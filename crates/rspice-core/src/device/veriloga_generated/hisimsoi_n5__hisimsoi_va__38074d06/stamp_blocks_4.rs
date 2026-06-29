@@ -628,7 +628,7 @@ impl Instance {
             s.store_square(1742, 1738);
             s.store_square(1734, 1742);
             s.store_div_ad_rhs(299, 1741, A::mul(s.ad_value(1734), s.ad_value(1738)));
-            s.store_mul_ad_product_lhs(300, A::div(s.ad_value(107), s.ad_value(441)), s.ad_value(250), 323);
+            s.store_mul_ad_product_lhs_mixed_ai(300, A::div(s.ad_value(107), s.ad_value(441)), 250, 323);
         }
 
         s.store_add(199, 199, 265);

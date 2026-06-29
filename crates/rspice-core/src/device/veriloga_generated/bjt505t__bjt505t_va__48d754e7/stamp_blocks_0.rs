@@ -992,7 +992,7 @@ impl Instance {
         }
 
         if (!s.b[540]) {
-            s.store_mul_ad_product_lhs(295, A::offset(A::div(s.ad_value(141), s.ad_value(41)), 1.0), s.ad_value(100), 8);
+            s.store_mul_ad_product_lhs_mixed_ai(295, A::offset(A::div(s.ad_value(141), s.ad_value(41)), 1.0), 100, 8);
             s.store_mul_div_scaled_inputs_product_lhs(296, 148, -1.0, 40, 1.0, 100, 8);
             s.store_div_scaled_inputs2(154, A::exp(s.ad_value(295)), 1.0, A::exp(s.ad_value(296)), (-1.0), A::offset(A::exp(A::mul(s.ad_value(100), s.ad_value(8))), (-1.0)), 1.0);
         }
@@ -1529,7 +1529,7 @@ impl Instance {
         }
 
         if ((s.b[575] && s.b[576]) && s.b[577]) {
-            s.store_mul_ad_product_lhs(210, A::div_from_scalar(p.p40, s.ad_value(340)), s.ad_value(339), 343);
+            s.store_mul_ad_product_lhs_mixed_ai(210, A::div_from_scalar(p.p40, s.ad_value(340)), 339, 343);
         }
 
         s.b[580] = (p.p39 == 2.0);
@@ -1590,7 +1590,7 @@ impl Instance {
         }
 
         if ((((s.b[575] && (!s.b[576])) && s.b[580]) && s.b[581]) && (!s.b[584])) {
-            s.store_mul_ad_product_rhs(210, 0, s.ad_value(201), A::exp_div_scaled_inputs(s.ad_value(99), -1.0, s.ad_value(205), 1.0));
+            s.store_mul_ad_product_rhs_mixed_ia(210, 0, 201, A::exp_div_scaled_inputs(s.ad_value(99), -1.0, s.ad_value(205), 1.0));
         }
 
         s.b[585] = (p.p39 == 3.0);
@@ -1790,7 +1790,7 @@ impl Instance {
 
         s.store_mul_add_scaled_inputs3_offset_rhs(239, 106, A::mul_sub_from_scalar_rhs_scaled_output(s.ad_value(105), 1.0, A::powf(A::sub_from_scalar(1.0, A::div(s.ad_value(238), s.ad_value(105))), (1.0 - p.p139)), 1.0 / ((1.0 - p.p139))), 1.0, s.ad_value(259), 2.0, s.ad_value(238), (-2.0), 0.0);
 
-        s.store_mul_ad_product_rhs(240, 94, s.ad_value(36), A::powf(A::div(s.ad_value(35), s.ad_value(36)), (1.0 / p.p85)));
+        s.store_mul_ad_product_rhs_mixed_ia(240, 94, 36, A::powf(A::div(s.ad_value(35), s.ad_value(36)), (1.0 / p.p85)));
 
         s.b[600] = ((s.v[252] / (p.p85 * s.v[6])) < p.p151);
         s.v[600] = if s.b[600] { 1.0 } else { 0.0 };
@@ -2838,7 +2838,7 @@ impl Instance {
         }
 
         if (!s.b[540]) {
-            s.store_mul_ad_product_lhs(295, A::offset(A::div(s.ad_value(141), s.ad_value(41)), 1.0), s.ad_value(100), 8);
+            s.store_mul_ad_product_lhs_mixed_ai(295, A::offset(A::div(s.ad_value(141), s.ad_value(41)), 1.0), 100, 8);
             s.store_mul_div_scaled_inputs_product_lhs(296, 148, -1.0, 40, 1.0, 100, 8);
             s.store_div_scaled_inputs2(154, A::exp(s.ad_value(295)), 1.0, A::exp(s.ad_value(296)), (-1.0), A::offset(A::exp(A::mul(s.ad_value(100), s.ad_value(8))), (-1.0)), 1.0);
         }
@@ -3197,7 +3197,7 @@ impl Instance {
         }
 
         if ((s.b[575] && s.b[576]) && s.b[577]) {
-            s.store_mul_ad_product_lhs(210, A::div_from_scalar(p.p40, s.ad_value(340)), s.ad_value(339), 343);
+            s.store_mul_ad_product_lhs_mixed_ai(210, A::div_from_scalar(p.p40, s.ad_value(340)), 339, 343);
         }
 
         s.b[580] = (p.p39 == 2.0);
@@ -3258,7 +3258,7 @@ impl Instance {
         }
 
         if ((((s.b[575] && (!s.b[576])) && s.b[580]) && s.b[581]) && (!s.b[584])) {
-            s.store_mul_ad_product_rhs(210, 0, s.ad_value(201), A::exp_div_scaled_inputs(s.ad_value(99), -1.0, s.ad_value(205), 1.0));
+            s.store_mul_ad_product_rhs_mixed_ia(210, 0, 201, A::exp_div_scaled_inputs(s.ad_value(99), -1.0, s.ad_value(205), 1.0));
         }
 
         s.b[585] = (p.p39 == 3.0);
@@ -3431,7 +3431,7 @@ impl Instance {
 
         s.store_mul_add_scaled_inputs3_offset_rhs(239, 106, A::mul_sub_from_scalar_rhs_scaled_output(s.ad_value(105), 1.0, A::powf(A::sub_from_scalar(1.0, A::div(s.ad_value(238), s.ad_value(105))), (1.0 - p.p139)), 1.0 / ((1.0 - p.p139))), 1.0, s.ad_value(259), 2.0, s.ad_value(238), (-2.0), 0.0);
 
-        s.store_mul_ad_product_rhs(240, 94, s.ad_value(36), A::powf(A::div(s.ad_value(35), s.ad_value(36)), (1.0 / p.p85)));
+        s.store_mul_ad_product_rhs_mixed_ia(240, 94, 36, A::powf(A::div(s.ad_value(35), s.ad_value(36)), (1.0 / p.p85)));
 
         s.b[600] = ((s.v[252] / (p.p85 * s.v[6])) < p.p151);
         s.v[600] = if s.b[600] { 1.0 } else { 0.0 };
