@@ -897,8 +897,15 @@ impl CanonicalStateOperator {
         }
     }
 
-    fn matches_call(self, name: &str) -> bool {
+    fn matches_call(self, name: &str, arg_count: usize) -> bool {
         let normalized = normalize_intrinsic_name(name);
+        if normalized == "idtmod" {
+            return match self {
+                Self::Idt => arg_count <= 2,
+                Self::IdtMod => arg_count >= 3,
+                _ => false,
+            };
+        }
         match self {
             Self::Laplace => matches!(
                 normalized.as_str(),
@@ -910,15 +917,21 @@ impl CanonicalStateOperator {
     }
 
     fn matches_operator(self, op: &HirAnalogOperator) -> bool {
-        matches!(
-            (self, op),
-            (Self::Ddt, HirAnalogOperator::Ddt { .. })
-                | (Self::Idt, HirAnalogOperator::Idt { .. })
-                | (Self::IdtMod, HirAnalogOperator::IdtMod { .. })
-                | (Self::Transition, HirAnalogOperator::Transition { .. })
-                | (Self::Slew, HirAnalogOperator::Slew { .. })
-                | (Self::Absdelay, HirAnalogOperator::Absdelay { .. })
-        )
+        match (self, op) {
+            (Self::Ddt, HirAnalogOperator::Ddt { .. }) => true,
+            (Self::Idt, HirAnalogOperator::Idt { .. }) => true,
+            (Self::Idt, HirAnalogOperator::IdtMod { modulus: None, .. }) => true,
+            (
+                Self::IdtMod,
+                HirAnalogOperator::IdtMod {
+                    modulus: Some(_), ..
+                },
+            ) => true,
+            (Self::Transition, HirAnalogOperator::Transition { .. }) => true,
+            (Self::Slew, HirAnalogOperator::Slew { .. }) => true,
+            (Self::Absdelay, HirAnalogOperator::Absdelay { .. }) => true,
+            _ => false,
+        }
     }
 }
 
@@ -1264,10 +1277,10 @@ fn collect_canonical_state_exprs(
     }
 
     match &expression.kind {
-        HirExprKind::SystemFunction { name, .. } if operator.matches_call(name) => {
+        HirExprKind::SystemFunction { name, args } if operator.matches_call(name, args.len()) => {
             slots.push(expr_id);
         }
-        HirExprKind::Call { name, .. } if operator.matches_call(name) => {
+        HirExprKind::Call { name, args } if operator.matches_call(name, args.len()) => {
             slots.push(expr_id);
         }
         HirExprKind::AnalogOperator { op } if operator.matches_operator(op) => {
@@ -2375,6 +2388,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_idtmod_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
         let (expr, ic, modulus, offset) = match args {
+            [_] | [_, _] => return self.lower_idt_operator(expr_id, args, None, None, None),
             [expr, ic, modulus] => (*expr, Some(*ic), Some(*modulus), None),
             [expr, ic, modulus, offset] => (*expr, Some(*ic), Some(*modulus), Some(*offset)),
             _ => {
@@ -2400,7 +2414,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             return Err(self.unsupported("analog operator idtmod abstol argument"));
         }
         let Some(modulus) = modulus else {
-            return Err(self.unsupported("analog operator idtmod modulus argument"));
+            if offset.is_some() {
+                return Err(self.unsupported("analog operator idtmod offset without modulus"));
+            }
+            return self.lower_idt_operator(expr_id, &[expr], ic, None, None);
         };
         let Some(slot) = self.limits.canonical_idtmod_slot(expr_id) else {
             return Err(self.unsupported(format!(
@@ -4750,6 +4767,64 @@ endmodule
                 NativeOp::Neg,
                 NativeOp::LoadParam(0),
                 NativeOp::Mul,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_canonical_idtmod_without_modulus_as_idt_state() {
+        let source = r#"
+module mir_idtmod_nomod(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ idtmod(1.0, 0.5);
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let equation_id = crate::canonical_ir::EquationId::new(0);
+        let bytecode_program = &model.stamp_programs[0].value_program;
+        let idt_slots = canonical_idt_slots_for_equation(
+            "mir_idtmod_nomod".into(),
+            &artifact.mir,
+            equation_id,
+            bytecode_program,
+        )
+        .expect("map modulus-free idtmod to bytecode idt slot");
+        let idtmod_slots = canonical_idtmod_slots_for_equation(
+            "mir_idtmod_nomod".into(),
+            &artifact.mir,
+            equation_id,
+            bytecode_program,
+        )
+        .expect("modulus-free idtmod is not an idtmod state slot");
+
+        assert_eq!(idt_slots.len(), 1);
+        assert!(idtmod_slots.is_empty());
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_idtmod_nomod",
+            EntryKind::StampValue,
+            &artifact.mir,
+            equation_id,
+            NativeLoweringLimits::new(2, 0, 0, 0, 0)
+                .with_canonical_idt_slots(&idt_slots)
+                .with_canonical_idtmod_slots(&idtmod_slots),
+        )
+        .expect("lower canonical idtmod without modulus as idt state");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::Const(1.0),
+                NativeOp::Const(0.5),
+                NativeOp::IdtState(0),
             ]
         );
         assert_eq!(program.max_stack_depth(), 2);
