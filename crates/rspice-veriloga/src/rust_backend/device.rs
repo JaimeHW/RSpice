@@ -466,6 +466,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_add_product3_rhs_helper_calls(source);
     source = compact_add_mul_sub_from_scalar_rhs_helper_calls(source);
     source = compact_sub_add_scaled_inputs4_lhs_helper_calls(source);
+    source = compact_sub_square_lhs_helper_calls(source);
     source = compact_div_ln_lhs_helper_calls(source);
     source = compact_add_sub_ln_lhs_helper_calls(source);
     source = compact_mul_div_scaled_product3_div_from_scalar_sqrt_offset_helper_calls(source);
@@ -1523,6 +1524,72 @@ fn compact_sub_add_scaled_inputs4_lhs_helper_call_replacement(
         &[inputs[1], inputs[3], inputs[5], inputs[7]],
         &[right_source],
     )?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_sub_square_lhs_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_sub_ad_lhs(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_sub_square_lhs_helper_call_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_sub_square_lhs_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_sub_ad_lhs(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let right_index = args[2].trim().parse::<usize>().ok()?;
+    let square_args = compact_ad_call_args(args[1].trim(), "square")?;
+    if square_args.len() != 1 {
+        return None;
+    }
+    let left_index = compact_scratch_ad_value_index(square_args[0])?;
+
+    let line =
+        format!("scratch.store_sub_square_lhs({target_index}, {left_index}, {right_index});");
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
     let statement_end = compact_statement_end_after_call(source, close_paren)?;
@@ -5202,6 +5269,27 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("A::add_scaled_inputs4("), "{compact}");
+        assert!(!compact.contains("s.store_sub_ad_lhs("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_sub_lhs_square_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(support.contains("fn store_sub_square_lhs("), "{support}");
+
+        let source = r#"
+fn stamp() {
+    scratch.store_sub_ad_lhs(182, AdValue::square(scratch.ad_value(2)), 3);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_sub_square_lhs(182, 2, 3);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::square("), "{compact}");
         assert!(!compact.contains("s.store_sub_ad_lhs("), "{compact}");
     }
 
@@ -16294,6 +16382,20 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = left.value - right_value;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] - self.node_derivatives[right][axis]; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] - self.branch_derivatives[right][axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_square_lhs(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        let derivative_scale = 2.0 * left_value;",
+        "        self.values[index] = left_value * left_value - right_value;",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * derivative_scale - right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * derivative_scale - right_branch_derivatives[axis]; }",
         "    }",
         "",
         "    #[inline]",
