@@ -556,11 +556,13 @@ mod tests {
     use super::{NativeModel, compile_model_with_canonical_ir, lower_assignment_step};
     use crate::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
     use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
-    use crate::native::EvalContext;
     use crate::native::expr::NativeOp;
     use crate::native::x64::codegen::NativeAssignment;
+    use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
+    use crate::vm::VmContext;
     use crate::{CompilerOptions, VerilogACompiler};
     use smol_str::SmolStr;
+    use std::path::{Path, PathBuf};
 
     fn canonical_artifact_with_unsupported_root(
         compiler: &VerilogACompiler,
@@ -714,6 +716,35 @@ endmodule
     }
 
     #[test]
+    #[ignore = "release-only shipped-model native x64 throughput probe; run with --release --features native -- --ignored --nocapture"]
+    fn native_x64_shipped_model_microbench_reports_sweep_throughput() {
+        assert!(
+            !cfg!(debug_assertions),
+            "native x64 shipped-model microbench is release-only; rerun with --release"
+        );
+
+        let cases = [
+            (
+                "juncap200",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "juncap200.va"]),
+                None,
+            ),
+            (
+                "r3_cmc",
+                shipped_cmc_model_path(&["r3_cmc_release1.1.2_2023Jun16", "r3_cmc.va"]),
+                None,
+            ),
+        ];
+        let iterations = shipped_model_microbench_iterations();
+        let samples = shipped_model_microbench_samples();
+        eprintln!("native-x64-shipped-microbench iterations={iterations} samples={samples}");
+
+        for (name, path, module) in cases {
+            run_shipped_model_microbench_case(name, &path, module, iterations, samples);
+        }
+    }
+
+    #[test]
     fn compile_model_with_canonical_ir_rejects_unsupported_mir_stamp() {
         let source = r#"
 `include "disciplines.vams"
@@ -816,6 +847,432 @@ endmodule
         let native = compile_model_with_canonical_ir(&model, &artifact)
             .expect("source-level canonical model compiles to native x64");
         (model, native)
+    }
+
+    fn run_shipped_model_microbench_case(
+        name: &str,
+        path: &Path,
+        module: Option<&str>,
+        iterations: usize,
+        samples: usize,
+    ) {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let compile_start = std::time::Instant::now();
+        let runtime = compiler
+            .compile_file_runtime_with_metadata(path, module)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "compile shipped Verilog-A model {name} at {}: {error}",
+                    path.display()
+                )
+            });
+        let compile_elapsed = compile_start.elapsed();
+        let native_start = std::time::Instant::now();
+        let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
+            .unwrap_or_else(|error| panic!("native x64 compile shipped model {name}: {error}"));
+        let native_compile_elapsed = native_start.elapsed();
+        let mut context = native_model_benchmark_context(&runtime.model);
+        resolve_native_parameter_defaults(&runtime.model, &native, &mut context);
+        let mut sanity_checksum =
+            run_native_model_sweep_once(&runtime.model, &native, &mut context, name);
+        assert!(
+            sanity_checksum.is_finite(),
+            "{name}: shipped-model sanity sweep checksum must stay finite"
+        );
+
+        let warmup_iterations = (iterations / 10).max(1);
+        sanity_checksum += run_native_model_sweep_sample(
+            &runtime.model,
+            &native,
+            &mut context,
+            name,
+            warmup_iterations,
+        );
+        assert!(
+            sanity_checksum.is_finite(),
+            "{name}: shipped-model warmup checksum must stay finite"
+        );
+
+        let mut sample_ns_per_sweep = Vec::with_capacity(samples);
+        let mut checksum = 0.0_f64;
+        for _ in 0..samples {
+            let start = std::time::Instant::now();
+            checksum += run_native_model_sweep_sample(
+                &runtime.model,
+                &native,
+                &mut context,
+                name,
+                iterations,
+            );
+            let elapsed = start.elapsed();
+            sample_ns_per_sweep.push(elapsed.as_nanos() as f64 / iterations as f64);
+        }
+        sample_ns_per_sweep.sort_by(|left, right| left.total_cmp(right));
+        let min_ns_per_sweep = sample_ns_per_sweep[0];
+        let median_ns_per_sweep = sample_ns_per_sweep[sample_ns_per_sweep.len() / 2];
+        let checksum = std::hint::black_box(checksum);
+        assert!(
+            checksum.is_finite(),
+            "{name}: shipped-model benchmark checksum must stay finite"
+        );
+        let stats = native.plan_stats();
+        eprintln!(
+            "native-x64-shipped-microbench model={name} compile_ms={:.3} native_compile_ms={:.3} dependencies={} params={} vars={} assignments={} stamps={} jacobians={} reactive_jacobians={} min_ns_per_sweep={min_ns_per_sweep:.3} median_ns_per_sweep={median_ns_per_sweep:.3} checksum={checksum:.17e}",
+            compile_elapsed.as_secs_f64() * 1000.0,
+            native_compile_elapsed.as_secs_f64() * 1000.0,
+            runtime.dependencies.len(),
+            runtime.model.parameters.len(),
+            runtime.model.num_variables,
+            count_assignment_steps(&runtime.model.assignment_steps),
+            stats.stamp_value_entry_points,
+            stats.jacobian_entry_points,
+            stats.reactive_jacobian_entry_points,
+        );
+    }
+
+    fn native_model_benchmark_context(model: &CompiledModel) -> VmContext {
+        let mut context = VmContext::with_internal_nodes(model.num_terminals, model.internal_nodes);
+        context.voltages.fill(0.0);
+        context.internal_voltages.fill(0.0);
+        context.parameters = model
+            .parameters
+            .iter()
+            .map(|parameter| parameter.default)
+            .collect();
+        context.param_given = vec![false; model.parameters.len()];
+        context.variables = vec![0.0; model.num_variables.max(1)];
+        context.currents = vec![0.0; model.stamp_programs.len()];
+        context.branch_current_values = vec![0.0; model.branch_sources.len()];
+        context.lookup_tables = model.lookup_tables.clone();
+        context.laplace_filters = model.laplace_filters.clone();
+        context.zi_filters = model.zi_filters.clone();
+        context.time = 1.0e-9;
+        context.timestep = 1.0e-12;
+        preallocate_native_benchmark_context(&mut context, model);
+        context
+    }
+
+    fn resolve_native_parameter_defaults(
+        model: &CompiledModel,
+        native: &NativeModel,
+        context: &mut VmContext,
+    ) {
+        for index in 0..model.parameters.len() {
+            let ctx = eval_context_from_vm_context(context);
+            if let Some(value) =
+                native.run_parameter_default(index, &ctx, context.variables.as_ptr())
+            {
+                context.parameters[index] = value;
+            }
+        }
+    }
+
+    fn run_native_model_sweep_sample(
+        model: &CompiledModel,
+        native: &NativeModel,
+        context: &mut VmContext,
+        name: &str,
+        iterations: usize,
+    ) -> f64 {
+        let mut checksum = 0.0_f64;
+        for _ in 0..iterations {
+            checksum +=
+                std::hint::black_box(run_native_model_sweep_once(model, native, context, name));
+        }
+        std::hint::black_box(checksum)
+    }
+
+    fn run_native_model_sweep_once(
+        model: &CompiledModel,
+        native: &NativeModel,
+        context: &mut VmContext,
+        name: &str,
+    ) -> f64 {
+        clear_native_runtime_error();
+        context.clear_currents();
+        context.currents.resize(model.stamp_programs.len(), 0.0);
+
+        let mut ctx = eval_context_from_vm_context(context);
+        native.run_assignments(&ctx, context.variables.as_mut_ptr());
+
+        let mut checksum = 0.0_f64;
+        for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+            ctx = eval_context_from_vm_context(context);
+            if let Some(active) =
+                native.run_static_condition(stamp_index, &ctx, context.variables.as_ptr())
+                && active.abs() <= 1.0e-15
+            {
+                continue;
+            }
+
+            ctx = eval_context_from_vm_context(context);
+            let value = native.run_stamp_value(stamp_index, &ctx, context.variables.as_ptr());
+            assert!(
+                value.is_finite(),
+                "{name}: non-finite stamp {stamp_index} value {value}"
+            );
+            checksum += value;
+            context.currents[stamp_index] = value;
+            if stamp.branch_ordinal.is_none()
+                && let Some((pos, neg)) = super::infer_current_terminal_pair(stamp)
+            {
+                context.set_branch_current(pos, neg, value);
+            }
+
+            for entry_index in 0..stamp.jacobian_programs.len() {
+                ctx = eval_context_from_vm_context(context);
+                let value =
+                    native.run_jacobian(stamp_index, entry_index, &ctx, context.variables.as_ptr());
+                assert!(
+                    value.is_finite(),
+                    "{name}: non-finite jacobian {stamp_index}.{entry_index} value {value}"
+                );
+                checksum += value;
+            }
+
+            for entry_index in 0..stamp.reactive_jacobians.len() {
+                ctx = eval_context_from_vm_context(context);
+                let value = native.run_reactive_jacobian(
+                    stamp_index,
+                    entry_index,
+                    &ctx,
+                    context.variables.as_ptr(),
+                );
+                assert!(
+                    value.is_finite(),
+                    "{name}: non-finite reactive jacobian {stamp_index}.{entry_index} value {value}"
+                );
+                checksum += value;
+            }
+        }
+
+        if let Some(error) = take_native_runtime_error() {
+            panic!("{name}: native runtime error during shipped-model sweep: {error}");
+        }
+        checksum
+    }
+
+    fn preallocate_native_benchmark_context(context: &mut VmContext, model: &CompiledModel) {
+        let mut max_state = None;
+        let mut max_delay_buffer = None;
+        let mut max_transition_filter = None;
+        let mut max_slew_filter = None;
+        let mut max_cross_detector = None;
+
+        let mut scan_program = |program: &BytecodeProgram| {
+            for instruction in &program.instructions {
+                match instruction {
+                    Instruction::DdtState(idx)
+                    | Instruction::IdtState(idx)
+                    | Instruction::IdtModState(idx)
+                    | Instruction::LimitState(idx) => {
+                        update_max_slot(&mut max_state, *idx);
+                    }
+                    Instruction::AbsDelayState(idx) => {
+                        update_max_slot(&mut max_delay_buffer, *idx);
+                    }
+                    Instruction::TransitionState(idx) => {
+                        update_max_slot(&mut max_transition_filter, *idx);
+                    }
+                    Instruction::SlewState(idx) => {
+                        update_max_slot(&mut max_slew_filter, *idx);
+                    }
+                    Instruction::CrossState(idx) => {
+                        update_max_slot(&mut max_cross_detector, *idx);
+                    }
+                    _ => {}
+                }
+            }
+        };
+
+        for parameter in &model.parameters {
+            if let Some(program) = &parameter.default_program {
+                scan_program(program);
+            }
+        }
+        scan_assignment_steps(&model.assignment_steps, &mut scan_program);
+        for stamp in &model.stamp_programs {
+            if let Some(condition) = &stamp.static_condition {
+                scan_program(condition);
+            }
+            scan_program(&stamp.value_program);
+            for jacobian in &stamp.jacobian_programs {
+                scan_program(&jacobian.program);
+            }
+            for jacobian in &stamp.reactive_jacobians {
+                scan_program(&jacobian.program);
+            }
+        }
+        for source in &model.noise_sources {
+            scan_program(&source.psd_program);
+            if let Some(program) = &source.exponent_program {
+                scan_program(program);
+            }
+        }
+
+        if let Some(max_idx) = max_state {
+            context.allocate_states(max_idx + 1);
+        }
+        if let Some(max_idx) = max_delay_buffer {
+            context.allocate_delay_buffers(max_idx + 1);
+        }
+        if let Some(max_idx) = max_transition_filter {
+            context.allocate_transition_filters(max_idx + 1);
+        }
+        if let Some(max_idx) = max_slew_filter {
+            context.allocate_slew_filters(max_idx + 1);
+        }
+        if let Some(max_idx) = max_cross_detector {
+            context.allocate_cross_detectors(max_idx + 1);
+        }
+    }
+
+    fn scan_assignment_steps(
+        steps: &[AssignmentStep],
+        scan_program: &mut impl FnMut(&BytecodeProgram),
+    ) {
+        for step in steps {
+            match step {
+                AssignmentStep::Assign(assignment) => {
+                    scan_program(&assignment.program);
+                }
+                AssignmentStep::AssignIndexed { index, value, .. } => {
+                    scan_program(index);
+                    scan_program(value);
+                }
+                AssignmentStep::Loop { condition, body } => {
+                    scan_program(condition);
+                    scan_assignment_steps(body, scan_program);
+                }
+            }
+        }
+    }
+
+    fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
+        EvalContext {
+            voltages: context.voltages.as_ptr(),
+            internal_voltages: context.internal_voltages.as_ptr(),
+            params: context.parameters.as_ptr(),
+            branch_currents: context.terminal_pair_currents_ptr(),
+            branch_currents_len: context.terminal_pair_currents_len(),
+            currents: context.currents.as_ptr(),
+            currents_len: context.currents.len(),
+            num_terminals: context.terminal_count(),
+            port_connected: context.port_connected.as_ptr(),
+            port_connected_len: context.port_connected.len(),
+            temperature: context.temperature,
+            time: context.time,
+            timestep: context.timestep,
+            state_prev: if context.state_values_prev.is_empty() {
+                std::ptr::null()
+            } else {
+                context.state_values_prev.as_ptr()
+            },
+            state_values: if context.state_values.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.state_values.as_mut_ptr()
+            },
+            state_initialized: if context.state_initialized.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.state_initialized.as_mut_ptr() as *mut u8
+            },
+            state_initialized_len: context.state_initialized.len(),
+            lookup_tables: if context.lookup_tables.is_empty() {
+                std::ptr::null()
+            } else {
+                context.lookup_tables.as_ptr()
+            },
+            lookup_tables_len: context.lookup_tables.len(),
+            laplace_filters: if context.laplace_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.laplace_filters.as_mut_ptr()
+            },
+            laplace_filters_len: context.laplace_filters.len(),
+            param_given: context.param_given.as_ptr() as *const u8,
+            param_given_len: context.param_given.len(),
+            branch_unknowns: if context.branch_current_values.is_empty() {
+                std::ptr::null()
+            } else {
+                context.branch_current_values.as_ptr()
+            },
+            analysis_type: context.analysis_type,
+            multiplicity: context.multiplicity,
+            zi_filters: if context.zi_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.zi_filters.as_mut_ptr()
+            },
+            zi_filters_len: context.zi_filters.len(),
+            transition_filters: if context.transition_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.transition_filters.as_mut_ptr()
+            },
+            transition_filters_len: context.transition_filters.len(),
+            slew_filters: if context.slew_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.slew_filters.as_mut_ptr()
+            },
+            slew_filters_len: context.slew_filters.len(),
+            delay_buffers: if context.delay_buffers.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.delay_buffers.as_mut_ptr()
+            },
+            delay_buffers_len: context.delay_buffers.len(),
+            cross_detectors: if context.cross_detectors.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.cross_detectors.as_mut_ptr()
+            },
+            cross_detectors_len: context.cross_detectors.len(),
+            state_prev_len: context.state_values_prev.len(),
+            state_values_len: context.state_values.len(),
+        }
+    }
+
+    fn update_max_slot(max_slot: &mut Option<usize>, idx: usize) {
+        *max_slot = Some(max_slot.map_or(idx, |prev| prev.max(idx)));
+    }
+
+    fn count_assignment_steps(steps: &[AssignmentStep]) -> usize {
+        steps
+            .iter()
+            .map(|step| match step {
+                AssignmentStep::Assign(_) | AssignmentStep::AssignIndexed { .. } => 1,
+                AssignmentStep::Loop { body, .. } => 1 + count_assignment_steps(body),
+            })
+            .sum()
+    }
+
+    fn shipped_cmc_model_path(parts: &[&str]) -> PathBuf {
+        let mut path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("models")
+            .join("veriloga")
+            .join("cmc");
+        for part in parts {
+            path = path.join(part);
+        }
+        assert!(
+            path.exists(),
+            "required shipped CMC model fixture missing: {}",
+            path.display()
+        );
+        path
+    }
+
+    fn shipped_model_microbench_iterations() -> usize {
+        2_000
+    }
+
+    fn shipped_model_microbench_samples() -> usize {
+        5
     }
 
     fn run_native_model_entry_microbench<F>(

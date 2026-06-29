@@ -60,6 +60,7 @@ const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = 1_i64 << 51;
 const DYNAMIC_READ_FRAME_BYTES: i32 = 16;
 const ROUND_TEMP_FRAME_BYTES: i32 = 16;
 const STATEFUL_SCRATCH_FRAME_BYTES: i32 = 16;
+const CALLEE_SAVED_XMM_BYTES: i32 = 16;
 #[cfg(test)]
 const CALL_RESULT_SLOT: usize = 6;
 #[cfg(windows)]
@@ -70,28 +71,46 @@ const LOCAL_SLOT_BYTES: i32 = 8;
 const LOCAL_FRAME_ALIGN_BYTES: i32 = 16;
 const INDEXED_ASSIGNMENT_SLOT_PTR_DISP: i32 = 0;
 const MAX_RUNTIME_LOOP_ITERATIONS: i32 = 100_000;
-const XMM_STACK: [Xmm; 6] = [
+#[cfg(windows)]
+const CALLER_SAVED_XMM_COUNT: usize = 6;
+#[cfg(not(windows))]
+const CALLER_SAVED_XMM_COUNT: usize = XMM_STACK.len();
+const XMM_STACK: [Xmm; 16] = [
     Xmm::Xmm0,
     Xmm::Xmm1,
     Xmm::Xmm2,
     Xmm::Xmm3,
     Xmm::Xmm4,
     Xmm::Xmm5,
+    Xmm::Xmm6,
+    Xmm::Xmm7,
+    Xmm::Xmm8,
+    Xmm::Xmm9,
+    Xmm::Xmm10,
+    Xmm::Xmm11,
+    Xmm::Xmm12,
+    Xmm::Xmm13,
+    Xmm::Xmm14,
+    Xmm::Xmm15,
 ];
 #[allow(dead_code)]
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
     let needs_stateful_scratch = program_needs_stateful_stack_scratch(program);
-    let local_frame_bytes = if needs_stateful_scratch {
+    let local_slot_bytes = if needs_stateful_scratch {
         STATEFUL_SCRATCH_FRAME_BYTES
     } else {
         0
     };
+    let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(program.max_stack_depth());
+    let local_frame_bytes =
+        align_local_frame(local_slot_bytes + callee_saved_xmm_frame_bytes(callee_saved_xmm_count));
     let mut compiler = FunctionCompiler::new(
         program_uses_helper_calls(program),
         value_program_needs_saved_entry_args(program),
         local_frame_bytes,
         None,
         needs_stateful_scratch.then_some(0),
+        callee_saved_xmm_count,
     );
     compiler.emit_program(program)?;
     compiler.finish_value_function()
@@ -103,17 +122,21 @@ pub(crate) fn compile_assignment_function(
     program: &NativeProgram,
 ) -> JitResult<Vec<u8>> {
     let needs_stateful_scratch = program_needs_stateful_stack_scratch(program);
-    let local_frame_bytes = if needs_stateful_scratch {
+    let local_slot_bytes = if needs_stateful_scratch {
         STATEFUL_SCRATCH_FRAME_BYTES
     } else {
         0
     };
+    let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(program.max_stack_depth());
+    let local_frame_bytes =
+        align_local_frame(local_slot_bytes + callee_saved_xmm_frame_bytes(callee_saved_xmm_count));
     let mut compiler = FunctionCompiler::new(
         program_uses_helper_calls(program),
         program_uses_helper_calls(program),
         local_frame_bytes,
         None,
         needs_stateful_scratch.then_some(0),
+        callee_saved_xmm_count,
     );
     compiler.emit_program(program)?;
     compiler.finish_assignment_function(var_index)
@@ -147,6 +170,8 @@ pub(crate) fn compile_assignment_pass_function(
         .iter()
         .any(assignment_needs_stateful_stack_scratch);
     let uses_helper_calls = assignments.iter().any(assignment_uses_helper_calls);
+    let max_stack_depth = assignment_max_stack_depth(assignments);
+    let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(max_stack_depth);
     let indexed_slot_bytes = if has_indexed_assignment {
         LOCAL_SLOT_BYTES
     } else {
@@ -161,7 +186,10 @@ pub(crate) fn compile_assignment_pass_function(
         0
     };
     let local_frame_bytes = align_local_frame(
-        indexed_slot_bytes + loop_depth * LOCAL_SLOT_BYTES + stateful_scratch_bytes,
+        indexed_slot_bytes
+            + loop_depth * LOCAL_SLOT_BYTES
+            + stateful_scratch_bytes
+            + callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
     );
 
     let mut compiler = FunctionCompiler::new(
@@ -170,6 +198,7 @@ pub(crate) fn compile_assignment_pass_function(
         local_frame_bytes,
         loop_counter_base_disp,
         stateful_scratch_base_disp,
+        callee_saved_xmm_count,
     );
     for assignment in assignments {
         compiler.emit_assignment_step(assignment, 0)?;
@@ -187,6 +216,7 @@ struct FunctionCompiler {
     local_frame_bytes: i32,
     loop_counter_base_disp: Option<i32>,
     stateful_scratch_base_disp: Option<i32>,
+    callee_saved_xmm_count: usize,
     early_return_jumps: Vec<usize>,
 }
 
@@ -203,11 +233,13 @@ impl FunctionCompiler {
         local_frame_bytes: i32,
         loop_counter_base_disp: Option<i32>,
         stateful_scratch_base_disp: Option<i32>,
+        callee_saved_xmm_count: usize,
     ) -> Self {
         debug_assert_eq!(local_frame_bytes % 16, 0);
         if let Some(base_disp) = stateful_scratch_base_disp {
             debug_assert!(base_disp + STATEFUL_SCRATCH_FRAME_BYTES <= local_frame_bytes);
         }
+        debug_assert!(callee_saved_xmm_frame_bytes(callee_saved_xmm_count) <= local_frame_bytes);
         let mut compiler = Self {
             encoder: X64Encoder::new(),
             depth: 0,
@@ -217,6 +249,7 @@ impl FunctionCompiler {
             local_frame_bytes,
             loop_counter_base_disp,
             stateful_scratch_base_disp,
+            callee_saved_xmm_count,
             early_return_jumps: Vec::new(),
         };
         if compiler.has_stack_setup() {
@@ -423,9 +456,11 @@ impl FunctionCompiler {
         if self.local_frame_bytes > 0 {
             self.encoder.sub_rsp_imm32(self.local_frame_bytes);
         }
+        self.emit_callee_saved_xmm_stores();
     }
 
     fn emit_return(&mut self) {
+        self.emit_callee_saved_xmm_loads();
         if self.local_frame_bytes > 0 {
             self.encoder.add_rsp_imm32(self.local_frame_bytes);
         }
@@ -434,6 +469,30 @@ impl FunctionCompiler {
             self.encoder.pop_r64(Gpr::R12);
         }
         self.encoder.ret();
+    }
+
+    fn emit_callee_saved_xmm_stores(&mut self) {
+        for index in 0..self.callee_saved_xmm_count {
+            let register = callee_saved_xmm_register(index);
+            let disp = self.callee_saved_xmm_disp(index);
+            self.encoder
+                .movdqu_m128_base_disp32_xmm(Gpr::Rsp, disp, register);
+        }
+    }
+
+    fn emit_callee_saved_xmm_loads(&mut self) {
+        for index in (0..self.callee_saved_xmm_count).rev() {
+            let register = callee_saved_xmm_register(index);
+            let disp = self.callee_saved_xmm_disp(index);
+            self.encoder
+                .movdqu_xmm_m128_base_disp32(register, Gpr::Rsp, disp);
+        }
+    }
+
+    fn callee_saved_xmm_disp(&self, index: usize) -> i32 {
+        debug_assert!(index < self.callee_saved_xmm_count);
+        self.local_frame_bytes - callee_saved_xmm_frame_bytes(self.callee_saved_xmm_count)
+            + (index as i32 * CALLEE_SAVED_XMM_BYTES)
     }
 
     fn ctx_arg_reg(&self) -> Gpr {
@@ -3033,6 +3092,36 @@ fn assignment_loop_depth(assignments: &[NativeAssignment]) -> i32 {
         .unwrap_or(0)
 }
 
+fn assignment_max_stack_depth(assignments: &[NativeAssignment]) -> usize {
+    assignments
+        .iter()
+        .map(|assignment| match assignment {
+            NativeAssignment::Direct { program, .. } => program.max_stack_depth(),
+            NativeAssignment::Indexed { index, value, .. } => {
+                index.max_stack_depth().max(value.max_stack_depth())
+            }
+            NativeAssignment::Loop { condition, body } => condition
+                .max_stack_depth()
+                .max(assignment_max_stack_depth(body)),
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn callee_saved_xmm_count_for_depth(max_stack_depth: usize) -> usize {
+    max_stack_depth
+        .min(XMM_STACK.len())
+        .saturating_sub(CALLER_SAVED_XMM_COUNT)
+}
+
+fn callee_saved_xmm_frame_bytes(count: usize) -> i32 {
+    count as i32 * CALLEE_SAVED_XMM_BYTES
+}
+
+fn callee_saved_xmm_register(index: usize) -> Xmm {
+    XMM_STACK[CALLER_SAVED_XMM_COUNT + index]
+}
+
 fn align_local_frame(bytes: i32) -> i32 {
     if bytes == 0 {
         0
@@ -4061,25 +4150,15 @@ mod tests {
         ];
 
         for (name, instruction, input, folded_value) in cases {
-            let program = native_program(
-                EntryKind::StampValue,
-                vec![
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(2.0),
-                    Instruction::PushConst(3.0),
-                    Instruction::PushConst(4.0),
-                    Instruction::PushConst(5.0),
-                    Instruction::PushConst(10.0),
-                    Instruction::PushTemperature,
-                    instruction,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                ],
-                0,
-            );
+            let prefix = constant_prefix(XMM_STACK.len() - 1);
+            let mut instructions = prefix.clone();
+            instructions.extend([
+                Instruction::PushConst(10.0),
+                Instruction::PushTemperature,
+                instruction,
+            ]);
+            instructions.extend(add_reductions(prefix.len()));
+            let program = native_program(EntryKind::StampValue, instructions, 0);
 
             assert_eq!(program.max_stack_depth(), XMM_STACK.len(), "{name}");
 
@@ -4106,7 +4185,7 @@ mod tests {
             let mut ctx = eval_context(&[], &[], &[], &[]);
             ctx.temperature = input;
 
-            let expected = 1.0 + 2.0 + 3.0 + 4.0 + 5.0 + folded_value;
+            let expected = constant_prefix_sum(prefix.len()) + folded_value;
             assert_eq!(
                 f(&ctx, std::ptr::null()).to_bits(),
                 expected.to_bits(),
@@ -4560,28 +4639,18 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_keeps_full_stack_dynamic_variable_read_on_spill_path() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![
-                Instruction::PushConst(1.0),
-                Instruction::PushConst(2.0),
-                Instruction::PushConst(3.0),
-                Instruction::PushConst(4.0),
-                Instruction::PushConst(5.0),
-                Instruction::PushParam(0),
-                Instruction::PushVariableDyn {
-                    base: 1,
-                    len: 3,
-                    lower: 1,
-                },
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-            ],
-            0,
-        );
+        let prefix = constant_prefix(XMM_STACK.len() - 1);
+        let mut instructions = prefix.clone();
+        instructions.extend([
+            Instruction::PushParam(0),
+            Instruction::PushVariableDyn {
+                base: 1,
+                len: 3,
+                lower: 1,
+            },
+        ]);
+        instructions.extend(add_reductions(prefix.len()));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes =
             compile_value_function(&program).expect("compile full-stack dynamic variable leaf");
@@ -4606,7 +4675,10 @@ mod tests {
 
         let loaded = f(&ctx, vars.as_ptr());
 
-        assert_eq!(loaded.to_bits(), 19.0_f64.to_bits());
+        assert_eq!(
+            loaded.to_bits(),
+            (constant_prefix_sum(prefix.len()) + 4.0).to_bits()
+        );
         assert!(take_native_runtime_error().is_none());
     }
 
@@ -6065,24 +6137,11 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_omits_stateful_scratch_when_full_stack_occurs_after_stateful_op() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![
-                Instruction::PushVariable(0),
-                Instruction::DdtState(1),
-                Instruction::PushVariable(1),
-                Instruction::PushVariable(2),
-                Instruction::PushVariable(3),
-                Instruction::PushVariable(4),
-                Instruction::PushVariable(5),
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-            ],
-            0,
-        );
+        let prefix = variable_prefix(1, XMM_STACK.len() - 1);
+        let mut instructions = vec![Instruction::PushVariable(0), Instruction::DdtState(1)];
+        instructions.extend(prefix.clone());
+        instructions.extend(add_reductions(prefix.len()));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes = compile_value_function(&program).expect("compile spare-depth stateful leaf");
         assert!(
@@ -6096,7 +6155,7 @@ mod tests {
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(entry) };
 
-        let vars = [2.0_f64, 1.0, 2.0, 3.0, 4.0, 5.0];
+        let vars = vars_with_prefix(2.0, prefix.len());
         let previous_state = [0.0_f64, 1.5_f64];
         let mut state_values = [0.0_f64, 0.0_f64];
         let mut ctx = eval_context(&[], &[], &[], &[]);
@@ -6106,7 +6165,10 @@ mod tests {
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_values_len = state_values.len();
 
-        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 17.0_f64.to_bits());
+        assert_eq!(
+            f(&ctx, vars.as_ptr()).to_bits(),
+            (2.0 + constant_prefix_sum(prefix.len())).to_bits()
+        );
         assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
     }
 
@@ -6115,8 +6177,14 @@ mod tests {
         let run = |program: NativeProgram, vars: &[f64], expected: f64, state_expected: f64| {
             assert_eq!(program.max_stack_depth(), XMM_STACK.len());
             let bytes = compile_value_function(&program).expect("compile full-stack stateful leaf");
+            let frame_bytes = super::align_local_frame(
+                STATEFUL_SCRATCH_FRAME_BYTES
+                    + super::callee_saved_xmm_frame_bytes(super::callee_saved_xmm_count_for_depth(
+                        XMM_STACK.len(),
+                    )),
+            );
             assert!(
-                contains_bytes(&bytes, &sub_rsp_bytes(STATEFUL_SCRATCH_FRAME_BYTES)),
+                contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
                 "full-stack stateful leaf should reserve a local scratch frame"
             );
 
@@ -6139,108 +6207,67 @@ mod tests {
             assert_eq!(state_values[1].to_bits(), state_expected.to_bits());
         };
 
+        let ddt_prefix = variable_prefix(1, XMM_STACK.len() - 1);
+        let mut ddt_instructions = ddt_prefix.clone();
+        ddt_instructions.extend([Instruction::PushVariable(0), Instruction::DdtState(1)]);
+        ddt_instructions.extend(add_reductions(ddt_prefix.len()));
+        let ddt_vars = vars_with_prefix(2.0, ddt_prefix.len());
         run(
-            native_program(
-                EntryKind::StampValue,
-                vec![
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(2.0),
-                    Instruction::PushConst(3.0),
-                    Instruction::PushConst(4.0),
-                    Instruction::PushConst(5.0),
-                    Instruction::PushVariable(0),
-                    Instruction::DdtState(1),
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                ],
-                0,
-            ),
-            &[2.0],
-            17.0,
+            native_program(EntryKind::StampValue, ddt_instructions, 0),
+            &ddt_vars,
+            constant_prefix_sum(ddt_prefix.len()) + 2.0,
             2.0,
         );
 
+        let idt_prefix = variable_prefix(1, XMM_STACK.len() - 2);
+        let mut idt_instructions = idt_prefix.clone();
+        idt_instructions.extend([
+            Instruction::PushVariable(0),
+            Instruction::PushConst(0.5),
+            Instruction::IdtState(1),
+        ]);
+        idt_instructions.extend(add_reductions(idt_prefix.len()));
+        let idt_vars = vars_with_prefix(2.0, idt_prefix.len());
         run(
-            native_program(
-                EntryKind::StampValue,
-                vec![
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(2.0),
-                    Instruction::PushConst(3.0),
-                    Instruction::PushConst(4.0),
-                    Instruction::PushVariable(0),
-                    Instruction::PushConst(0.5),
-                    Instruction::IdtState(1),
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                ],
-                0,
-            ),
-            &[2.0],
-            12.0,
+            native_program(EntryKind::StampValue, idt_instructions, 0),
+            &idt_vars,
+            constant_prefix_sum(idt_prefix.len()) + 2.0,
             2.0,
         );
 
+        let idtmod_prefix = variable_prefix(1, XMM_STACK.len() - 4);
+        let mut idtmod_instructions = idtmod_prefix.clone();
+        idtmod_instructions.extend([
+            Instruction::PushVariable(0),
+            Instruction::PushConst(0.5),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(0.25),
+            Instruction::IdtModState(1),
+        ]);
+        idtmod_instructions.extend(add_reductions(idtmod_prefix.len()));
+        let idtmod_vars = vars_with_prefix(2.0, idtmod_prefix.len());
         run(
-            native_program(
-                EntryKind::StampValue,
-                vec![
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(2.0),
-                    Instruction::PushVariable(0),
-                    Instruction::PushConst(0.5),
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(0.25),
-                    Instruction::IdtModState(1),
-                    Instruction::Add,
-                    Instruction::Add,
-                ],
-                0,
-            ),
-            &[2.0],
-            4.0,
+            native_program(EntryKind::StampValue, idtmod_instructions, 0),
+            &idtmod_vars,
+            constant_prefix_sum(idtmod_prefix.len()) + 1.0,
             1.0,
         );
 
+        let jacobian_prefix = variable_prefix(1, XMM_STACK.len() - 1);
+        let mut ddt_jacobian = jacobian_prefix.clone();
+        ddt_jacobian.extend([Instruction::PushVariable(0), Instruction::DdtJacobian]);
+        ddt_jacobian.extend(add_reductions(jacobian_prefix.len()));
+        let mut idt_jacobian = jacobian_prefix.clone();
+        idt_jacobian.extend([Instruction::PushVariable(0), Instruction::IdtJacobian]);
+        idt_jacobian.extend(add_reductions(jacobian_prefix.len()));
         let jacobian_cases = [
             (
-                23.0_f64,
-                vec![
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(2.0),
-                    Instruction::PushConst(3.0),
-                    Instruction::PushConst(4.0),
-                    Instruction::PushConst(5.0),
-                    Instruction::PushVariable(0),
-                    Instruction::DdtJacobian,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                ],
+                constant_prefix_sum(jacobian_prefix.len()) + 8.0,
+                ddt_jacobian,
             ),
             (
-                15.5_f64,
-                vec![
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(2.0),
-                    Instruction::PushConst(3.0),
-                    Instruction::PushConst(4.0),
-                    Instruction::PushConst(5.0),
-                    Instruction::PushVariable(0),
-                    Instruction::IdtJacobian,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                ],
+                constant_prefix_sum(jacobian_prefix.len()) + 0.5,
+                idt_jacobian,
             ),
         ];
         for (expected, instructions) in jacobian_cases {
@@ -6248,8 +6275,14 @@ mod tests {
             assert_eq!(program.max_stack_depth(), XMM_STACK.len());
             let bytes =
                 compile_value_function(&program).expect("compile full-stack stateful jacobian");
+            let frame_bytes = super::align_local_frame(
+                STATEFUL_SCRATCH_FRAME_BYTES
+                    + super::callee_saved_xmm_frame_bytes(super::callee_saved_xmm_count_for_depth(
+                        XMM_STACK.len(),
+                    )),
+            );
             assert!(
-                contains_bytes(&bytes, &sub_rsp_bytes(STATEFUL_SCRATCH_FRAME_BYTES)),
+                contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
                 "full-stack stateful jacobian should reserve a local scratch frame"
             );
 
@@ -6261,7 +6294,7 @@ mod tests {
             let mut ctx = eval_context(&[], &[], &[], &[]);
             ctx.timestep = 0.25;
 
-            let vars = [2.0_f64];
+            let vars = vars_with_prefix(2.0, jacobian_prefix.len());
             assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), expected.to_bits());
         }
     }
@@ -6494,23 +6527,15 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_keeps_full_stack_limit_state_on_spill_path() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![
-                Instruction::PushConst(1.0),
-                Instruction::PushConst(2.0),
-                Instruction::PushConst(3.0),
-                Instruction::PushConst(4.0),
-                Instruction::PushVariable(0),
-                Instruction::PushConst(0.5),
-                Instruction::LimitState(1),
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-            ],
-            0,
-        );
+        let prefix = constant_prefix(XMM_STACK.len() - 2);
+        let mut instructions = prefix.clone();
+        instructions.extend([
+            Instruction::PushVariable(0),
+            Instruction::PushConst(0.5),
+            Instruction::LimitState(1),
+        ]);
+        instructions.extend(add_reductions(prefix.len()));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes = compile_value_function(&program).expect("compile full-stack limit state leaf");
         assert!(
@@ -6537,7 +6562,10 @@ mod tests {
         ctx.state_initialized_len = state_initialized.len();
 
         let vars = [11.0_f64];
-        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 20.5_f64.to_bits());
+        assert_eq!(
+            f(&ctx, vars.as_ptr()).to_bits(),
+            (constant_prefix_sum(prefix.len()) + 10.5).to_bits()
+        );
         assert_eq!(state_values[1].to_bits(), 10.5_f64.to_bits());
     }
 
@@ -8264,24 +8292,11 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_keeps_full_stack_floor_on_spill_path() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![
-                Instruction::PushConst(1.0),
-                Instruction::PushConst(2.0),
-                Instruction::PushConst(3.0),
-                Instruction::PushConst(4.0),
-                Instruction::PushConst(5.0),
-                Instruction::PushParam(0),
-                Instruction::Floor,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-            ],
-            0,
-        );
+        let prefix = constant_prefix(XMM_STACK.len() - 1);
+        let mut instructions = prefix.clone();
+        instructions.extend([Instruction::PushParam(0), Instruction::Floor]);
+        instructions.extend(add_reductions(prefix.len()));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes = compile_value_function(&program).expect("compile full-stack floor leaf");
         assert!(
@@ -8299,7 +8314,10 @@ mod tests {
             unsafe { std::mem::transmute(entry) };
         let ctx = eval_context(&[3.75], &[], &[], &[]);
 
-        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 18.0_f64.to_bits());
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            (constant_prefix_sum(prefix.len()) + 3.0).to_bits()
+        );
     }
 
     #[test]
@@ -8718,24 +8736,11 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_negates_at_full_xmm_stack_depth() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![
-                Instruction::PushConst(1.0),
-                Instruction::PushConst(2.0),
-                Instruction::PushConst(3.0),
-                Instruction::PushConst(4.0),
-                Instruction::PushConst(5.0),
-                Instruction::PushTemperature,
-                Instruction::Neg,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-            ],
-            0,
-        );
+        let prefix = constant_prefix(XMM_STACK.len() - 1);
+        let mut instructions = prefix.clone();
+        instructions.extend([Instruction::PushTemperature, Instruction::Neg]);
+        instructions.extend(add_reductions(prefix.len()));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
 
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
 
@@ -8753,28 +8758,19 @@ mod tests {
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.temperature = 6.0;
 
-        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 9.0_f64.to_bits());
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            (constant_prefix_sum(prefix.len()) - 6.0).to_bits()
+        );
     }
 
     #[test]
     fn generated_value_leaf_loads_differential_voltage_at_full_xmm_stack_depth_without_scratch() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![
-                Instruction::PushConst(1.0),
-                Instruction::PushConst(2.0),
-                Instruction::PushConst(3.0),
-                Instruction::PushConst(4.0),
-                Instruction::PushConst(5.0),
-                Instruction::PushVoltage(0, 1),
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-            ],
-            2,
-        );
+        let prefix = constant_prefix(XMM_STACK.len() - 1);
+        let mut instructions = prefix.clone();
+        instructions.push(Instruction::PushVoltage(0, 1));
+        instructions.extend(add_reductions(prefix.len()));
+        let program = native_program(EntryKind::StampValue, instructions, 2);
 
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
 
@@ -8796,7 +8792,10 @@ mod tests {
             unsafe { std::mem::transmute(entry) };
         let ctx = eval_context(&[], &[9.0, 4.0], &[], &[]);
 
-        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 20.0_f64.to_bits());
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            (constant_prefix_sum(prefix.len()) + 5.0).to_bits()
+        );
     }
 
     #[test]
@@ -9044,8 +9043,14 @@ mod tests {
             "x64-codegen-test",
             entry_kind,
             &BytecodeProgram { instructions },
-            NativeLoweringLimits::new(terminal_count, internal_node_count, 8, 8, 8)
-                .with_lookup_table_count(8),
+            NativeLoweringLimits::new(
+                terminal_count,
+                internal_node_count,
+                test_storage_limit(),
+                test_storage_limit(),
+                test_storage_limit(),
+            )
+            .with_lookup_table_count(test_storage_limit()),
         )
         .expect("lower bytecode to native program")
     }
@@ -9060,11 +9065,21 @@ mod tests {
             "x64-codegen-test",
             entry_kind,
             &BytecodeProgram { instructions },
-            NativeLoweringLimits::new(terminal_count, 0, 8, 8, 8)
-                .with_lookup_table_count(8)
-                .with_available_current_pairs(available_current_pairs),
+            NativeLoweringLimits::new(
+                terminal_count,
+                0,
+                test_storage_limit(),
+                test_storage_limit(),
+                test_storage_limit(),
+            )
+            .with_lookup_table_count(test_storage_limit())
+            .with_available_current_pairs(available_current_pairs),
         )
         .expect("lower bytecode to native program")
+    }
+
+    fn test_storage_limit() -> usize {
+        XMM_STACK.len() + 1
     }
 
     fn eval_context(
@@ -9149,6 +9164,33 @@ mod tests {
 
     fn old_fixed_call_frame_bytes() -> i32 {
         call_frame_bytes(XMM_STACK.len() + 1)
+    }
+
+    fn constant_prefix(count: usize) -> Vec<Instruction> {
+        (0..count)
+            .map(|index| Instruction::PushConst((index + 1) as f64))
+            .collect()
+    }
+
+    fn variable_prefix(start: usize, count: usize) -> Vec<Instruction> {
+        (0..count)
+            .map(|index| Instruction::PushVariable(start + index))
+            .collect()
+    }
+
+    fn vars_with_prefix(first: f64, count: usize) -> Vec<f64> {
+        let mut vars = Vec::with_capacity(count + 1);
+        vars.push(first);
+        vars.extend((0..count).map(|index| (index + 1) as f64));
+        vars
+    }
+
+    fn add_reductions(count: usize) -> Vec<Instruction> {
+        (0..count).map(|_| Instruction::Add).collect()
+    }
+
+    fn constant_prefix_sum(count: usize) -> f64 {
+        (count * (count + 1) / 2) as f64
     }
 
     fn count_bytes(bytes: &[u8], needle: &[u8]) -> usize {
