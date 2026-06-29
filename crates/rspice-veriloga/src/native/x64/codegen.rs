@@ -2134,12 +2134,33 @@ impl FunctionCompiler {
                 self.encoder.xorpd_xmm_xmm(dst, dst);
                 self.emit_node_voltage_subtract(dst, neg)?;
             }
+            (VoltageNode::Terminal(pos), VoltageNode::Terminal(neg)) => {
+                self.emit_same_storage_voltage_difference(dst, VOLTAGES_OFFSET, pos, neg)?;
+            }
+            (VoltageNode::Internal(pos), VoltageNode::Internal(neg)) => {
+                self.emit_same_storage_voltage_difference(dst, INTERNAL_VOLTAGES_OFFSET, pos, neg)?;
+            }
             (pos, neg) => {
                 self.emit_node_voltage_load(dst, pos)?;
                 self.emit_node_voltage_subtract(dst, neg)?;
             }
         }
 
+        Ok(())
+    }
+
+    fn emit_same_storage_voltage_difference(
+        &mut self,
+        dst: Xmm,
+        ctx_field_offset: i32,
+        pos_index: usize,
+        neg_index: usize,
+    ) -> JitResult<()> {
+        self.emit_context_pointer_load(ctx_field_offset);
+        self.encoder
+            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(pos_index)?);
+        self.encoder
+            .subsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(neg_index)?);
         Ok(())
     }
 
@@ -2692,9 +2713,10 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, K_BOLTZMANN, NativeAssignment, Q_ELECTRON,
-        X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
-        compile_assignment_function, compile_assignment_pass_function, compile_value_function,
+        Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
+        NativeAssignment, Q_ELECTRON, VOLTAGES_OFFSET, X64Encoder, XMM_STACK, Xmm,
+        assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
+        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -3954,6 +3976,126 @@ mod tests {
 
             assert_eq!(f(&ctx, std::ptr::null()), expected, "{name}");
         }
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_voltage_base_for_same_storage_pairs() {
+        let cases = [
+            (
+                "terminal-terminal",
+                native_program(
+                    EntryKind::StampValue,
+                    vec![Instruction::PushVoltage(0, 1)],
+                    2,
+                ),
+                eval_context(&[], &[9.0, 4.0], &[], &[]),
+                VOLTAGES_OFFSET,
+                INTERNAL_VOLTAGES_OFFSET,
+                5.0_f64,
+            ),
+            (
+                "internal-internal",
+                native_program_with_internals(
+                    EntryKind::StampValue,
+                    vec![Instruction::PushVoltage(2, 3)],
+                    2,
+                    2,
+                ),
+                eval_context(&[], &[0.0, 0.0], &[8.0, 3.0], &[]),
+                INTERNAL_VOLTAGES_OFFSET,
+                VOLTAGES_OFFSET,
+                5.0_f64,
+            ),
+        ];
+
+        for (name, program, ctx, reused_offset, unused_offset, expected) in cases {
+            let bytes =
+                compile_value_function(&program).expect("compile same-storage voltage leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "{name} should stay helper-free"
+            );
+            assert_eq!(
+                count_bytes(&bytes, &context_pointer_load_bytes(reused_offset)),
+                1,
+                "{name} should load its voltage base pointer once"
+            );
+            assert_eq!(
+                count_bytes(&bytes, &context_pointer_load_bytes(unused_offset)),
+                0,
+                "{name} should not touch the other voltage storage"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate same-storage voltage leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+
+            assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected.to_bits());
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_keeps_mixed_storage_voltage_base_loads_separate() {
+        let program = native_program_with_internals(
+            EntryKind::StampValue,
+            vec![Instruction::PushVoltage(0, 2)],
+            2,
+            1,
+        );
+
+        let bytes = compile_value_function(&program).expect("compile mixed-storage voltage leaf");
+        assert!(
+            !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "mixed-storage voltage load should stay helper-free"
+        );
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(VOLTAGES_OFFSET)),
+            1,
+            "mixed-storage voltage load should read terminal voltage storage once"
+        );
+        assert_eq!(
+            count_bytes(
+                &bytes,
+                &context_pointer_load_bytes(INTERNAL_VOLTAGES_OFFSET)
+            ),
+            1,
+            "mixed-storage voltage load should read internal voltage storage once"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate mixed voltage leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[11.0, 0.0], &[2.5], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 8.5_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_same_node_voltage_preserves_nan_subtraction() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![Instruction::PushVoltage(0, 0)],
+            1,
+        );
+
+        let bytes = compile_value_function(&program).expect("compile same-node voltage leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(VOLTAGES_OFFSET)),
+            1,
+            "same-node voltage should still reuse one terminal base pointer"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate same-node voltage leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let nan = f64::from_bits(0x7ff8_0000_0000_0001);
+        let ctx = eval_context(&[], &[nan], &[], &[]);
+
+        assert!(f(&ctx, std::ptr::null()).is_nan());
     }
 
     #[test]
@@ -6386,6 +6528,11 @@ mod tests {
             !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
             "differential voltage load should stay helper-free at full XMM stack depth"
         );
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(VOLTAGES_OFFSET)),
+            1,
+            "full-stack differential voltage load should reuse one terminal voltage base pointer"
+        );
 
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate full-stack voltage leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -6484,6 +6631,19 @@ mod tests {
 
     fn contains_bytes(bytes: &[u8], needle: &[u8]) -> bool {
         bytes.windows(needle.len()).any(|window| window == needle)
+    }
+
+    fn count_bytes(bytes: &[u8], needle: &[u8]) -> usize {
+        bytes
+            .windows(needle.len())
+            .filter(|window| *window == needle)
+            .count()
+    }
+
+    fn context_pointer_load_bytes(ctx_field_offset: i32) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, entry_ctx_arg_reg(), ctx_field_offset);
+        encoder.into_bytes()
     }
 
     fn runtime_min(left: f64, right: f64) -> f64 {
