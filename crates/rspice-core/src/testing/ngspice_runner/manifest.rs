@@ -90,6 +90,14 @@ impl TestRunner {
         let key = self.manifest_key_for_path(cir_path)?;
         self.validation_manifest.get(&key).copied()
     }
+
+    pub(in crate::testing::ngspice_runner) fn suppresses_historical_reference_output_for(
+        &self,
+        cir_path: &Path,
+    ) -> bool {
+        self.validation_contract_for(cir_path)
+            .is_some_and(ValidationContract::suppresses_historical_reference_output)
+    }
 }
 
 #[cfg(test)]
