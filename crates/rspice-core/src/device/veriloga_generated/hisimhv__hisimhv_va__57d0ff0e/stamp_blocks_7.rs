@@ -2090,7 +2090,7 @@ impl Instance {
 
         s.store_sqrt(332, 338);
 
-        s.store_add_ad_rhs(128, 336, A::mul_sub_from_scalar_rhs(s.ad_value(335), 1.0, s.ad_value(332)));
+        s.store_add_mul_sub_from_scalar_rhs_indices(128, 336, 335, 1.0, 332);
 
         s.store_sub(129, 128, 159);
 

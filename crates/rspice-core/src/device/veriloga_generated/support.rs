@@ -2819,6 +2819,23 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_add_mul_sub_from_scalar_rhs_indices(&mut self, index: usize, source: usize, product_left: usize, scalar: f64, subtrahend: usize) {
+        let source_value = self.v[source];
+        let product_left_value = self.v[product_left];
+        let subtrahend_value = self.v[subtrahend];
+        let subtrahend_term = scalar - subtrahend_value;
+        self.v[index] = source_value + product_left_value * subtrahend_term;
+        let source_dn = self.dn[source];
+        let product_left_dn = self.dn[product_left];
+        let subtrahend_dn = self.dn[subtrahend];
+        let source_db = self.db[source];
+        let product_left_db = self.db[product_left];
+        let subtrahend_db = self.db[subtrahend];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] + product_left_dn[axis] * subtrahend_term - product_left_value * subtrahend_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] + product_left_db[axis] * subtrahend_term - product_left_value * subtrahend_db[axis]; }
+    }
+
+    #[inline]
     pub(crate) fn store_add_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
         let right_value = self.v[right];
         let right_dn = self.dn[right];
@@ -18323,6 +18340,23 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = left_value + right.value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] + right.dn[axis]; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] + right.db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_mul_sub_from_scalar_rhs_indices(&mut self, index: usize, source: usize, product_left: usize, scalar: f64, subtrahend: usize) {
+        let source_value = self.v[source];
+        let product_left_value = self.v[product_left];
+        let subtrahend_value = self.v[subtrahend];
+        let subtrahend_term = scalar - subtrahend_value;
+        self.v[index] = source_value + product_left_value * subtrahend_term;
+        let source_dn = self.dn[source];
+        let product_left_dn = self.dn[product_left];
+        let subtrahend_dn = self.dn[subtrahend];
+        let source_db = self.db[source];
+        let product_left_db = self.db[product_left];
+        let subtrahend_db = self.db[subtrahend];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] + product_left_dn[axis] * subtrahend_term - product_left_value * subtrahend_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] + product_left_db[axis] * subtrahend_term - product_left_value * subtrahend_db[axis]; }
     }
 
     #[inline]

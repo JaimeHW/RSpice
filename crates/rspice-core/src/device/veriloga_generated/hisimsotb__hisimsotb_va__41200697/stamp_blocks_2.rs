@@ -18,7 +18,7 @@ impl Instance {
 
         s.store_sqrt(281, 287);
 
-        s.store_add_ad_rhs(288, 76, A::mul_sub_from_scalar_rhs(s.ad_value(280), 1.0, s.ad_value(281)));
+        s.store_add_mul_sub_from_scalar_rhs_indices(288, 76, 280, 1.0, 281);
 
         s.store_sqrt_square_offset(639, 288, ((4.0 * 0.01) * 0.01));
 

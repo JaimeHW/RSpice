@@ -2241,7 +2241,7 @@ impl Instance {
 
         if (s.b[3307] && s.b[3308]) {
             s.store_sqrt(340, 340);
-            s.store_add_ad_rhs(282, 335, A::mul_sub_from_scalar_rhs(s.ad_value(337), 1.0, s.ad_value(340)));
+            s.store_add_mul_sub_from_scalar_rhs_indices(282, 335, 337, 1.0, 340);
             s.store_div_from_scalar_offset_input(336, s.v[582], 667, s.v[582]);
             s.store_add_scaled_inputs_product_indices(283, 1435, s.v[488], 109, 1.0, 336, 282, (-1.0));
             s.store_sqrt_square_offset(782, 283, ((4.0 * 0.001) * 0.001));

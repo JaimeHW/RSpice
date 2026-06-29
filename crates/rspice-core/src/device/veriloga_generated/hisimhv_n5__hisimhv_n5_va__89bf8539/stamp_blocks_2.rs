@@ -1280,7 +1280,7 @@ impl Instance {
 
         if ((s.b[1441] && (s.b[1443] && (!s.b[1442]))) && s.b[1960]) {
             s.store_sqrt(337, 338);
-            s.store_add_ad_rhs(344, 85, A::mul_sub_from_scalar_rhs(s.ad_value(1904), 1.0, s.ad_value(337)));
+            s.store_add_mul_sub_from_scalar_rhs_indices(344, 85, 1904, 1.0, 337);
         }
 
         s.b[1967] = ((s.v[344] < 1.0) && (1.0 >= 0.0));
@@ -3532,7 +3532,7 @@ impl Instance {
 
         if ((s.b[1441] && (s.b[1443] && (!s.b[1442]))) && s.b[2055]) {
             s.store_sqrt(337, 338);
-            s.store_add_ad_rhs(344, 85, A::mul_sub_from_scalar_rhs(s.ad_value(1904), 1.0, s.ad_value(337)));
+            s.store_add_mul_sub_from_scalar_rhs_indices(344, 85, 1904, 1.0, 337);
         }
 
         s.b[2062] = ((s.v[344] < (s.v[972] + s.v[1908])) && (s.v[1908] >= 0.0));
@@ -5975,7 +5975,7 @@ impl Instance {
 
         if ((s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) && (!s.b[2232])) {
             s.store_sqrt(337, 338);
-            s.store_add_ad_rhs(344, 85, A::mul_sub_from_scalar_rhs(s.ad_value(2132), 1.0, s.ad_value(337)));
+            s.store_add_mul_sub_from_scalar_rhs_indices(344, 85, 2132, 1.0, 337);
         }
 
         s.b[2244] = ((s.v[344] < p.p404) && (p.p404 >= 0.0));

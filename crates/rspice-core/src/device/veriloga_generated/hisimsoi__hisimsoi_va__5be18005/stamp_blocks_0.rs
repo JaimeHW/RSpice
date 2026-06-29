@@ -1355,7 +1355,7 @@ impl Instance {
 
         s.store_sqrt_offset_input(688, 331, 1e-50);
 
-        s.store_add_ad_rhs(193, 686, A::mul_sub_from_scalar_rhs(s.ad_value(685), 1.0, s.ad_value(688)));
+        s.store_add_mul_sub_from_scalar_rhs_indices(193, 686, 685, 1.0, 688);
 
         s.store_sub(194, 193, 231);
 
@@ -2774,7 +2774,7 @@ impl Instance {
             s.store_scaled_mul(211, 210, 225, 0.5);
             s.store_scaled_mul(212, 211, 225, 2.0);
             s.store_sqrt_offset_ad(213, A::div_scaled_offset_numerator(A::mul(s.ad_value(225), s.ad_value(207)), 4.0, ((-1.0) * 4.0), s.ad_value(212), 1.0), 1.0);
-            s.store_add_ad_rhs(215, 207, A::mul_sub_from_scalar_rhs(s.ad_value(211), 1.0, s.ad_value(213)));
+            s.store_add_mul_sub_from_scalar_rhs_indices(215, 207, 211, 1.0, 213);
             s.store_div_scalar_by_product(223, 1.0, s.ad_value(209), s.ad_value(210), 1.0);
             s.store_div_ad(216, A::ln(A::mul(s.ad_value(223), A::square(s.ad_value(207)))), A::add(s.ad_value(225), A::div_from_scalar(2.0, s.ad_value(207))));
             s.store_add_scaled_inputs3_indices(217, 216, 1.0, 215, (-1.0), 143, -1.0);
@@ -3288,7 +3288,7 @@ impl Instance {
         }
 
         if ((((s.b[737] && s.b[804]) && s.b[805]) && (!s.b[847])) && (!s.b[848])) {
-            s.store_add_ad_rhs(845, 835, A::mul_sub_from_scalar_rhs(s.ad_value(837), 1.0, s.ad_value(840)));
+            s.store_add_mul_sub_from_scalar_rhs_indices(845, 835, 837, 1.0, 840);
             s.store_div_from_scalar_offset_input(836, s.v[100], 131, s.v[100]);
             s.store_add_scaled_product_value_ad(846, A::scale_offset(s.ad_value(173), p.p122, s.v[176]), 1.0, 836, 845, (-1.0));
             s.store_sqrt_square_offset(44, 846, ((4.0 * 0.001) * 0.001));
@@ -4044,7 +4044,7 @@ impl Instance {
 
         if (s.b[737] && (!s.b[929])) {
             s.store_sqrt(932, 933);
-            s.store_add_ad_rhs(936, 159, A::mul_sub_from_scalar_rhs(s.ad_value(931), 1.0, s.ad_value(932)));
+            s.store_add_mul_sub_from_scalar_rhs_indices(936, 159, 931, 1.0, 932);
             s.store_sqrt_square_offset(44, 936, ((4.0 * 0.01) * 0.01));
             s.store_offset_add_scaled_inputs_indices(936, 936, 0.5, 44, 0.5, (1e-10 * 0.01));
         }

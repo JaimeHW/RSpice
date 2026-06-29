@@ -828,7 +828,7 @@ impl Instance {
         s: &mut ReactiveScratch,
     ) {
         if ((!s.b[733]) && s.b[1085]) {
-            s.store_add_ad_rhs(1092, 159, A::mul_sub_from_scalar_rhs(s.ad_value(1087), 1.0, s.ad_value(1088)));
+            s.store_add_mul_sub_from_scalar_rhs_indices(1092, 159, 1087, 1.0, 1088);
             s.store_sqrt_square_offset(44, 1092, ((4.0 * 0.01) * 0.01));
             s.store_offset_add_scaled_inputs_indices(1092, 1092, 0.5, 44, 0.5, (1e-10 * 0.01));
         }
@@ -1627,7 +1627,7 @@ impl Instance {
 
         if (s.b[1129] && s.b[1206]) {
             s.store_sqrt_offset_input(213, 1197, 1e-50);
-            s.store_add_ad_rhs(215, 207, A::mul_sub_from_scalar_rhs(s.ad_value(211), 1.0, s.ad_value(213)));
+            s.store_add_mul_sub_from_scalar_rhs_indices(215, 207, 211, 1.0, 213);
             s.store_div_from_scalar_add_ad(327, 1.0, s.ad_value(225), A::div_scalar_offset_denominator(2.0, s.ad_value(207), 1e-50, 1.0));
             s.store_mul_ln_ad_lhs(216, A::mul(A::div_scalar_by_product(1.0, s.ad_value(209), s.ad_value(210), 1.0), A::square(s.ad_value(207))), 327);
             s.store_div_scaled_value_offset_denominator(1200, s.ad_value(216), 1.0, s.ad_value(207), 1e-50, 1.0);
@@ -2651,7 +2651,7 @@ impl Instance {
         }
 
         if (((s.b[1291] && (!s.b[1304])) && (!s.b[1305])) && (!s.b[1306])) {
-            s.store_add_ad_rhs(1302, 1292, A::mul_sub_from_scalar_rhs(s.ad_value(1294), 1.0, s.ad_value(1297)));
+            s.store_add_mul_sub_from_scalar_rhs_indices(1302, 1292, 1294, 1.0, 1297);
             s.store_div_from_scalar_offset_input(1293, s.v[100], 131, s.v[100]);
             s.store_add_scaled_inputs_product_indices(1303, 173, p.p122, 176, 1.0, 1293, 1302, (-1.0));
             s.store_sqrt_square_offset(44, 1303, ((4.0 * 0.001) * 0.001));
