@@ -4280,7 +4280,7 @@ mod tests {
     fn generated_value_leaf_computes_sqrt_in_place() {
         let program = native_program(
             EntryKind::StampValue,
-            vec![Instruction::PushConst(49.0), Instruction::Sqrt],
+            vec![Instruction::PushTemperature, Instruction::Sqrt],
             0,
         );
         let bytes = compile_value_function(&program).expect("compile sqrt leaf");
@@ -4288,7 +4288,8 @@ mod tests {
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(entry) };
-        let ctx = eval_context(&[], &[], &[], &[]);
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.temperature = 49.0;
 
         assert_eq!(f(&ctx, std::ptr::null()), 7.0);
     }

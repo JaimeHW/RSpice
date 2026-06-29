@@ -1794,6 +1794,9 @@ impl NativeProgram {
                         depth,
                         1,
                     )?;
+                    if lower_constant_sqrt(&mut ops) {
+                        continue;
+                    }
                     ops.push(NativeOp::Sqrt);
                 }
                 Instruction::Exp
@@ -2856,7 +2859,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "sqrt" => {
                 self.require_intrinsic_arity(name, args, 1)?;
                 self.lower(args[0])?;
-                self.append_unary(NativeOp::Sqrt)
+                if lower_constant_sqrt(&mut self.ops) {
+                    Ok(())
+                } else {
+                    self.append_unary(NativeOp::Sqrt)
+                }
             }
             "exp" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Exp),
             "ln" | "log" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Log),
@@ -3915,6 +3922,17 @@ fn lower_constant_abs(ops: &mut Vec<NativeOp>) -> bool {
     true
 }
 
+fn lower_constant_sqrt(ops: &mut Vec<NativeOp>) -> bool {
+    let Some(NativeOp::Const(value)) = ops.last_mut() else {
+        return false;
+    };
+    if value.is_nan() || *value < 0.0 {
+        return false;
+    }
+    *value = value.sqrt();
+    true
+}
+
 fn lower_unary_composition(ops: &mut Vec<NativeOp>, op: NativeOp) -> bool {
     match op {
         NativeOp::Neg => {
@@ -4817,6 +4835,34 @@ endmodule
                 NativeOp::Abs,
             ]
         );
+        assert_eq!(program.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_canonical_constant_sqrt_to_literal() {
+        let source = r#"
+module mir_constant_sqrt(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ sqrt(49.0);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_constant_sqrt",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower canonical constant sqrt to native program");
+
+        assert_eq!(program.ops(), &[NativeOp::Const(7.0)]);
         assert_eq!(program.max_stack_depth(), 1);
     }
 
@@ -5750,6 +5796,72 @@ endmodule
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn folds_safe_constant_sqrt_to_exact_literal() {
+        let cases = [
+            ("finite-square", 49.0_f64.to_bits()),
+            ("finite-nonsquare", 2.0_f64.to_bits()),
+            ("positive-zero", 0.0_f64.to_bits()),
+            ("negative-zero", (-0.0_f64).to_bits()),
+            ("positive-infinity", f64::INFINITY.to_bits()),
+        ];
+
+        for (case, input_bits) in cases {
+            let input = f64::from_bits(input_bits);
+            let program = BytecodeProgram {
+                instructions: vec![Instruction::PushConst(input), Instruction::Sqrt],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-sqrt",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("safe constant sqrt should fold to exact literal");
+
+            assert_eq!(lowered.max_stack_depth(), 1, "{case}");
+            match lowered.ops() {
+                [NativeOp::Const(value)] => {
+                    assert_eq!(value.to_bits(), input.sqrt().to_bits(), "{case}");
+                }
+                ops => panic!("{case}: expected folded sqrt literal, got {ops:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn keeps_unsafe_constant_sqrt_as_runtime_op() {
+        let cases = [
+            ("negative-finite", (-1.0_f64).to_bits()),
+            ("quiet-nan", 0x7ff8_0000_0000_0007),
+            ("signaling-nan", 0x7ff0_0000_0000_0007),
+        ];
+
+        for (case, input_bits) in cases {
+            let input = f64::from_bits(input_bits);
+            let program = BytecodeProgram {
+                instructions: vec![Instruction::PushConst(input), Instruction::Sqrt],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-sqrt-runtime",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("unsafe constant sqrt should keep runtime op");
+
+            assert_eq!(lowered.max_stack_depth(), 1, "{case}");
+            match lowered.ops() {
+                [NativeOp::Const(value), NativeOp::Sqrt] => {
+                    assert_eq!(value.to_bits(), input_bits, "{case}");
+                }
+                ops => panic!("{case}: expected literal plus runtime sqrt, got {ops:?}"),
+            }
+        }
     }
 
     #[test]
