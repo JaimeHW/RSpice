@@ -3345,6 +3345,11 @@ fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
             | NativeOp::LoadParamGiven(_)
             | NativeOp::LoadPortConnected(_)
             | NativeOp::LoadVoltage { .. }
+            | NativeOp::LoadTemperature
+            | NativeOp::LoadThermalVoltage
+            | NativeOp::LoadTime
+            | NativeOp::Analysis(_)
+            | NativeOp::LoadMfactor
             | NativeOp::LoadCurrent(_)
             | NativeOp::LoadPriorCurrent(_)
             | NativeOp::LoadInternalVoltage(_)
@@ -3362,6 +3367,8 @@ fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
             | NativeOp::DivFromConst(_)
             | NativeOp::Square
             | NativeOp::Sqrt
+            | NativeOp::WhiteNoise
+            | NativeOp::FlickerNoise
     )
 }
 
@@ -3761,6 +3768,90 @@ mod tests {
         let ctx = eval_context(&params, &[], &[], &[]);
 
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 43.75_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_param_base_across_context_scalar_ops() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::LoadTemperature,
+                NativeOp::Add,
+                NativeOp::LoadThermalVoltage,
+                NativeOp::Add,
+                NativeOp::LoadTime,
+                NativeOp::Add,
+                NativeOp::Analysis(1),
+                NativeOp::Add,
+                NativeOp::LoadMfactor,
+                NativeOp::Add,
+                NativeOp::LoadParam(1),
+                NativeOp::Add,
+            ],
+            2,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let bytes = compile_value_function(&program).expect("compile scalar context param leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            1,
+            "param base should remain cached across scalar context loads"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate scalar context leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [1.25_f64, 3.5_f64];
+        let mut ctx = eval_context(&params, &[], &[], &[]);
+        ctx.temperature = 300.0;
+        ctx.time = 2.0;
+        ctx.analysis_type = 1;
+        ctx.multiplicity = 4.0;
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            (1.25_f64 + 300.0 + thermal_voltage(300.0) + 2.0 + 1.0 + 4.0 + 3.5).to_bits()
+        );
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_param_base_across_large_signal_noise_ops() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::Const(1.0),
+                NativeOp::WhiteNoise,
+                NativeOp::Add,
+                NativeOp::Const(2.0),
+                NativeOp::Const(3.0),
+                NativeOp::FlickerNoise,
+                NativeOp::Add,
+                NativeOp::LoadParam(1),
+                NativeOp::Add,
+            ],
+            3,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let bytes = compile_value_function(&program).expect("compile noise param leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            1,
+            "param base should remain cached across large-signal noise ops"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate noise param leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [1.25_f64, 3.5_f64];
+        let ctx = eval_context(&params, &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 4.75_f64.to_bits());
     }
 
     #[test]
