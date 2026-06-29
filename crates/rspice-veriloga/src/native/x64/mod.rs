@@ -1436,6 +1436,11 @@ endmodule
                 Some("hicumL2va"),
             ),
             (
+                "bsimsoi47",
+                shipped_cmc_model_path(&["BSIM-SOI_4.7.0_05192025", "code", "bsimsoi.va"]),
+                Some("bsimsoi"),
+            ),
+            (
                 "hisimsoi",
                 shipped_cmc_model_path(&[
                     "HiSIM_SOI_1.5.0_Release_20211008",
@@ -1520,6 +1525,11 @@ endmodule
                 "hicuml2",
                 shipped_cmc_model_path(&["hicumL2_v320_files", "hicumL2_v320.va"]),
                 Some("hicumL2va"),
+            ),
+            (
+                "bsimsoi47",
+                shipped_cmc_model_path(&["BSIM-SOI_4.7.0_05192025", "code", "bsimsoi.va"]),
+                Some("bsimsoi"),
             ),
             (
                 "hisimsoi",
@@ -1920,6 +1930,10 @@ endmodule
             "diode_cmc" => [0.7, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "vbic13_4t" => [0.2, 0.75, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "bsimimg" | "hisimsoi" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "bsimsoi47" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0]
                 .get(terminal)
                 .copied()
                 .unwrap_or(0.0),
