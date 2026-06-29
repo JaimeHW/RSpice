@@ -3150,6 +3150,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 }
             }
             "Not" => self.append_unary(NativeOp::Logical(LogicalOp::Not)),
+            "BitNot" => {
+                self.push(NativeOp::Const(-1.0))?;
+                self.append_integer_binary("BitXor")
+            }
             _ => Err(self.unsupported(format!("unary operator {op}"))),
         }
     }
