@@ -6640,6 +6640,23 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_add_scaled_product_right_ln_one_plus_exp_scaled_input(&mut self, index: usize, value: usize, value_scale: f64, product_left: usize, product_right: usize, input_scale: f64, product_scale: f64) {
+        let value_raw = self.v[value];
+        let product_left_value = self.v[product_left];
+        let (product_right_value, product_right_derivative_scale) = Self::ln_one_plus_exp_raw(self.v[product_right] * input_scale);
+        let product_right_derivative_scale = product_right_derivative_scale * input_scale;
+        self.v[index] = value_raw * value_scale + product_left_value * product_right_value * product_scale;
+        let value_dn = self.dn[value];
+        let product_left_dn = self.dn[product_left];
+        let product_right_dn = self.dn[product_right];
+        let value_db = self.db[value];
+        let product_left_db = self.db[product_left];
+        let product_right_db = self.db[product_right];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value_dn[axis] * value_scale + (product_left_dn[axis] * product_right_value + product_left_value * product_right_dn[axis] * product_right_derivative_scale) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value_db[axis] * value_scale + (product_left_db[axis] * product_right_value + product_left_value * product_right_db[axis] * product_right_derivative_scale) * product_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_add_scaled_product_right_sub(&mut self, index: usize, value: usize, value_scale: f64, product_left: usize, sub_left: usize, sub_right: usize, product_scale: f64) {
         let value_raw = self.v[value];
         let product_left_value = self.v[product_left];
@@ -22127,6 +22144,23 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = value_raw * value_scale + product_left_value * product_right.value * product_scale;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[value][axis] * value_scale + (self.dn[product_left][axis] * product_right.value + product_left_value * product_right.dn[axis]) * product_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[value][axis] * value_scale + (self.db[product_left][axis] * product_right.value + product_left_value * product_right.db[axis]) * product_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_product_right_ln_one_plus_exp_scaled_input(&mut self, index: usize, value: usize, value_scale: f64, product_left: usize, product_right: usize, input_scale: f64, product_scale: f64) {
+        let value_raw = self.v[value];
+        let product_left_value = self.v[product_left];
+        let (product_right_value, product_right_derivative_scale) = Self::ln_one_plus_exp_raw(self.v[product_right] * input_scale);
+        let product_right_derivative_scale = product_right_derivative_scale * input_scale;
+        self.v[index] = value_raw * value_scale + product_left_value * product_right_value * product_scale;
+        let value_dn = self.dn[value];
+        let product_left_dn = self.dn[product_left];
+        let product_right_dn = self.dn[product_right];
+        let value_db = self.db[value];
+        let product_left_db = self.db[product_left];
+        let product_right_db = self.db[product_right];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value_dn[axis] * value_scale + (product_left_dn[axis] * product_right_value + product_left_value * product_right_dn[axis] * product_right_derivative_scale) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value_db[axis] * value_scale + (product_left_db[axis] * product_right_value + product_left_value * product_right_db[axis] * product_right_derivative_scale) * product_scale; }
     }
 
     #[inline]
