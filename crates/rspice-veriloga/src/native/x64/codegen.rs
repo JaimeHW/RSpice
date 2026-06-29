@@ -17,7 +17,9 @@ use crate::native::abi::{
     rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
-use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
+use crate::native::expr::{
+    CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode, native_op_stack_effect,
+};
 use crate::native::{JitError, JitResult};
 
 const MODEL: &str = "native-x64";
@@ -3126,17 +3128,35 @@ fn native_op_reads_entry_args(op: NativeOp) -> bool {
 }
 
 fn program_needs_stateful_stack_scratch(program: &NativeProgram) -> bool {
-    program.max_stack_depth() >= XMM_STACK.len()
-        && program.ops().iter().any(|op| {
-            matches!(
-                op,
-                NativeOp::DdtState(_)
-                    | NativeOp::DdtJacobian
-                    | NativeOp::IdtState(_)
-                    | NativeOp::IdtJacobian
-                    | NativeOp::IdtModState(_)
-            )
-        })
+    let mut depth = 0_usize;
+    for op in program.ops().iter().copied() {
+        if native_op_uses_stateful_scratch_at_depth(op, depth) {
+            return true;
+        }
+        depth = native_stack_depth_after(depth, op);
+    }
+    false
+}
+
+fn native_op_uses_stateful_scratch_at_depth(op: NativeOp, depth: usize) -> bool {
+    depth >= XMM_STACK.len()
+        && matches!(
+            op,
+            NativeOp::DdtState(_)
+                | NativeOp::DdtJacobian
+                | NativeOp::IdtState(_)
+                | NativeOp::IdtJacobian
+                | NativeOp::IdtModState(_)
+        )
+}
+
+fn native_stack_depth_after(depth: usize, op: NativeOp) -> usize {
+    let (pops, pushes) = native_op_stack_effect(&op);
+    debug_assert!(
+        depth >= pops,
+        "native op {op:?} requires stack depth {pops}, found {depth}"
+    );
+    depth.saturating_sub(pops) + pushes
 }
 
 fn unary_math_uses_helper(op: UnaryMathOp) -> bool {
@@ -5923,6 +5943,53 @@ mod tests {
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
         let error = take_native_runtime_error().expect("short idtmod prior state must hard-fail");
         assert_prior_state_storage_bounds_error(&error);
+    }
+
+    #[test]
+    fn generated_value_leaf_omits_stateful_scratch_when_full_stack_occurs_after_stateful_op() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushVariable(0),
+                Instruction::DdtState(1),
+                Instruction::PushVariable(1),
+                Instruction::PushVariable(2),
+                Instruction::PushVariable(3),
+                Instruction::PushVariable(4),
+                Instruction::PushVariable(5),
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+            ],
+            0,
+        );
+        assert_eq!(program.max_stack_depth(), XMM_STACK.len());
+        let bytes = compile_value_function(&program).expect("compile spare-depth stateful leaf");
+        assert!(
+            !contains_bytes(&bytes, &sub_rsp_bytes(STATEFUL_SCRATCH_FRAME_BYTES)),
+            "stateful op with spare XMM capacity should not reserve a scratch frame just because a later expression reaches full depth"
+        );
+
+        let memory =
+            ExecutableMemory::allocate(&bytes).expect("allocate spare-depth stateful leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let vars = [2.0_f64, 1.0, 2.0, 3.0, 4.0, 5.0];
+        let previous_state = [0.0_f64, 1.5_f64];
+        let mut state_values = [0.0_f64, 0.0_f64];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.timestep = 0.25;
+        ctx.state_prev = previous_state.as_ptr();
+        ctx.state_prev_len = previous_state.len();
+        ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = state_values.len();
+
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 17.0_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
     }
 
     #[test]
