@@ -24634,7 +24634,7 @@ fn emit_stamp_body(
                 match equation.kind {
                     MirEquationKind::Current => {
                         if dense_reactive {
-                            emit_dense_derivative_arrays(
+                            let derivative_refs = emit_dense_derivative_refs(
                                 out,
                                 &format!("{prefix}_reactive"),
                                 &lowered.reactive_derivatives,
@@ -24650,13 +24650,9 @@ fn emit_stamp_body(
                                 optional_node_expr(equation.branch.neg_node)
                             ));
                             out.push_str("            &self.nodes,\n");
-                            out.push_str(&format!(
-                                "            &{prefix}_reactive_node_derivatives,\n"
-                            ));
+                            out.push_str(&format!("            {},\n", derivative_refs.node_ref));
                             out.push_str("            &self.branches,\n");
-                            out.push_str(&format!(
-                                "            &{prefix}_reactive_branch_derivatives,\n"
-                            ));
+                            out.push_str(&format!("            {},\n", derivative_refs.branch_ref));
                             out.push_str("            self.multiplicity,\n");
                             out.push_str("        );\n");
                         } else {
@@ -24720,7 +24716,7 @@ fn emit_stamp_body(
                                     )
                                 })?;
                         if dense_reactive {
-                            emit_dense_derivative_arrays(
+                            let derivative_refs = emit_dense_derivative_refs(
                                 out,
                                 &format!("{prefix}_reactive"),
                                 &lowered.reactive_derivatives,
@@ -24729,13 +24725,9 @@ fn emit_stamp_body(
                             out.push_str("        stamper.stamp_potential_reactive_dense(\n");
                             out.push_str(&format!("            self.branches[{slot}],\n"));
                             out.push_str("            &self.nodes,\n");
-                            out.push_str(&format!(
-                                "            &{prefix}_reactive_node_derivatives,\n"
-                            ));
+                            out.push_str(&format!("            {},\n", derivative_refs.node_ref));
                             out.push_str("            &self.branches,\n");
-                            out.push_str(&format!(
-                                "            &{prefix}_reactive_branch_derivatives,\n"
-                            ));
+                            out.push_str(&format!("            {},\n", derivative_refs.branch_ref));
                             out.push_str("        );\n");
                         } else {
                             let branch_expr = format!("self.branches[{slot}]");
@@ -24883,7 +24875,7 @@ fn emit_stamp_body(
                         out.push_str("        );\n");
                     }
                 } else if dense_stamp {
-                    emit_dense_derivative_arrays(
+                    let derivative_refs = emit_dense_derivative_refs(
                         out,
                         &prefix,
                         &node_derivatives,
@@ -24899,8 +24891,8 @@ fn emit_stamp_body(
                         optional_node_local_expr(equation.branch.neg_node)
                     ));
                     out.push_str(&format!("            self.multiplicity * ({value}),\n"));
-                    out.push_str(&format!("            &{prefix}_node_derivatives,\n"));
-                    out.push_str(&format!("            &{prefix}_branch_derivatives,\n"));
+                    out.push_str(&format!("            {},\n", derivative_refs.node_ref));
+                    out.push_str(&format!("            {},\n", derivative_refs.branch_ref));
                     out.push_str("            self.multiplicity,\n");
                     out.push_str("        );\n");
                 } else {
@@ -24989,7 +24981,7 @@ fn emit_stamp_body(
                         out.push_str("        );\n");
                     }
                 } else if dense_stamp {
-                    emit_dense_derivative_arrays(
+                    let derivative_refs = emit_dense_derivative_refs(
                         out,
                         &prefix,
                         &node_derivatives,
@@ -24998,8 +24990,8 @@ fn emit_stamp_body(
                     out.push_str("        stamper.stamp_potential_dense_local(\n");
                     out.push_str(&format!("            {slot},\n"));
                     out.push_str(&format!("            {value},\n"));
-                    out.push_str(&format!("            &{prefix}_node_derivatives,\n"));
-                    out.push_str(&format!("            &{prefix}_branch_derivatives,\n"));
+                    out.push_str(&format!("            {},\n", derivative_refs.node_ref));
+                    out.push_str(&format!("            {},\n", derivative_refs.branch_ref));
                     out.push_str("        );\n");
                 } else {
                     let branch_expr = format!("{slot}");
@@ -25645,22 +25637,141 @@ fn emit_compact_equation_stamp(
     Ok(())
 }
 
-fn emit_dense_derivative_arrays(
+#[derive(Debug, Clone)]
+struct DenseDerivativeRefs {
+    node_ref: String,
+    branch_ref: String,
+}
+
+fn emit_dense_derivative_refs(
     out: &mut String,
     prefix: &str,
     node_derivatives: &[String],
     branch_derivatives: &[String],
-) {
-    out.push_str(&format!(
-        "        let {prefix}_node_derivatives: [f64; {}] = [{}];\n",
-        node_derivatives.len(),
-        node_derivatives.join(", ")
-    ));
-    out.push_str(&format!(
-        "        let {prefix}_branch_derivatives: [f64; {}] = [{}];\n",
-        branch_derivatives.len(),
-        branch_derivatives.join(", ")
-    ));
+) -> DenseDerivativeRefs {
+    let node_ref = if node_derivatives.is_empty() {
+        "&[]".to_string()
+    } else if let Some(row) =
+        direct_scratch_derivative_row(node_derivatives, ScratchDerivativeKind::Node)
+    {
+        row.reference()
+    } else {
+        out.push_str(&format!(
+            "        let {prefix}_node_derivatives: [f64; {}] = [{}];\n",
+            node_derivatives.len(),
+            node_derivatives.join(", ")
+        ));
+        format!("&{prefix}_node_derivatives")
+    };
+
+    let branch_ref = if branch_derivatives.is_empty() {
+        "&[]".to_string()
+    } else if let Some(row) =
+        direct_scratch_derivative_row(branch_derivatives, ScratchDerivativeKind::Branch)
+    {
+        row.reference()
+    } else {
+        out.push_str(&format!(
+            "        let {prefix}_branch_derivatives: [f64; {}] = [{}];\n",
+            branch_derivatives.len(),
+            branch_derivatives.join(", ")
+        ));
+        format!("&{prefix}_branch_derivatives")
+    };
+
+    DenseDerivativeRefs {
+        node_ref,
+        branch_ref,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ScratchDerivativeKind {
+    Node,
+    Branch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ScratchDerivativeRow {
+    row: usize,
+    row_ref_prefix: &'static str,
+}
+
+impl ScratchDerivativeRow {
+    fn reference(self) -> String {
+        format!("{}{row}]", self.row_ref_prefix, row = self.row)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScratchDerivativePattern {
+    element_prefix: &'static str,
+    row_ref_prefix: &'static str,
+}
+
+impl ScratchDerivativeKind {
+    fn patterns(self) -> &'static [ScratchDerivativePattern] {
+        match self {
+            ScratchDerivativeKind::Node => &[
+                ScratchDerivativePattern {
+                    element_prefix: "scratch.node_derivatives[",
+                    row_ref_prefix: "&scratch.node_derivatives[",
+                },
+                ScratchDerivativePattern {
+                    element_prefix: "s.dn[",
+                    row_ref_prefix: "&s.dn[",
+                },
+            ],
+            ScratchDerivativeKind::Branch => &[
+                ScratchDerivativePattern {
+                    element_prefix: "scratch.branch_derivatives[",
+                    row_ref_prefix: "&scratch.branch_derivatives[",
+                },
+                ScratchDerivativePattern {
+                    element_prefix: "s.db[",
+                    row_ref_prefix: "&s.db[",
+                },
+            ],
+        }
+    }
+}
+
+fn direct_scratch_derivative_row(
+    derivatives: &[String],
+    kind: ScratchDerivativeKind,
+) -> Option<ScratchDerivativeRow> {
+    let mut row = None;
+    for (axis, derivative) in derivatives.iter().enumerate() {
+        let next = parse_scratch_derivative_axis(derivative, kind, axis)?;
+        match row {
+            Some(row) if row != next => return None,
+            Some(_) => {}
+            None => row = Some(next),
+        }
+    }
+    row
+}
+
+fn parse_scratch_derivative_axis(
+    derivative: &str,
+    kind: ScratchDerivativeKind,
+    expected_axis: usize,
+) -> Option<ScratchDerivativeRow> {
+    let derivative = derivative.trim();
+    for pattern in kind.patterns() {
+        let Some(rest) = derivative.strip_prefix(pattern.element_prefix) else {
+            continue;
+        };
+        let (row, rest) = rest.split_once("][")?;
+        let axis = rest.strip_suffix(']')?;
+        if axis.parse::<usize>().ok()? == expected_axis {
+            return Some(ScratchDerivativeRow {
+                row: row.parse().ok()?,
+                row_ref_prefix: pattern.row_ref_prefix,
+            });
+        }
+    }
+    None
 }
 
 fn emit_indexed_dense_derivative_arrays(
@@ -42585,4 +42696,69 @@ fn branch_derivative_axis_count(
         .max()
         .map(|slot| slot + 1)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod dense_derivative_ref_tests {
+    use super::{
+        ScratchDerivativeKind, ScratchDerivativeRow, direct_scratch_derivative_row,
+        emit_dense_derivative_refs,
+    };
+
+    fn strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn borrows_full_scratch_rows_without_temp_arrays() {
+        let node_derivatives = strings(&[
+            "scratch.node_derivatives[17][0]",
+            "scratch.node_derivatives[17][1]",
+            "scratch.node_derivatives[17][2]",
+        ]);
+        let branch_derivatives = strings(&["scratch.branch_derivatives[4][0]"]);
+        let mut out = String::new();
+
+        let refs =
+            emit_dense_derivative_refs(&mut out, "eq0", &node_derivatives, &branch_derivatives);
+
+        assert!(out.is_empty());
+        assert_eq!(refs.node_ref, "&scratch.node_derivatives[17]");
+        assert_eq!(refs.branch_ref, "&scratch.branch_derivatives[4]");
+    }
+
+    #[test]
+    fn supports_compacted_scratch_aliases() {
+        let node_derivatives = strings(&["s.dn[3][0]", "s.dn[3][1]"]);
+        let branch_derivatives = strings(&["s.db[9][0]", "s.db[9][1]"]);
+
+        assert_eq!(
+            direct_scratch_derivative_row(&node_derivatives, ScratchDerivativeKind::Node)
+                .map(ScratchDerivativeRow::reference),
+            Some("&s.dn[3]".to_string())
+        );
+        assert_eq!(
+            direct_scratch_derivative_row(&branch_derivatives, ScratchDerivativeKind::Branch)
+                .map(ScratchDerivativeRow::reference),
+            Some("&s.db[9]".to_string())
+        );
+    }
+
+    #[test]
+    fn falls_back_for_non_row_expressions() {
+        let node_derivatives = strings(&[
+            "scratch.node_derivatives[17][0]",
+            "scratch.node_derivatives[18][1]",
+        ]);
+        let branch_derivatives = strings(&["scratch.branch_derivatives[4][0] + 1.0"]);
+        let mut out = String::new();
+
+        let refs =
+            emit_dense_derivative_refs(&mut out, "eq1", &node_derivatives, &branch_derivatives);
+
+        assert!(out.contains("let eq1_node_derivatives: [f64; 2]"));
+        assert!(out.contains("let eq1_branch_derivatives: [f64; 1]"));
+        assert_eq!(refs.node_ref, "&eq1_node_derivatives");
+        assert_eq!(refs.branch_ref, "&eq1_branch_derivatives");
+    }
 }

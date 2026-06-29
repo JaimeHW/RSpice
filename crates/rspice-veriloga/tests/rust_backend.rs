@@ -9322,7 +9322,7 @@ fn rust_backend_borrowed_helper_arrays_compile_with_dense_stamps() {
         "{helper}"
     );
     assert!(
-        helper.contains("            &eq0_node_derivatives,\n            &eq0_branch_derivatives,"),
+        helper.contains("            &eq0_node_derivatives,\n            &[],"),
         "{helper}"
     );
     assert!(
