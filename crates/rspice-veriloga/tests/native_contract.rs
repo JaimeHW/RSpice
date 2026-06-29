@@ -1944,6 +1944,65 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_zi_current_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_zi_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    assert_eq!(
+        model.zi_filters.len(),
+        1,
+        "fixture must contain one compiled zi filter"
+    );
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("CZICANON1", model, &artifact, &[1, 0])
+            .expect("canonical zi current uses native JIT path");
+    assert!(device.is_using_native());
+
+    device.set_analysis_type(0);
+    device.update_voltages(&[2.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("canonical zi DC evaluation succeeds");
+    assert!(
+        (currents[0] - 2.0).abs() < 1.0e-12,
+        "DC currents: {currents:?}"
+    );
+
+    device.set_analysis_type(2);
+    device.set_timestep(0.5e-6);
+
+    device.set_time(0.0);
+    device.update_voltages(&[1.0]);
+    let first = device
+        .try_evaluate()
+        .expect("canonical zi first sample succeeds")[0];
+    let repeated = device
+        .try_evaluate()
+        .expect("canonical zi repeated sample succeeds")[0];
+    assert_eq!(first.to_bits(), repeated.to_bits());
+    assert!((first - 0.25).abs() < 1.0e-12, "first sample: {first}");
+    device.advance_state();
+
+    device.set_time(0.5e-6);
+    device.update_voltages(&[1.0]);
+    let held = device
+        .try_evaluate()
+        .expect("canonical zi hold evaluation succeeds")[0];
+    assert!((held - 0.25).abs() < 1.0e-12, "held output: {held}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"
