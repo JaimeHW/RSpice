@@ -787,6 +787,20 @@ impl VerilogADevice {
         ))
     }
 
+    #[cfg(feature = "native")]
+    fn missing_native_noise_exponent_entry(index: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT missing noise exponent entry for source {index}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_terminal_pair_current_slot(pair_index: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT missing terminal-pair current slot {pair_index}; no interpreter fallback"
+        ))
+    }
+
     #[cfg(not(feature = "native"))]
     fn refresh_static_conditions(&mut self) {
         let model = &self.model;
@@ -1330,9 +1344,7 @@ impl VerilogADevice {
             NativeValueEntry::NoisePsd(index) => native.run_noise_psd(index, &ctx, vars_ptr),
             NativeValueEntry::NoiseExponent(index) => native
                 .run_noise_exponent(index, &ctx, vars_ptr)
-                .ok_or_else(|| {
-                    VmError::InvalidInstruction("missing native noise exponent entry")
-                })?,
+                .ok_or_else(|| Self::missing_native_noise_exponent_entry(index))?,
         };
         if let Some(error) = take_native_runtime_error() {
             return Err(VmError::NativeJit(error));
@@ -1351,18 +1363,16 @@ impl VerilogADevice {
 
         let terminal_count = context.terminal_count();
         if terminal_count == 0 {
-            return Err(VmError::InvalidInstruction(
-                "missing terminal-pair current slot",
-            ));
+            return Err(Self::missing_native_terminal_pair_current_slot(0));
         }
         for pair_index in current_pairs {
             let Some((pos, neg)) = terminal_pair_current_endpoints(*pair_index, terminal_count)
             else {
-                return Err(VmError::InvalidInstruction(
-                    "missing terminal-pair current slot",
-                ));
+                return Err(Self::missing_native_terminal_pair_current_slot(*pair_index));
             };
-            context.try_current(pos, neg)?;
+            context
+                .try_current(pos, neg)
+                .map_err(|_| Self::missing_native_terminal_pair_current_slot(*pair_index))?;
         }
 
         Ok(())
@@ -2354,6 +2364,22 @@ endmodule
             .expect_err("native helper metadata error must hard-fail");
 
         assert_native_hard_fail(err, "Laplace");
+    }
+
+    #[test]
+    fn native_current_pair_preflight_errors_use_hard_fail_contract() {
+        let context = VmContext::with_internal_nodes(0, 0);
+        let err = VerilogADevice::validate_native_current_pairs(&context, &[0])
+            .expect_err("missing terminal-pair storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "terminal-pair current slot 0");
+    }
+
+    #[test]
+    fn native_missing_noise_exponent_entry_uses_hard_fail_contract() {
+        let err = VerilogADevice::missing_native_noise_exponent_entry(2);
+
+        assert_native_hard_fail(err, "noise exponent entry");
     }
 
     #[test]
