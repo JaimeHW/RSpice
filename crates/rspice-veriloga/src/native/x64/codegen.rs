@@ -86,6 +86,7 @@ pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u
     };
     let mut compiler = FunctionCompiler::new(
         program_uses_helper_calls(program),
+        value_program_needs_saved_entry_args(program),
         local_frame_bytes,
         None,
         needs_stateful_scratch.then_some(0),
@@ -106,6 +107,7 @@ pub(crate) fn compile_assignment_function(
         0
     };
     let mut compiler = FunctionCompiler::new(
+        program_uses_helper_calls(program),
         program_uses_helper_calls(program),
         local_frame_bytes,
         None,
@@ -162,6 +164,7 @@ pub(crate) fn compile_assignment_pass_function(
 
     let mut compiler = FunctionCompiler::new(
         uses_helper_calls,
+        uses_helper_calls,
         local_frame_bytes,
         loop_counter_base_disp,
         stateful_scratch_base_disp,
@@ -178,6 +181,7 @@ struct FunctionCompiler {
     depth: usize,
     literals: Vec<LiteralPatch>,
     uses_helper_calls: bool,
+    saves_entry_args: bool,
     local_frame_bytes: i32,
     loop_counter_base_disp: Option<i32>,
     stateful_scratch_base_disp: Option<i32>,
@@ -193,6 +197,7 @@ struct LiteralPatch {
 impl FunctionCompiler {
     fn new(
         uses_helper_calls: bool,
+        saves_entry_args: bool,
         local_frame_bytes: i32,
         loop_counter_base_disp: Option<i32>,
         stateful_scratch_base_disp: Option<i32>,
@@ -206,6 +211,7 @@ impl FunctionCompiler {
             depth: 0,
             literals: Vec::new(),
             uses_helper_calls,
+            saves_entry_args,
             local_frame_bytes,
             loop_counter_base_disp,
             stateful_scratch_base_disp,
@@ -218,11 +224,11 @@ impl FunctionCompiler {
     }
 
     fn has_stack_setup(&self) -> bool {
-        self.uses_helper_calls || self.local_frame_bytes > 0
+        self.saves_entry_args || self.local_frame_bytes > 0
     }
 
     fn saves_entry_args(&self) -> bool {
-        self.uses_helper_calls
+        self.saves_entry_args
     }
 
     fn emit_program(&mut self, program: &NativeProgram) -> JitResult<()> {
@@ -1448,16 +1454,24 @@ impl FunctionCompiler {
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
         }
-        self.encoder.mov_r64_m64_base_disp32(
-            table_ptr_arg_reg(),
-            self.ctx_arg_reg(),
-            LOOKUP_TABLES_OFFSET,
-        );
-        self.encoder.mov_r64_m64_base_disp32(
-            table_len_arg_reg(),
-            self.ctx_arg_reg(),
-            LOOKUP_TABLES_LEN_OFFSET,
-        );
+        let ctx = self.ctx_arg_reg();
+        if table_ptr_arg_reg() == ctx {
+            self.encoder.mov_r64_m64_base_disp32(
+                table_len_arg_reg(),
+                ctx,
+                LOOKUP_TABLES_LEN_OFFSET,
+            );
+            self.encoder
+                .mov_r64_m64_base_disp32(table_ptr_arg_reg(), ctx, LOOKUP_TABLES_OFFSET);
+        } else {
+            self.encoder
+                .mov_r64_m64_base_disp32(table_ptr_arg_reg(), ctx, LOOKUP_TABLES_OFFSET);
+            self.encoder.mov_r64_m64_base_disp32(
+                table_len_arg_reg(),
+                ctx,
+                LOOKUP_TABLES_LEN_OFFSET,
+            );
+        }
         self.emit_usize_arg(table_id_arg_reg(), table_id);
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
@@ -2238,14 +2252,14 @@ impl FunctionCompiler {
         }
 
         self.encoder
+            .mov_r64_r64(operand_filter_ctx_arg_reg(), self.ctx_arg_reg());
+        self.encoder
             .mov_r64_r64(operand_filter_operands_arg_reg(), Gpr::R11);
         let operands_disp = call_spill_disp(input_slot);
         if operands_disp != 0 {
             self.encoder
                 .add_r64_imm32(operand_filter_operands_arg_reg(), operands_disp);
         }
-        self.encoder
-            .mov_r64_r64(operand_filter_ctx_arg_reg(), self.ctx_arg_reg());
         self.emit_usize_arg(operand_filter_id_arg_reg(), filter_id);
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
@@ -3042,27 +3056,73 @@ fn call_result_disp() -> i32 {
 }
 
 fn program_uses_helper_calls(program: &NativeProgram) -> bool {
-    program.ops().iter().any(|op| {
-        matches!(
+    program.ops().iter().any(native_op_uses_helper_call)
+}
+
+fn value_program_needs_saved_entry_args(program: &NativeProgram) -> bool {
+    let mut helper_seen = false;
+    for op in program.ops() {
+        if helper_seen && native_op_reads_entry_args(*op) {
+            return true;
+        }
+        helper_seen |= native_op_uses_helper_call(op);
+    }
+    false
+}
+
+fn native_op_uses_helper_call(op: &NativeOp) -> bool {
+    matches!(
+        op,
+        NativeOp::BinaryMath(_)
+            | NativeOp::TableLookup(_)
+            | NativeOp::TableDerivative(_)
+            | NativeOp::LaplaceState(_)
+            | NativeOp::ZiState(_)
+            | NativeOp::TimerState(_)
+            | NativeOp::TransitionState(_)
+            | NativeOp::SlewState(_)
+            | NativeOp::AbsDelayState(_)
+            | NativeOp::CrossState(_)
+            | NativeOp::IdtModState(_)
+    ) || matches!(op, NativeOp::UnaryMath(op) if unary_math_uses_helper(*op))
+        || matches!(
             op,
-            NativeOp::BinaryMath(_)
-                | NativeOp::TableLookup(_)
-                | NativeOp::TableDerivative(_)
-                | NativeOp::LaplaceState(_)
-                | NativeOp::ZiState(_)
-                | NativeOp::TimerState(_)
-                | NativeOp::TransitionState(_)
-                | NativeOp::SlewState(_)
-                | NativeOp::AbsDelayState(_)
-                | NativeOp::CrossState(_)
-                | NativeOp::IdtModState(_)
-        ) || matches!(op, NativeOp::UnaryMath(op) if unary_math_uses_helper(*op))
-            || matches!(
-                op,
-                NativeOp::LoadVariableDyn { len, lower, .. }
-                    if !dynamic_variable_inline_supported(*len, *lower)
-            )
-    })
+            NativeOp::LoadVariableDyn { len, lower, .. }
+                if !dynamic_variable_inline_supported(*len, *lower)
+        )
+}
+
+fn native_op_reads_entry_args(op: NativeOp) -> bool {
+    !matches!(
+        op,
+        NativeOp::Const(_)
+            | NativeOp::Add
+            | NativeOp::Sub
+            | NativeOp::Mul
+            | NativeOp::Div
+            | NativeOp::AddConst(_)
+            | NativeOp::SubConst(_)
+            | NativeOp::MulConst(_)
+            | NativeOp::DivConst(_)
+            | NativeOp::SubFromConst(_)
+            | NativeOp::DivFromConst(_)
+            | NativeOp::Neg
+            | NativeOp::Abs
+            | NativeOp::Square
+            | NativeOp::Sqrt
+            | NativeOp::Compare(_)
+            | NativeOp::CompareConst(_, _)
+            | NativeOp::Logical(_)
+            | NativeOp::LogicalConst(_, _)
+            | NativeOp::IfElse
+            | NativeOp::Extremum(_)
+            | NativeOp::ExtremumConst(_, _)
+            | NativeOp::UnaryMath(_)
+            | NativeOp::BinaryMath(_)
+            | NativeOp::IntegerBinary(_)
+            | NativeOp::WhiteNoise
+            | NativeOp::FlickerNoise
+    )
 }
 
 fn program_needs_stateful_stack_scratch(program: &NativeProgram) -> bool {
@@ -3434,7 +3494,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_value_leaf_with_helper_call_emits_saved_arg_prologue() {
+    fn generated_value_leaf_terminal_helper_call_omits_saved_arg_prologue() {
         let program = native_program(
             EntryKind::StampValue,
             vec![Instruction::PushTemperature, Instruction::Exp],
@@ -3444,8 +3504,53 @@ mod tests {
         let bytes = compile_value_function(&program).expect("compile helper-call value function");
 
         assert!(
+            !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "terminal pure helper-call leaves should not save unused context and vars pointers"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate terminal helper leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.temperature = 0.5;
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            runtime_exp(0.5).to_bits()
+        );
+    }
+
+    #[test]
+    fn generated_value_leaf_helper_before_context_load_preserves_entry_args() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushTemperature,
+                Instruction::Exp,
+                Instruction::PushParam(0),
+                Instruction::Add,
+            ],
+            0,
+        );
+
+        let bytes = compile_value_function(&program).expect("compile helper-call value function");
+
+        assert!(
             bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
-            "helper-call native leaves must preserve context and vars pointers"
+            "helper calls before later context loads must preserve context and vars pointers"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate preserved helper leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let mut ctx = eval_context(&[2.0], &[], &[], &[]);
+        ctx.temperature = 0.5;
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            (runtime_exp(0.5) + 2.0).to_bits()
         );
     }
 
@@ -4425,8 +4530,15 @@ mod tests {
         let bytes = compile_value_function(&program).expect("compile huge dynamic range leaf");
 
         assert!(
-            bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
-            "huge dynamic ranges must keep helper-backed continuation semantics"
+            !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "terminal huge dynamic helper leaves should not save unused context and vars pointers"
+        );
+        assert!(
+            contains_bytes(
+                &bytes,
+                &movabs_imm64_bytes(super::dynamic_variable_len_arg_reg(), huge_len as u64)
+            ),
+            "huge dynamic ranges must still use the helper-backed continuation path"
         );
     }
 
