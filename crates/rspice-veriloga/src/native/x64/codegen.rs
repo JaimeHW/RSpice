@@ -3,10 +3,10 @@ use crate::native::abi::{
     rspice_absdelay_state_native, rspice_acos, rspice_acosh, rspice_asin, rspice_asinh,
     rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos, rspice_cosh,
     rspice_cross_state_native, rspice_dynamic_variable_load_native,
-    rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_idtmod_wrap,
-    rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10, rspice_mod,
-    rspice_native_integer_shift_count_error, rspice_native_loop_limit_error, rspice_pow,
-    rspice_sin, rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
+    rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
+    rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10,
+    rspice_mod, rspice_native_integer_shift_count_error, rspice_native_loop_limit_error,
+    rspice_pow, rspice_sin, rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
     rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
     rspice_transition_state_native, rspice_zi_step_native,
 };
@@ -2407,6 +2407,7 @@ fn binary_math_helper(op: BinaryMathOp) -> BinaryHelper {
     match op {
         BinaryMathOp::Pow => rspice_pow,
         BinaryMathOp::Atan2 => rspice_atan2,
+        BinaryMathOp::Hypot => rspice_hypot,
         BinaryMathOp::Mod => rspice_mod,
     }
 }
