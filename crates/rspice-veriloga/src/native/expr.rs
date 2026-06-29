@@ -155,6 +155,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     internal_node_count: usize,
     parameter_count: usize,
     variable_count: usize,
+    variable_names: &'a [SmolStr],
     branch_unknown_count: usize,
     lookup_table_count: usize,
     laplace_filter_count: usize,
@@ -175,6 +176,7 @@ impl<'a> NativeLoweringLimits<'a> {
             internal_node_count,
             parameter_count,
             variable_count,
+            variable_names: &[],
             branch_unknown_count,
             lookup_table_count: 0,
             laplace_filter_count: 0,
@@ -183,7 +185,7 @@ impl<'a> NativeLoweringLimits<'a> {
         }
     }
 
-    pub(crate) fn for_model(model: &CompiledModel) -> NativeLoweringLimits<'static> {
+    pub(crate) fn for_model(model: &CompiledModel) -> NativeLoweringLimits<'_> {
         NativeLoweringLimits::new(
             model.num_terminals,
             model.internal_nodes,
@@ -191,6 +193,7 @@ impl<'a> NativeLoweringLimits<'a> {
             model.num_variables,
             model.branch_sources.len(),
         )
+        .with_variable_names(&model.variable_names)
         .with_lookup_table_count(model.lookup_tables.len())
         .with_laplace_filter_count(model.laplace_filters.len())
         .with_zi_filter_count(model.zi_filters.len())
@@ -199,12 +202,16 @@ impl<'a> NativeLoweringLimits<'a> {
     pub(crate) fn with_available_current_pairs<'b>(
         self,
         available_current_pairs: &'b [usize],
-    ) -> NativeLoweringLimits<'b> {
+    ) -> NativeLoweringLimits<'b>
+    where
+        'a: 'b,
+    {
         NativeLoweringLimits {
             terminal_count: self.terminal_count,
             internal_node_count: self.internal_node_count,
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
+            variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
@@ -217,6 +224,24 @@ impl<'a> NativeLoweringLimits<'a> {
         Self {
             lookup_table_count,
             ..self
+        }
+    }
+
+    pub(crate) fn with_variable_names<'b>(
+        self,
+        variable_names: &'b [SmolStr],
+    ) -> NativeLoweringLimits<'b> {
+        NativeLoweringLimits {
+            terminal_count: self.terminal_count,
+            internal_node_count: self.internal_node_count,
+            parameter_count: self.parameter_count,
+            variable_count: self.variable_count,
+            variable_names,
+            branch_unknown_count: self.branch_unknown_count,
+            lookup_table_count: self.lookup_table_count,
+            laplace_filter_count: self.laplace_filter_count,
+            zi_filter_count: self.zi_filter_count,
+            available_current_pairs: &[],
         }
     }
 
@@ -1078,6 +1103,21 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.limits.parameter_count,
             )?;
             return self.push(NativeOp::LoadParam(index));
+        }
+
+        if let Some(index) = self
+            .limits
+            .variable_names
+            .iter()
+            .position(|variable| variable.as_str() == name)
+        {
+            validate_index(
+                self.model.clone(),
+                "canonical variable",
+                index,
+                self.limits.variable_count,
+            )?;
+            return self.push(NativeOp::LoadVariable(index));
         }
 
         Err(self.unsupported(format!("identifier {name}")))
