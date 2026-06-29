@@ -491,15 +491,9 @@ impl CircuitData {
         &mut self,
         time: Value,
         dt: Value,
-        coefficients: &crate::analysis::CompanionCoefficients,
+        _coefficients: &crate::analysis::CompanionCoefficients,
     ) {
-        let ddt_coefficients =
-            crate::device::veriloga_generated::GeneratedDdtCoefficients::from_companion(
-                coefficients,
-                dt,
-            );
-        self.generated_veriloga_devices
-            .set_timepoint(time, dt, ddt_coefficients);
+        self.generated_veriloga_devices.set_timepoint(time, dt);
     }
 
     /// Commit build-time generated Verilog-A integrator state after acceptance.

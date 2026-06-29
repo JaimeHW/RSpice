@@ -208,7 +208,7 @@ impl Engine {
             }
             #[cfg(feature = "veriloga-builtins")]
             if circuit.has_generated_veriloga_devices() {
-                circuit.prepare_generated_veriloga_timepoint(time, dt);
+                circuit.prepare_generated_veriloga_timepoint(time, dt, ctx.coeff);
             }
             circuit.stamp_nonlinear(matrix, rhs, solution);
             circuit.stamp_behavioral(matrix, rhs, solution, time);
