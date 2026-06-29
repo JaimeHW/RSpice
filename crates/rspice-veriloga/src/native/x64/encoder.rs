@@ -482,6 +482,10 @@ impl X64Encoder {
         self.emit_sse_reg_rip_disp32(0xF2, 0x5E, dst, disp)
     }
 
+    pub(crate) fn divsd_xmm_m64_base_disp32(&mut self, dst: Xmm, base: Gpr, disp: i32) {
+        self.emit_sse_reg_base_disp32(0xF2, 0x5E, dst, base, disp);
+    }
+
     pub fn divsd_xmm0_xmm1(&mut self) {
         self.divsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
     }

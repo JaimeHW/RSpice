@@ -588,17 +588,29 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        let scratch = self.scratch_register()?;
-        self.emit_literal_load(scratch, value);
         match op {
-            BinaryOp::Sub => self.encoder.subsd_xmm_xmm(scratch, target),
-            BinaryOp::Div => self.encoder.divsd_xmm_xmm(scratch, target),
+            BinaryOp::Sub | BinaryOp::Div => {
+                self.emit_literal_lhs_stack_binary_op(target, value, op)
+            }
             BinaryOp::Add | BinaryOp::Mul => {
                 unreachable!("literal LHS binary lowering only accepts sub/div")
             }
         }
-        self.encoder.movsd_xmm_xmm(target, scratch);
         Ok(())
+    }
+
+    fn emit_literal_lhs_stack_binary_op(&mut self, target: Xmm, value: f64, op: BinaryOp) {
+        self.encoder.sub_rsp_imm32(ROUND_TEMP_FRAME_BYTES);
+        self.encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, target);
+        self.emit_literal_load(target, value);
+        match op {
+            BinaryOp::Sub => self.encoder.subsd_xmm_m64_base_disp32(target, Gpr::Rsp, 0),
+            BinaryOp::Div => self.encoder.divsd_xmm_m64_base_disp32(target, Gpr::Rsp, 0),
+            BinaryOp::Add | BinaryOp::Mul => {
+                unreachable!("literal LHS stack lowering only accepts sub/div")
+            }
+        }
+        self.encoder.add_rsp_imm32(ROUND_TEMP_FRAME_BYTES);
     }
 
     fn emit_neg(&mut self) -> JitResult<()> {
@@ -2086,16 +2098,12 @@ impl FunctionCompiler {
                 self.emit_node_voltage_load(dst, pos)?;
             }
             (VoltageNode::Ground, neg) => {
-                let scratch = self.scratch_register()?;
                 self.encoder.xorpd_xmm_xmm(dst, dst);
-                self.emit_node_voltage_load(scratch, neg)?;
-                self.encoder.subsd_xmm_xmm(dst, scratch);
+                self.emit_node_voltage_subtract(dst, neg)?;
             }
             (pos, neg) => {
-                let scratch = self.scratch_register()?;
                 self.emit_node_voltage_load(dst, pos)?;
-                self.emit_node_voltage_load(scratch, neg)?;
-                self.encoder.subsd_xmm_xmm(dst, scratch);
+                self.emit_node_voltage_subtract(dst, neg)?;
             }
         }
 
@@ -2119,6 +2127,24 @@ impl FunctionCompiler {
                 self.encoder.xorpd_xmm_xmm(dst, dst);
                 Ok(())
             }
+        }
+    }
+
+    fn emit_node_voltage_subtract(&mut self, dst: Xmm, node: VoltageNode) -> JitResult<()> {
+        match node {
+            VoltageNode::Terminal(index) => {
+                self.emit_context_pointer_load(VOLTAGES_OFFSET);
+                self.encoder
+                    .subsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
+                Ok(())
+            }
+            VoltageNode::Internal(index) => {
+                self.emit_context_pointer_load(INTERNAL_VOLTAGES_OFFSET);
+                self.encoder
+                    .subsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
+                Ok(())
+            }
+            VoltageNode::Ground => Ok(()),
         }
     }
 
@@ -2928,6 +2954,60 @@ mod tests {
             let mut ctx = eval_context(&[], &[], &[], &[]);
             ctx.temperature = input;
 
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_applies_constant_lhs_arithmetic_at_full_xmm_stack_depth() {
+        let cases = [
+            ("sub", Instruction::Sub, 4.0_f64, 10.0_f64 - 4.0_f64),
+            ("div", Instruction::Div, 4.0_f64, 10.0_f64 / 4.0_f64),
+        ];
+
+        for (name, instruction, input, folded_value) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(3.0),
+                    Instruction::PushConst(4.0),
+                    Instruction::PushConst(5.0),
+                    Instruction::PushConst(10.0),
+                    Instruction::PushTemperature,
+                    instruction,
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                ],
+                0,
+            );
+
+            assert_eq!(program.max_stack_depth(), XMM_STACK.len(), "{name}");
+
+            let bytes = compile_value_function(&program)
+                .expect("compile full-stack literal LHS arithmetic leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "constant LHS arithmetic should stay helper-free at full XMM stack depth"
+            );
+
+            let memory = ExecutableMemory::allocate(&bytes)
+                .expect("allocate full-stack literal LHS arithmetic leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = input;
+
+            let expected = 1.0 + 2.0 + 3.0 + 4.0 + 5.0 + folded_value;
             assert_eq!(
                 f(&ctx, std::ptr::null()).to_bits(),
                 expected.to_bits(),
@@ -6160,6 +6240,44 @@ mod tests {
         ctx.temperature = 6.0;
 
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 9.0_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_loads_differential_voltage_at_full_xmm_stack_depth_without_scratch() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(3.0),
+                Instruction::PushConst(4.0),
+                Instruction::PushConst(5.0),
+                Instruction::PushVoltage(0, 1),
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+            ],
+            2,
+        );
+
+        assert_eq!(program.max_stack_depth(), XMM_STACK.len());
+
+        let bytes =
+            compile_value_function(&program).expect("compile full-stack differential voltage leaf");
+        assert!(
+            !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "differential voltage load should stay helper-free at full XMM stack depth"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate full-stack voltage leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[9.0, 4.0], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 20.0_f64.to_bits());
     }
 
     fn native_program(
