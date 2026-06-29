@@ -215,6 +215,20 @@ impl X64Encoder {
         self.emit_modrm(0b11, dst.code(), src.code());
     }
 
+    pub(crate) fn cvtsi2sd_xmm_r64(&mut self, dst: Xmm, src: Gpr) {
+        self.emit_u8(0xF2);
+        self.emit_rex(true, dst.code(), 0, src.code());
+        self.emit_all(&[0x0F, 0x2A]);
+        self.emit_modrm(0b11, dst.code(), src.code());
+    }
+
+    pub(crate) fn cvttsd2si_r64_xmm(&mut self, dst: Gpr, src: Xmm) {
+        self.emit_u8(0xF2);
+        self.emit_rex(true, dst.code(), 0, src.code());
+        self.emit_all(&[0x0F, 0x2C]);
+        self.emit_modrm(0b11, dst.code(), src.code());
+    }
+
     pub(crate) fn cmp_r32_imm8(&mut self, reg: Gpr, value: u8) {
         self.emit_rex(false, 0, 0, reg.code());
         self.emit_u8(0x83);
@@ -227,6 +241,12 @@ impl X64Encoder {
         self.emit_u8(0x81);
         self.emit_modrm(0b11, 0b111, reg.code());
         self.emit_i32(value);
+    }
+
+    pub(crate) fn cmp_r64_r64(&mut self, left: Gpr, right: Gpr) {
+        self.emit_rex(true, right.code(), 0, left.code());
+        self.emit_u8(0x39);
+        self.emit_modrm(0b11, right.code(), left.code());
     }
 
     pub(crate) fn movsd_m64_base_disp32_xmm(&mut self, base: Gpr, disp: i32, src: Xmm) {
@@ -299,6 +319,10 @@ impl X64Encoder {
 
     pub(crate) fn ucomisd_xmm_m64_rip_disp32(&mut self, left: Xmm, disp: i32) -> usize {
         self.emit_sse_reg_rip_disp32(0x66, 0x2E, left, disp)
+    }
+
+    pub(crate) fn ucomisd_xmm_m64_base_disp32(&mut self, left: Xmm, base: Gpr, disp: i32) {
+        self.emit_sse_reg_base_disp32(0x66, 0x2E, left, base, disp);
     }
 
     pub(crate) fn setcc_r8(&mut self, condition: ConditionCode, dst: Gpr) {

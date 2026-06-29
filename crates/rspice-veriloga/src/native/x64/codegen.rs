@@ -38,6 +38,8 @@ const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
 const BOOLEAN_EPSILON: f64 = 1.0e-15;
 const TIMESTEP_DC_EPSILON: f64 = 1.0e-20;
+const F64_EXACT_INTEGER_LIMIT_ABS_BITS: u64 = 0x4330_0000_0000_0000;
+const ROUND_TEMP_FRAME_BYTES: i32 = 16;
 const CALL_SPILL_SLOT_COUNT: usize = 7;
 #[cfg(test)]
 const CALL_RESULT_SLOT: usize = 6;
@@ -651,7 +653,53 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        self.emit_unary_helper_call(target, unary_math_helper(op));
+        match op {
+            UnaryMathOp::Floor => self.emit_floor_or_ceil(target, RoundDirection::Floor),
+            UnaryMathOp::Ceil => self.emit_floor_or_ceil(target, RoundDirection::Ceil),
+            _ => {
+                self.emit_unary_helper_call(target, unary_math_helper(op));
+                Ok(())
+            }
+        }
+    }
+
+    fn emit_floor_or_ceil(&mut self, target: Xmm, direction: RoundDirection) -> JitResult<()> {
+        self.encoder.movq_r64_xmm(Gpr::R11, target);
+        self.encoder.btr_r64_imm8(Gpr::R11, 63);
+        self.encoder.cmp_r64_imm32(Gpr::R11, 0);
+        let zero = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, F64_EXACT_INTEGER_LIMIT_ABS_BITS);
+        self.encoder.cmp_r64_r64(Gpr::R11, Gpr::Rax);
+        let already_integral_or_unordered = self
+            .encoder
+            .jcc_rel32_placeholder(ConditionCode::AboveOrEqual);
+
+        self.encoder.sub_rsp_imm32(ROUND_TEMP_FRAME_BYTES);
+        self.encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, target);
+        self.encoder.cvttsd2si_r64_xmm(Gpr::R10, target);
+        self.encoder.cvtsi2sd_xmm_r64(target, Gpr::R10);
+        self.encoder
+            .ucomisd_xmm_m64_base_disp32(target, Gpr::Rsp, 0);
+
+        let skip_adjust = match direction {
+            RoundDirection::Floor => self
+                .encoder
+                .jcc_rel32_placeholder(ConditionCode::BelowOrEqual),
+            RoundDirection::Ceil => self
+                .encoder
+                .jcc_rel32_placeholder(ConditionCode::AboveOrEqual),
+        };
+        let adjustment = match direction {
+            RoundDirection::Floor => -1,
+            RoundDirection::Ceil => 1,
+        };
+        self.encoder.add_r64_imm32(Gpr::R10, adjustment);
+        self.patch_rel32_to_current(skip_adjust)?;
+        self.encoder.cvtsi2sd_xmm_r64(target, Gpr::R10);
+        self.encoder.add_rsp_imm32(ROUND_TEMP_FRAME_BYTES);
+        self.patch_rel32_to_current(zero)?;
+        self.patch_rel32_to_current(already_integral_or_unordered)?;
         Ok(())
     }
 
@@ -1951,6 +1999,12 @@ enum BinaryOp {
     Div,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RoundDirection {
+    Floor,
+    Ceil,
+}
+
 type UnaryHelper = extern "C" fn(f64) -> f64;
 type BinaryHelper = extern "C" fn(f64, f64) -> f64;
 type TernaryHelper = extern "C" fn(f64, f64, f64) -> f64;
@@ -2051,8 +2105,7 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
     program.ops().iter().any(|op| {
         matches!(
             op,
-            NativeOp::UnaryMath(_)
-                | NativeOp::BinaryMath(_)
+            NativeOp::BinaryMath(_)
                 | NativeOp::IntegerBinary(_)
                 | NativeOp::TableLookup(_)
                 | NativeOp::TableDerivative(_)
@@ -2065,8 +2118,12 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
                 | NativeOp::AbsDelayState(_)
                 | NativeOp::CrossState(_)
                 | NativeOp::IdtModState(_)
-        )
+        ) || matches!(op, NativeOp::UnaryMath(op) if unary_math_uses_helper(*op))
     })
+}
+
+fn unary_math_uses_helper(op: UnaryMathOp) -> bool {
+    !matches!(op, UnaryMathOp::Floor | UnaryMathOp::Ceil)
 }
 
 fn xmm_stack_slot(register: Xmm) -> usize {
@@ -4999,6 +5056,58 @@ mod tests {
             assert_eq!(
                 f(&ctx, vars.as_ptr()).to_bits(),
                 (310.0 + ((unary_expected + 7.0) + 2.0)).to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_floor_ceil_without_helper_call() {
+        let cases = [
+            ("floor-positive", Instruction::Floor, 3.75, 3.0_f64),
+            ("floor-negative", Instruction::Floor, -3.25, -4.0_f64),
+            ("floor-integral", Instruction::Floor, -4.0, -4.0_f64),
+            ("floor-negative-zero", Instruction::Floor, -0.0, -0.0_f64),
+            (
+                "floor-huge",
+                Instruction::Floor,
+                4_503_599_627_370_496.0,
+                4_503_599_627_370_496.0,
+            ),
+            ("ceil-positive", Instruction::Ceil, 3.25, 4.0_f64),
+            ("ceil-negative", Instruction::Ceil, -3.75, -3.0_f64),
+            ("ceil-integral", Instruction::Ceil, 4.0, 4.0_f64),
+            ("ceil-negative-zero", Instruction::Ceil, -0.0, -0.0_f64),
+            (
+                "ceil-huge",
+                Instruction::Ceil,
+                -4_503_599_627_370_496.0,
+                -4_503_599_627_370_496.0,
+            ),
+        ];
+
+        for (name, instruction, input, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![Instruction::PushParam(0), instruction],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile helper-free floor/ceil");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "{name}: floor/ceil should not pay helper-call prologue cost"
+            );
+
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate floor/ceil leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let params = [input];
+            let ctx = eval_context(&params, &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
                 "{name}"
             );
         }
