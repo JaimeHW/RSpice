@@ -5663,8 +5663,8 @@ mod tests {
             let program = native_program(
                 EntryKind::StampValue,
                 vec![
-                    Instruction::PushConst(left),
-                    Instruction::PushConst(right),
+                    Instruction::PushTemperature,
+                    Instruction::PushVariable(0),
                     op.clone(),
                 ],
                 0,
@@ -5674,7 +5674,9 @@ mod tests {
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
-            let ctx = eval_context(&[], &[], &[], &[]);
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = left;
+            let vars = [right];
             let expected = match op {
                 Instruction::Min => runtime_min(left, right),
                 Instruction::Max => runtime_max(left, right),
@@ -5682,7 +5684,7 @@ mod tests {
             };
 
             assert_eq!(
-                f(&ctx, std::ptr::null()).to_bits(),
+                f(&ctx, vars.as_ptr()).to_bits(),
                 expected.to_bits(),
                 "{name}"
             );
