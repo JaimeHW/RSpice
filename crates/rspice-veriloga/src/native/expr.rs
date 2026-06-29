@@ -173,6 +173,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     canonical_above_slots: &'a [(ExprId, usize)],
     canonical_timer_slots: &'a [(ExprId, usize)],
     canonical_limit_slots: &'a [(ExprId, usize)],
+    canonical_table_lookup_slots: &'a [(ExprId, usize)],
 }
 
 impl<'a> NativeLoweringLimits<'a> {
@@ -206,6 +207,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: &[],
             canonical_timer_slots: &[],
             canonical_limit_slots: &[],
+            canonical_table_lookup_slots: &[],
         }
     }
 
@@ -253,6 +255,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -293,6 +296,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -340,6 +344,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -373,6 +378,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -406,6 +412,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -439,6 +446,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -472,6 +480,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -505,6 +514,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -538,6 +548,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -571,6 +582,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -604,6 +616,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -637,6 +650,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -670,6 +684,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
         }
     }
 
@@ -703,6 +718,41 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_above_slots: self.canonical_above_slots,
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+        }
+    }
+
+    pub(crate) fn with_canonical_table_lookup_slots<'b>(
+        self,
+        canonical_table_lookup_slots: &'b [(ExprId, usize)],
+    ) -> NativeLoweringLimits<'b>
+    where
+        'a: 'b,
+    {
+        NativeLoweringLimits {
+            terminal_count: self.terminal_count,
+            internal_node_count: self.internal_node_count,
+            parameter_count: self.parameter_count,
+            variable_count: self.variable_count,
+            variable_names: self.variable_names,
+            branch_unknown_count: self.branch_unknown_count,
+            lookup_table_count: self.lookup_table_count,
+            laplace_filter_count: self.laplace_filter_count,
+            zi_filter_count: self.zi_filter_count,
+            available_current_pairs: self.available_current_pairs,
+            canonical_ddt_slots: self.canonical_ddt_slots,
+            canonical_idt_slots: self.canonical_idt_slots,
+            canonical_idtmod_slots: self.canonical_idtmod_slots,
+            canonical_transition_slots: self.canonical_transition_slots,
+            canonical_slew_slots: self.canonical_slew_slots,
+            canonical_absdelay_slots: self.canonical_absdelay_slots,
+            canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
+            canonical_cross_slots: self.canonical_cross_slots,
+            canonical_above_slots: self.canonical_above_slots,
+            canonical_timer_slots: self.canonical_timer_slots,
+            canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots,
         }
     }
 
@@ -777,6 +827,12 @@ impl<'a> NativeLoweringLimits<'a> {
             .iter()
             .find_map(|(id, slot)| (*id == expr_id).then_some(*slot))
     }
+
+    fn canonical_table_lookup_slot(&self, expr_id: ExprId) -> Option<usize> {
+        self.canonical_table_lookup_slots
+            .iter()
+            .find_map(|(id, slot)| (*id == expr_id).then_some(*slot))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -793,6 +849,7 @@ enum CanonicalStateOperator {
     Above,
     Timer,
     Limit,
+    TableLookup,
 }
 
 impl CanonicalStateOperator {
@@ -810,6 +867,7 @@ impl CanonicalStateOperator {
             Self::Above => "above",
             Self::Timer => "timer",
             Self::Limit => "limit",
+            Self::TableLookup => "table_model",
         }
     }
 
@@ -828,6 +886,7 @@ impl CanonicalStateOperator {
             (Self::Above, Instruction::AboveState(slot)) => Some(*slot),
             (Self::Timer, Instruction::TimerState(slot)) => Some(*slot),
             (Self::Limit, Instruction::LimitState(slot)) => Some(*slot),
+            (Self::TableLookup, Instruction::TableLookup(slot)) => Some(*slot),
             _ => None,
         }
     }
@@ -1034,6 +1093,21 @@ pub(crate) fn canonical_limit_slots_for_equation(
         equation_id,
         bytecode_program,
         CanonicalStateOperator::Limit,
+    )
+}
+
+pub(crate) fn canonical_table_lookup_slots_for_equation(
+    model: SmolStr,
+    mir: &MirModel,
+    equation_id: EquationId,
+    bytecode_program: &BytecodeProgram,
+) -> JitResult<Vec<(ExprId, usize)>> {
+    canonical_state_slots_for_equation(
+        model,
+        mir,
+        equation_id,
+        bytecode_program,
+        CanonicalStateOperator::TableLookup,
     )
 }
 
@@ -2100,6 +2174,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<()> {
         match normalize_intrinsic_name(name).as_str() {
             "limit" => self.lower_limit_call(expr_id, args),
+            "table_model" => self.lower_table_model_call(expr_id, args),
             _ => self.lower_intrinsic_call(name, args),
         }
     }
@@ -2190,6 +2265,29 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
         self.pop_binary("canonical $limit")?;
         self.ops.push(NativeOp::LimitState(slot));
+        Ok(())
+    }
+
+    fn lower_table_model_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
+        if args.len() < 2 {
+            return Err(self.unsupported(format!(
+                "system function $table_model expects at least two operands, found {}",
+                args.len()
+            )));
+        }
+        let Some(table_id) = self.limits.canonical_table_lookup_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "system function $table_model expression {expr_id} table slot"
+            )));
+        };
+        validate_index(
+            self.model.clone(),
+            "TableLookup table",
+            table_id,
+            self.limits.lookup_table_count,
+        )?;
+        self.lower(args[0])?;
+        self.ops.push(NativeOp::TableLookup(table_id));
         Ok(())
     }
 
