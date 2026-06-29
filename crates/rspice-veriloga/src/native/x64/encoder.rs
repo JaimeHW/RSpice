@@ -173,13 +173,11 @@ impl X64Encoder {
     }
 
     pub(crate) fn sub_rsp_imm32(&mut self, value: i32) {
-        self.emit_all(&[0x48, 0x81, 0xEC]);
-        self.emit_i32(value);
+        self.emit_rsp_adjust_imm32(0b101, value);
     }
 
     pub(crate) fn add_rsp_imm32(&mut self, value: i32) {
-        self.emit_all(&[0x48, 0x81, 0xC4]);
-        self.emit_i32(value);
+        self.emit_rsp_adjust_imm32(0b000, value);
     }
 
     pub(crate) fn add_r64_imm32(&mut self, reg: Gpr, value: i32) {
@@ -587,6 +585,19 @@ impl X64Encoder {
         }
     }
 
+    fn emit_rsp_adjust_imm32(&mut self, extension: u8, value: i32) {
+        self.emit_rex(true, 0, 0, Gpr::Rsp.code());
+        if i8::try_from(value).is_ok() {
+            self.emit_u8(0x83);
+            self.emit_modrm(0b11, extension, Gpr::Rsp.code());
+            self.emit_u8(value as i8 as u8);
+        } else {
+            self.emit_u8(0x81);
+            self.emit_modrm(0b11, extension, Gpr::Rsp.code());
+            self.emit_i32(value);
+        }
+    }
+
     fn emit_i32(&mut self, value: i32) {
         self.emit_all(&value.to_le_bytes());
     }
@@ -983,9 +994,27 @@ mod tests {
         assert_eq!(
             encoder.into_bytes(),
             [
-                0x41, 0x54, 0x41, 0x55, 0x49, 0x89, 0xCC, 0x49, 0x89, 0xD5, 0x48, 0x81, 0xEC, 0x58,
-                0, 0, 0, 0x49, 0x89, 0xE3, 0x48, 0xB8, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,
-                0x11, 0xFF, 0xD0, 0x48, 0x81, 0xC4, 0x58, 0, 0, 0, 0x41, 0x5D, 0x41, 0x5C,
+                0x41, 0x54, 0x41, 0x55, 0x49, 0x89, 0xCC, 0x49, 0x89, 0xD5, 0x48, 0x83, 0xEC, 0x58,
+                0x49, 0x89, 0xE3, 0x48, 0xB8, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0xFF,
+                0xD0, 0x48, 0x83, 0xC4, 0x58, 0x41, 0x5D, 0x41, 0x5C,
+            ]
+        );
+    }
+
+    #[test]
+    fn encodes_stack_adjustments_with_short_and_wide_immediates() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.sub_rsp_imm32(16);
+        encoder.add_rsp_imm32(16);
+        encoder.sub_rsp_imm32(128);
+        encoder.add_rsp_imm32(128);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x48, 0x83, 0xEC, 16, 0x48, 0x83, 0xC4, 16, 0x48, 0x81, 0xEC, 128, 0, 0, 0, 0x48,
+                0x81, 0xC4, 128, 0, 0, 0,
             ]
         );
     }
