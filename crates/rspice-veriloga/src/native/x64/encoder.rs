@@ -138,6 +138,12 @@ impl X64Encoder {
         self.emit_all(&value.to_le_bytes());
     }
 
+    pub(crate) fn mov_r32_imm32(&mut self, dst: Gpr, value: u32) {
+        self.emit_rex(false, 0, 0, dst.code());
+        self.emit_u8(0xB8 + (dst.code() & 0b111));
+        self.emit_all(&value.to_le_bytes());
+    }
+
     pub(crate) fn push_r64(&mut self, reg: Gpr) {
         self.emit_rex(false, 0, 0, reg.code());
         self.emit_u8(0x50 + (reg.code() & 0b111));
@@ -629,6 +635,19 @@ mod tests {
         encoder.ret();
 
         assert_eq!(encoder.into_bytes(), [0xB8, 42, 0, 0, 0, 0xC3]);
+    }
+
+    #[test]
+    fn encodes_gpr_mov_r32_imm32() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.mov_r32_imm32(Gpr::Rax, 42);
+        encoder.mov_r32_imm32(Gpr::R10, 1);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [0xB8, 42, 0, 0, 0, 0x41, 0xBA, 1, 0, 0, 0]
+        );
     }
 
     #[test]

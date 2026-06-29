@@ -436,7 +436,7 @@ impl FunctionCompiler {
         loop_depth: i32,
     ) -> JitResult<()> {
         let counter_disp = self.loop_counter_disp(loop_depth)?;
-        self.encoder.movabs_r64_imm64(Gpr::R10, 0);
+        self.encoder.xor_r64_r64(Gpr::R10, Gpr::R10);
         self.encoder
             .mov_m64_base_disp32_r64(Gpr::Rsp, counter_disp, Gpr::R10);
 
@@ -1342,7 +1342,7 @@ impl FunctionCompiler {
         let done_after_convert = self.encoder.jmp_rel32_placeholder();
 
         self.patch_rel32_to_current(nan)?;
-        self.encoder.movabs_r64_imm64(dst, 0);
+        self.encoder.xor_r64_r64(dst, dst);
         let done_after_nan = self.encoder.jmp_rel32_placeholder();
 
         self.patch_rel32_to_current(positive_saturation)?;
@@ -2234,7 +2234,7 @@ impl FunctionCompiler {
 
     fn emit_bool_result(&mut self, dst: Xmm, value: bool) {
         if value {
-            self.encoder.movabs_r64_imm64(Gpr::R10, 1);
+            self.encoder.mov_r32_imm32(Gpr::R10, 1);
             self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
         } else {
             self.encoder.xorpd_xmm_xmm(dst, dst);
@@ -4325,6 +4325,14 @@ mod tests {
             !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
             "helper-free runtime loops should not pay the saved-argument prologue"
         );
+        assert!(
+            contains_bytes(&bytes, &xor_r64_bytes(Gpr::R10, Gpr::R10)),
+            "runtime loop counter should be zeroed with a zero idiom"
+        );
+        assert!(
+            !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::R10, 0)),
+            "runtime loop counter should not materialize zero as a 64-bit immediate"
+        );
         let memory =
             ExecutableMemory::allocate(&bytes).expect("allocate infinite loop assignment pass");
         let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -6118,6 +6126,16 @@ mod tests {
                 !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
                 "constant RHS logical op should stay helper-free"
             );
+            if name == "or-rhs-true" {
+                assert!(
+                    contains_bytes(&bytes, &mov_r32_imm32_bytes(Gpr::R10, 1)),
+                    "literal true logical result should use compact imm32 materialization"
+                );
+                assert!(
+                    !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::R10, 1)),
+                    "literal true logical result should not use a 64-bit immediate"
+                );
+            }
 
             let memory =
                 ExecutableMemory::allocate(&bytes).expect("allocate literal RHS logical leaf");
@@ -6323,6 +6341,22 @@ mod tests {
             assert!(
                 !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
                 "{name}: runtime shifts should not pay helper-call prologue"
+            );
+            assert!(
+                contains_bytes(&bytes, &xor_r64_bytes(Gpr::Rax, Gpr::Rax)),
+                "{name}: f64-to-i64 NaN path should zero the left operand with a zero idiom"
+            );
+            assert!(
+                contains_bytes(&bytes, &xor_r64_bytes(Gpr::Rcx, Gpr::Rcx)),
+                "{name}: f64-to-i64 NaN path should zero the shift count with a zero idiom"
+            );
+            assert!(
+                !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::Rax, 0)),
+                "{name}: f64-to-i64 NaN path should not materialize zero as a 64-bit immediate"
+            );
+            assert!(
+                !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::Rcx, 0)),
+                "{name}: f64-to-i64 NaN path should not materialize zero as a 64-bit immediate"
             );
             let memory = ExecutableMemory::allocate(&bytes).expect("allocate integer shift leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -7720,6 +7754,24 @@ mod tests {
         let mut encoder = X64Encoder::new();
         encoder.movabs_r64_imm64(Gpr::R11, index as u64);
         encoder.cmp_r64_r64(Gpr::R10, Gpr::R11);
+        encoder.into_bytes()
+    }
+
+    fn mov_r32_imm32_bytes(register: Gpr, value: u32) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.mov_r32_imm32(register, value);
+        encoder.into_bytes()
+    }
+
+    fn movabs_imm64_bytes(register: Gpr, value: u64) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.movabs_r64_imm64(register, value);
+        encoder.into_bytes()
+    }
+
+    fn xor_r64_bytes(dst: Gpr, src: Gpr) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.xor_r64_r64(dst, src);
         encoder.into_bytes()
     }
 
