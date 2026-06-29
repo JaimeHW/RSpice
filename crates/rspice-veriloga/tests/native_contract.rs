@@ -1896,6 +1896,54 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_laplace_current_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_laplace_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ laplace_nd(V(p, n), {1.0}, {1.0, 1.0});
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    assert_eq!(
+        model.laplace_filters.len(),
+        1,
+        "fixture must contain one compiled Laplace filter"
+    );
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("CLAPCANON1", model, &artifact, &[1, 0])
+            .expect("canonical Laplace current uses native JIT path");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[4.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("canonical Laplace DC evaluation succeeds")[0]
+            .to_bits(),
+        4.0_f64.to_bits()
+    );
+
+    device.advance_state();
+    device.set_analysis_type(2);
+    device.set_timestep(0.5);
+    device.update_voltages(&[4.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("canonical Laplace transient evaluation succeeds");
+    assert!(
+        (currents[0] - (4.0 / 3.0)).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"
