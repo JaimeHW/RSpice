@@ -290,6 +290,24 @@ pub extern "C" fn rspice_tanh(x: f64) -> f64 {
     x.tanh()
 }
 
+/// External helper function for inverse hyperbolic sine.
+#[unsafe(export_name = "rspice_asinh")]
+pub extern "C" fn rspice_asinh(x: f64) -> f64 {
+    x.asinh()
+}
+
+/// External helper function for inverse hyperbolic cosine.
+#[unsafe(export_name = "rspice_acosh")]
+pub extern "C" fn rspice_acosh(x: f64) -> f64 {
+    x.acosh()
+}
+
+/// External helper function for inverse hyperbolic tangent.
+#[unsafe(export_name = "rspice_atanh")]
+pub extern "C" fn rspice_atanh(x: f64) -> f64 {
+    x.atanh()
+}
+
 /// External helper function for arcsine.
 #[unsafe(export_name = "rspice_asin")]
 pub extern "C" fn rspice_asin(x: f64) -> f64 {

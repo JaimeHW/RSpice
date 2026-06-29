@@ -1,7 +1,8 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
-    rspice_absdelay_state_native, rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_ceil,
-    rspice_cos, rspice_cosh, rspice_cross_state_native, rspice_dynamic_variable_load_native,
+    rspice_absdelay_state_native, rspice_acos, rspice_acosh, rspice_asin, rspice_asinh,
+    rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos, rspice_cosh,
+    rspice_cross_state_native, rspice_dynamic_variable_load_native,
     rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_idtmod_wrap,
     rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10, rspice_mod,
     rspice_native_integer_shift_count_error, rspice_native_loop_limit_error, rspice_pow,
@@ -2364,6 +2365,9 @@ fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
         UnaryMathOp::Sinh => rspice_sinh,
         UnaryMathOp::Cosh => rspice_cosh,
         UnaryMathOp::Tanh => rspice_tanh,
+        UnaryMathOp::Asinh => rspice_asinh,
+        UnaryMathOp::Acosh => rspice_acosh,
+        UnaryMathOp::Atanh => rspice_atanh,
         UnaryMathOp::Limexp => rspice_limexp,
         UnaryMathOp::Asin => rspice_asin,
         UnaryMathOp::Acos => rspice_acos,
