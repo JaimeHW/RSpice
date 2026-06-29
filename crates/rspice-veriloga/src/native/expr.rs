@@ -715,6 +715,9 @@ impl NativeProgram {
                     if lower_constant_rhs_logical(&mut ops, logical_op(instruction)) {
                         continue;
                     }
+                    if lower_constant_lhs_logical(&mut ops, logical_op(instruction)) {
+                        continue;
+                    }
                     ops.push(NativeOp::Logical(logical_op(instruction)));
                 }
                 Instruction::Not => {
@@ -1100,6 +1103,24 @@ fn lower_constant_rhs_logical(ops: &mut Vec<NativeOp>, op: LogicalOp) -> bool {
         return false;
     };
     ops.pop();
+    ops.push(NativeOp::LogicalConst(op, constant_truthy(value)));
+    true
+}
+
+fn lower_constant_lhs_logical(ops: &mut Vec<NativeOp>, op: LogicalOp) -> bool {
+    if ops.len() < 2 {
+        return false;
+    }
+    let rhs_index = ops.len() - 1;
+    if !is_independent_value_push(&ops[rhs_index]) {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let NativeOp::Const(value) = ops[lhs_index] else {
+        return false;
+    };
+    ops.remove(lhs_index);
     ops.push(NativeOp::LogicalConst(op, constant_truthy(value)));
     true
 }
@@ -1884,6 +1905,56 @@ mod tests {
                     |op| matches!(op, NativeOp::Const(value) if value.to_bits() == rhs.to_bits())
                 ),
                 "{expected_op:?} should consume the RHS literal in the logical op"
+            );
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::LogicalConst(expected_op, expected_truthy)
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_constant_lhs_logical_ops_without_extra_stack_slot() {
+        let cases = [
+            (Instruction::And, 2.0e-15, LogicalOp::And, true),
+            (Instruction::And, 1.0e-15, LogicalOp::And, false),
+            (Instruction::And, f64::NAN, LogicalOp::And, false),
+            (Instruction::Or, -2.0e-15, LogicalOp::Or, true),
+            (Instruction::Or, 0.5e-15, LogicalOp::Or, false),
+            (Instruction::Or, f64::NAN, LogicalOp::Or, false),
+        ];
+
+        for (instruction, lhs, expected_op, expected_truthy) in cases {
+            let instruction_name = format!("{instruction:?}");
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(lhs),
+                    Instruction::PushTemperature,
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "logic-literal-lhs",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant LHS logical op has a direct native lowering");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{instruction_name} should not allocate a second XMM stack slot for LHS constants"
+            );
+            assert!(
+                !lowered.ops().iter().any(
+                    |op| matches!(op, NativeOp::Const(value) if value.to_bits() == lhs.to_bits())
+                ),
+                "{expected_op:?} should consume the LHS literal in the logical op"
             );
             assert_eq!(
                 lowered.ops(),
