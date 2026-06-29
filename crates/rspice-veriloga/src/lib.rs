@@ -132,6 +132,21 @@ pub struct CanonicalIrFile {
     pub dependencies: Vec<std::path::PathBuf>,
 }
 
+/// Result of compiling a Verilog-A source file for the runtime from disk.
+///
+/// Includes the bytecode-era compiled model, the canonical HIR/MIR/OptIR
+/// artifact that native JIT backends consume, and canonical dependency paths
+/// discovered during preprocessing (`include` expansion).
+#[derive(Debug, Clone)]
+pub struct CompiledRuntimeFile {
+    /// Compiled model artifact used by existing simulation metadata paths.
+    pub model: CompiledModel,
+    /// Canonical HIR/MIR/OptIR artifact for the selected module.
+    pub canonical_ir: canonical_ir::CanonicalIrArtifact,
+    /// Canonical source/include dependencies captured at compile time.
+    pub dependencies: Vec<std::path::PathBuf>,
+}
+
 /// Main compiler entry point
 pub struct VerilogACompiler {
     options: CompilerOptions,
@@ -246,21 +261,29 @@ impl VerilogACompiler {
         source: &str,
         module_name: Option<&str>,
     ) -> CompileResult<CompiledModel> {
+        let analyzed = self.analyze_preprocessed("<input>", source)?;
+
+        // Phase 4 & 5: IR generation and code generation
+        let model = CodeGenerator::new().generate_module(&analyzed, module_name)?;
+
+        Ok(model)
+    }
+
+    fn analyze_preprocessed(
+        &self,
+        source_package: &str,
+        source: &str,
+    ) -> CompileResult<semantic::AnalyzedFile> {
         // Phase 1: Lexical analysis
         let source_map = SourceMap::new();
-        let source_id = source_map.add_source("<input>", source);
+        let source_id = source_map.add_source(source_package, source);
         let tokens = Lexer::new(source, source_id).collect_tokens()?;
 
         // Phase 2: Parsing
         let source_file = Parser::new(&tokens).parse()?;
 
         // Phase 3: Semantic analysis
-        let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
-
-        // Phase 4 & 5: IR generation and code generation
-        let model = CodeGenerator::new().generate_module(&analyzed, module_name)?;
-
-        Ok(model)
+        SemanticAnalyzer::new().analyze(&source_file)
     }
 
     /// Compile already-preprocessed Verilog-A source to canonical IR.
@@ -280,19 +303,18 @@ impl VerilogACompiler {
         source: &str,
         module_name: Option<&str>,
     ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
-        // Phase 1: Lexical analysis
-        let source_map = SourceMap::new();
-        let source_id = source_map.add_source(source_package, source);
-        let tokens = Lexer::new(source, source_id).collect_tokens()?;
+        let analyzed = self.analyze_preprocessed(source_package, source)?;
+        self.build_canonical_ir_artifact(source_package, source, &analyzed, module_name)
+    }
 
-        // Phase 2: Parsing
-        let source_file = Parser::new(&tokens).parse()?;
-
-        // Phase 3: Semantic analysis
-        let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
-        let module = self.select_analyzed_module(&analyzed, module_name)?;
-
-        // Phase 4: Canonical HIR/MIR/OptIR lowering
+    fn build_canonical_ir_artifact(
+        &self,
+        source_package: &str,
+        source: &str,
+        analyzed: &semantic::AnalyzedFile,
+        module_name: Option<&str>,
+    ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
+        let module = self.select_analyzed_module(analyzed, module_name)?;
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
         let hir = canonical_ir::HirModel::from_analyzed_module(&metadata, module);
         let mir = canonical_ir::MirModel::from_hir(&hir).map_err(Self::canonical_ir_error)?;
@@ -445,6 +467,51 @@ impl VerilogACompiler {
 
         Ok(CanonicalIrFile {
             artifact,
+            dependencies,
+        })
+    }
+
+    /// Compile one module of a source file from disk to both runtime artifacts
+    /// with preprocessing and dependency metadata.
+    ///
+    /// This API preprocesses, parses, and analyzes the file once, then emits the
+    /// compiled model and canonical IR artifact from the same selected module.
+    /// See [`Self::compile_module`] for the module selection rules.
+    pub fn compile_file_runtime_with_metadata(
+        &self,
+        path: &std::path::Path,
+        module_name: Option<&str>,
+    ) -> CompileResult<CompiledRuntimeFile> {
+        let mut pp = self.configured_preprocessor();
+
+        let preprocessed = pp
+            .preprocess_file(path)
+            .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
+        let dependencies = pp.take_dependencies();
+        let source_package_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+        if std::env::var("RSPICE_DEBUG_PP").is_ok() {
+            let debug_path = path.with_extension("pp.va");
+            let _ = std::fs::write(&debug_path, &preprocessed);
+            eprintln!(
+                "DEBUG: Preprocessed output written to {}",
+                debug_path.display()
+            );
+        }
+
+        let source_package = source_package_path.display().to_string();
+        let analyzed = self.analyze_preprocessed(&source_package, &preprocessed)?;
+        let model = CodeGenerator::new().generate_module(&analyzed, module_name)?;
+        let canonical_ir = self.build_canonical_ir_artifact(
+            &source_package,
+            &preprocessed,
+            &analyzed,
+            module_name,
+        )?;
+
+        Ok(CompiledRuntimeFile {
+            model,
+            canonical_ir,
             dependencies,
         })
     }
