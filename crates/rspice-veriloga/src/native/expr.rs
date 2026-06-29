@@ -951,9 +951,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower(*else_expr)?;
                 self.append_ternary(NativeOp::IfElse)
             }
+            HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
+                self.lower_intrinsic_call(name.as_str(), args.as_slice())
+            }
             HirExprKind::StringLiteral { .. }
-            | HirExprKind::SystemFunction { .. }
-            | HirExprKind::Call { .. }
             | HirExprKind::NamedBranchAccess { .. }
             | HirExprKind::ArrayAccess { .. }
             | HirExprKind::ArrayLiteral { .. }
@@ -965,6 +966,101 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 expression_kind_name(&expression.kind)
             ))),
         }
+    }
+
+    fn lower_intrinsic_call(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
+        let normalized = normalize_intrinsic_name(name);
+        match normalized.as_str() {
+            "abs" | "fabs" => {
+                self.require_intrinsic_arity(name, args, 1)?;
+                self.lower(args[0])?;
+                if lower_constant_abs(&mut self.ops) {
+                    Ok(())
+                } else {
+                    self.append_unary(NativeOp::Abs)
+                }
+            }
+            "sqrt" => {
+                self.require_intrinsic_arity(name, args, 1)?;
+                self.lower(args[0])?;
+                self.append_unary(NativeOp::Sqrt)
+            }
+            "exp" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Exp),
+            "ln" | "log" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Log),
+            "log10" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Log10),
+            "sin" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Sin),
+            "cos" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Cos),
+            "tan" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Tan),
+            "sinh" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Sinh),
+            "cosh" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Cosh),
+            "tanh" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Tanh),
+            "limexp" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Limexp),
+            "asin" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Asin),
+            "acos" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Acos),
+            "atan" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Atan),
+            "floor" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Floor),
+            "ceil" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Ceil),
+            "pow" => self.lower_binary_math_intrinsic(name, args, BinaryMathOp::Pow),
+            "atan2" => self.lower_binary_math_intrinsic(name, args, BinaryMathOp::Atan2),
+            "min" => self.lower_extremum_intrinsic(name, args, ExtremumOp::Min),
+            "max" => self.lower_extremum_intrinsic(name, args, ExtremumOp::Max),
+            _ => Err(self.unsupported(format!("intrinsic function '{name}'"))),
+        }
+    }
+
+    fn lower_unary_math_intrinsic(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        op: UnaryMathOp,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.lower(args[0])?;
+        if lower_constant_unary_math(&mut self.ops, op) {
+            Ok(())
+        } else {
+            self.append_unary(NativeOp::UnaryMath(op))
+        }
+    }
+
+    fn lower_binary_math_intrinsic(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        op: BinaryMathOp,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 2)?;
+        self.lower(args[0])?;
+        self.lower(args[1])?;
+        self.pop_binary("canonical binary intrinsic")?;
+        self.append_binary_math_op(op)
+    }
+
+    fn lower_extremum_intrinsic(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        op: ExtremumOp,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 2)?;
+        self.lower(args[0])?;
+        self.lower(args[1])?;
+        self.append_extremum(op)
+    }
+
+    fn require_intrinsic_arity(
+        &self,
+        name: &str,
+        args: &[ExprId],
+        expected: usize,
+    ) -> JitResult<()> {
+        if args.len() != expected {
+            return Err(self.unsupported(format!(
+                "intrinsic function '{name}' expects {expected} argument(s), found {}",
+                args.len()
+            )));
+        }
+        Ok(())
     }
 
     fn lower_identifier(&mut self, name: &str) -> JitResult<()> {
@@ -1078,12 +1174,25 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "Mod" => BinaryMathOp::Mod,
             _ => unreachable!("append_binary_math only accepts binary math operators"),
         };
+        self.append_binary_math_op(op)
+    }
+
+    fn append_binary_math_op(&mut self, op: BinaryMathOp) -> JitResult<()> {
         if lower_constant_binary_math(&mut self.ops, op)
             || (op == BinaryMathOp::Pow && lower_constant_square_power(&mut self.ops))
         {
             return Ok(());
         }
         self.ops.push(NativeOp::BinaryMath(op));
+        Ok(())
+    }
+
+    fn append_extremum(&mut self, op: ExtremumOp) -> JitResult<()> {
+        self.pop_binary("canonical extremum")?;
+        if lower_constant_rhs_extremum(&mut self.ops, op) {
+            return Ok(());
+        }
+        self.ops.push(NativeOp::Extremum(op));
         Ok(())
     }
 
@@ -1273,6 +1382,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             format!("expression {}", detail.into()),
         )
     }
+}
+
+fn normalize_intrinsic_name(name: &str) -> String {
+    name.strip_prefix('$').unwrap_or(name).to_ascii_lowercase()
 }
 
 fn expression_kind_name(kind: &HirExprKind) -> &'static str {
@@ -2290,6 +2403,154 @@ endmodule
             error
                 .to_string()
                 .contains("native JIT does not support canonical op expression identifier x"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn lowers_canonical_intrinsic_calls_to_native_program() {
+        let source = r#"
+module mir_intrinsics(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real r = 2.0;
+  analog begin
+    I(p, n) <+ sqrt(abs(V(p, n))) + max(r, 1.0);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_intrinsics",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 1, 0, 0),
+        )
+        .expect("lower canonical intrinsics to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::Abs,
+                NativeOp::Sqrt,
+                NativeOp::LoadParam(0),
+                NativeOp::ExtremumConst(ExtremumOp::Max, 1.0),
+                NativeOp::Add,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_canonical_limexp_call_to_native_program() {
+        let source = r#"
+module mir_limexp(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ limexp(V(p, n));
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_limexp",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower canonical limexp to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::UnaryMath(UnaryMathOp::Limexp),
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_canonical_binary_intrinsic_calls_to_native_program() {
+        let source = r#"
+module mir_pow(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ pow(V(p, n), 2.0);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_pow",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower canonical binary intrinsic to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::Square,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn canonical_intrinsic_lowering_rejects_unsupported_hypot_without_fallback() {
+        let source = r#"
+module mir_hypot(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ hypot(V(p, n), 2.0);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let error = NativeProgram::from_mir_equation(
+            "mir_hypot",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect_err("unsupported canonical intrinsic must hard-fail");
+
+        assert!(
+            error.to_string().contains(
+                "native JIT does not support canonical op expression intrinsic function 'hypot'"
+            ),
             "{error}"
         );
     }
