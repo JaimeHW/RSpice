@@ -464,6 +464,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_exp_div_scaled_inputs_helper_calls(source);
     source = compact_add_sub_div_lhs_helper_calls(source);
     source = compact_add_product3_rhs_helper_calls(source);
+    source = compact_sub_add_scaled_inputs4_lhs_helper_calls(source);
     source = compact_div_ln_lhs_helper_calls(source);
     source = compact_add_sub_ln_lhs_helper_calls(source);
     source = compact_mul_div_scaled_product3_div_from_scalar_sqrt_offset_helper_calls(source);
@@ -1381,6 +1382,75 @@ fn compact_add_product3_rhs_helper_call_replacement(
     let source_index = args[1].trim().parse::<usize>().ok()?;
     let product = compact_product3_ad_expression(args[2].trim())?;
     let line = compact_add_product3_rhs_helper_line(target_index, source_index, &product)?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_sub_add_scaled_inputs4_lhs_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_sub_ad_lhs(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_sub_add_scaled_inputs4_lhs_helper_call_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_sub_add_scaled_inputs4_lhs_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_sub_ad_lhs(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let right_source = args[2].trim();
+    right_source.parse::<usize>().ok()?;
+    let inputs = compact_ad_call_args(args[1].trim(), "add_scaled_inputs4")?;
+    if inputs.len() != 8 {
+        return None;
+    }
+    let line = compact_index_or_mixed_scaled_inputs_helper_line(
+        target_index,
+        "store_sub_add_scaled_inputs4_lhs",
+        &[inputs[0], inputs[2], inputs[4], inputs[6]],
+        &[inputs[1], inputs[3], inputs[5], inputs[7]],
+        &[right_source],
+    )?;
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
     let statement_end = compact_statement_end_after_call(source, close_paren)?;
@@ -4965,6 +5035,41 @@ fn stamp() {
         assert!(!compact.contains("A::mul3("), "{compact}");
         assert!(!compact.contains("A::mul3_scaled_output("), "{compact}");
         assert!(!compact.contains("s.store_add_ad_rhs("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_sub_lhs_add_scaled_inputs4_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_sub_add_scaled_inputs4_lhs_indices",
+            "fn store_sub_add_scaled_inputs4_lhs_mixed_iaia",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_sub_ad_lhs(180, AdValue::add_scaled_inputs4(scratch.ad_value(2), params.a, scratch.ad_value(3), params.b, scratch.ad_value(4), params.c, scratch.ad_value(5), params.d), 6);
+    scratch.store_sub_ad_lhs(181, AdValue::add_scaled_inputs4(scratch.ad_value(7), params.a, AdValue::sqrt(scratch.ad_value(8)), params.b, scratch.ad_value(9), params.c, AdValue::ln(scratch.ad_value(10)), params.d), 11);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_sub_add_scaled_inputs4_lhs_indices(180, 2, p.a, 3, p.b, 4, p.c, 5, p.d, 6);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_sub_add_scaled_inputs4_lhs_mixed_iaia(181, 7, p.a, A::sqrt(s.ad_value(8)), p.b, 9, p.c, A::ln(s.ad_value(10)), p.d, 11);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::add_scaled_inputs4("), "{compact}");
+        assert!(!compact.contains("s.store_sub_ad_lhs("), "{compact}");
     }
 
     #[test]
@@ -19868,6 +19973,9 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
         out.push_str(&generate_index_or_mixed_add_scaled_inputs4_offset_helper(
             &mask,
         ));
+        out.push_str(&generate_index_or_mixed_sub_add_scaled_inputs4_lhs_helper(
+            &mask,
+        ));
         out.push_str(&generate_index_or_mixed_div_scaled_inputs3_helper(&mask));
         out.push_str(&generate_index_or_mixed_add_scaled_inputs3_div_scaled_third_helper(&mask));
     }
@@ -20478,6 +20586,40 @@ fn generate_index_or_mixed_add_scaled_inputs4_helper(mask: &str) -> String {
 fn generate_index_or_mixed_add_scaled_inputs4_offset_helper(mask: &str) -> String {
     let helper = index_or_mixed_helper_name("store_add_scaled_inputs4_offset", mask);
     generate_index_or_mixed_add_scaled_inputs4_body(mask, &helper, &["offset: f64"])
+}
+
+fn generate_index_or_mixed_sub_add_scaled_inputs4_lhs_helper(mask: &str) -> String {
+    let helper = index_or_mixed_helper_name("store_sub_add_scaled_inputs4_lhs", mask);
+    let first_value = index_or_mixed_value_expr(mask, 0, "first");
+    let first_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "first");
+    let first_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "first");
+    let second_value = index_or_mixed_value_expr(mask, 1, "second");
+    let second_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "second");
+    let second_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "second");
+    let third_value = index_or_mixed_value_expr(mask, 2, "third");
+    let third_node_derivative = index_or_mixed_node_derivative_expr(mask, 2, "third");
+    let third_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 2, "third");
+    let fourth_value = index_or_mixed_value_expr(mask, 3, "fourth");
+    let fourth_node_derivative = index_or_mixed_node_derivative_expr(mask, 3, "fourth");
+    let fourth_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 3, "fourth");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, first: {first_ty}, first_scale: f64, second: {second_ty}, second_scale: f64, third: {third_ty}, third_scale: f64, fourth: {fourth_ty}, fourth_scale: f64, source: usize) {{
+        let source_value = self.values[source];
+        let source_node_derivatives = self.node_derivatives[source];
+        let source_branch_derivatives = self.branch_derivatives[source];
+        self.values[index] = {first_value} * first_scale + {second_value} * second_scale + {third_value} * third_scale + {fourth_value} * fourth_scale - source_value;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {first_node_derivative} * first_scale + {second_node_derivative} * second_scale + {third_node_derivative} * third_scale + {fourth_node_derivative} * fourth_scale - source_node_derivatives[axis]; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {first_branch_derivative} * first_scale + {second_branch_derivative} * second_scale + {third_branch_derivative} * third_scale + {fourth_branch_derivative} * fourth_scale - source_branch_derivatives[axis]; }}
+    }}
+"#,
+        first_ty = mixed_helper_type(mask, 0),
+        second_ty = mixed_helper_type(mask, 1),
+        third_ty = mixed_helper_type(mask, 2),
+        fourth_ty = mixed_helper_type(mask, 3),
+    )
 }
 
 fn generate_index_or_mixed_add_scaled_inputs4_body(
