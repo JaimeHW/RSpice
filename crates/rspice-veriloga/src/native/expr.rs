@@ -699,6 +699,9 @@ impl NativeProgram {
                     if lower_constant_rhs_compare(&mut ops, compare_op(instruction)) {
                         continue;
                     }
+                    if lower_constant_lhs_compare(&mut ops, compare_op(instruction)) {
+                        continue;
+                    }
                     ops.push(NativeOp::Compare(compare_op(instruction)));
                 }
                 Instruction::And | Instruction::Or => {
@@ -1065,6 +1068,24 @@ fn lower_constant_rhs_compare(ops: &mut Vec<NativeOp>, op: CompareOp) -> bool {
     true
 }
 
+fn lower_constant_lhs_compare(ops: &mut Vec<NativeOp>, op: CompareOp) -> bool {
+    if ops.len() < 2 {
+        return false;
+    }
+    let rhs_index = ops.len() - 1;
+    if !is_independent_value_push(&ops[rhs_index]) {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let NativeOp::Const(value) = ops[lhs_index] else {
+        return false;
+    };
+    ops.remove(lhs_index);
+    ops.push(NativeOp::CompareConst(flip_compare_op(op), value));
+    true
+}
+
 fn lower_constant_rhs_extremum(ops: &mut Vec<NativeOp>, op: ExtremumOp) -> bool {
     let Some(NativeOp::Const(value)) = ops.last().copied() else {
         return false;
@@ -1085,6 +1106,10 @@ fn lower_constant_rhs_logical(ops: &mut Vec<NativeOp>, op: LogicalOp) -> bool {
 
 fn constant_truthy(value: f64) -> bool {
     value.abs() > LOGICAL_EPSILON
+}
+
+fn is_independent_value_push(op: &NativeOp) -> bool {
+    !matches!(op, NativeOp::Const(_)) && native_op_stack_effect(op) == (0, 1)
 }
 
 fn compute_native_max_stack_depth(
@@ -1323,6 +1348,17 @@ fn compare_op(instruction: &Instruction) -> CompareOp {
         Instruction::Eq => CompareOp::Eq,
         Instruction::Ne => CompareOp::Ne,
         _ => unreachable!("comparison lowering only accepts ordered comparison instructions"),
+    }
+}
+
+fn flip_compare_op(op: CompareOp) -> CompareOp {
+    match op {
+        CompareOp::Gt => CompareOp::Lt,
+        CompareOp::Lt => CompareOp::Gt,
+        CompareOp::Ge => CompareOp::Le,
+        CompareOp::Le => CompareOp::Ge,
+        CompareOp::Eq => CompareOp::Eq,
+        CompareOp::Ne => CompareOp::Ne,
     }
 }
 
@@ -1666,6 +1702,56 @@ mod tests {
                     .iter()
                     .any(|op| matches!(op, NativeOp::Const(value) if value.to_bits() == 300.0_f64.to_bits())),
                 "{expected:?} should consume the RHS literal in the compare op"
+            );
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::CompareConst(expected, 300.0)
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_constant_lhs_comparisons_without_extra_stack_slot() {
+        let cases = [
+            (Instruction::Gt, CompareOp::Lt),
+            (Instruction::Lt, CompareOp::Gt),
+            (Instruction::Ge, CompareOp::Le),
+            (Instruction::Le, CompareOp::Ge),
+            (Instruction::Eq, CompareOp::Eq),
+            (Instruction::Ne, CompareOp::Ne),
+        ];
+
+        for (instruction, expected) in cases {
+            let instruction_name = format!("{instruction:?}");
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(300.0),
+                    Instruction::PushTemperature,
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "cmp-literal-lhs",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant LHS comparison has a direct native lowering");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{instruction_name} should not allocate a second XMM stack slot for LHS constants"
+            );
+            assert!(
+                !lowered.ops().iter().any(
+                    |op| matches!(op, NativeOp::Const(value) if value.to_bits() == 300.0_f64.to_bits())
+                ),
+                "{expected:?} should consume the LHS literal in the compare op"
             );
             assert_eq!(
                 lowered.ops(),
