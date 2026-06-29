@@ -2369,7 +2369,7 @@ mod tests {
     fn generated_value_leaf_with_helper_call_emits_saved_arg_prologue() {
         let program = native_program(
             EntryKind::StampValue,
-            vec![Instruction::PushConst(1.0), Instruction::Exp],
+            vec![Instruction::PushTemperature, Instruction::Exp],
             0,
         );
 
@@ -4954,6 +4954,88 @@ mod tests {
             assert_eq!(
                 f(&ctx, vars.as_ptr()).to_bits(),
                 (310.0 + ((unary_expected + 7.0) + 2.0)).to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_folds_constant_unary_math_to_literals() {
+        let cases = [
+            ("exp", Instruction::Exp, 0.5, runtime_exp(0.5)),
+            ("log", Instruction::Log, 2.5, runtime_log(2.5)),
+            ("log10", Instruction::Log10, 100.0, runtime_log10(100.0)),
+            ("sin", Instruction::Sin, 0.5, runtime_sin(0.5)),
+            ("cos", Instruction::Cos, 0.5, runtime_cos(0.5)),
+            ("tan", Instruction::Tan, 0.25, runtime_tan(0.25)),
+            ("sinh", Instruction::Sinh, 0.25, runtime_sinh(0.25)),
+            ("cosh", Instruction::Cosh, 0.25, runtime_cosh(0.25)),
+            ("tanh", Instruction::Tanh, 0.25, runtime_tanh(0.25)),
+            (
+                "limexp-linear",
+                Instruction::Limexp,
+                45.0,
+                runtime_limexp(45.0),
+            ),
+            (
+                "limexp-negative",
+                Instruction::Limexp,
+                -50.0,
+                runtime_limexp(-50.0),
+            ),
+            ("asin", Instruction::Asin, 0.25, runtime_asin(0.25)),
+            ("asin-domain-nan", Instruction::Asin, 2.0, runtime_asin(2.0)),
+            ("acos", Instruction::Acos, 0.25, runtime_acos(0.25)),
+            ("atan", Instruction::Atan, 0.25, runtime_atan(0.25)),
+            ("floor", Instruction::Floor, 3.75, runtime_floor(3.75)),
+            (
+                "floor-negative",
+                Instruction::Floor,
+                -3.25,
+                runtime_floor(-3.25),
+            ),
+            ("ceil", Instruction::Ceil, 3.25, runtime_ceil(3.25)),
+            (
+                "ceil-negative",
+                Instruction::Ceil,
+                -3.75,
+                runtime_ceil(-3.75),
+            ),
+        ];
+
+        for (name, instruction, input, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![Instruction::PushConst(input), instruction],
+                0,
+            );
+
+            assert_eq!(program.max_stack_depth(), 1, "{name}");
+            match program.ops() {
+                [NativeOp::Const(value)] => assert_eq!(
+                    value.to_bits(),
+                    expected.to_bits(),
+                    "{name} should compile as the helper-equivalent folded literal"
+                ),
+                other => panic!("{name} should compile as one folded literal, got {other:?}"),
+            }
+
+            let bytes = compile_value_function(&program).expect("compile folded unary math leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "folded unary math should stay helper-free"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate folded unary math leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
                 "{name}"
             );
         }
