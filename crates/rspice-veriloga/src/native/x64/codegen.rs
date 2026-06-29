@@ -171,6 +171,7 @@ impl FunctionCompiler {
     }
 
     fn emit_program(&mut self, program: &NativeProgram) -> JitResult<()> {
+        program.validate_dependency_metadata()?;
         if program.max_stack_depth() > XMM_STACK.len() {
             return Err(register_allocation_error(format!(
                 "expression stack depth {} exceeds {} XMM registers",
