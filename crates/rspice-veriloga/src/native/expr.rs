@@ -1969,6 +1969,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 "cross" => self.lower_cross_call(expression.id, args.as_slice()),
                 "above" => self.lower_above_call(expression.id, args.as_slice()),
                 "timer" => self.lower_timer_call(expression.id, args.as_slice()),
+                "ddx" => self.lower_ddx_call(args.as_slice()),
                 _ => self.lower_intrinsic_call(name.as_str(), args.as_slice()),
             },
             HirExprKind::AnalogOperator { op } => self.lower_analog_operator(expression.id, op),
@@ -2051,6 +2052,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 delay,
                 max_delay,
             } => self.lower_absdelay_operator(expr_id, *expr, Some(*delay), *max_delay),
+            HirAnalogOperator::Ddx { expr, .. } => self.lower_ddx_operator(*expr),
             HirAnalogOperator::Limexp { expr } => {
                 self.lower(*expr)?;
                 if lower_constant_unary_math(&mut self.ops, UnaryMathOp::Limexp) {
@@ -2061,6 +2063,20 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             _ => Err(self.unsupported(format!("analog operator {}", analog_operator_name(op)))),
         }
+    }
+
+    fn lower_ddx_call(&mut self, args: &[ExprId]) -> JitResult<()> {
+        let [expr, _probe] = args else {
+            return Err(self.unsupported(format!(
+                "analog operator ddx expects two operands, found {}",
+                args.len()
+            )));
+        };
+        self.lower_ddx_operator(*expr)
+    }
+
+    fn lower_ddx_operator(&mut self, expr: ExprId) -> JitResult<()> {
+        self.lower(expr)
     }
 
     fn lower_ddt_operator(
