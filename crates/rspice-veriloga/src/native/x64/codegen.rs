@@ -3425,8 +3425,8 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_applies_constant_lhs_sub_div_without_extra_stack_slot() {
-        let temp_sub_rsp = [0x48, 0x81, 0xEC, 0x10, 0x00, 0x00, 0x00];
-        let temp_add_rsp = [0x48, 0x81, 0xC4, 0x10, 0x00, 0x00, 0x00];
+        let temp_sub_rsp = sub_rsp_bytes(ROUND_TEMP_FRAME_BYTES);
+        let temp_add_rsp = add_rsp_bytes(ROUND_TEMP_FRAME_BYTES);
         let cases = [
             (
                 "sub-finite",
@@ -3522,8 +3522,8 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_applies_constant_lhs_arithmetic_at_full_xmm_stack_depth() {
-        let temp_sub_rsp = [0x48, 0x81, 0xEC, 0x10, 0x00, 0x00, 0x00];
-        let temp_add_rsp = [0x48, 0x81, 0xC4, 0x10, 0x00, 0x00, 0x00];
+        let temp_sub_rsp = sub_rsp_bytes(ROUND_TEMP_FRAME_BYTES);
+        let temp_add_rsp = add_rsp_bytes(ROUND_TEMP_FRAME_BYTES);
         let cases = [
             ("sub", Instruction::Sub, 4.0_f64, 10.0_f64 - 4.0_f64),
             ("div", Instruction::Div, 4.0_f64, 10.0_f64 / 4.0_f64),
@@ -7942,17 +7942,15 @@ mod tests {
     }
 
     fn sub_rsp_bytes(value: i32) -> Vec<u8> {
-        rsp_adjust_bytes(0xEC, value)
+        let mut encoder = X64Encoder::new();
+        encoder.sub_rsp_imm32(value);
+        encoder.into_bytes()
     }
 
     fn add_rsp_bytes(value: i32) -> Vec<u8> {
-        rsp_adjust_bytes(0xC4, value)
-    }
-
-    fn rsp_adjust_bytes(opcode: u8, value: i32) -> Vec<u8> {
-        let mut bytes = vec![0x48, 0x81, opcode];
-        bytes.extend_from_slice(&value.to_le_bytes());
-        bytes
+        let mut encoder = X64Encoder::new();
+        encoder.add_rsp_imm32(value);
+        encoder.into_bytes()
     }
 
     fn count_bytes(bytes: &[u8], needle: &[u8]) -> usize {
