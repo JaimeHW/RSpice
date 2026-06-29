@@ -1222,6 +1222,21 @@ endmodule
                 Some("bsimcmg_va"),
             ),
             (
+                "bsimimg",
+                shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
+                Some("bsimimg"),
+            ),
+            (
+                "hisimsoi",
+                shipped_cmc_model_path(&[
+                    "HiSIM_SOI_1.5.0_Release_20211008",
+                    "HiSIM_SOI_1.5.0_VA-Code",
+                    "hisimsoi_va",
+                    "hisimsoi.va",
+                ]),
+                Some("hisimsoi_va"),
+            ),
+            (
                 "asmhemt",
                 shipped_cmc_model_path(&["ASM-HEMT101.6.0_05132026", "vacode", "asmhemt.va"]),
                 Some("asmhemt"),
@@ -1597,6 +1612,10 @@ endmodule
     fn shipped_device_terminal_bias(name: &str, terminal: usize) -> f64 {
         match name {
             "bsimcmg" => [0.05, 0.7, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "bsimimg" | "hisimsoi" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0]
                 .get(terminal)
                 .copied()
                 .unwrap_or(0.0),
