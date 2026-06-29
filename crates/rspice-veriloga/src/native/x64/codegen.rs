@@ -1,14 +1,13 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
-    rspice_absdelay_state_native, rspice_acos, rspice_asin, rspice_atan, rspice_atan2,
-    rspice_bitand, rspice_bitor, rspice_bitxor, rspice_ceil, rspice_cos, rspice_cosh,
-    rspice_cross_state_native, rspice_dynamic_variable_load_native,
+    rspice_absdelay_state_native, rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_ceil,
+    rspice_cos, rspice_cosh, rspice_cross_state_native, rspice_dynamic_variable_load_native,
     rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_idtmod_wrap,
     rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10, rspice_mod,
-    rspice_native_loop_limit_error, rspice_pow, rspice_shl, rspice_shr, rspice_sin, rspice_sinh,
-    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
-    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
-    rspice_zi_step_native,
+    rspice_native_integer_shift_count_error, rspice_native_loop_limit_error, rspice_pow,
+    rspice_sin, rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
+    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
+    rspice_transition_state_native, rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -1059,13 +1058,70 @@ impl FunctionCompiler {
 
         let left = XMM_STACK[self.depth - 2];
         let right = XMM_STACK[self.depth - 1];
-        if integer_binary_uses_helper(op) {
-            self.emit_binary_helper_call(left, right, integer_binary_helper(op));
-        } else {
-            self.emit_integer_bitwise_op(left, right, op)?;
+        match op {
+            IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
+                self.emit_integer_shift_op(left, right, op)?
+            }
+            IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
+                self.emit_integer_bitwise_op(left, right, op)?
+            }
         }
         self.depth -= 1;
         Ok(())
+    }
+
+    fn emit_integer_shift_op(
+        &mut self,
+        left: Xmm,
+        right: Xmm,
+        op: IntegerBinaryOp,
+    ) -> JitResult<()> {
+        #[cfg(windows)]
+        let restore_entry_ctx = !self.saves_entry_args();
+        #[cfg(windows)]
+        if restore_entry_ctx {
+            self.encoder.mov_r64_r64(Gpr::R10, entry_ctx_arg_reg());
+        }
+
+        self.emit_rust_f64_to_i64(left, Gpr::Rax)?;
+        self.emit_rust_f64_to_i64(right, Gpr::Rcx)?;
+        self.encoder.test_r64_r64(Gpr::Rcx, Gpr::Rcx);
+        let negative_count = self.encoder.jcc_rel32_placeholder(ConditionCode::Negative);
+        self.encoder.cmp_r64_imm32(Gpr::Rcx, 64);
+        let too_large_count = self
+            .encoder
+            .jcc_rel32_placeholder(ConditionCode::AboveOrEqual);
+        match op {
+            IntegerBinaryOp::Shl => self.encoder.shl_r64_cl(Gpr::Rax),
+            IntegerBinaryOp::Shr => self.encoder.sar_r64_cl(Gpr::Rax),
+            IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
+                unreachable!("bitwise integer ops use emit_integer_bitwise_op")
+            }
+        }
+        #[cfg(windows)]
+        if restore_entry_ctx {
+            self.encoder.mov_r64_r64(entry_ctx_arg_reg(), Gpr::R10);
+        }
+        self.encoder.cvtsi2sd_xmm_r64(left, Gpr::Rax);
+        let valid_count_done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(negative_count)?;
+        self.patch_rel32_to_current(too_large_count)?;
+        self.emit_integer_shift_count_error_return();
+        self.patch_rel32_to_current(valid_count_done)?;
+        Ok(())
+    }
+
+    fn emit_integer_shift_count_error_return(&mut self) {
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let helper: VoidHelper = rspice_native_integer_shift_count_error;
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.xorpd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm0);
+        let return_after_error = self.encoder.jmp_rel32_placeholder();
+        self.early_return_jumps.push(return_after_error);
     }
 
     fn emit_integer_bitwise_op(
@@ -1081,7 +1137,7 @@ impl FunctionCompiler {
             IntegerBinaryOp::BitOr => self.encoder.or_r64_r64(Gpr::Rax, Gpr::R11),
             IntegerBinaryOp::BitXor => self.encoder.xor_r64_r64(Gpr::Rax, Gpr::R11),
             IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
-                unreachable!("shift integer ops stay on the helper path")
+                unreachable!("shift integer ops use emit_integer_shift_op")
             }
         }
         self.encoder.cvtsi2sd_xmm_r64(left, Gpr::Rax);
@@ -2325,16 +2381,6 @@ fn binary_math_helper(op: BinaryMathOp) -> BinaryHelper {
     }
 }
 
-fn integer_binary_helper(op: IntegerBinaryOp) -> BinaryHelper {
-    match op {
-        IntegerBinaryOp::Shl => rspice_shl,
-        IntegerBinaryOp::Shr => rspice_shr,
-        IntegerBinaryOp::BitAnd => rspice_bitand,
-        IntegerBinaryOp::BitOr => rspice_bitor,
-        IntegerBinaryOp::BitXor => rspice_bitxor,
-    }
-}
-
 fn call_spill_disp(index: usize) -> i32 {
     CALL_SHADOW_BYTES + (index * WORD_BYTES) as i32
 }
@@ -2362,10 +2408,6 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
         ) || matches!(op, NativeOp::UnaryMath(op) if unary_math_uses_helper(*op))
             || matches!(
                 op,
-                NativeOp::IntegerBinary(integer_op) if integer_binary_uses_helper(*integer_op)
-            )
-            || matches!(
-                op,
                 NativeOp::LoadVariableDyn { len, lower, .. }
                     if !dynamic_variable_inline_supported(*len, *lower)
             )
@@ -2374,10 +2416,6 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
 
 fn unary_math_uses_helper(op: UnaryMathOp) -> bool {
     !matches!(op, UnaryMathOp::Floor | UnaryMathOp::Ceil)
-}
-
-fn integer_binary_uses_helper(op: IntegerBinaryOp) -> bool {
-    matches!(op, IntegerBinaryOp::Shl | IntegerBinaryOp::Shr)
 }
 
 fn dynamic_variable_inline_supported(len: usize, lower: i64) -> bool {
@@ -5013,7 +5051,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_value_leaf_calls_integer_shift_helpers_and_preserves_state() {
+    fn generated_value_leaf_computes_runtime_shifts_without_helper_call() {
         let cases = [
             ("shl", Instruction::Shl, 3.0, 2.0, runtime_shl(3.0, 2.0)),
             (
@@ -5041,12 +5079,12 @@ mod tests {
                 ],
                 0,
             );
-            let bytes = compile_value_function(&program).expect("compile integer helper leaf");
+            let bytes = compile_value_function(&program).expect("compile integer shift leaf");
             assert!(
-                bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
-                "{name}: runtime shifts should stay on the helper path until shift-count semantics are inlined"
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "{name}: runtime shifts should not pay helper-call prologue"
             );
-            let memory = ExecutableMemory::allocate(&bytes).expect("allocate integer helper leaf");
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate integer shift leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
@@ -5055,10 +5093,55 @@ mod tests {
             ctx.time = 2.0;
             let vars = [7.0_f64];
 
+            clear_native_runtime_error();
             assert_eq!(
                 f(&ctx, vars.as_ptr()).to_bits(),
                 (310.0 + ((7.0 + integer_expected) + 2.0)).to_bits(),
                 "{name}"
+            );
+            assert!(
+                take_native_runtime_error().is_none(),
+                "{name}: valid runtime shift count should not report a native runtime error"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_runtime_shifts_hard_fail_invalid_counts_without_helper_call() {
+        let cases = [
+            ("shl-negative-count", Instruction::Shl, 3.0, -1.0),
+            ("shr-too-large-count", Instruction::Shr, -16.0, 64.0),
+        ];
+
+        for (name, op, left, right) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![Instruction::PushParam(0), Instruction::PushParam(1), op],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile integer shift leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "{name}: invalid runtime shifts should not require the helper-call prologue"
+            );
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate integer shift leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[left, right], &[], &[], &[]);
+
+            clear_native_runtime_error();
+            let result = f(&ctx, std::ptr::null());
+
+            assert_eq!(result.to_bits(), 0.0_f64.to_bits(), "{name}");
+            let error = take_native_runtime_error().expect("invalid shift count must hard-fail");
+            assert!(
+                error.contains("integer shift count"),
+                "{name}: error must identify shift-count failure, got: {error}"
+            );
+            assert!(
+                error.contains("no interpreter fallback"),
+                "{name}: error must preserve the native hard-fail contract, got: {error}"
             );
         }
     }
