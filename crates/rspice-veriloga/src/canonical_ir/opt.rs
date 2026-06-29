@@ -872,8 +872,22 @@ impl<'a> ScalarGraphBuilder<'a> {
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Ddt { expr, abstol: None },
             } => self.lower_expression(*expr),
+            HirExprKind::AnalogOperator {
+                op:
+                    HirAnalogOperator::Idt {
+                        expr,
+                        assert: None,
+                        abstol: None,
+                        ..
+                    },
+            } => self.lower_expression(*expr),
             HirExprKind::Call { name, args }
                 if name.eq_ignore_ascii_case("ddt") && args.len() == 1 =>
+            {
+                self.lower_expression(args[0])
+            }
+            HirExprKind::Call { name, args }
+                if name.eq_ignore_ascii_case("idt") && (1..=2).contains(&args.len()) =>
             {
                 self.lower_expression(args[0])
             }

@@ -29,6 +29,7 @@ const COMPACT_EQUATION_EXPR_NODE_THRESHOLD: usize = 32;
 struct ScalarHybridStampPlan {
     large_signal_roots: HashMap<EquationId, ValueId>,
     ddt_roots: HashMap<EquationId, ValueId>,
+    idt_roots: HashMap<EquationId, ValueId>,
     static_cache: super::scalar::ScalarStaticCache,
 }
 
@@ -37,6 +38,7 @@ impl ScalarHybridStampPlan {
         self.large_signal_roots
             .keys()
             .chain(self.ddt_roots.keys())
+            .chain(self.idt_roots.keys())
             .copied()
             .collect()
     }
@@ -45,12 +47,15 @@ impl ScalarHybridStampPlan {
         self.large_signal_roots
             .iter()
             .chain(self.ddt_roots.iter())
+            .chain(self.idt_roots.iter())
             .map(|(equation, root)| (*equation, *root))
             .collect()
     }
 
     fn has_transient_equation(&self, equation: EquationId) -> bool {
-        self.large_signal_roots.contains_key(&equation) || self.ddt_roots.contains_key(&equation)
+        self.large_signal_roots.contains_key(&equation)
+            || self.ddt_roots.contains_key(&equation)
+            || self.idt_roots.contains_key(&equation)
     }
 
     fn has_reactive_equation(&self, equation: EquationId) -> bool {
@@ -88,8 +93,8 @@ impl StampCommonUsage {
         StampHelperCommonUsage {
             ctx: block.contains("ctx"),
             stamper: block.contains("stamper."),
-            scratch: block.contains("scratch.") || block.contains("s."),
-            params: block.contains("params.") || block.contains("p."),
+            scratch: block_uses_path_alias(block, "scratch") || block_uses_path_alias(block, "s"),
+            params: block_uses_path_alias(block, "params") || block_uses_path_alias(block, "p"),
             nodes: block.contains("self.nodes")
                 || block.contains("nodes[")
                 || block.contains("nodes,"),
@@ -147,54 +152,71 @@ fn stamp_helper_call_args(
     common_usage: StampHelperCommonUsage,
     operator_usage: StampOperatorUsage,
 ) -> String {
+    stamp_helper_call_args_with_locals(common_usage, operator_usage, &LocalHelperUsage::default())
+}
+
+fn stamp_helper_call_args_with_locals(
+    common_usage: StampHelperCommonUsage,
+    operator_usage: StampOperatorUsage,
+    local_usage: &LocalHelperUsage,
+) -> String {
+    let mut args = stamp_helper_base_call_args(common_usage, operator_usage);
+    args.extend(stamp_helper_local_call_args(local_usage));
+    args.join(", ")
+}
+
+fn stamp_helper_base_call_args(
+    common_usage: StampHelperCommonUsage,
+    operator_usage: StampOperatorUsage,
+) -> Vec<String> {
     let mut args = Vec::new();
     if common_usage.ctx {
-        args.push("ctx");
+        args.push("ctx".to_string());
     }
     if common_usage.stamper {
-        args.push("stamper");
+        args.push("stamper".to_string());
     }
     if common_usage.scratch {
-        args.push("s");
+        args.push("s".to_string());
     }
     if common_usage.params {
-        args.push("p");
+        args.push("p".to_string());
     }
     if common_usage.nodes {
-        args.push("nodes");
+        args.push("nodes".to_string());
     }
     if common_usage.branches {
-        args.push("branches");
+        args.push("branches".to_string());
     }
     if common_usage.param_given {
-        args.push("param_given");
+        args.push("param_given".to_string());
     }
     if common_usage.multiplicity {
-        args.push("multiplicity");
+        args.push("multiplicity".to_string());
     }
     if common_usage.time {
-        args.push("time");
+        args.push("time".to_string());
     }
     if operator_usage.has_any() {
-        args.push("ddt_active");
+        args.push("ddt_active".to_string());
     }
     if operator_usage.ddt {
-        args.push("ddt_scale");
+        args.push("ddt_scale".to_string());
     }
     if operator_usage.idt {
-        args.push("idt_scale");
+        args.push("idt_scale".to_string());
     }
     if operator_usage.ddt {
-        args.push("ddt_state_current");
-        args.push("ddt_state_previous");
-        args.push("ddt_state_initialized");
+        args.push("ddt_state_current".to_string());
+        args.push("ddt_state_previous".to_string());
+        args.push("ddt_state_initialized".to_string());
     }
     if operator_usage.idt {
-        args.push("idt_state_current");
-        args.push("idt_state_previous");
-        args.push("idt_state_initialized");
+        args.push("idt_state_current".to_string());
+        args.push("idt_state_previous".to_string());
+        args.push("idt_state_initialized".to_string());
     }
-    args.join(", ")
+    args
 }
 
 fn stamp_helper_common_params(
@@ -229,6 +251,54 @@ fn stamp_helper_common_params(
     }
     if common_usage.time {
         params.push_str("        time: f64,\n");
+    }
+    params
+}
+
+fn stamp_helper_params_with_locals(
+    common_usage: StampHelperCommonUsage,
+    operator_usage: StampOperatorUsage,
+    local_usage: &LocalHelperUsage,
+    stamper_type: &str,
+    scratch_type: &str,
+) -> String {
+    let mut params = stamp_helper_common_params(common_usage, stamper_type, scratch_type);
+    params.push_str(&stamp_helper_operator_params(operator_usage));
+    params.push_str(&stamp_helper_local_params(local_usage));
+    params
+}
+
+#[derive(Debug, Clone, Default)]
+struct LocalHelperUsage {
+    read_only: Vec<String>,
+    mutable: Vec<String>,
+}
+
+impl LocalHelperUsage {
+    fn is_empty(&self) -> bool {
+        self.read_only.is_empty() && self.mutable.is_empty()
+    }
+}
+
+fn stamp_helper_local_call_args(local_usage: &LocalHelperUsage) -> Vec<String> {
+    let mut args = Vec::new();
+    args.extend(local_usage.read_only.iter().cloned());
+    args.extend(
+        local_usage
+            .mutable
+            .iter()
+            .map(|name| format!("&mut {name}")),
+    );
+    args
+}
+
+fn stamp_helper_local_params(local_usage: &LocalHelperUsage) -> String {
+    let mut params = String::new();
+    for name in &local_usage.read_only {
+        params.push_str(&format!("        {name}: f64,\n"));
+    }
+    for name in &local_usage.mutable {
+        params.push_str(&format!("        {name}_slot: &mut f64,\n"));
     }
     params
 }
@@ -276,25 +346,13 @@ pub(super) fn generate_hybrid_device(
             format!("invalid scalar OptIR: {diagnostics:?}"),
         )
     })?;
-    let equation_inline = equation_inline_plan(artifact)?;
-    let current_roots = exclude_legacy_branch_current_ordered_roots(
-        artifact,
-        super::scalar::scalarizable_current_equation_roots(artifact)?,
-        &equation_inline,
-    )?;
-    let potential_roots = exclude_legacy_branch_current_ordered_roots(
-        artifact,
-        super::scalar::scalarizable_potential_equation_roots(artifact)?,
-        &equation_inline,
-    )?;
+    let current_roots = super::scalar::scalarizable_current_equation_roots(artifact)?;
+    let potential_roots = super::scalar::scalarizable_potential_equation_roots(artifact)?;
     let large_signal_roots: HashMap<_, _> =
         current_roots.into_iter().chain(potential_roots).collect();
-    let ddt_roots = exclude_legacy_branch_current_ordered_roots(
-        artifact,
-        super::scalar::scalarizable_ddt_current_equation_roots(artifact)?,
-        &equation_inline,
-    )?;
-    if large_signal_roots.is_empty() && ddt_roots.is_empty() {
+    let ddt_roots = super::scalar::scalarizable_ddt_current_equation_roots(artifact)?;
+    let idt_roots = super::scalar::scalarizable_idt_equation_roots(artifact)?;
+    if large_signal_roots.is_empty() && ddt_roots.is_empty() && idt_roots.is_empty() {
         return Err(unsupported(
             artifact,
             "no scalarizable hybrid current equations",
@@ -303,39 +361,17 @@ pub(super) fn generate_hybrid_device(
     let scalar_cache_roots: HashMap<_, _> = large_signal_roots
         .iter()
         .chain(ddt_roots.iter())
+        .chain(idt_roots.iter())
         .map(|(equation, root)| (*equation, *root))
         .collect();
     let static_cache = super::scalar::ScalarStaticCache::from_roots(artifact, &scalar_cache_roots)?;
     let scalar_hybrid_plan = ScalarHybridStampPlan {
         large_signal_roots,
         ddt_roots,
+        idt_roots,
         static_cache,
     };
     generate_device_with_scalar_hybrid_plan(artifact, options, Some(&scalar_hybrid_plan))
-}
-
-fn exclude_legacy_branch_current_ordered_roots(
-    artifact: &CanonicalIrArtifact,
-    mut roots: HashMap<EquationId, ValueId>,
-    equation_inline: &[bool],
-) -> Result<HashMap<EquationId, ValueId>, RustBackendError> {
-    if equation_inline.len() != artifact.mir.equations.len() {
-        return Err(RustBackendError::internal(
-            artifact.metadata.source_package.as_str(),
-            artifact.mir.module_name.as_str(),
-            "equation inline plan length does not match MIR equation count",
-        ));
-    }
-
-    let legacy_ordered_equations: HashSet<_> = artifact
-        .mir
-        .equations
-        .iter()
-        .enumerate()
-        .filter_map(|(index, equation)| equation_inline[index].then_some(equation.id))
-        .collect();
-    roots.retain(|equation, _root| !legacy_ordered_equations.contains(equation));
-    Ok(roots)
 }
 
 fn generate_device_with_scalar_hybrid_plan(
@@ -11122,6 +11158,13 @@ fn collect_transient_liveness_excluding(
 struct ReactiveLiveness {
     variables: HashSet<String>,
     equations: HashSet<EquationId>,
+    dynamic: DynamicDependencies,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DynamicDependencies {
+    variables: HashSet<String>,
+    branch_currents: HashSet<String>,
 }
 
 impl ReactiveLiveness {
@@ -11160,7 +11203,7 @@ fn collect_reactive_liveness_excluding(
     artifact: &CanonicalIrArtifact,
     excluded_equations: &HashSet<EquationId>,
 ) -> Result<ReactiveLiveness, RustBackendError> {
-    let dynamic_variables = collect_dynamic_variables(artifact)?;
+    let dynamic = collect_dynamic_dependencies(artifact)?;
     let mut live_variables = HashSet::new();
     let mut reactive_equations = HashSet::new();
 
@@ -11171,7 +11214,7 @@ fn collect_reactive_liveness_excluding(
         if expr_depends_on_ddt_or_dynamic(
             artifact,
             equation.expression.id,
-            &dynamic_variables,
+            &dynamic,
             &mut HashSet::new(),
         )? {
             reactive_equations.insert(equation.id);
@@ -11197,37 +11240,37 @@ fn collect_reactive_liveness_excluding(
     Ok(ReactiveLiveness {
         variables: live_variables,
         equations: reactive_equations,
+        dynamic,
     })
 }
 
-fn collect_dynamic_variables(
+fn collect_dynamic_dependencies(
     artifact: &CanonicalIrArtifact,
-) -> Result<HashSet<String>, RustBackendError> {
-    let mut dynamic_variables = HashSet::new();
+) -> Result<DynamicDependencies, RustBackendError> {
+    let mut dynamic = DynamicDependencies::default();
     loop {
-        let mut next = dynamic_variables.clone();
-        let mut changed = false;
+        let before = dynamic.variables.len() + dynamic.branch_currents.len();
+        let current = dynamic.clone();
         collect_dynamic_statement_targets(
             artifact,
             &artifact.hir.statements,
-            &dynamic_variables,
-            &mut changed,
-            &mut next,
+            &current,
+            &mut dynamic.variables,
         )?;
-        if !changed {
+        collect_dynamic_branch_current_targets(artifact, &current, &mut dynamic.branch_currents)?;
+        let after = dynamic.variables.len() + dynamic.branch_currents.len();
+        if after == before {
             break;
         }
-        dynamic_variables = next;
     }
-    Ok(dynamic_variables)
+    Ok(dynamic)
 }
 
 fn collect_dynamic_statement_targets(
     artifact: &CanonicalIrArtifact,
     statements: &[HirStatement],
-    current: &HashSet<String>,
-    changed: &mut bool,
-    next: &mut HashSet<String>,
+    current: &DynamicDependencies,
+    next_variables: &mut HashSet<String>,
 ) -> Result<(), RustBackendError> {
     for statement in statements {
         match statement {
@@ -11237,9 +11280,8 @@ fn collect_dynamic_statement_targets(
                     assignment.expr.id,
                     current,
                     &mut HashSet::new(),
-                )? && next.insert(assignment.target_name.to_string())
-                {
-                    *changed = true;
+                )? {
+                    next_variables.insert(assignment.target_name.to_string());
                 }
             }
             HirStatement::Loop(loop_statement) => {
@@ -11247,10 +11289,31 @@ fn collect_dynamic_statement_targets(
                     artifact,
                     &loop_statement.body,
                     current,
-                    changed,
-                    next,
+                    next_variables,
                 )?;
             }
+        }
+    }
+    Ok(())
+}
+
+fn collect_dynamic_branch_current_targets(
+    artifact: &CanonicalIrArtifact,
+    current: &DynamicDependencies,
+    next_branch_currents: &mut HashSet<String>,
+) -> Result<(), RustBackendError> {
+    for equation in &artifact.mir.equations {
+        if equation.kind != MirEquationKind::Current {
+            continue;
+        }
+        if expr_depends_on_ddt_or_dynamic(
+            artifact,
+            equation.expression.id,
+            current,
+            &mut HashSet::new(),
+        )? && let Some(name) = declared_contribution_branch_name(artifact, equation)
+        {
+            next_branch_currents.insert(name);
         }
     }
     Ok(())
@@ -11432,7 +11495,7 @@ fn statement_contains_live_assignment(
 fn expr_depends_on_ddt_or_dynamic(
     artifact: &CanonicalIrArtifact,
     id: ExprId,
-    dynamic_variables: &HashSet<String>,
+    dynamic: &DynamicDependencies,
     visited: &mut HashSet<ExprId>,
 ) -> Result<bool, RustBackendError> {
     if !visited.insert(id) {
@@ -11451,7 +11514,10 @@ fn expr_depends_on_ddt_or_dynamic(
         })?;
 
     match &expression.kind {
-        HirExprKind::Identifier { name } => Ok(dynamic_variables.contains(name.as_str())),
+        HirExprKind::Identifier { name } => Ok(dynamic.variables.contains(name.as_str())),
+        HirExprKind::NamedBranchAccess { access, name } if access.as_str() == "I" => {
+            Ok(dynamic.branch_currents.contains(name.as_str()))
+        }
         HirExprKind::Call { name, .. }
             if is_ddt_name(name.as_str()) || is_idt_name(name.as_str()) =>
         {
@@ -11465,7 +11531,7 @@ fn expr_depends_on_ddt_or_dynamic(
         } => Ok(true),
         other => {
             for child in expression_children(other) {
-                if expr_depends_on_ddt_or_dynamic(artifact, child, dynamic_variables, visited)? {
+                if expr_depends_on_ddt_or_dynamic(artifact, child, dynamic, visited)? {
                     return Ok(true);
                 }
             }
@@ -24042,10 +24108,156 @@ fn scalarized_potential_branch_slots(
         .iter()
         .filter(|equation| {
             equation.kind == MirEquationKind::Potential
-                && plan.large_signal_roots.contains_key(&equation.id)
+                && (plan.large_signal_roots.contains_key(&equation.id)
+                    || plan.idt_roots.contains_key(&equation.id))
         })
         .filter_map(|equation| potential_branch_slots.slot_for(equation.id))
         .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn residual_equations_use_scratch_with_local_variables(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    ddt_slots: &DdtSlots,
+    potential_branch_slots: &PotentialBranchSlots,
+    reactive: bool,
+    scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
+    equation_inline: &[bool],
+    variables: &HashMap<String, LoweredVariable>,
+) -> Result<bool, RustBackendError> {
+    if reactive {
+        return Ok(false);
+    }
+
+    let mut branch_currents = HashMap::new();
+    if let Some(plan) = scalar_hybrid_plan {
+        seed_scalar_hybrid_branch_current_cache(
+            artifact,
+            plan,
+            ddt_slots,
+            potential_branch_slots,
+            &mut branch_currents,
+        )?;
+    }
+
+    for (index, equation) in artifact.mir.equations.iter().enumerate() {
+        if scalar_hybrid_plan
+            .map(|plan| plan.has_transient_equation(equation.id))
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        if equation.kind == MirEquationKind::Current
+            && !equation_inline[index]
+            && expression_large_signal_is_zero(
+                artifact,
+                equation.expression.id,
+                &mut HashSet::new(),
+            )?
+        {
+            continue;
+        }
+        let prefix = format!("eq{index}");
+        if should_emit_compact_equation_stamp(
+            artifact,
+            equation,
+            potential_branch_slots.current_slots(),
+            equation_inline[index],
+        )? {
+            if compact_equation_uses_scratch_with_local_variables(
+                artifact,
+                equation,
+                &prefix,
+                parameter_fields,
+                variables,
+                ddt_slots,
+                potential_branch_slots,
+            )? {
+                return Ok(true);
+            }
+            continue;
+        }
+
+        let lowered = lower_equation_expr_with_branch_currents(
+            artifact,
+            equation.expression.id,
+            &prefix,
+            parameter_fields,
+            variables,
+            ddt_slots,
+            &branch_currents,
+            potential_branch_slots.current_slots(),
+        )?;
+        if lowered_expr_uses_scratch(&lowered) {
+            return Ok(true);
+        }
+        if equation.kind == MirEquationKind::Current {
+            cache_named_branch_current(
+                artifact,
+                equation,
+                &mut branch_currents,
+                &format!("{prefix}_value"),
+                &lowered.derivatives,
+                &lowered.branch_derivatives,
+                &lowered,
+            );
+        }
+    }
+
+    Ok(false)
+}
+
+fn compact_equation_uses_scratch_with_local_variables(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    prefix: &str,
+    parameter_fields: &HashMap<String, String>,
+    variables: &HashMap<String, LoweredVariable>,
+    ddt_slots: &DdtSlots,
+    potential_branch_slots: &PotentialBranchSlots,
+) -> Result<bool, RustBackendError> {
+    let mut emitter = CompactAdEmitter {
+        artifact,
+        prefix,
+        parameter_fields,
+        variables,
+        ddt_slots,
+        branch_current_unknowns: potential_branch_slots.current_slots(),
+        emitted: HashMap::new(),
+        repeated_ad_counts: HashMap::new(),
+        repeated_ad_locals: HashMap::new(),
+        condition_values: HashMap::new(),
+        condition_counter: 0,
+        lines: Vec::new(),
+    };
+    emitter.repeated_ad_counts = emitter.repeated_expensive_ad_counts(equation.expression.id)?;
+    let lowered = emitter.lower(equation.expression.id)?;
+    Ok(generated_expr_uses_scratch(&lowered)
+        || emitter
+            .lines
+            .iter()
+            .any(|line| generated_expr_uses_scratch(line)))
+}
+
+fn lowered_expr_uses_scratch(lowered: &LoweredExpr) -> bool {
+    lowered
+        .lines
+        .iter()
+        .any(|line| generated_expr_uses_scratch(line))
+        || generated_expr_uses_scratch(&lowered.value)
+        || lowered
+            .derivatives
+            .iter()
+            .chain(lowered.branch_derivatives.iter())
+            .chain(std::iter::once(&lowered.reactive_value))
+            .chain(lowered.reactive_derivatives.iter())
+            .chain(lowered.reactive_branch_derivatives.iter())
+            .any(|value| generated_expr_uses_scratch(value))
+}
+
+fn generated_expr_uses_scratch(value: &str) -> bool {
+    block_uses_path_alias(value, "s") || block_uses_path_alias(value, "scratch")
 }
 
 fn emit_stamp_body(
@@ -24120,13 +24332,23 @@ fn emit_stamp_body(
         } else {
             super::scalar::emit_static_current_stamps(
                 artifact,
+                parameter_fields,
                 &plan.large_signal_roots,
                 &plan.static_cache,
                 out,
             )?;
             super::scalar::emit_ddt_current_stamps(
                 artifact,
+                parameter_fields,
                 &plan.ddt_roots,
+                &plan.static_cache,
+                ddt_slots,
+                out,
+            )?;
+            super::scalar::emit_ddt_current_stamps(
+                artifact,
+                parameter_fields,
+                &plan.idt_roots,
                 &plan.static_cache,
                 ddt_slots,
                 out,
@@ -24134,7 +24356,7 @@ fn emit_stamp_body(
         }
     }
 
-    let uses_scratch = artifact.hir.variables.iter().any(|variable| {
+    let has_live_variables = artifact.hir.variables.iter().any(|variable| {
         if reactive {
             reactive_liveness.is_variable_live(variable.name.as_str())
         } else {
@@ -24142,6 +24364,46 @@ fn emit_stamp_body(
                 || transient_liveness.is_derivative_live(variable.name.as_str())
         }
     });
+    let candidate_local_derivative_variables = if has_live_variables && !reactive {
+        collect_local_derivative_variables(artifact, transient_liveness)?
+    } else {
+        HashSet::new()
+    };
+    let branch_axis_count = branch_derivative_axis_count(potential_branch_slots.current_slots());
+    let equation_inline = equation_inline_plan(artifact)?;
+    let mut use_local_variables = has_live_variables
+        && can_use_local_variable_storage(
+            artifact,
+            reactive,
+            transient_liveness,
+            reactive_liveness,
+            &candidate_local_derivative_variables,
+            scalar_hybrid_plan.is_some(),
+        );
+    if use_local_variables {
+        let mut discard = String::new();
+        let local_variables = emit_local_variable_initializers(
+            artifact,
+            variable_fields,
+            branch_axis_count,
+            transient_liveness,
+            &candidate_local_derivative_variables,
+            &mut discard,
+        );
+        if residual_equations_use_scratch_with_local_variables(
+            artifact,
+            parameter_fields,
+            ddt_slots,
+            potential_branch_slots,
+            reactive,
+            scalar_hybrid_plan,
+            &equation_inline,
+            &local_variables,
+        )? {
+            use_local_variables = false;
+        }
+    }
+    let uses_scratch = has_live_variables && !use_local_variables;
     if uses_scratch {
         let scratch_field = if reactive {
             "reactive_scratch"
@@ -24162,11 +24424,25 @@ fn emit_stamp_body(
         ));
         out.push_str("        };\n");
     }
-    let mut variables = if uses_scratch {
+    let local_derivative_variables = if use_local_variables {
+        candidate_local_derivative_variables
+    } else {
+        HashSet::new()
+    };
+    let mut variables = if use_local_variables {
+        emit_local_variable_initializers(
+            artifact,
+            variable_fields,
+            branch_axis_count,
+            transient_liveness,
+            &local_derivative_variables,
+            out,
+        )
+    } else if uses_scratch {
         emit_variable_initializers(
             artifact,
             variable_fields,
-            potential_branch_slots.current_slots().len(),
+            branch_axis_count,
             reactive,
             reactive_liveness,
             out,
@@ -24185,15 +24461,29 @@ fn emit_stamp_body(
         reactive,
         reactive_liveness,
     )?;
-    emit_chunked_stamp_helpers(
-        helper_prefix,
-        reactive,
-        assignment_chunks,
-        common_usage,
-        operator_usage,
-        helper_modules,
-        out,
-    );
+    if use_local_variables {
+        let local_names = local_variable_storage_names(&variables);
+        emit_chunked_local_variable_stamp_helpers(
+            helper_prefix,
+            reactive,
+            assignment_chunks,
+            common_usage,
+            operator_usage,
+            &local_names,
+            helper_modules,
+            out,
+        );
+    } else {
+        emit_chunked_stamp_helpers(
+            helper_prefix,
+            reactive,
+            assignment_chunks,
+            common_usage,
+            operator_usage,
+            helper_modules,
+            out,
+        );
+    }
 
     if !reactive {
         let scalarized_potential_slots =
@@ -24222,9 +24512,26 @@ fn emit_stamp_body(
         }
     }
 
-    let equation_inline = equation_inline_plan(artifact)?;
-    let split_equations = uses_scratch && artifact.mir.equations.len() > 8;
+    let split_equations = (uses_scratch || use_local_variables) && artifact.mir.equations.len() > 8;
     let mut branch_currents = HashMap::new();
+    if let Some(plan) = scalar_hybrid_plan {
+        if reactive {
+            seed_scalar_hybrid_reactive_branch_current_cache(
+                artifact,
+                plan,
+                potential_branch_slots,
+                &mut branch_currents,
+            )?;
+        } else {
+            seed_scalar_hybrid_branch_current_cache(
+                artifact,
+                plan,
+                ddt_slots,
+                potential_branch_slots,
+                &mut branch_currents,
+            )?;
+        }
+    }
     for (index, equation) in artifact.mir.equations.iter().enumerate() {
         if !reactive
             && scalar_hybrid_plan
@@ -25417,6 +25724,81 @@ fn indexed_derivative_terms(derivatives: &[String]) -> Vec<(usize, String)> {
         .collect()
 }
 
+fn seed_scalar_hybrid_branch_current_cache(
+    artifact: &CanonicalIrArtifact,
+    plan: &ScalarHybridStampPlan,
+    ddt_slots: &DdtSlots,
+    potential_branch_slots: &PotentialBranchSlots,
+    branch_currents: &mut HashMap<String, LoweredVariable>,
+) -> Result<(), RustBackendError> {
+    let branch_axis_count = branch_derivative_axis_count(potential_branch_slots.current_slots());
+    for equation in &artifact.mir.equations {
+        if equation.kind != MirEquationKind::Current {
+            continue;
+        }
+        if let Some(root) = plan.large_signal_roots.get(&equation.id).copied() {
+            let lowered = super::scalar::scalar_transient_current_lowered_variable(
+                artifact,
+                equation,
+                root,
+                &plan.static_cache,
+                branch_axis_count,
+                None,
+            )?;
+            cache_named_branch_current_variable(artifact, equation, branch_currents, lowered);
+        }
+        if let Some(root) = plan.ddt_roots.get(&equation.id).copied() {
+            let lowered = super::scalar::scalar_transient_current_lowered_variable(
+                artifact,
+                equation,
+                root,
+                &plan.static_cache,
+                branch_axis_count,
+                Some(ddt_slots),
+            )?;
+            cache_named_branch_current_variable(artifact, equation, branch_currents, lowered);
+        }
+        if let Some(root) = plan.idt_roots.get(&equation.id).copied() {
+            let lowered = super::scalar::scalar_transient_current_lowered_variable(
+                artifact,
+                equation,
+                root,
+                &plan.static_cache,
+                branch_axis_count,
+                Some(ddt_slots),
+            )?;
+            cache_named_branch_current_variable(artifact, equation, branch_currents, lowered);
+        }
+    }
+    Ok(())
+}
+
+fn seed_scalar_hybrid_reactive_branch_current_cache(
+    artifact: &CanonicalIrArtifact,
+    plan: &ScalarHybridStampPlan,
+    potential_branch_slots: &PotentialBranchSlots,
+    branch_currents: &mut HashMap<String, LoweredVariable>,
+) -> Result<(), RustBackendError> {
+    let branch_axis_count = branch_derivative_axis_count(potential_branch_slots.current_slots());
+    for equation in &artifact.mir.equations {
+        if equation.kind != MirEquationKind::Current {
+            continue;
+        }
+        let Some(root) = plan.ddt_roots.get(&equation.id).copied() else {
+            continue;
+        };
+        let lowered = super::scalar::scalar_reactive_current_lowered_variable(
+            artifact,
+            equation,
+            root,
+            &plan.static_cache,
+            branch_axis_count,
+        )?;
+        cache_named_branch_current_variable(artifact, equation, branch_currents, lowered);
+    }
+    Ok(())
+}
+
 fn cache_named_branch_current(
     artifact: &CanonicalIrArtifact,
     equation: &MirEquation,
@@ -25426,9 +25808,9 @@ fn cache_named_branch_current(
     branch_derivatives: &[String],
     lowered: &LoweredExpr,
 ) {
-    let Some(branch_name) = declared_contribution_branch_name(artifact, equation) else {
+    if declared_contribution_branch_name(artifact, equation).is_none() {
         return;
-    };
+    }
 
     let cached_value = if lowered_expr_is_constant_zero(lowered, derivatives, branch_derivatives) {
         "0.0".to_string()
@@ -25445,7 +25827,18 @@ fn cache_named_branch_current(
         reactive_derivatives: lowered.reactive_derivatives.clone(),
         reactive_branch_derivatives: lowered.reactive_branch_derivatives.clone(),
     };
+    cache_named_branch_current_variable(artifact, equation, branch_currents, next);
+}
 
+fn cache_named_branch_current_variable(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    branch_currents: &mut HashMap<String, LoweredVariable>,
+    next: LoweredVariable,
+) {
+    let Some(branch_name) = declared_contribution_branch_name(artifact, equation) else {
+        return;
+    };
     branch_currents
         .entry(branch_name)
         .and_modify(|current| {
@@ -25569,6 +25962,466 @@ fn variable_local_names(artifact: &CanonicalIrArtifact) -> HashMap<String, Strin
         .map(|variable| variable.name.to_string())
         .collect::<Vec<_>>();
     unique_identifiers(&names)
+}
+
+fn can_use_local_variable_storage(
+    artifact: &CanonicalIrArtifact,
+    reactive: bool,
+    transient_liveness: &TransientLiveness,
+    reactive_liveness: &ReactiveLiveness,
+    derivative_variables: &HashSet<String>,
+    aggressive_straight_line_locals: bool,
+) -> bool {
+    if reactive {
+        return false;
+    }
+    let local_storage_shape = statements_contain_loop(&artifact.hir.statements)
+        || (aggressive_straight_line_locals
+            && statements_are_straight_line_assignments(&artifact.hir.statements))
+        || (derivative_variables.is_empty()
+            && straight_line_assignments_are_parameter_static(artifact, transient_liveness));
+    if !local_storage_shape {
+        return false;
+    }
+    artifact.hir.variables.iter().all(|variable| {
+        let live = if reactive {
+            reactive_liveness.is_variable_live(variable.name.as_str())
+        } else {
+            transient_liveness.is_value_live(variable.name.as_str())
+                || transient_liveness.is_derivative_live(variable.name.as_str())
+        };
+        !live || variable.value_type == CanonicalValueType::Real
+    })
+}
+
+fn statements_contain_loop(statements: &[HirStatement]) -> bool {
+    statements.iter().any(|statement| match statement {
+        HirStatement::Assignment(_) => false,
+        HirStatement::Loop(_) => true,
+    })
+}
+
+fn statements_are_straight_line_assignments(statements: &[HirStatement]) -> bool {
+    statements
+        .iter()
+        .all(|statement| matches!(statement, HirStatement::Assignment(_)))
+}
+
+fn straight_line_assignments_are_parameter_static(
+    artifact: &CanonicalIrArtifact,
+    transient_liveness: &TransientLiveness,
+) -> bool {
+    let mut local_values = HashSet::new();
+    let mut live_assignment_count = 0usize;
+    for statement in &artifact.hir.statements {
+        let HirStatement::Assignment(assignment) = statement else {
+            return false;
+        };
+        if !transient_liveness.is_value_live(assignment.target_name.as_str())
+            && !transient_liveness.is_derivative_live(assignment.target_name.as_str())
+        {
+            continue;
+        }
+        live_assignment_count += 1;
+        if live_assignment_count > 1 {
+            return false;
+        }
+        if !expr_is_parameter_static_local_candidate(
+            artifact,
+            assignment.expr.id,
+            &local_values,
+            &mut HashSet::new(),
+        ) {
+            return false;
+        }
+        local_values.insert(assignment.target_name.to_string());
+    }
+    live_assignment_count == 1
+}
+
+fn expr_is_parameter_static_local_candidate(
+    artifact: &CanonicalIrArtifact,
+    id: ExprId,
+    local_values: &HashSet<String>,
+    visited: &mut HashSet<ExprId>,
+) -> bool {
+    if !visited.insert(id) {
+        return true;
+    }
+    let Some(expression) = artifact.mir.expressions.get(usize::from(id)) else {
+        return false;
+    };
+    match &expression.kind {
+        HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => true,
+        HirExprKind::Identifier { name } => {
+            local_values.contains(name.as_str())
+                || artifact
+                    .mir
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.name.as_str() == name)
+        }
+        HirExprKind::BranchAccess { .. }
+        | HirExprKind::NamedBranchAccess { .. }
+        | HirExprKind::NoiseSource { .. }
+        | HirExprKind::SystemFunction { .. } => false,
+        HirExprKind::Call { .. } | HirExprKind::AnalogOperator { .. } => false,
+        HirExprKind::Conditional { .. } => false,
+        HirExprKind::Binary { op, .. }
+            if comparison_operator(op.as_str()).is_some()
+                || matches!(op.as_str(), "And" | "Or" | "BitAnd" | "BitOr") =>
+        {
+            false
+        }
+        other => expression_children(other).into_iter().all(|child| {
+            expr_is_parameter_static_local_candidate(
+                artifact,
+                child,
+                local_values,
+                &mut HashSet::new(),
+            )
+        }),
+    }
+}
+
+fn emit_local_variable_initializers(
+    artifact: &CanonicalIrArtifact,
+    variable_fields: &HashMap<String, String>,
+    branch_axis_count: usize,
+    transient_liveness: &TransientLiveness,
+    derivative_variables: &HashSet<String>,
+    out: &mut String,
+) -> HashMap<String, LoweredVariable> {
+    let mut variables = HashMap::new();
+    let mut emitted = false;
+    for variable in &artifact.hir.variables {
+        let value_live = transient_liveness.is_value_live(variable.name.as_str());
+        let derivatives_live = transient_liveness.is_derivative_live(variable.name.as_str())
+            && derivative_variables.contains(variable.name.as_str());
+        if !value_live && !derivatives_live {
+            continue;
+        }
+        let field = variable_fields
+            .get(variable.name.as_str())
+            .expect("variable field names should cover all HIR variables");
+        let value = local_variable_value_name(field);
+        out.push_str(&format!("        let mut {value}: f64 = 0.0;\n"));
+        emitted = true;
+
+        let mut derivatives = Vec::with_capacity(artifact.mir.nodes.len());
+        for node_index in 0..artifact.mir.nodes.len() {
+            if derivatives_live {
+                let derivative = local_variable_node_derivative_name(field, node_index);
+                out.push_str(&format!("        let mut {derivative}: f64 = 0.0;\n"));
+                derivatives.push(derivative);
+            } else {
+                derivatives.push("0.0".to_string());
+            }
+        }
+
+        let mut branch_derivatives = Vec::with_capacity(branch_axis_count);
+        for branch_index in 0..branch_axis_count {
+            if derivatives_live {
+                let derivative = local_variable_branch_derivative_name(field, branch_index);
+                out.push_str(&format!("        let mut {derivative}: f64 = 0.0;\n"));
+                branch_derivatives.push(derivative);
+            } else {
+                branch_derivatives.push("0.0".to_string());
+            }
+        }
+
+        variables.insert(
+            variable.name.to_string(),
+            LoweredVariable {
+                value,
+                condition: None,
+                derivatives,
+                branch_derivatives,
+                has_reactive: false,
+                reactive_value: "0.0".to_string(),
+                reactive_derivatives: zero_derivative_vec(artifact.mir.nodes.len()),
+                reactive_branch_derivatives: zero_derivative_vec(branch_axis_count),
+            },
+        );
+    }
+    if emitted {
+        out.push('\n');
+    }
+    variables
+}
+
+fn local_variable_value_name(field: &str) -> String {
+    format!("var_{field}")
+}
+
+fn local_variable_node_derivative_name(field: &str, node: usize) -> String {
+    format!("var_{field}_dn{node}")
+}
+
+fn local_variable_branch_derivative_name(field: &str, branch: usize) -> String {
+    format!("var_{field}_db{branch}")
+}
+
+fn is_local_variable_storage(variable: &LoweredVariable) -> bool {
+    variable.value.starts_with("var_")
+}
+
+fn local_variable_storage_names(variables: &HashMap<String, LoweredVariable>) -> Vec<String> {
+    let mut names = BTreeSet::new();
+    for variable in variables.values() {
+        insert_local_variable_storage_name(&mut names, &variable.value);
+        for derivative in &variable.derivatives {
+            insert_local_variable_storage_name(&mut names, derivative);
+        }
+        for derivative in &variable.branch_derivatives {
+            insert_local_variable_storage_name(&mut names, derivative);
+        }
+        insert_local_variable_storage_name(&mut names, &variable.reactive_value);
+        for derivative in &variable.reactive_derivatives {
+            insert_local_variable_storage_name(&mut names, derivative);
+        }
+        for derivative in &variable.reactive_branch_derivatives {
+            insert_local_variable_storage_name(&mut names, derivative);
+        }
+    }
+    names.into_iter().collect()
+}
+
+fn declared_local_variable_storage_names(source: &str) -> Vec<String> {
+    let mut names = BTreeSet::new();
+    for line in source.lines() {
+        let Some((local, _)) = parse_generated_mut_f64_local_initializer(line) else {
+            continue;
+        };
+        insert_local_variable_storage_name(&mut names, local);
+    }
+    names.into_iter().collect()
+}
+
+fn insert_local_variable_storage_name(names: &mut BTreeSet<String>, value: &str) {
+    if is_local_variable_storage_name(value) {
+        names.insert(value.to_string());
+    }
+}
+
+fn is_local_variable_storage_name(value: &str) -> bool {
+    let value = value.trim();
+    value.starts_with("var_") && is_rust_identifier(value)
+}
+
+fn parse_generated_mut_f64_local_initializer(line: &str) -> Option<(&str, &str)> {
+    let line = line.trim();
+    let rest = line.strip_prefix("let mut ")?;
+    let (local, rhs) = rest.split_once(": f64 = ")?;
+    if !is_local_variable_storage_name(local) {
+        return None;
+    }
+    let rhs = rhs.strip_suffix(';')?.trim();
+    Some((local, rhs))
+}
+
+fn local_helper_usage(block: &str, local_names: &[String]) -> LocalHelperUsage {
+    if local_names.is_empty() {
+        return LocalHelperUsage::default();
+    }
+    let tokens = generated_identifier_tokens(block);
+    let mut usage = LocalHelperUsage::default();
+    for name in local_names {
+        if !tokens.contains(name.as_str()) {
+            continue;
+        }
+        if block_assigns_local_variable(block, name) {
+            usage.mutable.push(name.clone());
+        } else {
+            usage.read_only.push(name.clone());
+        }
+    }
+    usage
+}
+
+fn generated_identifier_tokens(block: &str) -> HashSet<String> {
+    let mut tokens = HashSet::new();
+    let mut token_start = None;
+    for (index, ch) in block.char_indices() {
+        if is_rust_identifier_char(ch) {
+            if token_start.is_none() {
+                token_start = Some(index);
+            }
+            continue;
+        }
+        if let Some(start) = token_start.take() {
+            tokens.insert(block[start..index].to_string());
+        }
+    }
+    if let Some(start) = token_start {
+        tokens.insert(block[start..].to_string());
+    }
+    tokens
+}
+
+fn block_assigns_local_variable(block: &str, local_name: &str) -> bool {
+    block
+        .lines()
+        .any(|line| line_assigns_local_variable(line, local_name))
+}
+
+fn line_assigns_local_variable(line: &str, local_name: &str) -> bool {
+    let line = line.trim_start();
+    let Some(rest) = line.strip_prefix(local_name) else {
+        return false;
+    };
+    if rest.chars().next().is_some_and(is_rust_identifier_char) {
+        return false;
+    }
+    rest.trim_start().starts_with('=')
+}
+
+fn local_helper_block_body(block: &str, local_usage: &LocalHelperUsage) -> String {
+    let mut body = String::with_capacity(block.len() + local_usage.mutable.len() * 96);
+    for name in &local_usage.mutable {
+        body.push_str(&format!("        let mut {name}: f64 = *{name}_slot;\n"));
+    }
+    if !local_usage.mutable.is_empty() {
+        body.push('\n');
+    }
+    body.push_str(block);
+    if !block.ends_with('\n') {
+        body.push('\n');
+    }
+    if !local_usage.mutable.is_empty() {
+        body.push('\n');
+    }
+    for name in &local_usage.mutable {
+        body.push_str(&format!("        *{name}_slot = {name};\n"));
+    }
+    body
+}
+
+fn collect_local_derivative_variables(
+    artifact: &CanonicalIrArtifact,
+    transient_liveness: &TransientLiveness,
+) -> Result<HashSet<String>, RustBackendError> {
+    let mut active = HashSet::new();
+    loop {
+        let before = active.len();
+        collect_local_derivative_statement_targets(
+            artifact,
+            &artifact.hir.statements,
+            transient_liveness,
+            &mut active,
+        )?;
+        if active.len() == before {
+            break;
+        }
+    }
+    Ok(active)
+}
+
+fn collect_local_derivative_statement_targets(
+    artifact: &CanonicalIrArtifact,
+    statements: &[HirStatement],
+    transient_liveness: &TransientLiveness,
+    active: &mut HashSet<String>,
+) -> Result<(), RustBackendError> {
+    for statement in statements {
+        match statement {
+            HirStatement::Assignment(assignment) => {
+                if !transient_liveness.is_derivative_live(assignment.target_name.as_str()) {
+                    continue;
+                }
+                if expr_local_derivative_may_be_nonzero(
+                    artifact,
+                    assignment.expr.id,
+                    active,
+                    &mut HashSet::new(),
+                )? {
+                    active.insert(assignment.target_name.to_string());
+                }
+            }
+            HirStatement::Loop(loop_statement) => {
+                collect_local_derivative_statement_targets(
+                    artifact,
+                    &loop_statement.body,
+                    transient_liveness,
+                    active,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn expr_local_derivative_may_be_nonzero(
+    artifact: &CanonicalIrArtifact,
+    id: ExprId,
+    active_variables: &HashSet<String>,
+    visited: &mut HashSet<ExprId>,
+) -> Result<bool, RustBackendError> {
+    if !visited.insert(id) {
+        return Ok(false);
+    }
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(id))
+        .ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("expression {id} is outside MIR arena"),
+            )
+        })?;
+
+    match &expression.kind {
+        HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => Ok(false),
+        HirExprKind::Identifier { name } => Ok(active_variables.contains(name.as_str())),
+        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => Ok(true),
+        HirExprKind::NoiseSource { .. } => Ok(false),
+        HirExprKind::Call { name, .. } | HirExprKind::SystemFunction { name, .. }
+            if is_noise_name(name.as_str())
+                || is_analysis_name(name.as_str())
+                || is_value_only_system_function_name(name.as_str()) =>
+        {
+            Ok(false)
+        }
+        HirExprKind::AnalogOperator {
+            op: HirAnalogOperator::Ddx { .. },
+        } => Ok(true),
+        HirExprKind::Unary { op, operand } if matches!(op.as_str(), "Not" | "BitNot") => {
+            let _ = operand;
+            Ok(false)
+        }
+        HirExprKind::Binary { op, .. }
+            if comparison_operator(op.as_str()).is_some()
+                || matches!(op.as_str(), "And" | "Or" | "BitAnd" | "BitOr") =>
+        {
+            Ok(false)
+        }
+        HirExprKind::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } => Ok(expr_local_derivative_may_be_nonzero(
+            artifact,
+            *then_expr,
+            active_variables,
+            &mut HashSet::new(),
+        )? || expr_local_derivative_may_be_nonzero(
+            artifact,
+            *else_expr,
+            active_variables,
+            &mut HashSet::new(),
+        )?),
+        other => {
+            for child in expression_children(other) {
+                if expr_local_derivative_may_be_nonzero(artifact, child, active_variables, visited)?
+                {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+    }
 }
 
 fn emit_variable_initializers(
@@ -25745,6 +26598,104 @@ fn emit_chunked_stamp_helpers(
     out.push('\n');
 }
 
+#[allow(clippy::too_many_arguments)]
+fn emit_chunked_local_variable_stamp_helpers(
+    helper_prefix: &str,
+    reactive: bool,
+    chunks: Vec<String>,
+    common_usage: StampCommonUsage,
+    operator_usage: StampOperatorUsage,
+    local_names: &[String],
+    helper_modules: &mut StampHelperModules,
+    out: &mut String,
+) {
+    if chunks.is_empty() {
+        return;
+    }
+
+    let total_lines: usize = chunks.iter().map(|chunk| chunk.lines().count()).sum();
+    if total_lines <= MAX_STAMP_HELPER_LINES {
+        for chunk in chunks {
+            out.push_str(&chunk);
+        }
+        return;
+    }
+
+    let mut block_index = 0usize;
+    let mut block = String::new();
+    let mut block_lines = 0usize;
+    for chunk in chunks {
+        let chunk_lines = chunk.lines().count();
+        if block_lines > 0 && block_lines + chunk_lines > MAX_STAMP_HELPER_LINES {
+            emit_local_variable_stamp_helper_call(
+                helper_prefix,
+                reactive,
+                block_index,
+                &block,
+                common_usage,
+                operator_usage,
+                local_names,
+                helper_modules,
+                out,
+            );
+            block.clear();
+            block_lines = 0;
+            block_index += 1;
+        }
+        block_lines += chunk_lines;
+        block.push_str(&chunk);
+    }
+    if !block.is_empty() {
+        emit_local_variable_stamp_helper_call(
+            helper_prefix,
+            reactive,
+            block_index,
+            &block,
+            common_usage,
+            operator_usage,
+            local_names,
+            helper_modules,
+            out,
+        );
+    }
+    out.push('\n');
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_local_variable_stamp_helper_call(
+    helper_prefix: &str,
+    reactive: bool,
+    block_index: usize,
+    block: &str,
+    common_usage: StampCommonUsage,
+    operator_usage: StampOperatorUsage,
+    local_names: &[String],
+    helper_modules: &mut StampHelperModules,
+    out: &mut String,
+) {
+    let helper_common_usage = common_usage.for_helper_block(block);
+    let helper_operator_usage = operator_usage.for_helper_block(block);
+    let local_usage = local_helper_usage(block, local_names);
+    emit_stamp_helper_method_with_locals(
+        helper_prefix,
+        reactive,
+        block_index,
+        block,
+        helper_common_usage,
+        helper_operator_usage,
+        &local_usage,
+        helper_modules,
+    );
+    let helper_args = stamp_helper_call_args_with_locals(
+        helper_common_usage,
+        helper_operator_usage,
+        &local_usage,
+    );
+    out.push_str(&format!(
+        "        Self::{helper_prefix}_block_{block_index}({helper_args});\n"
+    ));
+}
+
 fn split_marked_equation_chunks(
     out: &mut String,
     helper_modules: &mut StampHelperModules,
@@ -25768,6 +26719,7 @@ fn split_marked_equation_chunks(
         helper_modules: &mut StampHelperModules,
         common_usage: StampCommonUsage,
         operator_usage: StampOperatorUsage,
+        local_names: &[String],
     ) {
         let Some(pending) = pending.take() else {
             return;
@@ -25779,23 +26731,30 @@ fn split_marked_equation_chunks(
         }
         .for_helper_block(&pending.block);
         let helper_common_usage = common_usage.for_helper_block(&pending.block);
+        let local_usage = local_helper_usage(&pending.block, local_names);
         let method_prefix = format!("{}_equations", pending.helper_prefix);
-        emit_stamp_helper_method(
+        emit_stamp_helper_method_with_locals(
             &method_prefix,
             pending.reactive,
             pending.block_index,
             &pending.block,
             helper_common_usage,
             helper_operator_usage,
+            &local_usage,
             helper_modules,
         );
-        let helper_args = stamp_helper_call_args(helper_common_usage, helper_operator_usage);
+        let helper_args = stamp_helper_call_args_with_locals(
+            helper_common_usage,
+            helper_operator_usage,
+            &local_usage,
+        );
         rewritten.push_str(&format!(
             "        Self::{method_prefix}_block_{}({helper_args});\n",
             pending.block_index
         ));
     }
 
+    let local_names = declared_local_variable_storage_names(out);
     let mut rewritten = String::with_capacity(out.len());
     let mut lines = out.lines();
     let mut pending: Option<PendingEquationHelper> = None;
@@ -25808,6 +26767,7 @@ fn split_marked_equation_chunks(
                 helper_modules,
                 common_usage,
                 operator_usage,
+                &local_names,
             );
             rewritten.push_str(line);
             rewritten.push('\n');
@@ -25822,6 +26782,7 @@ fn split_marked_equation_chunks(
                 helper_modules,
                 common_usage,
                 operator_usage,
+                &local_names,
             );
             continue;
         };
@@ -25833,6 +26794,7 @@ fn split_marked_equation_chunks(
                 helper_modules,
                 common_usage,
                 operator_usage,
+                &local_names,
             );
             continue;
         }
@@ -25864,6 +26826,7 @@ fn split_marked_equation_chunks(
                 helper_modules,
                 common_usage,
                 operator_usage,
+                &local_names,
             );
         }
 
@@ -25892,6 +26855,7 @@ fn split_marked_equation_chunks(
         helper_modules,
         common_usage,
         operator_usage,
+        &local_names,
     );
 
     *out = rewritten;
@@ -26382,6 +27346,25 @@ fn is_rust_identifier_char(ch: char) -> bool {
     ch == '_' || ch.is_ascii_alphanumeric()
 }
 
+fn block_uses_path_alias(block: &str, alias: &str) -> bool {
+    let mut token_start = None;
+    for (index, ch) in block.char_indices() {
+        if is_rust_identifier_char(ch) {
+            if token_start.is_none() {
+                token_start = Some(index);
+            }
+            continue;
+        }
+        if let Some(start) = token_start.take()
+            && &block[start..index] == alias
+            && block[index..].starts_with('.')
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn emit_stamp_helper_method(
     helper_prefix: &str,
     reactive: bool,
@@ -26389,6 +27372,29 @@ fn emit_stamp_helper_method(
     block: &str,
     common_usage: StampHelperCommonUsage,
     operator_usage: StampOperatorUsage,
+    helper_modules: &mut StampHelperModules,
+) {
+    emit_stamp_helper_method_with_locals(
+        helper_prefix,
+        reactive,
+        block_index,
+        block,
+        common_usage,
+        operator_usage,
+        &LocalHelperUsage::default(),
+        helper_modules,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_stamp_helper_method_with_locals(
+    helper_prefix: &str,
+    reactive: bool,
+    block_index: usize,
+    block: &str,
+    common_usage: StampHelperCommonUsage,
+    operator_usage: StampOperatorUsage,
+    local_usage: &LocalHelperUsage,
     helper_modules: &mut StampHelperModules,
 ) {
     let stamper_type = if reactive {
@@ -26401,12 +27407,20 @@ fn emit_stamp_helper_method(
     } else {
         "Scratch"
     };
-    let common_params = stamp_helper_common_params(common_usage, stamper_type, scratch_type);
-    let operator_params = stamp_helper_operator_params(operator_usage);
-    let mut method = format!(
-        "\n    pub(super) fn {helper_prefix}_block_{block_index}(\n{common_params}{operator_params}    ) {{\n"
+    let params = stamp_helper_params_with_locals(
+        common_usage,
+        operator_usage,
+        local_usage,
+        stamper_type,
+        scratch_type,
     );
-    method.push_str(block);
+    let mut method =
+        format!("\n    pub(super) fn {helper_prefix}_block_{block_index}(\n{params}    ) {{\n");
+    if local_usage.is_empty() {
+        method.push_str(block);
+    } else {
+        method.push_str(&local_helper_block_body(block, local_usage));
+    }
     method.push_str("    }\n");
     helper_modules.push_method(method, reactive);
 }
@@ -26440,11 +27454,9 @@ impl StampHelperModules {
             .expect("helper module must exist after allocation");
         if method_part.starts_with("\n    pub(super) fn ") {
             module.method_count += 1;
-            if reactive {
-                module.uses_reactive_scratch = true;
-            } else {
-                module.uses_transient_scratch = true;
-            }
+            module.uses_reactive_scratch |=
+                reactive && method_part.contains("&mut ReactiveScratch");
+            module.uses_transient_scratch |= !reactive && method_part.contains("&mut Scratch");
         }
         module.contents.push_str(&method_part);
     }
@@ -26589,11 +27601,15 @@ fn emit_assignment_statement(
                 ),
             )
         })?;
+    let target_local_variable = variables
+        .get(target.name.as_str())
+        .filter(|variable| is_local_variable_storage(variable))
+        .cloned();
     if reactive
         && !expr_depends_on_ddt_or_dynamic(
             artifact,
             assignment.expr.id,
-            &HashSet::new(),
+            &reactive_liveness.dynamic,
             &mut HashSet::new(),
         )?
     {
@@ -26612,7 +27628,8 @@ fn emit_assignment_statement(
 
     let derivatives_live =
         reactive || transient_liveness.is_derivative_live(assignment.target_name.as_str());
-    if !reactive
+    if target_local_variable.is_none()
+        && !reactive
         && (target.value_type == CanonicalValueType::Boolean
             || assignment_rhs_has_boolean_condition(
                 artifact,
@@ -26636,7 +27653,7 @@ fn emit_assignment_statement(
             prefix,
         );
     }
-    if !reactive && derivatives_live {
+    if target_local_variable.is_none() && !reactive && derivatives_live {
         return emit_compact_assignment_statement(
             artifact,
             assignment,
@@ -26686,10 +27703,24 @@ fn emit_assignment_statement(
             branch_current_unknowns,
         )?
     };
-    for line in lowered.lines {
+    for line in &lowered.lines {
         out.push_str(indent);
-        out.push_str(&line);
+        out.push_str(line);
         out.push('\n');
+    }
+
+    if let Some(target_variable) = target_local_variable {
+        emit_local_variable_assignment_store(
+            artifact,
+            assignment.target_name.as_str(),
+            target_variable,
+            lowered,
+            variables,
+            out,
+            reactive,
+            indent,
+        )?;
+        return Ok(());
     }
 
     let target_index = usize::from(target.id);
@@ -26783,6 +27814,95 @@ fn emit_assignment_statement(
             reactive_branch_derivatives: reactive_branch_derivative_locals,
         },
     );
+    Ok(())
+}
+
+fn emit_local_variable_assignment_store(
+    artifact: &CanonicalIrArtifact,
+    target_name: &str,
+    mut target_variable: LoweredVariable,
+    lowered: LoweredExpr,
+    variables: &mut HashMap<String, LoweredVariable>,
+    out: &mut String,
+    reactive: bool,
+    indent: &str,
+) -> Result<(), RustBackendError> {
+    out.push_str(&format!(
+        "{indent}{} = {};\n",
+        target_variable.value, lowered.value
+    ));
+    assign_local_derivative_lanes(
+        artifact,
+        &target_variable.derivatives,
+        &lowered.derivatives,
+        out,
+        indent,
+    )?;
+    assign_local_derivative_lanes(
+        artifact,
+        &target_variable.branch_derivatives,
+        &lowered.branch_derivatives,
+        out,
+        indent,
+    )?;
+
+    if reactive {
+        out.push_str(&format!(
+            "{indent}{} = {};\n",
+            target_variable.reactive_value, lowered.reactive_value
+        ));
+        assign_local_derivative_lanes(
+            artifact,
+            &target_variable.reactive_derivatives,
+            &lowered.reactive_derivatives,
+            out,
+            indent,
+        )?;
+        assign_local_derivative_lanes(
+            artifact,
+            &target_variable.reactive_branch_derivatives,
+            &lowered.reactive_branch_derivatives,
+            out,
+            indent,
+        )?;
+    }
+
+    target_variable.has_reactive = reactive && lowered.has_reactive;
+    variables.insert(target_name.to_string(), target_variable);
+    Ok(())
+}
+
+fn assign_local_derivative_lanes(
+    artifact: &CanonicalIrArtifact,
+    targets: &[String],
+    values: &[String],
+    out: &mut String,
+    indent: &str,
+) -> Result<(), RustBackendError> {
+    if targets.len() != values.len() {
+        return Err(RustBackendError::internal(
+            artifact.metadata.source_package.as_str(),
+            artifact.mir.module_name.as_str(),
+            format!(
+                "local derivative lane count mismatch: {} targets for {} values",
+                targets.len(),
+                values.len()
+            ),
+        ));
+    }
+    for (target, value) in targets.iter().zip(values.iter()) {
+        if target == "0.0" {
+            if !is_zero_derivative(value) {
+                return Err(RustBackendError::internal(
+                    artifact.metadata.source_package.as_str(),
+                    artifact.mir.module_name.as_str(),
+                    format!("nonzero derivative {value} assigned to non-live local lane"),
+                ));
+            }
+            continue;
+        }
+        out.push_str(&format!("{indent}{target} = {value};\n"));
+    }
     Ok(())
 }
 

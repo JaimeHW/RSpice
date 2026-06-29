@@ -1306,7 +1306,7 @@ fn rust_backend_auto_scalarizes_integer_parameter_counted_scalar_loops() {
 }
 
 #[test]
-fn rust_backend_auto_falls_back_for_runtime_bounded_scalar_loops() {
+fn rust_backend_auto_lowers_runtime_bounded_scalar_loops_without_scratch() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(runtime_bounded_loop_accumulator_source())
         .expect("canonical IR");
@@ -1326,6 +1326,12 @@ fn rust_backend_auto_falls_back_for_runtime_bounded_scalar_loops() {
 
     assert!(stamp.contains("while"), "{stamp}");
     assert!(stamp.contains("loop_guard"), "{stamp}");
+    assert!(
+        !stamp.contains("Scratch::new_box")
+            && !stamp.contains("scratch.values")
+            && !stamp.contains("scratch.node_derivatives"),
+        "runtime scalar loops should use mutable local values and derivative lanes instead of scratch AD storage:\n{stamp}"
+    );
     assert_generated_rust_compiles(&generated);
 }
 
@@ -1377,6 +1383,40 @@ fn rust_backend_auto_scalarizes_hybrid_ddt_current_equations() {
 }
 
 #[test]
+fn rust_backend_auto_uses_local_storage_for_hybrid_straight_line_assignments() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(hybrid_idt_straight_line_assignment_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile hybrid idt straight-line assignments through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("eval_idt") && stamp.contains("eval_ddt"),
+        "unsupported scalar intrinsic should force hybrid while DDT/IDT provide scalarized roots:\n{stamp}"
+    );
+    assert!(stamp.contains("let mut var_drive: f64 = 0.0;"), "{stamp}");
+    assert!(stamp.contains("var_drive_dn0"), "{stamp}");
+    assert!(
+        !stamp.contains("let s = match &mut self.scratch")
+            && !stamp.contains("scratch.values")
+            && !stamp.contains("scratch.node_derivatives"),
+        "hybrid straight-line real assignments should use local scalar storage instead of scratch:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_scalarizes_hybrid_potential_equations() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(potential_runtime_bounded_loop_source())
@@ -1418,7 +1458,7 @@ fn rust_backend_auto_scalarizes_hybrid_potential_equations() {
 }
 
 #[test]
-fn rust_backend_auto_preserves_hybrid_ddt_named_branch_current_cache() {
+fn rust_backend_auto_scalarizes_hybrid_ddt_named_branch_current_cache() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(ddt_named_branch_runtime_loop_source())
         .expect("canonical IR");
@@ -1441,18 +1481,27 @@ fn rust_backend_auto_preserves_hybrid_ddt_named_branch_current_cache() {
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
-        stamp.contains("let eq0_") && stamp.contains("eq0_value"),
-        "ddt contribution feeding I(sense) must stay on the legacy path until scalar branch-current caching is available:\n{stamp}"
+        !stamp.contains("let eq0_") && !stamp.contains("eq0_value"),
+        "scalar branch-current caching should let the DDT producer avoid legacy scratch lowering:\n{stamp}"
     );
     assert!(
-        stamp.contains("I(sense)") || stamp.contains("eq0_value"),
-        "generated code should preserve a cached named current value for the later probe:\n{stamp}"
+        stamp.contains("_ddt")
+            && stamp.contains("ddt_scale")
+            && stamp.contains("stamper.stamp_current_node2_local("),
+        "scalarized DDT producer should use scalar transient stamping and BE derivative scaling:\n{stamp}"
+    );
+    assert!(
+        stamp
+            .matches("stamper.stamp_current_reactive_node2(")
+            .count()
+            >= 2,
+        "reactive named-current cache should propagate the scalarized DDT derivative through the later consumer:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
 
 #[test]
-fn rust_backend_auto_preserves_hybrid_static_named_branch_current_cache() {
+fn rust_backend_auto_scalarizes_hybrid_static_named_branch_current_cache() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(static_named_branch_runtime_loop_source())
         .expect("canonical IR");
@@ -1475,14 +1524,18 @@ fn rust_backend_auto_preserves_hybrid_static_named_branch_current_cache() {
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
-        stamp.contains("let eq0_") && stamp.contains("eq0_value"),
-        "current contribution feeding I(sense) must stay on the legacy path until scalar branch-current caching is available:\n{stamp}"
+        !stamp.contains("let eq0_") && !stamp.contains("eq0_value"),
+        "scalar branch-current caching should let the simple producer avoid legacy scratch lowering:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "scalarized branch-current producer should use fixed-arity scalar current stamping:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
 
 #[test]
-fn rust_backend_auto_preserves_hybrid_terminal_named_branch_current_cache() {
+fn rust_backend_auto_scalarizes_hybrid_terminal_named_branch_current_cache() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(terminal_named_branch_runtime_loop_source())
         .expect("canonical IR");
@@ -1505,8 +1558,12 @@ fn rust_backend_auto_preserves_hybrid_terminal_named_branch_current_cache() {
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
-        stamp.contains("let eq0_") && stamp.contains("eq0_value"),
-        "terminal current contribution feeding I(sense) must stay on the legacy path until scalar branch-current caching is available:\n{stamp}"
+        !stamp.contains("let eq0_") && !stamp.contains("eq0_value"),
+        "scalar branch-current caching should let the terminal producer avoid legacy scratch lowering:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "scalarized terminal branch-current producer should use fixed-arity scalar current stamping:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -8416,11 +8473,14 @@ endmodule
         .as_str();
 
     assert!(
-        stamp.contains("let s = match &mut self.scratch {"),
+        !stamp.contains("let s = match &mut self.scratch {"),
         "{stamp}"
     );
+    assert!(!stamp.contains("Scratch::new_box"), "{stamp}");
     assert!(!stamp.contains("Scratch::new();"), "{stamp}");
-    assert!(stamp.contains("s.v[0] = (1.0 / p.p0);"), "{stamp}");
+    assert!(stamp.contains("let mut var_g: f64 = 0.0;"), "{stamp}");
+    assert!(stamp.contains("var_g = "), "{stamp}");
+    assert!(stamp.contains("(1.0 / p.p0)"), "{stamp}");
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
     assert!(stamp.contains("eq0_value"), "{stamp}");
     assert!(!stamp.contains("s.dn[0]"), "{stamp}");
@@ -9304,8 +9364,51 @@ fn rust_backend_lowers_runtime_loops_with_derivative_shadows() {
         stamp.contains("stamper.stamp_current_node2_local("),
         "{stamp}"
     );
-    assert!(stamp.contains("s.dn[1][0]"), "{stamp}");
-    assert!(stamp.contains("s.dn[1][1]"), "{stamp}");
+    assert!(stamp.contains("var_acc_dn0"), "{stamp}");
+    assert!(stamp.contains("var_acc_dn1"), "{stamp}");
+    assert!(!stamp.contains("Scratch::new_box"), "{stamp}");
+}
+
+#[test]
+fn rust_backend_splits_large_local_variable_blocks_without_scratch() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&large_loop_accumulator_source(280))
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile large loop accumulator");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let helper = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp_blocks_0.rs")
+        .expect("stamp helper file")
+        .contents
+        .as_str();
+
+    assert!(!stamp.contains("Scratch::new_box"), "{stamp}");
+    assert!(stamp.contains("let mut var_acc: f64 = 0.0;"), "{stamp}");
+    assert!(
+        stamp.contains("Self::stamp_transient_block_0(") && stamp.contains("&mut var_acc"),
+        "{stamp}"
+    );
+    assert!(helper.contains("var_acc_slot: &mut f64"), "{helper}");
+    assert!(
+        helper.contains("let mut var_acc: f64 = *var_acc_slot;"),
+        "{helper}"
+    );
+    assert!(helper.contains("*var_acc_slot = var_acc;"), "{helper}");
+    assert!(!helper.contains("Scratch"), "{helper}");
+    assert_generated_rust_compiles(&generated);
 }
 
 #[test]
@@ -9680,6 +9783,87 @@ fn rust_backend_lowers_idt_potential_state() {
     );
     assert!(stamp.contains("idt_jacobian(timestep"), "{stamp}");
     assert!(stamp.contains("stamper.stamp_potential"), "{stamp}");
+}
+
+#[test]
+fn rust_backend_scalar_lowers_idt_potential_without_scratch() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(idt_potential_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile scalar idt potential");
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(state.contains("DDT_STATE_COUNT: usize = 0"), "{state}");
+    assert!(state.contains("IDT_STATE_COUNT: usize = 1"), "{state}");
+    assert!(stamp.contains("fn eval_idt"), "{stamp}");
+    assert!(
+        stamp.contains("let idt_state_current = self.idt_state_current.as_mut();"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("let idt_scale = if ddt_active { timestep } else { 0.0 };"),
+        "{stamp}"
+    );
+    assert!(stamp.contains("eval_idt(idt_state_current, idt_state_previous, idt_state_initialized, ddt_active, idt_scale"), "{stamp}");
+    assert!(
+        !stamp.contains("ddt_state_current") && !stamp.contains("let ddt_scale = if ddt_active"),
+        "IDT-only scalar stamps should not borrow DDT state:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("Scratch")
+            && !stamp.contains("AdValue")
+            && !stamp.contains("scratch.values")
+            && !stamp.contains("scratch.node_derivatives"),
+        "scalar IDT output should stay out of scratch AD:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_scalar_lowers_parameter_idt_initial_condition() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(idt_parameter_ic_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile scalar idt with parameter ic");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("let p = &(*self.params);"), "{stamp}");
+    assert!(
+        stamp.contains("eval_idt") && stamp.contains("(p.p0 + 0.25)"),
+        "parameter IC should be emitted in the scalar IDT state call:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("AdValue") && !stamp.contains("Scratch"),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
 }
 
 #[test]
@@ -17613,6 +17797,39 @@ endmodule
 "#
 }
 
+fn large_loop_accumulator_source(body_terms: usize) -> String {
+    assert!(body_terms > 0);
+    let mut source = String::from(
+        r#"
+module large_loop_accum(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real limit = 3.0 from [0:inf);
+    real loop;
+    real acc;
+    analog begin
+        loop = 0.0;
+        acc = 0.0;
+        while (loop < limit) begin
+"#,
+    );
+    for index in 0..body_terms {
+        source.push_str(&format!(
+            "            acc = acc + V(p, n) * {}.0;\n",
+            index + 1
+        ));
+    }
+    source.push_str(
+        r#"            loop = loop + 1.0;
+        end
+        I(p, n) <+ acc;
+    end
+endmodule
+"#,
+    );
+    source
+}
+
 fn runtime_bounded_loop_accumulator_source() -> &'static str {
     r#"
 module runtime_loop_accum(p, n);
@@ -17673,6 +17890,24 @@ module ddt_runtime_loop(p, n);
             loop = loop + 1.0;
         end
         I(p, n) <+ acc;
+    end
+endmodule
+"#
+}
+
+fn hybrid_idt_straight_line_assignment_source() -> &'static str {
+    r#"
+module hybrid_idt_straight_line_assignments(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from [0:inf);
+    parameter real gain = 2.0;
+    real drive;
+    analog begin
+        drive = gain * V(p, n);
+        I(p, n) <+ ddt(c * V(p, n));
+        V(p, n) <+ idt(drive, 0.0);
+        I(p, n) <+ floor(drive);
     end
 endmodule
 "#
@@ -17988,6 +18223,23 @@ module idt_potential(p, n);
     analog begin
         flow = V(p, n);
         V(x) <+ idt(flow, 0.5);
+        I(p, n) <+ V(x);
+    end
+endmodule
+"#
+}
+
+fn idt_parameter_ic_source() -> &'static str {
+    r#"
+module idt_parameter_ic(p, n);
+    inout p, n;
+    electrical p, n;
+    electrical x;
+    parameter real ic = 0.5;
+    real flow;
+    analog begin
+        flow = V(p, n);
+        V(x) <+ idt(flow, ic + 0.25);
         I(p, n) <+ V(x);
     end
 endmodule

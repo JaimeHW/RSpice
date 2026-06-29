@@ -7,7 +7,7 @@ use crate::canonical_ir::{
     OptBinaryOp, OptOp, OptUnaryOp, OptValue, OptValueKind, OptValueType, ValueId,
 };
 
-use super::expr::{DdtSlots, parameter_field_names};
+use super::expr::{DdtSlots, LoweredVariable, parameter_field_names};
 use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames};
 use super::{RustTranspileOptions, device};
 
@@ -109,6 +109,17 @@ struct ScalarDerivatives {
     branches: Vec<(u32, ValueId)>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ScalarTransientOperator {
+    Ddt {
+        operator: ExprId,
+    },
+    Idt {
+        operator: ExprId,
+        ic: Option<ExprId>,
+    },
+}
+
 pub fn generate_device(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
@@ -127,9 +138,6 @@ pub fn generate_device(
     let parameter_fields = parameter_field_names(artifact);
     let static_cache = ScalarStaticCache::from_artifact(artifact);
     let ddt_slots = device::collect_ddt_slots(artifact)?;
-    if ddt_slots.idt_len() > 0 {
-        return Err(unsupported(artifact, "idt equations in scalar backend"));
-    }
     let potential_branch_count = artifact.mir.branch_unknowns.len();
     let stamp = generate_stamp_file(
         artifact,
@@ -144,7 +152,7 @@ pub fn generate_device(
             options,
             &parameter_fields,
             ddt_slots.len(),
-            0,
+            ddt_slots.idt_len(),
             potential_branch_count,
         )?
     } else {
@@ -154,7 +162,7 @@ pub fn generate_device(
             options,
             &parameter_fields,
             ddt_slots.len(),
-            0,
+            ddt_slots.idt_len(),
             potential_branch_count,
             &extensions,
         )?
@@ -192,12 +200,15 @@ fn generate_stamp_file(
 ) -> Result<String, RustBackendError> {
     let roots = scalar_equation_roots(artifact)?;
     let stamp_live = collect_stamp_live_values(artifact, &roots, static_cache)?;
-    let stamp_needs_params = artifact.opt.values.iter().any(|value| {
-        stamp_live.contains(&value.id) && matches!(value.kind, OptValueKind::Parameter { .. })
-    });
-    let stamp_needs_param_given = artifact.opt.values.iter().any(|value| {
-        stamp_live.contains(&value.id) && matches!(value.kind, OptValueKind::ParamGiven { .. })
-    });
+    let has_idt_slots = ddt_slots.idt_len() > 0;
+    let stamp_needs_params = has_idt_slots
+        || artifact.opt.values.iter().any(|value| {
+            stamp_live.contains(&value.id) && matches!(value.kind, OptValueKind::Parameter { .. })
+        });
+    let stamp_needs_param_given = has_idt_slots
+        || artifact.opt.values.iter().any(|value| {
+            stamp_live.contains(&value.id) && matches!(value.kind, OptValueKind::ParamGiven { .. })
+        });
     let stamp_needs_branches = artifact.opt.values.iter().any(|value| {
         stamp_live.contains(&value.id) && matches!(value.kind, OptValueKind::BranchFlow { .. })
     });
@@ -214,8 +225,8 @@ fn generate_stamp_file(
             format_f64(LIMEXP_MAX)
         ));
     }
-    if ddt_slots.len() > 0 {
-        emit_ddt_helpers(&mut out);
+    if ddt_slots.len() > 0 || has_idt_slots {
+        emit_transient_state_helpers(ddt_slots, &mut out);
     }
     out.push_str("impl Instance {\n");
     out.push_str(
@@ -237,13 +248,27 @@ fn generate_stamp_file(
         out.push_str("        let param_given = self.param_given.as_ref();\n");
     }
     out.push_str("        let multiplicity = self.multiplicity;\n");
-    if ddt_slots.len() > 0 {
+    if ddt_slots.len() > 0 || has_idt_slots {
         out.push_str("        let timestep = self.timestep;\n");
+    }
+    if ddt_slots.len() > 0 {
         out.push_str("        let ddt_state_current = self.ddt_state_current.as_mut();\n");
         out.push_str("        let ddt_state_previous = self.ddt_state_previous.as_mut();\n");
         out.push_str("        let ddt_state_initialized = self.ddt_state_initialized.as_mut();\n");
+    }
+    if has_idt_slots {
+        out.push_str("        let idt_state_current = self.idt_state_current.as_mut();\n");
+        out.push_str("        let idt_state_previous = self.idt_state_previous.as_mut();\n");
+        out.push_str("        let idt_state_initialized = self.idt_state_initialized.as_mut();\n");
+    }
+    if ddt_slots.len() > 0 || has_idt_slots {
         out.push_str("        let ddt_active = timestep.abs() > Instance::DDT_EPSILON;\n");
+    }
+    if ddt_slots.len() > 0 {
         out.push_str("        let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };\n");
+    }
+    if has_idt_slots {
+        out.push_str("        let idt_scale = if ddt_active { timestep } else { 0.0 };\n");
     }
 
     let stamp_context = ValueEmitContext {
@@ -270,7 +295,14 @@ fn generate_stamp_file(
         out.push('\n');
     }
 
-    emit_current_stamps(artifact, &roots, static_cache, Some(ddt_slots), &mut out)?;
+    emit_current_stamps(
+        artifact,
+        parameter_fields,
+        &roots,
+        static_cache,
+        Some(ddt_slots),
+        &mut out,
+    )?;
 
     out.push_str("    }\n\n");
     let reactive_roots = ddt_equation_roots(artifact, &roots);
@@ -314,32 +346,65 @@ fn generate_stamp_file(
     Ok(out)
 }
 
-fn emit_ddt_helpers(out: &mut String) {
-    out.push_str("#[inline]\n");
-    out.push_str("fn eval_ddt<const STATE_COUNT: usize>(\n");
-    out.push_str("    current: &mut [f64; STATE_COUNT],\n");
-    out.push_str("    previous: &mut [f64; STATE_COUNT],\n");
-    out.push_str("    initialized: &mut [bool; STATE_COUNT],\n");
-    out.push_str("    ddt_active: bool,\n");
-    out.push_str("    ddt_scale: f64,\n");
-    out.push_str("    slot: usize,\n");
-    out.push_str("    value: f64,\n");
-    out.push_str(") -> f64 {\n");
-    out.push_str(
-        "    debug_assert!(slot < STATE_COUNT, \"generated ddt state slot out of range\");\n",
-    );
-    out.push_str(
-        "    let previous_value = if initialized[slot] { previous[slot] } else { value };\n",
-    );
-    out.push_str("    current[slot] = value;\n");
-    out.push_str("    if ddt_active {\n");
-    out.push_str("        (value - previous_value) * ddt_scale\n");
-    out.push_str("    } else {\n");
-    out.push_str("        previous[slot] = value;\n");
-    out.push_str("        initialized[slot] = true;\n");
-    out.push_str("        0.0\n");
-    out.push_str("    }\n");
-    out.push_str("}\n\n");
+fn emit_transient_state_helpers(ddt_slots: &DdtSlots, out: &mut String) {
+    if ddt_slots.len() > 0 {
+        out.push_str("#[inline]\n");
+        out.push_str("fn eval_ddt<const STATE_COUNT: usize>(\n");
+        out.push_str("    current: &mut [f64; STATE_COUNT],\n");
+        out.push_str("    previous: &mut [f64; STATE_COUNT],\n");
+        out.push_str("    initialized: &mut [bool; STATE_COUNT],\n");
+        out.push_str("    ddt_active: bool,\n");
+        out.push_str("    ddt_scale: f64,\n");
+        out.push_str("    slot: usize,\n");
+        out.push_str("    value: f64,\n");
+        out.push_str(") -> f64 {\n");
+        out.push_str(
+            "    debug_assert!(slot < STATE_COUNT, \"generated ddt state slot out of range\");\n",
+        );
+        out.push_str(
+            "    let previous_value = if initialized[slot] { previous[slot] } else { value };\n",
+        );
+        out.push_str("    current[slot] = value;\n");
+        out.push_str("    if ddt_active {\n");
+        out.push_str("        (value - previous_value) * ddt_scale\n");
+        out.push_str("    } else {\n");
+        out.push_str("        previous[slot] = value;\n");
+        out.push_str("        initialized[slot] = true;\n");
+        out.push_str("        0.0\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
+    }
+    if ddt_slots.idt_len() > 0 {
+        out.push_str("#[inline]\n");
+        out.push_str("fn eval_idt<const STATE_COUNT: usize>(\n");
+        out.push_str("    current: &mut [f64; STATE_COUNT],\n");
+        out.push_str("    previous: &mut [f64; STATE_COUNT],\n");
+        out.push_str("    initialized: &mut [bool; STATE_COUNT],\n");
+        out.push_str("    ddt_active: bool,\n");
+        out.push_str("    idt_scale: f64,\n");
+        out.push_str("    slot: usize,\n");
+        out.push_str("    value: f64,\n");
+        out.push_str("    ic: f64,\n");
+        out.push_str(") -> f64 {\n");
+        out.push_str(
+            "    debug_assert!(slot < STATE_COUNT, \"generated idt state slot out of range\");\n",
+        );
+        out.push_str(
+            "    let previous_value = if initialized[slot] { previous[slot] } else { ic };\n",
+        );
+        out.push_str("    let current_value = if ddt_active {\n");
+        out.push_str("        previous_value + value * idt_scale\n");
+        out.push_str("    } else {\n");
+        out.push_str("        ic\n");
+        out.push_str("    };\n");
+        out.push_str("    current[slot] = current_value;\n");
+        out.push_str("    if !ddt_active {\n");
+        out.push_str("        previous[slot] = current_value;\n");
+        out.push_str("        initialized[slot] = true;\n");
+        out.push_str("    }\n");
+        out.push_str("    current_value\n");
+        out.push_str("}\n\n");
+    }
 }
 
 fn scalar_model_uses_limexp(artifact: &CanonicalIrArtifact) -> bool {
@@ -537,7 +602,7 @@ pub(super) fn scalarizable_current_equation_roots(
     let roots = available_scalar_equation_roots(artifact);
     let mut selected = HashMap::new();
     for equation in &artifact.mir.equations {
-        if equation_ddt_expr(artifact, equation)?.is_some() {
+        if equation_transient_operator(artifact, equation)?.is_some() {
             continue;
         }
         let Some(root) = roots.get(&equation.id).copied() else {
@@ -561,6 +626,9 @@ pub(super) fn scalarizable_potential_equation_roots(
     let mut selected = HashMap::new();
     for equation in &artifact.mir.equations {
         if equation.kind != MirEquationKind::Potential {
+            continue;
+        }
+        if equation_transient_operator(artifact, equation)?.is_some() {
             continue;
         }
         let Some(root) = roots.get(&equation.id).copied() else {
@@ -592,6 +660,39 @@ pub(super) fn scalarizable_ddt_current_equation_roots(
         match validate_scalar_current_equation(artifact, equation, root)
             .and_then(|()| scalar_node_derivatives(artifact, equation, root).map(|_| ()))
         {
+            Ok(()) => {
+                selected.insert(equation.id, root);
+            }
+            Err(error) if error.is_unsupported() => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(selected)
+}
+
+pub(super) fn scalarizable_idt_equation_roots(
+    artifact: &CanonicalIrArtifact,
+) -> Result<HashMap<EquationId, ValueId>, RustBackendError> {
+    let roots = available_scalar_equation_roots(artifact);
+    let mut selected = HashMap::new();
+    for equation in &artifact.mir.equations {
+        if !matches!(
+            equation_transient_operator(artifact, equation)?,
+            Some(ScalarTransientOperator::Idt { .. })
+        ) {
+            continue;
+        }
+        let Some(root) = roots.get(&equation.id).copied() else {
+            continue;
+        };
+        let validated = match equation.kind {
+            MirEquationKind::Current => validate_scalar_current_equation(artifact, equation, root),
+            MirEquationKind::Potential => {
+                validate_scalar_potential_equation(artifact, equation, root)
+            }
+            MirEquationKind::Indirect => Err(unsupported(artifact, "indirect contributions")),
+        };
+        match validated {
             Ok(()) => {
                 selected.insert(equation.id, root);
             }
@@ -638,25 +739,35 @@ pub(super) fn emit_static_current_values(
 
 pub(super) fn emit_static_current_stamps(
     artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
     roots: &HashMap<EquationId, ValueId>,
     static_cache: &ScalarStaticCache,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
-    emit_current_stamps(artifact, roots, static_cache, None, out)
+    emit_current_stamps(artifact, parameter_fields, roots, static_cache, None, out)
 }
 
 pub(super) fn emit_ddt_current_stamps(
     artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
     roots: &HashMap<EquationId, ValueId>,
     static_cache: &ScalarStaticCache,
     ddt_slots: &DdtSlots,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
-    emit_current_stamps(artifact, roots, static_cache, Some(ddt_slots), out)
+    emit_current_stamps(
+        artifact,
+        parameter_fields,
+        roots,
+        static_cache,
+        Some(ddt_slots),
+        out,
+    )
 }
 
 fn emit_current_stamps(
     artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
     roots: &HashMap<EquationId, ValueId>,
     static_cache: &ScalarStaticCache,
     ddt_slots: Option<&DdtSlots>,
@@ -668,10 +779,26 @@ fn emit_current_stamps(
         };
         match equation.kind {
             MirEquationKind::Current => {
-                emit_current_stamp(artifact, equation, root, static_cache, ddt_slots, out)?;
+                emit_current_stamp(
+                    artifact,
+                    parameter_fields,
+                    equation,
+                    root,
+                    static_cache,
+                    ddt_slots,
+                    out,
+                )?;
             }
             MirEquationKind::Potential => {
-                emit_potential_stamp(artifact, equation, root, static_cache, out)?;
+                emit_potential_stamp(
+                    artifact,
+                    parameter_fields,
+                    equation,
+                    root,
+                    static_cache,
+                    ddt_slots,
+                    out,
+                )?;
             }
             MirEquationKind::Indirect => {
                 return Err(unsupported(artifact, "indirect contributions"));
@@ -694,6 +821,126 @@ pub(super) fn emit_current_reactive_stamps(
         emit_current_reactive_stamp(artifact, equation, root, static_cache, out)?;
     }
     Ok(())
+}
+
+pub(super) fn scalar_transient_current_lowered_variable(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    root: ValueId,
+    static_cache: &ScalarStaticCache,
+    branch_axis_count: usize,
+    ddt_slots: Option<&DdtSlots>,
+) -> Result<LoweredVariable, RustBackendError> {
+    let root_value = artifact
+        .opt
+        .values
+        .get(usize::from(root))
+        .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
+    let derivatives = scalar_derivatives(artifact, equation, root)?;
+
+    let mut node_derivatives = vec!["0.0".to_string(); artifact.mir.nodes.len()];
+    for (node, _) in &derivatives.nodes {
+        node_derivatives[*node as usize] = derivative_name(root, *node);
+    }
+    let mut branch_derivatives = vec!["0.0".to_string(); branch_axis_count];
+    for (branch, _) in &derivatives.branches {
+        let index = *branch as usize;
+        if index >= branch_axis_count {
+            return Err(internal(
+                artifact,
+                format!("branch derivative lane {branch} exceeds axis count {branch_axis_count}"),
+            ));
+        }
+        branch_derivatives[index] = branch_derivative_name(root, *branch);
+    }
+
+    let root_name = cached_or_local_value_name(root, static_cache);
+    let mut value = current_root_expr(root_value.value_type, &root_name);
+    let mut derivative_scale = "1.0";
+    match equation_transient_operator(artifact, equation)? {
+        Some(ScalarTransientOperator::Ddt { operator }) => {
+            let slots =
+                ddt_slots.ok_or_else(|| unsupported(artifact, "ddt scalar cache context"))?;
+            if slots.slot_for(operator).is_none() {
+                return Err(internal(
+                    artifact,
+                    format!("ddt expression {operator} has no generated state slot"),
+                ));
+            }
+            value = format!("{}_ddt", value_name(root));
+            derivative_scale = "ddt_scale";
+        }
+        Some(ScalarTransientOperator::Idt { operator, .. }) => {
+            let slots =
+                ddt_slots.ok_or_else(|| unsupported(artifact, "idt scalar cache context"))?;
+            if slots.idt_slot_for(operator).is_none() {
+                return Err(internal(
+                    artifact,
+                    format!("idt expression {operator} has no generated state slot"),
+                ));
+            }
+            value = format!("{}_idt", value_name(root));
+            derivative_scale = "idt_scale";
+        }
+        None => {}
+    }
+    if derivative_scale != "1.0" {
+        for derivative in &mut node_derivatives {
+            if derivative != "0.0" {
+                *derivative = scaled_derivative_expr(derivative.clone(), derivative_scale);
+            }
+        }
+        for derivative in &mut branch_derivatives {
+            if derivative != "0.0" {
+                *derivative = scaled_derivative_expr(derivative.clone(), derivative_scale);
+            }
+        }
+    }
+
+    Ok(LoweredVariable {
+        value,
+        condition: None,
+        derivatives: node_derivatives,
+        branch_derivatives,
+        has_reactive: false,
+        reactive_value: "0.0".to_string(),
+        reactive_derivatives: vec!["0.0".to_string(); artifact.mir.nodes.len()],
+        reactive_branch_derivatives: vec!["0.0".to_string(); branch_axis_count],
+    })
+}
+
+pub(super) fn scalar_reactive_current_lowered_variable(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    root: ValueId,
+    static_cache: &ScalarStaticCache,
+    branch_axis_count: usize,
+) -> Result<LoweredVariable, RustBackendError> {
+    let root_value = artifact
+        .opt
+        .values
+        .get(usize::from(root))
+        .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
+    let derivatives = scalar_node_derivatives(artifact, equation, root)?;
+
+    let mut node_derivatives = vec!["0.0".to_string(); artifact.mir.nodes.len()];
+    for (node, _) in &derivatives {
+        node_derivatives[*node as usize] = derivative_name(root, *node);
+    }
+    let branch_derivatives = vec!["0.0".to_string(); branch_axis_count];
+    let root_name = cached_or_local_value_name(root, static_cache);
+    let value = current_root_expr(root_value.value_type, &root_name);
+
+    Ok(LoweredVariable {
+        value: value.clone(),
+        condition: None,
+        derivatives: node_derivatives.clone(),
+        branch_derivatives: branch_derivatives.clone(),
+        has_reactive: true,
+        reactive_value: value,
+        reactive_derivatives: node_derivatives,
+        reactive_branch_derivatives: branch_derivatives,
+    })
 }
 
 fn scalar_derivatives(
@@ -734,8 +981,54 @@ fn scalar_node_derivatives(
     Ok(derivatives.nodes)
 }
 
+fn emit_transient_operator_root(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    equation: &MirEquation,
+    root: ValueId,
+    root_expr: String,
+    ddt_slots: Option<&DdtSlots>,
+    out: &mut String,
+) -> Result<(String, String), RustBackendError> {
+    match equation_transient_operator(artifact, equation)? {
+        Some(ScalarTransientOperator::Ddt { operator }) => {
+            let slots =
+                ddt_slots.ok_or_else(|| unsupported(artifact, "ddt scalar stamp context"))?;
+            let slot = slots.slot_for(operator).ok_or_else(|| {
+                internal(
+                    artifact,
+                    format!("ddt expression {operator} has no generated state slot"),
+                )
+            })?;
+            let ddt_value = format!("{}_ddt", value_name(root));
+            out.push_str(&format!(
+                "        let {ddt_value}: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, {slot}, {root_expr});\n"
+            ));
+            Ok((ddt_value, "ddt_scale".to_string()))
+        }
+        Some(ScalarTransientOperator::Idt { operator, ic }) => {
+            let slots =
+                ddt_slots.ok_or_else(|| unsupported(artifact, "idt scalar stamp context"))?;
+            let slot = slots.idt_slot_for(operator).ok_or_else(|| {
+                internal(
+                    artifact,
+                    format!("idt expression {operator} has no generated state slot"),
+                )
+            })?;
+            let ic_expr = emit_idt_ic_expr(artifact, parameter_fields, ic)?;
+            let idt_value = format!("{}_idt", value_name(root));
+            out.push_str(&format!(
+                "        let {idt_value}: f64 = eval_idt(idt_state_current, idt_state_previous, idt_state_initialized, ddt_active, idt_scale, {slot}, {root_expr}, {ic_expr});\n"
+            ));
+            Ok((idt_value, "idt_scale".to_string()))
+        }
+        None => Ok((root_expr, "1.0".to_string())),
+    }
+}
+
 fn emit_current_stamp(
     artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
     equation: &MirEquation,
     root: ValueId,
     static_cache: &ScalarStaticCache,
@@ -767,23 +1060,16 @@ fn emit_current_stamp(
     let pos = optional_node_local_expr(equation.branch.pos_node);
     let neg = optional_node_local_expr(equation.branch.neg_node);
     let root_name = cached_or_local_value_name(root, static_cache);
-    let mut root_expr = current_root_expr(root_value.value_type, &root_name);
-    let mut derivative_scale = "1.0".to_string();
-    if let Some(ddt_expr) = equation_ddt_expr(artifact, equation)? {
-        let slots = ddt_slots.ok_or_else(|| unsupported(artifact, "ddt scalar stamp context"))?;
-        let slot = slots.slot_for(ddt_expr).ok_or_else(|| {
-            internal(
-                artifact,
-                format!("ddt expression {ddt_expr} has no generated state slot"),
-            )
-        })?;
-        let ddt_value = format!("{}_ddt", value_name(root));
-        out.push_str(&format!(
-            "        let {ddt_value}: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, {slot}, {root_expr});\n"
-        ));
-        root_expr = ddt_value;
-        derivative_scale = "ddt_scale".to_string();
-    }
+    let root_expr = current_root_expr(root_value.value_type, &root_name);
+    let (root_expr, derivative_scale) = emit_transient_operator_root(
+        artifact,
+        parameter_fields,
+        equation,
+        root,
+        root_expr,
+        ddt_slots,
+        out,
+    )?;
     match (
         derivatives.nodes.as_slice(),
         derivatives.branches.as_slice(),
@@ -948,9 +1234,11 @@ fn emit_current_stamp(
 
 fn emit_potential_stamp(
     artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
     equation: &MirEquation,
     root: ValueId,
     static_cache: &ScalarStaticCache,
+    ddt_slots: Option<&DdtSlots>,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     let root_value = artifact
@@ -980,6 +1268,15 @@ fn emit_potential_stamp(
     let neg = optional_node_local_expr(equation.branch.neg_node);
     let root_name = cached_or_local_value_name(root, static_cache);
     let root_expr = current_root_expr(root_value.value_type, &root_name);
+    let (root_expr, derivative_scale) = emit_transient_operator_root(
+        artifact,
+        parameter_fields,
+        equation,
+        root,
+        root_expr,
+        ddt_slots,
+        out,
+    )?;
     out.push_str("        stamper.stamp_potential_branch_local(\n");
     out.push_str(&format!("            {pos},\n"));
     out.push_str(&format!("            {neg},\n"));
@@ -1002,7 +1299,10 @@ fn emit_potential_stamp(
             out.push_str(&format!("            {branch_slot},\n"));
             out.push_str(&format!("            {root_expr},\n"));
             out.push_str(&format!("            {node0},\n"));
-            out.push_str(&format!("            {},\n", derivative_name(root, *node0)));
+            out.push_str(&format!(
+                "            {},\n",
+                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+            ));
             out.push_str("        );\n");
         }
         ([(node0, _), (node1, _)], []) => {
@@ -1010,9 +1310,15 @@ fn emit_potential_stamp(
             out.push_str(&format!("            {branch_slot},\n"));
             out.push_str(&format!("            {root_expr},\n"));
             out.push_str(&format!("            {node0},\n"));
-            out.push_str(&format!("            {},\n", derivative_name(root, *node0)));
+            out.push_str(&format!(
+                "            {},\n",
+                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+            ));
             out.push_str(&format!("            {node1},\n"));
-            out.push_str(&format!("            {},\n", derivative_name(root, *node1)));
+            out.push_str(&format!(
+                "            {},\n",
+                scaled_derivative_expr(derivative_name(root, *node1), derivative_scale.as_str())
+            ));
             out.push_str("        );\n");
         }
         ([], [(branch0, _)]) => {
@@ -1022,7 +1328,10 @@ fn emit_potential_stamp(
             out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                branch_derivative_name(root, *branch0)
+                scaled_derivative_expr(
+                    branch_derivative_name(root, *branch0),
+                    derivative_scale.as_str()
+                )
             ));
             out.push_str("        );\n");
         }
@@ -1033,12 +1342,18 @@ fn emit_potential_stamp(
             out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                branch_derivative_name(root, *branch0)
+                scaled_derivative_expr(
+                    branch_derivative_name(root, *branch0),
+                    derivative_scale.as_str()
+                )
             ));
             out.push_str(&format!("            {branch1},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                branch_derivative_name(root, *branch1)
+                scaled_derivative_expr(
+                    branch_derivative_name(root, *branch1),
+                    derivative_scale.as_str()
+                )
             ));
             out.push_str("        );\n");
         }
@@ -1047,11 +1362,17 @@ fn emit_potential_stamp(
             out.push_str(&format!("            {branch_slot},\n"));
             out.push_str(&format!("            {root_expr},\n"));
             out.push_str(&format!("            {node0},\n"));
-            out.push_str(&format!("            {},\n", derivative_name(root, *node0)));
+            out.push_str(&format!(
+                "            {},\n",
+                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+            ));
             out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                branch_derivative_name(root, *branch0)
+                scaled_derivative_expr(
+                    branch_derivative_name(root, *branch0),
+                    derivative_scale.as_str()
+                )
             ));
             out.push_str("        );\n");
         }
@@ -1060,13 +1381,22 @@ fn emit_potential_stamp(
             out.push_str(&format!("            {branch_slot},\n"));
             out.push_str(&format!("            {root_expr},\n"));
             out.push_str(&format!("            {node0},\n"));
-            out.push_str(&format!("            {},\n", derivative_name(root, *node0)));
+            out.push_str(&format!(
+                "            {},\n",
+                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+            ));
             out.push_str(&format!("            {node1},\n"));
-            out.push_str(&format!("            {},\n", derivative_name(root, *node1)));
+            out.push_str(&format!(
+                "            {},\n",
+                scaled_derivative_expr(derivative_name(root, *node1), derivative_scale.as_str())
+            ));
             out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                branch_derivative_name(root, *branch0)
+                scaled_derivative_expr(
+                    branch_derivative_name(root, *branch0),
+                    derivative_scale.as_str()
+                )
             ));
             out.push_str("        );\n");
         }
@@ -1078,6 +1408,7 @@ fn emit_potential_stamp(
                 &derivatives.branches,
                 branch_slot,
                 &root_expr,
+                derivative_scale.as_str(),
                 out,
             );
         }
@@ -1240,6 +1571,7 @@ fn emit_wide_potential_stamp(
     branch_derivatives: &[(u32, ValueId)],
     branch_slot: usize,
     root_expr: &str,
+    derivative_scale: &str,
     out: &mut String,
 ) {
     if node_derivatives.len() == artifact.mir.nodes.len()
@@ -1247,11 +1579,13 @@ fn emit_wide_potential_stamp(
     {
         let mut node_values = vec!["0.0".to_string(); artifact.mir.nodes.len()];
         for (node, _) in node_derivatives {
-            node_values[*node as usize] = derivative_name(root, *node);
+            node_values[*node as usize] =
+                scaled_derivative_expr(derivative_name(root, *node), derivative_scale);
         }
         let mut branch_values = vec!["0.0".to_string(); artifact.mir.branch_unknowns.len()];
         for (branch, _) in branch_derivatives {
-            branch_values[*branch as usize] = branch_derivative_name(root, *branch);
+            branch_values[*branch as usize] =
+                scaled_derivative_expr(branch_derivative_name(root, *branch), derivative_scale);
         }
         out.push_str(&format!(
             "        let {}_node_derivatives: [f64; {}] = [{}];\n",
@@ -1285,7 +1619,7 @@ fn emit_wide_potential_stamp(
             .join(", ");
         let node_values = node_derivatives
             .iter()
-            .map(|(node, _)| derivative_name(root, *node))
+            .map(|(node, _)| scaled_derivative_expr(derivative_name(root, *node), derivative_scale))
             .collect::<Vec<_>>()
             .join(", ");
         let branch_indices = branch_derivatives
@@ -1295,7 +1629,9 @@ fn emit_wide_potential_stamp(
             .join(", ");
         let branch_values = branch_derivatives
             .iter()
-            .map(|(branch, _)| branch_derivative_name(root, *branch))
+            .map(|(branch, _)| {
+                scaled_derivative_expr(branch_derivative_name(root, *branch), derivative_scale)
+            })
             .collect::<Vec<_>>()
             .join(", ");
         if node_derivatives.len() + branch_derivatives.len() <= SPARSE_STAMP_DERIVATIVE_THRESHOLD {
@@ -1576,6 +1912,238 @@ fn emit_value_expr(
     Ok(expr)
 }
 
+fn emit_idt_ic_expr(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    ic: Option<ExprId>,
+) -> Result<String, RustBackendError> {
+    match ic {
+        Some(ic) => emit_value_only_expr(artifact, parameter_fields, ic),
+        None => Ok("0.0".to_string()),
+    }
+}
+
+fn emit_value_only_expr(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    expr: ExprId,
+) -> Result<String, RustBackendError> {
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(expr))
+        .ok_or_else(|| unsupported(artifact, format!("missing expression {expr}")))?;
+    match &expression.kind {
+        HirExprKind::Number { value, .. } => Ok(format_f64(*value)),
+        HirExprKind::Identifier { name } => {
+            let parameter = artifact
+                .mir
+                .parameters
+                .iter()
+                .find(|parameter| parameter.name.as_str() == name.as_str())
+                .ok_or_else(|| {
+                    unsupported(
+                        artifact,
+                        format!("idt initial condition identifier '{name}'"),
+                    )
+                })?;
+            emit_parameter_expr(artifact, parameter_fields, parameter.id)
+        }
+        HirExprKind::Unary { op, operand } => {
+            let operand = emit_value_only_expr(artifact, parameter_fields, *operand)?;
+            match op.as_str() {
+                "Pos" => Ok(operand),
+                "Neg" => Ok(format!("(-{operand})")),
+                "Not" => Ok(format!(
+                    "if {} {{ 0.0 }} else {{ 1.0 }}",
+                    value_truth_expr(&operand)
+                )),
+                _ => Err(unsupported(
+                    artifact,
+                    format!("idt initial condition unary operator {op}"),
+                )),
+            }
+        }
+        HirExprKind::Binary { op, left, right } => {
+            let left = emit_value_only_expr(artifact, parameter_fields, *left)?;
+            let right = emit_value_only_expr(artifact, parameter_fields, *right)?;
+            let value = match op.as_str() {
+                "Add" => format!("({left} + {right})"),
+                "Sub" => format!("({left} - {right})"),
+                "Mul" => format!("({left} * {right})"),
+                "Div" => format!("({left} / {right})"),
+                "Mod" => format!("({left} % {right})"),
+                "Pow" => format!("({left}).powf({right})"),
+                "Eq" => format!("if {left} == {right} {{ 1.0 }} else {{ 0.0 }}"),
+                "Ne" => format!("if {left} != {right} {{ 1.0 }} else {{ 0.0 }}"),
+                "Lt" => format!("if {left} < {right} {{ 1.0 }} else {{ 0.0 }}"),
+                "Le" => format!("if {left} <= {right} {{ 1.0 }} else {{ 0.0 }}"),
+                "Gt" => format!("if {left} > {right} {{ 1.0 }} else {{ 0.0 }}"),
+                "Ge" => format!("if {left} >= {right} {{ 1.0 }} else {{ 0.0 }}"),
+                "And" => format!(
+                    "if {} && {} {{ 1.0 }} else {{ 0.0 }}",
+                    value_truth_expr(&left),
+                    value_truth_expr(&right)
+                ),
+                "Or" => format!(
+                    "if {} || {} {{ 1.0 }} else {{ 0.0 }}",
+                    value_truth_expr(&left),
+                    value_truth_expr(&right)
+                ),
+                _ => {
+                    return Err(unsupported(
+                        artifact,
+                        format!("idt initial condition binary operator {op}"),
+                    ));
+                }
+            };
+            Ok(value)
+        }
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            let condition = emit_value_only_expr(artifact, parameter_fields, *condition)?;
+            let then_expr = emit_value_only_expr(artifact, parameter_fields, *then_expr)?;
+            let else_expr = emit_value_only_expr(artifact, parameter_fields, *else_expr)?;
+            Ok(format!(
+                "if {} {{ {then_expr} }} else {{ {else_expr} }}",
+                value_truth_expr(&condition)
+            ))
+        }
+        HirExprKind::SystemFunction { name, args } => {
+            emit_value_only_system_function(artifact, parameter_fields, name.as_str(), args)
+        }
+        HirExprKind::Call { name, args } => {
+            emit_value_only_call(artifact, parameter_fields, name.as_str(), args)
+        }
+        HirExprKind::AnalogOperator {
+            op: HirAnalogOperator::Limexp { expr },
+        } => {
+            let expr = emit_value_only_expr(artifact, parameter_fields, *expr)?;
+            Ok(format!(
+                "{{ let limexp_arg = {expr}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {} * (1.0 + (limexp_arg - 80.0)) }} }}",
+                format_f64(LIMEXP_MAX)
+            ))
+        }
+        _ => Err(unsupported(
+            artifact,
+            format!(
+                "idt initial condition expression kind {:?}",
+                &expression.kind
+            ),
+        )),
+    }
+}
+
+fn emit_value_only_system_function(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    name: &str,
+    args: &[ExprId],
+) -> Result<String, RustBackendError> {
+    let normalized = name.to_ascii_lowercase();
+    match normalized.as_str() {
+        "$temperature" if args.is_empty() => Ok("ctx.temperature()".to_string()),
+        "$abstime" | "$realtime" if args.is_empty() => Ok("self.time".to_string()),
+        "$mfactor" if args.is_empty() => Ok("multiplicity".to_string()),
+        "$vt" | "$thermal_vt" if args.is_empty() => Ok("ctx.thermal_voltage()".to_string()),
+        "$vt" | "$thermal_vt" if args.len() == 1 => {
+            let temperature = emit_value_only_expr(artifact, parameter_fields, args[0])?;
+            Ok(format!(
+                "(({temperature}) * {})",
+                format_f64(crate::canonical_ir::opt::THERMAL_VOLTAGE_PER_K)
+            ))
+        }
+        "$param_given" if args.len() == 1 => {
+            let parameter = idt_ic_parameter_arg(artifact, args[0]).ok_or_else(|| {
+                unsupported(artifact, "$param_given idt initial condition argument")
+            })?;
+            Ok(format!(
+                "if param_given[{}] {{ 1.0 }} else {{ 0.0 }}",
+                usize::from(parameter)
+            ))
+        }
+        "$port_connected" if args.len() == 1 => Ok("1.0".to_string()),
+        _ => Err(unsupported(
+            artifact,
+            format!("idt initial condition system function '{name}'"),
+        )),
+    }
+}
+
+fn emit_value_only_call(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    name: &str,
+    args: &[ExprId],
+) -> Result<String, RustBackendError> {
+    if name.eq_ignore_ascii_case("analysis") {
+        return Ok("0.0".to_string());
+    }
+    let normalized = name.to_ascii_lowercase();
+    let mut lowered = Vec::with_capacity(args.len());
+    for arg in args {
+        lowered.push(emit_value_only_expr(artifact, parameter_fields, *arg)?);
+    }
+    let value = match (normalized.as_str(), lowered.as_slice()) {
+        ("abs" | "fabs", [arg]) => format!("{}.abs()", f64_method_receiver(arg)),
+        ("sqrt", [arg]) => format!("{}.sqrt()", f64_method_receiver(arg)),
+        ("exp", [arg]) => format!("{}.exp()", f64_method_receiver(arg)),
+        ("limexp", [arg]) => format!(
+            "{{ let limexp_arg = {arg}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {} * (1.0 + (limexp_arg - 80.0)) }} }}",
+            format_f64(LIMEXP_MAX)
+        ),
+        ("ln" | "log", [arg]) => format!("{}.ln()", f64_method_receiver(arg)),
+        ("log10", [arg]) => format!("{}.log10()", f64_method_receiver(arg)),
+        ("sin", [arg]) => format!("{}.sin()", f64_method_receiver(arg)),
+        ("cos", [arg]) => format!("{}.cos()", f64_method_receiver(arg)),
+        ("tan", [arg]) => format!("{}.tan()", f64_method_receiver(arg)),
+        ("atan", [arg]) => format!("{}.atan()", f64_method_receiver(arg)),
+        ("sinh", [arg]) => format!("{}.sinh()", f64_method_receiver(arg)),
+        ("cosh", [arg]) => format!("{}.cosh()", f64_method_receiver(arg)),
+        ("tanh", [arg]) => format!("{}.tanh()", f64_method_receiver(arg)),
+        ("asinh", [arg]) => format!("{}.asinh()", f64_method_receiver(arg)),
+        ("acosh", [arg]) => format!("{}.acosh()", f64_method_receiver(arg)),
+        ("atanh", [arg]) => format!("{}.atanh()", f64_method_receiver(arg)),
+        ("floor", [arg]) => format!("{}.floor()", f64_method_receiver(arg)),
+        ("ceil", [arg]) => format!("{}.ceil()", f64_method_receiver(arg)),
+        ("pow", [left, right]) => format!("{}.powf({right})", f64_method_receiver(left)),
+        ("min", [left, right]) => format!("{}.min({right})", f64_method_receiver(left)),
+        ("max", [left, right]) => format!("{}.max({right})", f64_method_receiver(left)),
+        ("hypot", [left, right]) => format!("{}.hypot({right})", f64_method_receiver(left)),
+        ("atan2", [left, right]) => format!("{}.atan2({right})", f64_method_receiver(left)),
+        _ => {
+            return Err(unsupported(
+                artifact,
+                format!("idt initial condition function '{name}'"),
+            ));
+        }
+    };
+    Ok(value)
+}
+
+fn idt_ic_parameter_arg(
+    artifact: &CanonicalIrArtifact,
+    expr: ExprId,
+) -> Option<crate::canonical_ir::ParamId> {
+    let expression = artifact.mir.expressions.get(usize::from(expr))?;
+    let HirExprKind::Identifier { name } = &expression.kind else {
+        return None;
+    };
+    artifact
+        .mir
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name.as_str() == name.as_str())
+        .map(|parameter| parameter.id)
+}
+
+fn value_truth_expr(value: &str) -> String {
+    format!("(({value}) != 0.0)")
+}
+
 fn emit_parameter_expr(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
@@ -1658,24 +2226,24 @@ fn emit_unary_expr(
         OptUnaryOp::Pos => input,
         OptUnaryOp::Neg => format!("(-{input})"),
         OptUnaryOp::Not => format!("(!{})", truth_expr(input, input_type)),
-        OptUnaryOp::Exp => format!("{input}.exp()"),
+        OptUnaryOp::Exp => format!("{}.exp()", f64_method_receiver(&input)),
         OptUnaryOp::LimExp => format!(
             "{{ let limexp_arg = {input}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {limexp_max} * (1.0 + (limexp_arg - 80.0)) }} }}"
         ),
         OptUnaryOp::LimExpDerivative => format!(
             "{{ let limexp_arg = {input}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {limexp_max} }} }}"
         ),
-        OptUnaryOp::Ln => format!("{input}.ln()"),
-        OptUnaryOp::Sqrt => format!("{input}.sqrt()"),
-        OptUnaryOp::Abs => format!("{input}.abs()"),
-        OptUnaryOp::Sin => format!("{input}.sin()"),
-        OptUnaryOp::Cos => format!("{input}.cos()"),
-        OptUnaryOp::Tan => format!("{input}.tan()"),
-        OptUnaryOp::Sinh => format!("{input}.sinh()"),
-        OptUnaryOp::Cosh => format!("{input}.cosh()"),
-        OptUnaryOp::Tanh => format!("{input}.tanh()"),
-        OptUnaryOp::Atan => format!("{input}.atan()"),
-        OptUnaryOp::Asinh => format!("{input}.asinh()"),
+        OptUnaryOp::Ln => format!("{}.ln()", f64_method_receiver(&input)),
+        OptUnaryOp::Sqrt => format!("{}.sqrt()", f64_method_receiver(&input)),
+        OptUnaryOp::Abs => format!("{}.abs()", f64_method_receiver(&input)),
+        OptUnaryOp::Sin => format!("{}.sin()", f64_method_receiver(&input)),
+        OptUnaryOp::Cos => format!("{}.cos()", f64_method_receiver(&input)),
+        OptUnaryOp::Tan => format!("{}.tan()", f64_method_receiver(&input)),
+        OptUnaryOp::Sinh => format!("{}.sinh()", f64_method_receiver(&input)),
+        OptUnaryOp::Cosh => format!("{}.cosh()", f64_method_receiver(&input)),
+        OptUnaryOp::Tanh => format!("{}.tanh()", f64_method_receiver(&input)),
+        OptUnaryOp::Atan => format!("{}.atan()", f64_method_receiver(&input)),
+        OptUnaryOp::Asinh => format!("{}.asinh()", f64_method_receiver(&input)),
     }
 }
 
@@ -1736,6 +2304,16 @@ fn ddt_equation_roots(
         .collect()
 }
 
+fn equation_transient_operator(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+) -> Result<Option<ScalarTransientOperator>, RustBackendError> {
+    if let Some(expr) = equation_ddt_expr(artifact, equation)? {
+        return Ok(Some(ScalarTransientOperator::Ddt { operator: expr }));
+    }
+    equation_idt_expr(artifact, equation)
+}
+
 fn equation_ddt_expr(
     artifact: &CanonicalIrArtifact,
     equation: &MirEquation,
@@ -1769,6 +2347,60 @@ fn equation_ddt_expr(
                     artifact,
                     format!("ddt expects one operand, found {}", args.len()),
                 ))
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+fn equation_idt_expr(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+) -> Result<Option<ScalarTransientOperator>, RustBackendError> {
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(equation.expression.id))
+        .ok_or_else(|| {
+            unsupported(
+                artifact,
+                format!("missing equation expression {}", equation.expression.id),
+            )
+        })?;
+    match &expression.kind {
+        HirExprKind::AnalogOperator {
+            op:
+                HirAnalogOperator::Idt {
+                    ic: _,
+                    assert: Some(_),
+                    ..
+                },
+        } => Err(unsupported(artifact, "idt assert argument")),
+        HirExprKind::AnalogOperator {
+            op: HirAnalogOperator::Idt {
+                abstol: Some(_), ..
+            },
+        } => Err(unsupported(artifact, "idt abstol argument")),
+        HirExprKind::AnalogOperator {
+            op: HirAnalogOperator::Idt { expr: _, ic, .. },
+        } => Ok(Some(ScalarTransientOperator::Idt {
+            operator: equation.expression.id,
+            ic: *ic,
+        })),
+        HirExprKind::Call { name, args } if name.eq_ignore_ascii_case("idt") => {
+            match args.as_slice() {
+                [_expr] => Ok(Some(ScalarTransientOperator::Idt {
+                    operator: equation.expression.id,
+                    ic: None,
+                })),
+                [_expr, ic] => Ok(Some(ScalarTransientOperator::Idt {
+                    operator: equation.expression.id,
+                    ic: Some(*ic),
+                })),
+                _ => Err(unsupported(
+                    artifact,
+                    format!("idt expects one or two operands, found {}", args.len()),
+                )),
             }
         }
         _ => Ok(None),
@@ -2191,4 +2823,8 @@ fn format_f64(value: f64) -> String {
     } else {
         format!("{value:?}")
     }
+}
+
+fn f64_method_receiver(value: &str) -> String {
+    format!("(({value}) as f64)")
 }

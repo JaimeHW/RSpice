@@ -429,6 +429,8 @@ impl<'a> GeneratedEvalContext<'a> {
 pub struct GeneratedStaticStampCache {
     node_count: usize,
     branch_count: usize,
+    node_axes: Vec<Option<usize>>,
+    branch_axes: Vec<Option<usize>>,
     axis_matrix_indices: Vec<Option<usize>>,
     matrix_axis_lookup: Vec<(usize, usize)>,
     slots: Vec<Option<CscIndex>>,
@@ -500,6 +502,29 @@ impl GeneratedStaticStampCache {
                 .map(|branch| Self::branch_matrix_index(num_nodes, branch)),
         );
 
+        self.node_axes.clear();
+        self.node_axes.reserve(self.node_count);
+        self.node_axes.extend(
+            self.axis_matrix_indices
+                .iter()
+                .take(self.node_count)
+                .enumerate()
+                .map(|(axis, matrix_index)| matrix_index.is_some().then_some(axis)),
+        );
+
+        self.branch_axes.clear();
+        self.branch_axes.reserve(self.branch_count);
+        self.branch_axes.extend(
+            self.axis_matrix_indices
+                .iter()
+                .skip(self.node_count)
+                .take(self.branch_count)
+                .enumerate()
+                .map(|(branch, matrix_index)| {
+                    matrix_index.is_some().then_some(self.node_count + branch)
+                }),
+        );
+
         self.matrix_axis_lookup.clear();
         self.matrix_axis_lookup.extend(
             self.axis_matrix_indices
@@ -519,27 +544,12 @@ impl GeneratedStaticStampCache {
 
     #[inline]
     fn node_axis(&self, node_index: usize) -> Option<usize> {
-        (node_index < self.node_count
-            && self
-                .axis_matrix_indices
-                .get(node_index)
-                .copied()
-                .flatten()
-                .is_some())
-        .then_some(node_index)
+        self.node_axes.get(node_index).copied().flatten()
     }
 
     #[inline]
     fn branch_axis(&self, branch_index: usize) -> Option<usize> {
-        let axis = self.node_count.checked_add(branch_index)?;
-        (branch_index < self.branch_count
-            && self
-                .axis_matrix_indices
-                .get(axis)
-                .copied()
-                .flatten()
-                .is_some())
-        .then_some(axis)
+        self.branch_axes.get(branch_index).copied().flatten()
     }
 
     #[inline]
@@ -590,14 +600,8 @@ impl GeneratedStaticStampCache {
 }
 
 enum GeneratedMatrixTarget<'a> {
-    Static {
-        matrix: &'a mut StaticMatrix,
-        cache: Option<&'a GeneratedStaticStampCache>,
-    },
-    AcReal {
-        matrix: &'a mut ComplexMatrix,
-        cache: Option<&'a GeneratedStaticStampCache>,
-    },
+    Static { matrix: &'a mut StaticMatrix },
+    AcReal { matrix: &'a mut ComplexMatrix },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -632,6 +636,7 @@ enum GeneratedDerivativeAxis {
 
 pub struct GeneratedStamper<'a> {
     matrix: GeneratedMatrixTarget<'a>,
+    cache: Option<&'a GeneratedStaticStampCache>,
     rhs: Option<&'a mut [Value]>,
     voltages: &'a [Value],
     num_nodes: usize,
@@ -646,10 +651,8 @@ impl<'a> GeneratedStamper<'a> {
         num_nodes: usize,
     ) -> Self {
         Self {
-            matrix: GeneratedMatrixTarget::Static {
-                matrix,
-                cache: None,
-            },
+            matrix: GeneratedMatrixTarget::Static { matrix },
+            cache: None,
             rhs: Some(rhs),
             voltages,
             num_nodes,
@@ -665,10 +668,8 @@ impl<'a> GeneratedStamper<'a> {
         cache: &'a GeneratedStaticStampCache,
     ) -> Self {
         Self {
-            matrix: GeneratedMatrixTarget::Static {
-                matrix,
-                cache: Some(cache),
-            },
+            matrix: GeneratedMatrixTarget::Static { matrix },
+            cache: Some(cache),
             rhs: Some(rhs),
             voltages,
             num_nodes,
@@ -682,10 +683,8 @@ impl<'a> GeneratedStamper<'a> {
         num_nodes: usize,
     ) -> Self {
         Self {
-            matrix: GeneratedMatrixTarget::AcReal {
-                matrix,
-                cache: None,
-            },
+            matrix: GeneratedMatrixTarget::AcReal { matrix },
+            cache: None,
             rhs: None,
             voltages,
             num_nodes,
@@ -700,10 +699,8 @@ impl<'a> GeneratedStamper<'a> {
         cache: &'a GeneratedStaticStampCache,
     ) -> Self {
         Self {
-            matrix: GeneratedMatrixTarget::AcReal {
-                matrix,
-                cache: Some(cache),
-            },
+            matrix: GeneratedMatrixTarget::AcReal { matrix },
+            cache: Some(cache),
             rhs: None,
             voltages,
             num_nodes,
@@ -2181,10 +2178,7 @@ impl<'a> GeneratedStamper<'a> {
 
     #[inline]
     fn static_cache(&self) -> Option<&GeneratedStaticStampCache> {
-        match &self.matrix {
-            GeneratedMatrixTarget::Static { cache, .. } => *cache,
-            GeneratedMatrixTarget::AcReal { cache, .. } => *cache,
-        }
+        self.cache
     }
 
     #[inline]
@@ -2224,30 +2218,34 @@ impl<'a> GeneratedStamper<'a> {
             return;
         };
         match &mut self.matrix {
-            GeneratedMatrixTarget::Static { matrix, cache } => {
-                if let Some(index) = cache.and_then(|cache| cache.slot_for_axes(row_axis, col_axis))
+            GeneratedMatrixTarget::Static { matrix } => {
+                if let Some(index) = self
+                    .cache
+                    .and_then(|cache| cache.slot_for_axes(row_axis, col_axis))
                 {
                     matrix.stamp_direct(index, value);
                 } else {
                     matrix.add(row, col, value);
                 }
             }
-            GeneratedMatrixTarget::AcReal { matrix, .. } => matrix.add_real(row, col, value),
+            GeneratedMatrixTarget::AcReal { matrix } => matrix.add_real(row, col, value),
         }
     }
 
     #[inline]
     fn add_real(&mut self, row: usize, col: usize, value: Value) {
         match &mut self.matrix {
-            GeneratedMatrixTarget::Static { matrix, cache } => {
-                if let Some(index) = cache.and_then(|cache| cache.slot_for_matrix_indices(row, col))
+            GeneratedMatrixTarget::Static { matrix } => {
+                if let Some(index) = self
+                    .cache
+                    .and_then(|cache| cache.slot_for_matrix_indices(row, col))
                 {
                     matrix.stamp_direct(index, value);
                 } else {
                     matrix.add(row, col, value);
                 }
             }
-            GeneratedMatrixTarget::AcReal { matrix, .. } => matrix.add_real(row, col, value),
+            GeneratedMatrixTarget::AcReal { matrix } => matrix.add_real(row, col, value),
         }
     }
 }
