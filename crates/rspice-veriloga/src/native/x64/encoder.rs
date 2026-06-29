@@ -233,11 +233,12 @@ impl X64Encoder {
         disp: i32,
     ) {
         debug_assert_ne!(index, Gpr::Rsp);
+        let mode = displacement_mode(base.code(), disp);
         self.emit_rex(true, dst.code(), index.code(), base.code());
         self.emit_u8(0x8D);
-        self.emit_modrm(0b10, dst.code(), 0b100);
+        self.emit_modrm(mode, dst.code(), 0b100);
         self.emit_sib(0b11, index.code(), base.code());
-        self.emit_i32(disp);
+        self.emit_displacement(mode, disp);
     }
 
     pub(crate) fn shl_r64_cl(&mut self, reg: Gpr) {
@@ -556,18 +557,15 @@ impl X64Encoder {
     }
 
     fn emit_base_disp32_modrm(&mut self, reg: u8, base: u8, disp: i32) {
-        let mode = if disp == 0 && !requires_displacement_base(base) {
-            0b00
-        } else if i8::try_from(disp).is_ok() {
-            0b01
-        } else {
-            0b10
-        };
-
+        let mode = displacement_mode(base, disp);
         self.emit_modrm(mode, reg, base);
         if needs_sib_base(base) {
             self.emit_sib(0, 0b100, base);
         }
+        self.emit_displacement(mode, disp);
+    }
+
+    fn emit_displacement(&mut self, mode: u8, disp: i32) {
         match mode {
             0b00 => {}
             0b01 => self.emit_u8(disp as i8 as u8),
@@ -648,6 +646,16 @@ fn needs_sib_base(base: u8) -> bool {
 
 fn requires_displacement_base(base: u8) -> bool {
     base & 0b111 == 0b101
+}
+
+fn displacement_mode(base: u8, disp: i32) -> u8 {
+    if disp == 0 && !requires_displacement_base(base) {
+        0b00
+    } else if i8::try_from(disp).is_ok() {
+        0b01
+    } else {
+        0b10
+    }
 }
 
 #[cfg(test)]
@@ -749,13 +757,20 @@ mod tests {
     fn encodes_scale8_indexed_lea() {
         let mut encoder = X64Encoder::new();
 
+        encoder.lea_r64_base_index_scale8_disp32(Gpr::Rax, Gpr::Rdx, Gpr::R10, 0);
         encoder.lea_r64_base_index_scale8_disp32(Gpr::Rax, Gpr::Rdx, Gpr::R10, 8);
+        encoder.lea_r64_base_index_scale8_disp32(Gpr::Rax, Gpr::Rdx, Gpr::R10, 128);
+        encoder.lea_r64_base_index_scale8_disp32(Gpr::Rax, Gpr::Rsp, Gpr::R10, 0);
+        encoder.lea_r64_base_index_scale8_disp32(Gpr::Rax, Gpr::R12, Gpr::R10, 0);
+        encoder.lea_r64_base_index_scale8_disp32(Gpr::Rax, Gpr::R13, Gpr::R10, 0);
         encoder.lea_r64_base_index_scale8_disp32(Gpr::Rax, Gpr::R13, Gpr::R10, 16);
 
         assert_eq!(
             encoder.into_bytes(),
             [
-                0x4A, 0x8D, 0x84, 0xD2, 8, 0, 0, 0, 0x4B, 0x8D, 0x84, 0xD5, 16, 0, 0, 0,
+                0x4A, 0x8D, 0x04, 0xD2, 0x4A, 0x8D, 0x44, 0xD2, 8, 0x4A, 0x8D, 0x84, 0xD2, 128, 0,
+                0, 0, 0x4A, 0x8D, 0x04, 0xD4, 0x4B, 0x8D, 0x04, 0xD4, 0x4B, 0x8D, 0x44, 0xD5, 0,
+                0x4B, 0x8D, 0x44, 0xD5, 16,
             ]
         );
     }
