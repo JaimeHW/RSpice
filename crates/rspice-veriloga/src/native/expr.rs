@@ -704,13 +704,17 @@ impl NativeProgram {
                         depth,
                     )?;
                     depth -= 1;
-                    if lower_constant_rhs_compare(&mut ops, compare_op(instruction)) {
+                    let op = compare_op(instruction);
+                    if lower_constant_binary_compare(&mut ops, op) {
                         continue;
                     }
-                    if lower_constant_lhs_compare(&mut ops, compare_op(instruction)) {
+                    if lower_constant_rhs_compare(&mut ops, op) {
                         continue;
                     }
-                    ops.push(NativeOp::Compare(compare_op(instruction)));
+                    if lower_constant_lhs_compare(&mut ops, op) {
+                        continue;
+                    }
+                    ops.push(NativeOp::Compare(op));
                 }
                 Instruction::And | Instruction::Or => {
                     pop_binary_stack(
@@ -1118,6 +1122,26 @@ fn lower_constant_lhs_noncommutative_arithmetic(
     true
 }
 
+fn lower_constant_binary_compare(ops: &mut Vec<NativeOp>, op: CompareOp) -> bool {
+    if ops.len() < 2 {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let rhs_index = ops.len() - 1;
+    let (NativeOp::Const(left), NativeOp::Const(right)) = (ops[lhs_index], ops[rhs_index]) else {
+        return false;
+    };
+    let value = if constant_compare(op, left, right) {
+        1.0
+    } else {
+        0.0
+    };
+    ops.truncate(lhs_index);
+    ops.push(NativeOp::Const(value));
+    true
+}
+
 fn lower_constant_rhs_compare(ops: &mut Vec<NativeOp>, op: CompareOp) -> bool {
     let Some(NativeOp::Const(value)) = ops.last().copied() else {
         return false;
@@ -1183,6 +1207,17 @@ fn lower_constant_lhs_logical(ops: &mut Vec<NativeOp>, op: LogicalOp) -> bool {
 
 fn constant_truthy(value: f64) -> bool {
     value.abs() > LOGICAL_EPSILON
+}
+
+fn constant_compare(op: CompareOp, left: f64, right: f64) -> bool {
+    match op {
+        CompareOp::Gt => left > right,
+        CompareOp::Lt => left < right,
+        CompareOp::Ge => left >= right,
+        CompareOp::Le => left <= right,
+        CompareOp::Eq => (left - right).abs() < LOGICAL_EPSILON,
+        CompareOp::Ne => (left - right).abs() >= LOGICAL_EPSILON,
+    }
 }
 
 fn is_independent_value_push(op: &NativeOp) -> bool {
@@ -1949,6 +1984,53 @@ mod tests {
                     NativeOp::LoadTemperature,
                     NativeOp::CompareConst(expected, 300.0)
                 ]
+            );
+        }
+    }
+
+    #[test]
+    fn folds_constant_comparisons_to_exact_literals() {
+        let cases = [
+            ("gt-true", Instruction::Gt, 5.0, 4.0, 1.0),
+            ("gt-unordered", Instruction::Gt, f64::NAN, 4.0, 0.0),
+            ("ge-equal", Instruction::Ge, 4.0, 4.0, 1.0),
+            ("lt-true", Instruction::Lt, 3.0, 4.0, 1.0),
+            ("le-equal", Instruction::Le, 4.0, 4.0, 1.0),
+            ("le-unordered", Instruction::Le, 4.0, f64::NAN, 0.0),
+            ("eq-within-epsilon", Instruction::Eq, 0.0, 0.5e-15, 1.0),
+            ("eq-at-epsilon", Instruction::Eq, 0.0, 1.0e-15, 0.0),
+            ("eq-unordered", Instruction::Eq, f64::NAN, 0.0, 0.0),
+            ("ne-within-epsilon", Instruction::Ne, 0.0, 0.5e-15, 0.0),
+            ("ne-at-epsilon", Instruction::Ne, 0.0, 1.0e-15, 1.0),
+            ("ne-unordered", Instruction::Ne, 0.0, f64::NAN, 0.0),
+        ];
+
+        for (case, instruction, left, right, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-compare",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant comparison folds to a literal");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{case} should only need the folded literal"
+            );
+            assert_eq!(
+                lowered.ops(),
+                &[NativeOp::Const(expected)],
+                "{case} should fold to an exact boolean literal"
             );
         }
     }

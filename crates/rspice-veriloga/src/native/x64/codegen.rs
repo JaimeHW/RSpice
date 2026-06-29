@@ -2685,6 +2685,62 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_folds_constant_comparisons_to_literals() {
+        let cases = [
+            ("gt-true", Instruction::Gt, 5.0, 4.0, 1.0),
+            ("gt-unordered", Instruction::Gt, f64::NAN, 4.0, 0.0),
+            ("ge-equal", Instruction::Ge, 4.0, 4.0, 1.0),
+            ("lt-true", Instruction::Lt, 3.0, 4.0, 1.0),
+            ("le-equal", Instruction::Le, 4.0, 4.0, 1.0),
+            ("le-unordered", Instruction::Le, 4.0, f64::NAN, 0.0),
+            ("eq-within-epsilon", Instruction::Eq, 0.0, 0.5e-15, 1.0),
+            ("eq-at-epsilon", Instruction::Eq, 0.0, 1.0e-15, 0.0),
+            ("eq-unordered", Instruction::Eq, f64::NAN, 0.0, 0.0),
+            ("ne-within-epsilon", Instruction::Ne, 0.0, 0.5e-15, 0.0),
+            ("ne-at-epsilon", Instruction::Ne, 0.0, 1.0e-15, 1.0),
+            ("ne-unordered", Instruction::Ne, 0.0, f64::NAN, 0.0),
+        ];
+
+        for (name, instruction, left, right, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+                0,
+            );
+
+            assert_eq!(program.max_stack_depth(), 1, "{name}");
+            assert_eq!(
+                program.ops(),
+                &[NativeOp::Const(expected)],
+                "{name} should compile as a folded literal"
+            );
+
+            let bytes = compile_value_function(&program).expect("compile folded comparison leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "folded comparison should stay helper-free"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate folded comparison leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_squares_constant_power_without_helper_call() {
         for instruction in [Instruction::Pow, Instruction::FnPow] {
             let program = native_program(
