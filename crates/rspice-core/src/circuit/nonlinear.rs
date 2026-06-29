@@ -490,14 +490,32 @@ impl CircuitData {
         rhs: &mut [Value],
         solution: &[Value],
         time: Value,
+        analysis: crate::xspice::AnalysisType,
     ) {
         self.behavioral_sources
             .stamp_all(matrix, rhs, solution, self.num_nodes, time);
         #[cfg(feature = "veriloga-builtins")]
         {
+            let generated_analysis = match analysis {
+                crate::xspice::AnalysisType::Ac => {
+                    crate::device::veriloga_generated::GeneratedAnalysisKind::Ac
+                }
+                crate::xspice::AnalysisType::Transient => {
+                    crate::device::veriloga_generated::GeneratedAnalysisKind::Tran
+                }
+                crate::xspice::AnalysisType::Noise => {
+                    crate::device::veriloga_generated::GeneratedAnalysisKind::Noise
+                }
+                _ => crate::device::veriloga_generated::GeneratedAnalysisKind::Dc,
+            };
             let num_nodes = self.num_nodes;
-            self.generated_veriloga_devices_mut()
-                .stamp_all(matrix, rhs, solution, num_nodes);
+            self.generated_veriloga_devices_mut().stamp_all(
+                matrix,
+                rhs,
+                solution,
+                num_nodes,
+                generated_analysis,
+            );
         }
     }
 

@@ -211,7 +211,13 @@ impl Engine {
                 circuit.prepare_generated_veriloga_timepoint(time, dt, ctx.coeff);
             }
             circuit.stamp_nonlinear(matrix, rhs, solution);
-            circuit.stamp_behavioral(matrix, rhs, solution, time);
+            circuit.stamp_behavioral(
+                matrix,
+                rhs,
+                solution,
+                time,
+                crate::xspice::AnalysisType::Transient,
+            );
         }
 
         if circuit.has_xspice_devices() {

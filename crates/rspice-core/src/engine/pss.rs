@@ -995,7 +995,13 @@ impl Engine {
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(linearize_at);
             circuit.stamp_nonlinear(matrix, rhs, linearize_at);
-            circuit.stamp_behavioral(matrix, rhs, linearize_at, t_next);
+            circuit.stamp_behavioral(
+                matrix,
+                rhs,
+                linearize_at,
+                t_next,
+                crate::xspice::AnalysisType::Transient,
+            );
         }
     }
 

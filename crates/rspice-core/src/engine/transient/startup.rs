@@ -39,7 +39,13 @@ impl Engine {
             if circuit.has_nonlinear_devices() {
                 circuit.update_nonlinear(&solution);
                 circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
-                circuit.stamp_behavioral(matrix, &mut rhs, &solution, 0.0);
+                circuit.stamp_behavioral(
+                    matrix,
+                    &mut rhs,
+                    &solution,
+                    0.0,
+                    crate::xspice::AnalysisType::DcOp,
+                );
             }
 
             let Ok(mut proposal) = matrix.solve(&rhs) else {
@@ -101,7 +107,13 @@ impl Engine {
             if circuit.has_nonlinear_devices() {
                 circuit.update_nonlinear(&solution);
                 circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
-                circuit.stamp_behavioral(matrix, &mut rhs, &solution, time);
+                circuit.stamp_behavioral(
+                    matrix,
+                    &mut rhs,
+                    &solution,
+                    time,
+                    crate::xspice::AnalysisType::Transient,
+                );
             }
 
             let Ok(mut proposal) = matrix.solve(&rhs) else {

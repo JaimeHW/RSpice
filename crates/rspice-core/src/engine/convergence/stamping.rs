@@ -140,7 +140,13 @@ impl Engine {
         circuit
             .try_stamp_nonlinear(matrix, rhs, solution)
             .map_err(SimulationError::Circuit)?;
-        circuit.stamp_behavioral(matrix, rhs, solution, 0.0);
+        circuit.stamp_behavioral(
+            matrix,
+            rhs,
+            solution,
+            0.0,
+            crate::xspice::AnalysisType::DcOp,
+        );
         if circuit.has_xspice_devices() {
             circuit.evaluate_xspice_with_analysis(
                 0.0,
@@ -170,7 +176,7 @@ impl Engine {
         circuit
             .try_stamp_nonlinear(matrix, rhs, solution)
             .map_err(SimulationError::Circuit)?;
-        circuit.stamp_behavioral(matrix, rhs, solution, time);
+        circuit.stamp_behavioral(matrix, rhs, solution, time, analysis);
         if circuit.has_xspice_devices() {
             circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
             circuit.stamp_xspice(matrix, rhs);

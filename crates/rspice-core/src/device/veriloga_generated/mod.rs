@@ -92,9 +92,10 @@ impl BuiltinVerilogADevices {
         rhs: &mut [Value],
         voltages: &[Value],
         num_nodes: usize,
+        analysis: GeneratedAnalysisKind,
     ) {
         for device in &mut self.devices {
-            device.stamp(matrix, rhs, voltages, num_nodes);
+            device.stamp(matrix, rhs, voltages, num_nodes, analysis);
         }
     }
 
@@ -167,10 +168,12 @@ impl BuiltinVerilogAInstance {
         rhs: &mut [Value],
         voltages: &[Value],
         num_nodes: usize,
+        analysis: GeneratedAnalysisKind,
     ) {
         self.static_stamp_cache
             .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
-        let ctx = GeneratedEvalContext::new(voltages, self.temperature, num_nodes);
+        let ctx =
+            GeneratedEvalContext::with_analysis(voltages, self.temperature, num_nodes, analysis);
         let mut stamper = GeneratedStamper::new_with_static_cache(
             matrix,
             rhs,
@@ -422,6 +425,50 @@ impl<'a> GeneratedEvalContext<'a> {
     #[inline]
     pub fn analysis(&self, query: &str) -> bool {
         self.analysis.matches_query(query)
+    }
+
+    #[inline]
+    pub fn analysis_dc(&self) -> bool {
+        matches!(self.analysis, GeneratedAnalysisKind::Dc)
+    }
+
+    #[inline]
+    pub fn analysis_ac(&self) -> bool {
+        matches!(self.analysis, GeneratedAnalysisKind::Ac)
+    }
+
+    #[inline]
+    pub fn analysis_tran(&self) -> bool {
+        matches!(self.analysis, GeneratedAnalysisKind::Tran)
+    }
+
+    #[inline]
+    pub fn analysis_noise(&self) -> bool {
+        matches!(self.analysis, GeneratedAnalysisKind::Noise)
+    }
+
+    #[inline]
+    pub fn analysis_ic(&self) -> bool {
+        matches!(self.analysis, GeneratedAnalysisKind::Ic)
+    }
+
+    #[inline]
+    pub fn analysis_static(&self) -> bool {
+        matches!(
+            self.analysis,
+            GeneratedAnalysisKind::Dc
+                | GeneratedAnalysisKind::Ac
+                | GeneratedAnalysisKind::Noise
+                | GeneratedAnalysisKind::Ic
+        )
+    }
+
+    #[inline]
+    pub fn analysis_smallsig(&self) -> bool {
+        matches!(
+            self.analysis,
+            GeneratedAnalysisKind::Ac | GeneratedAnalysisKind::Noise
+        )
     }
 }
 
