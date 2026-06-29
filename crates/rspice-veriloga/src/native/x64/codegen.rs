@@ -57,6 +57,7 @@ const I64_MIN_AS_F64: f64 = -9_223_372_036_854_775_808.0;
 const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = 1_i64 << 51;
 const DYNAMIC_READ_FRAME_BYTES: i32 = 16;
 const ROUND_TEMP_FRAME_BYTES: i32 = 16;
+const STATEFUL_SCRATCH_FRAME_BYTES: i32 = 16;
 const CALL_SPILL_SLOT_COUNT: usize = 7;
 #[cfg(test)]
 const CALL_RESULT_SLOT: usize = 6;
@@ -79,7 +80,18 @@ const XMM_STACK: [Xmm; 6] = [
 ];
 #[allow(dead_code)]
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
-    let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program), 0, None);
+    let needs_stateful_scratch = program_needs_stateful_stack_scratch(program);
+    let local_frame_bytes = if needs_stateful_scratch {
+        STATEFUL_SCRATCH_FRAME_BYTES
+    } else {
+        0
+    };
+    let mut compiler = FunctionCompiler::new(
+        program_uses_helper_calls(program),
+        local_frame_bytes,
+        None,
+        needs_stateful_scratch.then_some(0),
+    );
     compiler.emit_program(program)?;
     compiler.finish_value_function()
 }
@@ -89,7 +101,18 @@ pub(crate) fn compile_assignment_function(
     var_index: usize,
     program: &NativeProgram,
 ) -> JitResult<Vec<u8>> {
-    let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program), 0, None);
+    let needs_stateful_scratch = program_needs_stateful_stack_scratch(program);
+    let local_frame_bytes = if needs_stateful_scratch {
+        STATEFUL_SCRATCH_FRAME_BYTES
+    } else {
+        0
+    };
+    let mut compiler = FunctionCompiler::new(
+        program_uses_helper_calls(program),
+        local_frame_bytes,
+        None,
+        needs_stateful_scratch.then_some(0),
+    );
     compiler.emit_program(program)?;
     compiler.finish_assignment_function(var_index)
 }
@@ -118,6 +141,9 @@ pub(crate) fn compile_assignment_pass_function(
 ) -> JitResult<Vec<u8>> {
     let has_indexed_assignment = assignments.iter().any(assignment_has_indexed);
     let loop_depth = assignment_loop_depth(assignments);
+    let has_stateful_scratch = assignments
+        .iter()
+        .any(assignment_needs_stateful_stack_scratch);
     let uses_helper_calls = assignments.iter().any(assignment_uses_helper_calls);
     let indexed_slot_bytes = if has_indexed_assignment {
         LOCAL_SLOT_BYTES
@@ -125,10 +151,23 @@ pub(crate) fn compile_assignment_pass_function(
         0
     };
     let loop_counter_base_disp = (loop_depth > 0).then_some(indexed_slot_bytes);
-    let local_frame_bytes = align_local_frame(indexed_slot_bytes + loop_depth * LOCAL_SLOT_BYTES);
+    let stateful_scratch_base_disp =
+        has_stateful_scratch.then_some(indexed_slot_bytes + loop_depth * LOCAL_SLOT_BYTES);
+    let stateful_scratch_bytes = if has_stateful_scratch {
+        STATEFUL_SCRATCH_FRAME_BYTES
+    } else {
+        0
+    };
+    let local_frame_bytes = align_local_frame(
+        indexed_slot_bytes + loop_depth * LOCAL_SLOT_BYTES + stateful_scratch_bytes,
+    );
 
-    let mut compiler =
-        FunctionCompiler::new(uses_helper_calls, local_frame_bytes, loop_counter_base_disp);
+    let mut compiler = FunctionCompiler::new(
+        uses_helper_calls,
+        local_frame_bytes,
+        loop_counter_base_disp,
+        stateful_scratch_base_disp,
+    );
     for assignment in assignments {
         compiler.emit_assignment_step(assignment, 0)?;
     }
@@ -143,6 +182,7 @@ struct FunctionCompiler {
     uses_helper_calls: bool,
     local_frame_bytes: i32,
     loop_counter_base_disp: Option<i32>,
+    stateful_scratch_base_disp: Option<i32>,
     early_return_jumps: Vec<usize>,
 }
 
@@ -157,8 +197,12 @@ impl FunctionCompiler {
         uses_helper_calls: bool,
         local_frame_bytes: i32,
         loop_counter_base_disp: Option<i32>,
+        stateful_scratch_base_disp: Option<i32>,
     ) -> Self {
         debug_assert_eq!(local_frame_bytes % 16, 0);
+        if let Some(base_disp) = stateful_scratch_base_disp {
+            debug_assert!(base_disp + STATEFUL_SCRATCH_FRAME_BYTES <= local_frame_bytes);
+        }
         let mut compiler = Self {
             encoder: X64Encoder::new(),
             depth: 0,
@@ -166,6 +210,7 @@ impl FunctionCompiler {
             uses_helper_calls,
             local_frame_bytes,
             loop_counter_base_disp,
+            stateful_scratch_base_disp,
             early_return_jumps: Vec::new(),
         };
         if compiler.has_stack_setup() {
@@ -558,6 +603,22 @@ impl FunctionCompiler {
         }
 
         Ok(XMM_STACK[self.depth])
+    }
+
+    fn stateful_scratch_disp(&self, slot: usize) -> JitResult<i32> {
+        debug_assert!(slot < 2);
+        let base_disp = self.stateful_scratch_base_disp.ok_or_else(|| {
+            register_allocation_error(
+                "stateful operation requires a local scratch frame at full XMM stack depth"
+                    .to_string(),
+            )
+        })?;
+        base_disp
+            .checked_add((slot * WORD_BYTES) as i32)
+            .ok_or_else(|| JitError::Encoding {
+                model: MODEL.into(),
+                detail: "stateful scratch displacement overflow".into(),
+            })
     }
 
     fn emit_binary_op(&mut self, op: BinaryOp) -> JitResult<()> {
@@ -1700,8 +1761,25 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        let scratch = self.scratch_register()?;
+        if self.depth >= XMM_STACK.len() {
+            let value_disp = self.stateful_scratch_disp(0)?;
+            let prior_disp = self.stateful_scratch_disp(1)?;
 
+            self.encoder
+                .movsd_m64_base_disp32_xmm(Gpr::Rsp, value_disp, target);
+            self.emit_state_prev_load_if_available(state_index, target)?;
+            self.encoder
+                .movsd_m64_base_disp32_xmm(Gpr::Rsp, prior_disp, target);
+            self.encoder
+                .movsd_xmm_m64_base_disp32(target, Gpr::Rsp, value_disp);
+            self.emit_state_value_store(state_index, target)?;
+
+            self.encoder
+                .subsd_xmm_m64_base_disp32(target, Gpr::Rsp, prior_disp);
+            return self.emit_timestep_guarded_scale_from_frame(target, BinaryOp::Div);
+        }
+
+        let scratch = self.scratch_register()?;
         self.encoder.movsd_xmm_xmm(scratch, target);
         self.emit_state_prev_load_if_available(state_index, scratch)?;
         self.emit_state_value_store(state_index, target)?;
@@ -1719,8 +1797,12 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        let scratch = self.scratch_register()?;
-        self.emit_timestep_guarded_scale(target, scratch, BinaryOp::Div)
+        if self.depth < XMM_STACK.len() {
+            let scratch = self.scratch_register()?;
+            self.emit_timestep_guarded_scale(target, scratch, BinaryOp::Div)
+        } else {
+            self.emit_timestep_guarded_scale_from_frame(target, BinaryOp::Div)
+        }
     }
 
     fn emit_idt_state(&mut self, state_index: usize) -> JitResult<()> {
@@ -1733,8 +1815,42 @@ impl FunctionCompiler {
 
         let value = XMM_STACK[self.depth - 2];
         let ic = XMM_STACK[self.depth - 1];
-        let scratch = self.scratch_register()?;
+        if self.depth >= XMM_STACK.len() {
+            let value_disp = self.stateful_scratch_disp(0)?;
+            let timestep_disp = self.stateful_scratch_disp(1)?;
 
+            self.encoder
+                .movsd_m64_base_disp32_xmm(Gpr::Rsp, value_disp, value);
+            self.encoder
+                .movsd_xmm_m64_base_disp32(value, self.ctx_arg_reg(), TIMESTEP_OFFSET);
+            self.encoder.movq_r64_xmm(Gpr::R11, value);
+            self.emit_abs_register(value);
+            self.emit_literal_compare(value, TIMESTEP_DC_EPSILON);
+
+            let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
+            self.encoder.movsd_xmm_xmm(value, ic);
+            self.emit_state_value_store(state_index, value)?;
+            let done = self.encoder.jmp_rel32_placeholder();
+
+            self.patch_rel32_to_current(non_dc_path)?;
+            self.emit_state_prev_load_if_available(state_index, ic)?;
+
+            self.encoder.movq_xmm_r64(value, Gpr::R11);
+            self.encoder
+                .movsd_m64_base_disp32_xmm(Gpr::Rsp, timestep_disp, value);
+            self.encoder
+                .movsd_xmm_m64_base_disp32(value, Gpr::Rsp, value_disp);
+            self.encoder
+                .mulsd_xmm_m64_base_disp32(value, Gpr::Rsp, timestep_disp);
+            self.encoder.addsd_xmm_xmm(value, ic);
+            self.emit_state_value_store(state_index, value)?;
+
+            self.patch_rel32_to_current(done)?;
+            self.depth -= 1;
+            return Ok(());
+        }
+
+        let scratch = self.scratch_register()?;
         self.encoder
             .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
         self.encoder.movq_r64_xmm(Gpr::R11, scratch);
@@ -1768,8 +1884,12 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        let scratch = self.scratch_register()?;
-        self.emit_timestep_guarded_scale(target, scratch, BinaryOp::Mul)
+        if self.depth < XMM_STACK.len() {
+            let scratch = self.scratch_register()?;
+            self.emit_timestep_guarded_scale(target, scratch, BinaryOp::Mul)
+        } else {
+            self.emit_timestep_guarded_scale_from_frame(target, BinaryOp::Mul)
+        }
     }
 
     fn emit_idtmod_state(&mut self, state_index: usize) -> JitResult<()> {
@@ -1784,8 +1904,44 @@ impl FunctionCompiler {
         let ic = XMM_STACK[self.depth - 3];
         let modulus = XMM_STACK[self.depth - 2];
         let offset = XMM_STACK[self.depth - 1];
-        let scratch = self.scratch_register()?;
+        if self.depth >= XMM_STACK.len() {
+            let value_disp = self.stateful_scratch_disp(0)?;
+            let timestep_disp = self.stateful_scratch_disp(1)?;
 
+            self.encoder
+                .movsd_m64_base_disp32_xmm(Gpr::Rsp, value_disp, value);
+            self.encoder
+                .movsd_xmm_m64_base_disp32(value, self.ctx_arg_reg(), TIMESTEP_OFFSET);
+            self.encoder.movq_r64_xmm(Gpr::R11, value);
+            self.emit_abs_register(value);
+            self.emit_literal_compare(value, TIMESTEP_DC_EPSILON);
+
+            let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
+            self.encoder.movsd_xmm_xmm(value, ic);
+            self.emit_consuming_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
+            self.emit_state_value_store(state_index, value)?;
+            let done = self.encoder.jmp_rel32_placeholder();
+
+            self.patch_rel32_to_current(non_dc_path)?;
+            self.emit_state_prev_load_if_available(state_index, ic)?;
+
+            self.encoder.movq_xmm_r64(value, Gpr::R11);
+            self.encoder
+                .movsd_m64_base_disp32_xmm(Gpr::Rsp, timestep_disp, value);
+            self.encoder
+                .movsd_xmm_m64_base_disp32(value, Gpr::Rsp, value_disp);
+            self.encoder
+                .mulsd_xmm_m64_base_disp32(value, Gpr::Rsp, timestep_disp);
+            self.encoder.addsd_xmm_xmm(value, ic);
+            self.emit_consuming_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
+            self.emit_state_value_store(state_index, value)?;
+
+            self.patch_rel32_to_current(done)?;
+            self.depth -= 3;
+            return Ok(());
+        }
+
+        let scratch = self.scratch_register()?;
         self.encoder
             .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
         self.encoder.movq_r64_xmm(Gpr::R11, scratch);
@@ -1833,6 +1989,47 @@ impl FunctionCompiler {
         match op {
             BinaryOp::Mul => self.encoder.mulsd_xmm_xmm(target, scratch),
             BinaryOp::Div => self.encoder.divsd_xmm_xmm(target, scratch),
+            BinaryOp::Add | BinaryOp::Sub => unreachable!("timestep scaling supports mul/div"),
+        }
+
+        self.patch_rel32_to_current(done)
+    }
+
+    fn emit_timestep_guarded_scale_from_frame(
+        &mut self,
+        target: Xmm,
+        op: BinaryOp,
+    ) -> JitResult<()> {
+        let value_disp = self.stateful_scratch_disp(0)?;
+        let timestep_disp = self.stateful_scratch_disp(1)?;
+
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::Rsp, value_disp, target);
+        self.encoder
+            .movsd_xmm_m64_base_disp32(target, self.ctx_arg_reg(), TIMESTEP_OFFSET);
+        self.encoder.movq_r64_xmm(Gpr::R11, target);
+        self.emit_abs_register(target);
+        self.emit_literal_compare(target, TIMESTEP_DC_EPSILON);
+
+        let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
+        self.encoder.xorpd_xmm_xmm(target, target);
+        let done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(non_dc_path)?;
+        self.encoder.movq_xmm_r64(target, Gpr::R11);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::Rsp, timestep_disp, target);
+        self.encoder
+            .movsd_xmm_m64_base_disp32(target, Gpr::Rsp, value_disp);
+        match op {
+            BinaryOp::Mul => {
+                self.encoder
+                    .mulsd_xmm_m64_base_disp32(target, Gpr::Rsp, timestep_disp);
+            }
+            BinaryOp::Div => {
+                self.encoder
+                    .divsd_xmm_m64_base_disp32(target, Gpr::Rsp, timestep_disp);
+            }
             BinaryOp::Add | BinaryOp::Sub => unreachable!("timestep scaling supports mul/div"),
         }
 
@@ -2701,6 +2898,20 @@ fn assignment_uses_helper_calls(assignment: &NativeAssignment) -> bool {
     }
 }
 
+fn assignment_needs_stateful_stack_scratch(assignment: &NativeAssignment) -> bool {
+    match assignment {
+        NativeAssignment::Direct { program, .. } => program_needs_stateful_stack_scratch(program),
+        NativeAssignment::Indexed { index, value, .. } => {
+            program_needs_stateful_stack_scratch(index)
+                || program_needs_stateful_stack_scratch(value)
+        }
+        NativeAssignment::Loop { condition, body } => {
+            program_needs_stateful_stack_scratch(condition)
+                || body.iter().any(assignment_needs_stateful_stack_scratch)
+        }
+    }
+}
+
 fn assignment_has_indexed(assignment: &NativeAssignment) -> bool {
     match assignment {
         NativeAssignment::Direct { .. } => false,
@@ -2791,6 +3002,20 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
                     if !dynamic_variable_inline_supported(*len, *lower)
             )
     })
+}
+
+fn program_needs_stateful_stack_scratch(program: &NativeProgram) -> bool {
+    program.max_stack_depth() >= XMM_STACK.len()
+        && program.ops().iter().any(|op| {
+            matches!(
+                op,
+                NativeOp::DdtState(_)
+                    | NativeOp::DdtJacobian
+                    | NativeOp::IdtState(_)
+                    | NativeOp::IdtJacobian
+                    | NativeOp::IdtModState(_)
+            )
+        })
 }
 
 fn unary_math_uses_helper(op: UnaryMathOp) -> bool {
@@ -3013,10 +3238,10 @@ mod tests {
     use super::{
         CALL_FRAME_BYTES, DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64,
         INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, PARAMS_OFFSET, Q_ELECTRON,
-        ROUND_TEMP_FRAME_BYTES, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
-        assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
-        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
-        entry_vars_arg_reg, rspice_exp,
+        ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, VOLTAGES_OFFSET, WORD_BYTES,
+        X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
+        compile_assignment_function, compile_assignment_pass_function, compile_value_function,
+        entry_ctx_arg_reg, entry_vars_arg_reg, rspice_exp,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -5372,6 +5597,162 @@ mod tests {
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
         let error = take_native_runtime_error().expect("short idtmod prior state must hard-fail");
         assert_prior_state_storage_bounds_error(&error);
+    }
+
+    #[test]
+    fn generated_value_leaf_keeps_full_stack_stateful_ops_on_scratch_frame() {
+        let run = |program: NativeProgram, vars: &[f64], expected: f64, state_expected: f64| {
+            assert_eq!(program.max_stack_depth(), XMM_STACK.len());
+            let bytes = compile_value_function(&program).expect("compile full-stack stateful leaf");
+            assert!(
+                contains_bytes(&bytes, &sub_rsp_bytes(STATEFUL_SCRATCH_FRAME_BYTES)),
+                "full-stack stateful leaf should reserve a local scratch frame"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate full-stack stateful leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+
+            let previous_state = [0.0_f64, 1.5_f64];
+            let mut state_values = [0.0_f64, 0.0_f64];
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.timestep = 0.25;
+            ctx.state_prev = previous_state.as_ptr();
+            ctx.state_prev_len = previous_state.len();
+            ctx.state_values = state_values.as_mut_ptr();
+            ctx.state_values_len = state_values.len();
+
+            assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), expected.to_bits());
+            assert_eq!(state_values[1].to_bits(), state_expected.to_bits());
+        };
+
+        run(
+            native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(3.0),
+                    Instruction::PushConst(4.0),
+                    Instruction::PushConst(5.0),
+                    Instruction::PushVariable(0),
+                    Instruction::DdtState(1),
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                ],
+                0,
+            ),
+            &[2.0],
+            17.0,
+            2.0,
+        );
+
+        run(
+            native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(3.0),
+                    Instruction::PushConst(4.0),
+                    Instruction::PushVariable(0),
+                    Instruction::PushConst(0.5),
+                    Instruction::IdtState(1),
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                ],
+                0,
+            ),
+            &[2.0],
+            12.0,
+            2.0,
+        );
+
+        run(
+            native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(2.0),
+                    Instruction::PushVariable(0),
+                    Instruction::PushConst(0.5),
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.25),
+                    Instruction::IdtModState(1),
+                    Instruction::Add,
+                    Instruction::Add,
+                ],
+                0,
+            ),
+            &[2.0],
+            4.0,
+            1.0,
+        );
+
+        let jacobian_cases = [
+            (
+                23.0_f64,
+                vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(3.0),
+                    Instruction::PushConst(4.0),
+                    Instruction::PushConst(5.0),
+                    Instruction::PushVariable(0),
+                    Instruction::DdtJacobian,
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                ],
+            ),
+            (
+                15.5_f64,
+                vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(3.0),
+                    Instruction::PushConst(4.0),
+                    Instruction::PushConst(5.0),
+                    Instruction::PushVariable(0),
+                    Instruction::IdtJacobian,
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                    Instruction::Add,
+                ],
+            ),
+        ];
+        for (expected, instructions) in jacobian_cases {
+            let program = native_program(EntryKind::Jacobian, instructions, 0);
+            assert_eq!(program.max_stack_depth(), XMM_STACK.len());
+            let bytes =
+                compile_value_function(&program).expect("compile full-stack stateful jacobian");
+            assert!(
+                contains_bytes(&bytes, &sub_rsp_bytes(STATEFUL_SCRATCH_FRAME_BYTES)),
+                "full-stack stateful jacobian should reserve a local scratch frame"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate full-stack jacobian leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.timestep = 0.25;
+
+            let vars = [2.0_f64];
+            assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), expected.to_bits());
+        }
     }
 
     #[test]

@@ -488,6 +488,10 @@ impl X64Encoder {
         self.emit_sse_reg_rip_disp32(0xF2, 0x59, dst, disp)
     }
 
+    pub(crate) fn mulsd_xmm_m64_base_disp32(&mut self, dst: Xmm, base: Gpr, disp: i32) {
+        self.emit_sse_reg_base_disp32(0xF2, 0x59, dst, base, disp);
+    }
+
     pub fn mulsd_xmm0_xmm1(&mut self) {
         self.mulsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
     }
@@ -854,6 +858,7 @@ mod tests {
         encoder.mulsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm0);
         encoder.divsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm0);
         encoder.movsd_m64_base_disp32_xmm(Gpr::Rdx, 16, Xmm::Xmm1);
+        encoder.mulsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rdx, 16);
         encoder.ret();
 
         assert_eq!(
@@ -861,7 +866,7 @@ mod tests {
             [
                 0x66, 0x0F, 0x57, 0xC0, 0xF2, 0x0F, 0x10, 0xC8, 0xF2, 0x0F, 0x58, 0xC8, 0xF2, 0x0F,
                 0x5C, 0xC8, 0xF2, 0x0F, 0x59, 0xC8, 0xF2, 0x0F, 0x5E, 0xC8, 0xF2, 0x0F, 0x11, 0x4A,
-                16, 0xC3,
+                16, 0xF2, 0x0F, 0x59, 0x4A, 16, 0xC3,
             ]
         );
     }
