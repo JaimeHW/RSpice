@@ -1844,6 +1844,58 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_absdelay_current_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_absdelay_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ absdelay(V(p, n), 0.5);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("CDELAYCANON1", model, &artifact, &[1, 0])
+            .expect("canonical absdelay current uses native JIT path");
+    assert!(device.is_using_native());
+
+    device.set_analysis_type(0);
+    device.update_voltages(&[7.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("canonical absdelay DC evaluation succeeds")[0]
+            .to_bits(),
+        7.0_f64.to_bits()
+    );
+
+    device.set_analysis_type(2);
+    for (time, voltage, expected) in [(0.0, 0.0, 0.0), (0.5, 1.0, 0.0), (1.0, 3.0, 1.0)] {
+        device.set_time(time);
+        device.update_voltages(&[voltage]);
+        let currents = device
+            .try_evaluate()
+            .expect("canonical absdelay transient evaluation succeeds");
+        assert!(
+            (currents[0] - expected).abs() < 1e-12,
+            "time: {time}, currents: {currents:?}"
+        );
+    }
+
+    device.set_time(1.25);
+    device.update_voltages(&[5.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("canonical absdelay interpolation succeeds");
+    assert!((currents[0] - 2.0).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"
