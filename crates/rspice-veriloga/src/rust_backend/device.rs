@@ -5493,6 +5493,43 @@ fn stamp() {
             "{mul_product3_indices}"
         );
 
+        for signature in [
+            "fn store_mul_powf_mixed_ia(",
+            "fn store_mul_powf_mixed_ai(",
+            "fn store_mul_powf(",
+            "fn store_mul_pow_mixed_aii(",
+            "fn store_mul_pow_mixed_aai(",
+            "fn store_mul_pow(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                !body.contains("_node_derivatives = self.node_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("_branch_derivatives = self.branch_derivatives"),
+                "{body}"
+            );
+            assert!(!body.contains("store_mul_powf_components"), "{body}");
+            assert!(!body.contains("store_mul_pow_components"), "{body}");
+        }
+
+        let mul_powf_mixed_ia = helper_body(&support, "fn store_mul_powf_mixed_ia(");
+        assert!(
+            mul_powf_mixed_ia.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[factor][axis] * output + factor_value * base.node_derivatives[axis] * derivative_scale;"
+            ),
+            "{mul_powf_mixed_ia}"
+        );
+
+        let mul_pow_mixed_aii = helper_body(&support, "fn store_mul_pow_mixed_aii(");
+        assert!(
+            mul_pow_mixed_aii.contains(
+                "let derivative = AdValue::pow_derivative(output, base_value, exponent_value, self.node_derivatives[base][axis], self.node_derivatives[exponent][axis]); self.node_derivatives[index][axis] = factor.node_derivatives[axis] * output + factor_value * derivative;"
+            ),
+            "{mul_pow_mixed_aii}"
+        );
+
         assert!(
             !support.contains("fn store_add_scaled_inputs_product_components("),
             "{support}"
@@ -6938,13 +6975,13 @@ fn stamp() {
     #[test]
     fn rewrites_powf_multiply_stores_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
-        for helper in [
-            "fn store_mul_powf_components",
-            "fn store_mul_powf_mixed_ai",
-            "fn store_mul_powf_mixed_ia",
-        ] {
+        for helper in ["fn store_mul_powf_mixed_ai", "fn store_mul_powf_mixed_ia"] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
+        assert!(
+            !support.contains("fn store_mul_powf_components"),
+            "{support}"
+        );
 
         let source = r#"
 fn stamp() {
@@ -6981,13 +7018,13 @@ fn stamp() {
     #[test]
     fn rewrites_pow_multiply_stores_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
-        for helper in [
-            "fn store_mul_pow_components",
-            "fn store_mul_pow_mixed_aii",
-            "fn store_mul_pow_mixed_aai",
-        ] {
+        for helper in ["fn store_mul_pow_mixed_aii", "fn store_mul_pow_mixed_aai"] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
+        assert!(
+            !support.contains("fn store_mul_pow_components"),
+            "{support}"
+        );
 
         let source = r#"
 fn stamp() {
@@ -16394,16 +16431,14 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_pow_components(&mut self, index: usize, factor_value: f64, factor_node_derivatives: [f64; Instance::NODE_COUNT], factor_branch_derivatives: [f64; Instance::BRANCH_COUNT], base_value: f64, base_node_derivatives: [f64; Instance::NODE_COUNT], base_branch_derivatives: [f64; Instance::BRANCH_COUNT], exponent_value: f64, exponent_node_derivatives: [f64; Instance::NODE_COUNT], exponent_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
+    "    fn store_mul_pow(&mut self, index: usize, factor: AdValue, base: AdValue, exponent: AdValue) {",
+    "        let factor_value = factor.value;",
+    "        let base_value = base.value;",
+    "        let exponent_value = exponent.value;",
     "        let output = base_value.powf(exponent_value);",
     "        self.values[index] = factor_value * output;",
-    "        for axis in 0..Instance::NODE_COUNT { let derivative = AdValue::pow_derivative(output, base_value, exponent_value, base_node_derivatives[axis], exponent_node_derivatives[axis]); self.node_derivatives[index][axis] = factor_node_derivatives[axis] * output + factor_value * derivative; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { let derivative = AdValue::pow_derivative(output, base_value, exponent_value, base_branch_derivatives[axis], exponent_branch_derivatives[axis]); self.branch_derivatives[index][axis] = factor_branch_derivatives[axis] * output + factor_value * derivative; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_pow(&mut self, index: usize, factor: AdValue, base: AdValue, exponent: AdValue) {",
-    "        self.store_mul_pow_components(index, factor.value, factor.node_derivatives, factor.branch_derivatives, base.value, base.node_derivatives, base.branch_derivatives, exponent.value, exponent.node_derivatives, exponent.branch_derivatives);",
+    "        for axis in 0..Instance::NODE_COUNT { let derivative = AdValue::pow_derivative(output, base_value, exponent_value, base.node_derivatives[axis], exponent.node_derivatives[axis]); self.node_derivatives[index][axis] = factor.node_derivatives[axis] * output + factor_value * derivative; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { let derivative = AdValue::pow_derivative(output, base_value, exponent_value, base.branch_derivatives[axis], exponent.branch_derivatives[axis]); self.branch_derivatives[index][axis] = factor.branch_derivatives[axis] * output + factor_value * derivative; }",
     "    }",
     "",
     "    #[inline]",
@@ -16447,17 +16482,14 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_powf_components(&mut self, index: usize, factor_value: f64, factor_node_derivatives: [f64; Instance::NODE_COUNT], factor_branch_derivatives: [f64; Instance::BRANCH_COUNT], base_value: f64, base_node_derivatives: [f64; Instance::NODE_COUNT], base_branch_derivatives: [f64; Instance::BRANCH_COUNT], exponent: f64) {",
+    "    fn store_mul_powf(&mut self, index: usize, factor: AdValue, base: AdValue, exponent: f64) {",
+    "        let factor_value = factor.value;",
+    "        let base_value = base.value;",
     "        let output = base_value.powf(exponent);",
     "        let derivative_scale = AdValue::pow_derivative(output, base_value, exponent, 1.0, 0.0);",
     "        self.values[index] = factor_value * output;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor_node_derivatives[axis] * output + factor_value * base_node_derivatives[axis] * derivative_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor_branch_derivatives[axis] * output + factor_value * base_branch_derivatives[axis] * derivative_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_powf(&mut self, index: usize, factor: AdValue, base: AdValue, exponent: f64) {",
-    "        self.store_mul_powf_components(index, factor.value, factor.node_derivatives, factor.branch_derivatives, base.value, base.node_derivatives, base.branch_derivatives, exponent);",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor.node_derivatives[axis] * output + factor_value * base.node_derivatives[axis] * derivative_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor.branch_derivatives[axis] * output + factor_value * base.branch_derivatives[axis] * derivative_scale; }",
     "    }",
     "",
     "    #[inline]",
@@ -20418,17 +20450,25 @@ fn generate_index_or_mixed_mul_div_from_scalar_lhs_helper(mask: &str) -> String 
 }
 
 fn generate_index_or_mixed_mul_powf_helper(mask: &str) -> String {
-    let operands = ["factor", "base"];
     let helper = index_or_mixed_helper_name("store_mul_powf", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let factor = mixed_helper_component_args(mask, 0, "factor");
-    let base = mixed_helper_component_args(mask, 1, "base");
+    let factor_value = index_or_mixed_value_expr(mask, 0, "factor");
+    let base_value = index_or_mixed_value_expr(mask, 1, "base");
+    let factor_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "factor");
+    let base_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "base");
+    let factor_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "factor");
+    let base_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "base");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, factor: {factor_ty}, base: {base_ty}, exponent: f64) {{
-{locals}        self.store_mul_powf_components(index, {factor}, {base}, exponent);
+        let factor_value = {factor_value};
+        let base_value = {base_value};
+        let output = base_value.powf(exponent);
+        let derivative_scale = AdValue::pow_derivative(output, base_value, exponent, 1.0, 0.0);
+        self.values[index] = factor_value * output;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {factor_node_derivative} * output + factor_value * {base_node_derivative} * derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {factor_branch_derivative} * output + factor_value * {base_branch_derivative} * derivative_scale; }}
     }}
 "#,
         factor_ty = mixed_helper_type(mask, 0),
@@ -20437,18 +20477,28 @@ fn generate_index_or_mixed_mul_powf_helper(mask: &str) -> String {
 }
 
 fn generate_index_or_mixed_mul_pow_helper(mask: &str) -> String {
-    let operands = ["factor", "base", "exponent"];
     let helper = index_or_mixed_helper_name("store_mul_pow", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let factor = mixed_helper_component_args(mask, 0, "factor");
-    let base = mixed_helper_component_args(mask, 1, "base");
-    let exponent = mixed_helper_component_args(mask, 2, "exponent");
+    let factor_value = index_or_mixed_value_expr(mask, 0, "factor");
+    let base_value = index_or_mixed_value_expr(mask, 1, "base");
+    let exponent_value = index_or_mixed_value_expr(mask, 2, "exponent");
+    let factor_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "factor");
+    let base_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "base");
+    let exponent_node_derivative = index_or_mixed_node_derivative_expr(mask, 2, "exponent");
+    let factor_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "factor");
+    let base_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "base");
+    let exponent_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 2, "exponent");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, factor: {factor_ty}, base: {base_ty}, exponent: {exponent_ty}) {{
-{locals}        self.store_mul_pow_components(index, {factor}, {base}, {exponent});
+        let factor_value = {factor_value};
+        let base_value = {base_value};
+        let exponent_value = {exponent_value};
+        let output = base_value.powf(exponent_value);
+        self.values[index] = factor_value * output;
+        for axis in 0..Instance::NODE_COUNT {{ let derivative = AdValue::pow_derivative(output, base_value, exponent_value, {base_node_derivative}, {exponent_node_derivative}); self.node_derivatives[index][axis] = {factor_node_derivative} * output + factor_value * derivative; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ let derivative = AdValue::pow_derivative(output, base_value, exponent_value, {base_branch_derivative}, {exponent_branch_derivative}); self.branch_derivatives[index][axis] = {factor_branch_derivative} * output + factor_value * derivative; }}
     }}
 "#,
         factor_ty = mixed_helper_type(mask, 0),
