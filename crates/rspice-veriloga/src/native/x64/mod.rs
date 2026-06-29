@@ -154,12 +154,13 @@ fn compile_model_inner(
         }
     }
 
+    let noise_limits = base_limits.with_available_current_pairs(&available_current_pairs);
     for source in &model.noise_sources {
         let psd_program = NativeProgram::from_bytecode(
             model.name.clone(),
             EntryKind::StampValue,
             &source.psd_program,
-            base_limits,
+            noise_limits,
         )?;
         noise_psd_current_dependencies.push(psd_program.current_pair_dependencies().to_vec());
         noise_psd.push(append_value_entry(&mut image, &psd_program)?);
@@ -169,7 +170,7 @@ fn compile_model_inner(
                 model.name.clone(),
                 EntryKind::StampValue,
                 program,
-                base_limits,
+                noise_limits,
             )?;
             noise_exponent_current_dependencies
                 .push(exponent_program.current_pair_dependencies().to_vec());

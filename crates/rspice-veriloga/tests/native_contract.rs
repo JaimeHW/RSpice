@@ -4018,6 +4018,36 @@ fn native_noise_analysis_evaluates_noise_sources_without_fallback() {
 }
 
 #[test]
+fn native_noise_analysis_evaluates_current_probe_psd_without_fallback() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+module native_noise_current_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ V(p, n) * 2.0e-3
+            + white_noise(abs(I(p, n)) * 4.0, "shot");
+    end
+endmodule
+"#,
+    );
+    assert_eq!(model.noise_sources.len(), 1);
+
+    let mut device =
+        VerilogADevice::try_new("NOISECP1", model, &[1, 0]).expect("model uses native JIT");
+    assert!(device.is_using_native());
+    device.set_analysis_type(3);
+
+    let sources = device
+        .try_noise_sources(&[3.0])
+        .expect("native current-probe noise evaluation succeeds");
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].name, "shot");
+    assert!((sources[0].psd - 2.4e-2).abs() < 1.0e-15);
+}
+
+#[test]
 fn native_compile_accepts_reactive_ddt_jacobians_without_fallback() {
     let model = reactive_model();
     assert!(

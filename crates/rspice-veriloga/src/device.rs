@@ -1422,6 +1422,63 @@ impl VerilogADevice {
         Self::execute_assignment_steps(vm, &model.assignment_steps)
     }
 
+    #[cfg(feature = "native")]
+    fn populate_noise_current_probe_cache(
+        vm: &mut Vm<'_>,
+        model: &CompiledModel,
+        program_active: &[bool],
+        native: &NativeModel,
+    ) -> Result<(), VmError> {
+        for (program_idx, program) in model.stamp_programs.iter().enumerate() {
+            let active = program_active.get(program_idx).copied().unwrap_or(true);
+            let value = if active {
+                Self::run_value_program(
+                    vm,
+                    &program.value_program,
+                    native,
+                    NativeValueEntry::StampValue(program_idx),
+                )?
+            } else {
+                0.0
+            };
+            Self::cache_current_probe_value(vm.context, program, value, active);
+        }
+        Ok(())
+    }
+
+    #[cfg(not(feature = "native"))]
+    fn populate_noise_current_probe_cache(
+        vm: &mut Vm<'_>,
+        model: &CompiledModel,
+        program_active: &[bool],
+    ) -> Result<(), VmError> {
+        for (program_idx, program) in model.stamp_programs.iter().enumerate() {
+            let active = program_active.get(program_idx).copied().unwrap_or(true);
+            let value = if active {
+                vm.execute(&program.value_program)?
+            } else {
+                0.0
+            };
+            Self::cache_current_probe_value(vm.context, program, value, active);
+        }
+        Ok(())
+    }
+
+    fn cache_current_probe_value(
+        context: &mut VmContext,
+        program: &crate::codegen::StampProgram,
+        value: f64,
+        active: bool,
+    ) {
+        context.currents.push(value);
+        if active
+            && program.branch_ordinal.is_none()
+            && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
+        {
+            context.set_branch_current(pos, neg, value);
+        }
+    }
+
     /// Safety cap on runtime-loop iterations per evaluation (a model bug
     /// must not hang the Newton loop)
     #[cfg(not(feature = "native"))]
@@ -1837,8 +1894,10 @@ impl VerilogADevice {
         let native = self.native_model.as_ref();
 
         context.clear_currents();
+        context.currents.reserve(model.stamp_programs.len());
         let mut vm = Vm::new(context);
         Self::run_assignment_pass(&mut vm, model, native)?;
+        Self::populate_noise_current_probe_cache(&mut vm, model, program_active, native)?;
 
         let circuit_node = |index: &StampIndex| -> usize {
             match index {
@@ -1927,8 +1986,10 @@ impl VerilogADevice {
         let program_active = &self.program_active;
 
         context.clear_currents();
+        context.currents.reserve(model.stamp_programs.len());
         let mut vm = Vm::new(context);
         Self::run_assignment_pass(&mut vm, model)?;
+        Self::populate_noise_current_probe_cache(&mut vm, model, program_active)?;
 
         let circuit_node = |index: &StampIndex| -> usize {
             match index {

@@ -921,12 +921,11 @@ impl CodeGenerator {
                     .instructions
                     .push(Instruction::CrossState(detector_id));
             }
-            IrExpr::WhiteNoise { power, name: _ } => {
-                // $white_noise(power, name)
-                // In time domain, noise returns 0
-                // Contributes to AC noise analysis
-                self.emit_expr(power, emit_ctx, program)?;
-                program.instructions.push(Instruction::WhiteNoise);
+            IrExpr::WhiteNoise { power: _, name: _ } => {
+                // The large-signal contribution is zero. The PSD operand is
+                // compiled separately into model.noise_sources for noise
+                // analysis and must not create stamp-time dependencies.
+                program.instructions.push(Instruction::PushConst(0.0));
             }
             IrExpr::NoiseTable { .. } => {
                 // Like the other noise functions, the large-signal value
@@ -952,14 +951,13 @@ impl CodeGenerator {
                 program.instructions.push(Instruction::ZiState(filter_id));
             }
             IrExpr::FlickerNoise {
-                power,
-                exponent,
+                power: _,
+                exponent: _,
                 name: _,
             } => {
-                // $flicker_noise(power, exponent, name)
-                self.emit_expr(power, emit_ctx, program)?;
-                self.emit_expr(exponent, emit_ctx, program)?;
-                program.instructions.push(Instruction::FlickerNoise);
+                // The large-signal contribution is zero. PSD and exponent
+                // programs are compiled separately for noise analysis.
+                program.instructions.push(Instruction::PushConst(0.0));
             }
             IrExpr::Analysis(name) => {
                 // analysis(name) - check current analysis type
