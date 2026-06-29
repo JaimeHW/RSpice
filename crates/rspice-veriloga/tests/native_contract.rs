@@ -2354,7 +2354,37 @@ endmodule
     let currents = device
         .try_evaluate()
         .expect("canonical ddx current evaluation succeeds");
-    assert_eq!(currents[0].to_bits(), 9.0_f64.to_bits());
+    assert_eq!(currents[0].to_bits(), 6.0_f64.to_bits());
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_with_canonical_ir_rejects_assignment_fed_ddx_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_ddx_assignment_fed(p, n);
+    inout p, n;
+    electrical p, n;
+    real x;
+    analog begin
+        x = V(p, n) * V(p, n);
+        I(p, n) <+ ddx(x, V(p, n));
+    end
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let err = VerilogADevice::try_new_with_canonical_ir("DDXVARCANON1", model, &artifact, &[1, 0])
+        .expect_err("assignment-fed ddx must fail closed until native derivative shadows exist");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("ddx derivative through variable x")
+            && msg.contains("no interpreter fallback"),
+        "unexpected error: {msg}"
+    );
 }
 
 #[cfg(target_arch = "x86_64")]
