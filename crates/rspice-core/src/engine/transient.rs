@@ -45,6 +45,7 @@ mod state_recovery;
 mod state_transmission_lines;
 mod step_control;
 mod truncation;
+mod vbic;
 
 pub use checkpoint::{TransientCheckpoint, netlist_fingerprint};
 
@@ -600,6 +601,7 @@ impl Engine {
         let coupled_tline_refs =
             Self::initialize_coupled_tline_history(&mut circuit, &solution, resume_time);
         let mut bjt_history = Self::initialize_bjt_history(&circuit, &solution);
+        let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
         // ngspice seeds CKTdeltaOld[] with maxstep before the first transient point.
         // Mirror that here so early device-local truncation/order checks have the
         // same timestep history instead of falling back to a synthetic zero-history path.
@@ -632,6 +634,9 @@ impl Engine {
         let mut bsim4_history = Self::initialize_bsim4_history(&circuit, &solution);
         bsim4_history.accepted_dt_prev = hinted_max_step;
         bsim4_history.accepted_dt_prev_prev = hinted_max_step;
+        let mut ekv26_history = Self::initialize_ekv26_history(&circuit, &solution);
+        ekv26_history.accepted_dt_prev = hinted_max_step;
+        ekv26_history.accepted_dt_prev_prev = hinted_max_step;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let ideal_output_pairs = circuit.ideal_voltage_output_pairs();
 
@@ -740,6 +745,7 @@ impl Engine {
                         &mut b3soi_history,
                         &mut bsim3_history,
                         &mut bsim4_history,
+                        &mut ekv26_history,
                     );
                     lte_estimator =
                         LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
@@ -1054,10 +1060,13 @@ impl Engine {
                         b3soi_history: &b3soi_history,
                         bsim3_history: &bsim3_history,
                         bsim4_history: &bsim4_history,
+                        ekv26_history: &ekv26_history,
                         suppress_gate_charge,
                         tline_dc_refs: &tline_dc_refs,
                         coupled_tline_refs: &coupled_tline_refs,
                     },
+                    &mut vbic_snapshot_cache,
+                    VbicCachedSnapshotReuse::NewtonBypass,
                     !nonlinear_state_matches_new_solution,
                     0.0,
                 );
@@ -1386,10 +1395,12 @@ impl Engine {
                             b3soi_history: &b3soi_history,
                             bsim3_history: &bsim3_history,
                             bsim4_history: &bsim4_history,
+                            ekv26_history: &ekv26_history,
                             suppress_gate_charge,
                             tline_dc_refs: &tline_dc_refs,
                             coupled_tline_refs: &coupled_tline_refs,
                         },
+                        &mut vbic_snapshot_cache,
                     )
                 {
                     static GMIN_RESCUE_LOG_COUNT: std::sync::atomic::AtomicUsize =
@@ -1637,6 +1648,8 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &bjt_history,
+                            &vbic_snapshot_cache,
+                            self.voltage_abstol(),
                             self.voltage_reltol(),
                             self.current_abstol(),
                             self.charge_abstol(),
@@ -1835,6 +1848,8 @@ impl Engine {
                         &mut b3soi_history,
                         &mut bsim3_history,
                         &mut bsim4_history,
+                        &mut ekv26_history,
+                        Some(vbic_snapshot_cache.as_slice()),
                         None,
                         suppress_gate_charge,
                         &tline_dc_refs,
@@ -1937,6 +1952,8 @@ impl Engine {
                     step_trap_order,
                     dt,
                     &bjt_history,
+                    &vbic_snapshot_cache,
+                    self.voltage_abstol(),
                     self.voltage_reltol(),
                     self.current_abstol(),
                     self.charge_abstol(),
@@ -2222,7 +2239,6 @@ impl Engine {
                     diode_truncation_limit,
                     mosfet_truncation_limit,
                     vdmos_truncation_limit,
-                    b3soi_truncation_limit,
                 );
             let device_or_startup_controls_lte = first_accepted_transient_step
                 || linearized_startup_recovery_points
@@ -2406,6 +2422,8 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &bjt_history,
+                            &vbic_snapshot_cache,
+                            self.voltage_abstol(),
                             self.voltage_reltol(),
                             self.current_abstol(),
                             self.charge_abstol(),
@@ -2604,6 +2622,8 @@ impl Engine {
                         &mut b3soi_history,
                         &mut bsim3_history,
                         &mut bsim4_history,
+                        &mut ekv26_history,
+                        Some(vbic_snapshot_cache.as_slice()),
                         None,
                         suppress_gate_charge,
                         &tline_dc_refs,
@@ -2767,8 +2787,10 @@ impl Engine {
                         &diode_history,
                         &mosfet_history,
                         &vdmos_history,
-                        &b3soi_history,
+                        &ekv26_history,
                         &lte_estimator,
+                        &vbic_snapshot_cache,
+                        self.voltage_abstol(),
                         self.voltage_reltol(),
                         self.current_abstol(),
                         self.charge_abstol(),
@@ -2796,6 +2818,8 @@ impl Engine {
                 &mut b3soi_history,
                 &mut bsim3_history,
                 &mut bsim4_history,
+                &mut ekv26_history,
+                Some(vbic_snapshot_cache.as_slice()),
                 mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
                 suppress_gate_charge,
                 &tline_dc_refs,
