@@ -820,13 +820,7 @@ impl FunctionCompiler {
     fn emit_unary_helper_call(&mut self, target: Xmm, helper: UnaryHelper) {
         debug_assert!(self.uses_helper_calls);
         self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != target {
-                self.encoder
-                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
-            }
-        }
+        self.emit_call_frame_spills(self.depth, |_, register| register != target);
 
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
@@ -845,14 +839,36 @@ impl FunctionCompiler {
         restore_depth: usize,
         mut should_restore: impl FnMut(usize, Xmm) -> bool,
     ) {
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(target, Xmm::Xmm0);
         }
+        let mut frame_base_ready = false;
         for (index, register) in XMM_STACK.iter().copied().take(restore_depth).enumerate() {
             if register != target && should_restore(index, register) {
+                if !frame_base_ready {
+                    self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+                    frame_base_ready = true;
+                }
                 self.encoder
                     .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
+            }
+        }
+    }
+
+    fn emit_call_frame_spills(
+        &mut self,
+        spill_depth: usize,
+        mut should_spill: impl FnMut(usize, Xmm) -> bool,
+    ) {
+        let mut frame_base_ready = false;
+        for (index, register) in XMM_STACK.iter().copied().take(spill_depth).enumerate() {
+            if should_spill(index, register) {
+                if !frame_base_ready {
+                    self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+                    frame_base_ready = true;
+                }
+                self.encoder
+                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
             }
         }
     }
@@ -1087,13 +1103,7 @@ impl FunctionCompiler {
         let base_disp = byte_disp(base)?;
 
         self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != target {
-                self.encoder
-                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
-            }
-        }
+        self.emit_call_frame_spills(self.depth, |_, register| register != target);
 
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
@@ -1366,13 +1376,7 @@ impl FunctionCompiler {
         debug_assert!(self.uses_helper_calls);
         let target = XMM_STACK[self.depth - 1];
         self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != target {
-                self.encoder
-                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
-            }
-        }
+        self.emit_call_frame_spills(self.depth, |_, register| register != target);
 
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
@@ -1406,13 +1410,7 @@ impl FunctionCompiler {
         debug_assert!(self.uses_helper_calls);
         debug_assert!(xmm_stack_slot(target) < self.depth);
         self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != target {
-                self.encoder
-                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
-            }
-        }
+        self.emit_call_frame_spills(self.depth, |_, register| register != target);
 
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
@@ -1921,13 +1919,9 @@ impl FunctionCompiler {
     fn emit_binary_helper_call(&mut self, left: Xmm, right: Xmm, helper: BinaryHelper) {
         debug_assert!(self.uses_helper_calls);
         self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != left && register != right {
-                self.encoder
-                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
-            }
-        }
+        self.emit_call_frame_spills(self.depth, |_, register| {
+            register != left && register != right
+        });
 
         if left != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, left);
@@ -1962,11 +1956,7 @@ impl FunctionCompiler {
         debug_assert!(arg2_slot < self.depth);
 
         self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        for (index, register) in XMM_STACK.iter().copied().take(target_slot).enumerate() {
-            self.encoder
-                .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
-        }
+        self.emit_call_frame_spills(target_slot, |_, _| true);
 
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
@@ -1988,13 +1978,9 @@ impl FunctionCompiler {
     fn emit_timer_helper_call(&mut self, start: Xmm, period: Xmm, helper: TimerHelper) {
         debug_assert!(self.uses_helper_calls);
         self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != start && register != period {
-                self.encoder
-                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
-            }
-        }
+        self.emit_call_frame_spills(self.depth, |_, register| {
+            register != start && register != period
+        });
 
         if start != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, start);
@@ -3025,7 +3011,7 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64,
+        CALL_FRAME_BYTES, DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64,
         INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, PARAMS_OFFSET, Q_ELECTRON,
         ROUND_TEMP_FRAME_BYTES, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
         assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
@@ -3178,6 +3164,82 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_no_spill_unary_helper_omits_call_frame_base_register() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![Instruction::PushTemperature, Instruction::Exp],
+            0,
+        );
+
+        let bytes = compile_value_function(&program).expect("compile unary helper value function");
+
+        assert!(
+            contains_bytes(&bytes, &sub_rsp_bytes(CALL_FRAME_BYTES)),
+            "helper calls must still reserve an ABI call frame"
+        );
+        assert!(
+            contains_bytes(&bytes, &add_rsp_bytes(CALL_FRAME_BYTES)),
+            "helper calls must still release the ABI call frame"
+        );
+        assert_eq!(
+            count_bytes(&bytes, &mov_r11_rsp_bytes()),
+            0,
+            "unary helper calls without preserved XMM values should not materialize a call-frame base"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate unary helper leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.temperature = 0.5;
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            runtime_exp(0.5).to_bits()
+        );
+    }
+
+    #[test]
+    fn generated_value_leaf_no_spill_binary_helper_omits_call_frame_base_register() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushTemperature,
+                Instruction::PushTime,
+                Instruction::Pow,
+            ],
+            0,
+        );
+
+        let bytes = compile_value_function(&program).expect("compile binary helper value function");
+
+        assert!(
+            contains_bytes(&bytes, &sub_rsp_bytes(CALL_FRAME_BYTES)),
+            "helper calls must still reserve an ABI call frame"
+        );
+        assert!(
+            contains_bytes(&bytes, &add_rsp_bytes(CALL_FRAME_BYTES)),
+            "helper calls must still release the ABI call frame"
+        );
+        assert_eq!(
+            count_bytes(&bytes, &mov_r11_rsp_bytes()),
+            0,
+            "binary helper calls without preserved XMM values should not materialize a call-frame base"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate binary helper leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.temperature = 2.0;
+        ctx.time = 3.0;
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 8.0_f64.to_bits());
+    }
+
+    #[test]
     fn generated_value_leaf_helper_result_stays_in_target_register() {
         let program = native_program(
             EntryKind::StampValue,
@@ -3202,6 +3264,12 @@ mod tests {
         );
 
         let bytes = compile_value_function(&program).expect("compile helper result leaf");
+
+        assert_eq!(
+            count_bytes(&bytes, &mov_r11_rsp_bytes()),
+            2,
+            "helper calls with a live preserved XMM value should materialize the call-frame base once for spill and once for restore"
+        );
 
         let mut old_result_store = X64Encoder::new();
         old_result_store.movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
@@ -7992,6 +8060,12 @@ mod tests {
     fn xor_r64_bytes(dst: Gpr, src: Gpr) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.xor_r64_r64(dst, src);
+        encoder.into_bytes()
+    }
+
+    fn mov_r11_rsp_bytes() -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
         encoder.into_bytes()
     }
 
