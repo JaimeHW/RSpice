@@ -538,10 +538,12 @@ endmodule
     #[test]
     fn compile_model_with_canonical_ir_rejects_unsupported_mir_stamp() {
         let source = r#"
+`include "disciplines.vams"
 module native_canonical_unsupported(p, n);
   inout p, n;
   electrical p, n;
-  analog I(p, n) <+ hypot(V(p, n), 2.0);
+  thermal t;
+  analog I(p, n) <+ Temp(t);
 endmodule
 "#;
         let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -553,10 +555,7 @@ endmodule
         let error = compile_model_with_canonical_ir(&model, &artifact)
             .expect_err("unsupported canonical stamp must not fall back to bytecode");
 
-        assert!(
-            error.to_string().contains("intrinsic function 'hypot'"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("branch access Temp"), "{error}");
     }
 
     #[test]

@@ -2380,13 +2380,47 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_hypot_current_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_hypot_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ hypot(V(p, n), 2.0);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("HYPOTCANON1", model, &artifact, &[1, 0])
+            .expect("canonical hypot current uses native JIT path");
+    assert!(device.is_using_native());
+
+    let input = 3.0;
+    device.update_voltages(&[input]);
+    let currents = device
+        .try_evaluate()
+        .expect("canonical hypot current evaluation succeeds");
+    assert_eq!(currents.len(), 1);
+    assert!(
+        (currents[0] - input.hypot(2.0)).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"
 module native_canonical_cache_guard(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ hypot(V(p, n), 2.0);
+    thermal t;
+    analog I(p, n) <+ Temp(t);
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -2408,10 +2442,7 @@ endmodule
     )
     .expect_err("canonical-native path must not reuse cached bytecode-native image");
 
-    assert!(
-        error.to_string().contains("intrinsic function 'hypot'"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("branch access Temp"), "{error}");
 }
 
 #[cfg(target_arch = "x86_64")]

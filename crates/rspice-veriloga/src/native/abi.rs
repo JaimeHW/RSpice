@@ -350,6 +350,12 @@ pub extern "C" fn rspice_atan2(y: f64, x: f64) -> f64 {
     y.atan2(x)
 }
 
+/// External helper function for Euclidean norm.
+#[unsafe(export_name = "rspice_hypot")]
+pub extern "C" fn rspice_hypot(left: f64, right: f64) -> f64 {
+    left.hypot(right)
+}
+
 /// External helper function for Verilog-A remainder.
 #[unsafe(export_name = "rspice_mod")]
 pub extern "C" fn rspice_mod(left: f64, right: f64) -> f64 {

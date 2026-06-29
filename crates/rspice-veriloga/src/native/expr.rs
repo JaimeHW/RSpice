@@ -133,6 +133,7 @@ pub(crate) enum UnaryMathOp {
 pub(crate) enum BinaryMathOp {
     Pow,
     Atan2,
+    Hypot,
     Mod,
 }
 
@@ -2772,6 +2773,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "ceil" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Ceil),
             "pow" => self.lower_binary_math_intrinsic(name, args, BinaryMathOp::Pow),
             "atan2" => self.lower_binary_math_intrinsic(name, args, BinaryMathOp::Atan2),
+            "hypot" => self.lower_binary_math_intrinsic(name, args, BinaryMathOp::Hypot),
             "min" => self.lower_extremum_intrinsic(name, args, ExtremumOp::Min),
             "max" => self.lower_extremum_intrinsic(name, args, ExtremumOp::Max),
             "temperature" => {
@@ -3998,6 +4000,7 @@ fn constant_binary_math(op: BinaryMathOp, left: f64, right: f64) -> f64 {
     match op {
         BinaryMathOp::Pow => left.powf(right),
         BinaryMathOp::Atan2 => left.atan2(right),
+        BinaryMathOp::Hypot => left.hypot(right),
         BinaryMathOp::Mod => left % right,
     }
 }
@@ -4996,7 +4999,7 @@ endmodule
     }
 
     #[test]
-    fn canonical_intrinsic_lowering_rejects_unsupported_hypot_without_fallback() {
+    fn lowers_canonical_hypot_intrinsic_to_native_program() {
         let source = r#"
 module mir_hypot(p, n);
   inout p, n;
@@ -5010,21 +5013,27 @@ endmodule
             .compile_canonical_ir(source)
             .expect("compile canonical IR");
 
-        let error = NativeProgram::from_mir_equation(
+        let program = NativeProgram::from_mir_equation(
             "mir_hypot",
             EntryKind::StampValue,
             &artifact.mir,
             crate::canonical_ir::EquationId::new(0),
             NativeLoweringLimits::new(2, 0, 0, 0, 0),
         )
-        .expect_err("unsupported canonical intrinsic must hard-fail");
+        .expect("lower canonical hypot to native program");
 
-        assert!(
-            error.to_string().contains(
-                "native JIT does not support canonical op expression intrinsic function 'hypot'"
-            ),
-            "{error}"
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::Const(2.0),
+                NativeOp::BinaryMath(BinaryMathOp::Hypot),
+            ]
         );
+        assert_eq!(program.max_stack_depth(), 2);
     }
 
     #[test]
