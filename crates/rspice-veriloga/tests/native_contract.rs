@@ -1344,6 +1344,43 @@ fn native_device_stamps_potential_branch_unknowns() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_stamps_potential_branch_unknowns_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_zres(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 2000.0 from (0:inf);
+    analog V(p, n) <+ I(p, n) * r;
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    assert_eq!(model.branch_sources.len(), 1);
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("ZCANON1", model, &artifact, &[1, 2])
+            .expect("potential branch uses canonical native JIT path");
+    assert!(device.is_using_native());
+    device.set_branch_current_indices(&[3]);
+
+    let (matrix, rhs) = stamp_device(&mut device, &[1.0, 0.5, 1.0e-3]);
+
+    assert!((matrix.get(&(0, 2)).copied().unwrap_or_default() - 1.0).abs() < 1e-12);
+    assert!((matrix.get(&(1, 2)).copied().unwrap_or_default() + 1.0).abs() < 1e-12);
+    assert!((matrix.get(&(2, 0)).copied().unwrap_or_default() - 1.0).abs() < 1e-12);
+    assert!((matrix.get(&(2, 1)).copied().unwrap_or_default() + 1.0).abs() < 1e-12);
+    assert!((matrix.get(&(2, 2)).copied().unwrap_or_default() + 2000.0).abs() < 1e-9);
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
+        "rhs: {rhs:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_stamps_simple_resistor_without_interpreter_fallback() {
     let model = simple_resistor_model();
     let mut device =

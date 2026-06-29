@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use super::{JitError, JitResult};
-use crate::canonical_ir::{EquationId, ExprId, HirExprKind, MirModel};
+use crate::canonical_ir::{EquationId, ExprId, HirExprKind, MirModel, NodeId};
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
 use smol_str::SmolStr;
 
@@ -890,7 +890,8 @@ impl NativeProgram {
                 detail: format!("MIR equation {equation_id} is outside equation arena").into(),
             })?;
 
-        let mut lowerer = MirEquationLowerer::new(model.clone(), entry_kind, mir, limits);
+        let mut lowerer =
+            MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
         lowerer.lower(equation.expression.id)?;
 
         if lowerer.depth != 1 {
@@ -928,6 +929,7 @@ struct MirEquationLowerer<'a, 'limits> {
     model: SmolStr,
     entry_kind: EntryKind,
     mir: &'a MirModel,
+    equation_id: EquationId,
     limits: NativeLoweringLimits<'limits>,
     ops: Vec<NativeOp>,
     depth: usize,
@@ -940,12 +942,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         model: SmolStr,
         entry_kind: EntryKind,
         mir: &'a MirModel,
+        equation_id: EquationId,
         limits: NativeLoweringLimits<'limits>,
     ) -> Self {
         Self {
             model,
             entry_kind,
             mir,
+            equation_id,
             limits,
             ops: Vec::new(),
             depth: 0,
@@ -1305,6 +1309,22 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.push(NativeOp::LoadVoltage { pos, neg })
             }
             "I" => {
+                if let Some((branch_unknown, reversed)) =
+                    self.resolve_current_branch_unknown(pos, neg)?
+                {
+                    validate_index(
+                        self.model.clone(),
+                        "canonical branch unknown",
+                        branch_unknown,
+                        self.limits.branch_unknown_count,
+                    )?;
+                    self.push(NativeOp::LoadBranchUnknown(branch_unknown))?;
+                    if reversed {
+                        return self.append_unary(NativeOp::Neg);
+                    }
+                    return Ok(());
+                }
+
                 let pos = self.lower_terminal_node(pos)?;
                 let neg = neg
                     .map(|node| self.lower_terminal_node(node))
@@ -1328,6 +1348,43 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             _ => Err(self.unsupported(format!("branch access {access}"))),
         }
+    }
+
+    fn resolve_current_branch_unknown(
+        &self,
+        pos: &str,
+        neg: Option<&str>,
+    ) -> JitResult<Option<(usize, bool)>> {
+        let pos = self.branch_endpoint(pos)?;
+        let neg = neg
+            .map(|node| self.branch_endpoint(node))
+            .transpose()?
+            .flatten();
+
+        let Some(branch_unknown) = self
+            .mir
+            .branch_unknowns
+            .iter()
+            .find(|branch_unknown| branch_unknown.equation == self.equation_id)
+        else {
+            return Ok(None);
+        };
+
+        if branch_unknown.pos_node == pos && branch_unknown.neg_node == neg {
+            return Ok(Some((usize::from(branch_unknown.id), false)));
+        }
+        if branch_unknown.pos_node == neg && branch_unknown.neg_node == pos {
+            return Ok(Some((usize::from(branch_unknown.id), true)));
+        }
+
+        Ok(None)
+    }
+
+    fn branch_endpoint(&self, name: &str) -> JitResult<Option<NodeId>> {
+        if self.is_ground_node(name) {
+            return Ok(None);
+        }
+        Ok(Some(self.node(name)?.id))
     }
 
     fn lower_unary(&mut self, op: &str, operand: ExprId) -> JitResult<()> {
@@ -2579,6 +2636,79 @@ endmodule
                 },
                 NativeOp::LoadParam(0),
                 NativeOp::Div,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_canonical_potential_branch_current_unknown_to_native_program() {
+        let source = r#"
+module mir_potential_branch_current(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real r = 2.0;
+  analog begin
+    V(p, n) <+ I(p, n) * r;
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_potential_branch_current",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 1, 0, 1),
+        )
+        .expect("lower canonical potential branch current to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadBranchUnknown(0),
+                NativeOp::LoadParam(0),
+                NativeOp::Mul,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_reversed_canonical_potential_branch_current_unknown_with_sign_flip() {
+        let source = r#"
+module mir_reversed_potential_branch_current(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real r = 2.0;
+  analog begin
+    V(p, n) <+ I(n, p) * r;
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_reversed_potential_branch_current",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 1, 0, 1),
+        )
+        .expect("lower reversed canonical potential branch current to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadBranchUnknown(0),
+                NativeOp::Neg,
+                NativeOp::LoadParam(0),
+                NativeOp::Mul,
             ]
         );
         assert_eq!(program.max_stack_depth(), 2);
