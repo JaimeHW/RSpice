@@ -2305,6 +2305,81 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_simparam_current_without_fallback() {
+    let input = 4.0;
+    let cases = [
+        (
+            "SIMPARAMGMIN1",
+            "native_canonical_simparam_gmin",
+            r#"$simparam("gmin")"#,
+            1.0e-12,
+        ),
+        (
+            "SIMPARAMTNOM1",
+            "native_canonical_simparam_tnom",
+            r#"$simparam("tnom")"#,
+            300.15,
+        ),
+        (
+            "SIMPARAMVERSION1",
+            "native_canonical_simparam_version",
+            r#"$simparam("simulatorVersion")"#,
+            1.0,
+        ),
+        (
+            "SIMPARAMUNKNOWN1",
+            "native_canonical_simparam_unknown",
+            r#"$simparam("unknown")"#,
+            0.0,
+        ),
+        (
+            "SIMPARAMFALLBACK1",
+            "native_canonical_simparam_fallback",
+            r#"$simparam("gmin", (V(p, n) * 0.25) + 7.0)"#,
+            (input * 0.25) + 7.0,
+        ),
+    ];
+
+    for (instance_name, module_name, expression, expected) in cases {
+        let source = format!(
+            r#"
+`include "disciplines.vams"
+module {module_name}(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ {expression};
+endmodule
+"#
+        );
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(&source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(&source)
+            .expect("compile canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir(instance_name, model, &artifact, &[1, 0])
+                .expect("canonical simparam current uses native JIT path");
+        assert!(device.is_using_native());
+
+        device.update_voltages(&[input]);
+        let currents = device
+            .try_evaluate()
+            .expect("canonical simparam current evaluation succeeds");
+        assert_eq!(currents.len(), 1);
+        let tolerance = if expected.abs() < 1.0e-9 {
+            1.0e-18
+        } else {
+            1.0e-12
+        };
+        assert!(
+            (currents[0] - expected).abs() < tolerance,
+            "instance: {instance_name}, currents: {currents:?}, expected: {expected}"
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"
