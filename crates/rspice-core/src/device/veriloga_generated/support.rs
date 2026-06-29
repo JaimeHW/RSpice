@@ -7943,6 +7943,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aaai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + second.value * second_scale + third.value * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + third.dn[axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + third.db[axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_aaai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = first.value * first_scale;
         let second_value = second.value * second_scale;
@@ -7984,6 +7995,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = first.value * first_scale + second.value * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aaia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + second.value * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -8033,6 +8055,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aaii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + second.value * second_scale + self.v[third] * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + self.dn[third][axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + self.db[third][axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_aaii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = first.value * first_scale;
         let second_value = second.value * second_scale;
@@ -8074,6 +8107,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = first.value * first_scale + self.v[second] * second_scale + third.value * third_scale + fourth.value * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + third.dn[axis] * third_scale + fourth.dn[axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + third.db[axis] * third_scale + fourth.db[axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aiaa(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + self.v[second] * second_scale + third.value * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + third.dn[axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + third.db[axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -8123,6 +8167,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aiai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + self.v[second] * second_scale + third.value * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + third.dn[axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + third.db[axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_aiai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = first.value * first_scale;
         let second_value = self.v[second] * second_scale;
@@ -8164,6 +8219,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = first.value * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aiia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -8213,6 +8279,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aiii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_aiii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = first.value * first_scale;
         let second_value = self.v[second] * second_scale;
@@ -8254,6 +8331,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = self.v[first] * first_scale + second.value * second_scale + third.value * third_scale + fourth.value * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + third.dn[axis] * third_scale + fourth.dn[axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + third.db[axis] * third_scale + fourth.db[axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iaaa(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + second.value * second_scale + third.value * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + third.dn[axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + third.db[axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -8303,6 +8391,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iaai(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + second.value * second_scale + third.value * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + third.dn[axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + third.db[axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_iaai(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = self.v[first] * first_scale;
         let second_value = second.value * second_scale;
@@ -8344,6 +8443,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = self.v[first] * first_scale + second.value * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iaia(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + second.value * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -8393,6 +8503,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iaii(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + second.value * second_scale + self.v[third] * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + self.dn[third][axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + self.db[third][axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_iaii(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = self.v[first] * first_scale;
         let second_value = second.value * second_scale;
@@ -8434,6 +8555,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = self.v[first] * first_scale + self.v[second] * second_scale + third.value * third_scale + fourth.value * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + third.dn[axis] * third_scale + fourth.dn[axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + third.db[axis] * third_scale + fourth.db[axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iiaa(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + self.v[second] * second_scale + third.value * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + third.dn[axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + third.db[axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -8483,6 +8615,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iiai(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + self.v[second] * second_scale + third.value * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + third.dn[axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + third.db[axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_iiai(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = self.v[first] * first_scale;
         let second_value = self.v[second] * second_scale;
@@ -8528,6 +8671,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iiia(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_iiia(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
         let first_value = self.v[first] * first_scale;
         let second_value = self.v[second] * second_scale;
@@ -8569,6 +8723,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = self.v[first] * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + self.v[fourth] * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale + self.dn[fourth][axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale + self.db[fourth][axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -23268,6 +23433,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aaai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + second.value * second_scale + third.value * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + third.dn[axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + third.db[axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_aaai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = first.value * first_scale;
         let second_value = second.value * second_scale;
@@ -23309,6 +23485,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = first.value * first_scale + second.value * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aaia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + second.value * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -23358,6 +23545,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aaii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + second.value * second_scale + self.v[third] * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + self.dn[third][axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + self.db[third][axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_aaii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = first.value * first_scale;
         let second_value = second.value * second_scale;
@@ -23399,6 +23597,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = first.value * first_scale + self.v[second] * second_scale + third.value * third_scale + fourth.value * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + third.dn[axis] * third_scale + fourth.dn[axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + third.db[axis] * third_scale + fourth.db[axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aiaa(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + self.v[second] * second_scale + third.value * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + third.dn[axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + third.db[axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -23448,6 +23657,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aiai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + self.v[second] * second_scale + third.value * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + third.dn[axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + third.db[axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_aiai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = first.value * first_scale;
         let second_value = self.v[second] * second_scale;
@@ -23489,6 +23709,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = first.value * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aiia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -23538,6 +23769,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_aiii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = first.value * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_aiii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = first.value * first_scale;
         let second_value = self.v[second] * second_scale;
@@ -23579,6 +23821,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = self.v[first] * first_scale + second.value * second_scale + third.value * third_scale + fourth.value * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + third.dn[axis] * third_scale + fourth.dn[axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + third.db[axis] * third_scale + fourth.db[axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iaaa(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + second.value * second_scale + third.value * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + third.dn[axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + third.db[axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -23628,6 +23881,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iaai(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + second.value * second_scale + third.value * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + third.dn[axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + third.db[axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_iaai(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = self.v[first] * first_scale;
         let second_value = second.value * second_scale;
@@ -23669,6 +23933,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = self.v[first] * first_scale + second.value * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iaia(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + second.value * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -23718,6 +23993,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iaii(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + second.value * second_scale + self.v[third] * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + self.dn[third][axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + self.db[third][axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_iaii(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = self.v[first] * first_scale;
         let second_value = second.value * second_scale;
@@ -23759,6 +24045,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = self.v[first] * first_scale + self.v[second] * second_scale + third.value * third_scale + fourth.value * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + third.dn[axis] * third_scale + fourth.dn[axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + third.db[axis] * third_scale + fourth.db[axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iiaa(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + self.v[second] * second_scale + third.value * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + third.dn[axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + third.db[axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
     }
 
 
@@ -23808,6 +24105,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iiai(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + self.v[second] * second_scale + third.value * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + third.dn[axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + third.db[axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_iiai(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, denominator: usize, denominator_scale: f64) {
         let first_value = self.v[first] * first_scale;
         let second_value = self.v[second] * second_scale;
@@ -23853,6 +24161,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_mixed_iiia(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + fourth.value * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale + fourth.dn[axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale + fourth.db[axis] * fourth_scale - source_db[axis]; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3_mixed_iiia(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
         let first_value = self.v[first] * first_scale;
         let second_value = self.v[second] * second_scale;
@@ -23894,6 +24213,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = self.v[first] * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + self.v[fourth] * fourth_scale + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale + self.dn[fourth][axis] * fourth_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale + self.db[fourth][axis] * fourth_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_add_scaled_inputs4_lhs_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, source: usize) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        self.v[index] = self.v[first] * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + self.v[fourth] * fourth_scale - source_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale + self.dn[fourth][axis] * fourth_scale - source_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale + self.db[fourth][axis] * fourth_scale - source_db[axis]; }
     }
 
 
