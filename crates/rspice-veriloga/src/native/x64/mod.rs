@@ -1184,6 +1184,21 @@ endmodule
                 shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
                 Some("bsimimg"),
             ),
+            (
+                "hisimsoi",
+                shipped_cmc_model_path(&[
+                    "HiSIM_SOI_1.5.0_Release_20211008",
+                    "HiSIM_SOI_1.5.0_VA-Code",
+                    "hisimsoi_va",
+                    "hisimsoi.va",
+                ]),
+                Some("hisimsoi_va"),
+            ),
+            (
+                "asmhemt",
+                shipped_cmc_model_path(&["ASM-HEMT101.6.0_05132026", "vacode", "asmhemt.va"]),
+                Some("asmhemt"),
+            ),
         ];
 
         for (name, path, module) in cases {
