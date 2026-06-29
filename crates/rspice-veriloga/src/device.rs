@@ -1331,6 +1331,14 @@ impl VerilogADevice {
         };
         let prior_currents = match entry {
             NativeValueEntry::StampValue(index) => native.stamp_value_prior_currents(index),
+            NativeValueEntry::Jacobian { stamp, entry } => {
+                native.jacobian_prior_currents(stamp, entry)
+            }
+            NativeValueEntry::ReactiveJacobian { stamp, entry } => {
+                native.reactive_jacobian_prior_currents(stamp, entry)
+            }
+            NativeValueEntry::NoisePsd(index) => native.noise_psd_prior_currents(index),
+            NativeValueEntry::NoiseExponent(index) => native.noise_exponent_prior_currents(index),
             _ => &[],
         };
         Self::validate_native_current_pairs(vm.context, current_pairs)?;
@@ -1777,6 +1785,7 @@ impl VerilogADevice {
                 .copied()
                 .unwrap_or(true)
             {
+                vm.context.currents.push(0.0);
                 continue;
             }
 

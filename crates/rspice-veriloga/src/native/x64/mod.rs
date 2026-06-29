@@ -2,14 +2,14 @@ pub(crate) mod codegen;
 pub mod encoder;
 
 use super::expr::{
-    EntryKind, NativeLoweringLimits, NativeOp, NativeProgram, canonical_above_slots_for_equation,
-    canonical_absdelay_slots_for_equation, canonical_cross_slots_for_equation,
-    canonical_ddt_slots_for_equation, canonical_idt_slots_for_equation,
-    canonical_idtmod_slots_for_equation, canonical_laplace_slots_for_equation,
-    canonical_limit_slots_for_equation, canonical_slew_slots_for_equation,
-    canonical_table_lookup_slots_for_equation, canonical_timer_slots_for_equation,
-    canonical_transition_slots_for_equation, canonical_zi_slots_for_equation,
-    constant_dynamic_variable_slot,
+    EntryKind, NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
+    canonical_above_slots_for_equation, canonical_absdelay_slots_for_equation,
+    canonical_cross_slots_for_equation, canonical_ddt_slots_for_equation,
+    canonical_idt_slots_for_equation, canonical_idtmod_slots_for_equation,
+    canonical_laplace_slots_for_equation, canonical_limit_slots_for_equation,
+    canonical_slew_slots_for_equation, canonical_table_lookup_slots_for_equation,
+    canonical_timer_slots_for_equation, canonical_transition_slots_for_equation,
+    canonical_zi_slots_for_equation, constant_dynamic_variable_slot,
 };
 use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel};
 use super::runtime::ExecutableMemory;
@@ -68,13 +68,20 @@ fn compile_model_inner(
     let mut stamp_value_prior_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobians = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
+    let mut jacobian_prior_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut reactive_jacobians = Vec::with_capacity(model.stamp_programs.len());
     let mut reactive_jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
+    let mut reactive_jacobian_prior_current_dependencies =
+        Vec::with_capacity(model.stamp_programs.len());
     let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
     let mut noise_psd_current_dependencies = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_psd_prior_current_dependencies = Vec::with_capacity(model.noise_sources.len());
     let mut noise_exponents = Vec::with_capacity(model.noise_sources.len());
     let mut noise_exponent_current_dependencies = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_exponent_prior_current_dependencies =
+        Vec::with_capacity(model.noise_sources.len());
     let mut available_current_pairs = Vec::new();
+    let mut prior_current_probes = Vec::new();
 
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
         let static_condition = if let Some(condition) = &stamp.static_condition {
@@ -91,7 +98,9 @@ fn compile_model_inner(
         };
         static_conditions.push(static_condition);
 
-        let value_limits = base_limits.with_available_current_pairs(&available_current_pairs);
+        let value_limits = base_limits
+            .with_available_current_pairs(&available_current_pairs)
+            .with_prior_current_probes(&prior_current_probes);
         let program = lower_stamp_value_program(
             model,
             canonical_mir,
@@ -114,10 +123,25 @@ fn compile_model_inner(
                 neg,
             )?;
         }
-        let jacobian_limits = base_limits.with_available_current_pairs(&jacobian_current_pairs);
+        let mut jacobian_prior_current_probes = prior_current_probes.clone();
+        if stamp.branch_ordinal.is_none()
+            && let Some((pos, neg)) = infer_current_unified_pair(model, stamp)
+        {
+            push_prior_current_probe_aliases(
+                &mut jacobian_prior_current_probes,
+                stamp_index,
+                pos,
+                neg,
+            );
+        }
+        let jacobian_limits = base_limits
+            .with_available_current_pairs(&jacobian_current_pairs)
+            .with_prior_current_probes(&jacobian_prior_current_probes);
 
         let mut stamp_jacobians = Vec::with_capacity(stamp.jacobian_programs.len());
         let mut stamp_jacobian_current_dependencies =
+            Vec::with_capacity(stamp.jacobian_programs.len());
+        let mut stamp_jacobian_prior_current_dependencies =
             Vec::with_capacity(stamp.jacobian_programs.len());
         for jacobian in &stamp.jacobian_programs {
             let program = NativeProgram::from_bytecode(
@@ -133,13 +157,18 @@ fn compile_model_inner(
                 )
             })?;
             stamp_jacobian_current_dependencies.push(program.current_pair_dependencies().to_vec());
+            stamp_jacobian_prior_current_dependencies
+                .push(program.prior_current_dependencies().to_vec());
             stamp_jacobians.push(append_value_entry(&mut image, &program)?);
         }
         jacobians.push(stamp_jacobians);
         jacobian_current_dependencies.push(stamp_jacobian_current_dependencies);
+        jacobian_prior_current_dependencies.push(stamp_jacobian_prior_current_dependencies);
 
         let mut stamp_reactive_jacobians = Vec::with_capacity(stamp.reactive_jacobians.len());
         let mut stamp_reactive_jacobian_current_dependencies =
+            Vec::with_capacity(stamp.reactive_jacobians.len());
+        let mut stamp_reactive_jacobian_prior_current_dependencies =
             Vec::with_capacity(stamp.reactive_jacobians.len());
         for reactive_jacobian in &stamp.reactive_jacobians {
             let program = NativeProgram::from_bytecode(
@@ -159,10 +188,14 @@ fn compile_model_inner(
             })?;
             stamp_reactive_jacobian_current_dependencies
                 .push(program.current_pair_dependencies().to_vec());
+            stamp_reactive_jacobian_prior_current_dependencies
+                .push(program.prior_current_dependencies().to_vec());
             stamp_reactive_jacobians.push(append_value_entry(&mut image, &program)?);
         }
         reactive_jacobians.push(stamp_reactive_jacobians);
         reactive_jacobian_current_dependencies.push(stamp_reactive_jacobian_current_dependencies);
+        reactive_jacobian_prior_current_dependencies
+            .push(stamp_reactive_jacobian_prior_current_dependencies);
 
         if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
             push_current_pair_indices(
@@ -173,9 +206,16 @@ fn compile_model_inner(
                 neg,
             )?;
         }
+        if stamp.branch_ordinal.is_none()
+            && let Some((pos, neg)) = infer_current_unified_pair(model, stamp)
+        {
+            push_prior_current_probe_aliases(&mut prior_current_probes, stamp_index, pos, neg);
+        }
     }
 
-    let noise_limits = base_limits.with_available_current_pairs(&available_current_pairs);
+    let noise_limits = base_limits
+        .with_available_current_pairs(&available_current_pairs)
+        .with_prior_current_probes(&prior_current_probes);
     for source in &model.noise_sources {
         let psd_program = NativeProgram::from_bytecode(
             model.name.clone(),
@@ -185,6 +225,8 @@ fn compile_model_inner(
         )
         .map_err(|error| context_jit_error(error, format!("noise psd {}", noise_psd.len())))?;
         noise_psd_current_dependencies.push(psd_program.current_pair_dependencies().to_vec());
+        noise_psd_prior_current_dependencies
+            .push(psd_program.prior_current_dependencies().to_vec());
         noise_psd.push(append_value_entry(&mut image, &psd_program)?);
 
         let exponent_entry = if let Some(program) = &source.exponent_program {
@@ -199,9 +241,12 @@ fn compile_model_inner(
             })?;
             noise_exponent_current_dependencies
                 .push(exponent_program.current_pair_dependencies().to_vec());
+            noise_exponent_prior_current_dependencies
+                .push(exponent_program.prior_current_dependencies().to_vec());
             Some(append_value_entry(&mut image, &exponent_program)?)
         } else {
             noise_exponent_current_dependencies.push(Vec::new());
+            noise_exponent_prior_current_dependencies.push(Vec::new());
             None
         };
         noise_exponents.push(exponent_entry);
@@ -226,9 +271,13 @@ fn compile_model_inner(
             stamp_values: stamp_value_current_dependencies,
             stamp_value_prior_currents: stamp_value_prior_current_dependencies,
             jacobians: jacobian_current_dependencies,
+            jacobian_prior_currents: jacobian_prior_current_dependencies,
             reactive_jacobians: reactive_jacobian_current_dependencies,
+            reactive_jacobian_prior_currents: reactive_jacobian_prior_current_dependencies,
             noise_psd: noise_psd_current_dependencies,
+            noise_psd_prior_currents: noise_psd_prior_current_dependencies,
             noise_exponents: noise_exponent_current_dependencies,
+            noise_exponent_prior_currents: noise_exponent_prior_current_dependencies,
         },
     )
 }
@@ -580,6 +629,76 @@ fn infer_current_terminal_pair(program: &StampProgram) -> Option<(usize, usize)>
     }
 }
 
+fn infer_current_unified_pair(
+    model: &CompiledModel,
+    program: &StampProgram,
+) -> Option<(usize, usize)> {
+    let mut pos_endpoint = None;
+    let mut neg_endpoint = None;
+
+    for loc in &program.stamp_locations {
+        let endpoint = stamp_row_unified_endpoint(model, &loc.row)?;
+
+        if loc.sign < 0.0 {
+            if pos_endpoint.replace(endpoint).is_some() {
+                return None;
+            }
+        } else if loc.sign > 0.0 && neg_endpoint.replace(endpoint).is_some() {
+            return None;
+        }
+    }
+
+    match (pos_endpoint, neg_endpoint) {
+        (Some(pos), Some(neg)) if pos != neg => Some((pos, neg)),
+        _ => None,
+    }
+}
+
+fn stamp_row_unified_endpoint(model: &CompiledModel, index: &StampIndex) -> Option<usize> {
+    match index {
+        StampIndex::Terminal(term) if *term < model.num_terminals => Some(*term),
+        StampIndex::Internal(internal) if *internal < model.internal_nodes => {
+            Some(model.num_terminals + *internal)
+        }
+        StampIndex::Ground => Some(CURRENT_PAIR_GROUND),
+        _ => None,
+    }
+}
+
+fn push_prior_current_probe_aliases(
+    probes: &mut Vec<PriorCurrentProbe>,
+    current_index: usize,
+    pos: usize,
+    neg: usize,
+) {
+    push_prior_current_probe_alias(
+        probes,
+        PriorCurrentProbe {
+            pos,
+            neg,
+            current_index,
+            inverted: false,
+        },
+    );
+    if pos != neg {
+        push_prior_current_probe_alias(
+            probes,
+            PriorCurrentProbe {
+                pos: neg,
+                neg: pos,
+                current_index,
+                inverted: true,
+            },
+        );
+    }
+}
+
+fn push_prior_current_probe_alias(probes: &mut Vec<PriorCurrentProbe>, probe: PriorCurrentProbe) {
+    if !probes.contains(&probe) {
+        probes.push(probe);
+    }
+}
+
 fn push_current_pair_indices(
     model: &CompiledModel,
     available_current_pairs: &mut Vec<usize>,
@@ -633,8 +752,10 @@ fn format_current_endpoint(endpoint: usize) -> String {
 mod tests {
     use super::{NativeModel, compile_model_with_canonical_ir, lower_assignment_step};
     use crate::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
-    use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
-    use crate::native::expr::NativeOp;
+    use crate::codegen::{
+        AssignmentStep, BytecodeProgram, CompiledModel, Instruction, StampProgram,
+    };
+    use crate::native::expr::{NativeOp, PriorCurrentProbe};
     use crate::native::x64::codegen::NativeAssignment;
     use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
     use crate::vm::{Vm, VmContext};
@@ -831,6 +952,11 @@ endmodule
                 "bsimcmg",
                 shipped_cmc_model_path(&["BSIM-CMG_112.1.0_04282026", "code", "bsimcmg.va"]),
                 Some("bsimcmg_va"),
+            ),
+            (
+                "psp104",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "psp104.va"]),
+                Some("PSP104VA"),
             ),
         ];
         let iterations = shipped_model_microbench_iterations();
@@ -1221,6 +1347,7 @@ endmodule
         execute_bytecode_assignment_steps(&mut vm, &model.assignment_steps)
             .map_err(|error| error.to_string())?;
 
+        let mut prior_current_probes = Vec::new();
         for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
             if let Some(condition) = &stamp.static_condition
                 && vm
@@ -1229,12 +1356,21 @@ endmodule
                     .abs()
                     <= 1.0e-15
             {
+                push_prior_current_probe_aliases_for_stamp(
+                    model,
+                    &mut prior_current_probes,
+                    stamp_index,
+                    stamp,
+                );
                 continue;
             }
 
-            let value = vm
-                .execute(&stamp.value_program)
-                .map_err(|error| error.to_string())?;
+            let value = execute_bytecode_value_program_with_prior_current_probes(
+                &mut vm,
+                &stamp.value_program,
+                &prior_current_probes,
+            )
+            .map_err(|error| error.to_string())?;
             if !value.is_finite() {
                 reference.stamps.push(stamp_index);
             }
@@ -1245,10 +1381,20 @@ endmodule
                 vm.context.set_branch_current(pos, neg, value);
             }
 
+            let mut jacobian_prior_current_probes = prior_current_probes.clone();
+            push_prior_current_probe_aliases_for_stamp(
+                model,
+                &mut jacobian_prior_current_probes,
+                stamp_index,
+                stamp,
+            );
             for entry_index in 0..stamp.jacobian_programs.len() {
-                let value = vm
-                    .execute(&stamp.jacobian_programs[entry_index].program)
-                    .map_err(|error| error.to_string())?;
+                let value = execute_bytecode_value_program_with_prior_current_probes(
+                    &mut vm,
+                    &stamp.jacobian_programs[entry_index].program,
+                    &jacobian_prior_current_probes,
+                )
+                .map_err(|error| error.to_string())?;
                 if !value.is_finite() {
                     reference.jacobians.push((stamp_index, entry_index));
                 }
@@ -1264,9 +1410,78 @@ endmodule
                         .push((stamp_index, entry_index));
                 }
             }
+
+            push_prior_current_probe_aliases_for_stamp(
+                model,
+                &mut prior_current_probes,
+                stamp_index,
+                stamp,
+            );
         }
 
         Ok(reference)
+    }
+
+    fn execute_bytecode_value_program_with_prior_current_probes(
+        vm: &mut Vm<'_>,
+        program: &crate::codegen::BytecodeProgram,
+        prior_current_probes: &[PriorCurrentProbe],
+    ) -> Result<f64, crate::vm::VmError> {
+        let mut rewritten = None;
+        for (index, instruction) in program.instructions.iter().enumerate() {
+            let Instruction::PushCurrent(pos, neg) = *instruction else {
+                continue;
+            };
+            if vm.context.try_current(pos, neg).is_ok() {
+                continue;
+            }
+            let Some(value) =
+                prior_current_probe_value(vm.context, prior_current_probes, pos, neg)?
+            else {
+                continue;
+            };
+            let rewritten = rewritten.get_or_insert_with(|| program.clone());
+            rewritten.instructions[index] = Instruction::PushConst(value);
+        }
+
+        if let Some(rewritten) = rewritten {
+            vm.execute(&rewritten)
+        } else {
+            vm.execute(program)
+        }
+    }
+
+    fn prior_current_probe_value(
+        context: &VmContext,
+        probes: &[PriorCurrentProbe],
+        pos: usize,
+        neg: usize,
+    ) -> Result<Option<f64>, crate::vm::VmError> {
+        let mut value = None;
+        for probe in probes
+            .iter()
+            .filter(|probe| probe.pos == pos && probe.neg == neg)
+        {
+            let current = context.currents.get(probe.current_index).copied().ok_or(
+                crate::vm::VmError::InvalidInstruction("missing prior contribution current slot"),
+            )?;
+            let current = if probe.inverted { -current } else { current };
+            value = Some(value.unwrap_or(0.0) + current);
+        }
+        Ok(value)
+    }
+
+    fn push_prior_current_probe_aliases_for_stamp(
+        model: &CompiledModel,
+        probes: &mut Vec<PriorCurrentProbe>,
+        stamp_index: usize,
+        stamp: &StampProgram,
+    ) {
+        if stamp.branch_ordinal.is_none()
+            && let Some((pos, neg)) = super::infer_current_unified_pair(model, stamp)
+        {
+            super::push_prior_current_probe_aliases(probes, stamp_index, pos, neg);
+        }
     }
 
     fn execute_bytecode_assignment_steps(
