@@ -2974,11 +2974,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         &mut self,
         expr_id: ExprId,
         args: &[ExprId],
-        abstol: Option<ExprId>,
+        _abstol: Option<ExprId>,
     ) -> JitResult<()> {
-        if abstol.is_some() {
-            return Err(self.unsupported("analog operator ddt abstol argument"));
-        }
         if args.len() != 1 {
             return Err(self.unsupported(format!(
                 "analog operator ddt expects one operand, found {}",
@@ -3001,13 +2998,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         args: &[ExprId],
         ic: Option<ExprId>,
         assert: Option<ExprId>,
-        abstol: Option<ExprId>,
+        _abstol: Option<ExprId>,
     ) -> JitResult<()> {
-        if assert.is_some() {
+        if assert.is_some_and(|expr| self.constant_number(expr) != Some(0.0)) {
             return Err(self.unsupported("analog operator idt assert argument"));
-        }
-        if abstol.is_some() {
-            return Err(self.unsupported("analog operator idt abstol argument"));
         }
         let (expr, ic) = match (args, ic) {
             ([expr], ic) => (*expr, ic),
@@ -3060,11 +3054,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         ic: Option<ExprId>,
         modulus: Option<ExprId>,
         offset: Option<ExprId>,
-        abstol: Option<ExprId>,
+        _abstol: Option<ExprId>,
     ) -> JitResult<()> {
-        if abstol.is_some() {
-            return Err(self.unsupported("analog operator idtmod abstol argument"));
-        }
         let Some(modulus) = modulus else {
             if offset.is_some() {
                 return Err(self.unsupported("analog operator idtmod offset without modulus"));
@@ -3101,19 +3092,26 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_transition_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
-        let (expr, delay, rise, fall) = match args {
-            [expr] => (*expr, None, None, None),
-            [expr, delay] => (*expr, Some(*delay), None, None),
-            [expr, delay, rise] => (*expr, Some(*delay), Some(*rise), None),
-            [expr, delay, rise, fall] => (*expr, Some(*delay), Some(*rise), Some(*fall)),
+        let (expr, delay, rise, fall, tolerance) = match args {
+            [expr] => (*expr, None, None, None, None),
+            [expr, delay] => (*expr, Some(*delay), None, None, None),
+            [expr, delay, rise] => (*expr, Some(*delay), Some(*rise), None, None),
+            [expr, delay, rise, fall] => (*expr, Some(*delay), Some(*rise), Some(*fall), None),
+            [expr, delay, rise, fall, tolerance] => (
+                *expr,
+                Some(*delay),
+                Some(*rise),
+                Some(*fall),
+                Some(*tolerance),
+            ),
             _ => {
                 return Err(self.unsupported(format!(
-                    "analog operator transition expects one to four operands, found {}",
+                    "analog operator transition expects one to five operands, found {}",
                     args.len()
                 )));
             }
         };
-        self.lower_transition_operator(expr_id, expr, delay, rise, fall, None)
+        self.lower_transition_operator(expr_id, expr, delay, rise, fall, tolerance)
     }
 
     fn lower_transition_operator(
@@ -3123,11 +3121,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         delay: Option<ExprId>,
         rise: Option<ExprId>,
         fall: Option<ExprId>,
-        tolerance: Option<ExprId>,
+        _tolerance: Option<ExprId>,
     ) -> JitResult<()> {
-        if tolerance.is_some() {
-            return Err(self.unsupported("analog operator transition tolerance argument"));
-        }
         let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
             return Err(self.unsupported(format!(
                 "analog operator transition expression {expr_id} filter slot"
@@ -3212,17 +3207,18 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_absdelay_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
-        let (expr, delay) = match args {
-            [expr] => (*expr, None),
-            [expr, delay] => (*expr, Some(*delay)),
+        let (expr, delay, max_delay) = match args {
+            [expr] => (*expr, None, None),
+            [expr, delay] => (*expr, Some(*delay), None),
+            [expr, delay, max_delay] => (*expr, Some(*delay), Some(*max_delay)),
             _ => {
                 return Err(self.unsupported(format!(
-                    "analog operator absdelay expects one or two operands, found {}",
+                    "analog operator absdelay expects one to three operands, found {}",
                     args.len()
                 )));
             }
         };
-        self.lower_absdelay_operator(expr_id, expr, delay, None)
+        self.lower_absdelay_operator(expr_id, expr, delay, max_delay)
     }
 
     fn lower_absdelay_operator(
@@ -3230,11 +3226,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         expr_id: ExprId,
         expr: ExprId,
         delay: Option<ExprId>,
-        max_delay: Option<ExprId>,
+        _max_delay: Option<ExprId>,
     ) -> JitResult<()> {
-        if max_delay.is_some() {
-            return Err(self.unsupported("analog operator absdelay max_delay argument"));
-        }
         let Some(slot) = self.limits.canonical_absdelay_slot(expr_id) else {
             return Err(self.unsupported(format!(
                 "analog operator absdelay expression {expr_id} buffer slot"
@@ -5615,6 +5608,15 @@ mod tests {
         })
     }
 
+    fn voltage_expr() -> Expression {
+        Expression::BranchAccess(BranchAccess::Nodes {
+            access: "V".into(),
+            pos: "p".into(),
+            neg: Some("n".into()),
+            span: Span::dummy(),
+        })
+    }
+
     fn explicit_analog_limexp_mir() -> MirModel {
         let span = Span::dummy();
         let expression = Expression::AnalogOperator(AnalogOperator::Limexp {
@@ -5738,6 +5740,143 @@ endmodule
             ]
         );
         assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_canonical_ddt_with_abstol_metadata_to_state_op() {
+        let mir = analyzed_two_terminal_mir(
+            "mir_ddt_abstol",
+            Expression::AnalogOperator(AnalogOperator::Ddt {
+                expr: Box::new(voltage_expr()),
+                abstol: Some(Box::new(number(1.0e-18, "1.0e-18"))),
+                span: Span::dummy(),
+            }),
+        );
+        let root = mir.equations[0].expression.id;
+        let ddt_slots = [(root, 0)];
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_ddt_abstol",
+            EntryKind::StampValue,
+            &mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_canonical_ddt_slots(&ddt_slots),
+        )
+        .expect("ddt abstol metadata must not block native lowering");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::DdtState(0),
+            ]
+        );
+    }
+
+    #[test]
+    fn lowers_canonical_idt_with_zero_assert_and_abstol_metadata_to_state_op() {
+        let mir = analyzed_two_terminal_mir(
+            "mir_idt_abstol",
+            Expression::AnalogOperator(AnalogOperator::Idt {
+                expr: Box::new(voltage_expr()),
+                ic: Some(Box::new(number(0.5, "0.5"))),
+                assert_val: Some(Box::new(number(0.0, "0.0"))),
+                abstol: Some(Box::new(number(1.0e-9, "1.0e-9"))),
+                span: Span::dummy(),
+            }),
+        );
+        let root = mir.equations[0].expression.id;
+        let idt_slots = [(root, 0)];
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_idt_abstol",
+            EntryKind::StampValue,
+            &mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_canonical_idt_slots(&idt_slots),
+        )
+        .expect("zero idt assert and abstol metadata must not block native lowering");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::Const(0.5),
+                NativeOp::IdtState(0),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_canonical_idt_with_nonzero_assert_without_fallback() {
+        let mir = analyzed_two_terminal_mir(
+            "mir_idt_assert",
+            Expression::AnalogOperator(AnalogOperator::Idt {
+                expr: Box::new(voltage_expr()),
+                ic: Some(Box::new(number(0.5, "0.5"))),
+                assert_val: Some(Box::new(number(1.0, "1.0"))),
+                abstol: Some(Box::new(number(1.0e-9, "1.0e-9"))),
+                span: Span::dummy(),
+            }),
+        );
+        let root = mir.equations[0].expression.id;
+        let idt_slots = [(root, 0)];
+
+        let err = NativeProgram::from_mir_equation(
+            "mir_idt_assert",
+            EntryKind::StampValue,
+            &mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_canonical_idt_slots(&idt_slots),
+        )
+        .expect_err("nonzero idt assert needs explicit native reset semantics");
+        let msg = err.to_string();
+
+        assert!(msg.contains("analog operator idt assert argument"), "{msg}");
+        assert!(msg.contains("no interpreter fallback"), "{msg}");
+    }
+
+    #[test]
+    fn lowers_canonical_idtmod_with_abstol_metadata_to_state_op() {
+        let mir = analyzed_two_terminal_mir(
+            "mir_idtmod_abstol",
+            Expression::AnalogOperator(AnalogOperator::IdtMod {
+                expr: Box::new(number(1.0, "1.0")),
+                ic: Some(Box::new(number(0.0, "0.0"))),
+                modulus: Some(Box::new(number(1.0, "1.0"))),
+                offset: Some(Box::new(number(0.0, "0.0"))),
+                abstol: Some(Box::new(number(1.0e-9, "1.0e-9"))),
+                span: Span::dummy(),
+            }),
+        );
+        let root = mir.equations[0].expression.id;
+        let idtmod_slots = [(root, 0)];
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_idtmod_abstol",
+            EntryKind::StampValue,
+            &mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_canonical_idtmod_slots(&idtmod_slots),
+        )
+        .expect("idtmod abstol metadata must not block native lowering");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::Const(1.0),
+                NativeOp::Const(0.0),
+                NativeOp::Const(1.0),
+                NativeOp::Const(0.0),
+                NativeOp::IdtModState(0),
+            ]
+        );
     }
 
     #[test]

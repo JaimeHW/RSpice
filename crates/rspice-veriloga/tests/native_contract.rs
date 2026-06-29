@@ -18,6 +18,26 @@ fn compile(source: &str) -> rspice_veriloga::CompiledModel {
         .expect("Verilog-A source must compile")
 }
 
+#[cfg(target_arch = "x86_64")]
+fn canonical_device_from_sources(
+    instance: &str,
+    model_source: &str,
+    canonical_source: &str,
+) -> VerilogADevice {
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler
+        .compile(model_source)
+        .expect("bytecode-equivalent Verilog-A source must compile");
+    let artifact = compiler
+        .compile_canonical_ir(canonical_source)
+        .expect("canonical Verilog-A source must compile");
+    let mut device = VerilogADevice::try_new_with_canonical_ir(instance, model, &artifact, &[1, 0])
+        .expect("canonical native device must compile without fallback");
+    assert!(device.is_using_native());
+    device.update_voltages(&[0.0]);
+    device
+}
+
 fn canonical_artifact_with_unsupported_root(
     compiler: &VerilogACompiler,
     source: &str,
@@ -2085,6 +2105,41 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_accepts_transition_tolerance_without_fallback() {
+    let model_source = r#"
+`include "disciplines.vams"
+module native_canonical_transition_tol(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ transition(V(p, n) > 0.5, 0.2, 0.4, 0.4);
+endmodule
+"#;
+    let canonical_source = r#"
+`include "disciplines.vams"
+module native_canonical_transition_tol(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ transition(V(p, n) > 0.5, 0.2, 0.4, 0.4, 1.0e-6);
+endmodule
+"#;
+    let mut device = canonical_device_from_sources("CTRNTOL1", model_source, canonical_source);
+    device.set_analysis_type(2);
+
+    for (time, expected) in [(1.0, 0.0), (1.4, 0.5), (1.6, 1.0)] {
+        device.set_time(time);
+        device.update_voltages(&[1.0]);
+        let currents = device
+            .try_evaluate()
+            .expect("canonical transition tolerance evaluation succeeds");
+        assert!(
+            (currents[0] - expected).abs() < 1e-12,
+            "time: {time}, currents: {currents:?}"
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_executes_slew_current_without_fallback() {
     let source = r#"
 `include "disciplines.vams"
@@ -2168,6 +2223,51 @@ endmodule
         .try_evaluate()
         .expect("canonical absdelay interpolation succeeds");
     assert!((currents[0] - 2.0).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_with_canonical_ir_accepts_absdelay_max_delay_without_fallback() {
+    let model_source = r#"
+`include "disciplines.vams"
+module native_canonical_absdelay_max(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ absdelay(V(p, n), 0.5);
+endmodule
+"#;
+    let canonical_source = r#"
+`include "disciplines.vams"
+module native_canonical_absdelay_max(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ absdelay(V(p, n), 0.5, 2.0);
+endmodule
+"#;
+    let mut device = canonical_device_from_sources("CDELAYMAX1", model_source, canonical_source);
+
+    device.set_analysis_type(0);
+    device.update_voltages(&[7.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("canonical absdelay max-delay DC evaluation succeeds")[0]
+            .to_bits(),
+        7.0_f64.to_bits()
+    );
+
+    device.set_analysis_type(2);
+    for (time, voltage, expected) in [(0.0, 0.0, 0.0), (0.5, 1.0, 0.0), (1.0, 3.0, 1.0)] {
+        device.set_time(time);
+        device.update_voltages(&[voltage]);
+        let currents = device
+            .try_evaluate()
+            .expect("canonical absdelay max-delay transient evaluation succeeds");
+        assert!(
+            (currents[0] - expected).abs() < 1e-12,
+            "time: {time}, currents: {currents:?}"
+        );
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
