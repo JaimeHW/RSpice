@@ -5300,6 +5300,39 @@ fn stamp() {
             "{offset_product_quotient}"
         );
 
+        assert!(
+            !support.contains("fn store_mul_div_from_scalar_lhs_ad_components"),
+            "{support}"
+        );
+        for signature in [
+            "fn store_mul_div_from_scalar_lhs_ad(",
+            "fn store_mul_div_from_scalar_lhs_ad_mixed_ai(",
+            "fn store_mul_div_from_scalar_lhs_ad_mixed_ia(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                !body.contains("_node_derivatives = self.node_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("_branch_derivatives = self.branch_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_mul_div_from_scalar_lhs_ad_components"),
+                "{body}"
+            );
+        }
+
+        let mul_div_from_scalar =
+            helper_body(&support, "fn store_mul_div_from_scalar_lhs_ad_mixed_ia(");
+        assert!(
+            mul_div_from_scalar.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[denominator][axis] * denominator_derivative_scale * right_raw + quotient * right.node_derivatives[axis];"
+            ),
+            "{mul_div_from_scalar}"
+        );
+
         for component in [
             "fn store_offset_lhs_mixed_components",
             "fn store_offset_lhs_ad_rhs_components",
@@ -13694,19 +13727,13 @@ fn generate_scratch_operation_helpers() -> String {
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * right.value + left.value * right.branch_derivatives[axis]; }",
         "    }",
         "",
-        "    #[inline]",
-    "    fn store_mul_div_from_scalar_lhs_ad_components(&mut self, index: usize, scalar: f64, denominator_raw: f64, denominator_node_derivatives: [f64; Instance::NODE_COUNT], denominator_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
-        "        let reciprocal = 1.0 / denominator_raw;",
+    "    fn store_mul_div_from_scalar_lhs_ad(&mut self, index: usize, scalar: f64, denominator: AdValue, right: AdValue) {",
+        "        let reciprocal = 1.0 / denominator.value;",
         "        let quotient = scalar * reciprocal;",
         "        let denominator_derivative_scale = -quotient * reciprocal;",
-        "        self.values[index] = quotient * right_raw;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = denominator_node_derivatives[axis] * denominator_derivative_scale * right_raw + quotient * right_node_derivatives[axis]; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = denominator_branch_derivatives[axis] * denominator_derivative_scale * right_raw + quotient * right_branch_derivatives[axis]; }",
-        "    }",
-        "",
-        "    #[inline]",
-    "    fn store_mul_div_from_scalar_lhs_ad(&mut self, index: usize, scalar: f64, denominator: AdValue, right: AdValue) {",
-    "        self.store_mul_div_from_scalar_lhs_ad_components(index, scalar, denominator.value, denominator.node_derivatives, denominator.branch_derivatives, right.value, right.node_derivatives, right.branch_derivatives);",
+        "        self.values[index] = quotient * right.value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = denominator.node_derivatives[axis] * denominator_derivative_scale * right.value + quotient * right.node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = denominator.branch_derivatives[axis] * denominator_derivative_scale * right.value + quotient * right.branch_derivatives[axis]; }",
         "    }",
         "",
         "    #[inline]",
@@ -19564,28 +19591,6 @@ fn mixed_helper_type(mask: &str, index: usize) -> &'static str {
     }
 }
 
-fn mixed_helper_component_locals(mask: &str, operands: &[&str]) -> String {
-    operands
-        .iter()
-        .enumerate()
-        .filter_map(|(index, operand)| {
-            (mask.as_bytes()[index] == b'i').then(|| {
-                format!(
-                    "        let {operand}_value = self.values[{operand}];\n        let {operand}_node_derivatives = self.node_derivatives[{operand}];\n        let {operand}_branch_derivatives = self.branch_derivatives[{operand}];\n"
-                )
-            })
-        })
-        .collect()
-}
-
-fn mixed_helper_component_args(mask: &str, index: usize, operand: &str) -> String {
-    if mask.as_bytes()[index] == b'i' {
-        format!("{operand}_value, {operand}_node_derivatives, {operand}_branch_derivatives")
-    } else {
-        format!("{operand}.value, {operand}.node_derivatives, {operand}.branch_derivatives")
-    }
-}
-
 fn mixed_helper_value_expr(mask: &str, index: usize, operand: &str) -> String {
     if mask.as_bytes()[index] == b'i' {
         format!("self.values[{operand}]")
@@ -20798,17 +20803,26 @@ fn generate_index_or_mixed_offset_limited_exp_div_scaled_inputs_helper(mask: &st
 }
 
 fn generate_index_or_mixed_mul_div_from_scalar_lhs_helper(mask: &str) -> String {
-    let operands = ["denominator", "right"];
     let helper = index_or_mixed_helper_name("store_mul_div_from_scalar_lhs_ad", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let denominator = mixed_helper_component_args(mask, 0, "denominator");
-    let right = mixed_helper_component_args(mask, 1, "right");
+    let denominator_value = mixed_helper_value_expr(mask, 0, "denominator");
+    let right_value = mixed_helper_value_expr(mask, 1, "right");
+    let denominator_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "denominator");
+    let right_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "right");
+    let denominator_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "denominator");
+    let right_branch_derivative = mixed_helper_branch_derivative_expr(mask, 1, "right");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, scalar: f64, denominator: {denominator_ty}, right: {right_ty}) {{
-{locals}        self.store_mul_div_from_scalar_lhs_ad_components(index, scalar, {denominator}, {right});
+        let denominator_raw = {denominator_value};
+        let right_raw = {right_value};
+        let reciprocal = 1.0 / denominator_raw;
+        let quotient = scalar * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.values[index] = quotient * right_raw;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {denominator_node_derivative} * denominator_derivative_scale * right_raw + quotient * {right_node_derivative}; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {denominator_branch_derivative} * denominator_derivative_scale * right_raw + quotient * {right_branch_derivative}; }}
     }}
 "#,
         denominator_ty = mixed_helper_type(mask, 0),
