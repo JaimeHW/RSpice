@@ -256,6 +256,7 @@ impl FunctionCompiler {
                 NativeOp::Compare(op) => self.emit_compare(op)?,
                 NativeOp::CompareConst(op, value) => self.emit_compare_const(op, value)?,
                 NativeOp::Logical(op) => self.emit_logical(op)?,
+                NativeOp::LogicalConst(op, value) => self.emit_logical_const(op, value)?,
                 NativeOp::IfElse => self.emit_ifelse()?,
                 NativeOp::Extremum(op) => self.emit_extremum(op)?,
                 NativeOp::ExtremumConst(op, value) => self.emit_extremum_const(op, value)?,
@@ -1612,6 +1613,27 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_logical_const(&mut self, op: LogicalOp, rhs_truthy: bool) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "literal RHS logical op requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        match (op, rhs_truthy) {
+            (LogicalOp::And, true) | (LogicalOp::Or, false) => {
+                self.emit_truthy_to_gpr(target, Gpr::R10);
+                self.emit_gpr_bool_result(target, Gpr::R10);
+            }
+            (LogicalOp::And, false) => self.emit_bool_result(target, false),
+            (LogicalOp::Or, true) => self.emit_bool_result(target, true),
+            (LogicalOp::Not, _) => unreachable!("logical constant RHS only accepts and/or"),
+        }
+        Ok(())
+    }
+
     fn emit_logical_not(&mut self) -> JitResult<()> {
         if self.depth == 0 {
             return Err(JitError::Encoding {
@@ -1622,8 +1644,7 @@ impl FunctionCompiler {
 
         let target = XMM_STACK[self.depth - 1];
         self.emit_falsy_to_gpr(target, Gpr::R10, Gpr::R11);
-        self.encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
-        self.encoder.cvtsi2sd_xmm_r32(target, Gpr::R10);
+        self.emit_gpr_bool_result(target, Gpr::R10);
         Ok(())
     }
 
@@ -1631,6 +1652,20 @@ impl FunctionCompiler {
         self.emit_abs_register(value);
         self.emit_literal_compare(value, BOOLEAN_EPSILON);
         self.encoder.setcc_r8(ConditionCode::Above, dst);
+    }
+
+    fn emit_bool_result(&mut self, dst: Xmm, value: bool) {
+        if value {
+            self.encoder.movabs_r64_imm64(Gpr::R10, 1);
+            self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
+        } else {
+            self.encoder.xorpd_xmm_xmm(dst, dst);
+        }
+    }
+
+    fn emit_gpr_bool_result(&mut self, dst: Xmm, src: Gpr) {
+        self.encoder.movzx_r32_r8(src, src);
+        self.encoder.cvtsi2sd_xmm_r32(dst, src);
     }
 
     fn emit_falsy_to_gpr(&mut self, value: Xmm, dst: Gpr, scratch: Gpr) {
@@ -3774,6 +3809,81 @@ mod tests {
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
             let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(f(&ctx, std::ptr::null()), expected, "{name}");
+        }
+
+        let const_rhs_cases = [
+            (
+                "and-rhs-true-left-true",
+                Instruction::And,
+                2.0e-15,
+                -2.0e-15,
+                1.0,
+            ),
+            (
+                "and-rhs-true-left-false",
+                Instruction::And,
+                0.5e-15,
+                -2.0e-15,
+                0.0,
+            ),
+            ("and-rhs-false", Instruction::And, 2.0e-15, 1.0e-15, 0.0),
+            (
+                "and-rhs-unordered",
+                Instruction::And,
+                2.0e-15,
+                f64::NAN,
+                0.0,
+            ),
+            ("or-rhs-true", Instruction::Or, 0.5e-15, -2.0e-15, 1.0),
+            (
+                "or-rhs-false-left-true",
+                Instruction::Or,
+                2.0e-15,
+                1.0e-15,
+                1.0,
+            ),
+            (
+                "or-rhs-false-left-false",
+                Instruction::Or,
+                0.5e-15,
+                1.0e-15,
+                0.0,
+            ),
+            ("or-rhs-unordered", Instruction::Or, 0.5e-15, f64::NAN, 0.0),
+        ];
+
+        for (name, op, input, rhs, expected) in const_rhs_cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(rhs),
+                    op,
+                ],
+                0,
+            );
+
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{name} should use a literal RHS logical op, not a second stack slot"
+            );
+
+            let bytes = compile_value_function(&program).expect("compile literal RHS logical leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "constant RHS logical op should stay helper-free"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate literal RHS logical leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = input;
 
             assert_eq!(f(&ctx, std::ptr::null()), expected, "{name}");
         }

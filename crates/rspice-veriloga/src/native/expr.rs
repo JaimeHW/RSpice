@@ -4,6 +4,8 @@ use super::{JitError, JitResult};
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
 use smol_str::SmolStr;
 
+const LOGICAL_EPSILON: f64 = 1.0e-15;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryKind {
     Assignment,
@@ -53,6 +55,7 @@ pub(crate) enum NativeOp {
     Compare(CompareOp),
     CompareConst(CompareOp, f64),
     Logical(LogicalOp),
+    LogicalConst(LogicalOp, bool),
     IfElse,
     Extremum(ExtremumOp),
     ExtremumConst(ExtremumOp, f64),
@@ -700,6 +703,9 @@ impl NativeProgram {
                         depth,
                     )?;
                     depth -= 1;
+                    if lower_constant_rhs_logical(&mut ops, logical_op(instruction)) {
+                        continue;
+                    }
                     ops.push(NativeOp::Logical(logical_op(instruction)));
                 }
                 Instruction::Not => {
@@ -1046,6 +1052,19 @@ fn lower_constant_rhs_extremum(ops: &mut Vec<NativeOp>, op: ExtremumOp) -> bool 
     true
 }
 
+fn lower_constant_rhs_logical(ops: &mut Vec<NativeOp>, op: LogicalOp) -> bool {
+    let Some(NativeOp::Const(value)) = ops.last().copied() else {
+        return false;
+    };
+    ops.pop();
+    ops.push(NativeOp::LogicalConst(op, constant_truthy(value)));
+    true
+}
+
+fn constant_truthy(value: f64) -> bool {
+    value.abs() > LOGICAL_EPSILON
+}
+
 fn compute_native_max_stack_depth(
     model: SmolStr,
     entry_kind: EntryKind,
@@ -1102,6 +1121,7 @@ fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::DivConst(_)
         | NativeOp::CompareConst(_, _)
         | NativeOp::ExtremumConst(_, _)
+        | NativeOp::LogicalConst(_, _)
         | NativeOp::Neg
         | NativeOp::Abs
         | NativeOp::Square
@@ -1607,7 +1627,7 @@ mod tests {
             let program = BytecodeProgram {
                 instructions: vec![
                     Instruction::PushTemperature,
-                    Instruction::PushConst(300.0),
+                    Instruction::PushVariable(0),
                     instruction,
                 ],
             };
@@ -1624,7 +1644,7 @@ mod tests {
                 lowered.ops(),
                 &[
                     NativeOp::LoadTemperature,
-                    NativeOp::Const(300.0),
+                    NativeOp::LoadVariable(0),
                     NativeOp::Logical(expected),
                 ]
             );
@@ -1644,6 +1664,56 @@ mod tests {
             &[NativeOp::LoadTemperature, NativeOp::Logical(LogicalOp::Not)]
         );
         assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_constant_rhs_logical_ops_without_extra_stack_slot() {
+        let cases = [
+            (Instruction::And, 2.0e-15, LogicalOp::And, true),
+            (Instruction::And, 1.0e-15, LogicalOp::And, false),
+            (Instruction::And, f64::NAN, LogicalOp::And, false),
+            (Instruction::Or, -2.0e-15, LogicalOp::Or, true),
+            (Instruction::Or, 0.5e-15, LogicalOp::Or, false),
+            (Instruction::Or, f64::NAN, LogicalOp::Or, false),
+        ];
+
+        for (instruction, rhs, expected_op, expected_truthy) in cases {
+            let instruction_name = format!("{instruction:?}");
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(rhs),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "logic-literal",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant RHS logical op has a direct native lowering");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{instruction_name} should not allocate a second XMM stack slot for RHS constants"
+            );
+            assert!(
+                !lowered.ops().iter().any(
+                    |op| matches!(op, NativeOp::Const(value) if value.to_bits() == rhs.to_bits())
+                ),
+                "{expected_op:?} should consume the RHS literal in the logical op"
+            );
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::LogicalConst(expected_op, expected_truthy)
+                ]
+            );
+        }
     }
 
     #[test]
