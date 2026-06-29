@@ -55,6 +55,7 @@ pub(crate) enum NativeOp {
     Logical(LogicalOp),
     IfElse,
     Extremum(ExtremumOp),
+    ExtremumConst(ExtremumOp, f64),
     UnaryMath(UnaryMathOp),
     BinaryMath(BinaryMathOp),
     IntegerBinary(IntegerBinaryOp),
@@ -730,6 +731,9 @@ impl NativeProgram {
                         depth,
                     )?;
                     depth -= 1;
+                    if lower_constant_rhs_extremum(&mut ops, extremum_op(instruction)) {
+                        continue;
+                    }
                     ops.push(NativeOp::Extremum(extremum_op(instruction)));
                 }
                 Instruction::AboveState(_) => {
@@ -1033,6 +1037,15 @@ fn lower_constant_rhs_compare(ops: &mut Vec<NativeOp>, op: CompareOp) -> bool {
     true
 }
 
+fn lower_constant_rhs_extremum(ops: &mut Vec<NativeOp>, op: ExtremumOp) -> bool {
+    let Some(NativeOp::Const(value)) = ops.last().copied() else {
+        return false;
+    };
+    ops.pop();
+    ops.push(NativeOp::ExtremumConst(op, value));
+    true
+}
+
 fn compute_native_max_stack_depth(
     model: SmolStr,
     entry_kind: EntryKind,
@@ -1088,6 +1101,7 @@ fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::MulConst(_)
         | NativeOp::DivConst(_)
         | NativeOp::CompareConst(_, _)
+        | NativeOp::ExtremumConst(_, _)
         | NativeOp::Neg
         | NativeOp::Abs
         | NativeOp::Square
@@ -1670,7 +1684,7 @@ mod tests {
             let program = BytecodeProgram {
                 instructions: vec![
                     Instruction::PushTemperature,
-                    Instruction::PushConst(300.0),
+                    Instruction::PushVariable(0),
                     instruction,
                 ],
             };
@@ -1687,11 +1701,58 @@ mod tests {
                 lowered.ops(),
                 &[
                     NativeOp::LoadTemperature,
-                    NativeOp::Const(300.0),
+                    NativeOp::LoadVariable(0),
                     NativeOp::Extremum(expected),
                 ]
             );
             assert_eq!(lowered.max_stack_depth(), 2);
+        }
+    }
+
+    #[test]
+    fn lowers_constant_rhs_min_max_without_extra_stack_slot() {
+        let cases = [
+            (Instruction::Min, ExtremumOp::Min),
+            (Instruction::Max, ExtremumOp::Max),
+        ];
+
+        for (instruction, expected) in cases {
+            let instruction_name = format!("{instruction:?}");
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(300.0),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "minmax-literal",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant RHS min/max has a direct native lowering");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{instruction_name} should not allocate a second XMM stack slot for RHS constants"
+            );
+            assert!(
+                !lowered
+                    .ops()
+                    .iter()
+                    .any(|op| matches!(op, NativeOp::Const(value) if value.to_bits() == 300.0_f64.to_bits())),
+                "{expected:?} should consume the RHS literal in the min/max op"
+            );
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::ExtremumConst(expected, 300.0)
+                ]
+            );
         }
     }
 

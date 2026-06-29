@@ -415,8 +415,16 @@ impl X64Encoder {
         self.emit_sse_reg_base_disp32(0xF2, 0x5D, dst, base, disp);
     }
 
+    pub(crate) fn minsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
+        self.emit_sse_reg_rip_disp32(0xF2, 0x5D, dst, disp)
+    }
+
     pub(crate) fn maxsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
         self.emit_sse_reg_reg(0xF2, 0x5F, dst, src);
+    }
+
+    pub(crate) fn maxsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
+        self.emit_sse_reg_rip_disp32(0xF2, 0x5F, dst, disp)
     }
 
     pub fn ret(&mut self) {
@@ -666,14 +674,19 @@ mod tests {
 
         let mul_disp = encoder.mulsd_xmm_m64_rip_disp32(Xmm::Xmm1, 16);
         let div_disp = encoder.divsd_xmm_m64_rip_disp32(Xmm::Xmm5, -8);
+        let min_disp = encoder.minsd_xmm_m64_rip_disp32(Xmm::Xmm2, 24);
+        let max_disp = encoder.maxsd_xmm_m64_rip_disp32(Xmm::Xmm4, -16);
 
         assert_eq!(mul_disp, 4);
         assert_eq!(div_disp, 12);
+        assert_eq!(min_disp, 20);
+        assert_eq!(max_disp, 28);
         assert_eq!(
             encoder.into_bytes(),
             [
                 0xF2, 0x0F, 0x59, 0x0D, 16, 0, 0, 0, 0xF2, 0x0F, 0x5E, 0x2D, 0xF8, 0xFF, 0xFF,
-                0xFF,
+                0xFF, 0xF2, 0x0F, 0x5D, 0x15, 24, 0, 0, 0, 0xF2, 0x0F, 0x5F, 0x25, 0xF0, 0xFF,
+                0xFF, 0xFF,
             ]
         );
     }
