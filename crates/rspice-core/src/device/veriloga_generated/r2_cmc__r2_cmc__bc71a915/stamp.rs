@@ -101,9 +101,9 @@ impl Instance {
         let v249: f64 = (if self.scalar_v244 { v248 } else { v2 });
         let v250: f64 = (v249 * v249);
         let v251: f64 = (v5 + v250);
-        let v252: f64 = v251.sqrt();
+        let v252: f64 = ((v251) as f64).sqrt();
         let v253: f64 = (if self.scalar_v244 { v252 } else { v2 });
-        let v255: f64 = v246.abs();
+        let v255: f64 = ((v246) as f64).abs();
         let v256: f64 = (self.scalar_v254 * v255);
         let v257: f64 = (if self.scalar_v244 { v256 } else { v2 });
         let v258: f64 = (v257 * v257);

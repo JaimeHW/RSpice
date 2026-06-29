@@ -2014,7 +2014,7 @@ impl Instance {
         self.scalar_v4 = v4;
         let v5: f64 = (v3 * p.p14);
         self.scalar_v5 = v5;
-        let v6: f64 = v5.sqrt();
+        let v6: f64 = ((v5) as f64).sqrt();
         self.scalar_v6 = v6;
         let v7: f64 = p.p25;
         self.scalar_v7 = v7;
@@ -2118,7 +2118,7 @@ impl Instance {
         self.scalar_v118 = v118;
         let v126: f64 = (v115 * v118);
         self.scalar_v126 = v126;
-        let v127: f64 = v126.sqrt();
+        let v127: f64 = ((v126) as f64).sqrt();
         self.scalar_v127 = v127;
         let v128: f64 = (1.0 / v127);
         self.scalar_v128 = v128;
@@ -2184,7 +2184,7 @@ impl Instance {
         self.scalar_v171 = v171;
         let v173: f64 = (v171 + 0.001936);
         self.scalar_v173 = v173;
-        let v174: f64 = v173.sqrt();
+        let v174: f64 = ((v173) as f64).sqrt();
         self.scalar_v174 = v174;
         let v175: f64 = (v170 + v174);
         self.scalar_v175 = v175;
@@ -2426,7 +2426,7 @@ impl Instance {
         self.scalar_v91 = v91;
         let v92: f64 = (3.0 * self.scalar_v47);
         self.scalar_v92 = v92;
-        let v93: f64 = self.scalar_v72.ln();
+        let v93: f64 = ((self.scalar_v72) as f64).ln();
         self.scalar_v93 = v93;
         let v94: f64 = (self.scalar_v92 * self.scalar_v93);
         self.scalar_v94 = v94;
@@ -2444,7 +2444,7 @@ impl Instance {
         self.scalar_v101 = v101;
         let v102: f64 = (self.scalar_v54 + self.scalar_v101);
         self.scalar_v102 = v102;
-        let v103: f64 = self.scalar_v102.sqrt();
+        let v103: f64 = ((self.scalar_v102) as f64).sqrt();
         self.scalar_v103 = v103;
         let v104: f64 = (self.scalar_v100 + self.scalar_v103);
         self.scalar_v104 = v104;
@@ -2452,7 +2452,7 @@ impl Instance {
         self.scalar_v105 = v105;
         let v106: f64 = (0.2 + self.scalar_v105);
         self.scalar_v106 = v106;
-        let v107: f64 = self.scalar_v106.sqrt();
+        let v107: f64 = ((self.scalar_v106) as f64).sqrt();
         self.scalar_v107 = v107;
         let v108: f64 = (1.0 / self.scalar_v84);
         self.scalar_v108 = v108;
@@ -2468,7 +2468,7 @@ impl Instance {
         self.scalar_v120 = v120;
         let v121: f64 = (self.scalar_v51 * self.scalar_v120);
         self.scalar_v121 = v121;
-        let v122: f64 = self.scalar_v121.ln();
+        let v122: f64 = ((self.scalar_v121) as f64).ln();
         self.scalar_v122 = v122;
         let v124: f64 = (self.scalar_v122 - 0.6);
         self.scalar_v124 = v124;
@@ -2526,7 +2526,7 @@ impl Instance {
         self.scalar_v809 = v809;
         let v811: f64 = (self.scalar_v809 / self.scalar_v810);
         self.scalar_v811 = v811;
-        let v812: f64 = self.scalar_v811.exp();
+        let v812: f64 = ((self.scalar_v811) as f64).exp();
         self.scalar_v812 = v812;
         let v814: f64 = (self.scalar_v812 * self.scalar_v813);
         self.scalar_v814 = v814;

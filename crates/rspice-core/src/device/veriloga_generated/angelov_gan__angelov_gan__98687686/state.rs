@@ -1830,7 +1830,7 @@ impl Instance {
         self.scalar_v494 = v494;
         let v495: f64 = (p.p87 * p.p86);
         self.scalar_v495 = v495;
-        let v496: f64 = v495.sqrt();
+        let v496: f64 = ((v495) as f64).sqrt();
         self.scalar_v496 = v496;
         let v507: bool = (p.p1 == 1.0);
         self.scalar_v507 = v507;

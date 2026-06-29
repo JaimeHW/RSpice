@@ -91,8 +91,6 @@ impl Instance {
 };
         s.v[1] = assign140_e1665;
 
-        s.v[2] = 1000.0;
-
         s.v[3] = 10.0;
 
         s.v[4] = (1.0 / s.v[3]);
@@ -321,6 +319,7 @@ impl Instance {
             s.store_scalar(515, p.p886);
             s.store_scalar(516, p.p887);
             s.store_scalar(517, p.p888);
+            s.store_scalar(518, p.p889);
         }
 
     }
@@ -332,7 +331,6 @@ impl Instance {
     ) {
         let ctx_temp = ctx.temperature();
         if (!s.b[999]) {
-            s.store_scalar(518, p.p889);
             s.store_scalar(519, p.p890);
             s.store_scalar(522, p.p891);
             s.store_scalar(523, p.p892);
@@ -694,6 +692,10 @@ impl Instance {
 
         s.store_mul3_lhs(586, 583, 571, 580);
 
+        s.store_scale(587, 581, 2.0);
+
+        s.store_scale(588, 582, 2.0);
+
     }
 
     pub(super) fn stamp_transient_block_2(
@@ -701,10 +703,6 @@ impl Instance {
         p: &Parameters,
         param_given: &[bool; Instance::PARAMETER_COUNT],
     ) {
-        s.store_scale(587, 581, 2.0);
-
-        s.store_scale(588, 582, 2.0);
-
         s.store_scale(589, 583, 2.0);
 
         s.store_max_with_scalar_ad(599, A::scale(s.ad_value(557), 0.5), s.v[370]);
@@ -1189,6 +1187,10 @@ impl Instance {
 
         s.v[171] = p.p182;
 
+        s.v[172] = p.p184;
+
+        s.v[173] = p.p183;
+
     }
 
     pub(super) fn stamp_transient_block_3(
@@ -1196,10 +1198,6 @@ impl Instance {
         p: &Parameters,
         param_given: &[bool; Instance::PARAMETER_COUNT],
     ) {
-        s.v[172] = p.p184;
-
-        s.v[173] = p.p183;
-
         s.v[174] = p.p185;
 
         s.v[175] = p.p186;
@@ -1459,6 +1457,10 @@ impl Instance {
             s.store_scalar(38, p.p365);
         }
 
+        if s.b[1030] {
+            s.store_scalar(39, p.p299);
+        }
+
     }
 
     pub(super) fn stamp_transient_block_4(
@@ -1466,10 +1468,6 @@ impl Instance {
         p: &Parameters,
         param_given: &[bool; Instance::PARAMETER_COUNT],
     ) {
-        if s.b[1030] {
-            s.store_scalar(39, p.p299);
-        }
-
         s.b[1040] = param_given[366];
         s.v[1040] = if s.b[1040] { 1.0 } else { 0.0 };
 
@@ -1848,6 +1846,10 @@ impl Instance {
         s.b[1082] = (((param_given[599] || param_given[600]) || param_given[601]) || param_given[602]);
         s.v[1082] = if s.b[1082] { 1.0 } else { 0.0 };
 
+        if (s.b[1030] && s.b[1082]) {
+            s.store_add_scaled_inputs3_offset_indices(94, 314, p.p600, 316, p.p601, 318, p.p602, p.p599);
+        }
+
     }
 
     pub(super) fn stamp_transient_block_5(
@@ -1855,10 +1857,6 @@ impl Instance {
         p: &Parameters,
         param_given: &[bool; Instance::PARAMETER_COUNT],
     ) {
-        if (s.b[1030] && s.b[1082]) {
-            s.store_add_scaled_inputs3_offset_indices(94, 314, p.p600, 316, p.p601, 318, p.p602, p.p599);
-        }
-
         s.b[1083] = (((param_given[603] || param_given[604]) || param_given[605]) || param_given[606]);
         s.v[1083] = if s.b[1083] { 1.0 } else { 0.0 };
 
@@ -2303,6 +2301,7 @@ impl Instance {
             s.store_mul(69, 69, 1013);
             s.store_div_scaled_product3_mixed_iiaa(86, 86, 1013, A::scale_offset(s.ad_value(1009), p.p795, 1.0), 1.0, A::scale_offset(s.ad_value(1008), p.p795, 1.0), 1.0);
             s.store_div_scaled_product3_mixed_iiaa(125, 125, 1013, A::offset(A::mul(s.ad_value(43), s.ad_value(1009)), 1.0), 1.0, A::offset(A::mul(s.ad_value(43), s.ad_value(1008)), 1.0), 1.0);
+            s.store_mul(154, 154, 1013);
         }
 
     }
@@ -2312,7 +2311,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if (s.b[1030] && s.b[1139]) {
-            s.store_mul(154, 154, 1013);
             s.store_div_scaled_inputs_indices(1013, 1012, p.p803, 1010, 1.0);
             s.store_add(44, 44, 1013);
             s.store_add(149, 149, 1013);

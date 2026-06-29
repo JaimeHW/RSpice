@@ -5369,7 +5369,7 @@ impl Instance {
         self.scalar_v216 = v216;
         let v217: f64 = (4.0000000000000004e-19 + v216);
         self.scalar_v217 = v217;
-        let v218: f64 = v217.sqrt();
+        let v218: f64 = ((v217) as f64).sqrt();
         self.scalar_v218 = v218;
         let v219: f64 = (v214 + v218);
         self.scalar_v219 = v219;

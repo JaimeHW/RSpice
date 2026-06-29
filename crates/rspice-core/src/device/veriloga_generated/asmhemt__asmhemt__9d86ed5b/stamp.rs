@@ -161,7 +161,7 @@ impl Instance {
         let v68: f64 = (v61 - v66);
         let v69: f64 = (v68 * v68);
         let v74: f64 = (v69 + self.scalar_v73);
-        let v75: f64 = v74.sqrt();
+        let v75: f64 = ((v74) as f64).sqrt();
         let v76: f64 = (v67 + v75);
         let v77: f64 = (v44 * v76);
         let v78: f64 = (if self.scalar_v51 { v77 } else { v0 });
@@ -169,7 +169,7 @@ impl Instance {
         let v85: f64 = nv12;
         let v86: f64 = (v84 - v85);
         let v88: f64 = (v86 / self.scalar_v87);
-        let v89: f64 = v88.exp();
+        let v89: f64 = ((v88) as f64).exp();
         let v90: f64 = (self.scalar_v83 * v89);
         let v91: f64 = (v1 + v90);
         let v92: f64 = (self.scalar_v82 / v91);
@@ -178,7 +178,7 @@ impl Instance {
         let v97: f64 = nv14;
         let v98: f64 = (v96 - v97);
         let v100: f64 = (v98 / self.scalar_v99);
-        let v101: f64 = v100.exp();
+        let v101: f64 = ((v100) as f64).exp();
         let v102: f64 = (self.scalar_v95 * v101);
         let v103: f64 = (v1 + v102);
         let v104: f64 = (self.scalar_v94 / v103);

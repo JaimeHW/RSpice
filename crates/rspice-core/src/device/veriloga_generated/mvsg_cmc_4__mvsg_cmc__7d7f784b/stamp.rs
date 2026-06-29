@@ -128,7 +128,7 @@ impl Instance {
         let v57: f64 = nv2;
         let v61: f64 = nv1;
         let v62: f64 = (v56 - v61);
-        let v63: f64 = v62.abs();
+        let v63: f64 = ((v62) as f64).abs();
         let v64: f64 = (self.scalar_v60 * v63);
         let v66: f64 = (v62 - self.scalar_v65);
         let v67: f64 = nv21;
@@ -142,7 +142,7 @@ impl Instance {
         let v77: bool = (v72 < v76);
         let v78: bool = (!v77);
         let v79: bool = (v75 && v78);
-        let v80: f64 = v72.exp();
+        let v80: f64 = ((v72) as f64).exp();
         let v81: bool = (v75 && v77);
         let v82: f64 = 1.9287498479639178e-22;
         let v83: f64 = 5.184705528587072e21;

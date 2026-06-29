@@ -124,6 +124,9 @@ impl Instance {
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
         let idt_scale = if ddt_active { timestep } else { 0.0 };
+        let v1: f64 = 1000.0;
+        let v2: f64 = 0.1;
+        let v3: f64 = 100.0;
         let v4: f64 = nv6;
         let v5: f64 = nv7;
         let v6: f64 = nv8;
@@ -131,6 +134,33 @@ impl Instance {
         let v10: f64 = (v5 - v6);
         let v11: f64 = (self.scalar_v9 * v10);
         let v12: f64 = (v7 * self.scalar_v9);
+        let v13: f64 = bi7;
+        let v14: f64 = (v2 * v13);
+        let v15: f64 = (v1 * v14);
+        let v16: f64 = bi9;
+        let v17: f64 = (v2 * v16);
+        let v18: f64 = (v1 * v17);
+        let v19: f64 = bi11;
+        let v20: f64 = (v2 * v19);
+        let v21: f64 = (v1 * v20);
+        let v22: f64 = bi13;
+        let v23: f64 = (v2 * v22);
+        let v24: f64 = (v1 * v23);
+        let v25: f64 = bi15;
+        let v26: f64 = (v2 * v25);
+        let v27: f64 = (v1 * v26);
+        let v28: f64 = bi17;
+        let v29: f64 = (v2 * v28);
+        let v30: f64 = (v1 * v29);
+        let v31: f64 = bi19;
+        let v32: f64 = (v2 * v31);
+        let v33: f64 = (v1 * v32);
+        let v34: f64 = bi21;
+        let v35: f64 = (v2 * v34);
+        let v36: f64 = (v1 * v35);
+        let v37: f64 = bi23;
+        let v38: f64 = (v2 * v37);
+        let v39: f64 = (v1 * v38);
 
         let d11_dn7: f64 = self.scalar_v9;
         let d11_dn8: f64 = self.scalar_v40;
@@ -153,6 +183,123 @@ impl Instance {
             multiplicity * (d12_dn6),
             8,
             multiplicity * (d12_dn8),
+        );
+        let d15_db7: f64 = v3;
+        stamper.stamp_potential_branch_local(
+            Some(12),
+            None,
+            7,
+            multiplicity,
+        );
+        stamper.stamp_potential_branch1_local(
+            7,
+            v15,
+            7,
+            d15_db7,
+        );
+        let d18_db9: f64 = v3;
+        stamper.stamp_potential_branch_local(
+            Some(13),
+            None,
+            9,
+            multiplicity,
+        );
+        stamper.stamp_potential_branch1_local(
+            9,
+            v18,
+            9,
+            d18_db9,
+        );
+        let d21_db11: f64 = v3;
+        stamper.stamp_potential_branch_local(
+            Some(14),
+            None,
+            11,
+            multiplicity,
+        );
+        stamper.stamp_potential_branch1_local(
+            11,
+            v21,
+            11,
+            d21_db11,
+        );
+        let d24_db13: f64 = v3;
+        stamper.stamp_potential_branch_local(
+            Some(15),
+            None,
+            13,
+            multiplicity,
+        );
+        stamper.stamp_potential_branch1_local(
+            13,
+            v24,
+            13,
+            d24_db13,
+        );
+        let d27_db15: f64 = v3;
+        stamper.stamp_potential_branch_local(
+            Some(16),
+            None,
+            15,
+            multiplicity,
+        );
+        stamper.stamp_potential_branch1_local(
+            15,
+            v27,
+            15,
+            d27_db15,
+        );
+        let d30_db17: f64 = v3;
+        stamper.stamp_potential_branch_local(
+            Some(17),
+            None,
+            17,
+            multiplicity,
+        );
+        stamper.stamp_potential_branch1_local(
+            17,
+            v30,
+            17,
+            d30_db17,
+        );
+        let d33_db19: f64 = v3;
+        stamper.stamp_potential_branch_local(
+            Some(18),
+            None,
+            19,
+            multiplicity,
+        );
+        stamper.stamp_potential_branch1_local(
+            19,
+            v33,
+            19,
+            d33_db19,
+        );
+        let d36_db21: f64 = v3;
+        stamper.stamp_potential_branch_local(
+            Some(19),
+            None,
+            21,
+            multiplicity,
+        );
+        stamper.stamp_potential_branch1_local(
+            21,
+            v36,
+            21,
+            d36_db21,
+        );
+        let d39_db23: f64 = v3;
+        stamper.stamp_potential_branch_local(
+            Some(20),
+            None,
+            23,
+            multiplicity,
+        );
+        stamper.stamp_potential_branch1_local(
+            23,
+            v39,
+            23,
+            d39_db23,
         );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
@@ -265,19 +412,7 @@ impl Instance {
         stamper.stamp_potential_branch_local(
             Some(12),
             None,
-            7,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(12),
-            None,
             8,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(13),
-            None,
-            9,
             multiplicity,
         );
         stamper.stamp_potential_branch_local(
@@ -289,19 +424,7 @@ impl Instance {
         stamper.stamp_potential_branch_local(
             Some(14),
             None,
-            11,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(14),
-            None,
             12,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(15),
-            None,
-            13,
             multiplicity,
         );
         stamper.stamp_potential_branch_local(
@@ -313,19 +436,7 @@ impl Instance {
         stamper.stamp_potential_branch_local(
             Some(16),
             None,
-            15,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(16),
-            None,
             16,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(17),
-            None,
-            17,
             multiplicity,
         );
         stamper.stamp_potential_branch_local(
@@ -337,31 +448,13 @@ impl Instance {
         stamper.stamp_potential_branch_local(
             Some(18),
             None,
-            19,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(18),
-            None,
             20,
             multiplicity,
         );
         stamper.stamp_potential_branch_local(
             Some(19),
             None,
-            21,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(19),
-            None,
             22,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(20),
-            None,
-            23,
             multiplicity,
         );
         stamper.stamp_potential_branch_local(
@@ -379,116 +472,20 @@ impl Instance {
         Self::stamp_transient_equations_block_5(ctx, stamper, s, p, nodes, multiplicity);
         Self::stamp_transient_equations_block_6(ctx, stamper, s, p, nodes, multiplicity);
         Self::stamp_transient_equations_block_7(ctx, stamper, s, p, nodes, multiplicity);
-        Self::stamp_transient_equations_block_8(ctx, stamper, s, p, nodes, multiplicity);
-        let eq38_e1270: f64 = (s.v[4] * bi7);
-        let eq38_e1272: f64 = (eq38_e1270 * s.v[2]);
-        let eq38_e1272_d_b7: f64 = (s.v[4] * s.v[2]);
-        let eq38_value: f64 = eq38_e1272;
-        stamper.stamp_potential_branch1_local(
-            7,
-            eq38_value,
-            7,
-            eq38_e1272_d_b7,
-        );
+        Self::stamp_transient_equations_block_8(ctx, stamper, s, p, nodes, multiplicity, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
         Self::stamp_transient_equations_block_9(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
-        let eq40_e1283: f64 = (s.v[4] * bi9);
-        let eq40_e1285: f64 = (eq40_e1283 * s.v[2]);
-        let eq40_e1285_d_b9: f64 = (s.v[4] * s.v[2]);
-        let eq40_value: f64 = eq40_e1285;
-        stamper.stamp_potential_branch1_local(
-            9,
-            eq40_value,
-            9,
-            eq40_e1285_d_b9,
-        );
-        Self::stamp_transient_equations_block_10(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
-        let eq42_e1296: f64 = (s.v[4] * bi11);
-        let eq42_e1298: f64 = (eq42_e1296 * s.v[2]);
-        let eq42_e1298_d_b11: f64 = (s.v[4] * s.v[2]);
-        let eq42_value: f64 = eq42_e1298;
-        stamper.stamp_potential_branch1_local(
-            11,
-            eq42_value,
-            11,
-            eq42_e1298_d_b11,
-        );
-        Self::stamp_transient_equations_block_11(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
-        let eq44_e1309: f64 = (s.v[4] * bi13);
-        let eq44_e1311: f64 = (eq44_e1309 * s.v[2]);
-        let eq44_e1311_d_b13: f64 = (s.v[4] * s.v[2]);
-        let eq44_value: f64 = eq44_e1311;
-        stamper.stamp_potential_branch1_local(
-            13,
-            eq44_value,
-            13,
-            eq44_e1311_d_b13,
-        );
-        Self::stamp_transient_equations_block_12(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
-        let eq46_e1322: f64 = (s.v[4] * bi15);
-        let eq46_e1324: f64 = (eq46_e1322 * s.v[2]);
-        let eq46_e1324_d_b15: f64 = (s.v[4] * s.v[2]);
-        let eq46_value: f64 = eq46_e1324;
-        stamper.stamp_potential_branch1_local(
-            15,
-            eq46_value,
-            15,
-            eq46_e1324_d_b15,
-        );
-        Self::stamp_transient_equations_block_13(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
-        let eq48_e1335: f64 = (s.v[4] * bi17);
-        let eq48_e1337: f64 = (eq48_e1335 * s.v[2]);
-        let eq48_e1337_d_b17: f64 = (s.v[4] * s.v[2]);
-        let eq48_value: f64 = eq48_e1337;
-        stamper.stamp_potential_branch1_local(
-            17,
-            eq48_value,
-            17,
-            eq48_e1337_d_b17,
-        );
-        Self::stamp_transient_equations_block_14(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
-        let eq50_e1348: f64 = (s.v[4] * bi19);
-        let eq50_e1350: f64 = (eq50_e1348 * s.v[2]);
-        let eq50_e1350_d_b19: f64 = (s.v[4] * s.v[2]);
-        let eq50_value: f64 = eq50_e1350;
-        stamper.stamp_potential_branch1_local(
-            19,
-            eq50_value,
-            19,
-            eq50_e1350_d_b19,
-        );
-        Self::stamp_transient_equations_block_15(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
-        let eq52_e1361: f64 = (s.v[4] * bi21);
-        let eq52_e1363: f64 = (eq52_e1361 * s.v[2]);
-        let eq52_e1363_d_b21: f64 = (s.v[4] * s.v[2]);
-        let eq52_value: f64 = eq52_e1363;
-        stamper.stamp_potential_branch1_local(
-            21,
-            eq52_value,
-            21,
-            eq52_e1363_d_b21,
-        );
-        Self::stamp_transient_equations_block_16(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
-        let eq54_e1374: f64 = (s.v[4] * bi23);
-        let eq54_e1376: f64 = (eq54_e1374 * s.v[2]);
-        let eq54_e1376_d_b23: f64 = (s.v[4] * s.v[2]);
-        let eq54_value: f64 = eq54_e1376;
-        stamper.stamp_potential_branch1_local(
-            23,
-            eq54_value,
-            23,
-            eq54_e1376_d_b23,
-        );
-        Self::stamp_transient_equations_block_17(stamper, s, p, multiplicity, ddt_active, ddt_scale, idt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized, idt_state_current, idt_state_previous, idt_state_initialized);
-        Self::stamp_transient_equations_block_18(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_19(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_10(stamper, s, p, multiplicity, ddt_active, ddt_scale, idt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized, idt_state_current, idt_state_previous, idt_state_initialized);
+        Self::stamp_transient_equations_block_11(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_12(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_13(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         let eq64_value: f64 = 0.0;
         stamper.stamp_current_const_local(
             Some(4),
             None,
             multiplicity * (eq64_value),
         );
-        Self::stamp_transient_equations_block_20(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_21(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_14(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_15(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         let eq69_value: f64 = 0.0;
         stamper.stamp_current_const_local(
             Some(7),

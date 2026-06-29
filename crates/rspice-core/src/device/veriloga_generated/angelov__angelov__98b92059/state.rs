@@ -1590,7 +1590,7 @@ impl Instance {
         self.scalar_v418 = v418;
         let v419: f64 = (p.p72 * p.p71);
         self.scalar_v419 = v419;
-        let v420: f64 = v419.sqrt();
+        let v420: f64 = ((v419) as f64).sqrt();
         self.scalar_v420 = v420;
         let v431: bool = ((p.p1 != 0.0) && (p.p57 != 0.0));
         self.scalar_v431 = v431;

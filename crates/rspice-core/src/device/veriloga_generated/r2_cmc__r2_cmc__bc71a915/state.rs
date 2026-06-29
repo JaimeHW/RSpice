@@ -2073,7 +2073,7 @@ impl Instance {
         self.scalar_v28 = v28;
         let v29: f64 = (self.scalar_v28 - 1.0);
         self.scalar_v29 = v29;
-        let v30: f64 = self.scalar_v29.exp();
+        let v30: f64 = ((self.scalar_v29) as f64).exp();
         self.scalar_v30 = v30;
         let v31: f64 = (self.scalar_v25 + self.scalar_v30);
         self.scalar_v31 = v31;
@@ -2089,7 +2089,7 @@ impl Instance {
         self.scalar_v38 = v38;
         let v39: f64 = (self.scalar_v38 - 1.0);
         self.scalar_v39 = v39;
-        let v40: f64 = self.scalar_v39.exp();
+        let v40: f64 = ((self.scalar_v39) as f64).exp();
         self.scalar_v40 = v40;
         let v41: f64 = (self.scalar_v33 - self.scalar_v40);
         self.scalar_v41 = v41;
@@ -2121,7 +2121,7 @@ impl Instance {
         self.scalar_v232 = v232;
         let v233: f64 = (self.scalar_v232 - 1.0);
         self.scalar_v233 = v233;
-        let v234: f64 = self.scalar_v233.exp();
+        let v234: f64 = ((self.scalar_v233) as f64).exp();
         self.scalar_v234 = v234;
         let v235: f64 = (0.1 * self.scalar_v234);
         self.scalar_v235 = v235;
