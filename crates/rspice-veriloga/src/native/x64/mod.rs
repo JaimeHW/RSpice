@@ -532,12 +532,36 @@ fn current_pair_overflow(model: &CompiledModel, pos: usize, neg: usize) -> JitEr
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{compile_model_with_canonical_ir, lower_assignment_step};
+    use crate::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
     use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
     use crate::native::EvalContext;
     use crate::native::expr::NativeOp;
     use crate::native::x64::codegen::NativeAssignment;
     use crate::{CompilerOptions, VerilogACompiler};
     use smol_str::SmolStr;
+
+    fn canonical_artifact_with_unsupported_root(
+        compiler: &VerilogACompiler,
+        source: &str,
+    ) -> CanonicalIrArtifact {
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let metadata = artifact.metadata.clone();
+        let mut hir = artifact.hir.clone();
+        let mut mir = artifact.mir.clone();
+        let root = usize::from(mir.equations[0].expression.id);
+        let unsupported = HirExprKind::StringLiteral {
+            value: "unsupported-native-expression".into(),
+        };
+        hir.expressions[root].kind = unsupported.clone();
+        mir.expressions[root].kind = unsupported;
+        hir.contributions[0].expression.kind = "string".into();
+        mir.equations[0].expression.kind = "string".into();
+        let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
+        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+            .expect("synthetic canonical artifact has refreshed digests")
+    }
 
     #[test]
     fn compile_model_with_canonical_ir_executes_mir_stamp_value() {
@@ -577,20 +601,20 @@ endmodule
 module native_canonical_unsupported(p, n);
   inout p, n;
   electrical p, n;
-  thermal t;
-  analog I(p, n) <+ Temp(t);
+  analog I(p, n) <+ V(p, n);
 endmodule
 "#;
         let compiler = VerilogACompiler::new(CompilerOptions::default());
         let model = compiler.compile(source).expect("compile bytecode model");
-        let artifact = compiler
-            .compile_canonical_ir(source)
-            .expect("compile canonical IR");
+        let artifact = canonical_artifact_with_unsupported_root(&compiler, source);
 
         let error = compile_model_with_canonical_ir(&model, &artifact)
             .expect_err("unsupported canonical stamp must not fall back to bytecode");
 
-        assert!(error.to_string().contains("branch access Temp"), "{error}");
+        assert!(
+            error.to_string().contains("expression kind string"),
+            "{error}"
+        );
     }
 
     #[test]
