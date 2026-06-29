@@ -380,6 +380,9 @@ impl NativeProgram {
                         depth,
                     )?;
                     depth -= 1;
+                    if lower_constant_binary_arithmetic(&mut ops, instruction) {
+                        continue;
+                    }
                     if lower_constant_rhs_arithmetic(&mut ops, instruction) {
                         continue;
                     }
@@ -1067,6 +1070,28 @@ fn lower_constant_rhs_arithmetic(ops: &mut Vec<NativeOp>, instruction: &Instruct
     true
 }
 
+fn lower_constant_binary_arithmetic(ops: &mut Vec<NativeOp>, instruction: &Instruction) -> bool {
+    if ops.len() < 2 {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let rhs_index = ops.len() - 1;
+    let (NativeOp::Const(left), NativeOp::Const(right)) = (ops[lhs_index], ops[rhs_index]) else {
+        return false;
+    };
+    let value = match instruction {
+        Instruction::Add => left + right,
+        Instruction::Sub => left - right,
+        Instruction::Mul => left * right,
+        Instruction::Div => left / right,
+        _ => return false,
+    };
+    ops.truncate(lhs_index);
+    ops.push(NativeOp::Const(value));
+    true
+}
+
 fn lower_constant_lhs_noncommutative_arithmetic(
     ops: &mut Vec<NativeOp>,
     instruction: &Instruction,
@@ -1556,6 +1581,77 @@ mod tests {
                 "{instruction_name} should not allocate a second XMM stack slot for RHS constants"
             );
             assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, expected]);
+        }
+    }
+
+    #[test]
+    fn folds_constant_binary_arithmetic_to_exact_literal() {
+        let cases = [
+            (
+                "add finite",
+                Instruction::Add,
+                3.25_f64,
+                4.5_f64,
+                (3.25_f64 + 4.5_f64).to_bits(),
+            ),
+            (
+                "sub finite",
+                Instruction::Sub,
+                3.25_f64,
+                4.5_f64,
+                (3.25_f64 - 4.5_f64).to_bits(),
+            ),
+            (
+                "mul signed zero",
+                Instruction::Mul,
+                -0.0_f64,
+                4.5_f64,
+                (-0.0_f64 * 4.5_f64).to_bits(),
+            ),
+            (
+                "div negative zero",
+                Instruction::Div,
+                10.0_f64,
+                -0.0_f64,
+                (10.0_f64 / -0.0_f64).to_bits(),
+            ),
+            (
+                "mul unordered",
+                Instruction::Mul,
+                f64::from_bits(0x7ff8_0000_0000_0003),
+                4.5_f64,
+                (f64::from_bits(0x7ff8_0000_0000_0003) * 4.5_f64).to_bits(),
+            ),
+        ];
+
+        for (case, instruction, left, right, expected_bits) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-binary-arithmetic",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant binary arithmetic folds to exact literal");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{case} should not allocate an arithmetic stack slot"
+            );
+            match lowered.ops() {
+                [NativeOp::Const(value)] => {
+                    assert_eq!(value.to_bits(), expected_bits, "{case}");
+                }
+                ops => panic!("{case} lowered to unexpected ops: {ops:?}"),
+            }
         }
     }
 
