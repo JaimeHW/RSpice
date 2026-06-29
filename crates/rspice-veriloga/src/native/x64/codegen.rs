@@ -197,7 +197,7 @@ impl FunctionCompiler {
             match *op {
                 NativeOp::Const(value) => {
                     let dst = self.push_register()?;
-                    self.emit_literal_load(dst, value);
+                    self.emit_constant_load(dst, value);
                 }
                 NativeOp::LoadParam(index) => {
                     let dst = self.push_register()?;
@@ -2547,6 +2547,14 @@ impl FunctionCompiler {
         });
     }
 
+    fn emit_constant_load(&mut self, dst: Xmm, value: f64) {
+        if value.to_bits() == 0 {
+            self.encoder.xorpd_xmm_xmm(dst, dst);
+        } else {
+            self.emit_literal_load(dst, value);
+        }
+    }
+
     fn emit_literal_binary_op(&mut self, dst: Xmm, value: f64, op: BinaryOp) {
         let displacement_offset = match op {
             BinaryOp::Add => self.encoder.addsd_xmm_m64_rip_disp32(dst, 0),
@@ -3075,6 +3083,46 @@ mod tests {
             !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
             "helper-free native leaves should not pay callee-saved prologue cost"
         );
+    }
+
+    #[test]
+    fn generated_value_leaf_uses_register_zero_for_positive_zero_constant() {
+        let program = native_program(EntryKind::StampValue, vec![Instruction::PushConst(0.0)], 0);
+
+        let bytes = compile_value_function(&program).expect("compile zero value function");
+
+        assert!(
+            contains_bytes(&bytes, &xorpd_xmm_bytes(Xmm::Xmm0, Xmm::Xmm0)),
+            "positive zero constants should use a register zero idiom"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate zero value leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_preserves_negative_zero_constant_bits() {
+        let program = native_program(EntryKind::StampValue, vec![Instruction::PushConst(-0.0)], 0);
+
+        let bytes = compile_value_function(&program).expect("compile negative zero value function");
+
+        assert!(
+            !contains_bytes(&bytes, &xorpd_xmm_bytes(Xmm::Xmm0, Xmm::Xmm0)),
+            "negative zero constants must remain literal loads to preserve sign bits"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate negative zero leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), (-0.0_f64).to_bits());
     }
 
     #[test]
@@ -7897,6 +7945,12 @@ mod tests {
     fn xor_r64_bytes(dst: Gpr, src: Gpr) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.xor_r64_r64(dst, src);
+        encoder.into_bytes()
+    }
+
+    fn xorpd_xmm_bytes(dst: Xmm, src: Xmm) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.xorpd_xmm_xmm(dst, src);
         encoder.into_bytes()
     }
 
