@@ -990,14 +990,47 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_intrinsic_call(name.as_str(), args.as_slice())
             }
             HirExprKind::AnalogOperator { op } => self.lower_analog_operator(op),
+            HirExprKind::NoiseSource {
+                source, operands, ..
+            } => self.lower_noise_source(source.as_str(), operands.as_slice()),
             HirExprKind::StringLiteral { .. }
             | HirExprKind::ArrayLiteral { .. }
             | HirExprKind::Laplace { .. }
-            | HirExprKind::Zi { .. }
-            | HirExprKind::NoiseSource { .. } => Err(self.unsupported(format!(
+            | HirExprKind::Zi { .. } => Err(self.unsupported(format!(
                 "expression kind {}",
                 expression_kind_name(&expression.kind)
             ))),
+        }
+    }
+
+    fn lower_noise_source(&mut self, source: &str, operands: &[ExprId]) -> JitResult<()> {
+        match source.to_ascii_lowercase().as_str() {
+            "white" => {
+                if operands.len() != 1 {
+                    return Err(self.unsupported(format!(
+                        "noise source {source} expects one operand, found {}",
+                        operands.len()
+                    )));
+                }
+                self.lower(operands[0])?;
+                self.ops.push(NativeOp::WhiteNoise);
+                Ok(())
+            }
+            "flicker" => {
+                if operands.len() != 2 {
+                    return Err(self.unsupported(format!(
+                        "noise source {source} expects two operands, found {}",
+                        operands.len()
+                    )));
+                }
+                self.lower(operands[0])?;
+                self.lower(operands[1])?;
+                self.pop_binary("canonical flicker noise source")?;
+                self.ops.push(NativeOp::FlickerNoise);
+                Ok(())
+            }
+            "table" => self.push(NativeOp::Const(0.0)),
+            _ => Err(self.unsupported(format!("noise source {source}"))),
         }
     }
 
@@ -2084,6 +2117,10 @@ fn lower_constant_rhs_arithmetic(ops: &mut Vec<NativeOp>, instruction: &Instruct
     let Some(NativeOp::Const(value)) = ops.last().copied() else {
         return false;
     };
+    if matches!(instruction, Instruction::Add) && value.to_bits() == 0.0_f64.to_bits() {
+        ops.pop();
+        return true;
+    }
     let op = match instruction {
         Instruction::Add => NativeOp::AddConst(value),
         Instruction::Sub => NativeOp::SubConst(value),
@@ -2680,7 +2717,10 @@ fn integer_binary_op(instruction: &Instruction) -> IntegerBinaryOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{AnalogOperator, BranchAccess, Expression, PortDirection};
+    use crate::ast::{
+        AnalogOperator, BinaryExpr, BinaryOp, BranchAccess, Expression, NoiseSource, NumberLit,
+        PortDirection,
+    };
     use crate::canonical_ir::{CanonicalMetadata, HirExprKind, HirModel, MirModel};
     use crate::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
     use crate::source::Span;
@@ -2693,10 +2733,10 @@ mod tests {
             .with_lookup_table_count(8)
     }
 
-    fn explicit_analog_limexp_mir() -> MirModel {
+    fn analyzed_two_terminal_hir(module_name: &str, expression: Expression) -> HirModel {
         let span = Span::dummy();
         let analyzed = AnalyzedModule {
-            name: "mir_analog_limexp".into(),
+            name: module_name.into(),
             ports: vec![
                 AnalyzedPort {
                     name: "p".into(),
@@ -2722,15 +2762,7 @@ mod tests {
                 declared_branch: None,
                 is_current: true,
                 indirect: false,
-                expression: Expression::AnalogOperator(AnalogOperator::Limexp {
-                    expr: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
-                        access: "V".into(),
-                        pos: "p".into(),
-                        neg: Some("n".into()),
-                        span,
-                    })),
-                    span,
-                }),
+                expression,
                 expr_type: ValueType::Real,
                 span,
             }],
@@ -2740,8 +2772,35 @@ mod tests {
             arrays: HashMap::new(),
             symbol_table: SymbolTable::new(),
         };
-        let metadata = CanonicalMetadata::for_source("fixture", "explicit analog limexp");
-        let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+        let metadata = CanonicalMetadata::for_source("fixture", module_name);
+        HirModel::from_analyzed_module(&metadata, &analyzed)
+    }
+
+    fn analyzed_two_terminal_mir(module_name: &str, expression: Expression) -> MirModel {
+        let hir = analyzed_two_terminal_hir(module_name, expression);
+        MirModel::from_hir(&hir).expect("lower explicit canonical HIR to MIR")
+    }
+
+    fn number(value: f64, raw: &str) -> Expression {
+        Expression::Number(NumberLit {
+            value,
+            raw: raw.into(),
+            span: Span::dummy(),
+        })
+    }
+
+    fn explicit_analog_limexp_mir() -> MirModel {
+        let span = Span::dummy();
+        let expression = Expression::AnalogOperator(AnalogOperator::Limexp {
+            expr: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
+                access: "V".into(),
+                pos: "p".into(),
+                neg: Some("n".into()),
+                span,
+            })),
+            span,
+        });
+        let hir = analyzed_two_terminal_hir("mir_analog_limexp", expression);
         let contribution_expr = &hir.contributions[0].expression;
         assert!(
             matches!(
@@ -2752,6 +2811,37 @@ mod tests {
         );
 
         MirModel::from_hir(&hir).expect("lower explicit analog limexp HIR to MIR")
+    }
+
+    fn explicit_noise_sources_mir() -> MirModel {
+        let span = Span::dummy();
+        analyzed_two_terminal_mir(
+            "mir_explicit_noise_sources",
+            Expression::Binary(BinaryExpr {
+                op: BinaryOp::Add,
+                left: Box::new(Expression::Binary(BinaryExpr {
+                    op: BinaryOp::Add,
+                    left: Box::new(Expression::NoiseSource(NoiseSource::White {
+                        power: Box::new(number(1.0, "1.0")),
+                        name: Some("white".into()),
+                        span,
+                    })),
+                    right: Box::new(Expression::NoiseSource(NoiseSource::Flicker {
+                        power: Box::new(number(2.0, "2.0")),
+                        exponent: Box::new(number(1.0, "1.0")),
+                        name: Some("flicker".into()),
+                        span,
+                    })),
+                    span,
+                })),
+                right: Box::new(Expression::NoiseSource(NoiseSource::Table {
+                    data: vec![number(1.0, "1.0"), number(1.0e-18, "1.0e-18")],
+                    name: Some("table".into()),
+                    span,
+                })),
+                span,
+            }),
+        )
     }
 
     #[test]
@@ -3013,6 +3103,33 @@ endmodule
     }
 
     #[test]
+    fn lowers_explicit_canonical_noise_source_nodes_to_native_zero_ops() {
+        let mir = explicit_noise_sources_mir();
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_explicit_noise_sources",
+            EntryKind::StampValue,
+            &mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower explicit canonical noise source nodes to native large-signal zero ops");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::Const(1.0),
+                NativeOp::WhiteNoise,
+                NativeOp::Const(2.0),
+                NativeOp::Const(1.0),
+                NativeOp::FlickerNoise,
+                NativeOp::Add,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 3);
+    }
+
+    #[test]
     fn mir_equation_lowering_rejects_unsupported_canonical_expression_without_fallback() {
         let source = r#"
 module mir_unsupported(p, n);
@@ -3254,6 +3371,28 @@ endmodule
             );
             assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, expected]);
         }
+    }
+
+    #[test]
+    fn drops_positive_zero_rhs_add_without_runtime_op() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(0.0),
+                Instruction::Add,
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "literal-rhs-add-zero",
+            EntryKind::Assignment,
+            &program,
+            limits(0, 0),
+        )
+        .expect("positive RHS zero addition should lower away");
+
+        assert_eq!(lowered.max_stack_depth(), 1);
+        assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature]);
     }
 
     #[test]
