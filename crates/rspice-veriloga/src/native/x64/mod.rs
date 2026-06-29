@@ -1411,6 +1411,11 @@ endmodule
                 Some("bsimbulk"),
             ),
             (
+                "psp104",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "psp104.va"]),
+                Some("PSP104VA"),
+            ),
+            (
                 "bsimimg",
                 shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
                 Some("bsimimg"),
@@ -1485,6 +1490,11 @@ endmodule
                 "bsimbulk",
                 shipped_cmc_model_path(&["BSIM-BULK107.2.1_02112025", "code", "bsimbulk.va"]),
                 Some("bsimbulk"),
+            ),
+            (
+                "psp104",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "psp104.va"]),
+                Some("PSP104VA"),
             ),
             (
                 "bsimimg",
@@ -1895,6 +1905,7 @@ endmodule
                 .get(terminal)
                 .copied()
                 .unwrap_or(0.0),
+            "psp104" => [0.05, 0.7, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "r3_cmc" => [0.1, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "diode_cmc" => [0.7, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "vbic13_4t" => [0.2, 0.75, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
