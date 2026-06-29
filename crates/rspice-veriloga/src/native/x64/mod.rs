@@ -1166,6 +1166,32 @@ endmodule
     }
 
     #[test]
+    #[ignore = "release-only shipped-model native x64 finite oracle; run with --release --features native -- --ignored --nocapture"]
+    fn native_x64_shipped_model_finite_entries_match_bytecode_reference() {
+        assert!(
+            !cfg!(debug_assertions),
+            "native x64 shipped-model finite oracle is release-only; rerun with --release"
+        );
+
+        let cases = [
+            (
+                "bsimcmg",
+                shipped_cmc_model_path(&["BSIM-CMG_112.1.0_04282026", "code", "bsimcmg.va"]),
+                Some("bsimcmg_va"),
+            ),
+            (
+                "bsimimg",
+                shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
+                Some("bsimimg"),
+            ),
+        ];
+
+        for (name, path, module) in cases {
+            assert_shipped_model_finite_entries_match_bytecode(name, &path, module);
+        }
+    }
+
+    #[test]
     fn compile_model_with_canonical_ir_rejects_unsupported_mir_stamp() {
         let source = r#"
 `include "disciplines.vams"
@@ -1367,6 +1393,272 @@ endmodule
             stats.jacobian_entry_points,
             stats.reactive_jacobian_entry_points,
         );
+    }
+
+    fn assert_shipped_model_finite_entries_match_bytecode(
+        name: &str,
+        path: &Path,
+        module: Option<&str>,
+    ) {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let runtime = compiler
+            .compile_file_runtime_with_metadata(path, module)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "compile shipped Verilog-A oracle model {name} at {}: {error}",
+                    path.display()
+                )
+            });
+        let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
+            .unwrap_or_else(|error| panic!("native x64 compile oracle model {name}: {error}"));
+        let mut context = native_model_benchmark_context(&runtime.model, name);
+        resolve_native_parameter_defaults(&runtime.model, &native, &mut context);
+
+        let stats =
+            assert_native_matches_bytecode_finite_entries(&runtime.model, &native, context, name)
+                .unwrap_or_else(|error| panic!("{name}: finite native oracle failed: {error}"));
+        eprintln!(
+            "native-x64-shipped-oracle model={name} variables={} stamps={} jacobians={} reactive_jacobians={} skipped_nonfinite={}",
+            stats.variables,
+            stats.stamps,
+            stats.jacobians,
+            stats.reactive_jacobians,
+            stats.skipped_nonfinite,
+        );
+    }
+
+    #[derive(Default)]
+    struct FiniteOracleStats {
+        variables: usize,
+        stamps: usize,
+        jacobians: usize,
+        reactive_jacobians: usize,
+        skipped_nonfinite: usize,
+    }
+
+    fn assert_native_matches_bytecode_finite_entries(
+        model: &CompiledModel,
+        native: &NativeModel,
+        base_context: VmContext,
+        name: &str,
+    ) -> Result<FiniteOracleStats, String> {
+        let mut bytecode_context = base_context.clone();
+        bytecode_context.clear_currents();
+        bytecode_context
+            .currents
+            .resize(model.stamp_programs.len(), 0.0);
+        let mut vm = Vm::new(&mut bytecode_context);
+        let live_assignment_steps = super::live_native_assignment_steps(model);
+        execute_bytecode_assignment_steps(&mut vm, &live_assignment_steps)
+            .map_err(|error| error.to_string())?;
+
+        let mut native_context = base_context;
+        native_context.clear_currents();
+        native_context
+            .currents
+            .resize(model.stamp_programs.len(), 0.0);
+        let mut ctx = eval_context_from_vm_context(&mut native_context);
+        native.run_assignments(&ctx, native_context.variables.as_mut_ptr());
+        if let Some(error) = take_native_runtime_error() {
+            return Err(format!("native runtime error during assignments: {error}"));
+        }
+
+        let mut stats = FiniteOracleStats::default();
+        for index in 0..model.num_variables {
+            assert_close_or_skip_nonfinite(
+                name,
+                format!("variable {index}"),
+                vm.context.variables[index],
+                native_context.variables[index],
+                &mut stats.variables,
+                &mut stats.skipped_nonfinite,
+            )?;
+        }
+
+        let mut prior_current_probes = Vec::new();
+        for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+            let bytecode_active = if let Some(condition) = &stamp.static_condition {
+                let reference = vm.execute(condition).map_err(|error| error.to_string())?;
+                ctx = eval_context_from_vm_context(&mut native_context);
+                let actual = native
+                    .run_static_condition(stamp_index, &ctx, native_context.variables.as_ptr())
+                    .ok_or_else(|| format!("missing native static condition {stamp_index}"))?;
+                assert_finite_close(
+                    name,
+                    format!("static_condition {stamp_index}"),
+                    reference,
+                    actual,
+                )?;
+                reference.abs() > 1.0e-15
+            } else {
+                true
+            };
+
+            let native_active = if stamp.static_condition.is_some() {
+                ctx = eval_context_from_vm_context(&mut native_context);
+                native
+                    .run_static_condition(stamp_index, &ctx, native_context.variables.as_ptr())
+                    .ok_or_else(|| format!("missing native static condition {stamp_index}"))?
+                    .abs()
+                    > 1.0e-15
+            } else {
+                true
+            };
+            if bytecode_active != native_active {
+                return Err(format!(
+                    "static condition {stamp_index} active mismatch: bytecode={bytecode_active} native={native_active}"
+                ));
+            }
+            if !bytecode_active {
+                push_prior_current_probe_aliases_for_stamp(
+                    model,
+                    &mut prior_current_probes,
+                    stamp_index,
+                    stamp,
+                );
+                continue;
+            }
+
+            let reference = execute_bytecode_value_program_with_prior_current_probes(
+                &mut vm,
+                &stamp.value_program,
+                &prior_current_probes,
+            )
+            .map_err(|error| error.to_string())?;
+            ctx = eval_context_from_vm_context(&mut native_context);
+            let actual =
+                native.run_stamp_value(stamp_index, &ctx, native_context.variables.as_ptr());
+            assert_close_or_skip_nonfinite(
+                name,
+                format!("stamp {stamp_index}"),
+                reference,
+                actual,
+                &mut stats.stamps,
+                &mut stats.skipped_nonfinite,
+            )?;
+            vm.context.currents[stamp_index] = reference;
+            native_context.currents[stamp_index] = actual;
+            if stamp.branch_ordinal.is_none()
+                && let Some((pos, neg)) = super::infer_current_terminal_pair(stamp)
+            {
+                vm.context.set_branch_current(pos, neg, reference);
+                native_context.set_branch_current(pos, neg, actual);
+            }
+
+            let mut jacobian_prior_current_probes = prior_current_probes.clone();
+            push_prior_current_probe_aliases_for_stamp(
+                model,
+                &mut jacobian_prior_current_probes,
+                stamp_index,
+                stamp,
+            );
+            for entry_index in 0..stamp.jacobian_programs.len() {
+                let reference = execute_bytecode_value_program_with_prior_current_probes(
+                    &mut vm,
+                    &stamp.jacobian_programs[entry_index].program,
+                    &jacobian_prior_current_probes,
+                )
+                .map_err(|error| error.to_string())?;
+                ctx = eval_context_from_vm_context(&mut native_context);
+                let actual = native.run_jacobian(
+                    stamp_index,
+                    entry_index,
+                    &ctx,
+                    native_context.variables.as_ptr(),
+                );
+                assert_close_or_skip_nonfinite(
+                    name,
+                    format!("jacobian {stamp_index}.{entry_index}"),
+                    reference,
+                    actual,
+                    &mut stats.jacobians,
+                    &mut stats.skipped_nonfinite,
+                )?;
+            }
+
+            for entry_index in 0..stamp.reactive_jacobians.len() {
+                let reference = vm
+                    .execute(&stamp.reactive_jacobians[entry_index].program)
+                    .map_err(|error| error.to_string())?;
+                ctx = eval_context_from_vm_context(&mut native_context);
+                let actual = native.run_reactive_jacobian(
+                    stamp_index,
+                    entry_index,
+                    &ctx,
+                    native_context.variables.as_ptr(),
+                );
+                assert_close_or_skip_nonfinite(
+                    name,
+                    format!("reactive_jacobian {stamp_index}.{entry_index}"),
+                    reference,
+                    actual,
+                    &mut stats.reactive_jacobians,
+                    &mut stats.skipped_nonfinite,
+                )?;
+            }
+
+            push_prior_current_probe_aliases_for_stamp(
+                model,
+                &mut prior_current_probes,
+                stamp_index,
+                stamp,
+            );
+        }
+
+        if let Some(error) = take_native_runtime_error() {
+            return Err(format!(
+                "native runtime error during finite oracle: {error}"
+            ));
+        }
+        Ok(stats)
+    }
+
+    fn assert_close_or_skip_nonfinite(
+        name: &str,
+        entry: impl std::fmt::Display,
+        reference: f64,
+        actual: f64,
+        matched_count: &mut usize,
+        skipped_nonfinite: &mut usize,
+    ) -> Result<(), String> {
+        if !reference.is_finite() {
+            *skipped_nonfinite += 1;
+            return Ok(());
+        }
+        assert_finite_close(name, entry, reference, actual)?;
+        *matched_count += 1;
+        Ok(())
+    }
+
+    fn assert_finite_close(
+        name: &str,
+        entry: impl std::fmt::Display,
+        reference: f64,
+        actual: f64,
+    ) -> Result<(), String> {
+        let entry = entry.to_string();
+        if !reference.is_finite() {
+            return Err(format!(
+                "{entry}: bytecode reference is non-finite: {reference}"
+            ));
+        }
+        if !actual.is_finite() {
+            return Err(format!(
+                "{entry}: native value is non-finite while bytecode is finite: bytecode={reference} native={actual}"
+            ));
+        }
+        if reference == actual {
+            return Ok(());
+        }
+        let scale = reference.abs().max(actual.abs()).max(1.0);
+        let tolerance = 1.0e-8 * scale;
+        let delta = (reference - actual).abs();
+        if delta <= tolerance {
+            return Ok(());
+        }
+        Err(format!(
+            "{entry}: {name} native/reference mismatch: bytecode={reference:.17e} native={actual:.17e} delta={delta:.17e} tolerance={tolerance:.17e}"
+        ))
     }
 
     fn native_model_benchmark_context(model: &CompiledModel, name: &str) -> VmContext {
