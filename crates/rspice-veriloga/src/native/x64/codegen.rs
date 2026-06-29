@@ -244,6 +244,7 @@ impl FunctionCompiler {
         }
 
         self.depth = 0;
+        let mut context_pointer_cache = None;
         for op in program.ops() {
             match *op {
                 NativeOp::Const(value) => {
@@ -252,28 +253,36 @@ impl FunctionCompiler {
                 }
                 NativeOp::LoadParam(index) => {
                     let dst = self.push_register()?;
-                    self.emit_context_pointer_load(PARAMS_OFFSET);
+                    self.emit_context_pointer_load_cached(
+                        PARAMS_OFFSET,
+                        &mut context_pointer_cache,
+                    );
                     self.encoder
                         .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
                 }
                 NativeOp::LoadParamGiven(index) => {
-                    self.emit_param_given_load(index)?;
+                    self.emit_param_given_load(index, &mut context_pointer_cache)?;
                 }
                 NativeOp::LoadPortConnected(index) => {
-                    self.emit_port_connected_load(index)?;
+                    self.emit_port_connected_load(index, &mut context_pointer_cache)?;
                 }
                 NativeOp::LoadVoltage { pos, neg } => {
                     self.emit_voltage_load(pos, neg)?;
                 }
                 NativeOp::LoadCurrent(pair_index) => {
-                    self.emit_current_load(pair_index)?;
+                    self.emit_current_load(pair_index, &mut context_pointer_cache)?;
                 }
                 NativeOp::LoadPriorCurrent(current_index) => {
-                    self.emit_prior_current_load(current_index)?;
+                    self.emit_prior_current_load(current_index, &mut context_pointer_cache)?;
                 }
                 NativeOp::LoadInternalVoltage(index) => {
                     let dst = self.push_register()?;
-                    self.emit_internal_voltage_load(dst, index)?;
+                    self.emit_context_pointer_load_cached(
+                        INTERNAL_VOLTAGES_OFFSET,
+                        &mut context_pointer_cache,
+                    );
+                    self.encoder
+                        .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
                 }
                 NativeOp::LoadVariable(index) => {
                     let dst = self.push_register()?;
@@ -288,7 +297,10 @@ impl FunctionCompiler {
                 }
                 NativeOp::LoadBranchUnknown(index) => {
                     let dst = self.push_register()?;
-                    self.emit_context_pointer_load(BRANCH_UNKNOWNS_OFFSET);
+                    self.emit_context_pointer_load_cached(
+                        BRANCH_UNKNOWNS_OFFSET,
+                        &mut context_pointer_cache,
+                    );
                     self.encoder
                         .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
                 }
@@ -364,6 +376,9 @@ impl FunctionCompiler {
                 NativeOp::IdtState(index) => self.emit_idt_state(index)?,
                 NativeOp::IdtJacobian => self.emit_idt_jacobian()?,
                 NativeOp::IdtModState(index) => self.emit_idtmod_state(index)?,
+            }
+            if !native_op_preserves_context_pointer_cache(*op) {
+                context_pointer_cache = None;
             }
         }
 
@@ -1354,21 +1369,31 @@ impl FunctionCompiler {
         Ok(())
     }
 
-    fn emit_current_load(&mut self, pair_index: usize) -> JitResult<()> {
+    fn emit_current_load(
+        &mut self,
+        pair_index: usize,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
         self.emit_guarded_context_f64_slice_load(
             BRANCH_CURRENTS_OFFSET,
             BRANCH_CURRENTS_LEN_OFFSET,
             pair_index,
             rspice_native_current_probe_error,
+            context_pointer_cache,
         )
     }
 
-    fn emit_prior_current_load(&mut self, current_index: usize) -> JitResult<()> {
+    fn emit_prior_current_load(
+        &mut self,
+        current_index: usize,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
         self.emit_guarded_context_f64_slice_load(
             CURRENTS_OFFSET,
             CURRENTS_LEN_OFFSET,
             current_index,
             rspice_native_prior_current_error,
+            context_pointer_cache,
         )
     }
 
@@ -1378,11 +1403,12 @@ impl FunctionCompiler {
         len_field_offset: i32,
         index: usize,
         helper: VoidHelper,
+        context_pointer_cache: &mut Option<i32>,
     ) -> JitResult<()> {
         let dst = self.push_register()?;
         let value_disp = byte_disp(index)?;
 
-        self.emit_context_pointer_load(pointer_field_offset);
+        self.emit_context_pointer_load_cached(pointer_field_offset, context_pointer_cache);
         self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
         let missing_storage = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
 
@@ -2666,6 +2692,17 @@ impl FunctionCompiler {
             .mov_r64_m64_base_disp32(Gpr::Rax, self.ctx_arg_reg(), ctx_field_offset);
     }
 
+    fn emit_context_pointer_load_cached(
+        &mut self,
+        ctx_field_offset: i32,
+        context_pointer_cache: &mut Option<i32>,
+    ) {
+        if *context_pointer_cache != Some(ctx_field_offset) {
+            self.emit_context_pointer_load(ctx_field_offset);
+            *context_pointer_cache = Some(ctx_field_offset);
+        }
+    }
+
     fn emit_context_f64_load(&mut self, ctx_field_offset: i32) -> JitResult<()> {
         let dst = self.push_register()?;
         self.encoder
@@ -2673,21 +2710,31 @@ impl FunctionCompiler {
         Ok(())
     }
 
-    fn emit_param_given_load(&mut self, index: usize) -> JitResult<()> {
+    fn emit_param_given_load(
+        &mut self,
+        index: usize,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
         self.emit_guarded_context_u8_slice_load(
             PARAM_GIVEN_OFFSET,
             PARAM_GIVEN_LEN_OFFSET,
             index,
             rspice_native_param_given_error,
+            context_pointer_cache,
         )
     }
 
-    fn emit_port_connected_load(&mut self, index: usize) -> JitResult<()> {
+    fn emit_port_connected_load(
+        &mut self,
+        index: usize,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
         self.emit_guarded_context_u8_slice_load(
             PORT_CONNECTED_OFFSET,
             PORT_CONNECTED_LEN_OFFSET,
             index,
             rspice_native_port_connected_error,
+            context_pointer_cache,
         )
     }
 
@@ -2697,11 +2744,12 @@ impl FunctionCompiler {
         len_field_offset: i32,
         index: usize,
         helper: VoidHelper,
+        context_pointer_cache: &mut Option<i32>,
     ) -> JitResult<()> {
         let dst = self.push_register()?;
         let value_disp = byte_disp_u8(index)?;
 
-        self.emit_context_pointer_load(pointer_field_offset);
+        self.emit_context_pointer_load_cached(pointer_field_offset, context_pointer_cache);
         self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
         let missing_storage = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
 
@@ -3127,6 +3175,19 @@ fn native_op_reads_entry_args(op: NativeOp) -> bool {
     )
 }
 
+fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
+    matches!(
+        op,
+        NativeOp::LoadParam(_)
+            | NativeOp::LoadParamGiven(_)
+            | NativeOp::LoadPortConnected(_)
+            | NativeOp::LoadCurrent(_)
+            | NativeOp::LoadPriorCurrent(_)
+            | NativeOp::LoadInternalVoltage(_)
+            | NativeOp::LoadBranchUnknown(_)
+    )
+}
+
 fn program_needs_stateful_stack_scratch(program: &NativeProgram) -> bool {
     let mut depth = 0_usize;
     for op in program.ops().iter().copied() {
@@ -3377,10 +3438,10 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64,
-        INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, PARAMS_OFFSET, Q_ELECTRON,
-        ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, VOLTAGES_OFFSET, WORD_BYTES,
-        X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
+        BRANCH_CURRENTS_OFFSET, DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64,
+        I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, PARAMS_OFFSET,
+        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, VOLTAGES_OFFSET,
+        WORD_BYTES, X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
         compile_assignment_function, compile_assignment_pass_function, compile_value_function,
         entry_ctx_arg_reg, entry_vars_arg_reg, rspice_exp,
     };
@@ -3459,6 +3520,35 @@ mod tests {
         let ctx = eval_context(&params, &[], &[], &[]);
 
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 7.25_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_param_base_for_adjacent_param_loads() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushParam(0),
+                Instruction::PushParam(1),
+                Instruction::Add,
+            ],
+            0,
+        );
+
+        let bytes = compile_value_function(&program).expect("compile adjacent param value leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            1,
+            "adjacent param loads should materialize the params base pointer once"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate adjacent param leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [1.25_f64, 3.5_f64];
+        let ctx = eval_context(&params, &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 4.75_f64.to_bits());
     }
 
     #[test]
@@ -5483,6 +5573,38 @@ mod tests {
         ctx.num_terminals = 2;
 
         assert_eq!(f(&ctx, std::ptr::null()), 2.0);
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_current_base_for_adjacent_current_loads() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadCurrent(1),
+                NativeOp::LoadCurrent(2),
+                NativeOp::Add,
+            ],
+            2,
+            vec![1, 2],
+            Vec::new(),
+        );
+        let bytes = compile_value_function(&program).expect("compile adjacent current leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(BRANCH_CURRENTS_OFFSET)),
+            1,
+            "adjacent guarded current loads should materialize the current base pointer once"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate adjacent current leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let branch_currents = [f64::NAN, 4.0_f64, 6.5_f64];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.branch_currents = branch_currents.as_ptr();
+        ctx.branch_currents_len = branch_currents.len();
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 10.5_f64.to_bits());
     }
 
     #[test]
