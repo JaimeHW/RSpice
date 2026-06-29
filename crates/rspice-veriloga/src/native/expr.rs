@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use super::{JitError, JitResult};
+use crate::canonical_ir::{EquationId, ExprId, HirExprKind, MirModel};
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
 use smol_str::SmolStr;
 
@@ -837,6 +838,54 @@ impl NativeProgram {
         })
     }
 
+    pub(crate) fn from_mir_equation(
+        model: impl Into<SmolStr>,
+        entry_kind: EntryKind,
+        mir: &MirModel,
+        equation_id: EquationId,
+        limits: NativeLoweringLimits<'_>,
+    ) -> JitResult<Self> {
+        let model = model.into();
+        mir.validate()
+            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
+                model: model.clone(),
+                detail: diagnostics
+                    .first()
+                    .map(|diagnostic| diagnostic.message.clone())
+                    .unwrap_or_else(|| "MIR validation failed".into())
+                    .into(),
+            })?;
+
+        let equation = mir
+            .equations
+            .get(usize::from(equation_id))
+            .filter(|equation| equation.id == equation_id)
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.clone(),
+                detail: format!("MIR equation {equation_id} is outside equation arena").into(),
+            })?;
+
+        let mut lowerer = MirEquationLowerer::new(model.clone(), entry_kind, mir, limits);
+        lowerer.lower(equation.expression.id)?;
+
+        if lowerer.depth != 1 {
+            return Err(stack_error(
+                model.clone(),
+                entry_kind,
+                format!("final stack depth {}, expected 1", lowerer.depth),
+            ));
+        }
+        let optimized_max_stack_depth =
+            compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
+        debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
+
+        Ok(Self {
+            ops: lowerer.ops,
+            max_stack_depth: optimized_max_stack_depth,
+            current_pair_dependencies: lowerer.current_pair_dependencies,
+        })
+    }
+
     pub(crate) fn ops(&self) -> &[NativeOp] {
         &self.ops
     }
@@ -847,6 +896,403 @@ impl NativeProgram {
 
     pub(crate) fn current_pair_dependencies(&self) -> &[usize] {
         &self.current_pair_dependencies
+    }
+}
+
+struct MirEquationLowerer<'a, 'limits> {
+    model: SmolStr,
+    entry_kind: EntryKind,
+    mir: &'a MirModel,
+    limits: NativeLoweringLimits<'limits>,
+    ops: Vec<NativeOp>,
+    depth: usize,
+    max_stack_depth: usize,
+    current_pair_dependencies: Vec<usize>,
+}
+
+impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
+    fn new(
+        model: SmolStr,
+        entry_kind: EntryKind,
+        mir: &'a MirModel,
+        limits: NativeLoweringLimits<'limits>,
+    ) -> Self {
+        Self {
+            model,
+            entry_kind,
+            mir,
+            limits,
+            ops: Vec::new(),
+            depth: 0,
+            max_stack_depth: 0,
+            current_pair_dependencies: Vec::new(),
+        }
+    }
+
+    fn lower(&mut self, expr_id: ExprId) -> JitResult<()> {
+        let expression = self.expression(expr_id)?;
+        match &expression.kind {
+            HirExprKind::Number { value, .. } => self.push(NativeOp::Const(*value)),
+            HirExprKind::Identifier { name } => self.lower_identifier(name.as_str()),
+            HirExprKind::BranchAccess { access, pos, neg } => {
+                self.lower_branch_access(access.as_str(), pos.as_str(), neg.as_deref())
+            }
+            HirExprKind::Unary { op, operand } => self.lower_unary(op.as_str(), *operand),
+            HirExprKind::Binary { op, left, right } => {
+                self.lower_binary(op.as_str(), *left, *right)
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                self.lower(*condition)?;
+                self.lower(*then_expr)?;
+                self.lower(*else_expr)?;
+                self.append_ternary(NativeOp::IfElse)
+            }
+            HirExprKind::StringLiteral { .. }
+            | HirExprKind::SystemFunction { .. }
+            | HirExprKind::Call { .. }
+            | HirExprKind::NamedBranchAccess { .. }
+            | HirExprKind::ArrayAccess { .. }
+            | HirExprKind::ArrayLiteral { .. }
+            | HirExprKind::AnalogOperator { .. }
+            | HirExprKind::Laplace { .. }
+            | HirExprKind::Zi { .. }
+            | HirExprKind::NoiseSource { .. } => Err(self.unsupported(format!(
+                "expression kind {}",
+                expression_kind_name(&expression.kind)
+            ))),
+        }
+    }
+
+    fn lower_identifier(&mut self, name: &str) -> JitResult<()> {
+        if let Some(parameter) = self
+            .mir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name == name)
+        {
+            let index = usize::from(parameter.id);
+            validate_index(
+                self.model.clone(),
+                "canonical parameter",
+                index,
+                self.limits.parameter_count,
+            )?;
+            return self.push(NativeOp::LoadParam(index));
+        }
+
+        Err(self.unsupported(format!("identifier {name}")))
+    }
+
+    fn lower_branch_access(&mut self, access: &str, pos: &str, neg: Option<&str>) -> JitResult<()> {
+        match access {
+            "V" => {
+                let pos = self.lower_voltage_node(pos)?;
+                let neg = neg
+                    .map(|node| self.lower_voltage_node(node))
+                    .transpose()?
+                    .unwrap_or(VoltageNode::Ground);
+                self.push(NativeOp::LoadVoltage { pos, neg })
+            }
+            "I" => {
+                let pos = self.lower_terminal_node(pos)?;
+                let neg = neg
+                    .map(|node| self.lower_terminal_node(node))
+                    .transpose()?
+                    .unwrap_or(usize::MAX);
+                if neg == usize::MAX {
+                    return Err(self.unsupported("branch current to ground access"));
+                }
+                let pair_index =
+                    current_pair_index(self.model.clone(), pos, neg, self.limits.terminal_count)?;
+                if !self.limits.available_current_pairs.contains(&pair_index) {
+                    return Err(JitError::unsupported_program_op(
+                        self.model.clone(),
+                        format!("canonical branch current terminal pair {pos},{neg} unavailable"),
+                    ));
+                }
+                if !self.current_pair_dependencies.contains(&pair_index) {
+                    self.current_pair_dependencies.push(pair_index);
+                }
+                self.push(NativeOp::LoadCurrent(pair_index))
+            }
+            _ => Err(self.unsupported(format!("branch access {access}"))),
+        }
+    }
+
+    fn lower_unary(&mut self, op: &str, operand: ExprId) -> JitResult<()> {
+        self.lower(operand)?;
+        match op {
+            "Pos" => Ok(()),
+            "Neg" => {
+                if lower_constant_neg(&mut self.ops) {
+                    Ok(())
+                } else {
+                    self.append_unary(NativeOp::Neg)
+                }
+            }
+            "Not" => self.append_unary(NativeOp::Logical(LogicalOp::Not)),
+            _ => Err(self.unsupported(format!("unary operator {op}"))),
+        }
+    }
+
+    fn lower_binary(&mut self, op: &str, left: ExprId, right: ExprId) -> JitResult<()> {
+        self.lower(left)?;
+        self.lower(right)?;
+        match op {
+            "Add" | "Sub" | "Mul" | "Div" => self.append_arithmetic(op),
+            "Pow" | "Mod" => self.append_binary_math(op),
+            "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" => self.append_compare(op),
+            "And" | "Or" => self.append_logical(op),
+            "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr" => self.append_integer_binary(op),
+            _ => Err(self.unsupported(format!("binary operator {op}"))),
+        }
+    }
+
+    fn append_arithmetic(&mut self, op: &str) -> JitResult<()> {
+        self.pop_binary("canonical arithmetic")?;
+        let instruction = match op {
+            "Add" => Instruction::Add,
+            "Sub" => Instruction::Sub,
+            "Mul" => Instruction::Mul,
+            "Div" => Instruction::Div,
+            _ => unreachable!("append_arithmetic only accepts arithmetic operators"),
+        };
+        if lower_constant_binary_arithmetic(&mut self.ops, &instruction)
+            || lower_constant_rhs_arithmetic(&mut self.ops, &instruction)
+            || lower_constant_lhs_noncommutative_arithmetic(&mut self.ops, &instruction)
+        {
+            return Ok(());
+        }
+        self.ops.push(arithmetic_op(&instruction));
+        Ok(())
+    }
+
+    fn append_binary_math(&mut self, op: &str) -> JitResult<()> {
+        self.pop_binary("canonical binary math")?;
+        let op = match op {
+            "Pow" => BinaryMathOp::Pow,
+            "Mod" => BinaryMathOp::Mod,
+            _ => unreachable!("append_binary_math only accepts binary math operators"),
+        };
+        if lower_constant_binary_math(&mut self.ops, op)
+            || (op == BinaryMathOp::Pow && lower_constant_square_power(&mut self.ops))
+        {
+            return Ok(());
+        }
+        self.ops.push(NativeOp::BinaryMath(op));
+        Ok(())
+    }
+
+    fn append_compare(&mut self, op: &str) -> JitResult<()> {
+        self.pop_binary("canonical comparison")?;
+        let op = match op {
+            "Gt" => CompareOp::Gt,
+            "Lt" => CompareOp::Lt,
+            "Ge" => CompareOp::Ge,
+            "Le" => CompareOp::Le,
+            "Eq" => CompareOp::Eq,
+            "Ne" => CompareOp::Ne,
+            _ => unreachable!("append_compare only accepts comparison operators"),
+        };
+        if lower_constant_binary_compare(&mut self.ops, op)
+            || lower_constant_rhs_compare(&mut self.ops, op)
+            || lower_constant_lhs_compare(&mut self.ops, op)
+        {
+            return Ok(());
+        }
+        self.ops.push(NativeOp::Compare(op));
+        Ok(())
+    }
+
+    fn append_logical(&mut self, op: &str) -> JitResult<()> {
+        self.pop_binary("canonical logical")?;
+        let op = match op {
+            "And" => LogicalOp::And,
+            "Or" => LogicalOp::Or,
+            _ => unreachable!("append_logical only accepts logical operators"),
+        };
+        if lower_constant_binary_logical(&mut self.ops, op)
+            || lower_constant_rhs_logical(&mut self.ops, op)
+            || lower_constant_lhs_logical(&mut self.ops, op)
+        {
+            return Ok(());
+        }
+        self.ops.push(NativeOp::Logical(op));
+        Ok(())
+    }
+
+    fn append_integer_binary(&mut self, op: &str) -> JitResult<()> {
+        self.pop_binary("canonical integer binary")?;
+        let op = match op {
+            "Shl" => IntegerBinaryOp::Shl,
+            "Shr" => IntegerBinaryOp::Shr,
+            "BitAnd" => IntegerBinaryOp::BitAnd,
+            "BitOr" => IntegerBinaryOp::BitOr,
+            "BitXor" => IntegerBinaryOp::BitXor,
+            _ => unreachable!("append_integer_binary only accepts integer operators"),
+        };
+        if lower_constant_integer_binary(&mut self.ops, op) {
+            return Ok(());
+        }
+        self.ops.push(NativeOp::IntegerBinary(op));
+        Ok(())
+    }
+
+    fn append_unary(&mut self, op: NativeOp) -> JitResult<()> {
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical unary",
+            self.depth,
+            1,
+        )?;
+        self.ops.push(op);
+        Ok(())
+    }
+
+    fn append_ternary(&mut self, op: NativeOp) -> JitResult<()> {
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical ternary",
+            self.depth,
+            3,
+        )?;
+        self.depth -= 2;
+        self.ops.push(op);
+        Ok(())
+    }
+
+    fn pop_binary(&mut self, op_name: &'static str) -> JitResult<()> {
+        pop_binary_stack(self.model.clone(), self.entry_kind, op_name, self.depth)?;
+        self.depth -= 1;
+        Ok(())
+    }
+
+    fn push(&mut self, op: NativeOp) -> JitResult<()> {
+        self.ops.push(op);
+        push_stack(&mut self.depth, &mut self.max_stack_depth);
+        Ok(())
+    }
+
+    fn expression(&self, expr_id: ExprId) -> JitResult<&'a crate::canonical_ir::HirExpression> {
+        self.mir
+            .expressions
+            .get(usize::from(expr_id))
+            .filter(|expression| expression.id == expr_id)
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: self.model.clone(),
+                detail: format!("canonical expression {expr_id} is outside MIR arena").into(),
+            })
+    }
+
+    fn lower_voltage_node(&self, name: &str) -> JitResult<VoltageNode> {
+        if self.is_ground_node(name) {
+            return Ok(VoltageNode::Ground);
+        }
+        let node = self.node(name)?;
+        let node_index = usize::from(node.id);
+        if node.is_external {
+            validate_index(
+                self.model.clone(),
+                "canonical voltage terminal",
+                node_index,
+                self.limits.terminal_count,
+            )?;
+            return Ok(VoltageNode::Terminal(node_index));
+        }
+
+        let external_count = self.external_node_count();
+        let internal_index =
+            node_index
+                .checked_sub(external_count)
+                .ok_or_else(|| JitError::InvalidCanonicalIr {
+                    model: self.model.clone(),
+                    detail: format!("canonical internal node {name} appears before external nodes")
+                        .into(),
+                })?;
+        validate_index(
+            self.model.clone(),
+            "canonical internal voltage",
+            internal_index,
+            self.limits.internal_node_count,
+        )?;
+        Ok(VoltageNode::Internal(internal_index))
+    }
+
+    fn lower_terminal_node(&self, name: &str) -> JitResult<usize> {
+        let node = self.node(name)?;
+        let node_index = usize::from(node.id);
+        if !node.is_external {
+            return Err(self.unsupported(format!("branch current internal node {name}")));
+        }
+        validate_index(
+            self.model.clone(),
+            "canonical current terminal",
+            node_index,
+            self.limits.terminal_count,
+        )?;
+        Ok(node_index)
+    }
+
+    fn node(&self, name: &str) -> JitResult<&'a crate::canonical_ir::MirNode> {
+        self.mir
+            .nodes
+            .iter()
+            .find(|node| node.name.as_str() == name)
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: self.model.clone(),
+                detail: format!("canonical node {name} is outside MIR node arena").into(),
+            })
+    }
+
+    fn is_ground_node(&self, name: &str) -> bool {
+        name == "0"
+            || self
+                .mir
+                .ground_nodes
+                .iter()
+                .any(|node| node.as_str() == name)
+    }
+
+    fn external_node_count(&self) -> usize {
+        self.mir
+            .nodes
+            .iter()
+            .filter(|node| node.is_external)
+            .count()
+    }
+
+    fn unsupported(&self, detail: impl Into<String>) -> JitError {
+        JitError::unsupported_program_op(
+            self.model.clone(),
+            format!("expression {}", detail.into()),
+        )
+    }
+}
+
+fn expression_kind_name(kind: &HirExprKind) -> &'static str {
+    match kind {
+        HirExprKind::Number { .. } => "number",
+        HirExprKind::StringLiteral { .. } => "string literal",
+        HirExprKind::Identifier { .. } => "identifier",
+        HirExprKind::SystemFunction { .. } => "system function",
+        HirExprKind::Binary { .. } => "binary",
+        HirExprKind::Unary { .. } => "unary",
+        HirExprKind::Conditional { .. } => "conditional",
+        HirExprKind::Call { .. } => "call",
+        HirExprKind::BranchAccess { .. } => "branch access",
+        HirExprKind::NamedBranchAccess { .. } => "named branch access",
+        HirExprKind::ArrayAccess { .. } => "array access",
+        HirExprKind::ArrayLiteral { .. } => "array literal",
+        HirExprKind::AnalogOperator { .. } => "analog operator",
+        HirExprKind::Laplace { .. } => "laplace",
+        HirExprKind::Zi { .. } => "zi",
+        HirExprKind::NoiseSource { .. } => "noise source",
     }
 }
 
@@ -1737,6 +2183,7 @@ fn integer_binary_op(instruction: &Instruction) -> IntegerBinaryOp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{CompilerOptions, VerilogACompiler};
 
     fn limits(terminal_count: usize, internal_node_count: usize) -> NativeLoweringLimits<'static> {
         NativeLoweringLimits::new(terminal_count, internal_node_count, 8, 8, 8)
@@ -1772,6 +2219,79 @@ mod tests {
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_simple_mir_equation_expression_to_native_program() {
+        let source = r#"
+module mir_res(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real r = 2.0;
+  analog begin
+    I(p, n) <+ V(p, n) / r;
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_res",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 1, 0, 0),
+        )
+        .expect("lower MIR equation to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::LoadParam(0),
+                NativeOp::Div,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn mir_equation_lowering_rejects_unsupported_canonical_expression_without_fallback() {
+        let source = r#"
+module mir_unsupported(p, n);
+  inout p, n;
+  electrical p, n;
+  real x;
+  analog begin
+    x = 1.0;
+    I(p, n) <+ x;
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let error = NativeProgram::from_mir_equation(
+            "mir_unsupported",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect_err("unsupported MIR variable identifier must hard-fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("native JIT does not support canonical op expression identifier x"),
+            "{error}"
+        );
     }
 
     #[test]
