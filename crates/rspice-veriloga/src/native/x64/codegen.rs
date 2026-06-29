@@ -1309,8 +1309,8 @@ impl FunctionCompiler {
 
         self.encoder
             .mov_r64_m64_base_disp32(Gpr::R10, self.ctx_arg_reg(), len_field_offset);
-        self.encoder.movabs_r64_imm64(Gpr::R11, index as u64);
-        self.encoder.cmp_r64_r64(Gpr::R10, Gpr::R11);
+        self.encoder
+            .cmp_r64_imm32(Gpr::R10, slice_index_imm32(index)?);
         let index_out_of_range = self
             .encoder
             .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
@@ -2494,8 +2494,8 @@ impl FunctionCompiler {
 
         self.encoder
             .mov_r64_m64_base_disp32(Gpr::R10, self.ctx_arg_reg(), len_field_offset);
-        self.encoder.movabs_r64_imm64(Gpr::R11, index as u64);
-        self.encoder.cmp_r64_r64(Gpr::R10, Gpr::R11);
+        self.encoder
+            .cmp_r64_imm32(Gpr::R10, slice_index_imm32(index)?);
         let index_out_of_range = self
             .encoder
             .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
@@ -2823,6 +2823,13 @@ fn byte_disp_u8(index: usize) -> JitResult<i32> {
     i32::try_from(index).map_err(|_| JitError::Encoding {
         model: MODEL.into(),
         detail: format!("u8 flag index {index} exceeds x64 disp32 range").into(),
+    })
+}
+
+fn slice_index_imm32(index: usize) -> JitResult<i32> {
+    i32::try_from(index).map_err(|_| JitError::Encoding {
+        model: MODEL.into(),
+        detail: format!("slice index {index} exceeds x64 imm32 range").into(),
     })
 }
 
@@ -4605,6 +4612,14 @@ mod tests {
             &available_current_pairs,
         );
         let bytes = compile_value_function(&program).expect("compile current probe leaf");
+        assert!(
+            contains_bytes(&bytes, &guarded_slice_index_cmp_imm32_bytes(3)),
+            "current probe load should compare storage length against an imm32 index"
+        );
+        assert!(
+            !contains_bytes(&bytes, &guarded_slice_index_cmp_register_bytes(3)),
+            "current probe load should not materialize the constant index in a GPR"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate current probe leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -4723,6 +4738,14 @@ mod tests {
             0,
         );
         let bytes = compile_value_function(&program).expect("compile param_given leaf");
+        assert!(
+            contains_bytes(&bytes, &guarded_slice_index_cmp_imm32_bytes(1)),
+            "param_given load should compare storage length against an imm32 index"
+        );
+        assert!(
+            !contains_bytes(&bytes, &guarded_slice_index_cmp_register_bytes(1)),
+            "param_given load should not materialize the constant index in a GPR"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate param_given leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -7586,6 +7609,22 @@ mod tests {
             encoder.add_r64_imm32(Gpr::R11, base_disp);
         }
         encoder.add_r64_r64(Gpr::Rax, Gpr::R11);
+        encoder.into_bytes()
+    }
+
+    fn guarded_slice_index_cmp_imm32_bytes(index: usize) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.cmp_r64_imm32(
+            Gpr::R10,
+            super::slice_index_imm32(index).expect("guarded slice test index fits imm32"),
+        );
+        encoder.into_bytes()
+    }
+
+    fn guarded_slice_index_cmp_register_bytes(index: usize) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.movabs_r64_imm64(Gpr::R11, index as u64);
+        encoder.cmp_r64_r64(Gpr::R10, Gpr::R11);
         encoder.into_bytes()
     }
 
