@@ -2269,7 +2269,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 delay,
                 max_delay,
             } => self.lower_absdelay_operator(expr_id, *expr, Some(*delay), *max_delay),
-            HirAnalogOperator::Ddx { expr, .. } => self.lower_ddx_operator(*expr),
+            HirAnalogOperator::Ddx { expr, probe } => self.lower_ddx_projection(*expr, *probe),
             HirAnalogOperator::Limexp { expr } => {
                 self.lower(*expr)?;
                 if lower_constant_unary_math(&mut self.ops, UnaryMathOp::Limexp) {
@@ -2283,17 +2283,375 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_ddx_call(&mut self, args: &[ExprId]) -> JitResult<()> {
-        let [expr, _probe] = args else {
+        let [expr, probe] = args else {
             return Err(self.unsupported(format!(
                 "analog operator ddx expects two operands, found {}",
                 args.len()
             )));
         };
-        self.lower_ddx_operator(*expr)
+        self.lower_ddx_projection(*expr, *probe)
     }
 
-    fn lower_ddx_operator(&mut self, expr: ExprId) -> JitResult<()> {
-        self.lower(expr)
+    fn lower_ddx_projection(&mut self, expr: ExprId, probe: ExprId) -> JitResult<()> {
+        let (pos, neg) = self.ddx_probe_nodes(probe)?;
+        if let Some(pos) = pos {
+            self.lower_derivative(expr, pos)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+
+        if let Some(neg) = neg {
+            self.lower_derivative(expr, neg)?;
+            self.append_arithmetic("Sub")?;
+            self.push(NativeOp::Const(0.5))?;
+            self.append_arithmetic("Mul")?;
+        }
+
+        Ok(())
+    }
+
+    fn ddx_probe_nodes(&self, probe: ExprId) -> JitResult<(Option<NodeId>, Option<NodeId>)> {
+        let expression = self.expression(probe)?;
+        match &expression.kind {
+            HirExprKind::BranchAccess { access, pos, neg } if !is_flow_access(access) => Ok((
+                self.branch_endpoint(pos.as_str())?,
+                neg.as_deref()
+                    .map(|node| self.branch_endpoint(node))
+                    .transpose()?
+                    .flatten(),
+            )),
+            HirExprKind::NamedBranchAccess { access, name } if !is_flow_access(access) => {
+                let branch = self
+                    .mir
+                    .branches
+                    .iter()
+                    .find(|branch| branch.name.as_str() == name.as_str())
+                    .ok_or_else(|| self.unsupported(format!("unknown ddx probe branch {name}")))?;
+                Ok((branch.pos_node, branch.neg_node))
+            }
+            other => Err(self.unsupported(format!(
+                "ddx probe must be a voltage access, found {}",
+                expression_kind_name(other)
+            ))),
+        }
+    }
+
+    fn lower_derivative(&mut self, expr_id: ExprId, wrt: NodeId) -> JitResult<()> {
+        let expression = self.expression(expr_id)?;
+        match &expression.kind {
+            HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::ArrayLiteral { .. }
+            | HirExprKind::NoiseSource { .. } => self.push(NativeOp::Const(0.0)),
+            HirExprKind::Identifier { name } => self.lower_identifier_derivative(name.as_str()),
+            HirExprKind::BranchAccess { access, pos, neg } => self.lower_branch_access_derivative(
+                access.as_str(),
+                pos.as_str(),
+                neg.as_deref(),
+                wrt,
+            ),
+            HirExprKind::NamedBranchAccess { access, name } => {
+                self.lower_named_branch_access_derivative(access.as_str(), name.as_str(), wrt)
+            }
+            HirExprKind::Unary { op, operand } => {
+                self.lower_unary_derivative(op.as_str(), *operand, wrt)
+            }
+            HirExprKind::Binary { op, left, right } => {
+                self.lower_binary_derivative(op.as_str(), *left, *right, wrt)
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                self.lower(*condition)?;
+                self.lower_derivative(*then_expr, wrt)?;
+                self.lower_derivative(*else_expr, wrt)?;
+                self.append_ifelse()
+            }
+            HirExprKind::SystemFunction { name, .. } => {
+                if matches!(
+                    normalize_intrinsic_name(name).as_str(),
+                    "temperature"
+                        | "vt"
+                        | "thermal_vt"
+                        | "abstime"
+                        | "realtime"
+                        | "mfactor"
+                        | "simparam"
+                        | "param_given"
+                        | "port_connected"
+                        | "analysis"
+                ) {
+                    self.push(NativeOp::Const(0.0))
+                } else {
+                    Err(self.unsupported(format!("ddx derivative of system function '{name}'")))
+                }
+            }
+            HirExprKind::Call { name, args } => {
+                self.lower_call_derivative(name.as_str(), args.as_slice(), wrt)
+            }
+            HirExprKind::ArrayAccess { array, .. } => {
+                Err(self.unsupported(format!("ddx derivative through array access {array}")))
+            }
+            HirExprKind::AnalogOperator { op } => self.lower_analog_operator_derivative(op, wrt),
+            HirExprKind::Laplace { .. } | HirExprKind::Zi { .. } => Err(self.unsupported(format!(
+                "ddx derivative of {}",
+                expression_kind_name(&expression.kind)
+            ))),
+        }
+    }
+
+    fn lower_identifier_derivative(&mut self, name: &str) -> JitResult<()> {
+        if self
+            .mir
+            .parameters
+            .iter()
+            .any(|parameter| parameter.name.as_str() == name)
+        {
+            return self.push(NativeOp::Const(0.0));
+        }
+        if self
+            .limits
+            .variable_names
+            .iter()
+            .any(|variable| variable.as_str() == name)
+        {
+            return Err(self.unsupported(format!("ddx derivative through variable {name}")));
+        }
+        Err(self.unsupported(format!("ddx derivative of identifier {name}")))
+    }
+
+    fn lower_branch_access_derivative(
+        &mut self,
+        access: &str,
+        pos: &str,
+        neg: Option<&str>,
+        wrt: NodeId,
+    ) -> JitResult<()> {
+        if is_flow_access(access) {
+            return self.push(NativeOp::Const(0.0));
+        }
+        let pos = self.branch_endpoint(pos)?;
+        let neg = neg
+            .map(|node| self.branch_endpoint(node))
+            .transpose()?
+            .flatten();
+        self.push(NativeOp::Const(branch_voltage_derivative(pos, neg, wrt)))
+    }
+
+    fn lower_named_branch_access_derivative(
+        &mut self,
+        access: &str,
+        name: &str,
+        wrt: NodeId,
+    ) -> JitResult<()> {
+        if is_flow_access(access) {
+            return self.push(NativeOp::Const(0.0));
+        }
+        let branch = self
+            .mir
+            .branches
+            .iter()
+            .find(|branch| branch.name.as_str() == name)
+            .ok_or_else(|| self.unsupported(format!("unknown branch access {name}")))?;
+        self.push(NativeOp::Const(branch_voltage_derivative(
+            branch.pos_node,
+            branch.neg_node,
+            wrt,
+        )))
+    }
+
+    fn lower_unary_derivative(&mut self, op: &str, operand: ExprId, wrt: NodeId) -> JitResult<()> {
+        match op {
+            "Pos" => self.lower_derivative(operand, wrt),
+            "Neg" => {
+                self.lower_derivative(operand, wrt)?;
+                if lower_constant_neg(&mut self.ops) {
+                    Ok(())
+                } else {
+                    self.append_unary(NativeOp::Neg)
+                }
+            }
+            "Not" | "BitNot" => self.push(NativeOp::Const(0.0)),
+            _ => Err(self.unsupported(format!("ddx derivative of unary operator {op}"))),
+        }
+    }
+
+    fn lower_binary_derivative(
+        &mut self,
+        op: &str,
+        left: ExprId,
+        right: ExprId,
+        wrt: NodeId,
+    ) -> JitResult<()> {
+        match op {
+            "Add" | "Sub" => {
+                self.lower_derivative(left, wrt)?;
+                self.lower_derivative(right, wrt)?;
+                self.append_arithmetic(op)
+            }
+            "Mul" => {
+                self.lower_derivative(left, wrt)?;
+                self.lower(right)?;
+                self.append_arithmetic("Mul")?;
+                self.lower(left)?;
+                self.lower_derivative(right, wrt)?;
+                self.append_arithmetic("Mul")?;
+                self.append_arithmetic("Add")
+            }
+            "Div" => {
+                self.lower_derivative(left, wrt)?;
+                self.lower(right)?;
+                self.append_arithmetic("Mul")?;
+                self.lower(left)?;
+                self.lower_derivative(right, wrt)?;
+                self.append_arithmetic("Mul")?;
+                self.append_arithmetic("Sub")?;
+                self.lower(right)?;
+                self.lower(right)?;
+                self.append_arithmetic("Mul")?;
+                self.append_arithmetic("Div")
+            }
+            "Pow" => self.lower_pow_derivative(left, right, wrt),
+            "Mod" | "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
+            | "BitXor" | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
+            _ => Err(self.unsupported(format!("ddx derivative of binary operator {op}"))),
+        }
+    }
+
+    fn lower_pow_derivative(&mut self, left: ExprId, right: ExprId, wrt: NodeId) -> JitResult<()> {
+        let exponent = self
+            .constant_number(right)
+            .ok_or_else(|| self.unsupported("ddx derivative of non-constant power exponent"))?;
+        self.push(NativeOp::Const(exponent))?;
+        self.lower(left)?;
+        self.push(NativeOp::Const(exponent - 1.0))?;
+        self.append_binary_math_op(BinaryMathOp::Pow)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_derivative(left, wrt)?;
+        self.append_arithmetic("Mul")
+    }
+
+    fn lower_call_derivative(&mut self, name: &str, args: &[ExprId], wrt: NodeId) -> JitResult<()> {
+        let normalized = normalize_intrinsic_name(name);
+        match normalized.as_str() {
+            "ddx" => Err(self.unsupported("nested ddx derivative")),
+            "abs" | "fabs" => {
+                self.require_intrinsic_arity(name, args, 1)?;
+                self.lower(args[0])?;
+                self.push(NativeOp::Const(0.0))?;
+                self.append_compare("Ge")?;
+                self.push(NativeOp::Const(1.0))?;
+                self.push(NativeOp::Const(-1.0))?;
+                self.append_ifelse()?;
+                self.lower_derivative(args[0], wrt)?;
+                self.append_arithmetic("Mul")
+            }
+            "sqrt" => {
+                self.require_intrinsic_arity(name, args, 1)?;
+                self.push(NativeOp::Const(0.5))?;
+                self.lower(args[0])?;
+                self.append_unary(NativeOp::Sqrt)?;
+                self.append_arithmetic("Div")?;
+                self.lower_derivative(args[0], wrt)?;
+                self.append_arithmetic("Mul")
+            }
+            "exp" => self.lower_unary_chain_derivative(name, args, wrt, UnaryMathOp::Exp),
+            "ln" | "log" => {
+                self.require_intrinsic_arity(name, args, 1)?;
+                self.lower_derivative(args[0], wrt)?;
+                self.lower(args[0])?;
+                self.append_arithmetic("Div")
+            }
+            "sin" => {
+                self.require_intrinsic_arity(name, args, 1)?;
+                self.lower(args[0])?;
+                self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cos))?;
+                self.lower_derivative(args[0], wrt)?;
+                self.append_arithmetic("Mul")
+            }
+            "cos" => {
+                self.require_intrinsic_arity(name, args, 1)?;
+                self.lower(args[0])?;
+                self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Sin))?;
+                self.append_unary(NativeOp::Neg)?;
+                self.lower_derivative(args[0], wrt)?;
+                self.append_arithmetic("Mul")
+            }
+            "limexp" => {
+                self.require_intrinsic_arity(name, args, 1)?;
+                self.lower(args[0])?;
+                self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Limexp))?;
+                self.lower_derivative(args[0], wrt)?;
+                self.append_arithmetic("Mul")
+            }
+            "pow" => {
+                self.require_intrinsic_arity(name, args, 2)?;
+                self.lower_pow_derivative(args[0], args[1], wrt)
+            }
+            "min" | "max" => {
+                self.require_intrinsic_arity(name, args, 2)?;
+                self.lower(args[0])?;
+                self.lower(args[1])?;
+                self.append_compare(if normalized == "min" { "Le" } else { "Ge" })?;
+                self.lower_derivative(args[0], wrt)?;
+                self.lower_derivative(args[1], wrt)?;
+                self.append_ifelse()
+            }
+            "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
+            | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
+            | "flicker_noise" => self.push(NativeOp::Const(0.0)),
+            _ => Err(self.unsupported(format!("ddx derivative of intrinsic function '{name}'"))),
+        }
+    }
+
+    fn lower_unary_chain_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: NodeId,
+        op: UnaryMathOp,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.lower(args[0])?;
+        self.append_unary(NativeOp::UnaryMath(op))?;
+        self.lower_derivative(args[0], wrt)?;
+        self.append_arithmetic("Mul")
+    }
+
+    fn lower_analog_operator_derivative(
+        &mut self,
+        op: &HirAnalogOperator,
+        wrt: NodeId,
+    ) -> JitResult<()> {
+        match op {
+            HirAnalogOperator::Limexp { expr } => {
+                self.lower(*expr)?;
+                self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Limexp))?;
+                self.lower_derivative(*expr, wrt)?;
+                self.append_arithmetic("Mul")
+            }
+            HirAnalogOperator::Ddx { .. } => Err(self.unsupported("nested ddx derivative")),
+            HirAnalogOperator::Ddt { .. }
+            | HirAnalogOperator::Idt { .. }
+            | HirAnalogOperator::IdtMod { .. }
+            | HirAnalogOperator::Absdelay { .. }
+            | HirAnalogOperator::Transition { .. }
+            | HirAnalogOperator::Slew { .. }
+            | HirAnalogOperator::LastCrossing { .. } => Err(self.unsupported(format!(
+                "ddx derivative of analog operator {}",
+                analog_operator_name(op)
+            ))),
+        }
+    }
+
+    fn constant_number(&self, expr_id: ExprId) -> Option<f64> {
+        let expression = self.expression(expr_id).ok()?;
+        match &expression.kind {
+            HirExprKind::Number { value, .. } => Some(*value),
+            _ => None,
+        }
     }
 
     fn lower_limit_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
@@ -4504,6 +4862,17 @@ fn current_pair_index(
             ),
         )
     })
+}
+
+fn branch_voltage_derivative(pos: Option<NodeId>, neg: Option<NodeId>, wrt: NodeId) -> f64 {
+    let mut value = 0.0;
+    if pos == Some(wrt) {
+        value += 1.0;
+    }
+    if neg == Some(wrt) {
+        value -= 1.0;
+    }
+    value
 }
 
 fn format_current_pair(pos: usize, neg: usize) -> String {
