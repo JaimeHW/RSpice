@@ -1929,6 +1929,9 @@ impl NativeProgram {
                         depth,
                         1,
                     )?;
+                    if lower_constant_logical_not(&mut ops) {
+                        continue;
+                    }
                     ops.push(NativeOp::Logical(LogicalOp::Not));
                 }
                 Instruction::IfElse => {
@@ -3271,7 +3274,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.append_unary(NativeOp::Neg)
                 }
             }
-            "Not" => self.append_unary(NativeOp::Logical(LogicalOp::Not)),
+            "Not" => {
+                if lower_constant_logical_not(&mut self.ops) {
+                    Ok(())
+                } else {
+                    self.append_unary(NativeOp::Logical(LogicalOp::Not))
+                }
+            }
             "BitNot" => {
                 self.push(NativeOp::Const(-1.0))?;
                 self.append_integer_binary("BitXor")
@@ -4124,6 +4133,18 @@ fn lower_constant_lhs_logical(ops: &mut Vec<NativeOp>, op: LogicalOp) -> bool {
     };
     ops.remove(lhs_index);
     ops.push(NativeOp::LogicalConst(op, constant_truthy(value)));
+    true
+}
+
+fn lower_constant_logical_not(ops: &mut Vec<NativeOp>) -> bool {
+    let Some(NativeOp::Const(value)) = ops.last_mut() else {
+        return false;
+    };
+    *value = if value.abs() < LOGICAL_EPSILON {
+        1.0
+    } else {
+        0.0
+    };
     true
 }
 
@@ -6269,6 +6290,39 @@ endmodule
                 1,
                 "{case} should only need the folded literal"
             );
+            assert_eq!(
+                lowered.ops(),
+                &[NativeOp::Const(expected)],
+                "{case} should fold to an exact boolean literal"
+            );
+        }
+    }
+
+    #[test]
+    fn folds_constant_logical_not_to_exact_literal() {
+        let cases = [
+            ("positive-true", 2.0e-15, 0.0),
+            ("negative-true", -2.0e-15, 0.0),
+            ("positive-at-epsilon", 1.0e-15, 0.0),
+            ("negative-at-epsilon", -1.0e-15, 0.0),
+            ("zero", 0.0, 1.0),
+            ("unordered", f64::NAN, 0.0),
+        ];
+
+        for (case, value, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![Instruction::PushConst(value), Instruction::Not],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-not",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant logical not folds to a literal");
+
+            assert_eq!(lowered.max_stack_depth(), 1, "{case}");
             assert_eq!(
                 lowered.ops(),
                 &[NativeOp::Const(expected)],
