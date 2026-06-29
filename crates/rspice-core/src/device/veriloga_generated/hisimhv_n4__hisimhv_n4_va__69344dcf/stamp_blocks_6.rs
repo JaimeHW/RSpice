@@ -2419,7 +2419,7 @@ impl Instance {
             s.store_square(338, 319);
             s.store_scaled_mul(339, 317, 319, 42.0);
             s.store_add_scaled_inputs3_indices(339, 339, 1.0, 337, 4.0, 338, 4.0);
-            s.store_add_ad_rhs(339, 339, A::mul3_scaled_output(s.ad_value(322), s.ad_value(127), A::add(s.ad_value(317), s.ad_value(319)), 20.0));
+            s.store_add_product3_rhs_mixed_iia(339, 339, 322, 127, A::add(s.ad_value(317), s.ad_value(319)), 20.0);
             s.store_square(344, 336);
             s.store_square(344, 344);
             s.store_div_ad_rhs(323, 339, A::mul(s.ad_value(344), s.ad_value(336)));

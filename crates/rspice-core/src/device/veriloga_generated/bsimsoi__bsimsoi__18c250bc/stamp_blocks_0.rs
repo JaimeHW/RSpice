@@ -5841,7 +5841,7 @@ impl Instance {
         }
 
         if ((s.b[1358] && s.b[1359]) && (!s.b[1360])) {
-            s.store_add_ad_rhs(843, 885, A::mul3(s.ad_value(267), s.ad_value(398), s.ad_value(933)));
+            s.store_add_product3_rhs_indices(843, 885, 267, 398, 933, 1.0);
             s.store_mul(908, 968, 843);
         }
 

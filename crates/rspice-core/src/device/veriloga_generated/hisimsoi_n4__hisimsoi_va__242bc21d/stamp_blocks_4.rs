@@ -624,7 +624,7 @@ impl Instance {
             s.store_square(1738, 296);
             s.store_scaled_mul(1739, 294, 296, 42.0);
             s.store_add_scaled_inputs3_indices(1739, 1739, 1.0, 1737, 4.0, 1738, 4.0);
-            s.store_add_ad_rhs(1739, 1739, A::mul3_scaled_output(s.ad_value(298), s.ad_value(192), A::add(s.ad_value(294), s.ad_value(296)), 20.0));
+            s.store_add_product3_rhs_mixed_iia(1739, 1739, 298, 192, A::add(s.ad_value(294), s.ad_value(296)), 20.0);
             s.store_square(1740, 1736);
             s.store_square(1732, 1740);
             s.store_div_ad_rhs(299, 1739, A::mul(s.ad_value(1732), s.ad_value(1736)));

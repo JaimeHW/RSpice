@@ -5121,7 +5121,7 @@ impl Instance {
     ) {
         if s.b[2503] {
             s.store_square(2264, 2263);
-            s.store_add_ad_rhs(2265, 1887, A::mul3_scaled_output(s.ad_value(1879), s.ad_value(1877), A::add(A::offset(A::mul_scaled_output(s.ad_value(2263), s.ad_value(1889), 0.3333333333333333), (-1.0)), s.ad_value(1889)), 0.5));
+            s.store_add_product3_rhs_mixed_iia(2265, 1887, 1879, 1877, A::add(A::offset(A::mul_scaled_output(s.ad_value(2263), s.ad_value(1889), 0.3333333333333333), (-1.0)), s.ad_value(1889)), 0.5);
             s.store_scaled_mul(1929, 1880, 1877, 0.16666666666666666);
         }
 

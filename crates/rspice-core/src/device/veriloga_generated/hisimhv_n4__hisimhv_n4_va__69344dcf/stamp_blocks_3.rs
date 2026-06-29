@@ -3945,7 +3945,7 @@ impl Instance {
             s.store_offset_scaled(338, 1435, p.p285, 1.0);
             s.store_scalar(334, s.v[673]);
             s.store_add_scaled_inputs3_indices(339, 2085, 1.0, 340, 1.0, 1434, -1.0);
-            s.store_add_ad_rhs(338, 338, A::mul3(s.ad_value(1435), s.ad_value(334), s.ad_value(339)));
+            s.store_add_product3_rhs_indices(338, 338, 1435, 334, 339, 1.0);
             s.store_mul(340, 343, 338);
             s.copy_ad(343, 340);
         }
@@ -3972,7 +3972,7 @@ impl Instance {
 
         if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2422]) {
             s.store_mul_add_rhs(249, 94, 343, 342);
-            s.store_add_ad_rhs(135, 135, A::mul3(s.ad_value(115), s.ad_value(249), s.ad_value(253)));
+            s.store_add_product3_rhs_indices(135, 135, 115, 249, 253, 1.0);
         }
 
         if (s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) {
@@ -4096,7 +4096,7 @@ impl Instance {
         }
 
         if ((!s.b[1439]) && s.b[2426]) {
-            s.store_add_ad_rhs(89, 85, A::mul3_scaled_output(s.ad_value(213), s.ad_value(154), A::sub_from_scalar(1.0, A::sqrt(s.ad_value(332))), 0.5));
+            s.store_add_product3_rhs_mixed_iia(89, 85, 213, 154, A::sub_from_scalar(1.0, A::sqrt(s.ad_value(332))), 0.5);
         }
 
         s.b[2427] = (s.v[77] == 0.0);
@@ -5640,7 +5640,7 @@ impl Instance {
             s.store_offset_scaled(338, 1435, p.p285, 1.0);
             s.store_scalar(334, s.v[673]);
             s.store_add_scaled_inputs3_indices(339, 87, 1.0, 340, 1.0, 1434, -1.0);
-            s.store_add_ad_rhs(338, 338, A::mul3(s.ad_value(1435), s.ad_value(334), s.ad_value(339)));
+            s.store_add_product3_rhs_indices(338, 338, 1435, 334, 339, 1.0);
             s.store_mul(340, 343, 338);
             s.copy_ad(343, 340);
         }
@@ -5738,7 +5738,7 @@ impl Instance {
         if ((((!s.b[1439]) && s.b[2426]) && s.b[2495]) && s.b[2498]) {
             s.store_scalar(378, (((((20.0 + 1.0)) as f64).powf((p.p297 - 1.0)) * ((20.0 + 1.0) - ((0.5 * p.p297) * 20.0))) * ((1e-12) as f64).powf(p.p297)));
             s.store_scalar(379, ((((0.5 * p.p297) * (((20.0 + 1.0)) as f64).powf((p.p297 - 1.0))) / 20.0) * ((1e-12) as f64).powf((p.p297 - 2.0))));
-            s.store_add_ad_rhs(335, 378, A::mul3(s.ad_value(379), s.ad_value(369), s.ad_value(369)));
+            s.store_add_product3_rhs_indices(335, 378, 379, 369, 369, 1.0);
         }
 
         if ((((!s.b[1439]) && s.b[2426]) && s.b[2495]) && (!s.b[2498])) {

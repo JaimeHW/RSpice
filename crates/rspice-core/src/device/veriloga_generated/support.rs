@@ -14170,6 +14170,156 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_add_product3_rhs_mixed_aai(&mut self, index: usize, source: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = left.value;
+        let middle_value = middle.value;
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left.dn[axis] * middle_right_value + middle.dn[axis] * left_right_value + right_dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left.db[axis] * middle_right_value + middle.db[axis] * left_right_value + right_db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_mixed_aia(&mut self, index: usize, source: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = left.value;
+        let middle_value = self.v[middle];
+        let right_value = right.value;
+        let middle_dn = self.dn[middle];
+        let middle_db = self.db[middle];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left.dn[axis] * middle_right_value + middle_dn[axis] * left_right_value + right.dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left.db[axis] * middle_right_value + middle_db[axis] * left_right_value + right.db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_mixed_aii(&mut self, index: usize, source: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: usize, right: usize, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = left.value;
+        let middle_value = self.v[middle];
+        let right_value = self.v[right];
+        let middle_dn = self.dn[middle];
+        let middle_db = self.db[middle];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left.dn[axis] * middle_right_value + middle_dn[axis] * left_right_value + right_dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left.db[axis] * middle_right_value + middle_db[axis] * left_right_value + right_db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_mixed_iaa(&mut self, index: usize, source: usize, left: usize, middle: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = self.v[left];
+        let middle_value = middle.value;
+        let right_value = right.value;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left_dn[axis] * middle_right_value + middle.dn[axis] * left_right_value + right.dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left_db[axis] * middle_right_value + middle.db[axis] * left_right_value + right.db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_mixed_iai(&mut self, index: usize, source: usize, left: usize, middle: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = self.v[left];
+        let middle_value = middle.value;
+        let right_value = self.v[right];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left_dn[axis] * middle_right_value + middle.dn[axis] * left_right_value + right_dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left_db[axis] * middle_right_value + middle.db[axis] * left_right_value + right_db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_mixed_iia(&mut self, index: usize, source: usize, left: usize, middle: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = self.v[left];
+        let middle_value = self.v[middle];
+        let right_value = right.value;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let middle_dn = self.dn[middle];
+        let middle_db = self.db[middle];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left_dn[axis] * middle_right_value + middle_dn[axis] * left_right_value + right.dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left_db[axis] * middle_right_value + middle_db[axis] * left_right_value + right.db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_indices(&mut self, index: usize, source: usize, left: usize, middle: usize, right: usize, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = self.v[left];
+        let middle_value = self.v[middle];
+        let right_value = self.v[right];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let middle_dn = self.dn[middle];
+        let middle_db = self.db[middle];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left_dn[axis] * middle_right_value + middle_dn[axis] * left_right_value + right_dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left_db[axis] * middle_right_value + middle_db[axis] * left_right_value + right_db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_add_scaled_offset_product_lhs_product_mixed_aaaai(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, offset_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, offset_product_left_offset: f64, offset_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, offset_product_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
         let value_term = value.value * value_scale;
         let offset_product_left_offset_value = offset_product_left.value + offset_product_left_offset;
@@ -29341,6 +29491,156 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = factor_value * product_value;
         for axis in 0..NODE_COUNT { let product_derivative = (self.dn[left][axis] * middle_right_value + self.dn[middle][axis] * left_right_value + self.dn[right][axis] * left_middle_value) * scale; self.dn[index][axis] = self.dn[factor][axis] * product_value + factor_value * product_derivative; }
         for axis in 0..BRANCH_COUNT { let product_derivative = (self.db[left][axis] * middle_right_value + self.db[middle][axis] * left_right_value + self.db[right][axis] * left_middle_value) * scale; self.db[index][axis] = self.db[factor][axis] * product_value + factor_value * product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_mixed_aai(&mut self, index: usize, source: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = left.value;
+        let middle_value = middle.value;
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left.dn[axis] * middle_right_value + middle.dn[axis] * left_right_value + right_dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left.db[axis] * middle_right_value + middle.db[axis] * left_right_value + right_db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_mixed_aia(&mut self, index: usize, source: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = left.value;
+        let middle_value = self.v[middle];
+        let right_value = right.value;
+        let middle_dn = self.dn[middle];
+        let middle_db = self.db[middle];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left.dn[axis] * middle_right_value + middle_dn[axis] * left_right_value + right.dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left.db[axis] * middle_right_value + middle_db[axis] * left_right_value + right.db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_mixed_aii(&mut self, index: usize, source: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: usize, right: usize, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = left.value;
+        let middle_value = self.v[middle];
+        let right_value = self.v[right];
+        let middle_dn = self.dn[middle];
+        let middle_db = self.db[middle];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left.dn[axis] * middle_right_value + middle_dn[axis] * left_right_value + right_dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left.db[axis] * middle_right_value + middle_db[axis] * left_right_value + right_db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_mixed_iaa(&mut self, index: usize, source: usize, left: usize, middle: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = self.v[left];
+        let middle_value = middle.value;
+        let right_value = right.value;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left_dn[axis] * middle_right_value + middle.dn[axis] * left_right_value + right.dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left_db[axis] * middle_right_value + middle.db[axis] * left_right_value + right.db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_mixed_iai(&mut self, index: usize, source: usize, left: usize, middle: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = self.v[left];
+        let middle_value = middle.value;
+        let right_value = self.v[right];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left_dn[axis] * middle_right_value + middle.dn[axis] * left_right_value + right_dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left_db[axis] * middle_right_value + middle.db[axis] * left_right_value + right_db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_mixed_iia(&mut self, index: usize, source: usize, left: usize, middle: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = self.v[left];
+        let middle_value = self.v[middle];
+        let right_value = right.value;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let middle_dn = self.dn[middle];
+        let middle_db = self.db[middle];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left_dn[axis] * middle_right_value + middle_dn[axis] * left_right_value + right.dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left_db[axis] * middle_right_value + middle_db[axis] * left_right_value + right.db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_product3_rhs_indices(&mut self, index: usize, source: usize, left: usize, middle: usize, right: usize, scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let left_value = self.v[left];
+        let middle_value = self.v[middle];
+        let right_value = self.v[right];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let middle_dn = self.dn[middle];
+        let middle_db = self.db[middle];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let product_value = left_middle_value * right_value * scale;
+        self.v[index] = source_value + product_value;
+        for axis in 0..NODE_COUNT { let product_derivative = (left_dn[axis] * middle_right_value + middle_dn[axis] * left_right_value + right_dn[axis] * left_middle_value) * scale; self.dn[index][axis] = source_dn[axis] + product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = (left_db[axis] * middle_right_value + middle_db[axis] * left_right_value + right_db[axis] * left_middle_value) * scale; self.db[index][axis] = source_db[axis] + product_derivative; }
     }
 
 

@@ -1971,7 +1971,7 @@ impl Instance {
 
         if s.b[2902] {
             s.store_sub_ad_rhs(1983, 1934, A::mul3_scaled_output(s.ad_value(831), s.ad_value(1893), s.ad_value(1932), 0.5));
-            s.store_add_ad_rhs(1984, 1934, A::mul3_scaled_output(s.ad_value(831), s.ad_value(1893), s.ad_value(1932), 0.5));
+            s.store_add_product3_rhs_indices(1984, 1934, 831, 1893, 1932, 0.5);
             s.store_scalar(1978, 0.0);
             s.store_scalar(1979, 0.0);
         }
