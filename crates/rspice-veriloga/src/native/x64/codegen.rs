@@ -1020,7 +1020,6 @@ impl FunctionCompiler {
     }
 
     fn emit_runtime_loop_limit_error_call(&mut self) {
-        debug_assert!(self.uses_helper_calls);
         self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
         let helper: VoidHelper = rspice_native_loop_limit_error;
         self.encoder
@@ -2208,7 +2207,9 @@ fn assignment_uses_helper_calls(assignment: &NativeAssignment) -> bool {
                 || program_uses_helper_calls(index)
                 || program_uses_helper_calls(value)
         }
-        NativeAssignment::Loop { .. } => true,
+        NativeAssignment::Loop { condition, body } => {
+            program_uses_helper_calls(condition) || body.iter().any(assignment_uses_helper_calls)
+        }
     }
 }
 
@@ -3574,6 +3575,59 @@ mod tests {
 
         assert_eq!(vars, [2.0, 2.0, 22.0, 10.0, 11.0]);
         assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
+    fn generated_assignment_pass_helper_free_loop_omits_saved_arg_prologue_and_hard_fails_limit() {
+        let assignments = [
+            NativeAssignment::Loop {
+                condition: native_program(
+                    EntryKind::Assignment,
+                    vec![Instruction::PushConst(1.0)],
+                    0,
+                ),
+                body: Vec::new(),
+            },
+            NativeAssignment::Direct {
+                var_index: 0,
+                program: native_program(
+                    EntryKind::Assignment,
+                    vec![Instruction::PushConst(99.0)],
+                    0,
+                ),
+            },
+        ];
+        assert!(
+            !assignment_uses_helper_calls(&assignments[0]),
+            "helper-free runtime loops should not force the helper-call prologue"
+        );
+        let bytes = compile_assignment_pass_function(&assignments)
+            .expect("compile helper-free infinite loop assignment pass");
+        assert!(
+            !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "helper-free runtime loops should not pay the saved-argument prologue"
+        );
+        let memory =
+            ExecutableMemory::allocate(&bytes).expect("allocate infinite loop assignment pass");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *mut f64) = unsafe { std::mem::transmute(entry) };
+
+        let mut vars = [0.0_f64];
+        let ctx = eval_context(&[], &[], &[], &[]);
+        clear_native_runtime_error();
+
+        f(&ctx, vars.as_mut_ptr());
+
+        assert_eq!(vars, [0.0]);
+        let error = take_native_runtime_error().expect("loop limit must hard-fail");
+        assert!(
+            error.contains("native runtime loop iteration limit exceeded"),
+            "error must preserve loop-limit diagnostic, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
     }
 
     #[test]
