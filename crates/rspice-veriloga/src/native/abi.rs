@@ -808,17 +808,13 @@ pub unsafe extern "C" fn rspice_dynamic_variable_load_native(
         return 0.0;
     };
 
-    let index = raw_index.round() as i64;
-    let offset = index - lower;
-    if offset < 0 || offset >= len_i64 {
-        let upper = lower.saturating_add(len_i64).saturating_sub(1);
-        set_native_runtime_error(format!(
-            "native dynamic array read: array index {index} outside declared bounds [{lower}:{upper}]; no interpreter fallback"
-        ));
+    let Some(offset) =
+        dynamic_variable_offset(raw_index, len_i64, lower, "native dynamic array read")
+    else {
         return 0.0;
-    }
+    };
 
-    unsafe { *base_ptr.add(offset as usize) }
+    unsafe { *base_ptr.add(offset) }
 }
 
 /// External helper function for native x64 runtime-indexed variable writes.
@@ -855,17 +851,64 @@ pub unsafe extern "C" fn rspice_dynamic_variable_slot_native(
         return std::ptr::null_mut();
     };
 
-    let index = raw_index.round() as i64;
-    let offset = index - lower;
-    if offset < 0 || offset >= len_i64 {
-        let upper = lower.saturating_add(len_i64).saturating_sub(1);
-        set_native_runtime_error(format!(
-            "native indexed assignment: array index {index} outside declared bounds [{lower}:{upper}]; no interpreter fallback"
-        ));
+    let Some(offset) =
+        dynamic_variable_offset(raw_index, len_i64, lower, "native indexed assignment")
+    else {
         return std::ptr::null_mut();
+    };
+
+    unsafe { base_ptr.add(offset) }
+}
+
+fn dynamic_variable_offset(
+    raw_index: f64,
+    len_i64: i64,
+    lower: i64,
+    context: &str,
+) -> Option<usize> {
+    let Some(index) = rounded_i64_without_saturation(raw_index) else {
+        set_dynamic_variable_bounds_error(context, raw_index, lower, len_i64);
+        return None;
+    };
+
+    let Some(offset) = index.checked_sub(lower) else {
+        set_dynamic_variable_bounds_error(context, index, lower, len_i64);
+        return None;
+    };
+
+    if offset < 0 || offset >= len_i64 {
+        set_dynamic_variable_bounds_error(context, index, lower, len_i64);
+        return None;
     }
 
-    unsafe { base_ptr.add(offset as usize) }
+    usize::try_from(offset).ok()
+}
+
+fn rounded_i64_without_saturation(value: f64) -> Option<i64> {
+    const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
+
+    if !value.is_finite() {
+        return None;
+    }
+
+    let rounded = value.round();
+    if rounded < i64::MIN as f64 || rounded >= I64_MAX_EXCLUSIVE_AS_F64 {
+        return None;
+    }
+
+    Some(rounded as i64)
+}
+
+fn set_dynamic_variable_bounds_error(
+    context: &str,
+    index: impl std::fmt::Display,
+    lower: i64,
+    len_i64: i64,
+) {
+    let upper = lower.saturating_add(len_i64).saturating_sub(1);
+    set_native_runtime_error(format!(
+        "{context}: array index {index} outside declared bounds [{lower}:{upper}]; no interpreter fallback"
+    ));
 }
 
 /// External helper function for PushCurrent terminal-pair lookup.
@@ -1518,6 +1561,34 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_variable_helper_rejects_unsafe_indexes_without_aliasing_storage() {
+        for (name, raw_index, lower) in [
+            ("nan", f64::NAN, 0),
+            ("infinity", f64::INFINITY, 0),
+            ("huge finite", 1.0e300, i64::MAX),
+        ] {
+            let values = [2.0];
+            clear_native_runtime_error();
+
+            let loaded = unsafe {
+                rspice_dynamic_variable_load_native(raw_index, values.as_ptr(), 1, lower)
+            };
+
+            assert_eq!(loaded.to_bits(), 0.0_f64.to_bits(), "{name}");
+            let error = take_native_runtime_error()
+                .unwrap_or_else(|| panic!("{name}: unsafe native array read must hard-fail"));
+            assert!(
+                error.contains("outside declared bounds"),
+                "{name}: error must preserve array bounds diagnostic, got: {error}"
+            );
+            assert!(
+                error.contains("no interpreter fallback"),
+                "{name}: error must preserve the native hard-fail contract, got: {error}"
+            );
+        }
+    }
+
+    #[test]
     fn dynamic_variable_slot_helper_returns_rounded_slot_and_reports_bounds_errors() {
         let mut values = [2.0, 4.0, 8.0];
         clear_native_runtime_error();
@@ -1544,6 +1615,35 @@ mod tests {
             error.contains("no interpreter fallback"),
             "error must preserve the native hard-fail contract, got: {error}"
         );
+    }
+
+    #[test]
+    fn dynamic_variable_slot_helper_rejects_unsafe_indexes_without_aliasing_storage() {
+        for (name, raw_index, lower) in [
+            ("nan", f64::NAN, 0),
+            ("infinity", f64::INFINITY, 0),
+            ("huge finite", 1.0e300, i64::MAX),
+        ] {
+            let mut values = [2.0];
+            clear_native_runtime_error();
+
+            let slot = unsafe {
+                rspice_dynamic_variable_slot_native(raw_index, values.as_mut_ptr(), 1, lower)
+            };
+
+            assert!(slot.is_null(), "{name}");
+            assert_eq!(values[0].to_bits(), 2.0_f64.to_bits(), "{name}");
+            let error = take_native_runtime_error()
+                .unwrap_or_else(|| panic!("{name}: unsafe native indexed write must hard-fail"));
+            assert!(
+                error.contains("outside declared bounds"),
+                "{name}: error must preserve array bounds diagnostic, got: {error}"
+            );
+            assert!(
+                error.contains("no interpreter fallback"),
+                "{name}: error must preserve the native hard-fail contract, got: {error}"
+            );
+        }
     }
 
     fn empty_eval_context() -> EvalContext {
