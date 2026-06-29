@@ -7,7 +7,7 @@
 
 use rspice_veriloga::codegen::Instruction;
 use rspice_veriloga::device::VerilogADevice;
-use rspice_veriloga::native::compile_native;
+use rspice_veriloga::native::{compile_native, compile_native_with_canonical_ir};
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::HashMap;
 
@@ -1020,6 +1020,31 @@ fn native_compile_accepts_simple_resistor_subset() {
             .map(|stamp| stamp.jacobian_programs.len())
             .sum::<usize>()
     );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_compile_with_canonical_ir_accepts_simple_resistor_stamp_path() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_contract_res(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 2.0 from (0:inf);
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+
+    let native = compile_native_with_canonical_ir(&model, &artifact)
+        .expect("x64 native JIT must compile canonical stamp value path");
+
+    assert_eq!(native.native_stamp_count(), model.stamp_programs.len());
+    assert_eq!(native.plan_stats().stamp_value_entry_points, 1);
 }
 
 #[cfg(target_arch = "x86_64")]

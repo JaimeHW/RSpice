@@ -7,10 +7,26 @@ use super::expr::{
 use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel};
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
+use crate::canonical_ir::{CanonicalIrArtifact, EquationId, MirModel};
 use crate::codegen::{AssignmentStep, CompiledModel, StampIndex, StampProgram};
 use crate::native::x64::codegen::NativeAssignment;
 
 pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
+    compile_model_inner(model, None)
+}
+
+pub(crate) fn compile_model_with_canonical_ir(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<NativeModel> {
+    validate_canonical_artifact_for_model(model, artifact)?;
+    compile_model_inner(model, Some(&artifact.mir))
+}
+
+fn compile_model_inner(
+    model: &CompiledModel,
+    canonical_mir: Option<&MirModel>,
+) -> JitResult<NativeModel> {
     super::validate_native_coverage(model)?;
     let base_limits = NativeLoweringLimits::for_model(model);
 
@@ -43,7 +59,7 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
     let mut reactive_jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut available_current_pairs = Vec::new();
 
-    for stamp in &model.stamp_programs {
+    for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
         let static_condition = if let Some(condition) = &stamp.static_condition {
             let program = NativeProgram::from_bytecode(
                 model.name.clone(),
@@ -58,9 +74,10 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
         static_conditions.push(static_condition);
 
         let value_limits = base_limits.with_available_current_pairs(&available_current_pairs);
-        let program = NativeProgram::from_bytecode(
-            model.name.clone(),
-            EntryKind::StampValue,
+        let program = lower_stamp_value_program(
+            model,
+            canonical_mir,
+            stamp_index,
             &stamp.value_program,
             value_limits,
         )?;
@@ -141,6 +158,79 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
             jacobians: jacobian_current_dependencies,
             reactive_jacobians: reactive_jacobian_current_dependencies,
         },
+    )
+}
+
+fn validate_canonical_artifact_for_model(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<()> {
+    artifact
+        .validate()
+        .map_err(|diagnostics| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.message.clone())
+                .unwrap_or_else(|| "canonical artifact validation failed".into())
+                .into(),
+        })?;
+
+    if artifact.mir.module_name != model.name {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical module '{}' does not match compiled model '{}'",
+                artifact.mir.module_name, model.name
+            )
+            .into(),
+        });
+    }
+
+    if artifact.mir.equations.len() != model.stamp_programs.len() {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical equation count {} does not match stamp program count {}",
+                artifact.mir.equations.len(),
+                model.stamp_programs.len()
+            )
+            .into(),
+        });
+    }
+
+    Ok(())
+}
+
+fn lower_stamp_value_program(
+    model: &CompiledModel,
+    canonical_mir: Option<&MirModel>,
+    stamp_index: usize,
+    bytecode_program: &crate::codegen::BytecodeProgram,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<NativeProgram> {
+    if let Some(mir) = canonical_mir {
+        let equation_id = u32::try_from(stamp_index)
+            .map(EquationId::new)
+            .map_err(|_| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!("stamp index {stamp_index} exceeds canonical equation id range")
+                    .into(),
+            })?;
+        return NativeProgram::from_mir_equation(
+            model.name.clone(),
+            EntryKind::StampValue,
+            mir,
+            equation_id,
+            limits,
+        );
+    }
+
+    NativeProgram::from_bytecode(
+        model.name.clone(),
+        EntryKind::StampValue,
+        bytecode_program,
+        limits,
     )
 }
 
@@ -308,11 +398,74 @@ fn current_pair_overflow(model: &CompiledModel, pos: usize, neg: usize) -> JitEr
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
-    use super::lower_assignment_step;
+    use super::{compile_model_with_canonical_ir, lower_assignment_step};
     use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
+    use crate::native::EvalContext;
     use crate::native::expr::NativeOp;
     use crate::native::x64::codegen::NativeAssignment;
+    use crate::{CompilerOptions, VerilogACompiler};
     use smol_str::SmolStr;
+
+    #[test]
+    fn compile_model_with_canonical_ir_executes_mir_stamp_value() {
+        let source = r#"
+module native_canonical_res(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real r = 2.0;
+  analog begin
+    I(p, n) <+ V(p, n) / r;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical MIR stamp value compiles to native x64");
+
+        assert_eq!(native.native_stamp_count(), 1);
+        let params = [2.0_f64];
+        let voltages = [5.0_f64, 1.0_f64];
+        let ctx = eval_context(&params, &voltages);
+        assert_eq!(
+            native.run_stamp_value(0, &ctx, std::ptr::null()),
+            (voltages[0] - voltages[1]) / params[0]
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_rejects_unsupported_mir_stamp() {
+        let source = r#"
+module native_canonical_unsupported(p, n);
+  inout p, n;
+  electrical p, n;
+  real x;
+  analog begin
+    x = 1.0;
+    I(p, n) <+ x;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("unsupported canonical stamp must not fall back to bytecode");
+
+        assert!(
+            error
+                .to_string()
+                .contains("native JIT does not support canonical op expression identifier x"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn lower_assignment_step_folds_constant_indexed_write_to_direct_assignment() {
@@ -421,6 +574,46 @@ mod tests {
             laplace_filters: Vec::new(),
             zi_filters: Vec::new(),
             noise_sources: Vec::new(),
+        }
+    }
+
+    fn eval_context(params: &[f64], voltages: &[f64]) -> EvalContext {
+        EvalContext {
+            voltages: voltages.as_ptr(),
+            internal_voltages: std::ptr::null(),
+            params: params.as_ptr(),
+            branch_currents: std::ptr::null(),
+            branch_currents_len: 0,
+            currents: std::ptr::null(),
+            currents_len: 0,
+            num_terminals: voltages.len(),
+            port_connected: std::ptr::null(),
+            port_connected_len: 0,
+            temperature: 0.0,
+            time: 0.0,
+            timestep: 0.0,
+            state_prev: std::ptr::null(),
+            state_values: std::ptr::null_mut(),
+            state_initialized: std::ptr::null_mut(),
+            state_initialized_len: 0,
+            lookup_tables: std::ptr::null(),
+            lookup_tables_len: 0,
+            laplace_filters: std::ptr::null_mut(),
+            laplace_filters_len: 0,
+            param_given: std::ptr::null(),
+            branch_unknowns: std::ptr::null(),
+            analysis_type: 0,
+            multiplicity: 1.0,
+            zi_filters: std::ptr::null_mut(),
+            zi_filters_len: 0,
+            transition_filters: std::ptr::null_mut(),
+            transition_filters_len: 0,
+            slew_filters: std::ptr::null_mut(),
+            slew_filters_len: 0,
+            delay_buffers: std::ptr::null_mut(),
+            delay_buffers_len: 0,
+            cross_detectors: std::ptr::null_mut(),
+            cross_detectors_len: 0,
         }
     }
 }
