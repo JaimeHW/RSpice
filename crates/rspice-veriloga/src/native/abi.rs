@@ -152,7 +152,16 @@ pub unsafe extern "C" fn rspice_table_lookup_native(
     tables_len: usize,
     table_id: usize,
 ) -> f64 {
-    if tables_ptr.is_null() || table_id >= tables_len {
+    if tables_ptr.is_null() {
+        set_native_runtime_error(format!(
+            "native table lookup helper missing table storage for table {table_id}; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+    if table_id >= tables_len {
+        set_native_runtime_error(format!(
+            "native table lookup helper table {table_id} outside table length {tables_len}; no interpreter fallback"
+        ));
         return 0.0;
     }
 
@@ -171,7 +180,16 @@ pub unsafe extern "C" fn rspice_table_derivative_native(
     tables_len: usize,
     table_id: usize,
 ) -> f64 {
-    if tables_ptr.is_null() || table_id >= tables_len {
+    if tables_ptr.is_null() {
+        set_native_runtime_error(format!(
+            "native table derivative helper missing table storage for table {table_id}; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+    if table_id >= tables_len {
+        set_native_runtime_error(format!(
+            "native table derivative helper table {table_id} outside table length {tables_len}; no interpreter fallback"
+        ));
         return 0.0;
     }
 
@@ -979,9 +997,10 @@ mod tests {
         EvalContext, clear_native_runtime_error, rspice_absdelay_state_native,
         rspice_cross_state_native, rspice_dynamic_variable_load_native,
         rspice_dynamic_variable_slot_native, rspice_laplace_step_native, rspice_slew_state_native,
-        rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
-        take_native_runtime_error,
+        rspice_table_derivative_native, rspice_table_lookup_native, rspice_timer_state_native,
+        rspice_transition_state_native, rspice_zi_step_native, take_native_runtime_error,
     };
+    use crate::codegen::LookupTable;
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
     use std::mem::{align_of, offset_of, size_of};
 
@@ -1024,6 +1043,49 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, cross_detectors_len), 272);
         assert_eq!(size_of::<EvalContext>(), 280);
         assert_eq!(align_of::<EvalContext>(), 8);
+    }
+
+    #[test]
+    fn table_native_helpers_record_runtime_error_for_missing_storage() {
+        for (name, helper) in [
+            (
+                "lookup",
+                rspice_table_lookup_native
+                    as unsafe extern "C" fn(f64, *const LookupTable, usize, usize) -> f64,
+            ),
+            ("derivative", rspice_table_derivative_native),
+        ] {
+            clear_native_runtime_error();
+            let value = unsafe { helper(1.0, std::ptr::null(), 0, 0) };
+            assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{name}");
+            let error = take_native_runtime_error()
+                .unwrap_or_else(|| panic!("{name} missing table storage must hard-fail"));
+            assert!(error.contains("table"), "{name}: {error}");
+            assert!(error.contains("table storage"), "{name}: {error}");
+            assert!(error.contains("no interpreter fallback"), "{name}: {error}");
+        }
+    }
+
+    #[test]
+    fn table_native_helpers_record_runtime_error_for_out_of_range_table_id() {
+        let table = [LookupTable::from_data(vec![0.0, 1.0], vec![2.0, 4.0])];
+        for (name, helper) in [
+            (
+                "lookup",
+                rspice_table_lookup_native
+                    as unsafe extern "C" fn(f64, *const LookupTable, usize, usize) -> f64,
+            ),
+            ("derivative", rspice_table_derivative_native),
+        ] {
+            clear_native_runtime_error();
+            let value = unsafe { helper(1.0, table.as_ptr(), table.len(), 1) };
+            assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{name}");
+            let error = take_native_runtime_error()
+                .unwrap_or_else(|| panic!("{name} out-of-range table id must hard-fail"));
+            assert!(error.contains("table"), "{name}: {error}");
+            assert!(error.contains("outside table length"), "{name}: {error}");
+            assert!(error.contains("no interpreter fallback"), "{name}: {error}");
+        }
     }
 
     #[test]
