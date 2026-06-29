@@ -1394,6 +1394,21 @@ fn collect_canonical_state_expr_list(
 }
 
 impl NativeProgram {
+    #[cfg(test)]
+    pub(crate) fn from_ops_for_test(
+        ops: Vec<NativeOp>,
+        max_stack_depth: usize,
+        current_pair_dependencies: Vec<usize>,
+        prior_current_dependencies: Vec<usize>,
+    ) -> Self {
+        Self {
+            ops,
+            max_stack_depth,
+            current_pair_dependencies,
+            prior_current_dependencies,
+        }
+    }
+
     pub(crate) fn from_bytecode(
         model: impl Into<SmolStr>,
         entry_kind: EntryKind,

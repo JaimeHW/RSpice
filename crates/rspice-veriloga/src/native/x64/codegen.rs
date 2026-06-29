@@ -5,9 +5,10 @@ use crate::native::abi::{
     rspice_cross_state_native, rspice_dynamic_variable_load_native,
     rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
     rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10,
-    rspice_mod, rspice_native_integer_shift_count_error, rspice_native_limit_state_bounds_error,
-    rspice_native_limit_state_initialized_error, rspice_native_limit_state_values_error,
-    rspice_native_loop_limit_error, rspice_native_state_values_error, rspice_pow, rspice_sin,
+    rspice_mod, rspice_native_current_probe_error, rspice_native_integer_shift_count_error,
+    rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
+    rspice_native_limit_state_values_error, rspice_native_loop_limit_error,
+    rspice_native_prior_current_error, rspice_native_state_values_error, rspice_pow, rspice_sin,
     rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
     rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
     rspice_transition_state_native, rspice_zi_step_native,
@@ -21,7 +22,9 @@ const VOLTAGES_OFFSET: i32 = 0;
 const INTERNAL_VOLTAGES_OFFSET: i32 = 8;
 const PARAMS_OFFSET: i32 = 16;
 const BRANCH_CURRENTS_OFFSET: i32 = 24;
+const BRANCH_CURRENTS_LEN_OFFSET: i32 = 32;
 const CURRENTS_OFFSET: i32 = 40;
+const CURRENTS_LEN_OFFSET: i32 = 48;
 const PORT_CONNECTED_OFFSET: i32 = 64;
 const TEMPERATURE_OFFSET: i32 = 80;
 const TIME_OFFSET: i32 = 88;
@@ -205,19 +208,10 @@ impl FunctionCompiler {
                     self.emit_voltage_load(pos, neg)?;
                 }
                 NativeOp::LoadCurrent(pair_index) => {
-                    let dst = self.push_register()?;
-                    self.emit_context_pointer_load(BRANCH_CURRENTS_OFFSET);
-                    self.encoder
-                        .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(pair_index)?);
+                    self.emit_current_load(pair_index)?;
                 }
                 NativeOp::LoadPriorCurrent(current_index) => {
-                    let dst = self.push_register()?;
-                    self.emit_context_pointer_load(CURRENTS_OFFSET);
-                    self.encoder.movsd_xmm_m64_base_disp32(
-                        dst,
-                        Gpr::Rax,
-                        byte_disp(current_index)?,
-                    );
+                    self.emit_prior_current_load(current_index)?;
                 }
                 NativeOp::LoadInternalVoltage(index) => {
                     let dst = self.push_register()?;
@@ -1183,6 +1177,57 @@ impl FunctionCompiler {
         }
         self.encoder.cvtsi2sd_xmm_r64(left, Gpr::Rax);
         Ok(())
+    }
+
+    fn emit_current_load(&mut self, pair_index: usize) -> JitResult<()> {
+        self.emit_guarded_context_f64_slice_load(
+            BRANCH_CURRENTS_OFFSET,
+            BRANCH_CURRENTS_LEN_OFFSET,
+            pair_index,
+            rspice_native_current_probe_error,
+        )
+    }
+
+    fn emit_prior_current_load(&mut self, current_index: usize) -> JitResult<()> {
+        self.emit_guarded_context_f64_slice_load(
+            CURRENTS_OFFSET,
+            CURRENTS_LEN_OFFSET,
+            current_index,
+            rspice_native_prior_current_error,
+        )
+    }
+
+    fn emit_guarded_context_f64_slice_load(
+        &mut self,
+        pointer_field_offset: i32,
+        len_field_offset: i32,
+        index: usize,
+        helper: VoidHelper,
+    ) -> JitResult<()> {
+        let dst = self.push_register()?;
+        let value_disp = byte_disp(index)?;
+
+        self.emit_context_pointer_load(pointer_field_offset);
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let missing_storage = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+
+        self.encoder
+            .mov_r64_m64_base_disp32(Gpr::R10, self.ctx_arg_reg(), len_field_offset);
+        self.encoder.movabs_r64_imm64(Gpr::R11, index as u64);
+        self.encoder.cmp_r64_r64(Gpr::R10, Gpr::R11);
+        let index_out_of_range = self
+            .encoder
+            .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
+
+        self.encoder
+            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, value_disp);
+        let done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(missing_storage)?;
+        self.patch_rel32_to_current(index_out_of_range)?;
+        self.emit_void_error_return(helper);
+
+        self.patch_rel32_to_current(done)
     }
 
     fn emit_rust_f64_to_i64(&mut self, src: Xmm, dst: Gpr) -> JitResult<()> {
@@ -4250,6 +4295,19 @@ mod tests {
         ctx.num_terminals = 2;
 
         assert_eq!(f(&ctx, std::ptr::null()), -1.0);
+
+        ctx.branch_currents = std::ptr::null();
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("missing current probe must hard-fail");
+        assert_current_probe_error(&error);
+
+        ctx.branch_currents = branch_currents.as_ptr();
+        ctx.branch_currents_len = 3;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("out-of-range current probe must hard-fail");
+        assert_current_probe_error(&error);
     }
 
     #[test]
@@ -4288,6 +4346,41 @@ mod tests {
         ctx.num_terminals = 2;
 
         assert_eq!(f(&ctx, std::ptr::null()), 2.0);
+    }
+
+    #[test]
+    fn generated_value_leaf_loads_prior_current_probe() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![NativeOp::LoadPriorCurrent(1)],
+            1,
+            Vec::new(),
+            vec![1],
+        );
+        let bytes = compile_value_function(&program).expect("compile prior current leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate prior current leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let currents = [2.0_f64, 7.0_f64];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.currents = currents.as_ptr();
+        ctx.currents_len = currents.len();
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 7.0_f64.to_bits());
+
+        ctx.currents = std::ptr::null();
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("missing prior current must hard-fail");
+        assert_prior_current_error(&error);
+
+        ctx.currents = currents.as_ptr();
+        ctx.currents_len = 1;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("short prior current must hard-fail");
+        assert_prior_current_error(&error);
     }
 
     #[test]
@@ -6848,6 +6941,28 @@ mod tests {
         assert!(
             error.contains("missing state storage"),
             "error must identify missing native state storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    fn assert_current_probe_error(error: &str) {
+        assert!(
+            error.contains("missing terminal-pair current storage"),
+            "error must identify missing native current-probe storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    fn assert_prior_current_error(error: &str) {
+        assert!(
+            error.contains("missing contribution current storage"),
+            "error must identify missing native prior-current storage, got: {error}"
         );
         assert!(
             error.contains("no interpreter fallback"),
