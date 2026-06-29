@@ -553,7 +553,7 @@ fn format_current_endpoint(endpoint: usize) -> String {
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
-    use super::{compile_model_with_canonical_ir, lower_assignment_step};
+    use super::{NativeModel, compile_model_with_canonical_ir, lower_assignment_step};
     use crate::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
     use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
     use crate::native::EvalContext;
@@ -613,6 +613,103 @@ endmodule
         assert_eq!(
             native.run_stamp_value(0, &ctx, std::ptr::null()),
             (voltages[0] - voltages[1]) / params[0]
+        );
+    }
+
+    #[test]
+    #[ignore = "release-only source-level native x64 throughput probe; run with --release --features native -- --ignored --nocapture"]
+    fn native_x64_model_microbench_reports_entrypoint_throughput() {
+        assert!(
+            !cfg!(debug_assertions),
+            "native x64 model microbench is release-only; rerun with --release"
+        );
+
+        let source = r#"
+`include "disciplines.vams"
+module native_model_microbench(p, n);
+  inout p, n;
+  electrical p, n;
+  real g;
+  analog begin
+    g = 0.25;
+    I(p, n) <+ g * V(p, n);
+  end
+endmodule
+"#;
+        let (model, native) = compile_native_microbench_model(source);
+        assert!(
+            !model.assignment_steps.is_empty(),
+            "fixture must exercise the native assignment pass"
+        );
+        assert_eq!(native.native_stamp_count(), 1);
+        assert!(
+            !model.stamp_programs[0].jacobian_programs.is_empty(),
+            "fixture must exercise native jacobian entrypoints"
+        );
+
+        let params = [];
+        let voltages = [8.0_f64, 3.0];
+        let ctx = eval_context(&params, &voltages);
+        let mut vars = vec![0.0_f64; native.num_variables.max(1)];
+        native.run_assignments(&ctx, vars.as_mut_ptr());
+        assert_near(vars[0], 0.25, "assignment output");
+        assert_near(
+            native.run_stamp_value(0, &ctx, vars.as_ptr()),
+            1.25,
+            "stamp value",
+        );
+        let expected_jacobian = native.run_jacobian(0, 0, &ctx, vars.as_ptr());
+        assert!(
+            (expected_jacobian.abs() - 0.25).abs() <= 1.0e-12,
+            "first jacobian entry should be +/-0.25, got {expected_jacobian}"
+        );
+
+        let iterations = native_model_microbench_iterations();
+        let samples = native_model_microbench_samples();
+        eprintln!("native-x64-model-microbench iterations={iterations} samples={samples}");
+
+        run_native_model_entry_microbench(
+            "assignment_fed",
+            "assignments",
+            iterations,
+            samples,
+            0.25,
+            || {
+                native.run_assignments(
+                    std::hint::black_box(&ctx),
+                    std::hint::black_box(vars.as_mut_ptr()),
+                );
+                std::hint::black_box(vars[0])
+            },
+        );
+        run_native_model_entry_microbench(
+            "assignment_fed",
+            "stamp_value",
+            iterations,
+            samples,
+            1.25,
+            || {
+                native.run_stamp_value(
+                    0,
+                    std::hint::black_box(&ctx),
+                    std::hint::black_box(vars.as_ptr()),
+                )
+            },
+        );
+        run_native_model_entry_microbench(
+            "assignment_fed",
+            "jacobian0",
+            iterations,
+            samples,
+            expected_jacobian,
+            || {
+                native.run_jacobian(
+                    0,
+                    0,
+                    std::hint::black_box(&ctx),
+                    std::hint::black_box(vars.as_ptr()),
+                )
+            },
         );
     }
 
@@ -708,6 +805,83 @@ endmodule
                 other => panic!("{name}: expected indexed helper path, got {other:?}"),
             }
         }
+    }
+
+    fn compile_native_microbench_model(source: &str) -> (CompiledModel, NativeModel) {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("source-level canonical model compiles to native x64");
+        (model, native)
+    }
+
+    fn run_native_model_entry_microbench<F>(
+        case: &str,
+        entry: &str,
+        iterations: usize,
+        samples: usize,
+        expected: f64,
+        mut f: F,
+    ) where
+        F: FnMut() -> f64,
+    {
+        assert_near(f(), expected, entry);
+
+        let warmup_iterations = iterations / 10;
+        let warmup_checksum = run_native_model_microbench_sample(&mut f, warmup_iterations.max(1));
+        assert!(
+            warmup_checksum.is_finite(),
+            "{case} {entry}: native model microbench warmup checksum must stay finite"
+        );
+
+        let mut sample_ns_per_eval = Vec::with_capacity(samples);
+        let mut checksum = 0.0_f64;
+        for _ in 0..samples {
+            let start = std::time::Instant::now();
+            checksum += run_native_model_microbench_sample(&mut f, iterations);
+            let elapsed = start.elapsed();
+            sample_ns_per_eval.push(elapsed.as_nanos() as f64 / iterations as f64);
+        }
+        sample_ns_per_eval.sort_by(|left, right| left.total_cmp(right));
+        let min_ns_per_eval = sample_ns_per_eval[0];
+        let median_ns_per_eval = sample_ns_per_eval[sample_ns_per_eval.len() / 2];
+        let checksum = std::hint::black_box(checksum);
+        assert!(
+            checksum.is_finite(),
+            "{case} {entry}: native model microbench checksum must stay finite"
+        );
+        eprintln!(
+            "native-x64-model-microbench case={case} entry={entry} min_ns_per_eval={min_ns_per_eval:.3} median_ns_per_eval={median_ns_per_eval:.3} checksum={checksum:.17e}",
+        );
+    }
+
+    fn run_native_model_microbench_sample<F>(f: &mut F, iterations: usize) -> f64
+    where
+        F: FnMut() -> f64,
+    {
+        let mut checksum = 0.0_f64;
+        for _ in 0..iterations {
+            checksum += std::hint::black_box(f());
+        }
+        std::hint::black_box(checksum)
+    }
+
+    fn native_model_microbench_iterations() -> usize {
+        5_000_000
+    }
+
+    fn native_model_microbench_samples() -> usize {
+        5
+    }
+
+    fn assert_near(got: f64, expected: f64, name: &str) {
+        assert!(
+            (got - expected).abs() <= 1.0e-12,
+            "{name}: got {got:.17e}, expected {expected:.17e}"
+        );
     }
 
     fn indexed_assignment_step(
