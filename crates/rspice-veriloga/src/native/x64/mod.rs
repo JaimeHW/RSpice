@@ -1140,6 +1140,16 @@ endmodule
                 ]),
                 Some("hisimhv_va"),
             ),
+            (
+                "hisimsoi",
+                shipped_cmc_model_path(&[
+                    "HiSIM_SOI_1.5.0_Release_20211008",
+                    "HiSIM_SOI_1.5.0_VA-Code",
+                    "hisimsoi_va",
+                    "hisimsoi.va",
+                ]),
+                Some("hisimsoi_va"),
+            ),
         ];
         let iterations = shipped_model_microbench_iterations();
         let samples = shipped_model_microbench_samples();
