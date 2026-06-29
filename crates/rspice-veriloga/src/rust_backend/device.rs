@@ -5127,6 +5127,88 @@ fn stamp() {
             );
         }
 
+        for component in [
+            "fn store_exp_div_scaled_inputs_components",
+            "fn store_limited_exp_div_scaled_inputs_components",
+            "fn store_offset_limited_exp_div_scaled_inputs_components",
+        ] {
+            assert!(!support.contains(component), "{component}\n{support}");
+        }
+
+        for signature in [
+            "fn store_exp_div_scaled_inputs(",
+            "fn store_exp_div_scaled_inputs_indices(",
+            "fn store_exp_div_scaled_inputs_mixed_ai(",
+            "fn store_exp_div_scaled_inputs_mixed_ia(",
+            "fn store_limited_exp_div_scaled_inputs(",
+            "fn store_limited_exp_div_scaled_inputs_indices(",
+            "fn store_limited_exp_div_scaled_inputs_mixed_ai(",
+            "fn store_limited_exp_div_scaled_inputs_mixed_ia(",
+            "fn store_offset_limited_exp_div_scaled_inputs(",
+            "fn store_offset_limited_exp_div_scaled_inputs_indices(",
+            "fn store_offset_limited_exp_div_scaled_inputs_mixed_ai(",
+            "fn store_offset_limited_exp_div_scaled_inputs_mixed_ia(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                !body.contains("_node_derivatives = self.node_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("_branch_derivatives = self.branch_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_exp_div_scaled_inputs_components"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_limited_exp_div_scaled_inputs_components"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_offset_limited_exp_div_scaled_inputs_components"),
+                "{body}"
+            );
+        }
+
+        let exp_div = helper_body(&support, "fn store_exp_div_scaled_inputs_indices(");
+        assert!(
+            exp_div.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_derivative_scale + self.node_derivatives[right][axis] * right_derivative_scale;"
+            ),
+            "{exp_div}"
+        );
+
+        let limited_exp_div =
+            helper_body(&support, "fn store_limited_exp_div_scaled_inputs_indices(");
+        assert!(
+            limited_exp_div.contains("if quotient > 80.0"),
+            "{limited_exp_div}"
+        );
+        assert!(
+            limited_exp_div.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_derivative_scale + self.node_derivatives[right][axis] * right_derivative_scale;"
+            ),
+            "{limited_exp_div}"
+        );
+
+        let offset_limited_exp_div = helper_body(
+            &support,
+            "fn store_offset_limited_exp_div_scaled_inputs_indices(",
+        );
+        assert!(
+            offset_limited_exp_div
+                .contains("self.values[index] = LIMEXP_MAX * (1.0 + quotient - 80.0) + offset;"),
+            "{offset_limited_exp_div}"
+        );
+        assert!(
+            offset_limited_exp_div.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_derivative_scale + self.node_derivatives[right][axis] * right_derivative_scale;"
+            ),
+            "{offset_limited_exp_div}"
+        );
+
         for signature in [
             "fn store_add_scaled_product_indices(",
             "fn store_add_scaled_offset_product_rhs(",
@@ -14322,9 +14404,9 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-        "    fn store_exp_div_scaled_inputs_components(&mut self, index: usize, left_raw: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_scale: f64, right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_scale: f64) {",
-        "        let left_value = left_raw * left_scale;",
-        "        let right_value = right_raw * right_scale;",
+        "    fn store_exp_div_scaled_inputs(&mut self, index: usize, left: AdValue, left_scale: f64, right: AdValue, right_scale: f64) {",
+        "        let left_value = left.value * left_scale;",
+        "        let right_value = right.value * right_scale;",
         "        let reciprocal = 1.0 / right_value;",
         "        let quotient = left_value * reciprocal;",
         "        let left_quotient_derivative_scale = left_scale * reciprocal;",
@@ -14333,27 +14415,22 @@ fn generate_scratch_operation_helpers() -> String {
         "        let left_derivative_scale = left_quotient_derivative_scale * output;",
         "        let right_derivative_scale = right_quotient_derivative_scale * output;",
         "        self.values[index] = output;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_derivative_scale + right_node_derivatives[axis] * right_derivative_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_derivative_scale + right_branch_derivatives[axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * left_derivative_scale + right.branch_derivatives[axis] * right_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
-        "    fn store_exp_div_scaled_inputs(&mut self, index: usize, left: AdValue, left_scale: f64, right: AdValue, right_scale: f64) {",
-        "        self.store_exp_div_scaled_inputs_components(index, left.value, left.node_derivatives, left.branch_derivatives, left_scale, right.value, right.node_derivatives, right.branch_derivatives, right_scale);",
-        "    }",
-        "",
-        "    #[inline]",
-        "    fn store_limited_exp_div_scaled_inputs_components(&mut self, index: usize, left_raw: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_scale: f64, right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_scale: f64) {",
-        "        let left_value = left_raw * left_scale;",
-        "        let right_value = right_raw * right_scale;",
+        "    fn store_limited_exp_div_scaled_inputs(&mut self, index: usize, left: AdValue, left_scale: f64, right: AdValue, right_scale: f64) {",
+        "        let left_value = left.value * left_scale;",
+        "        let right_value = right.value * right_scale;",
         "        let reciprocal = 1.0 / right_value;",
         "        let quotient = left_value * reciprocal;",
         "        if quotient > 80.0 {",
         "            let left_derivative_scale = left_scale * reciprocal * LIMEXP_MAX;",
         "            let right_derivative_scale = -quotient * reciprocal * right_scale * LIMEXP_MAX;",
         "            self.values[index] = LIMEXP_MAX * (1.0 + quotient - 80.0);",
-        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_derivative_scale + right_node_derivatives[axis] * right_derivative_scale; }",
-        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_derivative_scale + right_branch_derivatives[axis] * right_derivative_scale; }",
+        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * left_derivative_scale + right.branch_derivatives[axis] * right_derivative_scale; }",
         "        } else if quotient < -80.0 {",
         "            self.store_scalar(index, 1.804851387e-35);",
         "        } else {",
@@ -14361,28 +14438,23 @@ fn generate_scratch_operation_helpers() -> String {
         "            let left_derivative_scale = left_scale * reciprocal * output;",
         "            let right_derivative_scale = -quotient * reciprocal * right_scale * output;",
         "            self.values[index] = output;",
-        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_derivative_scale + right_node_derivatives[axis] * right_derivative_scale; }",
-        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_derivative_scale + right_branch_derivatives[axis] * right_derivative_scale; }",
+        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * left_derivative_scale + right.branch_derivatives[axis] * right_derivative_scale; }",
         "        }",
         "    }",
         "",
         "    #[inline]",
-        "    fn store_limited_exp_div_scaled_inputs(&mut self, index: usize, left: AdValue, left_scale: f64, right: AdValue, right_scale: f64) {",
-        "        self.store_limited_exp_div_scaled_inputs_components(index, left.value, left.node_derivatives, left.branch_derivatives, left_scale, right.value, right.node_derivatives, right.branch_derivatives, right_scale);",
-        "    }",
-        "",
-        "    #[inline]",
-        "    fn store_offset_limited_exp_div_scaled_inputs_components(&mut self, index: usize, left_raw: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_scale: f64, right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_scale: f64, offset: f64) {",
-        "        let left_value = left_raw * left_scale;",
-        "        let right_value = right_raw * right_scale;",
+        "    fn store_offset_limited_exp_div_scaled_inputs(&mut self, index: usize, left: AdValue, left_scale: f64, right: AdValue, right_scale: f64, offset: f64) {",
+        "        let left_value = left.value * left_scale;",
+        "        let right_value = right.value * right_scale;",
         "        let reciprocal = 1.0 / right_value;",
         "        let quotient = left_value * reciprocal;",
         "        if quotient > 80.0 {",
         "            let left_derivative_scale = left_scale * reciprocal * LIMEXP_MAX;",
         "            let right_derivative_scale = -quotient * reciprocal * right_scale * LIMEXP_MAX;",
         "            self.values[index] = LIMEXP_MAX * (1.0 + quotient - 80.0) + offset;",
-        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_derivative_scale + right_node_derivatives[axis] * right_derivative_scale; }",
-        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_derivative_scale + right_branch_derivatives[axis] * right_derivative_scale; }",
+        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * left_derivative_scale + right.branch_derivatives[axis] * right_derivative_scale; }",
         "        } else if quotient < -80.0 {",
         "            self.store_scalar(index, 1.804851387e-35 + offset);",
         "        } else {",
@@ -14390,14 +14462,9 @@ fn generate_scratch_operation_helpers() -> String {
         "            let left_derivative_scale = left_scale * reciprocal * output;",
         "            let right_derivative_scale = -quotient * reciprocal * right_scale * output;",
         "            self.values[index] = output + offset;",
-        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_derivative_scale + right_node_derivatives[axis] * right_derivative_scale; }",
-        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_derivative_scale + right_branch_derivatives[axis] * right_derivative_scale; }",
+        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * left_derivative_scale + right.branch_derivatives[axis] * right_derivative_scale; }",
         "        }",
-        "    }",
-        "",
-        "    #[inline]",
-        "    fn store_offset_limited_exp_div_scaled_inputs(&mut self, index: usize, left: AdValue, left_scale: f64, right: AdValue, right_scale: f64, offset: f64) {",
-        "        self.store_offset_limited_exp_div_scaled_inputs_components(index, left.value, left.node_derivatives, left.branch_derivatives, left_scale, right.value, right.node_derivatives, right.branch_derivatives, right_scale, offset);",
         "    }",
         "",
         "    #[inline]",
@@ -20413,17 +20480,30 @@ fn generate_index_or_mixed_exp_mul_scaled_lhs_helper(mask: &str) -> String {
 }
 
 fn generate_index_or_mixed_exp_div_scaled_inputs_helper(mask: &str) -> String {
-    let operands = ["left", "right"];
     let helper = index_or_mixed_helper_name("store_exp_div_scaled_inputs", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let left = mixed_helper_component_args(mask, 0, "left");
-    let right = mixed_helper_component_args(mask, 1, "right");
+    let left_value = mixed_helper_value_expr(mask, 0, "left");
+    let right_value = mixed_helper_value_expr(mask, 1, "right");
+    let left_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "left");
+    let right_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "right");
+    let left_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "left");
+    let right_branch_derivative = mixed_helper_branch_derivative_expr(mask, 1, "right");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, left: {left_ty}, left_scale: f64, right: {right_ty}, right_scale: f64) {{
-{locals}        self.store_exp_div_scaled_inputs_components(index, {left}, left_scale, {right}, right_scale);
+        let left_value = {left_value} * left_scale;
+        let right_value = {right_value} * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = left_value * reciprocal;
+        let left_quotient_derivative_scale = left_scale * reciprocal;
+        let right_quotient_derivative_scale = -quotient * reciprocal * right_scale;
+        let output = quotient.exp();
+        let left_derivative_scale = left_quotient_derivative_scale * output;
+        let right_derivative_scale = right_quotient_derivative_scale * output;
+        self.values[index] = output;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} * left_derivative_scale + {right_node_derivative} * right_derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} * left_derivative_scale + {right_branch_derivative} * right_derivative_scale; }}
     }}
 "#,
         left_ty = mixed_helper_type(mask, 0),
@@ -20432,17 +20512,38 @@ fn generate_index_or_mixed_exp_div_scaled_inputs_helper(mask: &str) -> String {
 }
 
 fn generate_index_or_mixed_limited_exp_div_scaled_inputs_helper(mask: &str) -> String {
-    let operands = ["left", "right"];
     let helper = index_or_mixed_helper_name("store_limited_exp_div_scaled_inputs", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let left = mixed_helper_component_args(mask, 0, "left");
-    let right = mixed_helper_component_args(mask, 1, "right");
+    let left_value = mixed_helper_value_expr(mask, 0, "left");
+    let right_value = mixed_helper_value_expr(mask, 1, "right");
+    let left_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "left");
+    let right_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "right");
+    let left_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "left");
+    let right_branch_derivative = mixed_helper_branch_derivative_expr(mask, 1, "right");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, left: {left_ty}, left_scale: f64, right: {right_ty}, right_scale: f64) {{
-{locals}        self.store_limited_exp_div_scaled_inputs_components(index, {left}, left_scale, {right}, right_scale);
+        let left_value = {left_value} * left_scale;
+        let right_value = {right_value} * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = left_value * reciprocal;
+        if quotient > 80.0 {{
+            let left_derivative_scale = left_scale * reciprocal * LIMEXP_MAX;
+            let right_derivative_scale = -quotient * reciprocal * right_scale * LIMEXP_MAX;
+            self.values[index] = LIMEXP_MAX * (1.0 + quotient - 80.0);
+            for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} * left_derivative_scale + {right_node_derivative} * right_derivative_scale; }}
+            for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} * left_derivative_scale + {right_branch_derivative} * right_derivative_scale; }}
+        }} else if quotient < -80.0 {{
+            self.store_scalar(index, 1.804851387e-35);
+        }} else {{
+            let output = quotient.exp();
+            let left_derivative_scale = left_scale * reciprocal * output;
+            let right_derivative_scale = -quotient * reciprocal * right_scale * output;
+            self.values[index] = output;
+            for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} * left_derivative_scale + {right_node_derivative} * right_derivative_scale; }}
+            for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} * left_derivative_scale + {right_branch_derivative} * right_derivative_scale; }}
+        }}
     }}
 "#,
         left_ty = mixed_helper_type(mask, 0),
@@ -20451,17 +20552,38 @@ fn generate_index_or_mixed_limited_exp_div_scaled_inputs_helper(mask: &str) -> S
 }
 
 fn generate_index_or_mixed_offset_limited_exp_div_scaled_inputs_helper(mask: &str) -> String {
-    let operands = ["left", "right"];
     let helper = index_or_mixed_helper_name("store_offset_limited_exp_div_scaled_inputs", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let left = mixed_helper_component_args(mask, 0, "left");
-    let right = mixed_helper_component_args(mask, 1, "right");
+    let left_value = mixed_helper_value_expr(mask, 0, "left");
+    let right_value = mixed_helper_value_expr(mask, 1, "right");
+    let left_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "left");
+    let right_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "right");
+    let left_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "left");
+    let right_branch_derivative = mixed_helper_branch_derivative_expr(mask, 1, "right");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, left: {left_ty}, left_scale: f64, right: {right_ty}, right_scale: f64, offset: f64) {{
-{locals}        self.store_offset_limited_exp_div_scaled_inputs_components(index, {left}, left_scale, {right}, right_scale, offset);
+        let left_value = {left_value} * left_scale;
+        let right_value = {right_value} * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = left_value * reciprocal;
+        if quotient > 80.0 {{
+            let left_derivative_scale = left_scale * reciprocal * LIMEXP_MAX;
+            let right_derivative_scale = -quotient * reciprocal * right_scale * LIMEXP_MAX;
+            self.values[index] = LIMEXP_MAX * (1.0 + quotient - 80.0) + offset;
+            for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} * left_derivative_scale + {right_node_derivative} * right_derivative_scale; }}
+            for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} * left_derivative_scale + {right_branch_derivative} * right_derivative_scale; }}
+        }} else if quotient < -80.0 {{
+            self.store_scalar(index, 1.804851387e-35 + offset);
+        }} else {{
+            let output = quotient.exp();
+            let left_derivative_scale = left_scale * reciprocal * output;
+            let right_derivative_scale = -quotient * reciprocal * right_scale * output;
+            self.values[index] = output + offset;
+            for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} * left_derivative_scale + {right_node_derivative} * right_derivative_scale; }}
+            for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} * left_derivative_scale + {right_branch_derivative} * right_derivative_scale; }}
+        }}
     }}
 "#,
         left_ty = mixed_helper_type(mask, 0),
