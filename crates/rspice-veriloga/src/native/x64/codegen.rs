@@ -2792,7 +2792,9 @@ impl FunctionCompiler {
     }
 
     fn emit_usize_arg(&mut self, dst: Gpr, value: usize) {
-        if let Ok(value) = u32::try_from(value) {
+        if value == 0 {
+            self.encoder.xor_r64_r64(dst, dst);
+        } else if let Ok(value) = u32::try_from(value) {
             self.encoder.mov_r32_imm32(dst, value);
         } else {
             self.encoder.movabs_r64_imm64(dst, value as u64);
@@ -6365,9 +6367,19 @@ mod tests {
         assert!(
             contains_bytes(
                 &bytes,
+                &xor_r64_bytes(
+                    super::context_filter_id_arg_reg(),
+                    super::context_filter_id_arg_reg()
+                )
+            ),
+            "Laplace helper should zero filter ID 0 with a compact dependency-breaking xor"
+        );
+        assert!(
+            !contains_bytes(
+                &bytes,
                 &mov_r32_imm32_bytes(super::context_filter_id_arg_reg(), 0)
             ),
-            "Laplace helper should materialize small filter IDs with a compact imm32 move"
+            "Laplace helper should not materialize filter ID 0 with a wider imm32 move"
         );
         assert!(
             !contains_bytes(
@@ -6482,9 +6494,19 @@ mod tests {
         assert!(
             contains_bytes(
                 &bytes,
+                &xor_r64_bytes(
+                    super::operand_filter_id_arg_reg(),
+                    super::operand_filter_id_arg_reg()
+                )
+            ),
+            "transition helper should zero filter ID 0 with a compact dependency-breaking xor"
+        );
+        assert!(
+            !contains_bytes(
+                &bytes,
                 &mov_r32_imm32_bytes(super::operand_filter_id_arg_reg(), 0)
             ),
-            "transition helper should materialize small filter IDs with a compact imm32 move"
+            "transition helper should not materialize filter ID 0 with a wider imm32 move"
         );
         assert!(
             !contains_bytes(
