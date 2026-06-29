@@ -1389,8 +1389,7 @@ impl FunctionCompiler {
             self.ctx_arg_reg(),
             LOOKUP_TABLES_LEN_OFFSET,
         );
-        self.encoder
-            .movabs_r64_imm64(table_id_arg_reg(), table_id as u64);
+        self.emit_usize_arg(table_id_arg_reg(), table_id);
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
@@ -1422,8 +1421,7 @@ impl FunctionCompiler {
         }
         self.encoder
             .mov_r64_r64(context_filter_ctx_arg_reg(), self.ctx_arg_reg());
-        self.encoder
-            .movabs_r64_imm64(context_filter_id_arg_reg(), filter_id as u64);
+        self.emit_usize_arg(context_filter_id_arg_reg(), filter_id);
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
@@ -2046,8 +2044,7 @@ impl FunctionCompiler {
         }
         self.encoder
             .mov_r64_r64(operand_filter_ctx_arg_reg(), self.ctx_arg_reg());
-        self.encoder
-            .movabs_r64_imm64(operand_filter_id_arg_reg(), filter_id as u64);
+        self.emit_usize_arg(operand_filter_id_arg_reg(), filter_id);
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
@@ -2582,6 +2579,14 @@ impl FunctionCompiler {
             displacement_offset,
             value,
         });
+    }
+
+    fn emit_usize_arg(&mut self, dst: Gpr, value: usize) {
+        if let Ok(value) = u32::try_from(value) {
+            self.encoder.mov_r32_imm32(dst, value);
+        } else {
+            self.encoder.movabs_r64_imm64(dst, value as u64);
+        }
     }
 
     fn finish_with_literals(self) -> JitResult<Vec<u8>> {
@@ -5614,6 +5619,20 @@ mod tests {
         )
         .expect("lower Laplace helper program");
         let bytes = compile_value_function(&program).expect("compile Laplace helper leaf");
+        assert!(
+            contains_bytes(
+                &bytes,
+                &mov_r32_imm32_bytes(super::context_filter_id_arg_reg(), 0)
+            ),
+            "Laplace helper should materialize small filter IDs with a compact imm32 move"
+        );
+        assert!(
+            !contains_bytes(
+                &bytes,
+                &movabs_imm64_bytes(super::context_filter_id_arg_reg(), 0)
+            ),
+            "Laplace helper should not use movabs for small filter IDs"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate Laplace helper leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -5717,6 +5736,20 @@ mod tests {
         )
         .expect("lower transition helper program");
         let bytes = compile_value_function(&program).expect("compile transition helper leaf");
+        assert!(
+            contains_bytes(
+                &bytes,
+                &mov_r32_imm32_bytes(super::operand_filter_id_arg_reg(), 0)
+            ),
+            "transition helper should materialize small filter IDs with a compact imm32 move"
+        );
+        assert!(
+            !contains_bytes(
+                &bytes,
+                &movabs_imm64_bytes(super::operand_filter_id_arg_reg(), 0)
+            ),
+            "transition helper should not use movabs for small filter IDs"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate transition helper leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -6636,6 +6669,16 @@ mod tests {
                 0,
             );
             let bytes = compile_value_function(&program).expect("compile table helper leaf");
+            if name.ends_with("second-table") {
+                assert!(
+                    contains_bytes(&bytes, &mov_r32_imm32_bytes(super::table_id_arg_reg(), 1)),
+                    "table helper should materialize small table IDs with a compact imm32 move"
+                );
+                assert!(
+                    !contains_bytes(&bytes, &movabs_imm64_bytes(super::table_id_arg_reg(), 1)),
+                    "table helper should not use movabs for small table IDs"
+                );
+            }
             let memory = ExecutableMemory::allocate(&bytes).expect("allocate table helper leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
