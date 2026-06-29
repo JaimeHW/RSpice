@@ -2183,6 +2183,35 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_table_model_current_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_table_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ $table_model(V(p, n), 0.0, 0.0, 1.0, 2.0, 2.0, 8.0);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("TABLECANON1", model, &artifact, &[1, 0])
+            .expect("canonical table model current uses native JIT path");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[1.5]);
+    let currents = device
+        .try_evaluate()
+        .expect("canonical table model current evaluation succeeds");
+    assert_eq!(currents.len(), 1);
+    assert!((currents[0] - 5.0).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"
