@@ -4489,6 +4489,85 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_folds_safe_constant_integer_binary_to_literals() {
+        let cases = [
+            ("shl", Instruction::Shl, 3.0, 2.0, runtime_shl(3.0, 2.0)),
+            (
+                "shr-negative",
+                Instruction::Shr,
+                -16.0,
+                2.0,
+                runtime_shr(-16.0, 2.0),
+            ),
+            (
+                "bitand",
+                Instruction::BitAnd,
+                13.0,
+                6.0,
+                runtime_bitand(13.0, 6.0),
+            ),
+            (
+                "bitor",
+                Instruction::BitOr,
+                8.0,
+                3.0,
+                runtime_bitor(8.0, 3.0),
+            ),
+            (
+                "bitxor",
+                Instruction::BitXor,
+                15.0,
+                6.0,
+                runtime_bitxor(15.0, 6.0),
+            ),
+            (
+                "truncates-operands",
+                Instruction::BitAnd,
+                13.75,
+                6.25,
+                runtime_bitand(13.75, 6.25),
+            ),
+        ];
+
+        for (name, instruction, left, right, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+                0,
+            );
+
+            assert_eq!(program.max_stack_depth(), 1, "{name}");
+            assert_eq!(
+                program.ops(),
+                &[NativeOp::Const(expected)],
+                "{name} should compile as a folded helper-equivalent literal"
+            );
+
+            let bytes = compile_value_function(&program).expect("compile folded integer leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "folded integer binary op should stay helper-free"
+            );
+
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate folded integer leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_calls_table_helpers_and_preserves_state() {
         let cases = [
             (

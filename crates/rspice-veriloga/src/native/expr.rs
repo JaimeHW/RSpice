@@ -433,7 +433,11 @@ impl NativeProgram {
                         depth,
                     )?;
                     depth -= 1;
-                    ops.push(NativeOp::IntegerBinary(integer_binary_op(instruction)));
+                    let op = integer_binary_op(instruction);
+                    if lower_constant_integer_binary(&mut ops, op) {
+                        continue;
+                    }
+                    ops.push(NativeOp::IntegerBinary(op));
                 }
                 Instruction::TableLookup(table_id) => {
                     validate_index(
@@ -1068,6 +1072,24 @@ fn lower_constant_binary_math(ops: &mut Vec<NativeOp>, op: BinaryMathOp) -> bool
     true
 }
 
+fn lower_constant_integer_binary(ops: &mut Vec<NativeOp>, op: IntegerBinaryOp) -> bool {
+    if ops.len() < 2 {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let rhs_index = ops.len() - 1;
+    let (NativeOp::Const(left), NativeOp::Const(right)) = (ops[lhs_index], ops[rhs_index]) else {
+        return false;
+    };
+    let Some(value) = constant_integer_binary(op, left, right) else {
+        return false;
+    };
+    ops.truncate(lhs_index);
+    ops.push(NativeOp::Const(value));
+    true
+}
+
 fn lower_constant_neg(ops: &mut Vec<NativeOp>) -> bool {
     let Some(NativeOp::Const(value)) = ops.last_mut() else {
         return false;
@@ -1280,6 +1302,19 @@ fn constant_binary_math(op: BinaryMathOp, left: f64, right: f64) -> f64 {
         BinaryMathOp::Atan2 => left.atan2(right),
         BinaryMathOp::Mod => left % right,
     }
+}
+
+fn constant_integer_binary(op: IntegerBinaryOp, left: f64, right: f64) -> Option<f64> {
+    let left = left as i64;
+    let right = right as i64;
+    let value = match op {
+        IntegerBinaryOp::Shl => left.checked_shl(u32::try_from(right).ok()?)?,
+        IntegerBinaryOp::Shr => left.checked_shr(u32::try_from(right).ok()?)?,
+        IntegerBinaryOp::BitAnd => left & right,
+        IntegerBinaryOp::BitOr => left | right,
+        IntegerBinaryOp::BitXor => left ^ right,
+    };
+    Some(value as f64)
 }
 
 fn is_independent_value_push(op: &NativeOp) -> bool {
@@ -2648,6 +2683,121 @@ mod tests {
                 ]
             );
             assert_eq!(lowered.max_stack_depth(), 2);
+        }
+    }
+
+    #[test]
+    fn folds_safe_constant_integer_binary_ops_to_exact_literals() {
+        let cases = [
+            ("shl", Instruction::Shl, 3.0, 2.0, ((3_i64) << 2) as f64),
+            ("shr", Instruction::Shr, -16.0, 2.0, ((-16_i64) >> 2) as f64),
+            (
+                "bitand",
+                Instruction::BitAnd,
+                13.0,
+                6.0,
+                (13_i64 & 6) as f64,
+            ),
+            ("bitor", Instruction::BitOr, 8.0, 3.0, (8_i64 | 3) as f64),
+            (
+                "bitxor",
+                Instruction::BitXor,
+                15.0,
+                6.0,
+                (15_i64 ^ 6) as f64,
+            ),
+            (
+                "truncates-operands",
+                Instruction::BitAnd,
+                13.75,
+                6.25,
+                (13_i64 & 6) as f64,
+            ),
+        ];
+
+        for (case, instruction, left, right, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-integer-binary",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("safe constant integer binary op folds to a literal");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{case} should only need the folded literal"
+            );
+            assert_eq!(
+                lowered.ops(),
+                &[NativeOp::Const(expected)],
+                "{case} should fold to an exact helper-equivalent literal"
+            );
+        }
+    }
+
+    #[test]
+    fn leaves_unsafe_constant_shift_counts_as_runtime_integer_ops() {
+        let cases = [
+            (
+                "left-shift-negative",
+                Instruction::Shl,
+                3.0,
+                -1.0,
+                IntegerBinaryOp::Shl,
+            ),
+            (
+                "left-shift-too-wide",
+                Instruction::Shl,
+                3.0,
+                64.0,
+                IntegerBinaryOp::Shl,
+            ),
+            (
+                "right-shift-too-wide",
+                Instruction::Shr,
+                3.0,
+                64.0,
+                IntegerBinaryOp::Shr,
+            ),
+        ];
+
+        for (case, instruction, left, right, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-unsafe-shift",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("unsafe constant shift remains a runtime integer helper op");
+
+            assert_eq!(lowered.max_stack_depth(), 2, "{case}");
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::Const(left),
+                    NativeOp::Const(right),
+                    NativeOp::IntegerBinary(expected),
+                ],
+                "{case} should preserve current helper-call behavior"
+            );
         }
     }
 
