@@ -1410,6 +1410,9 @@ impl<'a> GeneratedStamper<'a> {
             .zip(node_derivatives.iter().copied())
         {
             let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
             if needs_rhs {
                 equivalent -= derivative * self.node_value_local(node);
             }
@@ -1423,6 +1426,9 @@ impl<'a> GeneratedStamper<'a> {
             .zip(branch_derivatives.iter().copied())
         {
             let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
             if needs_rhs {
                 equivalent -= derivative * self.branch_value_local(branch);
             }
@@ -1462,6 +1468,9 @@ impl<'a> GeneratedStamper<'a> {
             .zip(node_derivatives.iter().copied())
         {
             let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
             if needs_rhs {
                 equivalent -= derivative * self.node_value_local(node);
             }
@@ -1475,6 +1484,9 @@ impl<'a> GeneratedStamper<'a> {
             .zip(branch_derivatives.iter().copied())
         {
             let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
             if needs_rhs {
                 equivalent -= derivative * self.branch_value_local(branch);
             }
@@ -2012,6 +2024,9 @@ impl<'a> GeneratedStamper<'a> {
             .copied()
             .zip(node_derivatives.iter().copied())
         {
+            if derivative == 0.0 {
+                continue;
+            }
             equivalent -= derivative * self.node_value_local(node);
             if let Some(col_axis) = self.node_axis_local(node) {
                 self.add_real_axis(row_axis, col_axis, -derivative);
@@ -2022,6 +2037,9 @@ impl<'a> GeneratedStamper<'a> {
             .copied()
             .zip(branch_derivatives.iter().copied())
         {
+            if derivative == 0.0 {
+                continue;
+            }
             equivalent -= derivative * self.branch_value_local(branch);
             if let Some(col_axis) = self.branch_axis_local(branch) {
                 self.add_real_axis(row_axis, col_axis, -derivative);
@@ -2049,6 +2067,9 @@ impl<'a> GeneratedStamper<'a> {
             .copied()
             .zip(node_derivatives.iter().copied())
         {
+            if derivative == 0.0 {
+                continue;
+            }
             equivalent -= derivative * self.node_value_local(node);
             if let Some(col_axis) = self.node_axis_local(node) {
                 self.add_real_axis(row_axis, col_axis, -derivative);
@@ -2059,6 +2080,9 @@ impl<'a> GeneratedStamper<'a> {
             .copied()
             .zip(branch_derivatives.iter().copied())
         {
+            if derivative == 0.0 {
+                continue;
+            }
             equivalent -= derivative * self.branch_value_local(branch);
             if let Some(col_axis) = self.branch_axis_local(branch) {
                 self.add_real_axis(row_axis, col_axis, -derivative);
@@ -2069,6 +2093,9 @@ impl<'a> GeneratedStamper<'a> {
 
     #[inline]
     fn add_potential_rhs(&mut self, row: usize, equivalent: Value) {
+        if equivalent == 0.0 {
+            return;
+        }
         if let Some(rhs) = &mut self.rhs
             && let Some(slot) = rhs.get_mut(row)
         {
@@ -2189,6 +2216,9 @@ impl<'a> GeneratedStamper<'a> {
         col_axis: usize,
         derivative: Value,
     ) {
+        if derivative == 0.0 {
+            return;
+        }
         if let Some(row_axis) = pos_axis {
             self.add_real_axis(row_axis, col_axis, derivative);
         }
@@ -2211,6 +2241,9 @@ impl<'a> GeneratedStamper<'a> {
 
     #[inline]
     fn add_real_axis(&mut self, row_axis: usize, col_axis: usize, value: Value) {
+        if value == 0.0 {
+            return;
+        }
         let Some(row) = self.axis_matrix_index_local(row_axis) else {
             return;
         };
@@ -2234,6 +2267,9 @@ impl<'a> GeneratedStamper<'a> {
 
     #[inline]
     fn add_real(&mut self, row: usize, col: usize, value: Value) {
+        if value == 0.0 {
+            return;
+        }
         match &mut self.matrix {
             GeneratedMatrixTarget::Static { matrix } => {
                 if let Some(index) = self
@@ -2572,6 +2608,9 @@ impl<'a> GeneratedReactiveStamper<'a> {
         col: usize,
         derivative: Value,
     ) {
+        if derivative == 0.0 {
+            return;
+        }
         if let Some(row) = pos_row {
             self.matrix.add_imag(row, col, derivative);
         }
