@@ -1106,6 +1106,11 @@ endmodule
                 shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
                 Some("bsimimg"),
             ),
+            (
+                "bsimsoi461",
+                shipped_veriloga_model_path(&["bsimsoi_4.6.1", "vacode", "bsimsoi.va"]),
+                Some("bsimsoi_va"),
+            ),
         ];
         let iterations = shipped_model_microbench_iterations();
         let samples = shipped_model_microbench_samples();
