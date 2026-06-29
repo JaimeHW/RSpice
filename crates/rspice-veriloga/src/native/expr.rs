@@ -1031,8 +1031,84 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "atan2" => self.lower_binary_math_intrinsic(name, args, BinaryMathOp::Atan2),
             "min" => self.lower_extremum_intrinsic(name, args, ExtremumOp::Min),
             "max" => self.lower_extremum_intrinsic(name, args, ExtremumOp::Max),
+            "temperature" => {
+                self.require_intrinsic_arity(name, args, 0)?;
+                self.push(NativeOp::LoadTemperature)
+            }
+            "vt" | "thermal_vt" => self.lower_thermal_voltage_intrinsic(name, args),
+            "abstime" | "realtime" => {
+                self.require_intrinsic_arity(name, args, 0)?;
+                self.push(NativeOp::LoadTime)
+            }
+            "mfactor" => {
+                self.require_intrinsic_arity(name, args, 0)?;
+                self.push(NativeOp::LoadMfactor)
+            }
+            "param_given" => self.lower_param_given_intrinsic(name, args),
+            "port_connected" => self.lower_port_connected_intrinsic(name, args),
+            "analysis" => self.lower_analysis_intrinsic(name, args),
             _ => Err(self.unsupported(format!("intrinsic function '{name}'"))),
         }
+    }
+
+    fn lower_thermal_voltage_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
+        self.require_intrinsic_arity_range(name, args, 0, 1)?;
+        if args.is_empty() {
+            return self.push(NativeOp::LoadThermalVoltage);
+        }
+
+        self.lower(args[0])?;
+        self.push(NativeOp::Const(8.617333262e-5))?;
+        self.append_arithmetic("Mul")
+    }
+
+    fn lower_param_given_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        let parameter_name = self.identifier_argument(name, args[0])?;
+        let Some(parameter) = self
+            .mir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name == parameter_name)
+        else {
+            return Err(self.unsupported(format!(
+                "intrinsic function '{name}' parameter {parameter_name}"
+            )));
+        };
+        let index = usize::from(parameter.id);
+        validate_index(
+            self.model.clone(),
+            "canonical $param_given parameter",
+            index,
+            self.limits.parameter_count,
+        )?;
+        self.push(NativeOp::LoadParamGiven(index))
+    }
+
+    fn lower_port_connected_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        let port_name = self.identifier_argument(name, args[0])?;
+        let index = self.lower_terminal_node(port_name)?;
+        self.push(NativeOp::LoadPortConnected(index))
+    }
+
+    fn lower_analysis_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        let analysis_name = self.string_literal_argument(name, args[0])?;
+        let analysis_id = match analysis_name.to_ascii_lowercase().as_str() {
+            "dc" => 0,
+            "ac" => 1,
+            "tran" | "transient" => 2,
+            "noise" => 3,
+            "ic" => 4,
+            "static" => 5,
+            _ => {
+                return Err(self.unsupported(format!(
+                    "intrinsic function '{name}' analysis name '{analysis_name}'"
+                )));
+            }
+        };
+        self.push(NativeOp::Analysis(analysis_id))
     }
 
     fn lower_unary_math_intrinsic(
@@ -1088,6 +1164,42 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             )));
         }
         Ok(())
+    }
+
+    fn require_intrinsic_arity_range(
+        &self,
+        name: &str,
+        args: &[ExprId],
+        min: usize,
+        max: usize,
+    ) -> JitResult<()> {
+        if args.len() < min || args.len() > max {
+            return Err(self.unsupported(format!(
+                "intrinsic function '{name}' expects between {min} and {max} argument(s), found {}",
+                args.len()
+            )));
+        }
+        Ok(())
+    }
+
+    fn identifier_argument(&self, name: &str, expr_id: ExprId) -> JitResult<&'a str> {
+        let expression = self.expression(expr_id)?;
+        match &expression.kind {
+            HirExprKind::Identifier { name } => Ok(name.as_str()),
+            _ => Err(self.unsupported(format!(
+                "intrinsic function '{name}' requires identifier argument"
+            ))),
+        }
+    }
+
+    fn string_literal_argument(&self, name: &str, expr_id: ExprId) -> JitResult<&'a str> {
+        let expression = self.expression(expr_id)?;
+        match &expression.kind {
+            HirExprKind::StringLiteral { value } => Ok(value.as_str()),
+            _ => Err(self.unsupported(format!(
+                "intrinsic function '{name}' requires string literal argument"
+            ))),
+        }
     }
 
     fn lower_identifier(&mut self, name: &str) -> JitResult<()> {

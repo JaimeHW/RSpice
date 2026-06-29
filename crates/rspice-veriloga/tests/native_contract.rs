@@ -1474,6 +1474,55 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_stamps_simulator_context_reads_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_context_stamp(p, n, opt);
+    inout p, n, opt;
+    electrical p, n, opt;
+    parameter real rknob = 2.0 from (0:inf);
+    analog I(p, n) <+ (
+          (($temperature - 300.0) * 1.0e-3)
+        + (100.0 * $vt)
+        + (2.0 * $abstime)
+        + (3.0 * $mfactor)
+        + (analysis("tran") ? 5.0 : 7.0)
+        + (10.0 * $param_given(rknob))
+        + (11.0 * $port_connected(opt))
+    ) * V(p, n);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("CTXCANON1", model, &artifact, &[1, 0, 0])
+            .expect("context reads use canonical native JIT path");
+    assert!(device.is_using_native());
+    assert!(device.set_parameter("rknob", 2.0));
+    device.set_analysis_type(2);
+    device.set_temperature(310.0);
+    device.set_time(2.0);
+    device.set_multiplicity(3.0);
+
+    let (matrix, rhs) = stamp_device(&mut device, &[4.0]);
+    let local_conductance = 0.01 + (100.0 * thermal_voltage(310.0)) + 4.0 + 9.0 + 5.0 + 10.0 + 11.0;
+    let expected = local_conductance * 3.0;
+
+    assert!(
+        (matrix.get(&(0, 0)).copied().unwrap_or_default() - expected).abs() < 1e-12,
+        "matrix: {matrix:?}, expected: {expected}"
+    );
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
+        "rhs: {rhs:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"
