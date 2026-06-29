@@ -1547,6 +1547,9 @@ impl NativeProgram {
                     if lower_constant_rhs_arithmetic(&mut ops, instruction) {
                         continue;
                     }
+                    if lower_constant_lhs_identity_arithmetic(&mut ops, instruction) {
+                        continue;
+                    }
                     if lower_constant_lhs_noncommutative_arithmetic(&mut ops, instruction) {
                         continue;
                     }
@@ -3295,6 +3298,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         };
         if lower_constant_binary_arithmetic(&mut self.ops, &instruction)
             || lower_constant_rhs_arithmetic(&mut self.ops, &instruction)
+            || lower_constant_lhs_identity_arithmetic(&mut self.ops, &instruction)
             || lower_constant_lhs_noncommutative_arithmetic(&mut self.ops, &instruction)
         {
             return Ok(());
@@ -3963,6 +3967,29 @@ fn lower_constant_lhs_noncommutative_arithmetic(
     };
     ops.remove(lhs_index);
     ops.push(op);
+    true
+}
+
+fn lower_constant_lhs_identity_arithmetic(
+    ops: &mut Vec<NativeOp>,
+    instruction: &Instruction,
+) -> bool {
+    if !matches!(instruction, Instruction::Mul) || ops.len() < 2 {
+        return false;
+    }
+    let rhs_index = ops.len() - 1;
+    if !is_independent_value_push(&ops[rhs_index]) {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let NativeOp::Const(value) = ops[lhs_index] else {
+        return false;
+    };
+    if value.to_bits() != 1.0_f64.to_bits() {
+        return false;
+    }
+    ops.remove(lhs_index);
     true
 }
 
@@ -5463,6 +5490,28 @@ endmodule
             };
             assert_eq!(value.to_bits(), literal.to_bits(), "{name}");
         }
+    }
+
+    #[test]
+    fn drops_lhs_multiplicative_identity_without_runtime_op() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushTemperature,
+                Instruction::Mul,
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "literal-lhs-mul-one",
+            EntryKind::Assignment,
+            &program,
+            limits(0, 0),
+        )
+        .expect("LHS multiplicative identity should lower away");
+
+        assert_eq!(lowered.max_stack_depth(), 1);
+        assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature]);
     }
 
     #[test]
