@@ -2069,7 +2069,7 @@ impl ExprEmitter<'_> {
                 Ok(self.emit_value(
                     base,
                     format!(
-                        "eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, {slot}, {})",
+                        "eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_previous_previous, ddt_state_derivative_current, ddt_state_derivative_previous, ddt_state_initialized, ddt_state_history_depth, ddt_active, ddt_coefficients, ddt_scale, {slot}, {})",
                         operand.value
                     ),
                 ))
