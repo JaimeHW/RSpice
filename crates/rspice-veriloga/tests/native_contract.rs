@@ -2552,6 +2552,40 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_array_fed_ddx_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_ddx_array_fed(p, n);
+    inout p, n;
+    electrical p, n;
+    real q[0:1];
+    integer idx;
+    analog begin
+        idx = 1;
+        q[idx] = V(p, n) * V(p, n);
+        I(p, n) <+ ddx(q[idx], V(p, n));
+    end
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("DDXARRCANON1", model, &artifact, &[1, 0])
+            .expect("array-fed ddx uses native derivative shadow array");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[3.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("array-fed canonical ddx current evaluation succeeds");
+    assert_eq!(currents[0].to_bits(), 6.0_f64.to_bits());
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_executes_limit_current_without_fallback() {
     let source = r#"
 `include "disciplines.vams"

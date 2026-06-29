@@ -2616,8 +2616,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::Call { name, args } => {
                 self.lower_call_derivative(name.as_str(), args.as_slice(), wrt)
             }
-            HirExprKind::ArrayAccess { array, .. } => {
-                Err(self.unsupported(format!("ddx derivative through array access {array}")))
+            HirExprKind::ArrayAccess { array, index } => {
+                self.lower_array_access_derivative(array.as_str(), *index, wrt)
             }
             HirExprKind::AnalogOperator { op } => self.lower_analog_operator_derivative(op, wrt),
             HirExprKind::Laplace { .. } | HirExprKind::Zi { .. } => Err(self.unsupported(format!(
@@ -3784,8 +3784,53 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
+    fn lower_array_access_derivative(
+        &mut self,
+        array: &str,
+        index: ExprId,
+        wrt: NodeId,
+    ) -> JitResult<()> {
+        let Some((base, len, lower)) = self.resolve_array_derivative_variable_range(array, wrt)?
+        else {
+            return self.push(NativeOp::Const(0.0));
+        };
+        validate_range(
+            self.model.clone(),
+            "canonical array derivative variable range",
+            base,
+            len,
+            self.limits.variable_count,
+        )?;
+        self.lower(index)?;
+        if lower_constant_dynamic_variable_read(&mut self.ops, base, len, lower) {
+            return Ok(());
+        }
+        self.ops
+            .push(NativeOp::LoadVariableDyn { base, len, lower });
+        Ok(())
+    }
+
     fn resolve_array_variable_range(&self, array: &str) -> JitResult<Option<(usize, usize, i64)>> {
         let prefix = format!("{array}[");
+        self.resolve_variable_range_with_affixes(array, &prefix, "]")
+    }
+
+    fn resolve_array_derivative_variable_range(
+        &self,
+        array: &str,
+        wrt: NodeId,
+    ) -> JitResult<Option<(usize, usize, i64)>> {
+        let prefix = format!("{array}[");
+        let suffix = format!("]@d{}", usize::from(wrt));
+        self.resolve_variable_range_with_affixes(array, &prefix, &suffix)
+    }
+
+    fn resolve_variable_range_with_affixes(
+        &self,
+        array: &str,
+        prefix: &str,
+        suffix: &str,
+    ) -> JitResult<Option<(usize, usize, i64)>> {
         let mut slots = self
             .limits
             .variable_names
@@ -3794,8 +3839,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             .filter_map(|(slot, name)| {
                 let text = name.as_str();
                 let index = text
-                    .strip_prefix(&prefix)?
-                    .strip_suffix(']')?
+                    .strip_prefix(prefix)?
+                    .strip_suffix(suffix)?
                     .parse::<i64>()
                     .ok()?;
                 Some((index, slot))
