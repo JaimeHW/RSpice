@@ -300,7 +300,7 @@ impl FunctionCompiler {
                     self.emit_port_connected_load(index, &mut context_pointer_cache)?;
                 }
                 NativeOp::LoadVoltage { pos, neg } => {
-                    self.emit_voltage_load(pos, neg)?;
+                    self.emit_voltage_load(pos, neg, &mut context_pointer_cache)?;
                 }
                 NativeOp::LoadCurrent(pair_index) => {
                     self.emit_current_load(pair_index, &mut context_pointer_cache)?;
@@ -2673,7 +2673,12 @@ impl FunctionCompiler {
         self.encoder.setcc_r8(ConditionCode::Equal, dst);
     }
 
-    fn emit_voltage_load(&mut self, pos: VoltageNode, neg: VoltageNode) -> JitResult<()> {
+    fn emit_voltage_load(
+        &mut self,
+        pos: VoltageNode,
+        neg: VoltageNode,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
         let dst = self.push_register()?;
 
         match (pos, neg) {
@@ -2681,21 +2686,33 @@ impl FunctionCompiler {
                 self.encoder.xorpd_xmm_xmm(dst, dst);
             }
             (pos, VoltageNode::Ground) => {
-                self.emit_node_voltage_load(dst, pos)?;
+                self.emit_node_voltage_load(dst, pos, context_pointer_cache)?;
             }
             (VoltageNode::Ground, neg) => {
                 self.encoder.xorpd_xmm_xmm(dst, dst);
-                self.emit_node_voltage_subtract(dst, neg)?;
+                self.emit_node_voltage_subtract(dst, neg, context_pointer_cache)?;
             }
             (VoltageNode::Terminal(pos), VoltageNode::Terminal(neg)) => {
-                self.emit_same_storage_voltage_difference(dst, VOLTAGES_OFFSET, pos, neg)?;
+                self.emit_same_storage_voltage_difference(
+                    dst,
+                    VOLTAGES_OFFSET,
+                    pos,
+                    neg,
+                    context_pointer_cache,
+                )?;
             }
             (VoltageNode::Internal(pos), VoltageNode::Internal(neg)) => {
-                self.emit_same_storage_voltage_difference(dst, INTERNAL_VOLTAGES_OFFSET, pos, neg)?;
+                self.emit_same_storage_voltage_difference(
+                    dst,
+                    INTERNAL_VOLTAGES_OFFSET,
+                    pos,
+                    neg,
+                    context_pointer_cache,
+                )?;
             }
             (pos, neg) => {
-                self.emit_node_voltage_load(dst, pos)?;
-                self.emit_node_voltage_subtract(dst, neg)?;
+                self.emit_node_voltage_load(dst, pos, context_pointer_cache)?;
+                self.emit_node_voltage_subtract(dst, neg, context_pointer_cache)?;
             }
         }
 
@@ -2708,8 +2725,9 @@ impl FunctionCompiler {
         ctx_field_offset: i32,
         pos_index: usize,
         neg_index: usize,
+        context_pointer_cache: &mut Option<i32>,
     ) -> JitResult<()> {
-        self.emit_context_pointer_load(ctx_field_offset);
+        self.emit_context_pointer_load_cached(ctx_field_offset, context_pointer_cache);
         self.encoder
             .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(pos_index)?);
         if pos_index == neg_index {
@@ -2730,10 +2748,19 @@ impl FunctionCompiler {
         Ok(())
     }
 
-    fn emit_node_voltage_load(&mut self, dst: Xmm, node: VoltageNode) -> JitResult<()> {
+    fn emit_node_voltage_load(
+        &mut self,
+        dst: Xmm,
+        node: VoltageNode,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
         match node {
-            VoltageNode::Terminal(index) => self.emit_terminal_voltage_load(dst, index),
-            VoltageNode::Internal(index) => self.emit_internal_voltage_load(dst, index),
+            VoltageNode::Terminal(index) => {
+                self.emit_terminal_voltage_load(dst, index, context_pointer_cache)
+            }
+            VoltageNode::Internal(index) => {
+                self.emit_internal_voltage_load(dst, index, context_pointer_cache)
+            }
             VoltageNode::Ground => {
                 self.encoder.xorpd_xmm_xmm(dst, dst);
                 Ok(())
@@ -2741,16 +2768,24 @@ impl FunctionCompiler {
         }
     }
 
-    fn emit_node_voltage_subtract(&mut self, dst: Xmm, node: VoltageNode) -> JitResult<()> {
+    fn emit_node_voltage_subtract(
+        &mut self,
+        dst: Xmm,
+        node: VoltageNode,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
         match node {
             VoltageNode::Terminal(index) => {
-                self.emit_context_pointer_load(VOLTAGES_OFFSET);
+                self.emit_context_pointer_load_cached(VOLTAGES_OFFSET, context_pointer_cache);
                 self.encoder
                     .subsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
                 Ok(())
             }
             VoltageNode::Internal(index) => {
-                self.emit_context_pointer_load(INTERNAL_VOLTAGES_OFFSET);
+                self.emit_context_pointer_load_cached(
+                    INTERNAL_VOLTAGES_OFFSET,
+                    context_pointer_cache,
+                );
                 self.encoder
                     .subsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
                 Ok(())
@@ -2759,15 +2794,25 @@ impl FunctionCompiler {
         }
     }
 
-    fn emit_terminal_voltage_load(&mut self, dst: Xmm, index: usize) -> JitResult<()> {
-        self.emit_context_pointer_load(VOLTAGES_OFFSET);
+    fn emit_terminal_voltage_load(
+        &mut self,
+        dst: Xmm,
+        index: usize,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
+        self.emit_context_pointer_load_cached(VOLTAGES_OFFSET, context_pointer_cache);
         self.encoder
             .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
         Ok(())
     }
 
-    fn emit_internal_voltage_load(&mut self, dst: Xmm, index: usize) -> JitResult<()> {
-        self.emit_context_pointer_load(INTERNAL_VOLTAGES_OFFSET);
+    fn emit_internal_voltage_load(
+        &mut self,
+        dst: Xmm,
+        index: usize,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
+        self.emit_context_pointer_load_cached(INTERNAL_VOLTAGES_OFFSET, context_pointer_cache);
         self.encoder
             .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
         Ok(())
@@ -3299,6 +3344,7 @@ fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
             | NativeOp::LoadParam(_)
             | NativeOp::LoadParamGiven(_)
             | NativeOp::LoadPortConnected(_)
+            | NativeOp::LoadVoltage { .. }
             | NativeOp::LoadCurrent(_)
             | NativeOp::LoadPriorCurrent(_)
             | NativeOp::LoadInternalVoltage(_)
@@ -5518,6 +5564,68 @@ mod tests {
         let ctx = eval_context(&[], &[11.0, 0.0], &[2.5], &[]);
 
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 8.5_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_voltage_bases_across_pure_arithmetic() {
+        let cases = [
+            (
+                "terminal",
+                native_program(
+                    EntryKind::StampValue,
+                    vec![
+                        Instruction::PushVoltage(0, 1),
+                        Instruction::PushVoltage(2, 3),
+                        Instruction::Add,
+                    ],
+                    4,
+                ),
+                eval_context(&[], &[9.0, 4.0, 12.0, 2.0], &[], &[]),
+                VOLTAGES_OFFSET,
+                INTERNAL_VOLTAGES_OFFSET,
+                15.0_f64,
+            ),
+            (
+                "internal",
+                native_program_with_internals(
+                    EntryKind::StampValue,
+                    vec![
+                        Instruction::PushVoltage(4, 5),
+                        Instruction::PushVoltage(6, 7),
+                        Instruction::Add,
+                    ],
+                    4,
+                    4,
+                ),
+                eval_context(&[], &[0.0, 0.0, 0.0, 0.0], &[8.0, 3.0, 11.0, 2.0], &[]),
+                INTERNAL_VOLTAGES_OFFSET,
+                VOLTAGES_OFFSET,
+                14.0_f64,
+            ),
+        ];
+
+        for (name, program, ctx, reused_offset, unused_offset, expected) in cases {
+            let bytes =
+                compile_value_function(&program).expect("compile repeated voltage expression leaf");
+            assert_eq!(
+                count_bytes(&bytes, &context_pointer_load_bytes(reused_offset)),
+                1,
+                "{name} repeated voltage loads should materialize their base pointer once"
+            );
+            assert_eq!(
+                count_bytes(&bytes, &context_pointer_load_bytes(unused_offset)),
+                0,
+                "{name} repeated voltage loads should not touch the other voltage storage"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate repeated voltage leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+
+            assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected.to_bits());
+        }
     }
 
     #[test]
