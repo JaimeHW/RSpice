@@ -1552,6 +1552,49 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_idt_current_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_idt_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ idt(V(p, n), 0.5);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("CIDTCANON1", model, &artifact, &[1, 0])
+            .expect("canonical idt current uses native JIT path");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[2.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("canonical idt DC evaluation succeeds")[0]
+            .to_bits(),
+        0.5_f64.to_bits()
+    );
+    device.advance_state();
+
+    device.set_analysis_type(2);
+    device.set_timestep(0.25);
+    device.update_voltages(&[2.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("canonical idt transient evaluation succeeds")[0]
+            .to_bits(),
+        1.0_f64.to_bits()
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_stamps_assignment_fed_variable_without_fallback() {
     let source = r#"
 `include "disciplines.vams"
