@@ -5722,6 +5722,46 @@ fn stamp() {
             "{mul_sub_rhs}"
         );
 
+        let mul_add_indices = helper_body(&support, "fn store_mul_add_indices(");
+        assert!(
+            !mul_add_indices.contains("_node_derivatives = self.node_derivatives"),
+            "{mul_add_indices}"
+        );
+        assert!(
+            !mul_add_indices.contains("_branch_derivatives = self.branch_derivatives"),
+            "{mul_add_indices}"
+        );
+        assert!(
+            !mul_add_indices.contains("store_mul_add_components"),
+            "{mul_add_indices}"
+        );
+        assert!(
+            mul_add_indices.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[factor][axis] * sum + factor_value * (self.node_derivatives[left][axis] + self.node_derivatives[right][axis]);"
+            ),
+            "{mul_add_indices}"
+        );
+
+        let mul_sub_mixed_iai = helper_body(&support, "fn store_mul_sub_mixed_iai(");
+        assert!(
+            !mul_sub_mixed_iai.contains("_node_derivatives = self.node_derivatives"),
+            "{mul_sub_mixed_iai}"
+        );
+        assert!(
+            !mul_sub_mixed_iai.contains("_branch_derivatives = self.branch_derivatives"),
+            "{mul_sub_mixed_iai}"
+        );
+        assert!(
+            !mul_sub_mixed_iai.contains("store_mul_sub_components"),
+            "{mul_sub_mixed_iai}"
+        );
+        assert!(
+            mul_sub_mixed_iai.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[factor][axis] * difference + factor_value * (left.node_derivatives[axis] - self.node_derivatives[right][axis]);"
+            ),
+            "{mul_sub_mixed_iai}"
+        );
+
         let scaled_add = helper_body(&support, "fn store_scaled_add(");
         assert!(
             !scaled_add.contains("_node_derivatives = self.node_derivatives"),
@@ -6757,14 +6797,20 @@ fn stamp() {
     fn rewrites_add_sub_multiply_stores_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
         for helper in [
-            "fn store_mul_add_components",
-            "fn store_mul_sub_components",
             "fn store_mul_sub_by_sub",
             "fn store_mul_sub_mixed_aii",
             "fn store_mul_add_mixed_aai",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
+        assert!(
+            !support.contains("fn store_mul_add_components"),
+            "{support}"
+        );
+        assert!(
+            !support.contains("fn store_mul_sub_components"),
+            "{support}"
+        );
 
         let source = r#"
 fn stamp() {
@@ -15709,16 +15755,11 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_add_components(&mut self, index: usize, factor_value: f64, factor_node_derivatives: [f64; Instance::NODE_COUNT], factor_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_value: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
-    "        let add_value = left_value + right_value;",
-    "        self.values[index] = factor_value * add_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor_node_derivatives[axis] * add_value + factor_value * (left_node_derivatives[axis] + right_node_derivatives[axis]); }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor_branch_derivatives[axis] * add_value + factor_value * (left_branch_derivatives[axis] + right_branch_derivatives[axis]); }",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_add(&mut self, index: usize, factor: AdValue, left: AdValue, right: AdValue) {",
-    "        self.store_mul_add_components(index, factor.value, factor.node_derivatives, factor.branch_derivatives, left.value, left.node_derivatives, left.branch_derivatives, right.value, right.node_derivatives, right.branch_derivatives);",
+    "        let sum = left.value + right.value;",
+    "        self.values[index] = factor.value * sum;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor.node_derivatives[axis] * sum + factor.value * (left.node_derivatives[axis] + right.node_derivatives[axis]); }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor.branch_derivatives[axis] * sum + factor.value * (left.branch_derivatives[axis] + right.branch_derivatives[axis]); }",
     "    }",
     "",
     "    #[inline]",
@@ -15743,16 +15784,11 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_sub_components(&mut self, index: usize, factor_value: f64, factor_node_derivatives: [f64; Instance::NODE_COUNT], factor_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_value: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
-    "        let sub_value = left_value - right_value;",
-    "        self.values[index] = factor_value * sub_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor_node_derivatives[axis] * sub_value + factor_value * (left_node_derivatives[axis] - right_node_derivatives[axis]); }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor_branch_derivatives[axis] * sub_value + factor_value * (left_branch_derivatives[axis] - right_branch_derivatives[axis]); }",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_sub(&mut self, index: usize, factor: AdValue, left: AdValue, right: AdValue) {",
-    "        self.store_mul_sub_components(index, factor.value, factor.node_derivatives, factor.branch_derivatives, left.value, left.node_derivatives, left.branch_derivatives, right.value, right.node_derivatives, right.branch_derivatives);",
+    "        let difference = left.value - right.value;",
+    "        self.values[index] = factor.value * difference;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor.node_derivatives[axis] * difference + factor.value * (left.node_derivatives[axis] - right.node_derivatives[axis]); }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor.branch_derivatives[axis] * difference + factor.value * (left.branch_derivatives[axis] - right.branch_derivatives[axis]); }",
     "    }",
     "",
     "    #[inline]",
@@ -20163,19 +20199,33 @@ fn generate_index_or_mixed_mul_pow_helper(mask: &str) -> String {
 }
 
 fn generate_index_or_mixed_mul_add_sub_helper(mask: &str, base: &str) -> String {
-    let operands = ["factor", "left", "right"];
     let helper = index_or_mixed_helper_name(base, mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let factor = mixed_helper_component_args(mask, 0, "factor");
-    let left = mixed_helper_component_args(mask, 1, "left");
-    let right = mixed_helper_component_args(mask, 2, "right");
-    let components = format!("{base}_components");
+    let factor_value = mixed_helper_value_expr(mask, 0, "factor");
+    let left_value = mixed_helper_value_expr(mask, 1, "left");
+    let right_value = mixed_helper_value_expr(mask, 2, "right");
+    let factor_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "factor");
+    let left_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "left");
+    let right_node_derivative = mixed_helper_node_derivative_expr(mask, 2, "right");
+    let factor_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "factor");
+    let left_branch_derivative = mixed_helper_branch_derivative_expr(mask, 1, "left");
+    let right_branch_derivative = mixed_helper_branch_derivative_expr(mask, 2, "right");
+    let (combined_name, operator) = if base == "store_mul_add" {
+        ("sum", "+")
+    } else {
+        ("difference", "-")
+    };
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, factor: {factor_ty}, left: {left_ty}, right: {right_ty}) {{
-{locals}        self.{components}(index, {factor}, {left}, {right});
+        let factor_value = {factor_value};
+        let left_value = {left_value};
+        let right_value = {right_value};
+        let {combined_name} = left_value {operator} right_value;
+        self.values[index] = factor_value * {combined_name};
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {factor_node_derivative} * {combined_name} + factor_value * ({left_node_derivative} {operator} {right_node_derivative}); }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {factor_branch_derivative} * {combined_name} + factor_value * ({left_branch_derivative} {operator} {right_branch_derivative}); }}
     }}
 "#,
         factor_ty = mixed_helper_type(mask, 0),
