@@ -3356,6 +3356,40 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_elides_reciprocal_power_helper_call() {
+        for instruction in [Instruction::Pow, Instruction::FnPow] {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(-1.0),
+                    instruction,
+                ],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile reciprocal power leaf");
+
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "constant-minus-one power should not pay helper-call prologue cost"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate reciprocal power native leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = -0.0;
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                f64::NEG_INFINITY.to_bits()
+            );
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_loads_dynamic_variable_and_preserves_stack() {
         let program = native_program(
             EntryKind::StampValue,
