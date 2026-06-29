@@ -8799,6 +8799,233 @@ mod tests {
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 20.0_f64.to_bits());
     }
 
+    #[test]
+    #[ignore = "release-only direct native x64 throughput probe; run with --release --features native -- --ignored --nocapture"]
+    fn native_x64_microbench_reports_direct_call_throughput() {
+        assert!(
+            !cfg!(debug_assertions),
+            "native x64 microbench is release-only; rerun with --release"
+        );
+        let iterations = native_microbench_iterations();
+        let samples = native_microbench_samples();
+        eprintln!("native-x64-microbench iterations={iterations} samples={samples}");
+
+        let params = [1.25_f64, 3.5, 13.75, 6.25];
+        let vars = [7.0_f64, 10.0, 20.0, 30.0, 40.0];
+        let dyn_vars = [2.0_f64, 10.0, 20.0, 30.0, 40.0];
+        let voltages = [9.0_f64, 4.0, 12.0, 2.0];
+        let branch_currents = [f64::NAN, 4.0_f64, 6.5_f64];
+        let mut ctx = eval_context(&params, &voltages, &[], &[]);
+        ctx.temperature = 300.0;
+        ctx.branch_currents = branch_currents.as_ptr();
+        ctx.branch_currents_len = branch_currents.len();
+
+        run_native_value_microbench(
+            "constant_leaf",
+            native_program(EntryKind::StampValue, vec![Instruction::PushConst(1.0)], 0),
+            &ctx,
+            std::ptr::null(),
+            iterations,
+            samples,
+            1.0,
+        );
+        run_native_value_microbench(
+            "arithmetic_context",
+            native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushParam(0),
+                    Instruction::PushParam(1),
+                    Instruction::Mul,
+                    Instruction::PushVariable(0),
+                    Instruction::Add,
+                    Instruction::PushVoltage(0, 1),
+                    Instruction::Add,
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(0.01),
+                    Instruction::Mul,
+                    Instruction::Add,
+                ],
+                2,
+            ),
+            &ctx,
+            vars.as_ptr(),
+            iterations,
+            samples,
+            19.375,
+        );
+        run_native_value_microbench(
+            "same_storage_voltage_pair",
+            native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushVoltage(0, 1),
+                    Instruction::PushVoltage(2, 3),
+                    Instruction::Add,
+                ],
+                4,
+            ),
+            &ctx,
+            std::ptr::null(),
+            iterations,
+            samples,
+            15.0,
+        );
+        run_native_value_microbench(
+            "dynamic_index_inline",
+            native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushVariable(0),
+                    Instruction::PushVariableDyn {
+                        base: 1,
+                        len: 4,
+                        lower: 0,
+                    },
+                    Instruction::PushParam(0),
+                    Instruction::Add,
+                ],
+                0,
+            ),
+            &ctx,
+            dyn_vars.as_ptr(),
+            iterations,
+            samples,
+            31.25,
+        );
+        run_native_value_microbench(
+            "integer_bitwise",
+            native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushParam(2),
+                    Instruction::PushParam(3),
+                    Instruction::BitAnd,
+                    Instruction::PushVariable(0),
+                    Instruction::Add,
+                ],
+                0,
+            ),
+            &ctx,
+            vars.as_ptr(),
+            iterations,
+            samples,
+            11.0,
+        );
+        run_native_value_microbench(
+            "guarded_current_pair",
+            NativeProgram::from_ops_for_test(
+                vec![
+                    NativeOp::LoadCurrent(1),
+                    NativeOp::LoadCurrent(2),
+                    NativeOp::Add,
+                ],
+                2,
+                vec![1, 2],
+                Vec::new(),
+            ),
+            &ctx,
+            std::ptr::null(),
+            iterations,
+            samples,
+            10.5,
+        );
+
+        let state_vars = [2.0_f64];
+        let previous_state = [0.0_f64, 1.5_f64];
+        let mut state_values = [0.0_f64, 0.0_f64];
+        let mut state_ctx = eval_context(&[], &[], &[], &[]);
+        state_ctx.timestep = 0.25;
+        state_ctx.state_prev = previous_state.as_ptr();
+        state_ctx.state_prev_len = previous_state.len();
+        state_ctx.state_values = state_values.as_mut_ptr();
+        state_ctx.state_values_len = state_values.len();
+        run_native_value_microbench(
+            "stateful_ddt",
+            native_program(
+                EntryKind::StampValue,
+                vec![Instruction::PushVariable(0), Instruction::DdtState(1)],
+                0,
+            ),
+            &state_ctx,
+            state_vars.as_ptr(),
+            iterations,
+            samples,
+            2.0,
+        );
+    }
+
+    fn run_native_value_microbench(
+        name: &str,
+        program: NativeProgram,
+        ctx: &EvalContext,
+        vars: *const f64,
+        iterations: usize,
+        samples: usize,
+        expected: f64,
+    ) {
+        let bytes = compile_value_function(&program).expect("compile native microbench leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate native microbench leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        assert_f64_matches(f(ctx, vars), expected, name);
+
+        let warmup_iterations = iterations / 10;
+        let warmup_checksum = run_native_microbench_sample(f, ctx, vars, warmup_iterations.max(1));
+        assert!(
+            warmup_checksum.is_finite(),
+            "{name}: native microbench warmup checksum must stay finite"
+        );
+
+        let mut sample_ns_per_eval = Vec::with_capacity(samples);
+        let mut checksum = 0.0_f64;
+        for _ in 0..samples {
+            let start = std::time::Instant::now();
+            checksum += run_native_microbench_sample(f, ctx, vars, iterations);
+            let elapsed = start.elapsed();
+            sample_ns_per_eval.push(elapsed.as_nanos() as f64 / iterations as f64);
+        }
+        sample_ns_per_eval.sort_by(|left, right| left.total_cmp(right));
+        let min_ns_per_eval = sample_ns_per_eval[0];
+        let median_ns_per_eval = sample_ns_per_eval[sample_ns_per_eval.len() / 2];
+        let checksum = std::hint::black_box(checksum);
+        assert!(
+            checksum.is_finite(),
+            "{name}: native microbench checksum must stay finite"
+        );
+        eprintln!(
+            "native-x64-microbench case={name} code_bytes={} min_ns_per_eval={min_ns_per_eval:.3} median_ns_per_eval={median_ns_per_eval:.3} checksum={checksum:.17e}",
+            bytes.len(),
+        );
+
+        std::hint::black_box(memory);
+    }
+
+    fn run_native_microbench_sample(
+        f: extern "C" fn(*const EvalContext, *const f64) -> f64,
+        ctx: &EvalContext,
+        vars: *const f64,
+        iterations: usize,
+    ) -> f64 {
+        let mut checksum = 0.0_f64;
+        for _ in 0..iterations {
+            checksum += std::hint::black_box(f(
+                std::hint::black_box(ctx as *const EvalContext),
+                std::hint::black_box(vars),
+            ));
+        }
+        std::hint::black_box(checksum)
+    }
+
+    fn native_microbench_iterations() -> usize {
+        5_000_000
+    }
+
+    fn native_microbench_samples() -> usize {
+        5
+    }
+
     fn native_program(
         entry_kind: EntryKind,
         instructions: Vec<Instruction>,
