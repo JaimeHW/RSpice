@@ -22,6 +22,8 @@ pub(crate) struct NativeEntryOffsets {
     pub stamp_values: Vec<CodeOffset>,
     pub jacobians: Vec<Vec<CodeOffset>>,
     pub reactive_jacobians: Vec<Vec<CodeOffset>>,
+    pub noise_psd: Vec<CodeOffset>,
+    pub noise_exponents: Vec<Option<CodeOffset>>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -29,6 +31,8 @@ pub(crate) struct NativeCurrentDependencies {
     pub stamp_values: Vec<Vec<usize>>,
     pub jacobians: Vec<Vec<Vec<usize>>>,
     pub reactive_jacobians: Vec<Vec<Vec<usize>>>,
+    pub noise_psd: Vec<Vec<usize>>,
+    pub noise_exponents: Vec<Vec<usize>>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +43,7 @@ pub struct PlanStats {
     pub stamp_value_entry_points: usize,
     pub jacobian_entry_points: usize,
     pub reactive_jacobian_entry_points: usize,
+    pub noise_source_entry_points: usize,
 }
 
 pub struct NativeModel {
@@ -98,6 +103,8 @@ impl NativeModel {
         let reactive_jacobian_entry_points = entries.reactive_jacobians.iter().map(Vec::len).sum();
         let parameter_default_entry_points = entries.parameter_defaults.iter().flatten().count();
         let static_condition_entry_points = entries.static_conditions.iter().flatten().count();
+        let noise_source_entry_points =
+            entries.noise_psd.len() + entries.noise_exponents.iter().flatten().count();
         let stats = PlanStats {
             assignment_entry_points: 1,
             parameter_default_entry_points,
@@ -105,6 +112,7 @@ impl NativeModel {
             stamp_value_entry_points: entries.stamp_values.len(),
             jacobian_entry_points,
             reactive_jacobian_entry_points,
+            noise_source_entry_points,
         };
 
         Ok(Self {
@@ -142,6 +150,8 @@ impl NativeModel {
                 .into_iter()
                 .map(|count| vec![reactive_jacobian_entry; count])
                 .collect(),
+            noise_psd: vec![],
+            noise_exponents: vec![],
         };
 
         Self::from_executable_image(num_variables, 0, image, entries)
@@ -171,6 +181,12 @@ impl NativeModel {
                 detail: "static-condition entry shape does not match stamp entry shape".into(),
             });
         }
+        if entries.noise_exponents.len() != entries.noise_psd.len() {
+            return Err(JitError::InternalCompilerError {
+                model: "native-model".into(),
+                detail: "noise exponent entry shape does not match noise PSD entry shape".into(),
+            });
+        }
 
         Self::validate_entry_offset(entries.assignment, image_len)?;
         for offset in entries.parameter_defaults.iter().flatten() {
@@ -191,6 +207,12 @@ impl NativeModel {
             for offset in stamp_entries {
                 Self::validate_entry_offset(*offset, image_len)?;
             }
+        }
+        for offset in &entries.noise_psd {
+            Self::validate_entry_offset(*offset, image_len)?;
+        }
+        for offset in entries.noise_exponents.iter().flatten() {
+            Self::validate_entry_offset(*offset, image_len)?;
         }
         Ok(())
     }
@@ -222,6 +244,8 @@ impl NativeModel {
                 .iter()
                 .map(|entries| vec![Vec::new(); entries.len()])
                 .collect(),
+            noise_psd: vec![Vec::new(); entries.noise_psd.len()],
+            noise_exponents: vec![Vec::new(); entries.noise_exponents.len()],
         }
     }
 
@@ -242,6 +266,8 @@ impl NativeModel {
                 .iter()
                 .zip(&entries.reactive_jacobians)
                 .any(|(dependencies, entries)| dependencies.len() != entries.len())
+            || dependencies.noise_psd.len() != entries.noise_psd.len()
+            || dependencies.noise_exponents.len() != entries.noise_exponents.len()
         {
             return Err(JitError::InternalCompilerError {
                 model: "native-model".into(),
@@ -326,6 +352,30 @@ impl NativeModel {
 
     pub(crate) fn reactive_jacobian_current_pairs(&self, stamp: usize, entry: usize) -> &[usize] {
         &self.current_dependencies.reactive_jacobians[stamp][entry]
+    }
+
+    pub(crate) fn run_noise_psd(&self, index: usize, ctx: &EvalContext, vars: *const f64) -> f64 {
+        self.run_value_entry(self.entries.noise_psd[index], ctx, vars)
+    }
+
+    pub(crate) fn noise_psd_current_pairs(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.noise_psd[index]
+    }
+
+    pub(crate) fn run_noise_exponent(
+        &self,
+        index: usize,
+        ctx: &EvalContext,
+        vars: *const f64,
+    ) -> Option<f64> {
+        self.entries
+            .noise_exponents
+            .get(index)
+            .and_then(|offset| offset.map(|offset| self.run_value_entry(offset, ctx, vars)))
+    }
+
+    pub(crate) fn noise_exponent_current_pairs(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.noise_exponents[index]
     }
 
     fn run_value_entry(&self, offset: CodeOffset, ctx: &EvalContext, vars: *const f64) -> f64 {
@@ -413,6 +463,8 @@ mod tests {
                 stamp_values: vec![stamp_entry],
                 jacobians: vec![vec![jacobian_entry]],
                 reactive_jacobians: vec![vec![reactive_jacobian_entry]],
+                noise_psd: vec![],
+                noise_exponents: vec![],
             },
         )
         .expect("publish owned native model");
@@ -448,6 +500,8 @@ mod tests {
                 stamp_values: vec![],
                 jacobians: vec![],
                 reactive_jacobians: vec![],
+                noise_psd: vec![],
+                noise_exponents: vec![],
             },
         )
         .expect_err("entry at image length must be rejected");
@@ -470,6 +524,8 @@ mod tests {
                 stamp_values: vec![],
                 jacobians: vec![],
                 reactive_jacobians: vec![],
+                noise_psd: vec![],
+                noise_exponents: vec![],
             },
         )
         .expect_err("missing parameter-default slot must be rejected");

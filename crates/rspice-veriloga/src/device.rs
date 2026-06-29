@@ -39,6 +39,8 @@ enum NativeValueEntry {
     StampValue(usize),
     Jacobian { stamp: usize, entry: usize },
     ReactiveJacobian { stamp: usize, entry: usize },
+    NoisePsd(usize),
+    NoiseExponent(usize),
 }
 
 #[cfg(feature = "native")]
@@ -1295,6 +1297,8 @@ impl VerilogADevice {
             NativeValueEntry::ReactiveJacobian { stamp, entry } => {
                 native.reactive_jacobian_current_pairs(stamp, entry)
             }
+            NativeValueEntry::NoisePsd(index) => native.noise_psd_current_pairs(index),
+            NativeValueEntry::NoiseExponent(index) => native.noise_exponent_current_pairs(index),
         };
         Self::validate_native_current_pairs(vm.context, current_pairs)?;
 
@@ -1315,6 +1319,12 @@ impl VerilogADevice {
             NativeValueEntry::ReactiveJacobian { stamp, entry } => {
                 native.run_reactive_jacobian(stamp, entry, &ctx, vars_ptr)
             }
+            NativeValueEntry::NoisePsd(index) => native.run_noise_psd(index, &ctx, vars_ptr),
+            NativeValueEntry::NoiseExponent(index) => native
+                .run_noise_exponent(index, &ctx, vars_ptr)
+                .ok_or_else(|| {
+                    VmError::InvalidInstruction("missing native noise exponent entry")
+                })?,
         };
         if let Some(error) = take_native_runtime_error() {
             return Err(VmError::NativeJit(error));
@@ -1793,17 +1803,86 @@ impl VerilogADevice {
     ) -> Result<Vec<EvaluatedNoiseSource>, VmError> {
         self.try_update_all_voltages(circuit_voltages)?;
 
-        if !self.model.noise_sources.is_empty() {
-            return Err(VmError::NativeJit(
-                crate::native::JitError::unsupported_native_coverage(
-                    self.model.name.clone(),
-                    "NoiseSources",
-                )
-                .to_string(),
-            ));
-        }
+        let context = &mut self.context;
+        let model = &self.model;
+        let program_active = &self.program_active;
+        let native = self.native_model.as_ref();
 
-        Ok(Vec::new())
+        context.clear_currents();
+        let mut vm = Vm::new(context);
+        Self::run_assignment_pass(&mut vm, model, native)?;
+
+        let circuit_node = |index: &StampIndex| -> usize {
+            match index {
+                StampIndex::Terminal(t) => self.node_mapping.get(*t).copied().unwrap_or(0),
+                StampIndex::Internal(i) => self.internal_node_indices.get(*i).copied().unwrap_or(0),
+                StampIndex::Branch(k) => self.branch_current_indices.get(*k).copied().unwrap_or(0),
+                StampIndex::Ground => 0,
+            }
+        };
+
+        let mut sources = Vec::with_capacity(model.noise_sources.len());
+        for (idx, source) in model.noise_sources.iter().enumerate() {
+            if !program_active
+                .get(source.program_idx)
+                .copied()
+                .unwrap_or(true)
+            {
+                continue;
+            }
+            let psd = Self::run_value_program(
+                &mut vm,
+                &source.psd_program,
+                native,
+                NativeValueEntry::NoisePsd(idx),
+            )?;
+            if !psd.is_finite() {
+                continue;
+            }
+            let psd = psd.max(0.0);
+            if psd == 0.0 {
+                continue;
+            }
+            let m = vm.context.multiplicity;
+            let psd = if source.is_current { psd * m } else { psd / m };
+            let exponent = source
+                .exponent_program
+                .as_ref()
+                .map(|program| {
+                    Self::run_value_program(
+                        &mut vm,
+                        program,
+                        native,
+                        NativeValueEntry::NoiseExponent(idx),
+                    )
+                })
+                .transpose()?;
+
+            let (node_pos, node_neg) = match (source.is_current, source.branch_ordinal) {
+                (false, Some(ordinal)) => (
+                    self.branch_current_indices
+                        .get(ordinal)
+                        .copied()
+                        .unwrap_or(0),
+                    0,
+                ),
+                _ => (circuit_node(&source.pos), circuit_node(&source.neg)),
+            };
+
+            sources.push(EvaluatedNoiseSource {
+                node_pos,
+                node_neg,
+                psd,
+                exponent,
+                table: source.table.clone(),
+                name: source
+                    .name
+                    .as_ref()
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| format!("noise{idx}")),
+            });
+        }
+        Ok(sources)
     }
 
     /// Checked noise-source evaluation path for callers that can surface

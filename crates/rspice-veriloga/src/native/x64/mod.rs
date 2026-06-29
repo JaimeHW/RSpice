@@ -64,6 +64,10 @@ fn compile_model_inner(
     let mut jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut reactive_jacobians = Vec::with_capacity(model.stamp_programs.len());
     let mut reactive_jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
+    let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_psd_current_dependencies = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_exponents = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_exponent_current_dependencies = Vec::with_capacity(model.noise_sources.len());
     let mut available_current_pairs = Vec::new();
 
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
@@ -147,6 +151,33 @@ fn compile_model_inner(
         }
     }
 
+    for source in &model.noise_sources {
+        let psd_program = NativeProgram::from_bytecode(
+            model.name.clone(),
+            EntryKind::StampValue,
+            &source.psd_program,
+            base_limits,
+        )?;
+        noise_psd_current_dependencies.push(psd_program.current_pair_dependencies().to_vec());
+        noise_psd.push(append_value_entry(&mut image, &psd_program)?);
+
+        let exponent_entry = if let Some(program) = &source.exponent_program {
+            let exponent_program = NativeProgram::from_bytecode(
+                model.name.clone(),
+                EntryKind::StampValue,
+                program,
+                base_limits,
+            )?;
+            noise_exponent_current_dependencies
+                .push(exponent_program.current_pair_dependencies().to_vec());
+            Some(append_value_entry(&mut image, &exponent_program)?)
+        } else {
+            noise_exponent_current_dependencies.push(Vec::new());
+            None
+        };
+        noise_exponents.push(exponent_entry);
+    }
+
     let executable = ExecutableMemory::allocate(&image)?;
     NativeModel::from_executable_image_with_dependencies(
         model.num_variables,
@@ -159,11 +190,15 @@ fn compile_model_inner(
             stamp_values,
             jacobians,
             reactive_jacobians,
+            noise_psd,
+            noise_exponents,
         },
         NativeCurrentDependencies {
             stamp_values: stamp_value_current_dependencies,
             jacobians: jacobian_current_dependencies,
             reactive_jacobians: reactive_jacobian_current_dependencies,
+            noise_psd: noise_psd_current_dependencies,
+            noise_exponents: noise_exponent_current_dependencies,
         },
     )
 }
