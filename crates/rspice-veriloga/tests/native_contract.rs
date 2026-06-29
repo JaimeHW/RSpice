@@ -2586,6 +2586,67 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_math_intrinsic_ddx_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_ddx_math(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ ddx(
+          log10(V(p, n) + 3.0)
+        + tan(V(p, n) * 0.1)
+        + sinh(V(p, n) * 0.2)
+        + cosh(V(p, n) * 0.15)
+        + tanh(V(p, n) * 0.3)
+        + asinh(V(p, n) * 0.4)
+        + acosh(V(p, n) + 2.0)
+        + atanh(V(p, n) * 0.1)
+        + asin(V(p, n) * 0.07)
+        + acos(V(p, n) * 0.05)
+        + atan(V(p, n) * 0.2)
+        + atan2(V(p, n), V(p, n) + 1.0),
+        V(p, n));
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("DDXMATHCANON1", model, &artifact, &[1, 0])
+            .expect("math-intrinsic ddx uses native analytic derivatives");
+    assert!(device.is_using_native());
+
+    let x = 0.4_f64;
+    device.update_voltages(&[x]);
+    let currents = device
+        .try_evaluate()
+        .expect("math-intrinsic canonical ddx current evaluation succeeds");
+    let expected = 1.0 / ((x + 3.0) * std::f64::consts::LN_10)
+        + 0.1 / (x * 0.1).cos().powi(2)
+        + 0.2 * (x * 0.2).cosh()
+        + 0.15 * (x * 0.15).sinh()
+        + 0.3 * (1.0 - (x * 0.3).tanh().powi(2))
+        + 0.4 / ((x * 0.4).powi(2) + 1.0).sqrt()
+        + 1.0 / ((x + 1.0).sqrt() * (x + 3.0).sqrt())
+        + 0.1 / (1.0 - (x * 0.1).powi(2))
+        + 0.07 / (1.0 - (x * 0.07).powi(2)).sqrt()
+        - 0.05 / (1.0 - (x * 0.05).powi(2)).sqrt()
+        + 0.2 / (1.0 + (x * 0.2).powi(2))
+        + 1.0 / ((x + 1.0).powi(2) + x.powi(2));
+    let delta = (currents[0] - expected).abs();
+    assert!(
+        delta <= 1.0e-10 * expected.abs().max(1.0),
+        "math ddx current mismatch: native={} expected={} delta={}",
+        currents[0],
+        expected,
+        delta
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_executes_limit_current_without_fallback() {
     let source = r#"
 `include "disciplines.vams"

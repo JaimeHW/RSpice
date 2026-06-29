@@ -2804,6 +2804,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower(args[0])?;
                 self.append_arithmetic("Div")
             }
+            "log10" => self.lower_log10_derivative(name, args, wrt),
             "sin" => {
                 self.require_intrinsic_arity(name, args, 1)?;
                 self.lower(args[0])?;
@@ -2819,6 +2820,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_derivative(args[0], wrt)?;
                 self.append_arithmetic("Mul")
             }
+            "tan" => self.lower_tan_derivative(name, args, wrt),
+            "sinh" => self.lower_unary_chain_derivative(name, args, wrt, UnaryMathOp::Cosh),
+            "cosh" => self.lower_unary_chain_derivative(name, args, wrt, UnaryMathOp::Sinh),
+            "tanh" => self.lower_tanh_derivative(name, args, wrt),
+            "asinh" => self.lower_asinh_derivative(name, args, wrt),
+            "acosh" => self.lower_acosh_derivative(name, args, wrt),
+            "atanh" => self.lower_atanh_derivative(name, args, wrt),
             "limexp" => {
                 self.require_intrinsic_arity(name, args, 1)?;
                 self.lower(args[0])?;
@@ -2840,6 +2848,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_derivative(args[1], wrt)?;
                 self.append_ifelse()
             }
+            "asin" => self.lower_asin_derivative(name, args, wrt),
+            "acos" => self.lower_acos_derivative(name, args, wrt),
+            "atan" => self.lower_atan_derivative(name, args, wrt),
+            "floor" | "ceil" => {
+                self.require_intrinsic_arity(name, args, 1)?;
+                self.push(NativeOp::Const(0.0))
+            }
+            "atan2" => self.lower_atan2_derivative(name, args, wrt),
             "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
             | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
             | "flicker_noise" => self.push(NativeOp::Const(0.0)),
@@ -2859,6 +2875,155 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_unary(NativeOp::UnaryMath(op))?;
         self.lower_derivative(args[0], wrt)?;
         self.append_arithmetic("Mul")
+    }
+
+    fn lower_log10_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: NodeId,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.lower_derivative(args[0], wrt)?;
+        self.push(NativeOp::Const(std::f64::consts::LN_10))?;
+        self.lower(args[0])?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_tan_derivative(&mut self, name: &str, args: &[ExprId], wrt: NodeId) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.lower_derivative(args[0], wrt)?;
+        self.lower(args[0])?;
+        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cos))?;
+        self.lower(args[0])?;
+        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cos))?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_tanh_derivative(&mut self, name: &str, args: &[ExprId], wrt: NodeId) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.push(NativeOp::Const(1.0))?;
+        self.lower(args[0])?;
+        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Tanh))?;
+        self.lower(args[0])?;
+        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Tanh))?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")?;
+        self.lower_derivative(args[0], wrt)?;
+        self.append_arithmetic("Mul")
+    }
+
+    fn lower_asinh_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: NodeId,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.lower_derivative(args[0], wrt)?;
+        self.lower_arg_square_plus_const(args[0], 1.0)?;
+        self.append_unary(NativeOp::Sqrt)?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_acosh_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: NodeId,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.lower_derivative(args[0], wrt)?;
+        self.lower(args[0])?;
+        self.push(NativeOp::Const(1.0))?;
+        self.append_arithmetic("Sub")?;
+        self.append_unary(NativeOp::Sqrt)?;
+        self.lower(args[0])?;
+        self.push(NativeOp::Const(1.0))?;
+        self.append_arithmetic("Add")?;
+        self.append_unary(NativeOp::Sqrt)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_atanh_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: NodeId,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.lower_derivative(args[0], wrt)?;
+        self.push(NativeOp::Const(1.0))?;
+        self.lower_arg_square(args[0])?;
+        self.append_arithmetic("Sub")?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_asin_derivative(&mut self, name: &str, args: &[ExprId], wrt: NodeId) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.lower_derivative(args[0], wrt)?;
+        self.push(NativeOp::Const(1.0))?;
+        self.lower_arg_square(args[0])?;
+        self.append_arithmetic("Sub")?;
+        self.append_unary(NativeOp::Sqrt)?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_acos_derivative(&mut self, name: &str, args: &[ExprId], wrt: NodeId) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.lower_derivative(args[0], wrt)?;
+        self.append_unary(NativeOp::Neg)?;
+        self.push(NativeOp::Const(1.0))?;
+        self.lower_arg_square(args[0])?;
+        self.append_arithmetic("Sub")?;
+        self.append_unary(NativeOp::Sqrt)?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_atan_derivative(&mut self, name: &str, args: &[ExprId], wrt: NodeId) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.lower_derivative(args[0], wrt)?;
+        self.lower_arg_square_plus_const(args[0], 1.0)?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_atan2_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: NodeId,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 2)?;
+        let y = args[0];
+        let x = args[1];
+
+        self.lower(x)?;
+        self.lower_derivative(y, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.lower(y)?;
+        self.lower_derivative(x, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")?;
+
+        self.lower_arg_square(x)?;
+        self.lower_arg_square(y)?;
+        self.append_arithmetic("Add")?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_arg_square(&mut self, arg: ExprId) -> JitResult<()> {
+        self.lower(arg)?;
+        self.lower(arg)?;
+        self.append_arithmetic("Mul")
+    }
+
+    fn lower_arg_square_plus_const(&mut self, arg: ExprId, constant: f64) -> JitResult<()> {
+        self.lower_arg_square(arg)?;
+        self.push(NativeOp::Const(constant))?;
+        self.append_arithmetic("Add")
     }
 
     fn lower_limited_exp_derivative(
