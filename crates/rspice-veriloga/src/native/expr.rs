@@ -2506,7 +2506,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | HirExprKind::StringLiteral { .. }
             | HirExprKind::ArrayLiteral { .. }
             | HirExprKind::NoiseSource { .. } => self.push(NativeOp::Const(0.0)),
-            HirExprKind::Identifier { name } => self.lower_identifier_derivative(name.as_str()),
+            HirExprKind::Identifier { name } => {
+                self.lower_identifier_derivative(name.as_str(), wrt)
+            }
             HirExprKind::BranchAccess { access, pos, neg } => self.lower_branch_access_derivative(
                 access.as_str(),
                 pos.as_str(),
@@ -2565,7 +2567,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
-    fn lower_identifier_derivative(&mut self, name: &str) -> JitResult<()> {
+    fn lower_identifier_derivative(&mut self, name: &str, wrt: NodeId) -> JitResult<()> {
         if self
             .mir
             .parameters
@@ -2580,7 +2582,22 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             .iter()
             .any(|variable| variable.as_str() == name)
         {
-            return Err(self.unsupported(format!("ddx derivative through variable {name}")));
+            let shadow_name = format!("{name}@d{}", usize::from(wrt));
+            if let Some(shadow_index) = self
+                .limits
+                .variable_names
+                .iter()
+                .position(|variable| variable.as_str() == shadow_name)
+            {
+                validate_index(
+                    self.model.clone(),
+                    "canonical variable derivative shadow",
+                    shadow_index,
+                    self.limits.variable_count,
+                )?;
+                return self.push(NativeOp::LoadVariable(shadow_index));
+            }
+            return self.push(NativeOp::Const(0.0));
         }
         Err(self.unsupported(format!("ddx derivative of identifier {name}")))
     }

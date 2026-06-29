@@ -1071,6 +1071,40 @@ endmodule
     )
 }
 
+fn dead_assignment_current_probe_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_dead_assignment_current_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    real op_i;
+    analog begin
+        I(p, n) <+ V(p, n);
+        op_i = I(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
+fn live_assignment_current_probe_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_live_assignment_current_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    real sensed;
+    analog begin
+        sensed = I(p, n);
+        I(p, n) <+ sensed;
+    end
+endmodule
+"#,
+    )
+}
+
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn native_compile_accepts_simple_resistor_subset() {
@@ -2386,7 +2420,7 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn native_device_with_canonical_ir_rejects_assignment_fed_ddx_without_fallback() {
+fn native_device_with_canonical_ir_executes_assignment_fed_ddx_without_fallback() {
     let source = r#"
 `include "disciplines.vams"
 module native_canonical_ddx_assignment_fed(p, n);
@@ -2404,14 +2438,16 @@ endmodule
     let artifact = compiler
         .compile_canonical_ir(source)
         .expect("compile canonical IR");
-    let err = VerilogADevice::try_new_with_canonical_ir("DDXVARCANON1", model, &artifact, &[1, 0])
-        .expect_err("assignment-fed ddx must fail closed until native derivative shadows exist");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("ddx derivative through variable x")
-            && msg.contains("no interpreter fallback"),
-        "unexpected error: {msg}"
-    );
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("DDXVARCANON1", model, &artifact, &[1, 0])
+            .expect("assignment-fed ddx uses native derivative shadows");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[3.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("assignment-fed canonical ddx current evaluation succeeds");
+    assert_eq!(currents[0].to_bits(), 6.0_f64.to_bits());
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -4386,6 +4422,39 @@ fn native_device_executes_single_ended_current_probes_in_source_order() {
     assert_eq!(currents.len(), 2);
     assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
     assert!((currents[1] - 0.4).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_prunes_dead_assignment_current_probe_without_fallback() {
+    let model = dead_assignment_current_probe_model();
+    let mut device = VerilogADevice::try_new("DACP1", model, &[1, 0])
+        .expect("dead assignment current probe is excluded from the native pre-stamp pass");
+    assert!(device.is_using_native());
+    device.update_voltages(&[4.0]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native dead-assignment current-probe evaluation succeeds");
+
+    assert_eq!(currents.len(), 1);
+    assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_rejects_live_assignment_current_probe_without_fallback() {
+    let model = live_assignment_current_probe_model();
+
+    let err = compile_native(&model)
+        .expect_err("live assignment current probe must not compile before currents exist");
+    let msg = err.to_string();
+
+    assert_native_hard_fail_message(&msg);
+    assert!(
+        msg.contains("assignments: PushCurrent terminal pair 0,1 unavailable"),
+        "unexpected error: {msg}"
+    );
 }
 
 #[cfg(target_arch = "x86_64")]

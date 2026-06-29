@@ -15,7 +15,9 @@ use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, Na
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
 use crate::canonical_ir::{CanonicalIrArtifact, EquationId, MirModel};
-use crate::codegen::{AssignmentStep, CompiledModel, StampIndex, StampProgram};
+use crate::codegen::{
+    AssignmentStep, BytecodeProgram, CompiledModel, Instruction, StampIndex, StampProgram,
+};
 use crate::native::x64::codegen::NativeAssignment;
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 
@@ -500,8 +502,8 @@ fn lower_stamp_value_program(
 }
 
 fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitResult<()> {
-    let assignments = model
-        .assignment_steps
+    let live_assignment_steps = live_native_assignment_steps(model);
+    let assignments = live_assignment_steps
         .iter()
         .map(|step| lower_assignment_step(model, step))
         .collect::<JitResult<Vec<_>>>()?;
@@ -513,6 +515,142 @@ fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitRes
     };
     image.extend_from_slice(&bytes);
     Ok(())
+}
+
+fn live_native_assignment_steps(model: &CompiledModel) -> Vec<AssignmentStep> {
+    let mut live = native_assignment_roots(model);
+    loop {
+        let mut changed = false;
+        propagate_assignment_liveness(&model.assignment_steps, &mut live, &mut changed);
+        if !changed {
+            break;
+        }
+    }
+    filter_live_assignment_steps(&model.assignment_steps, &live)
+}
+
+fn native_assignment_roots(model: &CompiledModel) -> Vec<bool> {
+    let mut live = vec![false; model.num_variables];
+    for stamp in &model.stamp_programs {
+        if let Some(condition) = &stamp.static_condition {
+            mark_program_variable_reads(condition, &mut live);
+        }
+        mark_program_variable_reads(&stamp.value_program, &mut live);
+        for jacobian in &stamp.jacobian_programs {
+            mark_program_variable_reads(&jacobian.program, &mut live);
+        }
+        for jacobian in &stamp.reactive_jacobians {
+            mark_program_variable_reads(&jacobian.program, &mut live);
+        }
+    }
+    for source in &model.noise_sources {
+        mark_program_variable_reads(&source.psd_program, &mut live);
+        if let Some(program) = &source.exponent_program {
+            mark_program_variable_reads(program, &mut live);
+        }
+    }
+    live
+}
+
+fn propagate_assignment_liveness(steps: &[AssignmentStep], live: &mut [bool], changed: &mut bool) {
+    for step in steps.iter().rev() {
+        match step {
+            AssignmentStep::Assign(assignment) => {
+                if assignment.var_index < live.len() && live[assignment.var_index] {
+                    mark_program_variable_reads_changed(&assignment.program, live, changed);
+                }
+            }
+            AssignmentStep::AssignIndexed {
+                base,
+                len,
+                index,
+                value,
+                ..
+            } => {
+                if assignment_range_live(*base, *len, live) {
+                    mark_program_variable_reads_changed(index, live, changed);
+                    mark_program_variable_reads_changed(value, live, changed);
+                }
+            }
+            AssignmentStep::Loop { condition, body } => {
+                propagate_assignment_liveness(body, live, changed);
+                if assignment_steps_write_live(body, live) {
+                    mark_program_variable_reads_changed(condition, live, changed);
+                }
+            }
+        }
+    }
+}
+
+fn filter_live_assignment_steps(steps: &[AssignmentStep], live: &[bool]) -> Vec<AssignmentStep> {
+    steps
+        .iter()
+        .filter_map(|step| match step {
+            AssignmentStep::Assign(assignment) => (assignment.var_index < live.len()
+                && live[assignment.var_index])
+                .then(|| step.clone()),
+            AssignmentStep::AssignIndexed { base, len, .. } => {
+                assignment_range_live(*base, *len, live).then(|| step.clone())
+            }
+            AssignmentStep::Loop { condition, body } => {
+                let body = filter_live_assignment_steps(body, live);
+                (!body.is_empty()).then(|| AssignmentStep::Loop {
+                    condition: condition.clone(),
+                    body,
+                })
+            }
+        })
+        .collect()
+}
+
+fn assignment_steps_write_live(steps: &[AssignmentStep], live: &[bool]) -> bool {
+    steps.iter().any(|step| match step {
+        AssignmentStep::Assign(assignment) => {
+            assignment.var_index < live.len() && live[assignment.var_index]
+        }
+        AssignmentStep::AssignIndexed { base, len, .. } => assignment_range_live(*base, *len, live),
+        AssignmentStep::Loop { body, .. } => assignment_steps_write_live(body, live),
+    })
+}
+
+fn assignment_range_live(base: usize, len: usize, live: &[bool]) -> bool {
+    base.checked_add(len)
+        .and_then(|end| live.get(base..end))
+        .is_some_and(|range| range.iter().any(|slot| *slot))
+}
+
+fn mark_program_variable_reads(program: &BytecodeProgram, live: &mut [bool]) {
+    let mut changed = false;
+    mark_program_variable_reads_changed(program, live, &mut changed);
+}
+
+fn mark_program_variable_reads_changed(
+    program: &BytecodeProgram,
+    live: &mut [bool],
+    changed: &mut bool,
+) {
+    for instruction in &program.instructions {
+        match *instruction {
+            Instruction::PushVariable(index) => mark_variable_live(index, live, changed),
+            Instruction::PushVariableDyn { base, len, .. } => {
+                if let Some(end) = base.checked_add(len) {
+                    for index in base..end.min(live.len()) {
+                        mark_variable_live(index, live, changed);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn mark_variable_live(index: usize, live: &mut [bool], changed: &mut bool) {
+    if let Some(slot) = live.get_mut(index)
+        && !*slot
+    {
+        *slot = true;
+        *changed = true;
+    }
 }
 
 fn lower_assignment_step(
@@ -958,6 +1096,11 @@ endmodule
                 shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "psp104.va"]),
                 Some("PSP104VA"),
             ),
+            (
+                "hicuml2",
+                shipped_cmc_model_path(&["hicumL2_v320_files", "hicumL2_v320.va"]),
+                Some("hicumL2va"),
+            ),
         ];
         let iterations = shipped_model_microbench_iterations();
         let samples = shipped_model_microbench_samples();
@@ -1344,7 +1487,8 @@ endmodule
         context.clear_currents();
         context.currents.resize(model.stamp_programs.len(), 0.0);
         let mut vm = Vm::new(&mut context);
-        execute_bytecode_assignment_steps(&mut vm, &model.assignment_steps)
+        let live_assignment_steps = super::live_native_assignment_steps(model);
+        execute_bytecode_assignment_steps(&mut vm, &live_assignment_steps)
             .map_err(|error| error.to_string())?;
 
         let mut prior_current_probes = Vec::new();
