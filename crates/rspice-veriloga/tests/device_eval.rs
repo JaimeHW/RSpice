@@ -822,6 +822,38 @@ endmodule
 }
 
 #[test]
+fn try_noise_sources_evaluates_current_probe_psd() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+
+module noise_current_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ V(p, n) * 2.0e-3
+            + white_noise(abs(I(p, n)) * 4.0, "shot");
+    end
+endmodule
+"#,
+    );
+
+    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    device.set_analysis_type(3);
+    let sources = device
+        .try_noise_sources(&[3.0])
+        .expect("checked current-probe noise evaluation");
+
+    let shot = sources
+        .iter()
+        .find(|source| source.name == "shot")
+        .expect("shot noise source");
+    assert_eq!(shot.node_pos, 1);
+    assert_eq!(shot.node_neg, 0);
+    assert!((shot.psd - 2.4e-2).abs() < 1.0e-15, "shot={shot:?}");
+}
+
+#[test]
 fn idtmod_wraps_the_integral() {
     // Phase accumulator: phi = idtmod(rate, 0, 1) folds into [0, 1)
     let model = compile(
