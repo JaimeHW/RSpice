@@ -7,9 +7,10 @@ use crate::native::abi::{
     rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10,
     rspice_mod, rspice_native_integer_shift_count_error, rspice_native_limit_state_bounds_error,
     rspice_native_limit_state_initialized_error, rspice_native_limit_state_values_error,
-    rspice_native_loop_limit_error, rspice_pow, rspice_sin, rspice_sinh, rspice_slew_state_native,
-    rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan, rspice_tanh,
-    rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
+    rspice_native_loop_limit_error, rspice_native_state_values_error, rspice_pow, rspice_sin,
+    rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
+    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
+    rspice_transition_state_native, rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -1161,15 +1162,7 @@ impl FunctionCompiler {
     }
 
     fn emit_integer_shift_count_error_return(&mut self) {
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
-        let helper: VoidHelper = rspice_native_integer_shift_count_error;
-        self.encoder
-            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
-        self.encoder.call_r64(Gpr::Rax);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
-        self.encoder.xorpd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm0);
-        let return_after_error = self.encoder.jmp_rel32_placeholder();
-        self.early_return_jumps.push(return_after_error);
+        self.emit_void_error_return(rspice_native_integer_shift_count_error);
     }
 
     fn emit_integer_bitwise_op(
@@ -1381,14 +1374,7 @@ impl FunctionCompiler {
     }
 
     fn emit_limit_state_error_return(&mut self, helper: VoidHelper) {
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
-        self.encoder
-            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
-        self.encoder.call_r64(Gpr::Rax);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
-        self.encoder.xorpd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm0);
-        let return_after_error = self.encoder.jmp_rel32_placeholder();
-        self.early_return_jumps.push(return_after_error);
+        self.emit_void_error_return(helper);
     }
 
     fn emit_white_noise(&mut self) -> JitResult<()> {
@@ -1707,10 +1693,30 @@ impl FunctionCompiler {
     fn emit_state_value_store(&mut self, state_disp: i32, src: Xmm) -> JitResult<()> {
         self.emit_context_pointer_load(STATE_VALUES_OFFSET);
         self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
-        let skip_store = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+        let missing_state = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
         self.encoder
             .movsd_m64_base_disp32_xmm(Gpr::Rax, state_disp, src);
-        self.patch_rel32_to_current(skip_store)
+        let done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(missing_state)?;
+        self.emit_state_values_error_return();
+
+        self.patch_rel32_to_current(done)
+    }
+
+    fn emit_state_values_error_return(&mut self) {
+        self.emit_void_error_return(rspice_native_state_values_error);
+    }
+
+    fn emit_void_error_return(&mut self, helper: VoidHelper) {
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.xorpd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm0);
+        let return_after_error = self.encoder.jmp_rel32_placeholder();
+        self.early_return_jumps.push(return_after_error);
     }
 
     fn emit_binary_helper_call(&mut self, left: Xmm, right: Xmm, helper: BinaryHelper) {
@@ -4336,6 +4342,12 @@ mod tests {
         ctx.state_prev = std::ptr::null();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
+
+        ctx.state_values = std::ptr::null_mut();
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("missing ddt state must hard-fail");
+        assert_missing_state_storage_error(&error);
     }
 
     #[test]
@@ -4414,6 +4426,13 @@ mod tests {
         ctx.timestep = f64::NAN;
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
+
+        ctx.state_values = std::ptr::null_mut();
+        ctx.timestep = 0.0;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("missing idt state must hard-fail");
+        assert_missing_state_storage_error(&error);
     }
 
     #[test]
@@ -4535,6 +4554,13 @@ mod tests {
             (state_values[1] - 1.4).abs() < 1.0e-12,
             "unwrapped state: {state_values:?}"
         );
+
+        ctx.state_values = std::ptr::null_mut();
+        ctx.timestep = 0.0;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("missing idtmod state must hard-fail");
+        assert_missing_state_storage_error(&error);
     }
 
     #[test]
@@ -6816,6 +6842,17 @@ mod tests {
         let mut encoder = X64Encoder::new();
         encoder.mov_r64_m64_base_disp32(Gpr::Rax, entry_ctx_arg_reg(), ctx_field_offset);
         encoder.into_bytes()
+    }
+
+    fn assert_missing_state_storage_error(error: &str) {
+        assert!(
+            error.contains("missing state storage"),
+            "error must identify missing native state storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
     }
 
     fn runtime_min(left: f64, right: f64) -> f64 {
