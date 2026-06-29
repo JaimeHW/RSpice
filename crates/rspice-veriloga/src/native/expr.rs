@@ -2089,6 +2089,62 @@ impl NativeProgram {
     pub(crate) fn prior_current_dependencies(&self) -> &[usize] {
         &self.prior_current_dependencies
     }
+
+    pub(crate) fn validate_dependency_metadata(&self) -> JitResult<()> {
+        let current_pair_dependencies = collect_current_pair_dependencies(&self.ops);
+        validate_dependency_list(
+            "current-pair",
+            &self.current_pair_dependencies,
+            &current_pair_dependencies,
+        )?;
+
+        let prior_current_dependencies = collect_prior_current_dependencies(&self.ops);
+        validate_dependency_list(
+            "prior-current",
+            &self.prior_current_dependencies,
+            &prior_current_dependencies,
+        )
+    }
+}
+
+fn collect_current_pair_dependencies(ops: &[NativeOp]) -> Vec<usize> {
+    let mut dependencies = Vec::new();
+    for op in ops {
+        if let NativeOp::LoadCurrent(index) = *op {
+            push_unique_dependency(&mut dependencies, index);
+        }
+    }
+    dependencies
+}
+
+fn collect_prior_current_dependencies(ops: &[NativeOp]) -> Vec<usize> {
+    let mut dependencies = Vec::new();
+    for op in ops {
+        if let NativeOp::LoadPriorCurrent(index) = *op {
+            push_unique_dependency(&mut dependencies, index);
+        }
+    }
+    dependencies
+}
+
+fn push_unique_dependency(dependencies: &mut Vec<usize>, index: usize) {
+    if !dependencies.contains(&index) {
+        dependencies.push(index);
+    }
+}
+
+fn validate_dependency_list(name: &str, recorded: &[usize], actual: &[usize]) -> JitResult<()> {
+    if recorded == actual {
+        return Ok(());
+    }
+
+    Err(JitError::InternalCompilerError {
+        model: "native-program".into(),
+        detail: format!(
+            "{name} dependency metadata mismatch: recorded {recorded:?}, op stream requires {actual:?}"
+        )
+        .into(),
+    })
 }
 
 struct MirEquationLowerer<'a, 'limits> {
@@ -5079,6 +5135,64 @@ mod tests {
     fn limits(terminal_count: usize, internal_node_count: usize) -> NativeLoweringLimits<'static> {
         NativeLoweringLimits::new(terminal_count, internal_node_count, 8, 8, 8)
             .with_lookup_table_count(8)
+    }
+
+    #[test]
+    fn native_program_dependency_metadata_accepts_matching_loads() {
+        let program = NativeProgram {
+            ops: vec![
+                NativeOp::LoadCurrent(4),
+                NativeOp::LoadCurrent(4),
+                NativeOp::LoadPriorCurrent(1),
+                NativeOp::LoadPriorCurrent(2),
+                NativeOp::LoadPriorCurrent(1),
+            ],
+            max_stack_depth: 5,
+            current_pair_dependencies: vec![4],
+            prior_current_dependencies: vec![1, 2],
+        };
+
+        program
+            .validate_dependency_metadata()
+            .expect("matching metadata must pass");
+    }
+
+    #[test]
+    fn native_program_dependency_metadata_rejects_missing_current_load() {
+        let program = NativeProgram {
+            ops: vec![NativeOp::LoadCurrent(4)],
+            max_stack_depth: 1,
+            current_pair_dependencies: Vec::new(),
+            prior_current_dependencies: Vec::new(),
+        };
+
+        let err = program
+            .validate_dependency_metadata()
+            .expect_err("missing current dependency must fail native compile");
+        let msg = err.to_string();
+        assert!(msg.contains("current-pair dependency metadata mismatch"));
+        assert!(msg.contains("recorded []"));
+        assert!(msg.contains("op stream requires [4]"));
+        assert!(msg.contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn native_program_dependency_metadata_rejects_stale_prior_current_load() {
+        let program = NativeProgram {
+            ops: vec![NativeOp::Const(1.0)],
+            max_stack_depth: 1,
+            current_pair_dependencies: Vec::new(),
+            prior_current_dependencies: vec![0],
+        };
+
+        let err = program
+            .validate_dependency_metadata()
+            .expect_err("stale prior-current dependency must fail native compile");
+        let msg = err.to_string();
+        assert!(msg.contains("prior-current dependency metadata mismatch"));
+        assert!(msg.contains("recorded [0]"));
+        assert!(msg.contains("op stream requires []"));
+        assert!(msg.contains("no interpreter fallback"));
     }
 
     fn analyzed_two_terminal_hir(module_name: &str, expression: Expression) -> HirModel {
