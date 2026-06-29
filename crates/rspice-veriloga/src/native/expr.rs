@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use super::{JitError, JitResult};
-use crate::canonical_ir::{EquationId, ExprId, HirExprKind, MirModel, NodeId};
+use crate::canonical_ir::{EquationId, ExprId, HirAnalogOperator, HirExprKind, MirModel, NodeId};
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
 use smol_str::SmolStr;
 
@@ -989,15 +989,29 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
                 self.lower_intrinsic_call(name.as_str(), args.as_slice())
             }
+            HirExprKind::AnalogOperator { op } => self.lower_analog_operator(op),
             HirExprKind::StringLiteral { .. }
             | HirExprKind::ArrayLiteral { .. }
-            | HirExprKind::AnalogOperator { .. }
             | HirExprKind::Laplace { .. }
             | HirExprKind::Zi { .. }
             | HirExprKind::NoiseSource { .. } => Err(self.unsupported(format!(
                 "expression kind {}",
                 expression_kind_name(&expression.kind)
             ))),
+        }
+    }
+
+    fn lower_analog_operator(&mut self, op: &HirAnalogOperator) -> JitResult<()> {
+        match op {
+            HirAnalogOperator::Limexp { expr } => {
+                self.lower(*expr)?;
+                if lower_constant_unary_math(&mut self.ops, UnaryMathOp::Limexp) {
+                    Ok(())
+                } else {
+                    self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Limexp))
+                }
+            }
+            _ => Err(self.unsupported(format!("analog operator {}", analog_operator_name(op)))),
         }
     }
 
@@ -1762,6 +1776,20 @@ fn expression_kind_name(kind: &HirExprKind) -> &'static str {
         HirExprKind::Laplace { .. } => "laplace",
         HirExprKind::Zi { .. } => "zi",
         HirExprKind::NoiseSource { .. } => "noise source",
+    }
+}
+
+fn analog_operator_name(op: &HirAnalogOperator) -> &'static str {
+    match op {
+        HirAnalogOperator::Ddt { .. } => "ddt",
+        HirAnalogOperator::Idt { .. } => "idt",
+        HirAnalogOperator::IdtMod { .. } => "idtmod",
+        HirAnalogOperator::Ddx { .. } => "ddx",
+        HirAnalogOperator::Limexp { .. } => "limexp",
+        HirAnalogOperator::Absdelay { .. } => "absdelay",
+        HirAnalogOperator::Transition { .. } => "transition",
+        HirAnalogOperator::Slew { .. } => "slew",
+        HirAnalogOperator::LastCrossing { .. } => "last_crossing",
     }
 }
 
@@ -2652,11 +2680,78 @@ fn integer_binary_op(instruction: &Instruction) -> IntegerBinaryOp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::{AnalogOperator, BranchAccess, Expression, PortDirection};
+    use crate::canonical_ir::{CanonicalMetadata, HirExprKind, HirModel, MirModel};
+    use crate::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
+    use crate::source::Span;
+    use crate::types::ValueType;
     use crate::{CompilerOptions, VerilogACompiler};
+    use std::collections::HashMap;
 
     fn limits(terminal_count: usize, internal_node_count: usize) -> NativeLoweringLimits<'static> {
         NativeLoweringLimits::new(terminal_count, internal_node_count, 8, 8, 8)
             .with_lookup_table_count(8)
+    }
+
+    fn explicit_analog_limexp_mir() -> MirModel {
+        let span = Span::dummy();
+        let analyzed = AnalyzedModule {
+            name: "mir_analog_limexp".into(),
+            ports: vec![
+                AnalyzedPort {
+                    name: "p".into(),
+                    direction: PortDirection::Inout,
+                    discipline: "electrical".into(),
+                    nature_potential: Some("voltage".into()),
+                    nature_flow: Some("current".into()),
+                },
+                AnalyzedPort {
+                    name: "n".into(),
+                    direction: PortDirection::Inout,
+                    discipline: "electrical".into(),
+                    nature_potential: Some("voltage".into()),
+                    nature_flow: Some("current".into()),
+                },
+            ],
+            parameters: Vec::new(),
+            param_aliases: Vec::new(),
+            variables: Vec::new(),
+            branches: Vec::new(),
+            contributions: vec![AnalyzedContribution {
+                branch: "p,n".into(),
+                declared_branch: None,
+                is_current: true,
+                indirect: false,
+                expression: Expression::AnalogOperator(AnalogOperator::Limexp {
+                    expr: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
+                        access: "V".into(),
+                        pos: "p".into(),
+                        neg: Some("n".into()),
+                        span,
+                    })),
+                    span,
+                }),
+                expr_type: ValueType::Real,
+                span,
+            }],
+            statements: Vec::new(),
+            internal_nodes: Vec::new(),
+            ground_nodes: Vec::new(),
+            arrays: HashMap::new(),
+            symbol_table: SymbolTable::new(),
+        };
+        let metadata = CanonicalMetadata::for_source("fixture", "explicit analog limexp");
+        let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+        let contribution_expr = &hir.contributions[0].expression;
+        assert!(
+            matches!(
+                hir.expressions[usize::from(contribution_expr.id)].kind,
+                HirExprKind::AnalogOperator { .. }
+            ),
+            "test fixture must preserve explicit canonical analog operator"
+        );
+
+        MirModel::from_hir(&hir).expect("lower explicit analog limexp HIR to MIR")
     }
 
     #[test]
@@ -3016,6 +3111,32 @@ endmodule
             NativeLoweringLimits::new(2, 0, 0, 0, 0),
         )
         .expect("lower canonical limexp to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::UnaryMath(UnaryMathOp::Limexp),
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_canonical_analog_limexp_operator_to_native_program() {
+        let mir = explicit_analog_limexp_mir();
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_analog_limexp",
+            EntryKind::StampValue,
+            &mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower explicit canonical analog limexp operator to native program");
 
         assert_eq!(
             program.ops(),
