@@ -58,10 +58,8 @@ const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = 1_i64 << 51;
 const DYNAMIC_READ_FRAME_BYTES: i32 = 16;
 const ROUND_TEMP_FRAME_BYTES: i32 = 16;
 const STATEFUL_SCRATCH_FRAME_BYTES: i32 = 16;
-const CALL_SPILL_SLOT_COUNT: usize = 7;
 #[cfg(test)]
 const CALL_RESULT_SLOT: usize = 6;
-const CALL_FRAME_BYTES: i32 = CALL_SHADOW_BYTES + (CALL_SPILL_SLOT_COUNT * WORD_BYTES) as i32;
 #[cfg(windows)]
 const CALL_SHADOW_BYTES: i32 = 32;
 #[cfg(not(windows))]
@@ -880,7 +878,11 @@ impl FunctionCompiler {
 
     fn emit_unary_helper_call(&mut self, target: Xmm, helper: UnaryHelper) {
         debug_assert!(self.uses_helper_calls);
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes =
+            call_frame_bytes_for_slots(call_frame_spill_slot_count(self.depth, |_, register| {
+                register != target
+            }));
+        self.encoder.sub_rsp_imm32(frame_bytes);
         self.emit_call_frame_spills(self.depth, |_, register| register != target);
 
         if target != Xmm::Xmm0 {
@@ -891,7 +893,7 @@ impl FunctionCompiler {
         self.encoder.call_r64(Gpr::Rax);
 
         self.emit_helper_result_to_target_and_restore(target, self.depth, |_, _| true);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
     }
 
     fn emit_helper_result_to_target_and_restore(
@@ -1021,7 +1023,8 @@ impl FunctionCompiler {
         len: usize,
         lower: i64,
     ) {
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes = call_frame_bytes_for_slots(0);
+        self.encoder.sub_rsp_imm32(frame_bytes);
         self.encoder
             .mov_r64_r64(dynamic_variable_base_arg_reg(), self.vars_arg_reg());
         if base_disp != 0 {
@@ -1036,7 +1039,7 @@ impl FunctionCompiler {
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
     }
 
     fn emit_dynamic_variable_slot_inline(
@@ -1082,7 +1085,8 @@ impl FunctionCompiler {
             Gpr::Rsp,
             INDEXED_ASSIGNMENT_SLOT_PTR_DISP,
         );
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes = call_frame_bytes_for_slots(0);
+        self.encoder.sub_rsp_imm32(frame_bytes);
         self.encoder
             .mov_r64_r64(dynamic_variable_base_arg_reg(), self.vars_arg_reg());
         if base_disp != 0 {
@@ -1097,7 +1101,7 @@ impl FunctionCompiler {
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
         let return_after_error = self.encoder.jmp_rel32_placeholder();
         self.early_return_jumps.push(return_after_error);
     }
@@ -1163,7 +1167,11 @@ impl FunctionCompiler {
         debug_assert!(xmm_stack_slot(target) < self.depth);
         let base_disp = byte_disp(base)?;
 
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes =
+            call_frame_bytes_for_slots(call_frame_spill_slot_count(self.depth, |_, register| {
+                register != target
+            }));
+        self.encoder.sub_rsp_imm32(frame_bytes);
         self.emit_call_frame_spills(self.depth, |_, register| register != target);
 
         if target != Xmm::Xmm0 {
@@ -1184,7 +1192,7 @@ impl FunctionCompiler {
         self.encoder.call_r64(Gpr::Rax);
 
         self.emit_helper_result_to_target_and_restore(target, self.depth, |_, _| true);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
         Ok(())
     }
 
@@ -1208,7 +1216,8 @@ impl FunctionCompiler {
         debug_assert!(self.uses_helper_calls);
         let base_disp = byte_disp(base)?;
 
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes = call_frame_bytes_for_slots(0);
+        self.encoder.sub_rsp_imm32(frame_bytes);
         self.encoder
             .mov_r64_r64(dynamic_variable_base_arg_reg(), self.vars_arg_reg());
         if base_disp != 0 {
@@ -1223,18 +1232,19 @@ impl FunctionCompiler {
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
         self.depth = 0;
         Ok(())
     }
 
     fn emit_runtime_loop_limit_error_call(&mut self) {
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes = call_frame_bytes_for_slots(0);
+        self.encoder.sub_rsp_imm32(frame_bytes);
         let helper: VoidHelper = rspice_native_loop_limit_error;
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
     }
 
     fn emit_binary_math(&mut self, op: BinaryMathOp) -> JitResult<()> {
@@ -1436,7 +1446,11 @@ impl FunctionCompiler {
 
         debug_assert!(self.uses_helper_calls);
         let target = XMM_STACK[self.depth - 1];
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes =
+            call_frame_bytes_for_slots(call_frame_spill_slot_count(self.depth, |_, register| {
+                register != target
+            }));
+        self.encoder.sub_rsp_imm32(frame_bytes);
         self.emit_call_frame_spills(self.depth, |_, register| register != target);
 
         if target != Xmm::Xmm0 {
@@ -1458,7 +1472,7 @@ impl FunctionCompiler {
         self.encoder.call_r64(Gpr::Rax);
 
         self.emit_helper_result_to_target_and_restore(target, self.depth, |_, _| true);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
         Ok(())
     }
 
@@ -1470,7 +1484,11 @@ impl FunctionCompiler {
     ) -> JitResult<()> {
         debug_assert!(self.uses_helper_calls);
         debug_assert!(xmm_stack_slot(target) < self.depth);
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes =
+            call_frame_bytes_for_slots(call_frame_spill_slot_count(self.depth, |_, register| {
+                register != target
+            }));
+        self.encoder.sub_rsp_imm32(frame_bytes);
         self.emit_call_frame_spills(self.depth, |_, register| register != target);
 
         if target != Xmm::Xmm0 {
@@ -1484,7 +1502,7 @@ impl FunctionCompiler {
         self.encoder.call_r64(Gpr::Rax);
 
         self.emit_helper_result_to_target_and_restore(target, self.depth, |_, _| true);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
         Ok(())
     }
 
@@ -2103,11 +2121,12 @@ impl FunctionCompiler {
     }
 
     fn emit_void_error_return(&mut self, helper: VoidHelper) {
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes = call_frame_bytes_for_slots(0);
+        self.encoder.sub_rsp_imm32(frame_bytes);
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
         self.encoder.xorpd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm0);
         let return_after_error = self.encoder.jmp_rel32_placeholder();
         self.early_return_jumps.push(return_after_error);
@@ -2115,7 +2134,11 @@ impl FunctionCompiler {
 
     fn emit_binary_helper_call(&mut self, left: Xmm, right: Xmm, helper: BinaryHelper) {
         debug_assert!(self.uses_helper_calls);
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes =
+            call_frame_bytes_for_slots(call_frame_spill_slot_count(self.depth, |_, register| {
+                register != left && register != right
+            }));
+        self.encoder.sub_rsp_imm32(frame_bytes);
         self.emit_call_frame_spills(self.depth, |_, register| {
             register != left && register != right
         });
@@ -2133,7 +2156,7 @@ impl FunctionCompiler {
         self.emit_helper_result_to_target_and_restore(left, self.depth, |_, register| {
             register != right
         });
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
     }
 
     fn emit_consuming_ternary_helper_call(
@@ -2152,7 +2175,8 @@ impl FunctionCompiler {
         debug_assert!(arg1_slot < arg2_slot);
         debug_assert!(arg2_slot < self.depth);
 
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes = call_frame_bytes_for_slots(target_slot);
+        self.encoder.sub_rsp_imm32(frame_bytes);
         self.emit_call_frame_spills(target_slot, |_, _| true);
 
         if target != Xmm::Xmm0 {
@@ -2169,12 +2193,16 @@ impl FunctionCompiler {
         self.encoder.call_r64(Gpr::Rax);
 
         self.emit_helper_result_to_target_and_restore(target, target_slot, |_, _| true);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
     }
 
     fn emit_timer_helper_call(&mut self, start: Xmm, period: Xmm, helper: TimerHelper) {
         debug_assert!(self.uses_helper_calls);
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes =
+            call_frame_bytes_for_slots(call_frame_spill_slot_count(self.depth, |_, register| {
+                register != start && register != period
+            }));
+        self.encoder.sub_rsp_imm32(frame_bytes);
         self.emit_call_frame_spills(self.depth, |_, register| {
             register != start && register != period
         });
@@ -2194,7 +2222,7 @@ impl FunctionCompiler {
         self.emit_helper_result_to_target_and_restore(start, self.depth, |_, register| {
             register != period
         });
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
     }
 
     fn emit_operand_context_filter_helper_call(
@@ -2209,7 +2237,8 @@ impl FunctionCompiler {
         debug_assert!(operand_count > 0);
         debug_assert!(input_slot + operand_count <= self.depth);
 
-        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let frame_bytes = call_frame_bytes_for_slots(self.depth);
+        self.encoder.sub_rsp_imm32(frame_bytes);
         self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
         for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
             self.encoder
@@ -2231,7 +2260,7 @@ impl FunctionCompiler {
         self.encoder.call_r64(Gpr::Rax);
 
         self.emit_helper_result_to_target_and_restore(input, input_slot, |_, _| true);
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(frame_bytes);
     }
 
     fn emit_compare(&mut self, op: CompareOp) -> JitResult<()> {
@@ -2975,6 +3004,29 @@ fn call_spill_disp(index: usize) -> i32 {
     CALL_SHADOW_BYTES + (index * WORD_BYTES) as i32
 }
 
+fn call_frame_bytes_for_slots(slot_count: usize) -> i32 {
+    let spill_bytes = (slot_count * WORD_BYTES) as i32;
+    let mut frame_bytes = CALL_SHADOW_BYTES + spill_bytes;
+    while frame_bytes % LOCAL_FRAME_ALIGN_BYTES != LOCAL_SLOT_BYTES {
+        frame_bytes += LOCAL_SLOT_BYTES;
+    }
+    frame_bytes
+}
+
+fn call_frame_spill_slot_count(
+    spill_depth: usize,
+    mut should_spill: impl FnMut(usize, Xmm) -> bool,
+) -> usize {
+    XMM_STACK
+        .iter()
+        .copied()
+        .take(spill_depth)
+        .enumerate()
+        .filter_map(|(index, register)| should_spill(index, register).then_some(index + 1))
+        .max()
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 fn call_result_disp() -> i32 {
     call_spill_disp(CALL_RESULT_SLOT)
@@ -3236,7 +3288,7 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        CALL_FRAME_BYTES, DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64,
+        DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64,
         INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, PARAMS_OFFSET, Q_ELECTRON,
         ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, VOLTAGES_OFFSET, WORD_BYTES,
         X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
@@ -3397,14 +3449,24 @@ mod tests {
         );
 
         let bytes = compile_value_function(&program).expect("compile unary helper value function");
+        let frame_bytes = call_frame_bytes(0);
+        let old_fixed_frame_bytes = old_fixed_call_frame_bytes();
 
         assert!(
-            contains_bytes(&bytes, &sub_rsp_bytes(CALL_FRAME_BYTES)),
-            "helper calls must still reserve an ABI call frame"
+            contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
+            "no-spill helper calls must reserve the minimum ABI call frame"
         );
         assert!(
-            contains_bytes(&bytes, &add_rsp_bytes(CALL_FRAME_BYTES)),
-            "helper calls must still release the ABI call frame"
+            contains_bytes(&bytes, &add_rsp_bytes(frame_bytes)),
+            "no-spill helper calls must release the minimum ABI call frame"
+        );
+        assert!(
+            !contains_bytes(&bytes, &sub_rsp_bytes(old_fixed_frame_bytes)),
+            "no-spill helper calls should not reserve the old maximum spill frame"
+        );
+        assert!(
+            !contains_bytes(&bytes, &add_rsp_bytes(old_fixed_frame_bytes)),
+            "no-spill helper calls should not release the old maximum spill frame"
         );
         assert_eq!(
             count_bytes(&bytes, &mov_r11_rsp_bytes()),
@@ -3438,14 +3500,24 @@ mod tests {
         );
 
         let bytes = compile_value_function(&program).expect("compile binary helper value function");
+        let frame_bytes = call_frame_bytes(0);
+        let old_fixed_frame_bytes = old_fixed_call_frame_bytes();
 
         assert!(
-            contains_bytes(&bytes, &sub_rsp_bytes(CALL_FRAME_BYTES)),
-            "helper calls must still reserve an ABI call frame"
+            contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
+            "no-spill helper calls must reserve the minimum ABI call frame"
         );
         assert!(
-            contains_bytes(&bytes, &add_rsp_bytes(CALL_FRAME_BYTES)),
-            "helper calls must still release the ABI call frame"
+            contains_bytes(&bytes, &add_rsp_bytes(frame_bytes)),
+            "no-spill helper calls must release the minimum ABI call frame"
+        );
+        assert!(
+            !contains_bytes(&bytes, &sub_rsp_bytes(old_fixed_frame_bytes)),
+            "no-spill helper calls should not reserve the old maximum spill frame"
+        );
+        assert!(
+            !contains_bytes(&bytes, &add_rsp_bytes(old_fixed_frame_bytes)),
+            "no-spill helper calls should not release the old maximum spill frame"
         );
         assert_eq!(
             count_bytes(&bytes, &mov_r11_rsp_bytes()),
@@ -3489,7 +3561,25 @@ mod tests {
         );
 
         let bytes = compile_value_function(&program).expect("compile helper result leaf");
+        let frame_bytes = call_frame_bytes(1);
+        let old_fixed_frame_bytes = old_fixed_call_frame_bytes();
 
+        assert!(
+            contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
+            "single-prefix helper call should reserve only one XMM spill slot"
+        );
+        assert!(
+            contains_bytes(&bytes, &add_rsp_bytes(frame_bytes)),
+            "single-prefix helper call should release only one XMM spill slot"
+        );
+        assert!(
+            !contains_bytes(&bytes, &sub_rsp_bytes(old_fixed_frame_bytes)),
+            "single-prefix helper call should not reserve the old maximum spill frame"
+        );
+        assert!(
+            !contains_bytes(&bytes, &add_rsp_bytes(old_fixed_frame_bytes)),
+            "single-prefix helper call should not release the old maximum spill frame"
+        );
         assert_eq!(
             count_bytes(&bytes, &mov_r11_rsp_bytes()),
             2,
@@ -5772,6 +5862,24 @@ mod tests {
         );
         assert_eq!(program.max_stack_depth(), 5);
         let bytes = compile_value_function(&program).expect("compile prefixed idtmod state leaf");
+        let frame_bytes = call_frame_bytes(1);
+        let old_fixed_frame_bytes = old_fixed_call_frame_bytes();
+        assert!(
+            contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
+            "prefixed idtmod helper should reserve only the lower live prefix slot"
+        );
+        assert!(
+            contains_bytes(&bytes, &add_rsp_bytes(frame_bytes)),
+            "prefixed idtmod helper should release only the lower live prefix slot"
+        );
+        assert!(
+            !contains_bytes(&bytes, &sub_rsp_bytes(old_fixed_frame_bytes)),
+            "prefixed idtmod helper should not reserve the old maximum spill frame"
+        );
+        assert!(
+            !contains_bytes(&bytes, &add_rsp_bytes(old_fixed_frame_bytes)),
+            "prefixed idtmod helper should not release the old maximum spill frame"
+        );
         assert_eq!(
             count_bytes(&bytes, &call_frame_spill_bytes(0, Xmm::Xmm0)),
             2,
@@ -7423,6 +7531,24 @@ mod tests {
             0,
         );
         let bytes = compile_value_function(&program).expect("compile timer leaf");
+        let frame_bytes = call_frame_bytes(1);
+        let old_fixed_frame_bytes = old_fixed_call_frame_bytes();
+        assert!(
+            contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
+            "timer helper should reserve only the lower live prefix slot"
+        );
+        assert!(
+            contains_bytes(&bytes, &add_rsp_bytes(frame_bytes)),
+            "timer helper should release only the lower live prefix slot"
+        );
+        assert!(
+            !contains_bytes(&bytes, &sub_rsp_bytes(old_fixed_frame_bytes)),
+            "timer helper should not reserve the old maximum spill frame"
+        );
+        assert!(
+            !contains_bytes(&bytes, &add_rsp_bytes(old_fixed_frame_bytes)),
+            "timer helper should not release the old maximum spill frame"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate timer leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -8332,6 +8458,14 @@ mod tests {
         let mut encoder = X64Encoder::new();
         encoder.add_rsp_imm32(value);
         encoder.into_bytes()
+    }
+
+    fn call_frame_bytes(slot_count: usize) -> i32 {
+        super::call_frame_bytes_for_slots(slot_count)
+    }
+
+    fn old_fixed_call_frame_bytes() -> i32 {
+        call_frame_bytes(XMM_STACK.len() + 1)
     }
 
     fn count_bytes(bytes: &[u8], needle: &[u8]) -> usize {
