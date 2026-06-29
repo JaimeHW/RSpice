@@ -165,6 +165,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     canonical_idt_slots: &'a [(ExprId, usize)],
     canonical_idtmod_slots: &'a [(ExprId, usize)],
     canonical_transition_slots: &'a [(ExprId, usize)],
+    canonical_slew_slots: &'a [(ExprId, usize)],
 }
 
 impl<'a> NativeLoweringLimits<'a> {
@@ -190,6 +191,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_idt_slots: &[],
             canonical_idtmod_slots: &[],
             canonical_transition_slots: &[],
+            canonical_slew_slots: &[],
         }
     }
 
@@ -229,6 +231,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
             canonical_transition_slots: self.canonical_transition_slots,
+            canonical_slew_slots: self.canonical_slew_slots,
         }
     }
 
@@ -261,6 +264,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
             canonical_transition_slots: self.canonical_transition_slots,
+            canonical_slew_slots: self.canonical_slew_slots,
         }
     }
 
@@ -300,6 +304,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
             canonical_transition_slots: self.canonical_transition_slots,
+            canonical_slew_slots: self.canonical_slew_slots,
         }
     }
 
@@ -325,6 +330,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
             canonical_transition_slots: self.canonical_transition_slots,
+            canonical_slew_slots: self.canonical_slew_slots,
         }
     }
 
@@ -350,6 +356,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots,
             canonical_transition_slots: self.canonical_transition_slots,
+            canonical_slew_slots: self.canonical_slew_slots,
         }
     }
 
@@ -375,6 +382,33 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
             canonical_transition_slots,
+            canonical_slew_slots: self.canonical_slew_slots,
+        }
+    }
+
+    pub(crate) fn with_canonical_slew_slots<'b>(
+        self,
+        canonical_slew_slots: &'b [(ExprId, usize)],
+    ) -> NativeLoweringLimits<'b>
+    where
+        'a: 'b,
+    {
+        NativeLoweringLimits {
+            terminal_count: self.terminal_count,
+            internal_node_count: self.internal_node_count,
+            parameter_count: self.parameter_count,
+            variable_count: self.variable_count,
+            variable_names: self.variable_names,
+            branch_unknown_count: self.branch_unknown_count,
+            lookup_table_count: self.lookup_table_count,
+            laplace_filter_count: self.laplace_filter_count,
+            zi_filter_count: self.zi_filter_count,
+            available_current_pairs: self.available_current_pairs,
+            canonical_ddt_slots: self.canonical_ddt_slots,
+            canonical_idt_slots: self.canonical_idt_slots,
+            canonical_idtmod_slots: self.canonical_idtmod_slots,
+            canonical_transition_slots: self.canonical_transition_slots,
+            canonical_slew_slots,
         }
     }
 
@@ -401,6 +435,12 @@ impl<'a> NativeLoweringLimits<'a> {
             .iter()
             .find_map(|(id, slot)| (*id == expr_id).then_some(*slot))
     }
+
+    fn canonical_slew_slot(&self, expr_id: ExprId) -> Option<usize> {
+        self.canonical_slew_slots
+            .iter()
+            .find_map(|(id, slot)| (*id == expr_id).then_some(*slot))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -409,6 +449,7 @@ enum CanonicalStateOperator {
     Idt,
     IdtMod,
     Transition,
+    Slew,
 }
 
 impl CanonicalStateOperator {
@@ -418,6 +459,7 @@ impl CanonicalStateOperator {
             Self::Idt => "idt",
             Self::IdtMod => "idtmod",
             Self::Transition => "transition",
+            Self::Slew => "slew",
         }
     }
 
@@ -428,6 +470,7 @@ impl CanonicalStateOperator {
             }
             (Self::IdtMod, Instruction::IdtModState(slot)) => Some(*slot),
             (Self::Transition, Instruction::TransitionState(slot)) => Some(*slot),
+            (Self::Slew, Instruction::SlewState(slot)) => Some(*slot),
             _ => None,
         }
     }
@@ -443,6 +486,7 @@ impl CanonicalStateOperator {
                 | (Self::Idt, HirAnalogOperator::Idt { .. })
                 | (Self::IdtMod, HirAnalogOperator::IdtMod { .. })
                 | (Self::Transition, HirAnalogOperator::Transition { .. })
+                | (Self::Slew, HirAnalogOperator::Slew { .. })
         )
     }
 }
@@ -504,6 +548,21 @@ pub(crate) fn canonical_transition_slots_for_equation(
         equation_id,
         bytecode_program,
         CanonicalStateOperator::Transition,
+    )
+}
+
+pub(crate) fn canonical_slew_slots_for_equation(
+    model: SmolStr,
+    mir: &MirModel,
+    equation_id: EquationId,
+    bytecode_program: &BytecodeProgram,
+) -> JitResult<Vec<(ExprId, usize)>> {
+    canonical_state_slots_for_equation(
+        model,
+        mir,
+        equation_id,
+        bytecode_program,
+        CanonicalStateOperator::Slew,
     )
 }
 
@@ -1494,6 +1553,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 "idt" => self.lower_idt_operator(expression.id, args.as_slice(), None, None, None),
                 "idtmod" => self.lower_idtmod_call(expression.id, args.as_slice()),
                 "transition" => self.lower_transition_call(expression.id, args.as_slice()),
+                "slew" => self.lower_slew_call(expression.id, args.as_slice()),
                 _ => self.lower_intrinsic_call(name.as_str(), args.as_slice()),
             },
             HirExprKind::AnalogOperator { op } => self.lower_analog_operator(expression.id, op),
@@ -1566,6 +1626,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 fall,
                 tolerance,
             } => self.lower_transition_operator(expr_id, *expr, *delay, *rise, *fall, *tolerance),
+            HirAnalogOperator::Slew {
+                expr,
+                max_rise,
+                max_fall,
+            } => self.lower_slew_operator(expr_id, *expr, *max_rise, *max_fall),
             HirAnalogOperator::Limexp { expr } => {
                 self.lower(*expr)?;
                 if lower_constant_unary_math(&mut self.ops, UnaryMathOp::Limexp) {
@@ -1762,6 +1827,56 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         )?;
         self.depth -= 3;
         self.ops.push(NativeOp::TransitionState(slot));
+        Ok(())
+    }
+
+    fn lower_slew_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
+        let (expr, max_rise, max_fall) = match args {
+            [expr] => (*expr, None, None),
+            [expr, max_rise] => (*expr, Some(*max_rise), None),
+            [expr, max_rise, max_fall] => (*expr, Some(*max_rise), Some(*max_fall)),
+            _ => {
+                return Err(self.unsupported(format!(
+                    "analog operator slew expects one to three operands, found {}",
+                    args.len()
+                )));
+            }
+        };
+        self.lower_slew_operator(expr_id, expr, max_rise, max_fall)
+    }
+
+    fn lower_slew_operator(
+        &mut self,
+        expr_id: ExprId,
+        expr: ExprId,
+        max_rise: Option<ExprId>,
+        max_fall: Option<ExprId>,
+    ) -> JitResult<()> {
+        let Some(slot) = self.limits.canonical_slew_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "analog operator slew expression {expr_id} filter slot"
+            )));
+        };
+        self.lower(expr)?;
+        if let Some(max_rise) = max_rise {
+            self.lower(max_rise)?;
+        } else {
+            self.push(NativeOp::Const(f64::INFINITY))?;
+        }
+        if let Some(max_fall) = max_fall {
+            self.lower(max_fall)?;
+        } else {
+            self.push(NativeOp::Const(f64::INFINITY))?;
+        }
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical slew",
+            self.depth,
+            3,
+        )?;
+        self.depth -= 2;
+        self.ops.push(NativeOp::SlewState(slot));
         Ok(())
     }
 
