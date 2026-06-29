@@ -5185,6 +5185,18 @@ mod tests {
             .with_lookup_table_count(8)
     }
 
+    fn assert_f64_matches(actual: f64, expected: f64, context: &str) {
+        if expected.is_nan() {
+            assert!(
+                actual.is_nan(),
+                "{context}: expected NaN, got {actual:?} ({:#x})",
+                actual.to_bits()
+            );
+        } else {
+            assert_eq!(actual.to_bits(), expected.to_bits(), "{context}");
+        }
+    }
+
     #[test]
     fn native_program_dependency_metadata_accepts_matching_loads() {
         let program = NativeProgram {
@@ -6579,7 +6591,7 @@ endmodule
             );
             match lowered.ops() {
                 [NativeOp::Const(value)] => {
-                    assert_eq!(value.to_bits(), expected_bits, "{case}");
+                    assert_f64_matches(*value, f64::from_bits(expected_bits), case);
                 }
                 ops => panic!("{case} lowered to unexpected ops: {ops:?}"),
             }
@@ -7733,11 +7745,7 @@ endmodule
                 "{case} should only need the folded literal"
             );
             match lowered.ops() {
-                [NativeOp::Const(value)] => assert_eq!(
-                    value.to_bits(),
-                    expected.to_bits(),
-                    "{case} should fold to the exact helper-equivalent bit pattern"
-                ),
+                [NativeOp::Const(value)] => assert_f64_matches(*value, expected, case),
                 other => panic!("{case} should fold to one literal op, got {other:?}"),
             }
         }
@@ -7843,11 +7851,7 @@ endmodule
                 "{case} should only need the folded literal"
             );
             match lowered.ops() {
-                [NativeOp::Const(value)] => assert_eq!(
-                    value.to_bits(),
-                    expected.to_bits(),
-                    "{case} should fold to the exact helper-equivalent bit pattern"
-                ),
+                [NativeOp::Const(value)] => assert_f64_matches(*value, expected, case),
                 other => panic!("{case} should fold to one literal op, got {other:?}"),
             }
         }

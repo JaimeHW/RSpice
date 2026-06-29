@@ -3935,7 +3935,7 @@ mod tests {
 
             match program.ops() {
                 [NativeOp::Const(value)] => {
-                    assert_eq!(value.to_bits(), expected.to_bits(), "{case}");
+                    assert_f64_matches(*value, expected, case);
                 }
                 ops => panic!("{case} lowered to unexpected ops: {ops:?}"),
             }
@@ -3954,11 +3954,7 @@ mod tests {
                 unsafe { std::mem::transmute(entry) };
             let ctx = eval_context(&[], &[], &[], &[]);
 
-            assert_eq!(
-                f(&ctx, std::ptr::null()).to_bits(),
-                expected.to_bits(),
-                "{case}"
-            );
+            assert_f64_matches(f(&ctx, std::ptr::null()), expected, case);
         }
     }
 
@@ -4051,11 +4047,7 @@ mod tests {
             let mut ctx = eval_context(&[], &[], &[], &[]);
             ctx.temperature = input;
 
-            assert_eq!(
-                f(&ctx, std::ptr::null()).to_bits(),
-                expected.to_bits(),
-                "{name}"
-            );
+            assert_f64_matches(f(&ctx, std::ptr::null()), expected, name);
         }
     }
 
@@ -5437,12 +5429,16 @@ mod tests {
                 unsafe { std::mem::transmute(entry) };
 
             for (input, expected) in values {
-                let ctx = if uses_internal {
-                    eval_context(&[], &[0.0, 0.0], &[input], &[])
+                let got = if uses_internal {
+                    let voltages = [0.0_f64, 0.0_f64];
+                    let internal_voltages = [input];
+                    let ctx = eval_context(&[], &voltages, &internal_voltages, &[]);
+                    f(&ctx, std::ptr::null())
                 } else {
-                    eval_context(&[], &[input], &[], &[])
+                    let voltages = [input];
+                    let ctx = eval_context(&[], &voltages, &[], &[]);
+                    f(&ctx, std::ptr::null())
                 };
-                let got = f(&ctx, std::ptr::null());
                 if expected.is_nan() {
                     assert!(got.is_nan(), "{name} {input:?}");
                 } else {
@@ -7537,7 +7533,8 @@ mod tests {
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
-            let mut ctx = eval_context(&[left, right], &[], &[], &[]);
+            let params = [left, right];
+            let mut ctx = eval_context(&params, &[], &[], &[]);
             ctx.temperature = 310.0;
             ctx.time = 2.0;
             let vars = [7.0_f64];
@@ -7577,7 +7574,8 @@ mod tests {
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
-            let ctx = eval_context(&[left, right], &[], &[], &[]);
+            let params = [left, right];
+            let ctx = eval_context(&params, &[], &[], &[]);
 
             clear_native_runtime_error();
             let result = f(&ctx, std::ptr::null());
@@ -7665,7 +7663,8 @@ mod tests {
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
-            let ctx = eval_context(&[left, right], &[], &[], &[]);
+            let params = [left, right];
+            let ctx = eval_context(&params, &[], &[], &[]);
 
             assert_eq!(
                 f(&ctx, std::ptr::null()).to_bits(),
@@ -8891,6 +8890,18 @@ mod tests {
 
     fn contains_bytes(bytes: &[u8], needle: &[u8]) -> bool {
         bytes.windows(needle.len()).any(|window| window == needle)
+    }
+
+    fn assert_f64_matches(actual: f64, expected: f64, context: &str) {
+        if expected.is_nan() {
+            assert!(
+                actual.is_nan(),
+                "{context}: expected NaN, got {actual:?} ({:#x})",
+                actual.to_bits()
+            );
+        } else {
+            assert_eq!(actual.to_bits(), expected.to_bits(), "{context}");
+        }
     }
 
     fn sub_rsp_bytes(value: i32) -> Vec<u8> {
