@@ -2428,6 +2428,86 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_folds_constant_binary_arithmetic_to_literal() {
+        let cases = [
+            (
+                "add finite",
+                Instruction::Add,
+                3.25_f64,
+                4.5_f64,
+                3.25_f64 + 4.5_f64,
+            ),
+            (
+                "sub finite",
+                Instruction::Sub,
+                3.25_f64,
+                4.5_f64,
+                3.25_f64 - 4.5_f64,
+            ),
+            (
+                "mul signed zero",
+                Instruction::Mul,
+                -0.0_f64,
+                4.5_f64,
+                -0.0_f64 * 4.5_f64,
+            ),
+            (
+                "div negative zero",
+                Instruction::Div,
+                10.0_f64,
+                -0.0_f64,
+                10.0_f64 / -0.0_f64,
+            ),
+            (
+                "mul unordered",
+                Instruction::Mul,
+                f64::from_bits(0x7ff8_0000_0000_0003),
+                4.5_f64,
+                f64::from_bits(0x7ff8_0000_0000_0003) * 4.5_f64,
+            ),
+        ];
+
+        for (case, instruction, left, right, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+                0,
+            );
+
+            match program.ops() {
+                [NativeOp::Const(value)] => {
+                    assert_eq!(value.to_bits(), expected.to_bits(), "{case}");
+                }
+                ops => panic!("{case} lowered to unexpected ops: {ops:?}"),
+            }
+
+            let bytes =
+                compile_value_function(&program).expect("compile folded arithmetic literal leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "folded arithmetic literal should stay helper-free"
+            );
+
+            let memory = ExecutableMemory::allocate(&bytes)
+                .expect("allocate folded arithmetic literal leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_applies_constant_lhs_sub_div_without_extra_stack_slot() {
         let cases = [
             ("sub-finite", Instruction::Sub, 3.0_f64, 10.0_f64 - 3.0_f64),
