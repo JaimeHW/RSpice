@@ -2288,7 +2288,9 @@ mod tests {
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
-    use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeOp, NativeProgram};
+    use crate::native::expr::{
+        CompareOp, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
+    };
     use crate::native::runtime::ExecutableMemory;
     use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
@@ -2439,6 +2441,66 @@ mod tests {
 
             let memory =
                 ExecutableMemory::allocate(&bytes).expect("allocate literal RHS comparison leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = input;
+
+            assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected.to_bits());
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_applies_constant_lhs_comparisons_without_extra_stack_slot() {
+        let cases = [
+            (Instruction::Gt, CompareOp::Lt, 2.0_f64, 1.0_f64),
+            (Instruction::Ge, CompareOp::Le, 4.0_f64, 1.0_f64),
+            (Instruction::Lt, CompareOp::Gt, 8.0_f64, 1.0_f64),
+            (Instruction::Le, CompareOp::Ge, 4.0_f64, 1.0_f64),
+            (Instruction::Eq, CompareOp::Eq, 4.0_f64, 1.0_f64),
+            (Instruction::Ne, CompareOp::Ne, 8.0_f64, 1.0_f64),
+            (Instruction::Gt, CompareOp::Lt, f64::NAN, 0.0_f64),
+            (Instruction::Ge, CompareOp::Le, f64::NAN, 0.0_f64),
+            (Instruction::Eq, CompareOp::Eq, f64::NAN, 0.0_f64),
+            (Instruction::Ne, CompareOp::Ne, f64::NAN, 0.0_f64),
+        ];
+
+        for (instruction, expected_op, input, expected) in cases {
+            let instruction_name = format!("{instruction:?}");
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(4.0),
+                    Instruction::PushTemperature,
+                    instruction,
+                ],
+                0,
+            );
+
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{instruction_name} should use a literal LHS compare, not a second stack slot"
+            );
+            assert_eq!(
+                program.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::CompareConst(expected_op, 4.0)
+                ],
+                "{instruction_name} should flip the comparison around the literal LHS"
+            );
+
+            let bytes =
+                compile_value_function(&program).expect("compile literal LHS comparison leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "constant LHS comparison should stay helper-free"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate literal LHS comparison leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
