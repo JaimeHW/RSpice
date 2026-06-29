@@ -163,6 +163,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     available_current_pairs: &'a [usize],
     canonical_ddt_slots: &'a [(ExprId, usize)],
     canonical_idt_slots: &'a [(ExprId, usize)],
+    canonical_idtmod_slots: &'a [(ExprId, usize)],
 }
 
 impl<'a> NativeLoweringLimits<'a> {
@@ -186,6 +187,7 @@ impl<'a> NativeLoweringLimits<'a> {
             available_current_pairs: &[],
             canonical_ddt_slots: &[],
             canonical_idt_slots: &[],
+            canonical_idtmod_slots: &[],
         }
     }
 
@@ -223,6 +225,7 @@ impl<'a> NativeLoweringLimits<'a> {
             available_current_pairs,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
+            canonical_idtmod_slots: self.canonical_idtmod_slots,
         }
     }
 
@@ -253,6 +256,7 @@ impl<'a> NativeLoweringLimits<'a> {
             available_current_pairs: &[],
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
+            canonical_idtmod_slots: self.canonical_idtmod_slots,
         }
     }
 
@@ -290,6 +294,7 @@ impl<'a> NativeLoweringLimits<'a> {
             available_current_pairs: self.available_current_pairs,
             canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
+            canonical_idtmod_slots: self.canonical_idtmod_slots,
         }
     }
 
@@ -313,6 +318,31 @@ impl<'a> NativeLoweringLimits<'a> {
             available_current_pairs: self.available_current_pairs,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots,
+            canonical_idtmod_slots: self.canonical_idtmod_slots,
+        }
+    }
+
+    pub(crate) fn with_canonical_idtmod_slots<'b>(
+        self,
+        canonical_idtmod_slots: &'b [(ExprId, usize)],
+    ) -> NativeLoweringLimits<'b>
+    where
+        'a: 'b,
+    {
+        NativeLoweringLimits {
+            terminal_count: self.terminal_count,
+            internal_node_count: self.internal_node_count,
+            parameter_count: self.parameter_count,
+            variable_count: self.variable_count,
+            variable_names: self.variable_names,
+            branch_unknown_count: self.branch_unknown_count,
+            lookup_table_count: self.lookup_table_count,
+            laplace_filter_count: self.laplace_filter_count,
+            zi_filter_count: self.zi_filter_count,
+            available_current_pairs: self.available_current_pairs,
+            canonical_ddt_slots: self.canonical_ddt_slots,
+            canonical_idt_slots: self.canonical_idt_slots,
+            canonical_idtmod_slots,
         }
     }
 
@@ -327,12 +357,19 @@ impl<'a> NativeLoweringLimits<'a> {
             .iter()
             .find_map(|(id, slot)| (*id == expr_id).then_some(*slot))
     }
+
+    fn canonical_idtmod_slot(&self, expr_id: ExprId) -> Option<usize> {
+        self.canonical_idtmod_slots
+            .iter()
+            .find_map(|(id, slot)| (*id == expr_id).then_some(*slot))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 enum CanonicalStateOperator {
     Ddt,
     Idt,
+    IdtMod,
 }
 
 impl CanonicalStateOperator {
@@ -340,6 +377,7 @@ impl CanonicalStateOperator {
         match self {
             Self::Ddt => "ddt",
             Self::Idt => "idt",
+            Self::IdtMod => "idtmod",
         }
     }
 
@@ -348,6 +386,7 @@ impl CanonicalStateOperator {
             (Self::Ddt, Instruction::DdtState(slot)) | (Self::Idt, Instruction::IdtState(slot)) => {
                 Some(*slot)
             }
+            (Self::IdtMod, Instruction::IdtModState(slot)) => Some(*slot),
             _ => None,
         }
     }
@@ -359,7 +398,9 @@ impl CanonicalStateOperator {
     fn matches_operator(self, op: &HirAnalogOperator) -> bool {
         matches!(
             (self, op),
-            (Self::Ddt, HirAnalogOperator::Ddt { .. }) | (Self::Idt, HirAnalogOperator::Idt { .. })
+            (Self::Ddt, HirAnalogOperator::Ddt { .. })
+                | (Self::Idt, HirAnalogOperator::Idt { .. })
+                | (Self::IdtMod, HirAnalogOperator::IdtMod { .. })
         )
     }
 }
@@ -391,6 +432,21 @@ pub(crate) fn canonical_idt_slots_for_equation(
         equation_id,
         bytecode_program,
         CanonicalStateOperator::Idt,
+    )
+}
+
+pub(crate) fn canonical_idtmod_slots_for_equation(
+    model: SmolStr,
+    mir: &MirModel,
+    equation_id: EquationId,
+    bytecode_program: &BytecodeProgram,
+) -> JitResult<Vec<(ExprId, usize)>> {
+    canonical_state_slots_for_equation(
+        model,
+        mir,
+        equation_id,
+        bytecode_program,
+        CanonicalStateOperator::IdtMod,
     )
 }
 
@@ -1379,6 +1435,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::Call { name, args } => match normalize_intrinsic_name(name).as_str() {
                 "ddt" => self.lower_ddt_operator(expression.id, args.as_slice(), None),
                 "idt" => self.lower_idt_operator(expression.id, args.as_slice(), None, None, None),
+                "idtmod" => self.lower_idtmod_call(expression.id, args.as_slice()),
                 _ => self.lower_intrinsic_call(name.as_str(), args.as_slice()),
             },
             HirExprKind::AnalogOperator { op } => self.lower_analog_operator(expression.id, op),
@@ -1437,6 +1494,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 assert,
                 abstol,
             } => self.lower_idt_operator(expr_id, &[*expr], *ic, *assert, *abstol),
+            HirAnalogOperator::IdtMod {
+                expr,
+                ic,
+                modulus,
+                offset,
+                abstol,
+            } => self.lower_idtmod_operator(expr_id, *expr, *ic, *modulus, *offset, *abstol),
             HirAnalogOperator::Limexp { expr } => {
                 self.lower(*expr)?;
                 if lower_constant_unary_math(&mut self.ops, UnaryMathOp::Limexp) {
@@ -1514,6 +1578,64 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
         self.pop_binary("canonical idt")?;
         self.ops.push(NativeOp::IdtState(slot));
+        Ok(())
+    }
+
+    fn lower_idtmod_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
+        let (expr, ic, modulus, offset) = match args {
+            [expr, ic, modulus] => (*expr, Some(*ic), Some(*modulus), None),
+            [expr, ic, modulus, offset] => (*expr, Some(*ic), Some(*modulus), Some(*offset)),
+            _ => {
+                return Err(self.unsupported(format!(
+                    "analog operator idtmod expects three or four operands, found {}",
+                    args.len()
+                )));
+            }
+        };
+        self.lower_idtmod_operator(expr_id, expr, ic, modulus, offset, None)
+    }
+
+    fn lower_idtmod_operator(
+        &mut self,
+        expr_id: ExprId,
+        expr: ExprId,
+        ic: Option<ExprId>,
+        modulus: Option<ExprId>,
+        offset: Option<ExprId>,
+        abstol: Option<ExprId>,
+    ) -> JitResult<()> {
+        if abstol.is_some() {
+            return Err(self.unsupported("analog operator idtmod abstol argument"));
+        }
+        let Some(modulus) = modulus else {
+            return Err(self.unsupported("analog operator idtmod modulus argument"));
+        };
+        let Some(slot) = self.limits.canonical_idtmod_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "analog operator idtmod expression {expr_id} state slot"
+            )));
+        };
+        self.lower(expr)?;
+        if let Some(ic) = ic {
+            self.lower(ic)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+        self.lower(modulus)?;
+        if let Some(offset) = offset {
+            self.lower(offset)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical idtmod",
+            self.depth,
+            4,
+        )?;
+        self.depth -= 3;
+        self.ops.push(NativeOp::IdtModState(slot));
         Ok(())
     }
 
