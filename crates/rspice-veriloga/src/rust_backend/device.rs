@@ -5853,6 +5853,49 @@ fn stamp() {
             "{sqrt_first_indices}"
         );
 
+        let mul_div_scaled_inputs_rhs =
+            helper_body(&support, "fn store_mul_div_scaled_inputs_rhs(");
+        assert!(
+            !mul_div_scaled_inputs_rhs.contains("_node_derivatives = self.node_derivatives"),
+            "{mul_div_scaled_inputs_rhs}"
+        );
+        assert!(
+            !mul_div_scaled_inputs_rhs.contains("_branch_derivatives = self.branch_derivatives"),
+            "{mul_div_scaled_inputs_rhs}"
+        );
+        assert!(
+            !mul_div_scaled_inputs_rhs.contains("store_mul_div_scaled_inputs_components"),
+            "{mul_div_scaled_inputs_rhs}"
+        );
+        assert!(
+            mul_div_scaled_inputs_rhs.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * quotient + left_value * quotient_derivative;"
+            ),
+            "{mul_div_scaled_inputs_rhs}"
+        );
+
+        let mul_div_scaled_inputs_indices =
+            helper_body(&support, "fn store_mul_div_scaled_inputs_indices(");
+        assert!(
+            !mul_div_scaled_inputs_indices.contains("_node_derivatives = self.node_derivatives"),
+            "{mul_div_scaled_inputs_indices}"
+        );
+        assert!(
+            !mul_div_scaled_inputs_indices
+                .contains("_branch_derivatives = self.branch_derivatives"),
+            "{mul_div_scaled_inputs_indices}"
+        );
+        assert!(
+            !mul_div_scaled_inputs_indices.contains("store_mul_div_scaled_inputs_components"),
+            "{mul_div_scaled_inputs_indices}"
+        );
+        assert!(
+            mul_div_scaled_inputs_indices.contains(
+                "let quotient_derivative = self.node_derivatives[input][axis] * input_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale; self.node_derivatives[index][axis] = self.node_derivatives[factor][axis] * quotient + factor_value * quotient_derivative;"
+            ),
+            "{mul_div_scaled_inputs_indices}"
+        );
+
         let scaled_add = helper_body(&support, "fn store_scaled_add(");
         assert!(
             !scaled_add.contains("_node_derivatives = self.node_derivatives"),
@@ -8446,6 +8489,10 @@ fn stamp() {
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
+        assert!(
+            !support.contains("fn store_mul_div_scaled_inputs_components"),
+            "{support}"
+        );
 
         let source = r#"
 fn stamp() {
@@ -15612,23 +15659,16 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_div_scaled_inputs_components(&mut self, index: usize, factor_value: f64, factor_node_derivatives: [f64; Instance::NODE_COUNT], factor_branch_derivatives: [f64; Instance::BRANCH_COUNT], input_value: f64, input_node_derivatives: [f64; Instance::NODE_COUNT], input_branch_derivatives: [f64; Instance::BRANCH_COUNT], input_scale: f64, denominator_value: f64, denominator_node_derivatives: [f64; Instance::NODE_COUNT], denominator_branch_derivatives: [f64; Instance::BRANCH_COUNT], denominator_scale: f64) {",
-    "        let scaled_input = input_value * input_scale;",
-    "        let reciprocal = 1.0 / (denominator_value * denominator_scale);",
+    "    fn store_mul_div_scaled_inputs_rhs(&mut self, index: usize, left: usize, input: AdValue, input_scale: f64, denominator: AdValue, denominator_scale: f64) {",
+    "        let left_value = self.values[left];",
+    "        let scaled_input = input.value * input_scale;",
+    "        let reciprocal = 1.0 / (denominator.value * denominator_scale);",
     "        let quotient = scaled_input * reciprocal;",
     "        let input_derivative_scale = input_scale * reciprocal;",
     "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
-    "        self.values[index] = factor_value * quotient;",
-    "        for axis in 0..Instance::NODE_COUNT { let quotient_derivative = input_node_derivatives[axis] * input_derivative_scale + denominator_node_derivatives[axis] * denominator_derivative_scale; self.node_derivatives[index][axis] = factor_node_derivatives[axis] * quotient + factor_value * quotient_derivative; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { let quotient_derivative = input_branch_derivatives[axis] * input_derivative_scale + denominator_branch_derivatives[axis] * denominator_derivative_scale; self.branch_derivatives[index][axis] = factor_branch_derivatives[axis] * quotient + factor_value * quotient_derivative; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_div_scaled_inputs_rhs(&mut self, index: usize, left: usize, input: AdValue, input_scale: f64, denominator: AdValue, denominator_scale: f64) {",
-    "        let left_value = self.values[left];",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        self.store_mul_div_scaled_inputs_components(index, left_value, left_node_derivatives, left_branch_derivatives, input.value, input.node_derivatives, input.branch_derivatives, input_scale, denominator.value, denominator.node_derivatives, denominator.branch_derivatives, denominator_scale);",
+    "        self.values[index] = left_value * quotient;",
+    "        for axis in 0..Instance::NODE_COUNT { let quotient_derivative = input.node_derivatives[axis] * input_derivative_scale + denominator.node_derivatives[axis] * denominator_derivative_scale; self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * quotient + left_value * quotient_derivative; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { let quotient_derivative = input.branch_derivatives[axis] * input_derivative_scale + denominator.branch_derivatives[axis] * denominator_derivative_scale; self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] * quotient + left_value * quotient_derivative; }",
     "    }",
     "",
     "    #[inline]",
@@ -20368,18 +20408,30 @@ fn generate_index_or_mixed_mul_scale_offset_helper(mask: &str) -> String {
 }
 
 fn generate_index_or_mixed_mul_div_scaled_inputs_helper(mask: &str) -> String {
-    let operands = ["factor", "input", "denominator"];
     let helper = index_or_mixed_helper_name("store_mul_div_scaled_inputs", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let factor = mixed_helper_component_args(mask, 0, "factor");
-    let input = mixed_helper_component_args(mask, 1, "input");
-    let denominator = mixed_helper_component_args(mask, 2, "denominator");
+    let factor_value = mixed_helper_value_expr(mask, 0, "factor");
+    let input_value = mixed_helper_value_expr(mask, 1, "input");
+    let denominator_value = mixed_helper_value_expr(mask, 2, "denominator");
+    let factor_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "factor");
+    let input_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "input");
+    let denominator_node_derivative = mixed_helper_node_derivative_expr(mask, 2, "denominator");
+    let factor_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "factor");
+    let input_branch_derivative = mixed_helper_branch_derivative_expr(mask, 1, "input");
+    let denominator_branch_derivative = mixed_helper_branch_derivative_expr(mask, 2, "denominator");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, factor: {factor_ty}, input: {input_ty}, input_scale: f64, denominator: {denominator_ty}, denominator_scale: f64) {{
-{locals}        self.store_mul_div_scaled_inputs_components(index, {factor}, {input}, input_scale, {denominator}, denominator_scale);
+        let factor_value = {factor_value};
+        let scaled_input = {input_value} * input_scale;
+        let reciprocal = 1.0 / ({denominator_value} * denominator_scale);
+        let quotient = scaled_input * reciprocal;
+        let input_derivative_scale = input_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = factor_value * quotient;
+        for axis in 0..Instance::NODE_COUNT {{ let quotient_derivative = {input_node_derivative} * input_derivative_scale + {denominator_node_derivative} * denominator_derivative_scale; self.node_derivatives[index][axis] = {factor_node_derivative} * quotient + factor_value * quotient_derivative; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ let quotient_derivative = {input_branch_derivative} * input_derivative_scale + {denominator_branch_derivative} * denominator_derivative_scale; self.branch_derivatives[index][axis] = {factor_branch_derivative} * quotient + factor_value * quotient_derivative; }}
     }}
 "#,
         factor_ty = mixed_helper_type(mask, 0),
