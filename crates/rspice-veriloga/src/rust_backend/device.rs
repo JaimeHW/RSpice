@@ -5762,6 +5762,26 @@ fn stamp() {
             "{mul_sub_mixed_iai}"
         );
 
+        let mul_scale_offset_indices = helper_body(&support, "fn store_mul_scale_offset_indices(");
+        assert!(
+            !mul_scale_offset_indices.contains("_node_derivatives = self.node_derivatives"),
+            "{mul_scale_offset_indices}"
+        );
+        assert!(
+            !mul_scale_offset_indices.contains("_branch_derivatives = self.branch_derivatives"),
+            "{mul_scale_offset_indices}"
+        );
+        assert!(
+            !mul_scale_offset_indices.contains("store_mul_scale_offset_components"),
+            "{mul_scale_offset_indices}"
+        );
+        assert!(
+            mul_scale_offset_indices.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[factor][axis] * affine_value + factor_value * self.node_derivatives[value][axis] * input_scale;"
+            ),
+            "{mul_scale_offset_indices}"
+        );
+
         let scaled_add = helper_body(&support, "fn store_scaled_add(");
         assert!(
             !scaled_add.contains("_node_derivatives = self.node_derivatives"),
@@ -6873,11 +6893,15 @@ fn stamp() {
     fn rewrites_scale_offset_multiply_stores_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
         for helper in [
-            "fn store_mul_scale_offset_components",
+            "fn store_mul_scale_offset",
             "fn store_mul_scale_offset_mixed_ai",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
+        assert!(
+            !support.contains("fn store_mul_scale_offset_components"),
+            "{support}"
+        );
 
         let source = r#"
 fn stamp() {
@@ -17130,16 +17154,11 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_scale_offset_components(&mut self, index: usize, factor_value: f64, factor_node_derivatives: [f64; Instance::NODE_COUNT], factor_branch_derivatives: [f64; Instance::BRANCH_COUNT], value_raw: f64, value_node_derivatives: [f64; Instance::NODE_COUNT], value_branch_derivatives: [f64; Instance::BRANCH_COUNT], input_scale: f64, offset: f64) {",
-    "        let affine_value = value_raw * input_scale + offset;",
-    "        self.values[index] = factor_value * affine_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor_node_derivatives[axis] * affine_value + factor_value * value_node_derivatives[axis] * input_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor_branch_derivatives[axis] * affine_value + factor_value * value_branch_derivatives[axis] * input_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_scale_offset(&mut self, index: usize, factor: AdValue, value: AdValue, input_scale: f64, offset: f64) {",
-    "        self.store_mul_scale_offset_components(index, factor.value, factor.node_derivatives, factor.branch_derivatives, value.value, value.node_derivatives, value.branch_derivatives, input_scale, offset);",
+    "        let affine_value = value.value * input_scale + offset;",
+    "        self.values[index] = factor.value * affine_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor.node_derivatives[axis] * affine_value + factor.value * value.node_derivatives[axis] * input_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor.branch_derivatives[axis] * affine_value + factor.value * value.branch_derivatives[axis] * input_scale; }",
     "    }",
     "",
     "    #[inline]",
@@ -20235,17 +20254,23 @@ fn generate_index_or_mixed_mul_add_sub_helper(mask: &str, base: &str) -> String 
 }
 
 fn generate_index_or_mixed_mul_scale_offset_helper(mask: &str) -> String {
-    let operands = ["factor", "value"];
     let helper = index_or_mixed_helper_name("store_mul_scale_offset", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let factor = mixed_helper_component_args(mask, 0, "factor");
-    let value = mixed_helper_component_args(mask, 1, "value");
+    let factor_value = mixed_helper_value_expr(mask, 0, "factor");
+    let value_raw = mixed_helper_value_expr(mask, 1, "value");
+    let factor_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "factor");
+    let value_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "value");
+    let factor_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "factor");
+    let value_branch_derivative = mixed_helper_branch_derivative_expr(mask, 1, "value");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, factor: {factor_ty}, value: {value_ty}, input_scale: f64, offset: f64) {{
-{locals}        self.store_mul_scale_offset_components(index, {factor}, {value}, input_scale, offset);
+        let factor_value = {factor_value};
+        let affine_value = {value_raw} * input_scale + offset;
+        self.values[index] = factor_value * affine_value;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {factor_node_derivative} * affine_value + factor_value * {value_node_derivative} * input_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {factor_branch_derivative} * affine_value + factor_value * {value_branch_derivative} * input_scale; }}
     }}
 "#,
         factor_ty = mixed_helper_type(mask, 0),
