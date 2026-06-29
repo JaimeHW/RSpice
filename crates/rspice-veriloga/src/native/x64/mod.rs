@@ -1111,6 +1111,16 @@ endmodule
                 shipped_veriloga_model_path(&["bsimsoi_4.6.1", "vacode", "bsimsoi.va"]),
                 Some("bsimsoi_va"),
             ),
+            (
+                "bsimsoi47",
+                shipped_cmc_model_path(&["BSIM-SOI_4.7.0_05192025", "code", "bsimsoi.va"]),
+                Some("bsimsoi"),
+            ),
+            (
+                "bsimsoi100",
+                shipped_cmc_model_path(&["BSIM_SOI_100.1.1_09152025", "code", "bsimsoi.va"]),
+                Some("bsimsoi"),
+            ),
         ];
         let iterations = shipped_model_microbench_iterations();
         let samples = shipped_model_microbench_samples();
