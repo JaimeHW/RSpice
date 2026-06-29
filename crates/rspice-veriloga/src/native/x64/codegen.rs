@@ -600,13 +600,36 @@ impl FunctionCompiler {
         let target = XMM_STACK[self.depth - 1];
         match op {
             BinaryOp::Sub | BinaryOp::Div => {
-                self.emit_literal_lhs_stack_binary_op(target, value, op)
+                if self.depth < XMM_STACK.len() {
+                    let scratch = self.scratch_register()?;
+                    self.emit_literal_lhs_scratch_binary_op(target, scratch, value, op);
+                } else {
+                    self.emit_literal_lhs_stack_binary_op(target, value, op);
+                }
             }
             BinaryOp::Add | BinaryOp::Mul => {
                 unreachable!("literal LHS binary lowering only accepts sub/div")
             }
         }
         Ok(())
+    }
+
+    fn emit_literal_lhs_scratch_binary_op(
+        &mut self,
+        target: Xmm,
+        scratch: Xmm,
+        value: f64,
+        op: BinaryOp,
+    ) {
+        self.emit_literal_load(scratch, value);
+        match op {
+            BinaryOp::Sub => self.encoder.subsd_xmm_xmm(scratch, target),
+            BinaryOp::Div => self.encoder.divsd_xmm_xmm(scratch, target),
+            BinaryOp::Add | BinaryOp::Mul => {
+                unreachable!("literal LHS scratch lowering only accepts sub/div")
+            }
+        }
+        self.encoder.movsd_xmm_xmm(target, scratch);
     }
 
     fn emit_literal_lhs_stack_binary_op(&mut self, target: Xmm, value: f64, op: BinaryOp) {
@@ -2920,34 +2943,58 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_applies_constant_lhs_sub_div_without_extra_stack_slot() {
+        let temp_sub_rsp = [0x48, 0x81, 0xEC, 0x10, 0x00, 0x00, 0x00];
+        let temp_add_rsp = [0x48, 0x81, 0xC4, 0x10, 0x00, 0x00, 0x00];
         let cases = [
-            ("sub-finite", Instruction::Sub, 3.0_f64, 10.0_f64 - 3.0_f64),
+            (
+                "sub-finite",
+                Instruction::Sub,
+                10.0_f64,
+                3.0_f64,
+                10.0_f64 - 3.0_f64,
+            ),
+            (
+                "sub-signed-zero",
+                Instruction::Sub,
+                -0.0_f64,
+                0.0_f64,
+                -0.0_f64 - 0.0_f64,
+            ),
             (
                 "sub-unordered",
                 Instruction::Sub,
+                10.0_f64,
                 f64::from_bits(0x7ff8_0000_0000_0001),
                 10.0_f64 - f64::from_bits(0x7ff8_0000_0000_0001),
             ),
-            ("div-finite", Instruction::Div, 4.0_f64, 10.0_f64 / 4.0_f64),
+            (
+                "div-finite",
+                Instruction::Div,
+                10.0_f64,
+                4.0_f64,
+                10.0_f64 / 4.0_f64,
+            ),
             (
                 "div-negative-zero",
                 Instruction::Div,
+                10.0_f64,
                 -0.0_f64,
                 10.0_f64 / -0.0_f64,
             ),
             (
                 "div-unordered",
                 Instruction::Div,
+                10.0_f64,
                 f64::from_bits(0x7ff8_0000_0000_0002),
                 10.0_f64 / f64::from_bits(0x7ff8_0000_0000_0002),
             ),
         ];
 
-        for (name, instruction, input, expected) in cases {
+        for (name, instruction, lhs, input, expected) in cases {
             let program = native_program(
                 EntryKind::StampValue,
                 vec![
-                    Instruction::PushConst(10.0),
+                    Instruction::PushConst(lhs),
                     Instruction::PushTemperature,
                     instruction,
                 ],
@@ -2965,6 +3012,14 @@ mod tests {
             assert!(
                 !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
                 "constant LHS arithmetic should stay helper-free"
+            );
+            assert!(
+                !contains_bytes(&bytes, &temp_sub_rsp),
+                "{name} should use an XMM scratch instead of an RSP temp slot"
+            );
+            assert!(
+                !contains_bytes(&bytes, &temp_add_rsp),
+                "{name} should not restore an unused RSP temp slot"
             );
 
             let memory =
@@ -2985,6 +3040,8 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_applies_constant_lhs_arithmetic_at_full_xmm_stack_depth() {
+        let temp_sub_rsp = [0x48, 0x81, 0xEC, 0x10, 0x00, 0x00, 0x00];
+        let temp_add_rsp = [0x48, 0x81, 0xC4, 0x10, 0x00, 0x00, 0x00];
         let cases = [
             ("sub", Instruction::Sub, 4.0_f64, 10.0_f64 - 4.0_f64),
             ("div", Instruction::Div, 4.0_f64, 10.0_f64 / 4.0_f64),
@@ -3018,6 +3075,14 @@ mod tests {
             assert!(
                 !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
                 "constant LHS arithmetic should stay helper-free at full XMM stack depth"
+            );
+            assert!(
+                contains_bytes(&bytes, &temp_sub_rsp),
+                "{name} should fall back to an RSP temp slot at full XMM stack depth"
+            );
+            assert!(
+                contains_bytes(&bytes, &temp_add_rsp),
+                "{name} should restore the RSP temp slot at full XMM stack depth"
             );
 
             let memory = ExecutableMemory::allocate(&bytes)
