@@ -1959,6 +1959,9 @@ impl NativeProgram {
                         depth,
                     )?;
                     depth -= 1;
+                    if lower_constant_binary_extremum(&mut ops, extremum_op(instruction)) {
+                        continue;
+                    }
                     if lower_constant_rhs_extremum(&mut ops, extremum_op(instruction)) {
                         continue;
                     }
@@ -3359,7 +3362,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn append_extremum(&mut self, op: ExtremumOp) -> JitResult<()> {
         self.pop_binary("canonical extremum")?;
-        if lower_constant_rhs_extremum(&mut self.ops, op) {
+        if lower_constant_binary_extremum(&mut self.ops, op)
+            || lower_constant_rhs_extremum(&mut self.ops, op)
+        {
             return Ok(());
         }
         self.ops.push(NativeOp::Extremum(op));
@@ -4151,6 +4156,19 @@ fn lower_constant_rhs_extremum(ops: &mut Vec<NativeOp>, op: ExtremumOp) -> bool 
     true
 }
 
+fn lower_constant_binary_extremum(ops: &mut Vec<NativeOp>, op: ExtremumOp) -> bool {
+    let (lhs_index, rhs_index) = match ops.len().checked_sub(2) {
+        Some(lhs_index) => (lhs_index, lhs_index + 1),
+        None => return false,
+    };
+    let (NativeOp::Const(left), NativeOp::Const(right)) = (ops[lhs_index], ops[rhs_index]) else {
+        return false;
+    };
+    ops.truncate(lhs_index);
+    ops.push(NativeOp::Const(constant_extremum(op, left, right)));
+    true
+}
+
 fn lower_constant_rhs_logical(ops: &mut Vec<NativeOp>, op: LogicalOp) -> bool {
     let Some(NativeOp::Const(value)) = ops.last().copied() else {
         return false;
@@ -4230,6 +4248,13 @@ fn constant_logical(op: LogicalOp, left: f64, right: f64) -> bool {
         LogicalOp::And => constant_truthy(left) && constant_truthy(right),
         LogicalOp::Or => constant_truthy(left) || constant_truthy(right),
         LogicalOp::Not => unreachable!("binary logical lowering only accepts and/or"),
+    }
+}
+
+fn constant_extremum(op: ExtremumOp, left: f64, right: f64) -> f64 {
+    match op {
+        ExtremumOp::Min => left.min(right),
+        ExtremumOp::Max => left.max(right),
     }
 }
 
@@ -4979,6 +5004,34 @@ endmodule
         .expect("lower canonical constant above to native program");
 
         assert_eq!(program.ops(), &[NativeOp::Const(1.0)]);
+        assert_eq!(program.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_canonical_constant_min_to_literal() {
+        let source = r#"
+module mir_constant_min(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ min(5.0, -2.0);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_constant_min",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower canonical constant min to native program");
+
+        assert_eq!(program.ops(), &[NativeOp::Const(-2.0)]);
         assert_eq!(program.max_stack_depth(), 1);
     }
 
@@ -6695,6 +6748,144 @@ endmodule
                 ]
             );
             assert_eq!(lowered.max_stack_depth(), 2);
+        }
+    }
+
+    #[test]
+    fn folds_constant_min_max_to_exact_literals() {
+        let left_nan_bits = 0x7ff8_0000_0000_0001_u64;
+        let right_nan_bits = 0x7ff8_0000_0000_0002_u64;
+        let cases = [
+            (
+                "min-left-smaller",
+                Instruction::Min,
+                ExtremumOp::Min,
+                (-2.0_f64).to_bits(),
+                5.0_f64.to_bits(),
+            ),
+            (
+                "min-right-smaller",
+                Instruction::Min,
+                ExtremumOp::Min,
+                5.0_f64.to_bits(),
+                (-2.0_f64).to_bits(),
+            ),
+            (
+                "min-left-nan",
+                Instruction::Min,
+                ExtremumOp::Min,
+                left_nan_bits,
+                5.0_f64.to_bits(),
+            ),
+            (
+                "min-right-nan",
+                Instruction::Min,
+                ExtremumOp::Min,
+                5.0_f64.to_bits(),
+                right_nan_bits,
+            ),
+            (
+                "min-both-nan",
+                Instruction::Min,
+                ExtremumOp::Min,
+                left_nan_bits,
+                right_nan_bits,
+            ),
+            (
+                "min-left-neg-zero",
+                Instruction::Min,
+                ExtremumOp::Min,
+                (-0.0_f64).to_bits(),
+                0.0_f64.to_bits(),
+            ),
+            (
+                "min-right-neg-zero",
+                Instruction::Min,
+                ExtremumOp::Min,
+                0.0_f64.to_bits(),
+                (-0.0_f64).to_bits(),
+            ),
+            (
+                "max-left-larger",
+                Instruction::Max,
+                ExtremumOp::Max,
+                5.0_f64.to_bits(),
+                (-2.0_f64).to_bits(),
+            ),
+            (
+                "max-right-larger",
+                Instruction::Max,
+                ExtremumOp::Max,
+                (-2.0_f64).to_bits(),
+                5.0_f64.to_bits(),
+            ),
+            (
+                "max-left-nan",
+                Instruction::Max,
+                ExtremumOp::Max,
+                left_nan_bits,
+                5.0_f64.to_bits(),
+            ),
+            (
+                "max-right-nan",
+                Instruction::Max,
+                ExtremumOp::Max,
+                5.0_f64.to_bits(),
+                right_nan_bits,
+            ),
+            (
+                "max-both-nan",
+                Instruction::Max,
+                ExtremumOp::Max,
+                left_nan_bits,
+                right_nan_bits,
+            ),
+            (
+                "max-left-pos-zero",
+                Instruction::Max,
+                ExtremumOp::Max,
+                0.0_f64.to_bits(),
+                (-0.0_f64).to_bits(),
+            ),
+            (
+                "max-right-pos-zero",
+                Instruction::Max,
+                ExtremumOp::Max,
+                (-0.0_f64).to_bits(),
+                0.0_f64.to_bits(),
+            ),
+        ];
+
+        for (case, instruction, op, left_bits, right_bits) in cases {
+            let left = f64::from_bits(left_bits);
+            let right = f64::from_bits(right_bits);
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "minmax-constant",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant min/max should fold to a literal");
+
+            assert_eq!(lowered.max_stack_depth(), 1, "{case}");
+            match lowered.ops() {
+                [NativeOp::Const(value)] => {
+                    assert_eq!(
+                        value.to_bits(),
+                        constant_extremum(op, left, right).to_bits(),
+                        "{case}"
+                    );
+                }
+                ops => panic!("{case}: expected folded min/max literal, got {ops:?}"),
+            }
         }
     }
 
