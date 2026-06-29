@@ -164,6 +164,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     canonical_ddt_slots: &'a [(ExprId, usize)],
     canonical_idt_slots: &'a [(ExprId, usize)],
     canonical_idtmod_slots: &'a [(ExprId, usize)],
+    canonical_transition_slots: &'a [(ExprId, usize)],
 }
 
 impl<'a> NativeLoweringLimits<'a> {
@@ -188,6 +189,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_ddt_slots: &[],
             canonical_idt_slots: &[],
             canonical_idtmod_slots: &[],
+            canonical_transition_slots: &[],
         }
     }
 
@@ -226,6 +228,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
+            canonical_transition_slots: self.canonical_transition_slots,
         }
     }
 
@@ -257,6 +260,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
+            canonical_transition_slots: self.canonical_transition_slots,
         }
     }
 
@@ -295,6 +299,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
+            canonical_transition_slots: self.canonical_transition_slots,
         }
     }
 
@@ -319,6 +324,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
+            canonical_transition_slots: self.canonical_transition_slots,
         }
     }
 
@@ -343,6 +349,32 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots,
+            canonical_transition_slots: self.canonical_transition_slots,
+        }
+    }
+
+    pub(crate) fn with_canonical_transition_slots<'b>(
+        self,
+        canonical_transition_slots: &'b [(ExprId, usize)],
+    ) -> NativeLoweringLimits<'b>
+    where
+        'a: 'b,
+    {
+        NativeLoweringLimits {
+            terminal_count: self.terminal_count,
+            internal_node_count: self.internal_node_count,
+            parameter_count: self.parameter_count,
+            variable_count: self.variable_count,
+            variable_names: self.variable_names,
+            branch_unknown_count: self.branch_unknown_count,
+            lookup_table_count: self.lookup_table_count,
+            laplace_filter_count: self.laplace_filter_count,
+            zi_filter_count: self.zi_filter_count,
+            available_current_pairs: self.available_current_pairs,
+            canonical_ddt_slots: self.canonical_ddt_slots,
+            canonical_idt_slots: self.canonical_idt_slots,
+            canonical_idtmod_slots: self.canonical_idtmod_slots,
+            canonical_transition_slots,
         }
     }
 
@@ -363,6 +395,12 @@ impl<'a> NativeLoweringLimits<'a> {
             .iter()
             .find_map(|(id, slot)| (*id == expr_id).then_some(*slot))
     }
+
+    fn canonical_transition_slot(&self, expr_id: ExprId) -> Option<usize> {
+        self.canonical_transition_slots
+            .iter()
+            .find_map(|(id, slot)| (*id == expr_id).then_some(*slot))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -370,6 +408,7 @@ enum CanonicalStateOperator {
     Ddt,
     Idt,
     IdtMod,
+    Transition,
 }
 
 impl CanonicalStateOperator {
@@ -378,6 +417,7 @@ impl CanonicalStateOperator {
             Self::Ddt => "ddt",
             Self::Idt => "idt",
             Self::IdtMod => "idtmod",
+            Self::Transition => "transition",
         }
     }
 
@@ -387,6 +427,7 @@ impl CanonicalStateOperator {
                 Some(*slot)
             }
             (Self::IdtMod, Instruction::IdtModState(slot)) => Some(*slot),
+            (Self::Transition, Instruction::TransitionState(slot)) => Some(*slot),
             _ => None,
         }
     }
@@ -401,6 +442,7 @@ impl CanonicalStateOperator {
             (Self::Ddt, HirAnalogOperator::Ddt { .. })
                 | (Self::Idt, HirAnalogOperator::Idt { .. })
                 | (Self::IdtMod, HirAnalogOperator::IdtMod { .. })
+                | (Self::Transition, HirAnalogOperator::Transition { .. })
         )
     }
 }
@@ -447,6 +489,21 @@ pub(crate) fn canonical_idtmod_slots_for_equation(
         equation_id,
         bytecode_program,
         CanonicalStateOperator::IdtMod,
+    )
+}
+
+pub(crate) fn canonical_transition_slots_for_equation(
+    model: SmolStr,
+    mir: &MirModel,
+    equation_id: EquationId,
+    bytecode_program: &BytecodeProgram,
+) -> JitResult<Vec<(ExprId, usize)>> {
+    canonical_state_slots_for_equation(
+        model,
+        mir,
+        equation_id,
+        bytecode_program,
+        CanonicalStateOperator::Transition,
     )
 }
 
@@ -1436,6 +1493,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 "ddt" => self.lower_ddt_operator(expression.id, args.as_slice(), None),
                 "idt" => self.lower_idt_operator(expression.id, args.as_slice(), None, None, None),
                 "idtmod" => self.lower_idtmod_call(expression.id, args.as_slice()),
+                "transition" => self.lower_transition_call(expression.id, args.as_slice()),
                 _ => self.lower_intrinsic_call(name.as_str(), args.as_slice()),
             },
             HirExprKind::AnalogOperator { op } => self.lower_analog_operator(expression.id, op),
@@ -1501,6 +1559,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 offset,
                 abstol,
             } => self.lower_idtmod_operator(expr_id, *expr, *ic, *modulus, *offset, *abstol),
+            HirAnalogOperator::Transition {
+                expr,
+                delay,
+                rise,
+                fall,
+                tolerance,
+            } => self.lower_transition_operator(expr_id, *expr, *delay, *rise, *fall, *tolerance),
             HirAnalogOperator::Limexp { expr } => {
                 self.lower(*expr)?;
                 if lower_constant_unary_math(&mut self.ops, UnaryMathOp::Limexp) {
@@ -1636,6 +1701,67 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         )?;
         self.depth -= 3;
         self.ops.push(NativeOp::IdtModState(slot));
+        Ok(())
+    }
+
+    fn lower_transition_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
+        let (expr, delay, rise, fall) = match args {
+            [expr] => (*expr, None, None, None),
+            [expr, delay] => (*expr, Some(*delay), None, None),
+            [expr, delay, rise] => (*expr, Some(*delay), Some(*rise), None),
+            [expr, delay, rise, fall] => (*expr, Some(*delay), Some(*rise), Some(*fall)),
+            _ => {
+                return Err(self.unsupported(format!(
+                    "analog operator transition expects one to four operands, found {}",
+                    args.len()
+                )));
+            }
+        };
+        self.lower_transition_operator(expr_id, expr, delay, rise, fall, None)
+    }
+
+    fn lower_transition_operator(
+        &mut self,
+        expr_id: ExprId,
+        expr: ExprId,
+        delay: Option<ExprId>,
+        rise: Option<ExprId>,
+        fall: Option<ExprId>,
+        tolerance: Option<ExprId>,
+    ) -> JitResult<()> {
+        if tolerance.is_some() {
+            return Err(self.unsupported("analog operator transition tolerance argument"));
+        }
+        let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "analog operator transition expression {expr_id} filter slot"
+            )));
+        };
+        self.lower(expr)?;
+        if let Some(delay) = delay {
+            self.lower(delay)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+        if let Some(rise) = rise {
+            self.lower(rise)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+        if let Some(fall) = fall {
+            self.lower(fall)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical transition",
+            self.depth,
+            4,
+        )?;
+        self.depth -= 3;
+        self.ops.push(NativeOp::TransitionState(slot));
         Ok(())
     }
 
