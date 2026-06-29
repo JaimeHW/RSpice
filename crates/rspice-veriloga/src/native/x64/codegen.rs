@@ -2288,7 +2288,7 @@ mod tests {
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
-    use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeProgram};
+    use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeOp, NativeProgram};
     use crate::native::runtime::ExecutableMemory;
     use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
@@ -3275,6 +3275,80 @@ mod tests {
         let ctx = eval_context(&[], &[], &[], &[]);
 
         assert_eq!(f(&ctx, std::ptr::null()), 7.5);
+    }
+
+    #[test]
+    fn generated_value_leaf_folds_constant_unary_ops_to_literals() {
+        let cases = [
+            (
+                "neg negative literal",
+                Instruction::Neg,
+                (-7.5_f64).to_bits(),
+                7.5_f64.to_bits(),
+            ),
+            (
+                "neg negative zero",
+                Instruction::Neg,
+                (-0.0_f64).to_bits(),
+                0.0_f64.to_bits(),
+            ),
+            (
+                "neg positive nan",
+                Instruction::Neg,
+                0x7ff8_0000_0000_0001,
+                0xfff8_0000_0000_0001,
+            ),
+            (
+                "abs negative literal",
+                Instruction::Abs,
+                (-7.5_f64).to_bits(),
+                7.5_f64.to_bits(),
+            ),
+            (
+                "abs negative zero",
+                Instruction::Abs,
+                (-0.0_f64).to_bits(),
+                0.0_f64.to_bits(),
+            ),
+            (
+                "abs negative nan",
+                Instruction::Abs,
+                0xfff8_0000_0000_0001,
+                0x7ff8_0000_0000_0001,
+            ),
+        ];
+
+        for (case, instruction, input_bits, expected_bits) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(f64::from_bits(input_bits)),
+                    instruction,
+                ],
+                0,
+            );
+
+            match program.ops() {
+                [NativeOp::Const(value)] => {
+                    assert_eq!(value.to_bits(), expected_bits, "{case}");
+                }
+                ops => panic!("{case} lowered to unexpected ops: {ops:?}"),
+            }
+
+            let bytes = compile_value_function(&program).expect("compile folded unary leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "folded constant unary op should stay helper-free"
+            );
+
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate folded unary leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected_bits, "{case}");
+        }
     }
 
     #[test]
@@ -4579,7 +4653,7 @@ mod tests {
                 Instruction::PushConst(3.0),
                 Instruction::PushConst(4.0),
                 Instruction::PushConst(5.0),
-                Instruction::PushConst(6.0),
+                Instruction::PushTemperature,
                 Instruction::Neg,
                 Instruction::Add,
                 Instruction::Add,

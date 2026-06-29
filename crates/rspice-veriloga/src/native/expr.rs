@@ -579,6 +579,9 @@ impl NativeProgram {
                         depth,
                         1,
                     )?;
+                    if lower_constant_neg(&mut ops) {
+                        continue;
+                    }
                     ops.push(NativeOp::Neg);
                 }
                 Instruction::Abs => {
@@ -589,6 +592,9 @@ impl NativeProgram {
                         depth,
                         1,
                     )?;
+                    if lower_constant_abs(&mut ops) {
+                        continue;
+                    }
                     ops.push(NativeOp::Abs);
                 }
                 Instruction::Sqrt => {
@@ -1016,6 +1022,22 @@ fn lower_constant_square_power(ops: &mut Vec<NativeOp>) -> bool {
     } else {
         false
     }
+}
+
+fn lower_constant_neg(ops: &mut Vec<NativeOp>) -> bool {
+    let Some(NativeOp::Const(value)) = ops.last_mut() else {
+        return false;
+    };
+    *value = f64::from_bits(value.to_bits() ^ 0x8000_0000_0000_0000);
+    true
+}
+
+fn lower_constant_abs(ops: &mut Vec<NativeOp>) -> bool {
+    let Some(NativeOp::Const(value)) = ops.last_mut() else {
+        return false;
+    };
+    *value = f64::from_bits(value.to_bits() & 0x7fff_ffff_ffff_ffff);
+    true
 }
 
 fn lower_constant_rhs_arithmetic(ops: &mut Vec<NativeOp>, instruction: &Instruction) -> bool {
@@ -1497,6 +1519,77 @@ mod tests {
 
         assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, NativeOp::Abs]);
         assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn folds_constant_unary_ops_to_exact_literals() {
+        let cases = [
+            (
+                "neg negative literal",
+                Instruction::Neg,
+                (-3.5_f64).to_bits(),
+                3.5_f64.to_bits(),
+            ),
+            (
+                "neg negative zero",
+                Instruction::Neg,
+                (-0.0_f64).to_bits(),
+                0.0_f64.to_bits(),
+            ),
+            (
+                "neg positive nan",
+                Instruction::Neg,
+                0x7ff8_0000_0000_0001,
+                0xfff8_0000_0000_0001,
+            ),
+            (
+                "abs negative literal",
+                Instruction::Abs,
+                (-3.5_f64).to_bits(),
+                3.5_f64.to_bits(),
+            ),
+            (
+                "abs negative zero",
+                Instruction::Abs,
+                (-0.0_f64).to_bits(),
+                0.0_f64.to_bits(),
+            ),
+            (
+                "abs negative nan",
+                Instruction::Abs,
+                0xfff8_0000_0000_0001,
+                0x7ff8_0000_0000_0001,
+            ),
+        ];
+
+        for (case, instruction, input_bits, expected_bits) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(f64::from_bits(input_bits)),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-unary",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant unary op folds to exact literal");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{case} should not allocate a scratch stack slot"
+            );
+            match lowered.ops() {
+                [NativeOp::Const(value)] => {
+                    assert_eq!(value.to_bits(), expected_bits, "{case}");
+                }
+                ops => panic!("{case} lowered to unexpected ops: {ops:?}"),
+            }
+        }
     }
 
     #[test]
