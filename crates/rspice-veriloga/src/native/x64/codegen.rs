@@ -1056,12 +1056,10 @@ impl FunctionCompiler {
         self.patch_rel32_to_current(rounded)?;
 
         self.encoder.cvttsd2si_r64_xmm(Gpr::R10, index);
-        self.encoder.movabs_r64_imm64(Gpr::R11, lower as u64);
-        self.encoder.sub_r64_r64(Gpr::R10, Gpr::R11);
+        self.emit_i64_subtract(Gpr::R10, lower);
         self.encoder.test_r64_r64(Gpr::R10, Gpr::R10);
         slow_jumps.push(self.encoder.jcc_rel32_placeholder(ConditionCode::Negative));
-        self.encoder.movabs_r64_imm64(Gpr::R11, len as u64);
-        self.encoder.cmp_r64_r64(Gpr::R10, Gpr::R11);
+        self.emit_usize_compare(Gpr::R10, len);
         slow_jumps.push(
             self.encoder
                 .jcc_rel32_placeholder(ConditionCode::AboveOrEqual),
@@ -2589,6 +2587,24 @@ impl FunctionCompiler {
         }
     }
 
+    fn emit_usize_compare(&mut self, left: Gpr, value: usize) {
+        if let Ok(value) = i32::try_from(value) {
+            self.encoder.cmp_r64_imm32(left, value);
+        } else {
+            self.encoder.movabs_r64_imm64(Gpr::R11, value as u64);
+            self.encoder.cmp_r64_r64(left, Gpr::R11);
+        }
+    }
+
+    fn emit_i64_subtract(&mut self, target: Gpr, value: i64) {
+        if let Ok(value) = i32::try_from(value) {
+            self.encoder.sub_r64_imm32(target, value);
+        } else {
+            self.encoder.movabs_r64_imm64(Gpr::R11, value as u64);
+            self.encoder.sub_r64_r64(target, Gpr::R11);
+        }
+    }
+
     fn finish_with_literals(self) -> JitResult<Vec<u8>> {
         let mut bytes = self.encoder.into_bytes();
         for literal in &self.literals {
@@ -3717,6 +3733,22 @@ mod tests {
             !contains_bytes(&bytes, &dynamic_variable_shift_add_address_bytes(1)),
             "dynamic read fast path should not use the old shift/add address sequence"
         );
+        assert!(
+            contains_bytes(&bytes, &sub_r64_imm32_bytes(Gpr::R10, 1)),
+            "dynamic read fast path should subtract small lower bounds as an imm32"
+        );
+        assert!(
+            contains_bytes(&bytes, &cmp_r64_imm32_bytes(Gpr::R10, 3)),
+            "dynamic read fast path should compare small lengths as an imm32"
+        );
+        assert!(
+            !contains_bytes(&bytes, &dynamic_variable_movabs_sub_lower_bytes(1)),
+            "dynamic read fast path should not materialize small lower bounds in a GPR"
+        );
+        assert!(
+            !contains_bytes(&bytes, &dynamic_variable_movabs_cmp_len_bytes(3)),
+            "dynamic read fast path should not materialize small lengths in a GPR"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate dynamic variable leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -4044,6 +4076,22 @@ mod tests {
             !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
             "helper-free indexed writes should not pay the saved-argument prologue"
         );
+        assert!(
+            contains_bytes(&bytes, &sub_r64_imm32_bytes(Gpr::R10, 1)),
+            "indexed write fast path should subtract small lower bounds as an imm32"
+        );
+        assert!(
+            contains_bytes(&bytes, &cmp_r64_imm32_bytes(Gpr::R10, 3)),
+            "indexed write fast path should compare small lengths as an imm32"
+        );
+        assert!(
+            !contains_bytes(&bytes, &dynamic_variable_movabs_sub_lower_bytes(1)),
+            "indexed write fast path should not materialize small lower bounds in a GPR"
+        );
+        assert!(
+            !contains_bytes(&bytes, &dynamic_variable_movabs_cmp_len_bytes(3)),
+            "indexed write fast path should not materialize small lengths in a GPR"
+        );
         let memory =
             ExecutableMemory::allocate(&bytes).expect("allocate helper-free indexed assignment");
         let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -4078,6 +4126,14 @@ mod tests {
         assert!(
             !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
             "helper-free indexed writes should not pay the saved-argument prologue"
+        );
+        assert!(
+            contains_bytes(&bytes, &sub_r64_imm32_bytes(Gpr::R10, -2)),
+            "indexed write fast path should subtract negative lower bounds with a sign-extended imm32"
+        );
+        assert!(
+            !contains_bytes(&bytes, &dynamic_variable_movabs_sub_lower_bytes(-2)),
+            "indexed write fast path should not materialize small negative lower bounds in a GPR"
         );
         let memory = ExecutableMemory::allocate(&bytes)
             .expect("allocate negative lower-bound indexed assignment");
@@ -7781,6 +7837,32 @@ mod tests {
             encoder.add_r64_imm32(Gpr::R11, base_disp);
         }
         encoder.add_r64_r64(Gpr::Rax, Gpr::R11);
+        encoder.into_bytes()
+    }
+
+    fn sub_r64_imm32_bytes(register: Gpr, value: i32) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.sub_r64_imm32(register, value);
+        encoder.into_bytes()
+    }
+
+    fn cmp_r64_imm32_bytes(register: Gpr, value: i32) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.cmp_r64_imm32(register, value);
+        encoder.into_bytes()
+    }
+
+    fn dynamic_variable_movabs_sub_lower_bytes(lower: i64) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.movabs_r64_imm64(Gpr::R11, lower as u64);
+        encoder.sub_r64_r64(Gpr::R10, Gpr::R11);
+        encoder.into_bytes()
+    }
+
+    fn dynamic_variable_movabs_cmp_len_bytes(len: usize) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.movabs_r64_imm64(Gpr::R11, len as u64);
+        encoder.cmp_r64_r64(Gpr::R10, Gpr::R11);
         encoder.into_bytes()
     }
 
