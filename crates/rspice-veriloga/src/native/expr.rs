@@ -1380,7 +1380,7 @@ fn constant_limexp(value: f64) -> f64 {
     }
 }
 
-fn constant_dynamic_variable_slot(
+pub(super) fn constant_dynamic_variable_slot(
     raw_index: f64,
     base: usize,
     len: usize,
@@ -1390,7 +1390,7 @@ fn constant_dynamic_variable_slot(
         return None;
     }
 
-    let index = raw_index.round() as i64;
+    let index = rounded_i64_without_saturation(raw_index)?;
     let offset = index.checked_sub(lower)?;
     let offset = usize::try_from(offset).ok()?;
     if offset >= len {
@@ -1398,6 +1398,17 @@ fn constant_dynamic_variable_slot(
     }
 
     base.checked_add(offset)
+}
+
+fn rounded_i64_without_saturation(value: f64) -> Option<i64> {
+    const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
+
+    let rounded = value.round();
+    if rounded < i64::MIN as f64 || rounded >= I64_MAX_EXCLUSIVE_AS_F64 {
+        return None;
+    }
+
+    Some(rounded as i64)
 }
 
 fn is_independent_value_push(op: &NativeOp) -> bool {
@@ -3895,6 +3906,50 @@ mod tests {
 
         assert_eq!(lowered.ops(), &[NativeOp::LoadVariable(3)]);
         assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn preserves_unsafe_constant_dynamic_variable_reads_on_helper_path() {
+        for (name, raw_index, lower) in [
+            ("nan", f64::NAN, 0),
+            ("infinity", f64::INFINITY, 0),
+            ("huge finite", 1.0e300, i64::MAX),
+            ("out of range", 2.0, 0),
+        ] {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(raw_index),
+                    Instruction::PushVariableDyn {
+                        base: 0,
+                        len: 1,
+                        lower,
+                    },
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                name,
+                EntryKind::StampValue,
+                &program,
+                NativeLoweringLimits::new(0, 0, 0, 1, 0),
+            )
+            .expect("known dynamic variable range lowers natively");
+
+            match lowered.ops() {
+                [
+                    NativeOp::Const(actual),
+                    NativeOp::LoadVariableDyn {
+                        base: 0,
+                        len: 1,
+                        lower: actual_lower,
+                    },
+                ] if raw_index.is_nan() == actual.is_nan()
+                    && (raw_index.is_nan() || actual.to_bits() == raw_index.to_bits())
+                    && *actual_lower == lower => {}
+                other => panic!("{name}: expected helper-path dynamic read, got {other:?}"),
+            }
+            assert_eq!(lowered.max_stack_depth(), 1);
+        }
     }
 
     #[test]
