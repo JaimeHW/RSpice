@@ -5565,7 +5565,7 @@ impl Instance {
         if (((((!s.b[735]) && (!s.b[1066])) && (!s.b[1068])) && (!s.b[1069])) && (!s.b[1070])) {
             s.store_div_scalar_by_product(328, 1.0, s.ad_value(379), s.ad_value(434), 1.0);
             s.store_mul3_lhs(329, 328, 159, 159);
-            s.store_add_ad_rhs(330, 225, A::div_from_scalar(2.0, s.ad_value(159)));
+            s.store_add_div_from_scalar_rhs(330, 225, 2.0, 159);
             s.store_div_ln_lhs(377, 329, 330);
             s.store_offset_sub(44, 377, 376, (-0.0008));
             s.store_scale(45, 377, (4.0 * 0.0008));

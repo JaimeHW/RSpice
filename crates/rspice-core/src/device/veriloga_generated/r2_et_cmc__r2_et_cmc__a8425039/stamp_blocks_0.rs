@@ -323,16 +323,16 @@ impl Instance {
         s.v[82] = if s.b[82] { 1.0 } else { 0.0 };
 
         if ((s.b[80] && (!s.b[81])) && s.b[82]) {
-            s.store_add_ad_rhs(37, 37, A::div_from_scalar((0.5 * p.p39), s.ad_value(3)));
-            s.store_add_ad_rhs(38, 38, A::div_from_scalar((0.5 * p.p40), s.ad_value(3)));
+            s.store_add_div_from_scalar_rhs(37, 37, (0.5 * p.p39), 3);
+            s.store_add_div_from_scalar_rhs(38, 38, (0.5 * p.p40), 3);
         }
 
         s.b[83] = (s.v[4] > 0.0);
         s.v[83] = if s.b[83] { 1.0 } else { 0.0 };
 
         if s.b[83] {
-            s.store_add_ad_rhs(37, 37, A::div_from_scalar(p.p41, s.ad_value(4)));
-            s.store_add_ad_rhs(38, 38, A::div_from_scalar(p.p42, s.ad_value(4)));
+            s.store_add_div_from_scalar_rhs(37, 37, p.p41, 4);
+            s.store_add_div_from_scalar_rhs(38, 38, p.p42, 4);
         }
 
         s.b[85] = ((p.p3 != 0.0) && (p.p4 != 0.0));

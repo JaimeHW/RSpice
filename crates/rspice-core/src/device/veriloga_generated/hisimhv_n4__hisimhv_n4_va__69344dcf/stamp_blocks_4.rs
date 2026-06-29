@@ -394,7 +394,7 @@ impl Instance {
         if (((((!s.b[1439]) && s.b[2515]) && (!s.b[2534])) && (!s.b[2537])) && (!s.b[2538])) {
             s.store_div_scalar_by_product(335, 1.0, s.ad_value(210), s.ad_value(211), 1.0);
             s.store_mul3_lhs(336, 335, 2521, 2521);
-            s.store_add_ad_rhs(337, 154, A::div_from_scalar(2.0, s.ad_value(2521)));
+            s.store_add_div_from_scalar_rhs(337, 154, 2.0, 2521);
             s.store_offset_div_ad(90, A::ln(s.ad_value(336)), s.ad_value(337), p.p456);
             s.store_offset_sub(781, 90, 89, (-0.0008));
             s.store_scale(782, 90, (4.0 * 0.0008));

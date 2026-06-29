@@ -398,7 +398,7 @@ impl Instance {
         }
 
         if (((!s.b[1620]) && s.b[1843]) && (!s.b[1844])) {
-            s.store_add_ad_rhs(170, 169, A::div_from_scalar(1.0, s.ad_value(169)));
+            s.store_add_div_from_scalar_rhs(170, 169, 1.0, 169);
         }
 
         if ((!s.b[1620]) && s.b[1843]) {
@@ -432,7 +432,7 @@ impl Instance {
         }
 
         if (((!s.b[1620]) && s.b[1843]) && (!s.b[1846])) {
-            s.store_add_ad_rhs(170, 169, A::div_from_scalar(1.0, s.ad_value(169)));
+            s.store_add_div_from_scalar_rhs(170, 169, 1.0, 169);
         }
 
         if ((!s.b[1620]) && s.b[1843]) {
@@ -470,7 +470,7 @@ impl Instance {
         }
 
         if (((!s.b[1620]) && (!s.b[1843])) && (!s.b[1848])) {
-            s.store_add_ad_rhs(170, 169, A::div_from_scalar(1.0, s.ad_value(169)));
+            s.store_add_div_from_scalar_rhs(170, 169, 1.0, 169);
         }
 
         if ((!s.b[1620]) && (!s.b[1843])) {
@@ -504,7 +504,7 @@ impl Instance {
         }
 
         if (((!s.b[1620]) && (!s.b[1843])) && (!s.b[1850])) {
-            s.store_add_ad_rhs(170, 169, A::div_from_scalar(1.0, s.ad_value(169)));
+            s.store_add_div_from_scalar_rhs(170, 169, 1.0, 169);
         }
 
         if ((!s.b[1620]) && (!s.b[1843])) {

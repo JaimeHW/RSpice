@@ -5248,7 +5248,7 @@ impl Instance {
         }
 
         if (s.b[1369] && (!s.b[1370])) {
-            s.store_add_ad_rhs(15, 14, A::div_from_scalar(1.0, s.ad_value(14)));
+            s.store_add_div_from_scalar_rhs(15, 14, 1.0, 14);
         }
 
         if s.b[1369] {
@@ -5282,7 +5282,7 @@ impl Instance {
         }
 
         if (s.b[1369] && (!s.b[1372])) {
-            s.store_add_ad_rhs(15, 14, A::div_from_scalar(1.0, s.ad_value(14)));
+            s.store_add_div_from_scalar_rhs(15, 14, 1.0, 14);
         }
 
         if s.b[1369] {
@@ -5320,7 +5320,7 @@ impl Instance {
         }
 
         if ((!s.b[1369]) && (!s.b[1374])) {
-            s.store_add_ad_rhs(15, 14, A::div_from_scalar(1.0, s.ad_value(14)));
+            s.store_add_div_from_scalar_rhs(15, 14, 1.0, 14);
         }
 
         if (!s.b[1369]) {
@@ -5354,7 +5354,7 @@ impl Instance {
         }
 
         if ((!s.b[1369]) && (!s.b[1376])) {
-            s.store_add_ad_rhs(15, 14, A::div_from_scalar(1.0, s.ad_value(14)));
+            s.store_add_div_from_scalar_rhs(15, 14, 1.0, 14);
         }
 
         if (!s.b[1369]) {
