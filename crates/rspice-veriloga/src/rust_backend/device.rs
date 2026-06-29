@@ -480,6 +480,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_mul_product3_helper_calls(source);
     source = compact_mul_powf_helper_calls(source);
     source = compact_mul_pow_helper_calls(source);
+    source = compact_pow_index_helper_calls(source);
     source = compact_mul_add_sub_helper_calls(source);
     source = compact_mul_square_exp_scaled_input_helper_calls(source);
     source = compact_mul_scale_offset_helper_calls(source);
@@ -2361,6 +2362,65 @@ fn compact_mul_pow_helper_call_replacement(
     } else {
         return None;
     };
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_pow_index_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_pow_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_pow_index_helper_call_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_pow_index_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_pow_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let base = compact_scratch_ad_value_index(args[1])?;
+    let exponent = compact_scratch_ad_value_index(args[2])?;
+    let line = format!("scratch.store_pow_indices({target_index}, {base}, {exponent});");
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
     let statement_end = compact_statement_end_after_call(source, close_paren)?;
@@ -8372,6 +8432,27 @@ fn stamp() {
         assert!(!compact.contains("s.store_pow_ad("), "{compact}");
         assert!(!compact.contains("A::mul("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_pow_index_operands_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(support.contains("fn store_pow_indices("), "{support}");
+
+        let source = r#"
+fn stamp() {
+    scratch.store_pow_ad(20, scratch.ad_value(2), scratch.ad_value(3));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_pow_indices(20, 2, 3);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_pow_ad("), "{compact}");
+        assert!(!compact.contains("s.ad_value("), "{compact}");
     }
 
     #[test]
@@ -14509,6 +14590,20 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = output;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent, left.node_derivatives[axis], right.node_derivatives[axis]); }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent, left.branch_derivatives[axis], right.branch_derivatives[axis]); }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_pow_indices(&mut self, index: usize, left: usize, right: usize) {",
+        "        let base = self.values[left];",
+        "        let exponent = self.values[right];",
+        "        let output = base.powf(exponent);",
+        "        self.values[index] = output;",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent, left_node_derivatives[axis], right_node_derivatives[axis]); }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent, left_branch_derivatives[axis], right_branch_derivatives[axis]); }",
         "    }",
         "",
         "    #[inline]",
