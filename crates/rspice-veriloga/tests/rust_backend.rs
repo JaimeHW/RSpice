@@ -11431,10 +11431,7 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
         state.contains("scratch: Some(GenericScratch::new_box())"),
         "{state}"
     );
-    assert!(
-        state.contains("reactive_scratch: Some(GenericReactiveScratch::new_box())"),
-        "{state}"
-    );
+    assert!(state.contains("reactive_scratch: None"), "{state}");
     assert!(state.contains("params: self.params.clone()"), "{state}");
     assert!(state.contains("scratch: None"), "{state}");
     assert!(state.contains("reactive_scratch: None"), "{state}");

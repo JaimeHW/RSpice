@@ -418,7 +418,7 @@ impl Instance {
             scalar_v58: 0.0,
             scalar_v59: 0.0,
             scratch: Some(GenericScratch::new_box()),
-            reactive_scratch: Some(GenericReactiveScratch::new_box()),
+            reactive_scratch: None,
         };
         instance.recompute_instance_static();
         instance

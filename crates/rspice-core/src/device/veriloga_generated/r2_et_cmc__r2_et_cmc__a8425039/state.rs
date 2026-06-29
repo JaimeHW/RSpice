@@ -263,7 +263,7 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             scratch: Some(GenericScratch::new_box()),
-            reactive_scratch: Some(GenericReactiveScratch::new_box()),
+            reactive_scratch: None,
         }
     }
 

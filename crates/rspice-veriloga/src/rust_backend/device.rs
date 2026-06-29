@@ -12806,7 +12806,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            timestep: 0.0,\n");
     out.push_str(&extensions.new_initializers);
     out.push_str("            scratch: Some(GenericScratch::new_box()),\n");
-    out.push_str("            reactive_scratch: Some(GenericReactiveScratch::new_box()),\n");
+    out.push_str("            reactive_scratch: None,\n");
     if extensions.after_new.is_empty() {
         out.push_str("        }\n");
     } else {

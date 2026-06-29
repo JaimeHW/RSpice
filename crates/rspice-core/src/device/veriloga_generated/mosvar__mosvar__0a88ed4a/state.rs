@@ -1599,7 +1599,7 @@ impl Instance {
             scalar_temperature_static_temperature: 0.0,
             scalar_temperature_static_thermal_voltage: 0.0,
             scratch: Some(GenericScratch::new_box()),
-            reactive_scratch: Some(GenericReactiveScratch::new_box()),
+            reactive_scratch: None,
         };
         instance.recompute_instance_static();
         instance
