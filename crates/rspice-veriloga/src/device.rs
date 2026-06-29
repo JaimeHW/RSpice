@@ -1241,6 +1241,7 @@ impl VerilogADevice {
             },
             laplace_filters_len: context.laplace_filters.len(),
             param_given: context.param_given.as_ptr() as *const u8,
+            param_given_len: context.param_given.len(),
             branch_unknowns: if context.branch_current_values.is_empty() {
                 std::ptr::null()
             } else {

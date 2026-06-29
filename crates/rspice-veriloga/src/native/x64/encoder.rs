@@ -998,6 +998,7 @@ mod tests {
             laplace_filters: std::ptr::null_mut(),
             laplace_filters_len: 0,
             param_given: std::ptr::null(),
+            param_given_len: 0,
             branch_unknowns: branch_unknowns.as_ptr(),
             analysis_type: 0,
             multiplicity: 1.0,
@@ -1025,7 +1026,11 @@ mod tests {
         encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rax, 0);
         encoder.mulsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
         encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm1, vars_reg, 8);
-        encoder.mov_r64_m64_base_disp32(Gpr::Rax, ctx_reg, 176);
+        encoder.mov_r64_m64_base_disp32(
+            Gpr::Rax,
+            ctx_reg,
+            std::mem::offset_of!(EvalContext, branch_unknowns) as i32,
+        );
         encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm2, Gpr::Rax, 0);
         encoder.divsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm2);
         encoder.addsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
