@@ -893,6 +893,7 @@ mod tests {
     use crate::codegen::{
         AssignmentStep, BytecodeProgram, CompiledModel, Instruction, StampProgram,
     };
+    use crate::device::VerilogADevice;
     use crate::native::expr::{NativeOp, PriorCurrentProbe};
     use crate::native::x64::codegen::NativeAssignment;
     use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
@@ -1207,6 +1208,32 @@ endmodule
     }
 
     #[test]
+    #[ignore = "release-only shipped-model VerilogADevice native x64 probe; run with --release --features native -- --ignored --nocapture"]
+    fn native_x64_shipped_model_devices_run_without_interpreter_fallback() {
+        assert!(
+            !cfg!(debug_assertions),
+            "native x64 shipped-model device probe is release-only; rerun with --release"
+        );
+
+        let cases = [
+            (
+                "bsimcmg",
+                shipped_cmc_model_path(&["BSIM-CMG_112.1.0_04282026", "code", "bsimcmg.va"]),
+                Some("bsimcmg_va"),
+            ),
+            (
+                "asmhemt",
+                shipped_cmc_model_path(&["ASM-HEMT101.6.0_05132026", "vacode", "asmhemt.va"]),
+                Some("asmhemt"),
+            ),
+        ];
+
+        for (name, path, module) in cases {
+            run_shipped_model_device_probe(name, &path, module);
+        }
+    }
+
+    #[test]
     fn compile_model_with_canonical_ir_rejects_unsupported_mir_stamp() {
         let source = r#"
 `include "disciplines.vams"
@@ -1440,6 +1467,145 @@ endmodule
             stats.reactive_jacobians,
             stats.skipped_nonfinite,
         );
+    }
+
+    fn run_shipped_model_device_probe(name: &str, path: &Path, module: Option<&str>) {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let runtime = compiler
+            .compile_file_runtime_with_metadata(path, module)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "compile shipped Verilog-A device probe model {name} at {}: {error}",
+                    path.display()
+                )
+            });
+        let model = std::sync::Arc::new(runtime.model.clone());
+        let nodes = (1..=model.num_terminals).collect::<Vec<_>>();
+        let mut device = VerilogADevice::try_new_with_canonical_ir(
+            format!("{name}_device"),
+            std::sync::Arc::clone(&model),
+            &runtime.canonical_ir,
+            &nodes,
+        )
+        .unwrap_or_else(|error| {
+            panic!("{name}: shipped device native construction failed: {error}")
+        });
+        assert!(
+            device.is_using_native(),
+            "{name}: shipped device must use native code"
+        );
+
+        let terminal_count = model.num_terminals;
+        let internal_indices = ((terminal_count + 1)
+            ..(terminal_count + 1 + device.num_internal_nodes()))
+            .collect::<Vec<_>>();
+        device.set_internal_node_indices(&internal_indices);
+        let branch_start = terminal_count + 1 + device.num_internal_nodes();
+        let branch_indices =
+            (branch_start..(branch_start + device.num_branch_unknowns())).collect::<Vec<_>>();
+        device.set_branch_current_indices(&branch_indices);
+
+        let solution_len =
+            terminal_count + device.num_internal_nodes() + device.num_branch_unknowns();
+        let mut solution = vec![0.0; solution_len.max(1)];
+        for (terminal, node) in nodes.iter().copied().enumerate() {
+            solution[node - 1] = shipped_device_terminal_bias(name, terminal);
+        }
+
+        device
+            .try_update_all_voltages(&solution)
+            .unwrap_or_else(|error| {
+                panic!("{name}: shipped device voltage update failed: {error}")
+            });
+        let currents = device.try_evaluate().unwrap_or_else(|error| {
+            panic!("{name}: shipped device native evaluate failed: {error}")
+        });
+        assert_eq!(
+            currents.len(),
+            model.stamp_programs.len(),
+            "{name}: device evaluate must return one current per stamp"
+        );
+        let finite_currents = currents.iter().filter(|value| value.is_finite()).count();
+        assert!(
+            finite_currents > 0,
+            "{name}: shipped device native evaluate must produce finite currents"
+        );
+
+        let mut matrix_entries = 0usize;
+        let mut rhs_entries = 0usize;
+        let mut matrix_l1 = 0.0_f64;
+        let mut rhs_l1 = 0.0_f64;
+        device
+            .try_stamp(
+                &solution,
+                |row, col, value| {
+                    assert!(
+                        value.is_finite(),
+                        "{name}: non-finite matrix stamp ({row},{col})={value}"
+                    );
+                    matrix_entries += 1;
+                    matrix_l1 += value.abs();
+                },
+                |row, value| {
+                    assert!(
+                        value.is_finite(),
+                        "{name}: non-finite rhs stamp ({row})={value}"
+                    );
+                    rhs_entries += 1;
+                    rhs_l1 += value.abs();
+                },
+            )
+            .unwrap_or_else(|error| panic!("{name}: shipped device native stamp failed: {error}"));
+        assert!(
+            matrix_entries > 0,
+            "{name}: shipped device native stamp must produce matrix entries"
+        );
+        assert!(
+            rhs_entries > 0,
+            "{name}: shipped device native stamp must produce RHS entries"
+        );
+
+        let mut reactive_entries = 0usize;
+        let mut reactive_l1 = 0.0_f64;
+        device
+            .try_stamp_reactive(&solution, |row, col, value| {
+                assert!(
+                    value.is_finite(),
+                    "{name}: non-finite reactive stamp ({row},{col})={value}"
+                );
+                reactive_entries += 1;
+                reactive_l1 += value.abs();
+            })
+            .unwrap_or_else(|error| {
+                panic!("{name}: shipped device native reactive stamp failed: {error}")
+            });
+        assert!(
+            reactive_entries > 0,
+            "{name}: shipped device native reactive stamp must produce entries"
+        );
+
+        eprintln!(
+            "native-x64-shipped-device model={name} native_chunks={} finite_currents={} matrix_entries={} rhs_entries={} reactive_entries={} matrix_l1={matrix_l1:.17e} rhs_l1={rhs_l1:.17e} reactive_l1={reactive_l1:.17e}",
+            device.native_chunk_count(),
+            finite_currents,
+            matrix_entries,
+            rhs_entries,
+            reactive_entries,
+        );
+    }
+
+    fn shipped_device_terminal_bias(name: &str, terminal: usize) -> f64 {
+        match name {
+            "bsimcmg" => [0.05, 0.7, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "asmhemt" => [0.1, 0.3, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            _ => 0.0,
+        }
     }
 
     #[derive(Default)]
