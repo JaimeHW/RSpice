@@ -858,6 +858,24 @@ impl FunctionCompiler {
         let target = XMM_STACK[self.depth - 1];
         let base_disp = byte_disp(base)?;
 
+        if self.depth < XMM_STACK.len() {
+            let raw_index = self.scratch_register()?;
+            self.encoder.movsd_xmm_xmm(raw_index, target);
+            let slow_jumps =
+                self.emit_dynamic_variable_address_inline(target, base_disp, len, lower)?;
+            self.encoder.movsd_xmm_m64_base_disp32(target, Gpr::Rax, 0);
+            let fast_done = self.encoder.jmp_rel32_placeholder();
+
+            for slow_jump in slow_jumps {
+                self.patch_rel32_to_current(slow_jump)?;
+            }
+            self.emit_dynamic_variable_load_slow_return_from_register(
+                raw_index, base_disp, len, lower,
+            );
+            self.patch_rel32_to_current(fast_done)?;
+            return Ok(());
+        }
+
         self.encoder.sub_rsp_imm32(DYNAMIC_READ_FRAME_BYTES);
         self.encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, target);
 
@@ -878,6 +896,33 @@ impl FunctionCompiler {
     fn emit_dynamic_variable_load_slow_return(&mut self, base_disp: i32, len: usize, lower: i64) {
         self.encoder
             .movsd_xmm_m64_base_disp32(Xmm::Xmm0, Gpr::Rsp, 0);
+        self.emit_dynamic_variable_load_slow_return_from_xmm0(base_disp, len, lower);
+        self.encoder.add_rsp_imm32(DYNAMIC_READ_FRAME_BYTES);
+        let return_after_error = self.encoder.jmp_rel32_placeholder();
+        self.early_return_jumps.push(return_after_error);
+    }
+
+    fn emit_dynamic_variable_load_slow_return_from_register(
+        &mut self,
+        raw_index: Xmm,
+        base_disp: i32,
+        len: usize,
+        lower: i64,
+    ) {
+        if raw_index != Xmm::Xmm0 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, raw_index);
+        }
+        self.emit_dynamic_variable_load_slow_return_from_xmm0(base_disp, len, lower);
+        let return_after_error = self.encoder.jmp_rel32_placeholder();
+        self.early_return_jumps.push(return_after_error);
+    }
+
+    fn emit_dynamic_variable_load_slow_return_from_xmm0(
+        &mut self,
+        base_disp: i32,
+        len: usize,
+        lower: i64,
+    ) {
         self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
         self.encoder
             .mov_r64_r64(dynamic_variable_base_arg_reg(), self.vars_arg_reg());
@@ -894,9 +939,6 @@ impl FunctionCompiler {
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
-        self.encoder.add_rsp_imm32(DYNAMIC_READ_FRAME_BYTES);
-        let return_after_error = self.encoder.jmp_rel32_placeholder();
-        self.early_return_jumps.push(return_after_error);
     }
 
     fn emit_dynamic_variable_slot_inline(
@@ -2902,10 +2944,11 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
-        NativeAssignment, Q_ELECTRON, VOLTAGES_OFFSET, X64Encoder, XMM_STACK, Xmm,
-        assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
-        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg, rspice_exp,
+        DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64,
+        INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, Q_ELECTRON, VOLTAGES_OFFSET,
+        X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
+        compile_assignment_function, compile_assignment_pass_function, compile_value_function,
+        entry_ctx_arg_reg, rspice_exp,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -3600,6 +3643,14 @@ mod tests {
             !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
             "dynamic read fast path should not pay helper-call prologue cost"
         );
+        assert!(
+            !contains_bytes(&bytes, &sub_rsp_bytes(DYNAMIC_READ_FRAME_BYTES)),
+            "dynamic read with a spare XMM register should not spill the index before the fast path"
+        );
+        assert!(
+            !contains_bytes(&bytes, &add_rsp_bytes(DYNAMIC_READ_FRAME_BYTES)),
+            "dynamic read with a spare XMM register should not restore a fast-path spill frame"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate dynamic variable leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -3634,6 +3685,10 @@ mod tests {
             !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
             "dynamic read slow path should not require the helper-call prologue"
         );
+        assert!(
+            !contains_bytes(&bytes, &sub_rsp_bytes(DYNAMIC_READ_FRAME_BYTES)),
+            "out-of-range dynamic read with a spare XMM register should still avoid the old spill frame"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate dynamic variable leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -3655,6 +3710,58 @@ mod tests {
             error.contains("no interpreter fallback"),
             "error must preserve the native hard-fail contract, got: {error}"
         );
+    }
+
+    #[test]
+    fn generated_value_leaf_keeps_full_stack_dynamic_variable_read_on_spill_path() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(3.0),
+                Instruction::PushConst(4.0),
+                Instruction::PushConst(5.0),
+                Instruction::PushParam(0),
+                Instruction::PushVariableDyn {
+                    base: 1,
+                    len: 3,
+                    lower: 1,
+                },
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+            ],
+            0,
+        );
+        assert_eq!(program.max_stack_depth(), XMM_STACK.len());
+        let bytes =
+            compile_value_function(&program).expect("compile full-stack dynamic variable leaf");
+        assert!(
+            contains_bytes(&bytes, &sub_rsp_bytes(DYNAMIC_READ_FRAME_BYTES)),
+            "full-stack dynamic read must keep the stack spill fallback"
+        );
+        assert!(
+            contains_bytes(&bytes, &add_rsp_bytes(DYNAMIC_READ_FRAME_BYTES)),
+            "full-stack dynamic read must restore the stack spill fallback"
+        );
+
+        let memory =
+            ExecutableMemory::allocate(&bytes).expect("allocate full-stack dynamic variable leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let vars = [99.0_f64, 2.0, 4.0, 8.0];
+        let ctx = eval_context(&[2.49], &[], &[], &[]);
+        clear_native_runtime_error();
+
+        let loaded = f(&ctx, vars.as_ptr());
+
+        assert_eq!(loaded.to_bits(), 19.0_f64.to_bits());
+        assert!(take_native_runtime_error().is_none());
     }
 
     #[test]
@@ -7220,6 +7327,20 @@ mod tests {
 
     fn contains_bytes(bytes: &[u8], needle: &[u8]) -> bool {
         bytes.windows(needle.len()).any(|window| window == needle)
+    }
+
+    fn sub_rsp_bytes(value: i32) -> Vec<u8> {
+        rsp_adjust_bytes(0xEC, value)
+    }
+
+    fn add_rsp_bytes(value: i32) -> Vec<u8> {
+        rsp_adjust_bytes(0xC4, value)
+    }
+
+    fn rsp_adjust_bytes(opcode: u8, value: i32) -> Vec<u8> {
+        let mut bytes = vec![0x48, 0x81, opcode];
+        bytes.extend_from_slice(&value.to_le_bytes());
+        bytes
     }
 
     fn count_bytes(bytes: &[u8], needle: &[u8]) -> usize {
