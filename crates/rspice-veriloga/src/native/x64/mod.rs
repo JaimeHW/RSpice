@@ -1386,6 +1386,11 @@ endmodule
                 Some("bsimcmg_va"),
             ),
             (
+                "r3_cmc",
+                shipped_cmc_model_path(&["r3_cmc_release1.1.2_2023Jun16", "r3_cmc.va"]),
+                None,
+            ),
+            (
                 "bsimimg",
                 shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
                 Some("bsimimg"),
@@ -1435,6 +1440,11 @@ endmodule
                 "bsimcmg",
                 shipped_cmc_model_path(&["BSIM-CMG_112.1.0_04282026", "code", "bsimcmg.va"]),
                 Some("bsimcmg_va"),
+            ),
+            (
+                "r3_cmc",
+                shipped_cmc_model_path(&["r3_cmc_release1.1.2_2023Jun16", "r3_cmc.va"]),
+                None,
             ),
             (
                 "bsimimg",
@@ -1840,6 +1850,7 @@ endmodule
                 .get(terminal)
                 .copied()
                 .unwrap_or(0.0),
+            "r3_cmc" => [0.1, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "bsimimg" | "hisimsoi" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0]
                 .get(terminal)
                 .copied()
