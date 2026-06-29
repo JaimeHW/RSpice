@@ -2712,28 +2712,24 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_named_branch_access(&mut self, access: &str, name: &str) -> JitResult<()> {
-        match access {
-            "V" => {
-                let branch = self.named_branch(name)?;
-                let pos = self.lower_voltage_node_id(branch.pos_node)?;
-                let neg = self.lower_voltage_node_id(branch.neg_node)?;
-                self.push(NativeOp::LoadVoltage { pos, neg })
-            }
-            "I" => {
-                let Some(branch_unknown) = self.named_branch_unknown(name) else {
-                    return Err(self.unsupported(format!("named branch current {name}")));
-                };
-                let index = usize::from(branch_unknown.id);
-                validate_index(
-                    self.model.clone(),
-                    "canonical branch unknown",
-                    index,
-                    self.limits.branch_unknown_count,
-                )?;
-                self.push(NativeOp::LoadBranchUnknown(index))
-            }
-            _ => Err(self.unsupported(format!("named branch access {access}({name})"))),
+        if is_flow_access(access) {
+            let Some(branch_unknown) = self.named_branch_unknown(name) else {
+                return Err(self.unsupported(format!("named branch current {name}")));
+            };
+            let index = usize::from(branch_unknown.id);
+            validate_index(
+                self.model.clone(),
+                "canonical branch unknown",
+                index,
+                self.limits.branch_unknown_count,
+            )?;
+            return self.push(NativeOp::LoadBranchUnknown(index));
         }
+
+        let branch = self.named_branch(name)?;
+        let pos = self.lower_voltage_node_id(branch.pos_node)?;
+        let neg = self.lower_voltage_node_id(branch.neg_node)?;
+        self.push(NativeOp::LoadVoltage { pos, neg })
     }
 
     fn lower_intrinsic_call(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
@@ -3077,55 +3073,49 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_branch_access(&mut self, access: &str, pos: &str, neg: Option<&str>) -> JitResult<()> {
-        match access {
-            "V" => {
-                let pos = self.lower_voltage_node(pos)?;
-                let neg = neg
-                    .map(|node| self.lower_voltage_node(node))
-                    .transpose()?
-                    .unwrap_or(VoltageNode::Ground);
-                self.push(NativeOp::LoadVoltage { pos, neg })
-            }
-            "I" => {
-                if let Some((branch_unknown, reversed)) =
-                    self.resolve_current_branch_unknown(pos, neg)?
-                {
-                    validate_index(
-                        self.model.clone(),
-                        "canonical branch unknown",
-                        branch_unknown,
-                        self.limits.branch_unknown_count,
-                    )?;
-                    self.push(NativeOp::LoadBranchUnknown(branch_unknown))?;
-                    if reversed {
-                        return self.append_unary(NativeOp::Neg);
-                    }
-                    return Ok(());
-                }
-
-                let pos = self.lower_terminal_node(pos)?;
-                let neg = neg
-                    .map(|node| self.lower_terminal_node(node))
-                    .transpose()?
-                    .unwrap_or(usize::MAX);
-                if neg == usize::MAX {
-                    return Err(self.unsupported("branch current to ground access"));
-                }
-                let pair_index =
-                    current_pair_index(self.model.clone(), pos, neg, self.limits.terminal_count)?;
-                if !self.limits.available_current_pairs.contains(&pair_index) {
-                    return Err(JitError::unsupported_program_op(
-                        self.model.clone(),
-                        format!("canonical branch current terminal pair {pos},{neg} unavailable"),
-                    ));
-                }
-                if !self.current_pair_dependencies.contains(&pair_index) {
-                    self.current_pair_dependencies.push(pair_index);
-                }
-                self.push(NativeOp::LoadCurrent(pair_index))
-            }
-            _ => Err(self.unsupported(format!("branch access {access}"))),
+        if !is_flow_access(access) {
+            let pos = self.lower_voltage_node(pos)?;
+            let neg = neg
+                .map(|node| self.lower_voltage_node(node))
+                .transpose()?
+                .unwrap_or(VoltageNode::Ground);
+            return self.push(NativeOp::LoadVoltage { pos, neg });
         }
+
+        if let Some((branch_unknown, reversed)) = self.resolve_current_branch_unknown(pos, neg)? {
+            validate_index(
+                self.model.clone(),
+                "canonical branch unknown",
+                branch_unknown,
+                self.limits.branch_unknown_count,
+            )?;
+            self.push(NativeOp::LoadBranchUnknown(branch_unknown))?;
+            if reversed {
+                return self.append_unary(NativeOp::Neg);
+            }
+            return Ok(());
+        }
+
+        let pos = self.lower_terminal_node(pos)?;
+        let neg = neg
+            .map(|node| self.lower_terminal_node(node))
+            .transpose()?
+            .unwrap_or(usize::MAX);
+        if neg == usize::MAX {
+            return Err(self.unsupported("branch current to ground access"));
+        }
+        let pair_index =
+            current_pair_index(self.model.clone(), pos, neg, self.limits.terminal_count)?;
+        if !self.limits.available_current_pairs.contains(&pair_index) {
+            return Err(JitError::unsupported_program_op(
+                self.model.clone(),
+                format!("canonical branch current terminal pair {pos},{neg} unavailable"),
+            ));
+        }
+        if !self.current_pair_dependencies.contains(&pair_index) {
+            self.current_pair_dependencies.push(pair_index);
+        }
+        self.push(NativeOp::LoadCurrent(pair_index))
     }
 
     fn resolve_current_branch_unknown(
@@ -3148,11 +3138,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             return Ok(None);
         };
 
-        if branch_unknown.pos_node == pos && branch_unknown.neg_node == neg {
-            return Ok(Some((usize::from(branch_unknown.id), false)));
-        }
-        if branch_unknown.pos_node == neg && branch_unknown.neg_node == pos {
-            return Ok(Some((usize::from(branch_unknown.id), true)));
+        let same_direction = branch_unknown.pos_node == pos && branch_unknown.neg_node == neg;
+        let opposite_direction = branch_unknown.pos_node == neg && branch_unknown.neg_node == pos;
+        if same_direction || opposite_direction {
+            return Ok(Some((usize::from(branch_unknown.id), opposite_direction)));
         }
 
         Ok(None)
@@ -3479,6 +3468,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
 fn normalize_intrinsic_name(name: &str) -> String {
     name.strip_prefix('$').unwrap_or(name).to_ascii_lowercase()
+}
+
+fn is_flow_access(access: &str) -> bool {
+    matches!(access, "I" | "Pwr" | "F" | "Tau" | "MMF" | "Flow")
 }
 
 fn expression_kind_name(kind: &HirExprKind) -> &'static str {
@@ -4719,6 +4712,79 @@ endmodule
             ]
         );
         assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_canonical_custom_potential_node_access_to_native_voltage() {
+        let source = r#"
+`include "disciplines.vams"
+module mir_custom_potential_node(p, n);
+  inout p, n;
+  electrical p, n;
+  thermal t;
+  analog begin
+    I(p, n) <+ Temp(t);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_custom_potential_node",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 1, 0, 0, 0),
+        )
+        .expect("lower canonical custom potential node access to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[NativeOp::LoadVoltage {
+                pos: VoltageNode::Internal(0),
+                neg: VoltageNode::Ground,
+            }]
+        );
+        assert_eq!(program.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_canonical_custom_potential_named_branch_to_native_voltage() {
+        let source = r#"
+`include "disciplines.vams"
+module mir_custom_potential_named_branch(p, n);
+  inout p, n;
+  electrical p, n;
+  thermal t;
+  branch (t) th;
+  analog begin
+    I(p, n) <+ Temp(th);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_custom_potential_named_branch",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 1, 0, 0, 0),
+        )
+        .expect("lower canonical custom potential named branch to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[NativeOp::LoadVoltage {
+                pos: VoltageNode::Internal(0),
+                neg: VoltageNode::Ground,
+            }]
+        );
+        assert_eq!(program.max_stack_depth(), 1);
     }
 
     #[test]

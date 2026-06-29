@@ -5,6 +5,7 @@
 //! must return a native JIT error, not create a device that runs the VM.
 #![cfg(feature = "native")]
 
+use rspice_veriloga::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
 use rspice_veriloga::codegen::Instruction;
 use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::native::{compile_native, compile_native_with_canonical_ir};
@@ -15,6 +16,29 @@ fn compile(source: &str) -> rspice_veriloga::CompiledModel {
     VerilogACompiler::new(CompilerOptions::default())
         .compile(source)
         .expect("Verilog-A source must compile")
+}
+
+fn canonical_artifact_with_unsupported_root(
+    compiler: &VerilogACompiler,
+    source: &str,
+) -> CanonicalIrArtifact {
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let metadata = artifact.metadata.clone();
+    let mut hir = artifact.hir.clone();
+    let mut mir = artifact.mir.clone();
+    let root = usize::from(mir.equations[0].expression.id);
+    let unsupported = HirExprKind::StringLiteral {
+        value: "unsupported-native-expression".into(),
+    };
+    hir.expressions[root].kind = unsupported.clone();
+    mir.expressions[root].kind = unsupported;
+    hir.contributions[0].expression.kind = "string".into();
+    mir.equations[0].expression.kind = "string".into();
+    let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
+    CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect("synthetic canonical artifact has refreshed digests")
 }
 
 fn dependent_default_model() -> rspice_veriloga::CompiledModel {
@@ -1416,6 +1440,71 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_evaluates_custom_potential_node_access_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_thermal_node(p, n);
+    inout p, n;
+    electrical p, n;
+    thermal t;
+    analog I(p, n) <+ Temp(t);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    assert_eq!(model.internal_nodes, 1);
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("NTNODE1", model, &artifact, &[1, 0])
+            .expect("custom potential node access uses canonical native JIT path");
+    assert!(device.is_using_native());
+    device.set_internal_node_indices(&[2]);
+    device.update_all_voltages(&[0.25, 3.5]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native custom potential node access evaluates");
+
+    assert!((currents[0] - 3.5).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_with_canonical_ir_evaluates_custom_potential_named_branch_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_thermal_named(p, n);
+    inout p, n;
+    electrical p, n;
+    thermal t;
+    branch (t) th;
+    analog I(p, n) <+ Temp(th);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    assert_eq!(model.internal_nodes, 1);
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("NTBRANCH1", model, &artifact, &[1, 0])
+            .expect("custom potential named branch access uses canonical native JIT path");
+    assert!(device.is_using_native());
+    device.set_internal_node_indices(&[2]);
+    device.update_all_voltages(&[0.25, 4.25]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native custom potential named branch access evaluates");
+
+    assert!((currents[0] - 4.25).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_stamps_named_branch_current_without_fallback() {
     let source = r#"
 `include "disciplines.vams"
@@ -2457,15 +2546,12 @@ fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
 module native_canonical_cache_guard(p, n);
     inout p, n;
     electrical p, n;
-    thermal t;
-    analog I(p, n) <+ Temp(t);
+    analog I(p, n) <+ V(p, n);
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
     let model = std::sync::Arc::new(compiler.compile(source).expect("compile bytecode model"));
-    let artifact = compiler
-        .compile_canonical_ir(source)
-        .expect("compile canonical IR");
+    let artifact = canonical_artifact_with_unsupported_root(&compiler, source);
 
     let bytecode_device =
         VerilogADevice::try_new("BYTECACHE1", std::sync::Arc::clone(&model), &[1, 0])
@@ -2480,7 +2566,10 @@ endmodule
     )
     .expect_err("canonical-native path must not reuse cached bytecode-native image");
 
-    assert!(error.to_string().contains("branch access Temp"), "{error}");
+    assert!(
+        error.to_string().contains("expression kind string"),
+        "{error}"
+    );
 }
 
 #[cfg(target_arch = "x86_64")]
