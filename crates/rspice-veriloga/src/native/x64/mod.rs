@@ -1,7 +1,9 @@
 pub(crate) mod codegen;
 pub mod encoder;
 
-use super::expr::{EntryKind, NativeLoweringLimits, NativeProgram};
+use super::expr::{
+    EntryKind, NativeLoweringLimits, NativeOp, NativeProgram, constant_dynamic_variable_slot,
+};
 use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel};
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
@@ -195,6 +197,12 @@ fn lower_assignment_step(
                 value,
                 limits,
             )?;
+            if let Some(var_index) = constant_indexed_assignment_slot(&index, *base, *len, *lower) {
+                return Ok(NativeAssignment::Direct {
+                    var_index,
+                    program: value,
+                });
+            }
             Ok(NativeAssignment::Indexed {
                 base: *base,
                 len: *len,
@@ -216,6 +224,20 @@ fn lower_assignment_step(
                 .collect::<JitResult<Vec<_>>>()?;
             Ok(NativeAssignment::Loop { condition, body })
         }
+    }
+}
+
+fn constant_indexed_assignment_slot(
+    index: &NativeProgram,
+    base: usize,
+    len: usize,
+    lower: i64,
+) -> Option<usize> {
+    match index.ops() {
+        [NativeOp::Const(raw_index)] => {
+            constant_dynamic_variable_slot(*raw_index, base, len, lower)
+        }
+        _ => None,
     }
 }
 
@@ -281,5 +303,124 @@ fn current_pair_overflow(model: &CompiledModel, pos: usize, neg: usize) -> JitEr
     JitError::InvalidCanonicalIr {
         model: model.name.clone(),
         detail: format!("PushCurrent terminal pair {pos},{neg} index overflow").into(),
+    }
+}
+
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+mod tests {
+    use super::lower_assignment_step;
+    use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
+    use crate::native::expr::NativeOp;
+    use crate::native::x64::codegen::NativeAssignment;
+    use smol_str::SmolStr;
+
+    #[test]
+    fn lower_assignment_step_folds_constant_indexed_write_to_direct_assignment() {
+        let model = compiled_model_with_variables(4);
+        let step = indexed_assignment_step(
+            1,
+            3,
+            1,
+            vec![Instruction::PushConst(2.49)],
+            vec![Instruction::PushConst(11.0)],
+        );
+
+        let assignment = lower_assignment_step(&model, &step).expect("lower indexed assignment");
+
+        match assignment {
+            NativeAssignment::Direct { var_index, program } => {
+                assert_eq!(var_index, 2);
+                assert_eq!(program.ops(), &[NativeOp::Const(11.0)]);
+            }
+            other => panic!("expected direct assignment, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_assignment_step_preserves_unsafe_indexed_writes_on_helper_path() {
+        let cases = [
+            ("dynamic", vec![Instruction::PushVariable(0)], 0),
+            ("nan", vec![Instruction::PushConst(f64::NAN)], 0),
+            ("infinity", vec![Instruction::PushConst(f64::INFINITY)], 0),
+            (
+                "huge finite",
+                vec![Instruction::PushConst(1.0e300)],
+                i64::MAX,
+            ),
+            ("out of range", vec![Instruction::PushConst(2.0)], 0),
+        ];
+
+        for (name, index, lower) in cases {
+            let model = compiled_model_with_variables(1);
+            let step = indexed_assignment_step(
+                0,
+                1,
+                lower,
+                index.clone(),
+                vec![Instruction::PushConst(11.0)],
+            );
+
+            let assignment =
+                lower_assignment_step(&model, &step).expect("lower indexed assignment");
+
+            match assignment {
+                NativeAssignment::Indexed {
+                    base,
+                    len,
+                    lower: actual_lower,
+                    index: index_program,
+                    value,
+                } => {
+                    assert_eq!(base, 0, "{name}");
+                    assert_eq!(len, 1, "{name}");
+                    assert_eq!(actual_lower, lower, "{name}");
+                    assert_eq!(value.ops(), &[NativeOp::Const(11.0)], "{name}");
+                    assert!(
+                        !index_program.ops().is_empty(),
+                        "{name}: index program must remain on helper path"
+                    );
+                }
+                other => panic!("{name}: expected indexed helper path, got {other:?}"),
+            }
+        }
+    }
+
+    fn indexed_assignment_step(
+        base: usize,
+        len: usize,
+        lower: i64,
+        index: Vec<Instruction>,
+        value: Vec<Instruction>,
+    ) -> AssignmentStep {
+        AssignmentStep::AssignIndexed {
+            base,
+            len,
+            lower,
+            index: BytecodeProgram {
+                instructions: index,
+            },
+            value: BytecodeProgram {
+                instructions: value,
+            },
+        }
+    }
+
+    fn compiled_model_with_variables(num_variables: usize) -> CompiledModel {
+        CompiledModel {
+            name: SmolStr::new("native_x64_assignment_test"),
+            num_terminals: 0,
+            terminal_names: Vec::new(),
+            parameters: Vec::new(),
+            num_variables,
+            variable_names: Vec::new(),
+            assignment_steps: Vec::new(),
+            stamp_programs: Vec::new(),
+            lookup_tables: Vec::new(),
+            internal_nodes: 0,
+            branch_sources: Vec::new(),
+            laplace_filters: Vec::new(),
+            zi_filters: Vec::new(),
+            noise_sources: Vec::new(),
+        }
     }
 }
