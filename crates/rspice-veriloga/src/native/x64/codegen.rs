@@ -1067,13 +1067,12 @@ impl FunctionCompiler {
                 .jcc_rel32_placeholder(ConditionCode::AboveOrEqual),
         );
 
-        self.encoder.mov_r64_r64(Gpr::Rax, Gpr::R10);
-        self.encoder.shl_r64_imm8(Gpr::Rax, 3);
-        self.encoder.mov_r64_r64(Gpr::R11, self.vars_arg_reg());
-        if base_disp != 0 {
-            self.encoder.add_r64_imm32(Gpr::R11, base_disp);
-        }
-        self.encoder.add_r64_r64(Gpr::Rax, Gpr::R11);
+        self.encoder.lea_r64_base_index_scale8_disp32(
+            Gpr::Rax,
+            self.vars_arg_reg(),
+            Gpr::R10,
+            base_disp,
+        );
         Ok(slow_jumps)
     }
 
@@ -2996,7 +2995,8 @@ mod tests {
         INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, Q_ELECTRON,
         ROUND_TEMP_FRAME_BYTES, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
         assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
-        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg, rspice_exp,
+        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
+        entry_vars_arg_reg, rspice_exp,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -3698,6 +3698,14 @@ mod tests {
         assert!(
             !contains_bytes(&bytes, &add_rsp_bytes(DYNAMIC_READ_FRAME_BYTES)),
             "dynamic read with a spare XMM register should not restore a fast-path spill frame"
+        );
+        assert!(
+            contains_bytes(&bytes, &dynamic_variable_scaled_address_bytes(1)),
+            "dynamic read fast path should use one scaled indexed LEA for variable address formation"
+        );
+        assert!(
+            !contains_bytes(&bytes, &dynamic_variable_shift_add_address_bytes(1)),
+            "dynamic read fast path should not use the old shift/add address sequence"
         );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate dynamic variable leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -7554,6 +7562,30 @@ mod tests {
     fn context_pointer_load_bytes(ctx_field_offset: i32) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.mov_r64_m64_base_disp32(Gpr::Rax, entry_ctx_arg_reg(), ctx_field_offset);
+        encoder.into_bytes()
+    }
+
+    fn dynamic_variable_scaled_address_bytes(base: usize) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.lea_r64_base_index_scale8_disp32(
+            Gpr::Rax,
+            entry_vars_arg_reg(),
+            Gpr::R10,
+            super::byte_disp(base).expect("dynamic address test index fits disp32"),
+        );
+        encoder.into_bytes()
+    }
+
+    fn dynamic_variable_shift_add_address_bytes(base: usize) -> Vec<u8> {
+        let base_disp = super::byte_disp(base).expect("dynamic address test index fits disp32");
+        let mut encoder = X64Encoder::new();
+        encoder.mov_r64_r64(Gpr::Rax, Gpr::R10);
+        encoder.shl_r64_imm8(Gpr::Rax, 3);
+        encoder.mov_r64_r64(Gpr::R11, entry_vars_arg_reg());
+        if base_disp != 0 {
+            encoder.add_r64_imm32(Gpr::R11, base_disp);
+        }
+        encoder.add_r64_r64(Gpr::Rax, Gpr::R11);
         encoder.into_bytes()
     }
 
