@@ -161,6 +161,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     laplace_filter_count: usize,
     zi_filter_count: usize,
     available_current_pairs: &'a [usize],
+    canonical_ddt_slots: &'a [(ExprId, usize)],
 }
 
 impl<'a> NativeLoweringLimits<'a> {
@@ -182,6 +183,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: 0,
             zi_filter_count: 0,
             available_current_pairs: &[],
+            canonical_ddt_slots: &[],
         }
     }
 
@@ -217,6 +219,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs,
+            canonical_ddt_slots: self.canonical_ddt_slots,
         }
     }
 
@@ -230,7 +233,10 @@ impl<'a> NativeLoweringLimits<'a> {
     pub(crate) fn with_variable_names<'b>(
         self,
         variable_names: &'b [SmolStr],
-    ) -> NativeLoweringLimits<'b> {
+    ) -> NativeLoweringLimits<'b>
+    where
+        'a: 'b,
+    {
         NativeLoweringLimits {
             terminal_count: self.terminal_count,
             internal_node_count: self.internal_node_count,
@@ -242,6 +248,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: &[],
+            canonical_ddt_slots: self.canonical_ddt_slots,
         }
     }
 
@@ -258,6 +265,288 @@ impl<'a> NativeLoweringLimits<'a> {
             ..self
         }
     }
+
+    pub(crate) fn with_canonical_ddt_slots<'b>(
+        self,
+        canonical_ddt_slots: &'b [(ExprId, usize)],
+    ) -> NativeLoweringLimits<'b>
+    where
+        'a: 'b,
+    {
+        NativeLoweringLimits {
+            terminal_count: self.terminal_count,
+            internal_node_count: self.internal_node_count,
+            parameter_count: self.parameter_count,
+            variable_count: self.variable_count,
+            variable_names: self.variable_names,
+            branch_unknown_count: self.branch_unknown_count,
+            lookup_table_count: self.lookup_table_count,
+            laplace_filter_count: self.laplace_filter_count,
+            zi_filter_count: self.zi_filter_count,
+            available_current_pairs: self.available_current_pairs,
+            canonical_ddt_slots,
+        }
+    }
+
+    fn canonical_ddt_slot(&self, expr_id: ExprId) -> Option<usize> {
+        self.canonical_ddt_slots
+            .iter()
+            .find_map(|(id, slot)| (*id == expr_id).then_some(*slot))
+    }
+}
+
+pub(crate) fn canonical_ddt_slots_for_equation(
+    model: SmolStr,
+    mir: &MirModel,
+    equation_id: EquationId,
+    bytecode_program: &BytecodeProgram,
+) -> JitResult<Vec<(ExprId, usize)>> {
+    let equation = mir.equations.get(usize::from(equation_id)).ok_or_else(|| {
+        JitError::InvalidCanonicalIr {
+            model: model.clone(),
+            detail: format!("canonical equation {equation_id} is outside MIR equation arena")
+                .into(),
+        }
+    })?;
+
+    let mut canonical_ddt_exprs = Vec::new();
+    collect_canonical_ddt_exprs(
+        &model,
+        mir,
+        equation.expression.id,
+        &mut canonical_ddt_exprs,
+    )?;
+
+    let bytecode_ddt_slots = bytecode_program
+        .instructions
+        .iter()
+        .filter_map(|instruction| match instruction {
+            Instruction::DdtState(slot) => Some(*slot),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    if canonical_ddt_exprs.len() != bytecode_ddt_slots.len() {
+        return Err(JitError::InvalidCanonicalIr {
+            model,
+            detail: format!(
+                "canonical equation {equation_id} has {} ddt operators but bytecode stamp has {} DdtState slots",
+                canonical_ddt_exprs.len(),
+                bytecode_ddt_slots.len()
+            )
+            .into(),
+        });
+    }
+
+    Ok(canonical_ddt_exprs
+        .into_iter()
+        .zip(bytecode_ddt_slots)
+        .collect())
+}
+
+fn collect_canonical_ddt_exprs(
+    model: &SmolStr,
+    mir: &MirModel,
+    expr_id: ExprId,
+    slots: &mut Vec<ExprId>,
+) -> JitResult<()> {
+    let expression =
+        mir.expressions
+            .get(usize::from(expr_id))
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.clone(),
+                detail: format!("canonical expression {expr_id} is outside MIR expression arena")
+                    .into(),
+            })?;
+
+    match &expression.kind {
+        HirExprKind::Number { .. }
+        | HirExprKind::StringLiteral { .. }
+        | HirExprKind::Identifier { .. }
+        | HirExprKind::BranchAccess { .. }
+        | HirExprKind::NamedBranchAccess { .. } => {}
+        HirExprKind::SystemFunction { args, .. }
+        | HirExprKind::Call { args, .. }
+        | HirExprKind::ArrayLiteral { elements: args }
+        | HirExprKind::NoiseSource { operands: args, .. } => {
+            for arg in args {
+                collect_canonical_ddt_exprs(model, mir, *arg, slots)?;
+            }
+        }
+        HirExprKind::Unary { operand, .. } | HirExprKind::ArrayAccess { index: operand, .. } => {
+            collect_canonical_ddt_exprs(model, mir, *operand, slots)?;
+        }
+        HirExprKind::Binary { left, right, .. } => {
+            collect_canonical_ddt_exprs(model, mir, *left, slots)?;
+            collect_canonical_ddt_exprs(model, mir, *right, slots)?;
+        }
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            collect_canonical_ddt_exprs(model, mir, *condition, slots)?;
+            collect_canonical_ddt_exprs(model, mir, *then_expr, slots)?;
+            collect_canonical_ddt_exprs(model, mir, *else_expr, slots)?;
+        }
+        HirExprKind::AnalogOperator { op } => {
+            collect_canonical_ddt_operator_children(model, mir, op, slots)?;
+        }
+        HirExprKind::Laplace { expr, kind } => {
+            collect_canonical_ddt_exprs(model, mir, *expr, slots)?;
+            match kind {
+                crate::canonical_ir::HirLaplaceKind::ZeroPole { zeros, poles } => {
+                    collect_canonical_ddt_expr_list(model, mir, zeros, slots)?;
+                    collect_canonical_ddt_expr_list(model, mir, poles, slots)?;
+                }
+                crate::canonical_ir::HirLaplaceKind::ZeroDenominator { zeros, denominator } => {
+                    collect_canonical_ddt_expr_list(model, mir, zeros, slots)?;
+                    collect_canonical_ddt_expr_list(model, mir, denominator, slots)?;
+                }
+                crate::canonical_ir::HirLaplaceKind::NumeratorPole { numerator, poles } => {
+                    collect_canonical_ddt_expr_list(model, mir, numerator, slots)?;
+                    collect_canonical_ddt_expr_list(model, mir, poles, slots)?;
+                }
+                crate::canonical_ir::HirLaplaceKind::NumeratorDenominator {
+                    numerator,
+                    denominator,
+                } => {
+                    collect_canonical_ddt_expr_list(model, mir, numerator, slots)?;
+                    collect_canonical_ddt_expr_list(model, mir, denominator, slots)?;
+                }
+            }
+        }
+        HirExprKind::Zi { expr, kind } => {
+            collect_canonical_ddt_exprs(model, mir, *expr, slots)?;
+            match kind {
+                crate::canonical_ir::HirZiKind::ZeroPole { zeros, poles } => {
+                    collect_canonical_ddt_expr_list(model, mir, zeros, slots)?;
+                    collect_canonical_ddt_expr_list(model, mir, poles, slots)?;
+                }
+                crate::canonical_ir::HirZiKind::ZeroDenominator { zeros, denominator } => {
+                    collect_canonical_ddt_expr_list(model, mir, zeros, slots)?;
+                    collect_canonical_ddt_expr_list(model, mir, denominator, slots)?;
+                }
+                crate::canonical_ir::HirZiKind::NumeratorPole { numerator, poles } => {
+                    collect_canonical_ddt_expr_list(model, mir, numerator, slots)?;
+                    collect_canonical_ddt_expr_list(model, mir, poles, slots)?;
+                }
+                crate::canonical_ir::HirZiKind::NumeratorDenominator {
+                    numerator,
+                    denominator,
+                } => {
+                    collect_canonical_ddt_expr_list(model, mir, numerator, slots)?;
+                    collect_canonical_ddt_expr_list(model, mir, denominator, slots)?;
+                }
+            }
+        }
+    }
+
+    match &expression.kind {
+        HirExprKind::Call { name, .. } if normalize_intrinsic_name(name) == "ddt" => {
+            slots.push(expr_id);
+        }
+        HirExprKind::AnalogOperator {
+            op: HirAnalogOperator::Ddt { .. },
+        } => {
+            slots.push(expr_id);
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn collect_canonical_ddt_operator_children(
+    model: &SmolStr,
+    mir: &MirModel,
+    op: &HirAnalogOperator,
+    slots: &mut Vec<ExprId>,
+) -> JitResult<()> {
+    match op {
+        HirAnalogOperator::Ddt { expr, abstol } => {
+            collect_canonical_ddt_exprs(model, mir, *expr, slots)?;
+            if let Some(abstol) = abstol {
+                collect_canonical_ddt_exprs(model, mir, *abstol, slots)?;
+            }
+        }
+        HirAnalogOperator::Idt {
+            expr,
+            ic,
+            assert,
+            abstol,
+        } => {
+            collect_canonical_ddt_exprs(model, mir, *expr, slots)?;
+            for child in [*ic, *assert, *abstol].into_iter().flatten() {
+                collect_canonical_ddt_exprs(model, mir, child, slots)?;
+            }
+        }
+        HirAnalogOperator::IdtMod {
+            expr,
+            ic,
+            modulus,
+            offset,
+            abstol,
+        } => {
+            collect_canonical_ddt_exprs(model, mir, *expr, slots)?;
+            for child in [*ic, *modulus, *offset, *abstol].into_iter().flatten() {
+                collect_canonical_ddt_exprs(model, mir, child, slots)?;
+            }
+        }
+        HirAnalogOperator::Ddx { expr, probe } => {
+            collect_canonical_ddt_exprs(model, mir, *expr, slots)?;
+            collect_canonical_ddt_exprs(model, mir, *probe, slots)?;
+        }
+        HirAnalogOperator::Limexp { expr } | HirAnalogOperator::LastCrossing { expr, .. } => {
+            collect_canonical_ddt_exprs(model, mir, *expr, slots)?;
+        }
+        HirAnalogOperator::Absdelay {
+            expr,
+            delay,
+            max_delay,
+        } => {
+            collect_canonical_ddt_exprs(model, mir, *expr, slots)?;
+            collect_canonical_ddt_exprs(model, mir, *delay, slots)?;
+            if let Some(max_delay) = max_delay {
+                collect_canonical_ddt_exprs(model, mir, *max_delay, slots)?;
+            }
+        }
+        HirAnalogOperator::Transition {
+            expr,
+            delay,
+            rise,
+            fall,
+            tolerance,
+        } => {
+            collect_canonical_ddt_exprs(model, mir, *expr, slots)?;
+            for child in [*delay, *rise, *fall, *tolerance].into_iter().flatten() {
+                collect_canonical_ddt_exprs(model, mir, child, slots)?;
+            }
+        }
+        HirAnalogOperator::Slew {
+            expr,
+            max_rise,
+            max_fall,
+        } => {
+            collect_canonical_ddt_exprs(model, mir, *expr, slots)?;
+            for child in [*max_rise, *max_fall].into_iter().flatten() {
+                collect_canonical_ddt_exprs(model, mir, child, slots)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_canonical_ddt_expr_list(
+    model: &SmolStr,
+    mir: &MirModel,
+    exprs: &[ExprId],
+    slots: &mut Vec<ExprId>,
+) -> JitResult<()> {
+    for expr in exprs {
+        collect_canonical_ddt_exprs(model, mir, *expr, slots)?;
+    }
+    Ok(())
 }
 
 impl NativeProgram {
@@ -986,10 +1275,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower(*else_expr)?;
                 self.append_ternary(NativeOp::IfElse)
             }
-            HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
+            HirExprKind::SystemFunction { name, args } => {
                 self.lower_intrinsic_call(name.as_str(), args.as_slice())
             }
-            HirExprKind::AnalogOperator { op } => self.lower_analog_operator(op),
+            HirExprKind::Call { name, args } => {
+                if normalize_intrinsic_name(name) == "ddt" {
+                    self.lower_ddt_operator(expression.id, args.as_slice(), None)
+                } else {
+                    self.lower_intrinsic_call(name.as_str(), args.as_slice())
+                }
+            }
+            HirExprKind::AnalogOperator { op } => self.lower_analog_operator(expression.id, op),
             HirExprKind::NoiseSource {
                 source, operands, ..
             } => self.lower_noise_source(source.as_str(), operands.as_slice()),
@@ -1034,8 +1330,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
-    fn lower_analog_operator(&mut self, op: &HirAnalogOperator) -> JitResult<()> {
+    fn lower_analog_operator(&mut self, expr_id: ExprId, op: &HirAnalogOperator) -> JitResult<()> {
         match op {
+            HirAnalogOperator::Ddt { expr, abstol } => {
+                self.lower_ddt_operator(expr_id, &[*expr], *abstol)
+            }
             HirAnalogOperator::Limexp { expr } => {
                 self.lower(*expr)?;
                 if lower_constant_unary_math(&mut self.ops, UnaryMathOp::Limexp) {
@@ -1046,6 +1345,31 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             _ => Err(self.unsupported(format!("analog operator {}", analog_operator_name(op)))),
         }
+    }
+
+    fn lower_ddt_operator(
+        &mut self,
+        expr_id: ExprId,
+        args: &[ExprId],
+        abstol: Option<ExprId>,
+    ) -> JitResult<()> {
+        if abstol.is_some() {
+            return Err(self.unsupported("analog operator ddt abstol argument"));
+        }
+        if args.len() != 1 {
+            return Err(self.unsupported(format!(
+                "analog operator ddt expects one operand, found {}",
+                args.len()
+            )));
+        }
+        let Some(slot) = self.limits.canonical_ddt_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "analog operator ddt expression {expr_id} state slot"
+            )));
+        };
+        self.lower(args[0])?;
+        self.ops.push(NativeOp::DdtState(slot));
+        Ok(())
     }
 
     fn lower_named_branch_access(&mut self, access: &str, name: &str) -> JitResult<()> {
