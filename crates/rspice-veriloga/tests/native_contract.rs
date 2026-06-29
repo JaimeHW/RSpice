@@ -1599,6 +1599,37 @@ fn native_device_stamps_simple_resistor_without_interpreter_fallback() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_evaluates_builtin_constants_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_builtin_constants(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ M_PI + M_E;
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("CBUILTIN1", model, &artifact, &[1, 0])
+            .expect("builtin constants use canonical native JIT path");
+    assert!(device.is_using_native());
+
+    let currents = device
+        .try_evaluate()
+        .expect("native builtin constant expression evaluates");
+    let expected = std::f64::consts::PI + std::f64::consts::E;
+    assert!(
+        (currents[0] - expected).abs() < 1e-12,
+        "currents: {currents:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_stamps_simple_resistor_without_fallback() {
     let source = r#"
 `include "disciplines.vams"

@@ -1483,9 +1483,18 @@ impl HirLowerer {
             Expression::StringLit(string) => HirExprKind::StringLiteral {
                 value: string.value.clone(),
             },
-            Expression::Identifier(identifier) => HirExprKind::Identifier {
-                name: identifier.name.clone(),
-            },
+            Expression::Identifier(identifier) => {
+                if let Some(value) = builtin_constant_value(identifier.name.as_str()) {
+                    HirExprKind::Number {
+                        value,
+                        raw: identifier.name.clone(),
+                    }
+                } else {
+                    HirExprKind::Identifier {
+                        name: identifier.name.clone(),
+                    }
+                }
+            }
             Expression::SystemFunction(function) => HirExprKind::SystemFunction {
                 name: function.name.clone(),
                 args: self.lower_expr_ids(&function.args),
@@ -1789,6 +1798,20 @@ fn expression_kind(expr: &Expression) -> SmolStr {
         Expression::NoiseSource(_) => "noise_source",
     }
     .into()
+}
+
+fn builtin_constant_value(name: &str) -> Option<f64> {
+    match name {
+        "M_PI" | "P_PI" => Some(std::f64::consts::PI),
+        "M_E" | "P_E" => Some(std::f64::consts::E),
+        "M_LN2" => Some(std::f64::consts::LN_2),
+        "M_LN10" => Some(std::f64::consts::LN_10),
+        "M_LOG2E" => Some(std::f64::consts::LOG2_E),
+        "M_LOG10E" => Some(std::f64::consts::LOG10_E),
+        "M_SQRT2" => Some(std::f64::consts::SQRT_2),
+        "inf" => Some(f64::INFINITY),
+        _ => None,
+    }
 }
 
 fn port_direction_label(direction: PortDirection) -> SmolStr {
