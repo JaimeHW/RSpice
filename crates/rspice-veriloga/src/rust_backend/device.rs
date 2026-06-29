@@ -2418,8 +2418,27 @@ fn compact_pow_index_helper_call_replacement(
         return None;
     }
     let target_index = args[0].trim().parse::<usize>().ok()?;
-    let base = compact_scratch_ad_value_index(args[1])?;
     let exponent = compact_scratch_ad_value_index(args[2])?;
+    if let Some(abs_args) = compact_ad_call_args(args[1], "abs") {
+        if abs_args.len() != 1 {
+            return None;
+        }
+        if let Some(mul_args) = compact_ad_call_args(abs_args[0], "mul") {
+            if mul_args.len() != 2 {
+                return None;
+            }
+            let left = compact_scratch_ad_value_index(mul_args[0])?;
+            let right = compact_scratch_ad_value_index(mul_args[1])?;
+            let line = format!(
+                "scratch.store_pow_abs_mul_base_indices({target_index}, {left}, {right}, {exponent});"
+            );
+            let mut replacement = String::new();
+            push_indented_compact_line(&mut replacement, indent, &line);
+            let statement_end = compact_statement_end_after_call(source, close_paren)?;
+            return Some((statement_end, replacement));
+        }
+    }
+    let base = compact_scratch_ad_value_index(args[1])?;
     let line = format!("scratch.store_pow_indices({target_index}, {base}, {exponent});");
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
@@ -8453,6 +8472,31 @@ fn stamp() {
         );
         assert!(!compact.contains("s.store_pow_ad("), "{compact}");
         assert!(!compact.contains("s.ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_pow_abs_mul_base_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_pow_abs_mul_base_indices("),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_pow_ad(21, AdValue::abs(AdValue::mul(scratch.ad_value(2), scratch.ad_value(3))), scratch.ad_value(4));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_pow_abs_mul_base_indices(21, 2, 3, 4);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_pow_ad("), "{compact}");
+        assert!(!compact.contains("A::abs("), "{compact}");
+        assert!(!compact.contains("A::mul("), "{compact}");
     }
 
     #[test]
@@ -14604,6 +14648,26 @@ fn generate_scratch_operation_helpers() -> String {
         "        let right_branch_derivatives = self.branch_derivatives[right];",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent, left_node_derivatives[axis], right_node_derivatives[axis]); }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent, left_branch_derivatives[axis], right_branch_derivatives[axis]); }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_pow_abs_mul_base_indices(&mut self, index: usize, left: usize, right: usize, exponent: usize) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        let raw_base = left_value * right_value;",
+        "        let base = raw_base.abs();",
+        "        let exponent_value = self.values[exponent];",
+        "        let output = base.powf(exponent_value);",
+        "        let base_derivative_sign = if raw_base >= 0.0 { 1.0 } else { -1.0 };",
+        "        self.values[index] = output;",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let exponent_node_derivatives = self.node_derivatives[exponent];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let exponent_branch_derivatives = self.branch_derivatives[exponent];",
+        "        for axis in 0..Instance::NODE_COUNT { let base_derivative = (left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]) * base_derivative_sign; self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_node_derivatives[axis]); }",
+        "        for axis in 0..Instance::BRANCH_COUNT { let base_derivative = (left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]) * base_derivative_sign; self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_branch_derivatives[axis]); }",
         "    }",
         "",
         "    #[inline]",
