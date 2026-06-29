@@ -6585,6 +6585,10 @@ fn stamp() {
         let div_scaled_product3_indices =
             helper_body(&support, "fn store_div_scaled_product3_indices(");
         assert!(
+            !support.contains("fn store_div_scaled_product3_components"),
+            "{support}"
+        );
+        assert!(
             !div_scaled_product3_indices.contains("_node_derivatives = self.node_derivatives"),
             "{div_scaled_product3_indices}"
         );
@@ -21101,22 +21105,6 @@ fn generate_index_or_mixed_mul_product3_helper(mask: &str) -> String {
 
 fn generate_square_product_and_product3_scratch_helpers() -> String {
     let mut out = r#"
-    #[inline]
-    fn store_div_scaled_product3_components(&mut self, index: usize, product_left_value: f64, product_left_node_derivatives: [f64; Instance::NODE_COUNT], product_left_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_middle_value: f64, product_middle_node_derivatives: [f64; Instance::NODE_COUNT], product_middle_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_right_value: f64, product_right_node_derivatives: [f64; Instance::NODE_COUNT], product_right_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_scale: f64, denominator_raw: f64, denominator_node_derivatives: [f64; Instance::NODE_COUNT], denominator_branch_derivatives: [f64; Instance::BRANCH_COUNT], denominator_scale: f64) {
-        let denominator_value = denominator_raw * denominator_scale;
-        let reciprocal = 1.0 / denominator_value;
-        let left_middle_value = product_left_value * product_middle_value;
-        let left_right_value = product_left_value * product_right_value;
-        let middle_right_value = product_middle_value * product_right_value;
-        let scaled_product_value = left_middle_value * product_right_value * product_scale;
-        let quotient = scaled_product_value * reciprocal;
-        let product_derivative_scale = product_scale * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.values[index] = quotient;
-        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (product_left_node_derivatives[axis] * middle_right_value + product_middle_node_derivatives[axis] * left_right_value + product_right_node_derivatives[axis] * left_middle_value) * product_derivative_scale + denominator_node_derivatives[axis] * denominator_derivative_scale; }
-        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (product_left_branch_derivatives[axis] * middle_right_value + product_middle_branch_derivatives[axis] * left_right_value + product_right_branch_derivatives[axis] * left_middle_value) * product_derivative_scale + denominator_branch_derivatives[axis] * denominator_derivative_scale; }
-    }
-
     #[inline]
     fn store_mul_div_scaled_product3_div_from_scalar_sqrt_offset(&mut self, index: usize, product_left: usize, product_middle: usize, product_right: usize, product_scale: f64, denominator: usize, denominator_scale: f64, scalar: f64, sqrt_source: usize, sqrt_offset: f64) {
         let product_left_value = self.values[product_left];
