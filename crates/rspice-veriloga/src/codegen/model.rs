@@ -313,6 +313,8 @@ pub enum Instruction {
     Max,
     /// Limited exponential (for convergence)
     Limexp,
+    /// Guarded compact-model exponential with upper linear tail and lower clamp.
+    LimitedExp,
     /// Inverse trigonometric functions
     Asin,
     Acos,

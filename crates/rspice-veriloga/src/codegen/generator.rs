@@ -658,8 +658,13 @@ impl CodeGenerator {
                     .push(Instruction::PushPortConnected(*index));
             }
             IrExpr::Binary(op, left, right) => {
-                self.emit_expr(left, emit_ctx, program)?;
-                self.emit_expr(right, emit_ctx, program)?;
+                if should_emit_commutative_right_first(*op, left, right) {
+                    self.emit_expr(right, emit_ctx, program)?;
+                    self.emit_expr(left, emit_ctx, program)?;
+                } else {
+                    self.emit_expr(left, emit_ctx, program)?;
+                    self.emit_expr(right, emit_ctx, program)?;
+                }
                 program.instructions.push(match op {
                     // Arithmetic
                     BinaryOp::Add => Instruction::Add,
@@ -728,6 +733,7 @@ impl CodeGenerator {
                     IrFunction::Ceil => Instruction::Ceil,
                     // Power
                     IrFunction::Pow => Instruction::FnPow,
+                    IrFunction::LimitedExp => Instruction::LimitedExp,
                 });
             }
             IrExpr::Limexp(inner) => {
@@ -1083,6 +1089,322 @@ impl CodeGenerator {
         let table = LookupTable::from_data(x_data.to_vec(), y_data.to_vec());
         tables.push(table);
         Ok(tables.len() - 1)
+    }
+}
+
+fn should_emit_commutative_right_first(op: BinaryOp, left: &IrExpr, right: &IrExpr) -> bool {
+    is_stack_commutative(op) && expr_stack_cost(right) > expr_stack_cost(left)
+}
+
+fn is_stack_commutative(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::Add
+            | BinaryOp::Mul
+            | BinaryOp::Eq
+            | BinaryOp::Ne
+            | BinaryOp::And
+            | BinaryOp::Or
+            | BinaryOp::BitAnd
+            | BinaryOp::BitOr
+            | BinaryOp::BitXor
+    )
+}
+
+fn expr_stack_cost(expr: &IrExpr) -> usize {
+    match expr {
+        IrExpr::Const(_)
+        | IrExpr::Param(_)
+        | IrExpr::ParamGiven(_)
+        | IrExpr::Var(_)
+        | IrExpr::Voltage(_, _)
+        | IrExpr::Current(_, _)
+        | IrExpr::BranchCurrent(_)
+        | IrExpr::Time
+        | IrExpr::Temperature
+        | IrExpr::Vt
+        | IrExpr::Mfactor
+        | IrExpr::PortConnected(_)
+        | IrExpr::NoiseTable { .. }
+        | IrExpr::Analysis(_) => 1,
+        IrExpr::VarIndexed { index, .. }
+        | IrExpr::Unary(_, index)
+        | IrExpr::Ddt(index)
+        | IrExpr::Limexp(index)
+        | IrExpr::DdtCompanion(index)
+        | IrExpr::IdtCompanion(index) => expr_stack_cost(index),
+        IrExpr::Binary(op, left, right) => {
+            let left_first = binary_stack_cost(left, right);
+            if is_stack_commutative(*op) {
+                left_first.min(binary_stack_cost(right, left))
+            } else {
+                left_first
+            }
+        }
+        IrExpr::Call(_, args) => ordered_stack_cost(args.iter()),
+        IrExpr::Idt(expr, ic) => {
+            let args = std::iter::once(expr.as_ref()).chain(ic.iter().map(|expr| expr.as_ref()));
+            ordered_stack_cost(args)
+        }
+        IrExpr::IdtMod {
+            expr,
+            ic,
+            modulus,
+            offset,
+        } => {
+            let args = std::iter::once(expr.as_ref())
+                .chain(ic.iter().map(|expr| expr.as_ref()))
+                .chain(std::iter::once(modulus.as_ref()))
+                .chain(offset.iter().map(|expr| expr.as_ref()));
+            ordered_stack_cost(args)
+        }
+        IrExpr::Limit(expr, step_limit) => {
+            let args =
+                std::iter::once(expr.as_ref()).chain(step_limit.iter().map(|expr| expr.as_ref()));
+            ordered_stack_cost(args)
+        }
+        IrExpr::TableLookup { input, .. } | IrExpr::TableDerivative { input, .. } => {
+            expr_stack_cost(input)
+        }
+        IrExpr::AbsDelay { expr, delay_time } => ordered_stack_cost([expr.as_ref(), delay_time]),
+        IrExpr::Transition {
+            expr,
+            delay,
+            rise_time,
+            fall_time,
+        } => {
+            let args = std::iter::once(expr.as_ref())
+                .chain(delay.iter().map(|expr| expr.as_ref()))
+                .chain(rise_time.iter().map(|expr| expr.as_ref()))
+                .chain(fall_time.iter().map(|expr| expr.as_ref()));
+            ordered_stack_cost(args)
+        }
+        IrExpr::Slew {
+            expr,
+            max_pos_slew,
+            max_neg_slew,
+        } => {
+            let args = std::iter::once(expr.as_ref())
+                .chain(max_pos_slew.iter().map(|expr| expr.as_ref()))
+                .chain(max_neg_slew.iter().map(|expr| expr.as_ref()));
+            ordered_stack_cost(args)
+        }
+        IrExpr::Cross { expr, time_tol, .. } => {
+            let args =
+                std::iter::once(expr.as_ref()).chain(time_tol.iter().map(|expr| expr.as_ref()));
+            ordered_stack_cost(args)
+        }
+        IrExpr::Above {
+            expr,
+            threshold,
+            time_tol,
+        } => {
+            let args = std::iter::once(expr.as_ref())
+                .chain(std::iter::once(threshold.as_ref()))
+                .chain(time_tol.iter().map(|expr| expr.as_ref()));
+            ordered_stack_cost(args)
+        }
+        IrExpr::Timer { start_time, period } => {
+            let args =
+                std::iter::once(start_time.as_ref()).chain(period.iter().map(|expr| expr.as_ref()));
+            ordered_stack_cost(args)
+        }
+        IrExpr::WhiteNoise { power, .. } => expr_stack_cost(power),
+        IrExpr::FlickerNoise {
+            power, exponent, ..
+        } => ordered_stack_cost([power.as_ref(), exponent.as_ref()]),
+        IrExpr::LaplaceZP { expr, .. }
+        | IrExpr::LaplaceND { expr, .. }
+        | IrExpr::ZiFilter { expr, .. }
+        | IrExpr::Ddx { expr, .. } => expr_stack_cost(expr),
+        IrExpr::Conditional(condition, then_expr, else_expr) => {
+            ordered_stack_cost([condition.as_ref(), then_expr.as_ref(), else_expr.as_ref()])
+        }
+    }
+}
+
+fn binary_stack_cost(first: &IrExpr, second: &IrExpr) -> usize {
+    expr_stack_cost(first).max(1 + expr_stack_cost(second))
+}
+
+fn ordered_stack_cost<'a>(exprs: impl IntoIterator<Item = &'a IrExpr>) -> usize {
+    let mut depth = 0usize;
+    let mut max_depth = 1usize;
+    for expr in exprs {
+        max_depth = max_depth.max(depth + expr_stack_cost(expr));
+        depth += 1;
+    }
+    max_depth
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn var(name: &str) -> IrExpr {
+        IrExpr::Var(SmolStr::new(name))
+    }
+
+    fn right_heavy_add(names: &[&str]) -> IrExpr {
+        let [first, rest @ ..] = names else {
+            panic!("right-heavy add test needs at least one variable");
+        };
+        let mut expr = var(rest.last().copied().unwrap_or(first));
+        for name in rest[..rest.len().saturating_sub(1)].iter().rev() {
+            expr = IrExpr::Binary(BinaryOp::Add, Box::new(var(name)), Box::new(expr));
+        }
+        if rest.is_empty() {
+            var(first)
+        } else {
+            IrExpr::Binary(BinaryOp::Add, Box::new(var(first)), Box::new(expr))
+        }
+    }
+
+    fn bytecode_max_stack_depth(program: &BytecodeProgram) -> usize {
+        let mut depth = 0usize;
+        let mut max_depth = 0usize;
+        for instruction in &program.instructions {
+            match instruction {
+                Instruction::PushConst(_)
+                | Instruction::PushParam(_)
+                | Instruction::PushParamGiven(_)
+                | Instruction::PushPortConnected(_)
+                | Instruction::PushVoltage(_, _)
+                | Instruction::PushCurrent(_, _)
+                | Instruction::PushInternalVoltage(_)
+                | Instruction::PushVariable(_)
+                | Instruction::PushBranchCurrent(_)
+                | Instruction::PushTemperature
+                | Instruction::PushVt
+                | Instruction::PushTime
+                | Instruction::Analysis(_)
+                | Instruction::PushMfactor => depth += 1,
+                Instruction::Add
+                | Instruction::Sub
+                | Instruction::Mul
+                | Instruction::Div
+                | Instruction::Pow
+                | Instruction::FnPow
+                | Instruction::Atan2
+                | Instruction::Mod
+                | Instruction::Shl
+                | Instruction::Shr
+                | Instruction::BitAnd
+                | Instruction::BitOr
+                | Instruction::BitXor
+                | Instruction::Min
+                | Instruction::Max
+                | Instruction::And
+                | Instruction::Or
+                | Instruction::Gt
+                | Instruction::Lt
+                | Instruction::Ge
+                | Instruction::Le
+                | Instruction::Eq
+                | Instruction::Ne
+                | Instruction::LimitState(_)
+                | Instruction::TimerState(_)
+                | Instruction::AbsDelayState(_)
+                | Instruction::AboveState(_)
+                | Instruction::CrossState(_)
+                | Instruction::DdtJacobian
+                | Instruction::IdtJacobian => depth -= 1,
+                Instruction::IfElse | Instruction::SlewState(_) => depth -= 2,
+                Instruction::TransitionState(_) | Instruction::IdtModState(_) => depth -= 3,
+                Instruction::PushVariableDyn { .. }
+                | Instruction::Neg
+                | Instruction::Not
+                | Instruction::Abs
+                | Instruction::Sqrt
+                | Instruction::Exp
+                | Instruction::Limexp
+                | Instruction::LimitedExp
+                | Instruction::Log
+                | Instruction::Log10
+                | Instruction::Sin
+                | Instruction::Cos
+                | Instruction::Tan
+                | Instruction::Sinh
+                | Instruction::Cosh
+                | Instruction::Tanh
+                | Instruction::Asin
+                | Instruction::Acos
+                | Instruction::Atan
+                | Instruction::Floor
+                | Instruction::Ceil
+                | Instruction::TableLookup(_)
+                | Instruction::TableDerivative(_)
+                | Instruction::LaplaceState(_)
+                | Instruction::ZiState(_)
+                | Instruction::DdtState(_)
+                | Instruction::IdtState(_)
+                | Instruction::WhiteNoise => {}
+                Instruction::FlickerNoise => depth -= 1,
+            }
+            max_depth = max_depth.max(depth);
+        }
+        max_depth
+    }
+
+    #[test]
+    fn commutative_binary_emits_deeper_operand_first_to_bound_stack() {
+        let expr = right_heavy_add(&["a", "b", "c", "d", "e", "f"]);
+        let mut program = BytecodeProgram::default();
+        let mut variable_indices = HashMap::new();
+        for (index, name) in ["a", "b", "c", "d", "e", "f"].into_iter().enumerate() {
+            variable_indices.insert(SmolStr::new(name), index);
+        }
+        let emit_ctx = EmitContext {
+            parameter_indices: HashMap::new(),
+            variable_indices,
+        };
+
+        CodeGenerator::new()
+            .emit_expr(&expr, &emit_ctx, &mut program)
+            .expect("emit expression bytecode");
+
+        assert_eq!(bytecode_max_stack_depth(&program), 2);
+        assert!(
+            !matches!(
+                program.instructions.first(),
+                Some(Instruction::PushVariable(0))
+            ),
+            "deeper right operand should be emitted before shallow left operand: {:?}",
+            program.instructions
+        );
+    }
+
+    #[test]
+    fn noncommutative_binary_preserves_source_operand_order() {
+        let expr = IrExpr::Binary(
+            BinaryOp::Sub,
+            Box::new(var("a")),
+            Box::new(IrExpr::Binary(
+                BinaryOp::Sub,
+                Box::new(var("b")),
+                Box::new(var("c")),
+            )),
+        );
+        let mut program = BytecodeProgram::default();
+        let emit_ctx = EmitContext {
+            parameter_indices: HashMap::new(),
+            variable_indices: [
+                (SmolStr::new("a"), 0usize),
+                (SmolStr::new("b"), 1usize),
+                (SmolStr::new("c"), 2usize),
+            ]
+            .into_iter()
+            .collect(),
+        };
+
+        CodeGenerator::new()
+            .emit_expr(&expr, &emit_ctx, &mut program)
+            .expect("emit expression bytecode");
+
+        assert!(matches!(
+            program.instructions.first(),
+            Some(Instruction::PushVariable(0))
+        ));
     }
 }
 

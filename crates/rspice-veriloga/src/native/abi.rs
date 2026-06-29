@@ -361,6 +361,20 @@ pub extern "C" fn rspice_limexp(x: f64) -> f64 {
     }
 }
 
+/// External helper function for compact-model guarded exponential.
+#[unsafe(export_name = "rspice_limited_exp")]
+pub extern "C" fn rspice_limited_exp(x: f64) -> f64 {
+    const LIMIT: f64 = 80.0;
+    const LOW_VALUE: f64 = 1.804851387e-35;
+    if x > LIMIT {
+        LIMIT.exp() * (1.0 + x - LIMIT)
+    } else if x < -LIMIT {
+        LOW_VALUE
+    } else {
+        x.exp()
+    }
+}
+
 /// External helper function for exponential.
 #[unsafe(export_name = "rspice_exp")]
 pub extern "C" fn rspice_exp(x: f64) -> f64 {

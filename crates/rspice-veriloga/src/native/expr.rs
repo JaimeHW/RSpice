@@ -124,6 +124,7 @@ pub(crate) enum UnaryMathOp {
     Acosh,
     Atanh,
     Limexp,
+    LimitedExp,
     Asin,
     Acos,
     Atan,
@@ -1831,6 +1832,7 @@ impl NativeProgram {
                 | Instruction::Cosh
                 | Instruction::Tanh
                 | Instruction::Limexp
+                | Instruction::LimitedExp
                 | Instruction::Asin
                 | Instruction::Acos
                 | Instruction::Atan
@@ -2663,6 +2665,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_derivative(args[0], wrt)?;
                 self.append_arithmetic("Mul")
             }
+            "__rspice_limited_exp" => self.lower_limited_exp_derivative(name, args, wrt),
             "pow" => {
                 self.require_intrinsic_arity(name, args, 2)?;
                 self.lower_pow_derivative(args[0], args[1], wrt)
@@ -2693,6 +2696,31 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.require_intrinsic_arity(name, args, 1)?;
         self.lower(args[0])?;
         self.append_unary(NativeOp::UnaryMath(op))?;
+        self.lower_derivative(args[0], wrt)?;
+        self.append_arithmetic("Mul")
+    }
+
+    fn lower_limited_exp_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: NodeId,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.lower(args[0])?;
+        self.push(NativeOp::Const(80.0))?;
+        self.append_compare("Gt")?;
+        self.push(NativeOp::Const(80.0_f64.exp()))?;
+
+        self.lower(args[0])?;
+        self.push(NativeOp::Const(-80.0))?;
+        self.append_compare("Lt")?;
+        self.push(NativeOp::Const(0.0))?;
+        self.lower(args[0])?;
+        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))?;
+        self.append_ifelse()?;
+        self.append_ifelse()?;
+
         self.lower_derivative(args[0], wrt)?;
         self.append_arithmetic("Mul")
     }
@@ -3328,6 +3356,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "acosh" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Acosh),
             "atanh" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Atanh),
             "limexp" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Limexp),
+            "__rspice_limited_exp" => {
+                self.lower_unary_math_intrinsic(name, args, UnaryMathOp::LimitedExp)
+            }
             "asin" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Asin),
             "acos" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Acos),
             "atan" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Atan),
@@ -4768,6 +4799,7 @@ fn constant_unary_math(op: UnaryMathOp, value: f64) -> f64 {
         UnaryMathOp::Acosh => value.acosh(),
         UnaryMathOp::Atanh => value.atanh(),
         UnaryMathOp::Limexp => constant_limexp(value),
+        UnaryMathOp::LimitedExp => constant_limited_exp(value),
         UnaryMathOp::Asin => value.asin(),
         UnaryMathOp::Acos => value.acos(),
         UnaryMathOp::Atan => value.atan(),
@@ -4783,6 +4815,18 @@ fn constant_limexp(value: f64) -> f64 {
         exp_limit * (1.0 + value - LIMIT)
     } else if value < -LIMIT {
         (-LIMIT).exp()
+    } else {
+        value.exp()
+    }
+}
+
+fn constant_limited_exp(value: f64) -> f64 {
+    const LIMIT: f64 = 80.0;
+    const LOW_VALUE: f64 = 1.804851387e-35;
+    if value > LIMIT {
+        LIMIT.exp() * (1.0 + value - LIMIT)
+    } else if value < -LIMIT {
+        LOW_VALUE
     } else {
         value.exp()
     }
@@ -5038,6 +5082,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::Min => "Min",
         Instruction::Max => "Max",
         Instruction::Limexp => "Limexp",
+        Instruction::LimitedExp => "LimitedExp",
         Instruction::Asin => "Asin",
         Instruction::Acos => "Acos",
         Instruction::Atan => "Atan",
@@ -5127,6 +5172,7 @@ fn unary_math_op(instruction: &Instruction) -> UnaryMathOp {
         Instruction::Cosh => UnaryMathOp::Cosh,
         Instruction::Tanh => UnaryMathOp::Tanh,
         Instruction::Limexp => UnaryMathOp::Limexp,
+        Instruction::LimitedExp => UnaryMathOp::LimitedExp,
         Instruction::Asin => UnaryMathOp::Asin,
         Instruction::Acos => UnaryMathOp::Acos,
         Instruction::Atan => UnaryMathOp::Atan,
@@ -6206,6 +6252,55 @@ endmodule
                     neg: VoltageNode::Terminal(1),
                 },
                 NativeOp::UnaryMath(UnaryMathOp::Limexp),
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_recognized_limited_exp_call_to_native_program() {
+        let source = r#"
+module mir_limited_exp(p, n);
+  inout p, n;
+  electrical p, n;
+  analog function real lexp;
+    input x;
+    begin
+      if (x > 80.0) begin
+        lexp = 5.540622384e34 * (1.0 + x - 80.0);
+      end else if (x < -80.0) begin
+        lexp = 1.804851387e-35;
+      end else begin
+        lexp = exp(x);
+      end
+    end
+  endfunction
+  analog begin
+    I(p, n) <+ lexp(V(p, n));
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_limited_exp",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower recognized limited exp to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::UnaryMath(UnaryMathOp::LimitedExp),
             ]
         );
         assert_eq!(program.max_stack_depth(), 1);
@@ -7705,6 +7800,18 @@ endmodule
                 Instruction::Limexp,
                 -50.0,
                 constant_limexp(-50.0),
+            ),
+            (
+                "limited-exp-linear",
+                Instruction::LimitedExp,
+                85.0,
+                constant_limited_exp(85.0),
+            ),
+            (
+                "limited-exp-negative",
+                Instruction::LimitedExp,
+                -85.0,
+                constant_limited_exp(-85.0),
             ),
             ("asin", Instruction::Asin, 0.25, 0.25_f64.asin()),
             ("asin-domain-nan", Instruction::Asin, 2.0, 2.0_f64.asin()),

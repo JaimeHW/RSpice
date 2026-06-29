@@ -768,6 +768,10 @@ impl<'a> ExprConverter<'a> {
             "min" => IrFunction::Min,
             "max" => IrFunction::Max,
             "pow" => IrFunction::Pow,
+            "__rspice_limited_exp" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(1))?;
+                IrFunction::LimitedExp
+            }
             "limexp" => {
                 // limexp is a special analog operator
                 if call.args.is_empty() {

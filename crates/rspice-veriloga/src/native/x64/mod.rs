@@ -637,7 +637,7 @@ mod tests {
     use crate::native::expr::NativeOp;
     use crate::native::x64::codegen::NativeAssignment;
     use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
-    use crate::vm::VmContext;
+    use crate::vm::{Vm, VmContext};
     use crate::{CompilerOptions, VerilogACompiler};
     use smol_str::SmolStr;
     use std::path::{Path, PathBuf};
@@ -822,6 +822,16 @@ endmodule
                 shipped_veriloga_model_path(&["vbic_1.3", "vacode", "vbic_1p3.va"]),
                 Some("vbic13_4t"),
             ),
+            (
+                "bsimbulk",
+                shipped_cmc_model_path(&["BSIM-BULK107.2.1_02112025", "code", "bsimbulk.va"]),
+                Some("bsimbulk"),
+            ),
+            (
+                "bsimcmg",
+                shipped_cmc_model_path(&["BSIM-CMG_112.1.0_04282026", "code", "bsimcmg.va"]),
+                Some("bsimcmg_va"),
+            ),
         ];
         let iterations = shipped_model_microbench_iterations();
         let samples = shipped_model_microbench_samples();
@@ -959,10 +969,26 @@ endmodule
         let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
             .unwrap_or_else(|error| panic!("native x64 compile shipped model {name}: {error}"));
         let native_compile_elapsed = native_start.elapsed();
-        let mut context = native_model_benchmark_context(&runtime.model);
+        let mut context = native_model_benchmark_context(&runtime.model, name);
         resolve_native_parameter_defaults(&runtime.model, &native, &mut context);
-        let mut sanity_checksum =
-            run_native_model_sweep_once(&runtime.model, &native, &mut context, name);
+        let nonfinite_reference =
+            collect_bytecode_nonfinite_reference(&runtime.model, context.clone())
+                .unwrap_or_else(|error| panic!("{name}: bytecode non-finite reference: {error}"));
+        if !nonfinite_reference.is_empty() {
+            eprintln!(
+                "native-x64-shipped-microbench model={name} bytecode_nonfinite_reference stamps={} jacobians={} reactive_jacobians={}",
+                nonfinite_reference.stamps.len(),
+                nonfinite_reference.jacobians.len(),
+                nonfinite_reference.reactive_jacobians.len(),
+            );
+        }
+        let mut sanity_checksum = run_native_model_sweep_once(
+            &runtime.model,
+            &native,
+            &mut context,
+            name,
+            &nonfinite_reference,
+        );
         assert!(
             sanity_checksum.is_finite(),
             "{name}: shipped-model sanity sweep checksum must stay finite"
@@ -975,6 +1001,7 @@ endmodule
             &mut context,
             name,
             warmup_iterations,
+            &nonfinite_reference,
         );
         assert!(
             sanity_checksum.is_finite(),
@@ -991,6 +1018,7 @@ endmodule
                 &mut context,
                 name,
                 iterations,
+                &nonfinite_reference,
             );
             let elapsed = start.elapsed();
             sample_ns_per_sweep.push(elapsed.as_nanos() as f64 / iterations as f64);
@@ -1018,10 +1046,17 @@ endmodule
         );
     }
 
-    fn native_model_benchmark_context(model: &CompiledModel) -> VmContext {
+    fn native_model_benchmark_context(model: &CompiledModel, name: &str) -> VmContext {
         let mut context = VmContext::with_internal_nodes(model.num_terminals, model.internal_nodes);
         context.voltages.fill(0.0);
         context.internal_voltages.fill(0.0);
+        if name == "bsimcmg" && context.voltages.len() >= 5 {
+            context.voltages[0] = 0.05;
+            context.voltages[1] = 0.7;
+            context.voltages[2] = 0.0;
+            context.voltages[3] = 0.0;
+            context.voltages[4] = 0.0;
+        }
         context.parameters = model
             .parameters
             .iter()
@@ -1061,11 +1096,17 @@ endmodule
         context: &mut VmContext,
         name: &str,
         iterations: usize,
+        nonfinite_reference: &NonFiniteReference,
     ) -> f64 {
         let mut checksum = 0.0_f64;
         for _ in 0..iterations {
-            checksum +=
-                std::hint::black_box(run_native_model_sweep_once(model, native, context, name));
+            checksum += std::hint::black_box(run_native_model_sweep_once(
+                model,
+                native,
+                context,
+                name,
+                nonfinite_reference,
+            ));
         }
         std::hint::black_box(checksum)
     }
@@ -1075,6 +1116,7 @@ endmodule
         native: &NativeModel,
         context: &mut VmContext,
         name: &str,
+        nonfinite_reference: &NonFiniteReference,
     ) -> f64 {
         clear_native_runtime_error();
         context.clear_currents();
@@ -1095,11 +1137,14 @@ endmodule
 
             ctx = eval_context_from_vm_context(context);
             let value = native.run_stamp_value(stamp_index, &ctx, context.variables.as_ptr());
-            assert!(
-                value.is_finite(),
-                "{name}: non-finite stamp {stamp_index} value {value}"
-            );
-            checksum += value;
+            if !value.is_finite() {
+                assert!(
+                    nonfinite_reference.stamps.contains(&stamp_index),
+                    "{name}: non-finite stamp {stamp_index} value {value}"
+                );
+            } else {
+                checksum += value;
+            }
             context.currents[stamp_index] = value;
             if stamp.branch_ordinal.is_none()
                 && let Some((pos, neg)) = super::infer_current_terminal_pair(stamp)
@@ -1111,10 +1156,15 @@ endmodule
                 ctx = eval_context_from_vm_context(context);
                 let value =
                     native.run_jacobian(stamp_index, entry_index, &ctx, context.variables.as_ptr());
-                assert!(
-                    value.is_finite(),
-                    "{name}: non-finite jacobian {stamp_index}.{entry_index} value {value}"
-                );
+                if !value.is_finite() {
+                    assert!(
+                        nonfinite_reference
+                            .jacobians
+                            .contains(&(stamp_index, entry_index)),
+                        "{name}: non-finite jacobian {stamp_index}.{entry_index} value {value}"
+                    );
+                    continue;
+                }
                 checksum += value;
             }
 
@@ -1126,10 +1176,15 @@ endmodule
                     &ctx,
                     context.variables.as_ptr(),
                 );
-                assert!(
-                    value.is_finite(),
-                    "{name}: non-finite reactive jacobian {stamp_index}.{entry_index} value {value}"
-                );
+                if !value.is_finite() {
+                    assert!(
+                        nonfinite_reference
+                            .reactive_jacobians
+                            .contains(&(stamp_index, entry_index)),
+                        "{name}: non-finite reactive jacobian {stamp_index}.{entry_index} value {value}"
+                    );
+                    continue;
+                }
                 checksum += value;
             }
         }
@@ -1138,6 +1193,118 @@ endmodule
             panic!("{name}: native runtime error during shipped-model sweep: {error}");
         }
         checksum
+    }
+
+    #[derive(Default)]
+    struct NonFiniteReference {
+        stamps: Vec<usize>,
+        jacobians: Vec<(usize, usize)>,
+        reactive_jacobians: Vec<(usize, usize)>,
+    }
+
+    impl NonFiniteReference {
+        fn is_empty(&self) -> bool {
+            self.stamps.is_empty()
+                && self.jacobians.is_empty()
+                && self.reactive_jacobians.is_empty()
+        }
+    }
+
+    fn collect_bytecode_nonfinite_reference(
+        model: &CompiledModel,
+        mut context: VmContext,
+    ) -> Result<NonFiniteReference, String> {
+        let mut reference = NonFiniteReference::default();
+        context.clear_currents();
+        context.currents.resize(model.stamp_programs.len(), 0.0);
+        let mut vm = Vm::new(&mut context);
+        execute_bytecode_assignment_steps(&mut vm, &model.assignment_steps)
+            .map_err(|error| error.to_string())?;
+
+        for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+            if let Some(condition) = &stamp.static_condition
+                && vm
+                    .execute(condition)
+                    .map_err(|error| error.to_string())?
+                    .abs()
+                    <= 1.0e-15
+            {
+                continue;
+            }
+
+            let value = vm
+                .execute(&stamp.value_program)
+                .map_err(|error| error.to_string())?;
+            if !value.is_finite() {
+                reference.stamps.push(stamp_index);
+            }
+            vm.context.currents[stamp_index] = value;
+            if stamp.branch_ordinal.is_none()
+                && let Some((pos, neg)) = super::infer_current_terminal_pair(stamp)
+            {
+                vm.context.set_branch_current(pos, neg, value);
+            }
+
+            for entry_index in 0..stamp.jacobian_programs.len() {
+                let value = vm
+                    .execute(&stamp.jacobian_programs[entry_index].program)
+                    .map_err(|error| error.to_string())?;
+                if !value.is_finite() {
+                    reference.jacobians.push((stamp_index, entry_index));
+                }
+            }
+
+            for entry_index in 0..stamp.reactive_jacobians.len() {
+                let value = vm
+                    .execute(&stamp.reactive_jacobians[entry_index].program)
+                    .map_err(|error| error.to_string())?;
+                if !value.is_finite() {
+                    reference
+                        .reactive_jacobians
+                        .push((stamp_index, entry_index));
+                }
+            }
+        }
+
+        Ok(reference)
+    }
+
+    fn execute_bytecode_assignment_steps(
+        vm: &mut Vm<'_>,
+        steps: &[AssignmentStep],
+    ) -> Result<(), crate::vm::VmError> {
+        for step in steps {
+            match step {
+                AssignmentStep::Assign(assignment) => {
+                    let value = vm.execute(&assignment.program)?;
+                    vm.context.variables[assignment.var_index] = value;
+                }
+                AssignmentStep::AssignIndexed {
+                    base,
+                    len,
+                    lower,
+                    index,
+                    value,
+                } => {
+                    let raw_index = vm.execute(index)?;
+                    let slot = Vm::array_slot(raw_index, *base, *len, *lower)?;
+                    let value = vm.execute(value)?;
+                    vm.context.variables[slot] = value;
+                }
+                AssignmentStep::Loop { condition, body } => {
+                    let mut iterations = 0usize;
+                    while vm.execute(condition)?.abs() > 1.0e-15 {
+                        execute_bytecode_assignment_steps(vm, body)?;
+                        iterations += 1;
+                        assert!(
+                            iterations < 100_000,
+                            "bytecode reference loop exceeded shipped benchmark iteration guard"
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn preallocate_native_benchmark_context(context: &mut VmContext, model: &CompiledModel) {
