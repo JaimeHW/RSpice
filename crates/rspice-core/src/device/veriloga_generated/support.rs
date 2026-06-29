@@ -1079,7 +1079,11 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_rem_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::rem(left, right));
+        let right_value = right.value;
+        let quotient = (left.value / right_value).trunc();
+        self.v[index] = left.value % right_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] - quotient * right.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] - quotient * right.db[axis]; }
     }
 
     #[inline]
@@ -1108,28 +1112,48 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_min_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        let selected = if left.value <= right.value { left } else { right };
-        self.v[index] = selected.value;
-        self.dn[index] = selected.dn;
-        self.db[index] = selected.db;
+        if left.value <= right.value {
+            self.v[index] = left.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis]; }
+        } else {
+            self.v[index] = right.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = right.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = right.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_max_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        let selected = if left.value >= right.value { left } else { right };
-        self.v[index] = selected.value;
-        self.dn[index] = selected.dn;
-        self.db[index] = selected.db;
+        if left.value >= right.value {
+            self.v[index] = left.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis]; }
+        } else {
+            self.v[index] = right.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = right.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = right.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_hypot_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::hypot(left, right));
+        let left_value = left.value;
+        let right_value = right.value;
+        let output = left_value.hypot(right_value);
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_value * left.dn[axis] + right_value * right.dn[axis]) / output; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_value * left.db[axis] + right_value * right.db[axis]) / output; }
     }
 
     #[inline]
     pub(crate) fn store_atan2_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::atan2(left, right));
+        let left_value = left.value;
+        let right_value = right.value;
+        let denominator = right_value * right_value + left_value * left_value;
+        self.v[index] = left_value.atan2(right_value);
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (right_value * left.dn[axis] - left_value * right.dn[axis]) / denominator; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (right_value * left.db[axis] - left_value * right.db[axis]) / denominator; }
     }
 
     #[inline]
@@ -1274,32 +1298,66 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_offset_min_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::min(left, right), offset);
+        if left.value <= right.value {
+            self.v[index] = left.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis]; }
+        } else {
+            self.v[index] = right.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = right.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = right.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_offset_max_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::max(left, right), offset);
+        if left.value >= right.value {
+            self.v[index] = left.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis]; }
+        } else {
+            self.v[index] = right.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = right.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = right.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_offset_rem_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::rem(left, right), offset);
+        let right_value = right.value;
+        let quotient = (left.value / right_value).trunc();
+        self.v[index] = left.value % right_value + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] - quotient * right.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] - quotient * right.db[axis]; }
     }
 
     #[inline]
     pub(crate) fn store_offset_hypot_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::hypot(left, right), offset);
+        let left_value = left.value;
+        let right_value = right.value;
+        let output = left_value.hypot(right_value);
+        self.v[index] = output + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_value * left.dn[axis] + right_value * right.dn[axis]) / output; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_value * left.db[axis] + right_value * right.db[axis]) / output; }
     }
 
     #[inline]
     pub(crate) fn store_offset_atan2_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::atan2(left, right), offset);
+        let left_value = left.value;
+        let right_value = right.value;
+        let denominator = right_value * right_value + left_value * left_value;
+        self.v[index] = left_value.atan2(right_value) + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (right_value * left.dn[axis] - left_value * right.dn[axis]) / denominator; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (right_value * left.db[axis] - left_value * right.db[axis]) / denominator; }
     }
 
     #[inline]
     pub(crate) fn store_offset_rem_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::rem_from_scalar(scalar, value), offset);
+        let right_value = value.value;
+        let quotient = (scalar / right_value).trunc();
+        self.v[index] = scalar % right_value + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * -quotient; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * -quotient; }
     }
 
     #[inline]
@@ -1313,27 +1371,53 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_offset_min_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::min_from_scalar(scalar, value), offset);
+        if scalar <= value.value {
+            self.store_scalar(index, scalar + offset);
+        } else {
+            self.v[index] = value.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_offset_max_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::max_from_scalar(scalar, value), offset);
+        if scalar >= value.value {
+            self.store_scalar(index, scalar + offset);
+        } else {
+            self.v[index] = value.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_offset_rem_with_scalar_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scalar: f64, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::rem_with_scalar(value, scalar), offset);
+        self.v[index] = value.value % scalar + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
     }
 
     #[inline]
     pub(crate) fn store_offset_min_with_scalar_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scalar: f64, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::min_with_scalar(value, scalar), offset);
+        if value.value <= scalar {
+            self.v[index] = value.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        } else {
+            self.store_scalar(index, scalar + offset);
+        }
     }
 
     #[inline]
     pub(crate) fn store_offset_max_with_scalar_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scalar: f64, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::max_with_scalar(value, scalar), offset);
+        if value.value >= scalar {
+            self.v[index] = value.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        } else {
+            self.store_scalar(index, scalar + offset);
+        }
     }
 
     #[inline]
@@ -2596,7 +2680,11 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_rem_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::rem_from_scalar(scalar, value));
+        let right_value = value.value;
+        let quotient = (scalar / right_value).trunc();
+        self.v[index] = scalar % right_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * -quotient; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * -quotient; }
     }
 
     #[inline]
@@ -2610,27 +2698,53 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_min_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::min_from_scalar(scalar, value));
+        if scalar <= value.value {
+            self.store_scalar(index, scalar);
+        } else {
+            self.v[index] = value.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_max_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::max_from_scalar(scalar, value));
+        if scalar >= value.value {
+            self.store_scalar(index, scalar);
+        } else {
+            self.v[index] = value.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_rem_with_scalar_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scalar: f64) {
-        self.store_ad_value(index, AdValue::rem_with_scalar(value, scalar));
+        self.v[index] = value.value % scalar;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
     }
 
     #[inline]
     pub(crate) fn store_min_with_scalar_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scalar: f64) {
-        self.store_ad_value(index, AdValue::min_with_scalar(value, scalar));
+        if value.value <= scalar {
+            self.v[index] = value.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        } else {
+            self.store_scalar(index, scalar);
+        }
     }
 
     #[inline]
     pub(crate) fn store_max_with_scalar_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scalar: f64) {
-        self.store_ad_value(index, AdValue::max_with_scalar(value, scalar));
+        if value.value >= scalar {
+            self.v[index] = value.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        } else {
+            self.store_scalar(index, scalar);
+        }
     }
 
     #[inline]
@@ -16052,7 +16166,11 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_rem_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::rem(left, right));
+        let right_value = right.value;
+        let quotient = (left.value / right_value).trunc();
+        self.v[index] = left.value % right_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] - quotient * right.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] - quotient * right.db[axis]; }
     }
 
     #[inline]
@@ -16081,28 +16199,48 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_min_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        let selected = if left.value <= right.value { left } else { right };
-        self.v[index] = selected.value;
-        self.dn[index] = selected.dn;
-        self.db[index] = selected.db;
+        if left.value <= right.value {
+            self.v[index] = left.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis]; }
+        } else {
+            self.v[index] = right.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = right.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = right.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_max_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        let selected = if left.value >= right.value { left } else { right };
-        self.v[index] = selected.value;
-        self.dn[index] = selected.dn;
-        self.db[index] = selected.db;
+        if left.value >= right.value {
+            self.v[index] = left.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis]; }
+        } else {
+            self.v[index] = right.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = right.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = right.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_hypot_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::hypot(left, right));
+        let left_value = left.value;
+        let right_value = right.value;
+        let output = left_value.hypot(right_value);
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_value * left.dn[axis] + right_value * right.dn[axis]) / output; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_value * left.db[axis] + right_value * right.db[axis]) / output; }
     }
 
     #[inline]
     pub(crate) fn store_atan2_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::atan2(left, right));
+        let left_value = left.value;
+        let right_value = right.value;
+        let denominator = right_value * right_value + left_value * left_value;
+        self.v[index] = left_value.atan2(right_value);
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (right_value * left.dn[axis] - left_value * right.dn[axis]) / denominator; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (right_value * left.db[axis] - left_value * right.db[axis]) / denominator; }
     }
 
     #[inline]
@@ -16247,32 +16385,66 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_offset_min_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::min(left, right), offset);
+        if left.value <= right.value {
+            self.v[index] = left.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis]; }
+        } else {
+            self.v[index] = right.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = right.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = right.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_offset_max_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::max(left, right), offset);
+        if left.value >= right.value {
+            self.v[index] = left.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis]; }
+        } else {
+            self.v[index] = right.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = right.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = right.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_offset_rem_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::rem(left, right), offset);
+        let right_value = right.value;
+        let quotient = (left.value / right_value).trunc();
+        self.v[index] = left.value % right_value + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] - quotient * right.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] - quotient * right.db[axis]; }
     }
 
     #[inline]
     pub(crate) fn store_offset_hypot_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::hypot(left, right), offset);
+        let left_value = left.value;
+        let right_value = right.value;
+        let output = left_value.hypot(right_value);
+        self.v[index] = output + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_value * left.dn[axis] + right_value * right.dn[axis]) / output; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_value * left.db[axis] + right_value * right.db[axis]) / output; }
     }
 
     #[inline]
     pub(crate) fn store_offset_atan2_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::atan2(left, right), offset);
+        let left_value = left.value;
+        let right_value = right.value;
+        let denominator = right_value * right_value + left_value * left_value;
+        self.v[index] = left_value.atan2(right_value) + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (right_value * left.dn[axis] - left_value * right.dn[axis]) / denominator; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (right_value * left.db[axis] - left_value * right.db[axis]) / denominator; }
     }
 
     #[inline]
     pub(crate) fn store_offset_rem_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::rem_from_scalar(scalar, value), offset);
+        let right_value = value.value;
+        let quotient = (scalar / right_value).trunc();
+        self.v[index] = scalar % right_value + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * -quotient; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * -quotient; }
     }
 
     #[inline]
@@ -16286,27 +16458,53 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_offset_min_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::min_from_scalar(scalar, value), offset);
+        if scalar <= value.value {
+            self.store_scalar(index, scalar + offset);
+        } else {
+            self.v[index] = value.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_offset_max_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::max_from_scalar(scalar, value), offset);
+        if scalar >= value.value {
+            self.store_scalar(index, scalar + offset);
+        } else {
+            self.v[index] = value.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_offset_rem_with_scalar_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scalar: f64, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::rem_with_scalar(value, scalar), offset);
+        self.v[index] = value.value % scalar + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
     }
 
     #[inline]
     pub(crate) fn store_offset_min_with_scalar_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scalar: f64, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::min_with_scalar(value, scalar), offset);
+        if value.value <= scalar {
+            self.v[index] = value.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        } else {
+            self.store_scalar(index, scalar + offset);
+        }
     }
 
     #[inline]
     pub(crate) fn store_offset_max_with_scalar_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scalar: f64, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::max_with_scalar(value, scalar), offset);
+        if value.value >= scalar {
+            self.v[index] = value.value + offset;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        } else {
+            self.store_scalar(index, scalar + offset);
+        }
     }
 
     #[inline]
@@ -17569,7 +17767,11 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_rem_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::rem_from_scalar(scalar, value));
+        let right_value = value.value;
+        let quotient = (scalar / right_value).trunc();
+        self.v[index] = scalar % right_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * -quotient; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * -quotient; }
     }
 
     #[inline]
@@ -17583,27 +17785,53 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_min_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::min_from_scalar(scalar, value));
+        if scalar <= value.value {
+            self.store_scalar(index, scalar);
+        } else {
+            self.v[index] = value.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_max_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::max_from_scalar(scalar, value));
+        if scalar >= value.value {
+            self.store_scalar(index, scalar);
+        } else {
+            self.v[index] = value.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        }
     }
 
     #[inline]
     pub(crate) fn store_rem_with_scalar_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scalar: f64) {
-        self.store_ad_value(index, AdValue::rem_with_scalar(value, scalar));
+        self.v[index] = value.value % scalar;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
     }
 
     #[inline]
     pub(crate) fn store_min_with_scalar_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scalar: f64) {
-        self.store_ad_value(index, AdValue::min_with_scalar(value, scalar));
+        if value.value <= scalar {
+            self.v[index] = value.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        } else {
+            self.store_scalar(index, scalar);
+        }
     }
 
     #[inline]
     pub(crate) fn store_max_with_scalar_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scalar: f64) {
-        self.store_ad_value(index, AdValue::max_with_scalar(value, scalar));
+        if value.value >= scalar {
+            self.v[index] = value.value;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis]; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis]; }
+        } else {
+            self.store_scalar(index, scalar);
+        }
     }
 
     #[inline]
