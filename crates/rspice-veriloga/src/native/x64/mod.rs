@@ -1101,6 +1101,11 @@ endmodule
                 shipped_cmc_model_path(&["hicumL2_v320_files", "hicumL2_v320.va"]),
                 Some("hicumL2va"),
             ),
+            (
+                "bsimimg",
+                shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
+                Some("bsimimg"),
+            ),
         ];
         let iterations = shipped_model_microbench_iterations();
         let samples = shipped_model_microbench_samples();
