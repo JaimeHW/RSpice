@@ -6814,14 +6814,24 @@ fn rust_backend_fuses_nested_mixed_multiply_store_helpers() {
         "{support}"
     );
     assert!(
+        support.contains("pub(crate) fn store_mul_ad_product_lhs_mixed_ia("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_ad_product_rhs_mixed_ai("),
+        "{support}"
+    );
+    assert!(
         stamp.contains("s.store_mul3_lhs(") || stamp.contains("s.store_mul3_rhs("),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_mul_ad_product_lhs(")
-            || stamp.contains("s.store_mul_ad_product_rhs("),
+        stamp.contains("s.store_mul_ad_product_lhs_mixed_ia(")
+            || stamp.contains("s.store_mul_ad_product_rhs_mixed_ai("),
         "{stamp}"
     );
+    assert!(!stamp.contains("s.store_mul_ad_product_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_product_rhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
     assert_generated_rust_compiles(&generated);
