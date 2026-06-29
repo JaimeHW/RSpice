@@ -57,8 +57,6 @@ const XMM_STACK: [Xmm; 6] = [
     Xmm::Xmm4,
     Xmm::Xmm5,
 ];
-const SIGN_MASK: f64 = f64::from_bits(0x8000_0000_0000_0000);
-
 #[allow(dead_code)]
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
     let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program), 0, None);
@@ -592,9 +590,9 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        let scratch = self.scratch_register()?;
-        self.emit_literal_load(scratch, SIGN_MASK);
-        self.encoder.xorpd_xmm_xmm(target, scratch);
+        self.encoder.movq_r64_xmm(Gpr::Rax, target);
+        self.encoder.btc_r64_imm8(Gpr::Rax, 63);
+        self.encoder.movq_xmm_r64(target, Gpr::Rax);
         Ok(())
     }
 
@@ -2311,7 +2309,7 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        K_BOLTZMANN, NativeAssignment, Q_ELECTRON, compile_assignment_function,
+        K_BOLTZMANN, NativeAssignment, Q_ELECTRON, XMM_STACK, compile_assignment_function,
         compile_assignment_pass_function, compile_value_function,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
@@ -5329,7 +5327,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_neg_when_no_scratch_xmm_register_is_available() {
+    fn generated_value_leaf_negates_at_full_xmm_stack_depth() {
         let program = native_program(
             EntryKind::StampValue,
             vec![
@@ -5349,14 +5347,23 @@ mod tests {
             0,
         );
 
-        let error = compile_value_function(&program)
-            .expect_err("neg at full stack depth must require scratch register");
+        assert_eq!(program.max_stack_depth(), XMM_STACK.len());
 
-        assert!(matches!(
-            error,
-            crate::native::JitError::RegisterAllocation { .. }
-        ));
-        assert!(error.to_string().contains("scratch"));
+        let bytes = compile_value_function(&program).expect("compile full-stack dynamic neg leaf");
+        assert!(
+            !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "dynamic neg should remain helper-free at full XMM stack depth"
+        );
+
+        let memory =
+            ExecutableMemory::allocate(&bytes).expect("allocate full-stack dynamic neg leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.temperature = 6.0;
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 9.0_f64.to_bits());
     }
 
     fn native_program(
