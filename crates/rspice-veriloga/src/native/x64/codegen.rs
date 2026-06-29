@@ -3026,7 +3026,7 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 mod tests {
     use super::{
         DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64,
-        INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, Q_ELECTRON,
+        INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, PARAMS_OFFSET, Q_ELECTRON,
         ROUND_TEMP_FRAME_BYTES, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
         assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
         compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
@@ -3071,6 +3071,42 @@ mod tests {
         let ctx = eval_context(&params, &voltages, &[], &[]);
 
         assert_eq!(f(&ctx, vars.as_ptr()), 10.0);
+    }
+
+    #[test]
+    fn generated_value_leaf_uses_compact_base_displacements_for_param_load() {
+        let program = native_program(EntryKind::StampValue, vec![Instruction::PushParam(0)], 0);
+
+        let bytes = compile_value_function(&program).expect("compile param value function");
+
+        assert!(
+            contains_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            "param base pointer should use the compact context field load"
+        );
+        assert!(
+            contains_bytes(&bytes, &[0xF2, 0x0F, 0x10, 0x00]),
+            "param value load at index 0 should use the no-displacement memory form"
+        );
+        assert!(
+            !contains_bytes(
+                &bytes,
+                &old_disp32_context_pointer_load_bytes(PARAMS_OFFSET)
+            ),
+            "param base pointer should not use the old forced disp32 context field load"
+        );
+        assert!(
+            !contains_bytes(&bytes, &[0xF2, 0x0F, 0x10, 0x80, 0, 0, 0, 0]),
+            "param value load at index 0 should not use the old forced disp32 memory form"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate param value leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [7.25_f64];
+        let ctx = eval_context(&params, &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 7.25_f64.to_bits());
     }
 
     #[test]
@@ -7862,6 +7898,17 @@ mod tests {
         let mut encoder = X64Encoder::new();
         encoder.mov_r64_m64_base_disp32(Gpr::Rax, entry_ctx_arg_reg(), ctx_field_offset);
         encoder.into_bytes()
+    }
+
+    fn old_disp32_context_pointer_load_bytes(ctx_field_offset: i32) -> Vec<u8> {
+        let modrm = match entry_ctx_arg_reg() {
+            Gpr::Rcx => 0x81,
+            Gpr::Rdi => 0x87,
+            _ => unreachable!("native entry context arg register is fixed by the host ABI"),
+        };
+        let mut bytes = vec![0x48, 0x8B, modrm];
+        bytes.extend_from_slice(&ctx_field_offset.to_le_bytes());
+        bytes
     }
 
     fn dynamic_variable_scaled_address_bytes(base: usize) -> Vec<u8> {

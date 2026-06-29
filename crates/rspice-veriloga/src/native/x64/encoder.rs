@@ -567,11 +567,24 @@ impl X64Encoder {
     }
 
     fn emit_base_disp32_modrm(&mut self, reg: u8, base: u8, disp: i32) {
-        self.emit_modrm(0b10, reg, base);
+        let mode = if disp == 0 && !requires_displacement_base(base) {
+            0b00
+        } else if i8::try_from(disp).is_ok() {
+            0b01
+        } else {
+            0b10
+        };
+
+        self.emit_modrm(mode, reg, base);
         if needs_sib_base(base) {
             self.emit_sib(0, 0b100, base);
         }
-        self.emit_i32(disp);
+        match mode {
+            0b00 => {}
+            0b01 => self.emit_u8(disp as i8 as u8),
+            0b10 => self.emit_i32(disp),
+            _ => unreachable!("base displacement mode is always a memory addressing mode"),
+        }
     }
 
     fn emit_i32(&mut self, value: i32) {
@@ -625,6 +638,10 @@ fn requires_low_byte_rex(reg: u8) -> bool {
 
 fn needs_sib_base(base: u8) -> bool {
     base & 0b111 == 0b100
+}
+
+fn requires_displacement_base(base: u8) -> bool {
+    base & 0b111 == 0b101
 }
 
 #[cfg(test)]
@@ -685,9 +702,7 @@ mod tests {
 
         assert_eq!(
             encoder.into_bytes(),
-            [
-                0x48, 0x8B, 0x81, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,
-            ]
+            [0x48, 0x8B, 0x41, 16, 0xF2, 0x0F, 0x10, 0x40, 24, 0xC3]
         );
     }
 
@@ -700,9 +715,7 @@ mod tests {
 
         assert_eq!(
             encoder.into_bytes(),
-            [
-                0x48, 0x8B, 0x87, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,
-            ]
+            [0x48, 0x8B, 0x47, 16, 0xF2, 0x0F, 0x10, 0x40, 24, 0xC3]
         );
     }
 
@@ -739,7 +752,7 @@ mod tests {
     }
 
     #[test]
-    fn encodes_r12_disp32_memory_base_with_sib() {
+    fn encodes_r12_memory_base_with_sib() {
         let mut encoder = X64Encoder::new();
 
         encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::R12, 16);
@@ -748,8 +761,30 @@ mod tests {
         assert_eq!(
             encoder.into_bytes(),
             [
-                0x49, 0x8B, 0x84, 0x24, 16, 0, 0, 0, 0xF2, 0x41, 0x0F, 0x10, 0x84, 0x24, 80, 0, 0,
-                0,
+                0x49, 0x8B, 0x44, 0x24, 16, 0xF2, 0x41, 0x0F, 0x10, 0x44, 0x24, 80,
+            ]
+        );
+    }
+
+    #[test]
+    fn encodes_shortest_base_displacements() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rdx, 0);
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rdx, 127);
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rdx, 128);
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rdx, -128);
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rdx, -129);
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rsp, 0);
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::R12, 0);
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::R13, 0);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x48, 0x8B, 0x02, 0x48, 0x8B, 0x42, 127, 0x48, 0x8B, 0x82, 128, 0, 0, 0, 0x48,
+                0x8B, 0x42, 128, 0x48, 0x8B, 0x82, 127, 255, 255, 255, 0x48, 0x8B, 0x04, 0x24,
+                0x49, 0x8B, 0x04, 0x24, 0x49, 0x8B, 0x45, 0,
             ]
         );
     }
@@ -763,9 +798,7 @@ mod tests {
 
         assert_eq!(
             encoder.into_bytes(),
-            [
-                0x48, 0x89, 0x84, 0x24, 0, 0, 0, 0, 0x4D, 0x89, 0xAC, 0x24, 16, 0, 0, 0,
-            ]
+            [0x48, 0x89, 0x04, 0x24, 0x4D, 0x89, 0x6C, 0x24, 16]
         );
     }
 
@@ -781,8 +814,8 @@ mod tests {
         assert_eq!(
             encoder.into_bytes(),
             [
-                0x44, 0x0F, 0xB6, 0x90, 8, 0, 0, 0, 0x41, 0x83, 0xFA, 5, 0x41, 0x0F, 0x94, 0xC2,
-                0x45, 0x0F, 0xB6, 0xD2, 0xF2, 0x41, 0x0F, 0x2A, 0xC2,
+                0x44, 0x0F, 0xB6, 0x50, 8, 0x41, 0x83, 0xFA, 5, 0x41, 0x0F, 0x94, 0xC2, 0x45, 0x0F,
+                0xB6, 0xD2, 0xF2, 0x41, 0x0F, 0x2A, 0xC2,
             ]
         );
     }
@@ -803,8 +836,8 @@ mod tests {
             encoder.into_bytes(),
             [
                 0x66, 0x0F, 0x57, 0xC0, 0xF2, 0x0F, 0x10, 0xC8, 0xF2, 0x0F, 0x58, 0xC8, 0xF2, 0x0F,
-                0x5C, 0xC8, 0xF2, 0x0F, 0x59, 0xC8, 0xF2, 0x0F, 0x5E, 0xC8, 0xF2, 0x0F, 0x11, 0x8A,
-                16, 0, 0, 0, 0xC3,
+                0x5C, 0xC8, 0xF2, 0x0F, 0x59, 0xC8, 0xF2, 0x0F, 0x5E, 0xC8, 0xF2, 0x0F, 0x11, 0x4A,
+                16, 0xC3,
             ]
         );
     }
@@ -1018,9 +1051,9 @@ mod tests {
         assert_eq!(
             encoder.into_bytes(),
             [
-                0x41, 0xC6, 0x82, 16, 0, 0, 0, 1, 0x49, 0x0F, 0xBA, 0xFB, 63, 0x49, 0x81, 0xFB, 1,
-                0, 0, 0, 0x0F, 0x86, 0, 0, 0, 0, 0xF2, 0x0F, 0x5C, 0x88, 24, 0, 0, 0, 0xF2, 0x0F,
-                0x5D, 0x8C, 0x24, 0, 0, 0, 0, 0xF2, 0x0F, 0x58, 0x88, 24, 0, 0, 0,
+                0x41, 0xC6, 0x42, 16, 1, 0x49, 0x0F, 0xBA, 0xFB, 63, 0x49, 0x81, 0xFB, 1, 0, 0, 0,
+                0x0F, 0x86, 0, 0, 0, 0, 0xF2, 0x0F, 0x5C, 0x48, 24, 0xF2, 0x0F, 0x5D, 0x0C, 0x24,
+                0xF2, 0x0F, 0x58, 0x48, 24,
             ]
         );
     }
