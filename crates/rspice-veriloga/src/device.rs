@@ -317,6 +317,16 @@ impl VerilogADevice {
             for jac in &stamp.jacobian_programs {
                 scan_program(&jac.program);
             }
+            for jac in &stamp.reactive_jacobians {
+                scan_program(&jac.program);
+            }
+        }
+
+        for source in &model.noise_sources {
+            scan_program(&source.psd_program);
+            if let Some(program) = &source.exponent_program {
+                scan_program(program);
+            }
         }
 
         if let Some(max_idx) = max_state {
@@ -1293,6 +1303,8 @@ impl VerilogADevice {
                 context.cross_detectors.as_mut_ptr()
             },
             cross_detectors_len: context.cross_detectors.len(),
+            state_prev_len: context.state_values_prev.len(),
+            state_values_len: context.state_values.len(),
         }
     }
 
@@ -2267,7 +2279,10 @@ impl DeviceBuilder {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::*;
-    use crate::codegen::{AssignmentProgram, AssignmentStep, BytecodeProgram};
+    use crate::codegen::{
+        AssignmentProgram, AssignmentStep, BytecodeProgram, ColumnAxis, CompiledNoiseSource,
+        JacobianEntry,
+    };
     use crate::{CompilerOptions, VerilogACompiler};
     use std::sync::Arc;
 
@@ -2334,6 +2349,62 @@ mod tests {
             msg.contains("no interpreter fallback"),
             "error must state the hard-fail contract, got: {msg}"
         );
+    }
+
+    #[test]
+    fn preallocates_runtime_state_from_reactive_jacobians_and_noise_programs() {
+        let mut model = compile(
+            r#"
+`include "disciplines.vams"
+module prealloc_reactive_noise(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n) * 0.0;
+endmodule
+"#,
+        );
+        assert_eq!(model.stamp_programs.len(), 1);
+
+        model.stamp_programs[0]
+            .reactive_jacobians
+            .push(JacobianEntry {
+                row: StampIndex::Terminal(0),
+                col: StampIndex::Terminal(0),
+                col_axis: ColumnAxis::Node(0),
+                sign: 1.0,
+                program: BytecodeProgram {
+                    instructions: vec![
+                        Instruction::DdtState(3),
+                        Instruction::AbsDelayState(2),
+                        Instruction::TransitionState(1),
+                    ],
+                },
+            });
+        model.noise_sources.push(CompiledNoiseSource {
+            pos: StampIndex::Terminal(0),
+            neg: StampIndex::Ground,
+            is_current: true,
+            branch_ordinal: None,
+            program_idx: 0,
+            psd_program: BytecodeProgram {
+                instructions: vec![Instruction::IdtState(5), Instruction::SlewState(4)],
+            },
+            exponent_program: Some(BytecodeProgram {
+                instructions: vec![Instruction::LimitState(6), Instruction::CrossState(5)],
+            }),
+            table: None,
+            name: None,
+        });
+
+        let mut context = VmContext::with_internal_nodes(model.num_terminals, model.internal_nodes);
+        VerilogADevice::preallocate_vm_runtime_state(&mut context, &model);
+
+        assert_eq!(context.state_values.len(), 7);
+        assert_eq!(context.state_values_prev.len(), 7);
+        assert_eq!(context.delay_buffers.len(), 3);
+        assert_eq!(context.transition_filters.len(), 2);
+        assert_eq!(context.slew_filters.len(), 5);
+        assert_eq!(context.cross_detectors.len(), 6);
     }
 
     #[test]

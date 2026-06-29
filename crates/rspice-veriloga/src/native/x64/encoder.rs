@@ -1012,6 +1012,8 @@ mod tests {
             delay_buffers_len: 0,
             cross_detectors: std::ptr::null_mut(),
             cross_detectors_len: 0,
+            state_prev_len: 0,
+            state_values_len: 0,
         };
 
         let mut encoder = X64Encoder::new();
