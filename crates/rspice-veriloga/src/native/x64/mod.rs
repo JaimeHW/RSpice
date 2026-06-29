@@ -1150,6 +1150,11 @@ endmodule
                 ]),
                 Some("hisimsoi_va"),
             ),
+            (
+                "asmhemt",
+                shipped_cmc_model_path(&["ASM-HEMT101.6.0_05132026", "vacode", "asmhemt.va"]),
+                Some("asmhemt"),
+            ),
         ];
         let iterations = shipped_model_microbench_iterations();
         let samples = shipped_model_microbench_samples();
