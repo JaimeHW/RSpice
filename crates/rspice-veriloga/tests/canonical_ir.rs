@@ -3007,6 +3007,41 @@ fn hir_lowering_preserves_expression_tree_structure() {
 }
 
 #[test]
+fn hir_lowering_maps_builtin_constants_to_numbers() {
+    let source = r#"
+module builtin_constants(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ M_PI + M_E;
+endmodule
+"#;
+    let analyzed = analyze_fixture(source, "builtin_constants").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", source);
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    hir.validate()
+        .expect("builtin constants must validate as numeric HIR expressions");
+
+    let contribution_expr = &hir.contributions[0].expression;
+    let HirExprKind::Binary { left, right, .. } =
+        &hir.expressions[usize::from(contribution_expr.id)].kind
+    else {
+        panic!("expected top-level contribution expression to be binary");
+    };
+
+    let HirExprKind::Number { value: pi, raw } = &hir.expressions[usize::from(*left)].kind else {
+        panic!("expected M_PI to lower to number");
+    };
+    assert_eq!(raw.as_str(), "M_PI");
+    assert_eq!(pi.to_bits(), std::f64::consts::PI.to_bits());
+
+    let HirExprKind::Number { value: e, raw } = &hir.expressions[usize::from(*right)].kind else {
+        panic!("expected M_E to lower to number");
+    };
+    assert_eq!(raw.as_str(), "M_E");
+    assert_eq!(e.to_bits(), std::f64::consts::E.to_bits());
+}
+
+#[test]
 fn hir_lowering_preserves_laplace_operand_groups() {
     let span = Span::dummy();
     let number = |value: f64, raw: &str| {
