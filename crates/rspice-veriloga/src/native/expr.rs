@@ -959,6 +959,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         match &expression.kind {
             HirExprKind::Number { value, .. } => self.push(NativeOp::Const(*value)),
             HirExprKind::Identifier { name } => self.lower_identifier(name.as_str()),
+            HirExprKind::ArrayAccess { array, index } => {
+                self.lower_array_access(array.as_str(), *index)
+            }
             HirExprKind::BranchAccess { access, pos, neg } => {
                 self.lower_branch_access(access.as_str(), pos.as_str(), neg.as_deref())
             }
@@ -981,7 +984,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             HirExprKind::StringLiteral { .. }
             | HirExprKind::NamedBranchAccess { .. }
-            | HirExprKind::ArrayAccess { .. }
             | HirExprKind::ArrayLiteral { .. }
             | HirExprKind::AnalogOperator { .. }
             | HirExprKind::Laplace { .. }
@@ -1121,6 +1123,63 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
 
         Err(self.unsupported(format!("identifier {name}")))
+    }
+
+    fn lower_array_access(&mut self, array: &str, index: ExprId) -> JitResult<()> {
+        let Some((base, len, lower)) = self.resolve_array_variable_range(array)? else {
+            return Err(self.unsupported(format!("array access {array}")));
+        };
+        validate_range(
+            self.model.clone(),
+            "canonical array variable range",
+            base,
+            len,
+            self.limits.variable_count,
+        )?;
+        self.lower(index)?;
+        if lower_constant_dynamic_variable_read(&mut self.ops, base, len, lower) {
+            return Ok(());
+        }
+        self.ops
+            .push(NativeOp::LoadVariableDyn { base, len, lower });
+        Ok(())
+    }
+
+    fn resolve_array_variable_range(&self, array: &str) -> JitResult<Option<(usize, usize, i64)>> {
+        let prefix = format!("{array}[");
+        let mut slots = self
+            .limits
+            .variable_names
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, name)| {
+                let text = name.as_str();
+                let index = text
+                    .strip_prefix(&prefix)?
+                    .strip_suffix(']')?
+                    .parse::<i64>()
+                    .ok()?;
+                Some((index, slot))
+            })
+            .collect::<Vec<_>>();
+        if slots.is_empty() {
+            return Ok(None);
+        }
+
+        slots.sort_by_key(|(index, _)| *index);
+        let lower = slots[0].0;
+        let base = slots[0].1;
+        for (offset, (logical_index, slot)) in slots.iter().enumerate() {
+            let expected_index = lower + offset as i64;
+            let expected_slot = base + offset;
+            if *logical_index != expected_index || *slot != expected_slot {
+                return Err(self.unsupported(format!(
+                    "array access {array} with non-contiguous runtime storage"
+                )));
+            }
+        }
+
+        Ok(Some((base, slots.len(), lower)))
     }
 
     fn lower_branch_access(&mut self, access: &str, pos: &str, neg: Option<&str>) -> JitResult<()> {

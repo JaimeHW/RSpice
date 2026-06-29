@@ -443,13 +443,7 @@ endmodule
 module native_canonical_unsupported(p, n);
   inout p, n;
   electrical p, n;
-  real x[0:1];
-  integer i;
-  analog begin
-    i = 0;
-    x[i] = 1.0;
-    I(p, n) <+ x[i];
-  end
+  analog I(p, n) <+ transition(V(p, n) > 0.5, 0.2, 0.4, 0.4);
 endmodule
 "#;
         let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -462,7 +456,9 @@ endmodule
             .expect_err("unsupported canonical stamp must not fall back to bytecode");
 
         assert!(
-            error.to_string().contains("expression kind array access"),
+            error
+                .to_string()
+                .contains("intrinsic function 'transition'"),
             "{error}"
         );
     }
