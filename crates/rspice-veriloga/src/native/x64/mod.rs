@@ -1121,6 +1121,15 @@ endmodule
                 shipped_cmc_model_path(&["BSIM_SOI_100.1.1_09152025", "code", "bsimsoi.va"]),
                 Some("bsimsoi"),
             ),
+            (
+                "l_utsoi102",
+                shipped_cmc_model_path(&[
+                    "L_UTSOI_102.9.0_code_package",
+                    "vacode",
+                    "L_UTSOI_102.va",
+                ]),
+                Some("l_utsoi"),
+            ),
         ];
         let iterations = shipped_model_microbench_iterations();
         let samples = shipped_model_microbench_samples();
