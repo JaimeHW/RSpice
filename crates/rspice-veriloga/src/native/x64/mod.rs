@@ -1431,6 +1431,11 @@ endmodule
                 Some("hicumL0va"),
             ),
             (
+                "hicuml2",
+                shipped_cmc_model_path(&["hicumL2_v320_files", "hicumL2_v320.va"]),
+                Some("hicumL2va"),
+            ),
+            (
                 "hisimsoi",
                 shipped_cmc_model_path(&[
                     "HiSIM_SOI_1.5.0_Release_20211008",
@@ -1510,6 +1515,11 @@ endmodule
                 "hicuml0",
                 shipped_cmc_model_path(&["hicumL0_v2p1p0_files", "hicumL0_v2p1p0.va"]),
                 Some("hicumL0va"),
+            ),
+            (
+                "hicuml2",
+                shipped_cmc_model_path(&["hicumL2_v320_files", "hicumL2_v320.va"]),
+                Some("hicumL2va"),
             ),
             (
                 "hisimsoi",
@@ -1918,6 +1928,10 @@ endmodule
                 .copied()
                 .unwrap_or(0.0),
             "hicuml0" => [0.2, 0.8, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
+            "hicuml2" => [0.2, 0.8, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
             "asmhemt" => [0.1, 0.3, 0.0, 0.0, 0.0]
                 .get(terminal)
                 .copied()
