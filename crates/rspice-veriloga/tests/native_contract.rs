@@ -2045,6 +2045,40 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_above_current_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_above_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ above(V(p, n), 1.5);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("ABOVECANON1", model, &artifact, &[1, 0])
+            .expect("canonical above current uses native JIT path");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[1.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("canonical below-threshold above evaluation succeeds");
+    assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
+
+    device.update_voltages(&[2.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("canonical above-threshold above evaluation succeeds");
+    assert_eq!(currents[0].to_bits(), 1.0_f64.to_bits());
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"
