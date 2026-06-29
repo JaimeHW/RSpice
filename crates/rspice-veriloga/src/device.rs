@@ -23,6 +23,7 @@
 //! raw-pointer and Send/Sync safety reasoning in the native module and require a
 //! targeted audit before expanding that boundary.
 
+use crate::canonical_ir::CanonicalIrArtifact;
 use crate::codegen::{CompiledModel, Instruction, StampIndex};
 use crate::vm::{Vm, VmContext, VmError};
 use smol_str::SmolStr;
@@ -38,6 +39,13 @@ enum NativeValueEntry {
     StampValue(usize),
     Jacobian { stamp: usize, entry: usize },
     ReactiveJacobian { stamp: usize, entry: usize },
+}
+
+#[cfg(feature = "native")]
+#[derive(Clone, PartialEq, Eq)]
+enum NativeCompileCacheKey {
+    Bytecode,
+    CanonicalMir(SmolStr),
 }
 
 /// A Verilog-A device instance in a circuit
@@ -155,6 +163,32 @@ impl VerilogADevice {
         nodes: &[usize],
     ) -> Result<Self, VmError> {
         let model: std::sync::Arc<CompiledModel> = model.into();
+        Self::try_new_inner(name, model, nodes, None)
+    }
+
+    /// Checked constructor that compiles stamp values from canonical MIR when
+    /// the native backend is available. Unsupported MIR is a construction
+    /// error; the bytecode stamp path is not used as a fallback.
+    #[cfg(feature = "native")]
+    pub fn try_new_with_canonical_ir(
+        name: impl Into<SmolStr>,
+        model: impl Into<std::sync::Arc<CompiledModel>>,
+        artifact: &CanonicalIrArtifact,
+        nodes: &[usize],
+    ) -> Result<Self, VmError> {
+        let model: std::sync::Arc<CompiledModel> = model.into();
+        Self::try_new_inner(name, model, nodes, Some(artifact))
+    }
+
+    fn try_new_inner(
+        name: impl Into<SmolStr>,
+        model: std::sync::Arc<CompiledModel>,
+        nodes: &[usize],
+        canonical_artifact: Option<&CanonicalIrArtifact>,
+    ) -> Result<Self, VmError> {
+        #[cfg(not(feature = "native"))]
+        let _ = canonical_artifact;
+
         let num_terminals = model.num_terminals;
         let supplied_terminals = nodes.len().min(num_terminals);
 
@@ -189,7 +223,10 @@ impl VerilogADevice {
 
         // Attempt native compilation (if feature enabled)
         #[cfg(feature = "native")]
-        let native_model = Self::try_native_compile(&model)?;
+        let native_model = match canonical_artifact {
+            Some(artifact) => Self::try_native_compile_with_canonical_ir(&model, artifact)?,
+            None => Self::try_native_compile(&model)?,
+        };
 
         let num_branch_unknowns = model.branch_sources.len();
         let num_stamp_programs = model.stamp_programs.len();
@@ -305,22 +342,48 @@ impl VerilogADevice {
     fn try_native_compile(
         model: &std::sync::Arc<CompiledModel>,
     ) -> Result<std::sync::Arc<NativeModel>, VmError> {
-        use crate::native::compile_native;
+        Self::try_native_compile_cached(model, NativeCompileCacheKey::Bytecode, |model| {
+            crate::native::compile_native(model)
+        })
+    }
+
+    #[cfg(feature = "native")]
+    fn try_native_compile_with_canonical_ir(
+        model: &std::sync::Arc<CompiledModel>,
+        artifact: &CanonicalIrArtifact,
+    ) -> Result<std::sync::Arc<NativeModel>, VmError> {
+        Self::try_native_compile_cached(
+            model,
+            NativeCompileCacheKey::CanonicalMir(artifact.mir_digest.clone()),
+            |model| crate::native::compile_native_with_canonical_ir(model, artifact),
+        )
+    }
+
+    #[cfg(feature = "native")]
+    fn try_native_compile_cached(
+        model: &std::sync::Arc<CompiledModel>,
+        cache_key: NativeCompileCacheKey,
+        compile: impl FnOnce(&CompiledModel) -> crate::native::JitResult<NativeModel>,
+    ) -> Result<std::sync::Arc<NativeModel>, VmError> {
         use std::sync::{Arc, Mutex, Weak};
 
-        type CacheEntry = (Weak<CompiledModel>, Result<Arc<NativeModel>, String>);
+        type CacheEntry = (
+            Weak<CompiledModel>,
+            NativeCompileCacheKey,
+            Result<Arc<NativeModel>, String>,
+        );
         static NATIVE_CACHE: Mutex<Vec<CacheEntry>> = Mutex::new(Vec::new());
 
         let mut cache = NATIVE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        cache.retain(|(weak, _)| weak.strong_count() > 0);
-        if let Some((_, cached)) = cache
+        cache.retain(|(weak, _, _)| weak.strong_count() > 0);
+        if let Some((_, _, cached)) = cache
             .iter()
-            .find(|(weak, _)| weak.as_ptr() == Arc::as_ptr(model))
+            .find(|(weak, key, _)| weak.as_ptr() == Arc::as_ptr(model) && *key == cache_key)
         {
             return cached.clone().map_err(VmError::NativeJit);
         }
 
-        let compiled = match compile_native(model) {
+        let compiled = match compile(model.as_ref()) {
             Ok(native) => {
                 log::info!("[JIT] Model '{}' compiled to native code", model.name);
                 #[cfg(debug_assertions)]
@@ -342,7 +405,7 @@ impl VerilogADevice {
                 Err(msg)
             }
         };
-        cache.push((Arc::downgrade(model), compiled.clone()));
+        cache.push((Arc::downgrade(model), cache_key, compiled.clone()));
         compiled.map_err(VmError::NativeJit)
     }
 
