@@ -1097,6 +1097,40 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_pow_mul_base_indices(&mut self, index: usize, left: usize, right: usize, exponent: usize) {
+        let left_value = self.v[left];
+        let right_value = self.v[right];
+        let base = left_value * right_value;
+        let exponent_value = self.v[exponent];
+        let output = base.powf(exponent_value);
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let exponent_dn = self.dn[exponent];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        let exponent_db = self.db[exponent];
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { let base_derivative = left_dn[axis] * right_value + left_value * right_dn[axis]; self.dn[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent_value, base_derivative, exponent_dn[axis]); }
+        for axis in 0..BRANCH_COUNT { let base_derivative = left_db[axis] * right_value + left_value * right_db[axis]; self.db[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent_value, base_derivative, exponent_db[axis]); }
+    }
+
+    #[inline]
+    pub(crate) fn store_pow_mul_base_mixed_ai(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize, exponent: usize) {
+        let left_value = left.value;
+        let right_value = self.v[right];
+        let base = left_value * right_value;
+        let exponent_value = self.v[exponent];
+        let output = base.powf(exponent_value);
+        let right_dn = self.dn[right];
+        let exponent_dn = self.dn[exponent];
+        let right_db = self.db[right];
+        let exponent_db = self.db[exponent];
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { let base_derivative = left.dn[axis] * right_value + left_value * right_dn[axis]; self.dn[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent_value, base_derivative, exponent_dn[axis]); }
+        for axis in 0..BRANCH_COUNT { let base_derivative = left.db[axis] * right_value + left_value * right_db[axis]; self.db[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent_value, base_derivative, exponent_db[axis]); }
+    }
+
+    #[inline]
     pub(crate) fn store_pow_offset_rhs(&mut self, index: usize, left: usize, right: usize, exponent_offset: f64) {
         let base = self.v[left];
         let exponent = self.v[right] + exponent_offset;
@@ -16618,6 +16652,40 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = output;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, left.dn[axis], right.dn[axis]); }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, left.db[axis], right.db[axis]); }
+    }
+
+    #[inline]
+    pub(crate) fn store_pow_mul_base_indices(&mut self, index: usize, left: usize, right: usize, exponent: usize) {
+        let left_value = self.v[left];
+        let right_value = self.v[right];
+        let base = left_value * right_value;
+        let exponent_value = self.v[exponent];
+        let output = base.powf(exponent_value);
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let exponent_dn = self.dn[exponent];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        let exponent_db = self.db[exponent];
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { let base_derivative = left_dn[axis] * right_value + left_value * right_dn[axis]; self.dn[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent_value, base_derivative, exponent_dn[axis]); }
+        for axis in 0..BRANCH_COUNT { let base_derivative = left_db[axis] * right_value + left_value * right_db[axis]; self.db[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent_value, base_derivative, exponent_db[axis]); }
+    }
+
+    #[inline]
+    pub(crate) fn store_pow_mul_base_mixed_ai(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize, exponent: usize) {
+        let left_value = left.value;
+        let right_value = self.v[right];
+        let base = left_value * right_value;
+        let exponent_value = self.v[exponent];
+        let output = base.powf(exponent_value);
+        let right_dn = self.dn[right];
+        let exponent_dn = self.dn[exponent];
+        let right_db = self.db[right];
+        let exponent_db = self.db[exponent];
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { let base_derivative = left.dn[axis] * right_value + left_value * right_dn[axis]; self.dn[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent_value, base_derivative, exponent_dn[axis]); }
+        for axis in 0..BRANCH_COUNT { let base_derivative = left.db[axis] * right_value + left_value * right_db[axis]; self.db[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent_value, base_derivative, exponent_db[axis]); }
     }
 
     #[inline]

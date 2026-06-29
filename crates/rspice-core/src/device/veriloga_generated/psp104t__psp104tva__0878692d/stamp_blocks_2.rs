@@ -3277,7 +3277,7 @@ impl Instance {
         }
 
         if ((((s.b[2569] && (!s.b[2570])) && (!s.b[2658])) && (!s.b[2659])) && (!s.b[2661])) {
-            s.store_pow_ad(2540, A::mul(s.ad_value(2543), s.ad_value(597)), s.ad_value(512));
+            s.store_pow_mul_base_indices(2540, 2543, 597, 512);
         }
 
         if (((s.b[2569] && (!s.b[2570])) && (!s.b[2658])) && (!s.b[2659])) {
@@ -3390,7 +3390,7 @@ impl Instance {
         }
 
         if ((((s.b[2569] && (!s.b[2570])) && (!s.b[2658])) && (!s.b[2668])) && (!s.b[2669])) {
-            s.store_pow_ad(2540, A::mul(A::sub(s.ad_value(509), s.ad_value(2538)), s.ad_value(597)), s.ad_value(512));
+            s.store_pow_mul_base_mixed_ai(2540, A::sub(s.ad_value(509), s.ad_value(2538)), 597, 512);
         }
 
         if (((s.b[2569] && (!s.b[2570])) && (!s.b[2658])) && (!s.b[2668])) {
@@ -3520,7 +3520,7 @@ impl Instance {
         }
 
         if ((((s.b[2569] && (!s.b[2570])) && (!s.b[2676])) && (!s.b[2677])) && (!s.b[2679])) {
-            s.store_pow_ad(2540, A::mul(s.ad_value(2543), s.ad_value(598)), s.ad_value(513));
+            s.store_pow_mul_base_indices(2540, 2543, 598, 513);
         }
 
         if (((s.b[2569] && (!s.b[2570])) && (!s.b[2676])) && (!s.b[2677])) {
@@ -3633,7 +3633,7 @@ impl Instance {
         }
 
         if ((((s.b[2569] && (!s.b[2570])) && (!s.b[2676])) && (!s.b[2686])) && (!s.b[2687])) {
-            s.store_pow_ad(2540, A::mul(A::sub(s.ad_value(510), s.ad_value(2538)), s.ad_value(598)), s.ad_value(513));
+            s.store_pow_mul_base_mixed_ai(2540, A::sub(s.ad_value(510), s.ad_value(2538)), 598, 513);
         }
 
         if (((s.b[2569] && (!s.b[2570])) && (!s.b[2676])) && (!s.b[2686])) {
@@ -3757,7 +3757,7 @@ impl Instance {
         }
 
         if ((((s.b[2569] && (!s.b[2570])) && (!s.b[2694])) && (!s.b[2695])) && (!s.b[2697])) {
-            s.store_pow_ad(2540, A::mul(s.ad_value(2543), s.ad_value(599)), s.ad_value(514));
+            s.store_pow_mul_base_indices(2540, 2543, 599, 514);
         }
 
         if (((s.b[2569] && (!s.b[2570])) && (!s.b[2694])) && (!s.b[2695])) {
@@ -3878,7 +3878,7 @@ impl Instance {
         }
 
         if ((((s.b[2569] && (!s.b[2570])) && (!s.b[2694])) && (!s.b[2704])) && (!s.b[2705])) {
-            s.store_pow_ad(2540, A::mul(A::sub(s.ad_value(511), s.ad_value(2538)), s.ad_value(599)), s.ad_value(514));
+            s.store_pow_mul_base_mixed_ai(2540, A::sub(s.ad_value(511), s.ad_value(2538)), 599, 514);
         }
 
         if (((s.b[2569] && (!s.b[2570])) && (!s.b[2694])) && (!s.b[2704])) {
