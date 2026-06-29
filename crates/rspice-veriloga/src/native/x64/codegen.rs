@@ -722,11 +722,38 @@ impl FunctionCompiler {
         match op {
             UnaryMathOp::Floor => self.emit_floor_or_ceil(target, RoundDirection::Floor),
             UnaryMathOp::Ceil => self.emit_floor_or_ceil(target, RoundDirection::Ceil),
+            UnaryMathOp::Limexp => self.emit_limexp(target),
             _ => {
                 self.emit_unary_helper_call(target, unary_math_helper(op));
                 Ok(())
             }
         }
+    }
+
+    fn emit_limexp(&mut self, target: Xmm) -> JitResult<()> {
+        self.emit_literal_compare(target, 40.0);
+        let high_jump = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
+
+        self.emit_literal_compare(target, -40.0);
+        let exp_jump = self.encoder.jcc_rel32_placeholder(ConditionCode::Parity);
+        let low_jump = self.encoder.jcc_rel32_placeholder(ConditionCode::Below);
+
+        self.patch_rel32_to_current(exp_jump)?;
+        self.emit_unary_helper_call(target, rspice_exp);
+        let exp_done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(low_jump)?;
+        self.emit_literal_load(target, (-40.0_f64).exp());
+        let low_done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(high_jump)?;
+        self.emit_literal_binary_op(target, 1.0, BinaryOp::Add);
+        self.emit_literal_binary_op(target, 40.0, BinaryOp::Sub);
+        self.emit_literal_binary_op(target, 40.0_f64.exp(), BinaryOp::Mul);
+
+        self.patch_rel32_to_current(exp_done)?;
+        self.patch_rel32_to_current(low_done)?;
+        Ok(())
     }
 
     fn emit_floor_or_ceil(&mut self, target: Xmm, direction: RoundDirection) -> JitResult<()> {
@@ -2878,7 +2905,7 @@ mod tests {
         Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
         NativeAssignment, Q_ELECTRON, VOLTAGES_OFFSET, X64Encoder, XMM_STACK, Xmm,
         assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
-        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
+        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg, rspice_exp,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -2886,7 +2913,9 @@ mod tests {
         CompareOp, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
     };
     use crate::native::runtime::ExecutableMemory;
-    use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
+    use crate::native::{
+        EvalContext, clear_native_runtime_error, rspice_limexp, take_native_runtime_error,
+    };
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
     use crate::zfilter::ZiFilter;
 
@@ -6598,6 +6627,51 @@ mod tests {
             assert_eq!(
                 f(&ctx, std::ptr::null()).to_bits(),
                 expected.to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_inlines_limexp_clamped_regions() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![Instruction::PushParam(0), Instruction::Limexp],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile inline limexp leaf");
+        assert!(
+            !contains_bytes(
+                &bytes,
+                &(rspice_limexp as *const () as usize as u64).to_le_bytes()
+            ),
+            "inline limexp should not call the limexp helper"
+        );
+        assert!(
+            contains_bytes(
+                &bytes,
+                &(rspice_exp as *const () as usize as u64).to_le_bytes()
+            ),
+            "inline limexp should only call exp for the middle region"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate inline limexp leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        for (name, input) in [
+            ("middle", 0.5),
+            ("upper-threshold", 40.0),
+            ("lower-threshold", -40.0),
+            ("high-linear", 45.0),
+            ("low-clamped", -50.0),
+            ("nan", f64::NAN),
+        ] {
+            let params = [input];
+            let ctx = eval_context(&params, &[], &[], &[]);
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                runtime_limexp(input).to_bits(),
                 "{name}"
             );
         }
