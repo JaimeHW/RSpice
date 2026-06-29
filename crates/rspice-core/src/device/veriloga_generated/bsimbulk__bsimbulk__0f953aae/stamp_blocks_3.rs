@@ -2587,39 +2587,33 @@ impl Instance {
             multiplicity,
         );
         let eq19_e1428_q: f64 = s.v[787];
-        let eq19_reactive_node_derivatives: [f64; 17] = [s.dn[787][0], s.dn[787][1], s.dn[787][2], s.dn[787][3], s.dn[787][4], s.dn[787][5], s.dn[787][6], s.dn[787][7], s.dn[787][8], s.dn[787][9], s.dn[787][10], s.dn[787][11], s.dn[787][12], s.dn[787][13], s.dn[787][14], s.dn[787][15], s.dn[787][16]];
-        let eq19_reactive_branch_derivatives: [f64; 14] = [s.db[787][0], s.db[787][1], s.db[787][2], s.db[787][3], s.db[787][4], s.db[787][5], s.db[787][6], s.db[787][7], s.db[787][8], s.db[787][9], s.db[787][10], s.db[787][11], s.db[787][12], s.db[787][13]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[9]),
             Some(nodes[11]),
             nodes,
-            &eq19_reactive_node_derivatives,
+            &s.dn[787],
             branches,
-            &eq19_reactive_branch_derivatives,
+            &s.db[787],
             multiplicity,
         );
         let eq20_e1430_q: f64 = s.v[785];
-        let eq20_reactive_node_derivatives: [f64; 17] = [s.dn[785][0], s.dn[785][1], s.dn[785][2], s.dn[785][3], s.dn[785][4], s.dn[785][5], s.dn[785][6], s.dn[785][7], s.dn[785][8], s.dn[785][9], s.dn[785][10], s.dn[785][11], s.dn[785][12], s.dn[785][13], s.dn[785][14], s.dn[785][15], s.dn[785][16]];
-        let eq20_reactive_branch_derivatives: [f64; 14] = [s.db[785][0], s.db[785][1], s.db[785][2], s.db[785][3], s.db[785][4], s.db[785][5], s.db[785][6], s.db[785][7], s.db[785][8], s.db[785][9], s.db[785][10], s.db[785][11], s.db[785][12], s.db[785][13]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[7]),
             Some(nodes[11]),
             nodes,
-            &eq20_reactive_node_derivatives,
+            &s.dn[785],
             branches,
-            &eq20_reactive_branch_derivatives,
+            &s.db[785],
             multiplicity,
         );
         let eq21_e1432_q: f64 = s.v[786];
-        let eq21_reactive_node_derivatives: [f64; 17] = [s.dn[786][0], s.dn[786][1], s.dn[786][2], s.dn[786][3], s.dn[786][4], s.dn[786][5], s.dn[786][6], s.dn[786][7], s.dn[786][8], s.dn[786][9], s.dn[786][10], s.dn[786][11], s.dn[786][12], s.dn[786][13], s.dn[786][14], s.dn[786][15], s.dn[786][16]];
-        let eq21_reactive_branch_derivatives: [f64; 14] = [s.db[786][0], s.db[786][1], s.db[786][2], s.db[786][3], s.db[786][4], s.db[786][5], s.db[786][6], s.db[786][7], s.db[786][8], s.db[786][9], s.db[786][10], s.db[786][11], s.db[786][12], s.db[786][13]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[5]),
             Some(nodes[11]),
             nodes,
-            &eq21_reactive_node_derivatives,
+            &s.dn[786],
             branches,
-            &eq21_reactive_branch_derivatives,
+            &s.db[786],
             multiplicity,
         );
         let eq22_e1435: f64 = (-s.v[187]);

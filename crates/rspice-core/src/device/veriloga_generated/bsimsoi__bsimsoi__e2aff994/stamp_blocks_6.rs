@@ -434,75 +434,63 @@ impl Instance {
             multiplicity,
         );
         let eq35_e1938_q: f64 = s.v[1057];
-        let eq35_reactive_node_derivatives: [f64; 14] = [s.dn[1057][0], s.dn[1057][1], s.dn[1057][2], s.dn[1057][3], s.dn[1057][4], s.dn[1057][5], s.dn[1057][6], s.dn[1057][7], s.dn[1057][8], s.dn[1057][9], s.dn[1057][10], s.dn[1057][11], s.dn[1057][12], s.dn[1057][13]];
-        let eq35_reactive_branch_derivatives: [f64; 12] = [s.db[1057][0], s.db[1057][1], s.db[1057][2], s.db[1057][3], s.db[1057][4], s.db[1057][5], s.db[1057][6], s.db[1057][7], s.db[1057][8], s.db[1057][9], s.db[1057][10], s.db[1057][11]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[8]),
             Some(nodes[10]),
             nodes,
-            &eq35_reactive_node_derivatives,
+            &s.dn[1057],
             branches,
-            &eq35_reactive_branch_derivatives,
+            &s.db[1057],
             multiplicity,
         );
         let eq36_e1940_q: f64 = s.v[1058];
-        let eq36_reactive_node_derivatives: [f64; 14] = [s.dn[1058][0], s.dn[1058][1], s.dn[1058][2], s.dn[1058][3], s.dn[1058][4], s.dn[1058][5], s.dn[1058][6], s.dn[1058][7], s.dn[1058][8], s.dn[1058][9], s.dn[1058][10], s.dn[1058][11], s.dn[1058][12], s.dn[1058][13]];
-        let eq36_reactive_branch_derivatives: [f64; 12] = [s.db[1058][0], s.db[1058][1], s.db[1058][2], s.db[1058][3], s.db[1058][4], s.db[1058][5], s.db[1058][6], s.db[1058][7], s.db[1058][8], s.db[1058][9], s.db[1058][10], s.db[1058][11]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[8]),
             Some(nodes[11]),
             nodes,
-            &eq36_reactive_node_derivatives,
+            &s.dn[1058],
             branches,
-            &eq36_reactive_branch_derivatives,
+            &s.db[1058],
             multiplicity,
         );
         let eq37_e1942_q: f64 = s.v[1051];
-        let eq37_reactive_node_derivatives: [f64; 14] = [s.dn[1051][0], s.dn[1051][1], s.dn[1051][2], s.dn[1051][3], s.dn[1051][4], s.dn[1051][5], s.dn[1051][6], s.dn[1051][7], s.dn[1051][8], s.dn[1051][9], s.dn[1051][10], s.dn[1051][11], s.dn[1051][12], s.dn[1051][13]];
-        let eq37_reactive_branch_derivatives: [f64; 12] = [s.db[1051][0], s.db[1051][1], s.db[1051][2], s.db[1051][3], s.db[1051][4], s.db[1051][5], s.db[1051][6], s.db[1051][7], s.db[1051][8], s.db[1051][9], s.db[1051][10], s.db[1051][11]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[7]),
             Some(nodes[10]),
             nodes,
-            &eq37_reactive_node_derivatives,
+            &s.dn[1051],
             branches,
-            &eq37_reactive_branch_derivatives,
+            &s.db[1051],
             multiplicity,
         );
         let eq38_e1944_q: f64 = s.v[1052];
-        let eq38_reactive_node_derivatives: [f64; 14] = [s.dn[1052][0], s.dn[1052][1], s.dn[1052][2], s.dn[1052][3], s.dn[1052][4], s.dn[1052][5], s.dn[1052][6], s.dn[1052][7], s.dn[1052][8], s.dn[1052][9], s.dn[1052][10], s.dn[1052][11], s.dn[1052][12], s.dn[1052][13]];
-        let eq38_reactive_branch_derivatives: [f64; 12] = [s.db[1052][0], s.db[1052][1], s.db[1052][2], s.db[1052][3], s.db[1052][4], s.db[1052][5], s.db[1052][6], s.db[1052][7], s.db[1052][8], s.db[1052][9], s.db[1052][10], s.db[1052][11]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[7]),
             Some(nodes[11]),
             nodes,
-            &eq38_reactive_node_derivatives,
+            &s.dn[1052],
             branches,
-            &eq38_reactive_branch_derivatives,
+            &s.db[1052],
             multiplicity,
         );
         let eq39_e1946_q: f64 = s.v[1054];
-        let eq39_reactive_node_derivatives: [f64; 14] = [s.dn[1054][0], s.dn[1054][1], s.dn[1054][2], s.dn[1054][3], s.dn[1054][4], s.dn[1054][5], s.dn[1054][6], s.dn[1054][7], s.dn[1054][8], s.dn[1054][9], s.dn[1054][10], s.dn[1054][11], s.dn[1054][12], s.dn[1054][13]];
-        let eq39_reactive_branch_derivatives: [f64; 12] = [s.db[1054][0], s.db[1054][1], s.db[1054][2], s.db[1054][3], s.db[1054][4], s.db[1054][5], s.db[1054][6], s.db[1054][7], s.db[1054][8], s.db[1054][9], s.db[1054][10], s.db[1054][11]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[6]),
             Some(nodes[10]),
             nodes,
-            &eq39_reactive_node_derivatives,
+            &s.dn[1054],
             branches,
-            &eq39_reactive_branch_derivatives,
+            &s.db[1054],
             multiplicity,
         );
         let eq40_e1948_q: f64 = s.v[1055];
-        let eq40_reactive_node_derivatives: [f64; 14] = [s.dn[1055][0], s.dn[1055][1], s.dn[1055][2], s.dn[1055][3], s.dn[1055][4], s.dn[1055][5], s.dn[1055][6], s.dn[1055][7], s.dn[1055][8], s.dn[1055][9], s.dn[1055][10], s.dn[1055][11], s.dn[1055][12], s.dn[1055][13]];
-        let eq40_reactive_branch_derivatives: [f64; 12] = [s.db[1055][0], s.db[1055][1], s.db[1055][2], s.db[1055][3], s.db[1055][4], s.db[1055][5], s.db[1055][6], s.db[1055][7], s.db[1055][8], s.db[1055][9], s.db[1055][10], s.db[1055][11]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[6]),
             Some(nodes[11]),
             nodes,
-            &eq40_reactive_node_derivatives,
+            &s.dn[1055],
             branches,
-            &eq40_reactive_branch_derivatives,
+            &s.db[1055],
             multiplicity,
         );
     }
@@ -765,27 +753,23 @@ impl Instance {
             multiplicity,
         );
         let eq46_e1972_q: f64 = s.v[1047];
-        let eq46_reactive_node_derivatives: [f64; 14] = [s.dn[1047][0], s.dn[1047][1], s.dn[1047][2], s.dn[1047][3], s.dn[1047][4], s.dn[1047][5], s.dn[1047][6], s.dn[1047][7], s.dn[1047][8], s.dn[1047][9], s.dn[1047][10], s.dn[1047][11], s.dn[1047][12], s.dn[1047][13]];
-        let eq46_reactive_branch_derivatives: [f64; 12] = [s.db[1047][0], s.db[1047][1], s.db[1047][2], s.db[1047][3], s.db[1047][4], s.db[1047][5], s.db[1047][6], s.db[1047][7], s.db[1047][8], s.db[1047][9], s.db[1047][10], s.db[1047][11]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[6]),
             Some(nodes[3]),
             nodes,
-            &eq46_reactive_node_derivatives,
+            &s.dn[1047],
             branches,
-            &eq46_reactive_branch_derivatives,
+            &s.db[1047],
             multiplicity,
         );
         let eq47_e1974_q: f64 = s.v[1046];
-        let eq47_reactive_node_derivatives: [f64; 14] = [s.dn[1046][0], s.dn[1046][1], s.dn[1046][2], s.dn[1046][3], s.dn[1046][4], s.dn[1046][5], s.dn[1046][6], s.dn[1046][7], s.dn[1046][8], s.dn[1046][9], s.dn[1046][10], s.dn[1046][11], s.dn[1046][12], s.dn[1046][13]];
-        let eq47_reactive_branch_derivatives: [f64; 12] = [s.db[1046][0], s.db[1046][1], s.db[1046][2], s.db[1046][3], s.db[1046][4], s.db[1046][5], s.db[1046][6], s.db[1046][7], s.db[1046][8], s.db[1046][9], s.db[1046][10], s.db[1046][11]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[7]),
             Some(nodes[3]),
             nodes,
-            &eq47_reactive_node_derivatives,
+            &s.dn[1046],
             branches,
-            &eq47_reactive_branch_derivatives,
+            &s.db[1046],
             multiplicity,
         );
         let (eq67_e2103, eq67_e2103_d_n0, eq67_e2103_d_n1, eq67_e2103_d_n2, eq67_e2103_d_n3, eq67_e2103_d_n4, eq67_e2103_d_n5, eq67_e2103_d_n6, eq67_e2103_d_n7, eq67_e2103_d_n8, eq67_e2103_d_n9, eq67_e2103_d_n10, eq67_e2103_d_n11, eq67_e2103_d_n12, eq67_e2103_d_n13, eq67_e2103_d_b0, eq67_e2103_d_b1, eq67_e2103_d_b2, eq67_e2103_d_b3, eq67_e2103_d_b4, eq67_e2103_d_b5, eq67_e2103_d_b6, eq67_e2103_d_b7, eq67_e2103_d_b8, eq67_e2103_d_b9, eq67_e2103_d_b10, eq67_e2103_d_b11, eq67_e2103_q, eq67_e2103_q_d_n0, eq67_e2103_q_d_n1, eq67_e2103_q_d_n2, eq67_e2103_q_d_n3, eq67_e2103_q_d_n4, eq67_e2103_q_d_n5, eq67_e2103_q_d_n6, eq67_e2103_q_d_n7, eq67_e2103_q_d_n8, eq67_e2103_q_d_n9, eq67_e2103_q_d_n10, eq67_e2103_q_d_n11, eq67_e2103_q_d_n12, eq67_e2103_q_d_n13, eq67_e2103_q_d_b0, eq67_e2103_q_d_b1, eq67_e2103_q_d_b2, eq67_e2103_q_d_b3, eq67_e2103_q_d_b4, eq67_e2103_q_d_b5, eq67_e2103_q_d_b6, eq67_e2103_q_d_b7, eq67_e2103_q_d_b8, eq67_e2103_q_d_b9, eq67_e2103_q_d_b10, eq67_e2103_q_d_b11,) = {

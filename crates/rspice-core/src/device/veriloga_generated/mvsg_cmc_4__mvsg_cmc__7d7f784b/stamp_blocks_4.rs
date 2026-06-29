@@ -2674,14 +2674,13 @@ impl Instance {
         let eq43_e853_d_n16: f64 = (s.dn[212][16] + (-p.p355));
         let eq43_e853_q: f64 = (eq43_e848_q + eq43_e852_q);
         let eq43_reactive_node_derivatives: [f64; 30] = [s.dn[212][0], s.dn[212][1], s.dn[212][2], eq43_e853_d_n3, s.dn[212][4], s.dn[212][5], s.dn[212][6], s.dn[212][7], s.dn[212][8], s.dn[212][9], s.dn[212][10], s.dn[212][11], s.dn[212][12], s.dn[212][13], s.dn[212][14], s.dn[212][15], eq43_e853_d_n16, s.dn[212][17], s.dn[212][18], s.dn[212][19], s.dn[212][20], s.dn[212][21], s.dn[212][22], s.dn[212][23], s.dn[212][24], s.dn[212][25], s.dn[212][26], s.dn[212][27], s.dn[212][28], s.dn[212][29]];
-        let eq43_reactive_branch_derivatives: [f64; 36] = [s.db[212][0], s.db[212][1], s.db[212][2], s.db[212][3], s.db[212][4], s.db[212][5], s.db[212][6], s.db[212][7], s.db[212][8], s.db[212][9], s.db[212][10], s.db[212][11], s.db[212][12], s.db[212][13], s.db[212][14], s.db[212][15], s.db[212][16], s.db[212][17], s.db[212][18], s.db[212][19], s.db[212][20], s.db[212][21], s.db[212][22], s.db[212][23], s.db[212][24], s.db[212][25], s.db[212][26], s.db[212][27], s.db[212][28], s.db[212][29], s.db[212][30], s.db[212][31], s.db[212][32], s.db[212][33], s.db[212][34], s.db[212][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             Some(nodes[16]),
             nodes,
             &eq43_reactive_node_derivatives,
             branches,
-            &eq43_reactive_branch_derivatives,
+            &s.db[212],
             multiplicity,
         );
         let (eq46_e876, eq46_e876_d_n0, eq46_e876_d_n1, eq46_e876_d_n2, eq46_e876_d_n3, eq46_e876_d_n4, eq46_e876_d_n5, eq46_e876_d_n6, eq46_e876_d_n7, eq46_e876_d_n8, eq46_e876_d_n9, eq46_e876_d_n10, eq46_e876_d_n11, eq46_e876_d_n12, eq46_e876_d_n13, eq46_e876_d_n14, eq46_e876_d_n15, eq46_e876_d_n16, eq46_e876_d_n17, eq46_e876_d_n18, eq46_e876_d_n19, eq46_e876_d_n20, eq46_e876_d_n21, eq46_e876_d_n22, eq46_e876_d_n23, eq46_e876_d_n24, eq46_e876_d_n25, eq46_e876_d_n26, eq46_e876_d_n27, eq46_e876_d_n28, eq46_e876_d_n29, eq46_e876_d_b0, eq46_e876_d_b1, eq46_e876_d_b2, eq46_e876_d_b3, eq46_e876_d_b4, eq46_e876_d_b5, eq46_e876_d_b6, eq46_e876_d_b7, eq46_e876_d_b8, eq46_e876_d_b9, eq46_e876_d_b10, eq46_e876_d_b11, eq46_e876_d_b12, eq46_e876_d_b13, eq46_e876_d_b14, eq46_e876_d_b15, eq46_e876_d_b16, eq46_e876_d_b17, eq46_e876_d_b18, eq46_e876_d_b19, eq46_e876_d_b20, eq46_e876_d_b21, eq46_e876_d_b22, eq46_e876_d_b23, eq46_e876_d_b24, eq46_e876_d_b25, eq46_e876_d_b26, eq46_e876_d_b27, eq46_e876_d_b28, eq46_e876_d_b29, eq46_e876_d_b30, eq46_e876_d_b31, eq46_e876_d_b32, eq46_e876_d_b33, eq46_e876_d_b34, eq46_e876_d_b35, eq46_e876_q,) = {
@@ -2861,14 +2860,13 @@ impl Instance {
         let eq56_e960_d_n15: f64 = (s.dn[206][15] + (-p.p355));
         let eq56_e960_q: f64 = (eq56_e955_q + eq56_e959_q);
         let eq56_reactive_node_derivatives: [f64; 30] = [s.dn[206][0], s.dn[206][1], s.dn[206][2], eq56_e960_d_n3, s.dn[206][4], s.dn[206][5], s.dn[206][6], s.dn[206][7], s.dn[206][8], s.dn[206][9], s.dn[206][10], s.dn[206][11], s.dn[206][12], s.dn[206][13], s.dn[206][14], eq56_e960_d_n15, s.dn[206][16], s.dn[206][17], s.dn[206][18], s.dn[206][19], s.dn[206][20], s.dn[206][21], s.dn[206][22], s.dn[206][23], s.dn[206][24], s.dn[206][25], s.dn[206][26], s.dn[206][27], s.dn[206][28], s.dn[206][29]];
-        let eq56_reactive_branch_derivatives: [f64; 36] = [s.db[206][0], s.db[206][1], s.db[206][2], s.db[206][3], s.db[206][4], s.db[206][5], s.db[206][6], s.db[206][7], s.db[206][8], s.db[206][9], s.db[206][10], s.db[206][11], s.db[206][12], s.db[206][13], s.db[206][14], s.db[206][15], s.db[206][16], s.db[206][17], s.db[206][18], s.db[206][19], s.db[206][20], s.db[206][21], s.db[206][22], s.db[206][23], s.db[206][24], s.db[206][25], s.db[206][26], s.db[206][27], s.db[206][28], s.db[206][29], s.db[206][30], s.db[206][31], s.db[206][32], s.db[206][33], s.db[206][34], s.db[206][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             Some(nodes[15]),
             nodes,
             &eq56_reactive_node_derivatives,
             branches,
-            &eq56_reactive_branch_derivatives,
+            &s.db[206],
             multiplicity,
         );
         let (eq59_e983, eq59_e983_d_n0, eq59_e983_d_n1, eq59_e983_d_n2, eq59_e983_d_n3, eq59_e983_d_n4, eq59_e983_d_n5, eq59_e983_d_n6, eq59_e983_d_n7, eq59_e983_d_n8, eq59_e983_d_n9, eq59_e983_d_n10, eq59_e983_d_n11, eq59_e983_d_n12, eq59_e983_d_n13, eq59_e983_d_n14, eq59_e983_d_n15, eq59_e983_d_n16, eq59_e983_d_n17, eq59_e983_d_n18, eq59_e983_d_n19, eq59_e983_d_n20, eq59_e983_d_n21, eq59_e983_d_n22, eq59_e983_d_n23, eq59_e983_d_n24, eq59_e983_d_n25, eq59_e983_d_n26, eq59_e983_d_n27, eq59_e983_d_n28, eq59_e983_d_n29, eq59_e983_d_b0, eq59_e983_d_b1, eq59_e983_d_b2, eq59_e983_d_b3, eq59_e983_d_b4, eq59_e983_d_b5, eq59_e983_d_b6, eq59_e983_d_b7, eq59_e983_d_b8, eq59_e983_d_b9, eq59_e983_d_b10, eq59_e983_d_b11, eq59_e983_d_b12, eq59_e983_d_b13, eq59_e983_d_b14, eq59_e983_d_b15, eq59_e983_d_b16, eq59_e983_d_b17, eq59_e983_d_b18, eq59_e983_d_b19, eq59_e983_d_b20, eq59_e983_d_b21, eq59_e983_d_b22, eq59_e983_d_b23, eq59_e983_d_b24, eq59_e983_d_b25, eq59_e983_d_b26, eq59_e983_d_b27, eq59_e983_d_b28, eq59_e983_d_b29, eq59_e983_d_b30, eq59_e983_d_b31, eq59_e983_d_b32, eq59_e983_d_b33, eq59_e983_d_b34, eq59_e983_d_b35, eq59_e983_q,) = {
@@ -3078,14 +3076,13 @@ impl Instance {
         let eq69_e1067_d_n14: f64 = (s.dn[200][14] + (-p.p355));
         let eq69_e1067_q: f64 = (eq69_e1062_q + eq69_e1066_q);
         let eq69_reactive_node_derivatives: [f64; 30] = [s.dn[200][0], s.dn[200][1], s.dn[200][2], eq69_e1067_d_n3, s.dn[200][4], s.dn[200][5], s.dn[200][6], s.dn[200][7], s.dn[200][8], s.dn[200][9], s.dn[200][10], s.dn[200][11], s.dn[200][12], s.dn[200][13], eq69_e1067_d_n14, s.dn[200][15], s.dn[200][16], s.dn[200][17], s.dn[200][18], s.dn[200][19], s.dn[200][20], s.dn[200][21], s.dn[200][22], s.dn[200][23], s.dn[200][24], s.dn[200][25], s.dn[200][26], s.dn[200][27], s.dn[200][28], s.dn[200][29]];
-        let eq69_reactive_branch_derivatives: [f64; 36] = [s.db[200][0], s.db[200][1], s.db[200][2], s.db[200][3], s.db[200][4], s.db[200][5], s.db[200][6], s.db[200][7], s.db[200][8], s.db[200][9], s.db[200][10], s.db[200][11], s.db[200][12], s.db[200][13], s.db[200][14], s.db[200][15], s.db[200][16], s.db[200][17], s.db[200][18], s.db[200][19], s.db[200][20], s.db[200][21], s.db[200][22], s.db[200][23], s.db[200][24], s.db[200][25], s.db[200][26], s.db[200][27], s.db[200][28], s.db[200][29], s.db[200][30], s.db[200][31], s.db[200][32], s.db[200][33], s.db[200][34], s.db[200][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             Some(nodes[14]),
             nodes,
             &eq69_reactive_node_derivatives,
             branches,
-            &eq69_reactive_branch_derivatives,
+            &s.db[200],
             multiplicity,
         );
         let (eq72_e1090, eq72_e1090_d_n0, eq72_e1090_d_n1, eq72_e1090_d_n2, eq72_e1090_d_n3, eq72_e1090_d_n4, eq72_e1090_d_n5, eq72_e1090_d_n6, eq72_e1090_d_n7, eq72_e1090_d_n8, eq72_e1090_d_n9, eq72_e1090_d_n10, eq72_e1090_d_n11, eq72_e1090_d_n12, eq72_e1090_d_n13, eq72_e1090_d_n14, eq72_e1090_d_n15, eq72_e1090_d_n16, eq72_e1090_d_n17, eq72_e1090_d_n18, eq72_e1090_d_n19, eq72_e1090_d_n20, eq72_e1090_d_n21, eq72_e1090_d_n22, eq72_e1090_d_n23, eq72_e1090_d_n24, eq72_e1090_d_n25, eq72_e1090_d_n26, eq72_e1090_d_n27, eq72_e1090_d_n28, eq72_e1090_d_n29, eq72_e1090_d_b0, eq72_e1090_d_b1, eq72_e1090_d_b2, eq72_e1090_d_b3, eq72_e1090_d_b4, eq72_e1090_d_b5, eq72_e1090_d_b6, eq72_e1090_d_b7, eq72_e1090_d_b8, eq72_e1090_d_b9, eq72_e1090_d_b10, eq72_e1090_d_b11, eq72_e1090_d_b12, eq72_e1090_d_b13, eq72_e1090_d_b14, eq72_e1090_d_b15, eq72_e1090_d_b16, eq72_e1090_d_b17, eq72_e1090_d_b18, eq72_e1090_d_b19, eq72_e1090_d_b20, eq72_e1090_d_b21, eq72_e1090_d_b22, eq72_e1090_d_b23, eq72_e1090_d_b24, eq72_e1090_d_b25, eq72_e1090_d_b26, eq72_e1090_d_b27, eq72_e1090_d_b28, eq72_e1090_d_b29, eq72_e1090_d_b30, eq72_e1090_d_b31, eq72_e1090_d_b32, eq72_e1090_d_b33, eq72_e1090_d_b34, eq72_e1090_d_b35, eq72_e1090_q,) = {
@@ -3265,14 +3262,13 @@ impl Instance {
         let eq82_e1174_d_n5: f64 = (s.dn[194][5] + (-p.p355));
         let eq82_e1174_q: f64 = (eq82_e1169_q + eq82_e1173_q);
         let eq82_reactive_node_derivatives: [f64; 30] = [s.dn[194][0], s.dn[194][1], s.dn[194][2], eq82_e1174_d_n3, s.dn[194][4], eq82_e1174_d_n5, s.dn[194][6], s.dn[194][7], s.dn[194][8], s.dn[194][9], s.dn[194][10], s.dn[194][11], s.dn[194][12], s.dn[194][13], s.dn[194][14], s.dn[194][15], s.dn[194][16], s.dn[194][17], s.dn[194][18], s.dn[194][19], s.dn[194][20], s.dn[194][21], s.dn[194][22], s.dn[194][23], s.dn[194][24], s.dn[194][25], s.dn[194][26], s.dn[194][27], s.dn[194][28], s.dn[194][29]];
-        let eq82_reactive_branch_derivatives: [f64; 36] = [s.db[194][0], s.db[194][1], s.db[194][2], s.db[194][3], s.db[194][4], s.db[194][5], s.db[194][6], s.db[194][7], s.db[194][8], s.db[194][9], s.db[194][10], s.db[194][11], s.db[194][12], s.db[194][13], s.db[194][14], s.db[194][15], s.db[194][16], s.db[194][17], s.db[194][18], s.db[194][19], s.db[194][20], s.db[194][21], s.db[194][22], s.db[194][23], s.db[194][24], s.db[194][25], s.db[194][26], s.db[194][27], s.db[194][28], s.db[194][29], s.db[194][30], s.db[194][31], s.db[194][32], s.db[194][33], s.db[194][34], s.db[194][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             Some(nodes[5]),
             nodes,
             &eq82_reactive_node_derivatives,
             branches,
-            &eq82_reactive_branch_derivatives,
+            &s.db[194],
             multiplicity,
         );
         let (eq85_e1197, eq85_e1197_d_n0, eq85_e1197_d_n1, eq85_e1197_d_n2, eq85_e1197_d_n3, eq85_e1197_d_n4, eq85_e1197_d_n5, eq85_e1197_d_n6, eq85_e1197_d_n7, eq85_e1197_d_n8, eq85_e1197_d_n9, eq85_e1197_d_n10, eq85_e1197_d_n11, eq85_e1197_d_n12, eq85_e1197_d_n13, eq85_e1197_d_n14, eq85_e1197_d_n15, eq85_e1197_d_n16, eq85_e1197_d_n17, eq85_e1197_d_n18, eq85_e1197_d_n19, eq85_e1197_d_n20, eq85_e1197_d_n21, eq85_e1197_d_n22, eq85_e1197_d_n23, eq85_e1197_d_n24, eq85_e1197_d_n25, eq85_e1197_d_n26, eq85_e1197_d_n27, eq85_e1197_d_n28, eq85_e1197_d_n29, eq85_e1197_d_b0, eq85_e1197_d_b1, eq85_e1197_d_b2, eq85_e1197_d_b3, eq85_e1197_d_b4, eq85_e1197_d_b5, eq85_e1197_d_b6, eq85_e1197_d_b7, eq85_e1197_d_b8, eq85_e1197_d_b9, eq85_e1197_d_b10, eq85_e1197_d_b11, eq85_e1197_d_b12, eq85_e1197_d_b13, eq85_e1197_d_b14, eq85_e1197_d_b15, eq85_e1197_d_b16, eq85_e1197_d_b17, eq85_e1197_d_b18, eq85_e1197_d_b19, eq85_e1197_d_b20, eq85_e1197_d_b21, eq85_e1197_d_b22, eq85_e1197_d_b23, eq85_e1197_d_b24, eq85_e1197_d_b25, eq85_e1197_d_b26, eq85_e1197_d_b27, eq85_e1197_d_b28, eq85_e1197_d_b29, eq85_e1197_d_b30, eq85_e1197_d_b31, eq85_e1197_d_b32, eq85_e1197_d_b33, eq85_e1197_d_b34, eq85_e1197_d_b35, eq85_e1197_q,) = {
@@ -3452,14 +3448,13 @@ impl Instance {
         let eq95_e1281_d_n10: f64 = (s.dn[170][10] + (-p.p355));
         let eq95_e1281_q: f64 = (eq95_e1276_q + eq95_e1280_q);
         let eq95_reactive_node_derivatives: [f64; 30] = [s.dn[170][0], s.dn[170][1], s.dn[170][2], eq95_e1281_d_n3, s.dn[170][4], s.dn[170][5], s.dn[170][6], s.dn[170][7], s.dn[170][8], s.dn[170][9], eq95_e1281_d_n10, s.dn[170][11], s.dn[170][12], s.dn[170][13], s.dn[170][14], s.dn[170][15], s.dn[170][16], s.dn[170][17], s.dn[170][18], s.dn[170][19], s.dn[170][20], s.dn[170][21], s.dn[170][22], s.dn[170][23], s.dn[170][24], s.dn[170][25], s.dn[170][26], s.dn[170][27], s.dn[170][28], s.dn[170][29]];
-        let eq95_reactive_branch_derivatives: [f64; 36] = [s.db[170][0], s.db[170][1], s.db[170][2], s.db[170][3], s.db[170][4], s.db[170][5], s.db[170][6], s.db[170][7], s.db[170][8], s.db[170][9], s.db[170][10], s.db[170][11], s.db[170][12], s.db[170][13], s.db[170][14], s.db[170][15], s.db[170][16], s.db[170][17], s.db[170][18], s.db[170][19], s.db[170][20], s.db[170][21], s.db[170][22], s.db[170][23], s.db[170][24], s.db[170][25], s.db[170][26], s.db[170][27], s.db[170][28], s.db[170][29], s.db[170][30], s.db[170][31], s.db[170][32], s.db[170][33], s.db[170][34], s.db[170][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             Some(nodes[10]),
             nodes,
             &eq95_reactive_node_derivatives,
             branches,
-            &eq95_reactive_branch_derivatives,
+            &s.db[170],
             multiplicity,
         );
         let (eq98_e1304, eq98_e1304_d_n0, eq98_e1304_d_n1, eq98_e1304_d_n2, eq98_e1304_d_n3, eq98_e1304_d_n4, eq98_e1304_d_n5, eq98_e1304_d_n6, eq98_e1304_d_n7, eq98_e1304_d_n8, eq98_e1304_d_n9, eq98_e1304_d_n10, eq98_e1304_d_n11, eq98_e1304_d_n12, eq98_e1304_d_n13, eq98_e1304_d_n14, eq98_e1304_d_n15, eq98_e1304_d_n16, eq98_e1304_d_n17, eq98_e1304_d_n18, eq98_e1304_d_n19, eq98_e1304_d_n20, eq98_e1304_d_n21, eq98_e1304_d_n22, eq98_e1304_d_n23, eq98_e1304_d_n24, eq98_e1304_d_n25, eq98_e1304_d_n26, eq98_e1304_d_n27, eq98_e1304_d_n28, eq98_e1304_d_n29, eq98_e1304_d_b0, eq98_e1304_d_b1, eq98_e1304_d_b2, eq98_e1304_d_b3, eq98_e1304_d_b4, eq98_e1304_d_b5, eq98_e1304_d_b6, eq98_e1304_d_b7, eq98_e1304_d_b8, eq98_e1304_d_b9, eq98_e1304_d_b10, eq98_e1304_d_b11, eq98_e1304_d_b12, eq98_e1304_d_b13, eq98_e1304_d_b14, eq98_e1304_d_b15, eq98_e1304_d_b16, eq98_e1304_d_b17, eq98_e1304_d_b18, eq98_e1304_d_b19, eq98_e1304_d_b20, eq98_e1304_d_b21, eq98_e1304_d_b22, eq98_e1304_d_b23, eq98_e1304_d_b24, eq98_e1304_d_b25, eq98_e1304_d_b26, eq98_e1304_d_b27, eq98_e1304_d_b28, eq98_e1304_d_b29, eq98_e1304_d_b30, eq98_e1304_d_b31, eq98_e1304_d_b32, eq98_e1304_d_b33, eq98_e1304_d_b34, eq98_e1304_d_b35, eq98_e1304_q,) = {
@@ -3669,14 +3664,13 @@ impl Instance {
         let eq108_e1388_d_n11: f64 = (s.dn[176][11] + (-p.p355));
         let eq108_e1388_q: f64 = (eq108_e1383_q + eq108_e1387_q);
         let eq108_reactive_node_derivatives: [f64; 30] = [s.dn[176][0], s.dn[176][1], s.dn[176][2], eq108_e1388_d_n3, s.dn[176][4], s.dn[176][5], s.dn[176][6], s.dn[176][7], s.dn[176][8], s.dn[176][9], s.dn[176][10], eq108_e1388_d_n11, s.dn[176][12], s.dn[176][13], s.dn[176][14], s.dn[176][15], s.dn[176][16], s.dn[176][17], s.dn[176][18], s.dn[176][19], s.dn[176][20], s.dn[176][21], s.dn[176][22], s.dn[176][23], s.dn[176][24], s.dn[176][25], s.dn[176][26], s.dn[176][27], s.dn[176][28], s.dn[176][29]];
-        let eq108_reactive_branch_derivatives: [f64; 36] = [s.db[176][0], s.db[176][1], s.db[176][2], s.db[176][3], s.db[176][4], s.db[176][5], s.db[176][6], s.db[176][7], s.db[176][8], s.db[176][9], s.db[176][10], s.db[176][11], s.db[176][12], s.db[176][13], s.db[176][14], s.db[176][15], s.db[176][16], s.db[176][17], s.db[176][18], s.db[176][19], s.db[176][20], s.db[176][21], s.db[176][22], s.db[176][23], s.db[176][24], s.db[176][25], s.db[176][26], s.db[176][27], s.db[176][28], s.db[176][29], s.db[176][30], s.db[176][31], s.db[176][32], s.db[176][33], s.db[176][34], s.db[176][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             Some(nodes[11]),
             nodes,
             &eq108_reactive_node_derivatives,
             branches,
-            &eq108_reactive_branch_derivatives,
+            &s.db[176],
             multiplicity,
         );
         let (eq111_e1411, eq111_e1411_d_n0, eq111_e1411_d_n1, eq111_e1411_d_n2, eq111_e1411_d_n3, eq111_e1411_d_n4, eq111_e1411_d_n5, eq111_e1411_d_n6, eq111_e1411_d_n7, eq111_e1411_d_n8, eq111_e1411_d_n9, eq111_e1411_d_n10, eq111_e1411_d_n11, eq111_e1411_d_n12, eq111_e1411_d_n13, eq111_e1411_d_n14, eq111_e1411_d_n15, eq111_e1411_d_n16, eq111_e1411_d_n17, eq111_e1411_d_n18, eq111_e1411_d_n19, eq111_e1411_d_n20, eq111_e1411_d_n21, eq111_e1411_d_n22, eq111_e1411_d_n23, eq111_e1411_d_n24, eq111_e1411_d_n25, eq111_e1411_d_n26, eq111_e1411_d_n27, eq111_e1411_d_n28, eq111_e1411_d_n29, eq111_e1411_d_b0, eq111_e1411_d_b1, eq111_e1411_d_b2, eq111_e1411_d_b3, eq111_e1411_d_b4, eq111_e1411_d_b5, eq111_e1411_d_b6, eq111_e1411_d_b7, eq111_e1411_d_b8, eq111_e1411_d_b9, eq111_e1411_d_b10, eq111_e1411_d_b11, eq111_e1411_d_b12, eq111_e1411_d_b13, eq111_e1411_d_b14, eq111_e1411_d_b15, eq111_e1411_d_b16, eq111_e1411_d_b17, eq111_e1411_d_b18, eq111_e1411_d_b19, eq111_e1411_d_b20, eq111_e1411_d_b21, eq111_e1411_d_b22, eq111_e1411_d_b23, eq111_e1411_d_b24, eq111_e1411_d_b25, eq111_e1411_d_b26, eq111_e1411_d_b27, eq111_e1411_d_b28, eq111_e1411_d_b29, eq111_e1411_d_b30, eq111_e1411_d_b31, eq111_e1411_d_b32, eq111_e1411_d_b33, eq111_e1411_d_b34, eq111_e1411_d_b35, eq111_e1411_q,) = {
@@ -3856,14 +3850,13 @@ impl Instance {
         let eq121_e1495_d_n12: f64 = (s.dn[182][12] + (-p.p355));
         let eq121_e1495_q: f64 = (eq121_e1490_q + eq121_e1494_q);
         let eq121_reactive_node_derivatives: [f64; 30] = [s.dn[182][0], s.dn[182][1], s.dn[182][2], eq121_e1495_d_n3, s.dn[182][4], s.dn[182][5], s.dn[182][6], s.dn[182][7], s.dn[182][8], s.dn[182][9], s.dn[182][10], s.dn[182][11], eq121_e1495_d_n12, s.dn[182][13], s.dn[182][14], s.dn[182][15], s.dn[182][16], s.dn[182][17], s.dn[182][18], s.dn[182][19], s.dn[182][20], s.dn[182][21], s.dn[182][22], s.dn[182][23], s.dn[182][24], s.dn[182][25], s.dn[182][26], s.dn[182][27], s.dn[182][28], s.dn[182][29]];
-        let eq121_reactive_branch_derivatives: [f64; 36] = [s.db[182][0], s.db[182][1], s.db[182][2], s.db[182][3], s.db[182][4], s.db[182][5], s.db[182][6], s.db[182][7], s.db[182][8], s.db[182][9], s.db[182][10], s.db[182][11], s.db[182][12], s.db[182][13], s.db[182][14], s.db[182][15], s.db[182][16], s.db[182][17], s.db[182][18], s.db[182][19], s.db[182][20], s.db[182][21], s.db[182][22], s.db[182][23], s.db[182][24], s.db[182][25], s.db[182][26], s.db[182][27], s.db[182][28], s.db[182][29], s.db[182][30], s.db[182][31], s.db[182][32], s.db[182][33], s.db[182][34], s.db[182][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             Some(nodes[12]),
             nodes,
             &eq121_reactive_node_derivatives,
             branches,
-            &eq121_reactive_branch_derivatives,
+            &s.db[182],
             multiplicity,
         );
         let (eq124_e1518, eq124_e1518_d_n0, eq124_e1518_d_n1, eq124_e1518_d_n2, eq124_e1518_d_n3, eq124_e1518_d_n4, eq124_e1518_d_n5, eq124_e1518_d_n6, eq124_e1518_d_n7, eq124_e1518_d_n8, eq124_e1518_d_n9, eq124_e1518_d_n10, eq124_e1518_d_n11, eq124_e1518_d_n12, eq124_e1518_d_n13, eq124_e1518_d_n14, eq124_e1518_d_n15, eq124_e1518_d_n16, eq124_e1518_d_n17, eq124_e1518_d_n18, eq124_e1518_d_n19, eq124_e1518_d_n20, eq124_e1518_d_n21, eq124_e1518_d_n22, eq124_e1518_d_n23, eq124_e1518_d_n24, eq124_e1518_d_n25, eq124_e1518_d_n26, eq124_e1518_d_n27, eq124_e1518_d_n28, eq124_e1518_d_n29, eq124_e1518_d_b0, eq124_e1518_d_b1, eq124_e1518_d_b2, eq124_e1518_d_b3, eq124_e1518_d_b4, eq124_e1518_d_b5, eq124_e1518_d_b6, eq124_e1518_d_b7, eq124_e1518_d_b8, eq124_e1518_d_b9, eq124_e1518_d_b10, eq124_e1518_d_b11, eq124_e1518_d_b12, eq124_e1518_d_b13, eq124_e1518_d_b14, eq124_e1518_d_b15, eq124_e1518_d_b16, eq124_e1518_d_b17, eq124_e1518_d_b18, eq124_e1518_d_b19, eq124_e1518_d_b20, eq124_e1518_d_b21, eq124_e1518_d_b22, eq124_e1518_d_b23, eq124_e1518_d_b24, eq124_e1518_d_b25, eq124_e1518_d_b26, eq124_e1518_d_b27, eq124_e1518_d_b28, eq124_e1518_d_b29, eq124_e1518_d_b30, eq124_e1518_d_b31, eq124_e1518_d_b32, eq124_e1518_d_b33, eq124_e1518_d_b34, eq124_e1518_d_b35, eq124_e1518_q,) = {
@@ -4062,14 +4055,13 @@ impl Instance {
         let eq134_e1602_d_n13: f64 = (s.dn[188][13] + (-p.p355));
         let eq134_e1602_q: f64 = (eq134_e1597_q + eq134_e1601_q);
         let eq134_reactive_node_derivatives: [f64; 30] = [s.dn[188][0], s.dn[188][1], s.dn[188][2], eq134_e1602_d_n3, s.dn[188][4], s.dn[188][5], s.dn[188][6], s.dn[188][7], s.dn[188][8], s.dn[188][9], s.dn[188][10], s.dn[188][11], s.dn[188][12], eq134_e1602_d_n13, s.dn[188][14], s.dn[188][15], s.dn[188][16], s.dn[188][17], s.dn[188][18], s.dn[188][19], s.dn[188][20], s.dn[188][21], s.dn[188][22], s.dn[188][23], s.dn[188][24], s.dn[188][25], s.dn[188][26], s.dn[188][27], s.dn[188][28], s.dn[188][29]];
-        let eq134_reactive_branch_derivatives: [f64; 36] = [s.db[188][0], s.db[188][1], s.db[188][2], s.db[188][3], s.db[188][4], s.db[188][5], s.db[188][6], s.db[188][7], s.db[188][8], s.db[188][9], s.db[188][10], s.db[188][11], s.db[188][12], s.db[188][13], s.db[188][14], s.db[188][15], s.db[188][16], s.db[188][17], s.db[188][18], s.db[188][19], s.db[188][20], s.db[188][21], s.db[188][22], s.db[188][23], s.db[188][24], s.db[188][25], s.db[188][26], s.db[188][27], s.db[188][28], s.db[188][29], s.db[188][30], s.db[188][31], s.db[188][32], s.db[188][33], s.db[188][34], s.db[188][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             Some(nodes[13]),
             nodes,
             &eq134_reactive_node_derivatives,
             branches,
-            &eq134_reactive_branch_derivatives,
+            &s.db[188],
             multiplicity,
         );
         let (eq142_e1656, eq142_e1656_d_n0, eq142_e1656_d_n1, eq142_e1656_d_n2, eq142_e1656_d_n3, eq142_e1656_d_n4, eq142_e1656_d_n5, eq142_e1656_d_n6, eq142_e1656_d_n7, eq142_e1656_d_n8, eq142_e1656_d_n9, eq142_e1656_d_n10, eq142_e1656_d_n11, eq142_e1656_d_n12, eq142_e1656_d_n13, eq142_e1656_d_n14, eq142_e1656_d_n15, eq142_e1656_d_n16, eq142_e1656_d_n17, eq142_e1656_d_n18, eq142_e1656_d_n19, eq142_e1656_d_n20, eq142_e1656_d_n21, eq142_e1656_d_n22, eq142_e1656_d_n23, eq142_e1656_d_n24, eq142_e1656_d_n25, eq142_e1656_d_n26, eq142_e1656_d_n27, eq142_e1656_d_n28, eq142_e1656_d_n29, eq142_e1656_d_b0, eq142_e1656_d_b1, eq142_e1656_d_b2, eq142_e1656_d_b3, eq142_e1656_d_b4, eq142_e1656_d_b5, eq142_e1656_d_b6, eq142_e1656_d_b7, eq142_e1656_d_b8, eq142_e1656_d_b9, eq142_e1656_d_b10, eq142_e1656_d_b11, eq142_e1656_d_b12, eq142_e1656_d_b13, eq142_e1656_d_b14, eq142_e1656_d_b15, eq142_e1656_d_b16, eq142_e1656_d_b17, eq142_e1656_d_b18, eq142_e1656_d_b19, eq142_e1656_d_b20, eq142_e1656_d_b21, eq142_e1656_d_b22, eq142_e1656_d_b23, eq142_e1656_d_b24, eq142_e1656_d_b25, eq142_e1656_d_b26, eq142_e1656_d_b27, eq142_e1656_d_b28, eq142_e1656_d_b29, eq142_e1656_d_b30, eq142_e1656_d_b31, eq142_e1656_d_b32, eq142_e1656_d_b33, eq142_e1656_d_b34, eq142_e1656_d_b35, eq142_e1656_q, eq142_e1656_q_d_n28,) = {
@@ -4120,14 +4112,13 @@ impl Instance {
         let eq145_e1686_d_n9: f64 = (s.dn[117][9] + (-p.p355));
         let eq145_e1686_q: f64 = (eq145_e1681_q + eq145_e1685_q);
         let eq145_reactive_node_derivatives: [f64; 30] = [s.dn[117][0], s.dn[117][1], s.dn[117][2], s.dn[117][3], s.dn[117][4], s.dn[117][5], s.dn[117][6], s.dn[117][7], eq145_e1686_d_n8, eq145_e1686_d_n9, s.dn[117][10], s.dn[117][11], s.dn[117][12], s.dn[117][13], s.dn[117][14], s.dn[117][15], s.dn[117][16], s.dn[117][17], s.dn[117][18], s.dn[117][19], s.dn[117][20], s.dn[117][21], s.dn[117][22], s.dn[117][23], s.dn[117][24], s.dn[117][25], s.dn[117][26], s.dn[117][27], s.dn[117][28], s.dn[117][29]];
-        let eq145_reactive_branch_derivatives: [f64; 36] = [s.db[117][0], s.db[117][1], s.db[117][2], s.db[117][3], s.db[117][4], s.db[117][5], s.db[117][6], s.db[117][7], s.db[117][8], s.db[117][9], s.db[117][10], s.db[117][11], s.db[117][12], s.db[117][13], s.db[117][14], s.db[117][15], s.db[117][16], s.db[117][17], s.db[117][18], s.db[117][19], s.db[117][20], s.db[117][21], s.db[117][22], s.db[117][23], s.db[117][24], s.db[117][25], s.db[117][26], s.db[117][27], s.db[117][28], s.db[117][29], s.db[117][30], s.db[117][31], s.db[117][32], s.db[117][33], s.db[117][34], s.db[117][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[8]),
             Some(nodes[9]),
             nodes,
             &eq145_reactive_node_derivatives,
             branches,
-            &eq145_reactive_branch_derivatives,
+            &s.db[117],
             multiplicity,
         );
         let eq146_e1688_q: f64 = s.v[118];
@@ -4138,14 +4129,13 @@ impl Instance {
         let eq146_e1693_d_n8: f64 = (s.dn[118][8] + p.p355);
         let eq146_e1693_q: f64 = (eq146_e1688_q + eq146_e1692_q);
         let eq146_reactive_node_derivatives: [f64; 30] = [s.dn[118][0], s.dn[118][1], s.dn[118][2], s.dn[118][3], s.dn[118][4], eq146_e1693_d_n5, s.dn[118][6], s.dn[118][7], eq146_e1693_d_n8, s.dn[118][9], s.dn[118][10], s.dn[118][11], s.dn[118][12], s.dn[118][13], s.dn[118][14], s.dn[118][15], s.dn[118][16], s.dn[118][17], s.dn[118][18], s.dn[118][19], s.dn[118][20], s.dn[118][21], s.dn[118][22], s.dn[118][23], s.dn[118][24], s.dn[118][25], s.dn[118][26], s.dn[118][27], s.dn[118][28], s.dn[118][29]];
-        let eq146_reactive_branch_derivatives: [f64; 36] = [s.db[118][0], s.db[118][1], s.db[118][2], s.db[118][3], s.db[118][4], s.db[118][5], s.db[118][6], s.db[118][7], s.db[118][8], s.db[118][9], s.db[118][10], s.db[118][11], s.db[118][12], s.db[118][13], s.db[118][14], s.db[118][15], s.db[118][16], s.db[118][17], s.db[118][18], s.db[118][19], s.db[118][20], s.db[118][21], s.db[118][22], s.db[118][23], s.db[118][24], s.db[118][25], s.db[118][26], s.db[118][27], s.db[118][28], s.db[118][29], s.db[118][30], s.db[118][31], s.db[118][32], s.db[118][33], s.db[118][34], s.db[118][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[8]),
             Some(nodes[5]),
             nodes,
             &eq146_reactive_node_derivatives,
             branches,
-            &eq146_reactive_branch_derivatives,
+            &s.db[118],
             multiplicity,
         );
         let (eq157_e1796, eq157_e1796_d_n0, eq157_e1796_d_n1, eq157_e1796_d_n2, eq157_e1796_d_n3, eq157_e1796_d_n4, eq157_e1796_d_n5, eq157_e1796_d_n6, eq157_e1796_d_n7, eq157_e1796_d_n8, eq157_e1796_d_n9, eq157_e1796_d_n10, eq157_e1796_d_n11, eq157_e1796_d_n12, eq157_e1796_d_n13, eq157_e1796_d_n14, eq157_e1796_d_n15, eq157_e1796_d_n16, eq157_e1796_d_n17, eq157_e1796_d_n18, eq157_e1796_d_n19, eq157_e1796_d_n20, eq157_e1796_d_n21, eq157_e1796_d_n22, eq157_e1796_d_n23, eq157_e1796_d_n24, eq157_e1796_d_n25, eq157_e1796_d_n26, eq157_e1796_d_n27, eq157_e1796_d_n28, eq157_e1796_d_n29, eq157_e1796_d_b0, eq157_e1796_d_b1, eq157_e1796_d_b2, eq157_e1796_d_b3, eq157_e1796_d_b4, eq157_e1796_d_b5, eq157_e1796_d_b6, eq157_e1796_d_b7, eq157_e1796_d_b8, eq157_e1796_d_b9, eq157_e1796_d_b10, eq157_e1796_d_b11, eq157_e1796_d_b12, eq157_e1796_d_b13, eq157_e1796_d_b14, eq157_e1796_d_b15, eq157_e1796_d_b16, eq157_e1796_d_b17, eq157_e1796_d_b18, eq157_e1796_d_b19, eq157_e1796_d_b20, eq157_e1796_d_b21, eq157_e1796_d_b22, eq157_e1796_d_b23, eq157_e1796_d_b24, eq157_e1796_d_b25, eq157_e1796_d_b26, eq157_e1796_d_b27, eq157_e1796_d_b28, eq157_e1796_d_b29, eq157_e1796_d_b30, eq157_e1796_d_b31, eq157_e1796_d_b32, eq157_e1796_d_b33, eq157_e1796_d_b34, eq157_e1796_d_b35, eq157_e1796_q,) = {
@@ -4168,75 +4158,63 @@ impl Instance {
             multiplicity,
         );
         let eq172_e1881_q: f64 = s.v[214];
-        let eq172_reactive_node_derivatives: [f64; 30] = [s.dn[214][0], s.dn[214][1], s.dn[214][2], s.dn[214][3], s.dn[214][4], s.dn[214][5], s.dn[214][6], s.dn[214][7], s.dn[214][8], s.dn[214][9], s.dn[214][10], s.dn[214][11], s.dn[214][12], s.dn[214][13], s.dn[214][14], s.dn[214][15], s.dn[214][16], s.dn[214][17], s.dn[214][18], s.dn[214][19], s.dn[214][20], s.dn[214][21], s.dn[214][22], s.dn[214][23], s.dn[214][24], s.dn[214][25], s.dn[214][26], s.dn[214][27], s.dn[214][28], s.dn[214][29]];
-        let eq172_reactive_branch_derivatives: [f64; 36] = [s.db[214][0], s.db[214][1], s.db[214][2], s.db[214][3], s.db[214][4], s.db[214][5], s.db[214][6], s.db[214][7], s.db[214][8], s.db[214][9], s.db[214][10], s.db[214][11], s.db[214][12], s.db[214][13], s.db[214][14], s.db[214][15], s.db[214][16], s.db[214][17], s.db[214][18], s.db[214][19], s.db[214][20], s.db[214][21], s.db[214][22], s.db[214][23], s.db[214][24], s.db[214][25], s.db[214][26], s.db[214][27], s.db[214][28], s.db[214][29], s.db[214][30], s.db[214][31], s.db[214][32], s.db[214][33], s.db[214][34], s.db[214][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[6]),
             Some(nodes[2]),
             nodes,
-            &eq172_reactive_node_derivatives,
+            &s.dn[214],
             branches,
-            &eq172_reactive_branch_derivatives,
+            &s.db[214],
             multiplicity,
         );
         let eq173_e1883_q: f64 = s.v[215];
-        let eq173_reactive_node_derivatives: [f64; 30] = [s.dn[215][0], s.dn[215][1], s.dn[215][2], s.dn[215][3], s.dn[215][4], s.dn[215][5], s.dn[215][6], s.dn[215][7], s.dn[215][8], s.dn[215][9], s.dn[215][10], s.dn[215][11], s.dn[215][12], s.dn[215][13], s.dn[215][14], s.dn[215][15], s.dn[215][16], s.dn[215][17], s.dn[215][18], s.dn[215][19], s.dn[215][20], s.dn[215][21], s.dn[215][22], s.dn[215][23], s.dn[215][24], s.dn[215][25], s.dn[215][26], s.dn[215][27], s.dn[215][28], s.dn[215][29]];
-        let eq173_reactive_branch_derivatives: [f64; 36] = [s.db[215][0], s.db[215][1], s.db[215][2], s.db[215][3], s.db[215][4], s.db[215][5], s.db[215][6], s.db[215][7], s.db[215][8], s.db[215][9], s.db[215][10], s.db[215][11], s.db[215][12], s.db[215][13], s.db[215][14], s.db[215][15], s.db[215][16], s.db[215][17], s.db[215][18], s.db[215][19], s.db[215][20], s.db[215][21], s.db[215][22], s.db[215][23], s.db[215][24], s.db[215][25], s.db[215][26], s.db[215][27], s.db[215][28], s.db[215][29], s.db[215][30], s.db[215][31], s.db[215][32], s.db[215][33], s.db[215][34], s.db[215][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[6]),
             Some(nodes[0]),
             nodes,
-            &eq173_reactive_node_derivatives,
+            &s.dn[215],
             branches,
-            &eq173_reactive_branch_derivatives,
+            &s.db[215],
             multiplicity,
         );
         let eq174_e1885_q: f64 = s.v[216];
-        let eq174_reactive_node_derivatives: [f64; 30] = [s.dn[216][0], s.dn[216][1], s.dn[216][2], s.dn[216][3], s.dn[216][4], s.dn[216][5], s.dn[216][6], s.dn[216][7], s.dn[216][8], s.dn[216][9], s.dn[216][10], s.dn[216][11], s.dn[216][12], s.dn[216][13], s.dn[216][14], s.dn[216][15], s.dn[216][16], s.dn[216][17], s.dn[216][18], s.dn[216][19], s.dn[216][20], s.dn[216][21], s.dn[216][22], s.dn[216][23], s.dn[216][24], s.dn[216][25], s.dn[216][26], s.dn[216][27], s.dn[216][28], s.dn[216][29]];
-        let eq174_reactive_branch_derivatives: [f64; 36] = [s.db[216][0], s.db[216][1], s.db[216][2], s.db[216][3], s.db[216][4], s.db[216][5], s.db[216][6], s.db[216][7], s.db[216][8], s.db[216][9], s.db[216][10], s.db[216][11], s.db[216][12], s.db[216][13], s.db[216][14], s.db[216][15], s.db[216][16], s.db[216][17], s.db[216][18], s.db[216][19], s.db[216][20], s.db[216][21], s.db[216][22], s.db[216][23], s.db[216][24], s.db[216][25], s.db[216][26], s.db[216][27], s.db[216][28], s.db[216][29], s.db[216][30], s.db[216][31], s.db[216][32], s.db[216][33], s.db[216][34], s.db[216][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[2]),
             Some(nodes[0]),
             nodes,
-            &eq174_reactive_node_derivatives,
+            &s.dn[216],
             branches,
-            &eq174_reactive_branch_derivatives,
+            &s.db[216],
             multiplicity,
         );
         let eq175_e1887_q: f64 = s.v[218];
-        let eq175_reactive_node_derivatives: [f64; 30] = [s.dn[218][0], s.dn[218][1], s.dn[218][2], s.dn[218][3], s.dn[218][4], s.dn[218][5], s.dn[218][6], s.dn[218][7], s.dn[218][8], s.dn[218][9], s.dn[218][10], s.dn[218][11], s.dn[218][12], s.dn[218][13], s.dn[218][14], s.dn[218][15], s.dn[218][16], s.dn[218][17], s.dn[218][18], s.dn[218][19], s.dn[218][20], s.dn[218][21], s.dn[218][22], s.dn[218][23], s.dn[218][24], s.dn[218][25], s.dn[218][26], s.dn[218][27], s.dn[218][28], s.dn[218][29]];
-        let eq175_reactive_branch_derivatives: [f64; 36] = [s.db[218][0], s.db[218][1], s.db[218][2], s.db[218][3], s.db[218][4], s.db[218][5], s.db[218][6], s.db[218][7], s.db[218][8], s.db[218][9], s.db[218][10], s.db[218][11], s.db[218][12], s.db[218][13], s.db[218][14], s.db[218][15], s.db[218][16], s.db[218][17], s.db[218][18], s.db[218][19], s.db[218][20], s.db[218][21], s.db[218][22], s.db[218][23], s.db[218][24], s.db[218][25], s.db[218][26], s.db[218][27], s.db[218][28], s.db[218][29], s.db[218][30], s.db[218][31], s.db[218][32], s.db[218][33], s.db[218][34], s.db[218][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             Some(nodes[2]),
             nodes,
-            &eq175_reactive_node_derivatives,
+            &s.dn[218],
             branches,
-            &eq175_reactive_branch_derivatives,
+            &s.db[218],
             multiplicity,
         );
         let eq176_e1889_q: f64 = s.v[217];
-        let eq176_reactive_node_derivatives: [f64; 30] = [s.dn[217][0], s.dn[217][1], s.dn[217][2], s.dn[217][3], s.dn[217][4], s.dn[217][5], s.dn[217][6], s.dn[217][7], s.dn[217][8], s.dn[217][9], s.dn[217][10], s.dn[217][11], s.dn[217][12], s.dn[217][13], s.dn[217][14], s.dn[217][15], s.dn[217][16], s.dn[217][17], s.dn[217][18], s.dn[217][19], s.dn[217][20], s.dn[217][21], s.dn[217][22], s.dn[217][23], s.dn[217][24], s.dn[217][25], s.dn[217][26], s.dn[217][27], s.dn[217][28], s.dn[217][29]];
-        let eq176_reactive_branch_derivatives: [f64; 36] = [s.db[217][0], s.db[217][1], s.db[217][2], s.db[217][3], s.db[217][4], s.db[217][5], s.db[217][6], s.db[217][7], s.db[217][8], s.db[217][9], s.db[217][10], s.db[217][11], s.db[217][12], s.db[217][13], s.db[217][14], s.db[217][15], s.db[217][16], s.db[217][17], s.db[217][18], s.db[217][19], s.db[217][20], s.db[217][21], s.db[217][22], s.db[217][23], s.db[217][24], s.db[217][25], s.db[217][26], s.db[217][27], s.db[217][28], s.db[217][29], s.db[217][30], s.db[217][31], s.db[217][32], s.db[217][33], s.db[217][34], s.db[217][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             Some(nodes[0]),
             nodes,
-            &eq176_reactive_node_derivatives,
+            &s.dn[217],
             branches,
-            &eq176_reactive_branch_derivatives,
+            &s.db[217],
             multiplicity,
         );
         let eq177_e1891_q: f64 = s.v[219];
-        let eq177_reactive_node_derivatives: [f64; 30] = [s.dn[219][0], s.dn[219][1], s.dn[219][2], s.dn[219][3], s.dn[219][4], s.dn[219][5], s.dn[219][6], s.dn[219][7], s.dn[219][8], s.dn[219][9], s.dn[219][10], s.dn[219][11], s.dn[219][12], s.dn[219][13], s.dn[219][14], s.dn[219][15], s.dn[219][16], s.dn[219][17], s.dn[219][18], s.dn[219][19], s.dn[219][20], s.dn[219][21], s.dn[219][22], s.dn[219][23], s.dn[219][24], s.dn[219][25], s.dn[219][26], s.dn[219][27], s.dn[219][28], s.dn[219][29]];
-        let eq177_reactive_branch_derivatives: [f64; 36] = [s.db[219][0], s.db[219][1], s.db[219][2], s.db[219][3], s.db[219][4], s.db[219][5], s.db[219][6], s.db[219][7], s.db[219][8], s.db[219][9], s.db[219][10], s.db[219][11], s.db[219][12], s.db[219][13], s.db[219][14], s.db[219][15], s.db[219][16], s.db[219][17], s.db[219][18], s.db[219][19], s.db[219][20], s.db[219][21], s.db[219][22], s.db[219][23], s.db[219][24], s.db[219][25], s.db[219][26], s.db[219][27], s.db[219][28], s.db[219][29], s.db[219][30], s.db[219][31], s.db[219][32], s.db[219][33], s.db[219][34], s.db[219][35]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[6]),
             Some(nodes[3]),
             nodes,
-            &eq177_reactive_node_derivatives,
+            &s.dn[219],
             branches,
-            &eq177_reactive_branch_derivatives,
+            &s.db[219],
             multiplicity,
         );
         let (eq194_e2167, eq194_e2167_d_n4, eq194_e2167_q,) = {

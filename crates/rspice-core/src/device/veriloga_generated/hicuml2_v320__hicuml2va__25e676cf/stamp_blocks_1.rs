@@ -1294,36 +1294,30 @@ impl Instance {
             multiplicity * (eq39_e385_d_n4),
         );
         let eq41_value: f64 = s.v[237];
-        let eq41_node_derivatives: [f64; 15] = [s.dn[237][0], s.dn[237][1], s.dn[237][2], s.dn[237][3], s.dn[237][4], s.dn[237][5], s.dn[237][6], s.dn[237][7], s.dn[237][8], s.dn[237][9], s.dn[237][10], s.dn[237][11], s.dn[237][12], s.dn[237][13], s.dn[237][14]];
-        let eq41_branch_derivatives: [f64; 6] = [s.db[237][0], s.db[237][1], s.db[237][2], s.db[237][3], s.db[237][4], s.db[237][5]];
         stamper.stamp_current_dense_local(
             Some(10),
             None,
             multiplicity * (eq41_value),
-            &eq41_node_derivatives,
-            &eq41_branch_derivatives,
+            &s.dn[237],
+            &s.db[237],
             multiplicity,
         );
         let eq43_value: f64 = s.v[238];
-        let eq43_node_derivatives: [f64; 15] = [s.dn[238][0], s.dn[238][1], s.dn[238][2], s.dn[238][3], s.dn[238][4], s.dn[238][5], s.dn[238][6], s.dn[238][7], s.dn[238][8], s.dn[238][9], s.dn[238][10], s.dn[238][11], s.dn[238][12], s.dn[238][13], s.dn[238][14]];
-        let eq43_branch_derivatives: [f64; 6] = [s.db[238][0], s.db[238][1], s.db[238][2], s.db[238][3], s.db[238][4], s.db[238][5]];
         stamper.stamp_current_dense_local(
             Some(11),
             None,
             multiplicity * (eq43_value),
-            &eq43_node_derivatives,
-            &eq43_branch_derivatives,
+            &s.dn[238],
+            &s.db[238],
             multiplicity,
         );
         let eq45_value: f64 = s.v[235];
-        let eq45_node_derivatives: [f64; 15] = [s.dn[235][0], s.dn[235][1], s.dn[235][2], s.dn[235][3], s.dn[235][4], s.dn[235][5], s.dn[235][6], s.dn[235][7], s.dn[235][8], s.dn[235][9], s.dn[235][10], s.dn[235][11], s.dn[235][12], s.dn[235][13], s.dn[235][14]];
-        let eq45_branch_derivatives: [f64; 6] = [s.db[235][0], s.db[235][1], s.db[235][2], s.db[235][3], s.db[235][4], s.db[235][5]];
         stamper.stamp_current_dense_local(
             Some(12),
             None,
             multiplicity * (eq45_value),
-            &eq45_node_derivatives,
-            &eq45_branch_derivatives,
+            &s.dn[235],
+            &s.db[235],
             multiplicity,
         );
         let (eq65_e534, eq65_e534_d_n0, eq65_e534_d_n1, eq65_e534_d_n2, eq65_e534_d_n3, eq65_e534_d_n4, eq65_e534_d_n5, eq65_e534_d_n6, eq65_e534_d_n7, eq65_e534_d_n8, eq65_e534_d_n9, eq65_e534_d_n10, eq65_e534_d_n11, eq65_e534_d_n12, eq65_e534_d_n13, eq65_e534_d_n14, eq65_e534_d_b0, eq65_e534_d_b1, eq65_e534_d_b2, eq65_e534_d_b3, eq65_e534_d_b4, eq65_e534_d_b5,) = {

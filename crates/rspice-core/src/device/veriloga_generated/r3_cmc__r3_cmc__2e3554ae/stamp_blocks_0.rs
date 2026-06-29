@@ -1957,58 +1957,48 @@ impl Instance {
         multiplicity: f64,
     ) {
         let eq0_value: f64 = s.v[81];
-        let eq0_node_derivatives: [f64; 6] = [s.dn[81][0], s.dn[81][1], s.dn[81][2], s.dn[81][3], s.dn[81][4], s.dn[81][5]];
-        let eq0_branch_derivatives: [f64; 2] = [s.db[81][0], s.db[81][1]];
         stamper.stamp_current_dense_local(
             Some(5),
             Some(4),
             multiplicity * (eq0_value),
-            &eq0_node_derivatives,
-            &eq0_branch_derivatives,
+            &s.dn[81],
+            &s.db[81],
             multiplicity,
         );
         let eq1_value: f64 = s.v[82];
-        let eq1_node_derivatives: [f64; 6] = [s.dn[82][0], s.dn[82][1], s.dn[82][2], s.dn[82][3], s.dn[82][4], s.dn[82][5]];
-        let eq1_branch_derivatives: [f64; 2] = [s.db[82][0], s.db[82][1]];
         stamper.stamp_current_dense_local(
             Some(1),
             Some(4),
             multiplicity * (eq1_value),
-            &eq1_node_derivatives,
-            &eq1_branch_derivatives,
+            &s.dn[82],
+            &s.db[82],
             multiplicity,
         );
         let eq2_value: f64 = s.v[83];
-        let eq2_node_derivatives: [f64; 6] = [s.dn[83][0], s.dn[83][1], s.dn[83][2], s.dn[83][3], s.dn[83][4], s.dn[83][5]];
-        let eq2_branch_derivatives: [f64; 2] = [s.db[83][0], s.db[83][1]];
         stamper.stamp_current_dense_local(
             Some(1),
             Some(5),
             multiplicity * (eq2_value),
-            &eq2_node_derivatives,
-            &eq2_branch_derivatives,
+            &s.dn[83],
+            &s.db[83],
             multiplicity,
         );
         let eq3_value: f64 = s.v[95];
-        let eq3_node_derivatives: [f64; 6] = [s.dn[95][0], s.dn[95][1], s.dn[95][2], s.dn[95][3], s.dn[95][4], s.dn[95][5]];
-        let eq3_branch_derivatives: [f64; 2] = [s.db[95][0], s.db[95][1]];
         stamper.stamp_current_dense_local(
             Some(3),
             None,
             multiplicity * (eq3_value),
-            &eq3_node_derivatives,
-            &eq3_branch_derivatives,
+            &s.dn[95],
+            &s.db[95],
             multiplicity,
         );
         let eq4_value: f64 = s.v[94];
-        let eq4_node_derivatives: [f64; 6] = [s.dn[94][0], s.dn[94][1], s.dn[94][2], s.dn[94][3], s.dn[94][4], s.dn[94][5]];
-        let eq4_branch_derivatives: [f64; 2] = [s.db[94][0], s.db[94][1]];
         stamper.stamp_current_dense_local(
             Some(3),
             None,
             multiplicity * (eq4_value),
-            &eq4_node_derivatives,
-            &eq4_branch_derivatives,
+            &s.dn[94],
+            &s.db[94],
             multiplicity,
         );
     }
@@ -2156,39 +2146,33 @@ impl Instance {
         multiplicity: f64,
     ) {
         let eq9_e181_q: f64 = s.v[96];
-        let eq9_reactive_node_derivatives: [f64; 6] = [s.dn[96][0], s.dn[96][1], s.dn[96][2], s.dn[96][3], s.dn[96][4], s.dn[96][5]];
-        let eq9_reactive_branch_derivatives: [f64; 2] = [s.db[96][0], s.db[96][1]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[1]),
             Some(nodes[4]),
             nodes,
-            &eq9_reactive_node_derivatives,
+            &s.dn[96],
             branches,
-            &eq9_reactive_branch_derivatives,
+            &s.db[96],
             multiplicity,
         );
         let eq10_e183_q: f64 = s.v[97];
-        let eq10_reactive_node_derivatives: [f64; 6] = [s.dn[97][0], s.dn[97][1], s.dn[97][2], s.dn[97][3], s.dn[97][4], s.dn[97][5]];
-        let eq10_reactive_branch_derivatives: [f64; 2] = [s.db[97][0], s.db[97][1]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[1]),
             Some(nodes[5]),
             nodes,
-            &eq10_reactive_node_derivatives,
+            &s.dn[97],
             branches,
-            &eq10_reactive_branch_derivatives,
+            &s.db[97],
             multiplicity,
         );
         let eq11_e185_q: f64 = s.v[98];
-        let eq11_reactive_node_derivatives: [f64; 6] = [s.dn[98][0], s.dn[98][1], s.dn[98][2], s.dn[98][3], s.dn[98][4], s.dn[98][5]];
-        let eq11_reactive_branch_derivatives: [f64; 2] = [s.db[98][0], s.db[98][1]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             None,
             nodes,
-            &eq11_reactive_node_derivatives,
+            &s.dn[98],
             branches,
-            &eq11_reactive_branch_derivatives,
+            &s.db[98],
             multiplicity,
         );
     }

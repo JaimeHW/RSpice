@@ -529,15 +529,13 @@ impl Instance {
             multiplicity,
         );
         let eq13_e876_q: f64 = s.v[224];
-        let eq13_reactive_node_derivatives: [f64; 9] = [s.dn[224][0], s.dn[224][1], s.dn[224][2], s.dn[224][3], s.dn[224][4], s.dn[224][5], s.dn[224][6], s.dn[224][7], s.dn[224][8]];
-        let eq13_reactive_branch_derivatives: [f64; 5] = [s.db[224][0], s.db[224][1], s.db[224][2], s.db[224][3], s.db[224][4]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[8]),
             Some(nodes[6]),
             nodes,
-            &eq13_reactive_node_derivatives,
+            &s.dn[224],
             branches,
-            &eq13_reactive_branch_derivatives,
+            &s.db[224],
             multiplicity,
         );
         let eq14_e879_q: f64 = s.v[225];
@@ -583,27 +581,23 @@ impl Instance {
             multiplicity,
         );
         let eq15_e882_q: f64 = s.v[226];
-        let eq15_reactive_node_derivatives: [f64; 9] = [s.dn[226][0], s.dn[226][1], s.dn[226][2], s.dn[226][3], s.dn[226][4], s.dn[226][5], s.dn[226][6], s.dn[226][7], s.dn[226][8]];
-        let eq15_reactive_branch_derivatives: [f64; 5] = [s.db[226][0], s.db[226][1], s.db[226][2], s.db[226][3], s.db[226][4]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[7]),
             Some(nodes[6]),
             nodes,
-            &eq15_reactive_node_derivatives,
+            &s.dn[226],
             branches,
-            &eq15_reactive_branch_derivatives,
+            &s.db[226],
             multiplicity,
         );
         let eq16_e884_q: f64 = s.v[227];
-        let eq16_reactive_node_derivatives: [f64; 9] = [s.dn[227][0], s.dn[227][1], s.dn[227][2], s.dn[227][3], s.dn[227][4], s.dn[227][5], s.dn[227][6], s.dn[227][7], s.dn[227][8]];
-        let eq16_reactive_branch_derivatives: [f64; 5] = [s.db[227][0], s.db[227][1], s.db[227][2], s.db[227][3], s.db[227][4]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[7]),
             Some(nodes[5]),
             nodes,
-            &eq16_reactive_node_derivatives,
+            &s.dn[227],
             branches,
-            &eq16_reactive_branch_derivatives,
+            &s.db[227],
             multiplicity,
         );
         let eq17_e887_q: f64 = s.v[238];

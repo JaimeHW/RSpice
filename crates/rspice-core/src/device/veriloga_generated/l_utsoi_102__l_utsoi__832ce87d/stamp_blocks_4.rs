@@ -461,15 +461,13 @@ impl Instance {
             multiplicity,
         );
         let eq29_e681_q: f64 = s.v[374];
-        let eq29_reactive_node_derivatives: [f64; 10] = [s.dn[374][0], s.dn[374][1], s.dn[374][2], s.dn[374][3], s.dn[374][4], s.dn[374][5], s.dn[374][6], s.dn[374][7], s.dn[374][8], s.dn[374][9]];
-        let eq29_reactive_branch_derivatives: [f64; 4] = [s.db[374][0], s.db[374][1], s.db[374][2], s.db[374][3]];
         stamper.stamp_current_reactive_dense(
             Some(nodes[4]),
             None,
             nodes,
-            &eq29_reactive_node_derivatives,
+            &s.dn[374],
             branches,
-            &eq29_reactive_branch_derivatives,
+            &s.db[374],
             multiplicity,
         );
         let eq32_e690: f64 = (s.v[1790] * (nv5 - 0.0));

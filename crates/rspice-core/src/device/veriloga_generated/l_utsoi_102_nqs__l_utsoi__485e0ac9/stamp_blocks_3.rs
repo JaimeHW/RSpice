@@ -4490,25 +4490,21 @@ impl Instance {
             multiplicity,
         );
         let eq9_value: f64 = s.v[1765];
-        let eq9_node_derivatives: [f64; 14] = [s.dn[1765][0], s.dn[1765][1], s.dn[1765][2], s.dn[1765][3], s.dn[1765][4], s.dn[1765][5], s.dn[1765][6], s.dn[1765][7], s.dn[1765][8], s.dn[1765][9], s.dn[1765][10], s.dn[1765][11], s.dn[1765][12], s.dn[1765][13]];
-        let eq9_branch_derivatives: [f64; 4] = [s.db[1765][0], s.db[1765][1], s.db[1765][2], s.db[1765][3]];
         stamper.stamp_current_dense_local(
             Some(4),
             None,
             multiplicity * (eq9_value),
-            &eq9_node_derivatives,
-            &eq9_branch_derivatives,
+            &s.dn[1765],
+            &s.db[1765],
             multiplicity,
         );
         let eq10_value: f64 = s.v[1766];
-        let eq10_node_derivatives: [f64; 14] = [s.dn[1766][0], s.dn[1766][1], s.dn[1766][2], s.dn[1766][3], s.dn[1766][4], s.dn[1766][5], s.dn[1766][6], s.dn[1766][7], s.dn[1766][8], s.dn[1766][9], s.dn[1766][10], s.dn[1766][11], s.dn[1766][12], s.dn[1766][13]];
-        let eq10_branch_derivatives: [f64; 4] = [s.db[1766][0], s.db[1766][1], s.db[1766][2], s.db[1766][3]];
         stamper.stamp_current_dense_local(
             Some(4),
             None,
             multiplicity * (eq10_value),
-            &eq10_node_derivatives,
-            &eq10_branch_derivatives,
+            &s.dn[1766],
+            &s.db[1766],
             multiplicity,
         );
         let eq23_e642: f64 = (s.v[1774] + s.v[1775]);
