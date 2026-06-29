@@ -2413,6 +2413,44 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_analysis_aliases_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_analysis_aliases(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ analysis("op")
+        + 2.0 * analysis("smallsig")
+        + 4.0 * analysis("smallsignal")
+        + 8.0 * analysis("small_signal");
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("ANALIAS1", model, &artifact, &[1, 0])
+            .expect("canonical analysis aliases use native JIT path");
+    assert!(device.is_using_native());
+
+    for (analysis_type, expected) in [(0, 1.0), (1, 14.0), (2, 0.0), (3, 14.0), (4, 0.0)] {
+        device.set_analysis_type(analysis_type);
+        device.update_voltages(&[0.0]);
+        let currents = device
+            .try_evaluate()
+            .expect("canonical analysis alias evaluation succeeds");
+        assert_eq!(
+            currents[0].to_bits(),
+            f64::to_bits(expected),
+            "analysis_type: {analysis_type}, currents: {currents:?}"
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"

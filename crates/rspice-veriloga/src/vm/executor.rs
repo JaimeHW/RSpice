@@ -561,7 +561,7 @@ impl<'a> Vm<'a> {
 
             // Analysis: check current analysis type
             // Stack: [] -> [0 or 1]
-            // analysis_type encoding: 0=dc, 1=ac, 2=tran, 3=noise
+            // analysis_type encoding: 0=dc, 1=ac, 2=tran, 3=noise, 4=ic
             Instruction::Analysis(analysis_str_id) => {
                 let current_type = self.context.analysis_type;
                 let result = match analysis_str_id {
@@ -588,6 +588,14 @@ impl<'a> Vm<'a> {
                     5 => {
                         // "static": any equilibrium analysis (DC or IC)
                         if current_type == 0 || current_type == 4 {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    }
+                    6 => {
+                        // "smallsig": frequency-domain small-signal analyses
+                        if current_type == 1 || current_type == 3 {
                             1.0
                         } else {
                             0.0

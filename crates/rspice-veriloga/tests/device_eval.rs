@@ -745,6 +745,36 @@ endmodule
 }
 
 #[test]
+fn analysis_aliases_match_generated_runtime_semantics() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+
+module analysis_aliases(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ analysis("op")
+        + 2.0 * analysis("smallsig")
+        + 4.0 * analysis("smallsignal")
+        + 8.0 * analysis("small_signal");
+endmodule
+"#,
+    );
+
+    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    for (analysis_type, expected) in [(0, 1.0), (1, 14.0), (2, 0.0), (3, 14.0), (4, 0.0)] {
+        device.set_analysis_type(analysis_type);
+        device.update_voltages(&[0.0]);
+        let currents = device.evaluate();
+        assert_eq!(
+            currents[0].to_bits(),
+            f64::to_bits(expected),
+            "analysis_type: {analysis_type}, currents: {currents:?}"
+        );
+    }
+}
+
+#[test]
 fn try_noise_sources_preserves_flicker_and_table_metadata() {
     let model = compile(
         r#"
