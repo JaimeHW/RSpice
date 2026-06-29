@@ -39,6 +39,7 @@ const Q_ELECTRON: f64 = 1.602176634e-19;
 const BOOLEAN_EPSILON: f64 = 1.0e-15;
 const TIMESTEP_DC_EPSILON: f64 = 1.0e-20;
 const CALL_SPILL_SLOT_COUNT: usize = 7;
+#[cfg(test)]
 const CALL_RESULT_SLOT: usize = 6;
 const CALL_FRAME_BYTES: i32 = CALL_SHADOW_BYTES + (CALL_SPILL_SLOT_COUNT * WORD_BYTES) as i32;
 #[cfg(windows)]
@@ -672,18 +673,26 @@ impl FunctionCompiler {
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
 
+        self.emit_helper_result_to_target_and_restore(target, self.depth, |_, _| true);
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+    }
+
+    fn emit_helper_result_to_target_and_restore(
+        &mut self,
+        target: Xmm,
+        restore_depth: usize,
+        mut should_restore: impl FnMut(usize, Xmm) -> bool,
+    ) {
         self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != target {
+        if target != Xmm::Xmm0 {
+            self.encoder.movsd_xmm_xmm(target, Xmm::Xmm0);
+        }
+        for (index, register) in XMM_STACK.iter().copied().take(restore_depth).enumerate() {
+            if register != target && should_restore(index, register) {
                 self.encoder
                     .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
             }
         }
-        self.encoder
-            .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
-        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
     fn emit_dynamic_variable_load(&mut self, base: usize, len: usize, lower: i64) -> JitResult<()> {
@@ -742,17 +751,7 @@ impl FunctionCompiler {
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
 
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != target {
-                self.encoder
-                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
-            }
-        }
-        self.encoder
-            .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
+        self.emit_helper_result_to_target_and_restore(target, self.depth, |_, _| true);
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
         Ok(())
     }
@@ -879,17 +878,7 @@ impl FunctionCompiler {
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
 
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != target {
-                self.encoder
-                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
-            }
-        }
-        self.encoder
-            .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
+        self.emit_helper_result_to_target_and_restore(target, self.depth, |_, _| true);
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
         Ok(())
     }
@@ -922,17 +911,7 @@ impl FunctionCompiler {
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
 
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != target {
-                self.encoder
-                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
-            }
-        }
-        self.encoder
-            .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
+        self.emit_helper_result_to_target_and_restore(target, self.depth, |_, _| true);
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
         Ok(())
     }
@@ -1355,17 +1334,9 @@ impl FunctionCompiler {
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
 
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != left && register != right {
-                self.encoder
-                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
-            }
-        }
-        self.encoder
-            .movsd_xmm_m64_base_disp32(left, Gpr::R11, call_result_disp());
+        self.emit_helper_result_to_target_and_restore(left, self.depth, |_, register| {
+            register != right
+        });
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
@@ -1407,17 +1378,7 @@ impl FunctionCompiler {
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
 
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != target {
-                self.encoder
-                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
-            }
-        }
-        self.encoder
-            .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
+        self.emit_helper_result_to_target_and_restore(target, self.depth, |_, _| true);
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
@@ -1444,17 +1405,9 @@ impl FunctionCompiler {
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
 
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
-            if register != start && register != period {
-                self.encoder
-                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
-            }
-        }
-        self.encoder
-            .movsd_xmm_m64_base_disp32(start, Gpr::R11, call_result_disp());
+        self.emit_helper_result_to_target_and_restore(start, self.depth, |_, register| {
+            register != period
+        });
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
@@ -1492,15 +1445,7 @@ impl FunctionCompiler {
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
 
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
-        for (index, register) in XMM_STACK.iter().copied().take(input_slot).enumerate() {
-            self.encoder
-                .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
-        }
-        self.encoder
-            .movsd_xmm_m64_base_disp32(input, Gpr::R11, call_result_disp());
+        self.emit_helper_result_to_target_and_restore(input, input_slot, |_, _| true);
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
@@ -2097,6 +2042,7 @@ fn call_spill_disp(index: usize) -> i32 {
     CALL_SHADOW_BYTES + (index * WORD_BYTES) as i32
 }
 
+#[cfg(test)]
 fn call_result_disp() -> i32 {
     call_spill_disp(CALL_RESULT_SLOT)
 }
@@ -2309,8 +2255,9 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        K_BOLTZMANN, NativeAssignment, Q_ELECTRON, XMM_STACK, compile_assignment_function,
-        compile_assignment_pass_function, compile_value_function,
+        Gpr, K_BOLTZMANN, NativeAssignment, Q_ELECTRON, X64Encoder, XMM_STACK, Xmm,
+        call_result_disp, compile_assignment_function, compile_assignment_pass_function,
+        compile_value_function,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -2376,6 +2323,58 @@ mod tests {
         assert!(
             bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
             "helper-call native leaves must preserve context and vars pointers"
+        );
+    }
+
+    #[test]
+    fn generated_value_leaf_helper_result_stays_in_target_register() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushParam(0),
+                Instruction::Exp,
+                Instruction::Add,
+            ],
+            0,
+        );
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::Const(1.0),
+                NativeOp::LoadParam(0),
+                NativeOp::UnaryMath(crate::native::expr::UnaryMathOp::Exp),
+                NativeOp::Add,
+            ],
+            "test fixture must force a unary helper with xmm0 live and xmm1 as target"
+        );
+
+        let bytes = compile_value_function(&program).expect("compile helper result leaf");
+
+        let mut old_result_store = X64Encoder::new();
+        old_result_store.movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
+        assert!(
+            !contains_bytes(&bytes, &old_result_store.into_bytes()),
+            "helper result should not be spilled to the call frame"
+        );
+
+        let mut old_result_reload = X64Encoder::new();
+        old_result_reload.movsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::R11, call_result_disp());
+        assert!(
+            !contains_bytes(&bytes, &old_result_reload.into_bytes()),
+            "helper result should move directly into the target register"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate helper result leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[2.0], &[], &[], &[]);
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            (1.0_f64 + runtime_exp(2.0)).to_bits()
         );
     }
 
@@ -5450,6 +5449,10 @@ mod tests {
             cross_detectors: std::ptr::null_mut(),
             cross_detectors_len: 0,
         }
+    }
+
+    fn contains_bytes(bytes: &[u8], needle: &[u8]) -> bool {
+        bytes.windows(needle.len()).any(|window| window == needle)
     }
 
     fn runtime_min(left: f64, right: f64) -> f64 {
