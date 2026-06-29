@@ -11628,6 +11628,43 @@ pub mod runtime {{
         pub fn analysis(&self, query: &str) -> bool {{
             matches!(query, "dc" | "static")
         }}
+
+        pub fn analysis_dc(&self) -> bool {{
+            matches!(self.analysis, GeneratedAnalysisKind::Dc)
+        }}
+
+        pub fn analysis_ac(&self) -> bool {{
+            matches!(self.analysis, GeneratedAnalysisKind::Ac)
+        }}
+
+        pub fn analysis_tran(&self) -> bool {{
+            matches!(self.analysis, GeneratedAnalysisKind::Tran)
+        }}
+
+        pub fn analysis_noise(&self) -> bool {{
+            matches!(self.analysis, GeneratedAnalysisKind::Noise)
+        }}
+
+        pub fn analysis_ic(&self) -> bool {{
+            matches!(self.analysis, GeneratedAnalysisKind::Ic)
+        }}
+
+        pub fn analysis_static(&self) -> bool {{
+            matches!(
+                self.analysis,
+                GeneratedAnalysisKind::Dc
+                    | GeneratedAnalysisKind::Ac
+                    | GeneratedAnalysisKind::Noise
+                    | GeneratedAnalysisKind::Ic
+            )
+        }}
+
+        pub fn analysis_smallsig(&self) -> bool {{
+            matches!(
+                self.analysis,
+                GeneratedAnalysisKind::Ac | GeneratedAnalysisKind::Noise
+            )
+        }}
     }}
 
     pub struct GeneratedStamper<'a> {{
@@ -12272,6 +12309,43 @@ pub mod runtime {{
 
         pub fn analysis(&self, query: &str) -> bool {{
             matches!(query, "dc" | "static")
+        }}
+
+        pub fn analysis_dc(&self) -> bool {{
+            matches!(self.analysis, GeneratedAnalysisKind::Dc)
+        }}
+
+        pub fn analysis_ac(&self) -> bool {{
+            matches!(self.analysis, GeneratedAnalysisKind::Ac)
+        }}
+
+        pub fn analysis_tran(&self) -> bool {{
+            matches!(self.analysis, GeneratedAnalysisKind::Tran)
+        }}
+
+        pub fn analysis_noise(&self) -> bool {{
+            matches!(self.analysis, GeneratedAnalysisKind::Noise)
+        }}
+
+        pub fn analysis_ic(&self) -> bool {{
+            matches!(self.analysis, GeneratedAnalysisKind::Ic)
+        }}
+
+        pub fn analysis_static(&self) -> bool {{
+            matches!(
+                self.analysis,
+                GeneratedAnalysisKind::Dc
+                    | GeneratedAnalysisKind::Ac
+                    | GeneratedAnalysisKind::Noise
+                    | GeneratedAnalysisKind::Ic
+            )
+        }}
+
+        pub fn analysis_smallsig(&self) -> bool {{
+            matches!(
+                self.analysis,
+                GeneratedAnalysisKind::Ac | GeneratedAnalysisKind::Noise
+            )
         }}
     }}
 
@@ -13119,8 +13193,9 @@ fn rust_backend_lowers_analysis_call() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("ctx.analysis(\"dc\")"), "{stamp}");
-    assert!(stamp.contains("ctx.analysis(\"smallsig\")"), "{stamp}");
+    assert!(stamp.contains("ctx.analysis_dc()"), "{stamp}");
+    assert!(stamp.contains("ctx.analysis_smallsig()"), "{stamp}");
+    assert!(!stamp.contains("ctx.analysis(\""), "{stamp}");
 }
 
 #[test]

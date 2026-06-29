@@ -9,12 +9,12 @@ use crate::canonical_ir::{
 };
 
 use super::expr::{
-    BranchCurrentSlot, DdtSlots, LoweredExpr, LoweredVariable, branch_pair_key,
-    comparison_operator, is_analysis_name, is_intrinsic_name as expr_is_intrinsic_name,
-    lower_assignment_expr_with_branch_currents, lower_equation_expr_with_branch_currents,
-    lower_reactive_assignment_expr_with_branch_currents, lower_reactive_expr_with_branch_currents,
-    lower_value_assignment_expr_with_branch_currents, normalize_analysis_query,
-    parameter_field_names, unique_identifiers,
+    BranchCurrentSlot, DdtSlots, LoweredExpr, LoweredVariable, analysis_predicate_expr,
+    branch_pair_key, comparison_operator, is_analysis_name,
+    is_intrinsic_name as expr_is_intrinsic_name, lower_assignment_expr_with_branch_currents,
+    lower_equation_expr_with_branch_currents, lower_reactive_assignment_expr_with_branch_currents,
+    lower_reactive_expr_with_branch_currents, lower_value_assignment_expr_with_branch_currents,
+    normalize_analysis_query, parameter_field_names, unique_identifiers,
 };
 use super::{
     GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames, RustTranspileOptions,
@@ -41932,7 +41932,7 @@ impl CompactAdEmitter<'_> {
 
     fn analysis_condition(&self, args: &[ExprId]) -> Result<String, RustBackendError> {
         let query = self.analysis_query(args)?;
-        Ok(format!("ctx.analysis({query:?})"))
+        Ok(analysis_predicate_expr(&query).to_string())
     }
 
     fn analysis_query(&self, args: &[ExprId]) -> Result<String, RustBackendError> {

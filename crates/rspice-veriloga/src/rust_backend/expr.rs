@@ -1879,7 +1879,7 @@ impl ExprEmitter<'_> {
 
     fn analysis_condition(&self, args: &[ExprId]) -> Result<String, RustBackendError> {
         let query = self.analysis_query(args)?;
-        Ok(format!("ctx.analysis({query:?})"))
+        Ok(analysis_predicate_expr(&query).to_string())
     }
 
     fn analysis_query(&self, args: &[ExprId]) -> Result<String, RustBackendError> {
@@ -3609,6 +3609,19 @@ pub(crate) fn normalize_analysis_query(name: &str) -> Option<String> {
         "static" => Some("static".to_string()),
         "smallsig" | "smallsignal" | "small_signal" => Some("smallsig".to_string()),
         _ => None,
+    }
+}
+
+pub(crate) fn analysis_predicate_expr(query: &str) -> &'static str {
+    match query {
+        "dc" => "ctx.analysis_dc()",
+        "ac" => "ctx.analysis_ac()",
+        "tran" => "ctx.analysis_tran()",
+        "noise" => "ctx.analysis_noise()",
+        "ic" => "ctx.analysis_ic()",
+        "static" => "ctx.analysis_static()",
+        "smallsig" => "ctx.analysis_smallsig()",
+        _ => "false",
     }
 }
 
