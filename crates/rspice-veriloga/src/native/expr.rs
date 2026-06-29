@@ -48,6 +48,8 @@ pub(crate) enum NativeOp {
     SubConst(f64),
     MulConst(f64),
     DivConst(f64),
+    SubFromConst(f64),
+    DivFromConst(f64),
     Neg,
     Abs,
     Square,
@@ -379,6 +381,9 @@ impl NativeProgram {
                     )?;
                     depth -= 1;
                     if lower_constant_rhs_arithmetic(&mut ops, instruction) {
+                        continue;
+                    }
+                    if lower_constant_lhs_noncommutative_arithmetic(&mut ops, instruction) {
                         continue;
                     }
                     ops.push(arithmetic_op(instruction));
@@ -1062,6 +1067,32 @@ fn lower_constant_rhs_arithmetic(ops: &mut Vec<NativeOp>, instruction: &Instruct
     true
 }
 
+fn lower_constant_lhs_noncommutative_arithmetic(
+    ops: &mut Vec<NativeOp>,
+    instruction: &Instruction,
+) -> bool {
+    if ops.len() < 2 {
+        return false;
+    }
+    let rhs_index = ops.len() - 1;
+    if !is_independent_value_push(&ops[rhs_index]) {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let NativeOp::Const(value) = ops[lhs_index] else {
+        return false;
+    };
+    let op = match instruction {
+        Instruction::Sub => NativeOp::SubFromConst(value),
+        Instruction::Div => NativeOp::DivFromConst(value),
+        _ => return false,
+    };
+    ops.remove(lhs_index);
+    ops.push(op);
+    true
+}
+
 fn lower_constant_rhs_compare(ops: &mut Vec<NativeOp>, op: CompareOp) -> bool {
     let Some(NativeOp::Const(value)) = ops.last().copied() else {
         return false;
@@ -1187,6 +1218,8 @@ fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::SubConst(_)
         | NativeOp::MulConst(_)
         | NativeOp::DivConst(_)
+        | NativeOp::SubFromConst(_)
+        | NativeOp::DivFromConst(_)
         | NativeOp::CompareConst(_, _)
         | NativeOp::ExtremumConst(_, _)
         | NativeOp::LogicalConst(_, _)
@@ -1521,6 +1554,46 @@ mod tests {
                 lowered.max_stack_depth(),
                 1,
                 "{instruction_name} should not allocate a second XMM stack slot for RHS constants"
+            );
+            assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, expected]);
+        }
+    }
+
+    #[test]
+    fn lowers_constant_lhs_noncommutative_arithmetic_without_extra_stack_slot() {
+        let cases = [
+            (Instruction::Sub, NativeOp::SubFromConst(10.0)),
+            (Instruction::Div, NativeOp::DivFromConst(10.0)),
+        ];
+
+        for (instruction, expected) in cases {
+            let instruction_name = format!("{instruction:?}");
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(10.0),
+                    Instruction::PushTemperature,
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-lhs-arithmetic",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant LHS arithmetic has a direct native lowering");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{instruction_name} should not allocate a second XMM stack slot for LHS constants"
+            );
+            assert!(
+                !lowered.ops().iter().any(
+                    |op| matches!(op, NativeOp::Const(value) if value.to_bits() == 10.0_f64.to_bits())
+                ),
+                "{instruction_name} should consume the LHS literal in the arithmetic op"
             );
             assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, expected]);
         }

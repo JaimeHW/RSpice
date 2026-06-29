@@ -249,6 +249,12 @@ impl FunctionCompiler {
                 NativeOp::DivConst(value) => {
                     self.emit_literal_rhs_binary_op(value, BinaryOp::Div)?
                 }
+                NativeOp::SubFromConst(value) => {
+                    self.emit_literal_lhs_binary_op(value, BinaryOp::Sub)?
+                }
+                NativeOp::DivFromConst(value) => {
+                    self.emit_literal_lhs_binary_op(value, BinaryOp::Div)?
+                }
                 NativeOp::Neg => self.emit_neg()?,
                 NativeOp::Abs => self.emit_abs()?,
                 NativeOp::Square => self.emit_square()?,
@@ -552,6 +558,28 @@ impl FunctionCompiler {
 
         let target = XMM_STACK[self.depth - 1];
         self.emit_literal_binary_op(target, value, op);
+        Ok(())
+    }
+
+    fn emit_literal_lhs_binary_op(&mut self, value: f64, op: BinaryOp) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "literal LHS binary op requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        let scratch = self.scratch_register()?;
+        self.emit_literal_load(scratch, value);
+        match op {
+            BinaryOp::Sub => self.encoder.subsd_xmm_xmm(scratch, target),
+            BinaryOp::Div => self.encoder.divsd_xmm_xmm(scratch, target),
+            BinaryOp::Add | BinaryOp::Mul => {
+                unreachable!("literal LHS binary lowering only accepts sub/div")
+            }
+        }
+        self.encoder.movsd_xmm_xmm(target, scratch);
         Ok(())
     }
 
@@ -2396,6 +2424,71 @@ mod tests {
             ctx.temperature = 8.0;
 
             assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected.to_bits());
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_applies_constant_lhs_sub_div_without_extra_stack_slot() {
+        let cases = [
+            ("sub-finite", Instruction::Sub, 3.0_f64, 10.0_f64 - 3.0_f64),
+            (
+                "sub-unordered",
+                Instruction::Sub,
+                f64::from_bits(0x7ff8_0000_0000_0001),
+                10.0_f64 - f64::from_bits(0x7ff8_0000_0000_0001),
+            ),
+            ("div-finite", Instruction::Div, 4.0_f64, 10.0_f64 / 4.0_f64),
+            (
+                "div-negative-zero",
+                Instruction::Div,
+                -0.0_f64,
+                10.0_f64 / -0.0_f64,
+            ),
+            (
+                "div-unordered",
+                Instruction::Div,
+                f64::from_bits(0x7ff8_0000_0000_0002),
+                10.0_f64 / f64::from_bits(0x7ff8_0000_0000_0002),
+            ),
+        ];
+
+        for (name, instruction, input, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(10.0),
+                    Instruction::PushTemperature,
+                    instruction,
+                ],
+                0,
+            );
+
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{name} should use a literal LHS arithmetic op, not a second stack slot"
+            );
+
+            let bytes =
+                compile_value_function(&program).expect("compile literal LHS arithmetic leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "constant LHS arithmetic should stay helper-free"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate literal LHS arithmetic leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = input;
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
         }
     }
 
