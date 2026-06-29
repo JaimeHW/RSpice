@@ -2246,10 +2246,10 @@ endmodule
 module native_canonical_atanh_current(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ atanh(V(p, n));
+    analog I(p, n) <+ atanh(V(p, n) / 2.0);
 endmodule
 "#,
-            input.atanh(),
+            (input / 2.0).atanh(),
         ),
     ];
 
