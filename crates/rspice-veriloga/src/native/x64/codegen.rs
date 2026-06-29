@@ -4353,6 +4353,67 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_folds_constant_logical_ops_to_literals() {
+        let cases = [
+            ("and-both-true", Instruction::And, 2.0e-15, -2.0e-15, 1.0),
+            (
+                "and-left-at-epsilon",
+                Instruction::And,
+                1.0e-15,
+                2.0e-15,
+                0.0,
+            ),
+            (
+                "and-right-unordered",
+                Instruction::And,
+                2.0e-15,
+                f64::NAN,
+                0.0,
+            ),
+            ("or-right-true", Instruction::Or, 0.5e-15, -2.0e-15, 1.0),
+            ("or-both-false", Instruction::Or, 1.0e-15, 0.5e-15, 0.0),
+            ("or-left-unordered", Instruction::Or, f64::NAN, 0.5e-15, 0.0),
+        ];
+
+        for (name, instruction, left, right, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+                0,
+            );
+
+            assert_eq!(program.max_stack_depth(), 1, "{name}");
+            assert_eq!(
+                program.ops(),
+                &[NativeOp::Const(expected)],
+                "{name} should compile as a folded literal"
+            );
+
+            let bytes = compile_value_function(&program).expect("compile folded logical leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "folded logical op should stay helper-free"
+            );
+
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate folded logical leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_calls_integer_binary_helpers_and_preserves_state() {
         let cases = [
             ("shl", Instruction::Shl, 3.0, 2.0, runtime_shl(3.0, 2.0)),
