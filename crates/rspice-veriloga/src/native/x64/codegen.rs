@@ -1031,10 +1031,8 @@ impl FunctionCompiler {
             self.encoder
                 .add_r64_imm32(dynamic_variable_base_arg_reg(), base_disp);
         }
-        self.encoder
-            .movabs_r64_imm64(dynamic_variable_len_arg_reg(), len as u64);
-        self.encoder
-            .movabs_r64_imm64(dynamic_variable_lower_arg_reg(), lower as u64);
+        self.emit_usize_arg(dynamic_variable_len_arg_reg(), len);
+        self.emit_i64_arg(dynamic_variable_lower_arg_reg(), lower);
         let helper: DynamicVariableHelper = rspice_dynamic_variable_load_native;
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
@@ -1093,10 +1091,8 @@ impl FunctionCompiler {
             self.encoder
                 .add_r64_imm32(dynamic_variable_base_arg_reg(), base_disp);
         }
-        self.encoder
-            .movabs_r64_imm64(dynamic_variable_len_arg_reg(), len as u64);
-        self.encoder
-            .movabs_r64_imm64(dynamic_variable_lower_arg_reg(), lower as u64);
+        self.emit_usize_arg(dynamic_variable_len_arg_reg(), len);
+        self.emit_i64_arg(dynamic_variable_lower_arg_reg(), lower);
         let helper: DynamicVariableSlotHelper = rspice_dynamic_variable_slot_native;
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
@@ -1183,10 +1179,8 @@ impl FunctionCompiler {
             self.encoder
                 .add_r64_imm32(dynamic_variable_base_arg_reg(), base_disp);
         }
-        self.encoder
-            .movabs_r64_imm64(dynamic_variable_len_arg_reg(), len as u64);
-        self.encoder
-            .movabs_r64_imm64(dynamic_variable_lower_arg_reg(), lower as u64);
+        self.emit_usize_arg(dynamic_variable_len_arg_reg(), len);
+        self.emit_i64_arg(dynamic_variable_lower_arg_reg(), lower);
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
@@ -1224,10 +1218,8 @@ impl FunctionCompiler {
             self.encoder
                 .add_r64_imm32(dynamic_variable_base_arg_reg(), base_disp);
         }
-        self.encoder
-            .movabs_r64_imm64(dynamic_variable_len_arg_reg(), len as u64);
-        self.encoder
-            .movabs_r64_imm64(dynamic_variable_lower_arg_reg(), lower as u64);
+        self.emit_usize_arg(dynamic_variable_len_arg_reg(), len);
+        self.emit_i64_arg(dynamic_variable_lower_arg_reg(), lower);
         let helper: DynamicVariableSlotHelper = rspice_dynamic_variable_slot_native;
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
@@ -2807,6 +2799,18 @@ impl FunctionCompiler {
         }
     }
 
+    fn emit_i64_arg(&mut self, dst: Gpr, value: i64) {
+        if value == 0 {
+            self.encoder.xor_r64_r64(dst, dst);
+        } else if let Ok(value) = u32::try_from(value) {
+            self.encoder.mov_r32_imm32(dst, value);
+        } else if let Ok(value) = i32::try_from(value) {
+            self.encoder.mov_r64_imm32(dst, value);
+        } else {
+            self.encoder.movabs_r64_imm64(dst, value as u64);
+        }
+    }
+
     fn emit_usize_compare(&mut self, left: Gpr, value: usize) {
         if let Ok(value) = i32::try_from(value) {
             self.encoder.cmp_r64_imm32(left, value);
@@ -4216,6 +4220,34 @@ mod tests {
             !contains_bytes(&bytes, &dynamic_variable_movabs_cmp_len_bytes(3)),
             "dynamic read fast path should not materialize small lengths in a GPR"
         );
+        assert!(
+            contains_bytes(
+                &bytes,
+                &mov_r32_imm32_bytes(super::dynamic_variable_len_arg_reg(), 3)
+            ),
+            "dynamic read helper slow path should materialize small lengths with a compact imm32 move"
+        );
+        assert!(
+            contains_bytes(
+                &bytes,
+                &mov_r32_imm32_bytes(super::dynamic_variable_lower_arg_reg(), 1)
+            ),
+            "dynamic read helper slow path should materialize small positive lower bounds with a compact imm32 move"
+        );
+        assert!(
+            !contains_bytes(
+                &bytes,
+                &movabs_imm64_bytes(super::dynamic_variable_len_arg_reg(), 3)
+            ),
+            "dynamic read helper slow path should not materialize small lengths with movabs"
+        );
+        assert!(
+            !contains_bytes(
+                &bytes,
+                &movabs_imm64_bytes(super::dynamic_variable_lower_arg_reg(), 1)
+            ),
+            "dynamic read helper slow path should not materialize small positive lower bounds with movabs"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate dynamic variable leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -4599,8 +4631,22 @@ mod tests {
             "indexed write fast path should subtract negative lower bounds with a sign-extended imm32"
         );
         assert!(
+            contains_bytes(
+                &bytes,
+                &mov_r64_imm32_bytes(super::dynamic_variable_lower_arg_reg(), -2)
+            ),
+            "indexed write helper slow path should materialize small negative lower bounds with a sign-extended imm32 move"
+        );
+        assert!(
             !contains_bytes(&bytes, &dynamic_variable_movabs_sub_lower_bytes(-2)),
             "indexed write fast path should not materialize small negative lower bounds in a GPR"
+        );
+        assert!(
+            !contains_bytes(
+                &bytes,
+                &movabs_imm64_bytes(super::dynamic_variable_lower_arg_reg(), (-2_i64) as u64)
+            ),
+            "indexed write helper slow path should not materialize small negative lower bounds with movabs"
         );
         let memory = ExecutableMemory::allocate(&bytes)
             .expect("allocate negative lower-bound indexed assignment");
@@ -8561,6 +8607,12 @@ mod tests {
     fn mov_r32_imm32_bytes(register: Gpr, value: u32) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.mov_r32_imm32(register, value);
+        encoder.into_bytes()
+    }
+
+    fn mov_r64_imm32_bytes(register: Gpr, value: i32) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.mov_r64_imm32(register, value);
         encoder.into_bytes()
     }
 
