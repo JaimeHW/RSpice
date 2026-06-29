@@ -258,6 +258,7 @@ impl FunctionCompiler {
                 NativeOp::Logical(op) => self.emit_logical(op)?,
                 NativeOp::IfElse => self.emit_ifelse()?,
                 NativeOp::Extremum(op) => self.emit_extremum(op)?,
+                NativeOp::ExtremumConst(op, value) => self.emit_extremum_const(op, value)?,
                 NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
                 NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
                 NativeOp::IntegerBinary(op) => self.emit_integer_binary(op)?,
@@ -1684,9 +1685,37 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_extremum_const(&mut self, op: ExtremumOp, value: f64) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "literal RHS min/max requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.encoder.movq_r64_xmm(Gpr::Rax, target);
+        self.encoder.ucomisd_xmm_xmm(target, target);
+        self.encoder.setcc_r8(ConditionCode::NotParity, Gpr::R10);
+        self.emit_abs_zero_to_gpr(target, Gpr::R8);
+        self.emit_literal_extremum_op(target, value, op);
+        self.emit_extremum_select_left_fixup_from_result(target);
+        Ok(())
+    }
+
     fn emit_extremum_select_left_fixup(&mut self, result: Xmm, right: Xmm) {
         self.encoder.ucomisd_xmm_xmm(right, right);
         self.encoder.setcc_r8(ConditionCode::Parity, Gpr::R11);
+        self.emit_extremum_select_left_fixup_after_right_check(result);
+    }
+
+    fn emit_extremum_select_left_fixup_from_result(&mut self, result: Xmm) {
+        self.encoder.ucomisd_xmm_xmm(result, result);
+        self.encoder.setcc_r8(ConditionCode::Parity, Gpr::R11);
+        self.emit_extremum_select_left_fixup_after_right_check(result);
+    }
+
+    fn emit_extremum_select_left_fixup_after_right_check(&mut self, result: Xmm) {
         self.encoder.and_r8_r8(Gpr::R10, Gpr::R11);
         self.emit_abs_zero_to_gpr(result, Gpr::R9);
         self.encoder.and_r8_r8(Gpr::R8, Gpr::R9);
@@ -1837,6 +1866,17 @@ impl FunctionCompiler {
 
     fn emit_literal_compare(&mut self, left: Xmm, value: f64) {
         let displacement_offset = self.encoder.ucomisd_xmm_m64_rip_disp32(left, 0);
+        self.literals.push(LiteralPatch {
+            displacement_offset,
+            value,
+        });
+    }
+
+    fn emit_literal_extremum_op(&mut self, dst: Xmm, value: f64, op: ExtremumOp) {
+        let displacement_offset = match op {
+            ExtremumOp::Min => self.encoder.minsd_xmm_m64_rip_disp32(dst, 0),
+            ExtremumOp::Max => self.encoder.maxsd_xmm_m64_rip_disp32(dst, 0),
+        };
         self.literals.push(LiteralPatch {
             displacement_offset,
             value,
@@ -4077,6 +4117,71 @@ mod tests {
             let expected = match op {
                 Instruction::Min => runtime_min(left, right),
                 Instruction::Max => runtime_max(left, right),
+                _ => unreachable!("min/max test cases only use min/max opcodes"),
+            };
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_applies_constant_rhs_min_max_without_extra_stack_slot() {
+        let left_nan = f64::from_bits(0x7ff8_0000_0000_0001);
+        let right_nan = f64::from_bits(0x7ff8_0000_0000_0002);
+        let cases = [
+            ("min-left-smaller", Instruction::Min, -2.0, 5.0),
+            ("min-right-smaller", Instruction::Min, 5.0, -2.0),
+            ("min-left-nan", Instruction::Min, left_nan, 5.0),
+            ("min-right-nan", Instruction::Min, 5.0, right_nan),
+            ("min-both-nan", Instruction::Min, left_nan, right_nan),
+            ("min-left-neg-zero", Instruction::Min, -0.0, 0.0),
+            ("min-right-neg-zero", Instruction::Min, 0.0, -0.0),
+            ("max-left-larger", Instruction::Max, 5.0, -2.0),
+            ("max-right-larger", Instruction::Max, -2.0, 5.0),
+            ("max-left-nan", Instruction::Max, left_nan, 5.0),
+            ("max-right-nan", Instruction::Max, 5.0, right_nan),
+            ("max-both-nan", Instruction::Max, left_nan, right_nan),
+            ("max-left-pos-zero", Instruction::Max, 0.0, -0.0),
+            ("max-right-pos-zero", Instruction::Max, -0.0, 0.0),
+        ];
+
+        for (name, instruction, input, rhs) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(rhs),
+                    instruction.clone(),
+                ],
+                0,
+            );
+
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{name} should use a literal RHS min/max, not a second stack slot"
+            );
+
+            let bytes = compile_value_function(&program).expect("compile literal RHS min/max leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "constant RHS min/max should stay helper-free"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate literal RHS min/max leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = input;
+            let expected = match instruction {
+                Instruction::Min => runtime_min(input, rhs),
+                Instruction::Max => runtime_max(input, rhs),
                 _ => unreachable!("min/max test cases only use min/max opcodes"),
             };
 
