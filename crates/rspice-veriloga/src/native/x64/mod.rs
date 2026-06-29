@@ -6,8 +6,9 @@ use super::expr::{
     canonical_absdelay_slots_for_equation, canonical_cross_slots_for_equation,
     canonical_ddt_slots_for_equation, canonical_idt_slots_for_equation,
     canonical_idtmod_slots_for_equation, canonical_laplace_slots_for_equation,
-    canonical_slew_slots_for_equation, canonical_transition_slots_for_equation,
-    canonical_zi_slots_for_equation, constant_dynamic_variable_slot,
+    canonical_slew_slots_for_equation, canonical_timer_slots_for_equation,
+    canonical_transition_slots_for_equation, canonical_zi_slots_for_equation,
+    constant_dynamic_variable_slot,
 };
 use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel};
 use super::runtime::ExecutableMemory;
@@ -282,6 +283,12 @@ fn lower_stamp_value_program(
             equation_id,
             bytecode_program,
         )?;
+        let timer_slots = canonical_timer_slots_for_equation(
+            model.name.clone(),
+            mir,
+            equation_id,
+            bytecode_program,
+        )?;
         return NativeProgram::from_mir_equation(
             model.name.clone(),
             EntryKind::StampValue,
@@ -297,7 +304,8 @@ fn lower_stamp_value_program(
                 .with_canonical_laplace_slots(&laplace_slots)
                 .with_canonical_zi_slots(&zi_slots)
                 .with_canonical_cross_slots(&cross_slots)
-                .with_canonical_above_slots(&above_slots),
+                .with_canonical_above_slots(&above_slots)
+                .with_canonical_timer_slots(&timer_slots),
         );
     }
 

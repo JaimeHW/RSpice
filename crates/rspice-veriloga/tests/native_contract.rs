@@ -2079,6 +2079,43 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_timer_current_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_timer_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ timer(1.0, 0.5);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("TMRCANON1", model, &artifact, &[1, 0])
+            .expect("canonical timer current uses native JIT path");
+    assert!(device.is_using_native());
+    device.set_analysis_type(2);
+    device.set_timestep(0.01);
+
+    for (time, expected) in [
+        (0.75, 0.0_f64),
+        (1.0, 1.0_f64),
+        (1.25, 0.0_f64),
+        (1.5, 1.0_f64),
+    ] {
+        device.set_time(time);
+        let currents = device
+            .try_evaluate()
+            .expect("canonical timer current evaluation succeeds");
+        assert_eq!(currents[0].to_bits(), expected.to_bits(), "time: {time}");
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"
