@@ -3897,7 +3897,12 @@ fn lower_constant_rhs_arithmetic(ops: &mut Vec<NativeOp>, instruction: &Instruct
     let Some(NativeOp::Const(value)) = ops.last().copied() else {
         return false;
     };
-    if matches!(instruction, Instruction::Add) && value.to_bits() == 0.0_f64.to_bits() {
+    let is_identity_rhs = match instruction {
+        Instruction::Sub => value.to_bits() == 0.0_f64.to_bits(),
+        Instruction::Mul | Instruction::Div => value.to_bits() == 1.0_f64.to_bits(),
+        _ => false,
+    };
+    if is_identity_rhs {
         ops.pop();
         return true;
     }
@@ -5118,6 +5123,7 @@ endmodule
                 NativeOp::Const(1.0),
                 NativeOp::FlickerNoise,
                 NativeOp::Add,
+                NativeOp::AddConst(0.0),
             ]
         );
         assert_eq!(program.max_stack_depth(), 3);
@@ -5374,7 +5380,7 @@ endmodule
     }
 
     #[test]
-    fn drops_positive_zero_rhs_add_without_runtime_op() {
+    fn keeps_positive_zero_rhs_add_to_preserve_signed_zero() {
         let program = BytecodeProgram {
             instructions: vec![
                 Instruction::PushTemperature,
@@ -5389,10 +5395,74 @@ endmodule
             &program,
             limits(0, 0),
         )
-        .expect("positive RHS zero addition should lower away");
+        .expect("positive RHS zero addition should remain explicit");
 
         assert_eq!(lowered.max_stack_depth(), 1);
-        assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature]);
+        assert_eq!(
+            lowered.ops(),
+            &[NativeOp::LoadTemperature, NativeOp::AddConst(0.0)]
+        );
+    }
+
+    #[test]
+    fn drops_rhs_arithmetic_identities_without_runtime_ops() {
+        let cases = [
+            ("sub-positive-zero", Instruction::Sub, 0.0),
+            ("mul-one", Instruction::Mul, 1.0),
+            ("div-one", Instruction::Div, 1.0),
+        ];
+
+        for (name, instruction, literal) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(literal),
+                    instruction.clone(),
+                ],
+            };
+
+            let lowered =
+                NativeProgram::from_bytecode(name, EntryKind::Assignment, &program, limits(0, 0))
+                    .expect("RHS arithmetic identity should lower away");
+
+            assert_eq!(lowered.max_stack_depth(), 1, "{name}");
+            assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature], "{name}");
+        }
+    }
+
+    #[test]
+    fn keeps_rhs_arithmetic_non_identities_as_runtime_ops() {
+        let cases = [
+            ("sub-negative-zero", Instruction::Sub, -0.0),
+            ("mul-negative-one", Instruction::Mul, -1.0),
+            ("div-negative-one", Instruction::Div, -1.0),
+        ];
+
+        for (name, instruction, literal) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(literal),
+                    instruction.clone(),
+                ],
+            };
+
+            let lowered =
+                NativeProgram::from_bytecode(name, EntryKind::Assignment, &program, limits(0, 0))
+                    .expect("non-identity RHS arithmetic literal should remain explicit");
+
+            assert_eq!(lowered.max_stack_depth(), 1, "{name}");
+            let [NativeOp::LoadTemperature, op] = lowered.ops() else {
+                panic!("{name}: expected load plus explicit constant op, got {lowered:?}");
+            };
+            let value = match (instruction, *op) {
+                (Instruction::Sub, NativeOp::SubConst(value))
+                | (Instruction::Mul, NativeOp::MulConst(value))
+                | (Instruction::Div, NativeOp::DivConst(value)) => value,
+                _ => panic!("{name}: unexpected native op {op:?}"),
+            };
+            assert_eq!(value.to_bits(), literal.to_bits(), "{name}");
+        }
     }
 
     #[test]
