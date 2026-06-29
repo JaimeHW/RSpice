@@ -3456,6 +3456,10 @@ fn stamp() {
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
+        assert!(
+            !support.contains("fn store_add_scaled_inputs3_div_scaled_third_components"),
+            "{support}"
+        );
 
         let source = r#"
 fn stamp() {
@@ -5308,6 +5312,49 @@ fn stamp() {
                 "self.node_derivatives[index][axis] = (((self.node_derivatives[first][axis] * first_scale + self.node_derivatives[second][axis] * second_scale) + self.node_derivatives[third][axis] * third_scale) + self.node_derivatives[fourth][axis] * fourth_scale) * reciprocal + denominator.node_derivatives[axis] * denominator_derivative_scale;"
             ),
             "{div_inputs4_mixed_iiiia}"
+        );
+
+        for signature in [
+            "fn store_add_scaled_inputs3_div_scaled_third_indices(",
+            "fn store_add_scaled_inputs3_div_scaled_third_mixed_iaii(",
+            "fn store_add_scaled_inputs3_div_scaled_third_mixed_aaii(",
+            "fn store_add_scaled_inputs3_div_scaled_third_ad(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                !body.contains("_node_derivatives = self.node_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("_branch_derivatives = self.branch_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_add_scaled_inputs3_div_scaled_third_components"),
+                "{body}"
+            );
+        }
+
+        let add_inputs3_div = helper_body(
+            &support,
+            "fn store_add_scaled_inputs3_div_scaled_third_indices(",
+        );
+        assert!(
+            add_inputs3_div.contains(
+                "self.node_derivatives[index][axis] = (self.node_derivatives[first][axis] * first_scale + self.node_derivatives[second][axis] * second_scale) + self.node_derivatives[numerator][axis] * numerator_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale;"
+            ),
+            "{add_inputs3_div}"
+        );
+
+        let add_inputs3_div_mixed = helper_body(
+            &support,
+            "fn store_add_scaled_inputs3_div_scaled_third_mixed_iaii(",
+        );
+        assert!(
+            add_inputs3_div_mixed.contains(
+                "self.node_derivatives[index][axis] = (self.node_derivatives[first][axis] * first_scale + second.node_derivatives[axis] * second_scale) + self.node_derivatives[numerator][axis] * numerator_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale;"
+            ),
+            "{add_inputs3_div_mixed}"
         );
 
         for signature in [
@@ -12940,20 +12987,15 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-        "    fn store_add_scaled_inputs3_div_scaled_third_components(&mut self, index: usize, first_raw: f64, first_node_derivatives: [f64; Instance::NODE_COUNT], first_branch_derivatives: [f64; Instance::BRANCH_COUNT], first_scale: f64, second_raw: f64, second_node_derivatives: [f64; Instance::NODE_COUNT], second_branch_derivatives: [f64; Instance::BRANCH_COUNT], second_scale: f64, numerator_raw: f64, numerator_node_derivatives: [f64; Instance::NODE_COUNT], numerator_branch_derivatives: [f64; Instance::BRANCH_COUNT], numerator_scale: f64, denominator_raw: f64, denominator_node_derivatives: [f64; Instance::NODE_COUNT], denominator_branch_derivatives: [f64; Instance::BRANCH_COUNT], denominator_scale: f64, third_scale: f64) {",
-        "        let denominator_value = denominator_raw * denominator_scale;",
+        "    fn store_add_scaled_inputs3_div_scaled_third_ad(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, numerator: AdValue, numerator_scale: f64, denominator: AdValue, denominator_scale: f64, third_scale: f64) {",
+        "        let denominator_value = denominator.value * denominator_scale;",
         "        let reciprocal = 1.0 / denominator_value;",
-        "        let quotient = numerator_raw * numerator_scale * reciprocal;",
+        "        let quotient = numerator.value * numerator_scale * reciprocal;",
         "        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;",
         "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;",
-        "        self.values[index] = (first_raw * first_scale + second_raw * second_scale) + quotient * third_scale;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (first_node_derivatives[axis] * first_scale + second_node_derivatives[axis] * second_scale) + numerator_node_derivatives[axis] * numerator_derivative_scale + denominator_node_derivatives[axis] * denominator_derivative_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (first_branch_derivatives[axis] * first_scale + second_branch_derivatives[axis] * second_scale) + numerator_branch_derivatives[axis] * numerator_derivative_scale + denominator_branch_derivatives[axis] * denominator_derivative_scale; }",
-        "    }",
-        "",
-        "    #[inline]",
-        "    fn store_add_scaled_inputs3_div_scaled_third_ad(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, numerator: AdValue, numerator_scale: f64, denominator: AdValue, denominator_scale: f64, third_scale: f64) {",
-        "        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.node_derivatives, first.branch_derivatives, first_scale, second.value, second.node_derivatives, second.branch_derivatives, second_scale, numerator.value, numerator.node_derivatives, numerator.branch_derivatives, numerator_scale, denominator.value, denominator.node_derivatives, denominator.branch_derivatives, denominator_scale, third_scale);",
+        "        self.values[index] = (first.value * first_scale + second.value * second_scale) + quotient * third_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (first.node_derivatives[axis] * first_scale + second.node_derivatives[axis] * second_scale) + numerator.node_derivatives[axis] * numerator_derivative_scale + denominator.node_derivatives[axis] * denominator_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (first.branch_derivatives[axis] * first_scale + second.branch_derivatives[axis] * second_scale) + numerator.branch_derivatives[axis] * numerator_derivative_scale + denominator.branch_derivatives[axis] * denominator_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -19556,19 +19598,33 @@ fn generate_index_or_mixed_div_scaled_inputs3_helper(mask: &str) -> String {
 }
 
 fn generate_index_or_mixed_add_scaled_inputs3_div_scaled_third_helper(mask: &str) -> String {
-    let operands = ["first", "second", "numerator", "denominator"];
     let helper = index_or_mixed_helper_name("store_add_scaled_inputs3_div_scaled_third", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let first = mixed_helper_component_args(mask, 0, "first");
-    let second = mixed_helper_component_args(mask, 1, "second");
-    let numerator = mixed_helper_component_args(mask, 2, "numerator");
-    let denominator = mixed_helper_component_args(mask, 3, "denominator");
+    let first_value = index_or_mixed_value_expr(mask, 0, "first");
+    let second_value = index_or_mixed_value_expr(mask, 1, "second");
+    let numerator_value = index_or_mixed_value_expr(mask, 2, "numerator");
+    let denominator_value = index_or_mixed_value_expr(mask, 3, "denominator");
+    let first_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "first");
+    let second_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "second");
+    let numerator_node_derivative = index_or_mixed_node_derivative_expr(mask, 2, "numerator");
+    let denominator_node_derivative = index_or_mixed_node_derivative_expr(mask, 3, "denominator");
+    let first_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "first");
+    let second_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "second");
+    let numerator_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 2, "numerator");
+    let denominator_branch_derivative =
+        index_or_mixed_branch_derivative_expr(mask, 3, "denominator");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, first: {first_ty}, first_scale: f64, second: {second_ty}, second_scale: f64, numerator: {numerator_ty}, numerator_scale: f64, denominator: {denominator_ty}, denominator_scale: f64, third_scale: f64) {{
-{locals}        self.store_add_scaled_inputs3_div_scaled_third_components(index, {first}, first_scale, {second}, second_scale, {numerator}, numerator_scale, {denominator}, denominator_scale, third_scale);
+        let denominator_value = {denominator_value} * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = {numerator_value} * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.values[index] = ({first_value} * first_scale + {second_value} * second_scale) + quotient * third_scale;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = ({first_node_derivative} * first_scale + {second_node_derivative} * second_scale) + {numerator_node_derivative} * numerator_derivative_scale + {denominator_node_derivative} * denominator_derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = ({first_branch_derivative} * first_scale + {second_branch_derivative} * second_scale) + {numerator_branch_derivative} * numerator_derivative_scale + {denominator_branch_derivative} * denominator_derivative_scale; }}
     }}
 "#,
         first_ty = mixed_helper_type(mask, 0),
