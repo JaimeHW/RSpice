@@ -2823,6 +2823,9 @@ impl FunctionCompiler {
     }
 
     fn emit_i64_subtract(&mut self, target: Gpr, value: i64) {
+        if value == 0 {
+            return;
+        }
         if let Ok(value) = i32::try_from(value) {
             self.encoder.sub_r64_imm32(target, value);
         } else {
@@ -4312,6 +4315,43 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_zero_based_dynamic_variable_read_skips_lower_subtract() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushParam(0),
+                Instruction::PushVariableDyn {
+                    base: 0,
+                    len: 4,
+                    lower: 0,
+                },
+            ],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile zero-based dynamic read");
+        assert!(
+            !contains_bytes(&bytes, &sub_r64_imm32_bytes(Gpr::R10, 0)),
+            "zero-based dynamic read fast path should not emit a no-op lower-bound subtract"
+        );
+        assert!(
+            contains_bytes(&bytes, &cmp_r64_imm32_bytes(Gpr::R10, 4)),
+            "zero-based dynamic read fast path should still bounds-check the normalized index"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate zero-based dynamic read");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let vars = [2.0_f64, 4.0, 8.0, 16.0];
+        let ctx = eval_context(&[2.49], &[], &[], &[]);
+        clear_native_runtime_error();
+
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 8.0_f64.to_bits());
+        assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
     fn generated_value_leaf_keeps_full_stack_dynamic_variable_read_on_spill_path() {
         let program = native_program(
             EntryKind::StampValue,
@@ -4663,6 +4703,42 @@ mod tests {
         f(&ctx, vars.as_mut_ptr());
 
         assert_eq!(vars, [0.0, 12.0, 4.0, 8.0]);
+        assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
+    fn generated_assignment_pass_zero_based_indexed_assignment_skips_lower_subtract() {
+        let assignments = [NativeAssignment::Indexed {
+            base: 0,
+            len: 4,
+            lower: 0,
+            index: native_program(EntryKind::Assignment, vec![Instruction::PushParam(0)], 0),
+            value: native_program(EntryKind::Assignment, vec![Instruction::PushParam(1)], 0),
+        }];
+        let bytes = compile_assignment_pass_function(&assignments)
+            .expect("compile zero-based indexed assignment pass");
+        assert!(
+            !contains_bytes(&bytes, &sub_r64_imm32_bytes(Gpr::R10, 0)),
+            "zero-based indexed write fast path should not emit a no-op lower-bound subtract"
+        );
+        assert!(
+            contains_bytes(&bytes, &cmp_r64_imm32_bytes(Gpr::R10, 4)),
+            "zero-based indexed write fast path should still bounds-check the normalized index"
+        );
+
+        let memory =
+            ExecutableMemory::allocate(&bytes).expect("allocate zero-based indexed assignment");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *mut f64) = unsafe { std::mem::transmute(entry) };
+
+        let params = [2.49_f64, 13.0];
+        let mut vars = [2.0_f64, 4.0, 8.0, 16.0];
+        let ctx = eval_context(&params, &[], &[], &[]);
+        clear_native_runtime_error();
+
+        f(&ctx, vars.as_mut_ptr());
+
+        assert_eq!(vars, [2.0, 4.0, 13.0, 16.0]);
         assert!(take_native_runtime_error().is_none());
     }
 
