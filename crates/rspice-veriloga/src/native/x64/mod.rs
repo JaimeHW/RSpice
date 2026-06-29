@@ -443,10 +443,12 @@ endmodule
 module native_canonical_unsupported(p, n);
   inout p, n;
   electrical p, n;
-  real x;
+  real x[0:1];
+  integer i;
   analog begin
-    x = 1.0;
-    I(p, n) <+ x;
+    i = 0;
+    x[i] = 1.0;
+    I(p, n) <+ x[i];
   end
 endmodule
 "#;
@@ -460,9 +462,7 @@ endmodule
             .expect_err("unsupported canonical stamp must not fall back to bytecode");
 
         assert!(
-            error
-                .to_string()
-                .contains("native JIT does not support canonical op expression identifier x"),
+            error.to_string().contains("expression kind array access"),
             "{error}"
         );
     }

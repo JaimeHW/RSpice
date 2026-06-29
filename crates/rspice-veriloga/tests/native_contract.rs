@@ -1398,16 +1398,55 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_stamps_assignment_fed_variable_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_assignment_fed(p, n);
+    inout p, n;
+    electrical p, n;
+    real g;
+    analog begin
+        g = 0.25;
+        I(p, n) <+ g * V(p, n);
+    end
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("ACANON1", model, &artifact, &[1, 0])
+            .expect("assignment-fed stamp uses canonical native JIT path");
+    assert!(device.is_using_native());
+
+    let (matrix, rhs) = stamp_device(&mut device, &[8.0]);
+
+    assert!(
+        (matrix.get(&(0, 0)).copied().unwrap_or_default() - 0.25).abs() < 1e-12,
+        "matrix: {matrix:?}"
+    );
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
+        "rhs: {rhs:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"
 module native_canonical_cache_guard(p, n);
     inout p, n;
     electrical p, n;
-    real x;
+    real x[0:1];
+    integer i;
     analog begin
-        x = 1.0;
-        I(p, n) <+ x;
+        i = 0;
+        x[i] = 1.0;
+        I(p, n) <+ x[i];
     end
 endmodule
 "#;
@@ -1431,9 +1470,7 @@ endmodule
     .expect_err("canonical-native path must not reuse cached bytecode-native image");
 
     assert!(
-        error
-            .to_string()
-            .contains("native JIT does not support canonical op expression identifier x"),
+        error.to_string().contains("expression kind array access"),
         "{error}"
     );
 }
