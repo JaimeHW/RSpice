@@ -2689,7 +2689,7 @@ impl Instance {
             s.store_ln_ad(168, A::offset(A::limited_exp(s.ad_value(167)), 1.0));
         }
 
-        s.store_offset_sub_scaled_inputs(227, s.ad_value(168), (2.0 / p.p1146), s.ad_value(226), 1.0, (-((2.0 / p.p1146) * ((2.0) as f64).ln())));
+        s.store_offset_sub_scaled_inputs_indices(227, 168, (2.0 / p.p1146), 226, 1.0, (-((2.0 / p.p1146) * ((2.0) as f64).ln())));
 
         s.store_add_scaled_inputs3_indices(218, 224, (-1.0), 226, (-0.5), 227, (-(-0.5)));
 
@@ -2806,7 +2806,7 @@ impl Instance {
 
         s.store_mul_neg_ad_lhs(292, A::add_scaled_product(s.ad_value(732), 1.0, s.ad_value(733), s.ad_value(218), 1.0), 227);
 
-        s.store_offset_sub_scaled_inputs(292, s.ad_value(292), 0.5, A::sqrt_square_offset(s.ad_value(292), ((0.25 * 5e-5) * 5e-5)), 0.5, (0.25 * 5e-5));
+        s.store_offset_sub_scaled_inputs_mixed_ia(292, 292, 0.5, A::sqrt_square_offset(s.ad_value(292), ((0.25 * 5e-5) * 5e-5)), 0.5, (0.25 * 5e-5));
 
         s.store_mul_offset_rhs_ad(293, A::add_scaled_product(A::offset(s.ad_value(679), (p.p1077 / s.v[184])), 1.0, s.ad_value(680), s.ad_value(218), 1.0), A::powf(s.ad_value(639), p.p1076), (-1.0));
 

@@ -77,7 +77,7 @@ impl Instance {
             s.store_ln_one_plus_exp(2, 1);
         }
 
-        s.store_offset_sub_scaled_inputs(22, s.ad_value(2), (2.0 / p.p31), s.ad_value(21), 1.0, (-((2.0 / p.p31) * ((2.0) as f64).ln())));
+        s.store_offset_sub_scaled_inputs_indices(22, 2, (2.0 / p.p31), 21, 1.0, (-((2.0 / p.p31) * ((2.0) as f64).ln())));
 
         s.store_add_scaled_inputs3_indices(15, 19, (-1.0), 21, (-0.5), 22, (-(-0.5)));
 

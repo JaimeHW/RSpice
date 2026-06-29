@@ -2521,8 +2521,8 @@ impl Instance {
         if s.b[3327] {
             s.store_scale(706, 358, s.v[365]);
             s.store_scale(707, 359, s.v[365]);
-            s.store_offset_sub_scaled_inputs(703, s.ad_value(299), (-s.v[365]), s.ad_value(298), s.v[365], s.v[703]);
-            s.store_offset_sub_scaled_inputs(704, s.ad_value(301), (-s.v[365]), s.ad_value(297), s.v[365], s.v[704]);
+            s.store_offset_sub_scaled_inputs_indices(703, 299, (-s.v[365]), 298, s.v[365], s.v[703]);
+            s.store_offset_sub_scaled_inputs_indices(704, 301, (-s.v[365]), 297, s.v[365], s.v[704]);
         }
 
         s.store_scaled_add(709, 280, 287, s.v[365]);
