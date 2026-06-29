@@ -756,20 +756,15 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_add_scaled_inputs3_div_scaled_third_components(&mut self, index: usize, first_raw: f64, first_dn: [f64; NODE_COUNT], first_db: [f64; BRANCH_COUNT], first_scale: f64, second_raw: f64, second_dn: [f64; NODE_COUNT], second_db: [f64; BRANCH_COUNT], second_scale: f64, numerator_raw: f64, numerator_dn: [f64; NODE_COUNT], numerator_db: [f64; BRANCH_COUNT], numerator_scale: f64, denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT], denominator_scale: f64, third_scale: f64) {
-        let denominator_value = denominator_raw * denominator_scale;
+    pub(crate) fn store_add_scaled_inputs3_div_scaled_third_ad(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
+        let denominator_value = denominator.value * denominator_scale;
         let reciprocal = 1.0 / denominator_value;
-        let quotient = numerator_raw * numerator_scale * reciprocal;
+        let quotient = numerator.value * numerator_scale * reciprocal;
         let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
         let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
-        self.v[index] = (first_raw * first_scale + second_raw * second_scale) + quotient * third_scale;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first_dn[axis] * first_scale + second_dn[axis] * second_scale) + numerator_dn[axis] * numerator_derivative_scale + denominator_dn[axis] * denominator_derivative_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first_db[axis] * first_scale + second_db[axis] * second_scale) + numerator_db[axis] * numerator_derivative_scale + denominator_db[axis] * denominator_derivative_scale; }
-    }
-
-    #[inline]
-    pub(crate) fn store_add_scaled_inputs3_div_scaled_third_ad(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        self.v[index] = (first.value * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
     #[inline]
@@ -7943,10 +7938,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aaai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -7984,10 +7983,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aaia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -8025,13 +8028,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aaii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -8069,10 +8073,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aiaa(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + self.dn[second][axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + self.db[second][axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -8110,13 +8118,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aiai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + self.dn[second][axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + self.db[second][axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -8154,13 +8163,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aiia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + self.dn[second][axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + self.db[second][axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -8198,16 +8208,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aiii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + self.dn[second][axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + self.db[second][axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -8245,10 +8253,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iaaa(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + second.dn[axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + second.db[axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -8286,13 +8298,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iaai(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + second.dn[axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + second.db[axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -8330,13 +8343,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iaia(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + second.dn[axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + second.db[axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -8374,16 +8388,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iaii(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + second.dn[axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + second.db[axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -8421,13 +8433,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iiaa(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + self.db[second][axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -8465,16 +8478,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iiai(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + self.db[second][axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -8512,16 +8523,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iiia(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + self.db[second][axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -8559,19 +8568,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + self.db[second][axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -15669,20 +15673,15 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_add_scaled_inputs3_div_scaled_third_components(&mut self, index: usize, first_raw: f64, first_dn: [f64; NODE_COUNT], first_db: [f64; BRANCH_COUNT], first_scale: f64, second_raw: f64, second_dn: [f64; NODE_COUNT], second_db: [f64; BRANCH_COUNT], second_scale: f64, numerator_raw: f64, numerator_dn: [f64; NODE_COUNT], numerator_db: [f64; BRANCH_COUNT], numerator_scale: f64, denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT], denominator_scale: f64, third_scale: f64) {
-        let denominator_value = denominator_raw * denominator_scale;
+    pub(crate) fn store_add_scaled_inputs3_div_scaled_third_ad(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
+        let denominator_value = denominator.value * denominator_scale;
         let reciprocal = 1.0 / denominator_value;
-        let quotient = numerator_raw * numerator_scale * reciprocal;
+        let quotient = numerator.value * numerator_scale * reciprocal;
         let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
         let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
-        self.v[index] = (first_raw * first_scale + second_raw * second_scale) + quotient * third_scale;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first_dn[axis] * first_scale + second_dn[axis] * second_scale) + numerator_dn[axis] * numerator_derivative_scale + denominator_dn[axis] * denominator_derivative_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first_db[axis] * first_scale + second_db[axis] * second_scale) + numerator_db[axis] * numerator_derivative_scale + denominator_db[axis] * denominator_derivative_scale; }
-    }
-
-    #[inline]
-    pub(crate) fn store_add_scaled_inputs3_div_scaled_third_ad(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        self.v[index] = (first.value * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
     #[inline]
@@ -22856,10 +22855,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aaai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -22897,10 +22900,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aaia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -22938,13 +22945,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aaii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -22982,10 +22990,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aiaa(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + self.dn[second][axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + self.db[second][axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -23023,13 +23035,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aiai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + self.dn[second][axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + self.db[second][axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -23067,13 +23080,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aiia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + self.dn[second][axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + self.db[second][axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -23111,16 +23125,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_aiii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (first.value * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + self.dn[second][axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + self.db[second][axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -23158,10 +23170,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iaaa(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + second.dn[axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + second.db[axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -23199,13 +23215,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iaai(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + second.dn[axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + second.db[axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -23243,13 +23260,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iaia(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + second.dn[axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + second.db[axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -23287,16 +23305,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iaii(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + second.value * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + second.dn[axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + second.db[axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -23334,13 +23350,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iiaa(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + self.db[second][axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -23378,16 +23395,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iiai(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, numerator.value, numerator.dn, numerator.db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator.value * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale) + numerator.dn[axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + self.db[second][axis] * second_scale) + numerator.db[axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
@@ -23425,16 +23440,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_mixed_iiia(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator.value, denominator.dn, denominator.db, denominator_scale, third_scale);
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + self.db[second][axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + denominator.db[axis] * denominator_derivative_scale; }
     }
 
 
@@ -23472,19 +23485,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_div_scaled_third_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64, third_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        let numerator_value = self.v[numerator];
-        let numerator_dn = self.dn[numerator];
-        let numerator_db = self.db[numerator];
-        let denominator_value = self.v[denominator];
-        let denominator_dn = self.dn[denominator];
-        let denominator_db = self.db[denominator];
-        self.store_add_scaled_inputs3_div_scaled_third_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, numerator_value, numerator_dn, numerator_db, numerator_scale, denominator_value, denominator_dn, denominator_db, denominator_scale, third_scale);
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = self.v[numerator] * numerator_scale * reciprocal;
+        let numerator_derivative_scale = numerator_scale * reciprocal * third_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * third_scale;
+        self.v[index] = (self.v[first] * first_scale + self.v[second] * second_scale) + quotient * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale) + self.dn[numerator][axis] * numerator_derivative_scale + self.dn[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + self.db[second][axis] * second_scale) + self.db[numerator][axis] * numerator_derivative_scale + self.db[denominator][axis] * denominator_derivative_scale; }
     }
 
 
