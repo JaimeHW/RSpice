@@ -1570,6 +1570,9 @@ impl NativeProgram {
                     if lower_constant_square_power(&mut ops) {
                         continue;
                     }
+                    if lower_constant_identity_power(&mut ops) {
+                        continue;
+                    }
                     ops.push(NativeOp::BinaryMath(BinaryMathOp::Pow));
                 }
                 Instruction::Atan2 | Instruction::Mod => {
@@ -3771,6 +3774,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     fn append_binary_math_op(&mut self, op: BinaryMathOp) -> JitResult<()> {
         if lower_constant_binary_math(&mut self.ops, op)
             || (op == BinaryMathOp::Pow && lower_constant_square_power(&mut self.ops))
+            || (op == BinaryMathOp::Pow && lower_constant_identity_power(&mut self.ops))
         {
             return Ok(());
         }
@@ -4301,6 +4305,18 @@ fn lower_constant_square_power(ops: &mut Vec<NativeOp>) -> bool {
     } else {
         false
     }
+}
+
+fn lower_constant_identity_power(ops: &mut Vec<NativeOp>) -> bool {
+    let Some(NativeOp::Const(value)) = ops.last() else {
+        return false;
+    };
+    if value.to_bits() != 1.0_f64.to_bits() {
+        return false;
+    }
+
+    ops.pop();
+    true
 }
 
 fn lower_constant_binary_math(ops: &mut Vec<NativeOp>, op: BinaryMathOp) -> bool {
@@ -6215,6 +6231,40 @@ endmodule
     }
 
     #[test]
+    fn lowers_canonical_identity_power_to_native_base_expression() {
+        let source = r#"
+module mir_identity_pow(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ pow(V(p, n), 1.0);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_identity_pow",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower canonical identity power to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[NativeOp::LoadVoltage {
+                pos: VoltageNode::Terminal(0),
+                neg: VoltageNode::Terminal(1),
+            }]
+        );
+        assert_eq!(program.max_stack_depth(), 1);
+    }
+
+    #[test]
     fn lowers_canonical_hypot_intrinsic_to_native_program() {
         let source = r#"
 module mir_hypot(p, n);
@@ -7757,6 +7807,30 @@ endmodule
                 lowered.ops(),
                 &[NativeOp::LoadTemperature, NativeOp::Square]
             );
+            assert_eq!(lowered.max_stack_depth(), 1);
+        }
+    }
+
+    #[test]
+    fn lowers_constant_identity_power_as_native_base_expression() {
+        for instruction in [Instruction::Pow, Instruction::FnPow] {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(1.0),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "identity-power",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant-one power keeps the base expression without helper call");
+
+            assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature]);
             assert_eq!(lowered.max_stack_depth(), 1);
         }
     }
