@@ -145,6 +145,20 @@ pub extern "C" fn rspice_native_state_values_error() {
     );
 }
 
+#[unsafe(export_name = "rspice_native_current_probe_error")]
+pub extern "C" fn rspice_native_current_probe_error() {
+    set_native_runtime_error(
+        "native current probe missing terminal-pair current storage; no interpreter fallback",
+    );
+}
+
+#[unsafe(export_name = "rspice_native_prior_current_error")]
+pub extern "C" fn rspice_native_prior_current_error() {
+    set_native_runtime_error(
+        "native prior current load missing contribution current storage; no interpreter fallback",
+    );
+}
+
 /// External helper function for table lookup interpolation.
 ///
 /// # Safety
