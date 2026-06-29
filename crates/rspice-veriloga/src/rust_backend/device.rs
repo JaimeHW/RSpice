@@ -5209,6 +5209,64 @@ fn stamp() {
             "{offset_limited_exp_div}"
         );
 
+        for component in [
+            "fn store_offset_lhs_mixed_components",
+            "fn store_offset_lhs_ad_rhs_components",
+            "fn store_offset_rhs_ad_lhs_components",
+        ] {
+            assert!(!support.contains(component), "{component}\n{support}");
+        }
+
+        for signature in [
+            "fn store_add_offset_lhs(",
+            "fn store_add_offset_ad_lhs(",
+            "fn store_add_offset_lhs_ad_rhs(",
+            "fn store_add_offset_rhs_ad_lhs(",
+            "fn store_sub_offset_lhs(",
+            "fn store_sub_offset_rhs(",
+            "fn store_sub_offset_ad_lhs(",
+            "fn store_sub_offset_lhs_ad_rhs(",
+            "fn store_sub_offset_rhs_ad_lhs(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                !body.contains("_node_derivatives = self.node_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("_branch_derivatives = self.branch_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_offset_lhs_mixed_components"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_offset_lhs_ad_rhs_components"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_offset_rhs_ad_lhs_components"),
+                "{body}"
+            );
+        }
+
+        let add_offset_lhs = helper_body(&support, "fn store_add_offset_lhs(");
+        assert!(
+            add_offset_lhs.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] + self.node_derivatives[right][axis];"
+            ),
+            "{add_offset_lhs}"
+        );
+
+        let sub_offset_rhs = helper_body(&support, "fn store_sub_offset_rhs(");
+        assert!(
+            sub_offset_rhs.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] - self.node_derivatives[right][axis];"
+            ),
+            "{sub_offset_rhs}"
+        );
+
         for signature in [
             "fn store_add_scaled_product_indices(",
             "fn store_add_scaled_offset_product_rhs(",
@@ -15370,72 +15428,66 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-        "    fn store_offset_lhs_mixed_components(&mut self, index: usize, left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], offset: f64, right: usize, right_scale: f64) {",
-        "        let right_value = self.values[right];",
-        "        let right_node_derivatives = self.node_derivatives[right];",
-        "        let right_branch_derivatives = self.branch_derivatives[right];",
-        "        self.values[index] = left_value + offset + right_value * right_scale;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] + right_node_derivatives[axis] * right_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] + right_branch_derivatives[axis] * right_scale; }",
-        "    }",
-        "",
-        "    #[inline]",
-        "    fn store_offset_lhs_ad_rhs_components(&mut self, index: usize, left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], offset: f64, right_value: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_scale: f64) {",
-        "        self.values[index] = left_value + offset + right_value * right_scale;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] + right_node_derivatives[axis] * right_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] + right_branch_derivatives[axis] * right_scale; }",
-        "    }",
-        "",
-        "    #[inline]",
-        "    fn store_offset_rhs_ad_lhs_components(&mut self, index: usize, left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_value: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], offset: f64, right_scale: f64) {",
-        "        self.values[index] = left_value + (right_value + offset) * right_scale;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] + right_node_derivatives[axis] * right_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] + right_branch_derivatives[axis] * right_scale; }",
-        "    }",
-        "",
-        "    #[inline]",
         "    fn store_add_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {",
-        "        self.store_offset_lhs_mixed_components(index, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], offset, right, 1.0);",
+        "        self.values[index] = self.values[left] + offset + self.values[right];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] + self.node_derivatives[right][axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] + self.branch_derivatives[right][axis]; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_add_offset_ad_lhs(&mut self, index: usize, left: AdValue, offset: f64, right: usize) {",
-        "        self.store_offset_lhs_mixed_components(index, left.value, left.node_derivatives, left.branch_derivatives, offset, right, 1.0);",
+        "        self.values[index] = left.value + offset + self.values[right];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] + self.node_derivatives[right][axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] + self.branch_derivatives[right][axis]; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_add_offset_lhs_ad_rhs(&mut self, index: usize, left: usize, offset: f64, right: AdValue) {",
-        "        self.store_offset_lhs_ad_rhs_components(index, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], offset, right.value, right.node_derivatives, right.branch_derivatives, 1.0);",
+        "        self.values[index] = self.values[left] + offset + right.value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] + right.node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] + right.branch_derivatives[axis]; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_add_offset_rhs_ad_lhs(&mut self, index: usize, left: AdValue, right: usize, offset: f64) {",
-        "        self.store_offset_rhs_ad_lhs_components(index, left.value, left.node_derivatives, left.branch_derivatives, self.values[right], self.node_derivatives[right], self.branch_derivatives[right], offset, 1.0);",
+        "        self.values[index] = left.value + (self.values[right] + offset);",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] + self.node_derivatives[right][axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] + self.branch_derivatives[right][axis]; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_sub_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {",
-        "        self.store_offset_lhs_mixed_components(index, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], offset, right, -1.0);",
+        "        self.values[index] = self.values[left] + offset - self.values[right];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] - self.node_derivatives[right][axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] - self.branch_derivatives[right][axis]; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_sub_offset_rhs(&mut self, index: usize, left: usize, right: usize, offset: f64) {",
-        "        self.store_offset_rhs_ad_lhs_components(index, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], self.values[right], self.node_derivatives[right], self.branch_derivatives[right], offset, -1.0);",
+        "        self.values[index] = self.values[left] - (self.values[right] + offset);",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] - self.node_derivatives[right][axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] - self.branch_derivatives[right][axis]; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_sub_offset_ad_lhs(&mut self, index: usize, left: AdValue, offset: f64, right: usize) {",
-        "        self.store_offset_lhs_mixed_components(index, left.value, left.node_derivatives, left.branch_derivatives, offset, right, -1.0);",
+        "        self.values[index] = left.value + offset - self.values[right];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] - self.node_derivatives[right][axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] - self.branch_derivatives[right][axis]; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_sub_offset_lhs_ad_rhs(&mut self, index: usize, left: usize, offset: f64, right: AdValue) {",
-        "        self.store_offset_lhs_ad_rhs_components(index, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], offset, right.value, right.node_derivatives, right.branch_derivatives, -1.0);",
+        "        self.values[index] = self.values[left] + offset - right.value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] - right.node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] - right.branch_derivatives[axis]; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_sub_offset_rhs_ad_lhs(&mut self, index: usize, left: AdValue, right: usize, offset: f64) {",
-        "        self.store_offset_rhs_ad_lhs_components(index, left.value, left.node_derivatives, left.branch_derivatives, self.values[right], self.node_derivatives[right], self.branch_derivatives[right], offset, -1.0);",
+        "        self.values[index] = left.value - (self.values[right] + offset);",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] - self.node_derivatives[right][axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] - self.branch_derivatives[right][axis]; }",
         "    }",
         "",
         "    #[inline]",
