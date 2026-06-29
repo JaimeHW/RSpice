@@ -2344,8 +2344,12 @@ impl FunctionCompiler {
         self.emit_context_pointer_load(ctx_field_offset);
         self.encoder
             .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(pos_index)?);
-        self.encoder
-            .subsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(neg_index)?);
+        if pos_index == neg_index {
+            self.encoder.subsd_xmm_xmm(dst, dst);
+        } else {
+            self.encoder
+                .subsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(neg_index)?);
+        }
         Ok(())
     }
 
@@ -4437,28 +4441,76 @@ mod tests {
     }
 
     #[test]
-    fn generated_value_leaf_same_node_voltage_preserves_nan_subtraction() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![Instruction::PushVoltage(0, 0)],
-            1,
-        );
+    fn generated_value_leaf_same_node_voltage_subtracts_in_register() {
+        let cases = [
+            (
+                "terminal",
+                native_program(
+                    EntryKind::StampValue,
+                    vec![Instruction::PushVoltage(0, 0)],
+                    1,
+                ),
+                VOLTAGES_OFFSET,
+                0,
+                vec![
+                    (6.25_f64, 0.0_f64),
+                    (-0.0_f64, 0.0_f64),
+                    (f64::INFINITY, f64::NAN),
+                    (f64::from_bits(0x7ff8_0000_0000_0001), f64::NAN),
+                ],
+                false,
+            ),
+            (
+                "internal",
+                native_program_with_internals(
+                    EntryKind::StampValue,
+                    vec![Instruction::PushVoltage(2, 2)],
+                    2,
+                    1,
+                ),
+                INTERNAL_VOLTAGES_OFFSET,
+                0,
+                vec![
+                    (-3.0_f64, 0.0_f64),
+                    (f64::NEG_INFINITY, f64::NAN),
+                    (f64::from_bits(0xfff8_0000_0000_0002), f64::NAN),
+                ],
+                true,
+            ),
+        ];
 
-        let bytes = compile_value_function(&program).expect("compile same-node voltage leaf");
-        assert_eq!(
-            count_bytes(&bytes, &context_pointer_load_bytes(VOLTAGES_OFFSET)),
-            1,
-            "same-node voltage should still reuse one terminal base pointer"
-        );
+        for (name, program, reused_offset, index, values, uses_internal) in cases {
+            let bytes = compile_value_function(&program).expect("compile same-node voltage leaf");
+            assert_eq!(
+                count_bytes(&bytes, &context_pointer_load_bytes(reused_offset)),
+                1,
+                "{name} same-node voltage should still load its base pointer once"
+            );
+            assert!(
+                !contains_bytes(&bytes, &same_storage_voltage_memory_subtract_bytes(index)),
+                "{name} same-node voltage should not reread the same slot for subtraction"
+            );
 
-        let memory = ExecutableMemory::allocate(&bytes).expect("allocate same-node voltage leaf");
-        let entry = memory.ptr_at(0).expect("entry point inside image");
-        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
-            unsafe { std::mem::transmute(entry) };
-        let nan = f64::from_bits(0x7ff8_0000_0000_0001);
-        let ctx = eval_context(&[], &[nan], &[], &[]);
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate same-node voltage leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
 
-        assert!(f(&ctx, std::ptr::null()).is_nan());
+            for (input, expected) in values {
+                let ctx = if uses_internal {
+                    eval_context(&[], &[0.0, 0.0], &[input], &[])
+                } else {
+                    eval_context(&[], &[input], &[], &[])
+                };
+                let got = f(&ctx, std::ptr::null());
+                if expected.is_nan() {
+                    assert!(got.is_nan(), "{name} {input:?}");
+                } else {
+                    assert_eq!(got.to_bits(), expected.to_bits(), "{name} {input:?}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -7353,6 +7405,16 @@ mod tests {
     fn context_pointer_load_bytes(ctx_field_offset: i32) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.mov_r64_m64_base_disp32(Gpr::Rax, entry_ctx_arg_reg(), ctx_field_offset);
+        encoder.into_bytes()
+    }
+
+    fn same_storage_voltage_memory_subtract_bytes(index: usize) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.subsd_xmm_m64_base_disp32(
+            Xmm::Xmm0,
+            Gpr::Rax,
+            super::byte_disp(index).expect("same-node test index fits disp32"),
+        );
         encoder.into_bytes()
     }
 
