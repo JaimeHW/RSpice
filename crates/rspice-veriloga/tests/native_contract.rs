@@ -2916,6 +2916,41 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_hypot_ddx_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_hypot_ddx(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ ddx(hypot(2.0 * V(p, n), V(p, n) + 3.0), V(p, n));
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("HYPOTDDXCANON1", model, &artifact, &[1, 0])
+            .expect("canonical hypot ddx uses native analytic derivative");
+    assert!(device.is_using_native());
+
+    let x = 0.4_f64;
+    device.update_voltages(&[x]);
+    let currents = device
+        .try_evaluate()
+        .expect("canonical hypot ddx evaluation succeeds");
+    let left = 2.0 * x;
+    let right = x + 3.0;
+    let expected = (left * 2.0 + right) / left.hypot(right);
+    assert!(
+        (currents[0] - expected).abs() <= 1.0e-12,
+        "currents: {currents:?}, expected: {expected}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_executes_analysis_aliases_without_fallback() {
     let source = r#"
 `include "disciplines.vams"

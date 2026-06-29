@@ -2856,6 +2856,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.push(NativeOp::Const(0.0))
             }
             "atan2" => self.lower_atan2_derivative(name, args, wrt),
+            "hypot" => self.lower_hypot_derivative(name, args, wrt),
             "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
             | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
             | "flicker_noise" => self.push(NativeOp::Const(0.0)),
@@ -3011,6 +3012,31 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.lower_arg_square(x)?;
         self.lower_arg_square(y)?;
         self.append_arithmetic("Add")?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_hypot_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: NodeId,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 2)?;
+        let left = args[0];
+        let right = args[1];
+
+        self.lower(left)?;
+        self.lower_derivative(left, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.lower(right)?;
+        self.lower_derivative(right, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower(left)?;
+        self.lower(right)?;
+        self.pop_binary("canonical hypot derivative")?;
+        self.append_binary_math_op(BinaryMathOp::Hypot)?;
         self.append_arithmetic("Div")
     }
 
