@@ -768,12 +768,36 @@ impl FunctionCompiler {
             .encoder
             .jcc_rel32_placeholder(ConditionCode::AboveOrEqual);
 
-        self.encoder.sub_rsp_imm32(ROUND_TEMP_FRAME_BYTES);
-        self.encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, target);
+        if self.depth < XMM_STACK.len() {
+            let original = self.scratch_register()?;
+            self.encoder.movsd_xmm_xmm(original, target);
+            self.emit_floor_or_ceil_adjust(target, direction, |compiler, target| {
+                compiler.encoder.ucomisd_xmm_xmm(target, original);
+            })?;
+        } else {
+            self.encoder.sub_rsp_imm32(ROUND_TEMP_FRAME_BYTES);
+            self.encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, target);
+            self.emit_floor_or_ceil_adjust(target, direction, |compiler, target| {
+                compiler
+                    .encoder
+                    .ucomisd_xmm_m64_base_disp32(target, Gpr::Rsp, 0);
+            })?;
+            self.encoder.add_rsp_imm32(ROUND_TEMP_FRAME_BYTES);
+        }
+        self.patch_rel32_to_current(zero)?;
+        self.patch_rel32_to_current(already_integral_or_unordered)?;
+        Ok(())
+    }
+
+    fn emit_floor_or_ceil_adjust(
+        &mut self,
+        target: Xmm,
+        direction: RoundDirection,
+        compare_original: impl FnOnce(&mut Self, Xmm),
+    ) -> JitResult<()> {
         self.encoder.cvttsd2si_r64_xmm(Gpr::R10, target);
         self.encoder.cvtsi2sd_xmm_r64(target, Gpr::R10);
-        self.encoder
-            .ucomisd_xmm_m64_base_disp32(target, Gpr::Rsp, 0);
+        compare_original(self, target);
 
         let skip_adjust = match direction {
             RoundDirection::Floor => self
@@ -790,9 +814,6 @@ impl FunctionCompiler {
         self.encoder.add_r64_imm32(Gpr::R10, adjustment);
         self.patch_rel32_to_current(skip_adjust)?;
         self.encoder.cvtsi2sd_xmm_r64(target, Gpr::R10);
-        self.encoder.add_rsp_imm32(ROUND_TEMP_FRAME_BYTES);
-        self.patch_rel32_to_current(zero)?;
-        self.patch_rel32_to_current(already_integral_or_unordered)?;
         Ok(())
     }
 
@@ -2949,10 +2970,10 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 mod tests {
     use super::{
         DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64,
-        INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, Q_ELECTRON, VOLTAGES_OFFSET,
-        X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
-        compile_assignment_function, compile_assignment_pass_function, compile_value_function,
-        entry_ctx_arg_reg, rspice_exp,
+        INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, Q_ELECTRON,
+        ROUND_TEMP_FRAME_BYTES, VOLTAGES_OFFSET, X64Encoder, XMM_STACK, Xmm,
+        assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
+        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg, rspice_exp,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -6775,6 +6796,14 @@ mod tests {
                 !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
                 "{name}: floor/ceil should not pay helper-call prologue cost"
             );
+            assert!(
+                !contains_bytes(&bytes, &sub_rsp_bytes(ROUND_TEMP_FRAME_BYTES)),
+                "{name}: floor/ceil with a spare XMM register should not spill the original value"
+            );
+            assert!(
+                !contains_bytes(&bytes, &add_rsp_bytes(ROUND_TEMP_FRAME_BYTES)),
+                "{name}: floor/ceil with a spare XMM register should not restore a spill frame"
+            );
 
             let memory = ExecutableMemory::allocate(&bytes).expect("allocate floor/ceil leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -6789,6 +6818,46 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn generated_value_leaf_keeps_full_stack_floor_on_spill_path() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(3.0),
+                Instruction::PushConst(4.0),
+                Instruction::PushConst(5.0),
+                Instruction::PushParam(0),
+                Instruction::Floor,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+            ],
+            0,
+        );
+        assert_eq!(program.max_stack_depth(), XMM_STACK.len());
+        let bytes = compile_value_function(&program).expect("compile full-stack floor leaf");
+        assert!(
+            contains_bytes(&bytes, &sub_rsp_bytes(ROUND_TEMP_FRAME_BYTES)),
+            "full-stack floor must keep the original-value spill fallback"
+        );
+        assert!(
+            contains_bytes(&bytes, &add_rsp_bytes(ROUND_TEMP_FRAME_BYTES)),
+            "full-stack floor must restore the original-value spill fallback"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate full-stack floor leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[3.75], &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 18.0_f64.to_bits());
     }
 
     #[test]
