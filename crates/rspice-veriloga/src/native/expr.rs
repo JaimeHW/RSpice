@@ -4855,7 +4855,7 @@ fn compute_native_max_stack_depth(
     Ok(max_stack_depth)
 }
 
-fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
+pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
     match op {
         NativeOp::Const(_)
         | NativeOp::LoadParam(_)
