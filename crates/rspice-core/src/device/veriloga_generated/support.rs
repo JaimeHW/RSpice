@@ -1478,44 +1478,43 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_scaled_offset_mul_offset_lhs_components(&mut self, index: usize, left_raw: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], left_offset: f64, right_raw: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT], output_offset: f64, output_scale: f64) {
-        let left_value = left_raw + left_offset;
-        let product_value = left_value * right_raw;
-        self.v[index] = (product_value + output_offset) * output_scale;
-        for axis in 0..NODE_COUNT { let product_derivative = left_dn[axis] * right_raw + left_value * right_dn[axis]; self.dn[index][axis] = product_derivative * output_scale; }
-        for axis in 0..BRANCH_COUNT { let product_derivative = left_db[axis] * right_raw + left_value * right_db[axis]; self.db[index][axis] = product_derivative * output_scale; }
-    }
-
-    #[inline]
     pub(crate) fn store_scaled_offset_mul_offset_lhs(&mut self, index: usize, left: usize, left_offset: f64, right: usize, output_offset: f64, output_scale: f64) {
         let left_raw = self.v[left];
         let right_raw = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
-        self.store_scaled_offset_mul_offset_lhs_components(index, left_raw, left_dn, left_db, left_offset, right_raw, right_dn, right_db, output_offset, output_scale);
+        let left_value = left_raw + left_offset;
+        let product_value = left_value * right_raw;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        for axis in 0..NODE_COUNT { let product_derivative = self.dn[left][axis] * right_raw + left_value * self.dn[right][axis]; self.dn[index][axis] = product_derivative * output_scale; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = self.db[left][axis] * right_raw + left_value * self.db[right][axis]; self.db[index][axis] = product_derivative * output_scale; }
     }
 
     #[inline]
     pub(crate) fn store_scaled_offset_mul_offset_lhs_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, right: usize, output_offset: f64, output_scale: f64) {
         let right_raw = self.v[right];
-        let right_dn = self.dn[right];
-        let right_db = self.db[right];
-        self.store_scaled_offset_mul_offset_lhs_components(index, left.value, left.dn, left.db, left_offset, right_raw, right_dn, right_db, output_offset, output_scale);
+        let left_value = left.value + left_offset;
+        let product_value = left_value * right_raw;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * right_raw + left_value * self.dn[right][axis]; self.dn[index][axis] = product_derivative * output_scale; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * right_raw + left_value * self.db[right][axis]; self.db[index][axis] = product_derivative * output_scale; }
     }
 
     #[inline]
     pub(crate) fn store_scaled_offset_mul_offset_lhs_ad_rhs(&mut self, index: usize, left: usize, left_offset: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, output_offset: f64, output_scale: f64) {
         let left_raw = self.v[left];
-        let left_dn = self.dn[left];
-        let left_db = self.db[left];
-        self.store_scaled_offset_mul_offset_lhs_components(index, left_raw, left_dn, left_db, left_offset, right.value, right.dn, right.db, output_offset, output_scale);
+        let left_value = left_raw + left_offset;
+        let product_value = left_value * right.value;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        for axis in 0..NODE_COUNT { let product_derivative = self.dn[left][axis] * right.value + left_value * right.dn[axis]; self.dn[index][axis] = product_derivative * output_scale; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = self.db[left][axis] * right.value + left_value * right.db[axis]; self.db[index][axis] = product_derivative * output_scale; }
     }
 
     #[inline]
     pub(crate) fn store_scaled_offset_mul_offset_lhs_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, output_offset: f64, output_scale: f64) {
-        self.store_scaled_offset_mul_offset_lhs_components(index, left.value, left.dn, left.db, left_offset, right.value, right.dn, right.db, output_offset, output_scale);
+        let left_value = left.value + left_offset;
+        let product_value = left_value * right.value;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * right.value + left_value * right.dn[axis]; self.dn[index][axis] = product_derivative * output_scale; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * right.value + left_value * right.db[axis]; self.db[index][axis] = product_derivative * output_scale; }
     }
 
     #[inline]
@@ -16490,44 +16489,43 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_scaled_offset_mul_offset_lhs_components(&mut self, index: usize, left_raw: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], left_offset: f64, right_raw: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT], output_offset: f64, output_scale: f64) {
-        let left_value = left_raw + left_offset;
-        let product_value = left_value * right_raw;
-        self.v[index] = (product_value + output_offset) * output_scale;
-        for axis in 0..NODE_COUNT { let product_derivative = left_dn[axis] * right_raw + left_value * right_dn[axis]; self.dn[index][axis] = product_derivative * output_scale; }
-        for axis in 0..BRANCH_COUNT { let product_derivative = left_db[axis] * right_raw + left_value * right_db[axis]; self.db[index][axis] = product_derivative * output_scale; }
-    }
-
-    #[inline]
     pub(crate) fn store_scaled_offset_mul_offset_lhs(&mut self, index: usize, left: usize, left_offset: f64, right: usize, output_offset: f64, output_scale: f64) {
         let left_raw = self.v[left];
         let right_raw = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
-        self.store_scaled_offset_mul_offset_lhs_components(index, left_raw, left_dn, left_db, left_offset, right_raw, right_dn, right_db, output_offset, output_scale);
+        let left_value = left_raw + left_offset;
+        let product_value = left_value * right_raw;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        for axis in 0..NODE_COUNT { let product_derivative = self.dn[left][axis] * right_raw + left_value * self.dn[right][axis]; self.dn[index][axis] = product_derivative * output_scale; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = self.db[left][axis] * right_raw + left_value * self.db[right][axis]; self.db[index][axis] = product_derivative * output_scale; }
     }
 
     #[inline]
     pub(crate) fn store_scaled_offset_mul_offset_lhs_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, right: usize, output_offset: f64, output_scale: f64) {
         let right_raw = self.v[right];
-        let right_dn = self.dn[right];
-        let right_db = self.db[right];
-        self.store_scaled_offset_mul_offset_lhs_components(index, left.value, left.dn, left.db, left_offset, right_raw, right_dn, right_db, output_offset, output_scale);
+        let left_value = left.value + left_offset;
+        let product_value = left_value * right_raw;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * right_raw + left_value * self.dn[right][axis]; self.dn[index][axis] = product_derivative * output_scale; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * right_raw + left_value * self.db[right][axis]; self.db[index][axis] = product_derivative * output_scale; }
     }
 
     #[inline]
     pub(crate) fn store_scaled_offset_mul_offset_lhs_ad_rhs(&mut self, index: usize, left: usize, left_offset: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, output_offset: f64, output_scale: f64) {
         let left_raw = self.v[left];
-        let left_dn = self.dn[left];
-        let left_db = self.db[left];
-        self.store_scaled_offset_mul_offset_lhs_components(index, left_raw, left_dn, left_db, left_offset, right.value, right.dn, right.db, output_offset, output_scale);
+        let left_value = left_raw + left_offset;
+        let product_value = left_value * right.value;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        for axis in 0..NODE_COUNT { let product_derivative = self.dn[left][axis] * right.value + left_value * right.dn[axis]; self.dn[index][axis] = product_derivative * output_scale; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = self.db[left][axis] * right.value + left_value * right.db[axis]; self.db[index][axis] = product_derivative * output_scale; }
     }
 
     #[inline]
     pub(crate) fn store_scaled_offset_mul_offset_lhs_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, output_offset: f64, output_scale: f64) {
-        self.store_scaled_offset_mul_offset_lhs_components(index, left.value, left.dn, left.db, left_offset, right.value, right.dn, right.db, output_offset, output_scale);
+        let left_value = left.value + left_offset;
+        let product_value = left_value * right.value;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * right.value + left_value * right.dn[axis]; self.dn[index][axis] = product_derivative * output_scale; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * right.value + left_value * right.db[axis]; self.db[index][axis] = product_derivative * output_scale; }
     }
 
     #[inline]
