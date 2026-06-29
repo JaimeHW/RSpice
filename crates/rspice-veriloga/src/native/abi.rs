@@ -1,5 +1,7 @@
 use std::cell::RefCell;
 
+use crate::vm::terminal_pair_current_index;
+
 /// Evaluation context passed to JIT-compiled functions.
 #[repr(C)]
 pub struct EvalContext {
@@ -9,7 +11,7 @@ pub struct EvalContext {
     pub internal_voltages: *const f64,
     /// Parameter values
     pub params: *const f64,
-    /// Flattened terminal-pair branch current matrix (size = num_terminals * num_terminals)
+    /// Flattened current matrix over terminals plus the global reference.
     pub branch_currents: *const f64,
     /// Length of `branch_currents` buffer
     pub branch_currents_len: usize,
@@ -956,8 +958,10 @@ pub unsafe extern "C" fn rspice_current_lookup(
     pos: usize,
     neg: usize,
 ) -> f64 {
-    if !branch_currents_ptr.is_null() && pos < num_terminals && neg < num_terminals {
-        let idx = pos.saturating_mul(num_terminals).saturating_add(neg);
+    if !branch_currents_ptr.is_null() {
+        let Some(idx) = terminal_pair_current_index(pos, neg, num_terminals) else {
+            return f64::NAN;
+        };
         if idx < branch_currents_len {
             let value = unsafe { *branch_currents_ptr.add(idx) };
             if value.is_finite() {

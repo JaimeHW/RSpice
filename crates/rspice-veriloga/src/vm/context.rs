@@ -3,6 +3,73 @@ use super::filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
 use crate::codegen::LookupTable;
 use crate::laplace::StateSpaceFilter;
 
+pub const CURRENT_PAIR_GROUND: usize = usize::MAX;
+
+pub fn terminal_pair_current_index(pos: usize, neg: usize, num_terminals: usize) -> Option<usize> {
+    if pos == CURRENT_PAIR_GROUND && neg == CURRENT_PAIR_GROUND {
+        return None;
+    }
+
+    let width = current_pair_axis_width(num_terminals)?;
+    let pos = current_pair_axis_index(pos, num_terminals)?;
+    let neg = current_pair_axis_index(neg, num_terminals)?;
+    pos.checked_mul(width)?.checked_add(neg)
+}
+
+pub fn terminal_pair_current_endpoints(
+    pair_index: usize,
+    num_terminals: usize,
+) -> Option<(usize, usize)> {
+    let width = current_pair_axis_width(num_terminals)?;
+    let len = terminal_pair_current_len(num_terminals)?;
+    if pair_index >= len {
+        return None;
+    }
+
+    let pos = current_pair_endpoint(pair_index / width, num_terminals)?;
+    let neg = current_pair_endpoint(pair_index % width, num_terminals)?;
+    (pos != CURRENT_PAIR_GROUND || neg != CURRENT_PAIR_GROUND).then_some((pos, neg))
+}
+
+pub fn terminal_pair_current_len(num_terminals: usize) -> Option<usize> {
+    if num_terminals == 0 {
+        return Some(0);
+    }
+    let width = current_pair_axis_width(num_terminals)?;
+    width.checked_mul(width)
+}
+
+fn current_pair_axis_width(num_terminals: usize) -> Option<usize> {
+    (num_terminals != 0)
+        .then(|| num_terminals.checked_add(1))
+        .flatten()
+}
+
+fn current_pair_axis_index(endpoint: usize, num_terminals: usize) -> Option<usize> {
+    if endpoint == CURRENT_PAIR_GROUND {
+        Some(num_terminals)
+    } else if endpoint < num_terminals {
+        Some(endpoint)
+    } else {
+        None
+    }
+}
+
+fn current_pair_endpoint(axis_index: usize, num_terminals: usize) -> Option<usize> {
+    if axis_index == num_terminals {
+        Some(CURRENT_PAIR_GROUND)
+    } else if axis_index < num_terminals {
+        Some(axis_index)
+    } else {
+        None
+    }
+}
+
+fn terminal_pair_current_storage_len(num_terminals: usize) -> usize {
+    terminal_pair_current_len(num_terminals)
+        .expect("terminal-pair current table dimensions overflow")
+}
+
 /// Execution context providing runtime state to the VM.
 #[derive(Debug, Clone)]
 pub struct VmContext {
@@ -99,7 +166,10 @@ impl VmContext {
             internal_voltages: Vec::new(),
             currents: Vec::new(),
             branch_current_values: Vec::new(),
-            terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
+            terminal_pair_currents: vec![
+                f64::NAN;
+                terminal_pair_current_storage_len(num_terminals)
+            ],
             port_connected: vec![1; num_terminals],
             parameters: Vec::new(),
             param_given: Vec::new(),
@@ -129,7 +199,10 @@ impl VmContext {
             internal_voltages: vec![0.0; num_internal],
             currents: Vec::new(),
             branch_current_values: Vec::new(),
-            terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
+            terminal_pair_currents: vec![
+                f64::NAN;
+                terminal_pair_current_storage_len(num_terminals)
+            ],
             port_connected: vec![1; num_terminals],
             parameters: Vec::new(),
             param_given: Vec::new(),
@@ -159,7 +232,10 @@ impl VmContext {
             internal_voltages: Vec::new(),
             currents: Vec::new(),
             branch_current_values: Vec::new(),
-            terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
+            terminal_pair_currents: vec![
+                f64::NAN;
+                terminal_pair_current_storage_len(num_terminals)
+            ],
             port_connected: vec![1; num_terminals],
             parameters: Vec::new(),
             param_given: Vec::new(),
@@ -237,20 +313,19 @@ impl VmContext {
     /// Also populates the reverse direction with opposite sign.
     pub fn set_branch_current(&mut self, pos: usize, neg: usize, value: f64) {
         let n = self.voltages.len();
-        if n == 0 || pos >= n || neg >= n {
+        let Some(idx) = terminal_pair_current_index(pos, neg, n) else {
             return;
+        };
+        let len = terminal_pair_current_storage_len(n);
+        if self.terminal_pair_currents.len() != len {
+            self.terminal_pair_currents.resize(len, f64::NAN);
         }
 
-        if self.terminal_pair_currents.len() != n.saturating_mul(n) {
-            self.terminal_pair_currents
-                .resize(n.saturating_mul(n), f64::NAN);
-        }
-
-        let idx = pos * n + neg;
         self.terminal_pair_currents[idx] = value;
 
-        if pos != neg {
-            let reverse_idx = neg * n + pos;
+        if pos != neg
+            && let Some(reverse_idx) = terminal_pair_current_index(neg, pos, n)
+        {
             self.terminal_pair_currents[reverse_idx] = -value;
         }
     }
@@ -313,8 +388,7 @@ impl VmContext {
     #[inline]
     pub fn try_current(&self, pos: usize, neg: usize) -> Result<f64, VmError> {
         let n = self.voltages.len();
-        if pos < n && neg < n {
-            let idx = pos * n + neg;
+        if let Some(idx) = terminal_pair_current_index(pos, neg, n) {
             if idx < self.terminal_pair_currents.len() {
                 let value = self.terminal_pair_currents[idx];
                 if value.is_finite() {

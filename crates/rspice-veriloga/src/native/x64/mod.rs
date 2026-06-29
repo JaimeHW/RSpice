@@ -17,6 +17,7 @@ use super::{JitError, JitResult};
 use crate::canonical_ir::{CanonicalIrArtifact, EquationId, MirModel};
 use crate::codegen::{AssignmentStep, CompiledModel, StampIndex, StampProgram};
 use crate::native::x64::codegen::NativeAssignment;
+use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 
 pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
     compile_model_inner(model, None)
@@ -475,25 +476,26 @@ fn append_value_entry(image: &mut Vec<u8>, program: &NativeProgram) -> JitResult
 }
 
 fn infer_current_terminal_pair(program: &StampProgram) -> Option<(usize, usize)> {
-    let mut pos_terminal = None;
-    let mut neg_terminal = None;
+    let mut pos_endpoint = None;
+    let mut neg_endpoint = None;
 
     for loc in &program.stamp_locations {
-        let terminal = match loc.row {
+        let endpoint = match loc.row {
             StampIndex::Terminal(term) => term,
+            StampIndex::Ground => CURRENT_PAIR_GROUND,
             _ => continue,
         };
 
         if loc.sign < 0.0 {
-            if pos_terminal.replace(terminal).is_some() {
+            if pos_endpoint.replace(endpoint).is_some() {
                 return None;
             }
-        } else if loc.sign > 0.0 && neg_terminal.replace(terminal).is_some() {
+        } else if loc.sign > 0.0 && neg_endpoint.replace(endpoint).is_some() {
             return None;
         }
     }
 
-    match (pos_terminal, neg_terminal) {
+    match (pos_endpoint, neg_endpoint) {
         (Some(pos), Some(neg)) if pos != neg => Some((pos, neg)),
         _ => None,
     }
@@ -506,18 +508,14 @@ fn push_current_pair_indices(
     pos: usize,
     neg: usize,
 ) -> JitResult<()> {
-    let forward = pos
-        .checked_mul(terminal_count)
-        .and_then(|base| base.checked_add(neg))
-        .ok_or_else(|| current_pair_overflow(model, pos, neg))?;
+    let forward = terminal_pair_current_index(pos, neg, terminal_count)
+        .ok_or_else(|| current_pair_unavailable(model, pos, neg))?;
     if !available_current_pairs.contains(&forward) {
         available_current_pairs.push(forward);
     }
 
-    let reverse = neg
-        .checked_mul(terminal_count)
-        .and_then(|base| base.checked_add(pos))
-        .ok_or_else(|| current_pair_overflow(model, neg, pos))?;
+    let reverse = terminal_pair_current_index(neg, pos, terminal_count)
+        .ok_or_else(|| current_pair_unavailable(model, neg, pos))?;
     if !available_current_pairs.contains(&reverse) {
         available_current_pairs.push(reverse);
     }
@@ -525,10 +523,30 @@ fn push_current_pair_indices(
     Ok(())
 }
 
-fn current_pair_overflow(model: &CompiledModel, pos: usize, neg: usize) -> JitError {
+fn current_pair_unavailable(model: &CompiledModel, pos: usize, neg: usize) -> JitError {
     JitError::InvalidCanonicalIr {
         model: model.name.clone(),
-        detail: format!("PushCurrent terminal pair {pos},{neg} index overflow").into(),
+        detail: format!(
+            "PushCurrent terminal pair {} cannot be represented",
+            format_current_pair(pos, neg)
+        )
+        .into(),
+    }
+}
+
+fn format_current_pair(pos: usize, neg: usize) -> String {
+    format!(
+        "{},{}",
+        format_current_endpoint(pos),
+        format_current_endpoint(neg)
+    )
+}
+
+fn format_current_endpoint(endpoint: usize) -> String {
+    if endpoint == CURRENT_PAIR_GROUND {
+        "ground".to_string()
+    } else {
+        endpoint.to_string()
     }
 }
 

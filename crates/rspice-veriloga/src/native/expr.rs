@@ -3,6 +3,7 @@
 use super::{JitError, JitResult};
 use crate::canonical_ir::{EquationId, ExprId, HirAnalogOperator, HirExprKind, MirModel, NodeId};
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
+use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
 
 const LOGICAL_EPSILON: f64 = 1.0e-15;
@@ -1989,7 +1990,10 @@ impl NativeProgram {
                     if !limits.available_current_pairs.contains(&pair_index) {
                         return Err(JitError::unsupported_program_op(
                             model,
-                            format!("PushCurrent terminal pair {pos},{neg} unavailable"),
+                            format!(
+                                "PushCurrent terminal pair {} unavailable",
+                                format_current_pair(*pos, *neg)
+                            ),
                         ));
                     }
                     if !current_pair_dependencies.contains(&pair_index) {
@@ -3223,20 +3227,20 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             return Ok(());
         }
 
-        let pos = self.lower_terminal_node(pos)?;
+        let pos = self.lower_current_endpoint(pos)?;
         let neg = neg
-            .map(|node| self.lower_terminal_node(node))
+            .map(|node| self.lower_current_endpoint(node))
             .transpose()?
-            .unwrap_or(usize::MAX);
-        if neg == usize::MAX {
-            return Err(self.unsupported("branch current to ground access"));
-        }
+            .unwrap_or(CURRENT_PAIR_GROUND);
         let pair_index =
             current_pair_index(self.model.clone(), pos, neg, self.limits.terminal_count)?;
         if !self.limits.available_current_pairs.contains(&pair_index) {
             return Err(JitError::unsupported_program_op(
                 self.model.clone(),
-                format!("canonical branch current terminal pair {pos},{neg} unavailable"),
+                format!(
+                    "canonical branch current terminal pair {} unavailable",
+                    format_current_pair(pos, neg)
+                ),
             ));
         }
         if !self.current_pair_dependencies.contains(&pair_index) {
@@ -3572,6 +3576,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.limits.terminal_count,
         )?;
         Ok(node_index)
+    }
+
+    fn lower_current_endpoint(&self, name: &str) -> JitResult<usize> {
+        if self.is_ground_node(name) {
+            return Ok(CURRENT_PAIR_GROUND);
+        }
+        self.lower_terminal_node(name)
     }
 
     fn node(&self, name: &str) -> JitResult<&'a crate::canonical_ir::MirNode> {
@@ -4484,19 +4495,31 @@ fn current_pair_index(
     neg: usize,
     terminal_count: usize,
 ) -> JitResult<usize> {
-    if pos >= terminal_count || neg >= terminal_count {
-        return Err(JitError::unsupported_program_op(
+    terminal_pair_current_index(pos, neg, terminal_count).ok_or_else(|| {
+        JitError::unsupported_program_op(
             model,
-            format!("PushCurrent terminal pair {pos},{neg}"),
-        ));
-    }
+            format!(
+                "PushCurrent terminal pair {}",
+                format_current_pair(pos, neg)
+            ),
+        )
+    })
+}
 
-    pos.checked_mul(terminal_count)
-        .and_then(|base| base.checked_add(neg))
-        .ok_or_else(|| JitError::InvalidCanonicalIr {
-            model,
-            detail: format!("PushCurrent terminal pair {pos},{neg} index overflow").into(),
-        })
+fn format_current_pair(pos: usize, neg: usize) -> String {
+    format!(
+        "{},{}",
+        format_current_endpoint(pos),
+        format_current_endpoint(neg)
+    )
+}
+
+fn format_current_endpoint(endpoint: usize) -> String {
+    if endpoint == CURRENT_PAIR_GROUND {
+        "ground".to_string()
+    } else {
+        endpoint.to_string()
+    }
 }
 
 fn instruction_name(instruction: &Instruction) -> &'static str {
@@ -5304,6 +5327,78 @@ endmodule
             NativeLoweringLimits::new(2, 0, 1, 0, 1),
         )
         .expect("lower canonical named potential branch current to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadBranchUnknown(0),
+                NativeOp::LoadParam(0),
+                NativeOp::Mul,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_canonical_single_ended_potential_current_probe_to_branch_unknown() {
+        let source = r#"
+module mir_single_ended_potential_current(p);
+  inout p;
+  electrical p;
+  parameter real r = 2.0;
+  analog begin
+    V(p) <+ I(p) * r;
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_single_ended_potential_current",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(1, 0, 1, 0, 1),
+        )
+        .expect("lower canonical single-ended potential branch current to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadBranchUnknown(0),
+                NativeOp::LoadParam(0),
+                NativeOp::Mul,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_canonical_explicit_ground_potential_current_probe_to_branch_unknown() {
+        let source = r#"
+module mir_explicit_ground_potential_current(p);
+  inout p;
+  electrical p;
+  parameter real r = 2.0;
+  analog begin
+    V(p) <+ I(p, 0) * r;
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_explicit_ground_potential_current",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(1, 0, 1, 0, 1),
+        )
+        .expect("lower canonical explicit-ground potential branch current to native program");
 
         assert_eq!(
             program.ops(),
@@ -8170,6 +8265,46 @@ endmodule
         assert_eq!(lowered.ops(), &[NativeOp::LoadCurrent(1)]);
         assert_eq!(lowered.max_stack_depth(), 1);
         assert_eq!(lowered.current_pair_dependencies(), &[1]);
+    }
+
+    #[test]
+    fn lowers_terminal_to_ground_current_probe_when_pair_is_available() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushCurrent(0, usize::MAX)],
+        };
+        let available = [current_pair_index("probe".into(), 0, usize::MAX, 2).unwrap()];
+
+        let lowered = NativeProgram::from_bytecode(
+            "probe",
+            EntryKind::StampValue,
+            &program,
+            limits(2, 0).with_available_current_pairs(&available),
+        )
+        .expect("terminal-to-ground current probes are native-loadable");
+
+        assert_eq!(lowered.ops(), &[NativeOp::LoadCurrent(2)]);
+        assert_eq!(lowered.max_stack_depth(), 1);
+        assert_eq!(lowered.current_pair_dependencies(), &[2]);
+    }
+
+    #[test]
+    fn lowers_ground_to_terminal_current_probe_when_pair_is_available() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushCurrent(usize::MAX, 0)],
+        };
+        let available = [current_pair_index("probe".into(), usize::MAX, 0, 2).unwrap()];
+
+        let lowered = NativeProgram::from_bytecode(
+            "probe",
+            EntryKind::StampValue,
+            &program,
+            limits(2, 0).with_available_current_pairs(&available),
+        )
+        .expect("ground-to-terminal current probes are native-loadable");
+
+        assert_eq!(lowered.ops(), &[NativeOp::LoadCurrent(6)]);
+        assert_eq!(lowered.max_stack_depth(), 1);
+        assert_eq!(lowered.current_pair_dependencies(), &[6]);
     }
 
     #[test]

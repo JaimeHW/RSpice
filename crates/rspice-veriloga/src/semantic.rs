@@ -2394,6 +2394,9 @@ impl SemanticAnalyzer {
             )));
         };
         let Some(symbol) = self.symbols.lookup(name) else {
+            if is_global_ground_name(name) {
+                return Ok(());
+            }
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::UndeclaredSymbol { name: name.into() },
                 span,
@@ -4013,6 +4016,9 @@ impl SemanticAnalyzer {
     }
 
     fn validate_node(&self, name: &str, span: Span) -> CompileResult<()> {
+        if is_global_ground_name(name) {
+            return Ok(());
+        }
         if let Some(sym) = self.symbols.lookup(name) {
             match sym.kind {
                 SymbolKind::Port | SymbolKind::Node | SymbolKind::Branch => Ok(()),
@@ -4276,6 +4282,10 @@ impl SemanticAnalyzer {
             | Expression::NoiseSource(_) => false,
         }
     }
+}
+
+fn is_global_ground_name(name: &str) -> bool {
+    name == "0"
 }
 
 // ============================================================================

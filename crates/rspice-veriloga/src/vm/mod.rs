@@ -9,7 +9,9 @@ mod error;
 mod executor;
 mod filters;
 
-pub use context::VmContext;
+pub use context::{
+    CURRENT_PAIR_GROUND, VmContext, terminal_pair_current_endpoints, terminal_pair_current_index,
+};
 pub use error::VmError;
 pub use executor::Vm;
 pub use filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
