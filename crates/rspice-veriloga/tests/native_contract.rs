@@ -1720,6 +1720,49 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_idtmod_without_modulus_as_idt_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_idtmod_nomod(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ idtmod(1.0, 0.5);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("CIMODNOMOD1", model, &artifact, &[1, 0])
+            .expect("canonical idtmod without modulus uses native JIT path");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[0.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("canonical idtmod-without-modulus DC evaluation succeeds")[0]
+            .to_bits(),
+        0.5_f64.to_bits()
+    );
+    device.advance_state();
+
+    device.set_analysis_type(2);
+    device.set_timestep(0.25);
+    device.update_voltages(&[0.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("canonical idtmod-without-modulus transient evaluation succeeds")[0]
+            .to_bits(),
+        0.75_f64.to_bits()
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_executes_idtmod_current_without_fallback() {
     let source = r#"
 `include "disciplines.vams"
