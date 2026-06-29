@@ -2212,6 +2212,71 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_inverse_hyperbolic_current_without_fallback() {
+    let input = 0.25_f64;
+    let cases = [
+        (
+            "ASINHCANON1",
+            r#"
+`include "disciplines.vams"
+module native_canonical_asinh_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ asinh(V(p, n));
+endmodule
+"#,
+            input.asinh(),
+        ),
+        (
+            "ACOSHCANON1",
+            r#"
+`include "disciplines.vams"
+module native_canonical_acosh_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ acosh(V(p, n) + 2.0);
+endmodule
+"#,
+            (input + 2.0).acosh(),
+        ),
+        (
+            "ATANHCANON1",
+            r#"
+`include "disciplines.vams"
+module native_canonical_atanh_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ atanh(V(p, n));
+endmodule
+"#,
+            input.atanh(),
+        ),
+    ];
+
+    for (instance_name, source, expected) in cases {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir(instance_name, model, &artifact, &[1, 0])
+                .expect("canonical inverse hyperbolic current uses native JIT path");
+        assert!(device.is_using_native());
+
+        device.update_voltages(&[input]);
+        let currents = device
+            .try_evaluate()
+            .expect("canonical inverse hyperbolic current evaluation succeeds");
+        assert!(
+            (currents[0] - expected).abs() < 1e-12,
+            "instance: {instance_name}, currents: {currents:?}, expected: {expected}"
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_executes_bitnot_current_without_fallback() {
     let source = r#"
 `include "disciplines.vams"
