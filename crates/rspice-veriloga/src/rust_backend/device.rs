@@ -5782,6 +5782,27 @@ fn stamp() {
             "{mul_scale_offset_indices}"
         );
 
+        let exp_mul_scaled_lhs_indices =
+            helper_body(&support, "fn store_exp_mul_scaled_lhs_indices(");
+        assert!(
+            !exp_mul_scaled_lhs_indices.contains("_node_derivatives = self.node_derivatives"),
+            "{exp_mul_scaled_lhs_indices}"
+        );
+        assert!(
+            !exp_mul_scaled_lhs_indices.contains("_branch_derivatives = self.branch_derivatives"),
+            "{exp_mul_scaled_lhs_indices}"
+        );
+        assert!(
+            !exp_mul_scaled_lhs_indices.contains("store_exp_mul_scaled_lhs_components"),
+            "{exp_mul_scaled_lhs_indices}"
+        );
+        assert!(
+            exp_mul_scaled_lhs_indices.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_derivative_scale + self.node_derivatives[right][axis] * right_derivative_scale;"
+            ),
+            "{exp_mul_scaled_lhs_indices}"
+        );
+
         let scaled_add = helper_body(&support, "fn store_scaled_add(");
         assert!(
             !scaled_add.contains("_node_derivatives = self.node_derivatives"),
@@ -7553,6 +7574,10 @@ fn stamp() {
         ] {
             assert!(support.contains(helper), "{helper}\n{support}");
         }
+        assert!(
+            !support.contains("fn store_exp_mul_scaled_lhs_components"),
+            "{support}"
+        );
 
         let source = r#"
 fn stamp() {
@@ -14126,19 +14151,14 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-        "    fn store_exp_mul_scaled_lhs_components(&mut self, index: usize, left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], scale: f64, right_value: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
-        "        let scaled_left_value = left_value * scale;",
-        "        let output = (scaled_left_value * right_value).exp();",
-        "        let left_derivative_scale = output * scale * right_value;",
+        "    fn store_exp_mul_scaled_lhs(&mut self, index: usize, left: AdValue, scale: f64, right: AdValue) {",
+        "        let scaled_left_value = left.value * scale;",
+        "        let output = (scaled_left_value * right.value).exp();",
+        "        let left_derivative_scale = output * scale * right.value;",
         "        let right_derivative_scale = output * scaled_left_value;",
         "        self.values[index] = output;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_derivative_scale + right_node_derivatives[axis] * right_derivative_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_derivative_scale + right_branch_derivatives[axis] * right_derivative_scale; }",
-        "    }",
-        "",
-        "    #[inline]",
-        "    fn store_exp_mul_scaled_lhs(&mut self, index: usize, left: AdValue, scale: f64, right: AdValue) {",
-        "        self.store_exp_mul_scaled_lhs_components(index, left.value, left.node_derivatives, left.branch_derivatives, scale, right.value, right.node_derivatives, right.branch_derivatives);",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * left_derivative_scale + right.branch_derivatives[axis] * right_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -20083,17 +20103,26 @@ fn generate_index_or_mixed_div_scaled_product_add_scaled_denominator_helper(mask
 }
 
 fn generate_index_or_mixed_exp_mul_scaled_lhs_helper(mask: &str) -> String {
-    let operands = ["left", "right"];
     let helper = index_or_mixed_helper_name("store_exp_mul_scaled_lhs", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let left = mixed_helper_component_args(mask, 0, "left");
-    let right = mixed_helper_component_args(mask, 1, "right");
+    let left_value = mixed_helper_value_expr(mask, 0, "left");
+    let right_value = mixed_helper_value_expr(mask, 1, "right");
+    let left_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "left");
+    let right_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "right");
+    let left_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "left");
+    let right_branch_derivative = mixed_helper_branch_derivative_expr(mask, 1, "right");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, left: {left_ty}, scale: f64, right: {right_ty}) {{
-{locals}        self.store_exp_mul_scaled_lhs_components(index, {left}, scale, {right});
+        let scaled_left_value = {left_value} * scale;
+        let right_value = {right_value};
+        let output = (scaled_left_value * right_value).exp();
+        let left_derivative_scale = output * scale * right_value;
+        let right_derivative_scale = output * scaled_left_value;
+        self.values[index] = output;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} * left_derivative_scale + {right_node_derivative} * right_derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} * left_derivative_scale + {right_branch_derivative} * right_derivative_scale; }}
     }}
 "#,
         left_ty = mixed_helper_type(mask, 0),
