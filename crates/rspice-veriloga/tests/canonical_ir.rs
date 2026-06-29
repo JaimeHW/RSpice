@@ -429,6 +429,34 @@ fn compiler_can_emit_file_canonical_ir_with_metadata() {
 }
 
 #[test]
+fn compiler_can_emit_file_runtime_artifacts_with_metadata() {
+    let fixture = TempSourceFile::new(tiny_resistor_source());
+    let canonical_path = fixture
+        .path()
+        .canonicalize()
+        .expect("canonical fixture path");
+    let canonical_path_text = canonical_path.display().to_string();
+
+    let compiled = VerilogACompiler::default()
+        .compile_file_runtime_with_metadata(fixture.path(), None)
+        .expect("compile runtime artifacts from file");
+
+    assert_eq!(compiled.model.name.as_str(), "tiny_res");
+    assert_eq!(compiled.canonical_ir.hir.module_name.as_str(), "tiny_res");
+    assert_eq!(compiled.canonical_ir.mir.module_name.as_str(), "tiny_res");
+    assert_eq!(
+        compiled.model.stamp_programs.len(),
+        compiled.canonical_ir.mir.equations.len()
+    );
+    assert_eq!(compiled.dependencies, vec![canonical_path]);
+    assert_eq!(
+        compiled.canonical_ir.metadata.source_package.as_str(),
+        canonical_path_text
+    );
+    assert!(compiled.canonical_ir.validate().is_ok());
+}
+
+#[test]
 fn file_canonical_ir_metadata_uses_root_path_when_include_sorts_first() {
     let fixture = TempSourceDir::new();
     let include_path = fixture.write_file("aaa_include.va", "`define ROOT_GAIN 1.0\n");
