@@ -1401,6 +1401,11 @@ endmodule
                 Some("DIODE_CMC"),
             ),
             (
+                "vbic13_4t",
+                shipped_veriloga_model_path(&["vbic_1.3", "vacode", "vbic_1p3.va"]),
+                Some("vbic13_4t"),
+            ),
+            (
                 "bsimimg",
                 shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
                 Some("bsimimg"),
@@ -1465,6 +1470,11 @@ endmodule
                 "diode_cmc",
                 shipped_cmc_model_path(&["diode_cmc_3.0_20250714", "vacode", "diode_cmc.va"]),
                 Some("DIODE_CMC"),
+            ),
+            (
+                "vbic13_4t",
+                shipped_veriloga_model_path(&["vbic_1.3", "vacode", "vbic_1p3.va"]),
+                Some("vbic13_4t"),
             ),
             (
                 "bsimimg",
@@ -1873,6 +1883,7 @@ endmodule
                 .unwrap_or(0.0),
             "r3_cmc" => [0.1, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "diode_cmc" => [0.7, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
+            "vbic13_4t" => [0.2, 0.75, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "bsimimg" | "hisimsoi" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0]
                 .get(terminal)
                 .copied()
