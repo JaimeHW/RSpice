@@ -4956,6 +4956,103 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_folds_constant_binary_math_to_literals() {
+        let cases = [
+            (
+                "pow-operator",
+                Instruction::Pow,
+                2.0,
+                3.0,
+                runtime_pow(2.0, 3.0),
+            ),
+            (
+                "fn-pow",
+                Instruction::FnPow,
+                4.0,
+                0.5,
+                runtime_pow(4.0, 0.5),
+            ),
+            (
+                "pow-domain-nan",
+                Instruction::Pow,
+                -4.0,
+                0.5,
+                runtime_pow(-4.0, 0.5),
+            ),
+            (
+                "atan2",
+                Instruction::Atan2,
+                0.5,
+                0.25,
+                runtime_atan2(0.5, 0.25),
+            ),
+            (
+                "atan2-signed-zero",
+                Instruction::Atan2,
+                -0.0,
+                -0.0,
+                runtime_atan2(-0.0, -0.0),
+            ),
+            ("mod", Instruction::Mod, 5.25, 2.0, runtime_mod(5.25, 2.0)),
+            (
+                "mod-negative-dividend",
+                Instruction::Mod,
+                -5.25,
+                2.0,
+                runtime_mod(-5.25, 2.0),
+            ),
+            (
+                "mod-zero-divisor",
+                Instruction::Mod,
+                5.25,
+                0.0,
+                runtime_mod(5.25, 0.0),
+            ),
+        ];
+
+        for (name, instruction, left, right, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+                0,
+            );
+
+            assert_eq!(program.max_stack_depth(), 1, "{name}");
+            match program.ops() {
+                [NativeOp::Const(value)] => assert_eq!(
+                    value.to_bits(),
+                    expected.to_bits(),
+                    "{name} should compile as the helper-equivalent folded literal"
+                ),
+                other => panic!("{name} should compile as one folded literal, got {other:?}"),
+            }
+
+            let bytes = compile_value_function(&program).expect("compile folded binary math leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "folded binary math should stay helper-free"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate folded binary math leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_spills_max_depth_across_helper_call() {
         let input = 0.25;
         let program = native_program(
