@@ -5531,6 +5531,49 @@ fn stamp() {
         );
 
         assert!(
+            !support.contains("fn store_add_scaled_sub_value_product_components"),
+            "{support}"
+        );
+        for signature in [
+            "fn store_add_scaled_sub_value_product_indices(",
+            "fn store_add_scaled_sub_value_product_mixed_aii(",
+            "fn store_add_scaled_sub_value_product_mixed_iai(",
+            "fn store_add_scaled_sub_value_product_mixed_iia(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                !body.contains("_node_derivatives = self.node_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("_branch_derivatives = self.branch_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_add_scaled_sub_value_product_components"),
+                "{body}"
+            );
+        }
+
+        let sub_value_product =
+            helper_body(&support, "fn store_add_scaled_sub_value_product_indices(");
+        assert!(
+            sub_value_product.contains(
+                "self.node_derivatives[index][axis] = -self.node_derivatives[subtrahend][axis] * value_scale + (self.node_derivatives[product_left][axis] * product_right_value + product_left_value * self.node_derivatives[product_right][axis]) * product_scale;"
+            ),
+            "{sub_value_product}"
+        );
+
+        let sub_value_product_mixed =
+            helper_body(&support, "fn store_add_scaled_sub_value_product_mixed_aii(");
+        assert!(
+            sub_value_product_mixed.contains(
+                "self.node_derivatives[index][axis] = -subtrahend.node_derivatives[axis] * value_scale + (self.node_derivatives[product_left][axis] * product_right_value + product_left_value * self.node_derivatives[product_right][axis]) * product_scale;"
+            ),
+            "{sub_value_product_mixed}"
+        );
+
+        assert!(
             !support.contains("fn store_add_scaled_inputs_product_components("),
             "{support}"
         );
@@ -9014,6 +9057,12 @@ fn stamp() {
 
     #[test]
     fn rewrites_add_scaled_sub_value_product_ad_rvalue_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            !support.contains("fn store_add_scaled_sub_value_product_components"),
+            "{support}"
+        );
+
         let source = r#"
 fn stamp() {
     scratch.store_ad_value(25, AdValue::add_scaled_sub_value_product(params.scalar, scratch.ad_value(2), params.value_scale, scratch.ad_value(3), scratch.ad_value(4), params.product_scale));
@@ -18876,16 +18925,6 @@ fn generate_scratch_operation_helpers() -> String {
 
 fn generate_hybrid_index_product_scratch_helpers() -> &'static str {
     r#"
-
-    #[inline]
-    fn store_add_scaled_sub_value_product_components(&mut self, index: usize, scalar: f64, subtrahend_raw: f64, subtrahend_node_derivatives: [f64; Instance::NODE_COUNT], subtrahend_branch_derivatives: [f64; Instance::BRANCH_COUNT], value_scale: f64, product_left_value: f64, product_left_node_derivatives: [f64; Instance::NODE_COUNT], product_left_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_right_value: f64, product_right_node_derivatives: [f64; Instance::NODE_COUNT], product_right_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_scale: f64) {
-        let value_term = (scalar - subtrahend_raw) * value_scale;
-        let product_term = product_left_value * product_right_value * product_scale;
-        self.values[index] = value_term + product_term;
-        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -subtrahend_node_derivatives[axis] * value_scale + (product_left_node_derivatives[axis] * product_right_value + product_left_value * product_right_node_derivatives[axis]) * product_scale; }
-        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -subtrahend_branch_derivatives[axis] * value_scale + (product_left_branch_derivatives[axis] * product_right_value + product_left_value * product_right_branch_derivatives[axis]) * product_scale; }
-    }
-
     #[inline]
     fn store_add_scaled_product_value_ad(&mut self, index: usize, value: AdValue, value_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
         let product_left_value = self.values[product_left];
@@ -20800,18 +20839,31 @@ fn generate_index_or_mixed_add_scaled_square_product_helper(mask: &str) -> Strin
 }
 
 fn generate_index_or_mixed_add_scaled_sub_value_product_helper(mask: &str) -> String {
-    let operands = ["subtrahend", "product_left", "product_right"];
     let helper = index_or_mixed_helper_name("store_add_scaled_sub_value_product", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let subtrahend = mixed_helper_component_args(mask, 0, "subtrahend");
-    let product_left = mixed_helper_component_args(mask, 1, "product_left");
-    let product_right = mixed_helper_component_args(mask, 2, "product_right");
+    let subtrahend_value = index_or_mixed_value_expr(mask, 0, "subtrahend");
+    let subtrahend_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "subtrahend");
+    let subtrahend_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "subtrahend");
+    let product_left_value = index_or_mixed_value_expr(mask, 1, "product_left");
+    let product_left_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "product_left");
+    let product_left_branch_derivative =
+        index_or_mixed_branch_derivative_expr(mask, 1, "product_left");
+    let product_right_value = index_or_mixed_value_expr(mask, 2, "product_right");
+    let product_right_node_derivative =
+        index_or_mixed_node_derivative_expr(mask, 2, "product_right");
+    let product_right_branch_derivative =
+        index_or_mixed_branch_derivative_expr(mask, 2, "product_right");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, scalar: f64, subtrahend: {subtrahend_ty}, value_scale: f64, product_left: {product_left_ty}, product_right: {product_right_ty}, product_scale: f64) {{
-{locals}        self.store_add_scaled_sub_value_product_components(index, scalar, {subtrahend}, value_scale, {product_left}, {product_right}, product_scale);
+        let value_term = (scalar - {subtrahend_value}) * value_scale;
+        let product_left_value = {product_left_value};
+        let product_right_value = {product_right_value};
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.values[index] = value_term + product_term;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = -{subtrahend_node_derivative} * value_scale + ({product_left_node_derivative} * product_right_value + product_left_value * {product_right_node_derivative}) * product_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = -{subtrahend_branch_derivative} * value_scale + ({product_left_branch_derivative} * product_right_value + product_left_value * {product_right_branch_derivative}) * product_scale; }}
     }}
 "#,
         subtrahend_ty = mixed_helper_type(mask, 0),
