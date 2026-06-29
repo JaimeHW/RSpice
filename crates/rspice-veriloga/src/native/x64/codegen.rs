@@ -1800,7 +1800,7 @@ impl FunctionCompiler {
 
         let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
         self.encoder.movsd_xmm_xmm(value, ic);
-        self.emit_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
+        self.emit_consuming_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
         self.emit_state_value_store(state_index, value)?;
         let done = self.encoder.jmp_rel32_placeholder();
 
@@ -1810,7 +1810,7 @@ impl FunctionCompiler {
         self.encoder.movq_xmm_r64(scratch, Gpr::R11);
         self.encoder.mulsd_xmm_xmm(value, scratch);
         self.encoder.addsd_xmm_xmm(value, ic);
-        self.emit_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
+        self.emit_consuming_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
         self.emit_state_value_store(state_index, value)?;
 
         self.patch_rel32_to_current(done)?;
@@ -1949,7 +1949,7 @@ impl FunctionCompiler {
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
-    fn emit_ternary_helper_call(
+    fn emit_consuming_ternary_helper_call(
         &mut self,
         target: Xmm,
         arg1: Xmm,
@@ -1957,37 +1957,35 @@ impl FunctionCompiler {
         helper: TernaryHelper,
     ) {
         debug_assert!(self.uses_helper_calls);
-        debug_assert!(xmm_stack_slot(target) < self.depth);
-        debug_assert!(xmm_stack_slot(arg1) < self.depth);
-        debug_assert!(xmm_stack_slot(arg2) < self.depth);
+        let target_slot = xmm_stack_slot(target);
+        let arg1_slot = xmm_stack_slot(arg1);
+        let arg2_slot = xmm_stack_slot(arg2);
+        debug_assert!(target_slot < self.depth);
+        debug_assert!(target_slot < arg1_slot);
+        debug_assert!(arg1_slot < arg2_slot);
+        debug_assert!(arg2_slot < self.depth);
 
         self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
         self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+        for (index, register) in XMM_STACK.iter().copied().take(target_slot).enumerate() {
             self.encoder
                 .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
         }
 
-        self.encoder.movsd_xmm_m64_base_disp32(
-            Xmm::Xmm0,
-            Gpr::R11,
-            call_spill_disp(xmm_stack_slot(target)),
-        );
-        self.encoder.movsd_xmm_m64_base_disp32(
-            Xmm::Xmm1,
-            Gpr::R11,
-            call_spill_disp(xmm_stack_slot(arg1)),
-        );
-        self.encoder.movsd_xmm_m64_base_disp32(
-            Xmm::Xmm2,
-            Gpr::R11,
-            call_spill_disp(xmm_stack_slot(arg2)),
-        );
+        if target != Xmm::Xmm0 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
+        }
+        if arg1 != Xmm::Xmm1 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm1, arg1);
+        }
+        if arg2 != Xmm::Xmm2 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm2, arg2);
+        }
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
 
-        self.emit_helper_result_to_target_and_restore(target, self.depth, |_, _| true);
+        self.emit_helper_result_to_target_and_restore(target, target_slot, |_, _| true);
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
@@ -5031,6 +5029,29 @@ mod tests {
             0,
         );
         let bytes = compile_value_function(&program).expect("compile idtmod state leaf");
+        for (slot, register) in [
+            (0, Xmm::Xmm0),
+            (1, Xmm::Xmm1),
+            (2, Xmm::Xmm2),
+            (3, Xmm::Xmm3),
+        ] {
+            assert!(
+                !contains_bytes(&bytes, &call_frame_spill_bytes(slot, register)),
+                "idtmod helper should not spill consumed operand slot {slot}"
+            );
+        }
+        assert!(
+            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm0, 0)),
+            "idtmod helper should pass value directly instead of reloading it from the spill frame"
+        );
+        assert!(
+            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm1, 2)),
+            "idtmod helper should pass modulus directly instead of reloading it from the spill frame"
+        );
+        assert!(
+            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm2, 3)),
+            "idtmod helper should pass offset directly instead of reloading it from the spill frame"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate idtmod state leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -5130,6 +5151,80 @@ mod tests {
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
         let error = take_native_runtime_error().expect("short idtmod prior state must hard-fail");
         assert_prior_state_storage_bounds_error(&error);
+    }
+
+    #[test]
+    fn generated_value_leaf_preserves_prefix_across_idtmod_helper_call() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(10.0),
+                Instruction::PushVariable(0),
+                Instruction::PushConst(0.5),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(0.25),
+                Instruction::IdtModState(1),
+                Instruction::Add,
+            ],
+            0,
+        );
+        assert_eq!(program.max_stack_depth(), 5);
+        let bytes = compile_value_function(&program).expect("compile prefixed idtmod state leaf");
+        assert_eq!(
+            count_bytes(&bytes, &call_frame_spill_bytes(0, Xmm::Xmm0)),
+            2,
+            "idtmod should spill the lower live prefix once per helper-call path"
+        );
+        for (slot, register) in [
+            (1, Xmm::Xmm1),
+            (2, Xmm::Xmm2),
+            (3, Xmm::Xmm3),
+            (4, Xmm::Xmm4),
+        ] {
+            assert!(
+                !contains_bytes(&bytes, &call_frame_spill_bytes(slot, register)),
+                "idtmod helper should not spill consumed operand slot {slot}"
+            );
+        }
+        assert!(
+            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm0, 1)),
+            "idtmod helper should pass value directly instead of reloading it from the spill frame"
+        );
+        assert!(
+            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm1, 3)),
+            "idtmod helper should pass modulus directly instead of reloading it from the spill frame"
+        );
+        assert!(
+            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm2, 4)),
+            "idtmod helper should pass offset directly instead of reloading it from the spill frame"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate prefixed idtmod leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let vars = [2.0_f64];
+
+        let previous_state = [0.0_f64, 0.9_f64];
+        let mut state_values = [0.0_f64, 0.0_f64];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.timestep = 0.25;
+        ctx.state_prev = previous_state.as_ptr();
+        ctx.state_prev_len = previous_state.len();
+        ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = state_values.len();
+
+        let value = f(&ctx, vars.as_ptr());
+        assert!((value - 10.4).abs() < 1.0e-12, "value: {value}");
+        assert!(
+            (state_values[1] - 0.4).abs() < 1.0e-12,
+            "state: {state_values:?}"
+        );
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = 0.0;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 10.5_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
     }
 
     #[test]
@@ -7625,6 +7720,18 @@ mod tests {
         let mut encoder = X64Encoder::new();
         encoder.movabs_r64_imm64(Gpr::R11, index as u64);
         encoder.cmp_r64_r64(Gpr::R10, Gpr::R11);
+        encoder.into_bytes()
+    }
+
+    fn call_frame_spill_bytes(index: usize, register: Xmm) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.movsd_m64_base_disp32_xmm(Gpr::R11, super::call_spill_disp(index), register);
+        encoder.into_bytes()
+    }
+
+    fn call_frame_load_bytes(register: Xmm, index: usize) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.movsd_xmm_m64_base_disp32(register, Gpr::R11, super::call_spill_disp(index));
         encoder.into_bytes()
     }
 
