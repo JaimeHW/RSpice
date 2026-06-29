@@ -4024,6 +4024,81 @@ mod tests {
             assert_eq!(f(&ctx, std::ptr::null()), expected, "{name}");
         }
 
+        let const_lhs_cases = [
+            (
+                "and-lhs-true-right-true",
+                Instruction::And,
+                -2.0e-15,
+                2.0e-15,
+                1.0,
+            ),
+            (
+                "and-lhs-true-right-false",
+                Instruction::And,
+                -2.0e-15,
+                0.5e-15,
+                0.0,
+            ),
+            ("and-lhs-false", Instruction::And, 1.0e-15, 2.0e-15, 0.0),
+            (
+                "and-lhs-unordered",
+                Instruction::And,
+                f64::NAN,
+                2.0e-15,
+                0.0,
+            ),
+            ("or-lhs-true", Instruction::Or, -2.0e-15, 0.5e-15, 1.0),
+            (
+                "or-lhs-false-right-true",
+                Instruction::Or,
+                1.0e-15,
+                2.0e-15,
+                1.0,
+            ),
+            (
+                "or-lhs-false-right-false",
+                Instruction::Or,
+                1.0e-15,
+                0.5e-15,
+                0.0,
+            ),
+            ("or-lhs-unordered", Instruction::Or, f64::NAN, 0.5e-15, 0.0),
+        ];
+
+        for (name, op, lhs, input, expected) in const_lhs_cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(lhs),
+                    Instruction::PushTemperature,
+                    op,
+                ],
+                0,
+            );
+
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{name} should use a literal LHS logical op, not a second stack slot"
+            );
+
+            let bytes = compile_value_function(&program).expect("compile literal LHS logical leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "constant LHS logical op should stay helper-free"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate literal LHS logical leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = input;
+
+            assert_eq!(f(&ctx, std::ptr::null()), expected, "{name}");
+        }
+
         let not_cases = [
             ("not-within-epsilon", 0.5e-15, 1.0),
             ("not-at-epsilon", 1.0e-15, 0.0),
