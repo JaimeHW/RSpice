@@ -1467,9 +1467,9 @@ impl<'a> Parser<'a> {
             });
         }
 
-        let pos = self.expect_identifier("node")?;
+        let pos = self.expect_branch_endpoint("node")?;
         let neg = if self.match_token(TokenKind::Comma) {
-            Some(self.expect_identifier("node")?.into())
+            Some(self.expect_branch_endpoint("node")?.into())
         } else {
             None
         };
@@ -1855,9 +1855,9 @@ impl<'a> Parser<'a> {
                             }));
                         }
 
-                        let pos = self.expect_identifier("node")?;
+                        let pos = self.expect_branch_endpoint("node")?;
                         let neg = if self.match_token(TokenKind::Comma) {
-                            Some(self.expect_identifier("node")?.into())
+                            Some(self.expect_branch_endpoint("node")?.into())
                         } else {
                             None
                         };
@@ -2148,6 +2148,17 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn expect_branch_endpoint(&mut self, context: &str) -> Result<String, ParseError> {
+        if self.check(TokenKind::IntegerLiteral) {
+            let text = self.current().text.clone().unwrap_or_default();
+            if text == "0" {
+                self.advance();
+                return Ok(text);
+            }
+        }
+        self.expect_identifier(context)
+    }
+
     fn peek_is(&self, kind: TokenKind) -> bool {
         self.tokens
             .get(self.pos + 1)
@@ -2396,6 +2407,46 @@ mod tests {
         assert!(matches!(
             contrib.target,
             BranchAccess::Branch { ref name, .. } if name.as_str() == "coll"
+        ));
+    }
+
+    #[test]
+    fn numeric_zero_branch_endpoint_parses_as_ground() {
+        let m = parse_module(
+            r#"module a(p);
+                inout p;
+                electrical p;
+                real sensed;
+                analog begin
+                    sensed = I(p, 0);
+                    I(p, 0) <+ sensed;
+                end
+            endmodule"#,
+        );
+
+        let stmts = &m.analog_block.as_ref().unwrap().statements;
+        let AnalogStatement::Assignment(assign) = &stmts[0] else {
+            panic!("expected branch-current assignment");
+        };
+        assert!(matches!(
+            assign.value,
+            Expression::BranchAccess(BranchAccess::Nodes {
+                ref pos,
+                neg: Some(ref neg),
+                ..
+            }) if pos.as_str() == "p" && neg.as_str() == "0"
+        ));
+
+        let AnalogStatement::Contribution(contrib) = &stmts[1] else {
+            panic!("expected branch-current contribution");
+        };
+        assert!(matches!(
+            contrib.target,
+            BranchAccess::Nodes {
+                ref pos,
+                neg: Some(ref neg),
+                ..
+            } if pos.as_str() == "p" && neg.as_str() == "0"
         ));
     }
 

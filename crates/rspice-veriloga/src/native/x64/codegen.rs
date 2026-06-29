@@ -4126,7 +4126,7 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_loads_terminal_pair_current_probe() {
-        let available_current_pairs = [2];
+        let available_current_pairs = [3];
         let program = native_program_with_available_current_pairs(
             EntryKind::StampValue,
             vec![
@@ -4143,13 +4143,61 @@ mod tests {
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(entry) };
 
-        let branch_currents = [f64::NAN, 4.0_f64, -4.0_f64, f64::NAN];
+        let branch_currents = [
+            f64::NAN,
+            4.0_f64,
+            f64::NAN,
+            -4.0_f64,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+        ];
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.branch_currents = branch_currents.as_ptr();
         ctx.branch_currents_len = branch_currents.len();
         ctx.num_terminals = 2;
 
         assert_eq!(f(&ctx, std::ptr::null()), -1.0);
+    }
+
+    #[test]
+    fn generated_value_leaf_loads_terminal_to_ground_current_probe() {
+        let available_current_pairs = [2];
+        let program = native_program_with_available_current_pairs(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushCurrent(0, usize::MAX),
+                Instruction::PushConst(0.25),
+                Instruction::Mul,
+            ],
+            2,
+            &available_current_pairs,
+        );
+        let bytes = compile_value_function(&program).expect("compile current probe leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate current probe leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let branch_currents = [
+            f64::NAN,
+            f64::NAN,
+            8.0_f64,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            -8.0_f64,
+            f64::NAN,
+            f64::NAN,
+        ];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.branch_currents = branch_currents.as_ptr();
+        ctx.branch_currents_len = branch_currents.len();
+        ctx.num_terminals = 2;
+
+        assert_eq!(f(&ctx, std::ptr::null()), 2.0);
     }
 
     #[test]

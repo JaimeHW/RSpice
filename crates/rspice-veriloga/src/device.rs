@@ -25,7 +25,9 @@
 
 use crate::canonical_ir::CanonicalIrArtifact;
 use crate::codegen::{CompiledModel, Instruction, StampIndex};
-use crate::vm::{Vm, VmContext, VmError};
+#[cfg(feature = "native")]
+use crate::vm::terminal_pair_current_endpoints;
+use crate::vm::{CURRENT_PAIR_GROUND, Vm, VmContext, VmError};
 use smol_str::SmolStr;
 
 #[cfg(feature = "native")]
@@ -1353,8 +1355,12 @@ impl VerilogADevice {
             ));
         }
         for pair_index in current_pairs {
-            let pos = pair_index / terminal_count;
-            let neg = pair_index % terminal_count;
+            let Some((pos, neg)) = terminal_pair_current_endpoints(*pair_index, terminal_count)
+            else {
+                return Err(VmError::InvalidInstruction(
+                    "missing terminal-pair current slot",
+                ));
+            };
             context.try_current(pos, neg)?;
         }
 
@@ -2067,25 +2073,26 @@ impl VerilogADevice {
     fn infer_current_terminal_pair(
         program: &crate::codegen::StampProgram,
     ) -> Option<(usize, usize)> {
-        let mut pos_terminal = None;
-        let mut neg_terminal = None;
+        let mut pos_endpoint = None;
+        let mut neg_endpoint = None;
 
         for loc in &program.stamp_locations {
-            let terminal = match loc.row {
+            let endpoint = match loc.row {
                 StampIndex::Terminal(term) => term,
+                StampIndex::Ground => CURRENT_PAIR_GROUND,
                 _ => continue,
             };
 
             if loc.sign < 0.0 {
-                if pos_terminal.replace(terminal).is_some() {
+                if pos_endpoint.replace(endpoint).is_some() {
                     return None;
                 }
-            } else if loc.sign > 0.0 && neg_terminal.replace(terminal).is_some() {
+            } else if loc.sign > 0.0 && neg_endpoint.replace(endpoint).is_some() {
                 return None;
             }
         }
 
-        match (pos_terminal, neg_terminal) {
+        match (pos_endpoint, neg_endpoint) {
             (Some(pos), Some(neg)) if pos != neg => Some((pos, neg)),
             _ => None,
         }

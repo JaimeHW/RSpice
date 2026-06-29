@@ -153,6 +153,8 @@ impl ConversionContext {
             node_map.insert(node.name.clone(), num_terminals + node.index);
         }
 
+        node_map.insert(SmolStr::from("0"), GROUND_NODE);
+
         // Ground nets reference the global ground sentinel
         for name in &module.ground_nodes {
             node_map.insert(name.clone(), GROUND_NODE);

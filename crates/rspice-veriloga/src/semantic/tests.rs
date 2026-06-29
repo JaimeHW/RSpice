@@ -526,6 +526,24 @@ fn ground_net_does_not_allocate_internal_node() {
 }
 
 #[test]
+fn numeric_zero_branch_endpoint_references_global_ground() {
+    let m = analyze_one(&module_src(
+        r#"
+            analog begin
+                I(p, 0) <+ V(p, 0);
+                I(0, p) <+ V(0, p);
+            end
+            "#,
+    ));
+
+    assert_eq!(m.contributions.len(), 2);
+    assert_eq!(m.contributions[0].branch.as_str(), "p,0");
+    assert!(m.contributions[0].is_current);
+    assert_eq!(m.contributions[1].branch.as_str(), "0,p");
+    assert!(m.contributions[1].is_current);
+}
+
+#[test]
 fn initial_step_lowered_to_static_analysis_guard() {
     let m = analyze_one(&module_src(
         r#"

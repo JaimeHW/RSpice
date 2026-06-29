@@ -999,6 +999,22 @@ endmodule
     )
 }
 
+fn single_ended_current_probe_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_single_current_probe(p);
+    inout p;
+    electrical p;
+    analog begin
+        I(p) <+ V(p);
+        I(p) <+ I(p) * 0.1;
+    end
+endmodule
+"#,
+    )
+}
+
 fn unavailable_current_probe_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -4216,6 +4232,57 @@ fn native_device_executes_terminal_pair_current_probes_in_source_order() {
     let currents = device
         .try_evaluate()
         .expect("native current-probe evaluation succeeds");
+
+    assert_eq!(currents.len(), 2);
+    assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
+    assert!((currents[1] - 0.4).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_single_ended_current_probes_in_source_order() {
+    let model = single_ended_current_probe_model();
+    let mut device = VerilogADevice::try_new("CG1", model, &[1])
+        .expect("single-ended current probe model uses native JIT");
+    assert!(device.is_using_native());
+    device.update_voltages(&[4.0]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native single-ended current-probe evaluation succeeds");
+
+    assert_eq!(currents.len(), 2);
+    assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
+    assert!((currents[1] - 0.4).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_with_canonical_ir_executes_explicit_ground_current_probe_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_ground_current_probe(p);
+    inout p;
+    electrical p;
+    analog begin
+        I(p) <+ V(p);
+        I(p) <+ I(p, 0) * 0.1;
+    end
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device = VerilogADevice::try_new_with_canonical_ir("CGCANON1", model, &artifact, &[1])
+        .expect("canonical single-ended current probe uses native JIT path");
+    assert!(device.is_using_native());
+    device.update_voltages(&[4.0]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native canonical single-ended current-probe evaluation succeeds");
 
     assert_eq!(currents.len(), 2);
     assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");

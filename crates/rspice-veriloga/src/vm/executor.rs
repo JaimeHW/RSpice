@@ -814,6 +814,22 @@ mod tests {
     }
 
     #[test]
+    fn terminal_to_ground_current_uses_exact_pair_and_orientation() {
+        let mut context = VmContext::new(2);
+        context.set_branch_current(0, usize::MAX, 3.5);
+
+        let forward =
+            execute_with_context(&mut context, vec![Instruction::PushCurrent(0, usize::MAX)])
+                .expect("terminal-to-ground current should evaluate");
+        assert_eq!(forward, 3.5);
+
+        let reverse =
+            execute_with_context(&mut context, vec![Instruction::PushCurrent(usize::MAX, 0)])
+                .expect("ground-to-terminal current should evaluate");
+        assert_eq!(reverse, -3.5);
+    }
+
+    #[test]
     fn missing_terminal_pair_current_is_a_vm_error() {
         let mut context = VmContext::new(2);
         context.currents.push(123.0);
