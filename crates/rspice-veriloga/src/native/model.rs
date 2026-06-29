@@ -29,6 +29,7 @@ pub(crate) struct NativeEntryOffsets {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct NativeCurrentDependencies {
     pub stamp_values: Vec<Vec<usize>>,
+    pub stamp_value_prior_currents: Vec<Vec<usize>>,
     pub jacobians: Vec<Vec<Vec<usize>>>,
     pub reactive_jacobians: Vec<Vec<Vec<usize>>>,
     pub noise_psd: Vec<Vec<usize>>,
@@ -234,6 +235,7 @@ impl NativeModel {
     fn empty_current_dependencies(entries: &NativeEntryOffsets) -> NativeCurrentDependencies {
         NativeCurrentDependencies {
             stamp_values: vec![Vec::new(); entries.stamp_values.len()],
+            stamp_value_prior_currents: vec![Vec::new(); entries.stamp_values.len()],
             jacobians: entries
                 .jacobians
                 .iter()
@@ -254,6 +256,7 @@ impl NativeModel {
         dependencies: &NativeCurrentDependencies,
     ) -> JitResult<()> {
         if dependencies.stamp_values.len() != entries.stamp_values.len()
+            || dependencies.stamp_value_prior_currents.len() != entries.stamp_values.len()
             || dependencies.jacobians.len() != entries.jacobians.len()
             || dependencies.reactive_jacobians.len() != entries.reactive_jacobians.len()
             || dependencies
@@ -324,6 +327,10 @@ impl NativeModel {
 
     pub(crate) fn stamp_value_current_pairs(&self, index: usize) -> &[usize] {
         &self.current_dependencies.stamp_values[index]
+    }
+
+    pub(crate) fn stamp_value_prior_currents(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.stamp_value_prior_currents[index]
     }
 
     pub(crate) fn run_jacobian(

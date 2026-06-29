@@ -60,6 +60,7 @@ fn compile_model_inner(
     let mut static_conditions = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_values = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
+    let mut stamp_value_prior_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobians = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut reactive_jacobians = Vec::with_capacity(model.stamp_programs.len());
@@ -93,6 +94,7 @@ fn compile_model_inner(
             value_limits,
         )?;
         stamp_value_current_dependencies.push(program.current_pair_dependencies().to_vec());
+        stamp_value_prior_current_dependencies.push(program.prior_current_dependencies().to_vec());
         stamp_values.push(append_value_entry(&mut image, &program)?);
 
         let mut jacobian_current_pairs = available_current_pairs.clone();
@@ -195,6 +197,7 @@ fn compile_model_inner(
         },
         NativeCurrentDependencies {
             stamp_values: stamp_value_current_dependencies,
+            stamp_value_prior_currents: stamp_value_prior_current_dependencies,
             jacobians: jacobian_current_dependencies,
             reactive_jacobians: reactive_jacobian_current_dependencies,
             noise_psd: noise_psd_current_dependencies,

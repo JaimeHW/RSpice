@@ -1505,6 +1505,42 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_evaluates_prior_named_branch_current_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_named_current_probe(p, n);
+    inout p, n;
+    electrical p, n, sense_node;
+    branch (sense_node) sense;
+    analog begin
+        I(sense) <+ V(p, n);
+        I(p, n) <+ 2.0 * I(sense);
+    end
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    assert_eq!(model.internal_nodes, 1);
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("NCURPROBE1", model, &artifact, &[1, 0])
+            .expect("named branch current probe uses canonical native JIT path");
+    assert!(device.is_using_native());
+    device.set_internal_node_indices(&[2]);
+    device.update_all_voltages(&[2.0, 0.0]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native named branch current probe evaluates");
+
+    assert!((currents[0] - 2.0).abs() < 1e-12, "currents: {currents:?}");
+    assert!((currents[1] - 4.0).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_stamps_named_branch_current_without_fallback() {
     let source = r#"
 `include "disciplines.vams"

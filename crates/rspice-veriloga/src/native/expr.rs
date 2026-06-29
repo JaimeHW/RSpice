@@ -32,6 +32,7 @@ pub(crate) enum NativeOp {
     LoadPortConnected(usize),
     LoadVoltage { pos: VoltageNode, neg: VoltageNode },
     LoadCurrent(usize),
+    LoadPriorCurrent(usize),
     LoadInternalVoltage(usize),
     LoadVariable(usize),
     LoadVariableDyn { base: usize, len: usize, lower: i64 },
@@ -151,6 +152,7 @@ pub(crate) struct NativeProgram {
     ops: Vec<NativeOp>,
     max_stack_depth: usize,
     current_pair_dependencies: Vec<usize>,
+    prior_current_dependencies: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1977,6 +1979,7 @@ impl NativeProgram {
             ops,
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies,
+            prior_current_dependencies: Vec::new(),
         })
     }
 
@@ -2026,6 +2029,7 @@ impl NativeProgram {
             ops: lowerer.ops,
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies: lowerer.current_pair_dependencies,
+            prior_current_dependencies: lowerer.prior_current_dependencies,
         })
     }
 
@@ -2040,6 +2044,10 @@ impl NativeProgram {
     pub(crate) fn current_pair_dependencies(&self) -> &[usize] {
         &self.current_pair_dependencies
     }
+
+    pub(crate) fn prior_current_dependencies(&self) -> &[usize] {
+        &self.prior_current_dependencies
+    }
 }
 
 struct MirEquationLowerer<'a, 'limits> {
@@ -2052,6 +2060,7 @@ struct MirEquationLowerer<'a, 'limits> {
     depth: usize,
     max_stack_depth: usize,
     current_pair_dependencies: Vec<usize>,
+    prior_current_dependencies: Vec<usize>,
 }
 
 impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
@@ -2072,6 +2081,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             depth: 0,
             max_stack_depth: 0,
             current_pair_dependencies: Vec::new(),
+            prior_current_dependencies: Vec::new(),
         }
     }
 
@@ -2713,23 +2723,93 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_named_branch_access(&mut self, access: &str, name: &str) -> JitResult<()> {
         if is_flow_access(access) {
-            let Some(branch_unknown) = self.named_branch_unknown(name) else {
-                return Err(self.unsupported(format!("named branch current {name}")));
-            };
-            let index = usize::from(branch_unknown.id);
-            validate_index(
-                self.model.clone(),
-                "canonical branch unknown",
-                index,
-                self.limits.branch_unknown_count,
-            )?;
-            return self.push(NativeOp::LoadBranchUnknown(index));
+            if let Some(branch_unknown) = self.named_branch_unknown(name) {
+                let index = usize::from(branch_unknown.id);
+                validate_index(
+                    self.model.clone(),
+                    "canonical branch unknown",
+                    index,
+                    self.limits.branch_unknown_count,
+                )?;
+                return self.push(NativeOp::LoadBranchUnknown(index));
+            }
+            return self.lower_prior_named_branch_current(name);
         }
 
         let branch = self.named_branch(name)?;
         let pos = self.lower_voltage_node_id(branch.pos_node)?;
         let neg = self.lower_voltage_node_id(branch.neg_node)?;
         self.push(NativeOp::LoadVoltage { pos, neg })
+    }
+
+    fn lower_prior_named_branch_current(&mut self, name: &str) -> JitResult<()> {
+        let branch = self.named_branch(name)?;
+        let prior_indices = self.prior_named_branch_current_indices(name, branch);
+        let Some((first, rest)) = prior_indices.split_first() else {
+            return Err(self.unsupported(format!("named branch current {name}")));
+        };
+
+        self.push_prior_current(*first)?;
+        for index in rest {
+            self.push_prior_current(*index)?;
+            self.append_arithmetic("Add")?;
+        }
+        Ok(())
+    }
+
+    fn push_prior_current(&mut self, index: usize) -> JitResult<()> {
+        if !self.prior_current_dependencies.contains(&index) {
+            self.prior_current_dependencies.push(index);
+        }
+        self.push(NativeOp::LoadPriorCurrent(index))
+    }
+
+    fn prior_named_branch_current_indices(
+        &self,
+        name: &str,
+        branch: &crate::canonical_ir::MirBranch,
+    ) -> Vec<usize> {
+        let equation_index = usize::from(self.equation_id);
+        self.mir
+            .equations
+            .iter()
+            .take(equation_index)
+            .enumerate()
+            .filter_map(|(index, equation)| {
+                (equation.kind == crate::canonical_ir::MirEquationKind::Current
+                    && self.equation_contributes_to_named_branch(equation, name, branch))
+                .then_some(index)
+            })
+            .collect()
+    }
+
+    fn equation_contributes_to_named_branch(
+        &self,
+        equation: &crate::canonical_ir::MirEquation,
+        name: &str,
+        branch: &crate::canonical_ir::MirBranch,
+    ) -> bool {
+        if equation.branch.declared_name.as_deref() == Some(name) {
+            return true;
+        }
+
+        equation.branch.pos_node == branch.pos_node
+            && equation.branch.neg_node == branch.neg_node
+            && self.unique_branch_name_for_endpoints(branch.pos_node, branch.neg_node) == Some(name)
+    }
+
+    fn unique_branch_name_for_endpoints(
+        &self,
+        pos_node: Option<crate::canonical_ir::NodeId>,
+        neg_node: Option<crate::canonical_ir::NodeId>,
+    ) -> Option<&str> {
+        let mut matches = self
+            .mir
+            .branches
+            .iter()
+            .filter(|branch| branch.pos_node == pos_node && branch.neg_node == neg_node);
+        let first = matches.next()?;
+        matches.next().is_none().then_some(first.name.as_str())
     }
 
     fn lower_intrinsic_call(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
@@ -4122,6 +4202,7 @@ fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::LoadPortConnected(_)
         | NativeOp::LoadVoltage { .. }
         | NativeOp::LoadCurrent(_)
+        | NativeOp::LoadPriorCurrent(_)
         | NativeOp::LoadInternalVoltage(_)
         | NativeOp::LoadVariable(_)
         | NativeOp::LoadBranchUnknown(_)
@@ -4822,6 +4903,84 @@ endmodule
             ]
         );
         assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_canonical_named_branch_current_from_prior_contribution() {
+        let source = r#"
+module mir_named_branch_current_probe(p, n);
+  inout p, n;
+  electrical p, n, sense_node;
+  branch (sense_node) sense;
+  analog begin
+    I(sense) <+ V(p, n);
+    I(p, n) <+ 2.0 * I(sense);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_named_branch_current_probe",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(1),
+            NativeLoweringLimits::new(2, 1, 0, 0, 0),
+        )
+        .expect("lower canonical named branch current from prior contribution");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::Const(2.0),
+                NativeOp::LoadPriorCurrent(0),
+                NativeOp::Mul,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 2);
+        assert_eq!(program.current_pair_dependencies(), &[]);
+        assert_eq!(program.prior_current_dependencies(), &[0]);
+    }
+
+    #[test]
+    fn lowers_canonical_named_branch_current_as_sum_of_prior_contributions() {
+        let source = r#"
+module mir_named_branch_current_sum(p, n);
+  inout p, n;
+  electrical p, n, sense_node;
+  branch (sense_node) sense;
+  analog begin
+    I(sense) <+ 1.0;
+    I(sense) <+ V(p, n);
+    I(p, n) <+ I(sense);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_named_branch_current_sum",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(2),
+            NativeLoweringLimits::new(2, 1, 0, 0, 0),
+        )
+        .expect("lower canonical named branch current sum from prior contributions");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadPriorCurrent(0),
+                NativeOp::LoadPriorCurrent(1),
+                NativeOp::Add,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 2);
+        assert_eq!(program.prior_current_dependencies(), &[0, 1]);
     }
 
     #[test]

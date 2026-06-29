@@ -1300,7 +1300,12 @@ impl VerilogADevice {
             NativeValueEntry::NoisePsd(index) => native.noise_psd_current_pairs(index),
             NativeValueEntry::NoiseExponent(index) => native.noise_exponent_current_pairs(index),
         };
+        let prior_currents = match entry {
+            NativeValueEntry::StampValue(index) => native.stamp_value_prior_currents(index),
+            _ => &[],
+        };
         Self::validate_native_current_pairs(vm.context, current_pairs)?;
+        Self::validate_native_prior_currents(vm.context, prior_currents)?;
 
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_ptr();
@@ -1351,6 +1356,23 @@ impl VerilogADevice {
             let pos = pair_index / terminal_count;
             let neg = pair_index % terminal_count;
             context.try_current(pos, neg)?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "native")]
+    fn validate_native_prior_currents(
+        context: &VmContext,
+        prior_currents: &[usize],
+    ) -> Result<(), VmError> {
+        for current_index in prior_currents {
+            if *current_index >= context.currents.len() {
+                return Err(VmError::NativeJit(format!(
+                    "native stamp requires prior contribution current {current_index}, but only {} current(s) have been evaluated; no interpreter fallback",
+                    context.currents.len()
+                )));
+            }
         }
 
         Ok(())

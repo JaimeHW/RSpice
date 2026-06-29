@@ -19,6 +19,7 @@ const VOLTAGES_OFFSET: i32 = 0;
 const INTERNAL_VOLTAGES_OFFSET: i32 = 8;
 const PARAMS_OFFSET: i32 = 16;
 const BRANCH_CURRENTS_OFFSET: i32 = 24;
+const CURRENTS_OFFSET: i32 = 40;
 const PORT_CONNECTED_OFFSET: i32 = 64;
 const TEMPERATURE_OFFSET: i32 = 80;
 const TIME_OFFSET: i32 = 88;
@@ -205,6 +206,15 @@ impl FunctionCompiler {
                     self.emit_context_pointer_load(BRANCH_CURRENTS_OFFSET);
                     self.encoder
                         .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(pair_index)?);
+                }
+                NativeOp::LoadPriorCurrent(current_index) => {
+                    let dst = self.push_register()?;
+                    self.emit_context_pointer_load(CURRENTS_OFFSET);
+                    self.encoder.movsd_xmm_m64_base_disp32(
+                        dst,
+                        Gpr::Rax,
+                        byte_disp(current_index)?,
+                    );
                 }
                 NativeOp::LoadInternalVoltage(index) => {
                     let dst = self.push_register()?;
