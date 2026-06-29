@@ -37,14 +37,17 @@ use xspice_ports::*;
 #[cfg(feature = "veriloga")]
 mod veriloga_cache;
 #[cfg(feature = "veriloga")]
+use veriloga_cache::{
+    CachedVerilogAModel, normalize_model_key, resolve_cached_or_compile_veriloga,
+};
+#[cfg(feature = "veriloga")]
 pub use veriloga_cache::{
     VerilogACacheEntry, VerilogACachePruneReport, VerilogACacheStats, clear_veriloga_cache,
     prune_veriloga_cache, register_precompiled_veriloga_model,
-    register_precompiled_veriloga_model_with_dependencies, veriloga_cache_entries,
+    register_precompiled_veriloga_model_with_dependencies,
+    register_precompiled_veriloga_runtime_with_dependencies, veriloga_cache_entries,
     veriloga_cache_stats,
 };
-#[cfg(feature = "veriloga")]
-use veriloga_cache::{normalize_model_key, resolve_cached_or_compile_veriloga};
 
 mod model_policy;
 use model_policy::*;
@@ -110,10 +113,7 @@ impl Engine {
         // One shared Arc per model: instances share the (megabyte-scale)
         // program and a single JIT compilation
         #[cfg(feature = "veriloga")]
-        let mut veriloga_models: HashMap<
-            String,
-            std::sync::Arc<rspice_veriloga::CompiledModel>,
-        > = HashMap::new();
+        let mut veriloga_models: HashMap<String, CachedVerilogAModel> = HashMap::new();
 
         // One shared BSIM3v3.3 card + temperature block per .model name,
         // with the (W, L) size knots memoized across instances.
@@ -126,29 +126,28 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         {
             for include in &netlist.veriloga_includes {
-                let model =
-                    std::sync::Arc::new(resolve_cached_or_compile_veriloga(&include.file_path)?);
+                let runtime = resolve_cached_or_compile_veriloga(&include.file_path)?;
 
-                let model_key = normalize_model_key(model.name.as_str());
+                let model_key = normalize_model_key(runtime.model.name.as_str());
                 veriloga_models
                     .entry(model_key)
-                    .or_insert_with(|| std::sync::Arc::clone(&model));
+                    .or_insert_with(|| runtime.clone());
 
                 if let Some(alias) = include.model_name.as_deref() {
                     veriloga_models
                         .entry(normalize_model_key(alias))
-                        .or_insert_with(|| std::sync::Arc::clone(&model));
+                        .or_insert_with(|| runtime.clone());
                 }
 
                 if let Some(stem) = include.file_path.file_stem().and_then(|s| s.to_str()) {
                     veriloga_models
                         .entry(normalize_model_key(stem))
-                        .or_insert_with(|| std::sync::Arc::clone(&model));
+                        .or_insert_with(|| runtime.clone());
                 }
 
                 log::info!(
                     "Loaded Verilog-A model '{}' from {}",
-                    model.name,
+                    runtime.model.name,
                     include.file_path.display()
                 );
             }
@@ -1728,8 +1727,10 @@ impl Engine {
 
                     #[cfg(feature = "veriloga")]
                     {
-                        if let Some(model) = veriloga_models.get(&normalize_model_key(subckt_name))
+                        if let Some(runtime) =
+                            veriloga_models.get(&normalize_model_key(subckt_name))
                         {
+                            let model = &runtime.model;
                             if element.nodes.len() > model.num_terminals {
                                 return Err(SimulationError::Circuit(format!(
                                     "Verilog-A instance '{}' expects at most {} terminals for model '{}', found {}",
@@ -1749,14 +1750,32 @@ impl Engine {
                                 });
                             }
 
-                            let mut device = crate::device::veriloga::VerilogADevice::try_new(
+                            #[cfg(feature = "veriloga-native")]
+                            let device = {
+                                let canonical_ir = runtime.canonical_ir.as_ref().ok_or_else(|| {
+                                    SimulationError::Circuit(format!(
+                                        "Verilog-A device '{}' missing canonical IR for native JIT; no interpreter fallback",
+                                        element.name
+                                    ))
+                                })?;
+                                crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir(
+                                    element.name.clone(),
+                                    std::sync::Arc::clone(model),
+                                    canonical_ir.as_ref(),
+                                    &node_ids,
+                                )
+                            };
+
+                            #[cfg(not(feature = "veriloga-native"))]
+                            let device = crate::device::veriloga::VerilogADevice::try_new(
                                 element.name.clone(),
                                 std::sync::Arc::clone(model),
                                 &node_ids,
-                            )
-                            .map_err(|err| {
+                            );
+
+                            let mut device = device.map_err(|err| {
                                 SimulationError::Circuit(format!(
-                                    "Verilog-A device '{}' parameter default resolution failed: {}",
+                                    "Verilog-A device '{}' construction failed: {}",
                                     element.name, err
                                 ))
                             })?;

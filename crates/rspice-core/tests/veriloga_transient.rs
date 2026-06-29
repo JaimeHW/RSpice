@@ -6,7 +6,11 @@
 //! and the backward-Euler ddt() state pipeline.
 #![cfg(feature = "veriloga")]
 
-use rspice_core::{Engine, Netlist, register_precompiled_veriloga_model};
+#[cfg(not(feature = "veriloga-native"))]
+use rspice_core::register_precompiled_veriloga_model;
+#[cfg(feature = "veriloga-native")]
+use rspice_core::register_precompiled_veriloga_runtime_with_dependencies;
+use rspice_core::{Engine, Netlist};
 use rspice_veriloga::codegen::{BytecodeProgram, Instruction};
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::io::Write;
@@ -178,11 +182,24 @@ endmodule
     let mut compiled = VerilogACompiler::new(CompilerOptions::default())
         .compile(source)
         .expect("model compiles before cache corruption");
+    #[cfg(feature = "veriloga-native")]
+    let canonical_ir = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(source)
+        .expect("canonical IR compiles before cache corruption");
     compiled.parameters[1].default_program = Some(BytecodeProgram {
         instructions: vec![Instruction::PushParam(99)],
     });
+    #[cfg(not(feature = "veriloga-native"))]
     register_precompiled_veriloga_model(&model_path, compiled)
         .expect("register corrupted precompiled model");
+    #[cfg(feature = "veriloga-native")]
+    register_precompiled_veriloga_runtime_with_dependencies(
+        &model_path,
+        &[model_path.clone()],
+        compiled,
+        canonical_ir,
+    )
+    .expect("register corrupted precompiled runtime artifact");
 
     let deck = format!(
         "* veriloga dependent default diagnostic\n\
@@ -204,6 +221,50 @@ endmodule
     assert!(
         text.contains("Verilog-A") && text.contains("parameter"),
         "diagnostic should identify the Verilog-A parameter default failure, got: {text}"
+    );
+}
+
+#[test]
+#[cfg(all(feature = "veriloga-native", target_arch = "x86_64"))]
+fn veriloga_native_builder_uses_canonical_ir_without_bytecode_fallback() {
+    let model = write_model(
+        "canonical_required",
+        r#"
+`include "disciplines.vams"
+module va_canonical_required(p, n);
+    inout p, n;
+    electrical p, n;
+    real g;
+    analog begin
+        g = 1.0e-3;
+        I(p, n) <+ g * V(p, n);
+    end
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* native canonical IR path diagnostic\n\
+         V1 in 0 DC 1\n\
+         X1 in 0 va_canonical_required\n\
+         .VERILOGA \"{}\" va_canonical_required\n\
+         .end\n",
+        deck_path(&model)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let err = Engine::default()
+        .build_circuit(&netlist)
+        .expect_err("native builder must use canonical IR instead of bytecode-native fallback");
+    let text = err.to_string();
+
+    let _ = std::fs::remove_file(model);
+
+    assert!(
+        text.contains("native JIT")
+            && text.contains("expression identifier g")
+            && text.contains("no interpreter fallback"),
+        "diagnostic should prove the canonical native path hard-failed, got: {text}"
     );
 }
 

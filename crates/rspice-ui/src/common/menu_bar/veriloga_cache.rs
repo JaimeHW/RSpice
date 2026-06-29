@@ -198,13 +198,14 @@ pub(crate) fn action_veriloga_recompile_library(state: &mut AppState) {
     )));
 
     for candidate in candidates {
-        match compiler.compile_file_with_metadata(&candidate.source_path) {
+        match compiler.compile_file_runtime_with_metadata(&candidate.source_path, None) {
             Ok(compiled) => {
                 let model_name = compiled.model.name.clone();
-                match rspice_core::register_precompiled_veriloga_model_with_dependencies(
+                match rspice_core::register_precompiled_veriloga_runtime_with_dependencies(
                     &candidate.source_path,
                     &compiled.dependencies,
                     compiled.model,
+                    compiled.canonical_ir,
                 ) {
                     Ok(()) => {
                         ok_count += 1;

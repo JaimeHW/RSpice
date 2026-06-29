@@ -25,6 +25,8 @@ pub struct VerilogALoadDialogState {
     pub compiled_module: Option<CompiledModuleInfo>,
     /// Successfully compiled model artifact for simulation cache registration.
     pub compiled_artifact: Option<rspice_veriloga::CompiledModel>,
+    /// Canonical IR paired with the compiled model for native-JIT cache registration.
+    pub compiled_canonical_ir: Option<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
     /// Canonical source/include dependencies captured during compilation.
     pub compiled_dependencies: Option<Vec<PathBuf>>,
     /// Whether to show advanced options.
@@ -53,6 +55,7 @@ impl Default for VerilogALoadDialogState {
             errors: Vec::new(),
             compiled_module: None,
             compiled_artifact: None,
+            compiled_canonical_ir: None,
             compiled_dependencies: None,
             show_advanced_options: false,
             compile_started_at: None,
@@ -75,6 +78,7 @@ impl Clone for VerilogALoadDialogState {
             errors: self.errors.clone(),
             compiled_module: self.compiled_module.clone(),
             compiled_artifact: self.compiled_artifact.clone(),
+            compiled_canonical_ir: self.compiled_canonical_ir.clone(),
             compiled_dependencies: self.compiled_dependencies.clone(),
             show_advanced_options: self.show_advanced_options,
             compile_started_at: self.compile_started_at,
@@ -101,6 +105,10 @@ impl std::fmt::Debug for VerilogALoadDialogState {
             .field(
                 "compiled_artifact",
                 &self.compiled_artifact.as_ref().map(|m| &m.name),
+            )
+            .field(
+                "compiled_canonical_ir",
+                &self.compiled_canonical_ir.is_some(),
             )
             .field(
                 "compiled_dependencies",
@@ -172,6 +180,7 @@ impl VerilogALoadDialogState {
         self.errors.clear();
         self.compiled_module = None;
         self.compiled_artifact = None;
+        self.compiled_canonical_ir = None;
         self.compiled_dependencies = None;
         self.compile_started_at = None;
         self.last_compile_secs = None;
