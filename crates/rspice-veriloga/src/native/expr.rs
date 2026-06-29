@@ -168,6 +168,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     canonical_slew_slots: &'a [(ExprId, usize)],
     canonical_absdelay_slots: &'a [(ExprId, usize)],
     canonical_laplace_slots: &'a [(ExprId, usize)],
+    canonical_zi_slots: &'a [(ExprId, usize)],
 }
 
 impl<'a> NativeLoweringLimits<'a> {
@@ -196,6 +197,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_slew_slots: &[],
             canonical_absdelay_slots: &[],
             canonical_laplace_slots: &[],
+            canonical_zi_slots: &[],
         }
     }
 
@@ -238,6 +240,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_slew_slots: self.canonical_slew_slots,
             canonical_absdelay_slots: self.canonical_absdelay_slots,
             canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
         }
     }
 
@@ -273,6 +276,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_slew_slots: self.canonical_slew_slots,
             canonical_absdelay_slots: self.canonical_absdelay_slots,
             canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
         }
     }
 
@@ -315,6 +319,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_slew_slots: self.canonical_slew_slots,
             canonical_absdelay_slots: self.canonical_absdelay_slots,
             canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
         }
     }
 
@@ -343,6 +348,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_slew_slots: self.canonical_slew_slots,
             canonical_absdelay_slots: self.canonical_absdelay_slots,
             canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
         }
     }
 
@@ -371,6 +377,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_slew_slots: self.canonical_slew_slots,
             canonical_absdelay_slots: self.canonical_absdelay_slots,
             canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
         }
     }
 
@@ -399,6 +406,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_slew_slots: self.canonical_slew_slots,
             canonical_absdelay_slots: self.canonical_absdelay_slots,
             canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
         }
     }
 
@@ -427,6 +435,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_slew_slots,
             canonical_absdelay_slots: self.canonical_absdelay_slots,
             canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
         }
     }
 
@@ -455,6 +464,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_slew_slots: self.canonical_slew_slots,
             canonical_absdelay_slots,
             canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
         }
     }
 
@@ -483,6 +493,36 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_slew_slots: self.canonical_slew_slots,
             canonical_absdelay_slots: self.canonical_absdelay_slots,
             canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
+        }
+    }
+
+    pub(crate) fn with_canonical_zi_slots<'b>(
+        self,
+        canonical_zi_slots: &'b [(ExprId, usize)],
+    ) -> NativeLoweringLimits<'b>
+    where
+        'a: 'b,
+    {
+        NativeLoweringLimits {
+            terminal_count: self.terminal_count,
+            internal_node_count: self.internal_node_count,
+            parameter_count: self.parameter_count,
+            variable_count: self.variable_count,
+            variable_names: self.variable_names,
+            branch_unknown_count: self.branch_unknown_count,
+            lookup_table_count: self.lookup_table_count,
+            laplace_filter_count: self.laplace_filter_count,
+            zi_filter_count: self.zi_filter_count,
+            available_current_pairs: self.available_current_pairs,
+            canonical_ddt_slots: self.canonical_ddt_slots,
+            canonical_idt_slots: self.canonical_idt_slots,
+            canonical_idtmod_slots: self.canonical_idtmod_slots,
+            canonical_transition_slots: self.canonical_transition_slots,
+            canonical_slew_slots: self.canonical_slew_slots,
+            canonical_absdelay_slots: self.canonical_absdelay_slots,
+            canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots,
         }
     }
 
@@ -527,6 +567,12 @@ impl<'a> NativeLoweringLimits<'a> {
             .iter()
             .find_map(|(id, slot)| (*id == expr_id).then_some(*slot))
     }
+
+    fn canonical_zi_slot(&self, expr_id: ExprId) -> Option<usize> {
+        self.canonical_zi_slots
+            .iter()
+            .find_map(|(id, slot)| (*id == expr_id).then_some(*slot))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -538,6 +584,7 @@ enum CanonicalStateOperator {
     Slew,
     Absdelay,
     Laplace,
+    Zi,
 }
 
 impl CanonicalStateOperator {
@@ -550,6 +597,7 @@ impl CanonicalStateOperator {
             Self::Slew => "slew",
             Self::Absdelay => "absdelay",
             Self::Laplace => "laplace",
+            Self::Zi => "zi",
         }
     }
 
@@ -563,6 +611,7 @@ impl CanonicalStateOperator {
             (Self::Slew, Instruction::SlewState(slot)) => Some(*slot),
             (Self::Absdelay, Instruction::AbsDelayState(slot)) => Some(*slot),
             (Self::Laplace, Instruction::LaplaceState(slot)) => Some(*slot),
+            (Self::Zi, Instruction::ZiState(slot)) => Some(*slot),
             _ => None,
         }
     }
@@ -574,6 +623,7 @@ impl CanonicalStateOperator {
                 normalized.as_str(),
                 "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd"
             ),
+            Self::Zi => matches!(normalized.as_str(), "zi_zp" | "zi_zd" | "zi_np" | "zi_nd"),
             _ => normalized == self.name(),
         }
     }
@@ -693,6 +743,21 @@ pub(crate) fn canonical_laplace_slots_for_equation(
         equation_id,
         bytecode_program,
         CanonicalStateOperator::Laplace,
+    )
+}
+
+pub(crate) fn canonical_zi_slots_for_equation(
+    model: SmolStr,
+    mir: &MirModel,
+    equation_id: EquationId,
+    bytecode_program: &BytecodeProgram,
+) -> JitResult<Vec<(ExprId, usize)>> {
+    canonical_state_slots_for_equation(
+        model,
+        mir,
+        equation_id,
+        bytecode_program,
+        CanonicalStateOperator::Zi,
     )
 }
 
@@ -850,6 +915,9 @@ fn collect_canonical_state_exprs(
             slots.push(expr_id);
         }
         HirExprKind::Laplace { .. } if matches!(operator, CanonicalStateOperator::Laplace) => {
+            slots.push(expr_id);
+        }
+        HirExprKind::Zi { .. } if matches!(operator, CanonicalStateOperator::Zi) => {
             slots.push(expr_id);
         }
         _ => {}
@@ -1691,19 +1759,22 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => {
                     self.lower_laplace_call(expression.id, args.as_slice())
                 }
+                "zi_zp" | "zi_zd" | "zi_np" | "zi_nd" => {
+                    self.lower_zi_call(expression.id, args.as_slice())
+                }
                 _ => self.lower_intrinsic_call(name.as_str(), args.as_slice()),
             },
             HirExprKind::AnalogOperator { op } => self.lower_analog_operator(expression.id, op),
             HirExprKind::Laplace { expr, .. } => self.lower_laplace_operator(expression.id, *expr),
+            HirExprKind::Zi { expr, .. } => self.lower_zi_operator(expression.id, *expr),
             HirExprKind::NoiseSource {
                 source, operands, ..
             } => self.lower_noise_source(source.as_str(), operands.as_slice()),
-            HirExprKind::StringLiteral { .. }
-            | HirExprKind::ArrayLiteral { .. }
-            | HirExprKind::Zi { .. } => Err(self.unsupported(format!(
-                "expression kind {}",
-                expression_kind_name(&expression.kind)
-            ))),
+            HirExprKind::StringLiteral { .. } | HirExprKind::ArrayLiteral { .. } => Err(self
+                .unsupported(format!(
+                    "expression kind {}",
+                    expression_kind_name(&expression.kind)
+                ))),
         }
     }
 
@@ -2086,6 +2157,33 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         )?;
         self.lower(expr)?;
         self.ops.push(NativeOp::LaplaceState(slot));
+        Ok(())
+    }
+
+    fn lower_zi_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
+        let [expr, _, _, _] = args else {
+            return Err(self.unsupported(format!(
+                "analog operator zi expects four operands, found {}",
+                args.len()
+            )));
+        };
+        self.lower_zi_operator(expr_id, *expr)
+    }
+
+    fn lower_zi_operator(&mut self, expr_id: ExprId, expr: ExprId) -> JitResult<()> {
+        let Some(slot) = self.limits.canonical_zi_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "analog operator zi expression {expr_id} filter slot"
+            )));
+        };
+        validate_index(
+            self.model.clone(),
+            "ZiState filter",
+            slot,
+            self.limits.zi_filter_count,
+        )?;
+        self.lower(expr)?;
+        self.ops.push(NativeOp::ZiState(slot));
         Ok(())
     }
 
