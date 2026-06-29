@@ -7,12 +7,14 @@ use crate::native::abi::{
     rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10,
     rspice_mod, rspice_native_current_probe_error, rspice_native_integer_shift_count_error,
     rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
-    rspice_native_limit_state_values_error, rspice_native_loop_limit_error,
-    rspice_native_param_given_error, rspice_native_port_connected_error,
-    rspice_native_prior_current_error, rspice_native_state_values_error, rspice_pow, rspice_sin,
-    rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
-    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
-    rspice_transition_state_native, rspice_zi_step_native,
+    rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
+    rspice_native_loop_limit_error, rspice_native_param_given_error,
+    rspice_native_port_connected_error, rspice_native_prior_current_error,
+    rspice_native_state_prev_bounds_error, rspice_native_state_values_bounds_error,
+    rspice_native_state_values_error, rspice_pow, rspice_sin, rspice_sinh,
+    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
+    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
+    rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -42,6 +44,8 @@ const PARAM_GIVEN_LEN_OFFSET: i32 = 176;
 const BRANCH_UNKNOWNS_OFFSET: i32 = 184;
 const ANALYSIS_TYPE_OFFSET: i32 = 192;
 const MFACTOR_OFFSET: i32 = 200;
+const STATE_PREV_LEN_OFFSET: i32 = 288;
+const STATE_VALUES_LEN_OFFSET: i32 = 296;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
@@ -1361,6 +1365,13 @@ impl FunctionCompiler {
         self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
         let no_state = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
 
+        self.encoder
+            .mov_r64_m64_base_disp32(Gpr::R11, self.ctx_arg_reg(), STATE_VALUES_LEN_OFFSET);
+        self.encoder.cmp_r64_imm32(Gpr::R11, state_index_i32);
+        let state_values_out_of_range = self
+            .encoder
+            .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
+
         self.encoder.mov_r64_m64_base_disp32(
             Gpr::R10,
             self.ctx_arg_reg(),
@@ -1412,6 +1423,9 @@ impl FunctionCompiler {
 
         self.patch_rel32_to_current(initialized_flags_out_of_range)?;
         self.emit_limit_state_error_return(rspice_native_limit_state_bounds_error);
+
+        self.patch_rel32_to_current(state_values_out_of_range)?;
+        self.emit_limit_state_error_return(rspice_native_limit_state_values_bounds_error);
 
         self.patch_rel32_to_current(no_state)?;
         self.emit_limit_state_error_return(rspice_native_limit_state_values_error);
@@ -1581,17 +1595,10 @@ impl FunctionCompiler {
 
         let target = XMM_STACK[self.depth - 1];
         let scratch = self.scratch_register()?;
-        let state_disp = byte_disp(state_index)?;
-
-        self.emit_state_value_store(state_disp, target)?;
 
         self.encoder.movsd_xmm_xmm(scratch, target);
-        self.emit_context_pointer_load(STATE_PREV_OFFSET);
-        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
-        let skip_previous_load = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
-        self.encoder
-            .movsd_xmm_m64_base_disp32(scratch, Gpr::Rax, state_disp);
-        self.patch_rel32_to_current(skip_previous_load)?;
+        self.emit_state_prev_load_if_available(state_index, scratch)?;
+        self.emit_state_value_store(state_index, target)?;
 
         self.encoder.subsd_xmm_xmm(target, scratch);
         self.emit_timestep_guarded_scale(target, scratch, BinaryOp::Div)
@@ -1621,7 +1628,6 @@ impl FunctionCompiler {
         let value = XMM_STACK[self.depth - 2];
         let ic = XMM_STACK[self.depth - 1];
         let scratch = self.scratch_register()?;
-        let state_disp = byte_disp(state_index)?;
 
         self.encoder
             .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
@@ -1631,21 +1637,16 @@ impl FunctionCompiler {
 
         let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
         self.encoder.movsd_xmm_xmm(value, ic);
-        self.emit_state_value_store(state_disp, value)?;
+        self.emit_state_value_store(state_index, value)?;
         let done = self.encoder.jmp_rel32_placeholder();
 
         self.patch_rel32_to_current(non_dc_path)?;
-        self.emit_context_pointer_load(STATE_PREV_OFFSET);
-        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
-        let skip_previous_load = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
-        self.encoder
-            .movsd_xmm_m64_base_disp32(ic, Gpr::Rax, state_disp);
-        self.patch_rel32_to_current(skip_previous_load)?;
+        self.emit_state_prev_load_if_available(state_index, ic)?;
 
         self.encoder.movq_xmm_r64(scratch, Gpr::R11);
         self.encoder.mulsd_xmm_xmm(value, scratch);
         self.encoder.addsd_xmm_xmm(value, ic);
-        self.emit_state_value_store(state_disp, value)?;
+        self.emit_state_value_store(state_index, value)?;
 
         self.patch_rel32_to_current(done)?;
         self.depth -= 1;
@@ -1678,7 +1679,6 @@ impl FunctionCompiler {
         let modulus = XMM_STACK[self.depth - 2];
         let offset = XMM_STACK[self.depth - 1];
         let scratch = self.scratch_register()?;
-        let state_disp = byte_disp(state_index)?;
 
         self.encoder
             .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
@@ -1689,22 +1689,17 @@ impl FunctionCompiler {
         let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
         self.encoder.movsd_xmm_xmm(value, ic);
         self.emit_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
-        self.emit_state_value_store(state_disp, value)?;
+        self.emit_state_value_store(state_index, value)?;
         let done = self.encoder.jmp_rel32_placeholder();
 
         self.patch_rel32_to_current(non_dc_path)?;
-        self.emit_context_pointer_load(STATE_PREV_OFFSET);
-        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
-        let skip_previous_load = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
-        self.encoder
-            .movsd_xmm_m64_base_disp32(ic, Gpr::Rax, state_disp);
-        self.patch_rel32_to_current(skip_previous_load)?;
+        self.emit_state_prev_load_if_available(state_index, ic)?;
 
         self.encoder.movq_xmm_r64(scratch, Gpr::R11);
         self.encoder.mulsd_xmm_xmm(value, scratch);
         self.encoder.addsd_xmm_xmm(value, ic);
         self.emit_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
-        self.emit_state_value_store(state_disp, value)?;
+        self.emit_state_value_store(state_index, value)?;
 
         self.patch_rel32_to_current(done)?;
         self.depth -= 3;
@@ -1738,10 +1733,21 @@ impl FunctionCompiler {
         self.patch_rel32_to_current(done)
     }
 
-    fn emit_state_value_store(&mut self, state_disp: i32, src: Xmm) -> JitResult<()> {
+    fn emit_state_value_store(&mut self, state_index: usize, src: Xmm) -> JitResult<()> {
+        let state_disp = byte_disp(state_index)?;
+        let state_index_i32 = state_index_imm32(state_index)?;
+
         self.emit_context_pointer_load(STATE_VALUES_OFFSET);
         self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
         let missing_state = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+
+        self.encoder
+            .mov_r64_m64_base_disp32(Gpr::R10, self.ctx_arg_reg(), STATE_VALUES_LEN_OFFSET);
+        self.encoder.cmp_r64_imm32(Gpr::R10, state_index_i32);
+        let state_values_out_of_range = self
+            .encoder
+            .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
+
         self.encoder
             .movsd_m64_base_disp32_xmm(Gpr::Rax, state_disp, src);
         let done = self.encoder.jmp_rel32_placeholder();
@@ -1749,11 +1755,48 @@ impl FunctionCompiler {
         self.patch_rel32_to_current(missing_state)?;
         self.emit_state_values_error_return();
 
+        self.patch_rel32_to_current(state_values_out_of_range)?;
+        self.emit_state_values_bounds_error_return();
+
+        self.patch_rel32_to_current(done)
+    }
+
+    fn emit_state_prev_load_if_available(&mut self, state_index: usize, dst: Xmm) -> JitResult<()> {
+        let state_disp = byte_disp(state_index)?;
+        let state_index_i32 = state_index_imm32(state_index)?;
+
+        self.emit_context_pointer_load(STATE_PREV_OFFSET);
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let no_previous_state = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+
+        self.encoder
+            .mov_r64_m64_base_disp32(Gpr::R10, self.ctx_arg_reg(), STATE_PREV_LEN_OFFSET);
+        self.encoder.cmp_r64_imm32(Gpr::R10, state_index_i32);
+        let previous_state_out_of_range = self
+            .encoder
+            .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
+
+        self.encoder
+            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, state_disp);
+        let done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(previous_state_out_of_range)?;
+        self.emit_state_prev_bounds_error_return();
+
+        self.patch_rel32_to_current(no_previous_state)?;
         self.patch_rel32_to_current(done)
     }
 
     fn emit_state_values_error_return(&mut self) {
         self.emit_void_error_return(rspice_native_state_values_error);
+    }
+
+    fn emit_state_values_bounds_error_return(&mut self) {
+        self.emit_void_error_return(rspice_native_state_values_bounds_error);
+    }
+
+    fn emit_state_prev_bounds_error_return(&mut self) {
+        self.emit_void_error_return(rspice_native_state_prev_bounds_error);
     }
 
     fn emit_void_error_return(&mut self, helper: VoidHelper) {
@@ -2664,6 +2707,13 @@ fn byte_disp_u8(index: usize) -> JitResult<i32> {
     i32::try_from(index).map_err(|_| JitError::Encoding {
         model: MODEL.into(),
         detail: format!("u8 flag index {index} exceeds x64 disp32 range").into(),
+    })
+}
+
+fn state_index_imm32(index: usize) -> JitResult<i32> {
+    i32::try_from(index).map_err(|_| JitError::Encoding {
+        model: MODEL.into(),
+        detail: format!("state index {index} exceeds x64 imm32 range").into(),
     })
 }
 
@@ -4530,7 +4580,9 @@ mod tests {
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.timestep = 0.25;
         ctx.state_prev = previous_state.as_ptr();
+        ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = state_values.len();
 
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 2.0_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
@@ -4551,6 +4603,21 @@ mod tests {
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
         let error = take_native_runtime_error().expect("missing ddt state must hard-fail");
         assert_missing_state_storage_error(&error);
+
+        ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = 1;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("short ddt state must hard-fail");
+        assert_state_storage_bounds_error(&error);
+
+        ctx.state_values_len = state_values.len();
+        ctx.state_prev = previous_state.as_ptr();
+        ctx.state_prev_len = 1;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("short ddt prior state must hard-fail");
+        assert_prior_state_storage_bounds_error(&error);
     }
 
     #[test]
@@ -4598,7 +4665,9 @@ mod tests {
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.timestep = 0.25;
         ctx.state_prev = previous_state.as_ptr();
+        ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = state_values.len();
 
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 2.0_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
@@ -4636,6 +4705,22 @@ mod tests {
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
         let error = take_native_runtime_error().expect("missing idt state must hard-fail");
         assert_missing_state_storage_error(&error);
+
+        ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = 1;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("short idt state must hard-fail");
+        assert_state_storage_bounds_error(&error);
+
+        ctx.state_values_len = state_values.len();
+        ctx.timestep = 0.25;
+        ctx.state_prev = previous_state.as_ptr();
+        ctx.state_prev_len = 1;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("short idt prior state must hard-fail");
+        assert_prior_state_storage_bounds_error(&error);
     }
 
     #[test]
@@ -4694,7 +4779,9 @@ mod tests {
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.timestep = 0.25;
         ctx.state_prev = previous_state.as_ptr();
+        ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = state_values.len();
 
         let value = f(&ctx, vars.as_ptr());
         assert!((value - 0.4).abs() < 1.0e-12, "value: {value}");
@@ -4764,6 +4851,22 @@ mod tests {
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
         let error = take_native_runtime_error().expect("missing idtmod state must hard-fail");
         assert_missing_state_storage_error(&error);
+
+        ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = 1;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("short idtmod state must hard-fail");
+        assert_state_storage_bounds_error(&error);
+
+        ctx.state_values_len = state_values.len();
+        ctx.timestep = 0.25;
+        ctx.state_prev = previous_state.as_ptr();
+        ctx.state_prev_len = 1;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("short idtmod prior state must hard-fail");
+        assert_prior_state_storage_bounds_error(&error);
     }
 
     #[test]
@@ -4787,6 +4890,7 @@ mod tests {
         let mut state_initialized = [0_u8, 0_u8];
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = state_values.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
 
@@ -4843,6 +4947,13 @@ mod tests {
         );
 
         ctx.state_initialized_len = state_initialized.len();
+        ctx.state_values_len = 1;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("short limit state must hard-fail");
+        assert_limit_state_storage_bounds_error(&error);
+
+        ctx.state_values_len = state_values.len();
         ctx.state_values = std::ptr::null_mut();
         clear_native_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
@@ -7028,6 +7139,8 @@ mod tests {
             delay_buffers_len: 0,
             cross_detectors: std::ptr::null_mut(),
             cross_detectors_len: 0,
+            state_prev_len: 0,
+            state_values_len: 0,
         }
     }
 
@@ -7052,6 +7165,39 @@ mod tests {
         assert!(
             error.contains("missing state storage"),
             "error must identify missing native state storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    fn assert_state_storage_bounds_error(error: &str) {
+        assert!(
+            error.contains("index outside state storage"),
+            "error must identify out-of-range native state storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    fn assert_limit_state_storage_bounds_error(error: &str) {
+        assert!(
+            error.contains("limit state index outside state storage"),
+            "error must identify out-of-range limit state storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    fn assert_prior_state_storage_bounds_error(error: &str) {
+        assert!(
+            error.contains("index outside prior-state storage"),
+            "error must identify out-of-range native prior-state storage, got: {error}"
         );
         assert!(
             error.contains("no interpreter fallback"),

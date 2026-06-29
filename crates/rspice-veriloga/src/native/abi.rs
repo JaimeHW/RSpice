@@ -82,6 +82,10 @@ pub struct EvalContext {
     pub cross_detectors: *mut crate::vm::CrossDetector,
     /// Number of cross detectors
     pub cross_detectors_len: usize,
+    /// Length of `state_prev`.
+    pub state_prev_len: usize,
+    /// Length of `state_values`.
+    pub state_values_len: usize,
 }
 
 thread_local! {
@@ -126,6 +130,13 @@ pub extern "C" fn rspice_native_limit_state_values_error() {
     set_native_runtime_error("native limit state missing state storage; no interpreter fallback");
 }
 
+#[unsafe(export_name = "rspice_native_limit_state_values_bounds_error")]
+pub extern "C" fn rspice_native_limit_state_values_bounds_error() {
+    set_native_runtime_error(
+        "native limit state index outside state storage; no interpreter fallback",
+    );
+}
+
 #[unsafe(export_name = "rspice_native_limit_state_initialized_error")]
 pub extern "C" fn rspice_native_limit_state_initialized_error() {
     set_native_runtime_error(
@@ -144,6 +155,20 @@ pub extern "C" fn rspice_native_limit_state_bounds_error() {
 pub extern "C" fn rspice_native_state_values_error() {
     set_native_runtime_error(
         "native state operator missing state storage; no interpreter fallback",
+    );
+}
+
+#[unsafe(export_name = "rspice_native_state_values_bounds_error")]
+pub extern "C" fn rspice_native_state_values_bounds_error() {
+    set_native_runtime_error(
+        "native state operator index outside state storage; no interpreter fallback",
+    );
+}
+
+#[unsafe(export_name = "rspice_native_state_prev_bounds_error")]
+pub extern "C" fn rspice_native_state_prev_bounds_error() {
+    set_native_runtime_error(
+        "native state operator index outside prior-state storage; no interpreter fallback",
     );
 }
 
@@ -1098,7 +1123,9 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, delay_buffers_len), 264);
         assert_eq!(offset_of!(EvalContext, cross_detectors), 272);
         assert_eq!(offset_of!(EvalContext, cross_detectors_len), 280);
-        assert_eq!(size_of::<EvalContext>(), 288);
+        assert_eq!(offset_of!(EvalContext, state_prev_len), 288);
+        assert_eq!(offset_of!(EvalContext, state_values_len), 296);
+        assert_eq!(size_of::<EvalContext>(), 304);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -1242,6 +1269,8 @@ mod tests {
             delay_buffers_len: 0,
             cross_detectors: std::ptr::null_mut(),
             cross_detectors_len: 0,
+            state_prev_len: 0,
+            state_values_len: 0,
         };
 
         assert_eq!(
@@ -1839,6 +1868,8 @@ mod tests {
             delay_buffers_len: 0,
             cross_detectors: std::ptr::null_mut(),
             cross_detectors_len: 0,
+            state_prev_len: 0,
+            state_values_len: 0,
         }
     }
 }
