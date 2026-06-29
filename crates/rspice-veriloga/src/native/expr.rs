@@ -2787,6 +2787,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.require_intrinsic_arity(name, args, 0)?;
                 self.push(NativeOp::LoadMfactor)
             }
+            "simparam" => self.lower_simparam_intrinsic(name, args),
             "param_given" => self.lower_param_given_intrinsic(name, args),
             "port_connected" => self.lower_port_connected_intrinsic(name, args),
             "analysis" => self.lower_analysis_intrinsic(name, args),
@@ -2805,6 +2806,23 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.lower(args[0])?;
         self.push(NativeOp::Const(8.617333262e-5))?;
         self.append_arithmetic("Mul")
+    }
+
+    fn lower_simparam_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
+        self.require_intrinsic_arity_range(name, args, 1, 2)?;
+        let simparam_name = self.string_literal_argument(name, args[0])?;
+
+        if let Some(default) = args.get(1).copied() {
+            return self.lower(default);
+        }
+
+        let value = match simparam_name {
+            "gmin" => 1.0e-12,
+            "tnom" => 300.15,
+            "simulatorVersion" => 1.0,
+            _ => 0.0,
+        };
+        self.push(NativeOp::Const(value))
     }
 
     fn lower_param_given_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
