@@ -2774,7 +2774,7 @@ mod tests {
             EntryKind::StampValue,
             vec![
                 Instruction::PushConst(1.0),
-                Instruction::PushConst(2.49),
+                Instruction::PushParam(0),
                 Instruction::PushVariableDyn {
                     base: 1,
                     len: 3,
@@ -2786,6 +2786,54 @@ mod tests {
         );
         let bytes = compile_value_function(&program).expect("compile dynamic variable leaf");
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate dynamic variable leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let vars = [99.0_f64, 2.0, 4.0, 8.0];
+        let ctx = eval_context(&[2.49], &[], &[], &[]);
+        clear_native_runtime_error();
+
+        let loaded = f(&ctx, vars.as_ptr());
+
+        assert_eq!(loaded.to_bits(), 5.0_f64.to_bits());
+        assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
+    fn generated_value_leaf_folds_constant_dynamic_variable_read_to_direct_load() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(2.49),
+                Instruction::PushVariableDyn {
+                    base: 1,
+                    len: 3,
+                    lower: 1,
+                },
+                Instruction::Add,
+            ],
+            0,
+        );
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::Const(1.0),
+                NativeOp::LoadVariable(2),
+                NativeOp::Add
+            ],
+            "finite in-range literal dynamic index should lower to direct variable load"
+        );
+
+        let bytes = compile_value_function(&program).expect("compile folded dynamic variable leaf");
+        assert!(
+            !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "folded dynamic read should be helper-free"
+        );
+        let memory =
+            ExecutableMemory::allocate(&bytes).expect("allocate folded dynamic variable leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(entry) };

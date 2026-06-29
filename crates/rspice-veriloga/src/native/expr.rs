@@ -336,6 +336,9 @@ impl NativeProgram {
                         depth,
                         1,
                     )?;
+                    if lower_constant_dynamic_variable_read(&mut ops, *base, *len, *lower) {
+                        continue;
+                    }
                     ops.push(NativeOp::LoadVariableDyn {
                         base: *base,
                         len: *len,
@@ -1102,6 +1105,22 @@ fn lower_constant_unary_math(ops: &mut Vec<NativeOp>, op: UnaryMathOp) -> bool {
     true
 }
 
+fn lower_constant_dynamic_variable_read(
+    ops: &mut Vec<NativeOp>,
+    base: usize,
+    len: usize,
+    lower: i64,
+) -> bool {
+    let Some(NativeOp::Const(raw_index)) = ops.last_mut() else {
+        return false;
+    };
+    let Some(slot) = constant_dynamic_variable_slot(*raw_index, base, len, lower) else {
+        return false;
+    };
+    *ops.last_mut().expect("constant index op still present") = NativeOp::LoadVariable(slot);
+    true
+}
+
 fn lower_constant_neg(ops: &mut Vec<NativeOp>) -> bool {
     let Some(NativeOp::Const(value)) = ops.last_mut() else {
         return false;
@@ -1359,6 +1378,26 @@ fn constant_limexp(value: f64) -> f64 {
     } else {
         value.exp()
     }
+}
+
+fn constant_dynamic_variable_slot(
+    raw_index: f64,
+    base: usize,
+    len: usize,
+    lower: i64,
+) -> Option<usize> {
+    if !raw_index.is_finite() {
+        return None;
+    }
+
+    let index = raw_index.round() as i64;
+    let offset = index.checked_sub(lower)?;
+    let offset = usize::try_from(offset).ok()?;
+    if offset >= len {
+        return None;
+    }
+
+    base.checked_add(offset)
 }
 
 fn is_independent_value_push(op: &NativeOp) -> bool {
@@ -3830,6 +3869,31 @@ mod tests {
                 }
             ]
         );
+        assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn folds_constant_dynamic_variable_read_to_direct_load() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushConst(2.49),
+                Instruction::PushVariableDyn {
+                    base: 2,
+                    len: 3,
+                    lower: 1,
+                },
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "const-dyn-read",
+            EntryKind::StampValue,
+            &program,
+            NativeLoweringLimits::new(0, 0, 0, 5, 0),
+        )
+        .expect("in-range constant dynamic variable read lowers directly");
+
+        assert_eq!(lowered.ops(), &[NativeOp::LoadVariable(3)]);
         assert_eq!(lowered.max_stack_depth(), 1);
     }
 
