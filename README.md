@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="RSpice logo" width="140" />
+<img src="assets/brand/logo.svg" alt="RSpice logo" width="140" />
 
 # RSpice
 
