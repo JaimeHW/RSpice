@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 
 use super::{JitError, JitResult};
-use crate::canonical_ir::{EquationId, ExprId, HirAnalogOperator, HirExprKind, MirModel, NodeId};
+use crate::canonical_ir::{
+    EquationId, ExprId, HirAnalogOperator, HirExprKind, HirLaplaceKind, HirZiKind, MirModel, NodeId,
+};
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
@@ -1030,7 +1032,8 @@ impl CanonicalStateOperator {
             (Self::Above, Instruction::AboveState(slot)) => Some(*slot),
             (Self::Timer, Instruction::TimerState(slot)) => Some(*slot),
             (Self::Limit, Instruction::LimitState(slot)) => Some(*slot),
-            (Self::TableLookup, Instruction::TableLookup(slot)) => Some(*slot),
+            (Self::TableLookup, Instruction::TableLookup(slot))
+            | (Self::TableLookup, Instruction::TableDerivative(slot)) => Some(*slot),
             _ => None,
         }
     }
@@ -2710,36 +2713,21 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_derivative(*else_expr, wrt)?;
                 self.append_ifelse()
             }
-            HirExprKind::SystemFunction { name, .. } => {
-                if matches!(
-                    normalize_intrinsic_name(name).as_str(),
-                    "temperature"
-                        | "vt"
-                        | "thermal_vt"
-                        | "abstime"
-                        | "realtime"
-                        | "mfactor"
-                        | "simparam"
-                        | "param_given"
-                        | "port_connected"
-                        | "analysis"
-                ) {
-                    self.push(NativeOp::Const(0.0))
-                } else {
-                    Err(self.unsupported(format!("ddx derivative of system function '{name}'")))
-                }
-            }
+            HirExprKind::SystemFunction { name, args } => self.lower_system_function_derivative(
+                expression.id,
+                name.as_str(),
+                args.as_slice(),
+                wrt,
+            ),
             HirExprKind::Call { name, args } => {
-                self.lower_call_derivative(name.as_str(), args.as_slice(), wrt)
+                self.lower_call_derivative(expression.id, name.as_str(), args.as_slice(), wrt)
             }
             HirExprKind::ArrayAccess { array, index } => {
                 self.lower_array_access_derivative(array.as_str(), *index, wrt)
             }
             HirExprKind::AnalogOperator { op } => self.lower_analog_operator_derivative(op, wrt),
-            HirExprKind::Laplace { .. } | HirExprKind::Zi { .. } => Err(self.unsupported(format!(
-                "ddx derivative of {}",
-                expression_kind_name(&expression.kind)
-            ))),
+            HirExprKind::Laplace { expr, kind } => self.lower_laplace_derivative(*expr, kind, wrt),
+            HirExprKind::Zi { expr, kind } => self.lower_zi_derivative(*expr, kind, wrt),
         }
     }
 
@@ -2946,8 +2934,27 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_arithmetic("Mul")
     }
 
+    fn lower_system_function_derivative(
+        &mut self,
+        expr_id: ExprId,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        match normalize_intrinsic_name(name).as_str() {
+            "limit" => self.lower_limit_derivative(name, args, wrt),
+            "table_model" => self.lower_table_model_derivative(expr_id, name, args, wrt),
+            "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
+            | "simparam" | "param_given" | "port_connected" | "analysis" => {
+                self.push(NativeOp::Const(0.0))
+            }
+            _ => Err(self.unsupported(format!("ddx derivative of system function '{name}'"))),
+        }
+    }
+
     fn lower_call_derivative(
         &mut self,
+        expr_id: ExprId,
         name: &str,
         args: &[ExprId],
         wrt: CanonicalDerivativeAxis,
@@ -2956,6 +2963,19 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         match normalized.as_str() {
             "ddx" => Err(self.unsupported("nested ddx derivative")),
             "ddt" => self.lower_ddt_derivative(name, args, wrt),
+            "idt" => self.lower_idt_derivative(name, args, wrt),
+            "idtmod" => self.lower_idtmod_derivative(name, args, wrt),
+            "transition" => self.lower_passthrough_call_derivative(name, args, 1, 5, wrt),
+            "slew" => self.lower_passthrough_call_derivative(name, args, 1, 3, wrt),
+            "absdelay" => self.lower_passthrough_call_derivative(name, args, 1, 3, wrt),
+            "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => {
+                self.lower_laplace_call_derivative(normalized.as_str(), name, args, wrt)
+            }
+            "zi_zp" | "zi_zd" | "zi_np" | "zi_nd" => {
+                self.lower_zi_call_derivative(normalized.as_str(), name, args, wrt)
+            }
+            "limit" => self.lower_limit_derivative(name, args, wrt),
+            "table_model" => self.lower_table_model_derivative(expr_id, name, args, wrt),
             "abs" | "fabs" => {
                 self.require_intrinsic_arity(name, args, 1)?;
                 self.lower(args[0])?;
@@ -3292,6 +3312,100 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_unary(NativeOp::DdtJacobian)
     }
 
+    fn lower_idt_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        if !(1..=2).contains(&args.len()) {
+            return Err(self.unsupported(format!(
+                "analog operator {name} expects one or two operands, found {}",
+                args.len()
+            )));
+        }
+        self.lower_derivative(args[0], wrt)?;
+        self.append_unary(NativeOp::IdtJacobian)
+    }
+
+    fn lower_idtmod_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        if !(1..=4).contains(&args.len()) {
+            return Err(self.unsupported(format!(
+                "analog operator {name} expects one to four operands, found {}",
+                args.len()
+            )));
+        }
+        self.lower_derivative(args[0], wrt)?;
+        self.append_unary(NativeOp::IdtJacobian)
+    }
+
+    fn lower_limit_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        if !(1..=2).contains(&args.len()) {
+            return Err(self.unsupported(format!(
+                "system function {name} expects one or two operands, found {}",
+                args.len()
+            )));
+        }
+        self.lower_derivative(args[0], wrt)
+    }
+
+    fn lower_table_model_derivative(
+        &mut self,
+        expr_id: ExprId,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        if args.len() < 2 {
+            return Err(self.unsupported(format!(
+                "system function {name} expects at least two operands, found {}",
+                args.len()
+            )));
+        }
+        let Some(table_id) = self.limits.canonical_table_lookup_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "system function {name} expression {expr_id} table slot"
+            )));
+        };
+        validate_index(
+            self.model.clone(),
+            "TableDerivative table",
+            table_id,
+            self.limits.lookup_table_count,
+        )?;
+        self.lower_derivative(args[0], wrt)?;
+        self.lower(args[0])?;
+        self.append_unary(NativeOp::TableDerivative(table_id))?;
+        self.append_arithmetic("Mul")
+    }
+
+    fn lower_passthrough_call_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        min_args: usize,
+        max_args: usize,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        if !(min_args..=max_args).contains(&args.len()) {
+            return Err(self.unsupported(format!(
+                "analog operator {name} expects {min_args} to {max_args} operands, found {}",
+                args.len()
+            )));
+        }
+        self.lower_derivative(args[0], wrt)
+    }
+
     fn lower_analog_operator_derivative(
         &mut self,
         op: &HirAnalogOperator,
@@ -3308,17 +3422,253 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_derivative(*expr, wrt)?;
                 self.append_unary(NativeOp::DdtJacobian)
             }
+            HirAnalogOperator::Idt { expr, .. } | HirAnalogOperator::IdtMod { expr, .. } => {
+                self.lower_derivative(*expr, wrt)?;
+                self.append_unary(NativeOp::IdtJacobian)
+            }
+            HirAnalogOperator::Absdelay { expr, .. }
+            | HirAnalogOperator::Transition { expr, .. }
+            | HirAnalogOperator::Slew { expr, .. } => self.lower_derivative(*expr, wrt),
+            HirAnalogOperator::LastCrossing { .. } => self.push(NativeOp::Const(0.0)),
             HirAnalogOperator::Ddx { .. } => Err(self.unsupported("nested ddx derivative")),
-            HirAnalogOperator::Idt { .. }
-            | HirAnalogOperator::IdtMod { .. }
-            | HirAnalogOperator::Absdelay { .. }
-            | HirAnalogOperator::Transition { .. }
-            | HirAnalogOperator::Slew { .. }
-            | HirAnalogOperator::LastCrossing { .. } => Err(self.unsupported(format!(
-                "ddx derivative of analog operator {}",
-                analog_operator_name(op)
+        }
+    }
+
+    fn lower_laplace_derivative(
+        &mut self,
+        expr: ExprId,
+        kind: &HirLaplaceKind,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let gain = self.laplace_kind_dc_gain(kind)?;
+        self.lower_scaled_derivative(expr, wrt, gain)
+    }
+
+    fn lower_laplace_call_derivative(
+        &mut self,
+        normalized: &str,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        if args.len() != 3 {
+            return Err(self.unsupported(format!(
+                "analog operator {name} expects three operands, found {}",
+                args.len()
+            )));
+        }
+        let gain = match normalized {
+            "laplace_zp" => {
+                let zeros = self.constant_array_values(args[1])?;
+                let poles = self.constant_array_values(args[2])?;
+                divide_dc_gain(product_negated(&zeros), product_negated(&poles))
+            }
+            "laplace_zd" => {
+                let zeros = self.constant_array_values(args[1])?;
+                let denominator = self.constant_array_values(args[2])?;
+                divide_dc_gain(product_negated(&zeros), first_or(&denominator, 1.0))
+            }
+            "laplace_np" => {
+                let numerator = self.constant_array_values(args[1])?;
+                let poles = self.constant_array_values(args[2])?;
+                divide_dc_gain(first_or(&numerator, 0.0), product_negated(&poles))
+            }
+            "laplace_nd" => {
+                let numerator = self.constant_array_values(args[1])?;
+                let denominator = self.constant_array_values(args[2])?;
+                divide_dc_gain(first_or(&numerator, 0.0), first_or(&denominator, 1.0))
+            }
+            _ => unreachable!("caller filters canonical laplace names"),
+        };
+        self.lower_scaled_derivative(args[0], wrt, gain)
+    }
+
+    fn lower_zi_derivative(
+        &mut self,
+        expr: ExprId,
+        kind: &HirZiKind,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let gain = self.zi_kind_dc_gain(kind)?;
+        self.lower_scaled_derivative(expr, wrt, gain)
+    }
+
+    fn lower_zi_call_derivative(
+        &mut self,
+        normalized: &str,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        if args.len() != 4 {
+            return Err(self.unsupported(format!(
+                "analog operator {name} expects four operands, found {}",
+                args.len()
+            )));
+        }
+        let gain = match normalized {
+            "zi_zp" => {
+                let zeros = self.constant_array_values(args[1])?;
+                let poles = self.constant_array_values(args[2])?;
+                divide_dc_gain(product_one_minus(&zeros), product_one_minus(&poles))
+            }
+            "zi_zd" => {
+                let zeros = self.constant_array_values(args[1])?;
+                let denominator = self.constant_array_values(args[2])?;
+                divide_dc_gain(product_one_minus(&zeros), sum_values(&denominator))
+            }
+            "zi_np" => {
+                let numerator = self.constant_array_values(args[1])?;
+                let poles = self.constant_array_values(args[2])?;
+                divide_dc_gain(sum_values(&numerator), product_one_minus(&poles))
+            }
+            "zi_nd" => {
+                let numerator = self.constant_array_values(args[1])?;
+                let denominator = self.constant_array_values(args[2])?;
+                divide_dc_gain(sum_values(&numerator), sum_values(&denominator))
+            }
+            _ => unreachable!("caller filters canonical zi names"),
+        };
+        self.lower_scaled_derivative(args[0], wrt, gain)
+    }
+
+    fn lower_scaled_derivative(
+        &mut self,
+        expr: ExprId,
+        wrt: CanonicalDerivativeAxis,
+        gain: f64,
+    ) -> JitResult<()> {
+        if gain.to_bits() == 0.0_f64.to_bits() {
+            return self.push(NativeOp::Const(0.0));
+        }
+        self.lower_derivative(expr, wrt)?;
+        if gain.to_bits() == 1.0_f64.to_bits() {
+            return Ok(());
+        }
+        self.push(NativeOp::Const(gain))?;
+        self.append_arithmetic("Mul")
+    }
+
+    fn laplace_kind_dc_gain(&self, kind: &HirLaplaceKind) -> JitResult<f64> {
+        match kind {
+            HirLaplaceKind::ZeroPole { zeros, poles } => Ok(divide_dc_gain(
+                self.constant_expr_product_negated(zeros)?,
+                self.constant_expr_product_negated(poles)?,
+            )),
+            HirLaplaceKind::ZeroDenominator { zeros, denominator } => Ok(divide_dc_gain(
+                self.constant_expr_product_negated(zeros)?,
+                self.constant_expr_first_or(denominator, 1.0)?,
+            )),
+            HirLaplaceKind::NumeratorPole { numerator, poles } => Ok(divide_dc_gain(
+                self.constant_expr_first_or(numerator, 0.0)?,
+                self.constant_expr_product_negated(poles)?,
+            )),
+            HirLaplaceKind::NumeratorDenominator {
+                numerator,
+                denominator,
+            } => Ok(divide_dc_gain(
+                self.constant_expr_first_or(numerator, 0.0)?,
+                self.constant_expr_first_or(denominator, 1.0)?,
+            )),
+        }
+    }
+
+    fn zi_kind_dc_gain(&self, kind: &HirZiKind) -> JitResult<f64> {
+        match kind {
+            HirZiKind::ZeroPole { zeros, poles } => Ok(divide_dc_gain(
+                self.constant_expr_product_one_minus(zeros)?,
+                self.constant_expr_product_one_minus(poles)?,
+            )),
+            HirZiKind::ZeroDenominator { zeros, denominator } => Ok(divide_dc_gain(
+                self.constant_expr_product_one_minus(zeros)?,
+                self.constant_expr_sum(denominator)?,
+            )),
+            HirZiKind::NumeratorPole { numerator, poles } => Ok(divide_dc_gain(
+                self.constant_expr_sum(numerator)?,
+                self.constant_expr_product_one_minus(poles)?,
+            )),
+            HirZiKind::NumeratorDenominator {
+                numerator,
+                denominator,
+            } => Ok(divide_dc_gain(
+                self.constant_expr_sum(numerator)?,
+                self.constant_expr_sum(denominator)?,
+            )),
+        }
+    }
+
+    fn constant_array_values(&self, expr_id: ExprId) -> JitResult<Vec<f64>> {
+        match &self.expression(expr_id)?.kind {
+            HirExprKind::ArrayLiteral { elements } => elements
+                .iter()
+                .map(|element| self.constant_expr_value(*element))
+                .collect(),
+            HirExprKind::Number { value, .. } => Ok(vec![*value]),
+            other => Err(self.unsupported(format!(
+                "constant array expected, found {}",
+                expression_kind_name(other)
             ))),
         }
+    }
+
+    fn constant_expr_value(&self, expr_id: ExprId) -> JitResult<f64> {
+        match &self.expression(expr_id)?.kind {
+            HirExprKind::Number { value, .. } => Ok(*value),
+            HirExprKind::Unary { op, operand } => {
+                let value = self.constant_expr_value(*operand)?;
+                match op.as_str() {
+                    "Pos" => Ok(value),
+                    "Neg" => Ok(-value),
+                    _ => Err(self.unsupported(format!("constant coefficient unary operator {op}"))),
+                }
+            }
+            HirExprKind::Binary { op, left, right } => {
+                let left = self.constant_expr_value(*left)?;
+                let right = self.constant_expr_value(*right)?;
+                match op.as_str() {
+                    "Add" => Ok(left + right),
+                    "Sub" => Ok(left - right),
+                    "Mul" => Ok(left * right),
+                    "Div" => Ok(left / right),
+                    "Pow" => Ok(left.powf(right)),
+                    _ => {
+                        Err(self.unsupported(format!("constant coefficient binary operator {op}")))
+                    }
+                }
+            }
+            other => Err(self.unsupported(format!(
+                "constant coefficient expected, found {}",
+                expression_kind_name(other)
+            ))),
+        }
+    }
+
+    fn constant_expr_first_or(&self, exprs: &[ExprId], default: f64) -> JitResult<f64> {
+        match exprs.first() {
+            Some(expr) => self.constant_expr_value(*expr),
+            None => Ok(default),
+        }
+    }
+
+    fn constant_expr_sum(&self, exprs: &[ExprId]) -> JitResult<f64> {
+        exprs
+            .iter()
+            .map(|expr| self.constant_expr_value(*expr))
+            .try_fold(0.0, |acc, value| Ok(acc + value?))
+    }
+
+    fn constant_expr_product_negated(&self, exprs: &[ExprId]) -> JitResult<f64> {
+        exprs
+            .iter()
+            .map(|expr| self.constant_expr_value(*expr))
+            .try_fold(1.0, |acc, value| Ok(acc * -value?))
+    }
+
+    fn constant_expr_product_one_minus(&self, exprs: &[ExprId]) -> JitResult<f64> {
+        exprs
+            .iter()
+            .map(|expr| self.constant_expr_value(*expr))
+            .try_fold(1.0, |acc, value| Ok(acc * (1.0 - value?)))
     }
 
     fn constant_number(&self, expr_id: ExprId) -> Option<f64> {
@@ -5758,6 +6108,30 @@ fn branch_voltage_derivative(pos: Option<NodeId>, neg: Option<NodeId>, wrt: Node
         value -= 1.0;
     }
     value
+}
+
+fn divide_dc_gain(numerator: f64, denominator: f64) -> f64 {
+    if denominator.abs() > 1.0e-300 {
+        numerator / denominator
+    } else {
+        0.0
+    }
+}
+
+fn first_or(values: &[f64], default: f64) -> f64 {
+    values.first().copied().unwrap_or(default)
+}
+
+fn sum_values(values: &[f64]) -> f64 {
+    values.iter().sum()
+}
+
+fn product_negated(values: &[f64]) -> f64 {
+    values.iter().map(|value| -*value).product()
+}
+
+fn product_one_minus(values: &[f64]) -> f64 {
+    values.iter().map(|value| 1.0 - *value).product()
 }
 
 fn format_current_pair(pos: usize, neg: usize) -> String {

@@ -169,6 +169,7 @@ fn compile_model_inner(
                 model,
                 canonical_mir,
                 stamp_index,
+                &stamp.value_program,
                 jacobian,
                 jacobian_limits,
             )
@@ -342,12 +343,20 @@ fn lower_jacobian_program(
     model: &CompiledModel,
     canonical_mir: Option<&MirModel>,
     stamp_index: usize,
+    stamp_value_program: &BytecodeProgram,
     jacobian: &JacobianEntry,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<NativeProgram> {
     if let Some(mir) = canonical_mir {
         let equation_id = canonical_equation_id(model, stamp_index)?;
         let axis = canonical_derivative_axis_for_column(model, mir, &jacobian.col_axis)?;
+        let table_lookup_slots = canonical_table_lookup_slots_for_equation(
+            model.name.clone(),
+            mir,
+            equation_id,
+            stamp_value_program,
+        )?;
+        let limits = limits.with_canonical_table_lookup_slots(&table_lookup_slots);
         let canonical = NativeProgram::from_mir_derivative(
             model.name.clone(),
             EntryKind::Jacobian,
@@ -3446,6 +3455,109 @@ endmodule
             2.0,
             "canonical_branch_shadow_jacobian d/dI0",
         );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_advanced_jacobians_from_mir() {
+        let cases = [
+            (
+                "limit",
+                "$limit(V(p, n), 0.5)",
+                0.4_f64,
+                1.0e-12_f64,
+                1.0_f64,
+            ),
+            (
+                "table",
+                "$table_model(V(p, n), 0.0, 0.0, 1.0, 2.0, 2.0, 8.0)",
+                1.5_f64,
+                1.0e-12_f64,
+                6.0_f64,
+            ),
+            ("idt", "idt(V(p, n), 0.0)", 0.4_f64, 0.25_f64, 0.25_f64),
+            (
+                "absdelay",
+                "absdelay(V(p, n), 1.0e-9)",
+                0.4_f64,
+                1.0e-12_f64,
+                1.0_f64,
+            ),
+            (
+                "transition",
+                "transition(V(p, n), 0.0, 1.0e-9, 1.0e-9)",
+                0.4_f64,
+                1.0e-12_f64,
+                1.0_f64,
+            ),
+            (
+                "slew",
+                "slew(V(p, n), 1.0e9, 1.0e9)",
+                0.4_f64,
+                1.0e-12_f64,
+                1.0_f64,
+            ),
+            (
+                "laplace",
+                "laplace_nd(V(p, n), {2.0}, {1.0})",
+                0.4_f64,
+                1.0e-12_f64,
+                2.0_f64,
+            ),
+            (
+                "zi",
+                "zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6)",
+                0.4_f64,
+                1.0e-12_f64,
+                1.0_f64,
+            ),
+        ];
+
+        for (name, expr, voltage, timestep, expected) in cases {
+            let source = format!(
+                r#"
+module native_canonical_advanced_jacobian_{name}(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ {expr};
+endmodule
+"#
+            );
+            let compiler = VerilogACompiler::new(CompilerOptions::default());
+            let mut model = compiler.compile(&source).expect("compile bytecode model");
+            let artifact = compiler
+                .compile_canonical_ir(&source)
+                .expect("compile canonical IR");
+            assert!(
+                model.stamp_programs[0]
+                    .jacobian_programs
+                    .iter()
+                    .any(|jacobian| matches!(jacobian.col_axis, ColumnAxis::Node(0))),
+                "{name}: fixture must include positive-node Jacobian"
+            );
+            poison_jacobian_bytecode(&mut model, 99.0);
+
+            let native =
+                compile_model_with_canonical_ir(&model, &artifact).unwrap_or_else(|error| {
+                    panic!("{name}: canonical Jacobian compile failed: {error}")
+                });
+            let mut context = native_model_benchmark_context(&model, name);
+            context.voltages[0] = voltage;
+            context.voltages[1] = 0.0;
+            context.timestep = timestep;
+            resolve_native_parameter_defaults(&model, &native, &mut context);
+            let ctx = eval_context_from_vm_context(&mut context);
+
+            assert_jacobian_axis_value(
+                &model,
+                &native,
+                &ctx,
+                context.variables.as_ptr(),
+                0,
+                |axis| matches!(axis, ColumnAxis::Node(0)),
+                expected,
+                format!("canonical_advanced_jacobian_{name} d/dp"),
+            );
+        }
     }
 
     #[test]
