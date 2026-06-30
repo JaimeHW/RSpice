@@ -67,7 +67,10 @@ fn collect_veriloga_sources(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<
         return Ok(());
     }
 
-    for entry in fs::read_dir(dir)? {
+    let Some(entries) = read_dir_if_directory(dir)? else {
+        return Ok(());
+    };
+    for entry in entries {
         let entry = entry?;
         let path = entry.path();
         if should_skip_path(&path) {
@@ -96,7 +99,10 @@ fn collect_include_dirs(root: &Path, dir: &Path, dirs: &mut BTreeSet<PathBuf>) -
     }
 
     let mut contains_include_file = false;
-    for entry in fs::read_dir(dir)? {
+    let Some(entries) = read_dir_if_directory(dir)? else {
+        return Ok(false);
+    };
+    for entry in entries {
         let entry = entry?;
         let path = entry.path();
         if should_skip_path(&path) {
@@ -116,6 +122,14 @@ fn collect_include_dirs(root: &Path, dir: &Path, dirs: &mut BTreeSet<PathBuf>) -
         dirs.insert(path_relative_to(root, dir));
     }
     Ok(contains_include_file)
+}
+
+fn read_dir_if_directory(dir: &Path) -> io::Result<Option<fs::ReadDir>> {
+    match fs::read_dir(dir) {
+        Ok(entries) => Ok(Some(entries)),
+        Err(err) if err.kind() == io::ErrorKind::NotADirectory => Ok(None),
+        Err(err) => Err(err),
+    }
 }
 
 fn is_veriloga_include_file(path: &Path) -> bool {
