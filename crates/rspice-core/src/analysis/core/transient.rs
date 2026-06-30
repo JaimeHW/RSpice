@@ -655,6 +655,18 @@ impl LteEstimator {
         prefix_len: usize,
         dt: Value,
     ) -> (Value, bool) {
+        self.estimate_prefix_excluding(current, prefix_len, dt, &[])
+    }
+
+    /// Estimate LTE for the first `prefix_len` solution entries, skipping
+    /// sorted zero-based indices owned by model-specific timestep semantics.
+    pub fn estimate_prefix_excluding(
+        &self,
+        current: &[Value],
+        prefix_len: usize,
+        dt: Value,
+        excluded_indices: &[usize],
+    ) -> (Value, bool) {
         let len = prefix_len.min(current.len());
         // Need at least one previous point to estimate
         if len == 0 || self.history_count < 1 || self.prev_solution.len() < len {
@@ -662,10 +674,18 @@ impl LteEstimator {
         }
 
         let mut max_lte = 0.0_f64;
+        let mut excluded_pos = 0usize;
 
         // For trapezoidal, LTE ~ (dt^3 / 12) * d^3v/dt^3
         // We approximate by comparing predicted (linear extrapolation) vs actual
         for (i, &curr_val) in current.iter().take(len).enumerate() {
+            while excluded_pos < excluded_indices.len() && excluded_indices[excluded_pos] < i {
+                excluded_pos += 1;
+            }
+            if excluded_pos < excluded_indices.len() && excluded_indices[excluded_pos] == i {
+                continue;
+            }
+
             let prev_val = self.prev_solution[i];
             let prev_prev_val = self.prev_prev_solution.get(i).copied().unwrap_or(prev_val);
             let prev_prev_prev_val = self

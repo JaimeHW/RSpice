@@ -1784,12 +1784,18 @@ impl Engine {
         dt: Value,
         is_strictly_linear_transient: bool,
         voltage_lte_estimator: &LteEstimator,
+        voltage_lte_excluded_nodes: &[usize],
     ) -> (Value, bool) {
         if is_strictly_linear_transient {
             return (0.0, true);
         }
 
-        voltage_lte_estimator.estimate_prefix(candidate_solution, circuit.num_nodes(), dt)
+        voltage_lte_estimator.estimate_prefix_excluding(
+            candidate_solution,
+            circuit.num_nodes(),
+            dt,
+            voltage_lte_excluded_nodes,
+        )
     }
 
     #[inline]
@@ -1806,6 +1812,7 @@ impl Engine {
         vdmos_history: &VdmosTransientHistory,
         ekv26_history: &Ekv26TransientHistory,
         voltage_lte_estimator: &LteEstimator,
+        voltage_lte_excluded_nodes: &[usize],
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         voltage_abstol: Value,
         reltol: Value,
@@ -1861,6 +1868,7 @@ impl Engine {
             dt,
             is_strictly_linear_transient,
             voltage_lte_estimator,
+            voltage_lte_excluded_nodes,
         );
         if !accept {
             return None;

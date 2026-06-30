@@ -51,6 +51,19 @@ impl Engine {
         }
     }
 
+    pub(super) fn collect_xspice_runtime_breakpoints(
+        circuit: &mut crate::circuit::Circuit,
+        breakpoints: &mut BreakpointManager,
+        tstop: Value,
+    ) {
+        if let Some(event_time) = circuit.next_xspice_event_time() {
+            Self::add_breakpoint_if_in_range(breakpoints, event_time, tstop);
+        }
+        for time in circuit.take_xspice_requested_breakpoints() {
+            Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+        }
+    }
+
     pub(super) fn add_source_spec_breakpoints(
         breakpoints: &mut BreakpointManager,
         spec: &crate::netlist::SourceSpec,
@@ -202,6 +215,21 @@ impl Engine {
         }
 
         for instance in &circuit.xspice_instances {
+            match instance.transient_breakpoints() {
+                Ok(times) => {
+                    for time in times {
+                        Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+                    }
+                }
+                Err(err) => {
+                    log::warn!(
+                        "Failed to collect XSPICE '{}' transient breakpoints: {:?}",
+                        instance.model_name(),
+                        err
+                    );
+                }
+            }
+
             if instance.model_name().eq_ignore_ascii_case("pwlts")
                 && let Some(times) = instance.real_vector_param("x_array")
             {

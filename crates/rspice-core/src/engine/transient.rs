@@ -514,6 +514,7 @@ impl Engine {
         };
         result.record_digital_snapshot(resume_time, &circuit.xspice_digital_snapshot());
         let mut t = resume_time;
+        let voltage_lte_excluded_nodes = circuit.xspice_transient_voltage_lte_excluded_nodes();
 
         // Grid-locked stepping: the accepted times are exactly the
         // configured grid (filtered to points after the start), the dt
@@ -1864,9 +1865,11 @@ impl Engine {
                     );
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
-                        if let Some(event_time) = circuit.next_xspice_event_time() {
-                            Self::add_breakpoint_if_in_range(&mut breakpoints, event_time, tstop);
-                        }
+                        Self::collect_xspice_runtime_breakpoints(
+                            &mut circuit,
+                            &mut breakpoints,
+                            tstop,
+                        );
                     }
                     #[cfg(feature = "veriloga")]
                     if circuit.has_veriloga_devices() {
@@ -2260,6 +2263,7 @@ impl Engine {
                     dt,
                     is_strictly_linear_transient,
                     &lte_estimator,
+                    &voltage_lte_excluded_nodes,
                 )
             };
             let lte_scale = if first_accepted_transient_step || is_strictly_linear_transient {
@@ -2638,9 +2642,11 @@ impl Engine {
                     );
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
-                        if let Some(event_time) = circuit.next_xspice_event_time() {
-                            Self::add_breakpoint_if_in_range(&mut breakpoints, event_time, tstop);
-                        }
+                        Self::collect_xspice_runtime_breakpoints(
+                            &mut circuit,
+                            &mut breakpoints,
+                            tstop,
+                        );
                     }
                     #[cfg(feature = "veriloga")]
                     if circuit.has_veriloga_devices() {
@@ -2789,6 +2795,7 @@ impl Engine {
                         &vdmos_history,
                         &ekv26_history,
                         &lte_estimator,
+                        &voltage_lte_excluded_nodes,
                         &vbic_snapshot_cache,
                         self.voltage_abstol(),
                         self.voltage_reltol(),
@@ -2837,9 +2844,7 @@ impl Engine {
             // Accept XSPICE timestep (commit state changes)
             if circuit.has_xspice_devices() {
                 circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
-                if let Some(event_time) = circuit.next_xspice_event_time() {
-                    Self::add_breakpoint_if_in_range(&mut breakpoints, event_time, tstop);
-                }
+                Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop);
             }
             #[cfg(feature = "veriloga")]
             let veriloga_discontinuity = if circuit.has_veriloga_devices() {

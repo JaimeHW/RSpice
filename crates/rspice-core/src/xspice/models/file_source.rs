@@ -404,7 +404,15 @@ fn schedule_next_breakpoint(ctx: &mut CmContext, rows: &[FileSourceRow]) {
     if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
         return;
     }
-    if let Some(row) = rows.iter().find(|row| row.time > ctx.time) {
+    if let Some(row) = rows
+        .iter()
+        .filter(|row| row.time > ctx.time)
+        .min_by(|left, right| {
+            left.time
+                .partial_cmp(&right.time)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    {
         ctx.request_breakpoint(row.time);
     }
 }
