@@ -8,9 +8,10 @@ use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortDirection, PortSpec,
     PortType,
 };
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 const MIN_FREQUENCY: Value = 1.0e-16;
+const FREQUENCY_TABLE_RESOURCE: &str = "xspice.waveform.frequency_table";
 const PHASE_STATE: usize = 0;
 const SQUARE_TIME1_STATE: usize = 1;
 const SQUARE_TIME2_STATE: usize = 2;
@@ -33,6 +34,18 @@ pub struct TriangleOscillator;
 struct ControlPoint {
     control: Value,
     frequency: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct FrequencyTableSignature {
+    controls: Vec<Value>,
+    frequencies: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct FrequencyTableResource {
+    signature: FrequencyTableSignature,
+    result: CmResult<Option<Arc<Vec<ControlPoint>>>>,
 }
 
 fn invalid_param(name: &str, message: impl Into<String>) -> CmError {
@@ -133,7 +146,7 @@ fn triangle_params() -> &'static [ParamSpec] {
 }
 
 fn controlled_frequency_table(ctx: &CmContext) -> CmResult<Vec<ControlPoint>> {
-    controlled_frequency_table_optional(ctx)?.ok_or_else(|| {
+    controlled_frequency_table_optional_uncached(ctx)?.ok_or_else(|| {
         invalid_param(
             "cntl_array/freq_array",
             "cntl_array length must match freq_array length",
@@ -141,7 +154,16 @@ fn controlled_frequency_table(ctx: &CmContext) -> CmResult<Vec<ControlPoint>> {
     })
 }
 
-fn controlled_frequency_table_optional(ctx: &CmContext) -> CmResult<Option<Vec<ControlPoint>>> {
+fn frequency_table_signature(ctx: &CmContext) -> FrequencyTableSignature {
+    FrequencyTableSignature {
+        controls: ctx.real_vector_param("cntl_array").unwrap_or(&[]).to_vec(),
+        frequencies: ctx.real_vector_param("freq_array").unwrap_or(&[]).to_vec(),
+    }
+}
+
+fn controlled_frequency_table_optional_uncached(
+    ctx: &CmContext,
+) -> CmResult<Option<Vec<ControlPoint>>> {
     let controls = ctx
         .real_vector_param("cntl_array")
         .ok_or_else(|| CmError::MissingParameter("cntl_array".to_string()))?;
@@ -184,6 +206,27 @@ fn controlled_frequency_table_optional(ctx: &CmContext) -> CmResult<Option<Vec<C
     }
 
     Ok(Some(table))
+}
+
+fn controlled_frequency_table_optional(
+    ctx: &mut CmContext,
+) -> CmResult<Option<Arc<Vec<ControlPoint>>>> {
+    let signature = frequency_table_signature(ctx);
+    if let Some(resource) = ctx.resource::<FrequencyTableResource>(FREQUENCY_TABLE_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.result.clone();
+    }
+
+    let result = controlled_frequency_table_optional_uncached(ctx).map(|table| table.map(Arc::new));
+    ctx.set_resource(
+        FREQUENCY_TABLE_RESOURCE,
+        Arc::new(FrequencyTableResource {
+            signature,
+            result: result.clone(),
+        }),
+    );
+    result
 }
 
 fn interpolate_frequency(table: &[ControlPoint], control: Value) -> Value {
@@ -705,6 +748,34 @@ mod tests {
             .evaluate(&mut triangle)
             .expect("ngspice triangle returns without fatal error on mismatched tables");
         assert_eq!(triangle.output("out"), 0.0);
+    }
+
+    #[test]
+    fn waveform_frequency_table_cache_reloads_when_params_change() {
+        let mut ctx = oscillator_context();
+        SineOscillator.init(&mut ctx).expect("sine initializes");
+
+        let first = controlled_frequency_table_optional(&mut ctx)
+            .expect("cached frequency table loads")
+            .expect("frequency table is present");
+        let second = controlled_frequency_table_optional(&mut ctx)
+            .expect("cached frequency table reloads")
+            .expect("frequency table is present");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "unchanged waveform frequency parameters should reuse the parsed table"
+        );
+        assert_eq!(interpolate_frequency(&first, 0.0), 1.0e9);
+
+        ctx.set_real_vector_param("freq_array", vec![2.0e9, 2.0e9]);
+        let updated = controlled_frequency_table_optional(&mut ctx)
+            .expect("updated frequency table loads")
+            .expect("frequency table is present");
+        assert!(
+            !Arc::ptr_eq(&first, &updated),
+            "changed waveform frequency parameters must refresh the parsed table"
+        );
+        assert_eq!(interpolate_frequency(&updated, 0.0), 2.0e9);
     }
 
     #[test]
