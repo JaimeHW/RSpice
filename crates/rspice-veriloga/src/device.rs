@@ -2261,6 +2261,8 @@ pub struct DeviceBuilder {
     nodes: Vec<usize>,
     params: Vec<(String, f64)>,
     temperature: f64,
+    #[cfg(feature = "native")]
+    canonical_ir: Option<CanonicalIrArtifact>,
 }
 
 impl DeviceBuilder {
@@ -2272,6 +2274,8 @@ impl DeviceBuilder {
             nodes: Vec::new(),
             params: Vec::new(),
             temperature: 300.15, // 27°C
+            #[cfg(feature = "native")]
+            canonical_ir: None,
         }
     }
 
@@ -2293,17 +2297,55 @@ impl DeviceBuilder {
         self
     }
 
+    /// Provide the canonical IR artifact required by native JIT builds.
+    #[cfg(feature = "native")]
+    pub fn canonical_ir(mut self, artifact: CanonicalIrArtifact) -> Self {
+        self.canonical_ir = Some(artifact);
+        self
+    }
+
     /// Build the device
     pub fn build(self) -> VerilogADevice {
-        let mut device = VerilogADevice::new(self.name, self.model, &self.nodes);
-        device.set_temperature(self.temperature);
+        self.try_build().unwrap_or_else(|err| {
+            panic!("Verilog-A device builder failed: {err}");
+        })
+    }
 
-        for (name, value) in self.params {
+    /// Checked build path that reports native-JIT and parameter-default
+    /// failures instead of panicking.
+    pub fn try_build(self) -> Result<VerilogADevice, VmError> {
+        let Self {
+            model,
+            name,
+            nodes,
+            params,
+            temperature,
+            #[cfg(feature = "native")]
+            canonical_ir,
+        } = self;
+
+        #[cfg(feature = "native")]
+        let mut device = {
+            let canonical_ir = canonical_ir.ok_or_else(|| {
+                VmError::NativeJit(
+                    "DeviceBuilder requires canonical IR when native JIT is enabled; no interpreter fallback"
+                        .to_string(),
+                )
+            })?;
+            VerilogADevice::try_new_with_canonical_ir(name, model, &canonical_ir, &nodes)?
+        };
+
+        #[cfg(not(feature = "native"))]
+        let mut device = VerilogADevice::try_new(name, model, &nodes)?;
+
+        device.try_set_temperature(temperature)?;
+
+        for (name, value) in params {
             device.set_parameter(&name, value);
         }
-        device.resolve_parameter_defaults();
+        device.try_resolve_parameter_defaults()?;
 
-        device
+        Ok(device)
     }
 }
 
@@ -2400,6 +2442,60 @@ mod tests {
         BytecodeProgram {
             instructions: vec![Instruction::PushParam(999)],
         }
+    }
+
+    #[test]
+    fn native_device_builder_requires_canonical_ir() {
+        let model = compile(
+            r#"
+`include "disciplines.vams"
+module builder_requires_canonical(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n);
+endmodule
+"#,
+        );
+
+        let err = DeviceBuilder::new(model, "B1")
+            .nodes(&[1, 0])
+            .try_build()
+            .expect_err("native DeviceBuilder must require canonical IR");
+
+        assert_native_hard_fail(err, "DeviceBuilder requires canonical IR");
+    }
+
+    #[test]
+    fn native_device_builder_uses_canonical_ir() {
+        let source = r#"
+`include "disciplines.vams"
+module builder_uses_canonical(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 2.0;
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile builder model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile builder canonical IR");
+
+        let mut device = DeviceBuilder::new(model, "B2")
+            .nodes(&[1, 0])
+            .canonical_ir(artifact)
+            .try_build()
+            .expect("native DeviceBuilder uses canonical IR");
+
+        assert!(device.is_using_native());
+        device.update_voltages(&[4.0]);
+        assert_eq!(
+            device
+                .try_evaluate()
+                .expect("canonical builder device evaluates"),
+            vec![2.0]
+        );
     }
 
     #[test]
