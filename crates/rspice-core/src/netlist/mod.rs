@@ -879,6 +879,32 @@ mod tests {
     }
 
     #[test]
+    fn model_params_accept_unparenthesized_trailing_close() {
+        let netlist = Netlist::parse(
+            "xspice unparenthesized model close\n\
+             .model fil1 s_xfer gain=1000 int_ic=[0 0]\n\
+             + num_coeff=[1.0 0]\n\
+             + den_coeff=[1.0 1e3 1e7]\n\
+             + )\n\
+             .end\n",
+        )
+        .expect("ngspice accepts a trailing ')' after unparenthesized model params");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("fil1"))
+            .expect("model exists");
+
+        assert!(model.params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("gain") && (*value - 1000.0).abs() < f64::EPSILON
+        }));
+        assert!(model.real_vector_params.iter().any(|(name, values)| {
+            name.eq_ignore_ascii_case("den_coeff") && values == &[1.0, 1.0e3, 1.0e7]
+        }));
+    }
+
+    #[test]
     fn xspice_string_vector_params_preserve_unquoted_argv_tokens() {
         let netlist = Netlist::parse(
             "xspice string-vector argv model params\n\

@@ -172,6 +172,26 @@ pub(super) fn parse_model_params(
                 });
             }
             TokenKind::RParen => {
+                let has_params = !numeric_params.is_empty()
+                    || !expr_params.is_empty()
+                    || !string_params.is_empty()
+                    || !string_vector_params.is_empty()
+                    || !real_vector_params.is_empty()
+                    || !integer_vector_params.is_empty();
+                if has_params {
+                    stream.advance();
+                    skip_commas(stream);
+                    if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+                        return Ok(ParsedModelParams {
+                            numeric: numeric_params,
+                            expr: expr_params,
+                            string: string_params,
+                            string_vector: string_vector_params,
+                            real_vector: real_vector_params,
+                            integer_vector: integer_vector_params,
+                        });
+                    }
+                }
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: "Unexpected ')' in .MODEL parameter list".to_string(),
