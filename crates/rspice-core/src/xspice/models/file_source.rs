@@ -35,6 +35,7 @@ struct FileSourceRow {
 
 const FILESOURCE_ROW_CURSOR_STATE: usize = 0;
 const FILESOURCE_ROWS_RESOURCE: &str = "xspice.filesource.rows";
+const FILESOURCE_TRANSFORMED_ROWS_RESOURCE: &str = "xspice.filesource.transformed_rows";
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct FileSourceCacheKey {
@@ -52,6 +53,24 @@ struct FileSourceRowsResource {
     width: usize,
     virtual_stamp: Option<data_file::DataFileStamp>,
     fields: Arc<Vec<RawFileSourceField>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct FileSourceTransformedRowsSignature {
+    file: String,
+    width: usize,
+    virtual_stamp: Option<data_file::DataFileStamp>,
+    timeoffset: Value,
+    timescale: Value,
+    timerelative: bool,
+    amploffset: Vec<Value>,
+    amplscale: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct FileSourceTransformedRowsResource {
+    signature: FileSourceTransformedRowsSignature,
+    rows: CmResult<Arc<Vec<FileSourceRow>>>,
 }
 
 #[derive(Debug, Default)]
@@ -269,18 +288,24 @@ fn filesource_resource_fields(
     ctx: &CmContext,
     file: &str,
     width: usize,
-) -> Option<Arc<Vec<RawFileSourceField>>> {
+) -> Option<(
+    Arc<Vec<RawFileSourceField>>,
+    Option<data_file::DataFileStamp>,
+)> {
     let resource = ctx.resource::<FileSourceRowsResource>(FILESOURCE_ROWS_RESOURCE)?;
     let virtual_stamp = data_file::virtual_data_file_stamp(file);
     (resource.file == file && resource.width == width && resource.virtual_stamp == virtual_stamp)
-        .then(|| Arc::clone(&resource.fields))
+        .then(|| (Arc::clone(&resource.fields), resource.virtual_stamp))
 }
 
 fn load_filesource_for_context(
     ctx: &mut CmContext,
     file: &str,
     width: usize,
-) -> CmResult<Arc<Vec<RawFileSourceField>>> {
+) -> CmResult<(
+    Arc<Vec<RawFileSourceField>>,
+    Option<data_file::DataFileStamp>,
+)> {
     if let Some(fields) = filesource_resource_fields(ctx, file, width) {
         return Ok(fields);
     }
@@ -295,18 +320,78 @@ fn load_filesource_for_context(
             fields: Arc::clone(&fields),
         }),
     );
-    Ok(fields)
+    Ok((fields, virtual_stamp))
 }
 
 fn load_filesource_from_context(
     ctx: &CmContext,
     file: &str,
     width: usize,
-) -> CmResult<Arc<Vec<RawFileSourceField>>> {
-    filesource_resource_fields(ctx, file, width).map_or_else(
-        || load_filesource(file, width).map(|(fields, _)| fields),
-        Ok,
-    )
+) -> CmResult<(
+    Arc<Vec<RawFileSourceField>>,
+    Option<data_file::DataFileStamp>,
+)> {
+    filesource_resource_fields(ctx, file, width).map_or_else(|| load_filesource(file, width), Ok)
+}
+
+fn transformed_rows_signature(
+    ctx: &CmContext,
+    file: &str,
+    width: usize,
+    virtual_stamp: Option<data_file::DataFileStamp>,
+) -> FileSourceTransformedRowsSignature {
+    FileSourceTransformedRowsSignature {
+        file: file.to_string(),
+        width,
+        virtual_stamp,
+        timeoffset: ctx.param("timeoffset"),
+        timescale: ctx.param("timescale"),
+        timerelative: bool_param(ctx, "timerelative"),
+        amploffset: ctx.real_vector_param("amploffset").unwrap_or(&[]).to_vec(),
+        amplscale: ctx.real_vector_param("amplscale").unwrap_or(&[]).to_vec(),
+    }
+}
+
+fn transformed_rows_for_context(
+    ctx: &mut CmContext,
+    file: &str,
+    width: usize,
+) -> CmResult<Arc<Vec<FileSourceRow>>> {
+    let (raw_fields, virtual_stamp) = load_filesource_for_context(ctx, file, width)?;
+    let signature = transformed_rows_signature(ctx, file, width, virtual_stamp);
+    if let Some(resource) =
+        ctx.resource::<FileSourceTransformedRowsResource>(FILESOURCE_TRANSFORMED_ROWS_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.rows.clone();
+    }
+
+    let rows = transform_rows(ctx, &raw_fields, width).map(Arc::new);
+    ctx.set_resource(
+        FILESOURCE_TRANSFORMED_ROWS_RESOURCE,
+        Arc::new(FileSourceTransformedRowsResource {
+            signature,
+            rows: rows.clone(),
+        }),
+    );
+    rows
+}
+
+fn transformed_rows_from_context(
+    ctx: &CmContext,
+    file: &str,
+    width: usize,
+) -> CmResult<Arc<Vec<FileSourceRow>>> {
+    let (raw_fields, virtual_stamp) = load_filesource_from_context(ctx, file, width)?;
+    let signature = transformed_rows_signature(ctx, file, width, virtual_stamp);
+    if let Some(resource) =
+        ctx.resource::<FileSourceTransformedRowsResource>(FILESOURCE_TRANSFORMED_ROWS_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.rows.clone();
+    }
+
+    transform_rows(ctx, &raw_fields, width).map(Arc::new)
 }
 
 fn finite_param(ctx: &CmContext, name: &str) -> CmResult<Value> {
@@ -555,8 +640,7 @@ impl CodeModel for FileSource {
             .string_param("file")
             .unwrap_or("filesource.txt")
             .to_string();
-        let raw_fields = load_filesource_for_context(ctx, &file, width)?;
-        let rows = transform_rows(ctx, &raw_fields, width)?;
+        let rows = transformed_rows_for_context(ctx, &file, width)?;
         ctx.allocate_int_states(1);
         ctx.set_int_state(FILESOURCE_ROW_CURSOR_STATE, 0);
         ctx.set_output_vector("out", rows[0].values.clone());
@@ -573,8 +657,7 @@ impl CodeModel for FileSource {
             .string_param("file")
             .unwrap_or("filesource.txt")
             .to_string();
-        let raw_fields = load_filesource_for_context(ctx, &file, width)?;
-        let rows = transform_rows(ctx, &raw_fields, width)?;
+        let rows = transformed_rows_for_context(ctx, &file, width)?;
         let values = evaluate_rows(ctx, &rows);
         ctx.set_output_vector("out", values);
         Ok(())
@@ -591,9 +674,8 @@ impl CodeModel for FileSource {
     fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
         let width = ctx.port_width("out");
         let file = ctx.string_param("file").unwrap_or("filesource.txt");
-        let raw_fields = load_filesource_from_context(ctx, file, width)?;
-        let rows = transform_rows(ctx, &raw_fields, width)?;
-        Ok(rows.into_iter().map(|row| row.time).collect())
+        let rows = transformed_rows_from_context(ctx, file, width)?;
+        Ok(rows.iter().map(|row| row.time).collect())
     }
 }
 
@@ -760,6 +842,41 @@ mod tests {
             .evaluate(&mut ctx)
             .expect("filesource reevaluates after virtual replace");
         assert!((ctx.output_vector("out")[0] - 11.0).abs() < 1.0e-12);
+
+        let _ = data_file::unregister_data_file(file);
+    }
+
+    #[test]
+    fn filesource_transformed_rows_cache_reloads_when_transform_params_change() {
+        let _guard = data_file_test_guard();
+        let file = "virtual://filesource/transformed-row-cache";
+        let _ = data_file::unregister_data_file(file);
+        lock_filesource_cache().clear();
+        data_file::register_data_file(file, "0 1\n1e-9 3\n").expect("register filesource data");
+
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("out", 1);
+        ctx.set_string_param("file", file);
+        ctx.set_param("timeoffset", 0.0);
+        ctx.set_param("timescale", 1.0);
+        ctx.set_param("timerelative", 0.0);
+        ctx.set_real_vector_param("amploffset", vec![0.0]);
+        ctx.set_real_vector_param("amplscale", vec![1.0]);
+
+        let first = transformed_rows_for_context(&mut ctx, file, 1).expect("transform rows");
+        let second =
+            transformed_rows_for_context(&mut ctx, file, 1).expect("reuse transformed rows");
+        assert!(Arc::ptr_eq(&first, &second));
+
+        ctx.set_param("timeoffset", 5.0);
+        let shifted = transformed_rows_for_context(&mut ctx, file, 1).expect("reload shifted rows");
+        assert!(!Arc::ptr_eq(&first, &shifted));
+        assert_eq!(shifted[0].time, 5.0);
+
+        ctx.set_real_vector_param("amplscale", vec![10.0]);
+        let scaled = transformed_rows_for_context(&mut ctx, file, 1).expect("reload scaled rows");
+        assert!(!Arc::ptr_eq(&shifted, &scaled));
+        assert_eq!(scaled[0].values, vec![10.0]);
 
         let _ = data_file::unregister_data_file(file);
     }
