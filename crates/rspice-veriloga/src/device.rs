@@ -416,8 +416,6 @@ impl VerilogADevice {
         let compiled = match compile(model.as_ref()) {
             Ok(native) => {
                 log::info!("[JIT] Model '{}' compiled to native code", model.name);
-                #[cfg(debug_assertions)]
-                eprintln!("[JIT] Model '{}' compiled to native code", model.name);
                 Ok(std::sync::Arc::new(native))
             }
             Err(error) => {
@@ -426,11 +424,6 @@ impl VerilogADevice {
                     "[JIT] Native compilation failed for '{}': {}",
                     model.name,
                     msg
-                );
-                #[cfg(debug_assertions)]
-                eprintln!(
-                    "[JIT] Native compilation failed for '{}': {}",
-                    model.name, msg
                 );
                 Err(msg)
             }
