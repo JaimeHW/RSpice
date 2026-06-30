@@ -5,16 +5,11 @@ use super::*;
 impl Engine {
     #[inline]
     pub(in crate::engine) fn effective_device_junction_gmin(&self, gmin: Value) -> Value {
-        let configured = self
-            .config
-            .convergence_config
-            .gmin_initial
-            .max(self.config.convergence_config.gmin_target)
-            .max(0.0);
-        if gmin.is_finite() && gmin > configured {
+        let floor = self.config.convergence_config.junction_gmin_target.max(0.0);
+        if gmin.is_finite() && gmin > floor {
             gmin
         } else {
-            configured
+            floor
         }
     }
 

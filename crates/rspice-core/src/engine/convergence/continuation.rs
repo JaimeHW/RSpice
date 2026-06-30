@@ -10,8 +10,8 @@ impl Engine {
         if !start.is_finite() || start <= 0.0 {
             start = 1e-3;
         }
-        if !end.is_finite() || end <= 0.0 {
-            end = 1e-12;
+        if !end.is_finite() || end < 0.0 {
+            end = 0.0;
         }
         if start < end {
             std::mem::swap(&mut start, &mut end);
@@ -41,7 +41,7 @@ impl Engine {
     pub(in crate::engine::convergence) fn gmin_linear_schedule(&self) -> Vec<Value> {
         let conv = &self.config.convergence_config;
         let start = conv.gmin_initial.max(1e-2);
-        let end = conv.gmin_target.max(1e-12);
+        let end = conv.gmin_target.max(0.0);
         Self::build_descending_schedule(start, end)
     }
 
@@ -49,7 +49,7 @@ impl Engine {
     pub(in crate::engine) fn gmin_nonlinear_schedule(&self) -> Vec<Value> {
         let conv = &self.config.convergence_config;
         let start = conv.gmin_initial.max(1e-3);
-        let end = conv.gmin_target.max(1e-12);
+        let end = conv.gmin_target.max(0.0);
         Self::build_descending_schedule(start, end)
     }
 

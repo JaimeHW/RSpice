@@ -78,6 +78,37 @@ fn bjt_pspice_nk_matches_xyce_forward_gummel_collector_current() {
 }
 
 #[test]
+fn bjt_pspice_nk_matches_xyce_forward_gummel_base_current() {
+    let netlist = Netlist::parse(bjt_pspice_nk_deck()).expect("deck parses");
+    let results = Engine::new(SimulationConfig::default())
+        .run_dc_sweep(&netlist, "vbb", 0.15, 0.95, 0.05)
+        .expect("sweep converges");
+
+    let vmon1 = branch_index(&results[0].1, "vmon1");
+    let xyce710_points = [
+        (0.20, 2.038_331_06e-12),
+        (0.35, 1.414_174_73e-10),
+        (0.50, 3.268_393_12e-8),
+        (0.75, 4.848_572_21e-4),
+        (0.90, 3.231_205_34e-2),
+    ];
+
+    for &(bias, expected) in &xyce710_points {
+        let (_, result) = results
+            .iter()
+            .find(|(sweep, _)| (sweep - bias).abs() < 1e-12)
+            .unwrap_or_else(|| panic!("missing sweep bias {bias:.2}"));
+        let got = result.branch_currents[vmon1];
+        let abs = (got - expected).abs();
+        let rel = abs / expected.abs();
+        assert!(
+            rel < 2.0e-3 || abs < 5.0e-15,
+            "BJT NK base current at VBB={bias:.2}: rspice={got:.9e} xyce={expected:.9e} abs={abs:.3e} rel={rel:.3e}"
+        );
+    }
+}
+
+#[test]
 fn bjt_pspice_nkf_alias_matches_xyce_forward_gummel_collector_current() {
     let deck = bjt_pspice_nkf_deck();
     let netlist = Netlist::parse(&deck).expect("deck parses");

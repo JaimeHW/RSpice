@@ -8,10 +8,13 @@ impl Bjt {
         vbe_eff: Value,
         vbc_eff: Value,
     ) -> TransportChargeState {
-        let ifi = self.diode_current(vbe_eff, self.nf);
-        let iri = self.diode_current_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr);
-        let gfi = self.diode_conductance(vbe_eff, self.nf);
-        let gri = self.diode_conductance_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr);
+        let gmin = self.junction_gmin;
+        let ifi = self.diode_current(vbe_eff, self.nf) + gmin * vbe_eff;
+        let iri = self.diode_current_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr)
+            + gmin * vbc_eff;
+        let gfi = self.diode_conductance(vbe_eff, self.nf) + gmin;
+        let gri =
+            self.diode_conductance_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr) + gmin;
 
         let raw_q1_inv =
             1.0 - if self.var.is_finite() && self.var > 0.0 {
@@ -476,10 +479,30 @@ impl Bjt {
         let dibe_intrinsic_breakdown_dvbe = wbe * dibe_breakdown_dvbe;
         let ibex_breakdown = (1.0 - wbe) * ibe_breakdown;
         let dibex_breakdown_dvbe = (1.0 - wbe) * dibe_breakdown_dvbe;
-        let ib_be = wbe * ibe_normal + ibe_intrinsic_breakdown + gmin * vbe_eff;
-        let dibe_dvbe = wbe * dibe_normal_dvbe + dibe_intrinsic_breakdown_dvbe + gmin;
-        let ibc = bc.ibc + gmin * vbc_eff;
-        let dibc_dvbc = bc.dibc_dvbc_eff + gmin;
+        let legacy_ideal_be_scale = if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            1.0 / self.bf.max(1e-18)
+        } else {
+            0.0
+        };
+        let legacy_ideal_bc_scale = if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            1.0 / self.br.max(1e-18)
+        } else {
+            0.0
+        };
+        let direct_be_gmin = if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            legacy_ideal_be_scale * gmin
+        } else {
+            gmin
+        };
+        let direct_bc_gmin = if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            legacy_ideal_bc_scale * gmin
+        } else {
+            gmin
+        };
+        let ib_be = wbe * ibe_normal + ibe_intrinsic_breakdown + direct_be_gmin * vbe_eff;
+        let dibe_dvbe = wbe * dibe_normal_dvbe + dibe_intrinsic_breakdown_dvbe + direct_be_gmin;
+        let ibc = bc.ibc + direct_bc_gmin * vbc_eff;
+        let dibc_dvbc = bc.dibc_dvbc_eff + direct_bc_gmin;
         let iciei = transport.itzf - transport.itzr;
         let diciei_dvbe = transport.ditzf_dvbe_eff - transport.ditzr_dvbe_eff;
         let diciei_dvbc = transport.ditzf_dvbc_eff - transport.ditzr_dvbc_eff;

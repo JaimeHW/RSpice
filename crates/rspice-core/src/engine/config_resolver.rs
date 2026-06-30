@@ -92,6 +92,8 @@ pub fn resolve_simulation_config(
     let mut charge_abstol = base.convergence_config.charge_abstol;
     let mut residual_reltol = base.convergence_config.residual_reltol;
     let mut gmin_initial = base.convergence_config.gmin_initial;
+    let gmin_target = base.convergence_config.gmin_target;
+    let mut junction_gmin_target = base.convergence_config.junction_gmin_target;
 
     if let Some(opts) = netlist_options {
         if let Some(temp_celsius) = opts.temp {
@@ -136,7 +138,10 @@ pub fn resolve_simulation_config(
             residual_reltol = residual;
         }
         if let Some(gmin) = opts.gmin {
-            gmin_initial = gmin;
+            junction_gmin_target = gmin;
+            if gmin_initial < gmin {
+                gmin_initial = gmin;
+            }
         }
     }
 
@@ -211,8 +216,13 @@ pub fn resolve_simulation_config(
     resolved.convergence_config.charge_abstol = charge_abstol;
     resolved.convergence_config.residual_reltol = residual_reltol;
     resolved.convergence_config.gmin_initial = gmin_initial;
-    if resolved.convergence_config.gmin_target > gmin_initial {
-        resolved.convergence_config.gmin_target = gmin_initial;
+    resolved.convergence_config.gmin_target = gmin_target;
+    resolved.convergence_config.junction_gmin_target = junction_gmin_target;
+    if resolved.convergence_config.gmin_target > resolved.convergence_config.gmin_initial {
+        resolved.convergence_config.gmin_initial = resolved.convergence_config.gmin_target;
+    }
+    if resolved.convergence_config.junction_gmin_target > resolved.convergence_config.gmin_initial {
+        resolved.convergence_config.gmin_initial = resolved.convergence_config.junction_gmin_target;
     }
 
     resolved
@@ -295,6 +305,24 @@ mod tests {
             resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
 
         assert_eq!(resolved.transient_trtol, 2.25);
+    }
+
+    #[test]
+    fn deck_gmin_updates_device_junction_floor_not_final_nodal_floor() {
+        let base = SimulationConfig::default();
+        let options = NetlistSimulationOptions {
+            gmin: Some(0.0),
+            ..Default::default()
+        };
+
+        let resolved =
+            resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
+
+        assert_eq!(
+            resolved.convergence_config.gmin_target,
+            base.convergence_config.gmin_target
+        );
+        assert_eq!(resolved.convergence_config.junction_gmin_target, 0.0);
     }
 
     #[test]

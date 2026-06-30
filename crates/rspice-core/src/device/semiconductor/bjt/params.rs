@@ -76,7 +76,17 @@ impl Bjt {
         self.nkf = 0.5;
         self.nkf_given = false;
         self.ibei_nominal = 0.0;
+        self.iben_nominal = 0.0;
         self.ibci_nominal = 0.0;
+        self.ibcn_nominal = 0.0;
+        self.ibei = self.ibei_nominal;
+        self.iben = self.iben_nominal;
+        self.ibci = self.ibci_nominal;
+        self.ibcn = self.ibcn_nominal;
+        self.nei = 1.0;
+        self.nen = 1.5;
+        self.nci = 1.0;
+        self.ncn = 2.0;
         self.vbbe_nominal = 0.0;
         self.nbbe_nominal = 1.0;
         self.ibbe_nominal = 1e-6;
@@ -1251,12 +1261,22 @@ impl Bjt {
             self.ibei_nominal = v.max(0.0);
             has_ibei = true;
         }
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon
+            && let Some(&v) = params.get("ISE")
+        {
+            self.iben_nominal = v.max(0.0);
+        }
         if let Some(&v) = params.get("IBEN") {
             self.iben_nominal = v.max(0.0);
         }
         if let Some(&v) = params.get("IBCI") {
             self.ibci_nominal = v.max(0.0);
             has_ibci = true;
+        }
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon
+            && let Some(&v) = params.get("ISC")
+        {
+            self.ibcn_nominal = v.max(0.0);
         }
         if let Some(&v) = params.get("IBCN") {
             self.ibcn_nominal = v.max(0.0);
@@ -1289,6 +1309,13 @@ impl Bjt {
         {
             self.nen = v;
         }
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon
+            && let Some(&v) = params.get("NE")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.nen = v;
+        }
         if let Some(&v) = params.get("NCI")
             && v.is_finite()
             && v > 0.0
@@ -1296,6 +1323,13 @@ impl Bjt {
             self.nci = v;
         }
         if let Some(&v) = params.get("NCN")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.ncn = v;
+        }
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon
+            && let Some(&v) = params.get("NC")
             && v.is_finite()
             && v > 0.0
         {
@@ -1488,5 +1522,30 @@ mod tests {
         assert_eq!(bjt.rb, 50.0);
         assert_eq!(bjt.rbx, 10.0);
         assert_eq!(bjt.rbi, 40.0);
+    }
+
+    #[test]
+    fn legacy_spice_leakage_aliases_map_to_nonideal_junctions() {
+        let bjt = model_with(&[
+            ("ISE", 2.3e-14),
+            ("NE", 1.78),
+            ("ISC", 4.5e-15),
+            ("NC", 2.2),
+        ]);
+
+        assert_eq!(bjt.iben_nominal, 2.3e-14);
+        assert_eq!(bjt.nen, 1.78);
+        assert_eq!(bjt.ibcn_nominal, 4.5e-15);
+        assert_eq!(bjt.ncn, 2.2);
+    }
+
+    #[test]
+    fn legacy_spice_leakage_defaults_match_bjt_reference_models() {
+        let bjt = model_with(&[]);
+
+        assert_eq!(bjt.iben_nominal, 0.0);
+        assert_eq!(bjt.nen, 1.5);
+        assert_eq!(bjt.ibcn_nominal, 0.0);
+        assert_eq!(bjt.ncn, 2.0);
     }
 }

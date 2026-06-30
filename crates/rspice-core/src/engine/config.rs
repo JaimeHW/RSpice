@@ -127,10 +127,12 @@ pub struct ConvergenceConfig {
     pub arc_length: bool,
     /// Damping strategy for Newton iterations
     pub damping_strategy: DampingStrategy,
-    /// Initial GMIN value (typically 1e-12)
+    /// Initial continuation GMIN value for stepping.
     pub gmin_initial: Value,
-    /// Target GMIN value (typically 1e-15)
+    /// Final global nodal diagonal floor used only for numerical conditioning.
     pub gmin_target: Value,
+    /// Final SPICE device-junction GMIN floor seen by compact models.
+    pub junction_gmin_target: Value,
     /// Relative voltage tolerance for Newton voltage convergence checks.
     pub voltage_reltol: Value,
     /// Absolute voltage tolerance for Newton voltage convergence checks.
@@ -184,6 +186,7 @@ impl Default for ConvergenceConfig {
             damping_strategy: DampingStrategy::VoltageLimiting,
             gmin_initial: 1e-12,
             gmin_target: 1e-15,
+            junction_gmin_target: crate::constants::GMIN,
             voltage_reltol: crate::constants::RELTOL,
             voltage_abstol: 0.0,
             current_abstol: crate::constants::ITOL,
