@@ -163,6 +163,36 @@ m1 d g s e nbsimsoi w=1u l=1u
 }
 
 #[test]
+fn mos_bsimcmg_binned_levels_route_by_l_and_nfin_to_generated_bsimcmg() {
+    assert!(
+        has_builtin("bsimcmg_va"),
+        "commercial-ready BSIM-CMG source should be generated as bsimcmg_va"
+    );
+
+    let circuit = build(
+        r#"
+v1 d 0 dc 0
+m1 d g s b nmos1 tfin=15n l=30n nfin=10 nrs=1 nrd=1
+.model nmos1.1 nmos level=107 lmin=0 lmax=29n nfinmin=1 nfinmax=4 type=1
+.model nmos1.2 nmos level=107 lmin=29n lmax=35n nfinmin=5 nfinmax=100 type=1
+.op
+.end
+"#,
+    );
+
+    assert!(circuit.has_generated_veriloga_devices());
+    assert_eq!(circuit.device_count(), 2);
+    assert!(
+        circuit
+            .device_op_report()
+            .entries
+            .iter()
+            .all(|entry| !entry.name.eq_ignore_ascii_case("m1")),
+        "BSIM-CMG binned LEVEL=107 should not also instantiate a native MOS evaluator"
+    );
+}
+
+#[test]
 fn bjt_vbic_level_4_routes_to_generated_vbic13() {
     assert!(
         has_builtin("vbic13_4t"),

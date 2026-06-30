@@ -1581,6 +1581,43 @@ fn rust_backend_auto_keeps_hybrid_local_storage_when_residual_needs_scratch() {
 }
 
 #[test]
+fn rust_backend_auto_uses_bounded_local_storage_subset_for_wide_mixed_residuals() {
+    let source = wide_mixed_hybrid_local_storage_source(35, 470);
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&source)
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile wide mixed residual fixture through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("let s = match &mut self.scratch"),
+        "unsupported wide residual should keep scratch AD available:\n{stamp}"
+    );
+    assert!(stamp.contains("let mut var_drive: f64 = 0.0;"), "{stamp}");
+    assert!(stamp.contains("let mut var_shaped: f64 = 0.0;"), "{stamp}");
+    assert!(
+        !stamp.contains("let mut var_x0") && !stamp.contains("let mut var_x469"),
+        "scratch-only wide variables must not expand into scalar local derivative storage:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("stamper.stamp_current_const_local("),
+        "scratch-free residual equations should stay on scalar local stamps:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_bounds_hybrid_local_storage_width() {
     let source = wide_hybrid_local_storage_guard_source(35, 470);
     let artifact = VerilogACompiler::default()
@@ -18605,6 +18642,69 @@ module hybrid_local_storage_scratch_residual(p, n);
     end
 endmodule
 "#
+}
+
+fn wide_mixed_hybrid_local_storage_source(node_count: usize, variable_count: usize) -> String {
+    let nodes = (0..node_count)
+        .map(|index| format!("p{index}"))
+        .collect::<Vec<_>>();
+    let mut source = String::new();
+    source.push_str("module wide_mixed_hybrid_local_storage(");
+    source.push_str(&nodes.join(", "));
+    source.push_str(");\n");
+    source.push_str("    inout ");
+    source.push_str(&nodes.join(", "));
+    source.push_str(";\n");
+    source.push_str("    electrical ");
+    source.push_str(&nodes.join(", "));
+    source.push_str(";\n");
+    source.push_str("    parameter real c = 1e-12 from [0:inf);\n");
+    source.push_str("    parameter real gain = 2.0;\n");
+    source.push_str("    parameter real alpha = 1.5;\n");
+    source.push_str("    real drive;\n");
+    source.push_str("    real shaped;\n");
+    source.push_str("    real legacy;\n");
+    for index in 0..variable_count {
+        source.push_str(&format!("    real x{index};\n"));
+    }
+    source.push_str("    analog begin\n");
+    source.push_str("        I(p0, p1) <+ ddt(c * V(p0, p1));\n");
+    source.push_str("        drive = gain * V(p0, p1);\n");
+    source.push_str("        shaped = drive + V(p1, p2) * V(p2, p3);\n");
+    source.push_str("        I(p0, p1) <+ floor(shaped);\n");
+    source.push_str("        legacy = sqrt(abs(V(p0, p1)) + 1.0)\n");
+    source.push_str("            + exp(V(p1, p2) * 0.01)\n");
+    source.push_str("            + ln(1.0 + V(p2, p3) * V(p2, p3))\n");
+    source.push_str("            + sin(V(p3, p4))\n");
+    source.push_str("            + cos(V(p4, p5))\n");
+    source.push_str("            + tanh(V(p5, p6))\n");
+    source.push_str("            + atan(V(p6, p7));\n");
+    for index in 0..variable_count {
+        let pos = index % node_count;
+        let neg = (index + 1) % node_count;
+        if index == 0 {
+            source.push_str(&format!("        x0 = V(p{pos}, p{neg});\n"));
+        } else {
+            source.push_str(&format!(
+                "        x{index} = x{} + V(p{pos}, p{neg});\n",
+                index - 1
+            ));
+        }
+    }
+    source.push_str(&format!(
+        "        I(p0, p1) <+ floor(x{} + legacy\n",
+        variable_count - 1
+    ));
+    source.push_str("            + sqrt(abs(V(p0, p1)) + 1.0)\n");
+    source.push_str("            + exp(V(p1, p2) * 0.01)\n");
+    source.push_str("            + ln(1.0 + V(p2, p3) * V(p2, p3))\n");
+    source.push_str("            + sin(V(p3, p4))\n");
+    source.push_str("            + cos(V(p4, p5))\n");
+    source.push_str("            + tanh(V(p5, p6))\n");
+    source.push_str("            + atan(V(p6, p7))\n");
+    source.push_str("            + pow(abs(V(p7, p8)) + 1.0, alpha));\n");
+    source.push_str("    end\nendmodule\n");
+    source
 }
 
 fn wide_hybrid_local_storage_guard_source(node_count: usize, variable_count: usize) -> String {

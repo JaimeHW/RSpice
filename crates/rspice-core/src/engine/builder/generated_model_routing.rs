@@ -360,6 +360,7 @@ fn generated_mos_target(
     Ok(match checked_model_level("MOSFET", model_name, model)? {
         Some(104) => Some(GeneratedTarget::with_level_parameter("PSP104VA")),
         Some(10 | 55 | 56 | 57) => Some(GeneratedTarget::new("bsimsoi_va")),
+        Some(107 | 108 | 110 | 111) => Some(GeneratedTarget::new("bsimcmg_va")),
         Some(260) => Some(GeneratedTarget::new("ekv_va")),
         Some(70470) => Some(GeneratedTarget::new("bsimsoi__18c250bc")),
         Some(1000) => Some(GeneratedTarget::with_level_parameter("mosvar")),
@@ -551,7 +552,7 @@ fn append_generated_mos_polarity_param(
 }
 
 fn needs_inferred_generated_mos_type(model_name: &str) -> bool {
-    match_normalized(model_name, &["EKV_VA", "BSIMSOI_VA"])
+    match_normalized(model_name, &["EKV_VA", "BSIMSOI_VA", "BSIMCMG_VA"])
 }
 
 fn append_generated_bjt_polarity_param(

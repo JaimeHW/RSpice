@@ -226,37 +226,65 @@ fn model_binning_param(model_def: &crate::netlist::ModelDef, name: &str) -> Opti
     model_param(&model_def.params, &[name])
 }
 
-fn model_matches_geometry(model_def: &crate::netlist::ModelDef, width: f64, length: f64) -> bool {
+fn model_matches_geometry(
+    model_def: &crate::netlist::ModelDef,
+    instance_params: &[(String, f64)],
+) -> bool {
     let lmin = model_binning_param(model_def, "LMIN");
     let lmax = model_binning_param(model_def, "LMAX");
     let wmin = model_binning_param(model_def, "WMIN");
     let wmax = model_binning_param(model_def, "WMAX");
+    let nfinmin = model_binning_param(model_def, "NFINMIN");
+    let nfinmax = model_binning_param(model_def, "NFINMAX");
 
-    if lmin.is_none() && lmax.is_none() && wmin.is_none() && wmax.is_none() {
+    if lmin.is_none()
+        && lmax.is_none()
+        && wmin.is_none()
+        && wmax.is_none()
+        && nfinmin.is_none()
+        && nfinmax.is_none()
+    {
         return false;
     }
 
-    let within_l = lmin.is_none_or(|min| length >= min) && lmax.is_none_or(|max| length <= max);
-    let within_w = wmin.is_none_or(|min| width >= min) && wmax.is_none_or(|max| width <= max);
-    within_l && within_w
+    let length = instance_param(instance_params, &["L", "LENGTH"]);
+    let width = instance_param(instance_params, &["W", "WIDTH"]);
+    let nfin = instance_param(instance_params, &["NFIN"]);
+
+    bin_range_contains(length, lmin, lmax)
+        && bin_range_contains(width, wmin, wmax)
+        && bin_range_contains(nfin, nfinmin, nfinmax)
+}
+
+fn bin_range_contains(value: Option<f64>, min: Option<f64>, max: Option<f64>) -> bool {
+    if min.is_none() && max.is_none() {
+        return true;
+    }
+    let Some(value) = value else {
+        return false;
+    };
+    min.is_none_or(|min| value >= min) && max.is_none_or(|max| value <= max)
 }
 
 fn model_bin_range_size(model_def: &crate::netlist::ModelDef) -> f64 {
-    let l_range = match (
+    bin_range_size(
         model_binning_param(model_def, "LMIN"),
         model_binning_param(model_def, "LMAX"),
-    ) {
-        (Some(min), Some(max)) => max - min,
-        _ => f64::MAX,
-    };
-    let w_range = match (
+    ) + bin_range_size(
         model_binning_param(model_def, "WMIN"),
         model_binning_param(model_def, "WMAX"),
-    ) {
+    ) + bin_range_size(
+        model_binning_param(model_def, "NFINMIN"),
+        model_binning_param(model_def, "NFINMAX"),
+    )
+}
+
+fn bin_range_size(min: Option<f64>, max: Option<f64>) -> f64 {
+    match (min, max) {
         (Some(min), Some(max)) => max - min,
-        _ => f64::MAX,
-    };
-    l_range + w_range
+        (Some(_), None) | (None, Some(_)) => f64::MAX / 4.0,
+        (None, None) => 0.0,
+    }
 }
 
 pub(super) fn resolve_bjt_type_from_model(model_type: &str) -> Option<crate::netlist::BjtType> {
@@ -360,8 +388,6 @@ pub(super) fn find_binned_model_def<'a>(
         return exact;
     }
 
-    let width = instance_param(instance_params, &["W", "WIDTH"])?;
-    let length = instance_param(instance_params, &["L", "LENGTH"])?;
     let prefix = format!("{model_name}.");
 
     netlist
@@ -370,7 +396,7 @@ pub(super) fn find_binned_model_def<'a>(
         .filter(|model_def| {
             model_def.name.len() > prefix.len()
                 && model_def.name[..prefix.len()].eq_ignore_ascii_case(&prefix)
-                && model_matches_geometry(model_def, width, length)
+                && model_matches_geometry(model_def, instance_params)
         })
         .min_by(|left, right| {
             model_bin_range_size(left)
