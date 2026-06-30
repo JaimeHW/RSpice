@@ -1444,6 +1444,10 @@ pub struct SimulationOptions {
     /// Xyce `.options device zeroresistancetol=...`: resistance threshold
     /// used by topology supernode reduction.
     pub device_zero_resistance_tol: Option<Value>,
+    /// Xyce `.options device b3soigminscaling=...`: when enabled, BSIMSOI3
+    /// receives `GMIN * 1e-6` in its terminal GMIN branches. Xyce enables this
+    /// by default and decks may set it to zero to request the full GMIN.
+    pub b3soi_gmin_scaling: Option<bool>,
 }
 
 impl SimulationOptions {
@@ -1516,6 +1520,9 @@ impl SimulationOptions {
         }
         if other.device_zero_resistance_tol.is_some() {
             self.device_zero_resistance_tol = other.device_zero_resistance_tol;
+        }
+        if other.b3soi_gmin_scaling.is_some() {
+            self.b3soi_gmin_scaling = other.b3soi_gmin_scaling;
         }
     }
 }

@@ -104,6 +104,9 @@ pub struct B3SoiFd {
     base_temp_k: Value,
     /// Model scalars needed inside the load.
     consts: ModelConsts,
+    /// Xyce-style BSIMSOI3 terminal GMIN. FD has no solved body row, so the
+    /// source-side term is stamped as a source reference conductance.
+    eval_gmin: Value,
 
     // Operating point (current iteration).
     op: B3SoiFdOp,
@@ -196,6 +199,7 @@ impl B3SoiFd {
             geometry: geom,
             base_temp_k: temp_k,
             consts,
+            eval_gmin: 0.0,
             op: B3SoiFdOp::default(),
             bias: B3SoiFdBias::default(),
             converged_ref: B3SoiFdBias::default(),
@@ -240,6 +244,18 @@ impl B3SoiFd {
         self.charges_suppressed = debug_mod == -1;
     }
 
+    pub fn set_eval_gmin(&mut self, gmin: Value) {
+        self.eval_gmin = if gmin.is_finite() && gmin > 0.0 {
+            gmin
+        } else {
+            0.0
+        };
+    }
+
+    pub fn eval_gmin(&self) -> Value {
+        self.eval_gmin
+    }
+
     /// Whether `DEBUG=-1` suppresses this device's charge contributions.
     pub fn charges_suppressed(&self) -> bool {
         self.charges_suppressed
@@ -263,6 +279,24 @@ impl B3SoiFd {
     pub fn begin_timestep_iteration(&self) {
         self.force_full_eval.set(true);
         self.bypass_active.set(false);
+    }
+
+    /// Re-linearize directly at the supplied static candidate solution.
+    ///
+    /// Regular Newton updates intentionally use the BSIMSOI temperature limiter.
+    /// Residual and fallback validation probes must evaluate the true
+    /// operating-point equations at the candidate voltage itself.
+    pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {
+        self.converged_ref = self.bias;
+        let bias = self.raw_branch_voltages(voltages);
+        self.bias = bias;
+        self.op = self.eval_op_for_bias(bias);
+        self.has_history = true;
+        self.del_temp_limit_anchor = bias.del_temp;
+        self.limit_anchor_valid.set(true);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(false);
+        self.last_limited.set(false);
     }
 
     /// ngspice bypass predicate (b3soifdld.c:512-560): every branch-voltage
@@ -822,6 +856,9 @@ impl B3SoiFd {
         stamp_rhs(matrix, dp, ceqbd - cdreq);
         stamp_rhs(matrix, sp, cdreq + ceqbs);
 
+        stamp_conductance(matrix, g, dp, self.eval_gmin);
+        stamp(matrix, sp, sp, self.eval_gmin);
+
         // ----- matrix (b3soifdld.c:3197-3245, DC: gc*=0) -----
         // Drain-prime row.
         stamp(matrix, dp, g, gm + gddpg);
@@ -892,6 +929,17 @@ fn stamp_rhs(matrix: &mut impl MatrixStamper, node: NodeId, value: Value) {
     if node != 0 && value != 0.0 {
         matrix.stamp_rhs(node, value);
     }
+}
+
+#[inline]
+fn stamp_conductance(matrix: &mut impl MatrixStamper, a: NodeId, b: NodeId, g: Value) {
+    if g <= 0.0 || a == b {
+        return;
+    }
+    stamp(matrix, a, a, g);
+    stamp(matrix, a, b, -g);
+    stamp(matrix, b, a, -g);
+    stamp(matrix, b, b, g);
 }
 
 #[inline]

@@ -306,6 +306,9 @@ pub struct CircuitData {
     pub(crate) b3soi: B3SoiDds,
     pub(crate) b3soi_fd: B3SoiFds,
     pub(crate) b3soi_pd: B3SoiPds,
+    /// Multiplier applied to the circuit-level device GMIN before it reaches
+    /// BSIMSOI3 terminal-GMIN branches. Xyce defaults this to `1e-6`.
+    pub(crate) b3soi_gmin_scale: Value,
     pub(crate) bsim3v3: Bsim3v3s,
     pub(crate) bsim4v8: Bsim4v8s,
     pub(crate) ekv26s: EkvMosfets,

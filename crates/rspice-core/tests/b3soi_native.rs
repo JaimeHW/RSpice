@@ -1304,6 +1304,7 @@ fn default_pd_geometry() -> B3SoiPdGeometry {
         rth0: 0.0,
         cth0: 0.0,
         nseg: 1.0,
+        frbody: 1.0,
     }
 }
 

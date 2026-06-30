@@ -105,6 +105,9 @@ pub struct B3SoiPd {
     base_temp_k: Value,
     /// Model scalars needed inside the load.
     consts: ModelConsts,
+    /// Xyce-style BSIMSOI3 terminal GMIN used for body-source and gate-drain
+    /// conductance branches.
+    eval_gmin: Value,
 
     // Operating point (current iteration).
     op: B3SoiPdOp,
@@ -216,6 +219,7 @@ impl B3SoiPd {
             geometry: geom,
             base_temp_k: temp_k,
             consts,
+            eval_gmin: 0.0,
             op: B3SoiPdOp::default(),
             bias: B3SoiPdBias::default(),
             converged_ref: B3SoiPdBias::default(),
@@ -267,6 +271,18 @@ impl B3SoiPd {
         self.charges_suppressed = debug_mod == -1;
     }
 
+    pub fn set_eval_gmin(&mut self, gmin: Value) {
+        self.eval_gmin = if gmin.is_finite() && gmin > 0.0 {
+            gmin
+        } else {
+            0.0
+        };
+    }
+
+    pub fn eval_gmin(&self) -> Value {
+        self.eval_gmin
+    }
+
     /// Whether `DEBUG=-1` suppresses this device's charge contributions.
     pub fn charges_suppressed(&self) -> bool {
         self.charges_suppressed
@@ -290,6 +306,28 @@ impl B3SoiPd {
     pub fn begin_timestep_iteration(&self) {
         self.force_full_eval.set(true);
         self.bypass_active.set(false);
+    }
+
+    /// Re-linearize directly at the supplied static candidate solution.
+    ///
+    /// Regular Newton updates intentionally use the BSIMSOI branch/body
+    /// limiters. Residual and fallback validation probes need the compact-model
+    /// equations at the candidate voltage itself so they can measure the true
+    /// operating-point residual.
+    pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {
+        self.converged_ref = self.bias;
+        let bias = self.raw_branch_voltages(voltages);
+        self.bias = bias;
+        self.op = self.eval_op_for_bias(bias);
+        self.has_history = true;
+        self.vbs_limit_anchor = bias.vbs;
+        self.vbd_limit_anchor = bias.vbs - bias.vds;
+        self.del_temp_limit_anchor = bias.del_temp;
+        self.limit_anchor_valid.set(true);
+        self.startup_seed_pending.set(false);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(false);
+        self.last_limited.set(false);
     }
 
     /// ngspice bypass predicate (b3soipdld.c:509-560): every branch-voltage
@@ -721,16 +759,17 @@ impl B3SoiPd {
         check
     }
 
-    /// MODEINITJCT startup bias used by ngspice for an uninitialized B3SOIPD
-    /// operating-point solve with no explicit instance ICs.
-    fn junction_init_bias(&self) -> B3SoiPdBias {
+    /// MODEINITJCT startup bias used by Xyce/ngspice for an uninitialized
+    /// B3SOIPD operating-point solve with no explicit input operating point.
+    ///
+    /// Xyce's normal `initJctFlag` path preserves the source-solved terminal
+    /// drops and only imposes the gate startup value; it does not zero Vbs,
+    /// Vds, Ves, or Vps. That is important for `.NODESET` and DC-sweep
+    /// warm-starts of floating-body devices.
+    fn junction_init_bias(&self, raw: B3SoiPdBias) -> B3SoiPdBias {
         B3SoiPdBias {
-            vbs: 0.0,
             vgs: self.mtype * 0.1 + self.sized.vth0,
-            vds: 0.0,
-            ves: 0.0,
-            vps: 0.0,
-            del_temp: 0.0,
+            ..raw
         }
     }
 
@@ -772,7 +811,7 @@ impl NonlinearDevice for B3SoiPd {
             return;
         }
         if !self.has_history && self.dc_mode.get() {
-            let bias = self.junction_init_bias();
+            let bias = self.junction_init_bias(self.raw_branch_voltages(voltages));
             self.bias = bias;
             self.op = self.eval_op_for_bias(bias);
             self.has_history = true;
@@ -836,9 +875,6 @@ impl NonlinearDevice for B3SoiPd {
         }
         let bias = self.bias;
         let op = self.op.clone();
-        // `cdreq`/`ceq*` must be formed from the same limited bias that produced
-        // `op`; recomputing from the raw node vector bypasses the local
-        // B3SOIPDlimit path that ngspice stamps.
         self.stamp_op(&op, bias, matrix);
     }
 
@@ -865,15 +901,20 @@ impl B3SoiPd {
     /// Faithful transcription of the DC portion of the B3SOIPD matrix/RHS load
     /// (b3soipdld.c:3886-4150) for `bodyMod` 0/2, no temp node, and
     /// `ChargeComputationNeeded == 0` (so all `gc*`/`ceqq*` charge terms vanish).
-    /// `m` (multiplier) is 1. CKTgmin terms are omitted: the RSpice solver adds
-    /// its own diagonal gmin, so replicating ngspice's per-device gmin would
-    /// double-count it.
+    /// `m` (multiplier) is 1. Xyce's BSIMSOI3 terminal-GMIN branches are
+    /// stamped explicitly; they are not equivalent to the solver's nodal
+    /// conditioning shunt.
     ///
     /// In DC the builder supplies `dNodePrime`/`sNodePrime` as this device's
     /// drain/source when fixed series resistance is present; otherwise they
     /// coincide with the external terminals. `bNode` is the body node (internal
     /// floating or external tie), and `tempNode` is absent.
-    fn stamp_op(&self, op: &B3SoiPdOp, bias: B3SoiPdBias, matrix: &mut impl MatrixStamper) {
+    fn stamp_op(
+        &self,
+        op: &B3SoiPdOp,
+        bias: B3SoiPdBias,
+        matrix: &mut impl MatrixStamper,
+    ) {
         let (dp, g, sp, e, b) = (
             self.node_drain,
             self.node_gate,
@@ -905,8 +946,8 @@ impl B3SoiPd {
                     - op.gds * bias.vds
                     - gm * bias.vgs
                     - gmbs * bias.vbs
-                    - gme * bias.ves)
-                - gm_t * bias.del_temp;
+                    - gme * bias.ves
+                    - gm_t * bias.del_temp);
             ceqbs = op.cjs - op.gjs_t * bias.del_temp;
             ceqbd = op.cjd - op.gjd_t * bias.del_temp;
 
@@ -945,8 +986,8 @@ impl B3SoiPd {
                     + op.gds * bias.vds
                     + gm * vgd
                     + gmbs * vbd
-                    + gme * (bias.ves - bias.vds))
-                + gm_t * bias.del_temp;
+                    + gme * (bias.ves - bias.vds)
+                    + gm_t * bias.del_temp);
             ceqbs = op.cjd - op.gjd_t * bias.del_temp;
             ceqbd = op.cjs - op.gjs_t * bias.del_temp;
 
@@ -988,6 +1029,9 @@ impl B3SoiPd {
         stamp_rhs(matrix, dp, ceqbd - cdreq);
         stamp_rhs(matrix, sp, cdreq + ceqbs);
         self.stamp_thermal_rhs(op, matrix);
+
+        stamp_conductance(matrix, b, sp, self.eval_gmin);
+        stamp_conductance(matrix, g, dp, self.eval_gmin);
 
         // ----- matrix (b3soipdld.c:4090-4128, DC: gc*=0) -----
         // E row: only EePtr (gceeb==0) -> nothing in DC.
@@ -1087,6 +1131,17 @@ fn stamp_rhs(matrix: &mut impl MatrixStamper, node: NodeId, value: Value) {
     if node != 0 && value != 0.0 {
         matrix.stamp_rhs(node, value);
     }
+}
+
+#[inline]
+fn stamp_conductance(matrix: &mut impl MatrixStamper, a: NodeId, b: NodeId, g: Value) {
+    if g <= 0.0 || a == b {
+        return;
+    }
+    stamp(matrix, a, a, g);
+    stamp(matrix, a, b, -g);
+    stamp(matrix, b, a, -g);
+    stamp(matrix, b, b, g);
 }
 
 #[cfg(test)]

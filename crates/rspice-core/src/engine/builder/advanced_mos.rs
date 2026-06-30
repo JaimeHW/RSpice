@@ -355,6 +355,7 @@ impl Engine {
                 .or_else(|| params_map.get("CTH0").copied())
                 .unwrap_or(0.0),
             nseg: instance_param(instance_params, &["NSEG"]).unwrap_or(1.0),
+            frbody: instance_param(instance_params, &["FRBODY"]).unwrap_or(1.0),
         };
 
         // B3SOIPD creates drain/source prime nodes when RSH and NRD/NRS are

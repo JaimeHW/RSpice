@@ -168,7 +168,8 @@ impl Engine {
         // merit-based step shrinking livelocks turn-on (the raw residual
         // transiently rises along the convergent direction). The +/-1kV node
         // containment below stays active regardless.
-        let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit);
+        let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit)
+            || self.b3soi_limiter_owns_global_damping(circuit);
         // Use 10x more iterations for DC nonlinear since damping limits voltage change per step
         // With MAX_DELTA_V=2V and standard max_iterations=50, we can only move 100V
         // Need 500+ iterations to traverse the full +/-1000V range if starting from a poor guess
@@ -700,7 +701,8 @@ impl Engine {
             circuit.requires_conservative_solution_damping();
         let mut rhs = vec![0.0; size];
         let mut damping_state = NewtonDampingState::default();
-        let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit);
+        let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit)
+            || self.b3soi_limiter_owns_global_damping(circuit);
         // ngspice floors every NIiter call to 100 iterations (ITL1); the
         // per-iterate junction walk of pnjlim devices legitimately needs
         // tens of iterations on deep TTL chains before the residual settles.

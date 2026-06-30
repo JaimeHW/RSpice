@@ -13,6 +13,15 @@ use crate::{CircuitData, Netlist, Value};
 
 const DC_SWEEP_CONTINUATION_MAX_SUBDIVISIONS: usize = 128;
 
+/// One accepted point from a DC sweep, including the solved node/branch result
+/// and the per-device operating-point report cached at that bias.
+#[derive(Debug, Clone)]
+pub struct DcSweepPointResult {
+    pub sweep_value: Value,
+    pub result: SimulationResult,
+    pub device_op_report: crate::circuit::DeviceOpReport,
+}
+
 enum DcSweepSource {
     Voltage {
         index: usize,
@@ -233,8 +242,43 @@ impl Engine {
         sweep2: Option<&crate::netlist::DcSecondSweep>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+        self.run_dc_sweep2_with_report_and_abort(
+            netlist,
+            source_name,
+            start,
+            stop,
+            step,
+            sweep2,
+            abort,
+        )
+        .map(|points| {
+            points
+                .into_iter()
+                .map(|point| (point.sweep_value, point.result))
+                .collect()
+        })
+    }
+
+    /// Two-source DC sweep that preserves per-point device operating reports.
+    pub fn run_dc_sweep2_with_report_and_abort(
+        &self,
+        netlist: &Netlist,
+        source_name: &str,
+        start: Value,
+        stop: Value,
+        step: Value,
+        sweep2: Option<&crate::netlist::DcSecondSweep>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
         let Some(sweep2) = sweep2 else {
-            return self.run_dc_sweep_with_abort(netlist, source_name, start, stop, step, abort);
+            return self.run_dc_sweep_with_report_and_abort(
+                netlist,
+                source_name,
+                start,
+                stop,
+                step,
+                abort,
+            );
         };
 
         use crate::analysis::DcSweep;
@@ -267,8 +311,14 @@ impl Engine {
             } else {
                 Self::override_independent_source_dc(&mut swept, &sweep2.source, outer_value)?;
             }
-            let inner =
-                self.run_dc_sweep_with_abort(&swept, source_name, start, stop, step, abort)?;
+            let inner = self.run_dc_sweep_with_report_and_abort(
+                &swept,
+                source_name,
+                start,
+                stop,
+                step,
+                abort,
+            )?;
             results.extend(inner);
         }
         Ok(results)
@@ -310,6 +360,26 @@ impl Engine {
         step: Value,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+        self.run_dc_sweep_with_report_and_abort(netlist, source_name, start, stop, step, abort)
+            .map(|points| {
+                points
+                    .into_iter()
+                    .map(|point| (point.sweep_value, point.result))
+                    .collect()
+            })
+    }
+
+    /// Run a DC sweep and return per-point device operating reports alongside
+    /// the solved node/branch vectors.
+    pub fn run_dc_sweep_with_report_and_abort(
+        &self,
+        netlist: &Netlist,
+        source_name: &str,
+        start: Value,
+        stop: Value,
+        step: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
         use crate::analysis::DcSweep;
 
         let engine = self.resolved_for_netlist(netlist);
@@ -332,7 +402,12 @@ impl Engine {
                 swept.options.temp = Some(sweep_value);
                 swept.params.set("TEMP", sweep_value);
                 swept.params.set("TEMPER", sweep_value);
-                results.push((sweep_value, self.run_dc_op(&swept)?));
+                let (result, device_op_report) = self.run_dc_op_with_report(&swept)?;
+                results.push(DcSweepPointResult {
+                    sweep_value,
+                    result,
+                    device_op_report,
+                });
             }
             return Ok(results);
         }
@@ -343,7 +418,11 @@ impl Engine {
         if circuit.num_nodes() == 0 {
             return Ok(sweep_points
                 .into_iter()
-                .map(|value| (value, Self::build_empty_dc_result()))
+                .map(|value| DcSweepPointResult {
+                    sweep_value: value,
+                    result: Self::build_empty_dc_result(),
+                    device_op_report: crate::circuit::DeviceOpReport::default(),
+                })
                 .collect());
         }
 
@@ -389,7 +468,7 @@ impl Engine {
 
         let node_hints = self.collect_node_voltage_hints(netlist, &circuit);
 
-        let sweep_result = (|| -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+        let sweep_result = (|| -> Result<Vec<DcSweepPointResult>, SimulationError> {
             let mut results = Vec::with_capacity(sweep_points.len());
 
             // Use previous solution as initial guess for next point.
@@ -512,7 +591,11 @@ impl Engine {
                     }
                 }
 
-                results.push((sweep_value, result));
+                results.push(DcSweepPointResult {
+                    sweep_value,
+                    result,
+                    device_op_report: circuit.device_op_report(),
+                });
                 prev_solution = Some(solution);
                 prev_sweep_value = Some(sweep_value);
             }

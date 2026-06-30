@@ -56,6 +56,7 @@ pub use config_resolver::{
     ConvergencePreset, SimulationConfigOverrides, resolve_simulation_config,
 };
 pub use core::Engine;
+pub use dc::DcSweepPointResult;
 pub use error::SimulationError;
 pub use hb::{HbAnalysisResult, PacAnalysisResult, PnoiseAnalysisResult};
 pub use pss::{PssAnalysisResult, PssError};

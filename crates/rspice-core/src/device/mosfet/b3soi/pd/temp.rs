@@ -249,6 +249,7 @@ pub struct B3SoiPdGeometry {
     pub rth0: Value,
     pub cth0: Value,
     pub nseg: Value,
+    pub frbody: Value,
 }
 
 impl B3SoiPdSized {
@@ -485,7 +486,12 @@ impl B3SoiPdSized {
         let thermal_width = (p.weff + m.wth0).max(1.0e-30);
         p.rth = geom.rth0 / thermal_width * nseg;
         p.cth = geom.cth0 * thermal_width / nseg;
-        p.rbody = m.rbody * p.weff / p.leff;
+        let rbody_denom = 2.0 * m.rbody + m.rhalo * p.leff;
+        p.rbody = if rbody_denom != 0.0 {
+            geom.frbody * m.rbody * m.rhalo / rbody_denom * p.weff / nseg
+        } else {
+            0.0
+        };
         p.ua += p.ua1 * t0;
         p.ub += p.ub1 * t0;
         p.uc += p.uc1 * t0;

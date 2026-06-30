@@ -565,6 +565,10 @@ pub(super) fn parse_options_command(
                     line_num,
                 )?);
             }
+            (Some("DEVICE"), "B3SOIGMINSCALING" | "B3SOI_GMIN_SCALING") => {
+                options.b3soi_gmin_scaling =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
             (None, "TOPOLOGY_SUPERNODE" | "TOPOLOGYSUPERNODE") => {
                 options.topology_supernode =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
@@ -582,6 +586,13 @@ pub(super) fn parse_options_command(
                     value,
                     line_num,
                 )?);
+            }
+            (
+                None,
+                "B3SOIGMINSCALING" | "B3SOI_GMIN_SCALING" | "DEVICE_B3SOIGMINSCALING",
+            ) => {
+                options.b3soi_gmin_scaling =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
             (_, "RELTOL") => {
                 let value = expect_value(stream, line_num, params)?;

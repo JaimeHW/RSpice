@@ -65,6 +65,9 @@ pub struct SimulationConfig {
     pub spice_dialect: SpiceDialect,
     /// Internal evaluator used for `NJF`/`PJF LEVEL=2`.
     pub jfet_level2_model: JfetLevel2Model,
+    /// Xyce BSIMSOI3 terminal-GMIN policy. When true, B3SOI devices receive
+    /// `GMIN * 1e-6`; when false, they receive the full device GMIN.
+    pub b3soi_gmin_scaling: bool,
     /// Transient truncation tolerance factor for charge-state timestep control.
     pub transient_trtol: Value,
     /// Largest nonlinear-device terminal-voltage change allowed per accepted
@@ -308,6 +311,7 @@ impl Default for SimulationConfig {
             integration_method: crate::analysis::IntegrationMethod::TrapGear,
             spice_dialect: SpiceDialect::BestAvailable,
             jfet_level2_model: JfetLevel2Model::DialectDefault,
+            b3soi_gmin_scaling: true,
             transient_trtol: crate::constants::TRTOL,
             transient_node_activity_bound: crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
             bypass_config: BypassConfig::default(),

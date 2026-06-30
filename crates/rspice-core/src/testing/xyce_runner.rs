@@ -10,7 +10,8 @@
 use crate::abort_signal::AbortSignal;
 use crate::analysis::DcSweep;
 use crate::engine::{
-    ConvergenceConfig, SimulationConfig, SimulationError, SpiceDialect, extract_dc_value,
+    ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
+    extract_dc_value,
 };
 use crate::netlist::{AnalysisCommand, DcSecondSweep, ElementKind, Netlist};
 use crate::{Engine, Value};
@@ -604,7 +605,7 @@ impl XyceTestRunner {
 
         let engine = self.create_dc_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let results = match engine.run_dc_sweep2_with_abort(
+        let results = match engine.run_dc_sweep2_with_report_and_abort(
             &netlist,
             &plan.dc.source,
             plan.dc.start,
@@ -785,49 +786,49 @@ impl XyceTestRunner {
                     );
                 }
             };
-            let target_run = self.run_static_dc_results(&target_plan, start);
-            let (target_netlist, target_results) = match target_run {
-                Ok(results) => results,
-                Err(SimulationError::Aborted) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        "subckt_family_wrapper",
-                        format!(
-                            "SUBCKT family '{}' member {} exceeded timeout ({}ms)",
-                            contract.family,
-                            self.display_path(&target_path),
-                            self.config.max_time_per_test_ms
-                        ),
-                        Vec::new(),
-                    );
-                }
-                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
-                    return self.expected_unsupported_result(
-                        deck,
-                        start,
-                        "subckt_family_wrapper",
-                        &format!(
-                            "SUBCKT family '{}' member {} is not supported by RSpice yet: {err}",
-                            contract.family,
-                            self.display_path(&target_path)
-                        ),
-                    );
-                }
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        "subckt_family_wrapper",
-                        format!(
-                            "SUBCKT family '{}' member {} error: {err}",
-                            contract.family,
-                            self.display_path(&target_path)
-                        ),
-                        Vec::new(),
-                    );
-                }
-            };
+            let (target_netlist, target_results) =
+                match self.run_static_dc_results(&target_plan, start) {
+                    Ok(results) => results,
+                    Err(SimulationError::Aborted) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            "subckt_family_wrapper",
+                            format!(
+                                "SUBCKT family '{}' member {} exceeded timeout ({}ms)",
+                                contract.family,
+                                self.display_path(&target_path),
+                                self.config.max_time_per_test_ms
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                    Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                        return self.expected_unsupported_result(
+                            deck,
+                            start,
+                            "subckt_family_wrapper",
+                            &format!(
+                                "SUBCKT family '{}' member {} is not supported by RSpice yet: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                        );
+                    }
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            "subckt_family_wrapper",
+                            format!(
+                                "SUBCKT family '{}' member {} error: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
 
             let mut mismatches = match self.compare_dc_prn_reference(
                 &baseline_table,
@@ -883,12 +884,12 @@ impl XyceTestRunner {
         &self,
         plan: &XyceStaticDcPlan,
         start: Instant,
-    ) -> Result<(Netlist, Vec<(Value, crate::SimulationResult)>), SimulationError> {
+    ) -> Result<(Netlist, Vec<DcSweepPointResult>), SimulationError> {
         let netlist = Netlist::parse_with_path(&plan.source, &plan.deck_path)
             .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
         let engine = self.create_dc_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let results = engine.run_dc_sweep2_with_abort(
+        let results = engine.run_dc_sweep2_with_report_and_abort(
             &netlist,
             &plan.dc.source,
             plan.dc.start,
@@ -904,7 +905,7 @@ impl XyceTestRunner {
         &self,
         plan: &XyceStaticDcPlan,
         netlist: &Netlist,
-        results: &[(Value, crate::SimulationResult)],
+        results: &[DcSweepPointResult],
     ) -> Result<XycePrnTable, String> {
         let mut columns = Vec::with_capacity(plan.print.probes.len() + 1);
         columns.push("Index".to_string());
@@ -928,9 +929,9 @@ impl XyceTestRunner {
         }
 
         let mut rows = Vec::with_capacity(results.len());
-        for (row_index, (_sweep_value, result)) in results.iter().enumerate() {
+        for (row_index, point) in results.iter().enumerate() {
             let sweep_point = XyceDcSweepPoint {
-                primary: results[row_index].0,
+                primary: point.sweep_value,
                 secondary: if let Some(points) = secondary_points.as_ref() {
                     let outer_index = row_index / primary_points.len();
                     Some(*points.get(outer_index).ok_or_else(|| {
@@ -952,7 +953,8 @@ impl XyceTestRunner {
                     netlist,
                     &plan.dc,
                     sweep_point,
-                    result,
+                    &point.result,
+                    &point.device_op_report,
                 )?);
             }
             rows.push(row);
@@ -980,7 +982,7 @@ impl XyceTestRunner {
         netlist: &Netlist,
         source: &str,
         dc: &XyceDcSweep,
-        results: &[(Value, crate::SimulationResult)],
+        results: &[DcSweepPointResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
         if reference.columns.is_empty() {
             return Err("reference table has no columns".to_string());
@@ -1036,7 +1038,7 @@ impl XyceTestRunner {
             }
 
             let sweep_point = XyceDcSweepPoint {
-                primary: results[row_index].0,
+                primary: results[row_index].sweep_value,
                 secondary: if let Some(points) = secondary_points.as_ref() {
                     let outer_index = row_index / primary_points.len();
                     Some(*points.get(outer_index).ok_or_else(|| {
@@ -1062,7 +1064,8 @@ impl XyceTestRunner {
                             netlist,
                             dc,
                             sweep_point,
-                            &results[row_index].1,
+                            &results[row_index].result,
+                            &results[row_index].device_op_report,
                         )?,
                     ),
                 };
@@ -1384,10 +1387,41 @@ impl XyceTestRunner {
 
     fn validate_dc_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
         let normalized = Self::normalize_probe(probe);
+        if let Some(expression) = Self::print_expression_inner(&normalized)
+            && Self::print_expression_contains_probe_call(expression)
+        {
+            return Self::validate_dc_probe_expression(expression, netlist);
+        }
+
+        Self::validate_atomic_dc_probe(&normalized, probe, netlist)
+    }
+
+    fn validate_atomic_dc_probe(
+        normalized: &str,
+        original: &str,
+        netlist: &Netlist,
+    ) -> Result<(), String> {
         if let Some((node_pos, node_neg)) = Self::parse_voltage_probe(&normalized) {
             if !node_pos.is_empty() && node_neg.as_deref().is_none_or(|node| !node.is_empty()) {
                 return Ok(());
             }
+        }
+        if let Some((element_name, parameter)) =
+            Self::parse_device_operating_point_probe(normalized)
+        {
+            if !Self::netlist_has_device_op_instance(netlist, &element_name) {
+                return Err(format!(
+                    "device operating-point probe '{}' targets an unknown reported device",
+                    original
+                ));
+            }
+            if Self::canonical_device_op_parameter(&parameter).is_some() {
+                return Ok(());
+            }
+            return Err(format!(
+                "device operating-point probe '{}' targets an unsupported operating-point parameter",
+                original
+            ));
         }
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(&normalized) {
             match parameter.as_str() {
@@ -1407,7 +1441,7 @@ impl XyceTestRunner {
             }
             return Err(format!(
                 "device parameter probe '{}' targets an unsupported parameter",
-                probe
+                original
             ));
         }
         if let Some(parameter_name) = Self::parse_scalar_parameter_probe(&normalized)
@@ -1425,15 +1459,15 @@ impl XyceTestRunner {
                 }
                 return Err(format!(
                     "current probe '{}' targets a zero/near-zero resistor not implemented by the first Xyce adapter",
-                    probe
+                    original
                 ));
             }
             return Err(format!(
                 "current probe '{}' targets an unsupported branch/device",
-                probe
+                original
             ));
         }
-        Err(format!("unsupported .PRINT DC probe '{}'", probe))
+        Err(format!("unsupported .PRINT DC probe '{}'", original))
     }
 
     fn evaluate_dc_probe(
@@ -1442,8 +1476,33 @@ impl XyceTestRunner {
         dc: &XyceDcSweep,
         sweep_point: XyceDcSweepPoint,
         result: &crate::SimulationResult,
+        op_report: &crate::circuit::DeviceOpReport,
     ) -> Result<f64, String> {
         let normalized = Self::normalize_probe(probe);
+        if let Some(expression) = Self::print_expression_inner(&normalized)
+            && Self::print_expression_contains_probe_call(expression)
+        {
+            return Self::evaluate_dc_probe_expression(
+                expression,
+                netlist,
+                dc,
+                sweep_point,
+                result,
+                op_report,
+            );
+        }
+
+        Self::evaluate_atomic_dc_probe(&normalized, netlist, dc, sweep_point, result, op_report)
+    }
+
+    fn evaluate_atomic_dc_probe(
+        normalized: &str,
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        result: &crate::SimulationResult,
+        op_report: &crate::circuit::DeviceOpReport,
+    ) -> Result<f64, String> {
         if let Some((node_pos, node_neg)) = Self::parse_voltage_probe(&normalized) {
             let pos = result
                 .try_voltage_named(&node_pos)
@@ -1455,6 +1514,16 @@ impl XyceTestRunner {
                 None => 0.0,
             };
             return Ok(pos - neg);
+        }
+
+        if let Some((element_name, parameter)) =
+            Self::parse_device_operating_point_probe(normalized)
+        {
+            return Self::evaluate_device_operating_point_probe(
+                op_report,
+                &element_name,
+                &parameter,
+            );
         }
 
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(&normalized) {
@@ -1485,7 +1554,162 @@ impl XyceTestRunner {
             }
         }
 
-        Err(format!("unsupported DC probe '{}'", probe))
+        Err(format!("unsupported DC probe '{}'", normalized))
+    }
+
+    fn validate_dc_probe_expression(expression: &str, netlist: &Netlist) -> Result<(), String> {
+        let (rewritten, context) =
+            Self::rewrite_print_expression_calls(expression, netlist.params.clone(), |call| {
+                let normalized = Self::normalize_probe(call);
+                Self::validate_atomic_dc_probe(&normalized, call, netlist)?;
+                Ok(1.0)
+            })?;
+        crate::netlist::expr::eval_expression(&rewritten, &context)
+            .map_err(|err| format!("unsupported .PRINT DC expression '{{{expression}}}': {err}"))?;
+        Ok(())
+    }
+
+    fn evaluate_dc_probe_expression(
+        expression: &str,
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        result: &crate::SimulationResult,
+        op_report: &crate::circuit::DeviceOpReport,
+    ) -> Result<f64, String> {
+        let (rewritten, context) =
+            Self::rewrite_print_expression_calls(expression, netlist.params.clone(), |call| {
+                let normalized = Self::normalize_probe(call);
+                Self::evaluate_atomic_dc_probe(
+                    &normalized,
+                    netlist,
+                    dc,
+                    sweep_point,
+                    result,
+                    op_report,
+                )
+            })?;
+        crate::netlist::expr::eval_expression(&rewritten, &context).map_err(|err| {
+            format!("failed to evaluate .PRINT DC expression '{{{expression}}}': {err}")
+        })
+    }
+
+    fn rewrite_print_expression_calls<F>(
+        expression: &str,
+        mut context: crate::netlist::ParamContext,
+        mut call_value: F,
+    ) -> Result<(String, crate::netlist::ParamContext), String>
+    where
+        F: FnMut(&str) -> Result<Value, String>,
+    {
+        let mut rewritten = String::with_capacity(expression.len());
+        let mut index = 0usize;
+        let mut placeholder_index = 0usize;
+
+        while index < expression.len() {
+            if Self::print_probe_call_starts_at(expression, index) {
+                let open_index = index + 1;
+                let close_index = Self::matching_parenthesis_index(expression, open_index)?;
+                let call = &expression[index..=close_index];
+                let placeholder = format!("__rspice_probe_{placeholder_index}");
+                let value = call_value(call)?;
+                context.set(&placeholder, value);
+                rewritten.push_str(&placeholder);
+                placeholder_index += 1;
+                index = close_index + 1;
+                continue;
+            }
+
+            let ch = expression[index..]
+                .chars()
+                .next()
+                .expect("valid char boundary");
+            match ch {
+                '{' => rewritten.push('('),
+                '}' => rewritten.push(')'),
+                _ => rewritten.push(ch),
+            }
+            index += ch.len_utf8();
+        }
+
+        if placeholder_index == 0 {
+            return Err(format!(
+                ".PRINT DC expression '{{{expression}}}' does not contain a supported V(), I(), or N() probe"
+            ));
+        }
+
+        Ok((rewritten, context))
+    }
+
+    fn print_expression_inner(probe: &str) -> Option<&str> {
+        let trimmed = probe.trim();
+        trimmed
+            .strip_prefix('{')
+            .and_then(|value| value.strip_suffix('}'))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
+    fn print_expression_contains_probe_call(expression: &str) -> bool {
+        let mut index = 0usize;
+        while index < expression.len() {
+            if Self::print_probe_call_starts_at(expression, index) {
+                return true;
+            }
+            let ch = expression[index..]
+                .chars()
+                .next()
+                .expect("valid char boundary");
+            index += ch.len_utf8();
+        }
+        false
+    }
+
+    fn print_probe_call_starts_at(expression: &str, index: usize) -> bool {
+        if index >= expression.len() || !expression.is_char_boundary(index) {
+            return false;
+        }
+        let mut chars = expression[index..].chars();
+        let Some(ch @ ('v' | 'i' | 'n')) = chars.next() else {
+            return false;
+        };
+        let next_index = index + ch.len_utf8();
+        if !expression[next_index..].starts_with('(') {
+            return false;
+        }
+        let previous = expression[..index].chars().next_back();
+        previous.is_none_or(|value| !Self::print_identifier_char(value))
+    }
+
+    fn print_identifier_char(ch: char) -> bool {
+        ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '$')
+    }
+
+    fn matching_parenthesis_index(expression: &str, open_index: usize) -> Result<usize, String> {
+        if !expression[open_index..].starts_with('(') {
+            return Err(format!(
+                "internal error: expected '(' in .PRINT expression '{expression}'"
+            ));
+        }
+
+        let mut depth = 0usize;
+        for (relative_index, ch) in expression[open_index..].char_indices() {
+            let absolute_index = open_index + relative_index;
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Ok(absolute_index);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Err(format!(
+            "unterminated probe call in .PRINT expression '{{{expression}}}'"
+        ))
     }
 
     fn evaluate_device_parameter_probe(
@@ -1528,6 +1752,138 @@ impl XyceTestRunner {
                 element_name, parameter
             )),
         }
+    }
+
+    fn evaluate_device_operating_point_probe(
+        op_report: &crate::circuit::DeviceOpReport,
+        element_name: &str,
+        parameter: &str,
+    ) -> Result<f64, String> {
+        let canonical_parameter =
+            Self::canonical_device_op_parameter(parameter).ok_or_else(|| {
+                format!(
+                    "device operating-point probe 'N({element_name}:{parameter})' targets an unsupported operating-point parameter"
+                )
+            })?;
+
+        for entry in &op_report.entries {
+            if !Self::device_instance_names_match(&entry.name, element_name) {
+                continue;
+            }
+            if let Some(value) = Self::xyce_device_operating_point_value(entry, canonical_parameter)
+            {
+                return Ok(value);
+            }
+            return Err(format!(
+                "device operating-point probe 'N({element_name}:{parameter})' targets parameter '{}' that is not reported for {} '{}'",
+                canonical_parameter, entry.device_kind, entry.name
+            ));
+        }
+
+        Err(format!(
+            "device operating-point probe 'N({element_name}:{parameter})' targets a device with no operating-point report"
+        ))
+    }
+
+    fn xyce_device_operating_point_value(
+        entry: &crate::circuit::DeviceOpEntry,
+        parameter: &str,
+    ) -> Option<Value> {
+        if matches!(entry.device_kind, "BSIM3" | "BSIM4") {
+            return Self::xyce_bsim_device_store_value(entry, parameter);
+        }
+
+        Self::device_op_entry_param(entry, parameter)
+    }
+
+    fn xyce_bsim_device_store_value(
+        entry: &crate::circuit::DeviceOpEntry,
+        parameter: &str,
+    ) -> Option<Value> {
+        let raw = if parameter == "vdsat" && entry.device_kind == "BSIM4" {
+            Self::device_op_entry_param(entry, "output_vdsat")
+                .or_else(|| Self::device_op_entry_param(entry, parameter))?
+        } else {
+            Self::device_op_entry_param(entry, parameter)?
+        };
+        let vds = Self::device_op_entry_param(entry, "vds").unwrap_or(0.0);
+        if vds >= 0.0 {
+            return Some(raw);
+        }
+
+        match parameter {
+            // Xyce stores BSIM3/BSIM4 gm after the same inverse-mode sign
+            // swap it applies to the MNA stamp.
+            "gm" => Some(-raw),
+            // Xyce's Vds/Vgs/Vbs store nodes are the mode-frame branch
+            // voltages: Vds, Vgs, Vbs in normal mode; -Vds, Vgd, Vbd in
+            // inverse mode.
+            "vds" => Some(-vds),
+            "vgs" => Some(raw - vds),
+            "vbs" => Some(raw - vds),
+            _ => Some(raw),
+        }
+    }
+
+    fn device_op_entry_param(
+        entry: &crate::circuit::DeviceOpEntry,
+        parameter: &str,
+    ) -> Option<Value> {
+        entry
+            .params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(parameter))
+            .map(|(_, value)| *value)
+    }
+
+    fn canonical_device_op_parameter(parameter: &str) -> Option<&'static str> {
+        match parameter.trim().to_ascii_lowercase().as_str() {
+            "id" | "ids" => Some("id"),
+            "vgs" => Some("vgs"),
+            "vds" => Some("vds"),
+            "vbs" => Some("vbs"),
+            "vth" | "vto" => Some("vth"),
+            "vdsat" | "vdssat" => Some("vdsat"),
+            "gm" => Some("gm"),
+            "gds" => Some("gds"),
+            "gmb" | "gmbs" => Some("gmb"),
+            _ => None,
+        }
+    }
+
+    fn netlist_has_device_op_instance(netlist: &Netlist, instance_name: &str) -> bool {
+        if netlist.elements.iter().any(|element| {
+            Self::netlist_element_exports_device_op(element)
+                && Self::device_instance_names_match(&element.name, instance_name)
+        }) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            flattened.elements.iter().any(|element| {
+                Self::netlist_element_exports_device_op(element)
+                    && Self::device_instance_names_match(&element.name, instance_name)
+            })
+        })
+    }
+
+    fn netlist_element_exports_device_op(element: &crate::netlist::Element) -> bool {
+        matches!(
+            element.kind,
+            ElementKind::Diode { .. }
+                | ElementKind::Bjt { .. }
+                | ElementKind::Mosfet { .. }
+                | ElementKind::Jfet { .. }
+                | ElementKind::Mesfet { .. }
+        )
+    }
+
+    fn device_instance_names_match(lhs: &str, rhs: &str) -> bool {
+        Self::normalize_device_instance_name(lhs) == Self::normalize_device_instance_name(rhs)
+    }
+
+    fn normalize_device_instance_name(name: &str) -> String {
+        Self::normalize_probe(name).replace(':', ".")
     }
 
     fn evaluate_scalar_parameter_probe(
@@ -2183,6 +2539,19 @@ impl XyceTestRunner {
         }
         let inner = &normalized[2..normalized.len() - 1];
         (!inner.is_empty()).then(|| inner.to_string())
+    }
+
+    fn parse_device_operating_point_probe(probe: &str) -> Option<(String, String)> {
+        let normalized = Self::normalize_probe(probe);
+        if !normalized.starts_with("n(") || !normalized.ends_with(')') {
+            return None;
+        }
+        let inner = &normalized[2..normalized.len() - 1];
+        let (element, parameter) = inner.rsplit_once(':')?;
+        if element.is_empty() || parameter.is_empty() {
+            return None;
+        }
+        Some((element.to_string(), parameter.to_string()))
     }
 
     fn parse_device_parameter_probe(probe: &str) -> Option<(String, String)> {

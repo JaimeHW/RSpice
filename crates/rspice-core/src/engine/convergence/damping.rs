@@ -177,12 +177,13 @@ impl Engine {
     }
 
     /// Whether per-device iterate-replacement junction limiting governs the
-    /// Newton step for this circuit. Legacy Gummel-Poon BJTs run ngspice's
-    /// bjtload.c pnjlim discipline inside `update`: the full node step is
-    /// the algorithm and the per-iterate junction replacement is the
-    /// globalization. Merit-based step shrinking livelocks junction turn-on
-    /// for these devices because the raw nonlinear residual transiently
-    /// rises along the convergent direction.
+    /// Newton step for this circuit. These compact models run SPICE/Xyce-style
+    /// voltage limiting inside their `update` path: the full node step is the
+    /// algorithm and the per-iterate branch replacement is the globalization.
+    /// B3SOI also has a local branch/body limiter, but it still benefits from
+    /// the engine's voltage damping in ordinary operating-point solves. Those
+    /// callers use a progress-forcing line-search policy instead of this raw
+    /// full-step bypass.
     pub(in crate::engine) fn junction_limiting_owns_newton_steps(circuit: &CircuitData) -> bool {
         circuit
             .bjts
@@ -194,6 +195,17 @@ impl Engine {
                 .devices
                 .iter()
                 .any(|vdmos| vdmos.xyce_level18)
+    }
+
+    pub(in crate::engine) fn b3soi_limiter_owns_global_damping(
+        &self,
+        circuit: &CircuitData,
+    ) -> bool {
+        circuit.has_b3soi_devices()
+            && matches!(
+                self.config.convergence_config.damping_strategy,
+                DampingStrategy::LineSearch | DampingStrategy::Combined
+            )
     }
 
     pub(in crate::engine::convergence) fn apply_damping_strategy_with_junction_ownership<F>(

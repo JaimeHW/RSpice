@@ -321,6 +321,51 @@ fn test_xyce_subckt_wrapper_family_members_run_natively() {
 }
 
 #[test]
+fn test_xyce_bsim_gm_device_operating_point_probes_run() {
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/BSIM3_GM/nmosGm1.cir",
+        "Netlists/BSIM3_GM/nmosGm1_rev.cir",
+        "Netlists/BSIM3_GM/pmosGm1.cir",
+        "Netlists/BSIM3_GM/pmosGm1_rev.cir",
+        "Netlists/BSIM4_GM/nmosGm1.cir",
+        "Netlists/BSIM4_GM/nmosGm1_rev.cir",
+        "Netlists/BSIM4_GM/pmosGm1.cir",
+        "Netlists/BSIM4_GM/pmosGm1_rev.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a numeric Xyce device operating-point comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_bsimsoi3_gmin_scaling_dc_sweep_runs() {
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/BSIMSOI3/dcSweepNoGminScaling.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a numeric Xyce BSIMSOI3 GMIN comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+}
+
+#[test]
 fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());

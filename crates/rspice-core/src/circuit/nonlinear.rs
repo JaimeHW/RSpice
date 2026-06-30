@@ -251,6 +251,19 @@ impl CircuitData {
         for dev in &mut self.bsim4v8.devices {
             dev.set_eval_gmin(gmin);
         }
+        // Xyce BSIMSOI3 carries CKTgmin as two terminal conductances
+        // (body-source and gate-drain). Its device option scales that GMIN by
+        // 1e-6 by default, but decks can disable the scaling.
+        let b3soi_gmin = gmin * self.b3soi_gmin_scale.max(0.0);
+        for dev in &mut self.b3soi.devices {
+            dev.set_eval_gmin(b3soi_gmin);
+        }
+        for dev in &mut self.b3soi_fd.devices {
+            dev.set_eval_gmin(b3soi_gmin);
+        }
+        for dev in &mut self.b3soi_pd.devices {
+            dev.set_eval_gmin(b3soi_gmin);
+        }
         for dev in &mut self.ekv26s.devices {
             dev.set_eval_gmin(gmin);
         }
@@ -405,6 +418,24 @@ impl CircuitData {
             if uses_hfet_legacy_inverse && jfet.internal_vds_limited_state() < 0.0 {
                 hfet_inverse_latched = true;
             }
+        }
+    }
+
+    /// Re-linearize BSIMSOI devices directly at a static probe solution.
+    ///
+    /// Normal nonlinear updates intentionally apply BSIMSOI branch/body
+    /// limiters to protect Newton iterations. Residual and fallback validation
+    /// probes must evaluate the compact-model equations at the candidate
+    /// voltage itself so false limiter-history roots are rejected.
+    pub(crate) fn update_b3soi_static_linearizations(&mut self, voltages: &[Value]) {
+        for dev in &mut self.b3soi.devices {
+            dev.update_static_linearization(voltages);
+        }
+        for dev in &mut self.b3soi_fd.devices {
+            dev.update_static_linearization(voltages);
+        }
+        for dev in &mut self.b3soi_pd.devices {
+            dev.update_static_linearization(voltages);
         }
     }
 

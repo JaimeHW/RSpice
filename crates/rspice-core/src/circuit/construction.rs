@@ -26,6 +26,7 @@ impl CircuitData {
             b3soi: B3SoiDds::new(),
             b3soi_fd: B3SoiFds::new(),
             b3soi_pd: B3SoiPds::new(),
+            b3soi_gmin_scale: 1.0e-6,
             bsim3v3: Bsim3v3s::new(),
             bsim4v8: Bsim4v8s::new(),
             ekv26s: EkvMosfets::new(),
@@ -102,7 +103,7 @@ impl CircuitData {
 
     #[inline]
     pub(in crate::circuit) fn is_ground_name(name: &str) -> bool {
-        name == "0" || name.eq_ignore_ascii_case("gnd")
+        crate::compat::ground::is_spice_ground_name(name)
     }
 
     /// Look up an existing node ID by name.

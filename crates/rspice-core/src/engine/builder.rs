@@ -400,6 +400,11 @@ impl Engine {
     /// Build circuit from netlist (flattens subcircuits first)
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
         let mut circuit = CircuitData::new();
+        circuit.b3soi_gmin_scale = if self.config.b3soi_gmin_scaling {
+            1.0e-6
+        } else {
+            1.0
+        };
 
         // Flatten subcircuit instances into top-level elements
         let flattened = flatten_netlist_with_models(netlist)
@@ -2969,6 +2974,16 @@ impl Engine {
         }
         for dev in &mut circuit.bsim4v8.devices {
             dev.set_eval_gmin(junction_gmin);
+        }
+        let b3soi_gmin = junction_gmin * circuit.b3soi_gmin_scale.max(0.0);
+        for dev in &mut circuit.b3soi.devices {
+            dev.set_eval_gmin(b3soi_gmin);
+        }
+        for dev in &mut circuit.b3soi_fd.devices {
+            dev.set_eval_gmin(b3soi_gmin);
+        }
+        for dev in &mut circuit.b3soi_pd.devices {
+            dev.set_eval_gmin(b3soi_gmin);
         }
 
         Ok(circuit)

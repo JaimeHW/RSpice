@@ -144,6 +144,7 @@ fn geom() -> B3SoiPdGeometry {
         rth0: 0.005,
         cth0: 0.0,
         nseg: 1.0,
+        frbody: 1.0,
     }
 }
 
@@ -183,6 +184,40 @@ fn temp_setup_is_finite_and_physical() {
     assert!(sized.vth0.is_finite());
     assert!(sized.rds0 >= 0.0);
     assert!(sized.jbjt > 0.0 && sized.jrec > 0.0 && sized.jdif > 0.0);
+}
+
+#[test]
+fn temp_setup_uses_rhalo_body_resistance_scaling() {
+    let mut params = n1_params();
+    params.insert("LINT".into(), 0.0);
+    params.insert("WINT".into(), 0.0);
+    params.insert("RBODY".into(), 3200.0);
+    params.insert("RBSH".into(), 3.4);
+    params.insert("RHALO".into(), 0.0);
+
+    let model = B3SoiPdModel::from_params(&params, false, 300.15);
+    let geom = B3SoiPdGeometry {
+        l: 1.0e-6,
+        w: 10.0e-6,
+        body_squares: 1.0,
+        nseg: 2.0,
+        ..geom()
+    };
+    let sized = B3SoiPdSized::new(&model, &geom, 300.15).expect("sized");
+    assert_eq!(sized.rbody, 0.0);
+    assert!((sized.rbodyext - 3.4).abs() < 1.0e-15);
+
+    params.insert("RHALO".into(), 1.0e15);
+    let model = B3SoiPdModel::from_params(&params, false, 300.15);
+    let sized = B3SoiPdSized::new(&model, &geom, 300.15).expect("sized");
+    let expected = 3200.0 * 1.0e15 / (2.0 * 3200.0 + 1.0e15 * sized.leff)
+        * sized.weff
+        / geom.nseg;
+    assert!(
+        (sized.rbody - expected).abs() <= expected.abs() * 1.0e-12,
+        "rbody={} expected={expected}",
+        sized.rbody
+    );
 }
 
 #[test]

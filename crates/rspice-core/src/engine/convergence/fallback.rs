@@ -183,7 +183,8 @@ impl Engine {
                 &solution,
                 &raw_solution,
                 damping_state,
-                Self::junction_limiting_owns_newton_steps(circuit),
+                Self::junction_limiting_owns_newton_steps(circuit)
+                    || self.b3soi_limiter_owns_global_damping(circuit),
                 |trial| self.nonlinear_merit_scaled(circuit, matrix, trial, source_scale),
             );
             Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);

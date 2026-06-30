@@ -199,7 +199,7 @@ impl TransientResult {
     }
 
     fn is_ground_name(name: &str) -> bool {
-        matches!(name, "0") || name.eq_ignore_ascii_case("gnd")
+        crate::compat::ground::is_spice_ground_name(name)
     }
 }
 

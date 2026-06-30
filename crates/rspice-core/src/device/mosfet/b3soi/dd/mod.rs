@@ -101,6 +101,9 @@ pub struct B3SoiDd {
     base_temp_k: Value,
     /// Model scalars needed inside the load.
     consts: ModelConsts,
+    /// Xyce-style BSIMSOI3 terminal GMIN used for body-source and gate-drain
+    /// conductance branches.
+    eval_gmin: Value,
 
     // Operating point (current iteration).
     op: B3SoiDdOp,
@@ -206,6 +209,7 @@ impl B3SoiDd {
             geometry: geom,
             base_temp_k: temp_k,
             consts,
+            eval_gmin: 0.0,
             op: B3SoiDdOp::default(),
             bias: B3SoiDdBias {
                 vbs: 0.0,
@@ -271,6 +275,18 @@ impl B3SoiDd {
         self.charges_suppressed = debug_mod == -1;
     }
 
+    pub fn set_eval_gmin(&mut self, gmin: Value) {
+        self.eval_gmin = if gmin.is_finite() && gmin > 0.0 {
+            gmin
+        } else {
+            0.0
+        };
+    }
+
+    pub fn eval_gmin(&self) -> Value {
+        self.eval_gmin
+    }
+
     /// Whether `DEBUG=-1` suppresses this device's charge contributions.
     pub fn charges_suppressed(&self) -> bool {
         self.charges_suppressed
@@ -294,6 +310,26 @@ impl B3SoiDd {
     pub fn begin_timestep_iteration(&self) {
         self.force_full_eval.set(true);
         self.bypass_active.set(false);
+    }
+
+    /// Re-linearize directly at the supplied static candidate solution.
+    ///
+    /// Regular Newton updates intentionally use the BSIMSOI body limiter.
+    /// Residual and fallback validation probes must evaluate the true
+    /// operating-point equations at the candidate voltage itself.
+    pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {
+        self.converged_ref = self.bias;
+        let bias = self.raw_branch_voltages(voltages);
+        self.bias = bias;
+        self.op = self.eval_op_for_bias(bias);
+        self.has_history = true;
+        self.vbs_limit_anchor = bias.vbs;
+        self.vbd_limit_anchor = bias.vbs - bias.vds;
+        self.del_temp_limit_anchor = bias.del_temp;
+        self.limit_anchor_valid.set(true);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(false);
+        self.last_limited.set(false);
     }
 
     /// ngspice bypass predicate (b3soiddld.c:589-643): every branch-voltage
@@ -842,9 +878,9 @@ impl B3SoiDd {
     /// (b3soiddld.c:3886-4150) for `bodyMod` 0/2 and
     /// `ChargeComputationNeeded == 0` (so all `gc*`/`ceqq*` charge terms vanish;
     /// the self-heating row is stamped when its temperature node exists).
-    /// `m` (multiplier) is 1. CKTgmin terms are omitted: the RSpice solver adds
-    /// its own diagonal gmin, so replicating ngspice's per-device gmin would
-    /// double-count it.
+    /// `m` (multiplier) is 1. Xyce's BSIMSOI3 terminal-GMIN branches are
+    /// stamped explicitly; they are not equivalent to the solver's nodal
+    /// conditioning shunt.
     ///
     /// The device's drain/source node ids are already the prime nodes; they
     /// equal the external terminals only when no builder-lowered series
@@ -966,6 +1002,9 @@ impl B3SoiDd {
         stamp_rhs(matrix, sp, cdreq + ceqbs);
         self.stamp_thermal_rhs(op, matrix);
 
+        stamp_conductance(matrix, b, sp, self.eval_gmin);
+        stamp_conductance(matrix, g, dp, self.eval_gmin);
+
         // ----- matrix (b3soiddld.c:4090-4128, DC: gc*=0) -----
         // E row: only EePtr (gceeb==0) -> nothing in DC.
         // DP/SP body columns (b3soiddld.c:4092-4093):
@@ -1053,6 +1092,17 @@ fn stamp_rhs(matrix: &mut impl MatrixStamper, node: NodeId, value: Value) {
     if node != 0 && value != 0.0 {
         matrix.stamp_rhs(node, value);
     }
+}
+
+#[inline]
+fn stamp_conductance(matrix: &mut impl MatrixStamper, a: NodeId, b: NodeId, g: Value) {
+    if g <= 0.0 || a == b {
+        return;
+    }
+    stamp(matrix, a, a, g);
+    stamp(matrix, a, b, -g);
+    stamp(matrix, b, a, -g);
+    stamp(matrix, b, b, g);
 }
 
 #[inline]

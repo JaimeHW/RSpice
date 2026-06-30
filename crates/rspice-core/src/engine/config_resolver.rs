@@ -94,6 +94,7 @@ pub fn resolve_simulation_config(
     let mut gmin_initial = base.convergence_config.gmin_initial;
     let gmin_target = base.convergence_config.gmin_target;
     let mut junction_gmin_target = base.convergence_config.junction_gmin_target;
+    let mut b3soi_gmin_scaling = base.b3soi_gmin_scaling;
 
     if let Some(opts) = netlist_options {
         if let Some(temp_celsius) = opts.temp {
@@ -142,6 +143,9 @@ pub fn resolve_simulation_config(
             if gmin_initial < gmin {
                 gmin_initial = gmin;
             }
+        }
+        if let Some(scaling) = opts.b3soi_gmin_scaling {
+            b3soi_gmin_scaling = scaling;
         }
     }
 
@@ -218,6 +222,7 @@ pub fn resolve_simulation_config(
     resolved.convergence_config.gmin_initial = gmin_initial;
     resolved.convergence_config.gmin_target = gmin_target;
     resolved.convergence_config.junction_gmin_target = junction_gmin_target;
+    resolved.b3soi_gmin_scaling = b3soi_gmin_scaling;
     if resolved.convergence_config.gmin_target > resolved.convergence_config.gmin_initial {
         resolved.convergence_config.gmin_initial = resolved.convergence_config.gmin_target;
     }
