@@ -4,6 +4,7 @@
 //! Supports both built-in models and dynamically loaded external models.
 
 use super::traits::CodeModel;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -19,6 +20,20 @@ use std::sync::Arc;
 pub struct CodeModelRegistry {
     /// Registered models by name (lowercase)
     models: HashMap<String, Arc<dyn CodeModel>>,
+}
+
+#[inline]
+fn canonical_model_key(name: &str) -> String {
+    name.to_lowercase()
+}
+
+#[inline]
+fn canonical_model_lookup_key(name: &str) -> Cow<'_, str> {
+    if name.chars().any(char::is_uppercase) {
+        Cow::Owned(canonical_model_key(name))
+    } else {
+        Cow::Borrowed(name)
+    }
 }
 
 const BUILTIN_MODEL_NAMES: &[&str] = &[
@@ -141,18 +156,20 @@ impl CodeModelRegistry {
     ///
     /// The model is registered under its name (case-insensitive).
     pub fn register(&mut self, model: Arc<dyn CodeModel>) {
-        let name = model.name().to_lowercase();
+        let name = canonical_model_key(model.name());
         self.models.insert(name, model);
     }
 
     /// Get a code model by name
     pub fn get(&self, name: &str) -> Option<Arc<dyn CodeModel>> {
-        self.models.get(&name.to_lowercase()).cloned()
+        let key = canonical_model_lookup_key(name);
+        self.models.get(key.as_ref()).cloned()
     }
 
     /// Check if a model is registered
     pub fn contains(&self, name: &str) -> bool {
-        self.models.contains_key(&name.to_lowercase())
+        let key = canonical_model_lookup_key(name);
+        self.models.contains_key(key.as_ref())
     }
 
     /// Get all registered model names
@@ -423,6 +440,23 @@ mod tests {
         assert_eq!(registered, catalog);
         assert!(CodeModelRegistry::is_builtin_model_name("DAC_BRIDGE"));
         assert!(!CodeModelRegistry::is_builtin_model_name("d_rom"));
+    }
+
+    #[test]
+    fn registry_lookup_remains_case_insensitive() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        let lower = registry
+            .get("dac_bridge")
+            .expect("lowercase dac_bridge resolves");
+        let mixed = registry
+            .get("DAC_Bridge")
+            .expect("mixed-case dac_bridge resolves");
+
+        assert_eq!(lower.name(), "dac_bridge");
+        assert_eq!(mixed.name(), "dac_bridge");
+        assert!(registry.contains("DAC_BRIDGE"));
+        assert!(!registry.contains("d_rom"));
     }
 
     #[test]
