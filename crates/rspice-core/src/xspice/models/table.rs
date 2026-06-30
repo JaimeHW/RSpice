@@ -750,8 +750,20 @@ fn table2d_value(table: &Table2DData, x_index: usize, y_index: usize) -> Value {
     table.values[y_index * table.x.len() + x_index]
 }
 
+fn table2d_row(table: &Table2DData, y_index: usize) -> &[Value] {
+    let x_len = table.x.len();
+    let start = y_index * x_len;
+    &table.values[start..start + x_len]
+}
+
 fn table3d_value(table: &Table3DData, x_index: usize, y_index: usize, z_index: usize) -> Value {
     table.values[(z_index * table.y.len() + y_index) * table.x.len() + x_index]
+}
+
+fn table3d_x_row(table: &Table3DData, y_index: usize, z_index: usize) -> &[Value] {
+    let x_len = table.x.len();
+    let start = (z_index * table.y.len() + y_index) * x_len;
+    &table.values[start..start + x_len]
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -845,21 +857,26 @@ fn eno1d_eval(samples: &[Value], order: usize, index: usize, offset: Value) -> E
     }
 }
 
-fn eno2d_eval_grid(
-    rows: &[Vec<Value>],
+fn eno2d_eval_grid<'a, F>(
+    row_count: usize,
+    mut row_at: F,
     order: usize,
     x_index: usize,
     y_index: usize,
     x_offset: Value,
     y_offset: Value,
-) -> Eno2dEval {
-    let y_window_start = eno_window_start(y_index, order, rows.len());
+) -> Eno2dEval
+where
+    F: FnMut(usize) -> &'a [Value],
+{
+    let y_window_start = eno_window_start(y_index, order, row_count);
     let y_window = 2 * order - 2;
     let y_local_index = y_index - y_window_start;
 
     let mut values_along_y = Vec::with_capacity(y_window);
     let mut dx_along_y = Vec::with_capacity(y_window);
-    for row in rows.iter().skip(y_window_start).take(y_window) {
+    for row_index in y_window_start..y_window_start + y_window {
+        let row = row_at(row_index);
         let eval = eno1d_eval(row, order, x_index, x_offset);
         values_along_y.push(eval.value);
         dx_along_y.push(eval.derivative);
@@ -880,17 +897,9 @@ fn table2d_eno_derivatives(
     x_axis: AxisEval,
     y_axis: AxisEval,
 ) -> Eno2dEval {
-    let mut rows = Vec::with_capacity(table.y.len());
-    for y in 0..table.y.len() {
-        let mut row = Vec::with_capacity(table.x.len());
-        for x in 0..table.x.len() {
-            row.push(table2d_value(table, x, y));
-        }
-        rows.push(row);
-    }
-
     eno2d_eval_grid(
-        &rows,
+        table.y.len(),
+        |y| table2d_row(table, y),
         order,
         x_axis.eno_index,
         y_axis.eno_index,
@@ -918,11 +927,12 @@ fn table3d_eno_derivatives(
         let mut value_row = Vec::with_capacity(yz_window);
         let mut dx_row = Vec::with_capacity(yz_window);
         for y in y_window_start..y_window_start + yz_window {
-            let mut x_row = Vec::with_capacity(table.x.len());
-            for x in 0..table.x.len() {
-                x_row.push(table3d_value(table, x, y, z));
-            }
-            let eval = eno1d_eval(&x_row, order, x_axis.eno_index, x_axis.eno_offset);
+            let eval = eno1d_eval(
+                table3d_x_row(table, y, z),
+                order,
+                x_axis.eno_index,
+                x_axis.eno_offset,
+            );
             value_row.push(eval.value);
             dx_row.push(eval.derivative);
         }
@@ -931,7 +941,8 @@ fn table3d_eno_derivatives(
     }
 
     let yz_eval = eno2d_eval_grid(
-        &values_over_zy,
+        values_over_zy.len(),
+        |row| values_over_zy[row].as_slice(),
         order,
         y_local_index,
         z_local_index,
@@ -939,7 +950,8 @@ fn table3d_eno_derivatives(
         z_axis.eno_offset,
     );
     let dx_eval = eno2d_eval_grid(
-        &dx_over_zy,
+        dx_over_zy.len(),
+        |row| dx_over_zy[row].as_slice(),
         order,
         y_local_index,
         z_local_index,
