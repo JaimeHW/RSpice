@@ -100,11 +100,10 @@ impl CodeModel for AdcBridge {
         let in_high = ctx.param("in_high");
         let rise_delay = official_bridge_timing(ctx.param("rise_delay"));
         let fall_delay = official_bridge_timing(ctx.param("fall_delay"));
-        let inputs = ctx.input_vector("in");
         let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
 
         for index in 0..width {
-            let v_in = inputs.get(index).copied().unwrap_or(0.0);
+            let v_in = analog_vector_input_value(ctx, "in", index);
             let prev = ctx.int_state(index);
 
             let new_state = if v_in <= in_low {
@@ -841,6 +840,19 @@ fn bridge_vector_width(ctx: &CmContext, model_name: &str) -> CmResult<usize> {
     Ok(in_width)
 }
 
+fn analog_vector_input_value(ctx: &CmContext, name: &str, index: usize) -> Value {
+    ctx.input_analog_vector_values(name)
+        .and_then(|inputs| inputs.get(index))
+        .map(|input| input.value)
+        .unwrap_or(0.0)
+}
+
+fn digital_vector_input_value(ctx: &CmContext, name: &str, index: usize) -> DigitalValue {
+    ctx.input_digital_vector_values(name)
+        .and_then(|inputs| inputs.get(index).copied())
+        .unwrap_or_default()
+}
+
 fn dac_bridge_state_base(index: usize) -> usize {
     index * 4
 }
@@ -932,12 +944,11 @@ impl CodeModel for DacBridge {
         let out_undef = dac_bridge_out_undef(ctx, out_low, out_high);
         let t_rise = official_bridge_timing(ctx.param("t_rise"));
         let t_fall = official_bridge_timing(ctx.param("t_fall"));
-        let inputs = ctx.input_digital_vector("in");
         let mut outputs = Vec::with_capacity(width);
         let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
 
         for index in 0..width {
-            let d_in = inputs.get(index).copied().unwrap_or_default();
+            let d_in = digital_vector_input_value(ctx, "in", index);
             let v_target = if d_in.state.is_high() {
                 out_high
             } else if d_in.state.is_low() {
@@ -1105,9 +1116,6 @@ impl CodeModel for BidiBridge {
         }
 
         let params = bidi_params(ctx);
-        let analog = ctx.input_vector("a");
-        let digital = ctx.input_digital_vector("d");
-        let dir = ctx.input_digital_vector("dir");
         let output_strength = digital_strength_from_param(params.strength);
         let current_base = bidi_state_base(width);
         let drive_state_base = bidi_drive_state_base(width);
@@ -1118,8 +1126,12 @@ impl CodeModel for BidiBridge {
         let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
 
         for index in 0..width {
-            let voltage = analog.get(index).copied().unwrap_or(0.0);
-            let direction_request = bidi_direction(params, &dir, index);
+            let voltage = analog_vector_input_value(ctx, "a", index);
+            let direction_request = bidi_direction(
+                params,
+                ctx.input_digital_vector_values("dir").unwrap_or(&[]),
+                index,
+            );
             let old_state_code = ctx.int_state(BIDI_INT_OUTPUT_STATE_BASE + index);
             let old_state = if old_state_code == BIDI_UNINITIALIZED_STATE_CODE {
                 DigitalState::Unknown
@@ -1127,7 +1139,7 @@ impl CodeModel for BidiBridge {
                 digital_state_from_code(old_state_code)
             };
             let old_strength = digital_strength_from_code(ctx.int_state(strength_base + index));
-            let digital_input = digital.get(index).copied().unwrap_or_default();
+            let digital_input = digital_vector_input_value(ctx, "d", index);
             let direction = if direction_request == BidiDirection::Bidirectional {
                 bidi_default_effective_direction(digital_input, old_state, old_strength)
             } else {
