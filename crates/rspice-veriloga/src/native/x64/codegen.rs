@@ -1018,15 +1018,10 @@ impl FunctionCompiler {
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(target, Xmm::Xmm0);
         }
-        let mut frame_base_ready = false;
         for (index, register) in XMM_STACK.iter().copied().take(restore_depth).enumerate() {
             if register != target && should_restore(index, register) {
-                if !frame_base_ready {
-                    self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-                    frame_base_ready = true;
-                }
                 self.encoder
-                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
+                    .movsd_xmm_m64_base_disp32(register, Gpr::Rsp, call_spill_disp(index));
             }
         }
     }
@@ -1036,15 +1031,10 @@ impl FunctionCompiler {
         spill_depth: usize,
         mut should_spill: impl FnMut(usize, Xmm) -> bool,
     ) {
-        let mut frame_base_ready = false;
         for (index, register) in XMM_STACK.iter().copied().take(spill_depth).enumerate() {
             if should_spill(index, register) {
-                if !frame_base_ready {
-                    self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-                    frame_base_ready = true;
-                }
                 self.encoder
-                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
+                    .movsd_m64_base_disp32_xmm(Gpr::Rsp, call_spill_disp(index), register);
             }
         }
     }
@@ -3695,10 +3685,10 @@ mod tests {
         K_BOLTZMANN, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET, Q_ELECTRON,
         ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, TableHelper, TimerHelper,
         VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls,
-        call_result_disp, compile_assignment_function, compile_assignment_pass_function,
-        compile_value_function, entry_ctx_arg_reg, entry_vars_arg_reg, native_op_reads_entry_args,
-        native_op_uses_helper_call, program_uses_helper_calls, rspice_exp,
-        value_program_needs_saved_entry_args,
+        call_result_disp, call_spill_disp, compile_assignment_function,
+        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
+        entry_vars_arg_reg, native_op_reads_entry_args, native_op_uses_helper_call,
+        program_uses_helper_calls, rspice_exp, value_program_needs_saved_entry_args,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -4618,8 +4608,20 @@ mod tests {
         );
         assert_eq!(
             count_bytes(&bytes, &mov_r11_rsp_bytes()),
-            2,
-            "helper calls with a live preserved XMM value should materialize the call-frame base once for spill and once for restore"
+            0,
+            "helper calls should address spills directly from rsp instead of materializing a call-frame base"
+        );
+        let mut direct_prefix_store = X64Encoder::new();
+        direct_prefix_store.movsd_m64_base_disp32_xmm(Gpr::Rsp, call_spill_disp(0), Xmm::Xmm0);
+        assert!(
+            contains_bytes(&bytes, &direct_prefix_store.into_bytes()),
+            "live prefix should spill directly to the call frame"
+        );
+        let mut direct_prefix_reload = X64Encoder::new();
+        direct_prefix_reload.movsd_xmm_m64_base_disp32(Xmm::Xmm0, Gpr::Rsp, call_spill_disp(0));
+        assert!(
+            contains_bytes(&bytes, &direct_prefix_reload.into_bytes()),
+            "live prefix should reload directly from the call frame"
         );
 
         let mut old_result_store = X64Encoder::new();
@@ -10632,13 +10634,13 @@ mod tests {
 
     fn call_frame_spill_bytes(index: usize, register: Xmm) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
-        encoder.movsd_m64_base_disp32_xmm(Gpr::R11, super::call_spill_disp(index), register);
+        encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, super::call_spill_disp(index), register);
         encoder.into_bytes()
     }
 
     fn call_frame_load_bytes(register: Xmm, index: usize) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
-        encoder.movsd_xmm_m64_base_disp32(register, Gpr::R11, super::call_spill_disp(index));
+        encoder.movsd_xmm_m64_base_disp32(register, Gpr::Rsp, super::call_spill_disp(index));
         encoder.into_bytes()
     }
 
