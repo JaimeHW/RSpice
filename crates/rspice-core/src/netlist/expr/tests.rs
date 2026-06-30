@@ -30,7 +30,89 @@ fn behavioral_preparation_expands_functions_without_substituting_probe_names() {
     let prepared = prepare_behavioral_expression("gain(V(node), I(vsense))", &ctx)
         .expect("behavioral expression prepares");
 
-    assert_eq!(prepared, "((2*V(NODE))*I(VSENSE))");
+    assert_eq!(prepared, "((2*V(node))*I(vsense))");
+}
+
+#[test]
+fn behavioral_preparation_preserves_digit_leading_probe_nodes() {
+    let ctx = ParamContext::new();
+
+    let prepared =
+        prepare_behavioral_expression("V(2a)+V(1)", &ctx).expect("behavioral expression prepares");
+
+    assert_eq!(prepared, "(V(2a)+V(1))");
+    assert!(!prepared.contains("0.000000000000000002"));
+}
+
+#[test]
+fn behavioral_preparation_expands_xyce_ordered_poly_expression() {
+    let ctx = ParamContext::new();
+
+    let prepared = prepare_behavioral_expression("POLY(1) V(2) 3 2 1", &ctx)
+        .expect("POLY expression prepares");
+
+    assert!(!prepared.to_ascii_uppercase().contains("POLY"));
+    assert!(prepared.contains("V(2)"));
+    assert!(prepared.contains("3"));
+    assert!(prepared.contains("2"));
+}
+
+#[test]
+fn behavioral_preparation_expands_xyce_ordered_poly_function_body() {
+    let mut ctx = ParamContext::new();
+    for (name, value) in [
+        ("C0", 0.1),
+        ("C1", 0.2),
+        ("C2", 0.3),
+        ("C11", 0.4),
+        ("C12", 0.5),
+        ("C21", 0.6),
+        ("C22", 0.7),
+        ("C111", 0.8),
+        ("C112", 0.9),
+        ("C121", 0.10),
+        ("C122", 0.11),
+        ("C211", 0.12),
+        ("C212", 0.13),
+        ("C221", 0.14),
+        ("C222", 0.15),
+    ] {
+        ctx.set(name, value);
+    }
+    ctx.define_function(
+        "polyVersion",
+        vec!["X1".to_string(), "X2".to_string()],
+        "POLY(2) X1 X2 C0 C1 C2 C11 C12 C21 C22 C111 C112 C121 C122 C211 C212 C221 C222",
+    );
+
+    let prepared = prepare_behavioral_expression("polyVersion(V(2), V(1))", &ctx)
+        .expect("POLY function prepares");
+
+    assert!(!prepared.to_ascii_uppercase().contains("POLY"));
+    assert!(prepared.contains("V(2)"));
+    assert!(prepared.contains("V(1)"));
+    assert!(prepared.contains("0.8"));
+    assert!(prepared.contains("0.15"));
+}
+
+#[test]
+fn behavioral_preparation_preserves_digit_leading_probe_nodes_through_function_args() {
+    let mut ctx = ParamContext::new();
+    ctx.set("C0", 0.1);
+    ctx.set("C1", 0.2);
+    ctx.set("C2", 0.3);
+    ctx.define_function(
+        "exprVersion",
+        vec!["X1".to_string(), "X2".to_string()],
+        "C0 + C1*X1 + C2*X2",
+    );
+
+    let prepared = prepare_behavioral_expression("exprVersion(V(2a),V(1))", &ctx)
+        .expect("function call expression prepares");
+
+    assert!(prepared.contains("V(2a)"));
+    assert!(prepared.contains("V(1)"));
+    assert!(!prepared.contains("0.000000000000000002"));
 }
 
 //=============================================================================

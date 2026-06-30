@@ -95,7 +95,7 @@ pub enum Function {
     Max,
     Sign,  // sign(x) = -1, 0, or 1
     Uramp, // uramp(x) = max(0, x) - positive ramp
-    Stp,   // stp(x) = 0 if x<0, 0.5 if x==0, 1 if x>0 - step function
+    Stp,   // stp(x) = 1 if x is positive outside expression-zero tolerance else 0
     U2,    // u2(x) = clamp(x, 0, 1)
     Eq0,   // eq0(x) = 1 if x == 0 else 0
     Ne0,   // ne0(x) = 1 if x != 0 else 0

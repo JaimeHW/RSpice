@@ -32,7 +32,7 @@ impl std::error::Error for ParseError {}
 /// Token types for expression parsing
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    Number(f64),
+    Number { value: f64, lexeme: String },
     InvalidNumber(String),
     Ident(String),
     // Operators
@@ -125,8 +125,8 @@ impl<'a> Lexer<'a> {
         // 1e6) and any remaining letters are swallowed (`10kOhm`). Unlike
         // parameter expressions, `mil` = 25.4e-6 exists here.
         let mut multiplier = 1.0;
+        let mut tail = String::new();
         if matches!(self.chars.peek(), Some(c) if c.is_ascii_alphabetic()) {
-            let mut tail = String::new();
             while matches!(self.chars.peek(), Some(c) if c.is_ascii_alphabetic()) {
                 tail.push(self.chars.next().unwrap());
             }
@@ -151,7 +151,16 @@ impl<'a> Lexer<'a> {
             };
         }
 
-        Token::Number(base * multiplier)
+        let lexeme = if tail.is_empty() {
+            s
+        } else {
+            format!("{s}{tail}")
+        };
+
+        Token::Number {
+            value: base * multiplier,
+            lexeme,
+        }
     }
 
     fn read_ident(&mut self) -> String {
@@ -489,9 +498,9 @@ impl<'a> Parser<'a> {
 
     fn parse_primary(&mut self) -> Expr {
         match self.current.clone() {
-            Token::Number(n) => {
+            Token::Number { value, .. } => {
                 self.advance();
-                Expr::Const(n)
+                Expr::Const(value)
             }
             Token::Ident(name) => {
                 self.advance();
@@ -532,7 +541,7 @@ impl<'a> Parser<'a> {
             self.advance(); // consume (
             let parse_ref_arg = |token: &Token| match token {
                 Token::Ident(arg) => Some(arg.clone()),
-                Token::Number(n) => Some(n.to_string()),
+                Token::Number { lexeme, .. } => Some(lexeme.clone()),
                 _ => None,
             };
 
@@ -600,7 +609,7 @@ impl<'a> Parser<'a> {
             self.expect(Token::RParen);
 
             let func = match upper.as_str() {
-                "ABS" => Some(Function::Abs),
+                "ABS" | "M" => Some(Function::Abs),
                 "SQRT" => Some(Function::Sqrt),
                 "EXP" => Some(Function::Exp),
                 "LOG" | "LN" => Some(Function::Log),
@@ -718,6 +727,43 @@ mod tests {
     #[test]
     fn pi_constant_matches_xyce_expression_semantics() {
         assert!((eval_const("sin(pi/2)") - 1.0).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn m_function_alias_matches_xyce_magnitude_semantics() {
+        assert_eq!(eval_const("m(-5)"), 5.0);
+        assert_eq!(eval_const("M(3)"), 3.0);
+    }
+
+    #[test]
+    fn xyce_unary_step_and_sign_zero_semantics() {
+        assert_eq!(eval_const("stp(-1)"), 0.0);
+        assert_eq!(eval_const("stp(-1e-15)"), 0.0);
+        assert_eq!(eval_const("stp(0)"), 0.0);
+        assert_eq!(eval_const("stp(1e-15)"), 0.0);
+        assert_eq!(eval_const("stp(1e-9)"), 1.0);
+        assert_eq!(eval_const("stp(1)"), 1.0);
+        assert_eq!(eval_const("sgn(-1)"), -1.0);
+        assert_eq!(eval_const("sgn(-1e-15)"), 0.0);
+        assert_eq!(eval_const("sgn(0)"), 0.0);
+        assert_eq!(eval_const("sgn(1e-15)"), 0.0);
+        assert_eq!(eval_const("sgn(1e-9)"), 1.0);
+        assert_eq!(eval_const("sgn(1)"), 1.0);
+    }
+
+    #[test]
+    fn probe_references_preserve_numeric_looking_node_lexemes() {
+        assert_eq!(
+            parse_expression_strict("V(2a)").expect("probe parses"),
+            Expr::NodeVoltage("2a".to_string())
+        );
+        assert_eq!(
+            parse_expression_strict("V(2e3,0)").expect("differential probe parses"),
+            Expr::sub(
+                Expr::NodeVoltage("2e3".to_string()),
+                Expr::NodeVoltage("0".to_string())
+            )
+        );
     }
 
     #[test]

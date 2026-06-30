@@ -5,6 +5,8 @@
 use crate::Value;
 use std::collections::HashMap;
 
+const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
+
 /// Bytecode instruction
 #[derive(Debug, Clone)]
 pub enum Instruction {
@@ -232,12 +234,20 @@ impl Vm {
                 Instruction::Le => self.binary_op(|a, b| if a <= b { 1.0 } else { 0.0 }),
                 Instruction::Gt => self.binary_op(|a, b| if a > b { 1.0 } else { 0.0 }),
                 Instruction::Ge => self.binary_op(|a, b| if a >= b { 1.0 } else { 0.0 }),
-                Instruction::Eq => {
-                    self.binary_op(|a, b| if (a - b).abs() < 1e-12 { 1.0 } else { 0.0 })
-                }
-                Instruction::Ne => {
-                    self.binary_op(|a, b| if (a - b).abs() >= 1e-12 { 1.0 } else { 0.0 })
-                }
+                Instruction::Eq => self.binary_op(|a, b| {
+                    if (a - b).abs() < EXPR_ZERO_TOLERANCE {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }),
+                Instruction::Ne => self.binary_op(|a, b| {
+                    if (a - b).abs() >= EXPR_ZERO_TOLERANCE {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }),
 
                 // Logical
                 Instruction::And => {
@@ -275,27 +285,33 @@ impl Vm {
                 Instruction::Round => self.unary_op(|a| a.round_ties_even()),
                 Instruction::Sqr => self.unary_op(|a| a * a),
                 Instruction::Sign => self.unary_op(|a| {
-                    if a > 0.0 {
+                    if a > EXPR_ZERO_TOLERANCE {
                         1.0
-                    } else if a < 0.0 {
+                    } else if a < -EXPR_ZERO_TOLERANCE {
                         -1.0
                     } else {
                         0.0
                     }
                 }),
                 Instruction::Uramp => self.unary_op(|a| a.max(0.0)),
-                Instruction::Stp => self.unary_op(|a| {
-                    if a > 0.0 {
+                Instruction::Stp => {
+                    self.unary_op(|a| if a > EXPR_ZERO_TOLERANCE { 1.0 } else { 0.0 })
+                }
+                Instruction::U2 => self.unary_op(|a| a.clamp(0.0, 1.0)),
+                Instruction::Eq0 => self.unary_op(|a| {
+                    if a.abs() < EXPR_ZERO_TOLERANCE {
                         1.0
-                    } else if a == 0.0 {
-                        0.5
                     } else {
                         0.0
                     }
                 }),
-                Instruction::U2 => self.unary_op(|a| a.clamp(0.0, 1.0)),
-                Instruction::Eq0 => self.unary_op(|a| if a.abs() < 1e-12 { 1.0 } else { 0.0 }),
-                Instruction::Ne0 => self.unary_op(|a| if a.abs() >= 1e-12 { 1.0 } else { 0.0 }),
+                Instruction::Ne0 => self.unary_op(|a| {
+                    if a.abs() >= EXPR_ZERO_TOLERANCE {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }),
                 Instruction::Gt0 => self.unary_op(|a| if a > 0.0 { 1.0 } else { 0.0 }),
                 Instruction::Lt0 => self.unary_op(|a| if a < 0.0 { 1.0 } else { 0.0 }),
                 Instruction::Ge0 => self.unary_op(|a| if a >= 0.0 { 1.0 } else { 0.0 }),

@@ -3972,6 +3972,25 @@ mod tests {
     }
 
     #[test]
+    fn digit_leading_node_names_preserve_label_identity() {
+        let netlist = Netlist::parse(
+            "digit-leading node labels\n\
+             R1 1 2a 1k\n\
+             R2 2e3 0 1k\n\
+             B1 out 0 V={V(2a)+V(2e3)}\n\
+             .end\n",
+        )
+        .expect("digit-leading node labels should parse as node names");
+
+        assert_eq!(netlist.elements[0].nodes, vec!["1", "2A"]);
+        assert_eq!(netlist.elements[1].nodes, vec!["2e3", "0"]);
+        assert!(matches!(
+            &netlist.elements[2].kind,
+            ElementKind::BehavioralVoltage { expression, .. } if expression == "V(2a)+V(2e3)"
+        ));
+    }
+
+    #[test]
     fn resistor_value_model_and_instance_parameters_parse() {
         let netlist = Netlist::parse(
             "modeled resistor\n\

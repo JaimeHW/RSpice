@@ -37,9 +37,11 @@ pub fn expect_node(stream: &mut TokenStream, line_num: usize) -> Result<String, 
             stream.advance();
             Ok(s)
         }
-        TokenKind::Number(n) => {
-            // Numeric node name (e.g., "0", "1")
-            let s = format!("{}", *n as i64);
+        TokenKind::Number(_) => {
+            // Node names are labels, not scalar values. Preserve the source
+            // spelling so digit-leading names such as `2a` stay addressable by
+            // behavioral probes like V(2a).
+            let s = stream.peek().lexeme.clone();
             stream.advance();
             Ok(s)
         }
