@@ -6,10 +6,11 @@ use crate::Value;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
 };
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 const INPUT_DOMAIN_MIN: Value = 1.0e-12;
 const INPUT_DOMAIN_MAX: Value = 0.5;
+const LOOKUP_TABLE_RESOURCE: &str = "xspice.lookup.table";
 
 #[derive(Debug, Clone, Copy)]
 struct LookupPoint {
@@ -21,6 +22,18 @@ struct LookupPoint {
 struct LookupResult {
     value: Value,
     slope: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct LookupTableSignature {
+    x_values: Vec<Value>,
+    y_values: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct LookupTableResource {
+    signature: LookupTableSignature,
+    points: CmResult<Arc<Vec<LookupPoint>>>,
 }
 
 fn lookup_params() -> &'static [ParamSpec] {
@@ -85,7 +98,14 @@ fn pwl_output_port() -> PortSpec {
     }
 }
 
-fn lookup_table(ctx: &CmContext) -> CmResult<Vec<LookupPoint>> {
+fn lookup_table_signature(ctx: &CmContext) -> LookupTableSignature {
+    LookupTableSignature {
+        x_values: ctx.real_vector_param("x_array").unwrap_or(&[]).to_vec(),
+        y_values: ctx.real_vector_param("y_array").unwrap_or(&[]).to_vec(),
+    }
+}
+
+fn lookup_table_uncached(ctx: &CmContext) -> CmResult<Vec<LookupPoint>> {
     let x_values = ctx
         .real_vector_param("x_array")
         .ok_or_else(|| missing_param("x_array"))?;
@@ -93,6 +113,25 @@ fn lookup_table(ctx: &CmContext) -> CmResult<Vec<LookupPoint>> {
         .real_vector_param("y_array")
         .ok_or_else(|| missing_param("y_array"))?;
     validate_lookup_table(x_values, y_values)
+}
+
+fn cache_lookup_table(ctx: &mut CmContext) {
+    let signature = lookup_table_signature(ctx);
+    let points = lookup_table_uncached(ctx).map(Arc::new);
+    ctx.set_resource(
+        LOOKUP_TABLE_RESOURCE,
+        Arc::new(LookupTableResource { signature, points }),
+    );
+}
+
+fn lookup_table(ctx: &CmContext) -> CmResult<Arc<Vec<LookupPoint>>> {
+    let signature = lookup_table_signature(ctx);
+    if let Some(resource) = ctx.resource::<LookupTableResource>(LOOKUP_TABLE_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.points.clone();
+    }
+    lookup_table_uncached(ctx).map(Arc::new)
 }
 
 fn missing_param(name: &str) -> CmError {
@@ -326,6 +365,7 @@ impl CodeModel for PiecewiseLinear {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        cache_lookup_table(ctx);
         let points = lookup_table(ctx)?;
         validate_smoothing_domain(
             &points,
@@ -381,6 +421,7 @@ impl CodeModel for PiecewiseLinearTimeSeries {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        cache_lookup_table(ctx);
         let points = lookup_table(ctx)?;
         validate_smoothing_domain(
             &points,
