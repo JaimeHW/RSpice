@@ -104,9 +104,10 @@ fn compile_model_inner(
 
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
         let static_condition = if let Some(condition) = &stamp.static_condition {
-            let program = NativeProgram::from_bytecode(
-                model.name.clone(),
-                EntryKind::StaticCondition,
+            let program = lower_static_condition_program(
+                model,
+                canonical_mir,
+                stamp_index,
                 condition,
                 base_limits,
             )
@@ -307,6 +308,101 @@ fn compile_model_inner(
         entries,
         current_dependencies,
     )
+}
+
+fn lower_static_condition_program(
+    model: &CompiledModel,
+    canonical_mir: Option<&MirModel>,
+    stamp_index: usize,
+    bytecode_program: &BytecodeProgram,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<NativeProgram> {
+    if let Some(mir) = canonical_mir {
+        let (mir, expr) = canonical_static_condition_expr(model, mir, stamp_index)?;
+        return NativeProgram::from_mir_expression(
+            model.name.clone(),
+            EntryKind::StaticCondition,
+            &mir,
+            expr,
+            limits,
+        );
+    }
+
+    NativeProgram::from_bytecode(
+        model.name.clone(),
+        EntryKind::StaticCondition,
+        bytecode_program,
+        limits,
+    )
+}
+
+fn canonical_static_condition_expr(
+    model: &CompiledModel,
+    canonical_mir: &MirModel,
+    stamp_index: usize,
+) -> JitResult<(MirModel, ExprId)> {
+    let equation =
+        canonical_mir
+            .equations
+            .get(stamp_index)
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!("canonical equation {stamp_index} is outside equation table")
+                    .into(),
+            })?;
+    let mut synthetic = canonical_mir.clone();
+    let expr = extract_leading_static_condition(
+        model,
+        &mut synthetic,
+        stamp_index,
+        equation.expression.id,
+    )?;
+    Ok((synthetic, expr))
+}
+
+fn extract_leading_static_condition(
+    model: &CompiledModel,
+    mir: &mut MirModel,
+    stamp_index: usize,
+    root: ExprId,
+) -> JitResult<ExprId> {
+    let mut condition = None;
+    let mut current = root;
+
+    loop {
+        let expression = canonical_expression(model, mir, current)?.clone();
+        match expression.kind {
+            HirExprKind::Conditional {
+                condition: guard,
+                then_expr,
+                else_expr,
+            } if is_canonical_zero(model, mir, else_expr)? => {
+                condition = Some(match condition {
+                    Some(previous) => {
+                        append_canonical_binary(mir, "And", previous, guard, expression.span)
+                    }
+                    None => guard,
+                });
+                current = then_expr;
+            }
+            _ => {
+                return condition.ok_or_else(|| JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: format!(
+                        "canonical equation {stamp_index} is missing leading static-condition guard"
+                    )
+                    .into(),
+                });
+            }
+        }
+    }
+}
+
+fn is_canonical_zero(model: &CompiledModel, mir: &MirModel, expr_id: ExprId) -> JitResult<bool> {
+    match &canonical_expression(model, mir, expr_id)?.kind {
+        HirExprKind::Number { value, .. } => Ok(value.to_bits() == 0.0_f64.to_bits()),
+        _ => Ok(false),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2557,7 +2653,7 @@ fn format_current_endpoint(endpoint: usize) -> String {
 mod tests {
     use super::{
         NativeModel, compile_model_with_canonical_ir, lower_assignment_step,
-        validate_compiled_entry_shape,
+        lower_static_condition_program, validate_compiled_entry_shape,
     };
     use crate::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
     use crate::codegen::{
@@ -2813,6 +2909,114 @@ endmodule
         assert!(
             message.contains("no interpreter fallback"),
             "canonical parameter mismatch must keep hard-JIT contract: {message}"
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_static_condition_from_mir() {
+        let source = r#"
+module native_canonical_static_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real enabled = 1.0;
+  analog begin
+    if (enabled > 0.5) begin
+      I(p, n) <+ V(p, n);
+    end
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let stamp_index = model
+            .stamp_programs
+            .iter()
+            .position(|stamp| stamp.static_condition.is_some())
+            .expect("fixture must include a static condition");
+        model.stamp_programs[stamp_index].static_condition = Some(BytecodeProgram {
+            instructions: vec![Instruction::PushConst(0.0)],
+        });
+
+        let program = lower_static_condition_program(
+            &model,
+            Some(&artifact.mir),
+            stamp_index,
+            model.stamp_programs[stamp_index]
+                .static_condition
+                .as_ref()
+                .expect("poisoned static condition bytecode exists"),
+            NativeLoweringLimits::for_model(&model),
+        )
+        .expect("canonical static condition lowers to native ops");
+        assert_eq!(program.ops(), &[NativeOp::LoadVariable(0)]);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical static condition compiles to native x64");
+        let mut context = native_model_benchmark_context(&model, "canonical_static_guard");
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+        native.run_assignments(&ctx, context.variables.as_mut_ptr());
+        if let Some(error) = take_native_runtime_error() {
+            panic!("native assignment failed before static condition: {error}");
+        }
+        let ctx = eval_context_from_vm_context(&mut context);
+        let active = native
+            .run_static_condition(stamp_index, &ctx, context.variables.as_ptr())
+            .expect("static condition has native entry");
+
+        assert_eq!(active.to_bits(), 1.0_f64.to_bits());
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_rejects_missing_static_condition_guard() {
+        let model_source = r#"
+module native_canonical_static_guard_shape(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real enabled = 1.0;
+  analog begin
+    if (enabled > 0.5) begin
+      I(p, n) <+ V(p, n);
+    end
+  end
+endmodule
+"#;
+        let artifact_source = r#"
+module native_canonical_static_guard_shape(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real enabled = 1.0;
+  analog I(p, n) <+ V(p, n);
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(model_source)
+            .expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(artifact_source)
+            .expect("compile mismatched canonical IR");
+        assert!(
+            model
+                .stamp_programs
+                .iter()
+                .any(|stamp| stamp.static_condition.is_some()),
+            "fixture must include a compiled static condition"
+        );
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("missing canonical static guard must fail native compile");
+        let message = error.to_string();
+        assert!(
+            message.contains("missing leading static-condition guard"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical static guard mismatch must keep hard-JIT contract: {message}"
         );
     }
 
