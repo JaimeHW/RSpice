@@ -1350,8 +1350,16 @@ impl CmContext {
     pub fn advance_state(&mut self) {
         self.state_prev.clone_from(&self.state);
         for output in self.outputs.values_mut() {
-            if let OutputValue::Analog(value) = output {
-                value.prev_value = value.value;
+            match output {
+                OutputValue::Analog(value) => {
+                    value.prev_value = value.value;
+                }
+                OutputValue::AnalogVector(values) => {
+                    for value in values {
+                        value.prev_value = value.value;
+                    }
+                }
+                _ => {}
             }
         }
         self.time_prev = self.time;
