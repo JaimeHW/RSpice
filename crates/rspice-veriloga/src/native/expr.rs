@@ -70,6 +70,7 @@ pub(crate) enum NativeOp {
     IfElseCondLast,
     Extremum(ExtremumOp),
     ExtremumConst(ExtremumOp, f64),
+    ExtremumConstLhs(ExtremumOp, f64),
     UnaryMath(UnaryMathOp),
     BinaryMath(BinaryMathOp),
     IntegerBinary(IntegerBinaryOp),
@@ -2137,6 +2138,9 @@ impl NativeProgram {
                         continue;
                     }
                     if lower_constant_rhs_extremum(&mut ops, extremum_op(instruction)) {
+                        continue;
+                    }
+                    if lower_constant_lhs_extremum(&mut ops, extremum_op(instruction)) {
                         continue;
                     }
                     ops.push(NativeOp::Extremum(extremum_op(instruction)));
@@ -7774,6 +7778,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.pop_binary("canonical extremum")?;
         if lower_constant_binary_extremum(&mut self.ops, op)
             || lower_constant_rhs_extremum(&mut self.ops, op)
+            || lower_constant_lhs_extremum(&mut self.ops, op)
         {
             return Ok(());
         }
@@ -8181,6 +8186,7 @@ fn is_parameter_default_op(op: &NativeOp) -> bool {
             | NativeOp::IfElseCondLast
             | NativeOp::Extremum(_)
             | NativeOp::ExtremumConst(_, _)
+            | NativeOp::ExtremumConstLhs(_, _)
             | NativeOp::UnaryMath(_)
             | NativeOp::BinaryMath(_)
             | NativeOp::IntegerBinary(_)
@@ -8242,6 +8248,7 @@ fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::IfElseCondLast => "IfElseCondLast",
         NativeOp::Extremum(_) => "Extremum",
         NativeOp::ExtremumConst(_, _) => "ExtremumConst",
+        NativeOp::ExtremumConstLhs(_, _) => "ExtremumConstLhs",
         NativeOp::UnaryMath(_) => "UnaryMath",
         NativeOp::BinaryMath(_) => "BinaryMath",
         NativeOp::IntegerBinary(_) => "IntegerBinary",
@@ -8767,6 +8774,24 @@ fn lower_constant_rhs_extremum(ops: &mut Vec<NativeOp>, op: ExtremumOp) -> bool 
     true
 }
 
+fn lower_constant_lhs_extremum(ops: &mut Vec<NativeOp>, op: ExtremumOp) -> bool {
+    if ops.len() < 2 {
+        return false;
+    }
+    let rhs_index = ops.len() - 1;
+    if !is_independent_value_push(&ops[rhs_index]) {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let NativeOp::Const(value) = ops[lhs_index] else {
+        return false;
+    };
+    ops.remove(lhs_index);
+    ops.push(NativeOp::ExtremumConstLhs(op, value));
+    true
+}
+
 fn lower_constant_binary_extremum(ops: &mut Vec<NativeOp>, op: ExtremumOp) -> bool {
     let (lhs_index, rhs_index) = match ops.len().checked_sub(2) {
         Some(lhs_index) => (lhs_index, lhs_index + 1),
@@ -9060,6 +9085,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::DivFromConst(_)
         | NativeOp::CompareConst(_, _)
         | NativeOp::ExtremumConst(_, _)
+        | NativeOp::ExtremumConstLhs(_, _)
         | NativeOp::LogicalConst(_, _)
         | NativeOp::IntegerShiftConst(_, _)
         | NativeOp::Neg
@@ -12188,6 +12214,53 @@ endmodule
                 &[
                     NativeOp::LoadTemperature,
                     NativeOp::ExtremumConst(expected, 300.0)
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_constant_lhs_min_max_without_extra_stack_slot() {
+        let cases = [
+            (Instruction::Min, ExtremumOp::Min),
+            (Instruction::Max, ExtremumOp::Max),
+        ];
+
+        for (instruction, expected) in cases {
+            let instruction_name = format!("{instruction:?}");
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(300.0),
+                    Instruction::PushTemperature,
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "minmax-literal-lhs",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant LHS min/max has a direct native lowering");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{instruction_name} should not allocate a second XMM stack slot for LHS constants"
+            );
+            assert!(
+                !lowered
+                    .ops()
+                    .iter()
+                    .any(|op| matches!(op, NativeOp::Const(value) if value.to_bits() == 300.0_f64.to_bits())),
+                "{expected:?} should consume the LHS literal in the min/max op"
+            );
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::ExtremumConstLhs(expected, 300.0)
                 ]
             );
         }

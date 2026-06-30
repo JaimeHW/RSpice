@@ -580,6 +580,10 @@ impl X64Encoder {
         self.emit_sse_reg_reg(0xF2, 0x5F, dst, src);
     }
 
+    pub(crate) fn maxsd_xmm_m64_base_disp32(&mut self, dst: Xmm, base: Gpr, disp: i32) {
+        self.emit_sse_reg_base_disp32(0xF2, 0x5F, dst, base, disp);
+    }
+
     pub(crate) fn maxsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
         self.emit_sse_reg_rip_disp32(0xF2, 0x5F, dst, disp)
     }
