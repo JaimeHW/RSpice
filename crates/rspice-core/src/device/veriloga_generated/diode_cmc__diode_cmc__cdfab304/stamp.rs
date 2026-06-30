@@ -27,28 +27,44 @@ const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 fn eval_ddt<const STATE_COUNT: usize>(
     current: &mut [f64; STATE_COUNT],
     previous: &mut [f64; STATE_COUNT],
+    older: &mut [f64; STATE_COUNT],
     initialized: &mut [bool; STATE_COUNT],
+    derivative_current: &mut [f64; STATE_COUNT],
+    derivative_previous: &mut [f64; STATE_COUNT],
     ddt_active: bool,
     ddt_scale: f64,
+    ddt_previous_value_scale: f64,
+    ddt_older_value_scale: f64,
+    ddt_previous_derivative_scale: f64,
     slot: usize,
     value: f64,
 ) -> f64 {
     debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
     let previous_value = if initialized[slot] { previous[slot] } else { value };
+    let older_value = if initialized[slot] { older[slot] } else { value };
     current[slot] = value;
     if ddt_active {
-        (value - previous_value) * ddt_scale
+        let result = value * ddt_scale
+            - previous_value * ddt_previous_value_scale
+            - older_value * ddt_older_value_scale
+            - derivative_previous[slot] * ddt_previous_derivative_scale;
+        derivative_current[slot] = result;
+        result
     } else {
+        current[slot] = value;
         previous[slot] = value;
+        older[slot] = value;
+        derivative_current[slot] = 0.0;
+        derivative_previous[slot] = 0.0;
         initialized[slot] = true;
         0.0
     }
 }
 
 #[inline]
-fn ddt_jacobian(timestep: f64, derivative: f64) -> f64 {
-    if timestep.abs() > Instance::DDT_EPSILON {
-        derivative / timestep
+fn ddt_jacobian(ddt_active: bool, ddt_scale: f64, derivative: f64) -> f64 {
+    if ddt_active {
+        derivative * ddt_scale
     } else {
         0.0
     }
@@ -108,9 +124,15 @@ impl Instance {
         let timestep = (*self).timestep;
         let ddt_state_current = self.ddt_state_current.as_mut();
         let ddt_state_previous = self.ddt_state_previous.as_mut();
+        let ddt_state_older = self.ddt_state_older.as_mut();
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
-        let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
-        let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
+        let ddt_derivative_current = self.ddt_derivative_current.as_mut();
+        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();
+        let ddt_active = self.ddt_coefficients.active;
+        let ddt_scale = self.ddt_coefficients.derivative_scale;
+        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
+        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
+        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let v57: f64 = 0.0;
         let v92: f64 = 0.01;
         let v179: f64 = 0.5;
@@ -6173,7 +6195,7 @@ impl Instance {
         let d11540_dn3: f64 = v15589;
         let d11540_dn4: f64 = v15590;
         let d11540_dn5: f64 = v15591;
-        let v11540_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 3, v11540);
+        let v11540_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 3, v11540);
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(0),
             Some(2),
@@ -6186,7 +6208,7 @@ impl Instance {
         );
         let d11543_dn0: f64 = v15594;
         let d11543_dn2: f64 = v15595;
-        let v11543_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 4, v11543);
+        let v11543_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 4, v11543);
         stamper.stamp_current_node2_local(
             Some(0),
             Some(2),
@@ -6820,7 +6842,7 @@ impl Instance {
         Self::stamp_transient_block_52(ctx, p, nodes, var_ab_i, var_exp_a, var_exp_a_db0, var_exp_a_db1, var_exp_a_db2, var_exp_a_db3, var_exp_a_dn0, var_exp_a_dn1, var_exp_a_dn2, var_exp_a_dn3, var_exp_a_dn4, var_exp_a_dn5, var_guard558, var_guard560, var_guard561, var_guard562, var_nj0, var_nj0_db0, var_nj0_db1, var_nj0_db2, var_nj0_db3, var_nj0_dn0, var_nj0_dn1, var_nj0_dn2, var_nj0_dn3, var_nj0_dn4, var_nj0_dn5, var_nj_k, var_nj_k_db0, var_nj_k_db1, var_nj_k_db2, var_nj_k_db3, var_nj_k_dn0, var_nj_k_dn1, var_nj_k_dn2, var_nj_k_dn3, var_nj_k_dn4, var_nj_k_dn5, var_phitdinv, var_pn0, var_q_pex0, var_tkd, var_tkr, var_v_ha, var_v_hk, var_vak, var_vak_db0, var_vak_db1, var_vak_db2, var_vak_db3, var_vak_dn0, var_vak_dn1, var_vak_dn2, var_vak_dn3, var_vak_dn4, var_vak_dn5, &mut var_exp_a2, &mut var_exp_a2_db0, &mut var_exp_a2_db1, &mut var_exp_a2_db2, &mut var_exp_a2_db3, &mut var_exp_a2_dn0, &mut var_exp_a2_dn1, &mut var_exp_a2_dn2, &mut var_exp_a2_dn3, &mut var_exp_a2_dn4, &mut var_exp_a2_dn5, &mut var_exp_k, &mut var_exp_k2, &mut var_exp_k2_db0, &mut var_exp_k2_db1, &mut var_exp_k2_db2, &mut var_exp_k2_db3, &mut var_exp_k2_dn0, &mut var_exp_k2_dn1, &mut var_exp_k2_dn2, &mut var_exp_k2_dn3, &mut var_exp_k2_dn4, &mut var_exp_k2_dn5, &mut var_exp_k_db0, &mut var_exp_k_db1, &mut var_exp_k_db2, &mut var_exp_k_db3, &mut var_exp_k_dn0, &mut var_exp_k_dn1, &mut var_exp_k_dn2, &mut var_exp_k_dn3, &mut var_exp_k_dn4, &mut var_exp_k_dn5, &mut var_guard563, &mut var_guard564, &mut var_guard565, &mut var_guard566, &mut var_inqs0_a, &mut var_inqs0_a_db0, &mut var_inqs0_a_db1, &mut var_inqs0_a_db2, &mut var_inqs0_a_db3, &mut var_inqs0_a_dn0, &mut var_inqs0_a_dn1, &mut var_inqs0_a_dn2, &mut var_inqs0_a_dn3, &mut var_inqs0_a_dn4, &mut var_inqs0_a_dn5, &mut var_inqs0_k, &mut var_inqs0_k_db0, &mut var_inqs0_k_db1, &mut var_inqs0_k_db2, &mut var_inqs0_k_db3, &mut var_inqs0_k_dn0, &mut var_inqs0_k_dn1, &mut var_inqs0_k_dn2, &mut var_inqs0_k_dn3, &mut var_inqs0_k_dn4, &mut var_inqs0_k_dn5, &mut var_p_na, &mut var_p_na_db0, &mut var_p_na_db1, &mut var_p_na_db2, &mut var_p_na_db3, &mut var_p_na_dn0, &mut var_p_na_dn1, &mut var_p_na_dn2, &mut var_p_na_dn3, &mut var_p_na_dn4, &mut var_p_na_dn5, &mut var_p_nk, &mut var_p_nk_db0, &mut var_p_nk_db1, &mut var_p_nk_db2, &mut var_p_nk_db3, &mut var_p_nk_dn0, &mut var_p_nk_dn1, &mut var_p_nk_dn2, &mut var_p_nk_dn3, &mut var_p_nk_dn4, &mut var_p_nk_dn5, &mut var_q_nqs_a, &mut var_q_nqs_a_db0, &mut var_q_nqs_a_db1, &mut var_q_nqs_a_db2, &mut var_q_nqs_a_db3, &mut var_q_nqs_a_dn0, &mut var_q_nqs_a_dn1, &mut var_q_nqs_a_dn2, &mut var_q_nqs_a_dn3, &mut var_q_nqs_a_dn4, &mut var_q_nqs_a_dn5, &mut var_q_nqs_k, &mut var_q_nqs_k_db0, &mut var_q_nqs_k_db1, &mut var_q_nqs_k_db2, &mut var_q_nqs_k_db3, &mut var_q_nqs_k_dn0, &mut var_q_nqs_k_dn1, &mut var_q_nqs_k_dn2, &mut var_q_nqs_k_dn3, &mut var_q_nqs_k_dn4, &mut var_q_nqs_k_dn5, &mut var_q_pexa, &mut var_q_pexa_db0, &mut var_q_pexa_db1, &mut var_q_pexa_db2, &mut var_q_pexa_db3, &mut var_q_pexa_dn0, &mut var_q_pexa_dn1, &mut var_q_pexa_dn2, &mut var_q_pexa_dn3, &mut var_q_pexa_dn4, &mut var_q_pexa_dn5, &mut var_q_pexk, &mut var_q_pexk_db0, &mut var_q_pexk_db1, &mut var_q_pexk_db2, &mut var_q_pexk_db3, &mut var_q_pexk_dn0, &mut var_q_pexk_dn1, &mut var_q_pexk_dn2, &mut var_q_pexk_dn3, &mut var_q_pexk_dn4, &mut var_q_pexk_dn5, &mut var_q_qs_a, &mut var_q_qs_a_db0, &mut var_q_qs_a_db1, &mut var_q_qs_a_db2, &mut var_q_qs_a_db3, &mut var_q_qs_a_dn0, &mut var_q_qs_a_dn1, &mut var_q_qs_a_dn2, &mut var_q_qs_a_dn3, &mut var_q_qs_a_dn4, &mut var_q_qs_a_dn5, &mut var_q_qs_k, &mut var_q_qs_k_db0, &mut var_q_qs_k_db1, &mut var_q_qs_k_db2, &mut var_q_qs_k_db3, &mut var_q_qs_k_dn0, &mut var_q_qs_k_dn1, &mut var_q_qs_k_dn2, &mut var_q_qs_k_dn3, &mut var_q_qs_k_dn4, &mut var_q_qs_k_dn5);
         Self::stamp_transient_block_53(ctx, p, nodes, var_epssi, var_guard558, var_juncdlt, var_ndi_i, var_pb, var_vak, var_vak_db0, var_vak_db1, var_vak_db2, var_vak_db3, var_vak_dn0, var_vak_dn1, var_vak_dn2, var_vak_dn3, var_vak_dn4, var_vak_dn5, var_w_depa0, var_w_depa0_db0, var_w_depa0_db1, var_w_depa0_db2, var_w_depa0_db3, var_w_depa0_dn0, var_w_depa0_dn1, var_w_depa0_dn2, var_w_depa0_dn3, var_w_depa0_dn4, var_w_depa0_dn5, &mut var_guard567, &mut var_guard568, &mut var_guard571, &mut var_guard572, &mut var_iwnqs0_a, &mut var_iwnqs0_a_db0, &mut var_iwnqs0_a_db1, &mut var_iwnqs0_a_db2, &mut var_iwnqs0_a_db3, &mut var_iwnqs0_a_dn0, &mut var_iwnqs0_a_dn1, &mut var_iwnqs0_a_dn2, &mut var_iwnqs0_a_dn3, &mut var_iwnqs0_a_dn4, &mut var_iwnqs0_a_dn5, &mut var_tmf1, &mut var_tmf1_db0, &mut var_tmf1_db1, &mut var_tmf1_db2, &mut var_tmf1_db3, &mut var_tmf1_dn0, &mut var_tmf1_dn1, &mut var_tmf1_dn2, &mut var_tmf1_dn3, &mut var_tmf1_dn4, &mut var_tmf1_dn5, &mut var_tmf2, &mut var_tmf2_db0, &mut var_tmf2_db1, &mut var_tmf2_db2, &mut var_tmf2_db3, &mut var_tmf2_dn0, &mut var_tmf2_dn1, &mut var_tmf2_dn2, &mut var_tmf2_dn3, &mut var_tmf2_dn4, &mut var_tmf2_dn5, &mut var_vjunc_a, &mut var_vjunc_a_db0, &mut var_vjunc_a_db1, &mut var_vjunc_a_db2, &mut var_vjunc_a_db3, &mut var_vjunc_a_dn0, &mut var_vjunc_a_dn1, &mut var_vjunc_a_dn2, &mut var_vjunc_a_dn3, &mut var_vjunc_a_dn4, &mut var_vjunc_a_dn5, &mut var_w_depa, &mut var_w_depa_db0, &mut var_w_depa_db1, &mut var_w_depa_db2, &mut var_w_depa_db3, &mut var_w_depa_dn0, &mut var_w_depa_dn1, &mut var_w_depa_dn2, &mut var_w_depa_dn3, &mut var_w_depa_dn4, &mut var_w_depa_dn5, &mut var_w_nqs_a, &mut var_w_nqs_a_db0, &mut var_w_nqs_a_db1, &mut var_w_nqs_a_db2, &mut var_w_nqs_a_db3, &mut var_w_nqs_a_dn0, &mut var_w_nqs_a_dn1, &mut var_w_nqs_a_dn2, &mut var_w_nqs_a_dn3, &mut var_w_nqs_a_dn4, &mut var_w_nqs_a_dn5, &mut var_w_qs_a, &mut var_w_qs_a_db0, &mut var_w_qs_a_db1, &mut var_w_qs_a_db2, &mut var_w_qs_a_db3, &mut var_w_qs_a_dn0, &mut var_w_qs_a_dn1, &mut var_w_qs_a_dn2, &mut var_w_qs_a_dn3, &mut var_w_qs_a_dn4, &mut var_w_qs_a_dn5);
 
-        Self::stamp_transient_equations_block_0(stamper, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized, var_guard571, var_guard572, var_inqs0_a, var_inqs0_a_db0, var_inqs0_a_db1, var_inqs0_a_db2, var_inqs0_a_db3, var_inqs0_a_dn0, var_inqs0_a_dn1, var_inqs0_a_dn2, var_inqs0_a_dn3, var_inqs0_a_dn4, var_inqs0_a_dn5, var_inqs0_k, var_inqs0_k_db0, var_inqs0_k_db1, var_inqs0_k_db2, var_inqs0_k_db3, var_inqs0_k_dn0, var_inqs0_k_dn1, var_inqs0_k_dn2, var_inqs0_k_dn3, var_inqs0_k_dn4, var_inqs0_k_dn5, var_iwnqs0_a, var_iwnqs0_a_db0, var_iwnqs0_a_db1, var_iwnqs0_a_db2, var_iwnqs0_a_db3, var_iwnqs0_a_dn0, var_iwnqs0_a_dn1, var_iwnqs0_a_dn2, var_iwnqs0_a_dn3, var_iwnqs0_a_dn4, var_iwnqs0_a_dn5, var_q_nqs_a, var_q_nqs_a_db0, var_q_nqs_a_db1, var_q_nqs_a_db2, var_q_nqs_a_db3, var_q_nqs_a_dn0, var_q_nqs_a_dn1, var_q_nqs_a_dn2, var_q_nqs_a_dn3, var_q_nqs_a_dn4, var_q_nqs_a_dn5, var_q_nqs_k, var_q_nqs_k_db0, var_q_nqs_k_db1, var_q_nqs_k_db2, var_q_nqs_k_db3, var_q_nqs_k_dn0, var_q_nqs_k_dn1, var_q_nqs_k_dn2, var_q_nqs_k_dn3, var_q_nqs_k_dn4, var_q_nqs_k_dn5, var_w_nqs_a, var_w_nqs_a_db0, var_w_nqs_a_db1, var_w_nqs_a_db2, var_w_nqs_a_db3, var_w_nqs_a_dn0, var_w_nqs_a_dn1, var_w_nqs_a_dn2, var_w_nqs_a_dn3, var_w_nqs_a_dn4, var_w_nqs_a_dn5);
+        Self::stamp_transient_equations_block_0(stamper, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, var_guard571, var_guard572, var_inqs0_a, var_inqs0_a_db0, var_inqs0_a_db1, var_inqs0_a_db2, var_inqs0_a_db3, var_inqs0_a_dn0, var_inqs0_a_dn1, var_inqs0_a_dn2, var_inqs0_a_dn3, var_inqs0_a_dn4, var_inqs0_a_dn5, var_inqs0_k, var_inqs0_k_db0, var_inqs0_k_db1, var_inqs0_k_db2, var_inqs0_k_db3, var_inqs0_k_dn0, var_inqs0_k_dn1, var_inqs0_k_dn2, var_inqs0_k_dn3, var_inqs0_k_dn4, var_inqs0_k_dn5, var_iwnqs0_a, var_iwnqs0_a_db0, var_iwnqs0_a_db1, var_iwnqs0_a_db2, var_iwnqs0_a_db3, var_iwnqs0_a_dn0, var_iwnqs0_a_dn1, var_iwnqs0_a_dn2, var_iwnqs0_a_dn3, var_iwnqs0_a_dn4, var_iwnqs0_a_dn5, var_q_nqs_a, var_q_nqs_a_db0, var_q_nqs_a_db1, var_q_nqs_a_db2, var_q_nqs_a_db3, var_q_nqs_a_dn0, var_q_nqs_a_dn1, var_q_nqs_a_dn2, var_q_nqs_a_dn3, var_q_nqs_a_dn4, var_q_nqs_a_dn5, var_q_nqs_k, var_q_nqs_k_db0, var_q_nqs_k_db1, var_q_nqs_k_db2, var_q_nqs_k_db3, var_q_nqs_k_dn0, var_q_nqs_k_dn1, var_q_nqs_k_dn2, var_q_nqs_k_dn3, var_q_nqs_k_dn4, var_q_nqs_k_dn5, var_w_nqs_a, var_w_nqs_a_db0, var_w_nqs_a_db1, var_w_nqs_a_db2, var_w_nqs_a_db3, var_w_nqs_a_dn0, var_w_nqs_a_dn1, var_w_nqs_a_dn2, var_w_nqs_a_dn3, var_w_nqs_a_dn4, var_w_nqs_a_dn5);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

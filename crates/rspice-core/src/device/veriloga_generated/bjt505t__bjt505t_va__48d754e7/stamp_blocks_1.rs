@@ -15367,9 +15367,15 @@ impl Instance {
         nodes: &[usize; Instance::NODE_COUNT],
         ddt_active: bool,
         ddt_scale: f64,
+        ddt_previous_value_scale: f64,
+        ddt_older_value_scale: f64,
+        ddt_previous_derivative_scale: f64,
         ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         var_guard123: f64,
         var_iavl: f64,
         var_iavl_db0: f64,
@@ -15796,7 +15802,7 @@ impl Instance {
         var_guard125 = assign6900_e7171;
 
         let assign6910_e7174: f64 = (p.p147 * (nv4 - 0.0));
-        let assign6910_e7175: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, assign6910_e7174);
+        let assign6910_e7175: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, assign6910_e7174);
         let assign6910_e7177: f64 = (assign6910_e7175 * p.p1);
         var_i_cth = assign6910_e7177;
         var_i_cth_dn0 = 0.0;

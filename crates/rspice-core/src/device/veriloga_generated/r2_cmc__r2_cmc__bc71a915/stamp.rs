@@ -16,28 +16,44 @@ const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 fn eval_ddt<const STATE_COUNT: usize>(
     current: &mut [f64; STATE_COUNT],
     previous: &mut [f64; STATE_COUNT],
+    older: &mut [f64; STATE_COUNT],
     initialized: &mut [bool; STATE_COUNT],
+    derivative_current: &mut [f64; STATE_COUNT],
+    derivative_previous: &mut [f64; STATE_COUNT],
     ddt_active: bool,
     ddt_scale: f64,
+    ddt_previous_value_scale: f64,
+    ddt_older_value_scale: f64,
+    ddt_previous_derivative_scale: f64,
     slot: usize,
     value: f64,
 ) -> f64 {
     debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
     let previous_value = if initialized[slot] { previous[slot] } else { value };
+    let older_value = if initialized[slot] { older[slot] } else { value };
     current[slot] = value;
     if ddt_active {
-        (value - previous_value) * ddt_scale
+        let result = value * ddt_scale
+            - previous_value * ddt_previous_value_scale
+            - older_value * ddt_older_value_scale
+            - derivative_previous[slot] * ddt_previous_derivative_scale;
+        derivative_current[slot] = result;
+        result
     } else {
+        current[slot] = value;
         previous[slot] = value;
+        older[slot] = value;
+        derivative_current[slot] = 0.0;
+        derivative_previous[slot] = 0.0;
         initialized[slot] = true;
         0.0
     }
 }
 
 #[inline]
-fn ddt_jacobian(timestep: f64, derivative: f64) -> f64 {
-    if timestep.abs() > Instance::DDT_EPSILON {
-        derivative / timestep
+fn ddt_jacobian(ddt_active: bool, ddt_scale: f64, derivative: f64) -> f64 {
+    if ddt_active {
+        derivative * ddt_scale
     } else {
         0.0
     }

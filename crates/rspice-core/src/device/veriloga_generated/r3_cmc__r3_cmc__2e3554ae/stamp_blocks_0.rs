@@ -2058,9 +2058,15 @@ impl Instance {
         multiplicity: f64,
         ddt_active: bool,
         ddt_scale: f64,
+        ddt_previous_value_scale: f64,
+        ddt_older_value_scale: f64,
+        ddt_previous_derivative_scale: f64,
         ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
     ) {
         let nv2 = ctx.node_voltage(nodes[2]);
         let nv5 = ctx.node_voltage(nodes[5]);
@@ -2100,41 +2106,35 @@ impl Instance {
             &eq8_branch_derivatives,
             multiplicity,
         );
-        let eq9_e181: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, s.v[96]);
+        let eq9_e181: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, s.v[96]);
         let eq9_value: f64 = eq9_e181;
-        let eq9_node_derivatives: [f64; 6] = [(s.dn[96][0] * ddt_scale), (s.dn[96][1] * ddt_scale), (s.dn[96][2] * ddt_scale), (s.dn[96][3] * ddt_scale), (s.dn[96][4] * ddt_scale), (s.dn[96][5] * ddt_scale)];
-        let eq9_branch_derivatives: [f64; 2] = [(s.db[96][0] * ddt_scale), (s.db[96][1] * ddt_scale)];
         stamper.stamp_current_dense_local(
             Some(1),
             Some(4),
             multiplicity * (eq9_value),
-            &eq9_node_derivatives,
-            &eq9_branch_derivatives,
-            multiplicity,
+            &s.dn[96],
+            &s.db[96],
+            (multiplicity) * (ddt_scale),
         );
-        let eq10_e183: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, s.v[97]);
+        let eq10_e183: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 1, s.v[97]);
         let eq10_value: f64 = eq10_e183;
-        let eq10_node_derivatives: [f64; 6] = [(s.dn[97][0] * ddt_scale), (s.dn[97][1] * ddt_scale), (s.dn[97][2] * ddt_scale), (s.dn[97][3] * ddt_scale), (s.dn[97][4] * ddt_scale), (s.dn[97][5] * ddt_scale)];
-        let eq10_branch_derivatives: [f64; 2] = [(s.db[97][0] * ddt_scale), (s.db[97][1] * ddt_scale)];
         stamper.stamp_current_dense_local(
             Some(1),
             Some(5),
             multiplicity * (eq10_value),
-            &eq10_node_derivatives,
-            &eq10_branch_derivatives,
-            multiplicity,
+            &s.dn[97],
+            &s.db[97],
+            (multiplicity) * (ddt_scale),
         );
-        let eq11_e185: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, s.v[98]);
+        let eq11_e185: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 2, s.v[98]);
         let eq11_value: f64 = eq11_e185;
-        let eq11_node_derivatives: [f64; 6] = [(s.dn[98][0] * ddt_scale), (s.dn[98][1] * ddt_scale), (s.dn[98][2] * ddt_scale), (s.dn[98][3] * ddt_scale), (s.dn[98][4] * ddt_scale), (s.dn[98][5] * ddt_scale)];
-        let eq11_branch_derivatives: [f64; 2] = [(s.db[98][0] * ddt_scale), (s.db[98][1] * ddt_scale)];
         stamper.stamp_current_dense_local(
             Some(3),
             None,
             multiplicity * (eq11_value),
-            &eq11_node_derivatives,
-            &eq11_branch_derivatives,
-            multiplicity,
+            &s.dn[98],
+            &s.db[98],
+            (multiplicity) * (ddt_scale),
         );
     }
 

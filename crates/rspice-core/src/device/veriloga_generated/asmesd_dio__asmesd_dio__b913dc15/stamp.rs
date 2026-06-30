@@ -19,28 +19,44 @@ const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 fn eval_ddt<const STATE_COUNT: usize>(
     current: &mut [f64; STATE_COUNT],
     previous: &mut [f64; STATE_COUNT],
+    older: &mut [f64; STATE_COUNT],
     initialized: &mut [bool; STATE_COUNT],
+    derivative_current: &mut [f64; STATE_COUNT],
+    derivative_previous: &mut [f64; STATE_COUNT],
     ddt_active: bool,
     ddt_scale: f64,
+    ddt_previous_value_scale: f64,
+    ddt_older_value_scale: f64,
+    ddt_previous_derivative_scale: f64,
     slot: usize,
     value: f64,
 ) -> f64 {
     debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
     let previous_value = if initialized[slot] { previous[slot] } else { value };
+    let older_value = if initialized[slot] { older[slot] } else { value };
     current[slot] = value;
     if ddt_active {
-        (value - previous_value) * ddt_scale
+        let result = value * ddt_scale
+            - previous_value * ddt_previous_value_scale
+            - older_value * ddt_older_value_scale
+            - derivative_previous[slot] * ddt_previous_derivative_scale;
+        derivative_current[slot] = result;
+        result
     } else {
+        current[slot] = value;
         previous[slot] = value;
+        older[slot] = value;
+        derivative_current[slot] = 0.0;
+        derivative_previous[slot] = 0.0;
         initialized[slot] = true;
         0.0
     }
 }
 
 #[inline]
-fn ddt_jacobian(timestep: f64, derivative: f64) -> f64 {
-    if timestep.abs() > Instance::DDT_EPSILON {
-        derivative / timestep
+fn ddt_jacobian(ddt_active: bool, ddt_scale: f64, derivative: f64) -> f64 {
+    if ddt_active {
+        derivative * ddt_scale
     } else {
         0.0
     }
@@ -93,9 +109,15 @@ impl Instance {
         let timestep = (*self).timestep;
         let ddt_state_current = self.ddt_state_current.as_mut();
         let ddt_state_previous = self.ddt_state_previous.as_mut();
+        let ddt_state_older = self.ddt_state_older.as_mut();
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
-        let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
-        let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
+        let ddt_derivative_current = self.ddt_derivative_current.as_mut();
+        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();
+        let ddt_active = self.ddt_coefficients.active;
+        let ddt_scale = self.ddt_coefficients.derivative_scale;
+        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
+        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
+        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let v1: f64 = 0.0;
         let v5: f64 = nv3;
         let v6: f64 = nv4;
@@ -940,8 +962,8 @@ impl Instance {
         Self::stamp_transient_block_2(ctx, p, nodes, var_cje_t, var_cje_t_db0, var_cje_t_db1, var_cje_t_db2, var_cje_t_db3, var_cje_t_db4, var_cje_t_db5, var_cje_t_db6, var_cje_t_dn0, var_cje_t_dn1, var_cje_t_dn2, var_cje_t_dn3, var_cje_t_dn4, var_cje_t_dn5, var_cje_t_dn6, var_guard5, var_ifwd, var_ifwd_db0, var_ifwd_db1, var_ifwd_db2, var_ifwd_db3, var_ifwd_db4, var_ifwd_db5, var_ifwd_db6, var_ifwd_dn0, var_ifwd_dn1, var_ifwd_dn2, var_ifwd_dn3, var_ifwd_dn4, var_ifwd_dn5, var_ifwd_dn6, var_lnrt, var_lnrt_db0, var_lnrt_db1, var_lnrt_db2, var_lnrt_db3, var_lnrt_db4, var_lnrt_db5, var_lnrt_db6, var_lnrt_dn0, var_lnrt_dn1, var_lnrt_dn2, var_lnrt_dn3, var_lnrt_dn4, var_lnrt_dn5, var_lnrt_dn6, var_vbbi, var_vbbi_db0, var_vbbi_db1, var_vbbi_db2, var_vbbi_db3, var_vbbi_db4, var_vbbi_db5, var_vbbi_db6, var_vbbi_dn0, var_vbbi_dn1, var_vbbi_dn2, var_vbbi_dn3, var_vbbi_dn4, var_vbbi_dn5, var_vbbi_dn6, var_vbiei, var_vbiei_db0, var_vbiei_db1, var_vbiei_db2, var_vbiei_db3, var_vbiei_db4, var_vbiei_db5, var_vbiei_db6, var_vbiei_dn0, var_vbiei_dn1, var_vbiei_dn2, var_vbiei_dn3, var_vbiei_dn4, var_vbiei_dn5, var_vbiei_dn6, var_veei, var_veei_db0, var_veei_db1, var_veei_db2, var_veei_db3, var_veei_db4, var_veei_db5, var_veei_db6, var_veei_dn0, var_veei_dn1, var_veei_dn2, var_veei_dn3, var_veei_dn4, var_veei_dn5, var_veei_dn6, var_vje_t, var_vje_t_db0, var_vje_t_db1, var_vje_t_db2, var_vje_t_db3, var_vje_t_db4, var_vje_t_db5, var_vje_t_db6, var_vje_t_dn0, var_vje_t_dn1, var_vje_t_dn2, var_vje_t_dn3, var_vje_t_dn4, var_vje_t_dn5, var_vje_t_dn6, &mut var_dv0, &mut var_dv0_db0, &mut var_dv0_db1, &mut var_dv0_db2, &mut var_dv0_db3, &mut var_dv0_db4, &mut var_dv0_db5, &mut var_dv0_db6, &mut var_dv0_dn0, &mut var_dv0_dn1, &mut var_dv0_dn2, &mut var_dv0_dn3, &mut var_dv0_dn4, &mut var_dv0_dn5, &mut var_dv0_dn6, &mut var_dvh, &mut var_dvh_db0, &mut var_dvh_db1, &mut var_dvh_db2, &mut var_dvh_db3, &mut var_dvh_db4, &mut var_dvh_db5, &mut var_dvh_db6, &mut var_dvh_dn0, &mut var_dvh_dn1, &mut var_dvh_dn2, &mut var_dvh_dn3, &mut var_dvh_dn4, &mut var_dvh_dn5, &mut var_dvh_dn6, &mut var_guard10, &mut var_guard7, &mut var_guard8, &mut var_guard9, &mut var_ibe, &mut var_ibe_db0, &mut var_ibe_db1, &mut var_ibe_db2, &mut var_ibe_db3, &mut var_ibe_db4, &mut var_ibe_db5, &mut var_ibe_db6, &mut var_ibe_dn0, &mut var_ibe_dn1, &mut var_ibe_dn2, &mut var_ibe_dn3, &mut var_ibe_dn4, &mut var_ibe_dn5, &mut var_ibe_dn6, &mut var_itrev, &mut var_itrev_db0, &mut var_itrev_db1, &mut var_itrev_db2, &mut var_itrev_db3, &mut var_itrev_db4, &mut var_itrev_db5, &mut var_itrev_db6, &mut var_itrev_dn0, &mut var_itrev_dn1, &mut var_itrev_dn2, &mut var_itrev_dn3, &mut var_itrev_dn4, &mut var_itrev_dn5, &mut var_itrev_dn6, &mut var_itzf, &mut var_itzf_db0, &mut var_itzf_db1, &mut var_itzf_db2, &mut var_itzf_db3, &mut var_itzf_db4, &mut var_itzf_db5, &mut var_itzf_db6, &mut var_itzf_dn0, &mut var_itzf_dn1, &mut var_itzf_dn2, &mut var_itzf_dn3, &mut var_itzf_dn4, &mut var_itzf_dn5, &mut var_itzf_dn6, &mut var_pwq, &mut var_qde, &mut var_qde_db0, &mut var_qde_db1, &mut var_qde_db2, &mut var_qde_db3, &mut var_qde_db4, &mut var_qde_db5, &mut var_qde_db6, &mut var_qde_dn0, &mut var_qde_dn1, &mut var_qde_dn2, &mut var_qde_dn3, &mut var_qde_dn4, &mut var_qde_dn5, &mut var_qde_dn6, &mut var_qhi, &mut var_qhi_db0, &mut var_qhi_db1, &mut var_qhi_db2, &mut var_qhi_db3, &mut var_qhi_db4, &mut var_qhi_db5, &mut var_qhi_db6, &mut var_qhi_dn0, &mut var_qhi_dn1, &mut var_qhi_dn2, &mut var_qhi_dn3, &mut var_qhi_dn4, &mut var_qhi_dn5, &mut var_qhi_dn6, &mut var_qje, &mut var_qje_db0, &mut var_qje_db1, &mut var_qje_db2, &mut var_qje_db3, &mut var_qje_db4, &mut var_qje_db5, &mut var_qje_db6, &mut var_qje_dn0, &mut var_qje_dn1, &mut var_qje_dn2, &mut var_qje_dn3, &mut var_qje_dn4, &mut var_qje_dn5, &mut var_qje_dn6, &mut var_qlo, &mut var_qlo_db0, &mut var_qlo_db1, &mut var_qlo_db2, &mut var_qlo_db3, &mut var_qlo_db4, &mut var_qlo_db5, &mut var_qlo_db6, &mut var_qlo_dn0, &mut var_qlo_dn1, &mut var_qlo_dn2, &mut var_qlo_dn3, &mut var_qlo_dn4, &mut var_qlo_dn5, &mut var_qlo_dn6, &mut var_rb, &mut var_rb_db0, &mut var_rb_db1, &mut var_rb_db2, &mut var_rb_db3, &mut var_rb_db4, &mut var_rb_db5, &mut var_rb_db6, &mut var_rb_dn0, &mut var_rb_dn1, &mut var_rb_dn2, &mut var_rb_dn3, &mut var_rb_dn4, &mut var_rb_dn5, &mut var_rb_dn6, &mut var_re, &mut var_re_db0, &mut var_re_db1, &mut var_re_db2, &mut var_re_db3, &mut var_re_db4, &mut var_re_db5, &mut var_re_db6, &mut var_re_dn0, &mut var_re_dn1, &mut var_re_dn2, &mut var_re_dn3, &mut var_re_dn4, &mut var_re_dn5, &mut var_re_dn6, &mut var_tff, &mut var_tff_db0, &mut var_tff_db1, &mut var_tff_db2, &mut var_tff_db3, &mut var_tff_db4, &mut var_tff_db5, &mut var_tff_db6, &mut var_tff_dn0, &mut var_tff_dn1, &mut var_tff_dn2, &mut var_tff_dn3, &mut var_tff_dn4, &mut var_tff_dn5, &mut var_tff_dn6, &mut var_vbesat, &mut var_vbesat_db0, &mut var_vbesat_db1, &mut var_vbesat_db2, &mut var_vbesat_db3, &mut var_vbesat_db4, &mut var_vbesat_db5, &mut var_vbesat_db6, &mut var_vbesat_dn0, &mut var_vbesat_dn1, &mut var_vbesat_dn2, &mut var_vbesat_dn3, &mut var_vbesat_dn4, &mut var_vbesat_dn5, &mut var_vbesat_dn6, &mut var_veesat, &mut var_veesat_db0, &mut var_veesat_db1, &mut var_veesat_db2, &mut var_veesat_db3, &mut var_veesat_db4, &mut var_veesat_db5, &mut var_veesat_db6, &mut var_veesat_dn0, &mut var_veesat_dn1, &mut var_veesat_dn2, &mut var_veesat_dn3, &mut var_veesat_dn4, &mut var_veesat_dn5, &mut var_veesat_dn6, &mut var_vtff, &mut var_vtff1, &mut var_vtff1_db0, &mut var_vtff1_db1, &mut var_vtff1_db2, &mut var_vtff1_db3, &mut var_vtff1_db4, &mut var_vtff1_db5, &mut var_vtff1_db6, &mut var_vtff1_dn0, &mut var_vtff1_dn1, &mut var_vtff1_dn2, &mut var_vtff1_dn3, &mut var_vtff1_dn4, &mut var_vtff1_dn5, &mut var_vtff1_dn6, &mut var_vtff_db0, &mut var_vtff_db1, &mut var_vtff_db2, &mut var_vtff_db3, &mut var_vtff_db4, &mut var_vtff_db5, &mut var_vtff_db6, &mut var_vtff_dn0, &mut var_vtff_dn1, &mut var_vtff_dn2, &mut var_vtff_dn3, &mut var_vtff_dn4, &mut var_vtff_dn5, &mut var_vtff_dn6);
         Self::stamp_transient_block_3(p, var_weff, &mut var_guard11, &mut var_guard12, &mut var_guard13, &mut var_guard14, &mut var_rb_nom, &mut var_re_nom);
 
-        Self::stamp_transient_equations_block_0(ctx, stamper, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized, var_guard10, var_guard11, var_guard12, var_guard13, var_guard14, var_guard8, var_ibe, var_ibe_db0, var_ibe_db1, var_ibe_db2, var_ibe_db3, var_ibe_db4, var_ibe_db5, var_ibe_db6, var_ibe_dn0, var_ibe_dn1, var_ibe_dn2, var_ibe_dn3, var_ibe_dn4, var_ibe_dn5, var_ibe_dn6, var_ifwd, var_ifwd_db0, var_ifwd_db1, var_ifwd_db2, var_ifwd_db3, var_ifwd_db4, var_ifwd_db5, var_ifwd_db6, var_ifwd_dn0, var_ifwd_dn1, var_ifwd_dn2, var_ifwd_dn3, var_ifwd_dn4, var_ifwd_dn5, var_ifwd_dn6, var_rb, var_rb_db0, var_rb_db1, var_rb_db2, var_rb_db3, var_rb_db4, var_rb_db5, var_rb_db6, var_rb_dn0, var_rb_dn1, var_rb_dn2, var_rb_dn3, var_rb_dn4, var_rb_dn5, var_rb_dn6, var_re, var_re_db0, var_re_db1, var_re_db2, var_re_db3, var_re_db4, var_re_db5, var_re_db6, var_re_dn0, var_re_dn1, var_re_dn2, var_re_dn3, var_re_dn4, var_re_dn5, var_re_dn6, var_tff, var_tff_db0, var_tff_db1, var_tff_db2, var_tff_db3, var_tff_db4, var_tff_db5, var_tff_db6, var_tff_dn0, var_tff_dn1, var_tff_dn2, var_tff_dn3, var_tff_dn4, var_tff_dn5, var_tff_dn6, var_weff);
-        Self::stamp_transient_equations_block_1(stamper, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized, var_ibe, var_ibe_db0, var_ibe_db1, var_ibe_db2, var_ibe_db3, var_ibe_db4, var_ibe_db5, var_ibe_db6, var_ibe_dn0, var_ibe_dn1, var_ibe_dn2, var_ibe_dn3, var_ibe_dn4, var_ibe_dn5, var_ibe_dn6, var_qde, var_qde_db0, var_qde_db1, var_qde_db2, var_qde_db3, var_qde_db4, var_qde_db5, var_qde_db6, var_qde_dn0, var_qde_dn1, var_qde_dn2, var_qde_dn3, var_qde_dn4, var_qde_dn5, var_qde_dn6, var_qje, var_qje_db0, var_qje_db1, var_qje_db2, var_qje_db3, var_qje_db4, var_qje_db5, var_qje_db6, var_qje_dn0, var_qje_dn1, var_qje_dn2, var_qje_dn3, var_qje_dn4, var_qje_dn5, var_qje_dn6, var_ttype, var_weff);
+        Self::stamp_transient_equations_block_0(ctx, stamper, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, var_guard10, var_guard11, var_guard12, var_guard13, var_guard14, var_guard8, var_ibe, var_ibe_db0, var_ibe_db1, var_ibe_db2, var_ibe_db3, var_ibe_db4, var_ibe_db5, var_ibe_db6, var_ibe_dn0, var_ibe_dn1, var_ibe_dn2, var_ibe_dn3, var_ibe_dn4, var_ibe_dn5, var_ibe_dn6, var_ifwd, var_ifwd_db0, var_ifwd_db1, var_ifwd_db2, var_ifwd_db3, var_ifwd_db4, var_ifwd_db5, var_ifwd_db6, var_ifwd_dn0, var_ifwd_dn1, var_ifwd_dn2, var_ifwd_dn3, var_ifwd_dn4, var_ifwd_dn5, var_ifwd_dn6, var_rb, var_rb_db0, var_rb_db1, var_rb_db2, var_rb_db3, var_rb_db4, var_rb_db5, var_rb_db6, var_rb_dn0, var_rb_dn1, var_rb_dn2, var_rb_dn3, var_rb_dn4, var_rb_dn5, var_rb_dn6, var_re, var_re_db0, var_re_db1, var_re_db2, var_re_db3, var_re_db4, var_re_db5, var_re_db6, var_re_dn0, var_re_dn1, var_re_dn2, var_re_dn3, var_re_dn4, var_re_dn5, var_re_dn6, var_tff, var_tff_db0, var_tff_db1, var_tff_db2, var_tff_db3, var_tff_db4, var_tff_db5, var_tff_db6, var_tff_dn0, var_tff_dn1, var_tff_dn2, var_tff_dn3, var_tff_dn4, var_tff_dn5, var_tff_dn6, var_weff);
+        Self::stamp_transient_equations_block_1(stamper, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, var_ibe, var_ibe_db0, var_ibe_db1, var_ibe_db2, var_ibe_db3, var_ibe_db4, var_ibe_db5, var_ibe_db6, var_ibe_dn0, var_ibe_dn1, var_ibe_dn2, var_ibe_dn3, var_ibe_dn4, var_ibe_dn5, var_ibe_dn6, var_qde, var_qde_db0, var_qde_db1, var_qde_db2, var_qde_db3, var_qde_db4, var_qde_db5, var_qde_db6, var_qde_dn0, var_qde_dn1, var_qde_dn2, var_qde_dn3, var_qde_dn4, var_qde_dn5, var_qde_dn6, var_qje, var_qje_db0, var_qje_db1, var_qje_db2, var_qje_db3, var_qje_db4, var_qje_db5, var_qje_db6, var_qje_dn0, var_qje_dn1, var_qje_dn2, var_qje_dn3, var_qje_dn4, var_qje_dn5, var_qje_dn6, var_ttype, var_weff);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

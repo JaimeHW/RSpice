@@ -19,28 +19,44 @@ const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 fn eval_ddt<const STATE_COUNT: usize>(
     current: &mut [f64; STATE_COUNT],
     previous: &mut [f64; STATE_COUNT],
+    older: &mut [f64; STATE_COUNT],
     initialized: &mut [bool; STATE_COUNT],
+    derivative_current: &mut [f64; STATE_COUNT],
+    derivative_previous: &mut [f64; STATE_COUNT],
     ddt_active: bool,
     ddt_scale: f64,
+    ddt_previous_value_scale: f64,
+    ddt_older_value_scale: f64,
+    ddt_previous_derivative_scale: f64,
     slot: usize,
     value: f64,
 ) -> f64 {
     debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
     let previous_value = if initialized[slot] { previous[slot] } else { value };
+    let older_value = if initialized[slot] { older[slot] } else { value };
     current[slot] = value;
     if ddt_active {
-        (value - previous_value) * ddt_scale
+        let result = value * ddt_scale
+            - previous_value * ddt_previous_value_scale
+            - older_value * ddt_older_value_scale
+            - derivative_previous[slot] * ddt_previous_derivative_scale;
+        derivative_current[slot] = result;
+        result
     } else {
+        current[slot] = value;
         previous[slot] = value;
+        older[slot] = value;
+        derivative_current[slot] = 0.0;
+        derivative_previous[slot] = 0.0;
         initialized[slot] = true;
         0.0
     }
 }
 
 #[inline]
-fn ddt_jacobian(timestep: f64, derivative: f64) -> f64 {
-    if timestep.abs() > Instance::DDT_EPSILON {
-        derivative / timestep
+fn ddt_jacobian(ddt_active: bool, ddt_scale: f64, derivative: f64) -> f64 {
+    if ddt_active {
+        derivative * ddt_scale
     } else {
         0.0
     }
@@ -107,9 +123,15 @@ impl Instance {
         let timestep = (*self).timestep;
         let ddt_state_current = self.ddt_state_current.as_mut();
         let ddt_state_previous = self.ddt_state_previous.as_mut();
+        let ddt_state_older = self.ddt_state_older.as_mut();
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
-        let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
-        let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
+        let ddt_derivative_current = self.ddt_derivative_current.as_mut();
+        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();
+        let ddt_active = self.ddt_coefficients.active;
+        let ddt_scale = self.ddt_coefficients.derivative_scale;
+        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
+        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
+        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let v0: f64 = nv8;
         let v1: f64 = nv5;
         let v2: f64 = (v0 - v1);
@@ -1690,7 +1712,7 @@ impl Instance {
             multiplicity * (d499_dn11),
         );
         let d435_dn12: f64 = self.scalar_v433;
-        let v435_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, v435);
+        let v435_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, v435);
         stamper.stamp_current_node1_local(
             Some(12),
             None,
@@ -1700,7 +1722,7 @@ impl Instance {
         );
         let d439_dn1: f64 = self.scalar_v436;
         let d439_dn3: f64 = self.scalar_v1456;
-        let v439_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 6, v439);
+        let v439_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 6, v439);
         stamper.stamp_current_node2_local(
             Some(4),
             Some(3),
@@ -1712,7 +1734,7 @@ impl Instance {
         );
         let d441_dn3: f64 = self.scalar_v440;
         let d441_dn5: f64 = self.scalar_v1457;
-        let v441_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 7, v441);
+        let v441_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 7, v441);
         stamper.stamp_current_node2_local(
             Some(3),
             Some(5),
@@ -1724,7 +1746,7 @@ impl Instance {
         );
         let d444_dn3: f64 = v100;
         let d444_dn10: f64 = v1458;
-        let v444_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 8, v444);
+        let v444_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 8, v444);
         stamper.stamp_current_node2_local(
             Some(3),
             Some(10),
@@ -1736,7 +1758,7 @@ impl Instance {
         );
         let d453_dn8: f64 = self.scalar_v1479;
         let d453_dn9: f64 = self.scalar_v450;
-        let v453_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 9, v453);
+        let v453_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 9, v453);
         stamper.stamp_current_node2_local(
             Some(9),
             Some(8),
@@ -3517,7 +3539,7 @@ impl Instance {
             multiplicity,
         );
 
-        Self::stamp_transient_equations_block_0(ctx, stamper, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized, var_cgd, var_cgd_db0, var_cgd_db1, var_cgd_db10, var_cgd_db11, var_cgd_db12, var_cgd_db13, var_cgd_db14, var_cgd_db2, var_cgd_db3, var_cgd_db4, var_cgd_db5, var_cgd_db6, var_cgd_db7, var_cgd_db8, var_cgd_db9, var_cgd_dn0, var_cgd_dn1, var_cgd_dn10, var_cgd_dn11, var_cgd_dn12, var_cgd_dn13, var_cgd_dn14, var_cgd_dn15, var_cgd_dn2, var_cgd_dn3, var_cgd_dn4, var_cgd_dn5, var_cgd_dn6, var_cgd_dn7, var_cgd_dn8, var_cgd_dn9, var_cgs, var_cgs_db0, var_cgs_db1, var_cgs_db10, var_cgs_db11, var_cgs_db12, var_cgs_db13, var_cgs_db14, var_cgs_db2, var_cgs_db3, var_cgs_db4, var_cgs_db5, var_cgs_db6, var_cgs_db7, var_cgs_db8, var_cgs_db9, var_cgs_dn0, var_cgs_dn1, var_cgs_dn10, var_cgs_dn11, var_cgs_dn12, var_cgs_dn13, var_cgs_dn14, var_cgs_dn15, var_cgs_dn2, var_cgs_dn3, var_cgs_dn4, var_cgs_dn5, var_cgs_dn6, var_cgs_dn7, var_cgs_dn8, var_cgs_dn9, var_ci, var_ci_db0, var_ci_db1, var_ci_db10, var_ci_db11, var_ci_db12, var_ci_db13, var_ci_db14, var_ci_db2, var_ci_db3, var_ci_db4, var_ci_db5, var_ci_db6, var_ci_db7, var_ci_db8, var_ci_db9, var_ci_dn0, var_ci_dn1, var_ci_dn10, var_ci_dn11, var_ci_dn12, var_ci_dn13, var_ci_dn14, var_ci_dn15, var_ci_dn2, var_ci_dn3, var_ci_dn4, var_ci_dn5, var_ci_dn6, var_ci_dn7, var_ci_dn8, var_ci_dn9, var_guard16, var_guard21, var_guard22, var_guard23, var_guard24, var_guard25, var_guard26, var_guard27, var_guard43, var_qgd, var_qgd_db0, var_qgd_db1, var_qgd_db10, var_qgd_db11, var_qgd_db12, var_qgd_db13, var_qgd_db14, var_qgd_db2, var_qgd_db3, var_qgd_db4, var_qgd_db5, var_qgd_db6, var_qgd_db7, var_qgd_db8, var_qgd_db9, var_qgd_dn0, var_qgd_dn1, var_qgd_dn10, var_qgd_dn11, var_qgd_dn12, var_qgd_dn13, var_qgd_dn14, var_qgd_dn15, var_qgd_dn2, var_qgd_dn3, var_qgd_dn4, var_qgd_dn5, var_qgd_dn6, var_qgd_dn7, var_qgd_dn8, var_qgd_dn9, var_qgs, var_qgs_db0, var_qgs_db1, var_qgs_db10, var_qgs_db11, var_qgs_db12, var_qgs_db13, var_qgs_db14, var_qgs_db2, var_qgs_db3, var_qgs_db4, var_qgs_db5, var_qgs_db6, var_qgs_db7, var_qgs_db8, var_qgs_db9, var_qgs_dn0, var_qgs_dn1, var_qgs_dn10, var_qgs_dn11, var_qgs_dn12, var_qgs_dn13, var_qgs_dn14, var_qgs_dn15, var_qgs_dn2, var_qgs_dn3, var_qgs_dn4, var_qgs_dn5, var_qgs_dn6, var_qgs_dn7, var_qgs_dn8, var_qgs_dn9, var_rd1_t, var_rd1_t_db0, var_rd1_t_db1, var_rd1_t_db10, var_rd1_t_db11, var_rd1_t_db12, var_rd1_t_db13, var_rd1_t_db14, var_rd1_t_db2, var_rd1_t_db3, var_rd1_t_db4, var_rd1_t_db5, var_rd1_t_db6, var_rd1_t_db7, var_rd1_t_db8, var_rd1_t_db9, var_rd1_t_dn0, var_rd1_t_dn1, var_rd1_t_dn10, var_rd1_t_dn11, var_rd1_t_dn12, var_rd1_t_dn13, var_rd1_t_dn14, var_rd1_t_dn15, var_rd1_t_dn2, var_rd1_t_dn3, var_rd1_t_dn4, var_rd1_t_dn5, var_rd1_t_dn6, var_rd1_t_dn7, var_rd1_t_dn8, var_rd1_t_dn9, var_rs_t, var_rs_t_db0, var_rs_t_db1, var_rs_t_db10, var_rs_t_db11, var_rs_t_db12, var_rs_t_db13, var_rs_t_db14, var_rs_t_db2, var_rs_t_db3, var_rs_t_db4, var_rs_t_db5, var_rs_t_db6, var_rs_t_db7, var_rs_t_db8, var_rs_t_db9, var_rs_t_dn0, var_rs_t_dn1, var_rs_t_dn10, var_rs_t_dn11, var_rs_t_dn12, var_rs_t_dn13, var_rs_t_dn14, var_rs_t_dn15, var_rs_t_dn2, var_rs_t_dn3, var_rs_t_dn4, var_rs_t_dn5, var_rs_t_dn6, var_rs_t_dn7, var_rs_t_dn8, var_rs_t_dn9, var_vgdc, var_vgdc_db0, var_vgdc_db1, var_vgdc_db10, var_vgdc_db11, var_vgdc_db12, var_vgdc_db13, var_vgdc_db14, var_vgdc_db2, var_vgdc_db3, var_vgdc_db4, var_vgdc_db5, var_vgdc_db6, var_vgdc_db7, var_vgdc_db8, var_vgdc_db9, var_vgdc_dn0, var_vgdc_dn1, var_vgdc_dn10, var_vgdc_dn11, var_vgdc_dn12, var_vgdc_dn13, var_vgdc_dn14, var_vgdc_dn15, var_vgdc_dn2, var_vgdc_dn3, var_vgdc_dn4, var_vgdc_dn5, var_vgdc_dn6, var_vgdc_dn7, var_vgdc_dn8, var_vgdc_dn9, var_vgsc, var_vgsc_db0, var_vgsc_db1, var_vgsc_db10, var_vgsc_db11, var_vgsc_db12, var_vgsc_db13, var_vgsc_db14, var_vgsc_db2, var_vgsc_db3, var_vgsc_db4, var_vgsc_db5, var_vgsc_db6, var_vgsc_db7, var_vgsc_db8, var_vgsc_db9, var_vgsc_dn0, var_vgsc_dn1, var_vgsc_dn10, var_vgsc_dn11, var_vgsc_dn12, var_vgsc_dn13, var_vgsc_dn14, var_vgsc_dn15, var_vgsc_dn2, var_vgsc_dn3, var_vgsc_dn4, var_vgsc_dn5, var_vgsc_dn6, var_vgsc_dn7, var_vgsc_dn8, var_vgsc_dn9);
+        Self::stamp_transient_equations_block_0(ctx, stamper, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, var_cgd, var_cgd_db0, var_cgd_db1, var_cgd_db10, var_cgd_db11, var_cgd_db12, var_cgd_db13, var_cgd_db14, var_cgd_db2, var_cgd_db3, var_cgd_db4, var_cgd_db5, var_cgd_db6, var_cgd_db7, var_cgd_db8, var_cgd_db9, var_cgd_dn0, var_cgd_dn1, var_cgd_dn10, var_cgd_dn11, var_cgd_dn12, var_cgd_dn13, var_cgd_dn14, var_cgd_dn15, var_cgd_dn2, var_cgd_dn3, var_cgd_dn4, var_cgd_dn5, var_cgd_dn6, var_cgd_dn7, var_cgd_dn8, var_cgd_dn9, var_cgs, var_cgs_db0, var_cgs_db1, var_cgs_db10, var_cgs_db11, var_cgs_db12, var_cgs_db13, var_cgs_db14, var_cgs_db2, var_cgs_db3, var_cgs_db4, var_cgs_db5, var_cgs_db6, var_cgs_db7, var_cgs_db8, var_cgs_db9, var_cgs_dn0, var_cgs_dn1, var_cgs_dn10, var_cgs_dn11, var_cgs_dn12, var_cgs_dn13, var_cgs_dn14, var_cgs_dn15, var_cgs_dn2, var_cgs_dn3, var_cgs_dn4, var_cgs_dn5, var_cgs_dn6, var_cgs_dn7, var_cgs_dn8, var_cgs_dn9, var_ci, var_ci_db0, var_ci_db1, var_ci_db10, var_ci_db11, var_ci_db12, var_ci_db13, var_ci_db14, var_ci_db2, var_ci_db3, var_ci_db4, var_ci_db5, var_ci_db6, var_ci_db7, var_ci_db8, var_ci_db9, var_ci_dn0, var_ci_dn1, var_ci_dn10, var_ci_dn11, var_ci_dn12, var_ci_dn13, var_ci_dn14, var_ci_dn15, var_ci_dn2, var_ci_dn3, var_ci_dn4, var_ci_dn5, var_ci_dn6, var_ci_dn7, var_ci_dn8, var_ci_dn9, var_guard16, var_guard21, var_guard22, var_guard23, var_guard24, var_guard25, var_guard26, var_guard27, var_guard43, var_qgd, var_qgd_db0, var_qgd_db1, var_qgd_db10, var_qgd_db11, var_qgd_db12, var_qgd_db13, var_qgd_db14, var_qgd_db2, var_qgd_db3, var_qgd_db4, var_qgd_db5, var_qgd_db6, var_qgd_db7, var_qgd_db8, var_qgd_db9, var_qgd_dn0, var_qgd_dn1, var_qgd_dn10, var_qgd_dn11, var_qgd_dn12, var_qgd_dn13, var_qgd_dn14, var_qgd_dn15, var_qgd_dn2, var_qgd_dn3, var_qgd_dn4, var_qgd_dn5, var_qgd_dn6, var_qgd_dn7, var_qgd_dn8, var_qgd_dn9, var_qgs, var_qgs_db0, var_qgs_db1, var_qgs_db10, var_qgs_db11, var_qgs_db12, var_qgs_db13, var_qgs_db14, var_qgs_db2, var_qgs_db3, var_qgs_db4, var_qgs_db5, var_qgs_db6, var_qgs_db7, var_qgs_db8, var_qgs_db9, var_qgs_dn0, var_qgs_dn1, var_qgs_dn10, var_qgs_dn11, var_qgs_dn12, var_qgs_dn13, var_qgs_dn14, var_qgs_dn15, var_qgs_dn2, var_qgs_dn3, var_qgs_dn4, var_qgs_dn5, var_qgs_dn6, var_qgs_dn7, var_qgs_dn8, var_qgs_dn9, var_rd1_t, var_rd1_t_db0, var_rd1_t_db1, var_rd1_t_db10, var_rd1_t_db11, var_rd1_t_db12, var_rd1_t_db13, var_rd1_t_db14, var_rd1_t_db2, var_rd1_t_db3, var_rd1_t_db4, var_rd1_t_db5, var_rd1_t_db6, var_rd1_t_db7, var_rd1_t_db8, var_rd1_t_db9, var_rd1_t_dn0, var_rd1_t_dn1, var_rd1_t_dn10, var_rd1_t_dn11, var_rd1_t_dn12, var_rd1_t_dn13, var_rd1_t_dn14, var_rd1_t_dn15, var_rd1_t_dn2, var_rd1_t_dn3, var_rd1_t_dn4, var_rd1_t_dn5, var_rd1_t_dn6, var_rd1_t_dn7, var_rd1_t_dn8, var_rd1_t_dn9, var_rs_t, var_rs_t_db0, var_rs_t_db1, var_rs_t_db10, var_rs_t_db11, var_rs_t_db12, var_rs_t_db13, var_rs_t_db14, var_rs_t_db2, var_rs_t_db3, var_rs_t_db4, var_rs_t_db5, var_rs_t_db6, var_rs_t_db7, var_rs_t_db8, var_rs_t_db9, var_rs_t_dn0, var_rs_t_dn1, var_rs_t_dn10, var_rs_t_dn11, var_rs_t_dn12, var_rs_t_dn13, var_rs_t_dn14, var_rs_t_dn15, var_rs_t_dn2, var_rs_t_dn3, var_rs_t_dn4, var_rs_t_dn5, var_rs_t_dn6, var_rs_t_dn7, var_rs_t_dn8, var_rs_t_dn9, var_vgdc, var_vgdc_db0, var_vgdc_db1, var_vgdc_db10, var_vgdc_db11, var_vgdc_db12, var_vgdc_db13, var_vgdc_db14, var_vgdc_db2, var_vgdc_db3, var_vgdc_db4, var_vgdc_db5, var_vgdc_db6, var_vgdc_db7, var_vgdc_db8, var_vgdc_db9, var_vgdc_dn0, var_vgdc_dn1, var_vgdc_dn10, var_vgdc_dn11, var_vgdc_dn12, var_vgdc_dn13, var_vgdc_dn14, var_vgdc_dn15, var_vgdc_dn2, var_vgdc_dn3, var_vgdc_dn4, var_vgdc_dn5, var_vgdc_dn6, var_vgdc_dn7, var_vgdc_dn8, var_vgdc_dn9, var_vgsc, var_vgsc_db0, var_vgsc_db1, var_vgsc_db10, var_vgsc_db11, var_vgsc_db12, var_vgsc_db13, var_vgsc_db14, var_vgsc_db2, var_vgsc_db3, var_vgsc_db4, var_vgsc_db5, var_vgsc_db6, var_vgsc_db7, var_vgsc_db8, var_vgsc_db9, var_vgsc_dn0, var_vgsc_dn1, var_vgsc_dn10, var_vgsc_dn11, var_vgsc_dn12, var_vgsc_dn13, var_vgsc_dn14, var_vgsc_dn15, var_vgsc_dn2, var_vgsc_dn3, var_vgsc_dn4, var_vgsc_dn5, var_vgsc_dn6, var_vgsc_dn7, var_vgsc_dn8, var_vgsc_dn9);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

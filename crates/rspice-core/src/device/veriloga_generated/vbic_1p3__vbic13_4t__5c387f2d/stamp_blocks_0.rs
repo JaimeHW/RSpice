@@ -266,7 +266,7 @@ impl Instance {
         let mut var_vtv_dn8: f64 = *var_vtv_dn8_slot;
         let mut var_vtv_dn9: f64 = *var_vtv_dn9_slot;
 
-        let assign00_e408: f64 = if ctx.analysis("static") { 1.0 } else { 0.0 };
+        let assign00_e408: f64 = if ctx.analysis_static() { 1.0 } else { 0.0 };
         var_guard1 = assign00_e408;
 
         let assign70_e452: f64 = if param_given[10] { 1.0 } else { 0.0 };

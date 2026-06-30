@@ -9,19 +9,35 @@ const LIMEXP_MAX: f64 = 5.54062238439351e34;
 fn eval_ddt<const STATE_COUNT: usize>(
     current: &mut [f64; STATE_COUNT],
     previous: &mut [f64; STATE_COUNT],
+    older: &mut [f64; STATE_COUNT],
     initialized: &mut [bool; STATE_COUNT],
+    derivative_current: &mut [f64; STATE_COUNT],
+    derivative_previous: &mut [f64; STATE_COUNT],
     ddt_active: bool,
     ddt_scale: f64,
+    ddt_previous_value_scale: f64,
+    ddt_older_value_scale: f64,
+    ddt_previous_derivative_scale: f64,
     slot: usize,
     value: f64,
 ) -> f64 {
     debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
     let previous_value = if initialized[slot] { previous[slot] } else { value };
+    let older_value = if initialized[slot] { older[slot] } else { value };
     current[slot] = value;
     if ddt_active {
-        (value - previous_value) * ddt_scale
+        let result = value * ddt_scale
+            - previous_value * ddt_previous_value_scale
+            - older_value * ddt_older_value_scale
+            - derivative_previous[slot] * ddt_previous_derivative_scale;
+        derivative_current[slot] = result;
+        result
     } else {
+        current[slot] = value;
         previous[slot] = value;
+        older[slot] = value;
+        derivative_current[slot] = 0.0;
+        derivative_previous[slot] = 0.0;
         initialized[slot] = true;
         0.0
     }
@@ -35,9 +51,15 @@ impl Instance {
         let timestep = self.timestep;
         let ddt_state_current = self.ddt_state_current.as_mut();
         let ddt_state_previous = self.ddt_state_previous.as_mut();
+        let ddt_state_older = self.ddt_state_older.as_mut();
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
-        let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
-        let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
+        let ddt_derivative_current = self.ddt_derivative_current.as_mut();
+        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();
+        let ddt_active = self.ddt_coefficients.active;
+        let ddt_scale = self.ddt_coefficients.derivative_scale;
+        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
+        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
+        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let v6: f64 = ctx.node_voltage(nodes[4]);
         let v7: f64 = (self.scalar_v5 + v6);
         let v8: f64 = 1.3806503e-23;
@@ -4903,7 +4925,7 @@ impl Instance {
         let d1284_dn7: f64 = v4788;
         let d1284_dn8: f64 = v4798;
         let d1284_dn9: f64 = v4799;
-        let v1284_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, v1284);
+        let v1284_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, v1284);
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(8),
             Some(9),
@@ -4918,7 +4940,7 @@ impl Instance {
         let d1286_dn7: f64 = v4807;
         let d1286_dn8: f64 = v4808;
         let d1286_dn9: f64 = v4809;
-        let v1286_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, v1286);
+        let v1286_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 1, v1286);
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(7),
             Some(9),
@@ -4934,7 +4956,7 @@ impl Instance {
         let d1293_dn7: f64 = v4814;
         let d1293_dn8: f64 = v4828;
         let d1293_dn9: f64 = v4816;
-        let v1293_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, v1293);
+        let v1293_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 2, v1293);
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(8),
             Some(6),
@@ -4948,7 +4970,7 @@ impl Instance {
         let d1294_dn4: f64 = v4829;
         let d1294_dn5: f64 = v4830;
         let d1294_dn8: f64 = v4831;
-        let v1294_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 3, v1294);
+        let v1294_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 3, v1294);
         stamper.stamp_current_node3_local(
             Some(8),
             Some(5),
@@ -4966,7 +4988,7 @@ impl Instance {
         let d1297_dn8: f64 = v4848;
         let d1297_dn9: f64 = v4838;
         let d1297_dn10: f64 = v4849;
-        let v1297_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 4, v1297);
+        let v1297_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 4, v1297);
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(7),
             Some(10),
@@ -4979,7 +5001,7 @@ impl Instance {
         );
         let d1304_dn1: f64 = self.scalar_v1303;
         let d1304_dn2: f64 = self.scalar_v4862;
-        let v1304_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 5, v1304);
+        let v1304_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 5, v1304);
         stamper.stamp_current_node2_local(
             Some(1),
             Some(2),
@@ -4991,7 +5013,7 @@ impl Instance {
         );
         let d1307_dn0: f64 = self.scalar_v4863;
         let d1307_dn1: f64 = self.scalar_v1306;
-        let v1307_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 6, v1307);
+        let v1307_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 6, v1307);
         stamper.stamp_current_node2_local(
             Some(1),
             Some(0),
@@ -5054,7 +5076,7 @@ impl Instance {
         let d1301_dn9: f64 = v4856;
         let d1301_dn10: f64 = v4860;
         let d1301_dn11: f64 = v4861;
-        let v1301_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 7, v1301);
+        let v1301_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 7, v1301);
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(11),
             Some(10),
@@ -5096,7 +5118,7 @@ impl Instance {
             multiplicity,
         );
         let d1345_dn4: f64 = self.scalar_v1344;
-        let v1345_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 8, v1345);
+        let v1345_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 8, v1345);
         stamper.stamp_current_node1_local(
             Some(4),
             None,

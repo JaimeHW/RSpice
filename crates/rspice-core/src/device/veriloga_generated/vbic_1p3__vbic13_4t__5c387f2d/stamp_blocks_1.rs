@@ -9244,7 +9244,7 @@ impl Instance {
         param_given: &[bool; Instance::PARAMETER_COUNT],
     ) {
         let ctx_temp = ctx.temperature();
-        s.b[172] = ctx.analysis("static");
+        s.b[172] = ctx.analysis_static();
         s.store_scalar(172, if s.b[172] { 1.0 } else { 0.0 });
 
         s.b[176] = param_given[11];
@@ -10272,9 +10272,15 @@ impl Instance {
         multiplicity: f64,
         ddt_active: bool,
         ddt_scale: f64,
+        ddt_previous_value_scale: f64,
+        ddt_older_value_scale: f64,
+        ddt_previous_derivative_scale: f64,
         ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         var_ibc: f64,
         var_ibc_dn0: f64,
         var_ibc_dn1: f64,
@@ -10856,7 +10862,7 @@ impl Instance {
             &[],
             multiplicity,
         );
-        let eq20_e159: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, var_qbe);
+        let eq20_e159: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, var_qbe);
         let eq20_value: f64 = eq20_e159;
         let eq20_node_derivatives: [f64; 14] = [(var_qbe_dn0 * ddt_scale), (var_qbe_dn1 * ddt_scale), (var_qbe_dn2 * ddt_scale), (var_qbe_dn3 * ddt_scale), (var_qbe_dn4 * ddt_scale), (var_qbe_dn5 * ddt_scale), (var_qbe_dn6 * ddt_scale), (var_qbe_dn7 * ddt_scale), (var_qbe_dn8 * ddt_scale), (var_qbe_dn9 * ddt_scale), (var_qbe_dn10 * ddt_scale), (var_qbe_dn11 * ddt_scale), (var_qbe_dn12 * ddt_scale), (var_qbe_dn13 * ddt_scale)];
         stamper.stamp_current_dense_local(
@@ -10867,7 +10873,7 @@ impl Instance {
             &[],
             multiplicity,
         );
-        let eq21_e161: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, var_qbex);
+        let eq21_e161: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 1, var_qbex);
         let eq21_value: f64 = eq21_e161;
         let eq21_node_derivatives: [f64; 14] = [(var_qbex_dn0 * ddt_scale), (var_qbex_dn1 * ddt_scale), (var_qbex_dn2 * ddt_scale), (var_qbex_dn3 * ddt_scale), (var_qbex_dn4 * ddt_scale), (var_qbex_dn5 * ddt_scale), (var_qbex_dn6 * ddt_scale), (var_qbex_dn7 * ddt_scale), (var_qbex_dn8 * ddt_scale), (var_qbex_dn9 * ddt_scale), (var_qbex_dn10 * ddt_scale), (var_qbex_dn11 * ddt_scale), (var_qbex_dn12 * ddt_scale), (var_qbex_dn13 * ddt_scale)];
         stamper.stamp_current_dense_local(
@@ -10878,7 +10884,7 @@ impl Instance {
             &[],
             multiplicity,
         );
-        let eq22_e163: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, var_qbc);
+        let eq22_e163: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 2, var_qbc);
         let eq22_value: f64 = eq22_e163;
         let eq22_node_derivatives: [f64; 14] = [(var_qbc_dn0 * ddt_scale), (var_qbc_dn1 * ddt_scale), (var_qbc_dn2 * ddt_scale), (var_qbc_dn3 * ddt_scale), (var_qbc_dn4 * ddt_scale), (var_qbc_dn5 * ddt_scale), (var_qbc_dn6 * ddt_scale), (var_qbc_dn7 * ddt_scale), (var_qbc_dn8 * ddt_scale), (var_qbc_dn9 * ddt_scale), (var_qbc_dn10 * ddt_scale), (var_qbc_dn11 * ddt_scale), (var_qbc_dn12 * ddt_scale), (var_qbc_dn13 * ddt_scale)];
         stamper.stamp_current_dense_local(
@@ -10889,7 +10895,7 @@ impl Instance {
             &[],
             multiplicity,
         );
-        let eq23_e165: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 3, var_qbcx);
+        let eq23_e165: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 3, var_qbcx);
         let eq23_value: f64 = eq23_e165;
         let eq23_node_derivatives: [f64; 14] = [(var_qbcx_dn0 * ddt_scale), (var_qbcx_dn1 * ddt_scale), (var_qbcx_dn2 * ddt_scale), (var_qbcx_dn3 * ddt_scale), (var_qbcx_dn4 * ddt_scale), (var_qbcx_dn5 * ddt_scale), (var_qbcx_dn6 * ddt_scale), (var_qbcx_dn7 * ddt_scale), (var_qbcx_dn8 * ddt_scale), (var_qbcx_dn9 * ddt_scale), (var_qbcx_dn10 * ddt_scale), (var_qbcx_dn11 * ddt_scale), (var_qbcx_dn12 * ddt_scale), (var_qbcx_dn13 * ddt_scale)];
         stamper.stamp_current_dense_local(
@@ -10900,7 +10906,7 @@ impl Instance {
             &[],
             multiplicity,
         );
-        let eq24_e167: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 4, var_qbep);
+        let eq24_e167: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 4, var_qbep);
         let eq24_value: f64 = eq24_e167;
         let eq24_node_derivatives: [f64; 14] = [(var_qbep_dn0 * ddt_scale), (var_qbep_dn1 * ddt_scale), (var_qbep_dn2 * ddt_scale), (var_qbep_dn3 * ddt_scale), (var_qbep_dn4 * ddt_scale), (var_qbep_dn5 * ddt_scale), (var_qbep_dn6 * ddt_scale), (var_qbep_dn7 * ddt_scale), (var_qbep_dn8 * ddt_scale), (var_qbep_dn9 * ddt_scale), (var_qbep_dn10 * ddt_scale), (var_qbep_dn11 * ddt_scale), (var_qbep_dn12 * ddt_scale), (var_qbep_dn13 * ddt_scale)];
         stamper.stamp_current_dense_local(
@@ -10911,7 +10917,7 @@ impl Instance {
             &[],
             multiplicity,
         );
-        let eq27_e173: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 7, var_qbcp);
+        let eq27_e173: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 7, var_qbcp);
         let eq27_value: f64 = eq27_e173;
         let eq27_node_derivatives: [f64; 14] = [(var_qbcp_dn0 * ddt_scale), (var_qbcp_dn1 * ddt_scale), (var_qbcp_dn2 * ddt_scale), (var_qbcp_dn3 * ddt_scale), (var_qbcp_dn4 * ddt_scale), (var_qbcp_dn5 * ddt_scale), (var_qbcp_dn6 * ddt_scale), (var_qbcp_dn7 * ddt_scale), (var_qbcp_dn8 * ddt_scale), (var_qbcp_dn9 * ddt_scale), (var_qbcp_dn10 * ddt_scale), (var_qbcp_dn11 * ddt_scale), (var_qbcp_dn12 * ddt_scale), (var_qbcp_dn13 * ddt_scale)];
         stamper.stamp_current_dense_local(
@@ -10922,7 +10928,7 @@ impl Instance {
             &[],
             multiplicity,
         );
-        let eq30_e179: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 10, var_qcth);
+        let eq30_e179: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 10, var_qcth);
         let eq30_value: f64 = eq30_e179;
         let eq30_node_derivatives: [f64; 14] = [(var_qcth_dn0 * ddt_scale), (var_qcth_dn1 * ddt_scale), (var_qcth_dn2 * ddt_scale), (var_qcth_dn3 * ddt_scale), (var_qcth_dn4 * ddt_scale), (var_qcth_dn5 * ddt_scale), (var_qcth_dn6 * ddt_scale), (var_qcth_dn7 * ddt_scale), (var_qcth_dn8 * ddt_scale), (var_qcth_dn9 * ddt_scale), (var_qcth_dn10 * ddt_scale), (var_qcth_dn11 * ddt_scale), (var_qcth_dn12 * ddt_scale), (var_qcth_dn13 * ddt_scale)];
         stamper.stamp_current_dense_local(

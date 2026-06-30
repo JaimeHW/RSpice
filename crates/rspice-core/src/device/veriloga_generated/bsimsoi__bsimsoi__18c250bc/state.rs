@@ -1,5 +1,6 @@
 #![allow(dead_code, unused_parens, unused_variables)]
 
+use crate::device::veriloga_generated::GeneratedDdtCoefficients;
 use crate::device::veriloga_generated::support::{ReactiveScratch as GenericReactiveScratch, Scratch as GenericScratch};
 
 pub struct Parameters {
@@ -2328,12 +2329,16 @@ pub struct Instance {
     pub(crate) multiplicity: f64,
     pub(crate) ddt_state_current: Box<[f64; 22]>,
     pub(crate) ddt_state_previous: Box<[f64; 22]>,
+    pub(crate) ddt_state_older: Box<[f64; 22]>,
     pub(crate) ddt_state_initialized: Box<[bool; 22]>,
+    pub(crate) ddt_derivative_current: Box<[f64; 22]>,
+    pub(crate) ddt_derivative_previous: Box<[f64; 22]>,
     pub(crate) idt_state_current: Box<[f64; 0]>,
     pub(crate) idt_state_previous: Box<[f64; 0]>,
     pub(crate) idt_state_initialized: Box<[bool; 0]>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
+    pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
     pub(crate) scalar_v0: f64,
     pub(crate) scalar_v1: f64,
     pub(crate) scalar_v2: f64,
@@ -2701,12 +2706,16 @@ impl Clone for Instance {
             multiplicity: self.multiplicity,
             ddt_state_current: self.ddt_state_current.clone(),
             ddt_state_previous: self.ddt_state_previous.clone(),
+            ddt_state_older: self.ddt_state_older.clone(),
             ddt_state_initialized: self.ddt_state_initialized.clone(),
+            ddt_derivative_current: self.ddt_derivative_current.clone(),
+            ddt_derivative_previous: self.ddt_derivative_previous.clone(),
             idt_state_current: self.idt_state_current.clone(),
             idt_state_previous: self.idt_state_previous.clone(),
             idt_state_initialized: self.idt_state_initialized.clone(),
             time: self.time,
             timestep: self.timestep,
+            ddt_coefficients: self.ddt_coefficients,
             scalar_v0: self.scalar_v0,
             scalar_v1: self.scalar_v1,
             scalar_v2: self.scalar_v2,
@@ -3091,12 +3100,16 @@ impl Instance {
             multiplicity: 1.0,
             ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
             ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_state_older: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
             ddt_state_initialized: boxed_zero_bool_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_derivative_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_derivative_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
             idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
             idt_state_previous: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
             idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
             time: 0.0,
             timestep: 0.0,
+            ddt_coefficients: GeneratedDdtCoefficients::inactive(),
             scalar_v0: 0.0,
             scalar_v1: 0.0,
             scalar_v2: 0.0,
@@ -3468,12 +3481,16 @@ impl Instance {
             multiplicity,
             ddt_state_current,
             ddt_state_previous,
+            ddt_state_older,
             ddt_state_initialized,
+            ddt_derivative_current,
+            ddt_derivative_previous,
             idt_state_current,
             idt_state_previous,
             idt_state_initialized,
             time,
             timestep,
+            ddt_coefficients,
             scalar_v0,
             scalar_v1,
             scalar_v2,
@@ -3837,12 +3854,16 @@ impl Instance {
             multiplicity,
             ddt_state_current,
             ddt_state_previous,
+            ddt_state_older,
             ddt_state_initialized,
+            ddt_derivative_current,
+            ddt_derivative_previous,
             idt_state_current,
             idt_state_previous,
             idt_state_initialized,
             time,
             timestep,
+            ddt_coefficients,
             scalar_v0,
             scalar_v1,
             scalar_v2,
@@ -5270,16 +5291,19 @@ impl Instance {
     }
 
     #[inline]
-    pub fn set_timepoint(&mut self, time: f64, timestep: f64) {
+    pub fn set_timepoint(&mut self, time: f64, timestep: f64, ddt_coefficients: GeneratedDdtCoefficients) {
         self.time = time;
         self.timestep = timestep;
+        self.ddt_coefficients = ddt_coefficients;
     }
 
     #[inline]
     pub fn accept_timestep(&mut self) {
         let mut index = 0usize;
         while index < Self::DDT_STATE_COUNT {
+            self.ddt_state_older[index] = self.ddt_state_previous[index];
             self.ddt_state_previous[index] = self.ddt_state_current[index];
+            self.ddt_derivative_previous[index] = self.ddt_derivative_current[index];
             self.ddt_state_initialized[index] = true;
             index += 1;
         }
@@ -5299,11 +5323,25 @@ impl Instance {
         } else {
             value
         };
-        self.ddt_state_current[slot] = value;
-        if self.timestep.abs() > Self::DDT_EPSILON {
-            (value - previous) / self.timestep
+        let older = if self.ddt_state_initialized[slot] {
+            self.ddt_state_older[slot]
         } else {
+            value
+        };
+        self.ddt_state_current[slot] = value;
+        if self.ddt_coefficients.active {
+            let result = value * self.ddt_coefficients.derivative_scale
+                - previous * self.ddt_coefficients.previous_value_scale
+                - older * self.ddt_coefficients.older_value_scale
+                - self.ddt_derivative_previous[slot] * self.ddt_coefficients.previous_derivative_scale;
+            self.ddt_derivative_current[slot] = result;
+            result
+        } else {
+            self.ddt_state_current[slot] = value;
             self.ddt_state_previous[slot] = value;
+            self.ddt_state_older[slot] = value;
+            self.ddt_derivative_current[slot] = 0.0;
+            self.ddt_derivative_previous[slot] = 0.0;
             self.ddt_state_initialized[slot] = true;
             0.0
         }
@@ -5311,8 +5349,8 @@ impl Instance {
 
     #[inline]
     pub(crate) fn ddt_jacobian(&self, derivative: f64) -> f64 {
-        if self.timestep.abs() > Self::DDT_EPSILON {
-            derivative / self.timestep
+        if self.ddt_coefficients.active {
+            derivative * self.ddt_coefficients.derivative_scale
         } else {
             0.0
         }

@@ -5480,9 +5480,15 @@ impl Instance {
         multiplicity: f64,
         ddt_active: bool,
         ddt_scale: f64,
+        ddt_previous_value_scale: f64,
+        ddt_older_value_scale: f64,
+        ddt_previous_derivative_scale: f64,
         ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
     ) {
         let nv5 = ctx.node_voltage(nodes[5]);
         let nv6 = ctx.node_voltage(nodes[6]);
@@ -5898,7 +5904,7 @@ impl Instance {
             &eq11_branch_derivatives,
             multiplicity,
         );
-        let eq12_e873: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, s.v[223]);
+        let eq12_e873: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, s.v[223]);
         let eq12_e874: f64 = (s.v[212] * eq12_e873);
         let eq12_e874_d_n0: f64 = ((s.dn[212][0] * eq12_e873) + (s.v[212] * (s.dn[223][0] * ddt_scale)));
         let eq12_e874_d_n1: f64 = ((s.dn[212][1] * eq12_e873) + (s.v[212] * (s.dn[223][1] * ddt_scale)));
