@@ -358,27 +358,31 @@ impl CodeModel for DigitalGenericLookupTable {
 
         let mut max_input_delay = 0.0;
         let mut input_index = Some(0usize);
-        for bit in 0..input_width {
-            let input = ctx
-                .input_digital_vector_values("in")
-                .and_then(|inputs| inputs.get(bit).copied())
-                .unwrap_or_default();
-            let input_code = d_lut_state_code(input.state);
-            if input_code != ctx.int_state(input_start + bit) {
-                max_input_delay = f64::max(
-                    max_input_delay,
-                    d_genlut_param_value(ctx, "input_delay", bit, 0.0),
-                );
-            }
-            match (input_index, input.state.logic_level()) {
-                (Some(index), Some(true)) => {
-                    input_index = Some(index | (1usize << bit));
+        let mut input_codes = Vec::with_capacity(input_width);
+        {
+            let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
+            for bit in 0..input_width {
+                let input = inputs.get(bit).copied().unwrap_or_default();
+                let input_code = d_lut_state_code(input.state);
+                input_codes.push(input_code);
+                if input_code != ctx.int_state(input_start + bit) {
+                    max_input_delay = f64::max(
+                        max_input_delay,
+                        d_genlut_param_value(ctx, "input_delay", bit, 0.0),
+                    );
                 }
-                (Some(index), Some(false)) => {
-                    input_index = Some(index);
+                match (input_index, input.state.logic_level()) {
+                    (Some(index), Some(true)) => {
+                        input_index = Some(index | (1usize << bit));
+                    }
+                    (Some(index), Some(false)) => {
+                        input_index = Some(index);
+                    }
+                    _ => input_index = None,
                 }
-                _ => input_index = None,
             }
+        }
+        for (bit, input_code) in input_codes.into_iter().enumerate() {
             d_lookup_set_int_state(ctx, input_start + bit, input_code);
         }
 
@@ -577,6 +581,57 @@ mod tests {
         assert_eq!(ctx.int_state(d_genlut_previous_input_start(2, 3)), -1);
         assert_eq!(ctx.int_state(d_genlut_previous_state_start(2, 3)), -1);
         assert_eq!(ctx.int_state(d_genlut_previous_state_start(2, 3) + 2), -1);
+    }
+
+    #[test]
+    fn d_genlut_uses_max_changed_input_delay_after_input_scan() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("in", 3);
+        ctx.set_port_width("out", 1);
+        ctx.set_string_param("table_values", "00000010");
+        ctx.set_real_vector_param("input_delay", vec![1.0e-9, 2.0e-9, 3.0e-9]);
+        ctx.set_real_vector_param("rise_delay", vec![1.0e-9]);
+        ctx.set_input(
+            "in",
+            InputValue::DigitalVector(vec![
+                DigitalValue::zero(),
+                DigitalValue::zero(),
+                DigitalValue::zero(),
+            ]),
+        );
+
+        DigitalGenericLookupTable
+            .init(&mut ctx)
+            .expect("d_genlut init");
+        DigitalGenericLookupTable
+            .evaluate(&mut ctx)
+            .expect("d_genlut initial evaluate");
+        let _ = ctx.take_pending_events();
+
+        ctx.time = 1.0e-9;
+        ctx.set_input(
+            "in",
+            InputValue::DigitalVector(vec![
+                DigitalValue::zero(),
+                DigitalValue::one(),
+                DigitalValue::one(),
+            ]),
+        );
+        DigitalGenericLookupTable
+            .evaluate(&mut ctx)
+            .expect("d_genlut changed-input evaluate");
+
+        let events = ctx.take_pending_events();
+        assert!(
+            events
+                .iter()
+                .any(|event| event.delay == 4.0e-9 && event.values == vec![DigitalValue::one()]),
+            "d_genlut should add the largest changed input delay to the output delay, got {events:?}"
+        );
+        let input_start = d_genlut_previous_input_start(3, 1);
+        assert_eq!(ctx.int_state(input_start), 0);
+        assert_eq!(ctx.int_state(input_start + 1), 1);
+        assert_eq!(ctx.int_state(input_start + 2), 1);
     }
 
     #[test]
