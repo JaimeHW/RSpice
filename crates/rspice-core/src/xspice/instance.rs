@@ -1504,14 +1504,12 @@ impl XspiceInstance {
 
     /// Process digital events scheduled by this instance
     pub fn schedule_events(&mut self, event_queue: &mut EventQueue, current_time: Value) {
-        let events = self.context.take_pending_events();
-
         for PendingDigitalEvent {
             port_name,
             start_index,
             values,
             delay,
-        } in events
+        } in self.context.drain_pending_events()
         {
             let Some(&port_idx) = self.port_indices.get(&port_name) else {
                 continue;
@@ -1575,14 +1573,12 @@ impl XspiceInstance {
             }
         }
 
-        let events = self.context.take_pending_real_events();
-
         for PendingRealEvent {
             port_name,
             start_index,
             values,
             delay,
-        } in events
+        } in self.context.drain_pending_real_events()
         {
             let Some(&port_idx) = self.port_indices.get(&port_name) else {
                 continue;

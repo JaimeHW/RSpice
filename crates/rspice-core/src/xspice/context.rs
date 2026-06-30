@@ -10,6 +10,7 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
+use std::vec::Drain;
 
 //=============================================================================
 // Analysis Type
@@ -1489,9 +1490,19 @@ impl CmContext {
         std::mem::take(&mut self.pending_events)
     }
 
+    /// Drain pending events while preserving the queue allocation.
+    pub(crate) fn drain_pending_events(&mut self) -> Drain<'_, PendingDigitalEvent> {
+        self.pending_events.drain(..)
+    }
+
     /// Get all pending real events and clear the queue
     pub(crate) fn take_pending_real_events(&mut self) -> Vec<PendingRealEvent> {
         std::mem::take(&mut self.pending_real_events)
+    }
+
+    /// Drain pending real-valued events while preserving the queue allocation.
+    pub(crate) fn drain_pending_real_events(&mut self) -> Drain<'_, PendingRealEvent> {
+        self.pending_real_events.drain(..)
     }
 
     /// Request that the transient stepper place a breakpoint at an absolute time.
@@ -2000,6 +2011,27 @@ mod tests {
         assert_eq!(real_events.len(), 1);
         assert_eq!(real_events[0].values, [1.25]);
         assert_eq!(real_events[0].delay, 2.0e-9);
+    }
+
+    #[test]
+    fn pending_event_drains_preserve_queue_capacity() {
+        let mut ctx = CmContext::new();
+
+        ctx.set_output_digital("dout", DigitalValue::zero(), 0.0);
+        ctx.set_output_digital("dout", DigitalValue::one(), 1.0e-9);
+        let digital_capacity = ctx.pending_events.capacity();
+        let digital_events = ctx.drain_pending_events().collect::<Vec<_>>();
+        assert_eq!(digital_events.len(), 2);
+        assert!(ctx.pending_events.is_empty());
+        assert_eq!(ctx.pending_events.capacity(), digital_capacity);
+
+        ctx.set_output_real("rout", 1.0, 0.0);
+        ctx.set_output_real("rout", 2.0, 1.0e-9);
+        let real_capacity = ctx.pending_real_events.capacity();
+        let real_events = ctx.drain_pending_real_events().collect::<Vec<_>>();
+        assert_eq!(real_events.len(), 2);
+        assert!(ctx.pending_real_events.is_empty());
+        assert_eq!(ctx.pending_real_events.capacity(), real_capacity);
     }
 
     #[test]
