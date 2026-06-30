@@ -243,6 +243,7 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/BJT_PSPICE_NK/bjt_test_nk.cir",
         "Netlists/Certification_Tests/BUG_302/DC_comma.cir",
         "Netlists/Certification_Tests/BUG_28_SON/bug_28_son2.cir",
+        "Netlists/NMESFET/nmesfet.cir",
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(

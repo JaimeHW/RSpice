@@ -14,7 +14,7 @@ use crate::engine::{
 };
 use crate::netlist::{AnalysisCommand, DcSecondSweep, ElementKind, Netlist};
 use crate::{Engine, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -156,6 +156,44 @@ struct XyceExecutionPlan {
 #[derive(Debug, Clone)]
 struct XycePrintRequest {
     probes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct XyceComparisonTolerance {
+    relative: f64,
+    absolute: f64,
+    zero: Option<f64>,
+}
+
+impl XyceComparisonTolerance {
+    fn from_config(config: &XyceRunnerConfig) -> Self {
+        Self {
+            relative: config.relative_tolerance,
+            absolute: config.absolute_tolerance,
+            zero: None,
+        }
+    }
+
+    fn with_relative(mut self, value: f64) -> Self {
+        if value.is_finite() && value >= 0.0 {
+            self.relative = value;
+        }
+        self
+    }
+
+    fn with_absolute(mut self, value: f64) -> Self {
+        if value.is_finite() && value >= 0.0 {
+            self.absolute = self.absolute.max(value);
+        }
+        self
+    }
+
+    fn with_zero(mut self, value: f64) -> Self {
+        if value.is_finite() && value >= 0.0 {
+            self.zero = Some(self.zero.unwrap_or(0.0).max(value));
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -568,6 +606,7 @@ impl XyceTestRunner {
             &reference,
             &plan.print,
             &netlist,
+            &plan.source,
             &plan.dc,
             &results,
         ) {
@@ -613,6 +652,7 @@ impl XyceTestRunner {
         reference: &XycePrnTable,
         print: &XycePrintRequest,
         netlist: &Netlist,
+        source: &str,
         dc: &XyceDcSweep,
         results: &[(Value, crate::SimulationResult)],
     ) -> Result<Vec<XyceValueMismatch>, String> {
@@ -634,6 +674,7 @@ impl XyceTestRunner {
         }
 
         let data_columns = self.reference_data_columns(reference, print)?;
+        let comp_tolerances = self.comp_tolerances(source, &data_columns)?;
         let primary_points = DcSweep::new(dc.source.clone(), dc.start, dc.stop, dc.step).points();
         if primary_points.is_empty() {
             return Err("primary DC sweep has no points".to_string());
@@ -699,7 +740,11 @@ impl XyceTestRunner {
                         )?,
                     ),
                 };
-                if let Some(relative_error) = self.value_mismatch(expected, actual) {
+                let tolerance = comp_tolerances
+                    .get(&Self::normalize_probe(probe))
+                    .copied()
+                    .unwrap_or_else(|| XyceComparisonTolerance::from_config(&self.config));
+                if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
                     mismatches.push(XyceValueMismatch {
                         row: row_index,
                         probe: probe.to_string(),
@@ -774,20 +819,155 @@ impl XyceTestRunner {
         false
     }
 
-    fn value_mismatch(&self, expected: f64, actual: f64) -> Option<f64> {
+    fn comp_tolerances(
+        &self,
+        source: &str,
+        columns: &[XyceReferenceColumn],
+    ) -> Result<BTreeMap<String, XyceComparisonTolerance>, String> {
+        let mut compared_probes = BTreeSet::new();
+        for column in columns {
+            let XyceReferenceColumn::Probe { name } = column else {
+                continue;
+            };
+            compared_probes.insert(Self::normalize_probe(name));
+        }
+
+        let default_tolerance = XyceComparisonTolerance::from_config(&self.config);
+        let mut tolerances = BTreeMap::new();
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = line.trim_start();
+            if !trimmed
+                .get(..5)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("*comp"))
+            {
+                continue;
+            }
+            let rest = trimmed[5..].trim_start();
+            let Some((probe, options)) = Self::split_comp_directive(rest) else {
+                continue;
+            };
+            let normalized_probe = Self::normalize_probe(&probe);
+            if !compared_probes.contains(&normalized_probe) {
+                continue;
+            }
+            let tolerance = Self::parse_comp_tolerance(&options, default_tolerance)?;
+            tolerances.insert(normalized_probe, tolerance);
+        }
+        Ok(tolerances)
+    }
+
+    fn split_comp_directive(rest: &str) -> Option<(String, String)> {
+        let rest = rest
+            .split_once(';')
+            .map(|(head, _)| head)
+            .unwrap_or(rest)
+            .trim();
+        if rest.is_empty() {
+            return None;
+        }
+
+        if rest.starts_with('{') {
+            let mut depth = 0usize;
+            for (index, ch) in rest.char_indices() {
+                match ch {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            let end = index + ch.len_utf8();
+                            return Some((
+                                rest[..end].trim().to_string(),
+                                rest[end..].trim().to_string(),
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let mut split = rest.splitn(2, char::is_whitespace);
+        let probe = split.next()?.trim();
+        if probe.is_empty() {
+            return None;
+        }
+        Some((
+            probe.to_string(),
+            split.next().unwrap_or_default().trim().to_string(),
+        ))
+    }
+
+    fn parse_comp_tolerance(
+        options: &str,
+        default_tolerance: XyceComparisonTolerance,
+    ) -> Result<XyceComparisonTolerance, String> {
+        let mut tolerance = default_tolerance;
+        let tokens = options.split_whitespace().collect::<Vec<_>>();
+        let mut index = 0usize;
+        while index < tokens.len() {
+            let token = tokens[index];
+            let (raw_key, raw_value, consumed) = if let Some((key, value)) = token.split_once('=') {
+                (key, value, 1usize)
+            } else if token.ends_with('=') {
+                let key = token.trim_end_matches('=');
+                let value = tokens.get(index + 1).copied().unwrap_or_default();
+                (key, value, 2usize)
+            } else if tokens
+                .get(index + 1)
+                .is_some_and(|candidate| *candidate == "=")
+            {
+                let value = tokens.get(index + 2).copied().unwrap_or_default();
+                (token, value, 3usize)
+            } else {
+                index += 1;
+                continue;
+            };
+
+            let key = raw_key.trim().to_ascii_lowercase();
+            let value = raw_value.trim();
+            if value.is_empty() {
+                return Err(format!("Xyce *COMP option '{key}' is missing a value"));
+            }
+            match key.as_str() {
+                "reltol" => tolerance = tolerance.with_relative(Self::parse_comp_float(value)?),
+                "abstol" | "absdifftol" => {
+                    tolerance = tolerance.with_absolute(Self::parse_comp_float(value)?)
+                }
+                "zerotol" => tolerance = tolerance.with_zero(Self::parse_comp_float(value)?),
+                _ => {}
+            }
+            index += consumed;
+        }
+        Ok(tolerance)
+    }
+
+    fn parse_comp_float(value: &str) -> Result<f64, String> {
+        value
+            .parse::<f64>()
+            .map_err(|err| format!("invalid Xyce *COMP numeric value '{value}': {err}"))
+    }
+
+    fn value_mismatch(
+        &self,
+        expected: f64,
+        actual: f64,
+        tolerance: XyceComparisonTolerance,
+    ) -> Option<f64> {
         if !expected.is_finite() || !actual.is_finite() {
             return Some(f64::INFINITY);
         }
         let abs_error = (expected - actual).abs();
-        if abs_error <= self.config.absolute_tolerance {
+        if let Some(zero_tolerance) = tolerance.zero {
+            if expected.abs() <= zero_tolerance && actual.abs() <= zero_tolerance {
+                return None;
+            }
+        }
+        if abs_error <= tolerance.absolute {
             return None;
         }
-        let scale = expected
-            .abs()
-            .max(actual.abs())
-            .max(self.config.absolute_tolerance);
+        let scale = expected.abs().max(actual.abs()).max(tolerance.absolute);
         let relative_error = abs_error / scale;
-        (relative_error > self.config.relative_tolerance).then_some(relative_error)
+        (relative_error > tolerance.relative).then_some(relative_error)
     }
 
     fn validate_static_dc_contract(
@@ -1694,6 +1874,46 @@ End of Xyce(TM) Simulation
             &columns[2],
             XyceReferenceColumn::Probe { name } if name == "i(vds)"
         ));
+    }
+
+    #[test]
+    fn comp_tolerances_apply_zero_tolerance_to_matching_print_probe() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let columns = vec![XyceReferenceColumn::Probe {
+            name: "I(VIDS)".to_string(),
+        }];
+        let tolerances = runner
+            .comp_tolerances("*COMP I(VIDS) zerotol=1.0e-11\n", &columns)
+            .expect("COMP tolerance parses");
+        let tolerance = *tolerances
+            .get("i(vids)")
+            .expect("COMP tolerance keyed by normalized probe");
+
+        assert_eq!(tolerance.zero, Some(1.0e-11));
+        assert!(
+            runner.value_mismatch(1.0e-24, 1.8e-12, tolerance).is_none(),
+            "zerotol should accept near-zero values on both sides"
+        );
+    }
+
+    #[test]
+    fn comp_tolerances_parse_case_and_spaced_assignments() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let columns = vec![XyceReferenceColumn::Probe {
+            name: "i(vds)".to_string(),
+        }];
+        let tolerances = runner
+            .comp_tolerances(
+                "*COMP i(vds) RELTOL = 0.25 abstol=1e-5 absdifftol=2e-5\n",
+                &columns,
+            )
+            .expect("COMP tolerances parse");
+        let tolerance = *tolerances
+            .get("i(vds)")
+            .expect("COMP tolerance keyed by normalized probe");
+
+        assert_eq!(tolerance.relative, 0.25);
+        assert_eq!(tolerance.absolute, 2.0e-5);
     }
 
     #[test]
