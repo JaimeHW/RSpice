@@ -148,21 +148,9 @@ fn d_ram_select_code(ctx: &CmContext, shape: DMemoryShape) -> i64 {
     1
 }
 
-fn d_ram_address_codes(ctx: &CmContext, shape: DMemoryShape) -> Vec<i64> {
-    (0..shape.address_width)
-        .map(|index| d_ram_input_state_code(ctx, "address", index))
-        .collect()
-}
-
-fn d_ram_data_codes(ctx: &CmContext, shape: DMemoryShape) -> Vec<i64> {
-    (0..shape.word_width)
-        .map(|index| d_ram_input_state_code(ctx, "data_in", index))
-        .collect()
-}
-
-fn d_ram_address_index(address: &[i64]) -> Option<usize> {
+fn d_ram_address_index_from_codes(address: impl Iterator<Item = i64>) -> Option<usize> {
     let mut index = 0usize;
-    for (bit_idx, code) in address.iter().copied().enumerate() {
+    for (bit_idx, code) in address.enumerate() {
         match code {
             0 => {}
             1 => index |= 1usize << bit_idx,
@@ -170,6 +158,12 @@ fn d_ram_address_index(address: &[i64]) -> Option<usize> {
         }
     }
     Some(index)
+}
+
+fn d_ram_address_index(ctx: &CmContext, shape: DMemoryShape) -> Option<usize> {
+    d_ram_address_index_from_codes(
+        (0..shape.address_width).map(|index| d_ram_input_state_code(ctx, "address", index)),
+    )
 }
 
 fn d_ram_memory_index(shape: DMemoryShape, address_index: usize, bit: usize) -> usize {
@@ -211,9 +205,9 @@ fn d_ram_read_word(
     ctx: &CmContext,
     scratch_state: Option<&[i64]>,
     shape: DMemoryShape,
-    address: &[i64],
+    address_index: Option<usize>,
 ) -> Vec<i64> {
-    let Some(address_index) = d_ram_address_index(address) else {
+    let Some(address_index) = address_index else {
         return vec![2; shape.word_width];
     };
 
@@ -232,17 +226,17 @@ fn d_ram_write_word(
     ctx: &mut CmContext,
     scratch_state: &mut Option<Vec<i64>>,
     shape: DMemoryShape,
-    address: &[i64],
-    data: &[i64],
+    address_index: Option<usize>,
 ) {
-    let Some(address_index) = d_ram_address_index(address) else {
+    let Some(address_index) = address_index else {
         for bit in 0..shape.memory_bits {
             d_ram_set_state(ctx, scratch_state, shape.memory_start + bit, 2);
         }
         return;
     };
 
-    for (bit, code) in data.iter().copied().enumerate().take(shape.word_width) {
+    for bit in 0..shape.word_width {
+        let code = d_ram_input_state_code(ctx, "data_in", bit);
         d_ram_set_state(
             ctx,
             scratch_state,
@@ -264,27 +258,50 @@ fn d_ram_set_outputs(ctx: &mut CmContext, codes: &[i64], strength: DigitalStreng
     ctx.set_output_digital_vector("data_out", d_ram_output_values(codes, strength), delay);
 }
 
+fn d_ram_set_uniform_outputs(
+    ctx: &mut CmContext,
+    shape: DMemoryShape,
+    code: i64,
+    strength: DigitalStrength,
+    delay: Value,
+) {
+    let value = d_ram_value_from_code(code, strength);
+    ctx.set_output_digital_vector("data_out", vec![value; shape.word_width], delay);
+}
+
+fn d_ram_set_input_data_outputs(
+    ctx: &mut CmContext,
+    shape: DMemoryShape,
+    address_index: Option<usize>,
+    strength: DigitalStrength,
+    delay: Value,
+) {
+    let values = if address_index.is_some() {
+        (0..shape.word_width)
+            .map(|bit| d_ram_value_from_code(d_ram_input_state_code(ctx, "data_in", bit), strength))
+            .collect()
+    } else {
+        vec![d_ram_value_from_code(2, strength); shape.word_width]
+    };
+    ctx.set_output_digital_vector("data_out", values, delay);
+}
+
 fn d_ram_store_previous(
     ctx: &mut CmContext,
     scratch_state: &mut Option<Vec<i64>>,
     shape: DMemoryShape,
     write_en: i64,
     select: i64,
-    address: &[i64],
-    data: &[i64],
 ) {
     d_ram_set_state(ctx, scratch_state, D_RAM_PREV_WRITE_EN, write_en);
     d_ram_set_state(ctx, scratch_state, D_RAM_PREV_SELECT, select);
-    for (idx, code) in address
-        .iter()
-        .copied()
-        .enumerate()
-        .take(shape.address_width)
-    {
+    for idx in 0..shape.address_width {
+        let code = d_ram_input_state_code(ctx, "address", idx);
         d_ram_set_state(ctx, scratch_state, D_RAM_ADDRESS_START + idx, code);
     }
     let data_start = d_ram_data_start(shape.address_width);
-    for (idx, code) in data.iter().copied().enumerate().take(shape.word_width) {
+    for idx in 0..shape.word_width {
+        let code = d_ram_input_state_code(ctx, "data_in", idx);
         d_ram_set_state(ctx, scratch_state, data_start + idx, code);
     }
 }
@@ -293,28 +310,23 @@ fn d_ram_previous_address_changed(
     ctx: &CmContext,
     scratch_state: Option<&[i64]>,
     shape: DMemoryShape,
-    address: &[i64],
 ) -> bool {
-    address
-        .iter()
-        .copied()
-        .enumerate()
-        .take(shape.address_width)
-        .any(|(idx, code)| d_ram_state(ctx, scratch_state, D_RAM_ADDRESS_START + idx) != code)
+    (0..shape.address_width).any(|idx| {
+        d_ram_state(ctx, scratch_state, D_RAM_ADDRESS_START + idx)
+            != d_ram_input_state_code(ctx, "address", idx)
+    })
 }
 
 fn d_ram_previous_data_changed(
     ctx: &CmContext,
     scratch_state: Option<&[i64]>,
     shape: DMemoryShape,
-    data: &[i64],
 ) -> bool {
     let data_start = d_ram_data_start(shape.address_width);
-    data.iter()
-        .copied()
-        .enumerate()
-        .take(shape.word_width)
-        .any(|(idx, code)| d_ram_state(ctx, scratch_state, data_start + idx) != code)
+    (0..shape.word_width).any(|idx| {
+        d_ram_state(ctx, scratch_state, data_start + idx)
+            != d_ram_input_state_code(ctx, "data_in", idx)
+    })
 }
 
 impl CodeModel for DigitalRam {
@@ -368,8 +380,7 @@ impl CodeModel for DigitalRam {
         let shape = d_ram_shape(ctx)?;
         let write_en = d_ram_state_code(ctx.input_digital("write_en").unwrap_or_default());
         let select = d_ram_select_code(ctx, shape);
-        let address = d_ram_address_codes(ctx, shape);
-        let data = d_ram_data_codes(ctx, shape);
+        let address_index = d_ram_address_index(ctx, shape);
         let ic = d_ram_integer_param(ctx, "ic", 2.0, D_RAM_IC_MIN, D_RAM_IC_MAX);
         let read_delay = d_ram_read_delay(ctx);
         let mut scratch_state = (ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe)
@@ -381,23 +392,13 @@ impl CodeModel for DigitalRam {
             }
 
             if select == 1 && write_en == 0 {
-                let codes = vec![ic; shape.word_width];
-                d_ram_set_outputs(ctx, &codes, DigitalStrength::Strong, 0.0);
+                d_ram_set_uniform_outputs(ctx, shape, ic, DigitalStrength::Strong, 0.0);
             } else {
-                let codes = vec![2; shape.word_width];
-                d_ram_set_outputs(ctx, &codes, DigitalStrength::HighZ, 0.0);
+                d_ram_set_uniform_outputs(ctx, shape, 2, DigitalStrength::HighZ, 0.0);
             }
 
             d_ram_set_state(ctx, &mut scratch_state, D_RAM_INITIALIZED, 1);
-            d_ram_store_previous(
-                ctx,
-                &mut scratch_state,
-                shape,
-                write_en,
-                select,
-                &address,
-                &data,
-            );
+            d_ram_store_previous(ctx, &mut scratch_state, shape, write_en, select);
             return Ok(());
         }
 
@@ -405,54 +406,46 @@ impl CodeModel for DigitalRam {
             select != d_ram_state(ctx, scratch_state.as_deref(), D_RAM_PREV_SELECT);
         let write_changed =
             write_en != d_ram_state(ctx, scratch_state.as_deref(), D_RAM_PREV_WRITE_EN);
-        let address_changed =
-            d_ram_previous_address_changed(ctx, scratch_state.as_deref(), shape, &address);
-        let data_changed = d_ram_previous_data_changed(ctx, scratch_state.as_deref(), shape, &data);
+        let address_changed = d_ram_previous_address_changed(ctx, scratch_state.as_deref(), shape);
+        let data_changed = d_ram_previous_data_changed(ctx, scratch_state.as_deref(), shape);
 
         if select_changed {
             if select == 1 {
                 if write_en == 0 {
-                    let word = d_ram_read_word(ctx, scratch_state.as_deref(), shape, &address);
+                    let word = d_ram_read_word(ctx, scratch_state.as_deref(), shape, address_index);
                     d_ram_set_outputs(ctx, &word, DigitalStrength::Strong, read_delay);
                 } else {
-                    d_ram_write_word(ctx, &mut scratch_state, shape, &address, &data);
-                    let output = if d_ram_address_index(&address).is_some() {
-                        data.clone()
-                    } else {
-                        vec![2; shape.word_width]
-                    };
-                    d_ram_set_outputs(ctx, &output, DigitalStrength::HighZ, read_delay);
+                    d_ram_write_word(ctx, &mut scratch_state, shape, address_index);
+                    d_ram_set_input_data_outputs(
+                        ctx,
+                        shape,
+                        address_index,
+                        DigitalStrength::HighZ,
+                        read_delay,
+                    );
                 }
             } else if write_en == 0 {
-                let codes = vec![2; shape.word_width];
-                d_ram_set_outputs(ctx, &codes, DigitalStrength::HighZ, read_delay);
+                d_ram_set_uniform_outputs(ctx, shape, 2, DigitalStrength::HighZ, read_delay);
             }
         } else if write_changed || address_changed || data_changed {
             if write_en == 1 {
                 if select == 1 {
-                    d_ram_write_word(ctx, &mut scratch_state, shape, &address, &data);
-                    let output = if d_ram_address_index(&address).is_some() {
-                        data.clone()
-                    } else {
-                        vec![2; shape.word_width]
-                    };
-                    d_ram_set_outputs(ctx, &output, DigitalStrength::HighZ, read_delay);
+                    d_ram_write_word(ctx, &mut scratch_state, shape, address_index);
+                    d_ram_set_input_data_outputs(
+                        ctx,
+                        shape,
+                        address_index,
+                        DigitalStrength::HighZ,
+                        read_delay,
+                    );
                 }
             } else if select == 1 {
-                let word = d_ram_read_word(ctx, scratch_state.as_deref(), shape, &address);
+                let word = d_ram_read_word(ctx, scratch_state.as_deref(), shape, address_index);
                 d_ram_set_outputs(ctx, &word, DigitalStrength::Strong, read_delay);
             }
         }
 
-        d_ram_store_previous(
-            ctx,
-            &mut scratch_state,
-            shape,
-            write_en,
-            select,
-            &address,
-            &data,
-        );
+        d_ram_store_previous(ctx, &mut scratch_state, shape, write_en, select);
         Ok(())
     }
 }
@@ -507,6 +500,15 @@ mod tests {
             .expect("data_out event is scheduled");
         assert_eq!(event.values.len(), 1);
         (event.values[0], event.delay)
+    }
+
+    fn take_data_out_vector(ctx: &mut CmContext) -> (Vec<DigitalValue>, Value) {
+        let mut events = ctx.take_pending_events();
+        let event = events
+            .drain(..)
+            .find(|event| event.port_name == "data_out")
+            .expect("data_out event is scheduled");
+        (event.values, event.delay)
     }
 
     #[test]
@@ -628,6 +630,57 @@ mod tests {
             DigitalValue::one(),
             "the non-select UNKNOWN write_en branch must not overwrite stored data"
         );
+    }
+
+    #[test]
+    fn d_ram_multi_bit_word_uses_streamed_inputs_for_write_and_readback() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("data_in", 2);
+        ctx.set_port_width("data_out", 2);
+        ctx.set_port_width("address", 2);
+        ctx.set_port_width("select", 1);
+        ctx.set_param("select_value", 1.0);
+        ctx.set_param("ic", 0.0);
+        ctx.set_param("read_delay", 3.0e-9);
+        ctx.set_input(
+            "address",
+            InputValue::DigitalVector(vec![DigitalValue::one(), DigitalValue::zero()]),
+        );
+        ctx.set_input(
+            "data_in",
+            InputValue::DigitalVector(vec![DigitalValue::zero(), DigitalValue::zero()]),
+        );
+        ctx.set_input_digital("write_en", DigitalValue::zero());
+        ctx.set_input(
+            "select",
+            InputValue::DigitalVector(vec![DigitalValue::one()]),
+        );
+
+        DigitalRam.init(&mut ctx).expect("d_ram initializes");
+        evaluate_ram(&mut ctx, 0.0);
+        let _ = take_data_out_vector(&mut ctx);
+
+        ctx.set_input_digital("write_en", DigitalValue::one());
+        ctx.set_input(
+            "data_in",
+            InputValue::DigitalVector(vec![DigitalValue::one(), DigitalValue::zero()]),
+        );
+        evaluate_ram(&mut ctx, 1.0e-9);
+        let (write_output, write_delay) = take_data_out_vector(&mut ctx);
+        assert_eq!(
+            write_output,
+            vec![
+                DigitalValue::new(DigitalState::One, DigitalStrength::HighZ),
+                DigitalValue::new(DigitalState::Zero, DigitalStrength::HighZ)
+            ]
+        );
+        assert_eq!(write_delay, 3.0e-9);
+
+        ctx.set_input_digital("write_en", DigitalValue::zero());
+        evaluate_ram(&mut ctx, 2.0e-9);
+        let (readback, read_delay) = take_data_out_vector(&mut ctx);
+        assert_eq!(readback, vec![DigitalValue::one(), DigitalValue::zero()]);
+        assert_eq!(read_delay, 3.0e-9);
     }
 
     #[test]
