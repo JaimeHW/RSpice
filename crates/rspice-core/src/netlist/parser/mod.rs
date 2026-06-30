@@ -79,7 +79,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     for line in lines.iter().skip(1) {
         line_num += 1;
 
-        // Strip inline ';' and '$' comments (common SPICE syntax), then trim.
+        // Strip inline comments (common SPICE syntax), then trim.
         // We intentionally keep this simple and treat these markers as comment
         // starts only when they appear outside quoted strings.
         let no_inline_comment = strip_inline_semicolon_comment(line);

@@ -3213,6 +3213,26 @@ mod tests {
     }
 
     #[test]
+    fn slash_inline_comments_do_not_extend_subckt_end_names() {
+        let netlist = Netlist::parse(
+            "slash comment after ends\n\
+             .subckt sar_adc in out\n\
+             R1 in out 1k\n\
+             .ends // SUBCKT sar_adc\n\
+             Rtop out 0 1k\n\
+             .end\n",
+        )
+        .expect("ngspice-style // inline comment after .ENDS should parse");
+
+        assert!(
+            netlist
+                .subcircuits
+                .iter()
+                .any(|subckt| subckt.name.eq_ignore_ascii_case("SAR_ADC"))
+        );
+    }
+
+    #[test]
     fn analysis_commands_reject_unconsumed_trailing_tokens() {
         for line in [
             ".op garbage",

@@ -6,10 +6,13 @@ pub(super) fn strip_inline_semicolon_comment(line: &str) -> &str {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut escaped = false;
+    let mut chars = line.char_indices().peekable();
+    let mut prev_char = None;
 
-    for (idx, ch) in line.char_indices() {
+    while let Some((idx, ch)) = chars.next() {
         if escaped {
             escaped = false;
+            prev_char = Some(ch);
             continue;
         }
 
@@ -26,8 +29,16 @@ pub(super) fn strip_inline_semicolon_comment(line: &str) -> &str {
             ';' | '$' if !in_single_quote && !in_double_quote => {
                 return &line[..idx];
             }
+            '/' if !in_single_quote && !in_double_quote => {
+                if matches!(chars.peek(), Some((_, '/')))
+                    && prev_char.map_or(true, |prev: char| prev.is_whitespace())
+                {
+                    return &line[..idx];
+                }
+            }
             _ => {}
         }
+        prev_char = Some(ch);
     }
     line
 }
@@ -451,5 +462,30 @@ pub(super) fn parse_line(
             line: line_num,
             message: format!("Unknown element type: {}", first_char),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_inline_semicolon_comment;
+
+    #[test]
+    fn slash_comments_do_not_strip_urls() {
+        assert_eq!(
+            strip_inline_semicolon_comment(".ends // SUBCKT sar_adc").trim_end(),
+            ".ends"
+        );
+        assert_eq!(
+            strip_inline_semicolon_comment("A1 m file=https://example.test/model // comment")
+                .trim_end(),
+            "A1 m file=https://example.test/model"
+        );
+        assert_eq!(
+            strip_inline_semicolon_comment(
+                "A1 m file=\"https://example.test/model // not a comment\" // comment",
+            )
+            .trim_end(),
+            "A1 m file=\"https://example.test/model // not a comment\""
+        );
     }
 }
