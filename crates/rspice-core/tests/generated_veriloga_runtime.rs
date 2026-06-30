@@ -292,12 +292,9 @@ fn generated_indexed_dense_current_stamper_skips_static_zero_lanes() {
     let branches: [usize; 0] = [];
     let voltages = [1.0, 2.0, 3.0, 4.0];
     let mut rhs = vec![0.0; 4];
-    let mut matrix = StaticMatrix::from_triplets(
-        4,
-        4,
-        &[(0, 0, 0.0), (0, 2, 0.0), (1, 0, 0.0), (1, 2, 0.0)],
-    )
-    .expect("static matrix");
+    let mut matrix =
+        StaticMatrix::from_triplets(4, 4, &[(0, 0, 0.0), (0, 2, 0.0), (1, 0, 0.0), (1, 2, 0.0)])
+            .expect("static matrix");
     let mut cache = GeneratedStaticStampCache::default();
     cache.link(&matrix, &nodes, &branches, 4);
 
@@ -328,6 +325,39 @@ fn generated_indexed_dense_current_stamper_skips_static_zero_lanes() {
     assert_eq!(rhs[1], equivalent);
     assert_eq!(rhs[2], 0.0);
     assert_eq!(rhs[3], 0.0);
+}
+
+#[test]
+fn generated_ac_real_stamper_uses_linked_static_slots() {
+    let nodes = [1, 2, 3, 4];
+    let branches: [usize; 0] = [];
+    let voltages = [1.0, 2.0, 3.0, 4.0];
+    let real_matrix =
+        StaticMatrix::from_triplets(4, 4, &[(0, 0, 0.0), (0, 2, 0.0), (1, 0, 0.0), (1, 2, 0.0)])
+            .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&real_matrix, &nodes, &branches, 4);
+    let mut matrix = ComplexMatrix::from_real_structure(&real_matrix);
+
+    GeneratedStamper::new_ac_real_with_static_cache(&mut matrix, &voltages, 4, &cache)
+        .stamp_current_indexed_dense_local(
+            Some(0),
+            Some(1),
+            0.0,
+            &[0, 2],
+            &[1.0, 3.0],
+            &[],
+            &[],
+            2.0,
+        );
+
+    let real = matrix.to_dense_real();
+    assert_eq!(real[0][0], 2.0);
+    assert_eq!(real[0][2], 6.0);
+    assert_eq!(real[1][0], -2.0);
+    assert_eq!(real[1][2], -6.0);
+    assert_eq!(real[0][1], 0.0);
+    assert_eq!(real[2][0], 0.0);
 }
 
 #[test]
@@ -374,6 +404,29 @@ fn generated_dense_reactive_current_stamper_stamps_both_rows() {
     assert_eq!(imag[1][0], -15.0);
     assert_eq!(imag[1][2], 30.0);
     assert_eq!(imag[1][3], -60.0);
+    assert_eq!(imag[0][1], 0.0);
+    assert_eq!(imag[2][0], 0.0);
+}
+
+#[test]
+fn generated_reactive_stamper_uses_linked_static_slots() {
+    let nodes = [1, 2, 3, 4];
+    let branches: [usize; 0] = [];
+    let real_matrix =
+        StaticMatrix::from_triplets(4, 4, &[(0, 0, 0.0), (0, 2, 0.0), (1, 0, 0.0), (1, 2, 0.0)])
+            .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&real_matrix, &nodes, &branches, 4);
+    let mut matrix = ComplexMatrix::from_real_structure(&real_matrix);
+
+    GeneratedReactiveStamper::new_with_static_cache(&mut matrix, 4, 10.0, &cache)
+        .stamp_current_reactive_dense(Some(1), Some(2), &[1, 3], &[0.5, -1.0], &[], &[], 2.0);
+
+    let imag = matrix.to_dense_imag();
+    assert_eq!(imag[0][0], 10.0);
+    assert_eq!(imag[0][2], -20.0);
+    assert_eq!(imag[1][0], -10.0);
+    assert_eq!(imag[1][2], 20.0);
     assert_eq!(imag[0][1], 0.0);
     assert_eq!(imag[2][0], 0.0);
 }
