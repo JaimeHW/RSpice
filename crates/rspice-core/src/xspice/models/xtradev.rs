@@ -148,6 +148,45 @@ struct CoreHysteresisParams {
 
 pub(crate) const XTRADEV_METER_MEASURED_VALUE_PARAM: &str = "__rspice_measured_value";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XtradevPortKey {
+    R0,
+    R1,
+    Wiper,
+    Out,
+    CntlIn,
+    MmfOut,
+    L,
+    PosPwr,
+    NegPwr,
+    Other,
+}
+
+#[inline]
+fn xtradev_port_key(output_port: &str) -> XtradevPortKey {
+    if output_port.eq_ignore_ascii_case("r0") {
+        XtradevPortKey::R0
+    } else if output_port.eq_ignore_ascii_case("r1") {
+        XtradevPortKey::R1
+    } else if output_port.eq_ignore_ascii_case("wiper") {
+        XtradevPortKey::Wiper
+    } else if output_port.eq_ignore_ascii_case("out") {
+        XtradevPortKey::Out
+    } else if output_port.eq_ignore_ascii_case("cntl_in") {
+        XtradevPortKey::CntlIn
+    } else if output_port.eq_ignore_ascii_case("mmf_out") {
+        XtradevPortKey::MmfOut
+    } else if output_port.eq_ignore_ascii_case("l") {
+        XtradevPortKey::L
+    } else if output_port.eq_ignore_ascii_case("pos_pwr") {
+        XtradevPortKey::PosPwr
+    } else if output_port.eq_ignore_ascii_case("neg_pwr") {
+        XtradevPortKey::NegPwr
+    } else {
+        XtradevPortKey::Other
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct IlimitEval {
     out_current: Value,
@@ -2386,17 +2425,17 @@ impl CodeModel for Potentiometer {
         let Ok(split) = potentiometer_split(ctx) else {
             return Vec::new();
         };
-        match output_port.to_ascii_lowercase().as_str() {
-            "r0" => vec![
+        match xtradev_port_key(output_port) {
+            XtradevPortKey::R0 => vec![
                 ("r0".to_string(), split.g_lower),
                 ("wiper".to_string(), -split.g_lower),
             ],
-            "wiper" => vec![
+            XtradevPortKey::Wiper => vec![
                 ("r0".to_string(), -split.g_lower),
                 ("wiper".to_string(), split.g_lower + split.g_upper),
                 ("r1".to_string(), -split.g_upper),
             ],
-            "r1" => vec![
+            XtradevPortKey::R1 => vec![
                 ("wiper".to_string(), -split.g_upper),
                 ("r1".to_string(), split.g_upper),
             ],
@@ -2503,12 +2542,12 @@ impl CodeModel for Pswitch {
         let Ok(eval) = pswitch_eval(ctx) else {
             return Vec::new();
         };
-        match output_port.to_ascii_lowercase().as_str() {
-            "out" => vec![
+        match xtradev_port_key(output_port) {
+            XtradevPortKey::Out => vec![
                 ("out".to_string(), eval.output_conductance),
                 ("cntl_in".to_string(), eval.control_partial),
             ],
-            "cntl_in" => vec![("cntl_in".to_string(), eval.control_conductance)],
+            XtradevPortKey::CntlIn => vec![("cntl_in".to_string(), eval.control_conductance)],
             _ => Vec::new(),
         }
     }
@@ -2806,9 +2845,9 @@ impl CodeModel for LcCouple {
 
     fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
         let num_turns = ctx.param_or("num_turns", 1.0);
-        match output_port.to_ascii_lowercase().as_str() {
-            "mmf_out" => vec![("l".to_string(), num_turns)],
-            "l" if ctx.time != 0.0 && ctx.is_transient() => {
+        match xtradev_port_key(output_port) {
+            XtradevPortKey::MmfOut => vec![("l".to_string(), num_turns)],
+            XtradevPortKey::L if ctx.time != 0.0 && ctx.is_transient() => {
                 let delta = ctx.time - ctx.time_prev;
                 if delta > 0.0 && delta.is_finite() {
                     vec![("mmf_out".to_string(), -num_turns / delta)]
@@ -2827,12 +2866,14 @@ impl CodeModel for LcCouple {
         frequency: Value,
     ) -> Vec<(String, crate::Complex64)> {
         let num_turns = ctx.param_or("num_turns", 1.0);
-        match output_port.to_ascii_lowercase().as_str() {
-            "l" => vec![(
+        match xtradev_port_key(output_port) {
+            XtradevPortKey::L => vec![(
                 "mmf_out".to_string(),
                 crate::Complex64::new(0.0, num_turns * std::f64::consts::TAU * frequency),
             )],
-            "mmf_out" => vec![("l".to_string(), crate::Complex64::new(num_turns, 0.0))],
+            XtradevPortKey::MmfOut => {
+                vec![("l".to_string(), crate::Complex64::new(num_turns, 0.0))]
+            }
             _ => Vec::new(),
         }
     }
@@ -2924,20 +2965,20 @@ impl CodeModel for Ilimit {
             return Vec::new();
         };
 
-        match output_port.to_ascii_lowercase().as_str() {
-            "out" => partials([
+        match xtradev_port_key(output_port) {
+            XtradevPortKey::Out => partials([
                 ("in", eval.out_in_partial),
                 ("out", eval.out_out_partial),
                 ("pos_pwr", eval.out_pos_partial),
                 ("neg_pwr", eval.out_neg_partial),
             ]),
-            "pos_pwr" if ilimit_port_connected(ctx, "pos_pwr") => partials([
+            XtradevPortKey::PosPwr if ilimit_port_connected(ctx, "pos_pwr") => partials([
                 ("in", eval.pos_in_partial),
                 ("out", eval.pos_out_partial),
                 ("pos_pwr", eval.pos_pos_partial),
                 ("neg_pwr", eval.pos_neg_partial),
             ]),
-            "neg_pwr" if ilimit_port_connected(ctx, "neg_pwr") => partials([
+            XtradevPortKey::NegPwr if ilimit_port_connected(ctx, "neg_pwr") => partials([
                 ("in", eval.neg_in_partial),
                 ("out", eval.neg_out_partial),
                 ("pos_pwr", eval.neg_pos_partial),
