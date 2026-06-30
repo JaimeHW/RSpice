@@ -551,7 +551,15 @@ fn commit_filesource_cursor(ctx: &mut CmContext, cursor: usize) {
     }
 }
 
-fn locate_filesource_interval(ctx: &mut CmContext, rows: &[FileSourceRow]) -> usize {
+fn locate_filesource_interval(ctx: &mut CmContext, data: &FileSourceRowsData) -> usize {
+    let rows = data.rows.as_slice();
+    if data.strictly_increasing_time {
+        let upper = rows.partition_point(|row| row.time < ctx.time);
+        let lower = upper.saturating_sub(1).min(rows.len() - 1);
+        commit_filesource_cursor(ctx, lower);
+        return lower;
+    }
+
     let mut lower = filesource_cursor(ctx, rows);
 
     while lower > 0 && ctx.time < rows[lower].time {
@@ -580,7 +588,7 @@ fn evaluate_rows(ctx: &mut CmContext, data: &FileSourceRowsData) -> Vec<Value> {
     }
 
     let step_mode = bool_param(ctx, "amplstep");
-    let lower = locate_filesource_interval(ctx, rows);
+    let lower = locate_filesource_interval(ctx, data);
     if lower + 1 >= rows.len() {
         return rows[lower].values.clone();
     }
@@ -847,6 +855,20 @@ mod tests {
         assert!(!rows.strictly_increasing_time);
         schedule_next_breakpoint(&mut ctx, &rows);
         assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
+    }
+
+    #[test]
+    fn filesource_monotonic_interval_lookup_keeps_previous_row_at_exact_step_time() {
+        let rows = FileSourceRowsData::new(vec![row(0.0, 0.0), row(1.0e-9, 1.0), row(2.0e-9, 2.0)]);
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.allocate_int_states(1);
+        ctx.set_param("amplstep", 1.0);
+        ctx.time = 1.0e-9;
+
+        let out = evaluate_rows(&mut ctx, &rows);
+        assert_eq!(out, vec![0.0]);
+        assert_eq!(ctx.int_state(FILESOURCE_ROW_CURSOR_STATE), 0);
     }
 
     #[test]
