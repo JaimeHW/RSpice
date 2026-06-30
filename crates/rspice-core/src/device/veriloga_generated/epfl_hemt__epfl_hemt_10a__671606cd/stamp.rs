@@ -3,10 +3,9 @@
 use super::state::Instance;
 use crate::device::veriloga_generated::{GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
 
-use crate::device::veriloga_generated::support::{AdValue as GenericAdValue, ReactiveScratch as GenericReactiveScratch};
+use crate::device::veriloga_generated::support::{AdValue as GenericAdValue};
 
 type A = GenericAdValue<{ Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;
-type ReactiveScratch = GenericReactiveScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;
 
 const LIMEXP_MAX: f64 = 5.54062238439351e34;
 #[path = "stamp_blocks_0.rs"]
@@ -1883,16 +1882,75 @@ impl Instance {
         let branches = &(*self).branches;
         let nv4 = ctx.node_voltage(nodes[4]);
         let multiplicity = (*self).multiplicity;
-        let s = match &mut self.reactive_scratch {
-            Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(ReactiveScratch::new_box()).as_mut(),
-        };
+        let mut var_guard6: f64 = 0.0;
+        let mut var_guard6_rv: f64 = 0.0;
+        let mut var_guard6_dn0: f64 = 0.0;
+        let mut var_guard6_rdn0: f64 = 0.0;
+        let mut var_guard6_dn1: f64 = 0.0;
+        let mut var_guard6_rdn1: f64 = 0.0;
+        let mut var_guard6_dn2: f64 = 0.0;
+        let mut var_guard6_rdn2: f64 = 0.0;
+        let mut var_guard6_dn3: f64 = 0.0;
+        let mut var_guard6_rdn3: f64 = 0.0;
+        let mut var_guard6_dn4: f64 = 0.0;
+        let mut var_guard6_rdn4: f64 = 0.0;
+        let mut var_guard6_dn5: f64 = 0.0;
+        let mut var_guard6_rdn5: f64 = 0.0;
+        let mut var_guard6_dn6: f64 = 0.0;
+        let mut var_guard6_rdn6: f64 = 0.0;
+        let mut var_guard6_dn7: f64 = 0.0;
+        let mut var_guard6_rdn7: f64 = 0.0;
+        let mut var_guard6_dn8: f64 = 0.0;
+        let mut var_guard6_rdn8: f64 = 0.0;
+        let mut var_guard6_dn9: f64 = 0.0;
+        let mut var_guard6_rdn9: f64 = 0.0;
+        let mut var_guard6_dn10: f64 = 0.0;
+        let mut var_guard6_rdn10: f64 = 0.0;
+        let mut var_guard6_dn11: f64 = 0.0;
+        let mut var_guard6_rdn11: f64 = 0.0;
+        let mut var_guard6_db0: f64 = 0.0;
+        let mut var_guard6_rdb0: f64 = 0.0;
+        let mut var_guard6_db1: f64 = 0.0;
+        let mut var_guard6_rdb1: f64 = 0.0;
+        let mut var_guard6_db2: f64 = 0.0;
+        let mut var_guard6_rdb2: f64 = 0.0;
 
-        s.b[148] = (p.p35 != 0.0);
-        s.store_scalar(148, if s.b[148] { 1.0 } else { 0.0 });
+        let assign1950_e93260: f64 = if p.p35 != 0.0 { 1.0 } else { 0.0 };
+        var_guard6 = assign1950_e93260;
+        var_guard6_dn0 = 0.0;
+        var_guard6_dn1 = 0.0;
+        var_guard6_dn2 = 0.0;
+        var_guard6_dn3 = 0.0;
+        var_guard6_dn4 = 0.0;
+        var_guard6_dn5 = 0.0;
+        var_guard6_dn6 = 0.0;
+        var_guard6_dn7 = 0.0;
+        var_guard6_dn8 = 0.0;
+        var_guard6_dn9 = 0.0;
+        var_guard6_dn10 = 0.0;
+        var_guard6_dn11 = 0.0;
+        var_guard6_db0 = 0.0;
+        var_guard6_db1 = 0.0;
+        var_guard6_db2 = 0.0;
+        var_guard6_rv = 0.0;
+        var_guard6_rdn0 = 0.0;
+        var_guard6_rdn1 = 0.0;
+        var_guard6_rdn2 = 0.0;
+        var_guard6_rdn3 = 0.0;
+        var_guard6_rdn4 = 0.0;
+        var_guard6_rdn5 = 0.0;
+        var_guard6_rdn6 = 0.0;
+        var_guard6_rdn7 = 0.0;
+        var_guard6_rdn8 = 0.0;
+        var_guard6_rdn9 = 0.0;
+        var_guard6_rdn10 = 0.0;
+        var_guard6_rdn11 = 0.0;
+        var_guard6_rdb0 = 0.0;
+        var_guard6_rdb1 = 0.0;
+        var_guard6_rdb2 = 0.0;
 
         let (eq4_e64, eq4_e64_d_n4, eq4_e64_q,) = {
-    if s.b[148] {
+    if (var_guard6 != 0.0) {
         let eq4_e61: f64 = (p.p36 * (nv4 - 0.0));
         let eq4_e62_q: f64 = eq4_e61;
         (eq4_e61, p.p36, eq4_e62_q,)
