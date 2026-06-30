@@ -1032,7 +1032,7 @@ fn logarithmic_sweep_points(
     let raw_count = span * points_per_interval as Value + 1.0;
     let boundary_epsilon = 64.0 * Value::EPSILON * raw_count.abs().max(1.0);
     let count = (raw_count + boundary_epsilon).floor() as usize;
-    let count = count.max(1).min(2_000_000);
+    let count = count.clamp(1, 2_000_000);
 
     (0..count)
         .map(|index| start * multiplier.powi(index as i32))
