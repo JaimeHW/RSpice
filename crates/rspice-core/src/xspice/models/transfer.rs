@@ -763,20 +763,26 @@ fn s_xfer_dc_gain(ctx: &CmContext) -> Value {
     }
 }
 
-fn s_xfer_feedthrough_and_remainder(coefficients: &SXferCoefficients) -> (Value, Vec<Value>) {
+fn s_xfer_feedthrough(coefficients: &SXferCoefficients) -> Value {
     let order = coefficients.denominator.len().saturating_sub(1);
     if order == 0 {
-        return (
-            coefficients.numerator.first().copied().unwrap_or(0.0),
-            Vec::new(),
-        );
+        return coefficients.numerator.first().copied().unwrap_or(0.0);
     }
 
-    let feedthrough = if coefficients.numerator.len() == order + 1 {
+    if coefficients.numerator.len() == order + 1 {
         coefficients.numerator[order]
     } else {
         0.0
-    };
+    }
+}
+
+fn s_xfer_feedthrough_and_remainder(coefficients: &SXferCoefficients) -> (Value, Vec<Value>) {
+    let order = coefficients.denominator.len().saturating_sub(1);
+    let feedthrough = s_xfer_feedthrough(coefficients);
+    if order == 0 {
+        return (feedthrough, Vec::new());
+    }
+
     let remainder = (0..order)
         .map(|index| {
             coefficients.numerator.get(index).copied().unwrap_or(0.0)
@@ -965,14 +971,15 @@ fn s_xfer_transient_eval(
     let order = coefficients.denominator.len() - 1;
     let input = ctx.input("in") + ctx.param("in_offset");
     let u = coefficients.gain * input;
-    let (feedthrough, remainder) = s_xfer_feedthrough_and_remainder(coefficients);
 
     if order == 0 {
+        let feedthrough = s_xfer_feedthrough(coefficients);
         return Ok((Vec::new(), feedthrough * u, feedthrough * coefficients.gain));
     }
 
     let dt = ctx.timestep;
     if !dt.is_finite() || dt <= 0.0 {
+        let (feedthrough, remainder) = s_xfer_feedthrough_and_remainder(coefficients);
         let state: Vec<Value> = (0..order).map(|index| ctx.state_prev(index)).collect();
         let output = remainder
             .iter()
