@@ -77,7 +77,7 @@ fn real_to_v_output(
         target * gain
     } else {
         let fraction = (time - start_time) / transition_time;
-        start_value + (target - start_value) * fraction * gain
+        (start_value + (target - start_value) * fraction) * gain
     }
 }
 
@@ -552,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn real_to_v_gain_uses_ngspice_mid_transition_formula() {
+    fn real_to_v_gain_scales_the_full_mid_transition_value() {
         let mut ctx = CmContext::new();
         ctx.set_param("gain", 2.0);
         ctx.set_param("transition_time", 1.0e-9);
@@ -583,8 +583,8 @@ mod tests {
 
         let out = ctx.output("out");
         assert!(
-            (out - 3.0).abs() < 1.0e-12,
-            "ngspice computes v0 + (v1 - v0) * fraction * gain during transition; got {out}"
+            (out - 4.0).abs() < 1.0e-12,
+            "real_to_v should interpolate the real value and then apply gain, got {out}"
         );
     }
 
