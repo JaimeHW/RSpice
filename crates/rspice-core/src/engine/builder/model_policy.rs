@@ -460,11 +460,102 @@ pub(super) fn reject_unsupported_vbic13_params(
     }
 
     let present_list = present.join(", ");
-    Err(SimulationError::Circuit(format!(
-        "BJT '{element_name}': model '{model}' uses VBIC13 parameter(s) {present_list}; \
-         generated Verilog-A VBIC builtins own VBIC13 behavior, and these parameters must not \
-         be silently applied to legacy Gummel-Poon native routing"
-    )))
+    if !native_vbic_level {
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': model '{model}' uses VBIC13 parameter(s) {present_list}; \
+             these are unsupported on legacy GP routing, accepted only on native VBIC LEVEL=4, \
+             LEVEL=9, LEVEL=11, LEVEL=12, or LEVEL=13 cards, and must not be silently ignored"
+        )));
+    }
+
+    for (name, expr) in expr_params {
+        let Some(param) = canonical_vbic13_param(name) else {
+            continue;
+        };
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': model '{model}' uses unresolved VBIC13 parameter {param}={expr}; \
+             accepted VBIC13 compatibility parameters must be finite numeric literals"
+        )));
+    }
+    for (name, value) in string_params {
+        let Some(param) = canonical_vbic13_param(name) else {
+            continue;
+        };
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': model '{model}' uses non-numeric VBIC13 parameter {param}=\"{value}\"; \
+             accepted VBIC13 compatibility parameters must be finite numeric literals"
+        )));
+    }
+
+    for param in &present {
+        if !params.contains_key(*param) {
+            continue;
+        }
+        let value = params
+            .get(*param)
+            .copied()
+            .expect("present VBIC13 parameter has a value");
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': model '{model}' uses non-finite VBIC13 parameter {param}={value}; \
+                 accepted VBIC13 parameters must be finite numeric literals"
+            )));
+        }
+    }
+
+    let vbbe = params.get("VBBE").copied().unwrap_or(0.0);
+    if vbbe < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': model '{model}' uses VBIC13 parameter VBBE={vbbe}; \
+             VBBE must be nonnegative for native VBIC13 reverse B-E breakdown"
+        )));
+    }
+
+    let nbbe = params.get("NBBE").copied().unwrap_or(1.0);
+    if nbbe <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': model '{model}' uses VBIC13 parameter NBBE={nbbe}; \
+             NBBE must be positive for native VBIC13 reverse B-E breakdown"
+        )));
+    }
+
+    let ibbe = params.get("IBBE").copied().unwrap_or(1e-6);
+    if ibbe <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': model '{model}' uses VBIC13 parameter IBBE={ibbe}; \
+             IBBE must be positive for native VBIC13 reverse B-E breakdown"
+        )));
+    }
+
+    if vbbe > 0.0 {
+        for (name, expr) in expr_params {
+            if name.eq_ignore_ascii_case("WBE") {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{element_name}': model '{model}' uses unresolved WBE={expr} with active \
+                     VBIC13 reverse B-E breakdown; WBE must be a finite numeric literal for the \
+                     native split path"
+                )));
+            }
+        }
+        for (name, value) in string_params {
+            if name.eq_ignore_ascii_case("WBE") {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{element_name}': model '{model}' uses non-numeric WBE=\"{value}\" with \
+                     active VBIC13 reverse B-E breakdown; WBE must be a finite numeric literal for \
+                     the native split path"
+                )));
+            }
+        }
+        let wbe = params.get("WBE").copied().unwrap_or(1.0);
+        if !wbe.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': model '{model}' uses active VBIC13 reverse B-E breakdown \
+                 with WBE={wbe}; WBE must be finite for the native split path"
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 pub(super) fn validate_diode_model_level(
