@@ -3,7 +3,7 @@
 //! Represents an instantiated code model in a circuit.
 //! Handles port connections, parameter binding, and matrix stamping.
 
-use super::context::{PendingDigitalEvent, PendingRealEvent};
+use super::context::{AnalogValue, PendingDigitalEvent, PendingRealEvent};
 use super::{
     AnalysisType, CallType, CmContext, CmError, CmResult, CodeModel, DigitalValue, EvaluationPhase,
     EventQueue, ParamSpec, ParamType, PortSpec, PortType,
@@ -1082,71 +1082,57 @@ impl XspiceInstance {
                     }
                 }
                 PortConnection::AnalogVector(nodes) => {
-                    let values: Vec<Value> =
-                        nodes.iter().map(|n| node_voltage(solution, *n)).collect();
-                    // Store as analog vector input
-                    use super::context::{AnalogValue, InputValue};
-                    self.context.set_input(
+                    self.context.set_input_analog_vector_from_fn(
                         &port.name,
-                        InputValue::AnalogVector(
-                            values.into_iter().map(AnalogValue::new).collect(),
-                        ),
+                        nodes.len(),
+                        |index| AnalogValue::new(node_voltage(solution, nodes[index])),
                     );
                 }
                 PortConnection::TypedAnalogVector(elements) => {
-                    use super::context::{AnalogValue, InputValue};
-                    self.context.set_input(
+                    self.context.set_input_analog_vector_from_fn(
                         &port.name,
-                        InputValue::AnalogVector(
-                            elements
-                                .iter()
-                                .map(|element| {
-                                    AnalogValue::new(
-                                        element.value_from_solution(solution, num_nodes),
-                                    )
-                                })
-                                .collect(),
-                        ),
+                        elements.len(),
+                        |index| {
+                            AnalogValue::new(
+                                elements[index].value_from_solution(solution, num_nodes),
+                            )
+                        },
                     );
                 }
                 PortConnection::DigitalVector(nodes) => {
-                    let values: Vec<DigitalValue> = nodes
-                        .iter()
-                        .map(|n| digital_values.get(n).copied().unwrap_or_default())
-                        .collect();
-                    let event_times = nodes
-                        .iter()
-                        .map(|node| digital_event_times.get(node).copied())
-                        .collect();
-                    use super::context::InputValue;
-                    self.context
-                        .set_input(&port.name, InputValue::DigitalVector(values));
-                    self.context
-                        .set_input_digital_vector_event_times(&port.name, event_times);
+                    self.context.set_input_digital_vector_from_fn(
+                        &port.name,
+                        nodes.len(),
+                        |index| {
+                            digital_values
+                                .get(&nodes[index])
+                                .copied()
+                                .unwrap_or_default()
+                        },
+                    );
+                    self.context.set_input_digital_vector_event_times_from_fn(
+                        &port.name,
+                        nodes.len(),
+                        |index| digital_event_times.get(&nodes[index]).copied(),
+                    );
                 }
                 PortConnection::DigitalVectorMapped(nodes) => {
-                    let values: Vec<DigitalValue> = nodes
-                        .iter()
-                        .map(|connection| connection.input_value(digital_values))
-                        .collect();
-                    let event_times = nodes
-                        .iter()
-                        .map(|connection| digital_event_times.get(&connection.node).copied())
-                        .collect();
-                    use super::context::InputValue;
-                    self.context
-                        .set_input(&port.name, InputValue::DigitalVector(values));
-                    self.context
-                        .set_input_digital_vector_event_times(&port.name, event_times);
+                    self.context.set_input_digital_vector_from_fn(
+                        &port.name,
+                        nodes.len(),
+                        |index| nodes[index].input_value(digital_values),
+                    );
+                    self.context.set_input_digital_vector_event_times_from_fn(
+                        &port.name,
+                        nodes.len(),
+                        |index| digital_event_times.get(&nodes[index].node).copied(),
+                    );
                 }
                 PortConnection::RealVector(nodes) => {
-                    let values: Vec<Value> = nodes
-                        .iter()
-                        .map(|n| real_values.get(n).copied().unwrap_or(0.0))
-                        .collect();
-                    use super::context::InputValue;
                     self.context
-                        .set_input(&port.name, InputValue::RealVector(values));
+                        .set_input_real_vector_from_fn(&port.name, nodes.len(), |index| {
+                            real_values.get(&nodes[index]).copied().unwrap_or(0.0)
+                        });
                 }
                 PortConnection::Null => {}
             }
@@ -2589,6 +2575,102 @@ mod tests {
             instance.context.input_digital("in"),
             Some(DigitalValue::one())
         );
+    }
+
+    #[test]
+    fn update_inputs_reuses_vector_input_buffers() {
+        let model = model_with_ports(vec![
+            PortSpec::vector_input("ain", PortType::Voltage),
+            PortSpec::vector_input("din", PortType::Digital),
+            PortSpec::vector_input("rin", PortType::Real),
+        ]);
+        let mut instance = XspiceInstance::new(
+            "Avecin",
+            Arc::new(model),
+            vec![
+                PortConnection::AnalogVector(vec![1, 2]),
+                PortConnection::DigitalVector(vec![3, 4]),
+                PortConnection::RealVector(vec![5, 6]),
+            ],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("vector input instance should construct");
+
+        let mut digital_values = HashMap::new();
+        digital_values.insert(3, DigitalValue::zero());
+        digital_values.insert(4, DigitalValue::one());
+        let mut digital_event_times = HashMap::new();
+        digital_event_times.insert(4, 2.0e-9);
+        let mut real_values = HashMap::new();
+        real_values.insert(5, 10.0);
+        real_values.insert(6, 11.0);
+
+        instance.update_inputs(
+            &[1.0, 2.0],
+            2,
+            &digital_values,
+            &digital_event_times,
+            &real_values,
+            &HashMap::new(),
+        );
+
+        let analog_ptr = instance
+            .context
+            .input_analog_vector_values("ain")
+            .unwrap()
+            .as_ptr();
+        let digital_ptr = instance
+            .context
+            .input_digital_vector_values("din")
+            .unwrap()
+            .as_ptr();
+        let real_ptr = instance
+            .context
+            .input_real_vector_values("rin")
+            .unwrap()
+            .as_ptr();
+
+        digital_values.insert(3, DigitalValue::one());
+        digital_values.insert(4, DigitalValue::zero());
+        digital_event_times.clear();
+        digital_event_times.insert(3, 3.0e-9);
+        real_values.insert(5, 20.0);
+        real_values.insert(6, 21.0);
+
+        instance.update_inputs(
+            &[3.0, 4.0],
+            2,
+            &digital_values,
+            &digital_event_times,
+            &real_values,
+            &HashMap::new(),
+        );
+
+        let analog = instance.context.input_analog_vector_values("ain").unwrap();
+        assert_eq!(analog.as_ptr(), analog_ptr);
+        assert_eq!(
+            analog.iter().map(|value| value.value).collect::<Vec<_>>(),
+            vec![3.0, 4.0]
+        );
+
+        let digital = instance.context.input_digital_vector_values("din").unwrap();
+        assert_eq!(digital.as_ptr(), digital_ptr);
+        assert_eq!(digital, &[DigitalValue::one(), DigitalValue::zero()]);
+        assert_eq!(
+            instance.context.input_digital_vector_event_time("din", 0),
+            Some(3.0e-9)
+        );
+        assert_eq!(
+            instance.context.input_digital_vector_event_time("din", 1),
+            None
+        );
+
+        let real = instance.context.input_real_vector_values("rin").unwrap();
+        assert_eq!(real.as_ptr(), real_ptr);
+        assert_eq!(real, &[20.0, 21.0]);
     }
 
     #[test]
