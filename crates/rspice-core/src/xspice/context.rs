@@ -1056,6 +1056,41 @@ impl CmContext {
         });
     }
 
+    /// Set a digital vector output from values derived from this context.
+    pub fn set_output_digital_vector_from_context_fn<F>(
+        &mut self,
+        name: &str,
+        value_count: usize,
+        delay: Value,
+        mut value_at: F,
+    ) where
+        F: FnMut(&CmContext, usize) -> DigitalValue,
+    {
+        let mut event_values = Vec::with_capacity(value_count);
+        for index in 0..value_count {
+            event_values.push(value_at(self, index));
+        }
+
+        match self.outputs.get_mut(name) {
+            Some(OutputValue::DigitalVector(existing)) => {
+                existing.clear();
+                existing.extend_from_slice(&event_values);
+            }
+            _ => {
+                self.outputs.insert(
+                    name.to_string(),
+                    OutputValue::DigitalVector(event_values.clone()),
+                );
+            }
+        }
+        self.pending_events.push(PendingDigitalEvent {
+            port_name: name.to_string(),
+            start_index: 0,
+            values: event_values,
+            delay,
+        });
+    }
+
     /// Set digital vector output from borrowed values.
     pub fn set_output_digital_vector_from_slice(
         &mut self,
@@ -1720,6 +1755,30 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].values, values);
         assert_eq!(events[0].delay, 4.0e-9);
+    }
+
+    #[test]
+    fn digital_vector_context_fn_reads_context_before_replacing_output() {
+        let mut ctx = CmContext::new();
+        ctx.set_input(
+            "in",
+            InputValue::DigitalVector(vec![DigitalValue::zero(), DigitalValue::one()]),
+        );
+        ctx.set_output_digital_vector("out", vec![DigitalValue::unknown()], 0.0);
+        ctx.take_pending_events();
+
+        ctx.set_output_digital_vector_from_context_fn("out", 2, 8.0e-9, |ctx, index| {
+            ctx.input_digital_vector_values("in")
+                .and_then(|values| values.get(index).copied())
+                .unwrap_or_default()
+        });
+
+        let values = vec![DigitalValue::zero(), DigitalValue::one()];
+        assert_eq!(ctx.output_digital_vector("out"), values);
+        let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].values, values);
+        assert_eq!(events[0].delay, 8.0e-9);
     }
 
     #[test]
