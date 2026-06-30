@@ -2,7 +2,7 @@
 //!
 //! A floating top-center surface, lighter than a modal: mono filter input
 //! over a ranked command list with the shortcut hints right-aligned
-//! (`design/app/volta-app-dialogs.html` §01). Arrows move, Enter runs,
+//! as a product command surface. Arrows move, Enter runs,
 //! Esc closes, click runs. Filtering prefers prefix matches, then word
 //! starts, then substrings, then subsequences; ties keep the canonical
 //! order so related commands stay grouped. Matched letters render in

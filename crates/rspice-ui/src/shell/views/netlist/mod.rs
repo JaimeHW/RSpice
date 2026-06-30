@@ -1,7 +1,6 @@
 //! Netlist workspace — the text-first editing loop.
 //!
-//! The netlist-editor design (design/app/volta-netlist-editor.html): an
-//! editable SPICE buffer with gutter diagnostics and diff pips, a
+//! Netlist editing is an editable SPICE buffer with gutter diagnostics and diff pips, a
 //! `.param` tuner in the right panel that re-simulates on drag, and a
 //! run bar whose delta chips compare the latest run's measurements
 //! against the previous baseline. Editing switches the deck to *manual

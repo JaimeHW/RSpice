@@ -36,9 +36,10 @@ __pycache__/
 /rtlinv_*.json
 /rtlinv_*.cir
 /diagnostics/
+/design/
+/docs/
 /.codex-tools/
 /tmp/
-design/tools/marks_out.txt
 .agent/
 .worktrees/
 /_site

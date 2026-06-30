@@ -1,5 +1,5 @@
 //! Copy Cell and Rename Cell — small modals on the dialog primitive
-//! (`design/app/volta-library-manager.html` §07). The forms are one field
+//! The forms are one field
 //! deep; the semantics live in `AppState::copy_cell` / `rename_cell`.
 
 use super::shared::validate_lcv_name;

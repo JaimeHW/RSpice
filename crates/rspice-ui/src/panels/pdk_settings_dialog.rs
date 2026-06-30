@@ -1,8 +1,7 @@
 //! Model Library Paths Dialog
 //!
 //! Master–detail interface for configuring PDK (Process Design Kit) library
-//! paths, environment variables, and model file discovery
-//! (`design/app/volta-dialogs-v2.html` §2).
+//! paths, environment variables, and model file discovery.
 //!
 //! ## Features
 //!

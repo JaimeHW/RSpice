@@ -608,7 +608,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// Right-click menu for a cell row: Open, the cell operations, Delete.
-/// `design/app/volta-library-manager.html` §07.
+/// Uses the standard cell-operation menu grammar.
 fn cell_row_menu(
     response: &egui::Response,
     state: &mut AppState,

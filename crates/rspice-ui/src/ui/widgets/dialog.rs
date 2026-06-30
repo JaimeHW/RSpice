@@ -1,7 +1,7 @@
 //! The VOLTA modal primitive.
 //!
 //! Every dialog in the application is the same three-part surface over a
-//! scrim (see `design/app/volta-dialogs.html` §01):
+//! scrim:
 //!
 //! - **Scrim** — full-viewport canvas-black wash that blocks interaction
 //!   with everything underneath. Clicking it does not dismiss; `Esc` does.

@@ -12,12 +12,6 @@ here, run the deploy workflow, and that exact byte content goes live.
   (rspice-wasm bundle) likewise.
 - `assets/` — fonts, og-card, shared css/js.
 
-The mockups under `design/` (see `design/README.md` for the index) are
-design explorations with a sandbox lifecycle — they are NOT the site.
-When a design lands, port it here deliberately. `parity.html`'s design
-source is `design/internal/rspice-parity-dashboard.html`; the two are kept
-in sync by hand, with the oracle labels deliberately differing.
-
 Deploying: `python3 tools/deploy/deploy.py` (Windows: `py tools\deploy\deploy.py`)
 — git only, no `gh` required: it pushes your branch and a new `site-vN` tag, and
 the tag push is what triggers the workflow. It prints the Actions URL to watch.

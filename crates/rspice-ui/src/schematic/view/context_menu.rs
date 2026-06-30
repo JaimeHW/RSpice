@@ -1,5 +1,5 @@
 //! Right-click context menus — the editor's third hand
-//! (`design/app/volta-schematic-editor.html` §08).
+//! for the schematic editor.
 //!
 //! One menu per target: instance, wire segment, empty canvas. Every item
 //! is a route the keyboard or menubar already provides — the menu teaches

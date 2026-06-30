@@ -1,5 +1,5 @@
 //! Autosave checkpoints — crash recovery that never touches your file
-//! (`design/app/volta-app-dialogs.html` §02).
+//! using the standard confirmation dialog.
 //!
 //! While the schematic is dirty and has a path, a timer writes the same
 //! serialization the real save uses to a `.autosave` sibling. A clean save

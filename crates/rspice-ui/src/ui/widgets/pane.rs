@@ -1,6 +1,5 @@
 //! The two-pane master–detail chrome of the v2 dialog grammar
-//! (`design/app/volta-dialogs-v2.html` `.panes` / `.hd` / `.seclab`): one
-//! bordered container split into a fixed-width rail on `bg_panel` and a
+//! one bordered container split into a fixed-width rail on `bg_panel` and a
 //! fluid detail region on `bg_elevated`, each flowing top-down with a
 //! 36 pt header strip and an optional footer strip pinned to the bottom.
 //!
