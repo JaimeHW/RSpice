@@ -2668,8 +2668,10 @@ impl CodeModel for Integrator {
                 ParamSpec::real("gain", 1.0).with_description("Integration gain (1/time_constant)"),
                 ParamSpec::real("out_ic", 0.0).with_description("Initial output value"),
                 ParamSpec::real("out_lower_limit", -1e12)
+                    .required()
                     .with_description("Lower output saturation limit"),
                 ParamSpec::real("out_upper_limit", 1e12)
+                    .required()
                     .with_description("Upper output saturation limit"),
                 ParamSpec::real("limit_range", 1.0e-6)
                     .with_description("Smoothing range near output limits"),
@@ -2852,8 +2854,10 @@ impl CodeModel for Differentiator {
                 ParamSpec::real("gain", 1.0).with_description("Differentiation gain"),
                 ParamSpec::real("out_offset", 0.0).with_description("Output offset voltage"),
                 ParamSpec::real("out_lower_limit", -1e12)
+                    .required()
                     .with_description("Lower output saturation limit"),
                 ParamSpec::real("out_upper_limit", 1e12)
+                    .required()
                     .with_description("Upper output saturation limit"),
                 ParamSpec::real("limit_range", 1.0e-6)
                     .with_description("Smoothing range near output limits"),
