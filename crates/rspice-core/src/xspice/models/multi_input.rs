@@ -1,6 +1,7 @@
 //! Multi-input analog XSPICE code models.
 
 use crate::Value;
+use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
 };
@@ -124,16 +125,16 @@ fn table(ctx: &CmContext) -> CmResult<(&[Value], &[Value])> {
     Ok((x, y))
 }
 
-fn controlling_input(inputs: &[Value], mode: MultiInputPwlMode) -> Option<(usize, Value)> {
+fn controlling_input(inputs: &[AnalogValue], mode: MultiInputPwlMode) -> Option<(usize, Value)> {
     match mode {
         MultiInputPwlMode::And | MultiInputPwlMode::Nand => inputs
             .iter()
-            .copied()
+            .map(|input| input.value)
             .enumerate()
             .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
         MultiInputPwlMode::Or | MultiInputPwlMode::Nor => inputs
             .iter()
-            .copied()
+            .map(|input| input.value)
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
     }
@@ -202,7 +203,7 @@ fn reverse_output(x_table: &[Value], y_table: &[Value], input: Value) -> TableEv
 
 fn evaluate_multi_input(ctx: &CmContext) -> CmResult<Option<(usize, TableEval)>> {
     let (x_table, y_table) = table(ctx)?;
-    let inputs = ctx.input_vector("in");
+    let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if inputs.len() < 2 {
         return Err(CmError::PortCountMismatch {
             expected: 2,
@@ -211,7 +212,7 @@ fn evaluate_multi_input(ctx: &CmContext) -> CmResult<Option<(usize, TableEval)>>
     }
 
     let mode = mode(ctx)?;
-    let Some((index, controlling_input)) = controlling_input(&inputs, mode) else {
+    let Some((index, controlling_input)) = controlling_input(inputs, mode) else {
         return Ok(None);
     };
 

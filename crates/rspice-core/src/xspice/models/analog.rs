@@ -265,13 +265,17 @@ impl CodeModel for Summer {
         let out_gain = ctx.param("out_gain");
         let out_offset = ctx.param("out_offset");
 
-        let inputs = ctx.input_vector("in");
-        let in_gain = analog_vector_param(ctx, "in_gain", inputs.len(), 1.0, "summer")?;
-        let in_offset = analog_vector_param(ctx, "in_offset", inputs.len(), 0.0, "summer")?;
+        let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
+        let in_gain = analog_vector_param_values(ctx, "in_gain", inputs.len(), "summer")?;
+        let in_offset = analog_vector_param_values(ctx, "in_offset", inputs.len(), "summer")?;
         let sum: Value = inputs
             .iter()
-            .zip(in_gain.iter().zip(in_offset.iter()))
-            .map(|(&input, (&gain, &offset))| gain * (input + offset))
+            .enumerate()
+            .map(|(index, input)| {
+                let gain = analog_vector_param_at(in_gain, index, 1.0);
+                let offset = analog_vector_param_at(in_offset, index, 0.0);
+                gain * (input.value + offset)
+            })
             .sum();
         let v_out = sum * out_gain + out_offset;
 
@@ -288,34 +292,35 @@ impl CodeModel for Summer {
             return Vec::new();
         }
 
-        let inputs = ctx.input_vector("in");
-        let Ok(in_gain) = analog_vector_param(ctx, "in_gain", inputs.len(), 1.0, "summer") else {
+        let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
+        let Ok(in_gain) = analog_vector_param_values(ctx, "in_gain", inputs.len(), "summer") else {
             return Vec::new();
         };
         let out_gain = ctx.param("out_gain");
-        in_gain
-            .into_iter()
-            .enumerate()
-            .map(|(index, gain)| ("in".to_string(), index, gain * out_gain))
+        (0..inputs.len())
+            .map(|index| {
+                (
+                    "in".to_string(),
+                    index,
+                    analog_vector_param_at(in_gain, index, 1.0) * out_gain,
+                )
+            })
             .collect()
     }
 }
 
-fn analog_vector_param(
-    ctx: &CmContext,
+fn analog_vector_param_values<'a>(
+    ctx: &'a CmContext,
     name: &str,
     width: usize,
-    default_value: Value,
     model_name: &str,
-) -> CmResult<Vec<Value>> {
+) -> CmResult<Option<&'a [Value]>> {
     let supplied = ctx.real_vector_param(name).unwrap_or(&[]);
-    let values = if supplied.is_empty() {
-        vec![default_value; width]
-    } else {
-        validate_analog_vector_param_width(name, supplied.len(), width, model_name)?;
-        supplied.to_vec()
-    };
-    for (index, value) in values.iter().copied().enumerate() {
+    if supplied.is_empty() {
+        return Ok(None);
+    }
+    validate_analog_vector_param_width(name, supplied.len(), width, model_name)?;
+    for (index, value) in supplied.iter().copied().enumerate() {
         if !value.is_finite() {
             return Err(CmError::InvalidParameter {
                 name: name.to_string(),
@@ -323,7 +328,13 @@ fn analog_vector_param(
             });
         }
     }
-    Ok(values)
+    Ok(Some(supplied))
+}
+
+fn analog_vector_param_at(values: Option<&[Value]>, index: usize, default_value: Value) -> Value {
+    values
+        .and_then(|values| values.get(index).copied())
+        .unwrap_or(default_value)
 }
 
 fn validate_analog_vector_param_width(
@@ -468,7 +479,7 @@ impl CodeModel for Multiplier {
 }
 
 fn mult_transfer_from_context(ctx: &CmContext) -> CmResult<(Value, Vec<Value>)> {
-    let inputs = ctx.input_vector("in");
+    let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if inputs.len() < 2 {
         return Err(CmError::EvaluationError(format!(
             "mult requires at least 2 inputs, got {}",
@@ -476,17 +487,19 @@ fn mult_transfer_from_context(ctx: &CmContext) -> CmResult<(Value, Vec<Value>)> 
         )));
     }
 
-    let in_gain = analog_vector_param(ctx, "in_gain", inputs.len(), 1.0, "mult")?;
-    let in_offset = analog_vector_param(ctx, "in_offset", inputs.len(), 0.0, "mult")?;
+    let in_gain = analog_vector_param_values(ctx, "in_gain", inputs.len(), "mult")?;
+    let in_offset = analog_vector_param_values(ctx, "in_offset", inputs.len(), "mult")?;
     let out_gain = ctx.param("out_gain");
     let out_offset = ctx.param("out_offset");
 
     let mut accumulate_gain = 1.0;
     let mut accumulate_in = 1.0;
     let mut shifted_inputs = Vec::with_capacity(inputs.len());
-    for ((&input, &gain), &offset) in inputs.iter().zip(&in_gain).zip(&in_offset) {
+    for (index, input) in inputs.iter().enumerate() {
+        let gain = analog_vector_param_at(in_gain, index, 1.0);
+        let offset = analog_vector_param_at(in_offset, index, 0.0);
         accumulate_gain *= gain;
-        let shifted = input + offset;
+        let shifted = input.value + offset;
         shifted_inputs.push(shifted);
         accumulate_in *= shifted;
     }

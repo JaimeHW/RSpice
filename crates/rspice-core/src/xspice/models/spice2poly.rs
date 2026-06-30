@@ -5,6 +5,7 @@
 //! sequence instead of a rewritten polynomial ordering.
 
 use crate::Value;
+use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
 };
@@ -76,18 +77,19 @@ fn invalid_param(name: &str, message: impl Into<String>) -> CmError {
     }
 }
 
-fn checked_inputs(ctx: &CmContext) -> CmResult<Vec<Value>> {
-    let inputs = ctx.input_vector("in");
+fn checked_inputs(ctx: &CmContext) -> CmResult<&[AnalogValue]> {
+    let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if inputs.is_empty() {
         return Err(CmError::PortCountMismatch {
             expected: 1,
             actual: 0,
         });
     }
-    for (index, value) in inputs.iter().enumerate() {
-        if !value.is_finite() {
+    for (index, input) in inputs.iter().enumerate() {
+        if !input.value.is_finite() {
             return Err(CmError::EvaluationError(format!(
-                "input {index} must be finite, got {value}"
+                "input {index} must be finite, got {}",
+                input.value
             )));
         }
     }
@@ -177,7 +179,7 @@ fn nxtpwr(pwrseq: &mut [usize]) {
     pwrseq[k - 2] -= 1;
 }
 
-fn evaluate_poly(inputs: &[Value], coef: &[Value], multiplier: Value) -> PolyEval {
+fn evaluate_poly(inputs: &[AnalogValue], coef: &[Value], multiplier: Value) -> PolyEval {
     let mut exponents = vec![0usize; inputs.len()];
     let mut value = coef[0];
     let mut partials = vec![0.0; inputs.len()];
@@ -187,7 +189,7 @@ fn evaluate_poly(inputs: &[Value], coef: &[Value], multiplier: Value) -> PolyEva
 
         let mut product = 1.0;
         for (input, exponent) in inputs.iter().zip(exponents.iter().copied()) {
-            product *= evterm(*input, exponent);
+            product *= evterm(input.value, exponent);
         }
         value += coefficient * product;
 
@@ -201,9 +203,9 @@ fn evaluate_poly(inputs: &[Value], coef: &[Value], multiplier: Value) -> PolyEva
             for (term_index, input) in inputs.iter().enumerate() {
                 let term_exponent = exponents[term_index];
                 partial_product *= if term_index == input_index {
-                    evterm(*input, term_exponent - 1)
+                    evterm(input.value, term_exponent - 1)
                 } else {
-                    evterm(*input, term_exponent)
+                    evterm(input.value, term_exponent)
                 };
             }
             partials[input_index] += coefficient * partial_product;
@@ -222,7 +224,7 @@ fn evaluate_context(ctx: &CmContext) -> CmResult<PolyEval> {
     let inputs = checked_inputs(ctx)?;
     let coef = checked_coef(ctx)?;
     let multiplier = checked_multiplier(ctx)?;
-    Ok(evaluate_poly(&inputs, coef, multiplier))
+    Ok(evaluate_poly(inputs, coef, multiplier))
 }
 
 impl CodeModel for Spice2Poly {
@@ -379,7 +381,8 @@ mod tests {
 
     #[test]
     fn polynomial_value_and_partials_use_multiplier() {
-        let result = evaluate_poly(&[2.0, 3.0], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2.0);
+        let inputs = vec![AnalogValue::new(2.0), AnalogValue::new(3.0)];
+        let result = evaluate_poly(&inputs, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2.0);
 
         assert!((result.value - 228.0).abs() < 1.0e-12);
         assert!((result.partials[0] - 66.0).abs() < 1.0e-12);

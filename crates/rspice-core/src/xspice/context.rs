@@ -633,6 +633,13 @@ impl CmContext {
             .unwrap_or_default()
     }
 
+    /// Borrow an analog input vector without allocating.
+    pub fn input_analog_vector_values(&self, name: &str) -> Option<&[AnalogValue]> {
+        self.inputs
+            .get(name)
+            .and_then(InputValue::try_analog_vector)
+    }
+
     /// Get digital input vector
     pub fn input_digital_vector(&self, name: &str) -> Vec<DigitalValue> {
         self.inputs
@@ -644,6 +651,13 @@ impl CmContext {
             .unwrap_or_default()
     }
 
+    /// Borrow a digital input vector without allocating.
+    pub fn input_digital_vector_values(&self, name: &str) -> Option<&[DigitalValue]> {
+        self.inputs
+            .get(name)
+            .and_then(InputValue::try_digital_vector)
+    }
+
     /// Get real input vector
     pub fn input_real_vector(&self, name: &str) -> Vec<Value> {
         self.inputs
@@ -653,6 +667,11 @@ impl CmContext {
                 _ => Vec::new(),
             })
             .unwrap_or_default()
+    }
+
+    /// Borrow a real input vector without allocating.
+    pub fn input_real_vector_values(&self, name: &str) -> Option<&[Value]> {
+        self.inputs.get(name).and_then(InputValue::try_real_vector)
     }
 
     /// Set an input value (used by circuit integration)
@@ -1491,6 +1510,37 @@ mod tests {
 
         let real = InputValue::Real(2.5);
         assert_eq!(real.try_real(), Some(2.5));
+    }
+
+    #[test]
+    fn vector_input_borrow_accessors_do_not_require_clones() {
+        let mut ctx = CmContext::new();
+        ctx.set_input(
+            "analog",
+            InputValue::AnalogVector(vec![AnalogValue::new(1.0), AnalogValue::new(2.0)]),
+        );
+        ctx.set_input(
+            "digital",
+            InputValue::DigitalVector(vec![DigitalValue::zero(), DigitalValue::one()]),
+        );
+        ctx.set_input("real", InputValue::RealVector(vec![3.0, 4.0]));
+
+        let analog = ctx
+            .input_analog_vector_values("analog")
+            .expect("analog vector is borrowed");
+        assert_eq!(
+            analog.iter().map(|value| value.value).collect::<Vec<_>>(),
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            ctx.input_digital_vector_values("digital"),
+            Some([DigitalValue::zero(), DigitalValue::one()].as_slice())
+        );
+        assert_eq!(
+            ctx.input_real_vector_values("real"),
+            Some([3.0, 4.0].as_slice())
+        );
+        assert!(ctx.input_analog_vector_values("missing").is_none());
     }
 
     #[test]
