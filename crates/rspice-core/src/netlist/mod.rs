@@ -3193,6 +3193,26 @@ mod tests {
     }
 
     #[test]
+    fn split_subckt_end_name_can_match_open_subckt_name() {
+        let netlist = Netlist::parse(
+            "split subckt end name\n\
+             .subckt count10 in out\n\
+             R1 in out 1k\n\
+             .ends count 10\n\
+             X1 a b count10\n\
+             .end\n",
+        )
+        .expect("ngspice accepts whitespace-split .ENDS names in example decks");
+
+        assert!(
+            netlist
+                .subcircuits
+                .iter()
+                .any(|subckt| subckt.name.eq_ignore_ascii_case("COUNT10"))
+        );
+    }
+
+    #[test]
     fn analysis_commands_reject_unconsumed_trailing_tokens() {
         for line in [
             ".op garbage",

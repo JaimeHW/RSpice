@@ -148,13 +148,7 @@ pub(super) fn process_line(
     if head.eq_ignore_ascii_case(".ends") {
         let mut fields = line.split_whitespace();
         fields.next();
-        let end_name = fields.next();
-        if let Some(extra) = fields.next() {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: format!(".ENDS has unexpected trailing token `{extra}`"),
-            });
-        }
+        let end_name = fields.collect::<Vec<_>>();
 
         let Some(open_frame) = state.subckt_stack.last() else {
             return Err(ParseError::Syntax {
@@ -163,17 +157,19 @@ pub(super) fn process_line(
             });
         };
 
-        if let Some(end_name) = end_name
-            && !end_name.eq_ignore_ascii_case(&open_frame.def.name)
-            && !end_name.eq_ignore_ascii_case(&open_frame.qualified_name)
-        {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: format!(
-                    ".ENDS `{end_name}` does not match open .SUBCKT `{}`",
-                    open_frame.def.name
-                ),
-            });
+        if !end_name.is_empty() {
+            let end_name = end_name.join("");
+            if !end_name.eq_ignore_ascii_case(&open_frame.def.name)
+                && !end_name.eq_ignore_ascii_case(&open_frame.qualified_name)
+            {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        ".ENDS `{end_name}` does not match open .SUBCKT `{}`",
+                        open_frame.def.name
+                    ),
+                });
+            }
         }
 
         let mut frame = state
