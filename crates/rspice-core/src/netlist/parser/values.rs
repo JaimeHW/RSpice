@@ -958,8 +958,20 @@ pub(super) fn expect_node(stream: &mut TokenStream, line_num: usize) -> Result<S
 
     match &stream.peek().kind {
         TokenKind::Ident(s) => {
-            let s = s.clone();
+            let mut s = s.clone();
+            let ident_end = stream.peek().span.end;
             stream.advance();
+            match &stream.peek().kind {
+                TokenKind::Plus if stream.peek().span.start == ident_end => {
+                    s.push('+');
+                    stream.advance();
+                }
+                TokenKind::Minus if stream.peek().span.start == ident_end => {
+                    s.push('-');
+                    stream.advance();
+                }
+                _ => {}
+            }
             Ok(s)
         }
         TokenKind::Number(n) => {

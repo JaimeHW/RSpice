@@ -3880,6 +3880,18 @@ mod tests {
     }
 
     #[test]
+    fn node_names_accept_adjacent_sign_suffixes() {
+        let netlist = Netlist::parse(
+            "signed node suffixes\n\
+             R1 out+ in- 1k\n\
+             .end\n",
+        )
+        .expect("ngspice node names may end in adjacent + or -");
+
+        assert_eq!(netlist.elements[0].nodes, vec!["OUT+", "IN-"]);
+    }
+
+    #[test]
     fn resistor_value_model_and_instance_parameters_parse() {
         let netlist = Netlist::parse(
             "modeled resistor\n\
