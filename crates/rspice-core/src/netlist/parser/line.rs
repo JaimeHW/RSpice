@@ -117,7 +117,7 @@ pub(super) fn process_line(
 
     // Check for .SUBCKT start
     if head.eq_ignore_ascii_case(".subckt") {
-        let subckt = parse_subckt_def(line, line_num)?;
+        let subckt = parse_subckt_def(line, line_num, state.condition_scope())?;
         let parent_scope = state
             .subckt_stack
             .last()
@@ -130,6 +130,9 @@ pub(super) fn process_line(
             .unwrap_or_else(|| state.params.clone());
         for (name, value) in &subckt.params {
             local_params.set(name, *value);
+        }
+        for (name, value) in &subckt.string_params {
+            local_params.set_string(name, value.clone());
         }
         state.subckt_stack.push(SubcktFrame {
             def: subckt,
@@ -220,7 +223,7 @@ pub(super) fn process_line(
             let mut stream = TokenStream::new(tokens);
             stream.advance(); // skip .MODEL
             let mut model =
-                parse_model_definition(&mut stream, line_num, &frame.local_params, models)?;
+                parse_model_definition(&mut stream, line_num, &frame.local_params, models, true)?;
             let local_name = model.name.clone();
             let qualified_name = qualify_local_model_name(&frame.qualified_name, &local_name);
             frame
@@ -439,7 +442,14 @@ pub(super) fn parse_line(
         // XSPICE code model instance
         'A' => {
             let name = expect_ident(&mut stream, line_num)?;
-            xspice_parser::parse_xspice(&mut stream, line_num, name, elements)
+            xspice_parser::parse_xspice(
+                &mut stream,
+                line_num,
+                name,
+                elements,
+                params,
+                defer_simple_param_refs,
+            )
         }
         _ => Err(ParseError::Syntax {
             line: line_num,

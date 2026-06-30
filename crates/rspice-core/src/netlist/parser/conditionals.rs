@@ -85,7 +85,7 @@ impl ParseState {
 
     /// Parameter scope for evaluating a condition: subcircuit-local when
     /// inside a `.subckt` body, global otherwise.
-    fn condition_scope(&self) -> &ParamContext {
+    pub(super) fn condition_scope(&self) -> &ParamContext {
         self.subckt_stack
             .last()
             .map(|frame| &frame.local_params)

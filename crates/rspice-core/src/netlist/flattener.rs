@@ -18,11 +18,12 @@
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
 use super::{
-    Element, ElementKind, Netlist, ParamContext, ParametricValue, ParseError, RandomState,
-    SourceSpec, SubcircuitDef,
+    Element, ElementKind, ModelDef, Netlist, ParamContext, ParametricValue, ParseError,
+    RandomState, SourceSpec, SubcircuitDef,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 //=============================================================================
 // Flattener Configuration
@@ -103,6 +104,14 @@ pub struct InstanceMetadata {
     pub children: Vec<String>,
 }
 
+/// Result of flattening a netlist, including any instance-scoped model cards
+/// needed by parameterized subcircuits.
+#[derive(Debug, Clone)]
+pub struct FlattenedNetlist {
+    pub elements: Vec<Element>,
+    pub scoped_models: Vec<ModelDef>,
+}
+
 //=============================================================================
 // Flattener
 //=============================================================================
@@ -117,6 +126,9 @@ pub struct InstanceMetadata {
 pub struct Flattener<'a> {
     /// Subcircuit definitions indexed by name
     subcircuits: HashMap<&'a str, &'a SubcircuitDef>,
+    /// Original model definitions, used to clone parameterized local models
+    /// when subcircuits are expanded with instance-specific parameter scopes.
+    models: &'a [ModelDef],
     /// Configuration options
     config: FlattenerConfig,
     /// Parameter resolver for scoped parameter lookup
@@ -135,6 +147,10 @@ pub struct Flattener<'a> {
     /// Netlist-wide statistical-function stream (shared draw counter), so
     /// per-instance expression draws are distinct yet reproducible.
     random: RandomState,
+    /// Model cards cloned while flattening parameterized subcircuit instances.
+    scoped_models: Vec<ModelDef>,
+    /// Directory of the parsed deck, used to resolve scoped XSPICE file params.
+    source_base_dir: Option<PathBuf>,
 }
 
 impl<'a> Flattener<'a> {
@@ -145,6 +161,15 @@ impl<'a> Flattener<'a> {
 
     /// Create a flattener with custom configuration
     pub fn with_config(subcircuits: &'a [SubcircuitDef], config: FlattenerConfig) -> Self {
+        Self::with_models_config(subcircuits, &[], config)
+    }
+
+    /// Create a flattener with model definitions available for scoped cloning.
+    pub fn with_models_config(
+        subcircuits: &'a [SubcircuitDef],
+        models: &'a [ModelDef],
+        config: FlattenerConfig,
+    ) -> Self {
         let subcircuit_map: HashMap<&str, &SubcircuitDef> =
             subcircuits.iter().map(|s| (s.name.as_str(), s)).collect();
 
@@ -156,6 +181,7 @@ impl<'a> Flattener<'a> {
 
         Self {
             subcircuits: subcircuit_map,
+            models,
             config,
             param_resolver,
             instance_metadata: Vec::new(),
@@ -163,6 +189,8 @@ impl<'a> Flattener<'a> {
             global_nodes: HashSet::new(),
             expansion_stack: Vec::new(),
             random: RandomState::default(),
+            scoped_models: Vec::new(),
+            source_base_dir: None,
         }
     }
 
@@ -182,12 +210,24 @@ impl<'a> Flattener<'a> {
         self.external_subckts = Self::collect_external_subckts(netlist);
         self.global_nodes = netlist.global_nodes.clone();
         self.expansion_stack.clear();
+        self.scoped_models.clear();
+        self.source_base_dir = netlist
+            .source_path
+            .as_ref()
+            .and_then(|path| path.parent())
+            .map(Path::to_path_buf);
         // Continue the netlist's statistical draw sequence (seeded at parse
         // time) so flatten-time draws are distinct per instance.
         self.random = netlist.params.random().clone();
         let global_params: HashMap<String, Value> = netlist
             .params
             .all_params()
+            .into_iter()
+            .map(|(name, value)| (canonical_param_name(&name), value))
+            .collect();
+        let global_string_params: HashMap<String, String> = netlist
+            .params
+            .all_string_params()
             .into_iter()
             .map(|(name, value)| (canonical_param_name(&name), value))
             .collect();
@@ -203,6 +243,7 @@ impl<'a> Flattener<'a> {
                 "",
                 &HashMap::new(),
                 &global_params,
+                &global_string_params,
                 0,
                 &mut flat_elements,
             )?;
@@ -218,6 +259,7 @@ impl<'a> Flattener<'a> {
         prefix: &str,
         node_map: &HashMap<String, String>,
         scope_params: &HashMap<String, Value>,
+        scope_string_params: &HashMap<String, String>,
         depth: usize,
         output: &mut Vec<Element>,
     ) -> Result<(), ParseError> {
@@ -244,6 +286,7 @@ impl<'a> Flattener<'a> {
                         prefix,
                         node_map,
                         scope_params,
+                        scope_string_params,
                         depth,
                         output,
                     )?;
@@ -303,6 +346,7 @@ impl<'a> Flattener<'a> {
         prefix: &str,
         parent_node_map: &HashMap<String, String>,
         caller_scope_params: &HashMap<String, Value>,
+        caller_scope_string_params: &HashMap<String, String>,
         depth: usize,
         output: &mut Vec<Element>,
     ) -> Result<(), ParseError> {
@@ -374,9 +418,10 @@ impl<'a> Flattener<'a> {
             }
         }
 
-        let param_map = build_subcircuit_param_scope(
+        let (param_map, string_param_map) = build_subcircuit_param_scope(
             subckt,
             caller_scope_params,
+            caller_scope_string_params,
             instance_params,
             &self.random,
         )?;
@@ -414,7 +459,13 @@ impl<'a> Flattener<'a> {
         self.expansion_stack.push(subckt_name.to_owned());
         for sub_element in &subckt.elements {
             // Apply parameter substitution to element values
-            let mut substituted = self.substitute_params(sub_element, &param_map)?;
+            let element_path = if new_prefix.is_empty() {
+                sub_element.name.clone()
+            } else {
+                format!("{}.{}", new_prefix, sub_element.name)
+            };
+            let mut substituted =
+                self.substitute_params(sub_element, &param_map, &string_param_map, &element_path)?;
             if multiplicity != 1.0 {
                 apply_element_multiplicity(&mut substituted, multiplicity);
             }
@@ -423,6 +474,7 @@ impl<'a> Flattener<'a> {
                 &new_prefix,
                 &node_map,
                 &param_map,
+                &string_param_map,
                 depth + 1,
                 output,
             )?;
@@ -521,6 +573,44 @@ impl<'a> Flattener<'a> {
                     control_element: new_ctrl,
                 }
             }
+            ElementKind::Xspice {
+                model,
+                ports,
+                params,
+                expr_params,
+                string_params,
+                string_expr_params,
+                string_vector_params,
+                string_vector_expr_params,
+                real_vector_params,
+                real_vector_expr_params,
+            } => ElementKind::Xspice {
+                model: model.clone(),
+                ports: ports
+                    .iter()
+                    .map(|port| self.remap_xspice_port(port, prefix, node_map))
+                    .collect(),
+                params: params.clone(),
+                expr_params: expr_params.clone(),
+                string_params: string_params
+                    .iter()
+                    .map(|(name, value)| {
+                        (
+                            name.clone(),
+                            super::normalize_model_string_path_value(
+                                name,
+                                value,
+                                self.source_base_dir.as_deref(),
+                            ),
+                        )
+                    })
+                    .collect(),
+                string_expr_params: string_expr_params.clone(),
+                string_vector_params: string_vector_params.clone(),
+                string_vector_expr_params: string_vector_expr_params.clone(),
+                real_vector_params: real_vector_params.clone(),
+                real_vector_expr_params: real_vector_expr_params.clone(),
+            },
             // All other kinds - clone as-is
             other => other.clone(),
         };
@@ -554,6 +644,57 @@ impl<'a> Flattener<'a> {
             node.to_string()
         } else {
             format!("{}{}{}", prefix, self.config.hierarchy_separator, node)
+        }
+    }
+
+    fn remap_xspice_port(
+        &self,
+        port: &super::XspicePort,
+        prefix: &str,
+        node_map: &HashMap<String, String>,
+    ) -> super::XspicePort {
+        use super::XspicePort;
+
+        let remap = |name: &str| self.remap_node(name, prefix, node_map);
+        match port {
+            XspicePort::Analog(name) => XspicePort::Analog(remap(name)),
+            XspicePort::Digital(name) => XspicePort::Digital(remap(name)),
+            XspicePort::DigitalInverted(name) => XspicePort::DigitalInverted(remap(name)),
+            XspicePort::AnalogVector(names) => {
+                XspicePort::AnalogVector(names.iter().map(|name| remap(name)).collect())
+            }
+            XspicePort::DigitalVector(names) => {
+                XspicePort::DigitalVector(names.iter().map(|name| remap(name)).collect())
+            }
+            XspicePort::DigitalVectorMixed(nodes) => XspicePort::DigitalVectorMixed(
+                nodes
+                    .iter()
+                    .map(|node| super::XspiceDigitalNode::new(remap(&node.name), node.inverted))
+                    .collect(),
+            ),
+            XspicePort::Conductance(name) => XspicePort::Conductance(remap(name)),
+            XspicePort::Current(name) => XspicePort::Current(remap(name)),
+            XspicePort::VoltageName(name) => XspicePort::VoltageName(remap(name)),
+            XspicePort::DifferentialVoltage { pos, neg } => XspicePort::DifferentialVoltage {
+                pos: remap(pos),
+                neg: remap(neg),
+            },
+            XspicePort::DifferentialCurrent { pos, neg } => XspicePort::DifferentialCurrent {
+                pos: remap(pos),
+                neg: remap(neg),
+            },
+            XspicePort::DifferentialConductance { pos, neg } => {
+                XspicePort::DifferentialConductance {
+                    pos: remap(pos),
+                    neg: remap(neg),
+                }
+            }
+            XspicePort::Hybrid(name) => XspicePort::Hybrid(remap(name)),
+            XspicePort::DifferentialHybrid { pos, neg } => XspicePort::DifferentialHybrid {
+                pos: remap(pos),
+                neg: remap(neg),
+            },
+            XspicePort::Null => XspicePort::Null,
         }
     }
 
@@ -628,9 +769,11 @@ impl<'a> Flattener<'a> {
     /// Since our current AST stores resolved f64 values, we substitute
     /// by scaling/replacing values based on parameter lookups.
     fn substitute_params(
-        &self,
+        &mut self,
         element: &Element,
         param_map: &HashMap<String, Value>,
+        string_param_map: &HashMap<String, String>,
+        element_path: &str,
     ) -> Result<Element, ParseError> {
         let new_kind = match &element.kind {
             // Passive components
@@ -778,14 +921,21 @@ impl<'a> Flattener<'a> {
             } => {
                 let mut merged_params = Vec::with_capacity(instance_params.len());
                 for (name, value) in instance_params {
-                    merged_params.push((
-                        name.clone(),
+                    let resolved = if parametric_value_is_string(value) {
+                        ParametricValue::String(resolve_string_parametric_value(
+                            value,
+                            param_map,
+                            string_param_map,
+                            &self.random,
+                        )?)
+                    } else {
                         ParametricValue::Resolved(resolve_parametric_value(
                             value,
                             param_map,
                             &self.random,
-                        )?),
-                    ));
+                        )?)
+                    };
+                    merged_params.push((name.clone(), resolved));
                 }
 
                 ElementKind::Subcircuit {
@@ -793,6 +943,49 @@ impl<'a> Flattener<'a> {
                     params: merged_params,
                 }
             }
+
+            ElementKind::Xspice {
+                model,
+                ports,
+                params,
+                expr_params,
+                string_params,
+                string_expr_params,
+                string_vector_params,
+                string_vector_expr_params,
+                real_vector_params,
+                real_vector_expr_params,
+            } => ElementKind::Xspice {
+                model: self.resolve_scoped_xspice_model(
+                    model,
+                    param_map,
+                    string_param_map,
+                    element_path,
+                )?,
+                ports: ports.clone(),
+                params: self.merge_deferred_params(params, expr_params, param_map)?,
+                expr_params: Vec::new(),
+                string_params: self.merge_deferred_string_params(
+                    string_params,
+                    string_expr_params,
+                    string_param_map,
+                    element_path,
+                )?,
+                string_expr_params: Vec::new(),
+                string_vector_params: self.merge_deferred_string_vector_params(
+                    string_vector_params,
+                    string_vector_expr_params,
+                    string_param_map,
+                    element_path,
+                )?,
+                string_vector_expr_params: Vec::new(),
+                real_vector_params: self.merge_deferred_real_vector_params(
+                    real_vector_params,
+                    real_vector_expr_params,
+                    param_map,
+                )?,
+                real_vector_expr_params: Vec::new(),
+            },
 
             // Controlled sources
             ElementKind::Vcvs {
@@ -871,9 +1064,135 @@ impl<'a> Flattener<'a> {
                 param_map,
                 &self.random,
             )?;
-            match merged.iter_mut().find(|(existing, _)| existing == name) {
+            match merged
+                .iter_mut()
+                .find(|(existing, _)| existing.eq_ignore_ascii_case(name))
+            {
                 Some(slot) => slot.1 = value,
                 None => merged.push((name.clone(), value)),
+            }
+        }
+        Ok(merged)
+    }
+
+    fn merge_deferred_string_params(
+        &self,
+        instance_params: &[(String, String)],
+        deferred_params: &[(String, String)],
+        string_param_map: &HashMap<String, String>,
+        element_path: &str,
+    ) -> Result<Vec<(String, String)>, ParseError> {
+        let mut merged: Vec<(String, String)> = instance_params
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.clone(),
+                    super::normalize_model_string_path_value(
+                        name,
+                        value,
+                        self.source_base_dir.as_deref(),
+                    ),
+                )
+            })
+            .collect();
+        if deferred_params.is_empty() {
+            return Ok(merged);
+        }
+
+        for (name, expr) in deferred_params {
+            let raw_value = string_param_map
+                .get(&canonical_param_name(expr))
+                .cloned()
+                .ok_or_else(|| {
+                    ParseError::InvalidValue(format!(
+                        "XSPICE instance string parameter '{}' for element '{}' could not resolve string parameter '{}'",
+                        name, element_path, expr
+                    ))
+                })?;
+            let value = super::normalize_model_string_path_value(
+                name,
+                &raw_value,
+                self.source_base_dir.as_deref(),
+            );
+            match merged
+                .iter_mut()
+                .find(|(existing, _)| existing.eq_ignore_ascii_case(name))
+            {
+                Some(slot) => slot.1 = value,
+                None => merged.push((name.clone(), value)),
+            }
+        }
+        Ok(merged)
+    }
+
+    fn merge_deferred_real_vector_params(
+        &self,
+        instance_params: &[(String, Vec<Value>)],
+        deferred_params: &[(String, Vec<String>)],
+        param_map: &HashMap<String, Value>,
+    ) -> Result<Vec<(String, Vec<Value>)>, ParseError> {
+        if deferred_params.is_empty() {
+            return Ok(instance_params.to_vec());
+        }
+
+        let mut merged = instance_params.to_vec();
+        for (name, exprs) in deferred_params {
+            let values = exprs
+                .iter()
+                .map(|expr| {
+                    resolve_parametric_value(
+                        &ParametricValue::Expression(expr.clone()),
+                        param_map,
+                        &self.random,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            match merged
+                .iter_mut()
+                .find(|(existing, _)| existing.eq_ignore_ascii_case(name))
+            {
+                Some(slot) => slot.1 = values,
+                None => merged.push((name.clone(), values)),
+            }
+        }
+        Ok(merged)
+    }
+
+    fn merge_deferred_string_vector_params(
+        &self,
+        instance_params: &[(String, Vec<String>)],
+        deferred_params: &[(String, String)],
+        string_param_map: &HashMap<String, String>,
+        element_path: &str,
+    ) -> Result<Vec<(String, Vec<String>)>, ParseError> {
+        if deferred_params.is_empty() {
+            return Ok(instance_params.to_vec());
+        }
+
+        let mut merged = instance_params.to_vec();
+        for (name, expr) in deferred_params {
+            let value = string_param_map
+                .get(&canonical_param_name(expr))
+                .cloned()
+                .ok_or_else(|| {
+                    ParseError::InvalidValue(format!(
+                        "XSPICE instance string-vector parameter '{}' for element '{}' could not resolve string parameter '{}'",
+                        name, element_path, expr
+                    ))
+                })?;
+            let values =
+                super::parse_xspice_string_vector_literal(&value, 1, name).map_err(|err| {
+                    ParseError::InvalidValue(format!(
+                        "XSPICE instance string-vector parameter '{}' for element '{}' could not parse string parameter '{}': {}",
+                        name, element_path, expr, err
+                    ))
+                })?;
+            match merged
+                .iter_mut()
+                .find(|(existing, _)| existing.eq_ignore_ascii_case(name))
+            {
+                Some(slot) => slot.1 = values,
+                None => merged.push((name.clone(), values)),
             }
         }
         Ok(merged)
@@ -892,6 +1211,73 @@ impl<'a> Flattener<'a> {
         }
         Ok(element)
     }
+
+    fn resolve_scoped_xspice_model(
+        &mut self,
+        model_name: &str,
+        param_map: &HashMap<String, Value>,
+        string_param_map: &HashMap<String, String>,
+        element_path: &str,
+    ) -> Result<String, ParseError> {
+        let Some(model_def) = self
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case(model_name))
+        else {
+            return Ok(model_name.to_string());
+        };
+
+        if model_def.expr_params.is_empty() {
+            return Ok(model_name.to_string());
+        }
+
+        let scoped_name = scoped_model_name(model_name, element_path);
+        let mut scoped_model = model_def.clone();
+        scoped_model.name = scoped_name.clone();
+        scoped_model.expr_params.clear();
+
+        for (name, expr) in &model_def.expr_params {
+            if let Some(value) = string_param_map.get(&canonical_param_name(expr)) {
+                push_scoped_model_string_value(
+                    &mut scoped_model,
+                    name,
+                    value,
+                    element_path,
+                    self.source_base_dir.as_deref(),
+                )?;
+                continue;
+            }
+
+            let mut ctx = ParamContext::new();
+            for (param_name, value) in param_map {
+                ctx.set(param_name, *value);
+            }
+            ctx.adopt_random(&self.random);
+            match super::expr::eval_expression(expr, &ctx) {
+                Ok(value) if value.is_finite() => {
+                    replace_model_param(&mut scoped_model, name);
+                    scoped_model.params.push((name.clone(), value));
+                }
+                Ok(value) => {
+                    return Err(ParseError::InvalidValue(format!(
+                        "XSPICE model parameter '{}' for scoped model '{}' resolved to non-finite value {}",
+                        name, model_name, value
+                    )));
+                }
+                Err(_) => scoped_model.expr_params.push((name.clone(), expr.clone())),
+            }
+        }
+
+        self.scoped_models.push(scoped_model);
+        Ok(scoped_name)
+    }
+}
+
+fn parametric_value_is_string(value: &ParametricValue) -> bool {
+    matches!(
+        value,
+        ParametricValue::String(_) | ParametricValue::StringExpression(_)
+    )
 }
 
 fn resolve_parametric_value(
@@ -913,6 +1299,43 @@ fn resolve_parametric_value(
             super::expr::eval_expression(expr, &ctx)
                 .map_err(|e| ParseError::InvalidValue(e.to_string()))
         }
+        ParametricValue::String(value) => Err(ParseError::InvalidValue(format!(
+            "string parameter value '{}' cannot be used as a numeric value",
+            value
+        ))),
+        ParametricValue::StringExpression(expr) => Err(ParseError::InvalidValue(format!(
+            "string parameter expression '{}' cannot be used as a numeric value",
+            expr
+        ))),
+    }
+}
+
+fn resolve_string_parametric_value(
+    value: &ParametricValue,
+    param_map: &HashMap<String, Value>,
+    string_param_map: &HashMap<String, String>,
+    random: &RandomState,
+) -> Result<String, ParseError> {
+    match value {
+        ParametricValue::String(value) => Ok(value.clone()),
+        ParametricValue::StringExpression(expr) | ParametricValue::Expression(expr) => {
+            string_param_map
+                .get(&canonical_param_name(expr))
+                .cloned()
+                .ok_or_else(|| {
+                    ParseError::InvalidValue(format!(
+                        "string parameter expression '{}' could not be resolved",
+                        expr
+                    ))
+                })
+        }
+        ParametricValue::Resolved(_) => {
+            let value = resolve_parametric_value(value, param_map, random)?;
+            Err(ParseError::InvalidValue(format!(
+                "numeric parameter value {} cannot be used as a string value",
+                value
+            )))
+        }
     }
 }
 
@@ -923,24 +1346,202 @@ fn canonical_param_name(name: &str) -> String {
 fn build_subcircuit_param_scope(
     subckt: &SubcircuitDef,
     caller_scope_params: &HashMap<String, Value>,
+    caller_scope_string_params: &HashMap<String, String>,
     instance_params: &[(String, ParametricValue)],
     random: &RandomState,
-) -> Result<HashMap<String, Value>, ParseError> {
+) -> Result<(HashMap<String, Value>, HashMap<String, String>), ParseError> {
     let mut param_map: HashMap<String, Value> = caller_scope_params
         .iter()
         .map(|(name, value)| (canonical_param_name(name), *value))
+        .collect();
+    let mut string_param_map: HashMap<String, String> = caller_scope_string_params
+        .iter()
+        .map(|(name, value)| (canonical_param_name(name), value.clone()))
         .collect();
 
     for (name, value) in &subckt.params {
         param_map.insert(canonical_param_name(name), *value);
     }
-
-    for (name, value) in instance_params {
-        let resolved = resolve_parametric_value(value, caller_scope_params, random)?;
-        param_map.insert(canonical_param_name(name), resolved);
+    for (name, value) in &subckt.string_params {
+        string_param_map.insert(canonical_param_name(name), value.clone());
     }
 
-    Ok(param_map)
+    for (name, value) in instance_params {
+        let key = canonical_param_name(name);
+        if subckt
+            .string_params
+            .iter()
+            .any(|(formal, _)| formal.eq_ignore_ascii_case(name))
+            || parametric_value_is_string(value)
+        {
+            let resolved = resolve_string_parametric_value(
+                value,
+                caller_scope_params,
+                caller_scope_string_params,
+                random,
+            )?;
+            string_param_map.insert(key, resolved);
+        } else {
+            let resolved = resolve_parametric_value(value, caller_scope_params, random)?;
+            param_map.insert(key, resolved);
+        }
+    }
+
+    Ok((param_map, string_param_map))
+}
+
+fn replace_model_param(model: &mut ModelDef, name: &str) {
+    model
+        .params
+        .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+    model
+        .expr_params
+        .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+    model
+        .string_params
+        .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+    model
+        .string_vector_params
+        .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+    model
+        .real_vector_params
+        .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+    model
+        .integer_vector_params
+        .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+}
+
+fn push_scoped_model_string_value(
+    model: &mut ModelDef,
+    name: &str,
+    value: &str,
+    element_path: &str,
+    source_base_dir: Option<&Path>,
+) -> Result<(), ParseError> {
+    replace_model_param(model, name);
+    let value = super::normalize_model_string_path_value(name, value, source_base_dir);
+    if value.trim_start().starts_with('[') {
+        match parse_scoped_model_vector_string(&value, element_path, name)? {
+            ScopedModelVector::Real(values) => {
+                model.real_vector_params.push((name.to_string(), values));
+            }
+            ScopedModelVector::String(values) => {
+                model.string_vector_params.push((name.to_string(), values));
+            }
+        }
+    } else {
+        model.string_params.push((name.to_string(), value));
+    }
+    Ok(())
+}
+
+enum ScopedModelVector {
+    Real(Vec<Value>),
+    String(Vec<String>),
+}
+
+fn parse_scoped_model_vector_string(
+    value: &str,
+    element_path: &str,
+    name: &str,
+) -> Result<ScopedModelVector, ParseError> {
+    let trimmed = value.trim();
+    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+        return Err(ParseError::InvalidValue(format!(
+            "XSPICE scoped model parameter '{}' for element '{}' has malformed vector string '{}'",
+            name, element_path, value
+        )));
+    }
+
+    let inner = &trimmed[1..trimmed.len() - 1];
+    let fields = split_vector_fields(inner);
+    if fields.is_empty() {
+        return Err(ParseError::InvalidValue(format!(
+            "XSPICE scoped model parameter '{}' for element '{}' has an empty vector",
+            name, element_path
+        )));
+    }
+
+    let mut numeric_values = Vec::with_capacity(fields.len());
+    let mut all_numeric = true;
+    for field in &fields {
+        match super::lexer::parse_spice_value(field) {
+            Ok(value) if value.is_finite() => numeric_values.push(value),
+            _ => {
+                all_numeric = false;
+                break;
+            }
+        }
+    }
+
+    if all_numeric {
+        return Ok(ScopedModelVector::Real(numeric_values));
+    }
+
+    Ok(ScopedModelVector::String(
+        fields
+            .into_iter()
+            .map(|field| strip_local_string_literal(&field).to_string())
+            .collect(),
+    ))
+}
+
+fn strip_local_string_literal(value: &str) -> &str {
+    let trimmed = value.trim();
+    if trimmed.len() >= 2 {
+        let first = trimmed.as_bytes()[0] as char;
+        let last = trimmed.as_bytes()[trimmed.len() - 1] as char;
+        if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+            return &trimmed[1..trimmed.len() - 1];
+        }
+    }
+    trimmed
+}
+
+fn split_vector_fields(input: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut single_quote = false;
+    let mut double_quote = false;
+
+    for ch in input.chars() {
+        match ch {
+            '\'' if !double_quote => {
+                single_quote = !single_quote;
+                current.push(ch);
+            }
+            '"' if !single_quote => {
+                double_quote = !double_quote;
+                current.push(ch);
+            }
+            ',' | ' ' | '\t' if !single_quote && !double_quote => {
+                if !current.is_empty() {
+                    fields.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        fields.push(current);
+    }
+
+    fields
+}
+
+fn scoped_model_name(model_name: &str, element_path: &str) -> String {
+    let suffix: String = element_path
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{model_name}__{suffix}")
 }
 
 /// Multiply an element's effective parallel multiplicity by `m`.
@@ -988,6 +1589,9 @@ fn apply_element_multiplicity(element: &mut Element, m: Value) {
                     ParametricValue::Resolved(v) => ParametricValue::Resolved(*v * m),
                     ParametricValue::Expression(expr) => {
                         ParametricValue::Expression(format!("({})*({})", expr, m))
+                    }
+                    ParametricValue::String(_) | ParametricValue::StringExpression(_) => {
+                        value.clone()
                     }
                 };
                 *value = composed;
@@ -1103,6 +1707,21 @@ fn scale_source_amplitudes(spec: &mut SourceSpec, m: Value) {
 pub fn flatten_netlist(netlist: &Netlist) -> Result<Vec<Element>, ParseError> {
     let mut flattener = Flattener::new(&netlist.subcircuits);
     flattener.flatten(netlist)
+}
+
+/// Convenience function to flatten a netlist and return instance-scoped model
+/// definitions created during subcircuit expansion.
+pub fn flatten_netlist_with_models(netlist: &Netlist) -> Result<FlattenedNetlist, ParseError> {
+    let mut flattener = Flattener::with_models_config(
+        &netlist.subcircuits,
+        &netlist.models,
+        FlattenerConfig::default(),
+    );
+    let elements = flattener.flatten(netlist)?;
+    Ok(FlattenedNetlist {
+        elements,
+        scoped_models: flattener.scoped_models,
+    })
 }
 
 fn is_ident_start(c: char) -> bool {

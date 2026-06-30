@@ -118,6 +118,7 @@ impl FunctionDef {
 #[derive(Debug, Clone, Default)]
 pub struct ParamContext {
     params: HashMap<String, Value>,
+    string_params: HashMap<String, String>,
     /// User-defined functions (.FUNC)
     functions: HashMap<String, FunctionDef>,
     /// Stream for the statistical functions; deterministic by default.
@@ -135,9 +136,21 @@ impl ParamContext {
         self.params.insert(name.to_uppercase(), value);
     }
 
+    /// Set a string parameter value.
+    pub fn set_string(&mut self, name: &str, value: impl Into<String>) {
+        self.string_params.insert(name.to_uppercase(), value.into());
+    }
+
     /// Get a parameter value
     pub fn get(&self, name: &str) -> Option<Value> {
         self.params.get(&name.to_uppercase()).copied()
+    }
+
+    /// Get a string parameter value.
+    pub fn get_string(&self, name: &str) -> Option<&str> {
+        self.string_params
+            .get(&name.to_uppercase())
+            .map(String::as_str)
     }
 
     /// Merge another context into this one
@@ -147,6 +160,9 @@ impl ParamContext {
     pub fn merge(&mut self, other: &ParamContext) {
         for (k, v) in &other.params {
             self.params.insert(k.clone(), *v);
+        }
+        for (k, v) in &other.string_params {
+            self.string_params.insert(k.clone(), v.clone());
         }
         for (k, v) in &other.functions {
             self.functions.insert(k.clone(), v.clone());
@@ -175,6 +191,14 @@ impl ParamContext {
     /// Get all parameters as a vector of (name, value) tuples
     pub fn all_params(&self) -> Vec<(String, Value)> {
         self.params.iter().map(|(k, v)| (k.clone(), *v)).collect()
+    }
+
+    /// Get all string parameters as a vector of (name, value) tuples.
+    pub fn all_string_params(&self) -> Vec<(String, String)> {
+        self.string_params
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     /// Define a user function

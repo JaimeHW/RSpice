@@ -17,6 +17,7 @@ use crate::Value;
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
+    pub lexeme: String,
 }
 
 /// Source location span
@@ -56,10 +57,15 @@ pub enum TokenKind {
     Slash,
     /// At sign (for device parameter references @device[param])
     AtSign,
+    /// Tilde (for inverted XSPICE digital event ports)
+    Tilde,
     /// Left bracket (for parameter indexing)
     LBracket,
     /// Right bracket
     RBracket,
+    /// Non-delimiter punctuation, kept for parser contexts such as liberal
+    /// ngspice-style XSPICE net names.
+    Other(char),
     /// Newline (significant for line structure)
     Newline,
     /// End of input
@@ -82,8 +88,10 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Star => write!(f, "*"),
             TokenKind::Slash => write!(f, "/"),
             TokenKind::AtSign => write!(f, "@"),
+            TokenKind::Tilde => write!(f, "~"),
             TokenKind::LBracket => write!(f, "["),
             TokenKind::RBracket => write!(f, "]"),
+            TokenKind::Other(c) => write!(f, "{}", c),
             TokenKind::Newline => write!(f, "\\n"),
             TokenKind::Eof => write!(f, "EOF"),
         }
@@ -135,13 +143,14 @@ impl<'a> Lexer<'a> {
                 end: start_pos + consumed,
                 line: start_line,
             };
+            let lexeme = self.input[start_pos..span.end].to_string();
 
             // Track newlines for line counting
             if matches!(kind, TokenKind::Newline) {
                 self.line += 1;
             }
 
-            tokens.push(Token { kind, span });
+            tokens.push(Token { kind, span, lexeme });
             self.pos += consumed;
         }
 
@@ -153,6 +162,7 @@ impl<'a> Lexer<'a> {
                 end: self.pos,
                 line: self.line,
             },
+            lexeme: String::new(),
         });
 
         Ok(tokens)
@@ -194,6 +204,7 @@ impl<'a> Lexer<'a> {
             '*' => Ok((TokenKind::Star, 1)),
             '/' => Ok((TokenKind::Slash, 1)),
             '@' => Ok((TokenKind::AtSign, 1)),
+            '~' => Ok((TokenKind::Tilde, 1)),
             '[' => Ok((TokenKind::LBracket, 1)),
             ']' => Ok((TokenKind::RBracket, 1)),
             '{' => self.parse_expression(input),
@@ -216,6 +227,7 @@ impl<'a> Lexer<'a> {
             }
             '0'..='9' => self.parse_number_or_ident(input),
             _ if is_ident_start(c) => self.parse_ident(input),
+            _ if is_other_token_char(c) => Ok((TokenKind::Other(c), c.len_utf8())),
             _ => Err(LexError::UnexpectedChar(c, self.line)),
         }
     }
@@ -526,6 +538,11 @@ fn is_ident_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':' || c == '%'
 }
 
+/// Check if an otherwise-special character should remain available to parsers.
+fn is_other_token_char(c: char) -> bool {
+    !c.is_whitespace() && !c.is_control()
+}
+
 /// Parse SPICE engineering suffix and return (multiplier, chars_consumed)
 fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
     if chars.is_empty() {
@@ -708,6 +725,7 @@ impl TokenStream {
             tokens.push(Token {
                 kind: TokenKind::Eof,
                 span,
+                lexeme: String::new(),
             });
         }
         Self { tokens, pos: 0 }
@@ -848,10 +866,42 @@ mod tests {
     }
 
     #[test]
+    fn tokens_keep_original_lexeme_text() {
+        let tokens = tokenize(".model co d_cosim (sim_args=[1e3, deck])\n").expect("tokenize");
+
+        assert!(
+            tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Number(1.0e3) && token.lexeme == "1e3")
+        );
+        assert!(
+            tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Ident("DECK".to_string())
+                    && token.lexeme == "deck")
+        );
+    }
+
+    #[test]
     fn unterminated_quoted_expression_is_rejected() {
         assert!(tokenize("R1 a b '2*3").is_err());
         assert!(tokenize("R1 a b 'µ0*2").is_err());
     }
+    #[test]
+    fn non_delimiter_punctuation_tokens_keep_original_lexeme_text() {
+        let tokens = tokenize("A1 !bias^1 bus|2 ctrl?0 model\n").expect("tokenize");
+
+        for ch in ['!', '^', '|', '?'] {
+            assert!(
+                tokens
+                    .iter()
+                    .any(|token| token.kind == TokenKind::Other(ch)
+                        && token.lexeme == ch.to_string()),
+                "missing Other({ch:?}) token in {tokens:?}"
+            );
+        }
+    }
+
     #[test]
     fn token_stream_empty_input_behaves_as_eof() {
         let mut stream = TokenStream::new(Vec::new());

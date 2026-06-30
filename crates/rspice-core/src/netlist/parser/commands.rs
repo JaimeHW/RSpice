@@ -141,7 +141,7 @@ pub(super) fn parse_command(
             });
         }
         ".MODEL" => {
-            let model = parse_model_definition(stream, line_num, params, models)?;
+            let model = parse_model_definition(stream, line_num, params, models, false)?;
             models.push(model);
         }
         ".PARAM" | ".CSPARAM" => {
@@ -573,6 +573,11 @@ pub(super) fn parse_options_command(
             "TRTOL" => {
                 let value = expect_value(stream, line_num, params)?;
                 options.trtol = Some(parse_positive_real_option("TRTOL", value, line_num)?);
+            }
+            "RAMPTIME" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.ramptime =
+                    Some(parse_non_negative_real_option("RAMPTIME", value, line_num)?);
             }
             "CHGTOL" => {
                 let value = expect_value(stream, line_num, params)?;
@@ -1303,9 +1308,26 @@ pub(super) fn parse_param_statement(
             });
         }
 
-        // Get the value (could be number or expression)
-        let value = expect_value(stream, line_num, params)?;
-        params.set(&name, value);
+        // Get the value (could be number, expression, or string-valued vector).
+        match &stream.peek().kind {
+            TokenKind::StringLit(value) => {
+                let value = value.clone();
+                stream.advance();
+                params.set_string(&name, value);
+            }
+            TokenKind::Expression(expr) if params.get_string(expr).is_some() => {
+                let value = params
+                    .get_string(expr)
+                    .expect("string parameter presence checked")
+                    .to_string();
+                stream.advance();
+                params.set_string(&name, value);
+            }
+            _ => {
+                let value = expect_value(stream, line_num, params)?;
+                params.set(&name, value);
+            }
+        }
     }
 
     Ok(())
@@ -1441,6 +1463,8 @@ mod tests {
             ".options iabstol=0",
             ".options residual_reltol=-1e-3",
             ".options trtol=0",
+            ".options ramptime=-1e-9",
+            ".options ramptime=1e309",
             ".options chgtol=-1e-15",
             ".options pivtol=0",
             ".options gmin=-1e-12",
@@ -1469,5 +1493,12 @@ mod tests {
                 "unexpected error for {options}: {err}"
             );
         }
+    }
+
+    #[test]
+    fn options_parse_ramptime() {
+        let netlist = Netlist::parse(&deck_with_options(".options ramptime=10n"))
+            .expect("ramptime option parses");
+        assert_eq!(netlist.options.ramptime, Some(10.0e-9));
     }
 }

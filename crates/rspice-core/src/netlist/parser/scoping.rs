@@ -18,6 +18,7 @@ pub(super) fn parse_model_definition(
     line_num: usize,
     params: &ParamContext,
     known_models: &[ModelDef],
+    defer_expression_params: bool,
 ) -> Result<ModelDef, ParseError> {
     let name = expect_ident(stream, line_num)?;
     let second = expect_ident(stream, line_num)?;
@@ -58,12 +59,39 @@ pub(super) fn parse_model_definition(
             params: Vec::new(),
             expr_params: Vec::new(),
             string_params: Vec::new(),
+            string_vector_params: Vec::new(),
             real_vector_params: Vec::new(),
             integer_vector_params: Vec::new(),
         });
     }
 
-    let model_params = parse_model_params(stream, line_num, params)?;
+    let ako_base_model = if let Some(base_name) = ako_base.as_ref() {
+        Some(
+            known_models
+                .iter()
+                .rev()
+                .find(|m| m.name.eq_ignore_ascii_case(base_name))
+                .ok_or_else(|| ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "AKO base model `{base_name}` is not defined before `{name}` \
+                         (PSpice requires the base earlier in the deck)"
+                    ),
+                })?,
+        )
+    } else {
+        None
+    };
+    let model_type_hint = model_type
+        .as_deref()
+        .or_else(|| ako_base_model.map(|base| base.model_type.as_str()));
+    let model_params = parse_model_params(
+        stream,
+        line_num,
+        params,
+        defer_expression_params,
+        model_type_hint,
+    )?;
 
     let Some(base_name) = ako_base else {
         return Ok(ModelDef {
@@ -72,22 +100,13 @@ pub(super) fn parse_model_definition(
             params: model_params.numeric,
             expr_params: model_params.expr,
             string_params: model_params.string,
+            string_vector_params: model_params.string_vector,
             real_vector_params: model_params.real_vector,
             integer_vector_params: model_params.integer_vector,
         });
     };
 
-    let base = known_models
-        .iter()
-        .rev()
-        .find(|m| m.name.eq_ignore_ascii_case(&base_name))
-        .ok_or_else(|| ParseError::Syntax {
-            line: line_num,
-            message: format!(
-                "AKO base model `{base_name}` is not defined before `{name}` \
-                 (PSpice requires the base earlier in the deck)"
-            ),
-        })?;
+    let base = ako_base_model.expect("AKO base model was resolved before parsing params");
 
     let model_type = match model_type {
         Some(explicit) => {
@@ -110,11 +129,14 @@ pub(super) fn parse_model_definition(
     let mut numeric = base.params.clone();
     let mut expr = base.expr_params.clone();
     let mut string = base.string_params.clone();
+    let mut string_vector = base.string_vector_params.clone();
     let mut real_vector = base.real_vector_params.clone();
     let mut integer_vector = base.integer_vector_params.clone();
     for (key, value) in model_params.numeric {
         numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         numeric.push((key, value));
@@ -122,6 +144,8 @@ pub(super) fn parse_model_definition(
     for (key, value) in model_params.expr {
         numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         expr.push((key, value));
@@ -130,14 +154,25 @@ pub(super) fn parse_model_definition(
         numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         string.push((key, value));
+    }
+    for (key, value) in model_params.string_vector {
+        numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        string_vector.push((key, value));
     }
     for (key, value) in model_params.real_vector {
         numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         real_vector.push((key, value));
@@ -146,6 +181,7 @@ pub(super) fn parse_model_definition(
         numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         integer_vector.push((key, value));
@@ -157,6 +193,7 @@ pub(super) fn parse_model_definition(
         params: numeric,
         expr_params: expr,
         string_params: string,
+        string_vector_params: string_vector,
         real_vector_params: real_vector,
         integer_vector_params: integer_vector,
     })
