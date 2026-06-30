@@ -531,6 +531,9 @@ pub struct Bjt {
     pub node_rth: NodeId,
     pub node_xf1: NodeId,
     pub node_xf2: NodeId,
+    /// True when the VBIC thermal rise state is supplied as an external
+    /// instance terminal rather than allocated as an internal node.
+    vbic_external_thermal_node: bool,
     /// True once the builder has promoted this VBIC instance's internal
     /// states to MNA unknowns; legacy Gummel-Poon instances stay on the
     /// reduced 4-terminal Schur stamp.
@@ -1003,6 +1006,7 @@ impl Bjt {
             node_rth: 0,
             node_xf1: 0,
             node_xf2: 0,
+            vbic_external_thermal_node: false,
             vbic_mna_promoted: false,
 
             // Default parameters (2N2222-like for NPN)
@@ -1294,8 +1298,7 @@ impl Bjt {
             // The shipped ngspice VBIC regression decks include `RTH` on several
             // level-4 models whose reference outputs match the non-self-heated
             // solution unless `SELFT` is explicitly enabled.
-            && self.selft_given
-            && self.selft >= 0.5
+            && (self.vbic_external_thermal_node || (self.selft_given && self.selft >= 0.5))
     }
 
     #[inline]

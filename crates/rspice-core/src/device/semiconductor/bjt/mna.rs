@@ -162,7 +162,11 @@ impl Bjt {
             self.node_substrate
         };
         self.node_rth = if self.self_heating_enabled() {
-            alloc("rth")
+            if self.vbic_external_thermal_node && self.node_rth != 0 {
+                self.node_rth
+            } else {
+                alloc("rth")
+            }
         } else {
             0
         };
@@ -710,6 +714,31 @@ mod tests {
             node
         });
         bjt
+    }
+
+    #[test]
+    fn external_vbic_thermal_terminal_enables_rth_without_selft() {
+        let params = std::collections::HashMap::from([
+            ("LEVEL".to_string(), 11.0),
+            ("RTH".to_string(), 100.0),
+        ]);
+        let mut bjt = Bjt::new_npn("q1".to_string(), 1, 2, 3).with_params(&params);
+
+        assert!(
+            !bjt.has_vbic_self_heating(),
+            "internal VBIC self-heating still requires SELFT when no external dt terminal is present"
+        );
+
+        bjt.set_vbic_external_thermal_node(4);
+        let mut next = 5;
+        bjt.assign_vbic_internal_nodes(|_| {
+            let node = next;
+            next += 1;
+            node
+        });
+
+        assert!(bjt.has_vbic_self_heating());
+        assert_eq!(bjt.node_rth, 4);
     }
 
     /// The promoted stamp is a Newton linearization: for biases close enough

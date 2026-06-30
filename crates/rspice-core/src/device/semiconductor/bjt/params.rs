@@ -605,6 +605,20 @@ impl Bjt {
         self.node_substrate = substrate;
     }
 
+    /// Use a caller-supplied node for the VBIC thermal-rise state.
+    ///
+    /// Xyce's native VBIC13 `LEVEL=11` has three electrical terminals and
+    /// treats the first extra instance terminal as `dt`, not as a substrate.
+    /// The parser keeps that token as an instance node; the builder resolves
+    /// the model card and calls this method when that node is the external
+    /// thermal terminal.
+    pub fn set_vbic_external_thermal_node(&mut self, thermal: NodeId) {
+        self.node_rth = thermal;
+        self.vbic_external_thermal_node = thermal != 0;
+        self.rth = self.rth_nominal.max(0.0);
+        self.cth = self.thermal_capacitance();
+    }
+
     /// Set model parameters from a DeviceModel
     pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
         let mut has_vaf = false;

@@ -884,11 +884,17 @@ impl Engine {
                     let collector = circuit.get_or_create_node(&element.nodes[0]);
                     let base = circuit.get_or_create_node(&element.nodes[1]);
                     let emitter = circuit.get_or_create_node(&element.nodes[2]);
-                    let substrate = element
+                    let fourth_terminal = element
                         .nodes
                         .get(3)
                         .map(|n| circuit.get_or_create_node(n))
                         .unwrap_or(0);
+                    let fifth_terminal = element
+                        .nodes
+                        .get(4)
+                        .map(|n| circuit.get_or_create_node(n))
+                        .unwrap_or(0);
+                    let bjt_level;
                     // Resolve polarity from model card when available.
                     let model_def = find_model_def(netlist, model);
                     #[cfg(feature = "veriloga-builtins")]
@@ -959,6 +965,7 @@ impl Engine {
                     if let Some(device_model) = model_def {
                         // Normalize keys so model cards remain case-insensitive.
                         let params_map = model_params_upper_map(&device_model.params);
+                        bjt_level = params_map.get("LEVEL").copied();
                         validate_bjt_model_level(
                             &element.name,
                             model,
@@ -970,6 +977,7 @@ impl Engine {
                     } else if let Some(params_map) =
                         builtin_bjt_model_map().get(&model.to_uppercase())
                     {
+                        bjt_level = params_map.get("LEVEL").copied();
                         // Fallback to embedded transistor library models when no
                         // explicit .MODEL card is present in the parsed netlist.
                         bjt = bjt.with_params(params_map);
@@ -991,7 +999,24 @@ impl Engine {
                         self.config.temperature,
                         netlist.options.tnom.unwrap_or(27.0),
                     );
+                    let xyce_vbic_external_dt = self.config.spice_dialect == SpiceDialect::Xyce
+                        && bjt.uses_vbic_dynamic_charges()
+                        && bjt_level.is_some_and(|level| bjt_level_matches(level, 11.0))
+                        && fourth_terminal != 0;
+                    let substrate = if xyce_vbic_external_dt {
+                        0
+                    } else {
+                        fourth_terminal
+                    };
+                    let external_thermal = if xyce_vbic_external_dt {
+                        fourth_terminal
+                    } else {
+                        fifth_terminal
+                    };
                     bjt.set_substrate_node(substrate);
+                    if bjt.uses_vbic_dynamic_charges() && external_thermal != 0 {
+                        bjt.set_vbic_external_thermal_node(external_thermal);
+                    }
 
                     // Legacy GP: externalize the constant collector,
                     // emitter, and base resistances onto real internal
