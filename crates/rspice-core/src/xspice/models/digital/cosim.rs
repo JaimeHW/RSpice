@@ -36,6 +36,7 @@ struct DigitalCosimInputScratch {
     inputs: Vec<DigitalValue>,
     inouts: Vec<DigitalValue>,
     input_events: Vec<DigitalCosimInputEvent>,
+    results: Vec<DigitalCosimStep>,
 }
 
 fn official_cosim_delay(ctx: &CmContext) -> Value {
@@ -230,6 +231,13 @@ fn apply_cosim_step(ctx: &mut CmContext, result: DigitalCosimStep) -> CmResult<(
     Ok(())
 }
 
+fn apply_cosim_steps(ctx: &mut CmContext, results: &mut Vec<DigitalCosimStep>) -> CmResult<()> {
+    for result in results.drain(..) {
+        apply_cosim_step(ctx, result)?;
+    }
+    Ok(())
+}
+
 impl CodeModel for DigitalCosim {
     fn name(&self) -> &str {
         "d_cosim"
@@ -354,6 +362,7 @@ impl CodeModel for DigitalCosim {
             inputs,
             inouts,
             input_events,
+            results,
         } = &mut *input_scratch;
         fill_sized_digital_vector(ctx, "d_in", input_width, inputs);
         fill_sized_digital_vector(ctx, "d_inout", inout_width, inouts);
@@ -373,7 +382,7 @@ impl CodeModel for DigitalCosim {
             .lock()
             .map_err(|_| d_cosim_error("runtime lock is poisoned"))?;
 
-        let mut results = Vec::new();
+        results.clear();
         if ctx.time == 0.0 {
             if ctx.int_state(STATE_TIME_ZERO_INITIALIZED) != COSIM_NOT_INITIALIZED {
                 return Ok(());
@@ -407,11 +416,7 @@ impl CodeModel for DigitalCosim {
                 digital_value_code(event.value),
             );
         }
-        drop(input_scratch);
-
-        for result in results {
-            apply_cosim_step(ctx, result)?;
-        }
+        apply_cosim_steps(ctx, results)?;
         Ok(())
     }
 }
@@ -533,6 +538,28 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].port_name, "d_out");
         assert_eq!(events[0].start_index, 0);
+        assert_eq!(events[0].values, vec![DigitalValue::one()]);
+    }
+
+    #[test]
+    fn d_cosim_result_drain_reuses_existing_buffer() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("d_out", 1);
+        let mut results = vec![DigitalCosimStep {
+            vtime: 0.0,
+            outputs: vec![DigitalValue::one()],
+            inouts: Vec::new(),
+        }];
+        let first_ptr = results.as_ptr();
+        let first_capacity = results.capacity();
+
+        apply_cosim_steps(&mut ctx, &mut results).expect("cosim result applies");
+
+        assert!(results.is_empty());
+        assert_eq!(results.as_ptr(), first_ptr);
+        assert_eq!(results.capacity(), first_capacity);
+        let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 1);
         assert_eq!(events[0].values, vec![DigitalValue::one()]);
     }
 }
