@@ -4,6 +4,7 @@
 //! fallback path when this module is asked to compile a model.
 
 mod abi;
+pub mod bench;
 mod error;
 mod expr;
 mod model;

@@ -45,7 +45,7 @@ pub(crate) struct NativeCurrentDependencies {
     pub noise_exponent_prior_currents: Vec<Vec<usize>>,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct PlanStats {
     pub assignment_entry_points: usize,
     pub parameter_default_entry_points: usize,
