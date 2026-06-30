@@ -944,7 +944,6 @@ impl CodeModel for DacBridge {
         let out_undef = dac_bridge_out_undef(ctx, out_low, out_high);
         let t_rise = official_bridge_timing(ctx.param("t_rise"));
         let t_fall = official_bridge_timing(ctx.param("t_fall"));
-        let mut outputs = Vec::with_capacity(width);
         let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
 
         for index in 0..width {
@@ -963,7 +962,7 @@ impl CodeModel for DacBridge {
                 ctx.set_state(base + 1, v_target);
                 ctx.set_state(base + 2, ctx.time);
                 ctx.set_state(base + 3, v_target);
-                outputs.push(v_target);
+                ctx.set_output_vector_element("out", index, v_target);
                 continue;
             }
 
@@ -1033,10 +1032,9 @@ impl CodeModel for DacBridge {
                 ctx.set_state(base + 2, transition_start_time);
                 ctx.set_state(base + 3, transition_start_value);
             }
-            outputs.push(v_out);
+            ctx.set_output_vector_element("out", index, v_out);
         }
 
-        ctx.set_output_vector("out", outputs);
         Ok(())
     }
 }
@@ -1121,8 +1119,6 @@ impl CodeModel for BidiBridge {
         let drive_state_base = bidi_drive_state_base(width);
         let drive_strength_base = bidi_drive_strength_base(width);
         let strength_base = bidi_int_strength_base(width);
-        let mut analog_currents = Vec::with_capacity(width);
-        let mut analog_partials = Vec::with_capacity(width);
         let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
 
         for index in 0..width {
@@ -1207,11 +1203,14 @@ impl CodeModel for BidiBridge {
                     digital_strength_code(drive.strength) as Value,
                 );
             }
-            analog_currents.push(analog_drive.current);
-            analog_partials.push(analog_drive.partial);
+            ctx.set_output_vector_element_with_partial(
+                "a",
+                index,
+                analog_drive.current,
+                analog_drive.partial,
+            );
         }
 
-        ctx.set_output_vector_with_partials("a", analog_currents, analog_partials);
         Ok(())
     }
 }

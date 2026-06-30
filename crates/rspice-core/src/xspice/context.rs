@@ -880,6 +880,42 @@ impl CmContext {
         }
     }
 
+    /// Set one analog vector output element with zero direct partial.
+    pub fn set_output_vector_element(&mut self, name: &str, index: usize, value: Value) {
+        self.set_output_vector_element_with_partial(name, index, value, 0.0);
+    }
+
+    /// Set one analog vector output element and direct partial in place.
+    pub fn set_output_vector_element_with_partial(
+        &mut self,
+        name: &str,
+        index: usize,
+        value: Value,
+        partial: Value,
+    ) {
+        let width = self.port_width(name).max(index + 1);
+        let out = self
+            .outputs
+            .entry(name.to_string())
+            .or_insert_with(|| OutputValue::analog_vector(width));
+        match out {
+            OutputValue::AnalogVector(existing) => {
+                existing.resize(width, AnalogValue::default());
+                if let Some(analog) = existing.get_mut(index) {
+                    analog.prev_value = analog.value;
+                    analog.value = value;
+                    analog.partial = partial;
+                }
+            }
+            OutputValue::Analog(existing) if index == 0 && width == 1 => {
+                existing.prev_value = existing.value;
+                existing.value = value;
+                existing.partial = partial;
+            }
+            _ => {}
+        }
+    }
+
     /// Set digital output value (schedules event)
     pub fn set_output_digital(&mut self, name: &str, value: DigitalValue, delay: Value) {
         self.outputs
@@ -1541,6 +1577,20 @@ mod tests {
             Some([3.0, 4.0].as_slice())
         );
         assert!(ctx.input_analog_vector_values("missing").is_none());
+    }
+
+    #[test]
+    fn analog_vector_element_setter_updates_in_place() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("out", 2);
+        ctx.set_output_vector("out", vec![1.0, 2.0]);
+
+        ctx.set_output_vector_element("out", 0, 1.5);
+        ctx.set_output_vector_element_with_partial("out", 1, 3.0, 4.0);
+
+        assert_eq!(ctx.output_vector("out"), vec![1.5, 3.0]);
+        assert_eq!(ctx.output_vector_prev("out"), vec![1.0, 2.0]);
+        assert_eq!(ctx.partial_vector("out"), vec![0.0, 4.0]);
     }
 
     #[test]
