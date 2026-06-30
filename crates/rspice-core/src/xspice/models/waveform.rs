@@ -36,6 +36,12 @@ struct ControlPoint {
     frequency: Value,
 }
 
+#[derive(Debug, Clone)]
+struct FrequencyTableData {
+    points: Vec<ControlPoint>,
+    strictly_increasing_control: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct FrequencyTableSignature {
     controls: Vec<Value>,
@@ -45,7 +51,7 @@ struct FrequencyTableSignature {
 #[derive(Debug, Clone)]
 struct FrequencyTableResource {
     signature: FrequencyTableSignature,
-    result: CmResult<Option<Arc<Vec<ControlPoint>>>>,
+    result: CmResult<Option<Arc<FrequencyTableData>>>,
 }
 
 fn invalid_param(name: &str, message: impl Into<String>) -> CmError {
@@ -145,13 +151,15 @@ fn triangle_params() -> &'static [ParamSpec] {
     })
 }
 
-fn controlled_frequency_table(ctx: &CmContext) -> CmResult<Vec<ControlPoint>> {
-    controlled_frequency_table_optional_uncached(ctx)?.ok_or_else(|| {
-        invalid_param(
-            "cntl_array/freq_array",
-            "cntl_array length must match freq_array length",
-        )
-    })
+fn controlled_frequency_table(ctx: &CmContext) -> CmResult<FrequencyTableData> {
+    controlled_frequency_table_optional_uncached(ctx)?
+        .map(frequency_table_data)
+        .ok_or_else(|| {
+            invalid_param(
+                "cntl_array/freq_array",
+                "cntl_array length must match freq_array length",
+            )
+        })
 }
 
 fn frequency_table_signature(ctx: &CmContext) -> FrequencyTableSignature {
@@ -208,9 +216,19 @@ fn controlled_frequency_table_optional_uncached(
     Ok(Some(table))
 }
 
+fn frequency_table_data(points: Vec<ControlPoint>) -> FrequencyTableData {
+    let strictly_increasing_control = points
+        .windows(2)
+        .all(|pair| pair[0].control < pair[1].control);
+    FrequencyTableData {
+        points,
+        strictly_increasing_control,
+    }
+}
+
 fn controlled_frequency_table_optional(
     ctx: &mut CmContext,
-) -> CmResult<Option<Arc<Vec<ControlPoint>>>> {
+) -> CmResult<Option<Arc<FrequencyTableData>>> {
     let signature = frequency_table_signature(ctx);
     if let Some(resource) = ctx.resource::<FrequencyTableResource>(FREQUENCY_TABLE_RESOURCE)
         && resource.signature == signature
@@ -218,7 +236,8 @@ fn controlled_frequency_table_optional(
         return resource.result.clone();
     }
 
-    let result = controlled_frequency_table_optional_uncached(ctx).map(|table| table.map(Arc::new));
+    let result = controlled_frequency_table_optional_uncached(ctx)
+        .map(|table| table.map(frequency_table_data).map(Arc::new));
     ctx.set_resource(
         FREQUENCY_TABLE_RESOURCE,
         Arc::new(FrequencyTableResource {
@@ -229,7 +248,7 @@ fn controlled_frequency_table_optional(
     result
 }
 
-fn interpolate_frequency(table: &[ControlPoint], control: Value) -> Value {
+fn interpolate_frequency_linear_scan(table: &[ControlPoint], control: Value) -> Value {
     let first = table[0];
     let last = table[table.len() - 1];
 
@@ -251,6 +270,26 @@ fn interpolate_frequency(table: &[ControlPoint], control: Value) -> Value {
         }
         frequency.unwrap_or(last.frequency)
     }
+}
+
+fn interpolate_frequency(table: &FrequencyTableData, control: Value) -> Value {
+    let points = table.points.as_slice();
+    if !table.strictly_increasing_control {
+        return interpolate_frequency_linear_scan(points, control);
+    }
+
+    let first = points[0];
+    let last = points[points.len() - 1];
+    if control <= first.control {
+        let raw = linear_interpolate(points[0], points[1], control);
+        return raw.max(MIN_FREQUENCY);
+    }
+    if control >= last.control {
+        return linear_interpolate(points[points.len() - 2], last, control);
+    }
+
+    let upper_index = points.partition_point(|point| point.control <= control);
+    linear_interpolate(points[upper_index - 1], points[upper_index], control)
 }
 
 fn linear_interpolate(left: ControlPoint, right: ControlPoint, control: Value) -> Value {
@@ -312,7 +351,7 @@ fn waveform_set_state(ctx: &mut CmContext, index: usize, value: Value) {
     }
 }
 
-fn transient_phase(ctx: &mut CmContext, table: &[ControlPoint]) -> Value {
+fn transient_phase(ctx: &mut CmContext, table: &FrequencyTableData) -> Value {
     let frequency = interpolate_frequency(table, ctx.input("cntl_in"));
     let dt = (ctx.time - ctx.time_prev).max(0.0);
     let phase = ctx.state_prev(PHASE_STATE) + frequency * dt;
@@ -850,7 +889,7 @@ mod tests {
 
     #[test]
     fn interpolate_frequency_uses_last_matching_segment_like_ngspice() {
-        let table = [
+        let table = frequency_table_data(vec![
             ControlPoint {
                 control: 0.0,
                 frequency: 0.0,
@@ -867,13 +906,42 @@ mod tests {
                 control: 2.0,
                 frequency: 300.0,
             },
-        ];
+        ]);
 
         let frequency = interpolate_frequency(&table, 0.75);
 
         assert!(
             (frequency - 91.666_666_666_666_66).abs() < 1.0e-12,
             "ngspice scans every ascending in-range segment and keeps the later match; got {frequency}"
+        );
+    }
+
+    #[test]
+    fn interpolate_frequency_uses_monotonic_brackets() {
+        let table = frequency_table_data(vec![
+            ControlPoint {
+                control: 0.0,
+                frequency: 100.0,
+            },
+            ControlPoint {
+                control: 1.0,
+                frequency: 200.0,
+            },
+            ControlPoint {
+                control: 3.0,
+                frequency: 600.0,
+            },
+        ]);
+
+        assert!(table.strictly_increasing_control);
+        assert!(
+            (interpolate_frequency(&table, 2.0) - 400.0).abs() < 1.0e-12,
+            "strictly increasing controls should interpolate from the binary-search bracket"
+        );
+        assert_eq!(
+            interpolate_frequency(&table, 1.0),
+            200.0,
+            "exact interior controls should return the matching row"
         );
     }
 
