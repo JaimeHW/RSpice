@@ -54,7 +54,11 @@ impl CircuitData {
             // XSPICE instances
             xspice_instances: Vec::new(),
             xspice_digital_values: HashMap::new(),
+            xspice_digital_drivers: HashMap::new(),
             xspice_digital_event_times: HashMap::new(),
+            xspice_real_values: HashMap::new(),
+            xspice_real_drivers: HashMap::new(),
+            xspice_real_event_times: HashMap::new(),
             xspice_event_queue: EventQueue::new(),
             xspice_registry: Arc::new(CodeModelRegistry::with_builtins()),
             xspice_evaluation_error: None,

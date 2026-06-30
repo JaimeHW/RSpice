@@ -350,8 +350,16 @@ pub struct CircuitData {
     pub(crate) xspice_instances: Vec<XspiceInstance>,
     /// Circuit-level digital node values driven by XSPICE events.
     pub(crate) xspice_digital_values: HashMap<NodeId, DigitalValue>,
+    /// Per-output digital driver values, resolved onto digital nodes.
+    pub(crate) xspice_digital_drivers: HashMap<(NodeId, String, String), DigitalValue>,
     /// Last event time per XSPICE digital node.
     pub(crate) xspice_digital_event_times: HashMap<NodeId, Value>,
+    /// Circuit-level real-valued event node values driven by XSPICE events.
+    pub(crate) xspice_real_values: HashMap<NodeId, Value>,
+    /// Per-output real-valued event drivers, summed onto real nodes.
+    pub(crate) xspice_real_drivers: HashMap<(NodeId, String, String), Value>,
+    /// Last event time per XSPICE real-valued event node.
+    pub(crate) xspice_real_event_times: HashMap<NodeId, Value>,
     /// Circuit-level XSPICE digital event queue.
     pub(crate) xspice_event_queue: EventQueue,
     /// XSPICE code model registry (shared across instances)

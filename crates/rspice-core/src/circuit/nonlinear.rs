@@ -20,7 +20,11 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     behavioral_sources: BehavioralSources,
     xspice_instances: Vec<XspiceInstance>,
     xspice_digital_values: HashMap<NodeId, DigitalValue>,
+    xspice_digital_drivers: HashMap<(NodeId, String, String), DigitalValue>,
     xspice_digital_event_times: HashMap<NodeId, Value>,
+    xspice_real_values: HashMap<NodeId, Value>,
+    xspice_real_drivers: HashMap<(NodeId, String, String), Value>,
+    xspice_real_event_times: HashMap<NodeId, Value>,
     xspice_event_queue: EventQueue,
     #[cfg(feature = "veriloga")]
     veriloga_devices: crate::device::veriloga::VerilogADevices,
@@ -289,7 +293,11 @@ impl CircuitData {
             behavioral_sources: self.behavioral_sources.clone(),
             xspice_instances: self.xspice_instances.clone(),
             xspice_digital_values: self.xspice_digital_values.clone(),
+            xspice_digital_drivers: self.xspice_digital_drivers.clone(),
             xspice_digital_event_times: self.xspice_digital_event_times.clone(),
+            xspice_real_values: self.xspice_real_values.clone(),
+            xspice_real_drivers: self.xspice_real_drivers.clone(),
+            xspice_real_event_times: self.xspice_real_event_times.clone(),
             xspice_event_queue: self.xspice_event_queue.clone(),
             #[cfg(feature = "veriloga")]
             veriloga_devices: self.veriloga_devices.clone(),
@@ -318,7 +326,11 @@ impl CircuitData {
         self.behavioral_sources = snapshot.behavioral_sources;
         self.xspice_instances = snapshot.xspice_instances;
         self.xspice_digital_values = snapshot.xspice_digital_values;
+        self.xspice_digital_drivers = snapshot.xspice_digital_drivers;
         self.xspice_digital_event_times = snapshot.xspice_digital_event_times;
+        self.xspice_real_values = snapshot.xspice_real_values;
+        self.xspice_real_drivers = snapshot.xspice_real_drivers;
+        self.xspice_real_event_times = snapshot.xspice_real_event_times;
         self.xspice_event_queue = snapshot.xspice_event_queue;
         #[cfg(feature = "veriloga")]
         {
