@@ -895,6 +895,16 @@ fn s_xfer_transient_system_signature(
     }
 }
 
+fn s_xfer_transient_system_signature_matches(
+    coefficients: &SXferCoefficients,
+    timestep: Value,
+    signature: &SXferTransientSystemSignature,
+) -> bool {
+    signature.timestep == timestep
+        && coefficients.numerator.as_slice() == signature.numerator.as_slice()
+        && coefficients.denominator.as_slice() == signature.denominator.as_slice()
+}
+
 fn build_s_xfer_transient_system(
     coefficients: &SXferCoefficients,
     timestep: Value,
@@ -925,14 +935,18 @@ fn s_xfer_transient_system_for_context(
     ctx: &mut CmContext,
     coefficients: &SXferCoefficients,
 ) -> CmResult<Arc<SXferTransientSystem>> {
-    let signature = s_xfer_transient_system_signature(coefficients, ctx.timestep);
     if let Some(resource) =
         ctx.resource::<SXferTransientSystemResource>(SXFER_TRANSIENT_SYSTEM_RESOURCE)
-        && resource.signature == signature
+        && s_xfer_transient_system_signature_matches(
+            coefficients,
+            ctx.timestep,
+            &resource.signature,
+        )
     {
         return resource.system.clone();
     }
 
+    let signature = s_xfer_transient_system_signature(coefficients, ctx.timestep);
     let system = build_s_xfer_transient_system(coefficients, ctx.timestep);
     ctx.set_resource(
         SXFER_TRANSIENT_SYSTEM_RESOURCE,
