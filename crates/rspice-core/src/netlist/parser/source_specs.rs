@@ -472,6 +472,8 @@ fn parse_pulse_spec(
     let width_defaults_to_zero = rise.is_some() && fall.is_some() && width.is_none();
     let period = source_optional_value(stream, line_num, params, "PULSE", "PER", has_paren)?
         .unwrap_or(Value::NAN);
+    let phase =
+        source_value_or_default(stream, line_num, params, "PULSE", "PHASE", has_paren, 0.0)?;
 
     close_source_args(stream, line_num, "PULSE", has_paren)?;
 
@@ -483,6 +485,7 @@ fn parse_pulse_spec(
         fall: fall.unwrap_or(Value::NAN),
         width: width.unwrap_or(Value::NAN),
         period,
+        phase,
         width_defaults_to_zero,
     })
 }

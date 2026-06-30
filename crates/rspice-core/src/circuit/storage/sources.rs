@@ -525,6 +525,7 @@ impl VoltageSources {
                 fall,
                 width,
                 period,
+                phase,
                 width_defaults_to_zero,
             } => {
                 let (delay, rise, fall, width, period) = Self::resolve_pulse_timing(
@@ -539,13 +540,25 @@ impl VoltageSources {
                 if time < delay {
                     return *v1;
                 }
-                let t_rel = time - delay;
-                let t = if period.is_finite() && period > 0.0 {
-                    t_rel.rem_euclid(period)
+                let phase_time = if period.is_finite() && period > 0.0 {
+                    let phase_cycles = (phase / 360.0).rem_euclid(1.0);
+                    if phase_cycles > 0.0 {
+                        phase_cycles * period - period
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+                let t_rel = time - delay + phase_time;
+                let t = if period.is_finite() && period > 0.0 && t_rel > period {
+                    t_rel - period * (t_rel / period).floor()
                 } else {
                     t_rel
                 };
-                if t < rise {
+                if t <= 0.0 || t >= rise + width + fall {
+                    *v1
+                } else if t < rise {
                     v1 + (v2 - v1) * t / rise
                 } else if t < rise + width {
                     *v2
@@ -1085,6 +1098,7 @@ mod tests {
             fall: 3.0e-9,
             width: Value::NAN,
             period: Value::NAN,
+            phase: 0.0,
             width_defaults_to_zero: true,
         };
 
@@ -1095,6 +1109,31 @@ mod tests {
         );
 
         assert_close(value, 5.0 / 6.0);
+    }
+
+    #[test]
+    fn pulse_phase_shifts_waveform_like_ngspice_xspice_mode() {
+        let spec = SourceSpec::Pulse {
+            v1: -1.0,
+            v2: 1.0,
+            delay: 0.0,
+            rise: 1.0e-5,
+            fall: 1.0e-5,
+            width: 5.0e-4,
+            period: 1.0e-3,
+            phase: 45.0,
+            width_defaults_to_zero: false,
+        };
+
+        let ctx = transient_context(2.0e-5, 2.0e-3);
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.0, ctx),
+            -1.0,
+        );
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 8.85e-4, ctx),
+            1.0,
+        );
     }
 
     #[test]

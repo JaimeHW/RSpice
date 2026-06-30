@@ -3632,6 +3632,27 @@ mod tests {
     }
 
     #[test]
+    fn pulse_source_accepts_xspice_phase_argument() {
+        let netlist = Netlist::parse(
+            "pulse phase\n\
+             V1 out 0 PULSE(-1 1 0 1e-5 1e-5 5e-4 1e-3 45.0)\n\
+             R1 out 0 1k\n\
+             .tran 2e-5 2e-3\n\
+             .end\n",
+        )
+        .expect("XSPICE PULSE phase argument should parse");
+
+        assert!(matches!(
+            first_source_spec(&netlist),
+            SourceSpec::Pulse {
+                phase,
+                period,
+                ..
+            } if (*phase - 45.0).abs() < 1e-12 && (*period - 1.0e-3).abs() < 1e-15
+        ));
+    }
+
+    #[test]
     fn source_distortion_terms_after_sin_are_consumed() {
         let netlist = Netlist::parse(
             "distortion source annotation\n\

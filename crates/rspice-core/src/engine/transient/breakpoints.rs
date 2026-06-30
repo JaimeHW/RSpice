@@ -89,6 +89,7 @@ impl Engine {
                 fall,
                 width,
                 period,
+                phase,
                 width_defaults_to_zero,
                 ..
             } => {
@@ -107,8 +108,18 @@ impl Engine {
                     );
 
                 let per_valid = per.is_finite() && per > 0.0;
+                let phase_time = if per_valid {
+                    let phase_cycles = (phase / 360.0).rem_euclid(1.0);
+                    if phase_cycles > 0.0 {
+                        phase_cycles * per - per
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
                 let max_cycles = if per_valid {
-                    (((tstop - td).max(0.0) / per).ceil() as usize).saturating_add(1)
+                    (((tstop - td - phase_time).max(0.0) / per).ceil() as usize).saturating_add(1)
                 } else {
                     1
                 };
@@ -116,7 +127,7 @@ impl Engine {
 
                 for cycle in 0..max_cycles {
                     let cycle_start = if per_valid {
-                        td + per * cycle as Value
+                        td - phase_time + per * cycle as Value
                     } else {
                         td
                     };
@@ -505,12 +516,33 @@ mod tests {
             fall: 3.0e-9,
             width: Value::NAN,
             period: Value::NAN,
+            phase: 0.0,
             width_defaults_to_zero: true,
         };
 
         Engine::add_source_spec_breakpoints(&mut breakpoints, &spec, 20.0e-9, 0.5e-9);
 
         assert_delays_close(breakpoints.times(), &[1.0e-9, 3.0e-9, 6.0e-9]);
+    }
+
+    #[test]
+    fn pulse_phase_shifts_breakpoints_like_ngspice_xspice_mode() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
+        let spec = crate::netlist::SourceSpec::Pulse {
+            v1: -1.0,
+            v2: 1.0,
+            delay: 0.0,
+            rise: 1.0e-5,
+            fall: 1.0e-5,
+            width: 5.0e-4,
+            period: 1.0e-3,
+            phase: 45.0,
+            width_defaults_to_zero: false,
+        };
+
+        Engine::add_source_spec_breakpoints(&mut breakpoints, &spec, 1.0e-3, 2.0e-5);
+
+        assert_delays_close(breakpoints.times(), &[8.75e-4, 8.85e-4]);
     }
 
     #[test]

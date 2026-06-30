@@ -892,7 +892,7 @@ pub enum SourceSpec {
         transient: Box<SourceSpec>,
     },
 
-    /// Pulse source: PULSE(v1 v2 td tr tf pw per)
+    /// Pulse source: PULSE(v1 v2 td tr tf pw per phase)
     Pulse {
         v1: Value,
         v2: Value,
@@ -901,6 +901,8 @@ pub enum SourceSpec {
         fall: Value,
         width: Value,
         period: Value,
+        /// XSPICE pulse phase, in degrees.
+        phase: Value,
         width_defaults_to_zero: bool,
     },
 
