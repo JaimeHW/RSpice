@@ -29,8 +29,10 @@ const MIN_DIRECT_RESISTOR_ABS_OHMS: Value = 1.0e-30;
 pub struct XyceRunnerConfig {
     /// Relative tolerance for value comparison.
     pub relative_tolerance: f64,
-    /// Absolute tolerance for near-zero values.
+    /// Absolute tolerance for current-like and unitless near-zero values.
     pub absolute_tolerance: f64,
+    /// Absolute tolerance for voltage-like near-zero values.
+    pub voltage_absolute_tolerance: f64,
     /// Maximum number of mismatches to retain in one result.
     pub max_mismatches: usize,
     /// Maximum wall-clock time allowed for a numerically executed deck.
@@ -44,6 +46,7 @@ impl Default for XyceRunnerConfig {
         Self {
             relative_tolerance: 0.02,
             absolute_tolerance: 1.0e-12,
+            voltage_absolute_tolerance: crate::constants::VNTOL,
             max_mismatches: 20,
             max_time_per_test_ms: 30_000,
             verbose: false,
@@ -740,10 +743,11 @@ impl XyceTestRunner {
                         )?,
                     ),
                 };
+                let normalized_probe = Self::normalize_probe(probe);
                 let tolerance = comp_tolerances
-                    .get(&Self::normalize_probe(probe))
+                    .get(&normalized_probe)
                     .copied()
-                    .unwrap_or_else(|| XyceComparisonTolerance::from_config(&self.config));
+                    .unwrap_or_else(|| self.default_comparison_tolerance(&normalized_probe));
                 if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
                     mismatches.push(XyceValueMismatch {
                         row: row_index,
@@ -833,7 +837,6 @@ impl XyceTestRunner {
             compared_probes.insert(Self::normalize_probe(name));
         }
 
-        let default_tolerance = XyceComparisonTolerance::from_config(&self.config);
         let mut tolerances = BTreeMap::new();
         for line in Self::logical_netlist_lines(source) {
             let trimmed = line.trim_start();
@@ -851,10 +854,23 @@ impl XyceTestRunner {
             if !compared_probes.contains(&normalized_probe) {
                 continue;
             }
+            let default_tolerance = self.default_comparison_tolerance(&normalized_probe);
             let tolerance = Self::parse_comp_tolerance(&options, default_tolerance)?;
             tolerances.insert(normalized_probe, tolerance);
         }
         Ok(tolerances)
+    }
+
+    fn default_comparison_tolerance(&self, normalized_probe: &str) -> XyceComparisonTolerance {
+        let mut tolerance = XyceComparisonTolerance::from_config(&self.config);
+        if Self::probe_uses_voltage_tolerance(normalized_probe) {
+            tolerance.absolute = self.config.voltage_absolute_tolerance;
+        }
+        tolerance
+    }
+
+    fn probe_uses_voltage_tolerance(normalized_probe: &str) -> bool {
+        normalized_probe == "v-sweep" || Self::parse_voltage_probe(normalized_probe).is_some()
     }
 
     fn split_comp_directive(rest: &str) -> Option<(String, String)> {
@@ -1922,6 +1938,28 @@ End of Xyce(TM) Simulation
 
         assert_eq!(tolerance.relative, 0.25);
         assert_eq!(tolerance.absolute, 2.0e-5);
+    }
+
+    #[test]
+    fn default_tolerances_are_unit_aware() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let voltage_tolerance = runner.default_comparison_tolerance("v(1)");
+        let current_tolerance = runner.default_comparison_tolerance("i(v1)");
+
+        assert_eq!(voltage_tolerance.absolute, crate::constants::VNTOL);
+        assert_eq!(current_tolerance.absolute, 1.0e-12);
+        assert!(
+            runner
+                .value_mismatch(3.98095099e-12, 0.0, voltage_tolerance)
+                .is_none(),
+            "picovolt-scale voltage differences should be inside default VNTOL"
+        );
+        assert!(
+            runner
+                .value_mismatch(3.98095099e-12, 0.0, current_tolerance)
+                .is_some(),
+            "current differences keep the stricter ITOL-scale default"
+        );
     }
 
     #[test]

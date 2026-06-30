@@ -245,6 +245,7 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/Certification_Tests/BUG_28_SON/bug_28_son2.cir",
         "Netlists/Certification_Tests/BUG_1807/vbic_pnp_default.cir",
         "Netlists/NMESFET/nmesfet.cir",
+        "Netlists/NPN_DC/npn1.cir",
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
