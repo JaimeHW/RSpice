@@ -858,21 +858,20 @@ fn solve_factorized_system(
         rhs[row_index] -= lower_sum;
     }
 
-    let mut solution = vec![0.0; n];
     for row_index in (0..n).rev() {
         let tail: Value = factorization.lu[row_index]
             .iter()
             .enumerate()
             .skip(row_index + 1)
-            .map(|(col, value)| value * solution[col])
+            .map(|(col, value)| value * rhs[col])
             .sum();
         let pivot = factorization.lu[row_index][row_index];
         if pivot.abs() <= 1.0e-30 {
             return None;
         }
-        solution[row_index] = (rhs[row_index] - tail) / pivot;
+        rhs[row_index] = (rhs[row_index] - tail) / pivot;
     }
-    Some(solution)
+    Some(rhs)
 }
 
 fn s_xfer_backward_euler_matrix(coefficients: &SXferCoefficients, dt: Value) -> Vec<Vec<Value>> {
@@ -1243,6 +1242,21 @@ mod tests {
         let changed = s_xfer_transient_system_for_context(&mut ctx, &changed_coefficients)
             .expect("coefficient-specific transient system");
         assert!(!Arc::ptr_eq(&larger_step, &changed));
+    }
+
+    #[test]
+    fn s_xfer_factorized_solver_reuses_rhs_buffer() {
+        let factorization =
+            factor_linear_system(vec![vec![2.0, 0.0], vec![0.0, 5.0]]).expect("factorizes");
+        let rhs = vec![4.0, 10.0];
+        let first_ptr = rhs.as_ptr();
+        let first_capacity = rhs.capacity();
+
+        let solution = solve_factorized_system(&factorization, rhs).expect("solves");
+
+        assert_eq!(solution, vec![2.0, 2.0]);
+        assert_eq!(solution.as_ptr(), first_ptr);
+        assert_eq!(solution.capacity(), first_capacity);
     }
 
     #[test]
