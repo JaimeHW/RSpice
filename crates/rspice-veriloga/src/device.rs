@@ -22,9 +22,10 @@
 //! Production circuit-builder flows that enable native Verilog-A carry the
 //! canonical IR artifact and construct devices through
 //! [`VerilogADevice::try_new_with_canonical_ir`]. The direct [`VerilogADevice::try_new`]
-//! constructor has no canonical artifact to consume, so under `native` it is kept
-//! as a bytecode-native development/test entrypoint. It is still full JIT or
-//! error; it must not be treated as an interpreter fallback.
+//! constructor has no canonical artifact to consume, so under normal `native`
+//! builds it fails closed instead of compiling from bytecode. Bytecode-native
+//! construction is available only behind the internal
+//! `native-bytecode-contract-tests` feature for backend contract tests.
 //!
 //! The native path is a performance backend, not a separate public ABI. Keep all
 //! raw-pointer and Send/Sync safety reasoning in the native module and require a
@@ -55,9 +56,9 @@ enum NativeValueEntry {
 #[cfg(feature = "native")]
 #[derive(Clone, PartialEq, Eq)]
 enum NativeCompileCacheKey {
-    /// Direct device construction without a canonical artifact uses this
-    /// development/test cache lane. Production `veriloga-native` circuit builds
-    /// should compile through `CanonicalMir` instead.
+    /// Internal bytecode-native contract-test cache lane. Production native
+    /// construction must compile through `CanonicalMir`.
+    #[cfg(feature = "native-bytecode-contract-tests")]
     Bytecode,
     CanonicalMir(SmolStr),
 }
@@ -241,11 +242,15 @@ impl VerilogADevice {
         context.zi_filters = model.zi_filters.clone();
         Self::preallocate_vm_runtime_state(&mut context, &model);
 
-        // Attempt native compilation (if feature enabled)
         #[cfg(feature = "native")]
         let native_model = match canonical_artifact {
             Some(artifact) => Self::try_native_compile_with_canonical_ir(&model, artifact)?,
+            #[cfg(feature = "native-bytecode-contract-tests")]
             None => Self::try_native_compile(&model)?,
+            #[cfg(not(feature = "native-bytecode-contract-tests"))]
+            None => {
+                return Err(Self::missing_canonical_ir_native_error());
+            }
         };
 
         let num_branch_unknowns = model.branch_sources.len();
@@ -368,7 +373,15 @@ impl VerilogADevice {
     /// instances of one model compile once. The result (including a
     /// failed attempt) is cached so construction stays O(1) after the
     /// first instance.
-    #[cfg(feature = "native")]
+    #[cfg(all(feature = "native", not(feature = "native-bytecode-contract-tests")))]
+    fn missing_canonical_ir_native_error() -> VmError {
+        VmError::NativeJit(
+            "VerilogADevice::try_new requires canonical IR when native JIT is enabled; use try_new_with_canonical_ir; no interpreter fallback"
+                .to_string(),
+        )
+    }
+
+    #[cfg(feature = "native-bytecode-contract-tests")]
     fn try_native_compile(
         model: &std::sync::Arc<CompiledModel>,
     ) -> Result<std::sync::Arc<NativeModel>, VmError> {
@@ -2444,6 +2457,25 @@ mod tests {
         }
     }
 
+    #[cfg(not(feature = "native-bytecode-contract-tests"))]
+    #[test]
+    fn native_try_new_requires_canonical_ir() {
+        let model = compile(
+            r#"
+`include "disciplines.vams"
+module native_try_new_requires_canonical(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n);
+endmodule
+"#,
+        );
+
+        let err = VerilogADevice::try_new("N1", model, &[1, 0])
+            .expect_err("normal native try_new must require canonical IR");
+        assert_native_hard_fail(err, "requires canonical IR");
+    }
+
     #[test]
     fn native_device_builder_requires_canonical_ir() {
         let model = compile(
@@ -2498,6 +2530,7 @@ endmodule
         );
     }
 
+    #[cfg(feature = "native-bytecode-contract-tests")]
     #[test]
     fn native_compile_cache_prunes_dropped_models_before_fresh_compile() {
         let source = r#"
@@ -2601,6 +2634,7 @@ endmodule
         assert_eq!(context.cross_detectors.len(), 6);
     }
 
+    #[cfg(feature = "native-bytecode-contract-tests")]
     #[test]
     fn native_runtime_helper_error_reaches_device_as_native_jit_error() {
         let model = compile(
