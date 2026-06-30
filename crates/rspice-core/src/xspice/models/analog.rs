@@ -1825,6 +1825,11 @@ fn oneshot_table_signature(ctx: &CmContext) -> OneShotTableSignature {
     }
 }
 
+fn oneshot_table_signature_matches(ctx: &CmContext, signature: &OneShotTableSignature) -> bool {
+    ctx.real_vector_param("cntl_array").unwrap_or(&[]) == signature.controls.as_slice()
+        && ctx.real_vector_param("pw_array").unwrap_or(&[]) == signature.widths.as_slice()
+}
+
 fn oneshot_table_optional_uncached(ctx: &CmContext) -> CmResult<Option<Vec<OneShotPoint>>> {
     let controls = ctx
         .real_vector_param("cntl_array")
@@ -1880,13 +1885,13 @@ fn oneshot_table_data(points: Vec<OneShotPoint>) -> OneShotTableData {
 }
 
 fn oneshot_table_optional(ctx: &mut CmContext) -> CmResult<Option<Arc<OneShotTableData>>> {
-    let signature = oneshot_table_signature(ctx);
     if let Some(resource) = ctx.resource::<OneShotTableResource>(ONESHOT_TABLE_RESOURCE)
-        && resource.signature == signature
+        && oneshot_table_signature_matches(ctx, &resource.signature)
     {
         return resource.result.clone();
     }
 
+    let signature = oneshot_table_signature(ctx);
     let result = oneshot_table_optional_uncached(ctx)
         .map(|table| table.map(oneshot_table_data).map(Arc::new));
     ctx.set_resource(
