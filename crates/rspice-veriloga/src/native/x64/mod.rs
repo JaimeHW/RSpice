@@ -12,7 +12,9 @@ use super::expr::{
     canonical_transition_slots_for_equation, canonical_zi_slots_for_equation,
     constant_dynamic_variable_slot,
 };
-use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel};
+use super::model::{
+    CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel, NativeRequiredStorage,
+};
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
@@ -353,6 +355,7 @@ fn compile_model_inner(
         executable,
         entries,
         current_dependencies,
+        NativeRequiredStorage::for_model(model),
     )
 }
 

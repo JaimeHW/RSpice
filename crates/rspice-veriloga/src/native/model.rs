@@ -1,5 +1,6 @@
 use super::runtime::ExecutableMemory;
 use super::{EvalContext, JitError, JitResult};
+use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
 
 type AssignmentEntry = unsafe extern "C" fn(*const EvalContext, *mut f64);
 type ValueEntry = unsafe extern "C" fn(*const EvalContext, *const f64) -> f64;
@@ -54,6 +55,117 @@ pub(crate) struct NativeCurrentDependencies {
     pub noise_exponent_branch_unknowns: Vec<Vec<usize>>,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NativeRequiredStorage {
+    pub state_values: usize,
+    pub state_values_prev: usize,
+    pub state_initialized: usize,
+    pub lookup_tables: usize,
+    pub laplace_filters: usize,
+    pub zi_filters: usize,
+    pub transition_filters: usize,
+    pub slew_filters: usize,
+    pub delay_buffers: usize,
+    pub cross_detectors: usize,
+}
+
+impl NativeRequiredStorage {
+    pub(crate) fn for_model(model: &CompiledModel) -> Self {
+        #[inline]
+        fn update_max(max_slot: &mut Option<usize>, index: usize) {
+            *max_slot = Some(max_slot.map_or(index, |prev| prev.max(index)));
+        }
+
+        let mut max_state = None;
+        let mut max_limit_state = None;
+        let mut max_transition_filter = None;
+        let mut max_slew_filter = None;
+        let mut max_delay_buffer = None;
+        let mut max_cross_detector = None;
+
+        let mut scan_program = |program: &BytecodeProgram| {
+            for instruction in &program.instructions {
+                match instruction {
+                    Instruction::DdtState(index)
+                    | Instruction::IdtState(index)
+                    | Instruction::IdtModState(index) => update_max(&mut max_state, *index),
+                    Instruction::LimitState(index) => {
+                        update_max(&mut max_state, *index);
+                        update_max(&mut max_limit_state, *index);
+                    }
+                    Instruction::TransitionState(index) => {
+                        update_max(&mut max_transition_filter, *index);
+                    }
+                    Instruction::SlewState(index) => update_max(&mut max_slew_filter, *index),
+                    Instruction::AbsDelayState(index) => update_max(&mut max_delay_buffer, *index),
+                    Instruction::CrossState(index) => update_max(&mut max_cross_detector, *index),
+                    _ => {}
+                }
+            }
+        };
+
+        for parameter in &model.parameters {
+            if let Some(program) = &parameter.default_program {
+                scan_program(program);
+            }
+        }
+        scan_assignment_steps(&model.assignment_steps, &mut scan_program);
+        for stamp in &model.stamp_programs {
+            if let Some(condition) = &stamp.static_condition {
+                scan_program(condition);
+            }
+            scan_program(&stamp.value_program);
+            for jacobian in &stamp.jacobian_programs {
+                scan_program(&jacobian.program);
+            }
+            for jacobian in &stamp.reactive_jacobians {
+                scan_program(&jacobian.program);
+            }
+        }
+        for source in &model.noise_sources {
+            scan_program(&source.psd_program);
+            if let Some(program) = &source.exponent_program {
+                scan_program(program);
+            }
+        }
+
+        let state_values = max_state.map_or(0, |index| index + 1);
+        Self {
+            state_values,
+            state_values_prev: state_values,
+            state_initialized: max_limit_state.map_or(0, |index| index + 1),
+            lookup_tables: model.lookup_tables.len(),
+            laplace_filters: model.laplace_filters.len(),
+            zi_filters: model.zi_filters.len(),
+            transition_filters: max_transition_filter.map_or(0, |index| index + 1),
+            slew_filters: max_slew_filter.map_or(0, |index| index + 1),
+            delay_buffers: max_delay_buffer.map_or(0, |index| index + 1),
+            cross_detectors: max_cross_detector.map_or(0, |index| index + 1),
+        }
+    }
+}
+
+fn scan_assignment_steps(
+    steps: &[AssignmentStep],
+    scan_program: &mut impl FnMut(&BytecodeProgram),
+) {
+    for step in steps {
+        match step {
+            AssignmentStep::Assign(assignment) => {
+                scan_program(&assignment.program);
+            }
+            AssignmentStep::AssignIndexed { index, value, .. } => {
+                scan_program(index);
+                scan_program(value);
+            }
+            AssignmentStep::Loop { condition, body } => {
+                scan_program(condition);
+                scan_assignment_steps(body, scan_program);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct PlanStats {
     pub assignment_entry_points: usize,
@@ -73,6 +185,7 @@ pub struct NativeModel {
     image: ExecutableMemory,
     entries: NativeEntryOffsets,
     current_dependencies: NativeCurrentDependencies,
+    required_storage: NativeRequiredStorage,
     stats: PlanStats,
 }
 
@@ -84,6 +197,7 @@ impl std::fmt::Debug for NativeModel {
             .field("num_variables", &self.num_variables)
             .field("num_parameters", &self.num_parameters)
             .field("image_len", &self.image.len())
+            .field("required_storage", &self.required_storage)
             .field("stats", &self.stats)
             .finish()
     }
@@ -111,6 +225,7 @@ impl NativeModel {
             image,
             entries,
             current_dependencies,
+            NativeRequiredStorage::default(),
         )
     }
 
@@ -122,6 +237,7 @@ impl NativeModel {
         image: ExecutableMemory,
         entries: NativeEntryOffsets,
         current_dependencies: NativeCurrentDependencies,
+        required_storage: NativeRequiredStorage,
     ) -> JitResult<Self> {
         Self::validate_entry_offsets(&entries, image.len(), num_parameters)?;
         Self::validate_current_dependencies(&entries, &current_dependencies)?;
@@ -150,6 +266,7 @@ impl NativeModel {
             image,
             entries,
             current_dependencies,
+            required_storage,
             stats,
         })
     }
@@ -418,6 +535,10 @@ impl NativeModel {
 
     pub(crate) fn assignment_branch_unknowns(&self) -> &[usize] {
         &self.current_dependencies.assignment_branch_unknowns
+    }
+
+    pub(crate) fn required_storage(&self) -> NativeRequiredStorage {
+        self.required_storage
     }
 
     pub(crate) fn run_parameter_default(

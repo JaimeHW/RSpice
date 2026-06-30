@@ -19,6 +19,7 @@ pub use abi::{
 };
 pub(crate) use abi::{clear_native_runtime_error, take_native_runtime_error};
 pub use error::{JitError, JitResult};
+pub(crate) use model::NativeRequiredStorage;
 pub use model::{NativeModel, PlanStats};
 pub use target::{Architecture, TargetSpec};
 
