@@ -23,7 +23,8 @@ full run gates nightly CI against the conformance watermark
 Layer map - separate validation surfaces:
   tests/ngspice/  conformance against recorded ngspice-46 oracles (this tree)
   tests/xyce/     vendored Xyce Regression Suite, not yet run by RSpice
-  examples/       user-facing pattern for circuit CI via the Python bindings
+  crates/rspice-python/examples/analog_ci/
+                  user-facing pattern for circuit CI via the Python bindings
   benchmarks/     performance rig decks + published scoreboards
 
 The upstream ngspice README follows unchanged; its build instructions

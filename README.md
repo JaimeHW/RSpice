@@ -177,7 +177,7 @@ result = engine.run_dc_op(netlist)
 print(result.voltage(1))
 ```
 
-Transient and AC results come back as NumPy arrays. Full API reference: [crates/rspice-python/README.md](crates/rspice-python/README.md). A CI-ready pytest pattern — circuit and `.MEAS` criteria asserted from a test — lives in [examples/python/](examples/python/) and runs in this repo's own CI.
+Transient and AC results come back as NumPy arrays. Full API reference: [crates/rspice-python/README.md](crates/rspice-python/README.md). A CI-ready pytest pattern - circuit and `.MEAS` criteria asserted from a test - lives in [crates/rspice-python/examples/analog_ci/](crates/rspice-python/examples/analog_ci/) and runs in this repo's own CI.
 
 For local checks, keep the fast Rust workspace pass separate from the PyO3
 extension and wasm target:
@@ -241,7 +241,7 @@ The harness design — oracle-replay methodology, comparison gating, debug envir
 | `rspice-wasm` | WebAssembly bindings for the simulation engine |
 | `rspice-bench` | Whole-process benchmark rig against local ngspice |
 
-Beyond the crates: [models/](models/) holds starter SPICE and Verilog-A libraries, [tests/](tests/) contains vendored simulator corpora (`ngspice/` and `xyce/`) with corpus-local manifests and notices, [examples/](examples/) CI-ready usage patterns, [benchmarks/](benchmarks/) the macro-benchmark decks and published scoreboards, and [docs/](docs/) the user manual, testing methodology, and roadmap.
+Beyond the crates: [models/](models/) holds starter SPICE and Verilog-A libraries, [tests/](tests/) contains vendored simulator corpora (`ngspice/` and `xyce/`) with corpus-local manifests and notices, [benchmarks/](benchmarks/) the macro-benchmark decks and published scoreboards, and [docs/](docs/) the user manual, testing methodology, and roadmap. Executable API examples live with the crate they exercise, such as [crates/rspice-python/examples/analog_ci/](crates/rspice-python/examples/analog_ci/).
 
 ## License
 
