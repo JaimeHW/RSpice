@@ -4344,7 +4344,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "BitXor" => IntegerBinaryOp::BitXor,
             _ => unreachable!("append_integer_binary only accepts integer operators"),
         };
-        if lower_constant_integer_binary(&mut self.ops, op) {
+        if lower_constant_integer_binary(&mut self.ops, op)
+            || lower_constant_rhs_integer_shift(&mut self.ops, op)
+        {
             return Ok(());
         }
         self.ops.push(NativeOp::IntegerBinary(op));
@@ -6001,6 +6003,40 @@ endmodule
             ]
         );
         assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_canonical_constant_rhs_shift_without_extra_stack_slot() {
+        let mir = analyzed_two_terminal_mir(
+            "mir_shift_const_count",
+            Expression::Binary(BinaryExpr {
+                op: BinaryOp::Shl,
+                left: Box::new(voltage_expr()),
+                right: Box::new(number(2.0, "2.0")),
+                span: Span::dummy(),
+            }),
+        );
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_shift_const_count",
+            EntryKind::StampValue,
+            &mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("canonical constant RHS shift lowers to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::IntegerShiftConst(IntegerBinaryOp::Shl, 2),
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 1);
     }
 
     #[test]
