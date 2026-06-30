@@ -67,6 +67,16 @@ jobs:
         run: cargo clean
       - name: Test non-UI crates (fast tier)
         run: cargo test -p rspice-cli -p rspice-veriloga -p rspice-bench
+      - name: Test Verilog-A native JIT units (Linux x64)
+        run: cargo test -p rspice-veriloga --features native native:: -- --test-threads=1
+      - name: Test Verilog-A native JIT contracts (Linux x64)
+        run: cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
+      - name: Test Verilog-A native multiplicity contracts (Linux x64)
+        run: cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1
+      - name: Test Verilog-A native contract (Linux x64 release)
+        run: cargo test -p rspice-veriloga --release --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
+      - name: Smoke Verilog-A native JIT benchmark gate (Linux x64)
+        run: cargo run -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 1.10
       - name: Clear non-UI test artifacts
         run: cargo clean
       - name: Test UI library (Linux)
@@ -86,6 +96,14 @@ jobs:
         run: cargo check --workspace --exclude rspice-python --exclude rspice-wasm
       - name: Unit tests
         run: cargo test -p rspice-core --lib
+      - name: Verilog-A native JIT unit tests
+        run: cargo test -p rspice-veriloga --features native native:: -- --test-threads=1
+      - name: Verilog-A native JIT contract tests
+        run: cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
+      - name: Verilog-A native multiplicity tests
+        run: cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1
+      - name: Smoke Verilog-A native JIT benchmark gate
+        run: cargo run -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 1.10
 
   check-macos-desktop:
     name: Check desktop UI/CLI (macOS)
