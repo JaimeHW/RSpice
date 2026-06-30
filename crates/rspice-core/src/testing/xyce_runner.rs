@@ -785,49 +785,49 @@ impl XyceTestRunner {
                     );
                 }
             };
-            let (target_netlist, target_results) =
-                match self.run_static_dc_results(&target_plan, start) {
-                    Ok(results) => results,
-                    Err(SimulationError::Aborted) => {
-                        return self.failure_result(
-                            deck,
-                            start,
-                            "subckt_family_wrapper",
-                            format!(
-                                "SUBCKT family '{}' member {} exceeded timeout ({}ms)",
-                                contract.family,
-                                self.display_path(&target_path),
-                                self.config.max_time_per_test_ms
-                            ),
-                            Vec::new(),
-                        );
-                    }
-                    Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
-                        return self.expected_unsupported_result(
-                            deck,
-                            start,
-                            "subckt_family_wrapper",
-                            &format!(
-                                "SUBCKT family '{}' member {} is not supported by RSpice yet: {err}",
-                                contract.family,
-                                self.display_path(&target_path)
-                            ),
-                        );
-                    }
-                    Err(err) => {
-                        return self.failure_result(
-                            deck,
-                            start,
-                            "subckt_family_wrapper",
-                            format!(
-                                "SUBCKT family '{}' member {} error: {err}",
-                                contract.family,
-                                self.display_path(&target_path)
-                            ),
-                            Vec::new(),
-                        );
-                    }
-                };
+            let target_run = self.run_static_dc_results(&target_plan, start);
+            let (target_netlist, target_results) = match target_run {
+                Ok(results) => results,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        "subckt_family_wrapper",
+                        format!(
+                            "SUBCKT family '{}' member {} exceeded timeout ({}ms)",
+                            contract.family,
+                            self.display_path(&target_path),
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "subckt_family_wrapper",
+                        &format!(
+                            "SUBCKT family '{}' member {} is not supported by RSpice yet: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        "subckt_family_wrapper",
+                        format!(
+                            "SUBCKT family '{}' member {} error: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
 
             let mut mismatches = match self.compare_dc_prn_reference(
                 &baseline_table,
