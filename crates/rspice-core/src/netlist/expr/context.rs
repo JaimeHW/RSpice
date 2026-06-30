@@ -1,6 +1,6 @@
 use super::*;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 //=============================================================================
 // Expression Evaluator
@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// want a different stream set `.options seed=<n>`.
 pub const DEFAULT_RANDOM_SEED: u64 = 1;
 
+const DEFAULT_TEMPERATURE_C: Value = 27.0;
 const GOLDEN_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
 
 /// Finalizer from SplitMix64 (Steele, Lea, Flood 2014).
@@ -143,7 +144,11 @@ impl ParamContext {
 
     /// Get a parameter value
     pub fn get(&self, name: &str) -> Option<Value> {
-        self.params.get(&name.to_uppercase()).copied()
+        let key = name.to_uppercase();
+        self.params
+            .get(&key)
+            .copied()
+            .or_else(|| builtin_numeric_param(&key))
     }
 
     /// Get a string parameter value.
@@ -245,5 +250,12 @@ impl ParamContext {
         // Parse and evaluate the function body
         let expr = parse_expression(&func.body)?;
         evaluate(&expr, &temp_ctx)
+    }
+}
+
+fn builtin_numeric_param(name: &str) -> Option<Value> {
+    match name {
+        "TEMP" | "TEMPER" => Some(DEFAULT_TEMPERATURE_C),
+        _ => None,
     }
 }

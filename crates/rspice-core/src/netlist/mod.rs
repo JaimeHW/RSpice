@@ -665,6 +665,29 @@ mod tests {
     }
 
     #[test]
+    fn param_statements_accept_unbraced_expression_rhs() {
+        let netlist = Netlist::parse(
+            "unbraced param expression\n\
+             .param fact = 0.05\n\
+             .param tgain = 1. + (TEMPER / 27. - 1.) * {fact} next=3\n\
+             .end\n",
+        )
+        .expect("ngspice-style unbraced .param arithmetic should parse");
+
+        let tgain = netlist
+            .params
+            .get("tgain")
+            .expect("tgain parameter should be set");
+        let next = netlist
+            .params
+            .get("next")
+            .expect("following parameter should not be consumed by tgain");
+
+        assert!((tgain - 1.0).abs() < f64::EPSILON);
+        assert!((next - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
     fn model_param_rhs_identifier_is_not_reinterpreted_as_bare_flag() {
         let err = Netlist::parse(
             "bad model rhs\n\

@@ -1315,6 +1315,22 @@ pub(super) fn parse_param_statement(
                 stream.advance();
                 params.set_string(&name, value);
             }
+            TokenKind::Expression(expr)
+                if !param_rhs_continues(stream) && params.get_string(expr).is_some() =>
+            {
+                let value = params
+                    .get_string(expr)
+                    .expect("string parameter presence checked")
+                    .to_string();
+                stream.advance();
+                params.set_string(&name, value);
+            }
+            _ if param_rhs_continues(stream) => {
+                let expr = collect_param_rhs_expression(stream, line_num, &name)?;
+                let value = eval_expression(&expr, params)
+                    .map_err(|e| ParseError::InvalidValue(format!("line {}: {}", line_num, e)))?;
+                params.set(&name, value);
+            }
             TokenKind::Expression(expr) if params.get_string(expr).is_some() => {
                 let value = params
                     .get_string(expr)
@@ -1331,6 +1347,89 @@ pub(super) fn parse_param_statement(
     }
 
     Ok(())
+}
+
+fn param_rhs_continues(stream: &TokenStream) -> bool {
+    let mut depth = 0usize;
+    let mut offset = 0usize;
+    let mut saw_token = false;
+
+    loop {
+        match &stream.peek_n(offset).kind {
+            TokenKind::Newline | TokenKind::Eof => return false,
+            TokenKind::Comma if depth == 0 => return false,
+            TokenKind::Ident(_) if saw_token && depth == 0 => {
+                return !matches!(stream.peek_n(offset + 1).kind, TokenKind::Equals);
+            }
+            TokenKind::LParen | TokenKind::LBracket => {
+                if !saw_token {
+                    return true;
+                }
+                depth += 1;
+            }
+            TokenKind::RParen | TokenKind::RBracket => {
+                depth = depth.saturating_sub(1);
+            }
+            TokenKind::Plus | TokenKind::Minus | TokenKind::Star | TokenKind::Slash
+                if saw_token && depth == 0 =>
+            {
+                return true;
+            }
+            TokenKind::Expression(_) if saw_token => return true,
+            _ => {}
+        }
+
+        saw_token = true;
+        offset += 1;
+    }
+}
+
+fn collect_param_rhs_expression(
+    stream: &mut TokenStream,
+    line_num: usize,
+    name: &str,
+) -> Result<String, ParseError> {
+    let mut fragments = Vec::new();
+    let mut depth = 0usize;
+
+    loop {
+        match &stream.peek().kind {
+            TokenKind::Newline | TokenKind::Eof => break,
+            TokenKind::Comma if depth == 0 => break,
+            TokenKind::Ident(_) if !fragments.is_empty() && depth == 0 => {
+                if matches!(stream.peek_n(1).kind, TokenKind::Equals) {
+                    break;
+                }
+            }
+            _ => {}
+        }
+
+        let token = stream.peek().clone();
+        match &token.kind {
+            TokenKind::LParen | TokenKind::LBracket => depth += 1,
+            TokenKind::RParen | TokenKind::RBracket => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+
+        fragments.push(param_rhs_token_fragment(&token.kind, &token.lexeme));
+        stream.advance();
+    }
+
+    if fragments.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Expected value for parameter '{}'", name),
+        });
+    }
+
+    Ok(fragments.join(" "))
+}
+
+fn param_rhs_token_fragment(kind: &TokenKind, lexeme: &str) -> String {
+    match kind {
+        TokenKind::Expression(expr) => format!("({expr})"),
+        _ => lexeme.to_string(),
+    }
 }
 
 /// Parse .FUNC statement: .FUNC name(arg1, arg2, ...) = expression
