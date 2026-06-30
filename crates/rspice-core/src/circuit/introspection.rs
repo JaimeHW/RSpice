@@ -87,8 +87,7 @@ impl CircuitData {
         }
 
         for dev in &self.bsim4v8.devices {
-            let (id, vgs, vds, vbs, vth, vdsat, output_vdsat, gm, gds, gmbs, region) =
-                dev.op_values();
+            let (id, vgs, vds, vbs, vth, vdsat, gm, gds, gmbs, region) = dev.op_values();
             entries.push(DeviceOpEntry {
                 name: dev.name.clone(),
                 device_kind: "BSIM4",
@@ -100,7 +99,6 @@ impl CircuitData {
                     ("vbs", vbs),
                     ("vth", vth),
                     ("vdsat", vdsat),
-                    ("output_vdsat", output_vdsat),
                     ("gm", gm),
                     ("gds", gds),
                     ("gmb", gmbs),
