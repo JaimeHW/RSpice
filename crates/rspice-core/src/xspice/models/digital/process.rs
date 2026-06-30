@@ -12,8 +12,10 @@ use std::sync::{Arc, Mutex};
 pub struct DigitalProcess;
 
 type DigitalProcessRuntimeResource = Mutex<Box<dyn DigitalProcessRuntime>>;
+type DigitalProcessIoScratchResource = Mutex<DigitalProcessIoScratch>;
 
 const RESOURCE_RUNTIME: &str = "d_process.runtime";
+const RESOURCE_IO_SCRATCH: &str = "d_process.io_scratch";
 const STATE_PREV_CLK: usize = 0;
 const STATE_PREV_RESET: usize = 1;
 const STATE_RNG: usize = 2;
@@ -26,6 +28,12 @@ const D_PROCESS_MAX_PROCESS_PARAMS: usize = 1022;
 
 fn d_process_error(message: impl Into<String>) -> CmError {
     CmError::EvaluationError(format!("d_process: {}", message.into()))
+}
+
+#[derive(Default)]
+struct DigitalProcessIoScratch {
+    input_bytes: Vec<u8>,
+    output_bytes: Vec<u8>,
 }
 
 fn packed_byte_len(bit_count: usize) -> usize {
@@ -86,8 +94,13 @@ fn next_unknown_input_bit(seed: &mut u32) -> bool {
     *seed & 1 != 0
 }
 
-fn pack_input_bits(ctx: &mut CmContext, input_width: usize) -> Vec<u8> {
-    let mut bytes = vec![0u8; packed_byte_len(input_width)];
+fn resize_zeroed(bytes: &mut Vec<u8>, len: usize) {
+    bytes.clear();
+    bytes.resize(len, 0);
+}
+
+fn pack_input_bits(ctx: &mut CmContext, input_width: usize, bytes: &mut Vec<u8>) {
+    resize_zeroed(bytes, packed_byte_len(input_width));
     let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
     let mut rng_seed = ctx.int_state(STATE_RNG) as u32;
     let mut rng_changed = false;
@@ -110,8 +123,6 @@ fn pack_input_bits(ctx: &mut CmContext, input_width: usize) -> Vec<u8> {
     if rng_changed {
         ctx.set_int_state(STATE_RNG, rng_seed as i64);
     }
-
-    bytes
 }
 
 fn output_code(output_bytes: &[u8], bit_index: usize) -> i64 {
@@ -210,6 +221,10 @@ impl CodeModel for DigitalProcess {
         let runtime = start_digital_process_runtime(&spec)?;
         let runtime: Arc<DigitalProcessRuntimeResource> = Arc::new(Mutex::new(runtime));
         ctx.set_resource(RESOURCE_RUNTIME, runtime);
+        ctx.set_resource(
+            RESOURCE_IO_SCRATCH,
+            Arc::new(Mutex::new(DigitalProcessIoScratch::default())),
+        );
         set_unknown_outputs(ctx, output_width);
         Ok(())
     }
@@ -242,8 +257,14 @@ impl CodeModel for DigitalProcess {
         let prev_clk_code = ctx.int_state(STATE_PREV_CLK);
 
         if prev_clk_code != STATE_ONE && clk_code == STATE_ONE {
-            let input_bytes = pack_input_bits(ctx, input_width);
-            let mut output_bytes = vec![0u8; packed_byte_len(output_width)];
+            let scratch = ctx
+                .resource::<DigitalProcessIoScratchResource>(RESOURCE_IO_SCRATCH)
+                .ok_or_else(|| d_process_error("I/O scratch is not initialized"))?;
+            let mut scratch = scratch
+                .lock()
+                .map_err(|_| d_process_error("I/O scratch lock is poisoned"))?;
+            pack_input_bits(ctx, input_width, &mut scratch.input_bytes);
+            resize_zeroed(&mut scratch.output_bytes, packed_byte_len(output_width));
             let signed_time = if reset_code == STATE_ONE {
                 -ctx.time
             } else {
@@ -257,7 +278,11 @@ impl CodeModel for DigitalProcess {
                 let mut runtime = runtime
                     .lock()
                     .map_err(|_| d_process_error("runtime lock is poisoned"))?;
-                if let Err(err) = runtime.exchange(signed_time, &input_bytes, &mut output_bytes) {
+                let DigitalProcessIoScratch {
+                    input_bytes,
+                    output_bytes,
+                } = &mut *scratch;
+                if let Err(err) = runtime.exchange(signed_time, input_bytes, output_bytes) {
                     log::warn!(
                         "d_process external exchange failed at {signed_time:.16e}; continuing with current output packet like ngspice: {err}"
                     );
@@ -266,7 +291,7 @@ impl CodeModel for DigitalProcess {
 
             let clk_delay = ctx.param_or("clk_delay", 1.0e-9);
             for index in 0..output_width {
-                let new_code = output_code(&output_bytes, index);
+                let new_code = output_code(&scratch.output_bytes, index);
                 if new_code != ctx.int_state(STATE_DOUT_START + index) {
                     ctx.set_output_digital_vector_element(
                         "out",
@@ -292,7 +317,7 @@ mod tests {
     use crate::xspice::context::InputValue;
 
     #[test]
-    fn d_process_pack_input_bits_borrows_inputs_once_and_commits_rng_once() {
+    fn d_process_pack_input_bits_reuses_buffer_and_commits_rng_once() {
         let mut ctx = CmContext::new();
         ctx.allocate_int_states(STATE_DOUT_START);
         ctx.set_int_state(STATE_RNG, D_PROCESS_RNG_SEED);
@@ -330,11 +355,20 @@ mod tests {
             expected_first_byte |= 1 << 7;
         }
 
-        assert_eq!(
-            pack_input_bits(&mut ctx, 9),
-            vec![expected_first_byte, 0b0000_0001]
-        );
+        let mut bytes = Vec::new();
+        pack_input_bits(&mut ctx, 9, &mut bytes);
+
+        assert_eq!(bytes, vec![expected_first_byte, 0b0000_0001]);
         assert_eq!(ctx.int_state(STATE_RNG) as u32, expected_seed);
+
+        let first_ptr = bytes.as_ptr();
+        let first_capacity = bytes.capacity();
+        ctx.set_input("in", InputValue::DigitalVector(vec![DigitalValue::zero()]));
+        pack_input_bits(&mut ctx, 9, &mut bytes);
+
+        assert_eq!(bytes, vec![0, 0]);
+        assert_eq!(bytes.as_ptr(), first_ptr);
+        assert_eq!(bytes.capacity(), first_capacity);
     }
 
     #[test]
