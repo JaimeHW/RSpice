@@ -1,3 +1,0 @@
-serial, nightly,  parallel
-valgrind
-bsrc, params

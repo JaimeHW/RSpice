@@ -1,5 +1,0 @@
-README
-Transformers.pm
-tags
-testCombined1.cir
-testCombined1.cir.sh

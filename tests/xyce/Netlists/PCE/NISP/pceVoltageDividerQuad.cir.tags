@@ -1,7 +1,0 @@
-serial, nightly,  parallel, analytic
-sampling
-pce
-quadrature_pce
-nisp
-required:stokhos
-valgrind

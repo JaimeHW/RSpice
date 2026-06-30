@@ -1,3 +1,0 @@
-bug529.cir
-bug529.cir.sh
-tags

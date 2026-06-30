@@ -1,3 +1,0 @@
-issue340.cir
-table.txt
-tags

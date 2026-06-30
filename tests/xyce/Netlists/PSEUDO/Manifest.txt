@@ -1,5 +1,0 @@
-exclude
-nonpseudo.cir
-pseudo.cir
-pseudo.cir.sh
-tags

@@ -1,19 +1,24 @@
 //! Xyce regression corpus runner.
 //!
-//! The upstream Xyce suite is vendored as a corpus. Its Perl/Bash harness is
-//! retained for provenance, but RSpice regression execution is Rust-native:
-//! every `.cir` deck is discovered and reported, and only decks with a
-//! supported, checked-in static `.prn` oracle are numerically executed.
+//! The upstream Xyce suite is vendored as a runtime corpus. RSpice keeps the
+//! netlists, reference output data, and licensing/provenance files, but omits
+//! upstream platform-specific harness scripts. Regression execution is
+//! Rust-native: every retained `.cir` deck is discovered and reported, and only
+//! decks with a supported, checked-in static `.prn` oracle are numerically
+//! executed.
 
 use crate::abort_signal::AbortSignal;
 use crate::engine::{ConvergenceConfig, SimulationConfig, SimulationError};
 use crate::netlist::{AnalysisCommand, ElementKind, Netlist};
 use crate::{Engine, Value};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const EXPECTED_UNSUPPORTED_MARKER: &str = "EXPECTED_UNSUPPORTED:";
+const HARNESS_MANIFEST_FILE: &str = "RSPICE-HARNESS-MANIFEST.tsv";
+const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
 const MIN_DIRECT_RESISTOR_ABS_OHMS: Value = 1.0e-30;
 
 /// Configuration for the Xyce corpus runner.
@@ -48,8 +53,6 @@ impl Default for XyceRunnerConfig {
 pub enum XyceDeckSection {
     /// Simulator regression decks under `tests/xyce/Netlists`.
     Netlists,
-    /// Upstream harness self-test fixtures under `tests/xyce/TestScripts`.
-    UpstreamHarnessFixture,
     /// Any other vendored `.cir` file.
     Other,
 }
@@ -135,6 +138,7 @@ impl XyceStatistics {
 pub struct XyceTestRunner {
     root: PathBuf,
     config: XyceRunnerConfig,
+    upstream_wrapper_decks: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -193,7 +197,12 @@ impl XyceTestRunner {
             .as_ref()
             .canonicalize()
             .unwrap_or_else(|_| root.as_ref().to_path_buf());
-        Self { root, config }
+        let upstream_wrapper_decks = Self::load_upstream_wrapper_decks(&root);
+        Self {
+            root,
+            config,
+            upstream_wrapper_decks,
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -207,6 +216,14 @@ impl XyceTestRunner {
     /// RSpice never executes upstream `.sh`/`.pl` harness files in this runner.
     pub fn executes_upstream_scripts(&self) -> bool {
         false
+    }
+
+    /// Whether a retained deck had an upstream `.cir.sh` wrapper sidecar in the
+    /// source corpus. Those scripts are intentionally not vendored; the
+    /// cross-platform manifest records the execution contract instead.
+    pub fn requires_upstream_wrapper(&self, relative_path: &str) -> bool {
+        self.upstream_wrapper_decks
+            .contains(&Self::normalize_manifest_key(relative_path))
     }
 
     /// Discover every `.cir` file under the vendored Xyce root.
@@ -408,9 +425,9 @@ impl XyceTestRunner {
     }
 
     fn execution_plan(&self, deck: &XyceDeck) -> Result<XyceExecutionPlan, String> {
-        if self.has_upstream_wrapper_script(&deck.path) {
+        if self.requires_upstream_wrapper(&deck.relative_path) {
             return Err(
-                "upstream .cir.sh wrapper sidecar exists; Rust adapter must implement wrapper semantics before executing this deck"
+                "upstream wrapper semantics are required; RSPICE-HARNESS-MANIFEST.tsv records the removed .cir.sh sidecar contract"
                     .to_string(),
             );
         }
@@ -1028,15 +1045,6 @@ impl XyceTestRunner {
         )
     }
 
-    fn has_upstream_wrapper_script(&self, deck_path: &Path) -> bool {
-        let Some(file_name) = deck_path.file_name().and_then(|name| name.to_str()) else {
-            return false;
-        };
-        deck_path
-            .with_file_name(format!("{file_name}.sh"))
-            .is_file()
-    }
-
     fn collect_circuit_files(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = fs::read_dir(dir) else {
             return;
@@ -1058,11 +1066,35 @@ impl XyceTestRunner {
     fn section_for_relative_path(relative_path: &str) -> XyceDeckSection {
         if relative_path.starts_with("Netlists/") {
             XyceDeckSection::Netlists
-        } else if relative_path.starts_with("TestScripts/") {
-            XyceDeckSection::UpstreamHarnessFixture
         } else {
             XyceDeckSection::Other
         }
+    }
+
+    fn load_upstream_wrapper_decks(root: &Path) -> BTreeSet<String> {
+        let manifest_path = root.join(HARNESS_MANIFEST_FILE);
+        let Ok(content) = fs::read_to_string(manifest_path) else {
+            return BTreeSet::new();
+        };
+
+        let mut decks = BTreeSet::new();
+        for raw_line in content.lines() {
+            let line = raw_line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((path, contract)) = line.split_once('\t') else {
+                continue;
+            };
+            if contract.trim() == REQUIRES_UPSTREAM_WRAPPER_CONTRACT {
+                decks.insert(Self::normalize_manifest_key(path));
+            }
+        }
+        decks
+    }
+
+    fn normalize_manifest_key(path: &str) -> String {
+        path.trim().replace('\\', "/").to_ascii_lowercase()
     }
 
     fn relative_key(&self, path: &Path) -> String {

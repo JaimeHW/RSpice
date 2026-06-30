@@ -1,3 +1,0 @@
-bug379.cir
-bug379.cir.sh
-tags

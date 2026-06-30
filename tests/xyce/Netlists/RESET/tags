@@ -1,5 +1,0 @@
-serial, nightly,  parallel
-valgrind
-resistor
-capacitor
-bjt,bjtlev1

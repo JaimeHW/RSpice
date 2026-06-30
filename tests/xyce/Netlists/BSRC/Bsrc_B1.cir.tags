@@ -1,4 +1,0 @@
-serial, nightly, parallel
-valgrind
-bsrc
-atanh

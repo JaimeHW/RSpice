@@ -1,6 +1,0 @@
-README
-RLC.cir
-RLC.cir.sh
-RLC_simple.cir
-exclude
-tags

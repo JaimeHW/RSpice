@@ -1,4 +1,0 @@
-bad_user_defined_func.cir
-bad_user_defined_func.cir.sh
-tags
-options

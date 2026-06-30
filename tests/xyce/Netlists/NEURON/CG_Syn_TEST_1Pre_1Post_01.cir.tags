@@ -1,5 +1,0 @@
-serial, parallel, nightly
-notmorethan4procs
-valgrind
-neuron
-

@@ -1,4 +1,0 @@
-serial, parallel, nightly
-tecplot, raw, output
-numpy
-bug668

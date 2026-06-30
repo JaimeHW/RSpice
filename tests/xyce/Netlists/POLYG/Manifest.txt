@@ -1,2 +1,0 @@
-polyg.cir
-tags

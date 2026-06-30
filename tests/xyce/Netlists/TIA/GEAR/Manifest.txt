@@ -1,4 +1,0 @@
-circuit1.cir
-circuit3.cir
-exclude
-tags

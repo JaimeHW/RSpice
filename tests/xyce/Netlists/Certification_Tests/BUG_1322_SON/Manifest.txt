@@ -1,2 +1,0 @@
-wildcardOrdering.cir
-wildcardOrdering.cir.sh

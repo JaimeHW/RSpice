@@ -1,4 +1,0 @@
-serial, nightly
-probe
-required:noverbose
-bug397

@@ -1,6 +1,0 @@
-serial, nightly,  parallel, analytic
-intrusive_pce
-pce
-quadrature_pce
-required:stokhos
-valgrind

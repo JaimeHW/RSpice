@@ -1,3 +1,0 @@
-serial, nightly, parallel
-output, measure, fourier, fft
-required:fft

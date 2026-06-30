@@ -1,9 +1,0 @@
-README
-bad-device-line.cir
-bad-device-line.cir.sh
-extra-space.cir
-extra-space.cir.sh
-tags
-worse-device-line.cir
-worse-device-line.cir.sh
-options

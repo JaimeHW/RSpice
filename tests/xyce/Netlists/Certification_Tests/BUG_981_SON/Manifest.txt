@@ -1,7 +1,0 @@
-exclude
-bug981.cir
-bug981.cir.sh
-bug981A.cir
-bug981B.cir
-patfile
-tags

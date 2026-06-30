@@ -1,3 +1,0 @@
-bug_654.cir
-bug_654.cir.res.gs
-tags

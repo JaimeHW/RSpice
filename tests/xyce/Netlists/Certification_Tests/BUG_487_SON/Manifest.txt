@@ -1,8 +1,0 @@
-boron.dat
-bug_487.cir
-bug_487.cir.gold.out
-bug_487.cir.sh
-exclude
-patfile
-phos.dat
-tags

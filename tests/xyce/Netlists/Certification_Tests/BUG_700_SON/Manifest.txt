@@ -1,3 +1,0 @@
-bug700son.cir
-bug700son.cir.sh
-tags

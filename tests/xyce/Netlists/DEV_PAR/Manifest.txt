@@ -1,4 +1,0 @@
-dev_par.cir
-dev_par.cir.sh
-dev_par.cir.tags
-tags

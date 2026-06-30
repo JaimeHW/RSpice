@@ -1,2 +1,0 @@
-forced_oscillator.cir
-tags

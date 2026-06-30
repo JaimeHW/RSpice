@@ -1,6 +1,0 @@
-README
-bug1847.cir
-bug1847.cir.sh
-exclude
-includedNetlist.cir
-tags

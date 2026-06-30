@@ -1,7 +1,0 @@
-serial, nightly, normal, parallel
-valgrind
-resistor
-inductor
-mutualinductor
-sampling
-issue297

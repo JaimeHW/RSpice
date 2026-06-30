@@ -1,3 +1,0 @@
-log.cir
-log.cir.prn.gs.pl
-tags

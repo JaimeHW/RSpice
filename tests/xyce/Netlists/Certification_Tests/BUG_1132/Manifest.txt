@@ -1,4 +1,0 @@
-README
-bug_1132-empty.cir
-bug_1132-empty.cir.sh
-tags

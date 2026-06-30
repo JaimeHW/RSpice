@@ -1,5 +1,0 @@
-Bad_PWL_Source.cir
-Bad_PWL_Source.cir.sh
-README
-tags
-options

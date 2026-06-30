@@ -1,5 +1,0 @@
-serial, nightly, parallel
-output
-hb, hboutput
-errorexit
-required:fft

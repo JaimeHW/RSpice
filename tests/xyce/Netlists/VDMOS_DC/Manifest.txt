@@ -1,4 +1,0 @@
-irf130.cir
-irhc110.cir
-mtb60p06v.cir
-tags

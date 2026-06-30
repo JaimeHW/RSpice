@@ -1,7 +1,0 @@
-serial, nightly,  parallel
-valgrind
-capacitor
-capacitoraging
-params
-transient
-resistor

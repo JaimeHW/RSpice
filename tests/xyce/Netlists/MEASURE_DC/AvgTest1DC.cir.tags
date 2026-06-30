@@ -1,6 +1,0 @@
-nightly
-serial, parallel
-measure, dc
-required:fft
-valgrind
-preprocess

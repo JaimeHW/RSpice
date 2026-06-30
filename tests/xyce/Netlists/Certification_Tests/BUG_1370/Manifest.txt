@@ -1,3 +1,0 @@
-README
-bug1370.cir
-tags

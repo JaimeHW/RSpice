@@ -1,7 +1,0 @@
-copper.linear
-exclude
-linear_simple.cir
-linear_simple.cir.sh
-linear_simple_global.cir
-linear_simple_param.cir
-tags

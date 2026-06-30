@@ -1,3 +1,0 @@
-sandler7.cir
-sandler7.cir.sh
-tags

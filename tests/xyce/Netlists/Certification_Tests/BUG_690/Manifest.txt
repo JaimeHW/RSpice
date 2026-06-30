@@ -1,4 +1,0 @@
-README
-misspelled.cir
-misspelled.cir.sh
-tags

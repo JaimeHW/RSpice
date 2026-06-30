@@ -1,4 +1,0 @@
-issue306.cir
-issue306.cir.sh
-params.inc
-tags

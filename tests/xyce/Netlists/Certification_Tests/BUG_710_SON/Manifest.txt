@@ -1,4 +1,0 @@
-b3cap.cir
-b3cap.cir.tags
-b4cap.cir
-b4cap.cir.tags

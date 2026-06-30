@@ -1,3 +1,0 @@
-bug1197.cir
-bug1197.cir.res.gs
-tags

@@ -30,9 +30,11 @@ cargo test --release -p rspice-core --test ngspice_regression -- test_ngspice_tr
 `tests/` is a container for upstream simulator corpora. `tests/ngspice/` is
 the active ngspice-46 corpus used by the ngspice Rust regression harness.
 `tests/xyce/` contains the Xyce Regression Suite runtime materials
-(`Netlists/`, `OutputData/`, and `TestScripts/`) plus GPL/vendoring notices.
-The Xyce corpus is run by the separate `xyce_regression` adapter because its
-layout and `.prn` references differ from the ngspice `.out` suite.
+(`Netlists/` and `OutputData/`) plus GPL/vendoring notices and
+`RSPICE-HARNESS-MANIFEST.tsv`. Upstream platform scripts, `TestScripts/`, tags,
+exclude lists, and runner manifests are intentionally trimmed. The Xyce corpus
+is run by the separate `xyce_regression` adapter because its layout and `.prn`
+references differ from the ngspice `.out` suite.
 
 ## Oracle-replay fixture tests
 
@@ -51,10 +53,10 @@ Each deck runs in an isolated watchdog-supervised process (`rspice-ngspice-case-
 ## Xyce regression harness
 
 The Xyce harness (`crates/rspice-core/src/testing/xyce_runner.rs`) discovers
-every vendored `.cir` file under `tests/xyce/`, including upstream
-`TestScripts/` fixtures. The full-corpus test fails if any vendored deck is
-invisible to discovery. Upstream Perl and Bash scripts remain vendored for
-provenance, but the RSpice harness does not execute them.
+every retained `.cir` file under `tests/xyce/`. The full-corpus test fails if
+any retained deck is invisible to discovery. Upstream Perl, Python, and shell
+scripts are not vendored or executed; removed `.cir.sh` wrapper contracts are
+recorded in `tests/xyce/RSPICE-HARNESS-MANIFEST.tsv`.
 
 Numerical execution is capability-based rather than hand-picked. A deck runs
 when the Rust adapter can prove a supported contract: currently a direct

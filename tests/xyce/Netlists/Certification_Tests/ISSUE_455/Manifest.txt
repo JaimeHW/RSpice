@@ -1,3 +1,0 @@
-issue455.cir
-issue455.cir.sh
-tags

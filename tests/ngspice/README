@@ -20,13 +20,21 @@ gates are declared in <deck>.gates.tsv sidecars next to their decks. The
 full run gates nightly CI against the conformance watermark
 (.github/workflows/nightly.yml).
 
+Upstream runner/build files that RSpice does not execute - `bin/`,
+`Makefile.am`, CMC `qaSpec`/`parameters`/`reference` harness trees, and
+`ChangeLog` - are intentionally trimmed from this vendored corpus. The retained
+files are the RSpice-discovered `.cir` decks, checked-in `.out` oracles,
+required include/model data, measure sidecars, this README, and the validation
+manifest.
+
 Layer map - separate validation surfaces:
   tests/ngspice/  conformance against recorded ngspice-46 oracles (this tree)
-  tests/xyce/     vendored Xyce Regression Suite, not yet run by RSpice
+  tests/xyce/     vendored Xyce Regression Suite runtime corpus
   benchmarks/     performance rig decks + published scoreboards
 
-The upstream ngspice README follows unchanged; its build instructions
-(configure, Makefile.am, make check) apply to ngspice, not RSpice.
+The upstream ngspice README excerpt below is retained for provenance; its
+`configure`/`Makefile.am`/`make check` instructions apply to upstream ngspice,
+not RSpice.
 
 ------------------------------------------------------------------------
 

@@ -1,3 +1,0 @@
-serial, nightly,  parallel, bjtlev1, diode, vccs
-valgrind
-bsrc

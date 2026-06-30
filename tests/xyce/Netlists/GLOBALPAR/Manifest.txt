@@ -1,9 +1,0 @@
-gp2.cir
-gp2.cir.res.gs
-gp3.cir
-gp3.cir.tags
-gp_func.cir
-gp_func.cir.res.gs
-gp_loca.cir
-gp_loca.cir.tags
-tags

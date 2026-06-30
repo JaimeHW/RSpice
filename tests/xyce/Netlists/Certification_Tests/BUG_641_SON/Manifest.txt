@@ -1,4 +1,0 @@
-bad_obj_function_dot_sens.cir
-bad_obj_function_dot_sens.cir.sh
-tags
-options

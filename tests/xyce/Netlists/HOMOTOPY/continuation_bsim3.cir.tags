@@ -1,5 +1,0 @@
-serial, nightly,  parallel, homotopy
-valgrind
-bsim3
-resistor
-capacitor

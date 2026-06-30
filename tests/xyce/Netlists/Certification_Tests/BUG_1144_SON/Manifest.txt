@@ -1,3 +1,0 @@
-test3.cir
-test3.cir.res.gs
-tags

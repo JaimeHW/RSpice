@@ -1,4 +1,0 @@
-nightly, serial
-required:fft
-library
-requirestestbinary

@@ -1,6 +1,0 @@
-exclude
-tags
-subckt.cir.sh
-subckt.cir
-subckt.cir.tspice
-

@@ -1,5 +1,0 @@
-serial, nightly,  parallel
-valgrind
-bsrc
-capacitor
-resistor

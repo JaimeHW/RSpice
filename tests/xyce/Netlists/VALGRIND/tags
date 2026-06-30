@@ -1,4 +1,0 @@
-nightly, serial
-required:valgrindmaster
-# valgrind - tscoffe - must not be specified for the VALGRIND master test itself.
-

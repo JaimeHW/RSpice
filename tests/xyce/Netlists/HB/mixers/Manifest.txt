@@ -1,6 +1,0 @@
-exclude
-top.cir
-top.cir.sh
-xyce_netlist.sp
-model.cir
-tags

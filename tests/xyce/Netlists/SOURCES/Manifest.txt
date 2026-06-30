@@ -1,4 +1,0 @@
-ebh.cir
-ebh_sub.cir
-sources.cir
-tags

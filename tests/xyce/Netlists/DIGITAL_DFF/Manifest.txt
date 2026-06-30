@@ -1,2 +1,0 @@
-DFF_Verify_Xyce.cir
-tags

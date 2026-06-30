@@ -1,2 +1,0 @@
-ccmop.cir
-tags

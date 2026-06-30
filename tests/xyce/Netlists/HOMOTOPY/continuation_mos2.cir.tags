@@ -1,5 +1,0 @@
-serial, nightly,  parallel, homotopy
-valgrind
-mos2
-resistor
-capacitor

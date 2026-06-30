@@ -1,2 +1,0 @@
-serial, nightly,  parallel, hspice, issue488
-valgrind

@@ -1,3 +1,0 @@
-bug_436_son.cir
-bug_436_son.cir.sh
-tags

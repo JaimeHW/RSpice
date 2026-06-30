@@ -1,3 +1,0 @@
-acos_asin.cir
-acos_asin.cir.prn.gs.pl
-tags

@@ -1,4 +1,0 @@
-serial, nightly, parallel
-output, gnuplot
-hb, hboutput
-required:fft

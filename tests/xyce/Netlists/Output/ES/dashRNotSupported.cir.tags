@@ -1,5 +1,0 @@
-nightly, serial, parallel, pce, tran, bsim3
-embeddedsampling
-quadrature_pce
-output, errorexit
-required:stokhos

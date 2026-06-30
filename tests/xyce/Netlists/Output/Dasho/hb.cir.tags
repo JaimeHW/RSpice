@@ -1,3 +1,0 @@
-serial, nightly, parallel
-output, hb
-required:fft

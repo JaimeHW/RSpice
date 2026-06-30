@@ -1,2 +1,0 @@
-amp_mod.cir
-tags

@@ -1,4 +1,0 @@
-serial, nightly, parallel, normal, expression, multi
-valgrind
-capacitor
-sampling

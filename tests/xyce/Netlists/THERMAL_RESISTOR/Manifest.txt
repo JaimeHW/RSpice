@@ -1,5 +1,0 @@
-constant.cir
-copper.constant
-copper.linear
-linear.cir
-tags

@@ -1,6 +1,0 @@
-exclude
-nom.lib
-tags
-diodeClipper.cir.sh
-diodeClipper.cir
-diodeClipper.cir.pspice

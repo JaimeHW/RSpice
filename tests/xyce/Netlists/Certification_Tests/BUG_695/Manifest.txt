@@ -1,2 +1,0 @@
-bug695.cir
-tags

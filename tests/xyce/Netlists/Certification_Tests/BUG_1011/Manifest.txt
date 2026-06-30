@@ -1,4 +1,0 @@
-README
-sand23.cir
-sand23.cir.sh
-tags

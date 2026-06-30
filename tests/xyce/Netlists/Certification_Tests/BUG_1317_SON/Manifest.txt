@@ -1,2 +1,0 @@
-tra.cir
-tra.cir.sh

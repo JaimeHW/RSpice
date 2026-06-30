@@ -1,4 +1,0 @@
-nightly, serial, pce, tran
-embeddedsampling
-regression_pce
-required:stokhos

@@ -1,4 +1,0 @@
-RC.cir
-simpleRC-hb.cir
-simpleRC.cir
-tags

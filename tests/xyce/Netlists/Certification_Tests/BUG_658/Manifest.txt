@@ -1,4 +1,0 @@
-README
-diode.cir
-diode.cir.sh
-tags

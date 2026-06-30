@@ -1,2 +1,0 @@
-bug_584.cir
-tags

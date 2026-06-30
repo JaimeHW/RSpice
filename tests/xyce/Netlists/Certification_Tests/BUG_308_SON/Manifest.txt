@@ -1,6 +1,0 @@
-comparator.cir
-comparator0.cir
-comparator3.cir
-exclude
-tags
-comparator3.cir.sh

@@ -1,8 +1,0 @@
-bug_374.cir
-bug_374.cir.sh
-capacitor-bug.cir
-capacitor.cir
-exclude
-resistor-bug.cir
-resistor.cir
-tags

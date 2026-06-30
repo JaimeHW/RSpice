@@ -1,4 +1,0 @@
-nightly, serial, parallel, pce
-embeddedsampling
-errorexit
-required:stokhos

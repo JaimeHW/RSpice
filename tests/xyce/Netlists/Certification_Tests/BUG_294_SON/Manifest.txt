@@ -1,6 +1,0 @@
-bjt_baseline.cir
-bjt_load.cir
-bjt_save.cir
-bjt_save.cir.sh
-exclude
-tags

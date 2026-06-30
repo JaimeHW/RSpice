@@ -1,5 +1,0 @@
-exclude
-multiSubcktPar.cir
-multiSubcktPar.cir.sh
-multiSubcktParRef.cir
-tags

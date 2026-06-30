@@ -1,5 +1,0 @@
-README
-leadExp.cir
-leadExp.cir.sh
-tags
-options

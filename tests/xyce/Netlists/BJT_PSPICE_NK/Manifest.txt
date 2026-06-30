@@ -1,2 +1,0 @@
-bjt_test_nk.cir
-tags

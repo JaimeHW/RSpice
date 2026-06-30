@@ -1,5 +1,0 @@
-bsimcmg_107_inverter_transient.cir
-bsimcmg_107_inverter_transient.cir.sh
-bsimcmg_107_inverter_transientBaseline.cir
-exclude
-tags

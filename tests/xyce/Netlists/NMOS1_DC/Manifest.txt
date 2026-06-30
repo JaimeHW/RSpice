@@ -1,2 +1,0 @@
-nmos1.cir
-tags

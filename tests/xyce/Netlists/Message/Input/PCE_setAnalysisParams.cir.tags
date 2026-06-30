@@ -1,3 +1,0 @@
-nightly, serial, parallel, pce
-errorexit
-required:stokhos

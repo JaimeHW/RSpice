@@ -1,4 +1,0 @@
-exclude
-bug_967.cir
-bug_967.cir.sh
-tags

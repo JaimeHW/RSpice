@@ -1,8 +1,0 @@
-bad_command_line.cir
-command_line.cir
-command_line.cir.sh
-goldHelpTxt
-noQuietStrings
-exclude
-tags
-options

@@ -1,4 +1,0 @@
-bad_dot_dc_line.cir
-bad_dot_dc_line.cir.sh
-tags
-options

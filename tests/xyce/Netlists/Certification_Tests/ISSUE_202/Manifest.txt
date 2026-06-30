@@ -1,6 +1,0 @@
-exclude
-first.cir
-first_last.cir
-first_last.cir.sh
-last.cir
-tags

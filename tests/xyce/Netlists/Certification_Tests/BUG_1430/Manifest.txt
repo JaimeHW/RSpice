@@ -1,3 +1,0 @@
-bug_1430.cir
-bug_1430.cir.sh
-tags

@@ -1,4 +1,0 @@
-tags
-bug_479.cir
-bug_479.cir.sh
-bug_479_GSfile

@@ -41,10 +41,12 @@ Derived components include:
     src/spicelib/devices/vsrc/vsrcload.c — Copyright 1990 Regents of the
     University of California.
 
-The test decks, reference outputs, and QA scripts under tests/ngspice/ are
-redistributed verbatim from the ngspice-46 tests/ directory (which in turn
-includes material from Spice3f5 and MacSpice3f4), likewise under the
-Modified BSD license.
+The retained test decks, reference outputs, include/model data, and validation
+sidecars under tests/ngspice/ are redistributed from the ngspice-46 tests/
+directory (which in turn includes material from Spice3f5 and MacSpice3f4),
+likewise under the Modified BSD license. Upstream runner/build scripts and CMC
+QA harness files not used by RSpice are intentionally not shipped in this
+trimmed corpus.
 
 ngspice Modified BSD license:
 
@@ -171,9 +173,11 @@ RSpice includes the GPL version 3 text at tests/xyce/COPYING because the local
 source checkout referenced COPYING but did not contain that file at vendoring
 time. GPL terms apply to redistribution of tests/xyce/ and modifications to
 that corpus. The corpus has been trimmed to runtime test materials:
-Netlists/, OutputData/, TestScripts/, upstream README.md, COPYING, and
-RSPICE-VENDORING.md. Upstream CMake/CTest configuration files were omitted
-because RSpice does not run this corpus through upstream CTest.
+Netlists/, OutputData/, upstream README.md, COPYING, RSPICE-VENDORING.md, and
+RSPICE-HARNESS-MANIFEST.tsv. Upstream platform scripts, TestScripts/, tag and
+exclude files, per-directory runner manifests, and CMake/CTest configuration
+files were omitted because RSpice runs this corpus through its Rust-native
+adapter.
 
 -------------------------------------------------------------------------------
 5. IBM Plex fonts (SIL Open Font License 1.1)

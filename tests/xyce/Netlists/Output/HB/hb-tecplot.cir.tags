@@ -1,5 +1,0 @@
-serial, nightly, parallel, output
-hb
-hboutput
-required:fft
-bug381

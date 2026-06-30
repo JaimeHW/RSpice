@@ -1,4 +1,0 @@
-UnsupportedRemeasureMode.cir
-UnsupportedRemeasureMode.cir.sh
-UnsupportedRemeasureMode.cir.tags
-UnsupportedRemeasureMode.cir.options

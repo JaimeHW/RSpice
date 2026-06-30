@@ -1,7 +1,0 @@
-nightly
-serial, parallel
-measure
-remeasure
-errorexit, bug785
-
-

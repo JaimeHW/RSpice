@@ -1,4 +1,0 @@
-sqrt.cir
-sqrt.cir.prn.gs.pl
-sqrt.cir.sh
-tags

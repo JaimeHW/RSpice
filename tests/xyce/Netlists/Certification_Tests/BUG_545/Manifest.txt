@@ -1,5 +1,0 @@
-README
-bug_545.cir
-bug_545.cir.sh
-exclude
-tags

@@ -1,3 +1,0 @@
-Manifest.txt
-issue310.cir
-tags

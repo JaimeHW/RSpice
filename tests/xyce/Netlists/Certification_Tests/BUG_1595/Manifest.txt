@@ -1,4 +1,0 @@
-bug1595.cir
-bug1595.cir.sh
-tags
-options

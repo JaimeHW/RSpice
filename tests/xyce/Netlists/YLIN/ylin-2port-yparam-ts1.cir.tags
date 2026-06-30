@@ -1,4 +1,0 @@
-serial, nightly, parallel
-ylin
-valgrind
-required:fft

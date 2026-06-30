@@ -1,3 +1,0 @@
-bug_477.cir
-exclude
-tags

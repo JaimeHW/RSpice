@@ -1,4 +1,0 @@
-nightly, serial, pce, bsim3
-embeddedsampling
-output
-required:stokhos

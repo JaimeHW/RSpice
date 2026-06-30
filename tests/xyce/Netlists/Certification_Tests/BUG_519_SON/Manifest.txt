@@ -1,3 +1,0 @@
-bug_519_SON.cir
-bug_519_SON.cir.sh
-tags

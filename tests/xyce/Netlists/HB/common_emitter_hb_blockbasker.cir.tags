@@ -1,5 +1,0 @@
-parallel,serial,nightly
-hb    
-required:fft
-required:amesos2basker
-valgrind

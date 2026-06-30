@@ -1,3 +1,0 @@
-serial, nightly, bug389, parallel
-hb
-required:fft

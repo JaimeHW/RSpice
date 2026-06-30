@@ -1,3 +1,0 @@
-mos1236_temp_dep.cir
-mos1236_temp_dep.cir.sh
-tags

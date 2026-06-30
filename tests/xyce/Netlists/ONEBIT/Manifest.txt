@@ -1,4 +1,0 @@
-onebit.cir
-onebita.lib
-onebitb.lib
-tags

@@ -1,4 +1,0 @@
-README
-bug899.cir
-bug899.cir.sh
-tags

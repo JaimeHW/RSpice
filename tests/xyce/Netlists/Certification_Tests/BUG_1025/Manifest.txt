@@ -1,5 +1,0 @@
-README
-null.cir
-null.cir.sh
-tags
-options

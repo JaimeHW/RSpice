@@ -1,8 +1,0 @@
-bug_407_ac.cir
-bug_407_ac.cir.sh
-bug_407_dc.cir
-bug_407_dc.cir.sh
-bug_407_hb.cir
-bug_407_hb.cir.sh
-tags
-bug_407_hb.cir.tags

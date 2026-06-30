@@ -1,7 +1,8 @@
 //! Xyce Regression Corpus Tests
 //!
 //! The Xyce corpus is vendored under `tests/xyce`. These tests run the
-//! Rust-native RSpice adapter, not the upstream Perl/Bash harness.
+//! Rust-native RSpice adapter, not the upstream Perl/Bash harness. Upstream
+//! platform scripts are intentionally trimmed from this corpus.
 
 use rspice_core::testing::{XyceDeckSection, XyceRunnerConfig, XyceTestRunner};
 use std::collections::BTreeSet;
@@ -48,6 +49,77 @@ fn all_circuit_paths(root: &Path) -> BTreeSet<String> {
     paths
 }
 
+fn removed_upstream_harness_artifact_paths(root: &Path) -> Vec<String> {
+    fn visit(root: &Path, dir: &Path, paths: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit(root, &path, paths);
+                continue;
+            }
+
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default();
+            let extension = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default();
+            let is_removed_artifact = matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "sh" | "pl" | "pm" | "py" | "tags"
+            ) || name.eq_ignore_ascii_case("tags")
+                || name.eq_ignore_ascii_case("exclude")
+                || name.eq_ignore_ascii_case("run")
+                || name.eq_ignore_ascii_case("run_xyce_regression")
+                || name.eq_ignore_ascii_case("run_xyce_regressionMP")
+                || (name.starts_with("Manifest") && extension.eq_ignore_ascii_case("txt"));
+
+            if is_removed_artifact {
+                paths.push(
+                    path.strip_prefix(root)
+                        .expect("path under root")
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+            }
+        }
+    }
+
+    let mut paths = Vec::new();
+    visit(root, root, &mut paths);
+    paths.sort();
+    paths
+}
+
+fn harness_manifest_entries(root: &Path) -> BTreeSet<String> {
+    let path = root.join("RSPICE-HARNESS-MANIFEST.tsv");
+    let content = fs::read_to_string(&path).expect("read RSpice Xyce harness manifest");
+    let mut entries = BTreeSet::new();
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (relative_path, contract) = line
+            .split_once('\t')
+            .expect("manifest rows use tab-separated path and contract");
+        assert_eq!(
+            contract, "requires_upstream_wrapper",
+            "unexpected Xyce harness manifest contract in {line:?}"
+        );
+        assert!(
+            entries.insert(relative_path.to_string()),
+            "duplicate Xyce harness manifest path {relative_path}"
+        );
+    }
+    entries
+}
+
 #[test]
 fn test_xyce_corpus_root_is_scoped_under_tests_xyce() {
     let root = get_xyce_tests_dir();
@@ -64,10 +136,14 @@ fn test_xyce_corpus_root_is_scoped_under_tests_xyce() {
         "OutputData directory missing"
     );
     assert!(
-        root.join("TestScripts").is_dir(),
-        "TestScripts directory missing"
+        !root.join("TestScripts").exists(),
+        "upstream TestScripts runner directory must not be vendored into the RSpice corpus"
     );
     assert!(root.join("COPYING").is_file(), "Xyce COPYING file missing");
+    assert!(
+        root.join("RSPICE-HARNESS-MANIFEST.tsv").is_file(),
+        "RSpice Xyce harness manifest missing"
+    );
     assert!(
         root.join("RSPICE-VENDORING.md").is_file(),
         "RSpice vendoring notes missing"
@@ -95,27 +171,63 @@ fn test_xyce_discovery_covers_every_vendored_circuit() {
         "Xyce Netlists corpus must contain simulator decks"
     );
     assert!(
-        discovered
-            .iter()
-            .any(|path| path.starts_with("TestScripts/")),
-        "Xyce TestScripts fixtures must remain visible, not silently ignored"
+        discovered.iter().all(|path| path.starts_with("Netlists/")),
+        "Only runtime simulator decks should remain in the Xyce .cir corpus"
     );
 }
 
 #[test]
-fn test_xyce_runner_does_not_execute_platform_scripts() {
+fn test_xyce_corpus_omits_upstream_platform_harness_artifacts() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let artifacts = removed_upstream_harness_artifact_paths(&root);
 
     assert!(
-        root.join("TestScripts")
-            .join("run_xyce_regression")
-            .is_file(),
-        "upstream script corpus should remain vendored for provenance"
+        artifacts.is_empty(),
+        "Xyce corpus contains upstream platform harness artifacts that RSpice does not execute: {artifacts:#?}"
     );
     assert!(
         !runner.executes_upstream_scripts(),
         "RSpice Xyce tests must not depend on Perl/Bash harness execution"
+    );
+}
+
+#[test]
+fn test_xyce_wrapper_manifest_covers_trimmed_sidecar_contracts() {
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let entries = harness_manifest_entries(&root);
+
+    assert!(
+        entries.len() > 1000,
+        "wrapper manifest should preserve the removed Xyce .cir.sh sidecar contracts"
+    );
+    for relative_path in &entries {
+        assert!(
+            relative_path.starts_with("Netlists/") && relative_path.ends_with(".cir"),
+            "wrapper manifest path must name a retained Netlists .cir deck: {relative_path}"
+        );
+        let deck_path = root.join(relative_path);
+        assert!(
+            deck_path.is_file(),
+            "wrapper manifest path points at a missing deck: {relative_path}"
+        );
+        let file_name = deck_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("deck has file name");
+        assert!(
+            !deck_path.with_file_name(format!("{file_name}.sh")).exists(),
+            "wrapper sidecar should be trimmed, not retained: {relative_path}.sh"
+        );
+        assert!(
+            runner.requires_upstream_wrapper(relative_path),
+            "runner did not load wrapper manifest entry for {relative_path}"
+        );
+    }
+    assert!(
+        !runner.requires_upstream_wrapper("Netlists/RESISTOR/resistor.cir"),
+        "plain resistor smoke deck should not require removed wrapper semantics"
     );
 }
 

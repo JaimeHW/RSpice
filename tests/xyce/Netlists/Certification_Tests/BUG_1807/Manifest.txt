@@ -1,2 +1,0 @@
-tags
-vbic_pnp_default.cir

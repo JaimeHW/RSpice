@@ -375,7 +375,7 @@ fn unique_case_result_path(cir_path: &Path) -> PathBuf {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Get the path to the ngspice tests directory at the workspace root.
-/// Tests are located at workspace_root/tests/, not crate/tests/
+/// Tests are located at workspace_root/tests/ngspice/, not crate/tests/.
 fn get_tests_dir() -> PathBuf {
     // CARGO_MANIFEST_DIR points to crates/rspice-core/
     // We need to go up two levels to reach the workspace root
@@ -384,7 +384,8 @@ fn get_tests_dir() -> PathBuf {
             .parent() // crates/
             .and_then(|p| p.parent()) // workspace root
             .expect("Could not find workspace root")
-            .join("tests");
+            .join("tests")
+            .join("ngspice");
 
     // Canonicalize so paths returned by the runner (which canonicalizes its
     // root, yielding `\\?\`-prefixed paths on Windows) stay prefix-comparable
@@ -777,6 +778,26 @@ fn test_bsim3soifd_nmos_model_card_has_parseable_rth0_parameter() {
         }),
         "expected included NMOS model to preserve RTH0=.006, got {:?}",
         model.params
+    );
+}
+
+#[test]
+fn test_ngspice_corpus_root_is_scoped_under_tests_ngspice() {
+    let tests_dir = get_tests_dir();
+    let normalized = tests_dir.to_string_lossy().replace('\\', "/");
+
+    assert!(
+        normalized.ends_with("/tests/ngspice"),
+        "ngspice regression root must be scoped to tests/ngspice, got {}",
+        tests_dir.display()
+    );
+    assert!(
+        tests_dir.join("validation-manifest.tsv").is_file(),
+        "ngspice validation manifest missing"
+    );
+    assert!(
+        !tests_dir.join("xyce").exists(),
+        "ngspice harness root must not include the Xyce corpus"
     );
 }
 
@@ -1486,8 +1507,8 @@ fn test_discover_tests() {
     let general_tests = runner.discover_tests("general");
     println!("Found {} tests in general/", general_tests.len());
 
-    let bsim4_tests = runner.discover_tests("bsim4");
-    println!("Found {} tests in bsim4/", bsim4_tests.len());
+    let bsim3soifd_tests = runner.discover_tests("bsim3soifd");
+    println!("Found {} tests in bsim3soifd/", bsim3soifd_tests.len());
 
     // Verify paths look correct
     for path in general_tests.iter().take(3) {

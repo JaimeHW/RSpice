@@ -1,6 +1,0 @@
-parallel,serial,nightly, mos2
-hb    
-required:fft
-valgrind
-capacitor
-resistor

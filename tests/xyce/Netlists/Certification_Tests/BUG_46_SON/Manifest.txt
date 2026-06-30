@@ -1,6 +1,0 @@
-baseline.cir
-bug_46_son.cir
-bug_46_son.cir.sh
-exclude
-synonyms.cir
-tags

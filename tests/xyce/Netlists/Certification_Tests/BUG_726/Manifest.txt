@@ -1,5 +1,0 @@
-README
-adjacent.cir
-adjacent.cir.sh
-tags
-options

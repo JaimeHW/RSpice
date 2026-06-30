@@ -1,3 +1,0 @@
-rc_simple_xyce.cir
-rc_simple_xyce.cir.sh
-tags

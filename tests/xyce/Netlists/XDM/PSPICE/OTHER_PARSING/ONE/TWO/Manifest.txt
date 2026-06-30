@@ -1,4 +1,0 @@
-file_hierarchy.cir.pspice
-file_hierarchy.cir
-file_hierarchy.cir.sh
-tags

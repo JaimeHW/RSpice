@@ -1,8 +1,0 @@
-serial, nightly,  parallel
-valgrind
-bjt,bjtlev1
-diode
-inductor
-bsrc
-resistor
-capacitor

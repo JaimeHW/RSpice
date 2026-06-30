@@ -1,4 +1,0 @@
-serial, nightly,  parallel, analytic
-valgrind
-resistor
-capacitor

@@ -1,3 +1,0 @@
-ForcedDampedHO.cir
-ForcedDampedHO.cir.sh
-tags

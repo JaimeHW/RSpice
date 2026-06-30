@@ -1,4 +1,0 @@
-serial, nightly,  parallel, subckt, params
-valgrind
-bsrc
-errorexit

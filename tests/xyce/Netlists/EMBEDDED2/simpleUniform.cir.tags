@@ -1,4 +1,0 @@
-serial, nightly, parallel, uniform, expression
-valgrind
-capacitor
-embeddedsampling

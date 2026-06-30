@@ -1,4 +1,0 @@
-serial, nightly,  parallel, lhs, normal
-valgrind
-capacitor
-sampling

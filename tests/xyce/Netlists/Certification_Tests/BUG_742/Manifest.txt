@@ -1,5 +1,0 @@
-README
-bug_742.cir
-bug_742.cir.sh
-tags
-exclude

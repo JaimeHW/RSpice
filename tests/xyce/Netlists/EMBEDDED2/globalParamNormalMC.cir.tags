@@ -1,2 +1,0 @@
-serial, nightly, parallel,  analytic, globalparam, embeddedsampling, mc, normal, expression
-valgrind

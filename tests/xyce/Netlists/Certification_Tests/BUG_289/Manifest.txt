@@ -1,4 +1,0 @@
-README
-bug_289.cir
-bug_289.cir.sh
-tags

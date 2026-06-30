@@ -1,8 +1,0 @@
-bug_1803a.cir
-bug_1803b.cir
-bug_1803c.cir
-bug_1803d.cir
-bug_1803d.cir.tags
-tags
-bug_1803d.cir.sh
-bug_1803d.cir.options

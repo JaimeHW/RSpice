@@ -1,3 +1,0 @@
-bug1018son.cir
-bug1018son.cir.tags
-tags

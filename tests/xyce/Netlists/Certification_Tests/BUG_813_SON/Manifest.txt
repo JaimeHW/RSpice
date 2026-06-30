@@ -1,3 +1,0 @@
-bug_813_son.cir
-CMakeLists.txt
-tags

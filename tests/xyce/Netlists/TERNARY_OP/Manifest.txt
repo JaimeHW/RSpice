@@ -1,3 +1,0 @@
-ternary_op.cir
-ternary_op.cir.prn.gs.pl
-tags

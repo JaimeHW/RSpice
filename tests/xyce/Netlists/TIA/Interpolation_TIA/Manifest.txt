@@ -1,3 +1,0 @@
-interpolation_gear.cir
-interpolationtrap.cir
-tags

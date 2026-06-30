@@ -1,4 +1,0 @@
-bug_612.cir
-bug_612.cir.sh
-tags
-options

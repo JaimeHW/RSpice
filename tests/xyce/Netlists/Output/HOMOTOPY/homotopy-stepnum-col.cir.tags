@@ -1,4 +1,0 @@
-serial, nightly,  parallel, output, gmin
-homotopy, gnuplot, splot
-bug 972
-

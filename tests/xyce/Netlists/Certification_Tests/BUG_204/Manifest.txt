@@ -1,5 +1,0 @@
-README
-bug204.cir
-bug204.cir.sh
-tags
-options

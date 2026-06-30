@@ -1,2 +1,0 @@
-serial, nightly, parallel,  analytic, globalparam, lhs, normal, embeddedsampling, bug1190son, issue167
-valgrind

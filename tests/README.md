@@ -6,8 +6,8 @@ keeps its own upstream layout, provenance, and license terms.
 
 - `ngspice/` contains the ngspice-46 regression corpus used by
   `crates/rspice-core/tests/ngspice_regression.rs`.
-- `xyce/` contains the Xyce Regression Suite. It is vendored for future Xyce
-  corpus support and is not run by the ngspice regression harness.
+- `xyce/` contains the Xyce Regression Suite runtime corpus used by
+  `crates/rspice-core/tests/xyce_regression.rs`.
 
 Do not mix validation manifests, generated outputs, or harness sidecars between
 corpora. Add a corpus-specific README or vendoring note when importing another

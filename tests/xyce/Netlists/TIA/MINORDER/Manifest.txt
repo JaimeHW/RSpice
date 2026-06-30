@@ -1,5 +1,0 @@
-capacitor.cir
-capacitor.cir.sh
-exclude
-invert.cir
-tags

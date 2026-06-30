@@ -1,3 +1,0 @@
-bug1212.cir
-bug1212.cir.sh
-tags

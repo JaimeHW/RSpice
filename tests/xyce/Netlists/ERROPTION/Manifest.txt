@@ -1,4 +1,0 @@
-rc_osc.cir
-rc_osc.cir.prn.gs.pl
-rc_osc.cir.sh
-tags

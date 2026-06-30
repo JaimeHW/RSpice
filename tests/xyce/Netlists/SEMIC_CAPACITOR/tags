@@ -1,4 +1,0 @@
-serial, nightly,  parallel
-valgrind
-semicap
-capacitor

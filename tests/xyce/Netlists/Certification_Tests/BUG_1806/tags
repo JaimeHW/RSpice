@@ -1,3 +1,0 @@
-serial, nightly, valgrind, subckt, param, expression, bsrc
-valgrind
-bug1806
