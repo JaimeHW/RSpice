@@ -814,7 +814,8 @@ impl XyceTestRunner {
             return true;
         }
         if let Some(source_name) = Self::parse_current_probe(probe) {
-            return normalized_column == format!("{source_name}_branch");
+            return normalized_column == format!("{source_name}_branch")
+                || normalized_column == format!("{source_name}#branch");
         }
         false
     }
@@ -1848,14 +1849,17 @@ End of Xyce(TM) Simulation
     fn reference_columns_accept_primary_sweep_and_branch_labels() {
         let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
         let reference = XycePrnTable {
-            columns: ["Index", "v-sweep", "v(2)", "vds_branch"]
+            columns: ["Index", "v-sweep", "v(2)", "vds_branch", "vmon1#branch"]
                 .into_iter()
                 .map(str::to_string)
                 .collect(),
             rows: Vec::new(),
         };
         let print = XycePrintRequest {
-            probes: ["v(2)", "i(vds)"].into_iter().map(str::to_string).collect(),
+            probes: ["v(2)", "i(vds)", "I(VMON1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
         };
 
         let columns = runner
@@ -1873,6 +1877,10 @@ End of Xyce(TM) Simulation
         assert!(matches!(
             &columns[2],
             XyceReferenceColumn::Probe { name } if name == "i(vds)"
+        ));
+        assert!(matches!(
+            &columns[3],
+            XyceReferenceColumn::Probe { name } if name == "I(VMON1)"
         ));
     }
 
