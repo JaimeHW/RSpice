@@ -14,8 +14,10 @@ use std::sync::{Arc, Mutex};
 pub struct DigitalCosim;
 
 type DigitalCosimRuntimeResource = Mutex<Box<dyn DigitalCosimRuntime>>;
+type DigitalCosimInputScratchResource = Mutex<DigitalCosimInputScratch>;
 
 const RESOURCE_RUNTIME: &str = "d_cosim.runtime";
+const RESOURCE_INPUT_SCRATCH: &str = "d_cosim.input_scratch";
 const STATE_TIME_ZERO_INITIALIZED: usize = 0;
 const STATE_PREV_INPUT_START: usize = 1;
 const COSIM_NOT_INITIALIZED: i64 = 0;
@@ -27,6 +29,12 @@ const COSIM_QUEUE_SIZE_MIN: i64 = 1;
 
 fn d_cosim_error(message: impl Into<String>) -> CmError {
     CmError::EvaluationError(format!("d_cosim: {}", message.into()))
+}
+
+#[derive(Default)]
+struct DigitalCosimInputScratch {
+    inputs: Vec<DigitalValue>,
+    inouts: Vec<DigitalValue>,
 }
 
 fn official_cosim_delay(ctx: &CmContext) -> Value {
@@ -61,11 +69,18 @@ fn d_cosim_inout_port() -> PortSpec {
     }
 }
 
-fn sized_digital_vector(ctx: &CmContext, name: &str, width: usize) -> Vec<DigitalValue> {
+fn fill_sized_digital_vector(
+    ctx: &CmContext,
+    name: &str,
+    width: usize,
+    output: &mut Vec<DigitalValue>,
+) {
     let values = ctx.input_digital_vector_values(name).unwrap_or(&[]);
-    (0..width)
-        .map(|index| values.get(index).copied().unwrap_or_default())
-        .collect()
+    output.clear();
+    output.reserve(width);
+    for index in 0..width {
+        output.push(values.get(index).copied().unwrap_or_default());
+    }
 }
 
 fn event_is_new(event_time: Value, previous_time: Value) -> bool {
@@ -314,6 +329,10 @@ impl CodeModel for DigitalCosim {
         let runtime = start_digital_cosim_runtime(&spec)?;
         let runtime: Arc<DigitalCosimRuntimeResource> = Arc::new(Mutex::new(runtime));
         ctx.set_resource(RESOURCE_RUNTIME, runtime);
+        ctx.set_resource(
+            RESOURCE_INPUT_SCRATCH,
+            Arc::new(Mutex::new(DigitalCosimInputScratch::default())),
+        );
         set_initial_outputs(ctx, official_cosim_delay(ctx));
         Ok(())
     }
@@ -325,8 +344,14 @@ impl CodeModel for DigitalCosim {
 
         let input_width = ctx.port_width("d_in");
         let inout_width = ctx.port_width("d_inout");
-        let inputs = sized_digital_vector(ctx, "d_in", input_width);
-        let inouts = sized_digital_vector(ctx, "d_inout", inout_width);
+        let input_scratch = ctx
+            .resource::<DigitalCosimInputScratchResource>(RESOURCE_INPUT_SCRATCH)
+            .ok_or_else(|| d_cosim_error("input scratch is not initialized"))?;
+        let mut input_scratch = input_scratch
+            .lock()
+            .map_err(|_| d_cosim_error("input scratch lock is poisoned"))?;
+        fill_sized_digital_vector(ctx, "d_in", input_width, &mut input_scratch.inputs);
+        fill_sized_digital_vector(ctx, "d_inout", inout_width, &mut input_scratch.inouts);
 
         let runtime = ctx
             .resource::<DigitalCosimRuntimeResource>(RESOURCE_RUNTIME)
@@ -337,7 +362,12 @@ impl CodeModel for DigitalCosim {
                 .map_err(|_| d_cosim_error("runtime lock is poisoned"))?;
             runtime.input_event_limit()
         };
-        let input_events = collect_input_events(ctx, &inputs, &inouts, input_event_limit);
+        let input_events = collect_input_events(
+            ctx,
+            &input_scratch.inputs,
+            &input_scratch.inouts,
+            input_event_limit,
+        );
 
         let mut runtime = runtime
             .lock()
@@ -352,24 +382,34 @@ impl CodeModel for DigitalCosim {
             for index in 0..(input_width + inout_width) {
                 ctx.set_state(index, 0.0);
             }
-            for (index, value) in inputs.iter().copied().enumerate() {
+            for (index, value) in input_scratch.inputs.iter().copied().enumerate() {
                 ctx.set_int_state(STATE_PREV_INPUT_START + index, digital_value_code(value));
             }
-            for (index, value) in inouts.iter().copied().enumerate() {
+            for (index, value) in input_scratch.inouts.iter().copied().enumerate() {
                 ctx.set_int_state(
                     STATE_PREV_INPUT_START + input_width + index,
                     digital_value_code(value),
                 );
             }
-            results.push(runtime.initialize(ctx.time, &inputs, &inouts)?);
+            results.push(runtime.initialize(
+                ctx.time,
+                &input_scratch.inputs,
+                &input_scratch.inouts,
+            )?);
         } else {
             if ctx.int_state(STATE_TIME_ZERO_INITIALIZED) == COSIM_INPUTS_INITIALIZED {
                 results.push(runtime.startup_step(0.0)?);
                 ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, COSIM_STARTUP_STEP_DONE);
             }
-            results.push(runtime.step(ctx.time, &inputs, &inouts, &input_events)?);
+            results.push(runtime.step(
+                ctx.time,
+                &input_scratch.inputs,
+                &input_scratch.inouts,
+                &input_events,
+            )?);
         }
         drop(runtime);
+        drop(input_scratch);
 
         for result in results {
             apply_cosim_step(ctx, result)?;
@@ -388,6 +428,35 @@ impl CodeModel for DigitalCosim {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xspice::context::InputValue;
+
+    #[test]
+    fn d_cosim_sized_input_fill_reuses_existing_buffer() {
+        let mut ctx = CmContext::new();
+        ctx.set_input(
+            "d_in",
+            InputValue::DigitalVector(vec![DigitalValue::one(), DigitalValue::zero()]),
+        );
+        let mut values = Vec::new();
+
+        fill_sized_digital_vector(&ctx, "d_in", 2, &mut values);
+        assert_eq!(values, vec![DigitalValue::one(), DigitalValue::zero()]);
+        let first_ptr = values.as_ptr();
+        let first_capacity = values.capacity();
+
+        ctx.set_input(
+            "d_in",
+            InputValue::DigitalVector(vec![DigitalValue::unknown()]),
+        );
+        fill_sized_digital_vector(&ctx, "d_in", 2, &mut values);
+
+        assert_eq!(
+            values,
+            vec![DigitalValue::unknown(), DigitalValue::default()]
+        );
+        assert_eq!(values.as_ptr(), first_ptr);
+        assert_eq!(values.capacity(), first_capacity);
+    }
 
     #[test]
     fn d_cosim_initial_outputs_are_streamed_vectors() {
