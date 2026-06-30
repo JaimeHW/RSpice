@@ -314,11 +314,11 @@ fn basic_digital_vector_gates_reject_input_vector_below_official_minimum_length_
 }
 
 #[test]
-fn digital_lookup_and_ram_reject_official_vector_port_bounds_at_construction() {
+fn digital_lookup_accepts_official_zero_width_input_and_ram_rejects_port_bounds() {
     let registry = CodeModelRegistry::with_builtins();
 
     let lut = registry.get("d_lut").expect("d_lut is registered");
-    let err = XspiceInstance::new(
+    let instance = XspiceInstance::new(
         "a_d_lut_empty_in",
         lut,
         vec![
@@ -330,11 +330,14 @@ fn digital_lookup_and_ram_reject_official_vector_port_bounds_at_construction() {
         &[],
         &[],
     )
-    .expect_err("official d_lut input vector lower bound must be enforced");
-    assert!(
-        err.to_string().contains("in") && err.to_string().contains("at least 1"),
-        "d_lut empty input vector should be rejected like ngspice, got {err}"
-    );
+    .expect("official d_lut input vector has no lower bound");
+    match instance.connection("in") {
+        Some(PortConnection::DigitalVector(nodes)) => assert!(
+            nodes.is_empty(),
+            "d_lut should preserve an explicitly empty input vector, got {nodes:?}"
+        ),
+        other => panic!("d_lut input connection should be an empty vector, got {other:?}"),
+    }
 
     let ram = registry.get("d_ram").expect("d_ram is registered");
     let err = XspiceInstance::new(
