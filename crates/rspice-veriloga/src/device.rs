@@ -1644,6 +1644,7 @@ impl VerilogADevice {
             native.num_internal_nodes,
         )?;
         Self::validate_native_parameter_storage(vm.context, native.num_parameters)?;
+        Self::validate_native_variable_storage(vm.context, native.num_variables)?;
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_mut_ptr();
         clear_native_runtime_error();
