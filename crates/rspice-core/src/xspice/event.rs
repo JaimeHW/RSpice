@@ -122,10 +122,8 @@ impl EventQueue {
         if !event.time.is_finite() {
             return;
         }
-        let mut remaining: Vec<Event> = self.events.drain().collect();
-        remaining
+        self.events
             .retain(|pending| !(pending.same_output_driver(&event) && pending.time >= event.time));
-        self.events = remaining.into_iter().collect();
         self.events.push(event);
     }
 
@@ -232,16 +230,12 @@ impl EventQueue {
 
     /// Cancel all events for a specific node
     pub fn cancel_node_events(&mut self, node_id: usize) {
-        let mut remaining: Vec<Event> = self.events.drain().collect();
-        remaining.retain(|e| e.node_id != node_id);
-        self.events = remaining.into_iter().collect();
+        self.events.retain(|event| event.node_id != node_id);
     }
 
     /// Cancel all events for a specific instance
     pub fn cancel_instance_events(&mut self, instance: &str) {
-        let mut remaining: Vec<Event> = self.events.drain().collect();
-        remaining.retain(|e| e.instance != instance);
-        self.events = remaining.into_iter().collect();
+        self.events.retain(|event| event.instance != instance);
     }
 
     /// Clear all pending events
@@ -292,6 +286,84 @@ mod tests {
             queue.is_empty(),
             "ngspice reports 'Output delay < 0 not allowed' and ignores the output update"
         );
+    }
+
+    #[test]
+    fn event_queue_replaces_later_events_from_same_output_driver() {
+        let mut queue = EventQueue::new();
+
+        queue.schedule(Event::new(
+            0.5e-9,
+            1,
+            "out",
+            "a_driver",
+            EventValue::Digital(DigitalValue::zero()),
+        ));
+        queue.schedule(Event::new(
+            2.0e-9,
+            1,
+            "out",
+            "a_driver",
+            EventValue::Digital(DigitalValue::one()),
+        ));
+        queue.schedule(Event::new(
+            2.0e-9,
+            1,
+            "other",
+            "a_driver",
+            EventValue::Digital(DigitalValue::unknown()),
+        ));
+        queue.schedule(Event::new(
+            1.0e-9,
+            1,
+            "out",
+            "a_driver",
+            EventValue::Digital(DigitalValue::unknown()),
+        ));
+
+        assert_eq!(queue.len(), 3);
+        let events = queue.pop_events_at(2.0e-9);
+        let values: Vec<_> = events.iter().map(|event| event.value).collect();
+        assert!(values.contains(&EventValue::Digital(DigitalValue::zero())));
+        assert!(values.contains(&EventValue::Digital(DigitalValue::unknown())));
+        assert!(!values.contains(&EventValue::Digital(DigitalValue::one())));
+    }
+
+    #[test]
+    fn event_queue_cancel_filters_heap_in_place() {
+        let mut queue = EventQueue::new();
+
+        queue.schedule(Event::new(
+            1.0e-9,
+            1,
+            "out",
+            "a_left",
+            EventValue::Digital(DigitalValue::one()),
+        ));
+        queue.schedule(Event::new(
+            2.0e-9,
+            2,
+            "out",
+            "a_left",
+            EventValue::Digital(DigitalValue::zero()),
+        ));
+        queue.schedule(Event::new(
+            3.0e-9,
+            3,
+            "out",
+            "a_right",
+            EventValue::Digital(DigitalValue::unknown()),
+        ));
+
+        queue.cancel_node_events(2);
+        assert_eq!(queue.len(), 2);
+        queue.cancel_instance_events("a_right");
+        assert_eq!(queue.len(), 1);
+
+        let events = queue.pop_events_at(3.0e-9);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].node_id, 1);
+        assert_eq!(events[0].instance, "a_left");
     }
 }
 
