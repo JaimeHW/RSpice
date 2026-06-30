@@ -21,6 +21,12 @@ struct XferPoint {
 }
 
 #[derive(Debug, Clone)]
+struct XferTableData {
+    points: Vec<XferPoint>,
+    strictly_increasing_frequency: bool,
+}
+
+#[derive(Debug, Clone)]
 struct SXferCoefficients {
     numerator: Vec<Value>,
     denominator: Vec<Value>,
@@ -46,7 +52,7 @@ struct XferTableSignature {
 #[derive(Debug, Clone)]
 struct XferTableResource {
     signature: XferTableSignature,
-    result: CmResult<Arc<Vec<XferPoint>>>,
+    result: CmResult<Arc<XferTableData>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -447,6 +453,16 @@ fn xfer_table_uncached(
     (None, xfer_table_from_model(ctx))
 }
 
+fn xfer_table_data(points: Vec<XferPoint>) -> XferTableData {
+    let strictly_increasing_frequency = points
+        .windows(2)
+        .all(|pair| pair[0].frequency < pair[1].frequency);
+    XferTableData {
+        points,
+        strictly_increasing_frequency,
+    }
+}
+
 fn xfer_table_signature(ctx: &CmContext) -> XferTableSignature {
     let file = ctx.string_param("file").unwrap_or("").trim().to_string();
     xfer_table_signature_with_virtual_stamp(ctx, data_file::virtual_data_file_stamp(&file))
@@ -476,24 +492,24 @@ fn xfer_table_signature_with_virtual_stamp(
 fn cache_xfer_table(ctx: &mut CmContext) {
     let (file_virtual_stamp, result) = xfer_table_uncached(ctx);
     let signature = xfer_table_signature_with_virtual_stamp(ctx, file_virtual_stamp);
-    let result = result.map(Arc::new);
+    let result = result.map(xfer_table_data).map(Arc::new);
     ctx.set_resource(
         XFER_TABLE_RESOURCE,
         Arc::new(XferTableResource { signature, result }),
     );
 }
 
-fn xfer_table(ctx: &CmContext) -> CmResult<Arc<Vec<XferPoint>>> {
+fn xfer_table(ctx: &CmContext) -> CmResult<Arc<XferTableData>> {
     if let Some(resource) = ctx.resource::<XferTableResource>(XFER_TABLE_RESOURCE) {
         if resource.signature == xfer_table_signature(ctx) {
             return resource.result.clone();
         }
     }
     let (_, result) = xfer_table_uncached(ctx);
-    result.map(Arc::new)
+    result.map(xfer_table_data).map(Arc::new)
 }
 
-fn xfer_gain_at(points: &[XferPoint], frequency: Value) -> Complex64 {
+fn xfer_gain_linear_scan(points: &[XferPoint], frequency: Value) -> Complex64 {
     let Some(first) = points.first() else {
         return Complex64::new(0.0, 0.0);
     };
@@ -523,10 +539,43 @@ fn xfer_gain_at(points: &[XferPoint], frequency: Value) -> Complex64 {
     last.gain
 }
 
+fn xfer_interpolated_gain(lower: &XferPoint, upper: &XferPoint, frequency: Value) -> Complex64 {
+    let span = upper.frequency - lower.frequency;
+    if span.abs() <= Value::EPSILON {
+        return upper.gain;
+    }
+    let factor = (frequency - lower.frequency) / span;
+    lower.gain + (upper.gain - lower.gain) * factor
+}
+
+fn xfer_gain_at(table: &XferTableData, frequency: Value) -> Complex64 {
+    let points = table.points.as_slice();
+    if !table.strictly_increasing_frequency {
+        return xfer_gain_linear_scan(points, frequency);
+    }
+
+    let Some(first) = points.first() else {
+        return Complex64::new(0.0, 0.0);
+    };
+    let Some(last) = points.last() else {
+        return first.gain;
+    };
+
+    if frequency <= first.frequency {
+        return first.gain;
+    }
+    if frequency >= last.frequency {
+        return last.gain;
+    }
+
+    let upper_index = points.partition_point(|point| point.frequency < frequency);
+    xfer_interpolated_gain(&points[upper_index - 1], &points[upper_index], frequency)
+}
+
 fn xfer_first_real_gain(ctx: &CmContext) -> Value {
     xfer_table(ctx)
         .ok()
-        .and_then(|points| points.first().map(|point| point.gain.re))
+        .and_then(|table| table.points.first().map(|point| point.gain.re))
         .unwrap_or(0.0)
 }
 
@@ -985,7 +1034,7 @@ impl CodeModel for Xfer {
             return Vec::new();
         }
         match xfer_table(ctx) {
-            Ok(points) => vec![("in".to_string(), xfer_gain_at(&points, frequency))],
+            Ok(table) => vec![("in".to_string(), xfer_gain_at(table.as_ref(), frequency))],
             Err(_) => Vec::new(),
         }
     }
@@ -1081,6 +1130,13 @@ impl CodeModel for SXfer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn xfer_point(frequency: Value, gain: Value) -> XferPoint {
+        XferPoint {
+            frequency,
+            gain: Complex64::new(gain, 0.0),
+        }
+    }
 
     fn first_order_lowpass_context() -> CmContext {
         let mut ctx = CmContext::new();
@@ -1181,6 +1237,55 @@ mod tests {
         assert_eq!(xfer_first_real_gain(&ctx), 5.0);
 
         let _ = data_file::unregister_data_file(file);
+    }
+
+    #[test]
+    fn xfer_gain_uses_monotonic_table_brackets() {
+        let table = xfer_table_data(vec![
+            xfer_point(1.0, 10.0),
+            xfer_point(2.0, 20.0),
+            xfer_point(4.0, 40.0),
+        ]);
+
+        assert!(table.strictly_increasing_frequency);
+        assert_eq!(
+            xfer_gain_at(&table, 2.0),
+            Complex64::new(20.0, 0.0),
+            "exact table frequencies should return the matching row"
+        );
+        assert_eq!(
+            xfer_gain_at(&table, 3.0),
+            Complex64::new(30.0, 0.0),
+            "monotonic tables should interpolate between the binary-search bracket"
+        );
+    }
+
+    #[test]
+    fn xfer_gain_preserves_linear_scan_for_duplicate_or_unordered_tables() {
+        let duplicate = xfer_table_data(vec![
+            xfer_point(1.0, 10.0),
+            xfer_point(2.0, 20.0),
+            xfer_point(2.0, 70.0),
+            xfer_point(3.0, 30.0),
+        ]);
+        let unordered = xfer_table_data(vec![
+            xfer_point(1.0, 10.0),
+            xfer_point(3.0, 30.0),
+            xfer_point(2.0, 200.0),
+        ]);
+
+        assert!(!duplicate.strictly_increasing_frequency);
+        assert_eq!(
+            xfer_gain_at(&duplicate, 2.0),
+            Complex64::new(20.0, 0.0),
+            "duplicate row frequencies should keep the original first-crossing behavior"
+        );
+        assert!(!unordered.strictly_increasing_frequency);
+        assert_eq!(
+            xfer_gain_at(&unordered, 2.5),
+            Complex64::new(200.0, 0.0),
+            "unordered file-compatible tables should keep the original endpoint clamp"
+        );
     }
 
     #[test]
