@@ -1038,8 +1038,16 @@ impl CmContext {
         values: Vec<DigitalValue>,
         delay: Value,
     ) {
-        self.outputs
-            .insert(name.to_string(), OutputValue::DigitalVector(values.clone()));
+        match self.outputs.get_mut(name) {
+            Some(OutputValue::DigitalVector(existing)) => {
+                existing.clear();
+                existing.extend_from_slice(&values);
+            }
+            _ => {
+                self.outputs
+                    .insert(name.to_string(), OutputValue::DigitalVector(values.clone()));
+            }
+        }
         self.pending_events.push(PendingDigitalEvent {
             port_name: name.to_string(),
             start_index: 0,
@@ -1688,6 +1696,30 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].values, values);
         assert_eq!(events[0].delay, 2.0e-9);
+    }
+
+    #[test]
+    fn digital_vector_owned_setter_replaces_output_and_schedules_event() {
+        let mut ctx = CmContext::new();
+        ctx.set_output_digital_vector(
+            "out",
+            vec![
+                DigitalValue::zero(),
+                DigitalValue::one(),
+                DigitalValue::unknown(),
+            ],
+            0.0,
+        );
+        ctx.take_pending_events();
+
+        let values = vec![DigitalValue::one()];
+        ctx.set_output_digital_vector("out", values.clone(), 4.0e-9);
+
+        assert_eq!(ctx.output_digital_vector("out"), values);
+        let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].values, values);
+        assert_eq!(events[0].delay, 4.0e-9);
     }
 
     #[test]
