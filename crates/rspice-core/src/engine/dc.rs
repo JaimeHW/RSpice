@@ -563,7 +563,7 @@ mod tests {
         let deck = r#"
 * xspice integrator initial condition
 V1 in 0 0
-A1 in out integrator out_ic=5
+A1 in out integrator out_ic=5 out_lower_limit=-10 out_upper_limit=10
 Rload out 0 1k
 .op
 .end
