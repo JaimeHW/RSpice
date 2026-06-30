@@ -799,6 +799,17 @@ fn eno_window_start(index: usize, order: usize, len: usize) -> usize {
 }
 
 fn eno1d_eval(samples: &[Value], order: usize, index: usize, offset: Value) -> Eno1dEval {
+    let mut scratch = Vec::new();
+    eno1d_eval_with_scratch(samples, order, index, offset, &mut scratch)
+}
+
+fn eno1d_eval_with_scratch(
+    samples: &[Value],
+    order: usize,
+    index: usize,
+    offset: Value,
+    scratch: &mut Vec<Value>,
+) -> Eno1dEval {
     debug_assert!(order >= 2);
     debug_assert!(order <= samples.len());
     debug_assert!(index < samples.len());
@@ -807,20 +818,26 @@ fn eno1d_eval(samples: &[Value], order: usize, index: usize, offset: Value) -> E
     let start_hi = index.min(max_start);
     let start_lo = start_hi.min(index.saturating_sub(order - 2));
     let window_end = start_hi + order;
+    let window_len = window_end - start_lo;
+    let row_offset =
+        |degree: usize| -> usize { degree * window_len - degree.saturating_sub(1) * degree / 2 };
 
-    let mut differences = Vec::with_capacity(order);
-    differences.push(samples[start_lo..window_end].to_vec());
+    let total_len = order * window_len - order.saturating_sub(1) * order / 2;
+    scratch.clear();
+    scratch.resize(total_len, 0.0);
+    scratch[..window_len].copy_from_slice(&samples[start_lo..window_end]);
     for degree in 1..order {
-        let previous = &differences[degree - 1];
-        let mut row = Vec::with_capacity(previous.len().saturating_sub(1));
-        for i in 0..previous.len() - 1 {
-            row.push(previous[i + 1] - previous[i]);
+        let previous = row_offset(degree - 1);
+        let current = row_offset(degree);
+        let row_len = window_len - degree;
+        for i in 0..row_len {
+            scratch[current + i] = scratch[previous + i + 1] - scratch[previous + i];
         }
-        differences.push(row);
     }
 
+    let highest_order = row_offset(order - 1);
     let smoothness = (start_lo..=start_hi)
-        .map(|start| differences[order - 1][start - start_lo].abs())
+        .map(|start| scratch[highest_order + start - start_lo].abs())
         .fold(Value::INFINITY, Value::min);
 
     let mut value = 0.0;
@@ -829,7 +846,7 @@ fn eno1d_eval(samples: &[Value], order: usize, index: usize, offset: Value) -> E
 
     for start in start_lo..=start_hi {
         let local_start = start - start_lo;
-        if differences[order - 1][local_start].abs() > smoothness {
+        if scratch[highest_order + local_start].abs() > smoothness {
             continue;
         }
         stencil_count += 1;
@@ -838,8 +855,8 @@ fn eno1d_eval(samples: &[Value], order: usize, index: usize, offset: Value) -> E
         let mut basis = 1.0;
         let mut basis_derivative = 0.0;
 
-        for (degree, row) in differences.iter().enumerate().take(order) {
-            let divided_difference = row[local_start];
+        for degree in 0..order {
+            let divided_difference = scratch[row_offset(degree) + local_start];
             value += basis * divided_difference;
             derivative += basis_derivative * divided_difference;
 
@@ -869,21 +886,59 @@ fn eno2d_eval_grid<'a, F>(
 where
     F: FnMut(usize) -> &'a [Value],
 {
+    let mut values_along_y = Vec::new();
+    let mut dx_along_y = Vec::new();
+    let mut x_scratch = Vec::new();
+    let mut y_scratch = Vec::new();
+    eno2d_eval_grid_with_scratch(
+        row_count,
+        &mut row_at,
+        order,
+        x_index,
+        y_index,
+        x_offset,
+        y_offset,
+        &mut values_along_y,
+        &mut dx_along_y,
+        &mut x_scratch,
+        &mut y_scratch,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn eno2d_eval_grid_with_scratch<'a, F>(
+    row_count: usize,
+    row_at: &mut F,
+    order: usize,
+    x_index: usize,
+    y_index: usize,
+    x_offset: Value,
+    y_offset: Value,
+    values_along_y: &mut Vec<Value>,
+    dx_along_y: &mut Vec<Value>,
+    x_scratch: &mut Vec<Value>,
+    y_scratch: &mut Vec<Value>,
+) -> Eno2dEval
+where
+    F: FnMut(usize) -> &'a [Value],
+{
     let y_window_start = eno_window_start(y_index, order, row_count);
     let y_window = 2 * order - 2;
     let y_local_index = y_index - y_window_start;
 
-    let mut values_along_y = Vec::with_capacity(y_window);
-    let mut dx_along_y = Vec::with_capacity(y_window);
+    values_along_y.clear();
+    dx_along_y.clear();
+    values_along_y.reserve(y_window);
+    dx_along_y.reserve(y_window);
     for row_index in y_window_start..y_window_start + y_window {
         let row = row_at(row_index);
-        let eval = eno1d_eval(row, order, x_index, x_offset);
+        let eval = eno1d_eval_with_scratch(row, order, x_index, x_offset, x_scratch);
         values_along_y.push(eval.value);
         dx_along_y.push(eval.derivative);
     }
 
-    let y_eval = eno1d_eval(&values_along_y, order, y_local_index, y_offset);
-    let dx_eval = eno1d_eval(&dx_along_y, order, y_local_index, y_offset);
+    let y_eval = eno1d_eval_with_scratch(values_along_y, order, y_local_index, y_offset, y_scratch);
+    let dx_eval = eno1d_eval_with_scratch(dx_along_y, order, y_local_index, y_offset, y_scratch);
     Eno2dEval {
         value: y_eval.value,
         dx: dx_eval.value,
@@ -921,42 +976,58 @@ fn table3d_eno_derivatives(
     let y_local_index = y_axis.eno_index - y_window_start;
     let z_local_index = z_axis.eno_index - z_window_start;
 
-    let mut values_over_zy = Vec::with_capacity(yz_window);
-    let mut dx_over_zy = Vec::with_capacity(yz_window);
+    let mut values_over_zy = Vec::with_capacity(yz_window * yz_window);
+    let mut dx_over_zy = Vec::with_capacity(yz_window * yz_window);
+    let mut x_scratch = Vec::new();
     for z in z_window_start..z_window_start + yz_window {
-        let mut value_row = Vec::with_capacity(yz_window);
-        let mut dx_row = Vec::with_capacity(yz_window);
         for y in y_window_start..y_window_start + yz_window {
-            let eval = eno1d_eval(
+            let eval = eno1d_eval_with_scratch(
                 table3d_x_row(table, y, z),
                 order,
                 x_axis.eno_index,
                 x_axis.eno_offset,
+                &mut x_scratch,
             );
-            value_row.push(eval.value);
-            dx_row.push(eval.derivative);
+            values_over_zy.push(eval.value);
+            dx_over_zy.push(eval.derivative);
         }
-        values_over_zy.push(value_row);
-        dx_over_zy.push(dx_row);
     }
 
-    let yz_eval = eno2d_eval_grid(
-        values_over_zy.len(),
-        |row| values_over_zy[row].as_slice(),
+    let mut values_along_y = Vec::new();
+    let mut dx_along_y = Vec::new();
+    let mut yz_x_scratch = Vec::new();
+    let mut yz_y_scratch = Vec::new();
+    let yz_eval = eno2d_eval_grid_with_scratch(
+        yz_window,
+        &mut |row| {
+            let start = row * yz_window;
+            &values_over_zy[start..start + yz_window]
+        },
         order,
         y_local_index,
         z_local_index,
         y_axis.eno_offset,
         z_axis.eno_offset,
+        &mut values_along_y,
+        &mut dx_along_y,
+        &mut yz_x_scratch,
+        &mut yz_y_scratch,
     );
-    let dx_eval = eno2d_eval_grid(
-        dx_over_zy.len(),
-        |row| dx_over_zy[row].as_slice(),
+    let dx_eval = eno2d_eval_grid_with_scratch(
+        yz_window,
+        &mut |row| {
+            let start = row * yz_window;
+            &dx_over_zy[start..start + yz_window]
+        },
         order,
         y_local_index,
         z_local_index,
         y_axis.eno_offset,
         z_axis.eno_offset,
+        &mut values_along_y,
+        &mut dx_along_y,
+        &mut yz_x_scratch,
+        &mut yz_y_scratch,
     );
 
     Eno3dEval {
@@ -1329,6 +1400,29 @@ mod tests {
 
         assert!((eval.value - expected_value).abs() < 1.0e-12);
         assert!((eval.derivative - expected_derivative).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn eno1d_reused_scratch_matches_allocating_wrapper() {
+        let samples: Vec<Value> = (0..64)
+            .map(|index| {
+                let x = index as Value;
+                x.sin() + 0.125 * x * x
+            })
+            .collect();
+        let mut scratch = Vec::new();
+
+        let fast = eno1d_eval_with_scratch(&samples, 4, 31, 0.4, &mut scratch);
+        let expected = eno1d_eval(&samples, 4, 31, 0.4);
+        assert_eq!(fast.value, expected.value);
+        assert_eq!(fast.derivative, expected.derivative);
+
+        let capacity = scratch.capacity();
+        let again = eno1d_eval_with_scratch(&samples, 4, 32, 0.1, &mut scratch);
+        let expected_again = eno1d_eval(&samples, 4, 32, 0.1);
+        assert_eq!(scratch.capacity(), capacity);
+        assert_eq!(again.value, expected_again.value);
+        assert_eq!(again.derivative, expected_again.derivative);
     }
 
     #[test]
