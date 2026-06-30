@@ -9,6 +9,8 @@ fn apply_xspice_events_at_or_before(
     real_drivers: &mut HashMap<(NodeId, String, String), Value>,
     real_event_times: &mut HashMap<NodeId, Value>,
     event_queue: &mut crate::xspice::EventQueue,
+    touched_digital_nodes: &mut Vec<NodeId>,
+    touched_real_nodes: &mut Vec<NodeId>,
     time: Value,
 ) -> bool {
     fn resolve_node_drivers(
@@ -37,27 +39,39 @@ fn apply_xspice_events_at_or_before(
     }
 
     let mut changed = false;
+    touched_digital_nodes.clear();
+    touched_real_nodes.clear();
     event_queue.drain_events_at(time, |event| {
         let driver_key = (event.node_id, event.instance, event.port_name);
         match event.value {
             crate::xspice::EventValue::Digital(value) => {
                 digital_drivers.insert(driver_key, value);
-                let resolved =
-                    resolve_node_drivers(digital_drivers, event.node_id).unwrap_or_default();
-                let previous_value = digital_values.insert(event.node_id, resolved);
                 let previous_time = digital_event_times.insert(event.node_id, event.time);
-                changed |= previous_value != Some(resolved) || previous_time != Some(event.time);
+                changed |= previous_time != Some(event.time);
+                touched_digital_nodes.push(event.node_id);
             }
             crate::xspice::EventValue::Real(value) => {
                 real_drivers.insert(driver_key, value);
-                let resolved =
-                    resolve_real_node_drivers(real_drivers, event.node_id).unwrap_or(0.0);
-                let previous_value = real_values.insert(event.node_id, resolved);
                 let previous_time = real_event_times.insert(event.node_id, event.time);
-                changed |= previous_value != Some(resolved) || previous_time != Some(event.time);
+                changed |= previous_time != Some(event.time);
+                touched_real_nodes.push(event.node_id);
             }
         }
     });
+    touched_digital_nodes.sort_unstable();
+    touched_digital_nodes.dedup();
+    touched_real_nodes.sort_unstable();
+    touched_real_nodes.dedup();
+    for &node_id in touched_digital_nodes.iter() {
+        let resolved = resolve_node_drivers(digital_drivers, node_id).unwrap_or_default();
+        let previous_value = digital_values.insert(node_id, resolved);
+        changed |= previous_value != Some(resolved);
+    }
+    for &node_id in touched_real_nodes.iter() {
+        let resolved = resolve_real_node_drivers(real_drivers, node_id).unwrap_or(0.0);
+        let previous_value = real_values.insert(node_id, resolved);
+        changed |= previous_value != Some(resolved);
+    }
     changed
 }
 
@@ -255,6 +269,8 @@ impl CircuitData {
             let real_drivers = &mut self.xspice_real_drivers;
             let real_event_times = &mut self.xspice_real_event_times;
             let event_queue = &mut self.xspice_event_queue;
+            let touched_digital_nodes = &mut self.xspice_touched_digital_nodes;
+            let touched_real_nodes = &mut self.xspice_touched_real_nodes;
             let mut changed = apply_xspice_events_at_or_before(
                 digital_values,
                 digital_drivers,
@@ -263,6 +279,8 @@ impl CircuitData {
                 real_drivers,
                 real_event_times,
                 event_queue,
+                touched_digital_nodes,
+                touched_real_nodes,
                 time,
             );
 
@@ -293,6 +311,8 @@ impl CircuitData {
                     real_drivers,
                     real_event_times,
                     event_queue,
+                    touched_digital_nodes,
+                    touched_real_nodes,
                     time,
                 );
             }
@@ -1368,11 +1388,85 @@ mod tests {
     use super::*;
     use crate::solver::StaticMatrix;
     use crate::xspice::{
-        AnalysisType, CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec,
-        PortConnection, PortDirection, PortSpec, PortType, XspiceInstance,
+        AnalysisType, CmContext, CmError, CmResult, CodeModel, DigitalValue, EvaluationPhase,
+        Event, EventQueue, EventValue, ParamSpec, PortConnection, PortDirection, PortSpec,
+        PortType, XspiceInstance,
     };
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn apply_xspice_events_resolves_touched_nodes_with_reused_scratch() {
+        let mut digital_values = HashMap::new();
+        let mut digital_drivers = HashMap::new();
+        let mut digital_event_times = HashMap::new();
+        let mut real_values = HashMap::new();
+        let mut real_drivers = HashMap::new();
+        let mut real_event_times = HashMap::new();
+        let mut event_queue = EventQueue::new();
+        let mut touched_digital_nodes = Vec::with_capacity(4);
+        let mut touched_real_nodes = Vec::with_capacity(4);
+        let digital_capacity = touched_digital_nodes.capacity();
+        let real_capacity = touched_real_nodes.capacity();
+
+        event_queue.schedule(Event::new(
+            1.0e-9,
+            1,
+            "out_a",
+            "d_a",
+            EventValue::Digital(DigitalValue::one()),
+        ));
+        event_queue.schedule(Event::new(
+            1.0e-9,
+            1,
+            "out_b",
+            "d_b",
+            EventValue::Digital(DigitalValue::one()),
+        ));
+        event_queue.schedule(Event::new(1.0e-9, 2, "out_a", "r_a", EventValue::Real(1.0)));
+        event_queue.schedule(Event::new(1.0e-9, 2, "out_b", "r_b", EventValue::Real(2.0)));
+
+        assert!(apply_xspice_events_at_or_before(
+            &mut digital_values,
+            &mut digital_drivers,
+            &mut digital_event_times,
+            &mut real_values,
+            &mut real_drivers,
+            &mut real_event_times,
+            &mut event_queue,
+            &mut touched_digital_nodes,
+            &mut touched_real_nodes,
+            1.0e-9,
+        ));
+
+        assert_eq!(touched_digital_nodes, vec![1]);
+        assert_eq!(touched_real_nodes, vec![2]);
+        assert_eq!(touched_digital_nodes.capacity(), digital_capacity);
+        assert_eq!(touched_real_nodes.capacity(), real_capacity);
+        assert_eq!(digital_values.get(&1).copied(), Some(DigitalValue::one()));
+        assert_eq!(digital_event_times.get(&1).copied(), Some(1.0e-9));
+        assert_eq!(real_values.get(&2).copied(), Some(3.0));
+        assert_eq!(real_event_times.get(&2).copied(), Some(1.0e-9));
+        assert!(event_queue.is_empty());
+
+        assert!(!apply_xspice_events_at_or_before(
+            &mut digital_values,
+            &mut digital_drivers,
+            &mut digital_event_times,
+            &mut real_values,
+            &mut real_drivers,
+            &mut real_event_times,
+            &mut event_queue,
+            &mut touched_digital_nodes,
+            &mut touched_real_nodes,
+            1.0e-9,
+        ));
+
+        assert!(touched_digital_nodes.is_empty());
+        assert!(touched_real_nodes.is_empty());
+        assert_eq!(touched_digital_nodes.capacity(), digital_capacity);
+        assert_eq!(touched_real_nodes.capacity(), real_capacity);
+    }
 
     struct OutputModel {
         ports: Vec<PortSpec>,

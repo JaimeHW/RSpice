@@ -365,6 +365,10 @@ pub struct CircuitData {
     pub(crate) xspice_real_event_times: HashMap<NodeId, Value>,
     /// Circuit-level XSPICE digital event queue.
     pub(crate) xspice_event_queue: EventQueue,
+    /// Scratch nodes touched while applying a batch of XSPICE digital events.
+    pub(crate) xspice_touched_digital_nodes: Vec<NodeId>,
+    /// Scratch nodes touched while applying a batch of XSPICE real-valued events.
+    pub(crate) xspice_touched_real_nodes: Vec<NodeId>,
     /// XSPICE code model registry (shared across instances)
     pub(crate) xspice_registry: Arc<CodeModelRegistry>,
     /// First XSPICE evaluation failure seen during the current analysis.
