@@ -40,3 +40,6 @@ default = []
 ams = []
 # Enable RSpice native JIT compilation. Native mode is full JIT or error.
 native = ["dep:windows-sys", "dep:libc"]
+# Internal contract-test surface for the bytecode-native backend. Production
+# native users must supply canonical IR and must not enable this feature.
+native-bytecode-contract-tests = ["native"]
