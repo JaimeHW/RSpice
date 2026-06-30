@@ -1282,9 +1282,9 @@ impl XspiceInstance {
     /// Get one element from the last analog vector input supplied to a port.
     pub fn analog_vector_input_value(&self, port_name: &str, index: usize) -> Value {
         self.context
-            .input_vector(port_name)
-            .get(index)
-            .copied()
+            .input_analog_vector_values(port_name)
+            .and_then(|values| values.get(index))
+            .map(|value| value.value)
             .unwrap_or(0.0)
     }
 
