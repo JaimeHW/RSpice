@@ -169,6 +169,11 @@ fn frequency_table_signature(ctx: &CmContext) -> FrequencyTableSignature {
     }
 }
 
+fn frequency_table_signature_matches(ctx: &CmContext, signature: &FrequencyTableSignature) -> bool {
+    ctx.real_vector_param("cntl_array").unwrap_or(&[]) == signature.controls.as_slice()
+        && ctx.real_vector_param("freq_array").unwrap_or(&[]) == signature.frequencies.as_slice()
+}
+
 fn controlled_frequency_table_optional_uncached(
     ctx: &CmContext,
 ) -> CmResult<Option<Vec<ControlPoint>>> {
@@ -229,13 +234,13 @@ fn frequency_table_data(points: Vec<ControlPoint>) -> FrequencyTableData {
 fn controlled_frequency_table_optional(
     ctx: &mut CmContext,
 ) -> CmResult<Option<Arc<FrequencyTableData>>> {
-    let signature = frequency_table_signature(ctx);
     if let Some(resource) = ctx.resource::<FrequencyTableResource>(FREQUENCY_TABLE_RESOURCE)
-        && resource.signature == signature
+        && frequency_table_signature_matches(ctx, &resource.signature)
     {
         return resource.result.clone();
     }
 
+    let signature = frequency_table_signature(ctx);
     let result = controlled_frequency_table_optional_uncached(ctx)
         .map(|table| table.map(frequency_table_data).map(Arc::new));
     ctx.set_resource(
