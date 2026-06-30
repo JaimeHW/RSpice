@@ -260,6 +260,10 @@ fn d_process_fifo_base_name(process_file: &str) -> Option<&str> {
     }
 }
 
+fn d_process_fifo_endpoint_paths(process_file: &str) -> Option<(String, String)> {
+    d_process_fifo_base_name(process_file).map(|base| (format!("{base}_in"), format!("{base}_out")))
+}
+
 #[cfg(target_arch = "wasm32")]
 struct WasmDigitalProcessFactory;
 
@@ -346,53 +350,47 @@ mod native {
         }
 
         fn start_fifo(spec: &DigitalProcessSpec) -> CmResult<Self> {
-            #[cfg(windows)]
-            {
-                let _ = spec;
-                Err(CmError::EvaluationError(
-                    "d_process FIFO mode is not supported on Windows".to_string(),
-                ))
+            use std::fs::OpenOptions;
+
+            let trimmed = super::d_process_fifo_base_name(&spec.process_file).unwrap_or("");
+            if trimmed.is_empty() {
+                return Err(CmError::InvalidParameter {
+                    name: "process_file".to_string(),
+                    message: "FIFO base name must not be empty".to_string(),
+                });
             }
 
-            #[cfg(unix)]
-            {
-                use std::fs::OpenOptions;
-
-                let trimmed = super::d_process_fifo_base_name(&spec.process_file).unwrap_or("");
-                if trimmed.is_empty() {
-                    return Err(CmError::InvalidParameter {
+            let (writer_path, reader_path) =
+                super::d_process_fifo_endpoint_paths(&spec.process_file).ok_or_else(|| {
+                    CmError::InvalidParameter {
                         name: "process_file".to_string(),
-                        message: "FIFO base name must not be empty".to_string(),
-                    });
-                }
+                        message: "FIFO process file must end in '|' or '||'".to_string(),
+                    }
+                })?;
+            let writer = OpenOptions::new()
+                .write(true)
+                .open(&writer_path)
+                .map_err(|err| {
+                    CmError::EvaluationError(format!(
+                        "d_process failed to open input FIFO or named pipe '{writer_path}': {err}"
+                    ))
+                })?;
+            let reader = OpenOptions::new()
+                .read(true)
+                .open(&reader_path)
+                .map_err(|err| {
+                    CmError::EvaluationError(format!(
+                        "d_process failed to open output FIFO or named pipe '{reader_path}': {err}"
+                    ))
+                })?;
 
-                let writer_path = format!("{trimmed}_in");
-                let reader_path = format!("{trimmed}_out");
-                let writer = OpenOptions::new()
-                    .write(true)
-                    .open(&writer_path)
-                    .map_err(|err| {
-                        CmError::EvaluationError(format!(
-                            "d_process failed to open input FIFO '{writer_path}': {err}"
-                        ))
-                    })?;
-                let reader = OpenOptions::new()
-                    .read(true)
-                    .open(&reader_path)
-                    .map_err(|err| {
-                        CmError::EvaluationError(format!(
-                            "d_process failed to open output FIFO '{reader_path}': {err}"
-                        ))
-                    })?;
-
-                Ok(Self {
-                    writer: Box::new(writer),
-                    reader: Box::new(reader),
-                    child: None,
-                    input_byte_count: 0,
-                    output_byte_count: 0,
-                })
-            }
+            Ok(Self {
+                writer: Box::new(writer),
+                reader: Box::new(reader),
+                child: None,
+                input_byte_count: 0,
+                output_byte_count: 0,
+            })
         }
 
         fn send_header(&mut self, spec: &DigitalProcessSpec) -> CmResult<()> {
@@ -1378,6 +1376,83 @@ mod tests {
             "ngspice strips one trailing pipe, or the two-pipe PSpice-compat marker, not every trailing pipe"
         );
         assert_eq!(d_process_fifo_base_name("|"), Some(""));
+    }
+
+    #[test]
+    fn d_process_fifo_endpoint_paths_append_ngspice_suffixes() {
+        assert_eq!(d_process_fifo_endpoint_paths("proc"), None);
+        assert_eq!(
+            d_process_fifo_endpoint_paths("proc|"),
+            Some(("proc_in".to_string(), "proc_out".to_string()))
+        );
+        assert_eq!(
+            d_process_fifo_endpoint_paths("proc||"),
+            Some(("proc_in".to_string(), "proc_out".to_string()))
+        );
+        assert_eq!(
+            d_process_fifo_endpoint_paths(r"\\.\pipe\rspice-process|"),
+            Some((
+                r"\\.\pipe\rspice-process_in".to_string(),
+                r"\\.\pipe\rspice-process_out".to_string(),
+            )),
+            "Windows named-pipe bases should keep their host path prefix"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_d_process_fifo_mode_exchanges_protocol_over_endpoint_paths() {
+        use std::convert::TryInto;
+
+        let unique = format!(
+            "rspice-d-process-fifo-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after epoch")
+                .as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir(&dir).expect("create d_process FIFO endpoint test directory");
+
+        let base = dir.join("proc");
+        let base = base
+            .to_str()
+            .expect("temporary path should be valid Unicode for process_file");
+        let input_path = format!("{base}_in");
+        let output_path = format!("{base}_out");
+        let process_file = format!("{base}|");
+        std::fs::File::create(&input_path).expect("create input endpoint file");
+        std::fs::write(&output_path, [0x01, 1, 1, 1])
+            .expect("seed output endpoint with header echo and one response byte");
+
+        let spec = DigitalProcessSpec {
+            process_file,
+            process_params: Vec::new(),
+            input_count: 1,
+            output_count: 1,
+        };
+        let factory = native::NativeDigitalProcessFactory;
+        let mut runtime = factory
+            .start(&spec)
+            .expect("native FIFO endpoint runtime starts");
+        let mut output = [0u8; 1];
+        runtime
+            .exchange(2.0e-9, &[1], &mut output)
+            .expect("native FIFO endpoint runtime exchanges one packet");
+        assert_eq!(output, [1]);
+        drop(runtime);
+
+        let input = std::fs::read(&input_path).expect("read input endpoint protocol bytes");
+        assert_eq!(&input[..3], &[0x01, 1, 1]);
+        let time = Value::from_ne_bytes(input[3..11].try_into().expect("time packet bytes"));
+        assert!(
+            (time - 2.0e-9).abs() <= f64::EPSILON,
+            "exchange should write the native-endian signed time, got {time:e}"
+        );
+        assert_eq!(input[11], 1);
+
+        std::fs::remove_dir_all(&dir).expect("remove d_process FIFO endpoint test directory");
     }
 
     #[test]
