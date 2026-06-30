@@ -1118,6 +1118,17 @@ impl Engine {
                     let is_vdmos_compatible = level == 18
                         || model_def.is_some_and(|def| is_vdmos_model_type(&def.model_type));
 
+                    if *compact_syntax
+                        && !is_vdmos_compatible
+                        && known_advanced_mos_level_without_native(level)
+                    {
+                        return Err(missing_advanced_mos_builtin_error(
+                            &element.name,
+                            model,
+                            level,
+                        ));
+                    }
+
                     if *compact_syntax && !is_vdmos_compatible {
                         return Err(SimulationError::Circuit(format!(
                             "MOSFET '{}': compact three-terminal syntax `M D G S model` is only supported for VDMOS-compatible models; ordinary MOSFETs require an explicit bulk node.",
@@ -1305,6 +1316,36 @@ impl Engine {
                         continue;
                     }
 
+                    // EKV 2.6 LEVEL=260 has a native validated runtime when
+                    // generated Verilog-A builtins are not enabled. Feature
+                    // builds with the generated EKV builtin route before this
+                    // point.
+                    if level == 260
+                        && let Some(params_map) = params_map.as_ref()
+                    {
+                        let device_model =
+                            model_def.expect("native EKV26 params map derives from model card");
+                        let model_key = device_model.name.clone();
+                        reject_deferred_native_mos_model_params(
+                            &element.name,
+                            &model_key,
+                            "EKV26",
+                            params_map,
+                            &device_model.expr_params,
+                            &device_model.string_params,
+                        )?;
+                        Self::build_ekv26(
+                            &mut circuit,
+                            element,
+                            resolved_mos_type,
+                            &model_key,
+                            params_map,
+                            instance_params,
+                            self.config.temperature,
+                        )?;
+                        continue;
+                    }
+
                     // EKV3 LEVEL=301. The native support is deliberately
                     // narrow: VA-Models NMOS150 ekv3_rf DC plus the Xyce
                     // VANOISE regression slice. Unsupported EKV3 surfaces fail
@@ -1370,18 +1411,14 @@ impl Engine {
                     // parameters yields plausible-looking but wrong currents,
                     // which is strictly worse than an error.
                     if !native_bulk_mos_level(level) {
-                        let descriptor = mos_level_descriptor(level);
                         if known_advanced_mos_level_without_native(level) {
-                            return Err(SimulationError::Circuit(format!(
-                                "MOSFET '{}': model '{}' requests {}, but no generated Verilog-A \
-                                 builtin for that exact advanced compact-model family is available \
-                                 in this build. Advanced CMC/HiSIM model families must not run \
-                                 through the simplified MOS approximation; add or enable the exact \
-                                 generated builtin with reference-backed validation before running \
-                                 this card.",
-                                element.name, model, descriptor
-                            )));
+                            return Err(missing_advanced_mos_builtin_error(
+                                &element.name,
+                                model,
+                                level,
+                            ));
                         }
+                        let descriptor = mos_level_descriptor(level);
                         return Err(SimulationError::Circuit(format!(
                             "MOSFET '{}': model '{}' requests {} which has no native \
                              implementation. Supported levels: 1, 2, 3, 6 (Berkeley \

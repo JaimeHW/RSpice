@@ -100,6 +100,30 @@ fn compact_three_terminal_mos_rejects_non_vdmos_model() {
 }
 
 #[test]
+fn compact_known_advanced_mos_level_fails_closed_before_bulk_syntax_policy() {
+    let deck = "* compact MVS MOS level policy\n\
+                vdd d 0 dc 1.8\n\
+                vg g 0 dc 1.0\n\
+                m1 d g 0 nmod w=1u l=0.1u\n\
+                .model nmod NMOS (LEVEL=2000)\n\
+                .op\n\
+                .end\n";
+    let message = run(deck).expect_err("MVS LEVEL=2000 must fail closed as unsupported");
+    assert!(
+        message.contains("LEVEL=2000") && message.contains("MVS"),
+        "error should identify the unsupported MVS level, got: {message}"
+    );
+    assert!(
+        message.contains("Verilog-A-to-Rust") && message.contains("codegen"),
+        "error should describe the exact generated-model implementation path, got: {message}"
+    );
+    assert!(
+        !message.contains("bulk") && !message.contains("VDMOS"),
+        "advanced unsupported level policy must not be masked by compact MOS syntax wording: {message}"
+    );
+}
+
+#[test]
 fn fractional_mos_level_is_rejected_instead_of_truncated() {
     for level in [14.9, 18.5] {
         let deck = op_deck(

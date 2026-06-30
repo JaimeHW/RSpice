@@ -223,7 +223,6 @@ pub(super) fn known_advanced_mos_level_without_native(level: i32) -> bool {
             | 109
             | 110
             | 111
-            | 260
             | 1000
             | 1031
             | 2000
@@ -233,6 +232,21 @@ pub(super) fn known_advanced_mos_level_without_native(level: i32) -> bool {
             | 70470
             | 10240
     )
+}
+
+pub(super) fn missing_advanced_mos_builtin_error(
+    element_name: &str,
+    model_name: &str,
+    level: i32,
+) -> SimulationError {
+    let descriptor = mos_level_descriptor(level);
+    SimulationError::Circuit(format!(
+        "MOSFET '{element_name}': model '{model_name}' requests {descriptor}, but no generated \
+         Verilog-A builtin for that exact advanced compact-model family is available in this \
+         build. Advanced CMC/HiSIM model families must not run through the simplified MOS \
+         approximation; add or enable the exact Verilog-A-to-Rust codegen builtin with \
+         reference-backed validation before running this card."
+    ))
 }
 
 pub(super) fn bjt_level_matches(level: f64, expected: f64) -> bool {
