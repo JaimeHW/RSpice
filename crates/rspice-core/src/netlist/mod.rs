@@ -3950,6 +3950,34 @@ mod tests {
     }
 
     #[test]
+    fn pwl_sources_accept_grouped_time_value_pairs() {
+        let netlist = Netlist::parse(
+            "grouped pwl pairs\n\
+             V1 out 0 DC PWL( (0 0.0) (1m 1.0) )\n\
+             R1 out 0 1k\n\
+             .tran 1u 1m\n\
+             .end\n",
+        )
+        .expect("grouped PWL time/value pairs parse");
+
+        match first_source_spec(&netlist) {
+            SourceSpec::DcTransient {
+                dc_value,
+                transient,
+            } => {
+                assert_eq!(*dc_value, 0.0);
+                match transient.as_ref() {
+                    SourceSpec::Pwl { points } => {
+                        assert_eq!(points, &[(0.0, 0.0), (1e-3, 1.0)]);
+                    }
+                    other => panic!("expected PWL transient, got {other:?}"),
+                }
+            }
+            other => panic!("expected DC transient source, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn remaining_transient_sources_reject_malformed_arguments() {
         for (source, deck) in [
             (

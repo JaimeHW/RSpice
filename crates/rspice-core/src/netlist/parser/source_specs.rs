@@ -622,6 +622,7 @@ fn parse_pwl_spec(
             break;
         }
 
+        let grouped_pair = stream.consume(&TokenKind::LParen);
         if let Some(time) =
             source_optional_value(stream, line_num, params, "PWL", "time", has_paren)?
         {
@@ -633,8 +634,20 @@ fn parse_pwl_spec(
                     message: "PWL requires complete time/value pairs".to_string(),
                 });
             };
+            if grouped_pair && !stream.consume(&TokenKind::RParen) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("PWL point pair expected ')' before {}", stream.peek().kind),
+                });
+            }
             points.push((time, value));
         } else {
+            if grouped_pair {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "PWL point pair requires a time/value pair".to_string(),
+                });
+            }
             break;
         }
     }
