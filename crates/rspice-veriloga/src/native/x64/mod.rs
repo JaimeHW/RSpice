@@ -367,7 +367,6 @@ fn lower_jacobian_program(
         );
         match canonical {
             Ok(program) => return Ok(program),
-            Err(JitError::UnsupportedCanonicalOp { .. }) => {}
             Err(error) => return Err(error),
         }
     }
