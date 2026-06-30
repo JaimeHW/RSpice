@@ -9,7 +9,9 @@
 
 use crate::abort_signal::AbortSignal;
 use crate::analysis::DcSweep;
-use crate::engine::{ConvergenceConfig, SimulationConfig, SimulationError, extract_dc_value};
+use crate::engine::{
+    ConvergenceConfig, SimulationConfig, SimulationError, SpiceDialect, extract_dc_value,
+};
 use crate::netlist::{AnalysisCommand, DcSecondSweep, ElementKind, Netlist};
 use crate::{Engine, Value};
 use std::collections::BTreeSet;
@@ -599,6 +601,7 @@ impl XyceTestRunner {
         Engine::new(SimulationConfig {
             max_iterations: defaults.max_iterations.max(1200),
             convergence_config: ConvergenceConfig::robust(),
+            spice_dialect: SpiceDialect::Xyce,
             // Xyce and ngspice regression decks use 27 C unless overridden.
             temperature: 300.15,
             ..defaults
@@ -1691,5 +1694,17 @@ End of Xyce(TM) Simulation
             &columns[2],
             XyceReferenceColumn::Probe { name } if name == "i(vds)"
         ));
+    }
+
+    #[test]
+    fn xyce_runner_engine_uses_xyce_device_dialect() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let engine = runner.create_dc_engine();
+
+        assert_eq!(engine.config().spice_dialect, SpiceDialect::Xyce);
+        assert_eq!(
+            engine.config().resolved_jfet_level2_model(),
+            crate::engine::JfetLevel2Model::XyceModifiedShockley
+        );
     }
 }
