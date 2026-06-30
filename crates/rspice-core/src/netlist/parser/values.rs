@@ -336,6 +336,33 @@ pub(super) fn parse_model_params(
                         }
                     }
                 }
+            } else if model_param_accepts_bare_string(&name, model_type) {
+                match &stream.peek().kind {
+                    TokenKind::StringLit(value) => {
+                        let value = value.clone();
+                        stream.advance();
+                        push_model_string_value(
+                            &mut string_params,
+                            &mut string_vector_params,
+                            &mut real_vector_params,
+                            line_num,
+                            &name,
+                            &value,
+                        )?;
+                    }
+                    kind if model_bare_string_token_can_start(kind) => {
+                        let value = parse_model_bare_string_value(stream, line_num, &name)?;
+                        push_model_string_value(
+                            &mut string_params,
+                            &mut string_vector_params,
+                            &mut real_vector_params,
+                            line_num,
+                            &name,
+                            &value,
+                        )?;
+                    }
+                    _ => numeric_params.push((name, 1.0)),
+                }
             } else {
                 numeric_params.push((name, 1.0));
             }

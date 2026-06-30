@@ -904,6 +904,42 @@ mod tests {
     }
 
     #[test]
+    fn xspice_model_params_accept_ngspice_spaced_string_literals() {
+        let netlist = Netlist::parse(
+            "xspice spaced string model params\n\
+             .model lut d_lut (rise_delay=50n fall_delay=50n input_load=1.0p\n\
+             + table_values \"0001\")\n\
+             .model gen d_genlut (rise_delay=[50n 50n] fall_delay=[50n 50n]\n\
+             + input_load=[1.0p 1.0p] input_delay=[2n 2n] table_values \"01100001\")\n\
+             .end\n",
+        )
+        .expect("official ngspice d_lut/d_genlut spaced string params parse");
+
+        for (model_name, expected) in [("lut", "0001"), ("gen", "01100001")] {
+            let model = netlist
+                .models
+                .iter()
+                .find(|model| model.name.eq_ignore_ascii_case(model_name))
+                .unwrap_or_else(|| panic!("model {model_name} exists"));
+            let table_values = model
+                .string_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("table_values"))
+                .map(|(_, value)| value.as_str())
+                .expect("table_values exists");
+
+            assert_eq!(table_values, expected);
+            assert!(
+                model
+                    .params
+                    .iter()
+                    .all(|(name, _)| !name.eq_ignore_ascii_case("table_values")),
+                "spaced string param must not also be a numeric flag"
+            );
+        }
+    }
+
+    #[test]
     fn xspice_model_string_params_preserve_unquoted_path_tokens() {
         let netlist = Netlist::parse(
             "xspice unquoted scalar string model params\n\
