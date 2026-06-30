@@ -5,7 +5,9 @@ use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
 };
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+const TABLE_RESOURCE: &str = "xspice.multi_input_pwl.table";
 
 #[derive(Debug, Default)]
 pub struct MultiInputPwl;
@@ -22,6 +24,24 @@ enum MultiInputPwlMode {
 struct TableEval {
     value: Value,
     slope: Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TablePoint {
+    x: Value,
+    y: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct TableSignature {
+    x_values: Vec<Value>,
+    y_values: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct TableResource {
+    signature: TableSignature,
+    points: CmResult<Arc<Vec<TablePoint>>>,
 }
 
 fn invalid_param(name: &str, message: impl Into<String>) -> CmError {
@@ -92,7 +112,14 @@ fn mode(ctx: &CmContext) -> CmResult<MultiInputPwlMode> {
     }
 }
 
-fn table(ctx: &CmContext) -> CmResult<(&[Value], &[Value])> {
+fn table_signature(ctx: &CmContext) -> TableSignature {
+    TableSignature {
+        x_values: ctx.real_vector_param("x").unwrap_or(&[]).to_vec(),
+        y_values: ctx.real_vector_param("y").unwrap_or(&[]).to_vec(),
+    }
+}
+
+fn table_uncached(ctx: &CmContext) -> CmResult<Vec<TablePoint>> {
     let x = ctx
         .real_vector_param("x")
         .ok_or_else(|| CmError::MissingParameter("x".to_string()))?;
@@ -108,6 +135,8 @@ fn table(ctx: &CmContext) -> CmResult<(&[Value], &[Value])> {
     }
     let x = &x[..effective_len];
     let y = &y[..effective_len];
+
+    let mut points = Vec::with_capacity(effective_len);
     for (idx, (&x_value, &y_value)) in x.iter().zip(y).enumerate() {
         if !x_value.is_finite() {
             return Err(invalid_param(
@@ -121,8 +150,43 @@ fn table(ctx: &CmContext) -> CmResult<(&[Value], &[Value])> {
                 format!("point {idx} must be finite, got {y_value}"),
             ));
         }
+        points.push(TablePoint {
+            x: x_value,
+            y: y_value,
+        });
     }
-    Ok((x, y))
+
+    Ok(points)
+}
+
+fn cache_table(ctx: &mut CmContext) -> CmResult<Arc<Vec<TablePoint>>> {
+    let signature = table_signature(ctx);
+    if let Some(resource) = ctx.resource::<TableResource>(TABLE_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.points.clone();
+    }
+
+    let points = table_uncached(ctx).map(Arc::new);
+    ctx.set_resource(
+        TABLE_RESOURCE,
+        Arc::new(TableResource {
+            signature,
+            points: points.clone(),
+        }),
+    );
+    points
+}
+
+fn table(ctx: &CmContext) -> CmResult<Arc<Vec<TablePoint>>> {
+    let signature = table_signature(ctx);
+    if let Some(resource) = ctx.resource::<TableResource>(TABLE_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.points.clone();
+    }
+
+    table_uncached(ctx).map(Arc::new)
 }
 
 fn controlling_input(inputs: &[AnalogValue], mode: MultiInputPwlMode) -> Option<(usize, Value)> {
@@ -140,69 +204,71 @@ fn controlling_input(inputs: &[AnalogValue], mode: MultiInputPwlMode) -> Option<
     }
 }
 
-fn forward_output(x_table: &[Value], y_table: &[Value], input: Value) -> TableEval {
-    let last = x_table.len() - 1;
-    if input <= x_table[0] {
+fn forward_output(table: &[TablePoint], input: Value) -> TableEval {
+    let last = table.len() - 1;
+    if input <= table[0].x {
         return TableEval {
-            value: y_table[0],
+            value: table[0].y,
             slope: 0.0,
         };
     }
-    if input >= x_table[last] {
+    if input >= table[last].x {
         return TableEval {
-            value: y_table[last],
+            value: table[last].y,
             slope: 0.0,
         };
     }
 
-    for idx in 1..x_table.len() {
-        if input > x_table[idx - 1] && input <= x_table[idx] {
-            let slope = (y_table[idx] - y_table[idx - 1]) / (x_table[idx] - x_table[idx - 1]);
+    for idx in 1..table.len() {
+        if input > table[idx - 1].x && input <= table[idx].x {
+            let slope = (table[idx].y - table[idx - 1].y) / (table[idx].x - table[idx - 1].x);
             return TableEval {
-                value: y_table[idx] + slope * (input - x_table[idx]),
+                value: table[idx].y + slope * (input - table[idx].x),
                 slope,
             };
         }
     }
 
     TableEval {
-        value: y_table[last],
+        value: table[last].y,
         slope: 0.0,
     }
 }
 
-fn reverse_output(x_table: &[Value], y_table: &[Value], input: Value) -> TableEval {
-    let last = x_table.len() - 1;
-    if input <= x_table[0] {
+fn reverse_output(table: &[TablePoint], input: Value) -> TableEval {
+    let last = table.len() - 1;
+    if input <= table[0].x {
         return TableEval {
-            value: y_table[last],
+            value: table[last].y,
             slope: 0.0,
         };
     }
-    if input >= x_table[last] {
+    if input >= table[last].x {
         return TableEval {
-            value: y_table[0],
+            value: table[0].y,
             slope: 0.0,
         };
     }
 
-    for idx in 1..x_table.len() {
-        if input > x_table[idx - 1] && input <= x_table[idx] {
+    for idx in 1..table.len() {
+        if input > table[idx - 1].x && input <= table[idx].x {
             return TableEval {
-                value: y_table[last - idx],
+                value: table[last - idx].y,
                 slope: 0.0,
             };
         }
     }
 
     TableEval {
-        value: y_table[0],
+        value: table[0].y,
         slope: 0.0,
     }
 }
 
-fn evaluate_multi_input(ctx: &CmContext) -> CmResult<Option<(usize, TableEval)>> {
-    let (x_table, y_table) = table(ctx)?;
+fn evaluate_multi_input_with_table(
+    ctx: &CmContext,
+    table: &[TablePoint],
+) -> CmResult<Option<(usize, TableEval)>> {
     let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if inputs.len() < 2 {
         return Err(CmError::PortCountMismatch {
@@ -217,15 +283,23 @@ fn evaluate_multi_input(ctx: &CmContext) -> CmResult<Option<(usize, TableEval)>>
     };
 
     let result = match mode {
-        MultiInputPwlMode::And | MultiInputPwlMode::Or => {
-            forward_output(x_table, y_table, controlling_input)
-        }
+        MultiInputPwlMode::And | MultiInputPwlMode::Or => forward_output(table, controlling_input),
         MultiInputPwlMode::Nand | MultiInputPwlMode::Nor => {
-            reverse_output(x_table, y_table, controlling_input)
+            reverse_output(table, controlling_input)
         }
     };
 
     Ok(Some((index, result)))
+}
+
+fn evaluate_multi_input(ctx: &CmContext) -> CmResult<Option<(usize, TableEval)>> {
+    let table = table(ctx)?;
+    evaluate_multi_input_with_table(ctx, &table)
+}
+
+fn evaluate_multi_input_cached(ctx: &mut CmContext) -> CmResult<Option<(usize, TableEval)>> {
+    let table = cache_table(ctx)?;
+    evaluate_multi_input_with_table(ctx, &table)
 }
 
 impl CodeModel for MultiInputPwl {
@@ -246,13 +320,13 @@ impl CodeModel for MultiInputPwl {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        table(ctx)?;
+        cache_table(ctx)?;
         mode(ctx)?;
         Ok(())
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let output = evaluate_multi_input(ctx)?.map_or(0.0, |(_, result)| result.value);
+        let output = evaluate_multi_input_cached(ctx)?.map_or(0.0, |(_, result)| result.value);
         ctx.set_output_with_partial("out", output, 0.0);
         Ok(())
     }
@@ -275,5 +349,33 @@ impl CodeModel for MultiInputPwl {
             }
             _ => Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multi_input_table_cache_reloads_when_params_change() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("x", vec![0.0, 1.0, 2.0]);
+        ctx.set_real_vector_param("y", vec![0.0, 10.0, 20.0]);
+
+        let first = cache_table(&mut ctx).expect("table caches");
+        let second = cache_table(&mut ctx).expect("table reuses cache");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "unchanged multi_input_pwl table parameters should reuse the parsed table"
+        );
+        assert_eq!(first[2].y, 20.0);
+
+        ctx.set_real_vector_param("y", vec![0.0, 10.0, 30.0]);
+        let updated = cache_table(&mut ctx).expect("updated table caches");
+        assert!(
+            !Arc::ptr_eq(&first, &updated),
+            "changed multi_input_pwl table parameters must refresh the parsed table"
+        );
+        assert_eq!(updated[2].y, 30.0);
     }
 }
