@@ -624,6 +624,44 @@ fn native_bsim4_rejects_non_numeric_model_params_before_defaulting() {
 }
 
 #[test]
+fn native_bsim4_accepts_dotted_version_metadata() {
+    let models = models45().replace(
+        ".model n45 nmos level=54 version=4.8",
+        ".model n45 nmos level=54 version=4.6.1",
+    );
+    let deck = format!(
+        "* bsim4 dotted VERSION metadata policy\n\
+         vd d 0 dc 1.1\n\
+         vg g 0 dc 0.7\n\
+         m1 d g 0 0 n45 w=1u l=45n\n\
+         {models}\n\
+         .op\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("dotted VERSION deck parses");
+    let (_, report) = engine()
+        .run_dc_op_with_report(&netlist)
+        .expect("native BSIM4 accepts dotted VERSION metadata");
+
+    let id = report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+        .and_then(|entry| {
+            entry
+                .params
+                .iter()
+                .find(|(key, _)| *key == "id")
+                .map(|(_, value)| *value)
+        })
+        .expect("m1 drain current reported");
+    assert!(
+        id.is_finite(),
+        "dotted VERSION run produced non-finite id {id}"
+    );
+}
+
+#[test]
 fn native_bsim4_rejects_invalid_integer_model_selectors_without_defaulting() {
     for (param, value) in [
         ("RDSMOD", "2"),

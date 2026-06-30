@@ -680,6 +680,88 @@ pub(super) fn reject_deferred_native_mos_model_params(
     Ok(())
 }
 
+pub(super) fn native_bsim4_model_params_upper_map(
+    element_name: &str,
+    model: &str,
+    params: &HashMap<String, f64>,
+    expr_params: &[(String, String)],
+    string_params: &[(String, String)],
+) -> Result<HashMap<String, f64>, SimulationError> {
+    let mut resolved = params.clone();
+
+    for (name, expr) in expr_params {
+        let param = name.to_ascii_uppercase();
+        return Err(SimulationError::Circuit(format!(
+            "MOSFET '{element_name}': native BSIM4 model '{model}' uses unresolved model parameter {param}={expr}; \
+             native BSIM4 model parameters must be finite numeric literals, except dotted VERSION metadata"
+        )));
+    }
+
+    for (name, value) in string_params {
+        let param = name.to_ascii_uppercase();
+        if param == "VERSION" {
+            let version = parse_bsim4_version_metadata(value).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "MOSFET '{element_name}': native BSIM4 model '{model}' has invalid VERSION=\"{value}\"; \
+                     VERSION metadata must be a dotted numeric version such as 4.6.1"
+                ))
+            })?;
+            resolved.insert(param, version);
+            continue;
+        }
+
+        return Err(SimulationError::Circuit(format!(
+            "MOSFET '{element_name}': native BSIM4 model '{model}' uses non-numeric model parameter {param}=\"{value}\"; \
+             native BSIM4 model parameters must be finite numeric literals, except dotted VERSION metadata"
+        )));
+    }
+
+    for (name, value) in &resolved {
+        if !value.is_finite() {
+            let param = name.to_ascii_uppercase();
+            return Err(SimulationError::Circuit(format!(
+                "MOSFET '{element_name}': native BSIM4 model '{model}' uses non-finite model parameter {param}={value}; \
+                 native BSIM4 model parameters must be finite numeric literals"
+            )));
+        }
+    }
+
+    Ok(resolved)
+}
+
+fn parse_bsim4_version_metadata(value: &str) -> Option<f64> {
+    let normalized = value.trim().trim_matches('"').trim_matches('\'').trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    if let Ok(version) = normalized.parse::<f64>() {
+        return version.is_finite().then_some(version);
+    }
+
+    let mut parts = normalized.split('.');
+    let major = parts.next()?;
+    let minor = parts.next()?;
+    let patch_parts = parts.collect::<Vec<_>>();
+    if patch_parts.is_empty()
+        || major.is_empty()
+        || minor.is_empty()
+        || patch_parts.iter().any(|part| part.is_empty())
+        || !major.chars().all(|ch| ch.is_ascii_digit())
+        || !minor.chars().all(|ch| ch.is_ascii_digit())
+        || !patch_parts
+            .iter()
+            .all(|part| part.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return None;
+    }
+
+    let compact = format!("{major}.{minor}{}", patch_parts.join(""));
+    compact
+        .parse::<f64>()
+        .ok()
+        .filter(|version| version.is_finite())
+}
+
 /// Warn about nodes with no conductive path to ground: the unconditional
 /// matrix gmin keeps such systems numerically solvable, so without this
 /// notice a forgotten connection simulates silently with a meaningless bias.

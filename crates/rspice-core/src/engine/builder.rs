@@ -1280,10 +1280,9 @@ impl Engine {
                     {
                         let device_model =
                             model_def.expect("native BSIM4 params map derives from model card");
-                        reject_deferred_native_mos_model_params(
+                        let bsim4_params = native_bsim4_model_params_upper_map(
                             &element.name,
                             model,
-                            "BSIM4",
                             params_map,
                             &device_model.expr_params,
                             &device_model.string_params,
@@ -1297,7 +1296,7 @@ impl Engine {
                             element,
                             resolved_mos_type,
                             &model_key,
-                            params_map,
+                            &bsim4_params,
                             instance_params,
                             self.config.temperature,
                             tnom_default_k,
@@ -2857,12 +2856,8 @@ impl Engine {
         }
         circuit.couplings = couplings;
 
-        let junction_gmin = self
-            .config
-            .convergence_config
-            .gmin_initial
-            .max(self.config.convergence_config.gmin_target)
-            .max(0.0);
+        let junction_gmin =
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
         for mos in &mut circuit.mosfets.devices {
             mos.set_junction_gmin(junction_gmin);
         }
