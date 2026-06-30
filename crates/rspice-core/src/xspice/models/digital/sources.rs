@@ -291,11 +291,33 @@ fn load_d_source_rows_for_context(
     }
 }
 
-fn d_source_row_indices(rows: &[DSourceRow], time: Value) -> (Option<usize>, Option<usize>) {
-    const TIME_EPSILON: Value = 1e-18;
-    let mut active = None;
-    for (idx, row) in rows.iter().enumerate() {
-        if row.time <= time + TIME_EPSILON {
+const D_SOURCE_TIME_EPSILON: Value = 1e-18;
+
+fn d_source_scan_start(rows: &[DSourceRow], time: Value, emitted_row: i64) -> usize {
+    let Some(index) = usize::try_from(emitted_row)
+        .ok()
+        .filter(|&index| index < rows.len())
+    else {
+        return 0;
+    };
+
+    if rows[index].time <= time + D_SOURCE_TIME_EPSILON {
+        index.saturating_add(1)
+    } else {
+        0
+    }
+}
+
+fn d_source_row_indices(
+    rows: &[DSourceRow],
+    time: Value,
+    emitted_row: i64,
+) -> (Option<usize>, Option<usize>) {
+    let start = d_source_scan_start(rows, time, emitted_row);
+    let mut active = start.checked_sub(1);
+
+    for (idx, row) in rows.iter().enumerate().skip(start) {
+        if row.time <= time + D_SOURCE_TIME_EPSILON {
             active = Some(idx);
         } else {
             return (active, Some(idx));
@@ -379,9 +401,9 @@ impl CodeModel for DigitalSource {
             d_source_set_row_state(ctx, D_SOURCE_SCHEDULED_ROW, D_SOURCE_NO_ROW);
             return Ok(());
         }
-        let (active_idx, next_idx) = d_source_row_indices(&rows, ctx.time);
         let emitted_row = ctx.int_state(D_SOURCE_EMITTED_ROW);
         let scheduled_row = ctx.int_state(D_SOURCE_SCHEDULED_ROW);
+        let (active_idx, next_idx) = d_source_row_indices(&rows, ctx.time, emitted_row);
 
         if let Some(idx) = active_idx {
             if emitted_row != idx as i64 {
@@ -1191,6 +1213,39 @@ mod tests {
         );
 
         unregister_test_data_file(input_file);
+    }
+
+    #[test]
+    fn d_source_row_lookup_uses_emitted_cursor_when_time_is_monotonic() {
+        let rows = vec![
+            DSourceRow {
+                time: 0.0,
+                values: Vec::new(),
+            },
+            DSourceRow {
+                time: 1.0e-9,
+                values: Vec::new(),
+            },
+            DSourceRow {
+                time: 2.0e-9,
+                values: Vec::new(),
+            },
+            DSourceRow {
+                time: 3.0e-9,
+                values: Vec::new(),
+            },
+        ];
+
+        assert_eq!(d_source_scan_start(&rows, 2.5e-9, 1), 2);
+        assert_eq!(d_source_row_indices(&rows, 2.5e-9, 1), (Some(2), Some(3)));
+        assert_eq!(d_source_row_indices(&rows, 4.0e-9, 3), (Some(3), None));
+
+        assert_eq!(d_source_scan_start(&rows, 0.5e-9, 2), 0);
+        assert_eq!(d_source_row_indices(&rows, 0.5e-9, 2), (Some(0), Some(1)));
+        assert_eq!(
+            d_source_row_indices(&rows, -1.0e-9, D_SOURCE_BEFORE_FIRST_ROW),
+            (None, Some(0))
+        );
     }
 
     #[test]
