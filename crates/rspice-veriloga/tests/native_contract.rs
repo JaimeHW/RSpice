@@ -4656,35 +4656,22 @@ fn native_device_executes_single_ended_current_probes_in_source_order() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn native_prunes_dead_assignment_current_probe_without_fallback() {
-    let model = dead_assignment_current_probe_model();
-    let mut device = VerilogADevice::try_new("DACP1", model, &[1, 0])
-        .expect("dead assignment current probe is excluded from the native pre-stamp pass");
-    assert!(device.is_using_native());
-    device.update_voltages(&[4.0]);
+fn native_rejects_observable_assignment_current_probe_without_fallback() {
+    for (name, model) in [
+        ("otherwise-dead", dead_assignment_current_probe_model()),
+        ("live", live_assignment_current_probe_model()),
+    ] {
+        let err = compile_native(&model).expect_err(
+            "observable assignment current probe must not compile before currents exist",
+        );
+        let msg = err.to_string();
 
-    let currents = device
-        .try_evaluate()
-        .expect("native dead-assignment current-probe evaluation succeeds");
-
-    assert_eq!(currents.len(), 1);
-    assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
-}
-
-#[cfg(target_arch = "x86_64")]
-#[test]
-fn native_rejects_live_assignment_current_probe_without_fallback() {
-    let model = live_assignment_current_probe_model();
-
-    let err = compile_native(&model)
-        .expect_err("live assignment current probe must not compile before currents exist");
-    let msg = err.to_string();
-
-    assert_native_hard_fail_message(&msg);
-    assert!(
-        msg.contains("assignments: PushCurrent terminal pair 0,1 unavailable"),
-        "unexpected error: {msg}"
-    );
+        assert_native_hard_fail_message(&msg);
+        assert!(
+            msg.contains("assignments: PushCurrent terminal pair 0,1 unavailable"),
+            "{name}: unexpected error: {msg}"
+        );
+    }
 }
 
 #[cfg(target_arch = "x86_64")]

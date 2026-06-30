@@ -691,6 +691,12 @@ fn live_native_assignment_steps(model: &CompiledModel) -> Vec<AssignmentStep> {
 
 fn native_assignment_roots(model: &CompiledModel) -> Vec<bool> {
     let mut live = vec![false; model.num_variables];
+    for index in 0..model.variable_names.len().min(live.len()) {
+        // Named variables are externally observable through
+        // VerilogADevice::variable(s), so native JIT must update them even
+        // when no contribution reads them later in the evaluation pass.
+        live[index] = true;
+    }
     for stamp in &model.stamp_programs {
         if let Some(condition) = &stamp.static_condition {
             mark_program_variable_reads(condition, &mut live);
