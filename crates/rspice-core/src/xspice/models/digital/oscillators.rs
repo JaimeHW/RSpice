@@ -283,10 +283,7 @@ fn validate_table_optional_uncached(
 }
 
 fn interpolate_table(table: &[ControlTablePoint], control: Value) -> Value {
-    let right_index = table
-        .iter()
-        .position(|point| point.control > control)
-        .unwrap_or(table.len());
+    let right_index = table.partition_point(|point| point.control <= control);
     let left = if right_index == 0 {
         0
     } else if right_index == table.len() {
