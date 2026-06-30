@@ -791,8 +791,13 @@ fn eno1d_eval(samples: &[Value], order: usize, index: usize, offset: Value) -> E
     debug_assert!(order <= samples.len());
     debug_assert!(index < samples.len());
 
+    let max_start = samples.len() - order;
+    let start_hi = index.min(max_start);
+    let start_lo = start_hi.min(index.saturating_sub(order - 2));
+    let window_end = start_hi + order;
+
     let mut differences = Vec::with_capacity(order);
-    differences.push(samples.to_vec());
+    differences.push(samples[start_lo..window_end].to_vec());
     for degree in 1..order {
         let previous = &differences[degree - 1];
         let mut row = Vec::with_capacity(previous.len().saturating_sub(1));
@@ -802,11 +807,8 @@ fn eno1d_eval(samples: &[Value], order: usize, index: usize, offset: Value) -> E
         differences.push(row);
     }
 
-    let max_start = samples.len() - order;
-    let start_hi = index.min(max_start);
-    let start_lo = start_hi.min(index.saturating_sub(order - 2));
     let smoothness = (start_lo..=start_hi)
-        .map(|start| differences[order - 1][start].abs())
+        .map(|start| differences[order - 1][start - start_lo].abs())
         .fold(Value::INFINITY, Value::min);
 
     let mut value = 0.0;
@@ -814,7 +816,8 @@ fn eno1d_eval(samples: &[Value], order: usize, index: usize, offset: Value) -> E
     let mut stencil_count = 0_usize;
 
     for start in start_lo..=start_hi {
-        if differences[order - 1][start].abs() > smoothness {
+        let local_start = start - start_lo;
+        if differences[order - 1][local_start].abs() > smoothness {
             continue;
         }
         stencil_count += 1;
@@ -824,7 +827,7 @@ fn eno1d_eval(samples: &[Value], order: usize, index: usize, offset: Value) -> E
         let mut basis_derivative = 0.0;
 
         for (degree, row) in differences.iter().enumerate().take(order) {
-            let divided_difference = row[start];
+            let divided_difference = row[local_start];
             value += basis * divided_difference;
             derivative += basis_derivative * divided_difference;
 
@@ -1296,6 +1299,24 @@ mod tests {
 
         poison_table3d_cache_lock();
         lock_table3d_cache().clear();
+    }
+
+    #[test]
+    fn eno1d_eval_reconstructs_quadratic_from_local_window() {
+        let samples: Vec<Value> = (0..64)
+            .map(|index| {
+                let x = index as Value;
+                0.5 * x * x + 2.0 * x + 1.0
+            })
+            .collect();
+
+        let eval = eno1d_eval(&samples, 3, 31, 0.25);
+        let x = 31.25;
+        let expected_value = 0.5 * x * x + 2.0 * x + 1.0;
+        let expected_derivative = x + 2.0;
+
+        assert!((eval.value - expected_value).abs() < 1.0e-12);
+        assert!((eval.derivative - expected_derivative).abs() < 1.0e-12);
     }
 
     #[test]
