@@ -3553,7 +3553,9 @@ endmodule
         let voltages = [5.0_f64, 1.0_f64];
         let ctx = eval_context(&params, &voltages);
         assert_eq!(
-            native.run_stamp_value(0, &ctx, std::ptr::null()),
+            native
+                .run_stamp_value(0, &ctx, std::ptr::null())
+                .expect("stamp value entry"),
             (voltages[0] - voltages[1]) / params[0]
         );
     }
@@ -3938,8 +3940,12 @@ endmodule
         resolve_native_parameter_defaults(&model, &native, &mut context);
         let ctx = eval_context_from_vm_context(&mut context);
 
-        let white_psd = native.run_noise_psd(0, &ctx, context.variables.as_ptr());
-        let flicker_psd = native.run_noise_psd(1, &ctx, context.variables.as_ptr());
+        let white_psd = native
+            .run_noise_psd(0, &ctx, context.variables.as_ptr())
+            .expect("white noise PSD entry");
+        let flicker_psd = native
+            .run_noise_psd(1, &ctx, context.variables.as_ptr())
+            .expect("flicker noise PSD entry");
         let flicker_exponent = native
             .run_noise_exponent(1, &ctx, context.variables.as_ptr())
             .expect("flicker source has native exponent entry");
@@ -4033,8 +4039,18 @@ endmodule
         let branch_unknowns = [3.0_f64];
         let mut ctx = eval_context(&[], &[0.0, 0.0]);
         ctx.branch_unknowns = branch_unknowns.as_ptr();
-        assert_eq!(native.run_stamp_value(0, &ctx, std::ptr::null()), 1.0);
-        assert_eq!(native.run_stamp_value(1, &ctx, std::ptr::null()), 6.0);
+        assert_eq!(
+            native
+                .run_stamp_value(0, &ctx, std::ptr::null())
+                .expect("stamp value entry 0"),
+            1.0
+        );
+        assert_eq!(
+            native
+                .run_stamp_value(1, &ctx, std::ptr::null())
+                .expect("stamp value entry 1"),
+            6.0
+        );
     }
 
     #[test]
@@ -4494,7 +4510,9 @@ endmodule
             "canonical assignment-fed ddx current",
             "stamp value",
             6.0,
-            native.run_stamp_value(0, &ctx, context.variables.as_ptr()),
+            native
+                .run_stamp_value(0, &ctx, context.variables.as_ptr())
+                .expect("stamp value entry"),
         )
         .expect("assignment-fed ddx current matches expected value");
         assert_jacobian_axis_value(
@@ -4565,7 +4583,9 @@ endmodule
             "canonical array-fed ddx current",
             "stamp value",
             6.0,
-            native.run_stamp_value(0, &ctx, context.variables.as_ptr()),
+            native
+                .run_stamp_value(0, &ctx, context.variables.as_ptr())
+                .expect("stamp value entry"),
         )
         .expect("array-fed ddx current matches expected value");
         assert_jacobian_axis_value(
@@ -4880,11 +4900,15 @@ endmodule
         native.run_assignments(&ctx, vars.as_mut_ptr());
         assert_near(vars[0], 0.25, "assignment output");
         assert_near(
-            native.run_stamp_value(0, &ctx, vars.as_ptr()),
+            native
+                .run_stamp_value(0, &ctx, vars.as_ptr())
+                .expect("stamp value entry"),
             1.25,
             "stamp value",
         );
-        let expected_jacobian = native.run_jacobian(0, 0, &ctx, vars.as_ptr());
+        let expected_jacobian = native
+            .run_jacobian(0, 0, &ctx, vars.as_ptr())
+            .expect("Jacobian entry");
         assert!(
             (expected_jacobian.abs() - 0.25).abs() <= 1.0e-12,
             "first jacobian entry should be +/-0.25, got {expected_jacobian}"
@@ -4915,11 +4939,13 @@ endmodule
             samples,
             1.25,
             || {
-                native.run_stamp_value(
-                    0,
-                    std::hint::black_box(&ctx),
-                    std::hint::black_box(vars.as_ptr()),
-                )
+                native
+                    .run_stamp_value(
+                        0,
+                        std::hint::black_box(&ctx),
+                        std::hint::black_box(vars.as_ptr()),
+                    )
+                    .expect("stamp value entry")
             },
         );
         run_native_model_entry_microbench(
@@ -4929,12 +4955,14 @@ endmodule
             samples,
             expected_jacobian,
             || {
-                native.run_jacobian(
-                    0,
-                    0,
-                    std::hint::black_box(&ctx),
-                    std::hint::black_box(vars.as_ptr()),
-                )
+                native
+                    .run_jacobian(
+                        0,
+                        0,
+                        std::hint::black_box(&ctx),
+                        std::hint::black_box(vars.as_ptr()),
+                    )
+                    .expect("Jacobian entry")
             },
         );
     }
@@ -5874,8 +5902,9 @@ endmodule
             )
             .map_err(|error| error.to_string())?;
             ctx = eval_context_from_vm_context(&mut native_context);
-            let actual =
-                native.run_stamp_value(stamp_index, &ctx, native_context.variables.as_ptr());
+            let actual = native
+                .run_stamp_value(stamp_index, &ctx, native_context.variables.as_ptr())
+                .ok_or_else(|| format!("missing native stamp-value entry {stamp_index}"))?;
             assert_close_or_skip_nonfinite(
                 name,
                 format!("stamp {stamp_index}"),
@@ -5908,12 +5937,16 @@ endmodule
                 )
                 .map_err(|error| error.to_string())?;
                 ctx = eval_context_from_vm_context(&mut native_context);
-                let actual = native.run_jacobian(
-                    stamp_index,
-                    entry_index,
-                    &ctx,
-                    native_context.variables.as_ptr(),
-                );
+                let actual = native
+                    .run_jacobian(
+                        stamp_index,
+                        entry_index,
+                        &ctx,
+                        native_context.variables.as_ptr(),
+                    )
+                    .ok_or_else(|| {
+                        format!("missing native Jacobian entry {stamp_index}.{entry_index}")
+                    })?;
                 assert_close_or_skip_nonfinite(
                     name,
                     format!("jacobian {stamp_index}.{entry_index}"),
@@ -5929,12 +5962,18 @@ endmodule
                     .execute(&stamp.reactive_jacobians[entry_index].program)
                     .map_err(|error| error.to_string())?;
                 ctx = eval_context_from_vm_context(&mut native_context);
-                let actual = native.run_reactive_jacobian(
-                    stamp_index,
-                    entry_index,
-                    &ctx,
-                    native_context.variables.as_ptr(),
-                );
+                let actual = native
+                    .run_reactive_jacobian(
+                        stamp_index,
+                        entry_index,
+                        &ctx,
+                        native_context.variables.as_ptr(),
+                    )
+                    .ok_or_else(|| {
+                        format!(
+                            "missing native reactive-Jacobian entry {stamp_index}.{entry_index}"
+                        )
+                    })?;
                 assert_close_or_skip_nonfinite(
                     name,
                     format!("reactive_jacobian {stamp_index}.{entry_index}"),
@@ -6045,7 +6084,11 @@ endmodule
             .iter()
             .position(|jacobian| matches_axis(&jacobian.col_axis))
             .unwrap_or_else(|| panic!("{label}: missing matching Jacobian axis"));
-        let actual = native.run_jacobian(stamp_index, entry_index, ctx, variables);
+        let actual = native
+            .run_jacobian(stamp_index, entry_index, ctx, variables)
+            .unwrap_or_else(|| {
+                panic!("{label}: missing native Jacobian entry {stamp_index}.{entry_index}")
+            });
         if let Err(error) = assert_finite_close("canonical Jacobian", &label, expected, actual) {
             panic!("{error}");
         }
@@ -6067,7 +6110,13 @@ endmodule
             .iter()
             .position(|jacobian| matches_axis(&jacobian.col_axis))
             .unwrap_or_else(|| panic!("{label}: missing matching reactive Jacobian axis"));
-        let actual = native.run_reactive_jacobian(stamp_index, entry_index, ctx, variables);
+        let actual = native
+            .run_reactive_jacobian(stamp_index, entry_index, ctx, variables)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{label}: missing native reactive-Jacobian entry {stamp_index}.{entry_index}"
+                )
+            });
         if let Err(error) =
             assert_finite_close("canonical reactive Jacobian", &label, expected, actual)
         {
@@ -6092,7 +6141,11 @@ endmodule
             .iter()
             .position(|jacobian| matches_axis(&jacobian.col_axis))
             .unwrap_or_else(|| panic!("{label}: missing matching Jacobian axis"));
-        let actual = native.run_jacobian(stamp_index, entry_index, ctx, variables);
+        let actual = native
+            .run_jacobian(stamp_index, entry_index, ctx, variables)
+            .unwrap_or_else(|| {
+                panic!("{label}: missing native Jacobian entry {stamp_index}.{entry_index}")
+            });
         assert!(
             actual.is_finite(),
             "{label}: native Jacobian is non-finite: {actual}"
@@ -6200,7 +6253,11 @@ endmodule
             }
 
             ctx = eval_context_from_vm_context(context);
-            let value = native.run_stamp_value(stamp_index, &ctx, context.variables.as_ptr());
+            let value = native
+                .run_stamp_value(stamp_index, &ctx, context.variables.as_ptr())
+                .unwrap_or_else(|| {
+                    panic!("{name}: missing native stamp-value entry {stamp_index}")
+                });
             if !value.is_finite() {
                 assert!(
                     nonfinite_reference.stamps.contains(&stamp_index),
@@ -6218,8 +6275,11 @@ endmodule
 
             for entry_index in 0..stamp.jacobian_programs.len() {
                 ctx = eval_context_from_vm_context(context);
-                let value =
-                    native.run_jacobian(stamp_index, entry_index, &ctx, context.variables.as_ptr());
+                let value = native
+                    .run_jacobian(stamp_index, entry_index, &ctx, context.variables.as_ptr())
+                    .unwrap_or_else(|| {
+                        panic!("{name}: missing native Jacobian entry {stamp_index}.{entry_index}")
+                    });
                 if !value.is_finite() {
                     assert!(
                         nonfinite_reference
@@ -6234,12 +6294,18 @@ endmodule
 
             for entry_index in 0..stamp.reactive_jacobians.len() {
                 ctx = eval_context_from_vm_context(context);
-                let value = native.run_reactive_jacobian(
-                    stamp_index,
-                    entry_index,
-                    &ctx,
-                    context.variables.as_ptr(),
-                );
+                let value = native
+                    .run_reactive_jacobian(
+                        stamp_index,
+                        entry_index,
+                        &ctx,
+                        context.variables.as_ptr(),
+                    )
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{name}: missing native reactive-Jacobian entry {stamp_index}.{entry_index}"
+                        )
+                    });
                 if !value.is_finite() {
                     assert!(
                         nonfinite_reference

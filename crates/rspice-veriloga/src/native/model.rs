@@ -856,8 +856,17 @@ impl NativeModel {
             .and_then(|offset| offset.map(|offset| self.run_value_entry(offset, ctx, vars)))
     }
 
-    pub(crate) fn run_stamp_value(&self, index: usize, ctx: &EvalContext, vars: *const f64) -> f64 {
-        self.run_value_entry(self.entries.stamp_values[index], ctx, vars)
+    pub(crate) fn run_stamp_value(
+        &self,
+        index: usize,
+        ctx: &EvalContext,
+        vars: *const f64,
+    ) -> Option<f64> {
+        self.entries
+            .stamp_values
+            .get(index)
+            .copied()
+            .map(|offset| self.run_value_entry(offset, ctx, vars))
     }
 
     pub(crate) fn run_static_condition(
@@ -872,20 +881,32 @@ impl NativeModel {
             .and_then(|offset| offset.map(|offset| self.run_value_entry(offset, ctx, vars)))
     }
 
-    pub(crate) fn stamp_value_current_pairs(&self, index: usize) -> &[usize] {
-        &self.current_dependencies.stamp_values[index]
+    pub(crate) fn stamp_value_current_pairs(&self, index: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .stamp_values
+            .get(index)
+            .map(Vec::as_slice)
     }
 
-    pub(crate) fn stamp_value_prior_currents(&self, index: usize) -> &[usize] {
-        &self.current_dependencies.stamp_value_prior_currents[index]
+    pub(crate) fn stamp_value_prior_currents(&self, index: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .stamp_value_prior_currents
+            .get(index)
+            .map(Vec::as_slice)
     }
 
-    pub(crate) fn static_condition_branch_unknowns(&self, index: usize) -> &[usize] {
-        &self.current_dependencies.static_condition_branch_unknowns[index]
+    pub(crate) fn static_condition_branch_unknowns(&self, index: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .static_condition_branch_unknowns
+            .get(index)
+            .map(Vec::as_slice)
     }
 
-    pub(crate) fn stamp_value_branch_unknowns(&self, index: usize) -> &[usize] {
-        &self.current_dependencies.stamp_value_branch_unknowns[index]
+    pub(crate) fn stamp_value_branch_unknowns(&self, index: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .stamp_value_branch_unknowns
+            .get(index)
+            .map(Vec::as_slice)
     }
 
     pub(crate) fn run_jacobian(
@@ -894,20 +915,37 @@ impl NativeModel {
         entry: usize,
         ctx: &EvalContext,
         vars: *const f64,
-    ) -> f64 {
-        self.run_value_entry(self.entries.jacobians[stamp][entry], ctx, vars)
+    ) -> Option<f64> {
+        self.entries
+            .jacobians
+            .get(stamp)
+            .and_then(|entries| entries.get(entry))
+            .copied()
+            .map(|offset| self.run_value_entry(offset, ctx, vars))
     }
 
-    pub(crate) fn jacobian_current_pairs(&self, stamp: usize, entry: usize) -> &[usize] {
-        &self.current_dependencies.jacobians[stamp][entry]
+    pub(crate) fn jacobian_current_pairs(&self, stamp: usize, entry: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .jacobians
+            .get(stamp)
+            .and_then(|entries| entries.get(entry))
+            .map(Vec::as_slice)
     }
 
-    pub(crate) fn jacobian_prior_currents(&self, stamp: usize, entry: usize) -> &[usize] {
-        &self.current_dependencies.jacobian_prior_currents[stamp][entry]
+    pub(crate) fn jacobian_prior_currents(&self, stamp: usize, entry: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .jacobian_prior_currents
+            .get(stamp)
+            .and_then(|entries| entries.get(entry))
+            .map(Vec::as_slice)
     }
 
-    pub(crate) fn jacobian_branch_unknowns(&self, stamp: usize, entry: usize) -> &[usize] {
-        &self.current_dependencies.jacobian_branch_unknowns[stamp][entry]
+    pub(crate) fn jacobian_branch_unknowns(&self, stamp: usize, entry: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .jacobian_branch_unknowns
+            .get(stamp)
+            .and_then(|entries| entries.get(entry))
+            .map(Vec::as_slice)
     }
 
     pub(crate) fn run_reactive_jacobian(
@@ -916,36 +954,83 @@ impl NativeModel {
         entry: usize,
         ctx: &EvalContext,
         vars: *const f64,
-    ) -> f64 {
-        self.run_value_entry(self.entries.reactive_jacobians[stamp][entry], ctx, vars)
+    ) -> Option<f64> {
+        self.entries
+            .reactive_jacobians
+            .get(stamp)
+            .and_then(|entries| entries.get(entry))
+            .copied()
+            .map(|offset| self.run_value_entry(offset, ctx, vars))
     }
 
-    pub(crate) fn reactive_jacobian_current_pairs(&self, stamp: usize, entry: usize) -> &[usize] {
-        &self.current_dependencies.reactive_jacobians[stamp][entry]
+    pub(crate) fn reactive_jacobian_current_pairs(
+        &self,
+        stamp: usize,
+        entry: usize,
+    ) -> Option<&[usize]> {
+        self.current_dependencies
+            .reactive_jacobians
+            .get(stamp)
+            .and_then(|entries| entries.get(entry))
+            .map(Vec::as_slice)
     }
 
-    pub(crate) fn reactive_jacobian_prior_currents(&self, stamp: usize, entry: usize) -> &[usize] {
-        &self.current_dependencies.reactive_jacobian_prior_currents[stamp][entry]
+    pub(crate) fn reactive_jacobian_prior_currents(
+        &self,
+        stamp: usize,
+        entry: usize,
+    ) -> Option<&[usize]> {
+        self.current_dependencies
+            .reactive_jacobian_prior_currents
+            .get(stamp)
+            .and_then(|entries| entries.get(entry))
+            .map(Vec::as_slice)
     }
 
-    pub(crate) fn reactive_jacobian_branch_unknowns(&self, stamp: usize, entry: usize) -> &[usize] {
-        &self.current_dependencies.reactive_jacobian_branch_unknowns[stamp][entry]
+    pub(crate) fn reactive_jacobian_branch_unknowns(
+        &self,
+        stamp: usize,
+        entry: usize,
+    ) -> Option<&[usize]> {
+        self.current_dependencies
+            .reactive_jacobian_branch_unknowns
+            .get(stamp)
+            .and_then(|entries| entries.get(entry))
+            .map(Vec::as_slice)
     }
 
-    pub(crate) fn run_noise_psd(&self, index: usize, ctx: &EvalContext, vars: *const f64) -> f64 {
-        self.run_value_entry(self.entries.noise_psd[index], ctx, vars)
+    pub(crate) fn run_noise_psd(
+        &self,
+        index: usize,
+        ctx: &EvalContext,
+        vars: *const f64,
+    ) -> Option<f64> {
+        self.entries
+            .noise_psd
+            .get(index)
+            .copied()
+            .map(|offset| self.run_value_entry(offset, ctx, vars))
     }
 
-    pub(crate) fn noise_psd_current_pairs(&self, index: usize) -> &[usize] {
-        &self.current_dependencies.noise_psd[index]
+    pub(crate) fn noise_psd_current_pairs(&self, index: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .noise_psd
+            .get(index)
+            .map(Vec::as_slice)
     }
 
-    pub(crate) fn noise_psd_prior_currents(&self, index: usize) -> &[usize] {
-        &self.current_dependencies.noise_psd_prior_currents[index]
+    pub(crate) fn noise_psd_prior_currents(&self, index: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .noise_psd_prior_currents
+            .get(index)
+            .map(Vec::as_slice)
     }
 
-    pub(crate) fn noise_psd_branch_unknowns(&self, index: usize) -> &[usize] {
-        &self.current_dependencies.noise_psd_branch_unknowns[index]
+    pub(crate) fn noise_psd_branch_unknowns(&self, index: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .noise_psd_branch_unknowns
+            .get(index)
+            .map(Vec::as_slice)
     }
 
     pub(crate) fn run_noise_exponent(
@@ -967,16 +1052,25 @@ impl NativeModel {
             .is_some_and(Option::is_some)
     }
 
-    pub(crate) fn noise_exponent_current_pairs(&self, index: usize) -> &[usize] {
-        &self.current_dependencies.noise_exponents[index]
+    pub(crate) fn noise_exponent_current_pairs(&self, index: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .noise_exponents
+            .get(index)
+            .map(Vec::as_slice)
     }
 
-    pub(crate) fn noise_exponent_prior_currents(&self, index: usize) -> &[usize] {
-        &self.current_dependencies.noise_exponent_prior_currents[index]
+    pub(crate) fn noise_exponent_prior_currents(&self, index: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .noise_exponent_prior_currents
+            .get(index)
+            .map(Vec::as_slice)
     }
 
-    pub(crate) fn noise_exponent_branch_unknowns(&self, index: usize) -> &[usize] {
-        &self.current_dependencies.noise_exponent_branch_unknowns[index]
+    pub(crate) fn noise_exponent_branch_unknowns(&self, index: usize) -> Option<&[usize]> {
+        self.current_dependencies
+            .noise_exponent_branch_unknowns
+            .get(index)
+            .map(Vec::as_slice)
     }
 
     fn run_value_entry(&self, offset: CodeOffset, ctx: &EvalContext, vars: *const f64) -> f64 {
@@ -1037,15 +1131,21 @@ mod tests {
 
         assert_eq!(model.plan_stats().reactive_jacobian_entry_points, 1);
         assert_eq!(
-            model.run_stamp_value(0, &empty_eval_context(), std::ptr::null()),
+            model
+                .run_stamp_value(0, &empty_eval_context(), std::ptr::null())
+                .expect("stamp value entry"),
             1.0
         );
         assert_eq!(
-            model.run_jacobian(0, 0, &empty_eval_context(), std::ptr::null()),
+            model
+                .run_jacobian(0, 0, &empty_eval_context(), std::ptr::null())
+                .expect("Jacobian entry"),
             2.0
         );
         assert_eq!(
-            model.run_reactive_jacobian(0, 0, &empty_eval_context(), std::ptr::null()),
+            model
+                .run_reactive_jacobian(0, 0, &empty_eval_context(), std::ptr::null())
+                .expect("reactive-Jacobian entry"),
             3.0
         );
     }
@@ -1080,10 +1180,22 @@ mod tests {
             model.run_static_condition(0, &ctx, std::ptr::null()),
             Some(1.0)
         );
-        assert_eq!(model.run_stamp_value(0, &ctx, std::ptr::null()), 1.0);
-        assert_eq!(model.run_jacobian(0, 0, &ctx, std::ptr::null()), 2.0);
         assert_eq!(
-            model.run_reactive_jacobian(0, 0, &ctx, std::ptr::null()),
+            model
+                .run_stamp_value(0, &ctx, std::ptr::null())
+                .expect("stamp value entry"),
+            1.0
+        );
+        assert_eq!(
+            model
+                .run_jacobian(0, 0, &ctx, std::ptr::null())
+                .expect("Jacobian entry"),
+            2.0
+        );
+        assert_eq!(
+            model
+                .run_reactive_jacobian(0, 0, &ctx, std::ptr::null())
+                .expect("reactive-Jacobian entry"),
             3.0
         );
         assert_eq!(model.native_stamp_count(), 1);
@@ -1105,10 +1217,22 @@ mod tests {
                 barrier.wait();
                 for _ in 0..2048 {
                     model.run_assignments(&ctx, std::ptr::null_mut());
-                    assert_eq!(model.run_stamp_value(0, &ctx, std::ptr::null()), 1.0);
-                    assert_eq!(model.run_jacobian(0, 0, &ctx, std::ptr::null()), 2.0);
                     assert_eq!(
-                        model.run_reactive_jacobian(0, 0, &ctx, std::ptr::null()),
+                        model
+                            .run_stamp_value(0, &ctx, std::ptr::null())
+                            .expect("stamp value entry"),
+                        1.0
+                    );
+                    assert_eq!(
+                        model
+                            .run_jacobian(0, 0, &ctx, std::ptr::null())
+                            .expect("Jacobian entry"),
+                        2.0
+                    );
+                    assert_eq!(
+                        model
+                            .run_reactive_jacobian(0, 0, &ctx, std::ptr::null())
+                            .expect("reactive-Jacobian entry"),
                         3.0
                     );
                 }

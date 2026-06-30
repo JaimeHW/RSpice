@@ -533,29 +533,37 @@ fn run_native_sweep(
         }
 
         ctx = eval_context_from_vm_context(context);
-        let value = native.run_stamp_value(stamp_index, &ctx, context.variables.as_ptr());
+        let value = native
+            .run_stamp_value(stamp_index, &ctx, context.variables.as_ptr())
+            .ok_or_else(|| format!("native sweep missing stamp-value entry {stamp_index}"))?;
         checksum += value;
         context.currents[stamp_index] = value;
 
         for entry_index in 0..stamp.jacobian_programs.len() {
             ctx = eval_context_from_vm_context(context);
-            checksum +=
-                native.run_jacobian(stamp_index, entry_index, &ctx, context.variables.as_ptr());
+            checksum += native
+                .run_jacobian(stamp_index, entry_index, &ctx, context.variables.as_ptr())
+                .ok_or_else(|| {
+                    format!("native sweep missing Jacobian entry {stamp_index}.{entry_index}")
+                })?;
         }
         for entry_index in 0..stamp.reactive_jacobians.len() {
             ctx = eval_context_from_vm_context(context);
-            checksum += native.run_reactive_jacobian(
-                stamp_index,
-                entry_index,
-                &ctx,
-                context.variables.as_ptr(),
-            );
+            checksum += native
+                .run_reactive_jacobian(stamp_index, entry_index, &ctx, context.variables.as_ptr())
+                .ok_or_else(|| {
+                    format!(
+                        "native sweep missing reactive-Jacobian entry {stamp_index}.{entry_index}"
+                    )
+                })?;
         }
     }
 
     for source_index in 0..model.noise_sources.len() {
         ctx = eval_context_from_vm_context(context);
-        checksum += native.run_noise_psd(source_index, &ctx, context.variables.as_ptr());
+        checksum += native
+            .run_noise_psd(source_index, &ctx, context.variables.as_ptr())
+            .ok_or_else(|| format!("native sweep missing noise PSD entry {source_index}"))?;
         if let Some(exponent) =
             native.run_noise_exponent(source_index, &ctx, context.variables.as_ptr())
         {
