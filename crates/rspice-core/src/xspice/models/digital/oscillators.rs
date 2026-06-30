@@ -179,6 +179,28 @@ fn control_table_signature(
     }
 }
 
+fn control_table_signature_matches(
+    ctx: &CmContext,
+    signature: &ControlTableSignature,
+    model: &'static str,
+    control_name: &'static str,
+    value_name: &'static str,
+) -> bool {
+    if signature.model != model
+        || signature.control_name != control_name
+        || signature.value_name != value_name
+    {
+        return false;
+    }
+
+    let controls = ctx.real_vector_param(control_name);
+    let values = ctx.real_vector_param(value_name);
+    signature.controls_present == controls.is_some()
+        && signature.values_present == values.is_some()
+        && controls.unwrap_or(&[]) == signature.controls.as_slice()
+        && values.unwrap_or(&[]) == signature.values.as_slice()
+}
+
 #[cfg(test)]
 fn validate_table(
     ctx: &mut CmContext,
@@ -204,13 +226,19 @@ fn validate_table_optional(
     value_name: &'static str,
     sanitize_value: fn(Value) -> Value,
 ) -> CmResult<Option<Arc<Vec<ControlTablePoint>>>> {
-    let signature = control_table_signature(ctx, model, control_name, value_name);
     if let Some(resource) = ctx.resource::<ControlTableResource>(CONTROL_TABLE_RESOURCE)
-        && resource.signature == signature
+        && control_table_signature_matches(
+            ctx,
+            &resource.signature,
+            model,
+            control_name,
+            value_name,
+        )
     {
         return resource.result.clone();
     }
 
+    let signature = control_table_signature(ctx, model, control_name, value_name);
     let result =
         validate_table_optional_uncached(ctx, model, control_name, value_name, sanitize_value)
             .map(|table| table.map(Arc::new));
