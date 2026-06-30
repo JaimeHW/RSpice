@@ -5,7 +5,10 @@
 
 use super::{DigitalValue, PortType};
 use crate::Value;
-use std::collections::HashMap;
+use std::any::Any;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::sync::Arc;
 
 //=============================================================================
 // Analysis Type
@@ -47,6 +50,27 @@ pub enum CallType {
     Probe,
 }
 
+/// Rollback/commit phase for a code-model evaluation.
+///
+/// Most built-in models are pure and do not need this distinction. External
+/// co-simulation models need it to avoid mutating irreversible host state
+/// during Newton trial evaluations that may be rolled back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvaluationPhase {
+    /// Ordinary evaluation without transient rollback semantics.
+    DirectEvaluation,
+    /// A rollbackable trial evaluation used for residual/Jacobian probing.
+    RollbackableProbe,
+    /// Evaluation for an accepted transient timepoint.
+    AcceptedStep,
+}
+
+impl Default for EvaluationPhase {
+    fn default() -> Self {
+        Self::DirectEvaluation
+    }
+}
+
 //=============================================================================
 // Port Values
 //=============================================================================
@@ -84,6 +108,10 @@ pub enum InputValue {
     Digital(DigitalValue),
     /// Vector of digital values
     DigitalVector(Vec<DigitalValue>),
+    /// Real-valued event node
+    Real(Value),
+    /// Vector of real-valued event nodes
+    RealVector(Vec<Value>),
 }
 
 impl InputValue {
@@ -143,6 +171,27 @@ impl InputValue {
     pub fn digital_vector(&self) -> &[DigitalValue] {
         self.try_digital_vector().expect("Expected digital vector")
     }
+
+    /// Try to get a real scalar value.
+    pub fn try_real(&self) -> Option<Value> {
+        match self {
+            InputValue::Real(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Get real value
+    pub fn real(&self) -> Value {
+        self.try_real().expect("Expected real value")
+    }
+
+    /// Try to get a real vector.
+    pub fn try_real_vector(&self) -> Option<&[Value]> {
+        match self {
+            InputValue::RealVector(v) => Some(v),
+            _ => None,
+        }
+    }
 }
 
 /// Output port value container
@@ -156,6 +205,10 @@ pub enum OutputValue {
     Digital(DigitalValue),
     /// Vector of digital outputs
     DigitalVector(Vec<DigitalValue>),
+    /// Real-valued event to schedule
+    Real(Value),
+    /// Vector of real-valued event outputs
+    RealVector(Vec<Value>),
 }
 
 /// Digital event emitted by a code model output port.
@@ -163,15 +216,71 @@ pub enum OutputValue {
 pub(crate) struct PendingDigitalEvent {
     /// Output port name as declared by the code model.
     pub port_name: String,
+    /// First vector element index targeted by this event.
+    pub start_index: usize,
     /// One or more values emitted by the port.
     pub values: Vec<DigitalValue>,
     /// Delay relative to the current evaluation time.
     pub delay: Value,
 }
 
+/// Real-valued event emitted by a code model output port.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingRealEvent {
+    /// Output port name as declared by the code model.
+    pub port_name: String,
+    /// First vector element index targeted by this event.
+    pub start_index: usize,
+    /// One or more values emitted by the port.
+    pub values: Vec<Value>,
+    /// Delay relative to the current evaluation time.
+    pub delay: Value,
+}
+
+/// Per-output state used by official XSPICE inertial digital delays.
+#[derive(Debug, Clone, Copy)]
+struct InertialOutputState {
+    /// Absolute time of the pending transition, or a negative value when idle.
+    when: Value,
+    /// Output value before the pending transition started.
+    prev: DigitalValue,
+}
+
+/// Time-domain sample history owned by one code-model instance.
+#[derive(Debug, Clone)]
+struct TransientHistorySample {
+    time: Value,
+    values: Vec<Value>,
+}
+
 impl Default for OutputValue {
     fn default() -> Self {
         OutputValue::Analog(AnalogValue::default())
+    }
+}
+
+fn same_transient_time(a: Value, b: Value) -> bool {
+    let scale = a.abs().max(b.abs()).max(1.0);
+    (a - b).abs() <= f64::EPSILON * scale
+}
+
+fn prune_transient_history(
+    history: &mut Vec<TransientHistorySample>,
+    time: Value,
+    retention_window: Value,
+) {
+    if !retention_window.is_finite() || retention_window < 0.0 {
+        return;
+    }
+    let oldest_kept = time - retention_window;
+    let prune_count = history
+        .iter()
+        .take_while(|sample| {
+            sample.time < oldest_kept && !same_transient_time(sample.time, oldest_kept)
+        })
+        .count();
+    if prune_count > 0 {
+        history.drain(0..prune_count);
     }
 }
 
@@ -181,9 +290,19 @@ impl OutputValue {
         OutputValue::Analog(AnalogValue::default())
     }
 
+    /// Create analog vector output initialized to zero.
+    pub fn analog_vector(width: usize) -> Self {
+        OutputValue::AnalogVector(vec![AnalogValue::default(); width])
+    }
+
     /// Create digital output initialized to unknown
     pub fn digital() -> Self {
         OutputValue::Digital(DigitalValue::default())
+    }
+
+    /// Create real output initialized to zero
+    pub fn real() -> Self {
+        OutputValue::Real(0.0)
     }
 
     /// Set analog output value
@@ -204,6 +323,11 @@ impl OutputValue {
     pub fn set_digital(&mut self, value: DigitalValue) {
         *self = OutputValue::Digital(value);
     }
+
+    /// Set real output value
+    pub fn set_real(&mut self, value: Value) {
+        *self = OutputValue::Real(value);
+    }
 }
 
 //=============================================================================
@@ -219,6 +343,19 @@ impl OutputValue {
 /// - Simulation state (time, timestep, temperature)
 /// - Internal state variables
 /// - Event scheduling
+#[derive(Clone, Default)]
+struct ContextResources {
+    values: HashMap<String, Arc<dyn Any + Send + Sync>>,
+}
+
+impl fmt::Debug for ContextResources {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ContextResources")
+            .field("keys", &self.values.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CmContext {
     //-------------------------------------------------------------------------
@@ -230,12 +367,20 @@ pub struct CmContext {
     pub time_prev: Value,
     /// Current timestep
     pub timestep: Value,
+    /// Transient print-step/max-step hint for code models that need run context.
+    transient_step_hint: Option<Value>,
+    /// Final transient stop time for code models that need circuit run context.
+    transient_stop_time: Option<Value>,
     /// Temperature in Kelvin
     pub temperature: Value,
+    /// ngspice-compatible transient ramp time for analog code models.
+    ramptime: Value,
     /// Type of analysis being performed
     pub analysis: AnalysisType,
     /// Reason for this evaluation call
     pub call_type: CallType,
+    /// Rollback/commit phase for this evaluation call.
+    evaluation_phase: EvaluationPhase,
     /// Current iteration count (for convergence tracking)
     pub iteration: usize,
 
@@ -246,10 +391,18 @@ pub struct CmContext {
     inputs: HashMap<String, InputValue>,
     /// Last event time for scalar digital input ports.
     input_event_times: HashMap<String, Value>,
+    /// Last event time for vector digital input ports, per element.
+    input_vector_event_times: HashMap<String, Vec<Option<Value>>>,
     /// Output port values by name
     outputs: HashMap<String, OutputValue>,
     /// Connected analog node index per scalar analog port (0 = ground).
     port_nodes: HashMap<String, usize>,
+    /// Connected terminal pair per scalar or differential analog port.
+    port_terminals: HashMap<String, (usize, usize)>,
+    /// Connected terminal pairs per analog vector port element.
+    port_vector_terminals: HashMap<String, Vec<(usize, usize)>>,
+    /// MNA matrix column for scalar branch-current control ports.
+    port_control_columns: HashMap<String, usize>,
     /// Connected width per port. Scalar ports have width 1.
     port_widths: HashMap<String, usize>,
 
@@ -260,10 +413,14 @@ pub struct CmContext {
     params: HashMap<String, Value>,
     /// String parameters (paths, etc.)
     string_params: HashMap<String, String>,
+    /// String-vector parameters by name
+    string_vector_params: HashMap<String, Vec<String>>,
     /// Real-vector parameters by name
     real_vector_params: HashMap<String, Vec<Value>>,
     /// Integer-vector parameters by name
     integer_vector_params: HashMap<String, Vec<i64>>,
+    /// Parameters explicitly supplied by the instance or model card.
+    provided_params: HashSet<String>,
 
     //-------------------------------------------------------------------------
     // Internal State
@@ -274,12 +431,22 @@ pub struct CmContext {
     state_prev: Vec<Value>,
     /// Integer state variables
     int_state: Vec<i64>,
+    /// Per-instance transient sample histories keyed by model-defined names.
+    transient_histories: HashMap<String, Vec<TransientHistorySample>>,
+    /// Host/runtime resources owned by the model instance.
+    resources: ContextResources,
 
     //-------------------------------------------------------------------------
     // Event Scheduling
     //-------------------------------------------------------------------------
     /// Scheduled output events.
     pending_events: Vec<PendingDigitalEvent>,
+    /// Scheduled real-valued output events.
+    pending_real_events: Vec<PendingRealEvent>,
+    /// Per-output inertial-delay state for digital code models.
+    inertial_outputs: HashMap<String, InertialOutputState>,
+    /// Absolute transient times requested by analog code models.
+    requested_breakpoints: Vec<Value>,
 
     //-------------------------------------------------------------------------
     // Matrix Stamping
@@ -308,26 +475,88 @@ impl CmContext {
             time: 0.0,
             time_prev: 0.0,
             timestep: 1e-9,
+            transient_step_hint: None,
+            transient_stop_time: None,
             temperature: 300.15, // 27°C
+            ramptime: 0.0,
             analysis: AnalysisType::DcOp,
             call_type: CallType::Init,
+            evaluation_phase: EvaluationPhase::DirectEvaluation,
             iteration: 0,
             inputs: HashMap::new(),
             input_event_times: HashMap::new(),
+            input_vector_event_times: HashMap::new(),
             outputs: HashMap::new(),
             port_nodes: HashMap::new(),
+            port_terminals: HashMap::new(),
+            port_vector_terminals: HashMap::new(),
+            port_control_columns: HashMap::new(),
             port_widths: HashMap::new(),
             params: HashMap::new(),
             string_params: HashMap::new(),
+            string_vector_params: HashMap::new(),
             real_vector_params: HashMap::new(),
             integer_vector_params: HashMap::new(),
+            provided_params: HashSet::new(),
             state: Vec::new(),
             state_prev: Vec::new(),
             int_state: Vec::new(),
+            transient_histories: HashMap::new(),
+            resources: ContextResources::default(),
             pending_events: Vec::new(),
+            pending_real_events: Vec::new(),
+            inertial_outputs: HashMap::new(),
+            requested_breakpoints: Vec::new(),
             stamps: Vec::new(),
             rhs: Vec::new(),
         }
+    }
+
+    /// Return the rollback/commit phase for the current model evaluation.
+    pub fn evaluation_phase(&self) -> EvaluationPhase {
+        self.evaluation_phase
+    }
+
+    /// Final transient stop time, when evaluation is running inside `.tran`.
+    pub fn transient_stop_time(&self) -> Option<Value> {
+        self.transient_stop_time
+    }
+
+    /// Transient print-step/max-step hint, when evaluation is running inside `.tran`.
+    pub fn transient_step_hint(&self) -> Option<Value> {
+        self.transient_step_hint
+    }
+
+    /// Set transient run context for models with ngspice run-context defaults.
+    pub(crate) fn set_transient_run_context(&mut self, tstep: Option<Value>, tstop: Option<Value>) {
+        self.transient_step_hint = tstep.filter(|value| value.is_finite() && *value > 0.0);
+        self.transient_stop_time = tstop.filter(|value| value.is_finite() && *value >= 0.0);
+    }
+
+    /// Set ngspice-compatible transient ramp time in seconds.
+    pub fn set_ramptime(&mut self, ramptime: Value) {
+        self.ramptime = ramptime;
+    }
+
+    /// Transient ramp time in seconds.
+    pub fn ramptime(&self) -> Value {
+        self.ramptime
+    }
+
+    /// ngspice `cm_analog_ramp_factor()` semantics for XSPICE analog models.
+    pub fn analog_ramp_factor(&self) -> Value {
+        if !self.is_transient() || !self.ramptime.is_finite() || self.ramptime <= 0.0 {
+            return 1.0;
+        }
+        if self.time >= self.ramptime {
+            return 1.0;
+        }
+        self.time / self.ramptime
+    }
+
+    /// Set the rollback/commit phase for the next model evaluation.
+    pub(crate) fn set_evaluation_phase(&mut self, phase: EvaluationPhase) {
+        self.evaluation_phase = phase;
     }
 
     //-------------------------------------------------------------------------
@@ -363,6 +592,26 @@ impl CmContext {
         self.input_event_times.get(name).copied()
     }
 
+    /// Get the last event time for one element of a digital input vector.
+    pub fn input_digital_vector_event_time(&self, name: &str, index: usize) -> Option<Value> {
+        self.input_vector_event_times
+            .get(name)
+            .and_then(|times| times.get(index).copied().flatten())
+    }
+
+    /// Get real input value
+    pub fn input_real(&self, name: &str) -> Option<Value> {
+        self.inputs.get(name).and_then(|v| match v {
+            InputValue::Real(value) => Some(*value),
+            _ => None,
+        })
+    }
+
+    /// Get the last event time for a scalar real input.
+    pub fn input_real_event_time(&self, name: &str) -> Option<Value> {
+        self.input_event_times.get(name).copied()
+    }
+
     /// Get analog input vector
     pub fn input_vector(&self, name: &str) -> Vec<Value> {
         self.inputs
@@ -380,6 +629,17 @@ impl CmContext {
             .get(name)
             .map(|v| match v {
                 InputValue::DigitalVector(vec) => vec.clone(),
+                _ => Vec::new(),
+            })
+            .unwrap_or_default()
+    }
+
+    /// Get real input vector
+    pub fn input_real_vector(&self, name: &str) -> Vec<Value> {
+        self.inputs
+            .get(name)
+            .map(|v| match v {
+                InputValue::RealVector(vec) => vec.clone(),
                 _ => Vec::new(),
             })
             .unwrap_or_default()
@@ -404,8 +664,25 @@ impl CmContext {
             .insert(name.to_string(), InputValue::Digital(value));
     }
 
+    /// Set real input by name
+    pub fn set_input_real(&mut self, name: &str, value: Value) {
+        self.inputs
+            .insert(name.to_string(), InputValue::Real(value));
+    }
+
     /// Set last event time for a scalar digital input.
     pub fn set_input_digital_event_time(&mut self, name: &str, time: Value) {
+        self.input_event_times.insert(name.to_string(), time);
+    }
+
+    /// Set per-element event times for a digital input vector.
+    pub fn set_input_digital_vector_event_times(&mut self, name: &str, times: Vec<Option<Value>>) {
+        self.input_vector_event_times
+            .insert(name.to_string(), times);
+    }
+
+    /// Set last event time for a scalar real input.
+    pub fn set_input_real_event_time(&mut self, name: &str, time: Value) {
         self.input_event_times.insert(name.to_string(), time);
     }
 
@@ -435,6 +712,54 @@ impl CmContext {
             .unwrap_or(0.0)
     }
 
+    /// Get analog vector output values.
+    pub fn output_vector(&self, name: &str) -> Vec<Value> {
+        self.outputs
+            .get(name)
+            .map(|v| match v {
+                OutputValue::AnalogVector(values) => {
+                    values.iter().map(|value| value.value).collect()
+                }
+                OutputValue::Analog(value) => vec![value.value],
+                _ => Vec::new(),
+            })
+            .unwrap_or_default()
+    }
+
+    /// Get previous analog vector output values.
+    pub fn output_vector_prev(&self, name: &str) -> Vec<Value> {
+        self.outputs
+            .get(name)
+            .map(|v| match v {
+                OutputValue::AnalogVector(values) => {
+                    values.iter().map(|value| value.prev_value).collect()
+                }
+                OutputValue::Analog(value) => vec![value.prev_value],
+                _ => Vec::new(),
+            })
+            .unwrap_or_default()
+    }
+
+    /// Get real output value, if this output is a real-valued event port.
+    pub fn output_real(&self, name: &str) -> Option<Value> {
+        self.outputs.get(name).and_then(|v| match v {
+            OutputValue::Real(value) => Some(*value),
+            _ => None,
+        })
+    }
+
+    /// Get digital vector output values.
+    pub fn output_digital_vector(&self, name: &str) -> Vec<DigitalValue> {
+        self.outputs
+            .get(name)
+            .map(|v| match v {
+                OutputValue::DigitalVector(values) => values.clone(),
+                OutputValue::Digital(value) => vec![*value],
+                _ => Vec::new(),
+            })
+            .unwrap_or_default()
+    }
+
     /// Get analog output partial derivative
     pub fn partial(&self, name: &str) -> Value {
         self.outputs
@@ -444,6 +769,20 @@ impl CmContext {
                 _ => 0.0,
             })
             .unwrap_or(0.0)
+    }
+
+    /// Get analog vector output partial derivatives.
+    pub fn partial_vector(&self, name: &str) -> Vec<Value> {
+        self.outputs
+            .get(name)
+            .map(|v| match v {
+                OutputValue::AnalogVector(values) => {
+                    values.iter().map(|value| value.partial).collect()
+                }
+                OutputValue::Analog(value) => vec![value.partial],
+                _ => Vec::new(),
+            })
+            .unwrap_or_default()
     }
 
     /// Set analog output value
@@ -476,12 +815,122 @@ impl CmContext {
         }
     }
 
+    /// Set analog vector output values with zero direct partials.
+    pub fn set_output_vector(&mut self, name: &str, values: Vec<Value>) {
+        let partials = vec![0.0; values.len()];
+        self.set_output_vector_with_partials(name, values, partials);
+    }
+
+    /// Set analog vector output values and per-element direct partials.
+    pub fn set_output_vector_with_partials(
+        &mut self,
+        name: &str,
+        values: Vec<Value>,
+        partials: Vec<Value>,
+    ) {
+        let width = self.port_width(name).max(values.len()).max(partials.len());
+        let out = self
+            .outputs
+            .entry(name.to_string())
+            .or_insert_with(|| OutputValue::analog_vector(width));
+        match out {
+            OutputValue::AnalogVector(existing) => {
+                existing.resize(width, AnalogValue::default());
+                for (index, analog) in existing.iter_mut().enumerate() {
+                    analog.prev_value = analog.value;
+                    analog.value = values.get(index).copied().unwrap_or(0.0);
+                    analog.partial = partials.get(index).copied().unwrap_or(0.0);
+                }
+            }
+            OutputValue::Analog(existing) if width == 1 => {
+                existing.prev_value = existing.value;
+                existing.value = values.first().copied().unwrap_or(0.0);
+                existing.partial = partials.first().copied().unwrap_or(0.0);
+            }
+            _ => {}
+        }
+    }
+
     /// Set digital output value (schedules event)
     pub fn set_output_digital(&mut self, name: &str, value: DigitalValue, delay: Value) {
         self.outputs
             .insert(name.to_string(), OutputValue::Digital(value));
+        self.push_pending_digital_event(name, value, delay);
+    }
+
+    /// Set real output value (schedules event)
+    pub fn set_output_real(&mut self, name: &str, value: Value, delay: Value) {
+        self.outputs
+            .insert(name.to_string(), OutputValue::Real(value));
+        self.push_pending_real_event(name, value, delay);
+    }
+
+    /// Set digital output value using official XSPICE inertial delay semantics.
+    pub fn set_output_digital_inertial(
+        &mut self,
+        name: &str,
+        value: DigitalValue,
+        delay: Value,
+        previous: DigitalValue,
+        unknown_transition_delays: Option<(Value, Value)>,
+    ) {
+        self.outputs
+            .insert(name.to_string(), OutputValue::Digital(value));
+
+        if !self.is_transient() {
+            self.push_pending_digital_event(name, value, delay);
+            return;
+        }
+
+        let state = self
+            .inertial_outputs
+            .entry(name.to_string())
+            .or_insert(InertialOutputState {
+                when: -1.0,
+                prev: previous,
+            });
+        let mut effective_delay = delay;
+        let mut reversion = None;
+
+        if state.when <= self.time {
+            state.prev = previous;
+            state.when = self.time + delay;
+        } else if value != state.prev {
+            reversion = Some((state.prev, (state.when - self.time) / 2.0));
+            if value.state.is_unknown() {
+                if let Some((rise_delay, fall_delay)) = unknown_transition_delays {
+                    effective_delay = if state.prev.state.is_low() {
+                        rise_delay
+                    } else {
+                        fall_delay
+                    };
+                }
+            }
+            state.when = self.time + effective_delay;
+        } else {
+            effective_delay = (state.when - self.time) / 2.0;
+            state.when = -1.0;
+        }
+
+        if let Some((reversion_value, reversion_delay)) = reversion {
+            self.push_pending_digital_event(name, reversion_value, reversion_delay);
+        }
+        self.push_pending_digital_event(name, value, effective_delay);
+    }
+
+    fn push_pending_digital_event(&mut self, name: &str, value: DigitalValue, delay: Value) {
         self.pending_events.push(PendingDigitalEvent {
             port_name: name.to_string(),
+            start_index: 0,
+            values: vec![value],
+            delay,
+        });
+    }
+
+    fn push_pending_real_event(&mut self, name: &str, value: Value, delay: Value) {
+        self.pending_real_events.push(PendingRealEvent {
+            port_name: name.to_string(),
+            start_index: 0,
             values: vec![value],
             delay,
         });
@@ -498,7 +947,49 @@ impl CmContext {
             .insert(name.to_string(), OutputValue::DigitalVector(values.clone()));
         self.pending_events.push(PendingDigitalEvent {
             port_name: name.to_string(),
+            start_index: 0,
             values,
+            delay,
+        });
+    }
+
+    /// Set real vector output value (schedules one event per connected element).
+    pub fn set_output_real_vector(&mut self, name: &str, values: Vec<Value>, delay: Value) {
+        self.outputs
+            .insert(name.to_string(), OutputValue::RealVector(values.clone()));
+        self.pending_real_events.push(PendingRealEvent {
+            port_name: name.to_string(),
+            start_index: 0,
+            values,
+            delay,
+        });
+    }
+
+    /// Set one element of a digital vector output.
+    pub fn set_output_digital_vector_element(
+        &mut self,
+        name: &str,
+        index: usize,
+        value: DigitalValue,
+        delay: Value,
+    ) {
+        let width = self.port_width(name).max(index + 1);
+        match self.outputs.get_mut(name) {
+            Some(OutputValue::DigitalVector(values)) => {
+                values.resize(width, DigitalValue::unknown());
+                values[index] = value;
+            }
+            _ => {
+                let mut values = vec![DigitalValue::unknown(); width];
+                values[index] = value;
+                self.outputs
+                    .insert(name.to_string(), OutputValue::DigitalVector(values));
+            }
+        }
+        self.pending_events.push(PendingDigitalEvent {
+            port_name: name.to_string(),
+            start_index: index,
+            values: vec![value],
             delay,
         });
     }
@@ -506,12 +997,48 @@ impl CmContext {
     /// Initialize output ports
     pub fn init_output(&mut self, name: &str, port_type: PortType) {
         match port_type {
-            PortType::Voltage | PortType::Current | PortType::DifferentialVoltage => {
+            PortType::Voltage
+            | PortType::DifferentialVoltage
+            | PortType::Conductance
+            | PortType::DifferentialConductance
+            | PortType::Hybrid
+            | PortType::DifferentialHybrid
+            | PortType::Current => {
                 self.outputs.insert(name.to_string(), OutputValue::analog());
             }
             PortType::Digital => {
                 self.outputs
                     .insert(name.to_string(), OutputValue::digital());
+            }
+            PortType::Real => {
+                self.outputs.insert(name.to_string(), OutputValue::real());
+            }
+            _ => {}
+        }
+    }
+
+    /// Initialize an output vector port.
+    pub fn init_output_vector(&mut self, name: &str, port_type: PortType, width: usize) {
+        match port_type {
+            PortType::Voltage
+            | PortType::DifferentialVoltage
+            | PortType::Conductance
+            | PortType::DifferentialConductance
+            | PortType::Hybrid
+            | PortType::DifferentialHybrid
+            | PortType::Current => {
+                self.outputs
+                    .insert(name.to_string(), OutputValue::analog_vector(width));
+            }
+            PortType::Digital => {
+                self.outputs.insert(
+                    name.to_string(),
+                    OutputValue::DigitalVector(vec![DigitalValue::default(); width]),
+                );
+            }
+            PortType::Real => {
+                self.outputs
+                    .insert(name.to_string(), OutputValue::RealVector(vec![0.0; width]));
             }
             _ => {}
         }
@@ -520,11 +1047,46 @@ impl CmContext {
     /// Register connected node for an analog scalar port (0 = ground).
     pub fn set_port_node(&mut self, name: &str, node: usize) {
         self.port_nodes.insert(name.to_string(), node);
+        self.port_terminals.insert(name.to_string(), (node, 0));
+    }
+
+    /// Register connected terminal pair for a scalar or differential analog port.
+    pub fn set_port_terminals(&mut self, name: &str, pos: usize, neg: usize) {
+        self.port_nodes.insert(name.to_string(), pos);
+        self.port_terminals.insert(name.to_string(), (pos, neg));
+    }
+
+    /// Register connected terminal pairs for an analog vector port.
+    pub fn set_port_vector_terminals(&mut self, name: &str, terminals: Vec<(usize, usize)>) {
+        self.port_vector_terminals
+            .insert(name.to_string(), terminals);
+    }
+
+    /// Register the matrix column for a branch-current input port.
+    pub fn set_port_control_column(&mut self, name: &str, column: usize) {
+        self.port_control_columns.insert(name.to_string(), column);
     }
 
     /// Get connected node for an analog scalar port (0 = ground).
     pub fn port_node(&self, name: &str) -> Option<usize> {
         self.port_nodes.get(name).copied()
+    }
+
+    /// Get connected terminal pair for a scalar or differential analog port.
+    pub fn port_node_pair(&self, name: &str) -> Option<(usize, usize)> {
+        self.port_terminals.get(name).copied()
+    }
+
+    /// Get connected terminal pair for one analog vector port element.
+    pub fn port_vector_node_pair(&self, name: &str, index: usize) -> Option<(usize, usize)> {
+        self.port_vector_terminals
+            .get(name)
+            .and_then(|pairs| pairs.get(index).copied())
+    }
+
+    /// Get matrix column for a branch-current input port.
+    pub fn port_control_column(&self, name: &str) -> Option<usize> {
+        self.port_control_columns.get(name).copied()
     }
 
     /// Register connected width for a port.
@@ -540,11 +1102,31 @@ impl CmContext {
     /// Clear port-node mapping for current evaluation pass.
     pub fn clear_port_nodes(&mut self) {
         self.port_nodes.clear();
+        self.port_terminals.clear();
+        self.port_vector_terminals.clear();
+        self.port_control_columns.clear();
     }
 
     /// Get all pending events and clear the queue
     pub(crate) fn take_pending_events(&mut self) -> Vec<PendingDigitalEvent> {
         std::mem::take(&mut self.pending_events)
+    }
+
+    /// Get all pending real events and clear the queue
+    pub(crate) fn take_pending_real_events(&mut self) -> Vec<PendingRealEvent> {
+        std::mem::take(&mut self.pending_real_events)
+    }
+
+    /// Request that the transient stepper place a breakpoint at an absolute time.
+    pub fn request_breakpoint(&mut self, time: Value) {
+        if time.is_finite() && time >= 0.0 {
+            self.requested_breakpoints.push(time);
+        }
+    }
+
+    /// Drain pending absolute transient breakpoint requests.
+    pub fn take_requested_breakpoints(&mut self) -> Vec<Value> {
+        std::mem::take(&mut self.requested_breakpoints)
     }
 
     //-------------------------------------------------------------------------
@@ -574,6 +1156,13 @@ impl CmContext {
             .map(|s| s.as_str())
     }
 
+    /// Get string-vector parameter
+    pub fn string_vector_param(&self, name: &str) -> Option<&[String]> {
+        self.string_vector_params
+            .get(&Self::canonical_param_key(name))
+            .map(|values| values.as_slice())
+    }
+
     /// Get real-vector parameter
     pub fn real_vector_param(&self, name: &str) -> Option<&[Value]> {
         self.real_vector_params
@@ -588,6 +1177,17 @@ impl CmContext {
             .map(|values| values.as_slice())
     }
 
+    /// Return true when a parameter was explicitly supplied instead of coming from a default.
+    pub fn param_was_provided(&self, name: &str) -> bool {
+        self.provided_params
+            .contains(&Self::canonical_param_key(name))
+    }
+
+    /// Mark a parameter as explicitly supplied by the instance or model card.
+    pub fn mark_param_provided(&mut self, name: &str) {
+        self.provided_params.insert(Self::canonical_param_key(name));
+    }
+
     /// Set parameter value
     pub fn set_param(&mut self, name: &str, value: Value) {
         self.params.insert(Self::canonical_param_key(name), value);
@@ -597,6 +1197,12 @@ impl CmContext {
     pub fn set_string_param(&mut self, name: &str, value: &str) {
         self.string_params
             .insert(Self::canonical_param_key(name), value.to_string());
+    }
+
+    /// Set string-vector parameter
+    pub fn set_string_vector_param(&mut self, name: &str, value: Vec<String>) {
+        self.string_vector_params
+            .insert(Self::canonical_param_key(name), value);
     }
 
     /// Set real-vector parameter
@@ -609,6 +1215,29 @@ impl CmContext {
     pub fn set_integer_vector_param(&mut self, name: &str, value: Vec<i64>) {
         self.integer_vector_params
             .insert(Self::canonical_param_key(name), value);
+    }
+
+    //-------------------------------------------------------------------------
+    // Resource Access
+    //-------------------------------------------------------------------------
+
+    /// Store a typed host resource in the model context.
+    pub fn set_resource<T>(&mut self, key: impl Into<String>, resource: Arc<T>)
+    where
+        T: Any + Send + Sync + 'static,
+    {
+        self.resources.values.insert(key.into(), resource);
+    }
+
+    /// Fetch a typed host resource from the model context.
+    pub fn resource<T>(&self, key: &str) -> Option<Arc<T>>
+    where
+        T: Any + Send + Sync + 'static,
+    {
+        self.resources
+            .values
+            .get(key)
+            .and_then(|resource| Arc::clone(resource).downcast::<T>().ok())
     }
 
     //-------------------------------------------------------------------------
@@ -663,6 +1292,58 @@ impl CmContext {
         if index < self.int_state.len() {
             self.int_state[index] = value;
         }
+    }
+
+    /// Record one rollback-aware transient sample for model-owned history.
+    ///
+    /// Samples at the same time replace the last sample, which avoids growing
+    /// history during repeated Newton iterations. Samples newer than `time`
+    /// are discarded before appending, matching transient rollback semantics.
+    pub fn record_transient_history(
+        &mut self,
+        key: &str,
+        time: Value,
+        values: Vec<Value>,
+        retention_window: Value,
+    ) {
+        if !time.is_finite() || values.iter().any(|value| !value.is_finite()) {
+            return;
+        }
+
+        let history = self.transient_histories.entry(key.to_string()).or_default();
+
+        while let Some(last) = history.last() {
+            if last.time > time && !same_transient_time(last.time, time) {
+                history.pop();
+            } else {
+                break;
+            }
+        }
+
+        if let Some(last) = history.last_mut()
+            && same_transient_time(last.time, time)
+        {
+            last.time = time;
+            last.values = values;
+            prune_transient_history(history, time, retention_window);
+            return;
+        }
+
+        history.push(TransientHistorySample { time, values });
+        prune_transient_history(history, time, retention_window);
+    }
+
+    /// Return the first recorded sample at or after `time`.
+    pub fn transient_history_at_or_after(&self, key: &str, time: Value) -> Option<Vec<Value>> {
+        if !time.is_finite() {
+            return None;
+        }
+        self.transient_histories.get(key).and_then(|history| {
+            history
+                .iter()
+                .find(|sample| sample.time > time || same_transient_time(sample.time, time))
+                .map(|sample| sample.values.clone())
+        })
     }
 
     /// Advance state for new timestep
@@ -767,10 +1448,12 @@ mod tests {
         ));
         assert_eq!(digital.try_analog(), None);
         assert!(digital.try_analog_vector().is_none());
+        assert_eq!(digital.try_real(), None);
 
         let analog = InputValue::Analog(AnalogValue::new(1.25));
         assert_eq!(analog.try_digital(), None);
         assert!(analog.try_digital_vector().is_none());
+        assert_eq!(analog.try_real(), None);
     }
 
     #[test]
@@ -781,5 +1464,66 @@ mod tests {
         let digital_value = DigitalValue::new(DigitalState::One, DigitalStrength::Strong);
         let digital = InputValue::Digital(digital_value);
         assert_eq!(digital.try_digital(), Some(digital_value));
+
+        let real = InputValue::Real(2.5);
+        assert_eq!(real.try_real(), Some(2.5));
+    }
+
+    #[test]
+    fn context_records_and_drains_transient_breakpoint_requests() {
+        let mut ctx = CmContext::new();
+
+        ctx.request_breakpoint(2.0e-9);
+        ctx.request_breakpoint(f64::NAN);
+        ctx.request_breakpoint(-1.0e-9);
+        ctx.request_breakpoint(1.0e-9);
+
+        assert_eq!(ctx.take_requested_breakpoints(), vec![2.0e-9, 1.0e-9]);
+        assert!(ctx.take_requested_breakpoints().is_empty());
+    }
+
+    #[test]
+    fn analog_ramp_factor_matches_ngspice_transient_rules() {
+        let mut ctx = CmContext::new();
+        ctx.set_ramptime(10.0e-9);
+        ctx.time = 5.0e-9;
+        assert_eq!(ctx.analog_ramp_factor(), 1.0);
+
+        ctx.analysis = AnalysisType::Transient;
+        assert_eq!(ctx.analog_ramp_factor(), 0.5);
+
+        ctx.time = 10.0e-9;
+        assert_eq!(ctx.analog_ramp_factor(), 1.0);
+
+        ctx.set_ramptime(0.0);
+        ctx.time = 1.0e-12;
+        assert_eq!(ctx.analog_ramp_factor(), 1.0);
+    }
+
+    #[test]
+    fn transient_history_replaces_same_time_rolls_back_and_prunes_old_samples() {
+        let mut ctx = CmContext::new();
+
+        ctx.record_transient_history("line", 0.0, vec![0.0], 3.0);
+        ctx.record_transient_history("line", 1.0, vec![1.0], 3.0);
+        ctx.record_transient_history("line", 1.0, vec![1.5], 3.0);
+        ctx.record_transient_history("line", 3.5, vec![3.5], 3.0);
+
+        assert_eq!(
+            ctx.transient_history_at_or_after("line", 0.0),
+            Some(vec![1.5])
+        );
+        assert_eq!(
+            ctx.transient_history_at_or_after("line", 2.0),
+            Some(vec![3.5])
+        );
+
+        ctx.record_transient_history("line", 2.5, vec![2.5], 3.0);
+
+        assert_eq!(ctx.transient_history_at_or_after("line", 3.0), None);
+        assert_eq!(
+            ctx.transient_history_at_or_after("line", 2.0),
+            Some(vec![2.5])
+        );
     }
 }

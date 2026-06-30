@@ -3,7 +3,9 @@
 //! Implements the official `pwl` and `pwlts` analog lookup blocks.
 
 use crate::Value;
-use crate::xspice::{CmContext, CmError, CmResult, CodeModel, ParamSpec, PortSpec, PortType};
+use crate::xspice::{
+    CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
+};
 use std::sync::OnceLock;
 
 const INPUT_DOMAIN_MIN: Value = 1.0e-12;
@@ -27,18 +29,58 @@ fn lookup_params() -> &'static [ParamSpec] {
         vec![
             ParamSpec::real_vector("x_array", Vec::new())
                 .required()
+                .with_vector_min_len(2)
                 .with_description("Monotonically increasing x-axis lookup points"),
             ParamSpec::real_vector("y_array", Vec::new())
                 .required()
+                .with_vector_min_len(2)
                 .with_description("Lookup output values"),
-            ParamSpec::real("input_domain", 0.01)
-                .with_description("Smoothing domain around internal breakpoints"),
+            ParamSpec::real("input_domain", 0.01).with_description(
+                "Smoothing domain around internal breakpoints, clamped to official limits",
+            ),
             ParamSpec::boolean("fraction", true)
                 .with_description("Treat input_domain as a fraction of adjacent x spacing"),
             ParamSpec::boolean("limit", false)
                 .with_description("Clamp outside the table instead of extrapolating"),
         ]
     })
+}
+
+fn pwl_input_port() -> PortSpec {
+    PortSpec {
+        name: "in".to_string(),
+        direction: PortDirection::In,
+        default_type: PortType::Voltage,
+        allowed_types: vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::Current,
+            PortType::VoltageName,
+        ],
+        is_vector: false,
+        null_allowed: false,
+        vector_min_len: None,
+        vector_max_len: None,
+        description: "Lookup input".to_string(),
+    }
+}
+
+fn pwl_output_port() -> PortSpec {
+    PortSpec {
+        name: "out".to_string(),
+        direction: PortDirection::Out,
+        default_type: PortType::Voltage,
+        allowed_types: vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::Current,
+        ],
+        is_vector: false,
+        null_allowed: false,
+        vector_min_len: None,
+        vector_max_len: None,
+        description: "Lookup output".to_string(),
+    }
 }
 
 fn lookup_table(ctx: &CmContext) -> CmResult<Vec<LookupPoint>> {
@@ -123,26 +165,11 @@ fn effective_input_domain(input_domain: Value) -> CmResult<Value> {
 }
 
 fn validate_smoothing_domain(
-    points: &[LookupPoint],
+    _points: &[LookupPoint],
     input_domain: Value,
-    fraction: bool,
+    _fraction: bool,
 ) -> CmResult<()> {
-    let input_domain = effective_input_domain(input_domain)?;
-    if fraction {
-        return Ok(());
-    }
-
-    for window in points.windows(2) {
-        let spacing = window[1].x - window[0].x;
-        if spacing < 2.0 * input_domain {
-            return Err(invalid_param(
-                "input_domain",
-                format!(
-                    "absolute smoothing domain {input_domain} overlaps lookup spacing {spacing}"
-                ),
-            ));
-        }
-    }
+    effective_input_domain(input_domain)?;
     Ok(())
 }
 
@@ -289,12 +316,7 @@ impl CodeModel for PiecewiseLinear {
 
     fn ports(&self) -> &[PortSpec] {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
-        PORTS.get_or_init(|| {
-            vec![
-                PortSpec::input("in", PortType::Voltage).with_description("Lookup input"),
-                PortSpec::output("out", PortType::Voltage).with_description("Lookup output"),
-            ]
-        })
+        PORTS.get_or_init(|| vec![pwl_input_port(), pwl_output_port()])
     }
 
     fn parameters(&self) -> &[ParamSpec] {
@@ -349,9 +371,7 @@ impl CodeModel for PiecewiseLinearTimeSeries {
 
     fn ports(&self) -> &[PortSpec] {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
-        PORTS.get_or_init(|| {
-            vec![PortSpec::output("out", PortType::Voltage).with_description("Lookup output")]
-        })
+        PORTS.get_or_init(|| vec![pwl_output_port()])
     }
 
     fn parameters(&self) -> &[ParamSpec] {

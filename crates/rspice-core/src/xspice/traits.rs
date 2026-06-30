@@ -3,7 +3,7 @@
 //! Defines the core interfaces for XSPICE code models.
 //! All built-in and external code models implement these traits.
 
-use crate::Value;
+use crate::{Complex64, Value};
 use std::fmt;
 
 //=============================================================================
@@ -94,6 +94,14 @@ pub enum PortType {
     Voltage,
     /// Differential analog voltage pair (vd)
     DifferentialVoltage,
+    /// Single-ended analog conductance terminal (g)
+    Conductance,
+    /// Differential analog conductance terminal pair (gd)
+    DifferentialConductance,
+    /// Single-ended hybrid/resistance terminal (h): current input, voltage output
+    Hybrid,
+    /// Differential hybrid/resistance terminal pair (hd)
+    DifferentialHybrid,
     /// Analog current (i)
     Current,
     /// Voltage source name for current sensing (vnam)
@@ -113,7 +121,13 @@ impl PortType {
     pub fn is_analog(&self) -> bool {
         matches!(
             self,
-            PortType::Voltage | PortType::DifferentialVoltage | PortType::Current
+            PortType::Voltage
+                | PortType::DifferentialVoltage
+                | PortType::Conductance
+                | PortType::DifferentialConductance
+                | PortType::Hybrid
+                | PortType::DifferentialHybrid
+                | PortType::Current
         )
     }
 
@@ -149,6 +163,10 @@ pub struct PortSpec {
     pub is_vector: bool,
     /// Null connection allowed (port can be unconnected)
     pub null_allowed: bool,
+    /// Minimum vector connection length, when this is a vector port
+    pub vector_min_len: Option<usize>,
+    /// Maximum vector connection length, when this is a vector port
+    pub vector_max_len: Option<usize>,
     /// Description for documentation
     pub description: String,
 }
@@ -163,6 +181,8 @@ impl PortSpec {
             allowed_types: vec![port_type],
             is_vector: false,
             null_allowed: false,
+            vector_min_len: None,
+            vector_max_len: None,
             description: String::new(),
         }
     }
@@ -176,6 +196,8 @@ impl PortSpec {
             allowed_types: vec![port_type],
             is_vector: false,
             null_allowed: false,
+            vector_min_len: None,
+            vector_max_len: None,
             description: String::new(),
         }
     }
@@ -189,6 +211,8 @@ impl PortSpec {
             allowed_types: vec![port_type],
             is_vector: true,
             null_allowed: false,
+            vector_min_len: None,
+            vector_max_len: None,
             description: String::new(),
         }
     }
@@ -202,6 +226,8 @@ impl PortSpec {
             allowed_types: vec![port_type],
             is_vector: true,
             null_allowed: false,
+            vector_min_len: None,
+            vector_max_len: None,
             description: String::new(),
         }
     }
@@ -215,6 +241,25 @@ impl PortSpec {
     /// Add description
     pub fn with_description(mut self, desc: impl Into<String>) -> Self {
         self.description = desc.into();
+        self
+    }
+
+    /// Require at least this many elements when the port is connected as a vector
+    pub fn with_vector_min_len(mut self, min_len: usize) -> Self {
+        self.vector_min_len = Some(min_len);
+        self
+    }
+
+    /// Require at most this many elements when the port is connected as a vector
+    pub fn with_vector_max_len(mut self, max_len: usize) -> Self {
+        self.vector_max_len = Some(max_len);
+        self
+    }
+
+    /// Require a bounded vector length range when the port is connected as a vector
+    pub fn with_vector_len_range(mut self, min_len: usize, max_len: usize) -> Self {
+        self.vector_min_len = Some(min_len);
+        self.vector_max_len = Some(max_len);
         self
     }
 }
@@ -234,6 +279,8 @@ pub enum ParamType {
     Boolean,
     /// String (path, identifier, etc.)
     String,
+    /// Vector of strings
+    StringVector,
     /// Vector of real numbers
     RealVector,
     /// Vector of integers
@@ -251,6 +298,8 @@ pub struct ParamSpec {
     pub default: Value,
     /// Default string value for string-typed parameters
     pub string_default: Option<String>,
+    /// Default string-vector value for string-vector parameters
+    pub string_vector_default: Option<Vec<String>>,
     /// Default real-vector value for vector-typed parameters
     pub real_vector_default: Option<Vec<Value>>,
     /// Default integer-vector value for vector-typed parameters
@@ -259,6 +308,10 @@ pub struct ParamSpec {
     pub min: Option<Value>,
     /// Maximum value (for numeric types)
     pub max: Option<Value>,
+    /// Minimum vector length (for vector types)
+    pub vector_min_len: Option<usize>,
+    /// Maximum vector length (for vector types)
+    pub vector_max_len: Option<usize>,
     /// Whether this parameter is required
     pub required: bool,
     /// Description for documentation
@@ -273,10 +326,13 @@ impl ParamSpec {
             param_type: ParamType::Real,
             default,
             string_default: None,
+            string_vector_default: None,
             real_vector_default: None,
             integer_vector_default: None,
             min: None,
             max: None,
+            vector_min_len: None,
+            vector_max_len: None,
             required: false,
             description: String::new(),
         }
@@ -289,10 +345,13 @@ impl ParamSpec {
             param_type: ParamType::Integer,
             default: default as f64,
             string_default: None,
+            string_vector_default: None,
             real_vector_default: None,
             integer_vector_default: None,
             min: None,
             max: None,
+            vector_min_len: None,
+            vector_max_len: None,
             required: false,
             description: String::new(),
         }
@@ -305,10 +364,13 @@ impl ParamSpec {
             param_type: ParamType::Boolean,
             default: if default { 1.0 } else { 0.0 },
             string_default: None,
+            string_vector_default: None,
             real_vector_default: None,
             integer_vector_default: None,
             min: None,
             max: None,
+            vector_min_len: None,
+            vector_max_len: None,
             required: false,
             description: String::new(),
         }
@@ -321,10 +383,13 @@ impl ParamSpec {
             param_type: ParamType::String,
             default: 0.0,
             string_default: Some(default.into()),
+            string_vector_default: None,
             real_vector_default: None,
             integer_vector_default: None,
             min: None,
             max: None,
+            vector_min_len: None,
+            vector_max_len: None,
             required: false,
             description: String::new(),
         }
@@ -337,10 +402,13 @@ impl ParamSpec {
             param_type: ParamType::RealVector,
             default: 0.0,
             string_default: None,
+            string_vector_default: None,
             real_vector_default: Some(default),
             integer_vector_default: None,
             min: None,
             max: None,
+            vector_min_len: None,
+            vector_max_len: None,
             required: false,
             description: String::new(),
         }
@@ -353,10 +421,32 @@ impl ParamSpec {
             param_type: ParamType::IntegerVector,
             default: 0.0,
             string_default: None,
+            string_vector_default: None,
             real_vector_default: None,
             integer_vector_default: Some(default),
             min: None,
             max: None,
+            vector_min_len: None,
+            vector_max_len: None,
+            required: false,
+            description: String::new(),
+        }
+    }
+
+    /// Create a string-vector parameter with default
+    pub fn string_vector(name: impl Into<String>, default: Vec<String>) -> Self {
+        Self {
+            name: name.into(),
+            param_type: ParamType::StringVector,
+            default: 0.0,
+            string_default: None,
+            string_vector_default: Some(default),
+            real_vector_default: None,
+            integer_vector_default: None,
+            min: None,
+            max: None,
+            vector_min_len: None,
+            vector_max_len: None,
             required: false,
             description: String::new(),
         }
@@ -378,6 +468,25 @@ impl ParamSpec {
     pub fn with_range(mut self, min: Value, max: Value) -> Self {
         self.min = Some(min);
         self.max = Some(max);
+        self
+    }
+
+    /// Set minimum vector length
+    pub fn with_vector_min_len(mut self, min_len: usize) -> Self {
+        self.vector_min_len = Some(min_len);
+        self
+    }
+
+    /// Set maximum vector length
+    pub fn with_vector_max_len(mut self, max_len: usize) -> Self {
+        self.vector_max_len = Some(max_len);
+        self
+    }
+
+    /// Set vector length range
+    pub fn with_vector_len_range(mut self, min_len: usize, max_len: usize) -> Self {
+        self.vector_min_len = Some(min_len);
+        self.vector_max_len = Some(max_len);
         self
     }
 
@@ -430,6 +539,16 @@ pub trait CodeModel: Send + Sync {
             .all(|p| p.default_type.is_event_driven())
     }
 
+    /// Whether this code model needs global conservative Newton damping.
+    ///
+    /// Most XSPICE models are behavioral sources with explicit operating-point
+    /// linearization. Treating them like compact semiconductor devices can
+    /// prevent ideal source branch equations from taking their exact Newton
+    /// step. Models that implement stiff physical device equations can opt in.
+    fn requires_conservative_newton_damping(&self) -> bool {
+        false
+    }
+
     /// Initialize instance state
     ///
     /// Called once when the instance is created.
@@ -456,6 +575,18 @@ pub trait CodeModel: Send + Sync {
         ]
     }
 
+    /// Whether a voltage output should be excluded from generic node-voltage
+    /// LTE control during transient analysis.
+    ///
+    /// Explicit step-history code models can intentionally return accepted
+    /// sample values rather than continuous-time state. Their output branch
+    /// equation is still enforced by Newton residual stamping, but generic
+    /// voltage extrapolation treats the sample history as physical curvature
+    /// and can drive timesteps to zero.
+    fn excludes_output_from_transient_voltage_lte(&self, _output_port: &str) -> bool {
+        false
+    }
+
     /// Linearized control partials for a voltage output branch equation.
     ///
     /// Each tuple is `(input_port_name, d(output)/d(input_port))`. The circuit
@@ -467,6 +598,109 @@ pub trait CodeModel: Send + Sync {
         _output_port: &str,
     ) -> Vec<(String, Value)> {
         Vec::new()
+    }
+
+    /// Linearized control partials for analog vector input ports.
+    ///
+    /// Each tuple is `(input_port_name, element_index, d(output)/d(input[element_index]))`.
+    /// This is required for official vector-input code models such as
+    /// `multi_input_pwl`, where only one vector element may be the controlling
+    /// input for the current operating point.
+    fn output_input_vector_partials(
+        &self,
+        _ctx: &super::CmContext,
+        _output_port: &str,
+    ) -> Vec<(String, usize, Value)> {
+        Vec::new()
+    }
+
+    /// Linearized scalar-input control partials for one element of an analog
+    /// vector output port.
+    ///
+    /// Existing scalar-output models remain compatible through the default
+    /// delegation. Vector-output models that need different Jacobian rows per
+    /// output element should override this method.
+    fn output_vector_input_partials(
+        &self,
+        ctx: &super::CmContext,
+        output_port: &str,
+        _output_index: usize,
+    ) -> Vec<(String, Value)> {
+        self.output_input_partials(ctx, output_port)
+    }
+
+    /// Linearized vector-input control partials for one element of an analog
+    /// vector output port.
+    fn output_vector_input_vector_partials(
+        &self,
+        ctx: &super::CmContext,
+        output_port: &str,
+        _output_index: usize,
+    ) -> Vec<(String, usize, Value)> {
+        self.output_input_vector_partials(ctx, output_port)
+    }
+
+    /// Complex small-signal control partials for a scalar analog output.
+    ///
+    /// Most code models are real-valued in AC and use the default adapter from
+    /// the DC/Newton partials. Frequency-domain models such as `xfer` and
+    /// `s_xfer` override this to stamp phase-bearing transfer functions.
+    fn output_input_ac_partials(
+        &self,
+        ctx: &super::CmContext,
+        output_port: &str,
+        _frequency: Value,
+    ) -> Vec<(String, Complex64)> {
+        self.output_input_partials(ctx, output_port)
+            .into_iter()
+            .map(|(port, partial)| (port, Complex64::new(partial, 0.0)))
+            .collect()
+    }
+
+    /// Complex small-signal vector-input partials for a scalar analog output.
+    fn output_input_vector_ac_partials(
+        &self,
+        ctx: &super::CmContext,
+        output_port: &str,
+        _frequency: Value,
+    ) -> Vec<(String, usize, Complex64)> {
+        self.output_input_vector_partials(ctx, output_port)
+            .into_iter()
+            .map(|(port, index, partial)| (port, index, Complex64::new(partial, 0.0)))
+            .collect()
+    }
+
+    /// Complex small-signal scalar-input partials for a vector output element.
+    fn output_vector_input_ac_partials(
+        &self,
+        ctx: &super::CmContext,
+        output_port: &str,
+        output_index: usize,
+        _frequency: Value,
+    ) -> Vec<(String, Complex64)> {
+        self.output_vector_input_partials(ctx, output_port, output_index)
+            .into_iter()
+            .map(|(port, partial)| (port, Complex64::new(partial, 0.0)))
+            .collect()
+    }
+
+    /// Complex small-signal vector-input partials for a vector output element.
+    fn output_vector_input_vector_ac_partials(
+        &self,
+        ctx: &super::CmContext,
+        output_port: &str,
+        output_index: usize,
+        _frequency: Value,
+    ) -> Vec<(String, usize, Complex64)> {
+        self.output_vector_input_vector_partials(ctx, output_port, output_index)
+            .into_iter()
+            .map(|(port, index, partial)| (port, index, Complex64::new(partial, 0.0)))
+            .collect()
+    }
+
+    /// Absolute transient breakpoint times owned by this code model instance.
+    fn transient_breakpoints(&self, _ctx: &super::CmContext) -> CmResult<Vec<Value>> {
+        Ok(Vec::new())
     }
 }
 

@@ -2,8 +2,63 @@
 //!
 //! Implements fundamental analog behavioral blocks used in mixed-signal simulation.
 
-use crate::Value;
-use crate::xspice::{CmContext, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType};
+use crate::xspice::{
+    CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortDirection, PortSpec,
+    PortType,
+};
+use crate::{Complex64, Value};
+
+fn scalar_analog_port(
+    name: &str,
+    direction: PortDirection,
+    default_type: PortType,
+    allowed_types: Vec<PortType>,
+    null_allowed: bool,
+    description: &str,
+) -> PortSpec {
+    PortSpec {
+        name: name.to_string(),
+        direction,
+        default_type,
+        allowed_types,
+        is_vector: false,
+        null_allowed,
+        vector_min_len: None,
+        vector_max_len: None,
+        description: description.to_string(),
+    }
+}
+
+fn broad_scalar_analog_input_port(name: &str, description: &str) -> PortSpec {
+    scalar_analog_port(
+        name,
+        PortDirection::In,
+        PortType::Voltage,
+        vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::Current,
+            PortType::VoltageName,
+        ],
+        false,
+        description,
+    )
+}
+
+fn scalar_analog_output_port(name: &str, description: &str) -> PortSpec {
+    scalar_analog_port(
+        name,
+        PortDirection::Out,
+        PortType::Voltage,
+        vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::Current,
+        ],
+        false,
+        description,
+    )
+}
 
 //=============================================================================
 // Gain Block
@@ -32,35 +87,41 @@ impl CodeModel for Gain {
     }
 
     fn ports(&self) -> &[PortSpec] {
-        static PORTS: [PortSpec; 2] = [
-            PortSpec {
-                name: String::new(), // Will be replaced
-                direction: PortDirection::In,
-                default_type: PortType::Voltage,
-                allowed_types: vec![],
-                is_vector: false,
-                null_allowed: false,
-                description: String::new(),
-            },
-            PortSpec {
-                name: String::new(),
-                direction: PortDirection::Out,
-                default_type: PortType::Voltage,
-                allowed_types: vec![],
-                is_vector: false,
-                null_allowed: false,
-                description: String::new(),
-            },
-        ];
-
-        // Use lazy_static pattern for proper port specs
         use std::sync::OnceLock;
-        static REAL_PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
-        REAL_PORTS.get_or_init(|| {
+        static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+        PORTS.get_or_init(|| {
             vec![
-                PortSpec::input("in", PortType::Voltage).with_description("Analog voltage input"),
-                PortSpec::output("out", PortType::Voltage)
-                    .with_description("Analog voltage output"),
+                PortSpec {
+                    name: "in".to_string(),
+                    direction: PortDirection::In,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                        PortType::VoltageName,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Analog input".to_string(),
+                },
+                PortSpec {
+                    name: "out".to_string(),
+                    direction: PortDirection::Out,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Analog output".to_string(),
+                },
             ]
         })
     }
@@ -112,10 +173,12 @@ impl CodeModel for Gain {
 // Summer
 //=============================================================================
 
-/// Analog summer: out = sum(in[i] * in_gain[i]) + out_offset
+/// Analog summer: out = out_gain * sum(in_gain[i] * (in[i] + in_offset[i])) + out_offset
 ///
 /// # Parameters
+/// - `in_offset` - Offset for each input (default: 0.0)
 /// - `in_gain` - Gain for each input (default: 1.0)
+/// - `out_gain` - Output gain (default: 1.0)
 /// - `out_offset` - Output offset (default: 0.0)
 ///
 /// # Ports
@@ -130,7 +193,7 @@ impl CodeModel for Summer {
     }
 
     fn description(&self) -> &str {
-        "Analog summer: out = sum(in[i] * in_gain[i]) + out_offset"
+        "Analog summer with per-input offsets/gains and output gain"
     }
 
     fn ports(&self) -> &[PortSpec] {
@@ -138,9 +201,37 @@ impl CodeModel for Summer {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
         PORTS.get_or_init(|| {
             vec![
-                PortSpec::vector_input("in", PortType::Voltage)
-                    .with_description("Vector of analog voltage inputs"),
-                PortSpec::output("out", PortType::Voltage).with_description("Summed analog output"),
+                PortSpec {
+                    name: "in".to_string(),
+                    direction: PortDirection::In,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                        PortType::VoltageName,
+                    ],
+                    is_vector: true,
+                    null_allowed: false,
+                    vector_min_len: Some(2),
+                    vector_max_len: None,
+                    description: "Vector of analog inputs".to_string(),
+                },
+                PortSpec {
+                    name: "out".to_string(),
+                    direction: PortDirection::Out,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Summed analog output".to_string(),
+                },
             ]
         })
     }
@@ -150,42 +241,125 @@ impl CodeModel for Summer {
         static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
         PARAMS.get_or_init(|| {
             vec![
-                ParamSpec::real("in_gain", 1.0)
-                    .with_description("Gain applied to each input (or array)"),
+                ParamSpec::real_vector("in_offset", Vec::new())
+                    .with_description("Offset applied to each input, defaulting each input to 0.0"),
+                ParamSpec::real_vector("in_gain", Vec::new())
+                    .with_description("Gain applied to each input, defaulting each input to 1.0"),
+                ParamSpec::real("out_gain", 1.0).with_description("Output gain factor"),
                 ParamSpec::real("out_offset", 0.0).with_description("Output offset voltage"),
             ]
         })
     }
 
-    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
-        Ok(())
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        validate_analog_vector_params(ctx, "summer")
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let in_gain = ctx.param("in_gain");
+        let out_gain = ctx.param("out_gain");
         let out_offset = ctx.param("out_offset");
 
         let inputs = ctx.input_vector("in");
-        let sum: Value = inputs.iter().map(|&v| v * in_gain).sum();
-        let v_out = sum + out_offset;
+        let in_gain = analog_vector_param(ctx, "in_gain", inputs.len(), 1.0, "summer")?;
+        let in_offset = analog_vector_param(ctx, "in_offset", inputs.len(), 0.0, "summer")?;
+        let sum: Value = inputs
+            .iter()
+            .zip(in_gain.iter().zip(in_offset.iter()))
+            .map(|(&input, (&gain, &offset))| gain * (input + offset))
+            .sum();
+        let v_out = sum * out_gain + out_offset;
 
         ctx.set_output("out", v_out);
         Ok(())
     }
+
+    fn output_input_vector_partials(
+        &self,
+        ctx: &CmContext,
+        output_port: &str,
+    ) -> Vec<(String, usize, Value)> {
+        if !output_port.eq_ignore_ascii_case("out") {
+            return Vec::new();
+        }
+
+        let inputs = ctx.input_vector("in");
+        let Ok(in_gain) = analog_vector_param(ctx, "in_gain", inputs.len(), 1.0, "summer") else {
+            return Vec::new();
+        };
+        let out_gain = ctx.param("out_gain");
+        in_gain
+            .into_iter()
+            .enumerate()
+            .map(|(index, gain)| ("in".to_string(), index, gain * out_gain))
+            .collect()
+    }
+}
+
+fn analog_vector_param(
+    ctx: &CmContext,
+    name: &str,
+    width: usize,
+    default_value: Value,
+    model_name: &str,
+) -> CmResult<Vec<Value>> {
+    let supplied = ctx.real_vector_param(name).unwrap_or(&[]);
+    let values = if supplied.is_empty() {
+        vec![default_value; width]
+    } else {
+        validate_analog_vector_param_width(name, supplied.len(), width, model_name)?;
+        supplied.to_vec()
+    };
+    for (index, value) in values.iter().copied().enumerate() {
+        if !value.is_finite() {
+            return Err(CmError::InvalidParameter {
+                name: name.to_string(),
+                message: format!("element {index} must be finite, got {value}"),
+            });
+        }
+    }
+    Ok(values)
+}
+
+fn validate_analog_vector_param_width(
+    name: &str,
+    len: usize,
+    width: usize,
+    model_name: &str,
+) -> CmResult<()> {
+    if len != width {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("vector length {len} must match {model_name} input width {width}"),
+        });
+    }
+    Ok(())
+}
+
+fn validate_analog_vector_params(ctx: &CmContext, model_name: &str) -> CmResult<()> {
+    let width = ctx.port_width("in");
+    for name in ["in_offset", "in_gain"] {
+        let supplied = ctx.real_vector_param(name).unwrap_or(&[]);
+        if !supplied.is_empty() {
+            validate_analog_vector_param_width(name, supplied.len(), width, model_name)?;
+        }
+    }
+    Ok(())
 }
 
 //=============================================================================
 // Multiplier
 //=============================================================================
 
-/// Analog multiplier: out = in0 * in1 * out_gain + out_offset
+/// Analog multiplier: out = out_gain * product(in_gain[i] * (in[i] + in_offset[i])) + out_offset
 ///
 /// # Parameters
+/// - `in_offset` - Offset for each input (default: 0.0)
+/// - `in_gain` - Gain for each input (default: 1.0)
 /// - `out_gain` - Output gain factor (default: 1.0)
 /// - `out_offset` - Output offset (default: 0.0)
 ///
 /// # Ports
-/// - `in0`, `in1` - Analog voltage inputs
+/// - `in` - Vector analog input
 /// - `out` - Analog voltage output
 #[derive(Debug, Default)]
 pub struct Multiplier;
@@ -196,7 +370,7 @@ impl CodeModel for Multiplier {
     }
 
     fn description(&self) -> &str {
-        "Analog multiplier: out = in0 * in1 * out_gain + out_offset"
+        "Analog vector-input multiplier with per-input offsets/gains"
     }
 
     fn ports(&self) -> &[PortSpec] {
@@ -204,9 +378,37 @@ impl CodeModel for Multiplier {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
         PORTS.get_or_init(|| {
             vec![
-                PortSpec::input("in0", PortType::Voltage).with_description("First analog input"),
-                PortSpec::input("in1", PortType::Voltage).with_description("Second analog input"),
-                PortSpec::output("out", PortType::Voltage).with_description("Product output"),
+                PortSpec {
+                    name: "in".to_string(),
+                    direction: PortDirection::In,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                        PortType::VoltageName,
+                    ],
+                    is_vector: true,
+                    null_allowed: false,
+                    vector_min_len: Some(2),
+                    vector_max_len: None,
+                    description: "Vector of analog inputs".to_string(),
+                },
+                PortSpec {
+                    name: "out".to_string(),
+                    direction: PortDirection::Out,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Product output".to_string(),
+                },
             ]
         })
     }
@@ -216,51 +418,109 @@ impl CodeModel for Multiplier {
         static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
         PARAMS.get_or_init(|| {
             vec![
+                ParamSpec::real_vector("in_offset", Vec::new())
+                    .with_description("Offset applied to each input, defaulting each input to 0.0"),
+                ParamSpec::real_vector("in_gain", Vec::new())
+                    .with_description("Gain applied to each input, defaulting each input to 1.0"),
                 ParamSpec::real("out_gain", 1.0).with_description("Output gain factor"),
                 ParamSpec::real("out_offset", 0.0).with_description("Output offset voltage"),
             ]
         })
     }
 
-    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
-        Ok(())
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        validate_analog_vector_params(ctx, "mult")
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let out_gain = ctx.param("out_gain");
-        let out_offset = ctx.param("out_offset");
+        let (output, _partials) = mult_transfer_from_context(ctx)?;
 
-        let in0 = ctx.input("in0");
-        let in1 = ctx.input("in1");
-        let v_out = in0 * in1 * out_gain + out_offset;
-
-        ctx.set_output("out", v_out);
+        ctx.set_output("out", output);
         Ok(())
     }
 
-    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
-        if output_port.eq_ignore_ascii_case("out") {
-            let out_gain = ctx.param("out_gain");
-            vec![
-                ("in0".to_string(), ctx.input("in1") * out_gain),
-                ("in1".to_string(), ctx.input("in0") * out_gain),
-            ]
-        } else {
-            Vec::new()
+    fn output_input_vector_partials(
+        &self,
+        ctx: &CmContext,
+        output_port: &str,
+    ) -> Vec<(String, usize, Value)> {
+        if !output_port.eq_ignore_ascii_case("out") {
+            return Vec::new();
         }
+
+        let Ok((_output, partials)) = mult_transfer_from_context(ctx) else {
+            return Vec::new();
+        };
+        partials
+            .into_iter()
+            .enumerate()
+            .map(|(index, partial)| ("in".to_string(), index, partial))
+            .collect()
     }
+}
+
+fn mult_transfer_from_context(ctx: &CmContext) -> CmResult<(Value, Vec<Value>)> {
+    let inputs = ctx.input_vector("in");
+    if inputs.len() < 2 {
+        return Err(CmError::EvaluationError(format!(
+            "mult requires at least 2 inputs, got {}",
+            inputs.len()
+        )));
+    }
+
+    let in_gain = analog_vector_param(ctx, "in_gain", inputs.len(), 1.0, "mult")?;
+    let in_offset = analog_vector_param(ctx, "in_offset", inputs.len(), 0.0, "mult")?;
+    let out_gain = ctx.param("out_gain");
+    let out_offset = ctx.param("out_offset");
+
+    let mut accumulate_gain = 1.0;
+    let mut accumulate_in = 1.0;
+    let mut shifted_inputs = Vec::with_capacity(inputs.len());
+    for ((&input, &gain), &offset) in inputs.iter().zip(&in_gain).zip(&in_offset) {
+        accumulate_gain *= gain;
+        let shifted = input + offset;
+        shifted_inputs.push(shifted);
+        accumulate_in *= shifted;
+    }
+
+    let transfer_gain = accumulate_gain * out_gain;
+    let output = accumulate_in * transfer_gain + out_offset;
+    let partials = if accumulate_in != 0.0 && accumulate_in.is_finite() && transfer_gain.is_finite()
+    {
+        shifted_inputs
+            .iter()
+            .map(|shifted| {
+                if *shifted == 0.0 {
+                    0.0
+                } else {
+                    accumulate_in / shifted * transfer_gain
+                }
+            })
+            .collect()
+    } else {
+        vec![0.0; inputs.len()]
+    };
+
+    Ok((output, partials))
 }
 
 //=============================================================================
 // Divider
 //=============================================================================
 
-/// Analog divider: out = (num / den) * out_gain + out_offset
+/// Analog divider: out = out_offset + out_gain * ((num + num_offset) * num_gain) /
+/// ((den + den_offset) * den_gain), with ngspice-compatible denominator limiting.
 ///
 /// # Parameters
+/// - `num_offset` - Numerator offset (default: 0.0)
+/// - `num_gain` - Numerator gain (default: 1.0)
+/// - `den_offset` - Denominator offset (default: 0.0)
+/// - `den_gain` - Denominator gain (default: 1.0)
+/// - `den_lower_limit` - Minimum denominator magnitude (default: 1e-10)
+/// - `den_domain` - Denominator smoothing domain (default: 1e-16)
+/// - `fraction` - Treat `den_domain` as a fraction of `den_lower_limit` (default: false)
 /// - `out_gain` - Output gain (default: 1.0)
 /// - `out_offset` - Output offset (default: 0.0)
-/// - `den_lower_limit` - Minimum denominator magnitude (default: 1e-12)
 ///
 /// # Ports
 /// - `num` - Numerator input
@@ -275,7 +535,7 @@ impl CodeModel for Divider {
     }
 
     fn description(&self) -> &str {
-        "Analog divider: out = (num / den) * out_gain + out_offset"
+        "Analog divider with input offsets/gains and smoothed denominator limiting"
     }
 
     fn ports(&self) -> &[PortSpec] {
@@ -283,9 +543,53 @@ impl CodeModel for Divider {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
         PORTS.get_or_init(|| {
             vec![
-                PortSpec::input("num", PortType::Voltage).with_description("Numerator input"),
-                PortSpec::input("den", PortType::Voltage).with_description("Denominator input"),
-                PortSpec::output("out", PortType::Voltage).with_description("Quotient output"),
+                PortSpec {
+                    name: "num".to_string(),
+                    direction: PortDirection::In,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                        PortType::VoltageName,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Numerator input".to_string(),
+                },
+                PortSpec {
+                    name: "den".to_string(),
+                    direction: PortDirection::In,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                        PortType::VoltageName,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Denominator input".to_string(),
+                },
+                PortSpec {
+                    name: "out".to_string(),
+                    direction: PortDirection::Out,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Quotient output".to_string(),
+                },
             ]
         })
     }
@@ -295,11 +599,18 @@ impl CodeModel for Divider {
         static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
         PARAMS.get_or_init(|| {
             vec![
+                ParamSpec::real("num_offset", 0.0).with_description("Numerator offset"),
+                ParamSpec::real("num_gain", 1.0).with_description("Numerator gain"),
+                ParamSpec::real("den_offset", 0.0).with_description("Denominator offset"),
+                ParamSpec::real("den_gain", 1.0).with_description("Denominator gain"),
+                ParamSpec::real("den_lower_limit", 1.0e-10)
+                    .with_description("Minimum denominator magnitude, clamped to 1e-10"),
+                ParamSpec::real("den_domain", 1.0e-16)
+                    .with_description("Denominator smoothing domain"),
+                ParamSpec::boolean("fraction", false)
+                    .with_description("Treat den_domain as a fraction of den_lower_limit"),
                 ParamSpec::real("out_gain", 1.0).with_description("Output gain factor"),
                 ParamSpec::real("out_offset", 0.0).with_description("Output offset voltage"),
-                ParamSpec::real("den_lower_limit", 1e-12)
-                    .with_min(0.0)
-                    .with_description("Minimum denominator magnitude to prevent division by zero"),
             ]
         })
     }
@@ -309,21 +620,7 @@ impl CodeModel for Divider {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let out_gain = ctx.param("out_gain");
-        let out_offset = ctx.param("out_offset");
-        let den_limit = ctx.param("den_lower_limit");
-
-        let num = ctx.input("num");
-        let den = ctx.input("den");
-
-        // Prevent division by zero
-        let safe_den = if den.abs() < den_limit {
-            den_limit.copysign(den)
-        } else {
-            den
-        };
-
-        let v_out = (num / safe_den) * out_gain + out_offset;
+        let (v_out, _, _) = divide_transfer_from_context(ctx);
         ctx.set_output("out", v_out);
         Ok(())
     }
@@ -333,31 +630,74 @@ impl CodeModel for Divider {
             return Vec::new();
         }
 
-        let out_gain = ctx.param("out_gain");
-        let den_limit = ctx.param("den_lower_limit");
-        let num = ctx.input("num");
-        let den = ctx.input("den");
-        let den_limited = den.abs() < den_limit;
-        let safe_den = if den_limited {
-            den_limit.copysign(den)
-        } else {
-            den
-        };
-        if safe_den == 0.0 || !safe_den.is_finite() {
+        let (_, num_partial, den_partial) = divide_transfer_from_context(ctx);
+        if !num_partial.is_finite() || !den_partial.is_finite() {
             return Vec::new();
         }
 
         vec![
-            ("num".to_string(), out_gain / safe_den),
-            (
-                "den".to_string(),
-                if den_limited {
-                    0.0
-                } else {
-                    -out_gain * num / (safe_den * safe_den)
-                },
-            ),
+            ("num".to_string(), num_partial),
+            ("den".to_string(), den_partial),
         ]
+    }
+}
+
+fn divide_transfer_from_context(ctx: &CmContext) -> (Value, Value, Value) {
+    let mut den_domain = ctx.param("den_domain");
+    let den_lower_limit = ctx.param("den_lower_limit").max(1.0e-10);
+    if ctx.param("fraction") > 0.5 {
+        den_domain *= den_lower_limit;
+    }
+
+    let numerator = (ctx.input("num") + ctx.param("num_offset")) * ctx.param("num_gain");
+    let denominator = (ctx.input("den") + ctx.param("den_offset")) * ctx.param("den_gain");
+    let (limited_den, den_partial) =
+        divide_limited_denominator(denominator, den_lower_limit, den_domain);
+
+    let out_gain = ctx.param("out_gain");
+    let output = ctx.param("out_offset") + out_gain * numerator / limited_den;
+    let num_partial = out_gain * ctx.param("num_gain") / limited_den;
+    let den_partial =
+        -out_gain * numerator * ctx.param("den_gain") * den_partial / (limited_den * limited_den);
+    (output, num_partial, den_partial)
+}
+
+fn divide_limited_denominator(
+    denominator: Value,
+    den_lower_limit: Value,
+    den_domain: Value,
+) -> (Value, Value) {
+    let threshold_upper = den_lower_limit + den_domain;
+    let threshold_lower = den_lower_limit - den_domain;
+
+    if denominator < threshold_upper && denominator >= 0.0 {
+        if den_domain > 0.0 && denominator > threshold_lower {
+            smooth_corner(
+                denominator,
+                den_lower_limit,
+                den_lower_limit,
+                den_domain,
+                0.0,
+                1.0,
+            )
+        } else {
+            (den_lower_limit, 0.0)
+        }
+    } else if denominator > -threshold_upper && denominator < 0.0 {
+        if den_domain > 0.0 && denominator < -threshold_lower {
+            smooth_corner(
+                denominator,
+                -den_lower_limit,
+                -den_lower_limit,
+                den_domain,
+                0.0,
+                1.0,
+            )
+        } else {
+            (-den_lower_limit, 0.0)
+        }
+    } else {
+        (denominator, 1.0)
     }
 }
 
@@ -365,15 +705,16 @@ impl CodeModel for Divider {
 // Limiter
 //=============================================================================
 
-/// Limiter with gain: out = clamp(gain * (in + in_offset) + out_offset, out_lower, out_upper)
+/// Limiter with gain: out = clamp(gain * (in + in_offset), out_lower, out_upper)
+/// with ngspice-compatible parabolic smoothing at both limits.
 ///
 /// # Parameters
 /// - `gain` - Gain in linear region (default: 1.0)
 /// - `in_offset` - Input offset (default: 0.0)
-/// - `out_offset` - Output offset (default: 0.0)
 /// - `out_lower_limit` - Lower output limit (default: -1e12)
 /// - `out_upper_limit` - Upper output limit (default: 1e12)
-/// - `limit_range` - Smoothing range (default: 0.01)
+/// - `limit_range` - Smoothing range (default: 1e-6)
+/// - `fraction` - Treat `limit_range` as a fraction of the output span (default: false)
 ///
 /// # Ports
 /// - `in` - Analog voltage input
@@ -387,7 +728,7 @@ impl CodeModel for Limiter {
     }
 
     fn description(&self) -> &str {
-        "Limiter with gain and offset"
+        "Limiter with gain and ngspice-compatible smoothing"
     }
 
     fn ports(&self) -> &[PortSpec] {
@@ -395,9 +736,37 @@ impl CodeModel for Limiter {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
         PORTS.get_or_init(|| {
             vec![
-                PortSpec::input("in", PortType::Voltage).with_description("Analog voltage input"),
-                PortSpec::output("out", PortType::Voltage)
-                    .with_description("Limited analog output"),
+                PortSpec {
+                    name: "in".to_string(),
+                    direction: PortDirection::In,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                        PortType::VoltageName,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Analog input".to_string(),
+                },
+                PortSpec {
+                    name: "out".to_string(),
+                    direction: PortDirection::Out,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Limited analog output".to_string(),
+                },
             ]
         })
     }
@@ -409,12 +778,16 @@ impl CodeModel for Limiter {
             vec![
                 ParamSpec::real("gain", 1.0).with_description("Gain in linear region"),
                 ParamSpec::real("in_offset", 0.0).with_description("Input offset voltage"),
-                ParamSpec::real("out_offset", 0.0).with_description("Output offset voltage"),
-                ParamSpec::real("out_lower_limit", -1e12).with_description("Lower output limit"),
-                ParamSpec::real("out_upper_limit", 1e12).with_description("Upper output limit"),
-                ParamSpec::real("limit_range", 0.01)
-                    .with_min(0.0)
-                    .with_description("Smoothing range for soft limiting"),
+                ParamSpec::real("out_lower_limit", -1e12)
+                    .required()
+                    .with_description("Lower output limit"),
+                ParamSpec::real("out_upper_limit", 1e12)
+                    .required()
+                    .with_description("Upper output limit"),
+                ParamSpec::real("limit_range", 1.0e-6)
+                    .with_description("Smoothing range for limit transitions"),
+                ParamSpec::boolean("fraction", false)
+                    .with_description("Treat limit_range as a fraction of the output span"),
             ]
         })
     }
@@ -424,30 +797,7 @@ impl CodeModel for Limiter {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let gain = ctx.param("gain");
-        let in_offset = ctx.param("in_offset");
-        let out_offset = ctx.param("out_offset");
-        let lower = ctx.param("out_lower_limit");
-        let upper = ctx.param("out_upper_limit");
-        let range = ctx.param("limit_range");
-
-        let v_in = ctx.input("in");
-        let linear_out = gain * (v_in + in_offset) + out_offset;
-
-        // Soft limiting (smooth clamp) using tanh-based smoothing
-        let v_out = if range > 0.0 {
-            soft_clamp(linear_out, lower, upper, range)
-        } else {
-            linear_out.clamp(lower, upper)
-        };
-
-        // Compute partial derivative for Newton-Raphson
-        let partial = if linear_out < lower || linear_out > upper {
-            0.0 // Output is clipped, derivative is zero
-        } else {
-            gain
-        };
-
+        let (v_out, partial) = limit_transfer_from_context(ctx);
         ctx.set_output_with_partial("out", v_out, partial);
         Ok(())
     }
@@ -458,6 +808,56 @@ impl CodeModel for Limiter {
         } else {
             Vec::new()
         }
+    }
+}
+
+fn limit_transfer_from_context(ctx: &CmContext) -> (Value, Value) {
+    limit_transfer(
+        ctx.input("in"),
+        ctx.param("in_offset"),
+        ctx.param("out_lower_limit"),
+        ctx.param("out_upper_limit"),
+        ctx.param("limit_range"),
+        ctx.param("gain"),
+        ctx.param("fraction") > 0.5,
+    )
+}
+
+fn limit_transfer(
+    input: Value,
+    in_offset: Value,
+    out_lower_limit: Value,
+    out_upper_limit: Value,
+    mut limit_range: Value,
+    gain: Value,
+    fraction: bool,
+) -> (Value, Value) {
+    if fraction {
+        limit_range *= out_upper_limit - out_lower_limit;
+    }
+
+    let threshold_upper = out_upper_limit - limit_range;
+    let threshold_lower = out_lower_limit + limit_range;
+    let raw = gain * (in_offset + input);
+
+    if raw < threshold_lower {
+        if raw > out_lower_limit - limit_range && limit_range > 0.0 {
+            let (limited_out, partial) =
+                smooth_corner(raw, out_lower_limit, out_lower_limit, limit_range, 0.0, 1.0);
+            (limited_out, gain * partial)
+        } else {
+            (out_lower_limit, 0.0)
+        }
+    } else if raw > threshold_upper {
+        if raw < out_upper_limit + limit_range && limit_range > 0.0 {
+            let (limited_out, partial) =
+                smooth_corner(raw, out_upper_limit, out_upper_limit, limit_range, 1.0, 0.0);
+            (limited_out, gain * partial)
+        } else {
+            (out_upper_limit, 0.0)
+        }
+    } else {
+        (raw, gain)
     }
 }
 
@@ -486,13 +886,10 @@ impl CodeModel for ControlledLimiter {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
         PORTS.get_or_init(|| {
             vec![
-                PortSpec::input("in", PortType::Voltage).with_description("Analog input"),
-                PortSpec::input("cntl_upper", PortType::Voltage)
-                    .with_description("Upper limit control input"),
-                PortSpec::input("cntl_lower", PortType::Voltage)
-                    .with_description("Lower limit control input"),
-                PortSpec::output("out", PortType::Voltage)
-                    .with_description("Controlled limited output"),
+                broad_scalar_analog_input_port("in", "Analog input"),
+                broad_scalar_analog_input_port("cntl_upper", "Upper limit control input"),
+                broad_scalar_analog_input_port("cntl_lower", "Lower limit control input"),
+                scalar_analog_output_port("out", "Controlled limited output"),
             ]
         })
     }
@@ -521,19 +918,232 @@ impl CodeModel for ControlledLimiter {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let (out, pout_pin, _pout_pcntl_lower, _pout_pcntl_upper) = climit_transfer(
-            ctx.input("in"),
-            ctx.param("in_offset"),
-            ctx.input("cntl_upper"),
-            ctx.input("cntl_lower"),
-            ctx.param("lower_delta"),
-            ctx.param("upper_delta"),
-            ctx.param("limit_range"),
-            ctx.param("gain"),
-            ctx.param("fraction") > 0.5,
-        );
+        let (out, pout_pin, _pout_pcntl_lower, _pout_pcntl_upper) =
+            climit_transfer_from_context(ctx);
 
         ctx.set_output_with_partial("out", out, pout_pin);
+        Ok(())
+    }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if output_port.eq_ignore_ascii_case("out") {
+            let (_out, pout_pin, pout_pcntl_lower, pout_pcntl_upper) =
+                climit_transfer_from_context(ctx);
+            vec![
+                ("in".to_string(), pout_pin),
+                ("cntl_lower".to_string(), pout_pcntl_lower),
+                ("cntl_upper".to_string(), pout_pcntl_upper),
+            ]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+//=============================================================================
+// Hysteresis Block
+//=============================================================================
+
+/// Official XSPICE `hyst` code model.
+#[derive(Debug, Default)]
+pub struct HysteresisBlock;
+
+const HYST_STATE: usize = 0;
+const HYST_UNINITIALIZED: i64 = i64::MIN;
+const HYST_RISING: i64 = 1;
+const HYST_FALLING: i64 = 0;
+
+#[derive(Debug, Clone, Copy)]
+struct HystParams {
+    in_low: Value,
+    in_high: Value,
+    hyst: Value,
+    out_lower_limit: Value,
+    out_upper_limit: Value,
+    input_domain: Value,
+}
+
+fn hyst_error(message: impl Into<String>) -> CmError {
+    CmError::EvaluationError(format!("hyst: {}", message.into()))
+}
+
+fn hyst_params(ctx: &CmContext) -> CmResult<HystParams> {
+    let in_low = ctx.param("in_low");
+    let in_high = ctx.param("in_high");
+    let raw_hyst = ctx.param("hyst");
+    let out_lower_limit = ctx.param("out_lower_limit");
+    let out_upper_limit = ctx.param("out_upper_limit");
+    let mut input_domain = ctx.param("input_domain");
+
+    for (name, value) in [
+        ("in_low", in_low),
+        ("in_high", in_high),
+        ("hyst", raw_hyst),
+        ("out_lower_limit", out_lower_limit),
+        ("out_upper_limit", out_upper_limit),
+        ("input_domain", input_domain),
+    ] {
+        if !value.is_finite() {
+            return Err(hyst_error(format!("{name} must be finite, got {value}")));
+        }
+    }
+    if in_high == in_low {
+        return Err(hyst_error(format!(
+            "in_high must differ from in_low, got in_low={in_low}, in_high={in_high}"
+        )));
+    }
+    let hyst = raw_hyst.max(0.0);
+
+    if ctx.param("fraction") > 0.5 {
+        input_domain *= in_high - in_low;
+    }
+
+    Ok(HystParams {
+        in_low,
+        in_high,
+        hyst,
+        out_lower_limit,
+        out_upper_limit,
+        input_domain,
+    })
+}
+
+fn hyst_transfer(input: Value, old_state: i64, params: HystParams) -> (Value, Value, i64) {
+    let slope =
+        (params.out_upper_limit - params.out_lower_limit) / (params.in_high - params.in_low);
+    let x_rise_linear = params.in_low + params.hyst;
+    let x_rise_zero = params.in_high + params.hyst;
+    let x_fall_linear = params.in_high - params.hyst;
+    let x_fall_zero = params.in_low - params.hyst;
+    let domain = params.input_domain;
+
+    let mut state = old_state;
+    if state == HYST_UNINITIALIZED {
+        state = if input < x_rise_zero + domain {
+            HYST_RISING
+        } else {
+            HYST_FALLING
+        };
+    }
+
+    if state == HYST_RISING {
+        if input <= x_rise_linear - domain {
+            (params.out_lower_limit, 0.0, HYST_RISING)
+        } else if domain > 0.0 && input <= x_rise_linear + domain {
+            let (out, partial) = smooth_corner(
+                input,
+                x_rise_linear,
+                params.out_lower_limit,
+                domain,
+                0.0,
+                slope,
+            );
+            (out, partial, HYST_RISING)
+        } else if input <= x_rise_zero - domain {
+            (
+                (input - x_rise_linear) * slope + params.out_lower_limit,
+                slope,
+                HYST_RISING,
+            )
+        } else if domain > 0.0 && input <= x_rise_zero + domain {
+            let (out, partial) = smooth_corner(
+                input,
+                x_rise_zero,
+                params.out_upper_limit,
+                domain,
+                slope,
+                0.0,
+            );
+            (out, partial, HYST_RISING)
+        } else {
+            (params.out_upper_limit, 0.0, HYST_FALLING)
+        }
+    } else if input >= x_fall_linear + domain {
+        (params.out_upper_limit, 0.0, HYST_FALLING)
+    } else if domain > 0.0 && input >= x_fall_linear - domain {
+        let (out, partial) = smooth_corner(
+            input,
+            x_fall_linear,
+            params.out_upper_limit,
+            domain,
+            slope,
+            0.0,
+        );
+        (out, partial, HYST_FALLING)
+    } else if input >= x_fall_zero + domain {
+        (
+            (input - x_fall_zero) * slope + params.out_lower_limit,
+            slope,
+            HYST_FALLING,
+        )
+    } else if domain > 0.0 && input >= x_fall_zero - domain {
+        let (out, partial) = smooth_corner(
+            input,
+            x_fall_zero,
+            params.out_lower_limit,
+            domain,
+            0.0,
+            slope,
+        );
+        (out, partial, HYST_FALLING)
+    } else {
+        (params.out_lower_limit, 0.0, HYST_RISING)
+    }
+}
+
+impl CodeModel for HysteresisBlock {
+    fn name(&self) -> &str {
+        "hyst"
+    }
+
+    fn description(&self) -> &str {
+        "Hysteresis block"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        use std::sync::OnceLock;
+        static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+        PORTS.get_or_init(|| {
+            vec![
+                broad_scalar_analog_input_port("in", "Analog input"),
+                scalar_analog_output_port("out", "Analog output"),
+            ]
+        })
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        use std::sync::OnceLock;
+        static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+        PARAMS.get_or_init(|| {
+            vec![
+                ParamSpec::real("in_low", 0.0).with_description("Input low value"),
+                ParamSpec::real("in_high", 1.0).with_description("Input high value"),
+                ParamSpec::real("hyst", 0.1)
+                    .with_description("Hysteresis width, clamped to nonnegative"),
+                ParamSpec::real("out_lower_limit", 0.0).with_description("Output lower limit"),
+                ParamSpec::real("out_upper_limit", 1.0).with_description("Output upper limit"),
+                ParamSpec::real("input_domain", 0.01).with_description("Input smoothing domain"),
+                ParamSpec::boolean("fraction", true)
+                    .with_description("Treat input_domain as a fraction of input range"),
+            ]
+        })
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        hyst_params(ctx)?;
+        ctx.allocate_int_states(1);
+        ctx.set_int_state(HYST_STATE, HYST_UNINITIALIZED);
+        Ok(())
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let params = hyst_params(ctx)?;
+        let (out, partial, state) =
+            hyst_transfer(ctx.input("in"), ctx.int_state(HYST_STATE), params);
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+            ctx.set_int_state(HYST_STATE, state);
+        }
+        ctx.set_output_with_partial("out", out, partial);
         Ok(())
     }
 
@@ -546,8 +1156,1289 @@ impl CodeModel for ControlledLimiter {
     }
 }
 
+//=============================================================================
+// Slew-Rate Follower
+//=============================================================================
+
+/// Official XSPICE `slew` code model.
+#[derive(Debug, Default)]
+pub struct SlewRateFollower;
+
+const SLEW_INPUT: usize = 0;
+const SLEW_OUTPUT: usize = 1;
+
+fn slew_rate_param(ctx: &CmContext, name: &str) -> CmResult<Value> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(CmError::EvaluationError(format!(
+            "slew: {name} must be finite, got {value}"
+        )));
+    }
+    Ok(value)
+}
+
+fn slew_step(
+    input: Value,
+    old_input: Value,
+    old_output: Value,
+    dt: Value,
+    rise_slope: Value,
+    fall_slope: Value,
+) -> (Value, Value) {
+    if dt <= 0.0 || !dt.is_finite() {
+        return (input, 1.0);
+    }
+
+    let slope = (input - old_input) / dt;
+    if slope >= 0.0 {
+        let out_slew = old_output + rise_slope * dt;
+        if input < old_output - fall_slope * dt {
+            (old_output - fall_slope * dt, 0.0)
+        } else if slope > rise_slope || (slope < rise_slope && out_slew <= input) {
+            (out_slew, 0.0)
+        } else {
+            (input, 1.0)
+        }
+    } else {
+        let out_slew = old_output - fall_slope * dt;
+        if input > old_output + rise_slope * dt {
+            (old_output + rise_slope * dt, 0.0)
+        } else if -slope > fall_slope || (-slope < fall_slope && out_slew > input) {
+            (out_slew, 0.0)
+        } else {
+            (input, 1.0)
+        }
+    }
+}
+
+impl CodeModel for SlewRateFollower {
+    fn name(&self) -> &str {
+        "slew"
+    }
+
+    fn description(&self) -> &str {
+        "Slew-rate limited follower"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        use std::sync::OnceLock;
+        static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+        PORTS.get_or_init(|| {
+            vec![
+                broad_scalar_analog_input_port("in", "Analog input"),
+                scalar_analog_output_port("out", "Slewed output"),
+            ]
+        })
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        use std::sync::OnceLock;
+        static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+        PARAMS.get_or_init(|| {
+            vec![
+                ParamSpec::real("rise_slope", 1.0e-9).with_description("Rising slew limit"),
+                ParamSpec::real("fall_slope", 1.0e-9).with_description("Falling slew limit"),
+            ]
+        })
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        slew_rate_param(ctx, "rise_slope")?;
+        slew_rate_param(ctx, "fall_slope")?;
+        ctx.allocate_states(2);
+        ctx.set_initial_state(SLEW_INPUT, 0.0);
+        ctx.set_initial_state(SLEW_OUTPUT, 0.0);
+        Ok(())
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let input = ctx.input("in");
+        let rise_slope = slew_rate_param(ctx, "rise_slope")?;
+        let fall_slope = slew_rate_param(ctx, "fall_slope")?;
+
+        let (output, partial) = if ctx.is_dc() || ctx.time == 0.0 {
+            (input, 1.0)
+        } else {
+            slew_step(
+                input,
+                ctx.state_prev(SLEW_INPUT),
+                ctx.state_prev(SLEW_OUTPUT),
+                (ctx.time - ctx.time_prev).max(0.0),
+                rise_slope,
+                fall_slope,
+            )
+        };
+
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+            if ctx.is_dc() || ctx.time == 0.0 {
+                ctx.set_initial_state(SLEW_INPUT, input);
+                ctx.set_initial_state(SLEW_OUTPUT, output);
+            } else {
+                ctx.set_state(SLEW_INPUT, input);
+                ctx.set_state(SLEW_OUTPUT, output);
+            }
+        }
+        ctx.set_output_with_partial("out", output, partial);
+        Ok(())
+    }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if output_port.eq_ignore_ascii_case("out") {
+            vec![("in".to_string(), ctx.partial("out"))]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+//=============================================================================
+// Analog Delay Line
+//=============================================================================
+
+/// Analog delay line compatible with the official XSPICE `delay` interface.
+#[derive(Debug, Default)]
+pub struct AnalogDelayLine;
+
+const DELAY_WRITE_INDEX: usize = 0;
+const DELAY_COUNT: usize = 1;
+const DELAY_INITIALIZED: usize = 2;
+const DELAY_TIME_EPSILON: Value = 1.0e-18;
+
+fn delay_buffer_size(ctx: &CmContext) -> CmResult<usize> {
+    let value = if ctx.param_was_provided("buffer_size") {
+        ctx.param("buffer_size")
+    } else if let (Some(tstop), Some(tstep)) =
+        (ctx.transient_stop_time(), ctx.transient_step_hint())
+    {
+        (tstop / tstep).trunc() + 1.0
+    } else {
+        ctx.param("buffer_size")
+    };
+    if !value.is_finite() {
+        return Err(CmError::EvaluationError(format!(
+            "delay: buffer_size must be finite, got {value}"
+        )));
+    }
+    Ok(value.round().max(1.0) as usize)
+}
+
+fn delay_state_count(buffer_size: usize) -> CmResult<usize> {
+    buffer_size
+        .checked_mul(2)
+        .ok_or_else(|| CmError::EvaluationError("delay: buffer_size is too large".to_string()))
+}
+
+fn controlled_delay_bound(ctx: &CmContext, value: Value) -> Value {
+    let mut bound = value.max(0.0);
+    if let Some(tstop) = ctx.transient_stop_time()
+        && bound > tstop
+    {
+        bound = tstop;
+    }
+    bound
+}
+
+fn delay_time_slot(index: usize) -> usize {
+    index
+}
+
+fn delay_value_slot(buffer_size: usize, index: usize) -> usize {
+    buffer_size + index
+}
+
+fn newest_delay_index(write_index: usize, count: usize, buffer_size: usize) -> usize {
+    if count == 0 {
+        0
+    } else {
+        (write_index + buffer_size - 1) % buffer_size
+    }
+}
+
+fn oldest_delay_index(write_index: usize, count: usize, buffer_size: usize) -> usize {
+    if count < buffer_size { 0 } else { write_index }
+}
+
+fn delay_ring_index(oldest: usize, offset: usize, buffer_size: usize) -> usize {
+    (oldest + offset) % buffer_size
+}
+
+fn append_delay_sample(ctx: &mut CmContext, buffer_size: usize, value: Value) {
+    if ctx.int_state(DELAY_INITIALIZED) == 0 {
+        ctx.set_state(delay_time_slot(0), ctx.time);
+        ctx.set_state(delay_value_slot(buffer_size, 0), value);
+        ctx.set_int_state(DELAY_WRITE_INDEX, if buffer_size == 1 { 0 } else { 1 });
+        ctx.set_int_state(DELAY_COUNT, 1);
+        ctx.set_int_state(DELAY_INITIALIZED, 1);
+        return;
+    }
+
+    let write_index = ctx.int_state(DELAY_WRITE_INDEX) as usize;
+    let count = ctx.int_state(DELAY_COUNT) as usize;
+    let newest = newest_delay_index(write_index, count, buffer_size);
+    let newest_time = ctx.state(delay_time_slot(newest));
+
+    if (ctx.time - newest_time).abs() <= DELAY_TIME_EPSILON {
+        ctx.set_state(delay_value_slot(buffer_size, newest), value);
+    } else if ctx.time > newest_time {
+        ctx.set_state(delay_time_slot(write_index), ctx.time);
+        ctx.set_state(delay_value_slot(buffer_size, write_index), value);
+        ctx.set_int_state(DELAY_WRITE_INDEX, ((write_index + 1) % buffer_size) as i64);
+        ctx.set_int_state(DELAY_COUNT, count.saturating_add(1).min(buffer_size) as i64);
+    }
+}
+
+fn interpolate_delay_history(ctx: &CmContext, buffer_size: usize, target_time: Value) -> Value {
+    let count = ctx.int_state(DELAY_COUNT) as usize;
+    if count == 0 {
+        return 0.0;
+    }
+
+    let write_index = ctx.int_state(DELAY_WRITE_INDEX) as usize;
+    let oldest = oldest_delay_index(write_index, count, buffer_size);
+    let first = oldest;
+    let first_time = ctx.state(delay_time_slot(first));
+    let first_value = ctx.state(delay_value_slot(buffer_size, first));
+    if count == 1 || target_time <= first_time {
+        return first_value;
+    }
+
+    let newest = newest_delay_index(write_index, count, buffer_size);
+    let newest_time = ctx.state(delay_time_slot(newest));
+    let newest_value = ctx.state(delay_value_slot(buffer_size, newest));
+    if target_time >= newest_time {
+        return newest_value;
+    }
+
+    let mut prev = first;
+    for offset in 1..count {
+        let current = delay_ring_index(oldest, offset, buffer_size);
+        let prev_time = ctx.state(delay_time_slot(prev));
+        let current_time = ctx.state(delay_time_slot(current));
+        if target_time <= current_time {
+            let prev_value = ctx.state(delay_value_slot(buffer_size, prev));
+            let current_value = ctx.state(delay_value_slot(buffer_size, current));
+            let span = current_time - prev_time;
+            if span.abs() <= Value::EPSILON {
+                return current_value;
+            }
+            let alpha = (target_time - prev_time) / span;
+            return prev_value + alpha * (current_value - prev_value);
+        }
+        prev = current;
+    }
+
+    newest_value
+}
+
+fn effective_delay(ctx: &CmContext) -> Value {
+    let delay = if ctx.param("has_delay_cnt") > 0.5 {
+        let raw_delmax_provided = ctx.param_was_provided("delmax");
+        let raw_delmax = if raw_delmax_provided {
+            ctx.param("delmax")
+        } else {
+            ctx.transient_stop_time()
+                .unwrap_or_else(|| ctx.param("delmax"))
+        };
+        let delmin = if raw_delmax_provided && raw_delmax < 0.0 {
+            // ngspice's cm_delay negative-delmax branch resets tdelmin before
+            // reconciling max < min, so both bounds collapse to zero.
+            0.0
+        } else {
+            controlled_delay_bound(ctx, ctx.param("delmin"))
+        };
+        let delmax = controlled_delay_bound(ctx, raw_delmax).max(delmin);
+        let control = ctx.input("cntrl").clamp(0.0, 1.0);
+        delmin + (delmax - delmin) * control
+    } else {
+        ctx.param("delay").max(0.0)
+    };
+
+    if ctx.timestep.is_finite() && ctx.timestep > 0.0 && delay < ctx.timestep {
+        0.0
+    } else {
+        delay
+    }
+}
+
+impl CodeModel for AnalogDelayLine {
+    fn name(&self) -> &str {
+        "delay"
+    }
+
+    fn description(&self) -> &str {
+        "Analog delay line"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        use std::sync::OnceLock;
+        static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+        PORTS.get_or_init(|| {
+            vec![
+                scalar_analog_port(
+                    "in",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::VoltageName,
+                    ],
+                    false,
+                    "Analog input",
+                ),
+                scalar_analog_port(
+                    "out",
+                    PortDirection::Out,
+                    PortType::Voltage,
+                    vec![PortType::Voltage, PortType::DifferentialVoltage],
+                    false,
+                    "Delayed output",
+                ),
+                scalar_analog_port(
+                    "cntrl",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                    ],
+                    true,
+                    "Delay control input",
+                ),
+            ]
+        })
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        use std::sync::OnceLock;
+        static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+        PARAMS.get_or_init(|| {
+            vec![
+                ParamSpec::real("delay", 0.0).with_description("Delay time"),
+                ParamSpec::integer("buffer_size", 1024)
+                    .with_description("Delay history buffer size, clamped to at least 1"),
+                ParamSpec::boolean("has_delay_cnt", false)
+                    .with_description("Use the control input for delay time"),
+                ParamSpec::real("delmin", 0.0)
+                    .with_description("Minimum controlled delay, clamped to nonnegative"),
+                ParamSpec::real("delmax", 0.0)
+                    .with_description("Maximum controlled delay, clamped to nonnegative"),
+            ]
+        })
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let buffer_size = delay_buffer_size(ctx)?;
+        ctx.allocate_states(delay_state_count(buffer_size)?);
+        ctx.allocate_int_states(3);
+        ctx.set_int_state(DELAY_WRITE_INDEX, 0);
+        ctx.set_int_state(DELAY_COUNT, 0);
+        ctx.set_int_state(DELAY_INITIALIZED, 0);
+        Ok(())
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let input = ctx.input("in");
+        if ctx.is_dc() || ctx.is_ac() {
+            ctx.set_output_with_partial("out", input, 1.0);
+            return Ok(());
+        }
+
+        let buffer_size = delay_buffer_size(ctx)?;
+        ctx.allocate_states(delay_state_count(buffer_size)?);
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+            append_delay_sample(ctx, buffer_size, input);
+        }
+
+        let delay = effective_delay(ctx);
+        let output = if delay <= DELAY_TIME_EPSILON {
+            input
+        } else {
+            interpolate_delay_history(ctx, buffer_size, ctx.time - delay)
+        };
+        let partial = if delay <= DELAY_TIME_EPSILON {
+            1.0
+        } else {
+            0.0
+        };
+        ctx.set_output_with_partial("out", output, partial);
+        Ok(())
+    }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if output_port.eq_ignore_ascii_case("out") {
+            vec![("in".to_string(), ctx.partial("out"))]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+//=============================================================================
+// Analog State Return
+//=============================================================================
+
+/// Analog state return compatible with the official XSPICE `astate` interface.
+#[derive(Debug, Default)]
+pub struct AnalogStateReturn;
+
+const ASTATE_HISTORY_DEPTH: usize = 3;
+
+fn astate_number(ctx: &CmContext) -> CmResult<usize> {
+    let value = ctx.param("astate_no");
+    if !value.is_finite() {
+        return Err(CmError::EvaluationError(format!(
+            "astate: astate_no must be finite, got {value}"
+        )));
+    }
+
+    let number = value.round().clamp(0.0, ASTATE_HISTORY_DEPTH as Value);
+    Ok(number as usize)
+}
+
+fn update_astate_history(ctx: &mut CmContext, input: Value) {
+    ctx.set_state(2, ctx.state_prev(1));
+    ctx.set_state(1, ctx.state_prev(0));
+    ctx.set_state(0, input);
+}
+
+impl CodeModel for AnalogStateReturn {
+    fn name(&self) -> &str {
+        "astate"
+    }
+
+    fn description(&self) -> &str {
+        "Analog state return"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        use std::sync::OnceLock;
+        static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+        PORTS.get_or_init(|| {
+            vec![
+                broad_scalar_analog_input_port("in", "Analog input"),
+                scalar_analog_output_port("out", "Selected previous analog input state"),
+            ]
+        })
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        use std::sync::OnceLock;
+        static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+        PARAMS.get_or_init(|| {
+            vec![
+                ParamSpec::integer("astate_no", 1)
+                    .with_description("Previous input state number to return, clamped to 0..3"),
+            ]
+        })
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        ctx.allocate_states(ASTATE_HISTORY_DEPTH);
+        Ok(())
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let input = ctx.input("in");
+        let state_number = astate_number(ctx)?;
+
+        if ctx.is_dc() || ctx.is_ac() || state_number == 0 {
+            ctx.set_output_with_partial("out", input, 1.0);
+            return Ok(());
+        }
+
+        let output = ctx.state_prev(state_number - 1);
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+            update_astate_history(ctx, input);
+        }
+        ctx.set_output_with_partial("out", output, 0.0);
+        Ok(())
+    }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
+    }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if output_port.eq_ignore_ascii_case("out") {
+            vec![("in".to_string(), ctx.partial("out"))]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+//=============================================================================
+// One-Shot Pulse Source
+//=============================================================================
+
+/// Analog one-shot compatible with the official XSPICE `oneshot` interface.
+#[derive(Debug, Default)]
+pub struct AnalogOneShot;
+
+const ONESHOT_T1: usize = 0;
+const ONESHOT_T2: usize = 1;
+const ONESHOT_T3: usize = 2;
+const ONESHOT_T4: usize = 3;
+const ONESHOT_SET: usize = 4;
+const ONESHOT_STATE: usize = 5;
+const ONESHOT_CLOCK: usize = 6;
+const ONESHOT_OUTPUT_OLD: usize = 7;
+const ONESHOT_LOCKED: usize = 8;
+const ONESHOT_TRAN_INIT: usize = 9;
+const ONESHOT_STATE_COUNT: usize = 10;
+const ONESHOT_MIN_EDGE_TIME: Value = 1.0e-12;
+
+#[derive(Debug, Clone, Copy)]
+struct OneShotPoint {
+    control: Value,
+    pulse_width: Value,
+}
+
+fn analog_signal_port(name: &str, direction: PortDirection, nullable: bool) -> PortSpec {
+    let allowed_types = match direction {
+        PortDirection::In => vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::VoltageName,
+            PortType::Current,
+        ],
+        PortDirection::Out => vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::Current,
+        ],
+        PortDirection::InOut => vec![PortType::Voltage, PortType::DifferentialVoltage],
+    };
+    scalar_analog_port(
+        name,
+        direction,
+        PortType::Voltage,
+        allowed_types,
+        nullable,
+        "",
+    )
+}
+
+fn oneshot_ports() -> &'static [PortSpec] {
+    use std::sync::OnceLock;
+    static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+    PORTS.get_or_init(|| {
+        vec![
+            analog_signal_port("clk", PortDirection::In, false).with_description("Clock input"),
+            analog_signal_port("cntl_in", PortDirection::In, true)
+                .with_description("Pulse-width control input"),
+            analog_signal_port("clear", PortDirection::In, true).with_description("Clear input"),
+            analog_signal_port("out", PortDirection::Out, false).with_description("Pulse output"),
+        ]
+    })
+}
+
+fn oneshot_params() -> &'static [ParamSpec] {
+    use std::sync::OnceLock;
+    static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+    PARAMS.get_or_init(|| {
+        vec![
+            ParamSpec::real_vector("cntl_array", vec![0.0, 1.0])
+                .with_vector_min_len(2)
+                .with_description("Control input table"),
+            ParamSpec::real_vector("pw_array", vec![1.0e-6, 0.999_999_9])
+                .with_vector_min_len(2)
+                .with_description("Pulse-width table"),
+            ParamSpec::real("clk_trig", 0.5).with_description("Clock trigger threshold"),
+            ParamSpec::boolean("pos_edge_trig", true)
+                .with_description("Trigger on positive edge when true"),
+            ParamSpec::real("out_low", 0.0).with_description("Low output level"),
+            ParamSpec::real("out_high", 1.0).with_description("High output level"),
+            ParamSpec::real("rise_time", 1.0e-9).with_description("Output rise time"),
+            ParamSpec::real("rise_delay", 1.0e-9)
+                .with_description("Delay from trigger to rising edge"),
+            ParamSpec::real("fall_delay", 1.0e-9)
+                .with_description("Delay from pulse-width end to falling edge"),
+            ParamSpec::real("fall_time", 1.0e-9).with_description("Output fall time"),
+            ParamSpec::boolean("retrig", false).with_description("Allow retriggering"),
+        ]
+    })
+}
+
+fn oneshot_invalid_param(name: &str, message: impl Into<String>) -> CmError {
+    CmError::InvalidParameter {
+        name: name.to_string(),
+        message: message.into(),
+    }
+}
+
+fn oneshot_table_optional(ctx: &CmContext) -> CmResult<Option<Vec<OneShotPoint>>> {
+    let controls = ctx
+        .real_vector_param("cntl_array")
+        .ok_or_else(|| CmError::MissingParameter("cntl_array".to_string()))?;
+    let widths = ctx
+        .real_vector_param("pw_array")
+        .ok_or_else(|| CmError::MissingParameter("pw_array".to_string()))?;
+
+    if controls.len() != widths.len() {
+        return Ok(None);
+    }
+    if controls.len() < 2 {
+        return Err(oneshot_invalid_param(
+            "cntl_array",
+            format!(
+                "cntl_array and pw_array require at least 2 points, got {}",
+                controls.len()
+            ),
+        ));
+    }
+
+    let mut table: Vec<OneShotPoint> = Vec::with_capacity(controls.len());
+    for (idx, (&control, &pulse_width)) in controls.iter().zip(widths).enumerate() {
+        if !control.is_finite() {
+            return Err(oneshot_invalid_param(
+                "cntl_array",
+                format!("point {idx} must be finite, got {control}"),
+            ));
+        }
+        if !pulse_width.is_finite() {
+            return Err(oneshot_invalid_param(
+                "pw_array",
+                format!("point {idx} must be finite, got {pulse_width}"),
+            ));
+        }
+        table.push(OneShotPoint {
+            control,
+            pulse_width: pulse_width.max(0.0),
+        });
+    }
+
+    Ok(Some(table))
+}
+
+fn interpolate_oneshot_pulse_width(table: &[OneShotPoint], control: Value) -> Value {
+    let first = table[0];
+    let last = table[table.len() - 1];
+    let raw = if control <= first.control {
+        interpolate_oneshot_segment(table[0], table[1], control)
+    } else if control >= last.control {
+        interpolate_oneshot_segment(table[table.len() - 2], last, control)
+    } else {
+        table
+            .windows(2)
+            .find_map(|window| {
+                let left = window[0];
+                let right = window[1];
+                (control >= left.control && control < right.control)
+                    .then(|| interpolate_oneshot_segment(left, right, control))
+            })
+            .unwrap_or(last.pulse_width)
+    };
+
+    raw.max(0.0)
+}
+
+fn interpolate_oneshot_segment(left: OneShotPoint, right: OneShotPoint, control: Value) -> Value {
+    let span = right.control - left.control;
+    if span.abs() <= Value::EPSILON {
+        return left.pulse_width;
+    }
+    let alpha = (control - left.control) / span;
+    left.pulse_width + alpha * (right.pulse_width - left.pulse_width)
+}
+
+fn oneshot_levels(ctx: &CmContext) -> CmResult<(Value, Value)> {
+    let low = ctx.param("out_low");
+    let high = ctx.param("out_high");
+    if !low.is_finite() {
+        return Err(oneshot_invalid_param(
+            "out_low",
+            format!("value must be finite, got {low}"),
+        ));
+    }
+    if !high.is_finite() {
+        return Err(oneshot_invalid_param(
+            "out_high",
+            format!("value must be finite, got {high}"),
+        ));
+    }
+    Ok((low, high))
+}
+
+fn oneshot_finite_param(ctx: &CmContext, name: &str) -> CmResult<Value> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(oneshot_invalid_param(
+            name,
+            format!("value must be finite, got {value}"),
+        ));
+    }
+    Ok(value)
+}
+
+fn reset_oneshot_state(ctx: &mut CmContext, output_low: Value) {
+    ctx.set_state(ONESHOT_T1, -1.0);
+    ctx.set_state(ONESHOT_T2, -1.0);
+    ctx.set_state(ONESHOT_T3, -1.0);
+    ctx.set_state(ONESHOT_T4, -1.0);
+    ctx.set_state(ONESHOT_SET, 0.0);
+    ctx.set_state(ONESHOT_STATE, 0.0);
+    ctx.set_state(ONESHOT_CLOCK, 0.0);
+    ctx.set_state(ONESHOT_OUTPUT_OLD, output_low);
+    ctx.set_state(ONESHOT_LOCKED, 0.0);
+    ctx.set_state(ONESHOT_TRAN_INIT, 0.0);
+}
+
+fn request_oneshot_breakpoints(ctx: &mut CmContext, times: &[Value]) {
+    for &time in times {
+        if time >= ctx.time - 1.0e-18 {
+            ctx.request_breakpoint(time);
+        }
+    }
+}
+
+fn oneshot_output_below_or_at_official(value: Value, target: Value) -> bool {
+    value - target < 1.0e-20
+}
+
+impl CodeModel for AnalogOneShot {
+    fn name(&self) -> &str {
+        "oneshot"
+    }
+
+    fn description(&self) -> &str {
+        "Analog one-shot pulse generator"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        oneshot_ports()
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        oneshot_params()
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        if oneshot_table_optional(ctx)?.is_none() {
+            return Ok(());
+        }
+        let (output_low, _) = oneshot_levels(ctx)?;
+        for name in [
+            "clk_trig",
+            "rise_delay",
+            "fall_delay",
+            "rise_time",
+            "fall_time",
+        ] {
+            oneshot_finite_param(ctx, name)?;
+        }
+        ctx.allocate_states(ONESHOT_STATE_COUNT);
+        reset_oneshot_state(ctx, output_low);
+        for index in 0..ONESHOT_STATE_COUNT {
+            ctx.set_initial_state(index, ctx.state(index));
+        }
+        Ok(())
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let Some(table) = oneshot_table_optional(ctx)? else {
+            return Ok(());
+        };
+        let (output_low, output_high) = oneshot_levels(ctx)?;
+        let trigger = oneshot_finite_param(ctx, "clk_trig")?;
+        let rise_delay = oneshot_finite_param(ctx, "rise_delay")?;
+        let fall_delay = oneshot_finite_param(ctx, "fall_delay")?;
+        let rise_time = oneshot_finite_param(ctx, "rise_time")?.max(ONESHOT_MIN_EDGE_TIME);
+        let fall_time = oneshot_finite_param(ctx, "fall_time")?.max(ONESHOT_MIN_EDGE_TIME);
+
+        if ctx.is_dc() {
+            reset_oneshot_state(ctx, output_low);
+            ctx.set_output_with_partial("out", output_low, 0.0);
+            return Ok(());
+        }
+        if ctx.is_ac() {
+            ctx.set_output_with_partial("out", 0.0, 0.0);
+            return Ok(());
+        }
+
+        let mut time1 = ctx.state_prev(ONESHOT_T1);
+        let mut time2 = ctx.state_prev(ONESHOT_T2);
+        let mut time3 = ctx.state_prev(ONESHOT_T3);
+        let mut time4 = ctx.state_prev(ONESHOT_T4);
+        let mut set = ctx.state_prev(ONESHOT_SET) > 0.5;
+        let mut state = ctx.state_prev(ONESHOT_STATE) > 0.5;
+        let mut locked = ctx.state_prev(ONESHOT_LOCKED) > 0.5;
+        let previous_output = ctx.state_prev(ONESHOT_OUTPUT_OLD);
+        let old_clock = if ctx.state_prev(ONESHOT_TRAN_INIT) > 0.5 {
+            ctx.state_prev(ONESHOT_CLOCK)
+        } else {
+            0.0
+        };
+        let clock = ctx.input("clk");
+        let commit_state = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
+
+        let mut output = output_low;
+        if ctx.port_width("clear") > 0 && ctx.input("clear") > trigger {
+            time1 = -1.0;
+            time2 = -1.0;
+            time3 = -1.0;
+            time4 = -1.0;
+            set = false;
+            state = false;
+            locked = false;
+        } else {
+            let control = if ctx.port_width("cntl_in") > 0 {
+                ctx.input("cntl_in")
+            } else {
+                0.0
+            };
+            let pulse_width = interpolate_oneshot_pulse_width(&table, control);
+            let positive_edge = ctx.param("pos_edge_trig") > 0.5;
+            let retrigger = ctx.param("retrig") > 0.5;
+
+            if positive_edge {
+                if !set {
+                    if clock > old_clock && clock > trigger {
+                        state = true;
+                        set = true;
+                    }
+                } else if clock < old_clock && clock < trigger {
+                    set = false;
+                }
+            } else if !set {
+                if clock < old_clock && clock < trigger {
+                    state = true;
+                    set = true;
+                }
+            } else if clock > old_clock && clock > trigger {
+                set = false;
+            }
+
+            if state && oneshot_output_below_or_at_official(previous_output, output_low) && !locked
+            {
+                time1 = ctx.time + rise_delay;
+                time2 = time1 + rise_time;
+                time3 = time2 + pulse_width + fall_delay;
+                time4 = time3 + fall_time;
+                if !retrigger {
+                    locked = true;
+                }
+                if commit_state {
+                    request_oneshot_breakpoints(ctx, &[time1, time2, time3, time4]);
+                }
+                state = false;
+            } else if state
+                && oneshot_output_below_or_at_official(previous_output, output_high)
+                && !locked
+            {
+                time3 = ctx.time + pulse_width + rise_delay + fall_delay + rise_time;
+                time4 = time3 + fall_time;
+                if commit_state {
+                    request_oneshot_breakpoints(ctx, &[time3, time4]);
+                }
+                state = false;
+            }
+
+            if state && locked {
+                state = false;
+            }
+
+            if ctx.time < time1 {
+                output = output_low;
+            } else if time1 <= ctx.time && ctx.time < time2 {
+                output = output_low
+                    + ((ctx.time - time1) / (time2 - time1)) * (output_high - output_low);
+            } else if time2 <= ctx.time && ctx.time < time3 {
+                output = output_high;
+            } else if time3 <= ctx.time && ctx.time < time4 {
+                output = output_high
+                    + ((ctx.time - time3) / (time4 - time3)) * (output_low - output_high);
+            } else {
+                output = output_low;
+                if !retrigger {
+                    locked = false;
+                }
+            }
+        }
+
+        if commit_state {
+            ctx.set_state(ONESHOT_T1, time1);
+            ctx.set_state(ONESHOT_T2, time2);
+            ctx.set_state(ONESHOT_T3, time3);
+            ctx.set_state(ONESHOT_T4, time4);
+            ctx.set_state(ONESHOT_SET, if set { 1.0 } else { 0.0 });
+            ctx.set_state(ONESHOT_STATE, if state { 1.0 } else { 0.0 });
+            ctx.set_state(ONESHOT_CLOCK, clock);
+            ctx.set_state(ONESHOT_OUTPUT_OLD, output);
+            ctx.set_state(ONESHOT_LOCKED, if locked { 1.0 } else { 0.0 });
+            ctx.set_state(ONESHOT_TRAN_INIT, 1.0);
+        }
+        ctx.set_output_with_partial("out", output, 0.0);
+        Ok(())
+    }
+
+    fn ac_gain(&self, _ctx: &CmContext) -> Vec<Value> {
+        vec![0.0]
+    }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mismatched_oneshot_context() -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("cntl_array", vec![0.0, 1.0]);
+        ctx.set_real_vector_param("pw_array", vec![1.0e-9, 2.0e-9, 3.0e-9]);
+        ctx.set_param("clk_trig", 0.5);
+        ctx.set_param("out_low", -2.0);
+        ctx.set_param("out_high", 3.0);
+        ctx.set_param("rise_delay", 1.0e-9);
+        ctx.set_param("fall_delay", 1.0e-9);
+        ctx.set_param("rise_time", 1.0e-9);
+        ctx.set_param("fall_time", 1.0e-9);
+        ctx.init_output("out", PortType::Voltage);
+        ctx
+    }
+
+    #[test]
+    fn oneshot_ignores_mismatched_control_tables_like_ngspice() {
+        let mut ctx = mismatched_oneshot_context();
+
+        AnalogOneShot
+            .init(&mut ctx)
+            .expect("ngspice reports mismatched oneshot tables but does not fail init");
+        AnalogOneShot
+            .evaluate(&mut ctx)
+            .expect("ngspice returns without fatal error on mismatched oneshot tables");
+
+        assert_eq!(ctx.output("out"), 0.0);
+    }
+
+    #[test]
+    fn oneshot_does_not_commit_rollbackable_probe_trigger() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.time = 1.0e-9;
+        ctx.set_real_vector_param("cntl_array", vec![0.0, 1.0]);
+        ctx.set_real_vector_param("pw_array", vec![1.0e-9, 1.0e-9]);
+        ctx.set_param("clk_trig", 0.5);
+        ctx.set_param("pos_edge_trig", 1.0);
+        ctx.set_param("retrig", 0.0);
+        ctx.set_param("out_low", 0.0);
+        ctx.set_param("out_high", 5.0);
+        ctx.set_param("rise_delay", 0.2e-9);
+        ctx.set_param("rise_time", 0.2e-9);
+        ctx.set_param("fall_delay", 0.1e-9);
+        ctx.set_param("fall_time", 0.2e-9);
+        ctx.init_output("out", PortType::Voltage);
+
+        AnalogOneShot.init(&mut ctx).expect("oneshot init");
+        ctx.set_input_analog("clk", 1.0);
+        ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+        AnalogOneShot
+            .evaluate(&mut ctx)
+            .expect("probe oneshot trigger");
+
+        assert_eq!(ctx.state(ONESHOT_T1), -1.0);
+        assert_eq!(ctx.state(ONESHOT_T2), -1.0);
+        assert_eq!(ctx.state(ONESHOT_CLOCK), 0.0);
+        assert_eq!(
+            ctx.take_requested_breakpoints(),
+            Vec::<Value>::new(),
+            "rollbackable oneshot trigger must not leave transient breakpoints behind"
+        );
+
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        AnalogOneShot
+            .evaluate(&mut ctx)
+            .expect("accepted oneshot trigger");
+
+        assert!((ctx.state(ONESHOT_T1) - 1.2e-9).abs() < 1.0e-18);
+        assert!((ctx.state(ONESHOT_T2) - 1.4e-9).abs() < 1.0e-18);
+        assert_eq!(ctx.state(ONESHOT_CLOCK), 1.0);
+        assert_eq!(ctx.take_requested_breakpoints().len(), 4);
+    }
+
+    #[test]
+    fn delay_does_not_record_rollbackable_probe_samples() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.timestep = 0.5e-9;
+        ctx.set_param("delay", 1.0e-9);
+        ctx.set_param("buffer_size", 8.0);
+        ctx.init_output("out", PortType::Voltage);
+
+        AnalogDelayLine.init(&mut ctx).expect("delay init");
+
+        ctx.time = 0.0;
+        ctx.set_input_analog("in", 0.0);
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        AnalogDelayLine
+            .evaluate(&mut ctx)
+            .expect("record first accepted sample");
+        ctx.advance_state();
+
+        ctx.time = 2.0e-9;
+        ctx.set_input_analog("in", 2.0);
+        ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+        AnalogDelayLine
+            .evaluate(&mut ctx)
+            .expect("probe future sample");
+
+        ctx.time = 1.0e-9;
+        ctx.set_input_analog("in", 1.0);
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        AnalogDelayLine
+            .evaluate(&mut ctx)
+            .expect("record next accepted sample");
+
+        let recorded_time = ctx.state(delay_time_slot(1));
+        let recorded_value = ctx.state(delay_value_slot(8, 1));
+        assert!(
+            (recorded_time - 1.0e-9).abs() <= 1.0e-18,
+            "rollbackable probe poisoned delay history slot with time {recorded_time}"
+        );
+        assert!(
+            (recorded_value - 1.0).abs() <= 1.0e-12,
+            "rollbackable probe poisoned delay history slot with value {recorded_value}"
+        );
+    }
+
+    #[test]
+    fn delay_negative_controlled_delmax_collapses_min_bound_like_ngspice() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.timestep = 0.1e-9;
+        ctx.set_transient_run_context(Some(0.1e-9), Some(2.0e-9));
+        ctx.set_param("has_delay_cnt", 1.0);
+        ctx.set_param("delmin", 1.0e-9);
+        ctx.set_param("delmax", -1.0e-9);
+        ctx.mark_param_provided("delmax");
+        ctx.set_input_analog("cntrl", 0.5);
+
+        let delay = effective_delay(&ctx);
+
+        assert_eq!(
+            delay, 0.0,
+            "ngspice cm_delay resets tdelmin when a provided delmax is negative"
+        );
+    }
+
+    #[test]
+    fn slew_does_not_commit_rollbackable_probe_state() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.set_param("rise_slope", 1.0e9);
+        ctx.set_param("fall_slope", 1.0e9);
+        ctx.init_output("out", PortType::Voltage);
+
+        SlewRateFollower.init(&mut ctx).expect("slew init");
+        ctx.time = 0.0;
+        ctx.set_input_analog("in", 0.0);
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        SlewRateFollower
+            .evaluate(&mut ctx)
+            .expect("accepted initial slew sample");
+        ctx.advance_state();
+
+        ctx.time = 1.0e-9;
+        ctx.set_input_analog("in", 10.0);
+        ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+        SlewRateFollower
+            .evaluate(&mut ctx)
+            .expect("probe slew sample");
+
+        assert_eq!(
+            (ctx.state(SLEW_INPUT), ctx.state(SLEW_OUTPUT)),
+            (0.0, 0.0),
+            "rollbackable slew probe must not commit input/output memory"
+        );
+        assert!((ctx.output("out") - 1.0).abs() < 1.0e-12);
+
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        SlewRateFollower
+            .evaluate(&mut ctx)
+            .expect("accepted slew sample");
+
+        assert_eq!((ctx.state(SLEW_INPUT), ctx.state(SLEW_OUTPUT)), (10.0, 1.0));
+    }
+
+    #[test]
+    fn integrator_does_not_commit_rollbackable_probe_state() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.timestep = 1.0;
+        ctx.time = 1.0;
+        ctx.set_param("gain", 1.0);
+        ctx.set_param("in_offset", 0.0);
+        ctx.set_param("out_ic", 0.0);
+        ctx.set_param("out_lower_limit", -10.0);
+        ctx.set_param("out_upper_limit", 10.0);
+        ctx.set_param("limit_range", 0.0);
+        ctx.init_output("out", PortType::Voltage);
+
+        Integrator.init(&mut ctx).expect("int init");
+        ctx.set_input_analog("in", 2.0);
+        ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+        Integrator
+            .evaluate(&mut ctx)
+            .expect("probe integrator sample");
+
+        assert!((ctx.output("out") - 1.0).abs() < 1.0e-12);
+        assert_eq!(
+            (ctx.state(0), ctx.state(1)),
+            (0.0, 0.0),
+            "rollbackable integrator probe must not commit integrated output/input memory"
+        );
+
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        Integrator
+            .evaluate(&mut ctx)
+            .expect("accepted integrator sample");
+
+        assert_eq!((ctx.state(0), ctx.state(1)), (1.0, 2.0));
+    }
+
+    #[test]
+    fn differentiator_does_not_commit_rollbackable_probe_state() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.timestep = 1.0;
+        ctx.time = 1.0;
+        ctx.set_param("gain", 1.0);
+        ctx.set_param("out_offset", 0.0);
+        ctx.set_param("out_lower_limit", -10.0);
+        ctx.set_param("out_upper_limit", 10.0);
+        ctx.set_param("limit_range", 0.0);
+        ctx.init_output("out", PortType::Voltage);
+
+        Differentiator.init(&mut ctx).expect("d_dt init");
+        ctx.set_input_analog("in", 2.0);
+        ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+        Differentiator
+            .evaluate(&mut ctx)
+            .expect("probe differentiator sample");
+
+        assert!((ctx.output("out") - 2.0).abs() < 1.0e-12);
+        assert_eq!(
+            ctx.state(0),
+            0.0,
+            "rollbackable differentiator probe must not commit input memory"
+        );
+
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        Differentiator
+            .evaluate(&mut ctx)
+            .expect("accepted differentiator sample");
+
+        assert_eq!(ctx.state(0), 2.0);
+    }
+
+    #[test]
+    fn sample_hold_does_not_commit_rollbackable_probe_state() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.set_param("cntl_th", 0.5);
+        ctx.set_param("out_ic", 1.0);
+        ctx.init_output("out", PortType::Voltage);
+
+        SampleHold.init(&mut ctx).expect("s_h init");
+        ctx.set_input_analog("cntl", 1.0);
+        ctx.set_input_analog("in", 7.0);
+        ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+        SampleHold.evaluate(&mut ctx).expect("probe s_h sample");
+
+        assert_eq!(ctx.output("out"), 7.0);
+        assert_eq!(
+            ctx.state(0),
+            1.0,
+            "rollbackable sample-and-hold probe must not commit held value"
+        );
+
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        SampleHold.evaluate(&mut ctx).expect("accepted s_h sample");
+
+        assert_eq!(ctx.state(0), 7.0);
+    }
+
+    #[test]
+    fn astate_does_not_commit_rollbackable_probe_history() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.set_param("astate_no", 1.0);
+        ctx.init_output("out", PortType::Voltage);
+
+        AnalogStateReturn.init(&mut ctx).expect("astate init");
+        ctx.set_initial_state(0, 1.0);
+        ctx.set_initial_state(1, 0.5);
+        ctx.set_initial_state(2, 0.25);
+
+        ctx.set_input_analog("in", 2.0);
+        ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+        AnalogStateReturn
+            .evaluate(&mut ctx)
+            .expect("probe astate history update");
+
+        assert_eq!(ctx.output("out"), 1.0);
+        assert_eq!(
+            (ctx.state(0), ctx.state(1), ctx.state(2)),
+            (1.0, 0.5, 0.25),
+            "rollbackable astate probe must not shift remembered samples"
+        );
+
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        AnalogStateReturn
+            .evaluate(&mut ctx)
+            .expect("accepted astate history update");
+
+        assert_eq!((ctx.state(0), ctx.state(1), ctx.state(2)), (2.0, 1.0, 0.5));
+    }
+
+    #[test]
+    fn hyst_does_not_commit_rollbackable_probe_branch_state() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.set_param("in_low", 0.0);
+        ctx.set_param("in_high", 1.0);
+        ctx.set_param("hyst", 0.2);
+        ctx.set_param("out_lower_limit", 0.0);
+        ctx.set_param("out_upper_limit", 10.0);
+        ctx.set_param("input_domain", 0.0);
+        ctx.set_param("fraction", 0.0);
+        ctx.init_output("out", PortType::Voltage);
+
+        HysteresisBlock.init(&mut ctx).expect("hyst init");
+
+        ctx.set_input_analog("in", 0.0);
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        HysteresisBlock
+            .evaluate(&mut ctx)
+            .expect("records initial rising branch");
+        assert_eq!(ctx.int_state(HYST_STATE), HYST_RISING);
+
+        ctx.set_input_analog("in", 1.3);
+        ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+        HysteresisBlock
+            .evaluate(&mut ctx)
+            .expect("probes falling branch");
+        assert_eq!(
+            ctx.int_state(HYST_STATE),
+            HYST_RISING,
+            "rollbackable hyst probe must not advance remembered branch state"
+        );
+
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        HysteresisBlock
+            .evaluate(&mut ctx)
+            .expect("commits accepted falling branch");
+        assert_eq!(ctx.int_state(HYST_STATE), HYST_FALLING);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-fn climit_transfer(
+pub(super) fn climit_transfer(
     input: Value,
     in_offset: Value,
     cntl_upper: Value,
@@ -602,7 +2493,21 @@ fn climit_transfer(
     }
 }
 
-fn smooth_corner(
+fn climit_transfer_from_context(ctx: &CmContext) -> (Value, Value, Value, Value) {
+    climit_transfer(
+        ctx.input("in"),
+        ctx.param("in_offset"),
+        ctx.input("cntl_upper"),
+        ctx.input("cntl_lower"),
+        ctx.param("lower_delta"),
+        ctx.param("upper_delta"),
+        ctx.param("limit_range"),
+        ctx.param("gain"),
+        ctx.param("fraction") > 0.5,
+    )
+}
+
+pub(super) fn smooth_corner(
     x_input: Value,
     x_center: Value,
     y_center: Value,
@@ -620,7 +2525,7 @@ fn smooth_corner(
     (y_output, dy_dx)
 }
 
-fn smooth_discontinuity(
+pub(super) fn smooth_discontinuity(
     x_input: Value,
     x_lower: Value,
     y_lower: Value,
@@ -654,20 +2559,6 @@ fn smooth_discontinuity(
     }
 }
 
-/// Soft clamp function for smooth limiting
-fn soft_clamp(x: f64, lower: f64, upper: f64, range: f64) -> f64 {
-    let mid = (lower + upper) / 2.0;
-    let half_range = (upper - lower) / 2.0;
-
-    if half_range <= 0.0 {
-        return mid;
-    }
-
-    // Scale and apply tanh for smoothness
-    let scaled = (x - mid) / half_range;
-    mid + half_range * scaled.clamp(-1.0 + range, 1.0 - range)
-}
-
 //=============================================================================
 // Integrator
 //=============================================================================
@@ -675,10 +2566,12 @@ fn soft_clamp(x: f64, lower: f64, upper: f64, range: f64) -> f64 {
 /// Continuous-time integrator: out = gain * integral(in) + out_ic
 ///
 /// # Parameters
+/// - `in_offset` - Input offset (default: 0.0)
 /// - `gain` - Integration gain (default: 1.0)
 /// - `out_ic` - Initial condition (default: 0.0)
 /// - `out_lower_limit` - Lower saturation (default: -1e12)
 /// - `out_upper_limit` - Upper saturation (default: 1e12)
+/// - `limit_range` - Smoothing range near saturation limits (default: 1e-6)
 ///
 /// # Ports
 /// - `in` - Input to integrate
@@ -700,9 +2593,37 @@ impl CodeModel for Integrator {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
         PORTS.get_or_init(|| {
             vec![
-                PortSpec::input("in", PortType::Voltage)
-                    .with_description("Input voltage to integrate"),
-                PortSpec::output("out", PortType::Voltage).with_description("Integrated output"),
+                PortSpec {
+                    name: "in".to_string(),
+                    direction: PortDirection::In,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                        PortType::VoltageName,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Input to integrate".to_string(),
+                },
+                PortSpec {
+                    name: "out".to_string(),
+                    direction: PortDirection::Out,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Integrated output".to_string(),
+                },
             ]
         })
     }
@@ -712,12 +2633,17 @@ impl CodeModel for Integrator {
         static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
         PARAMS.get_or_init(|| {
             vec![
+                ParamSpec::real("in_offset", 0.0).with_description("Input offset"),
                 ParamSpec::real("gain", 1.0).with_description("Integration gain (1/time_constant)"),
                 ParamSpec::real("out_ic", 0.0).with_description("Initial output value"),
                 ParamSpec::real("out_lower_limit", -1e12)
+                    .required()
                     .with_description("Lower output saturation limit"),
                 ParamSpec::real("out_upper_limit", 1e12)
+                    .required()
                     .with_description("Upper output saturation limit"),
+                ParamSpec::real("limit_range", 1.0e-6)
+                    .with_description("Smoothing range near output limits"),
             ]
         })
     }
@@ -739,6 +2665,7 @@ impl CodeModel for Integrator {
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let gain = ctx.param("gain");
+        let in_offset = ctx.param("in_offset");
         let lower_limit = ctx.param("out_lower_limit");
         let upper_limit = ctx.param("out_upper_limit");
         let (lower, upper) = if lower_limit <= upper_limit {
@@ -748,25 +2675,73 @@ impl CodeModel for Integrator {
         };
 
         let v_in_raw = ctx.input("in");
-        let v_in = if v_in_raw.is_finite() { v_in_raw } else { 0.0 };
+        let v_in = if v_in_raw.is_finite() {
+            v_in_raw + in_offset
+        } else {
+            in_offset
+        };
         let dt = ctx.timestep;
         let prev_out = ctx.state_prev(0);
         let prev_in = ctx.state_prev(1);
 
-        // Trapezoidal integration:
-        // y[n] = y[n-1] + gain * dt * (x[n] + x[n-1]) / 2
-        let delta = if dt.is_finite() && dt > 0.0 {
-            0.5 * gain * dt * (v_in + prev_in)
-        } else {
-            0.0
-        };
-        let new_out = (prev_out + delta).clamp(lower, upper);
+        let (raw_out, raw_partial) =
+            if ctx.is_dc() || ctx.time == 0.0 || !dt.is_finite() || dt <= 0.0 {
+                (prev_out, 0.0)
+            } else {
+                // Trapezoidal integration:
+                // y[n] = y[n-1] + gain * dt * (x[n] + x[n-1]) / 2
+                let delta = 0.5 * gain * dt * (v_in + prev_in);
+                let partial = if v_in_raw.is_finite() {
+                    0.5 * gain * dt
+                } else {
+                    0.0
+                };
+                (prev_out + delta, partial)
+            };
+        let (new_out, limit_partial) = limit_transfer(
+            raw_out,
+            0.0,
+            lower,
+            upper,
+            ctx.param("limit_range"),
+            1.0,
+            false,
+        );
 
-        ctx.set_state(0, new_out);
-        ctx.set_state(1, v_in);
-        ctx.set_output("out", new_out);
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+            ctx.set_state(0, new_out);
+            ctx.set_state(1, v_in);
+        }
+        ctx.set_output_with_partial("out", new_out, raw_partial * limit_partial);
 
         Ok(())
+    }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if output_port.eq_ignore_ascii_case("out") {
+            vec![("in".to_string(), ctx.partial("out"))]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn output_input_ac_partials(
+        &self,
+        ctx: &CmContext,
+        output_port: &str,
+        frequency: Value,
+    ) -> Vec<(String, Complex64)> {
+        if !output_port.eq_ignore_ascii_case("out") {
+            return Vec::new();
+        }
+        let omega = 2.0 * std::f64::consts::PI * frequency;
+        if !omega.is_finite() || omega == 0.0 {
+            return Vec::new();
+        }
+        vec![(
+            "in".to_string(),
+            Complex64::new(0.0, -ctx.param("gain") / omega),
+        )]
     }
 }
 
@@ -781,6 +2756,7 @@ impl CodeModel for Integrator {
 /// - `out_offset` - Output offset (default: 0.0)
 /// - `out_lower_limit` - Lower saturation (default: -1e12)
 /// - `out_upper_limit` - Upper saturation (default: 1e12)
+/// - `limit_range` - Smoothing range near saturation limits (default: 1e-6)
 ///
 /// # Ports
 /// - `in` - Input to differentiate
@@ -802,10 +2778,37 @@ impl CodeModel for Differentiator {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
         PORTS.get_or_init(|| {
             vec![
-                PortSpec::input("in", PortType::Voltage)
-                    .with_description("Input voltage to differentiate"),
-                PortSpec::output("out", PortType::Voltage)
-                    .with_description("Differentiated output"),
+                PortSpec {
+                    name: "in".to_string(),
+                    direction: PortDirection::In,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                        PortType::VoltageName,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Input to differentiate".to_string(),
+                },
+                PortSpec {
+                    name: "out".to_string(),
+                    direction: PortDirection::Out,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Differentiated output".to_string(),
+                },
             ]
         })
     }
@@ -818,9 +2821,13 @@ impl CodeModel for Differentiator {
                 ParamSpec::real("gain", 1.0).with_description("Differentiation gain"),
                 ParamSpec::real("out_offset", 0.0).with_description("Output offset voltage"),
                 ParamSpec::real("out_lower_limit", -1e12)
+                    .required()
                     .with_description("Lower output saturation limit"),
                 ParamSpec::real("out_upper_limit", 1e12)
+                    .required()
                     .with_description("Upper output saturation limit"),
+                ParamSpec::real("limit_range", 1.0e-6)
+                    .with_description("Smoothing range near output limits"),
             ]
         })
     }
@@ -836,24 +2843,59 @@ impl CodeModel for Differentiator {
         let out_offset = ctx.param("out_offset");
         let lower = ctx.param("out_lower_limit");
         let upper = ctx.param("out_upper_limit");
+        let limit_range = ctx.param("limit_range");
 
         let v_in = ctx.input("in");
         let dt = ctx.timestep;
         let prev_in = ctx.state_prev(0);
 
-        // Backward difference: dy/dt ≈ (y[n] - y[n-1]) / dt
-        let derivative = if dt > 1e-18 {
-            (v_in - prev_in) / dt
+        let (raw_out, raw_partial) = if ctx.is_dc() || ctx.time == 0.0 {
+            (0.0, 0.0)
         } else {
-            0.0
+            // Backward difference: dy/dt ≈ (y[n] - y[n-1]) / dt
+            if dt > 1e-18 {
+                (gain * (v_in - prev_in) / dt + out_offset, gain / dt)
+            } else {
+                (out_offset, 0.0)
+            }
         };
 
-        let v_out = (gain * derivative + out_offset).clamp(lower, upper);
+        let (v_out, limit_partial) =
+            limit_transfer(raw_out, 0.0, lower, upper, limit_range, 1.0, false);
 
-        ctx.set_state(0, v_in);
-        ctx.set_output("out", v_out);
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+            ctx.set_state(0, v_in);
+        }
+        ctx.set_output_with_partial("out", v_out, raw_partial * limit_partial);
 
         Ok(())
+    }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if output_port.eq_ignore_ascii_case("out") {
+            vec![("in".to_string(), ctx.partial("out"))]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn output_input_ac_partials(
+        &self,
+        ctx: &CmContext,
+        output_port: &str,
+        frequency: Value,
+    ) -> Vec<(String, Complex64)> {
+        if !output_port.eq_ignore_ascii_case("out") {
+            return Vec::new();
+        }
+        let omega = 2.0 * std::f64::consts::PI * frequency;
+        if !omega.is_finite() {
+            return Vec::new();
+        }
+        vec![(
+            "in".to_string(),
+            Complex64::new(0.0, ctx.param("gain") * omega),
+        )]
     }
 }
 
@@ -902,6 +2944,49 @@ macro_rules! analog_model_alias {
             ) -> Vec<(String, Value)> {
                 $target.output_input_partials(ctx, output_port)
             }
+
+            fn output_input_ac_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+                frequency: Value,
+            ) -> Vec<(String, Complex64)> {
+                $target.output_input_ac_partials(ctx, output_port, frequency)
+            }
+
+            fn output_input_vector_ac_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+                frequency: Value,
+            ) -> Vec<(String, usize, Complex64)> {
+                $target.output_input_vector_ac_partials(ctx, output_port, frequency)
+            }
+
+            fn output_vector_input_ac_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+                output_index: usize,
+                frequency: Value,
+            ) -> Vec<(String, Complex64)> {
+                $target.output_vector_input_ac_partials(ctx, output_port, output_index, frequency)
+            }
+
+            fn output_vector_input_vector_ac_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+                output_index: usize,
+                frequency: Value,
+            ) -> Vec<(String, usize, Complex64)> {
+                $target.output_vector_input_vector_ac_partials(
+                    ctx,
+                    output_port,
+                    output_index,
+                    frequency,
+                )
+            }
         }
     };
 }
@@ -909,137 +2994,6 @@ macro_rules! analog_model_alias {
 analog_model_alias!(DivideAlias, Divider, "divide");
 analog_model_alias!(IntegratorAlias, Integrator, "int");
 analog_model_alias!(DifferentiatorAlias, Differentiator, "d_dt");
-
-//=============================================================================
-// Analog Switch
-//=============================================================================
-
-/// Analog switch controlled by voltage
-///
-/// # Parameters
-/// - `cntl_on` - Control voltage to turn on (default: 1.0)
-/// - `cntl_off` - Control voltage to turn off (default: 0.0)
-/// - `r_on` - On-state resistance (default: 1.0)
-/// - `r_off` - Off-state resistance (default: 1e12)
-/// - `log` - Use logarithmic transition (default: true)
-///
-/// # Ports
-/// - `cntl` - Control voltage input
-/// - `ps` - Positive switch terminal
-/// - `ns` - Negative switch terminal
-#[derive(Debug, Default)]
-pub struct AnalogSwitch;
-
-impl CodeModel for AnalogSwitch {
-    fn name(&self) -> &str {
-        "aswitch"
-    }
-
-    fn description(&self) -> &str {
-        "Analog switch with voltage control"
-    }
-
-    fn ports(&self) -> &[PortSpec] {
-        use std::sync::OnceLock;
-        static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
-        PORTS.get_or_init(|| {
-            vec![
-                PortSpec::input("cntl", PortType::Voltage).with_description("Control voltage"),
-                PortSpec {
-                    name: "ps".to_string(),
-                    direction: PortDirection::InOut,
-                    default_type: PortType::Voltage,
-                    allowed_types: vec![PortType::Voltage],
-                    is_vector: false,
-                    null_allowed: false,
-                    description: "Positive switch terminal".to_string(),
-                },
-                PortSpec {
-                    name: "ns".to_string(),
-                    direction: PortDirection::InOut,
-                    default_type: PortType::Voltage,
-                    allowed_types: vec![PortType::Voltage],
-                    is_vector: false,
-                    null_allowed: false,
-                    description: "Negative switch terminal".to_string(),
-                },
-            ]
-        })
-    }
-
-    fn parameters(&self) -> &[ParamSpec] {
-        use std::sync::OnceLock;
-        static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
-        PARAMS.get_or_init(|| {
-            vec![
-                ParamSpec::real("cntl_on", 1.0).with_description("Control voltage for fully on"),
-                ParamSpec::real("cntl_off", 0.0).with_description("Control voltage for fully off"),
-                ParamSpec::real("r_on", 1.0)
-                    .with_min(1e-9)
-                    .with_description("On-state resistance"),
-                ParamSpec::real("r_off", 1e12)
-                    .with_min(1e-9)
-                    .with_description("Off-state resistance"),
-                ParamSpec::boolean("log", true)
-                    .with_description("Use logarithmic resistance transition"),
-            ]
-        })
-    }
-
-    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
-        Ok(())
-    }
-
-    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let cntl_on = ctx.param("cntl_on");
-        let cntl_off = ctx.param("cntl_off");
-        let r_on = ctx.param("r_on");
-        let r_off = ctx.param("r_off");
-        let log = ctx.param("log") > 0.5;
-
-        let v_cntl = ctx.input("cntl");
-
-        // Calculate interpolation factor (0 = off, 1 = on)
-        let t = if (cntl_on - cntl_off).abs() < 1e-15 {
-            if v_cntl >= cntl_on { 1.0 } else { 0.0 }
-        } else {
-            ((v_cntl - cntl_off) / (cntl_on - cntl_off)).clamp(0.0, 1.0)
-        };
-
-        // Interpolate resistance
-        let resistance = if log {
-            // Logarithmic interpolation
-            (r_off.ln() + t * (r_on.ln() - r_off.ln())).exp()
-        } else {
-            // Linear interpolation
-            r_off + t * (r_on - r_off)
-        };
-
-        let conductance = 1.0 / resistance;
-
-        // Stamp two-terminal conductance between switch nodes.
-        let ps_node = ctx.port_node("ps").unwrap_or(0);
-        let ns_node = ctx.port_node("ns").unwrap_or(0);
-        let ps = ps_node.checked_sub(1);
-        let ns = ns_node.checked_sub(1);
-
-        if let Some(p) = ps {
-            ctx.stamp_conductance(p, p, conductance);
-        }
-        if let Some(n) = ns {
-            ctx.stamp_conductance(n, n, conductance);
-        }
-        if let (Some(p), Some(n)) = (ps, ns) {
-            ctx.stamp_conductance(p, n, -conductance);
-            ctx.stamp_conductance(n, p, -conductance);
-        }
-
-        // Keep a scalar diagnostic output for unit tests and probing.
-        ctx.set_output("conductance", conductance);
-
-        Ok(())
-    }
-}
 
 //=============================================================================
 // Sample and Hold
@@ -1111,7 +3065,9 @@ impl CodeModel for SampleHold {
             ctx.state(0) // Hold previous value
         };
 
-        ctx.set_state(0, held_value);
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+            ctx.set_state(0, held_value);
+        }
         ctx.set_output("out", held_value);
 
         Ok(())

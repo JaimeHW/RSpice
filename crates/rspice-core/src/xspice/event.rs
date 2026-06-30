@@ -1,6 +1,7 @@
-//! Event Queue for Digital Simulation
+//! Event Queue for XSPICE Event-Driven Simulation
 //!
-//! Provides the event-driven scheduling infrastructure for digital code models.
+//! Provides the event-driven scheduling infrastructure for digital and real
+//! code models.
 //! Events are scheduled with delays and processed at breakpoints during transient analysis.
 
 use super::digital::DigitalValue;
@@ -12,7 +13,16 @@ use std::collections::BinaryHeap;
 // Event Types
 //=============================================================================
 
-/// A scheduled digital event
+/// Payload carried by a scheduled XSPICE event.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EventValue {
+    /// 12-state digital event value.
+    Digital(DigitalValue),
+    /// Real-valued event-node value.
+    Real(Value),
+}
+
+/// A scheduled event-driven XSPICE update.
 #[derive(Debug, Clone)]
 pub struct Event {
     /// Time at which the event occurs
@@ -23,8 +33,8 @@ pub struct Event {
     pub port_name: String,
     /// Instance name that scheduled the event
     pub instance: String,
-    /// New digital value
-    pub value: DigitalValue,
+    /// New event value
+    pub value: EventValue,
     /// Event priority (for tie-breaking)
     pub priority: u64,
 }
@@ -36,7 +46,7 @@ impl Event {
         node_id: usize,
         port_name: impl Into<String>,
         instance: impl Into<String>,
-        value: DigitalValue,
+        value: EventValue,
     ) -> Self {
         static PRIORITY_COUNTER: std::sync::atomic::AtomicU64 =
             std::sync::atomic::AtomicU64::new(0);
@@ -48,6 +58,12 @@ impl Event {
             value,
             priority: PRIORITY_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
         }
+    }
+
+    fn same_output_driver(&self, other: &Self) -> bool {
+        self.node_id == other.node_id
+            && self.instance == other.instance
+            && self.port_name == other.port_name
     }
 }
 
@@ -81,7 +97,7 @@ impl Ord for Event {
 // Event Queue
 //=============================================================================
 
-/// Priority queue for digital events
+/// Priority queue for XSPICE event-node updates.
 ///
 /// Events are scheduled with a future time and processed in chronological order.
 /// The queue automatically handles cancellation and replacement of events.
@@ -103,10 +119,17 @@ impl EventQueue {
 
     /// Schedule an event
     pub fn schedule(&mut self, event: Event) {
+        if !event.time.is_finite() {
+            return;
+        }
+        let mut remaining: Vec<Event> = self.events.drain().collect();
+        remaining
+            .retain(|pending| !(pending.same_output_driver(&event) && pending.time >= event.time));
+        self.events = remaining.into_iter().collect();
         self.events.push(event);
     }
 
-    /// Schedule an event with delay from current time
+    /// Schedule an event with delay from current time.
     pub fn schedule_delayed(
         &mut self,
         current_time: Value,
@@ -116,7 +139,39 @@ impl EventQueue {
         instance: impl Into<String>,
         value: DigitalValue,
     ) {
-        let event = Event::new(current_time + delay, node_id, port_name, instance, value);
+        if delay < 0.0 {
+            return;
+        }
+        let event = Event::new(
+            current_time + delay,
+            node_id,
+            port_name,
+            instance,
+            EventValue::Digital(value),
+        );
+        self.schedule(event);
+    }
+
+    /// Schedule a real-valued event with delay from current time.
+    pub fn schedule_real_delayed(
+        &mut self,
+        current_time: Value,
+        delay: Value,
+        node_id: usize,
+        port_name: impl Into<String>,
+        instance: impl Into<String>,
+        value: Value,
+    ) {
+        if delay < 0.0 {
+            return;
+        }
+        let event = Event::new(
+            current_time + delay,
+            node_id,
+            port_name,
+            instance,
+            EventValue::Real(value),
+        );
         self.schedule(event);
     }
 
@@ -213,6 +268,31 @@ pub struct EventQueueStats {
     pub processed: u64,
     /// Last event time
     pub last_event_time: Value,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_queue_ignores_negative_output_delays_like_ngspice() {
+        let mut queue = EventQueue::new();
+
+        queue.schedule_delayed(
+            1.0e-9,
+            -1.0e-12,
+            1,
+            "out",
+            "a_negative_digital_delay",
+            DigitalValue::one(),
+        );
+        queue.schedule_real_delayed(1.0e-9, -1.0e-12, 2, "out", "a_negative_real_delay", 1.0);
+
+        assert!(
+            queue.is_empty(),
+            "ngspice reports 'Output delay < 0 not allowed' and ignores the output update"
+        );
+    }
 }
 
 //=============================================================================

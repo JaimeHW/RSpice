@@ -77,18 +77,60 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::DivideAlias));
         self.register(Arc::new(super::models::PiecewiseLinear));
         self.register(Arc::new(super::models::PiecewiseLinearTimeSeries));
+        self.register(Arc::new(super::models::FileSource));
+        self.register(Arc::new(super::models::FileSourceAlias));
+        self.register(Arc::new(super::models::Table2D));
+        self.register(Arc::new(super::models::Table3D));
+        self.register(Arc::new(super::models::MultiInputPwl));
+        self.register(Arc::new(super::models::Spice2Poly));
+        self.register(Arc::new(super::models::IcmSpice2Poly));
+        self.register(Arc::new(super::models::Xfer));
+        self.register(Arc::new(super::models::SXfer));
+        self.register(Arc::new(super::models::SineOscillator));
+        self.register(Arc::new(super::models::SquareOscillator));
+        self.register(Arc::new(super::models::TriangleOscillator));
         self.register(Arc::new(super::models::Limiter));
         self.register(Arc::new(super::models::ControlledLimiter));
+        self.register(Arc::new(super::models::HysteresisBlock));
+        self.register(Arc::new(super::models::AnalogDelayLine));
+        self.register(Arc::new(super::models::AnalogStateReturn));
+        self.register(Arc::new(super::models::AnalogOneShot));
         self.register(Arc::new(super::models::Integrator));
         self.register(Arc::new(super::models::IntegratorAlias));
         self.register(Arc::new(super::models::Differentiator));
         self.register(Arc::new(super::models::DifferentiatorAlias));
+        self.register(Arc::new(super::models::SlewRateFollower));
         self.register(Arc::new(super::models::AnalogSwitch));
         self.register(Arc::new(super::models::SampleHold));
+        self.register(Arc::new(super::models::Potentiometer));
+        self.register(Arc::new(super::models::Pswitch));
+        self.register(Arc::new(super::models::Sidiode));
+        self.register(Arc::new(super::models::Zener));
+        self.register(Arc::new(super::models::Memristor));
+        self.register(Arc::new(super::models::Core));
+        self.register(Arc::new(super::models::CapacitorIc));
+        self.register(Arc::new(super::models::InductorIc));
+        self.register(Arc::new(super::models::CapacitanceMeter));
+        self.register(Arc::new(super::models::InductanceMeter));
+        self.register(Arc::new(super::models::LcCouple));
+        self.register(Arc::new(super::models::Ilimit));
+        self.register(Arc::new(super::models::SeeGenerator));
+        self.register(Arc::new(super::models::CoupledMicrostripLine));
+        self.register(Arc::new(super::models::CoupledTransmissionLine));
+        self.register(Arc::new(super::models::GenericTransmissionLine));
+        self.register(Arc::new(super::models::MicrostripLine));
+        self.register(Arc::new(super::models::MicrostripOpenEnd));
 
         // A/D and D/A bridges
         self.register(Arc::new(super::models::AdcBridge));
         self.register(Arc::new(super::models::DacBridge));
+        self.register(Arc::new(super::models::BidiBridge));
+
+        // Real-valued event models
+        self.register(Arc::new(super::models::DigitalToReal));
+        self.register(Arc::new(super::models::RealGain));
+        self.register(Arc::new(super::models::RealDelay));
+        self.register(Arc::new(super::models::RealToVoltage));
 
         // Digital sources
         self.register(Arc::new(super::models::DigitalSource));
@@ -105,6 +147,14 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::DigitalTristate));
         self.register(Arc::new(super::models::DigitalPullup));
         self.register(Arc::new(super::models::DigitalPulldown));
+        self.register(Arc::new(super::models::DigitalOpenCollector));
+        self.register(Arc::new(super::models::DigitalOpenEmitter));
+        self.register(Arc::new(super::models::DigitalLookupTable));
+        self.register(Arc::new(super::models::DigitalGenericLookupTable));
+        self.register(Arc::new(super::models::DigitalOscillator));
+        self.register(Arc::new(super::models::DigitalPwmOscillator));
+        self.register(Arc::new(super::models::DigitalProcess));
+        self.register(Arc::new(super::models::DigitalCosim));
 
         // Flip-flops and latches
         self.register(Arc::new(super::models::DFlipFlop));
@@ -113,6 +163,7 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::SrFlipFlop));
         self.register(Arc::new(super::models::DLatch));
         self.register(Arc::new(super::models::SrLatch));
+        self.register(Arc::new(super::models::DigitalFrequencyDivider));
 
         // State machine
         self.register(Arc::new(super::models::DigitalStateMachine));
@@ -165,6 +216,108 @@ impl std::fmt::Debug for CodeModelRegistry {
 mod tests {
     use super::*;
 
+    const OFFICIAL_NGSPICE_46_XSPICE_MODELS: &[&str] = &[
+        "adc_bridge",
+        "astate",
+        "aswitch",
+        "bidi_bridge",
+        "capacitoric",
+        "climit",
+        "cmeter",
+        "core",
+        "cpline",
+        "cpmlin",
+        "d_and",
+        "d_buffer",
+        "d_cosim",
+        "d_dff",
+        "d_dlatch",
+        "d_dt",
+        "d_fdiv",
+        "d_genlut",
+        "d_inverter",
+        "d_jkff",
+        "d_lut",
+        "d_nand",
+        "d_nor",
+        "d_open_c",
+        "d_open_e",
+        "d_or",
+        "d_osc",
+        "d_process",
+        "d_pulldown",
+        "d_pullup",
+        "d_pwm",
+        "d_ram",
+        "d_source",
+        "d_srff",
+        "d_srlatch",
+        "d_state",
+        "d_tff",
+        "d_to_real",
+        "d_tristate",
+        "d_xnor",
+        "d_xor",
+        "dac_bridge",
+        "delay",
+        "divide",
+        "filesource",
+        "gain",
+        "hyst",
+        "ilimit",
+        "inductoric",
+        "int",
+        "lcouple",
+        "limit",
+        "lmeter",
+        "memristor",
+        "mlin",
+        "msopen",
+        "mult",
+        "multi_input_pwl",
+        "oneshot",
+        "potentiometer",
+        "pswitch",
+        "pwl",
+        "pwlts",
+        "real_delay",
+        "real_gain",
+        "real_to_v",
+        "s_xfer",
+        "seegen",
+        "sidiode",
+        "sine",
+        "slew",
+        "spice2poly",
+        "square",
+        "summer",
+        "table2d",
+        "table3d",
+        "tline",
+        "triangle",
+        "xfer",
+        "zener",
+    ];
+
+    fn has_builtin_or_native_lowering(registry: &CodeModelRegistry, name: &str) -> bool {
+        registry.contains(name)
+    }
+
+    #[test]
+    fn builtins_cover_official_ngspice_46_xspice_catalog() {
+        let registry = CodeModelRegistry::with_builtins();
+        let missing: Vec<&str> = OFFICIAL_NGSPICE_46_XSPICE_MODELS
+            .iter()
+            .copied()
+            .filter(|name| !has_builtin_or_native_lowering(&registry, name))
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "missing official ngspice 46 XSPICE models: {missing:?}"
+        );
+    }
+
     #[test]
     fn builtins_do_not_register_unimplemented_digital_rom_stub() {
         let registry = CodeModelRegistry::with_builtins();
@@ -174,6 +327,20 @@ mod tests {
             !registry.contains("d_rom"),
             "d_rom must fail closed until a real code model is implemented"
         );
+    }
+
+    #[test]
+    fn builtins_register_official_external_digital_process() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("d_process"));
+    }
+
+    #[test]
+    fn builtins_register_official_external_digital_cosim() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("d_cosim"));
     }
 
     #[test]
@@ -191,5 +358,146 @@ mod tests {
 
         assert!(registry.contains("pwl"));
         assert!(registry.contains("pwlts"));
+        assert!(registry.contains("filesource"));
+        assert!(registry.contains("file_source"));
+        assert!(registry.contains("table2d"));
+        assert!(registry.contains("table3d"));
+    }
+
+    #[test]
+    fn builtins_register_official_waveform_oscillators() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        for name in ["sine", "square", "triangle"] {
+            assert!(registry.contains(name), "{name} must be registered");
+        }
+    }
+
+    #[test]
+    fn builtins_register_official_multi_input_pwl() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("multi_input_pwl"));
+    }
+
+    #[test]
+    fn builtins_register_official_hysteresis_block() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("hyst"));
+    }
+
+    #[test]
+    fn builtins_register_official_delay_line() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("delay"));
+    }
+
+    #[test]
+    fn builtins_register_official_analog_state_return() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("astate"));
+    }
+
+    #[test]
+    fn builtins_register_official_oneshot() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("oneshot"));
+    }
+
+    #[test]
+    fn builtins_register_official_spice2poly() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("spice2poly"));
+        assert!(registry.contains("icm_spice2poly"));
+    }
+
+    #[test]
+    fn builtins_register_official_xfer() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("xfer"));
+        assert!(registry.contains("s_xfer"));
+    }
+
+    #[test]
+    fn builtins_register_official_potentiometer() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("potentiometer"));
+    }
+
+    #[test]
+    fn builtins_register_official_pswitch() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("pswitch"));
+    }
+
+    #[test]
+    fn builtins_register_official_sidiode() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("sidiode"));
+    }
+
+    #[test]
+    fn builtins_register_official_zener() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("zener"));
+    }
+
+    #[test]
+    fn builtins_register_official_ilimit() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("ilimit"));
+    }
+
+    #[test]
+    fn builtins_register_official_real_event_models() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        for name in ["d_to_real", "real_gain", "real_delay", "real_to_v"] {
+            assert!(registry.contains(name), "{name} must be registered");
+        }
+    }
+
+    #[test]
+    fn builtins_register_official_slew_rate_follower() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("slew"));
+    }
+
+    #[test]
+    fn builtins_register_official_open_output_digital_buffers() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("d_open_c"));
+        assert!(registry.contains("d_open_e"));
+    }
+
+    #[test]
+    fn builtins_register_official_bidirectional_bridge() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("bidi_bridge"));
+    }
+
+    #[test]
+    fn builtins_register_official_digital_lookup_tables() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("d_lut"));
+        assert!(registry.contains("d_genlut"));
+        assert!(registry.contains("d_fdiv"));
+        assert!(registry.contains("d_osc"));
+        assert!(registry.contains("d_pwm"));
     }
 }

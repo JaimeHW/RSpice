@@ -44,8 +44,10 @@
 //! ```
 
 mod context;
+mod data_file;
 mod digital;
 mod event;
+mod external;
 mod instance;
 mod registry;
 mod traits;
@@ -54,10 +56,18 @@ mod traits;
 pub mod models;
 
 // Re-export primary types
-pub use context::{AnalysisType, CallType, CmContext};
+pub use context::{AnalysisType, CallType, CmContext, EvaluationPhase};
+pub(crate) use data_file::parse_ngspice_spice_value as parse_xspice_data_value;
+pub(crate) use data_file::read_to_string as read_data_file_to_string;
+pub use data_file::{clear_registered_data_files, register_data_file, unregister_data_file};
 pub use digital::{DigitalState, DigitalStrength, DigitalValue};
-pub use event::{Event, EventQueue};
-pub use instance::{PortConnection, XspiceInstance};
+pub use event::{Event, EventQueue, EventValue};
+pub use external::{
+    DigitalCosimInputEvent, DigitalCosimRuntime, DigitalCosimRuntimeFactory, DigitalCosimSpec,
+    DigitalCosimStep, DigitalProcessRuntime, DigitalProcessRuntimeFactory, DigitalProcessSpec,
+    set_digital_cosim_runtime_factory, set_digital_process_runtime_factory,
+};
+pub use instance::{AnalogInputConnection, DigitalPortConnection, PortConnection, XspiceInstance};
 pub use registry::CodeModelRegistry;
 pub use traits::{
     CmError, CmResult, CodeModel, ParamSpec, ParamType, PortDirection, PortSpec, PortType,
