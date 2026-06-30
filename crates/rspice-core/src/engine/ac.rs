@@ -369,6 +369,28 @@ impl Engine {
         value != Complex64::new(0.0, 0.0) && value.re.is_finite() && value.im.is_finite()
     }
 
+    fn stamp_xspice_ac_current_probe(
+        circuit: &CircuitData,
+        ac_matrix: &mut ComplexMatrix,
+        pos: usize,
+        neg: usize,
+        branch_ordinal: usize,
+    ) {
+        if branch_ordinal == 0 {
+            return;
+        }
+        let br = circuit.get_branch_matrix_index(branch_ordinal);
+        let br_idx = br - 1;
+        if pos > 0 {
+            ac_matrix.add_real(br_idx, pos - 1, 1.0);
+            ac_matrix.add_real(pos - 1, br_idx, 1.0);
+        }
+        if neg > 0 {
+            ac_matrix.add_real(br_idx, neg - 1, -1.0);
+            ac_matrix.add_real(neg - 1, br_idx, -1.0);
+        }
+    }
+
     fn stamp_xspice_small_signal_ac(
         circuit: &CircuitData,
         ac_matrix: &mut ComplexMatrix,
@@ -377,6 +399,15 @@ impl Engine {
         let num_nodes = circuit.num_nodes();
         for instance in &circuit.xspice_instances {
             let ports = instance.ports();
+            for (pos, neg, branch_ordinal) in instance.current_probe_branches() {
+                Self::stamp_xspice_ac_current_probe(
+                    circuit,
+                    ac_matrix,
+                    pos,
+                    neg,
+                    branch_ordinal,
+                );
+            }
             for (port_idx, connection) in instance.connections().iter().enumerate() {
                 let Some(port) = ports.get(port_idx) else {
                     continue;
@@ -519,7 +550,9 @@ impl Engine {
                             }
                         }
                     }
-                    crate::xspice::PortType::Current => {
+                    crate::xspice::PortType::Current
+                    | crate::xspice::PortType::Conductance
+                    | crate::xspice::PortType::DifferentialConductance => {
                         for (control_port, partial) in
                             instance.output_input_ac_partials(&port.name, frequency_hz)
                         {

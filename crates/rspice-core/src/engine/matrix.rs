@@ -936,10 +936,25 @@ impl Engine {
                 };
 
                 if port.direction == crate::xspice::PortDirection::InOut {
+                    let reserve_control_columns = matches!(
+                        port.default_type,
+                        crate::xspice::PortType::Conductance
+                            | crate::xspice::PortType::DifferentialConductance
+                    );
                     match connection {
                         crate::xspice::PortConnection::Analog(node) => {
                             if *node > 0 {
                                 inout_analog_nodes.push(*node);
+                            }
+                            if reserve_control_columns {
+                                push_current_output_controls(
+                                    &mut triplets,
+                                    circuit,
+                                    instance,
+                                    ports,
+                                    *node,
+                                    0,
+                                );
                             }
                         }
                         crate::xspice::PortConnection::Differential(pos, neg) => {
@@ -948,6 +963,16 @@ impl Engine {
                             }
                             if *neg > 0 {
                                 inout_analog_nodes.push(*neg);
+                            }
+                            if reserve_control_columns {
+                                push_current_output_controls(
+                                    &mut triplets,
+                                    circuit,
+                                    instance,
+                                    ports,
+                                    *pos,
+                                    *neg,
+                                );
                             }
                         }
                         _ => {}
@@ -1065,7 +1090,9 @@ impl Engine {
                         }
                         _ => {}
                     },
-                    crate::xspice::PortType::Current => {
+                    crate::xspice::PortType::Current
+                    | crate::xspice::PortType::Conductance
+                    | crate::xspice::PortType::DifferentialConductance => {
                         let (pos, neg) = match connection {
                             crate::xspice::PortConnection::Analog(node) => (*node, 0),
                             crate::xspice::PortConnection::Differential(pos, neg) => (*pos, *neg),

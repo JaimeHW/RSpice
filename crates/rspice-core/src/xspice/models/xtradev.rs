@@ -2765,6 +2765,43 @@ impl CodeModel for Ilimit {
 
         Ok(())
     }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        fn partials(items: [(&str, Value); 4]) -> Vec<(String, Value)> {
+            items
+                .into_iter()
+                .filter_map(|(port, partial)| {
+                    (partial != 0.0 && partial.is_finite()).then(|| (port.to_string(), partial))
+                })
+                .collect()
+        }
+
+        let Ok(eval) = ilimit_eval(ctx) else {
+            return Vec::new();
+        };
+
+        match output_port.to_ascii_lowercase().as_str() {
+            "out" => partials([
+                ("in", eval.out_in_partial),
+                ("out", eval.out_out_partial),
+                ("pos_pwr", eval.out_pos_partial),
+                ("neg_pwr", eval.out_neg_partial),
+            ]),
+            "pos_pwr" if ilimit_port_connected(ctx, "pos_pwr") => partials([
+                ("in", eval.pos_in_partial),
+                ("out", eval.pos_out_partial),
+                ("pos_pwr", eval.pos_pos_partial),
+                ("neg_pwr", eval.pos_neg_partial),
+            ]),
+            "neg_pwr" if ilimit_port_connected(ctx, "neg_pwr") => partials([
+                ("in", eval.neg_in_partial),
+                ("out", eval.neg_out_partial),
+                ("pos_pwr", eval.neg_pos_partial),
+                ("neg_pwr", eval.neg_neg_partial),
+            ]),
+            _ => Vec::new(),
+        }
+    }
 }
 
 impl CodeModel for SeeGenerator {
