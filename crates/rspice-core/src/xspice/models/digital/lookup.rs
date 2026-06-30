@@ -76,21 +76,22 @@ fn d_genlut_unknown_value() -> DigitalValue {
     DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined)
 }
 
-fn d_lut_index(inputs: &[DigitalValue]) -> CmResult<Option<usize>> {
-    if inputs.len() >= usize::BITS as usize {
+fn d_lut_index_for_width(inputs: &[DigitalValue], input_width: usize) -> CmResult<Option<usize>> {
+    if input_width >= usize::BITS as usize {
         return Err(d_lut_error(format!(
             "input vector width {} is too large",
-            inputs.len()
+            input_width
         )));
     }
 
     let mut index = 0usize;
-    for (bit, input) in inputs.iter().enumerate() {
+    for bit in 0..input_width {
+        let input = inputs.get(bit).copied().unwrap_or_default();
         match input.state.logic_level() {
             Some(false) => {}
             Some(true) => {
                 let mask = 1usize.checked_shl(bit as u32).ok_or_else(|| {
-                    d_lut_error(format!("input vector width {} is too large", inputs.len()))
+                    d_lut_error(format!("input vector width {input_width} is too large"))
                 })?;
                 index |= mask;
             }
@@ -99,6 +100,10 @@ fn d_lut_index(inputs: &[DigitalValue]) -> CmResult<Option<usize>> {
     }
 
     Ok(Some(index))
+}
+
+fn d_lut_index(inputs: &[DigitalValue]) -> CmResult<Option<usize>> {
+    d_lut_index_for_width(inputs, inputs.len())
 }
 
 fn d_genlut_shape(ctx: &CmContext) -> CmResult<(usize, usize)> {
@@ -262,8 +267,9 @@ impl CodeModel for DigitalLookupTable {
         let table = ctx
             .string_param("table_values")
             .ok_or_else(|| CmError::MissingParameter("table_values".to_string()))?;
+        let input_width = ctx.port_width("in");
         let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
-        let output_state = match d_lut_index(inputs)? {
+        let output_state = match d_lut_index_for_width(inputs, input_width)? {
             Some(index) => d_lut_table_state(table, index),
             None => DigitalState::Unknown,
         };
@@ -466,6 +472,18 @@ mod tests {
     }
 
     #[test]
+    fn d_lut_index_uses_declared_width_for_bounds() {
+        assert!(d_lut_index_for_width(&[], usize::BITS as usize).is_err());
+    }
+
+    #[test]
+    fn d_lut_index_uses_declared_width_with_default_event_node_values() {
+        let inputs = [DigitalValue::one()];
+
+        assert_eq!(d_lut_index_for_width(&inputs, 3).unwrap(), Some(1));
+    }
+
+    #[test]
     fn d_lut_zero_input_width_is_constant_table_like_ngspice() {
         let mut ctx = CmContext::new();
         ctx.set_port_width("in", 0);
@@ -486,6 +504,25 @@ mod tests {
         let inputs = vec![DigitalValue::zero(); usize::BITS as usize];
 
         assert!(d_lut_index(&inputs).is_err());
+    }
+
+    #[test]
+    fn d_lut_rejects_unaddressable_declared_width_even_with_short_input_buffer() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("in", usize::BITS as usize);
+        ctx.set_string_param("table_values", "0");
+
+        DigitalLookupTable
+            .init(&mut ctx)
+            .expect("d_lut init does not inspect table width");
+        let err = DigitalLookupTable
+            .evaluate(&mut ctx)
+            .expect_err("declared d_lut width must drive addressability checks");
+
+        assert!(
+            format!("{err}").contains("input vector width"),
+            "unexpected d_lut error: {err}"
+        );
     }
 
     #[test]
