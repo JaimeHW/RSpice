@@ -8,7 +8,6 @@
 //! executed.
 
 use crate::abort_signal::AbortSignal;
-use crate::analysis::DcSweep;
 use crate::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
     extract_dc_value,
@@ -222,7 +221,19 @@ struct XyceDcSweep {
     start: Value,
     stop: Value,
     step: Value,
+    mode: crate::netlist::DcSweepMode,
     sweep2: Option<DcSecondSweep>,
+}
+
+impl XyceDcSweep {
+    fn primary_spec(&self) -> crate::netlist::DcSweepSpec {
+        crate::netlist::DcSweepSpec {
+            start: self.start,
+            stop: self.stop,
+            step: self.step,
+            mode: self.mode.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -605,12 +616,10 @@ impl XyceTestRunner {
 
         let engine = self.create_dc_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let results = match engine.run_dc_sweep2_with_report_and_abort(
+        let results = match engine.run_dc_sweep2_spec_with_report_and_abort(
             &netlist,
             &plan.dc.source,
-            plan.dc.start,
-            plan.dc.stop,
-            plan.dc.step,
+            &plan.dc.primary_spec(),
             plan.dc.sweep2.as_ref(),
             &abort,
         ) {
@@ -889,12 +898,10 @@ impl XyceTestRunner {
             .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
         let engine = self.create_dc_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let results = engine.run_dc_sweep2_with_report_and_abort(
+        let results = engine.run_dc_sweep2_spec_with_report_and_abort(
             &netlist,
             &plan.dc.source,
-            plan.dc.start,
-            plan.dc.stop,
-            plan.dc.step,
+            &plan.dc.primary_spec(),
             plan.dc.sweep2.as_ref(),
             &abort,
         )?;
@@ -911,19 +918,11 @@ impl XyceTestRunner {
         columns.push("Index".to_string());
         columns.extend(plan.print.probes.iter().cloned());
 
-        let primary_points = DcSweep::new(
-            plan.dc.source.clone(),
-            plan.dc.start,
-            plan.dc.stop,
-            plan.dc.step,
-        )
-        .points();
+        let primary_points = plan.dc.primary_spec().points();
         if primary_points.is_empty() {
             return Err("primary DC sweep has no points".to_string());
         }
-        let secondary_points = plan.dc.sweep2.as_ref().map(|sweep| {
-            DcSweep::new(sweep.source.clone(), sweep.start, sweep.stop, sweep.step).points()
-        });
+        let secondary_points = plan.dc.sweep2.as_ref().map(|sweep| sweep.spec().points());
         if secondary_points.as_ref().is_some_and(Vec::is_empty) {
             return Err("secondary DC sweep has no points".to_string());
         }
@@ -1003,13 +1002,11 @@ impl XyceTestRunner {
 
         let data_columns = self.reference_data_columns(reference, print)?;
         let comp_tolerances = self.comp_tolerances(source, &data_columns)?;
-        let primary_points = DcSweep::new(dc.source.clone(), dc.start, dc.stop, dc.step).points();
+        let primary_points = dc.primary_spec().points();
         if primary_points.is_empty() {
             return Err("primary DC sweep has no points".to_string());
         }
-        let secondary_points = dc.sweep2.as_ref().map(|sweep| {
-            DcSweep::new(sweep.source.clone(), sweep.start, sweep.stop, sweep.step).points()
-        });
+        let secondary_points = dc.sweep2.as_ref().map(|sweep| sweep.spec().points());
         if secondary_points.as_ref().is_some_and(Vec::is_empty) {
             return Err("secondary DC sweep has no points".to_string());
         }
@@ -1327,6 +1324,8 @@ impl XyceTestRunner {
             Self::validate_dc_probe(probe, netlist)?;
         }
 
+        Self::reject_unsupported_static_dc_model_observables(netlist, print)?;
+
         Ok(())
     }
 
@@ -1337,12 +1336,112 @@ impl XyceTestRunner {
         let normalized = message.to_ascii_lowercase();
         normalized.contains("unsupported")
             || normalized.contains("not implemented")
+            || normalized.contains("does not support")
+            || normalized.contains("currently supports")
             || normalized.contains("no native implementation")
             || normalized.contains("no generated verilog-a builtin")
             || normalized.contains("no generated builtin")
             || normalized.contains("not yet")
             || normalized.contains("refusing")
             || normalized.contains("must not run through")
+    }
+
+    fn reject_unsupported_static_dc_model_observables(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<(), String> {
+        if !Self::netlist_uses_ekv3_level301_mosfet(netlist) {
+            return Ok(());
+        }
+
+        for probe in &print.probes {
+            if Self::dc_probe_references_voltage_source_current(probe, netlist)? {
+                return Err(
+                    "EKV3 LEVEL=301 static .PRINT DC voltage-source branch-current probes require full external terminal-current stamping; the current native EKV3 slice is limited to validated NMOS150 channel-current DC rows and VANOISE"
+                        .to_string(),
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn netlist_uses_ekv3_level301_mosfet(netlist: &Netlist) -> bool {
+        if Self::elements_use_ekv3_level301_mosfet(&netlist.elements, &netlist.models, &[]) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            Self::elements_use_ekv3_level301_mosfet(
+                &flattened.elements,
+                &netlist.models,
+                &flattened.scoped_models,
+            )
+        })
+    }
+
+    fn elements_use_ekv3_level301_mosfet(
+        elements: &[crate::netlist::Element],
+        models: &[crate::netlist::ModelDef],
+        scoped_models: &[crate::netlist::ModelDef],
+    ) -> bool {
+        elements.iter().any(|element| {
+            let ElementKind::Mosfet { model, .. } = &element.kind else {
+                return false;
+            };
+            Self::find_model(scoped_models, model)
+                .or_else(|| Self::find_model(models, model))
+                .is_some_and(Self::model_is_ekv3_level301)
+        })
+    }
+
+    fn find_model<'a>(
+        models: &'a [crate::netlist::ModelDef],
+        name: &str,
+    ) -> Option<&'a crate::netlist::ModelDef> {
+        models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case(name))
+    }
+
+    fn model_is_ekv3_level301(model: &crate::netlist::ModelDef) -> bool {
+        matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) && model
+            .params
+            .iter()
+            .rev()
+            .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+            .is_some_and(|(_, value)| (*value - 301.0).abs() <= 1.0e-9)
+    }
+
+    fn dc_probe_references_voltage_source_current(
+        probe: &str,
+        netlist: &Netlist,
+    ) -> Result<bool, String> {
+        let normalized = Self::normalize_probe(probe);
+        if let Some(source_name) = Self::parse_current_probe(&normalized) {
+            return Ok(Self::source_is_voltage_source(netlist, &source_name));
+        }
+
+        let Some(expression) = Self::print_expression_inner(&normalized) else {
+            return Ok(false);
+        };
+        if !Self::print_expression_contains_probe_call(expression) {
+            return Ok(false);
+        }
+
+        let mut references_voltage_source_current = false;
+        Self::rewrite_print_expression_calls(expression, netlist.params.clone(), |call| {
+            if let Some(source_name) = Self::parse_current_probe(call)
+                && Self::source_is_voltage_source(netlist, &source_name)
+            {
+                references_voltage_source_current = true;
+            }
+            Ok(0.0)
+        })?;
+        Ok(references_voltage_source_current)
     }
 
     fn validate_dc_sweep_source(netlist: &Netlist, source: &str) -> Result<(), String> {
@@ -2037,12 +2136,13 @@ impl XyceTestRunner {
                     start,
                     stop,
                     step,
+                    mode,
                     sweep2,
-                } => Some((source, start, stop, step, sweep2)),
+                } => Some((source, start, stop, step, mode, sweep2)),
                 _ => None,
             });
 
-        let Some((source, start, stop, step, sweep2)) = dc_commands.next() else {
+        let Some((source, start, stop, step, mode, sweep2)) = dc_commands.next() else {
             return Err(
                 "deck has no .DC analysis; first Xyce adapter supports static .PRINT DC only"
                     .to_string(),
@@ -2051,15 +2151,17 @@ impl XyceTestRunner {
         if dc_commands.next().is_some() {
             return Err("deck has multiple .DC analyses; multi-analysis Xyce comparison is not implemented yet".to_string());
         }
-        if !start.is_finite() || !stop.is_finite() || !step.is_finite() || *step == 0.0 {
+        let primary_spec = crate::netlist::DcSweepSpec {
+            start: *start,
+            stop: *stop,
+            step: *step,
+            mode: mode.clone(),
+        };
+        if primary_spec.points().is_empty() {
             return Err("deck has invalid .DC sweep bounds".to_string());
         }
         if let Some(sweep2) = sweep2 {
-            if !sweep2.start.is_finite()
-                || !sweep2.stop.is_finite()
-                || !sweep2.step.is_finite()
-                || sweep2.step == 0.0
-            {
+            if sweep2.spec().points().is_empty() {
                 return Err("deck has invalid secondary .DC sweep bounds".to_string());
             }
         }
@@ -2069,6 +2171,7 @@ impl XyceTestRunner {
             start: *start,
             stop: *stop,
             step: *step,
+            mode: mode.clone(),
             sweep2: sweep2.clone(),
         })
     }

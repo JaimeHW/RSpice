@@ -30,23 +30,18 @@ pub(super) fn parse_command(
             analyses.push(AnalysisCommand::Op);
         }
         ".DC" => {
-            let source = expect_ident(stream, line_num)?;
-            let start = expect_value(stream, line_num, params)?;
-            let stop = expect_value(stream, line_num, params)?;
-            let step = expect_value(stream, line_num, params)?;
+            let (source, spec) = parse_dc_sweep_spec(stream, line_num, params)?;
 
             // Optional second (outer) source: .DC V1 a b s V2 a2 b2 s2
             skip_commas(stream);
             let sweep2 = if matches!(stream.peek().kind, TokenKind::Ident(_)) {
-                let source2 = expect_ident(stream, line_num)?;
-                let start2 = expect_value(stream, line_num, params)?;
-                let stop2 = expect_value(stream, line_num, params)?;
-                let step2 = expect_value(stream, line_num, params)?;
+                let (source2, spec2) = parse_dc_sweep_spec(stream, line_num, params)?;
                 Some(crate::netlist::DcSecondSweep {
                     source: source2,
-                    start: start2,
-                    stop: stop2,
-                    step: step2,
+                    start: spec2.start,
+                    stop: spec2.stop,
+                    step: spec2.step,
+                    mode: spec2.mode,
                 })
             } else {
                 None
@@ -54,9 +49,10 @@ pub(super) fn parse_command(
 
             analyses.push(AnalysisCommand::Dc {
                 source,
-                start,
-                stop,
-                step,
+                start: spec.start,
+                stop: spec.stop,
+                step: spec.step,
+                mode: spec.mode,
                 sweep2,
             });
         }
@@ -1598,6 +1594,111 @@ pub(super) fn parse_func_statement(
     log::debug!("Defined function: {}(...) = {}", func_name, body);
 
     Ok(())
+}
+
+fn parse_dc_sweep_spec(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<(String, crate::netlist::DcSweepSpec), ParseError> {
+    skip_commas(stream);
+    let first = expect_ident(stream, line_num)?;
+    let first_upper = first.to_ascii_uppercase();
+
+    if is_dc_sweep_type(&first_upper) {
+        let source = expect_ident(stream, line_num)?;
+        let spec = parse_dc_sweep_spec_after_type(stream, line_num, params, &first_upper)?;
+        return Ok((source, spec));
+    }
+
+    skip_commas(stream);
+    if let TokenKind::Ident(kind) = &stream.peek().kind {
+        let kind_upper = kind.to_ascii_uppercase();
+        if is_dc_sweep_type(&kind_upper) {
+            stream.advance();
+            let spec = parse_dc_sweep_spec_after_type(stream, line_num, params, &kind_upper)?;
+            return Ok((first, spec));
+        }
+    }
+
+    let start = expect_value(stream, line_num, params)?;
+    let stop = expect_value(stream, line_num, params)?;
+    let step = expect_value(stream, line_num, params)?;
+    Ok((
+        first,
+        crate::netlist::DcSweepSpec::linear(start, stop, step),
+    ))
+}
+
+fn parse_dc_sweep_spec_after_type(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    kind: &str,
+) -> Result<crate::netlist::DcSweepSpec, ParseError> {
+    skip_commas(stream);
+    match kind {
+        "LIST" => {
+            let mut values = Vec::new();
+            while let Some(value) = try_value(stream, params) {
+                values.push(value);
+                skip_commas(stream);
+            }
+            if values.is_empty() {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: ".DC LIST requires at least one value".to_string(),
+                });
+            }
+            Ok(crate::netlist::DcSweepSpec::list(values))
+        }
+        "DEC" => {
+            let start = expect_value(stream, line_num, params)?;
+            let stop = expect_value(stream, line_num, params)?;
+            let points = expect_positive_integer_value(
+                expect_value(stream, line_num, params)?,
+                line_num,
+                ".DC DEC points parameter",
+            )?;
+            Ok(crate::netlist::DcSweepSpec::decade(start, stop, points))
+        }
+        "OCT" => {
+            let start = expect_value(stream, line_num, params)?;
+            let stop = expect_value(stream, line_num, params)?;
+            let points = expect_positive_integer_value(
+                expect_value(stream, line_num, params)?,
+                line_num,
+                ".DC OCT points parameter",
+            )?;
+            Ok(crate::netlist::DcSweepSpec::octave(start, stop, points))
+        }
+        "LIN" => {
+            let start = expect_value(stream, line_num, params)?;
+            let stop = expect_value(stream, line_num, params)?;
+            let step = expect_value(stream, line_num, params)?;
+            Ok(crate::netlist::DcSweepSpec::linear(start, stop, step))
+        }
+        _ => unreachable!("validated DC sweep type"),
+    }
+}
+
+fn is_dc_sweep_type(kind: &str) -> bool {
+    matches!(kind, "LIST" | "DEC" | "OCT" | "LIN")
+}
+
+fn expect_positive_integer_value(
+    value: Value,
+    line_num: usize,
+    label: &str,
+) -> Result<usize, ParseError> {
+    if value.is_finite() && value >= 1.0 && value.fract().abs() <= Value::EPSILON {
+        Ok(value as usize)
+    } else {
+        Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{label} must be a positive integer"),
+        })
+    }
 }
 
 /// Consume a trailing `UIC` keyword on a `.TRAN` card.

@@ -52,50 +52,6 @@ impl DcSweep {
 
     /// Generate sweep points
     pub fn points(&self) -> Vec<Value> {
-        if !self.start.is_finite()
-            || !self.stop.is_finite()
-            || !self.step.is_finite()
-            || self.step == 0.0
-        {
-            return Vec::new();
-        }
-        if (self.stop > self.start && self.step < 0.0)
-            || (self.stop < self.start && self.step > 0.0)
-        {
-            return Vec::new();
-        }
-
-        let mut points = Vec::new();
-        let eps = (self.step.abs() * 1e-9).max(1e-18);
-        let mut point_index = 0usize;
-        const MAX_POINTS: usize = 2_000_000;
-
-        let done = |x: Value| -> bool {
-            if self.step > 0.0 {
-                x > self.stop + eps
-            } else {
-                x < self.stop - eps
-            }
-        };
-
-        loop {
-            let value = self.start + self.step * point_index as Value;
-            if done(value) {
-                break;
-            }
-
-            let snapped_to_stop = (value - self.stop).abs() <= eps;
-            points.push(if snapped_to_stop { self.stop } else { value });
-            point_index += 1;
-            if snapped_to_stop || point_index >= MAX_POINTS {
-                break;
-            }
-        }
-
-        if points.is_empty() {
-            points.push(self.start);
-        }
-
-        points
+        crate::netlist::DcSweepSpec::linear(self.start, self.stop, self.step).points()
     }
 }

@@ -3,7 +3,7 @@
 //! ngspice-style, with results concatenated in outer order.
 
 use rspice_core::engine::{Engine, SimulationConfig};
-use rspice_core::netlist::{AnalysisCommand, Netlist};
+use rspice_core::netlist::{AnalysisCommand, DcSweepMode, Netlist};
 
 /// Equal 1k resistors from each source into `out`, 1k to ground:
 /// v(out) = (v1 + v2) / 3 — every grid point has a closed form.
@@ -44,6 +44,127 @@ fn single_source_dc_still_parses_without_sweep2() {
         .iter()
         .any(|analysis| matches!(analysis, AnalysisCommand::Dc { sweep2: None, .. }));
     assert!(has_plain_dc, "single-source .DC must carry no second sweep");
+}
+
+#[test]
+fn xyce_dc_upgrade_sweep_modes_parse_and_generate_points() {
+    let list = single_dc_analysis(".dc vt1 list -17 12 188 5");
+    assert!(matches!(list.mode, DcSweepMode::List(_)));
+    assert_eq!(
+        rspice_core::netlist::DcSweepSpec {
+            start: list.start,
+            stop: list.stop,
+            step: list.step,
+            mode: list.mode.clone(),
+        }
+        .points(),
+        vec![-17.0, 12.0, 188.0, 5.0]
+    );
+
+    let list_prefix = single_dc_analysis(".dc list vt1 -17 12 188 5");
+    assert_eq!(
+        rspice_core::netlist::DcSweepSpec {
+            start: list_prefix.start,
+            stop: list_prefix.stop,
+            step: list_prefix.step,
+            mode: list_prefix.mode,
+        }
+        .points(),
+        vec![-17.0, 12.0, 188.0, 5.0]
+    );
+
+    let dec = single_dc_analysis(".dc dec vt1 0.1 100 4");
+    assert!(matches!(
+        dec.mode,
+        DcSweepMode::Decade {
+            points_per_decade: 4
+        }
+    ));
+    let dec_points = rspice_core::netlist::DcSweepSpec {
+        start: dec.start,
+        stop: dec.stop,
+        step: dec.step,
+        mode: dec.mode,
+    }
+    .points();
+    assert_eq!(dec_points.len(), 13);
+    assert!((dec_points[0] - 0.1).abs() < 1e-12);
+    assert!((dec_points[12] - 100.0).abs() < 1e-9);
+
+    let dec_suffix = single_dc_analysis(".dc vt1 dec 0.1 100 4");
+    assert_eq!(
+        rspice_core::netlist::DcSweepSpec {
+            start: dec_suffix.start,
+            stop: dec_suffix.stop,
+            step: dec_suffix.step,
+            mode: dec_suffix.mode,
+        }
+        .points()
+        .len(),
+        13
+    );
+
+    let oct = single_dc_analysis(".dc oct vt1 0.125 66 3");
+    assert!(matches!(
+        oct.mode,
+        DcSweepMode::Octave {
+            points_per_octave: 3
+        }
+    ));
+    let oct_points = rspice_core::netlist::DcSweepSpec {
+        start: oct.start,
+        stop: oct.stop,
+        step: oct.step,
+        mode: oct.mode,
+    }
+    .points();
+    assert_eq!(oct_points.len(), 28);
+    assert!((oct_points[0] - 0.125).abs() < 1e-12);
+    assert!((oct_points[27] - 64.0).abs() < 1e-9);
+
+    let oct_suffix = single_dc_analysis(".dc vt1 oct 0.125 66 3");
+    assert_eq!(
+        rspice_core::netlist::DcSweepSpec {
+            start: oct_suffix.start,
+            stop: oct_suffix.stop,
+            step: oct_suffix.step,
+            mode: oct_suffix.mode,
+        }
+        .points()
+        .len(),
+        28
+    );
+}
+
+struct ParsedDc {
+    start: f64,
+    stop: f64,
+    step: f64,
+    mode: DcSweepMode,
+}
+
+fn single_dc_analysis(dc_line: &str) -> ParsedDc {
+    let deck = format!("dc mode\nvt1 4 0 0\nr1 4 0 1k\n{dc_line}\n.end\n");
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::Dc {
+                start,
+                stop,
+                step,
+                mode,
+                ..
+            } => Some(ParsedDc {
+                start: *start,
+                stop: *stop,
+                step: *step,
+                mode: mode.clone(),
+            }),
+            _ => None,
+        })
+        .expect(".dc card present")
 }
 
 #[test]

@@ -270,25 +270,30 @@ impl Engine {
         sweep2: Option<&crate::netlist::DcSecondSweep>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
+        let primary = crate::netlist::DcSweepSpec::linear(start, stop, step);
+        self.run_dc_sweep2_spec_with_report_and_abort(netlist, source_name, &primary, sweep2, abort)
+    }
+
+    /// Two-source DC sweep using the full `.DC` sweep specification for
+    /// non-linear sweep modes such as LIST, DEC, and OCT.
+    pub fn run_dc_sweep2_spec_with_report_and_abort(
+        &self,
+        netlist: &Netlist,
+        source_name: &str,
+        primary: &crate::netlist::DcSweepSpec,
+        sweep2: Option<&crate::netlist::DcSecondSweep>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
         let Some(sweep2) = sweep2 else {
-            return self.run_dc_sweep_with_report_and_abort(
+            return self.run_dc_sweep_spec_with_report_and_abort(
                 netlist,
                 source_name,
-                start,
-                stop,
-                step,
+                primary,
                 abort,
             );
         };
 
-        use crate::analysis::DcSweep;
-        let outer = DcSweep::new(
-            sweep2.source.clone(),
-            sweep2.start,
-            sweep2.stop,
-            sweep2.step,
-        );
-        let outer_points = outer.points();
+        let outer_points = sweep2.spec().points();
         if outer_points.is_empty() {
             return Err(SimulationError::Circuit(
                 "Invalid second-source sweep parameters".to_string(),
@@ -311,14 +316,8 @@ impl Engine {
             } else {
                 Self::override_independent_source_dc(&mut swept, &sweep2.source, outer_value)?;
             }
-            let inner = self.run_dc_sweep_with_report_and_abort(
-                &swept,
-                source_name,
-                start,
-                stop,
-                step,
-                abort,
-            )?;
+            let inner =
+                self.run_dc_sweep_spec_with_report_and_abort(&swept, source_name, primary, abort)?;
             results.extend(inner);
         }
         Ok(results)
@@ -380,11 +379,20 @@ impl Engine {
         step: Value,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
-        use crate::analysis::DcSweep;
+        let spec = crate::netlist::DcSweepSpec::linear(start, stop, step);
+        self.run_dc_sweep_spec_with_report_and_abort(netlist, source_name, &spec, abort)
+    }
 
+    /// Run a DC sweep from an already parsed sweep specification.
+    pub fn run_dc_sweep_spec_with_report_and_abort(
+        &self,
+        netlist: &Netlist,
+        source_name: &str,
+        spec: &crate::netlist::DcSweepSpec,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
-        let sweep = DcSweep::new(source_name.to_string(), start, stop, step);
-        let sweep_points = sweep.points();
+        let sweep_points = spec.points();
 
         if sweep_points.is_empty() {
             return Err(SimulationError::Circuit(

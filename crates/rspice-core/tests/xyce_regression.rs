@@ -356,6 +356,29 @@ fn test_xyce_include_alias_and_path_resolution_cases_run() {
 }
 
 #[test]
+fn test_xyce_dc_upgrade_sweep_modes_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/DC_UPGRADE/dcList.cir",
+        "Netlists/DC_UPGRADE/dcDec.cir",
+        "Netlists/DC_UPGRADE/dcOct.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a numeric Xyce DC sweep-mode comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_subckt_wrapper_family_members_run_natively() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
@@ -444,6 +467,24 @@ fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
             .is_some_and(|error| error.contains(".STEP")),
         "unsupported reason should name the missing feature, got {result:?}"
     );
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_1353/150nm_nmos.cir",
+        "Netlists/Certification_Tests/BUG_1353/150nm_pmos.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && result.expected_unsupported,
+            "{relative} should stay named unsupported until EKV3 LEVEL=301 static branch-current observables are fully implemented, got {result:?}"
+        );
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("EKV3 LEVEL=301")),
+            "unsupported reason should name the EKV3 capability boundary, got {result:?}"
+        );
+    }
 }
 
 #[test]

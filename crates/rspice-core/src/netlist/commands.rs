@@ -48,6 +48,7 @@ pub fn parse_command(
                     start: start2,
                     stop: stop2,
                     step: step2,
+                    mode: super::DcSweepMode::Linear,
                 })
             } else {
                 None
@@ -58,6 +59,7 @@ pub fn parse_command(
                 start,
                 stop,
                 step,
+                mode: super::DcSweepMode::Linear,
                 sweep2,
             });
         }

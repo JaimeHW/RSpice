@@ -857,6 +857,186 @@ pub struct DcSecondSweep {
     pub start: Value,
     pub stop: Value,
     pub step: Value,
+    pub mode: DcSweepMode,
+}
+
+impl DcSecondSweep {
+    pub fn linear(source: String, start: Value, stop: Value, step: Value) -> Self {
+        Self {
+            source,
+            start,
+            stop,
+            step,
+            mode: DcSweepMode::Linear,
+        }
+    }
+
+    pub fn spec(&self) -> DcSweepSpec {
+        DcSweepSpec {
+            start: self.start,
+            stop: self.stop,
+            step: self.step,
+            mode: self.mode.clone(),
+        }
+    }
+}
+
+/// DC sweep value generation mode.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DcSweepMode {
+    /// Classic SPICE linear sweep: start, stop, increment.
+    Linear,
+    /// Explicit value list, in source order.
+    List(Vec<Value>),
+    /// Logarithmic decade sweep with N points per decade.
+    Decade { points_per_decade: usize },
+    /// Logarithmic octave sweep with N points per octave.
+    Octave { points_per_octave: usize },
+}
+
+/// Value specification for one `.DC` sweep variable.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DcSweepSpec {
+    pub start: Value,
+    pub stop: Value,
+    pub step: Value,
+    pub mode: DcSweepMode,
+}
+
+impl DcSweepSpec {
+    pub fn linear(start: Value, stop: Value, step: Value) -> Self {
+        Self {
+            start,
+            stop,
+            step,
+            mode: DcSweepMode::Linear,
+        }
+    }
+
+    pub fn list(values: Vec<Value>) -> Self {
+        let start = values.first().copied().unwrap_or(0.0);
+        let stop = values.last().copied().unwrap_or(start);
+        Self {
+            start,
+            stop,
+            step: 0.0,
+            mode: DcSweepMode::List(values),
+        }
+    }
+
+    pub fn decade(start: Value, stop: Value, points_per_decade: usize) -> Self {
+        Self {
+            start,
+            stop,
+            step: points_per_decade as Value,
+            mode: DcSweepMode::Decade { points_per_decade },
+        }
+    }
+
+    pub fn octave(start: Value, stop: Value, points_per_octave: usize) -> Self {
+        Self {
+            start,
+            stop,
+            step: points_per_octave as Value,
+            mode: DcSweepMode::Octave { points_per_octave },
+        }
+    }
+
+    pub fn points(&self) -> Vec<Value> {
+        match &self.mode {
+            DcSweepMode::Linear => linear_sweep_points(self.start, self.stop, self.step),
+            DcSweepMode::List(values) => {
+                if values.iter().all(|value| value.is_finite()) {
+                    values.clone()
+                } else {
+                    Vec::new()
+                }
+            }
+            DcSweepMode::Decade { points_per_decade } => {
+                logarithmic_sweep_points(self.start, self.stop, *points_per_decade, 10.0)
+            }
+            DcSweepMode::Octave { points_per_octave } => {
+                logarithmic_sweep_points(self.start, self.stop, *points_per_octave, 2.0)
+            }
+        }
+    }
+}
+
+fn linear_sweep_points(start: Value, stop: Value, step: Value) -> Vec<Value> {
+    if !start.is_finite() || !stop.is_finite() || !step.is_finite() || step == 0.0 {
+        return Vec::new();
+    }
+    if (stop > start && step < 0.0) || (stop < start && step > 0.0) {
+        return Vec::new();
+    }
+
+    let mut points = Vec::new();
+    let eps = (step.abs() * 1e-9).max(1e-18);
+    let mut point_index = 0usize;
+    const MAX_POINTS: usize = 2_000_000;
+
+    let done = |x: Value| -> bool {
+        if step > 0.0 {
+            x > stop + eps
+        } else {
+            x < stop - eps
+        }
+    };
+
+    loop {
+        let value = start + step * point_index as Value;
+        if done(value) {
+            break;
+        }
+
+        let snapped_to_stop = (value - stop).abs() <= eps;
+        points.push(if snapped_to_stop { stop } else { value });
+        point_index += 1;
+        if snapped_to_stop || point_index >= MAX_POINTS {
+            break;
+        }
+    }
+
+    if points.is_empty() {
+        points.push(start);
+    }
+
+    points
+}
+
+fn logarithmic_sweep_points(
+    start: Value,
+    stop: Value,
+    points_per_interval: usize,
+    base: Value,
+) -> Vec<Value> {
+    if !start.is_finite()
+        || !stop.is_finite()
+        || start <= 0.0
+        || stop <= 0.0
+        || points_per_interval == 0
+    {
+        return Vec::new();
+    }
+
+    if start > stop {
+        return vec![start];
+    }
+
+    let multiplier = base.powf(1.0 / points_per_interval as Value);
+    let span = if (base - 10.0).abs() <= Value::EPSILON {
+        (stop.log10() - start.log10()).abs()
+    } else {
+        (stop.ln() - start.ln()).abs() / base.ln()
+    };
+    let raw_count = span * points_per_interval as Value + 1.0;
+    let boundary_epsilon = 64.0 * Value::EPSILON * raw_count.abs().max(1.0);
+    let count = (raw_count + boundary_epsilon).floor() as usize;
+    let count = count.max(1).min(2_000_000);
+
+    (0..count)
+        .map(|index| start * multiplier.powi(index as i32))
+        .collect()
 }
 
 //=============================================================================
@@ -1124,6 +1304,7 @@ pub enum AnalysisCommand {
         start: Value,
         stop: Value,
         step: Value,
+        mode: DcSweepMode,
         /// Optional second (outer) sweep source: the first source sweeps
         /// fully at every value of this one, ngspice-style.
         sweep2: Option<DcSecondSweep>,
