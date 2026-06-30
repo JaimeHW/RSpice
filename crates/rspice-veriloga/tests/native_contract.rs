@@ -4470,11 +4470,10 @@ endmodule
     );
 }
 
-#[cfg(feature = "native-bytecode-contract-tests")]
+#[cfg(target_arch = "x86_64")]
 #[test]
 fn native_noise_analysis_evaluates_current_probe_psd_without_fallback() {
-    let model = compile(
-        r#"
+    let source = r#"
 `include "disciplines.vams"
 module native_noise_current_probe(p, n);
     inout p, n;
@@ -4484,12 +4483,17 @@ module native_noise_current_probe(p, n);
             + white_noise(abs(I(p, n)) * 4.0, "shot");
     end
 endmodule
-"#,
-    );
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
     assert_eq!(model.noise_sources.len(), 1);
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
 
     let mut device =
-        VerilogADevice::try_new("NOISECP1", model, &[1, 0]).expect("model uses native JIT");
+        VerilogADevice::try_new_with_canonical_ir("NOISECP1", model, &artifact, &[1, 0])
+            .expect("canonical current-probe noise model uses native JIT");
     assert!(device.is_using_native());
     device.set_analysis_type(3);
 

@@ -2536,9 +2536,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         operands.len()
                     )));
                 }
-                self.lower(operands[0])?;
-                self.ops.push(NativeOp::WhiteNoise);
-                Ok(())
+                self.push(NativeOp::Const(0.0))
             }
             "flicker" => {
                 if operands.len() != 2 {
@@ -2547,11 +2545,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         operands.len()
                     )));
                 }
-                self.lower(operands[0])?;
-                self.lower(operands[1])?;
-                self.pop_binary("canonical flicker noise source")?;
-                self.ops.push(NativeOp::FlickerNoise);
-                Ok(())
+                self.push(NativeOp::Const(0.0))
             }
             "table" => {
                 // This is the large-signal stamp contribution. Noise-analysis
@@ -5345,18 +5339,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_white_noise_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
         self.require_intrinsic_arity_range(name, args, 1, 2)?;
-        self.lower(args[0])?;
-        self.ops.push(NativeOp::WhiteNoise);
-        Ok(())
+        self.push(NativeOp::Const(0.0))
     }
 
     fn lower_flicker_noise_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
         self.require_intrinsic_arity_range(name, args, 2, 3)?;
-        self.lower(args[0])?;
-        self.lower(args[1])?;
-        self.pop_binary("canonical flicker noise")?;
-        self.ops.push(NativeOp::FlickerNoise);
-        Ok(())
+        self.push(NativeOp::Const(0.0))
     }
 
     fn lower_noise_table_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
@@ -8393,18 +8381,8 @@ endmodule
         )
         .expect("lower canonical noise sources to native large-signal zero ops");
 
-        assert_eq!(
-            program.ops(),
-            &[
-                NativeOp::LoadTemperature,
-                NativeOp::WhiteNoise,
-                NativeOp::Const(2.0),
-                NativeOp::Const(1.0),
-                NativeOp::FlickerNoise,
-                NativeOp::Add,
-            ]
-        );
-        assert_eq!(program.max_stack_depth(), 3);
+        assert_eq!(program.ops(), &[NativeOp::Const(0.0)]);
+        assert_eq!(program.max_stack_depth(), 1);
     }
 
     #[test]
@@ -8420,19 +8398,8 @@ endmodule
         )
         .expect("lower explicit canonical noise source nodes to native large-signal zero ops");
 
-        assert_eq!(
-            program.ops(),
-            &[
-                NativeOp::Const(1.0),
-                NativeOp::WhiteNoise,
-                NativeOp::Const(2.0),
-                NativeOp::Const(1.0),
-                NativeOp::FlickerNoise,
-                NativeOp::Add,
-                NativeOp::AddConst(0.0),
-            ]
-        );
-        assert_eq!(program.max_stack_depth(), 3);
+        assert_eq!(program.ops(), &[NativeOp::Const(0.0)]);
+        assert_eq!(program.max_stack_depth(), 1);
     }
 
     #[test]

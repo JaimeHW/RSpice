@@ -825,7 +825,6 @@ endmodule
     );
 }
 
-#[cfg(not(feature = "native"))]
 #[test]
 fn try_noise_sources_evaluates_current_probe_psd() {
     let model = compile(
@@ -856,34 +855,6 @@ endmodule
     assert_eq!(shot.node_pos, 1);
     assert_eq!(shot.node_neg, 0);
     assert!((shot.psd - 2.4e-2).abs() < 1.0e-15, "shot={shot:?}");
-}
-
-#[cfg(feature = "native")]
-#[test]
-fn current_probe_noise_fails_closed_under_native() {
-    let model = compile(
-        r#"
-`include "disciplines.vams"
-
-module noise_current_probe(p, n);
-    inout p, n;
-    electrical p, n;
-    analog begin
-        I(p, n) <+ V(p, n) * 2.0e-3
-            + white_noise(abs(I(p, n)) * 4.0, "shot");
-    end
-endmodule
-"#,
-    );
-
-    let err = model
-        .try_device("X1", &[1, 0])
-        .expect_err("canonical native current-probe noise must fail closed");
-    let text = err.to_string();
-    assert!(
-        text.contains("branch current") && text.contains("no interpreter fallback"),
-        "diagnostic should identify unsupported current-probe noise without fallback, got: {text}"
-    );
 }
 
 #[test]
