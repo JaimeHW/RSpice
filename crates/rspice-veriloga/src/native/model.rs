@@ -147,6 +147,16 @@ impl NativeModel {
         let jacobian_entry = append_test_value_stub(&mut bytes, 2);
         let reactive_jacobian_entry = append_test_value_stub(&mut bytes, 3);
         let image = ExecutableMemory::allocate(&bytes).expect("allocate native test image");
+        assert_eq!(
+            jacobian_entry_points.len(),
+            stamp_value_entry_points,
+            "test native model must provide one Jacobian row per stamp"
+        );
+        assert_eq!(
+            reactive_jacobian_entry_points.len(),
+            stamp_value_entry_points,
+            "test native model must provide one reactive-Jacobian row per stamp"
+        );
         let entries = NativeEntryOffsets {
             assignment: CodeOffset::new(0),
             parameter_defaults: vec![],
@@ -189,6 +199,18 @@ impl NativeModel {
             return Err(JitError::InternalCompilerError {
                 model: "native-model".into(),
                 detail: "static-condition entry shape does not match stamp entry shape".into(),
+            });
+        }
+        if entries.jacobians.len() != entries.stamp_values.len() {
+            return Err(JitError::InternalCompilerError {
+                model: "native-model".into(),
+                detail: "jacobian entry shape does not match stamp entry shape".into(),
+            });
+        }
+        if entries.reactive_jacobians.len() != entries.stamp_values.len() {
+            return Err(JitError::InternalCompilerError {
+                model: "native-model".into(),
+                detail: "reactive-jacobian entry shape does not match stamp entry shape".into(),
             });
         }
         if entries.noise_exponents.len() != entries.noise_psd.len() {
@@ -477,7 +499,7 @@ mod tests {
 
     #[test]
     fn native_model_entry_points_are_not_optional() {
-        let model = NativeModel::new_for_test(2, 1, vec![1], vec![]);
+        let model = NativeModel::new_for_test(2, 1, vec![1], vec![0]);
         assert_eq!(model.chunk_count(), 1);
         assert_eq!(model.plan_stats().parameter_default_entry_points, 0);
         assert_eq!(model.plan_stats().static_condition_entry_points, 1);
@@ -620,6 +642,54 @@ mod tests {
         .expect_err("missing parameter-default slot must be rejected");
 
         assert!(error.to_string().contains("parameter-default entry shape"));
+        assert!(error.to_string().contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn native_model_rejects_jacobian_stamp_shape_mismatch() {
+        let image = ExecutableMemory::allocate(&[0xC3]).expect("allocate native test image");
+        let error = NativeModel::from_executable_image(
+            0,
+            0,
+            image,
+            NativeEntryOffsets {
+                assignment: CodeOffset::new(0),
+                parameter_defaults: vec![],
+                static_conditions: vec![None],
+                stamp_values: vec![CodeOffset::new(0)],
+                jacobians: vec![],
+                reactive_jacobians: vec![vec![]],
+                noise_psd: vec![],
+                noise_exponents: vec![],
+            },
+        )
+        .expect_err("jacobian table must match stamp table shape");
+
+        assert!(error.to_string().contains("jacobian entry shape"));
+        assert!(error.to_string().contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn native_model_rejects_reactive_jacobian_stamp_shape_mismatch() {
+        let image = ExecutableMemory::allocate(&[0xC3]).expect("allocate native test image");
+        let error = NativeModel::from_executable_image(
+            0,
+            0,
+            image,
+            NativeEntryOffsets {
+                assignment: CodeOffset::new(0),
+                parameter_defaults: vec![],
+                static_conditions: vec![None],
+                stamp_values: vec![CodeOffset::new(0)],
+                jacobians: vec![vec![]],
+                reactive_jacobians: vec![],
+                noise_psd: vec![],
+                noise_exponents: vec![],
+            },
+        )
+        .expect_err("reactive-jacobian table must match stamp table shape");
+
+        assert!(error.to_string().contains("reactive-jacobian entry shape"));
         assert!(error.to_string().contains("no interpreter fallback"));
     }
 
