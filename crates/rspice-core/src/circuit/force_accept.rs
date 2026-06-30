@@ -242,8 +242,31 @@ impl CircuitData {
                 }
                 match instance.connection_at(port_idx) {
                     Some(crate::xspice::PortConnection::Analog(node)) => push_pair(*node, 0),
+                    Some(crate::xspice::PortConnection::AnalogVector(nodes)) => {
+                        for node in nodes {
+                            push_pair(*node, 0);
+                        }
+                    }
                     Some(crate::xspice::PortConnection::Differential(pos, neg)) => {
                         push_pair(*pos, *neg)
+                    }
+                    Some(crate::xspice::PortConnection::TypedAnalogVector(elements)) => {
+                        for element in elements {
+                            match element {
+                                crate::xspice::AnalogInputConnection::Node(node) => {
+                                    push_pair(*node, 0);
+                                }
+                                crate::xspice::AnalogInputConnection::Differential(pos, neg)
+                                | crate::xspice::AnalogInputConnection::CurrentOutput {
+                                    pos,
+                                    neg,
+                                }
+                                | crate::xspice::AnalogInputConnection::Hybrid {
+                                    pos, neg, ..
+                                } => push_pair(*pos, *neg),
+                                _ => {}
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -298,9 +321,35 @@ impl CircuitData {
                     Some(crate::xspice::PortConnection::Analog(node)) => {
                         Self::mark_force_accept_protected_node(&mut mask, *node);
                     }
+                    Some(crate::xspice::PortConnection::AnalogVector(nodes)) => {
+                        for node in nodes {
+                            Self::mark_force_accept_protected_node(&mut mask, *node);
+                        }
+                    }
                     Some(crate::xspice::PortConnection::Differential(pos, neg)) => {
                         Self::mark_force_accept_protected_node(&mut mask, *pos);
                         Self::mark_force_accept_protected_node(&mut mask, *neg);
+                    }
+                    Some(crate::xspice::PortConnection::TypedAnalogVector(elements)) => {
+                        for element in elements {
+                            match element {
+                                crate::xspice::AnalogInputConnection::Node(node) => {
+                                    Self::mark_force_accept_protected_node(&mut mask, *node);
+                                }
+                                crate::xspice::AnalogInputConnection::Differential(pos, neg)
+                                | crate::xspice::AnalogInputConnection::CurrentOutput {
+                                    pos,
+                                    neg,
+                                }
+                                | crate::xspice::AnalogInputConnection::Hybrid {
+                                    pos, neg, ..
+                                } => {
+                                    Self::mark_force_accept_protected_node(&mut mask, *pos);
+                                    Self::mark_force_accept_protected_node(&mut mask, *neg);
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                     _ => {}
                 }
