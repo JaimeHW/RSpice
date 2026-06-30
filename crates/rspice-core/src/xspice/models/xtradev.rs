@@ -1290,6 +1290,11 @@ fn core_table_signature(ctx: &CmContext) -> CoreTableSignature {
     }
 }
 
+fn core_table_signature_matches(ctx: &CmContext, signature: &CoreTableSignature) -> bool {
+    ctx.real_vector_param("h_array").unwrap_or(&[]) == signature.h_values.as_slice()
+        && ctx.real_vector_param("b_array").unwrap_or(&[]) == signature.b_values.as_slice()
+}
+
 fn core_table_from_points(points: Vec<CorePoint>) -> CoreTable {
     let midpoints = points
         .windows(2)
@@ -1352,13 +1357,13 @@ fn core_table_uncached(ctx: &CmContext) -> CmResult<CoreTable> {
 }
 
 fn cache_core_table(ctx: &mut CmContext) -> CmResult<Arc<CoreTable>> {
-    let signature = core_table_signature(ctx);
     if let Some(resource) = ctx.resource::<CoreTableResource>(CORE_TABLE_RESOURCE)
-        && resource.signature == signature
+        && core_table_signature_matches(ctx, &resource.signature)
     {
         return resource.data.clone();
     }
 
+    let signature = core_table_signature(ctx);
     let data = core_table_uncached(ctx).map(Arc::new);
     ctx.set_resource(
         CORE_TABLE_RESOURCE,
