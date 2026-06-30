@@ -122,15 +122,14 @@ fn d_ram_value_from_code(code: i64, strength: DigitalStrength) -> DigitalValue {
     DigitalValue::new(state, strength)
 }
 
-fn d_ram_sized_input_vector(ctx: &CmContext, name: &str, width: usize) -> Vec<DigitalValue> {
-    let mut values = ctx.input_digital_vector(name);
-    values.resize(width, DigitalValue::default());
-    values.truncate(width);
-    values
+fn d_ram_input_state_code(ctx: &CmContext, name: &str, index: usize) -> i64 {
+    ctx.input_digital_vector_values(name)
+        .and_then(|values| values.get(index).copied())
+        .map(d_ram_state_code)
+        .unwrap_or_else(|| d_ram_state_code(DigitalValue::default()))
 }
 
 fn d_ram_select_code(ctx: &CmContext, shape: DMemoryShape) -> i64 {
-    let select = d_ram_sized_input_vector(ctx, "select", shape.select_width);
     let select_value = d_ram_integer_param(
         ctx,
         "select_value",
@@ -139,9 +138,9 @@ fn d_ram_select_code(ctx: &CmContext, shape: DMemoryShape) -> i64 {
         D_RAM_SELECT_VALUE_MAX,
     );
 
-    for (bit_idx, value) in select.iter().enumerate() {
+    for bit_idx in 0..shape.select_width {
         let expected = (select_value >> bit_idx) & 1;
-        if d_ram_state_code(*value) != expected {
+        if d_ram_input_state_code(ctx, "select", bit_idx) != expected {
             return 0;
         }
     }
@@ -150,16 +149,14 @@ fn d_ram_select_code(ctx: &CmContext, shape: DMemoryShape) -> i64 {
 }
 
 fn d_ram_address_codes(ctx: &CmContext, shape: DMemoryShape) -> Vec<i64> {
-    d_ram_sized_input_vector(ctx, "address", shape.address_width)
-        .into_iter()
-        .map(d_ram_state_code)
+    (0..shape.address_width)
+        .map(|index| d_ram_input_state_code(ctx, "address", index))
         .collect()
 }
 
 fn d_ram_data_codes(ctx: &CmContext, shape: DMemoryShape) -> Vec<i64> {
-    d_ram_sized_input_vector(ctx, "data_in", shape.word_width)
-        .into_iter()
-        .map(d_ram_state_code)
+    (0..shape.word_width)
+        .map(|index| d_ram_input_state_code(ctx, "data_in", index))
         .collect()
 }
 
