@@ -3343,7 +3343,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "hypot" => self.lower_hypot_derivative(name, args, wrt),
             "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
             | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
-            | "flicker_noise" | "noise_table" => self.push(NativeOp::Const(0.0)),
+            | "flicker_noise" | "noise_table" | "noise_table_log" => {
+                self.push(NativeOp::Const(0.0))
+            }
             _ => Err(self.unsupported(format!("ddx derivative of intrinsic function '{name}'"))),
         }
     }
@@ -3537,7 +3539,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             "floor" | "ceil" | "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime"
             | "mfactor" | "simparam" | "param_given" | "port_connected" | "analysis"
-            | "white_noise" | "flicker_noise" | "noise_table" => self.push(NativeOp::Const(0.0)),
+            | "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" => {
+                self.push(NativeOp::Const(0.0))
+            }
             "ddt" | "idt" | "idtmod" => Err(self.unsupported(format!(
                 "second derivative of stateful intrinsic at expression {expr_id}"
             ))),
@@ -5272,7 +5276,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "analysis" => self.lower_analysis_intrinsic(name, args),
             "white_noise" => self.lower_white_noise_intrinsic(name, args),
             "flicker_noise" => self.lower_flicker_noise_intrinsic(name, args),
-            "noise_table" => self.lower_noise_table_intrinsic(name, args),
+            "noise_table" | "noise_table_log" => self.lower_noise_table_intrinsic(name, args),
             _ => Err(self.unsupported(format!("intrinsic function '{name}'"))),
         }
     }
@@ -8382,7 +8386,9 @@ module mir_noise_sources(p, n);
   inout p, n;
   electrical p, n;
   analog begin
-    I(p, n) <+ white_noise($temperature, "thermal") + flicker_noise(2.0, 1.0, "flicker");
+    I(p, n) <+ white_noise($temperature, "thermal")
+      + flicker_noise(2.0, 1.0, "flicker")
+      + noise_table_log('{1.0, 2.0e-18, 10.0, 4.0e-18}, "table");
   end
 endmodule
 "#;

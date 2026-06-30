@@ -4419,12 +4419,13 @@ module native_noise_table_metadata(p, n);
     analog begin
         I(p, n) <+ flicker_noise(s, ex, "fl");
         I(p, n) <+ noise_table('{1.0, 2.0e-18, 10.0, 4.0e-18}, "tbl");
+        I(p, n) <+ noise_table_log('{1.0, 2.0e-18, 10.0, 4.0e-18}, "tbl_log");
     end
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
     let model = compiler.compile(source).expect("compile bytecode model");
-    assert_eq!(model.noise_sources.len(), 2);
+    assert_eq!(model.noise_sources.len(), 3);
     assert!(
         model
             .noise_sources
@@ -4440,7 +4441,7 @@ endmodule
         VerilogADevice::try_new_with_canonical_ir("NOISETBL1", model, &artifact, &[1, 0])
             .expect("noise-table model uses canonical native JIT path");
     assert!(device.is_using_native());
-    assert_eq!(device.native_plan_stats().noise_source_entry_points, 3);
+    assert_eq!(device.native_plan_stats().noise_source_entry_points, 4);
     device.set_analysis_type(3);
 
     let mut sources = device
@@ -4453,7 +4454,7 @@ endmodule
             .iter()
             .map(|source| source.name.as_str())
             .collect::<Vec<_>>(),
-        ["fl", "tbl"]
+        ["fl", "tbl", "tbl_log"]
     );
     assert!((sources[0].psd - 1.0e-18).abs() < 1.0e-30);
     assert_eq!(sources[0].exponent, Some(2.0));
@@ -4467,6 +4468,16 @@ endmodule
             .as_ref()
             .map(|(points, log)| (points.len(), *log)),
         Some((2, false))
+    );
+
+    assert_eq!(sources[2].psd, 1.0);
+    assert_eq!(sources[2].exponent, None);
+    assert_eq!(
+        sources[2]
+            .table
+            .as_ref()
+            .map(|(points, log)| (points.len(), *log)),
+        Some((2, true))
     );
 }
 
