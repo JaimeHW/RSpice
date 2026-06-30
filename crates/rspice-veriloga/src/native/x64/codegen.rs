@@ -3112,12 +3112,19 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
 fn value_program_needs_saved_entry_args(program: &NativeProgram) -> bool {
     let mut helper_seen = false;
     for op in program.ops() {
+        if native_op_needs_saved_entry_args_for_internal_helper_continuation(*op) {
+            return true;
+        }
         if helper_seen && native_op_reads_entry_args(*op) {
             return true;
         }
         helper_seen |= native_op_uses_helper_call(op);
     }
     false
+}
+
+fn native_op_needs_saved_entry_args_for_internal_helper_continuation(op: NativeOp) -> bool {
+    matches!(op, NativeOp::IdtModState(_))
 }
 
 fn native_op_uses_helper_call(op: &NativeOp) -> bool {
@@ -3628,6 +3635,50 @@ mod tests {
         assert_eq!(
             f(&ctx, std::ptr::null()).to_bits(),
             runtime_exp(0.5).to_bits()
+        );
+    }
+
+    #[test]
+    fn generated_value_leaf_terminal_idtmod_preserves_entry_args() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushVariable(0),
+                Instruction::PushConst(0.5),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(0.25),
+                Instruction::IdtModState(1),
+            ],
+            0,
+        );
+
+        let bytes =
+            compile_value_function(&program).expect("compile terminal idtmod value function");
+
+        assert!(
+            bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "terminal idtmod must preserve context and vars pointers across its internal helper call"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate terminal idtmod leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let vars = [2.0_f64];
+        let previous_state = [0.0_f64, 0.9_f64];
+        let mut state_values = [0.0_f64, 0.0_f64];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.timestep = 0.25;
+        ctx.state_prev = previous_state.as_ptr();
+        ctx.state_prev_len = previous_state.len();
+        ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = state_values.len();
+
+        let value = f(&ctx, vars.as_ptr());
+        assert!((value - 0.4).abs() < 1.0e-12, "value: {value}");
+        assert!(
+            (state_values[1] - 0.4).abs() < 1.0e-12,
+            "state: {state_values:?}"
         );
     }
 
