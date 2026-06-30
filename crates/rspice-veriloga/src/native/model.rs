@@ -546,6 +546,36 @@ impl NativeModel {
             &dependencies.noise_exponents,
             num_terminals,
         )?;
+        Self::validate_prior_current_dependency_list(
+            "assignment",
+            &dependencies.assignment_prior_currents,
+            entries.stamp_values.len(),
+        )?;
+        Self::validate_prior_current_dependency_table(
+            "stamp value",
+            &dependencies.stamp_value_prior_currents,
+            entries.stamp_values.len(),
+        )?;
+        Self::validate_prior_current_dependency_nested_table(
+            "jacobian",
+            &dependencies.jacobian_prior_currents,
+            entries.stamp_values.len(),
+        )?;
+        Self::validate_prior_current_dependency_nested_table(
+            "reactive jacobian",
+            &dependencies.reactive_jacobian_prior_currents,
+            entries.stamp_values.len(),
+        )?;
+        Self::validate_prior_current_dependency_table(
+            "noise psd",
+            &dependencies.noise_psd_prior_currents,
+            entries.stamp_values.len(),
+        )?;
+        Self::validate_prior_current_dependency_table(
+            "noise exponent",
+            &dependencies.noise_exponent_prior_currents,
+            entries.stamp_values.len(),
+        )?;
 
         Self::validate_branch_unknown_dependency_list(
             "assignment",
@@ -582,6 +612,60 @@ impl NativeModel {
             &dependencies.noise_exponent_branch_unknowns,
             num_branch_unknowns,
         )?;
+
+        Ok(())
+    }
+
+    fn validate_prior_current_dependency_table(
+        table_name: &str,
+        dependencies: &[Vec<usize>],
+        contribution_current_count: usize,
+    ) -> JitResult<()> {
+        for (entry_index, entry_dependencies) in dependencies.iter().enumerate() {
+            Self::validate_prior_current_dependency_list(
+                &format!("{table_name} {entry_index}"),
+                entry_dependencies,
+                contribution_current_count,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_prior_current_dependency_nested_table(
+        table_name: &str,
+        dependencies: &[Vec<Vec<usize>>],
+        contribution_current_count: usize,
+    ) -> JitResult<()> {
+        for (outer_index, outer_dependencies) in dependencies.iter().enumerate() {
+            for (inner_index, entry_dependencies) in outer_dependencies.iter().enumerate() {
+                Self::validate_prior_current_dependency_list(
+                    &format!("{table_name} {outer_index}.{inner_index}"),
+                    entry_dependencies,
+                    contribution_current_count,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_prior_current_dependency_list(
+        dependency_name: &str,
+        dependencies: &[usize],
+        contribution_current_count: usize,
+    ) -> JitResult<()> {
+        for index in dependencies {
+            if *index >= contribution_current_count {
+                return Err(JitError::InternalCompilerError {
+                    model: "native-model".into(),
+                    detail: format!(
+                        "{dependency_name} prior contribution current dependency {index} outside compiled contribution current count {contribution_current_count}"
+                    )
+                    .into(),
+                });
+            }
+        }
 
         Ok(())
     }
@@ -1135,6 +1219,49 @@ mod tests {
             "{message}"
         );
         assert!(message.contains("compiled terminal count 1"), "{message}");
+        assert!(message.contains("no interpreter fallback"), "{message}");
+    }
+
+    #[test]
+    fn native_model_rejects_prior_current_dependency_outside_compiled_count() {
+        let mut bytes = vec![0xC3]; // assignment: ret
+        let stamp_entry = append_test_value_stub(&mut bytes, 1);
+        let image = ExecutableMemory::allocate(&bytes).expect("allocate native test image");
+        let entries = NativeEntryOffsets {
+            assignment: CodeOffset::new(0),
+            parameter_defaults: vec![],
+            static_conditions: vec![None],
+            stamp_values: vec![stamp_entry],
+            jacobians: vec![vec![]],
+            reactive_jacobians: vec![vec![]],
+            noise_psd: vec![],
+            noise_exponents: vec![],
+        };
+        let mut dependencies = NativeModel::empty_current_dependencies(&entries);
+        dependencies.stamp_value_prior_currents[0].push(1);
+
+        let error = NativeModel::from_executable_image_with_dependencies(
+            1,
+            0,
+            0,
+            0,
+            0,
+            image,
+            entries,
+            dependencies,
+            NativeRequiredStorage::default(),
+        )
+        .expect_err("impossible prior contribution-current dependency must be rejected");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("stamp value 0 prior contribution current dependency 1"),
+            "{message}"
+        );
+        assert!(
+            message.contains("compiled contribution current count 1"),
+            "{message}"
+        );
         assert!(message.contains("no interpreter fallback"), "{message}");
     }
 
