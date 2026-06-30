@@ -800,9 +800,9 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        self.encoder.movq_r64_xmm(Gpr::Rax, target);
-        self.encoder.btc_r64_imm8(Gpr::Rax, 63);
-        self.encoder.movq_xmm_r64(target, Gpr::Rax);
+        self.encoder.movq_r64_xmm(Gpr::R11, target);
+        self.encoder.btc_r64_imm8(Gpr::R11, 63);
+        self.encoder.movq_xmm_r64(target, Gpr::R11);
         Ok(())
     }
 
@@ -815,7 +815,7 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        self.emit_abs_register(target);
+        self.emit_abs_register(target, Gpr::R11);
         Ok(())
     }
 
@@ -832,10 +832,11 @@ impl FunctionCompiler {
         Ok(())
     }
 
-    fn emit_abs_register(&mut self, target: Xmm) {
-        self.encoder.movq_r64_xmm(Gpr::Rax, target);
-        self.encoder.btr_r64_imm8(Gpr::Rax, 63);
-        self.encoder.movq_xmm_r64(target, Gpr::Rax);
+    fn emit_abs_register(&mut self, target: Xmm, scratch: Gpr) {
+        debug_assert_ne!(scratch, Gpr::Rax);
+        self.encoder.movq_r64_xmm(scratch, target);
+        self.encoder.btr_r64_imm8(scratch, 63);
+        self.encoder.movq_xmm_r64(target, scratch);
     }
 
     fn emit_sqrt(&mut self) -> JitResult<()> {
@@ -930,8 +931,8 @@ impl FunctionCompiler {
         self.encoder.cmp_r64_imm32(Gpr::R11, 0);
         let zero = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
         self.encoder
-            .movabs_r64_imm64(Gpr::Rax, F64_EXACT_INTEGER_LIMIT_ABS_BITS);
-        self.encoder.cmp_r64_r64(Gpr::R11, Gpr::Rax);
+            .movabs_r64_imm64(Gpr::R10, F64_EXACT_INTEGER_LIMIT_ABS_BITS);
+        self.encoder.cmp_r64_r64(Gpr::R11, Gpr::R10);
         let already_integral_or_unordered = self
             .encoder
             .jcc_rel32_placeholder(ConditionCode::AboveOrEqual);
@@ -1441,17 +1442,17 @@ impl FunctionCompiler {
         right: Xmm,
         op: IntegerBinaryOp,
     ) -> JitResult<()> {
-        self.emit_rust_f64_to_i64(left, Gpr::Rax)?;
+        self.emit_rust_f64_to_i64(left, Gpr::R10)?;
         self.emit_rust_f64_to_i64(right, Gpr::R11)?;
         match op {
-            IntegerBinaryOp::BitAnd => self.encoder.and_r64_r64(Gpr::Rax, Gpr::R11),
-            IntegerBinaryOp::BitOr => self.encoder.or_r64_r64(Gpr::Rax, Gpr::R11),
-            IntegerBinaryOp::BitXor => self.encoder.xor_r64_r64(Gpr::Rax, Gpr::R11),
+            IntegerBinaryOp::BitAnd => self.encoder.and_r64_r64(Gpr::R10, Gpr::R11),
+            IntegerBinaryOp::BitOr => self.encoder.or_r64_r64(Gpr::R10, Gpr::R11),
+            IntegerBinaryOp::BitXor => self.encoder.xor_r64_r64(Gpr::R10, Gpr::R11),
             IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
                 unreachable!("shift integer ops use emit_integer_shift_op")
             }
         }
-        self.encoder.cvtsi2sd_xmm_r64(left, Gpr::Rax);
+        self.encoder.cvtsi2sd_xmm_r64(left, Gpr::R10);
         Ok(())
     }
 
@@ -1962,7 +1963,7 @@ impl FunctionCompiler {
             self.encoder
                 .movsd_xmm_m64_base_disp32(value, self.ctx_arg_reg(), TIMESTEP_OFFSET);
             self.encoder.movq_r64_xmm(Gpr::R11, value);
-            self.emit_abs_register(value);
+            self.emit_abs_register(value, Gpr::R10);
             self.emit_literal_compare(value, TIMESTEP_DC_EPSILON);
 
             let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
@@ -1992,7 +1993,7 @@ impl FunctionCompiler {
         self.encoder
             .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
         self.encoder.movq_r64_xmm(Gpr::R11, scratch);
-        self.emit_abs_register(scratch);
+        self.emit_abs_register(scratch, Gpr::R10);
         self.emit_literal_compare(scratch, TIMESTEP_DC_EPSILON);
 
         let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
@@ -2051,7 +2052,7 @@ impl FunctionCompiler {
             self.encoder
                 .movsd_xmm_m64_base_disp32(value, self.ctx_arg_reg(), TIMESTEP_OFFSET);
             self.encoder.movq_r64_xmm(Gpr::R11, value);
-            self.emit_abs_register(value);
+            self.emit_abs_register(value, Gpr::R10);
             self.emit_literal_compare(value, TIMESTEP_DC_EPSILON);
 
             let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
@@ -2083,7 +2084,7 @@ impl FunctionCompiler {
         self.encoder
             .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
         self.encoder.movq_r64_xmm(Gpr::R11, scratch);
-        self.emit_abs_register(scratch);
+        self.emit_abs_register(scratch, Gpr::R10);
         self.emit_literal_compare(scratch, TIMESTEP_DC_EPSILON);
 
         let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
@@ -2115,7 +2116,7 @@ impl FunctionCompiler {
         self.encoder
             .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
         self.encoder.movq_r64_xmm(Gpr::R11, scratch);
-        self.emit_abs_register(scratch);
+        self.emit_abs_register(scratch, Gpr::R10);
         self.emit_literal_compare(scratch, TIMESTEP_DC_EPSILON);
 
         let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
@@ -2146,7 +2147,7 @@ impl FunctionCompiler {
         self.encoder
             .movsd_xmm_m64_base_disp32(target, self.ctx_arg_reg(), TIMESTEP_OFFSET);
         self.encoder.movq_r64_xmm(Gpr::R11, target);
-        self.emit_abs_register(target);
+        self.emit_abs_register(target, Gpr::R10);
         self.emit_literal_compare(target, TIMESTEP_DC_EPSILON);
 
         let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
@@ -2412,14 +2413,14 @@ impl FunctionCompiler {
             }
             CompareOp::Eq => {
                 self.encoder.subsd_xmm_xmm(left, right);
-                self.emit_abs_register(left);
+                self.emit_abs_register(left, Gpr::R11);
                 self.emit_literal_load(right, BOOLEAN_EPSILON);
                 self.encoder.ucomisd_xmm_xmm(right, left);
                 ConditionCode::Above
             }
             CompareOp::Ne => {
                 self.encoder.subsd_xmm_xmm(left, right);
-                self.emit_abs_register(left);
+                self.emit_abs_register(left, Gpr::R11);
                 self.emit_literal_load(right, BOOLEAN_EPSILON);
                 self.encoder.ucomisd_xmm_xmm(left, right);
                 ConditionCode::AboveOrEqual
@@ -2460,13 +2461,13 @@ impl FunctionCompiler {
             }
             CompareOp::Eq => {
                 self.emit_literal_binary_op(target, value, BinaryOp::Sub);
-                self.emit_abs_register(target);
+                self.emit_abs_register(target, Gpr::R11);
                 self.emit_literal_compare(target, BOOLEAN_EPSILON);
                 self.emit_ordered_condition_result(target, ConditionCode::Below);
             }
             CompareOp::Ne => {
                 self.emit_literal_binary_op(target, value, BinaryOp::Sub);
-                self.emit_abs_register(target);
+                self.emit_abs_register(target, Gpr::R11);
                 self.emit_literal_compare(target, BOOLEAN_EPSILON);
                 self.emit_condition_result(target, ConditionCode::AboveOrEqual);
             }
@@ -2554,7 +2555,8 @@ impl FunctionCompiler {
     }
 
     fn emit_truthy_to_gpr(&mut self, value: Xmm, dst: Gpr) {
-        self.emit_abs_register(value);
+        let abs_scratch = if dst == Gpr::R8 { Gpr::R9 } else { Gpr::R8 };
+        self.emit_abs_register(value, abs_scratch);
         self.emit_literal_compare(value, BOOLEAN_EPSILON);
         self.encoder.setcc_r8(ConditionCode::Above, dst);
     }
@@ -2574,7 +2576,12 @@ impl FunctionCompiler {
     }
 
     fn emit_falsy_to_gpr(&mut self, value: Xmm, dst: Gpr, scratch: Gpr) {
-        self.emit_abs_register(value);
+        let abs_scratch = if dst != Gpr::R8 && scratch != Gpr::R8 {
+            Gpr::R8
+        } else {
+            Gpr::R9
+        };
+        self.emit_abs_register(value, abs_scratch);
         self.emit_literal_compare(value, BOOLEAN_EPSILON);
         self.encoder.setcc_r8(ConditionCode::Below, dst);
         self.encoder.setcc_r8(ConditionCode::NotParity, scratch);
@@ -2593,11 +2600,11 @@ impl FunctionCompiler {
         let then_value = XMM_STACK[self.depth - 2];
         let else_value = XMM_STACK[self.depth - 1];
         self.emit_truthy_to_gpr(cond, Gpr::R10);
-        self.encoder.movq_r64_xmm(Gpr::Rax, else_value);
+        self.encoder.movq_r64_xmm(Gpr::R8, else_value);
         self.encoder.movq_r64_xmm(Gpr::R11, then_value);
         self.encoder.test_r8_r8(Gpr::R10, Gpr::R10);
-        self.encoder.cmovne_r64_r64(Gpr::Rax, Gpr::R11);
-        self.encoder.movq_xmm_r64(cond, Gpr::Rax);
+        self.encoder.cmovne_r64_r64(Gpr::R8, Gpr::R11);
+        self.encoder.movq_xmm_r64(cond, Gpr::R8);
         self.depth -= 2;
         Ok(())
     }
@@ -3365,8 +3372,19 @@ fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
             | NativeOp::DivConst(_)
             | NativeOp::SubFromConst(_)
             | NativeOp::DivFromConst(_)
+            | NativeOp::Neg
+            | NativeOp::Abs
             | NativeOp::Square
             | NativeOp::Sqrt
+            | NativeOp::Compare(_)
+            | NativeOp::CompareConst(_, _)
+            | NativeOp::Logical(_)
+            | NativeOp::LogicalConst(_, _)
+            | NativeOp::IfElse
+            | NativeOp::UnaryMath(UnaryMathOp::Floor | UnaryMathOp::Ceil)
+            | NativeOp::IntegerBinary(
+                IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor,
+            )
             | NativeOp::WhiteNoise
             | NativeOp::FlickerNoise
     )
@@ -3632,7 +3650,8 @@ mod tests {
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
     use crate::native::expr::{
-        CompareOp, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
+        CompareOp, EntryKind, IntegerBinaryOp, LogicalOp, NativeLoweringLimits, NativeOp,
+        NativeProgram, UnaryMathOp,
     };
     use crate::native::runtime::ExecutableMemory;
     use crate::native::{
@@ -3852,6 +3871,80 @@ mod tests {
         let ctx = eval_context(&params, &[], &[], &[]);
 
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 4.75_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_param_base_across_boolean_select_ops() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::LoadParam(1),
+                NativeOp::Compare(CompareOp::Eq),
+                NativeOp::LoadParam(2),
+                NativeOp::Logical(LogicalOp::And),
+                NativeOp::LoadParam(3),
+                NativeOp::LoadParam(4),
+                NativeOp::IfElse,
+                NativeOp::LoadParam(5),
+                NativeOp::Add,
+            ],
+            3,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let bytes = compile_value_function(&program).expect("compile boolean select param leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            1,
+            "param base should remain cached across compare/logical/ifelse ops"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate boolean select leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [2.0_f64, 2.0_f64, 7.0_f64, 10.0_f64, 20.0_f64, 5.0_f64];
+        let ctx = eval_context(&params, &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 15.0_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_param_base_across_misc_pure_ops() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::Neg,
+                NativeOp::Abs,
+                NativeOp::UnaryMath(UnaryMathOp::Floor),
+                NativeOp::LoadParam(1),
+                NativeOp::Add,
+                NativeOp::LoadParam(2),
+                NativeOp::IntegerBinary(IntegerBinaryOp::BitAnd),
+                NativeOp::LoadParam(3),
+                NativeOp::Add,
+            ],
+            2,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let bytes = compile_value_function(&program).expect("compile misc pure param leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            1,
+            "param base should remain cached across branchless pure ops"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate misc pure leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [6.75_f64, 4.0_f64, 3.0_f64, 5.0_f64];
+        let ctx = eval_context(&params, &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 7.0_f64.to_bits());
     }
 
     #[test]
