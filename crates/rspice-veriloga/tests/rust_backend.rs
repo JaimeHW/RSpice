@@ -1417,6 +1417,128 @@ fn rust_backend_auto_uses_local_storage_for_hybrid_straight_line_assignments() {
 }
 
 #[test]
+fn rust_backend_auto_uses_local_storage_for_hybrid_integer_flags() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(hybrid_integer_flag_local_storage_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile hybrid integer flag assignments through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("eval_ddt"), "{stamp}");
+    assert!(
+        stamp.contains("let mut var_use_left: f64 = 0.0;"),
+        "{stamp}"
+    );
+    assert!(stamp.contains("let mut var_drive: f64 = 0.0;"), "{stamp}");
+    assert!(
+        stamp.contains("if (var_use_left != 0.0)") || stamp.contains("if var_use_left"),
+        "integer flag should be reused as a local condition:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("let s = match &mut self.scratch")
+            && !stamp.contains("scratch.values")
+            && !stamp.contains("scratch.bool_values")
+            && !stamp.contains("scratch.node_derivatives"),
+        "hybrid integer/boolean flags should not force residual locals into scratch:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_treats_scaled_zero_derivatives_as_dead_local_lanes() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(hybrid_vt_zero_derivative_local_storage_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile local $vt assignment with zero derivative lanes");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("THERMAL_VOLTAGE_PER_K"), "{stamp}");
+    assert!(
+        !stamp.contains("0.0 * THERMAL_VOLTAGE_PER_K"),
+        "scaled zero derivatives should fold away before local lane assignment:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_types_pow_derivative_literal_receivers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(hybrid_pow_literal_receiver_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile pow derivative with literal base");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("(2.0_f64).ln()"), "{stamp}");
+    assert!(!stamp.contains("(2.0).ln()"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_uses_local_storage_for_reactive_assignments() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(reactive_local_storage_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile reactive local storage model");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("pub fn stamp_reactive"), "{stamp}");
+    assert!(
+        stamp.contains("let mut var_charge_rv: f64 = 0.0;"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("ReactiveScratch"), "{stamp}");
+    assert!(
+        !stamp.contains("let s = match &mut self.reactive_scratch"),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_keeps_hybrid_local_storage_when_residual_needs_scratch() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(hybrid_local_storage_with_scratch_residual_source())
@@ -18357,6 +18479,90 @@ module hybrid_idt_straight_line_assignments(p, n);
         I(p, n) <+ ddt(c * V(p, n));
         V(p, n) <+ idt(drive, 0.0);
         I(p, n) <+ floor(drive);
+    end
+endmodule
+"#
+}
+
+fn hybrid_integer_flag_local_storage_source() -> &'static str {
+    r#"
+module hybrid_integer_flag_local_storage(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from [0:inf);
+    parameter real gain = 2.0;
+    integer use_left;
+    real drive;
+    analog begin
+        use_left = V(p, n) > 0.0;
+        if (use_left) begin
+        drive = gain * V(p, n);
+        end else begin
+            drive = -gain * V(p, n);
+        end
+        I(p, n) <+ ddt(c * V(p, n));
+        V(p, n) <+ idt(drive, 0.0);
+        I(p, n) <+ floor(drive);
+    end
+endmodule
+"#
+}
+
+fn hybrid_vt_zero_derivative_local_storage_source() -> &'static str {
+    r#"
+module hybrid_vt_zero_derivative_local_storage(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from [0:inf);
+    real temp;
+    real vt;
+    real drive;
+    analog begin
+        temp = 300.15;
+        vt = $vt(temp);
+        drive = vt * V(p, n);
+        I(p, n) <+ ddt(c * V(p, n));
+        V(p, n) <+ idt(drive, 0.0);
+        I(p, n) <+ floor(drive);
+    end
+endmodule
+"#
+}
+
+fn hybrid_pow_literal_receiver_source() -> &'static str {
+    r#"
+module hybrid_pow_literal_receiver(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from [0:inf);
+    real drive;
+    analog begin
+        drive = pow(2.0, -V(p, n));
+        I(p, n) <+ ddt(c * V(p, n));
+        V(p, n) <+ idt(drive, 0.0);
+        I(p, n) <+ floor(drive);
+    end
+endmodule
+"#
+}
+
+fn reactive_local_storage_source() -> &'static str {
+    r#"
+module reactive_local_storage(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from [0:inf);
+    parameter real limit = 3.0 from [0:inf);
+    real loop;
+    real charge;
+    analog begin
+        loop = 0.0;
+        charge = 0.0;
+        while (loop < limit) begin
+            charge = charge + c * V(p, n);
+            loop = loop + 1.0;
+        end
+        V(p, n) <+ ddt(charge);
     end
 endmodule
 "#

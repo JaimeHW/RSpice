@@ -2684,7 +2684,8 @@ fn limited_exp_derivative_scale_expr(arg: &str) -> String {
 }
 
 fn is_zero_derivative(derivative: &str) -> bool {
-    derivative.trim() == "0.0"
+    let derivative = strip_redundant_outer_parens(derivative.trim());
+    derivative == "0.0" || derivative == "-0.0" || product_derivative_has_zero_factor(derivative)
 }
 
 fn is_one_derivative(derivative: &str) -> bool {
@@ -2720,6 +2721,60 @@ fn dynamic_operator_scaled_operand<'a>(derivative: &'a str, scale: &str) -> Opti
     let derivative = derivative.trim();
     let inner = derivative.strip_prefix('(')?.strip_suffix(')')?.trim();
     inner.strip_suffix(&format!(" * {scale}")).map(str::trim)
+}
+
+fn product_derivative_has_zero_factor(derivative: &str) -> bool {
+    let mut depth = 0usize;
+    let mut factor_start = 0usize;
+    let mut saw_product = false;
+    for (index, ch) in derivative.char_indices() {
+        match ch {
+            '(' => depth = depth.saturating_add(1),
+            ')' => depth = depth.saturating_sub(1),
+            '*' if depth == 0 => {
+                saw_product = true;
+                if is_zero_derivative(&derivative[factor_start..index]) {
+                    return true;
+                }
+                factor_start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    saw_product && is_zero_derivative(&derivative[factor_start..])
+}
+
+fn strip_redundant_outer_parens(mut value: &str) -> &str {
+    loop {
+        let trimmed = value.trim();
+        let Some(inner) = trimmed
+            .strip_prefix('(')
+            .and_then(|candidate| candidate.strip_suffix(')'))
+        else {
+            return trimmed;
+        };
+        if !outer_parens_wrap_entire_expr(trimmed) {
+            return trimmed;
+        }
+        value = inner;
+    }
+}
+
+fn outer_parens_wrap_entire_expr(value: &str) -> bool {
+    let mut depth = 0usize;
+    for (index, ch) in value.char_indices() {
+        match ch {
+            '(' => depth = depth.saturating_add(1),
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && index + ch.len_utf8() != value.len() {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    depth == 0
 }
 
 fn is_simple_inline_operand(value: &str) -> bool {
@@ -3299,18 +3354,19 @@ fn pow_derivative_expr(
     dbase: &str,
     dexponent: &str,
 ) -> String {
+    let base_receiver = f64_binary_receiver(base);
     let integer_exponent_derivative = conditional_expr(
         &format!("{exponent} == 0.0"),
         "0.0",
         &mul_expr(
             exponent,
-            &mul_expr(&format!("({base}).powf({exponent} - 1.0)"), dbase),
+            &mul_expr(&format!("{base_receiver}.powf({exponent} - 1.0)"), dbase),
         ),
     );
     let general_derivative = mul_expr(
         value,
         &add_expr(
-            &mul_expr(dexponent, &format!("({base}).ln()")),
+            &mul_expr(dexponent, &format!("{base_receiver}.ln()")),
             &mul_expr(exponent, &div_expr(dbase, base)),
         ),
     );

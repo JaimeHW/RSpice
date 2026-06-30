@@ -24704,14 +24704,24 @@ fn emit_stamp_body(
     let mut selected_local_variables = None;
     if local_storage_candidate {
         let mut discard = String::new();
-        let local_variables = emit_local_variable_initializers(
-            artifact,
-            variable_fields,
-            branch_axis_count,
-            transient_liveness,
-            &candidate_local_derivative_variables,
-            &mut discard,
-        );
+        let local_variables = if reactive {
+            emit_reactive_local_variable_initializers(
+                artifact,
+                variable_fields,
+                branch_axis_count,
+                reactive_liveness,
+                &mut discard,
+            )
+        } else {
+            emit_local_variable_initializers(
+                artifact,
+                variable_fields,
+                branch_axis_count,
+                transient_liveness,
+                &candidate_local_derivative_variables,
+                &mut discard,
+            )
+        };
         let residual_usage = residual_equation_local_variable_usage(
             artifact,
             parameter_fields,
@@ -24796,14 +24806,24 @@ fn emit_stamp_body(
         );
         variables
     } else if use_local_variables {
-        emit_local_variable_initializers(
-            artifact,
-            variable_fields,
-            branch_axis_count,
-            &local_transient_liveness,
-            &local_derivative_variables,
-            out,
-        )
+        if reactive {
+            emit_reactive_local_variable_initializers(
+                artifact,
+                variable_fields,
+                branch_axis_count,
+                reactive_liveness,
+                out,
+            )
+        } else {
+            emit_local_variable_initializers(
+                artifact,
+                variable_fields,
+                branch_axis_count,
+                &local_transient_liveness,
+                &local_derivative_variables,
+                out,
+            )
+        }
     } else if uses_scratch {
         emit_variable_initializers(
             artifact,
@@ -26892,22 +26912,28 @@ fn can_use_local_variable_storage(
     aggressive_straight_line_locals: bool,
 ) -> bool {
     if reactive {
-        return false;
-    }
-    let local_storage_shape = statements_contain_loop(&artifact.hir.statements)
-        || (aggressive_straight_line_locals
-            && statements_are_straight_line_assignments(&artifact.hir.statements))
-        || (derivative_variables.is_empty()
-            && straight_line_assignments_are_parameter_static(artifact, transient_liveness));
-    if !local_storage_shape {
-        return false;
-    }
-    if !local_variable_storage_is_bounded(
+        if !reactive_local_variable_storage_is_bounded(
+            artifact,
+            reactive_liveness,
+            branch_axis_count,
+        ) {
+            return false;
+        }
+    } else if !local_variable_storage_is_bounded(
         artifact,
         transient_liveness,
         derivative_variables,
         branch_axis_count,
     ) {
+        return false;
+    }
+    let local_storage_shape = statements_contain_loop(&artifact.hir.statements)
+        || (aggressive_straight_line_locals
+            && statements_are_straight_line_assignments(&artifact.hir.statements))
+        || (!reactive
+            && derivative_variables.is_empty()
+            && straight_line_assignments_are_parameter_static(artifact, transient_liveness));
+    if !local_storage_shape {
         return false;
     }
     artifact.hir.variables.iter().all(|variable| {
@@ -26917,8 +26943,18 @@ fn can_use_local_variable_storage(
             transient_liveness.is_value_live(variable.name.as_str())
                 || transient_liveness.is_derivative_live(variable.name.as_str())
         };
-        !live || variable.value_type == CanonicalValueType::Real
+        !live || local_storage_supports_value_type(variable.value_type)
     })
+}
+
+fn local_storage_supports_value_type(value_type: CanonicalValueType) -> bool {
+    matches!(
+        value_type,
+        CanonicalValueType::Real
+            | CanonicalValueType::Integer
+            | CanonicalValueType::Boolean
+            | CanonicalValueType::NatureAccess
+    )
 }
 
 fn local_variable_storage_is_bounded(
@@ -26931,13 +26967,36 @@ fn local_variable_storage_is_bounded(
     let mut slots = 0usize;
     for variable in &artifact.hir.variables {
         let value_live = transient_liveness.is_value_live(variable.name.as_str());
-        let derivatives_live = transient_liveness.is_derivative_live(variable.name.as_str())
+        let derivatives_live = variable.value_type == CanonicalValueType::Real
+            && transient_liveness.is_derivative_live(variable.name.as_str())
             && derivative_variables.contains(variable.name.as_str());
         if value_live || derivatives_live {
             slots = slots.saturating_add(1);
         }
         if derivatives_live {
             slots = slots.saturating_add(derivative_axis_count);
+        }
+        if slots > MAX_LOCAL_VARIABLE_STORAGE_SLOTS {
+            return false;
+        }
+    }
+    true
+}
+
+fn reactive_local_variable_storage_is_bounded(
+    artifact: &CanonicalIrArtifact,
+    reactive_liveness: &ReactiveLiveness,
+    branch_axis_count: usize,
+) -> bool {
+    let derivative_axis_count = artifact.mir.nodes.len() + branch_axis_count;
+    let mut slots = 0usize;
+    for variable in &artifact.hir.variables {
+        if !reactive_liveness.is_variable_live(variable.name.as_str()) {
+            continue;
+        }
+        slots = slots.saturating_add(2);
+        if variable.value_type == CanonicalValueType::Real {
+            slots = slots.saturating_add(2 * derivative_axis_count);
         }
         if slots > MAX_LOCAL_VARIABLE_STORAGE_SLOTS {
             return false;
@@ -27058,6 +27117,89 @@ fn emit_local_variable_initializers(
     variables
 }
 
+fn emit_reactive_local_variable_initializers(
+    artifact: &CanonicalIrArtifact,
+    variable_fields: &HashMap<String, String>,
+    branch_axis_count: usize,
+    reactive_liveness: &ReactiveLiveness,
+    out: &mut String,
+) -> HashMap<String, LoweredVariable> {
+    let mut variables = HashMap::new();
+    let mut emitted = false;
+    for variable in &artifact.hir.variables {
+        if !reactive_liveness.is_variable_live(variable.name.as_str()) {
+            continue;
+        }
+        let field = variable_fields
+            .get(variable.name.as_str())
+            .expect("variable field names should cover all HIR variables");
+        let value = local_variable_value_name(field);
+        let reactive_value = local_variable_reactive_value_name(field);
+        out.push_str(&format!("        let mut {value}: f64 = 0.0;\n"));
+        out.push_str(&format!("        let mut {reactive_value}: f64 = 0.0;\n"));
+        emitted = true;
+
+        let derivatives_live = variable.value_type == CanonicalValueType::Real;
+        let mut derivatives = Vec::with_capacity(artifact.mir.nodes.len());
+        let mut reactive_derivatives = Vec::with_capacity(artifact.mir.nodes.len());
+        for node_index in 0..artifact.mir.nodes.len() {
+            if derivatives_live {
+                let derivative = local_variable_node_derivative_name(field, node_index);
+                let reactive_derivative =
+                    local_variable_reactive_node_derivative_name(field, node_index);
+                out.push_str(&format!("        let mut {derivative}: f64 = 0.0;\n"));
+                out.push_str(&format!(
+                    "        let mut {reactive_derivative}: f64 = 0.0;\n"
+                ));
+                derivatives.push(derivative);
+                reactive_derivatives.push(reactive_derivative);
+            } else {
+                derivatives.push("0.0".to_string());
+                reactive_derivatives.push("0.0".to_string());
+            }
+        }
+
+        let mut branch_derivatives = Vec::with_capacity(branch_axis_count);
+        let mut reactive_branch_derivatives = Vec::with_capacity(branch_axis_count);
+        for branch_index in 0..branch_axis_count {
+            if derivatives_live {
+                let derivative = local_variable_branch_derivative_name(field, branch_index);
+                let reactive_derivative =
+                    local_variable_reactive_branch_derivative_name(field, branch_index);
+                out.push_str(&format!("        let mut {derivative}: f64 = 0.0;\n"));
+                out.push_str(&format!(
+                    "        let mut {reactive_derivative}: f64 = 0.0;\n"
+                ));
+                branch_derivatives.push(derivative);
+                reactive_branch_derivatives.push(reactive_derivative);
+            } else {
+                branch_derivatives.push("0.0".to_string());
+                reactive_branch_derivatives.push("0.0".to_string());
+            }
+        }
+
+        let condition = (variable.value_type == CanonicalValueType::Boolean)
+            .then(|| format!("({value} != 0.0)"));
+        variables.insert(
+            variable.name.to_string(),
+            LoweredVariable {
+                value,
+                condition,
+                derivatives,
+                branch_derivatives,
+                has_reactive: false,
+                reactive_value,
+                reactive_derivatives,
+                reactive_branch_derivatives,
+            },
+        );
+    }
+    if emitted {
+        out.push('\n');
+    }
+    variables
+}
+
 #[allow(clippy::too_many_arguments)]
 fn emit_selected_local_variable_initializers(
     artifact: &CanonicalIrArtifact,
@@ -27075,7 +27217,8 @@ fn emit_selected_local_variable_initializers(
             continue;
         }
         let value_live = transient_liveness.is_value_live(variable.name.as_str());
-        let derivatives_live = transient_liveness.is_derivative_live(variable.name.as_str())
+        let derivatives_live = variable.value_type == CanonicalValueType::Real
+            && transient_liveness.is_derivative_live(variable.name.as_str())
             && derivative_variables.contains(variable.name.as_str());
         if !value_live && !derivatives_live {
             continue;
@@ -27109,11 +27252,13 @@ fn emit_selected_local_variable_initializers(
             }
         }
 
+        let condition = (variable.value_type == CanonicalValueType::Boolean)
+            .then(|| format!("({value} != 0.0)"));
         variables.insert(
             variable.name.to_string(),
             LoweredVariable {
                 value,
-                condition: None,
+                condition,
                 derivatives,
                 branch_derivatives,
                 has_reactive: false,
@@ -27132,12 +27277,24 @@ fn local_variable_value_name(field: &str) -> String {
     format!("var_{field}")
 }
 
+fn local_variable_reactive_value_name(field: &str) -> String {
+    format!("var_{field}_rv")
+}
+
 fn local_variable_node_derivative_name(field: &str, node: usize) -> String {
     format!("var_{field}_dn{node}")
 }
 
 fn local_variable_branch_derivative_name(field: &str, branch: usize) -> String {
     format!("var_{field}_db{branch}")
+}
+
+fn local_variable_reactive_node_derivative_name(field: &str, node: usize) -> String {
+    format!("var_{field}_rdn{node}")
+}
+
+fn local_variable_reactive_branch_derivative_name(field: &str, branch: usize) -> String {
+    format!("var_{field}_rdb{branch}")
 }
 
 fn is_local_variable_storage(variable: &LoweredVariable) -> bool {
@@ -28603,6 +28760,7 @@ fn emit_assignment_statement(
         .filter(|variable| is_local_variable_storage(variable))
         .cloned();
     if reactive
+        && target_local_variable.is_none()
         && !expr_depends_on_ddt_or_dynamic(
             artifact,
             assignment.expr.id,
@@ -43466,7 +43624,8 @@ fn format_f64(value: f64) -> String {
 }
 
 fn is_zero_derivative(derivative: &str) -> bool {
-    derivative.trim() == "0.0"
+    let derivative = strip_redundant_outer_parens(derivative.trim());
+    derivative == "0.0" || derivative == "-0.0" || product_derivative_has_zero_factor(derivative)
 }
 
 fn lowered_variable_has_zero_derivatives(variable: &LoweredVariable) -> bool {
@@ -43515,6 +43674,60 @@ fn dynamic_operator_scaled_operand<'a>(derivative: &'a str, scale: &str) -> Opti
     let derivative = derivative.trim();
     let inner = derivative.strip_prefix('(')?.strip_suffix(')')?.trim();
     inner.strip_suffix(&format!(" * {scale}")).map(str::trim)
+}
+
+fn product_derivative_has_zero_factor(derivative: &str) -> bool {
+    let mut depth = 0usize;
+    let mut factor_start = 0usize;
+    let mut saw_product = false;
+    for (index, ch) in derivative.char_indices() {
+        match ch {
+            '(' => depth = depth.saturating_add(1),
+            ')' => depth = depth.saturating_sub(1),
+            '*' if depth == 0 => {
+                saw_product = true;
+                if is_zero_derivative(&derivative[factor_start..index]) {
+                    return true;
+                }
+                factor_start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    saw_product && is_zero_derivative(&derivative[factor_start..])
+}
+
+fn strip_redundant_outer_parens(mut value: &str) -> &str {
+    loop {
+        let trimmed = value.trim();
+        let Some(inner) = trimmed
+            .strip_prefix('(')
+            .and_then(|candidate| candidate.strip_suffix(')'))
+        else {
+            return trimmed;
+        };
+        if !outer_parens_wrap_entire_expr(trimmed) {
+            return trimmed;
+        }
+        value = inner;
+    }
+}
+
+fn outer_parens_wrap_entire_expr(value: &str) -> bool {
+    let mut depth = 0usize;
+    for (index, ch) in value.char_indices() {
+        match ch {
+            '(' => depth = depth.saturating_add(1),
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && index + ch.len_utf8() != value.len() {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    depth == 0
 }
 
 fn is_simple_inline_operand(value: &str) -> bool {
