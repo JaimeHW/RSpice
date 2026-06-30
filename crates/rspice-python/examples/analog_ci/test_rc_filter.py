@@ -1,13 +1,16 @@
-"""Analog regression testing with RSpice + pytest.
+"""Analog regression testing with RSpice and pytest.
 
-This file is the pattern for putting a circuit under CI: the pass/fail
+This file is the executable example for putting a circuit under CI: pass/fail
 criteria live in the netlist as .MEAS statements, the deck runs with
-``engine.run``, and ``report.assert_passed()`` plus ordinary asserts gate
-the pipeline. Run it like any other test suite:
+``Engine.run``, and ``RunReport.assert_passed()`` plus ordinary asserts gate
+the pipeline.
 
-    pip install maturin numpy pytest
-    (cd crates/rspice-python && maturin develop --release)
-    python -m pytest examples/python/ -v
+Run it from the repository root:
+
+    cd crates/rspice-python
+    python -m pip install maturin numpy pytest
+    maturin develop --release
+    python -m pytest examples/analog_ci -v
 """
 
 import math
@@ -20,7 +23,7 @@ import rspice
 R = 1e3  # Ohms
 C = 100e-9  # Farads
 TAU = R * C  # 100 us
-FC = 1.0 / (2 * math.pi * TAU)  # ~1591.5 Hz
+FC = 1.0 / (2 * math.pi * TAU)  # 1591.5 Hz
 
 RC_FILTER = f"""* RC lowpass regression deck
 V1 in 0 AC 1 PULSE(0 1 0 1n 1n 1 2)
@@ -45,8 +48,7 @@ def report():
 
 class TestStepResponse:
     def test_all_measurements_evaluated(self, report):
-        # Fails loudly if a .MEAS was skipped or failed to evaluate —
-        # a deck cannot silently green-wash the pipeline.
+        # Fails loudly if a .MEAS statement was skipped or failed to evaluate.
         report.assert_passed()
 
     def test_settles_to_input(self, report):
@@ -69,6 +71,7 @@ class TestFrequencyResponse:
         netlist = rspice.Netlist.parse(RC_FILTER)
         ac = engine.run_ac_sweep(netlist, "dec", 50, FC / 100, FC * 100)
         gain_db = ac.voltage_db("out")
+
         # -3 dB at the corner, -20 dB/decade beyond it.
         corner_idx = int(abs(ac.frequencies - FC).argmin())
         assert gain_db[corner_idx] == pytest.approx(-3.01, abs=0.1)
@@ -78,16 +81,16 @@ class TestFrequencyResponse:
         engine = rspice.Engine()
         netlist = rspice.Netlist.parse(RC_FILTER)
         pz = engine.run_pz(netlist, "in", "out")
+
         assert pz.is_stable
         assert pz.bandwidth_hz == pytest.approx(FC, rel=1e-3)
 
 
 class TestRobustnessToComponentVariation:
-    def test_corner_stays_in_band_with_5pct_parts(self):
-        # Same filter, parameterized, with uniform ±5% component spread.
+    def test_divider_midpoint_stays_in_band_with_5pct_parts(self):
         engine = rspice.Engine()
         netlist = rspice.Netlist.parse(
-            f"""* MC corner-frequency study
+            f"""* Monte Carlo divider study
 .param rval={R}
 V1 in 0 10
 R1 in out {{rval}}
@@ -95,11 +98,13 @@ R2 out 0 {R}
 .end
 """
         )
+
         mc = engine.run_monte_carlo(
             netlist, num_runs=300, seed=2026, distribution="uniform", spread=0.05
         )
         stats = mc.get_variable("V(OUT)")
+
         assert mc.num_failures == 0
-        # Divider midpoint with one 5%-toleranced arm: stays within ±2.6%.
+        # Divider midpoint with one 5%-toleranced arm: stays within +/-2.6%.
         assert stats.min > 4.85
         assert stats.max < 5.15
