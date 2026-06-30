@@ -243,8 +243,10 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/BJT_PSPICE_NK/bjt_test_nk.cir",
         "Netlists/Certification_Tests/BUG_302/DC_comma.cir",
         "Netlists/Certification_Tests/BUG_28_SON/bug_28_son2.cir",
+        "Netlists/Certification_Tests/BUG_1456/bug_1456.cir",
         "Netlists/Certification_Tests/BUG_1807/vbic_pnp_default.cir",
         "Netlists/NMESFET/nmesfet.cir",
+        "Netlists/NMOS1_DC/nmos1.cir",
         "Netlists/NPN_DC/npn1.cir",
     ] {
         let result = runner.run_test(root.join(relative));

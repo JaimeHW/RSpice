@@ -1,5 +1,8 @@
 use super::*;
 
+const DEFAULT_MOS_CHANNEL_LENGTH: Value = 1.0e-4;
+const DEFAULT_MOS_CHANNEL_WIDTH: Value = 1.0e-4;
+
 impl Mosfet {
     /// Create a new NMOS with default parameters
     pub fn new_nmos(
@@ -39,9 +42,9 @@ impl Mosfet {
             node_source: source,
             node_bulk: bulk,
 
-            // Default geometry (1um process)
-            l: 1e-6,
-            w: 10e-6,
+            // Classic SPICE/Xyce global MOS defaults: DEFL=DEFW=100um.
+            l: DEFAULT_MOS_CHANNEL_LENGTH,
+            w: DEFAULT_MOS_CHANNEL_WIDTH,
             ld: 0.0,
 
             // Level 1 parameters (mos1set.c model-card defaults; level 2/6
@@ -1227,6 +1230,15 @@ impl Mosfet {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn default_mos_geometry_matches_classic_spice_device_options() {
+        let mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+
+        assert_eq!(mos.l, DEFAULT_MOS_CHANNEL_LENGTH);
+        assert_eq!(mos.w, DEFAULT_MOS_CHANNEL_WIDTH);
+        assert_eq!(mos.w / mos.l, 1.0);
+    }
 
     #[test]
     fn temperature_scaling_is_identity_at_tnom() {
