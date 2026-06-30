@@ -109,7 +109,7 @@ fn collect_input_events(
     inputs: &[DigitalValue],
     inouts: &[DigitalValue],
     input_event_limit: Option<usize>,
-) -> Vec<(usize, DigitalCosimInputEvent)> {
+) -> Vec<DigitalCosimInputEvent> {
     let mut events = Vec::new();
 
     for (index, value) in inputs.iter().copied().enumerate() {
@@ -124,7 +124,7 @@ fn collect_input_events(
             && event_is_new(time, ctx.state(state_index))
             && digital_value_code(value) != ctx.int_state(STATE_PREV_INPUT_START + state_index)
         {
-            events.push((state_index, DigitalCosimInputEvent { time, index, value }));
+            events.push(DigitalCosimInputEvent { time, index, value });
         }
     }
 
@@ -142,18 +142,15 @@ fn collect_input_events(
             && event_is_new(time, ctx.state(state_index))
             && digital_value_code(value) != ctx.int_state(STATE_PREV_INPUT_START + state_index)
         {
-            events.push((
-                state_index,
-                DigitalCosimInputEvent {
-                    time,
-                    index: unified_index,
-                    value,
-                },
-            ));
+            events.push(DigitalCosimInputEvent {
+                time,
+                index: unified_index,
+                value,
+            });
         }
     }
 
-    events.sort_by(|(_, a), (_, b)| {
+    events.sort_by(|a, b| {
         a.time
             .partial_cmp(&b.time)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -341,10 +338,6 @@ impl CodeModel for DigitalCosim {
             runtime.input_event_limit()
         };
         let input_events = collect_input_events(ctx, &inputs, &inouts, input_event_limit);
-        let runtime_events: Vec<DigitalCosimInputEvent> = input_events
-            .iter()
-            .map(|(_, event)| event.clone())
-            .collect();
 
         let mut runtime = runtime
             .lock()
@@ -374,17 +367,17 @@ impl CodeModel for DigitalCosim {
                 results.push(runtime.startup_step(0.0)?);
                 ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, COSIM_STARTUP_STEP_DONE);
             }
-            results.push(runtime.step(ctx.time, &inputs, &inouts, &runtime_events)?);
+            results.push(runtime.step(ctx.time, &inputs, &inouts, &input_events)?);
         }
         drop(runtime);
 
         for result in results {
             apply_cosim_step(ctx, result)?;
         }
-        for (state_index, event) in input_events {
-            ctx.set_state(state_index, event.time);
+        for event in input_events {
+            ctx.set_state(event.index, event.time);
             ctx.set_int_state(
-                STATE_PREV_INPUT_START + state_index,
+                STATE_PREV_INPUT_START + event.index,
                 digital_value_code(event.value),
             );
         }
@@ -412,6 +405,43 @@ mod tests {
         assert_eq!(events[1].port_name, "d_inout");
         assert_eq!(events[1].values, vec![DigitalValue::zero()]);
         assert_eq!(events[1].delay, 3.0e-9);
+    }
+
+    #[test]
+    fn d_cosim_input_events_use_unified_indices_for_runtime_batch() {
+        let mut ctx = CmContext::new();
+        ctx.time = 2.0e-9;
+        ctx.allocate_states(3);
+        ctx.allocate_int_states(STATE_PREV_INPUT_START + 3);
+        for index in 0..3 {
+            ctx.set_int_state(STATE_PREV_INPUT_START + index, -1);
+        }
+        ctx.set_input_digital_vector_event_times("d_in", vec![Some(1.5e-9), Some(1.0e-9)]);
+        ctx.set_input_digital_vector_event_times("d_inout", vec![Some(1.0e-9)]);
+
+        let inputs = [DigitalValue::one(), DigitalValue::zero()];
+        let inouts = [DigitalValue::unknown()];
+        let events = collect_input_events(&ctx, &inputs, &inouts, None);
+
+        assert_eq!(events.len(), 3);
+        assert_eq!(
+            events.iter().map(|event| event.index).collect::<Vec<_>>(),
+            vec![1, 2, 0]
+        );
+        assert_eq!(
+            events.iter().map(|event| event.value).collect::<Vec<_>>(),
+            vec![
+                DigitalValue::zero(),
+                DigitalValue::unknown(),
+                DigitalValue::one()
+            ]
+        );
+
+        let clipped = collect_input_events(&ctx, &inputs, &inouts, Some(2));
+        assert_eq!(
+            clipped.iter().map(|event| event.index).collect::<Vec<_>>(),
+            vec![1, 0]
+        );
     }
 
     #[test]
