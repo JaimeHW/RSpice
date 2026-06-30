@@ -7,6 +7,12 @@ impl Mosfet {
     }
 
     #[inline]
+    fn uses_xyce_classic_reverse_body_junction(&self) -> bool {
+        self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse
+            && matches!(self.level, 1 | 2 | 3 | 6)
+    }
+
+    #[inline]
     pub(in crate::device::mosfet::mosfet) fn junction_diode_current(
         &self,
         isat: Value,
@@ -20,6 +26,9 @@ impl Mosfet {
         };
         let gmin = gmin.max(0.0);
         let nvt = self.body_junction_thermal_voltage();
+        if self.uses_xyce_classic_reverse_body_junction() && v <= 0.0 {
+            return (isat / nvt + gmin) * v;
+        }
         if v <= -3.0 * nvt {
             gmin * v - isat
         } else {
@@ -42,6 +51,9 @@ impl Mosfet {
         };
         let gmin = gmin.max(0.0);
         let nvt = self.body_junction_thermal_voltage();
+        if self.uses_xyce_classic_reverse_body_junction() && v <= 0.0 {
+            return isat / nvt + gmin;
+        }
         if v <= -3.0 * nvt {
             gmin
         } else {
@@ -397,5 +409,60 @@ impl Mosfet {
             matrix.add(cathode - 1, cathode - 1, gd);
             rhs[cathode - 1] += ieq;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_close(actual: Value, expected: Value, label: &str) {
+        let tol = 1.0e-12 * actual.abs().max(expected.abs()).max(1.0);
+        assert!(
+            (actual - expected).abs() <= tol,
+            "{label}: actual={actual:.12e} expected={expected:.12e} tol={tol:.12e}"
+        );
+    }
+
+    #[test]
+    fn xyce_classic_reverse_body_junction_linearizes_from_zero_bias() {
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 0).with_level(6);
+        mos.set_body_junction_model(MosBodyJunctionModel::XyceClassicLinearizedReverse);
+
+        let isat = 1.0e-14;
+        let gmin = 1.0e-12;
+        let reverse_voltage = -2.62;
+        let expected_conductance = isat / mos.body_junction_thermal_voltage() + gmin;
+
+        assert_close(
+            mos.junction_diode_current(isat, reverse_voltage, gmin),
+            expected_conductance * reverse_voltage,
+            "Xyce reverse current",
+        );
+        assert_close(
+            mos.junction_diode_conductance(isat, reverse_voltage, gmin),
+            expected_conductance,
+            "Xyce reverse conductance",
+        );
+    }
+
+    #[test]
+    fn ngspice_reverse_body_junction_keeps_deep_reverse_clamp() {
+        let mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 0).with_level(6);
+
+        let isat = 1.0e-14;
+        let gmin = 1.0e-12;
+        let reverse_voltage = -2.62;
+
+        assert_close(
+            mos.junction_diode_current(isat, reverse_voltage, gmin),
+            gmin * reverse_voltage - isat,
+            "ngspice reverse current",
+        );
+        assert_close(
+            mos.junction_diode_conductance(isat, reverse_voltage, gmin),
+            gmin,
+            "ngspice reverse conductance",
+        );
     }
 }

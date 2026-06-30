@@ -6,7 +6,7 @@
 #![allow(clippy::needless_range_loop)]
 use super::behavioral_expr::prepare_behavioral_expression;
 use super::{Engine, JfetLevel2Model, SimulationError, SpiceDialect, extract_dc_value};
-use crate::device::JfetChannelModel;
+use crate::device::{JfetChannelModel, MosBodyJunctionModel};
 use crate::netlist::{Element, ElementKind, SourceSpec, XspicePort, flatten_netlist_with_models};
 use crate::{CircuitData, Netlist};
 #[cfg(feature = "veriloga")]
@@ -1516,6 +1516,12 @@ impl Engine {
                             bulk,
                         ),
                     };
+                    mosfet.set_body_junction_model(match self.config.spice_dialect {
+                        SpiceDialect::Xyce => MosBodyJunctionModel::XyceClassicLinearizedReverse,
+                        SpiceDialect::BestAvailable | SpiceDialect::Ngspice => {
+                            MosBodyJunctionModel::NgspiceReverseClamp
+                        }
+                    });
 
                     // Look up model and apply parameters including LEVEL
                     if let Some(params_map) = params_map.as_ref() {

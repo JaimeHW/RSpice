@@ -41,6 +41,17 @@ pub enum MosRegion {
     Saturation,
 }
 
+/// Bulk-junction current law used by native classic MOSFET devices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MosBodyJunctionModel {
+    /// ngspice MOS1/2/3/6 reverse-bias clamp: deep reverse bias stamps only
+    /// GMIN plus the saturation-current offset.
+    NgspiceReverseClamp,
+    /// Xyce classic MOS reverse-bias rule: for Vj <= 0 the junction is
+    /// linearized from zero bias with slope IS / Vt + GMIN.
+    XyceClassicLinearizedReverse,
+}
+
 /// Pre-computed stamp indices for O(1) matrix access (4-terminal device, but only D and S rows)
 /// Note: Gate draws no DC current so has no G row stamps
 #[derive(Debug, Clone, Default)]
@@ -133,6 +144,8 @@ pub struct Mosfet {
     // Shared MOS model parameters and level routing.
     /// SPICE MOS model level.
     pub level: i32,
+    /// Compatibility policy for the native bulk-junction current law.
+    pub body_junction_model: MosBodyJunctionModel,
     /// Legacy BSIM1/BSIM2 model card for SPICE levels 4 and 5.
     legacy_bsim_model: Option<LegacyBsimModel>,
     /// Geometry-sized legacy BSIM instance data derived from W/L.

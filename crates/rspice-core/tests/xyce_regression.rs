@@ -245,6 +245,7 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/Certification_Tests/BUG_28_SON/bug_28_son2.cir",
         "Netlists/Certification_Tests/BUG_1456/bug_1456.cir",
         "Netlists/Certification_Tests/BUG_1807/vbic_pnp_default.cir",
+        "Netlists/MOS6/nmos6_dc.cir",
         "Netlists/NMESFET/nmesfet.cir",
         "Netlists/NMOS1_DC/nmos1.cir",
         "Netlists/NPN_DC/npn1.cir",

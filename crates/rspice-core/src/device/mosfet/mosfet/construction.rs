@@ -76,6 +76,7 @@ impl Mosfet {
 
             // Shared MOS defaults
             level: 1, // Default to Level 1
+            body_junction_model: MosBodyJunctionModel::NgspiceReverseClamp,
             legacy_bsim_model: None,
             legacy_bsim_sized: None,
             u0: 600.0, // Low-field mobility (cm^2/V*s), mos1set.c default
@@ -1035,6 +1036,11 @@ impl Mosfet {
             self.legacy_bsim_sized = None;
         }
         self
+    }
+
+    /// Set the native classic-MOS bulk-junction current compatibility model.
+    pub fn set_body_junction_model(&mut self, model: MosBodyJunctionModel) {
+        self.body_junction_model = model;
     }
 
     /// Apply MOSFET instance parameters (W/L/M/NF).
