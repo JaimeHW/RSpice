@@ -2306,6 +2306,28 @@ impl CodeModel for Potentiometer {
 
         Ok(())
     }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        let Ok(split) = potentiometer_split(ctx) else {
+            return Vec::new();
+        };
+        match output_port.to_ascii_lowercase().as_str() {
+            "r0" => vec![
+                ("r0".to_string(), split.g_lower),
+                ("wiper".to_string(), -split.g_lower),
+            ],
+            "wiper" => vec![
+                ("r0".to_string(), -split.g_lower),
+                ("wiper".to_string(), split.g_lower + split.g_upper),
+                ("r1".to_string(), -split.g_upper),
+            ],
+            "r1" => vec![
+                ("wiper".to_string(), -split.g_upper),
+                ("r1".to_string(), split.g_upper),
+            ],
+            _ => Vec::new(),
+        }
+    }
 }
 
 impl CodeModel for AnalogSwitch {
