@@ -333,7 +333,7 @@ fn d_source_set_row_state(ctx: &mut CmContext, index: usize, value: i64) {
 
 fn d_source_set_unknown_output(ctx: &mut CmContext, width: usize) {
     let value = DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined);
-    ctx.set_output_digital_vector("out", vec![value; width], 0.0);
+    ctx.set_output_digital_vector_from_context_fn("out", width, 0.0, |_, _| value);
 }
 
 impl CodeModel for DigitalSource {
@@ -636,18 +636,12 @@ fn parse_d_state_contents(
         let continuation_len = input_width + 2;
         let (state, outputs, input_start, next_idx) = if tokens.len() == header_len {
             let state = parse_d_state_i64(state_file, line_no, tokens[0])?;
-            let output_codes = tokens[1..1 + output_width]
-                .iter()
-                .map(|token| parse_d_state_output_code(state_file, line_no, token))
-                .collect::<CmResult<Vec<_>>>()?;
-            if let Some(code) = output_codes.last().copied() {
+            let mut outputs = Vec::with_capacity(output_width);
+            for token in &tokens[1..1 + output_width] {
+                let code = parse_d_state_output_code(state_file, line_no, token)?;
                 stale_bit_code = code;
+                outputs.push(d_state_output_from_code(code));
             }
-            let outputs = output_codes
-                .iter()
-                .copied()
-                .map(d_state_output_from_code)
-                .collect();
             last_state = Some(state);
             (state, outputs, 1 + output_width, header_len - 1)
         } else if tokens.len() == continuation_len {
@@ -1308,6 +1302,29 @@ mod tests {
         assert_eq!(table.transitions[0].outputs, vec![DigitalValue::one()]);
         assert_eq!(table.transitions[1].outputs, vec![DigitalValue::zero()]);
         assert_eq!(table.transitions[2].outputs, vec![DigitalValue::one()]);
+
+        unregister_test_data_file(state_file);
+    }
+
+    #[test]
+    fn d_state_multi_output_continuation_repeats_last_input_bit_like_ngspice() {
+        let _guard = data_file_test_guard();
+        let state_file = "virtual://d_state/multi-output-continuation-stale-bit";
+        unregister_test_data_file(state_file);
+        data_file::register_data_file(state_file, "0 0s 0s 1 -> 0\n0 -> 0\n")
+            .expect("register virtual d_state table");
+
+        let table = parse_d_state_file(state_file, 1, 2).expect("state table parses");
+
+        assert_eq!(table.transitions.len(), 2);
+        assert_eq!(
+            table.transitions[0].outputs,
+            vec![DigitalValue::zero(), DigitalValue::zero()]
+        );
+        assert_eq!(
+            table.transitions[1].outputs,
+            vec![DigitalValue::one(), DigitalValue::one()]
+        );
 
         unregister_test_data_file(state_file);
     }
