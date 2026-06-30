@@ -24165,13 +24165,15 @@ fn generate_ad_value_struct() -> String {
 
 pub fn render_runtime_support_module() -> String {
     let mut support = String::new();
-    support.push_str("#![rustfmt::skip]\n#![allow(dead_code)]\n\n");
+    support.push_str("#![allow(dead_code)]\n\n");
     support.push_str("use super::GeneratedEvalContext;\n\n");
     support.push_str("const LIMEXP_MAX: f64 = 5.54062238439351e34;\n\n");
     support.push_str(&generate_scratch_struct());
     support.push('\n');
     support.push_str(&generate_ad_value_struct());
-    support.push('\n');
+    if !support.ends_with('\n') {
+        support.push('\n');
+    }
 
     support = support
         .replace(
