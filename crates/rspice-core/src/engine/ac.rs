@@ -386,6 +386,26 @@ impl Engine {
                                         );
                                     }
                                 }
+                                crate::xspice::PortConnection::CurrentOutput { pos, neg } => {
+                                    if *pos > 0 {
+                                        Self::stamp_xspice_ac_control_partial(
+                                            ac_matrix,
+                                            *pos - 1,
+                                            control_connection,
+                                            partial,
+                                            1.0,
+                                        );
+                                    }
+                                    if *neg > 0 {
+                                        Self::stamp_xspice_ac_control_partial(
+                                            ac_matrix,
+                                            *neg - 1,
+                                            control_connection,
+                                            partial,
+                                            -1.0,
+                                        );
+                                    }
+                                }
                                 _ => {}
                             }
                         }

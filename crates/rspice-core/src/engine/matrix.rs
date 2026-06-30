@@ -672,6 +672,135 @@ impl Engine {
         // - Current outputs reserve nodal conductance/current topology.
         // Passive inout analog terminals reserve full nodal coupling so
         // code-model deferred stamps can inject conductance terms safely.
+        #[inline]
+        fn push_current_output_terminal_topology(
+            triplets: &mut Vec<(usize, usize, Value)>,
+            pos: usize,
+            neg: usize,
+        ) {
+            if pos > 0 {
+                triplets.push((pos - 1, pos - 1, 0.0));
+                if neg > 0 {
+                    triplets.push((pos - 1, neg - 1, 0.0));
+                }
+            }
+            if neg > 0 {
+                if pos > 0 {
+                    triplets.push((neg - 1, pos - 1, 0.0));
+                }
+                triplets.push((neg - 1, neg - 1, 0.0));
+            }
+        }
+
+        #[inline]
+        fn push_current_control_column(
+            triplets: &mut Vec<(usize, usize, Value)>,
+            pos: usize,
+            neg: usize,
+            col: usize,
+        ) {
+            if pos > 0 {
+                triplets.push((pos - 1, col, 0.0));
+            }
+            if neg > 0 {
+                triplets.push((neg - 1, col, 0.0));
+            }
+        }
+
+        fn push_current_output_control_topology(
+            triplets: &mut Vec<(usize, usize, Value)>,
+            circuit: &CircuitData,
+            instance: &crate::xspice::XspiceInstance,
+            control_port_name: &str,
+            control_connection: &crate::xspice::PortConnection,
+            pos: usize,
+            neg: usize,
+        ) {
+            match control_connection {
+                crate::xspice::PortConnection::Analog(node) => {
+                    if *node > 0 {
+                        push_current_control_column(triplets, pos, neg, *node - 1);
+                    }
+                }
+                crate::xspice::PortConnection::Differential(ctrl_pos, ctrl_neg) => {
+                    if *ctrl_pos > 0 {
+                        push_current_control_column(triplets, pos, neg, *ctrl_pos - 1);
+                    }
+                    if *ctrl_neg > 0 {
+                        push_current_control_column(triplets, pos, neg, *ctrl_neg - 1);
+                    }
+                }
+                crate::xspice::PortConnection::CurrentProbe { branch_ordinal, .. }
+                | crate::xspice::PortConnection::BranchCurrent { branch_ordinal }
+                | crate::xspice::PortConnection::Hybrid { branch_ordinal, .. } => {
+                    let branch = circuit.get_branch_matrix_index(*branch_ordinal);
+                    push_current_control_column(triplets, pos, neg, branch - 1);
+                }
+                crate::xspice::PortConnection::NamedBranchCurrent {
+                    branch_ordinal: Some(branch_ordinal),
+                    ..
+                } => {
+                    let branch = circuit.get_branch_matrix_index(*branch_ordinal);
+                    push_current_control_column(triplets, pos, neg, branch - 1);
+                }
+                crate::xspice::PortConnection::AnalogVector(nodes) => {
+                    for &node in nodes {
+                        if node > 0 {
+                            push_current_control_column(triplets, pos, neg, node - 1);
+                        }
+                    }
+                }
+                crate::xspice::PortConnection::TypedAnalogVector(elements) => {
+                    for (element_index, element) in elements.iter().enumerate() {
+                        if let Some(branch_ordinal) =
+                            instance.branch_vector_control_ordinal(control_port_name, element_index)
+                        {
+                            let branch = circuit.get_branch_matrix_index(branch_ordinal);
+                            push_current_control_column(triplets, pos, neg, branch - 1);
+                            continue;
+                        }
+                        if let Some(node) = element.primary_node()
+                            && node > 0
+                        {
+                            push_current_control_column(triplets, pos, neg, node - 1);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn push_current_output_controls(
+            triplets: &mut Vec<(usize, usize, Value)>,
+            circuit: &CircuitData,
+            instance: &crate::xspice::XspiceInstance,
+            ports: &[crate::xspice::PortSpec],
+            pos: usize,
+            neg: usize,
+        ) {
+            for (control_idx, control_port) in ports.iter().enumerate() {
+                if !matches!(
+                    control_port.direction,
+                    crate::xspice::PortDirection::In | crate::xspice::PortDirection::InOut
+                ) || !control_port.default_type.is_analog()
+                {
+                    continue;
+                }
+                let Some(control_connection) = instance.connections().get(control_idx) else {
+                    continue;
+                };
+                push_current_output_control_topology(
+                    triplets,
+                    circuit,
+                    instance,
+                    &control_port.name,
+                    control_connection,
+                    pos,
+                    neg,
+                );
+            }
+        }
+
         for instance in &circuit.xspice_instances {
             let ports = instance.ports();
             let mut inout_analog_nodes: Vec<usize> = Vec::new();
@@ -768,26 +897,25 @@ impl Engine {
                             }
                         }
                     }
-                    crate::xspice::PortType::Current => match connection {
-                        crate::xspice::PortConnection::Analog(node) => {
-                            if *node > 0 {
-                                triplets.push((*node - 1, *node - 1, 0.0));
+                    crate::xspice::PortType::Current => {
+                        let (pos, neg) = match connection {
+                            crate::xspice::PortConnection::Analog(node) => (*node, 0),
+                            crate::xspice::PortConnection::Differential(pos, neg) => (*pos, *neg),
+                            crate::xspice::PortConnection::CurrentOutput { pos, neg } => {
+                                (*pos, *neg)
                             }
-                        }
-                        crate::xspice::PortConnection::Differential(pos, neg) => {
-                            if *pos > 0 {
-                                triplets.push((*pos - 1, *pos - 1, 0.0));
-                            }
-                            if *neg > 0 {
-                                triplets.push((*neg - 1, *neg - 1, 0.0));
-                            }
-                            if *pos > 0 && *neg > 0 {
-                                triplets.push((*pos - 1, *neg - 1, 0.0));
-                                triplets.push((*neg - 1, *pos - 1, 0.0));
-                            }
-                        }
-                        _ => {}
-                    },
+                            _ => continue,
+                        };
+                        push_current_output_terminal_topology(&mut triplets, pos, neg);
+                        push_current_output_controls(
+                            &mut triplets,
+                            circuit,
+                            instance,
+                            ports,
+                            pos,
+                            neg,
+                        );
+                    }
                     _ => {}
                 }
             }
