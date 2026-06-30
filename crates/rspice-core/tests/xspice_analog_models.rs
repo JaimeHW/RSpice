@@ -149,6 +149,99 @@ fn ac_voltage_at(deck: &str, node: &str, freq: f64) -> Complex64 {
     result.voltages[idx]
 }
 
+fn complex_partial(partials: &[(String, Complex64)], name: &str, context: &str) -> Complex64 {
+    partials
+        .iter()
+        .find_map(|(partial_name, value)| partial_name.eq_ignore_ascii_case(name).then_some(*value))
+        .unwrap_or_else(|| panic!("{context} partial {name} missing from {partials:?}"))
+}
+
+#[test]
+fn xspice_tline_ac_partials_match_official_hyperbolic_impedances() {
+    let model = rspice_core::xspice::models::GenericTransmissionLine;
+    let mut ctx = CmContext::new();
+    ctx.set_param("l", 0.125);
+    ctx.set_param("z", 75.0);
+    ctx.set_param("a", 3.0);
+
+    let frequency = 2.0e9;
+    let alpha = (10.0_f64.powf(0.05 * 3.0)).ln() / 2.0;
+    let beta = std::f64::consts::TAU * frequency / 299_792_458.0;
+    let gamma_l = Complex64::new(alpha, beta) * 0.125;
+    let z = Complex64::new(75.0, 0.0);
+    let expected_z11 = z / gamma_l.tanh();
+    let expected_z21 = z / gamma_l.sinh();
+
+    let in_partials = model.output_input_ac_partials(&ctx, "in", frequency);
+    let out_partials = model.output_input_ac_partials(&ctx, "out", frequency);
+
+    assert!(
+        (complex_partial(&in_partials, "in", "tline in") - expected_z11).norm() < 1.0e-9,
+        "tline AC self partial should be z/tanh(gamma*l), got {in_partials:?}"
+    );
+    assert!(
+        (complex_partial(&in_partials, "out", "tline in") - expected_z21).norm() < 1.0e-9,
+        "tline AC transfer partial should be z/sinh(gamma*l), got {in_partials:?}"
+    );
+    assert!(
+        (complex_partial(&out_partials, "out", "tline out") - expected_z11).norm() < 1.0e-9,
+        "tline AC output self partial should be z/tanh(gamma*l), got {out_partials:?}"
+    );
+    assert!(
+        (complex_partial(&out_partials, "in", "tline out") - expected_z21).norm() < 1.0e-9,
+        "tline AC reverse transfer partial should be z/sinh(gamma*l), got {out_partials:?}"
+    );
+}
+
+#[test]
+fn xspice_tline_transient_uses_delayed_remote_history_after_time_of_flight() {
+    let model = rspice_core::xspice::models::GenericTransmissionLine;
+    let mut ctx = CmContext::new();
+    let impedance = 50.0;
+    let delay = 1.0e-9;
+    ctx.analysis = AnalysisType::Transient;
+    ctx.set_param("l", delay * 299_792_458.0);
+    ctx.set_param("z", impedance);
+    ctx.set_param("a", 0.0);
+
+    ctx.time = 0.0;
+    ctx.set_input_analog("V1sens", 1.0);
+    ctx.set_input_analog("V2sens", 2.0);
+    ctx.set_input_analog("in", 0.01);
+    ctx.set_input_analog("out", 0.02);
+    model.evaluate(&mut ctx).expect("tline evaluates at t=0");
+
+    assert!((ctx.output("in") - 3.5).abs() < 1.0e-12);
+    assert!((ctx.output("out") - 2.5).abs() < 1.0e-12);
+
+    ctx.time = 0.5e-9;
+    ctx.set_input_analog("V1sens", 4.0);
+    ctx.set_input_analog("V2sens", 8.0);
+    ctx.set_input_analog("in", 0.03);
+    ctx.set_input_analog("out", 0.04);
+    model
+        .evaluate(&mut ctx)
+        .expect("tline records pre-flight history sample");
+
+    ctx.time = 1.5e-9;
+    ctx.set_input_analog("V1sens", 20.0);
+    ctx.set_input_analog("V2sens", 30.0);
+    ctx.set_input_analog("in", 0.07);
+    ctx.set_input_analog("out", 0.11);
+    model
+        .evaluate(&mut ctx)
+        .expect("tline evaluates delayed transient branch");
+
+    assert!(
+        (ctx.output("in") - 13.5).abs() < 1.0e-12,
+        "tline input-side output should combine delayed remote V/I with present local current"
+    );
+    assert!(
+        (ctx.output("out") - 11.0).abs() < 1.0e-12,
+        "tline output-side output should combine delayed remote V/I with present local current"
+    );
+}
+
 #[test]
 fn xspice_waveform_oscillators_accept_official_current_output_ports() {
     let registry = CodeModelRegistry::with_builtins();
