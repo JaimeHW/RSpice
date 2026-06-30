@@ -2443,7 +2443,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.ops.push(NativeOp::FlickerNoise);
                 Ok(())
             }
-            "table" => self.push(NativeOp::Const(0.0)),
+            "table" => {
+                // This is the large-signal stamp contribution. Noise-analysis
+                // table metadata is carried separately on CompiledNoiseSource
+                // and evaluated by VerilogADevice::try_noise_sources.
+                self.push(NativeOp::Const(0.0))
+            }
             _ => Err(self.unsupported(format!("noise source {source}"))),
         }
     }
@@ -2863,7 +2868,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "hypot" => self.lower_hypot_derivative(name, args, wrt),
             "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
             | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
-            | "flicker_noise" => self.push(NativeOp::Const(0.0)),
+            | "flicker_noise" | "noise_table" => self.push(NativeOp::Const(0.0)),
             _ => Err(self.unsupported(format!("ddx derivative of intrinsic function '{name}'"))),
         }
     }
@@ -3735,6 +3740,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "analysis" => self.lower_analysis_intrinsic(name, args),
             "white_noise" => self.lower_white_noise_intrinsic(name, args),
             "flicker_noise" => self.lower_flicker_noise_intrinsic(name, args),
+            "noise_table" => self.lower_noise_table_intrinsic(name, args),
             _ => Err(self.unsupported(format!("intrinsic function '{name}'"))),
         }
     }
@@ -3831,6 +3837,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.pop_binary("canonical flicker noise")?;
         self.ops.push(NativeOp::FlickerNoise);
         Ok(())
+    }
+
+    fn lower_noise_table_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
+        self.require_intrinsic_arity_range(name, args, 1, 2)?;
+        // The large-signal contribution is zero. The frequency table and
+        // amplitude scale are preserved on CompiledNoiseSource and evaluated
+        // by VerilogADevice::try_noise_sources.
+        self.push(NativeOp::Const(0.0))
     }
 
     fn lower_unary_math_intrinsic(

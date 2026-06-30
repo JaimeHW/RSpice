@@ -4355,6 +4355,70 @@ fn native_noise_analysis_evaluates_noise_sources_without_fallback() {
     assert!(sources[1].table.is_none());
 }
 
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_canonical_noise_analysis_preserves_table_metadata_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_noise_table_metadata(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real s = 1.0e-18;
+    parameter real ex = 2.0;
+    analog begin
+        I(p, n) <+ flicker_noise(s, ex, "fl");
+        I(p, n) <+ noise_table('{1.0, 2.0e-18, 10.0, 4.0e-18}, "tbl");
+    end
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    assert_eq!(model.noise_sources.len(), 2);
+    assert!(
+        model
+            .noise_sources
+            .iter()
+            .any(|source| source.table.is_some()),
+        "fixture must contain table-backed noise metadata"
+    );
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("NOISETBL1", model, &artifact, &[1, 0])
+            .expect("noise-table model uses canonical native JIT path");
+    assert!(device.is_using_native());
+    assert_eq!(device.native_plan_stats().noise_source_entry_points, 3);
+    device.set_analysis_type(3);
+
+    let mut sources = device
+        .try_noise_sources(&[0.0])
+        .expect("native table noise metadata evaluation succeeds");
+    sources.sort_by(|left, right| left.name.cmp(&right.name));
+
+    assert_eq!(
+        sources
+            .iter()
+            .map(|source| source.name.as_str())
+            .collect::<Vec<_>>(),
+        ["fl", "tbl"]
+    );
+    assert!((sources[0].psd - 1.0e-18).abs() < 1.0e-30);
+    assert_eq!(sources[0].exponent, Some(2.0));
+    assert!(sources[0].table.is_none());
+
+    assert_eq!(sources[1].psd, 1.0);
+    assert_eq!(sources[1].exponent, None);
+    assert_eq!(
+        sources[1]
+            .table
+            .as_ref()
+            .map(|(points, log)| (points.len(), *log)),
+        Some((2, false))
+    );
+}
+
 #[test]
 fn native_noise_analysis_evaluates_current_probe_psd_without_fallback() {
     let model = compile(
