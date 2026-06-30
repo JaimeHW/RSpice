@@ -7,6 +7,7 @@ use crate::xspice::{
     PortType,
 };
 use crate::{Complex64, Value};
+use std::sync::Arc;
 
 fn scalar_analog_port(
     name: &str,
@@ -1716,11 +1717,30 @@ const ONESHOT_LOCKED: usize = 8;
 const ONESHOT_TRAN_INIT: usize = 9;
 const ONESHOT_STATE_COUNT: usize = 10;
 const ONESHOT_MIN_EDGE_TIME: Value = 1.0e-12;
+const ONESHOT_TABLE_RESOURCE: &str = "xspice.oneshot.table";
 
 #[derive(Debug, Clone, Copy)]
 struct OneShotPoint {
     control: Value,
     pulse_width: Value,
+}
+
+#[derive(Debug, Clone)]
+struct OneShotTableData {
+    points: Vec<OneShotPoint>,
+    strictly_increasing_control: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct OneShotTableSignature {
+    controls: Vec<Value>,
+    widths: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct OneShotTableResource {
+    signature: OneShotTableSignature,
+    result: CmResult<Option<Arc<OneShotTableData>>>,
 }
 
 fn analog_signal_port(name: &str, direction: PortDirection, nullable: bool) -> PortSpec {
@@ -1798,7 +1818,14 @@ fn oneshot_invalid_param(name: &str, message: impl Into<String>) -> CmError {
     }
 }
 
-fn oneshot_table_optional(ctx: &CmContext) -> CmResult<Option<Vec<OneShotPoint>>> {
+fn oneshot_table_signature(ctx: &CmContext) -> OneShotTableSignature {
+    OneShotTableSignature {
+        controls: ctx.real_vector_param("cntl_array").unwrap_or(&[]).to_vec(),
+        widths: ctx.real_vector_param("pw_array").unwrap_or(&[]).to_vec(),
+    }
+}
+
+fn oneshot_table_optional_uncached(ctx: &CmContext) -> CmResult<Option<Vec<OneShotPoint>>> {
     let controls = ctx
         .real_vector_param("cntl_array")
         .ok_or_else(|| CmError::MissingParameter("cntl_array".to_string()))?;
@@ -1842,7 +1869,37 @@ fn oneshot_table_optional(ctx: &CmContext) -> CmResult<Option<Vec<OneShotPoint>>
     Ok(Some(table))
 }
 
-fn interpolate_oneshot_pulse_width(table: &[OneShotPoint], control: Value) -> Value {
+fn oneshot_table_data(points: Vec<OneShotPoint>) -> OneShotTableData {
+    let strictly_increasing_control = points
+        .windows(2)
+        .all(|pair| pair[0].control < pair[1].control);
+    OneShotTableData {
+        points,
+        strictly_increasing_control,
+    }
+}
+
+fn oneshot_table_optional(ctx: &mut CmContext) -> CmResult<Option<Arc<OneShotTableData>>> {
+    let signature = oneshot_table_signature(ctx);
+    if let Some(resource) = ctx.resource::<OneShotTableResource>(ONESHOT_TABLE_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.result.clone();
+    }
+
+    let result = oneshot_table_optional_uncached(ctx)
+        .map(|table| table.map(oneshot_table_data).map(Arc::new));
+    ctx.set_resource(
+        ONESHOT_TABLE_RESOURCE,
+        Arc::new(OneShotTableResource {
+            signature,
+            result: result.clone(),
+        }),
+    );
+    result
+}
+
+fn interpolate_oneshot_pulse_width_linear_scan(table: &[OneShotPoint], control: Value) -> Value {
     let first = table[0];
     let last = table[table.len() - 1];
     let raw = if control <= first.control {
@@ -1859,6 +1916,26 @@ fn interpolate_oneshot_pulse_width(table: &[OneShotPoint], control: Value) -> Va
                     .then(|| interpolate_oneshot_segment(left, right, control))
             })
             .unwrap_or(last.pulse_width)
+    };
+
+    raw.max(0.0)
+}
+
+fn interpolate_oneshot_pulse_width(table: &OneShotTableData, control: Value) -> Value {
+    let points = table.points.as_slice();
+    if !table.strictly_increasing_control {
+        return interpolate_oneshot_pulse_width_linear_scan(points, control);
+    }
+
+    let first = points[0];
+    let last = points[points.len() - 1];
+    let raw = if control <= first.control {
+        interpolate_oneshot_segment(points[0], points[1], control)
+    } else if control >= last.control {
+        interpolate_oneshot_segment(points[points.len() - 2], last, control)
+    } else {
+        let upper = points.partition_point(|point| point.control <= control);
+        interpolate_oneshot_segment(points[upper - 1], points[upper], control)
     };
 
     raw.max(0.0)
@@ -2018,7 +2095,7 @@ impl CodeModel for AnalogOneShot {
             } else {
                 0.0
             };
-            let pulse_width = interpolate_oneshot_pulse_width(&table, control);
+            let pulse_width = interpolate_oneshot_pulse_width(table.as_ref(), control);
             let positive_edge = ctx.param("pos_edge_trig") > 0.5;
             let retrigger = ctx.param("retrig") > 0.5;
 
@@ -2116,6 +2193,13 @@ impl CodeModel for AnalogOneShot {
 mod tests {
     use super::*;
 
+    fn oneshot_point(control: Value, pulse_width: Value) -> OneShotPoint {
+        OneShotPoint {
+            control,
+            pulse_width,
+        }
+    }
+
     fn mismatched_oneshot_context() -> CmContext {
         let mut ctx = CmContext::new();
         ctx.set_real_vector_param("cntl_array", vec![0.0, 1.0]);
@@ -2143,6 +2227,67 @@ mod tests {
             .expect("ngspice returns without fatal error on mismatched oneshot tables");
 
         assert_eq!(ctx.output("out"), 0.0);
+    }
+
+    #[test]
+    fn oneshot_table_cache_reloads_when_params_change() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("cntl_array", vec![0.0, 1.0]);
+        ctx.set_real_vector_param("pw_array", vec![1.0e-9, 2.0e-9]);
+
+        let first = oneshot_table_optional(&mut ctx)
+            .expect("oneshot table loads")
+            .expect("table is present");
+        let second = oneshot_table_optional(&mut ctx)
+            .expect("oneshot table reloads")
+            .expect("table is present");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "unchanged oneshot table parameters should reuse the parsed table"
+        );
+        assert!((interpolate_oneshot_pulse_width(&first, 0.5) - 1.5e-9).abs() < 1.0e-21);
+
+        ctx.set_real_vector_param("pw_array", vec![2.0e-9, 4.0e-9]);
+        let updated = oneshot_table_optional(&mut ctx)
+            .expect("updated oneshot table loads")
+            .expect("table is present");
+        assert!(
+            !Arc::ptr_eq(&first, &updated),
+            "changed oneshot table parameters must refresh the parsed table"
+        );
+        assert!((interpolate_oneshot_pulse_width(&updated, 0.5) - 3.0e-9).abs() < 1.0e-21);
+    }
+
+    #[test]
+    fn oneshot_interpolation_uses_monotonic_brackets() {
+        let table = oneshot_table_data(vec![
+            oneshot_point(0.0, 1.0e-9),
+            oneshot_point(1.0, 3.0e-9),
+            oneshot_point(3.0, 7.0e-9),
+        ]);
+
+        assert!(table.strictly_increasing_control);
+        assert!(
+            (interpolate_oneshot_pulse_width(&table, 2.0) - 5.0e-9).abs() < 1.0e-21,
+            "strictly increasing oneshot controls should interpolate from the binary-search bracket"
+        );
+        assert_eq!(
+            interpolate_oneshot_pulse_width(&table, 1.0),
+            3.0e-9,
+            "exact interior controls should return the matching row"
+        );
+    }
+
+    #[test]
+    fn oneshot_interpolation_preserves_linear_scan_for_descending_tables() {
+        let table =
+            oneshot_table_data(vec![oneshot_point(1.0, 1.0e-9), oneshot_point(0.0, 2.0e-9)]);
+
+        assert!(!table.strictly_increasing_control);
+        assert!(
+            (interpolate_oneshot_pulse_width(&table, 0.5) - 1.5e-9).abs() < 1.0e-21,
+            "descending oneshot controls should keep the original endpoint segment behavior"
+        );
     }
 
     #[test]
