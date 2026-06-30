@@ -2,14 +2,15 @@ pub(crate) mod codegen;
 pub mod encoder;
 
 use super::expr::{
-    BranchUnknownRuntimeMapping, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
-    PriorCurrentProbe, canonical_above_slots_for_equation, canonical_absdelay_slots_for_equation,
-    canonical_cross_slots_for_equation, canonical_ddt_slots_for_equation,
-    canonical_idt_slots_for_equation, canonical_idtmod_slots_for_equation,
-    canonical_laplace_slots_for_equation, canonical_limit_slots_for_equation,
-    canonical_slew_slots_for_equation, canonical_table_lookup_slots_for_equation,
-    canonical_timer_slots_for_equation, canonical_transition_slots_for_equation,
-    canonical_zi_slots_for_equation, constant_dynamic_variable_slot,
+    BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, EntryKind, NativeLoweringLimits,
+    NativeOp, NativeProgram, PriorCurrentProbe, canonical_above_slots_for_equation,
+    canonical_absdelay_slots_for_equation, canonical_cross_slots_for_equation,
+    canonical_ddt_slots_for_equation, canonical_idt_slots_for_equation,
+    canonical_idtmod_slots_for_equation, canonical_laplace_slots_for_equation,
+    canonical_limit_slots_for_equation, canonical_slew_slots_for_equation,
+    canonical_table_lookup_slots_for_equation, canonical_timer_slots_for_equation,
+    canonical_transition_slots_for_equation, canonical_zi_slots_for_equation,
+    constant_dynamic_variable_slot,
 };
 use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel};
 use super::runtime::ExecutableMemory;
@@ -19,8 +20,8 @@ use crate::canonical_ir::{
     HirLaplaceKind, HirZiKind, MirEquationKind, MirModel, NodeId, SourceSpanRef,
 };
 use crate::codegen::{
-    AssignmentStep, BytecodeProgram, CompiledModel, CompiledNoiseSource, Instruction, StampIndex,
-    StampProgram,
+    AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, CompiledNoiseSource, Instruction,
+    JacobianEntry, StampIndex, StampProgram,
 };
 use crate::native::x64::codegen::NativeAssignment;
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
@@ -164,10 +165,11 @@ fn compile_model_inner(
         let mut stamp_jacobian_prior_current_dependencies =
             Vec::with_capacity(stamp.jacobian_programs.len());
         for jacobian in &stamp.jacobian_programs {
-            let program = NativeProgram::from_bytecode(
-                model.name.clone(),
-                EntryKind::Jacobian,
-                &jacobian.program,
+            let program = lower_jacobian_program(
+                model,
+                canonical_mir,
+                stamp_index,
+                jacobian,
                 jacobian_limits,
             )
             .map_err(|error| {
@@ -334,6 +336,123 @@ fn lower_static_condition_program(
         bytecode_program,
         limits,
     )
+}
+
+fn lower_jacobian_program(
+    model: &CompiledModel,
+    canonical_mir: Option<&MirModel>,
+    stamp_index: usize,
+    jacobian: &JacobianEntry,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<NativeProgram> {
+    if let Some(mir) = canonical_mir {
+        let equation_id = canonical_equation_id(model, stamp_index)?;
+        let axis = canonical_derivative_axis_for_column(model, mir, &jacobian.col_axis)?;
+        let canonical = NativeProgram::from_mir_derivative(
+            model.name.clone(),
+            EntryKind::Jacobian,
+            mir,
+            equation_id,
+            axis,
+            limits,
+        );
+        match canonical {
+            Ok(program) => return Ok(program),
+            Err(JitError::UnsupportedCanonicalOp { .. }) => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    NativeProgram::from_bytecode(
+        model.name.clone(),
+        EntryKind::Jacobian,
+        &jacobian.program,
+        limits,
+    )
+}
+
+fn canonical_equation_id(model: &CompiledModel, stamp_index: usize) -> JitResult<EquationId> {
+    u32::try_from(stamp_index)
+        .map(EquationId::new)
+        .map_err(|_| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!("stamp index {stamp_index} exceeds canonical equation id range").into(),
+        })
+}
+
+fn canonical_derivative_axis_for_column(
+    model: &CompiledModel,
+    mir: &MirModel,
+    col_axis: &ColumnAxis,
+) -> JitResult<CanonicalDerivativeAxis> {
+    match col_axis {
+        ColumnAxis::Node(node) => {
+            let canonical_node = canonical_node_id_for_compiled_axis(model, mir, *node)?;
+            Ok(CanonicalDerivativeAxis::Node(canonical_node))
+        }
+        ColumnAxis::Branch(branch) if *branch < model.branch_sources.len() => {
+            Ok(CanonicalDerivativeAxis::Branch(*branch))
+        }
+        ColumnAxis::Branch(branch) => Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "compiled jacobian branch axis {branch} exceeds branch source count {}",
+                model.branch_sources.len()
+            )
+            .into(),
+        }),
+    }
+}
+
+fn canonical_node_id_for_compiled_axis(
+    model: &CompiledModel,
+    mir: &MirModel,
+    node: usize,
+) -> JitResult<NodeId> {
+    let node_count = model
+        .num_terminals
+        .checked_add(model.internal_nodes)
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: "compiled node count overflows usize".into(),
+        })?;
+    if node >= node_count {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!("compiled jacobian node axis {node} exceeds node count {node_count}")
+                .into(),
+        });
+    }
+    let node_id =
+        u32::try_from(node)
+            .map(NodeId::new)
+            .map_err(|_| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "compiled jacobian node axis {node} exceeds canonical node id range"
+                )
+                .into(),
+            })?;
+    let canonical_node = mir
+        .nodes
+        .get(node)
+        .filter(|canonical_node| canonical_node.id == node_id)
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!("canonical node {node_id} is outside MIR node table").into(),
+        })?;
+    let expected_external = node < model.num_terminals;
+    if canonical_node.is_external != expected_external {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical node {node_id} external flag {} does not match compiled jacobian node axis {node}",
+                canonical_node.is_external
+            )
+            .into(),
+        });
+    }
+    Ok(node_id)
 }
 
 fn canonical_static_condition_expr(
@@ -2657,7 +2776,7 @@ mod tests {
     };
     use crate::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
     use crate::codegen::{
-        AssignmentStep, BytecodeProgram, CompiledModel, Instruction, StampProgram,
+        AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, Instruction, StampProgram,
     };
     use crate::device::VerilogADevice;
     use crate::native::expr::{
@@ -3159,6 +3278,174 @@ endmodule
         ctx.branch_unknowns = branch_unknowns.as_ptr();
         assert_eq!(native.run_stamp_value(0, &ctx, std::ptr::null()), 1.0);
         assert_eq!(native.run_stamp_value(1, &ctx, std::ptr::null()), 6.0);
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_node_jacobians_from_mir() {
+        let source = r#"
+module native_canonical_node_jacobian(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real g = 2.0;
+  analog I(p, n) <+ g * V(p, n);
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(
+            model.stamp_programs[0]
+                .jacobian_programs
+                .iter()
+                .any(|jacobian| matches!(jacobian.col_axis, ColumnAxis::Node(0))),
+            "fixture must include positive-node Jacobian"
+        );
+        assert!(
+            model.stamp_programs[0]
+                .jacobian_programs
+                .iter()
+                .any(|jacobian| matches!(jacobian.col_axis, ColumnAxis::Node(1))),
+            "fixture must include negative-node Jacobian"
+        );
+        poison_jacobian_bytecode(&mut model, 99.0);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical node Jacobians compile to native x64");
+        let mut context = native_model_benchmark_context(&model, "canonical_node_jacobian");
+        context.voltages[0] = 5.0;
+        context.voltages[1] = 1.0;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(0)),
+            2.0,
+            "canonical_node_jacobian d/dp",
+        );
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(1)),
+            -2.0,
+            "canonical_node_jacobian d/dn",
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_branch_jacobians_from_mir() {
+        for (name, body, expected) in [
+            ("forward", "V(p, n) <+ r * I(p, n);", 2.0_f64),
+            ("reversed", "V(p, n) <+ r * I(n, p);", -2.0_f64),
+        ] {
+            let source = format!(
+                r#"
+module native_canonical_branch_jacobian_{name}(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real r = 2.0;
+  analog {body}
+endmodule
+"#
+            );
+            let compiler = VerilogACompiler::new(CompilerOptions::default());
+            let mut model = compiler.compile(&source).expect("compile bytecode model");
+            let artifact = compiler
+                .compile_canonical_ir(&source)
+                .expect("compile canonical IR");
+            assert_eq!(
+                model.branch_sources.len(),
+                1,
+                "fixture must allocate one runtime branch unknown"
+            );
+            assert!(
+                model.stamp_programs[0]
+                    .jacobian_programs
+                    .iter()
+                    .any(|jacobian| matches!(jacobian.col_axis, ColumnAxis::Branch(0))),
+                "fixture must include branch-current Jacobian"
+            );
+            poison_jacobian_bytecode(&mut model, 99.0);
+
+            let native = compile_model_with_canonical_ir(&model, &artifact)
+                .expect("canonical branch Jacobian compiles to native x64");
+            let mut context = native_model_benchmark_context(&model, name);
+            context.branch_current_values[0] = 3.0;
+            resolve_native_parameter_defaults(&model, &native, &mut context);
+            let ctx = eval_context_from_vm_context(&mut context);
+
+            assert_jacobian_axis_value(
+                &model,
+                &native,
+                &ctx,
+                context.variables.as_ptr(),
+                0,
+                |axis| matches!(axis, ColumnAxis::Branch(0)),
+                expected,
+                format!("canonical_branch_jacobian_{name} d/dI0"),
+            );
+        }
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_branch_shadow_jacobian_from_mir() {
+        let source = r#"
+module native_canonical_branch_shadow_jacobian(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real r = 2.0;
+  real x;
+  analog begin
+    x = I(p, n);
+    V(p, n) <+ r * x;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(
+            model
+                .variable_names
+                .iter()
+                .any(|name| name.as_str() == "x@dI0"),
+            "fixture must include branch-current derivative shadow"
+        );
+        poison_jacobian_bytecode(&mut model, 99.0);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical branch-shadow Jacobian compiles to native x64");
+        let mut context = native_model_benchmark_context(&model, "canonical_branch_shadow");
+        context.branch_current_values[0] = 3.0;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+        native.run_assignments(&ctx, context.variables.as_mut_ptr());
+        if let Some(error) = take_native_runtime_error() {
+            panic!("native assignment failed before branch-shadow Jacobian: {error}");
+        }
+        let ctx = eval_context_from_vm_context(&mut context);
+
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Branch(0)),
+            2.0,
+            "canonical_branch_shadow_jacobian d/dI0",
+        );
     }
 
     #[test]
@@ -4483,6 +4770,38 @@ endmodule
         Err(format!(
             "{entry}: {name} native/reference mismatch: bytecode={reference:.17e} native={actual:.17e} delta={delta:.17e} tolerance={tolerance:.17e}"
         ))
+    }
+
+    fn poison_jacobian_bytecode(model: &mut CompiledModel, value: f64) {
+        for stamp in &mut model.stamp_programs {
+            for jacobian in &mut stamp.jacobian_programs {
+                jacobian.program = BytecodeProgram {
+                    instructions: vec![Instruction::PushConst(value)],
+                };
+            }
+        }
+    }
+
+    fn assert_jacobian_axis_value(
+        model: &CompiledModel,
+        native: &NativeModel,
+        ctx: &EvalContext,
+        variables: *const f64,
+        stamp_index: usize,
+        matches_axis: impl Fn(&ColumnAxis) -> bool,
+        expected: f64,
+        label: impl std::fmt::Display,
+    ) {
+        let label = label.to_string();
+        let entry_index = model.stamp_programs[stamp_index]
+            .jacobian_programs
+            .iter()
+            .position(|jacobian| matches_axis(&jacobian.col_axis))
+            .unwrap_or_else(|| panic!("{label}: missing matching Jacobian axis"));
+        let actual = native.run_jacobian(stamp_index, entry_index, ctx, variables);
+        if let Err(error) = assert_finite_close("canonical Jacobian", &label, expected, actual) {
+            panic!("{error}");
+        }
     }
 
     fn native_model_benchmark_context(model: &CompiledModel, name: &str) -> VmContext {

@@ -167,6 +167,21 @@ pub(crate) struct PriorCurrentProbe {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CanonicalDerivativeAxis {
+    Node(NodeId),
+    Branch(usize),
+}
+
+impl CanonicalDerivativeAxis {
+    fn shadow_suffix(self) -> String {
+        match self {
+            Self::Node(node) => format!("d{}", usize::from(node)),
+            Self::Branch(branch) => format!("dI{branch}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BranchUnknownRuntimeMapping {
     pub(crate) runtime_index: usize,
     pub(crate) inverted: bool,
@@ -2286,6 +2301,57 @@ impl NativeProgram {
         })
     }
 
+    pub(crate) fn from_mir_derivative(
+        model: impl Into<SmolStr>,
+        entry_kind: EntryKind,
+        mir: &MirModel,
+        equation_id: EquationId,
+        axis: CanonicalDerivativeAxis,
+        limits: NativeLoweringLimits<'_>,
+    ) -> JitResult<Self> {
+        let model = model.into();
+        mir.validate()
+            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
+                model: model.clone(),
+                detail: diagnostics
+                    .first()
+                    .map(|diagnostic| diagnostic.message.clone())
+                    .unwrap_or_else(|| "MIR validation failed".into())
+                    .into(),
+            })?;
+
+        let equation = mir
+            .equations
+            .get(usize::from(equation_id))
+            .filter(|equation| equation.id == equation_id)
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.clone(),
+                detail: format!("MIR equation {equation_id} is outside equation arena").into(),
+            })?;
+
+        let mut lowerer =
+            MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
+        lowerer.lower_derivative(equation.expression.id, axis)?;
+
+        if lowerer.depth != 1 {
+            return Err(stack_error(
+                model.clone(),
+                entry_kind,
+                format!("final stack depth {}, expected 1", lowerer.depth),
+            ));
+        }
+        let optimized_max_stack_depth =
+            compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
+        debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
+
+        Ok(Self {
+            ops: lowerer.ops,
+            max_stack_depth: optimized_max_stack_depth,
+            current_pair_dependencies: lowerer.current_pair_dependencies,
+            prior_current_dependencies: lowerer.prior_current_dependencies,
+        })
+    }
+
     pub(crate) fn ops(&self) -> &[NativeOp] {
         &self.ops
     }
@@ -2568,13 +2634,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     fn lower_ddx_projection(&mut self, expr: ExprId, probe: ExprId) -> JitResult<()> {
         let (pos, neg) = self.ddx_probe_nodes(probe)?;
         if let Some(pos) = pos {
-            self.lower_derivative(expr, pos)?;
+            self.lower_derivative(expr, CanonicalDerivativeAxis::Node(pos))?;
         } else {
             self.push(NativeOp::Const(0.0))?;
         }
 
         if let Some(neg) = neg {
-            self.lower_derivative(expr, neg)?;
+            self.lower_derivative(expr, CanonicalDerivativeAxis::Node(neg))?;
             self.append_arithmetic("Sub")?;
             self.push(NativeOp::Const(0.5))?;
             self.append_arithmetic("Mul")?;
@@ -2609,7 +2675,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
-    fn lower_derivative(&mut self, expr_id: ExprId, wrt: NodeId) -> JitResult<()> {
+    fn lower_derivative(&mut self, expr_id: ExprId, wrt: CanonicalDerivativeAxis) -> JitResult<()> {
         let expression = self.expression(expr_id)?;
         match &expression.kind {
             HirExprKind::Number { .. }
@@ -2677,7 +2743,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
-    fn lower_identifier_derivative(&mut self, name: &str, wrt: NodeId) -> JitResult<()> {
+    fn lower_identifier_derivative(
+        &mut self,
+        name: &str,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
         if self
             .mir
             .parameters
@@ -2692,7 +2762,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             .iter()
             .any(|variable| variable.as_str() == name)
         {
-            let shadow_name = format!("{name}@d{}", usize::from(wrt));
+            let shadow_name = format!("{name}@{}", wrt.shadow_suffix());
             if let Some(shadow_index) = self
                 .limits
                 .variable_names
@@ -2717,27 +2787,68 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         access: &str,
         pos: &str,
         neg: Option<&str>,
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         if is_flow_access(access) {
-            return self.push(NativeOp::Const(0.0));
+            let derivative = match wrt {
+                CanonicalDerivativeAxis::Branch(runtime_branch) => {
+                    if let Some((branch_unknown, reversed)) =
+                        self.resolve_current_branch_unknown(pos, neg)?
+                    {
+                        let mapping = self.map_canonical_branch_unknown(branch_unknown)?;
+                        if mapping.runtime_index == runtime_branch {
+                            if reversed ^ mapping.inverted {
+                                -1.0
+                            } else {
+                                1.0
+                            }
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        0.0
+                    }
+                }
+                CanonicalDerivativeAxis::Node(_) => 0.0,
+            };
+            return self.push(NativeOp::Const(derivative));
         }
         let pos = self.branch_endpoint(pos)?;
         let neg = neg
             .map(|node| self.branch_endpoint(node))
             .transpose()?
             .flatten();
-        self.push(NativeOp::Const(branch_voltage_derivative(pos, neg, wrt)))
+        let derivative = match wrt {
+            CanonicalDerivativeAxis::Node(node) => branch_voltage_derivative(pos, neg, node),
+            CanonicalDerivativeAxis::Branch(_) => 0.0,
+        };
+        self.push(NativeOp::Const(derivative))
     }
 
     fn lower_named_branch_access_derivative(
         &mut self,
         access: &str,
         name: &str,
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         if is_flow_access(access) {
-            return self.push(NativeOp::Const(0.0));
+            let derivative = match wrt {
+                CanonicalDerivativeAxis::Branch(runtime_branch) => {
+                    if let Some(branch_unknown) = self.named_branch_unknown(name) {
+                        let mapping =
+                            self.map_canonical_branch_unknown(usize::from(branch_unknown.id))?;
+                        if mapping.runtime_index == runtime_branch {
+                            if mapping.inverted { -1.0 } else { 1.0 }
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        0.0
+                    }
+                }
+                CanonicalDerivativeAxis::Node(_) => 0.0,
+            };
+            return self.push(NativeOp::Const(derivative));
         }
         let branch = self
             .mir
@@ -2745,14 +2856,21 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             .iter()
             .find(|branch| branch.name.as_str() == name)
             .ok_or_else(|| self.unsupported(format!("unknown branch access {name}")))?;
-        self.push(NativeOp::Const(branch_voltage_derivative(
-            branch.pos_node,
-            branch.neg_node,
-            wrt,
-        )))
+        let derivative = match wrt {
+            CanonicalDerivativeAxis::Node(node) => {
+                branch_voltage_derivative(branch.pos_node, branch.neg_node, node)
+            }
+            CanonicalDerivativeAxis::Branch(_) => 0.0,
+        };
+        self.push(NativeOp::Const(derivative))
     }
 
-    fn lower_unary_derivative(&mut self, op: &str, operand: ExprId, wrt: NodeId) -> JitResult<()> {
+    fn lower_unary_derivative(
+        &mut self,
+        op: &str,
+        operand: ExprId,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
         match op {
             "Pos" => self.lower_derivative(operand, wrt),
             "Neg" => {
@@ -2773,7 +2891,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         op: &str,
         left: ExprId,
         right: ExprId,
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         match op {
             "Add" | "Sub" => {
@@ -2810,7 +2928,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
-    fn lower_pow_derivative(&mut self, left: ExprId, right: ExprId, wrt: NodeId) -> JitResult<()> {
+    fn lower_pow_derivative(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
         let exponent = self
             .constant_number(right)
             .ok_or_else(|| self.unsupported("ddx derivative of non-constant power exponent"))?;
@@ -2823,10 +2946,16 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_arithmetic("Mul")
     }
 
-    fn lower_call_derivative(&mut self, name: &str, args: &[ExprId], wrt: NodeId) -> JitResult<()> {
+    fn lower_call_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
         let normalized = normalize_intrinsic_name(name);
         match normalized.as_str() {
             "ddx" => Err(self.unsupported("nested ddx derivative")),
+            "ddt" => self.lower_ddt_derivative(name, args, wrt),
             "abs" | "fabs" => {
                 self.require_intrinsic_arity(name, args, 1)?;
                 self.lower(args[0])?;
@@ -2918,7 +3047,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         &mut self,
         name: &str,
         args: &[ExprId],
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
         op: UnaryMathOp,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
@@ -2932,7 +3061,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         &mut self,
         name: &str,
         args: &[ExprId],
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
         self.lower_derivative(args[0], wrt)?;
@@ -2942,7 +3071,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_arithmetic("Div")
     }
 
-    fn lower_tan_derivative(&mut self, name: &str, args: &[ExprId], wrt: NodeId) -> JitResult<()> {
+    fn lower_tan_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
         self.lower_derivative(args[0], wrt)?;
         self.lower(args[0])?;
@@ -2953,7 +3087,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_arithmetic("Div")
     }
 
-    fn lower_tanh_derivative(&mut self, name: &str, args: &[ExprId], wrt: NodeId) -> JitResult<()> {
+    fn lower_tanh_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
         self.push(NativeOp::Const(1.0))?;
         self.lower(args[0])?;
@@ -2970,7 +3109,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         &mut self,
         name: &str,
         args: &[ExprId],
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
         self.lower_derivative(args[0], wrt)?;
@@ -2983,7 +3122,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         &mut self,
         name: &str,
         args: &[ExprId],
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
         self.lower_derivative(args[0], wrt)?;
@@ -3003,7 +3142,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         &mut self,
         name: &str,
         args: &[ExprId],
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
         self.lower_derivative(args[0], wrt)?;
@@ -3013,7 +3152,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_arithmetic("Div")
     }
 
-    fn lower_asin_derivative(&mut self, name: &str, args: &[ExprId], wrt: NodeId) -> JitResult<()> {
+    fn lower_asin_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
         self.lower_derivative(args[0], wrt)?;
         self.push(NativeOp::Const(1.0))?;
@@ -3023,7 +3167,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_arithmetic("Div")
     }
 
-    fn lower_acos_derivative(&mut self, name: &str, args: &[ExprId], wrt: NodeId) -> JitResult<()> {
+    fn lower_acos_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
         self.lower_derivative(args[0], wrt)?;
         self.append_unary(NativeOp::Neg)?;
@@ -3034,7 +3183,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_arithmetic("Div")
     }
 
-    fn lower_atan_derivative(&mut self, name: &str, args: &[ExprId], wrt: NodeId) -> JitResult<()> {
+    fn lower_atan_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
         self.lower_derivative(args[0], wrt)?;
         self.lower_arg_square_plus_const(args[0], 1.0)?;
@@ -3045,7 +3199,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         &mut self,
         name: &str,
         args: &[ExprId],
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 2)?;
         let y = args[0];
@@ -3069,7 +3223,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         &mut self,
         name: &str,
         args: &[ExprId],
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 2)?;
         let left = args[0];
@@ -3106,7 +3260,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         &mut self,
         name: &str,
         args: &[ExprId],
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
         self.lower(args[0])?;
@@ -3127,10 +3281,21 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_arithmetic("Mul")
     }
 
+    fn lower_ddt_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 1)?;
+        self.lower_derivative(args[0], wrt)?;
+        self.append_unary(NativeOp::DdtJacobian)
+    }
+
     fn lower_analog_operator_derivative(
         &mut self,
         op: &HirAnalogOperator,
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         match op {
             HirAnalogOperator::Limexp { expr } => {
@@ -3139,9 +3304,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_derivative(*expr, wrt)?;
                 self.append_arithmetic("Mul")
             }
+            HirAnalogOperator::Ddt { expr, .. } => {
+                self.lower_derivative(*expr, wrt)?;
+                self.append_unary(NativeOp::DdtJacobian)
+            }
             HirAnalogOperator::Ddx { .. } => Err(self.unsupported("nested ddx derivative")),
-            HirAnalogOperator::Ddt { .. }
-            | HirAnalogOperator::Idt { .. }
+            HirAnalogOperator::Idt { .. }
             | HirAnalogOperator::IdtMod { .. }
             | HirAnalogOperator::Absdelay { .. }
             | HirAnalogOperator::Transition { .. }
@@ -4038,7 +4206,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         &mut self,
         array: &str,
         index: ExprId,
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         let Some((base, len, lower)) = self.resolve_array_derivative_variable_range(array, wrt)?
         else {
@@ -4068,10 +4236,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     fn resolve_array_derivative_variable_range(
         &self,
         array: &str,
-        wrt: NodeId,
+        wrt: CanonicalDerivativeAxis,
     ) -> JitResult<Option<(usize, usize, i64)>> {
         let prefix = format!("{array}[");
-        let suffix = format!("]@d{}", usize::from(wrt));
+        let suffix = format!("]@{}", wrt.shadow_suffix());
         self.resolve_variable_range_with_affixes(array, &prefix, &suffix)
     }
 
