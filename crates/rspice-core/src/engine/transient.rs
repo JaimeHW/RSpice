@@ -268,6 +268,7 @@ impl Engine {
         circuit
             .current_sources
             .set_transient_context(source_step_hint, tstop);
+        circuit.set_xspice_transient_context(source_step_hint, tstop);
 
         // `.TRAN ... UIC` skips the operating point: integration starts
         // from zero everywhere except user-supplied .IC node voltages
