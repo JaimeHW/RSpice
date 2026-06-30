@@ -290,6 +290,25 @@ impl NativeModel {
         jacobian_entry_points: Vec<usize>,
         reactive_jacobian_entry_points: Vec<usize>,
     ) -> Self {
+        Self::new_for_test_with_shape(
+            0,
+            0,
+            num_variables,
+            stamp_value_entry_points,
+            jacobian_entry_points,
+            reactive_jacobian_entry_points,
+        )
+    }
+
+    #[cfg(all(test, target_arch = "x86_64"))]
+    pub(crate) fn new_for_test_with_shape(
+        num_terminals: usize,
+        num_internal_nodes: usize,
+        num_variables: usize,
+        stamp_value_entry_points: usize,
+        jacobian_entry_points: Vec<usize>,
+        reactive_jacobian_entry_points: Vec<usize>,
+    ) -> Self {
         let mut bytes = vec![0xC3]; // assignment: ret
         let stamp_entry = append_test_value_stub(&mut bytes, 1);
         let jacobian_entry = append_test_value_stub(&mut bytes, 2);
@@ -322,8 +341,19 @@ impl NativeModel {
             noise_exponents: vec![],
         };
 
-        Self::from_executable_image(num_variables, 0, image, entries)
-            .expect("publish native test model")
+        let current_dependencies = Self::empty_current_dependencies(&entries);
+        Self::from_executable_image_with_dependencies(
+            num_terminals,
+            num_internal_nodes,
+            num_variables,
+            0,
+            0,
+            image,
+            entries,
+            current_dependencies,
+            NativeRequiredStorage::default(),
+        )
+        .expect("publish native test model")
     }
 
     #[allow(dead_code)]

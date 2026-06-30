@@ -910,6 +910,13 @@ impl VerilogADevice {
     }
 
     #[cfg(feature = "native")]
+    fn mismatched_native_terminal_context(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT terminal context has {available} terminal slot(s), but compiled image requires exactly {required}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
     fn missing_native_internal_voltage_storage(required: usize, available: usize) -> VmError {
         VmError::NativeJit(format!(
             "native JIT internal-voltage storage has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
@@ -1483,7 +1490,7 @@ impl VerilogADevice {
             NativeValueEntry::NoiseExponent(index) => native.noise_exponent_branch_unknowns(index),
             NativeValueEntry::ParameterDefault(_) => &[],
         };
-        Self::validate_native_current_pairs(vm.context, current_pairs)?;
+        Self::validate_native_current_pairs(vm.context, native.num_terminals, current_pairs)?;
         Self::validate_native_prior_currents(vm.context, prior_currents)?;
         Self::validate_native_branch_unknowns(vm.context, branch_unknowns)?;
 
@@ -1518,6 +1525,7 @@ impl VerilogADevice {
     #[cfg(feature = "native")]
     fn validate_native_current_pairs(
         context: &VmContext,
+        compiled_terminal_count: usize,
         current_pairs: &[usize],
     ) -> Result<(), VmError> {
         if current_pairs.is_empty() {
@@ -1525,11 +1533,18 @@ impl VerilogADevice {
         }
 
         let terminal_count = context.terminal_count();
-        if terminal_count == 0 {
+        if terminal_count != compiled_terminal_count {
+            return Err(Self::mismatched_native_terminal_context(
+                compiled_terminal_count,
+                terminal_count,
+            ));
+        }
+        if compiled_terminal_count == 0 {
             return Err(Self::missing_native_terminal_pair_current_slot(0));
         }
         for pair_index in current_pairs {
-            let Some((pos, neg)) = terminal_pair_current_endpoints(*pair_index, terminal_count)
+            let Some((pos, neg)) =
+                terminal_pair_current_endpoints(*pair_index, compiled_terminal_count)
             else {
                 return Err(Self::missing_native_terminal_pair_current_slot(*pair_index));
             };
@@ -1561,6 +1576,12 @@ impl VerilogADevice {
     ) -> Result<(), VmError> {
         if context.voltages.len() < required_terminals {
             return Err(Self::missing_native_voltage_storage(
+                required_terminals,
+                context.voltages.len(),
+            ));
+        }
+        if context.voltages.len() != required_terminals {
+            return Err(Self::mismatched_native_terminal_context(
                 required_terminals,
                 context.voltages.len(),
             ));
@@ -1743,7 +1764,11 @@ impl VerilogADevice {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
         Self::validate_native_storage(vm.context, native)?;
-        Self::validate_native_current_pairs(vm.context, native.assignment_current_pairs())?;
+        Self::validate_native_current_pairs(
+            vm.context,
+            native.num_terminals,
+            native.assignment_current_pairs(),
+        )?;
         Self::validate_native_prior_currents(vm.context, native.assignment_prior_currents())?;
         Self::validate_native_branch_unknowns(vm.context, native.assignment_branch_unknowns())?;
         let ctx = Self::eval_context_from(vm.context);
@@ -2659,6 +2684,7 @@ mod tests {
         let model = Arc::new(model);
         let num_terminals = model.num_terminals;
         let num_internal_nodes = model.internal_nodes;
+        let num_variables = model.num_variables;
         let num_branch_unknowns = model.branch_sources.len();
         let num_stamp_programs = model.stamp_programs.len();
         let jacobian_entry_points = model
@@ -2678,7 +2704,7 @@ mod tests {
             context.set_param(i, param.default);
         }
         context.param_given = vec![false; model.parameters.len()];
-        context.variables.resize(model.num_variables, 0.0);
+        context.variables.resize(num_variables, 0.0);
         context.lookup_tables = model.lookup_tables.clone();
         context.laplace_filters = model.laplace_filters.clone();
         context.zi_filters = model.zi_filters.clone();
@@ -2696,8 +2722,10 @@ mod tests {
             program_active: vec![true; num_stamp_programs],
             branch_active: vec![true; num_branch_unknowns],
             matrix_indices: MatrixIndices::default(),
-            native_model: Arc::new(NativeModel::new_for_test(
-                0,
+            native_model: Arc::new(NativeModel::new_for_test_with_shape(
+                num_terminals,
+                num_internal_nodes,
+                num_variables,
                 num_stamp_programs,
                 jacobian_entry_points,
                 reactive_jacobian_entry_points,
@@ -2976,10 +3004,19 @@ endmodule
     #[test]
     fn native_current_pair_preflight_errors_use_hard_fail_contract() {
         let context = VmContext::with_internal_nodes(0, 0);
-        let err = VerilogADevice::validate_native_current_pairs(&context, &[0])
+        let err = VerilogADevice::validate_native_current_pairs(&context, 0, &[0])
             .expect_err("missing terminal-pair storage must hard-fail in native mode");
 
         assert_native_hard_fail(err, "terminal-pair current slot 0");
+    }
+
+    #[test]
+    fn native_current_pair_preflight_rejects_terminal_count_mismatch() {
+        let context = VmContext::with_internal_nodes(2, 0);
+        let err = VerilogADevice::validate_native_current_pairs(&context, 1, &[0])
+            .expect_err("terminal-pair preflight must use the compiled terminal shape");
+
+        assert_native_hard_fail(err, "terminal context");
     }
 
     #[test]
@@ -3158,6 +3195,15 @@ endmodule
             .expect_err("missing terminal voltage storage must hard-fail in native mode");
 
         assert_native_hard_fail(err, "voltage storage");
+    }
+
+    #[test]
+    fn native_voltage_storage_rejects_terminal_count_mismatch() {
+        let context = VmContext::with_internal_nodes(2, 0);
+        let err = VerilogADevice::validate_native_voltage_storage(&context, 1, 0)
+            .expect_err("native dispatch must reject stale terminal context shapes");
+
+        assert_native_hard_fail(err, "terminal context");
     }
 
     #[test]
