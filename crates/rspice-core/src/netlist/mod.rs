@@ -642,6 +642,29 @@ mod tests {
     }
 
     #[test]
+    fn transient_command_accepts_bare_seconds_units() {
+        let netlist = Netlist::parse(
+            "bare seconds transient\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .tran .1s 10s\n\
+             .end\n",
+        )
+        .expect("bare seconds units parse in .TRAN");
+
+        let tran = netlist
+            .analyses
+            .iter()
+            .find_map(|analysis| match analysis {
+                AnalysisCommand::Tran { step, stop, .. } => Some((*step, *stop)),
+                _ => None,
+            })
+            .expect(".TRAN exists");
+
+        assert_eq!(tran, (0.1, 10.0));
+    }
+
+    #[test]
     fn model_param_rhs_identifier_is_not_reinterpreted_as_bare_flag() {
         let err = Netlist::parse(
             "bad model rhs\n\

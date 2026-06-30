@@ -630,8 +630,8 @@ fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
         'N' => (1e-9, 1),
         'P' => (1e-12, 1),
         'F' => (1e-15, 1),
-        // Unit designators (e.g., "1V", "1A") are treated as neutral scale.
-        'V' | 'A' => (1.0, 1),
+        // Unit designators (e.g., "1V", "1A", ".1s") are treated as neutral scale.
+        'V' | 'A' | 'S' => (1.0, 1),
         _ => (1.0, 0),
     }
 }
@@ -863,6 +863,25 @@ mod tests {
         assert_eq!(tokens[2].kind, TokenKind::Ident("1A".to_string()));
         assert_eq!(tokens[3].kind, TokenKind::Ident("0V".to_string()));
         assert_eq!(parse_spice_value("0V").expect("0V parses"), 0.0);
+    }
+
+    #[test]
+    fn bare_seconds_suffix_is_consumed_after_decimal_values() {
+        let tokens = tokenize(".tran .1s 10s\n").expect("tokenize");
+
+        assert!(
+            tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Number(0.1) && token.lexeme == ".1s")
+        );
+        assert!(
+            !tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Ident("S".to_string())),
+            "bare seconds unit must not remain as a stray identifier: {tokens:?}"
+        );
+        assert_eq!(parse_spice_value(".1s").expect(".1s parses"), 0.1);
+        assert_eq!(parse_spice_value("10s").expect("10s parses"), 10.0);
     }
 
     #[test]
