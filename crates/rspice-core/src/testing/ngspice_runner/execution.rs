@@ -76,7 +76,7 @@ impl TestRunner {
 
         // Check for unsupported features
         if let Some(reason) = self.check_unsupported(&source) {
-            if matches!(contract, Some(ValidationContract::ExpectedUnsupported)) {
+            if contract.is_some_and(ValidationContract::expects_unsupported_in_this_build) {
                 return TestResult {
                     name,
                     passed: true,
@@ -105,14 +105,19 @@ impl TestRunner {
                 analysis_type: None,
             };
         }
-        if matches!(contract, Some(ValidationContract::ExpectedUnsupported)) {
+        if contract.is_some_and(ValidationContract::expects_unsupported_in_this_build) {
+            let contract_name = match contract {
+                Some(ValidationContract::ExpectedUnsupportedWithoutGeneratedBuiltins) => {
+                    "expected_unsupported_without_veriloga_builtins"
+                }
+                _ => "expected_unsupported",
+            };
             return TestResult {
                 name,
                 passed: false,
-                error: Some(
-                    "deck has expected_unsupported contract but no unsupported feature was detected -- re-adjudicate the contract"
-                        .to_string(),
-                ),
+                error: Some(format!(
+                    "deck has {contract_name} contract but no unsupported feature was detected -- re-adjudicate the contract"
+                )),
                 mismatches: Vec::new(),
                 duration_ms: start.elapsed().as_millis(),
                 analysis_type: Some("EXPECTED_UNSUPPORTED".to_string()),
@@ -331,15 +336,15 @@ impl TestRunner {
             },
         };
 
-        // Expected-diagnostic decks invert the outcome: the adjudicated
-        // result is a clean refusal diagnostic (the reference simulator
-        // fails these decks too), and converging every analysis instead
-        // demands re-adjudication of the contract.
-        if matches!(contract, Some(ValidationContract::ExpectedUnsolvable)) {
+        // Some contracts admit a clean refusal diagnostic as a successful
+        // adjudicated outcome. expected_unsolvable is stricter than
+        // reference_unsolvable: converging every analysis demands
+        // re-adjudication only for expected_unsolvable.
+        if contract.is_some_and(ValidationContract::accepts_clean_refusal) {
             match &final_result.error {
                 Some(message) if is_clean_refusal_diagnostic(message) => {
                     log::info!(
-                        "'{}' failed as adjudicated (expected_unsolvable): {message}",
+                        "'{}' failed with an accepted clean refusal diagnostic: {message}",
                         final_result.name
                     );
                     final_result.passed = true;
@@ -351,13 +356,14 @@ impl TestRunner {
                     // timeout) is a genuine defect even on an unsolvable
                     // deck; keep it failing as reported.
                 }
-                None => {
+                None if matches!(contract, Some(ValidationContract::ExpectedUnsolvable)) => {
                     final_result.passed = false;
                     final_result.error = Some(
                         "deck is adjudicated unsolvable (expected_unsolvable contract) but every analysis converged -- re-adjudicate the contract"
                             .to_string(),
                     );
                 }
+                None => {}
             }
         }
 

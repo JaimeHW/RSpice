@@ -328,7 +328,7 @@ impl CircuitData {
 
     /// Total device count (for parallel stamping threshold)
     pub fn device_count(&self) -> usize {
-        let mut count = self.resistors.len()
+        let count = self.resistors.len()
             + self.capacitors.len()
             + self.inductors.len()
             + self.voltage_sources.len()
@@ -348,13 +348,9 @@ impl CircuitData {
             + self.multi_winding_transformers.len()
             + self.jiles_atherton_inductors.len();
         #[cfg(feature = "veriloga")]
-        {
-            count += self.veriloga_device_count();
-        }
+        let count = count + self.veriloga_device_count();
         #[cfg(feature = "veriloga-builtins")]
-        {
-            count += self.generated_veriloga_devices.len();
-        }
+        let count = count + self.generated_veriloga_devices.len();
         count
     }
 

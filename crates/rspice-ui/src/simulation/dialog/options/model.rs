@@ -178,6 +178,7 @@ impl SimulationOptions {
             gmin_initial: Some(self.gmin),
             spice_dialect: None,
             jfet_level2_model: None,
+            ramptime: None,
         }
     }
 

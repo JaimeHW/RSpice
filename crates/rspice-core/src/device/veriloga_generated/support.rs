@@ -1,3 +1,4 @@
+#![rustfmt::skip]
 #![allow(dead_code)]
 
 use super::GeneratedEvalContext;
@@ -34567,4 +34568,3 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
         if let Some(neg) = neg { 0.5 * (pos - expr.dn[neg]) } else { pos }
     }
 }
-
