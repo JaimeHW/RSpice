@@ -3836,11 +3836,11 @@ mod tests {
         ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES, FunctionCompiler, Gpr,
         I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
         LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET,
-        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, TableHelper, TimerHelper,
-        VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
-        assignment_uses_helper_calls, call_result_disp, call_spill_disp,
-        compile_assignment_function, compile_assignment_pass_function, compile_value_function,
-        entry_ctx_arg_reg, entry_vars_arg_reg, native_op_reads_entry_args,
+        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, TEMPERATURE_OFFSET,
+        TableHelper, TimerHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES,
+        X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
+        call_spill_disp, compile_assignment_function, compile_assignment_pass_function,
+        compile_value_function, entry_ctx_arg_reg, entry_vars_arg_reg, native_op_reads_entry_args,
         native_op_uses_helper_call, program_uses_helper_calls, rspice_exp,
         value_program_needs_saved_entry_args,
     };
@@ -8506,6 +8506,27 @@ mod tests {
 
             assert_eq!(f(&ctx, std::ptr::null()), expected, "{name}");
         }
+
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(1.0e-15),
+                Instruction::PushTemperature,
+                Instruction::And,
+            ],
+            0,
+        );
+        assert_eq!(
+            program.ops(),
+            &[NativeOp::Const(0.0)],
+            "false && nonfaulting context read should fold to a literal"
+        );
+        let bytes =
+            compile_value_function(&program).expect("compile dominating constant LHS logical leaf");
+        assert!(
+            !contains_bytes(&bytes, &context_pointer_load_bytes(TEMPERATURE_OFFSET)),
+            "folded false && temperature should not emit a dead temperature load"
+        );
     }
 
     #[test]
