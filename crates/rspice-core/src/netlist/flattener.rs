@@ -549,11 +549,7 @@ impl<'a> Flattener<'a> {
                 control_element,
             } => {
                 // Remap control element name with prefix (like element names)
-                let new_ctrl = if prefix.is_empty() {
-                    control_element.clone()
-                } else {
-                    format!("{}.{}", prefix, control_element)
-                };
+                let new_ctrl = Self::remap_local_element_reference(control_element, prefix);
                 ElementKind::Cccs {
                     gain: *gain,
                     control_element: new_ctrl,
@@ -563,16 +559,22 @@ impl<'a> Flattener<'a> {
                 transresistance,
                 control_element,
             } => {
-                let new_ctrl = if prefix.is_empty() {
-                    control_element.clone()
-                } else {
-                    format!("{}.{}", prefix, control_element)
-                };
+                let new_ctrl = Self::remap_local_element_reference(control_element, prefix);
                 ElementKind::Ccvs {
                     transresistance: *transresistance,
                     control_element: new_ctrl,
                 }
             }
+            ElementKind::Coupling {
+                inductors,
+                coefficient,
+            } => ElementKind::Coupling {
+                inductors: inductors
+                    .iter()
+                    .map(|name| Self::remap_local_element_reference(name, prefix))
+                    .collect(),
+                coefficient: *coefficient,
+            },
             ElementKind::Xspice {
                 model,
                 ports,
@@ -619,6 +621,14 @@ impl<'a> Flattener<'a> {
             name: new_name,
             kind: new_kind,
             nodes: new_nodes,
+        }
+    }
+
+    fn remap_local_element_reference(name: &str, prefix: &str) -> String {
+        if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}.{}", prefix, name)
         }
     }
 

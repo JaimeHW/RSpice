@@ -6,7 +6,7 @@
 //! definition should be reported as a named cycle, not as a depth blowout
 //! a hundred expansions later.
 
-use rspice_core::netlist::{Flattener, Netlist, SaveSet, SaveSignal};
+use rspice_core::netlist::{ElementKind, Flattener, Netlist, SaveSet, SaveSignal};
 
 fn flatten_err(deck: &str) -> String {
     let netlist = Netlist::parse(deck).expect("deck parses");
@@ -98,6 +98,47 @@ fn matching_connections_flatten() {
         names.iter().any(|n| n.eq_ignore_ascii_case("x1.r1")),
         "have {names:?}"
     );
+}
+
+#[test]
+fn subcircuit_local_coupling_references_flattened_inductors() {
+    let netlist = Netlist::parse(
+        "* local K references\n\
+         x1 a 0 cell\n\
+         .subckt cell p n\n\
+         l1 p m 1u\n\
+         l2 m n 2u\n\
+         k1 l1 l2 0.5\n\
+         .ends\n\
+         .end\n",
+    )
+    .expect("deck parses");
+    let mut flattener = Flattener::new(&netlist.subcircuits);
+    let flattened = flattener.flatten(&netlist).expect("flattening succeeds");
+
+    assert!(
+        flattened
+            .iter()
+            .any(|element| element.name.eq_ignore_ascii_case("x1.l1")),
+        "flattened l1 not found in {flattened:?}"
+    );
+    assert!(
+        flattened
+            .iter()
+            .any(|element| element.name.eq_ignore_ascii_case("x1.l2")),
+        "flattened l2 not found in {flattened:?}"
+    );
+
+    let coupling = flattened
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("x1.k1"))
+        .expect("flattened coupling exists");
+    let ElementKind::Coupling { inductors, .. } = &coupling.kind else {
+        panic!("x1.k1 is not a coupling: {coupling:?}");
+    };
+    assert_eq!(inductors.len(), 2);
+    assert!(inductors[0].eq_ignore_ascii_case("x1.l1"));
+    assert!(inductors[1].eq_ignore_ascii_case("x1.l2"));
 }
 
 //=============================================================================
