@@ -1130,15 +1130,25 @@ impl CmContext {
 
     /// Set digital output value (schedules event)
     pub fn set_output_digital(&mut self, name: &str, value: DigitalValue, delay: Value) {
-        self.outputs
-            .insert(name.to_string(), OutputValue::Digital(value));
+        match self.outputs.get_mut(name) {
+            Some(output) => *output = OutputValue::Digital(value),
+            None => {
+                self.outputs
+                    .insert(name.to_string(), OutputValue::Digital(value));
+            }
+        }
         self.push_pending_digital_event(name, value, delay);
     }
 
     /// Set real output value (schedules event)
     pub fn set_output_real(&mut self, name: &str, value: Value, delay: Value) {
-        self.outputs
-            .insert(name.to_string(), OutputValue::Real(value));
+        match self.outputs.get_mut(name) {
+            Some(output) => *output = OutputValue::Real(value),
+            None => {
+                self.outputs
+                    .insert(name.to_string(), OutputValue::Real(value));
+            }
+        }
         self.push_pending_real_event(name, value, delay);
     }
 
@@ -1151,8 +1161,13 @@ impl CmContext {
         previous: DigitalValue,
         unknown_transition_delays: Option<(Value, Value)>,
     ) {
-        self.outputs
-            .insert(name.to_string(), OutputValue::Digital(value));
+        match self.outputs.get_mut(name) {
+            Some(output) => *output = OutputValue::Digital(value),
+            None => {
+                self.outputs
+                    .insert(name.to_string(), OutputValue::Digital(value));
+            }
+        }
 
         if !self.is_transient() {
             self.push_pending_digital_event(name, value, delay);
@@ -1307,8 +1322,16 @@ impl CmContext {
 
     /// Set real vector output value (schedules one event per connected element).
     pub fn set_output_real_vector(&mut self, name: &str, values: Vec<Value>, delay: Value) {
-        self.outputs
-            .insert(name.to_string(), OutputValue::RealVector(values.clone()));
+        match self.outputs.get_mut(name) {
+            Some(OutputValue::RealVector(existing)) => {
+                existing.clear();
+                existing.extend_from_slice(&values);
+            }
+            _ => {
+                self.outputs
+                    .insert(name.to_string(), OutputValue::RealVector(values.clone()));
+            }
+        }
         self.pending_real_events.push(PendingRealEvent {
             port_name: name.to_string(),
             start_index: 0,
@@ -1934,6 +1957,73 @@ mod tests {
 
         assert_eq!(ctx.output_digital_vector("out"), values);
         let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].values, values);
+        assert_eq!(events[0].delay, 4.0e-9);
+    }
+
+    #[test]
+    fn scalar_event_output_setters_replace_values_without_growing_map() {
+        let mut ctx = CmContext::new();
+
+        ctx.set_output_digital("out", DigitalValue::zero(), 0.0);
+        ctx.set_output_digital("out", DigitalValue::one(), 1.0e-9);
+        assert_eq!(
+            ctx.output_digital_vector_value("out", 0),
+            Some(DigitalValue::one())
+        );
+        assert_eq!(ctx.outputs.len(), 1);
+
+        ctx.set_output_real("out", 1.25, 2.0e-9);
+        assert_eq!(ctx.output_real("out"), Some(1.25));
+        assert_eq!(ctx.outputs.len(), 1);
+
+        ctx.set_output_digital_inertial(
+            "out",
+            DigitalValue::unknown(),
+            3.0e-9,
+            DigitalValue::zero(),
+            None,
+        );
+        assert_eq!(
+            ctx.output_digital_vector_value("out", 0),
+            Some(DigitalValue::unknown())
+        );
+        assert_eq!(ctx.outputs.len(), 1);
+
+        let digital_events = ctx.take_pending_events();
+        assert_eq!(digital_events.len(), 3);
+        assert_eq!(digital_events[2].values, [DigitalValue::unknown()]);
+        assert_eq!(digital_events[2].delay, 3.0e-9);
+
+        let real_events = ctx.take_pending_real_events();
+        assert_eq!(real_events.len(), 1);
+        assert_eq!(real_events[0].values, [1.25]);
+        assert_eq!(real_events[0].delay, 2.0e-9);
+    }
+
+    #[test]
+    fn real_vector_owned_setter_reuses_output_buffer_and_schedules_event() {
+        let mut ctx = CmContext::new();
+        ctx.set_output_real_vector("out", vec![1.0, 2.0, 3.0], 0.0);
+        ctx.take_pending_real_events();
+
+        let vector_ptr = match ctx.outputs.get("out") {
+            Some(OutputValue::RealVector(values)) => values.as_ptr(),
+            other => panic!("expected real vector output, got {other:?}"),
+        };
+
+        let values = vec![4.0];
+        ctx.set_output_real_vector("out", values.clone(), 4.0e-9);
+
+        match ctx.outputs.get("out") {
+            Some(OutputValue::RealVector(values)) => {
+                assert_eq!(values.as_slice(), &[4.0]);
+                assert_eq!(values.as_ptr(), vector_ptr);
+            }
+            other => panic!("expected reused real vector output, got {other:?}"),
+        }
+        let events = ctx.take_pending_real_events();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].values, values);
         assert_eq!(events[0].delay, 4.0e-9);
