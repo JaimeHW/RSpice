@@ -128,10 +128,6 @@ fn d_genlut_delay_param_value(ctx: &CmContext, name: &str, index: usize, default
     d_lookup_delay(d_genlut_param_value(ctx, name, index, default))
 }
 
-fn d_genlut_input_at(inputs: &[DigitalValue], bit: usize) -> DigitalValue {
-    inputs.get(bit).copied().unwrap_or_default()
-}
-
 fn d_genlut_output_delay(
     ctx: &CmContext,
     output_index: usize,
@@ -353,19 +349,20 @@ impl CodeModel for DigitalGenericLookupTable {
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let (input_width, output_width) = d_genlut_shape(ctx)?;
-        let table = ctx
-            .string_param("table_values")
-            .ok_or_else(|| CmError::MissingParameter("table_values".to_string()))?;
-        let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
+        if ctx.string_param("table_values").is_none() {
+            return Err(CmError::MissingParameter("table_values".to_string()));
+        }
         let input_start = d_genlut_previous_input_start(input_width, output_width);
         let state_start = d_genlut_previous_state_start(input_width, output_width);
         let strength_start = d_genlut_previous_strength_start(input_width, output_width);
 
         let mut max_input_delay = 0.0;
-        let mut input_codes = Vec::with_capacity(input_width);
         let mut input_index = Some(0usize);
         for bit in 0..input_width {
-            let input = d_genlut_input_at(inputs, bit);
+            let input = ctx
+                .input_digital_vector_values("in")
+                .and_then(|inputs| inputs.get(bit).copied())
+                .unwrap_or_default();
             let input_code = d_lut_state_code(input.state);
             if input_code != ctx.int_state(input_start + bit) {
                 max_input_delay = f64::max(
@@ -382,18 +379,18 @@ impl CodeModel for DigitalGenericLookupTable {
                 }
                 _ => input_index = None,
             }
-            input_codes.push(input_code);
+            d_lookup_set_int_state(ctx, input_start + bit, input_code);
         }
 
         let entry_len = 1usize << input_width;
-        let outputs = match input_index {
-            Some(index) => (0..output_width)
-                .map(|output| d_genlut_lookup_value(table, index + output * entry_len))
-                .collect::<Vec<_>>(),
-            None => vec![d_genlut_unknown_value(); output_width],
-        };
-
-        for (output_index, value) in outputs.iter().copied().enumerate() {
+        for output_index in 0..output_width {
+            let value = {
+                let table = ctx.string_param("table_values").unwrap_or("");
+                match input_index {
+                    Some(index) => d_genlut_lookup_value(table, index + output_index * entry_len),
+                    None => d_genlut_unknown_value(),
+                }
+            };
             let (state_code, strength_code) = d_genlut_value_code(value);
             let previous_state = ctx.int_state(state_start + output_index);
             let previous_strength = ctx.int_state(strength_start + output_index);
@@ -422,10 +419,6 @@ impl CodeModel for DigitalGenericLookupTable {
 
             d_lookup_set_int_state(ctx, state_start + output_index, state_code);
             d_lookup_set_int_state(ctx, strength_start + output_index, strength_code);
-        }
-
-        for (bit, input_code) in input_codes.into_iter().enumerate() {
-            d_lookup_set_int_state(ctx, input_start + bit, input_code);
         }
 
         Ok(())
@@ -526,6 +519,48 @@ mod tests {
         assert_eq!(d_genlut_strength_from_code(1), DigitalStrength::HighZ);
         assert_eq!(d_genlut_strength_from_code(2), DigitalStrength::Resistive);
         assert_eq!(d_genlut_strength_from_code(3), DigitalStrength::Strong);
+    }
+
+    #[test]
+    fn d_genlut_multi_output_lookup_and_unknown_input_update_all_state() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("in", 2);
+        ctx.set_port_width("out", 3);
+        ctx.set_string_param("table_values", "0101z0z1x1zz");
+        ctx.set_input(
+            "in",
+            InputValue::DigitalVector(vec![DigitalValue::one(), DigitalValue::zero()]),
+        );
+
+        DigitalGenericLookupTable
+            .init(&mut ctx)
+            .expect("d_genlut init");
+        DigitalGenericLookupTable
+            .evaluate(&mut ctx)
+            .expect("d_genlut indexed evaluate");
+
+        assert_eq!(
+            ctx.output_digital_vector("out"),
+            vec![
+                DigitalValue::one(),
+                DigitalValue::zero(),
+                DigitalValue::one()
+            ]
+        );
+
+        ctx.set_input(
+            "in",
+            InputValue::DigitalVector(vec![DigitalValue::unknown(), DigitalValue::zero()]),
+        );
+        DigitalGenericLookupTable
+            .evaluate(&mut ctx)
+            .expect("d_genlut unknown-input evaluate");
+
+        let unknown = DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined);
+        assert_eq!(ctx.output_digital_vector("out"), vec![unknown; 3]);
+        assert_eq!(ctx.int_state(d_genlut_previous_input_start(2, 3)), -1);
+        assert_eq!(ctx.int_state(d_genlut_previous_state_start(2, 3)), -1);
+        assert_eq!(ctx.int_state(d_genlut_previous_state_start(2, 3) + 2), -1);
     }
 
     #[test]
