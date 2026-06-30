@@ -573,31 +573,41 @@ fn locate_filesource_interval(ctx: &mut CmContext, data: &FileSourceRowsData) ->
     lower
 }
 
-fn evaluate_rows(ctx: &mut CmContext, data: &FileSourceRowsData) -> Vec<Value> {
+fn set_filesource_output_from_row(ctx: &mut CmContext, row: &FileSourceRow) {
+    ctx.set_output_vector_from_fn("out", row.values.len(), |index| {
+        row.values.get(index).copied().unwrap_or(0.0)
+    });
+}
+
+fn evaluate_rows_into_output(ctx: &mut CmContext, data: &FileSourceRowsData) {
     schedule_next_breakpoint(ctx, data);
     let rows = data.rows.as_slice();
 
     let first = &rows[0];
     if ctx.time < first.time {
         commit_filesource_cursor(ctx, 0);
-        return rows.get(1).unwrap_or(first).values.clone();
+        set_filesource_output_from_row(ctx, rows.get(1).unwrap_or(first));
+        return;
     }
     if ctx.time == first.time {
         commit_filesource_cursor(ctx, 0);
-        return first.values.clone();
+        set_filesource_output_from_row(ctx, first);
+        return;
     }
 
     let step_mode = bool_param(ctx, "amplstep");
     let lower = locate_filesource_interval(ctx, data);
     if lower + 1 >= rows.len() {
-        return rows[lower].values.clone();
+        set_filesource_output_from_row(ctx, &rows[lower]);
+        return;
     }
 
     let lower_row = &rows[lower];
     let upper_row = &rows[lower + 1];
 
     if step_mode {
-        return lower_row.values.clone();
+        set_filesource_output_from_row(ctx, lower_row);
+        return;
     }
 
     let span = upper_row.time - lower_row.time;
@@ -606,12 +616,18 @@ fn evaluate_rows(ctx: &mut CmContext, data: &FileSourceRowsData) -> Vec<Value> {
     } else {
         1.0
     };
-    lower_row
-        .values
-        .iter()
-        .zip(&upper_row.values)
-        .map(|(lower, upper)| lower + alpha * (upper - lower))
-        .collect()
+    let width = lower_row.values.len().min(upper_row.values.len());
+    ctx.set_output_vector_from_fn("out", width, |index| {
+        let lower = lower_row.values.get(index).copied().unwrap_or(0.0);
+        let upper = upper_row.values.get(index).copied().unwrap_or(0.0);
+        lower + alpha * (upper - lower)
+    });
+}
+
+#[cfg(test)]
+fn evaluate_rows(ctx: &mut CmContext, data: &FileSourceRowsData) -> Vec<Value> {
+    evaluate_rows_into_output(ctx, data);
+    ctx.output_vector("out")
 }
 
 fn filesource_ports() -> &'static [PortSpec] {
@@ -685,7 +701,7 @@ impl CodeModel for FileSource {
         let rows = transformed_rows_for_context(ctx, &file, width)?;
         ctx.allocate_int_states(1);
         ctx.set_int_state(FILESOURCE_ROW_CURSOR_STATE, 0);
-        ctx.set_output_vector("out", rows[0].values.clone());
+        set_filesource_output_from_row(ctx, &rows[0]);
         Ok(())
     }
 
@@ -700,8 +716,7 @@ impl CodeModel for FileSource {
             .unwrap_or("filesource.txt")
             .to_string();
         let rows = transformed_rows_for_context(ctx, &file, width)?;
-        let values = evaluate_rows(ctx, &rows);
-        ctx.set_output_vector("out", values);
+        evaluate_rows_into_output(ctx, &rows);
         Ok(())
     }
 
@@ -808,6 +823,26 @@ mod tests {
         let back = evaluate_rows(&mut ctx, &rows);
         assert!((back[0] - 0.5).abs() < 1.0e-12);
         assert_eq!(ctx.int_state(FILESOURCE_ROW_CURSOR_STATE), 0);
+    }
+
+    #[test]
+    fn filesource_streams_output_and_preserves_previous_vector_value() {
+        let rows = FileSourceRowsData::new(vec![row(0.0, 0.0), row(1.0e-9, 2.0), row(2.0e-9, 4.0)]);
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.set_port_width("out", 1);
+        ctx.allocate_int_states(1);
+        ctx.set_output_vector("out", vec![10.0]);
+
+        ctx.time = 0.5e-9;
+        evaluate_rows_into_output(&mut ctx, &rows);
+        assert_eq!(ctx.output_vector("out"), vec![1.0]);
+        assert_eq!(ctx.output_vector_prev("out"), vec![10.0]);
+
+        ctx.time = 1.5e-9;
+        evaluate_rows_into_output(&mut ctx, &rows);
+        assert_eq!(ctx.output_vector("out"), vec![3.0]);
+        assert_eq!(ctx.output_vector_prev("out"), vec![1.0]);
     }
 
     #[test]
