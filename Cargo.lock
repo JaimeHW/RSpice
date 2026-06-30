@@ -3779,6 +3779,7 @@ name = "rspice-bench"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "rspice-veriloga",
  "serde",
  "serde_json",
 ]

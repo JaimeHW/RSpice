@@ -18,6 +18,7 @@
 
 mod error;
 mod generate;
+mod native_jit;
 mod runner;
 
 use clap::{Parser, Subcommand};
@@ -37,6 +38,8 @@ struct Cli {
 enum BenchCommand {
     /// Regenerate the deterministic, generated benchmark decks (RC ladders).
     Gen(generate::GenArgs),
+    /// Run the in-process native Verilog-A JIT benchmark gate.
+    NativeJit(native_jit::NativeJitArgs),
     /// Run the benchmark suite and emit a JSON scoreboard.
     Run(runner::RunArgs),
 }
@@ -45,6 +48,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let outcome = match cli.command {
         BenchCommand::Gen(args) => generate::generate(&args).map(|()| ExitCode::SUCCESS),
+        BenchCommand::NativeJit(args) => native_jit::run(&args),
         BenchCommand::Run(args) => runner::run(&args),
     };
     match outcome {

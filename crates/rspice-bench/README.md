@@ -19,12 +19,15 @@ isolated solver-kernel numbers, use rspice-core's
 
 | File | Contents |
 | :--- | :--- |
-| `src/main.rs` | CLI entry point: `gen` and `run` subcommands |
+| `src/main.rs` | CLI entry point: `gen`, `native-jit`, and `run` subcommands |
 | `src/runner.rs` | The `run` subcommand: locates executables, runs warmup + timed repeats per deck/simulator, computes min/median/mean and the median speedup, writes the scoreboard, prints the table |
 | `src/generate.rs` | The `gen` subcommand: deterministically regenerates the generated decks (RC ladders, MOS array) with byte-stable output — fixed formatting, no timestamps |
+| `src/native_jit.rs` | The `native-jit` subcommand: in-process Verilog-A native JIT benchmark gate with median speedup and optional p95 budgets |
 | `src/error.rs` | `BenchError` with full context on every failure path |
 
-No feature flags; dependencies are just `clap`, `serde`, and `serde_json`.
+The macro runner has no feature flags. The `native-jit` subcommand links the
+`rspice-veriloga` native feature so it can benchmark generated native x64
+entrypoints without exposing the low-level JIT ABI outside the compiler crate.
 
 ## Building and running
 
@@ -34,6 +37,9 @@ cargo build --release -p rspice-cli -p rspice-bench
 
 # Run the suite (writes benchmarks/scoreboards/scoreboard.json)
 target/release/rspice-bench run
+
+# Run the native Verilog-A JIT gate
+target/release/rspice-bench native-jit
 
 # Regenerate the generated decks (verify with git diff afterwards)
 target/release/rspice-bench gen
@@ -57,6 +63,25 @@ Environment variables:
 
 The process exits non-zero if any simulator run failed, so CI can gate on
 deck health even when timings are not being compared.
+
+### `rspice-bench native-jit`
+
+This is an in-process native Verilog-A JIT benchmark gate, not a full-circuit
+macro benchmark. It compiles a dense synthetic Verilog-A model, runs generated
+native entrypoint sweeps against the bytecode VM reference path, and gates on
+median native speedup. It also records p95 so a single lucky fastest sample
+cannot hide a regression.
+
+| Flag | Default | Meaning |
+| :--- | :--- | :--- |
+| `--iterations <N>` | 200000 | Entry-point sweeps per timed sample |
+| `--samples <N>` | 7 | Timed samples; report computes min/median/p95/mean |
+| `--min-speedup <X>` | 1.10 | Required `bytecode_median / native_median`; below this exits non-zero |
+| `--max-native-p95-ns-per-sweep <NS>` | unset | Optional absolute native p95 budget |
+| `--out <PATH>` | unset | Optional JSON report path |
+
+Use release builds for comparable numbers. Debug runs are useful only as a
+functional smoke test of the benchmark machinery.
 
 ### `rspice-bench gen`
 

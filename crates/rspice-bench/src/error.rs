@@ -41,6 +41,11 @@ pub enum BenchError {
         /// Underlying serde_json error.
         source: serde_json::Error,
     },
+    /// Native JIT benchmark setup or execution failed.
+    NativeJit {
+        /// Human-readable benchmark failure.
+        message: String,
+    },
     /// Internal invariant violation (a bug in the rig itself).
     Internal(&'static str),
 }
@@ -72,6 +77,7 @@ impl fmt::Display for BenchError {
                 dir.display()
             ),
             Self::Json { context, .. } => write!(f, "{context}"),
+            Self::NativeJit { message } => write!(f, "{message}"),
             Self::Internal(message) => write!(f, "internal error: {message}"),
         }
     }
