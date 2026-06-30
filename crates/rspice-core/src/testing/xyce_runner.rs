@@ -157,6 +157,22 @@ struct XyceExecutionPlan {
 }
 
 #[derive(Debug, Clone)]
+struct XyceStaticDcPlan {
+    deck_path: PathBuf,
+    source: String,
+    print: XycePrintRequest,
+    dc: XyceDcSweep,
+}
+
+#[derive(Debug, Clone)]
+struct XyceSubcktFamilyContract {
+    family: String,
+    baseline_path: PathBuf,
+    member_paths: Vec<PathBuf>,
+    target_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
 struct XycePrintRequest {
     probes: Vec<String>,
 }
@@ -411,6 +427,19 @@ impl XyceTestRunner {
             );
         }
 
+        if let Some(contract) = self.subckt_family_contract(deck) {
+            let result = self.run_subckt_family_contract(deck, contract, start);
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         let plan = match self.execution_plan(deck) {
             Ok(plan) => plan,
             Err(reason) => {
@@ -505,8 +534,20 @@ impl XyceTestRunner {
             ));
         }
 
+        let static_plan = self.static_dc_plan_for_path(&deck.path)?;
+
+        Ok(XyceExecutionPlan {
+            deck_path: deck.path.clone(),
+            reference_path,
+            source: static_plan.source,
+            print: static_plan.print,
+            dc: static_plan.dc,
+        })
+    }
+
+    fn static_dc_plan_for_path(&self, deck_path: &Path) -> Result<XyceStaticDcPlan, String> {
         let source =
-            fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
+            fs::read_to_string(deck_path).map_err(|err| format!("failed to read deck: {err}"))?;
         if Self::contains_control_block(&source) {
             return Err(
                 "deck uses a .control block; Xyce adapter does not interpret simulator scripting"
@@ -516,14 +557,13 @@ impl XyceTestRunner {
         Self::reject_unsupported_source_directives(&source)?;
 
         let print = Self::single_dc_print_request(&source)?;
-        let netlist = Netlist::parse_with_path(&source, &deck.path)
+        let netlist = Netlist::parse_with_path(&source, deck_path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let dc = Self::single_dc_sweep(&netlist)?;
         Self::validate_static_dc_contract(&netlist, &dc, &print)?;
 
-        Ok(XyceExecutionPlan {
-            deck_path: deck.path.clone(),
-            reference_path,
+        Ok(XyceStaticDcPlan {
+            deck_path: deck_path.to_path_buf(),
             source,
             print,
             dc,
@@ -636,6 +676,290 @@ impl XyceTestRunner {
                 mismatches,
             )
         }
+    }
+
+    fn run_subckt_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceSubcktFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let baseline_plan = match self.static_dc_plan_for_path(&contract.baseline_path) {
+            Ok(plan) => plan,
+            Err(reason) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "subckt_family_wrapper",
+                    &format!(
+                        "SUBCKT family '{}' baseline is not supported by the static DC adapter: {reason}",
+                        contract.family
+                    ),
+                );
+            }
+        };
+        let (baseline_netlist, baseline_results) =
+            match self.run_static_dc_results(&baseline_plan, start) {
+                Ok(results) => results,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        "subckt_family_wrapper",
+                        format!(
+                            "SUBCKT family '{}' baseline exceeded timeout ({}ms)",
+                            contract.family, self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "subckt_family_wrapper",
+                        &format!(
+                            "SUBCKT family '{}' baseline is not supported by RSpice yet: {err}",
+                            contract.family
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        "subckt_family_wrapper",
+                        format!("SUBCKT family '{}' baseline error: {err}", contract.family),
+                        Vec::new(),
+                    );
+                }
+            };
+        let baseline_table = match self.dc_results_to_prn_table(
+            &baseline_plan,
+            &baseline_netlist,
+            &baseline_results,
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    "subckt_family_wrapper",
+                    format!(
+                        "SUBCKT family '{}' baseline output conversion failed: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let targets = if let Some(target_path) = contract.target_path {
+            if Self::same_path(&target_path, &contract.baseline_path) {
+                return self.passed_result(deck, start, "subckt_family_baseline");
+            }
+            vec![target_path]
+        } else {
+            contract
+                .member_paths
+                .iter()
+                .filter(|path| !Self::same_path(path, &contract.baseline_path))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+
+        let mut all_mismatches = Vec::new();
+        for target_path in targets {
+            let target_plan = match self.static_dc_plan_for_path(&target_path) {
+                Ok(plan) => plan,
+                Err(reason) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "subckt_family_wrapper",
+                        &format!(
+                            "SUBCKT family '{}' member {} is not supported by the static DC adapter: {reason}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                    );
+                }
+            };
+            let (target_netlist, target_results) = match self
+                .run_static_dc_results(&target_plan, start)
+            {
+                Ok(results) => results,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        "subckt_family_wrapper",
+                        format!(
+                            "SUBCKT family '{}' member {} exceeded timeout ({}ms)",
+                            contract.family,
+                            self.display_path(&target_path),
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "subckt_family_wrapper",
+                        &format!(
+                            "SUBCKT family '{}' member {} is not supported by RSpice yet: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        "subckt_family_wrapper",
+                        format!(
+                            "SUBCKT family '{}' member {} error: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+
+            let mut mismatches = match self.compare_dc_prn_reference(
+                &baseline_table,
+                &target_plan.print,
+                &target_netlist,
+                &baseline_plan.source,
+                &target_plan.dc,
+                &target_results,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        "subckt_family_wrapper",
+                        format!(
+                            "SUBCKT family '{}' member {} comparison error: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("{} {}", self.display_path(&target_path), mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+
+        if all_mismatches.is_empty() {
+            self.passed_result(deck, start, "subckt_family_wrapper")
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                "subckt_family_wrapper",
+                format!(
+                    "{} SUBCKT family '{}' mismatch(es)",
+                    all_mismatches.len(),
+                    contract.family
+                ),
+                all_mismatches,
+            )
+        }
+    }
+
+    fn run_static_dc_results(
+        &self,
+        plan: &XyceStaticDcPlan,
+        start: Instant,
+    ) -> Result<(Netlist, Vec<(Value, crate::SimulationResult)>), SimulationError> {
+        let netlist = Netlist::parse_with_path(&plan.source, &plan.deck_path)
+            .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
+        let engine = self.create_dc_engine();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let results = engine.run_dc_sweep2_with_abort(
+            &netlist,
+            &plan.dc.source,
+            plan.dc.start,
+            plan.dc.stop,
+            plan.dc.step,
+            plan.dc.sweep2.as_ref(),
+            &abort,
+        )?;
+        Ok((netlist, results))
+    }
+
+    fn dc_results_to_prn_table(
+        &self,
+        plan: &XyceStaticDcPlan,
+        netlist: &Netlist,
+        results: &[(Value, crate::SimulationResult)],
+    ) -> Result<XycePrnTable, String> {
+        let mut columns = Vec::with_capacity(plan.print.probes.len() + 1);
+        columns.push("Index".to_string());
+        columns.extend(plan.print.probes.iter().cloned());
+
+        let primary_points = DcSweep::new(
+            plan.dc.source.clone(),
+            plan.dc.start,
+            plan.dc.stop,
+            plan.dc.step,
+        )
+        .points();
+        if primary_points.is_empty() {
+            return Err("primary DC sweep has no points".to_string());
+        }
+        let secondary_points = plan.dc.sweep2.as_ref().map(|sweep| {
+            DcSweep::new(sweep.source.clone(), sweep.start, sweep.stop, sweep.step).points()
+        });
+        if secondary_points.as_ref().is_some_and(Vec::is_empty) {
+            return Err("secondary DC sweep has no points".to_string());
+        }
+
+        let mut rows = Vec::with_capacity(results.len());
+        for (row_index, (_sweep_value, result)) in results.iter().enumerate() {
+            let sweep_point = XyceDcSweepPoint {
+                primary: results[row_index].0,
+                secondary: if let Some(points) = secondary_points.as_ref() {
+                    let outer_index = row_index / primary_points.len();
+                    Some(*points.get(outer_index).ok_or_else(|| {
+                        format!(
+                            "row {row_index} maps outside secondary DC sweep point count ({})",
+                            points.len()
+                        )
+                    })?)
+                } else {
+                    None
+                },
+            };
+
+            let mut row = Vec::with_capacity(columns.len());
+            row.push(row_index as f64);
+            for probe in &plan.print.probes {
+                row.push(Self::evaluate_dc_probe(
+                    probe,
+                    netlist,
+                    &plan.dc,
+                    sweep_point,
+                    result,
+                )?);
+            }
+            rows.push(row);
+        }
+
+        Ok(XycePrnTable { columns, rows })
     }
 
     fn create_dc_engine(&self) -> Engine {
@@ -1663,6 +1987,107 @@ impl XyceTestRunner {
         decks
     }
 
+    fn subckt_family_contract(&self, deck: &XyceDeck) -> Option<XyceSubcktFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/subckt/") {
+            return None;
+        }
+
+        let file_name = deck.path.file_name()?.to_str()?;
+        let parent = deck.path.parent()?;
+        if self.requires_upstream_wrapper(&deck.relative_path)
+            && let Some(family) = Self::parse_subckt_wrapper_file_name(file_name)
+            && fs::metadata(&deck.path)
+                .ok()
+                .is_some_and(|metadata| metadata.len() == 0)
+        {
+            return self.subckt_family_contract_for(parent, &family, None);
+        }
+
+        let family = Self::parse_subckt_family_member_file_name(file_name)?;
+        let wrapper_relative = format!("Netlists/SUBCKT/subckt_{family}.cir");
+        if !self.requires_upstream_wrapper(&wrapper_relative) {
+            return None;
+        }
+        self.subckt_family_contract_for(parent, &family, Some(deck.path.clone()))
+    }
+
+    fn subckt_family_contract_for(
+        &self,
+        parent: &Path,
+        family: &str,
+        target_path: Option<PathBuf>,
+    ) -> Option<XyceSubcktFamilyContract> {
+        let mut member_paths = Vec::new();
+        for entry in fs::read_dir(parent).ok()?.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let file_name = path.file_name().and_then(|name| name.to_str())?;
+            if Self::parse_subckt_family_member_file_name(file_name)
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(family))
+            {
+                member_paths.push(path);
+            }
+        }
+        member_paths.sort_by(|left, right| {
+            left.file_name()
+                .unwrap_or_default()
+                .cmp(right.file_name().unwrap_or_default())
+        });
+
+        let baseline_path = parent.join(format!("subckt_{family}0.cir"));
+        if !member_paths
+            .iter()
+            .any(|member| Self::same_path(member, &baseline_path))
+        {
+            return None;
+        }
+
+        Some(XyceSubcktFamilyContract {
+            family: family.to_string(),
+            baseline_path,
+            member_paths,
+            target_path,
+        })
+    }
+
+    fn parse_subckt_wrapper_file_name(file_name: &str) -> Option<String> {
+        let stem = file_name.strip_suffix(".cir")?;
+        let family = stem.strip_prefix("subckt_")?;
+        if !family.is_empty()
+            && family
+                .chars()
+                .all(|ch| ch.is_ascii_alphabetic() || ch == '_')
+        {
+            Some(family.to_string())
+        } else {
+            None
+        }
+    }
+
+    fn parse_subckt_family_member_file_name(file_name: &str) -> Option<String> {
+        let stem = file_name.strip_suffix(".cir")?;
+        let rest = stem.strip_prefix("subckt_")?;
+        let digit_index = rest.find(|ch: char| ch.is_ascii_digit())?;
+        let family = &rest[..digit_index];
+        if family.is_empty() {
+            return None;
+        }
+        let suffix = &rest[digit_index + 1..];
+        if !matches!(suffix, "" | "_hs" | "_dup") {
+            return None;
+        }
+        Some(family.to_string())
+    }
+
+    fn same_path(left: &Path, right: &Path) -> bool {
+        let left = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
+        let right = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
+        left == right
+    }
+
     fn normalize_manifest_key(path: &str) -> String {
         path.trim().replace('\\', "/").to_ascii_lowercase()
     }
@@ -1971,6 +2396,35 @@ End of Xyce(TM) Simulation
         assert_eq!(
             engine.config().resolved_jfet_level2_model(),
             crate::engine::JfetLevel2Model::XyceModifiedShockley
+        );
+    }
+
+    #[test]
+    fn subckt_family_names_match_upstream_wrapper_globs() {
+        assert_eq!(
+            XyceTestRunner::parse_subckt_wrapper_file_name("subckt_b.cir").as_deref(),
+            Some("b")
+        );
+        assert_eq!(
+            XyceTestRunner::parse_subckt_family_member_file_name("subckt_b0.cir").as_deref(),
+            Some("b")
+        );
+        assert_eq!(
+            XyceTestRunner::parse_subckt_family_member_file_name("subckt_b2_hs.cir").as_deref(),
+            Some("b")
+        );
+        assert_eq!(
+            XyceTestRunner::parse_subckt_family_member_file_name("subckt_a1_dup.cir").as_deref(),
+            Some("a")
+        );
+        assert!(
+            XyceTestRunner::parse_subckt_family_member_file_name("subckt_a2_dup_error.cir")
+                .is_none(),
+            "error-checking wrapper decks are not part of the diff-against-baseline family glob"
+        );
+        assert!(
+            XyceTestRunner::parse_subckt_family_member_file_name("subckt_j1.cir").is_some(),
+            "matching the filename glob is separate from requiring a sibling wrapper manifest entry"
         );
     }
 }

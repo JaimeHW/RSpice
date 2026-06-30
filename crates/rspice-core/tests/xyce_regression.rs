@@ -299,6 +299,28 @@ fn test_xyce_static_prn_cases_run() {
 }
 
 #[test]
+fn test_xyce_subckt_wrapper_family_members_run_natively() {
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        ("Netlists/SUBCKT/subckt_b.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_b0.cir", "subckt_family_baseline"),
+        ("Netlists/SUBCKT/subckt_b1.cir", "subckt_family_wrapper"),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run through the native SUBCKT family contract, got {result:?}"
+        );
+        assert_eq!(
+            result.contract, expected_contract,
+            "{relative} should not fall back to standalone static .prn comparison"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
