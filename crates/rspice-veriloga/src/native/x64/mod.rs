@@ -1210,6 +1210,151 @@ endmodule
     }
 
     #[test]
+    fn native_x64_generated_model_plan_publishes_dense_entrypoint_surface() {
+        let source = r#"
+`include "disciplines.vams"
+module native_generated_plan_guard(p, n, ctrl);
+  inout p, n, ctrl;
+  electrical p, n, ctrl;
+  parameter real base = 1.5;
+  parameter real gain = base * 2.0;
+  parameter real enable_a = 1.0;
+  parameter real enable_b = 1.0;
+  real vp;
+  real vc;
+  real g0;
+  real g1;
+  real g2;
+  real g3;
+  real accum;
+  analog begin
+    vp = V(p, n);
+    vc = V(ctrl, n);
+    g0 = gain + vc * 0.1;
+    g1 = g0 * g0 + 0.25;
+    g2 = sqrt(g1) + exp(0.01 * vp);
+    g3 = sin(vc) - cos(vp);
+    accum = g0 + g1 + g2 + g3;
+    if (enable_a > 0.5) begin
+      I(p, n) <+ g0 * vp;
+      I(p, n) <+ g1 * vp;
+      I(ctrl, n) <+ 0.5 * vc;
+    end
+    if (enable_b > 0.5) begin
+      I(p, n) <+ accum * 0.125;
+    end
+    I(p, n) <+ g2 * vp + g3;
+    I(p, n) <+ ddt(1.0e-12 * vp);
+    I(p, n) <+ white_noise(1.0e-18 * (1.0 + abs(vp)), "thermal");
+    I(p, n) <+ flicker_noise(2.0e-18 * (1.0 + abs(vc)), 1.0, "flicker");
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile generated model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile generated canonical IR");
+
+        let expected_parameter_defaults = model
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.default_program.is_some())
+            .count();
+        let expected_static_conditions = model
+            .stamp_programs
+            .iter()
+            .filter(|stamp| stamp.static_condition.is_some())
+            .count();
+        let expected_jacobians = model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.jacobian_programs.len())
+            .sum::<usize>();
+        let expected_reactive_jacobians = model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.reactive_jacobians.len())
+            .sum::<usize>();
+        let expected_noise_entries = model.noise_sources.len()
+            + model
+                .noise_sources
+                .iter()
+                .filter(|source| source.exponent_program.is_some())
+                .count();
+
+        assert!(
+            count_assignment_steps(&model.assignment_steps) >= 7,
+            "fixture must exercise a dense assignment pass"
+        );
+        assert!(
+            model.stamp_programs.len() >= 6,
+            "fixture must publish multiple stamp entry points"
+        );
+        assert!(
+            expected_parameter_defaults >= 1,
+            "fixture must include dependent parameter defaults"
+        );
+        assert!(
+            expected_static_conditions >= 2,
+            "fixture must include parameter-static contribution guards"
+        );
+        assert!(
+            expected_jacobians >= model.stamp_programs.len(),
+            "fixture must publish Jacobian coverage for every stamp"
+        );
+        assert!(
+            expected_reactive_jacobians >= 1,
+            "fixture must include reactive Jacobian coverage"
+        );
+        assert!(
+            expected_noise_entries >= 3,
+            "fixture must include white-noise PSD plus flicker PSD/exponent entries"
+        );
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("generated model compiles to native x64 without fallback");
+        let stats = native.plan_stats();
+        assert_eq!(stats.assignment_entry_points, 1);
+        assert_eq!(
+            stats.parameter_default_entry_points,
+            expected_parameter_defaults
+        );
+        assert_eq!(
+            stats.static_condition_entry_points,
+            expected_static_conditions
+        );
+        assert_eq!(stats.stamp_value_entry_points, model.stamp_programs.len());
+        assert_eq!(stats.jacobian_entry_points, expected_jacobians);
+        assert_eq!(
+            stats.reactive_jacobian_entry_points,
+            expected_reactive_jacobians
+        );
+        assert_eq!(stats.noise_source_entry_points, expected_noise_entries);
+        assert_eq!(native.native_stamp_count(), model.stamp_programs.len());
+
+        let mut context = native_model_benchmark_context(&model, "generated_plan_guard");
+        context.voltages[0] = 0.8;
+        context.voltages[1] = 0.0;
+        context.voltages[2] = 0.2;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let oracle_stats =
+            assert_native_matches_bytecode_finite_entries(&model, &native, context, "generated")
+                .expect("generated-model native values match bytecode oracle");
+        assert!(
+            oracle_stats.variables >= 7
+                && oracle_stats.stamps >= 6
+                && oracle_stats.jacobians >= expected_jacobians
+                && oracle_stats.reactive_jacobians >= expected_reactive_jacobians,
+            "oracle stats did not cover the dense surface: variables={} stamps={} jacobians={} reactive_jacobians={}",
+            oracle_stats.variables,
+            oracle_stats.stamps,
+            oracle_stats.jacobians,
+            oracle_stats.reactive_jacobians
+        );
+    }
+
+    #[test]
     #[ignore = "release-only source-level native x64 throughput probe; run with --release --features native -- --ignored --nocapture"]
     fn native_x64_model_microbench_reports_entrypoint_throughput() {
         assert!(
