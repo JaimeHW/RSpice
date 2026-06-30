@@ -76,34 +76,39 @@ fn validate_shape(input_width: usize, output_width: usize) -> CmResult<()> {
     Ok(())
 }
 
-fn next_unknown_input_bit(ctx: &mut CmContext) -> bool {
-    let mut seed = ctx.int_state(STATE_RNG) as u32;
-    if seed == 0 {
-        seed = D_PROCESS_RNG_SEED as u32;
+fn next_unknown_input_bit(seed: &mut u32) -> bool {
+    if *seed == 0 {
+        *seed = D_PROCESS_RNG_SEED as u32;
     }
-    seed ^= seed << 13;
-    seed ^= seed >> 17;
-    seed ^= seed << 5;
-    ctx.set_int_state(STATE_RNG, seed as i64);
-    seed & 1 != 0
+    *seed ^= *seed << 13;
+    *seed ^= *seed >> 17;
+    *seed ^= *seed << 5;
+    *seed & 1 != 0
 }
 
 fn pack_input_bits(ctx: &mut CmContext, input_width: usize) -> Vec<u8> {
     let mut bytes = vec![0u8; packed_byte_len(input_width)];
+    let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
+    let mut rng_seed = ctx.int_state(STATE_RNG) as u32;
+    let mut rng_changed = false;
 
     for bit_index in 0..input_width {
-        let value = ctx
-            .input_digital_vector_values("in")
-            .and_then(|inputs| inputs.get(bit_index).copied())
-            .unwrap_or_default();
+        let value = inputs.get(bit_index).copied().unwrap_or_default();
         let bit = match digital_state_code(value) {
             STATE_ZERO => false,
             STATE_ONE => true,
-            _ => next_unknown_input_bit(ctx),
+            _ => {
+                rng_changed = true;
+                next_unknown_input_bit(&mut rng_seed)
+            }
         };
         if bit {
             bytes[bit_index >> 3] |= 1u8 << (bit_index & 7);
         }
+    }
+
+    if rng_changed {
+        ctx.set_int_state(STATE_RNG, rng_seed as i64);
     }
 
     bytes
@@ -284,6 +289,53 @@ impl CodeModel for DigitalProcess {
 mod tests {
     use super::*;
     use crate::xspice::AnalysisType;
+    use crate::xspice::context::InputValue;
+
+    #[test]
+    fn d_process_pack_input_bits_borrows_inputs_once_and_commits_rng_once() {
+        let mut ctx = CmContext::new();
+        ctx.allocate_int_states(STATE_DOUT_START);
+        ctx.set_int_state(STATE_RNG, D_PROCESS_RNG_SEED);
+        ctx.set_input(
+            "in",
+            InputValue::DigitalVector(vec![
+                DigitalValue::one(),
+                DigitalValue::zero(),
+                DigitalValue::unknown(),
+                DigitalValue::one(),
+                DigitalValue::unknown(),
+                DigitalValue::zero(),
+                DigitalValue::unknown(),
+                DigitalValue::unknown(),
+                DigitalValue::one(),
+            ]),
+        );
+
+        let mut expected_seed = D_PROCESS_RNG_SEED as u32;
+        let unknown_2 = next_unknown_input_bit(&mut expected_seed);
+        let unknown_4 = next_unknown_input_bit(&mut expected_seed);
+        let unknown_6 = next_unknown_input_bit(&mut expected_seed);
+        let unknown_7 = next_unknown_input_bit(&mut expected_seed);
+        let mut expected_first_byte = 0b0000_1001;
+        if unknown_2 {
+            expected_first_byte |= 1 << 2;
+        }
+        if unknown_4 {
+            expected_first_byte |= 1 << 4;
+        }
+        if unknown_6 {
+            expected_first_byte |= 1 << 6;
+        }
+        if unknown_7 {
+            expected_first_byte |= 1 << 7;
+        }
+
+        assert_eq!(
+            pack_input_bits(&mut ctx, 9),
+            vec![expected_first_byte, 0b0000_0001]
+        );
+        assert_eq!(ctx.int_state(STATE_RNG) as u32, expected_seed);
+    }
 
     #[test]
     fn d_process_time_zero_rollbackable_probe_does_not_reset_outputs_or_state() {
