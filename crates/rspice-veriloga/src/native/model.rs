@@ -222,6 +222,7 @@ impl NativeModel {
             0,
             num_variables,
             num_parameters,
+            0,
             image,
             entries,
             current_dependencies,
@@ -234,13 +235,14 @@ impl NativeModel {
         num_internal_nodes: usize,
         num_variables: usize,
         num_parameters: usize,
+        num_branch_unknowns: usize,
         image: ExecutableMemory,
         entries: NativeEntryOffsets,
         current_dependencies: NativeCurrentDependencies,
         required_storage: NativeRequiredStorage,
     ) -> JitResult<Self> {
         Self::validate_entry_offsets(&entries, image.len(), num_parameters)?;
-        Self::validate_current_dependencies(&entries, &current_dependencies)?;
+        Self::validate_current_dependencies(&entries, &current_dependencies, num_branch_unknowns)?;
 
         let jacobian_entry_points = entries.jacobians.iter().map(Vec::len).sum();
         let reactive_jacobian_entry_points = entries.reactive_jacobians.iter().map(Vec::len).sum();
@@ -450,6 +452,7 @@ impl NativeModel {
     fn validate_current_dependencies(
         entries: &NativeEntryOffsets,
         dependencies: &NativeCurrentDependencies,
+        num_branch_unknowns: usize,
     ) -> JitResult<()> {
         if dependencies.static_condition_branch_unknowns.len() != entries.static_conditions.len()
             || dependencies.stamp_values.len() != entries.stamp_values.len()
@@ -504,6 +507,96 @@ impl NativeModel {
                 model: "native-model".into(),
                 detail: "current dependency shape does not match native entry shape".into(),
             });
+        }
+
+        Self::validate_branch_unknown_dependency_list(
+            "assignment",
+            &dependencies.assignment_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_table(
+            "static condition",
+            &dependencies.static_condition_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_table(
+            "stamp value",
+            &dependencies.stamp_value_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_nested_table(
+            "jacobian",
+            &dependencies.jacobian_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_nested_table(
+            "reactive jacobian",
+            &dependencies.reactive_jacobian_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_table(
+            "noise psd",
+            &dependencies.noise_psd_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_table(
+            "noise exponent",
+            &dependencies.noise_exponent_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+
+        Ok(())
+    }
+
+    fn validate_branch_unknown_dependency_table(
+        table_name: &str,
+        dependencies: &[Vec<usize>],
+        num_branch_unknowns: usize,
+    ) -> JitResult<()> {
+        for (entry_index, entry_dependencies) in dependencies.iter().enumerate() {
+            Self::validate_branch_unknown_dependency_list(
+                &format!("{table_name} {entry_index}"),
+                entry_dependencies,
+                num_branch_unknowns,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_branch_unknown_dependency_nested_table(
+        table_name: &str,
+        dependencies: &[Vec<Vec<usize>>],
+        num_branch_unknowns: usize,
+    ) -> JitResult<()> {
+        for (outer_index, outer_dependencies) in dependencies.iter().enumerate() {
+            for (inner_index, entry_dependencies) in outer_dependencies.iter().enumerate() {
+                Self::validate_branch_unknown_dependency_list(
+                    &format!("{table_name} {outer_index}.{inner_index}"),
+                    entry_dependencies,
+                    num_branch_unknowns,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_branch_unknown_dependency_list(
+        dependency_name: &str,
+        dependencies: &[usize],
+        num_branch_unknowns: usize,
+    ) -> JitResult<()> {
+        for index in dependencies {
+            if *index >= num_branch_unknowns {
+                return Err(JitError::InternalCompilerError {
+                    model: "native-model".into(),
+                    detail: format!(
+                        "{dependency_name} branch-current unknown dependency {index} outside compiled branch-current unknown count {num_branch_unknowns}"
+                    )
+                    .into(),
+                });
+            }
         }
 
         Ok(())
@@ -711,7 +804,10 @@ fn append_test_value_stub(bytes: &mut Vec<u8>, value: u32) -> CodeOffset {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::super::runtime::ExecutableMemory;
-    use super::{CodeOffset, EvalContext, NativeEntryOffsets, NativeModel, append_test_value_stub};
+    use super::{
+        CodeOffset, EvalContext, NativeEntryOffsets, NativeModel, NativeRequiredStorage,
+        append_test_value_stub,
+    };
     use std::sync::{Arc, Barrier};
 
     #[test]
@@ -908,6 +1004,49 @@ mod tests {
 
         assert!(error.to_string().contains("reactive-jacobian entry shape"));
         assert!(error.to_string().contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn native_model_rejects_branch_unknown_dependency_outside_compiled_count() {
+        let mut bytes = vec![0xC3]; // assignment: ret
+        let stamp_entry = append_test_value_stub(&mut bytes, 1);
+        let image = ExecutableMemory::allocate(&bytes).expect("allocate native test image");
+        let entries = NativeEntryOffsets {
+            assignment: CodeOffset::new(0),
+            parameter_defaults: vec![],
+            static_conditions: vec![None],
+            stamp_values: vec![stamp_entry],
+            jacobians: vec![vec![]],
+            reactive_jacobians: vec![vec![]],
+            noise_psd: vec![],
+            noise_exponents: vec![],
+        };
+        let mut dependencies = NativeModel::empty_current_dependencies(&entries);
+        dependencies.stamp_value_branch_unknowns[0].push(1);
+
+        let error = NativeModel::from_executable_image_with_dependencies(
+            0,
+            0,
+            0,
+            0,
+            1,
+            image,
+            entries,
+            dependencies,
+            NativeRequiredStorage::default(),
+        )
+        .expect_err("out-of-range branch-current unknown dependency must be rejected");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("stamp value 0 branch-current unknown dependency 1"),
+            "{message}"
+        );
+        assert!(
+            message.contains("compiled branch-current unknown count 1"),
+            "{message}"
+        );
+        assert!(message.contains("no interpreter fallback"), "{message}");
     }
 
     fn empty_eval_context() -> EvalContext {

@@ -352,6 +352,7 @@ fn compile_model_inner(
         model.internal_nodes,
         model.num_variables,
         model.parameters.len(),
+        model.branch_sources.len(),
         executable,
         entries,
         current_dependencies,
