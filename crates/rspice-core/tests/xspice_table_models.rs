@@ -322,7 +322,7 @@ fn table2d_applies_suffix_after_exponent_like_ngspice() {
 2
 0 1
 0 1
-1e3k 0
+1e-3k 0
 0 0
 ",
         )],
@@ -340,7 +340,7 @@ rload out 0 1
 
     let out = op_voltage(&temp.netlist, "out");
     assert!(
-        (out + 1.0e6).abs() < 1.0e-3,
+        (out + 1.0).abs() < 1.0e-9,
         "ngspice applies the k suffix after exponent notation in table values, got {out}"
     );
 }
@@ -358,7 +358,7 @@ fn table3d_applies_suffix_after_exponent_like_ngspice() {
 0 1
 0 1
 0 1
-1e3k 0
+1e-3k 0
 0 0
 0 0
 0 0
@@ -379,7 +379,7 @@ rload out 0 1
 
     let out = op_voltage(&temp.netlist, "out");
     assert!(
-        (out + 1.0e6).abs() < 1.0e-3,
+        (out + 1.0).abs() < 1.0e-9,
         "ngspice applies the k suffix after exponent notation in table3d values, got {out}"
     );
 }
@@ -894,7 +894,7 @@ rload out 0 1
 }
 
 #[test]
-fn table3d_ac_maps_z_derivative_to_y_input_like_ngspice() {
+fn table3d_ac_uses_each_input_derivative() {
     let table = "\
 2
 2
@@ -908,10 +908,10 @@ fn table3d_ac_maps_z_derivative_to_y_input_like_ngspice() {
 6 7
 ";
 
-    for (axis, y_ac, z_ac, expected) in [("y", 1.0, 0.0, -4.0), ("z", 0.0, 1.0, 0.0)] {
+    for (axis, y_ac, z_ac, expected) in [("y", 1.0, 0.0, -2.0), ("z", 0.0, 1.0, -4.0)] {
         let deck = format!(
             "\
-* XSPICE table3d AC {axis}-input compatibility
+* XSPICE table3d AC {axis}-input derivative
 vx x 0 dc 0.5 ac 0
 vy y 0 dc 0.25 ac {y_ac}
 vz z 0 dc 0.125 ac {z_ac}
@@ -923,7 +923,7 @@ rload out 0 1
 "
         );
         let temp = parse_temp_deck(
-            &format!("rspice-xspice-table3d-ac-{axis}-compat"),
+            &format!("rspice-xspice-table3d-ac-{axis}-derivative"),
             &[("table3d.tbl", table)],
             &deck,
         );
@@ -931,7 +931,7 @@ rload out 0 1
         let ac = ac_voltage(&temp.netlist, "out");
         assert!(
             (ac.re - expected).abs() < 1.0e-9 && ac.im.abs() < 1.0e-12,
-            "ngspice table3d AC compatibility expects v(out)={expected} for {axis}-only excitation, got {ac}"
+            "table3d AC should use the {axis} derivative and drive v(out)={expected}, got {ac}"
         );
     }
 }
@@ -1146,8 +1146,8 @@ rload out 0 1
 
     for (axis, x_ac, y_ac, z_ac, expected) in [
         ("x", 1.0, 0.0, 0.0, 6.7),
-        ("y", 0.0, 1.0, 0.0, 19.7),
-        ("z", 0.0, 0.0, 1.0, 0.0),
+        ("y", 0.0, 1.0, 0.0, 15.1),
+        ("z", 0.0, 0.0, 1.0, 19.7),
     ] {
         let deck = format!(
             "\
@@ -1171,7 +1171,7 @@ rload out 0 1
         let ac = ac_voltage(&temp.netlist, "out");
         assert!(
             (ac.re + expected).abs() < 1.0e-9 && ac.im.abs() < 1.0e-12,
-            "table3d AC should match ngspice ENO response {expected} for {axis}-only excitation, got {ac}"
+            "table3d AC should use ENO response {expected} for {axis}-only excitation, got {ac}"
         );
     }
 }
