@@ -1401,7 +1401,7 @@ impl XyceTestRunner {
         original: &str,
         netlist: &Netlist,
     ) -> Result<(), String> {
-        if let Some((node_pos, node_neg)) = Self::parse_voltage_probe(&normalized) {
+        if let Some((node_pos, node_neg)) = Self::parse_voltage_probe(normalized) {
             if !node_pos.is_empty() && node_neg.as_deref().is_none_or(|node| !node.is_empty()) {
                 return Ok(());
             }
@@ -1423,7 +1423,7 @@ impl XyceTestRunner {
                 original
             ));
         }
-        if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(&normalized) {
+        if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
             match parameter.as_str() {
                 "dcv0" if Self::source_is_independent_source(netlist, &element_name) => {
                     return Ok(());
@@ -1444,12 +1444,12 @@ impl XyceTestRunner {
                 original
             ));
         }
-        if let Some(parameter_name) = Self::parse_scalar_parameter_probe(&normalized)
+        if let Some(parameter_name) = Self::parse_scalar_parameter_probe(normalized)
             && Self::scalar_parameter_probe_is_supported(netlist, &parameter_name)
         {
             return Ok(());
         }
-        if let Some(element_name) = Self::parse_current_probe(&normalized) {
+        if let Some(element_name) = Self::parse_current_probe(normalized) {
             if Self::source_is_voltage_source(netlist, &element_name) {
                 return Ok(());
             }
@@ -1503,7 +1503,7 @@ impl XyceTestRunner {
         result: &crate::SimulationResult,
         op_report: &crate::circuit::DeviceOpReport,
     ) -> Result<f64, String> {
-        if let Some((node_pos, node_neg)) = Self::parse_voltage_probe(&normalized) {
+        if let Some((node_pos, node_neg)) = Self::parse_voltage_probe(normalized) {
             let pos = result
                 .try_voltage_named(&node_pos)
                 .ok_or_else(|| format!("node '{}' not found in DC result", node_pos))?;
@@ -1526,7 +1526,7 @@ impl XyceTestRunner {
             );
         }
 
-        if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(&normalized) {
+        if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
             return Self::evaluate_device_parameter_probe(
                 netlist,
                 dc,
@@ -1536,7 +1536,7 @@ impl XyceTestRunner {
             );
         }
 
-        if let Some(parameter_name) = Self::parse_scalar_parameter_probe(&normalized) {
+        if let Some(parameter_name) = Self::parse_scalar_parameter_probe(normalized) {
             return Self::evaluate_scalar_parameter_probe(
                 netlist,
                 dc,
@@ -1545,7 +1545,7 @@ impl XyceTestRunner {
             );
         }
 
-        if let Some(element_name) = Self::parse_current_probe(&normalized) {
+        if let Some(element_name) = Self::parse_current_probe(normalized) {
             if let Some(current) = result.branch_current_named(&element_name) {
                 return Ok(current);
             }
