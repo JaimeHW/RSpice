@@ -21,6 +21,9 @@ use crate::codegen::{
 use crate::native::x64::codegen::NativeAssignment;
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 
+const ENTRY_ALIGNMENT: usize = 16;
+const X64_NOP: u8 = 0x90;
+
 pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
     compile_model_inner(model, None)
 }
@@ -46,8 +49,7 @@ fn compile_model_inner(
         .with_canonical_branch_unknown_map(&canonical_branch_unknown_map);
 
     let mut image = Vec::new();
-    let assignment = CodeOffset::new(image.len());
-    append_assignment_entry(model, &mut image)
+    let assignment = append_assignment_entry(model, &mut image)
         .map_err(|error| context_jit_error(error, "assignments"))?;
 
     let mut parameter_defaults = Vec::with_capacity(model.parameters.len());
@@ -658,7 +660,7 @@ fn lower_stamp_value_program(
     )
 }
 
-fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitResult<()> {
+fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitResult<CodeOffset> {
     let live_assignment_steps = live_native_assignment_steps(model);
     let assignments = live_assignment_steps
         .iter()
@@ -670,8 +672,9 @@ fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitRes
     } else {
         codegen::compile_assignment_pass_function(&assignments)?
     };
+    let offset = align_image_for_entry(image);
     image.extend_from_slice(&bytes);
-    Ok(())
+    Ok(offset)
 }
 
 fn live_native_assignment_steps(model: &CompiledModel) -> Vec<AssignmentStep> {
@@ -892,10 +895,16 @@ fn constant_indexed_assignment_slot(
 }
 
 fn append_value_entry(image: &mut Vec<u8>, program: &NativeProgram) -> JitResult<CodeOffset> {
-    let offset = CodeOffset::new(image.len());
     let bytes = codegen::compile_value_function(program)?;
+    let offset = align_image_for_entry(image);
     image.extend_from_slice(&bytes);
     Ok(offset)
+}
+
+fn align_image_for_entry(image: &mut Vec<u8>) -> CodeOffset {
+    let padding = (ENTRY_ALIGNMENT - (image.len() % ENTRY_ALIGNMENT)) % ENTRY_ALIGNMENT;
+    image.resize(image.len() + padding, X64_NOP);
+    CodeOffset::new(image.len())
 }
 
 fn infer_current_terminal_pair(program: &StampProgram) -> Option<(usize, usize)> {
@@ -1051,13 +1060,56 @@ mod tests {
         AssignmentStep, BytecodeProgram, CompiledModel, Instruction, StampProgram,
     };
     use crate::device::VerilogADevice;
-    use crate::native::expr::{NativeOp, PriorCurrentProbe};
+    use crate::native::expr::{
+        EntryKind, NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
+    };
+    use crate::native::runtime::ExecutableMemory;
     use crate::native::x64::codegen::NativeAssignment;
     use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
     use crate::vm::{Vm, VmContext};
     use crate::{CompilerOptions, VerilogACompiler};
     use smol_str::SmolStr;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn append_value_entry_aligns_nonzero_entry_offsets() {
+        let program = NativeProgram::from_bytecode(
+            "aligned-entry",
+            EntryKind::StampValue,
+            &BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(12.0),
+                    Instruction::PushConst(0.5),
+                    Instruction::Add,
+                ],
+            },
+            NativeLoweringLimits::new(0, 0, 0, 0, 0),
+        )
+        .expect("constant add lowers to native program");
+        let mut image = vec![0xC3];
+
+        let offset =
+            super::append_value_entry(&mut image, &program).expect("append aligned value entry");
+
+        assert_eq!(offset.as_usize(), super::ENTRY_ALIGNMENT);
+        assert_eq!(offset.as_usize() % super::ENTRY_ALIGNMENT, 0);
+        assert!(
+            image[1..offset.as_usize()]
+                .iter()
+                .all(|byte| *byte == super::X64_NOP),
+            "entry padding should be x64 NOPs"
+        );
+
+        let memory = ExecutableMemory::allocate(&image).expect("allocate aligned image");
+        let entry = memory
+            .ptr_at(offset.as_usize())
+            .expect("aligned entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()), 12.5);
+    }
 
     fn canonical_artifact_with_unsupported_root(
         compiler: &VerilogACompiler,
