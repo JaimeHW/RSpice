@@ -242,7 +242,7 @@ impl VerilogADevice {
         context.lookup_tables = model.lookup_tables.clone();
         context.laplace_filters = model.laplace_filters.clone();
         context.zi_filters = model.zi_filters.clone();
-        Self::preallocate_vm_runtime_state(&mut context, &model);
+        Self::preallocate_vm_runtime_state(&mut context, &model)?;
 
         #[cfg(feature = "native")]
         let native_model = match canonical_artifact {
@@ -282,10 +282,22 @@ impl VerilogADevice {
     ///
     /// This avoids repeated dynamic growth during simulation hot paths and ensures
     /// stateful operators have stable dedicated slots.
-    fn preallocate_vm_runtime_state(context: &mut VmContext, model: &CompiledModel) {
+    fn preallocate_vm_runtime_state(
+        context: &mut VmContext,
+        model: &CompiledModel,
+    ) -> Result<(), VmError> {
         #[inline]
         fn update_max(max_slot: &mut Option<usize>, idx: usize) {
             *max_slot = Some(max_slot.map_or(idx, |prev| prev.max(idx)));
+        }
+
+        #[inline]
+        fn required_slot_count(label: &str, max_idx: usize) -> Result<usize, VmError> {
+            max_idx.checked_add(1).ok_or_else(|| {
+                VmError::NativeJit(format!(
+                    "native JIT {label} runtime state slot index {max_idx} cannot be represented; no interpreter fallback"
+                ))
+            })
         }
 
         let mut max_state = None;
@@ -361,20 +373,22 @@ impl VerilogADevice {
         }
 
         if let Some(max_idx) = max_state {
-            context.allocate_states(max_idx + 1);
+            context.allocate_states(required_slot_count("state-value", max_idx)?);
         }
         if let Some(max_idx) = max_delay_buffer {
-            context.allocate_delay_buffers(max_idx + 1);
+            context.allocate_delay_buffers(required_slot_count("delay-buffer", max_idx)?);
         }
         if let Some(max_idx) = max_transition_filter {
-            context.allocate_transition_filters(max_idx + 1);
+            context.allocate_transition_filters(required_slot_count("transition-filter", max_idx)?);
         }
         if let Some(max_idx) = max_slew_filter {
-            context.allocate_slew_filters(max_idx + 1);
+            context.allocate_slew_filters(required_slot_count("slew-filter", max_idx)?);
         }
         if let Some(max_idx) = max_cross_detector {
-            context.allocate_cross_detectors(max_idx + 1);
+            context.allocate_cross_detectors(required_slot_count("cross-detector", max_idx)?);
         }
+
+        Ok(())
     }
 
     /// Attempt to compile the model to native code.
@@ -2668,7 +2682,8 @@ mod tests {
         context.lookup_tables = model.lookup_tables.clone();
         context.laplace_filters = model.laplace_filters.clone();
         context.zi_filters = model.zi_filters.clone();
-        VerilogADevice::preallocate_vm_runtime_state(&mut context, &model);
+        VerilogADevice::preallocate_vm_runtime_state(&mut context, &model)
+            .expect("native test model runtime state preallocates");
 
         let mut device = VerilogADevice {
             name: SmolStr::new("NTEST"),
@@ -2890,7 +2905,8 @@ endmodule
         });
 
         let mut context = VmContext::with_internal_nodes(model.num_terminals, model.internal_nodes);
-        VerilogADevice::preallocate_vm_runtime_state(&mut context, &model);
+        VerilogADevice::preallocate_vm_runtime_state(&mut context, &model)
+            .expect("stateful test model runtime state preallocates");
 
         assert_eq!(context.state_values.len(), 9);
         assert_eq!(context.state_values_prev.len(), 9);
@@ -2899,6 +2915,31 @@ endmodule
         assert_eq!(context.transition_filters.len(), 2);
         assert_eq!(context.slew_filters.len(), 5);
         assert_eq!(context.cross_detectors.len(), 6);
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn native_runtime_preallocation_rejects_state_slot_count_overflow() {
+        let mut model = compile(
+            r#"
+`include "disciplines.vams"
+module native_state_slot_overflow(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n);
+endmodule
+"#,
+        );
+        model.stamp_programs[0]
+            .value_program
+            .instructions
+            .push(Instruction::TransitionState(usize::MAX));
+
+        let mut context = VmContext::with_internal_nodes(model.num_terminals, model.internal_nodes);
+        let err = VerilogADevice::preallocate_vm_runtime_state(&mut context, &model)
+            .expect_err("overflowing runtime state slot must hard-fail");
+
+        assert_native_hard_fail(err, "transition-filter runtime state slot");
     }
 
     #[cfg(feature = "native-bytecode-contract-tests")]

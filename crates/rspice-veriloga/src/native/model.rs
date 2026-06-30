@@ -77,6 +77,10 @@ impl NativeRequiredStorage {
             *max_slot = Some(max_slot.map_or(index, |prev| prev.max(index)));
         }
 
+        fn required_count(max_slot: Option<usize>) -> usize {
+            max_slot.map_or(0, |index| index.checked_add(1).unwrap_or(usize::MAX))
+        }
+
         let mut max_state = None;
         let mut max_limit_state = None;
         let mut max_transition_filter = None;
@@ -130,18 +134,18 @@ impl NativeRequiredStorage {
             }
         }
 
-        let state_values = max_state.map_or(0, |index| index + 1);
+        let state_values = required_count(max_state);
         Self {
             state_values,
             state_values_prev: state_values,
-            state_initialized: max_limit_state.map_or(0, |index| index + 1),
+            state_initialized: required_count(max_limit_state),
             lookup_tables: model.lookup_tables.len(),
             laplace_filters: model.laplace_filters.len(),
             zi_filters: model.zi_filters.len(),
-            transition_filters: max_transition_filter.map_or(0, |index| index + 1),
-            slew_filters: max_slew_filter.map_or(0, |index| index + 1),
-            delay_buffers: max_delay_buffer.map_or(0, |index| index + 1),
-            cross_detectors: max_cross_detector.map_or(0, |index| index + 1),
+            transition_filters: required_count(max_transition_filter),
+            slew_filters: required_count(max_slew_filter),
+            delay_buffers: required_count(max_delay_buffer),
+            cross_detectors: required_count(max_cross_detector),
         }
     }
 }
