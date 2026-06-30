@@ -297,10 +297,7 @@ impl Engine {
                 return Ok(solution);
             }
 
-            if voltage_converged
-                && device_converged
-                && !(linearized_residual_converged || nonlinear_residual_converged)
-            {
+            if voltage_converged && device_converged && !nonlinear_residual_converged {
                 residual_stall_iterations += 1;
                 if residual_stall_iterations >= Self::DC_RESIDUAL_STALL_LIMIT {
                     residual_stalled = true;

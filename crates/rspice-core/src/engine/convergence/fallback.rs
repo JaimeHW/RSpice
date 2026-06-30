@@ -191,8 +191,6 @@ impl Engine {
 
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, &new_solution, node_count);
-            let linearized_residual_converged =
-                self.residual_convergence_met(matrix, &new_solution, &rhs);
             if seed_mode == CorrectorSeedMode::StaticJfetEveryIteration {
                 self.update_device_states_for_dc(circuit, &new_solution);
                 circuit.update_jfet_static_linearizations(&new_solution);
@@ -214,10 +212,7 @@ impl Engine {
                 return (solution, true, used_iterations);
             }
 
-            if voltage_converged
-                && device_converged
-                && !(linearized_residual_converged || nonlinear_residual_converged)
-            {
+            if voltage_converged && device_converged && !nonlinear_residual_converged {
                 residual_stall_iterations += 1;
                 if residual_stall_iterations >= Self::DC_RESIDUAL_STALL_LIMIT {
                     break;

@@ -1847,6 +1847,7 @@ impl XyceTestRunner {
             "gm" => Some("gm"),
             "gds" => Some("gds"),
             "gmb" | "gmbs" => Some("gmb"),
+            "cd" => Some("cd"),
             _ => None,
         }
     }

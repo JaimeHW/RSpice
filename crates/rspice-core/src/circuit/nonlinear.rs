@@ -32,6 +32,12 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     generated_veriloga_devices: crate::device::veriloga_generated::BuiltinVerilogADevices,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DiodeStampMode {
+    LimitedNewton,
+    StaticProbe,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,8 +465,43 @@ impl CircuitData {
         rhs: &mut [Value],
         voltages: &[Value],
     ) -> Result<(), String> {
+        self.try_stamp_nonlinear_with_diode_mode(
+            matrix,
+            rhs,
+            voltages,
+            DiodeStampMode::LimitedNewton,
+        )
+    }
+
+    /// Checked nonlinear stamping path for residual probes.
+    ///
+    /// Diodes are stamped at the candidate bias rather than through pnjlim,
+    /// so residual validation measures the physical nonlinear equations. The
+    /// live Newton path still uses limited diode companions.
+    pub fn try_stamp_static_probe_nonlinear(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) -> Result<(), String> {
+        self.try_stamp_nonlinear_with_diode_mode(matrix, rhs, voltages, DiodeStampMode::StaticProbe)
+    }
+
+    fn try_stamp_nonlinear_with_diode_mode(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        diode_stamp_mode: DiodeStampMode,
+    ) -> Result<(), String> {
         use crate::device::NonlinearDevice;
-        self.diodes.stamp_all_direct(matrix, rhs, voltages);
+        match diode_stamp_mode {
+            DiodeStampMode::LimitedNewton => self.diodes.stamp_all_direct(matrix, rhs, voltages),
+            DiodeStampMode::StaticProbe => {
+                self.diodes
+                    .stamp_static_probe_all_direct(matrix, rhs, voltages);
+            }
+        }
         self.bjts.stamp_all_direct(matrix, rhs, voltages);
         self.mosfets.stamp_all_direct(matrix, rhs, voltages);
         for jfet in &self.jfets {

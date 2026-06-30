@@ -234,12 +234,12 @@ impl CircuitData {
         }
 
         for diode in &self.diodes.devices {
-            let (vd, id, gd) = diode.op_values();
+            let (vd, id, gd, cd) = diode.op_values();
             entries.push(DeviceOpEntry {
                 name: diode.name.clone(),
                 device_kind: "DIODE",
                 region: None,
-                params: vec![("vd", vd), ("id", id), ("gd", gd)],
+                params: vec![("vd", vd), ("id", id), ("gd", gd), ("cd", cd)],
             });
         }
 

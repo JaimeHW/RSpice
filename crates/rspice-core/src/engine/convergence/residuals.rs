@@ -3,6 +3,32 @@
 use super::*;
 
 impl Engine {
+    fn residual_probe_fixed_point_converged(
+        &self,
+        circuit: &CircuitData,
+        probe: &mut StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+    ) -> bool {
+        if !self.residual_convergence_met(probe, solution, rhs) {
+            return false;
+        }
+
+        let Ok(next_solution) = probe.solve(rhs) else {
+            return false;
+        };
+        let node_count = circuit
+            .num_nodes()
+            .min(solution.len())
+            .min(next_solution.len());
+        let voltage_abstol = self.voltage_abstol();
+        let fixed_point_converged = solution[..node_count]
+            .iter()
+            .zip(next_solution[..node_count].iter())
+            .all(|(current, next)| (next - current).abs() <= voltage_abstol);
+        fixed_point_converged || circuit.has_jfet_gate_generation_branches()
+    }
+
     #[inline]
     pub(crate) fn residual_convergence_met(
         &self,
@@ -75,7 +101,7 @@ impl Engine {
             {
                 return false;
             }
-            self.residual_convergence_met(probe, solution, rhs)
+            self.residual_probe_fixed_point_converged(circuit, probe, solution, rhs)
         });
         circuit.restore_nonlinear_state(snapshot);
         converged
@@ -115,7 +141,7 @@ impl Engine {
                 stamp_error = Some(err);
                 return false;
             }
-            self.residual_convergence_met(probe, solution, rhs)
+            self.residual_probe_fixed_point_converged(circuit, probe, solution, rhs)
         });
         circuit.restore_nonlinear_state(snapshot);
         if let Some(err) = stamp_error {

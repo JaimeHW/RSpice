@@ -67,6 +67,18 @@ impl Diodes {
             d.stamp_direct(matrix, rhs, voltages);
         }
     }
+
+    /// Stamp diode companions at the candidate voltage for residual probes.
+    pub fn stamp_static_probe_all_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        for d in &self.devices {
+            d.stamp_static_probe_direct(matrix, rhs, voltages);
+        }
+    }
 }
 
 /// BJT storage for nonlinear Newton-Raphson iteration

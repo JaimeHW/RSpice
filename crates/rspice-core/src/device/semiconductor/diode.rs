@@ -10,6 +10,8 @@ const KOVERQ: Value = 1.38064852e-23 / 1.6021766208e-19;
 /// SPICE reference temperature, 27C in Kelvin (ngspice REFTEMP).
 const REFTEMP: Value = 300.15;
 const EPSMIN: Value = 1.0e-28;
+const MAX_EXP_ARG: Value = 100.0;
+const BREAKDOWN_EXP_ARG_MAX: Value = 40.0;
 
 /// Pre-computed stamp indices for O(1) matrix access (2-terminal device)
 #[derive(Debug, Clone, Default)]
@@ -43,6 +45,16 @@ pub struct Diode {
     pub forward_knee_current: Value,
     /// Reverse high-injection knee current (IKR).
     pub reverse_knee_current: Value,
+    /// Sidewall perimeter instance parameter (PJ).
+    pub sidewall_perimeter: Value,
+    /// Sidewall saturation current density/current parameter (JSW).
+    pub sidewall_saturation_current: Value,
+    /// Whether JSW was explicitly given on the model card.
+    pub sidewall_current_given: bool,
+    /// Sidewall emission coefficient (NS).
+    pub sidewall_emission_coefficient: Value,
+    /// Whether NS was explicitly given on the model card.
+    pub sidewall_emission_given: bool,
 
     // Junction capacitance parameters
     /// Zero-bias junction capacitance (CJ0)
@@ -55,6 +67,18 @@ pub struct Diode {
     pub tt: Value,
     /// Forward-bias depletion capacitance coefficient (FC)
     pub fc: Value,
+    /// Sidewall zero-bias junction capacitance (CJSW/CJP)
+    pub sidewall_cj0: Value,
+    /// Sidewall built-in potential (PHP/VJSW)
+    pub sidewall_vj: Value,
+    /// Sidewall grading coefficient (MJSW)
+    pub sidewall_m: Value,
+    /// Sidewall forward-bias depletion capacitance coefficient (FCS)
+    pub sidewall_fc: Value,
+    /// Reverse breakdown ideality factor (NBV).
+    pub breakdown_emission_coefficient: Value,
+    /// Whether NBV was explicitly given on the model card.
+    pub breakdown_emission_given: bool,
 
     // Temperature parameters
     /// Saturation-current temperature exponent (XTI)
@@ -88,6 +112,16 @@ pub struct Diode {
     /// The last stamp's pnjlim clamped the junction; a limited step forces
     /// another Newton iteration (ngspice `Check` semantics).
     limited: std::cell::Cell<bool>,
+    /// Junction voltage used by the last nonlinear stamp.
+    last_stamp_vd: std::cell::Cell<Value>,
+    /// Current used by the last nonlinear stamp, with junction gmin folded in.
+    last_stamp_id: std::cell::Cell<Value>,
+    /// Conductance used by the last nonlinear stamp, with junction gmin folded in.
+    last_stamp_gd: std::cell::Cell<Value>,
+    /// Folded AREA * M multiplier applied to the bottom junction.
+    junction_scale: Value,
+    /// Temperature-adjusted matched breakdown voltage (Xyce/ngspice tBrkdwnV).
+    temperature_breakdown_voltage: Option<Value>,
     /// Pre-computed matrix indices for O(1) stamping
     pub indices: DiodeIndices,
 }
@@ -107,6 +141,11 @@ impl Diode {
             ibv: 1e-6,
             forward_knee_current: 0.0,
             reverse_knee_current: 0.0,
+            sidewall_perimeter: 0.0,
+            sidewall_saturation_current: 0.0,
+            sidewall_current_given: false,
+            sidewall_emission_coefficient: 1.0,
+            sidewall_emission_given: false,
 
             // Junction capacitance (1N4148-like)
             cj0: 4e-12, // Zero-bias junction capacitance (4pF)
@@ -114,6 +153,12 @@ impl Diode {
             m: 0.5,     // Grading coefficient
             tt: 8e-9,   // Transit time (8ns)
             fc: 0.5,    // Forward-bias depletion coefficient (SPICE default)
+            sidewall_cj0: 0.0,
+            sidewall_vj: 1.0,
+            sidewall_m: 0.33,
+            sidewall_fc: 0.5,
+            breakdown_emission_coefficient: 1.752,
+            breakdown_emission_given: false,
 
             // SPICE temperature defaults
             xti: 3.0,
@@ -131,6 +176,11 @@ impl Diode {
             junction_gmin: 0.0,
             last_limited_vd: std::cell::Cell::new(0.0),
             limited: std::cell::Cell::new(false),
+            last_stamp_vd: std::cell::Cell::new(0.0),
+            last_stamp_id: std::cell::Cell::new(0.0),
+            last_stamp_gd: std::cell::Cell::new(0.0),
+            junction_scale: 1.0,
+            temperature_breakdown_voltage: None,
             indices: DiodeIndices::default(),
         }
     }
@@ -177,20 +227,37 @@ impl Diode {
     /// a dedicated branch around `-BV`, and clamping them with the plain
     /// forward law would fight the breakdown exponential.
     fn limited_linearization(&self, vd_raw: Value) -> (Value, Value, Value) {
-        let vd = if self.bv.is_none() {
-            let vte = self.n * self.vt;
-            let vcrit = vte * (vte / (std::f64::consts::SQRT_2 * self.is.max(1e-300))).ln();
-            let (vd, limited) = Self::pnjlim(vd_raw, self.last_limited_vd.get(), vte, vcrit);
-            self.limited.set(limited);
-            self.last_limited_vd.set(vd);
-            vd
+        let vte = self.n * self.vt;
+        let vcrit = vte
+            * (vte
+                / (std::f64::consts::SQRT_2
+                    * self.effective_bottom_saturation_current().max(1e-300)))
+            .ln();
+
+        let (vd, limited) = if let Some(bv) = self.bv.filter(|bv| bv.is_finite() && *bv > 0.0) {
+            let vtebrk = self.breakdown_emission_coefficient.max(EPSMIN) * self.vt;
+            if vd_raw < 0.0_f64.min(-bv + 10.0 * vtebrk) {
+                let transformed = -(vd_raw + bv);
+                let old_transformed = -(self.last_limited_vd.get() + bv);
+                let (limited_transformed, limited) =
+                    Self::pnjlim(transformed, old_transformed, vtebrk, vcrit);
+                (-(limited_transformed + bv), limited)
+            } else {
+                Self::pnjlim(vd_raw, self.last_limited_vd.get(), vte, vcrit)
+            }
         } else {
-            self.limited.set(false);
-            self.last_limited_vd.set(vd_raw);
-            vd_raw
+            Self::pnjlim(vd_raw, self.last_limited_vd.get(), vte, vcrit)
         };
+        self.limited.set(limited);
+        self.last_limited_vd.set(vd);
+
         let (id, gd) = self.current_and_conductance(vd);
-        (vd, id + self.junction_gmin * vd, gd + self.junction_gmin)
+        let stamped_id = id + self.junction_gmin * vd;
+        let stamped_gd = gd + self.junction_gmin;
+        self.last_stamp_vd.set(vd);
+        self.last_stamp_id.set(stamped_id);
+        self.last_stamp_gd.set(stamped_gd);
+        (vd, stamped_id, stamped_gd)
     }
 
     /// Return the flicker-noise coefficients `(KF, AF)`, if enabled by the
@@ -223,6 +290,16 @@ impl Diode {
         diode.vj = 1.0;
         diode.m = 0.5;
         diode.tt = 0.0;
+        diode.sidewall_saturation_current = 0.0;
+        diode.sidewall_current_given = false;
+        diode.sidewall_emission_coefficient = 1.0;
+        diode.sidewall_emission_given = false;
+        diode.sidewall_cj0 = 0.0;
+        diode.sidewall_vj = 1.0;
+        diode.sidewall_m = 0.33;
+        diode.sidewall_fc = 0.5;
+        diode.breakdown_emission_coefficient = diode.n;
+        diode.breakdown_emission_given = false;
         diode
     }
 
@@ -236,7 +313,7 @@ impl Diode {
 
     /// Set model parameters from a HashMap (for .MODEL statement parsing)
     pub fn with_model_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
-        if let Some(&v) = params.get("IS") {
+        if let Some(&v) = params.get("IS").or_else(|| params.get("JS")) {
             self.is = v;
         }
         if let Some(&v) = params.get("N") {
@@ -259,7 +336,7 @@ impl Diode {
         {
             self.af = v;
         }
-        if let Some(&v) = params.get("BV")
+        if let Some(&v) = params.get("BV").or_else(|| params.get("VB"))
             && v.is_finite()
             && v > 0.0
         {
@@ -277,10 +354,11 @@ impl Diode {
         if let Some(&v) = params.get("IKR") {
             self.reverse_knee_current = if v.is_finite() && v >= EPSMIN { v } else { 0.0 };
         }
-        if let Some(&v) = params.get("CJO") {
-            self.cj0 = v;
-        }
-        if let Some(&v) = params.get("CJ0") {
+        if let Some(&v) = params
+            .get("CJO")
+            .or_else(|| params.get("CJ0"))
+            .or_else(|| params.get("CJ"))
+        {
             self.cj0 = v;
         }
         if let Some(&v) = params.get("VJ") {
@@ -298,6 +376,50 @@ impl Diode {
         {
             self.fc = v;
         }
+        if let Some(&v) = params.get("JSW")
+            && v.is_finite()
+            && v >= 0.0
+        {
+            self.sidewall_saturation_current = v;
+            self.sidewall_current_given = true;
+        }
+        if let Some(&v) = params.get("NS")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.sidewall_emission_coefficient = v;
+            self.sidewall_emission_given = true;
+        }
+        if let Some(&v) = params.get("CJSW").or_else(|| params.get("CJP"))
+            && v.is_finite()
+            && v >= 0.0
+        {
+            self.sidewall_cj0 = v;
+        }
+        if let Some(&v) = params.get("PHP").or_else(|| params.get("VJSW"))
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.sidewall_vj = v;
+        }
+        if let Some(&v) = params.get("MJSW")
+            && v.is_finite()
+        {
+            self.sidewall_m = v;
+        }
+        if let Some(&v) = params.get("FCS")
+            && v.is_finite()
+            && v >= 0.0
+        {
+            self.sidewall_fc = v;
+        }
+        if let Some(&v) = params.get("NBV")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.breakdown_emission_coefficient = v;
+            self.breakdown_emission_given = true;
+        }
         if let Some(&v) = params.get("XTI") {
             self.xti = v;
         }
@@ -306,6 +428,9 @@ impl Diode {
         }
         if let Some(&v) = params.get("TNOM") {
             self.tnom_c = Some(v);
+        }
+        if !self.breakdown_emission_given {
+            self.breakdown_emission_coefficient = self.n;
         }
         self
     }
@@ -326,11 +451,11 @@ impl Diode {
 
     /// Scale the junction to the operating temperature.
     ///
-    /// Mirrors ngspice's diotemp.c at TLEV=0 / TLEVC=0 (the SPICE3
-    /// default): IS follows the activation-energy / XTI law, and VJ and
-    /// CJ0 follow the bandgap-shift mapping. The formulas reduce to
-    /// identity at `temp == tnom`. The soft breakdown branch keeps its
-    /// nominal knee (the exact ngspice IBV/BV matching is not modeled).
+    /// Mirrors ngspice's diotemp.c and Xyce's `Instance::updateTemperature`
+    /// at the SPICE3 default temperature level: IS/JSW follow the
+    /// activation-energy / XTI law, VJ/CJ0 and PHP/CJSW follow the
+    /// bandgap-shift mapping, and BV is converted to the matched
+    /// breakdown voltage used by the reverse branch.
     ///
     /// Call once after model parameters and junction scaling are applied.
     pub fn set_temperature(&mut self, temp_kelvin: Value, default_tnom_kelvin: Value) {
@@ -366,6 +491,13 @@ impl Diode {
         if is_factor.is_finite() && is_factor > 0.0 {
             self.is *= is_factor;
         }
+        let ns = self.sidewall_emission_coefficient.max(EPSMIN);
+        let sidewall_factor = (((temp / tnom) - 1.0) * self.eg / (ns * vt)
+            + (self.xti / ns) * (temp / tnom).ln())
+        .exp();
+        if sidewall_factor.is_finite() && sidewall_factor > 0.0 {
+            self.sidewall_saturation_current *= sidewall_factor;
+        }
 
         // VJ(T) and CJ0(T), TLEVC=0 bandgap mapping.
         if self.vj > 0.0 {
@@ -385,15 +517,36 @@ impl Diode {
                 }
             }
         }
+        if self.sidewall_vj > 0.0 {
+            let pbo = (self.sidewall_vj - pbfact1) / fact1;
+            if pbo > 0.0 {
+                let gmaold = (self.sidewall_vj - pbo) / pbo;
+                let denom = 1.0 + self.sidewall_m * (400e-6 * (tnom - REFTEMP) - gmaold);
+                let t_jct_pot = pbfact + fact2 * pbo;
+                if denom != 0.0 && t_jct_pot > 0.0 {
+                    let mut cj = self.sidewall_cj0 / denom;
+                    let gmanew = (t_jct_pot - pbo) / pbo;
+                    cj *= 1.0 + self.sidewall_m * (400e-6 * (temp - REFTEMP) - gmanew);
+                    if cj.is_finite() && cj >= 0.0 {
+                        self.sidewall_vj = t_jct_pot;
+                        self.sidewall_cj0 = cj;
+                    }
+                }
+            }
+        }
 
         self.vt = vt;
+        self.temperature_breakdown_voltage = self
+            .bv
+            .and_then(|bv| self.xbv_matched_breakdown_voltage(bv));
     }
 
     /// Cached operating-point values from the last accepted Newton solution:
     /// `(vd, id, gd)` — junction voltage, current, and conductance.
-    pub fn op_values(&self) -> (Value, Value, Value) {
+    pub fn op_values(&self) -> (Value, Value, Value, Value) {
         let (id, gd) = self.current_and_conductance(self.prev_vd);
-        (self.prev_vd, id, gd)
+        let (_, cd) = self.junction_charge_and_capacitance(self.prev_vd);
+        (self.prev_vd, id, gd, cd)
     }
 
     /// Apply a parallel-junction scale factor (instance `AREA` × `M`).
@@ -403,6 +556,7 @@ impl Diode {
     /// resistance scales inversely. Mirrors ngspice's AREA/M handling for
     /// the lumped diode.
     pub fn apply_junction_scaling(&mut self, scale: Value) {
+        self.junction_scale *= scale;
         self.is *= scale;
         self.ibv *= scale;
         self.forward_knee_current *= scale;
@@ -411,6 +565,15 @@ impl Diode {
         if self.rs > 0.0 {
             self.rs /= scale;
         }
+    }
+
+    /// Set the sidewall perimeter scale (instance `PJ`, multiplied by `M`).
+    pub fn set_sidewall_perimeter(&mut self, perimeter: Value) {
+        self.sidewall_perimeter = if perimeter.is_finite() && perimeter > 0.0 {
+            perimeter
+        } else {
+            0.0
+        };
     }
 
     /// Set junction capacitance parameters
@@ -434,26 +597,22 @@ impl Diode {
     pub fn junction_charge_and_capacitance(&self, vd: Value) -> (Value, Value) {
         let mut qd = 0.0;
         let mut capd = 0.0;
-        if self.cj0 > 0.0 && self.vj > 0.0 && self.m < 1.0 {
-            let fc = self.fc.clamp(0.0, 0.95);
-            let dep_cap_knee = fc * self.vj;
-            if vd < dep_cap_knee {
-                let arg = 1.0 - vd / self.vj;
-                let sarg = (-self.m * arg.ln()).exp();
-                qd += self.vj * self.cj0 * (1.0 - arg * sarg) / (1.0 - self.m);
-                capd += self.cj0 * sarg;
-            } else {
-                let f1 = self.vj * (1.0 - (1.0 - fc).powf(1.0 - self.m)) / (1.0 - self.m);
-                let f2 = (1.0 - fc).powf(1.0 + self.m);
-                let f3 = 1.0 - fc * (1.0 + self.m);
-                let czof2 = self.cj0 / f2;
-                qd += self.cj0 * f1
-                    + czof2
-                        * (f3 * (vd - dep_cap_knee)
-                            + (self.m / (2.0 * self.vj)) * (vd * vd - dep_cap_knee * dep_cap_knee));
-                capd += czof2 * (f3 + self.m * vd / self.vj);
-            }
-        }
+        let (bottom_q, bottom_c) =
+            Self::depletion_charge_and_capacitance(vd, self.cj0, self.vj, self.m, self.fc);
+        qd += bottom_q;
+        capd += bottom_c;
+
+        let sidewall_cj0 = self.sidewall_cj0 * self.sidewall_perimeter;
+        let (sidewall_q, sidewall_c) = Self::depletion_charge_and_capacitance(
+            vd,
+            sidewall_cj0,
+            self.sidewall_vj,
+            self.sidewall_m,
+            self.sidewall_fc,
+        );
+        qd += sidewall_q;
+        capd += sidewall_c;
+
         if self.tt > 0.0 {
             let (id, gd) = self.current_and_conductance(vd);
             qd += self.tt * id;
@@ -465,31 +624,7 @@ impl Diode {
     /// Calculate junction capacitance: Cj = CJ0 / (1 - Vd/VJ)^M
     /// Includes depletion (junction) and diffusion capacitance
     pub fn junction_capacitance(&self, vd: Value) -> Value {
-        // Clamp voltage to avoid singularity at forward bias > VJ
-        let v_clamped = vd.min(0.9 * self.vj);
-
-        // Junction (depletion) capacitance
-        let cj = if v_clamped < 0.0 {
-            // Reverse bias: standard formula
-            self.cj0 / (1.0 - v_clamped / self.vj).powf(self.m)
-        } else {
-            // Forward bias: linear approximation above VJ/2
-            let fc = 0.5; // Where to switch to linear
-            if v_clamped < fc * self.vj {
-                self.cj0 / (1.0 - v_clamped / self.vj).powf(self.m)
-            } else {
-                // Linear extrapolation
-                let cj_fc = self.cj0 / (1.0 - fc).powf(self.m);
-                let dcj = cj_fc * self.m / (self.vj * (1.0 - fc));
-                cj_fc + dcj * (v_clamped - fc * self.vj)
-            }
-        };
-
-        // Diffusion capacitance: Cd = TT * gd (where gd is conductance)
-        let gd = self.diode_conductance(vd);
-        let cd = self.tt * gd;
-
-        cj + cd
+        self.junction_charge_and_capacitance(vd).1
     }
 
     /// Link this device to a StaticMatrix for O(1) stamping
@@ -513,6 +648,32 @@ impl Diode {
 
     /// Stamp using O(1) direct indexing (call after link)
     pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
+        let vd_raw = self.terminal_voltage(voltages);
+        // Iteration-limited linearization with junction gmin folded in.
+        let (vd, id, gd) = self.limited_linearization(vd_raw);
+        self.stamp_linearized_direct(matrix, rhs, vd, id, gd);
+    }
+
+    /// Stamp a static residual probe at the candidate voltage itself.
+    ///
+    /// Newton iteration uses `limited_linearization` to protect live steps.
+    /// Residual validation must instead rebuild the companion at the actual
+    /// candidate bias, otherwise a limiter companion can masquerade as a
+    /// converged nonlinear solution.
+    pub(crate) fn stamp_static_probe_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        let vd = self.terminal_voltage(voltages);
+        let (id, gd) = self.current_and_conductance(vd);
+        let stamped_id = id + self.junction_gmin * vd;
+        let stamped_gd = gd + self.junction_gmin;
+        self.stamp_linearized_direct(matrix, rhs, vd, stamped_id, stamped_gd);
+    }
+
+    fn terminal_voltage(&self, voltages: &[Value]) -> Value {
         let va = if self.node_anode == 0 {
             0.0
         } else {
@@ -523,9 +684,17 @@ impl Diode {
         } else {
             voltages[self.node_cathode - 1]
         };
-        // Iteration-limited linearization with junction gmin folded in.
-        let (vd, id, gd) = self.limited_linearization(va - vc);
+        va - vc
+    }
 
+    fn stamp_linearized_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        vd: Value,
+        id: Value,
+        gd: Value,
+    ) {
         // Equivalent current source: ieq = id - gd * vd
         let ieq = id - gd * vd;
 
@@ -558,44 +727,166 @@ impl Diode {
         self.current_and_conductance(vd).0
     }
 
-    /// Diode conductance (derivative of current): gd = Is / (N * Vt) * exp(Vd / (N * Vt))
-    fn diode_conductance(&self, vd: Value) -> Value {
-        self.current_and_conductance(vd).1
-    }
-
     /// Junction current and conductance in one evaluation.
     ///
-    /// `current` + `diode_conductance` share the same forward and breakdown
-    /// exponentials; the stamp path calls this fused form to evaluate each
-    /// exp() once. The expression shapes mirror the individual methods
-    /// exactly so results stay bit-identical.
+    /// Xyce treats JSW without NS as extra saturation current on the bottom
+    /// diode, while JSW with NS is a distinct sidewall diode on the same
+    /// junction voltage. That distinction matters for high-injection limiting
+    /// and for the sidewall current shape.
     fn current_and_conductance(&self, vd: Value) -> (Value, Value) {
         let (forward_i, forward_g) = self.bottom_current_and_conductance(vd);
-        let (breakdown_i, breakdown_g) = match self.bv {
-            None => (0.0, 0.0),
-            Some(bv) => {
-                let scale = self.breakdown_softness(bv);
-                let exponent = ((-vd - bv) / scale).clamp(-80.0, 40.0);
-                let be = exponent.exp();
-                (-self.ibv * be, (self.ibv / scale) * be)
-            }
-        };
-        let current = forward_i + breakdown_i;
-        let conductance = forward_g + breakdown_g;
-        self.apply_high_injection_knee(vd, current, conductance)
+        let (sidewall_i, sidewall_g) = self.separate_sidewall_current_and_conductance(vd);
+        (forward_i + sidewall_i, forward_g + sidewall_g)
     }
 
     fn bottom_current_and_conductance(&self, vd: Value) -> (Value, Value) {
-        let n_vt = self.n * self.vt;
+        let isat = self.effective_bottom_saturation_current();
+        let (current, conductance) = self.exponential_current_and_conductance(vd, isat, self.n);
+        self.apply_high_injection_knee(vd, current, conductance)
+    }
+
+    fn separate_sidewall_current_and_conductance(&self, vd: Value) -> (Value, Value) {
+        if !(self.sidewall_current_given && self.sidewall_emission_given) {
+            return (0.0, 0.0);
+        }
+
+        let isat = self.sidewall_saturation_current * self.sidewall_perimeter;
+        self.exponential_current_and_conductance(vd, isat, self.sidewall_emission_coefficient)
+    }
+
+    fn effective_bottom_saturation_current(&self) -> Value {
+        let sidewall = if self.sidewall_current_given && !self.sidewall_emission_given {
+            self.sidewall_saturation_current * self.sidewall_perimeter
+        } else {
+            0.0
+        };
+        self.is + sidewall
+    }
+
+    fn exponential_current_and_conductance(
+        &self,
+        vd: Value,
+        isat: Value,
+        emission_coefficient: Value,
+    ) -> (Value, Value) {
+        if !(isat.is_finite() && isat > 0.0 && emission_coefficient.is_finite()) {
+            return (0.0, 0.0);
+        }
+
+        let n_vt = emission_coefficient.max(EPSMIN) * self.vt;
         if vd >= -3.0 * n_vt {
-            let vd_limited = vd.min(80.0 * n_vt);
-            let e = (vd_limited / n_vt).exp();
-            return (self.is * (e - 1.0), (self.is / n_vt) * e);
+            let (e, de_darg) = Self::limited_exp(vd / n_vt, MAX_EXP_ARG);
+            return (isat * (e - 1.0), (isat / n_vt) * de_darg);
+        }
+
+        if let Some(brkdwn_v) = self.active_breakdown_voltage()
+            && vd < -brkdwn_v
+        {
+            let vtebrk = self.breakdown_emission_coefficient.max(EPSMIN) * self.vt;
+            let (e, de_darg) = Self::limited_exp(-(brkdwn_v + vd) / vtebrk, BREAKDOWN_EXP_ARG_MAX);
+            return (-isat * e, (isat / vtebrk) * de_darg);
         }
 
         let mut arg = 3.0 * n_vt / (vd * std::f64::consts::E);
         arg = arg * arg * arg;
-        (-self.is * (1.0 + arg), self.is * 3.0 * arg / vd)
+        (-isat * (1.0 + arg), isat * 3.0 * arg / vd)
+    }
+
+    fn active_breakdown_voltage(&self) -> Option<Value> {
+        if let Some(brkdwn_v) = self.temperature_breakdown_voltage
+            && brkdwn_v.is_finite()
+            && brkdwn_v > 0.0
+        {
+            return Some(brkdwn_v);
+        }
+
+        self.bv.and_then(|bv| {
+            if bv.is_finite() && bv > 0.0 {
+                self.xbv_matched_breakdown_voltage(bv).or(Some(bv))
+            } else {
+                None
+            }
+        })
+    }
+
+    fn xbv_matched_breakdown_voltage(&self, bv: Value) -> Option<Value> {
+        let vt = self.vt;
+        let isat = self.is.max(1e-300);
+        let cbv = self.ibv;
+        let nbv = self.breakdown_emission_coefficient.max(EPSMIN);
+        if !(bv.is_finite()
+            && bv > 0.0
+            && vt.is_finite()
+            && vt > 0.0
+            && cbv.is_finite()
+            && cbv > 0.0)
+        {
+            return None;
+        }
+
+        if cbv < isat * bv / vt {
+            return Some(bv);
+        }
+
+        let reltol = 1.0e-3;
+        let tol = reltol * cbv;
+        let mut xbv = bv - nbv * vt * (1.0 + cbv / isat).ln();
+        for _ in 0..25 {
+            xbv = bv - nbv * vt * (cbv / isat + 1.0 - xbv / vt).ln();
+            let xcbv = isat * (((bv - xbv) / (nbv * vt)).exp() - 1.0 + xbv / vt);
+            if (xcbv - cbv).abs() <= tol {
+                break;
+            }
+        }
+        if xbv.is_finite() && xbv > 0.0 {
+            Some(xbv)
+        } else {
+            Some(bv)
+        }
+    }
+
+    fn limited_exp(arg: Value, max_arg: Value) -> (Value, Value) {
+        if arg <= max_arg {
+            let exp_arg = arg.exp();
+            return (exp_arg, exp_arg);
+        }
+
+        let exp_max = max_arg.exp();
+        (exp_max * (1.0 + arg - max_arg), exp_max)
+    }
+
+    fn depletion_charge_and_capacitance(
+        vd: Value,
+        cj0: Value,
+        vj: Value,
+        grading: Value,
+        fc: Value,
+    ) -> (Value, Value) {
+        if !(cj0 > 0.0 && vj > 0.0 && grading < 1.0) {
+            return (0.0, 0.0);
+        }
+
+        let fc = fc.clamp(0.0, 0.95);
+        let dep_cap_knee = fc * vj;
+        if vd < dep_cap_knee {
+            let arg = 1.0 - vd / vj;
+            let sarg_arg = (-grading * arg.ln()).min(MAX_EXP_ARG);
+            let sarg = sarg_arg.exp();
+            let charge = vj * cj0 * (1.0 - arg * sarg) / (1.0 - grading);
+            let capacitance = cj0 * sarg;
+            return (charge, capacitance);
+        }
+
+        let f1 = vj * (1.0 - (1.0 - fc).powf(1.0 - grading)) / (1.0 - grading);
+        let f2 = (1.0 - fc).powf(1.0 + grading);
+        let f3 = 1.0 - fc * (1.0 + grading);
+        let czof2 = cj0 / f2;
+        let charge = cj0 * f1
+            + czof2
+                * (f3 * (vd - dep_cap_knee)
+                    + (grading / (2.0 * vj)) * (vd * vd - dep_cap_knee * dep_cap_knee));
+        let capacitance = czof2 * (f3 + grading * vd / vj);
+        (charge, capacitance)
     }
 
     fn apply_high_injection_knee(
@@ -643,10 +934,13 @@ impl Diode {
         (current / (1.0 + sqrt_knee), limited_conductance)
     }
 
-    fn breakdown_softness(&self, bv: Value) -> Value {
-        let thermal_knee = (self.n * self.vt).abs().max(0.05);
-        let scaled_knee = (0.02 * bv.abs()).clamp(0.05, 1.0);
-        thermal_knee.max(scaled_knee)
+    fn linearized_current_matches_candidate(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        let candidate_current = self.current(self.prev_vd) + self.junction_gmin * self.prev_vd;
+        let predicted_current = self.last_stamp_id.get()
+            + self.last_stamp_gd.get() * (self.prev_vd - self.last_stamp_vd.get());
+        let tolerance = criteria.current_tolerance()
+            + criteria.relative_tolerance() * candidate_current.abs().max(predicted_current.abs());
+        (candidate_current - predicted_current).abs() <= tolerance
     }
 }
 
@@ -704,7 +998,9 @@ impl NonlinearDevice for Diode {
         let tolerance = criteria.voltage_tolerance();
         // A pnjlim-clamped step must iterate again regardless of the
         // voltage delta (ngspice `Check` semantics).
-        !self.limited.get() && (self.prev_vd - self.prev_vd_old).abs() < tolerance
+        !self.limited.get()
+            && (self.prev_vd - self.prev_vd_old).abs() < tolerance
+            && self.linearized_current_matches_candidate(criteria)
     }
 }
 

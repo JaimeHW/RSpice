@@ -134,7 +134,7 @@ impl Engine {
         circuit.update_jfet_static_linearizations(solution);
         circuit.stamp_generic_switches(matrix, rhs, 0.0);
         circuit
-            .try_stamp_nonlinear(matrix, rhs, solution)
+            .try_stamp_static_probe_nonlinear(matrix, rhs, solution)
             .map_err(SimulationError::Circuit)?;
         circuit.stamp_behavioral(
             matrix,

@@ -847,6 +847,8 @@ impl Engine {
                     // up, series resistance scales down.
                     let area = instance_param(instance_params, &["AREA"]).unwrap_or(1.0);
                     let mult = instance_param(instance_params, &["M", "MULT"]).unwrap_or(1.0);
+                    let sidewall_perimeter =
+                        instance_param(instance_params, &["PJ"]).unwrap_or(0.0);
                     if !area.is_finite() || area <= 0.0 {
                         return Err(SimulationError::Circuit(format!(
                             "Diode '{}' has invalid AREA={} (must be finite and > 0)",
@@ -859,10 +861,17 @@ impl Engine {
                             element.name, mult
                         )));
                     }
+                    if !sidewall_perimeter.is_finite() || sidewall_perimeter < 0.0 {
+                        return Err(SimulationError::Circuit(format!(
+                            "Diode '{}' has invalid PJ={} (must be finite and >= 0)",
+                            element.name, sidewall_perimeter
+                        )));
+                    }
                     let junction_scale = area * mult;
                     if junction_scale != 1.0 {
                         diode.apply_junction_scaling(junction_scale);
                     }
+                    diode.set_sidewall_perimeter(sidewall_perimeter * mult);
                     diode.multiplicity = mult;
                     diode.set_temperature(temp_k, tnom_k);
 

@@ -416,8 +416,15 @@ impl Engine {
                 return false;
             };
 
-            let fixed_point_converged =
-                self.node_voltage_convergence_met(solution, &next_solution, circuit.num_nodes());
+            let node_count = circuit
+                .num_nodes()
+                .min(solution.len())
+                .min(next_solution.len());
+            let voltage_abstol = self.voltage_abstol();
+            let fixed_point_converged = solution[..node_count]
+                .iter()
+                .zip(next_solution[..node_count].iter())
+                .all(|(current, next)| (next - current).abs() <= voltage_abstol);
             let residual_only_acceptable =
                 residual_converged && circuit.has_jfet_gate_generation_branches();
 
