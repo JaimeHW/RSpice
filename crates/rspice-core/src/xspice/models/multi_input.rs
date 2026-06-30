@@ -106,15 +106,19 @@ fn parameters() -> &'static [ParamSpec] {
 
 fn mode(ctx: &CmContext) -> CmResult<MultiInputPwlMode> {
     let raw = ctx.string_param("model").unwrap_or("and");
-    match raw.to_ascii_lowercase().as_str() {
-        "and" => Ok(MultiInputPwlMode::And),
-        "nand" => Ok(MultiInputPwlMode::Nand),
-        "or" => Ok(MultiInputPwlMode::Or),
-        "nor" => Ok(MultiInputPwlMode::Nor),
-        _ => Err(invalid_param(
+    if raw.eq_ignore_ascii_case("and") {
+        Ok(MultiInputPwlMode::And)
+    } else if raw.eq_ignore_ascii_case("nand") {
+        Ok(MultiInputPwlMode::Nand)
+    } else if raw.eq_ignore_ascii_case("or") {
+        Ok(MultiInputPwlMode::Or)
+    } else if raw.eq_ignore_ascii_case("nor") {
+        Ok(MultiInputPwlMode::Nor)
+    } else {
+        Err(invalid_param(
             "model",
             format!("unknown model '{raw}', expected and|nand|or|nor"),
-        )),
+        ))
     }
 }
 
