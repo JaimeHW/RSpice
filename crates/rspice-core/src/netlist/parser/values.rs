@@ -205,6 +205,11 @@ pub(super) fn parse_model_params(
                         stream.advance();
                         string_params.push((name, value));
                     }
+                    TokenKind::Other('<') => {
+                        let value =
+                            parse_model_complex_literal_string(stream, line_num, &name, params)?;
+                        string_params.push((name, value));
+                    }
                     TokenKind::Number(_)
                         if crate::netlist::xspice_param_preserves_numeric_string(&name)
                             || model_param_accepts_bare_string(&name, model_type) =>
@@ -287,9 +292,11 @@ pub(super) fn parse_model_params(
                     }
                     TokenKind::LBracket => {
                         if crate::netlist::xspice_param_prefers_string_vector(&name)
+                            || model_vector_starts_with_complex(stream)
                             || model_vector_starts_with_string(stream, params)
                         {
-                            let values = parse_model_string_vector(stream, line_num, &name)?;
+                            let values =
+                                parse_model_string_vector(stream, line_num, &name, params)?;
                             string_vector_params.push((name, values));
                         } else {
                             let values = parse_model_real_vector(stream, line_num, &name, params)?;
@@ -525,6 +532,8 @@ fn model_param_accepts_contextual_bare_string(name: &str, model_type: Option<&st
         return false;
     };
     name.eq_ignore_ascii_case("model") && model_type.eq_ignore_ascii_case("multi_input_pwl")
+        || name.eq_ignore_ascii_case("string")
+            && model_type.eq_ignore_ascii_case("print_param_types")
 }
 
 fn push_model_string_value(
@@ -628,6 +637,17 @@ fn model_vector_starts_with_string(stream: &TokenStream, params: &ParamContext) 
     }
 }
 
+fn model_vector_starts_with_complex(stream: &TokenStream) -> bool {
+    let mut offset = 1usize;
+    loop {
+        match &stream.peek_n(offset).kind {
+            TokenKind::Comma => offset += 1,
+            TokenKind::Other('<') => return true,
+            _ => return false,
+        }
+    }
+}
+
 fn token_can_start_model_real_vector_value(kind: &TokenKind, params: &ParamContext) -> bool {
     match kind {
         TokenKind::Number(_) | TokenKind::Expression(_) => true,
@@ -642,6 +662,7 @@ fn parse_model_string_vector(
     stream: &mut TokenStream,
     line_num: usize,
     name: &str,
+    params: &ParamContext,
 ) -> Result<Vec<String>, ParseError> {
     if !stream.consume(&TokenKind::LBracket) {
         return Err(ParseError::Syntax {
@@ -669,6 +690,11 @@ fn parse_model_string_vector(
                 let value = value.clone();
                 stream.advance();
                 values.push(value);
+            }
+            TokenKind::Other('<') => {
+                values.push(parse_model_complex_literal_string(
+                    stream, line_num, name, params,
+                )?);
             }
             TokenKind::RParen | TokenKind::Newline | TokenKind::Eof => {
                 return Err(ParseError::Syntax {
@@ -733,6 +759,64 @@ fn parse_model_string_vector_bare_value(
     }
 
     Ok(value)
+}
+
+fn parse_model_complex_literal_string(
+    stream: &mut TokenStream,
+    line_num: usize,
+    name: &str,
+    params: &ParamContext,
+) -> Result<String, ParseError> {
+    if !matches!(stream.peek().kind, TokenKind::Other('<')) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected complex value for model parameter '{}', found {}",
+                name,
+                stream.peek().kind
+            ),
+        });
+    }
+    stream.advance();
+
+    let Some(real) = try_signed_model_value(stream, params) else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected real part in complex model parameter '{}', found {}",
+                name,
+                stream.peek().kind
+            ),
+        });
+    };
+    let Some(imag) = try_signed_model_value(stream, params) else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected imaginary part in complex model parameter '{}', found {}",
+                name,
+                stream.peek().kind
+            ),
+        });
+    };
+
+    skip_commas(stream);
+    if !stream.consume(&TokenKind::Other('>')) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected '>' after complex model parameter '{}', found {}",
+                name,
+                stream.peek().kind
+            ),
+        });
+    }
+
+    Ok(format!(
+        "<{} {}>",
+        format_compact_number(real),
+        format_compact_number(imag)
+    ))
 }
 
 fn parse_model_real_vector(

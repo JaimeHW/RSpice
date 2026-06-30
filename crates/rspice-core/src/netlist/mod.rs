@@ -867,6 +867,69 @@ mod tests {
     }
 
     #[test]
+    fn xspice_model_params_accept_ngspice_complex_literals() {
+        let netlist = Netlist::parse(
+            "xspice complex model params\n\
+             .model mod print_param_types (complex=<4.0 5.0>\n\
+             + string=six\n\
+             + real_array=[9.0 10.0]\n\
+             + complex_array=[< 11.0 12.0 > < 13.0 14.0 >]\n\
+             + string_array=[fifteen sixteen])\n\
+             .end\n",
+        )
+        .expect("official ngspice complex model params parse");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("mod"))
+            .expect("model exists");
+        let complex = model
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("complex"))
+            .map(|(_, value)| value.as_str())
+            .expect("complex exists");
+        let string = model
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("string"))
+            .map(|(_, value)| value.as_str())
+            .expect("string exists");
+        let real_array = model
+            .real_vector_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("real_array"))
+            .map(|(_, values)| values.as_slice())
+            .expect("real_array exists");
+        let complex_array = model
+            .string_vector_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("complex_array"))
+            .map(|(_, values)| values.as_slice())
+            .expect("complex_array exists");
+        let string_array = model
+            .string_vector_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("string_array"))
+            .map(|(_, values)| values.as_slice())
+            .expect("string_array exists");
+
+        assert_eq!(complex, "<4 5>");
+        assert_eq!(string, "six");
+        assert_eq!(real_array, &[9.0, 10.0]);
+        assert_eq!(complex_array, &["<11 12>", "<13 14>"]);
+        assert_eq!(string_array, &["fifteen", "sixteen"]);
+        assert!(
+            model
+                .params
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("complex")),
+            "complex literal must not also be a numeric scalar"
+        );
+    }
+
+    #[test]
     fn xspice_model_params_accept_known_bare_string_literals() {
         let netlist = Netlist::parse(
             "xspice bare string model params\n\
