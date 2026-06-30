@@ -7,7 +7,7 @@
 use super::digital::DigitalValue;
 use crate::Value;
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 
 //=============================================================================
 // Event Types
@@ -39,6 +39,13 @@ pub struct Event {
     pub priority: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct EventDriverKey {
+    node_id: usize,
+    port_name: String,
+    instance: String,
+}
+
 impl Event {
     /// Create a new event
     pub fn new(
@@ -64,6 +71,14 @@ impl Event {
         self.node_id == other.node_id
             && self.instance == other.instance
             && self.port_name == other.port_name
+    }
+
+    fn driver_key(&self) -> EventDriverKey {
+        EventDriverKey {
+            node_id: self.node_id,
+            port_name: self.port_name.clone(),
+            instance: self.instance.clone(),
+        }
     }
 }
 
@@ -105,6 +120,8 @@ impl Ord for Event {
 pub struct EventQueue {
     /// Pending events (min-heap by time)
     events: BinaryHeap<Event>,
+    /// Latest pending event time for each output driver.
+    latest_driver_event_times: HashMap<EventDriverKey, Value>,
     /// Number of events processed
     events_processed: u64,
     /// Last event time processed
@@ -122,8 +139,18 @@ impl EventQueue {
         if !event.time.is_finite() {
             return;
         }
-        self.events
-            .retain(|pending| !(pending.same_output_driver(&event) && pending.time >= event.time));
+        let driver_key = event.driver_key();
+        if self
+            .latest_driver_event_times
+            .get(&driver_key)
+            .is_some_and(|latest_time| *latest_time >= event.time)
+        {
+            self.events.retain(|pending| {
+                !(pending.same_output_driver(&event) && pending.time >= event.time)
+            });
+        }
+        self.latest_driver_event_times
+            .insert(driver_key, event.time);
         self.events.push(event);
     }
 
@@ -208,6 +235,7 @@ impl EventQueue {
         while let Some(event) = self.events.peek() {
             if event.time <= time {
                 if let Some(e) = self.events.pop() {
+                    self.forget_drained_event(&e);
                     self.events_processed += 1;
                     self.last_event_time = time;
                     sink(e);
@@ -225,6 +253,7 @@ impl EventQueue {
         while let Some(event) = self.events.peek() {
             if (event.time - time).abs() < EPSILON {
                 if let Some(e) = self.events.pop() {
+                    self.forget_drained_event(&e);
                     events.push(e);
                     self.events_processed += 1;
                     self.last_event_time = time;
@@ -239,16 +268,19 @@ impl EventQueue {
     /// Cancel all events for a specific node
     pub fn cancel_node_events(&mut self, node_id: usize) {
         self.events.retain(|event| event.node_id != node_id);
+        self.rebuild_driver_index();
     }
 
     /// Cancel all events for a specific instance
     pub fn cancel_instance_events(&mut self, instance: &str) {
         self.events.retain(|event| event.instance != instance);
+        self.rebuild_driver_index();
     }
 
     /// Clear all pending events
     pub fn clear(&mut self) {
         self.events.clear();
+        self.latest_driver_event_times.clear();
     }
 
     /// Get statistics
@@ -257,6 +289,31 @@ impl EventQueue {
             pending: self.events.len(),
             processed: self.events_processed,
             last_event_time: self.last_event_time,
+        }
+    }
+
+    fn forget_drained_event(&mut self, event: &Event) {
+        let driver_key = event.driver_key();
+        if self
+            .latest_driver_event_times
+            .get(&driver_key)
+            .is_some_and(|latest_time| *latest_time == event.time)
+        {
+            self.latest_driver_event_times.remove(&driver_key);
+        }
+    }
+
+    fn rebuild_driver_index(&mut self) {
+        self.latest_driver_event_times.clear();
+        for event in &self.events {
+            self.latest_driver_event_times
+                .entry(event.driver_key())
+                .and_modify(|latest_time| {
+                    if event.time > *latest_time {
+                        *latest_time = event.time;
+                    }
+                })
+                .or_insert(event.time);
         }
     }
 }
@@ -335,6 +392,68 @@ mod tests {
         assert!(values.contains(&EventValue::Digital(DigitalValue::zero())));
         assert!(values.contains(&EventValue::Digital(DigitalValue::unknown())));
         assert!(!values.contains(&EventValue::Digital(DigitalValue::one())));
+    }
+
+    #[test]
+    fn event_queue_driver_index_tracks_schedule_drain_cancel_and_clear() {
+        let mut queue = EventQueue::new();
+        let driver = EventDriverKey {
+            node_id: 1,
+            port_name: "out".to_string(),
+            instance: "a_driver".to_string(),
+        };
+
+        queue.schedule(Event::new(
+            1.0e-9,
+            1,
+            "out",
+            "a_driver",
+            EventValue::Digital(DigitalValue::zero()),
+        ));
+        queue.schedule(Event::new(
+            3.0e-9,
+            1,
+            "out",
+            "a_driver",
+            EventValue::Digital(DigitalValue::one()),
+        ));
+        assert_eq!(
+            queue.latest_driver_event_times.get(&driver).copied(),
+            Some(3.0e-9)
+        );
+
+        queue.schedule(Event::new(
+            2.0e-9,
+            1,
+            "out",
+            "a_driver",
+            EventValue::Digital(DigitalValue::unknown()),
+        ));
+        assert_eq!(queue.len(), 2);
+        assert_eq!(
+            queue.latest_driver_event_times.get(&driver).copied(),
+            Some(2.0e-9)
+        );
+
+        let drained = queue.pop_events_at(1.0e-9);
+        assert_eq!(drained.len(), 1);
+        assert_eq!(
+            queue.latest_driver_event_times.get(&driver).copied(),
+            Some(2.0e-9)
+        );
+
+        queue.cancel_node_events(1);
+        assert!(queue.latest_driver_event_times.is_empty());
+
+        queue.schedule(Event::new(
+            4.0e-9,
+            1,
+            "out",
+            "a_driver",
+            EventValue::Digital(DigitalValue::one()),
+        ));
+        queue.clear();
+        assert!(queue.latest_driver_event_times.is_empty());
     }
 
     #[test]
