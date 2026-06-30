@@ -19,6 +19,13 @@
 //! native JIT image. Unsupported native compilation returns a typed error rather
 //! than silently running the bytecode VM interpreter.
 //!
+//! Production circuit-builder flows that enable native Verilog-A carry the
+//! canonical IR artifact and construct devices through
+//! [`VerilogADevice::try_new_with_canonical_ir`]. The direct [`VerilogADevice::try_new`]
+//! constructor has no canonical artifact to consume, so under `native` it is kept
+//! as a bytecode-native development/test entrypoint. It is still full JIT or
+//! error; it must not be treated as an interpreter fallback.
+//!
 //! The native path is a performance backend, not a separate public ABI. Keep all
 //! raw-pointer and Send/Sync safety reasoning in the native module and require a
 //! targeted audit before expanding that boundary.
@@ -48,6 +55,9 @@ enum NativeValueEntry {
 #[cfg(feature = "native")]
 #[derive(Clone, PartialEq, Eq)]
 enum NativeCompileCacheKey {
+    /// Direct device construction without a canonical artifact uses this
+    /// development/test cache lane. Production `veriloga-native` circuit builds
+    /// should compile through `CanonicalMir` instead.
     Bytecode,
     CanonicalMir(SmolStr),
 }
@@ -161,6 +171,12 @@ impl VerilogADevice {
     /// Checked constructor for callers that can surface dependent-parameter
     /// default failures as diagnostics instead of panicking or accepting a
     /// zero default.
+    ///
+    /// With the `native` feature enabled, this direct constructor uses the
+    /// bytecode-native development/test compiler because it has no canonical IR
+    /// artifact. Production native circuit flows should use
+    /// [`Self::try_new_with_canonical_ir`] or the core circuit builder, which
+    /// requires canonical IR and hard-fails on unsupported native coverage.
     pub fn try_new(
         name: impl Into<SmolStr>,
         model: impl Into<std::sync::Arc<CompiledModel>>,
