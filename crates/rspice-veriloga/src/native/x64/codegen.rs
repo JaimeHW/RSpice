@@ -49,6 +49,8 @@ const MFACTOR_OFFSET: i32 = 200;
 const STATE_PREV_LEN_OFFSET: i32 = 288;
 const STATE_VALUES_LEN_OFFSET: i32 = 296;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
+const LITERAL_POOL_ALIGNMENT: usize = WORD_BYTES;
+const LITERAL_POOL_PADDING_BYTE: u8 = 0x90;
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
 const BOOLEAN_EPSILON: f64 = 1.0e-15;
@@ -3063,6 +3065,11 @@ impl FunctionCompiler {
     fn finish_with_literals(self) -> JitResult<Vec<u8>> {
         let mut bytes = self.encoder.into_bytes();
         let mut literal_offsets: Vec<(u64, usize)> = Vec::new();
+        if !self.literals.is_empty() {
+            let padding = (LITERAL_POOL_ALIGNMENT - (bytes.len() % LITERAL_POOL_ALIGNMENT))
+                % LITERAL_POOL_ALIGNMENT;
+            bytes.resize(bytes.len() + padding, LITERAL_POOL_PADDING_BYTE);
+        }
         for literal in &self.literals {
             let bits = literal.value.to_bits();
             let literal_offset = literal_offsets
@@ -3682,13 +3689,14 @@ mod tests {
     use super::{
         BRANCH_CURRENTS_OFFSET, ConditionCode, ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES,
         FunctionCompiler, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET,
-        K_BOLTZMANN, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET, Q_ELECTRON,
-        ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, TableHelper, TimerHelper,
-        VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls,
-        call_result_disp, call_spill_disp, compile_assignment_function,
-        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
-        entry_vars_arg_reg, native_op_reads_entry_args, native_op_uses_helper_call,
-        program_uses_helper_calls, rspice_exp, value_program_needs_saved_entry_args,
+        K_BOLTZMANN, LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper,
+        PARAMS_OFFSET, Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES,
+        TableHelper, TimerHelper, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
+        assignment_uses_helper_calls, call_result_disp, call_spill_disp,
+        compile_assignment_function, compile_assignment_pass_function, compile_value_function,
+        entry_ctx_arg_reg, entry_vars_arg_reg, native_op_reads_entry_args,
+        native_op_uses_helper_call, program_uses_helper_calls, rspice_exp,
+        value_program_needs_saved_entry_args,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -3707,6 +3715,7 @@ mod tests {
     #[test]
     fn literal_pool_reuses_identical_bit_patterns() {
         let mut compiler = FunctionCompiler::new(false, false, 0, None, None, 0);
+        compiler.encoder.ret();
         compiler.emit_literal_load(Xmm::Xmm0, 2.0);
         compiler.emit_literal_load(Xmm::Xmm1, 2.0);
         compiler.emit_literal_load(Xmm::Xmm2, 3.0);
@@ -3724,6 +3733,20 @@ mod tests {
             count_bytes(&bytes, &3.0_f64.to_le_bytes()),
             1,
             "distinct literals should keep distinct pool slots"
+        );
+        let two_offset =
+            find_bytes(&bytes, &2.0_f64.to_le_bytes()).expect("2.0 literal is present");
+        let three_offset =
+            find_bytes(&bytes, &3.0_f64.to_le_bytes()).expect("3.0 literal is present");
+        assert_eq!(
+            two_offset % LITERAL_POOL_ALIGNMENT,
+            0,
+            "first literal should be naturally aligned"
+        );
+        assert_eq!(
+            three_offset % LITERAL_POOL_ALIGNMENT,
+            0,
+            "subsequent literal should stay naturally aligned"
         );
     }
 
@@ -10427,6 +10450,12 @@ mod tests {
 
     fn contains_bytes(bytes: &[u8], needle: &[u8]) -> bool {
         bytes.windows(needle.len()).any(|window| window == needle)
+    }
+
+    fn find_bytes(bytes: &[u8], needle: &[u8]) -> Option<usize> {
+        bytes
+            .windows(needle.len())
+            .position(|window| window == needle)
     }
 
     fn assert_f64_matches(actual: f64, expected: f64, context: &str) {
