@@ -2,7 +2,7 @@ RSpice conformance corpus
 =========================
 
 This tree is the ngspice-46 test corpus, vendored as RSpice's conformance
-oracle suite (provenance: docs/legal/ngspice-provenance-audit.md). The
+oracle suite. The
 .out files are recorded ngspice-46 results and serve as the golden
 references.
 

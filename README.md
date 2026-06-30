@@ -25,7 +25,7 @@ Around the engine sit a CLI built for batch runs and CI, a desktop application f
 
 RSpice is a young project under active development. The surface area below is broad: major paths are implemented and covered by focused tests, but maturity and validation depth vary by subsystem. Accuracy is measured against ngspice continuously rather than assumed, and the current repository should not be presented as a substitute for hardened EDA tooling.
 
-Platform support is tracked by evidence in [docs/platform-support.md](docs/platform-support.md); mobile/tablet browser use and signed release artifacts are still experimental or launch-only until their gates exist.
+Platform support is tracked by CI coverage and release gates; mobile/tablet browser use and signed release artifacts are still experimental or launch-only until their gates exist.
 
 ## Quick start
 
@@ -227,7 +227,7 @@ cargo test --release -p rspice-core --test ngspice_regression  # ngspice suite
 cargo test --release -p rspice-core --test xyce_regression     # Xyce corpus
 ```
 
-The harness design — oracle-replay methodology, comparison gating, debug environment variables — is documented in [docs/testing.md](docs/testing.md).
+The harness design uses oracle replay, comparison gating, and debug environment variables to keep simulator-corpus results explicit and reproducible.
 
 ## Workspace
 
@@ -241,7 +241,7 @@ The harness design — oracle-replay methodology, comparison gating, debug envir
 | `rspice-wasm` | WebAssembly bindings for the simulation engine |
 | `rspice-bench` | Whole-process benchmark rig against local ngspice |
 
-Beyond the crates: [models/](models/) holds starter SPICE and Verilog-A libraries, [tests/](tests/) contains vendored simulator corpora (`ngspice/` and `xyce/`) with corpus-local manifests and notices, [benchmarks/](benchmarks/) the macro-benchmark decks and published scoreboards, and [docs/](docs/) the user manual, testing methodology, and roadmap.
+Beyond the crates: [models/](models/) holds starter SPICE and Verilog-A libraries, [tests/](tests/) contains vendored simulator corpora (`ngspice/` and `xyce/`) with corpus-local manifests and notices, and [benchmarks/](benchmarks/) the macro-benchmark decks and published scoreboards.
 
 ## License
 

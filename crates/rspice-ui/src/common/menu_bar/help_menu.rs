@@ -1,10 +1,10 @@
 use crate::common::app::{AppState, ConsoleMessage};
 
 pub(crate) const DOC_REFERENCES: [(&str, &str); 4] = [
-    ("User Guide", "docs/user_guide.md"),
-    ("SPICE Reference", "docs/spice_reference.md"),
-    ("Analysis Guide", "docs/analysis_guide.md"),
-    ("Model Library", "docs/models.md"),
+    ("README", "https://github.com/JaimeHW/RSpice#readme"),
+    ("Website Docs", "https://rspice.app/docs.html"),
+    ("Validation", "https://rspice.app/parity.html"),
+    ("Model Library", "models/README.md"),
 ];
 
 pub(crate) fn open_documentation_reference(state: &mut AppState, title: &str, relative_path: &str) {

@@ -113,15 +113,6 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("runs-on: macos-latest", workflow)
         self.assertIn("cargo check -p rspice-cli -p rspice-ui", workflow)
 
-    def test_platform_support_matrix_documents_evidence_and_mobile_limits(self) -> None:
-        matrix = read_text("docs/platform-support.md")
-
-        self.assertIn("Native desktop", matrix)
-        self.assertIn("Browser IDE", matrix)
-        self.assertIn("WASM playground", matrix)
-        self.assertRegex(matrix, r"macOS.*cargo check -p rspice-cli -p rspice-ui")
-        self.assertRegex(matrix.lower(), r"mobile/tablet.*experimental")
-
     def test_ui_readme_matches_current_feature_flags_and_modules(self) -> None:
         readme = read_text("crates/rspice-ui/README.md")
         manifest = read_text("crates/rspice-ui/Cargo.toml")
@@ -183,15 +174,6 @@ class CiConfigurationTests(unittest.TestCase):
         normalized_notice = re.sub(r"\s+", " ", notice)
         self.assertIn("Educational Community License, Version 2.0", normalized_notice)
 
-    def test_klu_solver_provenance_audit_is_current(self) -> None:
-        audit = read_text("docs/legal/ngspice-provenance-audit.md")
-        core_readme = read_text("crates/rspice-core/README.md")
-
-        self.assertIn("KLU-class", core_readme)
-        self.assertIn("2026-06-18 KLU-class solver addendum", audit)
-        self.assertNotIn("not re-audited", audit)
-        self.assertIn("no SuiteSparse KLU source or binding is vendored", audit)
-
     def test_referenced_source_files_are_tracked(self) -> None:
         source_like_paths = [
             "crates/rspice-core/src/netlist/source_map.rs",
@@ -208,7 +190,6 @@ class CiConfigurationTests(unittest.TestCase):
             "crates/rspice-ui/src/simulation/runner/worker_contract.rs",
             "crates/rspice-ui/src/state/simulation/ac_bode.rs",
             "crates/rspice-veriloga/tests/support/mod.rs",
-            "docs/platform-support.md",
         ]
 
         for path in source_like_paths:
