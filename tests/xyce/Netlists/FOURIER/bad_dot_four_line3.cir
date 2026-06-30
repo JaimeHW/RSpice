@@ -1,0 +1,25 @@
+Testing ill-formed .FOUR lines
+*********************************************************************
+* This test that invalid lead current requests, not on a
+* .PRINT TRAN line, will generate the correct error messages, 
+* and a graceful exit.  It also tests that for the P(), W(), V() 
+* and N() operators.  Also, GND is not a valid node since the 
+* netlist does not define GND as a valid node or have the 
+* line .PREPROCESS REPLACEGROUND TRUE
+*
+*
+*  See SRN Bugs 703, 707 and 718 for more details. 
+*
+*********************************************************************
+VS  1  0  SIN(0 1.0 1KHZ 0 0)
+R1  1  0  100
+.TRAN 0 1ms
+.PRINT TRAN FORMAT=NOINDEX V(1)
+
+* bogo measure lines that will cause an error within
+* the *makeOp() function in N_UTL_Op.C
+
+.FOUR 1KHZ I(BogoDevice1) P(BogoDevice2) W(BogoDevice3) V(2) N(3) V(GND)
+
+.END
+

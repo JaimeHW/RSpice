@@ -1,0 +1,33 @@
+Test
+v1 11 0 0
+v2 20 0 0
+r1 30 5 1k
+v3 5 0 0
+MNORMA 11 20 30 30 MOSNORM L=1E-4 W=1000 
+
+.dc v1 0 1 1
+.print dc v(11) i(v1) i(v2)
+
+.MODEL MOSNORM NMOS (
++      LEVEL = 1
++        VTO = 128
++         KP = .00002
++      GAMMA = 0
++        PHI = .6
++     LAMBDA = 0
++         RD = 0.16
++         RS = 0.001
++        CBD = 10pF
++        CBS = 10pF
++         IS = 1E-14
++         PB = .8
++       CGSO = 5pF ;controls trigger pulse width at 50V & firing
++       CGDO = 10pF; la de da
++       CGBO = 10pF
++        RSH = 0.001
++         CJ = 10pF
++         MJ = .5
++       CJSW = 0.1pF
++       MJSW = .33
++         JS = 0
++ )

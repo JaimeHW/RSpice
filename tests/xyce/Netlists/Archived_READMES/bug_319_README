@@ -1,0 +1,18 @@
+Bug Number: 319
+Test netlist: bug_319.cir
+
+Description:
+============
+This test checks for proper handling of subcircuit instance of a subcircuit
+defined with parameters.
+
+Verification
+============
+Run Xyce on the netlist.
+
+Compare against the results in the given prn file using xyce_verify.pl or
+"compare".
+
+Special Notes:
+==============
+None.

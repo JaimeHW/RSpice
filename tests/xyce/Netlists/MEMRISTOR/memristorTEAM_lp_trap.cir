@@ -1,0 +1,21 @@
+A test of the TEAM memristor device
+
+vsrc n1 0  sin( 0 1 1000 0 )
+
+*rload n1 n2 100
+
+vmon n1 n2 0 
+
+.model mrm1 memristor level=2 ron=50 roff=1000 koff=1.46e-18 kon=-4.68e-22 alphaoff=10 alphaon=10 wc=1.0e-12 ioff=115e-6 ion=-8.9e-6 xscaling=1.0e9 wt=4
+ymemristor mr1 n2 n3 mrm1
+
+rptg n3 0 50 
+
+
+.print tran v(n1)  i(vmon) i(ymemristor!mr1) {(v(n2)-v(n3))*i(ymemristor!mr1)} p(ymemristor!mr1) w(ymemristor!mr1)
+
+
+.tran 0 10e-3
+
+.end
+

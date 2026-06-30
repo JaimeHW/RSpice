@@ -1,0 +1,5 @@
+README
+bug_1578.cir
+bug_1578.cir.sh
+tags
+options

@@ -1,0 +1,11 @@
+Interpolation bug example
+v1 1 0 1V
+v2 2 0 0V
+R1 1 2 {10 + 1000 * exp(-(TIME - 7e-3)**2 / 5e-6)}
+*R1 1 2 {10 + 1e9 * TIME**3}
+
+.tran 50us 15ms
+.options output initial_interval=150us
+.print tran {1/i(R1)} I(V2)
+.options timeint reltol = 1e-5
+.end

@@ -1,0 +1,105 @@
+* This is a netlist that demonstrates transient adjoint sensitivities with an 
+* event-based objective function for delay.  It demonstrates them 
+* by processing the output of an inverter chain.
+*
+* The Xyce implementation of adjoints currently doens't directly support event 
+* objectives.  It can only compute sensitivities with respect to solution variables, 
+* or simple objectives supported by the expression library.
+*
+* However, it is possible to work around this by implementing objective functions 
+* in the netlist as solution variables.  This can be accomplished with combinations 
+* of circuit elements, behavioral sources, and other uses of the expression library.
+*
+* Author: Eric Keiter
+*********************************************************************************
+
+.options timeint method=gear debuglevel=-100 reltol=1.0e-6 abstol=1.0e-6
+.options device temp=25 debuglevel=-100
+
+*.hdl "bsim6.va"
+.include "modelcard_xyce.nmos"
+.include "modelcard_xyce.pmos"
+
+* --- Voltage Sources ---
+vdd   supply  0 dc 1.0
+VIN1 vi 0 PWL(0S 0V  7.0e-8 0V 0.1us 1.0V )
+*VIN1 vi 0 PWL(0S 0V  0.1us 1.0V )
+
+* --- Inverter Subcircuit ---
+.subckt inverter vin vout vdd gnd
+Mp1 vout vin vdd gnd pmos W=10u L=10u 
+Mn1 vout vin gnd gnd nmos W=10u L=10u 
+.ends
+
+* --- Inverter ---
+Xinv1  vi 1 supply 0 inverter
+Xinv2  1 2 supply 0 inverter
+Xinv3  2 3 supply 0 inverter
+Xinv4  3 4 supply 0 inverter
+Xinv5  4 vo supply 0 inverter
+
+
+*********************************************************************************
+* Circuit to support an event-based objective.  
+* Let time be a solution variable, via a Bsrc.
+* Feed that time value into an RC delay circuit.  Initially have the RC delay be 
+* trivially small.  Then, based on an event-based conditional, change the RC value 
+* to a really large RC constant, so that the value for "time" stops changing.  
+* This will effectively create a measure of when this event happens.
+*
+* Note, this only works if the event happens 1x.
+*********************************************************************************
+* big conductance, no delay (for BEFORE the event)
+.param RnoDelay=1.0e-4
+.param GnoDelay={1/RnoDelay} 
+.param logGnoDelay={log(GnoDelay)}
+
+* small conductance, large delay (for AFTER the event)
+.param RbigDelay=1.0e+7
+.param GbigDelay={1/RbigDelay}
+.param logGbigDelay={log(GbigDelay)}
+
+.param scale={ ( logGnoDelay - logGbigDelay )/2 }
+.param Vthresh = 0.5
+.param Vwidth = 0.001
+.param widthScale = {1/Vwidth}
+
+* smoothly varying conductance function, using tanh function to handle smoothing.
+* The smoothing is applied to the log of the conductance, as it varys over many
+* orders of magnitude.
+*
+* The threshold value is given by Vthresh.  If the input voltage is above 0.5 
+* (the BEFORE state) then the conductance is the "BIG" no-delay conductance.  
+* Opposite is true if below 0.5.
+*
+.func smoothG (V) {10**( scale*(1+tanh( (V-Vthresh)*widthScale)) + logGbigDelay)}
+
+.param CeventParam=1.0e-6
+
+.param RCnoConst={CeventParam*RnoDelay}
+.param RCbigConst={CeventParam*RbigDelay}
+
+* event circuit
+Bevent  timeNode 0 V={time}
+BeventR timeNode eventTime I={ smoothG(v(vo)) *(v(timeNode)-v(eventTime)) }
+Cevent eventTime 0 {CeventParam}
+*********************************************************************************
+
+* --- Transient Analysis ---
+.tran 2ns 1us
+
+.print tran v(vi) v(1) v(2) v(3) v(4) v(vo) 
++ v(timeNode)
++ v(eventTime)
+
+.SENS objfunc={v(eventTime)} param=nmos:TOXE,pmos:TOXE
+
+.options SENSITIVITY adjoint=1 direct=0  adjointTimePoints=1us
+
+.print TRANADJOINT  
+
+* this is here to fool xyce verify.
+.print sens
+
+.end
+

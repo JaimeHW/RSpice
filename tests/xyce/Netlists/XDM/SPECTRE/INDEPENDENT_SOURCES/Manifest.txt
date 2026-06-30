@@ -1,0 +1,13 @@
+exclude
+tags
+i_sources.cir.spectre
+i_sources.cir
+i_sources.cir.sh
+v_sources.cir.spectre
+v_sources.cir
+v_sources.cir.sh
+pwl_sources.cir.spectre
+vpwlFile
+ipwlFile
+pwl_sources.cir
+pwl_sources.cir.sh

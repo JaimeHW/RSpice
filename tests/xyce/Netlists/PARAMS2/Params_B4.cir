@@ -1,0 +1,20 @@
+Basic voltage divider circuit test of subcircuit usage
+* Should produce results identical to Double_Resist_Control.cir
+.PARAM R1=2.5K
+XR1 1 2 R1
+XR2 2 0 R2
+V1 1 0 DC 5V
+
+.subckt R1 1 2 
+* It would be a bug for this value of R1 to be used out of its context!
+.param R1=10k
+R1 1 2 {R1}
+.ends
+
+.subckt R2 1 2 
+R1 1 2 {R1*2}
+.ends
+
+.dc V1 0 5 1
+.print DC v(1) v(2) I(v1)
+.end

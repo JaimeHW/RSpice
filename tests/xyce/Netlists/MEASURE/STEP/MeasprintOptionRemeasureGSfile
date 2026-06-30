@@ -1,0 +1,28 @@
+In OutputMgr::remeasure 
+file to reprocess through measure and/or fft functions: MeasprintOptionALL.cir.prn
+***** Processing Data for Step 0
+
+ ***** Measure Functions ***** 
+
+MAXV2 = 5.000000e-01 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+MINV2 = -5.000000e-01 at time = 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+LASTMEASURE = 1.000000e+00 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+***** Processing Data for Step 1
+
+ ***** Measure Functions ***** 
+
+MAXV2 = 3.333333e-01 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+MINV2 = -3.333333e-01 at time = 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+LASTMEASURE = 1.000000e+00 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+

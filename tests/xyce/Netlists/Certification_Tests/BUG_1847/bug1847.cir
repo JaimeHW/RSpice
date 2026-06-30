@@ -1,0 +1,29 @@
+print line in include file test
+*
+* A test netlist where a print line
+* in an included file caused all data
+* to be written to the output file
+*
+* User reported that:
+* 1) if an included file had a .print line printing in raw format 
+* 2) and the main file have a regular print line 
+*
+*  Then a raw file would be generated that had all of the simulation
+*  output data.
+* 
+*  This test re-creates that condition and verifies that just a regular "prn"
+* was created.
+
+.include "includedNetlist.cir"
+
+vone 0 1 5
+rload 1 2 100
+rload2 2 3 100
+ctest 2 0 1.0e-9
+ctest2 3 0 1.0e-9
+rload3 3 0 100
+
+.print tran i(rload2)
+.tran 0 2 
+
+.end

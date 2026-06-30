@@ -1,0 +1,19 @@
+*******************************************************************
+* Test of error exit when both .IC and .NODESET statements are in
+* the netlist.                                                      
+* 
+* See SON Bug 684
+*
+*
+*
+*
+*******************************************************************
+V1 1 0 5V
+R1 1 0 1
+
+.TRAN 0 1ms
+.PRINT TRAN V(1)
+.IC V(Bleem)=1
+.NODESET V(Bleem)=1
+
+.end

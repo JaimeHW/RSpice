@@ -1,0 +1,10 @@
+
+R1  1  0  1
+X1  1  2  suba
+.tran 1ns 1us
+.print tran v(1)
+
+.subckt suba  b  b
+r1  b  0  1
+.ends
+.end

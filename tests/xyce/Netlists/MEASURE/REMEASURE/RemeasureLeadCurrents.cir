@@ -1,0 +1,128 @@
+**************************************************************
+* Test remeasure for I().  Test both in the top-level circuit
+* and in a subcircuit.  This test includes V, I and L because their
+* "lead currents" are actually solution variables.  It tests
+* IC(Q1) to catch the case of a multi-character operator for
+* devices that have more than two leads.  The C device is also
+* tested because the setting of initial conditions on the C
+* device requires some special handling during the creation 
+* of the I(C4) operator.  The L device is also tested for the 
+* case of that inductor being part of a mutual inductor.
+*
+* This netlist also tests the "work-around" for -remeasure of
+* power calculations, via the PR1B and PX1R1B measures.
+*
+* See SON Bug 697 for more details.
+*************************************************************
+
+V1  1 0 SIN(0 1 10)
+R1a 1 0 1
+R1b 1 0 2
+
+I1  2 0 SIN(0 2 10)
+R2  2 0 1
+
+V3 3 0 PULSE(0 1 0U 1U 1U 100m)
+R3 3a 3 1K
+C3 0 3a 20u
+
+I4 4 0 PULSE(0 5V 0 1MS 1MS 10MS 100m)
+L4 0 4a 10mH
+R4 4 4a 0.001
+
+* Test inductor (L6) that is part of a mutual inductor
+V5 5 0 sin(0 1 0.1)
+R5 5 6a 1
+VP1 6a 6 0
+R7 7a 0 1
+VP2 7a 7 0
+L6 6 0 1mH
+L7 7 0 1mH
+K6 L6 L7 0.75
+
+* Multi-letter lead current designators.  Will only test IC()
+vie 0 10 0
+vic 0 12 5
+vib 0 11 pulse(0 1 100ns 100ns 100ns 700ns 50m) 
+q1 12 11 10 qjunk 
+
+.model qjunk npn
++bf=130 br=1 is=3e-14
++tf=1e-8 vjs=0.68 ne=1.6 nc=2.0 rb=450
++cje=1uf cjc=1uf cjs=1uf ikf=0.002 ikr=0.002 vaf=50 var=50
++nf=1.0 ise=0 nr=1 isc=0 irb=0 rbm=450 re=0 rc=0 vje=0.75 
++mje=0.33 xtf=0 vtf=100 itf=0 ptf=0 vjc=0.75 mjs=0 xtb=0 
++eg=1.11 xti=3 kf=0 af=1 fc=0.5 tnom=27
+
+* test same device types but in a subcircuit
+V8 8 0 1
+X1 8 9 SUB1
+R9 9 0 1
+
+.SUBCKT SUB1 a b
+V1  1 0 SIN(0 1 10)
+R1a 1 0 1
+R1b 1 0 2
+
+I1  2 0 SIN(0 2 10)
+R2  2 0 1
+
+V3 3 0 PULSE(0 1 0U 1U 1U 100m)
+R3 3a 3 1K
+C3 0 3a 20u
+
+I4 4 0 PULSE(0 5V 0 1MS 1MS 10MS 100m)
+L4 0 4a 10mH
+R4 4 4a 0.001
+
+*Mutual inductor
+V5 5 0 sin(0 1 0.1)
+R5 5 6a 1
+VP1 6a 6 0
+R7 7a 0 1
+VP2 7a 7 0
+L6 6 0 1mH
+L7 7 0 1mH
+K6 L6 L7 0.75
+
+*multi-letter lead current designators
+vie 0 10 0
+vic 0 12 5
+vib 0 11 pulse(0 1 100ns 100ns 100ns 700ns) 
+q1 12 11 10 qjunk 
+
+R8 a b 1
+.ENDS
+
+.TRAN 0 0.1
+.PRINT TRAN V(1) V(2) I(V1) I(I1) I(R1b) I(C3) I(L4) I(L6) IC(Q1)
++ V(X1:1) V(X1:2) I(X1:V1) I(X1:I1) I(X1:R1b) I(X1:C3) I(X1:L4) I(X1:L6) IC(X1:Q1)
+
+.MEASURE TRAN MAXIV1 MAX I(V1)
+.MEASURE TRAN MAXII1 MAX I(I1)
+.MEASURE TRAN MAXIR1b MAX I(R1b)
+.MEASURE TRAN PPIC3 PP I(C3)
+.MEASURE TRAN PPIL4 PP I(L4)
+.MEASURE TRAN PPIL6 PP I(L6)
+.MEASURE TRAN MAXICQ1 MAX IC(Q1)
+
+* Same measures, but for the devices in the subcircuit.  These measures
+* should get the same values as the ones for the devices in the
+* top-level circuit.
+.MEASURE TRAN MAXIX1V1 MAX I(X1:V1)
+.MEASURE TRAN MAXIX1I1 MAX I(X1:I1)
+.MEASURE TRAN MAXIX1R1b MAX I(X1:R1b)
+.MEASURE TRAN PPIX1C3 PP I(X1:C3)
+.MEASURE TRAN PPIX1L4 PP I(X1:L4)
+.MEASURE TRAN PPIX1L6 PP I(X1:L6)
+.MEASURE TRAN MAXICX1Q1 MAX IC(X1:Q1)
+
+* Verify that expressions work if the needed variables are in the
+* output file
+.MEASURE TRAN PR1B MAX {V(1)*I(R1b)}
+.MEASURE TRAN VDIFF MAX {V(1)-V(2)}
+.MEASURE TRAN PX1R1B MAX {V(X1:1)*I(X1:R1b)}
+.MEASURE TRAN VX1DIFF MAX {V(X1:1)-V(X1:2)}
+
+.END
+

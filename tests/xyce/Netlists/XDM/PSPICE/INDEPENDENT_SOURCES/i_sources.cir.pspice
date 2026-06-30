@@ -1,0 +1,24 @@
+* This netlist tests various PSpice syntaxes for I-Sources
+* This tests SRN Bug 1987.
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PROBE I(R_R1) I(R_R2) I(R_R3) I(R_R4)
+
+*AC Source syntaxes
+R_R1        1 0  1k TC=0,0 
+I_I1        1 0  AC 1
++SIN 0 1 1KHz 0 0 0
+
+* DC source syntaxes
+R_R2        2 0  1k TC=0,0 
+I_I2        2 0  5Vdc
+
+R_R3        3 0  1k TC=0,0 
+I_I3        3 0  DC=1
+
+R_R4        4 0  1k TC=0,0 
+I_I4        4 0  DC 1
+
+.END
+

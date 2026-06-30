@@ -1,0 +1,26 @@
+Test Circuit for log10 function
+
+VS   1  0  0
+B1   2  0  V = {log10(if(V(1) > 0, V(1), 1))}
+R2   2  0  100K
+B3   3  0  V = {atan(V(1)/10)}
+R3   3  0  100K
+B4   4  0  V = {arctan(V(1)/10)}
+R4   4  0  100K
+B5   5  0  V = {atan2(V(1),10)}
+R5   5  0  100K
+B6   6  0  V = {m(V(1)-5)}
+R6   6  0  100K
+B7   7  0  V = {stp(V(1)-5)}
+R7   7  0  100K
+B8   8  0  V = {sgn(V(1)-5)}
+R8   8  0  100K
+B9   9  0  V = {uramp(V(1)-5)}
+R9   9  0  100K
+.DC VS 1 9 1
+.PRINT DC V(1) V(2) v(3) v(4) v(5) v(6) v(7) v(8) v(9)
+.END
+
+
+
+

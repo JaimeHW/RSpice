@@ -1,0 +1,36 @@
+* This netlist includes various files that use relative paths
+* on their .INC and .LIB lines.  Note that each resistor has
+* a different value, as does each parameter.  So, the values
+* for the currents through each Rx or Rxa device is unique, and
+* it should be obvious which file each device is using if this
+* test fails.
+
+* The currents through R1 and R1a use the "fallback paths" that are
+* relative to the toplevel subdirectory, rather then the directory
+* (sub1) of the include file.
+.INC sub1\include1
+R1a 1 0 {P1}
+
+* The use of a .\<fileName> syntax is is tested by the current through R2
+.INC .\include_dot_top
+
+* Also test paths that are relative to sub1\include1 with the
+* current through R3 and R3a.  This is the new default behavior
+* for both .LIB and .INC lines.
+R3a 1 0 {P3}
+
+* Test that paths relative to sub1, for .INC and .LIB lines in a file in
+* the sub1 subdirectory, take predecence over the "fallback paths" relative
+* to the top-level subdirectory.  This uses the current through R4 and R4a.
+R4a 1 0 {P4}
+
+* This is used to test a ..\ syntax on a .INC line via an .INC file that
+* is in the sub1\sub2 subdirectory.
+.INC sub1\include1b
+
+.DC V1 1 5 1
+.PRINT DC V(1) I(R1) I(R1a) I(R2) I(R3) I(R3a) I(R4) I(R4a) I(R5)
+
+V1 1 0 1
+
+.END

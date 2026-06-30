@@ -1,0 +1,15 @@
+Test of series RC circuit in HB
+* This version depends on the "general external" device to do the actual
+* evaluation of the equations, and as such it MUST be run through the
+* "GenCouplingSimulator" API with an appropriate "VectorComputeInterface"
+* implementation.
+
+V1 1 0 SIN (0 1 1e4)
+* 1K ohm Resistor implemented as external device
+YGenExt R1 1 2 DPARAMS={NAME=R VALUE=1K}
+YGenExt C1 2 0 DPARAMS={NAME=C VALUE=1u}
+
+.hb 1e4
+.options hbint numfreq=5 tahb=0
+.print HB v(1) V(2) I(v1) 
+.end

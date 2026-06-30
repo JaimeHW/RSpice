@@ -1,0 +1,51 @@
+* Test AC mode support for the FIND-AT, FIND-WHEN and WHEN
+* measures.  To be conservative, there are subtests for each
+* valid operator (V, VR, VI, VP, VM and VDB) for
+* each measure type.
+*
+* See SON Bug 1270 for more details.
+*****************************************************
+
+* trivial high-pass filter (V-C-R) circuit
+
+R2 c 0 1
+R1 b c 1
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.print AC vr(b) vi(b) vm(b) vp(b) vdb(b)
++ vr(c) vi(c) vm(c) vp(c) vdb(c)
+.ac dec 5 100Hz 1e6
+.STEP R1:R 1 2 1
+
+* WHEN
+.MEASURE AC whenvmb0.5 WHEN vm(b)= 0.5
+.MEASURE AC whenvrb0.5 WHEN vr(b)= 0.5
+.MEASURE AC whenvib0.1 WHEN vi(b)= 0.1
+.MEASURE AC whenvbp50 WHEN vp(b)= 50
+
+* FIND-WHEN
+.MEASURE AC findvmcwhenvmb0.5 find vm(c) when vm(b)= 0.5
+.MEASURE AC findvrcwhenvrb0.5 find vr(c) when vr(b)= 0.5
+.MEASURE AC findvicwhenvib0.1 find vi(c) when vi(b)= 0.1
+.MEASURE AC findvpcwhenvpb50 find vp(c) when vp(b)= 50.0
+
+* FIND-AT
+.MEASURE AC vibat1e2 FIND vi(b) at=1e2 ; first sweep value
+.MEASURE AC vibat3e4 FIND vi(b) at 3e4
+.MEASURE AC vibexpat5e4 FIND {vi(b)+1} at 5e4
+
+* Expressions, with FIND-WHEN measure
+.MEASURE AC findvmcwhenvmbExp1 find vm(c) when {vm(b)+0.1}=0.5
+.MEASURE AC findvmcwhenvmbExp2 find vm(c) when vm(b)={0.3+0.2}
+.MEASURE AC findvmcwhenvmbExp3 find {vm(c)+1} when {vm(b)+0.1}=0.5
+.MEASURE AC findvmcwhenvmbExp4 find {vm(c)+1} when vm(b)={0.3+0.2}
+.MEASURE AC findvrcwhenvmbExp5 find vr(c) when vr(b)=vi(b)
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure ac lastMeasure max vm(b)
+
+
+.END

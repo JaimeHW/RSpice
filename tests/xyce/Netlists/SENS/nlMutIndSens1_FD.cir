@@ -1,0 +1,29 @@
+* test of coupled inductor parameters on the .PRINT line
+V1 1 0 SIN(0 1 1KHz)
+R1 1 0 2
+R2 2 0 2
+
+* mutual inductor definition (nonlnear level=1)
+L1 1 0 1e-3
+L2 2 0 2mH
+K1 L1 L2 0.75 nlcore
+
+* perturbation circuit
+* test of coupled inductor parameters on the .PRINT line
+V1b 1b 0 SIN(0 1 1KHz)
+R1b 1b 0 2
+R2b 2b 0 2
+
+* mutual inductor definition (nonlnear level=1)
+L1b 1b 0 {1e-3+1e-10}
+L2b 2b 0 2mH
+K1b L1b L2b 0.75 nlcore
+
+
+.model nlcore core level=1 gap=0.001 path=1.0 area=0.01
+
+.TRAN 0 0.3ms 
+.PRINT TRAN V(2) {((V(2b)-V(2))/1.0e-10)}
+
+.END 
+

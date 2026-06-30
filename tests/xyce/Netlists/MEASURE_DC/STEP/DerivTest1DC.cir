@@ -1,0 +1,73 @@
+* Test DC mode support for DERIV Measures. This bug covers:
+*
+*   1) The case of one variable (vsrc1) on the .DC line,
+*      with one variable (vsrc2) in the .STEP statement.
+*
+*   2) The DC values of the swept variable (vsrc1) are monotonically
+*      decreasing.
+*
+* See SON Bug 1282 for more details.
+****************************************************************
+
+V1 1 0 1
+R1 1 0 1
+
+E2 2 0 VALUE={V(1)*V(1)}
+R2a 2 2a 2
+R2b 2a 0 2
+
+E3 3 0 VALUE={(V(2a)-5)*(V(2a)-5)}
+R3 3 0 3
+
+.DC V1 5 1 -1
+.STEP R2b 2 4 2
+.PRINT DC V(1) V(2a) V(3) I(R2b)
+
+* DERIV
+.MEASURE DC DERIVV2AT2.5 DERIV V(2a) AT=2.5
+
+* test AT value at start of sweep
+.MEASURE DC DERIVV2AT1 DERIVATIVE V(2a) AT=1
+
+* WHEN syntaxes
+.MEASURE DC DERIVV2WHEN10 deriv V(2a) WHEN V(2a)=10
+
+* Expressions in WHEN clause
+.MEASURE DC derivExp1 DERIV V(2a) when v(2a)={2*v(1)}
+.MEASURE DC derivExp2 DERIV V(2a) when {v(2a)+1}=6
+.MEASURE DC derivExp3 DERIV V(2a) when v(2a)={3+2}
+.MEASURE DC derivExp4 DERIV V(2a) when v(2a)={v(1)+6}
+
+* Expression in DERIV clause
+.MEASURE DC derivExp5 DERIV {V(1)-V(2a)} when v(2a)=10
+
+* FROM
+.MEASURE DC from1 DERIV V(3) WHEN V(3)=10
+.MEASURE DC from2 DERIV V(3) WHEN V(3)=10 FROM=2.5
+
+* These should get the same answer
+.MEASURE DC from3 DERIV V(3) WHEN V(3)=5 FROM=2 TO=4
+.MEASURE DC from4 DERIV V(3) WHEN V(3)=5 TO=2  FROM=4
+
+* lead current
+.MEASURE DC derivir2at2.5 deriv I(R2b) AT=2.5
+
+* measures should fail
+.measure dc FAIL1 DERIV v(2a) WHEN v(3)=200
+.measure dc FAIL2 DERIV v(2a) AT=10
+
+* Test case of both FROM and TO given, but both are outside of the
+* measurement window
+.measure dc FAIL3 DERIV v(2a) WHEN v(2a)=2 FROM=6 TO=10
+.measure dc FAIL4 DERIV v(2a) WHEN v(2a)=2 FROM=-5 TO=0
+
+* Tests should fail
+.measure dc derivFail1 deriv v(1) AT=10
+.measure dc derivFail2 deriv v(1) when v(1)=10
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure dc lastMeasure max v(2a)
+
+.end

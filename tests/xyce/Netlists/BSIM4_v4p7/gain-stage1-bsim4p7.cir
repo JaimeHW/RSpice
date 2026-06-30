@@ -1,0 +1,19 @@
+*NOISE analysis using BSIM4 v4p7 model card.
+*Adapted from NOISE/gain-stage1.cir test and
+
+.inc "./modelcard.noise.nmos"
+
+M1 3 2 0 0 n1 w=4u l=1u 
+Rsource 1 2 100k
+Rload 3 vdd 25k
+
+Vdd1 vdd 0 5 
+Vin 1 0 1.44 ac .1 sin(0 1 1e+5 0 0) 
+
+.noise v(3) Vin dec 10 100 1000Meg  1
+
+.print noise {sqrt(abs(onoise))} {sqrt(abs(inoise))}
+
+
+.end
+

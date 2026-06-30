@@ -1,0 +1,20 @@
+* Test multi-character wildcards such as VR(b*) and IR(V*) for 
+* the complex operators.
+*
+* See SON Bugs 1211, 1238 and 1320 for more details.
+*
+* Trivial low-pass filter (V-L-R) circuits.
+*
+
+R1 b1 0 2
+L1 a1 b1 1u
+V1 a1 0 DC 0V AC 1
+
+R2 b2 0 2
+L2 a2 b2 1u
+V2 a2 0 DC 0V AC 1
+
+.print AC VR(b*) VI(b*) VM(b*) VP(b*) VDB(b*) IR(V*) II(V*) IM(V*) IP(V*) IDB(V*)
+.ac dec 5 100Hz 10e6
+
+.end

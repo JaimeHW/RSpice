@@ -1,0 +1,36 @@
+Test Name: bug790
+Owner: Dave Shirley
+Test netlists: bug790.cir
+               bug790_long.cir         # optional
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_3.0.1       # the first version where this bug was tested.
+ 
+Description:
+============
+This check is to make sure that output columns in the .prn file do not merge
+when high precision output is generated.
+ 
+Procedure:
+============
+The default procedure is:
+  run_xyce -o ${OUT_DIR}/bug790.cir.prn bug790.cir > ${OUT_DIR}/bug790.cir.log
+
+Verification:
+=============
+Passes if bug790.cir.prn does not have merged columns.  In other words, there
+should be white space between each pair of columns.
+
+Sample of good output:
+
+Index           TIME                 V(DD)                V(IN)               V(BUF)
+0       0.000000000000e+00   1.000000000000e+00   2.000000000000e+00   1.381908496764e-11   
+1       5.000000000000e-12   1.005000000000e+00   2.000000000000e+00   1.038873368887e-05   
+ 
+Notes:
+======
+Bug790_long.cir tests to see if the index number (first column) merges into the
+first data column when it is greater than 7 digits.  The simulation takes hours
+to reach this point.  I would not advocate running this test routinely, but
+include the input file for completeness.

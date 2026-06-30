@@ -1,0 +1,7 @@
+nightly, serial, pce, tran, bjtlev1, expression
+embeddedsampling
+quadrature_pce
+nisp
+sparse_grid
+required:stokhos
+issue84

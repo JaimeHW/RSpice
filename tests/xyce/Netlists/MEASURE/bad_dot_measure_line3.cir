@@ -1,0 +1,27 @@
+Testing ill-formed .MEASURE lines
+*********************************************************************
+* Missing node specifier in V(), I(), P() and W().   Also some
+* invalid syntaxes from SON Bug 1134. 
+* 
+* See SON Bugs 673 and 1134
+*
+*
+*
+*
+*********************************************************************
+VS  1  0  SIN(0 1.0 1KHZ 0 0)
+R1  1  0  100
+.TRAN 0 1ms
+.PRINT TRAN FORMAT=NOINDEX V(1) I(R1)
+
+.MEASURE TRAN NONODE MAX V()
+.MEASURE TRAN MAX1 MAX I()
+.MEASURE TRAN MAX2 MAX P()
+.MEASURE TRAN MAX3 MAX W()
+
+* test cases from SON Bug1134
+.MEASURE TRAN M1 MAX V(1)+V(2)
+.MEASURE TRAN M2 MAX V(1) +V(2)
+
+.END
+

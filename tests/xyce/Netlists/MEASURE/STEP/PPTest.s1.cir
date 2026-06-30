@@ -1,0 +1,63 @@
+*******************************************************************************
+* This netlist is equivalent to Step 1 for the PPTest.cir netlist.
+* It has VS1:VA=2 and VS3:V0=-0.25
+*
+*******************************************************************************
+*
+* a few sources of different types
+VS1  1  0  SIN(0 2 1KHz 0 0)
+VP  2  0  PULSE( 0 100 0.2ms 0.2ms 0.2ms 1ms 2ms )
+VS3  3  0  SIN(-0.25 1.0 1KHZ 0 500)
+VS4  4  0  SIN(0.5 -1.0 1KHZ 0 500)
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+R4  4  0  100
+
+* Use MEASFAIL to test the reset of the default calculation value
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0  3ms
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3) V(4)
+
+* plain test
+.measure tran ppAll PP V(1)
+.measure tran ppTop Pp V(2)
+
+* add TO-FROM modifiers
+.measure tran ppHalfSine pp V(1) from=0 to=0.5e-3
+
+* mix in TDs before and after FROM value.
+.measure tran sine10 pp V(1) FROM=0 TO=0.25e-3 TD=0.1e-3
+.measure tran sine15 pp V(1) FROM=0.00015 TO=0.25e-3 TD=0.1e-3
+.measure tran sine20 pp V(1) FROM=0.0002 TO=0.25e-3 TD=0.1e-3
+
+* these tests should return -1 and -100
+.measure tran returnNegOne pp V(1) FROM=0.2e-3 TO=0.25e-3 TD=0.5e-3
+.measure tran returnNeg100 pp V(1) FROM=0.2e-3 TO=0.25e-3 TD=0.5e-3 default_val=-100
+
+* add tests for rise/fall/cross.  V3 and VS4 have a DC offset
+* and are damped sinusoids
+.measure tran ppv3fall2 pp v(3) fall=2
+.measure tran ppv4rise1 pp v(4) rise=1
+.measure tran ppv3cross2 pp v(3) cross=2
+
+* test LAST for rise/fall/cross
+.measure tran ppv3falllast pp v(3) fall=last
+.measure tran ppv4riselast pp v(4) rise=last
+.measure tran ppv3crosslast pp v(3) cross=last
+.measure tran ppv4crosslast pp v(4) cross=last
+
+* test RFC_LEVEL keyword
+.measure tran ppv1Rise1RFClevel50 pp V(1) RFC_LEVEL=0.5 RISE=1
+.measure tran ppv1Fall1RFClevel50 pp V(1) RFC_LEVEL=0.5 FALL=1
+.measure tran ppv1Cross1RFClevel50 pp V(1) RFC_LEVEL=0.5 CROSS=1 
+
+*test Failed measures for rise/fall/cross
+.measure tran ppv3fallfail pp v(3) fall=10 default_val=-1
+.measure tran ppv4risefail pp v(4) rise=10 default_val=-1
+.measure tran ppv3crossfail pp v(3) cross=10 default_val=-1
+
+.END
+

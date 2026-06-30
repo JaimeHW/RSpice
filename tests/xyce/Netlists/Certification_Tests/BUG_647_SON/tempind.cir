@@ -1,0 +1,21 @@
+Test Circuit for the Inductor
+* The inductor has two instance parameters that are copied from the model
+* if not given (TC1 and TC2), and one that is copied from the general device
+* properties (TEMP).  Test that this is happening in the right place (i.e.
+* processParams, not constructor) by doing sweeps over them in the instance
+* and comparing to the sweeps over them in the model (or device package).
+
+*
+B1 0 1  I = {10 * TIME * EXP( - 5*TIME)}
+VMON 1 2 0
+R1 2 3  0.000001
+L1 3 0 IND1 10mH TEMP=90  TC1=0.010 TC2=0.926e-4 
+.MODEL IND1 L  ( TC1=0.010 TC2=0.926e-4 )
+*
+.TRAN 0.1MS 20MS
+.PRINT TRAN I(VMON) V(3) L1:TEMP L1:TC1 L1:TC2
+.step lin L1:TEMP 90 95 1
+.step lin L1:TC1 0.01 0.03 0.01
+.step lin L1:TC2 0.926e-4 0.929e-4 0.001e-4
+.END
+

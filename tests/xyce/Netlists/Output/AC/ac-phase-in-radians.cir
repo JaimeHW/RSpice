@@ -1,0 +1,16 @@
+* AC test of print output format, with phase output in radians.
+* See SON Bug 1208 for more details.
+*
+* Trivial high-pass filter (V-C-R) circuit, just do a AC sweep
+* and watch the output
+
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.print AC vp(b) ip(v1) vp(a,b)
+
+.ac dec 5 100Hz 1e6
+.OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=TRUE
+
+.end

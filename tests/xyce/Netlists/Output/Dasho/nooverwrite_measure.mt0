@@ -1,0 +1,17 @@
+***************************************************************
+* Testing that a poorly chosen -o file is not overwritten by
+* the .MEASURE output.
+*
+****************************************************************
+
+V1 1 0 PWL 0 0 0.45 1 1 0
+R1 1 2 1
+R2 2 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(2)
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.05
+
+.MEASURE TRAN FINDV2 WHEN V(2)=0.4
+
+.END

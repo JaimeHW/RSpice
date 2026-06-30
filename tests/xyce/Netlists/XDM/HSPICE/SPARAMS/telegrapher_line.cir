@@ -1,0 +1,26 @@
+* telegrapher line
+* Xyce netlist for corresponding HSPICE netlist
+* This netlist tests XDM translations from HSPICE of
+* P-element device and the .LIN directive. If the 
+* translation works correctly, the print statement
+* should be commented out, and the output of the 
+* simulation should be saved in the file
+* "telegrapher_line_file_opt.s2p". 
+
+PIN IN 0 port=1 z0=50
+POUT OUT 0 port=2 z0 = 50
+
+R1 IN 1 10
+C1 1 0 10p
+R2 1 2 10
+C2 2 0 10p
+R3 2 3 10
+C3 3 0 10p
+R4 3 OUT 10
+C4 OUT 0 10p
+
+.AC DEC 1 1000 1G
+
+.LIN DATAFORMAT=MA FILENAME=telegrapher_line_file_opt.s2p
+
+.END

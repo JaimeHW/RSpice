@@ -1,0 +1,478 @@
+This circuit tests the mos level=9 model as a chain of inverters in series
+* This is a chain of 50 1-input CMOS inverters
+* The NMOS and PMOS devices have their gates tied 
+* together to form a CMOS inverter. VIN1, the input signal, is applied to a 1K
+* resistor,RIN, which is connected to the gates of the inverter at node IN.
+
+*
+* params.inc contains all the .params, including the uncertain ones.
+* It includes a really large number of .params that are not used, 
+* which is part of the point of the test.
+*
+.inc params.inc
+
+* for both model cards (nmos and pmos) there are 10 uncertain params.
+*
+
+* nmos params
+.param nmos_tnom=27
+.param nmos_tox={7.9e-9*p5}
+.param nmos_xj={1.5e-7*p5}
+.param nmos_nch={1.7e17*p5}
+.param nmos_vth0={0.5169662*p5}
+.param nmos_k1={0.5862027*p5}
+.param nmos_k2={0.0120774*p5}
+.param nmos_k3={16.1323712*p5}
+.param nmos_k3b={0.8487425*p5}
+.param nmos_w0={2.17449e-6*p5}
+.param nmos_nlx={2.079688e-7*p5}
+.param nmos_dvt0w=0
+.param nmos_dvt1w=5.3e6
+.param nmos_dvt2w=-0.032
+.param nmos_dvt0=9.7504029
+.param nmos_dvt1=0.9681505
+.param nmos_dvt2=-0.0235742
+.param nmos_u0=438.6895901
+.param nmos_ua=8.263356e-11
+.param nmos_ub=2.159824e-18
+.param nmos_uc=8.361115e-11
+.param nmos_vsat=1.173431e5
+.param nmos_a0=0.9412879
+.param nmos_ags=0.3886454
+.param nmos_b0=3.227443e-6
+.param nmos_b1=4.764379e-6
+.param nmos_keta=-5.567324e-3
+.param nmos_a1=0
+.param nmos_a2=1
+.param nmos_rdsw=923.7832391
+.param nmos_prwg=-3.089043e-4
+.param nmos_prwb=-0.094855
+.param nmos_wr=1
+.param nmos_wint=5.838392e-8
+.param nmos_lint=1.759761e-8
+.param nmos_dwg=-1.288272e-8
+.param nmos_dwb=5.449646e-9
+.param nmos_voff=-0.1076921
+.param nmos_nfactor=0
+.param nmos_cit=0
+.param nmos_cdsc=8.530932e-4
+.param nmos_cdscd=1.554386e-4
+.param nmos_cdscb=1.940792e-4
+.param nmos_eta0=0.0298638
+.param nmos_etab=-3.113611e-3
+.param nmos_dsub=0.3695329
+.param nmos_pclm=1.0357865
+.param nmos_pdiblc1=0.0176042
+.param nmos_pdiblc2=4.154589e-3
+.param nmos_pdiblcb=0.1
+.param nmos_drout=0.5839275
+.param nmos_pscbe1=7.231401e9
+.param nmos_pscbe2=5e-10
+.param nmos_pvag=0.3898063
+.param nmos_delta=0.01
+.param nmos_mobmod=1
+.param nmos_prt=0
+.param nmos_ute=-1.5
+.param nmos_kt1=-0.11
+.param nmos_kt1l=0
+.param nmos_kt2=0.022
+.param nmos_ua1=4.31e-9
+.param nmos_ub1=-7.61e-18
+.param nmos_uc1=-5.6e-11
+.param nmos_at=3.3e4
+.param nmos_wl=0
+.param nmos_wln=1
+.param nmos_ww=0
+.param nmos_wwn=1
+.param nmos_wwl=0
+.param nmos_ll=0
+.param nmos_lln=1
+.param nmos_lw=0
+.param nmos_lwn=1
+.param nmos_lwl=0
+.param nmos_capmod=2
+.param nmos_xpart=0.4
+.param nmos_cgdo=3.67e-10
+.param nmos_cgso=3.67e-10
+.param nmos_cgbo=0
+.param nmos_cj=9.366619e-4
+.param nmos_pb=0.8472082
+.param nmos_mj=0.3782709
+.param nmos_cjsw=1.705874e-10
+.param nmos_pbsw=0.6459681
+.param nmos_mjsw=0.1595611
+.param nmos_pvth0=-0.0153794
+.param nmos_prdsw=-150.7148427
+.param nmos_pk2=1.079181e-3
+.param nmos_wketa=1.316537e-3
+.param nmos_lketa=-2.53398e-3
+
+* pmos params
+.param pmos_tnom=27
+.param pmos_tox={7.9e-9*p5}
+.param pmos_xj={1.5e-7*p5}
+.param pmos_nch={1.7e17*p5}
+.param pmos_vth0={-0.5874767*p5}
+.param pmos_k1={0.6644374*p5}
+.param pmos_k2={-0.0114964*p5}
+.param pmos_k3={14.2635744*p5}
+.param pmos_k3b={-3.0055422*p5}
+.param pmos_w0={3.097499e-6*p5}
+.param pmos_nlx={4.063655e-8*p5}
+.param pmos_dvt0w=0
+.param pmos_dvt1w=5.3e6
+.param pmos_dvt2w=-0.032
+.param pmos_dvt0=1.531602
+.param pmos_dvt1=0.6223798
+.param pmos_dvt2=-0.15
+.param pmos_u0=140.9814676
+.param pmos_ua=2.073141e-9
+.param pmos_ub=4.311698e-19
+.param pmos_uc=-2.47491e-11
+.param pmos_vsat=1.907922e5
+.param pmos_a0=1.1020888
+.param pmos_ags=0.2992066
+.param pmos_b0=2.685878e-6
+.param pmos_b1=5e-6
+.param pmos_keta=-4.965703e-3
+.param pmos_a1=0
+.param pmos_a2=1
+.param pmos_rdsw=1.816999e3
+.param pmos_prwg=-4.79226e-4
+.param pmos_prwb=-0.0130234
+.param pmos_wr=1
+.param pmos_wint=6.05421e-8
+.param pmos_lint=1.854495e-8
+.param pmos_dwg=-1.817774e-8
+.param pmos_dwb=1.258711e-9
+.param pmos_voff=-0.1150203
+.param pmos_nfactor=0
+.param pmos_cit=0
+.param pmos_cdsc=0
+.param pmos_cdscd=0
+.param pmos_cdscb=5.062751e-4
+.param pmos_eta0=0.087128
+.param pmos_etab=-0.108095
+.param pmos_dsub=0.859253
+.param pmos_pclm=4.3937251
+.param pmos_pdiblc1=2.62547e-3
+.param pmos_pdiblc2=0.0116633
+.param pmos_pdiblcb=0.016944
+.param pmos_drout=0.0985252
+.param pmos_pscbe1=2.122679e10
+.param pmos_pscbe2=9.323911e-9
+.param pmos_pvag=10.23015
+.param pmos_delta=0.01
+.param pmos_mobmod=1
+.param pmos_prt=0
+.param pmos_ute=-1.5
+.param pmos_kt1=-0.11
+.param pmos_kt1l=0
+.param pmos_kt2=0.022
+.param pmos_ua1=4.31e-9
+.param pmos_ub1=-7.61e-18
+.param pmos_uc1=-5.6e-11
+.param pmos_at=3.3e4
+.param pmos_wl=0
+.param pmos_wln=1
+.param pmos_ww=0
+.param pmos_wwn=1
+.param pmos_wwl=0
+.param pmos_ll=0
+.param pmos_lln=1
+.param pmos_lw=0
+.param pmos_lwn=1
+.param pmos_lwl=0
+.param pmos_capmod=2
+.param pmos_xpart=0.4
+.param pmos_cgdo=4.9e-10
+.param pmos_cgso=4.9e-10
+.param pmos_cgbo=0
+.param pmos_cj=8.663825e-4
+.param pmos_pb=0.99
+.param pmos_mj=0.5738763
+.param pmos_cjsw=1.877938e-10
+.param pmos_pbsw=0.99
+.param pmos_mjsw=0.2504781
+.param pmos_pvth0=0.0159148
+.param pmos_prdsw=-282.5443722
+.param pmos_pk2=5.401242e-4
+.param pmos_wketa=-1.688757e-3
+.param pmos_lketa=-0.018132
+
+
+
+.subckt INVERTER IN OUT VDD GND
+MN1 OUT IN GND GND CMOSN L=0.35U W=4.2U AD=4.2P AS=4.2P PD=10U PS=10U
+MP1 OUT IN VDD VDD CMOSP L=0.46U W=1U  AD=1P   AS=1P   PD=4U  PS=4U
+
+
+
+* + pmos model card
+.model cmosp pmos (
++ level=9
++ tnom	 = {pmos_tnom}
++ tox	 = {pmos_tox}
++ xj	 = {pmos_xj}
++ nch	 = {pmos_nch}
++ vth0	 = {pmos_vth0}
++ k1	 = {pmos_k1}
++ k2	 = {pmos_k2}
++ k3	 = {pmos_k3}
++ k3b	 = {pmos_k3b}
++ w0	 = {pmos_w0}
++ nlx	 = {pmos_nlx}
++ dvt0w	 = {pmos_dvt0w}
++ dvt1w	 = {pmos_dvt1w}
++ dvt2w	 = {pmos_dvt2w}
++ dvt0	 = {pmos_dvt0}
++ dvt1	 = {pmos_dvt1}
++ dvt2	 = {pmos_dvt2}
++ u0	 = {pmos_u0}
++ ua	 = {pmos_ua}
++ ub	 = {pmos_ub}
++ uc	 = {pmos_uc}
++ vsat	 = {pmos_vsat}
++ a0	 = {pmos_a0}
++ ags	 = {pmos_ags}
++ b0	 = {pmos_b0}
++ b1	 = {pmos_b1}
++ keta	 = {pmos_keta}
++ a1	 = {pmos_a1}
++ a2	 = {pmos_a2}
++ rdsw	 = {pmos_rdsw}
++ prwg	 = {pmos_prwg}
++ prwb	 = {pmos_prwb}
++ wr	 = {pmos_wr}
++ wint	 = {pmos_wint}
++ lint	 = {pmos_lint}
++ dwg	 = {pmos_dwg}
++ dwb	 = {pmos_dwb}
++ voff	 = {pmos_voff}
++ nfactor	 = {pmos_nfactor}
++ cit	 = {pmos_cit}
++ cdsc	 = {pmos_cdsc}
++ cdscd	 = {pmos_cdscd}
++ cdscb	 = {pmos_cdscb}
++ eta0	 = {pmos_eta0}
++ etab	 = {pmos_etab}
++ dsub	 = {pmos_dsub}
++ pclm	 = {pmos_pclm}
++ pdiblc1	 = {pmos_pdiblc1}
++ pdiblc2	 = {pmos_pdiblc2}
++ pdiblcb	 = {pmos_pdiblcb}
++ drout	 = {pmos_drout}
++ pscbe1	 = {pmos_pscbe1}
++ pscbe2	 = {pmos_pscbe2}
++ pvag	 = {pmos_pvag}
++ delta	 = {pmos_delta}
++ mobmod	 = {pmos_mobmod}
++ prt	 = {pmos_prt}
++ ute	 = {pmos_ute}
++ kt1	 = {pmos_kt1}
++ kt1l	 = {pmos_kt1l}
++ kt2	 = {pmos_kt2}
++ ua1	 = {pmos_ua1}
++ ub1	 = {pmos_ub1}
++ uc1	 = {pmos_uc1}
++ at	 = {pmos_at}
++ wl	 = {pmos_wl}
++ wln	 = {pmos_wln}
++ ww	 = {pmos_ww}
++ wwn	 = {pmos_wwn}
++ wwl	 = {pmos_wwl}
++ ll	 = {pmos_ll}
++ lln	 = {pmos_lln}
++ lw	 = {pmos_lw}
++ lwn	 = {pmos_lwn}
++ lwl	 = {pmos_lwl}
++ capmod	 = {pmos_capmod}
++ xpart	 = {pmos_xpart}
++ cgdo	 = {pmos_cgdo}
++ cgso	 = {pmos_cgso}
++ cgbo	 = {pmos_cgbo}
++ cj	 = {pmos_cj}
++ pb	 = {pmos_pb}
++ mj	 = {pmos_mj}
++ cjsw	 = {pmos_cjsw}
++ pbsw	 = {pmos_pbsw}
++ mjsw	 = {pmos_mjsw}
++ pvth0	 = {pmos_pvth0}
++ prdsw	 = {pmos_prdsw}
++ pk2	 = {pmos_pk2}
++ wketa	 = {pmos_wketa}
++ lketa	 = {pmos_lketa}
++ )
+
+* nmos model
+.model cmosn nmos ( level   = 9
++ tnom	 = {nmos_tnom}
++ tox	 = {nmos_tox}
++ xj	 = {nmos_xj}
++ nch	 = {nmos_nch}
++ vth0	 = {nmos_vth0}
++ k1	 = {nmos_k1}
++ k2	 = {nmos_k2}
++ k3	 = {nmos_k3}
++ k3b	 = {nmos_k3b}
++ w0	 = {nmos_w0}
++ nlx	 = {nmos_nlx}
++ dvt0w	 = {nmos_dvt0w}
++ dvt1w	 = {nmos_dvt1w}
++ dvt2w	 = {nmos_dvt2w}
++ dvt0	 = {nmos_dvt0}
++ dvt1	 = {nmos_dvt1}
++ dvt2	 = {nmos_dvt2}
++ u0	 = {nmos_u0}
++ ua	 = {nmos_ua}
++ ub	 = {nmos_ub}
++ uc	 = {nmos_uc}
++ vsat	 = {nmos_vsat}
++ a0	 = {nmos_a0}
++ ags	 = {nmos_ags}
++ b0	 = {nmos_b0}
++ b1	 = {nmos_b1}
++ keta	 = {nmos_keta}
++ a1	 = {nmos_a1}
++ a2	 = {nmos_a2}
++ rdsw	 = {nmos_rdsw}
++ prwg	 = {nmos_prwg}
++ prwb	 = {nmos_prwb}
++ wr	 = {nmos_wr}
++ wint	 = {nmos_wint}
++ lint	 = {nmos_lint}
++ dwg	 = {nmos_dwg}
++ dwb	 = {nmos_dwb}
++ voff	 = {nmos_voff}
++ nfactor	 = {nmos_nfactor}
++ cit	 = {nmos_cit}
++ cdsc	 = {nmos_cdsc}
++ cdscd	 = {nmos_cdscd}
++ cdscb	 = {nmos_cdscb}
++ eta0	 = {nmos_eta0}
++ etab	 = {nmos_etab}
++ dsub	 = {nmos_dsub}
++ pclm	 = {nmos_pclm}
++ pdiblc1	 = {nmos_pdiblc1}
++ pdiblc2	 = {nmos_pdiblc2}
++ pdiblcb	 = {nmos_pdiblcb}
++ drout	 = {nmos_drout}
++ pscbe1	 = {nmos_pscbe1}
++ pscbe2	 = {nmos_pscbe2}
++ pvag	 = {nmos_pvag}
++ delta	 = {nmos_delta}
++ mobmod	 = {nmos_mobmod}
++ prt	 = {nmos_prt}
++ ute	 = {nmos_ute}
++ kt1	 = {nmos_kt1}
++ kt1l	 = {nmos_kt1l}
++ kt2	 = {nmos_kt2}
++ ua1	 = {nmos_ua1}
++ ub1	 = {nmos_ub1}
++ uc1	 = {nmos_uc1}
++ at	 = {nmos_at}
++ wl	 = {nmos_wl}
++ wln	 = {nmos_wln}
++ ww	 = {nmos_ww}
++ wwn	 = {nmos_wwn}
++ wwl	 = {nmos_wwl}
++ ll	 = {nmos_ll}
++ lln	 = {nmos_lln}
++ lw	 = {nmos_lw}
++ lwn	 = {nmos_lwn}
++ lwl	 = {nmos_lwl}
++ capmod	 = {nmos_capmod}
++ xpart	 = {nmos_xpart}
++ cgdo	 = {nmos_cgdo}
++ cgso	 = {nmos_cgso}
++ cgbo	 = {nmos_cgbo}
++ cj	 = {nmos_cj}
++ pb	 = {nmos_pb}
++ mj	 = {nmos_mj}
++ cjsw	 = {nmos_cjsw}
++ pbsw	 = {nmos_pbsw}
++ mjsw	 = {nmos_mjsw}
++ pvth0	 = {nmos_pvth0}
++ prdsw	 = {nmos_prdsw}
++ pk2	 = {nmos_pk2}
++ wketa	 = {nmos_wketa}
++ lketa	 = {nmos_lketa}
++     )
+.ends
+
+** Analysis setup **
+*
+.tran 20ns 2e-6
+.print tran format=gnuplot precision=10 width=19 {v(vout) + 1.0}
+vdddev 	vdd	0	4v
+rin	in	1	1k
+vin1  1	0  4v pulse (4v 0v 1.5us 5ns 5ns 1.5us 3.01us)
+r1    vout  0  10k  
+c2    vout  0  0.1p
+
+.measure tran dmax max v(vout)
+
+* don't bother with LTE error control on this one, b/c I don't 
+* really care about the answer.
+.options timeint erroption=1
+
+.sampling useExpr=true
+.options samples numsamples=2
++ measures=dmax
++ seed=367038869
++ stdoutput=true
+
+* suppress the normal measure output
+.options measure measprint=none
+
+xinv1 IN OUT2 vdd 0 inverter
+xinv2 OUT2 OUT3 vdd 0 inverter
+xinv3 OUT3 OUT4 vdd 0 inverter
+xinv4 OUT4 OUT5 vdd 0 inverter
+xinv5 OUT5 OUT6 vdd 0 inverter
+xinv6 OUT6 OUT7 vdd 0 inverter
+xinv7 OUT7 OUT8 vdd 0 inverter
+xinv8 OUT8 OUT9 vdd 0 inverter
+xinv9 OUT9 OUT10 vdd 0 inverter
+xinv10 OUT10 OUT11 vdd 0 inverter
+xinv11 OUT11 OUT12 vdd 0 inverter
+xinv12 OUT12 OUT13 vdd 0 inverter
+xinv13 OUT13 OUT14 vdd 0 inverter
+xinv14 OUT14 OUT15 vdd 0 inverter
+xinv15 OUT15 OUT16 vdd 0 inverter
+xinv16 OUT16 OUT17 vdd 0 inverter
+xinv17 OUT17 OUT18 vdd 0 inverter
+xinv18 OUT18 OUT19 vdd 0 inverter
+xinv19 OUT19 OUT20 vdd 0 inverter
+xinv20 OUT20 OUT21 vdd 0 inverter
+xinv21 OUT21 OUT22 vdd 0 inverter
+xinv22 OUT22 OUT23 vdd 0 inverter
+xinv23 OUT23 OUT24 vdd 0 inverter
+xinv24 OUT24 OUT25 vdd 0 inverter
+xinv25 OUT25 OUT26 vdd 0 inverter
+xinv26 OUT26 OUT27 vdd 0 inverter
+xinv27 OUT27 OUT28 vdd 0 inverter
+xinv28 OUT28 OUT29 vdd 0 inverter
+xinv29 OUT29 OUT30 vdd 0 inverter
+xinv30 OUT30 OUT31 vdd 0 inverter
+xinv31 OUT31 OUT32 vdd 0 inverter
+xinv32 OUT32 OUT33 vdd 0 inverter
+xinv33 OUT33 OUT34 vdd 0 inverter
+xinv34 OUT34 OUT35 vdd 0 inverter
+xinv35 OUT35 OUT36 vdd 0 inverter
+xinv36 OUT36 OUT37 vdd 0 inverter
+xinv37 OUT37 OUT38 vdd 0 inverter
+xinv38 OUT38 OUT39 vdd 0 inverter
+xinv39 OUT39 OUT40 vdd 0 inverter
+xinv40 OUT40 OUT41 vdd 0 inverter
+xinv41 OUT41 OUT42 vdd 0 inverter
+xinv42 OUT42 OUT43 vdd 0 inverter
+xinv43 OUT43 OUT44 vdd 0 inverter
+xinv44 OUT44 OUT45 vdd 0 inverter
+xinv45 OUT45 OUT46 vdd 0 inverter
+xinv46 OUT46 OUT47 vdd 0 inverter
+xinv47 OUT47 OUT48 vdd 0 inverter
+xinv48 OUT48 OUT49 vdd 0 inverter
+xinv49 OUT49 OUT50 vdd 0 inverter
+xinv50 OUT50 VOUT vdd 0 inverter
+.END

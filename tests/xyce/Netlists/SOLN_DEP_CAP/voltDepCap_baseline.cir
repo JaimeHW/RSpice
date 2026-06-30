@@ -1,0 +1,32 @@
+*TEST MOS_PCAP
+.global_param V_OFFSET=-3.3
+XC2 VDD 0 mos_pcap CA=525.431f
+
+VD VDD 0 SIN('V_OFFSET' 1 1MEG 0 0)
+
+.options nonlin-tran reltol=1e-4 abstol=1e-7
+.options timeint method=7 newlte=1 newbpstepping=1
+.tran 1n 2u
+.step V_OFFSET -3.3 3.31 .1
+.print tran V_OFFSET V(VDD)
++ I(XC2:Vc) {525.431f*(.610+.390*tanh((V(VDD)-.8159)/.7586))}
+*COMP I(XC2:Vc) reltol=0.02 abstol=1e-6
+*COMP V(VDD) reltol=0.05 abstol=1e-6
+ 
+.subckt mos_pcap 1 2 CA=500f
+ 
+.param
++c0=0.610
++c1=0.390
++v0=0.8159
++v1=0.7686
+ 
+*c_mcap 1 2 c='ca*(c0+c1*tanh((V(1,2)-v0)/v1))'
+Vc 1 1a 0
+
+* I(cap)= C*dV(cap)/dt
+BC 1a 2 I={ddt(V(1,2))*(ca*(c0+c1*tanh((V(1,2)-v0)/v1)))}
+.ends
+
+.end
+

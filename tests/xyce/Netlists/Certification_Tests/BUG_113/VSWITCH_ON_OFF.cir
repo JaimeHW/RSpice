@@ -1,0 +1,14 @@
+Test of ON specifier in switch
+v1 1 0 5v
+s1 1 2 3 0 SW  ON
+R1 2 0 100
+
+v2 3 0 1v
+r2 3 0 100
+
+.model sw VSWITCH(RON=1u ROFF=1MEG VON=1 VOFF=0)
+.dc v1 5 5 1
+.print dc i(v1)
+.end
+
+ 

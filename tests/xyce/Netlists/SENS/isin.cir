@@ -1,0 +1,21 @@
+Transient sensitivity example, sine source, analytical sensitivity
+*****************************************************************************
+.param v0=0.3
+.param va=1
+.param f=500hz
+.param td=0
+.param phase=500
+.param theta=0
+
+* original
+isin 0 1 sin({v0} {va} {f} {td} {phase} {theta})
+r1   1 0 1
+
+.tran 0.06ms 6ms
+.print tran i(isin)
+
+* Sensitivity commands
+.print sens 
+.sens objfunc={v(1)} param=isin:v0, isin:va, isin:freq, isin:td, isin:theta, isin:phase
+.options sensitivity direct=1 adjoint=0 forceanalytic=true
+.end

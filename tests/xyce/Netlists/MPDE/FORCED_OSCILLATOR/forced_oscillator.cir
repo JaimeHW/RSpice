@@ -1,0 +1,59 @@
+Forced oscillator circuit
+
+* Fri Jul 18 10:53:11 2003
+
+** Analysis setup **
+.tran 10us 10ms
+*.print tran format=probe V(OscOut) V(HV-X)
+.print tran V(4) V(OscOut) V(2) V(5) V(1) V(6)
+*.mpde 10us 1e-5 1e-2
+.options mpde n2=21 T2={1/1000} OSCSRC=V_V4
+*.options mpde n2=21 T2={1/1000} OSCOUT=V(OscOut)
+*.options mpde freqdomain=1 wampde=0 n2=11 
+*V(HV-X)
+R_R103         0 1  100  
+R_R104         0 2  6.3k  
+R_Rpwr         4 3  0.5  
+D_CR302         OscOut HV-X D159700 
+D_CR101         0 2 D357133 
+C_C101         5 0  1u  
+R_R101         3 5  100  
+R_R102         1 5  2K  
+R_R1         6 0  1k  
+
+R_R105         5 2  2K   
+V_V4         4 0  SIN(0 20 1k 0 0 0)
+*V_V4         4 0 DC 0 PULSE (0 20 1us 100ns 100ns 8 12)
+X_TX2         2 5 1 OscOut 6 XFRM_NONLIN_CTP
+
+.subckt XFRM_NONLIN_CTP 1 2 3 4 6 
+Lp1 7 2 200
+Lp2 2 8 200
+Ls1 9 5 200
+Ls2 5 10 200
+Rp1 1 7 0.125
+Rp2 8 3 0.125
+Rs1 9 4 0.125
+Rs2 10 6 0.125
+K1 Lp1 Lp2 Ls1 Ls2 0.99 TN33_20_11_2P90 
+.ends
+R_R334         0 HV-X  10meg  
+C_C331         HV-X 0  2nF IC=0
+
+.MODEL TN33_20_11_2P90 CORE(
++ MS=1.2896E6
++ A=2.7128E3
++ C=.25001
++ K=1.5551E3
++ AREA=.650
++ PATH=8.0000) 
+
+.MODEL D357133 D  ( IS = 3.209E-09 RS = 0.03715 N = 1.773 TT = 3.59E-06 
++ CJO = 1.938E-11 VJ = 0.4717 M = 0.396 EG = 1.152 XTI = 0.55 KF = 0 AF = 1 
++ FC = 0.5 BV = 908 IBV = 0.001 ) 
+
+.model D159700  D( IS = 4.289E-09 RS = 1.133 N = 18.1 TT = 2.34E-6
++ CJO = 2.818E-12 VJ = 5.55 M = 0.3784 EG = 11.11 XTI = 30 KF = 0 AF = 1 
++ FC = 0.5 BV = 6.5E+3 IBV = 1E-6 )
+
+.END

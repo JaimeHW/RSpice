@@ -1,0 +1,5 @@
+parallel,serial,nightly
+hb, notmorethan4procs    
+required:fft
+valgrind
+

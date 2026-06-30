@@ -1,0 +1,44 @@
+Description
+===========
+
+Bug 372 was an enhancement request, asking for a PSPICE-compatible instance
+parameter M that simulated a number of parallel MOSFETS:
+   Mfoo 1 2 3 4 MODEL M=2
+should be the same as
+   Mfoo 1 2 3 4 MODEL
+   Mbar 1 2 3 4 MODEL
+
+The tests in this directory verify that  the M= parameter does indeed produce
+results that are the same as the equivalent parallel MOSFETS.
+
+Verification
+============
+
+For each level of mosfet there are two netlists, one with parallel mosfets,
+the other with a single mosfet with M=2.  Run all the netlists, then make
+the comparisons as so:
+
+   xyce_verify.pl invert1.cir invert1.cir.prn invert1-sim.cir.prn invert1.plot
+   xyce_verify.pl invert3.cir invert3.cir.prn invert3-sim.cir.prn invert3.plot
+   xyce_verify.pl invert_bsim3.cir invert_bsim3.cir.prn \
+                  invert_bsim3-sim.cir.prn invert_bsim3.plot
+   xyce_verify.pl invert_b3soi.cir invert_b3soi.cir.prn \
+                  invert_b3soi-sim.cir.prn invert_b3soi.plot
+
+Ideally all four xyce_verify runs should produce no warnings or comparison
+failures.  The tolerance of the comparisons have been set in the netlists
+so that this would be the case for Release 2.0.  These are netlists with
+square-wave driving voltages, though, so comparison failures would not indicate
+real testing failures.  If the code flags signals as having too large an error,
+the plot files should be analysed by hand -- the signals for the invert1.cir.prn
+output should match those of the invert1-sim.cir.prn, with significant relative
+errors only being seen at the transitions between high and low --- those
+spikey differences can be ignored, and the real test is that the high values
+should line up exactly.
+
+NOTE ADDED 13 July 2005
+
+The invert_b3soi circuits will not run in versions of Xyce prior to
+3.0.  Versions of Xyce prior to Release 2.1 had no level 10 mosfet,
+and Release 2.1 had a version of the BSIM SOI model that was not
+complete.

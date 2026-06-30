@@ -1,0 +1,13 @@
+Bug 1455 (charleson/SRN):  Spice compatibility test.  (equal signs present)
+
+.model PFET PMOS(LEVEL=1 KP=25U VTO=-0.8V)
+
+VDD 2 0 DC 5V
+R1 2 1 50K
+R2 1 0 50K
+RD 4 0 7.5K
+VMON 3 4 0
+M1 3 1 2 2 PFET L=10U W=160U
+.dc VDD 0 5 1
+.print DC V(2) I(VMON) V(2,3) V(2,1)
+.end

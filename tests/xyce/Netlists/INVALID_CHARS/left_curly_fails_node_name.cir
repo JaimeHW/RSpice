@@ -1,0 +1,32 @@
+*******************************************************
+* For SON Bug 744
+*
+* Illustrate that a left curly bracket is often a valid
+* character in node or device names. However, the node
+* name 3} will cause an error in a .PRINT statement
+* In addition, the device names (with } in them) may
+* be incorrect in the symbol table.
+*
+*
+*
+*******************************************************
+.DC v1 1 1 1
+v1 1 0 1
+r1 1 0 1
+r5 5 0 1
+
+* all of these lines actually pass netlist parsing for 
+* a V-device, at least, in Xyce 6.5.
+v2} 2 0 1
+v3 3} 0 1
+v4 } 0 1
+v} 5 0 1
+ 
+* This .PRINT statement is actually legal in Xyce 6.5.
+.print DC v(})
+
+* This .PRINT statements will cause a netlist 
+* parsing error.
+.PRINT DC v(3})
+
+.end

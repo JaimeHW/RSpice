@@ -1,0 +1,52 @@
+Parameter fit for SOI NMOS
+
+m1 D G S E B ndevice l=12um w=0.8um 
+ve E 0 0
+vb B 0 0
+vg G 0 0
+vs S 0 0
+vd D 0 0
+
+.objective vsq function=L2NORM file=opt_soi.dat value={i(vs)}
+
+*COMP i(vs) reltol=0.25
+
+.dc VD 0 3.6 0.072v VG 1.5 3.65 0.525
+.print DC V(D) V(G)  i(vs) 
+
+* had IS(M1) on the print line, but this was the negative of i(vs)
+
+.MODEL ndevice nmos (    LEVEL   = 10  VERSION = 3
++ A0      = dakota_A0
++ AGS     = dakota_AGS
++ B0      = 2.0E-7
++ DWG     = -4E-8
++ K1      = 0.9
++ U0      = 279.0 
++ VTH0    = 0.7
++ WINT    = 8.2E-8
++ CAPMOD  = 2  
++ LMIN    = 6E-7
++ LMAX    = 1.801E-5 
++ MOBMOD  = 1
++ SOIMOD  = 0   
++ SHMOD   = 1
++ TNOM    = 27  
++ TOX     = 6.5E-9 
++ WMIN    = 8E-7   
++ WMAX    = 1.801E-5 )
+
+* 
+* here are the parameters used to generate the gold standard
+*
+* .MODEL ndevice nmos (    LEVEL   = 10             VERSION = 3
+* + TOX     = 6.5E-9       U0      = 279.0       VTH0    = 0.7
+* + K1      = 0.9       DWG     = -4E-8         A0      = 3
+* + AGS     = 0.3       B0      = 2.0E-7       WINT    = 8.2E-8    
+*
+* + WMIN    = 8E-7           WMAX    = 1.801E-5       LMIN    = 6E-7
+* + LMAX    = 1.801E-5       TNOM    = 27             SHMOD   = 1
+* + CAPMOD  = 2              SOIMOD  = 0              MOBMOD  = 1   )
+
+
+.END

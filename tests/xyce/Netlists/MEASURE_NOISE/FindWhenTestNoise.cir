@@ -1,0 +1,87 @@
+* Test NOISE mode support for the FIND-AT, FIND-WHEN and WHEN measures.
+* It was deemed sufficient to mostly just test with the VR and VI operators.
+* Expressions are also tested. One current operator (IM) is tested for a
+* branch current.
+*
+* See SON Bug 1301 for more details.
+********************************************************************
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND HP FILTER
+EAMP   3 0 2 0 1
+CLP1   3 4  2e-4
+RLP1a  4 5 50
+RLP1b  5 0 50
+
+.NOISE  V(4)  V1  DEC  10 1 100
+.PRINT NOISE VM(4) VR(4) VI(4) VM(5) VR(5) VI(5)
+
+* WHEN
+.MEASURE NOISE whenvr4 WHEN vr(4)=0.4
+.MEASURE NOISE whenvi4 WHEN vi(4)=0.15
+
+* FIND-WHEN
+.MEASURE NOISE whenvr3 FIND VM(5) WHEN vr(4)=0.4
+.MEASURE NOISE whenvi3 FIND VM(5) WHEN vi(4)=0.15
+
+* FIND-AT
+.MEASURE NOISE at1 FIND vr(4) at=1 ; first step
+.MEASURE NOISE at10 FIND vr(4) at 1e1
+.MEASURE NOISE at30 FIND vi(4) at 3e1
+.MEASURE NOISE at50 FIND {vi(4)+1} at 5e1
+
+* Expressions with WHEN measure
+.MEASURE NOISE whenExp1 when vr(4)=vi(4)
+.MEASURE NOISE whenExp2 when {vm(4)+0.1}=0.5
+.MEASURE NOISE whenExp3 when vm(4)={0.3+0.1}
+.MEASURE NOISE whenExp4 when vr(4)={vi(4)+0.3}
+
+* Expressions, with FIND-WHEN measure
+.MEASURE NOISE findvm3awhenvm4Exp1 find vm(5) when {vm(4)+0.1}=0.5
+.MEASURE NOISE findvm3awhenvm4Exp2 find vm(5) when vm(4)={0.3+0.1}
+.MEASURE NOISE findvm3awhenvm4Exp3 find {vm(5)+1} when {vm(4)+0.1}=0.5
+.MEASURE NOISE findvm3awhenvm4Exp4 find {vm(5)+1} when vm(4)={0.3+0.1}
+.MEASURE NOISE findvr3awhenvm4Exp5 find vr(5) when vr(4)=vi(4)
+
+* Use of other measures in WHEN and FIND-WHEN
+.MEASURE NOISE eqnvm5 EQN {vm(5)}
+.MEASURE NOISE wheneqnvm5 when EQNVM5=0.1
+.MEASURE NOISE findwheneqnvm5 find eqnvm5 when vm(4)=0.4
+
+* Use of FREQ special variable in FIND measure.  (Note: this is
+* essentially a bad way to do a WHEN measure, but it should work.)
+.MEASURE NOISE findFreqwhenvm4 find {FREQ} when vm(4)= 0.4
+
+* FROM
+.MEASURE NOISE whenvi4from10 when vi(4)=0.21 FROM=10
+
+* Test that the interpolated WHEN frequency is within the measure window.
+* So, the first and third measures should find the first time vi(b)=0.1.
+* The second one should find the second time.
+.MEASURE NOISE whenvi4from4 when vi(4)=0.21 FROM=4
+.MEASURE NOISE whenvi4from5 when vi(4)=0.21 FROM=5
+.MEASURE NOISE whenvi4ft when vi(4)=0.21 FROM=4 TO=5
+
+* The second measure should fail.
+.MEASURE NOISE whenvr4to25 when vr(4)=0.45 TO=25
+.MEASURE NOISE whenvr4to20 when vr(4)=0.45 TO=20
+
+* measures should fail
+.measure noise FAIL1 WHEN vm(4)=2
+.measure noise FAIL2 FIND vm(5) WHEN vm(4)=2
+.measure noise FAIL3 FIND vm(5) AT=1e7
+
+* Tests should fail  since the FROM-T0 windows have various problems.
+.measure noise whenFail WHEN vm(4)=0.5 FROM=1e3 TO=1e4
+.measure noise findWhenFail FIND vm(5) WHEN vm(4)=0.5 FROM=100 TO=1
+
+* FROM and TO qualifiers take precedence over AT.
+* So, these are failed measures.
+.MEASURE NOISE atFailFrom find VI(4) AT=8 FROM=10
+.MEASURE NOISE atFailTo find VI(4) AT=8 TO=5
+
+.END

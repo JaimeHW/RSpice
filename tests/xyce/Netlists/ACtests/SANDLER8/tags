@@ -1,0 +1,14 @@
+serial, parallel, nightly
+ac
+subckt
+resistor
+capacitor
+diode
+bsrc
+expression
+undelimexpression
+isrc
+gsrc
+hsrc
+bjtlev1
+

@@ -1,0 +1,18 @@
+* Test to demonstrate expression handling error
+
+.param upgefukt=1.5
+.subckt foobar  a b m n o p
+
+Bfoobar a b V={1.5*sqrt((V(m)-V(n))**2+(v(o)-v(p))**2)}
+
+.ends
+
+
+Xomgwtf 10 0 a 0 c 0 foobar
+R1 a 0 10
+V1 c 0 4.7
+R2 10 0 1
+
+.print tran v(10)
+.tran 1us 10us
+.end

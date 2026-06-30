@@ -1,0 +1,4 @@
+serial, parallel, nightly
+vstar
+hb
+required:fft

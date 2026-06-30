@@ -1,0 +1,32 @@
+ ***** Measure Functions ***** 
+
+AVGV2 = 3.000000e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+DERIVV2 = 1.000000e+00 for AT = 2.500000e+00
+
+ERR1 = 5.000000e-01
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+FITERRORINFPRN = 2.000000e+01
+COMP_FUNCTION was INFNORM
+
+INTEGV2 = 1.200000e+01
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+MAXV2 = 5.000000e+00 at V1 value = 5.000000e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+MINV2 = 1.000000e+00 at V1 value = 1.000000e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+PPV2 = 4.000000e+00 with max at V1 value= 5.000000e+00 and min at V1 value= 1.000000e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+RMSV2 = 3.240370e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+WHENV2 = 4.000000e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+

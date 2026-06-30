@@ -1,0 +1,37 @@
+Test of sensitivities with respect to source parameters
+*
+* In an early implementation of numerical device derivatives, the dbdp vector 
+* was not handled correctly.  This only affected independent source sensitivities,
+* as most devices don't use the B-vector.
+*
+* This test insures that it is handled correctly now.
+*
+* ERK
+* 11/3/2018
+* 
+.param cap=1u
+.param res=1K
+.param G={1/res}
+.param Pi=3.1415927
+
+.global_param Vm=1.0
+.global_param per=1.0us
+.global_param frequency={1/per}
+.global_param td=0.0
+
+C 2 0 {cap}
+R 2 1 {res}
+V 1 0  sin(0.0 {Vm} {frequency} {td} )
+
+*comp   {V(2)}  offset=1e-4
+*comp d_{v(2)}/d_V:VA_dir offset=1.0e-4
+*comp d_{v(2)}/d_V:FREQ_dir offset=4e-10
+
+.tran 2ns 0.5us
+.print tran v(1) v(2) 
+
+.sens objfunc={v(2)} param=V:VA,V:FREQ
+.options sensitivity stdoutput=1 adjoint=0 direct=1  debuglevel=-100 forcedevicefd=1
+.print sens 
+
+

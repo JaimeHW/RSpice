@@ -1,0 +1,61 @@
+Test Name: BUG_668
+
+Owner: elranki 
+
+Test netlists: 
+  bug_668.cir
+  bug_668_raw.cir
+  bug_668_probe.cir
+  bug_668_tecplot.cir
+
+GS files: none
+
+Mode:  Serial 
+
+Comparator:  xyce_verify & diff 
+
+Version of Xyce: Release_4.1
+
+ 
+Description:
+============
+Confirm that the output formats (RAW, TECPLOT, STD, PROBE) produce the same 
+results.
+
+ 
+Procedure:
+============
+
+Create output files in all of the formats:
+  runxyce bug_668.cir 
+  runxyce -r bug_668_raw.bin bug_668_raw.cir 
+  runxyce -r bug_668_raw.txt -a bug_668_raw.cir 
+  runxyce bug_668_probe.cir 
+  runxyce bug_668_tecplot.cir 
+
+Translate all of the output files to the std format:
+
+  gnuplotxyce.py -s -o bug_668_< ... >
+
+Confirm that all of the translated output files are identical using diffs:
+
+  diff bug_668_< ... > bug_668_< ... >  
+
+Verify that one of translated files matches the original prn file:
+
+  xyce_verify.pl bug_668.cir bug_668.cir.prn test_bug_668_raw.bin
+
+
+Verification:
+=============
+Passes if the tecplot, probe, binary rawfile, and ascii rawfile yield the 
+same gnuplotxyce translated results.  Those results must match the std prn
+file.
+
+ 
+Notes:
+======
+The original bug was to test only probe and tecplot output files.  This has
+been extended to cover raw (binary and ascii) output as well.
+
+The python libaries, numpy (Numeric) and gnuplot-py, must be installed.

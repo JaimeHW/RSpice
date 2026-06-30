@@ -1,0 +1,7 @@
+README
+namesMap_nand8.cir.txt
+namesOnly.txt
+nand8.cir
+nand8.cir.sh
+nandgen.pl
+tags

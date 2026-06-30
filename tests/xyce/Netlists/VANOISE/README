@@ -1,0 +1,13 @@
+This directory holds a set of noise test for Verilog-A derived models.
+
+In all cases, the "gold standards" are Xyce output that have been
+manually cross-checked against HSPICE output using the same verilog
+(but the original versions unmodified for Xyce) and an equivalent
+netlist.
+
+An important "gotcha" in doing this Xyce/HSPICE comparison
+is to make sure to run both simulators at the same temperature.
+Xyce's default temperature is 27, HSPICE's is 25.  One or the other
+simulator must be given a non-default temperature setting.  It is
+probably best to do the temperature setting in both netlists to make
+it really obvious you're using the same temperature.

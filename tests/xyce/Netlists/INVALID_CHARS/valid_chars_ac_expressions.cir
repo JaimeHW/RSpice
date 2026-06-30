@@ -1,0 +1,26 @@
+**************************************************************
+* For SON Bug 1034
+*
+* Test of what non-alphanumeric characters are legal in 
+* a Xyce node or device name when that name is used within
+* a multi-character operator used for .AC analyses, like 
+* VR(+), within an expression. This includes the following 
+* characters in general:
+*
+* ` ~ ! @ # $ % ^ & - _ + [ ] | \ < > . ? /
+*
+* However, it is sufficient to just test the addition operator
+* for VR, VI, VP, VM and VDB.
+*
+**************************************************************
+
+* Trivial high-pass filter (V-C-R) circuit
+R1 + 0 2
+C1 a + 1u
+V1 a 0 DC 0V AC 1
+
+.print AC {vr(+)} {vi(+)} {vm(+)} {vp(+)} {vdb(+)}
+.ac dec 5 100Hz 1e6
+
+.end
+

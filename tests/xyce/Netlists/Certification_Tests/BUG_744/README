@@ -1,0 +1,7 @@
+BUG 744
+
+When Xyce fails to get a DC operating point, it should 
+exit.  This circuit doesn't have an operating point
+and will fail.  The shell script detects Xyce's 
+failure and reports success if it was a DC op failure.
+

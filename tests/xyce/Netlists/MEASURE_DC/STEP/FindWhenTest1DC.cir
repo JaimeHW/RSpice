@@ -1,0 +1,72 @@
+* Test DC mode support for FIND-AT, FIND-WHEN and WHEN Measures.
+*
+* This bug covers:
+*
+*   1) The case of one variable (vsrc1) on the .DC line,
+*      with one variable (vsrc2) in the .STEP statement.
+*
+*   2) The DC values of the swept variable (vsrc1) are
+*      monotonically decreasing.
+*
+* See SON Bug 1270 for more details.
+****************************************************************
+
+vsrc1   1a 0 1
+rload1a 1a 1b 0.1
+rload1b 1b 0 1
+
+vsrc2   2a 0 1
+rload2a 2a 2b 0.1
+rload2b 2b 1b 0.1
+
+E3 3 0 VALUE={(V(1a)-2.6)*(V(1a)-2.6)*sqrt(V(2a))}
+R3 3 0 3
+
+* Reverse the step order on vsrc1 (from the test in MEASURE_DC)
+* to make sure that both increasing and decreasing sequences of
+* values are tested.
+.DC vsrc1 5 1 -1
+.STEP VSRC2 1 4 3
+
+* Note: vsrc1:DCV0 is the syntax for printing the DC value of vsrc1,
+* at it is swept.
+.print dc vsrc1:DCV0 vsrc2:DCV0 v(1a) v(2a) v(1b) v(2b) V(3)
+
+* WHEN
+.MEASURE DC whenv1b3 WHEN v(1b)=3
+.MEASURE DC whenExp1 when v(1b)={v(2b)+0.1}
+.MEASURE DC whenExp2 when {v(1b)-0.1}=v(2b)
+
+* FIND-WHEN
+.MEASURE DC findv2bwhenv1b3 find v(2b) when v(1b)=3
+
+* FIND-AT
+.MEASURE DC v1bat5 find v(1b) at=5; first sweep value
+.MEASURE DC v1bat2 find v(1b) at=2
+.MEASURE DC v1bat2.5 find v(1b) at=2.5
+.MEASURE DC v1bexpat2.5 find {v(1b)+1} at=2.5
+
+* FROM
+.MEASURE DC from1 WHEN V(3)=1
+.MEASURE DC from2 WHEN V(3)=1 FROM=2.5
+
+* These should get the same answer
+.MEASURE DC from3 WHEN V(3)=1 FROM=2 TO=4
+.MEASURE DC from4 WHEN V(3)=1 TO=2  FROM=4
+
+* measures should fail
+.measure dc FAIL1 WHEN v(1b)=10
+.measure dc FAIL2 FIND v(2b) WHEN v(1b)=10
+.measure dc FAIL3 FIND v(1b) AT=10
+
+* Test case of both FROM and TO given, but both are outside of the
+* measurement window
+.measure dc FAIL4 WHEN v(2b)=2 FROM=6 TO=10
+.measure dc FAIL5 WHEN v(2b)=2 FROM=-5 TO=0
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure dc lastMeasure max v(1b)
+
+.end

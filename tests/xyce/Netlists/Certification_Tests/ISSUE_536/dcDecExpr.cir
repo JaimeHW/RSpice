@@ -1,0 +1,15 @@
+Test for DECADE capability in DC sweeps with expressions
+*
+VT1 4 0 0V
+R1  4 5 10
+R2  5 0 5
+
+.param start=0.1
+.param end=100
+.param segs=4
+
+.DC DEC VT1  {start} {end} {segs}
+.print DC V(4) V(5)
+
+.END
+

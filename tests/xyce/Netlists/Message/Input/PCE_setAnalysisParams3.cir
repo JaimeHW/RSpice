@@ -1,0 +1,31 @@
+* Test error message for illegal value for BETA
+* parameter on .PCE line.
+*
+* See SON Bug 1224 for more details.
+****************************************************************
+
+.global_param R1value={1000.0}
+.global_param R2value={1000.0}
+.global_param Vvalue={5.0}
+
+R2 1 0 {R2value}
+R1 1 2 {R1value}
+Von 2 0 {Vvalue}
+
+.op
+
+.print dc v(1)
+.PRINT PCE
+
+.PCE
++ param=R1value
++ type=gamma
++ alpha=9
++ beta=0
+
+.options PCES
++ order=2
+
+.options nonlin nox=0
+
+.end

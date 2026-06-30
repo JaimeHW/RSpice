@@ -1,0 +1,23 @@
+Description
+===========
+
+Some time after Release 1.1 a bug was introduced into the parser that broke
+expression handling when parameters in a .model statement were given as
+expressions.  Bug 352 documents that failure.  This test verifies that it's
+corrected.
+
+The failure was that parameters given as expressions were passed to the device
+as unevaluated expressions, and when "dVal" was used to return the double-
+precision value, the code gave the device 0.0.
+
+Verification
+============
+Run both BUG_352a.cir and BUG_352b.cir.  The former uses an expression, the
+latter a hardcoded value.  The two should match exactly when compared with
+xyce_verify:
+
+    xyce_verify.pl BUG_352b.cir BUG_352b.cir.prn BUG_352a.cir.prn
+
+Release 1.1 of the code worked properly, the failure is only in some post
+release 1.1 development snapshots.
+

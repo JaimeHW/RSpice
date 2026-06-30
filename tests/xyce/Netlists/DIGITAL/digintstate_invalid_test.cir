@@ -1,0 +1,47 @@
+Unit Test for Invalid .OPTIONS DIGINITSTATE 
+***************************************************************
+* Test that .OPTIONS DEVICE DIGINITSTATE=4 emits a warning 
+* message and sets the DIGINITSTATE to the default value of 3
+* 
+* 
+* 
+*
+*   
+*  
+***************************************************************
+.OPTIONS DEVICE DIGINITSTATE=4
+
+* Analysis Commands
+.DC V4 0 3 3 V3 0 3 3 V2 0 3 3 V1 0 3 3
+
+* Sources, used to toggle inputs at gates
+V1 in_pre 0 3V
+V2 in_clr 0 3V
+V3 in_enableclk 0 3V
+V4 in_data 0 3V
+
+* Output
+.print DC v(in_pre) v(in_clr) v(in_enableclk) v(in_data) v(out1_q) v(out1_qbar) 
+
+* Devices
+UDLTCH1 DLTCH dig_pn 0 in_pre in_clr in_enableclk in_data out1_q out1_qbar DMOD
+Rq1 out1_q 0 100K
+Rqbar1 out1_qbar 0 100K
+
+* Set digital default parameters:
+.param R1HI=5 R1LO=200 R0HI=200 R0LO=5 RIN=1000 R1=100
+.param SW=5.e-9  CAPOUT=1.e-12  CAPIN=1.e-12
+.param V_LO=0 V_HI=3
+
+* Digital power and reference node
+V5 dig_pn 0 3V 
+
+.model DMOD DIG ( CLO=CAPOUT  CHI=CAPOUT
++ S0RLO=R0LO  S0RHI=R0HI  S0TSW=SW
++ S0VLO=-1  S0VHI=1.8
++ S1RLO=R1LO  S1RHI=R1HI  S1TSW=SW
++ S1VLO=1  S1VHI=3
++ RLOAD=RIN   CLOAD=CAPIN 
++ DELAY=20ns )
+
+.end

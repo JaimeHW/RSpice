@@ -1,0 +1,23 @@
+* test for bug 1558
+* This version removes the "params:" from the subcircuit definition. 
+* The value "R" is defined by a .param statement as well as by the 
+* PARAMS: on the instance line.  The purpose of this netlist is to assure
+* that the behavior is consistent with user intent.
+* If the PARAMS: overrides the .param, then this will match the baseline.
+
+.param R=1k
+
+X1 1 0 simple PARAMS: R=100k
+V1 1 0 DC 5v
+
+.dc v1 0 5 1
+.print dc v(1) I(V1)
+
+
+.subckt simple a b 
+
+R1 a b {R}
+
+.ends
+
+.end

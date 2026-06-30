@@ -1,0 +1,6 @@
+Output data in this directory was generated with SPICE 3F5 modified to support
+the BSIM4 with version 4.6.1.  xyce_verify.pl should be able to cope with
+gold standards in SPICE format, so long as there are not so many output
+variables that SPICE starts splitting the lines (which it does in a way
+that xyce_verify can't handle).
+

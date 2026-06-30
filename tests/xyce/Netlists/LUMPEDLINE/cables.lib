@@ -1,0 +1,111 @@
+* Subcircuited RLC versions of a tranmission line.
+
+.param Rcable=1.0e-3; ohm/foot
+.param Lcable=0.5u  ; H/foot
+.param Ccable=60p   ; F/foot
+
+* r, l and c are in per 1 inch units.  Not that accurate.
+*   
+*  I--L--3--R--O   
+*              |
+*              C
+*              |
+*              0(gnd)
+*
+*
+.subckt rlclump I O 
+L1 I 3  {Lcable*0.1/12.0}
+C1 O 0  {Ccable*0.1/12.0}
+R1 3 O  {Rcable*0.1/12.0}
+.ends rlclump 
+
+.subckt rlconeinch I O
+x1 I 3 rlclump
+x2 3 4 rlclump
+x3 4 5 rlclump
+x4 5 6 rlclump
+x5 6 7 rlclump
+x6 7 8 rlclump
+x7 8 9 rlclump
+x8 9 10 rlclump
+x9 10 11 rlclump
+x10 11 O rlclump
+.ends rlconeinch
+
+.subckt rlctwoinch I O
+x1 I 3 rlconeinch
+x2 3 O rlconeinch
+.ends rlctwoinch
+
+.subckt rlcfourinch I O
+x1 I 3 rlconeinch
+x2 3 4 rlconeinch
+x3 4 5 rlconeinch
+x4 5 O rlconeinch
+.ends rlcfourinch
+
+.subckt rlcfiveinch I O
+x1 I 3 rlconeinch
+x2 3 4 rlconeinch
+x3 4 5 rlconeinch
+x4 5 6 rlconeinch
+x5 6 O rlconeinch
+.ends rlcfiveinch
+
+.subckt rlcsixinch I O
+x1 I 3 rlconeinch
+x2 3 4 rlconeinch
+x3 4 5 rlconeinch
+x4 5 6 rlconeinch
+x5 6 7 rlconeinch
+x6 7 O rlconeinch
+.ends rlcsixinch
+
+.subckt rlcOneFoot I O
+x1 I 3 rlcsixinch
+x2 3 O rlcsixinch
+.ends rlcOneFoot
+
+.subckt rlcOnePointFiveFoot I O
+x1 I 3 rlcsixinch
+x2 3 O rlcOneFoot
+.ends rlcOnePointFiveFoot
+
+.subckt rlcTwoFoot I O
+x1 I 3 rlcOneFoot
+x2 3 O rlcOneFoot
+.ends rlcTwoFoot
+
+.subckt rlcTwoPointFiveFoot I O
+x1 I 3 rlcTwoFoot
+x2 3 O rlcsixinch
+.ends rlcTwoPointFiveFoot 
+
+.subckt rlcThreePointFiveFoot I O
+x1 I 3 rlcOnePointFiveFoot 
+x2 3 O rlcTwoFoot
+.ends rlcThreePointFiveFoot 
+
+.subckt rlcFourFoot I O
+x1 I 3 rlcTwoFoot
+x2 3 O rlcTwoFoot
+.ends rlcFourFoot
+
+.subckt rlc_6Foot I O
+x1 I 3 rlcTwoFoot
+x2 3 O rlcFourFoot
+.ends rlc_6Foot
+
+.subckt rlc_12Foot I O
+x1 I 3 rlcFourFoot
+x2 3 4 rlcFourFoot
+x3 4 O rlcFourFoot
+.ends rlc_12Foot
+
+.subckt rlc_18Foot I O
+x1 I 3 rlc_12Foot
+x2 3 4 rlcTwoFoot
+x3 4 5 rlcTwoFoot
+x4 5 O rlcTwoFoot
+.ends rlc_18Foot
+

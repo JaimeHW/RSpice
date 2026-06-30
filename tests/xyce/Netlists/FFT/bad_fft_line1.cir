@@ -1,0 +1,21 @@
+*************************************************
+* Test of various invalid .FFT lines.  The
+* netlist does not really matter, other then
+* being a .TRAN analysis.
+*
+*
+*
+*************************************************
+.TRAN 0 1
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+.PRINT TRAN V(1) V(2)
+
+.FFT
+.FFT V(1) BOGO=2
+.FFT NP=64 V(2)
+
+.END

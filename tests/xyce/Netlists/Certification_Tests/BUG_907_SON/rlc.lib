@@ -1,0 +1,6 @@
+* Library for RLC, with recursive include to test error
+r1 1 2 3
+l1 2 3 1
+c1 3 0 .5
+
+.include rlc.lib

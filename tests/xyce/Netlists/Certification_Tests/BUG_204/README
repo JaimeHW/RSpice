@@ -1,0 +1,26 @@
+From the comments in the netlist:
+ The bug this is intended to test, bug 204, was one in which any netlist
+ with a ".DC" analysis line, which lacked a 3rd parameter to indicate the step
+ size, would fail by going into an infinite loop.
+
+ This circuit tests it by having such a .DC statement.  This is the
+ "diode" circuit from the test suite, but with the .DC analysis statement
+ changed to set up the bug.  Xyce should take this in stride now.
+
+Summary:
+  1) Run Xyce on this netlist using the "-op" (old parser) option:
+     runxyce -op bug204.cir
+  2) If operating correctly, Xyce will take one DC step, and V(1) will be
+     5 volts at this step.
+
+Running without the "-op" option will cause Xyce to exit with a fatal error
+in the parsing phase because of the missing parameter on the .DC line.
+
+This bug test will ultimately go away --- the new parser flags the
+syntax error that it contains as an error, whereas the bug test tests
+the ability of the code to handle the syntax error when the OLD parser
+passed over the syntax error and passed incomplete data to the time
+integration package.  Some day the old parser will go away, and this
+bug test will become irrelevant (except, perhaps, as a test of the new
+parser's error reporting capabilities).
+

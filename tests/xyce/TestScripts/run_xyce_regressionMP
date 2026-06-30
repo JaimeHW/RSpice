@@ -1,0 +1,1113 @@
+#!/usr/bin/env perl
+#
+###########################SIMULATION#############################
+#
+#   NAME:      SIMULATION SCRIPT
+#   Purpose:   This script is used to run various simulations of 
+#         the Xyce Circuit Simulation Code.
+#
+#   This script works by descending each directory in the current
+#   directory and running each available version of Xyce on
+#   the netlist found there.
+#   
+##################################################################
+
+package XyceRegression;
+use strict; 
+
+#use Env;          # import all variables
+use File::Basename;
+use File::Copy 'cp';
+use Getopt::Long;
+use FindBin;
+use lib "$FindBin::Bin";
+use List::Util 'shuffle';
+
+# this is needed for the function waitpid
+use POSIX "sys_wait_h";
+
+use XyceRegression::ToolsTestSetUp;
+
+
+# 03/30/06 tscoffe:  Consider using autoflush on STDOUT/STDERR
+# select STDOUT; # sets STDOUT as default output
+# $| = 1; # sets autoflush to true
+# or:
+# use IO::Handle;
+# STDOUT->autoflush(1); # does not change default output
+
+my $version = "0.1";
+
+my @time0=times;
+my $wtime0 = time;
+# modify these variables
+my $RunXYCE = "true";
+my $runCompare="true";
+my @copyARGV = @ARGV;
+# Parse commandline option: --testlist=filename
+my (@testlist, $globaltaglist, @globalwithtags, @globalwithouttags, @globalwithoptionaltags, $excludenotags);
+my ($verbose, $printVersion, $debug, $quiet, $helpflag, $textwidth, $output, $indent);
+my ($skipmake, $writelist, $passlist, $faillist, $testtime, $testprogress);
+my ($printlist, $xyce_test, @excludelist, $xyce_verify, $xyce_compare, @onetest);
+my ($notest, $resultfile, $saveoutput, $fulldiff, $fulldiffregex, $fork, $wrapshellscripts);
+my ($ignoreparsewarnings, $ignoreshellscripts, $selftest, $extraHelpFlag);
+my $randomizeTests = 0;
+my $bufferOutput = 0;
+my @testResults = ();
+my $PASSLIST;
+my $FAILLIST;
+
+#
+# this option and array is to store tests that fail when run with many processes
+# they will be re-run one at at time if retestFailsInSingleProc is true
+my $retestFailsInSingleProc = 0;
+my @failedTestsForRetest = ();
+
+#number of processes to spawn for running tests
+my $numproc=1;
+
+my @globalAllTags; # This is used to return a list of all tags
+my $listAllTags; # Flag to print global list of tags
+
+$indent="";
+$wrapshellscripts = 1;
+$textwidth=65; # total term width = 100 works well with this at 50.
+
+&GetOptions( "testlist=s" => \@testlist, 
+             "taglist=s" => \$globaltaglist,
+             "listalltags!" => \$listAllTags,
+             "excludenotags!" => \$excludenotags,
+             "verbose!" => \$verbose, 
+             "version!" => \$printVersion, 
+             "debug!" => \$debug, 
+             "quiet!" => \$quiet,
+             "help" => \$helpflag, 
+             "extrahelp" => \$extraHelpFlag,
+             "textwidth=s" => \$textwidth,
+             "output=s" => \$output,
+             "indent=s" => \$indent,
+             "skipmake!" => \$skipmake,
+             "writelist=s" => \$writelist,
+             "passlist=s" => \$passlist,
+             "faillist=s" => \$faillist,
+             "timelimit=s" => \$testtime,
+             "progresslimit=s" => \$testprogress,
+             "printlist!" => \$printlist,
+             "xyce_test=s" => \$xyce_test,
+             "excludelist=s" => \@excludelist,
+             "xyce_verify=s" => \$xyce_verify,
+             "xyce_compare=s" => \$xyce_compare,
+             "onetest=s" => \@onetest,
+             "notest!" => \$notest,
+             "resultfile=s" => \$resultfile,
+             "saveoutput!" => \$saveoutput,
+             "fulldiff=s" => \$fulldiff,
+             "fulldiffregex=s" => \$fulldiffregex,
+             "fork!" => \$fork,
+             "forkshellscripts!" => \$wrapshellscripts,
+             "ignoreparsewarnings!" => \$ignoreparsewarnings,
+             "ignoreshellscripts!" => \$ignoreshellscripts,
+             "selftest!" => \$selftest,
+             "numproc=s" => \$numproc,
+             "random" => \$randomizeTests,
+             "bufferoutput" => \$bufferOutput,
+             "retestfails" => \$retestFailsInSingleProc,
+# These will be depreciated soon
+             "withtag=s" => \@globalwithtags,
+             "withouttag=s" => \@globalwithouttags,
+             "withoptionaltag=s" => \@globalwithoptionaltags) or $helpflag=1;
+
+if ((defined $helpflag) or (defined $extraHelpFlag)) {
+  print "Usage:\n";
+  print "run_xyce_regression [options] [/path/to/Xyce]\n";
+  print "--version             # Print version information\n";
+  print "--verbose             # Enable verbose output\n";
+  print "--taglist             # List of tags to use +tagA-tagB?tagC [+serial+nightly]\n";
+  print "                        Note: -exclude is always added unless it appears explicitly\n";
+  print "--onetest=\"DIR/[CIR]\" # Run a single test or tests below DIR satisfying taglist\n";
+  print "--extrahelp           # Full list of command-line options\n";
+  print "/path/to/Xyce         # absolute path to Xyce binary, default is to look in path\n";
+}
+
+if (defined $extraHelpFlag) {
+  print "\n";
+  print "Extended Help:\n";
+  print "----------------------------------------------------------------------\n";
+  print "  Tag specification options:\n";
+  print "----------------------------------------------------------------------\n";
+  print "--listalltags         # Print a list of all tags specified in tests\n";
+  print "--excludenotags       # Change behavior to exclude tests w/o tag files\n";
+  print "--withtag             # [depreciated] Tests must have this tag\n";
+  print "--withouttag          # [depreciated] Tests must not have this tag\n";
+  print "--withoptionaltag     # [depreciated] Tests may have this tag\n";
+  print "----------------------------------------------------------------------\n";
+  print "  Testlist verification options:\n";
+  print "----------------------------------------------------------------------\n";
+  print "--notest              # Just parse/create the testlists and quit\n";
+  print "--printlist           # print list to screen before running tests\n";
+  print "----------------------------------------------------------------------\n";
+  print "  Testlist specification options:\n";
+  print "----------------------------------------------------------------------\n";
+  print "--testlist=filename   # File containing list of tests to run\n";
+  print "--excludelist=filename# Global exclude list to remove from tests\n";
+  print "--writelist=filename  # Write list of tests to file\n";
+  print "--passlist=filename   # Write list of passed tests to file\n";
+  print "--faillist=filename   # Write list of failed tests to file\n";
+  print "--ignoreparsewarnings # Skip tests that have parse errors\n";
+  print "----------------------------------------------------------------------\n";
+  print "  Direct output/results to different places:\n";
+  print "----------------------------------------------------------------------\n";
+  print "--output=directory    # Directory to put testing output into\n";
+  print "                        (E.g. \$output/Netlists/test/test.cir.prn)\n";
+  print "--resultfile=filename # Also print output to this file\n";
+  print "----------------------------------------------------------------------\n";
+  print "  Options that control how Xyce is run:\n";
+  print "----------------------------------------------------------------------\n";
+  print "--timelimit=7200      # Time limit for each test to complete (sec)\n";
+  print "--progresslimit=1800  # Time limit for non-shell script .prn updates\n";
+  print "                        Note:  timelimit/progresslimit require fork*\n";
+  print "--fork                # [default] Use fork when running Xyce\n";
+  print "--forkshellscripts    # [default] Use fork when running shell scripts\n";
+  print "--numproc=num         # Number of processses to use for running tests. Default is 1.\n";
+  print "----------------------------------------------------------------------\n";
+  print "  Report formatting options:\n";
+  print "----------------------------------------------------------------------\n";
+  print "--textwidth=50        # Width of text for test name and directory\n";
+  print "--indent=string       # Indent string to put before output lines\n";
+  print "----------------------------------------------------------------------\n";
+  print " Locations of prerequisites:\n";
+  print "----------------------------------------------------------------------\n";
+  print "--xyce_test=directory # Location of Xyce_Regression to use for testing\n";
+  print "--xyce_verify=file    # Location of xyce_verify.pl\n";
+  print "--xyce_compare=file   # Location of compare\n";
+  print "--skipmake            # Skip the make process for compare\n";
+  print "----------------------------------------------------------------------\n";
+  print "  Refactoring support options:\n";
+  print "----------------------------------------------------------------------\n";
+  print "--saveoutput          # Save all output from runs, (use with fulldiff)\n";
+  print "--fulldiff            # Diff output with previous --saveoutput run\n";
+  print "--fulldiffregex=file  # File with regex to remove extraneous data from\n";
+  print "                        output files (e.g. dates, timings, etc)\n";
+  print "----------------------------------------------------------------------\n";
+  print "  Screen/debug options:\n";
+  print "----------------------------------------------------------------------\n";
+  print "--quiet               # Disable most normal output\n";
+  print "--debug               # Enable debug output\n";
+  print "--ignoreshellscripts  # Ignore shell scripts when running tests\n";
+  print "----------------------------------------------------------------------\n";
+  print "  Self Testing:\n";
+  print "----------------------------------------------------------------------\n";
+  print "--selftest            # Run a set of internal self-tests\n";
+  print "----------------------------------------------------------------------\n";
+}
+if ((defined $helpflag) or (defined $extraHelpFlag)) {
+  exit 0;
+}
+my $XYCEPATH=$ARGV[0];
+
+# Set up common regression tools flags:
+my $Tools = XyceRegression::ToolsTestSetUp->new();
+if (defined ($resultfile)) { $Tools->setResultFile($resultfile); }
+if (defined ($quiet))      { $Tools->setQuiet(1); }
+if (defined ($verbose))    { $Tools->setVerbose(1); }
+if (defined ($debug))      { $Tools->setDebug(1); }
+if (defined ($fork))       { $Tools->setFork(1); }
+if (defined ($testtime))   { $Tools->setChildWait($testtime); }
+if (defined ($testprogress)) { $Tools->setChildProgress($testprogress); }
+$Tools->setIndent($indent);
+$Tools->setFork(1);
+
+# Map convenience print calls to regression tools:
+sub defaultPrint { $Tools->defaultPrint(@_); }
+sub resultPrint  { $Tools->resultPrint(@_); }
+sub iPrint       { $Tools->iPrint(@_); }
+sub verbosePrint { $Tools->verbosePrint(@_); }
+sub debugPrint   { $Tools->debugPrint(@_); }
+sub quietPrint   { $Tools->quietPrint(@_); }
+
+if (defined $selftest) {
+  use XyceRegression::UnitTests;
+  my $retval = XyceRegression::UnitTests::runTests($debug);
+  if ($retval == 0) {
+    print "Self Test passed\n";
+  } else {
+    print "Self Test FAILED\n";
+    $retval = 2;
+  }
+  print "Exit code = $retval\n";
+  exit $retval;
+}
+
+# Get default run options (timelimit, progresslimit) from Tools.
+my $defaultRunOptionsRef = $Tools->getRunOptions();
+
+$globaltaglist = $Tools->combineTags(\@globalwithtags,\@globalwithouttags,\@globalwithoptionaltags,$globaltaglist);
+$globaltaglist = $Tools->setDefaultTags($globaltaglist);
+debugPrint "run_xyce_regression:  \$globaltaglist = >>$globaltaglist<<\n";
+
+if (defined $printVersion) {
+  iPrint "run_xyce_regression version $version\n";
+  exit 0
+}
+
+verbosePrint("Setting PERL5LIB variable to $FindBin::Bin\n");
+$ENV{'PERL5LIB'} = "$FindBin::Bin";
+
+my $invocationDirectory = `pwd`; chomp($invocationDirectory);
+
+my $XYCE_TEST_HOME = $Tools->configureXyceTestHome($xyce_test,\%ENV);
+if (not defined $XYCE_TEST_HOME) { exit -1; }
+
+my $XYCE_VERIFY;
+# Order of precendence:
+# 1.  command line option
+# 2.  Environment variable
+# 3.  Use XYCE_TEST_HOME to find xyce_verify.pl
+if (defined($xyce_verify)) {
+    $XYCE_VERIFY=$xyce_verify;
+} elsif (defined ($ENV{XYCE_VERIFY})) {
+    $XYCE_VERIFY=$ENV{XYCE_VERIFY};
+} else {
+    $XYCE_VERIFY="$XYCE_TEST_HOME/TestScripts/xyce_verify.pl";
+}
+{ # this is to scope $CMD.
+  my $CMD = "$XYCE_VERIFY --help > /dev/null 2>&1";
+  if((system("$CMD") != 0) and (not defined($notest))) {
+      iPrint "ERROR: no valid xyce_verify.pl script found\n";
+      exit -1
+  }
+}
+verbosePrint "XYCE_VERIFY set to $XYCE_VERIFY\n";
+
+if ((@testlist)) {
+  verbosePrint "testlist set to @testlist\n";
+}
+
+# Check that the directory specified by $fulldiff is accessible
+if (defined($fulldiff)) {
+  chdir "$fulldiff" or die "ERROR cannot chdir to $fulldiff\n";
+  chdir "$fulldiff/Netlists" or die "ERROR cannot chdir to $fulldiff/Netlists\n";
+}
+if (defined($fulldiff)) {
+  debugPrint("\$fulldiff = $fulldiff\n");
+} else {
+  debugPrint("\$fulldiff not defined\n");
+} 
+
+# Check that the file fulldiffregex is accessible
+if (defined($fulldiffregex)) {
+  if ( -z "$fulldiffregex") {
+    die "Error file $fulldiffregex is empty!\n";
+  } elsif ( -f "$fulldiffregex" ) {
+   open(REGEX,$fulldiffregex) or die "Error, cannot open $fulldiffregex!\n";
+  }
+}
+
+# Determine if any Xyce_FooRegression directories are available and set symbolic links if necessary:
+# In particular this is important for "Xyce_SandiaRegression"
+{ # this is to scope @filelist.
+  chdir "$XYCE_TEST_HOME";
+  my @filelist = <*>;
+  foreach my $name (@filelist) {
+    chdir "$XYCE_TEST_HOME";
+    if ( -d "$name" )  { # if name is a directory
+      my $namedir = $name;
+      if ($name =~ s/Xyce_([\w]+)Regression/\1/)  {
+        my $nametests = "${name}Tests";
+        # Note:  chdir ".." does not follow symlinks backwards, code was updated to fix an incorrect assumption.
+        if ( ( ! -d "$XYCE_TEST_HOME/Netlists/$nametests" ) && ( -d "$XYCE_TEST_HOME/$namedir/Netlists" ) ) {
+          quietPrint "Setting up $name Tests\n";
+          chdir "$XYCE_TEST_HOME/Netlists";
+          `ln -s ../$namedir/Netlists $nametests`;
+        }
+        if ( ( ! -d "$XYCE_TEST_HOME/OutputData/$nametests" ) && ( -d "$XYCE_TEST_HOME/$namedir/OutputData" ) ) {
+          chdir "$XYCE_TEST_HOME/OutputData";
+          `ln -s ../$namedir/OutputData $nametests`;
+        }
+      }
+    }
+  }
+}
+
+chdir "$invocationDirectory";
+
+
+# Create valid testlist:
+my @cktlisttemp;
+if ( (@onetest) ) {
+  debugPrint "\@onetest = @onetest\n";
+  foreach my $test (@onetest) {
+    debugPrint "\$test = $test\n";
+    my $line = $test;
+    $line =~ s/^\s+//; # Remove space at beginning of line
+    $line =~ s/\s+$//; # Remove space at end of line
+    $line =~ s-^\./+--; # remove "./" at beginning of line
+    #$line =~ s-/- -g; # Change / to spaces.
+    $line =~ s/\s+/\//g; # Change spaces to /.
+    $line =~ s/[\/]([^\/]+[.]cir)/ $1/; # Change last / to a space.
+    my @split_line = split(/\s+/,$line);
+    if ($#split_line == 0) {
+      chdir "$XYCE_TEST_HOME/Netlists/$split_line[0]" or die "ERROR cannot chdir to $XYCE_TEST_HOME/Netlists/$split_line[0]\n";
+      my @localcktlisttemp = findTests("$split_line[0]",$globaltaglist,$excludenotags);
+      push(@cktlisttemp,@localcktlisttemp);
+      chdir "$invocationDirectory" or die "ERROR cannot chdir to $invocationDirectory\n";
+    } elsif ($#split_line == 1) {
+      push(@cktlisttemp,"$split_line[0] $split_line[1]");
+      @cktlisttemp = checkTestList(@cktlisttemp);
+    } else {
+      iPrint "ERROR:  Invalid syntax for --onetest=\"$test\"\n";
+      exit -1
+    }
+    debugPrint "\@cktlisttemp = @cktlisttemp\n";
+  }
+} elsif ( (@testlist) ) {
+  foreach my $testlist1 (@testlist) {
+    my @cktlisttemp1 = $Tools->parseTestList($testlist1,$ignoreparsewarnings);
+    @cktlisttemp1 = checkTestList(@cktlisttemp1);
+    push(@cktlisttemp,@cktlisttemp1);
+    debugPrint "\@cktlisttemp = @cktlisttemp\n";
+  }
+} else {
+  debugPrint "Attempting to construct test list.\n";
+  # Construct a default circuit list of all Netlists/*/*.cir
+  chdir "$XYCE_TEST_HOME/Netlists" or die "ERROR cannot chdir to $XYCE_TEST_HOME/Netlists";
+  @cktlisttemp = findTests('.',$globaltaglist,$excludenotags);
+}
+
+# Now we parse the global exclude list and remove entries.
+my @cktlist;
+if ( @excludelist ) {
+  my @globalexcludelist;
+  foreach my $excludelist1 (@excludelist) {
+    chdir "$invocationDirectory" or die "ERROR cannot chhdir to $invocationDirectory";
+    my @globalexcludelist1 = $Tools->parseTestList($excludelist1,$ignoreparsewarnings);
+    push(@globalexcludelist,@globalexcludelist1);
+    debugPrint "\@globalexcludelist = @globalexcludelist\n";
+  }
+  my %globalexcludehash = $Tools->excludeListToHash(@globalexcludelist);
+  debugPrint "Iterating over global exclude list\n";
+  foreach my $line (@cktlisttemp) {
+    my @split_line = split(' ',$line);
+    my $dir = $split_line[0];
+    my $ckt = $split_line[1];
+    if (defined($globalexcludehash{"$dir/$ckt"})) { 
+      verbosePrint "$dir/$ckt removed from list due to global exclude file\n"; 
+      next; 
+    }
+    $cktlist[$#cktlist+1] = $line;
+  }
+} else {
+  @cktlist = @cktlisttemp;
+}
+
+{ # this is to scope %cktlisthash.
+  # Now we remove duplicate entries from cktlist.
+  @cktlisttemp = @cktlist;
+  @cktlist = ();
+  my %cktlisthash = undef;
+  foreach my $line (@cktlisttemp) {
+    debugPrint "run_xyce_regression:  \$line = $line\n";
+    my $templine = $line;
+    $templine =~ s- -/-; # change space back to "/" for this.
+    if (not defined($cktlisthash{"$templine"})) {
+      $cktlisthash{"$templine"} = 1;
+      push @cktlist,$line;
+      
+    } else {
+      debugPrint "Removing duplicate test: $line\n";
+    }
+  }
+  if( $numproc > 1 )
+  {
+    # $testQueue->enqueue(@cktlist);
+    # signal that the queue will no longer have elements added after this point
+    # $testQueue->end();
+  }
+}
+
+if (defined($debug)) {
+  debugPrint "Final list of tests:\n";
+  debugPrint "-----------------------------------------\n";
+  foreach my $line (@cktlist) {
+    debugPrint "$line\n";
+  }
+  debugPrint "-----------------------------------------\n";
+}
+
+my $DATE1 = $Tools->getDate(':','-',':');
+my $DATE2 = $Tools->getDate('/',':','.');
+
+if (defined($writelist)) {
+  verbosePrint "Writing test list to: $writelist\n";
+  chdir "$invocationDirectory" or die "ERROR cannopt chdir to $invocationDirectory";
+  open(WRITELIST,">$writelist") or die "ERROR cannot open $writelist for writing";
+  print WRITELIST "# Date:  $DATE2\n";
+  print WRITELIST "# XYCE_TEST_HOME=$XYCE_TEST_HOME\n";
+  print WRITELIST "# $0 run from directory:  $invocationDirectory\n";
+  print WRITELIST "# ARGV = @copyARGV\n";
+  foreach my $line (@cktlist) {
+    print WRITELIST "$line\n";
+    debugPrint "$line\n";
+  }
+  close(WRITELIST);
+}
+
+if (defined $printlist) {
+  foreach my $line (@cktlist) {
+    print "$line\n";
+  }
+}
+
+if (defined $listAllTags) {
+  print "List of all tags present in tests:\n";
+  @globalAllTags = sort($Tools->uniqueSet(@globalAllTags));
+  foreach my $tag (@globalAllTags) {
+    print "$tag\n";
+  }
+}
+
+if (defined($notest)) {
+  exit 0
+}
+
+###################################################################################
+# Set up the output directory
+###################################################################################
+if (defined $output) {
+  if (not -d "$output/Netlists") {
+    verbosePrint "Creating \$output directory:  $output/Netlists\n";
+    `mkdir -p $output/Netlists`;
+  }
+} else {
+  # put output in $XYCE_TEST_HOME/Results.$date
+  my $tmpdate = $Tools->getDate('-','_','.');
+  $output = "$XYCE_TEST_HOME/Results_$tmpdate";
+  `mkdir -p $output/Netlists`;
+  # create symlink from Results -> current output location
+  if (-l "$XYCE_TEST_HOME/Results") {
+    `rm -f "$XYCE_TEST_HOME/Results"`;
+  }
+  symlink("$output","$XYCE_TEST_HOME/Results");
+}
+iPrint "Testing output is in $output/Netlists/\n";
+print results "Testing output is in $output/Netlists/\n";
+
+
+###################################################################################
+# Open file to store test results, input  a header line that include the date (RLS)
+###################################################################################
+open(results, ">$output/test_results") or die "Cannot open test_results file $output/test_results\n";
+#$datestring=localtime;
+#print results "-=*~  RESULTS OF AUTOMATED XYCE REGRESSION TESTING $datestring  for executable $XYCEPATH ~*=-\n";
+
+# WE no longer use "compare" but rather than remove all reference to it in 
+# all of the test scripts, simply set the value of this variable to something
+# nonsensical.  Every script tries to read its commandline using argv, and
+# if we didn't keep passing something, they'd ALL need to be edited.
+my $XYCE_COMPARE="NEVER_USED";
+
+    
+###################################################################################
+# setup output file, save old if present
+###################################################################################
+my $diff_output = "$output/Netlists/diff.out";
+my $diff_backup = "$diff_output.$DATE1";
+#print "diff_backup set to $diff_backup\n";
+
+##################################################################################
+# If there is a diff output file from previous runs, make a backup or delete it.
+# Create a new one too -- empty.
+##################################################################################
+if ( -f $diff_output ) {
+   rename ($diff_output, $diff_backup);
+}
+`touch $diff_output`;
+#print "diff_output setup $diff_output\n";
+my ($numberfailed, $num_code_failure);
+$numberfailed=0;
+$num_code_failure=0;
+
+if (defined($passlist)) {
+  chdir "$invocationDirectory" or die "ERROR cannopt chdir to $invocationDirectory";
+  open( my $PASSLIST,">$passlist") or die "ERROR cannot open $passlist for writing";
+  print $PASSLIST "# Date:  $DATE2\n";
+  print $PASSLIST "# XYCE_TEST_HOME=$XYCE_TEST_HOME\n";
+  print $PASSLIST "# $0 run from directory:  $invocationDirectory\n";
+  print $PASSLIST "# ARGV = @copyARGV\n";
+}
+
+if (defined($faillist)) {
+  chdir "$invocationDirectory" or die "ERROR cannopt chdir to $invocationDirectory";
+  open(my $FAILLIST,">$faillist") or die "ERROR cannot open $faillist for writing";
+  print $FAILLIST "# Date:  $DATE2\n";
+  print $FAILLIST "# XYCE_TEST_HOME=$XYCE_TEST_HOME\n";
+  print $FAILLIST "# $0 run from directory:  $invocationDirectory\n";
+  print $FAILLIST "# ARGV = @copyARGV\n";
+}
+
+if ($XYCEPATH eq "") {
+    quietPrint "No path to Xyce executable given, using first Xyce in your PATH\n";
+    $XYCEPATH="Xyce";
+}
+#$currentdir = `pwd`; chomp($currentdir);
+{ # this is to scope $testdir and $CMD.
+  my $testdir = "$output/Netlists";
+  chdir "$testdir" or die "ERROR cannot chdir to $testdir";
+  my $CMD = "$XYCEPATH -v > /dev/null 2>&1";
+  if((system("$CMD") != 0) and (not defined($notest))) {
+      iPrint "ERROR: no valid Xyce executable found\n";
+      exit -1
+  }
+}
+chdir "$invocationDirectory" or die "ERROR cannot chdir back to $invocationDirectory";
+verbosePrint "Testing $XYCEPATH\n";
+
+chdir "$output/Netlists" or die "ERROR cannot chdir to $output/Netlists";
+
+my $numtests = $#cktlist + 1;
+iPrint "There are $numtests tests.\n";
+print results "There are $numtests tests.\n";
+my $runTestBaseCommand = "$XYCE_TEST_HOME/TestScripts/runTest.pl --xyce_verify=$XYCE_VERIFY --xyce_test_home=$XYCE_TEST_HOME --xyce_path=\"$XYCEPATH\"" ;
+
+# this array is to track active process ids
+my @activePIDs=();
+
+# these hashes connect a process id to a result file, test directory and test file for reporting
+my %resultsHash;
+my %testDirHash;
+my %testFileHash;
+
+if( $randomizeTests ) 
+{
+  @cktlist = shuffle @cktlist;
+}
+
+my $testResults_ref;
+my $failedTestsForRetest_ref;
+($numberfailed, $num_code_failure, $testResults_ref, $failedTestsForRetest_ref ) = 
+  runTestsInSubProc($numproc, \@cktlist, $Tools, $XYCE_TEST_HOME, $output, $numberfailed, $num_code_failure, 
+       $bufferOutput, \@testResults, $retestFailsInSingleProc, $passlist, $PASSLIST, $faillist, $FAILLIST);
+if( $testResults_ref )
+{
+  @testResults = @{ $testResults_ref };
+}
+if( $failedTestsForRetest_ref  )
+{
+  @failedTestsForRetest = @{ $failedTestsForRetest_ref };
+}
+
+# rerun failed tests in a single process to verify that
+# they are really failing (only if the retestFailsInSingleProc flag is true)
+if( $retestFailsInSingleProc  )
+{
+  my $singleProc=0;
+  my $retestFlag=undef;
+  ($numberfailed, $num_code_failure, $testResults_ref, $failedTestsForRetest_ref ) = 
+    runTestsInSubProc($singleProc, \@failedTestsForRetest, $Tools, $XYCE_TEST_HOME, $output, $numberfailed, $num_code_failure, 
+       $bufferOutput, \@testResults, $retestFlag, $passlist, $PASSLIST, $faillist, $FAILLIST);
+  if( $testResults_ref )
+  {
+    @testResults = @{ $testResults_ref };
+  }
+  if( $failedTestsForRetest_ref  )
+  {
+    @failedTestsForRetest = @{ $failedTestsForRetest_ref };
+  }
+}
+
+if( $bufferOutput ) 
+{
+  @testResults = sort(@testResults);
+  print @testResults;
+}
+
+if (defined($passlist)) {
+  close PASSLIST;
+}
+
+if (defined($faillist)) {
+  close FAILLIST;
+}
+
+cp("$diff_output","$output/Netlists/$diff_output");
+
+print results "All Test runs complete - ";
+quietPrint "All Test runs complete - ";
+if ($numberfailed + $num_code_failure > 0) {
+    print  results "Warning $numberfailed Tests FAILED\n";
+    quietPrint "Warning $numberfailed Tests FAILED\n";
+    print  results "                         ";
+    quietPrint "                         ";
+    print  results "        $num_code_failure Tests EXITED WITH ERROR\n";
+    quietPrint "        $num_code_failure Tests EXITED WITH ERROR\n";
+} else {
+    print  results "All Tests PASSED\n";
+    quietPrint "All Tests PASSED\n";
+}
+close(results);
+my ($usertime,$systemtime,$walltime);
+{ # this is to scope @time1, $wtime1.
+  my @time1=times;
+  my $wtime1 = time;
+  $usertime=$time1[2]-$time0[2];
+  $systemtime=$time1[3]-$time0[3];
+  $walltime = ($wtime1 - $wtime0)/60; # Minutes
+}
+iPrint sprintf("Total testing time: %5.1fm (wall), %5.0fs (user), %5.0fs (system)\n",$walltime,$usertime,$systemtime);
+
+{ # this is to scope $DATE3
+  my $DATE3 = $Tools->getDate('_','.',':');
+  cp("$output/test_results","$output/test_results.$DATE3");
+}
+
+my $exitCode;
+if ($numberfailed + $num_code_failure == 0) {
+  $exitCode = 0;
+} elsif ($numberfailed > 15 || $num_code_failure > 15) {
+  $exitCode = 255;
+} else {
+  $exitCode = $numberfailed+$num_code_failure*16;
+}
+exit $exitCode;
+
+
+#
+# sub findTestsInSubDir
+#
+sub findTestsInSubDir
+{
+  use strict;
+  my ($dir,$localtaglist,$excludenotagsflag) = @_;
+  my @cktlistlocal;
+  my ($dirlist,@ckt1,$ckt);
+  $dirlist=`ls *.cir 2>/dev/null`; chomp($dirlist);
+  debugPrint "findTestsInSubDir:  \$dir = $dir\n";
+  debugPrint "findTestsInSubDir:  \$localtaglist = $localtaglist\n";
+  debugPrint "findTestsInSubDir:  \$excludenotagsflag = $excludenotagsflag\n";
+  debugPrint "findTestsInSubDir:  \$dirlist = $dirlist\n";
+  @ckt1 = split(' ',$dirlist);
+  if ( scalar(@ckt1) == 0 ) { 
+    return @cktlistlocal; 
+  }
+  
+  foreach my $ckt (@ckt1) {  
+    my ($success,$allFoundTagsRef) = $Tools->enableTestByTags($dir,$ckt,"exclude","tags","$ckt.tags",$localtaglist,$excludenotagsflag);
+    push(@globalAllTags,@$allFoundTagsRef);
+    if (defined $success) {
+      # Check that this $ckt is listed in CVS/Entries and report a warning if not
+      my $foundTest = 0;
+      if (not open(ENTRIES,"Manifest.txt")) {
+        defaultPrint "\nWarning!  The test directory $dir does not have a Manifest.txt file and the\ntest $ckt will not be run by run_xyce_regression unless the output directory is\nthe same as the Xyce_Regression directory.\n\n";
+		if (not open(ENTRIES,"CVS/Entries")) {
+		  defaultPrint "\nWarning!  The test directory $dir does not have a CVS sub-directory and the\ntest $ckt will not be run by run_xyce_regression unless the output directory is\nthe same as the Xyce_Regression directory.\n\n";
+		} else {
+		  # this processes the CVS/Entries file.
+		  while (my $line = <ENTRIES>) {
+		    
+            my @split_line = split(' ',$line);
+            if ($split_line[0] =~ m/^D$/i) { next; } # Skip directories
+            if ($split_line[0] =~ m/^\s*$/) { next; } # Skip empty strings
+            if ($split_line[1] =~ m/$ckt/) { $foundTest = 1; }			
+		  }
+		  if ($foundTest == 0) {
+			defaultPrint "\nWarning!  The test $ckt in directory $dir is not listed in the CVS/Entries file\nand will not be run by run_xyce_regression unless the output directory is the\nsame as the Xyce_Regression directory.\n\n";
+		  }
+		}
+	  } else {
+	    while (my $line = <ENTRIES>) {
+	      chomp $line;
+		  my @split_line = split(' ',$line);
+		  if ($split_line[0] =~ m/^D$/i) { next; } # Skip directories
+		  if ($split_line[0] =~ m/^\s*$/) { next; } # Skip empty strings
+		  if ($split_line[0] =~ m/$ckt/) { $foundTest = 1; }
+		}
+		if ($foundTest == 0) {
+		  defaultPrint "\nWarning!  The test $ckt in directory $dir is not listed in the Manifest.txt file\nand will not be run by run_xyce_regression unless the output directory is the\nsame as the Xyce_Regression directory.\n\n";
+		}
+	  }
+      if ($dir =~ '\.') {
+        push(@cktlistlocal,"$ckt");
+        verbosePrint "$ckt added to list\n";
+      } else {
+        push(@cktlistlocal,"$dir $ckt");
+        verbosePrint "$dir $ckt added to list\n";
+      }
+    }
+  }
+  return @cktlistlocal;
+}
+
+
+#
+# sub findTests
+#
+sub findTests
+{
+  use strict;
+  my ($currdir,$localtaglist,$excludenotagsflag) = @_;
+  my ($currTopDir);
+  my (@cktlist,@cktlistlocal);
+  my (@filelist,$dir);
+  @cktlist = findTestsInSubDir($currdir,$localtaglist,$excludenotagsflag);
+  @filelist = <*>;
+  debugPrint "findTests:  \$currdir = $currdir\n";
+  #debugPrint "findTests:  \@filelist = @filelist\n";
+  # loop through each directory
+  foreach $dir (@filelist) {
+    #debugPrint "findTests:  \$dir = $dir in \@filelist = @filelist\n";
+    if ( $dir eq 'CVS' ) {next}
+      if ( -d "$dir" )  { # if dir is a directory
+          verbosePrint "Entering $dir\n";
+          $currTopDir = `pwd`; chomp($currTopDir);
+          chdir "$dir";
+          if ($currdir =~ '\.') {
+            @cktlistlocal = findTests("$dir",$localtaglist,$excludenotagsflag);
+          } else {
+            @cktlistlocal = findTests("$currdir/$dir",$localtaglist,$excludenotagsflag);
+          }
+          push(@cktlist,@cktlistlocal);
+          verbosePrint "Exiting $dir\n";
+          chdir $currTopDir;
+      }
+  }
+  return @cktlist;
+}
+
+#
+# getTestsInCommonDir()
+#
+# must pass in circuit list as a reference.
+#
+sub getTestsInCommonDir
+{
+  use strict;
+  my ($cktlist_ref) = @_;
+  #my @cktlist = ();
+  #if( $cktlist_ref )
+  #{
+  #  @cktlist = @{ $cktlist_ref };
+  #}
+  my @results = ();
+  # automatically push first line to results
+  my $line =shift @{$cktlist_ref};
+  my @ckt1 = split(' ',$line);
+  my $firstDir = $ckt1[0];
+  my $ckt = $ckt1[1];
+  push @results, $line;
+  while( $#{$cktlist_ref} > 0)
+  {
+    $line=shift @{$cktlist_ref};
+    @ckt1 = split(' ',$line);
+    my $dir = $ckt1[0];
+    $ckt = $ckt1[1];
+    if($firstDir eq $dir)
+    {
+      push @results, $line;
+    }
+    else
+    {
+      # found a test directory that is different than firstDir
+      unshift @{$cktlist_ref}, $line;
+      return @results;
+    }
+  }
+  return @results;
+}
+
+#
+# count up the tests in a list of test bundles
+#
+sub getTotalNumberOfTests
+{
+  use strict;
+  my ($testBundleList_ref) = @_;
+  my $numTests=0;
+  foreach my $testBundle_ref (@{$testBundleList_ref})
+  {
+    $numTests = $numTests + $#{$testBundle_ref} + 1;
+  }
+  return $numTests;
+}
+
+
+#
+# sub runTestsInSubProc -- runs a set of tests from a list.  
+#
+sub runTestsInSubProc
+{
+  use strict;
+  my ($numproc, $cktlist_ref, $Tools, $XYCE_TEST_HOME, $output, $numberfailed, $num_code_failure, 
+    $bufferOutput, $testResults_ref, $retestFailsInSingleProc, $passList, $passListFileHandle, $failList, $failListFileHandle ) = @_;
+  
+  my @cktlist = ();
+  if( $cktlist_ref )
+  {
+    @cktlist = @{ $cktlist_ref };
+  }
+  
+  my @testResults = ();
+  if( $testResults_ref )
+  {
+    @testResults = @{ $testResults_ref };
+  }
+  
+  if( $numproc<=0 ) 
+  {
+    print "Invalid number of test jobs to run specified: $numproc.  Must be greater than zero.\n";
+    return;
+  }
+  
+  my $numberfailed_local = $numberfailed;
+  my $num_code_failure_local = $num_code_failure;
+  my @failedTestsForRetest=();
+  my $numTests= $#cktlist + 1;
+  my $bndnum = 0;
+  my @testBundles = ();
+  # debug
+  # print out test list
+  # 
+  #print "Original list of tests (count $#cktlist)\n";
+  #foreach my $testline (@cktlist)
+  #{
+  #  print "$testline\n";
+  #}
+  
+  my $numberOfTestsInOriginalList = $#cktlist + 1;
+  #print "Circuit list size $#cktlist and \"@cktlist\"\n";
+  # break up test list into a sets of tests 
+  while( $#cktlist>=0 )
+  {
+    my @localTestList = getTestsInCommonDir( \@cktlist);
+    push( @testBundles, \@localTestList);
+  }
+  
+  # this may seem a bit confusing to do at this time, but the setupCVSSandbox copies
+  # all of the files from a test directory into the output directory.  Thus it only 
+  # needs to be done once per test bundle, rather than for each test. 
+  print "Setting up test directories and files.\n";
+  for my $testBundle_ref (@testBundles)
+  {
+    my @testBundle = @{ $testBundle_ref};
+    my $aDir="";
+    my $aCkt="";
+    ($aDir, $aCkt) = split(' ', @testBundle[0]);
+    $Tools->setupCVSSandbox("$XYCE_TEST_HOME/Netlists/$aDir","$output/Netlists/$aDir","$aCkt");
+  }
+  
+  # sort the bundles by the number of tests per bundle
+  # want the largest bundles first 
+  my @sortedTestBundles = sort {  (scalar @{$b}) <=>  (scalar @{$a}) } @testBundles;
+  
+  # now we have a sorted list of test bundles 
+  # start running jobs from the list using the number of tests in the list as 
+  # an indicator of if we are done.
+  
+  my $pendingTests = getTotalNumberOfTests(\@sortedTestBundles);
+  my $numActiveProcs = @activePIDs;
+  
+  while ( ($pendingTests>0) || ($numActiveProcs > 0) )
+  {
+    if( $#sortedTestBundles != -1 )
+    {
+      # start a test from a test bundle.
+      my $testBundle_ref = shift @sortedTestBundles;
+    
+      my $dir = "";
+      my $ckt = "";
+      ($dir, $ckt) = split( ' ', @{$testBundle_ref}[0]);
+      
+      my $wdir="$output/Netlists/$dir";
+      $Tools->setWorkDir( $wdir );
+      if(!(chdir "$output/Netlists/$dir"))
+      {
+        warn "WARNING cannot chdir to $output/Netlists/$dir, skipping...";
+        die "ERROR cannot chdir to $output/Netlists/$dir, skipping...";
+      }
+  
+      debugPrint "run_xyce_regression:  \$dir = $dir\n";
+      debugPrint "run_xyce_regression:  \$ckt = $ckt\n";
+      # Grab any options from options files and pass to $Tools
+      $Tools->setRunOptions($Tools,$defaultRunOptionsRef);
+      $Tools->readAndSetRunOptions("options","$ckt.options");
+      my $runTestCommand = "cd $output/Netlists/$dir; $runTestBaseCommand --outputdir=$output/Netlists --testdir=$dir --testfile=$ckt";
+      #print ("Calling runTest with command \"$runTestCommand\"");
+      #system( $runTestCommand );
+      # start a new process to run a test.  Save process ID to monitor its progress
+      my $stdOutFile="$wdir/$ckt.pstdout";
+      my $stdErrFile="$wdir/$ckt.pstderr";
+    
+      my $testPID=$Tools->forkCommand( $runTestCommand, $stdOutFile, $stdErrFile );
+      if ($testPID < 0)
+      {
+        print "Coudn't fork.  forkCommand returned $testPID\n";
+      }
+      # print( "PID returned $testPID\n" );
+      push( @activePIDs, $testPID );
+      $numActiveProcs = @activePIDs;
+      # spawned a test, decrement the test counter.
+      $pendingTests--;
+      #print( "Adding $testPID to hash with value \"$dir/$stdOutFile\"\n" );
+      $resultsHash{ $testPID } = "$stdOutFile";
+      $testDirHash{ $testPID } = "$dir";
+      $testFileHash{ $testPID } = $testBundle_ref;
+    }
+    
+    # check all the active PID's to see if any are done;
+    while( ($numActiveProcs >= $numproc ) ||  ((($pendingTests==0)||($#sortedTestBundles==-1)) && ($numActiveProcs > 0)) )
+    {
+      # take a PID off the front of thie array.
+      my $aPID = shift @activePIDs;
+      $numActiveProcs = @activePIDs;
+
+      # this tests if a process is abled to be killed.  Doesn't kill it
+      # it's an easy way to check if a process is still running.
+      #print( "Checking on pid $aPID : $activePIDs[$pidIndex]\n" );
+      my $pidCheck = waitpid($aPID,&WNOHANG); # == $pid on completion
+
+      if( $pidCheck == $aPID ) 
+      {
+        # process is done output results
+        if( -f "$resultsHash{ $aPID }" )
+        {
+          open(RESULTFILE,"<$resultsHash{ $aPID }") or die "ERROR cannot open $resultsHash{ $aPID } for reading";
+          my $skipPrint=0;
+          my $testPassed=1;
+          while (my $line = <RESULTFILE>) 
+          {
+            if ($line =~/\.FAILED/ )
+            {
+              $testPassed=0;
+              if( $retestFailsInSingleProc )
+              {
+                my @testDirAndFile = split(' ', @{$testFileHash{ $aPID }}[0]);
+                push(@failedTestsForRetest, "$testDirHash{ $aPID }  @testDirAndFile[1]");
+                $skipPrint = 1;
+              }
+              else
+              {
+                $numberfailed_local++;
+                print results $line;
+                if (defined($failList)) 
+                {
+                  my @testDirAndFile = split(' ', @{$testFileHash{ $aPID }}[0]);
+                  print $failListFileHandle "$testDirHash{ $aPID } @testDirAndFile[1]";
+                }
+              }
+            }
+            #
+            # error messages that indicate a test failed for unexpected reasons.
+            #
+            #    1 => "SHELL SCRIPT EXITED WITH ERROR",
+            #    2 => "FAILED",
+            #   10 => "EXITED WITH ERROR",
+            #   11 => "TEST REQUIRES MANUAL VERIFICATION",
+            #   12 => "STALLED",
+            #   13 => "XYCE CRASHED",
+            #   14 => "NO PRN FILE",
+            #   15 => "TIME LIMIT",
+            #   16 => "CONTROL-C",
+            #   17 => "NO MEASURE FILE",
+            #   18 => "DAKOTA NOT FOUND"
+            #  if( ( $line =~/\.ERROR/ ) || ($line =~/\.SHELL/ ) || ($line =~/\.NO PRN FILE/ ) || ($line =~/\.XYCE/ ) )
+            if( ($line =~/\.SHELL SCRIPT EXITED WITH ERROR/ ) ||
+                ($line =~/\.EXITED WITH ERROR/ ) ||
+                ($line =~/\.UNKNOWN ERROR/ ) ||
+                ($line =~/\.TEST REQUIRES MANUAL VERIFICATION/ ) ||
+                ($line =~/\.XYCE CRASHED/ ) ||
+                ($line =~/\.NO PRN FILE/ ) ||
+                ($line =~/\.NO MEASURE FILE/ ) ||
+                ($line =~/\.STALLED/ ) ||
+                ($line =~/\.TIME LIMIT/ ) ||
+                ($line =~/\.DAKOTA NOT FOUND/ ) )
+            {
+              $testPassed=0;
+              if( $retestFailsInSingleProc )
+              {
+                my @testDirAndFile = split(' ', @{$testFileHash{ $aPID }}[0]);
+                push(@failedTestsForRetest, "$testDirHash{ $aPID }  @testDirAndFile[1]");
+                $skipPrint = 1;
+              }
+              else
+              {
+                $num_code_failure_local++;
+                print results $line;
+                if (defined($failList)) 
+                {
+                  my @testDirAndFile = split(' ', @{$testFileHash{ $aPID }}[0]);
+                  print $failListFileHandle "$testDirHash{ $aPID } @testDirAndFile[1]";
+                }
+              }
+            }
+           
+            if( not $skipPrint ) 
+            {
+              # print to standard output
+              if( $bufferOutput ) 
+              {
+                # if we are buffering the output, then the Active Jobs and Tests in Queue isn't useful info
+                push(@testResults, $line)  
+              }
+              else
+              {
+                # not buffering the output, so Active Jobs and Tests in Queue may be useful info.
+                chomp $line;
+                print "$line Tests in Queue: $pendingTests, Active Jobs: $numActiveProcs\n";
+                resultPrint "$line Tests in Queue: $pendingTests, Active Jobs: $numActiveProcs\n";
+              }
+            }
+            if ( $testPassed and defined($passList)) 
+            {
+              my @testDirAndFile = split(' ', @{$testFileHash{ $aPID }}[0]);
+              print $passListFileHandle "$testDirHash{ $aPID } @testDirAndFile[1]";
+            }
+          }
+          close(RESULTFILE);
+          
+          #
+          # check on remaining tests 
+          #
+          my $testBundle_ref = $testFileHash{ $aPID };
+          
+          # pull directory and test name off the list 
+          shift @{$testBundle_ref};
+          
+          # for this test bundle if there are any remaining tests then put the bundle back on the test list.
+          # print "===>loalTestList len = $#{$localTestListRef}\n";
+          if( $#{$testBundle_ref} >= 0)
+          {
+            unshift( @sortedTestBundles, $testBundle_ref);
+          }
+          
+        }
+        else
+        {
+          print( "Couldn't find output file for process $aPID:  $output/Netlists/$resultsHash{ $aPID }\n");
+        }
+      }
+      else
+      {
+        # PID was still going so push it back on the end of the array
+        push( @activePIDs, $aPID );
+        $numActiveProcs = @activePIDs;
+      }
+      # may have changed the number of active processes so update the counter.
+      
+      
+      if( $#activePIDs >= $numproc ) {
+        # sleep for some time waiting for tests to finish
+        # print( "proc queue full $#activePIDs.  Waiting." );
+        # sleep 1;
+      }
+      # check for control-c to exit
+      if ($Tools->checkControlExit()) {
+        kill '-KILL', @activePIDs;
+        $numTests=0;
+        @activePIDs={};
+      }
+    }
+    $numActiveProcs = @activePIDs;
+    #print ("==>Active PIDs  $numActiveProcs \n");
+  }
+  
+  return ($numberfailed_local, $num_code_failure_local, \@testResults, \@failedTestsForRetest);
+}

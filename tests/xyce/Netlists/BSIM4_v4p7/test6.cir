@@ -1,0 +1,17 @@
+** PMOSFET: Benchmarking Implementation of BSIM4.6.0 by Mohan V. Dunga 12/13/2006.
+
+** Circuit Description **
+m1 2 1 0 3 n1 L=0.09u W=10.0u rgeoMod=1
+vgs 1 0 1.2
+vds 2 0 0.1
+vbs 3 0 0.0
+
+.dc vgs 0.6 1.18 0.02 vbs 0 -1.2 -0.3
+
+.options device Temp=-55.0
+
+.print dc v(1) v(3) i(vds)
+*COMP i(vds) abstol=1e-5
+
+.include modelcard.nmos 
+.end

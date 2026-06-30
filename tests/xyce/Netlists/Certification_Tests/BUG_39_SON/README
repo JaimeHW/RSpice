@@ -1,0 +1,19 @@
+This directory tests a number of new math functions that have been added to
+Xyce.  All of these functions already exist in Hspice, and we're adding them to
+Xyce to increase cross-compatibility:
+
+POW:  synonym to "pwr", pow(x,y)=pwr(x,y)=x^y
+
+INT:  takes the integer part of a floating-point argument
+
+LIMIT:  Xyce already has a 3-input function limit, but Hspice has a 2-input
+        function that is used to indicate a specific probability 
+        distribution.  Since Xyce doesn't handle stochastics currently, this
+        function is programmed to return the following:  limit(x,y)=x+y
+
+AGAUSS:  Another probability distribution (Gaussian).  
+         agauss(mu,abs_dev,sigma) returns a random number between
+         mu-abs_dev and mu+abs_dev, selected from a Gaussian distribution 
+         with mean mu and standard deviation abs_dev/sigma.
+
+SIGN:  sign(x,y)=sgn(y)|x| 

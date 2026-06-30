@@ -1,0 +1,17 @@
+==>BUG_208/ README <==
+Bug Number: 208
+Test Netlist:  bug_208.cir
+
+Description:
+=======
+This test checks whether subcircuit instance parameters are handled corretly when they are given as an expression.
+
+Verification:
+=========
+Run Xyce in serial on the netlist.
+
+Compare against the results in the given prn file using the ?compare? program.
+
+Special Notes:
+=========
+Parallel testing is not needed for this case.

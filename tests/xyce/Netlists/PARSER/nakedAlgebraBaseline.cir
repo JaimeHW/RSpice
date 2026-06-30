@@ -1,0 +1,15 @@
+Test of expression version of SPICE pulse, with very fast (<1ps) rise times
+* The old expression library had trouble with breakpoints for super-fast 
+* rise times.  This test is proves that the new expression library
+* does not have this problem.
+
+.param V1={1.1} V2={2.0} TD={0.5ps} TR={0.3ps} TF={0.4ps} PW={10ps}
+
+B1  1   0  v={spice_pulse(v1,v2,td,tr,tf,pw)}
+r1  1   0  1k
+
+.tran 0.1ns 100ps
+.options timeint reltol=1e-3 
+.print tran v(1) 
+.end
+

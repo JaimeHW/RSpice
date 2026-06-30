@@ -1,0 +1,36 @@
+A test of a point neuron model
+
+*
+* in Dynamical Systems in Neuroscience
+* C=100   [pF]       100e-12 [F]
+* Vt=-40  [mV]       -40e-3  [V]
+* Vr=-60  [mV]       -60e-3  [V]
+* Vp=35   [mV]        35e-3  [V]
+* k=0.7   [pA/mV^2]  0.7e-6  [A/V^2]
+* a=0.03  [1/ms]     0.03e3  [1/s]
+* b=-2.0  [pA/mV]   -2.0e-9  [A/V]
+* c=-50.0 [mv]       -50e-3  [V]
+* d=100   [pA]       100e-12 [A]
+
+*.options TIMEINT method=7 erroption=1 nlmin=5 nlmax=25 mintimestepsbp=90
+
+.model baseParams neuron level=8 memC=100e-12 Vt=-0.040 Vr=-0.060 Vp=0.035 k=0.7e-6 a=30.0 b=-2.0e-9 c=-0.050 d=100e-12
+
+
+*
+* Using the above neuron model
+*
+*          pulse( initial_value pulse_value delay_time rise_time fall_time pulse_width period)
+Iin a 0 PULSE( 0 70.0e-12 100.0e-3 1.0e-4 1.0e-4 1.0e3 1.0e10)
+*Iin a 0 PULSE( 0 0 100.0e-3 1.0e-4 1.0e-4 1.0e3 1.0e10)
+
+yneuron neuron1  a b baseParams
+
+*rload a 0 1e6
+
+.step yneuron!neuron1:A 30 35 2
+
+.tran 0 1
+.print tran v(a) 
+
+.end

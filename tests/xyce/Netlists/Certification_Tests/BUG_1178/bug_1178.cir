@@ -1,0 +1,49 @@
+* Certification test for BUG_1178
+
+* derived from regression test PDE_1D_TRAN/userOneD.cir
+
+R 1 2 1000.0
+VP 1 0 PULSE(0 1.5 0.0 1.0e-2 0.0 1.0e+20 1.2e+20)
+VF 2 1 SIN(0 0.5 50 1.0e-2)
+VT1 4 0 0V
+R1 2 3 1k
+*------------- Diode PDE device ------------------
+* ORIGINAL YPDE device line
+* YPDE DIODE 3 4 PDEDIODE  
+* NEW YPDE device line with Y<name>
+YPDE YDIODE 3 4 PDEDIODE  
+
++ tecplotlevel=2 
++ l=5.0e-4 nx=11 
+*DOPING REGIONS:
++ region= {name     =    reg1,    reg2
++          function =    step,    step
++          type     =   ntype,    ptype
++          nmax     = 1.0e+19,  1.0e+19
++          nmin     = 0.0e+00,    0.0 
++          xloc     =    2.5e-4,  2.5e-4
++          flatx    =    -1  ,       1  }
+*--------end of  Diode PDE device ----------------
+.model PDEDIODE  ZOD  level=1 
+
+.tran 1.0e-3 2.0e-2
+.print tran v(1) v(2) v(3) v(4) 
+
+.options nonlin maxstep=100 maxsearchstep=3 
++ searchmethod=2  nox=1 debuglevel=-10
+
+* Set transient nonlinear solver options to be 
+* the same as the DCOP options:
+.options nonlin-tran maxstep=100 maxsearchstep=3 
++ searchmethod=2  nox=1 debuglevel=-10
++ abstol=1.0E-12
++ reltol=1.0E-3
++ deltaxtol=1.0
++ smallupdatetol=1.0e-6
++ rhstol=1.0E-6
+
+.options timeint reltol=1.0e-3 abstol=1.0e-6 
+*.options timeint method=7 
+.options device debuglevel=-10
+
+.END

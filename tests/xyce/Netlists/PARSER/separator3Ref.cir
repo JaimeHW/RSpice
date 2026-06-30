@@ -1,0 +1,33 @@
+Netlist to Test out the period "." separator for internal subcircuit names
+*
+* this netlist is the "baseline" so it should not be run with any -hspice-ext options.
+*
+V1 1 0 5V
+XsubR 1 2  SubR1
+R1 2 0 1.0
+
+.subckt SubR1 S1 S2
+R1 S1  1  1.0
+R2  1  2  1.0
+R3  2  3  1.0
+R4  3  4  1.0
+R5  4 S2  1.0
+.ends
+
+Btest 3 0 V={ 3*V(XsubR:2) }
+Rtest 3 0 1.0
+
+.print DC V(1) V(3)
+* internal subckt voltage nodes:
++ V(XsubR:1) V(XsubR:2) V(XsubR:3) V(XsubR:4)
++ {V(XsubR:1)} {V(XsubR:2)} {V(XsubR:3)} {V(XsubR:4)}
+* internal subckt device params (using default parameter)
++ XsubR:R1 XsubR:R2 XsubR:R3 XsubR:R4
++ {XsubR:R1} {XsubR:R2} {XsubR:R3} {XsubR:R4}
+* internal subckt device params (using specified parameter)
++ XsubR:R1:R XsubR:R2:R XsubR:R3:R XsubR:R4:R
++ {XsubR:R1:R} {XsubR:R2:R} {XsubR:R3:R} {XsubR:R4:R}
+
+.DC V1 5 5 1
+
+.end

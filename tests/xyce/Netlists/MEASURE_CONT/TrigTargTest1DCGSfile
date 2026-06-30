@@ -1,0 +1,51 @@
+ ***** Measure Functions ***** 
+
+TRIGTARGAT = 5.000000e+00 with targ = 7.500000e+00 and trig = 2.500000e+00
+
+TRIGTARGAT1 = -6.421429e-01 with targ = 1.857857e+00 and trig = 2.500000e+00
+
+TRIGTARGAT2 = 5.642143e+00 with targ = 7.500000e+00 and trig = 1.857857e+00
+
+TRIGTARG1 = -1.828571e-01 with targ = 1.766429e+00 and trig = 1.949286e+00
+TRIGTARG1 = 7.297101e-01 with targ = 4.038043e+00 and trig = 3.308333e+00
+TRIGTARG1 = -7.297101e-01 with targ = 5.961957e+00 and trig = 6.691667e+00
+TRIGTARG1 = 1.828571e-01 with targ = 8.233571e+00 and trig = 8.050714e+00
+
+TRIGTARG2 = 2.088758e+00 with targ = 4.038043e+00 and trig = 1.949286e+00
+TRIGTARG2 = 2.653623e+00 with targ = 5.961957e+00 and trig = 3.308333e+00
+TRIGTARG2 = 1.541905e+00 with targ = 8.233571e+00 and trig = 6.691667e+00
+
+TRIGTARG3 = -1.541905e+00 with targ = 1.766429e+00 and trig = 3.308333e+00
+TRIGTARG3 = -2.653623e+00 with targ = 4.038043e+00 and trig = 6.691667e+00
+TRIGTARG3 = -2.088758e+00 with targ = 5.961957e+00 and trig = 8.050714e+00
+
+RISEFALL1 = 2.653623e+00 with targ = 5.961957e+00 and trig = 3.308333e+00
+
+RISEFALL2 = -6.284286e+00 with targ = 1.766429e+00 and trig = 8.050714e+00
+
+TRIGTARG7 = 7.297101e-01 with targ = 4.038043e+00 and trig = 3.308333e+00
+TRIGTARG7 = -7.297101e-01 with targ = 5.961957e+00 and trig = 6.691667e+00
+TRIGTARG7 = 1.828571e-01 with targ = 8.233571e+00 and trig = 8.050714e+00
+
+TRIGTARG8 = 2.653623e+00 with targ = 5.961957e+00 and trig = 3.308333e+00
+TRIGTARG8 = 1.541905e+00 with targ = 8.233571e+00 and trig = 6.691667e+00
+
+TRIGTARG9 = 4.012671e+00 with targ = 5.961957e+00 and trig = 1.949286e+00
+TRIGTARG9 = 4.925238e+00 with targ = 8.233571e+00 and trig = 3.308333e+00
+
+TDEARLY = -1.828571e-01 with targ = 1.766429e+00 and trig = 1.949286e+00
+TDEARLY = 7.297101e-01 with targ = 4.038043e+00 and trig = 3.308333e+00
+TDEARLY = -7.297101e-01 with targ = 5.961957e+00 and trig = 6.691667e+00
+TDEARLY = 1.828571e-01 with targ = 8.233571e+00 and trig = 8.050714e+00
+
+ATEARLY = 0.000000e+00 FAILED with targ = not found and trig = not found
+
+ATLATE = 0.000000e+00 FAILED with targ = not found and trig = not found
+
+TRIGTDLATE = 0.000000e+00 FAILED with targ = 4.038043e+00 and trig = not found
+
+TARGTDLATE = 0.000000e+00 FAILED with targ = not found and trig = 1.949286e+00
+
+VALNOTFOUND = 0.000000e+00 FAILED with targ = not found and trig = not found
+
+

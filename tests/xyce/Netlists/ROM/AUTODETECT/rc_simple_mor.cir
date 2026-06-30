@@ -1,0 +1,32 @@
+Simple RC test
+
+.include rc_ladder_lib.inc
+
+V1 1 0 DC 0 SIN (0 1 1K 0 0)
+R1 1 2 1
+C1 2 0 1e-9
+X1 2 3 rc1000
+X2 3 4 rcd100 
+X3 4 5 rc1000 
+C2 5 0 1e-9
+
+.subckt rc1000 1 11
+X1 1 2 rc100
+X2 2 3 rc100
+X3 3 4 rc100
+X4 4 5 rc100
+X5 5 6 rc100
+X6 6 7 rc100
+X7 7 8 rc100
+X8 8 9 rc100
+X9 9 10 rc100
+X10 10 11 rc100
+.ends
+
+.mor
+* Keep the options line commented out to make sure the correct options are generated.
+*.options mor_opts autosize=1
+
+.tran 0.1u 2e-3 
+.print tran V(2)
+.end 

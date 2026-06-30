@@ -1,0 +1,12 @@
+Demonstration for .params test of bug 223 fix
+* Just a simple voltage divider circuit
+* We use a comma here.  Once upon a time Xyce didn't like that
+.param R_1=100, R_2=200
+
+R1 1 0 {R_1}
+R2 2 1 {R_2}
+V1 2 0 5V
+
+.DC V1 0 5 .1
+.print DC V(2) v(1)
+.end

@@ -1,0 +1,28 @@
+Testing ill-formed .MEASURE lines
+*********************************************************************
+* This test that invalid lead current requests, not on a
+* .PRINT TRAN line, will generate the correct error messages, 
+* and a graceful exit. 
+*    
+* See SRN Bug 698 for more details. 
+* 
+*
+*
+*
+*
+*
+*********************************************************************
+VS  1  0  SIN(0 1.0 1KHZ 0 0)
+R1  1  0  100
+.TRAN 0 1ms
+.PRINT TRAN FORMAT=NOINDEX V(1)
+
+* bogo measure lines that will cause an error within
+* the *makeOp() function in N_UTL_Op.C
+
+.MEASURE TRAN MAX1 MAX I(BogoDevice1)
+.MEASURE TRAN MAX2 MAX P(BogoDevice2)
+.MEASURE TRAN MAX3 MAX W(BogoDevice3)
+
+.END
+

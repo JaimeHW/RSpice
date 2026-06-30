@@ -1,0 +1,25 @@
+* Test various parsing errors from invalid Touchstone
+* 2 files.  The comments in each invalid file contain
+* information on what is being tested.
+*
+* See SON Bug 1215 for more details.
+*******************************************************
+
+V1 1 0 1
+R1 1 2 1
+YLIN YLIN6 2 0 YLIN_MOD6
+YLIN YLIN7 2 0 YLIN_MOD7
+YLIN YLIN8 2 0 YLIN_MOD8
+YLIN YLIN9 2 0 YLIN_MOD9
+YLIN YLIN10 2 0 YLIN_MOD10
+
+.MODEL YLIN_MOD6  LIN TSTONEFILE=invalidNumFreqLine.s2p
+.MODEL YLIN_MOD7  LIN TSTONEFILE=invalidLines.s2p
+.MODEL YLIN_MOD8  LIN TSTONEFILE=tooFewNetworkDataLines.s2p
+.MODEL YLIN_MOD9  LIN TSTONEFILE=tooManyNetworkDataLines.s2p
+.MODEL YLIN_MOD10 LIN TSTONEFILE=shortNetworkDataLine.s1p
+
+.DC V1 1 5 1
+.PRINT DC V(2)
+
+.END

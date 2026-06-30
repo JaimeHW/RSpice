@@ -1,0 +1,5 @@
+serial, weekly
+required:pymi
+required:tensorflow
+tensorflow
+genext

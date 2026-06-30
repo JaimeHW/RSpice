@@ -1,0 +1,136 @@
+test of printing power in subcircuits for b,e,f,g and h sources
+
+* circuit and subcircuit definition for Voltage Form B-Source
+BV1  	bv1_1 0 V={2.0*sin(10*pi*TIME)}
+R1_bv1  bv1_1 bv1_2 100
+R2_bv1  bv1_2 0 1K
+
+X1 bv2_a bv2_b MySubcircuit_BV
+
+.SUBCKT MYSUBCIRCUIT_BV bv2_a bv2_b
+BV2  	bv2_a 0 V={2.0*sin(10*pi*TIME)}
+R1_bv2  bv2_a bv2_b 100
+R2_bv2  bv2_b 0 1K
+.ENDS 
+
+* circuit and subcircuit definition for Current Form B-Source
+BI1  	bi1_1 0 I={2.0*sin(10*pi*TIME)}
+R1_bi1  bi1_1 bi1_2 100
+R2_bi1  bi1_2 0 1K
+
+X2 bi2_a bi2_b MySubcircuit_BI
+
+.SUBCKT MYSUBCIRCUIT_BI bi2_a bi2_b
+BI2  	bi2_a 0 I={2.0*sin(10*pi*TIME)}
+R1_bi2  bi2_a bi2_b 100
+R2_bi2  bi2_b 0 1K
+.ENDS
+
+* circuit and subcircuit definition for Linear E-Source
+EL1     el1_1 0 bv1_1 0 1
+R1_el1  el1_1 el1_2 100
+R2_el1  el1_2 0 1K
+
+X3 el2_a el2_b MySubcircuit_EL
+
+.SUBCKT MYSUBCIRCUIT_EL el2_a el2_b
+BEL  	bel_1 0 V={2.0*sin(10*pi*TIME)}
+EL2  	el2_a 0 bel_1 0 1
+R1_el2  el2_a el2_b 100
+R2_el2  el2_b 0 1K
+.ENDS
+
+* circuit and subcircuit definition for Value form of E-Source
+EV1     ev1_1 0 VALUE=5V*SQRT(V(bv1_1,0))
+R1_ev1  ev1_1 ev1_2 100
+R2_ev1  ev1_2 0 1K
+
+X4 ev2_a ev2_b MySubcircuit_EV
+
+.SUBCKT MYSUBCIRCUIT_EV ev2_a ev2_b
+BEV  	bev_1 0 V={2.0*sin(10*pi*TIME)}
+R1_bev  bev_1 bev_2 100
+R2_bev  bev_2 0 1K
+EV2  	ev2_a 0  VALUE=5V*SQRT(V(bev_1,0))
+R1_ev2  ev2_a ev2_b 100
+R2_ev2  ev2_b 0 1K
+.ENDS
+
+* circuit and subcircuit definition for Linear form of F-Source
+FL1     fl1_1 0 bv1 1
+R1_fl1  fl1_1 fl1_2 100
+R2_fl1  fl1_2 0 1K
+
+X5 fl2_a fl2_b MySubcircuit_FL
+
+.SUBCKT MYSUBCIRCUIT_FL fl2_a fl2_b
+BFL  	bfl_1 0 V={2.0*sin(10*pi*TIME)}
+R1_bfl  bfl_1 bfl_2 100
+R2_bfl  bfl_2 0 1K
+FL2  	fl2_a 0 bfl 1
+R1_fl2  fl2_a fl2_b 100
+R2_fl2  fl2_b 0 1K
+.ENDS
+
+* circuit and subcircuit definition for Linear form of G-Source
+GL1     gl1_1 0 bv1_1 0 1
+R1_gl1  gl1_1 gl1_2 100
+R2_gl1  gl1_2 0 1K
+
+X6 gl2_a gl2_b MySubcircuit_GL
+
+.SUBCKT MYSUBCIRCUIT_GL gl2_a gl2_b
+BGL  	bgl_1 0 V={2.0*sin(10*pi*TIME)}
+R1_bgl  bgl_1 bgl_2 100
+R2_bgl  bgl_2 0 1K
+GL2  	gl2_a 0 bgl_1 0 1
+R1_gl2  gl2_a gl2_b 100
+R2_gl2  gl2_b 0 1K
+.ENDS
+
+* circuit and subcircuit definition for Value form of G-Source
+GV1     gv1_1 0 VALUE=5V*SQRT(V(bv1_1,0))
+R1_gv1  gv1_1 gv1_2 100
+R2_gv1  gv1_2 0 1K
+
+X7 gv2_a gv2_b MySubcircuit_GV
+
+.SUBCKT MYSUBCIRCUIT_GV gv2_a gv2_b
+BGV  	bgv_1 0 V={2.0*sin(10*pi*TIME)}
+R1_bgv  bgv_1 bgv_2 100
+R2_bgv  bgv_2 0 1K
+GV2  	gv2_a 0  VALUE=5V*SQRT(V(bgv_1,0))
+R1_gv2  gv2_a gv2_b 100
+R2_gv2  gv2_b 0 1K
+.ENDS
+
+* circuit and subcircuit definition for Linear form of H-Source
+HL1     hl1_1 0 bv1 1
+R1_hl1  hl1_1 hl1_2 100
+R2_hl1  hl1_2 0 1K
+
+X8 hl2_a hl2_b MySubcircuit_HL
+
+.SUBCKT MYSUBCIRCUIT_HL hl2_a hl2_b
+BHL  	bhl_1 0 V={2.0*sin(10*pi*TIME)}
+R1_bhl  bhl_1 bhl_2 100
+R2_bhl  bhl_2 0 1K
+HL2  	hl2_a 0 bhl 1
+R1_hl2  hl2_a hl2_b 100
+R2_hl2  hl2_b 0 1K
+.ENDS
+
+.options timeint method=trap 
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.5U 100ms
+.options output initial_interval=1ms
+.PRINT TRAN p(BV1) p(X1:BV2) w(BV1) w(X1:BV2) 
++ p(BI1) p(X2:BI2) w(BI1) w(X2:BI2) 
++ p(EL1) p(X3:EL2) w(EL1) w(X3:EL2) 
++ p(EV1) p(X4:EV2) w(EV1) w(X4:EV2) 
++ p(FL1) p(X5:FL2) w(FL1) w(X5:FL2)
++ p(GL1) p(X6:GL2) w(GL1) w(X6:GL2)
++ p(GV1) p(X7:GV2) w(GV1) w(X7:GV2)
++ p(HL1) p(X8:HL2) w(HL1) w(X8:HL2)
+
+.END

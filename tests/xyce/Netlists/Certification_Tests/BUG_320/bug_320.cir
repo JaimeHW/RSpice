@@ -1,0 +1,61 @@
+*-------------------------------------------------------------------------
+* Copyright Notice
+*
+* Copyright (c) 2000, Sandia Corporation, Albuquerque, NM.
+*-------------------------------------------------------------------------
+*
+*-------------------------------------------------------------------------
+* Filename       : $RCSfile$
+*
+* Purpose        : Cartesian PDE BJT test circuit
+*
+* Special Notes  : This is from the regression test suite - see cartbjt.cir.
+*
+*                  Bug 320 was a bug in which the parameter "searchmethod" was
+*                  not being recognized.  This circuit uses that parameter.
+*
+* Creator        : Eric R. Keiter, 9233, Computational Sciences
+*
+* Creation Date  : 10/26/00
+*
+* Revision Information:
+* ---------------------
+*
+* Revision Number: $Revision$
+*
+* Revision Date  : $Date$
+*
+* Current Owner  : $Author$
+*-------------------------------------------------------------------------
+
+VPOS  1 0 DC 5V
+VBB   6 0 DC -2V
+RE    1 2 2K
+RB    3 4 190K
+
+YPDE BJT1 5 3 7 PDEBJT meshfile=internal.msh 
++ node={name =collector, base, emitter}
++ displcur=0 sgplotlevel=0 tecplotlevel=0 txtdatalevel=0
++ l=2.0e-3  w=1.0e-3
++ nx=30     ny=15
+
+
+* Zero volt sources acting as an ammeter to measure the
+* base, collector, and emmitter currents, respectively
+VMON1 4 6 0
+VMON2 5 0 0
+VMON3 2 7 0 
+
+.MODEL PDEBJT   ZOD  level=2
+
+.DC VPOS 0.0 0.0 1.0 
+
+.options LINSOL type=klu
+
+.options NONLIN maxstep=25 maxsearchstep=1 searchmethod=2 fredlevel=0
+
+.options TIMEINT reltol=1.0e-3 abstol=1.0e-6 
+
+.PRINT DC V(1) I(VMON1) I(VMON2) I(VMON3)
+
+.END

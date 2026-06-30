@@ -1,0 +1,18 @@
+* Test of I(*) and P(*) with an LTRA RC device in the netlist.
+* That O device should not show up in either of those two wildcard
+* outputs.  The I1(*) and I2(*) wildcards should also be silently
+* ignored, unless lead current support is added for the O device.
+*
+* R = 0.05 ohms per unit length
+* C = 20pF per unit length
+
+v1 1 0 pulse(0 1 1ns 1ns 1ns 20ns 40ns)
+rload 2 0 10
+
+o1 1 0 2 0 rcline
+.model rcline ltra r=0.05 g=0 l=0 c=20pF len=100 steplimit=1 compactrel=1.0e-3 compactabs=1.0e-14
+
+.tran 0.1ns 120ns 0 0.15ns
+.print tran v(1) v(2) I(*) P(*) I1(*) I2(*)
+
+.end

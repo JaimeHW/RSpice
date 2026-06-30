@@ -1,0 +1,28 @@
+Test a bad DCOP line
+**************************************************************
+* Test that a bad .DCOP line generates a useful error message
+* and a graceful exit.  
+*
+* See SON Bug 705, for a complete discussion.
+*
+* 
+**************************************************************
+
+V1 1 0 SIN(0 1 1KHZ)
+R1 1 0 1
+C1 1 0 1u
+
+.TRAN 0 1ms
+.PRINT TRAN V(1)
+* This line (with filename, rather than file) caused a core dump
+* in Xyce 6.3, or earlier
+.SAVE type=ic filename=bogo.save level=all
+* These next two lines would exit cleanly in Xyce 6.3.  Testing that now.
+.SAVE type= file=bogo.save
+.SAVE type file=bogo.save
+* These two lines would be silently ignored in Xyce 6.3.  They
+* cause a graceful exit in Xyce 6.4.
+.SAVE type=ic file=
+.SAVE type=ic file
+
+.end

@@ -1,0 +1,23 @@
+Test Name: sand23
+Owner: Dave Shirley
+Test netlists: sand23.cir
+Mode:  Serial and Parallel
+Comparator:  none
+Version of Xyce: Release_3.1       # the first version where this bug was tested.
+ 
+Description:
+============
+Tests for correct summary of devices contained in a circuit.
+ 
+Procedure:
+============
+  run_xyce -o ${OUT_DIR}/sand23.cir.prn sand23.cir > ${OUT_DIR}/sand23.cir.log
+  xmpirun -np 2 -o ${OUT_DIR}/sand23.cir.prn sand23.cir > ${OUT_DIR}/sand23.cir.log
+ 
+Verification:
+=============
+The correctness of this test is bt a script which extracts the device summary and compares
+it to a correct summary for the circuit.
+ 
+Notes:
+======

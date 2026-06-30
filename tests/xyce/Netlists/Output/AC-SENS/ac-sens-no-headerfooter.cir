@@ -1,0 +1,28 @@
+***************************************************************
+* Test AC-SENS output for FORMAT=STD with
+* .OPTIONS OUTPUT PRINTHEADER=FALSE PRINTFOOTER=FALSE
+*
+* See SON Bugs 1170 and 1252 for more details.
+***************************************************************
+
+* Trivial high-pass filter
+
+R2 c 0 1
+R1 b c 1
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+* Make sure that mixed case works correctly on the .SENS line
+* for a .AC analysis
+.SENS OBJVARS=b,C PARAM=R1:R,c1:c
+
+.options sensitivity direct=1 adjoint=1 stdoutput=1
+.print AC vr(b) vi(b) vp(b) vm(b) R1:R C1:C
+
+.PRINT SENS vr(b) vi(b) vp(b) vm(b) R1:R R2:R C1:C
+
+.ac dec 5 100Hz 1e6
+
+.OPTIONS OUTPUT PRINTHEADER=FALSE PRINTFOOTER=FALSE
+
+.end

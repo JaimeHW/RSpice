@@ -1,0 +1,30 @@
+* Unit Test of Series Power Grid Branch Devices, in PQ Polar format
+
+* vary the voltage at bus 1 to check if the answers match theory,
+* given on pg.250-254 of Kundar. Ammeter is defined so that power
+* flows from bus 1 into the branch between buses 1 and 2
+V1Th bus1Th ammBus1P 0
+V1VM bus1VM ammBus1Q 1V
+Vamm1P 0 ammBus1P 0V
+Vamm1Q 0 ammBus1Q 0V
+
+* initial conditions ("flat start") at bus 2
+.NODESET V(bus2Th)=0 V(bus2VM)=1
+
+* Have bus 3 be the slack bus. Ammeter is defined so that power 
+* flows from branch between buses 2 and 3 into bus 3, so as to match
+* equations in Kundar.
+V3Th bus3Th ammBus3P 0V
+V3VM bus3VM ammBus3Q 1V
+Vamm3P ammBus3P 0 0V
+Vamm3Q ammBus3Q 0 0V
+
+* two series branches should give same answer as one branch with X=2
+YPowerGridBranch pg12 bus1Th bus2Th bus1VM bus2VM AT=PQP R=0.0 X=1.0 B=0.0
+YPowerGridBranch pg23 bus2Th bus3Th bus2VM bus3VM AT=PQP R=0.0 X=1.0 B=0.0
+
+.DC V1Th -0.7854 0.7854 0.7854 V1VM 0.5 1.0 0.25
+.PRINT DC width=10 precision=6 V(bus1Th) V(bus1VM) 
++ I(Vamm1P) I(Vamm1Q) I(Vamm3P) I(Vamm3Q)
+ 
+.end

@@ -1,0 +1,47 @@
+*************************************************************
+* Test that the AGE and TC instance parameters work when
+* the device capacitance is set via  a "Solution-Dependent 
+* Capacitor" 
+*
+* See SON Bugs 164 and 681 for more details.
+*************************************************************
+
+* Simple dc source will be used to set the capacitance for the 
+* solution-dependent capacitor.  This is sufficient for this
+* test, since the goal is to ensure that the AGE and TC instance 
+* parameters work with the solution-dependent form.  The other 
+* test for SON Bug 164 tests the machinery for calculating the 
+* solution dependent capacitance value.
+VREF ref 0  40e-6
+RREF ref 0  1
+
+* baseline case, with AGE
+V1   1  0 PULSE(0 1 10U 1U 1U 100m) 
+R1   1a 1 1K 
+C1   1a 0 C=40e-6 AGE=1e4
+
+* Solution-dependent capacitor with AGE
+V2   2  0 PULSE(0 1 10U 1U 1U 100m) 
+R2   2a 2 1K 
+C2   2a 0 C={V(ref)} AGE=1e4
+
+* baseline case2
+V3   3  0 PULSE(0 1 10U 1U 1U 100m) 
+R3   3a 3 1K 
+C3   3a 0 CMOD C=40u TC1=0.1
+
+* Solution-dependent capacitor with Temp Coefficient.
+* Just testing TC1 is sufficient.
+V4   4  0 PULSE(0 1 10U 1U 1U 100m) 
+R4   4a 4 1K 
+C4   4a 0 CMOD C={V(ref)} TC1=0.1  
+
+.MODEL CMOD C TNOM=20
+
+.TRAN 0.5U 400ms
+
+* V(1a) and V(2a) should be identical. V(3a) and V(4a) should 
+* be identical also.
+.PRINT TRAN V(1a) V(2a) V(3a) v(4a)
+
+.END

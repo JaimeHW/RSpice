@@ -1,0 +1,105 @@
+Lowpass filter from https://www.electronics-tutorials.ws/filter/filter_2.html
+
+* device parameters:
+.param rval=4.7k
+.param cval=47n
+.param vinval=10.0
+
+
+* -------------------------------------------------------------------------------
+* analytical solutions for everything.  The test has a re-implmentation of these 
+* in perl, but I implemented them here first. ERK.  May 17, 2019
+
+* analytical expressions for VM, dVM_dr, dVM_dc and dVM_dvin
+* Xc = capacitive reactance.  I original computed the analytical mag solution and 
+* derivatives using this, but then didn't use it for the other quantities.
+.func Xc(f) {1.0/(2*pi*f*cval)}
+*.func vmag(f) {vinval * Xc(f)/sqrt(rval*rval + Xc(f)*Xc(f))}
+
+* ------ Objectives: mag, phase, real and imag of V(2) 
+.func vmag(f) {vinval / sqrt(1.0 + (2*pi*f*rval*cval)*(2*pi*f*rval*cval)) }
+.func vphase(f) { - atan(2*pi*f*rval*cval) }
+.func vreal(f) { vmag(f) * cos(vphase(f)) }
+.func vimag(f) { vmag(f) * sin(vphase(f)) }
+
+* ------ Mag sensitivities (from Maple):
+.func dvmag_dr(f) { -vinval * Xc(f) * rval / (rval*rval + Xc(f)*Xc(f))**(1.5) }
+.func dvmag_dc(f) { -vinval / ((pi*f*cval*cval)*sqrt(4*rval*rval+(1/(pi*pi*f*f*cval*cval)))) + vinval / (pi*pi*pi*f*f*f*cval*cval*cval*cval*(4*rval*rval+1/(pi*pi*f*f*cval*cval))**1.5) }
+.func dvmag_dvin(f) {Xc(f)/sqrt(rval*rval + Xc(f)*Xc(f))}
+
+* ------ Phase sensitivities (from Maple):
+.func dvphase_dr(f) {-2*pi*f*cval/(4*cval*cval*pi*pi*rval*rval*f*f+1)}
+.func dvphase_dc(f) {-2*pi*f*rval/(4*cval*cval*pi*pi*rval*rval*f*f+1)}
+.func dvphase_dvin(f) {0.0}
+
+* ------ Real sensitivities (from Maple):
+.func dvreal_dr(f) {-4.0*vinval*pi*f*cval*rval/((4.0*cval**2*pi**2*rval**2*f**2+1.0)**(3/2)*sqrt(4.0*rval**2+1.0/(pi**2*f**2*cval**2)))-4.0*vinval*rval/(sqrt(4.0*cval**2*pi**2*rval**2*f**2+1.0)*pi*f*cval*(4.0*rval**2+1.0/(pi**2*f**2*cval**2))**(3/2)) }
+
+.func dvreal_dc(f) { -4.0*vinval*pi*f*rval**2/((4.0*cval**2*pi**2*rval**2*f**2+1.0)**(3/2)*sqrt(4.0*rval**2+1.0/(pi**2*f**2*cval**2)))-vinval/(sqrt(4.0*cval**2*pi**2*rval**2*f**2+1.0)*pi*f*cval**2*sqrt(4.0*rval**2+1.0/(pi**2*f**2*cval**2)))+vinval/(sqrt(4.0*cval**2*pi**2*rval**2*f**2+1.0)*pi**3*f**3*cval**4.0*(4.0*rval**2+1.0/(pi**2*f**2*cval**2))**(3/2)) }
+
+.func dvreal_dvin(f) { 1.0/(sqrt(4.0*cval*cval*pi*pi*rval*rval*f*f+1)*pi*f*cval*sqrt(4.0*rval*rval+1.0/(pi*pi*f*f*cval*cval))) }
+
+* ------ Imag sensitivities (from Maple):
+.func dvimag_dr(f) { -2*vinval/(sqrt(4*cval**2*pi**2*rval**2*f**2+1)*sqrt(4*rval**2+1/(pi**2*f**2*cval**2)))+8*vinval*rval**2*cval**2*pi**2*f**2/((4*cval**2*pi**2*rval**2*f**2+1)**(3/2)*sqrt(4*rval**2+1/(pi**2*f**2*cval**2)))+8*vinval*rval**2/(sqrt(4*cval**2*pi**2*rval**2*f**2+1)*(4*rval**2+1/(pi**2*f**2*cval**2))**(3/2)) }
+
+.func dvimag_dc(f) { 8*vinval*rval**3*cval*pi**2*f**2/((4*cval**2*pi**2*rval**2*f**2+1)**(3/2)*sqrt(4*rval**2+1/(pi**2*f**2*cval**2)))-2*vinval*rval/(sqrt(4*cval**2*pi**2*rval**2*f**2+1)*(4*rval**2+1/(pi**2*f**2*cval**2))**(3/2)*pi**2*f**2*cval**3) }
+
+.func dvimag_dvin(f) { -2*rval/(sqrt(4*cval**2*pi**2*rval**2*f**2+1)*sqrt(4*rval**2+1/(pi**2*f**2*cval**2))) }
+* -------------------------------------------------------------------------------
+
+* Circuit:
+v1 1 0 ac {vinval}
+r1 1 2 {rval}
+c1 2 0 {cval}
+
+.ac dec 10 1 10k
+*.ac lin 1 720 720
+*.ac lin 1 360 360
+
+* Output vp() in degrees
+.OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=true
+
+.print ac 
+*format=tecplot  
++ vm(1) vp(1) vm(2) vp(2)   
+*{20*log(vm(2)/vm(1))}  v(2)
+*+ {vmag(FREQUENCY)}
+*+ {dvmag_dr(FREQUENCY)}
+*+ {dvmag_dc(FREQUENCY)}
+*+ {dvmag_dvin(FREQUENCY)}
+
+.print sens 
+*+ format=tecplot  
+*
+* If un-commented, these expression outputs will produce 
+* the analytic objectives and sensitivities in the same order as the 
+* Xyce-computed ones (which is the subject of this test), which will 
+* immediately follow these in the file.
+*
+*+ {vreal(FREQUENCY)}
+*+ {vimag(FREQUENCY)}
+*
+*+ {vmag(FREQUENCY)}
+*+ {vphase(FREQUENCY)}
+*
+*+ {dvreal_dr(FREQUENCY)}
+*+ {dvimag_dr(FREQUENCY)}
+*+ {dvmag_dr(FREQUENCY)}
+*+ {dvphase_dr(FREQUENCY)}
+*
+*+ {dvreal_dc(FREQUENCY)}
+*+ {dvimag_dc(FREQUENCY)}
+*+ {dvmag_dc(FREQUENCY)}
+*+ {dvphase_dc(FREQUENCY)}
+*
+*+ {dvreal_dvin(FREQUENCY)}
+*+ {dvimag_dvin(FREQUENCY)}
+*+ {dvmag_dvin(FREQUENCY)}
+*+ {dvphase_dvin(FREQUENCY)}
+
+.sens objvars=2 param=r1:r,c1:c,v1:acmag
+.options sensitivity direct=1 adjoint=1  stdoutput=1  
+
+.options device debuglevel=-100
+
+.end 

@@ -1,0 +1,21 @@
+Simple RC test
+
+.include rc.lib
+
+V1 1 0 DC 0 SIN (0 1 1K 0 0)
+R1 1 2 1
+C1 2 0 1e-9
+X1 2 3 rc3000
+
+.subckt rc 1 2
+R 1 2 1
+C 2 0 1e-9
+.ends
+
+.tran 0.1u .001
+*.options nonlin nox=0
+*.options nonlin-tran nox=0
+.print tran V(2)
+.end 
+
+

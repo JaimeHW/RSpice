@@ -1,0 +1,52 @@
+* Test various syntaxes for how expressions can be entered
+* on .MEASURE lines.  This includes the preferred Xyce
+* syntax and two valid HSPICE syntaxes.  See SON Bug 1135
+* for more details.
+************************************************************
+
+V1 1 0 SIN(0 1 1)
+R1 1 2 1
+R2 2 0 1
+
+.TRAN 0 1
+.OPTIONS TIMEINT BREAKPOINTS=0.2,0.25,0.5,0.75 
+.PRINT TRAN V(1) V(2)
+
+* preferred Xyce syntax
+.MEASURE TRAN AVGV1V2 AVG {V(1)*V(2)}
+.MEASURE TRAN INTV1V2 INTEG {V(1)*V(2)}
+.MEASURE TRAN MAXV1V2 MAX {V(1)+V(2)}
+.MEASURE TRAN MINV1V2 MIN {V(1)+V(2)}
+.MEASURE TRAN PPV1V2 PP {V(1)+V(2)}
+.MEASURE TRAN RMSV1V2 RMS {V(1)+V(2)}
+.meas tran vdiff FIND {V(1)-v(2)} WHEN {v(1)+v(2)}=1
+.MEAS TRAN sr DERIV {V(1)-V(2)} AT=200m
+.MEASURE TRAN EQNV1 EQN {1+V(1)}
+
+* HSPICE syntax for PAR, () and expression delimiter
+.MEASURE TRAN AVGPARV1V2 AVG PAR('V(1)*V(2)')
+.MEASURE TRAN INTPARV1V2 INTEG par('V(1)*V(2)')
+.MEASURE TRAN MAXPARV1V2 MAX PAR('V(1)+V(2)')
+.MEASURE TRAN MINPARV1V2 MIN PAR('V(1)+V(2)')
+.MEASURE TRAN PPPARV1V2 PP PAR('V(1)+V(2)')
+.MEASURE TRAN RMSPARV1V2 RMS PAR('V(1)+V(2)')
+.meas tran vdiffPAR FIND PAR('V(1)-v(2)') WHEN PAR('v(1)+v(2)')=1
+.MEAS TRAN srPAR DERIV PAR('V(1)-V(2)') AT=200m
+.MEASURE TRAN EQNPARV1 EQN PAR('1+V(1)')
+
+* HSPICE syntax for with () and expression delimiter
+.MEASURE TRAN AVGNOPARV1V2 AVG ('V(1)*V(2)')
+.MEASURE TRAN INTNOPARV1V2 INTEG ('V(1)*V(2)')
+.MEASURE TRAN MAXNOPARV1V2 MAX ('V(1)+V(2)')
+.MEASURE TRAN MINNOPARV1V2 MIN ('V(1)+V(2)')
+.MEASURE TRAN PPNOPARV1V2 PP ('V(1)+V(2)')
+.MEASURE TRAN RMSNOPARV1V2 RMS ('V(1)+V(2)')
+.meas tran vdiffNoPar FIND ('V(1)-v(2)') WHEN ('v(1)+v(2)')=1
+.MEAS TRAN srNoPar DERIV ('V(1)-V(2)') AT=200m
+.MEASURE TRAN EQNNOPARV1 EQN ('1+V(1)')
+
+* This verifies that the fix for SRN Bug 2039 did not
+* affect .MEASURE
+.MEASURE TRAN CURLYBRACES AVG {1+{V(1)*V(2)}}
+
+.END

@@ -1,0 +1,6 @@
+exclude
+rc.lib
+rc_simple_lib.cir
+rc_simple_lib.cir.sh
+rc_simple_xyce.cir
+tags

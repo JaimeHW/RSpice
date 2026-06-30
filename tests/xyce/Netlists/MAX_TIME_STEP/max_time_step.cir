@@ -1,0 +1,14 @@
+A simple test circuit for user specified multiple max time step values
+
+* sin( offset amplitude frequency delay attenuation )
+Vsrc 0 a sin( 0 5 1200 0 0 )
+Lind a b 1.0e-2
+Rld  b 0 100
+Ccp  b 0 5.0e-6
+
+.tran 0 2.0e-3  {schedule( 0.5e-3, 0, 1.0e-3, 1.0e-6, 1.5e-3, 1.0e-4, 2.0e-3, 0 )}
+
+.print tran v(a) v(b) {schedule( 0.5e-3, 0.0, 1.0e-3, 1.0e-6, 1.5e-3, 1.0e-4, 2.0e-3, 0 )}
+
+.end
+

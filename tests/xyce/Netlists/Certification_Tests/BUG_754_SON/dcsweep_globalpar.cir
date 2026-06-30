@@ -1,0 +1,19 @@
+* Shows bug in .dc sweep over source with global par usage
+
+.global_param vgi = 0.5
+.global_param vdi = 1.0
+M1 drain gate source 0 mlev1
+* This produces INCORRECT DC sweep values if {vdi} used
+*Vdrain drain 0  dc 1.0
+Vdrain drain 0  dc {vdi}
+Vgate gate 0 dc .5
+Vsource source 0 dc {0}
+
+.dc vdrain 0 1 0.001 
+.print dc v(drain) v(gate) I(vdrain)
+
+
+.model mlev1 nmos level=1
+
+.end
+

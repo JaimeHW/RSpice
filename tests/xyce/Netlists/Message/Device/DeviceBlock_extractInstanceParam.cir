@@ -1,0 +1,88 @@
+******************************************************************
+* This tests the error messages caused by bad device instance 
+* parameters, where parts of the correct device instance parameter
+* syntaxes are missing.  It does so for both "normal" and 
+* "vector" parameters.  See SON Bug 802 for more details.
+*
+* This netlist also tests incorrectly formatted vector parameters
+* on the device instance line in YPDE devices.  There are
+* extra commas in the vector parameter definitions. See SON Bug
+* 957 for more details.
+*
+******************************************************************
+.DC VPOS 0 2 1
+.PRINT DC V(1a)
+
+* source syntax and circuit layout don't really matter
+V1 1a 0 DC 1
+
+* This resistor syntax is correct
+R1 1a 0 1
+
+* These resistor syntaxes are "damaged".
+* TC= and TC are missing both vector values.
+* TC=0, is missing the second vector value
+* TEMP= and TEMP are normal parameters that are missing values
+* TC=0 0 is missing the comma between the values
+R2 1a 0 1 TC
+R3 1a 0 1 TC=
+R4 1a 0 1 TC=0,
+R5 1a 0 1 TC=0 0
+R6 1a 0 1 TEMP
+R7 1a 0 1 TEMP=
+
+* incorrectly formatted vector parameter in YPDE device
+YPDE BJT1 5 3 7 PDEBJT 
+*+ meshfile=internal.msh
++ node = {name = collector, base, emitter 
++ sgplotlevel=0 tecplotlevel=0
++ l=2.0e-3  w=1.0e-3
++ nx=30     ny=15
++ mobmodel=carr
+
+YPDE BJT2 5 3 7 PDEBJT 
+*+ meshfile=internal.msh
++ node = {name = collector, base, ,, emitter} 
++ sgplotlevel=0 tecplotlevel=0
++ l=2.0e-3  w=1.0e-3
++ nx=30     ny=15
++ mobmodel=carr
+
+YPDE BJT3 5 3 7 PDEBJT 
+*+ meshfile=internal.msh
++ node = {name = collector, base, ,emitter} 
++ sgplotlevel=0 tecplotlevel=0
++ l=2.0e-3  w=1.0e-3
++ nx=30     ny=15
++ mobmodel=carr
+
+YPDE BJT4 5 3 7 PDEBJT 
+*+ meshfile=internal.msh
++ node = {name = collector, base, emitter,} 
++ sgplotlevel=0 tecplotlevel=0
++ l=2.0e-3  w=1.0e-3
++ nx=30     ny=15
++ mobmodel=carr
+
+YPDE BJT5 5 3 7 PDEBJT 
+*+ meshfile=internal.msh
++ sgplotlevel=0 tecplotlevel=0
++ l=2.0e-3  w=1.0e-3
++ nx=30     ny=15
++ mobmodel=carr
++ node = {name = collector, base, emitter,}
+
+* Zero volt sources acting as an ammeter to measure the
+* base, collector, and emmitter currents, respectively
+VMON1 4 6 0
+VMON2 5 0 0
+VMON3 2 7 0 
+.MODEL PDEBJT   ZOD  level=2
+
+VPOS  1 0 DC 5V
+VBB   6 0 DC -2V
+RE    1 2 2K
+RB    3 4 190K
+
+.END
+

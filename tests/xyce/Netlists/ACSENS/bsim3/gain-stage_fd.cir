@@ -1,0 +1,54 @@
+*A Simple MOSFET Gain Stage. AC Analysis.
+
+.param wval=4u
+.param dw={wval*1.0e-8}
+
+.param lval=1u
+.param dl={lval*1.0e-8}
+
+
+M1 3 2 0 0 nmos w={wval} l={lval}
+Rsource 1 2 100k
+Rload 3 vdd 25k
+Vdd1 vdd 0 5 
+Vin 1 0 1.44 ac .1 sin(0 1 1e+5 0 0) 
+
+
+M1w 3w 2w 0 0 nmos w={wval+dw} l={lval}
+Rsourcew 1w 2w 100k
+Rloadw 3w vddw 25k
+Vdd1w vddw 0 5 
+Vinw 1w 0 1.44 ac .1 sin(0 1 1e+5 0 0) 
+
+
+M1l 3l 2l 0 0 nmos w={wval} l={lval+dl}
+Rsourcel 1l 2l 100k
+Rloadl 3l vddl 25k
+Vdd1l vddl 0 5 
+Vinl 1l 0 1.44 ac .1 sin(0 1 1e+5 0 0) 
+
+
+*.ac dec 10 100Hz 1000MegHz 
+.ac dec 10 1e7Hz 1000MegHz 
+.print ac 
+*format=tecplot 
++ vr(2) vi(2) vm(2) vp(2)
+*+ vr(2w) vi(2w) vm(2w) vp(2w)
+*+ vr(2l) vi(2l) vm(2l) vp(2l)
+*
++ { (vr(2w)-vr(2))/dw }
++ { (vi(2w)-vi(2))/dw }
++ { (vm(2w)-vm(2))/dw }
++ { (vp(2w)-vp(2))/dw }
+*
++ { (vr(2l)-vr(2))/dl }
++ { (vi(2l)-vi(2))/dl }
++ { (vm(2l)-vm(2))/dl }
++ { (vp(2l)-vp(2))/dl }
+*
+*.sens objvars=2 param=m1:w,m1:l
+
+.model nmos nmos level=9
+
+.end
+

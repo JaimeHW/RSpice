@@ -1,0 +1,25 @@
+Test Name: BUG_457
+Owner: Robert Hoekstra
+Test netlists: none 
+GS files: none
+Mode:  Serial/Parallel
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+This bug involved updating Xyce to use Trilinos 4.0.  The usage and validity
+of this code is tested by all usages of Xyce.
+ 
+Procedure:
+============
+Run nightly regression and certification tests.
+
+Verification:
+=============
+Passes if the regression and certification tests pass.
+ 
+Notes:
+======
+
+

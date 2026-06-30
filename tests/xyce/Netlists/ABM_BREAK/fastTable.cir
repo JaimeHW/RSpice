@@ -1,0 +1,15 @@
+Test of expression version of table, with very fast (<1ps) rise times
+* The old expression library had trouble with breakpoints for super-fast 
+* rise times.  This test is proves that the new expression library
+* does not have this problem.
+*
+.param V1=1.1 V2=2 TD=0.05ps TR=0.03ps TF=0.04ps PW=0.2ps 
+
+B1   1  0  V = {Table(time, 0, V1, TD, V1, (TD+TR), V2, (TD+TR+PW), V2, (TD+TR+PW+TF), V1, 10ps, V1)}
+r1  1   0  1k
+
+.tran 0.1ps 1ps
+.options timeint reltol=1e-3 
+.print tran v(1) 
+.end
+

@@ -1,0 +1,27 @@
+MTB60P06V Test Circuit
+VD 1 0 DC 0
+VG 3 0 DC 0
+VS 4 0 DC 0
+VID 1 2 DC 0
+*
+M1 2 3 4 4 MAIN W=1.114 L=1.632u
+.MODEL MAIN PMOS
++ LEVEL=18
++ CV=1
++ CVE=1
++ RD=0
++ RG=0
++ RS=0.0025
++ VTO=-3.20
++ M=3
++ SIGMA0=0
++ NSUB=4.6e15
++ PHI=0.6
++ UO=355
++ TOX=105nm
+*
+.DC VD 0 -5 -0.5v VG -3.35 -4.11 -0.25v
+*.DC VD 0 -5 -0.5v
+.PRINT DC V(1) V(3) V(2) I(VID)
+.END
+*

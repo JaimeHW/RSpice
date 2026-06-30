@@ -1,0 +1,2 @@
+serial, nightly,  parallel, bsim3
+valgrind

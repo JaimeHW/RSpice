@@ -1,0 +1,44 @@
+Test Name: BUG 25 (SON)
+Owner: Tom Russo
+Test netlists: testCombined1.cir.sh (Shell script generates 3 netlists)
+GS files: none
+Mode:  Serial and Parallel  
+Comparator:  xyce_verify.pl 
+Version of Xyce: Release_4.1
+ 
+Description:
+============
+
+In bug 25 on the SON bugzilla, it was discovered that the
+parseMutualInductances method of N_IO_CircuitBlock was malfunctioning, and
+that a circuit with multiple mutual inductance lines could, if just the 
+right conditions pertained, produce crazy results depending on how the 
+lines were ordered in the netlist.
+
+This test case generates three mutual inductance netlists, each of which
+contains two separate circuits.  One circuit is a simple isolation transformer
+with a primary and secondary loop, the other has a tapped secondary.  The 
+script generates permutations of K lines for these circuits, and compares
+the Xyce output to analytically derived solutions to make sure not only that
+ordering is unimportant, but that the correct analytical result is output
+no matter how the problem is ordered.
+
+
+Procedure:
+============
+
+The test is run by its "shell" script, testCombined1.cir.sh, which is
+actually a perl script.  It is meant to be run through the run_xyce_regression
+meta-script.
+
+Verification:
+=============
+The test passes if the script says it has passed by exiting with 
+"Exit code = 0", which means that all three variants have matched the 
+analytic results.
+
+If any version fails comparison, the script will place an error message
+in its stderr file telling which variant failed.
+
+Notes:
+======

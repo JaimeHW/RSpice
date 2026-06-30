@@ -1,0 +1,88 @@
+DC DC Flyback Converter
+
+.tran 0 4.0e-4
+.print tran v(n8)
+
+*.options mpde ic=1 auton2=true auton2max=50 saveicdata=1 startupperiods=10 oscsrc=v2 ; difforder=1 diff=0 
+*.options mpde ic=2 auton2=true auton2max=50 saveicdata=1 startupperiods=10 oscsrc=v2 ; difforder=1 diff=0 
+*.options mpde ic=3 auton2=true auton2max=50 saveicdata=1 startupperiods=10 oscsrc=v2 ; difforder=1 diff=0
+*.options mpde ic=4 auton2=true auton2max=50 saveicdata=1 startupperiods=10 oscsrc=v2 ; difforder=2 diff=0
+*.options nonlin-tran maxstep=100 abstol=1.0e-3 reltol=1.0e-1
+*.dcop output=converter.op
+*.options TIMEINT method=7 erroption=1
+.options device separateload=0
+
+* to save data use something like this: 
+.options restart job=converter initial_interval=2.0e-4
+* and to restart use something like this:
+*.options restart file=trans_test1e-08
+* packing option 
+
+V1    n1   0    10V
+R1    n1   n2   10
+L1    n2   n5   1.0e-5
+L2    0    n6   1.0e-4
+K1    L1   L2   1.0
+Q3    n5   n4   0     Q2N2222 
+R2    n3   n4   100
+V2    n3   0    PULSE(0.0 5.0 0.0us 10ns 10ns 10us 20us)
+D1    n6   n7   Z50FF3_27C
+R3    n7   n8   1.0e3
+C1    n8   0    1.0e-9
+R4    n8   0    100.0e9
+
+*
+* MODEL DEFINITIONS
+*
+.MODEL Z50FF3_27C D( 
++ LEVEL = 2         ; use for XYCE
++ IS = 3.18E-10
++ N = 7.8
++ BV = 5000
++ IBV = 1E-6 
++ RS = 12
++ CJO = 1.476E-11
++ VJ = 6.545
++ M = 0.3499 
++ FC = 0.5
++ TT = 8.3E-8
++ EG = 9.99
++ XTI = 27 
++ IKF = 0.003531
++ NR = 2
++ ISR = 0)
+
+ 
+.model Q2N2222 NPN(
++ Is=14.34f
++ Xti=3
++ Eg=1.11
++ Vaf=74.03
++ Bf=255.9
++ Ne=1.307
++ Ise=14.34f
++ Ikf=.2847
++ Xtb=1.5
++ Br=6.092
++ Nc=2
++ Isc=0
++ Ikr=0
++ Rc=1
++ Cjc=7.306p
++ Mjc=.3416
++ Vjc=.75
++ Fc=.5
++ Cje=22.01p
++ Mje=.377
++ Vje=.75
++ Tr=46.91n
++ Tf=411.1p
++ Itf=.6
++ Vtf=1.7
++ Xtf=3
++ Rb=10)
+
+
+
+
+.end

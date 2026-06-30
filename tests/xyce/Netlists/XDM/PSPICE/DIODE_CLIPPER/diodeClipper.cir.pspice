@@ -1,0 +1,40 @@
+* In addition to showing how XDM works on the UUR DIODE clipper example 
+* from the Xyce Users' guide, this PSpice netlist also illustrates the
+* following issues from SRN Bug 1989:
+* 
+*   1) lack of case sensitivity in the model names used on the Diode
+*      instance lines D_D1 and D_D2
+*   
+*   2) There is no need for an extra blank after the last .MODEL block 
+*      in a PSpice .lib files. (nom.lib should be exactly 30 lines long.)
+*      
+* NOTE: Because of Item 2 above, the .sh file for DiodeClipper.sh is slightly
+* different from the other .sh files.  It tests that the last line of nom.lib
+* isn't blank.
+
+*Libraries
+.lib "./nom.lib"
+
+*Analysis directives: 
+.TRAN  0 2ms 0
+.OPTIONS ADVCONV
+.AUTOCONVERGE ITL1=1000 ITL2=2000 ITL4=1000 RELTOL=0.05 ABSTOL=1.0E-5 VNTOL=.001 PIVTOL=1.0E-10
+.PROBE   V([N04173]) 
+.PROBE   N(N03179)
+.PROBE64 V([N03334])
+.PROBE   W(D_D1)
+.PROBE64 N([N04104])
+
+R_R1         N04173 N03179  1k TC=0,0 
+R_R2         N03179 N04104  3.3k TC=0,0 
+R_R3         0 N03179  3.3K TC=0,0 
+C_C1         N03179 N03334  0.47u  TC=0,0 
+R_R4         0 N03334  5.6k TC=0,0 
+D_D1         N03179 N04104 D1N3940 
+D_D2         0 N03179 d1n3940 
+V_V1         N04104 0 5Vdc
+V_V2         N04173 0  AC 1
++SIN 0 10 1KHz 0 0 0
+
+.END
+

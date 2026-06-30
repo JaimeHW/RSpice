@@ -1,0 +1,15 @@
+* The Y device line does not have enough entries
+* Note: this is not a valid netlist for running a power
+* grid simulation.  It is just being used to the
+* test the error messages.
+
+V1  1 0 DC 5V
+R1    1 0 1
+
+YPowerGridBranch pg1_2
+
+.DC V1 0.0 2.0 1.0 
+.PRINT DC V(1)
+
+.END
+

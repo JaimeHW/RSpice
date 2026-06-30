@@ -1,0 +1,9 @@
+The gold standard for this test was generated manually by running the
+equivalent netlist in ngspice at 10 separate temperatures, then massaging
+the output into a Xyce-style ".prn" file complete with header and footer.
+The point of the test is to verify that Xyce now produces SPICE3F5/ngspice
+compatible results for the diode at all temperatures.
+
+If it becomes necessary to regenerate the gold standard, it should be done
+by running the circuit in ngspice, not Xyce.
+

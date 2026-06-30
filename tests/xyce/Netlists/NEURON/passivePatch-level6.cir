@@ -1,0 +1,56 @@
+A test of the passive membrane response in the level 6 neuron 
+**************************************************************************
+* Tier:  ?????
+* Directory/Circuit name:  NEURON/passivePatch-level6.cir
+* Description:  transient analysis of response to constant current injection
+*
+* Created by:  C. E. Warrender 10/21/11
+*
+* NOTES:
+
+* A passive neural membrane behaves like an RC circuit.  The voltage is
+* given by:
+*	V(t) = v0 * exp(-t/tau) + v1
+* where 
+*	v1 = Vrest + Rm * Iinj
+*	v0 = -Rm * Iinj
+*	tau = Rm * Cm
+* Vrest is the resting membrane potential
+* Rm is the membrane resistance
+* Cm is the membrane capacitance
+* Iinj is the injected current
+*
+* based on:
+* Koch, Biophysics of Computation, fig 1.3, pg 11.
+
+.options nonlin nox=0
+
+.tran 0.0 0.2
+
+* neuron model
+.param restV = -0.07
+.param Rm = 1.0e8	; 100 Mohm cm^2
+.param Gm = {1/Rm}
+.param Cm = 1.0e-10	; 100 pF/cm^2
+.param Iinj = -0.1e-9	; -0.1 nA	- Koch also uses 0.1, 0.2, and 0.3
+* for level 6 neuron, parameters are 'specific' values that need to be multipled by 
+* membrane surface area; length and diameter must be specified
+* choose values for which surface area will be 1 cm^2 for simplicity
+.param length = 0.5642	; sqrt(1/pi)
+.param radius = {length/2}
+* also need to specify resistance along cable, although that shouldn't matter for single patch
+.param Ra = 1.0 ; [ohms m]
+* also specify single segment
+* with no ionchannelmodel specified, default is passive
+.model nrnParams neuron level=6 vRest={restV} cMem={Cm}  gMem={Gm} eLeak={restV}  L={length} A={radius} N={1} Ra={Ra}
+
+*level 6 neuron nodes represent ends of a cable, rather than inside/outside of membrane
+yneuron neuron1 a b nrnParams
+
+* use PULSE for current injection so that the current will be off during dcop calculation
+* pulse( initial_value pulse_value delay_time rise_time fall_time pulse_width period)
+Iin 0 a PULSE( 0.0 {Iinj} 1.0e-12 0.0 0.0 1.0e10 1.0e10)
+
+.print tran V(a) 	
+
+.end

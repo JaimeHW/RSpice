@@ -1,0 +1,23 @@
+* This test tests bug 206.  
+*
+* This is an issue that crept into the Xyce 
+* code, unnoticed between the Xyce 7.2 and 7.3 releases.
+* The problem was that under some rare circumstances, 
+* when a node name matched a model name, the parser
+* could get confused.  Before the bugfix for this
+* issue, this circuit would incorrectly exit 
+* with a fatal error.
+*
+
+* if this is commeted out the problem goes away.
+.MODEL N NMOS ( level     = 10  )
+
+* this does not work, if the above model statement is present
+.model rseu_d2_lvsres R( r=0.1)
+RLAT_ME N 0 rseu_d2_lvsres 500K 
+
+Vn N 0 1.0
+
+.DC Vn 1 1 1
+.PRINT DC V(N)
+

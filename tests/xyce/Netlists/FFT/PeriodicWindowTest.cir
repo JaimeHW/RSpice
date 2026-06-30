@@ -1,0 +1,49 @@
+****************************************************
+* Test of various periodic FFT Window Types.  This
+* also tests .OPTIONS FFT_MODE=1, and "synonyms"
+* such as HAMMING vs. HAMM.
+*
+* See gitlab issues 214 and 227 for more details.
+****************************************************
+
+.OPTIONS FFT FFT_MODE=1
+
+.TRAN 0 1
+.PRINT TRAN V(1)
+
+V1 1 0 PWL 0 0 0.45 1 1 0
+R1 1 0  1
+
+* Default format is UNORM for FFT_MODE=1
+.FFT V(1) NP=16 FORMAT=UNORM WINDOW=BART
+.FFT V(1) NP=16 WINDOW=BARTLETT
+
+.FFT V(1) NP=16 WINDOW=BARTLETTHANN
+
+* This is the conventional blackman window
+.FFT V(1) NP=16 WINDOW=BLACKMAN
+
+.FFT V(1) NP=16 WINDOW=COSINE2
+.FFT V(1) NP=16 WINDOW=COSINE4
+
+.FFT V(1) NP=16 WINDOW=HAMM
+.FFT V(1) NP=16 WINDOW=HAMMING
+
+.FFT V(1) NP=16 WINDOW=HANN
+.FFT V(1) NP=16 WINDOW=HANNING
+
+* This is the blackmanharris window in Spectre
+.FFT V(1) NP=16 WINDOW=HARRIS
+.FFT V(1) NP=16 WINDOW=BLACKMANHARRIS
+
+.FFT V(1) NP=16 WINDOW=NUTTALL
+
+.FFT V(1) NP=16 WINDOW=HALFCYCLESINE
+.FFT V(1) NP=16 WINDOW=HALFCYCLESINE3
+.FFT V(1) NP=16 WINDOW=HALFCYCLESINE6
+
+* Default format is UNORM for FFT_MODE=1
+.FFT V(1) NP=16 WINDOW=RECT
+.FFT V(1) NP=16 FORMAT=NORM WINDOW=RECTANGULAR
+
+.END

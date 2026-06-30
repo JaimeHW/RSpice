@@ -1,0 +1,19 @@
+N-channel mosfet circuit 
+
+vdd 5 0 dc 18v
+vgg 3 0 dc 5v
+r1 5 1 47meg
+r2 1 0 22meg
+rd 5 4 2.2k
+rs 2 0 500
+
+.param tempParam=15
+m1 3 1 2 2 nfet  temp={tempParam}
+.model nfet nmos(level=1 kp=0.5m vto=2v)
+
+.dc vgg 0 18 1 vdd 0 18 1
+.print dc v(3) v(5) v(3,2) v(1,2)
+
+.step tempParam list 15 25 35
+
+.end

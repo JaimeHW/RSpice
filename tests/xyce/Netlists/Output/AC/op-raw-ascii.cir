@@ -1,0 +1,13 @@
+AC test of FORMAT=RAW output format with .OP
+*
+* Trivial resistor circuit, just do a DC sweep and watch the output
+*
+
+R1 1 0 10
+V1 1 0 DC 0V
+
+.print AC FORMAT=RAW v(1) I(v1)
+.ac dec 10 100Hz 1000MegHz
+.op
+
+.end

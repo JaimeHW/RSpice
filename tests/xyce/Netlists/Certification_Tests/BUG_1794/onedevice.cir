@@ -1,0 +1,6 @@
+Netlist to Test that Xyce will run with a print line if any processor doesn't have any devices.
+
+VPULSE 1 0 PULSE(0V 1V 0S 10US 10US 0.1US 20.1US)
+.TRAN 1US 20.1US
+.PRINT TRAN V(1)
+.END

@@ -1,0 +1,10 @@
+RC_ladder100.cir
+RC_ladder100_autosize.cir
+RC_ladder100_autosize.cir.sh
+RC_ladder_top.cir
+RLC_ladder100.cir
+RLC_ladder100_autosize.cir
+RLC_ladder100_autosize.cir.sh
+RLC_ladder_top.cir
+exclude
+tags

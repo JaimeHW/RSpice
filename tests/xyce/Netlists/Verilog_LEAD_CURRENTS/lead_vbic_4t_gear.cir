@@ -1,0 +1,35 @@
+Lead current test for level 1 BJT
+*
+vie 0 Emitter 0
+vic 0 Collector 5
+vib 0 Base pulse(0 1 1ns 1ns 1ns 1us)
+vis 0 Subst 0
+
+q1 Collector Base Emitter Subst qjunk 
+
+.model qjunk npn
++ level=12
++ RCX=10 RCI=10 RBX=1 RBI=10 RE=1 RBP=10 RS=10
++ IBEN=1.0e-13 RTH=100
+
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+.tran 1ns 20us
+
+*COMP {i(vib)-ib(q1)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {i(vic)-ic(q1)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {i(vie)-ie(q1)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {i(vis)-i4(q1)} abstol=1.0e-6 zerotol=1.0e-7
+
+.print tran  PRECISION=10 WIDTH=19 {i(vib)-ib(q1)} {i(vic)-ic(q1)} {i(vie)-ie(q1)}   {i(vis)-i4(q1)}
+
+.measure tran maxmag1   max {abs(i(vib)-ib(q1))} failvalue=1e-6
+.measure tran totalrms1 rms {i(vib)-ib(q1)} failvalue=1e-6  
+.measure tran maxmag2   max {abs(i(vic)-ic(q1))} failvalue=1e-6
+.measure tran totalrms2 rms {i(vic)-ic(q1)} failvalue=1e-6  
+.measure tran maxmag3   max {abs(i(vie)-ie(q1))} failvalue=1e-6
+.measure tran totalrms3 rms {i(vie)-ie(q1)} failvalue=1e-6 
+.measure tran maxmag4   max {abs(i(vis)-i4(q1))} failvalue=1e-6
+.measure tran totalrms4 rms {i(vis)-i4(q1)} failvalue=1e-6 
+
+.end

@@ -1,0 +1,3 @@
+* The included files do not exist
+.INC sub2/include_bogo
+.LIB ./sub2/lib_bogo LIB_BOGO2

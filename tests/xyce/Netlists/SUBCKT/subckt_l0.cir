@@ -1,0 +1,18 @@
+Subcircuit test case L
+*This is a baseline test that uses no subcircuit.  It simply creates a B source
+* that takes the difference between two voltage nodes.
+
+V1 2 0 sin (0 8 8k)
+r1 2 0 1k
+
+v2 27 0 sin (0 8 4k)
+r2 27 0 1k
+
+Btest 3 0 V={ V(2)-V(27) }
+rtest 3 0 1k
+
+.print tran v(3) {v(2)-V(27)} {V(3)-(v(2)-v(27))}
+.tran 1us 5ms
+*COMP TIME    reltol=1e-7 abstol=1e-7
+*COMP V(3)    reltol=1e-7 abstol=1e-7
+.end

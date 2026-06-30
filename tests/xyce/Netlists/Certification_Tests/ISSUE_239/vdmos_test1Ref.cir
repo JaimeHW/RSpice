@@ -1,0 +1,42 @@
+irf130 test circuit
+*
+* this tests the use of "options parser scale", with .STEP analysis 
+* which modifies a scaled parameter, m1:l.
+*
+* The point of this test is to make sure that if .STEP
+* is applied to a scaled parameter, that it does the right 
+* thing and applies the scaling every time it is updated.
+*
+* this version of the netlist is the reference version, 
+* so it does not use scale.
+*
+vd 3 1 0.5
+vs 2 0 0
+vg 4 0 10 pulse(0 10 300ns 50ns 50ns 400ns 1000ns)
+vid 0 1 dc 0
+
+
+m1 3 4 2 0 irf130 w=0.386e6u l=2.5
+
+.model irf130 nmos level=18
++ cv=1
++ cve=1
++ vto=3.5
++ rd= 0
++ rs= 0.005
++ lambda=0
++ m=3
++ sigma0=0
++ uo=230
++ vmax=4e4
++ delta=5
++ tox=50nm
+
+.step m1:l list 2.5u 5.0u 7.5u
+
+.tran 0.5n 1u 0u 2n
+.print tran precision=10 width=19 v(3) v(4) {i(vid)+0.5}
+
+.options timeint reltol=1.0e-2 abstol=1.0e-7
+.end
+

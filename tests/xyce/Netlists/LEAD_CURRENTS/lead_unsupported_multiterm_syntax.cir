@@ -1,0 +1,74 @@
+****************************************************************
+* Test for I() for selected multi-terminal devices.  For these
+* devices, I(<deviceName>) is a parsing error.  Instead, an
+* explicit lead designator (like IC(Q1)) must be used.
+*
+* This circuit will actually run if the "offending devices"
+* are removed from the .PRINT line
+*
+* See SON Bug 1238 for more details.
+****************************************************************
+* This is a valid I-R circuit.  It is in here for "test
+* development" to help prove that the circuit actually works.
+I1 1e 0 sin(0 1 1KHz)
+R1 1e 0 1
+
+.tran 1ns 50us
+.PRINT TRAN V(1e) I(M1) I(Q1) I(Jtest) I(Z1)
+
+* PMOS Level 1
+VDD 2 0 DC 5V
+R1a 2 1 50K
+R2 1 0 50K
+RD 4 0 7.5K
+M1 4 1 2 2 PFET L=10U W=160U
+.MODEL PFET PMOS(LEVEL=1 KP=25U VTO=-0.8V)
+
+* bjt
+vie 0 1b 0
+vic 0 3b 5
+vib 0 2b pulse(0 1 1ns 1ns 1ns 1us)
+q1 3b 2b 1b qjunk
+
+.model qjunk npn
++bf=130 br=1 is=3e-14
++tf=1e-8 vjs=0.68 ne=1.6 nc=2.0 rb=450
++cje=1uf cjc=1uf cjs=1uf ikf=0.002 ikr=0.002 vaf=50 var=50
++nf=1.0 ise=0 nr=1 isc=0 irb=0 rbm=450 re=0 rc=0 vje=0.75
++mje=0.33 xtf=0 vtf=100 itf=0 ptf=0 vjc=0.75 mjs=0 xtb=0
++eg=1.11 xti=3 kf=0 af=1 fc=0.5 tnom=27
+
+*Drain curves
+Vds2 1c 0 5V
+Vgs2 2c 0 pulse (0 1 1ns 1ns 1ns 1us 2us)
+Jtest 1c 2c 0 SA2109
+*
+.MODEL SA2109 NJF
++ LEVEL=2
++ BETA= 0.0003790
++ VTO = -3.760
++ PB = 0.650
++ LAMBDA = 0.01240
++ DELTA = 0.370;
++ THETA = 0.01120;
++ RD = 0.0
++ RS = 104.5
++ FC = 0.5
++ IS = 1.393E-10
++ AF = 1.0
++ KF = 0.05
++ CGS= 1uf
++ CGD= 1uf
+*
+
+* N-Channel MESFET Circuit
+*
+VDS3 2d 0 2V
+VGS3 3d 0 pulse (-1 1 1ns 1ns 1ns 1us 2us)
+VSS 4d 0 0
+Z1 2d 3d 4d MESMOD AREA=1.4
+.MODEL MESMOD NMF
++ LEVEL=1 BETA=1.4E-3
++ RD=46 RS=46 VTO=-1.3 LAMBDA=0.03 ALPHA=3 CGS=1uf CGD=1uf
+
+.end

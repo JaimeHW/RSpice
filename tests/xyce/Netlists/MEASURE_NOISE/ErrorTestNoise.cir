@@ -1,0 +1,33 @@
+**************************************************************************************
+* A test circuit to measure the error between a reference signal and a measured signal
+* using the ERROR measure, in .NOISE mode.  The FILE= qualifier is only tested for
+* .prn.  Also, it was deemed sufficient to just test VR(), VI() and IM().
+* 
+*************************************************************************************** 
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP  3 4 100
+CLP  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 1MEG 1
+.PRINT NOISE VR(4) VI(4) IM(EAMP)
+
+* Used to make comparison file
+* AMP AND LP FILTER
+*.NOISE  V(4)  V1  DEC  6 100 1MEG 1
+*.PRINT NOISE FILE=ErrorTestNoiseRawData.NOISE.prn VR(4) VI(4) IM(EAMP)
+*EAMP  3 0 2 0 1
+*RLP2  3 4 110
+*CLP2  4 0 1.59NF
+
+.measure NOISE FitErrorPrnL1vr4 ERROR vr(4) FILE=ErrorTestNoiseRawData.NOISE.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=2
+.measure NOISE FitErrorPrnL1vi4 ERROR vi(4) FILE=ErrorTestNoiseRawData.NOISE.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=3
+.measure NOISE FitErrorPrnL2im ERROR im(EAMP) FILE=ErrorTestNoiseRawData.NOISE.prn COMP_FUNCTION=L2NORM INDEPVARCOL=1 DEPVARCOL=4
+
+.END

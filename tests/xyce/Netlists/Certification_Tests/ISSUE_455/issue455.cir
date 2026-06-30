@@ -1,0 +1,11 @@
+
+* this test checks that V2 will trigger a useful error message
+
+V2 1 0 dc 1.0 dc 0.0
+R2 1 0 1.0
+
+.OP
+.Print DC V(*)
+
+
+

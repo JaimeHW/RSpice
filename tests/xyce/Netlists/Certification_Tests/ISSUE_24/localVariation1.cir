@@ -1,0 +1,21 @@
+Local Variation test
+*
+V1 1 0 1.0
+
+.param resval=aunif(1000,400) 
+r1 1 2 resval
+r2 2 3 resval
+r3 3 0 resval
+
+.dc V1 1 1 1
+.print dc precision=12 width=21 v(1) v(2) v(3)
+
+.sampling useExpr=true
+
+.options samples numsamples=10 seed=1923635719
++ outputs={v(1)+0.2}
++ sample_type=lhs
++ stdoutput=false
+
+.END
+

@@ -1,0 +1,245 @@
+transient diode circuit sensitivity calculation.  
+* This version uses finite differences
+
+* Baseline circuit
+Ra 1a 2a 0.0001
+V2a 2a 0 0.0 SIN(0 5 100K)
+V1a 3a 0 0.0
+
+D2a 1a 3a DZRa 
+.MODEL DZRa D( level=2
++         IS = 1E-14
++         RS = 10.8
++          N = 1
++         TT = 0
++        CJO = 1P
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 7.255
++        IBV = .001
++ tbv1 = 0.00013
++ tbv2 = -5e-8
++ )
+
+* Finite difference perturbation circuit for VJ
+Rb 1b 2b 0.0001
+V2b 2b 0 0.0 SIN(0 5 100K)
+V1b 3b 0 0.0
+
+D2b 1b 3b DZRb 
+.MODEL DZRb D( level=2
++         IS = 1E-14
++         RS = 10.8
++          N = 1
++         TT = 0
++        CJO = 1P
++         VJ = 1.00000001
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 7.255
++        IBV = .001
++ tbv1 = 0.00013
++ tbv2 = -5e-8
++ )
+
+* Finite difference perturbation circuit for CJO
+Rc 1c 2c 0.0001
+V2c 2c 0 0.0 SIN(0 5 100K)
+V1c 3c 0 0.0
+
+D2c 1c 3c DZRc 
+.MODEL DZRc D( level=2
++         IS = 1E-14
++         RS = 10.8
++          N = 1
++         TT = 0
++        CJO = 1.01P
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 7.255
++        IBV = .001
++ tbv1 = 0.00013
++ tbv2 = -5e-8
++ )
+
+* Finite difference perturbation circuit for EG
+Rd 1d 2d 0.0001
+V2d 2d 0 0.0 SIN(0 5 100K)
+V1d 3d 0 0.0
+
+D2d 1d 3d DZRd 
+.MODEL DZRd D( level=2
++         IS = 1E-14
++         RS = 10.8
++          N = 1
++         TT = 0
++        CJO = 1P
++         VJ = 1
++          M = .5
++         EG = 1.11000001
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 7.255
++        IBV = .001
++ tbv1 = 0.00013
++ tbv2 = -5e-8
++ )
+
+* Finite difference perturbation circuit for XTI
+Re 1e 2e 0.0001
+V2e 2e 0 0.0 SIN(0 5 100K)
+V1e 3e 0 0.0
+
+D2e 1e 3e DZRe 
+.MODEL DZRe D( level=2
++         IS = 1E-14
++         RS = 10.8
++          N = 1
++         TT = 0
++        CJO = 1P
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3.00000003
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 7.255
++        IBV = .001
++ tbv1 = 0.00013
++ tbv2 = -5e-8
++ )
+
+* Finite difference perturbation circuit for M
+Rf 1f 2f 0.0001
+V2f 2f 0 0.0 SIN(0 5 100K)
+V1f 3f 0 0.0
+
+D2f 1f 3f DZRf 
+.MODEL DZRf D( level=2
++         IS = 1E-14
++         RS = 10.8
++          N = 1
++         TT = 0
++        CJO = 1P
++         VJ = 1
++          M = .500000005
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 7.255
++        IBV = .001
++ tbv1 = 0.00013
++ tbv2 = -5e-8
++ )
+
+* Finite difference perturbation circuit for IS
+Rg 1g 2g 0.0001
+V2g 2g 0 0.0 SIN(0 5 100K)
+V1g 3g 0 0.0
+
+D2g 1g 3g DZRg 
+.MODEL DZRg D( level=2
++         IS = 1.00000001E-14
++         RS = 10.8
++          N = 1
++         TT = 0
++        CJO = 1P
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 7.255
++        IBV = .001
++ tbv1 = 0.00013
++ tbv2 = -5e-8
++ )
+
+* Finite difference perturbation circuit for RS
+Rh 1h 2h 0.0001
+V2h 2h 0 0.0 SIN(0 5 100K)
+V1h 3h 0 0.0
+
+D2h 1h 3h DZRh 
+.MODEL DZRh D( level=2
++         IS = 1E-14
++         RS = 10.800000108
++          N = 1
++         TT = 0
++        CJO = 1P
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 7.255
++        IBV = .001
++ tbv1 = 0.00013
++ tbv2 = -5e-8
++ )
+
+* Finite difference perturbation circuit for N
+Ri 1i 2i 0.0001
+V2i 2i 0 0.0 SIN(0 5 100K)
+V1i 3i 0 0.0
+
+D2i 1i 3i DZRi 
+.MODEL DZRi D( level=2
++         IS = 1E-14
++         RS = 10.8
++          N = 1.00000001
++         TT = 0
++        CJO = 1P
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 7.255
++        IBV = .001
++ tbv1 = 0.00013
++ tbv2 = -5e-8
++ )
+
+.options timeint method=gear
+
+.TRAN 0 2e-5
+
+.print TRAN V(2a) I(V1a)
++ {(I(V1b)-I(V1a))/0.00000001 } ; dI/dVJ                
++ {(I(V1c)-I(V1a))/1e-14} ; dI/dCJO
++ {(I(V1d)-I(V1a))/0.00000001 } ; dI/dEG
++ {(I(V1e)-I(V1a))/0.00000003 } ; dI/dXTI
++ {(I(V1f)-I(V1a))/0.000000005 } ; dI/dM
++ {(I(V1g)-I(V1a))/0.00000001E-14 } ; dI/dIS
++ {(I(V1h)-I(V1a))/1.08e-7 } ; dI/dRS
++ {(I(V1i)-I(V1a))/0.00000001 } ; dI/dN
+
+.options device temp=25
+
+.END

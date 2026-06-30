@@ -1,0 +1,8 @@
+bug_333_son.cir
+bug_333_son.cir.sh
+bug_333_son_baseline.cir
+bug_333_son_baseline_unpacked.cir
+bug_333_son_restarted.cir
+bug_333_son_restarted_unpacked.cir
+exclude
+tags

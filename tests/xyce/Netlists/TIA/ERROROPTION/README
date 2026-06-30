@@ -1,0 +1,32 @@
+# 03/03/08
+# Todd Coffey
+
+This test is to verify that the time integration option erroroption=1 is
+working correctly.  Basically, in verbose time mode the time integrator will
+print out the following information:
+
+This is printed whenever you start a break point
+ERROROPTION=1:  DeltaT Grow = 1.6
+ERROROPTION=1:  DeltaT Cut = 0.125
+ERROROPTION=1:  NL MIN = 0
+ERROROPTION=1:  NL MAX = 20
+ERROROPTION=1:  DELMAX = 1.5e-07
+
+This is printed for every time step
+ERROROPTION=1: TimeStepLimitedbyBP = 0/1
+ERROROPTION=1: NL Its = 10
+ERROROPTION=1: New DeltaT = 0.23456e-6
+
+The last timestep before a break point normally is not controlled by this strategy; instead, it is what left before a break point. And TimeStepLimitedbyBP is used to indicate whether the time step is limited by break point.
+
+The algorithm is supposed to work as follows when erroroption=1 is set:
+
+if (NL MIN) < (NL Its) < (NL MAX) do nothing
+if (NL Its) <= (NL MIN) then (New DeltaT) *= (DeltaT Grow)
+if (NL Its) >= (NL MAX) then (New DeltaT) *= (DeltaT Cut)
+Always enforce:  (New DeltaT) <= (DELMAX)
+
+This test will read the strings above and verify that the computed delta t's
+are correct for the algorithm described.  
+
+

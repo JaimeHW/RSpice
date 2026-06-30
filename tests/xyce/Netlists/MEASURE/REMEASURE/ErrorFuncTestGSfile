@@ -1,0 +1,35 @@
+In OutputMgr::remeasure 
+file to reprocess through measure and/or fft functions: ErrorFuncTest.cir.remeasure.prn
+
+ ***** Measure Functions ***** 
+
+ERR1MV1.5 = 2.312406e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+ERR1YMIN2.5 = 3.409707e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+ERR1IGNOR2.5 = 3.409707e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+ERR1YMAX3.5 = 1.641704e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+ERR1FT = 6.850453e-01
+Measure Start Time= 5.000000e-01	Measure End Time= 8.000000e-01
+
+ERR2MV1.5 = 2.250000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+ERR2YMIN2.5 = 2.953042e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+ERR2IGNOR2.5 = 2.953042e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+ERR2YMAX3.5 = 9.812925e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+ERR2FT = 6.827381e-01
+Measure Start Time= 5.000000e-01	Measure End Time= 8.000000e-01
+

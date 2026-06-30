@@ -1,0 +1,12 @@
+* Test Circuit for 3 Mutually Coupled Inductors
+
+*VS 1 0 SIN(0 169.7 60HZ)
+*R1 1 2 1K
+*L1 2 0 1mH
+*R2 3 0 1K
+*L2 3 0 1mH
+K1 L1 L2 0.75
+R3 4 0 1K
+L3 4 0 1mH
+K2 L1 L3 0.8
+

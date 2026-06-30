@@ -1,0 +1,34 @@
+* See https://en.wikipedia.org/wiki/Oregonator 
+* and http://www.scholarpedia.org/article/Oregonator
+*
+* Parameters are from the scholarpedia page
+*
+*-------------------------------------------------------------------------
+VBASE BAS 0 0.5V
+VEMIT  GND 0 0.0V
+YRXN r1  BAS  GND  rxn1
++ transport=false  
++ scalerxn=false
++ dirichletbc=false
++ tecplotlevel=0
+*-------------------------------------------------------------------------
+.MODEL rxn1 rxn (LEVEL=1
++ REACTION_FILE=oregonator
++ NUMBER_REGIONS=1
++ )
+
+* this system requires super-accurate integration, or else densities go negative
+.options timeint debuglevel=-10 reltol=1.0e-8  method=gear 
+
+.TRAN 1.0E-8 2e5
+
+* The 3 species X,Y, and Z all oscillate, but the X and Y species are only 
+* visible on a log plot, and also have high frequency ringing.  The high 
+* frequency ringing is worse if using method=trap, but still present for 
+* method=gear.  So, while X and Y are interesting to look at, I'm not 
+* including them in the official test comparison.
+*.PRINT TRAN N(yrxn!r1_000_conc_xspec) N(yrxn!r1_000_conc_yspec) N(yrxn!r1_000_conc_zspec) 
+.PRINT TRAN N(yrxn!r1_000_conc_zspec) 
+
+.END
+

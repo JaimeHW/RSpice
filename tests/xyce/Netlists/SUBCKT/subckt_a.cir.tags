@@ -1,0 +1,6 @@
+serial, nightly,  parallel, subckt, params
+valgrind
+mos3
+bsrc
+resistor
+capacitor

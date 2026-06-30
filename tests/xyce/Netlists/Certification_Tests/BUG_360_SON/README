@@ -1,0 +1,12 @@
+
+Eric Keiter, 9/5/2014.
+
+This test insures that if a netlist fails to converge, it will include in its
+queue'd failure output the name of the node that was most problematic to 
+the solver.
+
+It tests this by running a circuit that will fail in transient and then doing
+a grep using a pattern file that contains all the node names for this circuit.
+This grep *should* produce a file that is 25 lines long, one for each failed
+history step.
+

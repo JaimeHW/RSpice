@@ -1,0 +1,40 @@
+Lead current test for capacitor and resistor
+*
+* The non-zero DC value in this pulse statement is required in order to
+* serve as a regression test for bug 663 (SON).  Do not change this.
+VIN  1 0 PULSE(1 2 10U 1U 1U 100m)
+R    2 1 1K
+D1   3 2 DFOR  
+rload 3 0 1K
+
+.MODEL DFOR D   (
++         IS = 6.96E-13
++         RS = 0.276
++          N = 1.292
++         TT = 95E-9
++        CJO = 1uf
++         VJ = 0.5894
++          M = 0.3288
++         EG = 1.11
++        XTI = 3.379
++         KF = 0
++         AF = 1
++         FC = 0.5
++         BV = 1000
++        IBV = 0.001
++ )
+
+.TRAN 0.5U 400ms
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-7
+
+*COMP {I(VIN)-I(R)} abstol=1e-6 zerotol=1e-7
+*COMP {I(VIN)-I(d1)} abstol=1e-6 zerotol=1e-7
+.PRINT TRAN  {I(VIN)-I(R)} {I(VIN)-I(d1)}
+
+.measure tran maxmag1   max {abs(I(VIN)-I(R))} failvalue=1e-6
+.measure tran totalrms1 rms {I(VIN)-I(R)} failvalue=1e-6  
+.measure tran maxmag2   max {abs(I(VIN)-I(d1))} failvalue=1e-6
+.measure tran totalrms2 rms {I(VIN)-I(d1)} failvalue=1e-6 
+
+.END

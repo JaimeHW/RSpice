@@ -1,0 +1,6 @@
+bug927-prn.cir
+bug927-prn.cir.sh
+bug927-prn-cir.tags
+bug927-op-raw.cir
+bug927-op-raw.cir.sh
+bug927-op-raw.cir.tags

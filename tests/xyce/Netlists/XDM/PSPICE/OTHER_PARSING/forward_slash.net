@@ -1,0 +1,8 @@
+* This netlist included in the PSpice netlist with a 
+* forward slash in the .INC statement.
+
+R_R1a         N01173 N01179  10 TC=0,0 
+R_R1b         N01179 0  20 TC=0,0 
+V_V1         N01173 0  AC 1
++SIN 0 1 1KHz 0 0 0
+

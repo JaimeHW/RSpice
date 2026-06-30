@@ -1,0 +1,6 @@
+* Trivial test netlist to satisfy bug requirement
+V1 1 0 1
+R1 1 0 1
+.dc v1 1 1 1
+.print dc V(1)
+.end

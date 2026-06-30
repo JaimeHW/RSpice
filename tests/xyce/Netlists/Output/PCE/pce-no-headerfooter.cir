@@ -1,0 +1,35 @@
+********************************************************
+* Test .PRINT PCE ES for FORMAT=STD for
+* .PRINT OPTIONS PRINTHEADER=FALSE PRINTFOOTER=FALSE.
+*
+* See SON Bugs 1231 and 1252 for more details.
+********************************************************
+
+.global_param R1value={1000.0}
+.global_param R2value={1000.0}
+
+R2 1 0 {R2value}
+R1 1 2 {R1value}
+Von 2 0 5
+
+.dc Von 5 5 1
+
+.print dc v(1)
+.PRINT PCE PRECISION=6 output_All_Samples=true
+
+.PCE
++ param=R1value
++ type=normal
++ means=1000.0
++ std_deviations=200.0
+
+* Use mixed case for outputs= arguments
+.options PCES
++ order=2
++ outputs={v(2)},{V(1)}
+
+.options nonlin nox=0
+
+.OPTIONS OUTPUT PRINTHEADER=FALSE PRINTFOOTER=FALSE
+
+.end

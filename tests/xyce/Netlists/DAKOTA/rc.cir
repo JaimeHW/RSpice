@@ -1,0 +1,15 @@
+Sampling example for Xyce/Dakota direct linkage
+* Circuit is a series RC  circuit where the capacitor begins charged at 1 V.
+* Capacitor discharges with time constant R*C.  Nominal values of resistor 
+* and capacitor are 1Kohm and 1uF, respectively.  Each is given (in Dakota input)
+* a 5% tolerance (standard deviation of normal distribution).
+* Time constant is measured using ".measure" line.
+c1 1 0 capacitance IC=1
+R1 1 2 resistance
+v1 2 0 0V
+.print tran v(1)
+.tran 0 5ms
+.measure tran timeconst when v(1)=.36788 minval=0.0005
+.options timeint reltol=1e-6 abstol=1e-6
+.end
+

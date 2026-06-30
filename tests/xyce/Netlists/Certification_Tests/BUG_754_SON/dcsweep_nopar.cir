@@ -1,0 +1,14 @@
+* Baseline circuit not using global param
+
+M1 drain gate source 0 mlev1
+Vdrain drain 0  dc 1.0
+Vgate gate 0 dc .5
+Vsource source 0 dc {0}
+
+.dc vdrain 0 1 0.001 
+.print dc v(drain) v(gate) I(vdrain)
+
+.model mlev1 nmos level=1
+
+.end
+

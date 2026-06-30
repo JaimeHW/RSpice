@@ -1,0 +1,31 @@
+# A simple Dakota input file
+
+model
+  single
+
+method
+  conmin_frcg
+  convergence_tolerance = 1.e-20
+  max_iterations = 1000
+
+variables
+  continuous_design = 1
+    descriptors 'dakota_C1C'
+    initial_point 1.0e-2
+    lower_bounds  1.e-5
+    upper_bounds 1
+
+interface
+  analysis_driver = 'Xyce'
+    direct
+
+responses
+  objective_functions = 1
+    id_responses = 'XyceSimulations'
+    response_descriptors = 'FitError'
+  numerical_gradients
+    method_source dakota
+    interval_type forward
+    fd_gradient_step_size = 1e-5
+  no_hessians
+

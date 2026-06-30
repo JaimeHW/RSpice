@@ -1,0 +1,9 @@
+* test that a device param can depend directly on time
+
+VA 1 0 1.0
+R1 1 2 'time'
+R2 2 0 25
+
+.tran 0.01 1
+.PRINT tran R1:R V(2)
+

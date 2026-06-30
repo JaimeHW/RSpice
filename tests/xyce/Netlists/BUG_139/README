@@ -1,0 +1,17 @@
+Bug Number:  139
+Test netlist: nmos1.cir
+
+Description:
+============
+The test checks inline comments are handled correctly. 
+
+Verification
+============
+Run Xyce in serial on the netlist.
+
+Compare against the results in the given prn file using xyce_verify.pl or
+"compare".
+
+Special Notes:
+==============
+Parallel testing is not needed.

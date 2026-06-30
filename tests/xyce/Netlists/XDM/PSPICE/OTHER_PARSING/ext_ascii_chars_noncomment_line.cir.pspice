@@ -1,0 +1,17 @@
+* This netlist tests that non-ASCII characters in a PSpice "non-comment"
+* line do not cause XDM to "fail".  However, xdm will emit a fatal error 
+* in this case.
+*
+* R_R3 actually has the character <96> from the extended ASCII character set.
+
+*Analysis directives and output: 
+.TRAN  0 1ms 0
+.PROBE  N(N04173) N(N03179)
+
+R_R1         N04173 N03179  10 TC=0,0 
+R_R2         N03179 0  20 TC=0,0 
+RR3      N03179 0  20 TC=0,0 
+V_V1         N04173 0  AC 1
++SIN 0 1 1KHz 0 0 0
+
+.END

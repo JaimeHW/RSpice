@@ -1,0 +1,36 @@
+* RC ladder circuit, for the .STEP case with a .PRINT AC
+* line.  This netlist addresses SON Bug 1271
+********************************************************
+
+P1 1 0 port=2
+*P2 12 0  port=1  z0=100
+
+C1 2 0 1e-2
+Rgs 1 2 0.02
+
+.subckt RCBlock IN OUT GND
+R1 IN OUT 20
+C1 IN OUT 1p
+Cg1 OUT GND 1p
+.ends
+
+X1 2 3 0 RCBlock
+X2 3 4 0 RCBlock
+X3 4 5 0 RCBlock
+X4 5 6 0 RCBlock
+X5 6 7 0 RCBlock
+X6 7 8 0 RCBlock
+X7 8 9 0 RCBlock
+X8 9 10 0 RCBlock
+X9 10 11 0 RCBlock
+X10 11 12 0 RCBlock
+
+.STEP C1 1e-2 2e-2 1e-2
+.AC lin 11 -1e5 1e5
+.LIN FORMAT=TOUCHSTONE
+
+.PRINT AC S(1,1)
+
+P2 12 0  port=1  z0=100
+
+.END

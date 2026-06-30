@@ -1,0 +1,133 @@
+* Test DC mode support for the DC_CONT version of
+* FIND-AT, FIND-WHEN and WHEN measures.
+*
+* See SON Bugs 1274 and 1313 for more details
+*****************************************************
+
+* For testing convenience send the output for the DC_CONT
+* measures to the <netlistName>.ms0 file.
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+.DC V1 1 10 1
+.PRINT DC V(1) V(2) V(3) whenCrossTest1 whenCrossContTest2
++ whenCrossContTest3 whenCrossContTest4
++ whenCrossNeg2 whenCrossContNeg2 whenCrossNeg5 whenCrossContNeg5
+
+V1 1 0 1
+R1 1 0 1
+
+B2 2 0 V={(V(1)-2.5)*(V(1)-2.5)*(V(1)-7.5)*(V(1)-7.5)/4}
+R2 2 3 1
+R3 3 0 1
+
+******************************************************
+* test CROSS qualifier and FIND-WHEN and WHEN
+* Non-continuous version should return first crossing.
+* Continuous version should return all crossings.
+.MEASURE DC whenCrossTest1 WHEN V(2)=5
+.MEASURE DC_CONT whenCrossContTest1 when V(2)=5
+
+* Non-continuous version should return first crossing.
+* Continuous version should return all crossings, starting
+* with the first one.
+.MEASURE DC whenCrossTest2 WHEN V(2)=5 CROSS=1
+.MEASURE DC_CONT whenCrossContTest2 WHEN V(2)=5 CROSS=1
+
+* Non-continuous version should return second crossing.
+* Continuous version should return all crossings, starting
+* with the second one.
+.MEASURE DC whenCrossTest3 WHEN V(2)=5 CROSS=2
+.MEASURE DC_CONT whenCrossContTest3 WHEN V(2)=5 CROSS=2
+
+* These should both return the last crossing
+.MEASURE DC whenCrossTest4 WHEN V(2)=5 CROSS=LAST
+.MEASURE DC_CONT whenCrossContTest4 WHEN V(2)=5 CROSS=LAST
+
+******************************************************
+* FIND-AT measures
+* These should give the same answer
+.MEASURE DC atTest FIND V(2) AT=2
+.MEASURE DC_CONT atContTest find V(2) aT=2
+
+******************************************************
+* Repeat WHEN tests as FIND-WHEN measures
+.MEASURE DC findCrossTest1 FIND V(3) WHEN V(2)=5
+.MEASURE DC_CONT findCrossContTest1 FIND V(3) WHEN V(2)=5
+
+.MEASURE DC findCrossTest2 FIND V(3) WHEN V(2)=5 CROSS=1
+.MEASURE DC_CONT findCrossContTest2 FIND V(3) WHEN V(2)=5 CROSS=1
+
+.MEASURE DC findCrossTest3 FIND V(3) WHEN V(2)=5 CROSS=2
+.MEASURE DC_CONT findCrossContTest3 FIND V(3) WHEN V(2)=5 CROSS=2
+
+.MEASURE DC findCrossTest4 FIND V(3) WHEN V(2)=5 CROSS=LAST
+.MEASURE DC_CONT findCrossContTest4 FIND V(3) WHEN V(2)=5 CROSS=LAST
+
+*****************************************************
+* test RISE and FAll qualifiers for WHEN and FIND-WHEN
+.MEASURE DC_CONT whenRiseContTest1 WHEN V(2)=5 RISE=1
+.MEASURE DC_CONT whenRiseContTest2 WHEN V(2)=5 RISE=2
+.MEASURE DC_CONT whenRiseContTest3 WHEN V(2)=5 RISE=LAST
+
+.MEASURE DC_CONT whenFallContTest1 WHEN V(2)=5 FALL=1
+.MEASURE DC_CONT whenFallContTest2 WHEN V(2)=5 FALL=2
+.MEASURE DC_CONT whenFallContTest3 WHEN V(2)=5 FALL=LAST
+
+.MEASURE DC_CONT findRiseContTest1 FIND V(3) WHEN V(2)=6 RISE=1
+.MEASURE DC_CONT findRiseContTest2 FIND V(3) WHEN V(2)=6 RISE=2
+.MEASURE DC_CONT findRiseContTest3 FIND V(3) WHEN V(2)=6 RISE=LAST
+
+.MEASURE DC_CONT findFallContTest1 FIND V(3) WHEN V(2)=7 FALL=1
+.MEASURE DC_CONT findFallContTest2 FIND V(3) WHEN V(2)=7 FALL=2
+.MEASURE DC_CONT findFallContTest3 FIND V(3) WHEN V(2)=7 FALL=LAST
+
+************************************************************************
+* Use of FROM-TO.  Only the rise, fall or cross values within the
+* FROM-TO windows should be returned, starting at the requested value.
+* For CROSS=LAST, only the last one within the FROM-TO window is returned
+.MEASURE DC whenCross1From25 WHEN V(2)=5 CROSS=1 FROM=2.5
+.MEASURE DC whenCross2From25 WHEN V(2)=5 CROSS=2 FROM=2.5
+.MEASURE DC whenCrossTo75 WHEN V(2)=5 CROSS=1 TO=7.5
+.MEASURE DC whenRiseFrom5 WHEN V(2)=5 RISE=1 FROM=5
+.MEASURE DC whenFallTo5 WHEN V(2)=5 FALL=1 TO=5
+.MEASURE DC whenCrossToLast WHEN V(2)=5 CROSS=LAST TO=7.5
+
+.MEASURE DC_CONT whenCross1ContFrom25 WHEN V(2)=5 CROSS=1 FROM=2.5
+.MEASURE DC_CONT whenCross2ContFrom25 WHEN V(2)=5 CROSS=2 FROM=2.5
+.MEASURE DC_CONT whenCrossContTo75 WHEN V(2)=5 CROSS=1 TO=7.5
+.MEASURE DC_CONT whenRiseContFrom5 WHEN V(2)=5 RISE=1 FROM=5
+.MEASURE DC_CONT whenFallContTo5 WHEN V(2)=5 FALL=1 TO=5
+.MEASURE DC_CONT whenCrossContToLast WHEN V(2)=5 CROSS=LAST TO=7.5
+
+*********************************************************
+* Test negative values
+.MEASURE DC whenCrossNeg2 WHEN V(2)=5 CROSS=-2
+.MEASURE DC whenCrossNeg3 WHEN V(2)=5 CROSS=-3
+.MEASURE DC whenCrossNeg5 WHEN V(2)=5 CROSS=-5
+.MEASURE DC_CONT whenCrossContNeg1 WHEN V(2)=5 CROSS=-1
+.MEASURE DC_CONT whenCrossContNeg2 WHEN V(2)=5 CROSS=-2
+.MEASURE DC_CONT whenCrossContNeg3 WHEN V(2)=5 CROSS=-3
+.MEASURE DC_CONT whenCrossContNeg4 WHEN V(2)=5 CROSS=-4
+.MEASURE DC_CONT whenCrossContNeg5 WHEN V(2)=5 CROSS=-5
+
+.MEASURE DC whenRiseNeg2 WHEN V(2)=5 RISE=-2
+.MEASURE DC whenRiseNeg3 WHEN V(2)=5 RISE=-3
+.MEASURE DC_CONT whenRiseContNeg1 WHEN V(2)=5 RISE=-1
+.MEASURE DC_CONT whenRiseContNeg2 WHEN V(2)=5 RISE=-2
+.MEASURE DC_CONT whenRiseContNeg3 WHEN V(2)=5 RISE=-3
+
+.MEASURE DC whenFallNeg2 WHEN V(2)=5 FALL=-2
+.MEASURE DC whenFallNeg3 WHEN V(2)=5 FALL=-3
+.MEASURE DC_CONT whenFallContNeg1 WHEN V(2)=5 FALL=-1
+.MEASURE DC_CONT whenFallContNeg2 WHEN V(2)=5 FALL=-2
+.MEASURE DC_CONT whenFallContNeg3 WHEN V(2)=5 FALL=-3
+
+*************************************************
+* test failed measures
+.MEASURE DC_CONT whenCrossContFail1 WHEN V(2)=100
+.MEASURE DC_CONT atContFail FIND V(2) at=20
+.MEASURE DC_CONT whenCrossContFail2 WHEN V(2)=5 CROSS=5
+.MEASURE DC_CONT whenRiseContFail WHEN V(2)=5 RISE=3
+.MEASURE DC_CONT whenFallContFail WHEN V(2)=5 FALL=3
+
+.END

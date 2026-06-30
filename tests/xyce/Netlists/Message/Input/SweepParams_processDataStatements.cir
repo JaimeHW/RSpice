@@ -1,0 +1,35 @@
+*********************************************************
+* Test the case of invalid .DATA statements in the
+* netlist.  See below and SON Bug 1188 for more details.
+*********************************************************
+
+R1b 1a  0  1
+R1a 1  1a  1
+V1  1   0  1
+
+R2b 2a  0  1
+R2a 2  2a  1
+V2  2   0  1
+
+* .DATA lines not formatted correctly
+* mis-matched number of parameter and data values
+.DATA table1
++ R1a R1b
++ 1.0
+.enddata
+
+* no data values
+.DATA table2
++ R1a R1b
+.enddata
+
+* no parameter values
+.DATA table3
++ 1.0 2.0
+.enddata
+
+.print DC v(1a) v(2a)
+.DC V1 1 1 1
+.STEP data=table1
+
+.end

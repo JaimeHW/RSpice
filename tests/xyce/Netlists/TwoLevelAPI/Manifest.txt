@@ -1,0 +1,10 @@
+resInnerTran.cir
+resTopTran.cir
+twoLevelLinearTran.cir
+twoLevelLinearTran.cir.sh
+twoLevelLinearTran.cir.tags
+twoLevelLinearDC.cir.sh
+twoLevelLinearDC.cir
+twoLevelLinearDC.cir.sh
+exclude
+tags

@@ -1,13 +1,13 @@
 # Testing and Validation
 
-RSpice treats accuracy as something to be measured continuously against ngspice, not assumed. This document describes the four validation layers, the ngspice regression harness, and the oracle-replay methodology in detail. For the short version, see the [Validation section of the README](../README.md#validation).
+RSpice treats accuracy as something to be measured continuously against external simulator corpora, not assumed. This document describes the four validation layers, the active ngspice regression harness, the vendored Xyce corpus, and the oracle-replay methodology in detail. For the short version, see the [Validation section of the README](../README.md#validation).
 
 ## Test levels
 
 1. **Unit tests** inside each crate, covering models, parsers, and solvers in isolation.
 2. **Oracle-replay fixture tests** for history-coupled device runtimes, which pin a device's internal recursion to data extracted from an instrumented ngspice run (see below).
 3. **Integration tests** under `crates/rspice-core/tests/`, exercising full netlist-to-result flows.
-4. **An ngspice regression harness** that runs the official ngspice test suite (vendored under `tests/`, including the checked-in reference `.out` oracles) against the RSpice engine.
+4. **An ngspice regression harness** that runs the official ngspice test suite (vendored under `tests/ngspice/`, including the checked-in reference `.out` oracles) against the RSpice engine.
 
 ## Running the suites
 
@@ -22,6 +22,16 @@ cargo test --release -p rspice-core --test ngspice_regression
 cargo test --release -p rspice-core --test ngspice_regression -- test_ngspice_transient_suite
 ```
 
+## Vendored corpora
+
+`tests/` is a container for upstream simulator corpora. `tests/ngspice/` is
+the active ngspice-46 corpus used by the Rust regression harness.
+`tests/xyce/` contains the Xyce Regression Suite runtime materials
+(`Netlists/`, `OutputData/`, and `TestScripts/`) plus GPL/vendoring notices.
+The Xyce corpus is intentionally not run by `ngspice_regression`; it needs a
+separate adapter because its layout and `.prn` references differ from the
+ngspice `.out` suite.
+
 ## Oracle-replay fixture tests
 
 Convolution-based transmission-line runtimes integrate their own discrete solution history, so an end-to-end waveform comparison cannot separate device-model fidelity from solver-timestep differences. Replay fixtures close that gap: ngspice's committed history samples and per-iteration branch right-hand sides are extracted from an instrumented oracle run (gdb on the vendored ngspice source) and checked into the repo (for example `crates/rspice-core/src/device/transmission_line/testdata/`), and the test drives the RSpice runtime with the oracle's own inputs, asserting the produced stamps match the oracle's point-by-point. This pins the recursion — including ngspice's mixed integer-picosecond/fractional-delta clock — independently of any timestep-control differences.
@@ -30,7 +40,7 @@ The same idea covers model subsystems the regression decks cannot reach: when th
 
 ## ngspice regression harness
 
-The harness (`crates/rspice-core/src/testing/ngspice_runner/`) discovers every `.cir` deck under `tests/`, executes the analyses each deck requests (`.op`, `.dc`, `.tran`, `.ac`, `.pz`, `.noise`, `.sens`, `.tf`), and compares results row-by-row against the reference tables with a 2% relative tolerance plus probe-aware absolute floors. Every executed analysis must be backed by a validation oracle — checked-in reference data, `_t`/`_g` gold-node assertions, or an explicit entry in `tests/validation-manifest.tsv` — so no deck can pass silently.
+The harness (`crates/rspice-core/src/testing/ngspice_runner/`) discovers every `.cir` deck under `tests/ngspice/`, executes the analyses each deck requests (`.op`, `.dc`, `.tran`, `.ac`, `.pz`, `.noise`, `.sens`, `.tf`), and compares results row-by-row against the reference tables with a 2% relative tolerance plus probe-aware absolute floors. Every executed analysis must be backed by a validation oracle - checked-in reference data, `_t`/`_g` gold-node assertions, or an explicit entry in `tests/ngspice/validation-manifest.tsv` - so no deck can pass silently.
 
 Because reference tables sample each binary's internally chosen timesteps, two narrowly gated fallbacks keep the comparison measuring accuracy rather than step-sequence reproduction: steep transient rows allow a slope-gated time-jitter window of one local reference timestep (ngspice itself reproduces its own tables only to within a step at fast edges), and rows where the reference oscillates at sample scale are compared against the local reference envelope. Operating points, smooth regions, and settled levels always keep the strict pointwise tolerances.
 

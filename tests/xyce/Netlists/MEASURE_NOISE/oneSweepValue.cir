@@ -1,0 +1,36 @@
+* Test .MEASURE NOISE behavior for the pathological case
+* of only one sweep point.
+*
+* See gitlab-ex issue 291 for more details.
+*****************************************************
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 100 1
+.PRINT NOISE VR(4) VI(4) IM(EAMP) INOISE ONOISE
+
+.MEASURE NOISE AVG AVG vi(4)
+
+.MEASURE NOISE DERIVAT DERIV vi(4) AT=100
+.MEASURE NOISE DERIVATFT DERIV vi(4) AT=100  FROM=100 TO=100
+.MEASURE NOISE DERIVWHEN DERIV vi(4) WHEN vm(1)=1.0  
+.MEASURE NOISE DERIVWHENFT DERIV vi(4) WHEN vm(1)=1.0  FROM=100 TO=100
+
+.MEASURE NOISE FINDAT FIND vi(4) AT=100
+.MEASURE NOISE FINDATFT FIND vi(4) AT=100  FROM=100 TO=100
+
+* These measures will fail since the default CROSS value is 1 in Xyce
+.MEASURE NOISE FINDWHEN FIND vi(4) WHEN vm(1)=1.0
+.MEASURE NOISE FINDWHENFT FIND vi(4) when vm(1)=1.0  FROM=100 TO=100
+
+.MEASURE NOISE RMS RMS vi(4)
+
+.END

@@ -1,0 +1,30 @@
+ ***** Measure Functions ***** 
+
+INTEGV1B = 6.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+INTEGRALGND1B = -6.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+INTEG1BFROM = 4.000000e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+INTEG1BTO = 2.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 3.000000e+00
+
+INTEG1BFT1 = -3.000000e+00
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+INTEG1BFT2 = 3.000000e+00
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+INTEG1BFT1PT = 0.000000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+INTEGFAIL1 = FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+INTEGFAIL2 = FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+

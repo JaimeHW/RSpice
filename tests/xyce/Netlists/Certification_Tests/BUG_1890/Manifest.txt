@@ -1,0 +1,4 @@
+bug1890.cir
+bug1890.cir.sh
+tags
+options

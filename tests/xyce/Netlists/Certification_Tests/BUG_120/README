@@ -1,0 +1,32 @@
+Bug #120 was a request that Xyce support dtmax, a user-specified maximum
+time step (or step ceiling, in the language of the users' guide).  This
+parameter is the 4th parameter on a .tran line:
+
+.tran 0.0001MS 20MS 0MS 0.01MS
+
+here:
+
+  The first argument, 0.0001MS is the print interval, or a guess for the
+  initial time step.
+
+  The second argument, 20MS is the final time for the simulation.
+
+  The third argument, 0MS is the initial time for the simulation (this is
+  an optional argument).
+
+  The fourth argument, 0.01MS is dtmax.
+
+The 3rd argument must be specified for there to be a 4th argument.
+
+Before, Xyce would read in all 4 args, but would ignore the last one.  Now, 
+it uses the last one.
+
+The attached netlist is the inductor.cir circuit from the test suite, with
+a modified .tran line to include the 3rd and 4th arguments.  Before fixing
+bug #120, adding these 2 arguments did not change the behavior of Xyce, and
+the circuit would take 95 steps to complete.  Now, with dtmax support, the
+same circuit takes 2057 steps to complete.
+
+The *.prn file in this directory is the correct output for the new,
+dtmax-supported version of Xyce.
+

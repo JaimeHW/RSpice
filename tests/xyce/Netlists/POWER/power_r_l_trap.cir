@@ -1,0 +1,18 @@
+power test for inductor
+* there are two inductors, because we want to make sure that P() and
+* W() are the same for both "polarities" of the inductor.
+*
+VIN  1 0 sin(0 1 4 0 0 ) 
+R    2 1 1K
+L2a  2 0 40m
+
+VIN2 3 0 sin(0 1 4 0 0 )
+R2   3 4 1K
+L2b  0 4 40m
+
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.5U 400ms
+.PRINT TRAN {i(vin)*v(1)} p(vin) w(vin) {i(r)*(v(2)-v(1))} p(r) w(r) 
++ {I(L2a)*v(2)-v(0)} p(L2a) w(L2a) {I(L2b)*(v(0)-v(4))} p(L2b) w(L2b)  
+.END

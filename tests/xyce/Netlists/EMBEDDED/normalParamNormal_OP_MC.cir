@@ -1,0 +1,76 @@
+Regression test for simple normal distribution sampling.
+
+* This tests a few things.
+*
+* (1) the use of .param parameters as sampling variables  (testNorm)
+* (2) the mean, std dev, variance, skew and kurtosis of a derived sampling input variable, R1 - does not use ckt solution 
+* (3) the mean, std dev, variance, skew and kurtosis of a circuit solution output variable, V(1)
+* (4) the use of all of this with LHS sampling, rather than MC.
+*
+* The circuit is a simple voltage divider, so it has an analytic solution
+* Also, the propagated mean, variance, etc can be computed analytically as well.
+*
+* Here is the results of that analytical analysis:
+*
+* analytical mean of R1 is 1.0e+3
+* analytical std dev of R1 is  1e+2
+* analytical variance of R1 is  1e+4
+* analytical skew of R1 is 0.0
+* analytical kurtosis of R1 is 3.0
+*
+* analytical mean of V1 is 875.0
+* analytical std dev of V1 is  10.93
+* analytical variance of V1 is  119.62
+* analytical skew of V1 is 0.0
+* analytical kurtosis of V1 is 3.0
+*
+* Analysis details:
+*
+* solution to voltage divider:  v(1) = V(2) * R2/(R1+R2)
+* v(2) = 1000V
+* mean value of R1 = 1e3
+* mean value of R2 = 7e3
+* analytical mean of v(1) is: 1000 * 7/(1+7) = 1000 * 7/8 = 875.0
+
+* analytical variance is given by:
+*
+*  variance_v(1) = (dV(1)/dR1*dV(1)/dR1)*varianceR1  +   (dV(1)_dR2*dV(1)_dR2)*varianceR2;
+*
+*   dV(1)/dR1 = - V(2) * R2/(R1+R2)^2 = - 1000 * 7e3/(8e3*8e3)  = -7e6/64e6 = -7/64  = 0.109375
+*   dV(1)/dR2 = + V(2) * R1/(R1+R2)^2 = + 1000 * 1e3/(8e3*8e3)  = +1e6/64e6 = +1/64 = 0.015625
+*
+*  variance_R2 = 0.0, so simplify and compute
+*
+*  variance_v(1) = (dV(1)/dR1*dV(1)/dR1)*varianceR1  
+*                = (-7/64 * -7/64) * 1e4 
+*                = (49/4096) * 1e4 
+*                = 119.62
+*
+*  std_dev_V(1) = sqrt(variance_V(1)) = 10.93
+
+
+.param testNorm=1.5k
+.param R1value={testNorm*2.0}
+
+R2 1 0 7K
+R1 1 2 {R1value}
+v1 2 0 1000V
+
+.op
+
+* normally distributed samples, mean=3k; std deviation=1k
+.embeddedsampling 
++ param=testnorm
++ type=normal
++ means=0.5k
++ std_deviations=0.05k
+
+* embedded outputs for device parameters like r1:r don't work yet.  erk. 2/8/2019
+.options embeddedsamples numsamples=25000
++ outputs={V(1)}
+*+ outputs={r1:r},{v(1)}
++ sample_type=mc
++ stdoutput=true
+
+.end
+

@@ -1,0 +1,50 @@
+A test of the activaton variables in the level 1 neuron 
+**************************************************************************
+* Tier:  ?????
+* Directory/Circuit name:  NEURON/HHgating-level1.cir
+* Description:  runs a DC sweep to check gating variables in the level 1
+*	neuron mdoel.
+* Input:  Vmem=V(a)
+* Output:  n(yneuron!neuron1_n) (activation variable for K channel)
+*          n(yneuron!neuron1_m) (activation variable for Na channel)
+*          n(yneuron!neuron1_h) (inactivation variable for Na channel)
+*
+* Created by:  C. E. Warrender 2/11
+*
+* NOTES:
+
+* The steady-state value of an activation variable x is given by:
+*
+* x_inf = alpha_x / (alpha_x + beta_x)
+*
+* where alpha and beta are functions of the membrane voltage.
+* Below, these are given in terms of vDiff = Vm = Vrest, in mV
+* For this test, we take Vrest to be 0 for simplicity
+*
+* For n, K channel activation variable:
+* 	alphaN = (10-vDiff) / (100*(exp((10-vDiff)/10)-1))
+*	betaN = 0.125*exp(-vDiff/80)
+* both multiplied by 1000 afterwards to convert from 1/ms to ms????
+* 	ninf = alphaN / (alphaN + betaN)
+*	     = 
+*
+* For m, Na channel activation variable:
+* TODO
+*
+* For h, Na channel inactivation variable:
+* TODO
+
+.DC Vmem -0.04 0.14 0.005
+Vmem a 0 
+
+* neuron model
+* the only model parameter that matters for this test is vRest
+* TODO - is that true?
+.param restV = 0.0	; -0.065
+.model channelParams neuron level=1 vRest={restV}
+
+yneuron neuron1 a 0 channelParams
+
+.print dc V(a) n(yneuron!neuron1_n)	n(yneuron!neuron1_m)	n(yneuron!neuron1_h)	
+
+.end

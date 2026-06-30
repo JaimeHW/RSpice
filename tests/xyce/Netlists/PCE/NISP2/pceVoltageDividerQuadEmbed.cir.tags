@@ -1,0 +1,8 @@
+serial, nightly,  parallel, analytic, expression
+embeddedsampling
+pce
+quadrature_pce
+nisp
+required:stokhos
+valgrind
+issue84

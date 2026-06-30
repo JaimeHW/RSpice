@@ -1,0 +1,10 @@
+Netlist to Test out the period "." separator for device instance parameters
+*
+* this netlist is the "baseline" so it should not be run with any -hspice-ext options.
+*
+
+R1 1 0 1K 
+V1 1 0 5V
+.DC V1 1V 1V 1V
+.PRINT DC V(1) R1:R  {R1:R}
+.END

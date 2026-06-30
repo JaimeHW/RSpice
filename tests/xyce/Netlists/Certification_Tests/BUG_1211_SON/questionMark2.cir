@@ -1,0 +1,18 @@
+* Test question mark wildcard for V(), P() and W(),
+* where ? means any one character.  So, the
+* output should return values for V(1), R123 and
+* R134, although their ordering may vary.
+*
+* See SON Bugs 1211 and 1319 for more details.
+***************************************************
+
+V1  1 0 1
+R1  1  12 1
+R12 12  13 1
+R134 13 123 1
+R123 123  0 1
+
+.DC V1 1 1 1
+.PRINT DC V(?) P(R?2?) W(?13?)
+
+.END

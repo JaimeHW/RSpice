@@ -1,0 +1,10 @@
+ic_in_subckt.cir
+ic_not_in_subckt.cir
+ic_in_subckt.cir.sh
+ic_in_subckt_warning.cir
+ic_in_subckt_warning.cir.sh
+nodeset_in_subckt.cir
+nodeset_not_in_subckt.cir
+nodeset_in_subckt.cir.sh
+tags
+exclude

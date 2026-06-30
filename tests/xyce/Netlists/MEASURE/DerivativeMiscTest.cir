@@ -1,0 +1,27 @@
+* Test the TRAN mode DERIV measure for gitlab-ex issue 291
+*****************************************************************
+*
+* Simple source
+V1 1 0 SIN(0 1 1)
+R1 1 0 1
+
+V2 2 0 1
+R2 2 0 1
+
+.TRAN 0 1
+.OPTIONS output initial_interval=0.02
+
+.PRINT TRAN FORMAT=NOINDEX V(1)
+
+* test AT value at start of simulation. The WHEN and
+* WHENFT measures will fail since v(2) is constant.
+.MEASURE TRAN DERIVV1AT1 DERIVATIVE V(1) AT=0
+.MEASURE TRAN WHEN DERIV v(1) WHEN v(2)=1  
+
+* Various constant signals.  The CONSTANT-WHEN2 measure will
+* fail because VM(2) is a constant.
+.MEASURE TRAN CONSTANT-AT DERIV V(2) AT=0.025
+.MEASURE TRAN CONSTANT-WHEN1 DERIV V(2) WHEN V(1)=0.5
+.MEASURE TRAN CONSTANT-WHEN2 DERIV V(1) WHEN V(2)=1
+
+.END

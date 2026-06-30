@@ -1,0 +1,46 @@
+A test of re-measure of .CSD formatted output file for the FOUR measure
+*******************************************************************************
+* The data portion of a .CSD file (made by Xyce) is formatted as follows.
+* The #N line is followed by a list of the data column headers.
+* The subsequent #C line has the time value and the number of data points.  
+* It is followed by a list of values (0.00000000e+00:1) that may span multiple 
+* lines.  The :1 says this is the value for the first data column.
+* 
+* #N
+* 'V(1)' 'V(2)' 'V(3)' 'V(4)' 'V(5)'
+* #C 0.00000000e+00 5
+* 0.00000000e+00:1   -5.00000000e-01:2   5.00000000e-01:3   0.00000000e+00:4
+* 0.00000000e+00:5   
+* #C 1.00000000e-05 5
+* 6.27773973e-02:1   -4.37569034e-01:2   4.37569034e-01:3   1.25554795e-01:4
+* -1.25554795e-01:5   
+*
+* So, it is important to use a CSD file where the data values span at 
+* least two lines
+*
+* collection of SIN sources
+VS1  1  0  SIN(0 1.0 1KHZ 0 0)
+VS2  2  0  SIN(-0.5 1.0 1KHZ 0 500)
+VS3  3  0  SIN(0.5 -1.0 1KHZ 0 500)
+VS4  4  0  SIN(0 2.0 1KHZ 0 0)
+VS5  5  0  SIN(0 -2.0 1KHZ 0 0)
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+R4  4  0  100
+R5  5  0  100
+
+.TRAN 0  3ms
+.PRINT TRAN FORMAT=PROBE V(1) V(2) V(3) V(4) V(5)
+
+* check re-measure for the first and last data column on the first line
+* after each #C, and also for the value on the second line after each #C.
+* This should be sufficient.  The other measure types are tested in a 
+* different test in RemeasureCsdData.cir.
+.measure tran Fourier1 FOUR V(1) AT=1e3
+.measure tran Fourier4 FOUR V(4) AT=1e3
+.measure tran Fourier5 FOUR V(5) AT=1e3
+
+.END
+

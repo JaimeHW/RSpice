@@ -1,0 +1,20 @@
+* The .lib or .endl statements in this library file 
+* have various formatting issues
+
+.lib low
+.param rval=4
+r3 2 0 9
+.endl ; should have library name low here
+
+.lib nom
+.param rval=3
+r3 2 0 8
+.endl low ; wrong library name
+
+*.lib high  ; this line is incorrectly commented out
+.param rval=2
+r3 2 0 9
+.endl high
+
+
+

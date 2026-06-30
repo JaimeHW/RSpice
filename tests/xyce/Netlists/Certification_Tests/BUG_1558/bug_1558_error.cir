@@ -1,0 +1,19 @@
+* test for bug 1558
+* This version removes the "params:" from the subcircuit definition. It also
+* fails to specify the resistance on the instance line.
+* This is intended to be a test that Xyce produces a meaningful error condition.
+
+X1 1 0 simple 
+V1 1 0 DC 5v
+
+.dc v1 0 5 1
+.print dc v(1) I(V1)
+
+
+.subckt simple a b 
+
+R1 a b {R}
+
+.ends
+
+.end

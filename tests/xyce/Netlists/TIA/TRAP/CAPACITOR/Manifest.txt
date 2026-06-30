@@ -1,0 +1,9 @@
+capacitor.cir
+capacitor.cir.prn.gs.pl
+capacitor.cir.sh
+capacitor1.cir
+exclude
+rc_osc.cir
+rc_osc.cir.prn.gs.pl
+rc_osc.cir.sh
+tags

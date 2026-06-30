@@ -1,0 +1,24 @@
+*Libraries: 
+* Profile Libraries :
+* Local Libraries :
+* Generated using PSpice 16.6.0
+
+*Analysis directives: 
+.TRAN  0 1000ns 0 
+
+.PROBE64 V([N382405])
+.PROBE64 V([N382063])
+.PROBE64 N(N381794)
+.PROBE64 N(N386932)
+.PROBE64 V([N395297])
+.PROBE64 N(N395329)
+.PROBE64 V([N384791])
+.PROBE N($G_CLK) 
+.PROBE V(2) 
+.PROBE V(3) 
+.PROBE V(4)
+
+.INC "./e_sources.net" 
+
+.END
+

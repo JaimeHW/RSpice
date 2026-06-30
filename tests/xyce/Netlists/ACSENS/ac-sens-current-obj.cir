@@ -1,0 +1,21 @@
+* Test for issue 729, AC version
+* Issue 729 was about sensitivity analysis objective functions not properly 
+* differentiating between current variables and voltage variables with the 
+* same name.  In other words, conflating I(v1) with V(v1), for example.
+
+v1 1 0 ac 10
+r1 1 2 4.7K
+c1 2 0 47n
+r2 2 3 4.7K
+c2 3 0 47n
+r3 3 v1 4.7K
+c3 v1 0 47n
+
+.ac dec 10 1 10K
+
+.sens acobjfunc={i(v1)},{v(v1)} param=r1:r
+
+.options sensitivity direct=1 adjoint=0 stdoutput=0
+.print sens 
+
+.end

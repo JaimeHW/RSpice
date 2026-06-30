@@ -1,0 +1,35 @@
+ ***** Measure Functions ***** 
+
+MAXEQUALRISE05V1 = 5.000000e-01 at time = 2.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+Rise 1: Start Time= 2.500000e-01	End Time= 7.400000e-01
+
+Netlist warning: MAXEQUALFALL05V1 failed. Measured Rise,Fall,Cross=(2,0,2)
+MAXEQUALFALL05V1 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+MAXEQUALCROSS05V1 = 5.000000e-01 at time = 2.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+Cross 1: Start Time= 2.500000e-01	End Time= 7.400000e-01
+
+MAXEQUALCROSS0V1 = 5.000000e-01 at time = 7.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+Cross 1: Start Time= 5.000000e-01	End Time= 9.900000e-01
+
+Netlist warning: MINEQUALRISE05V2 failed. Measured Rise,Fall,Cross=(0,2,2)
+MINEQUALRISE05V2 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+MINEQUALFALL05V2 = -5.000000e-01 at time = 2.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+Fall 1: Start Time= 2.500000e-01	End Time= 7.400000e-01
+
+MINEQUALCROSS05V2 = -5.000000e-01 at time = 2.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+Cross 1: Start Time= 2.500000e-01	End Time= 7.400000e-01
+
+MINEQUALCROSS0V2 = -5.000000e-01 at time = 7.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+Cross 1: Start Time= 5.000000e-01	End Time= 9.900000e-01
+
+

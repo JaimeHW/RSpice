@@ -1,0 +1,79 @@
+*************************************************************************
+* Test of PowerGridBusShunt Device in 6-bus network, in PQ Polar format
+*
+* This test also covers .STEP for the Shunt.  It also tests that the
+* default values (of 0) for G and B work for the Shunt device.
+* See SON Bug 848 for more details on .STEP
+*************************************************************************
+
+******************************************************
+* Have bus 1 be the slack bus.  Ammeter is wired     *
+* so that current flows into bus 1                   *
+******************************************************
+V1Th bus1Th ammBus1P 0V
+V1VM bus1VM ammBus1Q 1V
+Vamm1P 0 ammBus1P 0V
+Vamm1Q 0 ammBus1Q 0V
+
+***********************
+* Branch definitions  *
+***********************
+YPowerGridBranch pg12 bus1Th bus2Th bus1VM bus2VM AT=PQP R=0.1 X=0.2 B=0.02 
+YPowerGridBranch pg14 bus1Th bus4Th bus1VM bus4VM AT=PQP R=0.05 X=0.2 B=0.02
+YPowerGridBranch pg15 bus1Th bus5Th bus1VM bus5VM AT=PQP R=0.08 X=0.3 B=0.03
+YPowerGridBranch pg23 bus2Th bus3Th bus2VM bus3VM AT=PQP R=0.05 X=0.25 B=0.03 
+YPowerGridBranch pg24 bus2Th bus4Th bus2VM bus4VM AT=PQP R=0.05 X=0.1 B=0.01 
+YPowerGridBranch pg25 bus2Th bus5Th bus2VM bus5VM AT=PQP R=0.1 X=0.3 B=0.02 
+YPowerGridBranch pg26 bus2Th bus6Th bus2VM bus6VM AT=PQP R=0.07 X=0.2 B=0.025
+YPowerGridBranch pg35 bus3Th bus5Th bus3VM bus5VM AT=PQP R=0.12 X=0.26 B=0.025 
+YPowerGridBranch pg36 bus3Th bus6Th bus3VM bus6VM AT=PQP R=0.02 X=0.1 B=0.01
+YPowerGridBranch pg45 bus4Th bus5Th bus4VM bus5VM AT=PQP R=0.2 X=0.4 B=0.04 
+YPGBR pg56 bus5Th bus6Th bus5VM bus6VM AT=PQP R=0.1 X=0.3 B=0.03 
+
+****************************************************************
+* Bus Shunt definitions.                                       *
+* Devices pg1GND and pg2GND test that the default values of 0  *
+* work for G and B, respectively                               *
+****************************************************************
+YPowerGridBusShunt pg1GND bus1Th 0 bus1VM 0 AT=pqp b=0.1 
+YPowerGridBusShunt pg2GND bus2Th 0 bus2VM 0 AT=PQP G=0.2
+YPowerGridBusShunt pg3GND bus3Th 0 bus3VM 0 AT=PQP G=0.2 B=0.1 
+YPowerGridBusShunt pg4GND bus4Th 0 bus4VM 0 AT=PQP G=0.2 B=0.1 
+YPowerGridBusShunt pg5GND bus5Th 0 bus5VM 0 AT=PQP G=0.2 B=0.1
+YPGBS pg6GND bus6Th 0 bus6VM 0 AT=PQP G=0.2 B=0.1 
+
+*****************************
+* No PV Bus definitions yet *
+*****************************
+
+***********************
+* load definitions    *
+***********************
+ILoad2P bus2Th 0 0.2
+ILoad2Q bus2VM 0 0.2
+ILoad3P bus3Th 0 0.2
+ILoad3Q bus3VM 0 0.2
+ILoad4P bus4Th 0 0.2
+ILoad4Q bus4VM 0 0.2
+ILoad5P bus5Th 0 0.2
+ILoad5Q bus5VM 0 0.2
+ILoad6P bus6Th 0 0.2
+ILoad6Q bus6VM 0 0.2
+
+***************************************************************
+* use .NODESET to enforce "flat start" at non-generator buses *
+***************************************************************
+.NODESET V(bus2VM)=1 V(bus2Th)=0 V(bus3VM)=1 V(bus3Th)=0 
++ V(bus4VM)=1 V(bus4Th)=0 V(bus5VM)=1 V(bus5Th)=0 V(bus6VM)=1 V(bus6Th)=0
+
+*****************************************************
+* simulation control statement and output statement *
+*****************************************************
+.DC V1VM 1 1 1
+.STEP YPGBS!pg6GND:G 0.2 1.2 1
+.PRINT DC width=10 precision=6 V(bus1VM) V(bus1Th) V(bus2VM) V(bus2Th) 
++ V(bus3VM) V(bus3Th) V(bus4VM) V(bus4Th) V(bus5VM) V(bus5Th) V(bus6VM) V(bus6Th)
++ I(Vamm1P) I(Vamm1Q) I(ILoad2P) I(ILoad2Q) I(ILoad3P) I(ILoad3Q)
++ I(ILoad4P) I(ILoad4Q) I(ILoad5P) I(ILoad5Q) I(ILoad6P) I(ILoad6Q)
+ 
+.end

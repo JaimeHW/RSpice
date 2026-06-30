@@ -1,0 +1,34 @@
+***************************************************************
+* Output both the direct and adjoint sensitivities for
+* the case of two objective functions and one parameter.
+* This file has both a .PRINT AC and a .PRINT SENS line.
+* It uses FORMAT=GNUPLOT for the .PRINT SENS line. It steps
+* over C1.
+*
+* Also test FORMAT=SPLOT with .STEP. This should
+* produce the same .FD.SENS.prn file as FORMAT=STD, but
+* with one blank line before steps 1,2, ... N-1.
+
+* See SON Bug 1170 for more details.
+***************************************************************
+
+* Trivial high-pass filter
+
+R2 c 0 1
+R1 b c 1
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+* Make sure that mixed case works correctly on the .SENS line
+* for a .AC analysis
+.SENS OBJVARS=B,C PARAM=c1:c
+
+.options sensitivity direct=1 adjoint=1 stdoutput=1
+.print AC vr(b) vi(b) vp(b) vm(b) R1:R C1:C
+.PRINT SENS FORMAT=GNUPLOT vr(b) vi(b) vp(b) vm(b) R1:R R2:R C1:C
+.PRINT SENS FORMAT=SPLOT FILE=ac-sens-step-gnuplot.cir.FD.SENS.splot.prn
++ vr(b) vi(b) vp(b) vm(b) R1:R R2:R C1:C
+.ac dec 5 100Hz 1e6
+.STEP C1 1u 5u 4u
+
+.end

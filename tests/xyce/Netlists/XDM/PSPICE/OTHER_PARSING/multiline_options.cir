@@ -1,0 +1,23 @@
+* Simple Xyce netlist for testing "multi-line options resolution"
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PRINT TRAN FORMAT=PROBE  V(2) 
+
+*AC Source syntaxes
+R_R1        1 2  1k 
+R_R2        2 0  2K 
+V_V1        1 0 SIN(0 1 1KHz 0 0 0)
+
+* Xyce .OPTIONS lines.  These options should be the same as what is 
+* in the translated Xyce netlist.  Otherwise, the Gold and translated Xyce
+* netlists may get "different" answers (e.g., by using different time-steps).
+* That could mess up the XDM regression test's somewhat-naive comparisons 
+* of the two Xyce .csd files.
+.OPTIONS DEVICE GMIN=1.0E-9 
+.OPTIONS TIMEINT METHOD=TRAP RELTOL=0.01  
+.OPTIONS NONLIN RELTOL=0.01 ABSTOL=100u  
+.OPTIONS NONLIN-TRAN RELTOL=0.01 ABSTOL=100u MAXSTEP=20
+
+.END
+

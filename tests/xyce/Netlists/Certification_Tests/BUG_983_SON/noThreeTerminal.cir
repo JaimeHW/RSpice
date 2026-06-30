@@ -1,0 +1,12 @@
+* This netlist requests ID(*) IG(*) IS(*) IB(*) IC(*) IE(*)
+* on the .PRINT line when there are no J, M, Q or Z devices
+* in the netlist.  Those requests should be silently ignored.
+
+V1 1 0  1
+R1 1 0 1
+
+.DC V1 1 5 1
+
+.PRINT DC V(1) ID(*) IG(*) IS(*) IB(*) IC(*) IE(*)
+
+.END

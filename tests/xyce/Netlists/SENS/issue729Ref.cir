@@ -1,0 +1,15 @@
+Resistor sensitivity test.
+*
+R1 A B 10.0
+R2 B 0 10.0
+VA A 0 5
+
+.dc VA 5 5 1
+.print dc v(A) v(B) I(VA) {2*I(VA)}
+
+.SENS objfunc={I(VA)} param=R1:R,R2:R
+.options SENSITIVITY direct=1 adjoint=0  diagnosticfile=1 
+.print sens 
+
+.END
+

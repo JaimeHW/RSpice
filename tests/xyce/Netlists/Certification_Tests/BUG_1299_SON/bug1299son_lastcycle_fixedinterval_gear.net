@@ -1,0 +1,15 @@
+* netlist to assure that various
+* combinations of output-limiting options work
+* together
+* In this version, we output only the last cycle
+* of a sinusoidal source through a resistor
+* at fixed output intervals of 0.25s
+
+vin   1 0 sin(0 1 1Hz 0 0 90) 
+r1 1 0 1k
+
+.tran 0.1 5 4
+.print tran v(1)
+.options timeint method=gear
+.options output initial_interval=0.25
+.end

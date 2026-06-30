@@ -1,0 +1,73 @@
+* Test of PowerGridBusShunt Device in 6-bus network, in PQ Rectangular format
+* It also tests that the default values (of 0) for G and B work for 
+* the Shunt device.
+
+******************************************************
+* Have bus 1 be the slack bus.  Ammeter is wired     *
+* so that current flows into bus 1                   *
+******************************************************
+V1R bus1R ammBus1P 1V
+V1I bus1I ammBus1Q 0V
+Vamm1P 0 ammBus1P 0V
+Vamm1Q 0 ammBus1Q 0V
+
+***********************
+* Branch definitions  *
+***********************
+YPowerGridBranch pg12 bus1R bus2R bus1I bus2I AT=PQR R=0.1 X=0.2 B=0.02 
+YPowerGridBranch pg14 bus1R bus4R bus1I bus4I AT=PQR R=0.05 X=0.2 B=0.02
+YPowerGridBranch pg15 bus1R bus5R bus1I bus5I AT=PQR R=0.08 X=0.3 B=0.03
+YPowerGridBranch pg23 bus2R bus3R bus2I bus3I AT=PQR R=0.05 X=0.25 B=0.03 
+YPowerGridBranch pg24 bus2R bus4R bus2I bus4I AT=PQR R=0.05 X=0.1 B=0.01 
+YPowerGridBranch pg25 bus2R bus5R bus2I bus5I AT=PQR R=0.1 X=0.3 B=0.02 
+YPowerGridBranch pg26 bus2R bus6R bus2I bus6I AT=PQR R=0.07 X=0.2 B=0.025
+YPowerGridBranch pg35 bus3R bus5R bus3I bus5I AT=PQR R=0.12 X=0.26 B=0.025 
+YPowerGridBranch pg36 bus3R bus6R bus3I bus6I AT=PQR R=0.02 X=0.1 B=0.01
+YPowerGridBranch pg45 bus4R bus5R bus4I bus5I AT=PQR R=0.2 X=0.4 B=0.04 
+YPowerGridBranch pg56 bus5R bus6R bus5I bus6I AT=PQR R=0.1 X=0.3 B=0.03 
+
+**************************
+* Bus Shunt definitions  *
+**************************
+YPowerGridBusShunt pg1GND bus1R 0 bus1I 0 AT=pqr g=0 b=0.1 
+YPowerGridBusShunt pg2GND bus2R 0 bus2I 0 AT=PQR G=0.2 B=0 
+YPowerGridBusShunt pg3GND bus3R 0 bus3I 0 AT=PQR G=0.2 B=0.1 
+YPowerGridBusShunt pg4GND bus4R 0 bus4I 0 AT=PQR G=0.2 B=0.1 
+YPowerGridBusShunt pg5GND bus5R 0 bus5I 0 AT=PQR G=0.2 B=0.1 
+YPowerGridBusShunt pg6GND bus6R 0 bus6I 0 AT=PQR G=0.2 B=0.1 
+
+*****************************
+* No PV Bus definitions yet *
+*****************************
+
+***********************
+* load definitions    *
+***********************
+ILoad2P bus2R 0 0.2
+ILoad2Q bus2I 0 0.2
+ILoad3P bus3R 0 0.2
+ILoad3Q bus3I 0 0.2
+ILoad4P bus4R 0 0.2
+ILoad4Q bus4I 0 0.2
+ILoad5P bus5R 0 0.2
+ILoad5Q bus5I 0 0.2
+ILoad6P bus6R 0 0.2
+ILoad6Q bus6I 0 0.2
+
+***************************************************************
+* use .NODESET to enforce "flat start" at non-generator buses *
+***************************************************************
+.NODESET V(bus2R)=1 V(bus2I)=0 V(bus3R)=1 V(bus3I)=0
++ V(bus4R)=1 V(bus4I)=0 V(bus5R)=1 V(bus5I)=0
++ V(bus6R)=1 V(bus6I)=0 
+
+*****************************************************
+* simulation control statement and output statement *
+*****************************************************
+.DC V1R 1 1 1
+.PRINT DC width=10 precision=6 V(bus1R) V(bus1I) V(bus2R) V(bus2I) 
++ V(bus3R) V(bus3I) V(bus4R) V(bus4I) V(bus5R) V(bus5I) V(bus6R) V(bus6I)
++ I(Vamm1P) I(Vamm1Q) I(ILoad2P) I(ILoad2Q) I(ILoad3P) I(ILoad3Q)
++ I(ILoad4P) I(ILoad4Q) I(ILoad5P) I(ILoad5Q) I(ILoad6P) I(ILoad6Q)
+ 
+.end

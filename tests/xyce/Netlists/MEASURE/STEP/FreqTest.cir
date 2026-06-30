@@ -1,0 +1,33 @@
+A test of the measure freq functionality
+*******************************************************************************
+*
+* a few sources of different types
+VS  1  0  SIN(0 1.0 1KHZ 0 0)
+VP  2  0  PULSE( 0 100 0.2ms 0.2ms 0.2ms 1ms 2ms )
+
+R1  1  0  100
+R2  2  0  100
+
+* Use MEASFAIL to test the reset of the default calculation value
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0  100ms
+.step VS:FREQ 500 1000 500
+
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) 
+
+.measure tran freqAll FREQ v(1) ON=0.75 OFF=0.25
+.measure tran freqTop FREQ v(2) ON=75 OFF=25
+
+* with FROM/TO windows
+.measure tran freqAllWin FREQ v(1) ON=0.75 OFF=0.25 FROM=50e-3 TO=75e-3
+.measure tran freqTopWin FREQ v(2) ON=75 OFF=25  FROM=50e-3 TO=76e-3
+
+* with a time delay window
+.measure tran freqAllWinTD FREQ v(1) ON=0.75 OFF=0.25 TD=60e-3
+
+* failed measure
+.measure tran freqAllWinFail FREQ v(1) ON=0.75 OFF=0.25 FROM=75e-3 TO=50e-3 default_val=-1
+
+.END
+

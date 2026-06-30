@@ -1,0 +1,5 @@
+Manifest.txt
+bug1210.cir
+bug1210.cir.sh
+paramfile.txt
+tags

@@ -1,0 +1,33 @@
+// Generated for: spectre
+// Generated on: Aug 23 09:46:50 2016
+// Design library name: xyce_translator_prj
+// Design cell name: v_sources
+// Design view name: schematic
+simulator lang=spectre
+global 0
+//include "/usr/local/cadence/ic-5.1.41usr5/tools/dfII/samples/artist/ahdlLib/quantity.spectre"
+
+// Library name: xyce_translator_prj
+// Cell name: v_sources
+// View name: schematic
+V1 (net7 0) vsource dc=0 mag=0 phase=0 type=sine delay=0 sinedc=0 ampl=1\
+        freq=1K damp=0
+*Comment lines start with * and have a device name resistor in it
+*Simple model for metal5 resistor
+R1 (net7 V2) resistor r=1K // this is an inline Spectre comment
+R2 (0 V2) resistor r=2K 
+simulatorOptions options reltol=1e-3 vabstol=1e-6 iabstol=1e-12 temp=27 \
+    tnom=27 scalem=1.0 scale=1.0 gmin=1e-12 rforce=1 maxnotes=5 maxwarns=5 \
+    digits=5 cols=80 pivrel=1e-3 sensfile="../psf/sens.output" \
+    checklimitdest=psf 
+tran tran stop=1m errpreset=moderate write="spectre.ic" \
+    writefinal="spectre.fc" annotate=status maxiters=5 
+finalTimeOP info what=oppoint where=rawfile
+modelParameter info what=models where=rawfile
+element info what=inst where=rawfile
+outputParameter info what=output where=rawfile
+designParamVals info what=parameters where=rawfile
+primitives info what=primitives where=rawfile
+subckts info what=subckts  where=rawfile
+save V2
+saveOptions options save=allpub

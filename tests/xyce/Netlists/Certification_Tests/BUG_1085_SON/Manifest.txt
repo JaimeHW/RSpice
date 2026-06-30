@@ -1,0 +1,5 @@
+bug1085son.cir
+bug1085son.cir.sh
+bug1085sonRef.cir
+exclude
+tags

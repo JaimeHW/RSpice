@@ -1,0 +1,20 @@
+Local Variation test for subcircuit arguments (issue 631)
+
+.param main_var=aunif(5,5)
+.param arg1={main_var}
+ 
+r1 1 2 {main_var}
+x1 2 0 sub1 
+V1 1 0 DC 10V
+ 
+.subckt sub1 in out
+r1 in out {arg1}
+.ends
+ 
+.print DC r1:r x1:r1:r
+.dc v1 5 15 5
+ 
+.SAMPLING useExpr=true
+.options SAMPLES numsamples=2 seed=1923635719
+.end
+

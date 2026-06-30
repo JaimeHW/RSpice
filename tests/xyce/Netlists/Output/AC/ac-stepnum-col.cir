@@ -1,0 +1,23 @@
+* Test use of .OPTIONS OUTPUT ADD_STEPNUM_COL=TRUE
+*
+* See SON Bug 1209 for more details.
+**************************************************
+
+* Trivial high-pass filter (V-C-R) circuit
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+* step over two variables.
+.STEP R1 0.5 2 1.5
+.STEP C1 1e-7 1e-6 9e-7
+
+.OPTIONS OUTPUT ADD_STEPNUM_COL=true
+.print AC R1:R C1:C vm(b)
+.print AC FORMAT=NOINDEX FILE=ac-stepnum-col.cir.FD.noindex.prn R1:R C1:C vm(b)
+.print AC FORMAT=GNUPLOT FILE=ac-stepnum-col.cir.FD.gnuplot.prn R1:R C1:C vm(b)
+.print AC FORMAT=SPLOT FILE=ac-stepnum-col.cir.FD.splot.prn R1:R C1:C vm(b)
+.ac dec 5 100Hz 1e6
+
+.end
+

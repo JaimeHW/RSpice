@@ -1,0 +1,12 @@
+Test to see if .measure ... when... cross=x actually works
+
+R1 1 0 1
+V1 1 0 sin (0.5 0.5 1K)
+
+.tran 1u 10m
+.print tran v(1)
+.measure tran t1 when v(1)=.5 cross=1
+.measure tran t2 when v(1)=.5 cross=3
+.end
+
+

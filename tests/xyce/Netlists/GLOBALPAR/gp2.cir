@@ -1,0 +1,35 @@
+Test circuit for P-Channel JFET 
+***********************************
+*
+.global_param vs=0
+*Drain curves
+Vds 1 0 0
+.DC VDS -15 0 1
+Vgs 2 0 {Vs+1}
+.Step Vs -1.0 0.5 0.5
+*
+Vidmon 1 1a 0
+Vigmon 2 2a 0
+Vismon 0 3 0
+*
+.PRINT DC V(1) V(2) I(Vidmon)
+*
+Jtest 1a 2a 3 SA2108 TEMP= 27
+*
+.MODEL SA2108 PJF
++ LEVEL=1 BETA= 0.000278
++ VTO = -2.10
++ PB = 0.265
++ LAMBDA = 0.0055
++ B = 0.590;
++ RD = 302.5
++ RS = 0.0
++ FC = 0.5
++ IS = 1.393E-10
++ AF = 1.0
++ KF = 0.05
++ CGS= 0
++ CGD= 0
+*
+.END
+

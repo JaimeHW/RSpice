@@ -1,0 +1,16 @@
+ ***** Measure Functions ***** 
+
+DERIVV1AT1 = 6.283185e+00 for AT = 0.000000e+00
+
+WHEN = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+CONSTANT-AT = 0.000000e+00 for AT = 2.500000e-02
+
+CONSTANT-WHEN1 = 0.000000e+00 at time = 8.348095e-02
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+CONSTANT-WHEN2 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+

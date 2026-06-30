@@ -1,0 +1,8 @@
+exclude
+tags
+ic_in_subckt.cir.hspice
+ic_in_subckt.cir
+ic_in_subckt.cir.sh
+ic_global_node_warning.cir.hspice
+ic_global_node_warning.cir
+ic_global_node_warning.cir.sh

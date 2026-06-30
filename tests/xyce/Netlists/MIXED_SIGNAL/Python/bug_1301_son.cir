@@ -1,0 +1,24 @@
+* Certification test for SON Bug 1301.
+*
+* The presence/absence of .MODEL D statement does not matter,
+* but it was present in the netlist for the bug report.
+
+.MODEL D D
+
+V1 0 1 PWL (0 0 1 1)
+R1 1 2 1
+X1 2 3 SUB1
+R3 3 0 1
+
+.SUBCKT SUB1 a b
+R1 a b 2
+.ENDS
+
+* Test Y device
+YADC adc1 4 0 simpleADC R=1T WIDTH=2
+.model simpleADC ADC(settlingtime=50ns uppervoltagelimit=2 lowervoltagelimit=0)
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(2)
+
+.END

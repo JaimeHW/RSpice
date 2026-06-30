@@ -1,0 +1,175 @@
+ ***** Measure Functions ***** 
+
+DERIVCROSSTEST1 = 1.600000e+02 at time = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSSCONTTEST1 = 1.600000e+02 at time = 6.250000e-04
+DERIVCROSSCONTTEST1 = -2.000000e+02 at time = 4.000000e-03
+DERIVCROSSCONTTEST1 = 1.666667e+02 at time = 6.200000e-03
+DERIVCROSSCONTTEST1 = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSSTEST2 = 1.600000e+02 at time = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSSCONTTEST2 = 1.600000e+02 at time = 6.250000e-04
+DERIVCROSSCONTTEST2 = -2.000000e+02 at time = 4.000000e-03
+DERIVCROSSCONTTEST2 = 1.666667e+02 at time = 6.200000e-03
+DERIVCROSSCONTTEST2 = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSSTEST3 = -2.000000e+02 at time = 4.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSSCONTTEST3 = -2.000000e+02 at time = 4.000000e-03
+DERIVCROSSCONTTEST3 = 1.666667e+02 at time = 6.200000e-03
+DERIVCROSSCONTTEST3 = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSSTEST4 = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSSCONTTEST4 = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+ATTEST = 1.600000e+02 for AT = 2.000000e-03
+
+ATCONTTEST = 1.600000e+02 for AT = 2.000000e-03
+
+DERIVRISECONTTEST1 = 1.600000e+02 at time = 6.250000e-04
+DERIVRISECONTTEST1 = 1.666667e+02 at time = 6.200000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVRISECONTTEST2 = 1.666667e+02 at time = 6.200000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVRISECONTTEST3 = 1.666667e+02 at time = 6.200000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVFALLCONTTEST1 = -2.000000e+02 at time = 4.000000e-03
+DERIVFALLCONTTEST1 = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVFALLCONTTEST2 = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVFALLCONTTEST3 = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSS1FROM1MS = -2.000000e+02 at time = 4.000000e-03
+Measure Start Time= 1.000000e-03	Measure End Time= 1.000000e-02
+
+DERIVCROSS2FROM1MS = 1.666667e+02 at time = 6.200000e-03
+Measure Start Time= 1.000000e-03	Measure End Time= 1.000000e-02
+
+DERIVCROSSTO8MS = 1.600000e+02 at time = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 8.000000e-03
+
+DERIVRISETO5MS = 1.600000e+02 at time = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 5.000000e-03
+
+DERIVFALLFROM5MS = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 5.000000e-03	Measure End Time= 1.000000e-02
+
+DERIVCROSSTOLAST = 1.666667e+02 at time = 6.200000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 8.000000e-03
+
+DERIVCROSS1CONTFROM1MS = -2.000000e+02 at time = 4.000000e-03
+DERIVCROSS1CONTFROM1MS = 1.666667e+02 at time = 6.200000e-03
+DERIVCROSS1CONTFROM1MS = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 1.000000e-03	Measure End Time= 1.000000e-02
+
+DERIVCROSS2CONTFROM1MS = 1.666667e+02 at time = 6.200000e-03
+DERIVCROSS2CONTFROM1MS = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 1.000000e-03	Measure End Time= 1.000000e-02
+
+DERIVCROSSCONTTO8MS = 1.600000e+02 at time = 6.250000e-04
+DERIVCROSSCONTTO8MS = -2.000000e+02 at time = 4.000000e-03
+DERIVCROSSCONTTO8MS = 1.666667e+02 at time = 6.200000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 8.000000e-03
+
+DERIVRISECONTTO5MS = 1.600000e+02 at time = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 5.000000e-03
+
+DERIVFALLCONTFROM5MS = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 5.000000e-03	Measure End Time= 1.000000e-02
+
+DERIVCROSSCONTTOLAST = 1.666667e+02 at time = 6.200000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 8.000000e-03
+
+DERIVCROSSNEG2 = 1.666667e+02 at time = 6.200000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSSNEG3 = -2.000000e+02 at time = 4.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: DERIVCROSSNEG5 failed. Measured Rise,Fall,Cross=(2,2,4)
+DERIVCROSSNEG5 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSSCONTNEG1 = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSSCONTNEG2 = 1.666667e+02 at time = 6.200000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSSCONTNEG3 = -2.000000e+02 at time = 4.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: DERIVCROSSCONTNEG5 failed. Measured Rise,Fall,Cross=(2,2,4)
+DERIVCROSSCONTNEG5 = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVRISENEG2 = 1.600000e+02 at time = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: DERIVRISENEG3 failed. Measured Rise,Fall,Cross=(2,2,4)
+DERIVRISENEG3 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVRISECONTNEG1 = 1.666667e+02 at time = 6.200000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVRISECONTNEG2 = 1.600000e+02 at time = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: DERIVRISECONTNEG3 failed. Measured Rise,Fall,Cross=(2,2,4)
+DERIVRISECONTNEG3 = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVFALLNEG2 = -2.000000e+02 at time = 4.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: DERIVFALLNEG3 failed. Measured Rise,Fall,Cross=(2,2,4)
+DERIVFALLNEG3 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVFALLCONTNEG1 = -1.538462e+02 at time = 8.700000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVFALLCONTNEG2 = -2.000000e+02 at time = 4.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: DERIVFALLCONTNEG3 failed. Measured Rise,Fall,Cross=(2,2,4)
+DERIVFALLCONTNEG3 = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+DERIVCROSSCONTFAIL1 = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: ATCONTFAIL failed. AT value outside sim window
+ATCONTFAIL = FAILED for AT = 2.000000e-02
+
+Netlist warning: DERIVCROSSCONTFAIL2 failed. Measured Rise,Fall,Cross=(2,2,4)
+DERIVCROSSCONTFAIL2 = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: DERIVRISECONTFAIL failed. Measured Rise,Fall,Cross=(2,2,4)
+DERIVRISECONTFAIL = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: DERIVFALLCONTFAIL failed. Measured Rise,Fall,Cross=(2,2,4)
+DERIVFALLCONTFAIL = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+

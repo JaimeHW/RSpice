@@ -1,0 +1,12 @@
+* this is an error message test
+
+B1 1 0 I={1.0e-3}
+R1 1 0
+
+
+B2 2 0 I={I(B1)*20.0}
+R2 2 0
+
+.tran 1ns 1us
+.print tran v(1) v(2)
+

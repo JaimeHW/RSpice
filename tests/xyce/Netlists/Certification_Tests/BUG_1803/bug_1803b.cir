@@ -1,0 +1,20 @@
+* Old behavior
+* Xyce Error Report for this netlist:
+* Dev Fatal: N_DEV_DeviceMgr::getDeviceTypeOffset could not find the Resistor
+* model level = 10.
+*** Xyce Abort ***
+
+* This now runs as N and 0 are nodes and 1 is the resistance for R1, model
+* card is ignored
+
+V1 N 0 1
+R1 N 0 1
+
+.tran 0.1n 1n
+.print tran i(v1)
+
+.MODEL N NMOS (
++ LEVEL = 2
++ )
+
+.end

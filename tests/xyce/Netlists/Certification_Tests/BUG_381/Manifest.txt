@@ -1,0 +1,17 @@
+README
+bug_381.cir
+bug_381.cir.sh
+comparator0_5_-10.cir
+comparator0_5_0.cir
+comparator0_5_10.cir
+comparator0_6_-10.cir
+comparator0_6_0.cir
+comparator0_6_10.cir
+comparator0_7_-10.cir
+comparator0_7_0.cir
+comparator0_7_10.cir
+comparator1.cir
+comparator2.cir
+comparator3.cir
+exclude
+tags

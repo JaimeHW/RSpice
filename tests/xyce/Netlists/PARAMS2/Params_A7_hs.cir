@@ -1,0 +1,16 @@
+Test to see that passing a parameter to a subckt and use in a device line works
+* If all is well, this should produce examples identical to those of
+* Resist_Control
+
+*This tests that the use of an expression in the parameter is correctly handled
+.param TheRes=10k
+XR1 1 0 ResSub RES={TheRes}
+V1 1 0 DC 5V
+
+.subckt ResSub 1 2 RES=5k
+R1 1 2 {RES}
+.ends
+
+.dc V1 0 5 1
+.print DC v(1) I(v1)
+.end

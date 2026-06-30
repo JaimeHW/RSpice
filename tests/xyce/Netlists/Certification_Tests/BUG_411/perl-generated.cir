@@ -1,0 +1,2214 @@
+discrete81.esp Boolean Network Circuit
+*********************
+** Set voltage and clock values 
+Vdddev nVdd 0 5V 
+VddNdev nVddN 0 0V 
+Vset set 0 0V 
+Vreset reset 0 PULSE(0V 5V 0 0.05 0.05 .2 19.5) 
+Vclk1 clk1 0 PULSE(0V 5V 0.5 0.05 0.05 .2 1.8) 
+xNot_clk1 clk1 clk1Not nVdd not 
+Vclk2 clk2 0 PULSE(0V 5V 1.4 0.05 0.05 .2 1.8) 
+xNot_clk2 clk2 clk2Not nVdd not 
+*********************
+
+********** NODE n0 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n0_0 n12in and_n0_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n0Nxt and_n0_0 n0Nxt or1
+xDff_n0 n0Nxt n0 n0_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n0 n0 0 100K 
+Rres_n0_not n0_not 0 100K 
+
+********** NODE n1 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n1_0 n50in and_n1_0 and1
+xAnd_n1_1 n47in and_n1_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n1Nxt and_n1_0 and_n1_1 n1Nxt or2
+xDff_n1 n1Nxt n1 n1_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n1 n1 0 100K 
+Rres_n1_not n1_not 0 100K 
+
+********** NODE n2 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n2_0 n14in_not n10in n0in_not and_n2_0 and3
+xAnd_n2_1 n14in n10in_not and_n2_1 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n2Nxt and_n2_0 and_n2_1 n2Nxt or2
+xDff_n2 n2Nxt n2 n2_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n2 n2 0 100K 
+Rres_n2_not n2_not 0 100K 
+
+********** NODE n3 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n3_0 n66in_not n44in n1in n0in_not and_n3_0 and4
+xAnd_n3_1 n66in n44in_not and_n3_1 and2
+xAnd_n3_2 n44in_not n1in n0in and_n3_2 and3
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n3Nxt and_n3_0 and_n3_1 and_n3_2 n3Nxt or3
+xDff_n3 n3Nxt n3 n3_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n3 n3 0 100K 
+Rres_n3_not n3_not 0 100K 
+
+********** NODE n4 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n4_0 n57in and_n4_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n4Nxt and_n4_0 n4Nxt or1
+xDff_n4 n4Nxt n4 n4_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n4 n4 0 100K 
+Rres_n4_not n4_not 0 100K 
+
+********** NODE n5 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n5_0 n72in_not n0in_not and_n5_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n5Nxt and_n5_0 n5Nxt or1
+xDff_n5 n5Nxt n5 n5_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n5 n5 0 100K 
+Rres_n5_not n5_not 0 100K 
+
+********** NODE n6 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n6_0 n77in_not and_n6_0 and1
+xAnd_n6_1 n66in and_n6_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n6Nxt and_n6_0 and_n6_1 n6Nxt or2
+xDff_n6 n6Nxt n6 n6_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n6 n6 0 100K 
+Rres_n6_not n6_not 0 100K 
+
+********** NODE n7 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n7_0 n33in n3in and_n7_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n7Nxt and_n7_0 n7Nxt or1
+xDff_n7 n7Nxt n7 n7_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n7 n7 0 100K 
+Rres_n7_not n7_not 0 100K 
+
+********** NODE n8 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n8_0 n16in_not and_n8_0 and1
+xAnd_n8_1 n36in_not and_n8_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n8Nxt and_n8_0 and_n8_1 n8Nxt or2
+xDff_n8 n8Nxt n8 n8_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n8 n8 0 100K 
+Rres_n8_not n8_not 0 100K 
+
+********** NODE n9 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n9_0 n58in n48in and_n9_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n9Nxt and_n9_0 n9Nxt or1
+xDff_n9 n9Nxt n9 n9_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n9 n9 0 100K 
+Rres_n9_not n9_not 0 100K 
+
+********** NODE n10 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n10_0 n68in n44in and_n10_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n10Nxt and_n10_0 n10Nxt or1
+xDff_n10 n10Nxt n10 n10_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n10 n10 0 100K 
+Rres_n10_not n10_not 0 100K 
+
+********** NODE n11 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n11_0 n65in_not n58in_not and_n11_0 and2
+xAnd_n11_1 n65in n58in and_n11_1 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n11Nxt and_n11_0 and_n11_1 n11Nxt or2
+xDff_n11 n11Nxt n11 n11_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n11 n11 0 100K 
+Rres_n11_not n11_not 0 100K 
+
+********** NODE n12 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n12_0 n18in_not and_n12_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n12Nxt and_n12_0 n12Nxt or1
+xDff_n12 n12Nxt n12 n12_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n12 n12 0 100K 
+Rres_n12_not n12_not 0 100K 
+
+********** NODE n13 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n13_0 n56in_not and_n13_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n13Nxt and_n13_0 n13Nxt or1
+xDff_n13 n13Nxt n13 n13_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n13 n13 0 100K 
+Rres_n13_not n13_not 0 100K 
+
+********** NODE n14 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n14_0 n36in and_n14_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n14Nxt and_n14_0 n14Nxt or1
+xDff_n14 n14Nxt n14 n14_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n14 n14 0 100K 
+Rres_n14_not n14_not 0 100K 
+
+********** NODE n15 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n15_0 n47in_not n13in n0in_not and_n15_0 and3
+xAnd_n15_1 n13in_not n0in and_n15_1 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n15Nxt and_n15_0 and_n15_1 n15Nxt or2
+xDff_n15 n15Nxt n15 n15_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n15 n15 0 100K 
+Rres_n15_not n15_not 0 100K 
+
+********** NODE n16 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n16_0 n39in n1in n0in_not and_n16_0 and3
+xAnd_n16_1 n66in n1in_not n0in_not and_n16_1 and3
+xAnd_n16_2 n2in_not n1in_not n0in_not and_n16_2 and3
+xAnd_n16_3 n66in n39in_not n2in_not n1in_not and_n16_3 and4
+xAnd_n16_4 n66in_not n39in n2in_not n1in_not and_n16_4 and4
+xAnd_n16_5 n66in_not n39in_not n2in and_n16_5 and3
+xAnd_n16_6 n66in_not n39in_not n1in n0in and_n16_6 and4
+xAnd_n16_7 n66in n39in n1in and_n16_7 and3
+xAnd_n16_8 n2in n1in n0in and_n16_8 and3
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n16Nxt and_n16_0 and_n16_1 and_n16_2 and_n16_3 and_n16_4 
++ and_n16_5 and_n16_6 and_n16_7 and_n16_8 n16Nxt or9
+xDff_n16 n16Nxt n16 n16_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n16 n16 0 100K 
+Rres_n16_not n16_not 0 100K 
+
+********** NODE n17 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n17_0 n47in n14in and_n17_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n17Nxt and_n17_0 n17Nxt or1
+xDff_n17 n17Nxt n17 n17_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n17 n17 0 100K 
+Rres_n17_not n17_not 0 100K 
+
+********** NODE n18 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n18_0 n58in_not and_n18_0 and1
+xAnd_n18_1 n14in and_n18_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n18Nxt and_n18_0 and_n18_1 n18Nxt or2
+xDff_n18 n18Nxt n18 n18_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n18 n18 0 100K 
+Rres_n18_not n18_not 0 100K 
+
+********** NODE n19 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n19_0 n26in n3in n2in n1in_not and_n19_0 and4
+xAnd_n19_1 n28in n26in_not n3in n1in n0in and_n19_1 and5
+xAnd_n19_2 n28in_not n26in n3in_not n1in_not and_n19_2 and4
+xAnd_n19_3 n26in_not n3in n2in_not n1in_not n0in and_n19_3 and5
+xAnd_n19_4 n26in_not n2in n1in n0in_not and_n19_4 and4
+xAnd_n19_5 n28in_not n2in n1in_not n0in and_n19_5 and4
+xAnd_n19_6 n3in n2in n1in_not n0in_not and_n19_6 and4
+xAnd_n19_7 n28in n26in n2in_not n0in and_n19_7 and4
+xAnd_n19_8 n28in n3in_not n2in n1in n0in_not and_n19_8 and5
+xAnd_n19_9 n28in n26in_not n3in_not n2in_not n0in_not and_n19_9 and5
+xAnd_n19_10 n28in_not n26in_not n3in_not n1in n0in and_n19_10 and5
+xAnd_n19_11 n28in_not n3in n2in_not n0in_not and_n19_11 and4
+xAnd_n19_12 n28in_not n26in n3in n2in n0in and_n19_12 and5
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n19Nxt and_n19_0 and_n19_1 and_n19_2 and_n19_3 and_n19_4 
++ and_n19_5 and_n19_6 and_n19_7 and_n19_8 and_n19_9 and_n19_10 
++ and_n19_11 and_n19_12 n19Nxt or13
+xDff_n19 n19Nxt n19 n19_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n19 n19 0 100K 
+Rres_n19_not n19_not 0 100K 
+
+********** NODE n20 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n20_0 n61in n58in_not and_n20_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n20Nxt and_n20_0 n20Nxt or1
+xDff_n20 n20Nxt n20 n20_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n20 n20 0 100K 
+Rres_n20_not n20_not 0 100K 
+
+********** NODE n21 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n21_0 n4in_not and_n21_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n21Nxt and_n21_0 n21Nxt or1
+xDff_n21 n21Nxt n21 n21_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n21 n21 0 100K 
+Rres_n21_not n21_not 0 100K 
+
+********** NODE n22 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n22_0 n57in and_n22_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n22Nxt and_n22_0 n22Nxt or1
+xDff_n22 n22Nxt n22 n22_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n22 n22 0 100K 
+Rres_n22_not n22_not 0 100K 
+
+********** NODE n23 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n23_0 n71in_not n3in n2in_not n1in n0in_not and_n23_0 and5
+xAnd_n23_1 n71in n2in n1in n0in and_n23_1 and4
+xAnd_n23_2 n16in n3in_not n2in n0in and_n23_2 and4
+xAnd_n23_3 n71in_not n16in n3in n2in_not n1in and_n23_3 and5
+xAnd_n23_4 n16in_not n3in n2in_not n1in_not n0in_not and_n23_4 and5
+xAnd_n23_5 n16in n3in_not n2in_not n1in_not n0in_not and_n23_5 and5
+xAnd_n23_6 n71in_not n16in_not n3in_not n2in n1in_not and_n23_6 and5
+xAnd_n23_7 n71in n16in n3in n2in n1in_not and_n23_7 and5
+xAnd_n23_8 n71in n16in_not n3in n2in n1in and_n23_8 and5
+xAnd_n23_9 n71in n16in n3in_not n2in_not and_n23_9 and4
+xAnd_n23_10 n71in_not n16in_not n2in n0in and_n23_10 and4
+xAnd_n23_11 n71in n16in n1in_not n0in and_n23_11 and4
+xAnd_n23_12 n16in_not n3in_not n1in n0in and_n23_12 and4
+xAnd_n23_13 n71in n3in_not n2in_not n0in and_n23_13 and4
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n23Nxt and_n23_0 and_n23_1 and_n23_2 and_n23_3 and_n23_4 
++ and_n23_5 and_n23_6 and_n23_7 and_n23_8 and_n23_9 and_n23_10 
++ and_n23_11 and_n23_12 and_n23_13 n23Nxt or14
+xDff_n23 n23Nxt n23 n23_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n23 n23 0 100K 
+Rres_n23_not n23_not 0 100K 
+
+********** NODE n24 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n24_0 n51in_not and_n24_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n24Nxt and_n24_0 n24Nxt or1
+xDff_n24 n24Nxt n24 n24_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n24 n24 0 100K 
+Rres_n24_not n24_not 0 100K 
+
+********** NODE n25 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n25_0 n41in_not n36in and_n25_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n25Nxt and_n25_0 n25Nxt or1
+xDff_n25 n25Nxt n25 n25_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n25 n25 0 100K 
+Rres_n25_not n25_not 0 100K 
+
+********** NODE n26 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n26_0 n37in n28in n3in n1in n0in_not and_n26_0 and5
+xAnd_n26_1 n28in n3in n2in_not n1in_not n0in and_n26_1 and5
+xAnd_n26_2 n37in n3in n2in n1in n0in_not and_n26_2 and5
+xAnd_n26_3 n37in n28in n2in n0in_not and_n26_3 and4
+xAnd_n26_4 n28in_not n3in_not n2in_not n1in_not and_n26_4 and4
+xAnd_n26_5 n37in_not n28in n3in_not n2in_not n1in n0in_not and_n26_5 and6
+xAnd_n26_6 n37in n28in_not n3in_not n2in n1in n0in and_n26_6 and6
+xAnd_n26_7 n37in n28in n2in_not n1in n0in and_n26_7 and5
+xAnd_n26_8 n37in_not n3in n2in_not n1in_not and_n26_8 and4
+xAnd_n26_9 n37in_not n28in_not n3in_not n1in_not and_n26_9 and4
+xAnd_n26_10 n37in_not n28in_not n3in_not n2in_not n0in and_n26_10 and5
+xAnd_n26_11 n37in_not n3in n2in n0in and_n26_11 and4
+xAnd_n26_12 n28in_not n3in n2in n1in_not n0in and_n26_12 and5
+xAnd_n26_13 n37in_not n28in n2in n0in and_n26_13 and4
+xAnd_n26_14 n37in_not n1in_not n0in and_n26_14 and3
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n26Nxt and_n26_0 and_n26_1 and_n26_2 and_n26_3 and_n26_4 
++ and_n26_5 and_n26_6 and_n26_7 and_n26_8 and_n26_9 and_n26_10 
++ and_n26_11 and_n26_12 and_n26_13 and_n26_14 n26Nxt or15
+xDff_n26 n26Nxt n26 n26_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n26 n26 0 100K 
+Rres_n26_not n26_not 0 100K 
+
+********** NODE n27 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n27_0 n18in_not n15in and_n27_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n27Nxt and_n27_0 n27Nxt or1
+xDff_n27 n27Nxt n27 n27_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n27 n27 0 100K 
+Rres_n27_not n27_not 0 100K 
+
+********** NODE n28 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n28_0 n76in_not n16in n2in n0in_not and_n28_0 and4
+xAnd_n28_1 n16in n1in n0in and_n28_1 and3
+xAnd_n28_2 n76in_not n2in n1in_not n0in_not and_n28_2 and4
+xAnd_n28_3 n16in n2in_not n1in_not and_n28_3 and3
+xAnd_n28_4 n76in_not n16in_not n2in_not n1in n0in_not and_n28_4 and5
+xAnd_n28_5 n76in n16in_not n2in n0in and_n28_5 and4
+xAnd_n28_6 n76in n1in n0in and_n28_6 and3
+xAnd_n28_7 n2in n1in n0in and_n28_7 and3
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n28Nxt and_n28_0 and_n28_1 and_n28_2 and_n28_3 and_n28_4 
++ and_n28_5 and_n28_6 and_n28_7 n28Nxt or8
+xDff_n28 n28Nxt n28 n28_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n28 n28 0 100K 
+Rres_n28_not n28_not 0 100K 
+
+********** NODE n29 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n29_0 n3in and_n29_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n29Nxt and_n29_0 n29Nxt or1
+xDff_n29 n29Nxt n29 n29_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n29 n29 0 100K 
+Rres_n29_not n29_not 0 100K 
+
+********** NODE n30 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n30_0 n22in and_n30_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n30Nxt and_n30_0 n30Nxt or1
+xDff_n30 n30Nxt n30 n30_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n30 n30 0 100K 
+Rres_n30_not n30_not 0 100K 
+
+********** NODE n31 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n31_0 n10in n0in_not and_n31_0 and2
+xAnd_n31_1 n10in_not n0in and_n31_1 and2
+xAnd_n31_2 n77in_not and_n31_2 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n31Nxt and_n31_0 and_n31_1 and_n31_2 n31Nxt or3
+xDff_n31 n31Nxt n31 n31_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n31 n31 0 100K 
+Rres_n31_not n31_not 0 100K 
+
+********** NODE n32 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n32_0 n57in and_n32_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n32Nxt and_n32_0 n32Nxt or1
+xDff_n32 n32Nxt n32 n32_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n32 n32 0 100K 
+Rres_n32_not n32_not 0 100K 
+
+********** NODE n33 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n33_0 n31in n10in_not and_n33_0 and2
+xAnd_n33_1 n10in_not n0in and_n33_1 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n33Nxt and_n33_0 and_n33_1 n33Nxt or2
+xDff_n33 n33Nxt n33 n33_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n33 n33 0 100K 
+Rres_n33_not n33_not 0 100K 
+
+********** NODE n34 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n34_0 n46in n33in and_n34_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n34Nxt and_n34_0 n34Nxt or1
+xDff_n34 n34Nxt n34 n34_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n34 n34 0 100K 
+Rres_n34_not n34_not 0 100K 
+
+********** NODE n35 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n35_0 n34in and_n35_0 and1
+xAnd_n35_1 n33in and_n35_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n35Nxt and_n35_0 and_n35_1 n35Nxt or2
+xDff_n35 n35Nxt n35 n35_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n35 n35 0 100K 
+Rres_n35_not n35_not 0 100K 
+
+********** NODE n36 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n36_0 n76in_not n40in_not and_n36_0 and2
+xAnd_n36_1 n40in_not n0in and_n36_1 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n36Nxt and_n36_0 and_n36_1 n36Nxt or2
+xDff_n36 n36Nxt n36 n36_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n36 n36 0 100K 
+Rres_n36_not n36_not 0 100K 
+
+********** NODE n37 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n37_0 n68in n3in_not n2in_not n1in_not n0in and_n37_0 and5
+xAnd_n37_1 n68in n26in_not n2in n0in and_n37_1 and4
+xAnd_n37_2 n26in_not n2in n1in_not n0in and_n37_2 and4
+xAnd_n37_3 n68in n3in n2in_not n1in and_n37_3 and4
+xAnd_n37_4 n68in_not n26in_not n2in_not n1in_not n0in_not and_n37_4 and5
+xAnd_n37_5 n68in_not n26in n2in n1in_not and_n37_5 and4
+xAnd_n37_6 n68in n26in n3in_not n1in and_n37_6 and4
+xAnd_n37_7 n68in_not n26in_not n3in_not n2in n0in_not and_n37_7 and5
+xAnd_n37_8 n68in n26in_not n3in n2in n1in_not and_n37_8 and5
+xAnd_n37_9 n68in_not n26in n3in n1in_not n0in and_n37_9 and5
+xAnd_n37_10 n68in_not n3in_not n2in_not n1in n0in and_n37_10 and5
+xAnd_n37_11 n3in n2in n1in_not n0in and_n37_11 and4
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n37Nxt and_n37_0 and_n37_1 and_n37_2 and_n37_3 and_n37_4 
++ and_n37_5 and_n37_6 and_n37_7 and_n37_8 and_n37_9 and_n37_10 
++ and_n37_11 n37Nxt or12
+xDff_n37 n37Nxt n37 n37_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n37 n37 0 100K 
+Rres_n37_not n37_not 0 100K 
+
+********** NODE n38 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n38_0 n73in n19in n1in n0in_not and_n38_0 and4
+xAnd_n38_1 n73in_not n19in_not n1in_not and_n38_1 and3
+xAnd_n38_2 n73in n19in_not n0in and_n38_2 and3
+xAnd_n38_3 n73in_not n19in n0in and_n38_3 and3
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n38Nxt and_n38_0 and_n38_1 and_n38_2 and_n38_3 n38Nxt or4
+xDff_n38 n38Nxt n38 n38_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n38 n38 0 100K 
+Rres_n38_not n38_not 0 100K 
+
+********** NODE n39 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n39_0 n51in_not and_n39_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n39Nxt and_n39_0 n39Nxt or1
+xDff_n39 n39Nxt n39 n39_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n39 n39 0 100K 
+Rres_n39_not n39_not 0 100K 
+
+********** NODE n40 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n40_0 n4in and_n40_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n40Nxt and_n40_0 n40Nxt or1
+xDff_n40 n40Nxt n40 n40_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n40 n40 0 100K 
+Rres_n40_not n40_not 0 100K 
+
+********** NODE n41 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n41_0 n1in n0in_not and_n41_0 and2
+xAnd_n41_1 n19in_not n9in and_n41_1 and2
+xAnd_n41_2 n9in n0in_not and_n41_2 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n41Nxt and_n41_0 and_n41_1 and_n41_2 n41Nxt or3
+xDff_n41 n41Nxt n41 n41_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n41 n41 0 100K 
+Rres_n41_not n41_not 0 100K 
+
+********** NODE n42 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n42_0 n55in n9in_not n0in_not and_n42_0 and3
+xAnd_n42_1 n55in_not n9in_not n0in and_n42_1 and3
+xAnd_n42_2 n55in n9in n0in and_n42_2 and3
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n42Nxt and_n42_0 and_n42_1 and_n42_2 n42Nxt or3
+xDff_n42 n42Nxt n42 n42_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n42 n42 0 100K 
+Rres_n42_not n42_not 0 100K 
+
+********** NODE n43 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n43_0 n66in n41in_not and_n43_0 and2
+xAnd_n43_1 n66in_not n0in and_n43_1 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n43Nxt and_n43_0 and_n43_1 n43Nxt or2
+xDff_n43 n43Nxt n43 n43_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n43 n43 0 100K 
+Rres_n43_not n43_not 0 100K 
+
+********** NODE n44 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n44_0 n70in_not n0in_not and_n44_0 and2
+xAnd_n44_1 n15in n0in and_n44_1 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n44Nxt and_n44_0 and_n44_1 n44Nxt or2
+xDff_n44 n44Nxt n44 n44_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n44 n44 0 100K 
+Rres_n44_not n44_not 0 100K 
+
+********** NODE n45 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n45_0 n47in n31in and_n45_0 and2
+xAnd_n45_1 n31in_not n0in and_n45_1 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n45Nxt and_n45_0 and_n45_1 n45Nxt or2
+xDff_n45 n45Nxt n45 n45_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n45 n45 0 100K 
+Rres_n45_not n45_not 0 100K 
+
+********** NODE n46 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n46_0 n68in n26in_not n3in n1in n0in_not and_n46_0 and5
+xAnd_n46_1 n68in_not n26in_not n3in n2in_not n0in and_n46_1 and5
+xAnd_n46_2 n68in n26in n2in_not n1in_not and_n46_2 and4
+xAnd_n46_3 n68in n26in n1in_not n0in_not and_n46_3 and4
+xAnd_n46_4 n68in_not n26in_not n3in n1in_not n0in and_n46_4 and5
+xAnd_n46_5 n68in n26in n2in n1in n0in and_n46_5 and5
+xAnd_n46_6 n68in n26in n3in n2in_not and_n46_6 and4
+xAnd_n46_7 n68in_not n26in_not n2in n1in_not n0in_not and_n46_7 and5
+xAnd_n46_8 n3in n2in n1in_not n0in_not and_n46_8 and4
+xAnd_n46_9 n26in n3in_not n2in n1in n0in_not and_n46_9 and5
+xAnd_n46_10 n68in_not n26in n2in_not n1in n0in and_n46_10 and5
+xAnd_n46_11 n26in_not n3in_not n2in n1in n0in and_n46_11 and5
+xAnd_n46_12 n26in_not n2in_not n1in n0in_not and_n46_12 and4
+xAnd_n46_13 n68in n26in_not n3in_not n0in and_n46_13 and4
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n46Nxt and_n46_0 and_n46_1 and_n46_2 and_n46_3 and_n46_4 
++ and_n46_5 and_n46_6 and_n46_7 and_n46_8 and_n46_9 and_n46_10 
++ and_n46_11 and_n46_12 and_n46_13 n46Nxt or14
+xDff_n46 n46Nxt n46 n46_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n46 n46 0 100K 
+Rres_n46_not n46_not 0 100K 
+
+********** NODE n47 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n47_0 n44in n17in_not and_n47_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n47Nxt and_n47_0 n47Nxt or1
+xDff_n47 n47Nxt n47 n47_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n47 n47 0 100K 
+Rres_n47_not n47_not 0 100K 
+
+********** NODE n48 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n48_0 n65in and_n48_0 and1
+xAnd_n48_1 n10in and_n48_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n48Nxt and_n48_0 and_n48_1 n48Nxt or2
+xDff_n48 n48Nxt n48 n48_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n48 n48 0 100K 
+Rres_n48_not n48_not 0 100K 
+
+********** NODE n49 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n49_0 n4in_not and_n49_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n49Nxt and_n49_0 n49Nxt or1
+xDff_n49 n49Nxt n49 n49_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n49 n49 0 100K 
+Rres_n49_not n49_not 0 100K 
+
+********** NODE n50 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n50_0 n30in and_n50_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n50Nxt and_n50_0 n50Nxt or1
+xDff_n50 n50Nxt n50 n50_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n50 n50 0 100K 
+Rres_n50_not n50_not 0 100K 
+
+********** NODE n51 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n51_0 n57in and_n51_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n51Nxt and_n51_0 n51Nxt or1
+xDff_n51 n51Nxt n51 n51_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n51 n51 0 100K 
+Rres_n51_not n51_not 0 100K 
+
+********** NODE n52 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n52_0 n51in_not and_n52_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n52Nxt and_n52_0 n52Nxt or1
+xDff_n52 n52Nxt n52 n52_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n52 n52 0 100K 
+Rres_n52_not n52_not 0 100K 
+
+********** NODE n53 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n53_0 n58in_not and_n53_0 and1
+xAnd_n53_1 n44in and_n53_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n53Nxt and_n53_0 and_n53_1 n53Nxt or2
+xDff_n53 n53Nxt n53 n53_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n53 n53 0 100K 
+Rres_n53_not n53_not 0 100K 
+
+********** NODE n54 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n54_0 n57in_not and_n54_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n54Nxt and_n54_0 n54Nxt or1
+xDff_n54 n54Nxt n54 n54_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n54 n54 0 100K 
+Rres_n54_not n54_not 0 100K 
+
+********** NODE n55 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n55_0 n74in_not n68in_not n0in_not and_n55_0 and3
+xAnd_n55_1 n74in n68in_not n0in and_n55_1 and3
+xAnd_n55_2 n74in_not n68in n0in and_n55_2 and3
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n55Nxt and_n55_0 and_n55_1 and_n55_2 n55Nxt or3
+xDff_n55 n55Nxt n55 n55_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n55 n55 0 100K 
+Rres_n55_not n55_not 0 100K 
+
+********** NODE n56 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n56_0 n30in and_n56_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n56Nxt and_n56_0 n56Nxt or1
+xDff_n56 n56Nxt n56 n56_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n56 n56 0 100K 
+Rres_n56_not n56_not 0 100K 
+
+********** NODE n57 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n57_0 n79in_not n13in and_n57_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n57Nxt and_n57_0 n57Nxt or1
+xDff_n57 n57Nxt n57 n57_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n57 n57 0 100K 
+Rres_n57_not n57_not 0 100K 
+
+********** NODE n58 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n58_0 n68in_not and_n58_0 and1
+xAnd_n58_1 n12in and_n58_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n58Nxt and_n58_0 and_n58_1 n58Nxt or2
+xDff_n58 n58Nxt n58 n58_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n58 n58 0 100K 
+Rres_n58_not n58_not 0 100K 
+
+********** NODE n59 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n59_0 n61in n15in and_n59_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n59Nxt and_n59_0 n59Nxt or1
+xDff_n59 n59Nxt n59 n59_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n59 n59 0 100K 
+Rres_n59_not n59_not 0 100K 
+
+********** NODE n60 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n60_0 n13in_not and_n60_0 and1
+xAnd_n60_1 n54in_not and_n60_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n60Nxt and_n60_0 and_n60_1 n60Nxt or2
+xDff_n60 n60Nxt n60 n60_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n60 n60 0 100K 
+Rres_n60_not n60_not 0 100K 
+
+********** NODE n61 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n61_0 n78in n27in_not n0in_not and_n61_0 and3
+xAnd_n61_1 n78in_not n0in and_n61_1 and2
+xAnd_n61_2 n27in n0in and_n61_2 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n61Nxt and_n61_0 and_n61_1 and_n61_2 n61Nxt or3
+xDff_n61 n61Nxt n61 n61_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n61 n61 0 100K 
+Rres_n61_not n61_not 0 100K 
+
+********** NODE n62 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n62_0 n60in n21in and_n62_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n62Nxt and_n62_0 n62Nxt or1
+xDff_n62 n62Nxt n62 n62_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n62 n62 0 100K 
+Rres_n62_not n62_not 0 100K 
+
+********** NODE n63 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n63_0 n75in_not and_n63_0 and1
+xAnd_n63_1 n3in and_n63_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n63Nxt and_n63_0 and_n63_1 n63Nxt or2
+xDff_n63 n63Nxt n63 n63_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n63 n63 0 100K 
+Rres_n63_not n63_not 0 100K 
+
+********** NODE n64 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n64_0 n66in and_n64_0 and1
+xAnd_n64_1 n17in and_n64_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n64Nxt and_n64_0 and_n64_1 n64Nxt or2
+xDff_n64 n64Nxt n64 n64_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n64 n64 0 100K 
+Rres_n64_not n64_not 0 100K 
+
+********** NODE n65 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n65_0 n40in_not n34in_not and_n65_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n65Nxt and_n65_0 n65Nxt or1
+xDff_n65 n65Nxt n65 n65_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n65 n65 0 100K 
+Rres_n65_not n65_not 0 100K 
+
+********** NODE n66 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n66_0 n76in_not n25in_not n0in_not and_n66_0 and3
+xAnd_n66_1 n76in_not n25in n0in and_n66_1 and3
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n66Nxt and_n66_0 and_n66_1 n66Nxt or2
+xDff_n66 n66Nxt n66 n66_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n66 n66 0 100K 
+Rres_n66_not n66_not 0 100K 
+
+********** NODE n67 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n67_0 n71in_not and_n67_0 and1
+xAnd_n67_1 n0in and_n67_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n67Nxt and_n67_0 and_n67_1 n67Nxt or2
+xDff_n67 n67Nxt n67 n67_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n67 n67 0 100K 
+Rres_n67_not n67_not 0 100K 
+
+********** NODE n68 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n68_0 n1in_not and_n68_0 and1
+xAnd_n68_1 n9in_not and_n68_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n68Nxt and_n68_0 and_n68_1 n68Nxt or2
+xDff_n68 n68Nxt n68 n68_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n68 n68 0 100K 
+Rres_n68_not n68_not 0 100K 
+
+********** NODE n69 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n69_0 n75in_not and_n69_0 and1
+xAnd_n69_1 n48in and_n69_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n69Nxt and_n69_0 and_n69_1 n69Nxt or2
+xDff_n69 n69Nxt n69 n69_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n69 n69 0 100K 
+Rres_n69_not n69_not 0 100K 
+
+********** NODE n70 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n70_0 n36in n16in_not n2in_not n1in_not and_n70_0 and4
+xAnd_n70_1 n36in n16in n2in n0in_not and_n70_1 and4
+xAnd_n70_2 n36in_not n2in n1in_not n0in and_n70_2 and4
+xAnd_n70_3 n36in_not n16in_not n1in and_n70_3 and3
+xAnd_n70_4 n36in n16in n1in and_n70_4 and3
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n70Nxt and_n70_0 and_n70_1 and_n70_2 and_n70_3 and_n70_4 
++ n70Nxt or5
+xDff_n70 n70Nxt n70 n70_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n70 n70 0 100K 
+Rres_n70_not n70_not 0 100K 
+
+********** NODE n71 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n71_0 n76in n3in n2in n0in_not and_n71_0 and4
+xAnd_n71_1 n26in_not n3in n2in n1in_not n0in_not and_n71_1 and5
+xAnd_n71_2 n76in_not n26in n2in_not n1in_not n0in_not and_n71_2 and5
+xAnd_n71_3 n76in_not n26in_not n3in_not n2in_not n1in and_n71_3 and5
+xAnd_n71_4 n76in n26in_not n2in n1in and_n71_4 and4
+xAnd_n71_5 n26in n2in n1in n0in_not and_n71_5 and4
+xAnd_n71_6 n76in_not n26in n1in n0in and_n71_6 and4
+xAnd_n71_7 n3in n2in n1in n0in and_n71_7 and4
+xAnd_n71_8 n76in_not n3in_not n2in n0in_not and_n71_8 and4
+xAnd_n71_9 n76in n26in_not n3in_not n2in_not n0in and_n71_9 and5
+xAnd_n71_10 n76in_not n3in n2in_not n0in and_n71_10 and4
+xAnd_n71_11 n26in n3in n2in_not n1in_not n0in and_n71_11 and5
+xAnd_n71_12 n76in n26in_not n3in n2in and_n71_12 and4
+xAnd_n71_13 n76in n26in n1in n0in_not and_n71_13 and4
+xAnd_n71_14 n76in n26in n3in_not n2in n1in_not and_n71_14 and5
+xAnd_n71_15 n76in_not n26in n3in n0in and_n71_15 and4
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n71Nxt and_n71_0 and_n71_1 and_n71_2 and_n71_3 and_n71_4 
++ and_n71_5 and_n71_6 and_n71_7 and_n71_8 and_n71_9 and_n71_10 
++ and_n71_11 and_n71_12 and_n71_13 and_n71_14 and_n71_15 
++ n71Nxt or16
+xDff_n71 n71Nxt n71 n71_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n71 n71 0 100K 
+Rres_n71_not n71_not 0 100K 
+
+********** NODE n72 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n72_0 n28in_not and_n72_0 and1
+xAnd_n72_1 n78in_not and_n72_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n72Nxt and_n72_0 and_n72_1 n72Nxt or2
+xDff_n72 n72Nxt n72 n72_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n72 n72 0 100K 
+Rres_n72_not n72_not 0 100K 
+
+********** NODE n73 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n73_0 n47in_not and_n73_0 and1
+xAnd_n73_1 n78in_not and_n73_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n73Nxt and_n73_0 and_n73_1 n73Nxt or2
+xDff_n73 n73Nxt n73 n73_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n73 n73 0 100K 
+Rres_n73_not n73_not 0 100K 
+
+********** NODE n74 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n74_0 n19in_not n0in and_n74_0 and2
+xAnd_n74_1 n70in and_n74_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n74Nxt and_n74_0 and_n74_1 n74Nxt or2
+xDff_n74 n74Nxt n74 n74_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n74 n74 0 100K 
+Rres_n74_not n74_not 0 100K 
+
+********** NODE n75 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n75_0 n60in_not n10in_not and_n75_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n75Nxt and_n75_0 n75Nxt or1
+xDff_n75 n75Nxt n75 n75_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n75 n75 0 100K 
+Rres_n75_not n75_not 0 100K 
+
+********** NODE n76 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n76_0 n33in n31in and_n76_0 and2
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n76Nxt and_n76_0 n76Nxt or1
+xDff_n76 n76Nxt n76 n76_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n76 n76 0 100K 
+Rres_n76_not n76_not 0 100K 
+
+********** NODE n77 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n77_0 n36in_not and_n77_0 and1
+xAnd_n77_1 n76in and_n77_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n77Nxt and_n77_0 and_n77_1 n77Nxt or2
+xDff_n77 n77Nxt n77 n77_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n77 n77 0 100K 
+Rres_n77_not n77_not 0 100K 
+
+********** NODE n78 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n78_0 n10in and_n78_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n78Nxt and_n78_0 n78Nxt or1
+xDff_n78 n78Nxt n78 n78_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n78 n78 0 100K 
+Rres_n78_not n78_not 0 100K 
+
+********** NODE n79 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n79_0 n40in_not and_n79_0 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n79Nxt and_n79_0 n79Nxt or1
+xDff_n79 n79Nxt n79 n79_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n79 n79 0 100K 
+Rres_n79_not n79_not 0 100K 
+
+********** NODE n80 *****
+
+***** AND GATES FOR PRODUCT TERMS *****
+xAnd_n80_0 n8in_not and_n80_0 and1
+xAnd_n80_1 n1in and_n80_1 and1
+
+***** OR GATE FOR SUM OF PRODUCT TERMS *****
+xOr_n80Nxt and_n80_0 and_n80_1 n80Nxt or2
+xDff_n80 n80Nxt n80 n80_not nVdd nVddN clk2 clk2Not set reset dff 
+Rres_n80 n80 0 100K 
+Rres_n80_not n80_not 0 100K 
+
+***** Voltage Input Values *****
+Vn0init n0init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n0init n0init n0 n0inNxt nVdd or 
+xDff_n0in n0inNxt n0in n0in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n0init n0init 0 100 
+Rres_n0inNxt n0inNxt 0 100K 
+Rres_n0in n0in 0 100K 
+Rres_n0in_not n0in_not 0 100K 
+
+
+Vn1init n1init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n1init n1init n1 n1inNxt nVdd or 
+xDff_n1in n1inNxt n1in n1in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n1init n1init 0 100 
+Rres_n1inNxt n1inNxt 0 100K 
+Rres_n1in n1in 0 100K 
+Rres_n1in_not n1in_not 0 100K 
+
+
+Vn2init n2init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n2init n2init n2 n2inNxt nVdd or 
+xDff_n2in n2inNxt n2in n2in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n2init n2init 0 100 
+Rres_n2inNxt n2inNxt 0 100K 
+Rres_n2in n2in 0 100K 
+Rres_n2in_not n2in_not 0 100K 
+
+
+Vn3init n3init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n3init n3init n3 n3inNxt nVdd or 
+xDff_n3in n3inNxt n3in n3in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n3init n3init 0 100 
+Rres_n3inNxt n3inNxt 0 100K 
+Rres_n3in n3in 0 100K 
+Rres_n3in_not n3in_not 0 100K 
+
+
+Vn4init n4init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n4init n4init n4 n4inNxt nVdd or 
+xDff_n4in n4inNxt n4in n4in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n4init n4init 0 100 
+Rres_n4inNxt n4inNxt 0 100K 
+Rres_n4in n4in 0 100K 
+Rres_n4in_not n4in_not 0 100K 
+
+
+Vn5init n5init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n5init n5init n5 n5inNxt nVdd or 
+xDff_n5in n5inNxt n5in n5in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n5init n5init 0 100 
+Rres_n5inNxt n5inNxt 0 100K 
+Rres_n5in n5in 0 100K 
+Rres_n5in_not n5in_not 0 100K 
+
+
+Vn6init n6init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n6init n6init n6 n6inNxt nVdd or 
+xDff_n6in n6inNxt n6in n6in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n6init n6init 0 100 
+Rres_n6inNxt n6inNxt 0 100K 
+Rres_n6in n6in 0 100K 
+Rres_n6in_not n6in_not 0 100K 
+
+
+Vn7init n7init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n7init n7init n7 n7inNxt nVdd or 
+xDff_n7in n7inNxt n7in n7in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n7init n7init 0 100 
+Rres_n7inNxt n7inNxt 0 100K 
+Rres_n7in n7in 0 100K 
+Rres_n7in_not n7in_not 0 100K 
+
+
+Vn8init n8init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n8init n8init n8 n8inNxt nVdd or 
+xDff_n8in n8inNxt n8in n8in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n8init n8init 0 100 
+Rres_n8inNxt n8inNxt 0 100K 
+Rres_n8in n8in 0 100K 
+Rres_n8in_not n8in_not 0 100K 
+
+
+Vn9init n9init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n9init n9init n9 n9inNxt nVdd or 
+xDff_n9in n9inNxt n9in n9in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n9init n9init 0 100 
+Rres_n9inNxt n9inNxt 0 100K 
+Rres_n9in n9in 0 100K 
+Rres_n9in_not n9in_not 0 100K 
+
+
+Vn10init n10init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n10init n10init n10 n10inNxt nVdd or 
+xDff_n10in n10inNxt n10in n10in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n10init n10init 0 100 
+Rres_n10inNxt n10inNxt 0 100K 
+Rres_n10in n10in 0 100K 
+Rres_n10in_not n10in_not 0 100K 
+
+
+Vn11init n11init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n11init n11init n11 n11inNxt nVdd or 
+xDff_n11in n11inNxt n11in n11in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n11init n11init 0 100 
+Rres_n11inNxt n11inNxt 0 100K 
+Rres_n11in n11in 0 100K 
+Rres_n11in_not n11in_not 0 100K 
+
+
+Vn12init n12init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n12init n12init n12 n12inNxt nVdd or 
+xDff_n12in n12inNxt n12in n12in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n12init n12init 0 100 
+Rres_n12inNxt n12inNxt 0 100K 
+Rres_n12in n12in 0 100K 
+Rres_n12in_not n12in_not 0 100K 
+
+
+Vn13init n13init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n13init n13init n13 n13inNxt nVdd or 
+xDff_n13in n13inNxt n13in n13in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n13init n13init 0 100 
+Rres_n13inNxt n13inNxt 0 100K 
+Rres_n13in n13in 0 100K 
+Rres_n13in_not n13in_not 0 100K 
+
+
+Vn14init n14init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n14init n14init n14 n14inNxt nVdd or 
+xDff_n14in n14inNxt n14in n14in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n14init n14init 0 100 
+Rres_n14inNxt n14inNxt 0 100K 
+Rres_n14in n14in 0 100K 
+Rres_n14in_not n14in_not 0 100K 
+
+
+Vn15init n15init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n15init n15init n15 n15inNxt nVdd or 
+xDff_n15in n15inNxt n15in n15in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n15init n15init 0 100 
+Rres_n15inNxt n15inNxt 0 100K 
+Rres_n15in n15in 0 100K 
+Rres_n15in_not n15in_not 0 100K 
+
+
+Vn16init n16init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n16init n16init n16 n16inNxt nVdd or 
+xDff_n16in n16inNxt n16in n16in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n16init n16init 0 100 
+Rres_n16inNxt n16inNxt 0 100K 
+Rres_n16in n16in 0 100K 
+Rres_n16in_not n16in_not 0 100K 
+
+
+Vn17init n17init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n17init n17init n17 n17inNxt nVdd or 
+xDff_n17in n17inNxt n17in n17in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n17init n17init 0 100 
+Rres_n17inNxt n17inNxt 0 100K 
+Rres_n17in n17in 0 100K 
+Rres_n17in_not n17in_not 0 100K 
+
+
+Vn18init n18init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n18init n18init n18 n18inNxt nVdd or 
+xDff_n18in n18inNxt n18in n18in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n18init n18init 0 100 
+Rres_n18inNxt n18inNxt 0 100K 
+Rres_n18in n18in 0 100K 
+Rres_n18in_not n18in_not 0 100K 
+
+
+Vn19init n19init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n19init n19init n19 n19inNxt nVdd or 
+xDff_n19in n19inNxt n19in n19in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n19init n19init 0 100 
+Rres_n19inNxt n19inNxt 0 100K 
+Rres_n19in n19in 0 100K 
+Rres_n19in_not n19in_not 0 100K 
+
+
+Vn20init n20init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n20init n20init n20 n20inNxt nVdd or 
+xDff_n20in n20inNxt n20in n20in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n20init n20init 0 100 
+Rres_n20inNxt n20inNxt 0 100K 
+Rres_n20in n20in 0 100K 
+Rres_n20in_not n20in_not 0 100K 
+
+
+Vn21init n21init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n21init n21init n21 n21inNxt nVdd or 
+xDff_n21in n21inNxt n21in n21in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n21init n21init 0 100 
+Rres_n21inNxt n21inNxt 0 100K 
+Rres_n21in n21in 0 100K 
+Rres_n21in_not n21in_not 0 100K 
+
+
+Vn22init n22init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n22init n22init n22 n22inNxt nVdd or 
+xDff_n22in n22inNxt n22in n22in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n22init n22init 0 100 
+Rres_n22inNxt n22inNxt 0 100K 
+Rres_n22in n22in 0 100K 
+Rres_n22in_not n22in_not 0 100K 
+
+
+Vn23init n23init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n23init n23init n23 n23inNxt nVdd or 
+xDff_n23in n23inNxt n23in n23in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n23init n23init 0 100 
+Rres_n23inNxt n23inNxt 0 100K 
+Rres_n23in n23in 0 100K 
+Rres_n23in_not n23in_not 0 100K 
+
+
+Vn24init n24init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n24init n24init n24 n24inNxt nVdd or 
+xDff_n24in n24inNxt n24in n24in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n24init n24init 0 100 
+Rres_n24inNxt n24inNxt 0 100K 
+Rres_n24in n24in 0 100K 
+Rres_n24in_not n24in_not 0 100K 
+
+
+Vn25init n25init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n25init n25init n25 n25inNxt nVdd or 
+xDff_n25in n25inNxt n25in n25in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n25init n25init 0 100 
+Rres_n25inNxt n25inNxt 0 100K 
+Rres_n25in n25in 0 100K 
+Rres_n25in_not n25in_not 0 100K 
+
+
+Vn26init n26init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n26init n26init n26 n26inNxt nVdd or 
+xDff_n26in n26inNxt n26in n26in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n26init n26init 0 100 
+Rres_n26inNxt n26inNxt 0 100K 
+Rres_n26in n26in 0 100K 
+Rres_n26in_not n26in_not 0 100K 
+
+
+Vn27init n27init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n27init n27init n27 n27inNxt nVdd or 
+xDff_n27in n27inNxt n27in n27in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n27init n27init 0 100 
+Rres_n27inNxt n27inNxt 0 100K 
+Rres_n27in n27in 0 100K 
+Rres_n27in_not n27in_not 0 100K 
+
+
+Vn28init n28init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n28init n28init n28 n28inNxt nVdd or 
+xDff_n28in n28inNxt n28in n28in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n28init n28init 0 100 
+Rres_n28inNxt n28inNxt 0 100K 
+Rres_n28in n28in 0 100K 
+Rres_n28in_not n28in_not 0 100K 
+
+
+Vn29init n29init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n29init n29init n29 n29inNxt nVdd or 
+xDff_n29in n29inNxt n29in n29in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n29init n29init 0 100 
+Rres_n29inNxt n29inNxt 0 100K 
+Rres_n29in n29in 0 100K 
+Rres_n29in_not n29in_not 0 100K 
+
+
+Vn30init n30init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n30init n30init n30 n30inNxt nVdd or 
+xDff_n30in n30inNxt n30in n30in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n30init n30init 0 100 
+Rres_n30inNxt n30inNxt 0 100K 
+Rres_n30in n30in 0 100K 
+Rres_n30in_not n30in_not 0 100K 
+
+
+Vn31init n31init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n31init n31init n31 n31inNxt nVdd or 
+xDff_n31in n31inNxt n31in n31in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n31init n31init 0 100 
+Rres_n31inNxt n31inNxt 0 100K 
+Rres_n31in n31in 0 100K 
+Rres_n31in_not n31in_not 0 100K 
+
+
+Vn32init n32init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n32init n32init n32 n32inNxt nVdd or 
+xDff_n32in n32inNxt n32in n32in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n32init n32init 0 100 
+Rres_n32inNxt n32inNxt 0 100K 
+Rres_n32in n32in 0 100K 
+Rres_n32in_not n32in_not 0 100K 
+
+
+Vn33init n33init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n33init n33init n33 n33inNxt nVdd or 
+xDff_n33in n33inNxt n33in n33in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n33init n33init 0 100 
+Rres_n33inNxt n33inNxt 0 100K 
+Rres_n33in n33in 0 100K 
+Rres_n33in_not n33in_not 0 100K 
+
+
+Vn34init n34init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n34init n34init n34 n34inNxt nVdd or 
+xDff_n34in n34inNxt n34in n34in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n34init n34init 0 100 
+Rres_n34inNxt n34inNxt 0 100K 
+Rres_n34in n34in 0 100K 
+Rres_n34in_not n34in_not 0 100K 
+
+
+Vn35init n35init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n35init n35init n35 n35inNxt nVdd or 
+xDff_n35in n35inNxt n35in n35in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n35init n35init 0 100 
+Rres_n35inNxt n35inNxt 0 100K 
+Rres_n35in n35in 0 100K 
+Rres_n35in_not n35in_not 0 100K 
+
+
+Vn36init n36init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n36init n36init n36 n36inNxt nVdd or 
+xDff_n36in n36inNxt n36in n36in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n36init n36init 0 100 
+Rres_n36inNxt n36inNxt 0 100K 
+Rres_n36in n36in 0 100K 
+Rres_n36in_not n36in_not 0 100K 
+
+
+Vn37init n37init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n37init n37init n37 n37inNxt nVdd or 
+xDff_n37in n37inNxt n37in n37in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n37init n37init 0 100 
+Rres_n37inNxt n37inNxt 0 100K 
+Rres_n37in n37in 0 100K 
+Rres_n37in_not n37in_not 0 100K 
+
+
+Vn38init n38init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n38init n38init n38 n38inNxt nVdd or 
+xDff_n38in n38inNxt n38in n38in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n38init n38init 0 100 
+Rres_n38inNxt n38inNxt 0 100K 
+Rres_n38in n38in 0 100K 
+Rres_n38in_not n38in_not 0 100K 
+
+
+Vn39init n39init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n39init n39init n39 n39inNxt nVdd or 
+xDff_n39in n39inNxt n39in n39in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n39init n39init 0 100 
+Rres_n39inNxt n39inNxt 0 100K 
+Rres_n39in n39in 0 100K 
+Rres_n39in_not n39in_not 0 100K 
+
+
+Vn40init n40init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n40init n40init n40 n40inNxt nVdd or 
+xDff_n40in n40inNxt n40in n40in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n40init n40init 0 100 
+Rres_n40inNxt n40inNxt 0 100K 
+Rres_n40in n40in 0 100K 
+Rres_n40in_not n40in_not 0 100K 
+
+
+Vn41init n41init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n41init n41init n41 n41inNxt nVdd or 
+xDff_n41in n41inNxt n41in n41in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n41init n41init 0 100 
+Rres_n41inNxt n41inNxt 0 100K 
+Rres_n41in n41in 0 100K 
+Rres_n41in_not n41in_not 0 100K 
+
+
+Vn42init n42init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n42init n42init n42 n42inNxt nVdd or 
+xDff_n42in n42inNxt n42in n42in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n42init n42init 0 100 
+Rres_n42inNxt n42inNxt 0 100K 
+Rres_n42in n42in 0 100K 
+Rres_n42in_not n42in_not 0 100K 
+
+
+Vn43init n43init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n43init n43init n43 n43inNxt nVdd or 
+xDff_n43in n43inNxt n43in n43in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n43init n43init 0 100 
+Rres_n43inNxt n43inNxt 0 100K 
+Rres_n43in n43in 0 100K 
+Rres_n43in_not n43in_not 0 100K 
+
+
+Vn44init n44init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n44init n44init n44 n44inNxt nVdd or 
+xDff_n44in n44inNxt n44in n44in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n44init n44init 0 100 
+Rres_n44inNxt n44inNxt 0 100K 
+Rres_n44in n44in 0 100K 
+Rres_n44in_not n44in_not 0 100K 
+
+
+Vn45init n45init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n45init n45init n45 n45inNxt nVdd or 
+xDff_n45in n45inNxt n45in n45in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n45init n45init 0 100 
+Rres_n45inNxt n45inNxt 0 100K 
+Rres_n45in n45in 0 100K 
+Rres_n45in_not n45in_not 0 100K 
+
+
+Vn46init n46init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n46init n46init n46 n46inNxt nVdd or 
+xDff_n46in n46inNxt n46in n46in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n46init n46init 0 100 
+Rres_n46inNxt n46inNxt 0 100K 
+Rres_n46in n46in 0 100K 
+Rres_n46in_not n46in_not 0 100K 
+
+
+Vn47init n47init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n47init n47init n47 n47inNxt nVdd or 
+xDff_n47in n47inNxt n47in n47in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n47init n47init 0 100 
+Rres_n47inNxt n47inNxt 0 100K 
+Rres_n47in n47in 0 100K 
+Rres_n47in_not n47in_not 0 100K 
+
+
+Vn48init n48init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n48init n48init n48 n48inNxt nVdd or 
+xDff_n48in n48inNxt n48in n48in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n48init n48init 0 100 
+Rres_n48inNxt n48inNxt 0 100K 
+Rres_n48in n48in 0 100K 
+Rres_n48in_not n48in_not 0 100K 
+
+
+Vn49init n49init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n49init n49init n49 n49inNxt nVdd or 
+xDff_n49in n49inNxt n49in n49in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n49init n49init 0 100 
+Rres_n49inNxt n49inNxt 0 100K 
+Rres_n49in n49in 0 100K 
+Rres_n49in_not n49in_not 0 100K 
+
+
+Vn50init n50init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n50init n50init n50 n50inNxt nVdd or 
+xDff_n50in n50inNxt n50in n50in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n50init n50init 0 100 
+Rres_n50inNxt n50inNxt 0 100K 
+Rres_n50in n50in 0 100K 
+Rres_n50in_not n50in_not 0 100K 
+
+
+Vn51init n51init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n51init n51init n51 n51inNxt nVdd or 
+xDff_n51in n51inNxt n51in n51in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n51init n51init 0 100 
+Rres_n51inNxt n51inNxt 0 100K 
+Rres_n51in n51in 0 100K 
+Rres_n51in_not n51in_not 0 100K 
+
+
+Vn52init n52init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n52init n52init n52 n52inNxt nVdd or 
+xDff_n52in n52inNxt n52in n52in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n52init n52init 0 100 
+Rres_n52inNxt n52inNxt 0 100K 
+Rres_n52in n52in 0 100K 
+Rres_n52in_not n52in_not 0 100K 
+
+
+Vn53init n53init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n53init n53init n53 n53inNxt nVdd or 
+xDff_n53in n53inNxt n53in n53in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n53init n53init 0 100 
+Rres_n53inNxt n53inNxt 0 100K 
+Rres_n53in n53in 0 100K 
+Rres_n53in_not n53in_not 0 100K 
+
+
+Vn54init n54init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n54init n54init n54 n54inNxt nVdd or 
+xDff_n54in n54inNxt n54in n54in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n54init n54init 0 100 
+Rres_n54inNxt n54inNxt 0 100K 
+Rres_n54in n54in 0 100K 
+Rres_n54in_not n54in_not 0 100K 
+
+
+Vn55init n55init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n55init n55init n55 n55inNxt nVdd or 
+xDff_n55in n55inNxt n55in n55in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n55init n55init 0 100 
+Rres_n55inNxt n55inNxt 0 100K 
+Rres_n55in n55in 0 100K 
+Rres_n55in_not n55in_not 0 100K 
+
+
+Vn56init n56init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n56init n56init n56 n56inNxt nVdd or 
+xDff_n56in n56inNxt n56in n56in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n56init n56init 0 100 
+Rres_n56inNxt n56inNxt 0 100K 
+Rres_n56in n56in 0 100K 
+Rres_n56in_not n56in_not 0 100K 
+
+
+Vn57init n57init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n57init n57init n57 n57inNxt nVdd or 
+xDff_n57in n57inNxt n57in n57in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n57init n57init 0 100 
+Rres_n57inNxt n57inNxt 0 100K 
+Rres_n57in n57in 0 100K 
+Rres_n57in_not n57in_not 0 100K 
+
+
+Vn58init n58init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n58init n58init n58 n58inNxt nVdd or 
+xDff_n58in n58inNxt n58in n58in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n58init n58init 0 100 
+Rres_n58inNxt n58inNxt 0 100K 
+Rres_n58in n58in 0 100K 
+Rres_n58in_not n58in_not 0 100K 
+
+
+Vn59init n59init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n59init n59init n59 n59inNxt nVdd or 
+xDff_n59in n59inNxt n59in n59in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n59init n59init 0 100 
+Rres_n59inNxt n59inNxt 0 100K 
+Rres_n59in n59in 0 100K 
+Rres_n59in_not n59in_not 0 100K 
+
+
+Vn60init n60init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n60init n60init n60 n60inNxt nVdd or 
+xDff_n60in n60inNxt n60in n60in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n60init n60init 0 100 
+Rres_n60inNxt n60inNxt 0 100K 
+Rres_n60in n60in 0 100K 
+Rres_n60in_not n60in_not 0 100K 
+
+
+Vn61init n61init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n61init n61init n61 n61inNxt nVdd or 
+xDff_n61in n61inNxt n61in n61in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n61init n61init 0 100 
+Rres_n61inNxt n61inNxt 0 100K 
+Rres_n61in n61in 0 100K 
+Rres_n61in_not n61in_not 0 100K 
+
+
+Vn62init n62init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n62init n62init n62 n62inNxt nVdd or 
+xDff_n62in n62inNxt n62in n62in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n62init n62init 0 100 
+Rres_n62inNxt n62inNxt 0 100K 
+Rres_n62in n62in 0 100K 
+Rres_n62in_not n62in_not 0 100K 
+
+
+Vn63init n63init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n63init n63init n63 n63inNxt nVdd or 
+xDff_n63in n63inNxt n63in n63in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n63init n63init 0 100 
+Rres_n63inNxt n63inNxt 0 100K 
+Rres_n63in n63in 0 100K 
+Rres_n63in_not n63in_not 0 100K 
+
+
+Vn64init n64init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n64init n64init n64 n64inNxt nVdd or 
+xDff_n64in n64inNxt n64in n64in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n64init n64init 0 100 
+Rres_n64inNxt n64inNxt 0 100K 
+Rres_n64in n64in 0 100K 
+Rres_n64in_not n64in_not 0 100K 
+
+
+Vn65init n65init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n65init n65init n65 n65inNxt nVdd or 
+xDff_n65in n65inNxt n65in n65in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n65init n65init 0 100 
+Rres_n65inNxt n65inNxt 0 100K 
+Rres_n65in n65in 0 100K 
+Rres_n65in_not n65in_not 0 100K 
+
+
+Vn66init n66init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n66init n66init n66 n66inNxt nVdd or 
+xDff_n66in n66inNxt n66in n66in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n66init n66init 0 100 
+Rres_n66inNxt n66inNxt 0 100K 
+Rres_n66in n66in 0 100K 
+Rres_n66in_not n66in_not 0 100K 
+
+
+Vn67init n67init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n67init n67init n67 n67inNxt nVdd or 
+xDff_n67in n67inNxt n67in n67in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n67init n67init 0 100 
+Rres_n67inNxt n67inNxt 0 100K 
+Rres_n67in n67in 0 100K 
+Rres_n67in_not n67in_not 0 100K 
+
+
+Vn68init n68init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n68init n68init n68 n68inNxt nVdd or 
+xDff_n68in n68inNxt n68in n68in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n68init n68init 0 100 
+Rres_n68inNxt n68inNxt 0 100K 
+Rres_n68in n68in 0 100K 
+Rres_n68in_not n68in_not 0 100K 
+
+
+Vn69init n69init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n69init n69init n69 n69inNxt nVdd or 
+xDff_n69in n69inNxt n69in n69in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n69init n69init 0 100 
+Rres_n69inNxt n69inNxt 0 100K 
+Rres_n69in n69in 0 100K 
+Rres_n69in_not n69in_not 0 100K 
+
+
+Vn70init n70init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n70init n70init n70 n70inNxt nVdd or 
+xDff_n70in n70inNxt n70in n70in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n70init n70init 0 100 
+Rres_n70inNxt n70inNxt 0 100K 
+Rres_n70in n70in 0 100K 
+Rres_n70in_not n70in_not 0 100K 
+
+
+Vn71init n71init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n71init n71init n71 n71inNxt nVdd or 
+xDff_n71in n71inNxt n71in n71in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n71init n71init 0 100 
+Rres_n71inNxt n71inNxt 0 100K 
+Rres_n71in n71in 0 100K 
+Rres_n71in_not n71in_not 0 100K 
+
+
+Vn72init n72init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n72init n72init n72 n72inNxt nVdd or 
+xDff_n72in n72inNxt n72in n72in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n72init n72init 0 100 
+Rres_n72inNxt n72inNxt 0 100K 
+Rres_n72in n72in 0 100K 
+Rres_n72in_not n72in_not 0 100K 
+
+
+Vn73init n73init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n73init n73init n73 n73inNxt nVdd or 
+xDff_n73in n73inNxt n73in n73in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n73init n73init 0 100 
+Rres_n73inNxt n73inNxt 0 100K 
+Rres_n73in n73in 0 100K 
+Rres_n73in_not n73in_not 0 100K 
+
+
+Vn74init n74init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n74init n74init n74 n74inNxt nVdd or 
+xDff_n74in n74inNxt n74in n74in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n74init n74init 0 100 
+Rres_n74inNxt n74inNxt 0 100K 
+Rres_n74in n74in 0 100K 
+Rres_n74in_not n74in_not 0 100K 
+
+
+Vn75init n75init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n75init n75init n75 n75inNxt nVdd or 
+xDff_n75in n75inNxt n75in n75in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n75init n75init 0 100 
+Rres_n75inNxt n75inNxt 0 100K 
+Rres_n75in n75in 0 100K 
+Rres_n75in_not n75in_not 0 100K 
+
+
+Vn76init n76init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n76init n76init n76 n76inNxt nVdd or 
+xDff_n76in n76inNxt n76in n76in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n76init n76init 0 100 
+Rres_n76inNxt n76inNxt 0 100K 
+Rres_n76in n76in 0 100K 
+Rres_n76in_not n76in_not 0 100K 
+
+
+Vn77init n77init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n77init n77init n77 n77inNxt nVdd or 
+xDff_n77in n77inNxt n77in n77in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n77init n77init 0 100 
+Rres_n77inNxt n77inNxt 0 100K 
+Rres_n77in n77in 0 100K 
+Rres_n77in_not n77in_not 0 100K 
+
+
+Vn78init n78init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n78init n78init n78 n78inNxt nVdd or 
+xDff_n78in n78inNxt n78in n78in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n78init n78init 0 100 
+Rres_n78inNxt n78inNxt 0 100K 
+Rres_n78in n78in 0 100K 
+Rres_n78in_not n78in_not 0 100K 
+
+
+Vn79init n79init 0 PULSE(0V 0V 0 0.05 0.05 1.8 20)
+xOr_n79init n79init n79 n79inNxt nVdd or 
+xDff_n79in n79inNxt n79in n79in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n79init n79init 0 100 
+Rres_n79inNxt n79inNxt 0 100K 
+Rres_n79in n79in 0 100K 
+Rres_n79in_not n79in_not 0 100K 
+
+
+Vn80init n80init 0 PULSE(0V 5V 0 0.05 0.05 1.8 20)
+xOr_n80init n80init n80 n80inNxt nVdd or 
+xDff_n80in n80inNxt n80in n80in_not nVdd nVddN clk1 clk1Not set reset dff 
+Rres_n80init n80init 0 100 
+Rres_n80inNxt n80inNxt 0 100K 
+Rres_n80in n80in 0 100K 
+Rres_n80in_not n80in_not 0 100K 
+
+
+
+***** ANALYSIS AND OUTPUT *****
+.TRAN .1s 20s 
+.PRINT TRAN V(n0) V(n1) V(n2) V(n3) V(n4) V(n5) V(n6) V(n7) V(n8) V(n9) V(n10) 
++ V(n11) V(n12) V(n13) V(n14) V(n15) V(n16) V(n17) V(n18) V(n19) V(n20) 
++ V(n21) V(n22) V(n23) V(n24) V(n25) V(n26) V(n27) V(n28) V(n29) V(n30) 
++ V(n31) V(n32) V(n33) V(n34) V(n35) V(n36) V(n37) V(n38) V(n39) V(n40) 
++ V(n41) V(n42) V(n43) V(n44) V(n45) V(n46) V(n47) V(n48) V(n49) V(n50) 
++ V(n51) V(n52) V(n53) V(n54) V(n55) V(n56) V(n57) V(n58) V(n59) V(n60) 
++ V(n61) V(n62) V(n63) V(n64) V(n65) V(n66) V(n67) V(n68) V(n69) V(n70) 
++ V(n71) V(n72) V(n73) V(n74) V(n75) V(n76) V(n77) V(n78) V(n79) V(n80) 
+
+***** SUBCIRCUITS *****
+
+***** AND Subcircuits 
+.SUBCKT AND1 in0 outF
+*** Equation:  outF = 0 AND in0
+xAnd_outF in0 nVdd outF and 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT AND2 in0 in1 outF
+*** Equation:  outF = in0 AND in1
+xAnd_outF in0 in1 outF and 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT AND3 in0 in1 in2 outF
+*** Equation:  outF = in0 AND in1 AND in2
+xAnd_in0L1 in0 in1 in0L1 nVdd and 
+Rres_in0L1 in0L1 0 100K
+xAnd_outF in0L1 in2 outF and 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT AND4 in0 in1 in2 in3 outF
+*** Equation:  outF = in0 AND in1 AND in2 AND in3
+xAnd_in0L1 in0 in1 in0L1 nVdd and 
+Rres_in0L1 in0L1 0 100K
+xAnd_in1L1 in2 in3 in1L1 nVdd and 
+Rres_in1L1 in1L1 0 100K
+xAnd_outF in0L1 in1L1 outF and 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT AND5 in0 in1 in2 in3 in4 outF
+*** Equation:  outF = in0 AND in1 AND in2 AND in3 AND in4
+xAnd_in0L1 in0 in1 in0L1 nVdd and 
+Rres_in0L1 in0L1 0 100K
+xAnd_in1L1 in2 in3 in1L1 nVdd and 
+Rres_in1L1 in1L1 0 100K
+xAnd_in0L2 in0L1 in1L1 in0L2 nVdd and 
+Rres_in0L2 in0L2 0 100K
+xAnd_outF in0L2 in4 outF and 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT AND6 in0 in1 in2 in3 in4 in5 outF
+*** Equation:  outF = in0 AND in1 AND in2 AND in3 AND in4 AND in5
+xAnd_in0L1 in0 in1 in0L1 nVdd and 
+Rres_in0L1 in0L1 0 100K
+xAnd_in1L1 in2 in3 in1L1 nVdd and 
+Rres_in1L1 in1L1 0 100K
+xAnd_in2L1 in4 in5 in2L1 nVdd and 
+Rres_in2L1 in2L1 0 100K
+xAnd_in0L2 in0L1 in1L1 in0L2 nVdd and 
+Rres_in0L2 in0L2 0 100K
+xAnd_outF in0L2 in2L1 outF and 
+Rres_outF outF 0 100K
+.ENDS 
+
+
+***** OR Subcircuits 
+.SUBCKT OR12 in0 in1 in2 in3 in4 in5 in6 in7 in8 in9 in10 in11 outF
+*** Equation:  outF = in0 OR in1 OR in2 OR in3 OR in4 OR in5 OR in6 OR in7 
+************************OR in8 OR in9 OR in10 OR in11
+xOr_in0L1 in0 in1 in0L1 nVdd or 
+Rres_in0L1 in0L1 0 100K
+xOr_in1L1 in2 in3 in1L1 nVdd or 
+Rres_in1L1 in1L1 0 100K
+xOr_in2L1 in4 in5 in2L1 nVdd or 
+Rres_in2L1 in2L1 0 100K
+xOr_in3L1 in6 in7 in3L1 nVdd or 
+Rres_in3L1 in3L1 0 100K
+xOr_in4L1 in8 in9 in4L1 nVdd or 
+Rres_in4L1 in4L1 0 100K
+xOr_in5L1 in10 in11 in5L1 nVdd or 
+Rres_in5L1 in5L1 0 100K
+xOr_in0L2 in0L1 in1L1 in0L2 nVdd or 
+Rres_in0L2 in0L2 0 100K
+xOr_in1L2 in2L1 in3L1 in1L2 nVdd or 
+Rres_in1L2 in1L2 0 100K
+xOr_in2L2 in4L1 in5L1 in2L2 nVdd or 
+Rres_in2L2 in2L2 0 100K
+xOr_in0L3 in0L2 in1L2 in0L3 nVdd or 
+Rres_in0L3 in0L3 0 100K
+xOr_outF in0L3 in2L2 outF or 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT OR13 in0 in1 in2 in3 in4 in5 in6 in7 in8 in9 in10 in11 in12 outF
+*** Equation:  outF = in0 OR in1 OR in2 OR in3 OR in4 OR in5 OR in6 OR 
+***********************   in7 OR in8 OR in9 OR in10 OR in11 OR in12
+xOr_in0L1 in0 in1 in0L1 nVdd or 
+Rres_in0L1 in0L1 0 100K
+xOr_in1L1 in2 in3 in1L1 nVdd or 
+Rres_in1L1 in1L1 0 100K
+xOr_in2L1 in4 in5 in2L1 nVdd or 
+Rres_in2L1 in2L1 0 100K
+xOr_in3L1 in6 in7 in3L1 nVdd or 
+Rres_in3L1 in3L1 0 100K
+xOr_in4L1 in8 in9 in4L1 nVdd or 
+Rres_in4L1 in4L1 0 100K
+xOr_in5L1 in10 in11 in5L1 nVdd or 
+Rres_in5L1 in5L1 0 100K
+xOr_in0L2 in0L1 in1L1 in0L2 nVdd or 
+Rres_in0L2 in0L2 0 100K
+xOr_in1L2 in2L1 in3L1 in1L2 nVdd or 
+Rres_in1L2 in1L2 0 100K
+xOr_in2L2 in4L1 in5L1 in2L2 nVdd or 
+Rres_in2L2 in2L2 0 100K
+xOr_in0L3 in0L2 in1L2 in0L3 nVdd or 
+Rres_in0L3 in0L3 0 100K
+xOr_in1L3 in2L2 in12 in1L3 nVdd or 
+Rres_in1L3 in1L3 0 100K
+xOr_outF in0L3 in1L3 outF or 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT OR8 in0 in1 in2 in3 in4 in5 in6 in7 outF
+*** Equation:  outF = in0 OR in1 OR in2 OR in3 OR in4 OR in5 OR in6 OR in7
+xOr_in0L1 in0 in1 in0L1 nVdd or 
+Rres_in0L1 in0L1 0 100K
+xOr_in1L1 in2 in3 in1L1 nVdd or 
+Rres_in1L1 in1L1 0 100K
+xOr_in2L1 in4 in5 in2L1 nVdd or 
+Rres_in2L1 in2L1 0 100K
+xOr_in3L1 in6 in7 in3L1 nVdd or 
+Rres_in3L1 in3L1 0 100K
+xOr_in0L2 in0L1 in1L1 in0L2 nVdd or 
+Rres_in0L2 in0L2 0 100K
+xOr_in1L2 in2L1 in3L1 in1L2 nVdd or 
+Rres_in1L2 in1L2 0 100K
+xOr_outF in0L2 in1L2 outF or 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT OR9 in0 in1 in2 in3 in4 in5 in6 in7 in8 outF
+*** Equation:  outF = in0 OR in1 OR in2 OR in3 OR in4 OR in5 OR in6 OR in7 OR in8
+xOr_in0L1 in0 in1 in0L1 nVdd or 
+Rres_in0L1 in0L1 0 100K
+xOr_in1L1 in2 in3 in1L1 nVdd or 
+Rres_in1L1 in1L1 0 100K
+xOr_in2L1 in4 in5 in2L1 nVdd or 
+Rres_in2L1 in2L1 0 100K
+xOr_in3L1 in6 in7 in3L1 nVdd or 
+Rres_in3L1 in3L1 0 100K
+xOr_in0L2 in0L1 in1L1 in0L2 nVdd or 
+Rres_in0L2 in0L2 0 100K
+xOr_in1L2 in2L1 in3L1 in1L2 nVdd or 
+Rres_in1L2 in1L2 0 100K
+xOr_in0L3 in0L2 in1L2 in0L3 nVdd or 
+Rres_in0L3 in0L3 0 100K
+xOr_outF in0L3 in8 outF or 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT OR14 in0 in1 in2 in3 in4 in5 in6 in7 in8 in9 in10 in11 in12 in13 outF
+*** Equation:  outF = in0 OR in1 OR in2 OR in3 OR in4 OR in5 OR in6 OR 
+****                               in7 OR in8 OR in9 OR in10 OR in11 OR in12 OR in13
+xOr_in0L1 in0 in1 in0L1 nVdd or 
+Rres_in0L1 in0L1 0 100K
+xOr_in1L1 in2 in3 in1L1 nVdd or 
+Rres_in1L1 in1L1 0 100K
+xOr_in2L1 in4 in5 in2L1 nVdd or 
+Rres_in2L1 in2L1 0 100K
+xOr_in3L1 in6 in7 in3L1 nVdd or 
+Rres_in3L1 in3L1 0 100K
+xOr_in4L1 in8 in9 in4L1 nVdd or 
+Rres_in4L1 in4L1 0 100K
+xOr_in5L1 in10 in11 in5L1 nVdd or 
+Rres_in5L1 in5L1 0 100K
+xOr_in6L1 in12 in13 in6L1 nVdd or 
+Rres_in6L1 in6L1 0 100K
+xOr_in0L2 in0L1 in1L1 in0L2 nVdd or 
+Rres_in0L2 in0L2 0 100K
+xOr_in1L2 in2L1 in3L1 in1L2 nVdd or 
+Rres_in1L2 in1L2 0 100K
+xOr_in2L2 in4L1 in5L1 in2L2 nVdd or 
+Rres_in2L2 in2L2 0 100K
+xOr_in0L3 in0L2 in1L2 in0L3 nVdd or 
+Rres_in0L3 in0L3 0 100K
+xOr_in1L3 in2L2 in6L1 in1L3 nVdd or 
+Rres_in1L3 in1L3 0 100K
+xOr_outF in0L3 in1L3 outF or 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT OR15 in0 in1 in2 in3 in4 in5 in6 in7 in8 in9 in10 in11 in12 in13 in14 outF
+*** Equation:  outF = in0 OR in1 OR in2 OR in3 OR in4 OR in5 OR in6 OR in7 
+***********                    OR in8 OR in9 OR in10 OR in11 OR in12 OR in13 OR in14
+xOr_in0L1 in0 in1 in0L1 nVdd or 
+Rres_in0L1 in0L1 0 100K
+xOr_in1L1 in2 in3 in1L1 nVdd or 
+Rres_in1L1 in1L1 0 100K
+xOr_in2L1 in4 in5 in2L1 nVdd or 
+Rres_in2L1 in2L1 0 100K
+xOr_in3L1 in6 in7 in3L1 nVdd or 
+Rres_in3L1 in3L1 0 100K
+xOr_in4L1 in8 in9 in4L1 nVdd or 
+Rres_in4L1 in4L1 0 100K
+xOr_in5L1 in10 in11 in5L1 nVdd or 
+Rres_in5L1 in5L1 0 100K
+xOr_in6L1 in12 in13 in6L1 nVdd or 
+Rres_in6L1 in6L1 0 100K
+xOr_in0L2 in0L1 in1L1 in0L2 nVdd or 
+Rres_in0L2 in0L2 0 100K
+xOr_in1L2 in2L1 in3L1 in1L2 nVdd or 
+Rres_in1L2 in1L2 0 100K
+xOr_in2L2 in4L1 in5L1 in2L2 nVdd or 
+Rres_in2L2 in2L2 0 100K
+xOr_in3L2 in6L1 in14 in3L2 nVdd or 
+Rres_in3L2 in3L2 0 100K
+xOr_in0L3 in0L2 in1L2 in0L3 nVdd or 
+Rres_in0L3 in0L3 0 100K
+xOr_in1L3 in2L2 in3L2 in1L3 nVdd or 
+Rres_in1L3 in1L3 0 100K
+xOr_outF in0L3 in1L3 outF or 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT OR16 in0 in1 in2 in3 in4 in5 in6 in7 in8 in9 in10 in11 in12 
++ in13 in14 in15 outF
+*** Equation:  outF = in0 OR in1 OR in2 OR in3 OR in4 OR in5 OR in6 
+*** OR in7 OR in8 OR in9 OR in10 OR in11 OR in12 OR in13 OR in14 OR in15
+xOr_in0L1 in0 in1 in0L1 nVdd or 
+Rres_in0L1 in0L1 0 100K
+xOr_in1L1 in2 in3 in1L1 nVdd or 
+Rres_in1L1 in1L1 0 100K
+xOr_in2L1 in4 in5 in2L1 nVdd or 
+Rres_in2L1 in2L1 0 100K
+xOr_in3L1 in6 in7 in3L1 nVdd or 
+Rres_in3L1 in3L1 0 100K
+xOr_in4L1 in8 in9 in4L1 nVdd or 
+Rres_in4L1 in4L1 0 100K
+xOr_in5L1 in10 in11 in5L1 nVdd or 
+Rres_in5L1 in5L1 0 100K
+xOr_in6L1 in12 in13 in6L1 nVdd or 
+Rres_in6L1 in6L1 0 100K
+xOr_in7L1 in14 in15 in7L1 nVdd or 
+Rres_in7L1 in7L1 0 100K
+xOr_in0L2 in0L1 in1L1 in0L2 nVdd or 
+Rres_in0L2 in0L2 0 100K
+xOr_in1L2 in2L1 in3L1 in1L2 nVdd or 
+Rres_in1L2 in1L2 0 100K
+xOr_in2L2 in4L1 in5L1 in2L2 nVdd or 
+Rres_in2L2 in2L2 0 100K
+xOr_in3L2 in6L1 in7L1 in3L2 nVdd or 
+Rres_in3L2 in3L2 0 100K
+xOr_in0L3 in0L2 in1L2 in0L3 nVdd or 
+Rres_in0L3 in0L3 0 100K
+xOr_in1L3 in2L2 in3L2 in1L3 nVdd or 
+Rres_in1L3 in1L3 0 100K
+xOr_outF in0L3 in1L3 outF or 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT OR1 in0 outF
+*** Equation:  outF = 0 OR in0
+xOr_outF in0 nVddN outF or 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT OR2 in0 in1 outF
+*** Equation:  outF = in0 OR in1
+xOr_outF in0 in1 outF or 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT OR3 in0 in1 in2 outF
+*** Equation:  outF = in0 OR in1 OR in2
+xOr_in0L1 in0 in1 in0L1 nVdd or 
+Rres_in0L1 in0L1 0 100K
+xOr_outF in0L1 in2 outF or 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT OR4 in0 in1 in2 in3 outF
+*** Equation:  outF = in0 OR in1 OR in2 OR in3
+xOr_in0L1 in0 in1 in0L1 nVdd or 
+Rres_in0L1 in0L1 0 100K
+xOr_in1L1 in2 in3 in1L1 nVdd or 
+Rres_in1L1 in1L1 0 100K
+xOr_outF in0L1 in1L1 outF or 
+Rres_outF outF 0 100K
+.ENDS 
+
+.SUBCKT OR5 in0 in1 in2 in3 in4 outF
+*** Equation:  outF = in0 OR in1 OR in2 OR in3 OR in4
+xOr_in0L1 in0 in1 in0L1 nVdd or 
+Rres_in0L1 in0L1 0 100K
+xOr_in1L1 in2 in3 in1L1 nVdd or 
+Rres_in1L1 in1L1 0 100K
+xOr_in0L2 in0L1 in1L1 in0L2 nVdd or 
+Rres_in0L2 in0L2 0 100K
+xOr_outF in0L2 in4 outF or 
+Rres_outF outF 0 100K
+.ENDS 
+
+
+************************* Cmos Logic Gate Subcircuits
+
+**** Inverter Bsource 
+.SUBCKT NEG inA outF
+.PARAM negOne=-1.0
+Bneg1 outF 0 V={ V(inA) * negOne }
+.ENDS
+
+************************* SUBCIRCUITS CMOS Based Logic *************************
+
+*** SUBCIRCUIT CMOS D FLIP-FLOP
+.SUBCKT DFF din dout doutNot nVdd nVddN clk clkNot set reset
+*** Equation:  outF = inA (clkH=clk, clkL=NOT(clk))
+
+xtx_tg1 din tg1_out clk clkNot nVdd nVddN tx
+xnor_g1 set tg1_out g1_out nVdd nor
+xnor_g2 g1_out reset g2_out nVdd nor
+xtx_tg2 g2_out tg1_out clkNot clk nVdd nVddN tx
+xtx_tg3 g1_out tg3_out clkNot clk nVdd nVddN tx
+xnor_g3 set g4_out g3_out nVdd nor
+xnor_g4 tg3_out reset g4_out nVdd nor
+xtx_tg4 g3_out tg4_out clk clkNot nVdd nVddN tx
+xnot_g5 tg4_out dout nVdd not
+xnot_g6 g4_out doutNot nVdd not
+
+.ENDS
+
+********************************************************************
+
+***** NOT Subcircuit 
+.SUBCKT NOT inA outF nVdd 
+*** SUBCIRCUIT NOT 
+*** Equation:  outF = NOT(inA) 
+Mp1 outF inA nVdd nVdd cd4012_pmos l=5u w=270u 
+Mn1 outF inA 0 0 cd4012_nmos l=5u w=175u 
+.ENDS  
+
+********************************************************************
+***** NOR Subcircuit 
+.SUBCKT NOR inA inB outF nVdd 
+*** SUBCIRCUIT NOR 
+*** Equation:  outF = NOT(inA OR inB) 
+*** PMOS 
+mq4 nq4drain inB nVdd nVdd cd4012_pmos l=5u w=270u 
+mq2 outF inA nq4drain nq4drain cd4012_pmos l=5u w=270u 
+*** NMOS 
+mq3 outF inB 0 0 cd4012_nmos l=5u w=175u 
+mq1 outF inA 0 0 cd4012_nmos l=5u w=175u 
+.ENDS 
+
+********************************************************************
+.SUBCKT AND inA inB outF nVdd 
+*** SUBCIRCUIT AND 
+*** Equation:  outF = inA AND inB 
+*** PMOS 
+mq4 outF1 inB nVdd nVdd cd4012_pmos l=5u w=270u 
+mq2 outF1 inA nVdd nVdd cd4012_pmos l=5u w=270u 
+*** NMOS 
+mq3 nq3drain inB 0 0 cd4012_nmos l=5u w=175u 
+mq1 outF1 inA nq3drain nq3drain cd4012_nmos l=5u w=175u 
+****** Invert output of NAND Circ 
+*** Equation:  outF = NOT(outF1) 
+mp1 outF outF1 nVdd nVdd cd4012_pmos l=5u w=270u 
+mn1 outF outF1 0 0 cd4012_nmos l=5u w=175u 
+.ENDS  
+
+********************************************************************
+.SUBCKT OR inA inB outF nVdd 
+*** SUBCIRCUIT OR 
+*** Equation:  outF = inA OR inB 
+****** NOR Circ 
+*** PMOS 
+mq4 nq4drain inB nVdd nVdd cd4012_pmos l=5u w=270u 
+mq2 outF1 inA nq4drain nq4drain cd4012_pmos l=5u w=270u 
+*** NMOS 
+mq3 outF1 inB 0 0 cd4012_nmos l=5u w=175u 
+mq1 outF1 inA 0 0 cd4012_nmos l=5u w=175u 
+****** Invert output of NOR Circ 
+*** Equation:  outF = NOT(outF1) 
+mp1 outF outF1 nVdd nVdd cd4012_pmos l=5u w=270u 
+mn1 outF outF1 0 0 cd4012_nmos l=5u w=175u 
+.ENDS  
+
+********************************************************************
+***** Tx Gate Subcircuit 
+.SUBCKT TX inA outF clkL clkH nVdd nVddN 
+*** SUBCIRCUIT TRANSMISSION GATE 
+*** Equation:  outF = inA (clkH=clk, clkL=NOT(clk)) 
+**********TVR mod****** 
+Mp1 outF clkL inA nVdd cd4012_pmos l=5u w=270u 
+Mn1 inA clkH outF nVddN cd4012_nmos l=5u w=175u 
+.ENDS 
+
+********************************************************************
+.MODEL cd4012_pmos PMOS ( 
++ LEVEL = 3  UO = 310  VTO = -1.6  NFS = 5.794E+10  TOX = 6E-08  NSUB = 5.701E+15 
++ NSS = 0    VMAX = 5.374E+04   RS = 5.359   RD = 93.66   RSH = 0   IS = 1E-14 
++ XJ = 7.9E-06   LD = 3E-08   DELTA = 0   THETA = 0.0278   ETA = 0.535   KAPPA = 0.643 
++ KP = 1.711E-05 L=5u W=270u GAMMA=0.37 PHI=0.65 NFS=1E10 
++ CBD=0.1P CBS=0.1P PB=0.81 CGSO=2P CGBO=4P CGDO=2P CJ=2E-4 MJ=0.5 CJSW=1E-9 
++ MJSW=0.5 JS=1E-8 TPG=0 KF=1E-25 AF=1 FC=0.5 TNOM=27) 
+**************************
+.MODEL cd4012_nmos NMOS ( 
++ LEVEL = 3 UO = 190   VTO = 1.679   NFS = 2.368E+11   TOX = 6E-08   NSUB = 8.601E+15 
++ NSS = 0   VMAX = 4.206E+04   RS = 13.21   RD = 11.59   RSH = 0   IS = 1E-14 
++ VMAX = 4.206E+04 NFS=1E10  GAMMA=0.37 PHI=0.65  
++ XJ = 7.1E-06   LD = 8.6E-07   DELTA = 0   THETA = 0.0021   ETA = 0.057   KAPPA = 0.15 
++ KP = 2.161E-05  L=5u W=175u 
++ CBD=0.1P CBS=0.1P PB=0.81 CGSO=2P CGBO=4P CGDO=2P CJ=2E-4 MJ=0.5 CJSW=1E-9 
++ MJSW=0.5 JS=1E-8 TPG=0 KF=1E-25 AF=1 FC=0.5 TNOM=27) 
+
+
+
+.END

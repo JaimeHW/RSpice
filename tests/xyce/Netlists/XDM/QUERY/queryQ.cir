@@ -1,0 +1,39 @@
+* Xyce netlist for testing xdm query mode (-q) for Q (BJT)
+* This circuit is used elsewhere to test lead currents for 
+* the BJT.  It was modified here to have two model cards (with
+* different values for tnom.
+
+vie1 0 1 0
+vic1 0 3 5
+vib1 0 2 pulse(0 1 1ns 1ns 1ns 1us) 
+q1   3 2 1 qmod1 
+
+vie2 0 4 0
+vic2 0 6 5
+vib2 0 5 pulse(0 1 1ns 1ns 1ns 1us) 
+q2   6 5 4 qmod2 
+
+.model qmod1 npn
++bf=130 br=1 is=3e-14
++tf=1e-8 vjs=0.68 ne=1.6 nc=2.0 rb=450
++cje=1uf cjc=1uf cjs=1uf ikf=0.002 ikr=0.002 vaf=50 var=50
++nf=1.0 ise=0 nr=1 isc=0 irb=0 rbm=450 re=0 rc=0 vje=0.75 
++mje=0.33 xtf=0 vtf=100 itf=0 ptf=0 vjc=0.75 mjs=0 xtb=0 
++eg=1.11 xti=3 kf=0 af=1 fc=0.5 tnom=27
+
+.model qmod2 npn
++bf=130 br=1 is=3e-14
++tf=1e-8 vjs=0.68 ne=1.6 nc=2.0 rb=450
++cje=1uf cjc=1uf cjs=1uf ikf=0.002 ikr=0.002 vaf=50 var=50
++nf=1.0 ise=0 nr=1 isc=0 irb=0 rbm=450 re=0 rc=0 vje=0.75 
++mje=0.33 xtf=0 vtf=100 itf=0 ptf=0 vjc=0.75 mjs=0 xtb=0 
++eg=1.11 xti=3 kf=0 af=1 fc=0.5 tnom=30
+
+.options nonlin-tran rhstol=1.0e-7
+.tran 1ns 20us
+
+.print tran {i(vib1)-ib(q1)} {i(vic1)-ic(q1)} {i(vie1)-ie(q1)}   
+.end
+
+
+

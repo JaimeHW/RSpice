@@ -1,0 +1,17 @@
+Xmodelcard.nmos
+Xmodelcard.pmos
+tags
+test1.X.cir
+test10.X.cir
+test11.X.cir
+test12.X.cir
+test13.X.cir
+test14.X.cir
+test2.X.cir
+test3.X.cir
+test4.X.cir
+test5.X.cir
+test6.X.cir
+test7.X.cir
+test8.X.cir
+test9.X.cir

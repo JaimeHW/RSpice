@@ -1,0 +1,12 @@
+* This test will test the use of a Windows drive letter path without
+* file separators in them.
+
+.DC V1 1 5 1
+.PRINT DC V(1) I(R1) I(R2)
+
+V1 1 0 1
+R2 1 0 {RVAL}
+
+.INC sub1/dlns_path
+
+.END

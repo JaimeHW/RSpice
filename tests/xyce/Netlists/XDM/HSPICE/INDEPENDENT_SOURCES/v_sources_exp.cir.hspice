@@ -1,0 +1,10 @@
+* HSPICE netlist for testing mixed current sources
+
+.TRAN 0.001ms 0.5ms
+.PRINT TRAN V(1) V(2) I(R2)
+
+VRAMP 1 0 EXP 0V 0.2V 2us 20us 40us 60us
+R1 1 2 100
+R2 2 0 75
+
+.END

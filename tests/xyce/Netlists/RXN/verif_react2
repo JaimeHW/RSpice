@@ -1,0 +1,17 @@
+
+species
+Aspec 0.0 0.0 0
+Bspec 0.0 0.0 0
+Cspec 0.0 0.0 0
+end
+
+reactions
+Aspec+Bspec->Cspec; simple(1e-3)
+end
+
+initial_conditions
+Aspec 100.0
+Bspec 50.0
+Cspec 0.0
+end
+

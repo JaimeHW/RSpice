@@ -1,0 +1,22 @@
+********************************************************
+* Test .OPTIONS MEASURE MEASPRINT=STDOUT.  This should
+* suppress the generation of the .mt0 file, but the
+* measure output to stdout should still occur.
+*
+* See SON Bugs 1054 and 1057.
+********************************************************
+
+V1 1 0 PWL 0 -1 1 1 
+R1 1 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1)
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.1
+
+* Test at least two measure types
+.MEASURE TRAN MAXV1 MAX V(1)
+.MEASURE TRAN MINV1 MIN V(1)
+
+.OPTIONS MEASURE MEASPRINT=STDOUT
+.END
+

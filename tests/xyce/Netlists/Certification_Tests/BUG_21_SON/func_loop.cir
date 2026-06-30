@@ -1,0 +1,17 @@
+Does .param work with functions?
+
+.func foobar(x) {x*x}
+.func rancid(x) {x*bletch}
+
+.param foobie=3.1415926535
++ bletch={foobie*foobar(666)}
++ puke={rancid(1e-8)}
+
+V1 1 0 1
+R1 1 0 1
+B1 2 0 v={rancid(v(1))}
+R2 2 0 1 
+
+.DC V1 0 1 .1
+.print DC v(1) v(2)
+.end

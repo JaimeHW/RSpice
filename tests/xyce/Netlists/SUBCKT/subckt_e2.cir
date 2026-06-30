@@ -1,0 +1,12 @@
+Simple test of subcircuit scoping with include files
+* Full test, subcircuiting, includes.
+V1 1 0 PULSE (0v 5V 1us 10ns 10ns 1us 2us)
+X1 1 2 DFOR
+R1 2 0 10k
+
+
+.print TRAN V(1) V(2)
+.tran 10ns 6us
+
+.include "dfor.lib"
+.end

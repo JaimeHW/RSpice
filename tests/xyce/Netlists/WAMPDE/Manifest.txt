@@ -1,0 +1,11 @@
+Todd_test.cir
+exclude
+invert1.cir
+invert1.cir.sh
+invert1.cir.tags
+invert1_WAMPDE.cir
+sandler24.cir
+sandler24.cir.sh
+sandler24.cir.tags
+sandler24_WAMPDE.cir
+tags

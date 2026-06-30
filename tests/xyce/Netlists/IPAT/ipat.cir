@@ -1,0 +1,63 @@
+* Test Pattern source.  The source specification
+* is:
+*
+*   PAT (VHI VLO TD TR TF TSAMPLE DATA R)
+*
+* This test covers the cases of:
+*
+*  1) TR and TF being different
+*
+*  2) Positive and negative TD values
+*
+*  3) The inclusion of the optional () pair
+*
+*  4) Various R (repeat) values
+*
+*  5) Non-zero VHI and VLO values
+*
+* See SON Bug 1165 for more details.
+*
+*************************************************
+
+* Non-repeating waveforms
+I1 1 0 PAT (5 0 0n 1n 2n 5n b1010)
+I2 2 0 pat 5 0 0n 2n 1n 5n b0101 R=0
+I3 3 0 pat 5 0 5n 1n 2n 5n b1010
+I4 4 0 pat 5 0 5n 2n 1n 5n b0101
+I5 5 0 pat (5 0 -7.5n 1n 1n 5n b1010)
+
+* various repeat syntaxes.
+I6 6 0 pat (5 0 0n 1n 2n 5n b1010 R=1)
+I7 7 0 pat(5 0 0n 2n 1n 5n b0101 R=1)
+I8 8 0 pat 5 0  5.0n 2n 1n 5n b1010 R=1
+I9 9 0 pat 5 0 -7.5n 2n 1n 5n b1010 R=1
+I10 10 0 pat 5 0 0n 1n 2n 5n b101 R=1
+I11 11 0 pat 5 0 0n 2n 1n 5n b010 R=1
+
+* negative R values.  -1 means "repeat forever".
+* < -1 is reset to 0.
+I12 12 0 pat 5 0 0 1n 1n 5n b1010 R=-2
+I13 13 0 pat 5 0 0 1n 1n 5n b1010 R=-1
+
+* non-zero VLO
+I14 14 0 PAT (5 1 0n 1n 2n 5n b1010)
+
+R1 1 0 1
+R2 2 0 1
+R3 3 0 1
+R4 4 0 1
+R5 5 0 1
+R6 6 0 1
+R7 7 0 1
+R8 8 0 1
+R9 9 0 1
+R10 10 0 1
+R11 11 0 1
+R12 12 0 1
+R13 13 0 1
+R14 14 0 1
+
+.TRAN 0 50n
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.5n
+.PRINT TRAN I(I1) I(I2) I(I3) I(I4) I(I5) I(I6) I(I7) I(I8) I(I9) I(I10) I(I11) I(I12) I(I13) I(I14)
+.END

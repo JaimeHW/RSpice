@@ -1,0 +1,104 @@
+*Xyce Gold Netlist
+
+.TRAN 0 1ms
+.PRINT TRAN FORMAT=PROBE V(in_1) V(out_1) V(out_2) V(X1:in_1) V(X1:out_1) V(5) 
++ V(in_3) V(out_3) V(out_4) V(X2:in_1) V(X2:out_1) V(6)
++ V(X3:in_1) V(X3:out_1) V(7) 
++ V(in_8) V(out_8) V(out_9) 
++ V(X4:in_1) V(X4:out_1) V(10) 
+
+* Parameterize the output levels
+.PARAM VOH=5
+.PARAM VOL=0
+
+********************************************************
+* This top-level circuit and the X1 sub-circuit should 
+* have all of the Printed voltages equal to VOH.
+*********************************************************
+E_ABM1 out_1 0 VALUE={ IF( (V(in_1) > 1.4), IF( (V(in_1) > 1.5), VOH, 50*(V(in_1)-1.4) ), VOL )} 
+ROUT1 out_1 0 1K
+
+E_ABM2 out_2 0 VALUE={ IF( (V(out_1) > 1.4), IF( (V(out_1) > 1.5), VOH, 50*(V(out_1)-1.4) ), VOL )} 
+ROUT2 out_2 0 1K
+C_OUT2 out_2 in_1 1u
+
+.NODESET V(in_1)=5
+
+X1 5 ABM_SUB
+.NODESET V(X1:in_1)=5
+
+*********************************************************
+* This top-level circuit and the X2 sub-circuit should 
+* have all of the Printed voltages equal to VOL.
+*********************************************************
+E_ABM3 out_3 0 VALUE={ IF( (V(in_3) > 1.4), IF( (V(in_3) > 1.5), VOH, 50*(V(in_3)-1.4) ), VOL )} 
+ROUT3 out_3 0 1K
+
+E_ABM4 out_4 0 VALUE={ IF( (V(out_3) > 1.4), IF( (V(out_3) > 1.5), VOH, 50*(V(out_3)-1.4) ), VOL )} 
+ROUT4 out_4 0 1K
+C_OUT4 out_4 in_3 1u
+
+.NODESET V(in_3)=0
+
+X2 6 ABM_SUB
+.NODESET V(X2:in_1)=0
+
+*****************************************************************
+* Show that the a .NODESET statement at the PSpice top-level
+* gets correctly translated into Xyce ("dot" in Pspice becomes
+* "colon" in Xyce).  The output voltage should be VOL.
+*****************************************************************
+X3 7 ABM_SUB
+.NODESET V(X3:in_1)=0
+
+******************************************************
+* Instantiate the top-level circuit as a subcircuit
+******************************************************
+.SUBCKT ABM_SUB mid 
+
+E_ABM1 out_1 0 VALUE={ IF( (V(in_1) > 1.4), IF( (V(in_1) > 1.5), VOH, 50*(V(in_1)-1.4) ), VOL )} 
+ROUT1 out_1 0 1K
+
+E_ABM2 mid 0 VALUE={ IF( (V(out_1) > 1.4), IF( (V(out_1) > 1.5), VOH, 50*(V(out_1)-1.4) ), VOL )} 
+ROUT2 mid 0 1K
+C_OUT2 mid in_1 1u
+
+* move the .NODESET statement to the top-level for the X1 and X2 subciruits
+*.NODESET V(in_1)=5
+.ENDS
+
+********************************************************
+* This top-level circuit should have all of the Printed 
+* voltages equal to VOH.  It just uses a parameter to
+* set the IC, rather than a value.
+*********************************************************
+E_ABM8 out_8 0 VALUE={ IF( (V(in_8) > 1.4), IF( (V(in_8) > 1.5), VOH, 50*(V(in_8)-1.4) ), VOL )} 
+ROUT8 out_1 0 1K
+
+E_ABM9 out_9 0 VALUE={ IF( (V(out_8) > 1.4), IF( (V(out_8) > 1.5), VOH, 50*(V(out_8)-1.4) ), VOL )} 
+ROUT9 out_9 0 1K
+C_OUT9 out_9 in_8 1u
+
+.param ic_test=5
+.NODESET V(in_8)={ic_test}
+
+*********************************************************
+* Instantiate previous top-level circuit as a subcircuit.
+* Use an expression in the IC statement.
+*********************************************************
+X4 10 ABM_SUB3
+
+.SUBCKT ABM_SUB3 mid 
+
+E_ABM1 out_1 0 VALUE={ IF( (V(in_1) > 1.4), IF( (V(in_1) > 1.5), VOH, 50*(V(in_1)-1.4) ), VOL )} 
+ROUT1 out_1 0 1K
+
+E_ABM2 mid 0 VALUE={ IF( (V(out_1) > 1.4), IF( (V(out_1) > 1.5), VOH, 50*(V(out_1)-1.4) ), VOL )} 
+ROUT2 mid 0 1K
+C_OUT2 mid in_1 1u
+
+* This .NODESET statement uses an expression
+.NODESET V(in_1)={ic_test}
+.ENDS
+
+.END

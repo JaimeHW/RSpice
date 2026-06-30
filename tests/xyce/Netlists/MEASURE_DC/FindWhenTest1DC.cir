@@ -1,0 +1,94 @@
+* Test DC mode support for FIND-AT, FIND-WHEN and WHEN Measures.
+*
+* This bug covers:
+*   1) the case of one variable in the .DC line,
+*      without a .STEP statement.
+*
+*
+* See SON Bug 1270 for more details.
+********************************************************
+
+vsrc1   1a 0 1
+rload1a 1a 1b 0.2
+rload1b 1b 1c 0.4
+rload1c 1c 0  0.4
+
+B2 2 0 V={(V(1a)-3)*(V(1a)-3)}
+R2 2 0 1
+
+.DC vsrc1 1 5 1
+
+* Note: vsrc1:DCV0 is the syntax for printing the DC value of vsrc1,
+* at it is swept.
+.print dc vsrc1:DCV0 v(1a) v(1b) v(1c) v(2)
+
+* WHEN
+.MEASURE DC whenv1b2 WHEN v(1b)=2
+
+* FIND-WHEN
+.MEASURE DC findv1cwhenv1b2 find v(1c) when v(1b)=2
+
+* FIND-AT
+.MEASURE DC v1bat1 find v(1b) at=1 ; first sweep value
+.MEASURE DC v1bat2 find v(1b) at=2
+.MEASURE DC v1bat2.5 find v(1b) at=2.5
+.MEASURE DC v1bexpat2.5 find {v(1b)+1} at=2.5
+
+* Expressions with WHEN measure
+.MEASURE DC whenExp1 when {v(1b)+1}=4
+.MEASURE DC whenExp2 when v(1b)={v(1c)+1.2}
+.MEASURE DC whenExp3 when v(1b)={v(1c)+1}
+.MEASURE DC whenExp4 when {v(1b)-1}=v(1c)
+
+* Expressions, with FIND-WHEN measure
+.MEASURE DC findv1cwhenv1bExp1 find v(1c) when {v(1b)+1}=4
+.MEASURE DC findv1cwhenv1bExp2 find {v(1c)+1} when {v(1b)+1}=4
+
+* Use of other measures in WHEN and FIND-WHEN
+.MEASURE DC eqnv1c EQN {v(1c)}
+.MEASURE DC wheneqnv1c when EQNV1C=1.5
+.MEASURE DC findwheneqnv1c find eqnv1c when v(1b)=3
+
+* FROM
+.MEASURE DC whenv2from1 WHEN v(2)=2 FROM=3
+
+* Test that the interpolated WHEN frequency is within the measure window.
+* So, the first and third measures should find the first time v(2)=2.
+* The second one should find the second time.
+.MEASURE DC whenv2from2 WHEN v(2)=2 FROM=1.5
+.MEASURE DC whenv2from3 WHEN v(2)=2 FROM=1.8
+.MEASURE DC whenv2from4 WHEN v(2)=2 FROM=1.5 TO=1.8
+
+* This should get the same value as the whenv2from4 measure
+.MEASURE DC whenv2from5 WHEN v(2)=2 TO=1.5 FROM=1.8
+
+* The TO2 measure should fail, since the TO1 measure succeeds
+* at a sweep value of 1.33
+.MEASURE DC TO1 WHEN V(2)=3 TO=1.5
+.MEASURE DC TO2 WHEN V(2)=3 TO=1.1
+
+* FROM=TO value should work in this case, even though this
+* is a pathological case
+.MEASURE DC findwhen1Pt FIND v(1c) WHEN v(1a)=2 FROM=2 TO=2
+
+* measures should fail
+.measure dc FAIL1 WHEN v(1b)=10
+.measure dc FAIL2 FIND v(1c) WHEN v(1b)=10
+.measure dc FAIL3 FIND v(1c) AT=10
+
+* Test case of both FROM and TO given, but both are outside of the
+* measurement window
+.measure dc FAIL4 WHEN v(2)=2 FROM=6 TO=10
+.measure dc FAIL5 WHEN v(2)=2 FROM=-5 TO=0
+
+* Tests should fail since the FROM-T0 windows do not overlap
+* with the stepped values for VSRC1:DCV0
+.MEASURE DC whenFail1 WHEN v(1b)=2 FROM=-4 TO=-2
+.MEASURE DC whenFail2 WHEN v(1b)=2 FROM=-2 TO=-4
+
+* FROM and TO qualifiers take precedence over AT.
+* So, these are failed measures.
+.MEASURE DC atFailFrom FIND V(1b) AT=1 FROM=3 TO=4
+.MEASURE DC atFailTo find V(1b) AT=2 TO=1
+
+.end

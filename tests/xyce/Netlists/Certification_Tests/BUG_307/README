@@ -1,0 +1,56 @@
+Bug Number: 307
+Test netlists: bug_307_a.cir
+               bug_307_b.cir
+               bug_307_d.cir
+               bug_307_e.cir
+               bug_307_f.cir
+               bug_307_g.cir
+               bug_307_h.cir
+               bug_307_i.cir together with bug_307_i.lib1 and bug_307_i.lib2
+
+Description:
+============
+BUG 307 related to mishandling of model statements in subcircuit context.
+Some time between Release 1.0.1 and the tag D_RELEASE_1_1_0_B, model statements
+in subcircuits were added to the global context rather than the subcircuit's,
+and this led to the code using the wrong models when subcircuits happened
+to have identically named models. In the process of fixing this bug it was
+discovered that model prefixing and include file handling needed adjusting,
+Also, a warning message was added in the case that multiple models of a
+given name appear withing the same context.  All of these cases are tested.
+
+Verification:
+=============
+
+   1) Run bug_307_a.cir and bug_307_b.cir
+
+   2) compare the resulting .prn files with xyce_verify.pl.  They should
+      be identical, and xyce_verify should exit with a zero exit code and
+      no console output.
+
+   3) Run bug_307_d.cir through bug_307_i.cir
+
+   4) Compare the results from (3) using xyce_ferify. Note that the output 
+      in each of these cases should be identical on any given platform.
+
+   5) In addition to the results in (4), bug_307_g.cir and bug_307_h.cir
+      should produce the follow message in the log file:
+
+      User Warning: Reading model named SW in the subcircuit XX and found one or
+      more models previously defined in this scope.
+
+      Where "XX" is one of "ONEBIT", "OR", "AND", or "XOR".
+
+      There will be one such message for every occurrence of the "SW"
+      model after the first in these netlists, so there will be 3 in the
+      log for bug_307_g.cir and 4 in the log for bug_307_h.cir.
+
+Notes:
+======
+  1) Parallel testing CANNOT be performed on bug_307_a.cir and bug_307_b.cir.
+
+  2) Parallel testing should be performed on bug_307_d.cir through 
+     bug_307_i.cir.
+
+  3) Problems with direct matrix handling currently require this to be
+     turned off for the parallel runs, use the "-dma off" flag.

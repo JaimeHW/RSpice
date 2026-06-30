@@ -1,0 +1,19 @@
+*****************************************************
+* Test FORMAT=GNUPLOT without .STEP.  This should 
+* produce the same .FD.prn file as FORMAT=STD.
+*
+* This also tests FORMAT=SPLOT, which should produce
+* the same output file for the non-step case.
+*****************************************************
+
+* Trivial high-pass filter (V-C-R) circuit
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.print AC FORMAT=GNUPLOT R1:R C1:C vm(b)
+.print AC FORMAT=SPLOT FILE=ac-gnuplot.cir.FD.splot.prn R1:R C1:C vm(b)
+.ac dec 5 100Hz 1e6
+
+.end
+

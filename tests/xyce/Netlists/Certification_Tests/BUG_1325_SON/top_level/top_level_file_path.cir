@@ -1,0 +1,35 @@
+* This tests a netlist that is not in the execution subdirectory.
+* The subtests are as follows:
+*
+*   1) tl_include1, top_level/tl_include1 and top_level/sub1/tl_include1
+*      test that the path relative to the include file top_level/sub1/include_sub1
+*      has precedence over the paths to the top-level netlist directory and
+*      the execution directory.
+*
+*   2) tl_include2 and top_level/tl_include2 show that the top-level netlist
+*      directory has priority over the execution directory if tl_include2 is
+*      invoked from top_level/sub1/include_sub1.
+*
+*   3) tl_include3 shows that the execution directory is searched if tl_includes3
+*      is invoked from top_level/sub1/include_sub1.
+*
+*   4) tl_include4 and top_level5/tl_include5 are then tests for .INC files
+*      that are in the top-level netlist directory, when the execution
+*      directory is different from that directory.  These tests may be
+*      somewhat redundant with the first three tests.
+*
+* All of these tests, but tl_include4 will fail in Xyce 7.2, or earlier.
+*
+* See SON Bug 1325 for more details.
+****************************************************************************
+
+.INC sub1/include_sub1
+.INC tl_include4
+.INC tl_include5
+
+.DC V1 1 5 1
+.PRINT DC V(1) I(R1) I(R2) I(R3) I(R4) I(R5)
+
+V1 1 0 1
+
+.END

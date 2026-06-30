@@ -1,0 +1,19 @@
+*MI Test netlist
+*This is the netlist that was originally reported in bug 28.  The
+* subcircuit parameter p2 would not be resolved and resulted in the
+* abort of the run, even though the subcircuit is not even instantiated.
+* This was caused by improper context resolution when K devices are present.
+
+.param p1 = 1
+
+.subckt MIckt 1 2 3 4 Params: p2={2*p1}
+L1 1 2 1
+L2 3 4 1
+K1 L1 L2 1
+.ends
+
+v1 1 0 1
+r1 1 0 1
+.dc v1 0 1 .1
+.print dc V(1) I(v1)
+.end

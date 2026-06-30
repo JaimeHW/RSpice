@@ -1,0 +1,32 @@
+Test Name:  BUG_386
+Owner:  elranki
+Test netlists: diode.cir
+GS files: none
+Mode:  serial
+Comparator:  none
+Version of Xyce:  4.1
+
+
+Description:
+============
+Bug 386 addresses incorrect static date and time stamps in the
+Xyce output files.  Prior to the fix, the values always appeared as:
+TIME='0:00:00 AM' DATE='Jan 1, 2000'.
+
+
+Procedure:
+==========
+
+runxyce diode.cir 
+
+
+
+Verifiction:
+============
+
+Test passes if the time & date in the .prn file are accurate.
+
+
+Notes:
+======
+

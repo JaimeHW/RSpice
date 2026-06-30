@@ -1,0 +1,32 @@
+* Unit Test of Parallel Power Grid Branch Devices, in PQ Polar format.
+*
+* This also tests that a PowerGridBranch device uses the default 
+* values of R=0 and B=0 when those instance parameters are not
+* specified on the instance line.
+
+* vary the voltage at bus 1 to check if the answers match theory,
+* given on pg.250-254 of Kundar. Ammeter is defined so that power
+* flows from bus 1 into the branch between buses 1 and 2
+Vbus1Th bus1Th ammBus1P 0
+Vbus1VM bus1VM ammBus1Q 1V
+Vamm1P 0 ammBus1P 0V
+Vamm1Q 0 ammBus1Q 0V
+
+* Have bus 2 be the slack bus. Ammeter is defined so that power 
+* flows from branch between buses 1 and 2 into bus 2, so as to match
+* equations in Kundar.
+Vbus2Th bus2Th ammBus2P 0V
+Vbus2VM bus2VM ammBus2Q 1V
+Vamm2P ammBus2P 0 0V
+Vamm2Q ammBus2Q 0 0V
+
+* Two parallel branches should give same answer as one branch with X=2.
+* The br12b instance line tests that R and B default to 0, when not specified.
+YPGBR br12a bus1Th bus2Th bus1VM bus2VM AT=PQP R=0.0 X=4 B=0.0
+YPGBR br12b bus1Th bus2Th bus1VM bus2VM AT=PQP X=4
+
+.DC Vbus1VM 0 1 0.5 Vbus1Th -0.7854 0.7854 0.7854
+.PRINT DC width=10 precision=6 V(bus1Th) V(bus1VM)
++ I(Vamm1P) I(Vamm1Q) I(Vamm2P) I(Vamm2Q) 
+ 
+.end

@@ -1,0 +1,7 @@
+opamp-vf-gstepping.cir
+opamp-vf-gstepping.cir.sh
+opamp-vf.cir
+opamp-vf.cir.sh
+tags
+opamp-vf.cir.tags
+opamp-vf.cir.options

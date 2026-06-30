@@ -1,0 +1,15 @@
+Test for .DATA and its use in DC sweeps
+*
+* Eric Keiter
+* 9/9/2018
+*
+VT1 4 0 10V
+R1  4 5 10
+R2  5 0 5
+
+.DC R1:R 8 12 1  R2:R 4 6 1
+
+.print DC precision=4 {R1:R} {R2:R} V(4) V(5)
+
+.END
+

@@ -1,0 +1,24 @@
+********************************************************************
+* Test error message for various invalid .MEASURE FFT lines.
+*
+* The netlist and .TRAN print/analysis statements in this
+* netlist  don't really matter.  However, there must be matching
+* .FFT statements for the output variables used on the various
+* invalid .MEASURE FFT
+*
+*******************************************************************
+
+.TRAN 0 1
+
+V1 1 0 SIN(0 1 1)
+R1 1 2 1
+R2 2 0 1
+
+.FFT V(1)
+.FFT I(V1)
+
+* Only FIND-AT measures are supported for FFT measure mode
+.MEASURE FFT M1 FIND V(1) WHEN I(V1)=0.5
+
+.PRINT TRAN V(1) V(2)
+.END

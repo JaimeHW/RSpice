@@ -1,0 +1,16 @@
+README
+bug_307_a.cir
+bug_307_a.cir.sh
+bug_307_b.cir
+bug_307_d.cir
+bug_307_d.cir.sh
+bug_307_d.cir.tags
+bug_307_e.cir
+bug_307_f.cir
+bug_307_g.cir
+bug_307_h.cir
+bug_307_i.cir
+bug_307_i.lib1
+bug_307_i.lib2
+exclude
+tags

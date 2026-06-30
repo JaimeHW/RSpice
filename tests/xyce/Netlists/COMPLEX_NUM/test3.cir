@@ -1,0 +1,45 @@
+testing of complex expressions in parameters and on the .PRINT line
+
+Isrc 1 0 AC 1 0 
+R1 1 0 1e3
+C1 1 0 2e-6
+
+.param r0={3.0+2.0J}
+.param r1={m(r0)}
+.param r2={sqrt(-1.00000)}
+
+.AC DEC 10 1 1e5
+
+* Key to the expected outputs.  Xyce should be smart enough to determine
+* if an output is complex or not and output accordingly.  
+*
+* For AC analysis, the default is to output real and imaginary parts, for any output that is complex.
+*
+* If an output is a purely real-valued output, then don't include the imaginary part.
+* Some expressions will produce complex numbers, and some will not, even if the inputs are complex.
+* some of these outputs should automatically be both real and imaginary parts.
+* others should just be the real part.
+*
+* An output specifying the real part of an expression is considered by the outputter to be real.
+* An output specifying the imaginary part of an expression is considered by the outputter to be "real".
+*
+* In other words: 
+*  {RE(R0)} should not produce Re({RE(R0)}) and Im({RE(R0)}).  It should only output {RE(R0)}.
+*  {IMG(R0)} should not produce Re({IMG(R0)}) and Im({IMG(R0)}).  It should only output {IMG(R0)}.
+*
+*
+* output             description                     outputs
+.print ac 
++ v(1)          ; simple, non-expr voltage node  -> Re(V(1)) Im(V(1))
++ {r0}          ; complex expression             -> Re({R0}) Im({R0})
++ {re(r0)}      ; real part of cmplx expresssion -> {RE(R0)}
++ {img(r0)}     ; imag part of cmplx expresssion -> {IMG(R0)}
++ {r1}          ; real-valued expression         -> {R1}
++ {v(1)/r0}     ; complex expression             -> Re({V(1)/R0})  Im({V(1)/R0})  
++ {v(1)/r1}     ; complex expression             -> Re({V(1)/R1})  Im({V(1)/R1})  
++ {ph(v(1)/r1)} ; real-valued expression         -> {PH(V(1)/R1)}
++ {db(v(1))}    ; real-valued expression         -> {DB(V(1))}
++ {r(v(1))}     ; real-valued expression         -> {R(V(1))}
++ {0.1+r2}      ; complex expression             -> Re({R2}) Im({R2})
+
+.END

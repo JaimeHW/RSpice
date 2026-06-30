@@ -1,0 +1,17 @@
+
+* test for subcircuit instance parameters, when they refer to each other.
+*
+* This is the "baseline" test for the precedence_a series of tests. 
+* So, no parameters are used in this one.
+*
+.subckt simple in out 
+Rinside in out 48.0
+.ends
+
+V1 1 0 1.0
+R1 1 2 1.0
+Xtest 2 0 simple 
+
+.dc v1 1.0 1.0 1.0
+.print dc v(1) v(2) I(v1) {Xtest:Rinside:R}
+

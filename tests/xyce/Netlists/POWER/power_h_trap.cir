@@ -1,0 +1,23 @@
+Power test for H-Source (Current Controlled Voltage Source)
+* Test linear and POLY formats
+
+B1   1 0 V={2.0*sin(2*pi*TIME) }
+R1   1 2 1K
+R2   0 2 100
+
+HLIN  3 0 B1 1000
+R3    3 4 1K
+R4    0 4 100
+
+HPOLY 5 0 POLY(1) B1 0 1000
+R5    5 6 1K
+R6    0 6 100
+
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0 1.0
+.PRINT TRAN FORMAT=noindex 
++ v(3) I(Hlin) {I(Hlin)*v(3)} p(Hlin) W(Hlin)
++ v(5) I(Hpoly) {I(Hpoly)*v(5)} p(Hpoly) W(Hpoly)
+
+.END

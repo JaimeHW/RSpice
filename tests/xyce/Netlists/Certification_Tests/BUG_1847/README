@@ -1,0 +1,29 @@
+The following is no longer the case.  The new output manager is designed
+to allow multiple concurrent output files to be generated in a single
+run.
+
+--
+This is a test case for BUG 1847 where a ".print" line 
+that specified RAW format in an include file and before 
+the ".print" line in the main file would cause Xyce to 
+create a RAW file with all of the simulation data (i.e.
+a RAWOverride in the new Outputter class).  This no
+longer happens thanks to Dave's refactor of the Output
+Manager.  
+
+This test sets up the same series of .print lines as
+reported in the bug case, runs them in Xyce and 
+then verifies that (1) no Raw file was generated
+and (2) that the "prn" file that was made has the
+right header and values by comparing to a gold 
+standard.  This way if something changes in the 
+Outputter class and we start respecting the
+extra .print line this test will fail.   
+
+At this time Xyce doesn't support multiple 
+.print lines so it just does what the last
+.print line it encountered says.  This 
+test verifies that behavior.  If we change
+Xyce's behavior later on, this test will 
+have to change.
+

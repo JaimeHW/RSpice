@@ -1,0 +1,29 @@
+ ***** Measure Functions ***** 
+
+INTEGVR4 = 4.994998e+02
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+03
+
+INTEGRALVI4 = -2.497562e-01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+03
+
+INTEGVR4EXP = 1.498500e+03
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+03
+
+INTEGVR4FROMTO = 4.500000e+01
+Measure Start Freq= 1.000000e+01	Measure End Freq= 1.000000e+02
+
+INTEGIMEAMP = 2.497563e-03
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+03
+
+INTEGVM4FROMTO1PT = 0.000000e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+02
+
+Netlist warning: INTEGFAIL1 failed. FROM value > highest frequency value
+INTEGFAIL1 = FAILED
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+03
+
+Netlist warning: INTEGFAIL2 failed. TO value < FROM value
+INTEGFAIL2 = FAILED
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+03
+
+

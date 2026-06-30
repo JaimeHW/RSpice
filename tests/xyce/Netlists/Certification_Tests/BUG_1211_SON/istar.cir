@@ -1,0 +1,30 @@
+A test of wildcard syntaxes for I()
+*******************************************************************************
+
+V1 1 0 SIN(0 1 1KHZ)
+E2 2 0 1 0 1
+
+R1 1 2 1
+R2 2 0 1
+
+X1 3 4 MySubcircuit_1
+
+.SUBCKT MYSUBCIRCUIT_1 a b
+V1   a 0 1
+R1   a b 1
+R2   b 0 1
+X2 1 2 MySubcircuit_2
+.ENDS
+
+.SUBCKT MYSUBCIRCUIT_2 a b
+V1   a 0 1
+R1   a c 1
+l1   c b 1u
+R2   b 0 1
+.IC V(b)=0.90
+.ENDS
+
+.TRAN 0.1U 10us
+.PRINT TRAN I(X1*)
+
+.END

@@ -1,0 +1,23 @@
+** Profile: "SCHEMATIC1-bias"  [ H:\Xyce\PSpice\NetLists\transmissionline-pspicefiles\schematic1\bias.sim ] 
+
+** Creating circuit file "bias.cir" 
+** WARNING: THIS AUTOMATICALLY GENERATED FILE MAY BE OVERWRITTEN BY SUBSEQUENT SIMULATIONS
+
+*Libraries: 
+* Profile Libraries :
+* Local Libraries :
+* Generated using PSpice 16.6.0
+*.lib "nom.lib" 
+
+*Analysis directives: 
+.TRAN  0 100ns 0 
+.OPTIONS ADVCONV
+.PROBE64 N(N14950)
+.PROBE64 N(N15037)
+.PROBE V([N16674])
+.PROBE V([N16680])
+
+* Note: Mixed case of .net filename tests SRN Bug 2024
+.INC ".\SCHEMATIC1.net" 
+
+.END

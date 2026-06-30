@@ -1,0 +1,144 @@
+ ***** Measure Functions ***** 
+
+ERR = 5.049452e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1 = 5.049452e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1RO = 1.017762e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1MV1.5 = 4.426532e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1YMIN2.5 = 1.018714e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1IGNOR2.5 = 1.018714e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1YMAX3.5 = 2.440300e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1FROM = 1.382429e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1TO = 6.733443e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 3.000000e+00
+
+ERR1FT = 5.366894e-01
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 0.000000e+00
+
+ERR1TF = 5.366894e-01
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 0.000000e+00
+
+ERR2 = 4.250000e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2RO = 7.813333e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2MV1.5 = 3.833333e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2YMIN2.5 = 6.333333e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2IGNORE2.5 = 6.333333e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2YMAX3.5 = 1.874074e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2FROM = 1.150000e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2TO = 6.711111e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 3.000000e+00
+
+ERR2FT = 5.093333e-01
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 0.000000e+00
+
+ERR2TF = 5.093333e-01
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 0.000000e+00
+
+ERR1FAIL = FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2FAIL = FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+LASTMEASURE = 3.750000e+00 at VSRC1 value = 5.000000e+00
+ ***** Measure Functions ***** 
+
+ERR = 9.248129e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1 = 9.248129e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1RO = 3.691529e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1MV1.5 = 7.539141e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1YMIN2.5 = 3.363156e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1IGNOR2.5 = 3.363156e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1YMAX3.5 = 4.129156e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1FROM = 1.849552e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR1TO = 7.505417e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 3.000000e+00
+
+ERR1FT = 6.181742e-01
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 0.000000e+00
+
+ERR1TF = 6.181742e-01
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 0.000000e+00
+
+ERR2 = 7.260417e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2RO = 2.324946e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2MV1.5 = 6.218750e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2YMIN2.5 = 3.087801e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2IGNORE2.5 = 3.087801e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2YMAX3.5 = 2.784448e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2FROM = 1.381081e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2TO = 7.498679e-01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 3.000000e+00
+
+ERR2FT = 6.020477e-01
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 0.000000e+00
+
+ERR2TF = 6.020477e-01
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 0.000000e+00
+
+ERR1FAIL = FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+ERR2FAIL = FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= -5.000000e+00
+
+LASTMEASURE = 4.687500e+00 at VSRC1 value = 5.000000e+00

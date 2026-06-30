@@ -1,0 +1,15 @@
+HB test of print output format with statup output
+*
+* Trivial resistor circuit
+*
+
+R1 1 0 10
+v1 1 0 sin 0 1V 1e4 0 0
+
+.print HB v(1) I(v1)
+.print HB_IC file=test v(1) I(v1)
+
+.options hbint saveicdata=1 STARTUPPERIODS=2
+.hb 1e4
+
+.end

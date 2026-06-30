@@ -1,0 +1,40 @@
+* 2-port example with an ideal gain of 5 for S21. The other S-parameter
+* values all equal 0.  So, this is an non-symmetric S-parameter matrix
+* that tests:
+*
+*  1) That the indexing of S(i,j) vs. S(j,i) is handled correctly.
+*
+*  2) Both values for the [Two-Port Data Order] line, which are
+*     12_21 and 21_12, where the default value is 12_21.
+*
+*  3) The input S-parameter matrices, for this test were made by-hand.
+*     The gold standard was verified by inspection, since
+*     V(3) = V(2) = 5*V(1), and I(V1) = V(1)/25.
+*
+*  4) The Touchstone 1 input file verifies that the data order is
+*     set correctly for that input format.  That input file also
+*     contains blank lines as a parsing test.
+*
+*  5) This also verifies that multiple YLIN devices can be used in
+*     a netlist, and that two different .MODEL YLIN statements work.
+********************************************************************
+
+.options hbint numfreq=10 tahb=0
+.hb 1e4
+.print hb v(1) v(2) v(3) v(4) i(v1)
+
+v1 1 0  sin  0 1 1e4
+YLIN YLIN1 1 0 2 0 YLIN_MOD1
+.MODEL YLIN_MOD1 LIN TSTONEFILE=idealGain.cir.12_21.s2p
+R2 2 0 50
+
+YLIN YLIN2 1 0 3 0 YLIN_MOD2
+.MODEL YLIN_MOD2 LIN TSTONEFILE=idealGain.cir.21_12.s2p
+R3 3 0 50
+
+* This input file is in Touchstone 1 format
+YLIN YLIN3 1 0 4 0 YLIN_MOD3
+.MODEL YLIN_MOD3 LIN TSTONEFILE=idealGain.cir.ts1.s2p
+R4 4 0 50
+
+.end

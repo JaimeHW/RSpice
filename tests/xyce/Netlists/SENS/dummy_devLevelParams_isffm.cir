@@ -1,0 +1,30 @@
+* Transient sensitivity example, SFFM source, "dummy" file to provide variable 
+* list to xyce_verify.  This file is not run as part of the test, just parsed.
+*****************************************************************************
+.param v0 = 1.0
+.param va = 1.0
+.param fc = 1meg
+.param mdi = 2.0
+.param fs = 250k
+
+* original
+isffm 0 1 sffm({v0} {va} {fc} {mdi} {fs})
+r1   1 0 1
+
+.tran 0 10us 
+
+*comp v(1) offset=0.1
+*comp v(1)_va  offset=2.0
+*comp v(1)_fc offset=7e-5
+*comp v(1)_mdi  offset=1
+*comp v(1)_fs offset=0.00015
+
+.print tran v(1)
++ v(1)_v0 
++ v(1)_va 
++ v(1)_fc 
++ v(1)_mdi 
++ v(1)_fs
+
+
+.end

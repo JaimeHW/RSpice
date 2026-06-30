@@ -1,0 +1,2 @@
+serial, nightly, parallel,  analytic, globalparam, sampling, lhs, normal, expression, issue200, issue84
+valgrind

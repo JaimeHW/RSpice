@@ -1,0 +1,21 @@
+Simple example demonstrating subcircuit parameter error
+
+Xtest 1 0 testSubckt
+
+* error happens if the X3 line specifies any parameters, such as "bogus"
+.subckt testSubckt A B
+X1 A 2  sub1 bogus=2.0 rvalue=1.0 
+X3 2 B  sub1 bogus=3.0  
+.ends
+
+.subckt sub1  A  B  
+.param  rvalue=10.0 bogus=1.0
+R A B {rvalue}
+.ends
+
+Vtest 1  0  1.0
+
+.print DC V(1) V(XTEST:2)
+.DC Vtest 1 1 1
+
+.end

@@ -1,0 +1,13 @@
+*Baseline netlist to assure that various
+* combinations of output-limiting options work
+* together
+* In this version, we don't limit output at all and simply run a
+* sinusoidal source through a resistor
+
+vin   1 0 sin(0 1 1Hz 0 0 90) 
+r1 1 0 1k
+
+.tran 0.1 5
+*COMP v(1) offset=1.05 reltol=0.015
+.print tran v(1)
+.end

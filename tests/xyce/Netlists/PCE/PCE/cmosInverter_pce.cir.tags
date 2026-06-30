@@ -1,0 +1,4 @@
+nightly, serial, pce, tran, bsim3
+quadrature_pce
+intrusive_pce
+required:stokhos

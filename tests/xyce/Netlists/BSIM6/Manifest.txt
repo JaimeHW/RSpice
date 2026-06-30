@@ -1,0 +1,15 @@
+bsim6_nmos_outvars.cir
+bsim6_pmos_outvars.cir
+gummel_nmos_xyce.cir
+gummel_pmos_xyce.cir
+idvd_nmos_xyce.cir
+idvd_pmos_xyce.cir
+idvg_nmos_xyce.cir
+idvg_pmos_xyce.cir
+modelcard_xyce.nmos
+modelcard_xyce.pmos
+ringosc_17_xyce.cir
+ringosc_17_xyce.cir.sh
+ringosc_17_xyce.cir.tags
+tags
+inverter_transient_xyce.cir

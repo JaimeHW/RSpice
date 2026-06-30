@@ -1,0 +1,8 @@
+README
+bug_1284.cir
+bug_1284.cir.sh
+bug_1284_baseline.cir
+bug_1284_first.cir
+bug_1284_restarted.cir
+exclude
+tags

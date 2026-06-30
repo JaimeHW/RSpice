@@ -1,0 +1,7 @@
+SCHEMATIC1.net
+exclude
+pwlFile1.txt
+pwl_sources.cir
+tags
+pwl_sources.cir.pspice
+pwl_sources.cir.sh

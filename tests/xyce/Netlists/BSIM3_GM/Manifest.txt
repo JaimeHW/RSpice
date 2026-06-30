@@ -1,0 +1,5 @@
+nmosGm1.cir
+pmosGm1.cir
+nmosGm1_rev.cir
+pmosGm1_rev.cir
+tags

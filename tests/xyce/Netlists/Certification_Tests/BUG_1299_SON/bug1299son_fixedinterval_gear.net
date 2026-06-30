@@ -1,0 +1,14 @@
+* netlist to assure that various
+* combinations of output-limiting options work
+* together
+* In this version, we output the full transient
+* but at fixed output intervals of 0.25s
+* sinusoidal source through a resistor
+
+vin   1 0 sin(0 1 1Hz 0 0 90) 
+r1 1 0 1k
+
+.tran 0.1 5
+.print tran v(1)
+.options output initial_interval=0.25
+.end

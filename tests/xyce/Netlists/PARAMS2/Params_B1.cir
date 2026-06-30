@@ -1,0 +1,11 @@
+Basic voltage divider circuit test of parameters usage
+* Should produce results identical to Double_Resist_Control.cir
+
+.PARAM R1=10K
+R1 1 2 {R1}
+R2 2 0 {0.5*R1}
+V1 1 0 DC 5V
+
+.dc V1 0 5 1
+.print DC v(1) v(2) I(v1)
+.end

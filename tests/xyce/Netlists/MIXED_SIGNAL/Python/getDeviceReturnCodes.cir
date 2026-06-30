@@ -1,0 +1,49 @@
+* This netlist is used to test the return codes for the
+* Python methods getDeviceNames() and getDACDeviceNames()
+* for the cases of:
+*
+*    1) Success (1) for a valid non-Y device type (B) that
+*       exists in the netlist.
+*
+*    2) Success for a valid Y device type (e.g. YADC) that
+*       exists in the netlist.
+*
+*    3) Success for a valid U device type (e.g. BUF) that
+*       exists in the netlist.
+*
+*    4) failure (0) since this netlist has no YDAC devices,
+*       but YADC is a valid Y device type.
+*
+*    5) failure if the device type (BOGO) does not exist
+*       in Xyce.
+*
+*    6) Failure for a valid non-Y device type (e.g. I) that
+*       does not exist in the netlist.
+*
+* It also tests the getTotalNumDevices(), getAllDeviceNames(),
+* checkDeviceParamName() and getDeviceParamVal() methods for both
+* valid and invalid device names and parameter names.
+
+V1 1 0 SIN(0 1 1)
+R1 1 0 2
+
+B2 2 0 V={2*V(1)}
+R2 2 0 1
+
+* Test Y device
+YADC adc1 1 0 simpleADC R=1T WIDTH=2
+.model simpleADC ADC(settlingtime=50ns uppervoltagelimit=2 lowervoltagelimit=0)
+
+* Test U device.  Have its name length be 10, to be different from there
+* being 9 devices in the netlist.
+V_dpn dig_pn 0 3V
+Vin in_1 0 4
+UBUF12 BUF dig_pn 0 in_1 out_1 DMOD
+RBUF out_1 0 100K
+.model DMOD DIG (S1VHI=3)
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(2)
+
+.END
+

@@ -1,0 +1,92 @@
+************************************************************************
+* Unit test for .IC in subcircuits. This test is adequate for proving
+* that:
+*   1) XDM no longer moves the .IC statements from within a
+*      subcircuit in PSpice to the top-level circuit in the
+*      translated Xyce netlist.
+*
+*   2) the translated Xyce netlist runs fine with the .IC
+*      statement in the subcircuit definition.
+*
+*   3) xdm properly handles .IC statements with expressions
+*      at both the top-level and in subcircuits.
+*
+*   4) a PSpice .IC that uses subcircuit notation (e.g.,
+*      .IC V(X3.mid)=0 ) is properly translated into Xyce
+*      subcircuit notation (e.g.,  .IC V(X3:mid)=0 )
+*
+* See SRN Bug 1991 for more details.
+************************************************************************
+
+*Analysis directives:
+.TRAN  0.1ms 10ms
+.PROBE TRAN V(N15206) V(N15971) V(N15554) V(N15997) V(N16554) V(N16997) V(9a) V(9b) V(10a) V(10b) V(11a) V(11b)
+
+* RC Decay
+R_R1         N15206 N15971  1k TC1=0 TC2=0
+R_R2         N15975 N15971  10 TC1=0 TC2=0
+C_C1         N16095 N15975  1u TC1=0 TC2=0
+R_R3         0 N16095  10 TC1=0 TC2=0
+V_V1         N15206 0
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s
+
+*RC Decay with IC
+V_V2         N15554 0
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s
+R_R4         N15554 N15997  1k TC1=0 TC2=0
+R_R5         N15967 N15997  10 TC1=0 TC2=0
+C_C2         N16112 N15967  1u TC1=0 TC2=0
+R_R6         0 N16112  10 TC1=0 TC2=0
+.IC         V(N15967)=0.5
+
+*RC Decay with IC in subcircuit
+V_V3         N16554 0
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s
+R_R7         N16554 N16997  1k TC1=0 TC2=0
+X_X1          N16997 N17112  IC_Subckt
+R_R8         0 N17112  10 TC1=0 TC2=0
+
+.SUBCKT IC_Subckt in out
+R1          in  mid 10 TC1=0 TC2=0
+C1          mid out 1u TC1=0 TC2=0
+.IC         V(mid )=0.5
+.ENDS
+
+* RC Decay with IC as an expression
+.param test_ic=0.5
+V_V9         9a 0
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s
+R_R9a         9a 9b  1k TC1=0 TC2=0
+R_R9b         9c 9b  10 TC1=0 TC2=0
+C_C9          9d 9c  1u  TC1=0 TC2=0
+R_R9c         0 9d  10 TC1=0 TC2=0
+.IC         V(9c)='test_ic'
+
+*RC Decay with IC in subcircuit as expression
+V_V10        10a 0
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s
+R_R10a         10a 10b  1k TC1=0 TC2=0
+X_X2          10b 10c  IC_SubcktExp
+R_10b         0 10c  10 TC1=0 TC2=0
+
+.SUBCKT IC_SubcktExp in out
+R1          in  mid 10 TC1=0 TC2=0
+C1          mid out 1u TC1=0 TC2=0
+.IC         V(mid )='test_ic'
+.ENDS
+
+* Duplicate third test, but have the .IC statement at
+* the top-level, using subcircuit notation
+V_V11        11a 0
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s
+R_R11a        11a 11b  1k TC1=0 TC2=0
+X_X3          11b 11c  Subckt_noIC
+R_11b         0 11c  10 TC1=0 TC2=0
+.IC V(X_X3.mid)=0.5
+
+.SUBCKT Subckt_noIC in out
+R1          in  mid 10 TC1=0 TC2=0
+C1          mid out 1u TC1=0 TC2=0
+.ENDS
+
+.END

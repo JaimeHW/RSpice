@@ -1,0 +1,25 @@
+Simple RC circuit, .DATA version
+* 
+* Eric Keiter, SNL
+*
+Isrc 1 0 AC 1 0 
+R1 1 0 1e3
+C1 1 0 2e-6
+
+.print ac v(1)
+.AC data=eric
+
+.data eric
++ FREQ
++ 1.00000000e+00
++ 1.00000000e+01
++ 1.00000000e+02
++ 1.00000000e+03
++ 1.00000000e+04
++ 1.00000000e+05
++ 1.00000000e+06
++ 1.00000000e+07
++ 1.00000000e+08
+.enddata
+
+.END

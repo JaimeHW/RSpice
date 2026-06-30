@@ -1,0 +1,2 @@
+serial, nightly, parallel,  analytic, sampling, mc, normal, truncated
+valgrind

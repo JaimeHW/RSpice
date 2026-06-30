@@ -1,0 +1,38 @@
+*Sample netlist for BSIM-MG 
+*Inverter Transient
+
+*.option abstol=1e-6 reltol=1e-6 post ingold
+.options nonlin continuation=gmin
+.options timeint method=trap
+.options device temp=25 
+.options output initial_interval=1e-8
+
+.include "modelcard.nmos_xyce"
+.include "modelcard.pmos_xyce"
+
+* --- Voltage Sources ---
+vdd   supply  0 dc 1.0
+vsig  vi  0 dc 0.5 sin (0.5 0.5 1MEG)
+
+* --- Inverter Subcircuit ---
+.subckt mg_inv vin vout vdd gnd
+Mp1 vout vin vdd gnd pmos1 TFIN=15n L=30 NFIN=10 ASEO=1.5e-14 ADEO=1.5e-14 NRS=1 NRD=1
+Mn1 vout vin gnd gnd nmos1 TFIN=15n L=30 NFIN=10 ASEO=1.5e-14 ADEO=1.5e-14 NRS=1 NRD=1
+.ends
+
+.options parser scale=1n
+
+* --- Inverter ---
+Xinv1  vi 1 supply 0 mg_inv
+Xinv2  1 2 supply 0 mg_inv
+Xinv3  2 3 supply 0 mg_inv
+Xinv4  3 4 supply 0 mg_inv
+Xinv5  4 vo supply 0 mg_inv
+
+* --- Transient Analysis ---
+.tran 10n 5u
+
+.print tran {v(vi)+1} {v(vo)+1}
+*comp {v(vi)+1} reltol=1e-2 
+*comp {v(vo)+1} reltol=1e-2  abstol=1e-5 zerotol=1e-8
+.end

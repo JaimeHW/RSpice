@@ -1,0 +1,33 @@
+Test Name: BUG_411
+Owner: Eric Rankin
+Test netlists: perl-generated.cir
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+bug 411:  Segmentation fault when parsing netlist with subcircuit usage error
+
+Proper error trapping was missing prior to this bug fix.  The correction will
+now report an error when the subcircuit call, and subcircuit definition
+node list lengths, differ.
+
+Procedure:
+============
+Run Xyce with the perl-generated.cir 
+
+File I/O is handled on proc 0, so parallel test is not necessary.
+
+Verification:
+=============
+Verify that Xyce does not segfault, particularly on linux and ppc. 
+
+Xyce should abort with an error message.
+ 
+Notes:
+======
+
+
+

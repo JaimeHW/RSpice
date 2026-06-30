@@ -1,0 +1,18 @@
+* Test of FOURIER Measure with FROM-TO and TD.  Also test
+* .OPTIONS MEASURE MEASDGT.  The output precision should be
+* 7 digits, rather than either the default precision of 6
+* or the requested value of precision=5.
+
+.OPTIONS MEASURE MEASDGT=7
+.TRAN 0 4 
+
+.PRINT TRAN V(1) FOURFROMTO FOURTD
+V1 1 0 PWL 0 0V 1 1V 2 0V 3 2V 4 0V   
+R1 1 0 1
+
+* Magnitude of FOURTD should be 2x the value of FOURFROMTO.  They should have
+* the same phase value.
+.MEASURE TRAN FOURFROMTO FOUR V(1) AT=2 NUMFREQ=10 GRIDSIZE=200 FROM=0 TO=2 PRECISION=5
+.MEASURE TRAN FOURTD FOUR V(1) AT=2 NUMFREQ=10 GRIDSIZE=200 TD=2
+
+.END

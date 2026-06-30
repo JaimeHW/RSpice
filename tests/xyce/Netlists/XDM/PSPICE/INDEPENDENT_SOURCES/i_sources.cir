@@ -1,0 +1,22 @@
+* Xyce netlist for testing I-Sources
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PRINT TRAN FORMAT=PROBE  I(R_R1) I(R_R2) I(R_R3) I(R_R4)
+
+*AC Source syntaxes 
+R_R1        1 0  1K 
+I_I1        1 0 SIN(0 1 1KHz 0 0 0)
+
+* DC source syntaxes
+R_R2        2 0  1k 
+I_I2        2 0  5
+
+R_R3        3 0  1k 
+I_I3        3 0  1
+
+R_R4        4 0  1k 
+I_I4        4 0  1
+
+.END
+

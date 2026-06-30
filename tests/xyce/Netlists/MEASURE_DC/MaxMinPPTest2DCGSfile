@@ -1,0 +1,21 @@
+ ***** Measure Functions ***** 
+
+MAXV1B = 4.687500e+00 at VSRC1 value = 5.000000e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+MAXV1BFT = 4.062500e+00 at VSRC1 value = 4.000000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 2.000000e+00
+
+MINV1B = 1.250000e+00 at VSRC1 value = 1.000000e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+MINV1BFT = 1.875000e+00 at VSRC1 value = 2.000000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 2.000000e+00
+
+PPV1B = 3.437500e+00 with max at VSRC1 value= 5.000000e+00 and min at VSRC1 value= 1.000000e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+PPV1BFT = 2.187500e+00 with max at VSRC1 value= 4.000000e+00 and min at VSRC1 value= 2.000000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 2.000000e+00
+
+

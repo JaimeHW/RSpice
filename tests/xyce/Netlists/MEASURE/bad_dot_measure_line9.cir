@@ -1,0 +1,41 @@
+Testing ill-formed TRIG-TARG .MEASURE lines
+*******************************************************************
+* This test uses new TrigTarg classes 
+*
+*
+* See gitlab-ex issues 289 and 319
+* *****************************************************************
+
+VS1  1  0  SIN(0 1 1)
+R1   1  0  100
+
+.TRAN 0 1
+.PRINT TRAN V(1)
+
+.measure tran onea trig v(1)
+.measure tran oneb trig v(1)=0.9
+.measure tran onec trig v(1)=0.9 targ
+.measure tran oned trig v(1)=0.9 targ=
+
+.measure tran twoa trig v(1) targ v(1)=0.9 
+.measure tran twob trig= targ v(1)=0.9 
+
+.measure tran three trig targ at=0.5
+.measure tran four trig at=0.5 targ
+
+* these are failed measures, by definition, for now
+.measure tran crossminus2 trig v(1)=0.9 CROSS=-2 targ v(1)=0.9 CROSS=1
+.measure tran riseminus2 trig v(1)=0.9 rise=-2 targ v(1)=0.9 rise=1
+.measure tran fallminus2 trig v(1)=0.9 fall=-2 targ v(1)=0.9 fall=1
+.measure tran crossminus2a trig v(1)=0.9 CROSS=1 targ v(1)=0.9 CROSS=-2
+.measure tran riseminus2a trig v(1)=0.9 rise=1 targ v(1)=0.9 rise=-2
+.measure tran fallminus2a trig v(1)=0.9 fall=1 targ v(1)=0.9 fall=-2
+
+.measure tran_cont crossminus1 trig v(1)=0.9 CROSS=-1 targ v(1)=0.9 CROSS=1
+.measure tran_cont riseminus1 trig v(1)=0.9 rise=-1 targ v(1)=0.9 rise=1
+.measure tran_cont fallminus1 trig v(1)=0.9 fall=-1 targ v(1)=0.9 fall=1
+.measure tran_cont crossminus1a trig v(1)=0.9 CROSS=1 targ v(1)=0.9 CROSS=-1
+.measure tran_cont riseminus1a trig v(1)=0.9 rise=1 targ v(1)=0.9 rise=-1
+.measure tran_cont fallminus1a trig v(1)=0.9 fall=1 targ v(1)=0.9 fall=-1
+
+.end

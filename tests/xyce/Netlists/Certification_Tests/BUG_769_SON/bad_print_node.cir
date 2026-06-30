@@ -1,0 +1,17 @@
+* simple print test to illustrate alias node map issue
+Xsubcircuit node1 0 device
+
+*Vdrv node1 0 DC 5
+
+.subckt device
++ node_1 node_2
+Rres node_1 node_2 2
+.ENDS
+
+.print tran FORMAT=NOINDEX V(Xsubcircuit:node_1) 
+*.print tran FORMAT=NOINDEX v(node1)
+
+* run simulation
+.tran 0 1e-06
+
+.end

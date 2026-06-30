@@ -1,0 +1,40 @@
+Test Name: bug_1692
+Owner: Eric Keiter, with some code written by Dave Shirley.
+
+Test netlists:  see below
+GS files: none
+Mode:  Serial
+Comparator: diff       
+Version of Xyce: Release_5.0 
+ 
+Description:
+============
+This test confirms that under some circumstances, expressions can be specified 
+without curly braces or single quotes surrounding them.  As of this writing
+(5/21/2009), the conditions under which this can be done include:
+
+1) no whitespace in the expression
+
+2) equals sign must be present.
+
+3) Other than .MODEL, any line starting with "." is excluded from this 
+capability, meaning that expressions in lines such as .PRINT won't work 
+without braces or quotes.
+
+Procedure:
+============
+  run_xyce bug_1692_0.cir
+  run_xyce bug_1692_1.cir
+  run_xyce bug_1692_2.cir
+  run_xyce bug_1692_3.cir
+  diff bug_1692_0.cir.prn against the other 3.
+
+ 
+Verification:
+=============
+Passes if the output is identical.
+
+ 
+Notes:
+======
+

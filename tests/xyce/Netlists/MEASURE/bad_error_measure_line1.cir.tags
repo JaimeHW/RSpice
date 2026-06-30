@@ -1,0 +1,6 @@
+nightly
+serial, parallel
+measure, errorexit
+bug785
+
+

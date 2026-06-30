@@ -1,0 +1,20 @@
+Bug Number: 1116
+Test netlists: bug_1116.cir
+
+Description:
+============
+This test checks that an error is returned when the user tries to use a
+device with too few nodes.
+
+Verification
+============
+Run Xyce in serial on bug_1116.cir.
+
+Xyce should exit with fatal error:
+
+User Fatal: Error in file bug_1116.cir at or near line 4
+ Insufficient number of nodes for device: D1
+
+Special Notes:
+==============
+Parallel should give the same error.

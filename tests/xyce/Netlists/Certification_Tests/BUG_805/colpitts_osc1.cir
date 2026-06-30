@@ -1,0 +1,117 @@
+Colpitts oscilator
+* from http://engphys.mcmaster.ca/~elmer101/swvfo.html
+* generated from colpitts.sch and modified to include Xyce-specific options.
+* Spice netlister for gnetlist
+* Spice backend written by Bas Gieltjes
+R6 0 2 15k
+R5 0 3 15k
+R4 0 4 100k
+L1 5 0 2.5uH
+R7 1 5 .37
+C20 4 0 30pF
+C8 1 4 82pF
+C10 3 0 270pF
+C9 1 3 10pF
+C2 2 0 47pF
+C3 1 2 10pF
+C7 1 0 82pF
+C6 1 q2b 3.3nF
+C5 q2e 0 2.7nF
+C4 q2b q2e 2.7nF
+R16 0 q2b 22K
+R15 q2b q2c 47K
+V2 q2c 0 PWL (0 0 5ns 7.4V)
+R17 q2e 0 2.2k
+Q2 q2c q2b q2e Q222200
+*
+.tran 0 80us 
+*COMP v(q2b) reltol=5.0e-3 abstol=5.0e-7
+*COMP v(q2e) reltol=5.0e-3 abstol=5.0e-7
+.print tran v(q2b) v(q2e)
+.options device voltlim=1 debugLevel=0
+.options timeint reltol=1e-4 abstol=1e-9
+*.options reltol=1e-6 abstol=1e-9
+*SPICE 2G.6 Compatible
+*
+*  Copyright (C) 1993, by the Sandia National Laboratories
+*  All rights reserved.
+*
+* STORED UNDER DWG. NO.= 381575  
+* GENERIC FUNCTIONAL EQUIVALENT = 2N2222  
+* TYPE: TRANSISTOR  
+* SUBTYPE: BIPOLAR SS GP  
+* THE FOLLOWING FILE CONTAINS 5 MODELS FOR THE 2N2222AJTXV AT VARYING
+* TEMPERATURES. EACH MODELS TEMPERATURE IS NOTED.  
+* THIS MODEL CAN BE USED FOR ALL OF THE FOLLOWING DEVICES:  
+* 2N2222A  
+* 2N2222AJTXV    (381575) (MANUFACTURERS PART NO.)  
+* 2N2222AJV      (381575)  
+* 2C2222A        (373607)  
+* 2C2222AHV      (379549)  
+* PARAMETER MODELS EXTRACTED AT ALL-TECH FROM MEASURED DATA  
+* CREATION DATES: (NOTED BEFORE MODEL)  
+* RESPONSIBLE ENGINEER - 1252 - JAMES B. STANLEY
+* ENTERED INTO WHITESTAR BY JAMES B. STANLEY, 10/20/95
+* REQUESTED BY KIMBALL, MA, HEATON, HUSA, AND DIGHTON  
+*  
+* .LIB 2N2222  
+*  
+*  
+* CREATION DATE: 11-06-90  
+* RAD: PRERAD  
+* DEV: #130  
+* TEMP= 27  
+*  
+* THE FOLLOWING IS AN INDICATION OF SATURATED SWITCHING TIME ACCURACY
+* FOR THIS MODEL:  
+*  
+* IC(NOMINAL) = 20MA   FB=10  
+*  
+*  
+*      MEASURED     SIMULATED  
+*TON   39NS          37.5NS  
+*TOFF  302NS         304NS  
+*  
+.MODEL Q222200 NPN      (
++         IS = 3.97589E-14
++         BF = 195.3412
++         NF = 1.0040078
++        VAF = 53.081
++        IKF = 0.976
++        ISE = 1.60241E-14
++         NE = 1.4791931
++         BR = 1.1107942
++         NR = 0.9928261
++        VAR = 11.3571702
++        IKR = 2.4993953
++        ISC = 1.88505E-12
++         NC = 1.1838278
++         RB = 56.5826472
++        IRB = 1.50459E-4
++        RBM = 5.2592283
++         RE = 0.0402974
++         RC = 0.4208
++        CJE = 2.56E-11
++        VJE = 0.682256
++        MJE = 0.3358856
++         TF = 3.3E-10
++        XTF = 6
++        VTF = 0.574
++        ITF = 0.32
++        PTF = 25.832
++        CJC = 1.40625E-11
++        VJC = 0.5417393
++        MJC = 0.4547893
++       XCJC = 1
++         TR = 3.2E-7
++        CJS = 0
++        VJS = .75
++        MJS = 0
++        XTB = 1.6486
++         EG = 1.11
++        XTI = 5.8315
++         KF = 0
++         AF = 1
++         FC = 0.83
++ )
+.END

@@ -1,0 +1,59 @@
+*Samle netlist for BSIM-MG
+* Drain Noise Simulation 
+
+**.option abstol=1e-6 reltol=1e-6 post ingold
+*.options nonlin abstol=1e-6 reltol=1e-6
+.options device temp=27
+
+.include "modelcard.nmos_xyce_111"
+
+* --- Voltage Sources ---
+vds 1 0 dc 1v
+vgs gate 0 dc 0.5v ac 1
+vbs bulk 0 dc 0v
+
+* --- Circuit ---
+lbias 1 drain 1m
+cload drain 2 1m
+rload 2 0 1
+M1 drain gate 0 bulk nmos1 TFIN=15n L=30n NFIN=10 NRS=1 NRD=1
+
+* --- Analysis ---
+.noise v(drain) vgs dec 11 1k 100g 1
+
+* Verify that case does not matter in the device names or noise type names
+* for the DNO and DNI operators.
+.print noise {sqrt(abs(onoise))} {sqrt(abs(inoise))}
++ {pow(abs(DNO(RLOAD)),1/3)}
++ {pow(abs(DNO(M1,Flicker_di_si_1overf)),1/3)} 
++ {pow(abs(DNO(m1,white_d_di1_rd)),1/3)}
++ {pow(abs(DNO(m1,white_di1_di_rd)),1/3)}
++ {pow(abs(DNO(m1,white_di_si_id)),1/3)}
++ {pow(abs(DNO(m1,white_g_ge_rg)),1/3)}
++ {pow(abs(DNO(m1,white_gi_di_igbd)),1/3)}
++ {pow(abs(DNO(m1,white_gi_di_igd)),1/3)}
++ {pow(abs(DNO(m1,white_gi_e_igb)),1/3)}
++ {pow(abs(DNO(m1,white_gi_si_igbs)),1/3)}
++ {pow(abs(DNO(m1,white_gi_si_igs)),1/3)}
++ {pow(abs(DNO(m1,white_n_gnd_corl)),1/3)}
++ {pow(abs(DNO(m1,white_s_si1_rs)),1/3)}
++ {pow(abs(DNO(m1,white_si1_si_rs)),1/3)}
++ {pow(abs(DNO(M1)),1/3)}
++ {pow(abs(DNI(RLOAD)),1/3)}
++ {pow(abs(DNI(M1,Flicker_di_si_1overf)),1/3)} 
++ {pow(abs(DNI(m1,white_d_di1_rd)),1/3)}
++ {pow(abs(DNI(m1,white_di1_di_rd)),1/3)}
++ {pow(abs(DNI(m1,white_di_si_id)),1/3)}
++ {pow(abs(DNI(m1,white_g_ge_rg)),1/3)}
++ {pow(abs(DNI(m1,white_gi_di_igbd)),1/3)}
++ {pow(abs(DNI(m1,white_gi_di_igd)),1/3)}
++ {pow(abs(DNI(m1,white_gi_e_igb)),1/3)}
++ {pow(abs(DNI(m1,white_gi_si_igbs)),1/3)}
++ {pow(abs(DNI(m1,white_gi_si_igs)),1/3)}
++ {pow(abs(DNI(m1,white_n_gnd_corl)),1/3)}
++ {pow(abs(DNI(m1,white_s_si1_rs)),1/3)}
++ {pow(abs(DNI(m1,white_si1_si_rs)),1/3)}
++ {pow(abs(DNI(m1)),1/3)}
+
+.end
+

@@ -1,0 +1,12 @@
+ ***** Measure Functions ***** 
+
+MAXV1 = -1.593925e-12 at V1 value = 0.000000e+00
+Measure Start V1 Value= 0.000000e+00	Measure End V1 Value= -2.100000e-01
+
+MINV1 = -2.099982e-01 at V1 value = -2.100000e-01
+Measure Start V1 Value= 0.000000e+00	Measure End V1 Value= -2.100000e-01
+
+PPV1 = 2.099982e-01 with max at V1 value= 0.000000e+00 and min at V1 value= -2.100000e-01
+Measure Start V1 Value= 0.000000e+00	Measure End V1 Value= -2.100000e-01
+
+

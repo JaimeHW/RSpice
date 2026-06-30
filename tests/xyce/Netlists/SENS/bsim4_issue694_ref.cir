@@ -1,0 +1,21 @@
+* Reference circuit for bug4_issue694.  This circuit is equivalent, except that it doesn't use option scale.
+
+.model nfet_model nmos level = 54 
+.options timeint reltol=1.0e-6 method=gear
+.options device temp=25 
+
+.param Wparam=0.65u
+.param Lparam=0.15u
+
+VIN1 vi 0 PWL(0S 0V  100ps 0V 300ps 1.8V )
+m_nfet 0 vi vo 0 nfet_model l = {Lparam} w = {Wparam}
+r1 vo 0 1.0e-4
+c1 vo 0 1.0e-7
+
+.tran 2ps 1ns
+
+.SENS objfunc={v(vo)} param=m_nfet:w
+.options SENSITIVITY adjoint=0 direct=1 forcedevicefd=1
+.print sens
+
+.end

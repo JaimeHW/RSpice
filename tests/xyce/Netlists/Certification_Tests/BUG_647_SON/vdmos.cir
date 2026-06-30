@@ -1,0 +1,29 @@
+IRF130 Test Circuit
+VD 3 0 0
+VS 2 0 0
+VG 4 0 DC 5
+VID 3 5 DC 0
+M1 5 4 2 0 IRF130 W=0.386 L=2.5u TEMP=27
+.step lin M1:TEMP 25 27 1
+.step lin M1:L 2.4u 2.6u .1u
+.step lin M1:W .385 .387 .001
+.MODEL IRF130 NMOS LEVEL=18
++ L0=2.5u
++ W0=0.386
++ CV=1
++ CVE=1
++ VTO=3.5
++ RD= 0
++ RS= 0.005
++ LAMBDA=0
++ M=3
++ SIGMA0=0
++ UO=230
++ VMAX=4e4
++ DELTA=5
++ TOX=50nm
+*
+.DC VD 0 50 5 VG 5 15 5
+.PRINT DC V(3) V(4) V(2) I(VID) M1:TEMP M1:L M1:W
+.END
+

@@ -1,0 +1,59 @@
+THIS CIRCUIT TESTS A CHAIN of 2-INPUT NAND GATES WITH BJT MODEL
+* This is a 2-input NAND.  Inputnode1 is at node 1, while inputnode2 is at node 2.
+* VIN1 and VIN2 are the input signals.  Both signals have to be high to have
+* a low ouput. VIN1 and VIN2 are both high (5V) at 2us,10us,18us, and 26us.
+* The output, VOUT, is low (0V) for 1.2us.  Although thenode2 input signals are
+* only high at the same time for 1us,the output stays low for ~1.2us due to
+* the parameter Tr, reverse transit time, in the BJT model.  Tr=375ns.  Reverse
+* transit time and junction capacitance determine the switching characterisitics
+* of the model.  A chain of nands is set up such that the output nodes consist
+* of alternalyly high and low signals at the beginning.  This is primarily a
+* test if convergence for the DCOP using homotopy based on the exp() function.
+
+** Analysis setup **
+*
+.tran 20ns 10us
+
+* this circuit will run if mincap is set, but the point of the circuit
+* is for it to fail.
+*
+*.options device mincap=1nf
+.options topology outputnamesfile=true
+.options nonlin continuation=gmin
+
+VDD 	$G_VDDNODE	0	5V
+VIN1         node1 0  5V PULSE (5V 0V 3us 0.5ns 0.5ns 4us 8.275us)
+VIN2         node2 0  0V PULSE (0V 5V 2us 0.5ns 0.5ns 4us 8.275us)
+
+XN1 node1 node2  OUT1  NAND
+XN2 node1   OUT1  OUT2  NAND
+XN3 node1   OUT2  OUT3  NAND
+XN4 node1   OUT3  OUT4  NAND
+XN5 node1   OUT4  OUT5  NAND
+XN6 node1   OUT5  OUT6  NAND
+XN7 node1   OUT6  OUT7  NAND
+XN8 node1   OUT7  OUT8  NAND
+.print tran V(OUT1) v(OUT2) V(OUT7) v(OUT8) V(node1) V(node2)
+
+.subckt nand   INP1  INP2  VOUT 
+RB1	$G_VDDNODE	VB1	4K
+QIN1	VB2	VB1	INP1	NPN
+QIN2	VB2	VB1	INP2	NPN
+RC2	$G_VDDNODE	VC2	1.6K
+Q3	VC2	VB2	VB3	NPN
+RC3	$G_VDDNODE	VOUT	4K
+Q4	VOUT	VB3	0	NPN
+RB3	VB3	0	1K
+.ENDS
+
+**************************
+.MODEL NPN NPN (           IS     = 3.97589E-14
++ BF     = 195.3412        NF     = 1.0040078       VAF    = 53.081
++ IKF    = 0.976           ISE    = 1.60241E-14     NE     = 1.4791931
++ BR     = 1.1107942       NR     = 0.9928261       VAR    = 11.3571702
++ IKR    = 2.4993953       ISC    = 1.88505E-12     NC     = 1.1838278
++ RB     = 56.5826472      IRB    = 1.50459E-4      RBM    = 5.2592283
++ RE     = 0.0402974       RC     = 0.4208          XTI    = 5.8315
++ EG     = 1.11            XTB    = 1.6486                            )
+**************************
+.END

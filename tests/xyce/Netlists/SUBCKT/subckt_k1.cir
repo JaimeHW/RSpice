@@ -1,0 +1,30 @@
+Baseline for subcircuit/expression tests
+****************************************************************************
+*
+* Tests that expressions used in subcircuits work properly when using both
+* local nodes and nodes from the .subckt line.
+*
+* This test simply puts the B source into a subcircuit, with no trickery,
+* and no chance of confusion between main-level and subcircuit node names
+*
+****************************************************************************
+
+
+V1 1 0 5V
+R1 1 0 1
+V2 2 0 10V
+R2 2 0 1
+V3 3 0 100V
+R3 3 0 1
+
+R4 4 0 1
+XsubK1 1 2 3 4 SubK1
+
+.subckt SubK1 S1 S2 S3 S4
+B1 S4 0 V={V(S3)+V(S2)*V(S1)}
+.ends
+
+.print DC V(2) V(1) V(3) V(4)
+.DC V2 0 10 1
+
+.end

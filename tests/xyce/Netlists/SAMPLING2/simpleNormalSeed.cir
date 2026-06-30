@@ -1,0 +1,19 @@
+Regression test for simple normal distribution sampling
+
+c1 1 0 1uF IC=1
+*R1 1 2 1K
+R1 1 2 {agauss(3K,1K,1)}
+v1 2 0 0V
+.print tran v(1)
+.tran 0 5ms
+.options timeint reltol=1e-6 abstol=1e-6
+
+* 10 normally distributed samples, mean=3K; std deviation=1K
+.SAMPLING 
++ useExpr=true
+
+.options SAMPLES numsamples=10
++ seed=743190581
+
+.end
+

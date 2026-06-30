@@ -1,0 +1,17 @@
+`include "disciplines.vams"
+`include "constants.vams"
+
+
+(*xyceModelGroup="amplifier" xyceSpiceDeviceName="Amp" xyceLevelNumber="1"*) 
+
+module amplifier (out,in1,in2) ;
+input in1, in2;
+output out;
+//voltage out;
+
+parameter real GAIN_V = 1.0 from (1.0:inf);
+analog
+	begin
+		V(out) <+ GAIN_V * V(in1,in2);
+	end
+endmodule

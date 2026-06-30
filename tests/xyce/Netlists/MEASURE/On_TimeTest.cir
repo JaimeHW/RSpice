@@ -1,0 +1,41 @@
+A test of the measure On_time functionality
+*******************************************************************************
+*
+* a few sources of different types
+VS1  1  0  SIN(0 1.0 1KHZ 0 0)
+VP2  2  0  PULSE( 0 100 0ms 0.1ms 0.1ms 1ms 2ms )
+VS3  3  0  SIN(0 1.0 100HZ 0 0)
+VS4  4  0  SIN(0 1.0 200HZ 0 0)
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+R4  4  0  100
+
+* use MEASFAIL for compatibility with the verification approach
+* used in .sh file.
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0  10ms
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3) V(4) V(1,0)
+
+.measure tran on1KHz ON_TIME V(1) ON=.25
+.measure tran on10_1KHz ON_TIME V(1,0) ON=.25
+.measure tran onTop ON_TIME V(2) ON=25
+.measure tran on100Hz ON_TIME V(3) ON=.25
+.measure tran on200Hz ON_TIME V(4) ON=.25
+
+* add TO-FROM modifiers
+.measure tran sineHalfInterval on_time V(1) ON=0.25 FROM=0 TO=5e-3
+
+* mix in TDs before and after FROM value.
+.measure tran sineTDbetween on_time V(1) ON=0.25 FROM=0 TO=5e-3 TD=1e-3
+.measure tran sineTDbefore on_time V(1) ON=0.25 FROM=1e-3 TO=5e-3 TD=0.5e-3
+
+* this test should fail and return -1
+.measure tran returnNegOne on_time V(1) ON=0.25 FROM=0.2e-3 TO=0.25e-3 TD=0.5e-3 default_val=-1
+
+*this test should fail and return 0
+.measure tran returnZero on_time V(1) ON=2.0
+.END
+

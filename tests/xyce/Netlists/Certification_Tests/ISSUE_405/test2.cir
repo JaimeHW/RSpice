@@ -1,0 +1,27 @@
+
+* test for subcircuit instance parameters, when they refer to each other.
+*
+* this test also tests precedence rules for subcircuit parameters.   
+* The resistor Rinside uses the parameter 'par3'.  It is defined in 3 places.  
+* The one with highest priority is on the Xtest line.
+*
+* This version applies a .step sweep to one of the independent Xtest parameters 
+* (par1), to test if the updated value will propagate properly all the way 
+* thru to the device Rinside.
+*
+.subckt simple in out PARAMS: par1=2.0 par2=2.0 par3='par1*par2*2.0'
+.param par3=100.0
+Rinside in out 'par3'
+.ends
+
+V1 1 0 1.0
+R1 1 2 1.0
+Xtest 2 0  simple par1='fred' par2=3.0 par3='par1+par2'
+
+.param fred=2.0
+
+.step fred list 2.0 3.0 4.0
+
+.dc v1 1.0 1.0 1.0
+.print dc v(1) {Xtest:Rinside:R}
+

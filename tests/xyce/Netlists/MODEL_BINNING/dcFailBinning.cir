@@ -1,0 +1,27 @@
+** NMOSFET: Benchmarking Implementation of BSIM4.6.0 by Mohan V. Dunga 12/13/2006.  
+*
+* Model binning version:  Eric Keiter, 10/5/2018
+*
+** Circuit Description **
+*
+* this works:
+*m1 2 1 0 b nch L=0.11u W=10.1u NF=5 rgeomod=1 geomod=0
+*
+* this fails: (outside of the L ranges)
+m1 2 1 0 b nch L=0.09u W=10.1u NF=5 rgeomod=1 geomod=0
+vgs 1 0 1.2
+vds 2 0 1.2
+Vb b 0 0.0
+
+.op
+
+.dc vds 0.0 1.21 0.02 vgs 0.2 1.21 0.2
+
+.print dc v(2) v(1) i(vds)
+*COMP i(vds) abstol=1e-5
+
+* model binning
+.model nch.1 nmos ( version=4.7 level=14 lmin=0.1u lmax=20u wmin=0.1u wmax=10u  )
+.model nch.2 nmos ( version=4.7 level=14 lmin=0.1u lmax=20u wmin=10u  wmax=100u )
+
+.end

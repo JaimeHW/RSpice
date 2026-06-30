@@ -1,0 +1,34 @@
+* A test of re-measure of a .PRN formatted output file  where the delimter 
+* is comma and .STEP is used.  The command line syntax is: Xyce -delim COMMA <netlist>   
+* In particular, this tests re-measure of various special cases within the 
+* function for parsing the .PRN file for re-measure:
+*
+*    1) Expressions, with blanks in the enclosing {}
+*   
+*    2) Expressions with a V(a,b) syntax in them
+*
+*    3) V(a,b) syntax outside of an expression
+*
+* See SON Bug 763 for more details.
+*******************************************************************************
+*
+* a few sources of different types
+VS  1  0  SIN(0 1.0 1HZ 0 0)
+VP  2  0  PULSE( 0 100 100ms 100ms 100ms 700ms 1s )
+
+R1  1  0  100
+R2  2  0  100
+
+.STEP VS:VA 1 2 1
+.TRAN 0  1
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(2,1) {(V(2,1) - V(1))}
+
+.measure tran max1 max V(1) 
+.measure tran max2 max V(2)
+.measure tran maxdiff21 max V(2,1)
+.measure tran maxeqn max {V(2,1)-V(1)}
+.measure tran maxeqn1 max{V(2,1) - V(1)}
+
+
+.END
+

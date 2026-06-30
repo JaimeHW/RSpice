@@ -1,0 +1,22 @@
+Test of multiple print lines with homotopy -- baseline
+* Baseline for multiple-print-lines with homotopy.  Compare all outputs
+* of this netlist to the outputs of the netlist with the same name as this
+* but with "_baseline" removed.
+*
+* This differs from test 2 because it uses continuation, and therefore produces
+* an extra output file of continuation data, called "netlist.HOMOTOPY.prn" in
+* this case.  This extra output file should also have its lines of data
+* built up from the combined variable lists of the two print lines.
+
+R1 1 0 10
+V1 1 0 sin (0 10 10MEG 0 0)
+
+.print TRAN v(1) I(v1)
+.PRINT HOMOTOPY v(1) I(v1)
+
+.tran 1ns 10ns
+.options nonlin maxstep=200 continuation=gmin reltol=1.0e-2 abstol=1.0e-6 rhstol=1.0e-4
+
+.options loca stepper=natural predictor=constant stepcontrol=adaptive
+
+.end

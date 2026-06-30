@@ -1,0 +1,79 @@
+* Diode clipper circuit with transient analysis statement.   Note that
+* the device "names" in the Spectre netlist are (for example)
+* R5 and V5.  However, the Spectre instance lines are of the: 
+* form:
+*
+*   R1 (N03179 N40173) resistor r=1K
+*   V1 (N04104 0) vsource dc=5 type=dc
+*
+* So, on a Spectre instance line, it is the "resistor" and "vsource" 
+* keywords that identify the devices as Resistors or Voltage Sources.
+* So, the xdm translation will turn those devices into RR1 and VV1 
+* in the translated Xyce netlist.  For this reason, the device names 
+* in this "Gold" Xyce netlist are (for example) RR1 and VV1, to match
+* what the device names will be in the xdm-translated Xyce netlist.
+*
+* See SRN Bugs 2052 and 2069 for more details on what this netlist 
+* is testing.
+*
+* Voltage Sources
+VV1 N04104 0 5V
+VV2 N04173 0 SIN(0V 10V 1kHz)
+* Analysis Command
+.TRAN 0 2ms
+* Output
+.PRINT TRAN V(N04173) V(N03179) V(N03334) V(N04104)
+*+ W(DD1)
+* Diodes
+DD1 N03179 N04104 DIODEA
+DD2 0 N03179 DIODEP
+* Resistors
+RR1 N03179 N04173 1K
+RR2 N04104 N03179 3.3K
+RR3 N03179 0 3.3K
+RR4 N03334 0 5.6K
+* Capacitor
+CC1 N03179 N03334 0.47u
+*
+* GENERIC FUNCTIONAL EQUIVALENT = 1N3940
+* TYPE: DIODE
+* SUBTYPE: RECTIFIER
+.MODEL DIODEA D(
++ IS = 4E-10
++ RS = .105
++ N = 1.48
++ TT = 8E-7
++ CJO = 1.95E-11
++ VJ = .4
++ M = .38
++ EG = 1.36
++ XTI = -8
++ KF = 0
++ AF = 1
++ FC = .9
++ BV = 600
++ IBV = 1E-4)
+*
+
+* Same model parameters, but different name.
+* See SRN Bug 2069 for more details.
+* GENERIC FUNCTIONAL EQUIVALENT = 1N3940
+* TYPE: DIODE
+* SUBTYPE: RECTIFIER
+.MODEL DIODEP D(
++ IS = 4E-10
++ RS = .105
++ N = 1.48
++ TT = 8E-7
++ CJO = 1.95E-11
++ VJ = .4
++ M = .38
++ EG = 1.36
++ XTI = -8
++ KF = 0
++ AF = 1
++ FC = .9
++ BV = 600
++ IBV = 1E-4)
+*
+.END

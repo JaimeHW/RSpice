@@ -1,0 +1,57 @@
+A test of the level 6 neuron implementation of the d_lambda rule
+*
+* The d_lambda rule, described in The Neuron Book, pgs 122-123,
+* is used to determine the spatial resolution necessary for 
+* simulating a neuronal process.
+*
+* This test uses the same cable tested in rallpack1.cir, but without 
+* specifying N.  A cable with the parameters given below should
+* have at least 37 segments according to the d_lambda rule;
+* this tests verifies that the necessary number of segments are
+* created by accessing the end segments in the .print line.
+*
+.param length = 0.1e-2 ; [m]
+.param radius = 0.5e-6  ; [m]
+.param memC = 1.0e-2  ; [F/m^2] ok
+.param restV = -0.065 ; [V]
+.param Rm = 4.0 ; [ohms m^2]
+.param memG = {1.0/Rm}    ; TODO - make sure that's what Rm is for
+.param Ra = 1.0 ; [ohms m]
+
+
+.model pcParams neuron level=6
++ cMem = {memC}
++ gMem = {memG}
++ vRest = {restV}
+
+* This is a standard current pulse to start an activation
+*          pulse( initial_value pulse_value delay_time rise_time fall_time pulse_width period)
+Iin 0 a PULSE( 0 1.0e-10 1.0e-12 0.0 0.0 1.0e10 1.0e10)
+
+* the parameters R (intra-cellular resistivity Ohm/cm), A= radius (cm), L = length (cm)
+* can be specified in the .model statement or as part of the instance.  Instance level
+* parameters override model level ones.  N = number of segments.
+
+* intra cellular resistivity, rl,  is typically 1-3 kOhm mm.  Resistance along the long axis (longitudinal resistance Rl = rl L / (pi a^2)
+* 1 kOhm mm = 1000 Ohm mm = 100 Ohm cm 
+
+yneuron neuron1  a b pcParams 
+* R=1.0e2 A=1.0e-4 L=0.4 
++ R = {Ra}
++ A = {radius}
++ L = {length}
+
+.tran 0 0.25
+
+.options output initial_interval=5.0e-5
+.options timeint method=7 newlte=1 newbpstepping=1 reltol=1e-3
+.print tran 
++ V(a) 
++ n(yneuron!neuron1_V0) 
++ n(yneuron!neuron1_V36) 
++ V(b)
+   
+
+.end
+
+

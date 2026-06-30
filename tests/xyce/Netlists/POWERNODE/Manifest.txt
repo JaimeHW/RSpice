@@ -1,0 +1,17 @@
+cap.cir
+cap.cir.prn.gs.pl
+cap.cir.sh
+cap.cir.tags
+capInner.cir
+capTop.cir
+exclude
+resInner.cir
+resTop.cir
+resTop.cir.prn.gs.pl
+resTop.cir.tags
+sixNode.cir
+sixNode.cir.sh
+sixNode.cir.tags
+sixNode_in.cir
+sixNode_top.cir
+tags

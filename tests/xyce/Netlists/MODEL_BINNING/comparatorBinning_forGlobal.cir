@@ -1,0 +1,43 @@
+COMPARATOR - BSIM3 Transient Analysis, Binning version
+
+M1 Anot A E1 E1  PMOS w=3.6u l=1.2u
+M2 Anot A 0 0 NMOS w=1.8u l=1.2u
+M3 Bnot B E1 E1  PMOS w=3.6u l=1.2u
+M4 Bnot B 0 0 NMOS w=1.8u l=1.2u
+M5 AorBnot 0 E1 E1 PMOS w=1.8u l=3.6u
+M6 AorBnot B 1 0 NMOS w=1.8u l=1.2u
+M7 1 Anot 0 0 NMOS w=1.8u l=1.2u
+M8 Lnot 0 E1 E1 PMOS w=1.8u l=3.6u
+M9 Lnot Bnot 2 0 NMOS w=1.8u l=1.2u
+M10 2 A 0 0 NMOS w=1.8u l=1.2u
+M11 Qnot 0 E1 E1  PMOS w=3.6u l=3.6u
+M12 Qnot AorBnot 3 0 NMOS w=1.8u l=1.2u
+M13 3 Lnot 0 0 NMOS w=1.8u l=1.2u
+MQLO 8 Qnot E1 E1  PMOS w=3.6u l=1.2u
+MQL1 8 Qnot 0 0 NMOS w=1.8u l=1.2u
+MLTO 9 Lnot E1 E1  PMOS w=3.6u l=1.2u
+MLT1 9 Lnot 0 0 NMOS w=1.8u l=1.2u
+CQ Qnot 0 30f
+CL Lnot 0 10f
+
+Vdd E1 0 5
+Va A 0  pulse(0 5 10ns .1ns .1ns 15ns 30ns)
+Vb B 0 0
+
+.model nmos.1 nmos (level=9 lmin=0.1u lmax=3u  wmin=0.1u wmax=3u )
+.model nmos.2 nmos (level=9 lmin=0.1u lmax=3u  wmin=3u  wmax=10u )
+.model nmos.3 nmos (level=9 lmin=3u   lmax=10u wmin=0.1u wmax=3u )
+.model nmos.4 nmos (level=9 lmin=3u   lmax=10u wmin=3u  wmax=10u )
+
+.model pmos.1 pmos (level=9 lmin=0.1u lmax=3u wmin=0.1u wmax=3u )
+.model pmos.2 pmos (level=9 lmin=0.1u lmax=3u wmin=3u  wmax=10u )
+.model pmos.3 pmos (level=9 lmin=3u lmax=10u wmin=0.1u wmax=3u )
+.model pmos.4 pmos (level=9 lmin=3u lmax=10u wmin=3u  wmax=10u )
+
+* transient analysis
+.tran 1ns 60ns
+*.print tran v(a) v(b) v(9) v(8)
+.print tran precision=12 width=21 v(a) v(b) {v(9)+0.2} {v(8)+0.2}
+
+.END
+

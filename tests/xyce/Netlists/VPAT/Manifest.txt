@@ -1,0 +1,7 @@
+vpat.cir
+vpat_step.cir
+vpat_step.cir.sh
+bad_vpat.cir
+bad_vpat.cir.sh
+bad_vpat.cir.tags
+bad_vpat.cir.options

@@ -1,0 +1,24 @@
+Testing .MEASURE lines with unsupported DC mode
+*********************************************************************
+* This test will be modified once DC measures are supported.   
+* 
+* The TRAN measure should produce the correct output.
+* 
+*
+* 
+*
+*
+*********************************************************************
+VS  1  0  SIN(0 1.0 1KHZ 0 0)
+R1  1  0  100
+.TRAN 0 1ms
+.PRINT TRAN FORMAT=NOINDEX V(1) 
+
+* The .MEASURE DC line should result in Xyce running the Netlist,
+* but not putting anything in stdout or the .mt0 file for the DC
+* measure line.  The output should be correct for the TRAN measure.
+.MEASURE DC MAXDC MAX V(1)
+.MEASURE TRAN MAXTRAN MAX V(1)
+
+.END
+

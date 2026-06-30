@@ -1,0 +1,20 @@
+* This netlist tests scaling factors that are not commonly
+* used in Xyce.  At present it tests the use of X or x as
+* valid scaling factors for 1e6.  The other valid scaling
+* factor (MEG) for 1e6 is already well tested.  See SON
+* Bugs 472 and 1130 for more details.
+
+* 1 MHz sine wave, offset from zero
+V1 1 0 SIN(2 1 1X)
+R1 1 0 1
+
+V2 2 0 SIN(2 1 1x)
+R2 2 0 1
+
+V3 3 0 SIN(2 1 1MEG)
+R3 3 0 1
+
+.TRAN 0 1e-6
+.PRINT TRAN V(1) V(2) V(3) 
+.END
+

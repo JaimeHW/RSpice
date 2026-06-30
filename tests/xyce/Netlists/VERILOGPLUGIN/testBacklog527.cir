@@ -1,0 +1,30 @@
+*Test the fix of issue 527
+* Prior to fixing project backlog issue 527, Xyce/ADMS would exit with a fatal
+* error if a user defined an analog function that had any arguments of a type
+* differing from the return value of that function.
+*
+* This test case makes use of a resistor verilog-a module that takes
+* multiplicity as an integer parameter and passes it to an analog function
+* that computes conductance and resistor current.  We'll run it in a circuit
+* with a similar use of a built-in resistor and compare the two.
+
+*This is a simple voltage divider, v(2) should be exactly half of V(1)
+* and should be equal to V(1,2)
+
+* We really check this by subtracting the two and comparing to a fake
+* gold standard with the final column (where the difference should be) set
+* identically to zero.
+
+* if we pass the comparison, then that means that the verilog-a plugin
+* built correctly *and* the module is working properly.
+
+V1 1 0 SIN(0 10V 1kHz)
+R1 1 2 1K M=2
+R2 2 0 rmod R=1K M=2
+
+.model rmod r level=6
+
+.print tran V(1) V(1,2) V(2) {V(1,2)-V(2)}
+.tran 0 5m
+.end
+

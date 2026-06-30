@@ -1,0 +1,28 @@
+* Regression test to show transient direct sensitivities for 
+* second order Gear time integration, with global parameters.  This 
+* is the baseline to compare against sensCapGear_global_curlybrace.cir
+********************************************************************************
+
+.global_param cap=1u
+.global_param res=1K
+c1 1 0 1u
+R1 1 0 1K
+
+.print tran v(1) 
++ {(time/(res*res*cap))*exp(-time/(res*cap)) }
++ {(time/(res*cap*cap))*exp(-time/(res*cap)) }
+
+.print sens 
+
+.tran 0 5ms uic
+
+.IC V(1)=1.0
+
+.options timeint reltol=1e-6 abstol=1e-6 method=gear 
+
+.SENS objfunc={V(1)} param=c1:c,r1:r
+.options SENSITIVITY direct=1 adjoint=0  diagnosticfile=0  stdoutput=0  debuglevel=2   forcedevicefd=1
+*SQRTETA=1.0e-8
+
+.end
+

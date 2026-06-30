@@ -1,0 +1,30 @@
+* This netlist is the Xyce gold netlist.  It does not use
+* .INC statements like the in the PSpice netlist.
+
+*Analysis directives: 
+.TRAN  0 1ms
+
+* Output statements
+.PRINT TRAN FORMAT=PROBE V(N01173) V(N01179) V(N02173) V(N02179)
++ V(N03173) V(N03179) V(N04173) V(N04179)
+
+* Identical copies of the same V-R-R circuit, but the amplitude
+* of the V-src is changed from 1V to 4V.
+R_R1a         N01173 N01179  10 
+R_R1b         N01179 0  20
+V_V1         N01173 0  SIN(0 1 1KHz 0 0 0)
+
+R_R2a         N02173 N02179  10
+R_R2b         N02179 0  20 
+V_V2         N02173 0 SIN(0 2 1KHz 0 0 0)
+
+R_R3a         N03173 N03179  10 
+R_R3b         N03179 0  20  
+V_V3         N03173 0 SIN(0 3 1KHz 0 0 0)
+
+R_R4a         N04173 N04179  10 
+R_R4b         N04179 0  20  
+V_V4         N04173 0 SIN(0 4 1KHz 0 0 0)
+
+.END
+

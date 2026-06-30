@@ -1,0 +1,24 @@
+Diode Circuit Netlist test of parametric model selection
+*
+* This circuit is intened to run with 
+* a parameter file given to xyce as in :
+*   Xyce -prf params.in diode_templte.cir 
+*
+* The params.in file will define a variale dakota_DMOD 
+* which will take a value of 1, 2 or 3.  Given that
+* parameter, Xyce will select a given model for the 
+* diode as DMOD1, DMOD2 or DMOD3.
+
+VIN 1 0 PULSE ( 5 -1 0.05ms 100ns 100ns 0.1ms 0.2ms )
+R1 1 2 2K
+D1 3 0 @selecttext( dakota_DMOD, 1, DMOD1, 2, DMOD2, 3, DMOD3)
+VMON 2 3 0
+.MODEL DMOD1 D (IS=50FA)
+.MODEL DMOD2 D (IS=100FA)
+.MODEL DMOD3 D (IS=200FA)
+.TRAN 0 0.5ms
+.options timeint reltol=1.0e-4
+.PRINT TRAN I(VMON) V(3) {V(3)/I(VMON)}
+.measure tran iVmon avg i(VMON) from 0.4ms to 0.5ms
+*
+.END

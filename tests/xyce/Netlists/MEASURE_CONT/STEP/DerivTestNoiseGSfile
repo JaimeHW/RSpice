@@ -1,0 +1,328 @@
+ ***** Measure Functions ***** 
+
+DERIVCROSSTEST1 = -5.716664e-01 at freq = 1.556897e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTTEST1 = -5.716664e-01 at freq = 1.556897e-01
+DERIVCROSSCONTTEST1 = 1.435027e-02 at freq = 5.461130e-01
+DERIVCROSSCONTTEST1 = -4.269934e-01 at freq = 8.296111e-01
+DERIVCROSSCONTTEST1 = 1.232180e+00 at freq = 1.149737e+00
+DERIVCROSSCONTTEST1 = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSTEST2 = -5.716664e-01 at freq = 1.556897e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTTEST2 = -5.716664e-01 at freq = 1.556897e-01
+DERIVCROSSCONTTEST2 = 1.435027e-02 at freq = 5.461130e-01
+DERIVCROSSCONTTEST2 = -4.269934e-01 at freq = 8.296111e-01
+DERIVCROSSCONTTEST2 = 1.232180e+00 at freq = 1.149737e+00
+DERIVCROSSCONTTEST2 = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSTEST3 = 1.435027e-02 at freq = 5.461130e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTTEST3 = 1.435027e-02 at freq = 5.461130e-01
+DERIVCROSSCONTTEST3 = -4.269934e-01 at freq = 8.296111e-01
+DERIVCROSSCONTTEST3 = 1.232180e+00 at freq = 1.149737e+00
+DERIVCROSSCONTTEST3 = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSTEST4 = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTTEST4 = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+ATTEST = -2.869631e-02 for AT = 2.000000e+00
+
+ATCONTTEST = -2.869631e-02 for AT = 2.000000e+00
+
+DERIVRISECONTTEST1 = 1.435027e-02 at freq = 5.461130e-01
+DERIVRISECONTTEST1 = 1.232180e+00 at freq = 1.149737e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVRISECONTTEST2 = 1.232180e+00 at freq = 1.149737e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVRISECONTTEST3 = 1.232180e+00 at freq = 1.149737e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVFALLCONTTEST1 = -5.716664e-01 at freq = 1.556897e-01
+DERIVFALLCONTTEST1 = -4.269934e-01 at freq = 8.296111e-01
+DERIVFALLCONTTEST1 = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVFALLCONTTEST2 = -4.269934e-01 at freq = 8.296111e-01
+DERIVFALLCONTTEST2 = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVFALLCONTTEST3 = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSS1CONTFROM = 1.435027e-02 at freq = 5.461130e-01
+DERIVCROSS1CONTFROM = -4.269934e-01 at freq = 8.296111e-01
+DERIVCROSS1CONTFROM = 1.232180e+00 at freq = 1.149737e+00
+DERIVCROSS1CONTFROM = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 5.000000e-01	Measure End Freq= 1.000000e+01
+
+DERIVCROSS2CONTFROM = -4.269934e-01 at freq = 8.296111e-01
+DERIVCROSS2CONTFROM = 1.232180e+00 at freq = 1.149737e+00
+DERIVCROSS2CONTFROM = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 5.000000e-01	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTTO = -5.716664e-01 at freq = 1.556897e-01
+DERIVCROSSCONTTO = 1.435027e-02 at freq = 5.461130e-01
+DERIVCROSSCONTTO = -4.269934e-01 at freq = 8.296111e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+00
+
+DERIVRISECONTTO = 1.435027e-02 at freq = 5.461130e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+00
+
+DERIVFALLCONTFROM = -4.269934e-01 at freq = 8.296111e-01
+DERIVFALLCONTFROM = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 5.000000e-01	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTTOLAST = -4.269934e-01 at freq = 8.296111e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+00
+
+DERIVCROSSNEG2 = 1.232180e+00 at freq = 1.149737e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSNEG3 = -4.269934e-01 at freq = 8.296111e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVCROSSNEG6 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVCROSSNEG6 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTNEG1 = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTNEG2 = 1.232180e+00 at freq = 1.149737e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTNEG3 = -4.269934e-01 at freq = 8.296111e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVCROSSCONTNEG6 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVCROSSCONTNEG6 = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVRISENEG2 = 1.435027e-02 at freq = 5.461130e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVRISENEG3 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVRISENEG3 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVRISECONTNEG1 = 1.232180e+00 at freq = 1.149737e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVRISECONTNEG2 = 1.435027e-02 at freq = 5.461130e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVRISECONTNEG3 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVRISECONTNEG3 = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVFALLNEG2 = -4.269934e-01 at freq = 8.296111e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVFALLNEG4 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVFALLNEG4 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVFALLCONTNEG1 = 3.546943e-01 at freq = 1.334847e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVFALLCONTNEG2 = -4.269934e-01 at freq = 8.296111e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVFALLCONTNEG4 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVFALLCONTNEG4 = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTFAIL1 = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: ATCONTFAIL failed. AT value outside frequency sweep window
+ATCONTFAIL = FAILED for AT = 2.000000e+02
+
+Netlist warning: DERIVCROSSCONTFAIL2 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVCROSSCONTFAIL2 = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVRISECONTFAIL failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVRISECONTFAIL = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVFALLCONTFAIL failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVFALLCONTFAIL = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+LASTMEASURE = 4.997176e-01 at freq = 1.000000e-02
+ ***** Measure Functions ***** 
+
+DERIVCROSSTEST1 = -6.806107e-01 at freq = 2.502402e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTTEST1 = -6.806107e-01 at freq = 2.502402e-01
+DERIVCROSSCONTTEST1 = 1.355647e-03 at freq = 4.629520e-01
+DERIVCROSSCONTTEST1 = -1.472525e-01 at freq = 9.433038e-01
+DERIVCROSSCONTTEST1 = 7.012818e-01 at freq = 1.050439e+00
+DERIVCROSSCONTTEST1 = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSTEST2 = -6.806107e-01 at freq = 2.502402e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTTEST2 = -6.806107e-01 at freq = 2.502402e-01
+DERIVCROSSCONTTEST2 = 1.355647e-03 at freq = 4.629520e-01
+DERIVCROSSCONTTEST2 = -1.472525e-01 at freq = 9.433038e-01
+DERIVCROSSCONTTEST2 = 7.012818e-01 at freq = 1.050439e+00
+DERIVCROSSCONTTEST2 = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSTEST3 = 1.355647e-03 at freq = 4.629520e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTTEST3 = 1.355647e-03 at freq = 4.629520e-01
+DERIVCROSSCONTTEST3 = -1.472525e-01 at freq = 9.433038e-01
+DERIVCROSSCONTTEST3 = 7.012818e-01 at freq = 1.050439e+00
+DERIVCROSSCONTTEST3 = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSTEST4 = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTTEST4 = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+ATTEST = -3.007809e-02 for AT = 2.000000e+00
+
+ATCONTTEST = -3.007809e-02 for AT = 2.000000e+00
+
+DERIVRISECONTTEST1 = 1.355647e-03 at freq = 4.629520e-01
+DERIVRISECONTTEST1 = 7.012818e-01 at freq = 1.050439e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVRISECONTTEST2 = 7.012818e-01 at freq = 1.050439e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVRISECONTTEST3 = 7.012818e-01 at freq = 1.050439e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVFALLCONTTEST1 = -6.806107e-01 at freq = 2.502402e-01
+DERIVFALLCONTTEST1 = -1.472525e-01 at freq = 9.433038e-01
+DERIVFALLCONTTEST1 = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVFALLCONTTEST2 = -1.472525e-01 at freq = 9.433038e-01
+DERIVFALLCONTTEST2 = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVFALLCONTTEST3 = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSS1CONTFROM = -1.472525e-01 at freq = 9.433038e-01
+DERIVCROSS1CONTFROM = 7.012818e-01 at freq = 1.050439e+00
+DERIVCROSS1CONTFROM = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 5.000000e-01	Measure End Freq= 1.000000e+01
+
+DERIVCROSS2CONTFROM = 7.012818e-01 at freq = 1.050439e+00
+DERIVCROSS2CONTFROM = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 5.000000e-01	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTTO = -6.806107e-01 at freq = 2.502402e-01
+DERIVCROSSCONTTO = 1.355647e-03 at freq = 4.629520e-01
+DERIVCROSSCONTTO = -1.472525e-01 at freq = 9.433038e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+00
+
+DERIVRISECONTTO = 1.355647e-03 at freq = 4.629520e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+00
+
+DERIVFALLCONTFROM = -1.472525e-01 at freq = 9.433038e-01
+DERIVFALLCONTFROM = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 5.000000e-01	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTTOLAST = -1.472525e-01 at freq = 9.433038e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+00
+
+DERIVCROSSNEG2 = 7.012818e-01 at freq = 1.050439e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSNEG3 = -1.472525e-01 at freq = 9.433038e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVCROSSNEG6 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVCROSSNEG6 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTNEG1 = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTNEG2 = 7.012818e-01 at freq = 1.050439e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTNEG3 = -1.472525e-01 at freq = 9.433038e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVCROSSCONTNEG6 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVCROSSCONTNEG6 = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVRISENEG2 = 1.355647e-03 at freq = 4.629520e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVRISENEG3 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVRISENEG3 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVRISECONTNEG1 = 7.012818e-01 at freq = 1.050439e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVRISECONTNEG2 = 1.355647e-03 at freq = 4.629520e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVRISECONTNEG3 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVRISECONTNEG3 = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVFALLNEG2 = -1.472525e-01 at freq = 9.433038e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVFALLNEG4 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVFALLNEG4 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVFALLCONTNEG1 = -4.237279e+00 at freq = 1.623170e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVFALLCONTNEG2 = -1.472525e-01 at freq = 9.433038e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVFALLCONTNEG4 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVFALLCONTNEG4 = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+DERIVCROSSCONTFAIL1 = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: ATCONTFAIL failed. AT value outside frequency sweep window
+ATCONTFAIL = FAILED for AT = 2.000000e+02
+
+Netlist warning: DERIVCROSSCONTFAIL2 failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVCROSSCONTFAIL2 = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVRISECONTFAIL failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVRISECONTFAIL = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+Netlist warning: DERIVFALLCONTFAIL failed. Measured Rise,Fall,Cross=(2,3,5)
+DERIVFALLCONTFAIL = FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+01
+
+LASTMEASURE = 6.034041e-01 at freq = 1.258925e+00

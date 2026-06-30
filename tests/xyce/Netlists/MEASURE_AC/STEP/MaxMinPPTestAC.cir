@@ -1,0 +1,68 @@
+* Test AC mode support for MAX, MIN and PP measures.
+* To be conservative, there are subtests for each
+* valid operator (V, VR, VI, VP, VM and VDB) for
+* each measure type. Expressions are also tested.
+*
+* See SON Bug 1140 for more details
+*****************************************************
+
+* Trivial high-pass filter (V-C-R) circuit
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.print AC vr(b) vi(b) vm(b) vp(b) vdb(b)
+.ac dec 5 100Hz 1e6
+.STEP R1 0.5 2 1.5
+
+* MAX
+.MEASURE AC maxvb max v(b)
+.MEASURE AC maxvmb max vm(b)
+.MEASURE AC maxvrb max vr(b)
+.MEASURE AC maxvib max vi(b)
+.MEASURE AC maxvpb max vp(b)
+.MEASURE AC maxvdbb max vdb(b)
+
+* MIN
+.MEASURE AC minvb min v(b)
+.MEASURE AC minvmb min vm(b)
+.MEASURE AC minvrb min vr(b)
+.MEASURE AC minvib min vi(b)
+.MEASURE AC minvpb min vp(b)
+.MEASURE AC minvdbb min vdb(b)
+
+* PP
+.MEASURE AC ppvb pp v(b)
+.MEASURE AC ppvmb pp vm(b)
+.MEASURE AC ppvrb pp vr(b)
+.MEASURE AC ppvib pp vi(b)
+.MEASURE AC ppvpb pp vp(b)
+.MEASURE AC ppvdbb pp vdb(b)
+
+* Use expressions
+.MEASURE AC maxvrbExp max {1+vr(b)}
+.MEASURE AC maxvibExp max {1+vi(b)}
+.MEASURE AC minvrbExp min {1+vr(b)}
+.MEASURE AC minvibExp min {1+vi(b)}
+.MEASURE AC ppvrbExp pp {1+vr(b)}
+.MEASURE AC ppvriExp pp {1+vi(b)}
+
+* add FROM-TO
+.MEASURE AC maxvmbFromTo max vm(b) FROM=1e3 TO=1e5
+.MEASURE AC minvmbFromTo min vm(b) FROM=1e3 TO=1e5
+.MEASURE AC ppvmbFromTo pp vm(b) FROM=1e3 TO=1e5
+
+* Tests should fail since the FROM-T0 windows have various problems.
+.measure ac maxFromToFail1 max v(b) FROM=1e7 TO=1e8
+.measure ac maxFromToFail2 max vr(b) FROM=1e6 TO=1e2
+.measure ac minFromToFail1 min vi(b) TO=-1e6
+.measure ac minFromToFail2 min vm(b) FROM=1e7 TO=1e8
+.measure ac ppFromToFail1 pp vp(b) FROM=1e7 TO=1e8
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.  
+* This is needed for compatibility for testing with a verbose build, which 
+* is often used by the Xyce developers.
+.measure ac lastMeasure max vm(b) 
+
+.end
+

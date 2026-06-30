@@ -1,0 +1,22 @@
+**********************************************************************
+* Netlist used to test error messages for unsupported modes for 
+* remeasure.  The contents of this file just has to  use an 
+* analysis mode (e.g., .DC) that is currently unsupported by the 
+* remeasure functionality.
+* 
+*
+*
+**********************************************************************
+VS1  1  0  1
+R1   1  2  1
+R2   2  0  1
+
+.DC LIN VS1 1 5 2
+.PRINT DC FORMAT=NOINDEX V(1) V(2)
+
+* this measure line should now work when Xyce is * run "normally".  It 
+* should produce a fatal exit during re-measure still.
+.MEASURE dc bogomeasure max v(1)
+
+.END
+

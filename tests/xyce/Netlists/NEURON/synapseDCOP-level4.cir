@@ -1,0 +1,30 @@
+Test of synapse device
+
+*.options nonlin nox=0
+*.options device debuglevel=1
+* next option is supposed to allow discontinuous change:
+*.options timeint method=7 erroption=1
+
+
+* synapse level 4 takes place of NEURON's NetCon and synapse objets
+* NetCon parameters:  threshold 10mV, delay 0, weight 0.01
+*	'weight' is really conductance, measured in microsiemens
+* synapse parameters:  tau1 = 2ms, tau2 = 6.3 ms, revE = 0 mV
+.model synParams synapse level=4 vThresh={0.01} delay={0.0} gMax={0.01e-6} eRev={0.0} tau1={0.002} tau2={0.0063}
+
+ysynapse syn a1 a2 synParams 
+
+* just use a fixed voltage to represent the postsynaptic membrane
+* current measured through this seems to be opposite the postsynaptic current
+Vout a2 0 1.0
+
+
+.DC Vmem -0.04 0.14 0.005
+Vmem a1 0 
+
+
+.print dc V(a1) V(a2) i(Vout)   
+
+
+
+.end

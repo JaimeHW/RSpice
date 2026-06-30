@@ -1,0 +1,29 @@
+Test Name: BUG_1377
+Owner: Tom Russo
+Test netlists: test1.X.cir
+GS files: test1.X.cir.prn
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_4.0.2
+ 
+Description:
+============
+In versions of Xyce prior to Release 4.0.2, integer instance parameters were
+not properly substituted in subcircuits in the same way that double precision
+parameters were substituted.  The reason was that the code handling parameters
+that were defined as integers was never updated to allow those parameters
+to be expressions when the capability was added.
+
+Procedure: 
+============ 
+
+Run the test1.X.cir netlist in the normal manner.
+
+Verification:
+=============
+
+Compare with the default comparison technique (xyce_verify) to the
+gold standard (which was generated with SPICE3F5).
+ 
+Notes:
+======

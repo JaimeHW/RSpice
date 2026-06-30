@@ -1,0 +1,2 @@
+serial, parallel, nightly, pde, bjt1d, valgrind
+exclude

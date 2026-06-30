@@ -1,0 +1,24 @@
+********************************************************
+* Test that Xyce exits gracefully with a reasonable error
+* message if the specified output file is a directory
+* rather than a file.
+*
+* The contents of this netlist doesn't really matter.
+* The .PRINT TRAN line is trying to write to a directory rather
+* than a file.
+*
+* Note: this netlist will also be used to test the -r
+* command line option.  It also verifies that the -r
+* command line option takes precedence over the FILE=
+* specified on the .PRINT line.
+*********************************************************
+V1 1 0 SIN(0 1 1HZ)
+R1 1 2 1
+R2 2 0 2
+
+.TRAN 0 1S
+
+* attempting to write the output file to a directory
+.PRINT TRAN FILE=. V(2)
+
+.END 

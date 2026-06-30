@@ -1,0 +1,22 @@
+********************************************************
+* Test FORMAT=GNUPLOT without .STEP.  This should 
+* produce the same .prn files as FORMAT=STD. 
+*
+********************************************************
+
+R1  1 1a 500
+R1a 1a 0 500
+C1 1 0 1p
+D1 2 1 D1N3940
+.MODEL D1N3940 D (IS=4e-10 RS=.105 N=1.48 TT=8e-7 CJO=1.95E-11 VJ=.4 M=.38 
++ EG=1.36 XTI=-8 KF=0 AF=1 FC=.9 BV=600 IBV=1e-4)
+
+*            low high td tr  tf  pulsewidth    period
+v1 2 0 pulse 1V 2V  0 1e-5 1e-5 {1/1e4/2-1e-5 } {1/1e4}
+
+.print HB FORMAT=GNUPLOT vm(1)
+.hb 1e4
+
+.options hbint numfreq=10
+
+.end

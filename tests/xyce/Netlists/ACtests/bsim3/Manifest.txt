@@ -1,0 +1,10 @@
+exclude
+gain-stage.cir
+gain-stage.cir.sh
+gain-stage1.cir
+gain-stage1.cir.sh
+op-amp.cir
+op-amp.cir.sh
+step-op-amp.cir
+step-op-amp.cir.sh
+tags

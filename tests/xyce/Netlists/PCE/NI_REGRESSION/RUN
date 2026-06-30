@@ -1,0 +1,14 @@
+/Users/erkeite/XYCE/GitRepos/BUILD/STOKHOS_ONLY_DEV/src/Xyce  /Users/erkeite/XYCE/GitRepos/BUILD/STOKHOS_ONLY_DEV/PCE/simpleNormalPCE.cir >& /Users/erkeite/XYCE/GitRepos/BUILD/STOKHOS_ONLY_DEV/PCE/simpleNormalPCE.out 
+/Users/erkeite/XYCE/GitRepos/BUILD/STOKHOS_ONLY_DEV/src/Xyce  /Users/erkeite/XYCE/GitRepos/BUILD/STOKHOS_ONLY_DEV/PCE/embeddedNormal.cir >& /Users/erkeite/XYCE/GitRepos/BUILD/STOKHOS_ONLY_DEV/PCE/embeddedNormal.out 
+
+grep "sampling mean" simpleNormalPCE.out
+grep "sampling stddev" simpleNormalPCE.out
+grep "sampling mean" embeddedNormal.out
+grep "sampling stddev" embeddedNormal.out
+
+
+grep "regression PCE mean" simpleNormalPCE.out
+grep "regression PCE stddev" simpleNormalPCE.out
+grep "regression PCE mean" embeddedNormal.out
+grep "regression PCE stddev" embeddedNormal.out
+

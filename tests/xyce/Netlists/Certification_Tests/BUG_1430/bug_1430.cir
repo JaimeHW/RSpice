@@ -1,0 +1,14 @@
+Test to highlight global nodes bug
+
+v1 $g_1 0 pwl ( 0 0 1ms 1mV 2ms 4mV 3ms 9mV)
+R1 $g_1 0 1
+X1 1 0 foo
+
+.subckt foo a b
+B1 a b V={V($g_1)}
+R2 a b 1
+.ends
+
+.print tran v($g_1) v(1)
+.tran 1ns 4ms
+.end

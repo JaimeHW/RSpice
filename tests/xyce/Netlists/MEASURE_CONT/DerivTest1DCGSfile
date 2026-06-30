@@ -1,0 +1,168 @@
+ ***** Measure Functions ***** 
+
+DERIVCROSSTEST1 = -2.187500e+01 at V1 value = 1.857857e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSCONTTEST1 = -2.187500e+01 at V1 value = 1.857857e+00
+DERIVCROSSCONTTEST1 = 5.625000e+00 at V1 value = 3.663889e+00
+DERIVCROSSCONTTEST1 = -5.625000e+00 at V1 value = 6.336111e+00
+DERIVCROSSCONTTEST1 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSTEST2 = -2.187500e+01 at V1 value = 1.857857e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSCONTTEST2 = -2.187500e+01 at V1 value = 1.857857e+00
+DERIVCROSSCONTTEST2 = 5.625000e+00 at V1 value = 3.663889e+00
+DERIVCROSSCONTTEST2 = -5.625000e+00 at V1 value = 6.336111e+00
+DERIVCROSSCONTTEST2 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSTEST3 = 5.625000e+00 at V1 value = 3.663889e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSCONTTEST3 = 5.625000e+00 at V1 value = 3.663889e+00
+DERIVCROSSCONTTEST3 = -5.625000e+00 at V1 value = 6.336111e+00
+DERIVCROSSCONTTEST3 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSTEST4 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSCONTTEST4 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+ATTEST = -2.187500e+01 for AT = 2.000000e+00
+
+ATCONTTEST = -2.187500e+01 for AT = 2.000000e+00
+
+DERIVRISECONTTEST1 = 5.625000e+00 at V1 value = 3.663889e+00
+DERIVRISECONTTEST1 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVRISECONTTEST2 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVRISECONTTEST3 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVFALLCONTTEST1 = -2.187500e+01 at V1 value = 1.857857e+00
+DERIVFALLCONTTEST1 = -5.625000e+00 at V1 value = 6.336111e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVFALLCONTTEST2 = -5.625000e+00 at V1 value = 6.336111e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVFALLCONTTEST3 = -5.625000e+00 at V1 value = 6.336111e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSS1FROM25 = 5.625000e+00 at V1 value = 3.663889e+00
+Measure Start V1 Value= 2.500000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSS2FROM25 = -5.625000e+00 at V1 value = 6.336111e+00
+Measure Start V1 Value= 2.500000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSTO75 = -2.187500e+01 at V1 value = 1.857857e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 7.500000e+00
+
+DERIVRISEFROM5 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVFALLTO5 = -2.187500e+01 at V1 value = 1.857857e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+DERIVCROSSTTOLAST = -5.625000e+00 at V1 value = 6.336111e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 7.500000e+00
+
+DERIVCROSS1CONTFROM25 = 5.625000e+00 at V1 value = 3.663889e+00
+DERIVCROSS1CONTFROM25 = -5.625000e+00 at V1 value = 6.336111e+00
+DERIVCROSS1CONTFROM25 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 2.500000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSS2CONTFROM25 = -5.625000e+00 at V1 value = 6.336111e+00
+DERIVCROSS2CONTFROM25 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 2.500000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSCONTTO75 = -2.187500e+01 at V1 value = 1.857857e+00
+DERIVCROSSCONTTO75 = 5.625000e+00 at V1 value = 3.663889e+00
+DERIVCROSSCONTTO75 = -5.625000e+00 at V1 value = 6.336111e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 7.500000e+00
+
+DERIVRISECONTFROM5 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVFALLCONTTO5 = -2.187500e+01 at V1 value = 1.857857e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+DERIVCROSSCONTTOLAST = -5.625000e+00 at V1 value = 6.336111e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 7.500000e+00
+
+DERIVCROSSNEG2 = -5.625000e+00 at V1 value = 6.336111e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSNEG3 = 5.625000e+00 at V1 value = 3.663889e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSNEG5 = 0.000000e+00 FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSCONTNEG1 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSCONTNEG2 = -5.625000e+00 at V1 value = 6.336111e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSCONTNEG3 = 5.625000e+00 at V1 value = 3.663889e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSCONTNEG4 = -2.187500e+01 at V1 value = 1.857857e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSCONTNEG5 = FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVRISENEG2 = 5.625000e+00 at V1 value = 3.663889e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVRISENEG3 = 0.000000e+00 FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVRISECONTNEG1 = 2.187500e+01 at V1 value = 8.142143e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVRISECONTNEG2 = 5.625000e+00 at V1 value = 3.663889e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVRISECONTNEG3 = FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVFALLNEG2 = -2.187500e+01 at V1 value = 1.857857e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVFALLNEG3 = 0.000000e+00 FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVFALLCONTNEG1 = -5.625000e+00 at V1 value = 6.336111e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVFALLCONTNEG2 = -2.187500e+01 at V1 value = 1.857857e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVFALLCONTNEG3 = FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVCROSSCONTFAIL1 = FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+ATCONTFAIL = FAILED for AT = 2.000000e+01
+
+DERIVCROSSCONTFAIL2 = FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVRISECONTFAIL = FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+DERIVFALLCONTFAIL = FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+01
+
+

@@ -1,0 +1,60 @@
+***************************************************************
+* Test of Error Messages from Invalid Analysis Types for
+* the Power Grid devices, Invalid Transformer Types for the
+* Power Grid Transformer, and Invalid Parameter Values
+* for the AWL device
+*
+* This netlist is NOT a valid configuration.  It is just used 
+* to test the error messages.
+*
+*
+*
+*
+***************************************************************
+
+* invalid analysis types
+YPGBR BR1 bus1Th bus2Th bus1VM bus2VM AT=Bleem R=0.05 X=0.1 B=0.05
+YPGBS BS1 bus2Th 0 bus2VM 0 AT=Fnark G=0.2 B=0.1 
+YPGGB GB1 bus3Th ammbus3P bus3VM ammBus3Q AT=NA VM=0.99 P=0.5
+YPGTR TR1 bus2Th bus3Th bus2VM bus3VM AT=Bogo R=0.05 X=0.1 TR=1.0
+
+* analysis types that are not yet supported for the GenBus
+YPGGB GB2 bus4Th ammbus4P bus5VM ammBus5Q AT=IV VM=0.99 P=0.5
+YPGGB GB3 bus4Th ammbus4P bus5VM ammBus5Q AT=PQR VM=0.99 P=0.5
+
+* invalid transformer type
+YPGTR TR2 bus2Th bus3Th bus2VM bus3VM AT=PQP R=0.05 X=0.1 TR=1.0 TT=0
+
+* invalid number of nodes for specified transformer type
+YPGTR TR3 bus2Th bus3Th bus2VM bus3VM N2 AT=PQP R=0.05 X=0.1 TR=1.0 TT=FT
+
+* R or X must be non-zero.  At least one of R or X must be specified.
+YPGBR BR2 bus1Th bus2Th bus1VM bus2VM AT=PQP B=0.05
+YPGBR BR3 bus1Th bus2Th bus1VM bus2VM AT=PQP R=0
+YPGBR BR4 bus1Th bus2Th bus1VM bus2VM AT=PQP X=0
+
+* G or B must be non-zero.  At least one of G or B must be specified.
+YPGBS BS2 bus2Th 0 bus2VM 0 AT=PQP
+YPGBS BS3 bus2Th 0 bus2VM 0 AT=PQP G=0
+YPGBS BS4 bus2Th 0 bus2VM 0 AT=PQP B=0
+
+* TR can't be zero.  R or X must be non-zero, and at least one must
+* be specifed
+YPGTR TR4 bus2Th bus3Th bus2VM bus3VM AT=PQP R=0.05 X=0.1 TR=0.0
+YPGTR TR5 bus2Th bus3Th bus2VM bus3VM AT=PQP
+YPGTR TR6 bus2Th bus3Th bus2VM bus3VM AT=PQP R=0
+YPGTR TR7 bus2Th bus3Th bus2VM bus3VM AT=PQP X=0
+
+* VM must be positive for a generator bus
+YPGGB GB4 bus3Th ammbus3P bus3VM ammBus3Q AT=PQP VM=0 P=0.5 
+
+* invalid AWL syntaxes.  UL must be strictly greater than LL.
+* T must be positive.
+YAWL awl1 in awl1_out T=1 UL=0.5 LL=0.5
+YAWL awl2 in awl2_out T=0 UL=0.5 LL=-0.5
+
+* .DC and .PRINT statements
+.DC V1VM 1 1 1
+.PRINT DC V(bus1Th) V(bus1VM)
+
+.end

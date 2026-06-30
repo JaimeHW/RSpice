@@ -1,0 +1,23 @@
+*Test of passing subcircuit parameter values that are global params
+* In this netlist, we use the subcircuit parameter in an expression.
+* The parameter as passed is a global.
+* Prior to the fix of bug 1801, it would fail, using "0" as the value
+* of the subcircuit parameter no matter what.
+
+.global_param resval=1
+
+X1 1 0 RESSUB PARAMS: resistance={resval}
+V1 1 0 5V
+
+
+*10001 because sometimes there's roundoff in xyce_verify and it gets 
+* confused about where the end is...
+.step dec resval 1 10001 5
+.dc v1 5 5 1
+.print dc V(1) I(V1)
+
+.subckt ressub a b params: resistance=100k
+R1 a b {resistance+(resistance+1)}
+.ends
+
+.end

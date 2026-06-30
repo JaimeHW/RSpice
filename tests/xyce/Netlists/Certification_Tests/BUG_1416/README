@@ -1,0 +1,31 @@
+Test Name: BUG_1416
+Owner: Tom Russo
+Test netlists: bug_1416_dc.cir, bug_1416_tran.cir
+GS files: none
+Mode:  Serial
+Comparator:  local shell script
+Version of Xyce: Release_4.0.2
+ 
+Description:
+============
+Tests the "FORMAT=CSV" option on the .print line.  Tests the following things:
+  1) That the CSV file is created
+  2) That the the lines do not begin with commas
+  3) That the header lines are printed with the right field names
+  4) That the data lines contain the right number of fields
+  5) That the "End of Xyce Simulation" line is not printed
+
+Procedure: 
+============ 
+
+The shell scripts in this directory take care of the checks above.
+
+Verification:
+=============
+
+The shell scripts do the job, but if manual verification is necessary, run Xyce
+on the two netlists and make the checks listed above.
+
+Notes:
+======
+

@@ -1,0 +1,54 @@
+* Test AC mode support for ERR, ERR1 and ERR2 measures.
+*
+* See SON Bug 1278 for more details
+*****************************************************
+
+.GLOBAL_PARAM P1=75
+
+* Trivial high-pass filter (V-C-R) circuit
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.print AC vr(b) vi(b) vm(b) vp(b) vdb(b) im(v1)
+.ac dec 5 100Hz 1e6
+
+* ERR and ERR1 measures
+.MEASURE AC ERR ERR VM(b) VM(a)
+.MEASURE AC ERR1 ERR1 VM(b) VM(a)
+.MEASURE AC ERR1MV0.1 ERR1 VM(b) VM(a) MINVAL=0.1
+.MEASURE AC ERR1YMIN0.3 ERR1 VM(b) VM(a) YMIN=0.3
+.MEASURE AC ERR1IGNOR0.3 ERR1 VM(b) VM(a) IGNOR=0.3
+.MEASURE AC ERR1YMAX0.7 ERR1 VM(b) VM(a) YMAX=0.7
+.MEASURE AC ERR1EXP ERR1 {VM(b)+1} {VM(a)+1}
+
+* ERR2 measures
+.MEASURE AC ERR2 ERR2 VM(b) VM(a)
+.MEASURE AC ERR2MV0.1 ERR2 VM(b) VM(a) MINVAL=0.1
+.MEASURE AC ERR2YMIN0.3 ERR2 VM(b) VM(a) YMIN=0.3
+.MEASURE AC ERR2IGNORE0.3 ERR2 VM(b) VM(a) IGNORE=0.3
+.MEASURE AC ERR2YMAX0.7 ERR2 VM(b) VM(a) YMAX=0.7
+.MEASURE AC ERR2EXP ERR2 {VM(b)+1} {VM(a)+1}
+
+* Test various voltage ops for ERR1 measure only
+.MEASURE AC ERR1VR  ERR1 VR(b) VM(a) YMIN=0.1
+.MEASURE AC ERR1VI  ERR1 VI(b) VM(a)
+.MEASURE AC ERR1VP  ERR1 VP(b) VM(a)
+
+* Test various VDB for ERR1 and ERR2 measure, since
+* VDB(b) has positive and negative values for this netlist.
+.MEASURE AC ERR1VDB ERR1 VDB(b) VM(a)
+.MEASURE AC ERR2VDB ERR2 VDB(b) VM(a)
+
+* FROM-TO
+.MEASURE AC ERR1FT ERR1 VM(b) VM(a) FROM=1e3 TO=1e5
+
+* Branch current Op
+.MEASURE AC ERR1IM  ERR1 VM(b) IM(V1)
+
+* Tests should fail since the FROM-T0 windows
+* have various problems.
+.measure ac err1Fail err1 v(b) vm(a) FROM=1e7 TO=1e8
+.measure ac err2Fail err2 vr(b) vm(a) FROM=1e6 TO=1e2
+
+.end

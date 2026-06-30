@@ -1,0 +1,35 @@
+A test of the measure on_time functionality with .STEP
+*******************************************************************************
+*
+* a few sources of different types
+VS  1  0  SIN(0 1 1KHz 0 0)
+VP  2  0  PULSE( 0 100 0.2ms 0.2ms 0.2ms 1ms 2ms )
+
+R1  1  0  100
+R2  2  0  100
+
+* Use MEASFAIL to test the reset of the default calculation value
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0  250ms
+.step VS:VA 1 2 1 
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2)
+
+.measure tran onAll ON_TIME V(1) ON=.75
+.measure tran onTop ON_TIME V(2) ON=75
+
+* add TO-FROM modifiers
+.measure tran sineHalfInterval on_time V(1) ON=0.75 FROM=0 TO=0.5
+
+* mix in TDs before and after FROM value.
+.measure tran sineTDbetween on_time V(1) ON=0.75 FROM=0 TO=0.25 TD=0.1
+.measure tran sineTDbefore on_time V(1) ON=0.75 FROM=0.15 TO=0.25 TD=0.1
+
+* this test should return -1
+.measure tran returnNegOne on_time V(1) ON=0.75 FROM=0.2e-3 TO=0.25e-3 TD=0.5e-3 default_val=-1
+
+*this test should return 0
+.measure tran returnZero on_time V(1) ON=2.0
+
+.END
+

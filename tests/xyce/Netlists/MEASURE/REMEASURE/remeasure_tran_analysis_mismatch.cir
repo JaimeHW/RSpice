@@ -1,0 +1,25 @@
+*********************************************************************
+* This tests the error messages, from remeasure, that should occur if
+* if a DC mode measure is included in a netlist that is doing a 
+* .TRAN analysis.  
+* 
+* See SON Bug 889 for more details.
+*
+*
+*********************************************************************
+
+vsrc1   1a 0 SIN(0 1 1)
+rload1a 1a 1b 0.1
+rload1b 1b 0 1
+
+.TRAN 0 1
+.print tran v(1a) v(1b)
+
+* Test what happens when a DC measure is requested in a .TRAN netlist 
+* during remeasure
+.MEASURE DC dcmax max v(1a)
+
+
+.END
+
+

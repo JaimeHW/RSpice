@@ -1,0 +1,4 @@
+nightly
+serial, parallel
+noise, measure, remeasure
+errorexit

@@ -1,0 +1,39 @@
+Test mutual inductor instantiation without ".end" statement
+******************************************************
+* Tier: ?????
+* Directory/Circuit name:  BUG_22_SON/bug22.cir
+* Description:  Runs a transient analysis to make sure that mutual inductors 
+*               are instantiated properly when a ".end" statement isn't 
+*               explicitly included in the netlist.
+* 
+* Created by:  K. R. Santarelli (07/08)
+*
+* Before this bug was fixed, a ".end" statement needed to be explicitly added
+* to the netlist below to make sure that the mutual inductors were properly 
+* added to the netlist.  Among other bad behavior, without a ".end" statement,
+* a number of nodes would show up in the output file as having either 
+* connection to only one device terminal and/or no dc path to ground.  We run 
+* the netlist below and check to make sure that no such messages appear in the
+* output file bug22.cir.out.  If they do, the test fails.
+
+
+* source MUTUALL_TEST 
+V_Vn         N1 0 1 
+R_Rn1         N1 N2  1e-3 
+L_Ln1         N2 N3  5p 
+R_Rn2         N3 N4  1e-3 
+L_Ln2         N4 N5  5p 
+R_Rout         0 N5  100 
+V_Vm         M1 0 1 
+R_Rm1         M1 M2  1e-3 
+L_Lm1         M2 M3  5p 
+R_Rm2         M3 M4  1e-3 
+L_Lm2         M4 M5  5p 
+R_Rout2         0 M5  100 
+Kn_K2         L_Ln2 L_Lm2     0.001 
+Kn_K1         L_Ln1 L_Lm1     0.001 
+
+**** 
+.tran 1n 1 
+.print tran format=noindex ;file=test.txt 
++ v(n1) 

@@ -1,0 +1,8 @@
+We test Xyce's capability to detect mutual inductors which have inductors in 
+their definitions that are, themselves, defined nowhere else in the netlist 
+file.  If Xyce is detecting this scenario properly, running Xyce on bug75.cir 
+should produce the error message:
+
+User Fatal: Undefined inductor L2 in mutual inductor K3 definition.
+
+If this message is produced, the test passes.  Otherwise, it fails.

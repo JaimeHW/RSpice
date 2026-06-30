@@ -1,0 +1,13 @@
+Test of Xyce's behavior when given defective LIN sweep parameters
+
+R1 1 0 1K
+V1 1 0 1V
+
+* START is greater than STOP, but STEP is positive.  STOP cannont be reached
+* by repeatedly adding STEP to START.  The result should be that Xyce runs
+* only one step, with V1=100.
+* Prior to the fix of bug 1162, Xyce would determine that it needed to take
+* a negative number of steps, and then not take any at all.
+.dc V1 100 1 1
+.print dc V(1) I(v1)
+.end

@@ -1,0 +1,42 @@
+Test Name: BUG_1370
+Owner: Tom Russo
+Test netlists: bug1370.cir
+GS files: bug1370.cir.prn
+Mode:  Serial
+Comparator:  xyce_verify.pl
+Version of Xyce: Release_4.0.2
+ 
+Description:
+============
+
+In versions of Xyce prior to Release 4.0.2, the transmission line
+device had a bug in which a double-precision equality operator was
+used to assert a sanity check making sure that we never tried to
+extrapolate the terminal voltages to a time outside the range stored
+in the history.  This caused a fatal error if the transmission line's
+enforced maximum timestep (equal to its delay) caused the time
+integrator to take a step of exactly the time delay of the line,
+because roundoff error made it appear that the code was requesting an
+extrapolation (to a time infinitessimally later than the actual final
+time in the history).
+
+This netlist runs a transmission line problem with a very short time
+delay compared to the circuit behavior, meaning that it is almost
+always the case that the time step is restricted to exactly the line's
+time delay.  In versions of Xyce prior to 4.0.2, this will always fail.
+ 
+Procedure: 
+============ 
+
+Run Xyce on the netlist and compare to gold standard.  Bug is fixed if
+Xyce simulates to completion and compares well to the gold standard
+with xyce_verify.pl
+
+Verification:
+=============
+
+Compare the output to the gold standard with xyce_verify.pl
+ 
+Notes:
+======
+

@@ -1,0 +1,15 @@
+Bug 38 SON:  HSpice compatibility test.  (with subckt node parentheses)
+
+.subckt RESISTOR (1 2)
+R1 1 2 10
+.ENDS
+
+X1 1 0 RESISTOR
+
+V1 1 0 sin (0 10 10MEG 0 0)
+
+.print tran v(1) I(v1)
+
+.tran 1ns 1us
+
+.end

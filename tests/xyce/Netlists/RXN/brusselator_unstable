@@ -1,0 +1,34 @@
+# Brusselator chemical oscillator from https://en.wikipedia.org/wiki/Brusselator
+species
+Aspec 0.0 0.0 0  const
+Xspec 0.0 0.0 0
+Yspec 0.0 0.0 0
+Bspec 0.0 0.0 0  const
+Dspec 0.0 0.0 0  
+Espec 0.0 0.0 0  
+end
+
+reactions
+Aspec->Xspec;             simple(1.0)
+2*Xspec+Yspec->3*Xspec;   simple(1.0)
+Bspec+Xspec->Yspec+Dspec; simple(1.0)
+Xspec->Espec;             simple(1.0)
+end
+
+# See: https://en.wikipedia.org/wiki/Brusselator
+#
+# The Brusselator has a fixed point at
+#
+#    {X} = A,  {Y} = B/A
+#
+# The fixed point becomes unstable when
+#
+#    B > 1 + A^2 
+#
+initial_conditions
+Xspec 1.0
+Yspec 1.0
+Aspec 1.0
+Bspec 3.0
+end
+

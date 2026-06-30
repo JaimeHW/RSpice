@@ -1,0 +1,23 @@
+pierce oscillator
+
+c1 1 0 100e-12
+c2 3 0 100e-12
+c3 2 3 99.5e-15
+c4 1 3 25e-12
+l1 2 4 2.55e-3  
+r1 1 3 1e5
+r2 3 5 2.2e3
+r3 1 4 6.4
+v1 5 0 12
+
+Q1 3 1 0 NBJT
+.MODEL NBJT NPN (BF=100)
+
+.tran 1ns     1000us NOOP
+*.print tran format=tecplot v(1) v(2) v(3) v(4) v(5)
+.print tran  v(2) v(1) v(3) i(L1)
+*.options timeint method=7 reltol=1e-3
+.options timeint reltol=1e-3
+.options mpde ic=2 auton2=true T2=1e-7 saveicdata=1 diff=1 wampde=1 phase=1 phasecoeff=0  oscout="I(L1)"
+*.options device debuglevel=-100
+.ic v(2)=9.46885584e-01 v(1)=8.08574315e-01 V(3)=4.29107472e+00

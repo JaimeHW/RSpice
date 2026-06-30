@@ -1,0 +1,22 @@
+***********************************************************************
+* There is a partial incompatibility between remeasure for TRAN mode
+* and the inclusion of a .OP statement in the netlist.  Remeasure
+* will work if the .OP statement comes after the .TRAN line.  It 
+* will produce a fatal netlist error if the .OP statement comes first.
+* Both ways will work for .MEASURE. 
+*
+* See SON Bug 885 for more details.
+***********************************************************************
+
+VS1 1  0  SIN(0 1.0 1KHZ 0 0)
+R1  1  0  100
+
+.OP
+.TRAN 0 1ms
+*.OP
+.PRINT TRAN V(1)
+
+.MEASURE TRAN MAXV1 MAX V(1)
+
+.END
+

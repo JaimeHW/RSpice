@@ -1,0 +1,44 @@
+test for turning points using arclength continuation
+*
+* This test is identical to the one in Xyce_Regression/Netlists/HOMOTOPY, except 
+* that the output format is STD, rather than tecplot
+*
+* polynomial coefficients:
+.param A=3.0
+.param B=-2.0
+.param C=1.0
+.param I=1.0
+
+Vtest 1 0 5.0
+Btest 1 0 V={A*(I(Vtest)-I)**3 + B*(I(Vtest)-I) + C}
+
+.DC Vtest 1 1 1
+
+* no continuation:
+*.options nonlin continuation=0
+
+* natural parameter continuation (via loca)
+.options nonlin continuation=1 
+
+.options sensitivity debuglevel=1
+
+* stepper sets what order of continuation this is. 
+*   stepper=0 or stepper=NAT  is natural continuation
+*   stepper=1 or stepper=ARC  is arclength continuation
+*
+* predictor must be set to secant to see turning points
+*   predictor=0  tangent
+*   predictor=1  secant
+*   predictor=2  random
+*   predictor=3  constant
+*
+*.options loca stepper=0
+.options loca stepper=1 maxstep=50
++ predictor=1 stepcontrol=1 
++ conparam=Vtest:DCV0
++ initialvalue=0.0 minvalue=0.0 maxvalue=2.0
++ initialstepsize=0.01 minstepsize=1.0e-8 maxstepsize=0.1
++ aggressiveness=0.1
+
+.print homotopy I(Vtest) 
+

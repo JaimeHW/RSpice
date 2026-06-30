@@ -1,0 +1,6 @@
+This file is used to test how the ERROR measure handles 
+a file name that it too "short" to be parsed as a valid 
+comparison-file name.  The issue is that the filename must 
+end in .PRN, .CSV or .CSD for the ERROR measure function to 
+know which file-parsing object to use. That qualifier is 
+specified with FILE= on the ERROR measure line.

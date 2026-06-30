@@ -1,0 +1,11 @@
+gain-stage1.cir
+gain-stage1.cir.sh
+gain-stage2.cir
+gain-stage2.cir.sh
+gain-stage3.cir
+gain-stage3.cir.sh
+gain-stage6.cir
+gain-stage6.cir.sh
+opamp-ol.cir
+opamp-ol.cir.sh
+tags

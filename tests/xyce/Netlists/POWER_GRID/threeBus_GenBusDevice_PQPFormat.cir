@@ -1,0 +1,55 @@
+************************************************************
+* Unit Test of PV Bus Generator Model, in PQ Polar format
+*
+* This test also covers .STEP for the GenBus and Branch.
+* See SON Bug 848 for more details on .STEP
+************************************************************
+
+*********************************************
+* Simulation control statements             *
+*********************************************
+.DC V1VM 1 1 1
+.STEP YPowerGridBranch!pg23:X 0.1 0.2 0.1
+.STEP YPGGB!pvb3:P 0.5 0.8 0.3
+
+*********************************************
+* Bus 1 is the slack bus.  Ammeter is       *
+* wired so that current flows into Bus 1.   *
+*********************************************
+V1Th bus1Th ammBus1P 0
+V1VM bus1VM ammBus1Q 1V
+Vamm1P 0 ammBus1P 0V
+Vamm1Q 0 ammBus1Q 0V
+
+*********************************************
+* Branch Definitions                        *
+*********************************************
+YPowerGridBranch pg12 bus1Th bus2Th bus1VM bus2VM AT=PQP R=0.05 X=0.1 B=0.05
+YPowerGridBranch pg23 bus2Th bus3Th bus2VM bus3VM AT=PQP R=0.05 X=0.1 B=0.05
+
+*********************************************
+* PV Bus Definition.  Note that power flows *
+* into the network for a generator          *
+*********************************************
+YPGGB pvb3 bus3Th ammbus3P bus3VM ammBus3Q AT=PQP VM=0.99 P=0.5
+Vamm3P 0 ammBus3P 0V
+Vamm3Q 0 ammBus3Q 0V
+
+*********************************************
+* Load Definitions                          *
+*********************************************
+ILoad2P bus2Th 0 0.8
+ILoad2Q bus2VM 0 0.8
+
+*************************************************************
+* .NODESET used to enforce "flat start" for PQ formulations *
+*************************************************************
+.NODESET V(bus1Th)=0 V(bus1VM)=1 V(bus2Th)=0 V(bus2VM)=1 V(bus3Th)=0 V(bus3VM)=1
+
+*********************************************
+* Output Statements                         *
+*********************************************
+.PRINT DC width=10 precision=6 V(bus1Th) V(bus1VM) V(bus2Th) V(bus2VM) V(bus3Th) V(bus3VM) 
++ I(Vamm1P) I(Vamm1Q) I(Iload2P) I(Iload2Q) I(Vamm3P) I(Vamm3Q) 
+ 
+.end

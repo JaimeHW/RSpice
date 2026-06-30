@@ -1,0 +1,53 @@
+* Test DC_CONT mode support for TRIG-TARG Measures.
+*
+* This bug covers:
+*
+*   1) The case of one variable (vsrc1) on the .DC line,
+*      with one variable (vsrc2) in the .STEP statement.
+*
+*   2) The DC values of the swept variable (vsrc1) are
+*      monotonically decreasing.
+*
+* See gitlab-ex issues 293 and 302 for more details.
+****************************************************************
+
+* For testing convenience send the output for the AC_CONT
+* measures to the <netlistName>.ma0 file.
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+.GLOBAL_PARAM P1=4
+
+V1  1 0 1
+R1  1 0 1
+
+B2 2 0 V={(V(1)-2.5)*(V(1)-2.5)*(V(1)-7.5)*(V(1)-7.5)/P1}
+R2 2 3 1
+R3 3 0 1
+
+* Reverse the step order on v1 (from the test in MEASURE_DC)
+* to make sure that both increasing and decreasing sequences of
+* values are tested.
+.DC v1 10 1 -1
+.STEP P1 4 6 2
+.print dc v(1) v(2) v(3) P1
+
+.MEASURE DC_CONT TRIGTARGAT TRIG AT=2.5 TARG AT=7.5
+.MEASURE DC_CONT TRIGTARGAT1 TRIG AT=2.5 TARG V(2)=5 CROSS=1
+.MEASURE DC_CONT TRIGTARGAT2 TRIG V(2)=5 CROSS=1 TARG AT=7.5
+
+.MEASURE DC_CONT TRIGTARG1 TRIG V(2)=3 CROSS=1 TARG V(2)=7 CROSS=1
+
+* test that the first N TRIGs are matched with the first N TARGs 
+.MEASURE DC_CONT TRIGTARG2 TRIG V(2)=3 CROSS=1 TARG V(2)=7 CROSS=2
+.MEASURE DC_CONT TRIGTARG3 TRIG V(2)=3 CROSS=2 TARG V(2)=7 CROSS=1
+
+* Repeat core tests with RISE and FALL.
+.MEASURE DC_CONT RISEFALL1 TRIG V(2)=3 RISE=1 TARG V(3)=1 FALL=2 
+.MEASURE DC_CONT RISEFALL2 TRIG V(2)=3 RISE=2 TARG V(3)=1 FALL=1
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure dc lastMeasure min v(2)
+
+.END

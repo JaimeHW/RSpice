@@ -1,0 +1,59 @@
+NPN Bipolar Transistor Circuit Netlist
+*
+* This test is identical to npn_bjt_pde.cir, except that it sets the 
+* temperature to a non-default value.
+*
+* The reason for this temperature change is to force the Philips mobility 
+* model to exercise the internal Newton loop that is used to estimate the 
+* minimum value of G(P), one of the scattering terms in the model.  
+* Fixing this Newton loop was the subject of this gitlab issue:  
+*
+* https://cee-gitlab.sandia.gov/Xyce/backlog/bugs/-/issues/23
+*
+* Prior to the fix for that issue, the old implementation of the Newton 
+* loop was broken, and produced NaNs.
+*--------------------------------------------------------------------------------
+VCC  4 0 DC 12V
+RC 3 4 2K
+RB 4 5 377K
+* Zero volt sources used as ammeters to measure the
+* base and collector currents, respectively
+VMON1 5 1 0
+VMON2 3 2 0
+
+*--------------------------------------------------------------------------------
+ypde npnop 2 1 0 pdebjt    
++ C0=1.0e+17
++ tecplotlevel=0 
++ gnuplotlevel=0
++ mobmodel=philips
++ fielddep=true
++ auger=false
+* relatively course mesh, so the test runs quickly
++ l=9.0e-4 nx=50
+* DOPING REGIONS:
++ region={name       =            reg1,  reg2
++         function   =            file, file
++         file       =       boron.dat, phos.dat
++         nmaxchop   =         1.5e+18, 3.3e+19
++         type       =           ptype,  ntype
++         species    =              BM,  PP }
+*
+* ELECTRODES:
++ node={name           = collector,      base,  emitter
++       bc             = dirichlet, dirichlet,  dirichlet
++       side           =     right,    middle,  left
++       area           =    1.0e-2,    1.0e-2,  1.0e-2
++       location       =    9.0e-4,    3.0e-4,  0.0 }
+*
+.MODEL pdebjt ZOD  level=1
+*--------------------------------------------------------------------------------
+* this option forces it to skip the NL poisson initial guess
+.options timeint doubledcop=drift_diffusion
+
+.options device temp=35
+
+.DC VCC 0.0 6.0 0.01
+.PRINT DC  V(4) I(VMON1) I(VMON2) V(1) V(2) 
+
+.END

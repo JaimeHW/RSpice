@@ -1,0 +1,24 @@
+*David Vigliano
+*Sandia National Labs
+*9/26/2014
+
+*This netlist generates a voltage divider driven by a pulse
+
+*This source creates the sources
+vrf vinrf vin SIN(0 5 2000Meg)
+vp vin 0 PULSE(0 5 1us 6ns 6ns 2.029us 3.666us)
+
+*This section adds in the voltage dividers
+R3 vinrf vout 1k
+R4 vout 0 1k
+
+*This section defines the simulation type
+.TRAN .1ns 4us 0s .1ns
+
+*This section generates the output data
+.OPTIONS OUTPUT INITIAL_INTERVAL = .1ns
+.options timeint debuglevel=0
+
+*COMP v(vinrf) offset=5
+*COMP v(vout) offset=2.5
+.print TRAN v(vinrf) v(vout) 

@@ -1,0 +1,33 @@
+
+
+.global_param Vmax=1000.0
+.global_param testNorm={agauss(0.5k,0.05k,1)}
+.global_param R1value={testNorm*2.0}
+*
+R2  1  0  7k
+R1 1 2 {R1value}
+VS1  2  0  SIN(0 {Vmax} 1KHZ 0 0)
+
+.TRAN 0.25ms 0.25ms
+*.PRINT TRAN FORMAT=tecplot V(2) R1:R
+
+* plain test
+.meas tran maxSine max V(1) 
+*PRINT=None
+
+* normally distributed samples, mean=3k; std deviation=1k
+.sampling 
++ useExpr=true
+
+.options samples numsamples=1000
++ outputs={R1:R}
++ measures=maxSine
++ sample_type=mc
++ stdoutput=true
+
+.options timeint erroption=1
+
+* suppress the normal measure output, as for this test case we only care about 
+* the statistical moments.
+.options measure measprint=none
+

@@ -1,0 +1,15 @@
+Minimum capacitance/resistance test circuit
+*
+.param mr=0 mc=0
+.options DEVICE MINRES={mr} MINCAP={mc}
+VIN 1 0 PULSE ( 5 -1 0.05ms 100ns 100ns 0.1ms 0.2ms )
+R1 1 2a 2K
+D1 2a 0 DMODA
+R2 1 2b 2K
+D2 2b 0 DMODB
+.MODEL DMODA D (IS=100FA)
+.MODEL DMODB D (IS=100FA CJ0=1nf RS=100)
+.TRAN 0 0.5ms
+.PRINT TRAN V(2a) I(R1) V(2b) I(R2)
+*
+.END

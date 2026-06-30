@@ -1,0 +1,70 @@
+Lossy Transmission Line Circuits
+*********************************************************
+* Test of bad LTRA instance lines and model cards
+*
+* Test every invalid combination of R, L, C and G on
+* the instance line.  The only valid combinations are
+* RLC, RC, LC (lossless) and RG.  All other combinations
+* should cause an error during device initialization.
+*
+* The model name (e.g, onlyr) should describe what type
+* of lossy transmission line it is.
+*
+*
+*
+*
+*
+*********************************************************
+
+* model card is missing all of the parameters
+o1 1 0 2 0 noparams
+.model noparams ltra
+
+o2 1 0 2 0 onlyr
+.model onlyr ltra r=0.05 
+
+o3 1 0 2 0 onlyl
+.model onlyl ltra c=20pF
+
+o4 1 0 2 0 onlyc
+.model onlyc ltra l=20uH
+
+o5 1 0 2 0 onlyg
+.model onlyg ltra g=20 
+
+o6 1 0 2 0 all
+.model all ltra r=0.05 c=20pF l=20uH g=20
+
+o7 1 0 2 0 rl
+.model rl ltra r=0.05 l=20uH
+
+o8 1 0 2 0 gc
+.model gc ltra c=20pF g=20
+
+o9 1 0 2 0 gl
+.model gl ltra l=20uH g=20
+
+o10 1 0 2 0 glc
+.model glc ltra c=20pF l=20uH g=20
+
+o11 1 0 2 0 rgc
+.model rgc ltra r=0.05 c=20pF g=20
+
+o12 1 0 2 0 rgl
+.model rgl ltra r=0.05 l=20uH g=20
+
+* Not sure if a missing length parameter (which defaults to zero)
+* should be an error, or not.  LEN=0 is not allowed in PSpice.
+* So this instance line does not produce an error message, and may
+* be deleted from this test.
+o13 1 0 2 0 noLen
+.model noLen ltra r=0.05 C=20pF
+
+v1 1 0 pulse(0 1 1ns 1ns 1ns 20ns 40ns)
+rload 2 0 10
+
+.tran 0.1ns 120ns 0 0.15ns
+.print tran v(1) v(2)
+
+.end
+

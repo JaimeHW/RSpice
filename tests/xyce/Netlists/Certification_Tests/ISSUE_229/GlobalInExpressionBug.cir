@@ -1,0 +1,24 @@
+*
+* error in use of global in an expression
+*
+
+
+V_V1         $G_CLK 0 PULSE 0 5 100u 100n 100n 1e-6 1e-6
+R_V1         $G_CLK 0 100
+
+
+R_load       TestNode 0 100
+V_load       TestNode 0 0.5
+
+E_One        Node1 0 VALUE={IF( TIME == 0, 0.4, IF(((V(TestNode) < 0.8) & (V($G_CLK ) < 0.8)),  3.5, 0.4))}
+R_One        Node1 0 100
+
+E_Two        Node2 0 VALUE={IF( TIME == 0, 0.4, IF(((V( TestNode ) < 0.8) & (V($G_CLK) < 0.8)),  3.5, 0.4))}
+R_Two        Node2 0 100
+
+.print tran v(Node1) v(Node2) v(TestNode) {I( R_one )} {P( R_one )}
+.tran 0 1e-5
+
+
+.end
+

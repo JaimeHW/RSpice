@@ -1,0 +1,9 @@
+The re-measure subdirectory contains tests that
+are specific to the "machinery" of re-measure that
+are common to all measures.  This includes parsing of
+alternate file formats (like .csd) and error handling
+for bad Xyce -remeasure lines.
+
+The re-measure of individual measures is typically
+covered in the unit tests (e.g, for AVERAGE) in
+either MEASURE or MEASURE/STEP.

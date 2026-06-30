@@ -1,0 +1,19 @@
+Bug Number: 1148
+Test netlists: bug_1148.cir
+
+Description:
+============
+This test checks that an error is returned when the user tries to
+print a non-existant node.
+
+Verification
+============
+Run Xyce in serial on bug_1148.cir.
+
+Xyce should exit with fatal error:
+
+User Fatal: Undefined item(s) in .print: V(2)
+
+Special Notes:
+==============
+Parallel should give the same error.

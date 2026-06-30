@@ -1,0 +1,12 @@
+lib4.lib
+lib3.lib
+test2_nolib.cir
+test2.cir
+test2.cir.sh
+rlc.cir	
+rlc.cir.tags	
+rlc.cir.options
+rlc.cir.sh	
+rlc.lib	
+exclude
+tags

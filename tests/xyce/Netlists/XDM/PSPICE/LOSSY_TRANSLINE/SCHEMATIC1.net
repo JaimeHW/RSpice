@@ -1,0 +1,13 @@
+* source TRANSMISSIONLINE
+R_R1         N15586 0 10 TC=0,0
+V_V1         N15504 0  
++PULSE 0 5 0 0.1e-9 0.1e-9 5e-9 25e-9
+T_T2         N15504 0 N15586 0 LEN=100 R=0.05 L=1e-8 G=0 C=20e-12
+
+* specify same transmission line, and setup, using
+* model card
+R_R2         out_3 0 10 TC=0,0
+V_V2         in_3  0 
++PULSE 0 5 0 0.1e-9 0.1e-9 5e-9 25e-9 
+T_T3         in_3 0 out_3 0 lossy_tline_model
+.MODEL lossy_tline_model TRN LEN=100 R=0.05 L=1e-8 G=0 C=20e-12

@@ -1,0 +1,79 @@
+Unit Test of Digital Device Error Messages
+
+* Analysis and Output Commands
+.options timeint reltol=1.0e-3
+.tran 10ns 1us
+.print tran PRECISION=10 WIDTH=19 v(in_1) v(in_2) v(in_3) v(in_4)
++ v(out_1) v(out_2) v(out_3) v(out_4) v(out_5) v(out_6) v(out_7)
++ v(out_8) v(out_9) v(out_10a) v(out_10b) v(out_q11) v(out_q12)
+
+* Sources
+V1 in_1 0  PULSE ({V_LO} {V_HI} 100ns 20ns 20ns 180ns 400ns)
+V2 in_2 0  PULSE ({V_HI} {V_LO} 100ns 20ns 20ns 180ns 400ns)
+V3 in_3 0  PULSE ({V_LO} {V_HI} 100ns 20ns 20ns 180ns 400ns)
+V4 in_4 0  PULSE ({V_HI} {V_LO} 100ns 20ns 20ns 780ns 1600ns)
+
+* output load resistors
+R1  out_1  0 100K
+R2  out_2  0 100K
+R3  out_3  0 100K
+R4  out_4  0 100K
+R5  out_5  0 100K
+R6  out_6  0 100K
+R7  out_7  0 100K
+R8  out_8  0 100K
+R9  out_9  0 100K
+R10 out_10 0 100K
+R11 out_11  0 100K
+R12 out_12  0 100K
+
+* Digital power node
+V_dpn dig_pn 0 3V
+
+* error because no output node on INV and BUF
+UINV1 INV dig_pn 0 in_1 DMOD
+UBUF2 BUF dig_pn 0 in_1 DMOD
+
+* error because only three input nodes for AND(4), NAND(4), OR(4) and NOR(4)
+UAND3  AND(4)  dig_pn 0 in_1 in_2 in_3 out_2 DMOD
+UNAND4 NAND(4) dig_pn 0 in_1 in_2 in_3 out_3 DMOD
+UOR5 OR(4)     dig_pn 0 in_1 in_2 in_3 out_4 DMOD
+UNOR6 NOR(4)  dig_pn 0 in_1 in_2 in_3 out_5 DMOD
+
+* should get warning about Y device and NOT gate deprecation
+YNOT NOT7 0 dig_pn in_1 out_7 DMOD1
+
+* error becuase wrong number of input nodes on XOR and NXOR
+UXOR8 XOR   dig_pn 0 in_1 out_8 DMOD
+UNXOR9 NXOR dig_pn 0 in_1 out_9 DMOD
+
+* error because wrong number of input nodes on ADD.  Missing carry input
+UADD10 ADD dig_pn 0 in_1 in_2 out_10a out_10b DMOD
+
+* error because of wrong number of output nodes on DFF and DLTCH
+UDLTCH11 DLTCH dig_pn 0 in_1 in_2 in_3 in_4 out_q11 DMOD
+UDFF12   DFF   dig_pn 0 in_1 in_2 in_3 in_4 out_q12 DMOD	
+
+* Set digital default parameters:
+.param R1HI=5 R1LO=200 R0HI=200 R0LO=5 RIN=1000 R1=100
+.param SW=5.e-9  CAPOUT=1.e-12  CAPIN=1.e-12
+.param V_LO=0 V_REF=0 V_HI=3
+
+.model DMOD DIG ( CLO=CAPOUT  CHI=CAPOUT
++ S0RLO=R0LO  S0RHI=R0HI  S0TSW=SW
++ S0VLO=-1  S0VHI=1.8
++ S1RLO=R1LO  S1RHI=R1HI  S1TSW=SW
++ S1VLO=1  S1VHI=3
++ RLOAD=RIN   CLOAD=CAPIN
++ DELAY=20ns )
+
+.model DMOD1 DIG ( CLO=CAPOUT  CHI=CAPOUT
++ S0RLO=R0LO  S0RHI=R0HI  S0TSW=SW
++ S0VLO=-1  S0VHI=1.8
++ S1RLO=R1LO  S1RHI=R1HI  S1TSW=SW
++ S1VLO=1  S1VHI=3
++ RLOAD=RIN   CLOAD=CAPIN
++ VREF=V_REF
++ DELAY=20ns )
+
+.end

@@ -1,0 +1,17 @@
+.lib low
+.param rval=2
+r3  3  4  9
+.endl low
+
+.lib nom
+.param rval=3
+r3  3  4  8
+.endl nOm
+
+.lib high
+.param rval=4
+r3  3  4  7
+.endl high
+
+.include CircuitBlock_parseIncludeFile_3_r4.lib
+.param rval2={2*rval}

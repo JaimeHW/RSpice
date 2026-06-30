@@ -1,0 +1,78 @@
+*********************************************************************
+* Test various bad measure lines for the ERROR measure,
+* since that .MEASURE type has a different syntax then the
+* other measure types. This tests the error conditions of:
+*
+*   a) requesting a non-existent column in the comparison
+*      file (FILE=).
+*
+*   b) having the indepvarcol (e.g, the simulation time) not
+*      be monotonically increasing in the comparison file.   
+*      This may emit multiple errors, which is correct.  The
+*      error message(s) should have the line number(s) of each
+*      such line.
+*
+*   c) missing, negative or identical values for the column values
+*
+*   d) a user-specified netlist file that does not exist, cannot be
+*       opened or is a directory rather than a file name.  See SON
+*      Bugs 730 and 785 for more details.
+*
+*   e) is too short (e.g, ugh) for the file extension (e.g, .PRN,
+*      .CSV or .CSD) to be determined.
+*
+*   f) an unsupported file extensions (such as .RAW) 
+*********************************************************************
+
+v1 0 1 sin(0 10 10 0 0 0 )
+v2 0 2 sin(0 9 10 0 0 0 )
+r1 1 0 100
+r2 2 0 100
+
+.tran 0 250ms 
+
+.print tran v(1) v(2)
+
+* column 4 does not exist in the file ErrorTestRawDataMisOrdered.prn
+.measure tran IndepVarColInvalid error v(1) FILE=ErrorTestRawDataMisOrdered.prn 
++ comp_function=l2norm indepvarcol=1 depvarcol=4
+.measure tran DepVarColInvalid error v(2) FILE=ErrorTestRawDataMisOrdered.prn 
++ comp_function=l2norm indepvarcol=4 depvarcol=2
+
+* the file ErrorTestRawDataMisOrdered.prn has the simulation time column purposefully mis-ordered
+.measure tran TimeMisordred error v(2) FILE=ErrorTestRawDataMisOrdered.prn 
++ comp_function=l2norm indepvarcol=1 depvarcol=2
+
+* negative or missing column values (for indepvarcol or depvarcol) should produce an error
+.measure tran IndepVarColNegative error v(1) FILE=ErrorTestRawData.prn 
++ comp_function=l2norm indepvarcol=-1 depvarcol=2
+.measure tran DepVarColNegative error v(2) FILE=ErrorTestRawData.prn 
++ comp_function=l2norm indepvarcol=1 depvarcol=-1
+.measure tran IndepVarColMissing error v(1) FILE=ErrorTestRawData.prn 
++ comp_function=l2norm depvarcol=2
+.measure tran DepVarColMissing error v(2) FILE=ErrorTestRawData.prn 
++ comp_function=l2norm indepvarcol=1
+
+* identical values for indepvarcol and depvarcol should produce an error
+.measure tran IdenticalVarColValues error v(1) FILE=ErrorTestRawData.prn 
++ comp_function=l2norm indepvarcol=1 depvarcol=1
+
+* BogoFile does not exist
+.measure tran Bogofile error v(1) FILE=BogoFile.prn 
++ comp_function=l2norm indepvarcol=1 depvarcol=2
+
+* File is a directory
+.measure tran FileIsDir error v(1) FILE=STEP 
++ comp_function=l2norm indepvarcol=1 depvarcol=2
+
+* File name is too short for a valid file extension (e.g., .PRN,
+* .CSV or .CSD) to be determined.
+.measure tran ShortFileName error v(1) FILE=ugh 
++ comp_function=l2norm indepvarcol=1 depvarcol=2
+
+* Unsupported file extension
+.measure tran UnsupportedExt error v(1) FILE=bad_error_measure_line1.cir.raw 
++ comp_function=l2norm indepvarcol=1 depvarcol=2
+.end
+
+

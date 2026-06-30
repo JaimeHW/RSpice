@@ -1,0 +1,43 @@
+Lowpass filter from https://www.electronics-tutorials.ws/filter/filter_2.html
+* this is identical to the lowpass.cir sensitivity test, except that I am intentionally 
+* excluding v1:acmag and I have made it a little larger, with 2 R and 2 C devices, 
+* and in this netlist I am using the forceDeviceFD=true option.  
+
+* Having 2 R and 2 C devices makes it a second-order filter.
+*
+* The point of this test is to ensure that the numerical device sensitivity 
+* matches the analytical one.  Most devices are not able to compute an analytical
+* sensitivity.  But, the capacitor is able to, so it is a good device to use for 
+* comparisons.
+*
+* v1:acmag is computed by a completely different set of functions, so it isn't 
+* relevant to this test, which is why it is excluded
+*
+* device parameters:
+.param rval=4.7k
+.param cval=47n
+.param vinval=10.0
+
+* Circuit:
+v1 1 0 ac {vinval}
+r1 1 2 {rval}
+c1 2 0 {cval}
+r2 2 3 {rval}
+c2 3 0 {cval}
+
+.ac dec 10 1 10k
+
+* Output vp() in degrees
+.OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=true
+
+.print ac 
++ vm(1) vp(1) vm(2) vp(2)   
+
+.print sens 
+
+.sens objvars=3 param=r1:r,c1:c,r2:r,c2:c
+.options sensitivity direct=1 adjoint=1  stdoutput=1   forceDeviceFD=true
+
+.options device debuglevel=-100
+
+.end 

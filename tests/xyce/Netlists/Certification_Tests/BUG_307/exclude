@@ -1,0 +1,6 @@
+bug_307_b.cir # tested by bug_307_a.cir.sh
+bug_307_e.cir # tested by bug_307_d.cir.sh
+bug_307_f.cir # tested by bug_307_d.cir.sh
+bug_307_g.cir # tested by bug_307_d.cir.sh
+bug_307_h.cir # tested by bug_307_d.cir.sh
+bug_307_i.cir # tested by bug_307_d.cir.sh

@@ -1,0 +1,15 @@
+bug1238-ac.cir
+bug1238-ac.cir.sh
+bug1238-ac.cir.tags
+bug1238-ac-op.cir
+bug1238-ac-op.cir.sh
+bug1238-ac-op.cir.tags
+bug1238-hb.cir
+bug1238-hb.cir.sh
+bug1238-hb.cir.tags
+bug1238-noise.cir
+bug1238-noise.cir.sh
+bug1238-noise.cir.tags
+bug1320-ac.cir
+bug1320-ac.cir.sh
+tags

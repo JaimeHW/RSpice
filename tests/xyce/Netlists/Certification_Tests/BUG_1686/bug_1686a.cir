@@ -1,0 +1,20 @@
+
+.subckt fubar 1 2
+.include inc1.sub
+X1 1 2a busted
+R1 2a 2 1k
+.ends
+
+.subckt trashed 1 2
+.include inc1.sub
+X1 1 2a busted
+R1 2a 2 10k
+.ends
+
+V1 0 1 1
+X1 1 2 fubar
+X2 2 0 trashed
+
+.dc v1 0 1 .5
+.print dc v(2) I(v1)
+.end

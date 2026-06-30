@@ -1,0 +1,23 @@
+***************************************************************
+* Output both the direct and adjoint sensitivities for
+* the case of two objective functions and two parameters.
+* This file only has a .PRINT SENS line that uses
+* FORMAT=TECPLOT
+*
+* See SON Bug 1170 for more details.
+***************************************************************
+
+* Trivial high-pass filter
+
+R2 c 0 1
+R1 b c 1
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.SENS OBJVARS=b,C PARAM=R1:R,c1:c
+
+.options sensitivity direct=1 adjoint=1 stdoutput=1
+.PRINT SENS FORMAT=TECPLOT vr(b) vi(b) vp(b) vm(b) R1:R R2:R C1:C
+.ac dec 5 100Hz 1e6
+
+.end

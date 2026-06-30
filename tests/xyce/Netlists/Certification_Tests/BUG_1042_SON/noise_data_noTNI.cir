@@ -1,0 +1,36 @@
+res_noise.cir - noise analysis: resistor divider, amp, and lp filter
+*
+* Test .NOISE with data=<tableName> .  The values in table are
+* not monotonically increasing, so the Total Noise Integrals will
+* not be calculated or printed to stdout.
+*
+.global_param mag=1
+.global_param phase=0.1
+*
+*
+* resistor divider
+v1  1 0 dc 5.0 ac  {mag} {phase}
+r1  1 2 100k
+r2  2 0 100k
+*
+* amp and lp filter
+eamp  3 0 2 0 1
+rlp1  3 4 100
+clp1  4 0 1.59nf
+*
+
+.noise  v(4)  v1  data=table
+.print noise V(4) {log(onoise)} {log(inoise)}
+
+*.ac data=table
+*.print ac V(4)
+
+.data table
++ mag phase freq
++  2.0   0.2  1.0e1
++  3.0   0.3  1.0e2
++  4.0   0.4  1.0e3
++  5.0   0.5  1.0e4
++  6.0   0.6  1.0e5
++  1.0   0.1  1.0e0
+.enddata

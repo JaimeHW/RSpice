@@ -1,0 +1,64 @@
+A test of the measure MIN functionality
+*******************************************************************************
+*
+VS1  1  0  SIN(0 1.0 1KHZ 0 0)
+VS2  2  0  SIN(-0.5 1.0 1KHZ 0 500)
+VS3  3  0  SIN(0.5 -1.0 1KHZ 0 500)
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+
+* use MEASFAIL for compatibility with the verification approach
+* used in .sh file.
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0  3ms
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.00001
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3) V(1,0)
+
+* plain test
+.measure tran minSine min V(1)
+.measure tran min10Sine min V(1,0)
+
+* add TO-FROM modifiers
+.measure tran minHalfSine min V(1) from=0 to=0.5e-3
+
+* mix in TDs before and after FROM value.
+.measure tran sine10 min V(1) FROM=0 TO=0.25e-3 TD=0.1e-3
+.measure tran sine15 min V(1) FROM=0.00015 TO=0.25e-3 TD=0.1e-3
+.measure tran sine20 min V(1) FROM=0.0002 TO=0.25e-3 TD=0.1e-3
+
+* these tests should fail and return 0 and -100
+.measure tran returnZero min V(1) FROM=0.2e-3 TO=0.25e-3 TD=0.5e-3
+.measure tran returnNeg100 min V(1) FROM=0.2e-3 TO=0.25e-3 TD=0.5e-3 default_val=-100
+
+* add tests for rise/fall/cross.  VS2 and VS3 have a DC offset
+* and are damped sinusoids
+.measure tran minv2fall2 min v(2) fall=2
+.measure tran minv3rise1 min v(3) rise=1
+.measure tran minv2cross3 min v(2) cross=3
+
+* test LAST for rise/fall/cross
+.measure tran minv2falllast min v(2) fall=last
+.measure tran minv3riselast min v(3) rise=last
+.measure tran minv2crosslast min v(2) cross=last
+.measure tran minv3crosslast min v(3) cross=last
+
+* These should also give the minimum value at the last rise/fall/cross
+.measure tran minv2fallNegOne min v(2) fall=-1
+.measure tran minv3riseNegOne min v(3) rise=-1
+.measure tran minv2crossNegOne min v(2) cross=-1
+
+* test RFC_LEVEL keyword
+.measure tran minv1Rise1RFClevel50 min V(1) RFC_LEVEL=0.5 RISE=1
+.measure tran minv1Fall1RFClevel50 min V(1) RFC_LEVEL=0.5 FALL=1
+.measure tran minv1Cross1RFClevel50 min V(1) RFC_LEVEL=0.5 CROSS=1 
+
+*test Failed measures for rise/fall/cross
+.measure tran minv2fallfail min v(2) fall=10
+.measure tran minv3risefail min v(3) rise=10
+.measure tran minv2crossfail min v(2) cross=10
+
+.END
+

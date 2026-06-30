@@ -1,0 +1,25 @@
+* https://en.wikipedia.org/wiki/Brusselator
+*
+*-------------------------------------------------------------------------
+VBASE BAS 0 0.5V
+VEMIT  GND 0 0.0V
+YRXN r1  BAS  GND  rxn1
++ transport=false  
++ scalerxn=false
++ dirichletbc=false
++ tecplotlevel=0
+*-------------------------------------------------------------------------
+
+.MODEL rxn1 rxn (LEVEL=1
++ REACTION_FILE=brusselator_stable
++ NUMBER_REGIONS=1
++ )
+
+.options timeint debuglevel=-10   reltol=1.0e-5 
+
+.TRAN 3.0E-8 30.0
+
+.PRINT TRAN delimiter=tab N(yrxn!r1_000_conc_xspec) N(yrxn!r1_000_conc_yspec)
+
+.END
+

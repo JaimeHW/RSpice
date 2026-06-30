@@ -1,0 +1,13 @@
+* this circuit minimally reproduces the discontinuity reported in bug 1144 on the SON
+
+.dc V2 0.75 0.85 0.01
+.print dc v(1) I(v2)
+
+D1 0 1 DMODEL
+v2 1 0 1
+
+.step temp 25 35 1
+
+.MODEL DMODEL D (
++LEVEL = 1 IS = 0.00025 RS = 250
++N = 9.3  )

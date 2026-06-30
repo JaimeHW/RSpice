@@ -1,0 +1,15 @@
+Test case for FBH with nested DC sweep
+* Default model I-V curves as a "necessary but insufficient" 
+* regression test.
+.MODEL FBH_DEF NPN LEVEL=23
+
+VVCE N_1 0  DC 2 
+IBaseCurrent 0 N_2  DC 0
+QNPN_1 N_1 N_2 0 0 FBH_DEF
+
+.options device gmin=0
+.print DC V(N_1) I(IBaseCurrent) {-I(VVCE)} 
+.dc lin VVCE 0 5 100m IBaseCurrent 0 1m 100u
+
+.end
+

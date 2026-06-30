@@ -1,0 +1,4 @@
+serial, nightly,  ac, normal, expression
+valgrind
+capacitor
+sampling

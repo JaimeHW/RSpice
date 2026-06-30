@@ -1,0 +1,28 @@
+************************************************************************
+* This Xyce netlist will exit with a fatal error.  So, it is not
+* actually run by the test.
+*
+* See SRN Bug 1991
+************************************************************************
+
+*Analysis directives: 
+.TRAN  0 1ms
+.PRINT TRAN V(N15554) V(N15997) V(N15554a) V(N15997a)
+
+*RC Decay with IC 
+V_V2         N15554 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s) 
+R_R4         N15554 N15997  1k 
+R_R5         N15967 N15997  10  
+C_C2         N16112 N15967  1u  
+R_R6         0 N16112  10 
+.IC         V(N15967)=0.5
+
+*RC Decay with NODESET
+V_V2a         N15554a 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s) 
+R_R4a         N15554a N15997a  1k 
+R_R5a         N15967a N15997a  10 
+C_C2a         N16112a N15967a  1u  
+R_R6a         0 N16112a  10 
+.NODESET      V(N15967a)=0.5
+
+.END

@@ -1,0 +1,11 @@
+
+4/30/2010.
+
+Eric R. Keiter
+
+Title of bug:  Make level 57 synonym for level 10 mosfet
+
+The test simply runs the same inverter circuit twice, once with the level 
+numbers set to 10, and then once with it set to 57, and then does a 
+"diff" between the two files.  They should be identical.
+

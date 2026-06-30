@@ -1,0 +1,21 @@
+Regression test for simple normal distribution sampling
+
+c1 1 0 1uF IC=1
+R1 1 2 1K
+v1 2 0 0V
+.print tran v(1)
+.tran 0 5ms
+.options timeint reltol=1e-6 abstol=1e-6
+
+* 10 normally distributed samples, mean=3K; std deviation=1K
+*.SAMPLING NORMAL R1 3K 1K 10
+.SAMPLING 
++ param=R1
++ type=normal
++ means=3K
++ std_deviations=1K
+
+.options SAMPLES numsamples=10
+
+.end
+

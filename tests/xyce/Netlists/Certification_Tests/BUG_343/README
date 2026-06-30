@@ -1,0 +1,40 @@
+Test Name: 343
+Owner: 
+Test netlists: bug_343.cir
+GS files: bug_343.cir.prn 
+Mode:  Serial
+Comparator:  xyce_verify.pl 
+Version of Xyce: Development 21 Apr 05
+ 
+Description:
+============
+
+Bug 343 reported a segmentation violation when ".options output
+initial_interval=" was used without any subsequent time/timestep
+pairs.  This segmentation violation occured only on FreeBSD, and was
+due to improper initialization of a data block.  On other platforms
+the block was coincidentally initialized to 0 by the compiler.
+ 
+Procedure:
+============
+  runxyce -o ${OUT_DIR}/bug_343.cir.prn bug_343.cir
+  xyce_verify.pl bug343.cir ${GS_DIR}/bug_343.cir.prn ${OUT_DIR}/bug_343.cir.prn 
+
+The real test is that Xyce runs to completion on freebsd and does not
+segfault.  The xyce_verify.pl test just makes sure that when it *does*
+run to completion it still produces valid results.  This second step
+does nothing whatsoever to verify the proper functioning of .OPTIONS
+OUTPUT INITIAL_INTERVAL=, but there's no easy way to do that and it's
+not part of the bug anyway.
+ 
+Verification:
+=============
+
+Test passes if both runxyce and xyce_verify.pl exit with exit code 0
+and no error messages.
+ 
+Notes:
+======
+
+Per bug 406, this bug test netlist was completely revamped to remove
+an inappropriately complex test case.  The change was done on 21 April 2005.

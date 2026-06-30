@@ -1,0 +1,20 @@
+test of .func/.param interaction
+*this test defines a .param with same name as a .func function argument.
+* If bug 227 is fixed, it shouldn't matter.
+.param x=10
+.func f(x,y) {10*x+y*y}
+
+V1 1 0 5v
+r1 1 0 10k
+
+V2 2 0 5v
+r2 2 0 10k
+
+b1 3 0 v={f(v(1),v(2))}
+R3 3 4 10k
+R4 4 0 10k
+
+.DC v1 0 5 .1 v2 0 5 .1
+.print dc v(1) v(2) v(3) v(4)
+
+.end

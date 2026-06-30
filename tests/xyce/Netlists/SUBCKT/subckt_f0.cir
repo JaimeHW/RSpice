@@ -1,0 +1,23 @@
+Test
+* This is the baseline test for handling of parameter definition in one
+* include file and usage in another.
+* 
+* In the baseline, the include files have been inlined
+*.include parameters.lib
+
+.param foobie=1.0e-3
+*.include usage.lib
+.subckt frobnitz 1 2 
+.param RES={foobie*3}
+R1 1 2 {RES}
+.ends
+
+XR1 1 2 frobnitz
+R2 2 0 3K
+V1 1 0 5V
+
+.DC V1 1 5 1 
+.print dc v(1) v(2)
+*COMP V(1) reltol=1e-7 abstol=1e-7
+*COMP V(2) reltol=1e-7 abstol=1e-7
+.end

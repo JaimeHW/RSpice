@@ -1,0 +1,22 @@
+BUG 612 Broken circuit example from Rich's bugzilla report
+* If a netlist defines two subcircuits with the same name, but never instances
+* either of the subcircuits, Xyce freezes.  Xyce 2.0.1 wouldn't complain about the
+* renamed subcircuit and would run fine.  Following is a sample netlist that runs
+* on Xyce 2.0.1 but not Xyce 2.1QA
+
+.subckt dave n1 n2
+Rr1 n1 n2 1000
+.ends
+
+.subckt dave n1 n2 n3
+Rr1 n1 n2 500
+Rr2 n2 n3 500
+.ends
+
+
+Va 1 0 1
+Rb 1 0 100
+
+.TRAN 0 1
+.PRINT TRAN V(1)
+.END

@@ -1,0 +1,23 @@
+Test lumped model circuit
+
+*                 v1 v2 td tr tf pw per
+VsigGen 1 0 pulse(0.0 1.0 0.0 5u 5u 0.49e-3 1.0e-3)
+RsigGen 1 1b 50
+
+YTRANSLINE ERIC  DUT 1b  testLine
++ len=0.25 lumps=30
+
+.model testLine transline r=1.0e-3 l=0.5u c=60p
+
+.tran 0 1.0e-3
+.step lin testLine:r .5e-3 1.5e-3 .5e-3
+.step lin testLine:l 0.3u 0.7u 0.2u
+.step lin testLine:c 50p 70p 10p
+
+*comp V(2) offset=-0.2
+*comp I(V1) offset=-0.2
+.print tran V(1) V(1B)  testLine:r testLine:l testLine:c
+
+.options timeint debuglevel=-100 method=gear 
+.options device debuglevel=-100
+

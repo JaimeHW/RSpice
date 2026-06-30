@@ -1,0 +1,39 @@
+*****************************************************
+* Test that measure names can start with an operator
+* letter, like V or I, if they are used as the 
+* measured quantity in something like an EQN measure.
+*
+* See Issue #277 for more details.
+*****************************************************
+
+.TRAN 0 1
+
+V1 1 0 PWL 0 0 0.5 1 1 0
+R1 1 0 1
+
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.1
+.PRINT TRAN V(1)
+
+.MEASURE TRAN DMAX MAX V(1)
+.MEASURE TRAN IMAX MAX V(1)
+.MEASURE TRAN NMAX MAX V(1)
+.MEASURE TRAN PMAX MAX V(1)
+.MEASURE TRAN SMAX MAX V(1)
+.MEASURE TRAN VMAX MAX V(1)
+.MEASURE TRAN WMAX MAX V(1)
+
+* YMAX is a qualifer name.  So use YMAX1 instead
+.MEASURE TRAN YMAX1 MAX V(1)
+.MEASURE TRAN ZMAX MAX V(1)
+
+.MEASURE TRAN EQN1 EQN DMAX
+.MEASURE TRAN EQN2 EQN IMAX
+.MEASURE TRAN EQN3 EQN NMAX
+.MEASURE TRAN EQN4 EQN PMAX
+.MEASURE TRAN EQN5 EQN SMAX
+.MEASURE TRAN EQN6 EQN VMAX
+.MEASURE TRAN EQN7 EQN WMAX
+.MEASURE TRAN EQN8 EQN YMAX1
+.MEASURE TRAN EQN9 EQN ZMAX
+
+.END

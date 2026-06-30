@@ -1,0 +1,10 @@
+demonstrates how Xyce missing the analysis statement if it can't find a library
+
+.lib plugh.lib x
+
+c1 1 0 1uF IC=1
+R1 1 2 1K
+v1 2 0 0V
+.print tran v(1)
+.tran 0 5ms
+.end

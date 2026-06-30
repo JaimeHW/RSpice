@@ -1,0 +1,18 @@
+* This netlist tests that the PSpice netlist lines .OPTIONS ITL1 
+* or .OPTIONS ITL4 lines without values do not cause xdm to 
+* output an empty Xyce netlist.  This is part of SRN Bug 2020.
+
+.OPTIONS ITL1
+.OPTIONS ITL4
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PROBE V(1) V(2)
+
+*AC Source syntaxes
+R_R1        1 2  1k TC=0,0 
+R_R2        2 0  2K TC=0,0 
+V_V1        1 0  AC 1
++SIN 0 1 1KHz 0 0 0
+
+.END

@@ -1,0 +1,12 @@
+Resistor model card test
+************************************************************** 
+R1 2 0 RMOD1 L=1000U W=1U
+R2 2 0 RMOD2 L=1000U W=1U
+R3 2 0 {(1000u/1u)*1*2}
+VIN 1 0 5V
+VMON 1 2 0V
+.DC VIN 0 5V 1V
+.MODEL RMOD1 R (RSH=1 R=2)
+.MODEL RMOD2 RES (RSH=1 R=2)
+.PRINT DC V(1) I(VMON) I(R1) I(R2) I(R3) 
+.END

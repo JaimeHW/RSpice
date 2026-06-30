@@ -1,0 +1,249 @@
+Test Name: BUG_822
+Owner: Eric Keiter
+Test netlists:
+GS files:
+Mode:  N/A
+Comparator:  
+Version of Xyce: Release_3.0.1
+                                                                                                                                              
+Description:
+============
+Migrate/Improve the voltlim-with-homotopy stuff to release 3.0.1.
+
+There were a few features necessary to make this work correctly that
+didn't make it into the 3.0 release.  This bug is about finishing the
+job for 3.0.1.
+
+This is a tricky thing to test, as it involves a lot of bookkeeping
+that is internal to Xyce.  However, I  think it is complex enough (and
+easy to break) that there really needs to be some certification tests.
+
+This bug will require multiple tests.  At least one of them will be one
+that can be automated, but many will require manual verification.
+
+Here is a description of the things that need to be tested:
+
+1) Does a natural parameter homotopy, with fixed stepsize, give the same answer 
+   as an equivalent DC Sweep?
+
+2) Does the initJct flag NOT get set when going to the next homotopy parameter?
+   initJctFlag should *only* be set on the first newton iteration, of the first 
+   Newton solve of a simulation, with one exception.  The exception is that on 
+   nested DC sweeps, it needs to get set for the first Newton iteration after the 
+   inner-most DC sweep loop restarts.  This exception was dealt with in bug # 536,
+   and the verification of this is covered, partly, by the certification test for
+   that bug.
+
+3) Is the "last call" information being correctly stored in the state vector, and
+   is the state vector being updated correctly, after (and only after) each 
+   successful nonlinear solve?   
+
+4) Are all the updates/bookkeeping being done correctly for the case of a variable 
+   LOCA stepsize?  In particular, when steps fail, and are re-taken, do things 
+   work correctly?  This is similar to (3), but is a very specific issue - 
+   among other things, the state vector should *not* be updated for failed 
+   LOCA steps.
+
+5) When using homotopy for a tranOP calculation, does the transition to 
+   transient phase of the calculation go smoothly/correctly?  I mention this 
+   only because PA2 (which uses homotopy for the tranOP calculation) started 
+   having problems in transient this summer.  Make sure that initJct, for one 
+   thing, *never* gets set to true during transient.  Also make sure that the 
+   state vector handling for "last call" variables hasn't somehow gotten 
+   screwed up in transient.
+
+6) Earlier this summer, there was a bug on one of the CC machines (NWCC or ICC, I
+   don't remember which), in which a NULL pointer error came out of NOX, when
+   some of the new calls to NOX (necessary for voltlim to work) were made.  Need
+   to make sure this bug isn't still there, or have a way to turn this capability
+   off for that build.
+
+================================================================================
+Test 1: Compare voltim-with-homotopy (constant step) to an equivalent DC sweep.
+
+Test 1 Procedure:
+============
+
+This addresses the first item in the list above.
+
+This test compares a natural parameter homotopy of a single voltage 
+source with the equivalent DC sweep of that source.  The results 
+should be 100% identical - the code just goes through a different 
+set of functions, classes, etc. to do exactly the same thing.
+
+Do the following:
+
+Xyce ring51.cir >& ring51.out & <return>
+Xyce ring51_loca.cir >& ring51_loca.out & <return>
+
+grep -v Index ring51.cir.prn | grep -v End > result.prn <return>
+grep -v Index ring51_loca.cir.HOMOTOPY.prn | grep -v End > result_loca.prn <return>
+
+diff result.prn result_loca.prn <return> 
+
+This test should be run on every serial platform and every parallel platform.
+
+Note:  This is the only test that is covered by the shell script, 
+ring51.cir.sh.
+
+Test 1 Verification:
+=============
+
+If the "diff" returns NO output, then this test is passed.    Note that the 
+point of this test is NOT to compare against a gold standard, but rather 
+to compare equivalent runs of the same binary.  Hence there is no 
+gold standard.
+
+Test 1 Notes:
+======
+
+This test verifies that item #1 in the above list has been fixed.  It also 
+implies that item 3 is also fixed, but doesn't prove it.
+
+================================================================================
+Test 2:  Make sure the initJct flag is set correctly.
+
+Test 2 Procedure:
+============
+
+This requires a manual test - it isn't possible to test this automatically.
+
+Test 2 Verification:
+=============
+
+I (ERK) have tested this issue by hand, and believe it to be resolved.
+
+Test 2 Notes:
+======
+Note that there are enough automated homotopy tests in the test 
+suite at this point, which are based on "diff", that one of them would
+fail if initJct was handled incorrectly.  Test 1 (above) is a valid test
+for this issue.
+
+================================================================================
+Test 3:  Check that the updateStateVector function call is happening 
+          after a successful LOCA step.
+
+Test 3 Procedure:
+============
+
+This requires a manual test - it isn't possible to test this automatically.
+
+Test 3 Verification:
+=============
+
+I (ERK) have tested this issue by hand, and believe it to be resolved.
+
+Test 3 Notes:
+======
+
+Similar to Test 2 - a number of the "diff" based homotopy tests would fail,
+if this was broken.
+
+================================================================================
+Test 4:  Check that the updateStateVector function call is NOT happening 
+         after an unsuccessful step, and that the re-taking of the 
+         unsuccessful step has all the correct bookeeping.
+
+Test 4 Procedure:  
+============
+
+This requires a manual test - it isn't possible to test this automatically.
+
+I had included a circuit in this directory that is a good manual test circuit,
+called inv1_variable.cir. 
+
+inv_variable.cir uses a variable stepsize algorithm, and I 
+have selected an initial step size that is too large for the nonlinear solver 
+to succeed.  This insures that at least one step has to be re-taken, and allows
+for manual testing of the voltage limiter code.
+
+Test 4 Verification:
+=============
+
+I have manually verified that the state vectors are not rotated at the end of
+an unsuccessful step.
+
+
+Test 4 Notes:
+======
+Note - (this applies to item 3 as well) at the moment, the state arrays are 
+rotated at the end of a successful LOCA step, by a function call that is made
+from the LOCA interface to the time integrator (which owns the state arrays).
+
+The place in the LOCA interface is the same place as where calls to the output
+manager are made.  The output manager is only invoked when the solve has been
+successful, so this should be an appropriate place for it to be called from.
+However, until now I hadn't really tested it.
+
+================================================================================
+Test 5:  Check that the transition from tranOp to transient goes smoothly.
+
+Test 5 Procedure:
+============
+
+This is covered by bug 834, and the certification test associated with it.
+No additional test is neccessary.
+
+Test 5 Verification:
+=============
+
+Test 5 Notes:
+======
+
+================================================================================
+Test 6: Make sure that the weird NULL pointer issue (in NOX/LOCA) is gone.
+
+
+Test 6 Procedure:
+============
+
+This issue has been fixed, and tested by hand.  
+
+My test involved running a number of circuits which use LOCA,
+(including ring51_loca.cir, above) in valgrind to see if any memory errors
+came up.  Before my bugfix, I saw a very clear memory error, after my
+bugfix, it went away.  valgrind is only available on linux, and I couldn't 
+figure out how to use it in parallel, so I only tested linux serial
+in valgrind.
+
+I also ran the code (for the same circuits) in gdb, which demonstrated
+(before and after the fix) that the bug was fixed.
+
+Finally, it is now(2/18/2006) possible to do automated valgrind testing 
+of the entire nightly regression test suite, which includes LOCA usage.
+So, this issue is covered by that testing.
+
+
+Test 6 Verification:
+=============
+
+Based on my hand testing, I believe this bug to be fixed.
+
+Also, this issue is covered by the automated valgrind testing of
+the nightly regression test suite.
+
+Test 6 Notes:
+======
+The NULL pointer error, as described above, was actually a problem on all 
+platforms, not just one platform.   It just happened to cause a noticable
+fatal error on that one platform.  (I can't remember which one it was,
+but as it was actually an error on every platform, it doesn't matter now)
+
+Fixing it required adding an extra accessor function to the LOCA library.
+The problem was that the stepper class was re-allocating the solver at 
+each LOCA step, and that during that allocation, the new solver would 
+do an initial load of the residual (computeF).  Unfortunately, the 
+computeF call resulted in the device package requesting information
+(the nonlinear solve iteration number) from the solver. As the solver 
+was in the process of being allocated, its pointer was not NULL,  but it
+wasn't valid yet either.
+
+The new function that I put into LOCA checks to see if the pointer is valid
+or not - if it is not valid, it returns a zero.  The test is based on a 
+boolean flag, rather than the pointer's value.
+
+Note: automated testing recently became possible for this bug.
+
+================================================================================
+

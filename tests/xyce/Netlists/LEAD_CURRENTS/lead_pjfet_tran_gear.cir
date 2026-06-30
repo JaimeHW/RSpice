@@ -1,0 +1,43 @@
+Lead current test for JFET
+*
+Vin 3 0 pulse(12 0 10n 5n 5n 1u 1m)
+Vds 4 0 -15
+Rout 3 2 50
+Rterm 2 0 50
+Rload 4 1 500
+rsub  5 0 500
+vmond 1 1a 0
+vmong 2 2a 0
+vmons 5 5a 0
+*  drain gate source
+J1 1a 2a 5a 2N5114
+.MODEL 2N5114 PJF
++        VTO = -5.288
++       BETA = 2.1897M
++     LAMBDA = 9.946M
++         RD = 22.042
++         RS = 22.042
++        CGS = 14.6595P
++        CGD = 14.6595P
++         PB = 1.40863
++         IS = 39.24F
++         KF = 0
++         AF = 1
++         FC = 0.5
+*
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.5n 1.2u 1u .1n
+*COMP {i(vmond)-ID(J1)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {i(vmong)-IG(J1)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {i(vmons)-is(j1)} abstol=1.0e-6 zerotol=1.0e-7
+.PRINT TRAN {i(vmond)-ID(J1)} {i(vmong)-IG(J1)} {i(vmons)-is(j1)}
+
+.measure tran maxmag1   max {abs(i(vmond)-ID(J1))} failvalue=1e-6
+.measure tran totalrms1 rms {i(vmond)-ID(J1)} failvalue=1e-6 
+.measure tran maxmag2   max {abs(i(vmong)-IG(J1))} failvalue=1e-6
+.measure tran totalrms2 rms {i(vmong)-IG(J1)} failvalue=1e-6 
+.measure tran maxmag3   max {abs(i(vmons)-is(j1))} failvalue=1e-6
+.measure tran totalrms3 rms {i(vmons)-is(j1)} failvalue=1e-6 
+
+.END

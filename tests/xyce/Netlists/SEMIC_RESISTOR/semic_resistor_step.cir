@@ -1,0 +1,41 @@
+Semiconductor Resistor Circuit Netlist
+**************************************************************
+* Test that both the Level 1 and Level 2 resistors work 
+* correctly with .STEP if the semiconductor resistor
+* formulation is used for each level.  This was SON Bug 859.
+*
+* This netlist also tests SON Bug 972, which is being able to
+* to use the "shorthand syntax" of .STEP R3 rather than 
+* .STEP R3:R since since the level 2 resistor has R
+* as it instanceDefaultParameter. 
+************************************************************** 
+
+* Level 1 Resistor
+V1  1   0 1
+R1a 1a  0 1000 
+R1  1  1a RMOD1 L=1000U W=1U
+.MODEL RMOD1 R (RSH=1)
+
+* Level 2 resistor
+V2  2   0 1
+R2a 2a  0 1000 
+R2  2  2a RMOD2 L=1000U W=1U
+.MODEL RMOD2 R (LEVEL=2 RSH=1)
+
+* Level 2 resistor, with R specified.  So this is
+* not a "semiconductor resistor", but this was a 
+* convenient place/way to test SON Bug 972 without 
+* adding another test.
+V3  3   0 1
+R3a 3a  0 1000
+R3  3  3a RMOD3 R=500 
+.MODEL RMOD3 R (LEVEL=2)
+
+.STEP R1:L 1000u 2000u 1000u
+.STEP R2:L 1000u 2000u 1000u
+.STEP R3 500 1000 500
+
+.DC V1 1 1 1
+.PRINT DC V(1a) I(R1) P(R1) V(2a) I(R2) P(R2) {R3:R}
+
+.END

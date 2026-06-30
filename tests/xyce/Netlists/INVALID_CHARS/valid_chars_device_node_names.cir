@@ -1,0 +1,190 @@
+*******************************************************
+* For SON Bug 744
+*
+* Test of what non-alphanumeric characters are legal in 
+* a Xyce node or device name.  This includes the
+* following characters, in top-level circuits and
+* in subcircuits:
+*
+* ` ~ ! @ # $ % ^ & - _ + [ ] | \ < > . /
+*
+* This also tests that these characters work in a
+* a .DC statement and .PRINT DC statement.
+*
+* Note: *, 1*, ? and 1? are allowed as node names, but those
+* usages can cause problems since .PRINT DC V(*) V(1*) V(X1:1*)
+* have the special meanings in Xyce of:
+*
+*   a) print all nodal voltages in the netlist
+*   b) print all nodal voltages that start with '1'
+*   c) print all nodal voltages that start with "X1:1"
+*
+* The character * can be used in a device name, but the
+* same caveats for I(), P() and W() operators on a .PRINT
+* line apply and are tested by SON Bug 1211.
+* The same issues apply to the ? character since it is .PRINT
+* line wildcard that means "any single character".
+*
+*******************************************************
+.print DC WIDTH=6 PRECISION=1 v(1) v(1`) v(1~) v(1!) v(1@) 
++ v(1#) v(1$) v(1%) v(1^) v(1&) v(1-) v(1_) v(1+) v(1[) 
++ v(1]) v(1|) v(1\) v(1<) v(1>) v(1.) v(1/) 
++ v(`) v(~) v(!) v(@) v(#) v($) v(%) v(^) v(&) 
+*+v(*) 
++ v(-) v(_) 
++ v(+) v([) v(]) v(|) v(\) v(<) v(>) v(.) v(/) 
++ v(X1:1`) v(X1:1~) v(X1:1!) v(X1:1@) 
++ v(X1:1#) v(X1:1$) v(X1:1%) v(X1:1^) v(X1:1&) v(X1:1-)
++ v(X1:1_) v(X1:1+) v(X1:1[) v(X1:1]) v(X1:1|) v(X1:1\) v(X1:1<) 
++ v(X1:1>) v(X1:1.) v(X1:1/) 
++ v(X1:`) v(X1:~) v(X1:!) v(X1:@) v(X1:#) v(X1:$) v(X1:%) v(X1:^)
++ v(X1:&) v(X1:-) v(X1:_) v(X1:+) v(X1:[) v(X1:]) v(X1:|) v(X1:\) 
++ v(X1:<) v(X1:>) v(X1:.) v(X1:/) 
+
+.DC v1 1 1 1
+v1 1 0 1
+r1 1 0 1
+v2 2 0 1
+r2 2 0 1
+X1 2 0 sub1
+
+* test in .DC statements
+.DC v1` 1 1 1
+.DC v1~ 1 1 1 
+.DC V1! 1 1 1
+.DC v1@ 1 1 1
+.DC v1# 1 1 1
+.DC v1$ 1 1 1
+.DC v1% 1 1 1
+.DC v1^ 1 1 1
+.DC v1& 1 1 1
+.DC v1* 1 1 1
+.DC v1- 1 1 1
+.DC v1_ 1 1 1
+.DC v1+ 1 1 1
+.DC v1[ 1 1 1
+.DC v1] 1 1 1
+.DC v1| 1 1 1
+.DC v1\ 1 1 1
+.DC v1< 1 1 1
+.DC v1> 1 1 1
+.DC v1. 1 1 1
+.DC v1/ 1 1 1
+
+.DC v` 1 1 1
+.DC v~ 1 1 1
+.DC v! 1 1 1
+.DC v@ 1 1 1
+.DC v# 1 1 1
+.DC v$ 1 1 1
+.DC v% 1 1 1
+.DC v^ 1 1 1
+.DC v& 1 1 1
+.DC v* 1 1 1
+.DC v- 1 1 1
+.DC v_ 1 1 1
+.DC v+ 1 1 1
+.DC v[ 1 1 1
+.DC v] 1 1 1
+.DC v| 1 1 1
+.DC v\ 1 1 1
+.DC v< 1 1 1
+.DC v> 1 1 1
+.DC v. 1 1 1
+.DC v/ 1 1 1
+
+* test 1 followed by the special character
+v1` 1` 0 1
+v1~ 1~ 0 1
+v1! 1! 0 1
+v1@ 1@ 0 1
+v1# 1# 0 1
+v1$ 1$ 0 1
+v1% 1% 0 1
+v1^ 1^ 0 1
+v1& 1& 0 1
+v1* 1* 0 1
+v1- 1- 0 1
+v1_ 1_ 0 1
+v1+ 1+ 0 1
+v1[ 1[ 0 1
+v1] 1] 0 1
+v1| 1| 0 1
+v1\ 1\ 0 1
+v1< 1< 0 1
+v1> 1> 0 1
+v1. 1. 0 1
+v1/ 1/ 0 1
+
+* test with just the special character
+v` ` 0 1
+v~ ~ 0 1
+v! ! 0 1
+v@ @ 0 1
+v# # 0 1
+v$ $ 0 1
+v% % 0 1
+v^ ^ 0 1
+v& & 0 1
+v* * 0 1
+v- - 0 1
+v_ _ 0 1
+v+ + 0 1
+v[ [ 0 1
+v] ] 0 1
+v| | 0 1
+v\ \ 0 1
+v< < 0 1
+v> > 0 1
+v. . 0 1
+v/ / 0 1
+
+* repeat all tests, but in a subcircuit
+.SUBCKT sub1 a b
+R1 a b 1
+v1` 1` 0 1
+v1~ 1~ 0 1
+v1! 1! 0 1
+v1@ 1@ 0 1
+v1# 1# 0 1
+v1$ 1$ 0 1
+v1% 1% 0 1
+v1^ 1^ 0 1
+v1& 1& 0 1
+v1* 1* 0 1
+v1- 1- 0 1
+v1_ 1_ 0 1
+v1+ 1+ 0 1
+v1[ 1[ 0 1
+v1] 1] 0 1
+v1| 1| 0 1
+v1\ 1\ 0 1
+v1< 1< 0 1
+v1> 1> 0 1
+v1. 1. 0 1
+v1/ 1/ 0 1
+
+v` ` 0 1
+v~ ~ 0 1
+v! ! 0 1
+v@ @ 0 1
+v# # 0 1
+v$ $ 0 1
+v% % 0 1
+v^ ^ 0 1
+v& & 0 1
+v* * 0 1
+v- - 0 1
+v_ _ 0 1
+v+ + 0 1
+v[ [ 0 1
+v] ] 0 1
+v| | 0 1
+v\ \ 0 1
+v< < 0 1
+v> > 0 1
+v. . 0 1
+v/ / 0 1
+.ENDS
+
+.end

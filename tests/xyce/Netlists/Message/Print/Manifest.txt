@@ -1,0 +1,10 @@
+bad_device_parameter.cir
+bad_device_parameter.cir.sh
+bad_nodename.cir
+bad_nodename.cir.sh
+bad_variable.cir
+bad_variable.cir.sh
+multiple_format_same_file.cir
+multiple_format_same_file.cir.sh
+tags
+options

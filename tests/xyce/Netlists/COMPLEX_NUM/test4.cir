@@ -1,0 +1,37 @@
+testing of complex expressions in parameters and on the .PRINT line
+
+Vsrc 1 0 1 0 
+R1 1 0 1e3
+C1 1 0 2e-6
+
+.param r0={3.0+2.0J}
+.param r1={m(r0)}
+.param r2={sqrt(-1.00000)}
+.param r3={re(0.1+r2)} 
+.param r4={img(r2)}
+
+.DC Vsrc 1 1 1
+
+* Key to the expected outputs.  Xyce should be smart enough to determine
+* if an output is complex or not and output accordingly.  
+*
+* For DC analysis, the default is to output ONLY real part, even if the output is complex.
+* If the user wants a complex output, it must be requested.  In DC analysis, the only 
+* likely complex outputs are from expressions involving complex .params.
+*
+* output             description                     outputs
+.print DC
++ v(1)          ; simple, non-expr voltage node  -> V(1) 
++ {r0}          ; complex expression             -> {R0}
++ {re(r0)}      ; real part of cmplx expresssion -> {RE(R0)}
++ {img(r0)}     ; imag part of cmplx expresssion -> {IMG(R0)}
++ {r1}          ; real-valued expression         -> {R1}
++ {v(1)/r0}     ; complex expression             -> {V(1)/R0}
++ {v(1)/r1}     ; complex expression             -> {V(1)/R1}  
++ {ph(v(1)/r1)} ; real-valued expression         -> {PH(V(1)/R1)}
++ {db(v(1))}    ; real-valued expression         -> {DB(V(1))}
++ {r(v(1))}     ; real-valued expression         -> {R(V(1))}
++ {r3}          ; real (real part of r2 + 0.1)   -> {r3}
++ {r4}          ; real (imag part of r2)         -> {r4}
+
+.END

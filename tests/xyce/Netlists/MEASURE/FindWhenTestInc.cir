@@ -1,0 +1,22 @@
+A test of the measure find/when functionality
+*******************************************************************************
+*
+* a few sources of different types
+VS  1  0  SIN(0 1.0 1KHZ 0 0)
+VP  2  0  PULSE( 0 100 0.2ms 0.2ms 0.2ms 1ms 2ms )
+
+R1  1  0  100
+R2  2  0  100
+
+.OPTIONS MEASURE MEASFAIL=0
+.TRAN 0  10ms 0 1.0e-5
+
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) 
+
+* Both of these measures should return the default value (-1 and -100) since
+* there are not 100 rises and falls within the 10ms time window.
+.measure tran hit1_75 when v(1)=0.75 MINVAL=0.02 FALL=100 default_val=-1
+.measure tran hit2_75 when v(1)=0.75 MINVAL=0.08 RISE=100 default_val=-100
+
+.END
+

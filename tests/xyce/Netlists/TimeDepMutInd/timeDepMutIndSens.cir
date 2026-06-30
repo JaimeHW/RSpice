@@ -1,0 +1,59 @@
+# Test of mutual inductor with time-dependent coupling
+*VS 1 0 1
+IS 1a 0 1m
+Vprobe1 1a 1 0
+R1 1 2 1K
+vprobe2 3 3a 0
+R2 3a 0 1K
+L1 2 0 1mH
+L2 3 0 1mH
+K1 L1 L2 {0.75*(sin(2*PI*TIME/10m)+1)/2}
+.TRAN 100US 100MS
+
+* The solution for the I(Vprobe2) is the solution to the differential
+* equation:
+* 
+* dI2/dt+R2/L2*I2 = -I1/L2*dM/dt
+*
+* The analytic solution is
+* I2 = Ka/(denom)-K/denom*(a*cos(bt)+b*sin(bt))
+* where I1 is a constant current in the primary circuit,
+* a=R2/L2, b=2*pi*f, K=M0*pi*f*I1/L2
+*
+* The solution for v2 is -M*di2dt-I2*dm/dt.  
+*
+* The analytic solution to the sensitivity dI2_dL1 is (from Maple):
+* di2_dl1 = -coupmag * pow(l1 * l2, -0.1e1 / 0.2e1) * pi * frequency * i1 / (r2 * r2 * pow(l2, -0.2e1) + (4 * pi * pi * frequency * frequency)) * (r2 / l2 * cos((2 * pi * frequency * time)) + 0.2e1 * pi * frequency * sin((2 * pi * frequency * time))) / 0.2e1
+
+.param frequency=1e2
+.param coupmag=0.75
+.param L1=.001
+.param L2=.001
+.param I1=0.001
+.param R2=1000
+.param M0=coupmag*sqrt(L1*L2)
+.param dM0_dL1=coupmag*0.5*L2/sqrt(L1*L2)
+.param K=M0*pi*frequency*I1/L2
+.param a=R2/L2
+.param b=2*pi*frequency
+.param denom=a*a+b*b
+.param c1=K*a/denom
+* analytic solution for i2:
+.param i2analytic ={c1*exp(-a*time)-K/denom*(a*cos(b*time)+b*sin(b*time))}
+* analytic sensitivity from Maple:
+.param di2_dl1 = {-coupmag * pow(l1 * l2, -0.1e1 / 0.2e1) * pi * frequency * i1 / (r2 * r2 * pow(l2, -0.2e1) + (4 * pi * pi * frequency * frequency)) * (r2 / l2 * cos((2 * pi * frequency * time)) + 0.2e1 * pi * frequency * sin((2 * pi * frequency * time))) / 0.2e1}
+
+.PRINT TRAN I(Vprobe1) I(Vprobe2) V(1) V(2) V(3)  {i2analytic} {di2_dl1}
+
+.options timeint method=8 reltol=1e-6 abstol=1e-8
+.options nonlin-tran reltol=1e-6 abstol=1e-8
+
+
+*COMP {I(Vprobe2)}     offset=2e-6
+*COMP d_{I(Vprobe2)}/d_L1:L_dir  offset=0.002
+
+.sens objfunc={i(vprobe2)} param=l1:l
+.options sensitivity direct=1 adjoint=0   
+.print sens 
+
+.END

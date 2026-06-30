@@ -1,0 +1,7 @@
+README
+invert_mos6.cir
+invert_mos6.cir.tags
+nmos6_dc.cir
+nmos6_dc.cir.tags
+pmos6_dc.cir
+pmos6_dc.cir.tags

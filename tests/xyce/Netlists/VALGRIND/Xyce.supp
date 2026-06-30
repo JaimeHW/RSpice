@@ -1,0 +1,159 @@
+## suppresses fortran errors on linux x86 (rhel5) coe w/gcc (4.2.2)
+{
+   gccfortrashjunk
+   Memcheck:Leak
+   fun:malloc
+   obj:/usr/lib/libgfortran.so.1.0.0
+   obj:/usr/lib/libgfortran.so.1.0.0
+   obj:/usr/lib/libgfortran.so.1.0.0
+   obj:/usr/lib/libgfortran.so.1.0.0
+   obj:/usr/lib/libgfortran.so.1.0.0
+   obj:/usr/lib/libgfortran.so.1.0.0
+   fun:call_init
+   fun:_dl_init
+   obj:/lib/ld-2.5.so
+}
+
+
+#For Intel64_Linux_Serial-gcc44_tri11 test failure
+{
+   Invalid read error from state/store vectors
+   Memcheck:Addr8
+   fun:_ZN4Xyce6Device15AK_Photocurrent8Instance17registerStoreLIDsERKSt6vectorIiSaIiEE
+   fun:_ZN4Xyce4Topo13CktGraphBasic25registerStoreLIDswithDevsERNS0_7IndexorE
+   fun:_ZN4Xyce4Topo8Topology20registerLIDswithDevsEv
+   fun:_ZN4Xyce7Circuit9Simulator21setUpMatrixStructure_Ev
+   fun:_ZN4Xyce7Circuit9Simulator10initializeEiPPc
+   fun:_ZN4Xyce7Circuit9Simulator3runEiPPc
+   fun:main
+}
+
+#For AztecOO potential leaks (not actual leaks)
+{
+   AztecOOLeak1 
+   Memcheck:Leak
+   fun:malloc
+   fun:AZ_allocate
+   fun:AZ_manage_memory
+   fun:AZ_mk_context
+   fun:AZ_oldsolve_setup
+   fun:AZ_oldsolve
+   fun:AZ_iterate
+   fun:_ZN7AztecOO7IterateExd
+   fun:_ZN4Xyce6Linear13AztecOOSolver7doSolveEbb
+   fun:_ZN4Xyce9Nonlinear15NonLinearSolver7newton_Ev
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX9Interface13computeNewtonERN7Teuchos13ParameterListE
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX12SharedSystem13computeNewtonERKNS1_6VectorERS3_RN7Teuchos13ParameterListE
+}
+
+#For Amesos2-Basker leaks in HB direct solver
+{
+   Amesos2BaskerHB1
+   Memcheck:Free
+   fun:_ZdlPv
+   fun:~Basker
+   fun:free
+   fun:delete_obj
+   fun:_ZN7Teuchos11RCPNodeTmplIN6Basker6BaskerIiSt7complexIdEEENS_13DeallocDeleteIS5_EEE10delete_objEv
+   fun:_ZN7Teuchos13RCPNodeHandle9unbindOneEv
+   fun:unbind
+   fun:~RCPNodeHandle
+   fun:reset
+   fun:operator=
+   fun:_ZN4Xyce6Linear14HBDirectSolver18createBaskerSolverEv
+   fun:_ZN4Xyce6Linear14HBDirectSolver20numericFactorizationEv
+   fun:_ZN4Xyce6Linear14HBDirectSolver7doSolveEbb
+   fun:solve
+   fun:_ZN4Xyce9Nonlinear15NonLinearSolver7newton_Ev
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX9Interface13computeNewtonERN7Teuchos13ParameterListE
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX12SharedSystem13computeNewtonERKNS1_6VectorERS3_RN7Teuchos13ParameterListE
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX5Group13computeNewtonERN7Teuchos13ParameterListE
+   fun:_ZN3NOX9Direction6Newton7computeERNS_8Abstract6VectorERNS2_5GroupERKNS_6Solver7GenericE
+   fun:_ZN3NOX6Solver15LineSearchBased4stepEv
+}
+
+#For Amesos2-Basker leaks in HB direct solver
+{
+   Amesos2BaskerHB2
+   Memcheck:Free
+   fun:_ZdlPv
+   fun:~Basker
+   fun:free
+   fun:delete_obj
+   fun:_ZN7Teuchos11RCPNodeTmplIN6Basker6BaskerIiSt7complexIdEEENS_13DeallocDeleteIS5_EEE10delete_objEv
+   fun:_ZN7Teuchos13RCPNodeHandle9unbindOneEv
+   fun:~RCPNodeHandle
+   fun:~RCP
+   fun:_ZN4Xyce6Linear14HBDirectSolverD1Ev
+   fun:_ZN4Xyce6Linear14HBDirectSolverD0Ev
+   fun:_ZN7Teuchos13RCPNodeHandle9unbindOneEv
+   fun:unbind
+   fun:~RCPNodeHandle
+   fun:~RCP
+   fun:_ZN4Xyce9Nonlinear15NonLinearSolverD1Ev
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX9InterfaceD0Ev
+   fun:_ZN4Xyce9Nonlinear7ManagerD1Ev
+   fun:_ZN4Xyce7Circuit9SimulatorD1Ev
+   fun:main
+}
+
+#For Amesos2-Basker leaks in HB direct solver
+{
+   Amesos2BaskerHB3
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:_Znam
+   fun:_ZN6Basker6BaskerIiSt7complexIdEE6factorEiiiPiS4_PS2_
+   fun:_ZN4Xyce6Linear14HBDirectSolver20numericFactorizationEv
+   fun:_ZN4Xyce6Linear14HBDirectSolver7doSolveEbb
+   fun:solve
+   fun:_ZN4Xyce9Nonlinear15NonLinearSolver7newton_Ev
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX9Interface13computeNewtonERN7Teuchos13ParameterListE
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX12SharedSystem13computeNewtonERKNS1_6VectorERS3_RN7Teuchos13ParameterListE
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX5Group13computeNewtonERN7Teuchos13ParameterListE
+   fun:_ZN3NOX9Direction6Newton7computeERNS_8Abstract6VectorERNS2_5GroupERKNS_6Solver7GenericE
+   fun:_ZN3NOX6Solver15LineSearchBased4stepEv
+   fun:_ZN3NOX6Solver15LineSearchBased5solveEv
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX9Interface14stdNewtonSolveEPNS1_12ParameterSetE
+}
+
+#For Amesos2-Basker leaks in HB direct solver
+{
+   Amesos2BaskerHB4 
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:_Znam
+   fun:_ZN6Basker6BaskerIiSt7complexIdEE6factorEiiiPiS4_PS2_
+   fun:_ZN4Xyce6Linear14HBDirectSolver20numericFactorizationEv
+   fun:_ZN4Xyce6Linear14HBDirectSolver7doSolveEbb
+   fun:solve
+   fun:_ZN4Xyce9Nonlinear15NonLinearSolver7newton_Ev
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX9Interface13computeNewtonERN7Teuchos13ParameterListE
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX12SharedSystem13computeNewtonERKNS1_6VectorERS3_RN7Teuchos13ParameterListE
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX5Group13computeNewtonERN7Teuchos13ParameterListE
+   fun:_ZN3NOX9Direction6Newton7computeERNS_8Abstract6VectorERNS2_5GroupERKNS_6Solver7GenericE
+   fun:_ZN3NOX6Solver15LineSearchBased4stepEv
+   fun:_ZN3NOX6Solver15LineSearchBased5solveEv
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX9Interface14stdNewtonSolveEPNS1_12ParameterSetE
+}
+
+#For Amesos2-Basker leaks in HB direct solver
+{
+   Amesos2BaskerHB5
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:_Znam
+   fun:_ZN6Basker6BaskerIiSt7complexIdEE6factorEiiiPiS4_PS2_
+   fun:_ZN4Xyce6Linear14HBDirectSolver20numericFactorizationEv
+   fun:_ZN4Xyce6Linear14HBDirectSolver7doSolveEbb
+   fun:solve
+   fun:_ZN4Xyce9Nonlinear15NonLinearSolver7newton_Ev
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX9Interface13computeNewtonERN7Teuchos13ParameterListE
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX12SharedSystem13computeNewtonERKNS1_6VectorERS3_RN7Teuchos13ParameterListE
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX5Group13computeNewtonERN7Teuchos13ParameterListE
+   fun:_ZN3NOX9Direction6Newton7computeERNS_8Abstract6VectorERNS2_5GroupERKNS_6Solver7GenericE
+   fun:_ZN3NOX6Solver15LineSearchBased4stepEv
+   fun:_ZN3NOX6Solver15LineSearchBased5solveEv
+   fun:_ZN4Xyce9Nonlinear9N_NLS_NOX9Interface14stdNewtonSolveEPNS1_12ParameterSetE
+}
+

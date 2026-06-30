@@ -1,0 +1,32 @@
+ A.3.  Circuit 3:  RTL Inverter
+
+
+* The following deck determines the dc transfer curve and
+*the  transient pulse response of a simple RTL inverter.  The
+*input is a pulse from 0 to 5 Volts  with  delay,  rise,  and
+*fall  times of 2ns and a pulse width of 30ns.  The transient
+*interval is 0 to 100ns,  with  printing  to  be  done  every
+*nanosecond.
+
+
+*    SIMPLE RTL INVERTER
+VCC  4  0    5
+VIN  1  0    PULSE 0 5 2NS 2NS 2NS 30NS
+RB   1  2    10K
+Q1   3  2  0 Q1
+RC   3  4    1K
+.MODEL Q1 NPN BF 20 RB 100 TF .1NS CJC 2PF
+*.DC VIN 0 5 0.1
+.TRAN 1NS 100NS
+*.options timeint MINTIMESTEPSBP=1 USEDEVICEMAX=0 maxord=2 minord=2
+*.options timeint newbpstepping=0     
+.options timeint method=gear conststep=1
+
+*MINTIMESTEPSBP=1 USEDEVICEMAX=0 ABSTOL=5e-5 delmax=2e-9 
+*.options method=gear 
+*.options MAXORD=1 method=trap
+*.options timeint maxord=1 
+*.options timeint reltol=1.0e-3
+.print tran v(1)  v(2) v(3) I(vin)
+*I(vcc)
+.END

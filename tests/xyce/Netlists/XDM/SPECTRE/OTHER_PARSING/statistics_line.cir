@@ -1,0 +1,30 @@
+*********************************************************************
+* Xyce netlist for testing that:
+*
+*   1) Spectre statistics lines are properly commented out by xdm.  
+*
+*   2) Spectre parameters not in a subcircuit definition are properly
+*      translated by xdm.
+*  
+* A simple V-R-R circuit suffices. See SRN Bugs 2088 and 2089 for 
+* more details. 
+*
+*
+*********************************************************************
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PRINT TRAN V(net7) V(V2) 
+
+* Note the Spectre netlist has more parameters, because some of
+* them are needed to make the Spectre statistics line "legal"
+* in Spectre.  Only s1 and s2 are used in the Gold Xyce netlist
+.PARAM S1=1
+.PARAM S2=2
+
+RR1        net7 V2 {S1} 
+RR2        0 V2 {S2} 
+VV1        net7 0 SIN(0 1 1KHz 0 0 0)
+
+.END
+

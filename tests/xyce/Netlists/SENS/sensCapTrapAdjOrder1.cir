@@ -1,0 +1,30 @@
+Regression test to show transient adjoint sensitivities for first order trapezoid time integration.
+********************************************************************************
+
+.param cap=1e-6
+.param res=1e3
+
+V1 1 0 0.0 sin (0.0 1.0 200 0.0 0.0 0.0 )
+R1 1 2 {res}
+C1 2 0 {cap}
+
+.tran 1.0e-6 0.5e-2
+
+*comp   {V(2)}  offset=0.7
+*comp d_{V(2)}/d_R1:R_adj offset=0.0004
+*comp d_{V(2)}/d_C1:C_adj offset=400000
+
+.print tran V(1) V(2) 
+.print TRANADJOINT 
+* this is here to fool xyce verify.
+.print sens
+
+.options timeint method=trap  debuglevel=-100 conststep=0  reltol=1.0e-6 abstol=1e-6 maxord=1
+.options device debuglevel=-100
+
+.SENS objfunc={V(2)} param=R1:R,C1:C
+.options SENSITIVITY direct=0 adjoint=1  diagnosticfile=0  stdoutput=0 
++ adjointTimePoints=0.1e-2, 0.2e-2, 0.3e-2, 0.4e-2, 0.5e-2
+
+.end
+

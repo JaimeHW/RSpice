@@ -1,0 +1,4 @@
+analysis.cmds
+bug267.cir
+bug267.cir.sh
+tags

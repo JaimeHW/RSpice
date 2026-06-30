@@ -1,0 +1,5 @@
+exclude
+nmos1.cir
+nmos1.cir.sh
+nmos1_1level.cir
+tags

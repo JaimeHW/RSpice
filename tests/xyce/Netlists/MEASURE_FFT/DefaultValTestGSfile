@@ -1,0 +1,33 @@
+ ***** FFT Analyses ***** 
+
+FFT analysis for V(2):
+  Window: HANN, Start Time: 0.000000e+00, Stop Time: 1.000000e+00
+  First Harmonic: 1.000000e+00, Start Freq: 1.000000e+00, Stop Freq: 4.000000e+00
+
+      THD = -6.539856e+00 dB ( 4.709852e-01 )
+     SNDR = 6.539856e+00 dB
+     ENOB = 7.939959e-01 bit
+      SNR = 2.000000e+02 dB
+     SFDR = 8.176723e+00 dB at frequency 2.000000e+00
+
+    1.000000e+00 Hz     3.459496e+01 dB  at    -8.671969e+01 Deg.  Harmonic #           1
+    2.000000e+00 Hz     2.641824e+01 dB  at     1.473349e+02 Deg.  Harmonic #           2
+    3.000000e+00 Hz     2.254055e+01 dB  at     1.032519e+02 Deg.  Harmonic #           3
+    4.000000e+00 Hz     1.325629e+01 dB  at     0.000000e+00 Deg.  Harmonic #           4
+
+
+ ***** Measure Functions ***** 
+
+ENOB = 7.939959e-01
+
+FIND = 5.367205e+01 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+SFDR = 8.176723e+00
+
+SNDR = 6.539856e+00
+
+SNR = 2.000000e+02
+
+THD = -6.539856e+00
+
+

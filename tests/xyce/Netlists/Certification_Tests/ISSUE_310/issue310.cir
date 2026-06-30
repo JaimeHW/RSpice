@@ -1,0 +1,9 @@
+test for issue 310
+
+*COMP V(tri)  OFFSET=1
+Bosc tri 0 V={TABLE(TIME%120n,0,0,60n,3.3,100n,0)}
+Rosc tri 0 1.0
+
+.TRAN  10ns 200ns
+.PRINT TRAN V(tri)
+

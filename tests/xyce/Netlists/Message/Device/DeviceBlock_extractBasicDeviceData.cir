@@ -1,0 +1,24 @@
+* Check error messages when ON, OFF and TEMP parameters are not 
+* valid for a device.  It was easiest to check this with an E source.
+
+B1   1 0 V={2.0*sin(2*pi*TIME) }
+R1   1 2 1K
+R2   0 2 100
+
+ELIN1 3 0 1 0 1 ON 
+R3    3 4 1K
+R4    0 4 100
+
+ELIN2 5 0 1 0 1 OFF
+R5    5 6 1K
+R6    0 6 100
+
+ELIN3 7 0 1 0 1 TEMP=27
+R7    7 8 1K
+R8    0 8 100
+
+.TRAN 0 1
+.PRINT TRAN V(1)
+
+.END
+

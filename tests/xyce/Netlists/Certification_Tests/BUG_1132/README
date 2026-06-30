@@ -1,0 +1,29 @@
+Test Name:  BUG_1132
+Owner:  Eric R 
+Test netlists:  bug_1132-empty.cir
+GS files:  none
+Mode:  Serial
+Comparator:  none
+Version of Xyce:  Release_4.0
+
+ 
+Description:
+============
+This test confirms that Xyce can produce the expected output when "-param" is
+followed by a netlist filename.
+
+ 
+Procedure:
+============
+  run_xyce -param bug_1132-empty.cir
+
+
+Verification:
+=============
+Passes if Xyce prints a summary of model and device parameters.
+
+ 
+Notes:
+======
+The test netlist is empty.  
+

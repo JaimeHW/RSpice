@@ -1,0 +1,93 @@
+# relative_path<TAB>mode
+# mode:
+#   smoke                Explicit execution-only coverage. The deck must still
+#                        parse, build, and complete the requested analyses.
+#   scripted_control     Upstream ngspice deck carries validation logic in a
+#                        .control script that RSpice does not yet interpret.
+#   expected_unsupported The deck intentionally exercises an unimplemented
+#                        feature. The runner must report a named unsupported
+#                        feature; if it does not, the contract is stale.
+#   expected_unsupported_without_veriloga_builtins
+#                        The deck requires a generated Verilog-A builtin that
+#                        is intentionally outside the default feature set.
+#                        Default builds must report the named unsupported
+#                        generated-builtin feature; veriloga-builtins builds
+#                        run the deck normally.
+#   expected_unsolvable  The deck is adjudicated genuinely un-simulatable;
+#                        some RSpice analysis must end in a clean refusal
+#                        diagnostic -- Newton convergence failure or
+#                        timestep-collapse refusal -- and completing every
+#                        analysis instead fails the deck for re-adjudication.
+#                        Timeouts, aborts, parse and build errors stay
+#                        genuine defects.
+#   reference_unsolvable The current reference simulator cannot produce a
+#                        comparable oracle. Historical upstream .out data is
+#                        retained for provenance but not used as a numeric
+#                        oracle; RSpice must parse, build, and either complete
+#                        the requested analyses or terminate with a clean
+#                        refusal diagnostic. diffamp: ngspice-46 fails its
+#                        operating point with a singular matrix, while the
+#                        checked-in AC table is a 2009 historical oracle that
+#                        omits the current VBIC TD excess-phase behavior.
+#   locked_grid          Transient comparison replays the reference table's
+#                        recorded time axis as the exact accepted-step
+#                        sequence: physics parity judged on equal grids, for
+#                        waveforms whose free-run pointwise values encode the
+#                        producing binary's adaptive-step choices.
+#   measures             Transient comparison gates on extracted engineering
+#                        quantities declared in <deck>.gates.tsv (crossing
+#                        times, settled means, peak amplitudes), computed
+#                        identically from the reference table and the
+#                        simulation. For waveforms whose raw tail samples are
+#                        chaotic amplifications below solver tolerance: the
+#                        reference simulator's own answers move tens of
+#                        percent under timestep refinement there.
+bsim3soidd/ring51.cir	smoke
+bsim3soifd/ring51.cir	smoke
+bsim3soipd/ring51.cir	smoke
+general/diffpair.cir	smoke
+general/mosmem.cir	smoke
+general/rc.cir	smoke
+general/rca3040.cir	smoke
+mesa/mesa-12.cir	scripted_control
+mesa/mesa12.cir	smoke
+mesa/mesa13.cir	smoke
+mesa/mesa21.cir	smoke
+regression/lib-processing/ex1a.cir	smoke
+regression/lib-processing/ex1b.cir	smoke
+regression/lib-processing/ex2a.cir	smoke
+regression/lib-processing/ex3a.cir	smoke
+regression/misc/ac-zero.cir	scripted_control
+regression/misc/alter-vec.cir	scripted_control
+regression/misc/asrc-tc-1.cir	scripted_control
+regression/misc/asrc-tc-2.cir	scripted_control
+regression/misc/bugs-2.cir	scripted_control
+regression/misc/dollar-1.cir	smoke
+regression/misc/empty-1.cir	smoke
+regression/misc/if-elseif.cir	scripted_control
+regression/misc/log-functions-1.cir	scripted_control
+regression/misc/resume-1.cir	scripted_control
+regression/misc/test-noise-2.cir	scripted_control
+regression/misc/test-noise-3.cir	scripted_control
+regression/model/binning-1.cir	scripted_control
+regression/model/instance-defaults.cir	scripted_control
+regression/model/special-names-1.cir	scripted_control
+regression/parser/minus-minus.cir	smoke
+regression/parser/xpressn-2.cir	smoke
+regression/pipe/alter-1.cir	smoke
+regression/pz/ac-resistance.cir	scripted_control
+regression/sens/sens-ac-1.cir	scripted_control
+regression/sens/sens-ac-2.cir	scripted_control
+regression/sens/sens-dc-1.cir	scripted_control
+regression/sens/sens-dc-2.cir	scripted_control
+sensitivity/diffpair.cir	smoke
+regression/temper/temper-1.cir	scripted_control
+regression/temper/temper-2.cir	scripted_control
+regression/temper/temper-3.cir	scripted_control
+regression/temper/temper-res-1.cir	scripted_control
+transmission/cpl3_4_line.cir	measures
+transmission/cpl_ibm2.cir	measures
+transmission/ltra1_1_line.cir	locked_grid
+transmission/ltra2_2_line.cir	measures
+vbic/diffamp.cir	reference_unsolvable
+general/mosamp.cir	locked_grid

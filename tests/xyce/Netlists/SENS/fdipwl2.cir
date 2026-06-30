@@ -1,0 +1,66 @@
+* Transient sensitivity example, IPWL source, finite difference (netlist level) sensitivity
+**********************************************************************
+.param cap=10u
+.param res=1K
+.param v0 = 0.0
+.param v1 = 1.0
+.param v2 =-1.0
+.param v3 =-0.5
+.param v4 = 0.25
+.param v5 = 0.74
+.param v6 = 4.0
+
+* original
+i1 0 1 pwl(0 {v0} 1s {v1} 2s {v2} 3s {v3} 4s {v4} 5s {v5} 6s {v6} )
+X1 1 2 3 4 baseRC
+
+* v0 delta
+i1A 0 1A pwl(0 {v0+1e-8} 1s {v1} 2s {v2} 3s {v3} 4s {v4} 5s {v5} 6s {v6} )
+X1A 1A 2A 3A 4A baseRC
+
+* v1 delta
+i1B 0 1B pwl(0 {v0} 1s {v1*(1+1e-8)} 2s {v2} 3s {v3} 4s {v4} 5s {v5} 6s {v6} )
+X1B 1B 2B 3B 4B baseRC
+
+* v2 delta
+i1C 0 1C pwl(0 {v0} 1s {v1} 2s {v2*(1+1e-8)} 3s {v3} 4s {v4} 5s {v5} 6s {v6} )
+X1C 1C 2C 3C 4C baseRC
+
+* v3 delta
+i1D 0 1D pwl(0 {v0} 1s {v1} 2s {v2} 3s {v3*(1+1e-8)} 4s {v4} 5s {v5} 6s {v6} )
+X1D 1D 2D 3D 4D baseRC
+
+* v4 delta
+i1E 0 1E pwl(0 {v0} 1s {v1} 2s {v2} 3s {v3} 4s {v4*(1+1e-8)} 5s {v5} 6s {v6} )
+X1E 1E 2E 3E 4E baseRC
+
+* v5 delta
+i1F 0 1F pwl(0 {v0} 1s {v1} 2s {v2} 3s {v3} 4s {v4} 5s {v5*(1+1e-8)} 6s {v6} )
+X1F 1F 2F 3F 4F baseRC
+
+* v6 delta
+i1G 0 1G pwl(0 {v0} 1s {v1} 2s {v2} 3s {v3} 4s {v4} 5s {v5} 6s {v6*(1+1e-8)} )
+X1G 1G 2G 3G 4G baseRC
+
+.subckt baseRC A B C D 
+r1 A B res
+c1 B 0 cap
+r2 B C res
+c2 C 0 cap
+r3 C D res
+c3 D 0 cap
+r4 D 0 res
+.ends
+
+.tran .1s 7s
+.print tran v(4)
++ { (v(4A)-v(4))/(1.0e-8) } ; v0 sensitivity
++ { (v(4B)-v(4))/(v1*1.0e-8) }
++ { (v(4C)-v(4))/(v2*1.0e-8) }
++ { (v(4D)-v(4))/(v3*1.0e-8) }
++ { (v(4E)-v(4))/(v4*1.0e-8) }
++ { (v(4F)-v(4))/(v5*1.0e-8) }
++ { (v(4G)-v(4))/(v6*1.0e-8) }
+
+
+.end

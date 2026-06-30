@@ -1,0 +1,7 @@
+README
+bug_767a.cir
+bug_767a.cir.sh
+bug_767b.cir
+bug_767b.cir.sh
+exclude
+tags

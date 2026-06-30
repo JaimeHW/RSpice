@@ -1,0 +1,30 @@
+* Test ID(*) IG(*) IS(*) IB(*) and IE(*) for NMOS version of SOI MOSFET.
+* The output should not have the branch currents for the V devices, or
+* any of the lead currents for the R and C devices.
+
+* nmos version
+
+.tran 20ns 3us
+.options device mincap=1uf
+.PRINT TRAN ID(*) IG(*) IS(*) IE(*)
+
+rin in 1 100K
+vin   1 0  0V PULSE (0V 4V 1.5us 5ns 5ns 1.5us 3.01us)
+cin in 0 1.0p
+
+Rnd   in  nd  1
+Rng   in  ng  1
+Rns   0   ns  1
+Rne   0   ne  1
+Rnb   0   nb  1e+8
+
+MN1 nda ng ns ne nb  cmosn L=0.258u W=19.585u
+MN2 nda ng ns ne nb  cmosn L=0.258u W=19.585u
+
+.MODEL cmosn nmos (    LEVEL   = 70
++ soimod = 0
++ rgatemod = 1
++ mobmod = 2  capmod = 2
++ shmod = 1  igmod = 0  paramchk = 0 )
+
+.END

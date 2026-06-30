@@ -1,0 +1,39 @@
+Lead current test for MOS 3
+*
+VDS 4 0  5V
+VGS  1   0  pulse (0 1 1ns 1ns 1ns 1us 5us)
+VMOND 4 3 0V
+VMONS 0 2 0V
+VMONG 1 1a 0
+VMONB 0 6 0
+*  d g source substrate 
+M1 3 1a 2 6 NFET L=2.0U W=2.0U  
+.MODEL NFET NMOS 
++  LEVEL=3  UO=966.5  L=2.0U  W=2.0U  VTO=1.043
++  NFS=1.009E+11  TOX=1E-07  NSUB=1.379E+16  VMAX=4.096E+05
++  RSH=0  RS=0 	RD=0  IS =1E-14
++  XJ=5.378E-06	LD=0 DELTA=0  NSS=1E10
++  THETA =0.0582  ETA=0.095  KAPPA=2.93  CGDO=1UF  	
++  CGSO=1UF  CGBO=1UF  CBD=1UF CBS=1UF 
+
+*COMP {I(VMOND)-ID(M1)} abstol=1e-6 zerotol=1.0e-7
+*COMP {I(VMONG)-IG(M1)} abstol=1e-6 zerotol=1.0e-7
+*COMP {I(VMONS)-IS(M1)} abstol=1e-6 zerotol=1.0e-7
+*COMP {I(VMONB)-IB(M1)} abstol=1e-6 zerotol=1.0e-7
+
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-7
+
+.tran 1ns 50us
+.PRINT tran {I(VMOND)-ID(M1)} {I(VMONG)-IG(M1)} {I(VMONS)-IS(M1)} {I(VMONB)-IB(M1)}
+
+.measure tran maxmag1   max {abs(I(VMOND)-ID(M1))} failvalue=1e-6
+.measure tran totalrms1 rms {I(VMOND)-ID(M1)} failvalue=1e-6 
+.measure tran maxmag2   max {abs(I(VMONG)-IG(M1))} failvalue=1e-6
+.measure tran totalrms2 rms {I(VMONG)-IG(M1)} failvalue=1e-6 
+.measure tran maxmag3   max {abs(I(VMONS)-IS(M1))} failvalue=1e-6
+.measure tran totalrms3 rms {I(VMONS)-IS(M1)} failvalue=1e-6 
+.measure tran maxmag4   max {abs(I(VMONB)-IB(M1))} failvalue=1e-6
+.measure tran totalrms4 rms {I(VMONB)-IB(M1)} failvalue=1e-6 
+
+.END

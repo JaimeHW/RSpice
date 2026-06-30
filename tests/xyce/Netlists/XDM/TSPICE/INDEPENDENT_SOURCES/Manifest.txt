@@ -1,0 +1,17 @@
+exclude
+tags
+v_sources.cir.sh
+v_sources.cir
+v_sources.cir.tspice
+i_sources.cir.sh
+i_sources.cir
+i_sources.cir.tspice
+vpwl.cir.sh
+vpwl.cir
+vpwlFile.txt
+vpwl.cir.tspice
+ipwl.cir.sh
+ipwl.cir
+ipwlFile.txt
+ipwl.cir.tspice
+

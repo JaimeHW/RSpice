@@ -1,0 +1,39 @@
+******************************************************************
+* Test xdm translation of Multiplicity Factors (M) for R, L and C.
+*
+* These three V-R-C-L circuits should get the same answer.
+* This is also used to test the Spectre save command for 
+* lead currents for R, L and C. 
+*
+* It also tests the use of parameters in a Spectre subcircuit
+* definition.  See SRN Bug 2055 for more details.
+******************************************************************
+
+.TRAN 0 100ms
+.PRINT TRAN I(RR0) I(CC0) I(LL0) I(RR1) I(CC1) I(LL1)
++ I(XX1:RR1) I(XX1:CC1) I(LL2)
+
+* with M for R, L and C
+VV1 net018 0 sin(0 2 10)
+RR1 net018 net011 r=2K m=2
+CC1 net011 net07 c=500.0n m=2
+LL1 net07 0 l=2m m=2
+
+* without M
+VV0 net7 0 sin(0 2 10)
+RR0 net7 net4 r=1K
+CC0 net4 net2 c=1u
+LL0 net2 0 l=1m
+
+* using an RC subcircuit with parameters, to address SRN Bug 2055
+LL2 net6 0 l=2m m=2
+XX1 net5 net6 RC_sub PARAMS: rval=2K cval=500.0n mval=2 
+VV2 net5 0 sin(0 2 10)
+
+.subckt RC_sub in out PARAMS: rval=1K cval=1u mval=1
+RR1 in mid r=rval m=mval
+CC1 mid out c=cval m=mval
+.ends RC_sub
+
+.END
+

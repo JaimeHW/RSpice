@@ -1,0 +1,103 @@
+ ***** Measure Functions ***** 
+
+WHENVR4 = 1.593500e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENVI4 = 2.661898e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENVR3 = 2.236032e-01 at freq = 1.593500e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENVI3 = 7.919046e-02 at freq = 2.661898e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+AT1 = 7.772938e-03 for AT = 1.000000e+00
+
+AT10 = 3.061367e-01 for AT = 1.000000e+01
+
+AT30 = 1.247232e-01 for AT = 3.000000e+01
+
+AT50 = 1.077652e+00 for AT = 5.000000e+01
+
+WHENEXP1 = 7.958123e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENEXP2 = 1.072230e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENEXP3 = 1.072230e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENEXP4 = 2.406345e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVM3AWHENVM4EXP1 = 2.000000e-01 at freq = 1.072230e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVM3AWHENVM4EXP2 = 2.000000e-01 at freq = 1.072230e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVM3AWHENVM4EXP3 = 1.200000e+00 at freq = 1.072230e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVM3AWHENVM4EXP4 = 1.200000e+00 at freq = 1.072230e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVR3AWHENVM4EXP5 = 1.249768e-01 at freq = 7.958123e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+EQNVM5 = 2.492122e-01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENEQNVM5 = 3.484129e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDWHENEQNVM5 = 2.000000e-01 at freq = 1.072230e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDFREQWHENVM4 = 1.072230e+01 at freq = 1.072230e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENVI4FROM10 = 1.462627e+01
+Measure Start Freq= 1.000000e+01	Measure End Freq= 1.000000e+02
+
+WHENVI4FROM4 = 4.384150e+00
+Measure Start Freq= 4.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENVI4FROM5 = 1.462627e+01
+Measure Start Freq= 5.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENVI4FT = 4.384150e+00
+Measure Start Freq= 4.000000e+00	Measure End Freq= 5.000000e+00
+
+WHENVR4TO25 = 2.413227e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 2.500000e+01
+
+WHENVR4TO20 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+00	Measure End Freq= 2.000000e+01
+
+FAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+Netlist warning: FAIL3 failed. AT value outside frequency sweep window
+FAIL3 = 0.000000e+00 FAILED for AT = 1.000000e+07
+
+Netlist warning: WHENFAIL failed. FROM value > highest frequency value
+WHENFAIL = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+Netlist warning: FINDWHENFAIL failed. TO value < FROM value
+FINDWHENFAIL = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+Netlist warning: ATFAILFROM failed. AT value outside measurement window
+ATFAILFROM = 0.000000e+00 FAILED for AT = 8.000000e+00
+
+Netlist warning: ATFAILTO failed. AT value outside measurement window
+ATFAILTO = 0.000000e+00 FAILED for AT = 8.000000e+00
+
+

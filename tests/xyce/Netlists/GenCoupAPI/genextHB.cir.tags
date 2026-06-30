@@ -1,0 +1,5 @@
+serial, nightly, hb
+genext
+library
+required:fft
+requirestestbinary

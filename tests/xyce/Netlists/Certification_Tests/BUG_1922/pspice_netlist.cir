@@ -1,0 +1,20 @@
+*Test of Xyce's core model using openly available PSPICE core data for
+* the K528T500_3C8 ferroxcube toroid core
+* This is meant to create a B-H loop plot
+
+.tran 0 4 0 .01
+.print tran  V(1) 
+.probe/csd
+
+Rt1       1 0  1
+Lp1       1 0  20
+
+I1 1 0 sin(0 .1 1Hz 1)
+I2 1 0 sin(0 .2 1Hz 2)
+I3 1 0 sin(0 .8 1Hz 3)
+
+ktrans1  Lp1 1 K528T500_3C8
+.model K528T500_3C8 Core(MS=415.2K A=44.82 C=.4112 K=25.74
++ Area=1.17 Path=8.49 )
+.end
+

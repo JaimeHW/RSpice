@@ -1,0 +1,11 @@
+bug_1558.cir
+bug_1558.cir.sh
+bug_1558_0.cir
+bug_1558_1.cir
+bug_1558_2.cir
+bug_1558_3.cir
+bug_1558_4.cir
+bug_1558_error.cir
+bug_1558_error.cir.sh
+exclude
+tags

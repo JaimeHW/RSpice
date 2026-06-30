@@ -1,0 +1,8 @@
+serial, nightly, normal, parallel
+inductor
+mutualinductor
+pce
+intrusive_pce
+quadrature_pce
+required:stokhos
+issue297

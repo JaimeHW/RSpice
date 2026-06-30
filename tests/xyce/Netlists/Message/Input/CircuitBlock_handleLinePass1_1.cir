@@ -1,0 +1,8 @@
+*Title
+R1
+V1
+YAND
+UAND1
+.DC V1 0 5V 1V
+.PRINT DC V(1) I(V1)
+.END

@@ -1,0 +1,29 @@
+Bug Number: 40
+Test netlist: bug_40.cir
+
+Description
+===========
+The netlist contains a .PRINT statement that attempts to print data for a node
+that does not exist in the circuit. 
+
+Verification
+============
+The following statement should appear in the standard output (given in 
+bug_40.out, not the prn file) for this job:
+
+  Dev Warning: Output requested for non-existent node "BAD" by PRINT statement
+
+Special Notes
+=============
+1. To collect standard output run Xyce as in:
+
+     % Xyce bug_40.cir > bug_40.out
+
+   or
+ 
+     % runxyce -l bug_40.out bug_40.cir
+
+2. The prn file can be ignored since we are testing only for the presence
+   of the specifed warning message.
+
+3. No parallel testing is needed.

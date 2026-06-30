@@ -1,0 +1,35 @@
+***************************************************************
+* For testing -o (after the changes for Issue222), the key
+* points are that the netlist has:
+*
+*   1) multiple .PRINT AC statements with formats
+*      other than FORMAT=STD.  Print line concatenation
+*      should still work.
+*
+*   2) a .PRINT AC_IC line, that should also produce output,
+*      since the netlist has a .OP statement.
+*
+*   3) the output should go to the file specified by -o,
+*      and not to the default file name or the file
+*      specified with FILE=.  It should be a FORMAT=STD
+*      file with space as the delimiter, with the default
+*      extensions (e.g., dashoFile.FD.prn or dashoFile.TD.prn).
+*
+*   4) the .sh file will run this netlist with -delim COMMA
+*      to verify that command line option is ignored when
+*      -o is also specified.
+*
+****************************************************************
+
+* Trivial high-pass filter
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.print AC_IC FORMAT=CSV file=acFoo1 C1:C vm(a)
+.print AC FORMAT=CSV R1:R v(b)
+.PRINT AC FORMAT=CSV file=acFoo vr(b) vi(b)
+.ac dec 5 100Hz 1e6
+.op
+
+.end

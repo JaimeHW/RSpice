@@ -1,0 +1,14 @@
+Netlist to Test That lines starting with a tab are comments
+
+r1 1 2 3
+l1 2 3 1
+c1 3 0 .5
+v1 1 0 10 pulse(0 10 0 0 0 10 10)
+
+.tran  0.01 10 0
+	Note: the current has 1 subtracted from it to help with xyce_verify.
+.print tran v(1) {i(v1)-1.0}
+	* Note:  if run with backward-euler, the tolerances need to
+	* be much higher.  
+.end
+

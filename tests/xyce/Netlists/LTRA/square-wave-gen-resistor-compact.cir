@@ -1,0 +1,25 @@
+Simple example problem using lossy line LTRA, pulse voltage source into TL with R load
+
+VS 1 5 PULSE (0 3 0 1ns 1ns 8ns 20ns)
+
+VDC 5 0 5V
+
+O1 1 0  2 0 CABLE1
+
+R1 2 0 100
+
+.TRAN 1e-13 40ns
+
+.PRINT TRAN PRECISION=5 V(1) V(2) V(5)
+
+.model cable1 ltra truncdontcut=1 nosteplimit=1
++r=3.0 l=10.0e-9 c=0.5e-11 len=10
+
+*(LC)+l=10.0e-9 c=0.5e-11 len=10
+*(RC)+r=3.0 c=0.5e-09 len=1.0
+*(RG)+r=3.0 g=1.0e-5 len=10
+*(RLC)
+
+.options device trytocompact=1
+
+.end

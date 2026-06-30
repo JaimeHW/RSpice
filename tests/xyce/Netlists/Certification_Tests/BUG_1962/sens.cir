@@ -1,0 +1,26 @@
+***********************************************************
+* Voltages from subcircuit interface nodes used in a 
+* .SENS OBJFUNC.  See SRN Bug 1962 for more details.
+*
+***********************************************************
+ 
+V1 1 0 PWL 0 0 1 1
+X1 1 2 MySubcircuit1
+R2 2 0 0.5
+
+*subcircuit definitions
+.SUBCKT MYSUBCIRCUIT1 a c 
+R1   a b 0.5
+R2   b c 0.5
+.ENDS 
+
+.SENS objfunc={V(X1:a)*V(X1:c)} param=R2:R
+.options SENSITIVITY direct=1 adjoint=0
+.PRINT SENS V(1) V(2) R2:R
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(2) R2:R
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.2
+
+.END
+

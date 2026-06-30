@@ -1,0 +1,26 @@
+test of coupled inductor parameters with .PCE
+V1 1 0 SIN(0 1 1KHz)
+R1 1 0 1
+R2 2 0 1
+
+* mutual inductor definition
+L1 1 0 1e-3
+L2 2 0 2mH
+K1 L1 L2 0.75
+
+.TRAN 0 1ms 
+.options timeint reltol=1e-6 abstol=1e-6
+
+.PCE
++ param=L1:L
++ type=uniform
++ lower_bounds=+0.5e-3
++ upper_bounds=+1.5e-3
+
+.options PCES outputs={v(2)}
++ output_Sample_Stats=false
+
+.PRINT PCE PRECISION=6 FORMAT=TECPLOT output_Sample_Stats=false
+
+.end
+

@@ -1,0 +1,30 @@
+Regression test for simple normal distribution propagation via regression PCE
+* traditional sampling version
+
+.global_param testNorm={agauss(0.5k,0.05k,1)}
+.global_param R1value={testNorm*2.0}
+
+R2 1 0 7K
+R1 1 2 {R1value}
+v1 2 0 1000V
+
+.dc v1 1000 1000 1
+
+.print dc format=tecplot v(1)
+
+.SAMPLING 
++ useExpr=true
+*+ param=testNorm
+*+ type=normal
+*+ means=0.5K
+*+ std_deviations=0.05K
+
+.options SAMPLES numsamples=6
++ regression_pce=true
++ order=5
++ outputs={v(1)}
++ sample_type=lhs
++ stdoutput=true
+
+.end
+

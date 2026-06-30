@@ -1,0 +1,16 @@
+Netlist to Test the Xyce Voltage Controlled Current Source Model, multiplier version
+******************************************************************************
+*	Same as original vccs_tran.cir, but with 10x the current
+****************************************************************************** 
+VIN 1 0 12V PWL(0.0 0.0 1.0 12.0)
+G 3 0 2 0 0.02 M=10
+R1 1 2 300
+R2 2 0 900
+R3 3 0 200
+R4 3 0 200
+.TRAN 0.0 1.0
+.PRINT TRAN V(1) V(2) V(3) 
+* NOTE: XYCE DOES NOT CURRENTLY SUPPORT TRANSFER FUNCTION ANALYSIS 
+* THIS PORTION HAS BEEN COMMENTED OUT UNTIL TF IS SUPPORTED
+*.TF V(3) V
+.END

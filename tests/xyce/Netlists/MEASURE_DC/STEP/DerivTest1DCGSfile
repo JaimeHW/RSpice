@@ -1,0 +1,110 @@
+ ***** Measure Functions ***** 
+
+DERIVV2AT2.5 = 2.500000e+00 for AT = 2.500000e+00
+
+DERIVV2AT1 = 1.500000e+00 for AT = 1.000000e+00
+
+DERIVV2WHEN10 = 4.500000e+00 at V1 value = 4.444444e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+DERIVEXP1 = 4.500000e+00 at V1 value = 4.000000e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+DERIVEXP2 = 3.500000e+00 at V1 value = 3.142857e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+DERIVEXP3 = 3.500000e+00 at V1 value = 3.142857e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+DERIVEXP4 = 4.500000e+00 at V1 value = 4.571429e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+DERIVEXP5 = -3.500000e+00 at V1 value = 4.444444e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+FROM1 = 4.725000e+01 at V1 value = 4.021164e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+FROM2 = -1.125000e+01 at V1 value = 1.911111e+00
+Measure Start V1 Value= 2.500000e+00	Measure End V1 Value= 1.000000e+00
+
+FROM3 = 8.750000e+00 at V1 value = 3.542857e+00
+Measure Start V1 Value= 4.000000e+00	Measure End V1 Value= 2.000000e+00
+
+FROM4 = 8.750000e+00 at V1 value = 3.542857e+00
+Measure Start V1 Value= 4.000000e+00	Measure End V1 Value= 2.000000e+00
+
+DERIVIR2AT2.5 = 1.250000e+00 for AT = 2.500000e+00
+
+FAIL1 = 0.000000e+00 FAILED
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+FAIL2 = 0.000000e+00 FAILED for AT = 1.000000e+01
+
+FAIL3 = 0.000000e+00 FAILED
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+FAIL4 = 0.000000e+00 FAILED
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+DERIVFAIL1 = 0.000000e+00 FAILED for AT = 1.000000e+01
+
+DERIVFAIL2 = 0.000000e+00 FAILED
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+LASTMEASURE = 1.250000e+01 at V1 value = 5.000000e+00
+ ***** Measure Functions ***** 
+
+DERIVV2AT2.5 = 3.333333e+00 for AT = 2.500000e+00
+
+DERIVV2AT1 = 2.000000e+00 for AT = 1.000000e+00
+
+DERIVV2WHEN10 = 4.666667e+00 at V1 value = 3.857143e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+DERIVEXP1 = 4.666667e+00 at V1 value = 3.000000e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+DERIVEXP2 = 3.333333e+00 at V1 value = 2.700000e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+DERIVEXP3 = 3.333333e+00 at V1 value = 2.700000e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+DERIVEXP4 = 4.666667e+00 at V1 value = 3.818182e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+DERIVEXP5 = -3.666667e+00 at V1 value = 3.857143e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+FROM1 = 3.111111e+01 at V1 value = 3.289286e+00
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+FROM2 = -1.333333e+01 at V1 value = 1.658333e+00
+Measure Start V1 Value= 2.500000e+00	Measure End V1 Value= 1.000000e+00
+
+FROM3 = 3.111111e+01 at V1 value = 3.128571e+00
+Measure Start V1 Value= 4.000000e+00	Measure End V1 Value= 2.000000e+00
+
+FROM4 = 3.111111e+01 at V1 value = 3.128571e+00
+Measure Start V1 Value= 4.000000e+00	Measure End V1 Value= 2.000000e+00
+
+DERIVIR2AT2.5 = 8.333333e-01 for AT = 2.500000e+00
+
+FAIL1 = 0.000000e+00 FAILED
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+FAIL2 = 0.000000e+00 FAILED for AT = 1.000000e+01
+
+FAIL3 = 0.000000e+00 FAILED
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+FAIL4 = 0.000000e+00 FAILED
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+DERIVFAIL1 = 0.000000e+00 FAILED for AT = 1.000000e+01
+
+DERIVFAIL2 = 0.000000e+00 FAILED
+Measure Start V1 Value= 5.000000e+00	Measure End V1 Value= 1.000000e+00
+
+LASTMEASURE = 1.666667e+01 at V1 value = 5.000000e+00

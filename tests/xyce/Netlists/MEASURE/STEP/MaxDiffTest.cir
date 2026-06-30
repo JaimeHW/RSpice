@@ -1,0 +1,26 @@
+A test of the measure max functionality with .STEP
+*******************************************************************************
+*
+* a few sources of different types
+VS  1  0  SIN(0 1 1KHz 0 0)
+VP  2  0  PULSE( 0 100 0.2ms 0.2ms 0.2ms 1ms 2ms )
+
+R1  1  0  100
+R2  2  0  100
+
+.TRAN 0  10ms
+.step VS:VA 1 2 1 
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) {v(2) - v(1)}
+
+* plain test.  Include an expression {v(2) - v(1)} also.
+.measure tran max1 MAX v(1)
+.measure tran max2 MAX v(2)
+.measure tran maxDiff21 MAX {v(2) - v(1)}
+
+* add a measurement window
+.measure tran max1Window MAX v(1) FROM=2e-3 TO=5e-3 TD=1e-3
+.measure tran max2Window MAX v(2) FROM=2e-3 TO=5e-3 TD=1e-3
+.measure tran maxDiff21Window MAX {v(2) - v(1)} FROM=2e-3 TO=5e-3 TD=1e-3
+
+.END
+

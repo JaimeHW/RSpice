@@ -1,0 +1,46 @@
+****************************************************************
+* A simple test of a MAX measure with I(), P(), W() and
+* expressions, when I(), P() or W() is not on the .PRINT 
+* TRAN line.
+* 
+* See SON Bug 698.
+*
+****************************************************************
+V1 1 0 SIN(0 1 1KHZ)
+R1 1 0 2
+
+V2 2 0 SIN(0 2 2KHz)
+R2 2 0 2
+
+V3 3 0 SIN(0 1 2KHz)
+R3 3 0 2
+
+V4 4 0 SIN(0 3 3KHz)
+R4 4 0 2
+
+V5 5 0 SIN(0 1 3KHz)
+R5 5 0 2
+
+V6 6 0 SIN(0 4 4KHz)
+R6 6 0 2
+
+V7 7 0 SIN(0 1 4KHz)
+R7 7 0 2
+
+.TRAN 0 2ms 
+.PRINT TRAN V(1)
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.01
+
+* These lines test that .MEASURE works even if I(), P()
+* or W() is not on the .PRINT TRAN line.  See SON Bug 698.
+.measure tran maxIR1 max I(R1)
+.measure tran maxPR1 max P(R1) 
+.measure tran maxWR1 max W(R1)
+
+* Make sure that multiple lead current requests can be 
+* parsed out of an expression.
+.measure tran maxIR23 max {I(R2) - I(R3)}
+.measure tran maxPR45 max {P(R4) - P(R5)}
+.measure tran maxWR67 max {W(R6) - W(R7)}
+
+.end

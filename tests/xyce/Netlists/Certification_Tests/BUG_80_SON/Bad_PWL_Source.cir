@@ -1,0 +1,23 @@
+Single coil voltage drive test
+*NOTE: parameters are duplicated in the ALEGRA .inp file
+.param coreradius = 0.00215
+.param pi={4.*atan(1.)}
+.param corearea   = {pi*coreradius*coreradius}
+.param  rlayer1 = .0335
+.param V = 1.
+.param mu={4.*pi*1.e-7}
+.param sig = 1.e+6
+.param L = { mu*rlayer1*(ln(8.*rlayer1/coreradius)-2.+.25 )}
+.param R = { ((2.*pi*rlayer1)/sig/corearea) }
+.param t1= {1.e-5-1.e-9}
+.param t2= 1.e-5
+.param t3= 1.
+R1 1 0 1k
+V1 1 0 PWL( 0. 0. {t1} 0. {t2} {V} {t3} {V} )
+V2 10 0 PWL ... 
+L2 10 15 {L}
+R2 15 0  {R}
+.tran 1us 1s
+.PRINT tran V(1) I(V1) 
+.END
+

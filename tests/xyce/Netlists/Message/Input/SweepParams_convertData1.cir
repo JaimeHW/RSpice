@@ -1,0 +1,19 @@
+****************************************************
+* Test the case where there is no valid .DATA
+* statement in the netlist.
+*
+* See SON Bug 1188 for more details.
+****************************************************
+
+.global_param mag=1
+.global_param phase=0.1
+
+* Trivial high-pass filter (V-C-R) circuit.
+R1 b 0 2
+C1 a b 1u
+V1 a 0 AC {mag} {phase}
+
+.print AC vm(b)
+.ac data=table1
+
+.end

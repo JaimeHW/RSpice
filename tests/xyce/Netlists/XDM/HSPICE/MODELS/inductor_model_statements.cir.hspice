@@ -1,0 +1,22 @@
+*********************************************************************************
+* This netlist tests an inductor model in HSPICE
+*
+*
+********************************************************************************
+
+*Analysis directives:
+.TRAN  0.1ms 200ms
+.PRINT TRAN I(V1) I(R1) I(L1) I(V2) I(R2) I(L2)
+
+* R-L circuits
+R1 1 1a 1K
+L1 1a 0 L1_MOD L=1m
+.MODEL L1_MOD L L=5000 TC1=0 TC2=0
+V1 1 0 PULSE(0 1 10U 1U 1U 100m)
+
+R2 2 2a 1K
+L2 2a 0 L2_MOD L=10m
+.MODEL L2_MOD L L=100 TC1=0 TC2=0
+V2 2 0 PULSE(0 1 10U 1U 1U 100m)
+
+.END

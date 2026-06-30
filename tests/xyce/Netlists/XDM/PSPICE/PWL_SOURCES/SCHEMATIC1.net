@@ -1,0 +1,36 @@
+* source PWL_TEST
+
+R_R1         N14375 0  1k TC=0,0 
+* PWL Syntax emitted by Version 16.6 of ORCAD Capture
+V_V1         N14375 0  
++PWL 1e-3 0.5 2e-3 1 3e-3 1 4e-3 0.5 
+
+R_R2         N14713 0  1k TC=0,0 
+* PWL Syntax seen in one of Ben Long's Circuits
+V_V2         N14713 0  
++PWL (1e-3, 0.5, 2e-3, 1 3e-3, 1, 4e-3, 0.5) 
+
+* Have also seen this syntax without the commas
+V_V3         N14875 0  
++PWL (1e-3 0.5 2e-3 1 3e-3 1 4e-3 0.5) 
+R_R3         N14875 0  1k TC=0,0 
+
+* This is what is actually in the PSpice manual.
+* This was fixed for XDM 1.1, as part of SRN Bug 1985
+R_R4         N15043 0  1k TC=0,0 
+V_V4         N15043 0  
++PWL (1e-3,0.5) (2e-3,1) (3e-3,1) (4e-3,0.5) 
+
+* Use a file
+R_FILE1      N11767 0  1k TC=0,0
+V_FILE1      N11767 0   PWL   
++ FILE "pwlFile1.txt" 
+
+* These lines should be commented out by XDM, since they do not have
+* an easy translation in Xyce (REPEAT) or a valid translation 
+* (TIME_SCALE_FACTOR and VALUE_SCALE_FACTOR)
+V_V5 1 0 PWL REPEAT FOREVER (0,0) (5e-4,1) (1e-3,0)
++ ENDREPEAT
+V_V6 2 0 PWL REPEAT FOR 5 (0,0) (5e-4,1) (1e-3,0) ENDREPEAT
+V_V7 3 0 PWL TIME_SCALE_FACTOR=0.1 (0,0) (0.5,1) (1,0)
+V_V8 4 0 PWL VALUE_SCALE_FACTOR=0.1 (0,0) (0.5,1) (1,0)

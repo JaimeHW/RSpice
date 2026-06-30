@@ -1,0 +1,87 @@
+ ***** Measure Functions ***** 
+
+MAXV1B = 4.545455e+00 at VSRC1 value = 5.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+MAXV1BGND = 4.545455e+00 at VSRC1 value = 5.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+MAXFROM = 4.545455e+00 at VSRC1 value = 5.000000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+MAXTO = 3.636364e+00 at VSRC1 value = 4.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+MAXV1BFT = 3.636364e+00 at VSRC1 value = 4.000000e+00
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+MAXV1BTF = 3.636364e+00 at VSRC1 value = 4.000000e+00
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+MAXV1BSV = 4.545455e+00 at VSRC1 value = 5.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+MINV1B = 9.090909e-01 at VSRC1 value = 1.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+MINFROM = 3.636364e+00 at VSRC1 value = 4.000000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+MINTO = 9.090909e-01 at VSRC1 value = 1.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+MINV1BFT = 1.818182e+00 at VSRC1 value = 2.000000e+00
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+MINV1BTF = 1.818182e+00 at VSRC1 value = 2.000000e+00
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+MINV1BSV = 9.090909e-01 at VSRC1 value = 1.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+PPV1B = 3.636364e+00 with max at VSRC1 value= 5.000000e+00 and min at VSRC1 value= 1.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+PPFROM = 9.090909e-01 with max at VSRC1 value= 5.000000e+00 and min at VSRC1 value= 4.000000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+PPTO = 2.727273e+00 with max at VSRC1 value= 4.000000e+00 and min at VSRC1 value= 1.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+PPV1BFT = 1.818182e+00 with max at VSRC1 value= 4.000000e+00 and min at VSRC1 value= 2.000000e+00
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+PPV1BTF = 1.818182e+00 with max at VSRC1 value= 4.000000e+00 and min at VSRC1 value= 2.000000e+00
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+PPV1BFTEXP = 1.818182e+00 with max at VSRC1 value= 4.000000e+00 and min at VSRC1 value= 2.000000e+00
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+PPV1BTFEXP = 1.818182e+00 with max at VSRC1 value= 4.000000e+00 and min at VSRC1 value= 2.000000e+00
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+MAXFROMEXP = 4.545455e+00 at VSRC1 value = 5.000000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+MAXTOEXP = 3.636364e+00 at VSRC1 value = 4.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+MAXFAIL1 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+MAXFAIL2 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+MINFAIL1 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+MINFAIL2 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+PPFAIL1 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+PPFAIL2 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+

@@ -1,0 +1,33 @@
+MOS LEVEL 1 MODEL CMOS INVERTER, sampling test for HB
+*
+.hb 1e5
+.print hb {v(vout)+1.0} {v(in)+4.0}  {v(1)+4.0} ig(MP1) ig(MN1) is(MP1) id(MN1)  id(MP1)
+
+.options hbint numfreq=30 saveicdata=1 STARTUPPERIODS=2
+.options linsol-hb type=aztecoo prec_type=block_jacobi
+
+VDDdev 	VDD	0	3V
+RIN	IN	1	1K
+VIN1 1 0 sin 0  3V 1e5 0 0
+
+R1    VOUT  0  10K
+C2    VOUT  0  0.1p
+MN1   VOUT  IN 0 0 CD4012_NMOS L=5u W=175u
+MP1   VOUT IN VDD VDD CD4012_PMOS L=5u W=270u
+**************************************************************************
+.MODEL cd4012_pmos PMOS (LEVEL=2)
+**************************************************************************
+.MODEL cd4012_nmos NMOS (
++ LEVEL = 2)
+
+* 10 normally distributed samples
+.EMBEDDEDSAMPLING 
++ param=R1
++ type=normal
++ means=10K
++ std_deviations=0.5K
+
+.options EMBEDDEDSAMPLES numsamples=10
+
+.END
+

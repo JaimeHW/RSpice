@@ -1,0 +1,19 @@
+* This netlist tests various T-Spice syntaxes for F-Sources
+
+* source that supplies the controlling current
+R1 1 0  1 
+V1 1 0  SIN(0V 1V 1e3 0 0 0)
+
+* Linear form
+F2 2 0 V1 2
+R2 2 0 1
+
+* Poly form
+F3 3 0 POLY(1) V1 0 3
+R3 3 0 1
+
+.tran 10u 1ms
+.print tran I(R1) I(R2) I(R3)
+
+.end
+

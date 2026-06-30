@@ -1,0 +1,20 @@
+Author:  Eric R. Keiter
+Date:    04/13/2008
+
+Description:  
+
+This directory contains a perl script which can be used to create a bsim3
+oscillator of arbitrary length.  The usage is :
+
+ring_osc.pl  <number>  > ring_number.cir <return>
+
+
+Where the argument "number" is the number of inverters. This number must be
+odd, not even for this circuit to function as an oscillator.
+
+This circuit is very similar to the circuit ring_osc.cir, which can be found
+in several places in the test suite.  The original circuit is a 17-stage
+BSIM3 (or BSIM4) oscillator that originally came with the berkeley BSIM
+test suites.
+
+

@@ -1,0 +1,51 @@
+THIS CIRCUIT TESTS THE MOS LEVEL=10 MODEL AS A CHAIN OF INVERTERS IN SERIES
+*  BSIM SOI v3.2
+.options device debuglevel=-100
+.options timeint debuglevel=-100
+
+.param 
++ nstat=0
++ pstat='nstat'
++ sigmawn=0.04u
++ sigmawp=0.04u
++ sigmaln = 0.01276u
++ sigmalp = 0.01292u
++ sigmatoxn = 70.30p
++ sigmatoxp = 68.20p
++ sigmavtn = 0.0141
++ sigmavtp = 0.00833
++ dwn = 'nstat*sigmawn'
++ dwp = 'pstat*sigmawp'
++ dln = '-nstat*sigmaln'
++ dlp = '-pstat*sigmalp'
+
+.subckt N OUT IN GND GND GND PARAMS: W=0.8u L=0.35u M=1 AD=1p AS=1p PD=1u PS=1u
+MNFET OUT IN GND GND GND CMOSN W={W+dwn} L={L+dln} M={M} AD={AD} AS={AS} PD={PD} PS={PS}
+.ends N
+
+.subckt P OUT IN VDD GND VDD PARAMS: W=0.8u L=0.35u M=1 AD=1p AS=1p PD=1u PS=1u
+MP OUT IN VDD GND VDD CMOSP W={W+dwp} L={L+dlp} M={M} AD={AD} AS={AS} PD={PD} PS={PS}
+.ends P
+
+.subckt INVERTER IN OUT VDD GND
+xMN1 OUT IN GND GND GND N w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u     M=2
+xMP1 OUT IN VDD GND VDD P w=10u l=0.15u  AS=15p AD=15p PS=13u PD=13u M=2
+.ends
+
+*comp   v(vout) offset=1.0
+*comp   v(in) offset=1.0
+.tran 20ns 10us
+.print tran PRECISION=10 WIDTH=19 v(vout) v(in) 
+
+VDDdev 	VDD	0	0V PULSE (0V 2V 0 .1ns 1 1 1) 
+RIN	IN	1	1K
+VIN1  1	0  2V PULSE (2V 0V 1.5us 5ns 5ns 1.5us 3.01us)
+R1    VOUT  0  10K  
+C2    VOUT  0  0.1p
+XINV1 IN VOUT VDD 0 INVERTER
+
+* single bin. 
+.model CMOSN.1 NMOS (LEVEL = 10 lmin=0 lmax=1  wmin=0 wmax=1)
+.model CMOSP.1 PMOS (LEVEL = 10 lmin=0 lmax=1  wmin=0 wmax=1)
+
+.END

@@ -1,0 +1,53 @@
+***************************************************************
+* Regression test for the anti-windup limiter.
+*
+* See Section C.2 of "Power System Modeling and Scripting"
+* by F. Milano for more details.
+*
+* This tests also steps over the T parameter for device AWL1
+***************************************************************
+.tran 1ms 12.6s
+.print tran V(in) V(awl1_out) v(lpf1_out) V(lim1_out)
++  V(awl2_out) v(lpf2_out) V(lim2_out)
+.STEP YAWL!awl1:T 1.0 2.0 1
+
+****************************************************************
+* Source matches that used in Figure C.4 of Appendix C 
+* of Milano.  Test simulates two periods, rather than 1.
+V1 in 0 SIN(0 1 {0.5/3.14})
+
+********************************************
+* anti-windup limiter with load resistor
+********************************************
+YAWL awl1 in awl1_out T=1 UL=0.5 LL=-0.5
+R1 awl1_out 0 1
+
+*********************************************
+* Wind-up limiter implemented for comparison
+* with Figure C.4 of Appendix C of Milano.
+*********************************************
+* low-pass filter with response = 1/(1+sTc) *
+*********************************************
+Rlpf in lpf1_out 1
+Clpf lpf1_out 0 1
+
+*********************************************
+* implement limit function with a B-Source
+*********************************************
+BLim lim1_out 0 V={LIMIT(V(lpf1_out),-0.5,0.5)}
+R2 lim1_out 0 1
+
+* end of wind-up limiter
+*********************************************
+
+*********************************************
+* Repeat test with T=2                      *
+*********************************************
+YAWL awl2 in awl2_out T=2 UL=0.5 LL=-0.5
+R3 awl2_out 0 1
+Rlpf2 in lpf2_out 2
+Clpf2 lpf2_out 0 1
+BLim2 lim2_out 0 V={LIMIT(V(lpf2_out),-0.5,0.5)}
+R4 lim2_out 0 1
+
+.end

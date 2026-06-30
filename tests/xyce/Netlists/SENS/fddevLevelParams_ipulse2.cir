@@ -1,0 +1,66 @@
+* Transient sensitivity example, pulse source, finite difference (netlist level) sensitivity
+**********************************************************************
+.param cap=10u
+.param res=1K
+
+.param v1=1a
+.param v2=5a
+.param td=1s
+.param tr=0.1s
+.param tf=0.4s
+.param pw=0.5s
+.param per=2s
+
+* original
+ipulse 0 1 pulse({v1} {v2} {td} {tr} {tf} {pw} {per})
+X1 1 2 3 4 baseRC
+
+* v1 delta
+ipulseA 0 1A pulse({v1*(1+1e-8)} {v2} {td} {tr} {tf} {pw} {per})
+X1A 1A 2A 3A 4A baseRC
+
+* v2 delta
+ipulseB 0 1B pulse({v1} {v2*(1+1e-8)} {td} {tr} {tf} {pw} {per})
+X1B 1B 2B 3B 4B baseRC
+
+* td delta
+ipulseC 0 1C pulse({v1} {v2} {td*(1+1e-8)} {tr} {tf} {pw} {per})
+X1C 1C 2C 3C 4C baseRC
+
+* tr delta
+ipulseD 0 1D pulse({v1} {v2} {td} {tr*(1+1e-8)} {tf} {pw} {per})
+X1D 1D 2D 3D 4D baseRC
+
+* tf delta
+ipulseE 0 1E pulse({v1} {v2} {td} {tr} {tf*(1+1e-8)} {pw} {per})
+X1E 1E 2E 3E 4E baseRC
+
+* pw delta
+ipulseF 0 1F pulse({v1} {v2} {td} {tr} {tf} {pw*(1+1e-8)} {per})
+X1F 1F 2F 3F 4F baseRC
+
+* per delta
+ipulseG 0 1G pulse({v1} {v2} {td} {tr} {tf} {pw} {per*(1+1e-8)})
+X1G 1G 2G 3G 4G baseRC
+
+.subckt baseRC A B C D 
+r1 A B res
+c1 B 0 cap
+r2 B C res
+c2 C 0 cap
+r3 C D res
+c3 D 0 cap
+r4 D 0 res
+.ends
+
+.tran .1s 4s
+.print tran v(4)
++ { (v(4A)-v(4))/(v1*1.0e-8) }
++ { (v(4B)-v(4))/(v2*1.0e-8) }
++ { (v(4C)-v(4))/(td*1.0e-8) }
++ { (v(4D)-v(4))/(tr*1.0e-8) }
++ { (v(4E)-v(4))/(tf*1.0e-8) }
++ { (v(4F)-v(4))/(pw*1.0e-8) }
++ { (v(4G)-v(4))/(per*1.0e-8) }
+
+.end

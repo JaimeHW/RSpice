@@ -1,0 +1,32 @@
+* Transient sensitivity example, pulse source, finite difference (internal) sensitivity
+**********************************************************************
+.param cap=10u
+.param res=1K
+
+.param v1=1a
+.param v2=5a
+.param td=1s
+.param tr=0.1s
+.param tf=0.4s
+.param pw=0.5s
+.param per=2s
+
+
+ipulse 0 1 pulse({v1} {v2} {td} {tr} {tf} {pw} {per})
+
+r1 1 2 res
+c1 2 0 cap
+r2 2 3 res
+c2 3 0 cap
+r3 3 4 res
+c3 4 0 cap
+r4 4 0 res
+
+.tran .1s 4s
+.print tran v(1) v(2) v(3) v(4)
+
+* Sensitivity commands
+.print sens 
+.SENS objfunc={V(4)} param=v1,v2,td,tr,tf,pw,per
+.options SENSITIVITY direct=1 adjoint=0 forcefd=true
+.end

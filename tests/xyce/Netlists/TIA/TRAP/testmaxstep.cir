@@ -1,0 +1,14 @@
+Transmission Line Circuit with ridiculously tiny time delay
+*Intent is to make a time delay that is so small that it restricts the time 
+* integrator to a shorter time than it wants to take, to exercise the bug 
+* reported in bug 1370
+VIN 1 0 PULSE(0 5 0 30N 20N 50N 100N)
+Rin 1 2 50
+RL 2  0 50
+*Ydelay delay1 3 0 1 0 td=0.1n
+
+.TRAN 0.25N 50N
+.PRINT TRAN V(1) V(2)
+
+.options timeint delmax = 1e-10
+.END

@@ -1,0 +1,24 @@
+Test Name: bug_1017
+Owner: Dave Shirley
+Test netlists: bug_1017.cir
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_2.1       # the first version where this bug was tested.
+ 
+Description:
+============
+Test to make sure that a diagnostic is generated when an attempt is made to use an
+expression containing a parameter in a .option line.
+ 
+Procedure:
+============
+  run_xyce -o ${OUT_DIR}/bug_1017.cir.prn bug_1017.cir > ${OUT_DIR}/bug_1017.cir.log
+
+Verification:
+=============
+Script determines if the test passes.  It looks for the fatal diagnostic.
+ 
+Notes:
+======
+

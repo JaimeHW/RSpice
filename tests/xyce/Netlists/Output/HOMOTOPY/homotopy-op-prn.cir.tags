@@ -1,0 +1,4 @@
+serial, nightly,  parallel, output, gmin, op
+valgrind
+homotopy
+

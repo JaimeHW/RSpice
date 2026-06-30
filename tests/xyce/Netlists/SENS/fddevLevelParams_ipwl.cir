@@ -1,0 +1,31 @@
+* Transient sensitivity example, IPWL source, finite difference (internal) sensitivity
+**********************************************************************
+.param cap=10u
+.param res=1K
+
+.param v0 = 0.0
+.param v1 = 1.0
+.param v2 =-1.0
+.param v3 =-0.5
+.param v4 = 0.25
+.param v5 = 0.74
+.param v6 = 4.0
+
+
+i1 0 1 pwl(0 {v0} 1s {v1} 2s {v2} 3s {v3} 4s {v4} 5s {v5} 6s {v6} )
+r1 1 2 res
+c1 2 0 cap
+r2 2 3 res
+c2 3 0 cap
+r3 3 4 res
+c3 4 0 cap
+r4 4 0 res
+
+.tran .1s 7s
+.print tran v(1) v(2) v(3) v(4)
+
+* Sensitivity commands
+.print sens
+.SENS objfunc={V(4)} param=v0,v1,v2,v3,v4,v5,v6
+.options sensitivity direct=1 adjoint=0 forcefd=true
+.end

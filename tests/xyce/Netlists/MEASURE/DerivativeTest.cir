@@ -1,0 +1,70 @@
+A test of the measure derivative functionality
+*******************************************************************************
+*
+* a few sources of different types
+VS1  1  0  SIN(0 1.0 4 0 0)
+VS2  2  0  SIN(-0.5 1.0 100HZ 0 0.5)
+VS3  3  0  SIN(0.5 -1.0 100HZ 0 0.5)
+VS4  4  0  SIN(0 1.0 100HZ 0 0)
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+R4  4  0  100
+
+* use MEASFAIL for compatibility with the verification approach
+* used in .sh file.
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0 0.05
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3) V(4) V(1,0)
+
+* test the AT syntax
+.measure tran deriv_at_025 DERIVATIVE v(1) AT=0.025
+.measure tran deriv10_at_025 DERIVATIVE v(1,0) AT=0.025
+.measure tran deriv_at_zero_sin deriv v(1) AT=0.0
+.measure tran deriv_at_endSimTime_sin deriv v(1) AT=0.05
+
+* test the WHEN syntax
+.measure tran deriv_when_025 deriv v(1) WHEN v(1)=0.025
+.measure tran deriv10_when_025 deriv v(1) WHEN v(1,0)=0.025
+.measure tran deriv_when_025_ft deriv V(1) WHEN v(1)=0.25 from=0 to=25e-3
+
+* RFC level should be ignored (with a warning message)
+.measure tran deriv_ignore_rfc_level deriv v(1) WHEN v(1)=0.025 RFC_LEVEL=0.75
+
+* mix in TDs before and after FROM value.
+.measure tran deriv_when_075_tda deriv V(1) WHEN v(1)=0.75 FROM=20e-3 TO=40e-3 TD=30e-3
+.measure tran deriv_when_075_tdb deriv V(1) WHEN v(1)=0.75 FROM=30e-3 TO=40e-3 TD=20e-3
+
+* these should fail and return 0, since AT is outside of the simulation window
+.measure tran deriv_at_fail1 deriv v(1) AT=-1
+.measure tran deriv_at_fail2 deriv v(1) AT=1
+
+* this should fail and return 0, since the WHEN clause can never be met
+.measure tran deriv_when_fail deriv v(1) WHEN v(1)=2
+
+* add tests for rise/fall/cross.  VS2 and VS3 have a DC offset
+* and are damped sinusoids
+.measure tran deriv2fall2 deriv v(2) when v(2)=0.25 fall=2
+.measure tran deriv3rise1 deriv v(3) when v(3)=0.25 rise=1
+.measure tran deriv2cross2 deriv v(2) when v(2)=0.25 cross=2
+
+* test LAST for rise/fall/cross
+.measure tran deriv2falllast deriv v(2) when v(2)=0.25 fall=last
+.measure tran deriv3riselast deriv v(3) when v(3)=0.25 rise=last
+.measure tran deriv2crosslast deriv v(2) when v(2)=0.25 cross=last
+
+* These should also give the derivative at the last rise/fall/cross
+.measure tran deriv2fallNegOne deriv v(2) when v(2)=0.25 fall=-1
+.measure tran deriv3riseNegOne deriv v(3) when v(3)=0.25 rise=-1
+.measure tran deriv2crossNegOne deriv v(2) when v(2)=0.25 cross=-1
+
+*test failed measures for rise/fall/cross
+.measure tran deriv2fallfail deriv v(2) when v(2)=0.25 fall=250
+.measure tran deriv3risefail deriv v(3) when v(3)=0.25 rise=250
+.measure tran deriv2crossfail deriv v(2) when v(2)=0.25 cross=250
+.measure tran deriv2riselastfail deriv v(2) when v(2)=0.75 RISE=LAST
+
+.END
+

@@ -1,0 +1,11 @@
+*  Issue #235 "Extend the R=0 capability to allow use of resistor .MODELs"
+
+.model Rpdiff_lvsres R( r=0.1)
+RESD     IN1           OUT1      Rpdiff_lvsres   0
+
+Vn IN1 0 1.0
+Ro OUT1 0 1.0
+
+.DC Vn 1 1 1
+.PRINT DC V(IN1)
+

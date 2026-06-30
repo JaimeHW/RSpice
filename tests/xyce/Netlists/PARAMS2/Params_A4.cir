@@ -1,0 +1,19 @@
+Test to see that use of a expression works in device line inside a subckt.
+* If all is well, this should produce examples identical to those of
+* Resist_Control
+
+* it would be a bug for this parameter to be used in the subcircuit
+.param RES=5k
+
+XR1 1 0 ResSub
+V1 1 0 DC 5V
+
+.subckt ResSub 1 2
+*If context is working then only this parameter value is used
+.param RES=10k
+R1 1 2 {RES}
+.ends
+
+.dc V1 0 5 1
+.print DC v(1) I(v1)
+.end

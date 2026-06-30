@@ -1,0 +1,55 @@
+Test of lead currents in expressions
+*
+* Prior to the fix of bug 813 (SON), Xyce would incorrectly feed the expression
+* library the values of ID(M1) twice in both of the expressions
+* ID(M1)+IG(M1) and {ABS(ID(M1)*V(4))+ABS(IG(M1)*V(1))}
+* This was not a mis-parsing of the expression itself, but a misuse
+* by the ExpressionData class of incomplete information retrieved from the
+* ExpressionInternals class when setting up the "Ops" that actually access
+* the lead currents.
+*
+* In all versions of Xyce from (at least) Release 6.2 through 19 August 2016,
+* this test would fail.
+*
+VDS 4 0  5V
+VGS  1   0  sin (0 1 50K)
+VMOND 4 3 0V
+VMONS 0 2 0V
+VMONG 1 1a 0
+VMONB 0 6 0
+
+*  d g source substrate
+M1 3 1a 2 6 NFET L=2.0U W=2.0U
+
+.MODEL NFET NMOS
++  LEVEL=1  UO=966.5  L=2.0U  W=2.0U  VTO=1.043
++  TOX=1E-07  NSUB=1.379E+16 
++  RSH=0  RS=0 RD=0  IS =1E-14
++  LD=0  NSS=1E10 CGDO=1UF
++  CGSO=1UF  CGBO=1UF  CBD=1UF CBS=1UF
+
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-7
+.tran 1ns 50us
+
+bexpression1 0 ex1 V={abs(I(VMOND)*V(4))+abs(I(VMONG)*V(1))}
+bexpression2 0 ex2 V={I(VMOND)+I(VMONG)}
+rex1load ex1 0 100
+rex2load ex2 0 100 
+
+
+.PRINT TRAN PRECISION=10
++ {abs(ID(M1)*V(4))+abs(IG(M1)*V(1))}
++ {abs(ID(M1)*V(4))} {abs(IG(M1)*V(1))}
++ {ID(M1)+IG(M1)}
++ {ID(M1)} {IG(M1)}
+
+.measure tran maxmag1   max {abs(ID(M1)*V(4))+abs(IG(M1)*V(1)) - abs(V(ex1))} failvalue=1e-6
+.measure tran totalrms1 rms {abs(ID(M1)*V(4))+abs(IG(M1)*V(1)) - abs(V(ex1))} failvalue=1e-6
+.measure tran maxmag2   max {abs(ID(M1)+IG(M1)) - abs(v(ex2))} failvalue=1e-6
+.measure tran totalrms2 rms {abs(ID(M1)+IG(M1)) - abs(v(ex2))} failvalue=1e-6 
+.END
+
+
+
+

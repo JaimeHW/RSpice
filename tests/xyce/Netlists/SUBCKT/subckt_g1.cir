@@ -1,0 +1,20 @@
+Test of global parameter usage inside a subcircuit
+* The subcircuit attempts to use a global parameter to define a local 
+* parameter
+.PARAM Dwgc = 1.0e-3
+
+
+VA 1 0  1V
+xSPwgc 1 2 wgc
+R2 2 0 1e3
+
+
+.SUBCKT wgc t1 t2
+.PARAM Res = {1 / Dwgc}
+R1 t1 t2 {Res}
+.ENDS
+    
+.PRINT TRAN V(1) V(2)
+.TRAN 0 10
+ 
+.END

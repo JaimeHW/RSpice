@@ -1,0 +1,60 @@
+ ***** Measure Functions ***** 
+
+MAXV5 = 4.285714e+00 at Table Row value = 1.100000e+01
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+MAXV5TO = 3.846154e+00 at Table Row value = 6.000000e+00
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 8.000000e+00
+
+MINV5 = 2.500000e+00 at Table Row value = 5.000000e+00
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+MINV5FROM = 2.941176e+00 at Table Row value = 1.000000e+01
+Measure Start Table Row Value= 8.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+PPV5 = 1.785714e+00 with max at Table Row value= 1.100000e+01 and min at Table Row value= 5.000000e+00
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+AVGV5 = 3.344020e+00
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+AVGV5TO = 3.121664e+00
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 8.000000e+00
+
+AVGV5FROM = 3.566377e+00
+Measure Start Table Row Value= 8.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+INTEGV5 = 4.681628e+01
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+INTEGV5TO = 2.185165e+01
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 8.000000e+00
+
+INTEGV5FROM = 2.496464e+01
+Measure Start Table Row Value= 8.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+RMSV5 = 3.381301e+00
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+RMSV5TO = 3.154383e+00
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 8.000000e+00
+
+RMSV5FROM = 3.593920e+00
+Measure Start Table Row Value= 8.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+FINDV5 = 2.350000e+00
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+DERIVV5 = -2.197802e-01 at Table Row value = 2.350000e+00
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+ERR1 = 2.104625e+00
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+ERR1TO = 2.282406e+00
+Measure Start Table Row Value= 1.000000e+00	Measure End Table Row Value= 8.000000e+00
+
+ERR1FROM = 1.866667e+00
+Measure Start Table Row Value= 8.000000e+00	Measure End Table Row Value= 1.500000e+01
+
+

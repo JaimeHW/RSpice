@@ -1,0 +1,42 @@
+==>BUG_237/ README <==
+Bug Number: BUG_237
+Owner: Tom Russo
+Test Netlists:  inverter_Cascase_3.cir
+			inverter_cascade_3_BSIM3.cir
+			
+GS Files:  inverter_cascade_3.cir.prn
+		inverter_cascade_3_BSIM3.cir.prn
+
+Mode: Parallel
+Comparator: xyce_verify.pl
+Version of Xyce: Release_1.1    # the first version where this bug was tested.
+
+Description:
+=======
+Summary of the bug and/or the test objective.
+
+
+Procedure:
+=======
+
+Default procedure.
+
+Verification:
+========
+
+Passes if Xyce and xyce_verify.pl return a 0 exit code.
+
+Notes:
+=========
+Modified for Release 2.1 Prior to Release 2.1, this bug was tested by running each test with dma on (default) and with ?-dma off?, and then comparing the dma and nodma results. With Release 2.1, there is no dm adoption (dma is always used). Instead, gold standard files were added (the results from Release 2.0 testing on Alpha_OSF1_Serial), and the default test procedure is use. ? rja
+
+TVR?s notes from Release 2.0:
+Bug 237 was not a very carefully managed issue. The original report was ?DMA not working in parallel? but in investigating the problem several other related issues got fixed under the same bug report.
+
+The initial issue (?DMA not working in parallel?) turned out to be an insure at the Trilinos library level. Rob fixed that in Trilinos.
+
+On investigating the bug, I found that the inverter_cascase_3_BSIM3.cir netlist would not run in parallel, with or without DMA.  This turned out to be a problem in calculating a buffer size for MPI.
+
+In fixing that bug, both inverter_cascase_3.cir and inbverter_cascade_3_BSIM3.cir began to drop core on FreeBSD in parallel.  This turned out to be an uninitialized variable issue.
+
+The netlists describe a chain of 3 mosfet inverters. The input is a pulsed source, the output should be the inverse of the input --- output 0 when input high, output high when input 0.

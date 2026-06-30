@@ -1,0 +1,63 @@
+A neuron cable example
+*
+* This is a simple test of simulating a neuron cable
+* via the cable equation (6.29 in Theorteical Neuroscience,
+* by P. Dayan and L. Abbot)
+*
+
+* units for model parameters
+* cMem = F/cm^2
+* gMem = S/cm^2
+* vRest = V
+* eNa = V
+* gNa = S/cm^2
+* eK = V
+* gK = S/cm^2
+* r  = ohms cm
+*
+* NOTE: length scale is immaterial as long as it's always a consistent unit
+* parameters from Dayan's book pg 173, 157, 155
+*
+* gMem  = 0.003 mS/mm^2 =>  0.000003 S/mm^2  => 0.0003 S/cm^2
+* gK    = 0.36  mS/mm^2 =>  0.00036 S/mm^2   => 0.036  S/cm^2
+* gNa   = 1.2 mS/mm^2   =>  0.0012 S/mm^2    => 0.12   S/cm^2
+* vRest = -54.387 mV    => -0.054387 V
+* eK    = -77 mV        => -0.077 V
+* eNa   =  50 mV        =>  0.050 V
+* cMem  = 10 nF/mm^2    =>  1.0e-8 F/mm^2    => 1.0e-6 F/cm^2 
+* r     = 1 kOhm mm     =>  1000 Ohm mm      => 100 Ohm cm 
+
+*
+* Using the above neuron model
+*
+*.model hhParams neuron level=3 cMem=1.0e-6 gMem=0.0003 vRest=0.010613  eNa=0.115 gNa=0.120  eK=-0.012  gK=0.036 
+*.model hhParams neuron level=3 cMem=1.0e-6 gMem=0.0003 vRest=-.054     eNa=0.05  gNa=0.120  eK=-0.077  gK=0.036 
+
+.model hhParams neuron level=3 cMem=1.0e-6 gMem=0.0003 vRest=-0.054387  eNa=0.050 gNa=0.12  eK=-0.077  gK=0.036 
+
+* This is a standard current pulse to start an activation
+*          pulse( initial_value pulse_value delay_time rise_time fall_time pulse_width period)
+Iin a 0 PULSE( 0 0.40e-7 1.0e-3 1.0e-6 1.0e-6 1.0e-3 1.0e10)
+*Vin a 0 PULSE( 0 0.100 1.0e-3 1.0e-5 1.0e-5 1.0e-4 1.0e10)
+
+* the parameters R (intra-cellular resistivity Ohm/cm), A= radius (cm), L = length (cm)
+* can be specified in the .model statement or as part of the instance.  Instance level
+* parameters override model level ones.  N = number of segments.
+
+* intra cellular resistivity, rl,  is typically 1-3 kOhm mm.  Resistance along the long axis (longitudinal resistance Rl = rl L / (pi a^2)
+* 1 kOhm mm = 1000 Ohm mm = 100 Ohm cm 
+
+yneuron neuron1  a b hhParams R=1.0e1 A=1.0e-4 L=0.4 N=100 RPS=1.0e2 APS=1.0e-4 LPS=4.0e-3 RNS=1.0e2 ANS=1.0e-4 LNS=4.0e-3
+
+*COMP n(yneuron!neuron1_V50) RELTOL=0.07 abstol=1e-6
+
+.step yneuron!neuron1:A 1.0e-4 1.4e-4 2.0e-5
+.tran 0 2.0e-2
+
+.options timeint method=7 newlte=1 newbpstepping=1 reltol=1e-3
+
+.print tran  n(yneuron!neuron1_V50)
+
+.end
+
+

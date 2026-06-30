@@ -1,0 +1,39 @@
+Three-cell RC filter sensitivity test
+* this is similar to the lowpass.cir sensitivity test, except that I am intentionally 
+* excluding v1:acmag and I have made it a little larger, with 3 R and 3 C devices.  
+*
+* Having 3 R and 3 C devices makes it a third-order filter.
+*
+* The purpose of this circuit is to provide a "gold" standard for the 
+* lowpass_forceDeviceFD3 test.
+*
+* device parameters:
+.param rval=4.7k
+.param cval=47n
+.param vinval=10.0
+
+* Circuit:
+v1 1 0 ac {vinval}
+r1 1 2 {rval}
+c1 2 0 {cval}
+r2 2 3 {rval}
+c2 3 0 {cval}
+r3 3 4 {rval}
+c3 4 0 {cval}
+
+.ac dec 10 1 10k
+
+* Output vp() in degrees
+.OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=true
+
+.print ac 
++ vm(1) vp(1) vm(2) vp(2)   
+
+.print sens 
+
+.sens objvars=4 param=r1:r,c1:c,r2:r,c2:c,r3:r,c3:c
+.options sensitivity direct=1 adjoint=1  stdoutput=1  
+
+.options device debuglevel=-100
+
+.end 

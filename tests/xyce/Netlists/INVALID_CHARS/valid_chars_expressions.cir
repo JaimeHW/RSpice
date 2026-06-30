@@ -1,0 +1,284 @@
+**************************************************************
+* For SON Bug 1034
+*
+* Test of what non-alphanumeric characters are legal in 
+* a Xyce node or device name when that name is used within
+* an operator like V(a+) within an expression.  This includes 
+* the following characters, in top-level circuits and
+* in subcircuits:
+*
+* ` ~ ! @ # $ % ^ & - _ + [ ] | \ < > . ? /
+*
+* Note that .print DC {v(1*)} {v(*)} {v(1?)} {v(?)} will print out the voltages
+* at nodes 1*, *, 1? and ?.  *, 1*, ? and 1? are NOT wildcard syntaxes when
+* used within expression delimiters.
+*
+* This also tests the case of using an operator name (e.g., V)
+* as the variable name in a .FUNC statement.
+*
+* 3/8/2023 - this test is expanded to include currents from voltage 
+* sources that have funny characters in their names.  This was a use 
+* case that wasn't tested before.
+*
+**************************************************************
+.DC V3 1 1 1
+.print DC WIDTH=6 PRECISION=1 v(3) {v(1`)} {v(1~)} {v(1!)} {v(1@)} 
++ {v(1$)} {v(1%)} {v(1^)} {v(1&)} 
++ {v(1*)} {v(1-)} {v(1_)} {v(1+)} {v(1[)} 
++ {v(1])} {v(1|)} {v(1\)} {v(1<)} {v(1>)} {v(1.)} 
++ {v(1/)} 
++ {v(1#)}
+*+ {v(#)}
++ {v(`)} {v(~)} {v(!)} {v(@)} 
++ {v($)} {v(%)} {v(^)} {v(&)} 
++ {v(*)} {v(-)} {v(_)} {v(+)} {v([)} 
++ {v(])} {v(|)} {v(\)} {v(<)} {v(>)} {v(.)} 
++ {v(/)} 
++ v(X1:1`) v(X1:1~) v(X1:1!) v(X1:1@) 
++ v(X1:1#) v(X1:1$) v(X1:1%) v(X1:1^) v(X1:1&) v(X1:1-)
++ v(X1:1_) v(X1:1+) v(X1:1[) v(X1:1]) v(X1:1|) v(X1:1\) v(X1:1<) 
++ v(X1:1>) v(X1:1.) v(X1:1/) 
++ v(X1:`) v(X1:~) v(X1:!) v(X1:@) v(X1:#) v(X1:$) v(X1:%) v(X1:^)
++ v(X1:&) v(X1:-) v(X1:_) v(X1:+) v(X1:[) v(X1:]) v(X1:|) v(X1:\) 
++ v(X1:<) v(X1:>) v(X1:.) v(X1:/) 
++ {I(R3+)} {P(R3+)} {W(R3+)} {I(R-4)}
++ {IC(Q1+)} {IB(Q1+)} {IE(Q1+)}
+*
+* Excluding the current thru I(V*) and I(V1*) because this confuses the regex capability
+*
++ {I(v1`)} {I(v1~)} {I(v1!)} {I(v1@)} {I(v1#)}
++ {I(v1$)} {I(v1%)} {I(v1^)} {I(v1&)} 
++ {I(v1-)} {I(v1_)} {I(v1+)} {I(v1[)} {I(v1])}
++ {I(v1|)} {I(v1\)} {I(v1<)} {I(v1>)} {I(v1.)}
++ {I(v1/)}
+*
++ {I(v`)} {I(v~)} {I(v!)} {I(v@)} {I(v#)}
++ {I(v$)} {I(v%)} {I(v^)} {I(v&)} 
++ {I(v-)} {I(v_)} {I(v+)} {I(v[)} {I(v])}
++ {I(v|)} {I(v\)} {I(v<)} {I(v>)} {I(v.)}
++ {I(v/)}
+*
++ I(v1`) I(v1~) I(v1!) I(v1@) I(v1#)
++ I(v1$) I(v1%) I(v1^) I(v1&) 
++ I(v1-) I(v1_) I(v1+) I(v1[) I(v1])
++ I(v1|) I(v1\) I(v1<) I(v1>) I(v1.)
++ I(v1/)
+*
++ I(v`) I(v~) I(v!) I(v@) I(v#)
++ I(v$) I(v%) I(v^) I(v&) 
++ I(v-) I(v_) I(v+) I(v[) I(v])
++ I(v|) I(v\) I(v<) I(v>) I(v.)
++ I(v/)
+*
+v3  3 0 1
+r3+ 3 0 2
+v4  4 0 1
+r-4 4 0 2
+X1 2 0 sub1
+
+* test 1 followed by the special character
+v1` 1` 0 1
+r1` 1` 0 1
+v1~ 1~ 0 1
+r1~ 1~ 0 1
+v1! 1! 0 1
+r1! 1! 0 1
+v1@ 1@ 0 1
+r1@ 1@ 0 1
+v1# 1# 0 1
+r1# 1# 0 1
+v1$ 1$ 0 1
+r1$ 1$ 0 1
+v1% 1% 0 1
+r1% 1% 0 1
+v1^ 1^ 0 1
+r1^ 1^ 0 1
+v1& 1& 0 1
+r1& 1& 0 1
+v1* 1* 0 1
+r1* 1* 0 1
+v1- 1- 0 1
+r1- 1- 0 1
+v1_ 1_ 0 1
+r1_ 1_ 0 1
+v1+ 1+ 0 1
+r1+ 1+ 0 1
+v1[ 1[ 0 1
+r1[ 1[ 0 1
+v1] 1] 0 1
+r1] 1] 0 1
+v1| 1| 0 1
+r1| 1| 0 1
+v1\ 1\ 0 1
+r1\ 1\ 0 1
+v1< 1< 0 1
+r1< 1< 0 1
+v1> 1> 0 1
+r1> 1> 0 1
+v1. 1. 0 1
+r1. 1. 0 1
+v1/ 1/ 0 1
+r1/ 1/ 0 1
+
+* device and node names with just the special character
+v` ` 0 1
+r` ` 0 1
+v~ ~ 0 1
+r~ ~ 0 1
+v! ! 0 1
+r! ! 0 1
+v@ @ 0 1
+r@ @ 0 1
+v# # 0 1
+r# # 0 1
+v$ $ 0 1
+r$ $ 0 1
+v% % 0 1
+r% % 0 1
+v^ ^ 0 1
+r^ ^ 0 1
+v& & 0 1
+r& & 0 1
+v* * 0 1
+r* * 0 1
+v- - 0 1
+r- - 0 1
+v_ _ 0 1
+r_ _ 0 1
+v+ + 0 1
+r+ + 0 1
+v[ [ 0 1
+r[ [ 0 1
+v] ] 0 1
+r] ] 0 1
+v| | 0 1
+r| | 0 1
+v\ \ 0 1
+r\ \ 0 1
+v< < 0 1
+r< < 0 1
+v> > 0 1
+r> > 0 1
+v. . 0 1
+r. . 0 1
+v/ / 0 1
+r/ / 0 1
+
+* repeat all tests, but in a subcircuit
+.SUBCKT sub1 a b
+R1 a b 1
+* test 1 followed by the special character
+v1` 1` 0 1
+r1` 1` 0 1
+v1~ 1~ 0 1
+r1~ 1~ 0 1
+v1! 1! 0 1
+r1! 1! 0 1
+v1@ 1@ 0 1
+r1@ 1@ 0 1
+v1# 1# 0 1
+r1# 1# 0 1
+v1$ 1$ 0 1
+r1$ 1$ 0 1
+v1% 1% 0 1
+r1% 1% 0 1
+v1^ 1^ 0 1
+r1^ 1^ 0 1
+v1& 1& 0 1
+r1& 1& 0 1
+v1* 1* 0 1
+r1* 1* 0 1
+v1- 1- 0 1
+r1- 1- 0 1
+v1_ 1_ 0 1
+r1_ 1_ 0 1
+v1+ 1+ 0 1
+r1+ 1+ 0 1
+v1[ 1[ 0 1
+r1[ 1[ 0 1
+v1] 1] 0 1
+r1] 1] 0 1
+v1| 1| 0 1
+r1| 1| 0 1
+v1\ 1\ 0 1
+r1\ 1\ 0 1
+v1< 1< 0 1
+r1< 1< 0 1
+v1> 1> 0 1
+r1> 1> 0 1
+v1. 1. 0 1
+r1. 1. 0 1
+v1/ 1/ 0 1
+r1/ 1/ 0 1
+
+* device and node names with just the special character
+v` ` 0 1
+r` ` 0 1
+v~ ~ 0 1
+r~ ~ 0 1
+v! ! 0 1
+r! ! 0 1
+v@ @ 0 1
+r@ @ 0 1
+v# # 0 1
+r# # 0 1
+v$ $ 0 1
+r$ $ 0 1
+v% % 0 1
+r% % 0 1
+v^ ^ 0 1
+r^ ^ 0 1
+v& & 0 1
+r& & 0 1
+v* * 0 1
+r* * 0 1
+v- - 0 1
+r- - 0 1
+v_ _ 0 1
+r_ _ 0 1
+v+ + 0 1
+r+ + 0 1
+v[ [ 0 1
+r[ [ 0 1
+v] ] 0 1
+r] ] 0 1
+v| | 0 1
+r| | 0 1
+v\ \ 0 1
+r\ \ 0 1
+v< < 0 1
+r< < 0 1
+v> > 0 1
+r> > 0 1
+v. . 0 1
+r. . 0 1
+v/ / 0 1
+r/ / 0 1
+
+.ENDS
+
+* Test multi-letter lead current designators.  
+vie 0 10 0
+vic 0 12 5
+vib 0 11 1 
+q1+ 12 11 10 qjunk 
+
+.model qjunk npn
++bf=130 br=1 is=3e-14
++tf=1e-8 vjs=0.68 ne=1.6 nc=2.0 rb=450
++cje=1uf cjc=1uf cjs=1uf ikf=0.002 ikr=0.002 vaf=50 var=50
++nf=1.0 ise=0 nr=1 isc=0 irb=0 rbm=450 re=0 rc=0 vje=0.75 
++mje=0.33 xtf=0 vtf=100 itf=0 ptf=0 vjc=0.75 mjs=0 xtb=0 
++eg=1.11 xti=3 kf=0 af=1 fc=0.5 tnom=27
+
+* Test that the use of valid operator names as the variable name
+* in .FUNC statements doesn't cause Xyce to segfault 
+.func fubar1(w) {IF(1 > w, 1, 0)}
+.func fubar2(v) {IF(1 > v, 1, 0)}
+.func fubar3(p) {IF(1 > p, 1, 0)}
+.func fubar4(vr) {IF(1 > vr, 1, 0)}
+.func fubar5(i) {IF(1 > i, 1, 0)}
+.func fubar6(ic) {IF(1 > ic, 1, 0)}
+
+.end
+

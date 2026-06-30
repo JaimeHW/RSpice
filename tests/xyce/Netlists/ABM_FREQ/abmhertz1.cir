@@ -1,0 +1,14 @@
+Test of ABM HERTZ variable
+**********************************************************
+**********************************************************
+* For the Bsrc case, it is necessary to check for divide-by-zero.  
+* Otherwise, during the DCOP phase, freq is zero and the DCOP will fail.
+.global_param res = {(((HERTZ==0.0)?1.0:HERTZ))}
+Isrc 1 0 AC 1 0 sin(0 1 1e+5 0 0)
+B1  1  0  I = {V(1)/res}
+C1 1 0 2e-6
+*
+.AC DEC 1 1 1e5 
+.print ac v(1)  VR(1) VI(1) VM(1) VP(1) VDB(1)  {res}
+
+.END

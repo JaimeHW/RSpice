@@ -1,0 +1,27 @@
+Regression test for simple normal distribution sampling
+
+R2 1 0 3K
+R1 1 2 2K
+v1 2 0 10V
+
+.dc v1 10 10 1
+
+.print dc format=tecplot v(1)
+
+.SAMPLING 
++ param=R1,R2
++ type=normal,normal
++ means=3K,2K
++ std_deviations=0.1K,0.2K
+
+.options SAMPLES numsamples=50
++ projection_pce=true
+*+ regression_pce=true
++ output_pce_coeffs=true
++ order=3
++ outputs={v(1)}
++ sample_type=lhs
++ stdoutput=true
+
+.end
+

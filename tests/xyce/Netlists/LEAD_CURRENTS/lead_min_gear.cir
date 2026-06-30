@@ -1,0 +1,39 @@
+Lead Current test for component inductors in a nonlinear mutual inductor
+* This test is based on the certification test for SON Bug 518
+
+Vinput node1a 0 sin(0 14 120 0 0)
+
+VP1 node1a node1 0
+Llead1 node1 0 10
+Llead2 node2 node3 100
+Llead3 node4 node3 100
+K1 Llead1 Llead2 Llead3 1.0 nlcore
+
+.model nlcore CORE c=0.001
+
+rload1   node2a 0 100
+vp2  node2a node2 0
+rload2   node3 0 100
+rpathtg1 node4a 0 1
+vp4 node4a node4 0
+
+.print tran {I(Llead1)-I(vp1)} {I(Llead2)-I(vp2)}
++ {I(Llead3)-I(vp4)}
+
+.measure tran maxmag1   max {abs(I(Llead1)-I(vp1))} failvalue=1e-6
+.measure tran totalrms1 rms {I(Llead1)-I(vp1)} failvalue=1e-6 
+.measure tran maxmag2   max {abs(I(Llead2)-I(vp2))} failvalue=1e-6
+.measure tran totalrms2 rms {I(Llead2)-I(vp2)} failvalue=1e-6 
+.measure tran maxmag3   max {abs(I(Llead3)-I(vp4))} failvalue=1e-6
+.measure tran totalrms3 rms {I(Llead3)-I(vp4)} failvalue=1e-6 
+
+
+*COMP {I(Llead1)-I(vp1)} abstol=1.0e-6 zerotol=1.0e-7 
+*COMP {I(Llead2)-I(vp2)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {I(Llead3)-I(vp4)} abstol=1.0e-6 zerotol=1.0e-7
+
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+.tran 0 1e-3
+
+.end

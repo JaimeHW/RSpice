@@ -1,0 +1,45 @@
+Test Name: BUG_569
+Owner: Eric Keiter
+Test netlists: none 
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Bug 569 noted that .STEP had stopped working for transient simulations.
+
+.STEP was a capability that was added for the Xyce 2.0 release (barely).  
+This new .STEP capability was recorded as bug # 381.   As such, there is 
+already a regression test in place to test this capability.
+
+The reason it got broken between 2.0 and 2.1 was that I never added any
+regression tests for it.   (I'll make sure to do that this time).
+ 
+Procedure:
+============
+
+Run the certification tests for bug # 381.
+
+Verification:
+=============
+
+Use the same verification as was specified in bug # 381.  
+ 
+Notes:
+======
+
+The output for .STEP has changed since release 2.0, so the README 
+instructions for bug # 381 will be slightly different than before.
+
+The big change in output is that now, the output for .STEP does not go 
+to separate files anymore.  Each iteration of the .STEP is appended to a 
+single file.  If the .PRINT format is "probe", then each .STEP iteration 
+gets a new probe header.  If the .PRINT format is tecplot, then each 
+iteration gets a separate ZONE, in the same file.
+
+If the format is STD, things are just concatenated in a braindead way.
+
+Anyway, the bug # 381 instructions will be consistent with these changes.
+

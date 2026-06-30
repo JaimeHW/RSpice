@@ -1,0 +1,17 @@
+simple restart test
+
+r2 3 0 2
+
+*.options restart file=restart2e-06
+.options restart job=restart initial_interval=2.0e-6  pack=0
+
+E_U41A         3 0 VALUE {IF(((V(1) < 0.8) & (V(2) < 0.8)),  3.5, 0.4)}
+
+v1 1 0 pulse( 0   2.2  0 1e-8 1e-8 5e-7 1e-6)
+r1 2 0 1e-3
+v2 2 0 0.5
+
+.tran 0 1e-5
+.print tran  v(1) v(2)   v(3)
+
+.end

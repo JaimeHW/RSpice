@@ -1,0 +1,49 @@
+Lead current test for JFET
+***********************************
+*
+*Drain curves
+Vds 1 0 5V
+Vgs 2 0 pulse (0 1 1ns 1ns 1ns 1us 2us)
+.options timeint method=gear newbpstepping=0
+.options nonlin-tran rhstol=1.0e-7
+.tran 1ns 10us
+*
+Vidmon 1 1a 0
+Vigmon 2 2a 0
+Vismon 0 3 0
+*
+*COMP {I(Vidmon)-ID(Jtest)} abstol=1e-6 zerotol=1.0e-7
+*COMP {I(Vigmon)-IG(Jtest)} abstol=1e-6 zerotol=1.0e-7
+*COMP {I(Vismon)-IS(Jtest)} abstol=1e-6 zerotol=1.0e-7
+
+.PRINT tran {I(Vidmon)-ID(Jtest)} {I(Vigmon)-IG(Jtest)} {I(Vismon)-IS(Jtest)}
+
+.measure tran maxmag1   max {abs(I(Vidmon)-ID(Jtest))} failvalue=1e-6
+.measure tran totalrms1 rms {I(Vidmon)-ID(Jtest)} failvalue=1e-6 
+.measure tran maxmag2   max {abs(I(Vigmon)-IG(Jtest))} failvalue=1e-6
+.measure tran totalrms2 rms {I(Vigmon)-IG(Jtest)} failvalue=1e-6 
+.measure tran maxmag3   max {abs(I(Vismon)-IS(Jtest))} failvalue=1e-6
+.measure tran totalrms3 rms {I(Vismon)-IS(Jtest)} failvalue=1e-6 
+
+*
+Jtest 1a 2a 3 SA2109 
+*
+.MODEL SA2109 NJF
++ LEVEL=2
++ BETA= 0.0003790
++ VTO = -3.760
++ PB = 0.650
++ LAMBDA = 0.01240
++ DELTA = 0.370;
++ THETA = 0.01120;
++ RD = 0.0
++ RS = 104.5
++ FC = 0.5
++ IS = 1.393E-10
++ AF = 1.0
++ KF = 0.05
++ CGS= 1uf
++ CGD= 1uf
+*
+.END
+

@@ -1,0 +1,25 @@
+Zero Length Lossy Transmission Line, with RLC Model
+**********************************************************
+* The RLC line is a valid combination of model parameters.
+* However, the device model errors out if the length (LEN)
+* parameter is zero.
+*
+*
+*
+*
+*
+***********************************************************
+
+* model card has LEN=0, which causes an error during device
+* setup before the DCOP completes
+o1 1 0 2 0 rlc
+.model rlc ltra r=0.05 l=20uH C=20pF LEN=0
+
+v1 1 0 pulse(0 1 1ns 1ns 1ns 20ns 40ns)
+rload2 2 0 10
+
+.tran 0.1ns 70ns 0 0.15ns
+.print tran v(1) v(2)
+
+.end
+

@@ -1,0 +1,16 @@
+Test circuit of a BSIM3 model used as a capacitor.
+
+.options device temp=27
+
+.MODEL NCH NMOS (LEVEL = 9 TOX=4.1E-9)
+
+M1 0 G 0 0 NCH w=2e-6 l=1.8e-07 m=1 ad=1e-12 as=1e-12 pd=3e-6 ps=3e-6
+I2 0 G dc 1e-06
+
+.ic v(G)=0
+
+.print tran v(G)
+.tran 40p 20n 0 10p 
+
+.end
+

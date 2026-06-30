@@ -1,0 +1,2 @@
+serial, nightly, parallel,  analytic, embeddedsampling, lhs, normal, truncated
+valgrind

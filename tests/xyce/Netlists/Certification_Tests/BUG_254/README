@@ -1,0 +1,33 @@
+BUG 254
+=======
+Original Bug:
+
+This is what the current expression library has for an error check on the atanh
+function:
+
+double
+300             PTatanh(arg)
+301                 double arg;
+302             {
+303                 if (fabs(arg) > 20)
+304                   return 1.;
+
+which is totally wrong.  It looks like a check for tanh (which plateaus at
++-20) but this would be wrong for that as well since it ignores the negative
+side of the number line.
+
+It is probably worthwhile to actually put the *correct* bounds (+- 20) on the
+tanh since it probably calls cosh and sinh underneath which will blow up for
+large arguments.
+
+Bug Repaired in Xyce Version 1.1
+
+This test checks that the bsource functions "tanh" and "atanh" work correctly,
+varying from 1 to -1 as the argument varies.  In particular, the test pushes
+the argument from 100 to -100 even though the functions plateau out at
+approximately +-20 and +-1, respectively, depending on numerics.  This test
+should run to completion and produce data which "matches" that in the given
+.prn file.  I (SAH) checked using the xyce_verify test but it should work fine
+using either the "box" compare or the xyce_verify.
+
+Parallel testing is not needed for this case.

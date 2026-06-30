@@ -1,0 +1,18 @@
+* Qucs 0.0.19  /users/russo/src/qucs/examples/xyce/hb-test.sch
+D1 Node3 0 DMOD_D1 AREA=1.0 Temp=26.85
+.MODEL DMOD_D1 D (LEVEL = 2 Is=1e-15 N=1 Cj0=0 M=0.5 Vj=0.7 Fc=0.5 Rs=0 Tt=0 Ikf=0 Kf=0 Af=1 Bv=0.7 Ibv=0.001 Xti=3 Eg=1.11 Tbv1=0 Trs1=0 Tnom=26.85 )
+
+R1 Node1 _net0  100
+R2 _net1 Node3  100
+VPr2 _net0 _net1 DC 0 AC 0
+EPr1 Pr1 0 Node3 0 1.0
+V1 Node1 0 DC 0 SIN(0 4 1MEG 0 0) AC 4
+
+.options hbint numfreq=17 STARTUPPERIODS=2 saveicdata=1
+
+.HB 1MEG
+
+.PRINT  hb_fd file=bug_652a.cir.hb-test-hb-fd.txt I(VPr2) v(Node1) v(Node3) v(Pr1) 
+.PRINT  hb_td file=bug_652a.cir.hb-test-hb-td.txt I(VPr2) v(Node1) v(Node3) v(Pr1) 
+
+.END

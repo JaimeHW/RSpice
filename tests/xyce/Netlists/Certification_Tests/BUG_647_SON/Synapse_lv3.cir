@@ -1,0 +1,78 @@
+Test Synapse Level 3 device by Alex Duda
+
+*No learning, perfectly reliable.
+*13 August 2012
+
+.options timeint method=7 newlte=1 newbpstepping=1 reltol=1e-4
+
+.GLOBAL_PARAM TIMING=410e-3
+.param AMP={3.14159*.1825e-12}
+.param WIDTH={1e-3}
+.param PERIOD = {400e-3}
+
+*FIRST WE NEED TO SEND A CURRENT INPUT to HH1 and see its effect on HH2.
+In11 0 a1 PULSE( 0 {AMP} {400e-3} 1.0e-6 1.0e-6 {WIDTH} {PERIOD} )
+
+*SECOND WE NEED TO ADD HH1 TO RECEIVE INPUT.
+.param segLength = 1e-4     ; [cm]
+.param segDiameter = 1e-4   ; [cm]
+.param segSurfaceArea = { 3.14159 * segDiameter * segLength }
+
+* specific membrane capacitance 1uF/cm^2
+.param memC = { 1.0e-6 * segSurfaceArea } ; [F]
+
+* leak current has membrane resistivity of 40,000 ohm cm^2,
+* with reversal potential of -65mV
+.param rm = { 4.0e4 / segSurfaceArea } ; [ohm]
+.param memG = { 1 / rm } ; [1/ohm]
+.param revE = -0.065     ; [V]
+
+
+
+* active conductances
+* Na specific conductance is 1200 S/m^2 = 1.2e-1 S/cm^2
+.param gnas = { 0.12 * segSurfaceArea }   ; [S]
+.param ErevNa = 0.05                      ; [V]
+* K specific conductance is 360 S/m^2 = 3.6e-2 S/cm^2
+.param gks  = { 0.036 * segSurfaceArea }  ; [S]
+.param ErevK = -0.077                     ; [V]
+* neuron model
+.model HH_Params neuron level=1 cMem={memC}  gMem={memG}
++ eLeak={revE}  gNa={gnas}  gK={gks}
++ eNa={ErevNa} eK={ErevK} vRest={revE}
+
+*CREATE THREE NEURON INSTANCES
+yneuron HH1 a1 0 HH_Params
+yneuron HH2 a2 0 HH_Params
+
+.ic v(a1)=-72.655e-3
+.ic v(a2)=-72.655e-3
+
+*THIRD WE NEED TO ADD A SYNAPSE TO GO BETWEEN HH1 AND HH2.
+*(express all params in [A], [V], [s], etc.)
+*Tune maximal conductance, gMax, properly!
+*Let gRheo be roughly the least amount of conductance
+*that allows a single presyn neuronal spike to cause a postsyn neuronal spike.
+.param gRheo=1.318e-12
+
+*Tune N_Neu parameter such that it takes the desired number of presynaptic
+*spiking neurons to make a postsynaptic neuron spike.
+.param N_Neu=1
+.model synParams synapse level=3 vThresh={-45.3e-3} delay={1e-4}
++ gMax={gRheo/N_Neu} eRev={0} tau1={1e-4} tau2={5e-3}
++ ALTD={5e-2} ALTP={8.5} L1TAU=23e-3 L2TAU=7e-3 L3TAU= 46e-3
++ R=-72.655e-3 S=-45.3e-3 WINIT=1 WMAX=1 WMIN=1
+
+*The P parameter represents the synapse success probability.
+*With probability P it will work as usual,
+*With probability (1-P) it will fail to generate a synaptic current
+*and the w will fail to update.
+ysynapse syn12 a1 a2 synParams P={1} gMax={gRheo/N_Neu}
+
+.tran 0 8.4
+.step ysynapse!syn12:gmax 1.318e-13 1.318e-12 1.318e-13
+
+
+.print tran  n(ysynapse!syn12_vl2) 
+
+.end

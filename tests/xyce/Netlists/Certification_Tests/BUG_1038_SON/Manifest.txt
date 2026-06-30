@@ -1,0 +1,4 @@
+top.cir
+top.cir.sh
+foobar.lib
+tags

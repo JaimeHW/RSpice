@@ -1,0 +1,104 @@
+Test Name: BUG_520
+Owner: Eric Keiter
+Test netlists: none 
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Bug 520 is a PDE device bug, and concerns one of the default dopings 
+avaible to 2D PDE devices.  Specifically, the setting of type=PMOS
+is the thing being tested, for the case of a PDE device with 4 electrodes.
+
+The output file of interest is FET1_data.txt.  It contains a bunch of
+mesh-based information, such as maximum potential (see notes, below).
+This file should be compared against the gold standard using "diff".
+
+Another output file is the FET1_000Gnu.dat file.  Do not use this for
+certification.  It is a file which contains 2D plot data, suitable
+for plotting in gnuplot.  If you run "gnuplot" from the command line, and
+then, type:  splot 'Z1_000Gnu.dat' w l <return> you should get a 
+pretty cool picture on the screen.  There is no comparator that can
+be applied to this type of file, but I am leaving it here for historical
+reasons
+
+Procedure:
+============
+Run the circuit bug520.cir on all platforms, in serial.  
+Compare the output of FET1_data.txt  to the gold standard, using
+diff.  If there are no differences, then it passes.
+
+Verification:
+=============
+If "diff" reports no differences, then this test passes. 
+ 
+Notes:
+======
+
+7/13/05, erkeite:
+==================
+In an earlier version of this test, no *.prn file was generated, but 
+Xyce appears to have been changed to exit with a fatal error if there
+is no .PRINT statement.  So, the netlist has been modified to output
+a *prn file, but I don't think it is relevant to the test.
+
+Also, in previous versions of the test nox=0.  As nox is the official
+default solver, the circuit has been changed so nox=1. (actually the nox= 
+line has been removed altogether).
+
+
+2/9/2006 erkeite:
+==================
+
+Modified so that it now outputs
+a *txt file (FET1_data.txt) that contains simple information about
+the mesh-based variables.  Specifically it contains:
+
+max potential
+min potential
+max electron density
+min electron density
+max hole density
+min hole density
+
+potential, current, charge, dIdV and dQdV at each electrode.  In this
+device there are 4 electrodes:  SOURCE, GATE, DRAIN, SUB.
+
+The output precision is fairly low (5 digits)  for this file, so I'm
+hoping it can be compared with "diff".  This is the file that
+should be used for verifying the bug.
+
+Note:  Xyce can now run with no print statement again. (see previous notes)
+
+10/27/2007 erkeite:
+==================
+
+Modified the linsol line from:
+
+.options LINSOL type=klu 
+
+to be:
+
+.options LINSOL type=klu TR_partition=0 TR_amd=0
+
+TR_partition=0 turns off zoltan, which isn't needed if we are using KLU in parallel.
+(in parallel zoltan is called by default).  TR_amd=0 turns off amd reordering, which is
+not necessary because klu does this already.
+
+I have also added 'klu' to the tags file, so that this test is only run once, as part 
+of the forced "klu"  parallel tests.  Without this, the test is run 2x, which is redundant.
+
+1/31/2012 hkthorn:
+=================
+
+Removed ".options LINSOL" line to avoid confusion, since "required:klu" is already in
+the tags file.  By default, the transform interface turns off AMD ordering and partitioning
+if a serial direct solver is chosen for a parallel run.
+
+11/14/2024 hkthorn:
+=================
+
+The "required:klu" tag is being removed from the testing infrastructure, so the ".options LINSOL"
+line has been returned to the netlist.

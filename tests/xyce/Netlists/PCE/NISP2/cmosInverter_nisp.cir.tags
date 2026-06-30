@@ -1,0 +1,6 @@
+nightly, serial, pce, tran, bsim3, expression
+embeddedsampling
+quadrature_pce
+nisp
+required:stokhos
+issue84

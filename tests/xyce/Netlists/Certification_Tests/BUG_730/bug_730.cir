@@ -1,0 +1,68 @@
+Test for Charon vs PISCES vs Xyce
+*
+* Eric Keiter, 9233.
+* 8/1/04.
+*
+* This circuit simulates a simple 2D PDE diode,
+* with a step junction, and Na=Nd=1.0e+15 ccm.
+* A similar problem has also been run in PISCES
+* and also in Charon.  
+*
+VF 3 0 0V
+VT1 4 0 0V
+*
+* This B-source (B1) is here just to get an absolute
+* value of the current, so it can be plotted on a
+* log plot. It is a little Kludgy to do it this way
+* - I'd rather set up a post-process, rather than
+* have V(test1) as a solution variable, but right
+* now Xyce can't do that.
+*
+* Note: the unit scalar is to convert the output from
+* Amps/cm to Amps/micron.
+.param unitScalar=1.0e-4
+
+* the width scalar is to convert the current from
+* Amps/cm^2 to Amps/cm.  This
+.param widthScalar=0.5e-4
+
+B1   test1  0  V = {(abs(I(VT1)))*widthScalar*unitScalar}
+
+* These lengths are in cm.
+.param length=1.0e-4
+
+*------------- Diode PDE device ------------------
+YPDE DIODE 4 3 PDEDIODE
++ tecplotlevel=2  mobmodel=arora
++ l={length} nx=101
+* ELECTRODES:
++ node = {name           =     anode, cathode
++         bc             = dirichlet, dirichlet
++         material       =   neutral, neutral
++         side           =      left, right
++         oxideBndryFlag =         0, 0         }
+*DOPING REGIONS:
++ region= {name = reg1, reg2
++          function =    step,    step
++          type     =   ntype,    ptype
++          nmax     = 1.0e+15,  1.0e+15
++          nmin     = 0.0e+00,      0.0
++          xloc     =  0.5e-4,  0.5e-4
++          flatx    =      -1,       1  }
+*--------end of  Diode PDE device ----------------
+.MODEL PDEDIODE  ZOD  level=1
+
+.DC VT1 -0.2 0.5 0.01
+*.DC VT1 0.0 0.0 1
+.print DC format=tecplot v(4) I(VF) I(VT1) V(test1)
+
+.options NONLIN maxstep=100 maxsearchstep=3
++ searchmethod=0  nox=0 debuglevel=-10
+
+.options TIMEINT reltol=1.0e-3 abstol=1.0e-6
++ resettrannls=0 doubledcop=drift_diffusion
+
+.options DEVICE debuglevel=-10
+
+.END
+

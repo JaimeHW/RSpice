@@ -1,0 +1,474 @@
+* Sensitivity of collector current to amplifier component
+* This circuit was found  on page 298 of the book, 
+* "PSPICE and MATLAB for Electronics: An Integrated Approach" by John Okyere Attia.  
+*
+* The relevant pages are excerpted in google books, and includes a printout of the 
+* PSPICE output.
+*
+
+.global_param VCCvalue=10V
+
+* Baseline circuit
+VCCa 4a 0 DC {VCCValue}
+RB1a 4a 1a 40k
+RB2a 1a 0 10k
+REa 2a 0 1K
+RCa 5a 3a 6K
+VMa 4a 5a DC 0
+Q1a 3a 1a 2a Q2N2222a
+.model Q2N2222a NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for RB1:
+VCCb 4b 0 DC {VCCValue}
+RB1b 4b 1b 40.0000004k
+RB2b 1b 0 10k
+REb 2b 0 1K
+RCb 5b 3b 6K
+VMb 4b 5b DC 0
+Q1b 3b 1b 2b Q2N2222b
+.model Q2N2222b NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for RB2:
+VCCc 4c 0 DC {VCCValue}
+RB1c 4c 1c 40k
+RB2c 1c 0 10.0000001k
+REc 2c 0 1K
+RCc 5c 3c 6K
+VMc 4c 5c DC 0
+Q1c 3c 1c 2c Q2N2222c
+.model Q2N2222c NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for RE:
+VCCd 4d 0 DC {VCCValue}
+RB1d 4d 1d 40k
+RB2d 1d 0 10k
+REd 2d 0 1.00000001k
+RCd 5d 3d 6K
+VMd 4d 5d DC 0
+Q1d 3d 1d 2d Q2N2222d
+.model Q2N2222d NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for RC:
+VCCe 4e 0 DC {VCCValue}
+RB1e 4e 1e 40k
+RB2e 1e 0 10k
+REe 2e 0 1k
+RCe 5e 3e 6.00000006k
+VMe 4e 5e DC 0
+Q1e 3e 1e 2e Q2N2222e
+.model Q2N2222e NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for VM:
+VCCg 4g 0 DC {VCCValue}
+RB1g 4g 1g 40k
+RB2g 1g 0 10k
+REg 2g 0 1k
+RCg 5g 3g 6k
+VMg 4g 5g DC 1.0e-8
+Q1g 3g 1g 2g Q2N2222g
+.model Q2N2222g NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for BF:
+VCCh 4h 0 DC {VCCValue}
+RB1h 4h 1h 40k
+RB2h 1h 0 10k
+REh 2h 0 1k
+RCh 5h 3h 6k
+VMh 4h 5h DC 0
+Q1h 3h 1h 2h Q2N2222h
+.model Q2N2222h NPN(
++   BF =   100.000001
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for BR:
+VCCi 4i 0 DC {VCCValue}
+RB1i 4i 1i 40k
+RB2i 1i 0 10k
+REi 2i 0 1k
+RCi 5i 3i 6k
+VMi 4i 5i DC 0
+Q1i 3i 1i 2i Q2N2222i
+.model Q2N2222i NPN(
++   BF =   1.0000e+02
++   BR =   1.00000001
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for EG:
+VCCj 4j 0 DC {VCCValue}
+RB1j 4j 1j 40k
+RB2j 1j 0 10k
+REj 2j 0 1k
+RCj 5j 3j 6k
+VMj 4j 5j DC 0
+Q1j 3j 1j 2j Q2N2222j
+.model Q2N2222j NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100000111
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for FC:
+VCCk 4k 0 DC {VCCValue}
+RB1k 4k 1k 40k
+RB2k 1k 0 10k
+REk 2k 0 1k
+RCk 5k 3k 6k
+VMk 4k 5k DC 0
+Q1k 3k 1k 2k Q2N2222k
+.model Q2N2222k NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   0.500000005
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for IS:
+VCCl 4l 0 DC {VCCValue}
+RB1l 4l 1l 40k
+RB2l 1l 0 10k
+REl 2l 0 1K
+RCl 5l 3l 6K
+VMl 4l 5l DC 0
+Q1l 3l 1l 2l Q2N2222l
+.model Q2N2222l NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.29503295e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for NC:
+VCCm 4m 0 DC {VCCValue}
+RB1m 4m 1m 40k
+RB2m 1m 0 10k
+REm 2m 0 1k
+RCm 5m 3m 6k
+VMm 4m 5m DC 0
+Q1m 3m 1m 2m Q2N2222m
+.model Q2N2222m NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.00000002
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for NE:
+VCCn 4n 0 DC {VCCValue}
+RB1n 4n 1n 40k
+RB2n 1n 0 10k
+REn 2n 0 1k
+RCn 5n 3n 6k
+VMn 4n 5n DC 0
+Q1n 3n 1n 2n Q2N2222n
+.model Q2N2222n NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.500000015
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for NF:
+VCCo 4o 0 DC {VCCValue}
+RB1o 4o 1o 40k
+RB2o 1o 0 10k
+REo 2o 0 1k
+RCo 5o 3o 6k
+VMo 4o 5o DC 0
+Q1o 3o 1o 2o Q2N2222o
+.model Q2N2222o NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.00000001
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for NKF:
+VCCp 4p 0 DC {VCCValue}
+RB1p 4p 1p 40k
+RB2p 1p 0 10k
+REp 2p 0 1k
+RCp 5p 3p 6k
+VMp 4p 5p DC 0
+Q1p 3p 1p 2p Q2N2222p
+.model Q2N2222p NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   0.500000005
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for NR:
+VCCq 4q 0 DC {VCCValue}
+RB1q 4q 1q 40k
+RB2q 1q 0 10k
+REq 2q 0 1k
+RCq 5q 3q 6k
+VMq 4q 5q DC 0
+Q1q 3q 1q 2q Q2N2222q
+.model Q2N2222q NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.00000001
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for TNOM:
+VCCr 4r 0 DC {VCCValue}
+RB1r 4r 1r 40k
+RB2r 1r 0 10k
+REr 2r 0 1k
+RCr 5r 3r 6k
+VMr 4r 5r DC 0
+Q1r 3r 1r 2r Q2N2222r
+.model Q2N2222r NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   27.00000027
++  VAF =   2.0000e+02
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for VAF:
+VCCs 4s 0 DC {VCCValue}
+RB1s 4s 1s 40k
+RB2s 1s 0 10k
+REs 2s 0 1k
+RCs 5s 3s 6k
+VMs 4s 5s DC 0
+Q1s 3s 1s 2s Q2N2222s
+.model Q2N2222s NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   200.000002
++  XTI =   3.0000e+00)
+
+* Finite difference perturbation circuit for XTI:
+VCCt 4t 0 DC {VCCValue}
+RB1t 4t 1t 40k
+RB2t 1t 0 10k
+REt 2t 0 1k
+RCt 5t 3t 6k
+VMt 4t 5t DC 0
+Q1t 3t 1t 2t Q2N2222t
+.model Q2N2222t NPN(
++   BF =   1.0000e+02
++   BR =   1.0000e+00
++   EG =   1.1100e+00
++   FC =   5.0000e-01
++   IS =   3.2950e-14
++   NC =   2.0000e+00
++   NE =   1.5000e+00
++   NF =   1.0000e+00
++  NKF =   5.0000e-01
++   NR =   1.0000e+00
++ TNOM =   2.7000e+01
++  VAF =   2.0000e+02
++  XTI =   3.00000003)
+
+* Note: to run in spice3 or ngspice, comment out all the lines below, and
+* replace with:
+*.SENS I(VM)
+
+.options device debuglevel=-100
+
+.DC VCCvalue 1 10 0.2
+.print DC v(4a) I(VMa) 
++ {(I(VMb)-I(VMa))/0.0004};  dI/dRB1
++ {(I(VMc)-I(VMa))/0.0001};  dI/dRB2
++ {(I(VMd)-I(VMa))/0.00001};  dI/dRE
++ {(I(VMe)-I(VMa))/0.00006};  dI/dRC
++ {(I(VMg)-I(VMa))/1.0e-8};  dI/dVM
++ {(I(VMh)-I(VMa))/1.0e-6};  dI/dBF
+*+ {(I(VMi)-I(VMa))/1.0e-8};  dI/dBR
+*+ {(I(VMj)-I(VMa))/1.11e-8};  dI/dEG
+*+ {(I(VMk)-I(VMa))/0.5e-8};  dI/dFC
++ {(I(VMl)-I(VMa))/3.295e-19};  dI/dIS
+*+ {(I(VMm)-I(VMa))/2.0e-8};  dI/dNC
+*+ {(I(VMn)-I(VMa))/1.5e-8};  dI/dNE
++ {(I(VMo)-I(VMa))/1.0e-8};  dI/dNF
+*+ {(I(VMp)-I(VMa))/0.5e-8};  dI/dNKF
+*+ {(I(VMq)-I(VMa))/1.0e-8};  dI/dNR
++ {(I(VMr)-I(VMa))/27.0e-8};  dI/dTNOM
++ {(I(VMs)-I(VMa))/2.0e-6};  dI/dVAF
+*+ {(I(VMt)-I(VMa))/3.0e-8};  dI/dXTI   ; the correct answer is simply zero everywhere, but the FD approximation gives noise.  Bad to compare to.
+

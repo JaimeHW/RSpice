@@ -1,0 +1,8 @@
+exclude
+tags
+i_sources.cir.pspice
+i_sources.cir
+i_sources.cir.sh
+v_sources.cir.pspice
+v_sources.cir
+v_sources.cir.sh

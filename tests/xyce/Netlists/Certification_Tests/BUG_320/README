@@ -1,0 +1,71 @@
+Bug Number: 320
+Test netlist: bug_320.cir
+
+Description:
+============
+This test checks for correct handling of the nonlinear solve parameter
+"SEARCHMETHOD".
+
+The default for searchmethod is zero. (which means, essentially, 
+no search method).  This circuit will not run without some kind of search
+in the nonlinear solver.  This happens to be a PDE(TCAD) device problem.
+THe reason for this choice is that PDE problems often require a quadratic 
+search method to converge.  Most circuit problems don't seem to require it.
+
+With the old nonlinear solver (.options nonlin nox=0), this happens:
+
+  searchmethod        status
+      0               FAIL
+      1               FAIL
+      2               SUCCESS.
+      3               INVALID METHOD - FAIL.
+
+With the new nonlinear solver (.options nonlin nox=1), this happens:
+
+  searchmethod        status
+      0               FAIL
+      1               FAIL
+      2               SUCCESS.
+      3               SUCCESS.
+
+With the new solver, nox, searchmethod=2 is a quadratic search (as it also
+is for nox=0, the old solver).  When using nox, searchmethod=3 is a 
+cubic polynomial search.  Both of searchmethod=2 and 3 are polynomial
+searches, and so they tend to behave very similarly.
+
+Anyway, for this test, I have set searchmethod=2.  This should work for both
+nox=1 and nox=0.
+
+Verification
+============
+Run Xyce on the netlist, bug_320.cir.  
+
+Run this with both nox=1 and nox=0.  Both should pass.  Don't bother comparing
+output files.  If both nox=1 and nox=0 run successfully, consider this
+a passed test.
+
+Special Notes:
+==============
+THIS TEST SHOULD NOT BE RUN IN PARALLEL.
+
+Additional Notes, by Eric Keiter.  10/12/04.
+
+This test is simply to see if one parameter (searchmethod) is recognized,
+and used correctly.  
+
+If searchmethod is used correctly, the circuit will solve, and exit
+successfully, and if it is not used correctly, the circuit will fail.
+
+Additional Note, 10/27/04.  Eric Keiter.
+
+If Xyce gives a warning about "FREDLEVEL" being an invalid parameter, this 
+is good - this is the correct behavior.
+
+This bug was primarily a parser and/or parameter processing bug.  Xyce was not
+processing the "searchmethod" parameter correctly.  It was ignoring it.  Hence
+part of the fix involved forcing Xyce to identify which parameters were valid and
+which were not.  "FREDLEVEL" is an intentionally incorrect parameter, meant
+to test this.
+
+
+

@@ -1,0 +1,41 @@
+Test Name: BUG_689
+Owner: Eric Rankin 
+Test netlists: dos-diode.cir
+               unix-diode.cir
+GS files: none
+Mode:  Serial 
+Comparator:  diff 
+Version of Xyce: Release_3.0
+ 
+Description:
+============
+Windows builds of Xyce failed to properly parse subcircuit contents if dos
+style line terminators were present in the subcircuit.
+ 
+Procedure:
+============
+runxyce -o dd.out dos-diode.cir 
+
+Note the (absence of a) warning message from the device package regarding 
+voltage node(s) connected to only one device terminal.
+
+
+runxyce -o ud.out unix-diode.cir 
+
+diff ud.out dd.out
+
+ 
+Verification:
+=============
+Xyce will run to completion for both circuits. 
+
+Passes if no warning message is shown on stdout and dd.out and ud.out are 
+identical.
+ 
+Notes:
+======
+This bug only affects Windows.
+
+Be careful to preserve Windows line terminators when tranferring dos-diode.cir
+between machines.  The unix/linux utility "unix2dos" is helpful for formatting.
+

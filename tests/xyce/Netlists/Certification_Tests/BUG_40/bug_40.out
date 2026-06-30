@@ -1,0 +1,142 @@
+
+
+ *****
+ ***** Welcome to the Xyce(TM) Parallel Electronic Simulator
+ *****
+ ***** This is version DEVELOPMENT-200305080919
+ 
+ 
+ ***** Executing netlist bug_40.cir...
+ 
+ 
+ 
+ ***** Setting up topology...
+ 
+ ***** Setting up matrix structure...
+ 
+ ***** Initializing...
+ noxFlag is: FALSE
+directLinSolvFlag is TRUE.
+
+ ***** Allocating solver for 7 equations
+ 
+ ***** Local Equations: 7
+ Direct Solver Constructed
+
+
+ 
+-----------------------------------------------------------------------------
+
+ ***** Nonlinear solver options:
+ 
+	absTol:			1e-12
+	relTol:			0.001
+	deltaXTol (weighted):	1
+	RHSTol:			1e-06
+	max NL Steps:		200
+	Analysis Mode:		0	(DC Op)
+	NL Strategy:		0	(None => Newton)
+	search method:		0	(None => Full Newton Steps)
+	max search steps:	9
+	inexact-Newton forcing:	0
+	norm level:		2
+	linear optimization:	0
+	constraint backtrack:	0
+	Direct linear solver:	1
+-----------------------------------------------------------------------------
+
+ 
+
+ 
+-----------------------------------------------------------------------------
+
+ ***** Time Integration solver options:
+ 
+	Analysis:			DC SWEEP
+	Total DC Sweep Steps:	1
+	absErrorTol:			1e-06
+	relErrorTol:			0.01
+	exitTime:			0
+	exitStep:			-1
+-----------------------------------------------------------------------------
+  Integration method = None
+ 
+
+ 
+***** Start of DCOP STEP                        # 1
+ 
+      Current, Next, Step:  0.000000000e+00, 0.000000000e+00, 1.000000000e-09
+
+ 
+ Nonlinear	  Step		  Wt DeltaX	  Max Res	  Rel Res
+ Iter		  Length	  Norm		  Norm		  Norm
+------------    ------------    ------------    ------------    ------------
+Niter:     0	  1.0000e+00	  0.0000e+00	  1.8000e+01	  1.0000e+00
+ 
+ ***** Using Newton Direction...
+ 
+Niter:     1	  1.0000e+00	  1.0000e+03	  3.4953e-03	  2.7461e-04
+ 
+ ***** Using Newton Direction...
+ 
+Niter:     2	  1.0000e+00	  1.0000e+03	  2.0398e-04	  1.6026e-05
+ 
+ ***** Using Newton Direction...
+ 
+Niter:     3	  1.0000e+00	  6.1974e+01	  8.9037e-07	  6.9954e-08
+ 
+ ***** Using Newton Direction...
+ 
+Niter:     4	  1.0000e+00	  2.7283e-01	  1.7265e-11	  1.3565e-12
+ 
+Dev Warning: Output requested for non-existent node "BAD" by PRINT statement
+ 
+
+ 
+	Number Successful Steps Taken:		1
+	Number Failed Steps Attempted:		0
+	Number Jacobians Evaluated:		4
+	Number Iteration Matrix Factorizations:	4
+	Number Linear Solves:			4
+	Number Failed Linear Solves:		0
+	Number Residual Evaluations:		5
+	Number Nonlinear Convergence Failures:	0
+
+ 
+	Total Residual Load Time:		0.000101 seconds
+	Total Jacobian Load Time:		2.9e-05 seconds
+	Total Linear Solution Time:		0.000348 seconds
+
+ 
+ 
+ ***** Xyce(TM) Transient Solvers Run Time: 0.044079 seconds.
+ 
+
+  ***** Solution Summary *****
+
+ 
+	Number Successful Steps Taken:		1
+	Number Failed Steps Attempted:		0
+	Number Jacobians Evaluated:		4
+	Number Iteration Matrix Factorizations:	4
+	Number Linear Solves:			4
+	Number Failed Linear Solves:		0
+	Number Residual Evaluations:		5
+	Number Nonlinear Convergence Failures:	0
+
+ 
+	Total Residual Load Time:		0.000101 seconds
+	Total Jacobian Load Time:		2.9e-05 seconds
+	Total Linear Solution Time:		0.000348 seconds
+
+ 	Total Simulation Solvers Run Time:	0.044644 seconds
+ 
+ ***** End of Solution Summary *****
+
+ *****
+ ***** End of Xyce(TM) Simulation 
+ *****
+ 
+ Cleaning up...
+ 
+ 

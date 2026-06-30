@@ -1,0 +1,44 @@
+RLC Oscillator circuit
+**********************************************************************
+*
+* This circuit is an RLC oscillator with a nonlinear resistor to
+* produce negative conductance.
+*
+* There is also a voltage controlled capacitor that changes the 
+* frequency and amplitude in time.
+*
+* This is a candidate for WaMPDE
+*
+* (This circuit came from Ting Mei 6/4/03)
+*
+* To start this circuit in transient, use x0(1) = 0.1 (9/22/03 TSC)
+*
+**********************************************************************
+.param G0=-0.1
+.param Ginf=0.25
+.param Vk=1
+.param C0={1.0e-6/(2*pi)}
+.param CM={1.0e-6/(4*pi)}
+
+R1  1 0   0 ;{(G0 - Ginf)*Vk*tanh(V(1)/Vk) + Ginf*V(1)}
+L1	1 0	  {100*C0}
+C1	1 0	  0 ;{100*(C0 + CM*V(2))*V(1)}
+Cd  2 0   0.3uF
+Rd  2 3   1k
+Vs  3 0   SIN(0V 1.5V 100 0 0)
+*.tran 5us 9ms
+*.tran 5us 20ms
+.mpde 5us 20ms
+*.options timeint  method=3 useDCop=0
+
+*.mpde 5us 0.5ms 10ms
+.options mpdeint ic=0 freqdomain=1 wampde=1 n2=21 oscout="v(1)" T2=1e-4 
+*.mpde 5us 0.5ms 9ms
+*.options mpde freqdomain=0 wampde=1 n2=400 oscout=v(1) T2=1e-4 diff=2
+*.options mpde freqdomain=0 wampde=1 n2=21 oscout=v(1) T2=1e-4 diff=3
+.print tran V(1) I(L1) V(3) V(2) I(Vs)
+.print mpde V(1) I(L1) V(3) V(2) I(Vs)
+
+*COMP I(Vs) offset=.0001
+.END
+

@@ -1,0 +1,17 @@
+ErrorMessageTest.cir
+ErrorMessageTest.cir.sh
+ErrorMessageTest.cir.tags
+ErrorMessageTest.cir.options
+ErrorMessageTest_isc_td_input.prn
+ErrorMessageTest_isc_td_input.csd
+ErrorMessageTest_isc_td_input.csv
+ErrorMessageTest_isc_td_input.noindex
+ylin-2port-sparam.cir.s2p
+opAmpWithTDIsc.cir
+opAmpWithTDIsc.cir.sh
+opAmpWithTDIsc.cir.s2p
+opAmpWithTDIsc_input.prn
+opAmpWithTDIsc_input.csv
+opAmpWithTDIsc_input_prn
+opAmpWithTDIsc_input_csv
+opAmpWithTDIsc_input_noindex

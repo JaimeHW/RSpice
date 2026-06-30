@@ -1,0 +1,26 @@
+***************************************************************
+* Output both the direct and adjoint sensitivities for
+* the case of two objective functions and two parameters.
+* This file only has a .PRINT SENS line.
+*
+* This netlist outputs the VP(b) column in radians, not
+* degrees
+*
+* See SON Bug 1170 for more details.
+***************************************************************
+
+* Trivial high-pass filter
+
+R2 c 0 1
+R1 b c 1
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.SENS OBJVARS=b,c PARAM=R1:R,C1:C
+.options sensitivity direct=1 adjoint=1 stdoutput=1
+.PRINT SENS FORMAT=NOINDEX vr(b) vi(b) vp(b) vm(b) R1:R R2:R C1:C
+.ac dec 5 100Hz 1e6
+
+.OPTIONS OUTPUT PHASE_OPS_RADIANS=1
+
+.end

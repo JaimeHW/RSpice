@@ -1,0 +1,22 @@
+Bug Number: 624
+Test netlist: bug_624.cir
+
+Description:
+============
+This test checks that an error is returned when the user tries to step a non-existent
+parameter.  The original intent had been to test that setParam handled an attempt to
+set a non-existent parameter correctly, but investigation revealed that the error
+condition was encountered as a result of a call to getParam.  At that time, setParam
+was tested by modifying the Xyce source.
+
+Verification
+============
+Run Xyce in serial on the netlist.
+
+Xyce should exit with fatal error:
+
+User Fatal: Unable to find parameter R1:BOGUS
+
+Special Notes:
+==============
+Parallel should give the same error.

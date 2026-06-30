@@ -1,0 +1,27 @@
+main test of .func/.param resolution, per bug 224
+*
+* This test defines the functions and params inside the subckt, should be the
+* same as the otehr two netlists
+*
+* This one throws a PARAMS: into the mix, just for good measure.
+
+.DC V1 0 5 .1
+.print DC v(1) v(2) v(3) v(4) v(5)
+
+*Stupid little circuit to generate a voltage  feed into B source
+V1 1 0 5V
+R0 1 0 1K
+X1 2 3 1 FooCkt
+X2 4 5 1 FooCkt PARAMS: coef=2
+
+.subckt FooCkt A B CTL PARAMS: coef=1
+.Func F1(X) {coef*X*X}
+.Param resistance1=10k
+.param resistance2=5k
+* Voltage divider, fed by B source
+B1 A 0 V={F1(V(CTL))}
+R1 A B {resistance1}
+R2 B 0 {resistance2}
+.ends
+
+.end

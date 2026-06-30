@@ -1,0 +1,22 @@
+* Test error messages from invalid nodes on .MEASURE lines
+* See SON Bugs 707 and 718 for more details.
+
+V1 1 0 SIN(0 1 1)
+R1 1 2 1
+R2 2 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(2)
+
+* These statements should produce a fatal error during
+* netlist parsing, rather than a FAILED measure. Test
+* both V() and N()
+.MEASURE TRAN BOGONODEV MAX V(bogoNode)
+.MEASURE TRAN BOGONODEN MAX N(missingNode)
+
+* GND is not a valid in this .MEASURE statement since the 
+* netlist does not define GND as a valid node or have
+* the line .PREPROCESS REPLACEGROUND TRUE
+.MEASURE TRAN NOREPLACEGROUND MAX V(GND)
+
+.END

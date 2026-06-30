@@ -1,0 +1,6 @@
+serial, nightly,  parallel, normal
+valgrind
+capacitor
+embeddedsampling
+seed
+bug1084son

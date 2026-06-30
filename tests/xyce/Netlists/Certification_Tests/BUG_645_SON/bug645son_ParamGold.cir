@@ -1,0 +1,11 @@
+Testing the use of .param in objective functions.  Reference circuit for good.cir
+
+.DC V1 1 1 1
+V1 1 0 1
+R1 1 2 1
+R2 2 0 0.5
+
+.print sens
+.SENS objfunc={I(V1)} param=R1:R
+
+.end

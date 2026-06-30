@@ -1,0 +1,32 @@
+Transmission Line Circuit
+**************************************************************
+* Tier No.:	1                                           
+* Description:  Test of Xyce transmission line model using 
+*               lossless circuit configuration.  
+* Input:  5V Pulse Source
+* Output: Capacitor voltage
+* Circuit Elements: input and load resistances with matched
+*			  impedances
+* Analysis:
+*	The circuit contains a pulse voltage source (VIN), with a 
+*	50 ohm (RIN) output impedance, connected to a 50 ohm 
+*	transmission line (TLINE) which is terminated in a 50 ohm 
+*	(RL) matched load.  The pulse goes from 0V to 5V with no delay,
+*	and has a pulse width of 25ns.  The transmission line has a 
+*	10ns delay. Any change in the input voltage, V(2), of TLINE  
+*     should occur 10N later at the output (node 3).  
+*	Therefore, the input voltage rises from 0V to 2.5V in 1ns and 
+*	remains at 2.5V for 5ns.  The output voltage V(3), does the  
+*	same as V(2) except that it is delayed by 10ns. 
+*
+*	Note: V(2) is 2.5V due to the voltage drop across the 50 ohm
+*	RIN resistor. 
+*************************************************************** 
+VIN 1 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)
+RIN 1 2 50
+TLINE 2 0 3 0 Z0=50 TD=10N
+RL 3 0 50
+.TRAN 0.25N 50N
+.PRINT TRAN V(2) V(3)
+.options restart file=trans_test2e-08
+.END

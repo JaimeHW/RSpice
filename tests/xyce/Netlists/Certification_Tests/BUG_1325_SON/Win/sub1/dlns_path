@@ -1,0 +1,5 @@
+* The path for the .INC and .LIB files use the Windows drive letter without
+* a file separator in the path.  So they are in the netlist subdirectory,
+* which is the "current working directory".
+.INC C:inc_dlns_path
+.LIB C:lib_dlns_path LIB_DLNS

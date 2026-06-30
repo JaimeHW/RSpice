@@ -1,0 +1,35 @@
+Test errors for measure types that are not supported for NOISE
+******************************************************************************
+* Only the AVG, DERIV, FIND-WHEN, EQN/PARAM, ERR, ERR1, ERR2, ERROR, INTEG
+* MAX, MIN, PP, RMS, TRIG, TARG and WHEN measure types are supported for
+* NOISE mode for .MEASURE.  This tests the error messages from the other
+* valid types, that aren't supported for NOISE.
+*
+* The netlist and .NOISE print/analysis statements in this netlist
+* don't really matter.
+*
+*******************************************************************
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 100MEG 1
+.PRINT NOISE INOISE ONOISE
+
+* These measure types are not supported for NOISE mode. The exact syntax
+* of each measure line doesn't matter.  Just that it has noise as the
+* second word.
+.measure noise dutyVal duty VM(4)
+.measure noise fourfail FOUR VM(4) AT=1e6 TD=2e-3
+.measure noise freqVal FREQ VM(3) ON=0.75 OFF=0.25
+.measure noise offVal off_time VM(4) OFF=0
+.measure noise onVal on_time VM(4) ON=0
+
+.END

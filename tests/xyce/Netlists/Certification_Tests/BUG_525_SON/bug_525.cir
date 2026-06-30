@@ -1,0 +1,14 @@
+DC test of print output format
+*
+* Trivial resistor circuit, just do a DC sweep and watch the output
+*
+.options device GMIN=7
+
+R1 1 0 R={1.0/GMIN}
+R2 1 0 {1.0/1e-12}
+V1 1 0 DC 0V
+
+.print DC v(1) I(v1) r1:r r2:r {11.0/GMIN}
+.dc v1 0 10 .1
+
+.end

@@ -1,0 +1,13 @@
+
+Certification test for bug 531 on charleston.
+Title: Enhancement of the .PRINT statement to support V(*)
+
+Eric R. Keiter, 4/25/2012
+
+This test runs a simple inverter, which includes a print statement that uses 
+V(*) and I(*).  The point of this test is NOT to insure that the inverter
+runs properly, just that it outputs the correct list of variables.  So,
+assuming the test runs all the way through, the test ONLY compares the 
+*prn header, which include most of the V and I variables, excluding
+internal V nodes.
+

@@ -1,0 +1,42 @@
+Regression test to show temperature-dependent capacitor behavior.
+********************************************************************************
+* Tier No.:  1
+* Directory/Circuit Name:  TEMPCAP/tempcap.cir
+*
+* Analysis:
+*
+* This circuit is a modified version of TEMPCAP/capacitor.cir, by
+* Todd Coffey and Tom Russo.  It replaces the original version, which
+* had an incorrect analytic solution, and also didn't use a perl script.
+* Just like the original was a modified version of the old capacitor.cir
+* circuit, this one is a modified version of the new capacitor.cir.
+*
+* If this circuit is simulated correctly, the T=0 value of the voltage v(1)
+* should be 1V, and it should decay to 0 with a time constant of RC, as
+*   v(1)(T)=1V*exp(-t/RC), where R is 1K and C is given by:
+*
+*   The capacitance is C = baseCap*(1+(temp-tnom)*(TC1 + (temp-tnom)*TC2))
+*       C = 20E-9*(1 + 700*(0.00177 + 700*(-6.3e-7))) = 1.9303e-06
+*
+* The provided perl script will generate the correct analytic solution 
+* for this circuit.  Simply run as "./tempcap.cir.prn.gs.pl" and 
+* it will take the tempcap.cir.prn file and generate an 
+* tempcap.cir.prn.gs file which uses the same time points as in tempcap.cir.prn.
+*
+* The gold standard was generated from 
+* > ./tempcap.cir.prn.gs.pl
+* > cp tempcap.cir.prn.gs ../../OutputData/TEMPCAP/tempcap.cir.prn
+*
+* These high relative and absolute tolerances are required to match the
+* analytic solution.
+*
+********************************************************************************
+c1    1 0 CAP1 1uF IC=1 TEMP=727
+r1    1 2 1K
+v1 2 0 0V
+.model CAP1 C ( TC1=1.77M TC2=-0.63U TNOM=55 )
+
+.print tran v(1)
+.tran 0 5ms
+.options timeint reltol=1e-6 abstol=1e-6
+.END

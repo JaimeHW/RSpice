@@ -1,0 +1,17 @@
+********************************************************
+* Test FORMAT=STD for the .PRINT SENS line without .STEP  
+*
+********************************************************
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+.PRINT DC V(1) R1:R R2:R V(2)
+.DC V1 1 25 1 
+
+.sens objfunc={V(2)} param=R2:R 
+.print SENS V(1) R1:R R2:R
+.options SENSITIVITY direct=1 adjoint=0  
+
+.end

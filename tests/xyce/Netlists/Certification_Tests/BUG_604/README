@@ -1,0 +1,26 @@
+Test Name: BUG_604
+Owner: Eric Rankin
+Test netlists: none 
+GS files: none
+Mode: serial, parallel 
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+bug 604   Parameters defined in an include file not available for use
+
+Procedure:
+============
+Run nightly regression tests.  Make sure the set of SUBCKT tests 
+pass in:
+Xyce_Test/Netlists/SUBCKT
+
+Verification:
+=============
+Passes if the circuits in the above regression tests pass. Particularly
+the subckt_e2.cir subckt_e3.cir and subckt_f1.cir
+ 
+Notes:
+======
+

@@ -1,0 +1,22 @@
+* Test error messages from invalid nodes in expressions
+* on .PRINT lines after the fix for SON Bug 718. Note 
+* that GND is not a valid node since the netlist does
+* does not define GND as a valid node or have 
+* the line .PREPROCESS REPLACEGROUND TRUE
+*
+* For completeness, test N() and all forms of V() operators
+
+.ac dec 5 100Hz 1e6
+.PRINT AC 
++ {V(bogo1)} {V(bogo2,GND)} 
++ {V(bogo3,bogo4)} {V(a,bogo5)} {N(bogo6)}
++ {VR(bogo7)} {VI(bogo8)} {VP(bogo9)} {VM(bogo9)} {VDB(bogo10)}
++ {VR(a,bogo11)} {VI(bogo12,a)} {VP(b,bogo13)} 
++ {VM(bogo14,b)} {VDB(a,bogo15)}
+
+* Trivial high-pass filter
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.END

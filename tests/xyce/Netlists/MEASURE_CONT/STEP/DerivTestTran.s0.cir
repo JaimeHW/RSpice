@@ -1,0 +1,99 @@
+* This netlist is equivalent to Step 0 for the
+* DerivTestTran.cir netlist. It has R1b=150.
+*
+* See SON Bugs 1274 and 1313 for more details.
+********************************************************
+
+* For testing convenience send the output for the TRAN_CONT
+* measures to the <netlistName>.mt0 file.
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+*
+VPWL1 1  0  pwl(0 0.1 2.5m 0.5 5m 0 7.4m 0.4 10m 0)
+VPWL2 2  0  pwl(0 0.5 10m 0)
+
+R1a 1  1a  100
+R1b 1a  0  150
+R2  2  0   100
+
+.TRAN 0 10ms
+.PRINT TRAN V(1) V(1a) V(2)
+
+* Non-continuous version should return first crossing.
+* Continuous version should return all crossings.
+.measure tran derivCrossTest1 deriv v(1a) when v(1a)=0.2
+.measure TRAN_CONT derivCrossContTest1 deriv v(1a) when v(1a)=0.2
+
+* Non-continuous version should return first crossing.
+* Continuous version should return all crossings, starting
+* with the first one.
+.measure tran derivCrossTest2 deriv v(1a) when v(1a)=0.2 CROSS=1
+.measure TRAN_CONT derivCrossContTest2 deriv v(1a) when v(1a)=0.2 CROSS=1
+
+* Non-continuous version should return second crossing.
+* Continuous version should return all crossings, starting
+* with the second one.
+.measure tran derivCrossTest3 deriv v(1a) when v(1a)=0.2 CROSS=2
+.measure TRAN_CONT derivCrossContTest3 deriv v(1a) when v(1a)=0.2 CROSS=2
+
+* These should both return the last crossing
+.measure tran derivCrossTest4 deriv v(1a) when v(1a)=0.2 CROSS=LAST
+.measure TRAN_CONT derivCrossContTest4 deriv v(1a) when v(1a)=0.2 CROSS=LAST
+
+* DERIV-AT measures
+* These should give the same answer
+.measure tran atTest deriv v(1a) at=2e-3
+.measure tran_cont atContTest DERIV v(1a) at=2e-3
+
+*****************************************************
+* test RISE and FAll qualifiers for DERIV-WHEN
+.MEASURE TRAN_CONT derivRiseContTest1 deriv v(1a) when v(1a)=0.2 RISE=1
+.MEASURE TRAN_CONT derivRiseContTest2 deriv v(1a) when v(1a)=0.2 RISE=2
+.MEASURE TRAN_CONT derivRiseContTest3 deriv v(1a) when v(1a)=0.2 RISE=LAST
+
+.MEASURE TRAN_CONT derivFallContTest1 deriv v(1a) when v(1a)=0.2 FALL=1
+.MEASURE TRAN_CONT derivFallContTest2 deriv v(1a) when v(1a)=0.2 FALL=2
+.MEASURE TRAN_CONT derivFallContTest3 deriv v(1a) when v(1a)=0.2 FALL=LAST
+
+************************************************************************
+* Use of FROM-TO.  Only the rise, fall or cross values within the
+* FROM-TO windows should be returned, starting at the requested value.
+* For CROSS=LAST, only the last one within the FROM-TO window is returned
+.MEASURE TRAN_CONT derivCross1ContFrom2ms deriv v(1a) when v(1a)=0.2 CROSS=1 FROM=2e-3
+.MEASURE TRAN_CONT derivCross2ContFrom2ms deriv v(1a) when v(1a)=0.2 CROSS=2 FROM=2e-3
+.MEASURE TRAN_CONT derivCrossContTo75ms deriv v(1a) when v(1a)=0.2 CROSS=1 TO=7.5e-3
+.MEASURE TRAN_CONT derivRiseContTo5ms deriv v(1a) when v(1a)=0.2 RISE=1 TO=5e-3
+.MEASURE TRAN_CONT derivFallContFrom5ms deriv v(1a) when v(1a)=0.2 FALL=1 FROM=5e-3
+.MEASURE TRAN_CONT derivCrossContToLast deriv v(1a) when v(1a)=0.2 CROSS=LAST TO=8e-3
+
+*********************************************************
+* Test negative values
+.MEASURE TRAN derivCrossNeg2 deriv v(1a) when v(1a)=0.2 CROSS=-2
+.MEASURE TRAN derivCrossNeg3 deriv v(1a) when v(1a)=0.2 CROSS=-3
+.MEASURE TRAN derivCrossNeg5 deriv v(1a) when v(1a)=0.2 CROSS=-5
+.MEASURE TRAN_CONT derivCrossContNeg1 deriv v(1a) when v(1a)=0.2 CROSS=-1
+.MEASURE TRAN_CONT derivCrossContNeg2 deriv v(1a) when v(1a)=0.2 CROSS=-2
+.MEASURE TRAN_CONT derivCrossContNeg3 deriv v(1a) when v(1a)=0.2 CROSS=-3
+.MEASURE TRAN_CONT derivCrossContNeg5 deriv v(1a) when v(1a)=0.2 CROSS=-5
+
+.MEASURE TRAN derivRiseNeg2 deriv v(1a) when v(1a)=0.2 RISE=-2
+.MEASURE TRAN derivRiseNeg3 deriv v(1a) when v(1a)=0.2 RISE=-3
+.MEASURE TRAN_CONT derivRiseContNeg1 deriv v(1a) when v(1a)=0.2 RISE=-1
+.MEASURE TRAN_CONT derivRiseContNeg2 deriv v(1a) when v(1a)=0.2 RISE=-2
+.MEASURE TRAN_CONT derivRiseContNeg3 deriv v(1a) when v(1a)=0.2 RISE=-3
+
+.MEASURE TRAN derivFallNeg2 deriv v(1a) when v(1a)=0.2 FALL=-2
+.MEASURE TRAN derivFallNeg3 deriv v(1a) when v(1a)=0.2 FALL=-3
+.MEASURE TRAN_CONT derivFallContNeg1 deriv v(1a) when v(1a)=0.2 FALL=-1
+.MEASURE TRAN_CONT derivFallContNeg2 deriv v(1a) when v(1a)=0.2 FALL=-2
+.MEASURE TRAN_CONT derivFallContNeg3 deriv v(1a) when v(1a)=0.2 FALL=-3
+
+*************************************************
+* test failed measures
+.MEASURE TRAN_CONT derivCrossContFail1 deriv v(1a) when v(1a)=1
+.MEASURE TRAN_CONT atContFail DERIV v(1a) at=20e-3
+.MEASURE TRAN_CONT derivCrossContFail2 deriv v(1a) when v(1a)=0.2 CROSS=5
+.MEASURE TRAN_CONT derivRiseContFail deriv v(1a) when v(1a)=0.2 RISE=3
+.MEASURE TRAN_CONT derivFallContFail deriv v(1a) when v(1a)=0.2 FALL=3
+
+.END

@@ -1,0 +1,24 @@
+*
+* This netlist has a .PRINT SENS line that uses the
+* same file name as the -r invocation.  So, it should
+* produce a fatal netlist parsing error, if this
+* invocation is used:
+*
+*   Xyce -r tran-sens-error.cir.raw -a tran-sens-error.cir
+*
+*
+********************************************************
+
+V1 1 0 PWL 0 0 1 1
+R1 1 2 1
+R2 2 0 1
+
+.options output initial_interval=0.2
+.PRINT TRAN R1:R R2:R V(1) V(2)
+.TRAN 0 1 
+
+.sens objfunc={V(2)} param=R2:R 
+.print SENS FILE=tran-sens-error.cir.raw FORMAT=CSV V(1) R1:R R2:R
+.options SENSITIVITY direct=1 adjoint=0
+
+.end

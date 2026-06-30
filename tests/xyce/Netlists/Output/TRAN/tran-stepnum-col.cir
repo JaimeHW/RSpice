@@ -1,0 +1,21 @@
+* Test use of .OPTIONS OUTPUT ADD_STEPNUM_COL=TRUE
+*
+* See SON Bug 1209 for more details.
+**************************************************
+
+V1 1 0 SIN(0 1 1)
+R1 1 2 1
+R2 2 0 1
+
+* step over two variables
+.STEP R1 1 2 1
+.STEP R2 3 4 1
+
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.01 ADD_STEPNUM_COL=TRUE
+.PRINT TRAN R1:R R2:R V(1) V(2)
+.PRINT TRAN FORMAT=NOINDEX FILE=tran-stepnum-col.cir.noindex.prn R1:R R2:R V(1) V(2)
+.PRINT TRAN FORMAT=GNUPLOT FILE=tran-stepnum-col.cir.gnuplot.prn R1:R R2:R V(1) V(2)
+.PRINT TRAN FORMAT=SPLOT FILE=tran-stepnum-col.cir.splot.prn R1:R R2:R V(1) V(2)
+.TRAN 0 1
+
+.END

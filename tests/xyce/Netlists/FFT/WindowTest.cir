@@ -1,0 +1,50 @@
+*************************************************
+* Test of various FFT Window Types, and the
+* FFTOUT=1 option.  This also tests that I(R1)
+* works on a .FFT line even if I(R1) does not
+* appear on the .PRINT TRAN line.  It also tests
+* expressions on the .FFT line.
+*
+*************************************************
+.TRAN 0 1
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+V3 3 0 SIN(0 1 1)
+R3 3 0 1
+
+V4 4 0 PWL 0 0 0.5 1 1 0
+R4 4 0 1
+
+.PRINT TRAN V(1) V(2) V(3) V(4)
+.OPTIONS FFT FFTOUT=1
+
+* Test explicitly setting the window to RECT,
+* which is also the default window
+.FFT V(4) NP=16 WINDOW=RECT
+
+.FFT V(1) NP=8 WINDOW=HANN
+.FFT I(R1) np=8 WINDOW=Hann FORMAT=UNORM
+.FFT {V(1)} NP=8 window=hamm format=norm
+
+* I(V1) will have a phase angle of 180
+.FFT I(V1) NP=8 Window=Hamm FORMAT=unorm
+
+* Test BLACK and HARRIS window types
+.FFT V(1) NP=8 WINDOW=BLACK FORMAT=UNORM
+.FFT V(2) NP=8 WINDOW=HARRIS
+.FFT V(2) NP=8 Window=harris Format=Unorm
+
+* Repeat some tests with a SIN source, to test the fix to the FFT
+* interface for an even number of samples.  The .FFT lines with
+* V(3) and I(V3) should have phases of 0 and 180 degrees, respectively,
+* for Index=4.
+.FFT V(3) NP=8 WINDOW=HANN
+.FFT I(V3) NP=8 WINDOW=HAMM
+
+* Test voltage difference syntax
+.FFT V(1,2) NP=8 Window=HANN
+
+.END

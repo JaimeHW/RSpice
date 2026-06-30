@@ -1,0 +1,12 @@
+DC test of FORMAT=CSV output format
+*
+* Trivial resistor circuit, just do a DC sweep and watch the output
+*
+
+R1 1 0 10
+V1 1 0 DC 0V
+
+.print DC FORMAT=CSV v(1) I(v1) r1:r
+.dc v1 0 10 .1
+
+.end

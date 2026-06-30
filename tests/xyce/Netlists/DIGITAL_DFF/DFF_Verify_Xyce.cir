@@ -1,0 +1,71 @@
+* simplified mixed-signal circuit for DFF verification
+
+
+
+* Analysis Commands
+.options timeint reltol=1.0e-3 
+.tran 10ns 35us 
+
+* Output
+.print tran PRECISION=10 WIDTH=19 v(N03529) v(nCLK) v(nMYVDD) v(nRF)
++ v(X_DFF:N285734) v(X_DFF:X_U8A:PREB) v(X_DFF:X_U8A:CLRB) 
++ v(X_DFF:invVRF)
+
+* Set digital default parameters:
+.param R1HI=5 R1LO=200 R0HI=200 R0LO=5 RIN=1000 R1=100
+.param CAPOUT=1.e-12  CAPIN=1.e-12
+.param V_LO=0 V_HI=12 V_REF=0
+
+
+X_DFF nCLK nRF nSN nMYVDD N03529 0 MEMORY
+R_R1     0 N03529  1g TC=0,0 
+
+V_VCLK    nCLK 0  PULSE ({V_LO} {V_HI} 10us 1ns 1ns 7us 17us)
+V_VRF    nRF 0  PULSE ({V_LO} {V_HI} 10us 1ns 1ns 7us 17us)
+V_VSN    nSN 0  PULSE ({V_LO} {V_HI} 10us 1ns 1ns 7us 17us)
+V_MYVDD    nMYVDD 0 {V_HI}
+
+
+
+
+.SUBCKT MEMORY  fVCLK fVRF fVSN fMYVDD out_p34 wrm_p5 
+X_U8A         0 fVRF fVCLK WRM_P5 M_UN0002 N285734  CD4013B
+X_U52A         N285734 fVSN OUT_P34  CD4071B 
+YNOT invtest  fVRF   invVRF   DMODinv
+.ENDS MEMORY
+
+
+.subckt CD4013B  SET RESET CLK D Q QBAR
+YNOT invset  SET   PREB    DMODinv   
+YNOT invreset   RESET    CLRB   DMODinv  
+YDFF dff1 	PREB CLRB CLK   D   Q QBAR  DMOD
+.ends CD4013B
+
+
+.subckt CD4071B  A B J
+YOR or1   A B   J   DMOD 
+.ends CD4071B
+
+
+.model DMODinv DIG ( CLO=CAPOUT  CHI=CAPOUT
++ S0RLO=R0LO  S0RHI=R0HI  S0TSW=15ns
++ S0VLO=-1.0  S0VHI=1.8 ;these two are critical for functionality of inverter
++ S1RLO=R1LO  S1RHI=R1HI  S1TSW=15ns
++ S1VLO=1.0  S1VHI=3.0  ;these two are critical for functionality of inverter
++ RLOAD=RIN   CLOAD=CAPIN
++ VREF=V_REF VLO=V_LO VHI=V_HI 
++ DELAY=125ns )
+
+
+.model DMOD DIG ( CLO=1.0pF  CHI=1.0pF
++ S0RLO=1  S0RHI=80K  S0TSW=15ns
++ S0VLO=-3  S0VHI=-0.5
++ S1RLO=40K  S1RHI=1  S1TSW=15ns
++ S1VLO=0.5  S1VHI=3.0
++ RLOAD=1000   CLOAD=1.0pF
++ VREF=V_REF VLO=V_LO VHI=V_HI
++ DELAY=125ns )
+
+
+.end
+

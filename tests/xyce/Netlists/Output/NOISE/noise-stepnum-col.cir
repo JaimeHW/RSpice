@@ -1,0 +1,29 @@
+* Test use of .OPTIONS OUTPUT ADD_STEPNUM_COL=TRUE
+*
+* See SON Bug 1209 for more details.
+**************************************************
+
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 3a 100
+RLP2  3a 4 100
+CLP1  4 0 1.59NF
+
+* step over two variables
+.STEP RLP1 1e2 1e3 9e2
+.STEP RLP2 5e2 15e2 10e2
+
+.NOISE  V(4)  V1  DEC  5 100 100MEG 1
+
+.OPTIONS OUTPUT ADD_STEPNUM_COL=true
+
+.PRINT NOISE RLP1:R RLP2:R INOISE ONOISE
+.PRINT NOISE FORMAT=NOINDEX FILE=noise-stepnum-col.cir.NOISE.noindex.prn RLP1:R RLP2:R INOISE ONOISE
+.PRINT NOISE FORMAT=GNUPLOT FILE=noise-stepnum-col.cir.NOISE.gnuplot.prn RLP1:R RLP2:R INOISE ONOISE
+.PRINT NOISE FORMAT=SPLOT FILE=noise-stepnum-col.cir.NOISE.splot.prn RLP1:R RLP2:R INOISE ONOISE
+
+.END

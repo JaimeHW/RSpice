@@ -1,0 +1,15 @@
+* NMOS Id-Vd @ -55C
+
+.options temp=-55.0
+.include modelcard.nmos
+
+vg 1 0 1.2
+vd 2 0 1.2
+
+m1 2 1 0 0 n1 W=10.0u L=0.09u
+
+.dc vd 0 1.18 0.02 vg 0 1.2 0.2
+.print dc  FORMAT=gnuplot v(2) v(1) i(vd)
+
+.end
+

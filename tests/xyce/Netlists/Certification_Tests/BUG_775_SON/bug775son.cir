@@ -1,0 +1,122 @@
+*
+* common bridge rectifier
+* based on data from:
+*  Electrical Engineering and Electronics / 13
+*  Magnetic Core Selection for Transformers and Inductors
+*  A User's Guide to Practice and Specification,
+*  Colonel Wm. T. McLyman,
+*  Jet Propulsion Laboratory
+*  California Institute of Technology
+*  Pasadena, California,
+*  Marcel Dekker Inc. New York 1882
+*  ISBN 0-8247-1873-9
+*
+
+
+*
+* These 3 bridge rectifiers are the same except in how the M and R
+* internal variables of the non-linear mutual inductors are scaled.
+* In bridge_rectifer1 M and R should be order(1)
+* In bridge_rectifer2 M and R should be order(1) but M is scaled through a different mechanism
+* In bridge_rectifer3 M and R shoulbe be order(0.1) both manually scaled.
+*
+* The .measure statements at the end should indicate that this is true.
+*
+
+
+Vprimary 0 node2 sin(0 115 60 0 0 0 )
+
+
+xbr1 0 node2 node11 node12 bridge_rectifier1
+xbr2 0 node2 node13 node14 bridge_rectifier2
+***xbr3 0 node2 node15 node15 bridge_rectifier1
+
+.subckt bridge_rectifier1 pIn1 pIn2 sOut1 sOut2
+
+Lprimary   pIn1 pIn2 495
+Lsecondary node3 node4 34
+Ktrans Lprimary Lsecondary 1.0 tMod
+.model tMod CORE rvarscaling=3.0e6 factorms=1 MS=1.0e6 AREA=5.81
+
+Rfeed node4 0 1000
+Rtune node3 node5 0.1
+
+dbridge1 sOut1  node5 dmod1
+dbridge2 node5  sOut2 dmod1
+dbridge3 sOut1  node4 dmod1
+dbridge4 node4  sOut2 dmod1
+.model dmod1 d CJ=1.0e-12 CJ0=1.0e-12
+
+.ends
+
+
+.subckt bridge_rectifier2 pIn1 pIn2 sOut1 sOut2
+
+Lprimary   pIn1 pIn2 495
+Lsecondary node3 node4 34
+Ktrans Lprimary Lsecondary 1.0 tMod
+.model tMod CORE rvarscaling=1.0e6 factorms=1 MS=1.0e6 AREA=5.81
+
+Rfeed node4 0 1000
+Rtune node3 node5 0.1
+
+dbridge1 sOut1  node5 dmod1
+dbridge2 node5  sOut2 dmod1
+dbridge3 sOut1  node4 dmod1
+dbridge4 node4  sOut2 dmod1
+.model dmod1 d CJ=1.0e-12 CJ0=1.0e-12
+
+.ends
+
+.subckt bridge_rectifier3 pIn1 pIn2 sOut1 sOut2
+
+Lprimary   pIn1 pIn2 495
+Lsecondary node3 node4 34
+Ktrans Lprimary Lsecondary 1.0 tMod
+.model tMod CORE rvarscaling=1.0e6 mvarscaling=1.0e6 reqnscaling=1e-6 meqnscaling=1e-6 MS=1.0e6 AREA=5.81
+
+Rfeed node4 0 1000
+Rtune node3 node5 0.1
+
+dbridge1 sOut1  node5 dmod1
+dbridge2 node5  sOut2 dmod1
+dbridge3 sOut1  node4 dmod1
+dbridge4 node4  sOut2 dmod1
+.model dmod1 d CJ=1.0e-12 CJ0=1.0e-12
+
+.ends
+
+
+* loads on the output
+cload4 node11 node12 1e-10
+rload5 node11 0 100
+
+cload6 node13 node14 1e-10
+rload7 node13 0 100
+
+cload8 node15 node16 1e-10
+rload9 node15 0 100
+
+
+
+.print tran    v(node2) v(node12,node11) n(y:xbr1:min!ktrans_m) n(y:xbr1:min!ktrans_r)
++ v(node14,node13) n(y:xbr2:min!ktrans_m) n(y:xbr2:min!ktrans_r)
+*+ v(node16,node15) n(y:xbr3:min!ktrans_m) n(y:xbr3:min!ktrans_r)
+
+.measure tran maxM1 max n(y:xbr1:min!ktrans_m)
+.measure tran minM1 min n(y:xbr1:min!ktrans_m)
+.measure tran maxR1 max n(y:xbr1:min!ktrans_r)
+.measure tran minR1 min n(y:xbr1:min!ktrans_r)
+
+.measure tran maxM2 max n(y:xbr2:min!ktrans_m)
+.measure tran minM2 min n(y:xbr2:min!ktrans_m)
+.measure tran maxR2 max n(y:xbr2:min!ktrans_r)
+.measure tran minR2 min n(y:xbr2:min!ktrans_r)
+
+*.measure tran maxM3 max n(y:xbr3:min!ktrans_m)
+*.measure tran minM3 min n(y:xbr3:min!ktrans_m)
+*.measure tran maxR3 max n(y:xbr3:min!ktrans_r)
+*.measure tran minR3 min n(y:xbr3:min!ktrans_r)
+
+.tran 0 0.17
+.end

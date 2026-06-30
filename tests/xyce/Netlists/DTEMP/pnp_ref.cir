@@ -1,0 +1,23 @@
+PNP bipolar transistor circuit netlist, for testing DTEMP
+
+vpos  1 0 dc 5v
+vbb   6 0 dc -2v
+re    1 2 2k
+rb    3 4 190k
+
+.param tempParam=10
+q 5 3 7 pbjt temp={tempParam}
+*
+vmon1 4 6 0
+vmon2 5 0 0
+vmon3 2 7 0 
+.model pbjt pnp (is=100fa bf=60)
+
+.options device temp=15
+
+.dc vpos 0 5 1 vbb 0 -2 -0.5
+.print dc v(1) v(6) i(vmon1) i(vmon2) i(vmon3)
+
+.step tempParam list 15 25 35
+
+.end

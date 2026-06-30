@@ -1,0 +1,17 @@
+bsim3.cir
+bsim3.cir.sh
+bsim3_modpar.cir
+bsim4.cir
+bsim4.cir.sh
+bsim4_modpar.cir
+diode.cir
+diode.cir.sh
+diodeRef.cir
+mutInd1.cir.sh
+mutInd1.cir
+mutInd1_baseline.cir
+mutInd2.cir.sh
+mutInd2.cir
+mutInd2_baseline.cir
+tags
+exclude

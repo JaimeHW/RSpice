@@ -1,0 +1,10 @@
+README
+bug_1152.cir
+bug_1152.cir.prn.gs.pl
+bug_1152.cir.sh
+bug_1152.cir.tags
+bug_767b.cir
+bug_767b.cir.sh
+bug_767b.cir.tags
+bug_767b_nodupes.cir
+exclude

@@ -1,0 +1,48 @@
+***************************************************************
+* For testing -o (after the changes for Issue 222), the key
+* points are that the netlist has:
+*
+*   1) multiple .PRINT DC statements with formats
+*      other than FORMAT=STD.  Print line concatenation
+*      should still work.
+*
+*   2) a .PRINT HOMOTOPY line, that should also produce output.
+*
+*   3) the .PRINT output should go to the file specified by -o,
+*      and not to the default file name or the file
+*      specified with FILE=.  It should be a FORMAT=STD
+*      file with space as the delimiter, with the default
+*      extensions (e.g., dashoFile.prn or dashoFile.HOMOTOPY.prn).
+*
+*   4) the shell file will run this netlist with -delim COMMA
+*      to verify that command line option is ignored when
+*      -o is also specified.
+*
+****************************************************************
+
+* polynomial coefficients:
+.param A=3.0
+.param B=-2.0
+.param C=1.0
+.global_param Ivar=1.0
+
+Vtest 1 0 5.0
+Btest 1 0 V={A*(I(Vtest)-Ivar)**3 + B*(I(Vtest)-Ivar) + C}
+
+.DC Vtest 1 1 1
+
+* natural parameter continuation (via loca)
+.options nonlin continuation=1 
+
+.options loca stepper=1 
++ predictor=1 stepcontrol=1 
++ conparam=Vtest:DCV0
++ initialvalue=0.0 minvalue=0.0 maxvalue=2.0
++ initialstepsize=0.01 minstepsize=1.0e-8 maxstepsize=0.1
++ aggressiveness=0.1
+
+.PRINT DC FORMAT=CSV V(1)
+.PRINT DC FORMAT=CSV FILE=dcFoo I(Vtest)
+.print homotopy FILE=dcFoo1 FORMAT=CSV Ivar I(Vtest)
+
+.end

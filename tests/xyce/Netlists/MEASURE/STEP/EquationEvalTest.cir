@@ -1,0 +1,32 @@
+A test of the measure EQN functionality
+*******************************************************************************
+*
+* a few sources of different types
+VS  1  0  SIN(0 1.0 1KHZ 0 0)
+VP  2  0  PULSE( 0 1 0.2ms 0.2ms 0.2ms 1ms 2ms )
+
+R1  1  0  100
+R2  2  0  100
+
+.step VS:VA 1 2 1
+
+* Use MEASFAIL to test the reset of the default calculation value
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0 0.6ms
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) vv1 vv2 {vv1-vv2} difWin difTD
++ eqnReturnNegOne eqnReturnNeg100
+
+.measure tran vv1 PARAM {v(1)+1.0}
+.measure tran vv2 EQN {v(2)+12.0}
+.measure tran dif EQN {vv1 - vv2}
+.measure tran difWin EQN {vv1-vv2} FROM=0 TO=3e-4
+.measure tran difTD EQN {vv1-vv2} TD=3e-4 DEFAULT_VAL=-1
+
+* Measures should return -1 or -100, since the FROM-T0 window 
+* does not overlap with the stepped values for VSRC1:DCV0
+.measure tran eqnReturnNegOne EQN {v(1)+1.0} FROM=-4 TO=-2 DEFAULT_VAL=-1
+.measure tran eqnReturnNeg100 EQN {v(1)+1.0} FROM=8 TO=6 DEFAULT_VAL=-100
+
+.END
+

@@ -1,0 +1,147 @@
+Test Name: BUG_381
+Owner: Eric Keiter
+Test netlists: comparator2.cir
+GS files: comparator2.cir.prn, comparator2.cir.res
+Mode:  Serial and Parallel
+Comparator:  xyce_verify.pl
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Checks that the .STEP capability works.
+ 
+Procedure:
+============
+
+run Xyce on comparator2.cir and comparator3.cir.  IGNORE comparator1.cir and all of the
+comparator0_*.cir files.  
+
+Compare to gold standard with xyce.verify.pl
+
+   xyce_verify.pl --goodres=../../OutputData/BUG_381/comparator2.cir.res \
+                  --testres=comparator2.cir.res \ 
+                  comparator2.cir  \ 
+                  ../../OutputData/BUG_381/comparator2.cir.prn \
+                  comparator2.cir.prn
+
+   xyce_verify.pl --goodres=../../OutputData/BUG_381/comparator2.cir.res \
+                  --testres=comparator3.cir.res \ 
+                  comparator3.cir  \ 
+                  ../../OutputData/BUG_381/comparator2.cir.prn \
+                  comparator3.cir.prn
+
+        
+Verification:
+=============
+Passes if both Xyce and xyce_verify.pl run with no errors and exit with 
+return code 0.
+ 
+Notes:
+======
+
+17 Jan 2006:
+Comparator3 is exactly the same as comparator2, but uses a LIST form of
+the .STEP instead of a linear sweep.  There is no separate gold standard,
+the netlist is constructed to produce exactly the same results as comparator2,
+and the xyce_verify instructions above take advantage of that.  This will 
+only work with the most recent xyce_verify.pl that lives in the TestScripts
+directory of the Xyce_Test test suite repository.
+
+27 Sept 2005:
+Per the note just below, it was necessary to re-generate the "gold standard"
+file yet again for Release 3.0 and subsequent versions.  Comparison failure
+for this test case should almost always be first addressed by regenerating
+the gold standard so that the comparator2 output is always being compared
+to the comparator0 outputs generated from the same version of Xyce.  The 
+issue of Xyce producing correct results for the comparator is part of normal
+regression testing.
+
+---------------------------------------------------------------------
+NOTE: The test here is that Xyce, when using .step, produces the same
+output as Xyce, run multiple times with parameters changed.  For
+simplicity, a gold-standard output has been saved in
+../../OutputData/BUG_381, but it could be the case that numerical
+changes in the code could lead to failures in test against that gold
+standard.  The following text explains how to regenerate the gold
+standard.  Ideally, there should be no gold standard, and the process
+described below should always be used in running this test --- the
+.step netlist and the manual runs producing the "gold standard" should
+be run with exactly the same version of Xyce.  The gold standard saved
+on 27 April 2005 differs from the one that was used to certify Release
+2.1, precisely because of this issue.
+
+The "gold standard" was produced by running the files comparator_0*.cir and
+concatenating the output:
+
+for i in comparator0*.cir
+do
+   runxyce  $i
+done
+
+cat comparator0_7_-10.cir.prn comparator0_6_-10.cir.prn comparator0_5_-10.cir.prn comparator0_7_0.cir.prn comparator0_6_0.cir.prn comparator0_5_0.cir.prn comparator0_7_10.cir.prn comparator0_6_10.cir.prn comparator0_5_10.cir.prn > comparator2.cir.prn
+
+then hand-editing the concatenated files to remove the extraneous "End
+of Xyce..." and "Index..." lines other than the first "Index" and last "End"
+lines.
+
+This should produce an output file with precisely the same results as would
+have been obtained by a properly functioning .STEP capability.
+
+The .res gold standard file was produced simply by copying the .res file
+produced by a run of comparator2.cir
+---------------------------------------------------------------------------
+
+
+THIS TEST WAS FAILING ON 20 Oct 2004, AND IT LOOKED LIKE A REAL BUG!!!!!!!
+
+
+What follows is the original description of the test as it was performed for
+Release 2.0.  That process will not work for Release 2.1.
+
+Interestingly enough, the ONE step that was actually tested in Release
+2.0 does indeed look correct in Release 2.1.  Most of the others are
+wrong, though.  After I noticed that, I went back and tried comparing all
+the comparator0* outputs to the individual STEPn outputs produced by Xyce
+2.0.  They also failed to compare --- only the two outputs for vdd=7, temp=300
+and vdd=6, temp=300 passed xyce_verify.  vdd=5, temp=300 (the one case
+that was tested for Release 2.0) failed xyce_verify with a 4% relative error.
+
+Finally, temperatures in Xyce netlists are supposed to be in celsius.
+The original netlist choices of 200-300 degrees seem to indicate that
+it was assumed that input was in Kelvin (input temperatures are
+converted to kelvin, and internal calculations all use kelvin).
+
+
+----------------------------------------------
+11/3/3
+
+Author:  Eric R. Keiter  erkeite@sandia.gov
+
+Bug description:
+This bug was a new capability, rather than a bugfix per se.  The new
+capability is the .STEP specification, which allows users to run parameter
+sweeps.
+
+A good test for this capability is to take a complex transient circuit,
+with lots of messy devices, such as BJTs and MOSFETs, and run a parameter
+sweep over several very different parameters.  Then, after the sweep is
+over, compare the results of the final step of the sweep with a stand-alone
+calculation with the same parameter values.
+
+Test circuit(s):
+
+comparator1.cir  produces output file comparator1.cir.prn 
+comparator2.cir  produces output file(s) comparator2.cir.STEP?.prn 
+
+The first circuit is without the .step capability , and the the second is
+with it.   The step circuit (comparator2.cir) will produce 9 different
+output files, one for each step.  The final output file,
+comparator2.cir.STEP8.prn, should match comparator1.cir.prn.
+
+Unfortunately, they may not match perfectly, but they should pass compare.
+
+
+
+This test should be run in parallel and serial.
+
+

@@ -1,0 +1,23 @@
+********************************************************
+* Test ADC device with .STEP
+* I(V2) should be 1/2 of I(V1) for the first step.
+* They should be equal for the second step.
+*
+* The R values for ADC1 and ADC2 may be unrealistically
+* low.  They were chosen so that the currents are
+* on the order of 1e-6.
+*
+* This test addresses SON Bug 849.
+********************************************************
+
+YADC adc1 1 0 simpleADC R=1e6
+YADC adc2 2 0 simpleADC R=2e6
+.model simpleADC ADC(settlingtime=5ns uppervoltagelimit=5 lowervoltagelimit=0)
+
+v1 1 0 sin(2.5 2.5 100k 0)
+v2 2 0 sin(2.5 2.5 100k 0)
+
+.TRAN 0  1.0e-5
+.STEP YADC!adc1:R 1e6 2e6 1e6
+.PRINT TRAN V(1) V(2) I(V1) I(V2)
+.END

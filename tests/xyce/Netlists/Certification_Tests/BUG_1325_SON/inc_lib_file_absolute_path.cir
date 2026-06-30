@@ -1,0 +1,16 @@
+* This test will use absolute paths to files in a
+* subdirectory two levels down.
+
+.DC V1 1 5 1
+.PRINT DC V(1) V(2) I(R3)
+
+V1 1 0 1
+R1 1 2 1
+R3 1 0 {RVAL}
+
+* The absolute path for the files on these two lines will be
+* filled in by the .sh file.
+.INC
+.LIB
+
+.END

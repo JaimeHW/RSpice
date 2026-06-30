@@ -1,0 +1,28 @@
+* This circuit tests out the "global_param" capability, in combination with LOCA.
+.tran 1n 0.1u 0 
+
+*COMP I(VMON_VSS) RELTOL=0.04
+.print tran v(vdd) v(vss) I(vmon_vss) I(vmon_vdd)
+
+.global_param VRamp=3.3
+
+.options nonlin continuation=1 
+.options loca stepper=natural predictor=constant stepcontrol=adaptive initialvalue=0.0
++ conparam=VRamp
++ minvalue=-1.0 maxvalue=3.3 
++ initialstepsize=0.1 minstepsize=1e-4
++ maxstepsize=5.0 aggressiveness=0.1 maxsteps=200 maxnliters=200
+
+.options device voltlim=1 
+
+vhigh vdd 0 {VRamp}
+vlow vss 0 0.0 pulse(0 3.3 0.0 0.1 0.1 1 1)
+
+l_Lwirevss  vss nx       .50n
+l_Lwirevdd  vdd ny       .50n
+R_Rbw       ny  vdd_chip  50m
+R_Rwi       nx  vss_chip  50m
+
+vmon_vss  vss_chip 0  0.0
+vmon_vdd  vdd_chip 0  0.0
+

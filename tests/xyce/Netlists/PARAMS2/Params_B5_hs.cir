@@ -1,0 +1,14 @@
+Basic voltage divider circuit test of subcircuit usage
+* Should produce results identical to Double_Resist_Control.cir
+
+XR1 1 2 Rsub R=10k
+XR2 2 0 Rsub R=5k
+V1 1 0 DC 5V
+
+.subckt Rsub 1 2 R=1K
+R1 1 2 {R}
+.ends
+
+.dc V1 0 5 1
+.print DC v(1) v(2) I(v1)
+.end

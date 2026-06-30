@@ -1,0 +1,206 @@
+* DC simulation for xyce
+.subckt mysub d_x g_x s_x b_x
+e_d d_v 0 d_x 0 1
+v_d d_v d 0
+f_d d_x 0 v_d   -1
+e_g g_v 0 g_x 0 1
+v_g g_v g 0
+f_g g_x 0 v_g   -1
+e_s s_v 0 s_x 0 1
+v_s s_v s 0
+f_s s_x 0 v_s   -1
+e_b b_v 0 b_x 0 1
+v_b b_v b 0
+f_b b_x 0 v_b   -1
+m1 d g s b mymodel
++ W=0.2e-6
++ L=0.04e-6
+.model mymodel nmos level=70
++ TYPE=1
++ BINUNIT=1
++ MOBMOD=1
++ CAPMOD=3
++ SHMOD=1
++ PARAMCHK=0
++ SOIMOD=0
++ IGCMOD=0
++ IGBMOD=0
++ GIDLMOD=0
++ TSI=9E-008
++ TOX=2E-009
++ TOXREF=2E-009
++ TBOX=4E-007
++ TOXQM=2E-009
++ TNOM=27
++ RBODY=0
++ RBSH=0
++ RSH=0
++ DTOXCV=0
++ XJ=7E-008
++ RHALO=0
++ NCH=1E+019
++ NGATE=3E+020
++ WINT=5.5544E-009
++ LINT=2E-009
++ XPART=1
++ TOXM=2E-009
++ K1=0.6
++ K2=1E-010
++ K3=0.231
++ K3B=0
++ KB1=1
++ W0=0
++ DVT0=2.2
++ DVT1=0.53
++ DVT2=0.127
++ DVT0W=0
++ DVT1W=0
++ DVT2W=0
++ ETA0=1.7958
++ ETAB=-0.07
++ DSUB=1.7577
++ VOFF=-0.10382
++ NFACTOR=1
++ CDSC=0.00024
++ CDSCB=0
++ CDSCD=0
++ CIT=0
++ U0=200
++ UA=2.25E-009
++ UB=5.9E-019
++ UC=2.9E-011
++ PRWG=2.5
++ PRWB=0.76
++ WR=1
++ RDSW=0.695
++ A0=0
++ AGS=0
++ A1=0
++ A2=0.7
++ B0=0
++ B1=0
++ VSAT=99820
++ KETA=0
++ KETAS=0
++ DWG=0
++ DWB=0
++ DWBC=0
++ PCLM=1.3
++ PDIBLC1=0.39
++ PDIBLC2=0.05
++ PDIBLCB=0.89459
++ DROUT=2
++ PVAG=0.116
++ DELTA=0.01
++ VEVB=0.075
++ VECB=0.026
++ ALPHA0=5.0707E-009
++ BETA0=0.0007605
++ BETA1=0.0002767
++ BETA2=0.094512
++ ALPHAGB1=0.35
++ ALPHAGB2=0.43
++ BETAGB1=0.03
++ BETAGB2=0.05
++ FBJTII=0
++ VDSATII0=0.72051
++ TII=-0.5062
++ LII=2.835E-009
++ ESATII=2213500
++ SII0=2.0387
++ SII1=0.04093
++ SII2=9.8E-011
++ SIID=0.008025
++ AIGC=1
++ BIGC=0.05022
++ CIGC=0.075
++ AIGSD=0.43
++ BIGSD=0.054
++ CIGSD=0.075
++ NIGC=1
++ POXEDGE=1
++ PIGCD=1
++ AGIDL=0
++ BGIDL=0
++ EBG=1.2
++ VGB1=300
++ VGB2=17
++ VOXH=1.5
++ DELTAVOX=0.004
++ NTOX=1
++ NTUN=1
++ NDIODE=1
++ NRECF0=1.5
++ NRECR0=2
++ ISBJT=1E-006
++ ISDIF=0.0001
++ ISREC=0.01
++ ISTUN=5E-005
++ VREC0=1
++ VTUN0=0
++ NBJT=0.7888
++ LBJT0=1.4381E-006
++ VABJT=0.001
++ AELY=1.0819E+010
++ AHLI=0
++ LPE0=3E-009
++ CJSWG=1E-010
++ MJSWG=0.5
++ PBSWG=0.7
++ TT=4E-010
++ LDIF0=1
++ CGSO=5E-011
++ CGDO=5E-011
++ DLC=0
++ DWC=0
++ DLCB=0
++ DLBG=0
++ FBODY=1
++ CLC=1E-008
++ CLE=0
++ CF=0
++ CSDMIN=0
++ ASD=0.3
++ CSDESW=8.73E-011
++ DELVT=-0.031456
++ ACDE=1
++ MOIN=25
++ CKAPPA=3.2309
++ CGDL=1.5533E-010
++ CGSL=1.5533E-010
++ NDIF=-1
++ KT1=-0.11573
++ KT1L=-4E-010
++ KT2=-0.25
++ UTE=-1.2189
++ UA1=5.005E-012
++ UB1=-8.835E-019
++ UC1=-6E-011
++ PRT=51.149
++ RTH0=0.02
++ CTH0=1E-005
++ AT=8479
++ TPBSWG=5.86E-005
++ TCJSWG=0.00092578
++ NTRECF=-0.55338
++ NTRECR=-0.15688
++ XBJT=1.0968
++ XDIF=1.4551
++ XREC=2.6E-011
++ XTUN=25.308
++ FNOIMOD=0
++ TNOIMOD=2
++ AF=2.15
++ EF=1.119
++ KF=1.67E-026
++ W0FLK=0.001
+.ends
+v_d d 0 0
+v_g g 0 1.6
+v_s s 0 0
+v_b b 0 0
+x1 d g s b mysub
+.dc v_d 0.1 1.5 0.1 v_g list -1.6 0.4 1.6
+.print dc V(d) V(G)
++ i(v_d) N(M:X1:1_t)
+.end

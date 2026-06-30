@@ -1,0 +1,39 @@
+Regression test for simple gamma distribution sampling
+
+c1 1 0 1uF IC=1
+R1 1 2 1K
+v1 2 0 0V
+.print tran v(1)
+.tran 0 5ms
+.options timeint reltol=1e-6 abstol=1e-6
+
+* 10 gamma distributed samples.  The line specifies alpha and beta
+*
+* Note that for the gamma distribution:
+*
+*   mean = alpha/beta
+*   variance = alpha/(beta^2) = mean/beta
+*   std deviation = sqrt(variance)
+*
+*   so if mean=3k, std dev=1k then variance = 1k*1k
+*  means that beta must be:  1k*1k = 3k/beta  -->   beta = 3k/(1k*1k) = 0.03
+*
+*  so that means that alpha must be:  alpha = mean * beta = (3k) * 3k/(1k*1k) = 9
+*
+*.SAMPLING NORMAL R1 3K 1K 10
+*.SAMPLING GAMMA R1 9 0.03 10
+.SAMPLING 
++ param=R1
++ type=gamma
++ alpha=9
++ beta=0.03
+
+.options samples numsamples=5 sample_type=mc
+
+.options device debuglevel=-100
+.options timeint debuglevel=-100
+.options nonlin debuglevel=-100
+.options nonlin-tran debuglevel=-100
+
+.end
+

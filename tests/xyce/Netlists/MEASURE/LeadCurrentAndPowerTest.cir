@@ -1,0 +1,18 @@
+* A test of whether.MEASURE statements work with I, P and W
+* 
+*******************************************************************************
+*
+VS1  1  0  SIN(0 1.0 1KHZ 0 0)
+R1  1  0  100
+
+.TRAN 0  1ms
+.PRINT TRAN FORMAT=NOINDEX V(1) I(R1) P(R1) W(R1) N(VS1_BRANCH)
+
+* tests
+.measure tran maxI max I(R1)
+.measure tran maxP max P(R1)
+.measure tran maxW max W(R1)
+.measure tran maxN max N(VS1_BRANCH)
+
+.END
+

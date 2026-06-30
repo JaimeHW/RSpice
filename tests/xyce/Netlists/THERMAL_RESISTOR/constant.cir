@@ -1,0 +1,14 @@
+ 
+.include copper.constant
+
+R1  1 0 copper L=0.1 a=1e-5
+R2  1 0 copper L=0.2 a=1e-5
+R3  1 1a copper  L=0.5 a=2e-4
+R4  1a 1b copper  L=0.5 a=1e-4
+R5  1b 0 copper  L=1 a=2e-4
+v1  1 0 5
+ 
+.tran 0 1
+.print tran R1:R R1:TEMP i(r1) R2:R R2:TEMP i(r2) R3:TEMP R4:TEMP R5:TEMP
+*.print tran i(r1) i(r2) 
+.end

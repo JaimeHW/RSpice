@@ -1,0 +1,50 @@
+Lead Current test for component inductors in linear mutual inductors
+*test top-level circuit
+V1 1 0 sin(0 1 1KHz)
+R1 1 2a 1
+VP1 2a 2 0
+R3 3a 0 1
+VP2 3a 3 0
+
+* mutual inductor 1 definition
+L1 2 0 1mH
+L2 3 0 1mH
+K1 L1 L2 0.75
+
+* test with mutual inductor in a subcircuit
+V1S 1S 0 sin(0 1 1KHz)
+R1S 1S 2Sa 1
+VP1S 2Sa 2S
+R3S 3Sa 0 1
+VP2S 3Sa 3S
+X1 2S 3S ML_SUB
+
+.SUBCKT ML_SUB a b
+L1 a 0 1mH
+L2 b 0 1mH
+K1 L1 L2 0.75
+.ENDS
+
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0 1ms
+.PRINT TRAN {I(L1)-I(VP1)} {I(L2)-I(VP2)}
++ {I(X1:L1)-I(VP1S)} {I(X1:L2)-I(VP2S)}
+*+ I(L1) I(VP1) I(L2) I(VP2)
+*+ I(X1:L1) I(VP1S) I(X1:L2) I(VP2S)
+
+.measure tran maxmag1   max {abs(I(L1)-I(VP1))} failvalue=1e-6
+.measure tran totalrms1 rms {I(L1)-I(VP1)} failvalue=1e-6 
+.measure tran maxmag2   max {abs(I(L2)-I(VP2))} failvalue=1e-6
+.measure tran totalrms2 rms {I(L2)-I(VP2)} failvalue=1e-6 
+.measure tran maxmag3   max {abs(I(X1:L1)-I(VP1S))} failvalue=1e-6
+.measure tran totalrms3 rms {I(X1:L1)-I(VP1S)} failvalue=1e-6 
+.measure tran maxmag4   max {abs(I(X1:L2)-I(VP2S))} failvalue=1e-6
+.measure tran totalrms4 rms {I(X1:L2)-I(VP2S)} failvalue=1e-6 
+
+*COMP {I(L1)-I(VP1)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {I(L2)-I(VP2)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {I(X1:L1)-I(VP1S)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {I(X1:L2)-I(VP2S)} abstol=1.0e-6 zerotol=1.0e-7
+
+.END

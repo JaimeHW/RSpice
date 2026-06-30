@@ -1,0 +1,18 @@
+********************************************************
+* Test that Xyce exits gracefully with a reasonable error
+* message if the specified output file for the -namesfile
+* command line option is a file in a non-existent
+* directory.
+*
+* The contents of this netlist doesn't really matter.
+*
+*
+*********************************************************
+V1 1 0 SIN(0 1 1HZ)
+R1 1 2 1
+R2 2 0 2
+
+.TRAN 0 1S
+.PRINT TRAN V(2)
+
+.END 

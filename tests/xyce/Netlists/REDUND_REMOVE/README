@@ -1,0 +1,15 @@
+Comment by K. R. Santarelli, 10/15/07:
+
+Both tests in this directory have a number of "unnecessary" components added to
+the netlists to test the '.PREPROCESS REMOVEUNUSED' functionality.  For 
+instance, if the lines 
+
+V1 2 2 1
+.PREPROCESS REMOVEUNUSED V
+
+are included, Xyce should remove the source V1 from the netlist since both of
+the nodes of V1 are the same.  If, however, the preprocess command isn't 
+running correctly, and the source V1 does get added, the test *should* exit in 
+error since the addition of such a source causes a matrix singularity 
+(something like an AMESOS -22 error).  
+  

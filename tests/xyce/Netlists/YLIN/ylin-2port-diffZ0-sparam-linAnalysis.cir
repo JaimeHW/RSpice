@@ -1,0 +1,19 @@
+* This .LIN analysis was used to generate the input file for
+* the ylin-2port-diffZ0-sparam-linAnalysis.cir test.  This
+* netlist is not run as part of any regression test.
+
+P1 1 0 port=1 Z0=50
+P2 2 0 port=2 Z0=100
+
+.LIN lintype=s FILE=ylin-2port-diffZ0-sparam.cir.s2p format=touchstone2 precision=12
+
+.model testLine  transline r=0.2 g=0 l=9.13e-9 c=3.65e-12
+ytransline  line1  1 2  testLine len=10 lumps=5000
+
+* Add a load resistor so that the Z parameters have reasonable
+* values at DC
+R2 2 0 1
+
+.AC LIN 11 0 10e5
+
+.end

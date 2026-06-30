@@ -1,0 +1,8 @@
+Number of Independent Voltage Source models: 1
+           nameV level 1 (Independent Voltage Source)
+Number of Independent Voltage Source instances: 3
+           name            VDS            VGS           VMON
+Number of MOSFET level 3 models: 1
+           name           NFET
+Number of MOSFET level 3 instances: 1
+           name             M1

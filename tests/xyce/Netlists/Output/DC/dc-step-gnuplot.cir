@@ -1,0 +1,25 @@
+********************************************************
+* Test FORMAT=GNUPLOT with .STEP.  This should produce 
+* the same .prn file as FORMAT=STD, but with two 
+* blank lines before steps 1,2, ... N-1.  Note that
+* first step is "step 0".  In this netlist, N is 4.
+*
+* Also test FORMAT=SPLOT with .STEP. This should
+* produce the same FD.prn file as FORMAT=STD, but
+* with one blank line before steps 1,2, ... N-1.
+*
+********************************************************
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+* step over two variables
+.STEP R1 1 2 1 
+.STEP R2 3 8 5
+
+.PRINT DC FORMAT=GNUPLOT V(1) R1:R R2:R V(2)
+.print DC FORMAT=SPLOT FILE=dc-step-gnuplot.cir.splot.prn V(1) R1:R R2:R V(2)
+.DC V1 1 25 1 
+
+.end

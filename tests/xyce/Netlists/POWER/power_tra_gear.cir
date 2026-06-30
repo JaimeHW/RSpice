@@ -1,0 +1,17 @@
+power calculation test for T Device (Lossless Transmission Line or TRA)
+*********************************************************************** 
+VIN 1 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)
+
+* current (and power) flows into terminal 1, and out of terminal 2, of TLINE1
+RIN1 1 2 50
+TLINE1 2 0 3 0 Z0=50 TD=2N
+RL1 3 0 50
+
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.25N 50N
+
+.PRINT TRAN  W(TLINE1) P(TLINE1) {V(2)*I1(TLINE1)+V(3)*I2(TLINE1)} 
++ P(VIN) P(RIN1) P(RL1) 
+
+.END

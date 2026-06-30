@@ -1,0 +1,46 @@
+ ***** Measure Functions ***** 
+
+TRIGTARGAT = 4.700000e+02 with targ = 5.000000e+02 and trig = 3.000000e+01
+
+TRIGTARG1 = 3.904233e+01 with targ = 5.461130e+01 and trig = 1.556897e+01
+
+TRIGTARG2 = -3.904233e+01 with targ = 1.556897e+01 and trig = 5.461130e+01
+
+TRIGTARG3 = 1.179157e+02 with targ = 1.334847e+02 and trig = 1.556897e+01
+
+TRIGTARG4 = -1.179157e+02 with targ = 1.556897e+01 and trig = 1.334847e+02
+
+TRIGTARG5 = 6.036240e+01 with targ = 1.149737e+02 and trig = 5.461130e+01
+
+RISEFALL1 = 2.834981e+01 with targ = 8.296111e+01 and trig = 5.461130e+01
+
+RISEFALL2 = -9.940473e+01 with targ = 1.556897e+01 and trig = 1.149737e+02
+
+RISEFALL3 = 1.079713e+02 with targ = 1.235402e+02 and trig = 1.556897e+01
+
+RISEFALL4 = -1.524912e+02 with targ = 1.556897e+01 and trig = 1.680602e+02
+
+LASTMEASURE = 7.048556e-01 at freq = 1.584893e+02
+ ***** Measure Functions ***** 
+
+TRIGTARGAT = 4.700000e+02 with targ = 5.000000e+02 and trig = 3.000000e+01
+
+TRIGTARG1 = 2.127118e+01 with targ = 4.629520e+01 and trig = 2.502402e+01
+
+TRIGTARG2 = -2.127118e+01 with targ = 2.502402e+01 and trig = 4.629520e+01
+
+TRIGTARG3 = 1.372929e+02 with targ = 1.623170e+02 and trig = 2.502402e+01
+
+TRIGTARG4 = -1.372929e+02 with targ = 2.502402e+01 and trig = 1.623170e+02
+
+TRIGTARG5 = 5.874868e+01 with targ = 1.050439e+02 and trig = 4.629520e+01
+
+RISEFALL1 = 4.803518e+01 with targ = 9.433038e+01 and trig = 4.629520e+01
+
+RISEFALL2 = -8.001987e+01 with targ = 2.502402e+01 and trig = 1.050439e+02
+
+RISEFALL3 = 9.905091e+01 with targ = 1.240749e+02 and trig = 2.502402e+01
+
+RISEFALL4 = -1.449024e+02 with targ = 2.502402e+01 and trig = 1.699264e+02
+
+LASTMEASURE = 6.993866e-01 at freq = 1.584893e+02

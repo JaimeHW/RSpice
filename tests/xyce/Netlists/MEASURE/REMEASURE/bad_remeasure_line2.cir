@@ -1,0 +1,19 @@
+A netlist used to test a bad remeasure command line
+******************************************************************
+* The contents of this file doesn't really matter. It just has 
+* to have one valid .MEASURE statement.
+*
+* The purpose of this test is to verify that trying to use a
+* directory name for remeasure (as in -remeasure .) causes 
+* a graceful exit from remeasure.
+*******************************************************************
+VS1  1  0  SIN(0 1.0 1KHZ 0 0)
+R1  1  0  100
+
+.TRAN 0  1ms
+.PRINT TRAN FORMAT=NOINDEX V(1)
+
+.measure tran maxSine max V(1)
+
+.END
+

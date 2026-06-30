@@ -1,0 +1,16 @@
+opt_rc.cir
+opt_rc.reference_data
+opt_rc.cir.sh
+opt_rc.dak
+opt_soi.cir
+opt_soi.cir.sh
+opt_soi.cir.tags
+opt_soi.dak
+opt_soi_gold.prn
+rc.cir
+rc.dak
+rc.cir.sh
+res.cir
+res.dak
+res.cir.sh
+tags

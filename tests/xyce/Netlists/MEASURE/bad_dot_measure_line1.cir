@@ -1,0 +1,59 @@
+Testing ill-formed .MEASURE lines
+*********************************************************************
+* Missing various pieces of the .MEASURE line.   
+* Also:
+*   1) the second word must be DC, AC or TRAN. BlEEM causes an error.
+*   2) TRAN can not be used as the measure name
+*   3) invalid measure types
+*   4) mismatched expression delimiters
+*   5) Invalid HSPICE-style PAR() and () expression syntaxes
+* 
+* See SON Bugs 673, 613 (TRIG-TARG), 1134 and 1135
+*
+*********************************************************************
+VS  1  0  SIN(0 1.0 1KHZ 0 0)
+R1  1  0  100
+.TRAN 0 1ms
+.PRINT TRAN FORMAT=NOINDEX V(1) 
+
+* various bogo measure lines that will cause a fatal error within
+* the extractMEASUREDATA() function
+.MEASURE TRAN TRAN avg v(1)
+.MEASURE BLEEM AVERAGE avg v(1)
+.MEASURE TRAN AVERAGE
+.MEASURE TRAN
+.MEASURE
+.MEASURE TRAN badTrigVal TRIG v(1) VAL TARG v(1)=0.9
+.MEASURE TRAN badTargVal TRIG v(1)=0.1 TARG v(1) VAL
+.measure FIND v(1) WHEN v(1) VAL=0.1
+
+* Invalid measure type (bleem) for .TRAN
+.MEASURE TRAN bogotype bleem v(1)
+
+* mismatched expression delimiters
+.measure tran noEndCurly eqn {V(1)
+.measure tran noBeginCurly param=V(1)'
+
+* invalid PAR() expression synaxes
+.MEASURE TRAN M1 MAX PAR('V(1)+V(2)'
+.MEASURE TRAN M2 MAX PAR('V(1)+V(2))
+.MEASURE TRAN M3 MAX PAR(V(1)+V(2)')
+.MEASURE TRAN M4 MAX PAR(V(1)+V(2))
+
+*invalid () expression syntaxes
+.MEASURE TRAN M5 AVG (V(1)*V(2)')
+.MEASURE TRAN M6 INTEG ('V(1)*V(2)'
+.MEASURE TRAN M7 PP ('V(1)+V(2)'
+.MEASURE TRAN M8 PP (V(1)+V(2))
+
+* invalid syntaxes for qualifiers
+.MEASURE TRAN M9 PP V(1) TD=t1}
+.MEASURE TRAN M10 PP V(1) TO={t3
+.MEASURE TRAN M11 PP V(1) FROM=t1
+.MEASURE TRAN M11 PP V(1) FROM=
+
+* HB mode isn't supported.  Just TRAN, AC, DC and NOISE
+.MEASURE HB MHB MAX V(1)
+
+.END
+

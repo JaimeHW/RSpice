@@ -1,0 +1,29 @@
+Test Name: topoCheck
+Owner: 
+Test netlists: topoCheck.cir
+GS files: none
+Mode:  Serial and Parallel
+Comparator:  none
+Version of Xyce: Release_3.1       # the first version where this bug was tested.
+ 
+Description:
+============
+This test make sure that two types of topology checking are done and warning messages
+issued.  Xyce checks that (1) each node has a DC path to ground and (2) each node is
+connected to atleast two devices.
+ 
+Procedure:
+============
+Default
+ 
+Verification:
+=============
+In the log file near the top the following two diagnostics must be observed:
+
+Dev Warning: Voltage Node (X0:X6:HANGING) connected to only 1 device Terminal
+ 
+Dev Warning: Voltage Node (X0:X6:HANGING) does not have a DC path to ground
+ 
+Notes:
+======
+None

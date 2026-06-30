@@ -1,0 +1,34 @@
+* Transient sensitivity example, sine source, "dummy" file to provide variable 
+* list to xyce_verify.  This file is not run as part of the test, just parsed.
+*****************************************************************************
+.param v0=0.3
+.param va=1
+.param f=500hz
+.param td=0
+.param phase=500
+.param theta=0
+
+* original
+isin 0 1 sin({v0} {va} {f} {td} {phase} {theta})
+r1   1 0 1
+
+.tran 0.06ms 6ms
+
+
+*comp v(1) offset=0.3
+*comp v(1)_va  offset=0.6
+*comp v(1)_freq offset=0.005
+*comp v(1)_td  offset=4e3
+*comp v(1)_theta offset=0.0008
+*comp v(1)_phase offset=0.015
+
+.print tran 
++ v(1)
++ v(1)_v0
++ v(1)_va
++ v(1)_freq
++ v(1)_td
++ v(1)_theta
++ v(1)_phase
+
+.end

@@ -1,0 +1,16 @@
+$correct instance parameters
+* Netlist tests XDM will remove NF and LDE parameters 
+* from pfet model since those don't exist in level=3
+* model, while preserving them in level=54 model where
+* it is actually defined (see issue #113 on XDM gitlab)
+
+VD 1 0 1.2
+VG 2 0 DC=0
+M1 1 2 3 1 pfet L=60e-9 W=1900e-9 AD=33.6e-15 AS=33.6e-15 PD=740e-9 PS=740e-9 NRD=476.2e-3 NRS=476.2e-3 NF=1 SA=160e-9 SB=160e-9 SD=0
+M2 3 2 0 0 nfet L=60e-9 W=210e-9 AD=33.6e-15 AS=33.6e-15 PD=740e-9 PS=740e-9 NRD=476.2e-3 NRS=476.2e-3 NF=1 SA=160e-9 SB=160e-9 SD=0
+
+.DC VG 0 1.2 0.05
+.PRINT DC V(2) V(3)
+
+.MODEL NFET NMOS (LEVEL=54)
+.MODEL PFET PMOS (LEVEL=3)

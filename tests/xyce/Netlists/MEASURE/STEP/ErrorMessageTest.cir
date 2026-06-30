@@ -1,0 +1,146 @@
+A test of the .MEASURE Error Messages
+*******************************************************************************
+** This verifies the correct and erroneous .MEASURE statements print out
+** the correct information to std output.  The unit tests for each 
+** measure verify the correctness of the .mt0 files for failed measures
+**
+** This test uses the legacy TRIG-TARG mode,  so it tests the
+** RiseFallDelay class.  See gitlab-ex issue 303 for more details.
+
+VS1   1  0  SIN(0 1.0 1KHZ 0 0.9)
+VS2  2  0  SIN(0 -1.0 1KHz 0 0.9)
+R1  1  0  100
+R2  2  0  100
+
+* use MEASFAIL option for compatibility with precision test of .mt0 file
+.OPTIONS MEASURE MEASFAIL=0
+
+* use legacy trig-targ mode
+.OPTIONS MEASURE USE_LTTM=1
+
+.TRAN 0  1ms
+.step VS1:VA 1 2 1
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2)
+
+* AVG
+.measure tran avgVal avg V(1)
+.measure tran avgFailTo avg V(1) FROM=1 TO=1e-3
+.measure tran avgFailTd avg V(1) FROM=1e-4 TO=1e-3 TD=1
+.measure tran avgFailEarlyStart avg V(1) FROM=-2 TO=-1
+.measure tran avg1Pt avg V(1) from=5e-4 to=5e-4
+
+*DERIV
+.measure tran derivValWhen deriv V(1) WHEN V(1)=0.5
+.measure tran derivValWhenRise1 deriv V(1) WHEN V(1)=0.5 RISE 1
+.measure tran derivValAt deriv V(1) AT=5e-04
+.measure tran derivValWhenFail deriv V(1) WHEN V(1)=5
+.measure tran derivValAtFail deriv V(1) AT=5
+.measure tran derivriselast deriv v(1) when v(1)=-0.75 RISE=LAST
+.measure tran derivriselastfail deriv v(1) when v(1)=2 RISE=LAST
+
+* DUTY
+.measure tran dutyVal duty V(1)
+.measure tran dutyFailTo duty V(1) FROM=1 TO=1e-3
+.measure tran dutyFailTd duty V(1) FROM=1e-4 TO=1e-3 TD=1
+.measure tran dutyFailEarlyStart duty V(1) FROM=-2 TO=-1
+
+*EQN
+.measure tran eqnVal EQN {V(1)+10}
+.measure tran eqnFailTo EQN {V(1)-1} FROM=1 TO=1e-3
+.measure tran eqnEarlyStart duty V(1) FROM=-2 TO=-1
+
+* FIND WHEN
+.measure tran whenVal WHEN V(1)=0.5
+.measure tran whenLastMinus75 when v(1)=-0.75 RISE=LAST
+.measure tran whenFirst75 when v(1)=0.75 RISE=1
+.measure tran whenValFail WHEN V(1)=5
+.measure tran findWhenVal FIND V(2) WHEN V(1)=0.5
+.measure tran findWhenValFail find v(2) when v(1)=5
+.measure tran whenLast75 when v(1)=0.75 RISE=LAST
+.measure tran FindWhenLast75 find v(2) when v(1)=0.75 RISE=LAST
+
+*FOUR
+.measure tran fourfail FOUR V(1) AT=1e3 TD=2e-3
+.measure tran four1ptfailt FOUR V(1) AT=1e-3 TD=1e-3
+.measure tran fouratfail FOUR V(1) AT=1e2
+
+*FREQ
+.measure tran freqVal FREQ v(1) ON=0.75 OFF=0.25
+.measure tran freqFailTo FREQ v(1) ON=0.75 OFF=0.25 FROM=1 TO=1e-3
+.measure tran freqFailTd FREQ v(1) ON=0.75 OFF=0.25 FROM=1e-4 TO=1e-3 TD=1
+.measure tran freqFallEarlyStart FREQ v(1) ON=0.75 OFF=0.25 FROM=-2 TO=-1
+
+* INTEG
+.measure tran integVal integ V(1)
+.measure tran integFailTo integ V(1) FROM=1 TO=1e-3
+.measure tran integFailTd integ V(1) FROM=1e-4 TO=1e-3 TD=1
+.measure tran integFailEarlyStart integ V(1) FROM=-2 TO=-1
+
+* MAX
+.measure tran maxVal max V(1)
+.measure tran maxValRise1 max V(1) RISE 1
+.measure tran maxValRiseLast max V(1) RISE LAST
+.measure tran maxValRFClevel max v(1) CROSS=1 RFC_LEVEL=0.5
+.measure tran maxFailTo max V(1) FROM=1 TO=1e-3
+.measure tran maxFailTd max V(1) FROM=1e-4 TO=1e-3 TD=1
+.measure tran maxFailEarlyStart max V(1) FROM=-2 TO=-1
+.measure tran maxFailRise max V(1) RISE=4
+.measure tran maxFailFall max V(1) FALL=4
+.measure tran maxFailCross max V(1) CROSS=4 
+
+* MIN
+.measure tran minVal min V(1)
+.measure tran minValFallLast min V(1) FALL LAST
+.measure tran minValRFClevel min v(1) CROSS=1 RFC_LEVEL=0.5
+.measure tran minFailTo min V(1) FROM=1 TO=1e-3
+.measure tran minFailTd min V(1) FROM=1e-4 TO=1e-3 TD=1
+.measure tran minFailEarlyStart min V(1) FROM=-2 TO=-1
+.measure tran minFailRise min V(1) RISE=4
+.measure tran minFailFall min V(1) FALL=4
+.measure tran minFailCross min V(1) CROSS=4 
+
+* OFF_TIME
+.measure tran offVal off_time V(1) OFF=0
+.measure tran offValLow off_time V(1) OFF=-2
+.measure tran offFailTo off_time V(1) OFF=0 FROM=1 TO=1e-3
+.measure tran offFailTd off_time V(1) OFF=0 FROM=1e-4 TO=1e-3 TD=1
+.measure tran offFailEarlyStart off_time V(1) OFF=0 FROM=-2 TO=-1
+
+* ON_TIME
+.measure tran onVal on_time V(1) ON=0
+.measure tran onValHigh on_time V(1) ON=2
+.measure tran onFailTo on_time V(1) ON=0 FROM=1 TO=1e-3
+.measure tran onFailTd on_time V(1) ON=0 FROM=1e-4 TO=1e-3 TD=1
+.measure tran onFailEarlyStart on_time V(1) ON=0 FROM=-2 TO=-1
+
+* PP
+.measure tran ppVal pp V(1)
+.measure tran ppCrossLast pp V(1) Cross LAST
+.measure tran ppValRFClevel pp v(1) CROSS=1 RFC_LEVEL=0.5
+.measure tran ppFailTo pp V(1) FROM=1 TO=1e-3
+.measure tran ppFailTd pp V(1) FROM=1e-4 TO=1e-3 TD=1
+.measure tran ppFailEarlyStart pp V(1) FROM=-2 TO=-1
+.measure tran ppFailRise pp V(1) RISE=4
+.measure tran ppFailFall pp V(1) FALL=4
+.measure tran ppFailCross pp V(1) CROSS=4 
+
+* RMS
+.measure tran rmsVal rms V(1)
+.measure tran rmsFailTo rms V(1) FROM=1 TO=1e-3
+.measure tran rmsFailTd rms V(1) FROM=1e-4 TO=1e-3 TD=1
+.measure tran rmsFailEarlyStart rms V(1) FROM=-2 TO=-1
+.measure tran rms1Pt rms V(1) from=5e-4 to=5e-4
+
+*TRIG/TARG (RiseFallDelay)
+.measure tran trigTargVal TRIG v(1) 0.1 TARG v(1)=0.99
+.measure tran trigRiseLastFallLast trig v(1)=0.25 RISE=LAST targ v(1)=0.25 FALL=LAST
+.measure tran trigLastFail trig v(1)=0.25 FALL=LAST targ v(1)=0.25 CROSS=1
+.measure tran trigTargFail trig v(1) frac_max=0.1 targ v(1) frac_max=3
+.measure tran trigTargAtFail TRIG AT=2e-3 TARG V(2)=0.5
+
+* Signifies end of test. .sh file looks for a measure
+* named lastMeasure
+.measure tran lastMeasure deriv V(1) AT=5e-04
+
+.END
+

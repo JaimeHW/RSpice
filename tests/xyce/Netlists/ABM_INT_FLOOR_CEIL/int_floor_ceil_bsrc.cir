@@ -1,0 +1,39 @@
+* test B source with int/floor/ceil
+*
+* We have to do a DC sweep here, not transient.
+*
+* Trying to do this in transient can lead to convergence failures due
+* to infinite slope transitions if one uses, say, a sinusoidal source
+* like we do in the other netlist in this directory.
+*
+* When one uses a PWL source, one can avoid the convergence failures,
+* but results of ceil() at (approximately) 0 and 1 volt on V1 can
+* show up as "failures" in the perl script, but are actually correct:
+* "0" isn't really 0, it's some tiny negative number, and 1 isn't
+* really 1, it's some epsilon less than one -- in both cases, Xyce is
+* really outputting what the B source gets on node 4, which is
+* corrrect to simulation precision, but not in fact ceil(v(1))!
+* That makes it difficult to craft a portable perl script that sanity
+* checks the output.
+*
+* By using only a DC sweep this netlist does make sure that the
+* expressions using int, ceil, and floor do work as B source
+* expressions.
+*
+
+R1 1 0 1
+V1 1 0 DC 1
+
+Rint 2 0 1
+Bint 2 0 V={int(v(1))}
+
+Rfloor 3 0 1
+Bfloor 3 0 V={floor(v(1))}
+
+Rceil 4 0 1
+Bceil 4 0 V={ceil(v(1))}
+
+.DC V1 -1 1 .1
+.print DC V(1) v(2) v(3) v(4)
+.end
+

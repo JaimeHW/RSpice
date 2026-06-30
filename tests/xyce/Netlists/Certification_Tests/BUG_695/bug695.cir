@@ -1,0 +1,57 @@
+Simulation Input File
+
+.MODEL bfs17a_tc NPN 
++ IS = 2.463E-016 
++ BF = 103.8 
++ NF = 0.9915 
++ VAF = 74.47 
++ IKF = 0.1259 
++ ISE = 6.205E-016 
++ NE = 1.427 
++ BR = 8.577 
++ NR = 0.9919 
++ VAR = 4.753 
++ IKR = 0.02754 
++ ISC = 8.166E-017 
++ NC = 1.009 
++ RB = 60.64 
++ IRB = 0.000169 
++ RBM = 4.07 
++ RE = 0.182 
++ RC = 2.028 
++ EG = 1.222 
++ XTI = 3 
++ XTB = 1.556 
++ CJE = 1.435E-012 
++ MJE = 0.3446 
++ VJE = 0.8857 
++ CJC = 1.183E-012 
++ MJC = 0.206 
++ VJC = 0.4708 
++ FC = 0.5 
++ TF = 2.65E-011 
++ XTF = 14.36 
++ VTF = 0.9261 
++ ITF = 0.1298 
++ PTF = 80 
++ XCJC = 1 
++ TR = 1.186E-007 
+
+QCKT 1 2a 3 bfs17a_tc
+
+* START SOURCES
+VC 1 0 DC 0
+*IB 0 2 DC 0
+IB 0 2 DC 1e-4
+VIB 2 2a DC 0
+VE 3 0 DC 0
+* END SOURCES
+
+.options DEVICE TEMP=15
+.dc VC 0 0 0.1 
+.dc IB 8e-5 1e-4 2e-5
+
+.print DC  I(IB) V(1) I(VC) I(VIB) 
+
+.end
+

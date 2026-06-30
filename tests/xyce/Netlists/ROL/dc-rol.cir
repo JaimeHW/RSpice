@@ -1,0 +1,10 @@
+DC circuit with .rol statement 
+
+R1 1 0 10
+V1 1 0 DC 0V
+
+.print DC v(1) I(v1)
+.dc v1 0 10 .1
+.rol 
+
+.end

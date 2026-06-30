@@ -1,0 +1,77 @@
+A neuron cable example
+*
+* This is a simple test of simulating a neuron cable
+* via the cable equation (6.29 in Theorteical Neuroscience,
+* by P. Dayan and L. Abbot)
+*
+
+* units for model parameters
+* cMem = F/cm^2
+* gMem = S/cm^2
+* vRest = V
+* eNa = V
+* gNa = S/cm^2
+* eK = V
+* gK = S/cm^2
+* r  = ohms cm
+*
+* NOTE: length scale is immaterial as long as it's always a consistent unit
+* parameters from Dayan's book pg 173, 157, 155
+* cMem  = 1.0 uF/cm^2   =>  1.0e-6 F/cm^2
+* gMem  = 0.003 mS/mm^2 =>  0.000003 S/mm^2  => 0.0003 S/cm^2
+* gK    = 0.20  mS/mm^2 =>  0.00020 S/mm^2   => 0.020  S/cm^2
+* gNa   = 1.2 mS/mm^2   =>  0.0012 S/mm^2    => 0.12   S/cm^2
+* gA    = 0.477 mS/mm^2 =>  0.000477 S/mm^2  => 0.0477 S/cm^2
+* gCa   = 0.013 mS/mm^2 =>  0.00013 S/mm^2   => 0.013 S/cm^2
+* gKCa  = 0.013 mS/mm^2 =>  0.00013 S/mm^2   => 0.013 S/cm^2
+* vRest = -17 mV        => -0.017 V
+* eK    = -77 mV        => -0.077 V
+* eNa   =  50 mV        =>  0.050 V
+* eA    = -75 mV        => -0.075 V
+* eCa   = 120 mV        => -0.120 V
+* eKCA  = -72 mV        => -0.072 V
+* caInit = 20 uM        => 2.0e-5 M
+* caGamma = 0.1 
+* caTau = 200 ms        => 0.2 s
+* cMem  = 10 nF/mm^2    =>  1.0e-8 F/mm^2    => 1.0e-6 F/cm^2 
+* r     = 1 kOhm mm     =>  1000 Ohm mm      => 100 Ohm cm 
+
+.model csParams neuron level=4 A=1.0e-4
++ cmem=1.0e-6   gmem=0.0003  vrest=-0.017
++ ek=-0.072     gk=0.020
++ ena=0.055     gna=0.12
++ ea=-0.075     ga=0.0477
++ eca=-0.120    gca=0.013 
++ ekca=-0.072   gkca=0.013
++ cainit=2.0e-5 cagamma=0.1 catau=0.2
+
+
+*
+* Using the above neuron model
+*
+
+* This is a standard current pulse to start an activation
+*          pulse( initial_value pulse_value delay_time rise_time fall_time pulse_width period)
+Iin a 0 PULSE( 0 0.40e-7 1.0e-3 1.0e-6 1.0e-6 1.0e-5 1.0e10)
+*Vin a 0 PULSE( 0 0.100 1.0e-3 1.0e-5 1.0e-5 1.0e-4 1.0e10)
+
+* the parameters R (intra-cellular resistivity Ohm/cm), A= radius (cm), L = length (cm)
+* can be specified in the .model statement or as part of the instance.  Instance level
+* parameters override model level ones.  N = number of segments.
+
+* intra cellular resistivity, rl,  is typically 1-3 kOhm mm.  Resistance along the long axis (longitudinal resistance Rl = rl L / (pi a^2)
+* 1 kOhm mm = 1000 Ohm mm = 100 Ohm cm 
+
+yneuron neuron1  a b csParams R=1.0e2 A=1.0e-4 L=0.4 N=100 RPS=1.0e2 APS=1.0e-4 LPS=4.0e-3 RNS=1.0e2 ANS=1.0e-4 LNS=4.0e-3
+
+.step yneuron!neuron1:A 1.0e-4 9.0e-4 2.0e-4
+.tran 0 2.0e-2 noop
+.options timeint method=7 newlte=1 newbpstepping=1 reltol=1e-3
+.options linsol type=klu
+
+.print tran n(yneuron!neuron1_V50) 
+
+
+.end
+
+

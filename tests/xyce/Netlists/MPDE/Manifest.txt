@@ -1,0 +1,13 @@
+converter.cir
+converter.cir.tags
+exclude
+gilbert_cell_mpde.cir
+invert1.cir
+invert1.cir.sh
+invert1.cir.tags
+invert1_MPDE.cir
+sandler24.cir
+sandler24.cir.sh
+sandler24.cir.tags
+sandler24_MPDE.cir
+tags

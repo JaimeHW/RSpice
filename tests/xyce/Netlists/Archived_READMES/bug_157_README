@@ -1,0 +1,19 @@
+==> BUG_157/README <==
+
+Bug Number:  157
+Test Netlist:  bug_157.cir
+
+Description:
+=======
+The test checks for correct handling of nodes in expressions that have mixed alpha and numeric characters in their name and satart with one or more numerals.
+
+Verification:
+========
+Run Xyce in serial on the netlist.
+
+Compare against the results in the given prn file using xyce_verify.pl or ?compare?.
+
+Special Notes:
+========
+None.
+

@@ -1,0 +1,11 @@
+*Testing to make sure that level 54 invokes a BSIM4 mosfet
+
+VIN 1 0 DC 1
+VDD 2 0 DC 5
+M1 2 1 0 0 NMOD 
+
+.MODEL NMOD NMOS level=54
+
+.DC VIN 1 1 0.1
+.print DC V(1) 
+.end

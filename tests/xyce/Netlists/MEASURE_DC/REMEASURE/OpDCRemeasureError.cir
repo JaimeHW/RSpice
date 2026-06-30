@@ -1,0 +1,24 @@
+***********************************************************************
+* There is a partial incompatibility between remeasure for TRAN mode
+* and the inclusion of a .OP statement in the netlist.  Remeasure
+* will work if the .OP statement comes after the .TRAN line.  It 
+* will produce a fatal netlist error if the .OP statement comes first.
+* Both ways will work for .MEASURE. 
+*
+* See SON Bug 885 for more details.
+***********************************************************************
+
+vsrc1   1a 0 1
+rload1a 1a 1b 0.1
+rload1b 1b 0 1
+
+.OP
+.DC vsrc1 1 5 1
+*.OP
+.PRINT DC v(1b)
+
+* MAX measure
+.measure dc maxv1b  max v(1b)
+
+.end
+

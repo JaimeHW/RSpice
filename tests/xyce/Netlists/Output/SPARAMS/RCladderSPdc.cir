@@ -1,0 +1,41 @@
+RC ladder circuit 
+
+* If the [[DC] <val>] parameter is included on a
+* P device line then it must be the first parameter
+* after the node list.
+P1 1 0 DC 1 port=2   sin 0  1 1e5
+*P2 12 0  port=1  z0=100
+
+C1 2 0 1e-2
+Rgs 1 2 0.02
+
+.subckt RCBlock IN OUT GND
+R1 IN OUT 20
+C1 IN OUT 1p
+Cg1 OUT GND 1p
+.ends
+
+X1 2 3 0 RCBlock
+X2 3 4 0 RCBlock
+X3 4 5 0 RCBlock
+X4 5 6 0 RCBlock
+X5 6 7 0 RCBlock
+X6 7 8 0 RCBlock
+X7 8 9 0 RCBlock
+X8 9 10 0 RCBlock
+X9 10 11 0 RCBlock
+X10 11 12 0 RCBlock
+
+*.AC DEC 10 10  1e5 
+
+*.LIN FORMAT=TOUCHSTONE  sparcalc=1
+
+P2 12 0  port=1  z0=100
+
+*.print AC  v(1) v(2)  v(12)
+
+.DC P1  0 1  0.1
+
+.print DC v(1) v(2)   v(12)
+
+.END

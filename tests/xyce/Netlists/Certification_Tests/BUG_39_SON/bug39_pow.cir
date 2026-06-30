@@ -1,0 +1,10 @@
+Testing to make sure that "pow" is a synonym for "pwr"
+
+.param res = {pow(2,3)}
+
+I1 1 0 DC -1
+R1 1 0 res
+
+.DC I1 -1 -1 -.1
+.print DC I(I1) V(1)
+.end

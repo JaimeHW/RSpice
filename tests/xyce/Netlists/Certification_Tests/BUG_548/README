@@ -1,0 +1,30 @@
+Test Name: BUG_548
+Owner: Eric Keiter
+Test netlists: none 
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Bug 548 requested that there be an error trap to ensure that user-specified
+electrodes not overlap.
+
+Procedure:
+============
+The included circuit (overlap.cir) should be run, in serial on all 
+platforms.  Don't bother with parallel.
+
+Verification:
+=============
+The circuit should exit with a fatal error message.  It should say:
+
+Dev Fatal: Electrodes N2 and N1 overlap
+
+If you get this fatal error, consider the test passed.
+ 
+Notes:
+======
+
+

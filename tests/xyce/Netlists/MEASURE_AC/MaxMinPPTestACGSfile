@@ -1,0 +1,128 @@
+ ***** Measure Functions ***** 
+
+MAXVB = 9.937073e-01 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVMB = 9.968487e-01 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVRB = 9.937073e-01 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVIB = 4.872317e-01 at freq = 1.000000e+05
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVPB = 8.992800e+01 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVDBB = -2.741531e-02 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINVB = 1.579134e-06 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINVMB = 1.256636e-03 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINVRB = 1.579134e-06 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINVIB = 1.256635e-03 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINVPB = 4.549865e+00 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINVDBB = -5.801581e+01 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPVB = 9.937057e-01 with max at freq= 1.000000e+06 and min at freq= 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPVMB = 9.955920e-01 with max at freq= 1.000000e+06 and min at freq= 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPVRB = 9.937057e-01 with max at freq= 1.000000e+06 and min at freq= 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPVIB = 4.859750e-01 with max at freq= 1.000000e+05 and min at freq= 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPVPB = 8.537813e+01 with max at freq= 1.000000e+02 and min at freq= 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPVDBB = 5.798839e+01 with max at freq= 1.000000e+06 and min at freq= 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVRBEXP = 1.993707e+00 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVIBEXP = 1.487232e+00 at freq = 1.000000e+05
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINVRBEXP = 1.000002e+00 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINVIBEXP = 1.001257e+00 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPVRBEXP = 9.937057e-01 with max at freq= 1.000000e+06 and min at freq= 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPVRIEXP = 4.859750e-01 with max at freq= 1.000000e+05 and min at freq= 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVMBFROMTO = 7.824790e-01 at freq = 1.000000e+05
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+MINVMBFROMTO = 1.256538e-02 at freq = 1.000000e+03
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+PPVMBFROMTO = 7.699136e-01 with max at freq= 1.000000e+05 and min at freq= 1.000000e+03
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+MAXVIBFROMEXP = 4.872317e-01 at freq = 1.000000e+05
+Measure Start Freq= 1.000000e+05	Measure End Freq= 1.000000e+06
+
+MAXVMBTOEXP = 1.256538e-02 at freq = 1.000000e+03
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+03
+
+PPVMBFROMTOEXP = 6.577959e-01 with max at freq= 1.000000e+05 and min at freq= 1.000000e+04
+Measure Start Freq= 1.000000e+04	Measure End Freq= 1.000000e+05
+
+FREQOFMAXVB = 9.937073e-01 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+FREQOFMINVB = 1.579134e-06 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXIMV1 = 4.984243e-01 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINIMV1 = 6.283180e-04 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPIMV1 = 4.977960e-01 with max at freq= 1.000000e+06 and min at freq= 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: MAXFROMTOFAIL1 failed. FROM value > highest frequency value
+MAXFROMTOFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: MAXFROMTOFAIL2 failed. TO value < FROM value
+MAXFROMTOFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: MINFROMTOFAIL1 failed. TO value <= 0
+MINFROMTOFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: MINFROMTOFAIL2 failed. FROM value > highest frequency value
+MINFROMTOFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: PPFROMTOFAIL1 failed. FROM value > highest frequency value
+PPFROMTOFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+

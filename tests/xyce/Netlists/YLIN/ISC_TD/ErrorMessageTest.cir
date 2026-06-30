@@ -1,0 +1,47 @@
+* Test various parsing errors from invalid ISC_TD_FILES
+* parameters on the .MODEL lines.
+*
+* See SON Bug 1295 for more details.
+*******************************************************
+
+.model diod d
+
+.options hbint numfreq=10 tahb=0
+.hb 1e5
+.print hb v(1) v(2) i(v1)
+
+v1 1 0  sin  0 5 1e5
+
+* file bogo does not exit
+YLIN YLIN1 1 0 2 0 YLIN_MOD1
+.MODEL YLIN_MOD1 LIN TSTONEFILE=ylin-2port-sparam.cir.s2p
++ ISC_TD_FILE=bogo
+
+* bogo is not a supported format for ISC_TD_FILE_FORMAT
+YLIN YLIN2 1 0 2 0 YLIN_MOD2
+.MODEL YLIN_MOD2 LIN TSTONEFILE=ylin-2port-sparam.cir.s2p
++ ISC_TD_FILE=ErrorMessageTest_isc_td_input.prn ISC_TD_FILE_FORMAT=bogo
+
+* PROBE format is not supported
+YLIN YLIN3 1 0 2 0 YLIN_MOD3
+.MODEL YLIN_MOD3 LIN TSTONEFILE=ylin-2port-sparam.cir.s2p
++ ISC_TD_FILE=ErrorMessageTest_isc_td_input.csd
+
+* ErrorMessageTest2_isc_td_input.prn does not have enough columns
+YLIN YLIN4 1 0 2 0 YLIN_MOD4
+.MODEL YLIN_MOD4 LIN TSTONEFILE=ylin-2port-sparam.cir.s2p
++ ISC_TD_FILE=ErrorMessageTest_isc_td_input.prn
+
+* ErrorMessageTest2_isc_td_input.csv does not have enough columns
+YLIN YLIN5 1 0 2 0 YLIN_MOD5
+.MODEL YLIN_MOD5 LIN TSTONEFILE=ylin-2port-sparam.cir.s2p
++ ISC_TD_FILE=ErrorMessageTest_isc_td_input.csv ISC_TD_FILE_FORMAT=CSV
+
+* ErrorMessageTest2_isc_td_input.prn does not have enough columns
+YLIN YLIN6 1 0 2 0 YLIN_MOD6
+.MODEL YLIN_MOD6 LIN TSTONEFILE=ylin-2port-sparam.cir.s2p
++ ISC_TD_FILE=ErrorMessageTest_isc_td_input.noindex ISC_TD_FILE_FORMAT=NOINDEX
+
+d1  2 0 diod
+
+.end

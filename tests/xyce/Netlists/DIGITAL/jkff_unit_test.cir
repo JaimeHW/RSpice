@@ -1,0 +1,47 @@
+Unit Test for JKFF Digital Device
+
+*COMP v(Q_out) reltol=0.02
+*COMP v(QBar_out) reltol=0.02
+
+* Analysis Commands
+.options timeint reltol=1.0e-3
+.tran 10ns 2us
+
+* Sources.  
+* Set PREB and CLRB to 1, so that J, K and CLK control the output states
+V1 PREB_in 0 {V_HI}
+V2 CLRB_in 0 {V_HI}
+* Toggle CLK, J and K to test state table.  Note that the JK Flip-Flop
+* is "falling-edge" triggered by default to match PSpice.
+V3 CLK_in  0  PULSE ({V_LO} {V_HI} 100ns 10ns 10ns 80ns 200ns)
+V4 J_in    0  PWL 0.0 {V_LO} 250ns {V_LO} 260ns {V_HI} 450ns {V_HI} 460ns {V_LO} 
++ 850ns {V_LO} 860ns {V_HI} 1650ns {V_HI} 1660ns {V_LO}
+V5 K_in    0  PWL 0.0 {V_LO} 450ns {V_LO} 460ns {V_HI} 1650ns {V_HI} 1660ns {V_LO}
+
+* Output
+.print tran PRECISION=10 WIDTH=19 v(CLK_in) v(J_in) v(K_in) v(Q_out) v(QBar_out)
+
+* Set digital default parameters:
+.param R1HI=5 R1LO=200 R0HI=200 R0LO=5 RIN=1000 R1=100
+.param SW=5.e-9  CAPOUT=1.e-12  CAPIN=1.e-12
+.param V_LO=0 V_REF=0 V_HI=3
+
+* Digital power node
+V_dpn dig_pn 0 3V
+
+* explicitly set the initial state of the JKFF to Q=0 and QBar=1
+UJKFF1 JKFF dig_pn 0 PREB_in CLRB_in CLK_in J_in K_in Q_out QBar_out DMOD 
++ IC1=0 IC2=1
+
+R1 Q_out 0 100K
+R2 QBar_out 0 100K
+
+.model DMOD DIG ( CLO=CAPOUT  CHI=CAPOUT
++ S0RLO=R0LO  S0RHI=R0HI  S0TSW=SW
++ S0VLO=-1  S0VHI=1.8
++ S1RLO=R1LO  S1RHI=R1HI  S1TSW=SW
++ S1VLO=1  S1VHI=3
++ RLOAD=RIN   CLOAD=CAPIN 
++ DELAY=20ns )
+
+.end

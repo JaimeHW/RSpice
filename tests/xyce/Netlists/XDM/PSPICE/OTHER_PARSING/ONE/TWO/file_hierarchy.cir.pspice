@@ -1,0 +1,21 @@
+* This netlist tests that XDM can find a PSpice .lib or .net file, even if it 
+* is two levels up in the file hierarchy. See SRN Bug 1990 for more details.
+*Analysis directives: 
+.TRAN  0 1ms 0
+
+* Output statements
+.PROBE  V(N01173) N(N01179)
+.PROBE  V(N02173) N(N02179)
+.PROBE  V(N03173) N(N03179)
+.PROBE  V(N04173) N(N04179)
+
+* test slash direction for both included .lib and .net files.  The 
+* .net and .lib files use the same V-R-R circuit but the amplitude 
+* of the V-src is changed from 1V to 4V.
+.LIB "../../forward_slash.lib"
+.LIB "..\..\backward_slash.lib"
+.INC "../../forward_slash.net"
+.INC "..\..\backward_slash.net"
+
+.END
+

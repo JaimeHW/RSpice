@@ -1,0 +1,21 @@
+*
+* circuit with an intentional discontinuity 
+*
+
+Vin 1 0 pulse 0 5 1e-7 1e-6 1e-6 1e-3 2e-3
+
+rload 1 0 10
+
+
+bsrc 3 0 v = {if(v(1)>1, 1,0)}
+rload3 3 0 100
+
+
+.options timeint erroption=1
+.options diagnostic DISCLIMIT=1e-2 diagfilename=DisconCheck2.dia
+.print tran v(1) v(3)
+
+.tran 0 1e-2
+
+.end
+

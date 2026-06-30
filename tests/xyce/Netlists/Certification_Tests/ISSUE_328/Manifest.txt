@@ -1,0 +1,8 @@
+Xmodelcard.nmos
+Xmodelcard.pmos
+bsim4_temp.cir
+bsim4_tempC.cir
+bsim4_tempC2.cir
+bsim4_temp.cir.sh
+exclude
+tags

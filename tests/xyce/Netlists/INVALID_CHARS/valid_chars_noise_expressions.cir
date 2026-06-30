@@ -1,0 +1,30 @@
+**************************************************************
+* For SON Bug 1034
+*
+* Test of what non-alphanumeric characters are legal in 
+* a Xyce node or device name when that name is used within
+* a multi-character operator used for .NOISE analyses, like 
+* DNO(R+), within an expression. This includes the following 
+* characters:
+*
+* ` ~ ! @ # $ % ^ & - _ + [ ] | \ < > . ? /
+*
+* However, it is sufficient to just test the addition operator
+* for DNO and DNI.
+*
+**************************************************************
+
+V1  1 0 DC 5.0 AC  1.0   
+R+  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 100MEG 1
+.PRINT NOISE DNO(R+) DNI(R+)
+
+.END
+

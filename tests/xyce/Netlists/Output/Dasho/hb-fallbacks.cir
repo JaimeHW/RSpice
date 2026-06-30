@@ -1,0 +1,39 @@
+****************************************************************
+* For testing -o (after the changes for Issue 221 and the
+* fix for SON Bug 1011) the key points are that:
+*
+*   1) The .PRINT HB line generates "fallbacks" for the
+*      .PRINT HB_FD, .PRINT HB_TD, .PRINT HB_IC and
+*      .PRINT HB_STARTUP output.
+*
+*   2) The .PRINT output should go to the file specified by -o,
+*      and not to the default file name or the file
+*      specified with FILE=.  It should be a FORMAT=STD
+*      file with space as the delimiter, with the default
+*      extensions (e.g., dashoFile.HB.FD.prn, dashoFile.HB.TD.prn,
+*      dashoFile.hb_ic.prn or dashoFile.startup.prn).
+*
+*   3) the .sh file will run this netlist with -delim COMMA
+*      to verify that command line option is ignored when
+*      -o is also specified.
+*
+*   4) the .sh file will use -o hbFallbackOutput.HB.FD.prn to test
+*      that the default print extension is removed from the
+*      dashoFilename.
+*
+****************************************************************
+
+* Test netlist
+R1 1 0 1k
+C1 1 0 1p
+D1 2 1 D1N3940
+.MODEL D1N3940 D (IS=4e-10 RS=.105 N=1.48 TT=8e-7 CJO=1.95E-11 VJ=.4 M=.38
++ EG=1.36 XTI=-8 KF=0 AF=1 FC=.9 BV=600 IBV=1e-4)
+*            low high td tr  tf  pulsewidth    period
+v1 2 0 pulse 1V 2V  0 1e-5 1e-5 {1/1e4/2-1e-5 } {1/1e4}
+
+.print HB FORMAT=CSV file=hbFallbackFoo v(1) v(2)
+.hb 1e4
+
+.options hbint saveicdata=1 STARTUPPERIODS=2
+.end

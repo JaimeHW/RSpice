@@ -1,0 +1,11 @@
+.lib low
+r4  0  4   5 
+.endl low
+ 
+.lib nom
+r4  0  4   3
+.endl nOm
+ 
+.lib high
+r4  0  4   1
+.endl high

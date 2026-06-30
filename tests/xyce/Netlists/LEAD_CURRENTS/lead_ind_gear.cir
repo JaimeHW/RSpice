@@ -1,0 +1,30 @@
+Inductor Lead current test for simple linear uncoupled inductor
+*********************************************************************
+* Tier No.:  1                                               
+* Description:   Inductor circuit netlist to test validity of
+*                the Xyce inductor model. A small resistor 
+*		 is placed in series with the inductor to prevent
+*                the creation of an inductive loop.  However,
+*                the inductor is essentially in parallel with the
+*                input voltage source.   The inductor voltage will
+*                match the input voltage (minus a small drop across
+*                the resistor).  
+* Input:  V1 5V pulse 
+* Output: V(2) inductor voltage
+* Circuit Elements: inductor, resistor
+********************************************************************** 
+.options linsol TR_partition=0 type=klu
+.options timeint method=gear newbpstepping=0
+.options nonlin-tran rhstol=1.0e-7
+
+I1 1 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS)
+L1 0 2 10mH
+R1 1 2 0.001
+.TRAN 0.1MS 20MS
+*COMP {I(L1)-I(I1)} abstol=1.0e-6 zerotol=1.0e-7
+.PRINT TRAN {I(L1)-I(I1)}
+
+.measure tran maxmag1   max {abs(I(L1)-I(I1))} failvalue=1e-6
+.measure tran totalrms1 rms {I(L1)-I(I1)} failvalue=1e-6  
+
+.END

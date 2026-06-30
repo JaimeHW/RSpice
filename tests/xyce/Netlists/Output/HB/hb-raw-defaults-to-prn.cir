@@ -1,0 +1,38 @@
+*********************************************************************************
+* Test that FORMAT=RAW defaults to a .prn file when there are explicit .PRINT
+* lines for each type of .HB output.  See SON Bug 929 for more details.
+*
+*********************************************************************************
+
+* Because we use VP and IP here, it is pretty essential that there be nontrivial
+* power in frequencies other than the fundamental -- using a sinusoidal
+* input source and only linear devices would have what is essentially
+* roundoff error in all frequencies other than the fundamental.   This
+* leads to platform-dependent failure when comparing the VP signal.
+*
+* Thus, we're driving this with a roughly square wave and making the 
+* circuit slightly non-linear.
+* 
+**********************************************************************************
+
+R1 1 0 1k
+C1 1 0 1p
+D1 2 1 D1N3940
+.MODEL D1N3940 D (IS=4e-10 RS=.105 N=1.48 TT=8e-7 CJO=1.95E-11 VJ=.4 M=.38 EG=1.36 XTI=-8 KF=0 AF=1 FC=.9 BV=600 IBV=1e-4)
+*            low high td tr  tf  pulsewidth    period
+v1 2 0 pulse 1V 2V  0 1e-5 1e-5 {1/1e4/2-1e-5 } {1/1e4}
+
+* This .PRINT line will produce "fallback print parameters" that should be overwritten by
+* the following explicit .PRINT lines.  It should use a different variable list, to make
+* it clear that the "fallbacks" are not actually used.
+.print HB FORMAT=RAW v(2)
+
+* use explicit .PRINT lines for all four output files
+.print HB_FD FORMAT=RAW v(1) vr(1) vi(1) i(r1) ir(r1) ii(r1)
+.print HB_TD FORMAT=RAW v(1) vr(1) vi(1) i(r1) ir(r1) ii(r1)
+.print HB_IC FORMAT=RAW v(1) vr(1) vi(1) i(r1) ir(r1) ii(r1)
+.print HB_STARTUP FORMAT=RAW v(1) vr(1) vi(1) i(r1) ir(r1) ii(r1)
+.hb 1e4
+
+.options hbint saveicdata=1 STARTUPPERIODS=2
+.end

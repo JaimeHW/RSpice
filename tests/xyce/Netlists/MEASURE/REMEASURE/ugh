@@ -1,0 +1,6 @@
+This file is used to test how remeasure handles a file name
+that it too "short" to be parsed as a valid remeasure file.
+The issue is that the filename must end in .PRN, .CSV or .CSD
+for the remeasure function to know which file-parsing object
+to use.  The file name is specifed with -remeasure <filename>
+on the command line.

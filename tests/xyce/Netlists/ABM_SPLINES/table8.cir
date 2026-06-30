@@ -1,0 +1,10 @@
+test of table, with "file" suffix, without curly braces
+
+b1 1 0 v=tablefile("sinewave2-1.dat")
+r1 1 0 500
+.tran 1us 10us
+
+*COMP V(1) OFFSET=6
+.print tran v(1)
+
+.end

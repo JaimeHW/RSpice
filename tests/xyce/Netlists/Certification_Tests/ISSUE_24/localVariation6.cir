@@ -1,0 +1,36 @@
+
+* sampling 
+.param random_value=aunif(1000,400)
+.sampling useExpr=true
+.options SAMPLES numsamples=10
++ outputs={v(2)}
++ sample_type=lhs
++ stdoutput=true
++ seed=1923635719
+
+
+rtest 0 2 1.0
+xtest 1 2 test
+v1 0 1 1.0
+
+.subckt test in out
+.param fixed_value=random_value
+.param other_fixed_value=random_value
+.param yet_another_fixed_value={aunif(1000,400)}
+*r1 in 11 fixed_value
+*r2 11 22 other_fixed_value
+*r3 22 out yet_another_fixed_value
+xtest in out test2
+
+.subckt test2 in out
+.param yet_another2=yet_another_fixed_value
+r1 in 11 fixed_value
+r2 11 22 other_fixed_value
+r3 22 out yet_another2
+.ends
+
+.ends
+
+.dc v1 1 1 1
+.print dc v(1) v(2)
+

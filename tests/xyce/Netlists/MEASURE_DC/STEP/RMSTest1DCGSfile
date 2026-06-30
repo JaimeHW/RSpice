@@ -1,0 +1,60 @@
+ ***** Measure Functions ***** 
+
+RMSV1B = 2.614563e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+RMSV1BFROM = 1.926379e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+RMSV1BTO = 3.156095e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 3.000000e+00
+
+RMSV1BFT1 = 2.538762e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 2.000000e+00
+
+RMSV1BFT2 = 2.538762e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 2.000000e+00
+
+RMSV1BFT1PT = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+RMSV1BSQ = 7.856322e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+RMSFAIL1 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+RMSFAIL2 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+LASTMEASURE = 3.750000e+00 at VSRC1 value = 5.000000e+00
+ ***** Measure Functions ***** 
+
+RMSV1B = 3.521696e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+RMSV1BFROM = 2.847010e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+RMSV1BTO = 4.086468e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 3.000000e+00
+
+RMSV1BFT1 = 3.465793e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 2.000000e+00
+
+RMSV1BFT2 = 3.465793e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 2.000000e+00
+
+RMSV1BFT1PT = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+RMSV1BSQ = 1.348541e+01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+RMSFAIL1 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+RMSFAIL2 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+LASTMEASURE = 4.687500e+00 at VSRC1 value = 5.000000e+00

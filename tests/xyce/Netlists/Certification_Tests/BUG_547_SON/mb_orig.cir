@@ -1,0 +1,38 @@
+* Netlist  Developer error
+.FUNC DM_AC(x) {TABLE(x,0,0)}
+.TRAN 0 1
+Lp_1    A_1      0p1  1
+Rp_1    A_1    A_1b   1
+Vp_1    A_1b    0p1      0
+RP1gnd  0p1     0      1e+6
+Lp_2    A_2      0p2  1
+Rp_2    A_2    A_2b   1
+Vp_2    A_2b    0p2      0
+RP2gnd  0p2     0      1e+6
+Lp_3    A_3      0p3  1
+Rp_3    A_3    A_3b   1
+Vp_3    A_3b    0p3      0
+RP3gnd  0p3     0      1e+6
+Lp_4    A_4      0p4  1
+Rp_4    A_4    A_4b   1
+Vp_4    A_4b    0p4      0
+RP4gnd  0p4     0      1e+6
+XC1  11_1 10_1 z dzdt GC1
+Lc_1    11_1    10_1  1
+
+.subckt GC1 L1 L2 z dzdt
+Vc    L1      2       0
+Rc     2     L2     1
+Rgnd   0     L1      1e+6
+.ends GC1
+
+Bacc  acceleration  0   V = {( 0
++ + I(XC1:Vc)*I(Vp_1)*DM_AC(v(z))
++ + I(XC1:Vc)*I(Vp_2)
++ + I(XC1:Vc)*I(Vp_3)
++ + I(XC1:Vc)*I(Vp_4)
++ )}
+YACC acc1 acceleration dzdt z v0=0 x0=0
+
+.print tran V(Z) V(dzdt) v(acceleration)
+.end 

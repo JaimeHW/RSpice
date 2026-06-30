@@ -1,0 +1,30 @@
+Regression test for simple limit distribution sampling
+*
+*  The limit operator is specified as 
+*
+*     limit(nominal,abs_variation)
+*
+*  If running WITH sampling, then this operator returns either
+*  (nominal+abs_variation) or (nominal-abs_variation), with equal
+*  probability.  This use case is the subject of this test.
+*
+*  If running WITHOUT sampling, this operator should return the
+*  nominal value.  This use case is tested in the BUG_39_SON 
+*  regression test.
+*
+c1 1 0 1uF IC=1
+R1 1 2 {limit(3K,1K)}
+v1 2 0 0V
+.print tran v(1)
+.tran 0 5ms
+.options timeint reltol=1e-6 abstol=1e-6
+
+* 10 samples, with two * possible values:  R1=2K and R1=4K.
+* These two values have equal probability
+.SAMPLING 
++ useExpr=true
+
+.options SAMPLES numsamples=10
+
+.end
+

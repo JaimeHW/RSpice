@@ -1,0 +1,32 @@
+Test Name: BUG_616
+Owner: Eric Keiter
+Test netlists: bug_616.cir
+GS files: bug_616.cir.prn, bug_616.cir.res
+Mode:  Serial and Parallel
+Comparator:  xyce_verify.pl
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Checks that the .STEP capability works.  This is a companion to BUG 381.
+ 
+Procedure:
+============
+
+runxyce bug_616.cir 
+
+xyce_verify.pl --goodres=../../OutputData/BUG_616/bug_616.cir.res \
+ --testres=bug_616.cir.res  bug_616.cir \
+  ../../OutputData/BUG_616/bug_616.cir.prn bug_616.cir.prn
+
+
+Verification:
+=============
+
+If xyce_verify.pl passes, with no error messages, then consider this 
+test passed.
+ 
+Notes:
+======
+
+

@@ -1,0 +1,19 @@
+test multiplier
+
+Vin 1 0 1.0
+Rin 1 2 1.0
+
+Xtest1 2 3 test 
+Xtest2 3 0 test 
+
+.subckt test A B 
+Xtest A B test2 M=2
+.ends
+
+.subckt test2 A B 
+R1 A B 0.5 M=2.5
+.ends
+
+.DC Vin 1 1 1
+.PRINT DC V(1) V(2) V(3) I(Vin) 
+

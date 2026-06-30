@@ -1,0 +1,82 @@
+* Test NOISE mode support for the DERIV / DERIVATIVE measure.
+* It was deemed sufficient to mostly just test with the VR and VI
+* operators.  Expressions are also tested. One current operator (IM)
+* is tested for a branchcurrent.
+*
+* See SON Bug 1301 for more details.
+*****************************************************
+
+*==============  Begin SPICE netlist of main design ============
+.noise V(OUT) V1 dec 10 .01 1e3 1
+
+.print noise VM(out) VR(OUT) VI(OUT) IM(v1) inoise onoise
+
+R5 0 OUT 1MEG
+V1 1 0 sin 0 1 1meg AC 1
+V2 Vcc 0 12
+C2 Vc OUT 10u
+R4 0 Ve 270
+R3 Vc Vcc 1.5k
+Q1 Vc Vb Ve 2N2222
+.MODEL 2N2222 NPN (Is=14.34f Xti=3 Eg=1.11 Vaf=74.03 Bf=255.9 Ne=1.307 Ise=14.34f Ikf=.2847 Xtb=1.5 Br=6.092 Nc=2 Isc=0 Ikr=0 Rc=1 Cjc=7.306p Mjc=.3416 Vjc=.75 Fc=.5 Cje=22.01p Mje=.377 Vje=.75 Tr=46.91n Tf=411.1p Itf=.6 Vtf=1.7 Xtf=3 Rb=10)
+R2 0 Vb 6.8k
+R1 Vb Vcc 39k
+C1 1 Vb 10u
+
+* AT syntaxes
+.MEASURE NOISE DERIVVROUTAT1 DERIV VR(OUT) AT=1
+.MEASURE NOISE DERIVVROUTBAT5 DERIVATIVE VR(OUT) AT=5
+.MEASURE NOISE DERIVVIOUTBAT5 DERIVATIVE VI(OUT) AT=5
+
+* Test AT value at start of sweep. The WHEN and
+* WHENFT measures will fail since vm(vcc) is constant.
+.MEASURE NOISE DERIVVROUTAT0.01 DERIV VR(OUT) AT=0.01
+.MEASURE NOISE ATFT DERIV vr(out) AT=0.01  FROM=0.01 TO=0.01
+.MEASURE NOISE WHEN DERIV vr(out) WHEN vm(vcc)=12  
+.MEASURE NOISE WHENFT DERIV vr(out) WHEN vm(vcc)=12  FROM=0.01 TO=0.01
+
+* Various constant signals.  The CONSTANT-WHEN2 measure will
+* fail because VM(vcc) is a constant.
+.MEASURE NOISE CONSTANT-AT DERIV VR(vcc) AT=5
+.MEASURE NOISE CONSTANT-WHEN1 DERIV VM(vcc) WHEN VM(out)=1
+.MEASURE NOISE CONSTANT-WHEN2 DERIV VM(out) WHEN VM(vcc)=12
+
+* WHEN syntaxes
+.MEASURE NOISE DERIVWHENVROUT1 DERIV VR(OUT) WHEN VM(OUT)=1
+
+* Expressions in WHEN clause
+.MEASURE NOISE derivExp1 DERIV VM(out) when vr(out)=vi(out)
+.MEASURE NOISE derivExp2 DERIV VM(out) when {vr(out)-1.0}=-2.0
+.MEASURE NOISE derivExp3 DERIV VM(out) when vr(out)={-0.7-0.3}
+.MEASURE NOISE derivExp4 DERIV VM(out) when vr(out)={vi(out)-1.0}
+
+* Expression in DERIV clause
+.MEASURE NOISE derivExp5 DERIV {VR(out)+VI(out)} when vm(out)=1
+
+* FROM and TO
+.MEASURE NOISE FROM1 DERIV VI(OUT) WHEN VI(OUT)=-0.5 FROM=1
+
+* Test that the interpolated WHEN time is within the measure window.
+* So, the FROM2 and FROM4 measures should find the first time vi(out)=-0.5.
+* FROM3 should find the second time.
+.MEASURE NOISE FROM2 DERIV VI(OUT) WHEN VI(OUT)=-0.5 FROM=0.28
+.MEASURE NOISE FROM3 DERIV VI(OUT) WHEN VI(OUT)=-0.5 FROM=0.3
+.MEASURE NOISE FROM4 DERIV VI(OUT) WHEN VI(OUT)=-0.5 FROM=0.26 TO=0.29
+
+* The TO1 measure should fail.
+.MEASURE NOISE TO1 DERIV VR(OUT) WHEN VR(OUT)=-5.0 TO=10.5
+.MEASURE NOISE TO2 DERIV VR(OUT) WHEN VR(OUT)=-5.0 TO=12
+
+* branch current
+.measure noise derivimv1 DERIV {1e4*IM(v1)} at=0.05
+
+* Tests should fail
+.measure noise derivFail1 deriv v(out) AT=1e4
+.measure noise derivFail2 deriv vm(out) when vm(out)=10
+
+* FROM and TO qualifiers take precedence over AT.
+* So, these are failed measures.
+.MEASURE NOISE atFailFrom DERIV VI(out) AT=1 FROM=10
+.MEASURE NOISE atFailTo DERIV VI(out) AT=10 TO=5
+
+.end

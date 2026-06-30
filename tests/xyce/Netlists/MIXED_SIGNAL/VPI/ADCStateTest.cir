@@ -1,0 +1,14 @@
+* Test circuit
+
+YADC adc1 1 0 simpleADC R=1T WIDTH=2
+YADC adc2 1 0 simpleADC R=1T WIDTH=3
+.model simpleADC ADC(settlingtime=50ns uppervoltagelimit=2 lowervoltagelimit=0)
+
+v1 1 0 PWL 0 0 1e-4 2
+
+* Limit the max. time step so that the simulation takes at
+* least 1000 steps.  This is needed for the comparison of
+* test-generated timeArray and voltageArray in the .sh file.
+.TRAN 0 1e-4 0 1e-7
+.PRINT TRAN V(1) YADC!ADC1:WIDTH YADC!ADC2:WIDTH n(YADC!ADC1_STATE) n(YADC!ADC2_STATE)
+.END

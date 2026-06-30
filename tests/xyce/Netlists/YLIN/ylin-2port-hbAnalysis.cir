@@ -1,0 +1,30 @@
+* This .HB analysis was used to generate the Gold standards for the
+* following YLIN device tests:
+*
+*   ylin-2port-sparam.cir
+*   ylin-2port-yparam.cir
+*   ylin-2port-zparam.cir
+*   ylin-2port-yparam-ma.cir
+*   ylin-2port-yparam-db.cir
+*   ylin-2port-yparam-freqMult.cir
+*
+* This netlist is not run as part of any regression test.  The Gold
+* standard are ylin-2port.cir.HB.FD.prn and ylin-2port.cir.HB.FD.prn
+
+.model diod d
+.model testLine  transline r=0.2 g=0 l=9.13e-9 c=3.65e-12
+
+v1 1 0  sin  0 5 1e5
+ytransline  line1  1 2  testLine len=10 lumps=5000
+d1 2 0 diod
+
+* Add a load resistor so that the Z parameters have reasonable
+* values at DC
+R2 2 0 1
+
+.options hbint numfreq=10 tahb=0
+.hb 1e5
+.print hb v(2) i(v1)
+
+
+.end

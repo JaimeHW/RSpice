@@ -1,0 +1,12 @@
+Netlist to Test  BUG 156 SON
+*******The bug is that the parser has a memory reference error when
+*      it encounters a line with only a tab on it.  The following line
+*      consists of nothing but a tab.  Post-fix, this should cause
+*      no problem.
+	
+*********************************************************************** 
+R1 1 0 1K
+V1 1 0 5V
+.DC V1 0 5V 1V
+.PRINT DC V(1) I(V1)
+.END

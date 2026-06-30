@@ -1,0 +1,52 @@
+// Generated for: spectre
+// Generated on: Mar  9 09:47:36 2017
+// Design library name: Pete_Lib3
+// Design cell name: RLC_Multipliers
+// Design view name: schematic
+simulator lang=spectre
+global 0
+//include "/usr/local/cadence/ic-5.1.41usr5/tools/dfII/samples/artist/ahdlLib/quantity.spectre"
+
+subckt RC_sub (in out) 
+
+parameters
++ rval=1K
++ cval=1u
++ mval=1
+
+R1 (in mid) resistor r=rval m=mval
+C1 (mid out) capacitor c=cval m=mval
+
+ends RC_sub
+
+// Library name: Pete_Lib3
+// Cell name: RLC_Multipliers
+// View name: schematic
+L1 (net07 0) inductor l=2m m=2
+L0 (net2 0) inductor l=1m
+C1 (net011 net07) capacitor c=500.0n m=2
+C0 (net4 net2) capacitor c=1u
+R1 (net018 net011) resistor r=2K m=2
+R0 (net7 net4) resistor r=1K
+V1 (net018 0) vsource type=sine ampl=2 freq=10
+V0 (net7 0) vsource type=sine ampl=2 freq=10
+
+L2 (net6 0) inductor l=2m m=2
+X1 (net5 net6) RC_sub rval=2K cval=500.0n mval=2 
+V2 (net5 0) vsource type=sine ampl=2 freq=10
+simulatorOptions options reltol=1e-3 vabstol=1e-6 iabstol=1e-12 temp=27 \
+    tnom=27 scalem=1.0 scale=1.0 gmin=1e-12 rforce=1 maxnotes=5 maxwarns=5 \
+    digits=5 cols=80 pivrel=1e-3 sensfile="../psf/sens.output" \
+    checklimitdest=psf 
+tran tran stop=100e-3 write="spectre.ic" writefinal="spectre.fc" \
+    annotate=status maxiters=5 
+finalTimeOP info what=oppoint where=rawfile
+modelParameter info what=models where=rawfile
+element info what=inst where=rawfile
+outputParameter info what=output where=rawfile
+designParamVals info what=parameters where=rawfile
+primitives info what=primitives where=rawfile
+subckts info what=subckts  where=rawfile
+save R0:1 C0:1 L0:1 R1:1 C1:1 L1:1 X1.R1:1 X1.C1:1 L2:1
+saveOptions options save=allpub
+

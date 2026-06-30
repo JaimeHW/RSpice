@@ -1,0 +1,55 @@
+* Test use of .OPTIONS OUTPUT ADD_STEPNUM_COL=TRUE
+*
+* See SON Bug 1209 for more details.
+**************************************************
+*
+* This netlist can use the shorthand" syntax of .STEP Ivar
+* rather than .STEP Ivar:DCV0 since the I device has DCV0
+* as it instanceDefaultParameter.  See SON Bug 972 for
+* more details.
+********************************************************
+* polynomial coefficients:
+.param A=3.0
+.param B=-2.0
+.param C=1.0
+.global_param Ivar=1.0
+
+Vtest 1 0 5.0
+Btest 1 0 V={A*(I(Vtest)-Ivar)**3 + B*(I(Vtest)-Ivar) + C}
+
+.DC Vtest 1 1 1
+.step Ivar 1 1.5 .5
+
+* no continuation:
+*.options nonlin continuation=0
+
+* natural parameter continuation (via loca)
+.options nonlin continuation=1
+
+.options sensitivity debuglevel=1
+
+* stepper sets what order of continuation this is.
+*   stepper=0 or stepper=NAT  is natural continuation
+*   stepper=1 or stepper=ARC  is arclength continuation
+*
+* predictor must be set to secant to see turning points
+*   predictor=0  tangent
+*   predictor=1  secant
+*   predictor=2  random
+*   predictor=3  constant
+*
+*.options loca stepper=0
+.options loca stepper=1
++ predictor=1 stepcontrol=1
++ conparam=Vtest:DCV0
++ initialvalue=0.0 minvalue=0.0 maxvalue=2.0
++ initialstepsize=0.01 minstepsize=1.0e-8 maxstepsize=0.1
++ aggressiveness=0.1
+
+.OPTIONS OUTPUT ADD_STEPNUM_COL=true
+.print homotopy Ivar I(Vtest)
+.print homotopy FORMAT=NOINDEX FILE=homotopy-stepnum-col.cir.HOMOTOPY.noindex.prn Ivar I(Vtest)
+.print homotopy FORMAT=GNUPLOT FILE=homotopy-stepnum-col.cir.HOMOTOPY.gnuplot.prn Ivar I(Vtest)
+.print homotopy FORMAT=SPLOT FILE=homotopy-stepnum-col.cir.HOMOTOPY.splot.prn Ivar I(Vtest)
+
+.end

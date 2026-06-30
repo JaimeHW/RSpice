@@ -1,0 +1,4 @@
+serial, nightly,  parallel, homotopy, step, gmin
+bjt,bjtlev1
+resistor
+capacitor

@@ -1,0 +1,137 @@
+* Test for Issue #282, to allow b3soi voltage limiting to be turned off.
+*
+.param 
++ nstat=0
++ pstat='nstat'
++ sigmawn=0.04u
++ sigmawp=0.04u
++ sigmaln = 0.01276u
++ sigmalp = 0.01292u
++ sigmatoxn = 70.30p
++ sigmatoxp = 68.20p
++ sigmavtn = 0.0141
++ sigmavtp = 0.00833
++ dwn = 'nstat*sigmawn'
++ dwp = 'pstat*sigmawp'
++ dln = '-nstat*sigmaln'
++ dlp = '-pstat*sigmalp'
++ TOXN = '8.233E-009-nstat*sigmatoxn'
++ TOXP = '7.623E-009-pstat*sigmatoxp' 
++ VTH0N = '0.5116-nstat*sigmavtn'
++ VTH0P = '-0.8836+pstat*sigmavtp'
+
+.subckt N D G S B PARAMS: W=0.8u L=0.35u M=1 AD=1p AS=1p PD=1u PS=1u
+MNFET D G S 0 B N W={W+dwn} L={L+dln} M={M} AD={AD} AS={AS} PD={PD} PS={PS}
+.ends N
+
+.MODEL N NMOS (
++ LEVEL = 10 binunit = 0 shmod = 0 tnom = 27 nch = 200000000000000000 xj = 0.00000025
++ xgw = 0  cdsc = 0  vth0 = 'VTH0N'  k3b = -1.665  dvt1 = 0.4033  dvt2w = 0.1417
++ etab = -0.9661  u0 = 312.6  voff = -0.09519  ags = 0.2584  b0 = 0.0000001464
++ prwb = -0.3537  pdiblc2 = 0.007431  lint = 0.00000002049  lwn = 1  dwg = -0.000000009969
++ ww = -3.399E-16  llc = 0  wlc = 0  alpha0 = 0.00000000002547  dwbc = 0  vdsatii0 = 0.9
++ sii1 = 0.1  esatii = 10000000  ngidl = 1.2  aigc = 0.54  bigsd = 0.054  poxedge = 1
++ ndiode = 1  xtun = 0  isbjt = 0.000001  ln = 0.000002  lbjt0 = 0.0000002  ahli = 0
++ tt = 0.000000000001  csdmin = 0  ntrecr = 0  vbsa = -0.1475  k2b = 0  moinfd = 1000
++ vbs0pd = 0  xpart = 0  cgdl = 0.0000000000123  cle = 0  mjswg = 0.2381  delvt = -0.001075
++ wth0 = 0  ebg = 1.2  vgb1 = 300  vgb2 = 17  noia = 1E+20  ef = 1  tnoia = 1.5
++ ntnoi = 1  kt1 = -0.3539  ub1 = -3.028E-19  tcjswg = 0  ngcon = 1  lu0 = 0
++ soimod = 0  capmod = 3  igbmod = 0  tox = 'TOXN'  nsub = 1000000000000000
++ delta = 0.009299  xgl = 0  cdscb = 0  k1 = 0.6868  w0 = 4.441E-21  dvt2 = -0.06557
++ dsub = 1.603  ua = -0.000000001255  nfactor = 0.7713  a1 = 0.998  b1 = 4.441E-21
++ pclm = 4.046  pdiblcb = -0.00000000000000111  ll = 0.000000000000004045  lwl = 0
++ dwb = 0.00000003  wwn = 1.147  lwc = 0  wwc = 0  k1w1 = 0  beta0 = 0.003572
++ tii = 0  sii2 = 0  rth0 = 0  agidl = 0  bigc = 0.054  cigsd = 0.075
++ pigcd = 1  xbjt = 1  ntun = 10  isdif = 0  vrec0 = 0  ldif0 = 1
++ rbody = 3200  ndif = 0  asd = 0.3  dlcb = 0  nofffd = 1  dk2b = 0
++ vbs0fd = 0.5  cgso = 0.0000000002374  ckappa = 8.882E-16  dwc = 0
++ cjswg = 0.0000000005427  kb1 = -0.04605  rhalo = 0  vevb = 3
++ vecb = 1  voxh = 5  noib = 50000  af = 1
++ tnoib = 3.5  kt1l = 0.000000008561  uc1 = -0.2605  tpbswg = 0
++ rshg = 0.1  version = 3.1  mobmod = 3  igcmod = 0
++ tbox = 0.0000002  ngate = 3.5E20  rsh = 4.4  cdscd = 0  k2 = 0.02496
++ nlx = 0.0000001668  dvt0w = 0.7002  eta0 = 0.00000000000000222  ub = 3.325E-18
++ vsat = 93990  a2 = 0.995  rdsw = 183.7  pdiblc1 = 0.02219  pvag = 5
++ lln = 0.7  wr = 0.8379  wl = -0.000000000000007244  wwl = -1.738E-23  lwlc = 0
++ wwlc = 0  k1w2 = 0  beta1 = 0.000000001  lii = 0  siid = 0  cth0 = 0
++ bgidl = 0  cigc = 0.075  dlcig = 0  xdif = 1  nrecf0 = 2  isrec = 0  vtun0 = 0
++ vabjt = 10  rbsh = 3.4  vsdfb = 0  csdesw = 0  fbody = 1  vofffd = 0
++ dvbd0 = 0  cgdo = 0.0000000002374  cf = 0.00000000009734  dlc = 0.00000002049
++ acde = 1.037  dlbg = 0  ntox = 1  alphagb1 = 0.35  alphagb2 = 0.43  deltavox = 0.005
++ noic = -0.0000000000014  kf = 0  rnoia = 0.577  kt2 = -0.02299  ute = -1.589
++ prt = -0.000000000000005551  xrcrg1 = 12  paramchk = 0  rgatemod = 0  tsi = 0.00000025
++ cit = 0  toxm = 0.000000008233  dtoxcv = 0  k3 = 9.135  dvt0 = 0.4233
++ dvt1w = 161400  uc = 0.1  a0 = 1.785  keta = -0.07879  prwg = 0.2125  drout = 0.08428
++ lw = 0  wint = 0.0000001  wln = 1.005  ketas = 0  beta2 = 0.1  sii0 = 0.5
++ fbjtii = 0  aigsd = 0.43  nigc = 1  xrec = 1  nrecr0 = 10  istun = 0
++ nbjt = 1  aely = 0  cgeo = 0  vsdth = 0  ntrecf = 0  k1b = 1  dvbd1 = 0
++ cgsl = 0.0000000000123  clc = 0.00000001  pbswg = 1  moin = 15  toxqm = 0.000000008233
++ toxref = 0.000000008233  betagb1 = 0.03  betagb2 = 0.05  noff = 0.5  em = 41000000
++ noif = 1  rnoib = 0.37  ua1 = 0.00000000006663  at = 20000  xrcrg2 = 1
++ )
+
+
+.subckt P D G S B PARAMS: W=0.8u L=0.35u M=1 AD=1p AS=1p PD=1u PS=1u
+MP D G S 0 B P W={W+dwp} L={L+dlp} M={M} AD={AD} AS={AS} PD={PD} PS={PS}
+.ends P
+
+.MODEL P PMOS ( 
++ LEVEL = 10  Binunit = 1 Shmod = 0 Tnom = 27 Nch = 200000000000000000
++ Xj = 0.00000025 Xgw = 0 Cdsc = 4.441E-16 Vth0 = 'VTH0P' K3b = -0.5121
++ Dvt1 = 0.3746 Dvt2w = -0.006011 Etab = 1.616 U0 = 212.3 Voff = -0.1412
++ Ags = 0.3292 B0 = 0.000004021 Prwb = -0.3451 Pdiblc2 = 0.000001 Lint = 0.00000004677
++ Lwn = 1.07 Dwg = -0.000000009758 Ww = -0.000000000000004893 Llc = 0
++ Wlc = 0 Alpha0 = -0.0000000004739 Dwbc = 0 Vdsatii0 = 0.9 Sii1 = 0.1
++ Esatii = 10000000 Ngidl = 1.2 Aigc = 0.54 Bigsd = 0.054 Poxedge = 1
++ Ndiode = 1 Xtun = 0 Isbjt = 0.000001 Ln = 0.000002 Lbjt0 = 0.0000002
++ Ahli = 0 Tt = 0.000000000001 Csdmin = 0 Ntrecr = 0 Vbsa = 0.011
++ K2b = 0 Moinfd = 1000 Vbs0pd = 0 Xpart = 0 Cgdl = 0.0000000001021
++ Cle = 0 Mjswg = 0.2373 Delvt = -0.001 Wth0 = 0 Ebg = 1.2 Vgb1 = 300
++ Vgb2 = 17 Noia = 1E20 Ef = 1 Tnoia = 1.5 Ntnoi = 1 Kt1 = -0.5373
++ Ub1 = -1.088E-17 Tcjswg = 0 Ngcon = 1 Soimod = 0 Capmod = 3 Igbmod = 0
++ Tox = 'TOXP' Nsub = 10000000000000000 Delta = 0.009709 Xgl = 0 Cdscb = 0.00007297
++ K1 = 0.5225 W0 = 0.000000215 Dvt2 = -0.0506 Dsub = 3 Ua = 0.000000001691
++ Nfactor = 2.339 A1 = 0.0000912 B1 = 0.000005274 Pclm = 2.709 Pdiblcb = 5.551E-16
++ Ll = 0.000000000000001 Lwl = -9.383E-21 Dwb = 0.00000002996 Wwn = 0.5003 Lwc = 0
++ Wwc = 0 K1w1 = 0 Beta0 = 0.001067 Tii = 0 Sii2 = 0 Rth0 = 0 Agidl = 0
++ Bigc = 0.054 Cigsd = 0.075 Pigcd = 1 Xbjt = 1 Ntun = 10 Isdif = 0
++ Vrec0 = 0 Ldif0 = 1 Rbody = 3.6 Ndif = 0 Asd = 0.3 Dlcb = 0 Nofffd = 1
++ Dk2b = 0 Vbs0fd = 0.5 Cgso = 0.0000000003627 Ckappa = 8.882E-16 Dwc = 0
++ Cjswg = 0.0000000006416 Kb1 = 1 Rhalo = 0 Vevb = 3 Vecb = 1 Voxh = 5
++ Noib = 50000 Af = 1 Tnoib = 3.5 Kt1l = 0.00000001939 Uc1 = -0.0912
++ Tpbswg = 0 Rshg = 0.1 Version = 3.1 Mobmod = 3 Igcmod = 0
++ Tbox = 0.0000002 Ngate = 1.9E20 Rsh = 3.4 Cdscd = 0.0003546 K2 = 0.02789
++ Nlx = 4.441E-22 Dvt0w = 0.8318 Eta0 = 0.00000000000000222 Ub = 9.569E-19
++ Vsat = 264000 A2 = 0.1686 Rdsw = 155.2 Pdiblc1 = 0.008975 Pvag = 4.34
++ Lln = 1 Wr = 0.7372 Wl = 5.495E-16 Wwl = 1E-20 Lwlc = 0 Wwlc = 0
++ K1w2 = 0 Beta1 = 0.000000001 Lii = 0 Siid = 0 Cth0 = 0 Bgidl = 0
++ Cigc = 0.075 Dlcig = 0 Xdif = 1 Nrecf0 = 2 Isrec = 0.00001 Vtun0 = 0
++ Vabjt = 10 Rbsh = 4.4 Vsdfb = 0 Csdesw = 0 Fbody = 1 Vofffd = 0
++ Dvbd0 = 0 Cgdo = 0.0000000003627 Cf = 2.22E-24 Dlc = 0.00000004084
++ Acde = 1.17 Dlbg = 0 Ntox = 1 Alphagb1 = 0.35 Alphagb2 = 0.43
++ Deltavox = 0.005 Noic = -0.0000000000014 Kf = 0 Rnoia = 0.577
++ Kt2 = 1.11E-17 Ute = -0.5271 Prt = -163.4 Xrcrg1 = 12 Paramchk = 0
++ Rgatemod = 0 Tsi = 0.00000025 Cit = 0 Toxm = 0.000000007623 Dtoxcv = 0
++ K3 = -0.5167 Dvt0 = 1.426 Dvt1w = 631000 Uc = -0.01699 A0 = 1.396
++ Keta = -0.02719 Prwg = 0.5269 Drout = 0.009162 Lw = 0.00000000000002028
++ Wint = 0.0000001 Wln = 1 Ketas = 0 Beta2 = 0.1 Sii0 = 0.5 Fbjtii = 0
++ Aigsd = 0.43 Nigc = 1 Xrec = 1 Nrecr0 = 10 Istun = 0 Nbjt = 1 Aely = 0
++ Cgeo = 0 Vsdth = 0 Ntrecf = 0 K1b = 1 Dvbd1 = 0 Cgsl = 0.0000000001021
++ Clc = 0.00000001 Pbswg = 0.2201 Moin = 15 Toxqm = 0.000000007623
++ Toxref = 0.000000007623 Betagb1 = 0.03 Betagb2 = 0.05 Noff = 0.5
++ Em = 41000000 Noif = 1 Rnoib = 0.37 Ua1 = 0.00000000895
++ At = 20000 Xrcrg2 = 1 )
+
+vgs 1 0 0.0
+vds 2 0 3.0 
+VSSsrc VSS 0 0.0 
+
+.dc vgs 0.0 3.0 0.02
+
+.print dc V(1) {-I(vds)}
+
+.options device b3soivoltlim=0
+
+************************************************
+Mdut 2 1 VSS VSS N W=1e-05 L=1e-06  
+

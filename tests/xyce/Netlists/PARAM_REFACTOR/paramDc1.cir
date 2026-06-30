@@ -1,0 +1,15 @@
+Regression test to ensure that .DC can be applied to .param
+
+.param testnorm={0.5K}
+.param r1value={testnorm*2.0}
+
+r2 1 0 7k
+r1 1 2 {r1value}
+v1 2 0 1000v
+
+.print dc testnorm v(1)
+
+.dc testnorm 0.5k  0.7k  0.1k
+
+.end
+

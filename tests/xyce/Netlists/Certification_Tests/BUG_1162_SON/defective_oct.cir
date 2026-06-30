@@ -1,0 +1,14 @@
+Test of Xyce's behavior when given defective OCT sweep parameters
+
+R1 1 0 1K
+V1 1 0 1V
+
+* START is larger than STOP.  STOP cannot be reached by repeatedly multiplying
+* START by 2^(1/4).  The result should be that Xyce runs only one step,
+* with V1=100.
+* Prior to the fix of bug 1162, Xyce would run the same number of
+* steps that would have resulted from swapping stop and start, but
+* would sweep UP from 100.
+.dc OCT V1 100 1 4
+.print dc V(1) I(v1)
+.end

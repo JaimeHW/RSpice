@@ -1,0 +1,4 @@
+README
+bug_692.cir
+bug_692.cir.sh
+tags

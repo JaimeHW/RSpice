@@ -1,0 +1,22 @@
+A test of the measure derivative functionality.
+* This test is for SON Bug 724.  It tests the case of the
+* output file having an intermediate data point exactly
+* equal to the AT value in a DERIV measure.  It is separate 
+* from the DerivativeTest because of the use of the 
+* .options output initial_interval statement.  The DerivativeTest 
+* covers the cases of AT equal to the beginning and ending 
+* simulation times.
+*****************************************************************
+*
+* Simple source
+VS1  1  0  SIN(0 1.0 4 0 0)
+R1  1  0  100
+
+.TRAN 0 0.05
+.OPTIONS output initial_interval=0.001
+
+.PRINT TRAN FORMAT=NOINDEX V(1)
+.measure tran deriv_at_025 DERIVATIVE v(1) AT=0.025 
+
+.END
+

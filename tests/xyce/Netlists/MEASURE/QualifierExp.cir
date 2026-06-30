@@ -1,0 +1,89 @@
+*************************************************************
+* Test Measure qualifiers as expressions.  This covers the
+* TO, FROM, TD, RISE, FALL, CROSS, AT, OFF, ON and
+* DEFAULT_VAL qualifiers.  See SON Bug 800 for more details.
+*
+* This test uses the legacy TRIG-TARG mode, so it tests the
+* RiseFallDelay class.  See gitlab-ex issue 303 for more details.
+*************************************************************
+V1 1 0 PWL(0 0 1 1)
+V2 2 0 SIN(0 1 2 0 1)
+R1 1 0 1
+R2 2 0 1
+
+.PARAM t1=0.1
+.param t2=0.2
+.PARAM t3=0.7
+.PARAM d1=-5
+.PARAM i1=1
+.PARAM i2=2
+.PARAM l1=0.3
+
+* use MEASFAIL and DEFAULT_VAL options
+.OPTIONS MEASURE MEASFAIL=0 DEFAULT_VAL-5
+
+* use legacy trig-targ mode
+.OPTIONS MEASURE USE_LTTM=1
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(2)
+.OPTIONS TIMEINT BREAKPOINTS=0.1,0.2,0.3,0.7
+
+* test FROM, TO and TD
+.MEASURE TRAN M1 PP V(1) FROM='0.1+0.2'
+.MEASURE TRAN M2 PP V(1) FROM='0.1+t2'
+.MEASURE TRAN M2PAR PP V(1) FROM=PAR('0.1+t2')
+.MEASURE TRAN M2PAREN PP V(1) FROM=('0.1+t2')
+.MEASURE TRAN M3 PP V(1) TD={t1}
+.MEASURE TRAN M4 PP V(1) TO={t3}
+
+* test RISE, FALL, CROSS
+.MEASURE TRAN M5NE MIN V(2) FALL=1
+.MEASURE TRAN M5 MIN V(2) FALL={i1}
+.MEASURE TRAN M6NE MIN V(2) RISE=2
+.MEASURE TRAN M6 MIN V(2) RISE={i2}
+.MEASURE TRAN M7NE MIN V(2) CROSS=1
+.MEASURE TRAN M7 MIN V(2) CROSS={i1}
+
+* test AT
+.MEASURE TRAN M8NE DERIV V(2) AT=0.7
+.MEASURE TRAN M8 DERIV V(2) AT={t3}
+
+* test FIND-WHEN
+.MEASURE TRAN M9 FIND V(2) WHEN V(1)={t3}
+.MEASURE TRAN M9PAR FIND V(2) WHEN V(1)=PAR('t3')
+.MEASURE TRAN M9PAREN FIND V(2) WHEN V(1)=('t3')
+.MEASURE TRAN M9EXP2 FIND {V(2)+1} WHEN V(1)={t3}
+.MEASURE TRAN M9PAR2 FIND PAR('V(2)+1') WHEN V(1)={t3}
+.MEASURE TRAN M9PAREN2 FIND ('V(2)+1') WHEN V(1)={t3}
+
+* test ON, OFF
+.MEASURE TRAN M10NE DUTY V(2) ON=0.7 OFF=0.2
+.MEASURE TRAN M10 DUTY V(2) ON={t3} OFF={t2}
+
+* EQN printing out a parameter
+.MEASURE TRAN M11 EQN {t2}
+
+* test WHEN
+.MEASURE TRAN M12 WHEN V(1)={l1}
+.MEASURE TRAN M12PAR WHEN V(1)=PAR('l1')
+.MEASURE TRAN M12PARENS WHEN V(1)=('l1')
+
+* test TRIG-TARG
+.measure tran M13 TRIG v(1) {0.1} TARG v(1) {0.3}
+.measure tran M13EXP TRIG v(1) VAL={0.1} TARG v(1) VAL={0.3}
+.measure tran M13PARAM TRIG v(1) VAL={t1} TARG v(1) VAL={l1}
+.measure tran M13PAR TRIG v(1) VAL=PAR('t1') TARG v(1) VAL=PAR('l1')
+.measure tran M13PAREN TRIG v(1) VAL=('t1') TARG v(1) VAL=('l1')
+
+.measure tran M14VAR TRIG {v(1)-0.1} 0.1 TARG {v(1)-0.5} 0.3
+.measure tran M14VAREXP TRIG {v(1)-0.1} {0.1} TARG {v(1)-0.5} {0.3}
+.measure tran M14VARPARAM TRIG {v(1)-0.1} VAL={T1} TARG {v(1)-0.5} VAL={l1}
+.measure tran M14VARPAR TRIG PAR('v(1)-0.1') VAL=PAR('T1') TARG PAR('v(1)-0.5') VAL=PAR('l1')
+.measure tran M14VARPAREN TRIG ('v(1)-0.1') VAL=('T1') TARG ('v(1)-0.5') VAL=('l1')
+
+*failed measure, with a default value of -5
+.MEASURE TRAN M15 MAX V(1) FROM=1.1 DEFAULT_VAL={d1}
+
+.END
+

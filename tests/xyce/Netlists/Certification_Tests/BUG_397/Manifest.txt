@@ -1,0 +1,7 @@
+README
+diode-verbose.cir
+diode-verbose.cir.sh
+diode-verbose.cir.tags
+diode.cir
+diode.cir.sh
+diode.cir.tags

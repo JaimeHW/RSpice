@@ -1,0 +1,29 @@
+A test of .TRAN with .STEP for FORMAT=PROBE
+*************************************************************
+* This netlist is run, and compared against a "gold standard" 
+* that is known to open correctly in PSpice 16.6.  This test
+* is similar to the test used for SON Bug 646.  It must test
+* both the string fields and the numeric fields.  The key thing
+* is that the step headers are output at the start of the data
+* block for each step.
+*
+* This test is for SON Bug 722.
+*************************************************************
+VS1  1  0  SIN(0 1.0 1KHZ 0 0)
+VS2  2  0  SIN(0 3.0 1KHZ 0 0)
+R1  1  0  100
+R2  3  0  100
+
+.TRAN 0  2ms
+.STEP VS1:VA 1 2 1
+.STEP VS2:VA 3 6 3
+
+* A fixed output interval is used so that the .csd files
+* should have identical time points in them, irregardless 
+* of time-integratorchanges
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.00001
+
+.PRINT TRAN FORMAT=PROBE V(1) V(2)
+
+.END
+

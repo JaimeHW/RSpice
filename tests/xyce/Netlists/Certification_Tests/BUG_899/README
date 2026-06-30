@@ -1,0 +1,79 @@
+Test Name: BUG_899
+Owner: Roger Pawlowski
+Test netlists: bug899.cir
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_3.1
+ 
+Description:
+============
+A DC operating point for a transient run was failing, yet the step was
+being accepted and xyce proceeded to transient solves.  The status
+tests were not correctly flagging the error.  The return code was
+incorrectly set to +4 instead of -4.  This error is now being caught.
+ 
+Procedure: 
+============ 
+Run the circuit bug899.cir.  This circuit is too small for parallel,
+so only do this in serial.
+
+Verification:
+=============
+The DC Operating point should fail to converge and xyce should quit.  Verify that Xyce exits with the following error:
+
+
+
+N_TIA_ControlAlgorithm::transientLoop - DC Operating Point Failed.  Exiting
+ transient loop.
+
+
+ 
+
+	Number Successful Steps Taken:		0
+
+	Number Failed Steps Attempted:		1
+
+	Number Jacobians Evaluated:		23
+
+	Number Iteration Matrix Factorizations:	0
+
+	Number Linear Solves:			23
+
+	Number Failed Linear Solves:		0
+
+	Number Residual Evaluations:		24
+
+	Number Nonlinear Convergence Failures:	1
+
+
+ 
+
+	Total Residual Load Time:		0.000892 seconds
+
+	Total Jacobian Load Time:		0.000125 seconds
+
+	Total Linear Solution Time:		0.001898 seconds
+
+
+  ***** Solution Summary *****
+
+
+ 	Total Simulation Solvers Run Time:	0.007602 seconds
+ 
+
+ ***** End of Solution Summary *****
+
+
+ *****
+ ***** End of Xyce(TM) Simulation 
+ *****
+ 
+ Cleaning up...
+ 
+ 
+Notes:
+======
+03/15/06 tscoffe:  This test requires that Xyce print verbose output.  When
+release binaries are built, they have all verbose flags turned off, so this
+test will then start to fail.

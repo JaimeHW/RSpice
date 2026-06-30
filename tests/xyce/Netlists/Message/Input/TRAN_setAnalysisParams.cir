@@ -1,0 +1,14 @@
+* test error message for end time being before the start time.
+* This error can occur when manually converting an HSPICE .TRAN
+* statement to a Xyce .TRAN statement.
+
+* Xyce netlist line format
+* .TRAN <initial time step> <final time value> [<start time value>]
+.TRAN 0 0 1
+
+V1 1 0 SIN(0 1 1)
+R1 1 0 1
+
+.PRINT TRAN V(1)
+
+.END

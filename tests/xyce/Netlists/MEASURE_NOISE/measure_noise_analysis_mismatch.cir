@@ -1,0 +1,35 @@
+Testing .MEASURE lines that are mismatched with the Analysis Types
+*********************************************************************
+* This tests the error messages that should occur if a TRAN, TRAN_CONT,
+* AC, AC_CONT, FFT, DC or DC_CONT mode measure is requested for a netlist
+* that is doing a .NOISE analysis.
+*
+* See SON Bugs 1274, 1280 and 1301 for more details.
+*
+*
+*********************************************************************
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 100MEG 1
+.PRINT NOISE INOISE ONOISE
+
+* Test what happens when a TRAN, TRAN_CONT, AC, AC_CONT, FFT, DC or DC_CONT
+* measure is requested for a .NOISE netlist
+.MEASURE DC dcmax max v(4)
+.MEASURE DC_CONT dc_cont_when when v(4)=0.5
+.MEASURE TRAN tranmax max v(4)
+.MEASURE TRAN_CONT tran_cont_when when v(4)=0.5
+.MEASURE AC acmax max v(4)
+.MEASURE AC_CONT ac_cont_when when v(4)=0.5
+.MEASURE FFT THD THD v(4)
+
+.END

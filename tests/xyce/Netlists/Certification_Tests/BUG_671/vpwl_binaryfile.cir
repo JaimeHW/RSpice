@@ -1,0 +1,30 @@
+Voltage Source - Piece Wise Linear Signal
+**************************************************************
+* Tier No.:	1                                           
+* Description:	Test of Xyce model for an independent voltage
+* SECOND TEST: check that file-based PWL source produces same results as
+*              internal one.
+*	source.  The source is described as;
+*	A piece wise linear voltage which is a series of time
+*	and voltage pairs of data points, give by:
+*		  time(s), voltage(volts)	
+*			1    (0.00, 0.00)
+*			2    (2.00, 3.00)
+*			3    (3.00, 2.00)
+*			4    (4.00, 2.00)
+*			5    (4.01, 5.00)
+*			6    (4.50, 5.00)
+*			7    (4.51,-2.00)
+*			8    (7.00, 1.00)
+*			9    (9.00,-1.00)
+*			10   (9.01, 4.00)
+*			11   (10.0, 3.00)
+*
+* Input/Output:	VPWL; a common simulation data output (.csd)can
+*	be generated for viewing the signal.
+*************************************************************** 
+VPWL 1 0 PWL FILE "vpwl-word.csv"
+R 1 0 500
+.TRAN 0.01S 11S
+.PRINT TRAN V(1)
+.END 

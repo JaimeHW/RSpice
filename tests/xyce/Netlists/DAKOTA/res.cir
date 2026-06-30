@@ -1,0 +1,14 @@
+Simple Xyce/Dakota sampling test
+* A single resistance is varied by Dakota, and statistics collected
+* on the single response function, the value of V(B) when Va is 5V.
+
+R1 A B R1value
+R2 B 0 10.0
+Va A 0 5
+
+.MEASURE DC FOOBAR EQN {V(B)}
+
+.dc Va 5 5 1
+.print dc v(A) R1:R v(B)
+.END
+

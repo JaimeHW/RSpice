@@ -1,0 +1,15 @@
+==> BUG_203/README <==
+Bug Number: 203
+Test netlist: bug_203.cir
+
+Description:
+
+This test checks whether inline comments are handled correctly when there is no space between the ?;? (the inline comment symbol) and the file the precedes it.
+
+Verification
+Run Xyce in serial on the netlist
+
+Compare against the results in the given prn file using ?compare.?
+
+Special Notes:
+Parallel testing is not needed for this case.

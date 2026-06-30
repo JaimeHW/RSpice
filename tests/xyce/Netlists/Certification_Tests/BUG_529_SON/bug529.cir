@@ -1,0 +1,17 @@
+A test of the measure average functionality
+*******************************************************************************
+*
+* a few sources of different types
+VS  1  0  -1 
+VP  2  0  PULSE( 0 1 0.2ms 0.2ms 0.2ms 1ms 2ms )
+
+R1  1  0  100
+R2  2  0  100
+
+.TRAN 0  10ms
+.step VS -1 5 1
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) 
+
+
+.END
+

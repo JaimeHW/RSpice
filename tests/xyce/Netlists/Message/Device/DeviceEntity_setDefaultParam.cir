@@ -1,0 +1,21 @@
+* Test error message from .STEP when the device does not 
+* have a default parameter.  This uses the T device as
+* as convenient example.
+
+VIN 1 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)
+
+* specify transmission line with TD parameter
+RIN1 1 2 50
+TLINE1 2 0 3 0 Z0=50 TD=10N
+RL1 3 0 50
+
+* Since the T device does not have a default instance parameter the correct
+* syntax for stepping over Z0 would be:  .STEP TLINE:Z0 50 100 50
+.STEP TLINE1 50 100 50
+
+.TRAN 0.25N 50N
+.PRINT TRAN V(2) V(3) 
+
+.END
+
+

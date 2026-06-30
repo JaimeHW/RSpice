@@ -1,0 +1,11 @@
+*Libraries:
+* Profile Libraries :
+* Local Libraries :
+* Generated using PSpice 16.6.0
+
+*Analysis directives:
+.TRAN  0.1ms 5ms
+.PRINT TRAN N(N14375) N(N14713) N(N14875) N(N15043)
+.INC ".\SCHEMATIC1.net"
+
+.END

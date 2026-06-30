@@ -1,0 +1,10 @@
+test for breakpoints in Bsrc expressions
+
+v1  1  0  pwl(0 0 1.5 1 2 0)
+b1  2  0  v={if ((time*time)>1, time+2*v(1), 1+2*v(1))}
+r2 2a  0  10
+r1  1  0  1k
+vmon 2a  2  0
+.tran 1us 2
+.PRINT tran V(1) I(VMON)
+.END

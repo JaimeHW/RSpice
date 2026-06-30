@@ -1,0 +1,19 @@
+Semiconductor Capacitor Circuit Netlist
+* Test for BUG 647 (SON)
+*
+* Does a .step loop over all of the semiconductor capacitor's instance
+* parameters that default to the value in the model card, and compare
+* to the equivalent step loops over the model values.
+
+VIN  1 0 PULSE(0 1 10U 1N 1N 30U)
+R    1 2 1K
+C    3 0 CMODEL L=20U
+VMON 2 3 0
+.MODEL CMODEL C (CJ=1 DEFW=1U TC1=1e-2 TC2=1e-4)
+.TRAN 1N 20U
+.step lin CMODEL:DEFW 1u 5u 1u
+.step lin TEMP 30 35 1
+.step lin CMODEL:TC1 1e-2 3e-2 1e-2
+.step lin CMODEL:TC2 1e-4 3e-4 1e-4
+.PRINT TRAN  V(3) {I(VMON)*100.0+1.0} C:W C:TEMP C:TC1 C:TC2
+.END

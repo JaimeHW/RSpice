@@ -1,0 +1,28 @@
+* This netlist is equivalent to Step 1 for the
+* TranStep.cir netlist. It has R1b=200.
+*
+* See SON Bug 1274 for more details.
+********************************************************
+*
+VPWL1 1  0  pwl(0 0.1 2.5m 0.5 5m 0 7.4m 0.4 10m 0)
+VPWL2 2  0  pwl(0 0.5 10m 0)
+
+R1a 1  1a  100
+R1b 1a  0  200
+R2  2  0   100
+
+.TRAN 0 10ms
+.PRINT TRAN V(1) V(1a) V(2)
+
+.measure tran derivCrossTest1 deriv v(1a) when v(1a)=0.2
+.measure TRAN_CONT derivCrossContTest1 deriv v(1a) when v(1a)=0.2
+
+.measure tran whenCrossTest1 when v(1a)=0.2
+.measure TRAN_CONT whenCrossContTest1 when v(1a)=0.2
+
+.measure TRAN findCrossTest1 find V(2) when v(1a)=0.2
+.measure TRAN_CONT findCrossContTest1 find V(2) when v(1a)=0.2
+
+.MEASURE TRAN_CONT TrigTarg1 TRIG V(1a) VAL=0.2 CROSS=1 TARG V(1a) VAL=0.3 CROSS=1
+
+.END

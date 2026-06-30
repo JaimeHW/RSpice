@@ -1,0 +1,32 @@
+Bug Number: 250
+Test netlist: bug_250.cir
+
+Description:
+============
+This test checks that inline comments are handled correctly when they
+occur on a line which is continued on subsequent lines.  This was the
+original focus of SRN Bug 250.
+
+This test was updated for SON Bug 955 to also test what happens when 
+an "inline comment" is the only thing on a netlist line.  For code 
+coverage reasons, it is then important to test that type of inline 
+comment line for:
+
+  1) an inline comment line that is followed by a non-comment or
+non-continuation line.
+
+  2) two inline comment lines separated by a blank line.
+
+  3) inline comment lines followed by continuation lines.  There are
+two cases.  The continuation character (+) is the first character on 
+the line, or the continuation line starts with white space.
+
+Verification
+============
+Run Xyce in serial on the netlist.
+Compare against the results in the given prn file using the "compare" 
+program.
+
+Special Notes:
+==============
+Parallel testing is not needed for this case.

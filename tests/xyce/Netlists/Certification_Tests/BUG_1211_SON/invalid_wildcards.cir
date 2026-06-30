@@ -1,0 +1,28 @@
+* An errorexit test of wildcard syntaxes. The requested wildcards do not
+* exist in the netlist.
+*******************************************************************************
+
+V1 1 0 1
+X1 1 2 R1 RESISTANCE=3
+R2 2 0 1
+
+V3 5 0 1
+X2 5 6 R1 RESISTANCE=3
+R3 6 0 1
+
+.SUBCKT R1 1 5 RESISTANCE=1
+R1 1 3a RESISTANCE
+R2 3a 3b 1
+X3 3b 4a R2
+R4 4a 4b 1
+R5 4b 5 1
+.ENDS
+
+.SUBCKT R2 d f
+R1 d e 1
+R2 e f 1
+.ENDS
+
+.DC V1 1 5 1
+.PRINT DC V(1) V(4*) I(X5*) P(X6*) W(X7*)
+.END

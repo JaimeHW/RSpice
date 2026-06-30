@@ -1,0 +1,227 @@
+ ***** Measure Functions ***** 
+
+WHENCROSSTEST1 = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSSCONTTEST1 = 6.250000e-04
+WHENCROSSCONTTEST1 = 4.000000e-03
+WHENCROSSCONTTEST1 = 6.250000e-03
+WHENCROSSCONTTEST1 = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSSTEST2 = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSSCONTTEST2 = 6.250000e-04
+WHENCROSSCONTTEST2 = 4.000000e-03
+WHENCROSSCONTTEST2 = 6.250000e-03
+WHENCROSSCONTTEST2 = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSSTEST3 = 4.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSSCONTTEST3 = 4.000000e-03
+WHENCROSSCONTTEST3 = 6.250000e-03
+WHENCROSSCONTTEST3 = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSSTEST4 = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSSCONTTEST4 = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+ATTEST = 4.200000e-01 for AT = 2.000000e-03
+
+ATCONTTEST = 4.200000e-01 for AT = 2.000000e-03
+
+FINDCROSSTEST1 = 4.687500e-01 at time = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDCROSSCONTTEST1 = 4.687500e-01 at time = 6.250000e-04
+FINDCROSSCONTTEST1 = 3.000000e-01 at time = 4.000000e-03
+FINDCROSSCONTTEST1 = 1.875000e-01 at time = 6.250000e-03
+FINDCROSSCONTTEST1 = 6.250000e-02 at time = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDCROSSTEST2 = 4.687500e-01 at time = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDCROSSCONTTEST2 = 4.687500e-01 at time = 6.250000e-04
+FINDCROSSCONTTEST2 = 3.000000e-01 at time = 4.000000e-03
+FINDCROSSCONTTEST2 = 1.875000e-01 at time = 6.250000e-03
+FINDCROSSCONTTEST2 = 6.250000e-02 at time = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDCROSSTEST3 = 3.000000e-01 at time = 4.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDCROSSCONTTEST3 = 3.000000e-01 at time = 4.000000e-03
+FINDCROSSCONTTEST3 = 1.875000e-01 at time = 6.250000e-03
+FINDCROSSCONTTEST3 = 6.250000e-02 at time = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDCROSSTEST4 = 6.250000e-02 at time = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDCROSSCONTTEST4 = 6.250000e-02 at time = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENRISECONTTEST1 = 6.250000e-04
+WHENRISECONTTEST1 = 6.250000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENRISECONTTEST2 = 6.250000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENRISECONTTEST3 = 6.250000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENFALLCONTTEST1 = 4.000000e-03
+WHENFALLCONTTEST1 = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENFALLCONTTEST2 = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENFALLCONTTEST3 = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDRISECONTTEST1 = 4.687500e-01 at time = 6.250000e-04
+FINDRISECONTTEST1 = 1.875000e-01 at time = 6.250000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDRISECONTTEST2 = 1.875000e-01 at time = 6.250000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDRISECONTTEST3 = 1.875000e-01 at time = 6.250000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDFALLCONTTEST1 = 3.000000e-01 at time = 4.000000e-03
+FINDFALLCONTTEST1 = 6.250000e-02 at time = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDFALLCONTTEST2 = 6.250000e-02 at time = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+FINDFALLCONTTEST3 = 6.250000e-02 at time = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSS1FROM1MS = 4.000000e-03
+Measure Start Time= 1.000000e-03	Measure End Time= 1.000000e-02
+
+WHENCROSS2FROM1MS = 6.250000e-03
+Measure Start Time= 1.000000e-03	Measure End Time= 1.000000e-02
+
+WHENCROSSTO8MS = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 8.000000e-03
+
+WHENRISETO5MS = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 5.000000e-03
+
+WHENFALLFROM5MS = 8.750000e-03
+Measure Start Time= 5.000000e-03	Measure End Time= 1.000000e-02
+
+WHENCROSSTOLAST = 6.250000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 8.000000e-03
+
+WHENCROSS1CONTFROM1MS = 4.000000e-03
+WHENCROSS1CONTFROM1MS = 6.250000e-03
+WHENCROSS1CONTFROM1MS = 8.750000e-03
+Measure Start Time= 1.000000e-03	Measure End Time= 1.000000e-02
+
+WHENCROSS2CONTFROM1MS = 6.250000e-03
+WHENCROSS2CONTFROM1MS = 8.750000e-03
+Measure Start Time= 1.000000e-03	Measure End Time= 1.000000e-02
+
+WHENCROSSCONTTO8MS = 6.250000e-04
+WHENCROSSCONTTO8MS = 4.000000e-03
+WHENCROSSCONTTO8MS = 6.250000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 8.000000e-03
+
+WHENRISECONTTO5MS = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 5.000000e-03
+
+WHENFALLCONTFROM5MS = 8.750000e-03
+Measure Start Time= 5.000000e-03	Measure End Time= 1.000000e-02
+
+WHENCROSSCONTTOLAST = 6.250000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 8.000000e-03
+
+WHENCROSSNEG2 = 6.250000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSSNEG3 = 4.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: WHENCROSSNEG5 failed. Measured Rise,Fall,Cross=(2,2,4)
+WHENCROSSNEG5 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSSCONTNEG1 = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSSCONTNEG2 = 6.250000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSSCONTNEG3 = 4.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: WHENCROSSCONTNEG5 failed. Measured Rise,Fall,Cross=(2,2,4)
+WHENCROSSCONTNEG5 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENRISENEG2 = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: WHENRISENEG3 failed. Measured Rise,Fall,Cross=(2,2,4)
+WHENRISENEG3 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENRISECONTNEG1 = 6.250000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENRISECONTNEG2 = 6.250000e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: WHENRISECONTNEG3 failed. Measured Rise,Fall,Cross=(2,2,4)
+WHENRISECONTNEG3 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENFALLNEG2 = 4.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: WHENFALLNEG3 failed. Measured Rise,Fall,Cross=(2,2,4)
+WHENFALLNEG3 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENFALLCONTNEG1 = 8.750000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENFALLCONTNEG2 = 4.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: WHENFALLCONTNEG3 failed. Measured Rise,Fall,Cross=(2,2,4)
+WHENFALLCONTNEG3 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+WHENCROSSCONTFAIL1 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: ATCONTFAIL failed. AT value outside sim window
+ATCONTFAIL = 0.000000e+00 FAILED for AT = 2.000000e-02
+
+Netlist warning: WHENCROSSCONTFAIL2 failed. Measured Rise,Fall,Cross=(2,2,4)
+WHENCROSSCONTFAIL2 = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: WHENRISECONTFAIL failed. Measured Rise,Fall,Cross=(2,2,4)
+WHENRISECONTFAIL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+Netlist warning: WHENFALLCONTFAIL failed. Measured Rise,Fall,Cross=(2,2,4)
+WHENFALLCONTFAIL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-02
+
+

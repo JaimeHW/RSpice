@@ -1,0 +1,28 @@
+Bug Number: 767
+Test netlists: bug_767a.cir bug_767b.cir
+
+NOTE:  As of 4/1/2013, bug_767b.cir has been disabled due to bug 1152, where device
+and node names are allowed to be the same.
+
+Description:
+============
+This test checks that an error is returned when the user tries to use a node
+name that is identical to a device or model name.
+
+Verification
+============
+Run Xyce in serial on bug_767a.cir.
+
+Xyce should exit with fatal error:
+
+User Fatal: Model and node share the same name: DN in subcircuit: OPAMP#0
+
+Run Xyce in serial on bug_767b.cir.
+
+Xyce should exit with fatal error:
+
+User Fatal: Device and node share the same name: R1 in subcircuit: OPAMP#0
+
+Special Notes:
+==============
+Parallel should give the same error.

@@ -1,0 +1,6 @@
+README
+bug_38_son.cir
+bug_38_son.cir.sh
+bug_38_son_p.cir
+exclude
+tags

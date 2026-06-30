@@ -1,0 +1,9 @@
+nodcpath.cir
+nodcpath.cir.pl
+nodcpath.cir.sh
+nodcpath.cir_xyce.cir.gs.pl
+oneterm.cir
+oneterm.cir.pl
+oneterm.cir.sh
+oneterm.cir_xyce.cir.gs.pl
+tags

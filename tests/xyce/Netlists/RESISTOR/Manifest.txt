@@ -1,0 +1,10 @@
+resistor.cir
+resistor.cir.prn.gs.pl
+resistor_lv3.cir
+resistor_lv3_2.cir
+resistor_neg.cir
+tags
+DefaultValueWarning.cir
+DefaultValueWarning.cir.sh
+DefaultValueWarning.cir.tags
+DefaultValueWarning.cir.options

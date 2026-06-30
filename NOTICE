@@ -41,7 +41,7 @@ Derived components include:
     src/spicelib/devices/vsrc/vsrcload.c — Copyright 1990 Regents of the
     University of California.
 
-The test decks, reference outputs, and QA scripts under tests/ are
+The test decks, reference outputs, and QA scripts under tests/ngspice/ are
 redistributed verbatim from the ngspice-46 tests/ directory (which in turn
 includes material from Spice3f5 and MacSpice3f4), likewise under the
 Modified BSD license.
@@ -155,7 +155,28 @@ OMI packages are intentionally excluded from models/veriloga/cmc/ pending
 separate review of their custom terms.
 
 -------------------------------------------------------------------------------
-4. IBM Plex fonts (SIL Open Font License 1.1)
+4. Xyce Regression Suite (GPL-3.0-or-later)
+-------------------------------------------------------------------------------
+
+tests/xyce/ contains the Xyce Regression Suite runtime materials, vendored from
+the local upstream checkout at C:\Users\James\Desktop\Xyce_Regression-master.
+The upstream README identifies Xyce as free software under the GNU General
+Public License, version 3 or later.
+
+  Copyright 2019 National Technology & Engineering Solutions of Sandia, LLC
+  (NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S.
+  Government retains certain rights in this software.
+
+RSpice includes the GPL version 3 text at tests/xyce/COPYING because the local
+source checkout referenced COPYING but did not contain that file at vendoring
+time. GPL terms apply to redistribution of tests/xyce/ and modifications to
+that corpus. The corpus has been trimmed to runtime test materials:
+Netlists/, OutputData/, TestScripts/, upstream README.md, COPYING, and
+RSPICE-VENDORING.md. Upstream CMake/CTest configuration files were omitted
+because RSpice does not run this corpus through upstream CTest.
+
+-------------------------------------------------------------------------------
+5. IBM Plex fonts (SIL Open Font License 1.1)
 -------------------------------------------------------------------------------
 
 RSpice embeds the IBM Plex Sans and IBM Plex Mono typefaces
@@ -169,7 +190,7 @@ RSpice embeds the IBM Plex Sans and IBM Plex Mono typefaces
   https://scripts.sil.org/OFL
 
 -------------------------------------------------------------------------------
-5. Rust crate dependencies
+6. Rust crate dependencies
 -------------------------------------------------------------------------------
 
 RSpice links against open-source Rust crates. Most are dual-licensed
@@ -197,6 +218,7 @@ distributions on https://crates.io.
 The names of the University of California, the ngspice project, EPFL, Tiburon
 Design Automation, NXP, CEA, Delft University of Technology, Arizona State
 University, Silicon Integration Initiative, the Si2 Compact Model Coalition,
-IBM, or any other copyright holders listed above may not be used to endorse or
-promote RSpice or products derived from it without their prior written
-permission.
+IBM, National Technology & Engineering Solutions of Sandia, LLC, Sandia
+National Laboratories, Xyce, or any other copyright holders listed above may
+not be used to endorse or promote RSpice or products derived from it without
+their prior written permission.

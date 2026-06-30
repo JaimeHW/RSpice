@@ -1,0 +1,47 @@
+A test of the passive membrane response in the level 1 neuron 
+**************************************************************************
+* Tier:  ?????
+* Directory/Circuit name:  NEURON/passivePatch-level1.cir
+* Description:  transient analysis of response to constant current injection
+*
+* Created by:  C. E. Warrender 2/11
+*
+* NOTES:
+
+* A passive neural membrane behaves like an RC circuit.  The voltage is
+* given by:
+*	V(t) = v0 * exp(-t/tau) + v1
+* where 
+*	v1 = Vrest + Rm * Iinj
+*	v0 = -Rm * Iinj
+*	tau = Rm * Cm
+* Vrest is the resting membrane potential
+* Rm is the membrane resistance
+* Cm is the membrane capacitance
+* Iinj is the injected current
+*
+* based on:
+* Koch, Biophysics of Computation, fig 1.3, pg 11.
+
+.options nonlin nox=0
+
+.tran 0.0 0.2
+
+* neuron model
+.param restV = -0.07
+.param Rm = 1.0e8	; 100 Mohm
+.param Gm = {1/Rm}
+.param Cm = 1.0e-10	; 100 pF
+.param Iinj = -0.1e-9	; -0.1 nA	- Koch also uses 0.1, 0.2, and 0.3
+* set active conductances to 0
+.model nrnParams neuron level=1 vRest={restV} cMem={Cm}  gMem={Gm} eLeak={restV}  gNa={0}  gK={0} 
+
+yneuron neuron1 a 0 nrnParams
+
+* use PULSE for current injection so that the current will be off during dcop calculation
+* pulse( initial_value pulse_value delay_time rise_time fall_time pulse_width period)
+Iin 0 a PULSE( 0.0 {Iinj} 1.0e-12 0.0 0.0 1.0e10 1.0e10)
+
+.print tran V(a) 	
+
+.end

@@ -1,0 +1,26 @@
+Bug Number: 769
+Test netlist: bug_769a.cir bug_769b.cir bug_769c.cir
+
+Description:
+============
+This test checks that an error is returned when the user tries to use solution
+variable(s) in .param statements.
+
+Verification
+============
+Run Xyce in serial on all three netlists (a, b, c).
+
+Xyce should exit with following three fatal errors, respectively:
+
+User Fatal: Error in file bug_767a.cir at or near line 69
+ Node Voltage may not be used in parameter expression (RVAL)
+
+User Fatal: Error in file bug_767b.cir at or near line 69
+ Device Current may not be used in parameter expression (RVAL)
+
+User Fatal: Error in file bug_767c.cir at or near line 69
+ Lead Current may not be used in parameter expression (RVAL)
+
+Special Notes:
+==============
+Parallel should give the same error.

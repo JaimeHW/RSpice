@@ -1,0 +1,57 @@
+
+---------------------------------------------------------
+Global data for DC step    1:
+Current Time =   0.0000e+00
+       Vmin  =   0.0000e+00
+       Vmax  =   9.1830e-01
+       NnMin =   3.8097e+00
+       NnMax =   1.0000e+16
+       NpMin =   3.8097e+03
+       NpMax =   1.0000e+19
+
+Information for electrode: SOURCE
+potential:   0.0000e+00
+  current:   5.1728e-16
+  charge:    8.0133e-14
+  dIdVckt:   0.0000e+00
+  dQdVckt:   0.0000e+00
+
+Information for electrode: GATE
+potential:   9.1830e-01
+  current:  -7.0257e-19
+  charge:    2.3310e-21
+  dIdVckt:   0.0000e+00
+  dQdVckt:   0.0000e+00
+
+Information for electrode: DRAIN
+potential:   9.1830e-01
+  current:   5.1536e-16
+  charge:    8.0133e-14
+  dIdVckt:   0.0000e+00
+  dQdVckt:   0.0000e+00
+
+Information for electrode: SUB
+potential:   9.1830e-01
+  current:   0.0000e+00
+  charge:    0.0000e+00
+  dIdVckt:   0.0000e+00
+  dQdVckt:   0.0000e+00
+
+NOTE:  The two-level Newton algorithm was not used.
+       This means that the conductances and capacitances
+       were not calculated.
+
+Conductance array: 
+              	        SOURCE	          GATE	         DRAIN	           SUB
+        SOURCE	    0.0000e+00	    0.0000e+00	    0.0000e+00	    0.0000e+00
+          GATE	    0.0000e+00	    0.0000e+00	    0.0000e+00	    0.0000e+00
+         DRAIN	    0.0000e+00	    0.0000e+00	    0.0000e+00	    0.0000e+00
+           SUB	    0.0000e+00	    0.0000e+00	    0.0000e+00	    0.0000e+00
+
+Capacitance array: 
+              	        SOURCE	          GATE	         DRAIN	           SUB
+        SOURCE	    0.0000e+00	    0.0000e+00	    0.0000e+00	    0.0000e+00
+          GATE	    0.0000e+00	    0.0000e+00	    0.0000e+00	    0.0000e+00
+         DRAIN	    0.0000e+00	    0.0000e+00	    0.0000e+00	    0.0000e+00
+           SUB	    0.0000e+00	    0.0000e+00	    0.0000e+00	    0.0000e+00
+

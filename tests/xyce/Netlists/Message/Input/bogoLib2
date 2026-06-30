@@ -1,0 +1,8 @@
+* The .lib or .endl statements in this library file 
+* have various formatting issues
+
+.lib high
+.param rval=4
+r4 2 0 1
+.endl high low ; extra name on this line 
+

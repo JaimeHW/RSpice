@@ -1,0 +1,67 @@
+* Test DC mode support for TRIG-TARG Measures
+*
+* This bug covers:
+*   1) the case of one variable in the .DC line,
+*      without a .STEP statement. where the swept
+*      variable is increasing.
+*
+*   2) An ascending sweep variable.
+*****************************************************
+
+.DC V1 1 10 1
+.PRINT DC V(1) V(2) V(3) I(R1)
+
+V1 1 0 1
+R1 1 0 2
+
+B2 2 0 V={(V(1)-2.5)*(V(1)-2.5)*(V(1)-7.5)*(V(1)-7.5)/4}
+R2 2 3 1
+R3 3 0 1
+
+* AT tests
+.MEASURE DC TRIGTARGAT TRIG AT=2.5 TARG AT=7.5
+.MEASURE DC TRIGTARGAT1 TRIG AT=2.5 TARG V(2)=5 CROSS=1
+.MEASURE DC TRIGTARGAT2 TRIG V(2)=5 CROSS=1 TARG AT=7.5
+
+* Basic tests
+.MEASURE DC TRIGTARG1 TRIG V(2)=3 CROSS=1 TARG V(2)=7 CROSS=1 
+.MEASURE DC TRIGTARG2 TRIG V(2)=3 CROSS=1 TARG V(2)=7 CROSS=2
+.MEASURE DC TRIGTARG3 TRIG V(2)=3 CROSS=2 TARG V(2)=7 CROSS=1
+
+* Variables for TRIG and TARG, with and without expressions
+.MEASURE DC TRIGTARGVAR TRIG V(2)=V(1) CROSS=1 TARG V(2)=V(1) CROSS=2
+.MEASURE DC TRIGTARGVAREXP TRIG {V(2)}={V(1)} CROSS=1 TARG {V(2)}={V(1)} CROSS=2
+
+* Repeat core tests with RISE and FALL.
+.MEASURE DC RISEFALL1 TRIG V(2)=3 RISE=1 TARG V(2)=7 FALL=2 
+.MEASURE DC RISEFALL2 TRIG V(2)=3 RISE=2 TARG V(2)=7 FALL=1
+
+* Test with LAST and CROSS=-1
+.MEASURE DC TRIGTARG4 TRIG V(2)=3 CROSS=LAST TARG V(2)=7 CROSS=-1 
+.MEASURE DC TRIGTARG5 TRIG V(2)=3 CROSS=1 TARG V(2)=7 FALL=LAST 
+.MEASURE DC TRIGTARG6 TRIG V(2)=3 RISE=LAST TARG V(2)=7 CROSS=1
+
+* Add TD for both TRIG and TARG.  Note that the TRIG TD value will also be used
+* for the TARG TD value, if only the TRIG TD value is given.  An early TD value
+* is essentially ignored.
+.MEASURE DC TRIGTARG7 TRIG V(2)=3 CROSS=1 TD=2 TARG V(2)=7 CROSS=1 
+.MEASURE DC TRIGTARG8 TRIG V(2)=3 CROSS=1 TD=2 TARG V(2)=7 CROSS=1 TD=5
+.MEASURE DC TRIGTARG9 TRIG V(2)=3 CROSS=1 TARG V(2)=7 CROSS=1 TD=5
+.MEASURE DC TDearly TRIG V(2)=3 CROSS=1 TD=0.5 TARG V(2)=7 CROSS=1
+
+* Both TDs get ignored if both ATs at specified.  However, TRIG TD is used for
+* the TARG clause in the second case
+.MEASURE DC AtTD1 TRIG AT=2.5 TD=5 TARG AT=7.5 TD=9
+.MEASURE DC AtTD2 TRIG AT=2.5 TD=5 TARG v(2)=7 CROSS=1
+
+* lead current test
+.MEASURE DC TRIGTARG10 TRIG I(R1)=2 CROSS=1 TARG I(R1)=4 CROSS=1 
+
+* failed measures
+.MEASURE DC ATEarly TRIG AT=0 TARG AT=-1
+.MEASURE DC ATLate TRIG AT=11 TARG AT=12
+.MEASURE DC TrigTDLate TRIG v(2)=3 CROSS=1 TD=15 TARG v(2)=7 CROSS=1 TD=2
+.MEASURE DC TargTDLate TRIG v(2)=3 CROSS=1 TARG v(2)=7 CROSS=2 TD=12
+.MEASURE DC ValNotFound TRIG v(2)=200 CROSS=1 TARG v(2)=-200 CROSS=2
+
+.END

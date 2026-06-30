@@ -1,0 +1,16 @@
+A simple test case of a resistor with zero resistance.  
+* in this test node b should be automaticall removed and R1 removed.
+
+* floating node removal is off by default.  activate it
+.options topology floating_node=true
+
+* test case when resistance is given a zero
+V1 a 0 5V
+R1 a b 1K
+R2 b 0 1K
+R3 c 0 1K
+
+.DC V1 0 5V 1V
+.PRINT dc V(a) 
+
+.END

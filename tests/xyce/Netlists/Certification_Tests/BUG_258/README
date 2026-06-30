@@ -1,0 +1,23 @@
+Bug Number: 258
+Test netlist: bug_198.cir
+
+Description:
+============
+This test checks that error messages include line numbers and the name of the
+file in which the error occured. 
+
+Verification
+============
+This test should abort with the follwoing message:
+
+User Fatal: Error in file bug_198.cir at or near line 3
+ Unrecognized line
+
+
+ *** Xyce Abort ***
+
+---------------------------------------------------
+
+Special Notes:
+==============
+Parallel testing is not needed for this case.

@@ -1,0 +1,13 @@
+DC test of print output format with step
+*
+* Trivial resistor circuit, just do a DC sweep and watch the output
+*
+
+R1 1 0 10
+V1 1 0 DC 0V
+
+.print DC v(1) I(v1)
+.op
+.step temp -10 10 10
+
+.end

@@ -1,0 +1,18 @@
+**********************************************************************
+* Test of warning message for .IC statement that uses a node not 
+* specified in netlist
+*
+* See SON Bug 684
+*
+*
+*
+*
+**********************************************************************
+V1 1 0 5V
+R1 1 0 1
+
+.TRAN 0 1ms
+.PRINT TRAN V(1)
+.IC V(Bleem)=1
+
+.end

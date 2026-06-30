@@ -1,0 +1,27 @@
+Bug Number: 764
+Test netlist: none
+
+Description:
+============
+This test checks that an error is returned when the user tries to run Xyce without
+a netlist.
+
+Verification
+============
+Run Xyce in serial no arguments (just type 'Xyce').
+
+Xyce should exit with fatal error:
+
+User Fatal: Netlist not found on command line
+
+Special Notes:
+==============
+In parallel type 'mpirun -np 2 Xyce'
+
+Xyce should exit with the same error.
+
+NOTE:  On NWCC, it is possible to invoke "xpirun" with either "-n 2" or 
+"-np 2" because of the strange "mpiexec" deal they use there.  The former will 
+produce a different error message and the test script will report a failure.
+So when running the certification testing on NWCC, be sure to invoke xmpirun 
+with the "-np 2" version that all the other platforms like.

@@ -1,0 +1,77 @@
+********************************************************
+* This netlist is similar to the one in the RESISTOR_TD 
+* directory, except that the various resistors here 
+* use solution dependent expressions.  The solution 
+* dependent expression used in every case evaluates to 
+* 1.0, which was the value used for resistance in the 
+* original test.  So, the outputs (that I've bothered 
+* include) should all match the original circuit.
+********************************************************
+
+Vcontrol cntl 0 2.0
+Rcontrol cntl 0 1.0
+Vcontrol2 cntl2 0 0.5
+Rcontrol2 cntl2 0 1.0
+.global_param fred=0.5
+
+* Level 1 resistor
+* Show that TCE on the instance line takes precedence 
+* over TC1 and TC2
+V1  1a 0  1
+R1a 1a 1b {2.0*(V(cntl)*V(cntl2))*fred} TC1=1 TC2=2 TCE=3
+R1b 1b 0  2
+
+* Show that adding TCE did not break the correct
+* operation of TC1 (linear) and TC2 (quadratic) 
+* temperature coefficients.
+V2  2a 0  1
+R2a 2a 2b {2.0*(V(cntl)*V(cntl2))*fred} TC1=0.1 TC2=0.2
+R2b 2b 0  2
+
+* TCE on the instance line
+V3  3a 0  1
+R3a 3a 3b {2.0*(V(cntl)*V(cntl2))*fred} TCE=3
+R3b 3b 0  2
+
+* TCE in the model
+V4  4a 0  1
+R4a 4a 4b {2.0*(V(cntl)*V(cntl2))*fred} RMOD
+R4b 4b 0  2
+
+* TCE in model takes precedence over TC1 and TC2 on 
+* the instance line.
+V5  5a 0  1
+R5a 5a 5b {2.0*(V(cntl)*V(cntl2))*fred} RMOD TC1=0.1 TC2=0.2
+R5b 5b 0  2
+
+* TCE on the instance line overrides TCE in the
+* model.  Also test that negative TCE works.
+V6  6a 0  1
+R6a 6a 6b {2.0*(V(cntl)*V(cntl2))*fred} RMOD TCE=-6
+R6b 6b 0  2
+
+.MODEL RMOD R (TCE=3)
+
+* Semiconductor resistors, which are still a Level 1
+* resistor. TCE in model statement
+V8  8a 0 1
+R8a 8a 8b RMOD_SC1 L=1000U W=1U
+R8b 8b 0 2
+
+*TCE on instance line overrides value in model
+V9  9a 0 1
+R9a 9a 9b RMOD_SC1 L=1000U W=1U TCE=-6
+R9b 9b 0 2
+
+.MODEL RMOD_SC1 R (RSH=1e-3 TCE=3)
+
+* Analysis and print statements
+.DC V1 1 1 1
+.STEP TEMP 27 37 10
+.PRINT DC TEMP V(1b) V(2b) V(3b) V(4b) V(5b) 
++ V(6b) 
++ V(8b) V(9b)
++ I(R1a) I(R2a) I(R3a) I(R4a) I(R5a) I(R6a) 
++ I(R8a) I(R9a) 
+.END
+

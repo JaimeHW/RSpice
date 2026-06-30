@@ -1,0 +1,14 @@
+Testing the use of global parameters with .STEP in objective functions
+
+.DC V1 1 1 1
+.global_param res=1
+V1 1 0 1
+R1 1 2 1
+R2 2 0 0.5
+
+.step res 1 10 1
+
+.print sens
+.SENS objfunc={res*I(V1)} param=R1:R
+
+.end

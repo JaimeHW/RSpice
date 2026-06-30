@@ -1,0 +1,25 @@
+Testing bad objective functions in .SENS lines
+*********************************************************************
+* The .SENS lines in this test are not parsed correctly, and caused a
+* core dump in Xyce 6.3.  This tests that a valid error message is 
+* produced.
+*
+* See SON Bug 641 for more details.
+*
+* This test might be excluded, once the underlying reasons for these
+* lines being invalid are all fixed.
+*********************************************************************
+
+.DC V1 1 1 1
+.param res=1
+V1 1 0 1
+R1 1 2 res
+R2 2 0 {res/2}
+
+.print sens
+.SENS objfunc={P(R1)} param=R1:R
+*.SENS objfunc={I(R1)*I(R1)*res} param=R1:R
+
+.print DC {I(R1)*I(R1)*res} P(R1)
+
+.end

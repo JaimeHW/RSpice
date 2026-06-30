@@ -1,0 +1,37 @@
+* 2-port example. Input is Y-parameter data in RI format in Touchstone 1,
+* format but also includes the frequency-domain short-circuit current data for
+* that port.
+*
+* Note that this netlist does not have the R2 load resistor in it.
+* This is because that resistance is already included in the
+* Y-parameter model used by YLIN_MOD1.
+
+*comp v(2) offset=-10
+
+.model diod d
+
+.options hbint numfreq=10 tahb=0
+.hb 1e7
+*.hb 1e8
+*.hb 0.75e8
+*.hb  5e7
+.print hb_fd file=Eiger7-2port-nonlinear-ts1.cir.HB.FD.v1.prn v(1)
+.print hb_fd file=Eiger7-2port-nonlinear-ts1.cir.HB.FD.v2.prn v(2)
+.print hb_td v(1) v(2)
+*+i(r1) i(d2)
+*i(d1)  i(r1)
+*i(r1)  i(r2)
+
+*v1 1 0  sin  0 5 5e7
+YLIN YLIN1 1 0  2  0  YLIN_MOD1
+.MODEL YLIN_MOD1 LIN TSTONEFILE=wire2p1-ts1.txt isc_fd=1
+*d1 1 0 diod
+
+*v1 1 0 1V
+
+r1 1 0 50
+
+*r2 2 0 5000
+
+d2  2 0 diod
+.end

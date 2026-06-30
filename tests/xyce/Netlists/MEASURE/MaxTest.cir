@@ -1,0 +1,65 @@
+************************************************************
+* A test of the measure MAX functionality.  Also test
+* that .MEAS is a synonym for .MEASURE.
+************************************************************
+*
+VS1  1  0  SIN(0 1.0 1KHZ 0 0)
+VS2  2  0  SIN(-0.5 1.0 1KHZ 0 500)
+VS3  3  0  SIN(0.5 -1.0 1KHZ 0 500)
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+
+* use MEASFAIL for compatibility with the verification approach
+* used in .sh file.
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0  3ms
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.00001
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3) V(1,0)
+
+* plain test
+.meas tran maxSine max V(1)
+.measure tran max10Sine max V(1,0)
+
+* add TO-FROM modifiers
+.measure tran maxHalfSine max V(1) from=0 to=0.5e-3
+
+* mix in TDs before and after FROM value.
+.MEAS tran sine60 max V(1) FROM=0.5e-3 TO=0.75e-3 TD=0.6e-3
+.MEASURE tran sine70 max V(1) FROM=0.7e-3 TO=0.75e-3 TD=0.6e-3
+
+* these tests should fail and return 0 and -100
+.measure tran returnZero max V(1) FROM=0.2e-3 TO=0.25e-3 TD=0.5e-3
+.measure tran returnNeg100 max V(1) FROM=0.2e-3 TO=0.25e-3 TD=0.5e-3 default_val=-100
+
+* add tests for rise/fall/cross.  VS2 and VS3 have a DC offset
+* and are damped sinusoids
+.measure tran maxv2fall2 max v(2) fall=2
+.measure tran maxv3rise1 max v(3) rise=1
+.measure tran maxv2cross3 max v(2) cross=3
+
+* test LAST for rise/fall/cross
+.measure tran maxv2falllast max v(2) fall=last
+.measure tran maxv3riselast max v(3) rise=last
+.measure tran maxv2crosslast max v(2) cross=last
+.measure tran maxv3crosslast max v(3) cross=last
+
+* These should also give the maximum value at the last rise/fall/cross
+.measure tran maxv2fallNegOne max v(2) fall=-1
+.measure tran maxv3riseNegOne max v(3) rise=-1
+.measure tran maxv2crossNegOne max v(2) cross=-1
+
+* test RFC_LEVEL keyword
+.measure tran maxv1Rise1RFClevel50 max V(1) RFC_LEVEL=0.5 RISE=1
+.measure tran maxv1Fall1RFClevel50 max V(1) RFC_LEVEL=0.5 FALL=1
+.measure tran maxv1Cross1RFClevel50 max V(1) RFC_LEVEL=0.5 CROSS=1 
+
+*test Failed measures for rise/fall/cross
+.measure tran maxv2fallfail max v(2) fall=10
+.measure tran maxv3risefail max v(3) rise=10
+.measure tran maxv2crossfail max v(2) cross=10
+
+.END
+

@@ -1,0 +1,28 @@
+Test Name: BUG_534
+Owner: Eric Rankin
+Test netlists: none 
+GS files: none
+Mode: serial, parallel 
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+bug 534   Xyce mishandling model prefixing in subcircuits with parameters
+
+Procedure:
+============
+Run nightly regression tests.  Make sure the set of PARAMS and SUBCKT tests 
+all pass.  They are in:
+
+Xyce_Test/Netlists/SUBCKT
+Xyce_Test/Netlists/PARAMS1
+Xyce_Test/Netlists/PARAMS2
+
+Verification:
+=============
+Passes if the circuits in the above regression tests pass. 
+ 
+Notes:
+======
+

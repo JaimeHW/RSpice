@@ -1,0 +1,20 @@
+Bug Number:730 
+Test netlist: bug_730.cir
+
+Description:
+============
+This test checks that an error is returned when the user tries to step a non-existent
+composite parameter.
+
+Verification
+============
+Run Xyce in serial on the netlist.
+
+Xyce should exit with fatal error:
+
+User Fatal: Error in file bug_730.cir at or near line 43
+ Unrecognized fields for device Y%PDE%DIODE
+
+Special Notes:
+==============
+Parallel should give the same error.

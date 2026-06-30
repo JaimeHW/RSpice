@@ -1,0 +1,38 @@
+// Generated for: spectre
+// Generated on: Sep 25 19:29:35 2016
+// Design library name: xyce_translator_prj
+// Design cell name: DiodeClipper
+// Design view name: schematic
+simulator lang=spectre
+global 0
+//include "/usr/local/cadence/ic-5.1.41usr5/tools/dfII/samples/artist/ahdlLib/quantity.spectre"
+//include "/u/sreza/Spectre_files/xyce_translator_prj/models/D1N3940.scs"
+include "D1N3940.scs"
+
+// Library name: xyce_translator_prj
+// Cell name: DiodeClipper
+// View name: schematic
+D2 (0 N03179) diodea
+D1 (N03179 N04104) diodep
+C1 (N03179 N03334) capacitor c=470.00n
+R4 (N03334 0) resistor r=5.6K
+R3 (N03179 0) resistor r=3.3K
+R2 (N04104 N03179) resistor r=3.3K
+R1 (N03179 N04173) resistor r=1K
+V2 (N04173 0) vsource type=sine ampl=10 freq=1K
+V1 (N04104 0) vsource dc=5 type=dc
+simulatorOptions options reltol=1e-3 vabstol=1e-6 iabstol=1e-12 temp=27 \
+    tnom=27 scalem=1.0 scale=1.0 gmin=1e-12 rforce=1 maxnotes=5 maxwarns=5 \
+    digits=5 cols=80 pivrel=1e-3 sensfile="../psf/sens.output" \
+    checklimitdest=psf 
+tran tran stop=2m errpreset=moderate write="spectre.ic" \
+    writefinal="spectre.fc" annotate=status maxiters=5 
+finalTimeOP info what=oppoint where=rawfile
+modelParameter info what=models where=rawfile
+element info what=inst where=rawfile
+outputParameter info what=output where=rawfile
+designParamVals info what=parameters where=rawfile
+primitives info what=primitives where=rawfile
+subckts info what=subckts  where=rawfile
+save N04173 N03179 N03334 N04104
+saveOptions options save=allpub

@@ -1,0 +1,25 @@
+* ground node synonym in subckt instantiation
+* Xyce netlist for corresponding HSPICE netlist
+* Netlist tests XDM translation of ground node synonym
+* in the nodes of a device which is a instantiation of
+* a subcircuit. If it works correctly, XDM should detect 
+* the node "gnd" (case insensitive)and add in a 
+* .PREPROCESS directive to make it equivalent to a node
+* "0" (see issue #140 on XDM gitlab).
+
+.PREPROCESS REPLACEGROUND TRUE
+.OPTIONS DEVICE TNOM=25 
+
+.SUBCKT subckt_resistor a b PARAMS: RESISTANCE=1
+R1 a a1 R=resistance
+R2 a1 a2 R=resistance
+R3 a2 b R=resistance
+.ENDS
+
+VA 1 0 DC 0
+R1 1 2 R=15
+X1 2 gnd subckt_resistor PARAMS: RESISTANCE=5
+.DC LIN VA 0 10 1
+
+
+.PRINT DC FORMAT=PROBE V(1) V(2) 

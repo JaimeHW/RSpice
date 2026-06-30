@@ -1,0 +1,8 @@
+serial, nightly,  parallel, uniform, expression
+capacitor
+sampling
+pce
+regression_pce
+required:stokhos
+valgrind
+issue84

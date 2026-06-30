@@ -1,0 +1,9 @@
+README
+exclude
+gain-stagesoi.cir
+gain-stagesoi.cir.sh
+gain-stagesoi_default.cir
+gain-stagesoi_default.cir.sh
+gain-stagesoi_default_spice.cir
+nmos_3_2.mod
+tags

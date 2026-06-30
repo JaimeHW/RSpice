@@ -1,0 +1,16 @@
+converter_baseline.cir
+converter_baseline_output.cir
+converter_baseline_unpacked.cir
+converter_restart.cir
+converter_restart_unpacked.cir
+push_pull_xyce_baseline.cir
+push_pull_xyce_baseline_unpacked.cir
+push_pull_xyce_restart.cir
+push_pull_xyce_restart_unpacked.cir
+emitter_baseline.cir
+emitter_restart.cir
+emitter_baseline_gear.cir
+emitter_restart_gear.cir
+converter_restart_output.cir
+simple_baseline.cir
+simple_restart.cir

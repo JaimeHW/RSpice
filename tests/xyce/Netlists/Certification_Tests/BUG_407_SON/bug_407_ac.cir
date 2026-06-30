@@ -1,0 +1,12 @@
+Test circuit for AC output through expressions
+
+v1 a 0 AC 1
+R1 a b 1
+R2 b 0 2
+C1 a b 1u
+
+.ac dec 10 1 1e5
+
+.print ac V(B) {V(B)} VR(B) {VR(B)} VI(B) {VI(B)} VM(B) {VM(B)} VDB(B) {VDB(B)} VP(B) {VP(B)} 
+
+.end

@@ -1,0 +1,18 @@
+Bug Number: 332
+Test netlist: bug_332.cir
+
+Description:
+============
+This test checks for correct handling of Table expressions when there
+are extra spaces in the expression.
+
+Verification
+============
+Run Xyce on the netlist.
+
+Compare against the results in the given prn file using xyce_verify.pl or
+"compare".
+
+Special Notes:
+==============
+None.

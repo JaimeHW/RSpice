@@ -1,0 +1,20 @@
+NPN bipolar transistor circuit netlist, for testing DTEMP
+
+vcc  4 0 dc 12v
+rc 3 4 2k
+rb 4 5 377k
+
+vmon1 5 1 0
+vmon2 3 2 0
+.param tempParam=10
+q 2 1 0 nbjt temp={tempParam}
+.model nbjt npn (bf=100)
+
+.options device temp=15
+
+.dc vcc 0 12 1
+.print dc v(4) i(vmon1) i(vmon2) v(1) v(2) 
+
+.step tempParam list 15 25 35
+
+.end

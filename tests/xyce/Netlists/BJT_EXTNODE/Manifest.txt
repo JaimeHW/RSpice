@@ -1,0 +1,16 @@
+exclude
+npn.cir
+npn.cir.sh
+npn1.cir
+npn2.cir
+npn_rb_rc_re.cir
+npn_rb_rc_re.cir.sh
+npn_rb_rc_re_1.cir
+npn_rb_rc_re_2.cir
+npn_rb_rc_re_3.cir
+npn_rc_re.cir
+npn_rc_re.cir.sh
+npn_rc_re_1.cir
+npn_rc_re_2.cir
+npn_rc_re_3.cir
+tags

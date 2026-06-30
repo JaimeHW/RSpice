@@ -1,0 +1,53 @@
+A test circuit for the expression SDT and DDT on the .print line
+
+* SIN(I0 IA FREQ TD THETA)
+
+.param frequency=5
+.param amp=5
+
+Vsrc1 1 0 sin( 0 {amp} {frequency} 0 0 )
+
+* the dealy used here (1/4 of the period) will make this a cosine wave
+* then we can compare the ddt(v(1)) to v(2)
+Vsrc2 2 0 sin( 0 {amp} {frequency} {-1/(4*frequency)} 0 )
+
+* note sdt( Vsrc1 ) = (A/(2*pi*frequency)) * (cos(2*pi*frequency * 0) - cos( 2*pi*frequencyuency* T_final )  )
+*                   = (1/(2*pi*frequency)) * (1 - cos( 2*pi*frequency * T_final ) )
+*
+* note ddt( Vsrc1 ) = 2 * pi * frequencyuency * A * cos( 2 * pi * frequency * time)
+*     v(2) already has the amplitude factor, so ddt(v(1)) / (2*pi*frequency) == v(2)
+*
+*     To add to the confusion, Vsrc1's sine function implicitly includes the 2*pi*frequency 
+*     so in an expression context the derivative of Vsrc1 is amp*cos(2*pi*frequency*time) 
+*     NOT 2*pi*frequency*amp*cos(2*pi*frequency*time). Essentially, the sine function in the 
+*     voltage source takes a quantity with units (time) and then converts that to 
+*     radians while the expression package's cosine does not.
+*
+*     Finally, ddt() is doing a backward difference calculation, so it will be 
+*     slightly off of the analytic expression.  It could be better if it did 
+*     central differences, but then it would need to wait until the next 
+*     time step to report a value.
+
+* Thus on the .print line the expression with DDT divides by 2*pi*frequency*amp
+* to make it comparable to column 3.
+
+rload1 1 0 1000
+rload2 2 0 1000
+
+
+
+.measure tran test_sdt integ v(1)
+
+* 0=index  1=time    2     3        4         5       6              7               8
+.print tran       {TIME} v(1)   test_sdt {sdt(v(1))} v(2) {ddt(v(1))/(2*pi*frequency)} {amp*cos(2*pi*frequency*time)}
+
+* if TIME = {TIME}, column 1==2
+* if sdt and ddt are working correctly, then
+* column 4 == 5
+* column 6 == 7 == 8
+
+.tran 0 1
+
+.end
+
+

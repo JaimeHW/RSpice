@@ -1,0 +1,33 @@
+
+* test for subcircuit instance parameters, when they refer to each other.
+*
+* This is one of the tests for parameter precedence, which relies on Xyce's 
+* default parameter precedence.  
+*
+* In this circuit, par1/2/3 from the Xtest line are used (overriding par1/2/3 on the .subckt simple line)
+*
+* the .param barney is specified 2x.  In Xyce's default behavior, the first one is used.  So, barney=10.
+*
+* So, the correct value for par3 (using Xyce's default precendence behavior) is:
+* par1 = 2.0  
+* par2=10+2 = 12.0
+* par3 = par1*par2*2.0 = 2*12*2 = 4*12 = 48
+*
+* If run using Xyce -redefined_params uselast, then the value for par3 is:
+* par3 = par1*par2*2.0 = 2*22*2 = 88.0
+*
+.subckt simple in out PARAMS: par1=2.0 par2=2.0 par3=42.0
+Rinside in out 'par3'
+.ends
+
+V1 1 0 1.0
+R1 1 2 1.0
+Xtest 2 0  simple par1='fred' par2='barney+par1' par3='par1*par2*2.0'
+
+.param fred=2.0
+.param barney=10.0
+.param barney=20.0
+
+.dc v1 1.0 1.0 1.0
+.print dc v(1) v(2) I(v1) {Xtest:Rinside:R}
+

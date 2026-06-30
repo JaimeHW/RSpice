@@ -1,0 +1,15 @@
+*****************************************************
+* Test FORMAT=GNUPLOT without .STEP.  This should 
+* produce the same .prn file as FORMAT=STD.
+*
+*****************************************************
+
+V1 1 0 SIN(0 1 1)
+R1 1 2 1
+R2 2 0 1
+
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.01
+.PRINT TRAN FORMAT=GNUPLOT R1:R R2:R V(1) V(2)
+.TRAN 0 1
+
+.END

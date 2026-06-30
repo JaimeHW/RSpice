@@ -1,0 +1,33 @@
+testing ill-formed .dc lines
+***************************************
+* See SON Bugs 644 and 1188 for more
+* details.
+*
+*
+*
+***************************************
+
+V1 1 0 1.0
+R1 1 0 1.0
+
+V2 2 0 1.0
+R2 2 0 1.0
+
+* The last 4.0 is extraneous
+.DC V1 -8.0 -4.0 0.0 4.0
+
+* Same as last test, but with error in second sweep spec
+.DC V1 -8.0 -4.0 1.0 V2 -8.0 -4.0 0.0 4.0
+
+* Missing various pieces of the correct syntax of:
+* <sweep variable name> <start> <stop> <step>
+.DC V1 -8.0 4.0
+.DC V1 -8.0
+.DC V1
+.DC
+.DC DATA=
+.DC DATA
+
+.print dc V(1)
+
+.end

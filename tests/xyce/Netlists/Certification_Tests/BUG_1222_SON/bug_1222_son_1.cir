@@ -1,0 +1,226 @@
+* Bug 1222 test
+
+.param bedrock=0.032e-6 
+.param slagheap=0.032e-6 
+
+*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+.param
++ mrSlate = 1		
++ rockhead     = 9e34	
++ yabbaDabbaDoo      = 1e-13
+
+.FUNC fred_001(bedrock, slagheap)  '0.034u <= slagheap & slagheap < 0.036u & 0.032u <= bedrock & bedrock < 0.034u ?  0.001u : 0'
+.FUNC fred_002(bedrock, slagheap)  '0.036u <= slagheap & slagheap < 0.040u & 0.032u <= bedrock & bedrock < 0.034u ?  0.002u : 0'
+.FUNC fred_003(bedrock, slagheap)  '0.040u <= slagheap & slagheap < 0.042u & 0.032u <= bedrock & bedrock < 0.034u ?  0.003u : 0'
+.FUNC fred_004(bedrock, slagheap)  '0.042u <= slagheap & slagheap < 0.046u & 0.032u <= bedrock & bedrock < 0.034u ?  0.004u : 0'
+.FUNC fred_005(bedrock, slagheap)  '0.046u <= slagheap & slagheap < 0.050u & 0.032u <= bedrock & bedrock < 0.034u ?  0.005u : 0'
+.FUNC fred_006(bedrock, slagheap)  '0.050u <= slagheap & slagheap < 0.056u & 0.032u <= bedrock & bedrock < 0.034u ?  0.006u : 0'
+.FUNC fred_007(bedrock, slagheap)  '0.056u <= slagheap & slagheap < 0.058u & 0.032u <= bedrock & bedrock < 0.034u ?  0.007u : 0'
+.FUNC fred_008(bedrock, slagheap)  '0.036u <= slagheap & slagheap < 0.038u & 0.034u <= bedrock & bedrock < 0.036u ?  0.001u : 0'
+.FUNC fred_009(bedrock, slagheap)  '0.038u <= slagheap & slagheap < 0.042u & 0.034u <= bedrock & bedrock < 0.036u ?  0.002u : 0'
+.FUNC fred_010(bedrock, slagheap)  '0.042u <= slagheap & slagheap < 0.046u & 0.034u <= bedrock & bedrock < 0.036u ?  0.003u : 0'
+.FUNC fred_011(bedrock, slagheap)  '0.046u <= slagheap & slagheap < 0.050u & 0.034u <= bedrock & bedrock < 0.036u ?  0.004u : 0'
+.FUNC fred_012(bedrock, slagheap)  '0.050u <= slagheap & slagheap < 0.054u & 0.034u <= bedrock & bedrock < 0.036u ?  0.005u : 0'
+.FUNC fred_013(bedrock, slagheap)  '0.054u <= slagheap & slagheap < 0.058u & 0.034u <= bedrock & bedrock < 0.036u ?  0.006u : 0'
+.FUNC fred_014(bedrock, slagheap)  '0.060u <= slagheap & slagheap < 0.062u & 0.032u <= bedrock & bedrock < 0.042u ?  0.001u : 0'
+.FUNC fred_015(bedrock, slagheap)  '0.062u <= slagheap & slagheap < 0.064u & 0.032u <= bedrock & bedrock < 0.040u ?  0.002u : 0'
+.FUNC fred_016(bedrock, slagheap)  '0.064u <= slagheap & slagheap < 0.066u & 0.032u <= bedrock & bedrock < 0.036u ?  0.003u : 0'
+.FUNC fred_017(bedrock, slagheap)  '0.066u <= slagheap & slagheap < 0.072u & 0.032u <= bedrock & bedrock < 0.034u ?  0.004u : 0'
+.FUNC fred_018(bedrock, slagheap)  '0.072u <= slagheap & slagheap < 0.076u & 0.032u <= bedrock & bedrock < 0.034u ?  0.005u : 0'
+.FUNC fred_019(bedrock, slagheap)  '0.076u <= slagheap & slagheap < 0.082u & 0.032u <= bedrock & bedrock < 0.034u ?  0.006u : 0'
+.FUNC fred_020(bedrock, slagheap)  '0.082u <= slagheap & slagheap < 0.086u & 0.032u <= bedrock & bedrock < 0.034u ?  0.007u : 0'
+.FUNC fred_021(bedrock, slagheap)  '0.086u <= slagheap & slagheap < 0.092u & 0.032u <= bedrock & bedrock < 0.034u ?  0.008u : 0'
+.FUNC fred_022(bedrock, slagheap)  '0.092u <= slagheap & slagheap < rockhead  & 0.032u <= bedrock & bedrock < 0.034u ?  0.009u : 0'
+.FUNC fred_023(bedrock, slagheap)  '0.038u <= slagheap & slagheap < 0.042u & 0.036u <= bedrock & bedrock < 0.038u ?  0.001u : 0'
+.FUNC fred_024(bedrock, slagheap)  '0.042u <= slagheap & slagheap < 0.044u & 0.036u <= bedrock & bedrock < 0.038u ?  0.002u : 0'
+.FUNC fred_025(bedrock, slagheap)  '0.044u <= slagheap & slagheap < 0.048u & 0.036u <= bedrock & bedrock < 0.038u ?  0.003u : 0'
+.FUNC fred_026(bedrock, slagheap)  '0.048u <= slagheap & slagheap < 0.054u & 0.036u <= bedrock & bedrock < 0.038u ?  0.004u : 0'
+.FUNC fred_027(bedrock, slagheap)  '0.054u <= slagheap & slagheap < 0.058u & 0.036u <= bedrock & bedrock < 0.038u ?  0.005u : 0'
+.FUNC fred_028(bedrock, slagheap)  '0.064u <= slagheap & slagheap < 0.066u & 0.036u <= bedrock & bedrock < 0.042u ?  0.002u : 0'
+.FUNC fred_029(bedrock, slagheap)  '0.066u <= slagheap & slagheap < 0.068u & 0.034u <= bedrock & bedrock < 0.038u ?  0.003u : 0'
+.FUNC fred_030(bedrock, slagheap)  '0.068u <= slagheap & slagheap < 0.074u & 0.034u <= bedrock & bedrock < 0.036u ?  0.004u : 0'
+.FUNC fred_031(bedrock, slagheap)  '0.074u <= slagheap & slagheap < 0.078u & 0.034u <= bedrock & bedrock < 0.036u ?  0.005u : 0'
+.FUNC fred_032(bedrock, slagheap)  '0.078u <= slagheap & slagheap < 0.084u & 0.034u <= bedrock & bedrock < 0.036u ?  0.006u : 0'
+.FUNC fred_033(bedrock, slagheap)  '0.084u <= slagheap & slagheap < 0.088u & 0.034u <= bedrock & bedrock < 0.036u ?  0.007u : 0'
+.FUNC fred_034(bedrock, slagheap)  '0.088u <= slagheap & slagheap < 0.096u & 0.034u <= bedrock & bedrock < 0.036u ?  0.008u : 0'
+.FUNC fred_035(bedrock, slagheap)  '0.096u <= slagheap & slagheap < rockhead  & 0.034u <= bedrock               ?  0.009u : 0'
+.FUNC fred_036(bedrock, slagheap)  '0.040u <= slagheap & slagheap < 0.044u & 0.038u <= bedrock & bedrock < 0.040u ?  0.001u : 0'
+.FUNC fred_037(bedrock, slagheap)  '0.044u <= slagheap & slagheap < 0.048u & 0.038u <= bedrock & bedrock < 0.040u ?  0.002u : 0'
+.FUNC fred_038(bedrock, slagheap)  '0.048u <= slagheap & slagheap < 0.052u & 0.038u <= bedrock & bedrock < 0.040u ?  0.003u : 0'
+.FUNC fred_039(bedrock, slagheap)  '0.052u <= slagheap & slagheap < 0.058u & 0.038u <= bedrock & bedrock < 0.040u ?  0.004u : 0'
+.FUNC fred_040(bedrock, slagheap)  '0.066u <= slagheap & slagheap < 0.068u & 0.038u <= bedrock & bedrock < 0.044u ?  0.002u : 0'
+.FUNC fred_041(bedrock, slagheap)  '0.068u <= slagheap & slagheap < 0.070u & 0.036u <= bedrock & bedrock < 0.040u ?  0.003u : 0'
+.FUNC fred_042(bedrock, slagheap)  '0.070u <= slagheap & slagheap < 0.076u & 0.036u <= bedrock & bedrock < 0.038u ?  0.004u : 0'
+.FUNC fred_043(bedrock, slagheap)  '0.076u <= slagheap & slagheap < 0.080u & 0.036u <= bedrock & bedrock < 0.038u ?  0.005u : 0'
+.FUNC fred_044(bedrock, slagheap)  '0.080u <= slagheap & slagheap < 0.086u & 0.036u <= bedrock & bedrock < 0.038u ?  0.006u : 0'
+.FUNC fred_045(bedrock, slagheap)  '0.086u <= slagheap & slagheap < 0.094u & 0.036u <= bedrock & bedrock < 0.038u ?  0.007u : 0'
+.FUNC fred_046(bedrock, slagheap)  '0.044u <= slagheap & slagheap < 0.046u & 0.040u <= bedrock & bedrock < 0.042u ?  0.001u : 0'
+.FUNC fred_047(bedrock, slagheap)  '0.046u <= slagheap & slagheap < 0.052u & 0.040u <= bedrock & bedrock < 0.042u ?  0.002u : 0'
+.FUNC fred_048(bedrock, slagheap)  '0.052u <= slagheap & slagheap < 0.058u & 0.040u <= bedrock & bedrock < 0.042u ?  0.003u : 0'
+.FUNC fred_049(bedrock, slagheap)  '0.062u <= slagheap & slagheap < 0.064u & 0.040u <= bedrock & bedrock < 0.044u ?  0.001u : 0'
+.FUNC fred_050(bedrock, slagheap)  '0.064u <= slagheap & slagheap < 0.066u & 0.042u <= bedrock & bedrock < 0.046u ?  0.001u : 0'
+.FUNC fred_051(bedrock, slagheap)  '0.066u <= slagheap & slagheap < 0.068u & 0.044u <= bedrock & bedrock < 0.048u ?  0.001u : 0'
+.FUNC fred_052(bedrock, slagheap)  '0.068u <= slagheap & slagheap < 0.070u & 0.040u <= bedrock & bedrock < 0.046u ?  0.002u : 0'
+.FUNC fred_053(bedrock, slagheap)  '0.070u <= slagheap & slagheap < 0.072u & 0.038u <= bedrock & bedrock < 0.042u ?  0.003u : 0'
+.FUNC fred_054(bedrock, slagheap)  '0.072u <= slagheap & slagheap < 0.078u & 0.038u <= bedrock & bedrock < 0.040u ?  0.004u : 0'
+.FUNC fred_055(bedrock, slagheap)  '0.078u <= slagheap & slagheap < 0.082u & 0.038u <= bedrock & bedrock < 0.040u ?  0.005u : 0'
+.FUNC fred_056(bedrock, slagheap)  '0.082u <= slagheap & slagheap < 0.092u & 0.038u <= bedrock & bedrock < 0.040u ?  0.006u : 0'
+.FUNC fred_057(bedrock, slagheap)  '0.046u <= slagheap & slagheap < 0.050u & 0.042u <= bedrock & bedrock < 0.044u ?  0.001u : 0'
+.FUNC fred_058(bedrock, slagheap)  '0.050u <= slagheap & slagheap < 0.056u & 0.042u <= bedrock & bedrock < 0.044u ?  0.002u : 0'
+.FUNC fred_059(bedrock, slagheap)  '0.056u <= slagheap & slagheap < 0.058u & 0.042u <= bedrock & bedrock < 0.044u ?  0.003u : 0'
+.FUNC fred_060(bedrock, slagheap)  '0.070u <= slagheap & slagheap < 0.072u & 0.042u <= bedrock & bedrock < 0.048u ?  0.002u : 0'
+.FUNC fred_061(bedrock, slagheap)  '0.072u <= slagheap & slagheap < 0.074u & 0.040u <= bedrock & bedrock < 0.044u ?  0.003u : 0'
+.FUNC fred_062(bedrock, slagheap)  '0.074u <= slagheap & slagheap < 0.080u & 0.040u <= bedrock & bedrock < 0.042u ?  0.004u : 0'
+.FUNC fred_063(bedrock, slagheap)  '0.080u <= slagheap & slagheap < 0.090u & 0.040u <= bedrock & bedrock < 0.042u ?  0.005u : 0'
+.FUNC fred_064(bedrock, slagheap)  '0.086u <= slagheap & slagheap < 0.088u & 0.042u <= bedrock               ?  0.004u : 0'
+.FUNC fred_065(bedrock, slagheap)  '0.088u <= slagheap & slagheap < 0.090u & 0.042u <= bedrock               ?  0.005u : 0'
+.FUNC fred_066(bedrock, slagheap)  '0.090u <= slagheap & slagheap < 0.092u & 0.040u <= bedrock               ?  0.006u : 0'
+.FUNC fred_067(bedrock, slagheap)  '0.092u <= slagheap & slagheap < 0.094u & 0.038u <= bedrock               ?  0.007u : 0'
+.FUNC fred_068(bedrock, slagheap)  '0.094u <= slagheap & slagheap < 0.096u & 0.036u <= bedrock               ?  0.008u : 0'
+.FUNC fred_069(bedrock, slagheap)  '0.050u <= slagheap & slagheap < 0.054u & 0.044u <= bedrock & bedrock < 0.046u ?  0.001u : 0'
+.FUNC fred_070(bedrock, slagheap)  '0.054u <= slagheap & slagheap < 0.058u & 0.044u <= bedrock & bedrock < 0.046u ?  0.002u : 0'
+.FUNC fred_071(bedrock, slagheap)  '0.054u <= slagheap & slagheap < 0.058u & 0.046u <= bedrock & bedrock < 0.048u ?  0.001u : 0'
+.FUNC fred_072(bedrock, slagheap)  '0.068u <= slagheap & slagheap < 0.070u & 0.046u <= bedrock & bedrock < 0.050u ?  0.001u : 0'
+.FUNC fred_073(bedrock, slagheap)  '0.070u <= slagheap & slagheap < 0.072u & 0.048u <= bedrock & bedrock < 0.052u ?  0.001u : 0'
+.FUNC fred_074(bedrock, slagheap)  '0.072u <= slagheap & slagheap < 0.074u & 0.044u <= bedrock & bedrock < 0.050u ?  0.002u : 0'
+.FUNC fred_075(bedrock, slagheap)  '0.074u <= slagheap & slagheap < 0.076u & 0.042u <= bedrock & bedrock < 0.046u ?  0.003u : 0'
+.FUNC fred_076(bedrock, slagheap)  '0.074u <= slagheap & slagheap < 0.076u & 0.046u <= bedrock & bedrock < 0.052u ?  0.002u : 0'
+.FUNC fred_077(bedrock, slagheap)  '0.076u <= slagheap & slagheap < 0.086u & 0.042u <= bedrock & bedrock < 0.044u ?  0.004u : 0'
+.FUNC fred_078(bedrock, slagheap)  '0.076u <= slagheap & slagheap < 0.086u & 0.044u <= bedrock & bedrock < 0.048u ?  0.003u : 0'
+.FUNC fred_079(bedrock, slagheap)  '0.076u <= slagheap & slagheap < 0.084u & 0.048u <= bedrock & bedrock < 0.050u ?  0.002u : 0'
+.FUNC fred_080(bedrock, slagheap)  '0.084u <= slagheap & slagheap < 0.086u & 0.048u <= bedrock               ?  0.003u : 0'
+.FUNC fred_081(bedrock, slagheap)  '0.082u <= slagheap & slagheap < 0.084u & 0.050u <= bedrock               ?  0.002u : 0'
+.FUNC fred_082(bedrock, slagheap)  '0.058u <= slagheap & slagheap < 0.060u & 0.050u <= bedrock & bedrock < 0.054u ? -0.001u : 0'
+.FUNC fred_083(bedrock, slagheap)  '0.058u <= slagheap & slagheap < 0.060u & 0.054u <= bedrock & bedrock < 0.062u ? -0.002u : 0'
+.FUNC fred_084(bedrock, slagheap)  '0.060u <= slagheap & slagheap < 0.062u & 0.052u <= bedrock & bedrock < 0.056u ? -0.001u : 0'
+.FUNC fred_085(bedrock, slagheap)  '0.060u <= slagheap & slagheap < 0.062u & 0.056u <= bedrock & bedrock < 0.062u ? -0.002u : 0'
+.FUNC fred_086(bedrock, slagheap)  '0.062u <= slagheap & slagheap < 0.064u & 0.054u <= bedrock & bedrock < 0.058u ? -0.001u : 0'
+.FUNC fred_087(bedrock, slagheap)  '0.062u <= slagheap & slagheap < 0.064u & 0.058u <= bedrock & bedrock < 0.064u ? -0.002u : 0' 
+.FUNC fred_088(bedrock, slagheap)  '0.058u <= slagheap & slagheap < 0.062u & 0.062u <= bedrock               ?      0u : 0' 
+.FUNC fred_588(bedrock, slagheap)  '0.062u <= slagheap & slagheap < 0.066u & 0.064u <= bedrock & bedrock < 0.066u ? -0.003u : 0' 
+.FUNC fred_089(bedrock, slagheap)  '0.064u <= slagheap & slagheap < 0.066u & 0.056u <= bedrock & bedrock < 0.060u ? -0.001u : 0'
+.FUNC fred_090(bedrock, slagheap)  '0.064u <= slagheap & slagheap < 0.066u & 0.060u <= bedrock & bedrock < 0.064u ? -0.002u : 0' 
+.FUNC fred_093(bedrock, slagheap)  '0.066u <= slagheap & slagheap < 0.068u & 0.058u <= bedrock & bedrock < 0.062u ? -0.001u : 0'
+.FUNC fred_094(bedrock, slagheap)  '0.066u <= slagheap & slagheap < 0.068u & 0.062u <= bedrock & bedrock < 0.066u ? -0.002u : 0' 
+.FUNC fred_594(bedrock, slagheap)  '0.066u <= slagheap & slagheap < 0.068u & 0.066u <= bedrock               ?      0u : 0' 
+.FUNC fred_096(bedrock, slagheap)  '0.068u <= slagheap & slagheap < 0.070u & 0.060u <= bedrock & bedrock < 0.064u ? -0.001u : 0'
+.FUNC fred_097(bedrock, slagheap)  '0.068u <= slagheap & slagheap < 0.070u & 0.064u <= bedrock               ? -0.002u : 0'
+.FUNC fred_098(bedrock, slagheap)  '0.072u <= slagheap & slagheap < 0.074u & 0.050u <= bedrock & bedrock < 0.054u ?  0.001u : 0'
+.FUNC fred_099(bedrock, slagheap)  '0.074u <= slagheap & slagheap < 0.076u & 0.052u <= bedrock & bedrock < 0.056u ?  0.001u : 0'
+.FUNC fred_100(bedrock, slagheap)  '0.076u <= slagheap & slagheap < 0.078u & 0.050u <= bedrock & bedrock < 0.054u ?  0.002u : 0'
+.FUNC fred_101(bedrock, slagheap)  '0.076u <= slagheap & slagheap < 0.078u & 0.054u <= bedrock & bedrock < 0.058u ?  0.001u : 0'
+.FUNC fred_102(bedrock, slagheap)  '0.078u <= slagheap & slagheap < 0.082u & 0.050u <= bedrock               ?  0.001u : 0'
+.FUNC fred_103(bedrock, slagheap)  '0.070u <= slagheap & slagheap < 0.072u & 0.062u <= bedrock & bedrock < 0.066u ? -0.001u : 0'
+.FUNC fred_104(bedrock, slagheap)  '0.070u <= slagheap & slagheap < 0.072u & 0.066u <= bedrock               ? -0.002u : 0'
+.FUNC fred_105(bedrock, slagheap)  '0.072u <= slagheap & slagheap < 0.074u & 0.064u <= bedrock & bedrock < 0.068u ? -0.001u : 0'
+.FUNC fred_106(bedrock, slagheap)  '0.072u <= slagheap & slagheap < 0.074u & 0.068u <= bedrock               ? -0.002u : 0'
+.FUNC fred_107(bedrock, slagheap)  '0.074u <= slagheap & slagheap < 0.076u & 0.066u <= bedrock               ? -0.001u : 0'
+.FUNC fred_108(bedrock, slagheap)  '0.076u <= slagheap & slagheap < 0.078u & 0.068u <= bedrock & bedrock < 0.070u ? -0.001u : 0'
+
+.FUNC barney_087(bedrock, slagheap)  '0.062u <= slagheap & slagheap < 0.064u & 0.058u <= bedrock & bedrock < 0.062u ? -0.002u : 0' 
+.FUNC barney_088(bedrock, slagheap)  '0.062u <= slagheap & slagheap < 0.064u & 0.062u <= bedrock & bedrock < 0.066u ? -0.003u : 0' 
+.FUNC barney_090(bedrock, slagheap)  '0.064u <= slagheap & slagheap < 0.066u & 0.060u <= bedrock & bedrock < 0.062u ? -0.002u : 0' 
+.FUNC barney_091(bedrock, slagheap)  '0.064u <= slagheap & slagheap < 0.066u & 0.062u <= bedrock & bedrock < 0.064u ? -0.003u : 0' 
+.FUNC barney_092(bedrock, slagheap)  '0.064u <= slagheap & slagheap < 0.066u & 0.064u <= bedrock & bedrock < 0.066u ? -0.004u : 0' 
+.FUNC barney_094(bedrock, slagheap)  '0.066u <= slagheap & slagheap < 0.068u & 0.062u <= bedrock & bedrock < 0.064u ? -0.002u : 0' 
+.FUNC barney_095(bedrock, slagheap)  '0.066u <= slagheap & slagheap < 0.068u & 0.064u <= bedrock & bedrock < 0.066u ? -0.003u : 0' 
+.FUNC barney_595(bedrock, slagheap)  '0.064u <= slagheap & slagheap < 0.068u & 0.066u <= bedrock               ?      0u : 0' 
+
+
+.FUNC fred_00(bedrock, slagheap)  '                    fred_001(bedrock, slagheap) + fred_002(bedrock, slagheap)   
++                     + fred_003(bedrock, slagheap) + fred_004(bedrock, slagheap) + fred_005(bedrock, slagheap)   
++                     + fred_006(bedrock, slagheap) + fred_007(bedrock, slagheap) + fred_008(bedrock, slagheap)   
++                     + fred_009(bedrock, slagheap) '
+.FUNC fred_01(bedrock, slagheap)  ' fred_010(bedrock, slagheap) + fred_011(bedrock, slagheap) + fred_012(bedrock, slagheap)   
++                     + fred_013(bedrock, slagheap) + fred_014(bedrock, slagheap) + fred_015(bedrock, slagheap)   
++                     + fred_016(bedrock, slagheap) + fred_017(bedrock, slagheap) + fred_018(bedrock, slagheap)   
++                     + fred_019(bedrock, slagheap) '
+.FUNC fred_02(bedrock, slagheap)  ' fred_020(bedrock, slagheap) + fred_021(bedrock, slagheap) + fred_022(bedrock, slagheap)   
++                     + fred_023(bedrock, slagheap) + fred_024(bedrock, slagheap) + fred_025(bedrock, slagheap)   
++                     + fred_026(bedrock, slagheap) + fred_027(bedrock, slagheap) + fred_028(bedrock, slagheap)   
++                     + fred_029(bedrock, slagheap) '
+.FUNC fred_03(bedrock, slagheap)  ' fred_030(bedrock, slagheap) + fred_031(bedrock, slagheap) + fred_032(bedrock, slagheap)   
++                     + fred_033(bedrock, slagheap) + fred_034(bedrock, slagheap) + fred_035(bedrock, slagheap)   
++                     + fred_036(bedrock, slagheap) + fred_037(bedrock, slagheap) + fred_038(bedrock, slagheap)   
++                     + fred_039(bedrock, slagheap) '
+.FUNC fred_04(bedrock, slagheap)  ' fred_040(bedrock, slagheap) + fred_041(bedrock, slagheap) + fred_042(bedrock, slagheap)   
++                     + fred_043(bedrock, slagheap) + fred_044(bedrock, slagheap) + fred_045(bedrock, slagheap)   
++                     + fred_046(bedrock, slagheap) + fred_047(bedrock, slagheap) + fred_048(bedrock, slagheap)   
++                     + fred_049(bedrock, slagheap) '
+.FUNC fred_05(bedrock, slagheap)  ' fred_050(bedrock, slagheap) + fred_051(bedrock, slagheap) + fred_052(bedrock, slagheap)   
++                     + fred_053(bedrock, slagheap) + fred_054(bedrock, slagheap) + fred_055(bedrock, slagheap)   
++                     + fred_056(bedrock, slagheap) + fred_057(bedrock, slagheap) + fred_058(bedrock, slagheap)   
++                     + fred_059(bedrock, slagheap) '
+.FUNC fred_06(bedrock, slagheap)  ' fred_060(bedrock, slagheap) + fred_061(bedrock, slagheap) + fred_062(bedrock, slagheap)   
++                     + fred_063(bedrock, slagheap) + fred_064(bedrock, slagheap) + fred_065(bedrock, slagheap)   
++                     + fred_066(bedrock, slagheap) + fred_067(bedrock, slagheap) + fred_068(bedrock, slagheap)   
++                     + fred_069(bedrock, slagheap) '
+.FUNC fred_07(bedrock, slagheap)  ' fred_070(bedrock, slagheap) + fred_071(bedrock, slagheap) + fred_072(bedrock, slagheap)   
++                     + fred_073(bedrock, slagheap) + fred_074(bedrock, slagheap) + fred_075(bedrock, slagheap)   
++                     + fred_076(bedrock, slagheap) + fred_077(bedrock, slagheap) + fred_078(bedrock, slagheap)   
++                     + fred_079(bedrock, slagheap) '
+.FUNC barney_08(bedrock, slagheap)  ' fred_080(bedrock, slagheap) + fred_081(bedrock, slagheap) + fred_082(bedrock, slagheap)   
++                     + fred_083(bedrock, slagheap) + fred_084(bedrock, slagheap) + fred_085(bedrock, slagheap)   
++                     + fred_086(bedrock, slagheap) + barney_087(bedrock, slagheap) + barney_088(bedrock, slagheap)   
++                     + fred_089(bedrock, slagheap) '
+.FUNC fred_08(bedrock, slagheap)  ' fred_080(bedrock, slagheap) + fred_081(bedrock, slagheap) + fred_082(bedrock, slagheap)   
++                     + fred_083(bedrock, slagheap) + fred_084(bedrock, slagheap) + fred_085(bedrock, slagheap)   
++                     + fred_086(bedrock, slagheap) + fred_087(bedrock, slagheap) + fred_088(bedrock, slagheap) + fred_588(bedrock, slagheap)   
++                     + fred_089(bedrock, slagheap) '
+.FUNC barney_09(bedrock, slagheap)  ' barney_090(bedrock, slagheap) + barney_091(bedrock, slagheap) + barney_092(bedrock, slagheap)   
++                     + fred_093(bedrock, slagheap) + barney_094(bedrock, slagheap) + barney_095(bedrock, slagheap) + barney_595(bedrock, slagheap)   
++                     + fred_096(bedrock, slagheap) + fred_097(bedrock, slagheap) + fred_098(bedrock, slagheap)   
++                     + fred_099(bedrock, slagheap) '
+.FUNC fred_09(bedrock, slagheap)  ' fred_090(bedrock, slagheap) + fred_093(bedrock, slagheap) + fred_094(bedrock, slagheap) + fred_594(bedrock, slagheap)   
++                     + fred_096(bedrock, slagheap) + fred_097(bedrock, slagheap) + fred_098(bedrock, slagheap)   
++                     + fred_099(bedrock, slagheap) '
+.FUNC fred_10(bedrock, slagheap)  ' fred_100(bedrock, slagheap) + fred_101(bedrock, slagheap) + fred_102(bedrock, slagheap)   
++                     + fred_103(bedrock, slagheap) + fred_104(bedrock, slagheap) + fred_105(bedrock, slagheap)   
++                     + fred_106(bedrock, slagheap) + fred_107(bedrock, slagheap) + fred_108(bedrock, slagheap) '
+
+.FUNC betty(bedrock,slagheap)  '   
++       fred_00(bedrock, slagheap) + fred_01(bedrock, slagheap) + fred_02(bedrock, slagheap)
++     + fred_03(bedrock, slagheap) + fred_04(bedrock, slagheap) + fred_05(bedrock, slagheap)   
++     + fred_06(bedrock, slagheap) + fred_07(bedrock, slagheap) + barney_08(bedrock, slagheap)  
++     + barney_09(bedrock, slagheap) + fred_10(bedrock, slagheap) '
+
+
+*----------------------------------------------------
+.FUNC great_gazoo(bedrock,pebbles,bammbamm,hatrock) 'mrSlate ? betty(bedrock+yabbaDabbaDoo,pebbles+yabbaDabbaDoo) :0'   
+
+
+.FUNC wilma(bedrock,pebbles,bammbamm,slaghoople,hatrock) 'great_gazoo(bedrock,pebbles,bammbamm,hatrock)'
+
+
+.param hatrock=11001
+
+.param pebbles=0.085u 
+.param bammbamm=0.058u 
+.param slaghoople=1 
+
+
+.FUNC dino(bedrock,pebbles,bammbamm,slaghoople,hatrock) '(wilma(bedrock+great_gazoo(bedrock,pebbles,bammbamm,hatrock),pebbles,bammbamm,slaghoople,hatrock))'
+
+R1 2 0 {dino(bedrock,pebbles,bammbamm,slaghoople,hatrock)}
+R2 1 2 1.0
+V1 1 0 1.0
+
+.param bedrockTest=0.035u
+.param slagheapTest=0.097u
+
+.DC V1 1.0 1.0 1.0
+
+*comp v(1) offset=1.0e-1
+*comp v(2) offset=1.0e-1
+*comp {DINO(BEDROCK,PEBBLES,BAMMBAMM,SLAGHOOPLE,HATROCK)} offset=1.0e-9
+*comp {DINO(BEDROCKTEST,SLAGHEAPTEST,BAMMBAMM,SLAGHOOPLE,HATROCK)} offset=1.0e-9
+*comp {BETTY(BEDROCK,PEBBLES)} offset=1.0e-9
+*comp {BETTY(BEDROCK+YABBADABBADOO,PEBBLES+YABBADABBADOO)} offset=1.0e-9
+*comp {BETTY(BEDROCKTEST,SLAGHEAPTEST)} offset=1.0e-9
+
+.print dc V(1) V(2)
++ {dino(bedrock,pebbles,bammbamm,slaghoople,hatrock)}  
++ {dino(bedrockTest,slagheapTest,bammbamm,slaghoople,hatrock)}  
++ {betty(bedrock,pebbles)} {betty(bedrock+yabbaDabbaDoo,pebbles+yabbaDabbaDoo)} {betty(bedrockTest,slagheapTest)}
+
+.END

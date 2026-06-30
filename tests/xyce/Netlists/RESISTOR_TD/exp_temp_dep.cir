@@ -1,0 +1,96 @@
+********************************************************
+* This netlist address SON Bug 1027 for the Level 1 
+* resistor, a Level 1 resistor with no R-value on its 
+* instance line, the semiconductor version of the Level 1 
+* resistor, and the thermal (Level 2) resistor for the case 
+* where it basically defaults to a Level 1 Resistor. 
+*
+* TCE is the exponential temperature coefficient.
+* TC1 and TC2 are the linear and quadratic temperature
+* coefficients.
+********************************************************
+
+* Level 1 resistor
+* Show that TCE on the instance line takes precedence 
+* over TC1 and TC2
+V1  1a 0  1
+R1a 1a 1b 1 TC1=1 TC2=2 TCE=3
+R1b 1b 0  2
+
+* Show that adding TCE did not break the correct
+* operation of TC1 (linear) and TC2 (quadratic) 
+* temperature coefficients.
+V2  2a 0  1
+R2a 2a 2b 1 TC1=0.1 TC2=0.2
+R2b 2b 0  2
+
+* TCE on the instance line
+V3  3a 0  1
+R3a 3a 3b 1 TCE=3
+R3b 3b 0  2
+
+* TCE in the model
+V4  4a 0  1
+R4a 4a 4b 1 RMOD
+R4b 4b 0  2
+
+* TCE in model takes precedence over TC1 and TC2 on 
+* the instance line.
+V5  5a 0  1
+R5a 5a 5b 1 RMOD TC1=0.1 TC2=0.2
+R5b 5b 0  2
+
+* TCE on the instance line overrides TCE in the
+* model.  Also test that negative TCE works.
+V6  6a 0  1
+R6a 6a 6b 1 RMOD TCE=-6
+R6b 6b 0  2
+
+* TCE for a zero-value resistor.  This case shouldn't be 
+* used in a customer netlist, but test that it does 
+* something reasonable.  R7a's R value should default to 1K.
+V7  7a 0 1
+R7a 7a 7b TCE=3
+R7b 7b 0 2000
+
+.MODEL RMOD R (TCE=3)
+
+* Semiconductor resistors, which are still a Level 1
+* resistor. TCE in model statement
+V8  8a 0 1
+R8a 8a 8b RMOD_SC1 L=1000U W=1U
+R8b 8b 0 2
+
+*TCE on instance line overrides value in model
+V9  9a 0 1
+R9a 9a 9b RMOD_SC1 L=1000U W=1U TCE=-6
+R9b 9b 0 2
+
+.MODEL RMOD_SC1 R (RSH=1e-3 TCE=3)
+
+* Thermal resistors, that are really defaulting to 
+* Level 1 resistors.  TCE is only a model parameter in
+* this case though.  TCE still overrides TC1 and TC2.
+V10  10a 0 1
+R10a 10a 10b RMOD_TR1 1
+R10b 10b 0 2
+
+V11  11a 0 1
+R11a 11a 11b RMOD_TR2 1
+R11b 11b 0 2
+
+* Model has TCE, TC1 and TC2
+.model RMOD_TR1 r (level=2 TC1=1 TC2=2 TCE=3)
+
+* Model only has TC1 and TC2
+.model RMOD_TR2 r (level=2 TC1=0.1 TC2=0.2)
+
+* Analysis and print statements
+.DC V1 1 1 1
+.STEP TEMP 27 37 10
+.PRINT DC TEMP V(1b) V(2b) V(3b) V(4b) V(5b) 
++ V(6b) V(7b) V(8b) V(9b) V(10b) V(11b)
++ I(R1a) I(R2a) I(R3a) I(R4a) I(R5a) I(R6a) 
++ I(R7a) I(R8a) I(R9a) I(R10a) I(R11a)
+.END
+

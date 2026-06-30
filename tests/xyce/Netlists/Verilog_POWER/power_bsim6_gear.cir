@@ -1,0 +1,55 @@
+BSIM3 power test circuit
+* This is the basically the comparator circuit with one pmos and one
+* nmos bsim6 mosfets instrumented for lead current comparison.
+
+*circuit description
+
+M1 Anot A E1 E1  PMOS w=3.6u l=1.2u
+M2 Anot A 0 0 NMOS w=1.8u l=1.2u
+M3 Bnot B E1 E1  PMOS w=3.6u l=1.2u
+M4 Bnot B 0 0 NMOS w=1.8u l=1.2u
+M5 AorBnot 0 E1 E1 PMOS w=1.8u l=3.6u
+M6 AorBnot B 1 0 NMOS w=1.8u l=1.2u
+M7 1 Anot 0 0 NMOS w=1.8u l=1.2u
+M8 Lnot 0 E1 E1 PMOS w=1.8u l=3.6u
+M9 Lnot Bnot 2 0 NMOS w=1.8u l=1.2u
+M10 2 A 0 0 NMOS w=1.8u l=1.2u
+M11 Qnot_11 0_11 E1_11a E1_11b  PMOS w=3.6u l=3.6u
+M12 Qnot_12 AorBnot_12 3_12 0_12 NMOS w=1.8u l=1.2u
+M13 3 Lnot 0 0 NMOS w=1.8u l=1.2u
+MQLO 8 Qnot E1 E1  PMOS w=3.6u l=1.2u
+MQL1 8 Qnot 0 0 NMOS w=1.8u l=1.2u
+MLTO 9 Lnot E1 E1  PMOS w=3.6u l=1.2u
+MLT1 9 Lnot 0 0 NMOS w=1.8u l=1.2u
+CQ Qnot 0 30f
+CL Lnot 0 10f
+
+vd11  Qnot  Qnot_11  0
+vg11  0  0_11  0
+vs11  E1  E1_11a  0
+vb11  E1  E1_11b  0
+vd12  Qnot  Qnot_12  0
+vg12  AorBnot  AorBnot_12  0
+vs12  3  3_12  0
+vb12  0  0_12  0
+
+Vdd E1 0 5
+Va A 0  pulse(0 5 5ns .1ns .1ns 15ns 30ns)
+Vb B 0 0
+
+.include modelcard_xyce.nmos
+.include modelcard_xyce.pmos
+.options device mincap=1uf
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+
+* transient analysis
+.tran 1ns 30ns
+
+.print tran P(M11) W(M11) P(M12) W(M12)
++ {ID(M11)*(V(Qnot_11)-V(E1_11a)) + IG(M11)*(V(0_11)-V(E1_11a))}
++ {ID(M12)*(V(Qnot_12)-V(3_12)) + IG(M12)*(V(AorBnot_12)-V(3_12))}
++ ID(M11) IG(M11) {V(Qnot_11)-V(E1_11a)} {V(0_11)-V(E1_11a)}
+
+.END
+

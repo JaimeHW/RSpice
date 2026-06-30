@@ -1,0 +1,7 @@
+serial, nightly,  parallel, analytic
+sampling
+pce
+quadrature_pce
+nisp
+required:stokhos
+issue84

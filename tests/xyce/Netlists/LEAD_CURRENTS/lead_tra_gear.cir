@@ -1,0 +1,87 @@
+Transmission Line Circuit
+**************************************************************
+* Tier No.:	1                                           
+* Description:  Test of Xyce transmission line model using 
+*               lossless circuit configuration.  
+* Input:  5V Pulse Source
+* Output: Capacitor voltage
+* Circuit Elements: input and load resistances with matched
+*			  impedances
+* Analysis:
+*	The circuit contains a pulse voltage source (VIN), with a 
+*	50 ohm (RIN) output impedance, connected to a 50 ohm 
+*	transmission line (TLINE) which is terminated in a 50 ohm 
+*	(RL) matched load.  The pulse goes from 0V to 5V with no delay,
+*	and has a pulse width of 25ns.  The transmission line has a 
+*	10ns delay. Any change in the input voltage, V(2), of TLINE  
+*       should occur 10N later at the output (node 3).  
+*	Therefore, the input voltage rises from 0V to 2.5V in 1ns and 
+*	remains at 2.5V for 5ns.  The output voltage V(3), does the  
+*	same as V(2) except that it is delayed by 10ns. 
+*
+*	Note: V(2) is 2.5V due to the voltage drop across the 50 ohm
+*	RIN resistor. 
+*
+* Lead current test for TRA. Both TLINEs use a common source,
+* but have their terminals "reversed".  So, the lead currents for
+* terminal 1 of TLINE1 should be the same as the lead currents for
+* terminal 2 of TLINE2. Similarly, the lead currents for terminal 2 
+* of TLINE1 should be the same as the lead currents for terminal 1 
+* of TLINE2. 
+*
+* The various vmon's have their terminals arranged so that their
+* sign matches the expected sign of the TLINE lead currents.
+*************************************************************** 
+VIN 1 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)
+
+* current flows into terminal 1, and out of terminal 2, of TLINE1
+RIN1 1 2 50
+* positive current flows from node2 to node2a 
+* (e.g., into terminal 1 of TLINE1)
+Vmonin1 2 2a 0
+TLINE1 2a 0 3a 0 Z0=50 TD=10N
+* negative current flows from node 3a to node 3 
+* (e.g., out of terminal 2 of TLINE1)
+vmonout1 3 3a 0 
+RL1 3 0 50
+
+* current flows into terminal 2, and out of terminal 1, of TLINE2
+RIN2 1 4 50
+* positive current flows from node4 to node4a 
+* (e.g., into terminal 2 of TLINE2)
+Vmonin2 4 4a 0
+TLINE2 5a 0 4a 0 Z0=50 TD=10N
+* negative current flows from node 5a to node 5 
+* (e.g., out of terminal 2 of TLINE1)
+vmonout2 5 5a 0
+RL2 5 0 50
+
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.25N 50N
+
+*COMP {i1(TLINE1)-i2(TLINE2)} abstol=1.0e-6 zerotol=1.0e-16
+*COMP {i2(TLINE1)-i1(TLINE2)} abstol=1.0e-6 zerotol=1.0e-16
+*COMP {i(vmonin1)-i1(tline1)} abstol=1.0e-6 zerotol=1.0e-16
+*COMP {i(vmonout1)-i2(tline1)} abstol=1.0e-6 zerotol=1.0e-16
+*COMP {i(vmonin2)-i2(tline2)} abstol=1.0e-6 zerotol=1.0e-16
+*COMP {i(vmonout2)-i1(tline2)} abstol=1.0e-6 zerotol=1.0e-16
+
+.PRINT TRAN {i1(TLINE1)-i2(TLINE2)} {i2(TLINE1)-i1(TLINE2)}
++ {i(Vmonin1)-i1(tline1)} {i(vmonout1)-i2(tline1)}
++ {I(Vmonin2)-i2(tline2)} {I(Vmonout2)-i1(tline2)} 
+
+.measure tran maxmag1   max {abs(i1(TLINE1)-i2(TLINE2))} failvalue=1e-6
+.measure tran totalrms1 rms {i1(TLINE1)-i2(TLINE2)} failvalue=1e-6 
+.measure tran maxmag2   max {abs(i2(TLINE1)-i1(TLINE2))} failvalue=1e-6
+.measure tran totalrms2 rms {i2(TLINE1)-i1(TLINE2)} failvalue=1e-6 
+.measure tran maxmag3   max {abs(i(Vmonin1)-i1(tline1))} failvalue=1e-6
+.measure tran totalrms3 rms {i(Vmonin1)-i1(tline1)} failvalue=1e-6 
+.measure tran maxmag4   max {abs(i(vmonout1)-i2(tline1))} failvalue=1e-6
+.measure tran totalrms4 rms {i(vmonout1)-i2(tline1)} failvalue=1e-6 
+.measure tran maxmag5   max {abs(I(Vmonin2)-i2(tline2))} failvalue=1e-6
+.measure tran totalrms5 rms {I(Vmonin2)-i2(tline2)} failvalue=1e-6 
+.measure tran maxmag6   max {abs(I(Vmonout2)-i1(tline2))} failvalue=1e-6
+.measure tran totalrms6 rms {I(Vmonout2)-i1(tline2)} failvalue=1e-6 
+
+.END

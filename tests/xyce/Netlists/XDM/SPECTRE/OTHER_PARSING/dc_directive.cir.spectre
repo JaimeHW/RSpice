@@ -1,0 +1,21 @@
+// dc directive
+// Netlist tests XDM will properly translate the dc
+// directive in Spectre into Xyce. A nuance of this
+// test is that XDM should properly translate the 
+// swept device name in the dc directive. Since Spectre
+// sources aren't identified by the first character
+// as in other SPICE languages, XDM will rename sources
+// to start with "I" or "V" depending on if it is a
+// current or voltage source, respectively. The changed
+// source name needs to be reflected in the dc directive.
+// See issues #144 and #148 on XDM gitlab
+
+simulator lang=spectre
+
+ia (1 0) vsource dc=0
+r1 (1 2) resistor r=10
+r2 (2 0) resistor r=10
+
+mysweepname dc dev=ia start=0 stop=10 step=1
+save 1 2
+saveOptions options save=allpub

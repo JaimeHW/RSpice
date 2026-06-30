@@ -1,0 +1,57 @@
+Test Name: BUG_692
+Owner: 
+Test netlists: bug_692.cir
+GS files: bug_692.cir.prn,
+          bug_692.cir.res
+Mode:  Serial and Parallel 
+Comparator:  xyce_verify.pl
+Version of Xyce: Release_3.0
+ 
+Description:
+============
+
+At low temperatures (such as the one used by this netlist), Xyce's use of
+voltage limiting allows the DC operating point converge inappropriately to
+a 'solution' that differs significantly from Spice's.  The reason for this
+is that the right-hand-side terms for voltage limiting nearly cancel out the
+right-hand-side terms for the real residual, and the nonlinear solver falsly
+declares victory because the norm of the residual is small.
+
+This was fixed by adding a "device convergence" feature that crudely signals
+to the nonlinear solver that it should never accept a step in which any device
+has applied voltage limiting.  This fixes the problem in the netlist used here,
+but causes dramatic slowdowns of the code if applied during transient.
+
+In Release 3.0 this option, set by ENFORCEDEVICECONV in the .options NONLIN
+or .options NONLIN-TRAN lines, is on by default in DC, and off by default in
+transient.  The netlist here is a DC sweep on a voltage source, and a .STEP
+on a current source.
+ 
+Procedure:
+============
+Run Xyce on bug_692.cir:
+
+  runxyce bug_692.cir
+
+Compare the .prn and associated .res files to the gold standard files 
+using xyce_verify.pl:
+
+xyce_verify.pl --goodres=../../OutputData/BUG_692/bug_692.cir.res \
+               --testres=bug_692.cir.res \
+               bug_692.cir ../../OutputData/BUG_692/bug_692.cir.prn \
+               bug_692.cir.prn  
+
+Verification:
+=============
+Test is successful if Xyce and xyce_verify.pl exit with exit code 0.
+
+ 
+Notes:
+======
+
+Versions of xyce_verify.pl prior to the release 3.0 branch commit on
+20 July 2005 leave useless "_split" files around if the comparison
+fails.
+
+This test would fail on any output of Xyce Release 2.1 or earlier, when the
+bug still existed.

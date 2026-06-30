@@ -1,0 +1,19 @@
+* Ideal transformer   Turns ratio N=Ns/Np
+* Prior to the fix of bug 1020 SON, the F source with an expression as gain
+* would throw a syntax error due to incorrect translation into a B source.
+.subckt IdealXfmr P+ P- S+ S- PARAMS: TurnsRat=1
+Es S+ S- P+ P- {TurnsRat} ; Vs = TurnsRat * Vp
+Fp P- P+ Es {TurnsRat}      ; Ip = TurnsRat * Is 
+.ends
+
+* Test Circuit
+Vp P+ 0 SIN(1 1 1)
+Xfmr P+ 0 S+ 0 IdealXfmr PARAMS: TurnsRat=2
+Rs S+ 0 1
+.tran 0 1
+* Offset the sinusoidal signals slightly so there are never any zero
+* crossings to confuse xyce_verify.pl
+*COMP V(P+) offset=1e-5
+*COMP V(P-) offset=1e-5
+*COMP I(Vp) offset=-1e-5
+.print tran V(P+) V(S+) I(Vp)

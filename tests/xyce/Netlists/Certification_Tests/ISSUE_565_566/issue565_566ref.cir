@@ -1,0 +1,20 @@
+* test for .step with PWL source
+
+.param par0=-0.1
+.param par1=-0.9
+
+.data psw
++ par1
++ -0.9
++ -0.72
++ -0.54
+.enddata
+.step data=psw
+
+B_ivcY Y 0 V={table(time,0,par0,0.555n,par1)}
+Rtest Y 0 1.0
+
+.print tran v(*)
+.tran 1us 1s
+.end
+

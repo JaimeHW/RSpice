@@ -1,0 +1,34 @@
+Diode Circuit Netlist
+********************************************************************************
+* Tier No.:  1
+* Directory/Circuit Name: DIODE/DIODE.cir
+* Description:  Simple diode circuit to test the validity of the diode model.
+* Input:  VIN
+* Output: V(3), I(VMON)
+* Analysis:
+*       A diode is forward biased with a 5V input source, VIN.   With a 100fA saturation
+*       current, Is,  the diode current, I(VMON) or Id,  and voltage, Vd,  are determined by the
+*       following equations:
+*               (1) Id=Is[exp(Vd/Vt) - 1]
+*               (2) Vin=Id*R + Vd = Is[EXP(Vd/Vt)-1]*R + Vd
+*               where,
+*               Vt=25.86mV, R=2K, Is=100fA, Vin=5V
+*
+*       The diode voltage can be calculated by finding the value of Vd that makes equation (2)
+*       true.  The diode current can be found by solving (1)  after Vd is found.
+*       Therefore,
+*               Vd=0.6158V  and Id=2.19mA
+*******************************************************************************
+* NOTE:  The simulation in xyce results are:
+*	 Vd = .616V and Id=2.19mA
+*        This difference is currently being addressed (01/01)
+************************************************************************* 
+VIN 1 0 DC 5V
+R1 1 2 2K
+D1 3 0 DMOD
+VMON 2 3 0
+.MODEL DMOD D (IS=100FA)
+.DC VIN 5 5 1
+.PRINT DC FORMAT=PROBE FILE=diode.cir.prn I(VMON) V(3)
+*
+.END

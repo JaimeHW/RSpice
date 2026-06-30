@@ -1,0 +1,3 @@
+Index    {V(1)}_mean     {V(1)}_meanPlus  {V(1)}_meanMinus    {V(1)}_stddev    {V(1)}_variance  {V(1)}_quad_pce_mean {V(1)}_quad_pce_meanPlus {V(1)}_quad_pce_meanMinus {V(1)}_quad_pce_stddev {V(1)}_quad_pce_variance
+0          2.551546e+00      2.917852e+00      2.185240e+00      3.663060e-01      1.341801e-01      2.525773e+00      2.786070e+00      2.265477e+00      2.602965e-01      6.775428e-02
+End of Xyce(TM) PCE Simulation

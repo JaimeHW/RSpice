@@ -1,0 +1,24 @@
+***************************************************************
+* Test use of TEMP in an expresion on C-device and R-device
+* instance lines.
+*
+* See SON Bug 1197 for more details.
+***************************************************************
+
+*COMP V(1a) offset=0.1
+
+.PARAM dtemp=10
+
+*.OPTIONS DEVICE TEMP=25
+.STEP TEMP 25 25 1
+.OPTIONS DEVICE TNOM=25
+
+V1  1  0  PULSE(0 1 0U 1U 1U 100m)
+R1  1  1a 30  TC=0.1 temp={temp+dtemp}
+R1a 1a 0  40
+C1  0  1a C={20u*(1+V(1))} TC1=0.1 temp={temp+dtemp}
+
+.TRAN 0.5u 150ms
+.PRINT TRAN V(1a) C1:C
+
+.END

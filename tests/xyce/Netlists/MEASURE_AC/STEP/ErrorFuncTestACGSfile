@@ -1,0 +1,142 @@
+ ***** Measure Functions *****
+
+ERR = 8.948675e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1 = 8.948675e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1MV0.1 = 7.966875e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1YMIN0.3 = 6.354945e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1IGNOR0.3 = 6.354945e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1YMAX0.7 = 9.665674e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1EXP = 8.105492e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2 = 4.098368e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2MV0.1 = 6.843590e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2YMIN0.3 = 4.615357e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2IGNORE0.3 = 4.615357e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2YMAX0.7 = 4.781180e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2EXP = 7.337105e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1VR = 1.966363e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1VI = 8.948682e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1VP = 9.838957e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1VDB = 1.338539e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2VDB = 1.228113e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1FT = 1.230809e+02
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+ERR1IM = 1.000000e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: ERR1FAIL failed. FROM value > highest frequency value
+ERR1FAIL = FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: ERR2FAIL failed. TO value < FROM value
+ERR2FAIL = FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+LASTMEASURE = 9.528905e-01 at freq = 1.000000e+06
+ ***** Measure Functions *****
+
+ERR = 2.233755e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1 = 2.233755e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1MV0.1 = 7.010895e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1YMIN0.3 = 9.057532e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1IGNOR0.3 = 9.057532e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1YMAX0.7 = 2.643014e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1EXP = 7.169062e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2 = 1.019356e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2MV0.1 = 5.412372e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2YMIN0.3 = 5.159516e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2IGNORE0.3 = 5.159516e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2YMAX0.7 = 1.426781e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2EXP = 5.912530e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1VR = 1.539946e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1VI = 2.233996e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1VP = 9.654747e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1VDB = 9.075184e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR2VDB = 3.939305e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+ERR1FT = 3.031828e+01
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+ERR1IM = 5.000000e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: ERR1FAIL failed. FROM value > highest frequency value
+ERR1FAIL = FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: ERR2FAIL failed. TO value < FROM value
+ERR2FAIL = FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+LASTMEASURE = 9.968487e-01 at freq = 1.000000e+06

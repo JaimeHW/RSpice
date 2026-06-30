@@ -1,0 +1,124 @@
+* Test DC mode support for the DC_CONT version of
+* FIND-AT, FIND-WHEN and WHEN measures. This bug covers:
+*
+*   1) The case of one variable (v1) on the .DC line, with
+*      one variable (global param P1) in the .STEP statement.
+*
+*   2) The DC values of the swept variable (v1) are
+*      monotonically decreasing.
+*
+* See SON Bugs 1274 and 1313 for more details.
+****************************************************************
+
+* For testing convenience send the output for the DC_CONT
+* measures to the <netlistName>.ms0 file.
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+.GLOBAL_PARAM P1=4
+
+V1  1 0 1
+R1  1 0 1
+
+B2 2 0 V={(V(1)-2.5)*(V(1)-2.5)*(V(1)-7.5)*(V(1)-7.5)/P1}
+R2 2 3 1
+R3 3 0 1
+
+* Reverse the step order on v1 (from the test in MEASURE_DC)
+* to make sure that both increasing and decreasing sequences of
+* values are tested.
+.DC v1 10 1 -1
+.STEP P1 4 6 2
+.print dc v(1) v(2) v(3) P1
+
+******************************************************
+* test CROSS qualifier and FIND-WHEN and WHEN
+* Non-continuous version should return first crossing.
+* Continuous version should return all crossings.
+.MEASURE DC whenCrossTest1 WHEN V(2)=5
+.MEASURE DC_CONT whenCrossContTest1 WHEN V(2)=5
+
+* Non-continuous version should return first crossing.
+* Continuous version should return all crossings, starting
+* with the first one.
+.MEASURE DC whenCrossTest2 WHEN V(2)=5 CROSS=1
+.MEASURE DC_CONT whenCrossContTest2 WHEN V(2)=5 CROSS=1
+
+* Non-continuous version should return second crossing.
+* Continuous version should return all crossings, starting
+* with the second one.
+.MEASURE DC whenCrossTest3 WHEN V(2)=5 CROSS=2
+.MEASURE DC_CONT whenCrossContTest3 WHEN V(2)=5 CROSS=2
+
+* These should both return the last crossing
+.MEASURE DC whenCrossTest4 WHEN V(2)=5 CROSS=LAST
+.MEASURE DC_CONT whenCrossContTest4 WHEN V(2)=5 CROSS=LAST
+
+******************************************************
+* FIND-AT measures
+* These should give the same answer
+.MEASURE DC atTest FIND V(2) AT=2
+.MEASURE DC_CONT atContTest FIND V(2) AT=2
+
+******************************************************
+* Repeat WHEN tests as FIND-WHEN measures
+.MEASURE DC findCrossTest1 FIND V(3) WHEN V(2)=5
+.MEASURE DC_CONT findCrossContTest1 FIND V(3) WHEN V(2)=5
+
+.MEASURE DC findCrossTest2 FIND V(3) WHEN V(2)=5 CROSS=1
+.MEASURE DC_CONT findCrossContTest2 FIND V(3) WHEN V(2)=5 CROSS=1
+
+.MEASURE DC findCrossTest3 FIND V(3) WHEN V(2)=5 CROSS=2
+.MEASURE DC_CONT findCrossContTest3 FIND V(3) WHEN V(2)=5 CROSS=2
+
+.MEASURE DC findCrossTest4 FIND V(3) WHEN V(2)=5 CROSS=LAST
+.MEASURE DC_CONT findCrossContTest4 FIND V(3) WHEN V(2)=5 CROSS=LAST
+
+*****************************************************
+* test RISE and FAll qualifiers for WHEN and FIND-WHEN
+.MEASURE DC_CONT whenRiseContTest1 WHEN V(2)=5 RISE=1
+.MEASURE DC_CONT whenRiseContTest2 WHEN V(2)=5 RISE=2
+.MEASURE DC_CONT whenRiseContTest3 WHEN V(2)=5 RISE=LAST
+
+.MEASURE DC_CONT whenFallContTest1 WHEN V(2)=5 FALL=1
+.MEASURE DC_CONT whenFallContTest2 WHEN V(2)=5 FALL=2
+.MEASURE DC_CONT whenFallContTest3 WHEN V(2)=5 FALL=LAST
+
+.MEASURE DC_CONT findRiseContTest1 FIND V(3) WHEN V(2)=6 RISE=1
+.MEASURE DC_CONT findRiseContTest2 FIND V(3) WHEN V(2)=6 RISE=2
+.MEASURE DC_CONT findRiseContTest3 FIND V(3) WHEN V(2)=6 RISE=LAST
+
+.MEASURE DC_CONT findFallContTest1 FIND V(3) WHEN V(2)=4 FALL=1
+.MEASURE DC_CONT findFallContTest2 FIND V(3) WHEN V(2)=4 FALL=2
+.MEASURE DC_CONT findFallContTest3 FIND V(3) WHEN V(2)=4 FALL=LAST
+
+*********************************************************
+* Test negative values
+.MEASURE DC_CONT whenCrossContNeg1 WHEN V(2)=5 CROSS=-1
+.MEASURE DC_CONT whenCrossContNeg2 WHEN V(2)=5 CROSS=-2
+.MEASURE DC_CONT whenCrossContNeg3 WHEN V(2)=5 CROSS=-3
+.MEASURE DC_CONT whenCrossContNeg4 WHEN V(2)=5 CROSS=-4
+.MEASURE DC_CONT whenCrossContNeg5 WHEN V(2)=5 CROSS=-5
+
+.MEASURE DC_CONT whenRiseContNeg1 WHEN V(2)=5 RISE=-1
+.MEASURE DC_CONT whenRiseContNeg2 WHEN V(2)=5 RISE=-2
+.MEASURE DC_CONT whenRiseContNeg3 WHEN V(2)=5 RISE=-3
+
+.MEASURE DC_CONT whenFallContNeg1 WHEN V(2)=5 FALL=-1
+.MEASURE DC_CONT whenFallContNeg2 WHEN V(2)=5 FALL=-2
+.MEASURE DC_CONT whenFallContNeg3 WHEN V(2)=5 FALL=-3
+
+*************************************************
+* test failed measures
+.MEASURE DC_CONT whenCrossContFail1 WHEN V(2)=100
+.MEASURE DC_CONT atContFail FIND V(2) at=20
+.MEASURE DC_CONT whenCrossContFail2 WHEN V(2)=5 CROSS=5
+.MEASURE DC_CONT whenRiseContFail WHEN V(2)=5 RISE=3
+.MEASURE DC_CONT whenFallContFail WHEN V(2)=5 FALL=3
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure dc lastMeasure min v(2)
+
+.END
+

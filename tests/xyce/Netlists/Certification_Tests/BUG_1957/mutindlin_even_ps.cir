@@ -1,0 +1,22 @@
+Test Circuit for 4 Mutually Coupled Inductors
+
+VS 1 0 SIN(0 169.7 60HZ)
+R1 1 2 1K
+Lp 2 0 1mH
+R2 3 0 1K
+L1 3 0 1mH
+R3 4 0 1K
+L2 4 0 1mH
+R4 5 0 1K
+L3 5 0 1mH
+K1 Lp L1 L2 L3 0.75
+.TRAN 100US 25MS
+
+
+*comp v(2) offset=0.2
+*comp v(3) offset=0.2
+*comp v(4) offset=0.2
+*comp v(5) offset=0.2
+.PRINT TRAN I(VS) V(2) V(3) V(4) V(5)
+.END
+

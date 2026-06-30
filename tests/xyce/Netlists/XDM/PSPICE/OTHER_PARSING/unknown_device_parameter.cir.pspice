@@ -1,0 +1,50 @@
+*********************************************************************************
+* This test re-uses the UUR DIODE clipper example from the Xyce Users' guide.  
+* However, it is really addressing example 1 of SRN Bug 2025 (handling of the 
+* PSpice DEV (deviation) parameter in PSpice Model Cards, and more generally 
+* of PSpice Device model parameters that are not supported in Xyce).
+* 
+*   1) The D1N3940_VER1 Diode model card uses uses BV = 600 DEV=1% 
+*      XDM will properly translate this model card by omitting DEV=1% 
+*      from the translated Xyce netlist.  An XDM warning message should
+*      be emitted when a valid PSpice model parameter is omitted from the translated
+*      Xyce model card, because that valid PSpice model parameter does not have a
+*      valid Xyce translation.
+*   
+*   2) The D1N3940_VER2 Diode model card uses (BV = 600 DEV=1%).  
+*      This syntax will be commented out by XDM during PSpice netlist parsing.  
+*      This is not the best XDM behavior. It would be better if the Xyce model 
+*      card was translated with just BV=600 in it, and a warning message about
+*      the omission of the DEV parameter was generated.  However, doing that would
+*      complicate the XDM parser.
+********************************************************************************
+
+*Analysis directives: 
+.TRAN  0 2ms 0
+.PROBE   V([N04173]) V([N03179]) V([N03334]) V([N04104])
+
+R_R1         N04173 N03179  1k TC=0,0
+R_R2         N03179 N04104  3.3k TC=0,0 
+R_R3         0 N03179  3.3K TC=0,0 
+C_C1         N03179 N03334  0.47u  TC=0,0 
+R_R4         0 N03334  5.6k TC=0,0 
+D_D1         N03179 N04104 D1N3940_VER1
+D_D2         0 N03179 D1N3940_VER1  
+*D_D2         0 N03179 D1N3940_VER2 
+V_V1         N04104 0 5Vdc
+V_V2         N04173 0  AC 1
++SIN 0 10 1KHz 0 0 0
+
+* This version of the D1N3940 Diode Model Card uses BV=600 DEV=1%. 
+* The DEV parameter is invalid in Xyce.  So, xdm should emit a warning
+* message saying that DEV parameter was not included in the translated
+* Xyce netlist.  That Xyce netlist should run though. 
+.MODEL D1N3940_VER1 D(BV=600 DEV=1% IS=4E-10 RS=.105 N=1.48 TT=8E-7 CJO=1.95E-11
++VJ=.4 M=.38 EG=1.36 XTI=-8 KF=0 AF=1 FC=.9 IBV=1E-4)
+
+* This version of the D1N3940 Diode Model Card uses (BV = 600 DEV=1%).  
+.MODEL D1N3940_VER2 D((BV=600 DEV=1%) IS=4E-10 RS=.105 N=1.48 TT=8E-7 CJO=1.95E-11
++VJ=.4 M=.38 EG=1.36 XTI=-8 KF=0 AF=1 FC=.9 IBV=1E-4)
+
+.END
+

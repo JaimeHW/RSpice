@@ -1,0 +1,29 @@
+test of coupled inductor parameters on the .PRINT line, with .EMBEDDEDSAMPLING
+V1 1 0 SIN(0 1 1KHz)
+R1 1 0 1
+R2 2 0 1
+
+* mutual inductor definition
+L1 1 0 1e-3
+L2 2 0 2mH
+K1 L1 L2 0.75
+
+.TRAN 0 1ms 
+.PRINT TRAN V(1) V(2) L1:L {L1:L} {10*L1:L}
+.options timeint reltol=1e-6 abstol=1e-6
+
+.PRINT ES V(1) V(2) L1:L {L1:L} {10*L1:L}
+
+* 10 normally distributed samples
+.EMBEDDEDSAMPLING 
++ param=L1:L
++ type=normal
++ means=1e-3
++ std_deviations=0.2e-3
+
+.options EMBEDDEDSAMPLES numsamples=10
++ outputs={L1:L},{10*L1:L} 
++ stdoutput=true
+
+.end
+

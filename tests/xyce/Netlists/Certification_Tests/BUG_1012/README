@@ -1,0 +1,24 @@
+Test Name: negtable
+Owner: Dave Shirley
+Test netlists: negtable.cir
+GS files: none
+Mode:  Serial
+Comparator:  xyce_verify.pl
+Version of Xyce: Release_3.1       # the first version where this bug was tested.
+ 
+Description:
+============
+Test for the correct use of negative values in a table.  The presence of negative
+values previously caused a false fatal diagnostic.
+ 
+Procedure:
+============
+  run_xyce -o ${OUT_DIR}/negtable.cir.prn negtable.cir > ${OUT_DIR}/negtable.cir.log
+  xyce_verify.pl negtable.cir negtable.cir.prn.gs ${OUT_DIR}negtable.cir.prn  ${OUT_DIR}/negtable.plt
+ 
+Verification:
+=============
+Passes if Xyce and xyce_verify.pl return a 0 exit code.  
+
+Notes:
+======

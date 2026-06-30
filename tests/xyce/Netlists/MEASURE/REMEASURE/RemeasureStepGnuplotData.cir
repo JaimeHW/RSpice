@@ -1,0 +1,25 @@
+* A test of re-measure of a FORMAT=GNUPLOT formatted .prn
+* output file when .STEP is used.  This tests -remeasure
+* for both .MEASURE and .FFT lines.
+*
+* See Issue 233 for more details.
+*************************************************************
+
+V1 1 0 PWL 0 0 0.5 1 1 0
+R1 1 2 1
+R2 2 0 1
+
+.STEP R1 1 2 1
+.TRAN 0 1
+
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.1
+.PRINT TRAN FORMAT=GNUPLOT R1:R V(1) V(2)
+
+.MEASURE TRAN MAXV2 MAX V(2)
+
+* FORMAT=UNORM ensures that the .FFT outputs for both
+* steps is different.
+.OPTIONS FFT FFT_ACCURATE=0
+.FFT V(2) NP=8 WINDOW=HANN FORMAT=UNORM
+
+.END

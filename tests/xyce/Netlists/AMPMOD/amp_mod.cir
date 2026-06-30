@@ -1,0 +1,42 @@
+Amplitude Modulation Circuit
+***********************************************************************
+* Tier No.: 2
+* Description:  Test of the polyinomial functionality for
+*       describing a nonlinear dependent voltage source.
+* Input:  Sinusoidal Voltage Source, VCAR & VMOD
+* Output: V(30)
+* Circuit Elements: B source, resistors
+* Analysis:
+*	By using a polynomial nonlinear dependent source as a voltage
+*	controlled voltage source, an AM generator, EAM, is created.  The
+*	modulation index can change as can the carrier frequency and the 
+*	modulation frequency.  	
+*	VCAR is the carrier sinusoid and VMOD is the modulation voltage,
+*	which is a sinusoid with a 1V DC offset.  Both VCAR and VMOD are
+*	used to control the output of EAM, across which the AM carrier
+*	will appear.  RCAR, RMOD and RAM are used as dummy resistors to 
+*	to satisfy the simulation requirement that each node must have 
+*	two elements connected to it.
+*	VCAR is a 10V peak, 10kHz, sinusiod and VMOD is a 1V DC in series 
+*	with a 1V peak, 2 kHz sinusoid that is delayed 200us from time 
+*	zero.  The BAM source multiplies VCAR by VMOD. BAM is given by:
+* 		BAM = 0 + 0*VCAR + 0*VMOD + 0*VCAR^2 + 1*VCAR*VMOD
+*	            = (1 + 1*sin(2*pi*2k*t))(10(sin(2*pi*10k*t)
+*	where, pi=3.14..., t=time
+*
+*	The expected output for BAM or V(30) is a unmodulated carrier 
+*	for the first 200us, at which time the modulation envelope of a
+*	2kHz sinusoid begins.  The carrier reacheds its maximum values at 
+*	325us and 825us; the minimum occurs at 575us when the carrier 
+*	amplitude drops to 0V.
+***********************************************************************
+VCAR 10 0 SIN(0 10 10K)
+RCAR 10 0 1
+VMOD 20 0 SIN(1 1 2K 200U)
+RMOD 20 0 1
+BAM  30 0 V ={POLY(2) V(10) V(20) 0 0 0 0 1}
+RAM  30 0 1
+.TRAN 10U 1M
+.PRINT TRAN {20.0 + V(30)}
+*COMP V(30) RELTOL=0.02 abstol=1e-6
+.END

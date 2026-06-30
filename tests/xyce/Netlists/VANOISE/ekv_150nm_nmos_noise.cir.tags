@@ -1,0 +1,4 @@
+serial, nightly, noise, parallel
+ekv
+adms
+required:nonfree

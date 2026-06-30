@@ -1,0 +1,30 @@
+Power test for MOSFET Level 1
+*
+VDS 4 0  5V
+VGS  1   0  pulse (0 1 1ns 1ns 1ns 1us 5us)
+VMOND 4 3 0V
+VMONS 0 2 0V
+VMONG 1 1a 0
+VMONB 0 6 0
+*  d g source substrate 
+M1 3 1a 2 6 NFET L=2.0U W=2.0U  
+.MODEL NFET NMOS 
++  LEVEL=1  UO=966.5  L=2.0U  W=2.0U  VTO=1.043
++  NFS=1.009E+11  TOX=1E-07  NSUB=1.379E+16  VMAX=4.096E+05
++  RSH=0  RS=0 	RD=0  IS =1E-14
++  XJ=5.378E-06	LD=0 DELTA=0  NSS=1E10
++  THETA =0.0582  ETA=0.095  KAPPA=2.93  CGDO=1UF  	
++  CGSO=1UF  CGBO=1UF  CBD=1UF CBS=1UF 
+
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-8
+.tran 1ns 22us
+
+* test that P(M1) and W(M1) are equal to the formula (Id*Vds + Ig*Vgs)
+* and also equal to the combined power dissipation of the two
+* source VDS and VGS.
+.PRINT TRAN PRECISION=10 
++ P(M1) W(M1) {ID(M1)*V(4) + IG(M1)*V(1)} {-1*(P(VDS)+P(VGS))}
++ ID(M1) IG(M1) IS(M1) IB(M1) I(VDS) I(VGS) V(4) V(1) 
+
+.END

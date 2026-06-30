@@ -1,0 +1,25 @@
+Test Name: BUG_561
+Owner: Robert Hoekstra
+Test netlists: none 
+GS files: none
+Mode:  Parallel on SGI
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+MPI Warnings/Errors were being produced when 'Xyce -v' was executed in parallel
+on the SGI.  This was due to Xyce not cleaning up (MPI_Finalize).
+ 
+Procedure:
+============
+Run parallel regression and certification tests on SGI.
+
+Verification:
+=============
+Passes if no MPI warnings/errors are produced.
+ 
+Notes:
+======
+
+

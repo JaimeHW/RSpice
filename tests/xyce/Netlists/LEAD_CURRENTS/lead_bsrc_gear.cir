@@ -1,0 +1,38 @@
+Lead current test for BSRC
+*
+VS   1  0  PWL(
++ 0S 0V  
++ 1S 1V 
++ 2S 4V  
++ 3S 9V  
++ 4S 16V   
++ 5S 25V  
++ 6S 36V  
++ 7S 49V  
++ 8S 0.64E2V 
++ 9S 0.81E2V 
++ 10S 1E2V 
++ 11S 121V)
+
+R1   0  1  1
+* SOURCE THAT TAKES THE SQUARE ROOT OF V1
+B2   2  0  V = {SQRT(V(1))}
+R2   0  2  1
+.TRAN 1S 12S
+
+*COMP {I(VS)-I(R1)} abstol=1e-6 zerotol=1.0e-7
+*COMP {I(B2)-I(R2)} abstol=1e-6 zerotol=1.0e-7
+
+.PRINT TRAN {I(VS)-I(R1)} {I(B2)-I(R2)}
+
+.measure tran maxmag1   max {abs(I(VS)-I(R1))} failvalue=1e-6
+.measure tran totalrms1 rms {I(VS)-I(R1)} failvalue=1e-6  
+.measure tran maxmag2   max {abs(I(B2)-I(R2))} failvalue=1e-6
+.measure tran totalrms2 rms {I(B2)-I(R2)} failvalue=1e-6 
+
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+
+
+.END
+

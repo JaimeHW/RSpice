@@ -1,0 +1,111 @@
+Nand-based gmin stepping test.
+* This is a 2-input NAND.  If gmin stepping is not used, and the defaults
+* are used instead, this circuit fails.  This is the same nand circuit
+* that is used for the bjt_expord test.
+
+** Analysis setup **
+*
+.tran 20ns 1us
+
+.options nonlin nlstrategy=0 searchmethod=0 
++ maxstep=20 continuation=1 reltol=1.0e-2 abstol=1.0e-6 rhstol=1.0e-4
+
+.options loca
++ stepper=natural
++ predictor=constant
++ stepcontrol=adaptive
++ conparam=GSTEPPING
++ initialvalue=4
++ minvalue=-4
++ maxvalue=4
++ initialstepsize=-2
++ minstepsize=1.0e-6
++ maxstepsize=1.0e+12
++ aggressiveness=0.01
++ maxsteps=400
+* For subtle reasons, this specification of maxnliters is necessary. (see bug 574)
++ maxnliters=20
+
+
+VDD 	$G_VDDNODE	0	5V
+VIN1          1 0  5V PULSE (5V 0V 3us 25ns 250ns 4us 8.275us)
+VIN2          2 0  0V PULSE (0V 5V 2us 25ns 250ns 4us 8.275us)
+
+XN1  1  2  OUT1  NAND
+XN2  1   OUT1  OUT2  NAND
+XN3  1   OUT2  OUT3  NAND
+XN4  1   OUT3  OUT4  NAND
+XN5  1   OUT4  OUT5  NAND
+XN6  1   OUT5  OUT6  NAND
+XN7  1   OUT6  OUT7  NAND
+XN8  1   OUT7  OUT8  NAND
+XN9  1   OUT8  OUT9  NAND
+XN10  1   OUT9  OUT10  NAND
+XN11  1   OUT10  OUT11  NAND
+XN12  1   OUT11  OUT12  NAND
+XN13  1   OUT12  OUT13  NAND
+XN14  1   OUT13  OUT14  NAND
+XN15  1   OUT14  OUT15  NAND
+XN16  1   OUT15  OUT16  NAND
+XN17  1   OUT16  OUT17  NAND
+XN18  1   OUT17  OUT18  NAND
+XN19  1   OUT18  OUT19  NAND
+XN20  1   OUT19  OUT20  NAND
+XN21  1   OUT20  OUT21  NAND
+XN22  1   OUT21  OUT22  NAND
+XN23  1   OUT22  OUT23  NAND
+XN24  1   OUT23  OUT24  NAND
+XN25  1   OUT24  OUT25  NAND
+XN26  1   OUT25  OUT26  NAND
+XN27  1   OUT26  OUT27  NAND
+XN28  1   OUT27  OUT28  NAND
+XN29  1   OUT28  OUT29  NAND
+XN30  1   OUT29  OUT30  NAND
+XN31  1   OUT30  OUT31  NAND
+XN32  1   OUT31  OUT32  NAND
+XN33  1   OUT32  OUT33  NAND
+XN34  1   OUT33  OUT34  NAND
+XN35  1   OUT34  OUT35  NAND
+XN36  1   OUT35  OUT36  NAND
+XN37  1   OUT36  OUT37  NAND
+XN38  1   OUT37  OUT38  NAND
+XN39  1   OUT38  OUT39  NAND
+XN40  1   OUT39  OUT40  NAND
+XN41  1   OUT40  OUT41  NAND
+XN42  1   OUT41  OUT42  NAND
+XN43  1   OUT42  OUT43  NAND
+XN44  1   OUT43  OUT44  NAND
+XN45  1   OUT44  OUT45  NAND
+XN46  1   OUT45  OUT46  NAND
+XN47  1   OUT46  OUT47  NAND
+XN48  1   OUT47  OUT48  NAND
+XN49  1   OUT48  OUT49  NAND
+XN50  1   OUT49  OUT50  NAND
+.print tran V(OUT1) v(OUT2) V(OUT49) v(OUT50) V(1) V(2)
+
+.subckt nand   INP1  INP2  VOUT 
+RB1	$G_VDDNODE	VB1	4K
+QIN1	VB2	VB1	INP1	NPN
+QIN2	VB2	VB1	INP2	NPN
+RC2	$G_VDDNODE	VC2	1.6K
+Q3	VC2	VB2	VB3	NPN
+RC3	$G_VDDNODE	VOUT	4K
+Q4	VOUT	VB3	0	NPN
+RB3	VB3	0	1K
+.ENDS
+
+**************************
+.MODEL NPN NPN (           IS     = 3.97589E-14
++ BF     = 195.3412        NF     = 1.0040078       VAF    = 53.081
++ IKF    = 0.976           ISE    = 1.60241E-14     NE     = 1.4791931
++ BR     = 1.1107942       NR     = 0.9928261       VAR    = 11.3571702
++ IKR    = 2.4993953       ISC    = 1.88505E-12     NC     = 1.1838278
++ RB     = 56.5826472      IRB    = 1.50459E-4      RBM    = 5.2592283
++ RE     = 0.0402974       RC     = 0.4208          XTI    = 5.8315
++ EG     = 1.11            XTB    = 1.6486          TF     = 3.3E-10
++ XTF    = 6               ITF    = 0.32            VTF    = 0.574
++ PTF    = 25.832          TR     = 3.75E-7         CJE    = 2.56E-11
++ VJE    = 0.682256        MJE    = 0.3358856       FC     = 0.83
++ CJC    = 1.40625E-11     VJC    = 0.5417393       MJC    = 0.4547893       )
+**************************
+.END

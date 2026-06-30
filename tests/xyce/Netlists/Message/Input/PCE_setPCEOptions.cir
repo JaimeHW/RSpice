@@ -1,0 +1,33 @@
+* Test error messages, for a stokhos build, when the ORDER
+* parameter on the .OPTIONS PCES line has an invalid value.
+*
+* See SON Bug 1224 for more details.
+****************************************************************
+
+.global_param R1value={1000.0}
+.global_param R2value={1000.0}
+.global_param Vvalue={5.0}
+
+R2 1 0 {R2value}
+R1 1 2 {R1value}
+Von 2 0 {Vvalue}
+
+.op
+
+.print dc v(1)
+.PRINT PCE
+
+.PCE
++ param=R1value
++ type=normal
++ means=1000.0
++ std_deviations=200.0
+
+.options PCES
++ order=-1
+
+.options nonlin nox=0
+
+.end
+
+

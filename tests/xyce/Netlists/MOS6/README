@@ -1,0 +1,29 @@
+
+README for level=6 MOSFET tests.
+
+6/22/2008
+
+These tests are associated with bug # 1527, the purpose of which was to implement 
+the SPICE level=6 MOSFET in Xyce.  Almost nobody actually uses the level=6 MOSFET
+and as a result I had to invent test cases for it, and I couldn't find any when
+I googled the web.  The level=1,2,3 are easy to find test cases for, but the level=6
+is apparently unpopular.
+
+As a result, this device isn't a very high priority.
+
+In testing this device, I created 3 tests, which are copies of existing tests
+from the level=1.  nmos6_dc.cir, pmos6_dc.cir and invert_mos6.cir.  The two
+DC tests (as of this writing) were problematic, because they require the
+Newton solver to go at least one extra iteration before declaring convergence
+than the solver convergence criteria would indicate.  In other words, after
+one Newton step, all the norms are tiny, but the answer is still incorrect.
+After 2 steps, the answer is correct.
+
+SPICE forces its newton solver to take a minimum of 2 steps, apparently.
+
+So, for the level=6 MOSFET, I've added a flag to the isConverged function
+that forces the code to take at least two Newton steps for any circuit
+that includes a level=6 MOSFET.  The fact that I had to do this suggests
+to me that the level=6 is a bad device model, which is probably not 
+surprising, given that nobody uses it.
+

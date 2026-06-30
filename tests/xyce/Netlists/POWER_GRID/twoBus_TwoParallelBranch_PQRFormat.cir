@@ -1,0 +1,27 @@
+* Unit test of Parallel Power Grid Branch Devices, in PQ Rectangular format
+
+* Vary the voltage at bus 1 to check if the answers match theory,
+* given on pg.250-254 of Kundar. Ammeter is defined so that power
+* flows from bus 1 into the branch between buses 1 and 2
+V1R bus1R ammBus1P 1V
+V1I bus1I ammBus1Q 0V
+Vamm1P 0 ammBus1P 0V
+Vamm1Q 0 ammBus1Q 0V
+
+* Have bus 2 be the slack bus. Ammeter is defined so that power 
+* flows from branch between buses 1 and 2 into bus 2, so as to match
+* equations in Kundar.
+V2R bus2R ammBus2P 1V
+V2I bus2I ammBus2Q 0V
+Vamm2P ammBus2P 0 0V
+Vamm2Q ammBus2Q 0 0V
+
+* two parallel branches should give same answer as one branch with X=2
+YPowerGridBranch pg12a bus1R bus2R bus1I bus2I AT=pqr r=0.0 x=4.0 b=0.0
+YPowerGridBranch pg12b bus1R bus2R bus1I bus2I AT=PQR R=0.0 X=4.0 B=0.0
+
+.DC V1I -0.5 1.0 0.5 V1R -0.5 1.0 0.5
+.PRINT DC width=10 precision=6 V(bus1R) V(bus1I)
++ I(Vamm1P) I(Vamm1Q) I(Vamm2P) I(Vamm2Q)
+ 
+.end

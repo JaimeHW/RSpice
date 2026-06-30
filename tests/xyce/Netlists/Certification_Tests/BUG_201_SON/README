@@ -1,0 +1,54 @@
+BUG 201 (SON) (joseki)
+Owner: Eric Keiter
+1/5/2011.
+
+=======
+Bug Description:
+
+The IC= capability in inductors did not work correctly.  Possibly it never did,
+as there was no test case in the entire test suite that tested it.
+
+IC= for most devices that have it applies a voltage drop.  This includes the
+capacitor and most MOSFETs.   In the case of the capacitor (which calculates 
+its current as i=dq/dt), this makes sense to do this. While 
+the operating point is steady state, applying
+a fixed voltage sets an initial charge, q.  However, dq/dt can still
+be zero, as long as the time history of q is set up correctly.  So, for the
+capacitor (and most devices which include capacitors) this is fine.
+
+Applying a voltage drop accross an inductor, however, is not correct for
+steady state, as the inductor is the inverse of the capacitor: v=di/dt.  So,
+setting a nonzero V implies that the device is not in steady state.
+
+Mysteriously, spice3f5 appears to attempt to apply an initial voltage
+in the inductor.  This is probably a mistake.  The correct thing to do
+is apply an initial current, which is what PSpice does, according to the manual.
+
+Unfortunately, applying IC= to the inductor in Xyce resulted in zero current,
+no matter what value IC was set to.  So, it was busted.  It is fixed now.
+
+Test 1: bug201a.cir
+====================
+
+This netlist is a very simple netlist consisting of 2 resistors, a current
+source and an inductor.  The inductor has an IC=2 amps applied to it.  This
+is a "NOOP" netlist, meaning that the operating point is skipped.  The 
+current source is set to 10 amps at the operating point, but as the
+DCOP is skipped this value is not applied at t=0.  The test correctly
+passes if the time=0 (NOOP Point) value for the inductor current is 2.
+
+Test 2: bug201b.cir
+====================
+
+This netlist is the same netlist as the one used in bug201a.cir, except
+that the DCOP calculation is not skipped.  (ie the NOOP keyword has been
+removed from the tran line).  As before, the inductor has an IC=2 amps 
+applied to it.  As this is NOT a "NOOP" netlist, the operating point 
+is computed.  Also, as before, the current source is set to 10 amps 
+at the operating point, but unlike before, this value is applied during
+the DCOP calculation.  The test correctly passes if the time=0 
+(DCOP Point) value for the inductor current is 2.  This is a slightly 
+(though not much) harder test to pass, as the DCOP 
+calculation has to be performed consistently with the IC value.
+
+

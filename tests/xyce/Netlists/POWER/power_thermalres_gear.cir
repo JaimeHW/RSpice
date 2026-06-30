@@ -1,0 +1,32 @@
+Power test for thermal resistor
+* This uses the same .model settings as the copper.linear file
+* in THERMAL_RESISTOR regression test subdirectory
+
+V1   0 1 sin(0 1 4 0 0 ) ; PULSE(0 1 10U 1U 1U 100m)
+R1   1 2 copper L=0.1 a=1e-5
+R2   0 2 copper L=0.1 a=1e-5
+
+.options timeint method=gear 
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.5U 400ms
+.PRINT TRAN v(1) v(2) I(r1) r1:R {I(r1)*(v(1)-v(2))} p(r1) w(r1)
++ I(r2) {I(r2)*(v(0)-v(2))} p(r2) w(r2)
+
+* Thermal / resistivity properties for copper
+* resistivity is in units of ohm*m
+.model copper r ( level=2
++ resistivity=
++ {table(temp+273.15,
++      0,         0.5e-9,
++      100,        3e-9,
++      1000,       6.6e-8
++  )} 
+
+* heat capacity is in units or J/K/m**3
+* density (8.92e+3 kg/m**3) times table in J/K/kg
++ heatcapacity={8.92e+3*table(temp+273.15,
++      0,         1,
++      1000,      1500 
++  )} )
+
+.END

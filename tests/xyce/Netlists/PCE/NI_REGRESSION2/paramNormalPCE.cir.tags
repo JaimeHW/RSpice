@@ -1,0 +1,7 @@
+serial, nightly,  parallel, analytic, expression, issue200
+sampling
+pce
+regression_pce
+required:stokhos
+valgrind
+issue84

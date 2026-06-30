@@ -1,0 +1,30 @@
+Test Name: BUG_612
+Owner: Eric Rankin 
+Test netlists: rs_example.cir
+GS files: none
+Mode:  Serial and Parallel
+Comparator:   none
+Version of Xyce: Release_2.1  
+ 
+Description:
+============
+bug 612:  Parsing netlist that redefines subcircuit causes freeze
+
+Subcircuit names should be unique at a given level.  Xyce did not recognize
+duplicates prior the fix.  Because of the way the distributed parser moves
+back & forth through netlists, the potential for getting stuck in an 
+infinite was there.
+ 
+Procedure:
+============
+  runxyce rs_example.cir
+    or
+  xmpirun -np 2 rs_example.cir 
+
+Verification:
+=============
+Passes if Xyce aborts with an error message about invalid subcircuit named
+"DAVE".
+ 
+Notes:
+======

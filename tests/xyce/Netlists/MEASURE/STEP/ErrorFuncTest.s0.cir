@@ -1,0 +1,21 @@
+*******************************************************************************
+* This netlist is equivalent to Step 0 for the ErrorFuncTest.cir netlist.
+* It has R2=1.0
+*
+*******************************************************************************
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(2)
+
+V1 1 0 PWL 0 0 1 5
+R1 1 2 1
+R2 2 0 1
+
+.MEASURE TRAN ERR ERR V(1) V(2)
+.MEASURE TRAN ERR1 ERR1 V(1) V(2)
+.MEASURE TRAN ERR1RO ERR1 V(2) V(1)
+
+.MEASURE TRAN ERR2 ERR2 V(1) V(2)
+.MEASURE TRAN ERR2RO ERR2 V(2) V(1)
+
+.END

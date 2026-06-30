@@ -1,0 +1,5 @@
+* This netlist is not actually run.  See the other 
+* DeviceBlock_extractMIDeviceDataX.cir netlists for 
+* more details on the error conditions being tested
+* by each netlist.
+

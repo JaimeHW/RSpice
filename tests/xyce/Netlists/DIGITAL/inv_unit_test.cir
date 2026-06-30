@@ -1,0 +1,51 @@
+Unit Test for INV / NOT Digital Device
+
+*COMP v(out_1) reltol=0.02
+*COMP v(out_2) reltol=0.02
+*COMP v(out_3) reltol=0.02
+
+* Analysis Commands
+.options timeint reltol=1.0e-3
+.tran 10ns 1us
+
+* Sources
+V1 in_1 0  PULSE ({V_LO} {V_HI} 100ns 20ns 20ns 180ns 400ns)
+
+* Output
+.print tran PRECISION=10 WIDTH=19 v(in_1) v(out_1) v(out_2)
++ v(out_3)
+
+* Set digital default parameters:
+.param R1HI=5 R1LO=200 R0HI=200 R0LO=5 RIN=1000 R1=100
+.param SW=5.e-9  CAPOUT=1.e-12  CAPIN=1.e-12
+.param V_LO=0 V_REF=0 V_HI=3
+
+* Digital power node
+V_dpn dig_pn 0 3V
+
+UINV1 INV dig_pn 0 in_1 out_1 DMOD
+UNOT2 NOT dig_pn 0 in_1 out_2 DMOD
+YNOT NOT3 0 dig_pn in_1 out_3 DMOD1
+
+R1 out_1 0 100K
+R2 out_2 0 100K
+R3 out_3 0 100K
+
+.model DMOD DIG ( CLO=CAPOUT  CHI=CAPOUT
++ S0RLO=R0LO  S0RHI=R0HI  S0TSW=SW
++ S0VLO=-1  S0VHI=1.8
++ S1RLO=R1LO  S1RHI=R1HI  S1TSW=SW
++ S1VLO=1  S1VHI=3
++ RLOAD=RIN   CLOAD=CAPIN
++ DELAY=20ns )
+
+.model DMOD1 DIG ( CLO=CAPOUT  CHI=CAPOUT
++ S0RLO=R0LO  S0RHI=R0HI  S0TSW=SW
++ S0VLO=-1  S0VHI=1.8
++ S1RLO=R1LO  S1RHI=R1HI  S1TSW=SW
++ S1VLO=1  S1VHI=3
++ RLOAD=RIN   CLOAD=CAPIN
++ VREF=V_REF
++ DELAY=20ns )
+
+.end

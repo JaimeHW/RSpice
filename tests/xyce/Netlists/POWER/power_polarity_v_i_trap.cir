@@ -1,0 +1,59 @@
+Polarity test for V-Source and I-Souce
+* Test all combinations of polarities and signs. This 
+* test was added because there was a dependence in
+* some early (not released) version of the code for V and I.
+* In source definitons, NP = "normal polarity"
+* with a positive value for the source amplitude.
+* RN = "reversed polarity" with a negative value
+* for the source amplitude.  Etc.
+
+VNP    1 0 SIN(0 2 10 0)
+RVNP   1 2 10
+CVNP   2 3 1u
+LVNP   3 0 1m
+
+VNN    4 0 SIN(0 -2 10 0)
+RVNN   4 5 10
+CVNN   5 6 1u
+LVNN   6 0 1m
+
+VRP    0 7 SIN(0 2 10 0)
+RVRP   7 8 10
+CVRP   8 9 1u
+LVRP   9 0 1m
+
+VRN    0 10 SIN(0 -2 10 0)
+RVRN   10 11 10
+CVRN   11 12 1u
+LVRN   12 0 1m
+
+INP    13 0 SIN(0 2 10 0)
+RINP   13 0 1
+CINP   13 0 1u
+LINP   13 0 1m
+
+INN    14 0 SIN(0 -2 10 0)
+RINN   14 0 1
+CINN   14 0 1u
+LINN   14 0 1m
+
+IRP    0 15 SIN(0 2 10 0)
+RIRP   15 0 1
+CIRP   15 0 1u
+LIRP   15 0 1m
+
+IRN    0 16 SIN(0 -2 10 0)
+RIRN   16 0 1
+CIRN   16 0 1u
+LIRN   16 0 1m
+
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0 50ms
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.5ms
+.PRINT TRAN p(VNP) W(VNP) P(RVNP) P(CVNP) P(LVNP)
++ p(VNN) W(VNN) p(VRP) W(VRP) p(VRN) W(VRN)
++ p(INP) W(INP) P(RINP) P(CINP) P(LINP)
++ p(INN) W(INN) p(IRP) W(IRP) p(IRN) W(IRN)
+
+.END

@@ -1,0 +1,13 @@
+********************************************************
+* Test error message when S() parameter OP is requested
+* on the .PRINT line and the analysis mode is not AC.
+*****************************************************
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+.DC V1 1 5 1
+.PRINT DC V(1) S(1,1)
+
+.END

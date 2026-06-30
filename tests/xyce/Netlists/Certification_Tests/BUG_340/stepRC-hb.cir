@@ -1,0 +1,15 @@
+simple RC
+.hb 1e5
+.print hb v(1) v(2) i(v1)
+
+.options device debuglevel=1
+.options hbint numfreq=5 saveicdata=1
+.options linsol-hb prec_type=block_jacobi
+*.step r1 1k 1k 1k
+.step r1 1k 5k 1k
+
+v1 1 0 sin 0 1V 1e5 0 0
+r1 1 2 1k
+c1 2 0 2u
+
+.end

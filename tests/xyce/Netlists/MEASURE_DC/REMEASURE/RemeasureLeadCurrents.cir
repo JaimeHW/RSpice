@@ -1,0 +1,24 @@
+**************************************************************
+* Test remeasure for I().  For the DC analysis case, it is
+* sufficient to just test this for V and R devices in the 
+* top-level circuit.
+*
+* This netlist also tests the "work-around" for -remeasure of
+* power calculations, via the PR1B measure.
+*
+* See SON Bug 697 for more details.
+*************************************************************
+
+V1  1 0 1
+R1a 1 0 1
+R1b 1 0 2
+
+.DC V1 1 1 5
+.PRINT DC V(1) I(V1) I(R1b) 
+
+.MEASURE DC MAXIV1 MAX I(V1)
+.MEASURE DC MAXIR1b MAX I(R1b)
+.MEASURE DC PR1B MAX {V(1)*I(R1b)}
+
+.END
+

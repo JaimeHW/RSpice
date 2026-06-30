@@ -1,0 +1,37 @@
+Test circuit for P-Channel JFET 
+***********************************
+*
+*Drain curves
+Vds 1 0 0
+Vgs 2 0 0
+.DC Vds  -15 0 1 Vgs 0 1.5 0.5
+*
+Vidmon 1 1a 0
+Vigmon 2 2a 0
+Vismon 0 3 0
+*
+.PRINT DC V(1) V(2) I(Vidmon)
+*
+Jtest 1a 2a 3 SA2108 TEMP= 40
+*
+.MODEL SA2108 PJF ( TEMPMODEL=QUADRATIC TNOM = -55
++ LEVEL=2 BETA = 0.00365 VTO = -1.9360 PB = 0.304
++ LAMBDA = 0.00286 DELTA = 0.2540 THETA = 0.0
++ IS = 1.393E-10 RD = 0.0 RS = 1e-3
++ FC = 0.5 AF = 1.0 KF = 0.05 )
+
+.MODEL SA2108 PJF ( TEMPMODEL=QUADRATIC TNOM = 27
++ LEVEL=2 BETA= 0.003130 VTO = -1.9966 PB = 1.046
++ LAMBDA = 0.00401 DELTA = 0.578; THETA = 0;
++ IS = 1.393E-10  RD = 0.0 RS = 1e-3
++ FC = 0.5 AF = 1.0 KF = 0.05 )
+*
+.MODEL SA2108 PJF ( TEMPMODEL=QUADRATIC TNOM = 90
++ LEVEL=2 BETA = 0.002770 VTO = -2.0350 PB = 1.507
++ LAMBDA = 0.00528 DELTA = 0.630 THETA = 0.0
++ IS = 1.393E-10 RD = 0.0 RS = 5.66
++ FC = 0.5 AF = 1.0 KF = 0.05 )
+
+*
+.END
+

@@ -1,0 +1,83 @@
+Test Name: BUG_846
+Owner: Eric Keiter
+Test netlists:
+GS files:
+Mode:  N/A
+Comparator:  
+Version of Xyce: Release_3.0.1
+
+Description:
+============
+null newtonVecPtr_ pointer error when aztecOO fails.
+
+This is a blocker for bug 822.  
+
+This bug only pertains to simulations that use the aztecOO linear solver. 
+aztecOO is the default solver in parallel, but not serial.  However, if
+this solver is manually specified in serial, the same error appears.
+
+Essentially, if the aztec solver completely fails (ie makes no progress
+and exits with an error), the nonlinear solver ultimately would have a
+NULL pointer error.  The status tests used by Xyce would attempt to 
+calculate the 2-norm of dx, which required calling the 
+N_NLS_LOCA_Group::getNewton function.  This function call was broken, 
+because the newton ptr was never set up for the case of a LOCA solve.
+
+
+================================================================================
+
+Test Procedure:
+
+Run the circuit ring51_loca.cir.  This is almost the same circuit as is being
+used for the first test of bug 822, except that the solver options are 
+different, and the transient is of different length.  In particular, o
+the linear solver is explicitly  set to aztecOO.  To run the circuit, simply
+do this:
+
+Xyce ring51_loca.cir >& tmp & <return>
+
+Test Verification:
+
+This test should be considered "passed" if the circuit runs all the way to end
+without exiting with an error.
+
+This circuit should be run in both serial and parallel on every platform.
+
+Test Notes:
+
+This test is only meaningful if aztecOO occasionally fails.  I have checked 
+that this is the case with this circuit on linux and OSX.  This can be
+demonstrated by looking at  the verbose nonlinear solver output.  If the
+norm of dx goes to exactly zero, then aztecOO is occasionally failing.
+
+Here is an example of this behavior, which I observed when running 
+ring51_loca.cir on serial-OSX:
+
+Start of Continuation Step 2 : Parameter: vdd = 1.470e-01 from 5.000e-02
+f = 9.705e-02  step = 0.000e+00  dx = 0.000e+00
+f = 1.328e-05  step = 1.000e+00  dx = 8.012e-01
+f = 8.269e+05  step = 1.000e+00  dx = 4.196e+07
+f = 2.265e+08  step = 1.000e+00  dx = 4.772e+10
+f = 3.397e+07  step = 1.000e+00  dx = 4.837e+10
+f = 1.048e+12  step = 1.000e+00  dx = 9.088e+15
+f = 6.294e+15  step = 1.000e+00  dx = 5.513e+25
+f = 2.441e+15  step = 1.000e+00  dx = 3.065e+19
+f = 2.433e+16  step = 1.000e+00  dx = 3.489e+18
+f = 5.323e+18  step = 1.000e+00  dx = 0.000e+00   <---AztecOO starts failing!
+f = 1.026e+22  step = 1.000e+00  dx = 0.000e+00   <---AztecOO failing!
+f = 1.949e+25  step = 1.000e+00  dx = 0.000e+00   <---AztecOO failing!
+f = 4.482e+28  step = 1.000e+00  dx = 0.000e+00   <---AztecOO failing!
+f = 1.084e+32  step = 1.000e+00  dx = 0.000e+00   <---AztecOO failing!
+
+Before this bug was fixed, the code would exit with a memory error (core dump)
+at some point after aztecOO started to fail.
+
+
+Comment - this is the exact circuit in which I first observed this bug.  
+Normally, I would try to come up with a simpler circuit for testing,
+but in this case, the bug test really depends on aztecOO failing, and I
+wasn't confident I could easily cause that to happen in a smaller, more
+simple circuit.   So, for this case, I left the test circuit as-is.  Also,
+the test needed to be large enough to run meaningfully in both serial and
+parallel.
+

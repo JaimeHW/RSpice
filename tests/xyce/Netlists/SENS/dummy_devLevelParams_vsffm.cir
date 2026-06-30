@@ -1,0 +1,34 @@
+* Transient sensitivity example, SFFM source, 
+* "dummy" file to provide variable list to xyce_verify
+.param cap=0.1u
+.param res=1K
+
+c1 1 0 cap
+c2 2 0 cap
+R1 1 3 res
+R2 1 2 res
+
+Vin 3 0 SFFM(0 1 1MEG 2 250K)
+
+* Transient commands
+.tran 0 10us uic
+.options timeint reltol=1e-6 abstol=1e-6
+
+*comp v(2) offset=1e-5
+*comp v(2)_v0 offset=1e-4
+*comp v(2)_va  offset=1e-5
+*comp v(2)_fc offset=5e-10
+*comp v(2)_mdi offset=1e-4
+*comp v(2)_fs offset=2e-8
+
+.print tran 
++ V(2)
++ V(2)_VIN:V0
++ V(2)_VIN:VA
++ V(2)_VIN:FC
++ V(2)_VIN:MDI
++ V(2)_VIN:FS
+
+
+.end
+

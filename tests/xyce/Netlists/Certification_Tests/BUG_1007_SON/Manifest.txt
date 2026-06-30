@@ -1,0 +1,11 @@
+ic_cap0.cir
+ic_cap1.cir
+ic_cap2.cir
+ic_cap_step.cir
+ic_cap_step.cir.sh
+vbicNand0.cir
+vbicNand1.cir
+vbicNandStep.cir
+vbicNandStep.cir.tags
+vbicNandStep.cir.sh
+tags

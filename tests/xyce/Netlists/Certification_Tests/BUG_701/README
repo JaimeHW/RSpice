@@ -1,0 +1,30 @@
+Test Name: BUG_701
+Owner: Eric Rankin 
+Test netlists: dup-toplevel.cir
+               dup-subcircuit.cir
+GS files:  none
+Mode:  Serial and Parallel
+Comparator:  none
+Version of Xyce: Release_3.0 
+ 
+Description:
+============
+Parser erroneously ignores duplicate device names within a (sub)circuit.
+ 
+Procedure:
+============
+  runxyce dup-toplevel.cir
+  runxyce dup-subcircuit.cir
+    or
+  xmpirun -np 2 dup-toplevel.cir
+  xmpirun -np 2 dup-subcircuit.cir
+
+Verification:
+=============
+Passes if Xyce exits with a fatal error indicating more than one device with
+the same name appears within a (sub)circuit.
+ 
+Notes:
+======
+Devices names may be reused in different subcircuits.  Testing to ensure that 
+this still works is covered by existing regression tests.

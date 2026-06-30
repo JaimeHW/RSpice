@@ -1,0 +1,26 @@
+* a test of a potential subcircuit bug
+
+va 0 1 1
+rb 1 2 1
+cd 2 0 1e-6
+re 2 3 1
+rf 3 4 1
+rg 4 0 1
+
+xsub1 0 1 2 testsub
+
+.subckt testsub a b c
+r1 a b 1
+r2 b c 1
+*
+* NOTE this next line is WRONG
+* it should be ".ends" but using ".end" here
+* sends Xyce into an infinite loop. This
+* circuit is to demonstrate the problem
+*
+.end
+
+.tran 0 1
+.print tran v(1)
+.end
+

@@ -1,0 +1,9 @@
+$dummylib
+
+.LIB TWO 
+.MODEL DXX D (LEVEL=1 IS=1e-18 N=1)
+.ENDL TWO 
+
+.LIB ONE
+.MODEL DXX D (LEVEL=1 IS=1e-15 N=1.5)
+.ENDL ONE

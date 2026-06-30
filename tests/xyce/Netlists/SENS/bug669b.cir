@@ -1,0 +1,16 @@
+Test for default device params being used by .sens, which is the subject of bug 669
+
+Vtest 1 0 5.0
+Rtest 1 0 1.0
+
+.DC Vtest 1 1 1
+
+* this is the non-default param way to specify.  
+* It is the "gold" standard circuit for this test.
+.sens objfunc={I(Vtest)} param=Rtest:R
+
+.print sens v(1)
+.options SENSITIVITY direct=0 adjoint=1  
+
+.options device debuglevel=-100
+.options timeint debuglevel=-100

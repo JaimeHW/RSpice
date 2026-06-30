@@ -1,0 +1,81 @@
+Bug 587 test Diode Circuit Netlist
+********************************************************************************
+* Tier No.:  1
+* Directory/Circuit Name: DIODE/DIODE.cir
+* Description:  Simple diode circuit to test the validity of the diode model.
+* Input:  VIN
+* Output: V(3), I(VMON)
+* Analysis:
+*       A diode is forward biased with a 5V input source, VIN.   With a 100fA saturation
+*       current, Is,  the diode current, I(VMON) or Id,  and voltage, Vd,  are determined by the
+*       following equations:
+*               (1) Id=Is[exp(Vd/Vt) - 1]
+*               (2) Vin=Id*R + Vd = Is[EXP(Vd/Vt)-1]*R + Vd
+*               where,
+*               Vt=25.86mV, R=2K, Is=100fA, Vin=5V
+*
+*       The diode voltage can be calculated by finding the value of Vd that makes equation (2)
+*       true.  The diode current can be found by solving (1)  after Vd is found.
+*       Therefore,
+*               Vd=0.6158V  and Id=2.19mA
+*******************************************************************************
+* NOTE:  The simulation in xyce results are:
+*	 Vd = .616V and Id=2.19mA
+*        This difference is currently being addressed (01/01)
+************************************************************************* 
+.param secondary=10
+.param primary={13-secondary}
+VIN 1 0 DC 5V
+
+* netlist default
+* R1 1 2 2K
+
+* netlist indirect expression
+* OK: works as expected
+* R1 1 2 {2 * 1000}
+
+* bug report issue
+* The broken code would separate value into two fields 2.0e+ and {primary}.
+* Some devices would flag an error if more than the expected number of fields
+* appeared.  All default 2.0e to be 2.0.  The {primary} is resolved normally.
+* Here is the error as it appears in the bug report.  The later cases were
+* just for debugging.
+R1 1 2 2.0e+{primary}
+*R1 1 2 2.0e-{primary}
+*R1 1 2 2.0e{primary}
+*R1 1 2 2.0e{3}
+
+* fully wrapped
+* BROKEN line is not broken up but the exponent is dropped
+*R1 1 2 {2.0e+primary}
+
+* double wrapped
+* BROKEN segfault or no resolution
+*R1 1 2 {2.0e+{primary}}
+
+* no wrap
+* BROKEN: yields very incorrect results
+*R1 1 2 2.0e+primary
+
+* no sign
+* BROKEN; separate param
+*R1 1 2 2e{primary}
+
+* unusual spacing
+* OK: error message due to sign appearing as a param
+*R1 1 2 2e +{primary}
+*R1 1 2 2e+ {primary}
+
+
+* workaround
+*.param workaround=2.0e+primary
+* BROKEN:  nonsensical expansion
+*R1 1 2 {workaround}
+
+D1 3 0 DMOD
+VMON 2 3 0
+.MODEL DMOD D (IS=100FA)
+.DC VIN 5 5 1
+.PRINT DC I(VMON) V(3)
+*
+.END

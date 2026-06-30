@@ -1,0 +1,54 @@
+test for issue 340
+*
+* This circuit tests a robustness fix in the computeBreakpoint 
+* function of the new expression library.  This function performs a Newton 
+* loop to find breakpoints associated with conditional operators.  So,
+* any expression that is time-dependent and also depends on a ternary 
+* is a candidate for this function.
+*
+* This circuit does something a bit strange, and in real life I don't expect 
+* a Xyce user would do this.  It has a time-dependent PWL table, which is used 
+* as one of the arguments for a ternary expression.  But all the ternary does 
+* ensure that the Rvalue expression never goes negative.  This is something 
+* that one could simply do by setting up the table correctly, so normally 
+* one wouldn't need to use a ternary.
+*
+* Also, most combinations of ternaries and tables worked fine, but this 
+* one was a bit pathological.  The ternary compares the table to zero and then 
+* uses zero as the last argument. If this zero value is changed to a nonzero 
+* number, then there was no problem, and Xyce could run this circuit without 
+* the issue340 fix.  The problem was only exposed when
+*
+* 1. the comparision was against zero 
+* 2. the table itself had long subdomains of exactly zero.
+*
+*  These 2 conditions cause both "f" and "dfdt" to be zero in the 
+* computeBreakpoint function.   Before the issue340 fix, the 
+* algorithm would attempt to find a breakpoint if one or both 
+* of "f" and "dfdt" was zero, and this resulted in nonsense 
+* breakpoints. 
+*
+.OPTIONS TIMEINT METHOD=gear
+Vc 2 0 DC 15
+VPh 2 20 0
+
+.param nominal=0.5
+.param table_val={ table("table.txt") }
+.param Rvalue= { (table_val >0.0)?(table_val):(0.0) }
+
+R1 20 0 {nominal+Rvalue}
+
+.TRAN 1E-9 150E-6 0 
+.PRINT tran {Vc/I(Vc)} {nominal+Rvalue}
+
+* Exit if the time integrator gets stuck. If 
+* Xyce is working correctly, this circuit 
+* should not require very many time steps.
+* 
+* Prior to the fix for issue 340, this circuit 
+* could get stuck in an infinite loop in the 
+* time integrator.
+.options timeint exitstep=200
+
+.END
+

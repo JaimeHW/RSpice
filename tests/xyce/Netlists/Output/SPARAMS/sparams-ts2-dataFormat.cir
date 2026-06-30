@@ -1,0 +1,84 @@
+****************************************************
+* Test allowed data formats (RI, MA and DB) in
+* Touchstone2 output using a 2-Port S-Parameter
+* analysis.  Also test the PRECISION and
+* FILE/FILENAME qualifiers.  This test uses lower
+* case for ri, ma and db.
+*
+* This netlist also tests that:
+*
+*  1) FORMAT=STD defaults to FORMAT=TOUCHSTONE2
+*
+*  2) The parameters DELIMITER=<val>, FREQDIGIT=<val>
+*     and SPARDIGIT=<val>are all ignored
+*
+*  3) the .PRINT AC line should produce output
+*
+****************************************************
+
+* RC ladder circuit
+* Note that all ports (P devices) must use a common
+* Reference Node, which is 0 here.
+P1 1  0  port=1  z0=50
+P2 12 0  port=2  z0=50
+
+C1 2 0 1e-2
+Rgs 1 2 0.02
+
+.subckt RCBlock IN OUT GND
+R1 IN OUT 20
+C1 IN OUT 1p
+Cg1 OUT GND 1p
+.ends
+
+X1 2 3 0 RCBlock
+X2 3 4 0 RCBlock
+X3 4 5 0 RCBlock
+X4 5 6 0 RCBlock
+X5 6 7 0 RCBlock
+X6 7 8 0 RCBlock
+X7 8 9 0 RCBlock
+X8 9 10 0 RCBlock
+X9 10 11 0 RCBlock
+X10 11 12 0 RCBlock
+
+.AC DEC 10 10  1e5
+
+* The first line requests FORMAT=STD.  That should default to TOUCHSTONE2 format.
+* That first line also tests that the DELIMITER, SPARDIGIT and FREQDIGIT parameters
+* are all ignored on a .LIN line.
+.LIN FORMAT=STD FILE=sparams-ts2-dataFormat.cir.ri.s2p dataformat=ri PRECISION=6
++ DELIMITER=COMMA SPARDIGIT=8 FREQDIGIT=8
+.LIN FORMAT=TOUCHSTONE2 FILENAME=sparams-ts2-dataFormat.cir.ma.s2p DATAFORMAT=ma PRECISION=6
+.LIN FORMAT=TOUCHSTONE2 FILE=sparams-ts2-dataFormat.cir.db.s2p DATAFORMAT=db PRECISION=6
+
+* also test output of RF parameters via .PRINT AC line
+.PRINT AC S(1,1) SR(1,1) SI(1,1) SM(1,1) SP(1,1) SDB(1,1)
++ S(1,2) SR(1,2) SI(1,2) SM(1,2) SP(1,2) SDB(1,2)
++ S(2,1) SR(2,1) SI(2,1) SM(2,1) SP(2,1) SDB(2,1)
++ S(2,2) SR(2,2) SI(2,2) SM(2,2) SP(2,2) SDB(2,2)
++ Y(1,1) YR(1,1) YI(1,1) YM(1,1) YP(1,1) YDB(1,1)
++ Y(1,2) YR(1,2) YI(1,2) YM(1,2) YP(1,2) YDB(1,2)
++ Y(2,1) YR(2,1) YI(2,1) YM(2,1) YP(2,1) YDB(2,1)
++ Y(2,2) YR(2,2) YI(2,2) YM(2,2) YP(2,2) YDB(2,2)
++ Z(1,1) ZR(1,1) ZI(1,1) ZM(1,1) ZP(1,1) ZDB(1,1)
++ Z(1,2) ZR(1,2) ZI(1,2) ZM(1,2) ZP(1,2) ZDB(1,2)
++ Z(2,1) ZR(2,1) ZI(2,1) ZM(2,1) ZP(2,1) ZDB(2,1)
++ Z(2,2) ZR(2,2) ZI(2,2) ZM(2,2) ZP(2,2) ZDB(2,2)
+
+* also test their use in expressions
+.PRINT AC FILE=sparams-ts2-dataFormat.cir.FD.exp.prn
++ {S(1,1)} {SR(1,1)} {SI(1,1)} {SM(1,1)} {SP(1,1)} {SDB(1,1)}
++ {s(1,2)} {sr(1,2)} {si(1,2)} {sm(1,2)} {sp(1,2)} {sdb(1,2)}
++ {S(2,1)} {SR(2,1)} {SI(2,1)} {SM(2,1)} {SP(2,1)} {SDB(2,1)}
++ {S(2,2)} {SR(2,2)} {SI(2,2)} {SM(2,2)} {SP(2,2)} {SDB(2,2)}
++ {Y(1,1)} {YR(1,1)} {YI(1,1)} {YM(1,1)} {YP(1,1)} {YDB(1,1)}
++ {Y(1,2)} {YR(1,2)} {YI(1,2)} {YM(1,2)} {YP(1,2)} {YDB(1,2)}
++ {y(2,1)} {yr(2,1)} {yi(2,1)} {ym(2,1)} {yp(2,1)} {ydb(2,1)}
++ {Y(2,2)} {YR(2,2)} {YI(2,2)} {YM(2,2)} {YP(2,2)} {YDB(2,2)}
++ {Z(1,1)} {ZR(1,1)} {ZI(1,1)} {ZM(1,1)} {ZP(1,1)} {ZDB(1,1)}
++ {Z(1,2)} {ZR(1,2)} {ZI(1,2)} {ZM(1,2)} {ZP(1,2)} {ZDB(1,2)}
++ {Z(2,1)} {ZR(2,1)} {ZI(2,1)} {ZM(2,1)} {ZP(2,1)} {ZDB(2,1)}
++ {z(2,2)} {zr(2,2)} {zi(2,2)} {zm(2,2)} {zp(2,2)} {zdb(2,2)}
+
+.END

@@ -1,0 +1,12 @@
+Resistor Circuit Netlist - top level
+
+VIN1 1 0 DC 10V
+VIN2 2 0 DC 10V
+
+YEXT y1 1 2 externcode=xyce netlist=resInner.cir
+
+.DC VIN1 11 17 1
+.PRINT DC V(1) I(VIN1) 
+.options nonlin maxstep=10 nox=1
+*
+.END

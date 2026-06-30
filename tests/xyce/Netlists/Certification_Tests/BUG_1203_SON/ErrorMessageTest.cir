@@ -1,0 +1,20 @@
+****************************************************
+* Test error messages from invalid uses of the TEMP
+* instance parameter as an expresson-based parameter.
+*
+* See SON Bug 1203 for more details
+****************************************************
+
+V1 1 0 1
+R1 1 0 1  TC=0.1 temp={V(2)}
+
+V2 2 0 1
+R2 2 0 1 TC=0.1 temp={I(R1)}
+
+V3 3 0 1
+R3 3 0 TC=0.1 temp={I(V1)}
+
+.DC V2 1 5 1
+.PRINT DC I(R1) R1:TEMP I(R2) R2:TEMP I(R3) R3:R
+
+.END

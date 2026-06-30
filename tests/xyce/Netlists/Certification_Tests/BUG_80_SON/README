@@ -1,0 +1,7 @@
+This test case verifies that the code can catch badly formatted
+piecewise linear functions before devices that depend on them (I and V sources)
+are created.  
+
+The netlist Bad_PWL_Source.cir has an error that Xyce should catch and emit an 
+error.  The error string is searched for by the controlling script Bad_PWL_Source.cir.sh.
+

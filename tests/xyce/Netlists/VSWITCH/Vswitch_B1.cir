@@ -1,0 +1,12 @@
+Bug 245 test
+
+v1 1 0 5v
+s1 1 2 3 0 SW ON
+R1 2 0 100
+
+V2 3 0 1v
+R2 3 0 100
+.model SW VSWITCH( RON=1u ROFF=1MEG VON=1v VOFF=0v)
+
+.tran 1ms 1
+.print tran v(1) v(2) v(3)

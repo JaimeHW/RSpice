@@ -1,0 +1,56 @@
+* Sensitivity of collector current to amplifier component
+* This circuit was found  on page 298 of the book, 
+* "PSPICE and MATLAB for Electronics: An Integrated Approach" by John Okyere Attia.  
+*
+* The relevant pages are excerpted in google books, and includes a printout of the 
+* PSPICE output.
+*
+
+.global_param VCCvalue=10V
+
+
+VCC 4 0 DC {VCCvalue}
+RB1 4 1 40k
+RB2 1 0 10k
+RE 2 0 1K
+RC 5 3 6K
+VM 4 5 DC 0; monitor collector current
+Q1 3 1 2 Q2N2222
+.model Q2N2222 NPN(BF=100 IS=3.295e-14 VA=200)
+.op
+
+* Note: to run in spice3 or ngspice, comment out all the lines below, and
+* replace with:
+*.SENS I(VM)
+
+.options nonlin debuglevel=-100
+.options device debuglevel=-100
+.options linsol type=aztecoo
+
+.DC VCCvalue 1 10 0.2
+.print dc v(4)
+.print sens v(4)
+
+* commenting out the params that evaluate to zero:  eg, fc, nc, ne, nkf, nr
+* commenting out (for now) BR because the FD evaluation gives a really NOISY result, almost impossible to compare.  
+
+.SENS param=RB1:R,RB2:R,RE:R,RC:R,VM:DCV0,
++ Q2N2222:bf,
+*+ Q2N2222:br,
+*+ Q2N2222:eg,
+*+ Q2N2222:fc,
++ Q2N2222:is,
+*+ Q2N2222:nc,
+*+ Q2N2222:ne,
++ Q2N2222:nf,
+*+ Q2N2222:nkf,
+*+ Q2N2222:nr,
++ Q2N2222:tnom,
++ Q2N2222:vaf
+*+ Q2N2222:xti
++objfunc={I(VM)} 
+
+.op 
+
+.options SENSITIVITY direct=0 adjoint=1  difference=forward  diagnosticfile=0 STDOUTPUT=0 debuglevel=-100 REUSEFACTORS=0
+

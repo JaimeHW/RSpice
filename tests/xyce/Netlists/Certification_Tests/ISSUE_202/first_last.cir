@@ -1,0 +1,14 @@
+
+.param foobar=1000
+.param foobar=100
+.param foobar=1e7
+.param foobar=25
+.param foobar=0.001
+.param foobar=1
+
+R1 1 0 {foobar}
+V1 1 0 1
+
+.dc v1 1 1 1
+.print DC V(1) I(V1) R1:R
+.end

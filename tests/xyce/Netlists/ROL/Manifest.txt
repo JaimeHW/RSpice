@@ -1,0 +1,14 @@
+ampSens.cir
+amplifier.cir
+dc-rol.cir
+diode_direct.cir
+diode_forTimurROL.cir
+diode_forTimurROL.cir.sh
+diode_forTimurROL.param
+diode_forTimurROL.cir.tags
+input.xml
+measurementsDC.dat
+parameters.txt
+tags
+uncertain_parameters.txt
+vbic.cir

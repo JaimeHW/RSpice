@@ -1,0 +1,12 @@
+Basic diode circuit testing simple parameter use in model statement
+
+.param IS=100FA
+.param RS=2K
+
+D1 1 0 DMOD1
+V1 1 0 DC 5V
+
+.model DMOD1 D (IS=IS RS={RS})
+.dc V1 0 5 1
+.print DC v(1) I(v1)
+.end

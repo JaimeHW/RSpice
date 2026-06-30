@@ -1,0 +1,69 @@
+Unit Test for .OPTIONS DIGINITSTATE for JKFF and TFF Digital Devices
+***************************************************************
+* For .OPTIONS DEVICE DIGINITSTATE=1, test that:
+*    1) Q="high" and Qbar="low"
+*    2) IC1=FALSE or IC2=TRUE override the DIGINITSTATE for Q
+*       or Qbar, respectively 
+***************************************************************
+.OPTIONS DEVICE DIGINITSTATE=1
+
+* Analysis Commands
+.DC V5 0 3 3 V4 0 3 3 V3 0 3 3 V2 0 3 3 V1 0 3 3
+
+* Sources, used to toggle inputs at gates
+V1 in_pre 0 3V
+V2 in_clr 0 3V
+V3 in_clk 0 3V
+V4 in_TJ 0 3V
+V5 in_K 0 3V
+
+* Output
+.print DC v(in_pre) v(in_clr) v(in_clk) v(in_TJ) v(in_K) 
++ v(out1_q) v(out1_qbar) v(out2_q) v(out2_qbar) v(out3_q) v(out3_qbar) 
++ v(out4_q) v(out4_qbar) v(out5_q) v(out5_qbar) v(out6_q) v(out6_qbar) 
+
+* Devices
+
+* JKFF
+UJKFF1 JKFF dig_pn 0 in_pre in_clr in_clk in_TJ in_K out1_q out1_qbar DMOD
+Rq1 out1_q 0 100K
+Rqbar1 out1_qbar 0 100K
+
+UJKFF2 JKFF dig_pn 0 in_pre in_clr in_clk in_TJ in_K out2_q out2_qbar DMOD IC1=FALSE
+Rq2 out2_q 0 100K
+Rqbar2 out2_qbar 0 100K
+
+UJKFF3 JKFF dig_pn 0 in_pre in_clr in_clk in_TJ in_K out3_q out3_qbar DMOD IC2=TRUE
+Rq3 out3_q 0 100K
+Rqbar3 out3_qbar 0 100K
+
+* TFF
+UTFF1 TFF dig_pn 0 in_TJ in_clk out4_q out4_qbar DMOD
+Rq4 out4_q 0 100K
+Rqbar4 out4_qbar 0 100K
+
+UTFF2 TFF dig_pn 0 in_TJ in_clk out5_q out5_qbar DMOD IC1=FALSE
+Rq5 out5_q 0 100K
+Rqbar5 out5_qbar 0 100K
+
+UTFF3 TFF dig_pn 0 in_TJ in_clk out6_q out6_qbar DMOD IC2=TRUE
+Rq6 out6_q 0 100K
+Rqbar6 out6_qbar 0 100K
+
+* Set digital default parameters:
+.param R1HI=5 R1LO=200 R0HI=200 R0LO=5 RIN=1000 R1=100
+.param SW=5.e-9  CAPOUT=1.e-12  CAPIN=1.e-12
+.param V_LO=0 V_HI=3
+
+* Digital power and reference node
+VPN dig_pn 0 3V 
+
+.model DMOD DIG ( CLO=CAPOUT  CHI=CAPOUT
++ S0RLO=R0LO  S0RHI=R0HI  S0TSW=SW
++ S0VLO=-1  S0VHI=1.8
++ S1RLO=R1LO  S1RHI=R1HI  S1TSW=SW
++ S1VLO=1  S1VHI=3
++ RLOAD=RIN   CLOAD=CAPIN 
++ DELAY=20ns )
+
+.end

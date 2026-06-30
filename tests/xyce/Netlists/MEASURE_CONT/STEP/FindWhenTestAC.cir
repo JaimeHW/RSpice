@@ -1,0 +1,121 @@
+* Test AC mode support for the AC_CONT version of
+* FIND-AT, FIND-WHEN and WHEN measures.
+*
+* See SON Bugs 1274 and 1313 for more details
+*****************************************************
+
+* For testing convenience send the output for the AC_CONT
+* measures to the <netlistName>.ma0 file.
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+* Used to adjust reference frequency from 1Hz to 1KHz
+.PARAM scaleFactor=1e3
+
+V1 a 0 DC 0V AC 1
+
+* 7th order Chebychev LPF with 2dB of passband ripple.
+* This is not a realistic passband ripple level, but is
+* useful for this test.
+RS a b 1
+C1 b 0 {2.865/scaleFactor}
+L2 b c {0.912/scaleFactor}
+C3 c 0 {3.8774/scaleFactor}
+L4 c d {0.9537/scaleFactor}
+C5 d 0 {3.8774/scaleFactor}
+L6 d e {0.912/scaleFactor}
+C7 e 0 {2.8650/scaleFactor}
+
+* The magnitude at DC is RL/(RL + RS)
+RL e 0 1.0
+
+.print AC vm(a) vm(b) vm(c) vm(d) vm(e)
+.ac dec 20 1 1000
+.STEP RL 1 1.5 0.5
+
+* The non-continuous version should return the first crossing.
+* The continuous version should return all crossings.
+.MEASURE AC whenCrossTest1 WHEN vm(e)=0.45
+.MEASURE AC_CONT whenCrossContTest1 WHEN vm(e)=0.45
+
+* Non-continuous version should return first crossing.
+* Continuous version should return all crossings, starting
+* with the first one.
+.MEASURE AC whenCrossTest2 WHEN VM(e)=0.45 CROSS=1
+.MEASURE AC_CONT whenCrossContTest2 WHEN VM(e)=0.45 CROSS=1
+
+* Non-continuous version should return second crossing.
+* Continuous version should return all crossings, starting
+* with the second one.
+.MEASURE AC whenCrossTest3 WHEN VM(e)=0.45 CROSS=2
+.MEASURE AC_CONT whenCrossContTest3 WHEN VM(e)=0.45 CROSS=2
+
+* These should both return the last crossing
+.MEASURE AC whenCrossTest4 WHEN VM(e)=0.45 CROSS=LAST
+.MEASURE AC_CONT whenCrossContTest4 WHEN VM(e)=0.45 CROSS=LAST
+
+* FIND-AT measures
+* These should give the same answer
+.MEASURE AC atTest FIND VM(e) AT=20
+.MEASURE AC_CONT atContTest FIND VM(e) AT=20
+
+******************************************************
+* Repeat WHEN tests as FIND-WHEN measures
+.MEASURE AC findCrossTest1 FIND VM(d) WHEN VM(e)=0.45
+.MEASURE AC_CONT findCrossContTest1 FIND VM(d) WHEN VM(e)=0.45
+
+.MEASURE AC findCrossTest2 FIND VM(d) WHEN VM(e)=0.45 CROSS=1
+.MEASURE AC_CONT findCrossContTest2 FIND VM(d) WHEN VM(e)=0.45 CROSS=1
+
+.MEASURE AC findCrossTest3 FIND VM(d) WHEN VM(e)=0.45 CROSS=2
+.MEASURE AC_CONT findCrossContTest3 FIND VM(d) WHEN VM(e)=0.45 CROSS=2
+
+.MEASURE AC findCrossTest4 FIND VM(d) WHEN VM(e)=0.45 CROSS=LAST
+.MEASURE AC_CONT findCrossContTest4 FIND VM(d) WHEN VM(e)=0.45 CROSS=LAST
+
+*****************************************************
+* test RISE and FAll qualifiers for WHEN and FIND-WHEN
+.MEASURE AC_CONT whenRiseContTest1 WHEN VM(e)=0.45 RISE=1
+.MEASURE AC_CONT whenRiseContTest2 WHEN VM(e)=0.45 RISE=2
+.MEASURE AC_CONT whenRiseContTest3 WHEN VM(e)=0.45 RISE=LAST
+
+.MEASURE AC_CONT whenFallContTest1 WHEN VM(e)=0.45 FALL=1
+.MEASURE AC_CONT whenFallContTest2 WHEN VM(e)=0.45 FALL=2
+.MEASURE AC_CONT whenFallContTest3 WHEN VM(e)=0.45 FALL=LAST
+
+.MEASURE AC_CONT findRiseContTest1 FIND VM(b) WHEN VM(e)=0.45 RISE=1
+.MEASURE AC_CONT findRiseContTest2 FIND VM(b) WHEN VM(e)=0.45 RISE=2
+.MEASURE AC_CONT findRiseContTest3 FIND VM(b) WHEN VM(e)=0.45 RISE=LAST
+
+.MEASURE AC_CONT findFallContTest1 FIND VM(b) WHEN VM(e)=0.45 FALL=1
+.MEASURE AC_CONT findFallContTest2 FIND VM(b) WHEN VM(e)=0.45 FALL=2
+.MEASURE AC_CONT findFallContTest3 FIND VM(b) WHEN VM(e)=0.45 FALL=LAST
+
+*********************************************************
+* Test negative values
+.MEASURE AC_CONT whenCrossContNeg1 WHEN VM(e)=0.45 CROSS=-1
+.MEASURE AC_CONT whenCrossContNeg2 WHEN VM(e)=0.45 CROSS=-2
+.MEASURE AC_CONT whenCrossContNeg3 WHEN VM(e)=0.45 CROSS=-3
+.MEASURE AC_CONT whenCrossContNeg6 WHEN VM(e)=0.45 CROSS=-6
+
+.MEASURE AC_CONT whenRiseContNeg1 WHEN VM(e)=0.45 RISE=-1
+.MEASURE AC_CONT whenRiseContNeg2 WHEN VM(e)=0.45 RISE=-2
+.MEASURE AC_CONT whenRiseContNeg3 WHEN VM(e)=0.45 RISE=-3
+
+.MEASURE AC_CONT whenFallContNeg1 WHEN VM(e)=0.45 FALL=-1
+.MEASURE AC_CONT whenFallContNeg2 WHEN VM(e)=0.45 FALL=-2
+.MEASURE AC_CONT whenFallContNeg4 WHEN VM(e)=0.45 FALL=-4
+
+*************************************************
+* test failed measures
+.MEASURE AC_CONT whenCrossContFail1 WHEN VM(e)=1
+.MEASURE AC_CONT atContFail FIND VM(e) at=2000
+.MEASURE AC_CONT whenCrossContFail2 WHEN VM(e)=0.45 CROSS=6
+.MEASURE AC_CONT whenRiseContFail WHEN VM(e)=0.45 RISE=4
+.MEASURE AC_CONT whenFallContFail WHEN VM(e)=0.45 FALL=4
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure ac lastMeasure max VM(e)
+
+.END

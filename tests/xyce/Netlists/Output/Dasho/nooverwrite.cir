@@ -1,0 +1,16 @@
+******************************************************************
+* For testing -o (after the changes for Issue 222), the key point
+* is that a poorly chosen -o filename should not lead to the
+* netlist file being overwritten by the .PRINT statement.
+******************************************************************
+
+V1 1 0 PWL 0 0 1 1
+R1 1 2 1
+R2 2 0 1
+
+.TRAN 0 1
+.PRINT TRAN FORMAT=CSV V(1)
+.PRINT TRAN FILE=nooverwriteFoo V(2)
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.2
+
+.END

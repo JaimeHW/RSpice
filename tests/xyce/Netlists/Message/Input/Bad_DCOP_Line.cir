@@ -1,0 +1,21 @@
+Test a bad DCOP line
+**************************************************************
+* Test that a bad .DCOP line generates a useful error message
+* and a graceful exit.  The issue is that file=bleem.op
+* is not a valid qualifier for .DCOP 
+*
+* See SON Bug 684
+*
+*
+**************************************************************
+
+.DC V1 5 5 1
+V1 1 0 5V
+R1 1 0 1
+C1 1 0 1u
+
+.TRAN 0 1ms
+.PRINT TRAN V(1)
+.DCOP file=bleem.op
+
+.end

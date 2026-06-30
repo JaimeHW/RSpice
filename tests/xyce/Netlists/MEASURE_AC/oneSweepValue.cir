@@ -1,0 +1,32 @@
+* Test .MEASURE AC behavior for the pathological case
+* of only one sweep point.
+*
+* See gitlab-ex issue 291 for more details.
+******************************************************
+
+* trivial high-pass filter
+
+R1 b 0 2
+C1 a b 1m
+V1 a 0 DC 0V AC 1
+
+.print AC vm(a) vr(b) vi(b) vm(b) vp(b) vdb(b) im(v1)
+.ac dec 5 1 1
+
+.MEASURE AC AVG AVG vi(b)
+
+.MEASURE AC DERIVAT DERIV vi(b) AT=1
+.MEASURE AC DERIVATFT DERIV vi(b) AT=1  FROM=1 TO=1
+.MEASURE AC DERIVWHEN DERIV vi(b) WHEN vm(a)=1.0  
+.MEASURE AC DERIVWHENFT DERIV vi(b) WHEN vm(a)=1.0  FROM=1 TO=1
+
+.MEASURE AC FINDAT FIND vi(b) AT=1
+.MEASURE AC FINDATFT FIND vi(b) AT=1  FROM=1 TO=1
+
+* These measures will fail since the default CROSS value is 1 in Xyce
+.MEASURE AC FINDWHEN FIND vi(b) WHEN vm(a)=1.0
+.MEASURE AC FINDWHENFT FIND vi(b) when vm(a)=1.0  FROM=1 TO=1
+
+.MEASURE AC RMS RMS vi(b)
+
+.end

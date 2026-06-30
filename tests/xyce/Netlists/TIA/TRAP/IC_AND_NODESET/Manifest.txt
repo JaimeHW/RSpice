@@ -1,0 +1,15 @@
+ic_cap2.cir
+ic_cap2.cir.prn.gs.pl
+ic_cap2.cir.sh
+ic_cap2.cir.tags
+pierce.cir
+pierce.cir.tags
+pierce1.cir
+pierce3.cir
+pierce3.cir.sh
+pierce_noop.cir
+pierce_noop.cir.tags
+tags
+exclude
+pierce2.cir
+pierce_noop.cir.sh

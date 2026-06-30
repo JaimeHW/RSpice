@@ -1,0 +1,25 @@
+*
+* This case should not overwrite the netlist file.  
+* The Xyce invocation is:
+*
+*   Xyce -r tran-nooverwrite.cir -a tran-nooverwrite.cir 
+*
+* then Xyce will:
+*
+*   a) make the ASCII-formatted raw file tran-nooverwrite.cir.raw. 
+*      This is desired behavior since we don't want to 
+*      overwrite the netlist!
+*
+*   b) not make the file tran-nooverwrite.cir.prn 
+*
+********************************************************
+
+V1 1 0 PWL 0 0 1 1
+R1 1 2 1
+R2 2 0 1
+
+.options output initial_interval=0.2
+.PRINT TRAN R1:R R2:R V(1) V(2)
+.TRAN 0 1 
+
+.end

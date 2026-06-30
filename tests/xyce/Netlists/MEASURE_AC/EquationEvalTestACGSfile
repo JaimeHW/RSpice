@@ -1,0 +1,59 @@
+ ***** Measure Functions ***** 
+
+EQNVB = 1.993707e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVMB = 1.996849e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVRB = 1.993707e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVIB = 1.079077e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVPB = 5.549865e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVDBB = 9.725847e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PARAMVB = 1.993707e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PARAMVMB = 1.996849e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PARAMVRB = 1.993707e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PARAMVIB = 1.079077e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PARAMVPB = 5.549865e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PARAMVDBB = 9.725847e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVMBFROMTO = 1.782479e+00
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+EQNIMV1 = 1.498424e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNFREQ = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNHERTZ = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: EQNFAIL1 failed. FROM value > highest frequency value
+EQNFAIL1 = FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: EQNFAIL2 failed. TO value < FROM value
+EQNFAIL2 = FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+

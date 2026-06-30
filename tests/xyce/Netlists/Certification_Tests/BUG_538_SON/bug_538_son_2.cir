@@ -1,0 +1,19 @@
+Test of multiple print lines
+* This tests that multiple .print TRAN lines to the default file are the
+* same as a single .print TRAN line with all arguments aggregated.
+* It further tests that a second pair of print lines to a different file
+* also aggregate the output list.
+* both outputs should be compared to the output of the associated _baseline
+* netlist.
+
+R1 1 0 10
+V1 1 0 sin (0 10 10MEG 0 0)
+
+.print TRAN v(1)
+.print TRAN I(v1)
+.print TRAN file=bug538_2_df I(v1)
+.print TRAN file=bug538_2_df v(1)
+
+.tran 1ns 10ns
+
+.end

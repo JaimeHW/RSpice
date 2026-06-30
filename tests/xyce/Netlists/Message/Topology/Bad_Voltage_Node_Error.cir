@@ -1,0 +1,43 @@
+* The G_ABMI1 device refers to a voltage node that does not exist (V_V_lfwd)
+* CSD SUBCKT
+.SUBCKT CSD PIN1 PIN2 CASE
+X_U1 PIN2 CASE CSD_pro
+R_Rs PIN1 CASE 10U
+.ENDS
+.SUBCKT CSD_pro A K
+V_V_I A N00040 0Vdc
+V_V_Ifwd IN2 K 0Vdc
+E_E1 VREV 0 VALUE {IF(V(A,K)>0, 0, V(A,K))}
+E_E3 I_REV0 0 VALUE {1.4857e-08*exp(0.0089931*(-V(Vrev)))}
+E_E4 I_REV 0 VALUE {V(I_rev0)*V(Vr_small)-(-I(V_V_Irev))}
+E_E6 IN K VALUE {IF(V(A,K)>0, V(A,K), 0)}
+V_V_Irev VREV1 VREV 0Vdc
+G_ABMI1 N00040 K VALUE {I(V_V_lfwd)-V(I_rev)}
+E_E2 VR_SMALL 0 TABLE {V(Vrev)} = (-0.1,1) (0,0)
+D_D3 IN IN2 DCSD
+R_R1 0 VR_SMALL 10MEG
+D_D4 VREV1 0 DCSD
+R_R2 0 I_REV0 10MEG
+R_R3 0 I_REV 10MEG
+.MODEL DCSD D
++ IS=10.000E-21 N=.84507 RS=.37671 IKF=12.100
++ CJO=111.88E-12 M=.39264 VJ=.54581
++ BV=1000 IBV=20.000E-6
++ ISR=0 NR=1 EG=3.0 TT=0
++ LEVEL=2
+.ENDS
+
+*Voltage Sources
+V1 1 0 DC 1V
+
+*Device
+XCSD 1 0 CSD_pro 
+
+*Analysis
+*.STEP TEMP LIST -55 25 85 125
+.DC V1 0 1 10m
+.print dc 
+*+{TEMP}
++V(1)
++I(V1)
+*+{V(1)/I(V1)}

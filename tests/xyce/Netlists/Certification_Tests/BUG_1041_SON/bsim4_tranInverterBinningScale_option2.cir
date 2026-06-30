@@ -1,0 +1,65 @@
+Inverter example circuit, binning version
+* This test also tests the use of "option scale".  
+* It also ensures that "scale" works even when agauss is used. (see issue #239)   
+* Before fixing issue #239, the presence of agauss would cause the model to be 
+* set up more than once, and would incorrectly cause scale to applied more than once.
+*
+* Adapted from the ngspice test suite.
+* Eric Keiter, 10/5/2018
+*
+* model binning
+.model nch.1 nmos ( version=4.7 level=54 lmin=0.1u lmax=20u wmin=0.1u wmax=10u  vth0='agauss(0.7,0.07,1)' )
+.model nch.2 nmos ( version=4.7 level=54 lmin=0.1u lmax=20u wmin=10u  wmax=100u vth0='agauss(0.7,0.07,1)' )
+.model pch.1 pmos ( version=4.7 level=54 lmin=0.1u lmax=20u wmin=0.1u wmax=10u  vth0='agauss(-0.7,0.07,1)' )
+.model pch.2 pmos ( version=4.7 level=54 lmin=0.1u lmax=20u wmin=10u  wmax=100u vth0='agauss(-0.7,0.07,1)' )
+*
+* parameters
+.param vp     = 1.0v
+.param lmin   = 0.10
+.param wmin   = 0.12
+.param plmin  = 'lmin'
+.param nlmin  = 'lmin'
+.param wpmin  = 'wmin'
+.param wnmin  = 'wmin'
+.param drise  = 400ps
+.param dfall  = 100ps
+.param trise  = 100ps
+.param tfall  = 100ps
+.param period = 1ns
+.param skew_meas = 'vp/2'
+*
+* parameterized subckt
+.subckt inv in out vdd gnd pw='wpmin' pl='plmin' nw='wnmin' nl='nlmin'
+mp out in vdd vdd pch w='pw' l='pl'
+mn out in gnd gnd nch w='nw' l='nl'
+.ends
+
+v0 vdd 0 'vp'
+
+* vsrc with repeat
+v1 in 0 pwl
++ 0ns                       'vp'
++ 'dfall-0.8*tfall'         'vp'
++ 'dfall-0.4*tfall'         '0.9*vp'
++ 'dfall+0.4*tfall'         '0.1*vp'
++ 'dfall+0.8*tfall'         0v
++ 'drise-0.8*trise'         0v
++ 'drise-0.4*trise'         '0.1*vp'
++ 'drise+0.4*trise'         '0.9*vp'
++ 'drise+0.8*trise'         'vp'
++ 'period+dfall-0.8*tfall'  'vp'
++ r='dfall-0.8*tfall'
+
+x1 in out vdd 0 inv pw=60 nw=20
+c1 out 0 220fF
+
+.op
+
+.tran 1ps 4ns
+*COMP V(in) offset=.2
+*COMP V(out) offset=.2
+.print tran v(vdd) v(in) v(out)
+
+.option scale=1.0e-6
+
+.end

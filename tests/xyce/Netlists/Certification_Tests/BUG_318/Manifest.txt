@@ -1,0 +1,6 @@
+README
+bug_318.cir
+bug_318.cir.sh
+bug_318_noscope.cir
+exclude
+tags

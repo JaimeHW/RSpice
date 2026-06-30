@@ -1,0 +1,13 @@
+exclude
+push_pullLte2.cir
+push_pullLte2.cir.sh
+push_pull_xyce_baseline.cir
+testmaxstep.cir
+testmaxstep.cir.sh
+testmaxstep_gear.cir
+testmaxstep_gear.cir.sh
+teststep1.cir
+teststep1.cir.sh
+teststepgear1.cir
+teststepgear1.cir.sh
+tags

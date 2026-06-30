@@ -1,0 +1,37 @@
+Test Name: BUG_439
+Owner: Eric Rankin
+Test netlists: bad-dc-line.cir
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+bug 439   No error given for bad DC pulse statement 
+
+Proper error trapping was missing prior to this bug fix.  The correction will
+now report an error when the netlist line is formatted incorrectly. 
+
+Procedure:
+============
+Run Xyce with the bad-dc-line.cir 
+
+File I/O is handled on proc 0, so parallel test is not necessary.
+
+Verification:
+=============
+Verify that Xyce aborts with an error message, referencing the 
+bad voltage source line.
+ 
+Notes:
+======
+
+
+4/16/2012:  ADDENDUM ERK.  The example "bad" DC pulse line actually works fine in spice3.  
+Also, I recently changed the code so that Xyce can handle this pulse statement without
+difficulty, and produce the same answer as spice3.  As this is a use case that Xyce should
+support, I am changing the test to reflect that.  It is no longer a test for an error 
+message, but instead tests vs. a gold standard.
+
+

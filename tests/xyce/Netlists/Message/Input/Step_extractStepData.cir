@@ -1,0 +1,34 @@
+testing ill-formed .STEP lines
+***************************************
+* See SON Bug 1188 for more details.
+*
+*
+*
+*
+***************************************
+
+V1 1 0 1.0
+R1 1 0 1.0
+
+V2 2 0 1.0
+R2 2 0 1.0
+
+* The last 4.0 is extraneous
+.STEP R1 1.0 4.0 1.0 4.0
+
+* Same as last test, but with error in second sweep spec
+.STEP R1 1.0 4.0 1.0 R2 1.0 4.0 1.0 4.0
+
+* Missing various pieces of the correct syntax of:
+* <sweep variable name> <start> <stop> <step>
+.STEP R1 1.0 4.0
+.STEP R1 1.0
+.STEP R1
+.STEP
+.STEP DATA=
+.STEP DATA
+
+.DC V1 1 1 1
+.print dc V(1)
+
+.end

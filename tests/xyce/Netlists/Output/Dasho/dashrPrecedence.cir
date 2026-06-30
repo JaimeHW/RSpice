@@ -1,0 +1,22 @@
+******************************************************************
+* For testing -o (after the changes for Issue 222), the key point
+* is that the -r command line option only applies to the raw
+* override output for .PRINT TRAN.  The .PRINT SENS and .MEASURE
+* output still uses the dashoFilename, even when both -r and -o
+* are specified on the command line in the .sh file.
+******************************************************************
+
+V1 1 0 PWL 0 0 1 1
+R1 1 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1) I(V1)
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.2
+
+.sens objfunc={I(V1)} param=R1:R
+.options SENSITIVITY direct=1 adjoint=0
+.PRINT SENS FORMAT=CSV V(1) R1:R
+
+.MEASURE TRAN MAXV1 MAX V(1)
+
+.END

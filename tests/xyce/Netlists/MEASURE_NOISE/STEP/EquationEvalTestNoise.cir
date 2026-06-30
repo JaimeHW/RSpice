@@ -1,0 +1,46 @@
+* Test NOISE mode support for the EQN measure. It was deemed sufficient
+* to mostly just test with the VR and VI operators.  Expressions
+* are also tested. One current operator (IM) is tested for a branch
+* current.
+*
+* See SON Bug 1301 for more details.
+********************************************************************
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 1MEG
+.STEP RLP1 100 200 100
+
+.PRINT NOISE VM(4) VR(4) VI(4) IM(EAMP) INOISE ONOISE
+
+* EQN
+.MEASURE NOISE eqnvr4 EQN vr(4)
+.meas    noise eqnvi4 eqn vi(4)
+
+* Use expression
+.MEASURE NOISE eqnvr4Exp eqn {1+vr(4)}
+
+* add FROM-TO
+.MEASURE NOISE eqnvr4FromTo eqn vr(4) FROM=1e3 TO=1e5
+
+* branch current
+.MEASURE NOISE eqnimeamp eqn IM(EAMP)
+
+* Tests should fail since the FROM-T0 windows have various problems.
+.measure noise eqnFail1 eqn v(4) FROM=1e7 TO=1e8
+.measure noise eqnFail2 eqn vr(4) FROM=1e6 TO=1e2
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure noise lastMeasure eqn vm(4)
+
+.END

@@ -1,0 +1,27 @@
+A test of the Rise/Fall/Cross capability for measure MIN
+*******************************************************************************
+** use a damped sinusoid
+VS1  1  0  SIN(0 1.0 1KHZ 0 0.9)
+R1  1  0  100
+
+* use MEASFAIL for compatibility with the verification approach
+* used in .sh file.
+.OPTIONS MEASURE MEASFAIL=0 
+
+.TRAN 0  10ms
+.PRINT TRAN FORMAT=NOINDEX V(1) 
+
+* test RISE, FALL and CROSS qualifiers
+.measure tran Rise4 min V(1) RISE=4
+.measure tran Fall3 min V(1) FALL=3
+.measure tran Cross8 min V(1) CROSS=8
+
+* this test should fail and return -1 since the RISE, FALl and CROSS 
+* values are too high
+.measure tran returnNegOneRise min V(1) RISE=12 default_val=-1
+.measure tran returnNegOneFall min V(1) FALL=11 default_val=-1
+.measure tran returnNegOneCross min V(1) CROSS=20 default_val=-1
+
+
+.END
+

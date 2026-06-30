@@ -1,0 +1,20 @@
+*************************************************
+* Test SON Bug 1026 for .PRINT HB_IC.  The .OP
+* statement should precede the .HB statement
+* in this netlist.
+*
+*************************************************
+R1 1 0 1k
+C1 1 0 1p
+D1 2 1 D1N3940
+.MODEL D1N3940 D (IS=4e-10 RS=.105 N=1.48 TT=8e-7 CJO=1.95E-11 VJ=.4 M=.38
++ EG=1.36 XTI=-8 KF=0 AF=1 FC=.9 BV=600 IBV=1e-4)
+*            low high td tr  tf  pulsewidth    period
+v1 2 0 pulse 1V 2V  0 1e-5 1e-5 {1/1e4/2-1e-5 } {1/1e4}
+
+.print HB_IC v(1)
+.OP
+.hb 1e4
+
+.options hbint saveicdata=1 STARTUPPERIODS=2
+.end

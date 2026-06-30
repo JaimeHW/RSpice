@@ -1,0 +1,84 @@
+ ***** Measure Functions ***** 
+
+DERIVV2AT2.5 = 5.000000e+00 for AT = 2.500000e+00
+
+DERIVV2AT1 = 3.000000e+00 for AT = 1.000000e+00
+
+ATFT = 3.000000e+00 for AT = 1.000000e+00
+
+WHEN = 0.000000e+00 FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+WHENFT = 0.000000e+00 FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 1.000000e+00
+
+CONSTANT-AT = 0.000000e+00 for AT = 2.500000e+00
+
+CONSTANT-WHEN1 = 0.000000e+00 at V1 value = 3.142857e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+CONSTANT-WHEN2 = 0.000000e+00 FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+DERIVV2WHEN10 = 7.000000e+00 at V1 value = 3.142857e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+DERIVEXP1 = 7.000000e+00 at V1 value = 4.000000e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+DERIVEXP2 = 5.000000e+00 at V1 value = 2.200000e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+DERIVEXP3 = 5.000000e+00 at V1 value = 2.200000e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+DERIVEXP4 = 5.000000e+00 at V1 value = 3.000000e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+DERIVEXP5 = -6.000000e+00 at V1 value = 3.142857e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+FROM1 = 9.000000e-01 at V1 value = 3.555556e+00
+Measure Start V1 Value= 3.000000e+00	Measure End V1 Value= 5.000000e+00
+
+FROM2 = -1.100000e+00 at V1 value = 2.545455e+00
+Measure Start V1 Value= 2.250000e+00	Measure End V1 Value= 5.000000e+00
+
+FROM3 = 9.000000e-01 at V1 value = 3.555556e+00
+Measure Start V1 Value= 2.750000e+00	Measure End V1 Value= 5.000000e+00
+
+FROM4 = -1.100000e+00 at V1 value = 2.545455e+00
+Measure Start V1 Value= 2.250000e+00	Measure End V1 Value= 2.750000e+00
+
+FROM5 = -1.100000e+00 at V1 value = 2.545455e+00
+Measure Start V1 Value= 2.250000e+00	Measure End V1 Value= 2.750000e+00
+
+TO1 = 7.000000e+00 at V1 value = 3.428571e+00
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 3.750000e+00
+
+TO2 = 0.000000e+00 FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 3.250000e+00
+
+DERIVIR2AT2.5 = 1.666667e+00 for AT = 2.500000e+00
+
+FAIL1 = 0.000000e+00 FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+FAIL2 = 0.000000e+00 FAILED for AT = 1.000000e+01
+
+FAIL3 = 0.000000e+00 FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+FAIL4 = 0.000000e+00 FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+DERIVFAIL1 = 0.000000e+00 FAILED for AT = 1.000000e+01
+
+DERIVFAIL2 = 0.000000e+00 FAILED
+Measure Start V1 Value= 1.000000e+00	Measure End V1 Value= 5.000000e+00
+
+ATFAILFROM = 0.000000e+00 FAILED for AT = 1.000000e+00
+
+ATFAILTO = 0.000000e+00 FAILED for AT = 2.000000e+00
+
+

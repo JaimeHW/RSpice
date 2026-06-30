@@ -1,0 +1,12 @@
+Lossy Transmission Line Circuit with restart
+*************************************************************** 
+VS 1 5 PULSE (0 3 0 1ns 1ns 8ns 20ns)
+VDC 5 0 5V
+O1 1 0  2 0 CABLE1
+R1 2 0 100
+.TRAN 1e-13 50ns
+.PRINT TRAN PRECISION=5 V(1) V(2) V(5)
+.model cable1 ltra truncdontcut=1 nosteplimit=1
++r=3.0 l=10.0e-9 c=0.5e-11 len=10
+.options restart file=trans_test1e-08
+.END

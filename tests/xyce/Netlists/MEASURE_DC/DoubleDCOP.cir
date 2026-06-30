@@ -1,0 +1,25 @@
+*****************************************************************
+* This is test is based on the test PDE_1D_DIODE/diopde.  This 
+* test's purpose is to show that setting the nonlinear analysis 
+* mode to ANP_MODE_DC_NLPOISSON does not impact .MEASURE DC.
+*
+*****************************************************************
+
+R 1 2 1000.0
+V1 2 0 -0.21
+YPDE d1 1 0 DIODE na=1.0e15 nd=1.0e15  tecplotlevel=0 gnuplotlevel=0
++ graded=0 l=5.0e-4 wj=0.1e-3 nx=101  area=1.0 
++ mobmodel=carr
+
+.MODEL DIODE  ZOD 
+.DC V1 0.0 -0.21 -0.01
+
+.options NONLIN maxstep=50 maxsearchstep=3 searchmethod=1 abstol=1.0e-17
+
+.print DC v(2) v(1) I(V1)
+.MEASURE DC maxv1 MAX V(1)
+.MEASURE DC minv1 MIN V(1)
+.MEASURE DC ppv1  PP V(1)
+
+.END
+

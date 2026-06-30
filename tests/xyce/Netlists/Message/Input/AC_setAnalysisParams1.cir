@@ -1,0 +1,18 @@
+********************************************************
+* Test error messsage when .AC line has an invalid
+* <num points> entry, that is not an integer.  This also
+* covers the case of <num points> less than 1.
+*
+* See SON Bugs 1146 and 1321 for more details.
+********************************************************
+
+* Trivial high-pass filter (V-C-R) circuit.
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.print AC vm(b)
+.ac dec 0.5 100 1e6
+
+.end
+

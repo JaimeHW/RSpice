@@ -1,0 +1,45 @@
+Tests some conversions between parameter types
+ve E 0 0
+vb B 0 0
+vg G 0 0
+vs S 0 0
+vd D 0 0
+*
+m1 D G S E B ndevice.1 l=0.35um w=6.0um vldebug=false
+m2 D G S E B ndevice.2 l=0.35um w=6.0um vldebug=false
+*
+.param cap=2
+.param ver=3.2
+
+.MODEL ndevice.1 nmos ( LEVEL   = 10  TNOM = 27 
++ VERSION =  3.2         
++ TOX     = 5.5E-9         U0      = 382            VTH0    = 0.40 
++ K1      = 1.32           NLX     = 1.48067E-7     DVT1W   = 0             
++ UA      = 1.01042E-12    UB      = 1.62628E-18    DVT0    = 0.6            
++ A2      = 0.779512       RDSW    = 828            XJ      = 2.5E-7
++ WINT    = 8.79953E-8     LINT    = 8.02517E-8     DWG     = -3.04E-7 
++ VSAT    = 8.99284E4      A0      = 1.44034        
++ DWB     = 0              DROUT   = 1.72906        RSH     = 0.01
++ LA0     = -0.128398      LAGS    = -1.35966
++ WMIN    = 6E-6           WMAX    = 1.801E-5       LMIN    = 3.5E-7 
++ LMAX    = 6E-7           SHMOD   = 0             
++ CAPMOD  = 2              SOIMOD  = 0              MOBMOD  = 1  )                
+*
+.MODEL ndevice.2 nmos ( LEVEL   = 10  TNOM = 27 
++ VERSION =  {ver}           
++ TOX     = 5.5E-9         U0      = 382            VTH0    = 0.40 
++ K1      = 1.32           NLX     = 1.48067E-7     DVT1W   = 0             
++ UA      = 1.01042E-12    UB      = 1.62628E-18    DVT0    = 0.6            
++ A2      = 0.779512       RDSW    = 828            XJ      = 2.5E-7
++ WINT    = 8.79953E-8     LINT    = 8.02517E-8     DWG     = -3.04E-7 
++ VSAT    = 8.99284E4      A0      = 1.44034        
++ DWB     = 0              DROUT   = 1.72906        RSH     = 0.01
++ LA0     = -0.128398      LAGS    = -1.35966
++ WMIN    = 6E-6           WMAX    = 1.801E-5       LMIN    = 3.5E-7 
++ LMAX    = 6E-7           SHMOD   = 0             
++ CAPMOD  = cap            SOIMOD  = 0              MOBMOD  = {cap/2}  )                
+*
+.dc vd 1 3.6 1v vg 1.5 3.65 1
+.print dc v(D) V(G) id(m1) is(m1) {id(m2)/id(m1)} {is(m2)/is(m1)}
+
+.END

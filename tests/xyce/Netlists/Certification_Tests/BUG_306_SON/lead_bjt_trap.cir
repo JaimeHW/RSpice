@@ -1,0 +1,25 @@
+Lead current test for level 1 BJT
+*
+vie 0 1 0
+vic 0 3 5
+vib 0 2 pulse(0 1 1ns 1ns 1ns 1us) 
+q1 3 2 1 qjunk 
+
+.model qjunk npn
++bf=130 br=1 is=3e-14
++tf=1e-8 vjs=0.68 ne=1.6 nc=2.0 rb=450
++cje=1uf cjc=1uf cjs=1uf ikf=0.002 ikr=0.002 vaf=50 var=50
++nf=1.0 ise=0 nr=1 isc=0 irb=0 rbm=450 re=0 rc=0 vje=0.75 
++mje=0.33 xtf=0 vtf=100 itf=0 ptf=0 vjc=0.75 mjs=0 xtb=0 
++eg=1.11 xti=3 kf=0 af=1 fc=0.5 tnom=27
+
+.options timeint method=7
+.options nonlin-tran rhstol=1.0e-7
+.tran 1ns 20us
+
+*COMP {i(vib)-ib(q1)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {i(vic)-ic(q1)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {i(vie)-ie(q1)} abstol=1.0e-6 zerotol=1.0e-7
+
+.print tran  PRECISION=10 WIDTH=19 {i(vib)-ib(q1)} {i(vic)-ic(q1)} {i(vie)-ie(q1)}   
+.end

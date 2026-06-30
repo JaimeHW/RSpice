@@ -1,0 +1,17 @@
+Generic Switch 
+*
+IS 0 1 PWL(0 0 4u 0.040)
+VMON 1 1A 0V
+R1 1A 0 100
+VMON1 2 3 0
+R2 3 0 100
+
+SW1 1 2 SW OFF CONTROL={if(time>2u,1,0)}
+.MODEL SW SWITCH (ON=1 OFF=0 RON=1 ROFF=1E6)
+.options timeint reltol=1
+
+.TRAN 0.02u 4u
+.PRINT TRAN I(IS) I(VMON) I(VMON1)
+.END
+
+

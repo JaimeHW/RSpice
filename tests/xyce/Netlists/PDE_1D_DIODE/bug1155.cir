@@ -1,0 +1,36 @@
+1D PDE Diode test circuit, for the 2-level method
+*
+* This is a very simple test of the 1-D PDE diode device
+* in Xyce.  DC sweep, which happens to use the 2-level method
+*
+* Creator: Eric Keiter
+* Date: 2/25/2019
+*
+R 1 2 1000.0
+V1 2 0 -0.21
+V2 3 0  0.0
+
+YPDE d1 1 3 DIODE na=1.0e15 nd=1.0e15  tecplotlevel=0 gnuplotlevel=0
++ graded=0 l=5.0e-4 wj=0.1e-3 nx=101  area=1.0 
++ mobmodel=carr
++ useOldNi=true
+
+.MODEL DIODE  ZOD 
+.DC V1 0.0 -0.21 -0.01
+
+* Nonlinear solver params:                                                                                             
+.options NONLIN maxstep=50 maxsearchstep=2 searchmethod=0 nox=0 debuglevel=-100
+
+* Two-level Newton parameters.
+.options NONLIN-TWOLEVEL algorithm=3 nox=0 FULLNEWTONENFORCE=0
++ maxstep=15 maxsearchstep=2 searchmethod=2 debuglevel=-100
++ nlstrategy=0 rhstol=5.0e-6
++ continuationFlag=0 
++ reuseFactors=true
+
+.options device debuglevel=-100
+.options timeint debuglevel=-100   
+
+.print DC v(2) {v(1)+0.1} {I(V1)+1.0e-9} {I(V2)-1.0e-9}
+
+.END

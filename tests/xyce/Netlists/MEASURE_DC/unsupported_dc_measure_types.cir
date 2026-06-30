@@ -1,0 +1,32 @@
+Test errors for measure types that are not supported for DC
+**************************************************************************************
+* Only the AVG, DERIV, FIND-WHEN, EQN/PARAM, ERR, ERR1, ERR2, ERROR, INTEG,
+* MAX, MIN, PP, RMS, TRIG-TARG and WHEN measure types are supported for
+* DC mode for .MEASURE.  This tests the error messages from the other valid types,
+* that aren't supported for DC.
+*
+* The netlist and .DC print/analysis statements in this netlist
+* don't really matter.
+*
+*
+**************************************************************************************
+vsrc1   1a 0 1
+rload1a 1a 1b 0.1
+rload1b 1b 0 1
+.DC vsrc1 1 5 1
+
+* Note: vsrc1:DCV0 is the syntax for printing the DC value of vsrc1,
+* at it is swept.
+.print dc vsrc1:DCV0 v(1a) v(1b)
+
+* These measure types are not supported for DC mode. The exact syntax
+* of each measure line doesn't matter.  Just that it has dc as the
+* second word.
+.measure dc dutyVal duty V(1)
+.measure dc fourfail FOUR V(1) AT=1e6 TD=2e-3
+.measure dc freqVal FREQ v(1) ON=0.75 OFF=0.25
+.measure dc offVal off_time V(1) OFF=0
+.measure dc onVal on_time V(1) ON=0
+
+.END
+

@@ -1,0 +1,47 @@
+Test Name: BUG_568
+Owner: 
+Test netlists: bug_568.cir
+GS files: bug_568.cir.prn, bug_568.cir.res
+Mode:  Serial
+Comparator:  xyce_verify.pl
+Version of Xyce: Release_2.1       
+ 
+Description:
+============
+
+Bug 568 related to transmission line devices in netlists with .STEP
+directives.  Prior to the fix, transmission lines did not clear their history
+when the step loop cycled, leading to bad behavior at the beginning of a 
+step.
+ 
+Procedure:
+============
+Run Xyce on the included netlist:
+
+  runxyce bug_568.cir
+
+It should produce a .prn and a .res file.
+
+Compare the files to the gold standard with xyce_verify.pl:
+
+  xyce_verify.pl --goodres=../../OutputData/BUG_568/bug_568.cir.res \ 
+                 --testres=bug_568.cir.res
+                 bug_568.cir
+                 ../../OutputData/BUG_568/bug_568.cir.prn
+                 bug_568.cir.prn
+
+Note that the "../../OutputData/" files are simply examples of how to find the gold
+standard versions, and the file names without a path are meant to be examples of what
+would be created in the current working directory if the example "runxyce" command
+shown above were run with no added flags.  The xyce_verify.pl command might have to be
+modified slightly if the run deviates from these assumptions.
+
+Verification:
+=============
+Xyce should exit with error code 0 (successful run) and  xyce_verify.pl should
+also exit with error code 0.  Due to tolerance settings, some warnings that
+"Throwing away duplicate time 0" will appear, and are safely ignored.
+
+Notes:
+======
+

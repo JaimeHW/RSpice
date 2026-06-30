@@ -1,0 +1,32 @@
+Lead current test for BSRC
+*
+VS   1  0  PWL(
++ 0S 0V  
++ 1S 1V 
++ 2S 4V  
++ 3S 9V  
++ 4S 16V   
++ 5S 25V  
++ 6S 36V  
++ 7S 49V  
++ 8S 0.64E2V 
++ 9S 0.81E2V 
++ 10S 1E2V 
++ 11S 121V)
+
+R1   0  1  1
+* SOURCE THAT TAKES THE SQUARE ROOT OF V1
+B2   2  0  V = {SQRT(V(1))}
+R2   0  2  1
+.TRAN 1S 12S
+
+.PRINT TRAN I(R1) I(B2)
+
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-7
+
+.measure tran min1 min I(R1)
+.measure tran min2 min I(B2)
+
+.END
+

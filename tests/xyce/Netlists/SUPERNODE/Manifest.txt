@@ -1,0 +1,13 @@
+exclude
+supernode1.cir
+supernode1.cir.sh
+supernode1a.cir
+supernode1b.cir
+supernode2.cir
+supernode3.cir
+supernode4.cir
+supernode5.cir
+supernode5.cir.tags
+supernode6.cir
+supernode6.cir.sh
+tags

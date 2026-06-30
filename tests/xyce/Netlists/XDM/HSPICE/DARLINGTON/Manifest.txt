@@ -1,0 +1,4 @@
+exclude
+darlington.cir
+darlington.cir.hspice
+darlington.cir.sh

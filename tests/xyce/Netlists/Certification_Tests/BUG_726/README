@@ -1,0 +1,30 @@
+Test Name: BUG_726 
+Owner: Eric Rankin
+Test netlists: adjacent.cir
+GS files: none
+Mode:  Serial and Parallel 
+Comparator:  none
+Version of Xyce: Release_3.0
+ 
+Description:
+============
+Xyce failed to recognize improperly concatenated K lines.  It would simply run
+to completion producing incorrect results. 
+ 
+Procedure:
+============
+  runxyce adjacent.cir
+    or
+  xmpirun -np 2 adjacent.cir 
+
+Verification:
+=============
+Passes if Xyce exits with a message indicating that there a syntax error
+with a K device line.
+
+Notes:
+======
+Testing against valid K lines is covered by the regression tests.  
+
+This test covers >=2, linear, nonlinear, and mixed concatenations since 
+the type of mutual inductor is irrelevant this early during parsing.

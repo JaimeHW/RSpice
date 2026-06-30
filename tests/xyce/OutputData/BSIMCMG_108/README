@@ -1,0 +1,11 @@
+The "gold standards" in this directory are not actually Xyce output.  They 
+are taken from the HSpice output provided by the BSIM group for the
+BSIM-CMG version 107 along with the BSIM-CMG verilog files, as "circuit.lis" 
+files.  
+
+Those original files are captures of HSpice console output, and had to be 
+munged into a format that "xyce_verify.pl" could accept.  But the actual
+numbers in these gold standards are the same numbers in those .lis files,
+and should NOT be replaced by any Xyce output.  The goal here is to check
+Xyce's output from BSIM-CMG netlists with the standard output provided by
+the BSIM group.

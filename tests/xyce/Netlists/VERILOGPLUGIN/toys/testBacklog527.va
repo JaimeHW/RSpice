@@ -1,0 +1,40 @@
+`include "disciplines.vams"
+`include "constants.vams"
+// Xyce's K is not the one in constants.vams!
+`define X_K (1.3806226e23)
+
+(*xyceModelGroup="Resistor", xyceSpiceDeviceName="R", xyceLevelNumber="6"*)
+module resistor (p,n);
+   electrical p,n;
+   inout p,n;
+
+   (*desc="Resistance", type="instance"*) parameter real R=1 from (0:inf);
+   (*desc="Multiplicity", type="instance"*) parameter integer m=1 from [1:inf);
+
+   real           Ir;
+   real           tdevK;
+   real           conductance;
+
+   analog function real resistorCurrent;
+      input       PotentialDrop;
+      input       Resistance;
+      input       multiplicity;
+      output      conductance;
+      real        PotentialDrop;
+      real        Resistance;
+      integer     multiplicity;
+      real        conductance;
+      begin
+         conductance = multiplicity/Resistance;
+         resistorCurrent=PotentialDrop*conductance;
+      end
+   endfunction // resistorCurrent
+
+   analog
+     begin
+        tdevK=$temperature;
+        Ir=resistorCurrent(V(p,n),R,m,conductance);
+        I(p,n) <+ Ir;
+        I(p,n) <+ white_noise(4*`X_K*tdevK*conductance,"thermal");
+     end
+endmodule

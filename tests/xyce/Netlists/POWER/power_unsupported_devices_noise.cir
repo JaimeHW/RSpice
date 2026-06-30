@@ -1,0 +1,35 @@
+***************************************************************
+* Test for P() and W() for devices that do not implement
+* those calculations for .NOISE.
+*
+* The goal of this test is to ensure that Xyce exits gracefully
+* with a reasonable error message, instead of printing "all
+* zeros" for those devices.  See SON Bug 855 for more details.
+*
+***************************************************************
+* NOISE ANALYSIS: RESISTOR DIVIDER, AMP, AND LP FILTER
+*
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+I3 3 0 DC 5.0 AC 1.0
+R3 3 0 100K
+
+* It is important to test the case of the .OP statement coming
+* before the .NOISE statement.
+.OP
+.NOISE  V(4)  V1  DEC  5 100 1MEG 1
+
+* Power calculations are not supported for I, R and C devices, amongst
+* others for .NOISE analyses.
+.PRINT NOISE VM(4) P(I3) W(R1) P(CLP1) INOISE ONOISE
+
+.END
+

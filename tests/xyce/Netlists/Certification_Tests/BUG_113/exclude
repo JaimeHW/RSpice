@@ -1,0 +1,3 @@
+# These are excluded because the script handles running Xyce
+VSWITCH_NOIC.cir
+VSWITCH_ON_OFF.cir

@@ -1,0 +1,7 @@
+README
+VSWITCH.cir
+VSWITCH.cir.sh
+VSWITCH_NOIC.cir
+VSWITCH_ON_OFF.cir
+exclude
+tags

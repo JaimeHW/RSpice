@@ -1,0 +1,30 @@
+Test Name: BUG_671
+Owner: Eric Rankin 
+Test netlists: vpwl_binaryfile.cir
+               include_files:  vpwl-word.csv
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_3.0
+ 
+Description:
+============
+Xyce Not Producing Error w/wrong file type
+
+The parser failed to warn users and provide a graceful exit if certain csv 
+files were improperly formatted.  Binary files, such as Microsoft Word
+documents, contain extra characters that caused the parser to segfault.  
+ 
+Procedure:
+============
+  run_xyce  vpwl_binaryfile.cir 
+ 
+Verification:
+=============
+Passes if Xyce does not segfault and exits with an error message indicating 
+a problem with reading the include file.
+ 
+Notes:
+======
+This test is derived from the vpwl test in the regression suite.  Be careful
+to preserve the format of the include file:  it is a Microsoft Word document.

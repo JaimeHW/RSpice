@@ -1,0 +1,15 @@
+*
+* Regression test to check for proper handling of .print line with tagged 
+* params and only one print value.  Prior to fix of bug 1657, this would cause
+* an attempt to read past the end of a vector and a segfault on some platforms.
+*
+* Test passes if no segfault occurs.
+*
+c1 1 0 1uF IC=1
+R1 1 2 1K
+v1 2 0 0V
+.print tran format=tecplot {-v(1)}
+.tran 0 5ms
+.options timeint reltol=1e-6 abstol=1e-6
+.end
+

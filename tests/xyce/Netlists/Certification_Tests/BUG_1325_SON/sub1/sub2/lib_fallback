@@ -1,0 +1,5 @@
+* This file should get included in the netlist, via a path that
+* relative to the ../sub1 subdirectory.
+.LIB LIB_REL4
+.PARAM P4=4
+.ENDL LIB_REL4

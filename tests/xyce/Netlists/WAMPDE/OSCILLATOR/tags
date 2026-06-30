@@ -1,0 +1,4 @@
+serial, parallel, nightly
+mpde, wampde
+valgrind
+

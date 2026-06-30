@@ -1,0 +1,38 @@
+*******************************************************
+* For SON Bug 744
+*
+* Illustrate that parens are often a legal character
+* in node or device names. However, ( and ) within node
+* or device names may cause an error in .PRINT statements
+* In addition, devices with ( or ) in them may be 
+* incorrect in the symbol table.
+*
+* The test illustrates problems with parens in device names.
+*******************************************************
+.DC v1 1 1 1
+v1 1 0 1
+r1 1 0 1
+r5 5 0 1
+
+* all of these lines actually pass netlist parsing for 
+* a V-device, at least, in Xyce 6.5.
+v2( 2 0 1
+v3 3( 0 1
+v4 ( 0 1
+v( 5 0 1
+
+v6) 6 0 1
+v7 7) 0 1
+v8 ) 0 1
+
+* this line does cause a parse error
+*v) 9 0 1
+
+* All of these .PRINT statements will cause netlist 
+* parsing errors.  Just testing one for now.
+*.PRINT DC I(() 
+*.PRINT DC I(2()
+.PRINT DC I(V6))
+*.PRINT DC I())
+
+.end

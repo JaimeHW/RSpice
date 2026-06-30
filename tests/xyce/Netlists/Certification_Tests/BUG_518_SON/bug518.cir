@@ -1,0 +1,49 @@
+Test circuit for nonlinear mutual inductor
+
+*
+* a center tap transformer is modeled with both 
+* a linear and nonlinear mutual inductor.  In the
+* case of the nonlinear inductor the domain flexing
+* paramter is set to 0.001 causing Xyce to drop
+* the magnetics equation.  (if c is left at 
+* the default value then Xyce will get a time-
+* step too small error.
+*
+
+
+Vinput node1 0 sin(0 14 120 0 0)
+
+Llead1 node1 0 2e-6
+Llead2 node2 node3 798e-6
+Llead3 node3 node4 798e-6
+Ktrans1 Llead1 Llead2 Llead3 1.0
+
+rload1  node2 0 100
+rload2  node3 0 100
+rpathtg node4 0 1
+
+*
+* same circuit but with a nonlinear mutual inductor 
+*
+
+Llead4 node1 0 10
+Llead5 node5 node6 100
+Llead6 node6 node7 100
+Ktrans2 Llead4 Llead5 Llead6 1.0 nlcore
+
+.model nlcore CORE c=0.001
+
+rload3  node5 0 100
+rload4  node6 0 100
+rpathtg2 node7 0 1
+
+
+
+.print tran v(node1) v(node2) v(node3) v(node5) v(node6)
+
+.options timeint reltol=1.0e-4
+
+.tran 0 20e-3
+
+.end
+

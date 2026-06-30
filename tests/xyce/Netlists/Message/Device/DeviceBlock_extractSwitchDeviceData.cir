@@ -1,0 +1,32 @@
+* Invalid switch lines
+
+v1  1  0        PWL(0 0 1U 0 1.01U 5 2U 5 2.01U 0 3U 0 3.01U 5)
+
+* S1 is missing the VSW model
+* Correct line is S1  2  1  3  0 SW
+S1  2  1  3  0  
+
+* S2 device does not have enough nodes.  Needs 4, not 3.
+S2 2 1 3 VSW
+
+* SW1 device does not have enough nodes, when CONTROL 
+* keyword is used.
+SW1 5 0 1 VSW CONTROL={V(3)}
+
+* W2 does not have enough nodes. 
+* Line should be:  W2  0  2 v3  ISW
+W1  0  v3  ISW
+
+* W device does not use the CONTROL keyword
+W2  0 2 v3 ISW CONTROL
+
+v3  0  3        PWL (0 0 2U 0 2.01U 5)
+r3  0  3        200
+.MODEL VSW VSWITCH(RON=1 ROFF=1MEG VON=1 VOFF=0)
+.MODEL ISW ISWITCH (ION=10mA IOFF=0mA RON=1 ROFF=1E6)
+
+.TRAN 0.02U 4U
+.PRINT TRAN V(1)
+
+.END
+

@@ -1,0 +1,21 @@
+* Test Error handling for ERR, ERR1 and ERR2 measures.
+*
+* See SON Bug 1278 for more details.
+******************************************************
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(2) I(R1) I(R2a)
+
+V1 1 0 PWL 0 0 1 5
+R1 1 2 1
+R2 2 0 3
+
+* YMIN must be non-negative, while YMAX must be positive
+.MEASURE TRAN ERR1 ERR1 V(1) V(2) YMIN=-1.0
+.MEASURE TRAN ERR2 ERR2 V(1) V(2) YMAX=0
+
+* Lines are incomplete
+.MEASURE TRAN ERR1INC ERR1 V(1)
+.MEASURE TRAN ERR2INC ERR2 V(2)
+
+.END

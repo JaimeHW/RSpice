@@ -1,0 +1,53 @@
+COMPARATOR - BSIM3 Transient Analysis
+* This test tests the use of "options parser scale" 
+*
+* This version of the circuit is the reference circuit, 
+* so it does not apply scale.
+*
+* The point of this test is to make sure that if .STEP
+* is applied to a scaled parameter, that it does the right 
+* thing and applies the scaling every time it is updated.
+
+.param l1=1.2u
+.param l2=3.6u
+.param w1=3.6u
+.param w2=1.8u
+
+M1 Anot A E1 E1      pmos.1 w='w1' l='l1'
+M2 Anot A 0 0        nmos.1 w='w2' l='l1'
+M3 Bnot B E1 E1      pmos.1 w='w1' l='l1'
+M4 Bnot B 0 0        nmos.1 w='w2' l='l1'
+M5 AorBnot 0 E1 E1   pmos.1 w='w2' l='l2'
+M6 AorBnot B 1 0     nmos.1 w='w2' l='l1'
+M7 1 Anot 0 0        nmos.1 w='w2' l='l1'
+M8 Lnot 0 E1 E1      pmos.1 w='w2' l='l2'
+M9 Lnot Bnot 2 0     nmos.1 w='w2' l='l1'
+M10 2 A 0 0          nmos.1 w='w2' l='l1'
+M11 Qnot 0 E1 E1     pmos.1 w='w1' l='l2'
+M12 Qnot AorBnot 3 0 nmos.1 w='w2' l='l1'
+M13 3 Lnot 0 0       nmos.1 w='w2' l='l1'
+MQLO 8 Qnot E1 E1    pmos.1 w='w1' l='l1'
+MQL1 8 Qnot 0 0      nmos.1 w='w2' l='l1'
+MLTO 9 Lnot E1 E1    pmos.1 w='w1' l='l1'
+MLT1 9 Lnot 0 0      nmos.1 w='w2' l='l1'
+
+CQ Qnot 0 30f
+CL Lnot 0 10f
+
+Vdd E1 0 5
+Va A 0  pulse(0 5 10ns .1ns .1ns 15ns 30ns)
+Vb B 0 0
+
+.model nmos.1 nmos (level=9 lmin=0.1u lmax=3u  wmin=0.1u wmax=3u )
+.model pmos.1 pmos (level=9 lmin=0.1u lmax=3u wmin=0.1u wmax=3u )
+
+.options device debuglevel=-100
+
+* transient analysis
+.tran 1ns 60ns
+.print tran precision=12 width=21 v(a) v(b) {v(9)+0.2} {v(8)+0.2}
+
+.step l1 list 1.2u 1.3u
+
+.END
+

@@ -90,8 +90,8 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 
 | Family | Models |
 | :--- | :--- |
-| MOSFET | Native BSIM4 v4.8 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/9/49`, `CAPMOD=2/3`), BSIM3-SOI (FD / DD / PD), EKV, VDMOS, Berkeley MOS1/MOS2/MOS3/MOS6, and legacy BSIM1/BSIM2; unsupported MOS levels fail closed until native support and validation are added |
-| Bipolar | Gummel-Poon BJT (default / `LEVEL=1`) and native VBIC (`LEVEL=4`, including excess phase); other advanced BJT levels fail explicitly until their native models land |
+| MOSFET | Native BSIM4 v4.8 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/9/49`, `CAPMOD=2/3`), VDMOS, EKV3, Berkeley MOS1/MOS2/MOS3/MOS6, and legacy BSIM1/BSIM2; generated Verilog-A builtins are canonical for BSIM-SOI (`LEVEL=10/55/56/57`) and EKV 2.6 (`LEVEL=260`); unsupported MOS levels fail closed until generated or native support and validation are added |
+| Bipolar | Gummel-Poon BJT (default / `LEVEL=1`) plus generated Verilog-A builtins for VBIC (`LEVEL=4/9/11/12/13`), HICUM, and MEXTRAM where bundled sources are available; unsupported advanced BJT levels fail explicitly until generated support lands |
 | Junction | Diode, JFET level 1 and native Parker-Skellern JFET2 (`NJF`/`PJF LEVEL=2`, default/best-available), an internal Xyce modified-Shockley JFET2 compatibility mode, MES/MESA/HFET-family `Z` devices, GaN HEMT |
 | Passives | R / C / L with temperature coefficients, coupled inductors and multi-winding transformers, saturable inductor (Jiles–Atherton hysteresis) |
 | Transmission lines | Ideal, lossy (LTRA, TXL), coupled (CPL) |
@@ -101,14 +101,14 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 | Verilog-A | Compiled behavioral modules (below) |
 
 CMC compact-model families that ship redistributable Verilog-A sources under
-`models/veriloga/cmc/` are no longer planned as hand-maintained native ports.
-The strategic native path for those devices is generated Rust from the upstream
-Verilog-A source. That generator/build path now exists behind `rspice-core`'s
-`veriloga-builtins` feature, with a materialized generated registry under
-`crates/rspice-core/src/device/veriloga_generated/`. Historical hand-native CMC
-experiments should be treated as compatibility or reference work only; generated
-CMC devices remain feature-gated qualification artifacts until their oracle
-coverage and product gates are explicit.
+`models/veriloga/` are no longer planned as hand-maintained native ports. The
+product path for those devices is generated Rust from the upstream Verilog-A
+source, compiled through the product entry crates' explicit
+`veriloga-builtins` enablement and materialized under
+`crates/rspice-core/src/device/veriloga_generated/`.
+Historical hand-native CMC experiments should be treated as compatibility or
+reference work only; generated devices are the canonical model implementation
+when a bundled source is available.
 
 BSIM-class models fail with typed errors when a model card requests unported
 physics such as BSIM4 gate/body resistance networks, NQS, material-mode
@@ -219,7 +219,7 @@ coverage; it is not a substitute for importing the extension in pytest.
 
 ## Validation
 
-Correctness is measured rather than assumed, at four levels: unit tests in each crate, integration tests, oracle-replay fixtures for history-coupled device runtimes, and a regression harness that runs the vendored ngspice test suite deck-by-deck against the RSpice engine — comparing row-by-row against ngspice's reference outputs at 2% relative tolerance with probe-aware absolute floors. Every executed analysis must be backed by a validation oracle, so no deck can pass silently, and each deck runs in a watchdog-supervised process so a hung simulation cannot stall the suite. Current CI separates harness discipline from conformance status: nightly release runs ratchet against the recorded failure watermark in `.github/workflows/nightly.yml`; that watermark should only tighten as decks are fixed.
+Correctness is measured rather than assumed, at four levels: unit tests in each crate, integration tests, oracle-replay fixtures for history-coupled device runtimes, and a regression harness that runs the vendored ngspice test suite deck-by-deck against the RSpice engine — comparing row-by-row against ngspice's reference outputs at 2% relative tolerance with probe-aware absolute floors. The active ngspice corpus lives under `tests/ngspice/`; `tests/xyce/` vendors the Xyce Regression Suite for a future Xyce-specific adapter and is not run by the ngspice harness. Every executed analysis must be backed by a validation oracle, so no deck can pass silently, and each deck runs in a watchdog-supervised process so a hung simulation cannot stall the suite. Current CI separates harness discipline from conformance status: nightly release runs ratchet against the recorded failure watermark in `.github/workflows/nightly.yml`; that watermark should only tighten as decks are fixed.
 
 ```bash
 cargo test --release -p rspice-core                            # unit + integration
@@ -240,7 +240,7 @@ The harness design — oracle-replay methodology, comparison gating, debug envir
 | `rspice-wasm` | WebAssembly bindings for the simulation engine |
 | `rspice-bench` | Whole-process benchmark rig against local ngspice |
 
-Beyond the crates: [models/](models/) holds starter SPICE and Verilog-A libraries, [tests/](tests/) the vendored ngspice test suite and validation manifest, [examples/](examples/) CI-ready usage patterns, [benchmarks/](benchmarks/) the macro-benchmark decks and published scoreboards, and [docs/](docs/) the user manual, testing methodology, and roadmap.
+Beyond the crates: [models/](models/) holds starter SPICE and Verilog-A libraries, [tests/](tests/) contains vendored simulator corpora (`ngspice/` and `xyce/`) with corpus-local manifests and notices, [examples/](examples/) CI-ready usage patterns, [benchmarks/](benchmarks/) the macro-benchmark decks and published scoreboards, and [docs/](docs/) the user manual, testing methodology, and roadmap.
 
 ## License
 
@@ -248,4 +248,4 @@ RSpice is source-available software under the [RSpice Personal Use License](LICE
 
 ## Acknowledgments
 
-RSpice's device models and transient engine owe a great deal to [ngspice](https://ngspice.sourceforge.io/): several models are ported from BSD-licensed portions of ngspice 46, native BSIM4 acknowledges the UC Berkeley BSIM Research Group under the upstream BSIM4 terms, and the ngspice test suite is RSpice's primary accuracy reference. Sparse linear algebra uses the in-tree KLU-class real solver plus [faer](https://crates.io/crates/faer) for complex/AC-family paths.
+RSpice's device models and transient engine owe a great deal to [ngspice](https://ngspice.sourceforge.io/): several models are ported from BSD-licensed portions of ngspice 46, native BSIM4 acknowledges the UC Berkeley BSIM Research Group under the upstream BSIM4 terms, and the ngspice test suite is RSpice's primary accuracy reference. The Xyce Regression Suite is also vendored under its GPL terms for future cross-corpus validation. Sparse linear algebra uses the in-tree KLU-class real solver plus [faer](https://crates.io/crates/faer) for complex/AC-family paths.

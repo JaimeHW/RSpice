@@ -1,0 +1,146 @@
+PUSH PULL TEST CIRCUIT
+*.TRAN 1u 200m
+*.TRAN 1u 2m
+.TRAN 1u 1.0e-3
+.PRINT TRAN V(HV)
+
+.options timeint method=gear reltol=1e-2
+
+* to save data use something like this: 
+.options restart pack=0 job=push_pull_unpacked initial_interval=0.5e-3
+* and to restart use something like this:
+*.options restart file=push_pull_unpacked0.0005
+
+.SUBCKT 7834DREDS39 1 2 
+D1 1 2 DFOR 
+D2 2 1 DLEAK 
+D3 2 3 DBLOCK 
+IC 1 3 1.415 
+RC 1 3 59 
+.MODEL DFOR D( 
++ LEVEL=2
++ IS = 4.0E-13 N = 1.22 BV = 1000 IBV = 0.001 
++ RS = 0.05 CJO = 5.9E-11 VJ = 0.4 M = 0.33 
++ FC = 0.5 EG = 1.11 XTI = 3 TT = 5.6E-6)
+.MODEL DLEAK D(
++ IS = 4.236E-11 N = 1058 XTI = 3 EG = 1.1 RS = 0 CJO=1.0E-11)
+.MODEL DBLOCK D(
++ IS = 1E-12 N = 0.62 RS = 22 XTI = 3 EG = 1.1 CJO = 1.0E-11) 
+.ENDS
+*
+.MODEL 89DR3DS2DO D(
++ LEVEL=2
++ IS = 4.6E-9 N = 1.792 BV = 1000 IBV = 0.001 
++ RS = 0.4 CJO = 1.3E-12 VJ = 0.6 M = 0.06 
++ FC = 0.1 TT = 4.8E-9 EG = 1.11 XTI = 3 
++ IKF = 0.012 ISR = 3.4E-9 NR = 2)
+*
+.MODEL TY78YYRD D( 
++ LEVEL=2
++ IS = 2.5E-11 N = 6.835 BV = 3000 IBV = 5E-6 
++ RS = 0.55 CJO = 5.5E-12 VJ = 2.0 M = 0.4 
++ FC = 0.5 TT = 1.55E-7 EG = 4.44 XTI = 3 
++ IKF = 0.003 ISR = 3.0E-10 NR = 10)
+*
+.MODEL RT8920DD NPN( 
++ IS = 1.3E-014  BF = 150  NF = 0.9  VAF = 80  IKF = 0.9 
++ ISE = 5E-015  NE = 1.3  BR = 8.5  NR = 0.99  VAR = 14
++ IKR = 0.11  ISC = 3.0E-13  NC = 1.484  RB = 6.848  IRB = 0.004878 
++ CJE = 2.7E-11  VJE = 0.7  MJE = 0.3  TF = 0  XTF = 0  VTF = 1100 
++ ITF = 0  PTF = 0  CJC = 1.0E-11  VJC = 0.44  MJC = 0.24  XCJC = 1 
++ TR = 0  FC = 0.5
++ CJS=1.0E-11 )
+*
+.SUBCKT G89R006 10 20 30 
+LD 10 5 5E-009 
+LG 20 8 5E-009 
+LS 30 9 1.5E-008 
+RD1 5 4 0.01517 
+RD2 4 2 0.0147 
+RG 8 1 0.1 
+RS 9 3 0.01106 
+DDS 9 5 DDS1 
+DGD 6 4 DGD 
+RDGD 4 6 3.837E+010 
+M2 6 4 1 100  MSW1 
+RSUB1 1 100 1E+011 
+CGDMAX 4 7 4E-010 
+RCGD 4 7 1E+011 
+M3 7 4 1 101  MSW2 
+RSUB2 1 101 1E+011 
+M1 2 1 3 30 MAIN 
++ L = 1.6E-006 
++ W = 0.8697 
+CGS 1 3 7E-011 
+.MODEL MSW1 NMOS 
++ LEVEL = 1  VTO = 0  KP = 10 
++ CBD=1.0E-11 CBS=1.0E-11 CJ=1.0E-11
+.MODEL MSW2 PMOS 
++ LEVEL = 1  VTO = 0  KP = 10 
++ CBD=1.0E-11 CBS=1.0E-11 CJ=1.0E-11
+.MODEL MAIN NMOS 
++ LEVEL = 3  VTO = 4.112  NFS = 8.1E+011  NSUB = 4E+016  TOX = 1.2E-007 
++ KAPPA = 0.06  ETA = 0.001 PHI = 0.6757  THETA = 0.05943 
++ KP = 7.7E-005 
++ CBD=1.0E-11 CBS=1.0E-11 CJ=1.0E-11
++ CGBO=1.0E-11 CGDO=1.0E-11 CGSO=1.0E-11 CJSW=1.0E-11
+.MODEL DDS1 D 
++ IS = 2.0E-012  N = 1.03  RS = 0.009 CJO = 2.9E-009  VJ = 0.6
++ M = 0.3392  FC = 0.5  BV = 100  IBV = 0.00025  XTI = 3  TT = 1E-008 
+.MODEL DGD D 
++ CJO = 7.3E-010  VJ = 7.7  M = 1.2  FC = 0.5  BV = 100  IBV = 0.00025 
+.ENDS
+
+*
+* Schematics Netlist *
+*
+C_C123         0 $N_0001  4u  
+V_IA1         $N_0002 $N_0003   
+Q_Q1         $N_0005 $N_0004 0 RT8920DD
+D_D38         $N_0006 0 89DR3DS2DO
+V_V1         $N_0002 0 DC 0 PULSE(0 18 0 1n 1m 15 30)
+V_OSC_A         $N_0007 0 DC 0 PULSE (5 0 1u 0.1u 0.1u 16u 44u)
+R_R18         0 $N_0008  100k
+R_R21         0 $N_0006  250
+R_R16         $N_0005 $N_0008  50
+C_C1         $N_0007 $N_0004  150p
+R_R1         $N_0007 $N_0004  220
+R_R14         $N_0005 $N_0001  700
+R_R50         $N_0003 $N_0001  4
+V_IA2         $N_0009 $N_0010   
+V_V2         $N_0009 0 DC 0 PULSE (0 18 0 1n 1m 15 30)
+Q_Q2         $N_0012 $N_0011 0 RT8920DD 
+X_M3         $N_0014 $N_0013 0 G89R006
+X_D36         0 $N_0014 7834DREDS39
+D_D37         $N_0015 0 89DR3DS2DO 
+V_OSC_B         $N_0016 0 DC 0 PULSE (5 0 15u 0.1u 0.1u 12u 32u)
+R_R70         0 $N_0015  250
+R_R112         $N_0012 $N_0013  50
+R_R2         $N_0016 $N_0011  220
+R_R15         $N_0012 $N_0001  700
+C_C2         $N_0016 $N_0011  150p
+R_R80         0 $N_0013  100k
+C_C70         $N_0015 $N_0014  5n IC=0
+C_C101         0 HV  1u IC=0
+R_R101         0 HV  40MEG
+R_R100         $N_0017 HV  2k
+D_D39         $N_0018 $N_0017 TY78YYRD
+Kn_K12         L_L1 L_L2     0.99
+Kn_K13         L_L1 L_L3     .45
+L_L1         $N_0019 $N_0020  30u
+L_L2         $N_0020 $N_0021  30u
+Kn_K23         L_L2 L_L3     .45
+R_R90         0 $N_0020  100k
+C_C51         0 $N_0020  4u IC=0
+R_R51         $N_0010 $N_0020  4
+L_L3         $N_0022 $N_0023  115m  
+R_rprim2         $N_0014 $N_0021  0.24
+X_D35         0 $N_0024 7834DREDS39
+C_C20         $N_0006 $N_0024  5n IC=0
+X_M2         $N_0024 $N_0008 0 G89R006
+R_rprim1         $N_0024 $N_0019  0.24
+R_rsec2         $N_0022 0  40
+C_Csec         0 $N_0018  16p
+R_rsec1         $N_0023 $N_0018  40
+
+.END

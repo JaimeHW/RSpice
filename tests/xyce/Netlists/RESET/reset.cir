@@ -1,0 +1,62 @@
+Test of A Reset Circuit
+******************************************************************************** 
+* Tier No.:     2    
+* Directory/Circuit Name: VSIN/VSIN.cir                                       
+* Description:  Test of a 2n2222 reset circuit
+* Input: Vbat
+* Output: V(RESET)
+* Analysis: The circuit is an inverter-type circuit.  The transistor used is a
+*	2n2222 npn bjt.  Initially, when the input to the circuit is 0 volts or
+*	or logic low, the transistor is off and there is no current conducted 
+*	through RCC, the collector resistor.  Therefore, RESET is high or 10V (VCC).
+*	Then the input is 5V or logic high, the transistor turns on and is operating
+*	in the saturation regime.  Current is conducted through RCC, and there is a 
+*	voltage drop across RCC.  At this point, RESET is low or ~6mV.
+*
+********************************************************************************
+* ANALYSIS DIRECTIVES
+.TRAN 0 4ms 0 
+.options nonlin-tran reltol=1e-3
+*COMP V(RESET) reltol=0.02
+.PRINT TRAN width=21 precision=12 V(BAT) V(RESET)
+*
+* SOURCE RESET CIRCUIT STANDARD PARTS
+*
+RCC RESET N485 15K
+VCC N485 0 10V
+Vbat BAT 0 PULSE(0V 5V 1ms 1ns 1ns 2ms 1k)
+Rbase BAT VB 2K
+C1 VB 0 1.2u 
+Q1 RESET VB 0 Q2N2222
+*
+.MODEL Q2N2222 NPN (
++ IS = 8.92E-15       
++ BF = 227.4        
++ NF = 0.9812 
++ VAF = 97.39        
++ IKF = 0.5068         
++ ISE = 9.302E-15   
++ NE = 1.719 
++ BR = 8.282         
++ NR = 0.9722          
++ VAR = 26.57       
++ IKR = 0.2 
++ ISC = 4.019E-13    
++ NC = 1.193           
++ RB = 25.16          
++ IRB = 0.001144 
++ RBM = 0.001        
++ RE = 0.001             
++ RC = 0.525          
++ XTB = 0 
++ EG = 1.11          
++ XTI = 3              
++ CJE = 2.018E-11   
++ VJE = 0.7346 
++ MJE = 0.3379       
++ CJC = 6.226E-12      
++ VJC = 0.3481      
++ MJC = 0.2995 
++ FC = 0.5
++ ) 
+.END

@@ -1,0 +1,17 @@
+Basic diode circuit testing simple parameter use in model statement inside a
+* subcircuit
+
+.param IS0=100FA
+.param RS0=2K
+
+XD1 1 0 DMODsub
+V1 1 0 DC 5V
+
+.subckt DMODsub 1 2 
+D1 1 2 DMOD1
+.model DMOD1 D (IS={IS0} RS={RS0})
+.ends
+
+.dc V1 0 5 1
+.print DC v(1) I(v1)
+.end

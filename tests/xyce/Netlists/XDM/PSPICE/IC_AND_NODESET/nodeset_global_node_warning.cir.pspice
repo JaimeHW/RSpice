@@ -1,0 +1,30 @@
+************************************************************************
+* Unit test for a Xyce warning message from .NODESET on a global node
+* in a subcircuit, when the translated Xyce netlist is run. 
+*
+*
+*
+* See SRN Bug 1991
+************************************************************************
+
+*Analysis directives: 
+.TRAN  0 10ms 0 
+.PROBE64 V([N16554]) V([N16997])
+
+*RC Decay with IC in subcircuit
+V_V3         N16554 0  
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s
+R_R7         N16554 N16997  1k TC=0,0 
+X_X1          N16997 N17112  IC_Subckt
+R_R8         0 N17112  10 TC=0,0 
+
+.SUBCKT IC_Subckt in out
+R1          in  mid 10 TC=0,0
+C1          mid out 1u TC=0,0
+.IC         V(mid)=0.5
+* setting NODESET on global node here should cause warning when
+* translated Xyce netlist is run
+.NODESET         V($G_VCC)=0.0;
+.ENDS
+
+.END

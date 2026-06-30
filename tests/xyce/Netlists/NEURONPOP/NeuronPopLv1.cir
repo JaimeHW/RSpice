@@ -1,0 +1,12 @@
+A basic test of the level 1 neuron population device
+
+.model np1 neuronpop level=1 neurons_max=50 update_period=0.1 outputpopulationvars=1
+
+yneuronpop aneuronpop nodeIn  nodeOut  np1  
+
+* voltage node here just to have something to print
+vv1 a 0 5
+
+.tran 0 1
+.print tran v(a)
+.end

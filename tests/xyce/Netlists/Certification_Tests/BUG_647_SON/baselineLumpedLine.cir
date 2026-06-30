@@ -1,0 +1,60 @@
+* test HB circuit.  This circuit is linear, and should converge without an 
+* initial condition.
+
+
+*                 v1 v2 td tr tf pw per
+VsigGen 1 0 pulse(0.0 1.0 0.0 5u 5u 0.49e-3 1.0e-3)
+RsigGen 1 1b 50
+
+X_bigline DUT  1b rlcthreeinch
+
+.tran 0 1.0e-3
+.print tran V(1) V(1B) Rcable Lcable Ccable
+
+.step lin Rcable .5e-3 1.5e-3 .5e-3
+.step lin Lcable 0.3u 0.7u 0.2u
+.step lin Ccable 50p 70p 10p
+
+.options timeint debuglevel=-100 method=gear 
+.options device debuglevel=-100
+
+* Subcircuited RLC versions of a tranmission line.
+
+.global_param Rcable=1.0e-3; ohm/foot
+.global_param Lcable=0.5u  ; H/foot
+.global_param Ccable=60p   ; F/foot
+
+* r, l and c are in per 1 inch units.  Not that accurate.
+*   
+*  I--L--3--R--O   
+*              |
+*              C
+*              |
+*              0(gnd)
+*
+*
+.subckt rlclump I O 
+L1 I 3  {Lcable*0.1/12.0}
+C1 O 0  {Ccable*0.1/12.0}
+R1 3 O  {Rcable*0.1/12.0}
+.ends rlclump 
+
+.subckt rlconeinch I O
+x1 I 3 rlclump
+x2 3 4 rlclump
+x3 4 5 rlclump
+x4 5 6 rlclump
+x5 6 7 rlclump
+x6 7 8 rlclump
+x7 8 9 rlclump
+x8 9 10 rlclump
+x9 10 11 rlclump
+x10 11 O rlclump
+.ends rlconeinch
+
+.subckt rlcthreeinch I O
+x1 I 3 rlconeinch
+x2 3 4 rlconeinch
+x6 4 O rlconeinch
+.ends rlcthreeinch
+

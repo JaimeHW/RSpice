@@ -1,0 +1,52 @@
+**************************************************************************************
+* A test circuit to measure the error between a reference signal and a measured signal
+* using the ERROR measure, in .TRAN mode.
+* 
+* Since the ERROR measure is a bit "different" than other measures, it is tested 
+* for I(), P(), W() and Expressions.  This is only done in MEASURE, and is not 
+* done in MEASURE/STEP.   
+***************************************************************************************  
+
+v1 1 0 PWL 0 1 0.6 1.6 1 1
+v2 2 0 PWL 0 2 0.6 2.6 1 2
+
+* Note: R1 has a different resistance value (0.5 ohms) than in ErrorTest.cir
+r1 1 0 0.5
+r2 2 0 1
+
+.tran 0 1 
+.print tran v(2) I(R1) P(R1) W(R1)
+
+* these statements were used to generate the ErrorTestRawData.prn file.
+* They are commented out in the actual regression test 
+*v3 0 3 PWL 0 1 0.6 1.6 1 1
+*r3 3 0 1
+*v4 0 4 PWL 0 2 0.6 2.6 1 2
+*r4 4 0 1
+*.print tran FILE=ErrorTestRawData.prn V(3) V(4)
+*.OPTIONS OUTPUT INITIAL_INTERVAL=0.1
+
+* I(R1) vs. V(3).  Using V(3), so we don't have to generate a separate RawData.prn file for this test
+* ErrorTestRawData.prn is also used for the ErrorTest
+.measure tran FitErrorL1IR1 ERROR I(R1) FILE=ErrorTestRawData.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=2
+.measure tran FitErrorL2IR1 error I(R1) file=ErrorTestRawData.prn comp_function=L2NORM indepvarcol=1 depvarcol=2
+.measure tran FitErrorInfIR1 error I(R1) file=ErrorTestRawData.prn comp_function=INFNORM indepvarcol=1 depvarcol=2
+
+* P(R1) vs. V(3)
+.measure tran FitErrorL1PR1 ERROR P(R1) FILE=ErrorTestRawData.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=2
+.measure tran FitErrorL2PR1 error P(R1) file=ErrorTestRawData.prn comp_function=L2NORM indepvarcol=1 depvarcol=2
+.measure tran FitErrorInfPR1 error P(R1) file=ErrorTestRawData.prn comp_function=INFNORM indepvarcol=1 depvarcol=2
+
+* W(R1) vs. V(3)
+.measure tran FitErrorL1WR1 ERROR W(R1) FILE=ErrorTestRawData.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=2
+.measure tran FitErrorL2WR1 error W(R1) file=ErrorTestRawData.prn comp_function=L2NORM indepvarcol=1 depvarcol=2
+.measure tran FitErrorInfWR1 error W(R1) file=ErrorTestRawData.prn comp_function=INFNORM indepvarcol=1 depvarcol=2
+
+* Expression {V(2)} vs. V(4)
+.measure tran FitErrorL1EXP ERROR {V(2)} FILE=ErrorTestRawData.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=3
+.measure tran FitErrorL2EXP ERROR {V(2)} FILE=ErrorTestRawData.prn COMP_FUNCTION=L2NORM INDEPVARCOL=1 DEPVARCOL=3
+.measure tran FitErrorInfEXP ERROR {V(2)} FILE=ErrorTestRawData.prn COMP_FUNCTION=INFNORM INDEPVARCOL=1 DEPVARCOL=3
+
+.end
+
+

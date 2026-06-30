@@ -1,0 +1,28 @@
+N-Channel MESFET Circuit
+*
+VDS 2 0 2V
+VGS 3 0 pulse (-1 1 1ns 1ns 1ns 1us 2us)
+VSS 4 0 0
+Z1 2 3 4 MESMOD AREA=1.4
+.MODEL MESMOD NMF
++ LEVEL=1 BETA=1.4E-3
++ RD=46 RS=46 VTO=-1.3 LAMBDA=0.03 ALPHA=3 CGS=1uf CGD=1uf
+
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-7
+
+.tran 1ns 10us
+*COMP {-I(VDS)-ID(Z1)} abstol=1e-6 zerotol=1.0e-7
+*COMP {-I(VGS)-IG(Z1)} abstol=1e-6 zerotol=1.0e-7
+*COMP {-I(VSS)-IS(Z1)} abstol=1e-6 zerotol=1.0e-7
+.PRINT tran {-I(VDS)-ID(Z1)} {-I(VGS)-IG(Z1)} {-I(VSS)-IS(Z1)}
+
+.measure tran maxmag1   max {abs(-I(VDS)-ID(Z1))} failvalue=1e-6
+.measure tran totalrms1 rms {-I(VDS)-ID(Z1)} failvalue=1e-6 
+.measure tran maxmag2   max {abs(-I(VGS)-IG(Z1))} failvalue=1e-6
+.measure tran totalrms2 rms {-I(VGS)-IG(Z1)} failvalue=1e-6 
+.measure tran maxmag3   max {abs(-I(VSS)-IS(Z1))} failvalue=1e-6
+.measure tran totalrms3 rms {-I(VSS)-IS(Z1)} failvalue=1e-6 
+
+.END
+

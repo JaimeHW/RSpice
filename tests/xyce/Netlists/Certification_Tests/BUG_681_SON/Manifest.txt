@@ -1,0 +1,14 @@
+bsim3_681.cir
+bsim3_681.cir.res.gs
+bsim3_681.cir.sh
+bsim3_681_1.cir
+bsim3_681_2.cir
+bsim3_681_3.cir
+bsim4_681.cir
+bsim4_681.cir.res.gs
+bsim4_681.cir.sh
+bsim4_681_1.cir
+bsim4_681_2.cir
+bsim4_681_3.cir
+exclude
+tags

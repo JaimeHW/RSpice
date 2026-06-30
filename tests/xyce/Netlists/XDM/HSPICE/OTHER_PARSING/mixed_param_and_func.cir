@@ -1,0 +1,20 @@
+* mixed param and func statements
+* Xyce netlist for corresponding HSPICE netlist
+* Netlist tests XDM can properly parse out functions
+* and parameters mixed together on the same line in 
+* a .PARAM statement, and that it correct outputs 
+* the parameter or function to a .PARAM or .FUNC
+* statement in Xyce (see issue #100 on XDM gitlab)
+
+.PARAM A1=11 A2=3 A3=1 A4=5 A5=8
+.FUNC SQUARE(X) 'X*X'
+.FUNC MULTBY2(X) '2*X'
+.FUNC MULTBY1(X)  '1*X'
+.FUNC ADDBY17(X) 'X+17'
+
+VA 1 0 DC 0
+R1 1 2 'SQUARE(A4)+ADDBY17(A5)'
+R2 2 0 'MULTBY2(A1)+MULTBY1(A2)'
+
+.DC VA 0 10 1
+.PRINT DC FORMAT=PROBE V(1) V(2)

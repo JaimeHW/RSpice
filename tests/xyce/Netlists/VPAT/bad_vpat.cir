@@ -1,0 +1,37 @@
+* Test various illegal pattern source definitions.
+* That definition is:
+*
+*   PAT (VHI VLO TD TR TF TSAMPLE DATA R)
+*
+* See SON Bug 1165 for more details.
+*
+*************************************************
+
+* Lacks the required data parameter
+V1 1 0 PAT(5 0 0n 1n 1n 5n)
+
+* test negative and zero values for the doubles
+* (e.g., tr=-1e-9, tf=0 and tsample=0)
+V2 2 0 pat(5 0 0n -1n 0n 0n b10)
+V3 3 0 pat 5 0 0n 1n 0n 5n b10
+V4 4 0 pat (5 0 0n 1n 1n 0n b10)
+
+* invalid DATA specifications
+V5 5 0 PAT(5 0 0n 1n 1n 5n M10)
+V6 6 0 PAT(5 0 0n 1n 1n 5n B1M)
+
+* Only RB=1 is supported so far
+V7 7 0 PAT 5 0 0n 1n 1n 5n b10 RB=2
+
+R1 1 0 1
+R2 2 0 1
+R3 3 0 1
+R4 4 0 1
+R5 5 0 1
+R6 6 0 1
+R7 7 0 1
+
+.TRAN 0 50n
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.5n
+.PRINT TRAN V(1)
+.END

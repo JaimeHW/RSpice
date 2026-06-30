@@ -1,0 +1,31 @@
+Test Name: BUG_967 
+Owner: elranki 
+Test netlists: bug_967.cir
+GS files:  none
+Mode:  Serial and Parallel 
+Comparator:  none
+Version of Xyce: Release_3.1 
+
+NOTE:  As of 4/1/2013, bug_967.cir has been disabled due to bug 1152, where device
+and node names are allowed to be the same.
+ 
+Description:
+============
+Xyce did not recognize device and nodes with the same name, which caused 
+various problems.
+
+This test confirms that Xyce can properly handle this scenario by trapping
+identical device/node names and reporting an error msg.
+ 
+Procedure:
+============
+run_xyce bug_967.cir 
+  or
+xmpirun -np 2  bug_967.cir
+
+Note the error message that is printed.
+
+Verification:
+=============
+Passes if Xyce shows a message similar to "Device name: RBAD is identical 
+to a node name".

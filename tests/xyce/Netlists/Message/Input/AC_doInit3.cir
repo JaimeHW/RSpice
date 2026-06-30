@@ -1,0 +1,25 @@
+********************************************************
+* Test error messsage when .SENS has an objective function
+* but no parameters are defined.
+*
+* See GitLab issue 371 for more details.
+********************************************************
+
+v1 1 0 ac 10
+r1 1 2 4.7K
+c1 2 0 47n
+r2 2 3 4.7K
+c2 3 0 47n
+r3 3 4 4.7K
+c3 4 0 47n
+
+.ac dec 10 1 10K
+.print ac vm(1) vp(1) vm(2) vp(2)
+
+* this line should produce a parsing error
+.sens acobjfunc={v(2)}
+
+.options sensitivity direct=1 adjoint=1 stdoutput=1
+.print sens
+
+.end

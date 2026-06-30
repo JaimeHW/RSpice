@@ -1,0 +1,51 @@
+***************************************************************
+* For testing -o (after the changes for Issue 222), the key
+* points are that:
+*
+*   1) the .LIN output defaults to Touchstone 2 format
+*
+*   2) the .PRINT AC line should also produce output.
+*      It should be a FORMAT=STD file with space as the
+*      delimiter, with the default extension (dashoFile.FD.prn).
+*
+*   3) the FILE= qualifier on the .LIN line should
+*      be ignored
+*
+*   4) the .sh file will use -o sparamOutput.s1p to test
+*      that the default print extension is removed from the
+*      dashoFilename.
+*
+* See also SON Bug 1105 for more details
+****************************************************************
+
+* RC ladder circuit
+* Note that all ports (P devices) must use a common
+* Reference Node, which is 0 here.
+P1 1  0  port=1  z0=50
+
+C1 2 0 1e-2
+Rgs 1 2 0.02
+
+.subckt RCBlock IN OUT GND
+R1 IN OUT 20
+C1 IN OUT 1p
+Cg1 OUT GND 1p
+.ends
+
+X1 2 3 0 RCBlock
+X2 3 4 0 RCBlock
+X3 4 5 0 RCBlock
+X4 5 6 0 RCBlock
+X5 6 7 0 RCBlock
+X6 7 8 0 RCBlock
+X7 8 9 0 RCBlock
+X8 9 10 0 RCBlock
+X9 10 11 0 RCBlock
+X10 11 12 0 RCBlock
+
+.AC DEC 10 10  1e5
+.PRINT AC V(1)
+
+.LIN FORMAT=TOUCHSTONE FILE=sparamFoo
+
+.END

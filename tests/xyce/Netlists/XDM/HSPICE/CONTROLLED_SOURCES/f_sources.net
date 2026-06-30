@@ -1,0 +1,24 @@
+* source FSOURCETEST
+
+* test that case does not matter in F-Source.  The funky
+* subckt definition is how ORCAD capture made this circuit
+X_F1         N385945 N385872 N385703 0 SCHEMATIC1_F1
+R_R5         0 N385872  1 TC1=0 TC2=0
+R_R6         0 N385703  1 TC1=0 TC2=0
+V_V4         N385945 0  AC 1
++SIN 0V 1V 1e6 0 0 0
+
+.subckt SCHEMATIC1_F1 1 2 3 4
+F_F1         3 4 VF_F1 2
+*VF_F1        1 2 0V
+vf_f1       1 2 0V
+.ends SCHEMATIC1_F1
+
+* test the POLY form of the F-source, using the syntax in the
+* PSpice Reference Guide
+R_R8         0 N397302  1 TC1=0 TC2=0
+R_R9         0 N387774  1 TC1=0 TC2=0
+V_V5         N397302 0  AC 1
++SIN 0V 2V 1e6 0 0 0
+
+F_F2 N387774 0 POLY(1) V_V5 0 2

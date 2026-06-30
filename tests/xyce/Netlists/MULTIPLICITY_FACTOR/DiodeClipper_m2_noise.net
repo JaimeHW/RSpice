@@ -1,0 +1,41 @@
+Diode clipper circuit with transient analysis statement
+* This is from Figure 3.5 of the Users Guide
+*
+* Voltage Sources
+VCC 1 0 5V
+VIN 3 0 SIN(0V 10V 1kHz) AC 1
+* Analysis Command
+.noise V(2)  VIN oct 10 .01 1e3 1
+* Output
+.PRINT noise {sqrt(abs(inoise))} {sqrt(abs(onoise))}
+* Diodes
+D1 2 1 D1N3940 M=2
+D2 0 2 D1N3940 M=2
+* Resistors
+R1 2 3 1K
+R2 1 2 3.3K
+R3 2 0 3.3K
+R4 4 0 5.6K
+* Capacitor
+C1 2 4 0.47u
+*
+* GENERIC FUNCTIONAL EQUIVALENT = 1N3940
+* TYPE: DIODE
+* SUBTYPE: RECTIFIER
+.MODEL D1N3940 D(
++ IS = 4E-10
++ RS = .105
++ N = 1.48
++ TT = 8E-7
++ CJO = 1.95E-11
++ VJ = .4
++ M = .38
++ EG = 1.36
++ XTI = -8
++ KF = 0
++ AF = 1
++ FC = .9
++ BV = 600
++ IBV = 1E-4)
+*
+.END

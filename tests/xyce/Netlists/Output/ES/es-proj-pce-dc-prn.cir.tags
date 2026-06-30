@@ -1,0 +1,5 @@
+nightly, serial, parallel, pce
+embeddedsampling
+quadrature_pce
+output
+required:stokhos

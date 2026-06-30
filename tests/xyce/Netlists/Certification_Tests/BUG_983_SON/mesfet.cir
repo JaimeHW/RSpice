@@ -1,0 +1,19 @@
+* Test ID(*) IG(*) IS(*) for MESFET.  The output should not have the
+* branch currents for V devices.
+
+*N-Channel MESFET Circuits
+*
+VDS 2 0 2V
+VGS 3 0 pulse (-1 1 1ns 1ns 1ns 1us 2us)
+VSS 4 0 0
+Z1 2 3 4 MESMOD AREA=1.4
+Z2 2 3 4 MESMOD AREA=14
+
+.MODEL MESMOD NMF
++ LEVEL=1 BETA=1.4E-3
++ RD=46 RS=46 VTO=-1.3 LAMBDA=0.03 ALPHA=3 CGS=1uf CGD=1uf
+
+.tran 1ns 10us
+.PRINT tran V(2) ID(*) IG(*) IS(*)
+
+.END

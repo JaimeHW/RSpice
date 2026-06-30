@@ -1,0 +1,3 @@
+serial, nightly, parallel
+valgrind
+bsrc

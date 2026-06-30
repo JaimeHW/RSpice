@@ -1,0 +1,24 @@
+*
+* same as MINDUCTOR_IC.cir problem but using 
+* an expression for the IC value
+*
+VS 1 0 SIN(0 169.7 60HZ)
+R1 1 2 1K
+R2 3 0 1K
+L1 2 0 1mH IC={l1_ic_val}
+L2 3 0 1mH
+K1 L1 L2 0.75
+.TRAN 100US 25MS
+.PARAM l1_ic_val=0.50
+
+* Xyce option needed when default is changed to 1 (Backward Euler).
+* Also serves as useful test of non-default method.
+*.OPTIONS TIMEINT METHOD=2
+
+* Note. The two voltage signals are offset by 0.2 to avoid crossing
+* the zero axis.  Axis crossings cause problems for xyce_verify.
+.PRINT TRAN I(VS) {V(2)+0.2} {V(3)+0.2} i(L1) i(L2)
+
+*COMP V(2) reltol=0.02
+*COMP V(3) reltol=0.02
+.END

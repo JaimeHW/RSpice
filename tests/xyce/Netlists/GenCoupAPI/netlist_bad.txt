@@ -1,0 +1,14 @@
+********************************************************************************
+VS   1  0  PWL(0S 0V  1S 1V 2S 4V  3S 9V  4S 16V   5S 25V  6S 36V  7S 49V  8S 1E6V 
++              9S 998001V 10S 1E8V 11S 1E10V 12S 390625V)
+R1   1  0  1
+* SOURCE THAT TAKES THE SQUARE ROOT OF V1
+B2   2  0  V = {SQRT(V(1))}
+R2   2  0  1
+* SOURCE THAT SQUARES THE VALUE OF B2 
+* RESULTING IN THE ORIGINAL VALUE OF V1
+B3   3  0  V = {V(2)**2}
+R3   3  0  1
+*.TRAN 1S 12S
+.PRINT TRAN V(1) V(2) V(3)
+.END

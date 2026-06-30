@@ -1,0 +1,15 @@
+Regression test to show temperature-dependent capacitor behavior, reference
+
+.param tempParam=627
+
+c1    1 0 CAP1 1uF IC=1 TEMP={tempParam}
+r1    1 2 1K
+v1 2 0 0V
+.model CAP1 C ( TC1=1.77M TC2=-0.63U )
+
+.step tempParam list 627 727 827
+
+.print tran v(1)
+.tran 0 5ms
+.options timeint reltol=1e-6 abstol=1e-6
+.END

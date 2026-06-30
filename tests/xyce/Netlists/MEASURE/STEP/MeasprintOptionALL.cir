@@ -1,0 +1,26 @@
+********************************************************
+* Test .OPTIONS MEASURE MEASPRINT=ALL with .STEP.  This 
+* should generate both the .mt0 and .mt1 files and the 
+* measure output to stdout.
+*
+* See SON Bugs 1054 and 1057.
+********************************************************
+
+V1 1 0 PWL 0 -1 1 1
+R1 1 2 1
+R2 2 0 1
+
+.TRAN 0 1
+.STEP R1:R 1 2 1
+.PRINT TRAN V(1) V(2)
+
+.MEASURE TRAN MAXV2 MAX V(2)
+.MEASURE TRAN MINV2 MIN V(2)
+
+* Signifies end of test. .sh file looks for a measure
+* named lastMeasure in the stdout
+.MEASURE TRAN lastMeasure MAX V(1)
+
+.OPTIONS MEASURE MEASPRINT=ALL
+.END
+

@@ -1,0 +1,36 @@
+* This netlist will make separate .mt0 files for each
+* TRAN_CONT measure, by using the default value (1) for
+* .OPTIONS MEASURE USE_CONT_FILES.
+*
+* See SON Bug 1274 for more details.
+********************************************************
+*
+VPWL1 1  0  pwl(0 0.1 2.5m 0.5 5m 0 7.4m 0.4 10m 0)
+VPWL2 2  0  pwl(0 0.5 10m 0)
+
+R1  1  0  100
+R2  2  0  100
+
+* This matches the waveforms used in MEASURE_CONT/FindWhenTestTran.cir, so
+* that the test results can be cross-verified by inspection.
+VPWL1a 1a  0  pwl(0 0.1 2.5m 0.5 5m 0 7.5m 0.4 10m 0)
+VPWL2a 2a  0  pwl(0 0.5 10m 0)
+
+R1a  1a  0  100
+R2a  2a  0  100
+
+.TRAN 0 10ms
+.PRINT TRAN V(1) V(2) V(1a) V(2a)
+
+.measure tran derivCrossTest1 deriv v(1) when v(1)=0.2
+.measure TRAN_CONT derivCrossContTest1 deriv v(1) when v(1)=0.2
+
+.measure tran whenCrossTest1 when v(1a)=0.2
+.measure TRAN_CONT whenCrossContTest1 when v(1a)=0.2
+
+.measure TRAN findCrossTest1 find V(2a) when v(1a)=0.2
+.measure TRAN_CONT findCrossContTest1 find V(2a) when v(1a)=0.2
+
+.MEASURE TRAN_CONT TrigTargCont1 TRIG V(1a)=0.2 CROSS=1 TARG V(1a)=0.3 CROSS=1
+
+.END

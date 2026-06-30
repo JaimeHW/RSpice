@@ -1,0 +1,35 @@
+* Test remeasure support for .DC analyses. The main purpose 
+* is to test that remeasure works with a list-based step on 
+* the .DC line.
+*
+* See SON Bug 885 for more details.
+**************************************************************
+
+vsrc1   1a 0 1
+rload1a 1a 1b 0.1
+rload1b 1b 0 1
+
+vsrc2   2a 0 1
+rload2a 2a 1b 0.2
+
+.DC LIST vsrc1 1 20 40 60 80 100 LIN vsrc2 2 5 3
+
+* Note: vsrc1:DCV0 is the syntax for printing the DC value of vsrc1,
+* as it is swept. 
+.print dc vsrc1:DCV0 vsrc2:DCV0 v(1a) v(2a) v(1b)
+
+* MAX measure
+.measure dc maxv1b   max v(1b)
+.measure dc maxv1bFT max v(1b) FROM=20 TO=80
+
+*MIN measure
+.measure dc minv1b   min v(1b)
+.measure dc minv1bFT min v(1b) FROM=20 TO=80
+
+* PP measure
+.measure dc ppv1b   pp v(1b)
+.measure dc ppv1bFT pp v(1b) FROM=20 TO=80
+
+.end
+
+

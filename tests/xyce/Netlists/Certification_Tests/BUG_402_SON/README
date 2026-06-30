@@ -1,0 +1,18 @@
+
+BUG 402 SON was intended to ensure that the spice 
+syntax for setting device temperature:
+
+.options temp=xxx
+
+is correctly translated to Xyce's format:
+
+.options device temp=xxxx
+
+There are two versions of the test 
+netlist using the two ways to specify
+device temperature and both are run by the 
+test script bug402son.cir.sh.  Then
+the two results are compared with 
+xyce_verify.
+
+

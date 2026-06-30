@@ -1,0 +1,12 @@
+
+3/9/2015
+
+The gain-stagesoi_default_spice.cir circuit is not run as part of this test.  
+It was run in spice3 to generate the gold standard that is used for it.
+
+This is not what we normally do; regression test gold standards are nearly
+always generated from previous Xyce versions.  However, this test is
+in place to certify Bug 244, which was entitled, 
+
+"The defaults in Xyce bsimsoi do not match defaults in spice3 bsimsoi"
+

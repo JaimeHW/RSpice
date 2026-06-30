@@ -1,0 +1,38 @@
+*******************************************************************************
+* This netlist is equivalent to Step 1 for the DutyTest.cir netlist.
+* It has VS1:VA=2 and VS3:V0=-0.25
+*
+*******************************************************************************
+*
+* a few sources of different types
+VS1  1  0  SIN(0 2.0 100HZ 0 0)
+VP   2  0  PULSE( 0 100 2ms 2ms 2ms 10ms 20ms )
+
+R1  1  0  100
+R2  2  0  100
+
+* Use MEASFAIL to test the reset of the default calculation value
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0 0.5
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2)
+
+*.measure tran dutyAll DUTY V(1) ON=0.75 OFF=0.25
+.measure tran dutyTop Duty V(2) ON=75 OFF=25
+
+* add TO-FROM modifiers
+.measure tran sineHalfInterval duty V(1) on=0.75 off=0.25 from=0 to=0.25
+
+* mix in TDs before and after FROM value.
+.measure tran sineTDbetween duty V(1) ON=0.75 OFF=0.25 FROM=0 TO=0.25 TD=0.1
+.measure tran sineTDbefore duty V(1) ON=0.75 OFF=0.25 FROM=0.15 TO=0.25 TD=0.1
+
+* these tests should return -1 and -100
+.measure tran returnNegOne duty V(1) ON=0.75 OFF=0.25 FROM=0.2e-3 TO=0.25e-3 TD=0.5e-3 default_val=-1
+.measure tran returnNeg100 duty V(1) ON=0.75 OFF=0.25 FROM=0.2e-3 TO=0.25e-3 TD=0.5e-3 default_val=-100
+
+*this test should return 0
+.measure tran dutyZero DUTY V(1) ON=2.0 OFF=1.5
+
+.END
+

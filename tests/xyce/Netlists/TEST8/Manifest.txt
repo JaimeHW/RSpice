@@ -1,0 +1,2 @@
+tags
+test8.cir

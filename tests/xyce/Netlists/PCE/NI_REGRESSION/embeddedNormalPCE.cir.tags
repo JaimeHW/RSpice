@@ -1,0 +1,6 @@
+serial, nightly,  parallel, analytic
+embeddedsampling
+pce
+regression_pce
+required:stokhos
+valgrind

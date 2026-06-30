@@ -1,0 +1,12 @@
+Number of BSIM3 models: 2
+           name           NMOS           PMOS
+Number of BSIM3 instances: 17
+           name            M10            M12            M13             M2             M4             M6             M7
+Number of Capacitor models: 1
+           nameC level 1 (Capacitor)
+Number of Capacitor instances: 2
+           name             CL             CQ
+Number of Independent Voltage Source models: 1
+           nameV level 1 (Independent Voltage Source)
+Number of Independent Voltage Source instances: 3
+           name             VA             VB            VDD

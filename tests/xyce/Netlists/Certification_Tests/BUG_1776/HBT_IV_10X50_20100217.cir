@@ -1,0 +1,56 @@
+Test that Xyce calls updateTemperature even for devices that have no TEMP param
+*
+* Bug  1776 identified that the device manager was setting temperature
+* only by telling a device to set its "TEMP" parameter and then calling
+* "processParams"  This failed to work properly for VBIC, because most
+* verilog models don't have a TEMP instance parameter, and instead rely
+* on "$temperature" to be the simulator's current temperature.  The fix
+* makes sure that updateTemperature is called even for these devices.
+*
+* This netlist runs a simple DC sweep of a VBIC model through two
+* temperatures, and compares to a gold standard.
+
+.MODEL HN10x50 NPN LEVEL=11
++ AFN=1 AJC=-0.5 AJE=-0.5 AJS=-0.5 ART=0.1 AVC1=0 AVC2=0
++ BFN=1
++ CBCO=0 CBEO=0 CCSO=0 CJC=1.8617e-012 CJCP=0 CJE=1.0572e-012 CJEP=0 CTH=0
++ DEAR=0
++ EA=1.529 EAIC=1.529 EAIE=1.529 EAIS=1.529 EANC=1.529 EANE=1.529 EANS=1.529 EAP=1.12 EBBE=0
++ FC=0.9
++ GAMM=0
++ HRCF=0
++ IBBE=1e-008 IBCI=5.1365e-024 IBCIP=0 IBCN=6e-014 IBCNP=0 IBEI=1.0884e-022 IBEIP=0 IBEN=0 IBENP=0
++ IKF=0 IKP=0 IKR=0
++ IS=3.935e-024 ISMIN=1e-34 ISP=0 ISPMIN=0 ISRR=1 ITF=0
++ KFN=0
++ MC=0.328 ME=0.3763 MS=0.33
++ NBBE=1 NCI=0.97 NCIP=1 NCN=2 NCNP=2 NEI=1.22 NEN=2 NF=1 NFP=1 NKF=0.5 NR=1
++ PC=0.7659 PE=4.244 PS=0.75
++ QBM=0 QCO=0 QTF=0
++ RBI=10.1 RBP=1n RBPMIN=0 RBX=13.87 RCI=0.7491 RCX=4.57 RE=0.5423 RS=10G RTH=256.4
++ TAVC=0 TD=5.7e-13 TF=0 TNBBE=0 TNF=0 TNOM=25 TR=0 TVBBE1=0.586e-3 TVBBE2=0
++ VBBE=7.7 VEF=0 VER=0 VO=0 VRT=0 VTF=0
++ WBE=1 WSP=1
++ XII=4.5 XIKF=0 XIN=4.3 XIS=3.8 XISR=0 XRBI=0.35 XRBP=0 XRBX=0.35 XRCI=0.35 XRCX=0.35 XRE=0.4 XRS=0 XTF=0 XVO=0
+
+********* Simulation Settings - Parameters and SPICE Options *********
+* NOTE:  When I updated this test to VBIC 1.3, I removed the "dt" node
+* and its resistor.  This netlist makes no use of the "dt" node, and therefore
+* it is unnecessary to specify it on the Q line: VBIC 1.3 uses an internal
+* dt node if one is not specified on the instance line, assuring that the
+* device behaves correctly.  Turning off self-heating in VBIC 1.3 is done
+* by setting "sw_et=0" on the instance line, not through playing games with
+* the dt node.
+QNPN_1 N_2 N_1 0 HN10X50
+VVCE N_2 0  DC 2
+IBaseCurrent 0 N_1  DC 5u
+.PRINT  DC V(N_2) I(IBaseCurrent) {-I(VVCE)} TEMP
+
+********* Simulation Settings - Analysis section *********
+.dc lin VVCE 0 2 100m lin IBaseCurrent 200u 200u 100u
+*.temp 0 50
+.step temp list 0 50
+********* Simulation Settings - Additional SPICE commands *********
+
+.end
+

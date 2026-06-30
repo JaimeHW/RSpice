@@ -1,0 +1,78 @@
+# This is a set of perl regex commands that get applied to the output files to
+# produce "clean" files which are then differenced.
+
+# Remove the development string:
+s/DEVELOPMENT\-[0-9]+//;
+
+# Remove the wall clock timings:
+s/(Symbolic Factorization Time:)\s+[0-9\.e\-+]+/\1/;
+s/(Numeric Factorization Time:)\s+[0-9\.e\-+]+/\1/;
+s/(Solve Time:)\s+[0-9\.e\-+]+/\1/;
+s/(Solution Time:)\s+[0-9\.e\-+]+/\1/;
+s/(Problem read in and set up time:)\s+[0-9\.e\-+]+\s+(.*$)/\1\2/;
+s/(DCOP time:)\s+[0-9\.e\-+]+\s+(.*$)/\1\2/;
+s/(Total Residual Load Time:)\s+[0-9\.e\-+]+\s+(.*$)/\1\2/;
+s/(Total Jacobian Load Time:)\s+[0-9\.e\-+]+\s+(.*$)/\1\2/;
+s/(Transient Stepping time:)\s+[0-9\.e\-+]+\s+(.*$)/\1\2/;
+s/(Total Simulation Solvers Run Time:)\s+[0-9\.e\-+]+\s+(.*$)/\1\2/;
+s/(Total Elapsed Run Time:)\s+[0-9\.e\-+]+\s+(.*$)/\1\2/;
+s/(Estimated time to completion:)\s+.*$/\1/;
+s/(Solution time:)\s+[\-+0-9\.]+\s+(.*$)/\1\2/;
+
+# Remove current system time from output:
+s/(Current system time:).*$/\1/;
+
+# Remove date/time stamps from .prn files:
+s/(TIME=)\'[^\']+\'\s+(DATE=)\'[^\']+\'(.*$)/\1\2\3/;
+s/(DATASETAUXDATA TIME=)\s+\"[^\"]+\"(.*$)/\1\2/;
+s/(Date:)\s+[a-zA-Z]+\s[a-zA-Z]+\s[0-9]+\s[0-9:]+\s[0-9]+(.*$)/\1\2/;
+
+# Remove current system time from output:
+s/(Current system time:).*$/\1/;
+
+# Remove the name changes for this refactoring
+#s/N_TIA_[a-zA-Z_:0-9]+[\(\)]*//g;
+#s/N_ANP_[a-zA-Z_:0-9]+[\(\)]*//g;
+#s/secPtr_//g;
+#s/secRCPtr_//g;
+
+# Remove CVS tags:  Author, Revision, Date
+s/[\$]\s*RCSfile.*[\$]//;
+s/[\$]\s*Author.*[\$]//;
+s/[\$]\s*Revision.*[\$]//;
+s/[\$]\s*Date.*[\$]//;
+
+# 08/26/08 tscoffe:  Updates for MPDE_BRANCH Refactor
+# Change paths in error messages to match
+# /home/tscoffe/Project/Xyce__Work/MPDE_ANALYSIS_BRANCH/Xyce_Regression ->
+# /home/tscoffe/Project/Xyce__Work/MPDE_ANALYSIS_BRANCH/CLEAN/Xyce_Regression
+s-(MPDE_ANALYSIS_BRANCH)/(Xyce_Regression)-\1/CLEAN/\2-;
+s-(MPDE_ANALYSIS_BRANCH)/HEAD/(Xyce_Regression)-\1/CLEAN/\2-;
+# Change another path error in subckt_j1:
+s-(MPDE_ANALYSIS_BRANCH)/status_tests-\1/CLEAN/baseline_tests-;
+s-(MPDE_ANALYSIS_BRANCH)/HEAD/status_tests-\1/CLEAN/baseline_tests-;
+
+# BUG_386 prints lots of time & date to stdout
+# TIME = 02:22:09 PM
+s/(TIME\s+=\s+)\d+:\d+:\d+\s+[AP]M/\1/;
+# DATE = Aug 25, 2008 
+s/([\$]*DATE\s+=\s+)[a-zA-Z]+\s+\d+,\s+\d+/\1/;
+# testTIME = 02:22
+s/(testTIME\s+=\s+)\d+:\d+/\1/;
+# testDATE = Aug 25, 2008
+s/(testDATE\s+=\s+)[a-zA-Z]+\s+\d+,\s+\d+/\1/;
+# $TIME = 02:22
+s/([\$]TIME\s+=\s+)\d+:\d+/\1/;
+# $DATE = Aug 25, 2008
+# -> see DATE above
+# test date = Aug 25, 2008
+s/(test date\s+=\s+)[a-zA-Z]+\s+\d+,\s+\d+/\1/;
+# prn date = Aug 25, 2008
+s/(prn date\s+=\s+)[a-zA-Z]+\s+\d+,\s+\d+/\1/;
+# test time = 02:22 
+s/(test time\s+=\s+)\d+:\d+/\1/;
+# prn time = 02:22
+s/(prn time\s+=\s+)\d+:\d+/\1/;
+# $T = 02:22:09 PM-Aug 25, 2008
+s/([\$]T\s+=\s+)\d+:\d+:\d+\s+[AP]M-[a-zA-Z]+\s+\d+,\s+\d+/\1/;
+

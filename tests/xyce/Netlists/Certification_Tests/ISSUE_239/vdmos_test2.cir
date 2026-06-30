@@ -1,0 +1,40 @@
+irf130 test circuit
+* This test tests the use of "options parser scale" 
+*
+* The point of this test is to make sure that if agauss (without any sampling commands)
+* is applied to a scaled parameter, that it does the right 
+* thing, and doesn't apply scaling the wrong number of times.   
+* Prior to fixing issue 239, this would not be handled correctly.
+*
+* If sampling is not invoked (as it the case here), then the agauss operator 
+* should just return the mean.  However, as of this writing its presence 
+* forces extra processParam calls.
+vd 3 1 0.5
+vs 2 0 0
+vg 4 0 10 pulse(0 10 300ns 50ns 50ns 400ns 1000ns)
+vid 0 1 dc 0
+
+m1 3 4 2 0 irf130 w=0.386e6 l='agauss(2.5,0.25,1)'
+
+.model irf130 nmos level=18
++ cv=1
++ cve=1
++ vto=3.5
++ rd= 0
++ rs= 0.005
++ lambda=0
++ m=3
++ sigma0=0
++ uo=230
++ vmax=4e4
++ delta=5
++ tox=50nm
+
+.options parser scale=1.0e-6
+
+.tran 0.5n 1u 0u 2n
+.print tran precision=10 width=19 v(3) v(4) {i(vid)+0.5}
+
+.options timeint reltol=1.0e-2 abstol=1.0e-7
+.end
+

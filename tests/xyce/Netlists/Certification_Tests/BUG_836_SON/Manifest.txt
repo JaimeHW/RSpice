@@ -1,0 +1,6 @@
+sRC.cir
+sRC.cir.sh
+sRC_prn.cir
+sRC_tecp.cir
+exclude
+tags

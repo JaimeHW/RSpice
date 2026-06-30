@@ -1,0 +1,14 @@
+exclude
+tags
+multi_temperature_statement.cir.hspice
+multi_temperature_statement.cir
+multi_temperature_statement.cir.sh
+single_temperature_statement.cir.hspice
+single_temperature_statement.cir
+single_temperature_statement.cir.sh
+tnom_default_setting.cir.hspice
+tnom_default_setting.cir
+tnom_default_setting.cir.sh
+tnom_option_setting.cir.hspice
+tnom_option_setting.cir
+tnom_option_setting.cir.sh

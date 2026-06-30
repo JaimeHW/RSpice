@@ -1,0 +1,8 @@
+serial, nightly,  parallel, uniform
+capacitor
+sampling
+pce
+quadrature_pce
+nisp
+required:stokhos
+valgrind

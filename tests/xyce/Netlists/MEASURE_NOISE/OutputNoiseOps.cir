@@ -1,0 +1,104 @@
+* Test NOISE mode support for the all valid measures for the
+* ONOISE and DNO operators.  For the DNO operator, test:
+
+*  1) a device (R) that has only one noise source.
+*
+*  2) the total input noise from a device (Q) that has
+*     multiple noise sources.
+*
+*  3) An individual noise source contribution (IB) from
+*     a device that has multiple noise sources.
+*
+* See SON Bugs 824 and 1301 for more details.
+*****************************************************
+
+*==============  Begin SPICE netlist of main design ============
+.noise V(OUT) V1 lin 10 .01 0.1
+
+.print noise onoise DNO(R4) DNO(Q1) DNO(q1,ib) ONOISEMAX
+
+R5 0 OUT 1MEG
+V1 1 0 sin 0 1 1meg AC 1
+V2 Vcc 0 12
+C2 Vc OUT 10u
+R4 0 Ve 270
+R3 Vc Vcc 1.5k
+Q1 Vc Vb Ve 2N2222
+.MODEL 2N2222 NPN (Is=14.34f Xti=3 Eg=1.11 Vaf=74.03 Bf=255.9 Ne=1.307
++ Ise=14.34f Ikf=.2847 Xtb=1.5 Br=6.092 Nc=2 Isc=0 Ikr=0 Rc=1 Cjc=7.306p
++ Mjc=.3416 Vjc=.75 Fc=.5 Cje=22.01p Mje=.377 Vje=.75 Tr=46.91n Tf=411.1p
++ Itf=.6 Vtf=1.7 Xtf=3 Rb=10)
+R2 0 Vb 6.8k
+R1 Vb Vcc 39k
+C1 1 Vb 10u
+
+* used to make the comparison file for the ERROR measures
+*.noise V(OUT) V1 dec 10 .01 0.1
+*R4 0 Ve 250
+*.print noise FILE=OutputNoiseOpsRawData.NOISE.prn onoise DNO(r4) DNO(q1) DNO(Q1,IB)
+
+* AVG
+.MEASURE NOISE onoiseavg avg onoise
+.MEASURE NOISE dnor4avg avg {DNO(r4)}
+.MEASURE NOISE dnoq1avg avg {DNO(q1)}
+.MEASURE NOISE dnoq1ibavg avg {DNO(q1, IB)}
+
+* DERIV
+.MEASURE NOISE onoisderiv deriv {onoise} AT=0.05
+.MEASURE NOISE dnor4deriv deriv DNO(r4) AT=0.05
+.MEASURE NOISE dnoq1deriv deriv DNO(q1) AT=0.05
+.MEASURE NOISE dnoq1ibderiv deriv {DNO(q1, IB)} AT=0.05
+
+* EQN
+.MEASURE NOISE onoiseeqn eqn  ONOISE
+.MEASURE NOISE dnor4eqn  eqn  {DNO(r4)}
+.MEASURE NOISE dnoq1eqn  eqn  {DNO(q1)}
+.MEASURE NOISE dnoq1ibeqn eqn DNO(q1,ib)
+
+* ERROR
+.measure NOISE FitErrorONOISE ERROR onoise FILE=OutputNoiseOpsRawData.NOISE.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=2
+.measure NOISE FitErrorDNOR4 ERROR DNO(R4) FILE=OutputNoiseOpsRawData.NOISE.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=3
+.measure NOISE FitErrorDNOQ1 ERROR DNO(Q1) FILE=OutputNoiseOpsRawData.NOISE.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=4
+.measure NOISE FitErrorDNOQ1IB ERROR DNO(Q1,IB) FILE=OutputNoiseOpsRawData.NOISE.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=5
+
+* FIND-AT
+.MEASURE noise onoisefind find onoise AT=0.05
+.MEASURE NOISE dnoq1find  find  DNO(q1,ib) AT=0.05
+
+* INTEG
+.MEASURE NOISE onoiseinteg integ onoise
+.MEASURE NOISE dnor4integ  integ  dno(r4)
+.MEASURE NOISE dnoq1integ  integ  DNO(q1)
+.MEASURE NOISE dnoq1ibinteg integ DNO(q1,ib)
+
+* MAX
+.MEASURE NOISE onoisemax max  onoise
+.MEASURE NOISE dnor4max  max  dno(r4)
+.MEASURE NOISE dnoq1max  max  DNO(q1)
+.MEASURE NOISE dnoq1ibmax max DNO(q1,ib)
+
+* MIN
+.MEASURE NOISE onoisemin min  {onoise}
+.MEASURE NOISE dnor4min  min  DNO(r4)
+.MEASURE NOISE dnoq1min  min  DNO(Q1)
+.MEASURE NOISE dnoq1ibmin min DNO(Q1,ib)
+
+* PP
+.MEASURE NOISE onoisepp  pp  onoise
+.MEASURE NOISE dnor4pp   pp  {DNO(r4)}
+.MEASURE NOISE dnoq1pp   pp  DNO(q1)
+.MEASURE NOISE dnoq1ibpp  pp {DNO(q1,IB)}
+
+* RMS
+.MEASURE NOISE onoiserms  rms  onoise
+.MEASURE NOISE dnor4rms   rms  {DNO(r4)}
+.MEASURE NOISE dnoq1rms   rms  DNO(q1)
+.MEASURE NOISE dnoq1ibrms rms  {DNO(q1,IB)}
+
+* TRIG-TARG.  Note that MINVAL is needed on each .MEASURE line here,
+* since some of the measured values are smaller than the default MINVAL of 1e-12
+.MEASURE NOISE onoisett trig ONOISE=1e-14 CROSS=1 TARG ONOISE=9e-15 CROSS=1 MINVAL=1e-16
+.MEASURE NOISE dnoq1tt  trig  {DNO(q1)}=4e-15 RISE=1 targ {DNO(q1)}=5e-15 RISE=1 MINVAL=1e-16
+
+
+.end

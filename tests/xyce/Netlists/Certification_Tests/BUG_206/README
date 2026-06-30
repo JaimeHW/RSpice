@@ -1,0 +1,22 @@
+Bug Number: 206
+Test netlist: bug_206.cir
+
+Description:
+============
+This test checks that a a subcircuit instance line with a missing or misspelled
+subcircuit name is properly flagged. 
+
+Verification
+============
+This test should abort with the following message:
+
+User Fatal: Error in file bug_206.cir at or near line 3
+ Problem locating subcircuit: 0
+  Check for missing or misspelled subcircuit name.
+
+
+  *** Xyce Abort ***
+
+Special Notes:
+==============
+Parallel testing is not needed for this case.

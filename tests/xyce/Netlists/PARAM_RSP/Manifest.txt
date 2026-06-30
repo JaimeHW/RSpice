@@ -1,0 +1,16 @@
+BSIM_fit.cir
+BSIM_fit.cir.sh
+BSIM_fit.cir.tags
+BSIM_fit_gold.prn
+BSIM_fit_params1.in
+BSIM_fit_params2.in
+BSIM_fit_params3.in
+diode_template.cir
+diode_template.cir.sh
+diode_template_params1.in
+diode_template_params2.in
+diode_template_params3.in
+params.in.1
+rc_template.cir
+rc_template.cir.sh
+tags

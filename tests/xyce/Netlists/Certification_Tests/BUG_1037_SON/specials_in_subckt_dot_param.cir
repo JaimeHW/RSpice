@@ -1,0 +1,25 @@
+********************************************************
+* Testing that an attempt to use "specials" in a .PARAM
+* statement will cause a netlist parsing error with
+* a reasonable error message.  This covers the
+* subcircuit case.
+*
+********************************************************
+
+.DC V1 1 1 1
+V1 1 0 1
+R1 1 0 1
+
+V2 2 0
+X1 2 3 SUB1 PARAMS: RVAL=2
+R3 3 0
+
+.SUBCKT SUB1 a b PARAMS: RVAL=1
+RSUB a b RVAL
+.PARAM PA=TEMP
+.PARAM PB={2*VT}
+.PARAM PC={TIME}
+.ENDS
+
+.PRINT DC {X1:RSUB:R} I(X:RSUB:R) {PA} {PB} {PE}
+.END

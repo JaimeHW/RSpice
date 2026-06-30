@@ -1,0 +1,7 @@
+This is a series of tests for neuron devices:
+
+HH_Patch.cir -- Hodgken-Huxley equations on a membrane patch
+HH_Cable.cir -- Hodgken-Huxley equations on a membrane cable  
+CS_Patch.cir -- Conner Stevens equations on a membrane patch
+CS_Cable.cir -- Conner Stevens equations on a membrane cable
+

@@ -1,0 +1,68 @@
+*Analysis directives:
+.TRAN  0 10ms
+.PRINT TRAN FORMAT=PROBE V(N15206) V(N15971) V(N15554) V(N15997)
++  V(N16554) V(N16997) V(9a) V(9b) V(10a) V(10b) V(11a) V(11b)
+
+* RC Decay
+R_R1         N15206 N15971  1k 
+R_R2         N15975 N15971  10 
+C_C1         N16095 N15975  1u  
+R_R3         N16095 0  10 
+V_V1         N15206 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+
+*RC Decay with IC
+V_V2         N15554 0  
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s
+R_R4         N15554 N15997  1k 
+R_R5         N15967 N15997  10
+C_C2         N16112 N15967  1u 
+R_R6         N16112 0  10 
+.IC         V(N15967) =0.5
+
+*RC Decay with IC in subcircuit
+V_V3         N16554 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+R_R7         N16554 N16997  1k 
+X_X1         N16997 N17112  IC_Subckt
+R_R8         N17112 0 10 
+
+.SUBCKT IC_Subckt in out
+R1          in  mid 10
+C1          mid out 1u
+.ENDS
+.IC         V(X_X1:mid )=0.5
+
+* RC Decay with IC as an expression
+.param test_ic=0.5
+V_V9         9a 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+R_R9a         9a 9b  1k
+R_R9b         9c 9b  10 
+C_C9          9d 9c  1u
+R_R9c         0 9d  10
+.IC         V(9c)={test_ic}
+
+*RC Decay with IC in subcircuit as expression
+V_V10        10a 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+R_R10a         10a 10b  1k 
+X_X2          10b 10c  IC_SubcktExp
+R_10b         0 10c  10  
+
+.SUBCKT IC_SubcktExp in out
+R1          in  mid 10
+C1          mid out 1u
+.IC         V(mid )={test_ic}
+.ENDS
+
+* Duplicate third test, but have the .IC statement 
+* at the top-level, using subcircuit notation
+V_V11        11a 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+R_R11a       11a 11b  1k 
+X_X3         11b 11c  Subckt_noIC
+R_11b         0 11c  10  
+.IC V(X_X3:mid)=0.5
+
+.SUBCKT Subckt_noIC in out
+R1          in  mid 10
+C1          mid out 1u
+.ENDS
+
+.END

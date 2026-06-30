@@ -1,0 +1,622 @@
+ ***** Measure Functions ***** 
+
+AVGVAL = 1.349871e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: AVGFAILTO failed. TO value < FROM value
+AVGFAILTO = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: AVGFAILTD failed. TD value > TO value
+AVGFAILTD = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: AVGFAILEARLYSTART failed. TO value <= 0
+AVGFAILEARLYSTART = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+AVG1PT = 0.000000e+00 FAILED
+Measure Start Time= 5.000000e-04	Measure End Time= 5.000000e-04
+
+DERIVVALWHEN = 5.467851e+03 at time = 8.335581e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+DERIVVALWHENRISE1 = 5.467851e+03 at time = 8.335581e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+DERIVVALAT = -6.278146e+03 for AT = 5.000000e-04
+
+DERIVVALWHENFAIL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: DERIVVALATFAIL failed. AT value outside sim window
+DERIVVALATFAIL = 0.000000e+00 FAILED for AT = 5.000000e+00
+
+DERIVRISELAST = 4.061657e+03 at time = 8.648854e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: DERIVRISELASTFAIL failed. Measured Rise,Fall,Cross=(0,0,0)
+DERIVRISELASTFAIL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+DUTYVAL = 4.963589e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: DUTYFAILTO failed. TO value < FROM value
+DUTYFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: DUTYFAILTD failed. TD value > TO value
+DUTYFAILTD = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: DUTYFAILEARLYSTART failed. TO value <= 0
+DUTYFAILEARLYSTART = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+EQNVAL = 1.000000e+01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: EQNFAILTO failed. TO value < FROM value
+EQNFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: EQNEARLYSTART failed. TO value <= 0
+EQNEARLYSTART = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+WHENVAL = 8.335581e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+WHENLASTMINUS75 = 8.648854e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+WHENFIRST75 = 1.350317e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+WHENVALFAIL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+FINDWHENVAL = -5.000000e-01 at time = 8.335581e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+FINDWHENVALFAIL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+WHENLAST75 = 1.350317e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+FINDWHENLAST75 = -7.500000e-01 at time = 1.350317e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: FOURFAIL failed. FROM or TD value > sim end time
+FOURFAIL: FAILED
+
+Netlist warning: FOUR1PTFAILT failed. Only one point found in measurement
+ window.
+FOUR1PTFAILT: FAILED
+
+Netlist warning: FOURATFAIL failed. Period (1/AT) > measurement window length.
+FOURATFAIL: FAILED
+
+FREQVAL = 1.000000e+03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: FREQFAILTO failed. TO value < FROM value
+FREQFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: FREQFAILTD failed. TD value > TO value
+FREQFAILTD = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: FREQFALLEARLYSTART failed. TO value <= 0
+FREQFALLEARLYSTART = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+INTEGVAL = 1.349871e-07
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: INTEGFAILTO failed. TO value < FROM value
+INTEGFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: INTEGFAILTD failed. TD value > TO value
+INTEGFAILTD = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: INTEGFAILEARLYSTART failed. TO value <= 0
+INTEGFAILEARLYSTART = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+MAXVAL = 9.997576e-01 at time = 2.490367e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+MAXVALRISE1 = 9.997576e-01 at time = 2.490367e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Rise 1: Start Time= 1.000000e-10	End Time= 7.524385e-04
+
+MAXVALRISELAST = -2.447112e-16 at time = 1.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Last Rise: Start Time= 7.583585e-04	End Time= 1.000000e-03
+
+MAXVALRFCLEVEL = 9.997576e-01 at time = 2.490367e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Cross 1: Start Time= 8.519670e-05	End Time= 4.128767e-04
+
+Netlist warning: MAXFAILTO failed. TO value < FROM value
+MAXFAILTO = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MAXFAILTD failed. TD value > TO value
+MAXFAILTD = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MAXFAILEARLYSTART failed. TO value <= 0
+MAXFAILEARLYSTART = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+Netlist warning: MAXFAILRISE failed. Measured Rise,Fall,Cross=(2,1,1)
+MAXFAILRISE = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MAXFAILFALL failed. Measured Rise,Fall,Cross=(2,1,1)
+MAXFAILFALL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MAXFAILCROSS failed. Measured Rise,Fall,Cross=(2,1,1)
+MAXFAILCROSS = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+MINVAL = -9.992057e-01 at time = 7.524385e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+MINVALFALLLAST = -9.992057e-01 at time = 7.524385e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Last Fall: Start Time= 2.555903e-04	End Time= 1.000000e-03
+
+MINVALRFCLEVEL = 5.100657e-01 at time = 8.519670e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Cross 1: Start Time= 8.519670e-05	End Time= 4.128767e-04
+
+Netlist warning: MINFAILTO failed. TO value < FROM value
+MINFAILTO = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MINFAILTD failed. TD value > TO value
+MINFAILTD = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MINFAILEARLYSTART failed. TO value <= 0
+MINFAILEARLYSTART = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+Netlist warning: MINFAILRISE failed. Measured Rise,Fall,Cross=(2,1,1)
+MINFAILRISE = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MINFAILFALL failed. Measured Rise,Fall,Cross=(2,1,1)
+MINFAILFALL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MINFAILCROSS failed. Measured Rise,Fall,Cross=(2,1,1)
+MINFAILCROSS = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+OFFVAL = 5.084801e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+OFFVALLOW = 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: OFFFAILTO failed. TO value < FROM value
+OFFFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: OFFFAILTD failed. TD value > TO value
+OFFFAILTD = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: OFFFAILEARLYSTART failed. TO value <= 0
+OFFFAILEARLYSTART = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+ONVAL = 4.963589e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+ONVALHIGH = 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: ONFAILTO failed. TO value < FROM value
+ONFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: ONFAILTD failed. TD value > TO value
+ONFAILTD = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: ONFAILEARLYSTART failed. TO value <= 0
+ONFAILEARLYSTART = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+PPVAL = 1.998963e+00 with max at time= 2.490367e-04 and min at time= 7.524385e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+PPCROSSLAST = 9.992057e-01 with max at time= 1.000000e-03 and min at time= 7.524385e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Last Cross: Start Time= 5.046271e-04	End Time= 1.000000e-03
+
+PPVALRFCLEVEL = 4.896919e-01 with max at time= 2.490367e-04 and min at time= 8.519670e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Cross 1: Start Time= 8.519670e-05	End Time= 4.128767e-04
+
+Netlist warning: PPFAILTO failed. TO value < FROM value
+PPFAILTO = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: PPFAILTD failed. TD value > TO value
+PPFAILTD = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: PPFAILEARLYSTART failed. TO value <= 0
+PPFAILEARLYSTART = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+Netlist warning: PPFAILRISE failed. Measured Rise,Fall,Cross=(2,1,1)
+PPFAILRISE = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: PPFAILFALL failed. Measured Rise,Fall,Cross=(2,1,1)
+PPFAILFALL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: PPFAILCROSS failed. Measured Rise,Fall,Cross=(2,1,1)
+PPFAILCROSS = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+RMSVAL = 7.067979e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: RMSFAILTO failed. TO value < FROM value
+RMSFAILTO = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: RMSFAILTD failed. TD value > TO value
+RMSFAILTD = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: RMSFAILEARLYSTART failed. TO value <= 0
+RMSFAILEARLYSTART = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+RMS1PT = 0.000000e+00 FAILED
+Measure Start Time= 5.000000e-04	Measure End Time= 5.000000e-04
+
+TRIGTARGVAL = 2.119274e-04 with trig time= 1.594577e-05 and targ time= 2.278731e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+TRIGRISELASTFALLLAST = 4.195422e-04 with trig time= 4.022109e-05 and targ time= 4.597633e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+TRIGLASTFAIL = 0.000000e+00 FAILED with trig time= 4.597633e-04 and targ time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+TRIGTARGFAIL = 0.000000e+00 FAILED with trig time= 1.594189e-05 and targ time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: TRIGTARGATFAIL failed. AT value outside sim window
+TRIGTARGATFAIL = 0.000000e+00 FAILED with trig time= 0.000000e+00 and targ time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+LASTMEASURE = -6.278146e+03 for AT = 5.000000e-04
+ ***** Measure Functions ***** 
+
+AVGVAL = 3.042793e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: AVGFAILTO failed. TO value < FROM value
+AVGFAILTO = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: AVGFAILTD failed. TD value > TO value
+AVGFAILTD = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: AVGFAILEARLYSTART failed. TO value <= 0
+AVGFAILEARLYSTART = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+AVG1PT = 0.000000e+00 FAILED
+Measure Start Time= 5.000000e-04	Measure End Time= 5.000000e-04
+
+DERIVVALWHEN = 1.211714e+04 at time = 4.022109e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+DERIVVALWHENRISE1 = 1.211714e+04 at time = 4.022109e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+DERIVVALAT = -1.256037e+04 for AT = 5.000000e-04
+
+DERIVVALWHENFAIL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: DERIVVALATFAIL failed. AT value outside sim window
+DERIVVALATFAIL = 0.000000e+00 FAILED for AT = 5.000000e+00
+
+DERIVRISELAST = 1.163279e+04 at time = 9.387504e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: DERIVRISELASTFAIL failed. Measured Rise,Fall,Cross=(0,0,0)
+DERIVRISELASTFAIL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+DUTYVAL = 5.060423e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: DUTYFAILTO failed. TO value < FROM value
+DUTYFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: DUTYFAILTD failed. TD value > TO value
+DUTYFAILTD = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: DUTYFAILEARLYSTART failed. TO value <= 0
+DUTYFAILEARLYSTART = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+EQNVAL = 1.000000e+01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: EQNFAILTO failed. TO value < FROM value
+EQNFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: EQNEARLYSTART failed. TO value <= 0
+EQNEARLYSTART = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+WHENVAL = 4.022109e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+WHENLASTMINUS75 = 9.387504e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+WHENFIRST75 = 6.119454e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+WHENVALFAIL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+FINDWHENVAL = -2.500000e-01 at time = 4.022109e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+FINDWHENVALFAIL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+WHENLAST75 = 6.119454e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+FINDWHENLAST75 = -3.750000e-01 at time = 6.119454e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: FOURFAIL failed. FROM or TD value > sim end time
+FOURFAIL: FAILED
+
+Netlist warning: FOUR1PTFAILT failed. Only one point found in measurement
+ window.
+FOUR1PTFAILT: FAILED
+
+Netlist warning: FOURATFAIL failed. Period (1/AT) > measurement window length.
+FOURATFAIL: FAILED
+
+FREQVAL = 1.000000e+03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: FREQFAILTO failed. TO value < FROM value
+FREQFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: FREQFAILTD failed. TD value > TO value
+FREQFAILTD = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: FREQFALLEARLYSTART failed. TO value <= 0
+FREQFALLEARLYSTART = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+INTEGVAL = 3.042793e-07
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: INTEGFAILTO failed. TO value < FROM value
+INTEGFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: INTEGFAILTD failed. TD value > TO value
+INTEGFAILTD = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: INTEGFAILEARLYSTART failed. TO value <= 0
+INTEGFAILEARLYSTART = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+MAXVAL = 1.999515e+00 at time = 2.490367e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+MAXVALRISE1 = 1.999515e+00 at time = 2.490367e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Rise 1: Start Time= 1.000000e-10	End Time= 7.475126e-04
+
+MAXVALRISELAST = -4.894180e-16 at time = 1.000000e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Last Rise: Start Time= 7.547237e-04	End Time= 1.000000e-03
+
+MAXVALRFCLEVEL = 1.999515e+00 at time = 2.490367e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Cross 1: Start Time= 4.587510e-05	End Time= 4.587519e-04
+
+Netlist warning: MAXFAILTO failed. TO value < FROM value
+MAXFAILTO = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MAXFAILTD failed. TD value > TO value
+MAXFAILTD = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MAXFAILEARLYSTART failed. TO value <= 0
+MAXFAILEARLYSTART = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+Netlist warning: MAXFAILRISE failed. Measured Rise,Fall,Cross=(2,1,1)
+MAXFAILRISE = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MAXFAILFALL failed. Measured Rise,Fall,Cross=(2,1,1)
+MAXFAILFALL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MAXFAILCROSS failed. Measured Rise,Fall,Cross=(2,1,1)
+MAXFAILCROSS = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+MINVAL = -1.998411e+00 at time = 7.475126e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+MINVALFALLLAST = -1.998411e+00 at time = 7.475126e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Last Fall: Start Time= 2.555903e-04	End Time= 1.000000e-03
+
+MINVALRFCLEVEL = 5.123441e-01 at time = 4.587519e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Cross 1: Start Time= 4.587510e-05	End Time= 4.587519e-04
+
+Netlist warning: MINFAILTO failed. TO value < FROM value
+MINFAILTO = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MINFAILTD failed. TD value > TO value
+MINFAILTD = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MINFAILEARLYSTART failed. TO value <= 0
+MINFAILEARLYSTART = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+Netlist warning: MINFAILRISE failed. Measured Rise,Fall,Cross=(2,1,1)
+MINFAILRISE = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MINFAILFALL failed. Measured Rise,Fall,Cross=(2,1,1)
+MINFAILFALL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MINFAILCROSS failed. Measured Rise,Fall,Cross=(2,1,1)
+MINFAILCROSS = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+OFFVAL = 5.012690e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+OFFVALLOW = 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: OFFFAILTO failed. TO value < FROM value
+OFFFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: OFFFAILTD failed. TD value > TO value
+OFFFAILTD = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: OFFFAILEARLYSTART failed. TO value <= 0
+OFFFAILEARLYSTART = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+ONVAL = 5.060423e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+ONVALHIGH = 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: ONFAILTO failed. TO value < FROM value
+ONFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: ONFAILTD failed. TD value > TO value
+ONFAILTD = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: ONFAILEARLYSTART failed. TO value <= 0
+ONFAILEARLYSTART = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+PPVAL = 3.997926e+00 with max at time= 2.490367e-04 and min at time= 7.475126e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+PPCROSSLAST = 1.998411e+00 with max at time= 1.000000e-03 and min at time= 7.475126e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Last Cross: Start Time= 5.023365e-04	End Time= 1.000000e-03
+
+PPVALRFCLEVEL = 1.487171e+00 with max at time= 2.490367e-04 and min at time= 4.587519e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+Cross 1: Start Time= 4.587510e-05	End Time= 4.587519e-04
+
+Netlist warning: PPFAILTO failed. TO value < FROM value
+PPFAILTO = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: PPFAILTD failed. TD value > TO value
+PPFAILTD = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: PPFAILEARLYSTART failed. TO value <= 0
+PPFAILEARLYSTART = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+Netlist warning: PPFAILRISE failed. Measured Rise,Fall,Cross=(2,1,1)
+PPFAILRISE = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: PPFAILFALL failed. Measured Rise,Fall,Cross=(2,1,1)
+PPFAILFALL = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: PPFAILCROSS failed. Measured Rise,Fall,Cross=(2,1,1)
+PPFAILCROSS = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+RMSVAL = 1.413587e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: RMSFAILTO failed. TO value < FROM value
+RMSFAILTO = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: RMSFAILTD failed. TD value > TO value
+RMSFAILTD = 0.000000e+00 FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: RMSFAILEARLYSTART failed. TO value <= 0
+RMSFAILEARLYSTART = 0.000000e+00 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= -1.000000e+00
+
+RMS1PT = 0.000000e+00 FAILED
+Measure Start Time= 5.000000e-04	Measure End Time= 5.000000e-04
+
+TRIGTARGVAL = 7.447893e-05 with trig time= 7.962449e-06 and targ time= 8.244137e-05
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+TRIGRISELASTFALLLAST = 4.600909e-04 with trig time= 1.994769e-05 and targ time= 4.800386e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+TRIGLASTFAIL = 0.000000e+00 FAILED with trig time= 4.800386e-04 and targ time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+TRIGTARGFAIL = 0.000000e+00 FAILED with trig time= 1.594189e-05 and targ time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: TRIGTARGATFAIL failed. AT value outside sim window
+TRIGTARGATFAIL = 0.000000e+00 FAILED with trig time= 0.000000e+00 and targ time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+LASTMEASURE = -1.256037e+04 for AT = 5.000000e-04

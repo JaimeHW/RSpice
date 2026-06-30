@@ -1,0 +1,120 @@
+*Circuit with big mutual inductor, hoping to trip bug 37 (son)
+
+VIN 1a 0 sin ( 0 1 1KHz)
+*Primary winding
+L1 1a 1b 1uH
+R1 1b 0 1
+
+* secondary windings
+Lp1 2 3 1uh
+Lp2 4 5 1.5uh
+Lp3 6 7 2uh
+Lp4 8 9 2.5uh
+Lp5 10 11 3uh
+Lp6 12 13 3.5uh
+Lp7 14 15 4uh
+Lp8 16 17 4.5uh
+Lp9 18 19 5uh
+Lp10 20 21 5.5uh
+
+* loads for the secondaries
+Rp1 2 0  1k
+Rg1 3 0  .1u
+
+Rp2 4 0  1k
+Rg2 5 0  .1u
+
+Rp3 6 0  1k
+Rg3 7 0  .1u
+
+Rp4 8 0  1k
+Rg4 9 0  .1u
+
+Rp5 10 0  1k
+Rg5 11 0  .1u
+
+Rp6 12 0  1k
+Rg6 13 0  .1u
+
+Rp7 14 0  1k
+Rg7 15 0  .1u
+
+Rp8 16 0  1k
+Rg8 17 0  .1u
+
+Rp9 18 0  1k
+Rg9 19 0  .1u
+
+Rp10 20 0  1k
+Rg10 21 0  .1u
+
+* Mutual coupling
+K1 L1 Lp1 .8
+K2 L1 Lp2 .8
+K3 L1 Lp3 .8
+K4 L1 Lp4 .8
+K5 L1 Lp5 .8
+K6 L1 Lp6 .8
+K7 L1 Lp7 .8
+K9 L1 Lp8 .8
+K9 L1 Lp9 .8
+K10 L1 Lp10 .8
+
+Kp1p2 Lp1 Lp2 .5
+Kp1p3 Lp1 Lp3 .25
+Kp1p4 Lp1 Lp4 .125
+Kp1p5 Lp1 Lp5 .0625
+Kp1p6 Lp1 Lp6 .03125
+Kp1p7 Lp1 Lp7 .015625
+Kp1p8 Lp1 Lp8 .0087125
+Kp1p9 Lp1 Lp9 .00390625
+Kp1p10 Lp1 Lp10 .001953125
+
+Kp2p3 Lp2 Lp3 .5
+Kp2p4 Lp2 Lp4 .25
+Kp2p5 Lp2 Lp5 .125
+Kp2p6 Lp2 Lp6 .0625
+Kp2p7 Lp2 Lp7 .03125   
+Kp2p8 Lp2 Lp8 .015625  
+Kp2p9 Lp2 Lp9 .0087125 
+Kp2p10 Lp2 Lp10 .00390625 
+
+Kp3p4 Lp3 Lp4 .5
+Kp3p5 Lp3 Lp5 .25
+Kp3p6 Lp3 Lp6 .125
+Kp3p7 Lp3 Lp7 .0625 
+Kp3p8 Lp3 Lp8  .03125   
+Kp3p9 Lp3 Lp9  .015625  
+Kp3p10 Lp3 Lp10 .0087125   
+
+Kp4p5 Lp4 Lp5 .5
+Kp4p6 Lp4 Lp6 .25
+Kp4p7 Lp4 Lp7 .125
+Kp4p8 Lp4 Lp8 .0625 
+Kp4p9 Lp4 Lp9 .03125   
+Kp4p10 Lp4 Lp10  .015625  
+
+Kp5p6 Lp5 Lp6 .5
+Kp5p7 Lp5 Lp7 .25
+Kp5p8 Lp5 Lp8 .125
+Kp5p9 Lp5 Lp9 .0625 
+Kp5p10 Lp5 Lp10 .03125   
+
+Kp6p7 Lp6 Lp7 .5
+Kp6p8 Lp6 Lp8 .25
+Kp6p9 Lp6 Lp9 .125
+Kp6p10 Lp6 Lp10 .0625 
+
+Kp7p8 Lp7 Lp8 .5
+Kp7p9 Lp7 Lp9 .25
+Kp7p10 Lp7 Lp10 .125
+
+Kp8p9 Lp8 Lp9 .5
+Kp8p10 Lp8 Lp10 .25
+
+Kp9p10 Lp9 Lp10 .5
+
+.print tran V(1a) V(2) V(4) V(6) V(8) V(10) V(12)
+.tran 1u 10ms
+.end
+

@@ -1,0 +1,12 @@
+Test of .options output initial_interval=  with following time/timestep pair
+V1 1 0 sin(11 10 1KHz)
+R1 1 0 100
+
+.tran 0 11ms
+* This should cause Xyce to output one point every 1ms until t=9ms, and then
+* output every .1ms.  For the last 1ms, output every 10us
+.options output initial_interval=1ms 9ms .1ms 10ms 10us
+
+.print tran  V(1) I(V1)
+
+.end

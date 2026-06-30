@@ -1,0 +1,3 @@
+serial, nightly, parallel, normal, expression, issue377
+valgrind
+sampling

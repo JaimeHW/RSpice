@@ -1,0 +1,17 @@
+* These paths are relative to the sub1 subdirectory.
+.INC sub2/include2_path_rel_sub1
+.LIB ./sub2/lib2_path_rel_sub1 LIB_REL3
+
+* The these paths are relative to the directory of top-level netlist,
+* should be found as "fallbacks" since their paths don't exist via
+* the sub1 subdirectory.
+.INC sub1/sub2/include2_path_rel_top
+.LIB sub1/sub2/lib2_path_rel_top LIB_REL1
+
+* These are testing that the paths relative to the sub1 subdirectory
+* are preferred to paths relative to the directory of the top-level
+* netlist, when both files exist.
+.INC precedence/inc_precedence
+.LIB precedence/lib_precedence LIB_REL4
+
+

@@ -1,0 +1,41 @@
+Test of series RLC circuit
+* This version depends on the "general external" device to do the actual
+* evaluation of the equations, and as such it MUST be run through the
+* "GenCouplingSimulator" API with an appropriate "VectorComputeInterface"
+* implementation.
+*
+* This tests lead currents in three of the devices implemented by the test
+* harness.  We test the two two-terminal devices and the three-terminal device,
+* checking for equality of currents for two-terminal devices in series,  and
+* net current balance in the 3-terminal device.
+
+V1 1 0 SIN (5v 5v 10MEG)
+Vprobe1 1 1b 0
+* 1K ohm Resistor implemented as external device
+YGenExt R1 1b 1a  DPARAMS={NAME=R VALUE=1K}
+* RLC network implemented as external device
+YGenExt rlc1 1a 1c DPARAMS={NAME=R,L,C VALUE=1K,1m,1p}
+YGenExt ThreeTerm1 1c 1d 1e foobar DPARAMS={NAME=R1,R2 VALUE=1K,500}
+Vprobe2 1d 0 0
+Vprobe3 1e 0 0
+
+
+.tran 1n .2u
+
+* It is only safe to assume equality of lead currents to within the RHS tol
+.options nonlin-tran rhstol=1.0e-7
+
+*Dummy model card just to get around Xyce parser limitation.
+.model foobar genext
+
+* It is only safe to assume equality of lead currents to within the RHS tol
+* So set comparator rtol to the rhstol here for each output signal:
+*COMP {I(vprobe1)-I1(YGenExt!R1)} abstol=1e-6 zerotol=1e-7
+*COMP {I(vprobe1)-I1(YGenExt!RLC1)} abstol=1e-6 zerotol=1e-7
+*COMP {I(vprobe1)-I1(YGenExt!ThreeTerm1)} abstol=1e-6 zerotol=1e-7
+*COMP {I(vprobe1)+I2(YGenExt!ThreeTerm1)+I3(YGenExt!ThreeTerm1)} abstol=1e-6 zerotol=1e-7
+*COMP {I1(YGenExt!ThreeTerm1)+I2(YGenExt!ThreeTerm1)+I3(YGenExt!ThreeTerm1)} abstol=1e-6 zerotol=1e-7
+
+.print tran {I(vprobe1)-I1(YGenExt!R1)} {I(vprobe1)-I1(YGenExt!RLC1)} {I(vprobe1)-I1(YGenExt!ThreeTerm1)} {I(vprobe1)+I2(YGenExt!ThreeTerm1)+I3(YGenExt!ThreeTerm1)} {I1(YGenExt!ThreeTerm1)+I2(YGenExt!ThreeTerm1)+I3(YGenExt!ThreeTerm1)}
+
+.end

@@ -1,0 +1,55 @@
+A test of the measure derivative functionality with .STEP
+*******************************************************************************
+*
+* a few sources of different types
+
+VS1  1  0  SIN(0 1 1KHz 0 0)
+VP   2  0  PULSE( 0 100 0.2ms 0.2ms 0.2ms 1ms 2ms )
+VS3  3  0  SIN(-0.5 1.0 1KHz 0 0.5)
+VS4  4  0  SIN(0.5 -1.0 1KHz 0 0.5)
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+R4  4  0  100
+
+* Use MEASFAIL to test the reset of the default calculation value
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0  10ms
+.step VS1:VA 1 2 1.0 
+.step VS3:V0 -0.25 -0.5 -0.25
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3) V(4)
+
+* test the AT syntax
+.measure tran deriv_at_002_sin deriv v(1) AT=0.002
+.measure tran deriv_at_00021_pulse deriv v(2) AT=0.00021
+.measure tran deriv_at_zero_sin deriv v(1) AT=0.0
+.measure tran deriv_at_endSimTime_sin deriv v(1) AT=0.01
+
+* Test the WHEN syntax
+.measure tran deriv_when_20 deriv v(1) WHEN v(1)=0.2
+
+* mix in TDs before and after FROM value.
+.measure tran deriv_when_075_tda deriv V(1) WHEN v(1)=0.75 FROM=2e-3 TO=4e-3 TD=3e-3
+.measure tran deriv_when_075_tdb deriv V(1) WHEN v(1)=0.75 FROM=3e-3 TO=4e-3 TD=2e-3
+
+* add tests for rise/fall/cross.  VS3 and VS4 have a DC offset
+* and are damped sinusoids
+.measure tran deriv3fall2 deriv v(3) when v(3)=0.25 fall=2
+.measure tran deriv4rise1 deriv v(4) when v(4)=0.25 rise=1
+.measure tran deriv3cross2 deriv v(3) when v(3)=0.25 cross=2
+
+* test LAST for rise/fall/cross
+.measure tran deriv3falllast deriv v(3) when v(3)=0.25 fall=last
+.measure tran deriv4riselast deriv v(4) when v(4)=0.25 rise=last
+.measure tran deriv3crosslast deriv v(3) when v(3)=0.25 cross=last
+
+*test Failed measures for rise/fall/cross
+.measure tran deriv3fallfail deriv v(3) when v(3)=0.25 fall=250 default_val=-1
+.measure tran deriv4risefail deriv v(4) when v(4)=0.25 rise=250 default_val=-1
+.measure tran deriv3crossfail deriv v(3) when v(3)=0.25 cross=250 default_val=-1
+.measure tran deriv3riselastfail deriv v(3) when v(3)=0.75 RISE=LAST default_val=-1
+
+.END
+

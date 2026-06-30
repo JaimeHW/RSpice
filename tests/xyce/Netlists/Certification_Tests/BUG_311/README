@@ -1,0 +1,34 @@
+Bug Number: 311
+Test netlists: bug_311_a.cir
+               bug_311_b.cir
+
+Description:
+============
+Bug 311 involved a problem locating models in subcircuits when a device
+using one of those models appeared in the netlist after a subcircuit
+instance of any kind.
+
+Bugs 307 and 311 arose due to the recent introduction of the Xyce class
+N_IO_CircuitContext. This class had not been adequately tested for
+possible problems during the context construction and navigaton phases
+(roughly pass 1 and pass 2 of the netlist parser, respectively). In
+addition to testing bug 311, this test attempts to exercise various
+aspects of the N_IO_Circuit class. 
+
+Verification:
+=============
+
+   1) Run bug_311_a.cir, bug_311_b.cir
+
+   2) Compare the results using xyce_verify.
+
+   3) The log for bug_311_a.cir should contain the following message:
+
+      Reading model named SW in the subcircuit ONEBIT and found one or more models previously defined in this scope.
+
+Notes:
+======
+  - Parallel testing should be performed. 
+  
+  - Problems with direct matrix handling currently require this to be
+    turned off for the parallel runs, use the "-dma off" flag.

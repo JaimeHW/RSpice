@@ -1,0 +1,29 @@
+* This netlist will make separate .ms0 files for each
+* DC_CONT measure, by using the default value (1) for
+* .OPTIONS MEASURE USE_CONT_FILES.
+*
+* See SON Bug 1274 for more details
+*****************************************************
+
+.DC V1 1 10 1
+.PRINT DC V(1) V(2) V(3)
+
+V1 1 0 1
+R1 1 0 1
+
+B2 2 0 V={(V(1)-2.5)*(V(1)-2.5)*(V(1)-7.5)*(V(1)-7.5)/4}
+R2 2 3 1
+R3 3 0 1
+
+.MEASURE DC derivCrossTest1 DERIV V(2) WHEN V(2)=5
+.MEASURE DC_CONT derivCrossContTest1 derivative V(2) WHEN V(2)=5
+
+.MEASURE DC whenCrossTest1 WHEN V(2)=5
+.MEASURE DC_CONT whenCrossContTest1 WHEN V(2)=5
+
+.MEASURE DC findCrossTest1 FIND V(3) WHEN V(2)=5
+.MEASURE DC_CONT findCrossContTest1 FIND V(3) WHEN V(2)=5
+
+.MEASURE DC_CONT trigTargContTest1 TRIG V(2)=3 CROSS=1 TARG V(2)=7 CROSS=1
+
+.END

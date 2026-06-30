@@ -1,0 +1,13 @@
+simple RC
+
+.tran   0    50e-5
+
+.print tran  v(1) v(2)
+
+v1 1 0 sin 0 1V 1e5 0 0
+
+r1 1 2 1k
+c1 2 0 2u
+
+.ic v(2) = 1
+.end

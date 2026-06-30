@@ -1,0 +1,18 @@
+test circuit for missing nodes on lines
+
+* Sources
+V1 in_1 0 5V
+
+* Analysis
+.DC V1 1 5 1
+
+* Output
+.PRINT DC v(in_1) v(out_1)
+
+* Resistors
+R1 in_1 out_1 100K
+R2 out_1
+
+* Capacitors
+C2 out_1 100pF
+

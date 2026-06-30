@@ -1,0 +1,31 @@
+* FM_Modulator 
+
+C2 2 3 100n 
+C3 3 0 1n 
+C4 1 6 30P 
+C5 6 4 10P 
+C6 4 0 30P 
+L 1 6 90N 
+R1 2 1 2.2K 
+R2 3 1 22K 
+R3 4 0 220 
+
+Q 6 3 4 2N2222
+
+Vcc 1 0 dc 0 pulse (0 3 10n) 
+vin 2 1 dc 0 sin(0 100m 200k) 
+
+.model 2n2222 npn (is=19f bf=150 vaf=100 ikf=0.18 ise=50p 
++ ne=2.5 br=7.5 var=6.4 ikr=12m isc=8.7p nc=1.2 rb=50 re=0.4 
++ rc=0.3 cje=26p tf=0.5n cjc=11p tr=7n xtb=1.5 kf=0.032f af=1) 
+
+.TRAN 10n 20n
+*.print tran V(1) V(2) V(6)
+*v(3) v(4) N(q_collectorprime) N(q_baseprime)  N(q_baseprime) N(l_branch) 
+ 
+.options timeint reltol=5e-2
+
+.options nonlin nox=0
+.options nonlin-tran nox=0 
+
+.END

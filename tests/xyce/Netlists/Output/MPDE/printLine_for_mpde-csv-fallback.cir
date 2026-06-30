@@ -1,0 +1,10 @@
+*
+* This "circuit" exists to provide a meaningful .PRINT line to xyce_verify.pl.
+*
+* It isn't supposed to be run, and will exit with error.  Also the .PRINT lines
+* are missing the expression braces because of a limitation in how convertToPrn.py
+* works.  The "gold standard" has been similarly modified.
+*
+
+.mpde 0 1.0e-8
+.print mpde FORMAT=CSV {v(1)+2}

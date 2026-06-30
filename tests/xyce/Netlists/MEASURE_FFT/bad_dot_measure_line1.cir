@@ -1,0 +1,100 @@
+********************************************************************
+* Test error message for various invalid .MEASURE FFT lines.
+*
+* The netlist and .TRAN print/analysis statements in this
+* netlist  don't really matter.  However, there must be matching
+* .FFT statements for the output variables used on the various
+* invalid .MEASURE FFT
+*
+*******************************************************************
+
+.TRAN 0 1us
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+*Drain curves
+Vds2c 1c 0 5V
+Vgs2c 2c 0 pulse (0 1 10ns 80ns 10ns 1us)
+J1 1c 2c 0 SA2109
+*
+.MODEL SA2109 NJF
++ LEVEL=2
++ BETA= 0.0003790
++ VTO = -3.760
++ PB = 0.650
++ LAMBDA = 0.01240
++ DELTA = 0.370;
++ THETA = 0.01120;
++ RD = 0.0
++ RS = 104.5
++ FC = 0.5
++ IS = 1.393E-10
++ AF = 1.0
++ KF = 0.05
++ CGS= 1uf
++ CGD= 1uf
+*
+
+* bjt
+vie 0 1b 0
+vic 0 3b 5
+vib 0 2b pulse(0 1 50ns 400s 50ns 1us)
+q1 3b 2b 1b qjunk
+
+.model qjunk npn
++bf=130 br=1 is=3e-14
++tf=1e-8 vjs=0.68 ne=1.6 nc=2.0 rb=450
++cje=1uf cjc=1uf cjs=1uf ikf=0.002 ikr=0.002 vaf=50 var=50
++nf=1.0 ise=0 nr=1 isc=0 irb=0 rbm=450 re=0 rc=0 vje=0.75
++mje=0.33 xtf=0 vtf=100 itf=0 ptf=0 vjc=0.75 mjs=0 xtb=0
++eg=1.11 xti=3 kf=0 af=1 fc=0.5 tnom=27
+
+.FFT V(1)
+.FFT I(V1)
+.FFT {V(1)}
+.FFT P(V1)
+.FFT W(V1)
+.FFT N(1)
+.FFT IB(Q1)
+.FFT IC(Q1)
+.FFT IE(Q1)
+.FFT ID(J1)
+.FFT IG(J1)
+.FFT IS(J1)
+
+* Test bad measure lines that have too many variables
+* on their lines.  All of these measure types are only
+* allowed to have one variable.
+.MEASURE FFT M9 ENOB V(1) V(2)
+.MEASURE FFT M10 FIND V(1) V(2) AT=1
+.MEASURE FFT M11 SFDR V(1) V(2)
+.MEASURE FFT M12 SNDR V(1) V(2)
+.MEASURE FFT M13 SNR V(1) V(2)
+.MEASURE FFT M14 THD V(1) V(2)
+
+* At present, only V() and I() operators are supported for the
+* ENOB, SFDR, SNDR and THD measures
+.MEASURE FFT M1 ENOB VR(1)
+.MEASURE FFT M2 SFDR II(V1)
+.MEASURE FFT M3 SNDR VM(1)
+.MEASURE FFT M4 THD IP(V1)
+.MEASURE FFT M5 THD VDB(1)
+
+* expressions, N(), P() and W() are not supported yet for FIND measures
+.MEASURE FFT M6 FIND {V(1)} AT=2
+.MEASURE FFT M7 FIND P(V1) AT=2
+.MEASURE FFT M8 FIND W(V1) AT=2
+.MEASURE FFT M15 FIND N(1) AT=2
+
+* lead current designators are not supported for the FIND measure
+.MEASURE FFT M16 FIND IB(Q1) AT=1
+.MEASURE FFT M17 FIND IC(Q1) AT=1
+.MEASURE FFT M18 FIND IE(Q1) AT=1
+.MEASURE FFT M19 FIND ID(J1) AT=1
+.MEASURE FFT M20 FIND IS(J1) AT=1
+.MEASURE FFT M21 FIND IG(J1) AT=1
+
+.PRINT TRAN V(1) V(2)
+.END

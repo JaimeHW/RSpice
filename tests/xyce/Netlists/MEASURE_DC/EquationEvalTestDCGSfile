@@ -1,0 +1,30 @@
+ ***** Measure Functions ***** 
+
+VV1 = 5.545455e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+VV2 = 1.654545e+01
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+VV2FROM = 1.654545e+01
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+VV2TO = 1.563636e+01
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+VV2FT = 1.563636e+01
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+VV2TF = 1.563636e+01
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+DIF = -1.100000e+01
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+EQNFAIL1 = FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+EQNFAIL2 = FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+

@@ -1,0 +1,31 @@
+* Test .MEASURE DC behavior for the pathological case
+* of only one sweep point.
+*
+* See gitlab-ex issue 291 for more details.
+********************************************************
+
+vsrc1   1a 0 1
+rload1a 1a 1b 0.1
+rload1b 1b 0 1
+
+.DC vsrc1 1 1 1
+.PRINT DC v(1a) v(1b)
+
+.MEASURE DC AVG AVG v(1b)
+
+.MEASURE DC DERIVAT DERIV v(1b) AT=1
+.MEASURE DC DERIVATFT DERIV v(1b) AT=1  FROM=1 TO=1
+.MEASURE DC DERIVWHEN DERIV v(1b) WHEN v(1a)=1.0  
+.MEASURE DC DERIVWHENFT DERIV v(1b) WHEN v(1a)=1.0  FROM=1 TO=1
+
+.MEASURE DC FINDAT FIND v(1b) AT=1
+.MEASURE DC FINDATFT FIND v(1b) AT=1  FROM=1 TO=1
+
+* These measures will fail since the default CROSS value is 1 in Xyce
+.MEASURE DC FINDWHEN FIND v(1b) WHEN v(1a)=1.0
+.MEASURE DC FINDWHENFT FIND v(1b) when v(1a)=1.0  FROM=1 TO=1
+
+.MEASURE DC RMS RMS v(1b)
+
+
+.end

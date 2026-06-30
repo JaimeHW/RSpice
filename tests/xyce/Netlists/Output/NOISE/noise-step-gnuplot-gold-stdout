@@ -1,0 +1,20 @@
+For Step 0:
+RLP1 = 1.000000e+02
+RLP2 = 5.000000e+02
+Total Output Noise = 2.175563e-10
+Total Input Noise = 5.311125e-07
+For Step 1:
+RLP1 = 1.000000e+03
+RLP2 = 5.000000e+02
+Total Output Noise = 8.857616e-11
+Total Input Noise = 5.409304e-07
+For Step 2:
+RLP1 = 1.000000e+02
+RLP2 = 1.500000e+03
+Total Output Noise = 8.319827e-11
+Total Input Noise = 5.419962e-07
+For Step 3:
+RLP1 = 1.000000e+03
+RLP2 = 1.500000e+03
+Total Output Noise = 5.415214e-11
+Total Input Noise = 5.515349e-07

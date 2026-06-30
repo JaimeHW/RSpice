@@ -1,0 +1,2 @@
+model diodea diode is=4e-10 rs=0.105 n=1.48 tt=8E-7 cjo=1.95e-11 vj=0.4 m=0.38 eg=1.36 xti=-8 kf=0 af=1 fc=0.9 bv=600 ibv=1e-4
+model diodep diode is=4e-10 rs=0.105 n=1.48 tt=8E-7 cjo=1.95e-11 vj=0.4 m=0.38 eg=1.36 xti=-8 kf=0 af=1 fc=0.9 bv=600 ibv=1e-4

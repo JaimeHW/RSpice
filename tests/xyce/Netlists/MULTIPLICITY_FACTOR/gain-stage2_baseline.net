@@ -1,0 +1,28 @@
+*A Simple MOSFET Gain Stage. NOISE Analysis.
+
+M1 3 2 0 0 nmos w=4u l=1u
+M2 3 2 0 0 nmos w=4u l=1u
+M3 3 2 0 0 nmos w=4u l=1u
+M4 3 2 0 0 nmos w=4u l=1u
+M5 3 2 0 0 nmos w=4u l=1u
+M6 3 2 0 0 nmos w=4u l=1u
+Rsource 1 2 100k
+Rload 3 vdd 25k
+
+Vdd1 vdd 0 5
+Vin 1 0 1.44 ac .1 sin(0 1 1e+5 0 0)
+
+.noise v(3) Vin dec 10 100 1000Meg
+
+* Verify that case does not matter in the device names or noise type names
+* for the DNO and DNI operators.
+.print noise {sqrt(abs(onoise))} {sqrt(abs(inoise))}
++ {sqrt(abs(DNO(rsource)))}
++ {sqrt(abs(DNO(rload)))}
++ {sqrt(abs(DNI(rsource)))}
++ {sqrt(abs(DNI(rload)))}
+
+.model nmos nmos level=2
+
+.end
+

@@ -1,0 +1,21 @@
+* A test of the use of * in node and device names with
+* V, I, P and W wildcard syntaxes.  Something like V(2*)
+* is a request for all nodal voltages that start with '2'.
+* It is NOT an explicit request for the voltage at node 2*.
+************************************************************
+
+V1 1 0 SIN(0 1 1KHZ)
+
+R1* 1  2* 1
+R11 2* 21 1
+R1  21 2  1
+R2  2  3  1
+R3  3  31 1
+R31 31 4
+R4  4 0  1
+
+.TRAN 0 10us
+.PRINT TRAN V(2*) V(3*1) I(R1*) I(R3*1)
++ P(R1*) P(R3*1) W(R1*) W(R3*1)
+
+.END

@@ -1,0 +1,12 @@
+A circuit that should fail to get a dc op
+
+Vsrc1 1 0 5
+Vsrc2 1 0 2
+Rgrn  1 0 1e6
+
+.tran 0 1
+.print tran v(1)
+
+.end
+
+

@@ -1,0 +1,47 @@
+* This netlist will make separate .ma0 files for each
+* NOISE_CONT measure, by using the default value (1) for
+* .OPTIONS MEASURE USE_CONT_FILES.
+*
+* See SON Bug 1274 for more details
+*****************************************************
+
+* Used to adjust reference frequency from 1Hz to 10Hz
+.PARAM scaleFactor=10
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP   3 0 2 0 2
+
+* 7th order Chebychev LPF with 2dB of passband ripple.
+* This is not a realistic passband ripple level, but is
+* useful for this test.
+RS 3 b 1
+C1 b 0 {2.865/scaleFactor}
+L2 b c {0.912/scaleFactor}
+C3 c 0 {3.8774/scaleFactor}
+L4 c d {0.9537/scaleFactor}
+C5 d 0 {3.8774/scaleFactor}
+L6 d e {0.912/scaleFactor}
+C7 e 0 {2.8650/scaleFactor}
+RL e 0 1.0
+
+.NOISE  V(e)  V1  DEC 20 1e-2 10
+.print NOISE vm(3) vm(b) vm(c) vm(d) vm(e)
+
+.MEASURE NOISE derivCrossTest1 DERIV vm(d) WHEN vm(e)=0.45
+.MEASURE NOISE_CONT derivCrossContTest1 DERIVATIVE vm(d) WHEN vm(e)=0.45
+
+.MEASURE NOISE whenCrossTest1 WHEN vm(e)=0.45
+.MEASURE NOISE_CONT whenCrossContTest1 WHEN vm(e)=0.45
+
+.MEASURE NOISE findCrossTest1 FIND VM(d) WHEN VM(e)=0.45
+.MEASURE NOISE_CONT findCrossContTest1 FIND VM(d) WHEN VM(e)=0.45
+
+.MEASURE NOISE TrigTarg1 TRIG vm(e)=0.40 CROSS=1 TARG vm(e) VAL=0.45 CROSS=1
+.MEASURE NOISE_CONT TrigTargCont1 TRIG vm(e) VAL=0.40 CROSS=1 TARG vm(e)=0.45 CROSS=1
+
+.END

@@ -1,0 +1,9 @@
+Test of nint
+*
+R1 1 0 1
+V1 1 0 SIN(0 5 1K)
+
+.print tran {V(1)+6.0} {nint(v(1)+6.0)} 
+.tran 1n 5m
+
+.end

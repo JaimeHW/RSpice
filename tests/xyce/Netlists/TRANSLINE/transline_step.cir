@@ -1,0 +1,37 @@
+Transmission Line Circuit
+**************************************************************
+* Description:  Test of Xyce transmission line model using 
+*               lossless circuit configuration and .STEP.  
+* Input:  5V Pulse Source
+* Circuit Elements: input and load resistances with matched
+*                   impedances
+* Analysis:
+*	The circuit contains a pulse voltage source (VIN), with a 
+*	50 ohm (RIN) output impedance, connected to a 50 ohm 
+*	transmission line (TLINE1) which is terminated in a 50 ohm 
+*	(RL) matched load.  The input pulse goes from 0V to 5V with no 
+*       initial delay, and has a pulse width of 25ns.  The transmission 
+*       line has a nominal 10ns delay (NL/F), but that delay is changed
+*       by stepping over NL and F.  
+*
+*	Note: V(2) is 2.5V due to the voltage drop across the 50 ohm
+*	RIN resistor. 
+*************************************************************** 
+VIN 1 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)
+
+* specify the transmission line with F and NL parameters, and then
+* step over F and NL.  There is no need to step over Z0 or TD,
+* because those values are not re-calculated at each step.
+RIN1 1 2 50
+TLINE1 2 0 3 0 Z0=50 F=1GHZ NL=10
+RL1 3 0 50
+
+* This set of step parameters should produce delays of
+* NL/F = {10ns, 20ns, 5ns, 10ns) in the .PRN file.
+.STEP TLINE1:NL 5 10 5
+.STEP TLINE1:F 0.5GHZ 1GHZ 0.5GHZ
+
+.TRAN 0.25N 60N
+.PRINT TRAN V(2) V(3)
+*COMP TIME zerotol=0
+.END

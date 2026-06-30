@@ -1,0 +1,14 @@
+memristorTEAM_lp_trap.cir
+memristorTEAM_test.cir
+tags
+memristorTEAM_lp_trap.cir.sh
+memristorYakopcic.cir
+memristorYakopcic.cir.sh
+memristorPEM1.cir
+memristorPEM2.cir 
+memristorPEM1wIC.cir
+fxp_table.csv
+fxm_table.csv
+fxp_table.dat
+fxm_table.dat
+

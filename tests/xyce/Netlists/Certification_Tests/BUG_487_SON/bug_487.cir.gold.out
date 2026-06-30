@@ -1,0 +1,13 @@
+***** Number of Unknowns = 158
+Number of 1D PDE (level 1) models: 1
+          name          PDEBJT
+Number of 1D PDE (level 1) instances: 1
+          name      YPDE!NPNOP
+Number of Independent Voltage Source models: 1
+          name V level 1 (Independent Voltage Source)
+Number of Independent Voltage Source instances: 3
+          name             VCC          VMON1          VMON2
+Number of Resistor models: 1
+          name R level 1 (Resistor)
+Number of Resistor instances: 2
+          name              RB             RC

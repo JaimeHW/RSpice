@@ -1,0 +1,23 @@
+* Test use of .OPTIONS OUTPUT ADD_STEPNUM_COL=TRUE
+*
+* See SON Bug 1209 for more details.
+**************************************************
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+* step over two variables
+.STEP R1 1 2 1
+.STEP R2 3 8 5
+
+.OPTIONS OUTPUT ADD_STEPNUM_COL=true
+.PRINT DC V(1) R1:R R2:R V(2)
+.PRINT DC FORMAT=NOINDEX FILE=dc-stepnum-col.cir.noindex.prn V(1) R1:R R2:R V(2)
+.PRINT DC FORMAT=GNUPLOT FILE=dc-stepnum-col.cir.gnuplot.prn V(1) R1:R R2:R V(2)
+.PRINT DC FORMAT=SPLOT FILE=dc-stepnum-col.cir.splot.prn V(1) R1:R R2:R V(2)
+
+.DC V1 1 5 1
+
+.end
+

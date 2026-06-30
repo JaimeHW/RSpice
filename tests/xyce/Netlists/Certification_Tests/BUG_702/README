@@ -1,0 +1,77 @@
+Test Name: BUG_702
+Owner: Eric Rankin 
+Test netlists: inlined-single.cir
+               inlined-multiple.cir
+               dup-inlined.cir
+
+               external.cir
+               dup-external.cir
+               initcond.dat
+
+               missing-initcond.cir
+
+               precedence.cir
+
+               empty-initcond.cir
+               noinits.dat
+
+GS files: inv1xIC.cir.prn
+Mode:  Serial and Parallel
+Comparator:  xyce_verify.pl | compare | diff 
+Version of Xyce: Release_3.0
+ 
+Description:
+============
+Feature request for supplying initial conditions from a separate file.  Support
+for specifying initial conditions with a .initcond line is also available.
+ 
+Procedure:
+============
+For each $NETLIST.cir listed above, execute:
+
+  runxyce -o $NETLIST.cir.prn $NETLIST.cir 
+    or
+  xmpirun -np 2 -o $NETLIST.cir.prn $NETLIST.cir 
+
+
+  If no error message given, then
+
+    xyce_verify.pl $NETLIST.cir inv1xIC.cir.prn $NETLIST.cir.prn  
+
+  otherwise, note the error and confirm it matches the verification expectations.
+ 
+Verification:
+=============
+Passes if all of the following occur:
+
+  1.  Xyce exits with an error for dup-external.cir and dup-inlined.cir.
+      The message should indicate that multiple .INITCOND lines are errors.
+
+  2.  Xyce exits with an error for missing-initcond.cir.
+      The message should indicate that the file "ic.dat" cannot be found.
+
+  3.  Xyce exits with an error for empty-initcond.cir.
+      The message should indicate that the file "noinits.dat" is malformed.
+
+  4.  Xyce successfully runs for the remaining circuits, and the the outputs
+  pass the comparator.
+
+ 
+Notes:
+======
+Setting IC values in both toplevel and nested subcircuits is tested 
+simulaneously.  
+
+This test is derived from the INIT_CONDS regression and BUG_174 tests.
+
+
+inlined-single.cir:    test single device named in an .initcond line
+inlined-multiple.cir:  tests muliple devices named in an .initcond line 
+dup-inlined.cir:       tests expected error for multiple inlined .initcond lines
+external.cir:          tests file read & applications of external IC= values 
+dup-external.cir:      tests expected error for multiple external .initcond lines
+initcond.dat:          the include file for external tests 
+missing-initcond.cir:  tests expected error for missing .dat file
+precedence.cir:        demonstrates .initcond IC value take precedence of normal 
+empty-initcond.cir:    tests for including of empty file
+noinits.dat:           the include file for empty test

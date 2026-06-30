@@ -1,0 +1,25 @@
+test circuit to produce cable matching with Dakota
+*
+*---------------------------------------------------------------------------------
+*THIS FILE REPRODUCES SIGNAL C O TESTS.
+*THIS SIM PRINTS V(SCOPE) SIGNAL AND THE TERMINAL END IS TERMINATED WITH 1E6 OHMS.
+*---------------------------------------------------------------------------------
+
+.tran 0.1ns 0.4us
+ 
+* General Comments about the netlist
+* Cable models, full model=XcableModel, 10*(unit cable)=XUC_10X, 100*(unit cable)=XUC_100X
+
+* ----- N E T L I ST -------------------------
+
+Vpulse        pwrplus 0            pulse(0 9.9 0 3E-9 4E-9 0.3E-8 1E-4)
+
+YROM ROM1 pwrplus scope terminal BASE_FILENAME=cab_dak_sig_o_simple_mor.cir
+
+.print tran v(scope)
+
+* ______E N D ________________________________
+*.End
+
+* ______E N D ________________________________
+*.End

@@ -1,0 +1,5 @@
+exclude
+tags
+multiple_temperature_statement.cir.pspice
+multiple_temperature_statement.cir
+multiple_temperature_statement.cir.sh

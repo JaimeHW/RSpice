@@ -1,0 +1,30 @@
+Lead current test for capacitor and resistor
+*
+VIN  1 0 PULSE(0 1 0U 1U 1U 100m)
+R    2 1 1K
+C    0 2 20u
+
+* Also test case where the capacitor has an IC.
+* In this case, I(R3) and I(C3) should have the same 
+* values but opposite signs.  See SON Bug 874 for more
+* details.
+V3  3  0 0V 
+R3  3a 3 1K 
+C3  3a 0 C=40u IC=1
+
+*COMP {I(VIN)-I(R)} abstol=1e-6 zerotol=1.0e-7
+*COMP {I(VIN)-I(C)} abstol=1e-6 zerotol=1.0e-7
+*COMP {I(R3)+I(C3)} abstol=1e-6 zerotol=1.0e-7
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.5U 400ms
+.PRINT TRAN  {I(VIN)-I(R)} {I(VIN)-I(C)} {I(R3)+I(C3)}
+
+.measure tran maxmag1   max {abs(I(VIN)-I(R))} failvalue=1e-6
+.measure tran totalrms1 rms {I(VIN)-I(R)} failvalue=1e-6 
+.measure tran maxmag2   max {abs(I(VIN)-I(C))} failvalue=1e-6
+.measure tran totalrms2 rms {I(VIN)-I(C)} failvalue=1e-6 
+.measure tran maxmag3   max {abs(I(R3)+I(C3))} failvalue=1e-6
+.measure tran totalrms3 rms {I(R3)+I(C3)} failvalue=1e-6 
+
+.END

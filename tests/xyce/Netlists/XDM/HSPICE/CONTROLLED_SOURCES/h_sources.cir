@@ -1,0 +1,23 @@
+*Xyce netlist for testing H-sources syntaxes
+
+.TRAN 0 1000ns
+.PRINT TRAN V(N390192) V(N390144) I(V_V8) I(R_R15)
+
+R_R12         0 N390186  1
+R_R13         0 N390144  1
+V_V7         N390192 0  SIN(0V 1 1e6 0 0 0)
+X_H1    N390192 N390186 N390144 0 SCHEMATIC1_H1
+
+.subckt SCHEMATIC1_H1 1 2 3 4
+H_H1         3 4 VH_H1 2
+VH_H1         1 2 0V
+.ends SCHEMATIC1_H1
+
+* test POLY form of the H-source
+R_R14        0 N390338  1
+V_V8         N390338 0  SIN (0V 2V 1e6 0 0 0)
+R_R15        0 N390388  1
+
+H_H2 N390388 0 POLY(1) V_V8 0 2
+
+.END

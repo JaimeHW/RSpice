@@ -1,0 +1,7 @@
+Baseline: run a V source with sin function
+V1 1 0 SIN 0 10 1kHz
+R1 1 0 1
+
+.print tran V(1)
+.tran 1u 5m
+.end

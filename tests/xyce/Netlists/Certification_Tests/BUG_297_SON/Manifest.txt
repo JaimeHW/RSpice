@@ -1,0 +1,5 @@
+bug_297.cir
+modelcard.mod
+tags
+bug_297.cir.sh
+options

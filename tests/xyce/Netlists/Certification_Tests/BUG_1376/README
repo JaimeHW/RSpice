@@ -1,0 +1,30 @@
+Test Name: BUG_1376
+Owner: Tom Russo
+Test netlists: upper_case.cir
+               lower_case.cir
+GS files: none
+Mode:  Serial
+Comparator:  xyce_verify.pl
+Version of Xyce: Release_4.1
+ 
+Description:
+============
+
+Until Xyce 4.1, the "ON" and "OFF" parameters for switches and
+transistor devices were case-sensitive, and would only work with lower-case spelling
+if an "=1" were also provided.  During development of Xyce 4.1 this was 
+fixed.
+
+Procedure:
+============
+
+The test is controlled by the script bug_1376.cir.sh.  This runs the upper_case.cir
+and lower_case.cir tests and compares their results, which should be identical.
+ 
+Verification:
+=============
+Passes if Xyce and xyce_verify.pl return a 0 exit code.  
+
+ 
+Notes:
+======

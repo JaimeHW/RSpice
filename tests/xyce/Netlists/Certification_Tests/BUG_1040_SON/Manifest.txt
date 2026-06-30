@@ -1,0 +1,4 @@
+bug_1040_son.cir
+bug_1040_son.cir.sh
+rc_discharge_diode_noop.net
+rc_discharge_diode_op.net

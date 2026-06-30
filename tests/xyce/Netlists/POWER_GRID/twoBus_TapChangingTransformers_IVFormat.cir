@@ -1,0 +1,61 @@
+* Unit test of Tap Changing Power Grid Branch Transformers,
+* in I=YV format 
+
+*********************************************
+* Bus 1 is the slack bus.  Ammeter          *
+* is wired so that current flows into Bus 1 *
+*********************************************
+V1R Bus1R ammBus1R 1V
+V1I Bus1I ammBus1I 0V
+Vamm1R 0 ammBus1R 0V
+Vamm1I 0 ammBus1I 0V
+
+*********************************************
+* Transformer Definitions.  Use all three   *
+* transformer types in parallel.  These     *
+* purposefully use lower case for TT        *
+*********************************************
+YPGTR pg1_2 bus1R bus2R bus1I bus2I AT=iv TT=ft R=0.05 X=0.2 TR=1
+YPGTR pg1_2a bus1R bus2R bus1I bus2I N2 AT=IV TT=vt R=0.05 X=0.2 PS={15*PI/180}
+YPGTR pg1_2b bus1R bus2R bus1I bus2I Phi2 AT=IV TT=ps R=0.05 X=0.2 TR=0.978
+VN2 N2 0 0.978
+VPhi2 Phi2 0 {-15*PI/180}
+
+*********************************************
+* Load Definitions                          *
+*********************************************
+XLoad2 bus2R bus2I CPL PARAMS: P=0.9 Q=0.1
+
+****************************************************
+* use .NODESET to enforce "flat start" at load bus *
+****************************************************
+.NODESET V(N2)=1.0 V(Phi2)=0
+
+*********************************************
+* Simulation Control and Output Statements  *
+*********************************************
+.DC V1R 1 1 1
+.PRINT DC width=10 precision=6
++ V(bus1R) V(bus1I) V(bus2R) V(bus2I) 
++ {V(bus1R)*I(Vamm1R)+V(bus1I)*I(Vamm1I)}
++ {V(bus1I)*I(Vamm1R)-V(bus1R)*I(Vamm1I)}
++ {V(bus2R)*I(Xload2:VammR)+V(bus2I)*I(Xload2:VammI)}
++ {V(bus2I)*I(Xload2:VammR)-V(bus2R)*I(Xload2:VammI)}
++ V(N2) V(Phi2)
+
+**************************************************************
+* Subcircuit defintion of a constant power load for I=YV form*
+**************************************************************
+.SUBCKT CPL RNode INode PARAMS: P=0.5 Q=0.0 CurrLim=1000
+
+* Ammeter at load is defined so that power flows into the load from the bus
+VammR ammR 0 0V
+VammI ammI 0 0V
+BloadR RNode ammR I={limit((P*V(RNode)+Q*V(INode))/(V(RNode)*V(RNode)+V(INode)*V(INode)),
++ -CurrLim,CurrLim)}
+BloadI INode ammI  I={limit((P*V(INode)-Q*V(RNode))/(V(RNode)*V(RNode)+V(INode)*V(INode)),
++ -CurrLim,CurrLim)}
+
+.ENDS
+
+.end

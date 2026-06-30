@@ -1,0 +1,79 @@
+Unit Test for PREB and CLRB lines of JKFF Digital Device
+***********************************************************************
+* The key points of the test output are:
+*   a) If PREB=HIGH and CLRB=HIGH then the output will "toggle" on
+*      every negative Clock edge, except for the first one near t=0.
+*
+*   b) PREB=HIGH and CLRB=LOW during 0.65u to 0.9us.  During that
+*      time interval, the outputs are "cleared".  Q=LOW and Qbar=HIGH.
+*
+*   c) PREB=LOW and CLRB=HIGH during 1.7us to 2.05us.  During that
+*      time interval, the outputs are "set".  Q=HIGH and Qbar=LOW.
+*
+*   d) In between times 0.9us and 1.7us, PREB=HIGH and CLRB=HIGH. 
+*      So, the outputs toggle on each negative clock edge.  
+*
+*   e) In between times 2.8us and 3.15 us, PREB=LOW and CLRB=LOW.
+*      So, Q=HIGH and Qbar=HIGH.
+*
+*   f) Once PREB and CLRB both go HIGH again, we see that Qbar
+*      goes low starting at t=3.2us.  It does this in the absence
+*      of a negative clock edge because Q=HIGH and Qbar=HIGH is an
+*      unstable state.  The Xyce JKFF device enforces Q and Qbar
+*      being different, to resolve that unstable condition.
+*
+*   g) The outputs start toggling again at the next negative clock
+*      edge at 3.4us.
+*
+************************************************************************
+
+*COMP v(out_q) reltol=0.02
+*COMP v(out_qbar) reltol=0.02 offset =0.1
+
+* Analysis Commands
+.options timeint reltol=1.0e-3
+.tran 10ns 4us
+
+* Sources
+* PREB
+V1 in_pre 0 PWL 0 {V_HI} 1.65us {V_HI} 1.7us {V_LO} 2.05us {V_LO} 2.10us {V_HI}
++ 2.7us {V_HI} 2.8us {V_LO} 3.15us {V_LO} 3.2us {V_HI}
+
+*CLRB
+V2 in_clr 0 PWL 0 {V_HI} 0.6us {V_HI} 0.65us {V_LO} 0.9us {V_LO} 0.95us {V_HI} 
++ 2.7us {V_HI} 2.8us {V_LO} 3.15us {V_LO} 3.2us {V_HI}
+
+* Without PREB or CLRB being pulled low, this combo of Clock, J and K
+* will produce a toggling of the output values on every falling edge,
+* except for the first one near t=0.  This is because J and K always have the 
+* opposite value and a different set of values then at the last negative
+* clock edge.
+V3 in_clk 0 PULSE ({V_HI} {V_LO} 10ns 10ns 10ns 90ns 200ns)
+V4 in_J 0  PULSE ({V_HI} {V_LO} 100ns 20ns 20ns 180ns 400ns)
+V5 in_K 0 PULSE  ({V_LO} {V_HI} 100ns 20ns 20ns 180ns 400ns)
+
+* Digital power and reference node
+V6 dig_pn 0 {V_HI} 
+
+* Output
+.print tran PRECISION=10 WIDTH=19 v(in_pre) v(in_clr) v(in_clk) 
++ v(in_J) v(in_K) v(out_q) v(out_qbar)
+
+* Set digital default parameters:
+.param R1HI=5 R1LO=200 R0HI=200 R0LO=5 RIN=1000 R1=100
+.param SW=5.e-9  CAPOUT=1.e-12  CAPIN=1.e-12
+.param V_LO=0 V_HI=3
+
+UJKFF1 JKFF dig_pn 0 in_pre in_clr in_clk in_J in_K out_q out_qbar DMOD
+R1 out_q 0 100K
+R2 out_qbar 0 100K
+
+.model DMOD DIG ( CLO=CAPOUT  CHI=CAPOUT
++ S0RLO=R0LO  S0RHI=R0HI  S0TSW=SW
++ S0VLO=-1  S0VHI=1.8
++ S1RLO=R1LO  S1RHI=R1HI  S1TSW=SW
++ S1VLO=1  S1VHI=3
++ RLOAD=RIN   CLOAD=CAPIN 
++ DELAY=20ns )
+
+.end

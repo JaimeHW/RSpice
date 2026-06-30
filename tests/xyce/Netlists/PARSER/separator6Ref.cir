@@ -1,0 +1,34 @@
+Netlist to Test out the period "." separator for device model parameters
+*
+* this netlist is the "baseline" so it should not be run with any -hspice-ext options.
+*
+*
+* The naming of subcircuit models depends on if they have any dependence on 
+* expressions.  If they do have this dependence, then Xyce assumes that we 
+* must have a unique copy of the model for each subcircuit instance.  This 
+* test covers that use case.
+*
+V1 1 0 0.5V
+Xdio1 1 0 dioTest
+
+V2 2 0 0.5V
+Xdio2 2 0 dioTest
+
+.param isParam=2.355E-14 
+
+.subckt dioTest A C
+D1 A B DFOR
+R1 B C 10k
+.MODEL DFOR D
++ IS = 'isParam' N = 1.112 BV = 1000 IBV = 0.001
++ RS = 0.137 CJO = 2.993E-10 VJ = 0.5033 M = 0.3144
++ FC = 0.5 EG = 1.11 XTI = 3 TT = 1.7E-07
+.ends
+
+.print DC V(1) V(2)
++ V(Xdio1:B)  xdio1:DFOR:IS {xdio1:DFOR:IS}
++ V(Xdio2:B)  xdio2:DFOR:IS {xdio2:DFOR:IS}
+
+.dc V1 0.5V 0.5V 0.5V
+
+.end

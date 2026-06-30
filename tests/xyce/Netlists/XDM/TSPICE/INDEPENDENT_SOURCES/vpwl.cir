@@ -1,0 +1,20 @@
+* Xyce netlist for testing various VPWL Sources
+
+* Piecewise linear (without file specification)
+v4  4 0 pwl(0 -4 2e-4 -5 3e-4 -5 4e-4 -4) 
+*+ TD=2e-4
+r4a 4 4a 1K
+r4  4a 0 2K
+
+* Piecewise linear (with file specification).
+* The TD= line is currently commented out, because that 
+* syntax may not be properly translated from TSpice by xdm
+v5  5 0 pwl file "vpwlFile.txt" 
+*+ TD=2e-4
+r5a 5 5a 1K
+r5  5a 0 2K
+
+.tran 10u 2ms
+.print tran format=probe v(4) v(4a) v(5) v(5a) 
+
+.end

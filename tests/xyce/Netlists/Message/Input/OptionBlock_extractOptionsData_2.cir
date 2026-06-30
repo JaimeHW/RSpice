@@ -1,0 +1,23 @@
+********************************************************************************
+* Regression test to test error messages from bad .OPTIONS lines, 
+* that contain vector parameters.  See SON Bug 1021 for more details.
+*
+* The actual circuit doesn't matter, other than a working circuit is needed.
+********************************************************************************
+
+V1 1 0 PWL 0 0 1 1
+R1 1 2 1
+R2 2 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(2)
+
+.OPTIONS OUTPUT OUTPUTTIMEPOINTS=0.0,0.25 0.50
+.OPTIONS OUTPUT OUTPUTTIMEPOINTS=
+.OPTIONS OUTPUT OUTPUTTIMEPOINTS=0.0,0.25 0.50 PRINTHEADER=false
+.OPTIONS OUTPUT OUTPUTTIMEPOINTS=,0.0,0.25,0.50
+.OPTIONS OUTPUT OUTPUTTIMEPOINTS=0.0,0.25,0.50,
+.OPTIONS OUTPUT OUTPUTTIMEPOINTS=0.0,0.25,,0.50
+.OPTIONS OUTPUT OUTPUTTIMEPOINTS=0.0,0.25 0.50,0.75
+
+.END

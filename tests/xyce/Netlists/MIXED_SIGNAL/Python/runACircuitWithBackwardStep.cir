@@ -1,0 +1,9 @@
+* This netlist is used to test the Python simulateUntil() method
+* with a backward time step.
+V1  1 0 SIN(0 1 1)
+R1  1 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1)
+
+.END

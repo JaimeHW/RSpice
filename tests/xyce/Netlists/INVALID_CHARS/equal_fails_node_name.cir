@@ -1,0 +1,30 @@
+*******************************************************
+* For SON Bug 744
+*
+* Illustrate that an equal sign is often a valid 
+* character for a device or node name.  However,
+* the equal sign may not work in a .PRINT line.
+* In addition, the device names (with = in them) may
+* be incorrect in the symbol table.
+*
+* This test shows that an equal sign in a node name
+* on a .PRINT line can cause a parsing failure.
+******************************************************* 
+.DC v1 1 1 1
+v1 1 0 1
+r1 1 0 1
+
+* all of these lines actually pass netlist parsing for 
+* a V-device, at least, in Xyce 6.5.
+v2= 2 0 1
+v3 3= 0 1
+v4 = 0 1
+v= 4 0 1
+
+* This .PRINT line does pass netlist parsing in Xyce 6.5.
+.PRINT DC v(=) 
+
+* This .PRINT line does not pass netlist parsing in Xyce 6.5
+.PRINT DC v(3=)
+
+.end

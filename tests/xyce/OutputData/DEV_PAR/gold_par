@@ -1,0 +1,102 @@
+q level 1 {
+  Configuration {
+    Name: Bipolar Junction Transistor
+    Device Type: Q level 1
+    Nodes: 3
+    Optional Nodes: 4
+    Fill Nodes: 1
+    Model Required: yes
+    Linear Device: no
+    PDE Device: no
+    Primary Parameter: <none>
+    Instance Default Parameter: <none>
+    Model Types: pnp, npn
+  }
+  Model Parameters {
+    AF, double, default 1
+    BF, double, default 100, original value managed, scaling enabled
+    BFM, double, default 100, original value managed, scaling enabled
+    BR, double, default 1
+    BRM, double, default 1
+    BV, double, default 0
+    C2, double, default 0
+    C4, double, default 0
+    CCS, double, default 0
+    CDIS, double, default 1
+    CJC, double, default 0
+    CJE, double, default 0
+    CJS, double, default 0
+    CSUB, double, default 0
+    EG, double, default 1.11
+    ESUB, double, default 0
+    FC, double, default 0.5
+    IK, double, default 0
+    IKF, double, default 0
+    IKR, double, default 0
+    IOB, double, default 0
+    IRB, double, default 0
+    IS, double, default 1e-16
+    ISC, double, default 0
+    ISE, double, default 0
+    ITF, double, default 0
+    JBF, double, default 0
+    JBR, double, default 0
+    JLC, double, default 0
+    JLE, double, default 0
+    JRB, double, default 0
+    JTF, double, default 0
+    KF, double, default 0
+    MC, double, default 0.33
+    ME, double, default 0.33
+    MJC, double, default 0.33
+    MJE, double, default 0.33
+    MJS, double, default 0
+    MS, double, default 0
+    NC, double, default 2
+    NE, double, default 1.5
+    NF, double, default 1, original value managed, scaling enabled
+    NK, double, default 0.5
+    NKF, double, default 0.5
+    NLE, double, default 1.5
+    NR, double, default 1
+    PC, double, default 0.75
+    PE, double, default 0.75
+    PS, double, default 0.75
+    PSUB, double, default 0.75
+    PT, double, default 3
+    PTF, double, default 0
+    RB, double, default 0
+    RBM, double, default 0
+    RC, double, default 0
+    RE, double, default 0
+    TB, double, default 0
+    TCB, double, default 0
+    TF, double, default 0
+    TNOM, double, default 0
+    TR, double, default 0
+    VA, double, default 0
+    VAF, double, default 0
+    VAR, double, default 0
+    VB, double, default 0
+    VBF, double, default 0
+    VJC, double, default 0.75
+    VJE, double, default 0.75
+    VJS, double, default 0.75
+    VRB, double, default 0
+    VTF, double, default 0
+    XCJC, double, default 1
+    XTB, double, default 0
+    XTF, double, default 0
+    XTI, double, default 3
+  }
+  Instance Parameters {
+    AREA, double, default 1
+    DTEMP, double, default 0
+    IC1, double, default 0
+    IC2, double, default 0
+    M, double, default 1
+    OFF, boolean, default false
+    TEMP, double, default 0
+  }
+}
+

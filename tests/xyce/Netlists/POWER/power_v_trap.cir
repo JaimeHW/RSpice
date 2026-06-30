@@ -1,0 +1,11 @@
+Power test for resistor
+*
+VIN  1 0 sin(0 1 4 0 0 ) ; PULSE(0 1 10U 1U 1U 100m)
+R1   1 2 1K
+R2   0 2 100
+
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.5U 400ms
+.PRINT TRAN v(1) {I(VIN)*v(1)} p(vin) w(vin) p(r1) p(r2) w(r1) w(r2)
+.END

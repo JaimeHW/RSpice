@@ -1,0 +1,37 @@
+A test of the measure average functionality
+*******************************************************************************
+*
+* a few sources of different types
+VS1  1  0  SIN(0 1.0 100HZ 0 0)
+VP   2  0  PULSE( 0 100 0ms 1ms 1ms 10ms 20ms )
+VS3  3  0  SIN(-0.5 1.0 100HZ 0 0.5)
+VS4  4  0  SIN(0.5 -1.0 100HZ 0 0.5)
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+R4  4  0  100
+
+* use MEASFAIL for compatibility with the verification approach
+* used in .sh file.
+.OPTIONS MEASURE MEASFAIL=0 
+
+.TRAN 0  0.1
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3) V(4) V(1,0) averageAll
+
+.measure tran averageAll avg V(1)
+.measure tran averageAll10 avg V(1,0) 
+.measure tran averageTop AVG V(2)
+
+* add TO-FROM modifiers
+.measure tran sineHalfInterval Avg V(1) FROM=0 TO=0.005
+
+* mix in TDs before and after FROM value.
+.measure tran sineTDbetween avg V(1) FROM=0 TO=0.025 TD=0.02
+.measure tran sineTDbefore avg V(1) FROM=0.02 TO=0.025 TD=0.01
+
+* this test should fail, and return 0
+.measure tran returnZero avg V(1) FROM=0.2e-3 TO=0.25e-3 TD=0.5e-3
+
+.END
+

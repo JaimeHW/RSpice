@@ -1,0 +1,16 @@
+A simple test case of a resistor with zero resistance.  
+* in this test node b should be automatically removed and R1/R3 removed.
+
+* supernoding is off by default.  activate it
+.options topology supernode=true
+
+* test case when resistance is given a zero
+V1 a 0 5V
+R1 a b 0
+R2 b 0 1K
+R3 b 0 0
+
+.DC V1 0 5V 1V
+.PRINT dc V(a) 
+
+.END

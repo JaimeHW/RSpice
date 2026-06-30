@@ -1,0 +1,68 @@
+*******************************************************************************
+* This netlist is equivalent to Step 0 for the RiseFallDelay.cir netlist.
+* It has VS1:VA=1 and VS3:V0=-0.25
+*
+*******************************************************************************
+*
+* a few sources of different types
+VS1  1  0  SIN(0 1.0 2.0 0 0)
+VP   2  0  PULSE( 0 10 0.2 0.2 0.2 0.5 2 )
+VS3  3  0  SIN(-0.25 1.0 10HZ 0 0.5)
+VS4  4  0  SIN(0.5 -1.0 10HZ 0 0.5)
+
+R1  1  0  100K
+R2  2  0  100K
+R3  3  0  100K
+R4  4  0  100K
+
+* use legacy trig-targ mode. Use MEASFAIL to test the reset of the default calculation value.
+.OPTIONS MEASURE USE_LTTM=1 MEASFAIL=0
+
+.TRAN 0  1
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3) V(4)
+
+* first measure should return a value.  Second measure should fail.
+.measure tran riseSineMV1 trig v(1)=0.1 targ v(1)=1.0 minval=1.0e-2
+.measure tran riseSineMV2 trig v(1)=0.1 targ v(1)=1.0 minval=1.0e-3
+
+.measure tran riseSine1 TRIG v(1) 0.1 TARG v(1)=0.99
+.measure tran risePulse Trig v(2)=0.0 Targ v(2)=10
+
+.measure tran riseSineFracMax trig v(1) frac_max=0.03 targ v(1) frac_max=0.97
+.measure tran fallSineFracMax trig v(1) frac_max=0.97 targ v(1) frac_max=0.03
+.measure tran risePulseFracMax trig v(2) frac_max=0.03 targ v(2) frac_max=0.97
+
+* these are pulse width measurements
+.measure tran 50widthFracMax trig v(1) frac_max=0.50 targ v(1) frac_max=0.50 FALL=1
+.measure tran rise50FracMax trig v(1) frac_max=0.5 targ v(1) frac_max=1
+.measure tran fall50FracMax trig v(1) frac_max=1 targ v(1) frac_max=0.5
+.measure tran 50widthFracMaxFall2 trig v(1) frac_max=0.50 RISE=2 targ v(1) frac_max=0.50 FALL=2
+
+* repeat two of the pulse width measurements with the offset sinusiods
+.measure tran 50widthFracMaxV3 trig v(3) frac_max=0.50 targ v(3) frac_max=0.50 FALL=1
+.measure tran 50widthFracMaxFall2V3 trig v(3) frac_max=0.50 RISE=2 targ v(3) frac_max=0.50 FALL=2
+.measure tran 50widthFracMaxV4 trig v(4) frac_max=0.50 targ v(4) frac_max=0.50 FALL=2
+.measure tran 50widthFracMaxFall2V4 trig v(4) frac_max=0.50 RISE=1 targ v(4) frac_max=0.50 FALL=2
+
+* test rise/fall/cross without FRAC_MAX
+.measure tran Rise1Fall1V3 trig v(3)=0.25 targ v(3)=0.25 FALL=1
+.measure tran Cross1Cross2V3 trig v(3)=0.25 CROSS=1 targ v(3)=0.25 CROSS=2
+.measure tran Rise2Fall2V3 trig v(3)=0.25 RISE=2 targ v(3)=0.25 FALL=2
+
+* test LAST
+.measure tran Rise1CrossLast trig v(1)=0.25 RISE=1 targ v(1)=0.25 CROSS=LAST
+.measure tran RiseLastFallLast trig v(1)=0.25 RISE=LAST targ v(1)=0.25 FALL=LAST
+
+* test TO/FROM and TD
+.measure tran riseSine3td TRIG v(3)=0.1 TARG v(3)=0.4 TD=0.1
+.measure tran riseSine3fromto TRIG v(3)=0.1 TARG v(3)=0.3 FROM=0.2 TO=0.5
+
+* this last measure should fail because v(2) only returns to 5V at t=1.
+* 0.03 of its max value (10V) is 0.3V
+.measure tran fallPulseFracMax trig v(2) frac_max=0.97 targ v(2) frac_max=0.03 default_val=-1
+
+*this measure should fail because v(3) never gets over 0.5
+.measure tran RiseFail trig v(3)=5 targ v(3)=5 FALL=1 default_val=-1
+
+.END
+

@@ -1,0 +1,21 @@
+* For .PRINT AC, the I(*2) wildcard should only output the branch
+* currents for the V and L devices.  It should not output the lead
+* currents for the R2 device.
+*
+* See SON Bug 1211 for more details.
+*
+* Trivial low-pass filter (V-L-R) circuits.
+*
+
+R1 b1 0 2
+L1 a1 b1 1u
+V1 a1 0 DC 0V AC 1
+
+R2 b2 0 2
+L2 a2 b2 1u
+V2 a2 0 DC 0V AC 1
+
+.print AC V(*1) I(*2)
+.ac dec 5 100Hz 10e6
+
+.end

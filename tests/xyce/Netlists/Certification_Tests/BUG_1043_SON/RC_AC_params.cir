@@ -1,0 +1,38 @@
+Simple RC circuit
+*
+* Eric Keiter, SNL
+*
+* Tests simultaneous sweeps of frequency, magnitude, phase and model params 
+* using a data table to specify frequency, magnitude, phase, r1 and c1
+
+.global_param mag=1
+.global_param phase=0.1
+
+Isrc 1 0 AC {mag} {phase} 
+R1 1 0 1e3
+C1 1 0 2e-6
+
+
+.data table
++ mag phase freq  r1 c1
++  1.0   0.1  1.0e0 1e3 2e-6
++  2.0   0.2  1.0e1 2e3 3e-6
++  3.0   0.3  1.0e2 3e3 4e-6
++  4.0   0.4  1.0e3 4e3 5e-6
++  5.0   0.5  1.0e4 5e3 6e-6
++  6.0   0.6  1.0e5 6e3 7e-6
+.enddata
+
+
+.print ac 
++ mag
++ phase
++ Isrc:acmag
++ Isrc:acphase
++ r1:r
++ c1:c
++ v(1)
+
+.AC data=table
+
+.END

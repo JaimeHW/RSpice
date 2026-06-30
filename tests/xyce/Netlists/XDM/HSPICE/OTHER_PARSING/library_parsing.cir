@@ -1,0 +1,16 @@
+*library inclusion and correct instance parameters
+* Xyce netlist for corresponding HSPICE netlist
+* Netlist tests XDM library parsing functions. Makes
+* sure that model is read in from dummylib.lib section
+* TWO, and that there are no name scope conflicts with
+* definition in succeeding library section (see issues
+* #107, #112, #114, #117 and #119 on XDM gitlab)
+
+.OPTIONS DEVICE TNOM=25 TEMP=25
+
+VD 1 0 DC 0.05
+D1 1 0 DXX
+.MODEL DXX D (LEVEL=2 IS=1e-18 N=1)
+
+.DC VD 0 1.2 0.05
+.PRINT DC FORMAT=PROBE V(1) I(VD)

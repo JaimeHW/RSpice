@@ -1,0 +1,23 @@
+simple RC
+*
+
+*.tran 0 1.0e-3 0 1e-6
+.tran 0 1.0e-2
+*.mpde 0 1.0e-4
+.print tran v(1)  v(2) i(v1) 
+
+*.options mpdeint ic=2 auton2=true saveicdata=1  diff=0 wampde=1 phase=0 phasecoeff=0  T2=1e-5 oscout=1
+*.options mpdeint ic=2 auton2=true saveicdate=1 diff=0 oscsrc=V1
+*.options timeint maxord=1 
+.options timeint reltol=1e-3
+*.options timeint-mpde erroption=1
+*.options timeint method=7 reltol=1e-3   DEBUGLEVEL=0 
+*.options timeint erroption=1
+
+v1 1 0 sin 0 1V 1e5 0 0
+*v1 1 0 DC 3.7V
+r1 1 2 1k
+c1 2 0 2u
+
+
+.end

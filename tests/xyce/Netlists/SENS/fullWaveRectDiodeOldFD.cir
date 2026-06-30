@@ -1,0 +1,30 @@
+fullwave bridge rectifier
+*
+*  The point of this test is to test the new finite difference derivatives (bug 1080 son)
+*
+v1 1 0 sin(0 15 60 0 0) 
+rload 1 0 10k 
+d1 1 2 mod1 
+d2 0 2 mod1 
+d3 3 1 mod1 
+d4 3 0 mod1 
+
+.model mod1 d 
+
+.tran .5m 25m 
+
+.print tran v(1,0) v(2,3)
+
+.sens param=mod1:is objfunc={v(2,3)}
+.print sens 
+* Note that "forceFD" is the OLD way of doing finite differences.  
+* It should produce the correct answer, but is inefficient and can't be used with adjoints.
+* So, although bug 1080 SON was about getting finite differences to work with adjoints, I wanted
+* at least one test that compared the new FD to the old FD, and that test could not be
+* an adjoint test.
+.options sensitivity direct=1 adjoint=0  forceFD=1
+
+* this circuit performs better with gear.  Trap gets sawtooth oscillations
+.options timeint method=gear
+
+.end 

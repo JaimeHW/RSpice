@@ -1,0 +1,20 @@
+Bug Number: 67
+Test netlist: bug_67.cir
+
+Description:
+============
+This test checks that Xyce aborts cleanly when a B source contains
+an expression with syntax errors.
+
+Verification
+============
+Xyce should abort when run on the netlist with the message:
+
+User Fatal: Unable to parse expression: POLY I(V6) 300U 1
+
+
+*** Xyce Abort ***
+
+Special Notes:
+==============
+Parallel testing is not needed.

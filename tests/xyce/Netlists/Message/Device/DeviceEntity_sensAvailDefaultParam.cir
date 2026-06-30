@@ -1,0 +1,22 @@
+* Test error message from .SENS when the device does not 
+* have a default parameter.  This uses the T device as
+* as convenient example.
+
+VIN 1 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)
+
+* specify transmission line with TD parameter
+RIN1 1 2 50
+TLINE1 2 0 3 0 Z0=50 TD=10N
+RL1 3 0 50
+
+* Since the T device does not have a default instance parameter the correct
+* syntax would be:  .sens objfunc={V(3)} param=TLINE1:Z0
+.sens objfunc={V(3)} param=TLINE1
+
+.TRAN 0.25N 50N 
+.print SENS FORMAT=NOINDEX V(3) TLINE1:Z0
+.options SENSITIVITY direct=1 adjoint=0  
+
+.END
+
+

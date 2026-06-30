@@ -1,0 +1,116 @@
+**************************************************************************************
+* A test circuit to measure the error between a reference signal and a measured signal
+* using the ERROR measure, in .AC mode with .STEP.  The FILE= qualifier is tested for
+* .PRN, .CSV and comma-delimited .PRN formats.  It is not tested for .CSD format yet.
+*
+* The associated .sh file tests both measure and re-measure.
+*************************************************************************************** 
+
+vsrc1  1a 0 AC 1 SIN(0 1 1)
+rload1 1a 1b 0.1
+cload1 1b 0 1
+
+vsrc2  2a 0 AC 1 SIN(0 1 1)
+rload2 2a 2b 0.2
+cload2 2b 0 1
+
+* The voltage level at Node 1b is is varied via the value of Rload2.
+* So, the measure results for VM(2b) should be different for the two steps.
+.STEP LIN Rload2 0.2 0.4 0.2
+
+vsrc3  3a 0 AC 1 SIN(0 1 1)
+rload3 3a 3b 0.3
+cload3 3b 0 1
+
+.print ac vm(1a) vm(1b) vm(2b) vm(3b) {-20*log10(vm(1b)/vm(1a))}
+.AC lin 27 10 130
+
+* These .AC lines will illustrate the problem with interpolating the measured points
+* to the comparison file, when the measured data contains lower frequency data 
+* (e.g., between 0 and 10 Hz) than the comparison data.
+*.ac  lin 13 1 130
+*.ac lin 13 9 130
+*.ac lin 13 12 130
+
+* Used to generate the comparison files
+*.ac lin 10 10 100 
+*.print ac FILE=ErrorTestRawDataAC.FD.prn vm(1a) vm(1b) vm(2b) vm(3b) {-20*log10(vm(1b)/vm(1a))} 
+
+* Test with FILE= in .PRN format
+* L1 Norms.  
+.measure ac FitErrorPrnL1vm2b ERROR vm(2b) FILE=ErrorTestACRawData.FD.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=3
+.measure ac FitErrorPrnL1vm3b ERROR vm(3b) FILE=ErrorTestACRawData.FD.prn COMP_FUNCTION=l1norm INDEPVARCOL=1 DEPVARCOL=4
+
+*L2 Norms, which is also the default. Also test lower-case for FILE, COMP_FUNCTION, INDEPVARCOL and DEPVARCOL
+.measure ac FitErrorPrnL2vm2b error vm(2b) file=ErrorTestACRawData.FD.prn comp_function=L2NORM indepvarcol=1 depvarcol=3
+.measure ac FitErrorPrnL2vm3b error vm(3b) file=ErrorTestACRawData.FD.prn comp_function=l2norm indepvarcol=1 depvarcol=4
+
+* Not specifying COMP_FUNCTION, or asking for "BOGONORM" should default to the L2NORM.
+* So, these two measures should give the same results as the L2NORM measures above.
+.measure ac FitErrorPrnBogoVm2b error vm(2b) file=ErrorTestACRawData.FD.prn comp_function=BOGONORM indepvarcol=1 depvarcol=3
+.measure ac FitErrorPrnDefaultVm3b error vm(3b) file=ErrorTestACRawData.FD.prn indepvarcol=1 depvarcol=4
+
+*INF NORMS
+.measure ac FitErrorPrnInfVm2b error vm(2b) file=ErrorTestACRawData.FD.prn comp_function=INFNORM indepvarcol=1 depvarcol=3
+.measure ac FitErrorPrnInfVm3b error vm(3b) file=ErrorTestACRawData.FD.prn comp_function=infnorm indepvarcol=1 depvarcol=4
+
+* Test with FILE= in .CSD format.  These are all commented out for now.
+* L1 Norms.  
+*.measure ac FitErrorCsdL1vm2b ERROR vm(2b) FILE=ErrorTestACRawData.FD.csd COMP_FUNCTION=L1NORM INDEPVARCOL=0 DEPVARCOL=2
+*.measure ac FitErrorCsdL1vm3b ERROR vm(3b) FILE=ErrorTestACRawData.FD.csd COMP_FUNCTION=l1norm INDEPVARCOL=0 DEPVARCOL=3
+
+*L2 Norms, which is also the default. Also test lower-case for FILE, COMP_FUNCTION, INDEPVARCOL and DEPVARCOL
+*.measure ac FitErrorCsdL2vm2b error vm(2b) file=ErrorTestACRawData.FD.csd comp_function=L2NORM indepvarcol=0 depvarcol=2
+*.measure ac FitErrorCsdL2vm3b error vm(3b) file=ErrorTestACRawData.FD.csd comp_function=l2norm indepvarcol=0 depvarcol=3
+
+* Not specifying COMP_FUNCTION, or asking for "BOGONORM" should default to the L2NORM.
+* So, these two measures should give the same results as the L2NORM measures above.
+*.measure ac FitErrorCsdBogoVm2b error vm(2b) file=ErrorTestACRawData.FD.csd comp_function=BOGONORM indepvarcol=0 depvarcol=2
+*.measure ac FitErrorCsdDefaultVm3b error vm(3b) file=ErrorTestACRawData..FD.csd indepvarcol=0 depvarcol=3
+
+*INF NORMS
+*.measure ac FitErrorCsdInfVm2b error vm(2b) file=ErrorTestACRawData.FD.csd comp_function=INFNORM indepvarcol=0 depvarcol=2
+*.measure ac FitErrorCsdInfVM3b error vm(3b) file=ErrorTestACRawData.FD.csd comp_function=infnorm indepvarcol=0 depvarcol=3
+
+* Test with FILE= in .CSV format
+* L1 Norms.  
+.measure ac FitErrorCsvL1vm2b ERROR vm(2b) FILE=ErrorTestACRawData.FD.csv COMP_FUNCTION=L1NORM INDEPVARCOL=0 DEPVARCOL=2
+.measure ac FitErrorCsvL1vm3b ERROR vm(3b) FILE=ErrorTestACRawData.FD.csv COMP_FUNCTION=l1norm INDEPVARCOL=0 DEPVARCOL=3
+
+*L2 Norms, which is also the default. Also test lower-case for FILE, COMP_FUNCTION, INDEPVARCOL and DEPVARCOL
+.measure ac FitErrorCsvL2vm2b error vm(2b) file=ErrorTestACRawData.FD.csv comp_function=L2NORM indepvarcol=0 depvarcol=2
+.measure ac FitErrorCsvL2vm3b error vm(3b) file=ErrorTestACRawData.FD.csv comp_function=l2norm indepvarcol=0 depvarcol=3
+
+* Not specifying COMP_FUNCTION, or asking for "BOGONORM" should default to the L2NORM.
+* So, these two measures should give the same results as the L2NORM measures above.
+.measure ac FitErrorCsvBogoVm2b error vm(2b) file=ErrorTestACRawData.FD.csv comp_function=BOGONORM indepvarcol=0 depvarcol=2
+.measure ac FitErrorCsvDefaultVm3b error vm(3b) file=ErrorTestACRawData.FD.csv indepvarcol=0 depvarcol=3
+
+*INF NORMS
+.measure ac FitErrorCsvInfVm2b error vm(2b) file=ErrorTestACRawData.FD.csv comp_function=INFNORM indepvarcol=0 depvarcol=2
+.measure ac FitErrorCsvInfVm3b error vm(3b) file=ErrorTestACRawData.FD.csv comp_function=infnorm indepvarcol=0 depvarcol=3
+
+* Test with FILE= in Comma-Delimited .PRN format
+* L1 Norms.  
+.measure ac FitErrorCDPrnL1vm2b ERROR vm(2b) FILE=ErrorTestACCommaDelimRawData.FD.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=3
+.measure ac FitErrorCDPrnL1vm3b ERROR vm(3b) FILE=ErrorTestACCommaDelimRawData.FD.prn COMP_FUNCTION=l1norm INDEPVARCOL=1 DEPVARCOL=4
+
+*L2 Norms, which is also the default. Also test lower-case for FILE, COMP_FUNCTION, INDEPVARCOL and DEPVARCOL
+.measure ac FitErrorCDPrnL2vm2b error vm(2b) file=ErrorTestACCommaDelimRawData.FD.prn comp_function=L2NORM indepvarcol=1 depvarcol=3
+.measure ac FitErrorCDPrnL2vm3b error vm(3b) file=ErrorTestACCommaDelimRawData.FD.prn comp_function=l2norm indepvarcol=1 depvarcol=4
+
+* Not specifying COMP_FUNCTION, or asking for "BOGONORM" should default to the L2NORM.
+* So, these two measures should give the same results as the L2NORM measures above.
+.measure ac FitErrorCDPrnBogoVm2b error vm(2b) file=ErrorTestACCommaDelimRawData.FD.prn comp_function=BOGONORM indepvarcol=1 depvarcol=3
+.measure ac FitErrorCDPrnDefaultVm3b error vm(3b) file=ErrorTestACCommaDelimRawData.FD.prn indepvarcol=1 depvarcol=4
+
+*INF NORMS
+.measure ac FitErrorCDPrnInfVm2b error vm(2b) file=ErrorTestACCommaDelimRawData.FD.prn comp_function=INFNORM indepvarcol=1 depvarcol=3
+.measure ac FitErrorCDPrnInfVm3b error vm(3b) file=ErrorTestACCommaDelimRawData.FD.prn comp_function=infnorm indepvarcol=1 depvarcol=4
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.  
+* This is needed for compatibility for testing with a verbose build, which 
+* is often used by the Xyce developers.
+.measure ac lastMeasure error vm(3b) file=ErrorTestACRawData.FD.prn indepvarcol=1 depvarcol=4
+
+

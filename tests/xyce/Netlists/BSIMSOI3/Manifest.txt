@@ -1,0 +1,8 @@
+b3soiTranDefaults.cir
+dcSweep.cir
+dcSweep.cir.tags
+b3soiTranDefaultsNoVoltLim.cir
+dcSweepNoVoltLim.cir
+b3soiTranDefaultsNoGminScaling.cir
+dcSweepNoGminScaling.cir
+tags

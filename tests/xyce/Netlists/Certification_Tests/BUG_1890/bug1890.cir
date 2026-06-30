@@ -1,0 +1,59 @@
+BSIM3 lead current test circuit
+* This is the basically the comparator circuit with one pmos and one
+* nmos bsim3 mosfets instrumented for lead current comparison.
+
+*circuit description
+
+M1 Anot A E1 E1  PMOS w=3.6u l=1.2u
+M2 Anot A 0 0 NMOS w=1.8u l=1.2u
+M3 Bnot B E1 E1  PMOS w=3.6u l=1.2u
+M4 Bnot B 0 0 NMOS w=1.8u l=1.2u
+M5 AorBnot 0 E1 E1 PMOS w=1.8u l=3.6u
+M6 AorBnot B 1 0 NMOS w=1.8u l=1.2u
+M7 1 Anot 0 0 NMOS w=1.8u l=1.2u
+M8 Lnot 0 E1 E1 PMOS w=1.8u l=3.6u
+M9 Lnot Bnot 2 0 NMOS w=1.8u l=1.2u
+M10 2 A 0 0 NMOS w=1.8u l=1.2u
+M11 Qnot_11 0_11 E1_11a E1_11b  PMOS w=3.6u l=3.6u
+M12 Qnot_12 AorBnot_12 3_12 0_12 NMOS w=1.8u l=1.2u
+M13 3 Lnot 0 0 NMOS w=1.8u l=1.2u
+MQLO 8 Qnot E1 E1  PMOS w=3.6u l=1.2u
+MQL1 8 Qnot 0 0 NMOS w=1.8u l=1.2u
+MLTO 9 Lnot E1 E1  PMOS w=3.6u l=1.2u
+MLT1 9 Lnot 0 0 NMOS w=1.8u l=1.2u
+CQ Qnot 0 30f
+CL Lnot 0 10f
+
+vd11  Qnot  Qnot_11  0
+vg11  0  0_11  0
+vs11  E1  E1_11a  0
+vb11  E1  E1_11b  0
+vd12  Qnot  Qnot_12  0
+vg12  AorBnot  AorBnot_12  0
+vs12  3  3_12  0
+vb12  0  0_12  0
+
+Vdd E1 0 5
+Va A 0  pulse(0 5 5ns .1ns .1ns 15ns 30ns)
+Vb B 0 0
+
+.model nmos nmos (level=9)
+.model pmos pmos (level=9)
+
+* transient analysis
+.tran 1ns 30ns
+
+*COMP {ID(M11)-i(vd11)} abstol=1.0e-11
+*COMP {IG(M11)-i(vg11)} abstol=1.0e-11 
+*COMP {IS(M11)-i(vs11)} abstol=1.0e-11
+*COMP {IB(M11)-i(vb11)} abstol=1.0e-11
+*COMP {ID(M12)-i(vd12)} abstol=1.0e-11
+*COMP {IG(M12)-i(vg12)} abstol=1.0e-11
+*COMP {IS(M12)-i(vs12)} abstol=1.0e-11
+*COMP {IB(M12)-i(vb12)} abstol=1.0e-11
+
+* Note, the error below is that ivs(11) should be i(vs11) 
+* Xyce should emit an error when it encounters this.
+.print tran {ID(M11)-i(vd11)} {IG(M11)-i(vg11)} {IS(M11)-ivs(11)} {IB(M11)-i(vb11)} 
++ {ID(M12)-i(vd12)} {IG(M12)-i(vg12)} {IS(M12)-i(vs12)} {IB(M12)-i(vb12)}
+.END

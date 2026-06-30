@@ -1,0 +1,44 @@
+Regression test for simple normal distribution sampling.
+
+* The circuit is a simple voltage divider, so it has an analytic solution
+* Also, the propagated mean, max and min can be computed analytically as well.
+*
+* Here is the results of that analytical analysis:
+*
+* analytical mean of R1 is 4.0e+3
+* analytical max  of R1 is 2.0e+3
+* analytical min  of R1 is 6.0e+3
+*
+* analytical mean of V1 is 600
+*
+* Analysis details:
+*
+* solution to voltage divider:  v(1) = V(2) * R2/(R1+R2)
+*
+* analytical mean of v(1) is: 1000 * 6/(4+6) = 1000 * 6/10 = 600
+* analytical max  of v(1) is: 1000 * 6/(2+6) = 1000 * 6/8  = 750
+* analytical min  of v(1) is: 1000 * 6/(6+6) = 1000 * 6/12 = 500
+*
+*
+.param testNorm=1.5k
+.param R1value={testNorm*2.0}
+
+R2 1 0 6K
+R1 1 2 {R1value}
+v1 2 0 1000V
+
+.dc v1 1000 1000 1
+
+.sampling 
++ param=testnorm
++ type=uniform
++ lower_bounds=1k 
++ upper_bounds=3k 
+
+.options samples numsamples=25000
++ outputs={R1:R},{V(1)}
++ sample_type=mc
++ stdoutput=true
+
+.end
+

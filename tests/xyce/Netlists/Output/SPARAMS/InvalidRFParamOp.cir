@@ -1,0 +1,41 @@
+****************************************************
+* Test error message when the indices for S(), Y()
+* and Z() operators are invalid.
+****************************************************
+
+* RC ladder circuit
+P1 1  0  port=1  z0=50
+
+C1 2 0 1e-2
+Rgs 1 2 0.02
+
+.subckt RCBlock IN OUT GND
+R1 IN OUT 20
+C1 IN OUT 1p
+Cg1 OUT GND 1p
+.ends
+
+X1 2 3 0 RCBlock
+X2 3 4 0 RCBlock
+X3 4 5 0 RCBlock
+X4 5 6 0 RCBlock
+X5 6 7 0 RCBlock
+X6 7 8 0 RCBlock
+X7 8 9 0 RCBlock
+X8 9 10 0 RCBlock
+X9 10 11 0 RCBlock
+X10 11 12 0 RCBlock
+
+.AC DEC 10 10  1e5
+
+* This .LIN line should use the defaults of FORMAT=TOUCHSTONE2
+* and SPARCALC=1
+.LIN
+
+* Indices less than 1 are invalid.  The indices must also be integers.
+.PRINT AC S(0,1) SR(0,1) SI(0,1) SM(0,1) SP(0,1) SDB(0,1)
++ Y(1,0) YR(1,0) YI(1,0) YM(1,0) YP(1,0) YDB(1,0)
++ Z(0,1) ZR(0,1) ZI(0,1) ZM(0,1) ZP(0,1) ZDB(0,1)
++ S(a,1) Y(1,b)
+
+.END

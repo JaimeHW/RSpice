@@ -1,0 +1,10 @@
+* HSPICE netlist for testing mixed voltage sources
+
+.TRAN 0.1ms 1ms
+.PRINT TRAN V(1) V(2) I(R2)
+
+VIN 1 0 0.5 AC 1 SIN 0 1 1kHz 0 0 0
+R1 1 2 100
+R2 2 0 75
+
+.END

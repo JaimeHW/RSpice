@@ -1,0 +1,6 @@
+! unequal length data lines in a Touchstone 1 file
+# Hz S RI R 50
+!      Freq              ReS11             ImS11
+   1.00000000e+01   -9.97178373e-01   -6.35467433e-02
+   1.25892541e+01   -9.97924081e-01   -5.04958196e-02
+   1.58489319e+01   -9.98394878e-01

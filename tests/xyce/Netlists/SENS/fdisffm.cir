@@ -1,0 +1,20 @@
+* Transient sensitivity example, SFFM source, finite difference (internal) sensitivity
+*****************************************************************************
+.param v0 = 1.0
+.param va = 1.0
+.param fc = 1meg
+.param mdi = 2.0
+.param fs = 250k
+
+* original
+isffm 0 1 sffm({v0} {va} {fc} {mdi} {fs})
+r1   1 0 1
+
+.tran 0 10us 
+.print tran i(isffm)
+
+* Sensitivity commands
+.print sens 
+.sens objfunc={v(1)} param=isffm:v0,isffm:va,isffm:fc,isffm:mdi,isffm:fs
+.options sensitivity direct=1 adjoint=0 forcefd=true
+.end

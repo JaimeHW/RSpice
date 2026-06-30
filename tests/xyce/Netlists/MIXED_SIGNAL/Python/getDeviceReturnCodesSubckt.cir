@@ -1,0 +1,45 @@
+* This netlist is used to test the return codes for the
+* Python methods getDeviceNames() and getDACDeviceNames()
+* for the cases of devices in subcircuits:
+*
+*    1) Success (1) for a valid non-Y device type (L)
+*       that exists in the netlist.
+*
+*    2) Success for valid Y device types (e.g. YADC and YDAC)
+*       that exist in the netlist.  This also
+*       tests that just DAC works for a Y device.
+*
+*    3) Success for a valid U device type (e.g. BUF) that
+*       exists in the netlist.
+*
+* It also tests the getTotalNumDevices(), getAllDeviceNames(),
+* checkDeviceParamName() and getDeviceParamVal() methods with
+* subcircuits.
+
+V1 1 0 SIN(0 1 1e3)
+X1 1 2 SUB1
+R1 2 0 1
+
+.SUBCKT SUB1 a c
+R2 a b 2
+L2 b c 1e-3
+
+YADC adc1 a b simpleADC R=1T WIDTH=1
+.model simpleADC ADC(settlingtime=50ns uppervoltagelimit=2 lowervoltagelimit=0)
+
+YDAC dac1 2 0 simpleDAC
+.model simpleDAC DAC(tr=5e-9 tf=5e-9)
+
+* Also test a U device
+V_dpn dig_pn 0 3V
+Vin in_1 0 4
+UBUF1 BUF dig_pn 0 in_1 out_1 DMOD
+RBUF out_1 0 100K
+.model DMOD DIG (S1VHI=3)
+.ENDS
+
+.TRAN 0 1e-3
+.PRINT TRAN V(1)
+
+.END
+

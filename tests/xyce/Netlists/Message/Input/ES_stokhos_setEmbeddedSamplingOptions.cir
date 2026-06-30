@@ -1,0 +1,35 @@
+* Test error messages, for a stokhos build, when the NUMSAMPLES
+* and ORDER parameters on the .OPTIONS EMBEDDEDSAMPLES line
+* have invalid values.
+*
+* See SON Bug 1224 for more details.
+****************************************************************
+
+*Regression test for simple normal distribution sampling
+
+R2 1 0 3K
+R1 1 2 2K
+v1 2 0 10V
+
+.dc v1 10 10 1
+
+.print dc format=tecplot v(1)
+.PRINT ES
+
+.EMBEDDEDSAMPLING
++ param=R1,R2
++ type=normal,normal
++ means=3K,2K
++ std_deviations=0.1K,0.2K
+
+.options EMBEDDEDSAMPLES
++ projection_pce=true
++ ORDER=-1
++ NUMSAMPLES=0
++ outputs={v(1)}
++ sample_type=lhs
++ stdoutput=true
+
+.end
+
+

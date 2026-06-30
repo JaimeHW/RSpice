@@ -1,0 +1,76 @@
+PDE BJT inverter circuit.  
+* This circuit requires a voltage sweep homotopy to get the DCOP,
+* and then performs a transient for a single period.
+
+.global_param vddValue=3.0
+
+* power node.  Original spice file:
+VDD     VDDNODE 0       {vddValue}
+RIN     IN      0       1K
+
+* input node.
+*                                    v1  v2  td  tr  tf  pw  per
+VIN1  IN      0   {vddValue} PULSE (0.0V 3.0V 1us 50ns 50ns 1us 2us)
+R1    VOUT  0  500
+C2    VOUT  0  0.1p
+
+* NPN PDE BJT:
+YPDE BJT1 VOUT IN 0         PDEBJT 
++ type=NPN
++ node={name=collector, base , emitter}
++ l=2.0e-3  w=1.0e-3
++ nx=50     ny=30
++ tecplotlevel=0
++ sgplotlevel=0
++ voltlim=0
++ outputnlpoisson=1
++ auger=false
+
+* PNP PDE BJT:
+YPDE BJT2 VOUT IN VDDNODE   PDEBJT
++ type=PNP
++ node={name=collector, base , emitter}
++ l=2.0e-3  w=1.0e-3
++ nx=50     ny=30
++ tecplotlevel=0
++ sgplotlevel=0
++ voltlim=0
++ outputnlpoisson=1
++ auger=false
+
+.MODEL PDEBJT   ZOD  level=2 
+
+* transient goes for a single period
+.tran 20ns 2us
+.print tran {V(VOUT)+1.0} {V(IN)+1.0} {I(VDD)-10.0} {I(VIN1)+50.0}
+
+************************************
+* **** Start Homotopy Setup ****
+************************************
+.options nonlin nlstrategy=0 searchmethod=2
++ maxstep=50 maxsearchstep=1 continuation=1
+
+* do each source separately (this works, but is slower):
+*.options loca stepper=0 predictor=0 stepcontrol=0
+*+ conparam=VDD,VIN1
+*+ initialvalue=0.0,0.0 minvalue=0.0,0.0 maxvalue=3.0,3.0
+*+ initialstepsize=0.2,0.2 minstepsize=1.0e-4,1.0e-4 maxstepsize=0.2,0.2
+*+ aggressiveness=1.0,1.0
+*+ maxsteps=5000 maxnliters=200
+
+* do both sources at once (this also works and is faster):
+.options loca stepper=0 predictor=0 stepcontrol=0
++ conparam=vddValue
++ initialvalue=0.0 minvalue=0.0 maxvalue=3.0
++ initialstepsize=0.2 minstepsize=1.0e-4 maxstepsize=0.2
++ aggressiveness=1.0
++ maxsteps=5000 maxnliters=200
+**********************************
+* **** End Homotopy Setup ****
+**********************************
+.options timeint abstol=1e-6 reltol=1e-4  doubledcop=drift_diffusion
+.options linsol type=klu
+.options device debuglevel=-100
+
+.END
+

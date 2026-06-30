@@ -1,0 +1,18 @@
+*
+* Test for negative valued parameters passed in via -prf
+*
+
+Vone  n1  0 dakota_VV1
+Vtwo  n3  0 dakota_VV2
+
+Rload1 n1  0 100
+Rload2 n3  0 50
+
+
+.measure tran maxN1 max v(n1)
+.measure tran maxN3 max v(n3)
+
+.print tran v(n1) v(n3)
+.tran 0 1
+.end
+

@@ -1,0 +1,74 @@
+Test to see if 'GND' substituted correctly, unnecessary components removed.
+*******************************************************************
+* Tier: ?????
+* Directory/Circuit name:  REDUND_REMOVE/gnd_and_redund.cir
+* Description:  Runs a transient analysis to check operation of level 1 diode
+*		in the forward active region.
+* Input:  V1=V(1)
+* Output: V(2) (output of resistive divider)
+*
+* This circuit is the exact same circuit as gnd_and_redund.cir, except in 
+* this netlist, we do NOT do ground synonym removal.  This means that gND is
+* a different node from GND which are both different nodes from 0, etc.  
+* The result is that, in this simulation, V(2)=V(1) exactly (since all the 
+* nodes like 'gND' are essentially floating.
+*
+* As in the previous netlist, components with nodes that are all the same 
+* are removed from the netlist via the '.PREPROCESS REMOVEUNUSED' statement.
+*
+* Created by:  K. R. Santarelli 10/07
+*
+*******************************************************************
+
+V1 1 0 1
+R1 1 2 1
+R2 2 gND 2
+X1 2 ground resistor
+C1 2 gnd 1 
+
+
+*Some unnecessary components in the main circuit: 
+C11 gnd! GROUND 1 
+D11 1 1 Dmod
+I11 0 0 4
+L11 2 2 3
+M11 gnd GROUND gnd! 2 Nmod
+Q11 2 2 2 3 Qmod
+R11 1 1 1
+V11 3 3 4
+
+.subckt resistor 1 2
+R1 1 2 2
+X2 1 2 capacitor
+*Some unnecessary components in the first subcircuit
+C11 gnd! GROUND 1
+D11 1 1 Dmod
+I11 0 0 4
+L11 2 2 3
+M11 gnd GROUND gnd! 2 Nmod
+Q11 2 2 2 3 Qmod
+R11 1 1 1
+V11 3 3 4
+.ends
+
+.subckt capacitor 1 2
+C1 1 2 1
+*Some unnecessary components in the first subcircuit
+C11 gnd! GROUND 1
+D11 1 1 Dmod
+I11 0 0 4
+L11 2 2 3
+M11 gnd GROUND gnd! 2 Nmod
+Q11 2 2 2 3 Qmod
+R11 1 1 1
+V11 3 3 4
+.ends
+
+.model Dmod D
+.model Nmod NMOS
+.model Qmod NPN
+
+.PREPROCESS removeunused c,d,i,l,m,q,r,v
+.DC V1 -1 1 0.1
+.print DC V(1) V(2)
+.end

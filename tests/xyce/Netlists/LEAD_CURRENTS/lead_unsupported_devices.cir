@@ -1,0 +1,54 @@
+****************************************************************
+* Test for I() for devices that do not implement lead currents
+*
+* The goal of this test is to ensure that Xyce exits gracefully
+* with a reasonable error message.
+*
+* This circuit will actually run if the "offending devices"
+* are removed from the .PRINT line, and V(1) is printed instead.
+*
+* 
+*
+* See SON Bug 833 for more details.
+****************************************************************
+* This is a valid I-R circuit.  It is in here for "test 
+* development" to help prove that the circuit actually works 
+* in .TRAN
+I1 1 0 sin(0 1 1KHz)
+R1 1 0 1
+
+* mutual inductor definition
+L1 2 0 1mH
+L2 3 0 1mH
+K1 L1 L2 0.75
+
+* disconnected AND and OR gates, that don't stop the circuit from
+* actually running.
+UAND1 AND(4) dig_pn 0 in_1 in_2 in_3 in_4 out_1 DMOD1 
+.model DMOD1 DIG ( DELAY=20ns )
+YOR OR1 A B J  DMOD2
+.model DMOD2 DIG (VREF=0 VLO=0 VHI=12 DELAY=125ns )
+
+* lossy transmission line circuit that works
+V7 7 0 pulse(0 1 1ns 1ns 1ns 20ns 40ns)
+OLINE1 7 0 8 0 rcline 
+rload 8 0 10 
+.model rcline ltra r=0.05 g=0 l=0 c=20pF len=100 steplimit=1 compactrel=1.0e-3 compactabs=1.0e-14
+
+* accelerated mass example
+.param mass=2
+.param K=25.5
+.param c=0.5
+.param amag=0.5
+.param omega=3.56999165180658
+B1 acc 0 V={(-K*v(pos)-c*v(vel))/mass+amag*sin(omega*TIME)}
+r4 acc 0 1
+yacc acc1 acc vel pos v0=0 x0=0.4
+
+.TRAN 0 1000ns
+* Mix in devices for which I is not supported, and also one
+* non-existent device (K2).  Also have one of them in an expression.
+.PRINT TRAN V(2) I(K1) I(K2) I(OLINE1) 
++ I(UAND1) I(YOR!OR1) {1-I(YACC!ACC1)} 
+
+.end

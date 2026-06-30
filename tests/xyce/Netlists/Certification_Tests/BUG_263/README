@@ -1,0 +1,34 @@
+Bug Number: 263
+Test netlist: bug_263.cir
+
+Description:
+============
+This test checks that the use "format=probe" (lower case) on a print
+line is handled correctly. 
+
+Verification
+============
+Run Xyce in serial on the netlist.
+
+To verify this test, check the "prn" file to be sure are in the probe
+format. The beginnign of th prn file should look like:
+
+#H
+SOURCE='Xyce' VERSION='1.1'
+TITLE='spice probe data'
+SUBTITLE='spice probe data'
+TIME='0:00:00 AM' DATE='Jan 1, 2000' TEMPERATURE='2.700e+01'
+ANALYSIS='Transient Analysis' SERIALNO='12345'
+ALLVALUES='YES' COMPLEXVALUES='NO' NODES='2'
+SWEEPVAR='Time' SWEEPMODE='VAR_STEP'
+XBEGIN='0' XEND='0.0001'
+FORMAT='0 VOLTSorAMPS;EFLOAT : NODEorBRANCH;NODE'
+DGTLDATA='NO'
+#N
+'V(1)' 'V(2)'
+#C 0.00000000e+00 2
+0.00000000e+00:1   0.00000000e+00:2
+
+Special Notes:
+==============
+Parallel testing is not needed for this case.

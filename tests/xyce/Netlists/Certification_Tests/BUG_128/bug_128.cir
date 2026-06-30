@@ -1,0 +1,41 @@
+Regression test to show proper capacitor IC functioning after fixing BUG 128
+*
+* Bug 128 can be viewed at 
+*       http://tvrusso.sandia.gov/bugzilla/show_bug.cgi?id=128.
+*
+* If this circuit is simulated correctly, the T=0 value of the voltage v(1)
+* should be 1V, and it should decay to 0 with a time constant of 1ms, as
+*   v(1)(T)=1V*exp(-t/1ms)
+*
+* Versions of Xyce prior to 1.0.1 would produce t=0 value of v(1) of 0V.
+* 
+* The .prn file stored in the certification test does indeed show the proper
+* time dependence of the voltage at node 1, but there is some integration
+* error.  Using:
+*  awk '{print $1,$2,exp(-$2/.001)}' bug_128.cir.prn > analytic.out
+* and editing off the header and footer, I compared the results with:
+*  xyce_verify.pl bug_128.cir analytic.out bug_128.cir.prn plotfile
+* and found an integrated RMS error between the two files of 1.097%.
+*  If the circuit is simulated for more than 5 time constants then the 
+* integrated RMS error goes up, and this is to be expected because the 
+* signals become tiny and the relative error is exaggerated.
+*
+* In the file "bug_128.cir.prn.bad" are the results of running Xyce release
+*  1.0.0 on this netlist.
+*  BOTH OLD AND NEW CODE GIVE LOW INTEGRATED RMS ERRORS! (Old code gives
+*  1.64% error --- but it's still QUALITATIVELY wrong)
+* The essential difference is that at T=0 the correct code has V(1)=1.0
+* and the old (WRONG) code has V(1)=0.0
+*
+* NOTE THAT THE "COMPARE" PROGRAM DOES NOT (NOT! NOT!) DETECT FAILURE.
+*   If you run "compare" and give it the "good" and "bad" files it will
+*   tell you there's nothing wrong!
+* The only way to be sure the code is producing the right answer is to look
+* at the output by hand, or with a more delicate instrument than "compare"
+*
+c1 1 0 1uF IC=1
+R1 1 2 1K
+v1 2 0 0V
+.print tran v(1)
+.tran 0 5ms
+.end

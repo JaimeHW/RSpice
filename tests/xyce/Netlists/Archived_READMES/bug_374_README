@@ -1,0 +1,15 @@
+NOTES:
+  Bug 374 addresses a problem with device model being specified before
+  the primary parameter value.  The Xyce resistor and capacitor are 
+  examples of this.  
+
+HOWTO: (no compare)
+  1) Xyce capacitor.cir  (does not have the problem line)
+  2) Xyce capacitor-bug.cir  (has the problem line)
+  3) Confirm that both run to completion without aborting with an error 
+     message about unknown (or extra) parameters. 
+  *) May be repeated with the resistor example
+
+SERIAL/PARALLEL:
+  This test should be run in SERIAL.  
+

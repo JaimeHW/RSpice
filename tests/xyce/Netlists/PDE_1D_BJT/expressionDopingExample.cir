@@ -1,0 +1,114 @@
+*-------------------------------------------------------------------------
+* Copyright Notice
+*
+* Copyright (c) 2000, Sandia Corporation, Albuquerque, NM.
+*-------------------------------------------------------------------------
+*
+*-------------------------------------------------------------------------
+* Filename       : $RCSfile$
+*
+* Purpose        : 
+*
+* Special Notes  : 
+*
+* Creator        : Eric R. Keiter
+*
+* Creation Date  : 
+*
+* Revision Information:
+* ---------------------
+*
+* Revision Number: $Revision$
+*
+* Revision Date  : $Date$
+*
+* Current Owner  : $Author$
+*-------------------------------------------------------------------------
+* This file is the first attempt to use fitted functions to define
+* doping profiles.  
+*
+* The purpose of this netlist is to test the use of the expression library,
+* in combination with vector-composite doping-region specification, to set
+* this doping profiles.  For convenience it is using the .func capability, 
+* so that the composite table is not an unreadable mess.
+
+* distance scalar (convert from cm to microns)
+.param xs=1.0e+4
+.param xsi=1.0e-4
+
+* doping parameters for the analytic form:  N=e*10^(a+bx+cx^2)+d
+* Boron doping function params
+.param aB=19.088
+.param bB=-4.2737
+.param cB=-9.3786
+.param dB=0.0
+.param eB=1.0
+.Func FB1(X) { eB*(10**(aB+bB*(X*xs)+cB*((X*xs)**2.0)))+dB }
+
+* As doping function params:
+.param aAS=19.555
+.param bAS=18.222
+.param cAS=-148.23
+.param dAS=0.0
+.param eAS=1.0
+.Func FAS1(X) { eAS*(10**(aAS+bAS*(X*xs)+cAS*((X*xs)**2.0)))+dAS }
+
+* Sb doping function params:
+.param aSB=8.548
+.param bSB=5.4523
+.param cSB=-0.738
+.param dSB=1.60e+15
+.param eSB=1.0
+.Func FSB1(X) { eSB*(10**(aSB+bSB*(X*xs)+cSB*((X*xs)**2.0)))+dSB }
+
+* doping parameters for the analytic form:  N=10^A exp[-((x-x0)/2w)^2].
+* boron doping function params:
+.func ifmin (a,b) {if(a<b, a, b)}
+.func ifmax (a,b) {if(a>b, a, b)}
+
+.param A_B={19.574867}
+.param x0_B={-0.228}
+.param w_B={0.152}
+.Func FB2(X) { (10.0**A_B) * exp(-((((X*xs)-x0_B)/(2.0*w_B))**2.0) )  }
+*.func ifmin (a,b) {if(a<b, a, b)}
+
+* As doping function params:
+.param A_AS={20.11501}
+.param x0_AS={0.061}
+.param w_AS={0.038}
+.Func FAS2(X) { (10.0**A_AS) * exp(-(((  ifmax((X*xs)-x0_AS,0.0)  )/(2.0*w_AS))**2.0)) }
+
+* Sb doping function params:
+.param A_SB={18.61832}
+.param x0_SB={3.694}
+.param w_SB={0.542}
+.Func FSB2(X) { (10.0**A_SB) * exp(-((((X*xs)-x0_SB)/(2.0*w_SB))**2.0) )  }
+
+V1 0 1 1.0  
+
+* BJT specification:
+* (as the purpose of this netlist is to test out the doping spec, just using
+* two terminals, attached to base and emitter)
+ypde bjt    1 0 pdediode 
++ tecplotlevel=0 gnuplotlevel=0
++ l=3.3e-5; in cm, not meters!
++ nx=201  
++ area=1.0 
+*doping regions:
++ region={name       =          reg1,  reg2
++         function   =    expression,  expression
++         type       =         ptype,  ntype
++         expression =  { FB2(#x) }, { FAS2(#x) + FSB2(#x) }
++         species    =            BM,  ASP }
+
+.MODEL pdediode  ZOD  level=1
+
+.dc V1 1.0 1.0 1.0
+.print dc v(1) {log10(abs(I(V1)))}
+
+.options nonlin debuglevel=-100  
+.options nonlin-tran debuglevel=-100 
+.options timeint debuglevel=-100 
+.options device debuglevel=-100
+
+.END

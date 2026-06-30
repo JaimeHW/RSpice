@@ -1,0 +1,9 @@
+Testing DC argument count exceeds required
+
+V1 1 0 1.0
+R1 1 0 1.0
+
+.DC V1 -8.0 -4.0 0.0 4.0
+
+.print dc V(1)
+

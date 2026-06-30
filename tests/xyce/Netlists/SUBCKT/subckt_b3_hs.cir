@@ -1,0 +1,112 @@
+TEST B3_HS of subcircuit tests
+*
+* This series of test, derived from the bug 534 test case, attempts further
+* sanity checks on subcircuits with parameters and model context.
+*
+* Test B3 places the second mosfet into a subcircuit, using W, L and M as
+* subcircuit parameters, but using a local model statement.
+*
+*Note: ERK 10/22/09
+* Test B3_HS is identical to B3, except that the keyword PARAMS: has been
+* removed, to preserve Hspice compatibility, per bug 1733.
+*
+*
+* Author:   $Author$
+* Revision: $Revision$
+* Date:     $Date$
+*
+
+V1 Vpos 0 5V
+I1 Vpos BIAS 10u
+M_1 BIAS BIAS 0 0 MN W=10u L=1u M=1
+XM_2 OUT BIAS 0 0 XNMOS  W=10u L=1u M=4
+Vout RB OUT 0
+Rout Vpos RB 100k
+
+.DC V1 1 5 .1
+.print DC V(Vpos) V(BIAS) V(RB) V(OUT) I(V1) I(Vout)
+
+.subckt XNMOS D G S B  W=1 L=1 M=1
+M_2 D G S B MN W={W} L={L} M={M}
+.MODEL MN NMOS (LEVEL = 9
+* AMI MOSIS Models
+* DATE: Mar 13/02
+* LOT: T21S                  WAF: 0201
+* Temperature_parameters=Default
++VERSION = 3.1            TNOM    = 27             TOX     = 1.4E-8
++XJ      = 1.5E-7         NCH     = 1.7E17         VTH0    = 0.6484638
++K1      = 0.8874212      K2      = -0.0978537     K3      = 24.0034885
++K3B     = -7.2553705     W0      = 1.268969E-8    NLX     = 1E-9
++DVT0W   = 0              DVT1W   = 0              DVT2W   = 0
++DVT0    = 3.8899304      DVT1    = 0.4295545      DVT2    = -0.0862625
++U0      = 454.7269155    UA      = 1E-13          UB      = 1.362113E-18
++UC      = 1.430811E-11   VSAT    = 1.629926E5     A0      = 0.6165742
++AGS     = 0.1163052      B0      = 2.433887E-6    B1      = 5E-6
++KETA    = -2.051055E-3   A1      = 6.710587E-5    A2      = 0.37115
++RDSW    = 1.342046E3     PRWG    = 0.0525473      PRWB    = 0.0422162
++WR      = 1              WINT    = 2.317656E-7    LINT    = 3.438422E-8
+*+XL      = 0              XW      = 0              
++DWG     = -1.197811E-8
++DWB     = 6.032429E-8    VOFF    = 0              NFACTOR = 0.684939
++CIT     = 0              CDSC    = 2.4E-4         CDSCD   = 0
++CDSCB   = 0              ETA0    = 0.0323024      ETAB    = -1.472177E-3
++DSUB    = 0.2796903      PCLM    = 2.5557332      PDIBLC1 = -0.2401157
++PDIBLC2 = 2.505188E-3    PDIBLCB = -0.0520225     DROUT   = 0.5945619
++PSCBE1  = 5.499244E8     PSCBE2  = 4.527916E-5    PVAG    = 0
++DELTA   = 0.01           RSH     = 80.3           MOBMOD  = 1
++PRT     = 0              UTE     = -1.5           KT1     = -0.11
++KT1L    = 0              KT2     = 0.022          UA1     = 4.31E-9
++UB1     = -7.61E-18      UC1     = -5.6E-11       AT      = 3.3E4
++WL      = 0              WLN     = 1              WW      = 0
++WWN     = 1              WWL     = 0              LL      = 0
++LLN     = 1              LW      = 0              LWN     = 1
++LWL     = 0              CAPMOD  = 2              XPART   = 0.5
++CGDO    = 2.1E-10        CGSO    = 2.1E-10        CGBO    = 1E-9
++CJ      = 4.156656E-4    PB      = 0.99           MJ      = 0.4479288
++CJSW    = 3.399348E-10   PBSW    = 0.1            MJSW    = 0.1142026
++CJSWG   = 1.64E-10       PBSWG   = 0.1            MJSWG   = 0.1142026
++CF      = 0              PVTH0   = 0.0959658      PRDSW   = 103.9415756
++PK2     = -0.034767      WKETA   = -0.0168116     LKETA   = 1.239789E-3 )
+.ends
+
+.MODEL MN NMOS (LEVEL = 9
+* AMI MOSIS Models
+* DATE: Mar 13/02
+* LOT: T21S                  WAF: 0201
+* Temperature_parameters=Default
++VERSION = 3.1            TNOM    = 27             TOX     = 1.4E-8
++XJ      = 1.5E-7         NCH     = 1.7E17         VTH0    = 0.6484638
++K1      = 0.8874212      K2      = -0.0978537     K3      = 24.0034885
++K3B     = -7.2553705     W0      = 1.268969E-8    NLX     = 1E-9
++DVT0W   = 0              DVT1W   = 0              DVT2W   = 0
++DVT0    = 3.8899304      DVT1    = 0.4295545      DVT2    = -0.0862625
++U0      = 454.7269155    UA      = 1E-13          UB      = 1.362113E-18
++UC      = 1.430811E-11   VSAT    = 1.629926E5     A0      = 0.6165742
++AGS     = 0.1163052      B0      = 2.433887E-6    B1      = 5E-6
++KETA    = -2.051055E-3   A1      = 6.710587E-5    A2      = 0.37115
++RDSW    = 1.342046E3     PRWG    = 0.0525473      PRWB    = 0.0422162
++WR      = 1              WINT    = 2.317656E-7    LINT    = 3.438422E-8
+*+XL      = 0              XW      = 0              
++DWG     = -1.197811E-8
++DWB     = 6.032429E-8    VOFF    = 0              NFACTOR = 0.684939
++CIT     = 0              CDSC    = 2.4E-4         CDSCD   = 0
++CDSCB   = 0              ETA0    = 0.0323024      ETAB    = -1.472177E-3
++DSUB    = 0.2796903      PCLM    = 2.5557332      PDIBLC1 = -0.2401157
++PDIBLC2 = 2.505188E-3    PDIBLCB = -0.0520225     DROUT   = 0.5945619
++PSCBE1  = 5.499244E8     PSCBE2  = 4.527916E-5    PVAG    = 0
++DELTA   = 0.01           RSH     = 80.3           MOBMOD  = 1
++PRT     = 0              UTE     = -1.5           KT1     = -0.11
++KT1L    = 0              KT2     = 0.022          UA1     = 4.31E-9
++UB1     = -7.61E-18      UC1     = -5.6E-11       AT      = 3.3E4
++WL      = 0              WLN     = 1              WW      = 0
++WWN     = 1              WWL     = 0              LL      = 0
++LLN     = 1              LW      = 0              LWN     = 1
++LWL     = 0              CAPMOD  = 2              XPART   = 0.5
++CGDO    = 2.1E-10        CGSO    = 2.1E-10        CGBO    = 1E-9
++CJ      = 4.156656E-4    PB      = 0.99           MJ      = 0.4479288
++CJSW    = 3.399348E-10   PBSW    = 0.1            MJSW    = 0.1142026
++CJSWG   = 1.64E-10       PBSWG   = 0.1            MJSWG   = 0.1142026
++CF      = 0              PVTH0   = 0.0959658      PRDSW   = 103.9415756
++PK2     = -0.034767      WKETA   = -0.0168116     LKETA   = 1.239789E-3 )
+
+.end

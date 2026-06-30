@@ -1,0 +1,41 @@
+Test Name: BUG_576
+Owner: Eric Keiter
+Test netlists: none 
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Bug 576 requested that a divide by zero error be removed from the PDE
+devices.  This was an error that only happened on SGI, and I had added
+it inadvertantly, when refactoring the current calculation in the PDE
+devices.  
+
+Fixing it wasn't that difficult. I had to change some machine-dependent
+things.
+
+This bug was noticed when the regression test suite started to fail for
+the PDE devices on SGI.  If the PDE tests are all passing on all platforms,
+in the regression testing, that should be considered adequate testing
+for this bug.
+ 
+Procedure:
+============
+Run nightly regression tests.  Make sure the 3 PDE tests do not exit with
+error.  These 3 tests are:
+
+Xyce_Test/Netlists/PDE_1D_Diode/diopde.cir
+Xyce_Test/Netlists/PDE_1D_TRAN/userOneD.cir
+Xyce_Test/Netlists/PDE_2D_BJT/cartbjt.cir
+
+Verification:
+=============
+Passes if the 3 regression tests pass.   Failures related to this bug are
+catastrophic - segmentation faults.
+ 
+Notes:
+======
+
+

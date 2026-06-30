@@ -1,0 +1,20 @@
+* Test IB() IC() IE() IS() wildcards for BJT, for more complex wildcards.
+* The output should not have the branch current for the V devices
+* or any of the lead currents for the R devices.
+
+VPOS  1 0 DC 5V
+VBB   4 0 DC -2V
+RE    1 2 2K
+RB    3 4 190K
+Q1 0 3 2 PBJT1
+Q1a 0 3 2 PBJT1
+Q2 0 3 2 PBJT2
+Q2a 0 3 2 PBJT2
+
+.MODEL PBJT1 PNP (IS=100FA BF=60)
+.MODEL PBJT2 PNP (IS=100FA BF=120)
+
+.DC VPOS 0 5 1 VBB 0 -2 -0.5
+
+.PRINT DC V(1) IB(*a) IC(Q2*) IE(Q1*) IS(Q2?)
+.END

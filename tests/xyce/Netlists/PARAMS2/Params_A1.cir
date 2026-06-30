@@ -1,0 +1,10 @@
+Test to see that use of a parameter-based expression works in device line
+* If all is well, this should produce examples identical to those of
+* Resist_Control
+.param RES=10k
+R1 1 0 {RES}
+V1 1 0 DC 5V
+
+.dc V1 0 5 1
+.print DC v(1) I(v1)
+.end

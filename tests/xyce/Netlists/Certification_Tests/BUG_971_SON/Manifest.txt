@@ -1,0 +1,5 @@
+bug971.cir
+invalid_parameter.cir
+invalid_parameter.cir.sh
+invalid_parameter.cir.tags
+invalid_parameter.cir.options

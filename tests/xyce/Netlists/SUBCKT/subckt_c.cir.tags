@@ -1,0 +1,3 @@
+serial, nightly, subckt, params
+valgrind
+bsrc

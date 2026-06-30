@@ -1,0 +1,12 @@
+testing of complex expressions in parameters and on the .PRINT line
+
+V1 1 0 1.0
+R1 1 0 1e3
+C1 1 0 2e-6
+
+.param r0={log10(-1)}
+
+.DC V1 1 1 1
+.print dc v(1) {r0} {re(r0)} {img(r0)}
+
+.END

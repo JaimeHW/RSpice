@@ -1,0 +1,47 @@
+MOS LEVEL 1 MODEL CMOS INVERTER.  new-DAE baseline for MDPE test.
+*
+* new-DAE baseline version.
+* Eric Keiter, Sandia National Laboratories.
+*
+* This ia 1-input CMOS inverter, which is derived from the INVERT1
+* regression test.   For the original description, see file
+* Xyce_Test/Netlists/INVERT1/invert1.cir.
+*
+* The biggest difference between this circuit and the
+* original is that the rise and fall times are longer,
+* in order for the fast time scale to more easily resolve
+* the rise and fall.
+*
+*    original TR, TF = 5ns
+*    new      TR, TF = 0.15us
+*
+
+*.tran 20ns 5e-5
+.hb 1e5
+.print hb {v(vout)+1.0} {v(in)+4.0}  {v(1)+4.0} ig(MP1) ig(MN1) is(MP1) id(MN1)  id(MP1)
+
+.options hbint numfreq=30 saveicdata=1 STARTUPPERIODS=2
+.options linsol-hb type=direct direct_solver=lapack
+
+*.mpde 20ns 6us
+*.options MPDEINT IC=0 N2=51 oscsrc=VIN1 diff=1 NONLTESTEPS=3
+
+
+
+VDDdev 	VDD	0	3V
+RIN	IN	1	1K
+*                   v1 v2   td  tr  tf   pw   per
+*VIN1  1	0  5V PULSE (5V 0V 1.5us 5ns 5ns 1.5us 3us)
+*VIN1  1	0  5V PULSE (5V 0V 1.5us 0.15us 0.15us 1.5us 3.3us)
+VIN1 1 0 sin 0  3V 1e5 0 0
+
+R1    VOUT  0  10K
+C2    VOUT  0  0.1p
+MN1   VOUT  IN 0 0 CD4012_NMOS L=5u W=175u
+MP1   VOUT IN VDD VDD CD4012_PMOS L=5u W=270u
+**************************************************************************
+.MODEL cd4012_pmos PMOS (LEVEL=2)
+**************************************************************************
+.MODEL cd4012_nmos NMOS (
++ LEVEL = 2)
+.END

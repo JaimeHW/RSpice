@@ -1,0 +1,50 @@
+Voltage Source - Piece Wise Linear Signal
+**************************************************************
+* Tier No.:	1                                           
+* Description:	Test of Xyce model for an independent voltage
+*	source.  The source is described as;
+*	A piece wise linear voltage which is a series of time
+*	and voltage pairs of data points, give by:
+*		  time(s), voltage(volts)	
+*			1    (0.00, 0.00)
+*			2    (2.00, 3.00)
+*			3    (3.00, 2.00)
+*			4    (4.00, 2.00)
+*			5    (4.01, 5.00)
+*			6    (4.50, 5.00)
+*			7    (4.51,-2.00)
+*			8    (7.00, 1.00)
+*			9    (9.00,-1.00)
+*			10   (9.01, 4.00)
+*			11   (10.0, 3.00)
+*
+* Input/Output:	VPWL; a common simulation data output (.csd)can
+*	be generated for viewing the signal.
+*************************************************************** 
+* most typical Xyce syntax
+VPWL1 1 0 PWL FILE "vpwl.csv"
+R1 1 0 500
+
+* sometimes file is lower case
+VPWL2 2 0 PWL file "vpwl.csv"
+R2 2 0 500
+
+* repeat subtest 2, but without the double quotes
+VPWL2a 2a 0 PWL file vpwl.csv
+R2a 2a 0 500
+
+* Time delay
+VPWL3 3 0 PWL FILE "vpwl.csv" TD=1
+R3 3 0 500
+
+* Repeat whole waveform, with time delay
+VPWL4 4 0 PWL FILE "vpwl.csv" TD=1 R=0
+R4 4 0 500
+
+* Repeat part of waveform, starting at time=7s, with time delay
+VPWL5 5 0 PWL file "vpwl.csv" R=7 TD=1
+R5 5 0 500
+
+.TRAN 0.01S 30S
+.PRINT TRAN V(1) V(2) V(2A) V(3) V(4) V(5)
+.END 

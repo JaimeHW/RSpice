@@ -1,0 +1,52 @@
+ ***** Measure Functions *****
+
+EQNVR4 = 2.502435e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVI4 = -2.499999e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVR4EXP = 1.250244e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVR4FROMTO = 4.950590e-01
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+EQNIMEAMP = 3.533812e-03
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: EQNFAIL1 failed. FROM value > highest frequency value
+EQNFAIL1 = FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: EQNFAIL2 failed. TO value < FROM value
+EQNFAIL2 = FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+LASTMEASURE = 3.537255e-01
+ ***** Measure Functions *****
+
+EQNVR4 = 1.001559e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVI4 = -2.001169e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVR4EXP = 1.100156e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVR4FROMTO = 4.808052e-01
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+EQNIMEAMP = 2.235632e-03
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: EQNFAIL1 failed. FROM value > highest frequency value
+EQNFAIL1 = FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: EQNFAIL2 failed. TO value < FROM value
+EQNFAIL2 = FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+LASTMEASURE = 2.237811e-01

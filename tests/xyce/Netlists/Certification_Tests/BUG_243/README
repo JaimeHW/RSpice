@@ -1,0 +1,17 @@
+Bug Number: 243
+Test netlist: bug_243.cir
+
+Description:
+============
+This test checks that models in subcircuits are handled correctly when
+Xyce is run in parallel. 
+
+Verification
+============
+Run Xyce in parallel on the netlist.
+Use xyce_verify.pl to comapre against the results in the given prn file.
+
+Special Notes:
+==============
+Parallel testing only is needed.
+

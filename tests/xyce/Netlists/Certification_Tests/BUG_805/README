@@ -1,0 +1,45 @@
+
+Bug 805 (charleston): Add support for alternate parameter names in BJT model
+
+Many common BJT Gummel-Poon parameters have various aliases, depending
+on which SPICE varient one uses.  The point of this bug was to support
+as many of these aliases as we could, to be more compatible with Hspice
+and Pspice.  Hspice has a lot of params that we don't support, so
+it wasn't possible to make things 100% compatible.
+
+See this link for a table of params, and their names in various 
+simulators including spice2/3, Pspice, Hspice, and Spectre.
+
+http://cp.literature.agilent.com/litweb/pdf/ads2008/netlist/ads2008/BJT_Model-Bipolar_Transistor_Model.html#BJTModel-BipolarTransistorModel-1134824
+
+Here are the params I aliased for this bug:
+
+Bf ->   BFM 
+Vaf -> VA VA, VBF 
+Ikf -> IK IK, JBF 
+Ise -> JLE
+Ne -> NLE
+Br -> BRM
+Var -> VB, VRB, BV
+Ikr -> JBR
+Isc -> JLC
+Irb -> JRB, IOB 
+Vje -> PE
+Mje ->  ME
+Vjc -> PC
+Mjc -> MC
+Xcjc -> CDIS 
+Cjs -> CCS CCS, CSUB 
+Vjs -> PS PSUB 
+Mjs -> MS ESUB 
+Itf -> JTF 
+Xtb -> TB, TCB
+Xti -> PT
+
+All this test will do is run several circuits with identical parameters,
+but with different aliases for those params.  The results should pass
+the "diff" test.
+
+
+
+

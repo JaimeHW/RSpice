@@ -1,0 +1,25 @@
+Simple RC circuit
+*
+* Eric Keiter, SNL
+*
+* Tests simultaneous sweeps of frequency, magnitude and phase, using traditional
+* AC sweep commands combined with expressions for magnitude and phase.
+*
+
+.global_param mag={log10(freq)+1}
+.global_param phase={0.1*mag}
+
+Isrc 1 0 AC {mag} {phase} 
+R1 1 0 1e3
+C1 1 0 2e-6
+
+.print ac 
++ {mag}
++ {phase}
++ {Isrc:acmag}
++ {Isrc:acphase}
++ v(1)
+
+.AC DEC 1 1 1e5
+
+.END

@@ -1,0 +1,16 @@
+Bug Number: 80
+Test netlist: bug_80.cir
+
+Description:
+============
+This test checks for consistency between the analysis type and the print type.
+
+Verification
+============
+Xyce should abort with the follwing message:
+
+ERROR: print type DC and analysis type TRAN are inconsistent
+
+Special Notes:
+==============
+Parallel testing is not needed.

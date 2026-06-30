@@ -1,0 +1,23 @@
+*
+* This netlist has .PRINT TRAN line with a FILE= qualifer.  
+* If this invocation is used:
+*
+*   Xyce -r tran-multifile.cir.raw -a tran-multifile.cir
+*
+* then Xyce 6.10 will:
+*
+*   a) make the ASCII-formatted raw file tran-multifile.cir.raw
+*
+*   b) not make the file tran-multifile.cir.csv 
+*
+********************************************************
+
+V1 1 0 PWL 0 0 1 1
+R1 1 2 1
+R2 2 0 1
+
+.options output initial_interval=0.2
+.PRINT TRAN FILE=tran-ascii-multifile.cir.csv FORMAT=CSV R1:R R2:R V(1) V(2)
+.TRAN 0 1 
+
+.end

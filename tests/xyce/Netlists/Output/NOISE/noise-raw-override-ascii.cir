@@ -1,0 +1,9 @@
+NOISE test of -r output ASCII format
+*
+V1  1 0 DC 5.0 AC  1.0   
+R1  1 0 100K
+.NOISE  V(1) V1  DEC  5 100 100K 1
+.PRINT NOISE INOISE ONOISE
+
+.END
+

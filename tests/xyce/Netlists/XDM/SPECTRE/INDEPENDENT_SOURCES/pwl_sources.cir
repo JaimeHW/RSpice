@@ -1,0 +1,43 @@
+* Xyce netlist for testing various Spectre piecewise linear (PWL)
+* source syntaxes.  See SRN Bug 2051 for more details.
+* Note that the same vpwlFile and ipwlFile work for both Xyce
+* and Spectre netlists.
+*
+* Also note that the device "names" in the Spectre netlist are (for 
+* example) R5 and I5.  However, the Spectre instance lines are of 
+* the form:
+*
+*   R3 (net010 0) resistor r=1K
+*   I5 (net010 0) isource file="ipwlFile" type=pwl delay=1m 
+*
+* So, on a Spectre instance line, it is the "resistor" and "isource" 
+* keywords that identify the devices as Resistors or Current Sources.
+* So, the xdm translation will turn those devices into RR3 and II5 
+* in the translated Xyce netlist.  For this reason, the device names 
+* in this "Gold" Xyce netlist are (for example) RR5 and II5, to match
+* what the device names will be in the xdm-translated Xyce netlist.
+*
+* As a final note, only the Spectre parameters delay=<value> and 
+* file=<fileName> are used in the Spectre netlist.  The Spectre
+* type=pwl vsource and isource devices have many more parameters.  
+* However, many of them do not have a straightforward translation 
+* into Xyce.
+
+.TRAN 0 3ms
+.PRINT TRAN I(RR3) I(RR2) V(net017) V(net08) V(net4) V(net1)
+
+VV0 net1 0    PWL(0 0 250e-6 1 750e-6 1 1e-3 0) TD=1e-3
+RR0 net1 net4 R=1K    
+RR1 net4 0    R=1K
+
+VV1 net08 0  PWL FILE "vpwlFile" TD=1e-3
+RR4  net08 net017 R=1K 
+RR5  net017 0     R=1K
+
+II4 net011 0    PWL(0 0 250e-6 1 750e-6 1 1e-3 0) TD=1e-3
+RR2 net011 0    R=1K    
+
+II5 net010 0    PWL FILE "ipwlFile" TD=1e-3
+RR3 net010 0    R=1K    
+
+.END

@@ -1,0 +1,8 @@
+*Analysis directives:
+.TRAN  1n 1000ns
+
+.PRINT TRAN N(N390192) N(N390144) I(V_V8) I(R_R15)
+
+.INC ./h_sources.net
+
+.END

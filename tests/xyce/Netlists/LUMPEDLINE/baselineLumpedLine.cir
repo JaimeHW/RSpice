@@ -1,0 +1,15 @@
+* baseline circuit. 
+
+.inc cables.lib
+*                 v1 v2 td tr tf pw per
+VsigGen 1 0 pulse(0.0 1.0 0.0 5ns 5ns 0.49e-6 1.0e-6)
+RsigGen 1 1b 50
+
+X_bigline DUT  1b rlc_12Foot
+
+.tran 0 1.0e-6
+.print tran V(1) V(1B) 
+
+.options linsol type=klu
+.options timeint method=gear 
+

@@ -1,0 +1,46 @@
+* source HSOURCETEST
+
+R_R12         0 N390186  1 TC=0,0 
+R_R13         0 N390144  1 TC=0,0 
+V_V7         N390192 0  AC 1
++SIN 0V 1V 1e6 0 0 0
+X_H1    N390192 N390186 N390144 0 SCHEMATIC1_H1 
+
+.subckt SCHEMATIC1_H1 1 2 3 4  
+H_H1         3 4 VH_H1 2
+VH_H1         1 2 0V
+.ends SCHEMATIC1_H1
+
+* test the POLY form of the H-source, using the syntax in the 
+* PSpice Reference Guide
+R_R14         0 N390338  1 TC=0,0 
+V_V8         N390338 0  AC 1
++SIN 0V 2V 1e6 0 0 0
+R_R15         0 N390388  1 TC=0,0 
+
+H_H2 N390388 0 POLY(1) V_V8 0 2
+
+* this is commented out because the the translated Xyce netlist
+* does not produce the correct answer yet when the POLY
+* form of the H-Source is made as a subcircuit by the
+* OrCAD Capture UI.
+*V_V8         N390344 0  AC 1
+*+SIN 0V 2V 1e6 0 0 0
+*R_R14         0 N390338  1 TC=0,0 
+*R_R15         0 N390288  1 TC=0,0 
+*X_H2    N390344 N390338 N390288 0 SCHEMATIC1_H2
+
+*.subckt SCHEMATIC1_H2 1 2 3 4  
+*H_H2         3 4 POLY(1) VH_H2 2
+*VH_H2         1 2 DC 0V
+*.ends SCHEMATIC1_H2
+
+
+
+
+
+
+
+
+
+

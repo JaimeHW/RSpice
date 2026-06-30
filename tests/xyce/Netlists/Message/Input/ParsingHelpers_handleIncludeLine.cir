@@ -1,0 +1,19 @@
+************************************************
+* Test for warnings for improperly formatted
+* .INC lines, where the incFile is usable.
+*
+* See SON Bug 980 for more details. 
+************************************************
+
+* .INC statement only takes one argument
+.INC incFile bleem 
+.INC
+
+V1 1 0 1
+R1 1 2 1
+
+.DC V1 1 2 1
+.PRINT DC V(1) V(2)
+
+.END
+

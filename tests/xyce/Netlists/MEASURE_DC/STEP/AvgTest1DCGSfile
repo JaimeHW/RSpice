@@ -1,0 +1,54 @@
+ ***** Measure Functions ***** 
+
+AVGV1B = 2.500000e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+AVGV1BFROM = 1.875000e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+AVGV1BTO = 3.437500e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+AVGV1BFT = 1.875000e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+AVGV1BTF = 1.875000e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+AVGV1BFT1PT = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+AVGFAIL1 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+AVGFAIL2 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+LASTMEASURE = 3.750000e+00 at VSRC1 value = 5.000000e+00
+ ***** Measure Functions ***** 
+
+AVGV1B = 3.437500e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+AVGV1BFROM = 2.812500e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+AVGV1BTO = 4.375000e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+AVGV1BFT = 2.812500e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+AVGV1BTF = 2.812500e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+AVGV1BFT1PT = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+AVGFAIL1 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+AVGFAIL2 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+LASTMEASURE = 4.687500e+00 at VSRC1 value = 5.000000e+00

@@ -1,0 +1,8 @@
+* HSPICE netlist for testing SFFM V-Sources
+
+ISFF1 15 0 DC 1 SFFM(0V 0.5 20K 10 5K)
+RSSF1 15 0 1
+.TRAN .001ms .5ms
+.PRINT TRAN V(15)
+
+.END

@@ -1,0 +1,6 @@
+tags
+options
+specials_in_dot_param.cir
+specials_in_dot_param.cir.sh
+specials_in_subckt_dot_param.cir
+specials_in_subckt_dot_param.cir.sh

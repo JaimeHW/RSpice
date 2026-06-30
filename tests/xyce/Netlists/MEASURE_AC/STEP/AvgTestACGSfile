@@ -1,0 +1,64 @@
+ ***** Measure Functions ***** 
+
+AVGVB = 5.901385e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+AVGVMB = 7.248821e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+AVGVRB = 5.901385e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+AVGVIB = 3.787119e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+AVGVPB = 3.988427e+01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+AVGVDBB = -4.012674e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+AVGVRBEXP = 1.590139e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: AVGFAIL1 failed. FROM value > highest frequency value
+AVGFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: AVGFAIL2 failed. TO value < FROM value
+AVGFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+LASTMEASURE = 7.248821e-01
+ ***** Measure Functions ***** 
+
+AVGVB = 8.776204e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+AVGVMB = 9.211731e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+AVGVRB = 8.776204e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+AVGVIB = 2.046388e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+AVGVPB = 1.642710e+01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+AVGVDBB = -1.087514e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+AVGVRBEXP = 1.877620e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: AVGFAIL1 failed. FROM value > highest frequency value
+AVGFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: AVGFAIL2 failed. TO value < FROM value
+AVGFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+LASTMEASURE = 9.211731e-01

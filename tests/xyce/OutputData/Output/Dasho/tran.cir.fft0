@@ -1,0 +1,10 @@
+FFT analysis for V(2):
+  Window: HANN, Start Time: 0.000000e+00, Stop Time: 1.000000e+00
+  First Harmonic: 1.000000e+00, Start Freq: 1.000000e+00, Stop Freq: 4.000000e+00
+  DC component    Mag= 1.593980e-01   Phase= 0.000000e+00
+       Index       Frequency             Mag           Phase
+           1    1.000000e+00    2.214394e-01   -1.616955e+02
+           2    2.000000e+00    6.812017e-02    3.635017e+01
+           3    3.000000e+00    8.364585e-03   -1.337519e+02
+           4    4.000000e+00    3.513058e-03    0.000000e+00
+

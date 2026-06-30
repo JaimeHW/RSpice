@@ -1,0 +1,24 @@
+* 3 stage RC Ladder.
+*
+.global_param cap=1e-8
+.global_param res=1k
+
+Vs 1 0 sin (0.0 1.0  100k)
+Rgs 1 2 0.02
+
+.subckt RCBlock IN OUT GND
+R1 IN OUT {res}
+C1 IN OUT {cap}
+Cg1 OUT GND 1e-9
+.ends
+
+X1 2 3 0 RCBlock
+X2 3 4 0 RCBlock
+X3 4 5 0 RCBlock
+
+.print tran v(2) v(5)
+.tran 10p 1e-5
+
+.step res 1k 3k 1k
+.step cap 1e-8 3e-8 1e-8
+

@@ -1,0 +1,25 @@
+*
+* This netlist does not have a .PRINT SENS line.
+* If this invocation is used:
+*
+*   Xyce -r tran-nosens.cir.raw -a tran-nosens.cir
+*
+* then Xyce will:
+*
+*   a) make the ASCII-formatted raw file tran-nosens.cir.raw
+*
+*   b) not make the file tran-nosens.cir.prn 
+*
+*   c) not make any .SENS output
+*
+********************************************************
+
+V1 1 0 PWL 0 0 1 1
+R1 1 2 1
+R2 2 0 1
+
+.options output initial_interval=0.2
+.PRINT TRAN R1:R R2:R V(1) V(2)
+.TRAN 0 1 
+
+.end

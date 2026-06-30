@@ -1,0 +1,8 @@
+exclude
+p_element_bandpass_filter.cir.hspice
+p_element_bandpass_filter.cir
+p_element_bandpass_filter.cir.sh
+telegrapher_line.cir.hspice
+telegrapher_line.cir
+telegrapher_line.cir.sh
+tags

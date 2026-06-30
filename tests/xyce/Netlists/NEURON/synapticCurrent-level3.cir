@@ -1,0 +1,28 @@
+Test of synapse device
+
+*.options nonlin nox=0
+*.options device debuglevel=1
+* next option is supposed to allow discontinuous change:
+*.options timeint method=7 erroption=1
+
+*For comparison with analytical solution, need to have presynaptic spike at (just after, to avoid DCOP issues) time 0, and no delay in postsynaptic repsonse
+vin a1 0 PULSE( -0.065 0.05 1.0e-9 1.0e-6 1.0e-6 0.001 1.0e10 )
+
+* synapse level 3 takes place of NEURON's NetCon and synapse objets
+* it allows for plasticity, but this test is designed not to use it
+* NetCon parameters:  threshold 10mV, delay 0, weight 0.01
+*	'weight' is really conductance, measured in microsiemens
+* synapse parameters:  tau1 = 2ms, tau2 = 6.3 ms, revE = 0 mV
+.model synParams synapse level=3 vThresh={0.01} delay={0.0} gMax={0.01e-6} eRev={0.0} tau1={0.002} tau2={0.0063} wmin={1.0} wmax={1.0} winit={1.0}
+
+ysynapse syn a1 a2 synParams 
+
+* just use a fixed voltage to represent the postsynaptic membrane
+* current measured through this seems to be opposite the postsynaptic current
+Vout a2 0 1.0
+
+.tran 0 0.1
+.print tran v(a1) v(a2) 
++ i(Vout)
+
+.end

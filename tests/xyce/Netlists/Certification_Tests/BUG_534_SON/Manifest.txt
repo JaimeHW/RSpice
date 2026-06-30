@@ -1,0 +1,6 @@
+exclude
+noise_cancel_test1.cir
+noise_cancel_test1.cir.sh
+noise_cancel_test1_rf.cir
+noise_cancel_test1_rf.cir.sh
+tags

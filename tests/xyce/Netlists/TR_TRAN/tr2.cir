@@ -1,0 +1,13 @@
+Regression test to show proper transient RC circuit
+********************************************************************************
+* TR vs. TRAN test.  
+********************************************************************************
+c1 1 0 1uF IC=1
+R1 1 2 1K
+v1 2 0 0V
+*COMP v(1) reltol=5.0e-3 abstol=5.0e-7
+.print TR v(1)
+.TR 0 5ms
+*.options timeint reltol=1e-6 abstol=1e-6
+.end
+

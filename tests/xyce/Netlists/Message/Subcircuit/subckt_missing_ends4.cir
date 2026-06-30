@@ -1,0 +1,31 @@
+*=== Confirma Hierarchical Spice Netlister for KiCad... ver 0.1
+* Schematic=t_kgf_xyce_test
+.tran 1n 1u 0 1n
+.PRINT tran FORMAT=RAW
+
+.param DigitalSupply=1.8
+.param DigThreshold=DigitalSupply/2
+.param T_PropDelay=30p T_RiseTime=30p
+.param C_RiseTime=T_RiseTime/1e6
+
+.model Lsw_1meg vswitch von='DigThreshold+0.1' voff='DigThreshold-0.1' ron=1e6 roff=1e10
+
+.global digpower
+v_digpwr digpower 0 dc 'DigitalSupply'
+
+V3 CLK 0 DC 0 PULSE ( 0 1.8 0.5N 0.1N 0.1N 25N 50N)
+XU2 CLK CLKB TS_INV
+*XU1 CLKB CLKB_inv TS_INV
+*== End top level schem
+
+*======== INVERTERS GATES ===========
+.SUBCKT TS_INV A  YN
+* INV          IN OUT
+s1 digpower risefall digpower a Lsw_1meg
+s2 risefall 0 a 0 Lsw_1meg
+c1 risefall 0 'C_RiseTime'
+*r1  risefall yn 0.1 ; this is resistor with correctly labeled node "yn" matching .subckt
+r1  risefall z 0.1 ; this is resistor with incorrectly labeled node "z"
+
+*Infinite loop results if this next line is missing:
+*.ENDS TS_INV

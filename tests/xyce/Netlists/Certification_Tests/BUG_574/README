@@ -1,0 +1,49 @@
+Test Name: BUG_574
+Owner: Eric Keiter
+Test netlists: bug_574_mpi.cir 
+GS files: bug_574_mpi.cir.prn
+Mode:  Parallel
+Comparator:  xyce_verify.pl
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Bug 574 requested that the expression capability be added to the .PRINT
+line.  This way, it should be possible to specify things like:
+
+.PRINT DC format=tecplot V(1)  I(Vsrc)  {V(1)**2.0}
+
+where the final item in the example is an expression, applied to other
+solution variables.
+
+Procedure:
+============
+
+There is a nightly regression test associated with this capability.  That
+test is expPrint.cir.  This test can be used in part to verify this bug.
+
+On parallel platforms, run the circuit bug_574_mpi.cir. (2 processors is
+enough).  Compare the resulting *prn file with 
+../../OutputData/BUG_574/bug_574_mpi.cir.prn.  This comparison can be
+done with xyce_verify.pl.
+
+
+Verification:
+=============
+
+If expPrint.cir passes the regression test on every serial platform, 
+consider this bugfix verified for serial.
+
+If bug_574_mpi.cir passes on every parallel platform, consider this bugfix
+verified for parallel.
+ 
+Notes:
+======
+
+I tried using expPrint.cir (the regression test circuit) and it bombed in
+parallel, even if I tried to use KLU.  I think there is a bugzilla issue
+for handling the running of extra small circuits in parallel.  Anyway,
+that is why I set up a different circuit for parallel.
+
+
+

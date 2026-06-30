@@ -1,0 +1,42 @@
+* This netlist tests that various PSpice .PROBE and .PROBE64 lines are either
+* translated in Xyce or commented out (with an XDM warning message emitted)
+* if no legal Xyce translation exists.
+
+* This netlist addresses SRN Bug 2023.
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+
+* These .PROBE lines are legal. As othercomments, .PROBE and .PROBE64 should 
+* both be translated into .PRINT Statements.  V() and N() are synonyms 
+* in PSpice.   However, node names that contain alphanumeric characters
+* must be enclosed in square brackets in the V() syntax.
+.PROBE  V([N04173]) N(N03179)
+.PROBE64 V([N04173]) N(N03179)
+.PROBE  I(V_V1) 
+.PROBE64  I(R_R1)
+.PROBE  W(R_R1) 
+.PROBE64  W(R_R2)
+.PROBE N([N04173])
+.PROBE64 N([N03179])
+
+* These .PROBE lines are illegal (except for ones with V(*) or
+* V(alias(*)) and should be commented out by XDM. 
+* Note that this sequence of PSpice .PROBE statements will cause
+* xdm to emit a Xyce .PRINT statment with V(*) appearing twice.  That
+* is okay, since Xyce should only print out the entire list of node
+* voltages once in that case.
+.PROBE64 V(alias(*)) I(alias(*)) W(alias(*)) D(alias(*)) NOISE(alias(*)) 
+.PROBE V(*) 
+.PROBE I(*) 
+.PROBE W(*) 
+.PROBE D(*) 
+.PROBE NOISE(*) 
+
+R_R1         N04173 N03179  10 TC=0,0 
+R_R2         N03179 0  20 TC=0,0 
+V_V1         N04173 0  AC 1
++SIN 0 1 1KHz 0 0 0
+
+.END
+

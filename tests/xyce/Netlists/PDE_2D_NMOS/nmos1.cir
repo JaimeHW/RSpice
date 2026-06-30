@@ -1,0 +1,63 @@
+N-Channel Mosfet Circuit
+**************************************************************
+*
+* The purpose of this test is to test out the two-level Newton
+* algorithm.  Xyce has two versions of two level implemented.
+* The one used by this test is invoked by the presence of the
+* NONLIN-TWOLEVEL options, with the algorithm parameter set 
+* to 3.
+*
+* This particular version of two-level is PDE device specific.
+* It was not written to be general purpose.
+*
+* The other version of two-level is tested in several other
+* tests, including the POWERNODE tests.
+*
+* This particular circuit does not require two-level to work,
+* so normally one wouldn't bother using it on this circuit.
+* However, this makes it convenient to test.  This test compares
+* the two-level solution to a full Newton solution.
+*
+*
+VDD 5 0 DC 5V
+R1 5 1 47MEG
+R2 1 0 22MEG
+RD 5 4 2.2K
+RS 2 0 500
+VMON 4 3 0
+YPDE NMOS 3 2 1 4 NFET sgplotLevel=0 tecplotLevel=0
++ mobmodel=carr
++ nx=81 l=1.0e-3
++ ny=41 w=5.0e-4
++ node = { name  =   source,     gate,   drain,     sub
++          start =      0.0,   3.0e-4,  8.0e-4,     0.0
++            end =   2.0e-4,   7.0e-4,  1.0e-3,  1.0e-3
++           side =      top,      top,     top,  bottom
++       material =   neutral, neutral, neutral, neutral
++ oxideBndryFlag =         0,       0,       0,       0}
+*
+.MODEL NFET ZOD level=2
+
+* Nonlinear solver params:                                                                                             
+.options NONLIN maxstep=40 maxsearchstep=2 searchmethod=0 nox=0 debuglevel=-100
+
+* this circuit does not need continuation or 2-level to work.
+.options NONLIN-TWOLEVEL algorithm=3 nox=0 FULLNEWTONENFORCE=0
++ maxstep=15 maxsearchstep=2 searchmethod=2 debuglevel=-100
++ in_forcing=0 nlstrategy=0 rhstol=5.0e-6
++ continuationFlag=1 
+*+ continuationFlag=0 
+
+* Time integration params:
+.options DEVICE debuglevel=-100 
+
+* Linear solver params:
+.options LINSOL type=klu
+
+*.DC VDD 0 5 0.5 
+.DC VDD 0 3 0.5 
+*.print DC I(VMON) V(3,2) V(1,2)
+.print DC V(5) {abs(I(VMON))}
+
+.END
+

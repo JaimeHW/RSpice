@@ -1,0 +1,12 @@
+README
+inv_tr.cir
+inv_tr.cir.sh
+inv_tr_lev10.cir
+inv_tr_lev10.cir.tags
+inv_tr_lev57.cir
+inv_tr_lev57.cir.tags
+nmos3p2.mod
+nmos3p2_lev57.mod
+pmos3p2.mod
+pmos3p2_lev57.mod
+tags

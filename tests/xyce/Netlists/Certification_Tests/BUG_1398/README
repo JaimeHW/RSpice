@@ -1,0 +1,32 @@
+Test Name: BUG_1398
+Owner: Tom Russo
+Test netlists: RLC.cir, RLC_simple.cir
+GS files: none
+Mode:  Serial
+Comparator:  xyce_verify.pl
+Version of Xyce: Release_4.0.2
+ 
+Description:
+============
+In versions of Xyce prior to Release 4.0.2, but after revision 1.120 of
+N_DEV_Inductor.C, Xyce supported a PSpice-like model card for the inductor
+that contains a parameter L.  In PSpice, this is meant to be an inductor
+multiplier, but in Xyce it has been getting ignored since revision 1.120.
+Prior to revision 1.120, it was still wrong, and was simply another way of 
+specifying the total inductance.
+
+Procedure: 
+============ 
+
+The script "RLC.cir.sh" takes care of it, and runs RLC_simple.cir and RLC.cir.
+The former uses no model cards at all, and the latter uses model cards that
+should produce identical results.
+
+Verification:
+=============
+
+Compare the outputs of RLC_simple.cir and RLC.cir with xyce_verify.pl
+ 
+Notes:
+======
+

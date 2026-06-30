@@ -1,0 +1,6 @@
+patfile
+tags
+testjac_comp.cir
+testjac_comp.cir.gold_output
+testjac_comp.cir.patfile
+testjac_comp.cir.sh

@@ -1,0 +1,10 @@
+Test for illegal use of lead current
+
+V1  1  0  1
+R1  1  0  1
+B2  2  0  v={I(R1)+3}
+
+.tran 1ns 1us
+.print tran v(2)
+
+.end

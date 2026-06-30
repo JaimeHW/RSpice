@@ -1,0 +1,36 @@
+* This netlist tests that various PSpice lines that are not directly
+* supported in Xyce are either turned into the correct Xyce line,
+* or commented out.
+
+* In Xyce, comment lines start with *, rather than #
+* Note a PSpice line with # as the comment character has been seen once in a customer netlist.
+* However, a comment line that starts with # does not actually run in the PSpice command
+* line tool psp_cmd.
+# test that this PSpice comment line (that starts with #) is turned into a Xyce comment line  
+
+* These "dot lines" are not supported by Xyce, and should be commented out by XDM
+.AUTOCONVERGE ITL1=1000 ITL2=2000 ITL4=1000 RELTOL=0.05 ABSTOL=1.0E-5 VNTOL=.001 PIVTOL=1.0E-10
+
+* These .OPTIONS lines are not supported in Xyce, and should be commented out with
+* a warning message emitted by XDM.
+.OPTIONS ADVCONV
+.OPTIONS CHGTOL=1p
+.OPTIONS ITL2=1000
+.OPTIONS SPEED_LEVEL
+
+* These .OPTIONS lines can be translated into a different Xyce syntax.
+* The .OPTIONS METHOD=Default line should translate into .OPTIONS TIMEINT METHOD=TRAP in Xyce  
+.OPTIONS METHOD=Default 
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PROBE  N(N04173) 
+.PROBE  N(N03179)
+
+R_R1         N04173 N03179  1k TC=0,0 
+R_R2         0 N03179  2K TC=0,0 
+V_V1         N04173 0  AC 1
++SIN 0 1 1KHz 0 0 0
+
+.END
+

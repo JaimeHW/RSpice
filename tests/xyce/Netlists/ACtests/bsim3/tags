@@ -1,0 +1,11 @@
+serial, parallel, nightly
+ac
+bsim3,mos9
+resistor
+capacitor
+step
+esrc
+isrc
+isin
+
+

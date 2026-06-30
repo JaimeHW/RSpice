@@ -1,0 +1,15 @@
+Netlist to Test the Xyce Resistor Model
+
+* patterned after the RESISTOR_TD/temp_dep.cir test, loosely
+.param resDtemp = -82
+.options device temp = 27.0
+
+R1 1 0 1K RMODEL DTEMP='resDtemp'
+V1 1 0 5V
+.DC V1 0 5V 1V
+.MODEL RMODEL R (TC1=0.0007325 TC2=-2.217E-07)  
+
+.PRINT DC V(1) I(V1)
+.step resDtemp list -82 -2 45
+
+.END

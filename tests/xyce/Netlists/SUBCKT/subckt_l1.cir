@@ -1,0 +1,23 @@
+Subcircuit Test case L1
+* This test case should produce answers identical to those of subckt_l0
+* In all versions of Xyce prior to (Q)Release 3.0c, it failed to do the 
+* right thing, because of improper substitution of subcircuit parameters in
+* expressions.
+
+V1 2 0 sin (0 8 8k)
+r1 2 0 1k
+
+v2 27 0 sin (0 8 4k)
+r2 27 0 1k
+
+X1 2 27 3 foo
+
+
+.subckt foo 1 2 3
+Btest 3 0 V={ V(1)-V(2) }
+rtest 3 0 1k
+.ends
+
+.print tran v(3) {v(2)-V(27)} {V(3)-(v(2)-v(27))}
+.tran 1us 5ms
+.end

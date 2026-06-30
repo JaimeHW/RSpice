@@ -1,0 +1,53 @@
+Test Circuit for 3 Mutually Coupled Inductors
+******************************************************************************
+* Tier No.: 1
+* Directory/Circuit Name:  MINDUCTORS/cpldLMIs.cir
+* Description: Test of  mutually coupled inductors using coupling coefficent value 
+*              of k=0.75 (for K1) and k=0.8 (for K2)
+*
+*              This test was added to help verify that bug # 677 is fixed.
+*              Bug # 677 was that for circuits where several mutual inductors(K) all
+*              refered to the same inductor devices (L), the parser would lose
+*              track of some of them.  In this test, but K1 and K2 use the L1
+*              inductor.
+*
+* Input: VS = V(1)
+* Output: I(VS), V(2), V(3)
+*
+* Analysis:
+*       The circuit contains two coupled inductors, L1=1mH and L2=1mH, that form a
+*       transformer.   The primary side of the transformer is connected to resistor R1 
+*       and the secondary is connected to resistor R2. The input signal, VS=V(1),  is 
+*       a 60Hz sinusoidal waveform with a peak  voltage amplitude of 169.7 V.  The 
+*       rms value and radian frequency of the input signal are calculated as follows:
+*
+*       V(1)rms = 0.707 * 169.7 = 119.98 V
+*       w = 2*pi*frequency = 2 * 3.14159 * 60 Hz = 376.99 rads/s
+*
+*       A voltage is induced across L2 from the current in L1. Using a coupling 
+*       coefficent of k=0.75, the following calculations yield the current through 
+*       the primary L1, I(VS), and the voltage across the primary and secondary 
+*       inductors, V(2) and V(3), respectively:
+*
+*       I1 = I(VS) = VS /  SQRT (R1**2 + XL1**2)
+*
+*       where,
+*       XL1 = inductive reactance of L1 = 2*pi*frequency*L1= 376.99 * 1mH = 0.377 Ohms
+*
+*       Therefore,
+*       I1 = 119.98 / SQRT (1000**2 + 0.377**2) = 0.1199 A rms
+*           = 0.1199/0.707 =                      169.6 mA peak
+*       V(2) = I * XL1 = 0.1199 * 0.377 =         0.0452 V rms
+*               =  0.0452/0.707=                  63.9 mV peak
+*       V(3) = k1 * V(2) = 0.75 * 0.0452 =        0.0339 V rms
+*                = 0.0339 / 0.707=                47.9 mV peak
+*       V(4) = k2 * V(2) = 0.8 * 0.0452 =         0.0362 V rms
+*                = 0.0362 / 0.707=                51.2 mV peak
+******************************************************************************
+
+.include mil_test1.lib
+.TRAN 100US 25MS
+
+.PRINT TRAN I(VS) V(2) V(3) V(4)
+.END
+

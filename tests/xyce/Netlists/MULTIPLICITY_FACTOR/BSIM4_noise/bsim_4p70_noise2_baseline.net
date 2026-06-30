@@ -1,0 +1,264 @@
+* Noise simulation for xyce
+.options device temp=27
+.subckt mysub d_x g_x s_x b_x
+e_d d_v 0 d_x 0 1
+v_d d_v d 0
+f_d d_x 0 v_d   -0.1
+e_g g_v 0 g_x 0 1
+v_g g_v g 0
+f_g g_x 0 v_g   -0.1
+e_s s_v 0 s_x 0 1
+v_s s_v s 0
+f_s s_x 0 v_s   -0.1
+e_b b_v 0 b_x 0 1
+v_b b_v b 0
+f_b b_x 0 v_b   -0.1
+m1 d g s b mymodel
++ w=10.0e-6
++ l=0.06e-6
+m2 d g s b mymodel
++ w=10.0e-6
++ l=0.06e-6
+m3 d g s b mymodel
++ w=10.0e-6
++ l=0.06e-6
+m4 d g s b mymodel
++ w=10.0e-6
++ l=0.06e-6
+m5 d g s b mymodel
++ w=10.0e-6
++ l=0.06e-6
+m6 d g s b mymodel
++ w=10.0e-6
++ l=0.06e-6
+.model mymodel nmos level=14 version=4.70
++ binunit=1
++ paramchk=1
++ mobmod=0
++ capmod=2
++ igcmod=1
++ igbmod=1
++ geomod=0
++ diomod=1
++ rdsmod=0
++ rbodymod=1
++ rgatemod=0
++ permod=1
++ acnqsmod=0
++ trnqsmod=0
++ tnom=27
++ toxe=1.85e-9
++ toxp=1.2e-9
++ toxm=1.85e-9
++ dtox=0.65e-9
++ epsrox=3.9
++ wint=5e-9
++ lint=5.25e-9
++ ll=0
++ wl=0
++ lln=1
++ wln=1
++ lw=0
++ ww=0
++ lwn=1
++ wwn=1
++ lwl=0
++ wwl=0
++ xpart=0
++ toxref=1.85e-9
++ xl=-30e-9
++ vth0=0.423
++ k1=0.4
++ k2=0.01
++ k3=0
++ k3b=0
++ w0=2.5e-6
++ dvt0=1
++ dvt1=2
++ dvt2=-0.032
++ dvt0w=0
++ dvt1w=0
++ dvt2w=0
++ dsub=0.1
++ minv=0.05
++ voffl=0
++ dvtp0=1.0e-9
++ dvtp1=0.1
++ lpe0=0
++ lpeb=0
++ xj=1.96e-8
++ ngate=2e20
++ ndep=2.54e18
++ nsd=2e20
++ phin=0
++ cdsc=0.000
++ cdscb=0
++ cdscd=0
++ cit=0
++ voff=-0.13
++ nfactor=1.9
++ eta0=0.0058
++ etab=0
++ vfb=-0.55
++ u0=0.0491
++ ua=6e-10
++ ub=1.2e-18
++ uc=0
++ vsat=124340
++ a0=1.0
++ ags=1e-20
++ a1=0
++ a2=1.0
++ b0=0
++ b1=0
++ keta=0.04
++ dwg=0
++ dwb=0
++ pclm=0.04
++ pdiblc1=0.001
++ pdiblc2=0.001
++ pdiblcb=-0.005
++ drout=0.5
++ pvag=1e-20
++ delta=0.01
++ pscbe1=8.14e8
++ pscbe2=1e-7
++ fprout=0.2
++ pdits=0.08
++ pditsd=0.23
++ pditsl=2.3e6
++ rsh=5
++ rdsw=165
++ rsw=85
++ rdw=85
++ rdswmin=0
++ rdwmin=0
++ rswmin=0
++ prwg=0
++ prwb=6.8e-11
++ wr=1
++ alpha0=0.074
++ alpha1=0.005
++ beta0=30
++ agidl=0.0002
++ bgidl=2.1e9
++ cgidl=0.0002
++ egidl=0.8
++ aigbacc=0.012
++ bigbacc=0.0028
++ cigbacc=0.002
++ nigbacc=1
++ aigbinv=0.014
++ bigbinv=0.004
++ cigbinv=0.004
++ eigbinv=1.1
++ nigbinv=3
++ aigc=0.012
++ bigc=0.0028
++ cigc=0.002
++ aigsd=0.012
++ bigsd=0.0028
++ cigsd=0.002
++ nigc=1
++ poxedge=1
++ pigcd=1
++ ntox=1
++ xrcrg1=12
++ xrcrg2=5
++ cgso=1.5e-10
++ cgdo=1.5e-10
++ cgbo=2.56e-11
++ cgdl=2.653e-10
++ cgsl=2.653e-10
++ ckappas=0.03
++ ckappad=0.03
++ acde=1
++ moin=15
++ noff=0.9
++ voffcv=0.02
++ kt1=-0.11
++ kt1l=0
++ kt2=0.022
++ ute=-1.5
++ ua1=4.31e-9
++ ub1=7.61e-18
++ uc1=-5.6e-11
++ prt=0
++ at=33000
++ fnoimod=1
++ tnoimod=1
++ jss=0.0001
++ jsws=1e-11
++ jswgs=1e-10
++ njs=1
++ ijthsfwd=0.01
++ ijthsrev=0.001
++ bvs=10
++ xjbvs=1
++ jsd=0.0001
++ jswd=1e-11
++ jswgd=1e-10
++ njd=1
++ ijthdfwd=0.01
++ ijthdrev=0.001
++ bvd=10
++ xjbvd=1
++ pbs=1
++ cjs=0.0005
++ mjs=0.5
++ pbsws=1
++ cjsws=5e-10
++ mjsws=0.33
++ pbswgs=1
++ cjswgs=3e-10
++ mjswgs=0.33
++ pbd=1
++ cjd=0.0005
++ mjd=0.5
++ pbswd=1
++ cjswd=5e-10
++ mjswd=0.33
++ pbswgd=1
++ cjswgd=5e-10
++ mjswgd=0.33
++ tpb=0.005
++ tcj=0.001
++ tpbsw=0.005
++ tcjsw=0.001
++ tpbswg=0.005
++ tcjswg=0.001
++ xtis=3
++ xtid=3
++ dmcg=0
++ dmci=0
++ dmdg=0
++ dmcgt=0
++ dwj=0
++ xgw=0
++ xgl=0
++ rshg=0.4
++ gbmin=1e-10
++ rbpb=5
++ rbpd=15
++ rbps=15
++ rbdb=15
++ rbsb=15
++ ngcon=1
++ noia=6.25e41
++ noib=3.125e26
++ noic=8.75
++ em=4.1e7
++ ef=1.1
+.ends
+vin dummy 0 0 ac 1
+rin dummy 0 1
+v_d d 0 1.0
+v_g g 0 1.0
+v_s s 0 0
+v_b b 0 0
+x1 d g s b mysub
+hn 0 n_d v_d 1
+.noise v(n_d) vin dec 10 1e3 1e8
+.step v_g list 0.6 0.8 1.0
+.print noise inoise onoise
+.end

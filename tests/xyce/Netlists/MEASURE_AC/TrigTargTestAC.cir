@@ -1,0 +1,79 @@
+* Test AC mode support for the TRIG-TARG measure
+*
+*
+*
+* See gitlab-ex issue 289 for more details
+*************************************************
+
+* For testing convenience send the output for the AC_CONT
+* measures to the <netlistName>.ma0 file.
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+* Used to adjust reference frequency from 1Hz to 1KHz
+.PARAM scaleFactor=1e3
+
+V1 a 0 DC 0V AC 1
+
+* 7th order Chebychev LPF with 2dB of passband ripple.
+* This is not a realistic passband ripple level, but is
+* useful for this test.
+RS a b 1
+C1 b 0 {2.865/scaleFactor}
+L2 b c {0.912/scaleFactor}
+C3 c 0 {3.8774/scaleFactor}
+L4 c d {0.9537/scaleFactor}
+C5 d 0 {3.8774/scaleFactor}
+L6 d e {0.912/scaleFactor}
+C7 e 0 {2.8650/scaleFactor}
+
+* The magnitude at DC is RL/(RL + RS)
+RL e 0 1.0
+
+.ac dec 20 1 1000
+.print AC vm(a) vm(b) vm(c) vm(d) vm(e) vr(e) ii(L6)
+
+* Test both with AT
+.MEASURE AC TrigTargAT TRIG AT=30 TARG AT=500
+.MEASURE AC TrigTargAT1 TRIG vm(e)=0.45 CROSS=1 TARG AT=500
+.MEASURE AC TrigTargAT2 TRIG AT=30 TARG vm(e)=0.45 CROSS=1
+
+* Test that negative measure values are allowed
+.MEASURE AC TrigTarg1 TRIG vm(e)=0.45 CROSS=1 TARG vm(e)=0.45 CROSS=2
+.MEASURE AC TrigTarg2 TRIG vm(e)=0.45 CROSS=2 TARG vm(e)=0.45 CROSS=1
+
+* Repeat tests with LAST keyword and CROSS=-1
+.MEASURE AC TrigTarg3 TRIG vm(e)=0.45 CROSS=1 TARG vm(e)=0.45 CROSS=LAST
+.MEASURE AC TrigTarg4 TRIG vm(e)=0.45 CROSS=-1 TARG vm(e)=0.45 CROSS=1
+
+* Add TD for both TRIG and TARG.  Note that the TRIG TD value will also be used
+* for the TARG TD value, if only the TRIG TD value is given.  An "early" TD is
+* essentially ignored.
+.MEASURE AC TrigTarg5 TRIG vm(b) VAL=0.40 CROSS=1 TD=90 TARG vm(b) VAL=0.45 CROSS=1
+.MEASURE AC TrigTarg6 TRIG vm(b) VAL=0.40 CROSS=1 TD=90 TARG vm(b) VAL=0.45 CROSS=1 TD=10
+.MEASURE AC TrigTarg7 TRIG vm(b) VAL=0.40 CROSS=1 TARG vm(b) VAL=0.45 CROSS=1 TD=70
+.MEASURE AC TDearly TRIG vm(e)=0.45 CROSS=1 TD=0.1 TARG vm(e)=0.45 CROSS=2 TD=0.2
+
+* Repeat core tests with RISE and FALL.  Also test TRIG and TARG using different signals.
+.MEASURE AC RiseFall1 TRIG vm(e)=0.45 RISE=1 TARG vm(e)=0.45 FALL=2
+.MEASURE AC RiseFall2 TRIG vm(e)=0.45 RISE=2 TARG vm(e)=0.45 FALL=1
+
+.MEASURE AC RiseFall3 TRIG vm(e)=0.45 CROSS=1 TARG vm(d)=0.45 RISE=LAST
+.MEASURE AC RiseFall4 TRIG vm(d)=0.45 FALL=LAST TARG vm(e)=0.45 CROSS=1
+
+* Verify that both the real and imaginary part of solution vector are accessible,
+* and that branch currents work.
+.MEASURE AC TrigTarg8 TRIG vr(e)=0.45 CROSS=1 TARG II(L6)=-0.45 CROSS=2
+
+* Both TDs get ignored if both ATs at specified.  However, TRIG TD is used for
+* the TARG clause in the second case
+.MEASURE AC AtTD1 TRIG AT=30 TD=50 TARG AT=500 TD=600
+.MEASURE AC AtTD2 TRIG AT=30 TD=70 TARG vm(b)=0.45 CROSS=1
+
+* Failed measures
+.MEASURE AC ATEarly TRIG AT=0.1 TARG AT=0.1
+.MEASURE AC ATLate TRIG AT=2000 TARG AT=2000
+.MEASURE AC TrigTDLate TRIG vm(e)=0.45 CROSS=1 TD=1500 TARG vm(b)=0.45 CROSS=1 TD=10
+.MEASURE AC TargTDLate TRIG vm(e)=0.45 CROSS=1 TARG vm(e)=0.45 CROSS=2 TD=2000
+.MEASURE AC ValNotFound TRIG vm(e)=2 CROSS=1 TARG vm(e)=2 CROSS=2
+
+.END

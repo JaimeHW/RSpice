@@ -1,0 +1,9 @@
+exclude
+lead_bjt_gear.cir
+lead_bjt_gear.cir.sh
+lead_bjt_gear_strings.cir
+lead_bjt_trap.cir
+lead_bjt_trap.cir.sh
+lead_bjt_trap_strings.cir
+lead_bjt_trap_strings2.cir
+tags

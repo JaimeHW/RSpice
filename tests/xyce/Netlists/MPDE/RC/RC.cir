@@ -1,0 +1,70 @@
+Simple RC circuit
+**********************************************************************
+*
+* This circuit has the voltage source applied directly to the
+* resistor, with the capacitor tied to ground.
+*
+*
+* 1/30/03 Todd Coffey  <tscoffe@sandia.gov>
+*
+**********************************************************************
+.param Rval=1Meg Cval=100n sinfreq=1000 T1={Rval*Cval} Vval=12V T2={1/sinfreq}
+Vsrc    1 0  DC 0V SIN(0V {Vval} {sinfreq} 0 0)
+*Vsrc    1 0  DC 0V {12*sin(2*pi*sinfreq*time2)}
+*Vsrc  1 0 DC 0V PULSE(0 12 0 {T1} {T1} {2*T1} {4*T1})
+*Vsrc  1 0 DC 0V PULSE(0 12 {2*T2/10} {T2/10} {T2/10} {4*T2/10} {T2})
+*Vsrc  1 0 DC 0V BITSTREAM(0 12 {2*T2/10} {T2/10} {T2/10} {4*T2/10} {T2} 31415926535897932)
+*Vsrc  1 0 DC 0V {BITSTREAM(time1,0,12,2*T2/10,T2/10,T2/10,4*T2/10,T2,31415926535897932)}
+*Vsrc 1 0 DC 12V
+R1 1 2 {Rval}
+C1 2 0 {Cval}
+
+*R1 1 2 0 {(v(1)-v(2))/Rval}
+*C2 2 n1 100n
+*C3 n1 n2 100n
+*C4 n2 0 100n
+*C1 2 0 0 {v(2)*Cval}
+.print tran V(1) V(2) I(Vsrc)
+*.print tran v(1) v(2) v(n1) v(n2) i(vsrc)
+*.tran 0.1ms 100ms
+*.tran 1e-6 9.0909e-5
+*.tran 1e-5 1e-3
+*.print dc v(1) v(2) v(n1) v(n2) i(vsrc)
+*.dc vsrc 0v 12v 1v
+*.mpde 1.0e-6 1.0e-6 0.1
+*.mpde 1.0e-6 1.0e-6 4.0e-3
+*.mpde 1e-10 1e-10 1.0e-1
+.options mpde n2=51 diff=3 ICper=1 freqdomain=1 T2={1/sinfreq} ic=9
+.options timeint method=8 maxord=5 reltol=1e-2 abstol=1e-4
+*reltol=1e-4 abstol=1e-4
+*hmax={T2/10}
+*.options timeint method=3
+
+*.tran 0.1ms 1s
+.mpde 0.1ms 0.1ms 1s
+*.tran 1.0e-7 {10*T2}
+*.mpde 1.0e-7 1.0e-7 {10*T2}
+*.mpde 1e-11 1e-11 1e-11
+*.options timeint method=8 maxord=5 reltol=1e-8 abstol=1e-8
+*.options timeint method=8 
+*.options timeint method=1
+*.options timeint useDCop=0
+*.options timeint method=8 maxord=1 usedcop=0
+
+*Vsrc    1 0     SIN(0V 24V 100 0 0)
+*Vsrc    1 0     SIN(0V 24V 100 0 10)
+*R1	1 2	1Meg
+*C1	2 0	100n
+*.print tran V(1) V(2) I(Vsrc)
+*.tran 0.1ms 30ms
+*.tran 1ms 100ms
+*.tran 1ms 300ms
+*.mpde 0.01s 0.1s 1s
+*.mpde 0.1ms 0.1ms 100ms
+*.mpde 0.1ms 0.1ms 30ms
+*.options mpde freqdomain=0
+*.options timeint method=3
+*.options nonlin derivativecheck=1
+*.options nonlintran derivativecheck=1
+*.options device finitediff=0 
+.END

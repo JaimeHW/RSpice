@@ -1,0 +1,14 @@
+** Converted using XDM 0.20rc from /home/rrlober/xdmwork/xdm/data-model/src/python/test/unit/resources/pspice_9_1.xml to /home/rrlober/xdmwork/xdm/data-model/src/python/test/unit/resources/xyce_6_3.xml ** ** Profile: "SCHEMATIC1-bias"  [ H:\Xyce\PSpice\Netlists\TransmissionLine-PSpiceFiles\SCHEMATIC1\bias.sim ]
+
+*Analysis directives:
+.TRAN 0 100ns 0
+.PRINT TRAN V(N14950) V(N15037)
+
+* source TRANSMISSIONLINE
+T_T1 N14950 0 N15037 0 TD=10e-9 Z0=50
+R_R1 N14553 N14950 TC=0,0 R=50
+R_R2 N15037 0 TC=0,0 R=50
+V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)
+
+
+.END

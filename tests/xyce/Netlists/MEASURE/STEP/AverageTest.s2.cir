@@ -1,0 +1,38 @@
+*******************************************************************************
+* This netlist is equivalent to Step 2 for the AverageTest.cir netlist.
+* It has VS1:VA=1 and VS3:V0=-0.5
+*
+*******************************************************************************
+*
+* a few sources of different types
+VS1  1  0  SIN(0 1.0 100HZ 0 0)
+VP   2  0  PULSE( 0 100 2ms 2ms 2ms 10ms 20ms )
+VS3  3  0  SIN(-0.5 1.0 100HZ 0 0.5)
+VS4  4  0  SIN(0.5 -1.0 100HZ 0 0.5)
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+R4  4  0  100
+
+* Use MEASFAIL to test the reset of the default calculation value
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0  0.5
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3) V(4)
+
+.measure tran averageAll avg V(1) 
+.measure tran averageTop AVG V(2)
+
+* add TO-FROM modifiers
+.measure tran sineHalfInterval Avg V(1) FROM=0 TO=0.25
+
+* mix in TDs before and after FROM value.
+.measure tran sineTDbetween avg V(1) FROM=0 TO=0.25 TD=0.1
+.measure tran sineTDbefore avg V(1) FROM=0.15 TO=0.25 TD=0.1
+
+* this test should return -1
+.measure tran returnNegOne avg V(1) FROM=0.2e-3 TO=0.25e-3 TD=0.5e-3 default_val=-1
+
+.END
+

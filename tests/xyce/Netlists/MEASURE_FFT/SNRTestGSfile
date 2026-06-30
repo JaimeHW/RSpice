@@ -1,0 +1,27 @@
+ ***** Measure Functions ***** 
+
+SNRV1 = 2.000000e+02
+
+SNRV12 = 2.000000e+02
+
+SNREXP = 2.000000e+02
+
+SNRIR3 = 2.000000e+02
+
+MAXV3 = 1.000000e+00 at time = 2.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+EQN1 = 2.000000e+02
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+EQN2 = 2.000000e+02
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+PARAM1 = 2.000000e+02
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+SNRV4 = -2.653084e+01
+
+SNRMF2V1 = 3.169055e+01 up to frequency 2.000000e+00 Hz
+
+

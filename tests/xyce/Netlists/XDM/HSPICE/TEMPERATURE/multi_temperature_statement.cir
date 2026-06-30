@@ -1,0 +1,30 @@
+* temperature statement
+* Xyce netlist for corresponding HSPICE netlist
+* This netlist tests XDM HSPICE translation of
+* multiple .TEMP statements. The .TEMP statements
+* should be translated into a .STEP command, with 
+* the various temperatures in a .DATA table (see
+* issue #93 on XDM gitlab).
+
+.OPTIONS DEVICE TNOM=25 
+
+
+VA 1 0 DC 0
+
+R1 1 2 R=10
+R2 2 0 TC=0.001 R=10
+.DC LIN VA 0 10 1
+
+
+.PRINT DC FORMAT=PROBE V(1) V(2) 
+
+.STEP DATA=XDMgeneratedTable 
+.DATA XDMgeneratedTable 
++ temp
++ -10
++ 50
++ 85
++ 125
+.ENDDATA 
+
+

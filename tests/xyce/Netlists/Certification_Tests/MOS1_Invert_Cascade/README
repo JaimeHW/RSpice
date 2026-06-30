@@ -1,0 +1,47 @@
+Test Name: MOS1_Invert_Cascade
+Owner: Tom Russo
+Test netlists: invert_cascade_15.cir
+GS files: invert_cascade_15.cir.prn 
+Mode:  Serial and Parallel
+Comparator:  xyce_verify.pl 
+Version of Xyce: Release 1.0
+ 
+Description:
+============
+
+A long time ago, in a galaxy far, far away, Xyce was unable to run
+long chains of MOS inverters.  "long" meant "larger than 7 units".
+This test was written after that changed and installed into the old
+/Net/Proj/Xyce/Certifications_Test directory that predated this
+repository.  This test has been part of the release testing for Xyce
+since Release 1.0, the earliest one for which significant release
+testing was performed.  This was primarily a test to demonstrate that
+the code could handle these "long" chains, and the code running
+without convergence failures is the primary indicator of success.
+ 
+Procedure:
+============
+
+Run xyce on the netlist in this directory.
+  runxyce invert_cascade_15.cir
+
+Compare the output to the gold standard:
+  runxyce invert_cascade_15.cir ${gold-standard-location}/invert_cascade_15.cir.prn ${OUT_DIR}/invert_cascade_15.cir.prn
+ 
+Verification:
+=============
+Passes if Xyce and xyce_verify.pl return a 0 exit code, indicating a
+successful completion of simulation, and successful comparison to gold
+standard, respectively.
+
+ 
+Notes:
+======
+
+This might be fairly sensitive to numerical changes, but the "*COMP"
+tolerances specified in the netlist should be sufficient to take care
+of that.  If not, hand analysis is required.  This is a primarily
+digital circuit where all that matters is the transition times and
+levels --- a 15 unit inverter circuit should show the input and output
+to be at opposite logic levels, and input and output should switch
+between levels at the same times.

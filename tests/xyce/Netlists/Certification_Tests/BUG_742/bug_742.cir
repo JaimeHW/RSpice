@@ -1,0 +1,14 @@
+Test of random number generator
+*
+v1  1  0  {1+rand()}
+r1  1  0  1
+Xrnd2 2 RV
+Xrnd3 3 RV
+Xrnd4 4 RV
+.subckt rv a
+va  a  0  {1+rand()}
+ra  a  0  1
+.ends
+.tran 1us 2
+.PRINT tran V(1) V(2) V(3) V(4)
+.END

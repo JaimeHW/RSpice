@@ -1,0 +1,37 @@
+testing out ground node aliases in expressions.
+
+.param R2=0.5
+.param G2={1.0/R2}
+
+B1 2 0 I={G2*V(2,gnd)}
+R1 1 2 0.5
+V1 1 0 2.0
+
+B1A 2A 0 I={G2*V(2A,ground)}
+R1A 1A 2A 0.5
+V1A 1A 0 2.0
+
+B1B 2B 0 I={G2*V(2B,gND)}
+R1B 1B 2B 0.5
+V1B 1B 0 2.0
+
+B1C 2C 0 I={G2*V(2C,GROUND)}
+R1C 1C 2C 0.5
+V1C 1C 0 2.0
+
+B1D 2D 0 I={G2*V(2D,gnd!)}
+R1D 1D 2D 0.5
+V1D 1D 0 2.0
+
+.dc v1 2 2 1
+
+.print dc 
++ v(1)
++ v(2) {V(2,gnd)} 
++ v(2A) {V(2A,ground)} 
++ v(2B) {V(2B,gND)} 
++ v(2C) {V(2C,GROUND)} 
++ v(2D) {V(2D,gnd!)} 
+
+.PREPROCESS replaceground true
+

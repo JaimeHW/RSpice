@@ -1,0 +1,28 @@
+Number of Bipolar Junction Transistor models: 5
+           name    LM111T:QIN    LM111T:QMI    LM111T:QMO    LM111T:QOC        QN2222A
+Number of Bipolar Junction Transistor instances: 11
+           name          X4:Q1          X4:Q2          X5:Q1          X5:Q2          X4:Q4          X5:Q4          X4:Q3
+Number of Diode models: 2
+           name     LM111T:DX         ZN4733
+Number of Diode instances: 3
+           name          X4:DP          X5:DP             D1
+Number of Expression Based Voltage or Current Source models: 1
+           nameB level 1 (Expression Based Voltage or Current Source)
+Number of Expression Based Voltage or Current Source instances: 2
+           name         X4:BF1         X5:BF1
+Number of Independent Current Source models: 1
+           nameI level 1 (Independent Current Source)
+Number of Independent Current Source instances: 2
+           name         X4:IEE         X5:IEE
+Number of Independent Voltage Source models: 1
+           nameV level 1 (Independent Voltage Source)
+Number of Independent Voltage Source instances: 8
+           name             V1           V_IN          X4:V1         X4:VI1         X4:VI2          X5:V1         X5:VI1
+Number of Linear Voltage Controlled Voltage Source models: 1
+           nameE level 1 (Linear Voltage Controlled Voltage Source)
+Number of Linear Voltage Controlled Voltage Source instances: 2
+           name          X4:E1          X5:E1
+Number of Resistor models: 1
+           nameR level 1 (Resistor)
+Number of Resistor instances: 10
+           name             R1             R2             R3             R4             R5             R6             R7

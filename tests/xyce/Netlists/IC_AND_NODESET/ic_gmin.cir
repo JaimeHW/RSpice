@@ -1,0 +1,19 @@
+simple RC
+
+.options nonlin continuation=1
+
+.options loca stepper=natural predictor=constant stepcontrol=1 conparam=GSTEPPING
++ initialvalue=4 minvalue=-4 maxvalue=4 initialstepsize=-2 minstepsize=1e-6 maxstepsize=1e12
++ aggressiveness=0.01 maxsteps=200 maxnliters=20 voltagelist=DOFS
+
+.tran   0    50e-5
+
+.print tran  v(1) v(2)
+
+v1 1 0 sin 0 1V 1e5 0 0
+
+r1 1 2 1k
+c1 2 0 2u
+
+.ic v(2) = 1
+.end

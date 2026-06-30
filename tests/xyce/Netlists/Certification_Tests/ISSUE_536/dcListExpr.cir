@@ -1,0 +1,16 @@
+Test for LIST capability in DC sweeps with expressions
+*
+VT1 4 0 0V
+R1  4 5 10
+R2  5 0 5
+
+.param p1=-17
+.param p2=12
+.param p3=188
+.param p4=5
+
+.DC VT1 LIST {p1} {p2} {p3} {p4}
+.print DC V(4) V(5)
+
+.END
+

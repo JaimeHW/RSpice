@@ -1,0 +1,15 @@
+Test case for FBH with nested DC sweep
+.MODEL FBH_DEF NPN LEVEL=23
+
+VVCE N_1 0  DC 2 PWL (0 0.0V 1 5V )
+IBaseCurrent 0 N_2  DC 0
+QNPN_1 N_1 N_2 0 0 FBH_DEF
+
+.options device gmin=0
+.options timeint reltol=1e-4
+.print tran V(N_1) I(IBaseCurrent) {-I(VVCE) + 0.005} 
+.tran 1u 1s
+.step IBaseCurrent 0 1m 100u
+
+.end
+

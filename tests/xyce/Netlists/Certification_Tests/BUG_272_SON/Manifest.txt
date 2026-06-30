@@ -1,0 +1,5 @@
+bug272.cir
+bug272.cir.sh
+bug272_probe.cir
+exclude
+tags

@@ -1,0 +1,19 @@
+Test that DCOP Restart No Longer Works in Xyce 6.4
+**************************************************************
+* .DCOP feature never really worked right, and is redundant with
+* .IC and .NODESET.  It is being removed in Xyce 6.4.
+* 
+*  This netlist tests that a .DCOP line does produce a graceful
+*  exit.  The reason is that bad .DCOP lines can cause infinite
+*  loops and other bad outcomes during netlist parsing. So, we 
+*  want to make sure it's turned off.  See SON Bugs 684 and 685.
+*
+**************************************************************
+V1 1 0 5V
+R1 1 0 1
+
+.TRAN 0 1ms
+.PRINT TRAN V(1)
+.DCOP input=bleem.op
+
+.end

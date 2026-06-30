@@ -1,0 +1,96 @@
+two-level test case - single level version.
+**************************************************************
+*
+* Eric Keiter, Sandia Labs.  2/7/2007.
+*
+* The goal of this test is to insure that it is possible to run 
+* with the 2-level algorithm when the yext device has more
+* than 4 nodal connections to the inner problem.  In parallel, 
+* this has sometimes been an issue.  This test should be run in
+* both serial and parallel.
+*
+* This result of this test should be compared against an
+* equivalent, single-level problem.
+*
+**************************************************************
+.tran 20ns 10us
+*comp v(out1) reltol=0.02 
+*comp v(out2) reltol=0.02 
+.print tran format=std precision=13 width=21 v(out1) v(out2)
+*.print tran format=std precision=13 width=21 v(1a) v(2a) v(out1) v(3a) v(4a) v(out2)
+*.print tran format=tecplot precision=13 width=21 v(1a) v(2a) v(out1) v(3a) v(4a) v(out2)
+
+.options nonlin nlstrategy=0 searchmethod=0 in_forcing=0
++ maxstep=200 continuation=1 reltol=1.0e-2 abstol=1.0e-6 rhstol=1.0e-4
++ memory=0
+
+.options loca
++ stepper=natural
++ predictor=constant
++ stepcontrol=adaptive
++ conparam=GSTEPPING
++ initialvalue=4
++ minvalue=-4
++ maxvalue=4
++ initialstepsize=-2
++ minstepsize=1.0e-6
++ maxstepsize=1.0e+12
++ aggressiveness=0.01
++ maxsteps=400
++ maxnliters=20
+*+ voltagelist=DOFS
+
+
+vhi   realvdd  0  7v
+vlo     realvss 0       2v 
+vin1          1 0  7v pulse (7v 2v 3us 25ns 250ns 4us 8us)
+vin2          2 0  2v pulse (2v 7v 2us 25ns 250ns 4us 8us)
+vin3          3 0  7v pulse (7v 2v 1us 25ns 250ns 4us 8us)
+vin4          4 0  2v pulse (2v 7v 4us 25ns 250ns 4us 8us)
+
+rvdd realvdd vdd 1
+cvdd realvdd 0   1pf
+rvss realvss vss 1
+cvss realvss 0   1pf
+
+rvin1 1 1a 1
+cvin1 1 0  1pf
+rvin2 2 2a 1
+cvin2 2 0  1pf
+rvin3 3 3a 1
+cvin3 3 0  1pf
+rvin4 4 4a 1
+cvin4 4 0  1pf
+
+x1 vdd vss 1a 2a out1 nand
+x2 vdd vss 3a 4a out2 nand
+
+.subckt nand vdd vss 1 2 vout
+
+rb1   vdd  vb1   4k
+qin1  vb2  vb1   1  npn
+qin2  vb2  vb1   2  npn
+rc2   vdd  vc2   1.6k
+q3    vc2  vb2   vb3  npn
+rc3   vdd  vout  4k
+q4    vout vb3   vss  npn
+rb3   vb3  vss   1k
+**************************
+.model npn npn (           is     = 3.97589e-14
++ bf     = 195.3412        nf     = 1.0040078       vaf    = 53.081
++ ikf    = 0.976           ise    = 1.60241e-14     ne     = 1.4791931
++ br     = 1.1107942       nr     = 0.9928261       var    = 11.3571702
++ ikr    = 2.4993953       isc    = 1.88505e-12     nc     = 1.1838278
++ rb     = 56.5826472      irb    = 1.50459e-4      rbm    = 5.2592283
++ re     = 0.0402974       rc     = 0.4208          xti    = 5.8315
++ eg     = 1.11            xtb    = 1.6486          tf     = 3.3e-10
++ xtf    = 6               itf    = 0.32            vtf    = 0.574
++ ptf    = 25.832          tr     = 3.75e-7         cje    = 2.56e-11
++ vje    = 0.682256        mje    = 0.3358856       fc     = 0.83
++ cjc    = 1.40625e-11     vjc    = 0.5417393       mjc    = 0.4547893)
+**************************
+
+.ends
+
+.end
+

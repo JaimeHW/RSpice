@@ -1,0 +1,12 @@
+In OutputMgr::remeasure 
+file to reprocess through measure and/or fft functions: RemeasureStdOutTest.cir.prn
+
+ ***** Measure Functions ***** 
+
+MAX1 = 9.958957e-01 at time = 2.644245e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+MAX2 = 1.000000e+02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+***** Remeasure analysis complete

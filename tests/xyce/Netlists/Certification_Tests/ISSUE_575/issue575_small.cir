@@ -1,0 +1,45 @@
+* This circuit is the same as the issue575.cir circuit, except:
+*
+* (1) It is small enough to check via xyce_verify. 
+*     This also means it is too small to demonstrate 
+*     the performance improvements.
+*
+* (2) The table expression has new syntax in it.  
+*     Specifically, the parameters like VSS are 
+*     surrounded by single quotes.  Prior to the 
+*     work on this issue, the expression library 
+*     would not parse nested single quotes.
+*
+* Since it isn't practical to use xyce_verify on the main issue575 circuit, 
+* this provides at least one circuit in which the result was checked.  But
+* this circuit by itself doesn't really prove that issue 575 is fixed.
+* Circuit issue575.cir is required for that.
+*
+.param eric=0.9
+.param vdd={eric*2.0}
+.param vss=0.1
+
+.step eric list 0.5 0.9
+
+.print tran v(in_S)
+
+.tran 120.100000ns 4563.800000ns noop
+
+
+RS in_S 0 1.0
+BS in_S 0 V= {table(time,
++ 0.100000ns, 'VSS',
++ 960.800000ns, 'VSS',
++ 960.900000ns, 'VDD',
++ 1441.200000ns, 'VDD',
++ 1441.300000ns, 'VSS',
++ 1921.600000ns, 'VSS',
++ 1921.700000ns, 'VDD',
++ 2882.400000ns, 'VDD',
++ 2882.500000ns, 'VSS',
++ 3843.200000ns, 'VSS',
++ 3843.300000ns, 'VDD',
++ 4563.800000ns, 'VDD'
++)}
+
+.end

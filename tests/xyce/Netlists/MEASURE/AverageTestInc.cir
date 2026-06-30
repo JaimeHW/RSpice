@@ -1,0 +1,25 @@
+A test of the measure average functionality
+*******************************************************************************
+*
+* a few sources of different types
+VS  1  0  SIN(0 1.0 1KHZ 0 0)
+VP  2  0  PULSE( 0 1 0.2ms 0.2ms 0.2ms 1ms 2ms )
+
+R1  1  0  100
+R2  2  0  100
+
+* use MEASFAIL option for compatibility with the verification approach
+* used in .sh file.
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0  10ms
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) 
+
+* Both of these measures should fail and return the default value (0 and -100) since
+* the simulation ends at 10ms.  They also test the .measure works properly 
+* when the measured quantity, v(1), comes after the FROM/TO qualifiers.
+.measure tran avg1 AVG from=20ms to=40ms v(1)
+.measure tran avg2 AVG from=20ms to=40ms v(1) default_val=-100
+
+.END
+

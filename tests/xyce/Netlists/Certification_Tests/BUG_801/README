@@ -1,0 +1,30 @@
+Test Name: Lead current in expression error
+Owner:  Dave Shirley
+Test netlists: leadExp.cir
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_3.1       # the first version where this bug was tested.
+ 
+Description:
+============
+Test to make sure that a fatal diagnostic is generated when an attempt is made to
+use a lead current in a parameter expression.
+ 
+Procedure:
+============
+Default
+ 
+Verification:
+=============
+Xyce should terminate with a fatal error.  The log file should end with:
+ 
+User Fatal: Error in file leadExp.cir at or near line 5
+ Illegal to use lead current in device expressions: I(R1)+3
+ 
+ 
+*** Xyce Abort ***
+
+Notes:
+======
+None

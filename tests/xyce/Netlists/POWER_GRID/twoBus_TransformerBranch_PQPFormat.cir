@@ -1,0 +1,36 @@
+* Unit test of Power Grid Branch Transformer, in PQ Polar format
+
+*********************************************
+* Bus 1 is the slack bus.  Ammeter          *
+* is wired so that current flows into Bus 1 *
+*********************************************
+V1Th Bus1Th ammBus1P 0V
+V1VM Bus1VM ammBus1Q 1V
+Vamm1P 0 ammBus1P 0V
+Vamm1Q 0 ammBus1Q 0V
+
+*********************************************
+* Transformer Definition                    *
+*********************************************
+YPowerGridTransformer pg1_2 bus1Th bus2Th bus1VM bus2VM AT=PQP R=0.05 X=0.2 TR=0.978
+
+*********************************************
+* Load Definitions                          *
+*********************************************
+ILoad2P bus2Th 0 0.9
+ILoad2Q bus2VM 0 0.1
+
+****************************************************
+* use .NODESET to enforce "flat start" at load bus *
+****************************************************
+.NODESET V(bus2Th)=0 V(bus2VM)=1 
+
+*********************************************
+* Simulation Control and Output Statements  *
+*********************************************
+.DC V1VM 1 1 1
+.PRINT DC width=10 precision=6
++ V(bus1Th) V(bus1VM) V(bus2Th) V(bus2VM) 
++ I(Vamm1P) I(Vamm1Q) I(ILoad2P) I(ILoad2Q) 
+
+.end

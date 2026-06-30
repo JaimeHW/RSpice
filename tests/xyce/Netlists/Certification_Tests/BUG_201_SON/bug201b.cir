@@ -1,0 +1,15 @@
+Netlist to test ic= for inductors if uic/noop NOT specified
+*********************************************************************
+r1 1 2 3
+r2 2 0 3
+l1 2 0 1 ic=2
+i1 1 0 10 
+*pulse(0 10 0 0 0 10 10)
+
+.tran  0.01 10 0  
+.print tran v(1) {v(2)-0.1} i(i1) {i(l1)+11.0}
+*.options timeint method=8 reltol=2e-4
+.options timeint reltol=5e-4
+
+.end
+

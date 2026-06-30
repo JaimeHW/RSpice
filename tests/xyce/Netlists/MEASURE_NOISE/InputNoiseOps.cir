@@ -1,0 +1,104 @@
+* Test NOISE mode support for the all valid measures for the
+* INOISE and DNI operators.  For the DNI operator, test:
+
+*  1) a device (R) that has only one noise source.
+*
+*  2) the total input noise from a device (Q) that has
+*     multiple noise sources.
+*
+*  3) An individual noise source contribution (IB) from
+*     a device that has multiple noise sources.
+*
+* See SON Bugs 824 and 1301 for more details.
+*****************************************************
+
+*==============  Begin SPICE netlist of main design ============
+.noise V(OUT) V1 lin 10 .01 0.1
+
+.print noise inoise DNI(r4) DNI(q1) DNI(Q1,IB) inoisemax
+
+R5 0 OUT 1MEG
+V1 1 0 sin 0 1 1meg AC 1
+V2 Vcc 0 12
+C2 Vc OUT 10u
+R4 0 Ve 270
+R3 Vc Vcc 1.5k
+Q1 Vc Vb Ve 2N2222
+.MODEL 2N2222 NPN (Is=14.34f Xti=3 Eg=1.11 Vaf=74.03 Bf=255.9 Ne=1.307
++ Ise=14.34f Ikf=.2847 Xtb=1.5 Br=6.092 Nc=2 Isc=0 Ikr=0 Rc=1 Cjc=7.306p
++ Mjc=.3416 Vjc=.75 Fc=.5 Cje=22.01p Mje=.377 Vje=.75 Tr=46.91n Tf=411.1p
++ Itf=.6 Vtf=1.7 Xtf=3 Rb=10)
+R2 0 Vb 6.8k
+R1 Vb Vcc 39k
+C1 1 Vb 10u
+
+* used to make the comparison file for ERROR measures
+*.noise V(OUT) V1 dec 10 .01 0.1
+*R4 0 Ve 250
+*.print noise FILE=InputNoiseOpsRawData.NOISE.prn inoise DNI(r4) DNI(q1) DNI(Q1,IB)
+
+
+* AVG
+.MEASURE NOISE inoiseavg avg inoise
+.MEASURE NOISE dnir4avg avg {DNI(r4)}
+.MEASURE NOISE dniq1avg avg {DNI(q1)}
+.MEASURE NOISE dniq1ibavg avg {DNI(q1, IB)}
+
+* DERIV
+.MEASURE NOISE inoisderiv deriv {inoise} AT=0.05
+.MEASURE NOISE dnir4deriv deriv DNI(r4) AT=0.05
+.MEASURE NOISE dniq1deriv deriv DNI(q1) AT=0.05
+.MEASURE NOISE dniq1ibderiv deriv {DNI(q1, IB)} AT=0.05
+
+* EQN
+.MEASURE NOISE inoiseeqn eqn inoise
+.MEASURE NOISE dnir4eqn eqn {DNI(r4)}
+.MEASURE NOISE dniq1eqn eqn DNI(q1)
+.MEASURE NOISE dniq1ibeqn eqn {DNI(q1, IB)}
+
+* ERROR
+.measure NOISE FitErrorINOISE ERROR inoise FILE=InputNoiseOpsRawData.NOISE.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=2
+.measure NOISE FitErrorDNIR4 ERROR DNI(R4) FILE=InputNoiseOpsRawData.NOISE.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=3
+.measure NOISE FitErrorDNIQ1 ERROR DNI(Q1) FILE=InputNoiseOpsRawData.NOISE.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=4
+.measure NOISE FitErrorDNIQ1IB ERROR DNI(Q1,IB) FILE=InputNoiseOpsRawData.NOISE.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=5
+
+* FIND-AT
+.MEASURE noise inoisefind find inoise AT=0.05
+.MEASURE NOISE dniq1find  find  DNI(q1,ib) AT=0.05
+
+* INTEG
+.MEASURE NOISE inoiseinteg integ inoise
+.MEASURE NOISE dnir4integ  integ  dni(r4)
+.MEASURE NOISE dniq1integ  integ  DNI(q1)
+.MEASURE NOISE dniq1ibinteg integ DNI(q1,ib)
+
+* MAX
+.MEASURE NOISE inoisemax max INOISE
+.MEASURE NOISE dnir4max max {DNI(r4)}
+.MEASURE NOISE dniq1max max DNI(q1)
+.MEASURE NOISE dniq1ibmax max {DNI(q1, IB)}
+
+* MIN
+.MEASURE NOISE inoisemin min {inoise}
+.MEASURE NOISE dnir4min min dni(r4)
+.MEASURE NOISE dniq1min min DNI(Q1)
+.MEASURE NOISE dniq1ibmin min DNI(Q1,ib)
+
+* PP
+.MEASURE NOISE inoisepp  pp INOISE
+.MEASURE NOISE dnir4pp  pp  DNI(r4)
+.MEASURE NOISE dniq1pp  pp  {DNI(q1)}
+.MEASURE NOISE dniq1ibpp  pp  DNI(q1,ib)
+
+* RMS
+.MEASURE NOISE inoiserms rms INOISE
+.MEASURE NOISE dnir4rms  rms  DNI(r4)
+.MEASURE NOISE dniq1rms  rms  {DNI(q1)}
+.MEASURE NOISE dniq1ibrms rms  DNI(q1,ib)
+
+* TRIG-TARG.  Note that MINVAL is needed on each .MEASURE line here,
+* since some of the measured values are smaller than the default MINVAL of 1e-12
+.MEASURE NOISE inoisett trig INOISE=1e-11 CROSS=1 TARG INOISE=1e-12 CROSS=1 MINVAL=1e-15
+.MEASURE NOISE dniq1tt  trig  {DNI(q1)}=5e-12 FALL=1 targ {DNI(q1)}=1e-12 CROSS=1 MINVAL=1e-15
+
+.end

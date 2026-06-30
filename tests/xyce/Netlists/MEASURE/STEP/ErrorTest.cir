@@ -1,0 +1,141 @@
+**************************************************************************************
+* A test circuit to measure the error between a reference signal and a measured signal
+* using the ERROR measure, in .TRAN mode.  This also tests .STEP with .TRAN for the 
+* ERROR measure.  The FILE= qualifier is tested for .PRN, .CSD, .CSV and 
+* comma-delimited .PRN formats.
+* 
+* Notes are as follows:
+*   1) The use of asymmetric PWL signals, that are inverted from each other allows
+*      the exact answers for the various norms to be calculated analytically fairly 
+*      easily in Excel and/or Matlab.  
+*
+*   2) The asymetric nature of the PWL sources should catch cases where either the
+*      measured or reference signals got time-reversed in the measure calculations.
+*
+*   3) The DC offsets should catch cases where the first or last points in the
+*      reference (or measured) signals are omitted from the calculations.
+*
+*   4) The NORM values should be incorrect if fewer points, in the calculations, are
+*      used in the measured signal than in the reference signal, or vice versa.
+*
+*   5) The sign of the results should be reversed, if we are comparing the reference
+*      signal to the measured signal, rather than the measured signal to the reference
+*      signal.
+*
+*   6) The measured values should be "really wrong" if the code is interpolating the 
+*      reference signal to the measured signal, rather than vice versa.  The number
+*      of points (~40-50) in the measured signal should be more than the 11 points in 
+*      the  reference signal, and the L1 and L2 NORM  values should then be much larger.
+*
+*   7) The norms based on V(2A) should be identical for both steps.  The voltage levels for
+*      the PWL sources, v1 and v2, have been adjusted so that the norms for Step 1 (which 
+*      are measured at Node 1A) are the same values as for the tests in MEASURE/ErrorTest.  
+*      The voltage at intermediate point (Node 1A) of the resistor voltage-divider is 
+*      changed for Step 2 by varying the value of R1A.    
+***************************************************************************************  
+
+v1 1 0 PWL 0 2 0.6 3.2 1 2
+v2 2 0 PWL 0 4 0.6 5.2 1 4
+r1a 1  1a 1
+r1b 1a 0  1
+r2a 2  2a 1
+r2b 2a 0  1
+
+.tran 0 1
+.print tran v(1a) v(2a)
+
+* The voltage level at Node 1a is halved between steps 1 and 2, by varying the
+* value of R1A.
+.STEP R1A:R 1 3 2 
+
+* these statements were used to generate the ErrorTestRawData.prn file.
+* They are commented out in the actual regression test 
+*v3 0 3 PWL 0 1 0.6 1.6 1 1
+*r3 3 0 1
+*v4 0 4 PWL 0 2 0.6 2.6 1 2
+*r4 4 0 1
+*.print tran FILE=ErrorTestRawData.prn V(3) V(4)
+*.OPTIONS OUTPUT INITIAL_INTERVAL=0.1
+
+* Make sure to check "case insensitivity" for all keywords, specific to the ERROR measure.
+* Also use more than one dependent variable (e.g., V(3) and V(4)) for each NORM type.
+
+* L1 Norms.  
+.measure tran FitErrorPRNL1V1 ERROR v(1a) FILE=ErrorTestRawData.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=2
+.measure tran FitErrorPRNL1V2 ERROR v(2a) FILE=ErrorTestRawData.prn COMP_FUNCTION=l1norm INDEPVARCOL=1 DEPVARCOL=3
+
+*L2 Norms, which is also the default. Also test lower-case for FILE, COMP_FUNCTION, INDEPVARCOL and DEPVARCOL
+.measure tran FitErrorPRNL2V1 error v(1a) file=ErrorTestRawData.prn comp_function=L2NORM indepvarcol=1 depvarcol=2
+.measure tran FitErrorPRNL2V2 error v(2a) file=ErrorTestRawData.prn comp_function=l2norm indepvarcol=1 depvarcol=3
+
+* Not specifying COMP_FUNCTION, or asking for "BOGONORM" should default to the L2NORM.
+* So, these two measures should give the same results as the L2NORM measures above.
+.measure tran FitErrorPRNBogoV1 error v(1a) file=ErrorTestRawData.prn comp_function=BOGONORM indepvarcol=1 depvarcol=2
+.measure tran FitErrorPRNDefaultV2 error v(2a) file=ErrorTestRawData.prn indepvarcol=1 depvarcol=3
+
+*INF NORMS
+.measure tran FitErrorPRNInfV1 error v(1a) file=ErrorTestRawData.prn comp_function=INFNORM indepvarcol=1 depvarcol=2
+.measure tran FitErrorPRNInfV2 error v(2a) file=ErrorTestRawData.prn comp_function=infnorm indepvarcol=1 depvarcol=3
+
+* Test with FILE= in .CSD format
+* L1 Norms.  
+.measure tran FitErrorCsdL1V1 ERROR v(1a) FILE=ErrorTestRawData.csd COMP_FUNCTION=L1NORM INDEPVARCOL=0 DEPVARCOL=1
+.measure tran FitErrorCsdL1V2 ERROR v(2a) FILE=ErrorTestRawData.csd COMP_FUNCTION=l1norm INDEPVARCOL=0 DEPVARCOL=2
+
+*L2 Norms, which is also the default. Also test lower-case for FILE, COMP_FUNCTION, INDEPVARCOL and DEPVARCOL
+.measure tran FitErrorCsdL2V1 error v(1a) file=ErrorTestRawData.csd comp_function=L2NORM indepvarcol=0 depvarcol=1
+.measure tran FitErrorCsdL2V2 error v(2a) file=ErrorTestRawData.csd comp_function=l2norm indepvarcol=0 depvarcol=2
+
+* Not specifying COMP_FUNCTION, or asking for "BOGONORM" should default to the L2NORM.
+* So, these two measures should give the same results as the L2NORM measures above.
+.measure tran FitErrorCsdBogoV1 error v(1a) file=ErrorTestRawData.csd comp_function=BOGONORM indepvarcol=0 depvarcol=1
+.measure tran FitErrorCsdDefaultV2 error v(2a) file=ErrorTestRawData.csd indepvarcol=0 depvarcol=2
+
+*INF NORMS
+.measure tran FitErrorCsdInfV1 error v(1a) file=ErrorTestRawData.csd comp_function=INFNORM indepvarcol=0 depvarcol=1
+.measure tran FitErrorCsdInfV2 error v(2a) file=ErrorTestRawData.csd comp_function=infnorm indepvarcol=0 depvarcol=2
+
+* Test with FILE= in .CSV format
+* L1 Norms.  
+.measure tran FitErrorCsvL1V1 ERROR v(1a) FILE=ErrorTestRawData.csv COMP_FUNCTION=L1NORM INDEPVARCOL=0 DEPVARCOL=1
+.measure tran FitErrorCsvL1V2 ERROR v(2a) FILE=ErrorTestRawData.csv COMP_FUNCTION=l1norm INDEPVARCOL=0 DEPVARCOL=2
+
+*L2 Norms, which is also the default. Also test lower-case for FILE, COMP_FUNCTION, INDEPVARCOL and DEPVARCOL
+.measure tran FitErrorCsvL2V1 error v(1a) file=ErrorTestRawData.csv comp_function=L2NORM indepvarcol=0 depvarcol=1
+.measure tran FitErrorCsvL2V2 error v(2a) file=ErrorTestRawData.csv comp_function=l2norm indepvarcol=0 depvarcol=2
+
+* Not specifying COMP_FUNCTION, or asking for "BOGONORM" should default to the L2NORM.
+* So, these two measures should give the same results as the L2NORM measures above.
+.measure tran FitErrorCsvBogoV1 error v(1a) file=ErrorTestRawData.csv comp_function=BOGONORM indepvarcol=0 depvarcol=1
+.measure tran FitErrorCsvDefaultV2 error v(2a) file=ErrorTestRawData.csv indepvarcol=0 depvarcol=2
+
+*INF NORMS
+.measure tran FitErrorCsvInfV1 error v(1a) file=ErrorTestRawData.csv comp_function=INFNORM indepvarcol=0 depvarcol=1
+.measure tran FitErrorCsvInfV2 error v(2a) file=ErrorTestRawData.csv comp_function=infnorm indepvarcol=0 depvarcol=2
+
+* Test with FILE= in Comma-Delimited .PRN format
+* L1 Norms.  
+.measure tran FitErrorCDPrnL1V1 ERROR v(1a) FILE=ErrorTestCommaDelimRawData.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=2
+.measure tran FitErrorCDPrnL1V2 ERROR v(2a) FILE=ErrorTestCommaDelimRawData.prn COMP_FUNCTION=l1norm INDEPVARCOL=1 DEPVARCOL=3
+
+*L2 Norms, which is also the default. Also test lower-case for FILE, COMP_FUNCTION, INDEPVARCOL and DEPVARCOL
+.measure tran FitErrorCDPrnL2V1 error v(1a) file=ErrorTestCommaDelimRawData.prn comp_function=L2NORM indepvarcol=1 depvarcol=2
+.measure tran FitErrorCDPrnL2V2 error v(2a) file=ErrorTestCommaDelimRawData.prn comp_function=l2norm indepvarcol=1 depvarcol=3
+
+* Not specifying COMP_FUNCTION, or asking for "BOGONORM" should default to the L2NORM.
+* So, these two measures should give the same results as the L2NORM measures above.
+.measure tran FitErrorCDPrnBogoV1 error v(1a) file=ErrorTestCommaDelimRawData.prn comp_function=BOGONORM indepvarcol=1 depvarcol=2
+.measure tran FitErrorCDPrnDefaultV2 error v(2a) file=ErrorTestCommaDelimRawData.prn indepvarcol=1 depvarcol=3
+
+*INF NORMS
+.measure tran FitErrorCDPrnInfV1 error v(1a) file=ErrorTestCommaDelimRawData.prn comp_function=INFNORM indepvarcol=1 depvarcol=2
+.measure tran FitErrorCDPrnInfV2 error v(2a) file=ErrorTestCommaDelimRawData.prn comp_function=infnorm indepvarcol=1 depvarcol=3
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.  
+* The type of measure doesn't particularly matter.  This is needed for compatibility
+* for testing with a verbose build, which is often used by the Xyce developers.
+.measure tran lastMeasure max V(1a)
+
+.end
+
+

@@ -1,0 +1,39 @@
+* Xyce netlist for testing xdm query mode (-q) for R, L, C and ALL
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PRINT TRAN V(1)
+
+* SIN source
+R1a  1  1a  1e3 
+R1b  1a  0  2K 
+V1   1   0 SIN(0 1 1KHz 0 0 0)
+
+* DC source
+R2a  2  2a  1k 
+R2b  2a  0  2K 
+V2   2   0  5
+
+* Two capacitors and pulse source
+V3  3   0 PULSE(0 1 10U 1U 1U 1m)
+R3  3  3a 1K
+C3a 3a  0 40u
+C3b 0  3a 40e-6
+
+* Two inductors
+V4  4  0 sin(0 1 4 0 0 ) 
+R4  4a 4 1 1K
+L4  4a 0 40m
+
+V5  5 0  sin(0 1 4 0 0 )
+R5  5 5a 1K
+L5  0 5a 40e-3
+
+*PWL syntaxes
+R6        6 0  1k 
+VPWL6     6 0  PWL 1e-4 0.5 2e-4 1 3e-4 1 4e-4 0.5 
+R_FILE    7 0  1k
+VPWL_FILE 7 0  PWL FILE "pwlFile1.txt"
+
+.END
+

@@ -1,0 +1,8 @@
+# These are always excluded as they're taken care of by the shell script
+invert1-sim.cir
+invert2-sim.cir
+invert3-sim.cir
+invert6-sim.cir
+invert_b3soi-sim.cir
+invert_bsim3-sim.cir
+invert_bsim4-sim.cir

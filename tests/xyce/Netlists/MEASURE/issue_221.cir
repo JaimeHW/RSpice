@@ -1,0 +1,60 @@
+*****************************************************************
+* A test of .OPTIONS MEASURE MEASFAIL for successful measures.
+* This is the base case without .OPTIONS MEASURE MEASFAIL.
+*
+* See gitlab issue 221 for more details.
+*****************************************************************
+
+VS1  1  0  SIN(0 1.0 1KHZ 0 0.9)
+VS2  2  0  SIN(0 -1.0 1KHz 0 0.9)
+R1  1  0  100
+R2  2  0  100
+
+* used to generate comparison file for ERROR measure
+*VS3 3 0 SIN(0 1.0 1KHZ 0 0.7)
+*R3 3 0 100
+*.PRINT TRAN FILE=issue_221_comp_file.prn V(3)
+
+.TRAN 0  1ms
+.PRINT TRAN V(1) V(2)
+
+.measure tran avgVal avg V(1)
+
+.measure tran derivValWhen deriv V(1) WHEN V(1)=0.5
+.measure tran derivValAt deriv V(1) AT=5e-04
+
+.measure tran dutyVal duty V(1)
+
+.measure tran eqnVal EQN {V(1)+10}
+
+.measure tran errorVal ERROR v(1) FILE=issue_221_comp_file.prn
++ COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=2
+
+.measure tran whenVal WHEN V(1)=0.5
+.measure tran findWhenVal FIND V(2) WHEN V(1)=0.5
+.measure tran findAtVal FIND V(2) AT=0.75e-3
+
+.measure tran freqVal FREQ v(1) ON=0.75 OFF=0.25
+
+.measure tran integVal integ V(1)
+
+.measure tran maxVal max V(1)
+.measure tran minVal min V(1)
+
+.measure tran ppVal pp V(1)
+.measure tran rmsVal rms V(1)
+
+.measure tran trigTargVal TRIG v(1)=0.1 TARG v(1)=0.99
+
+* for testing convenience do not make separate .mt0 files
+* for each TRAN_CONT measure
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+.measure tran_cont derivValWhenCont deriv V(1) WHEN V(1)=0.5
+.measure tran_cont derivValAtCont deriv V(1) AT=5e-04
+
+.measure tran_cont whenValCont WHEN V(1)=0.5
+.measure tran_cont findWhenValCont FIND V(2) WHEN V(1)=0.5
+.measure tran_cont findAtValCont FIND V(2) AT=0.75e-3
+
+.END

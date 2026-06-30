@@ -1,0 +1,35 @@
+Test Name: BUG_613
+Owner: Eric Rankin
+Test netlists: none 
+GS files: none
+Mode: parallel 
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+bug 612:  MPICH versions of Xyce fail
+
+The "fix" for bug 605 actually broke the MPICH builds.  This happened
+because mpich alters the command line arguments each process sees, and
+the bug 605 patch ignored these modifications.  Binaries running far
+nodes (proc > 0) entered a receive loop, but proc 0 never broadcast
+any information, causing the hang.
+
+All mpich builds were affected for all parallel runs with > 2 processors.
+
+Procedure:
+============
+None.  trans_line, and others, cover this.
+
+Verification:
+=============
+Successful completion of the trans_line parallel tests imply this bug 
+is corrected.
+ 
+Notes:
+======
+This bug was triggered by the MPICH builds, however modifications to fix
+it apply to all parallel versions.  trans_line chosen as the test 
+reference only because it is mentioned in the bugzilla report as having
+triggered the error.

@@ -1,0 +1,17 @@
+* Test file for showing possible problem in -namesmap output.
+* Include both a top-level circuit and a simple subcircuit.
+V1 r1_in 0 1
+R1 r1_in sub_in 1
+X_X1 sub_in sub_out R_Subckt
+R4 sub_out 0 4
+
+.DC V1 1 1 1
+.PRINT DC V(r1_in) V(sub_in) V(sub_out)
+
+.SUBCKT R_Subckt in out
+R1          in  mid 2
+R2          mid out 3
+.ENDS
+
+.end
+

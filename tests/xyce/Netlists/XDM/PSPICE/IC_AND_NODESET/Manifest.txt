@@ -1,0 +1,17 @@
+exclude
+tags
+ic_in_subckt.cir.pspice
+ic_in_subckt.cir
+ic_in_subckt.cir.sh
+nodeset_in_subckt.cir.pspice
+nodeset_in_subckt.cir
+nodeset_in_subckt.cir.sh
+ic_nodeset.cir.pspice
+ic_nodeset.cir
+ic_nodeset.cir.sh
+ic_global_node_warning.cir.pspice
+ic_global_node_warning.cir
+ic_global_node_warning.cir.sh
+nodeset_global_node_warning.cir.pspice
+nodeset_global_node_warning.cir
+nodeset_global_node_warning.cir.sh

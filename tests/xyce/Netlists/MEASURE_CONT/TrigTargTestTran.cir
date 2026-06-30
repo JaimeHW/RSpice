@@ -1,0 +1,57 @@
+* Test TRAN mode support for the TRAN_CONT version of
+* TRIG-TARG Measures.
+*
+* See SON Bug 1335 for more details.
+********************************************************
+
+* For testing convenience send the output for the TRAN_CONT
+* measures to the <netlistName>.mt0 file.
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+*
+VPWL1 1  0  pwl(0 0.1 2.5m 0.5 5m 0 7.5m 0.4 10m 0)
+VPWL2 2  0  pwl(0 0.5 10m 0)
+
+R1  1  0  100
+R2  2  0  100
+
+.TRAN 0 10ms
+.PRINT TRAN V(1) V(2)
+
+* test combos of AT used by only TRIG, only TARG, or both.  Also test
+* VAL= syntax.
+.MEASURE TRAN_CONT TrigTargContAT TRIG AT=2ms TARG AT=8ms
+.MEASURE TRAN_CONT TrigTargContAT1 TRIG V(1) VAL=0.2 CROSS=1 TARG AT=8ms
+.MEASURE TRAN_CONT TrigTargContAT2 TRIG AT=2ms TARG V(1) VAL=0.2 CROSS=1
+
+* test base case
+.MEASURE TRAN_CONT TrigTarg1 TRIG V(1)=0.2 CROSS=1 TARG V(1)=0.3 CROSS=1
+
+* test that the first N TRIGs are matched with the first N TARGs
+.MEASURE TRAN_CONT TrigTarg2 TRIG V(1)=0.2 CROSS=1 TARG V(1)=0.3 CROSS=2
+.MEASURE TRAN_CONT TrigTarg3 TRIG V(1)=0.2 CROSS=2 TARG V(1)=0.3 CROSS=1
+
+* Simple RISE/FALL test
+.MEASURE TRAN_CONT TrigTarg4 TRIG V(1)=0.2 RISE=1 TARG V(1)=0.3 FALL=1
+
+* Add TD for both TRIG and TARG.  Note that the TRIG TD value will also be used
+* for the TARG TD value, if only the TRIG TD value is given.  An "early" TD is
+* essentially ignored.
+.MEASURE TRAN_CONT TrigTarg5 TRIG V(1)=0.2 TD=2ms CROSS=1 TARG V(1)=0.3 CROSS=1
+.MEASURE TRAN_CONT TrigTarg6 TRIG V(1)=0.2 TD=6ms CROSS=1 TARG V(1)=0.3 CROSS=1 TD=2ms
+.MEASURE TRAN_CONT TrigTarg7 TRIG V(1)=0.2 CROSS=1 TARG V(1)=0.3 CROSS=1 TD=8ms
+.MEASURE TRAN_CONT TDearly TRIG V(1)=0.2 CROSS=3 TD=-10ms TARG V(1)=0.3 CROSS=3 TD=-12ms
+
+* Both TDs get ignored if both ATs at specified.  However, TRIG TD is used for
+* the TARG clause in the second case.  
+.MEASURE TRAN_CONT AtTD1 TRIG AT=2ms TD=5ms TARG AT=8ms TD=9ms
+.MEASURE TRAN_CONT AtTD2 TRIG AT=1ms TD=2ms TARG V(1)=0.3 CROSS=1
+
+* Failed measures
+.MEASURE TRAN_CONT ATearly TRIG AT=-10ms TARG AT=-10ms
+.MEASURE TRAN_CONT ATlate  TRIG AT=20ms TARG AT=20ms
+.MEASURE TRAN_CONT TrigTDLate TRIG V(1)=0.2 CROSS=1 TD=15ms TARG V(1)=0.3 CROSS=1 TD=2ms
+.MEASURE TRAN_CONT TargTDLate TRIG V(1)=0.2 CROSS=1 TARG V(1)=0.3 CROSS=1 TD=12ms
+.MEASURE TRAN_CONT ValNotFound TRIG V(1)=2 CROSS=1 TARG V(1)=2 CROSS=2
+
+.END

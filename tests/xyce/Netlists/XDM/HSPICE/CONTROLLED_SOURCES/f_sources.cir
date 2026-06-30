@@ -1,0 +1,23 @@
+*Xyce netlist for testing F-sources syntaxes
+
+.TRAN 0 1000ns
+.PRINT TRAN V(N385945) V(N385703) I(V_V5) I(R_R9)
+*+ V(N387822) V(N387774)
+
+X_F1         N385945 N385872 N385703 0 SCHEMATIC1_F1
+R_R5         0 N385872  1
+R_R6         0 N385703  1
+V_V4         N385945 0  SIN(0 1 1e6 0 0 0)
+
+.subckt SCHEMATIC1_F1 1 2 3 4
+f_f1         3 4 vf_f1 2
+vf_f1         1 2 0V
+.ends SCHEMATIC1_F1
+
+* test POLY form of the F-source
+R_R8         0 N397302  1
+R_R9         0 N387774  1
+V_V5         N397302 0 SIN(0V 2V 1e6 0 0 0)
+F_F2 N387774 0 POLY(1) V_V5 0 2
+
+.END

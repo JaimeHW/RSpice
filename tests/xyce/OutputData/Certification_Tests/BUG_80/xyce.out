@@ -1,0 +1,14 @@
+
+
+ *****
+ ***** Welcome to the Xyce(TM) Parallel Electronic Simulator
+ *****
+ ***** This is version (D)Release 1.0.1 
+ 
+ 
+ ***** Executing netlist capacitor.cir...
+ 
+ 
+ 
+ ***** Setting up topology...
+ ERROR: print type DC and analysis type TRAN are inconsistent

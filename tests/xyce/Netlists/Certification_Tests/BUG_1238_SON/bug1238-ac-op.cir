@@ -1,0 +1,17 @@
+* Test wild cards for VR(), VI(), IR() and II() when .OP is used
+* with .AC.  Note that only the branch currents for V and L devices
+* are output for an AC analysis. The lead currents for the R-devices
+* are not.
+*
+* Trivial low-pass filter (V-L-R) circuit.
+*
+
+R1 b 0 2
+L1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.print AC VR(*) VI(*) IR(*) II(*)
+.ac dec 5 100Hz 10e6
+.OP
+
+.end

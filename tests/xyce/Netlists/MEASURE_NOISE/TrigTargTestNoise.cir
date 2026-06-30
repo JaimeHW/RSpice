@@ -1,0 +1,78 @@
+* Test NOISE mode support for the TRIG-TARG measure
+*
+*
+*
+* See gitlab-ex issue 289 for more details
+*************************************************
+
+* Used to adjust reference frequency from 1Hz to 1KHz
+.PARAM scaleFactor=1e3
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP   3 0 2 0 2
+* 7th order Chebychev LPF with 2dB of passband ripple.
+* This is not a realistic passband ripple level, but is
+* useful for this test.
+RS 3 b 1
+C1 b 0 {2.865/scaleFactor}
+L2 b c {0.912/scaleFactor}
+C3 c 0 {3.8774/scaleFactor}
+L4 c d {0.9537/scaleFactor}
+C5 d 0 {3.8774/scaleFactor}
+L6 d e {0.912/scaleFactor}
+C7 e 0 {2.8650/scaleFactor}
+RL e 0 1.0
+
+.NOISE  V(e)  V1  DEC  20 1 1000
+.PRINT NOISE VM(3) vm(b) vm(c) vm(d) vm(e)
+
+* Test both with AT
+.MEASURE NOISE TrigTargAT TRIG AT=30 TARG AT=500
+.MEASURE NOISE TrigTargAT1 TRIG vm(e)=0.45 CROSS=1 TARG AT=500
+.MEASURE NOISE TrigTargAT2 TRIG AT=30 TARG vm(e)=0.45 CROSS=1
+
+* Test that negative measure values are allowed
+.MEASURE NOISE TrigTarg1 TRIG vm(e)=0.45 CROSS=1 TARG vm(e)=0.45 CROSS=2
+.MEASURE NOISE TrigTarg2 TRIG vm(e)=0.45 CROSS=2 TARG vm(e)=0.45 CROSS=1
+
+* Repeat tests with LAST keyword and CROSS=-1
+.MEASURE NOISE TrigTarg3 TRIG vm(e)=0.45 CROSS=1 TARG vm(e)=0.45 CROSS=LAST
+.MEASURE NOISE TrigTarg4 TRIG vm(e)=0.45 CROSS=-1 TARG vm(e)=0.45 CROSS=1
+
+* Add TD for both TRIG and TARG.  Note that the TRIG TD value will also be used
+* for the TARG TD value, if only the TRIG TD value is given.  An "early" TD is
+* essentially ignored.
+.MEASURE NOISE TrigTarg5 TRIG vm(b) VAL=0.40 CROSS=1 TD=90 TARG vm(b) VAL=0.45 CROSS=1
+.MEASURE NOISE TrigTarg6 TRIG vm(b) VAL=0.40 CROSS=1 TD=90 TARG vm(b) VAL=0.45 CROSS=1 TD=10
+.MEASURE NOISE TrigTarg7 TRIG vm(b) VAL=0.40 CROSS=1 TARG vm(b) VAL=0.45 CROSS=1 TD=70
+.MEASURE NOISE TDearly TRIG vm(e)=0.45 CROSS=1 TD=0.1 TARG vm(e)=0.45 CROSS=2 TD=0.2
+
+* Repeat core tests with RISE and FALL
+.MEASURE NOISE RiseFall1 TRIG vm(e)=0.45 RISE=1 TARG vm(e)=0.45 FALL=2
+.MEASURE NOISE RiseFall2 TRIG vm(e)=0.45 RISE=2 TARG vm(e)=0.45 FALL=1
+
+.MEASURE NOISE RiseFall3 TRIG vm(e)=0.45 CROSS=1 TARG vm(d)=0.45 RISE=LAST
+.MEASURE NOISE RiseFall4 TRIG vm(d)=0.45 FALL=LAST TARG vm(e)=0.45 CROSS=1
+
+* Verify that both the real and imaginary part of solution vector are accessible,
+* and that branch currents work.
+.MEASURE NOISE TrigTarg8 TRIG vr(e)=0.45 CROSS=1 TARG II(L6)=-0.45 CROSS=2
+
+* Both TDs get ignored if both ATs at specified.  However, TRIG TD is used for
+* the TARG clause in the second case
+.MEASURE NOISE AtTD1 TRIG AT=30 TD=50 TARG AT=500 TD=600
+.MEASURE NOISE AtTD2 TRIG AT=30 TD=70 TARG vm(b)=0.45 CROSS=1
+
+* Failed measures
+.MEASURE NOISE ATEarly TRIG AT=0.1 TARG AT=0.1
+.MEASURE NOISE ATLate TRIG AT=2000 TARG AT=2000
+.MEASURE NOISE TrigTDLate TRIG vm(e)=0.45 CROSS=1 TD=1500 TARG vm(b)=0.45 CROSS=1 TD=10
+.MEASURE NOISE TargTDLate TRIG vm(e)=0.45 CROSS=1 TARG vm(e)=0.45 CROSS=2 TD=2000
+.MEASURE NOISE ValNotFound TRIG vm(e)=2 CROSS=1 TARG vm(e)=2 CROSS=2
+
+.END

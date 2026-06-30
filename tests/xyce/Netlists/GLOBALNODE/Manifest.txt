@@ -1,0 +1,7 @@
+global.cir
+global.cir.sh
+global2.cir
+global3.cir
+global_hspice.cir
+global_hspice.cir.tags
+tags

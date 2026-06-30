@@ -1,0 +1,27 @@
+*
+* same as MINDUCTOR_IC.cir problem but using 
+* two expressions and placing inductors in a sub circuit.
+* 
+VS 1 0 SIN(0 169.7 60HZ)
+R1 1 2 1K
+R2 3 0 1K
+XKs1 2 3 0 test1 params: coupling=0.75 
+.TRAN 100US 25MS
+
+.SUBCKT test1 node1 node2 GND params: coupling=0.75 
+L1 node1 0 1mH IC=0.5
+L2 node2 0 1mH
+K1 L1 L2 {coupling}
+.ENDS
+
+* Xyce option needed when default is changed to 1 (Backward Euler).
+* Also serves as useful test of non-default method.
+*.OPTIONS TIMEINT METHOD=2
+
+* Note. The two voltage signals are offset by 0.2 to avoid crossing
+* the zero axis.  Axis crossings cause problems for xyce_verify.
+.PRINT TRAN I(VS) {V(2)+0.2} {V(3)+0.2} i(XKs1:L1) i(XKs1:L2)
+
+*COMP V(2) reltol=0.02
+*COMP V(3) reltol=0.02
+.END

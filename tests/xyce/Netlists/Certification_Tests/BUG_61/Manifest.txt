@@ -1,0 +1,4 @@
+README
+capacitor.cir
+capacitor.cir.sh
+tags

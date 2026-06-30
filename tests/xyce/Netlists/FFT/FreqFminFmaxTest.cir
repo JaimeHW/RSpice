@@ -1,0 +1,83 @@
+* Test of FREQ, FMIN and FMAX qualifier
+*
+* The comments before each line indicate which
+* combination of qualifier and metric is "most tested"
+* by that line.
+*
+* Also test that setting FFT_MODE=0 (HSPICE compatibility)
+* works.
+***********************************************************
+
+.TRAN 0 1
+.OPTIONS FFT FFT_ACCURATE=1 FFTOUT=1 FFT_MODE=0
+
+* V(1) is a low-pass signal with its peak mag at F=1
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+* V(5) has a larger magnitude at F=3, than F=2.  This is
+* useful for testing FMIN with the SFDR metric.
+V4 4 0 SIN(0 2 1)
+V6 6 0 SIN(0 1 2)
+R4 4 5 1
+R5 5 0 1
+R6 6 5 1
+
+* This is useful for testing SFDR with FMAX less than the
+* first harmonic frequency
+V7 7 0 SIN(0 2 1)
+V8 8 0 SIN(0 1 2)
+V9 9 0 SIN(0 2 4)
+R7 7 10 1
+R8 8 10 1
+R9 9 10 1
+R10 10 0 1
+
+.FFT V(1) NP=16 WINDOW=HANN
+
+* Test effect of FMIN on SFDR, and of FMAX on SNR and THD.
+* SNR now considers F=5,6,7,8 to be noise.  THD only uses
+* F=2,3,4 now.  SNDR is uneffected by FMAX because all
+* frequencies, not equal to the fundamental (1), are
+* considered to be "distortion" or "noise".
+.FFT V(1) NP=16 WINDOW=HANN FMIN=3 FMAX=4
+
+* Test effect of different FMAX on SNR.  SNR now only
+* considers F=7,8 to be noise
+.FFT V(1) NP=16 WINDOW=HANN FMIN=2 FMAX=6
+
+* Repeat tests with a different fundamental frequency (F=2)
+* SNDR now uses F=1 in its calculation.  THD only considers
+* F=4,6,8.  The SNR calculation now considers F=1,3,5,7 to
+* be "noise".
+.FFT V(1) NP=16 WINDOW=HANN FREQ=2
+
+* FMIN does not affect THD, SNDR or SNR.  SFDR only
+* considers F>=5.
+.FFT V(1) NP=16 WINDOW=HANN FREQ=2 FMIN=5
+
+* THD only uses F=4
+.FFT V(1) NP=16 WINDOW=HANN FREQ=2 FMAX=5
+
+* Use V(5) to test SFDR for the case where the "correct harmonic"
+* for the SDFR is also lower than the fundamental.
+.FFT V(5) NP=16 WINDOW=HANN
+
+* SFDR found at F=4, since FMIN is not given
+.FFT V(5) NP=16 WINDOW=HANN FREQ=3
+
+* SFDR found at F=2, since FMIN is given
+.FFT V(5) NP=16 WINDOW=HANN FREQ=3 FMIN=2
+
+* SFDR found at F=1, since FMIN is given
+.FFT V(5) NP=16 WINDOW=HANN FREQ=3 FMIN=1
+
+* Test various values of FMIN and FMAX for SFDR
+.FFT V(10) NP=16 WINDOW=HANN
+.FFT V(10) NP=16 WINDOW=HANN FREQ=4 FMAX=5
+.FFT V(10) NP=16 WINDOW=HANN FREQ=4 FMAX=2  ; defaults to FMIN=1
+.FFT V(10) NP=16 WINDOW=HANN FREQ=4 FMIN=2 FMAX=3
+
+.PRINT TRAN V(1) V(2) V(5) V(10)
+.END

@@ -1,0 +1,876 @@
+This circuit tests a Trigger Ckt.in Xyce-low voltage input, pins #4 to gnd
+
+* this circuit ran to completion with Xyce3.1a Q release
+* this ckt does not run to completion w/level=2 diode and Xyce Dev 7/6/2006
+* this ckt does not run to completion w/level=1 diode and Xyce Dev 7/6/2006
+* this ckt does not run to completion w/level=3 diode and Xyce Dev 7/6/2006
+* this ckt does not run to completion w/level=4 diode and Xyce Dev 7/6/2006,but further than level=1,2,or 3
+* sprytron trigger voltage went to -20KV at 40.002e-03-is non-linear Xfmr model bad?
+* Found coil document for Xfmr - changed turns on coils to 12:240 - only 350V on sprytron
+* added zener gamma model
+* NO DCOP at 80C, or 70C or 60C or 50C or 40C trying special options
+* tried minres and mincap options - still no DCOP at >35C
+* default nonlin tran options don't work for DCOP at temp>30C either
+* ran SCR w/level=4 - no Xyce temp, just SPICE-runs at 30C, no DCOP 40C, 45C, etc.
+* temp homotopy works, trying reltol on nonlin-tran line and look at CJO in devices
+* room temp runs to 43ms, w/grorder=28,1E9
+* 54C runs to 40.007ms, w/grorder=28,1E9
+*too much delay for trigger, never fired(only 20V) when rgt=120 for sprytron
+*trying switch for sprytron-to much delay-Iload does not 'ring' due to switch
+*trying grorder=28 with pulse=50us wide at temp=27-works fine this file
+*trying grorder=30 with pulse=50us wide at temp=27..fails to converge during trigger current output
+* Steve says try moving trigger to 48ms-makse no difference
+*trying grorder=29 with pulse=50us wide at temp=27.-fails to converge during I(Rload)
+*trying earlier version of PXyce - 11/21/2006 - no difference
+*trying different abstol, reltol etc-worked when I changed reltol=1e-02, method=1 for timeint
+*trying grorder=30 @27C, w/wide photo pulse=50us
+*trying grorder=31 @27C, w/wide photo pulse=50us
+*trying grorder=31, temp=54, w/wide photo pulse
+*trying PXyce 12/1/2006, grorder=31, temp=54, w/wide photo pulse - does not run to completion
+
+VIN	7	0    0.0	pulse(0 450 10ns 0.15us 0.15us 41ms 1s)
+VRAMP1	4	0    0.0 PULSE( 0.0 24  40ms 10ns 10ns 3ms 600ms)
+
+.print tran format=std V(4a) v(5a) I(vrload) 
+* I(rload)
+*+ v(4) V(15) V(11) V(17)  I(R4) radpulse v(11a)
+
+.TRAN 10ns 45ms 
+
+.options DEVICE TEMP=54 debuglevel=-10
+*.options nonlin-tran maxstep=40
+*.options timeint abstol=1.0e-4 reltol=5.0e-3 dtmin=1.0e-8
+
+.PARAM
++ functiontype=7 grorder=31;=30,1E11,=29,1E10,=28,1E9,=27,1E8
+.global_param radpulse={spice_pulse(0,4.3,39e-03,10e-09,10e-09,50e-06,3)}
+
+R2	4	0	SA1229_13A	5.11K
+C2	4	0	SA1892_1A 	4.0uF 
+XCR2  	4a	4	SA2599
+R4	4a	0	SA1229_9A	1K
+XT2	4	17	5a	11	MC2348
+XQ2	5a	4a	0	SA2859
+DCR5	11	17	SA1388_2
+X7	15	17	12	11	MC2346
+C8 	17	11	SA2004_22A 	2200pF 
+C9	11	12	SA2004_22A	2200pF 
+XT3	13	12	0	11	MC2349
+R7	7	15	SA659_415A	2K
+R6	15	16	SA1466_1A	5.0MEG
+C5	15	0	SA1773A		4.0uF 
+R8	2	0	SA1229_76A	0.5MEG
+C6	2	3	SA1880_1A	1300pF 
+C7	3	0	SA2054_22A	0.027uF 
+C4	2	14	SA1880_3A	330pF 
+C3	14	0	SA1880_2A	1000pF 
+R5	14	0	SA1229_64A	1MEG
+X9	2	14	16	13	MC2347
+lload  	11a	11	70nh
+vrload  11a 11b 0
+rload	11b	0	0.025
+
+* ************** THIS FILE CONTAINS RESISTOR MODELS FOR A TRIGGER CIRCUIT ********************
+* For the SA1229-13, -9, -64, -76 resistors the 25C value has a +/-1% tolerance
+* and the -55C value can change -0.8%, while the 125C value can change
+* +1% from the 25C value:MODEL A, and the -55C value can change +0.8%,
+* while the 125C value can change -1% from the 25C value:MODEL B, TNOM=25C.
+.model SA1229_13A R(TC1=0.0001 TC2=0)
+.model SA1229_13B R(TC1=-0.0001 TC2=0)
+.model SA1229_9A R(TC1=0.0001 TC2=0)
+.model SA1229_9B R(TC1=-0.0001 TC2=0)
+.model SA1229_64A R(TC1=0.0001 TC2=0)
+.model SA1229_64B R(TC1=-0.0001 TC2=0)
+.model SA1229_76A R(TC1=0.0001 TC2=0)
+.model SA1229_76B R(TC1=-0.0001 TC2=0)
+* For the SA1466-1 resistor the 25C value has a +/-1% tolerance
+* and the -55C value can change -2%, while the 125C value can change
+* +2.5% from the 25C value: MODEL A, and the -55C value can change +2%,
+* while the 125C value can change -2.5% from the 25C value: MODEL B,
+* TNOM=25C, RNOM=5MEG:
+.model SA1466_1A R(TC1=0.00025 TC2=0)
+.model SA1466_1B R(TC1=-0.00025 TC2=0)
+* For the SA659-415 resistor the 25C value has a +/-1% tolerance
+* and the -55C value can change -0.4%, while the 125C value can change
+* +0.5% from the 25C value: MODEL A, and the -55C value can change +0.4%,
+* while the 125C value can change -0.5% from the 25C value: MODEL B,
+* TNOM=25C, RNOM=2K:
+.model SA659_415A R(TC1=0.00005 TC2=0)
+.model SA659_415B R(TC1=-0.00005 TC2=0)
+*******************************************************************************************************
+* ********************* Capacitor models for a Trigger ckt. ***************************************
+* For the SA1892-1 this model and temp. coeff. is for
+* -55C to 75C only where TNOM=25C, CNOM=4UF:
+.model SA1892_1A C(TC1=2.192308E-3 TC2=-3.846E-6)
+* For the SA1892-1 this model and temp. coeff. is for
+* 75C to 125C only where TNOM=75C, CNOM=4.0UF:
+.model SA1892_1B C(TC1=-2E-3 TC2=-10E-6)
+* For the SA1880 capacitors - please note they are only
+* rated for use between -55C and 100C. They are to stay within 20%
+* of the capacitance at room, which can be +/-10% of nominal value.
+* Two worst cases could exist: Model A - decrease by 30% at -55C and
+* increase by 30% at 100C or Model B - increase by 30% at -55C and 
+* decrease by 30% at 100C. Two models of each worst case condition
+* follow with TNOM=25C, SA1880-1 USES CNOM=1300PF:
+.model SA1880_1A C(TC1=3.87903E-3 TC2=1.613E-6)
+.model SA1880_1B C(TC1=-3.870968E-3 TC2=1.613E-6)
+* SA1880-2 USES CNOM=1000PF
+.model SA1880_2A C(TC1=3.87903E-3 TC2=1.613E-6)
+.model SA1880_2B C(TC1=-3.870968E-3 TC2=1.613E-6)
+* SA1880-3 USES CNOM=330PF
+.model SA1880_3A C(TC1=3.87903E-3 TC2=1.613E-6)
+.model SA1880_3B C(TC1=-3.870968E-3 TC2=1.613E-6)
+* For the SA1773 capacitors - please note they are only
+* rated for use between -55C and 100C. The temp. tolerances are to stay
+* within 10% of the capacitance measured at room, which can be +/-10% of
+* nominal value. Two worst cases could exist: Model A - decrease by 20%
+* at -55C and increase by 20% at 100C or - Model B - increase by 20% at
+* -55C and decrease by 20% at 100C. Two models of each worst case condition 
+* follow with TNOM=25C, SA1773 USES CNOM=4UF:
+.model SA1773A C(TC1=2.594335E-3 TC2=2.742E-6)
+.model SA1773B C(TC1=-2.580645E-3 TC2=2.742E-6)
+* SA2054-22 can be used from -55C to 125C. The capacitance will
+* vary +/-15% from measured capacitance at 25C which has a +/-10% tolerance,
+* therefore two worst case conditions could exist: Model A - nominal value
+* decreases -10% and -55C and 125C decrease another -15%, or Model B- nominal
+* value is at +10% tolerance and -55C and 125C increase another +15%. Two
+* models of each worst case condition follow with TNOM=25C:
+* SA2054-22 USES CNOM=0.027UF
+.model SA2054_22A C(TC1=3.75E-4 TC2=-18.75E-6)
+.model SA2054_22B C(TC1=-3.75E-4 TC2=18.75E-6)
+* SA2004-22 can be used from -55C to 125C. The capacitance will
+* vary +/-15% from measured capacitance at 25C which has a +/-10% tolerance,
+* therefore two worst case conditions could exist: Model A - nominal value
+* decreases -10% and -55C and 125C decrease another -15%, or Model B- nominal
+* value is at +10% tolerance and -55C and 125C increase another +15%. Two
+* models of each worst case condition follow with TNOM=25C:
+* SA2004-22 USES CNOM=2200PF
+.model SA2004_22A C(TC1=3.75E-4 TC2=-18.75E-6)
+.model SA2004_22B C(TC1=-3.75E-4 TC2=18.75E-6)
+***************************************************************************************************************
+*  
+* Zener model CR5
+* 
+*
+.SUBCKT SA2599 1 2  
+D1 1 2  DFOR  
+D2 2 1  DLEAK  
+D3 2 3  DBLOCK  
+IC 1 3 0.6315  
+RC 1 3 18.52  RMODEL
+.MODEL RMODEL R (TC1=0.0007325 TC2=-2.217E-07)  
+.MODEL DFOR D   (level=399
++         IS = 6.96E-13
++         RS = 0.276
++          N = 1.292
++         TT = 95E-9
++        CJO = 6.395E-11
++         VJ = 0.5894
++          M = 0.3288
++         EG = 1.11
++        XTI = 3.379
++         KF = 0
++         AF = 1
++         FC = 0.5
++         BV = 1000
++        IBV = 0.001
+* the following params describe the radiation pulse - user changes accordingly 
+*
+* TF Parameters
++ isnpp=0
++ ispnn=1
+* Note: The following two lines describe the characteristics of the radiation pulse
++ GRORDER = {grorder} FUNCTIONTYPE = {functiontype}
++ pulsedata={radpulse}
++ devicearea=6.0e-08
+* 6.1746e-8 original guess
++ raugn=1.1e-42 raugp=3e-43 ni=1.5e16
++ na=1.4e25
++ wp=5.4e-6
++ pdn=4.042e-3
++ pdp=2.419e-3 
++ taun0=3e-07
++ tauinfn=6e-07
++ nd=3.0e23
++ wn=1.4e-6 
++ ndn=2.709e-3 
++ ndp=1.696e-3 
++ taup0=3.29e-7
++ tauinfp=6.58e-7
++ ndhi=3e24
++ wnhi=2e-5
++ ndnhi=2e-3
++ ndphi=1e-3
++ taup0hi=1e-7
++ tauinfphi=2e-7
++ )
+.MODEL DLEAK D  (
++         IS = 7.529E-12
++         RS = 0
++          N = 64.86
++         TT = 0
++        CJO = 100pF;was 0
++         VJ = 1
++          M = .5
++         EG = 35
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 9.9999E+13
++        IBV = .001
++ )
+.MODEL DBLOCK D (
++         IS = 1E-12
++         RS = 0
++          N = 0.1531
++         TT = 0
++        CJO = 100pF; was 0
++         VJ = 1
++          M = .5
++         EG = 0.1
++        XTI = 0
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 9.9999E+13
++        IBV = .001
++ )
+.ENDS  
+***************************************************************************************************
+* STORED UNDER DWG. NO. 312432
+* TYPE=   
+* SUBTYPE = Transformer  
+* MC2348
+* GENERIC FUNCTIONAL EQUIVALENT =  
+* MANUFACTURERS PART NO. = 
+* THIS FILE CONTAINS A PRE-RAD  MODEL OF THE MC2348 TRANSFORMER.
+* CREATION DATE : 3-9-99
+* RESPONSIBLE ENGINEER - 1733  WENDEL ARCHER  
+* LATEST REVISION BY CAROLYN BOGDAN 10/26/99
+*  
+*
+*******************************************
+* MODEL OF MC2348 TRANSFORMER
+*
+.subckt mc2348   1a         2       10B        10C
+*               input       |       |           |
+*                         output    |           |
+*                                   MINUS-L1    |
+*                                               MINUS -L2
+Rp         1    1A     0.04  
+*L1         1    10B    6 
+*L2         3    10C    120
+L1         1    10B    12;changed from above - found AY w/correct turns ratio 
+L2         3    10C    240
+Rs         3    2       5.5
+Kmc2348    L1   L2    0.98 K1041T060_3B7
+.model K1041T060_3B7  CORE( Ms=410K A=45.01 C=.396 K=26.98 Area=.044 Path=1.30 
++ OUTPUTSTATEVARS=1 )
+.ends mc2348
+**********************************************************************************************************
+* Stored under Dwg. No. = 317560    SA2859
+* Generic Functional Equivalent = 
+* Abbreviated Functonal # = 2370     
+* Manufacturers Part No. = W2370   (TEXAS INST)
+* TYPE: THYRISTOR 
+* SUBTYPE: SCR        
+* THIS FILE CONTAINS A PRE-RAD SPICE2G.6 COMPATIBLE TEMPERATURE TRACKING 
+* MODELS OF THE SA2859 THYRISTOR.
+* CREATION DATE: 28-AUG-96
+* RESPONSIBLE ENGINEER - 1252 - CAROLYN BOGDAN
+* 
+* A TURN-OFF TIME OF 0.92US WAS MEASURED .
+*
+* RON = 3 OHMS, dV/dT = 12V/us (MEAS. = 6.3V/us), IH = 1mA (MEAS. = 1.3mA), 
+* GATE TRIGGER CURRENT = 1.25uA (MEAS. = 50pA), tr = 5.5ns (MEAS. = 10ns)
+*
+* THE FOLLOWING IS A PRE-RAD MODEL:
+*
+*               ANODE  
+*                |   GATE  
+*                |   |    CATHODE  
+*                |   |    |  
+.SUBCKT SA2859   4   1   10  
+R 1 10 700K;110K;value for SA1870, 750K;1.3K to 24K from cold to hot temperatures (min values) 
+DFOR 1 3 DMOD1  
+Q1 1 3 4 QMOD1  
+Q2 3 1 10 QMOD2  
+.MODEL DMOD1 D(
++         IS = 1E-14
++         RS = 0
++          N = 1
++         TT = 0
++        CJO = 100pF; was 0
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 70;50(min), 90(max)
++        IBV = .001
++ )
+
+.MODEL QMOD1 PNP ( LEVEL=4 TNOM=15 TEMPMODEL=QUADRATIC
++ IS=2.51822e-11 NF=1.02 BF=1
++ ISE=3.13e-15
++ NE=1.173
++ NC=2.0
++ NK=1.35
++ ikf=1E12
++ VAF=100
++ VAR=100
++ IKR=1e99
++ BR = 0.919; yields 1mA
++ RB = 0.012;from SAND88-2174 report was 0
++ IRB = 9.9999E+13
++ RE = 3
++ RC = 0.012;from SAND88-2174 report was 0
++ CJE = 36pF
++ TF = 0.428NS
++ VTF = 9.9999E+13
++ CJC = 12pF
++ TR = 8.2US
++ CJS = 100pF
+*
+* TF model parameters for MMBT2907
+* Note:  The following two lines describe the characteristics of the radiation pulse
+* groder=28 and pulsev2=4.3 is equivalent to 1e9 rads/sec
++ GRORDER = {grorder} FUNCTIONTYPE = {functiontype}
++ pulsedata={radpulse}
+* High Low Junction Flag
++ ISCHILOW = 1
+* Physical and Material Constants
++ PERMITTIVITY = 1.0443E-10  
++ NI = 1.45E16
+* Auger Recombination Parameters
++ RAUGN=1.1E-42 RAUGP=3.0E-43 
+* All physical (doping & depth) parameters derived from spreading resistance
+* Emitter Description (default values for lifetimes, diffusion constants calculated)
++ EC = 5.00E25     EW = 2.00E-6
++ EDN = 6.475E-4   EDP = 2.59E-4; Chuck had defaults
++ ETAU0 = 2.0E-8   ETAUINF = 4E-8  
+* base description (default values for lifetimes, diffusion constants calculated)
++ BC = 1.00E22     BW = 1.200E-6
++ BDN = 2.85E-3    BDP = 1.036E-3; Chuck had defaults
++ BTAU0 = 2.0E-8   BTAUINF = 4.0E-8
+* Collector description (default values for lifetimes, diffusion constants calculated)
++ CC = 1.30E21     CW = 4.50E-6
++ CDN = 3.37E-3    CDP = 1.17E-3; Chuck used 5X default values for carrier diffusion
++ CTAU0 = 1E-6     CTAUINF = 2E-6; Chuck used 0.02X default values for minority carrier lifetimes
+* Subcollector description (default values for lifetimes, diffusion constants calculated)
++ CCHI=2.0E24      CWHI=2.0E-5
++ CDNHI=6.475E-4   CDPHI=2.59E-4; Chuck used 5X default values for carrier diffusion
++ CTAU0HI=1E-7     CTAUINFHI=2E-7; Chuck used 0.02X default values for minority carrier lifetimes  
+* was from 2N2907;+ DEVICEAREA=2.8e-8)
+* geometric device area  
++ DEVICEAREA= 2.8E-08;or use base length of 13um,base width,1um X base Depth 3um,0.3e-06
++ )
+
+.MODEL QMOD1 pnp ( LEVEL=4 TNOM=27 TEMPMODEL=QUADRATIC
++ IS=7.00E-11 NF=1 BF=1
++ ISE=1.40E-14 NE=1.230 NK=1.74 ikf=1E12
++ VAF=100 VAR=100
++ BR=0.919 NC=2.0 
++ IKR=1e99
++ TR = 8.2US
++ RE=3  RB = 0.012;from SAND88-2174 report was 0
++ RC = 0.012;from SAND88-2174 report was 0
++ TF = 0.428NS
++ CJC=1.18377E-11 CJE=3.62005E-11; added for convergence, 8/4/2006, defaults=0
++ CJS = 100pF; was 0
++ ) 
+
+.MODEL QMOD1 pnp ( LEVEL=4 TNOM=66 TEMPMODEL=QUADRATIC
++ IS=1.40e-11 NF=1 BF=1
++ ISE=2.50e-13 NE=1.13 NK=2.6 ikf=1E12
++ VAF=100 VAR=100
++ BR=0.919 NC=2.0 
++ IKR=1e99
++ TR = 8.2US 
++ RE=3  RB = 0.012;from SAND88-2174 report was 0
++ RC = 0.012;from SAND88-2174 report was 0
++ TF = 0.428NS
++ CJC=1.18377E-11 CJE=3.62005E-11; added for convergence, 8/4/2006, defaults=0
++ CJS = 100pF; was 0
++ ) 
+
+.MODEL QMOD2 NPN ( Level=4 TNOM=15 TEMPMODEL=QUADRATIC
++ IS=1.03692e-16 NF=1 BF=9
++ ISE=5.59921e-16 NE=1.50 NK=0.77 ikf=1E13
++ VAR=100 VAF=100
++ BR=1 NC=2.0 
++ IKR=1e99
++ IRB=2.735269E-05
++ EG=1.023 ISC=0
++ CJE=2.974739E-12
++ CJC=1.894965E-12
++ RB = 0.012;from SAND88-2174 report was 0
++ RE = 3;from SAND88-2174 report, was 0
++ RC = 0.012;from SAND88-2174 report was 0
++ CJS = 100pF; was 0
+*
+*TF model parameters for MMBT2369
+* Dose Rate:    Set by changing the value of the model parameter
+*                       grorder:  e.g.  1E7  --> grorder=26
+*                                       1E10 --> grorder=29
+*                                       1E13 --> grorder=30
+*********************************************************************
+* Note: The following two lines describe the characteristics of the radiation pulse
++ GRORDER = {grorder} FUNCTIONTYPE = {functiontype}
++ pulsedata={radpulse}
+* High Low Junction Flag
++ ISCHILOW = 1  
+* Physical and Material onstants
++ PERMITTIVITY = 1.04E-10  
++ NI = 1.45E16
+* Auger Recombination Parameters
++ RAUGN = 1.1E-42 RAUGP = 3.0E-43 
+* All physical (doping & depth) parameters derived from sreading resistance measurements
+* Emitter description (default values for lifetimes, diffusion constants calculated)
++ EC = 3.00E25     EW = 1.14E-6  
++ EDN = 6.475E-4   EDP = 2.59E-4; Chuck used defaults
++ ETAU0 = 2.00E-8  ETAUINF = 4.0E-8
+* Base description (default values for lifetimes, diffusion constants calculated)
++ BC = 5.00E22     BW = 0.85E-6  
++ BDN = 2.46E-3    BDP = 8.29E-4; Chuck used defaults    
++ BTAU0 = 2.00E-8  BTAUINF = 4.0E-8
+* Lightly doped collector description (default values for lifetimes, diffusion constants calculated)
++ CC = 1.70E21     CW = 2.00E-6  
++ CDN = 3.37E-3    CDP = 1.17E-3; Chuck used 20X default values for carrier diffusion
++ CTAU0 = 1E-6  CTAUINF = 2E-6; Chuck used 0.02X default values for minority carrier lifetimes
+* Heavy doped collector description (default values for lifetimes, diffusion constants calculated)
++ CCHI=2.4E24       CWHI=2.0E-5     
++ CDNHI=6.475E-4      CDPHI=2.59E-4; Chuck used 20X default values for carrier diffusion
++ CTAU0HI=1E-7    CTAUINFHI=2E-7; Chuck used 0.02X default values for minority carrier lifetimes
+* device area is base diffusion area taken from construction analysis
+* 8325 um^2
+* was from 2N2369;+ DEVICEAREA=8.325e-9)
+* device area is base diffusion area
++ DEVICEAREA=8.3E-09; use same area as PNP, 0.3E-06
++ )
+
+.MODEL QMOD2 NPN ( Level=4 TNOM=27 TEMPMODEL=QUADRATIC
++ IS=2.00E-15 NF=1 BF=9
++ ISE=0.20E-14 NE=1.45 NK=0.7 ikf=1e13
++ VAR=100 VAF=100
++ BR=1 ISC=0 NC=2.0 
++ IKR=1e99
++ IRB=2.735269E-05
++ CJE=2.974739E-12
++ CJC=1.894965E-12
++ RB = 0.012;from SAND88-2174 report was 0
++ RE = 3;from SAND88-2174 report, was 0
++ RC = 0.012;from SAND88-2174 report was 0
++ CJS = 100pF; was 0
++ )
+
+.MODEL QMOD2 NPN ( Level=4 TNOM=66 TEMPMODEL=QUADRATIC
++ IS=4.01312e-13 NF=1 BF=9
++ ISE=5.1e-14 NE=1.42 NK=0.8 ikf=1e13
++ VAR=100 VAF=100
++ BR=1 ISC=0 NC=2.0 
++ IKR=1e99
++ IRB=2.735269E-05 
++ CJE=2.974739E-12
++ CJC=1.894965E-12
++ RB = 0.012;from SAND88-2174 report was 0
++ RE = 3;from SAND88-2174 report, was 0
++ RC = 0.012;from SAND88-2174 report was 0
++ CJS = 100pF
++ )
+*
+.ENDS SA2859  
+**************************************************************************************************
+* CREATED 8-2-94 BY ALBERT V. NUNEZ  
+* DEVICE S/N: #49  
+* TEMPERATURE: -55 DEG C TO 125 DEG C  
+* RADIATION LEVEL: NONE  
+*  
+* AN INDICATION OF REVERSE RECOVERY TIME WITH IF=20MA, IR=20MA, AND  
+* IRR=2MA IS CONTAINED IN THE FOLLOWING TABLE:  
+*  
+* TEMPERATURE                 MEASURED                    SIMULATED  
+*    -55C                     1876 NSEC                    2740 NSEC  
+*     27C                     2798 NSEC                    2816 NSEC  
+*    125C                     3445 NSEC                    2757 NSEC  
+*  
+.MODEL  SA1388_2 D (level=399
++         IS = 2.40658E-9
++         RS = 0.039
++          N = 1.76192
++         TT = 3.95E-6
++        CJO = 21.093E-12
++         VJ = 0.443893
++          M = 0.389655
++         EG = 1.15109
++        XTI = 1.18453
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 920
++        IBV = 1E-3
+* the following params describe the radiation pulse - user changes accordingly 
+*
+* TF Parameters
++ isnpp=0
++ ispnn=1
+* Note: The following two lines describe the characteristics of the radiation pulse
++ GRORDER = {grorder} FUNCTIONTYPE = {functiontype} 
++ pulsedata={radpulse}
++ devicearea=6.0e-08
+* 6.1746e-8 original guess
++ raugn=1.1e-42 raugp=3e-43 ni=1.5e16
++ na=1.4e25
++ wp=5.4e-6
++ pdn=4.042e-3
++ pdp=2.419e-3 
++ taun0=3e-07
++ tauinfn=6e-07
++ nd=3.0e23
++ wn=1.4e-6 
++ ndn=2.709e-3 
++ ndp=1.696e-3 
++ taup0=3.29e-7
++ tauinfp=6.58e-7
++ ndhi=3e24
++ wnhi=2e-5
++ ndnhi=2e-3
++ ndphi=1e-3
++ taup0hi=1e-7
++ tauinfphi=2e-7
++ )
+*******************************************************************************************************
+* STORED UNDER DWG. NO. 312430
+* TYPE= TUBE  
+* SUBTYPE = SPRYTRON  
+* MC2346
+* GENERIC FUNCTIONAL EQUIVALENT =  
+* MANUFACTURERS PART NO. =  ( E. G. & G. )
+* THIS FILE CONTAINS A PRE-RAD TEMPERATURE MODEL FOR USE FROM -55C TO
+* 125C OF THE MC2346 SPRYTRON.  
+* CREATION DATE : 8-27-96
+* RESPONSIBLE ENGINEER - 1252 - CAROLYN BOGDAN  
+*  
+********************************************
+*  
+* PLEASE NOTE THAT INITIAL VOLTAGE CONDITION FOR THE ANODE VOLTAGE HAS TO  
+* BE SET FOR CAPACITOR CDS IN THE SUBCIRCUIT PRIOR TO USING MODEL IN A  
+* SIMULATION  
+*
+*-------------------------BEGIN SUBCIRCUIT SPRYTRON-------------  
+.SUBCKT MC2346   10   20    20B    30    
+*                |    |      |      |    
+*                |    |      |      |      
+*                |    |      |      |  
+*                |    |      |     CATHODE (SOURCE)  
+*                |    |      |  
+*                |    |     TRIGGER2 (GATE)  
+*                |    |  
+*                |    TRIGGER1 (GATE)  
+*                |  
+*              ANODE (DRAIN)  
+VIDSMON 10A 11 0  
+*THE TRIGGER PROBE RESISTANCE AND CAPACITANCE VARY.  THE PRODUCT SPEC  
+*LIMITS ARE NOTED FOR EACH AND THE USER CAN CHANGE THE VALUE OF THEM.  
+*sbreak	20	30	20	30  sbreak
+RTRIGA  20  30  3K;VARIES FROM 120(MIN) TO 3K(MAX)
+.model Sbreak VSWITCH ROFF=3000 RON=120 VOFF=100 VON=200
+LINT  10 10A 50nh;120nH;200nh;15NH  
+* THE VALUE OF CDS CREATES A 50NS FALL TIME FOR THE ANODE-CATHODE VOLTAGE  
+* WHEN ONLY ONE TRIGGER IS USED. THE USER MAY HAVE TO ADJUST THIS VALUE  
+* WHEN BOTH TRIGGERS ARE USED.  
+CDS 11 30  1pF;0.004UF; IC=5575V BE SURE TO SET THIS TO THE ANODE  
+* VOLTAGE CONDITION FOR THE CIRCUIT YOU ARE USING ********  
+MNORMA 11 20 30 30 MOSNORM
+.MODEL MOSNORM NMOS (
++      LEVEL = 1
++        VTO = 98
++         KP = .00002
++      GAMMA = 0
++        PHI = .6
++     LAMBDA = 0
++         RD = 0.05
++         RS = 0
++        CBD = 1p
++        CBS = 1p
++         IS = 1E-14
++         PB = .8
++       CGSO = 0
++       CGDO = 0
++       CGBO = 0
++        RSH = 0
++         CJ = 0;10pF; was 0
++         MJ = .5
++       CJSW = 0
++       MJSW = .33
++         JS = 0
++        TOX = 0.0000001
++         LD = 0
++         UO = 600
++         KF = 0
++         AF = 1
++         FC = .5
++          L = 1E-8;1E-4
++          W = 10;trying default, 100u
++ )
+* THE TRIGGER THRESHOLD VOLTAGE CAN BE VARIED BY CHANGING THE PARAMETER  
+* VTO IN MOSNORM MODEL SET. PS LIMITS ARE 100V - 200V.  BE SURE THAT VTO  
+* IS 2 VOLTS LESS THAN THE TRIGGER VOLTAGE, OTHERWISE THE MOSFET WON'T  
+* TURN ON.  
+MNORMB 11 20B 30 30 MOSNORM  
+*THE TRIGGER PROBE RESISTANCE AND CAPACITANCE VARY.  THE PRODUCT SPEC  
+*LIMITS ARE NOTED FOR EACH AND THE USER CAN CHANGE THE VALUE OF THEM.  
+RTRIGB  20B  30  2K;2K;VARIES FROM 120(MIN) TO 3K(MAX)
+MAVAL 11 25 30 30 MOSAVAL  
+EGSAVAL 25 30 300 0 1  
+*---BEGIN LATCH----  
+* THE THRESHOLD CURRENT CAN BE CHANGED IN THE HLATCH STATEMENT.  THE  
+* -150 VALUE CORRESPONDS TO A 15A THRESHOLD CURRENT.  MULTIPLY THE  
+* THRESHOLD CURRENT VALUE TIMES -10 TO OBTAIN COEFFICIENT FOR HLATCH  
+* STATEMENT.  
+HLATCH 100 0 POLY(1) VIDSMON -150  10 ;changed to -1.5A threshold values; -15 10  
+DLATCH 100 200 DLATCH  
+R1 200 300 1  
+CLATCH 300 0 10N  
+RLATCH 300 0 50K  
+DCLAMP 0 300 DCLAMP  
+*---END OF LATCH---  
+.MODEL MOSAVAL NMOS (
++      LEVEL = 1
++        VTO = 1
++         KP = .00002
++      GAMMA = 0
++        PHI = .6
++     LAMBDA = 0
++         RD = 0.05
++         RS = 0
++        CBD = 1p
++        CBS = 1p
++         IS = 1E-14
++         PB = .8
++       CGSO = 0
++       CGDO = 0
++       CGBO = 0
++        RSH = 0
++         CJ = 0;10pF; was 0
++         MJ = .5
++       CJSW = 0
++       MJSW = .33
++         JS = 0
++        TOX = 0.0000001
++         LD = 0
++         UO = 600
++         KF = 0
++         AF = 1
++         FC = .5
++          L = 1E-8
++          W = 10;100u;trying default value
++ )
+.MODEL DLATCH D( level=2
++         IS = 1E-10
++         RS = 0.1
++          N = 1.0
++         TT = 5ns
++        CJO = 0;100pf
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 40K
++        IBV = 1E-10
++        ISR = 0
++         NR = 2
++        IKF = 1E12
++ )
+.MODEL DCLAMP D( level=2
++         IS = 1E-10
++         RS = 0.1
++          N = 1.0
++         TT = 5ns
++        CJO = 0;100pf
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 15
++        IBV = 1E-10
++        ISR = 0
++         NR = 2
++        IKF = 1E12
++ )
+.ENDS MC2346
+****************************************************************************************************** 
+* MC2349 MODEL FOR a TRIGGER CKT.
+.subckt mc2349   1	4	10B	10C
+*		input   |	|	|
+*			output	|	|
+*			     MINUS-L1	|
+*				     MINUS-L2
+Rp         1   2     1.9  
+Kmc2349    L1  L2    .98  K704PL_3B7
+L1         2   10B    75 
+L2         3   10C    75
+Rs         3   4      1.9
+.model K704PL_3B7 CORE(Area=.044 Path=1.3 Ms=364.8K A=45.01 C=.396  K=26.98 
++ OUTPUTSTATEVARS=1 )
+.ends mc2349
+********************************************************************************************************
+*-------------------------BEGIN SUBCIRCUIT KRYTRON-------------  
+.SUBCKT MC2347   10   20    20B    30    
+*                |    |      |      |    
+*                |    |      |      |      
+*                |    |      |      |  
+*                |    |      |     CATHODE (SOURCE)  
+*                |    |      |  
+*                |    |     KEEP ALIVE  
+*                |    |  
+*                |    GRID (TRIGGER1)
+*                |  
+*              ANODE (DRAIN)
+VIDSMON 10A 11 0  
+rtrig 20 30 2k   
+lint 10 10a 200nh   
+MNORMA 11 20 30 30 MOSNORM
+.MODEL MOSNORM NMOS (
++      LEVEL = 1
++        VTO = 50
++         KP = .00002
++      GAMMA = 0
++        PHI = .6
++     LAMBDA = 0
++         RD = .05
++         RS = 0.005
++        CBD = 1pf
++        CBS = 1pf
++         IS = 1E-14
++         PB = .8
++       CGSO = 560pf
++       CGDO = 1pf
++       CGBO = 1pf
++        RSH = 0
++         CJ = 1pf
++         MJ = .5
++       CJSW = 1pf
++       MJSW = .33
++         JS = 0
++        TOX = 0.0000001
++         UO = 600
++         KF = 0
++         AF = 1
++         FC = .5
++          L = 1E-08;1E-4
++          W = 10;100u; trying default
++ )
+MNORMB 20B T2 30 30 MOSNORM
+* EBCONTROL INTEGRATES THE VOLTAGE FROM ANODE TO GRID OVER TIME TO A 
+* VALUE OF BETA = 0.019 WHERE THE ANODE BREAKS DOWN TO FIRE
+EBCONTROL 1AA 0 VALUE = {SDT(V(10,0)**1.5)}
+RBIG 1AA 0 100MEG
+CLITTLE 1AA 0 10PF
+RHUGE N1 0 100MEG
+ctiny n1 0 10pf
+ctiny2 n2 0 10pf
+RHUGE2 N2 0 100MEG
+* ECONTROL DETERMINES WHEN VOLTAGE ON ANODE REACHES TRIGGER POINT
+* ERAMP AND ERAMPT - INPUT TRIGGER VOLTAGE
+ECONTROL N1 N2 VALUE = {IF(V(20B,20)<=160 & V(20B,30)<=120 & V(1AA)>=0.019, 55, 0)}
+rtrig2 26 30 2k
+*FLOATING NODE: commented out by TVR
+*ERAMP 20a 30 N1 N2 1
+ERAMPT T2 30 N1 N2 1
+MAVAL 11 25 30 30 MOSAVAL
+*maval2 11c 26 30 30 mosaval
+*vidsmon2 20c 11c 0
+maval2 20c 26 30 30 mosaval
+lint2 20b 20c 200nh
+EGSAVAL 25 30 300 0 1
+egsaval2 26 30 300 0 1  
+*---BEGIN LATCH----  
+* THE THRESHOLD CURRENT CAN BE CHANGED IN THE HLATCH STATEMENT.  THE  
+* -1.5 VALUE CORRESPONDS TO A 0.15A THRESHOLD CURRENT.  MULTIPLY THE  
+* THRESHOLD CURRENT VALUE TIMES -10 TO OBTAIN COEFFICIENT FOR HLATCH  
+* STATEMENT.  
+HLATCH 100 0 POLY(1) VIDSMON -1.5 10  
+DLATCH 100 200 DLATCH  
+R1 200 300 1  
+CLATCH 300 0 10N  
+RLATCH 300 0 50K  
+DCLAMP 0 300 DCLAMP  
+*---END OF LATCH---  
+.MODEL MOSAVAL NMOS (
++      LEVEL = 1
++        VTO = 1
++         KP = .00002
++      GAMMA = 0
++        PHI = .6
++     LAMBDA = 0
++         RD = 0.05
++         RS = 0.001
++        CBD = 1pf
++        CBS = 1pf
++         IS = 1E-14
++         PB = .8
++       CGSO = 1pf
++       CGDO = 1pf
++       CGBO = 1pf
++        RSH = 0.001
++         CJ = 1pf
++         MJ = .5
++       CJSW = 1pf
++       MJSW = .33
++         JS = 0
++        TOX = 0.01
++         UO = 600
++         KF = 0
++         AF = 1
++         FC = .5
++          L = 1E-08;1E-4
++          W = 10;100u; trying default
++ )
+.MODEL DLATCH D( level=2
++         IS = 1E-10
++         RS = 0.1
++          N = 1.0
++         TT = 5ns
++        CJO = 0;100pf
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 40K
++        IBV = 1E-10
++         NR = 2
++        IKF = 1E12
++ )
+.MODEL DCLAMP D( level=2
++         IS = 1E-10
++         RS = 0.1
++          N = 1
++         TT = 5ns
++        CJO = 0;100pf
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 15
++        IBV = 1E-10
++        IKF = 1E12
++ )
+.ENDS MC2347
+***************************************************************************************************
+.end

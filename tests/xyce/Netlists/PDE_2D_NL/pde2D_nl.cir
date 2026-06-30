@@ -1,0 +1,89 @@
+*-------------------------------------------------------------------------
+* Copyright Notice
+*
+* Copyright (c) 2000, Sandia Corporation, Albuquerque, NM.
+*-------------------------------------------------------------------------
+*
+*-------------------------------------------------------------------------
+* Filename       : $RCSfile$
+*
+* Purpose        : This test is mostly to test out various parameters that
+*                  can be specified for the PDE device.  In particular,
+*                  it tests the fixes for bug # 694 and bug # 521.
+*
+* Special Notes  : This only does the nonlinear poisson calculation, so it
+*                  should be fast.  Bug #521 was to allow users to specify
+*                  any number of electrodes, so for this test I've 
+*                  specified 6 (before the fix to 521, the max was 4).  
+*                  They don't really do anything (0V applied), but they exist.
+*
+*                  Also, this test specifies *all* the vector-composite
+*                  data, including the last items of NODE and REGION. 
+*                  (oxcharge and flaty, respectively).  Bug 694 was that 
+*                  these parameters were not getting recognized by the
+*                  parser.
+*
+*                  The contents of the *prn file will be trivial - all zeros.
+*
+*                  The real point of this test is for the circuit to NOT
+*                  exit with a fatal error.
+*
+* Creator        : Eric R. Keiter, 9233, Computational Sciences
+*
+* Creation Date  : 03/20/03
+*
+* Revision Information:
+* ---------------------
+*
+* Revision Number: $Revision$
+*
+* Revision Date  : $Date$
+*
+* Current Owner  : $Author$
+*-------------------------------------------------------------------------
+v2  2 0  0.0
+v3  3 0  0.0
+v4  4 0  0.0
+v5  5 0  0.0
+v6  6 0  0.0
+v7  7 0  0.0
+*-------------------------------------------------------------------------
+YPDE DIODE 2 3 4 5 6 7 PDEDIODE 
++ sgplotlevel=0 tecplotlevel=2 gnuplotlevel=0 txtdatalevel=0
++ mobmodel=carr voltlim=0 cyl=0 meshfile=internal.msh 
++ outputnlpoisson=1
++ nx=15  l=70.0e-4
++ ny=13  w=26.0e-4 
+* The old intrinsic calculation was used to generate gold standard.
+* It is inaccurate, however. 
++ useOldNi=true
+* ELECTRODES:
++ node={name           =     anode, cathode,  n4, n5, n6, n7
++       bc        =dirichlet,dirichlet,dirichlet,dirichlet,dirichlet,dirichlet
++       side           =       top, bottom,left,left, right,right
++       start          =     0.002, 0.002, 0.0005,0.0015,0.0005,0.0015
++       end            =     0.005, 0.005, 0.0010,0.0020,0.0010,0.0020
++       material       =   neutral, neutral,neutral,neutral,neutral,neutral
++       oxideBndryFlag =         0, 0, 0, 0, 0, 0
++       oxcharge       =       0.0, 0.0, 0.0, 0.0, 0.0, 0.0 }
+*DOPING REGIONS:
++ region= {name     =       reg1,     reg2
++          function =    uniform, gaussian 
++          type     =      ntype,    ptype 
++          nmax     =    4.0e+16,  1.0e+19 
++          nmin     =    4.0e+16,  4.0e+16 
++          xloc     =        0.0,   0.0035
++          xwidth   =        0.0,   0.0015
++          flatx    =          0,        0  
++          yloc     =        0.0,   0.0026
++          ywidth   =        0.0,   0.0015 
++          flaty    =          0,        0 }
+*-------------------------------------------------------------------------
+.MODEL PDEDIODE  ZOD  level=2 
+.options NONLIN maxstep=40 maxsearchstep=2 
++ searchmethod=0 in_forcing=0 nlstrategy=0 
+.options TIMEINT DOUBLEDCOP=NL_POISSON
+
+.DC v2 0 0 1
+.print DC v(2) v(3) 
+.END

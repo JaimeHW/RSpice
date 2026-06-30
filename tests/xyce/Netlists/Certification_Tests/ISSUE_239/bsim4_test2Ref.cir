@@ -1,0 +1,63 @@
+Inverter example circuit
+* This test tests the use of "options parser scale", 
+* when the scaled parameter is modified indictly by a .STEP sweep.
+*
+* Adapted from the ngspice test suite.
+*
+* This circuit does NOT use model binning, intentionally.  
+*
+* This is identical to the test1Ref.cir circuit.
+.model nch.1 nmos ( version=4.7 level=54 lmin=0.1u lmax=20u wmin=0.1u wmax=10u  )
+.model nch.2 nmos ( version=4.7 level=54 lmin=0.1u lmax=20u wmin=10u  wmax=100u )
+.model pch.1 pmos ( version=4.7 level=54 lmin=0.1u lmax=20u wmin=0.1u wmax=10u  )
+.model pch.2 pmos ( version=4.7 level=54 lmin=0.1u lmax=20u wmin=10u  wmax=100u )
+*
+* parameters
+.param vp     = 1.0v
+
+.param drise  = 400ps
+.param dfall  = 100ps
+.param trise  = 100ps
+.param tfall  = 100ps
+.param period = 1ns
+.param skew_meas = 'vp/2'
+*
+* parameterized subckt
+.subckt inv in out vdd gnd 
+mp out in vdd vdd pch.2 w=60e-6 l=0.10e-6
+mn out in gnd gnd nch.2 w=20e-6 l=0.10e-6
+.ends
+
+v0 vdd 0 'vp'
+
+* vsrc with repeat
+v1 in 0 pwl
++ 0ns                       'vp'
++ 'dfall-0.8*tfall'         'vp'
++ 'dfall-0.4*tfall'         '0.9*vp'
++ 'dfall+0.4*tfall'         '0.1*vp'
++ 'dfall+0.8*tfall'         0v
++ 'drise-0.8*trise'         0v
++ 'drise-0.4*trise'         '0.1*vp'
++ 'drise+0.4*trise'         '0.9*vp'
++ 'drise+0.8*trise'         'vp'
++ 'period+dfall-0.8*tfall'  'vp'
++ r='dfall-0.8*tfall'
+
+x1 in out vdd 0 inv pw=60e-6 nw=20e-6
+c1 out 0 220fF
+
+*.step x1:mp:l list 0.10  0.20
+
+.step data=table
+
+.data table
++ x1:mp:l x1:mn:l 
++ 0.10u    0.10u
++ 0.20u    0.20u
+.enddata
+
+.tran 1ps 4ns
+.print tran v(vdd) v(in) v(out)
+
+.end

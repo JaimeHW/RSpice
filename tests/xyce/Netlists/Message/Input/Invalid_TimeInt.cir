@@ -1,0 +1,12 @@
+*********************************************************************
+* Netlist uses BDF time integration, which is no longer supported.  *
+* This will spawn two errors, from the Analysis Manager, and also   *
+* from re-start.  See SON Bug 998 for more details                  *
+*********************************************************************
+.options timeint method=bdf
+.OPTIONS RESTART FILE=checkpt0.2
+.TRAN 0 1
+.PRINT TRAN V(1)
+V1 1 0 SIN(0 1 1)
+R1 1 0 1
+.END

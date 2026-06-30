@@ -1,0 +1,28 @@
+Bug Number: 402
+Test netlist: (none)
+
+Description:
+============
+This bug deals with evaluating the default of linesearch=2 for
+transient nonlinear solver.  
+
+Changed the default for the transient nonlinear solver from
+searchmethod=2 to searchmethod=0.  This default was really bad in
+terms of theory.  The transient defaults enabled both voltage limiting
+and quadratic line search.  If a line search was enabled, it would
+automatically fail because voltage limiting screwed up the residual
+evaluations.  Essentially the line search would always fail out and
+take the default step (limiting the backtracking to 2 inner iterations
+actually sitll worked because the step wasn't too small as to alert the
+user to a problem).
+
+No test since this only changed the default behavior of all circuits.
+Test suite passed without a problem.
+
+Verification
+============
+None.
+
+Special Notes:
+==============
+None.

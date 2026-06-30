@@ -1,0 +1,23 @@
+Test of BUG 159 Resolution
+* 
+* Prior to version 1.0.1 of Xyce, the BJT did NOT properly convert the 
+* parameter TNOM to Kelvin as it should.
+*
+* To verify the correctness of the fix, this netlist should be compared to
+* bug_159_2.cir.  Both should produce identical results.
+* This netlist specifies TNOM=27.  That is the default value.  The other 
+* netlist leaves the default without specifying TNOM.
+
+VCC  4 0 DC 12V
+RC 3 4 2K
+RB 4 5 377K
+* Zero volt sources used as ammeters to measure the
+* base and collector currents, respectively
+VMON1 5 1 0
+VMON2 3 2 0
+Q 2 1 0 NBJT
+.MODEL NBJT NPN (BF=100 TNOM=27)
+.DC VCC 12 12 1
+.PRINT DC V(4) I(VMON1) I(VMON2) V(1) V(2) 
+
+.END

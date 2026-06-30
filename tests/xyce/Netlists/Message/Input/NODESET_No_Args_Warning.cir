@@ -1,0 +1,17 @@
+**********************************************************************
+* Test of warning message for .NODESET statement with no arguments
+*
+* See SON Bug 684
+*
+*
+*
+*
+**********************************************************************
+V1 1 0 5V
+R1 1 0 1
+
+.TRAN 0 1ms
+.PRINT TRAN V(1)
+.NODESET 
+
+.end

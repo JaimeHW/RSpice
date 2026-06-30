@@ -1,0 +1,31 @@
+Test of series RLC circuit
+* This version depends on the "general external" device to do the actual
+* evaluation of the equations, and as such it MUST be run through the
+* "GenCouplingSimulator" API with an appropriate "VectorComputeInterface"
+* implementation.
+*
+* The purpose of this version of the test is to check that the I1, I2 and
+* I3 wildcards properly include the YGENEXT devices.  The P(*) wildcard
+* should exclude the YGENEXT devices though.
+
+V1 1 0 SIN (5v 5v 10MEG)
+Vprobe1 1 1b 0
+* 1K ohm Resistor implemented as external device
+YGenExt R1 1b 1a  DPARAMS={NAME=R VALUE=1K}
+* RLC network implemented as external device
+YGenExt rlc1 1a 1c DPARAMS={NAME=R,L,C VALUE=1K,1m,1p}
+YGenExt ThreeTerm1 1c 1d 1e foobar DPARAMS={NAME=R1,R2 VALUE=1K,500}
+Vprobe2 1d 0 0
+Vprobe3 1e 0 0
+
+.tran 1n .2u
+
+* It is only safe to assume equality of lead currents to within the RHS tol
+.options nonlin-tran rhstol=1.0e-7
+
+*Dummy model card just to get around Xyce parser limitation.
+.model foobar genext
+
+.print tran I1(*) I2(YGENEXT!R*) I3(YGENEXT!ThreeTerm?) P(*)
+
+.end

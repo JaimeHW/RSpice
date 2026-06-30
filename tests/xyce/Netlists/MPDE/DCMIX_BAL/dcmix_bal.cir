@@ -1,0 +1,94 @@
+Balanced CMOS down-conversion mixer
+**********************************************************************
+* 
+* 2/18/04 tscoffe
+* 
+* I've added this circuit to stress_tests to show off MPDE functionality
+* in Myce I have between 600x and 3000x speedup for this circuit.
+* This circuit is a copy of the Myce/MPDE/circuits/dcmix_bal.cir circuit
+* where all the Xyce portions have been turned on and the Myce portions
+* have been deleted.
+*
+**********************************************************************
+*
+* From "Making Fourier-Envelope Simulation Robust" 
+* by Jaijeet Roychowdhury, University of Minnesota
+*
+* Adapted from implementation in GnuQAPP
+*
+* Note that the capacitor placement is different from the code.  In the code
+* the capacitors appear to be tied to ground instead of between Vdd and Vo1 &
+* Vo2.  And there is an additional capacitor, Cs, which goes from vs to ground.
+* Also, in GnuQAPP, the currents from the gates on the MOSFETs appear to be
+* neglected, but in Xyce, I need to produce the voltage waveforms and that
+* requires a source to be applied at the gates which will induce a current
+* there.
+*
+.param RFval=0.5 LOval=0.5 rfdc=0.9 lodc=0.8 vddval=3 cval=1nf rval=10k csval=0.1nf T1=1e-4 T2={1/450e6} largeR=10k
+
+Vdd 1 0 DC {vddval}
+*RVdd 1 0 {largeR}
+R1  1 vo1 {rval}
+*C1  1 vo1 {cval}
+C1  vo1 0 {cval}
+R2  1 vo2 {rval}
+*C2  1 vo2 {cval}
+C2  vo2 0 {cval}
+*Cs  vs 0 {csval}
+M1  vo1 pRF vs 0 PNOM 
+M2  vo2 mRF vs 0 PNOM
+M3  vs pLO 0 0 PNOM
+M4  vs mLO 0 0 PNOM
+
+RpRF pRF N_RpRF  {largeR}
+BpRF N_RpRF 0 V={rfdc + RFval*V(5)*(1-V(6))}
+RmRF mRF N_RmRF  {largeR}
+BmRF N_RmRF 0 V={rfdc - RFval*V(5)*(1-V(6))}
+V1RF 5 0 SIN(0 1 {2/T2} {-(pi/2)/(2*pi*(2/T2))} 0)
+*V1RF 5 0 cos(2*pi*2*t2s)
+R1RF 5 0 10k
+V2RF 6 0 PULSE(0 1 0 {0.1*T1} {0.1*T1} {0.4*T1} {T1})
+*V2RF 6 0 pulse(t1s,0,0.1,0.5,0.6)
+R2RF 6 0 10k
+
+RpLO pLO N_RpLO {largeR}
+BpLO N_RpLO 0 V={lodc + LOval*V(7)*(1+0.5*V(8))}
+RmLO mLO N_RmLO {largeR}
+BmLO N_RmLO 0 V={lodc - LOval*V(7)*(1+0.5*V(8))}
+V1LO 7 0 SIN(0 1 {1/T2} {-(pi/2)/(2*pi*(1/T2))} 0)
+*V1LO 7 0 cos(2*pi*t2s)
+R1LO 7 0 10k
+V2LO 8 0 SIN(0 1 {1/(4*T1)} 0 0)
+*V2LO 8 0 sin(2*pi/4*t1s)
+R2LO 8 0 10k
+
+.model PNOM NMOS(AF=1)
+*.model PNOM NMOS(L=20u W=10u)
+
+.print tran V(vo1) V(vo2) V(vs) V(pRF) V(pLO) 
+.print mpde format=gnuplot V(vo1) V(vo2) V(vs) V(pRF) V(pLO) 
+
+* Notes; erkeite.  2/16/2007.
+* In the current version of Xyce, it is necessary to set newdae=1 explicitly.
+* Otherwise it will exit with an error.
+*
+* Also, expressions on the .options line don't currently work, so T2 has to 
+* be set to an actual number, if you set it.
+*
+* Finally, Xyce MPDE now produces both a 2D MPDE output file, as well as  a
+* conventional, interpolated output file.  The original .tran line (with a tfinal=4e-4)
+* results in a prohibitively HUGE output file.  So, I have scaled it back. 
+* With tfinal=0.0022e-3, the interpolated file still has over 100,000 time
+* points in it.
+* 
+*
+.mpde 1e-10 0.0022e-3
+*.tran 1e-10 4.0e-4
+
+*.mpde 1e-10 1e-6 4e-4
+*.options mpde T2={T2} n2=51 oscsrc=V1RF,V1LO IC=1 
+.options mpdeint T2=0.00222222e-6 n2=51 oscsrc=V1RF,V1LO IC=1 
+.options timeint newdae=1
+.options device debuglevel=-100
+
+.end

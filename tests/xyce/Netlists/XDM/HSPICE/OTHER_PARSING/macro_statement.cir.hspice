@@ -1,0 +1,44 @@
+$ subcircuit instance parameters
+* Netlist tests XDM macro statement translations, 
+* which is a synonym for suckt in HSPICE. XDM should
+* translate the macro statement into a subckt 
+* statement. Netlists also includes subckt statements
+* to check that mixed macro and subckt statements
+* won't cause problems, .param statements inside
+* the .macro scope to make sure the macro instance
+* parameters will be separated from .param statements,
+* and tests of node delineations involving the .macro 
+* statement.
+
+
+.macro subckt_resistor a b resistance=1 resistance2=1
+.param 
++ VAL1 = 2
++ VAL2 = 3
+R1 a a1 resistance
+R2 a1 a2 resistance2
+R3 a2 b VAL1+VAL2
+.eom subckt_resistor
+
+.subckt subckt_resistor2 a b resistance=1 resistance2=1
+R1 a a1 resistance
+R2 a1 b resistance2
+.ends
+
+.macro subckt_rc a b resistance=1 capacitance=10p
+.param VAL1=10
+R1 a a1 resistance
+R2 a1 b VAL1
+C1 b 0 capacitance
+.eom
+
+.param VAL3  = 10
+VA 1 0 PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+X1 1 2 subckt_resistor2 resistance=10 resistance2=10
+X2 2 3 subckt_resistor resistance=VAL3 resistance2=5
+X3 3 4 subckt_rc resistance=10 capacitance=1u
+C4 4 0 10u
+
+.IC V(X3.B)=0.5
+.TRAN  10u 10ms start=0 UIC
+.PRINT TRAN V(X1.*) V(X2.A1) V(X2.B) V(4)

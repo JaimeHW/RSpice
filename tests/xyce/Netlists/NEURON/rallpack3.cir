@@ -1,0 +1,54 @@
+cable simulation - rallpack 3 with 1 level 6 neuron
+
+
+.tran 0 0.25  
+
+.options output initial_interval=5.0e-5
+.options timeint method=7 newlte=1 newbpstepping=1 delmax=5e-5  
+.options linsol type=klu
+
+* rallpack 3 calls for a steady current input.  But we need to use PULSE so
+* that the current will be off during dcop calculation
+Iin 0 in0 PULSE( 0 1.0e-10 1.0e-12 1.0e-12 1.0e-10 1.0e10 1.0e10)
+
+* cable is 1mm long and 1 micron in diameter
+* 1000 segments, each 1 micron long and 1 micron in diameter
+.param nSeg = 1000
+.param length = 0.1        ; [cm]
+.param segDiameter = 1.0e-4   ; [cm]
+
+* specific membrane capacitance 1uF/cm^2 
+.param memC = { 1.0e-6 } ; [F/cm^2]
+
+* leak current has membrane resistivity of 40,000 ohm cm^2, with reversal potential of -65mV
+.param rm = { 4.0e4 }    ; [ohm cm^2]
+.param memG = { 1 / rm }                  ; [1/(ohm cm^2)]
+.param revE = -0.065                      ; [V]
+
+* active conductances
+* Na specific conductance is 1200 S/m^2 = 1.2e-1 S/cm^2
+.param gnas = { 0.12 }   ; [S/cm^2]
+.param ErevNa = 0.05                      ; [V]
+* K specific conductance is 360 S/m^2 = 3.6e-2 S/cm^2
+.param gks  = { 0.036 }  ; [S/cm^2]
+.param ErevK = -0.077                     ; [V]
+
+* Ra is 100 ohm cm
+.param Ra = 100.0
+
+* neuron model
+.model segParams neuron level=6 ionchannelmodel=HH
++ cMem={memC} gMem={memG} vRest={revE}  
++ gNa={gnas} gK={gks} eNa={ErevNa} eK={ErevK} 
++ N={nSeg} R={Ra} A={segDiameter/2.0} L={length}
+
+yneuron neuron1 in0 out segParams
+.ic v(in0) = -0.065
++ v(out) = -0.065
+
+.print tran 
+*+ i(Iin) 
++ v(in0) 
++ v(out) 
+
+.end

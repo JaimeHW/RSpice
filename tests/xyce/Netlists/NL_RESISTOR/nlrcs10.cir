@@ -1,0 +1,56 @@
+Nonlinear Resistor Circuit for Test Suite
+*Ken Marx  11/30/00
+*****************************************************************************
+* Tier No.:     2
+* Description:  Test of Xyce code enhancements:
+*
+*		.PARAMS, .FUNC, IF STATEMENTS
+* Input/Output: Measure V(1), V(2), V(3) a common simulation data
+*		output (.csd) file can be generated for viewing
+*		the signals using PROBE
+***************************************************************
+.tran 10us 10ms
+
+* Xyce option needed when default is changed to 1 (Backward Euler).
+* Also serves as useful test of non-default method.
+.options timeint reltol=1.0e-6 maxord=2
+
+.print tran v(1) v(2) v(3) 
+
+C1         1 0 400uF IC=400V
+L1         1 2  15mH IC=0A
+vmon       2 2a 0
+R1         2a 3  4
+Xnlr1      3 0 nlr_PS_04 PARAMS: R0=0.15 E1=4 R1=6
+
+********************************************************************
+* Nonlinear resistance.  Ken Marx  11/28/00
+
+.Subckt nlr_PS_04 1 2
++ Params: R0=0.15 E1=4 R1=6
+
+.PARAM E2 = {2*E1}
+.PARAM delr = {R1-R0}
+.PARAM k1 = {1/E1**2}
+.PARAM r2 = {R0+sqrt(2)*delr}
+
+Vmon 1 4 0
+
+BGabs 0 101 I = {IF(TIME < .1p, 0, 100*abs(I(Vmon)))}
+Cabs 101 0 1
+Rabs 101 0 1E12
+
+.Func Rreg1(a,b,c,d) {a +(b-a)*c/d}
+.Func Rreg2(a,b,c,d,f) {a+sqrt(2-b*(2*c-d)**2)*f}
+
+BEnlr 4 2 V = {I(Vmon) * IF(
++ V(101) < E1, Rreg1(R0,R1,V(101),E1),
++ IF(
++ V(101) < E2, Rreg2(R0,k1,E1,V(101),delr), R2
++ )
++ )}
+
+.Ends
+********************************************************************
+
+.END

@@ -1,0 +1,128 @@
+* IEEE 14 Bus Test Case
+
+*********************************************
+* Simulation control statements             *
+*********************************************
+.DC V1VM 1.06 1.06 1
+
+*********************************************
+* Bus 1 is the slack bus.  Ammeter is       *
+* wired so that current flows into Bus 1.   *
+* Note that slack bus has VM=1.06, per IEEE *
+* test case.                                *
+*********************************************
+V1Th Bus1Th ammBus1P 0V
+V1VM Bus1VM ammBus1Q 1.06V
+Vamm1P 0 ammBus1P 0V
+Vamm1Q 0 ammBus1Q 0V
+
+*********************************************
+* Branch Definitions.                       *
+* First device tests that PQP is the        *
+* default analysis type.                    *
+*********************************************
+YPowerGridBranch pg1_2 bus1Th bus2Th bus1VM bus2VM R=0.01938 X=0.05917 B=0.0528
+YPowerGridBranch pg1_5 bus1Th bus5Th bus1VM bus5VM at=pqp r=0.05403 x=0.22304 b=0.0492
+YPowerGridBranch pg2_3 bus2Th bus3Th bus2VM bus3VM AT=PQP R=0.04699 X=0.19797 B=0.0438
+YPowerGridBranch pg2_4 bus2Th bus4Th bus2VM bus4VM AT=PQP R=0.05811 X=0.17632 B=0.034
+YPowerGridBranch pg2_5 bus2Th bus5Th bus2VM bus5VM AT=PQP R=0.05695 X=0.17388 B=0.0346
+YPowerGridBranch pg3_4 bus3Th bus4Th bus3VM bus4VM AT=PQP R=0.06701 X=0.17103 B=0.0128
+YPowerGridBranch pg4_5 bus4Th bus5Th bus4VM bus5VM AT=PQP R=0.01335 X=0.04211 B=0
+YPowerGridBranch pg6_11 bus6Th bus11Th bus6VM bus11VM AT=PQP R=0.09498 X=0.1989 B=0
+YPowerGridBranch pg6_12 bus6Th bus12Th bus6VM bus12VM AT=PQP R=0.12291 X=0.25581 B=0
+YPowerGridBranch pg6_13 bus6Th bus13Th bus6VM bus13VM AT=PQP R=0.06615 X=0.13027 B=0
+YPowerGridBranch pg7_8 bus7Th bus8Th bus7VM bus8VM AT=PQP R=0 X=0.17615 B=0
+YPowerGridBranch pg7_9 bus7Th bus9Th bus7VM bus9VM AT=PQP R=0 X=0.11001 B=0
+YPowerGridBranch pg9_10 bus9Th bus10Th bus9VM bus10VM AT=PQP R=0.03181 X=0.0845 B=0
+YPowerGridBranch pg9_14 bus9Th bus14Th bus9VM bus14VM AT=PQP R=0.12711 X=0.27038 B=0
+YPowerGridBranch pg10_11 bus10Th bus11Th bus10VM bus11VM AT=PQP R=0.08205 X=0.19207 B=0
+YPowerGridBranch pg12_13 bus12Th bus13Th bus12VM bus13VM AT=PQP R=0.22092 X=0.19988 B=0
+YPowerGridBranch pg13_14 bus13Th bus14Th bus13VM bus14VM AT=PQP R=0.17093 X=0.34802 B=0
+
+*********************************************
+* Transformer Definitions.                  *
+* First device tests that PQP is the        *
+* default analysis type.                    *
+*********************************************
+YPowerGridTransformer pg4_7 bus4Th bus7Th bus4VM bus7VM R=0 X=0.20912 TR=0.978
+YPowerGridTransformer pg4_9 bus4Th bus9Th bus4VM bus9VM AT=pqp r=0 x=0.55618 tr=0.969
+YPowerGridTransformer pg5_6 bus5Th bus6Th bus5VM bus6VM AT=PQP R=0 X=0.25202 TR=0.932
+
+***********************************************
+* Bus Shunt Definitions                       *
+* Tests that PQP is the default analysis type *
+***********************************************
+YPowerGridBusShunt pg9_GND bus9Th 0 bus9VM 0 G=0 B=0.19
+
+****************************************************
+* PV Bus Definitions.                              *
+* Terminals are reversed on IGen, and ammeters     *
+* are wired, so that current (P,Q) flows into bus. *
+* First device tests that PQP is the               *
+* default analysis type.                           *
+****************************************************
+YPowerGridGenBus pvb2 bus2Th ammbus2P bus2VM ammBus2Q VM=1.045 p=0.4
+Vamm2P 0 ammBus2P 0V
+Vamm2Q 0 ammBus2Q 0V
+YPGGB pvb3 bus3Th ammbus3P bus3VM ammBus3Q AT=pqp vm=1.01 P=0
+Vamm3P 0 ammBus3P 0V
+Vamm3Q 0 ammBus3Q 0V
+YPGGB pvb6 bus6Th ammbus6P bus6VM ammBus6Q AT=PQP VM=1.07 P=0
+Vamm6P 0 ammBus6P 0V
+Vamm6Q 0 ammBus6Q 0V
+YPGGB pvb8 bus8Th ammbus8P bus8VM ammBus8Q AT=PQP VM=1.09 P=0
+Vamm8P 0 ammBus8P 0V
+Vamm8Q 0 ammBus8Q 0V
+
+*********************************************
+* Load Definitions                          *
+*********************************************
+ILoad2P bus2Th 0 0.217
+ILoad2Q bus2VM 0 0.127
+ILoad3P bus3Th 0 0.942
+ILoad3Q bus3VM 0 0.19
+ILoad4P bus4Th 0 0.478
+ILoad4Q bus4VM 0 -0.039
+ILoad5P bus5Th 0 0.076
+ILoad5Q bus5VM 0 0.016
+ILoad6P bus6Th 0 0.112
+ILoad6Q bus6VM 0 0.075
+ILoad7P bus7Th 0 0
+ILoad7Q bus7VM 0 0
+ILoad9P bus9Th 0 0.295
+ILoad9Q bus9VM 0 0.166
+ILoad10P bus10Th 0 0.09
+ILoad10Q bus10VM 0 0.058
+ILoad11P bus11Th 0 0.035
+ILoad11Q bus11VM 0 0.018
+ILoad12P bus12Th 0 0.061
+ILoad12Q bus12VM 0 0.016
+ILoad13P bus13Th 0 0.135
+ILoad13Q bus13VM 0 0.058
+ILoad14P bus14Th 0 0.149
+ILoad14Q bus14VM 0 0.05
+
+*************************************************************
+* .NODESET used to enforce "flat start" for PQ formulations *
+*************************************************************
+.NODESET V(bus1Th)=0 V(bus1VM)=1 V(bus2Th)=0 V(bus2VM)=1 V(bus3Th)=0 V(bus3VM)=1
++ V(bus4Th)=0 V(bus4VM)=1 V(bus5Th)=0 V(bus5VM)=1 V(bus6Th)=0 V(bus6VM)=1
++ V(bus7Th)=0 V(bus7VM)=1 V(bus8Th)=0 V(bus8VM)=1 V(bus9Th)=0 V(bus9VM)=1
++ V(bus10Th)=0 V(bus10VM)=1 V(bus11Th)=0 V(bus11VM)=1 V(bus12Th)=0 V(bus12VM)=1
++ V(bus13Th)=0 V(bus13VM)=1 V(bus14Th)=0 V(bus14VM)=1 
+
+*********************************************
+* Output Statements                         *
+*********************************************
+.PRINT DC width=10 precision=6
++ V(bus1Th) V(bus1VM) V(bus2Th) V(bus2VM) V(bus3Th) V(bus3VM) V(bus4Th) V(bus4VM)
++ V(bus5Th) V(bus5VM) V(bus6Th) V(bus6VM) V(bus7Th) V(bus7VM) V(bus8Th) V(bus8VM)
++ V(bus9Th) V(bus9VM) V(bus10Th) V(bus10VM) V(bus11Th) V(bus11VM) V(bus12Th) V(bus12VM)
++ V(bus13Th) V(bus13VM) V(bus14Th) V(bus14VM) 
++ I(Vamm1P) I(Vamm1Q) I(Vamm2P) I(Vamm2Q) I(Vamm3P) I(Vamm3Q) 
++ I(ILoad4P) I(ILoad4Q) I(ILoad5P) I(ILoad5Q) I(Vamm6P) I(Vamm6Q) 
++ I(ILoad7P) I(ILoad7Q) I(Vamm8P) I(Vamm8Q) I(ILoad9P) I(ILoad9Q) 
++ I(ILoad10P) I(ILoad10Q) I(ILoad11P) I(ILoad11Q) I(ILoad12P) I(ILoad12Q) 
++ I(ILoad13P) I(ILoad13Q) I(ILoad14P) I(ILoad14Q) 
+
+.end

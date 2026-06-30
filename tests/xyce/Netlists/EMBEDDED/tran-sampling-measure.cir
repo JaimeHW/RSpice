@@ -1,0 +1,38 @@
+
+
+.global_param Vmax=1000.0
+.global_param testNorm=1.5k
+.global_param R1value={testNorm*2.0}
+*
+R2  1  0  7k
+R1 1 2 {R1value}
+VS1  2  0  SIN(0 {Vmax} 1KHZ 0 0)
+
+.TRAN 0.25ms 0.25ms
+*.PRINT TRAN FORMAT=tecplot V(2) R1:R
+
+* plain test
+.meas tran maxSine max V(1) 
+*PRINT=None
+
+* normally distributed samples, mean=3K; std deviation=1K
+.EMBEDDEDSAMPLING 
++ param=testNorm
++ type=normal
++ means=0.5K
++ std_deviations=0.05K
+
+* embedded outputs for device parameters like R1:R don't work yet.  ERK. 2/8/2019
+.options EMBEDDEDSAMPLES numsamples=1000
+*+ OUTPUTS={R1:R}
++ OUTPUTS={V(1)}
++ MEASURES=maxSine
++ SAMPLE_TYPE=MC
++ stdoutput=true
+
+.options timeint erroption=1
+
+* suppress the normal measure output, as for this test case we only care about 
+* the statistical moments.
+.OPTIONS MEASURE MEASPRINT=NONE
+

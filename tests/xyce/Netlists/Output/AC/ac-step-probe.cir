@@ -1,0 +1,23 @@
+********************************************************
+* test FORMAT=PROBE with .STEP.  
+*
+* Note:  This netlist can use the shorthand" syntax of 
+* .STEP R1 rather than .STEP R1:R since the R and L 
+* devices have instanceDefaultParameter set to R and L, 
+* respectively.  See SON Bug 972 for more details.
+********************************************************
+
+* Trivial low-pass filter circuit
+R1 b 0 2
+C1 b 0 1u
+L1 a b 1m
+V1 a 0 DC 0V AC 1
+
+* step over two variables
+.STEP R1 0.5 2 1.5
+.STEP L1 1e-4 1e-3 9e-4
+.print AC FORMAT=PROBE I(V1) vm(b) 
+.ac dec 5 100Hz 1e6
+
+.end
+

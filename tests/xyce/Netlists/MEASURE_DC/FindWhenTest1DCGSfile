@@ -1,0 +1,92 @@
+ ***** Measure Functions ***** 
+
+WHENV1B2 = 2.500000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+FINDV1CWHENV1B2 = 1.000000e+00 at VSRC1 value = 2.500000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+V1BAT1 = 8.000000e-01 for AT = 1.000000e+00
+
+V1BAT2 = 1.600000e+00 for AT = 2.000000e+00
+
+V1BAT2.5 = 2.000000e+00 for AT = 2.500000e+00
+
+V1BEXPAT2.5 = 3.000000e+00 for AT = 2.500000e+00
+
+WHENEXP1 = 3.750000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+WHENEXP2 = 3.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+WHENEXP3 = 2.500000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+WHENEXP4 = 2.500000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+FINDV1CWHENV1BEXP1 = 1.500000e+00 at VSRC1 value = 3.750000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+FINDV1CWHENV1BEXP2 = 2.500000e+00 at VSRC1 value = 3.750000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+EQNV1C = 2.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+WHENEQNV1C = 3.750000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+FINDWHENEQNV1C = 1.500000e+00 at VSRC1 value = 3.750000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+WHENV2FROM1 = 4.333333e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+WHENV2FROM2 = 1.666667e+00
+Measure Start VSRC1 Value= 1.500000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+WHENV2FROM3 = 4.333333e+00
+Measure Start VSRC1 Value= 1.800000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+WHENV2FROM4 = 1.666667e+00
+Measure Start VSRC1 Value= 1.500000e+00	Measure End VSRC1 Value= 1.800000e+00
+
+WHENV2FROM5 = 1.666667e+00
+Measure Start VSRC1 Value= 1.500000e+00	Measure End VSRC1 Value= 1.800000e+00
+
+TO1 = 1.333333e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 1.500000e+00
+
+TO2 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 1.100000e+00
+
+FINDWHEN1PT = 8.000000e-01 at VSRC1 value = 2.000000e+00
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 2.000000e+00
+
+FAIL1 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+FAIL2 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+FAIL3 = 0.000000e+00 FAILED for AT = 1.000000e+01
+
+FAIL4 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+FAIL5 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+WHENFAIL1 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+WHENFAIL2 = 0.000000e+00 FAILED
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 5.000000e+00
+
+ATFAILFROM = 0.000000e+00 FAILED for AT = 1.000000e+00
+
+ATFAILTO = 0.000000e+00 FAILED for AT = 2.000000e+00
+
+

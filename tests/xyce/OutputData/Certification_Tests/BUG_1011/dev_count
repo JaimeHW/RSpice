@@ -1,0 +1,7 @@
+       C level 1 (Capacitor)                                 5
+       E level 1 (Linear Voltage Controlled Voltage Source)  1
+       G level 1 (Linear Voltage Controlled Current Source)  1
+       I level 1 (Independent Current Source)                2
+       L level 1 (Inductor)                                  1
+       R level 1 (Resistor)                                 13
+       V level 1 (Independent Voltage Source)                5

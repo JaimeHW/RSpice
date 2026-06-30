@@ -1,0 +1,53 @@
+*Test between one and sixteen variables on the output line for .CSD files.
+*This also covers SON Bug 275, which reported an issue when there were
+*15 variables on the .PRINT TRAN FORMAT=PROBE line.
+
+.TRAN 0 1S
+.OPTIONS output initial_interval=0.2s
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir1.csd V(1)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir2.csd V(1) V(2) 
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir3.csd V(1) V(2) V(3)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir4.csd V(1) V(2) V(3) V(4)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir5.csd V(1) V(2) V(3) V(4) V(5)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir6.csd V(1) V(2) V(3) V(4) V(5) V(6)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir7.csd V(1) V(2) V(3) V(4) V(5) V(6) V(7)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir8.csd V(1) V(2) V(3) V(4) V(5) V(6) V(7) V(8)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir9.csd V(1) V(2) V(3) V(4) V(5) V(6) V(7) V(8) V(9)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir10.csd V(1) V(2) V(3) V(4) V(5) V(6) V(7) V(8) V(9) V(10)
+
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir11.csd V(1) V(2) V(3) V(4) V(5) V(6) V(7) V(8) V(9) V(10)
++ V(11)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir12.csd V(1) V(2) V(3) V(4) V(5) V(6) V(7) V(8) V(9) V(10)
++ V(11) V(12)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir13.csd V(1) V(2) V(3) V(4) V(5) V(6) V(7) V(8) V(9) V(10)
++ V(11) V(12) V(13)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir14.csd V(1) V(2) V(3) V(4) V(5) V(6) V(7) V(8) V(9) V(10)
++ V(11) V(12) V(13) V(14)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir15.csd V(1) V(2) V(3) V(4) V(5) V(6) V(7) V(8) V(9) V(10)
++ V(11) V(12) V(13) V(14) V(15)
+.PRINT TRAN FORMAT=PROBE FILE=bug_646.cir16.csd V(1) V(2) V(3) V(4) V(5) V(6) V(7) V(8) V(9) V(10)
++ V(11) V(12) V(13) V(14) V(15) V(16)
+
+VS1  1  0  PWL 0.0 0.0 1.0 10.0  
+R1   1  2  1
+R2   2  3  1
+R3   3  4  1
+R4   4  5  1
+R5   5  6  1
+R6   6  7  1
+R7   7  8  1
+R8   8  9  1
+R9   9  10 1 
+R10 10  0  1
+
+VS2 11  0  PWL 0.0 0.0 1.0 6.0
+R11 11  12 1
+R12 12  13 1
+R13 13  14 1
+R14 14  15 1
+R15 15  16 1
+R16 16  0  1
+
+.END
+
+

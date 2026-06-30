@@ -1,0 +1,25 @@
+Test what characters Function Names can start with.
+* See SON Bug 1230 for more details.
+
+.FUNC afunc(x) {4+x}
+.FUNC _func(x) {4+x}
+.FUNC #func(x) {4+x}
+.FUNC @func(x) {4+x}
+.FUNC `func(x) {4+x}
+
+.PARAM P1=1
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 {afunc(P1)}
+R3 2 0 {_func(P1)}
+R4 2 0 {#func(P1)}
+R5 2 0 {@func(P1)}
+
+* This is the backtick character, not the single quote.
+R6 2 0 {`func(P1)}
+
+.DC V1 1 1 1
+.PRINT DC V(1) V(2)
+
+.END

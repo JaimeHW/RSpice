@@ -1,0 +1,56 @@
+* Test characters that are "special" to regex. They include:
+*
+*   \ ^ $ . + [ ] |
+*
+* These characters are not tested because they cause problems
+* earlier in Xyce parsing:
+*
+*   ( ) { }
+*
+* See SON Bugs 1211 and 1319 for more details.
+**************************************************************
+
+V1   1^  0 1
+R1   1^ 2^ 1
+R1a  2^ ^2 1
+R1b  ^2  0 1
+
+V2   1$  0 1
+R2   1$ 2$ 1
+R2a  2$ $2 1
+R2b  $2  0 1
+
+V3   1.  0 1
+R3   1. 2. 1
+R3a  2. .2 1
+R3b  .2  0 1
+
+V4   1+  0 1
+R4   1+ 2+ 1
+R4a  2+ +2 1
+R4b  +2  0 1
+
+V5   1[  0 1
+R5   1[ 2[ 1
+R5a  2[ [2 1
+R5b  [2  0 1
+
+V6   1]  0 1
+R6   1] 2] 1
+R6a  2] ]2 1
+R6b  ]2  0 1
+
+V7   1|  0 1
+R7   1| 2| 1
+R7a  2| |2 1
+R7b  |2  0 1
+
+V8   1\  0 1
+R8   1\ 2\ 1
+R8a  2\ \2 1
+R8b  \2  0 1
+
+.DC V1 1 1 1
+.PRINT DC V(?^) V(.?) V(+?) V(?[) V(]?) V(?|) V($?) V(\?)
+
+.END

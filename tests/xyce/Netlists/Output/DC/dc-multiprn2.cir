@@ -1,0 +1,69 @@
+Resistor sensitivity test.
+* Circuit description.  This circuit is a very simple circuit, in which
+* you have a single 5V voltage source, in series with two resistors.  The
+* resistors are of equal value, so the solution to this linear problem 
+* is to have the voltage at node A be 5V, and the voltage at node B to be
+* 2.5V.  
+*
+* The point of the sensitivity aspect of this simultion is to determine
+* how sensitive the volage of node B is to the values of the two resistors.
+* This is specified on the line ".SENS".
+*
+* The objective function is :  
+*      OF = 0.5 * (V(b)-3.0)^2
+*
+* The ultimate objective of the simulation is to determine d(OF)/dR1 and
+* d(OF)/dR2.  This is easy to determine analytically:
+*
+*    Vb = Va * R2/(R1+R2).  We know Va = 5, so:
+*
+*    Vb = 5 * R2/(R1+R2)
+*
+*  So the objective function becomes:
+*
+*  OF = 0.5 * ( Vb - 3.0 )^2
+*  OF = 0.5 * ( 5*R2/(R1+R2) - 3.0 )^2
+*
+*  d(OF)/dR1 = ( 5*R2/(R1+R2) - 3.0 ) * ( -5*R2 * (R1+R2)^-2 )
+*
+*  d(OF)/dR2 = ( 5*R2/(R1+R2) - 3.0 ) * ( -5*R2 * (R1+R2)^-2 + 5/(R1+R2) )
+*
+*
+*  Plugging in numbers:  If R1 = R2 = 10, Va = 5:
+*
+*    Vb = 5* 10/(20) = 2.5
+*
+*   OF = 0.5 * (2.5 - 3.0)^2 = 0.5*0.5*0.5 = 0.125
+*
+*  d(OF)/dR1 = (2.5-3.0) * (-50 *(20)^-2 )
+*            = (-1/2) * (-50 /400 ) 
+*            = (-1/2) * (-1/8 ) = 1/16 = 0.0625
+
+*  d(OF)/dR2 = (2.5-3.0) * (-50 *(20)^-2  + 5/(20) ) 
+*            = (-1/2) * (-50 /400 + 5/(20) ) 
+*            = (-1/2) * (-1/8 + 1/4 ) 
+*            = (-1/2) * (1/8) = -1/16 = -0.0625
+*
+* The two derivatives are 0.0625 and -0.0625.  This is the exact answer 
+* produced by the adjoint and direct sensitivity calculations.
+R1 A B 10.0
+R2 B 0 10.0
+
+* input nodes:
+Va A 0 5
+
+.dc Va 5 5 1
+
+.print dc v(A) v(B)
+.print dc format=tecplot v(A) v(B)
+.print dc format=probe v(A) v(B)
+
+.print sens format=tecplot
+.print sens format=dakota
+.print sens format=std
+
+.SENS objfunc={0.5*(V(B)-3.0)**2.0} param=R1:R,R2:R
+.options SENSITIVITY direct=1 adjoint=1  diagnosticfile=1
+
+.END
+

@@ -1,0 +1,20 @@
+Lead current test for JUNCAP200 diode
+*
+VIN  1 0 PULSE(1 2 10U 1U 1U 100m)
+R    2 1 1K
+D1   3 2 DFOR  
+rload 3 0 1K
+
+.MODEL DFOR D   ( level=200 )
+
+.TRAN 0.5U 400ms
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+
+*COMP {I(VIN)-I(d1)} abstol=1e-6 zerotol=1e-7
+.PRINT TRAN  {I(VIN)-I(d1)}
+
+.measure tran maxmag1   max {abs(I(VIN)-I(d1))} failvalue=1e-6
+.measure tran totalrms1 rms {I(VIN)-I(d1)} failvalue=1e-6  
+
+.END

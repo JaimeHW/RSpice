@@ -1,0 +1,6 @@
+exclude
+bug986.cir
+bug986.cir.sh
+bug986A.cir
+bug986B.cir
+tags

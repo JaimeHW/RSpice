@@ -1,0 +1,18 @@
+* This PSpice netlist tests that a PSpice .PROBE64 line, without any arguments,
+* becomes .PRINT TRAN V(*) in translated Xyce netlist.  This addresses
+* part of SRN Bug 2023.
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+
+* This .PROBE64 line should print out all of the node voltages in the netlist 
+.PROBE64
+
+*simple voltage divider circuit
+R_R1         N04173 N03179  10 TC=0,0 
+R_R2         N03179 0  20 TC=0,0 
+V_V1         N04173 0  AC 1
++SIN 0 1 1KHz 0 0 0
+
+.END
+

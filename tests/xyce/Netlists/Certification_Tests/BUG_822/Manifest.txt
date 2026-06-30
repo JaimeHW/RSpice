@@ -1,0 +1,9 @@
+README
+exclude
+lib.h
+nmos_3_2.mod
+pmos_3_2.mod
+ring51.cir
+ring51.cir.sh
+ring51_loca.cir
+tags

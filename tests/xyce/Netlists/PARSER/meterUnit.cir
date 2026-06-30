@@ -1,0 +1,30 @@
+* Test out the "m" unit.
+*
+* "m" can be either the meters unit, or the "mili" scalar.  
+* The scalar takes priority, so "m" by itself is the scalar.  
+* But "m" preceded by a scalar suffix is the unit.
+*
+* this came up inadvertantly during testing for issue 195. So, while 195 wasn't 
+* stricly about the "m" suffix, one test broke after the 195 fix, and this was 
+* the issue. ie, the fix required that the expression library be used a bit more 
+* during parsing, but the expression library didn't recognize "m" as a unit.  
+*
+* both of these test params should evaluate to 1.0
+.param test1={1.0e+3m} ; in this case "m" means "mili"
+.param test2={1.0e+6um}; in this case "um" means microns
+.param test3={1.0e+3M} ; in this case "M" means "mili"
+.param test4={1.0e+6uM}; in this case "uM" means microns
+.param test5={1.0e+3mm}; in this case "mm" means milimeters
+.param test6={1.0e+3mM}; in this case "mM" means milimeters
+
+R1 1 0 {test1}
+R2 1 2 {test2}
+R3 3 2 {test3}
+R4 4 3 {test4}
+R5 5 4 {test5}
+R6 6 5 {test6}
+V1 2 0 1.0
+
+.DC V1 1.0 1.0 1.0
+.PRINT DC V(2) V(1) {test1} {test2} {test3} {test4} {test5} {test6}
+

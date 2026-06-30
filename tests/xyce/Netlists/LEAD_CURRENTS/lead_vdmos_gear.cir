@@ -1,0 +1,76 @@
+Lead current test for vdmos
+*
+VD 0 3 -0.5
+VG 0 4 10 pulse(0 -10 300ns 50ns 50ns 400ns 1000ns)
+VS 0 2 0
+VB 0 1 0
+M1 3 4 2 1 IRF130 W=0.386 L=2.5u
+*
+VDp 0 3p 0.5
+VGp 0 4p 10 pulse(0 10 300ns 50ns 50ns 400ns 1000ns)
+VSp 0 2p 0
+VBp 0 1p 0
+M1p 3p 4p 2p 1p IRF130p W=0.386 L=2.5u
+*
+.MODEL IRF130 NMOS LEVEL=18
++ CV=1
++ CVE=1
++ VTO=3.5
++ RD= 0
++ RS= 0.005
++ LAMBDA=0
++ M=3
++ SIGMA0=0
++ UO=230
++ VMAX=4e4
++ DELTA=5
++ TOX=50nm
+*
+.MODEL IRF130p PMOS LEVEL=18
++ CV=1
++ CVE=1
++ VTO=-3.5
++ RD= 0
++ RS= 0.005
++ LAMBDA=0
++ M=3
++ SIGMA0=0
++ UO=230
++ VMAX=4e4
++ DELTA=5
++ TOX=50nm
+*
+.TRAN 0.5n 1u 0u 2n
+*COMP {I(VD)-ID(M1)} abstol=2.0e-6 zerotol=1.0e-7
+*COMP {I(VG)-IG(M1)} abstol=2.0e-6 zerotol=1.0e-7
+*COMP {I(VS)-IS(M1)} abstol=2.0e-6 zerotol=1.0e-7
+*COMP {I(VB)-IB(M1)} abstol=2.0e-6 zerotol=1.0e-7
+*COMP {I(VDp)-ID(M1p)} abstol=2.0e-6 zerotol=1.0e-7
+*COMP {I(VGp)-IG(M1p)} abstol=2.0e-6 zerotol=1.0e-7
+*COMP {I(VSp)-IS(M1p)} abstol=2.0e-6 zerotol=1.0e-7
+*COMP {I(VBp)-IB(M1p)} abstol=2.0e-6 zerotol=1.0e-7
+
+.PRINT TRAN {I(VD)-ID(M1)} {I(VG)-IG(M1)} {I(VS)-IS(M1)} {I(VB)-IB(M1)}
++ {I(VDp)-ID(M1p)} {I(VGp)-IG(M1p)} {I(VSp)-IS(M1p)} {I(VBp)-IB(M1p)}
+
+.measure tran maxmag1   max {abs(I(VD)-ID(M1))} failvalue=1e-6
+.measure tran totalrms1 rms {I(VD)-ID(M1)} failvalue=1e-6 
+.measure tran maxmag2   max {abs(I(VG)-IG(M1))} failvalue=1e-6
+.measure tran totalrms2 rms {I(VG)-IG(M1)} failvalue=1e-6 
+.measure tran maxmag3   max {abs(I(VS)-IS(M1))} failvalue=1e-6
+.measure tran totalrms3 rms {I(VS)-IS(M1)} failvalue=1e-6 
+.measure tran maxmag4   max {abs(I(VB)-IB(M1))} failvalue=1e-6
+.measure tran totalrms4 rms {I(VB)-IB(M1)} failvalue=1e-6 
+.measure tran maxmag5   max {abs(I(VDp)-ID(M1p))} failvalue=1e-6
+.measure tran totalrms5 rms {I(VDp)-ID(M1p)} failvalue=1e-6 
+.measure tran maxmag6   max {abs(I(VGp)-IG(M1p))} failvalue=1e-6
+.measure tran totalrms6 rms {I(VGp)-IG(M1p)} failvalue=1e-6 
+.measure tran maxmag7   max {abs(I(VSp)-IS(M1p))} failvalue=1e-6
+.measure tran totalrms7 rms {I(VSp)-IS(M1p)} failvalue=1e-6 
+.measure tran maxmag8   max {abs(I(VBp)-IB(M1p))} failvalue=1e-6
+.measure tran totalrms8 rms {I(VBp)-IB(M1p)} failvalue=1e-6 
+
+.options timeint method=gear newbpstepping=0
+.options nonlin-tran rhstol=1.0e-7
+.END
+

@@ -1,0 +1,23 @@
+* Test wild cards for V(), VR(), VI(), VM(), VP(), VDB(),
+* I(), IR(), II(), IM(), IP() and IDB().  Note that only the
+* branch currents for V and E devices are output for a
+* NOISE analysis. The lead currents for the R and C
+* devices are not.
+*
+
+* NOISE ANALYSIS: RESISTOR DIVIDER, AMP, AND LP FILTER
+*
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 100MEG 1
+.print NOISE V(*) VR(*) VI(*) VM(*) VP(*) VDB(*) I(*) IR(*) II(*) IM(*) IP(*) IDB(*)
+
+.end

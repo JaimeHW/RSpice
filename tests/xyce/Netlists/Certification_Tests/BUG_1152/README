@@ -1,0 +1,25 @@
+Test Name: BUG_1152
+
+Owner: hkthorn 
+Test netlists: bug_767b.cir, bug_1152.cir
+GS files:  none
+Mode:  Serial and Parallel 
+Comparator:  none
+Version of Xyce: Release_6.0
+ 
+Description:
+============
+Previous to this release, Xyce did not recognize device and nodes with the same name, 
+which caused various problems.  Several test cases were generated to ensure that
+Xyce can properly handle this scenario by trapping identical device/node names and 
+reporting an error msg (bug 767b.cir).
+
+However, changes to the topology package will now allow device and nodes with the
+same name.  So these previous tests are being used to verify that Xyce can simulate
+the original circuits that illustrated the issues.
+
+Additionally the bug_1152.cir is a simple RLC test that names both the input voltage
+device and node "vin".  Then the print statement uses both the voltage of the node
+"vin" and current of the device "vin".  This tests that the I/O package is getting
+the correct node from the topology package.
+ 

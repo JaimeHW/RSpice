@@ -1,0 +1,13 @@
+Test of Dakota transient
+*
+* dakota will fill in parameters dakota_C1C
+
+V1  1  0  pulse (1  0  2e-4  1e-9 1e-9  1 1 100)
+R1  1  OBJ  1
+C1  OBJ 0   dakota_C1C
+
+.measure tran FitError error V(OBJ) file=opt_rc.prn comp_function=l2norm indepvarcol=0 depvarcol=1
+
+.tran 0 1e-3
+.print tran V(OBJ)
+.end

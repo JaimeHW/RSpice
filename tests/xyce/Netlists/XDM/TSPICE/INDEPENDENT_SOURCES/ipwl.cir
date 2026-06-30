@@ -1,0 +1,19 @@
+* Xyce netlist for testing various syntaxes for PWL I-Sources
+
+* Piecewise linear (without file specification)
+i4 4 0 pwl (0 -4 2e-4 -5 3e-4 -5 4e-4 -4) 
+*+ TD=2e-4
+r4 4 0 1
+
+* Piecewise linear (with file specification).
+* The TD= line is currently commented out, because that 
+* syntax may not be properly translated from TSpice by xdm
+i5 5 0 pwl file "ipwlFile.txt" 
+*+ TD=1e-3
+r5 5 0 1
+
+.tran 10u 2ms
+.print tran format=probe i(r4) i(r5)
+
+.end
+

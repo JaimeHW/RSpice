@@ -1,0 +1,23 @@
+* This netlist tests that multiple PSpice .OPTIONS lines are
+* turned into the correct Xyce .OPTIONS lines
+
+*PSpice .OPTIONS lines
+.OPTIONS ABSTOL= 1e-10
+.OPTIONS GMIN= 1.0E-9
+.OPTIONS ITL4= 20
+.OPTIONS RELTOL= 0.01
+.OPTIONS VNTOL=100u
+.OPTIONS METHOD= Default
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PROBE V(2)
+
+*AC Source syntaxes
+R_R1        1 2  1k TC=0,0 
+R_R2        2 0  2K TC=0,0 
+V_V1        1 0  AC 1
++SIN 0 1 1KHz 0 0 0
+
+.END
+

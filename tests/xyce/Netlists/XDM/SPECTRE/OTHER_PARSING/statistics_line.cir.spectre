@@ -1,0 +1,68 @@
+// Generated for: spectre
+// Generated on: Aug 23 09:46:50 2016
+// Design library name: xyce_translator_prj
+// Design cell name: v_sources
+// Design view name: schematic
+simulator lang=spectre
+global 0
+//include "/usr/local/cadence/ic-5.1.41usr5/tools/dfII/samples/artist/ahdlLib/quantity.spectre"
+
+// Library name: xyce_translator_prj
+// Cell name: v_sources
+// View name: schematic
+V1 (net7 0) vsource dc=0 mag=0 phase=0 type=sine delay=0 sinedc=0 ampl=1\
+        freq=1K damp=0
+R1 (net7 V2) resistor r=s1
+R2 (0 V2) resistor r=s2 
+
+parameters
+ + s1 = 1       
+ + s2=2 
+ + d1=3
+ + d2=4
+ + TN = 5 VN = 6
+ + d3=7
+ + d4=8
+ + TP=9
+ + VP=10
+ + un=11
+ + up=12
+ + xdv=13
+ + xdu=14 	
+statistics {
+ process {
+ vary d1   dist=gauss	std = s1         
+ vary d2   dist=gauss	std = s2          
+ vary TN   dist=gauss	std = s1  
+ vary VN   dist=gauss	std = s2
+ vary d3   dist=gauss	std = s1         
+ vary d4   dist=gauss	std = s2          
+ vary TP   dist=gauss	std = s1   
+ vary VP   dist=gauss	std = s2
+ vary un 	dist=gauss	std = s1
+ vary up	dist=gauss	std= s2	
+ }
+correlate param = [d2 d4]	 cc=0.5
+correlate param = [d1 d3]	 cc=0.5
+correlate param = [TN TP]	 cc=0.5
+ mismatch {
+ vary xdv		dist=gauss std=1 
+ vary xdu		dist=gauss std=1
+ }
+}
+
+simulatorOptions options reltol=1e-3 vabstol=1e-6 iabstol=1e-12 temp=27 \
+    tnom=27 scalem=1.0 scale=1.0 gmin=1e-12 rforce=1 maxnotes=5 maxwarns=5 \
+    digits=5 cols=80 pivrel=1e-3 sensfile="../psf/sens.output" \
+    checklimitdest=psf 
+tran tran stop=1m errpreset=moderate write="spectre.ic" \
+    writefinal="spectre.fc" annotate=status maxiters=5 
+finalTimeOP info what=oppoint where=rawfile
+modelParameter info what=models where=rawfile
+element info what=inst where=rawfile
+outputParameter info what=output where=rawfile
+designParamVals info what=parameters where=rawfile
+primitives info what=primitives where=rawfile
+subckts info what=subckts  where=rawfile
+save net7 V2
+saveOptions options save=allpub

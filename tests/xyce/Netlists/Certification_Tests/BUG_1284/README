@@ -1,0 +1,31 @@
+Test Name: BUG_1284
+Owner: Tom Russo
+Test netlists: bug_1284_baseline.cir, bug_1284_first.cir, bug_1284_restarted.cir
+GS files: none
+Mode:  Serial
+Comparator:  xyce_verify
+Version of Xyce: Release_4.0.2
+ 
+Description:
+============
+Bug 1284 documented a bug in which restart files inappropriately contained
+the final "pause breakpoint" of the run that created them --- meaning that it
+was not possible for a restarted run to run past the final time of the run
+that created the restart file.  
+
+Procedure: 
+============ 
+
+Run the baseline netlist, then the "first" netlist, then the "restarted" 
+netlist.
+
+Verification:
+=============
+
+Test succeeds if the restarted netlist runs to completion, and xyce_verify 
+passes the comparison between the restarted and baseline output.  The shell
+script in this directory takes care of running the three netlists in the 
+right order and doing the comparison appropriately.
+ 
+Notes:
+======

@@ -1,0 +1,9 @@
+query.cir ,	8 ,	R1a ,	1e3
+query.cir ,	9 ,	R1b ,	2K
+query.cir ,	13 ,	R2a ,	1k
+query.cir ,	14 ,	R2b ,	2K
+query.cir ,	19 ,	R3 ,	1K
+query.cir ,	25 ,	R4 ,	1K
+query.cir ,	29 ,	R5 ,	1K
+query.cir ,	33 ,	R6 ,	1k
+query.cir ,	35 ,	R_FILE ,	1k

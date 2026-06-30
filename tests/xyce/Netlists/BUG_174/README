@@ -1,0 +1,18 @@
+Bug Number: 174
+Test netlist: nlrcs10.cir
+
+Description:
+============
+This test checks that inductor initial conditions can be set and operate
+correctly.
+
+Verification
+============
+Run Xyce on the netlist.
+
+Compare against the results in the given prn file using xyce_verify.pl or
+"compare".
+
+Special Notes:
+==============
+This test should be run in serial and parallel.

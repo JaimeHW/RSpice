@@ -1,0 +1,12 @@
+* source TRANSMISSIONLINE
+T_T1         N14950 0 N15037 0 Z0=50 TD=10e-9  
+R_R1         N14553 N14950  50 TC=0,0 
+R_R2         N15037 0  50 TC=0,0 
+V_V1         N14553 0  
++PULSE 0 5 0 0.1e-9 0.1e-9 5e-9 25e-9
+T_T2         N16674 0 N16680 0 Z0=50  F=1e9 NL=10
+V_V2         N16606 0  
++PULSE 0 5 0 0.1e-9 0.1e-9 5e-9 25e-9
+R_R4         N16680 0  50 TC=0,0 
+R_R3         N16606 N16674  50 TC=0,0 
+

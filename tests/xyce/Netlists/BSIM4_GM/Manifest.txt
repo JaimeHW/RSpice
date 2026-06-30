@@ -1,0 +1,7 @@
+Xmodelcard.nmos
+Xmodelcard.pmos
+nmosGm1.cir
+pmosGm1.cir
+pmosGm1_rev.cir
+nmosGm1_rev.cir
+tags

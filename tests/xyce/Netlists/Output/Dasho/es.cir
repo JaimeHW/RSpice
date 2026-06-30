@@ -1,0 +1,50 @@
+***************************************************************
+* Test -o command line option for .PRINT ES. Key points
+* (after the changes for Issue 222) are:
+*
+*  1) The parameters FORMAT=CSV and FILE=esFoo on the
+*     .PRINT ES line should be ignored.
+*
+*  2) The .PRINT DC line should also produce output.
+*
+*  3) the .PRINT output should go to the file specified by -o,
+*      and not to the default file name or the file
+*      specified with FILE=.  It should be a FORMAT=STD
+*      file with space as the delimiter, with the default
+*      extension (e.g., dashoFile.ES.prn or dashoFile.prn).
+*
+*  4) the .sh file will run this netlist with -delim COMMA
+*      to verify that command line option is ignored when
+*      -o is also specified.
+*
+*  5) the .sh file will use -o esOutput.ES.prn to test
+*      that the default print extension is removed from the
+*      dashoFilename.
+*
+* See SON Bug 1201 for more details.
+***************************************************************
+*Regression test for simple normal distribution sampling
+
+R2 1 0 3K
+R1 1 2 2K
+v1 2 0 10V
+
+.dc v1 10 10 1
+
+.EMBEDDEDSAMPLING
++ param=R1,R2
++ type=normal,normal
++ means=3K,2K
++ std_deviations=0.1K,0.2K
+
+.options EMBEDDEDSAMPLES numsamples=50
++ projection_pce=true
++ order=3
++ outputs={v(1)}
++ sample_type=lhs
++ stdoutput=true
+
+.PRINT DC FORMAT=CSV V(1)
+.PRINT ES PRECISION=6 FORMAT=CSV FILE=esFoo
+
+.END

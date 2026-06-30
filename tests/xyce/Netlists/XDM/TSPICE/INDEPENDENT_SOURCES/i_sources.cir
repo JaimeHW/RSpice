@@ -1,0 +1,23 @@
+* Xyce netlist to test various syntaxes for I-Sources
+
+* Transient source syntaxes
+* SIN with offset
+I1  1 0 SIN(0.5 1 1K)
+R1  1 0 1k
+
+* Pulse, without TSpice-specific RND parameter
+i2  2 0 pulse(0.5 2.5 0.1ms 0.1ms 0.2ms 0.6ms 1ms)
+r2  2 0 1K
+
+* Exp
+i3 3 0 exp (-0.5 -1.5 0.1m 0.1m 1.2m 0.2m)
+r3 3 0 1K
+
+* DC source syntax
+i4 4 0 1
+r4 4 0 1k
+
+.tran 10u 2ms
+.print tran format=probe i(R1) i(r2) i(r3) I(R4)
+
+.end

@@ -1,0 +1,20 @@
+Regression test for simple normal distribution sampling, .param version.
+
+.param testnorm={agauss(0.5K,0.05K,1)}
+.param r1value={testnorm*2.0}
+
+r2 1 0 7k
+r1 1 2 {r1value}
+v1 2 0 1000v
+
+.dc v1 1000 1000 1
+
+.sampling useExpr=true
+
+.options samples numsamples=10000
++ outputs={R1:R},{V(1)}
++ sample_type=lhs
++ stdoutput=true
+
+.end
+

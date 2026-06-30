@@ -1,0 +1,35 @@
+Power test for JFET Level 2
+***********************************
+*
+*Drain curves
+Vds 1 0 5V
+Vgs 2 0 pulse (0 1 1ns 1ns 1ns 1us 2us)
+.options timeint method=trap newbpstepping=0
+.options nonlin-tran rhstol=1.0e-7
+.tran 1ns 10us
+
+*
+.PRINT tran  P(J1) W(J1) {ID(J1)*V(1) + IG(J1)*V(2)} {-1*(P(VDS)+P(VGS))}
++ ID(J1) IG(J1) IS(J1) I(VDS) I(VGS) V(1) V(2) 
+
+*
+J1 1 2 0 SA2109 
+.MODEL SA2109 NJF
++ LEVEL=2
++ BETA= 0.0003790
++ VTO = -3.760
++ PB = 0.650
++ LAMBDA = 0.01240
++ DELTA = 0.370;
++ THETA = 0.01120;
++ RD = 0.0
++ RS = 104.5
++ FC = 0.5
++ IS = 1.393E-10
++ AF = 1.0
++ KF = 0.05
++ CGS= 1uf
++ CGD= 1uf
+*
+.END
+

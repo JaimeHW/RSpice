@@ -1,0 +1,10 @@
+* Xyce netlist for testing mixed current sources
+
+.TRAN  0 0.5ms 0
+.PRINT TRAN FORMAT=PROBE V(1) V(2) I(R2)
+
+VPULSE 1 0 pulse( 0V 2V 5us 5us 5us 20us 50us )
+R1 1 2 100
+R2 2 0 75
+
+.END

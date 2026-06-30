@@ -1,0 +1,7 @@
+README
+bug_1376.cir
+bug_1376.cir.sh
+exclude
+lower_case.cir
+tags
+upper_case.cir

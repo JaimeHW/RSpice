@@ -1,0 +1,17 @@
+RC filter test for giant table, PWL Vsrc version
+* 
+R2 IN OUT_RC1 4800
+C1 OUT_RC1 0 330n
+R1 OUT_RC1 0 330K
+VIN IN 0 PWL file ./table.pwl
+.tran .0001 .03
+
+*comp V(IN)  offset=1.0e-2
+*comp V(OUT_RC1) offset=1.0e-2
+.print tran 
++ V(IN) 
++ V(OUT_RC1)
+
+.options output initial_interval=1.0e-4
+
+.end

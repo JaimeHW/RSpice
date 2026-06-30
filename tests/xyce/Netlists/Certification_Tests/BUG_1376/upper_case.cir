@@ -1,0 +1,12 @@
+**** fet test ****
+sw 1 2 sw OFF control={if(time>.1,1,0)}
+v1 1 0 dc 5
+r1 2 0 5k
+
+.model sw switch roff=1e9 ron=1 off=0 on=1
+
+*Analysis directives:
+.TRAN  100n 500ms 0 
+.PRINT TRAN V(1) V(2)
+.END
+

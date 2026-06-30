@@ -1,0 +1,27 @@
+Regression test to show transient direct sensitivities for second order Gear time integration.
+********************************************************************************
+* This circuit differs from the "A" circuit only in the order that statements
+* appear in the file.
+********************************************************************************
+.param cap=1u
+.param res=1K
+c1 1 0 {cap} 
+R1 1 0 {res}
+
+.print tran v(1) 
++ {(time/(res*res*cap))*exp(-time/(res*cap)) }
++ {(time/(res*cap*cap))*exp(-time/(res*cap)) }
+
+.print sens 
+
+.tran 0 5ms uic
+
+.IC V(1)=1.0
+
+.options timeint reltol=1e-6 abstol=1e-6 method=gear 
+
+.SENS objfunc={V(1)} param=R1:R,C1:C
+.options SENSITIVITY direct=1 adjoint=0  diagnosticfile=0  stdoutput=0
+
+.end
+

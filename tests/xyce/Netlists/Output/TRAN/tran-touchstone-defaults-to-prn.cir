@@ -1,0 +1,15 @@
+**********************************************************
+* Netlist tests that TRAN output in TOUCHSTONE or TOUCHSTONE2
+* formats default to STD format (.prn file with an Index column)
+*
+*********************************************************
+
+V1 1 0 PWL (0 0 1 1)
+R1 1 0 1
+
+.TRAN 0 1
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.1
+.PRINT TRAN FORMAT=TOUCHSTONE V(1)
+.PRINT TRAN FILE=tran-touchstone-defaults-to-prn.cir.ts2 FORMAT=TOUCHSTONE2 V(1)
+
+.END

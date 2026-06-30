@@ -1,0 +1,5 @@
+bjt_ic.cir
+bjt_ic.cir.sh
+bjt_ic_nonzero.cir
+bjt_ic_nonzero.cir.sh
+tags

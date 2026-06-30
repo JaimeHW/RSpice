@@ -1,0 +1,12 @@
+Semiconductor Resistor Circuit Netlist
+* This is reworked as a test to bug 307
+XR1 2 0 myRMOD 
+VIN 1 0 5V
+VMON 1 2 0V
+.DC VIN 0 5V 1V
+.subckt myRMOD a b
+R1 a b RMOD L=1
+.MODEL RMOD R (RSH=.031 NARROW=0 DEFW=1 TC1=.001 TC2=-.001)
+.ends
+.PRINT DC V(1) I(VMON)
+.END

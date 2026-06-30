@@ -1,0 +1,28 @@
+IRF130 Test Circuit
+*comp I(VID) reltol=0.015
+VD 3 1 0.5
+VS 2 0 0
+VG 4 0 10 pulse(0 10 300ns 50ns 50ns 400ns 1000ns)
+VID 0 1 DC 0
+M1 3 4 2 0 IRF130 W=0.386 L=2.5u
+.MODEL IRF130 NMOS LEVEL=18
++ CV=1
++ CVE=1
++ VTO=3.5
++ RD= 0
++ RS= 0.005
++ LAMBDA=0
++ M=3
++ SIGMA0=0
++ UO=230
++ VMAX=4e4
++ DELTA=5
++ TOX=50nm
+*
+*.DC VD 0 50 5 VG 5 15 5
+.TRAN 0.5n 1u 0u 2n
+.PRINT TRAN precision=10 width=19 V(3) V(4) {I(VID)+0.5}
+
+.options timeint reltol=1.0e-2 abstol=1.0e-7
+.END
+

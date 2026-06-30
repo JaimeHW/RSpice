@@ -1,0 +1,25 @@
+Regression test for simple normal distribution sampling
+
+c1 1 0 1uF IC=1
+R1 1 2 1K
+v1 2 0 0V
+.print tran v(1)
+.tran 0 5ms
+.options timeint reltol=1e-6 abstol=1e-6
+
+* 10 uniform distributed samples.  The line specifies min and max
+.EMBEDDEDSAMPLING 
++ param=R1
++ type=uniform
++ lower_bounds=1K
++ upper_bounds=5K
+
+.options EMBEDDEDSAMPLES numsamples=10
+
+.options device debuglevel=-100
+.options timeint debuglevel=-100
+.options nonlin debuglevel=-100
+.options nonlin-tran debuglevel=-100
+
+.end
+

@@ -1,0 +1,28 @@
+Test Name: BUG_608
+Owner: Eric Rankin
+Test netlists: none 
+GS files: none
+Mode: serial and parallel 
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+bug 608  "BUG_281" certification problem enters infinite loop.
+
+On freebsd this bug caused Xyce to enter an infinite loop.  On some other 
+platforms, a segfault would result.  This is essentially a duplicate of
+BUG_281 (and BUG_204) that was reintroduced with the distributed parser
+and changes to .DC handling.
+
+Procedure:
+============
+None.  BUG_281 covers this.
+
+Verification:
+=============
+Successful completion of BUG_281 implies this bug is also corrected.
+ 
+Notes:
+======
+

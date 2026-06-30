@@ -1,0 +1,30 @@
+TRIGTARGCONTAT = 6.000000e-03                     targ = 8.000000e-03                    trig = 2.000000e-03
+TRIGTARGCONTAT1 = 7.375000e-03                    targ = 8.000000e-03                    trig = 6.250000e-04
+TRIGTARGCONTAT2 = -1.375000e-03                    targ = 6.250000e-04                    trig = 2.000000e-03
+TRIGTARG1 = 6.250000e-04                    targ = 1.250000e-03                    trig = 6.250000e-04
+TRIGTARG1 = -5.000000e-04                    targ = 3.500000e-03                    trig = 4.000000e-03
+TRIGTARG1 = 6.250000e-04                    targ = 6.875000e-03                    trig = 6.250000e-03
+TRIGTARG1 = -6.250000e-04                    targ = 8.125000e-03                    trig = 8.750000e-03
+TRIGTARG2 = 2.875000e-03                    targ = 3.500000e-03                    trig = 6.250000e-04
+TRIGTARG2 = 2.875000e-03                    targ = 6.875000e-03                    trig = 4.000000e-03
+TRIGTARG2 = 1.875000e-03                    targ = 8.125000e-03                    trig = 6.250000e-03
+TRIGTARG3 = -2.750000e-03                    targ = 1.250000e-03                    trig = 4.000000e-03
+TRIGTARG3 = -2.750000e-03                    targ = 3.500000e-03                    trig = 6.250000e-03
+TRIGTARG3 = -1.875000e-03                    targ = 6.875000e-03                    trig = 8.750000e-03
+TRIGTARG4 = 2.875000e-03                    targ = 3.500000e-03                    trig = 6.250000e-04
+TRIGTARG4 = 1.875000e-03                    targ = 8.125000e-03                    trig = 6.250000e-03
+TRIGTARG5 = -5.000000e-04                    targ = 3.500000e-03                    trig = 4.000000e-03
+TRIGTARG5 = 6.250000e-04                    targ = 6.875000e-03                    trig = 6.250000e-03
+TRIGTARG5 = -6.250000e-04                    targ = 8.125000e-03                    trig = 8.750000e-03
+TRIGTARG6 = -2.750000e-03                    targ = 3.500000e-03                    trig = 6.250000e-03
+TRIGTARG6 = -1.875000e-03                    targ = 6.875000e-03                    trig = 8.750000e-03
+TRIGTARG7 = 7.500000e-03                    targ = 8.125000e-03                    trig = 6.250000e-04
+TDEARLY = 6.250000e-04                    targ = 6.875000e-03                    trig = 6.250000e-03
+TDEARLY = -6.250000e-04                    targ = 8.125000e-03                    trig = 8.750000e-03
+ATTD1 = 6.000000e-03                     targ = 8.000000e-03                    trig = 2.000000e-03
+ATTD2 = 2.500000e-03                    targ = 3.500000e-03                    trig = 1.000000e-03
+ATEARLY = FAILED                    targ = not found                    trig = not found
+ATLATE = FAILED                    targ = not found                    trig = not found
+TRIGTDLATE = FAILED                    targ = 3.500000e-03                    trig = not found
+TARGTDLATE = FAILED                    targ = not found                    trig = 6.250000e-04
+VALNOTFOUND = FAILED                    targ = not found                    trig = not found

@@ -1,0 +1,28 @@
+********************************************************
+* Netlist to help test Noise output in TECPLOT format.
+* This netlist is in the exclude file, but it is run by
+* the noise-tecplot.cir.sh file.  It is used as a
+* psuedo gold-standard that the Tecplot output is 
+* compared against.
+*
+********************************************************
+
+* NOISE ANALYSIS: RESISTOR DIVIDER, AMP, AND LP FILTER
+*
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0   
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 100MEG 1
+
+* Using NOINDEX format makes it easier to compare
+* this .NOISE.prn file against the Tecplot output.
+.PRINT NOISE FORMAT=NOINDEX V(4) VR(4) VI(4) INOISE ONOISE
+
+.END

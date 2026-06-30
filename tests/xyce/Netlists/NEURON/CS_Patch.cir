@@ -1,0 +1,57 @@
+A single Neuron example
+
+
+* This is a standard current pulse to start an activation
+
+.tran 0 2.0e-2
+.options timeint method=7 newlte=1 newbpstepping=1 reltol=1e-3 
+
+.print tran V(a) i(iin) v(b)
++ n(yneuron!neuron1_n) n(yneuron!neuron1_m) n(yneuron!neuron1_h) 
++ n(yneuron!neuron1_a) n(yneuron!neuron1_b) n(yneuron!neuron1_m_)
++ n(yneuron!neuron1_h_) n(yneuron!neuron1_c) n(yneuron!neuron1_ca) 
+
+Iin 0 a PULSE( 0 0.40e-9 1.0e-3 1.0e-4 1.0e-4 1.0e-3 1.0e10)
+
+
+* standard area is 30x30xpi um2 = 30e-6 * 30e-6 * pi m^2 
+*                               = 3e-5 * 3e-5 * pi m^2 = 3e-3 * 3e-3 * pi cm^2 
+* scale GK, Gna, manebrane capacitance, membrane conductivity
+.param area = {3.0e-3 * 3.0e-3 * 3.141529}  ; [cm^2]
+.param g_mem = {0.003 * 0.1 * area }        ; [0.003 mS/mm^2 (10mm/cm)^2 (1S/1000mS) * area (cm^2)]
+.param c_mem = {1.0e-6 * area }             ; [1.0uF/cm^2    * [area cm^2] ]
+.param v_rst = -0.017                       ; V
+.param g_k  = {0.20 * 0.1 * area }          ; [0.20 mS/mm^2 (10mm/cm)^2 (1S/1000mS) * area (cm^2)]
+.param e_k  = -0.072                        ; V
+.param g_na = {1.20 * 0.1 * area }          ; [1.20 mS/mm^2 (10mm/cm)^2 (1S/1000mS) * area (cm^2)]
+.param e_na = 0.055                         ; V
+.param g_a  = {0.477 * 0.1 * area }         ; [0.477 mS/mm^2 (10mm/cm)^2 (1S/1000mS) * area (cm^2)]
+.param e_a  = -0.075                        ; V
+.param e_ca = 0.120                         ; V
+.param g_ca = {0.013 * 0.1 * area }         ; [0.013 mS/mm^2 (10mm/cm)^2 (1S/1000mS) * area (cm^2)]
+.param e_kca = -0.072                       ; V
+.param g_kca ={0.013 * 0.1 * area }         ; [0.013 mS/mm^2 (10mm/cm)^2 (1S/1000mS) * area (cm^2)]
+.param ca_init = 2.0e-5                     ; 20 micro-M
+.param ca_gamma = 0.1                       ; unknown
+.param ca_tau = 0.2                         ; 200 ms
+
+*
+* Using the above neuron model
+*
+.model csParams neuron level=2 
++ cmem={c_mem}  gmem={g_mem} vrest={v_rst} 
++ ek=0.0 gk=0.0 
++ ena=0.0 gna=0.0
++ ea={e_a} ga={g_a}
++ eca={e_ca} gca={g_ca}
++ ekca={e_kca} gkca={g_kca}
++ cainit={ca_init} cagamma={ca_gamma} catau={ca_tau}
+
+* + ek={e_k} gk={g_k} 
+* + ena={e_na} gna={g_na}
+
+yneuron neuron1  a b csParams
+
+rloader b 0 100
+
+.end

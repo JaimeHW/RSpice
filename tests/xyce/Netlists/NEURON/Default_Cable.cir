@@ -1,0 +1,30 @@
+A neuron cable example
+*
+* This is a simple test of simulating a neuron cable
+* via the cable equation (6.29 in Theorteical Neuroscience,
+* by P. Dayan and L. Abbot)
+*
+* Primary purpose of this test is to ensure that the default parameter values
+* for the level 6 neuron device are reasonable
+*
+* in this case there will be no ion channel currents, so
+* the cable is entirely passive
+*
+
+.model pcParams neuron level=6
+
+vsrc a 0 sin( 0 0.5 1000 0 ) 
+yneuron neuron1  a b pcParams
+rptg b 0 100  
+
+.tran 0 0.001
+.print tran V(a) 
+*n(y%neuron%neuron1_V10) n(y%neuron%neuron1_V20) n(y%neuron%neuron1_V30) 
+*+ n(y%neuron%neuron1_V40) n(y%neuron%neuron1_V50) n(y%neuron%neuron1_V60) n(y%neuron%neuron1_V70)
+*+ n(y%neuron%neuron1_V80) n(y%neuron%neuron1_V90) 
++ V(b)
+
+
+.end
+
+

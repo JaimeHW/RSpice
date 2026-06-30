@@ -1,0 +1,38 @@
+********************************************************
+* Test Embedded Sampling output for .DC with .STEP for
+* FORMAT=<STD|CSV>. This covers projection_pce=true
+* with one output variable.  It also tests the use of
+* simple expressions, voltage difference operators
+* and branch currents.
+*
+* See SON Bug 1201 for more details.
+********************************************************
+
+*Regression test for simple normal distribution sampling
+
+R2 1 0 3K
+R1 1 2 2K
+v1 2 0 10V
+
+.dc v1 10 15 1
+
+.print dc v(1)
+
+.EMBEDDEDSAMPLING
++ param=R1,R2
++ type=normal,normal
++ means=3K,2K
++ std_deviations=0.1K,0.2K
+
+* Use mixed case for outputs= arguments
+.options EMBEDDEDSAMPLES numsamples=50
++ projection_pce=true
++ order=3
++ outputs={v(1)},{V(1)+1},{I(v1)},{V(2,1)}
++ sample_type=lhs
++ stdoutput=true
+
+.PRINT ES
+.PRINT ES PRECISION=6 FORMAT=CSV FILE=es-proj-pce-dc-step-prn.cir.ES.csv
+
+.END

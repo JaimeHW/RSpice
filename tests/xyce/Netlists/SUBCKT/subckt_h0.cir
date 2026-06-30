@@ -1,0 +1,33 @@
+testing parameters
+* Note added by Tom Russo, 6 Feb 07:
+* This test case was originally the certification test for bug 208 and was
+* moved to regression in March 2005.  It is not a well-designed
+* test for the SUBCKT directory, as it only tests a single point, but does
+* adequately test the issue in bug 208 by checking that a parameter passed
+* down to a subcircuit is passed correctly.  The test makes sure that the
+* results agree with a very simple gold standard.  Prior to bug 208 being
+* fixed, they wouldn't.
+
+.param crappe=15
+
+* These lines always worked:
+*Xtest 1 0 testsub  PARAMS: CURRENT=15
+*Xtest 1 0 testsub  PARAMS: CURRENT=0
+
+* This didn't prior to bug 208 getting fixed
+Xtest 1 0 testsub  PARAMS: CURRENT={crappe}
+
+Rtest 1 2 100
+Vtest 2 0 0V
+.print DC V(2) V(1) I(Vtest)
+*COMP V(2)     reltol=1e-7 abstol=1e-7
+*COMP V(1)     reltol=1e-7 abstol=1e-7
+*COMP I(Vtest) reltol=1e-7 abstol=1e-7
+.DC Vtest 0 0 1
+
+.subckt testsub a b PARAMS: CURRENT=1
+*B1 a b I={CURRENT}
+I1 a b {CURRENT}
+.ends
+
+.end

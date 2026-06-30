@@ -1,0 +1,108 @@
+Test to see if 'GND' substituted correctly, unnecessary components removed.
+*******************************************************************
+* Tier: ?????
+* Directory/Circuit name:  REDUND_REMOVE/gnd_and_redund.cir
+* Description:  Runs a transient analysis to check operation of level 1 diode
+*		in the forward active region.
+* Input:  V1=V(1)
+* Output: V(2) (output of resistive divider)
+*
+* This circuit implements a DC sweep on a simple resistive divider.  The 
+* output voltage V(2) should equal 0.5V(1) exactly.  In addition to creating
+* the simple resistive divider, however, we add in LOTS of "junk" components--
+* components for which all of the nodes are the same (for MOSFETS and BJTS, we
+* require only that the first three nodes are the same, i.e., we ignore the 
+* bulk node).  Removal of such "redundant" nodes is specified on a line called
+* '.PREPROCESS' by adding the types of components for which we want to check
+* for redundancy.  That is,
+*
+* .PREPROCESS r,l,m
+*
+* will cause Xyce to check each resistor, inductor, and mosfet to see if all
+* of its nodes are the same.  If so, it will be removed from the circuit.  Any
+* circuit devices that are *not* specified in the '.PREPROCESS' line will not 
+* be removed even if redundancy exists.  This means that if the line 
+*
+* C1 2 2 1
+*
+* appears in the same netlist as the above '.PREPROCESS' statement, the 
+* capacitor C1 will *not* be removed from the netlist and an error will occur.
+* In the netlist we produce in this file, we add redundant components in the 
+* main circuit and two different levels of subcircuits and specifiy a 
+* preprocess statement to remove all redundant components.  Current components
+* which are supported for redundancy are (Component/.PREPROCESS keyword):
+* Capacitor/C, Diode/D, Independent Current Source/I, Inductor/L, MOSFET/M,
+* BJT/Q, Resistor/R, and Independent voltage source/V.  Note that if mutual 
+* inductors are present, removal of redundant inductors could cause Xyce to 
+* crash.  
+*
+* The other thing we check in this netlist is whether synonyms for ground are
+* appropriately handled.  I recently added some new functionality so that if
+* Xyce encounters the nodes 'GND', 'GND!', 'GROUND' or any capital/lowercase
+* variant thereof (e.g. 'GrOUnD'), it will treat the node as node 0.  We add
+* a bunch of instances of such nodes in various parts of the netlist.
+*
+* SPECIAL NOTE:  xyce-verify.pl still "sees" all of the DC sources, whether 
+*                they're redundant and have been removed or not.  So, for
+*                the netlist below, xyce-verify sees 4 independent voltage
+*                sources and 3 independent current sources.  It doesn't make 
+*                a difference in this simulation, but this might have some 
+*                affect in future sims.
+*
+* Created by:  K. R. Santarelli 10/07
+*
+*******************************************************************
+
+V1 1 0 1
+R1 1 2 1
+R2 2 gND 2
+X1 2 ground resistor
+C1 2 gnd 1 
+
+
+*Some unnecessary components in the main circuit: 
+C11 gnd! GROUND 1 
+D11 1 1 Dmod
+I11 0 0 4
+L11 2 2 3
+M11 gnd GROUND gnd! 2 Nmod
+Q11 2 2 2 3 Qmod
+R11 1 1 1
+V11 3 3 4
+
+.subckt resistor 1 2
+R1 1 2 2
+X2 1 2 capacitor
+*Some unnecessary components in the first subcircuit
+C11 gnd! GROUND 1
+D11 1 1 Dmod
+I11 0 0 4
+L11 2 2 3
+M11 gnd GROUND gnd! 2 Nmod
+Q11 2 2 2 3 Qmod
+R11 1 1 1
+V11 3 3 4
+.ends
+
+.subckt capacitor 1 2
+C1 1 2 1
+*Some unnecessary components in the first subcircuit
+C11 gnd! GROUND 1
+D11 1 1 Dmod
+I11 0 0 4
+L11 2 2 3
+M11 gnd GROUND gnd! 2 Nmod
+Q11 2 2 2 3 Qmod
+R11 1 1 1
+V11 3 3 4
+.ends
+
+.model Dmod D
+.model Nmod NMOS
+.model Qmod NPN
+
+.PREPROCESS removeunused c,d,i,l,m,q,r,v
+.PREPROCESS replaceground true
+.DC V1 -1 1 0.1
+.print DC V(1) V(2)
+.end

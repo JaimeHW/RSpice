@@ -1,0 +1,32 @@
+*********************************************************
+* Xyce gold netlist for subckt test.
+*
+* Make the same R-R-L circuit as a top-level circuit
+* and as a subcircuit.
+*
+*
+* See SRN Bug 2055 for more details.
+*********************************************************
+
+* Subcircuit definition
+.SUBCKT R_subckt Vnode1_I2 P2
+LL1 VL1 P2 L=100n
+RR1 Vnode1_I2 VL1 R=5K
+RR2 Vnode1_I2 P2 R=10K
+.ENDS
+
+* Same R-R-L circuit, but at the top-level
+RR2 Vnode2 0 R=10K
+RR1 Vnode2 VL1 R=5K
+LL1 VL1 0 L=100n
+
+* Sources and subcircuit instantiation
+VV2 Vnode2 0 SIN(1 1 5K 0 0 0)
+VV1 Vnode1 0 SIN(1 1 5K 0 0 0)
+XI2 Vnode1 0 R_subckt
+
+*Analysis and print statements
+.TRAN 0 1ms
+.PRINT TRAN V(Vnode1) I(XI2:RR1) V(XI2:VL1) I(XI2:RR2) V(Vnode2) I(RR1) V(VL1) I(RR2)
+
+.END

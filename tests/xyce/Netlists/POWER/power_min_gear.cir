@@ -1,0 +1,26 @@
+Power test for component inductors in a nonlinear mutual inductor
+* This test is based on the certification test for SON Bug 518
+
+Vinput node1 0 sin(0 14 120 0 0)
+
+Llead1 node1 0 10
+Llead2 node2 node3 100
+Llead3 node3 node4 100
+K1 Llead1 Llead2 Llead3 1.0 nlcore
+
+.model nlcore CORE c=0.001
+
+rload1   node2 0 100
+rload2   node3 0 100
+rpathtg1 node4 0 1
+
+.print tran v(node1) v(node2) v(node3) v(node4)
++ I(Llead1) P(Llead1) W(Llead1) {I(Llead1)*V(node1)}
++ I(Llead2) P(Llead2) W(Llead2) {I(Llead2)*(V(node2)-V(node3))}
++ I(Llead3) P(Llead3) W(Llead3) {I(Llead3)*(V(node3)-V(node4))}
+
+.options timeint method=gear
+.options timeint reltol=1.0e-5
+.tran 0 1e-3
+
+.end

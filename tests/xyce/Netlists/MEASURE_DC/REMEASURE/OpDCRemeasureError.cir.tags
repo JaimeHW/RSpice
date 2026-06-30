@@ -1,0 +1,4 @@
+nightly
+serial, parallel
+measure, dc, remeasure
+errorexit

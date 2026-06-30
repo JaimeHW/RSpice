@@ -1,0 +1,52 @@
+Test case for showing that initJctFlag is set correctly in sweeps
+
+*Prior to the fix of bug 1774, the solver state flag "initJctFlag" was not
+* properly being set to "true" on the first newton iteration of the first
+* DCOP step of the inner sweep of a nested set of sweeps.
+*
+* Since there's a different bug that involves nested DC sweeps (bug 1775),
+* this test case uses an outer .STEP loop instead.  Prior to bug 1774's fix,
+* this would fail to converge on the first point of the inner sweep for
+* several values of the outer sweep, because the junction voltage drops were
+* not being initialized as they should have been (because initJctFlag was
+* wrong)
+
+.MODEL HN10x50 NPN LEVEL=11 VO=0 GAMM=0 HRCF=0 RS=1u RBP=1u FC=0.9
++ CBEO=0 AJE=-0.5 CBCO=0 QCO=0 CJEP=0 AJC=-0.5 CJCP=0 PS=0.75 MS=0.33
++ AJS=-0.5 WBE=1 IBEN=0 NEN=2 AVC1=0 AVC2=0 ISP=0 WSP=1 NFP=1 IBEIP=0 IBENP=0
++ IBCIP=0 NCIP=1 IBCNP=0 NCNP=2 VEF=0 VER=0 IKF=0 IKR=0 IKP=0 TF=0 QTF=0
++ XTF=0 VTF=0 ITF=0 TR=0 TD=0 KFN=0 AFN=1 BFN=1 XRS=0 XVO=0 TNF=0 TAVC=0
++ CTH=0 VRT=0 ART=0.1 CCSO=0 QBM=0 NKF=0.5 XIKF=0 XRBP=0 ISRR=1 XISR=0 DEAR=0
++ EAP=1.12 VBBE=0 NBBE=1 IBBE=9.9999999999999995e-007 TVBBE1=0 TVBBE2=0
++ TNBBE=0 EBBE=0 TNOM=20 RCX=4.57 RCI=0.7491 RBX=13.87 RBI=10.1 RE=0.5423
++ IS=3.935e-024 NF=1 NR=1 CJE=1.0572e-012 PE=4.244 ME=0.3763 CJC=1.8617e-012
++ PC=0.7659 MC=0.328 IBEI=1.0884e-022 NEI=1.22 IBCI=5.1365e-024 NCI=0.97
++ IBCN=6e-014 NCN=2 XRE=0.4 XRBI=0.35 XRCI=0.35 EA=1.529 EAIE=1.529
++ EAIC=1.529 EAIS=1.529 EANE=1.529 EANC=1.529 EANS=1.529 XIS=3.8 XII=4.5
++ XIN=4.3 RTH=256.4 XRCX=0.35 XRBX=0.35
+
+*-------- Devices: SPICE.ORDER > 0 --------
+.global_param IBC=0
+* Backward compatible usage:  tying off QNPN_1's "dt" node
+* to ground through a large resistor like this is not needed for VBIC 1.3
+* just to print the temperature rise, because one can simply print
+* "N(QNPN_1:dt)" rather than V(N_4), but when I converted this netlist from
+* VBIC 1.2 to VBIC 1.3 I was trying to do it with minimal change
+RResistor_1 N_4 0  R=1g
+* Use 3-terminal + ET, not 4-terminal:
+QNPN_1 N_1 N_2 0 N_4 HN10x50
+VVCE N_1 0  DC 2
+IBaseCurrent 0 N_2  DC {IBC}
+
+* Lead currents not implemented in VBIC
+*.PRINT DC IC(QNPN_1) V(N_4)
+.print DC V(N_1) I(IBaseCurrent) {-I(VVCE)} V(N_4)
+.options device gmin=0
+********* Simulation Settings - Analysis section *********
+.dc lin VVCE 0 20 100m
+.step IBC 0 200u 20u
+
+********* Simulation Settings - Additional SPICE commands *********
+
+.end
+

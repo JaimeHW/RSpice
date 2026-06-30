@@ -1,0 +1,15 @@
+* This netlist is used to test the return codes from the
+* Python method checkResponseVarName() for the cases
+* where the measure names are valid or invalid.  It also
+* checks obtainResponse() for the case where the measure
+* name is invalid.
+
+V1 1 0 SIN(0 1 1)
+R1 1 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1)
+.MEASURE TRAN MAXV1 MAX V(1)
+
+.END
+

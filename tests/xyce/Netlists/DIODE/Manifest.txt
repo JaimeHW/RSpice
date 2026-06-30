@@ -1,0 +1,13 @@
+Level2_Temp_Dep_Breakdown.cir
+Level2_Temp_Dep_Breakdown.cir.sh
+Zener_5229.cir
+diode.cir
+diode_with_sidewall.cir
+diode_with_sidewall_ns.cir
+diode_with_sidewall_mjsw.cir
+diode_with_sidewall_php.cir
+diode_with_sidewall_fcs.cir
+diode_with_sidewall_nbv.cir
+diode_with_sidewall_temp.cir
+diode_with_sidewall_temp.cir.res.gs
+tags

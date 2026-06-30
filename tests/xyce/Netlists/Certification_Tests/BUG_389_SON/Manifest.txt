@@ -1,0 +1,6 @@
+bug389.cir
+bug389.cir.sh
+exclude
+global_param.cir
+local_param.cir
+tags

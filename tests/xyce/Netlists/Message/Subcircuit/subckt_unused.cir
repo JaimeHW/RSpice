@@ -1,0 +1,29 @@
+* a test of a potential subcircuit bug
+
+va 0 1 1
+rb 1 2 1
+cd 2 0 1e-6
+re 2 3 1
+rf 3 4 1
+rg 4 0 1
+
+xsub1 0 1 2 testsub
+
+.subckt testsub a b c
+r1 a b 1
+r2 b c 1
+.ends
+
+*
+* NOTE this next line is bad because its a malformed subcircuit
+* However, it is unused, so at the most it should produce
+* a warning.  Not an error. 
+*
+.subckt testbad 
+r1 a b
+.ends
+
+.tran 0 1
+.print tran v(1)
+.end
+

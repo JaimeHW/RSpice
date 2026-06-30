@@ -1,0 +1,30 @@
+* See https://en.wikipedia.org/wiki/Lotka%E2%80%93Volterra_equations
+.global_param inity=10
+
+.param alpha=1.1
+.param beta=0.4
+
+.param delta=0.1
+.param gamma=0.4
+
+* x-equation
+B1 0 1 I={alpha * v(1) - beta * v(1) * v(2)}
+C1 0 1 1
+
+* y-equation
+B2 0 2 I={delta * v(1)*v(2) - gamma*v(2)}
+C2 0 2 1
+
+.IC v(1)=10
+.IC v(2)={inity} ; this line is the test
+
+*COMP V(1) OFFSET=1
+*COMP V(2) OFFSET=1
+.tran 0.0 100.0 UIC
+.print tran v(1) v(2) 
+
+* This .STEP applies all the different initial
+* conditions shown on the wikipedia page.  
+.step inity list 1 2 5 7 10 12 15
+
+

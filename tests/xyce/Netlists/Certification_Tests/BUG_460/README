@@ -1,0 +1,47 @@
+Test Name: BUG_460
+Owner: Eric Keiter
+Test netlists: bug_460.cir
+GS files:  bug_460.cir.res.gs bug_460.cir.prn.gs 
+Mode:  N/A
+Comparator:  
+Version of Xyce: Release_3.1
+
+Description:
+============
+
+Issue # 460 was about implementing a new feature, .result.  This capability
+is only supposed to work if you are running with .step.  At the end of
+each .step iteration, the expressions that are specified on a .result line
+are calculated, and are included in the *.res file (which is produced as a 
+part of .step) in extra columns.  This sort of capability is useful if you
+have auxilliary calculations that you want to do, but only at the end of
+each transient.
+
+In some respects, testing this capability is fairly easy, in that you need
+to:
+
+(1) make sure there are the right number of outputs.
+(2) verify that the specified expressions are evaluated correctly.
+
+This should work for multiple .result statments in the netlist.  It should
+also work for both serial and parallel.  Finally, it should work for multiple
+.STEP sweep variables, and it should flag an error if .result is specified 
+without a .step.
+
+================================================================================
+Test 1: 
+
+Test 1 Procedure:
+============
+
+
+Test 1 Verification:
+=============
+
+
+Test 1 Notes:
+======
+
+
+================================================================================
+

@@ -1,0 +1,43 @@
+fullwave bridge rectifier
+*
+*  The point of this test is to test the new finite difference derivatives (bug 1080 son)
+*
+v1 1 0 sin(0 15 60 0 0) 
+rload 1 0 10k 
+d1 1 2 mod1 
+d2 0 2 mod1 
+d3 3 1 mod1 
+d4 3 0 mod1 
+
+.MODEL mod1 D( level=2
++         IS = 1E-14
++         RS = 10.8
++          N = 1
++         TT = 0
++        CJO = 1P
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 7.255
++        IBV = .001
++ tbv1 = 0.00013
++ tbv2 = -5e-8
++ )
+
+.tran .5m 25m 
+
+.sens param=mod1:is objfunc={v(2)-v(3)}
+*objfunc={v(2,3)}
+
+.print sens 
+
+.options sensitivity direct=1 adjoint=0  forceanalytic=1
+
+* this circuit performs better with gear.  Trap gets sawtooth oscillations
+.options timeint method=gear
+
+.end 

@@ -1,0 +1,28 @@
+Test Name: BUG_523
+Owner: Tom Russo
+Test netlists: None
+GS files: none
+Mode:  N/A
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Bug 523 highlighted some buffer overruns in the reading of restart files,
+and an incorrect handling of restarted time integrator parameters.
+ 
+Procedure:
+============
+There is no specific test case for this bug, but proper functioning of any 
+netlist that uses restart can serve as verification that bug is fixed.
+One such test case is bug 442's test case.
+
+It would be best if a thorough restart testing suite were added to the
+regression suite.  
+
+Verification:
+=============
+This bug is verified if bug 442's test case passes.
+ 
+Notes:
+======

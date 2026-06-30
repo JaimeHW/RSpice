@@ -1,0 +1,8 @@
+exclude
+gstage.cir
+gstage.cir.sh
+modelcard.nmos
+modelcard.pmos
+opamp.cir
+opamp.cir.sh
+tags

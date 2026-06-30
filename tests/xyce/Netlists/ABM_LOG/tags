@@ -1,0 +1,7 @@
+serial, nightly,  parallel
+valgrind
+bsrc
+expression
+transient
+vpwl
+resistor

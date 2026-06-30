@@ -1,0 +1,17 @@
+* Test that a DC analysis with a .options timeint method=trap statement 
+* will run.  The actual circuit is then not important.
+ 
+**********  Solver Settings ********************************************
+
+.options linsol type=klu
+.options timeint method=trap
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+.dc V1 1 5 1
+.print dc V(1) V(2) 
+
+.end
+

@@ -1,0 +1,23 @@
+test downdamples
+
+* This is a test of the "downsampling" capability in the expression library.
+* The original pulse file, bigPulse.dat, contains 4000 points.  Ordinarily, 
+* a 4000 point pulse requires 4000 breakpoints in the time integrator.
+*
+* However, the "numSamples" parameter tells the table operator to 
+* internally reduce the number of points in the table, from the 
+* original 4000 to 100.
+*
+* this one is different than downsamples1.cir, in that 
+* it is specifying that the interpolation should be performed using a log scale.
+
+.param numSamples=100
+.param logScale=true
+
+Btest 1 0 v={table("bigPulse.dat",numSamples,logScale)+0.1}
+Rtest 1 0 1.0
+
+.tran 1ms 1
+.print tran v(1)
+
+

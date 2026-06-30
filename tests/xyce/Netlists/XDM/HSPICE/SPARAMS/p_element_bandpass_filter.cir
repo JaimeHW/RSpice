@@ -1,0 +1,22 @@
+*port device
+* Xyce netlist for corresponding HSPICE netlist
+* This netlist tests XDM translations from HSPICE of
+* P-element device and the .LIN directive. If the 
+* translation works correctly, the noisecalc 
+* parameter of the .LIN ought to be removed and the
+* print statement should be commented out, since 
+* these are not yet implemented in Xyce. 
+
+.OPTIONS DEVICE TNOM=25 
+L1 1 2 L=1u
+
+C2 2 3 C=1n
+R3 3 0 R=1
+PIN 1 0 Z0=50 PORT=1
+POUT 3 0 PORT=2
+.AC DEC 10 1000 1G
+
+.LIN SPARCALC=1 
+.END
+
+

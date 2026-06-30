@@ -1,0 +1,7 @@
+exclude
+tags
+diodeClipper.cir.spectre
+diodeClipper.cir
+diodeClipper.cir.sh
+D1N3940.scs
+

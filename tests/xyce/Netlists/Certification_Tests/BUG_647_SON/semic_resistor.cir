@@ -1,0 +1,21 @@
+Semiconductor Resistor Circuit Netlist
+* BUG 647 pointed out that model parameters copied into instance were done
+* at the wrong time, and would not work properly if the model parameter
+* were subject to a .step loop.
+*
+* This test compares .step output over instance parameters to the same
+* sweep over the corresponding model parameter instead.
+*
+* The resistor has three parameters that are copied form the model, and one
+* that is copied from the device package (TEMP)
+R1 2 0 RMOD L=1000U W=1U TC1=1e-2 TC2=1e-4 
+VIN 1 0 5V
+VMON 1 2 0V
+.DC VIN 0 5V 1V
+.MODEL RMOD R (RSH=1 TNOM=27 W=1u)
+.step lin R1:W 1u 5u 1u
+.step lin R1:TEMP 30 35 1
+.step lin R1:TC1 1e-2 3e-2 1e-2
+.step lin R1:TC2 1e-4 3e-4 1e-4
+.PRINT DC V(1) I(VMON) R1:W R1:TC1 R1:TC2 R1:TEMP
+.END

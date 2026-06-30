@@ -1,0 +1,33 @@
+* test should fail because no time-voltage pairs were defined
+.TRAN 0 1
+V1 1 0 PWL 
+R1 1 0 500
+
+V2 2 0 PWL R=1 
+R2 2 0 500
+
+V3 3 0 PWL TD=1
+R3 3 0 500
+
+V4 4 0 PWL R=1 TD=1
+R4 4 0 500
+
+* test should fail because file does not exist
+V5 5 0 PWL FILE "missingFile.txt"
+R5 5 0 500
+
+* test should fail because file contains a bad
+* list of time-voltage pairs
+V6 6 0 PWL FILE "badTimeVoltageList.csv"
+R6 6 0 500
+
+* test should fail because file spec is missing the file name
+V7 7 0 PWL FILE
+R7 7 0 500
+
+* test should fail because the file is actually a directory
+V8 8 0 PWL FILE "."
+R8 8 0 500
+
+.PRINT TRAN V(1) V(2) V(3) V(4) V(5) V(6) V(7) V(8)
+.END

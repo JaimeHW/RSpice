@@ -1,0 +1,20 @@
+* Xyce netlist for testing lossless transmission line
+
+.TRAN 0 100ns 0
+.PRINT TRAN FORMAT=PROBE V(N14950) V(N15037) V(N16674) V(N16680)
+
+* specify using time delay (TD)
+T_T1 N14950 0 N15037 0 TD=10e-9 Z0=50
+R_R1 N14553 N14950 TC=0,0 R=50
+R_R2 N15037 0 TC=0,0 R=50
+V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)
+
+* specify using frequency and relative number of wavelengths
+T_T2 N16674 0 N16680 0 F=1e9 NL=10 Z0=50
+R_R3 N16606 N16674 TC=0,0 R=50
+R_R4 N16680 0 TC=0,0 R=50
+V_V2 N16606 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)
+
+
+.END
+

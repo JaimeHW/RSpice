@@ -1,0 +1,23 @@
+Regression test for simple normal distribution sampling, with multiple AGAUSS statements
+
+c1 1 0 1uF IC=1
+R1 1 2 { 2*agauss(0.75K,0.25K,1) + 2*agauss(0.75K,0.25K,1) }
+v1 2 0 0V
+.print tran v(1)
+.tran 0 5ms
+.options timeint reltol=1e-6 abstol=1e-6
+
+* 10 normally distributed samples, mean=3K; std deviation=1K
+.SAMPLING 
++ useExpr=true
+*+ param=R1
+*+ type=normal
+*+ means=3K
+*+ std_deviations=1K
+
+.options SAMPLES numsamples=10
++ outputs={R1:R},{V(1)}
++ stdoutput=true
+
+.end
+

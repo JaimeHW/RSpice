@@ -1,0 +1,10 @@
+* This netlist included in the PSpice netlist with a 
+* backward slash in the .INC statement.
+
+R_R4a         N04173 N04179  10 TC=0,0 
+R_R4b         N04179 0  20 TC=0,0 
+V_V4         N04173 0  AC 1
++SIN 0 4 1KHz 0 0 0
+
+.END
+

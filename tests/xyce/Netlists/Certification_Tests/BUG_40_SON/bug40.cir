@@ -1,0 +1,66 @@
+Testing new mutual inductor "k = { value } " syntax
+******************************************************
+* Tier: ?????
+* Directory/Circuit name:  BUG_40_SON/bug40.cir
+* Description:  Runs a transient analysis to check the new syntax for the 
+*               mutual inductor "k = {coupling}" (vs. just "coupling") 
+* Input:  DC voltage; zero initial condition for some inductor currents.
+* Output: I(L1), I(L2), inductor currents
+*
+* Created by:  K. R. Santarelli (09/08)
+*
+* The main purpose of this test is to make sure that a mutual inductor line 
+* of the form
+*
+* Ki Lm Ln k = coupling 
+*
+* is correctly interpreted by Xyce.  Up until now, Xyce only allowed lines of
+* the form
+*
+* Ki Lm Ln coupling
+*
+* We add a number of mutual inductors to the circuit below to test various 
+* syntax cases.  If this circuit doesn't exit in error, then the test has 
+* essentially passed.  We do, however, compute an analytical solution to the
+* circuit state and compare this via xyce-verify.
+*
+* The mutual inductor circuit comprised of L3, L4, R3, and R4 is a
+* "stand-alone" circuit with no external excitation.  All currents and 
+* voltages in this part of the circuit should be 0 (we add this part of the
+* circuit only to test syntax when a model card is present).
+*
+* The remaining circuit, which is driven by a DC voltage source V1, has 
+* inductor currents which can be found analytically:
+*
+* i(L1) = 1 - 0.5*exp(-2/3 * t) - 0.5 * exp(-2t)
+* i(L2) =    -0.5*exp(-2/3 * t) + 0.5 * exp(-2t)
+*
+* Note that I(R1)=I(L1), I(R2)=-I(L2)
+***********************************************************************
+
+.param kvalue = 1
+
+L1 2 0 1 IC=0
+L2 3 0 1 IC=0
+L3 4 0 1 
+L4 5 0 1
+
+
+K1 L1 L2 0
+K2 L1 L2 K = 0
+K3 L1 L2 k ={0}
+K4 L1 L2 k = {0.5 * kvalue}
+K5 L3 L4 k=0 kmodel
+
+V1 1 0 DC 1
+R1 1 2 1
+R2 3 0 1
+R3 4 0 1
+R4 5 0 1
+
+.model kmodel core area=0
+
+.tran 0.00001 7 uic
+.print tran I(R1) I(R2) I(R3) I(R4)
+.options TIMEINT reltol=1e-6 abstol=1e-12
+.end 

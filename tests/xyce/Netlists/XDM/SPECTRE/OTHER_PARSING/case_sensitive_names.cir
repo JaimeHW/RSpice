@@ -1,0 +1,28 @@
+**************************************************************
+* Xyce netlist for testing the xdm warning messages that
+* result from device names that are unique in Spectre, since
+* Spectre is case-senstive, but not unique in Xyce since
+* Xyce is not case-sensitive.  Note that the xdm-translated 
+* Xyce netlist will not run.  It will exit with an error
+* because of "duplicate device names".
+*
+* See SRN Bug 2017 and the associated Spectre netlist for 
+* more details.
+* 
+***********************************************************
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PRINT TRAN V(net1) V(net4) 
+
+* This netlist has resistor names that will actually work in
+* Xyce.  RR0 and RR0a will not conflict.  The Spectre netlist
+* has R0 and r0, which xdm turns into RR0 and Rr0.  Since
+* Xyce is not case-sensitive, those names int the xdm-translated
+* netlist are "identical" to Xyce.
+RR0        net1 net4  1K 
+RR0a       net4 0 1K 
+VV1        net1 0 SIN(0 1 1KHz 0 0 0)
+
+.END
+

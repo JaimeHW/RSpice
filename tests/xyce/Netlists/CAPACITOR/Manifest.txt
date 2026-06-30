@@ -1,0 +1,15 @@
+capacitor.cir
+capacitor.cir.prn.gs.pl
+capacitor.cir.sh
+capacitor3.cir
+capacitor3.cir.prn.gs.pl
+capacitor3.cir.sh
+rc_osc.cir
+rc_osc.cir.prn.gs.pl
+rc_osc.cir.sh
+tags
+ErrorMessageTest.cir
+ErrorMessageTest.cir.sh
+ErrorMessageTest.cir.tags
+
+ErrorMessageTest.cir.options

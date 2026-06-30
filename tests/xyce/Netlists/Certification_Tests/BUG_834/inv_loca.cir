@@ -1,0 +1,51 @@
+THIS CIRCUIT TESTS THE MOS LEVEL=10 MODEL AS A CHAIN OF INVERTERS IN SERIES
+*
+* Creator: Eric Keiter
+* Date:    10/24/2005.
+*
+* This is a chain of 1 1-input CMOS inverters.  It demonstrates that
+* the transition from a homotopy-based tranOP to the transient phase is
+* broken.  In particular, the homotopy seeps the value of the source 
+* vin from 0.0 to 2.0.  So, at the end of the tranop, vin is 2.0 volts.
+* However, on the very first time step, vin is back down to 0.0 volts.
+* This is particularly strange because vin is a simple, DC source - it
+* should have a constant value, and there shouldn't have been any opportunities
+* to change it, after the tranop was finished.
+
+vin in 0 2.0
+*                     v1  v2  td  tr     tf     pw  per
+vdd dd 0 dc 1.0 pulse 1.0 2.0 0.5 1.0e-2 1.0e-2 1.0 2.02
+vss ss 0 dc 0
+ve  sub  0 dc 0
+
+xinv1 dd ss sub in buf inv1 
+cout  buf ss 1pF
+
+.subckt inv1 dd ss sub in out
+mn1  out in  ss  sub  n1  w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u
+mp1  out in  dd  sub  p1  w=10u l=0.15u  AS=15p AD=15p PS=13u PD=13u
+.ends inv1
+
+.model  n1 nmos  level = 10 
+.model  p1 pmos  level = 10 
+
+.tran 20us 0.5s
+.print tran PRECISION=5 WIDTH=14  v(dd) v(in) 
+.options device debuglevel=-10 voltlim=1
+
+************************************
+* **** Start Homotopy Setup ****
+************************************
+.options loca stepper=0 
++ conparam=vin
++ initialvalue=0.0 minvalue=-1.0 maxvalue=2.0
++ initialstepsize=2.0  minstepsize=0.01  maxstepsize=2.0  aggressiveness=1.0
++ maxsteps=5000 maxnliters=200
+**********************************
+* **** End Homotopy Setup ****
+**********************************
+.options nonlin nlstrategy=0 searchmethod=0 
++ maxstep=200 maxsearchstep=20 
++ continuation=1
+
+.end

@@ -1,0 +1,12 @@
+Baseline for testing against the various defective netlists
+
+R1 1 0 1K
+V1 1 0 1V
+
+* This  single-point "sweep" should produce exactly the same result as all
+* the defective netlists in this directory.  Prior to the addressing of
+* bug 1162, each of the defective versions would produce something wildly
+* different.
+.dc V1 100 100 1
+.print dc V(1) I(v1)
+.end

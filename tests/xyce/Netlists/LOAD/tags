@@ -1,0 +1,6 @@
+serial, nightly,  parallel
+bjt,bjtlev1
+diode
+inductor
+capacitor
+resistor

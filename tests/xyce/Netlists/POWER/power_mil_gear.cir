@@ -1,0 +1,32 @@
+Power test for component inductors in linear mutual inductors
+*test top-level circuit
+V1 1 0 sin(0 1 1KHz)
+R1 1 2 1
+R3 3 0 1
+
+* mutual inductor 1 definition
+L1 2 0 1mH
+L2 3 0 1mH
+K1 L1 L2 0.75
+
+* test with mutual inductor in a subcircuit
+V1S 1S 0 sin(0 1 1KHz)
+R1S 1S 2S 1
+R3S 3S 0 1
+X1 2S 3S ML_SUB
+
+.SUBCKT ML_SUB a b
+L1 a 0 1mH
+L2 b 0 1mH
+K1 L1 L2 0.75
+.ENDS
+
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0 1ms
+.PRINT TRAN V(2) I(L1) P(L1) W(L1) {V(2)*I(L1)} 
++ V(3) I(L2) P(L2) W(L2) {V(3)*I(L2)}
++ V(2s) I(X1:L1) P(X1:L1) W(X1:L1) {V(2S)*I(X1:L1)} 
++ V(3S) I(X1:L2) P(X1:L2) W(X1:l2) {V(3S)*I(X1:L2)}
+
+.END

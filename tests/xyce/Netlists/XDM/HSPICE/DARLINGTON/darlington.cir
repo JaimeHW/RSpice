@@ -1,0 +1,29 @@
+* Xyce Netlist for Sziklai Darlington Transistor Pair
+
+* Circuit Parameters
+.param R1val = 10 ; value for R1
++      R2val = 20 ; value for R2
++      R3val = 30 ; value for R3
+
+* Analysis Directives
+.TRAN  0 1ms
+
+* Sources
+Vcc 6 0 DC 10V
+Vin 1 0 PULSE(0 5V 0.25ms 0.1ms 0.1ms 0.5ms 1m)
+
+* Circuit Netlist
+R1 1 2 R1val
+R2 3 5 R2val
+R3 3 6 R3val
+Q1 3 2 4 gpnp
+Q2 5 4 0 gnpn
+Q3 3 5 0 gpnp
+
+.PRINT tran FORMAT=PROBE V(3) V(4) V(5)
+
+.MODEL gnpn npn
++ level=1
+
+.MODEL gpnp pnp
++ level=1

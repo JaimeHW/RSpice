@@ -1,0 +1,10 @@
+abmpow1.cir
+abmpow1.cir.prn.gs.pl
+abmpow1.cir.sh
+abmpow2.cir
+abmpow2.cir.prn.gs.pl
+abmpow2.cir.sh
+abmpow3.cir
+abmpow3.cir.prn.gs.pl
+tags
+abmpow3.cir.sh

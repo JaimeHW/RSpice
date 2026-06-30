@@ -1,0 +1,84 @@
+ ***** Measure Functions ***** 
+
+AVGV1V2 = 2.500045e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+INTV1V2 = 2.500045e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+MAXV1V2 = 1.500000e+00 at time = 2.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+MINV1V2 = -1.500000e+00 at time = 7.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+PPV1V2 = 3.000000e+00 with max at time= 2.500000e-01 and min at time= 7.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+RMSV1V2 = 1.060670e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+VDIFF = 3.333333e-01 at time = 1.161670e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+SR = 1.021155e+00 for AT = 2.000000e-01
+
+EQNV1 = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+AVGPARV1V2 = 2.500045e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+INTPARV1V2 = 2.500045e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+MAXPARV1V2 = 1.500000e+00 at time = 2.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+MINPARV1V2 = -1.500000e+00 at time = 7.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+PPPARV1V2 = 3.000000e+00 with max at time= 2.500000e-01 and min at time= 7.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+RMSPARV1V2 = 1.060670e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+VDIFFPAR = 3.333333e-01 at time = 1.161670e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+SRPAR = 1.021155e+00 for AT = 2.000000e-01
+
+EQNPARV1 = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+AVGNOPARV1V2 = 2.500045e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+INTNOPARV1V2 = 2.500045e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+MAXNOPARV1V2 = 1.500000e+00 at time = 2.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+MINNOPARV1V2 = -1.500000e+00 at time = 7.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+PPNOPARV1V2 = 3.000000e+00 with max at time= 2.500000e-01 and min at time= 7.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+RMSNOPARV1V2 = 1.060670e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+VDIFFNOPAR = 3.333333e-01 at time = 1.161670e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+SRNOPAR = 1.021155e+00 for AT = 2.000000e-01
+
+EQNNOPARV1 = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+CURLYBRACES = 1.250005e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+

@@ -1,0 +1,37 @@
+Test of BJT (Uniform Collector Doping) Photocurrent Model 
+********************************************************************
+* csradtckt1.cir
+* Tier No.:  1
+* Description:  
+*
+* Input:  Pulse representing radition dose level within the
+*               model
+* Output:       
+* Circuit Elements: 
+* Dose Rate:    
+********************************************************************
+* This netlist can be used to simulate at various rad levels by changing
+* GRORDER (See note above).  The netlist include the basic MMBT2222 DC
+* model parameters and the TF default and MMBT2222 model parameters
+*------------------------------------------------------------------
+*.options nonlin-tran reltol=1.0E-5 abstol=1.0E-6 deltaxtol=0.1 searchmethod=2
+*+ maxsearchstep=10 maxstep=5000
+
+.include "modelcard.mod"
+
+Ib 3 0 DC -400E-6
+VIB 3  8 0V
+VC  4  0  2V
+VIC 4  7  0V
+VIE 9  0   0V
+rxth dt 0 1e12
+QNPN              7        8     9     dt   VND_0780
+
+*.DC VB 0 1 1
+*.DC Iecs 1e-4 1e-2 1e-4
+.DC VC 0 10 0.25 Ib -5e-6 -100e-6 -10e-6
+.PRINT DC   v(7) v(8) v(9) i(VIC) i(VIB) i(VIE)
+*.TRAN 1.0E-5 .001 0.0 1.0E-5
+*.PRINT TRAN FILE=csradtckt1b.prn v(1) v(3) v(4) v(5) v(6) v(10) i(VIC) i(VIB) i(VIE)
+.END
+

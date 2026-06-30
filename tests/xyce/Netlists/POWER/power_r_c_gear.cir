@@ -1,0 +1,22 @@
+power test for capacitor
+*
+VIN  1 0 PULSE(0 1 0U 1U 1U 100m)
+R    2 1 1K
+C2a  2 0 40u
+C2b  0 2 40u
+
+* Also test case where the capacitor has an IC.
+* In this case, P(R3) and P(C3) should have the same 
+* values but opposite signs.  See SON Bug 874 for more
+* details.
+V3  3  0 0V 
+R3  3a 3 1K 
+C3  3a 0 C=40u IC=1
+
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.5U 400ms
+.PRINT TRAN {i(vin)*v(1)} p(vin) w(vin) {i(r)*(v(2)-v(1))} p(r) w(r) 
++ {I(C2a)*v(2)-v(0)} p(c2a) w(c2a) {I(C2b)*(v(0)-v(2))} p(c2b) w(c2b)
++ P(R3) {-1*P(C3)}  
+.END

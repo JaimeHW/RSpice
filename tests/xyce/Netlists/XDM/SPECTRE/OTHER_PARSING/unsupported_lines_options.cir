@@ -1,0 +1,22 @@
+******************************************************************************
+* Xyce netlist for testing Spectre netlist lines that are not supported 
+* in Xyce.  So, the contents of this Xyce netlist doesn't really matter, 
+* other than that it matches the circuit in the Spectre netlist.
+*
+*
+* See SRN Bug 2053 for more details on which Spectre netlist lines are
+* not supported in Xyce.
+******************************************************************************
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PRINT TRAN V(V2)
+
+* A simple voltage divider circuit with an AC source suffices to prove
+* that the translated Xyce netlist actually runs in Xyce.
+RR1        net7 V2  1k 
+RR2        0 V2 2K 
+VV1        net7 0 SIN(0 1 1KHz 0 0 0)
+
+.END
+

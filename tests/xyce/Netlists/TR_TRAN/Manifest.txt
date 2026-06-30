@@ -1,0 +1,8 @@
+exclude
+tags
+tr.cir
+tr.cir.sh
+tr2.cir
+tr2.cir.sh
+tran.cir
+tran2.cir

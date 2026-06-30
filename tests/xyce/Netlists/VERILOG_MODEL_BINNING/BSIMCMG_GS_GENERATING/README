@@ -1,0 +1,9 @@
+The netlists and model cards here are used only for generation of the gold
+standards for the bsimcmg binning tests.  They are the same circuit, but
+use only the correct model card and no binning.  Run them, then rename their
+.prn files to the name of the associated test in the directory above, then
+move them to the OUTPUT directory.
+
+The level 107 gold standard is just a copy of the level 108, so there is no
+circuit to generate it.  110 and 108 do not produce the same signals, so
+need separate gold standards.

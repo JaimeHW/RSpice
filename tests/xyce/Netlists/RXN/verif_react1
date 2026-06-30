@@ -1,0 +1,15 @@
+
+species
+Aspec 0.0  0.0  0
+Zspec 0.0  0.0  0
+end
+
+reactions
+Aspec -> Zspec; simple(1e-3)
+end
+
+initial_conditions
+Aspec 1.0e6
+Zspec 0.0
+end
+

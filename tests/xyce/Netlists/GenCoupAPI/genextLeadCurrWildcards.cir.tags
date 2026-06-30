@@ -1,0 +1,4 @@
+serial, nightly
+genext, istar
+library
+requirestestbinary

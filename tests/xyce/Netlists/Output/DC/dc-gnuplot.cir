@@ -1,0 +1,17 @@
+********************************************************
+* Test FORMAT=GNUPLOT without .STEP.  This should 
+* produce the same .prn file as FORMAT=STD.
+*
+* This also tests FORMAT=SPLOT, which should produce
+* the same output file for the non-step case.
+********************************************************
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+.PRINT DC FORMAT=GNUPLOT V(1) R1:R R2:R V(2)
+.print DC FORMAT=SPLOT FILE=dc-gnuplot.cir.splot.prn V(1) R1:R R2:R V(2)
+.DC V1 1 25 1  
+
+.end

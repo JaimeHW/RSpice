@@ -1,0 +1,5 @@
+nightly, serial, parallel, pce, tran, bsim3
+embeddedsampling
+profection_pce
+output
+required:stokhos

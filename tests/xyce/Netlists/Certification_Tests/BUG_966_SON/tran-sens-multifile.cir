@@ -1,0 +1,30 @@
+*
+* This netlist has a .PRINT SENS line with a FILE= qualifer.
+* If this invocation is used:
+*
+*   Xyce -r tran-sens-multifile.cir.raw -a tran-sens-multfile.cir
+*
+* then Xyce will:
+*
+*   a) make the ASCII-formatted raw file tran-sens-multifile.cir.raw
+*
+*   b) not make the file tran-sens-multifile.cir.prn 
+*
+*   c) make the file tran-sens-multifile.SENS.csv specified by the
+*      FILE= qualifier on the .PRINT SENS line.
+*
+********************************************************
+
+V1 1 0 PWL 0 0 1 1
+R1 1 2 1
+R2 2 0 1
+
+.options output initial_interval=0.2
+.PRINT TRAN R1:R R2:R V(1) V(2)
+.TRAN 0 1 
+
+.sens objfunc={V(2)} param=R2:R 
+.print SENS FORMAT=CSV FILE=tran-sens-multifile.SENS.csv V(1) R1:R R2:R
+.options SENSITIVITY direct=1 adjoint=0
+
+.end

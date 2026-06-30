@@ -1,0 +1,31 @@
+* Test various parsing errors from invalid Touchstone
+* 2 files.  The comments in each invalid file contain
+* information on what is being tested.
+*
+* See SON Bug 1215 for more details.
+*******************************************************
+
+V1 1 0 1
+R1 1 2 1
+YLIN YLIN0 2 0 YLIN_MOD0
+YLIN YLIN1 2 0 YLIN_MOD1
+YLIN YLIN2 2 0 YLIN_MOD2
+YLIN YLIN3 2 0 YLIN_MOD3
+YLIN YLIN4 2 0 YLIN_MOD4
+YLIN YLIN5 2 0 YLIN_MOD5
+YLIN YLIN6 2 0 YLIN_MOD6
+YLIN YLIN7 2 0 YLIN_MOD7
+
+.MODEL YLIN_MOD0  LIN TSTONEFILE=noVersionOptionLines.s1p
+.MODEL YLIN_MOD1  LIN TSTONEFILE=noValidLines.s1p
+.MODEL YLIN_MOD2  LIN TSTONEFILE=shortVersionLine.s1p
+.MODEL YLIN_MOD3  LIN TSTONEFILE=invalidVersion.s1p
+.MODEL YLIN_MOD4  LIN TSTONEFILE=noOptionLine.s1p
+.MODEL YLIN_MOD5  LIN TSTONEFILE=shortLines.s1p
+.MODEL YLIN_MOD6  LIN TSTONEFILE=invalidMatrixFormat.s1p
+.MODEL YLIN_MOD7  LIN TSTONEFILE=bogoFile.s1p
+
+.DC V1 1 5 1
+.PRINT DC V(2)
+
+.END

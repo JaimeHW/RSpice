@@ -1,0 +1,16 @@
+* YLIN device only has three terminals, when it should have 4,
+* since the file ylin-2port-yparam.cir.y2p defines a two-port
+* device.  This is an error.
+
+.model diod d
+
+.options hbint numfreq=10 tahb=0
+.hb 1e5
+.print hb v(1) v(2) i(v1)
+
+v1 1 0  sin  0 5 1e5
+YLIN YLIN1 1 0 2 YLIN_MOD1
+.MODEL YLIN_MOD1 LIN TSTONEFILE=ylin-2port-yparam.cir.y2p
+d1  2 0 diod
+
+.end

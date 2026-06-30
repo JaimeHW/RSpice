@@ -1,0 +1,5 @@
+exclude
+tags
+nodeset_global_node_warning.cir.hspice
+nodeset_global_node_warning.cir
+nodeset_global_node_warning.cir.sh

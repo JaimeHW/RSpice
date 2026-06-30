@@ -1,0 +1,33 @@
+****************************************************
+* Test of various defaults on .FFT lines
+*
+*************************************************
+.TRAN 0 1
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+.PRINT TRAN V(1) V(2)
+
+* This will be changed to FFT_ACCURATE=1
+.OPTIONS FFT FFT_ACCURATE=2
+
+* This will be changed to FFT_MODE=0
+.OPTIONS FFT FFT_MODE=-1
+
+* Explicitly set this option to 0
+.OPTIONS FFT FFTOUT=0
+
+* These lines will use NP = 4, 8 and 16 respectively
+.FFT V(1) NP=3 WINDOW=HANN
+.FFT V(1) NP=11 WINDOW=HANN
+.FFT V(1) NP=12 WINDOW=HANN
+
+* Time window should be set to [0,1]
+.FFT V(1) START=-1 STOP=2 NP=8 WINDOW=HAMM FORMAT=UNORM
+.FFT V(2) FROM=-2 TO=4 NP=8 WINDOW=HAMM FORMAT=UNORM
+.FFT I(R1) STOP=-1 NP=8 WINDOW=HAMM
+
+.PRINT TRAN V(1) V(2)
+.END

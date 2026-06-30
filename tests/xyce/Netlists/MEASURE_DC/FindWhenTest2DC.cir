@@ -1,0 +1,34 @@
+* Test DC mode support for FIND-WHEN AND WHEN Measures
+*
+* This bug covers:
+*   1) The case of two variables on the .DC line.  (Note:
+*      since there is no .STEP statement, the output is treated
+*      like one STEP.)
+*
+*   2) Have one sweep variable (vsrc1) be monotonically decreasing,
+*      while the other (vsrc2) is monotonically increasing
+*
+* See SON Bug 1270 for more details.
+**************************************************************
+
+vsrc1   1a 0 1
+rload1a 1a 1b 0.1
+rload1b 1b 0 1
+
+vsrc2   2a 0 5
+rload2a 2a 2b 0.1
+rload2b 2b 1b 0.1
+
+.DC vsrc1 5 1 -1 vsrc2 2 5 3
+
+* Note: vsrc1:DCV0 is the syntax for printing the DC value of vsrc1,
+* as it is swept.
+.print dc vsrc1:DCV0 vsrc2:DCV0 v(1a) v(2a) v(1b) v(2b)
+
+* WHEN
+.MEASURE DC whenv1b4 WHEN v(1b)=4
+
+* FIND-WHEN
+.MEASURE DC findv2bwhenv1b4 find v(2b) when v(1b)=4
+
+.end

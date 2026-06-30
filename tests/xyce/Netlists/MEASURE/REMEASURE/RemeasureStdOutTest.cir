@@ -1,0 +1,19 @@
+* A test of the descriptive output to stdout for re-measure
+*
+*******************************************************************************
+*
+* a few sources of different types
+VS  1  0  SIN(0 1.0 1HZ 0 0)
+VP  2  0  PULSE( 0 100 100ms 100ms 100ms 700ms 1s )
+
+R1  1  0  100
+R2  2  0  100
+
+.TRAN 0  1
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2)
+
+.measure tran max1 max V(1) 
+.measure tran max2 max V(2)
+
+.END
+

@@ -1,0 +1,17 @@
+Bug Number: 742
+Test netlist: bug_742.cir
+
+Description:
+============
+This test checks the function of the RAND() function
+
+Verification
+============
+Run Xyce in serial on the netlist.
+
+The file bug_742.cir.prn should contain four different voltages, each constant, and
+each between one and two.  A second run should produce four new voltages.
+
+Special Notes:
+==============
+Parallel testing is not needed for this case.

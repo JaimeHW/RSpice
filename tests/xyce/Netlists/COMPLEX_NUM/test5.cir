@@ -1,0 +1,18 @@
+HB test for complex expressions on .print line
+*
+
+R1 1 0 1k
+C1 1 0 1p
+D1 2 1 D1N3940
+.MODEL D1N3940 D (IS=4e-10 RS=.105 N=1.48 TT=8e-7 CJO=1.95E-11 VJ=.4 M=.38 EG=1.36 XTI=-8 KF=0 AF=1 FC=.9 BV=600 IBV=1e-4)
+*            low high td tr  tf  pulsewidth    period
+v1 2 0 pulse 1V 2V  0 1e-5 1e-5 {1/1e4/2-1e-5 } {1/1e4}
+
+.param realPart=1.0e-4
+.param imagPart=2.0e-4
+.param par1={realPart + imagPart*1.0J}
+.print HB v(1) {par1} {par1 * v(1)} { m(par1) }
+.hb 1e4
+
+.options hbint numfreq=50
+.end

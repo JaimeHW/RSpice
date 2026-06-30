@@ -1,0 +1,4 @@
+parallel,serial,nightly
+hb    
+required:fft
+valgrind

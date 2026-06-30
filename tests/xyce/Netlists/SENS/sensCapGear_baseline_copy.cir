@@ -1,0 +1,28 @@
+Regression test to show transient direct sensitivities for second order Gear time integration.
+********************************************************************************
+*.param test_ic=1.0
+.param cap=1u
+.param res=1K
+c1 1 0 {cap} 
+R1 1 0 {res}
+
+.print tran v(1) 
++ {(time/(res*res*cap))*exp(-time/(res*cap)) }
++ {(time/(res*cap*cap))*exp(-time/(res*cap)) }
+
+.print sens 
+
+* only output after time=0.002 sec.  The capacitor sensitivity isn't very 
+* accurate for the finite difference case in the early part of the transient.
+.tran 0 5ms 0.002 uic
+
+*.IC V(1)={test_ic}
+.IC V(1)=1.0
+
+.options timeint reltol=1e-6 abstol=1e-6 method=gear 
+
+.SENS objfunc={V(1)} param=R1:R,C1:C
+.options SENSITIVITY direct=1 adjoint=0  diagnosticfile=0  stdoutput=0
+
+.end
+

@@ -1,0 +1,23 @@
+Zero length RC and RG lines
+*********************************************************
+* This two LTRA instance lines should run.  However,
+* since they have zero length, the output voltages
+* should be identical to the input voltages
+*
+*
+*********************************************************
+o1 1 0 rc_out 0 rc 
+.model rc ltra r=0.05 C=20pF LEN=0
+
+o2 1 0 rg_out 0 rg
+.model rg ltra r=0.05 g=20 LEN=0
+
+v1 1 0 pulse(0 1 1ns 1ns 1ns 20ns 40ns)
+rload_rc rc_out 0 10
+rload_rg rg_out 0 10
+
+.tran 0.1ns 70ns 0 0.15ns
+.print tran v(1) v(rc_out) v(rg_out)
+
+.end
+

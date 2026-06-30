@@ -1,0 +1,21 @@
+********************************************************
+* Test error messsage when .NOISE line has an invalid
+* <start frequency> entry, that is 0.
+*
+* See SON Bug 1042 for more details.
+********************************************************
+
+v1  1 0 dc 5.0 ac 1
+r1  1 2 100k
+r2  2 0 100k
+*
+* amp and lp filter
+eamp  3 0 2 0 1
+rlp1  3 4 100
+clp1  4 0 1.59nf
+*
+.noise v(4) v1 dec 5 0 1e6
+
+.print noise V(4) {log(onoise)} {log(inoise)}
+
+.end

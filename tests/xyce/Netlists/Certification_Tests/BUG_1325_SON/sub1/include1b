@@ -1,0 +1,5 @@
+* The path on the .INC line is relative to the path to this file.
+* This file is used as part of testing that a ../ syntax works on
+* a .INC line via the contents of the sub2/include 2 file.
+
+.inc sub2/include2

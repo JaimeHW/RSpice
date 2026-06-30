@@ -1,0 +1,14 @@
+boron.dat
+expressionDopingExample.cir
+gilbert_cell_pde_four.cir
+gilbert_cell_pde_four.cir.tags
+npn_bjt_pde.cir
+npn_bjt_pde.cir.tags
+npn_bjt_pde_35C.cir
+npn_bjt_pde_35C.cir.tags
+phos.dat
+ramp_test1_pde.cir
+ramp_test1_pde.cir.tags
+ramp_test1_pde_homotopy.cir
+ramp_test1_pde_homotopy.cir.tags
+tags

@@ -1,0 +1,5 @@
+exclude
+tags
+bsimsoi_translation.cir.spectre
+bsimsoi_translation.cir
+bsimsoi_translation.cir.sh

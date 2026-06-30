@@ -1,0 +1,25 @@
+Regression test for simple uniform distribution propagation via projection (quadrature) PCE
+*
+* This test ensures that a device parameter can have a complicated expression 
+* that includes multiple random operators.  This netlist should produce a result 
+* which matches the result of issue84_devParam1.cir exactly, via diff.
+*
+.global_param testNorm={agauss(2k,1k,1)}
+.global_param testUnif={aunif(2k,1k)}
+.global_param R1value={testUnif*2.0 + testNorm*3.0}
+*
+R2 1 0 6K
+R1 1 2 {R1value}
+v1 2 0 1000V
+.dc v1 1000 1000 1
+*
+.EMBEDDEDSAMPLING useExpr=true
+.options EMBEDDEDSAMPLES 
++ projection_pce=true
++ order=10
++ outputs={v(1)}
++ stdoutput=true
+
+.print es 
+.print dc v(1)
+.end

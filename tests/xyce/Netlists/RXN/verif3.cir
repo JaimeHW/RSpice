@@ -1,0 +1,28 @@
+Verification test 3
+*-------------------------------------------------------------------------
+VBASE BAS 0 0.5V
+VEMIT  GND 0 0.0V
+YRXN R1  BAS  GND  rxn1
++ transport=false  
++ scalerxn=false
++ dirichletbc=false
++ tecplotlevel=0
+*-------------------------------------------------------------------------
+
+.MODEL rxn1 rxn (LEVEL=1
++ MODELRXNSPEC=true
++ REACTION_FILE=verif_react3
++ NUMBER_REGIONS=1
++ )
+
+.options timeint debuglevel=-10   reltol=1.0e-5
+.options nonlin  debuglevel=-10  
+.options nonlin-tran  debuglevel=-10  
+.options device debuglevel=-10  
+
+.TRAN 3.0E-8 1.0e+2  
+
+.PRINT TRAN delimiter=tab N(yrxn!r1_000_Conc_Aspec) N(yrxn!r1_000_Conc_Bspec) N(yrxn!r1_000_Conc_Cspec) 
+
+.END
+

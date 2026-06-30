@@ -1,0 +1,23 @@
+Test Name: prn
+Owner: Dave Shirley
+Test netlists: prn.cir
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_3.1       # the first version where this bug was tested.
+ 
+Description:
+============
+  Test whether Xyce (incorrectly) exits if no .print is specified.
+ 
+Procedure:
+============
+  Default
+ 
+Verification:
+=============
+  Test passes if no fatal error is observed in the log file.
+ 
+Notes:
+======
+  None

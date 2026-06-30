@@ -1,0 +1,80 @@
+ ***** Measure Functions ***** 
+
+DERIVVROUTAT1 = -8.663736e-01 for AT = 1.000000e+00
+
+DERIVVROUTBAT5 = -5.237892e-01 for AT = 5.000000e+00
+
+DERIVVIOUTBAT5 = 1.986427e-01 for AT = 5.000000e+00
+
+DERIVVROUTAT0.01 = 1.083053e+00 for AT = 1.000000e-02
+
+DERIVWHENVROUT1 = -6.026308e-01 at freq = 5.846612e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP1 = 6.948642e-01 at freq = 3.106569e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP2 = 1.303230e+00 at freq = 1.491337e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP3 = 1.303230e+00 at freq = 1.491337e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP4 = 3.170457e-01 at freq = 4.341788e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP5 = -2.186783e+00 at freq = 5.846612e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVVIOUTFROM1 = 1.286611e-02 at freq = 3.311124e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+03
+
+DERIVIMV1 = 6.281163e-01 for AT = 5.000000e-02
+
+Netlist warning: DERIVFAIL1 failed. AT value outside frequency sweep window
+DERIVFAIL1 = 0.000000e+00 FAILED for AT = 1.000000e+04
+
+DERIVFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+LASTMEASURE = 5.360165e+00 at freq = 1.000000e+03
+ ***** Measure Functions ***** 
+
+DERIVVROUTAT1 = -8.005665e-01 for AT = 1.000000e+00
+
+DERIVVROUTBAT5 = -4.798523e-01 for AT = 5.000000e+00
+
+DERIVVIOUTBAT5 = 1.838194e-01 for AT = 5.000000e+00
+
+DERIVVROUTAT0.01 = 9.982830e-01 for AT = 1.000000e-02
+
+DERIVWHENVROUT1 = -6.749823e-01 at freq = 6.360983e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP1 = 6.373416e-01 at freq = 3.095386e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP2 = 1.198975e+00 at freq = 1.566625e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP3 = 1.198975e+00 at freq = 1.566625e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP4 = 2.901099e-01 at freq = 4.448845e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP5 = -2.049860e+00 at freq = 6.360983e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVVIOUTFROM1 = 1.841814e-02 at freq = 3.027269e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+03
+
+DERIVIMV1 = 6.281148e-01 for AT = 5.000000e-02
+
+Netlist warning: DERIVFAIL1 failed. AT value outside frequency sweep window
+DERIVFAIL1 = 0.000000e+00 FAILED for AT = 1.000000e+04
+
+DERIVFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+LASTMEASURE = 4.922994e+00 at freq = 1.000000e+03

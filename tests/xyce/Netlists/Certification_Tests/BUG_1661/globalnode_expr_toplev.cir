@@ -1,0 +1,10 @@
+Test to highlight global nodes bug
+
+v1 $g_1 0 pwl ( 0 0 1ms 1mV 2ms 4mV 3ms 9mV)
+R1 $g_1 0 1
+B1 1 0 V={V($g_1)}
+R2 1 0 1
+
+.print tran v($g_1) v(1)
+.tran 1ns 4ms
+.end

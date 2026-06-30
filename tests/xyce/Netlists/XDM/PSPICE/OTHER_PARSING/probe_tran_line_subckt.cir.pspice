@@ -1,0 +1,25 @@
+* This PSpice netlist tests that PSpice .PROBE64 and .PROBE lines work
+* for nodes in subcircuits.  It address SRN Bug 2033.
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+
+* .PROBE64 and .PROBE lines should work for nodes in subcircuits 
+.PROBE64 N(N04173) N(N03179) 
+.PROBE64 V([X_X1.B]) N(X_X1.B)
+.PROBE V([X_X1.B]) N(X_X1.B)
+
+* simple voltage divider circuit. but first "resistor" is two 
+* series resistors in a subcircuit
+X_X1         N04173 N03179  TwoRes 
+R_R2         N03179 0  20 TC=0,0 
+V_V1         N04173 0  AC 1
++SIN 0 1 1KHz 0 0 0
+
+.SUBCKT TwoRes A C
+R_RX1 A B 5  TC=0,0
+R_RX2 B C 5  TC=0,0
+.ENDS
+
+.END
+

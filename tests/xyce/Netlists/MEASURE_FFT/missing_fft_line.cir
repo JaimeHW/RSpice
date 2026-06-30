@@ -1,0 +1,19 @@
+********************************************************************
+* Test error message when netlist has a .MEASURE FFT line, but no
+* .FFT line.
+*
+* The netlist and .TRAN print/analysis statements in this netlist
+* don't really matter.
+*
+*******************************************************************
+
+.TRAN 0 1
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+.MEASURE FFT THD THD V(1)
+
+.PRINT TRAN V(1) V(2)
+.END

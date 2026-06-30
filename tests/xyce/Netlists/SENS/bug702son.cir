@@ -1,0 +1,48 @@
+Test for bug 702, to insure that derivatives of vsrc currents are correct
+*
+* For the nominal values of R1 = R2 = 10,
+*  V(A) = 5.0
+*  V(B) = 2.5
+*
+*  (V(A)-V(B))/R1 = V(B)/R2 = I(Va)
+*
+*  V(B) = 5*R2/(R2+R1) = 2.5
+*
+*
+.param R1=10.0
+.param R2=10.0
+R1 A B {R1}
+R2 B 0 {R2}
+Va A 0 5
+
+.dc Va 5 5 1
+
+* via expressions generate the analytical sensitivities.  The output
+* of "print dc" should match the output of "print sens", other than 
+* the header and footer.
+.print dc 
++ {-5/(R2+R1)}                            ; Vb
++ {5/((R2+R1)*(R2+R1))}                   ; dI/dR1
++ {5/((R2+R1)*(R2+R1))}                   ; dI/dR2
++ {25/((R2+R1)*(R2+R1))}                  ; I^2
++ {-50/((R2+R1)*(R2+R1)*(R2+R1))}         ; d (I^2)/dR1
++ {-50/((R2+R1)*(R2+R1)*(R2+R1))}         ; d (I^2)/dR2
++ {-0.5*R2/(R2+R1)}                       ; -Vb*0.1
++ {0.5*R2/((R2+R1)*(R2+R1))}              ; d( -Vb*0.1 )/dR1
++ {-0.5*R1/((R2+R1)*(R2+R1))}             ; d( -Vb*0.1 )/dR2
++ {0.25*R2*R2/((R2+R1)*(R2+R1))}          ; Vb*Vb*0.01
++ {-0.50*R2*R2/((R2+R1)*(R2+R1)*(R2+R1))} ; d (Vb*Vb*0.01) / dR1
++ {0.50*R2*R1/((R2+R1)*(R2+R1)*(R2+R1))}  ; d (Vb*Vb*0.01) / dR2
+
+* Derivatives of the first and third objective functions should match
+* Derivatives of the second and fourth objective functions should match
+* (Note, the test doesn't directly test this, but good to be aware of)
+.SENS objfunc={I(Va)},{I(Va)*I(Va)},{-V(B)*0.1},{V(B)*V(B)*0.01}
++ param=R1:R,R2:R
+
+.print sens 
+
+.options SENSITIVITY adjoint=1 
+
+.END
+

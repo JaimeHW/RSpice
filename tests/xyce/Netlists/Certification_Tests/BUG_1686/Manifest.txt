@@ -1,0 +1,8 @@
+bug_1686.cir
+bug_1686.cir.sh
+bug_1686_dup.cir
+bug_1686a.cir
+exclude
+inc1.sub
+inc2.sub
+tags

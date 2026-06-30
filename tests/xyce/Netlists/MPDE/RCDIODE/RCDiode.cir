@@ -1,0 +1,67 @@
+Simple RC-Diode circuit
+**********************************************************************
+*
+* This circuit has the voltage source applied directly to the
+* capacitor, with the resistor tied to ground and the diode
+* in parallel with the capacitor.
+*
+*
+* 1/30/03 Todd Coffey  <tscoffe@sandia.gov>
+*
+**********************************************************************
+*.options mpde n2=50
+* high-frequency noise on top of low freqency sine
+*Vsrc	1 0	SFFM(0V 24V 100 0.5 1000)
+* symmetric sine wave
+Vsrc	1 0	DC 0V SIN(0V 12V 200 0 0)
+* positive only pulse:
+*Vsrc	1 0	PULSE(0V 12V 1ms 1ms 1ms 5ms 10ms)
+* positive/negative pulse:
+*Vsrc1	1 0	PULSE(0V 12V 1ms 1ms 1ms 1ms 10ms)
+*Vsrc2	1 0     PULSE(0V -12V 6ms 1ms 1ms 1ms 10ms)
+* negative pulse:
+*Vsrc	1 0     PULSE(0V -12V 6ms 1ms 1ms 1ms 10ms)
+R1	1 2	20k 
+D1	2 3	DM
+C1  3 0 1u
+.model DM D( Is = 1.0e-14 )
+*.options timeint method=1 conststep=1
+.print tran V(1) V(2) V(3) I(Vsrc)
+
+*.tran 5e-5 50ms
+*.tran 5e-5 50ms
+*.TRAN 0.5e-4 50ms
+*.tran .05ms 50ms
+*.options nonlintran pseudoinverse=1
+*.options timeint method=3
+.options timeint method=8 maxord=5
+*maxord=1 hmax=0.01ms
+
+*.TRAN 10us 120ms
+*.TRAN 250us 120ms
+*
+.MPDE 5e-5 5e-5 50ms
+.options MPDE IC=5 ICper=1 n2=51 diff=3 freqdomain=0
+* IC=0 produced an IC that IDAReduced has to clean up substantially in terms of step-sizes
+* IC=2 failed
+* IC=3 produced an IC that IDAReduced has to clean up substantially in terms of step-sizes
+* IC=5 produced an IC that IDAReduced has to clean up substantially in terms of step-sizes
+
+
+*
+*C1	1 2	100n      
+*C1 1 2 500n
+*C1	1 2	1u 
+*.TRAN 100us 2s
+*.TRAN 10us 40ms
+*.MPDE 100us 1s 2s
+*.MPDE 100us 100us 40ms
+*.print dc v(1) v(2) i(vsrc)
+*.options timeint method=1
+*.options timeint debuglevel=2
+*.options nonlintran debuglevel=1
+*.options nonlin debuglevel=3
+*.options nonlin derivativecheck=1
+*.options nonlintran derivativecheck=1
+*.options device finitediff=0 
+.END

@@ -1,0 +1,47 @@
+inner problem
+.subckt nand vdd vss 1 2 vout
+
+rb1   vdd  vb1  4k
+qin1  vb2  vb1  1  npn
+qin2  vb2  vb1  2  npn
+rc2   vdd  vc2  1.6k
+q3    vc2  vb2  vb3  npn
+rc3   vdd  vout 4k
+q4    vout vb3  vss  npn
+rb3   vb3  vss    1k
+**************************
+.model npn npn (           is     = 3.97589e-14
++ bf     = 195.3412        nf     = 1.0040078       vaf    = 53.081
++ ikf    = 0.976           ise    = 1.60241e-14     ne     = 1.4791931
++ br     = 1.1107942       nr     = 0.9928261       var    = 11.3571702
++ ikr    = 2.4993953       isc    = 1.88505e-12     nc     = 1.1838278
++ rb     = 56.5826472      irb    = 1.50459e-4      rbm    = 5.2592283
++ re     = 0.0402974       rc     = 0.4208          xti    = 5.8315
++ eg     = 1.11            xtb    = 1.6486          tf     = 3.3e-10
++ xtf    = 6               itf    = 0.32            vtf    = 0.574
++ ptf    = 25.832          tr     = 3.75e-7         cje    = 2.56e-11
++ vje    = 0.682256        mje    = 0.3358856       fc     = 0.83
++ cjc    = 1.40625e-11     vjc    = 0.5417393       mjc    = 0.4547893)
+**************************
+
+.ends
+
+
+vconnectvdd vdd  0 7v
+vconnectvss vss  0 2v
+vconnect1a  1a   0 7v
+vconnect2a  2a   0 2v
+vconnect3a  3a   0 7v
+vconnect4a  4a   0 2v
+
+x1 vdd vss 1a 2a out1 nand
+x2 vdd vss 3a 4a out2 nand
+.tran 20ns 10us
+*comp v(out1) reltol=0.02 
+*comp v(out2) reltol=0.02 
+.print tran format=std precision=13 width=21 v(out1) v(out2)
+*.print tran format=std precision=13 width=21 v(1a) v(2a) v(out1) v(3a) v(4a) v(out2)
+*.print tran format=tecplot precision=13 width=21 v(1a) v(2a) v(out1) v(3a) v(4a) v(out2)
+
+.end
+

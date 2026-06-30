@@ -1,0 +1,8 @@
+RC_AC_params.cir
+RC_AC_params.cir.sh
+RC_AC_params_expr.cir
+tags
+exclude
+RC_AC_params_analytic.cir
+RC_AC_params_analytic.cir.tags
+RC_AC_params_analytic.cir.sh

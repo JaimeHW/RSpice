@@ -1,0 +1,44 @@
+* 2-port example with made-up time-domain short-circuit current data.
+* This netlist also uses an ideal gain element (with a gain
+* of 5) as a stand-in for an actual Op Amp circuit.
+*
+* See SON Bug 1295 for more details.
+*********************************************************************
+
+.options hbint numfreq=10 tahb=0
+.hb 1e4
+.print hb v(1) v(2) i(v1)
+
+* test auto-sensing of ISC_TD_FILE_FORMAT=STD
+v1 1 0  sin  0 1 1e4
+YLIN YLIN1 1 0 2 0 YLIN_MOD1
+.MODEL YLIN_MOD1 LIN TSTONEFILE=opAmpWithTDIsc.cir.s2p
++ ISC_TD_FILE=opAmpWithTDIsc_input.prn
+R2 2 0 50
+
+* test auto-sensing of ISC_TD_FILE_FORMAT=STD
+YLIN YLIN2 1 0 3 0 YLIN_MOD2
+.MODEL YLIN_MOD2 LIN TSTONEFILE=opAmpWithTDIsc.cir.s2p
++ ISC_TD_FILE=opAmpWithTDIsc_input.csv
+R3 3 0 50
+
+* Next three .model lines explicitly set ISC_TD_FILE_FORMAT
+YLIN YLIN3 1 0 4 0 YLIN_MOD3
+.MODEL YLIN_MOD3 LIN TSTONEFILE=opAmpWithTDIsc.cir.s2p
++ ISC_TD_FILE=opAmpWithTDIsc_input_prn
++ ISC_TD_FILE_FORMAT=STD
+R4 4 0 50
+
+YLIN YLIN4 1 0 5 0 YLIN_MOD4
+.MODEL YLIN_MOD4 LIN TSTONEFILE=opAmpWithTDIsc.cir.s2p
++ ISC_TD_FILE=opAmpWithTDIsc_input_csv
++ ISC_TD_FILE_FORMAT=CSV
+R5 5 0 50
+
+YLIN YLIN5 1 0 4 0 YLIN_MOD5
+.MODEL YLIN_MOD5 LIN TSTONEFILE=opAmpWithTDIsc.cir.s2p
++ ISC_TD_FILE=opAmpWithTDIsc_input_noindex
++ ISC_TD_FILE_FORMAT=NOINDEX
+R6 4 0 50
+
+.end

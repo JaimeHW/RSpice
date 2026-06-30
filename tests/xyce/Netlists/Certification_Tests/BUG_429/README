@@ -1,0 +1,23 @@
+Test Name: BUG_429
+Owner: Eric Rankin
+Test netlists: none 
+GS files: none
+Mode: parallel 
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+bug 429:  Build broken for MPILAM
+ 
+Procedure:
+============
+Create an MPILAM build as usual.
+
+Verification:
+=============
+A successful configure and make for mpilam builds confirms this bug is fixed.
+ 
+Notes:
+======
+

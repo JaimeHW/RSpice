@@ -1,0 +1,35 @@
+A single Neuron example
+
+
+* This is a standard current pulse to start an activation
+
+.tran 0 2.0e-2
+.options timeint method=7 newlte=1 newbpstepping=1 reltol=1e-3 
+
+.print tran V(a) i(iin) v(b) n(yneuron!neuron1_m) n(yneuron!neuron1_h) n(yneuron!neuron1_n)
+
+Iin 0 a PULSE( 0 0.40e-9 1.0e-3 1.0e-4 1.0e-4 1.0e-3 1.0e10)
+
+
+* standard area is 30x30xpi um2 = 30e-6 * 30e-6 * pi m^2 
+*                               = 3e-5 * 3e-5 * pi m^2 = 3e-3 * 3e-3 * pi cm^2 
+* scale GK, Gna, manebrane capacitance, membrane conductivity
+.param area = {3.0e-3 * 3.0e-3 * 3.141529}  ; [cm^2]
+.param gks  = {0.036 * area }               ; [0.036 S/cm^2  * [area cm^2] ]
+.param gnas = {0.120 * area }               ; [0.120 S/cm^2  * [area cm^2] ]
+.param memC = {1.0e-6 * area }              ; [1.0uF/cm^2    * [area cm^2] ]
+.param memG = {0.0003 * area }              ; [0.0003 S/cm^2 * [area cm^2] ] 
+
+*
+* Using the above neuron model
+*
+.model hhParams neuron level=1 cMem={memC}  gMem={memG} vRest=0.010613  eNa=0.115 gNa={gnas}  eK=-0.012  gK={gks} 
+
+yneuron neuron1  a b hhParams
+
+*membrane params: MemCap={memC} LeakCond={memG} Vrest=0.010613 
+*+ Gk={gks} Ek=-0.012 Gna={gnas} Ena=0.115
+
+rloader b 0 100
+
+.end

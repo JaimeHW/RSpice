@@ -1,0 +1,13 @@
+
+.lib foobar
+
+.subckt borked 1 2 3
+R1 1 2 1k
+R2 2 3 1k
+.ends
+.subckt borked2 1 2 3
+R1 1 2 1k
+R2 2 3 1k
+.ends
+
+.endl foobar

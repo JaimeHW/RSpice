@@ -1,0 +1,15 @@
+* ********************************************************
+* Test error messsage when .DC line has an invalid
+* <points> entry, that is not an integer.  This also
+* covers the case of <points> less than 1.
+*
+* See SON Bug 1321 for more details.
+********************************************************
+
+V1 1 0 1
+R1 1 0 1
+
+.DC DEC V1 1 10 0.3
+.PRINT DC V(1)
+
+.END

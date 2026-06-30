@@ -1,0 +1,36 @@
+In OutputMgr::remeasure 
+file to reprocess through measure and/or fft functions: RemeasureFFTonly.csv
+
+ ***** FFT Analyses ***** 
+
+FFT analysis for V(1):
+  Window: HANN, Start Time: 0.000000e+00, Stop Time: 1.000000e+00 
+  First Harmonic: 1.000000e+00, Start Freq: 1.000000e+00, Stop Freq: 4.000000e+00
+
+      THD = -1.950263e+01 dB ( 1.058934e-01 )
+     SNDR = 1.950263e+01 dB
+     ENOB = 2.947280e+00 bit
+      SNR = 2.000000e+02 dB
+     SFDR = 1.977330e+01 dB at frequency 2.000000e+00
+
+    1.000000e+00 Hz     0.000000e+00 dB  at    -1.575000e+02 Deg.  Harmonic #           1
+    2.000000e+00 Hz    -1.977330e+01 dB  at     4.500000e+01 Deg.  Harmonic #           2
+    3.000000e+00 Hz    -3.169055e+01 dB  at     6.750000e+01 Deg.  Harmonic #           3
+    4.000000e+00 Hz    -2.000000e+02 dB  at     0.000000e+00 Deg.  Harmonic #           4
+
+FFT analysis for V(2):
+  Window: HARRIS, Start Time: 0.000000e+00, Stop Time: 1.000000e+00 
+  First Harmonic: 1.000000e+00, Start Freq: 1.000000e+00, Stop Freq: 4.000000e+00
+
+      THD = -7.937518e+00 dB ( 4.009813e-01 )
+     SNDR = 7.937518e+00 dB
+     ENOB = 1.026166e+00 bit
+      SNR = 2.000000e+02 dB
+     SFDR = 8.064303e+00 dB at frequency 2.000000e+00
+
+    1.000000e+00 Hz     0.000000e+00 dB  at    -1.575000e+02 Deg.  Harmonic #           1
+    2.000000e+00 Hz    -8.064303e+00 dB  at     4.500000e+01 Deg.  Harmonic #           2
+    3.000000e+00 Hz    -2.334792e+01 dB  at    -1.125000e+02 Deg.  Harmonic #           3
+    4.000000e+00 Hz    -2.000000e+02 dB  at     0.000000e+00 Deg.  Harmonic #           4
+
+***** Remeasure analysis complete

@@ -1,0 +1,24 @@
+Simple test
+*
+* simple test
+*
+.FUNC Jt(I) { abs(I) } 
+.FUNC test(I) { sdt( Jt(I)*Jt(I) ) } 
+
+c1 1 0 1uF IC=1
+R1 1 2 1K
+v1 2 0 0V
+
+* test
+Btmp eric1 0 V = { test( I(v1)) }
+Rtmp eric1 0 1.0
+
+.tran 0 5ms
+
+* v(eric1), test(I(v1)) and sdt of Jt*Jt should all be the same.  
+.print tran 
++ {0.001 + abs( test(I(v1)) - V(eric1) ) } 
++ {0.001 + abs( sdt(Jt(I(v1))*Jt(I(v1))) - V(eric1) ) }
+
+.end
+

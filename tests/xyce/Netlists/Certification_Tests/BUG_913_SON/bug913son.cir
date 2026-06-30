@@ -1,0 +1,27 @@
+Netlist to Test the fix of bug 913
+.param base=1K
+* Prior to the fix, this netlist would bomb on all these .param statements
+* That is because prior to the fix, these names were all treated specially
+* by the SPICE separated field tool.  Now they're only treated specially
+* in the context in which they're special --- vector-composite parameters
+* for a number of special device models.
+.param DOPINGPROFILES={base+1000}
+.param REGION={base/1000}
+.param SOURCELIST={base-1000}
+.param LAYER={base*1000}
+.param NODE={SOURCELIST+base}
+.param FIELDDATA={base-1}
+.param COIL={base+1}
+.param PARAM={base*2}
+.param MM_CURRENT={base+base}
+.param MM_INDVARS={base+base}
+.param MM_INDFEQUS={base+base}
+.param MM_INDQEQUS={base+base}
+.param MM_FUNCTIONS={base+base}
+.param MM_PARAMETERS={base+base}
+.param mm_r1={base/2+500}
+R1 1 0 {mm_r1}
+V1 1 0 5V
+.DC V1 0 5V 1V
+.PRINT DC V(1) I(V1)
+.END

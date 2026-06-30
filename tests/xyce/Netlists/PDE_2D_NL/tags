@@ -1,0 +1,2 @@
+serial, nightly,  parallel, tags, pde, 2d
+valgrind

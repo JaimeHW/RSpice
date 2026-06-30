@@ -1,0 +1,49 @@
+Polynomial Source Netlist for a two inputs, third order polynomial
+***********************************************************************
+*
+*
+*  POLY(N) X1 ...XN   C0 C1 ...CN   C11 ...C1N    C21 ...CN1 ...CNN    C121 ...C12N ...
+*  
+*  Value = C0 
+*             + sum_{j=1}^N C_j X_j 
+*             + sum_{i=1}^N sum_{j=1}^N C_{ij} X_i X_j
+*             + sum_{i=1}^N sum_{j=1}^N sum_{k=1}^N C_{ijk} X_i * X_j * X_k + ...
+*
+* for this example, index=0 means V(2) and index=1 means V(1)
+*
+* The POLY expression will have this form:
+*
+*  POLY(2) V(2) V(1) C0   C1 C2   C11 C12 C21 C22   C111 C112 C121 C122 C211 C212 C221 C222  }
+*
+*  Value = C0 + (C1*X1 + C2*X2) + (C11*X1*X1 + C12*X1*X2 + C21*X1*X2 + C22*X2*X2)
+*  + ( C111 * X1*X1*X1 + C112 * X1*X1*X2 + C121 * X1*X2*X1 + C122 * X1*X2*X2 +
+*      C211 * X2*X1*X1 + C212 * X2*X1*X2 + C221 * X2*X2*X1 + C222 * X2*X2*X2 )
+*
+*
+***********************************************************************
+
+.param C0=0.1 C1=0.2 C2=0.3 C11=0.4 C12=0.5 C21=0.6 C22=0.7 C111=0.8 C112=0.9 C121=0.10 C122=0.11 C211=0.12 C212=0.13 C221=0.14 C222=0.15
+
+.func polyVersion(X1,X2) { POLY(2) X1 X2 C0 C1 C2 C11 C12 C21 C22 C111 C112 C121 C122 C211 C212 C221 C222  }
+
+* POLY version:
+VINPUT 1 0 1.0
+B 3 0 V ={polyVersion(V(2),V(1))}
+R1 1 2 1K
+R2 2 0 1K
+R3 3 4 2K
+R4 4 0 2K
+
+.func exprVersion(x1,x2) {C0 + (C1*X1 + C2*X2) + (C11*X1*X1 + C12*X1*X2 + C21*X1*X2 + C22*X2*X2) + ( C111 * X1*X1*X1 + C112 * X1*X1*X2 + C121 * X1*X2*X1 + C122 * X1*X2*X2 + C211 * X2*X1*X1 + C212 * X2*X1*X2 + C221 * X2*X2*X1 + C222 * X2*X2*X2 ) }
+
+* expression style, same polynomial:
+Ba 3a 0 V ={exprVersion(V(2a),V(1))}
+R1a 1 2a 1K
+R2a 2a 0 1K
+R3a 3a 4a 2K
+R4a 4a 0 2K
+
+.DC VINPUT -4 4 1
+.PRINT DC V(1) V(3) V(3a)
+
+.END

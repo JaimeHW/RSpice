@@ -1,0 +1,11 @@
+This is a directory for testing various aspects of
+the parameter refactor described in bugzilla issue 1190.
+
+The point of that issue is to make it so that .param doesn't 
+have to be constant.  .global_param can already be treated as a 
+variable, so the goal is to make .param more like .global_param.
+
+With the new expression library, a lot of the necessary work
+is done, but there is still work needed to make the rest of
+Xyce understand this.
+

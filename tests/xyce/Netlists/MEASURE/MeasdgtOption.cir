@@ -1,0 +1,83 @@
+A test of .OPTIONS MEASURE MEASDGT=<val>
+* This tests AVG, DERIV, ERROR, FIND, MAX, MIN, PP, RMS and TRIG/TARG.
+* The other measures use the output functions from the base class.  That
+* code is tested with the INTEG measure.  This also covers DERIV-AT
+* and FIND-AT for TRAN_CONT measure mode.
+
+* For all measures, the output precision should be 4 digits, rather
+* than either the default precision of 6 or the requested value of
+* precision=10.
+*******************************************************************************
+*
+*
+PWL1 1 0  PWL 0 0 0.5 1 1 0
+R1  1  0  100
+
+* used to generate comparison file for ERROR measures
+*PWL2  2 0  PWL 0 0 0.5 0.8 1 0
+*R2 2 0 100
+*.PRINT TRAN FILE=MeasdgtOption_comp_file.prn V(2)
+
+.TRAN 0 1
+
+.PRINT TRAN FORMAT=NOINDEX V(1)
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.05
+
+.OPTIONS MEASURE MEASDGT=4
+
+* AVG
+.measure tran avgVal avg V(1)
+.measure tran avgValWP avg V(1) precision=10
+
+* DERIV
+.measure tran derivWhen deriv V(1) WHEN V(1)=0.2
+.measure tran derivWhenWP deriv V(1) WHEN V(1)=0.2 PRECISION=10
+.measure tran derivATwp deriv V(1) AT=0.4 PRECISION=10
+.measure tran derivAT deriv v(1) AT=0.2
+
+* ERROR
+.measure tran errorVal ERROR v(1) FILE=MeasdgtOption_comp_file.prn
++ COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=2
+
+.measure tran errorValWP ERROR v(1) FILE=MeasdgtOption_comp_file.prn
++ COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=2 precision=10
+
+* FIND
+.measure tran findAt FIND V(1) AT=0.2
+.measure tran findAtWP FIND V(1) AT=0.2 precision=10
+
+* INTEG
+.measure tran integVal integ V(1)
+.measure tran integValWP integ V(1) precision=10
+
+* MAX
+.measure tran maxVal max V(1)
+.measure tran maxValWP max V(1) precision=10
+
+* MIN
+.measure tran minVal min V(1)
+.measure tran minValWP min V(1) precision=10
+
+* PP
+.measure tran ppVal PP V(1)
+.measure tran ppValWP PP V(1) precision=10
+
+* RMS
+.measure tran rmsVal RMS V(1)
+.measure tran rmsValWP RMS V(1) precision=10
+
+* TRIG/TARG
+.measure tran riseVal TRIG v(1)=0.1 TARG v(1)=0.9
+.measure tran riseValWP TRIG v(1)=0.1 TARG v(1)=0.9 PRECISION=10
+
+* for testing convenience do not make separate .mt0 files
+* for each TRAN_CONT measure
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+.measure tran_cont deriv_at_cont deriv v(1) at=0.4
+.measure tran_cont deriv_at_cont_wp deriv v(1) at=0.6 precision=10
+.measure tran_cont find_at_cont find v(1) at=0.4
+.measure tran_cont find_at_cont_wp find v(1) at=0.6 precision=10
+
+.END
+

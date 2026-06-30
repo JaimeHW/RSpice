@@ -1,0 +1,50 @@
+* Test error handling in the various constructors for SIN, EXP, SFFM 
+* and PULSE sources when the transient specification lacks the necessary
+* parameters.  See SON Bug 1087 for more details.  Note: This test
+* used to be called Core_DeviceSource_SinData.cir
+
+* V0, VA and FREQ are required for a SIN source
+V1 1 0 SIN
+R1 1 0 1
+
+V1a 1a 0 SIN 0 
+R1a 1a 0 1
+
+V1b 1b 0 SIN 0 1
+R1b 1b 0 1
+
+I2 2 0 SIN
+R2 2 0 1
+
+* V1 and V2 are required for an EXP source
+V3 3 0 EXP
+R3 3 0 1
+
+V3a 3a 0 EXP 1
+R3a 3a 0 1
+
+I4 4 0 EXP
+R4 4 0 1
+
+* V0 and VA are required for an SFFM source
+V5 5 0 SFFM
+R5 5 0 1
+
+V5a 5a 0 SFFM 1
+R5a 5a 0 1
+
+I6 6 0 SFFM
+R6 6 0 1
+
+* PULSE source with no parameters is an error
+V7 7 0 PULSE
+R7 7 0 1
+
+I8 8 0 PULSE
+R8 8 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(2) V(3) V(4) V(5) V(6) V(7) V(8)
+.END
+
+

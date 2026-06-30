@@ -1,0 +1,26 @@
+*// Test-bench for silicon ETSOI MVS2 model
+*// simulates the dc I-V characteristics of the transistor
+
+
+M1 drain gate source mvs_2_0_0_etsoi
+Vdrain drain 0  dc 1.0
+Vgate gate 0 dc 1.0
+Vsource source 0 dc 0
+
+.dc vdrain 0 1 0.001 
+.print dc v(drain) v(gate) I(vdrain)
+
+
+.model MVS_2_0_0_ETSOI nmos
++ level=2000 W=3.3e-6 Lgdr=40e-9 dLg=0 Cins = 2.54e-2 B = 2e-10 dqm0 = 3.0e-9 beta=1.45
++ n0=1.35 nd=0.1 delta=35e-3 energy_diff_volt = 48e-3 Rs0 = 125e-6 ksee = 0.035 mt=0.19 ml=0.89 eps=11.68 mu_eff = 350e-4 nu = 0.7
+
+*//simulatorOptions options reltol=1e-3 vabstol=1e-6 iabstol=1e-12 temp=27 \
+* //   tnom=27 scalem=1.0 scale=1.0 gmin=1e-12 rforce=1 maxnotes=5 maxwarns=5 \
+*  //  digits=5 cols=80 pivrel=1e-3 sensfile="../psf/sens.output" \
+*   // checklimitdest=psf 
+
+
+
+.end
+

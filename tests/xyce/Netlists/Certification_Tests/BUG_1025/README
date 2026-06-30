@@ -1,0 +1,23 @@
+Test Name: null netlist causes parallel hang
+Owner:  Dave Shirley
+Test netlists: null.cir
+GS files: none
+Mode:  Parallel
+Comparator:  none
+Version of Xyce: Release_3.1       # the first version where this bug was tested.
+ 
+Description:
+============
+Check to make sure that a null netlist file does not cause a parallel hang.
+ 
+Procedure:
+============
+  xmpirun -np 2 -o ${OUT_DIR}/null.cir.prn null.cir > ${OUT_DIR}/null.cir.log
+
+Verification:
+=============
+No hang occurs.  The script checks this.
+ 
+Notes:
+======
+

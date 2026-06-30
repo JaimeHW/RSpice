@@ -1,0 +1,31 @@
+****************************************************
+* Test the case of a valid .DATA statement in the
+* netlist, but the .AC statement uses the wrong
+* table name.
+*
+* See SON Bug 1188 for more details.
+****************************************************
+
+.global_param mag=1
+.global_param phase=0.1
+
+* Trivial high-pass filter (V-C-R) circuit.
+R1 b 0 2
+C1 a b 1u
+V1 a 0 AC {mag} {phase}
+
+.DATA table
++  mag  phase  freq
++  1.0   0.1  0.0e0
++  1.0   0.1  1.0e0
++  2.0   0.2  1.0e1
++  3.0   0.3  1.0e2
++  4.0   0.4  1.0e3
++  5.0   0.5  1.0e4
++  6.0   0.6  1.0e5
+.enddata
+
+.print AC vm(b)
+.ac data=table1
+
+.end

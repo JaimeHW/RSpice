@@ -1,0 +1,48 @@
+// Generated for: spectre
+// Generated on: Aug 23 09:46:50 2016
+// Design library name: xyce_translator_prj
+// Design cell name: v_sources
+// Design view name: schematic
+simulator lang=spectre
+global 0
+//include "/usr/local/cadence/ic-5.1.41usr5/tools/dfII/samples/artist/ahdlLib/quantity.spectre"
+
+// Library name: xyce_translator_prj
+// Cell name: v_sources
+// View name: schematic
+V5 (net3 0) vsource dc=1 type=dc
+V3 (net5 0) vsource dc=5 type=dc
+V7 (net1 0) vsource type=exp val0=0.0 val1=1.0 td1=100u tau1=20u td2=600u \
+        tau2=40u
+V1 (net7 0) vsource dc=0 mag=0 phase=0 type=sine delay=0 sinedc=0 ampl=1 \
+        freq=1K damp=0
+V9 (net9 0) vsource type=sine sinedc=1 ampl=1 freq=1K
+V11 (net11 0) vsource type=pulse val0=1 val1=10 period=400u delay=50u \
+        rise=50.0u fall=70.0u width=200u
+R7 (net1 V8) resistor r=1K
+R8 (0 V8) resistor r=2K
+R6 (0 V6) resistor r=2K
+R5 (net3 V6) resistor r=1K
+R4 (0 V4) resistor r=2K
+R3 (net5 V4) resistor r=1K
+R1 (net7 V2) resistor r=1K
+R2 (0 V2) resistor r=2K
+R9 (net9 V10) resistor r=1K
+R10 (0 V10) resistor r=2K
+R12 (V12 0) resistor r=1K
+R11 (net11 V12) resistor r=1K
+simulatorOptions options reltol=1e-3 vabstol=1e-6 iabstol=1e-12 temp=27 \
+    tnom=27 scalem=1.0 scale=1.0 gmin=1e-12 rforce=1 maxnotes=5 maxwarns=5 \
+    digits=5 cols=80 pivrel=1e-3 sensfile="../psf/sens.output" \
+    checklimitdest=psf 
+tran tran stop=1m errpreset=moderate write="spectre.ic" \
+    writefinal="spectre.fc" annotate=status maxiters=5 
+finalTimeOP info what=oppoint where=rawfile
+modelParameter info what=models where=rawfile
+element info what=inst where=rawfile
+outputParameter info what=output where=rawfile
+designParamVals info what=parameters where=rawfile
+primitives info what=primitives where=rawfile
+subckts info what=subckts  where=rawfile
+save V2 V4 V6 V8 V10 V12
+saveOptions options save=allpub

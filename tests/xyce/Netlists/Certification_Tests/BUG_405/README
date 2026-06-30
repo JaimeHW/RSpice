@@ -1,0 +1,25 @@
+Test Name: BUG_405
+Owner: Robert Hoekstra
+Test netlists: none 
+GS files: none
+Mode:  Serial/Parallel
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+The distributed parser functionality is tested by all current tests
+in serial and parallel since it is now default functionality.
+ 
+Procedure:
+============
+Run nightly regression and certification tests.
+
+Verification:
+=============
+Passes if the regression and certification tests pass.
+ 
+Notes:
+======
+
+

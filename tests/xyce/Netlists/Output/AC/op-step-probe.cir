@@ -1,0 +1,16 @@
+* AC test of FORMAT=PROBE with .OP and .STEP.
+*
+* See SON Bug 944 for more details.
+**********************************************
+
+* Trivial high-pass filter
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.print AC FORMAT=PROBE v(a) v(b)
+.ac dec 5 100Hz 1e6
+.step R1 1 2 1
+.op
+
+.end

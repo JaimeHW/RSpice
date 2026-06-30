@@ -1,0 +1,13 @@
+level=1 diode circuit
+* This test demonstrates that if there are two models of the same
+* name, Xyce no longer exits cleanly.
+R 1 2 0.0001
+V2 2 0 0.21
+V1 3 0 0.0
+D2 1 3 DA
+.MODEL DA D ( RS=1.84949620e-004 IS=1.85431176e-010)
+.MODEL DA D ( RS=1.73320090e-004 IS=1.85431192e-010)
+
+.DC V2 0.0 2.0 0.005
+.print DC v(2) I(V1)  
+.END

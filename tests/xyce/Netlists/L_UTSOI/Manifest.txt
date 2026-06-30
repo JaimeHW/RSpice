@@ -1,0 +1,9 @@
+asym_nmos_idvg0_allsw0_T27.cir
+asym_nmos_idvg0_allsw0_T27.cir.res.gs
+asym_pmos_idvg0_allsw0_T27.cir
+asym_pmos_idvg0_allsw0_T27.cir.res.gs
+sym_nmos_idvg0_allsw0_T27.cir
+sym_nmos_idvg0_allsw0_T27.cir.res.gs
+tags
+sym_pmos_idvg0_allsw0_T27.cir
+sym_pmos_idvg0_allsw0_T27.cir.res.gs

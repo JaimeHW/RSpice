@@ -1,0 +1,32 @@
+ ***** Measure Functions ***** 
+
+EQNVR4 = 2.502435e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVI4 = -2.499999e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVR4EXP = 1.250244e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PARAMVR4EXP = 1.250244e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNVR4FROMTO = 4.950590e-01
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+EQNIMEAMP = 3.533812e-03
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+EQNFREQ = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: EQNFAIL1 failed. FROM value > highest frequency value
+EQNFAIL1 = FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: EQNFAIL2 failed. TO value < FROM value
+EQNFAIL2 = FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+

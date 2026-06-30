@@ -1,0 +1,23 @@
+* test of coupled inductor parameters on the .PRINT line
+V1 1 0 SIN(0 1 1KHz)
+R1 1 0 2
+R2 2 0 2
+
+* mutual inductor definition (nonlnear level=1)
+L1 1 0 100
+L2 2 0 100
+K1 L1 L2 1.00 nlcore
+
+.model nlcore core level=2 c=0.001
+
+.TRAN 0 0.3ms 
+.PRINT TRAN V(1) V(2) L1:L {L1:L} {2*L1:L} {(L1:L)**2.0} {(L1:L)*R1:R}
+
+.SENS objfunc={v(2)} param=L1:L
+.options SENSITIVITY adjoint=0 direct=1
+.print sens
+
+.options timeint reltol=1e-6 abstol=1e-6 method=gear
+
+.END 
+

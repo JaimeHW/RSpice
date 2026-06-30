@@ -1,0 +1,6 @@
+nightly
+required:parallel
+resistor
+capacitor
+inductor
+

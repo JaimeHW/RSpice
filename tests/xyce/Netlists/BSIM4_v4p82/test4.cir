@@ -1,0 +1,14 @@
+* NMOS Id-Vg
+
+.include modelcard.nmos
+
+vg 1 0 1.2
+vd 2 0 1.2
+
+m1 2 1 0 0 n1 W=10.0u L=0.09u
+
+.dc vg 0.0 1.18 0.02 vd 0.05 1.2 0.5
+.print dc V(1) V(2) i(vd)
+
+.end
+

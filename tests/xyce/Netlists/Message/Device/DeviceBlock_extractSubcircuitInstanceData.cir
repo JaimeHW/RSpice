@@ -1,0 +1,27 @@
+* Test invalid subcircuit lines
+
+.TRAN 0 1
+.PRINT TRAN V(X1:2) V(X2:2)
+
+* X1 line should have an equal sign (e.g., A1=1)
+X1 a c subckt1 PARAMS: A1 1
+R1 c 0 1
+
+.SUBCKT subckt1 1 3 PARAMS: A1=1
+V1   1 0 SIN(0 1 1)
+R1   1 2 1
+R2   2 3 {A1}
+.ENDS 
+
+* X2 line has illegal name for parameter
+X2 d f subckt2 PARAMS: 2A=1
+R2 f 0 1
+
+.SUBCKT subckt2 1 3 PARAMS: A2=1
+V1   1 0 SIN(0 1 1)
+R1   1 2 1
+R2   2 3 {A2}
+.ENDS
+
+.END
+

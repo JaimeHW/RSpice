@@ -1,0 +1,28 @@
+Capacitor Circuit Netlist
+*###############################################################################
+* Tier No.:  1
+* Directory/Circuit Name:  CAPACITOR/capacitor.cir
+* Description:  Test of the capacitor model using a simple RC circuit
+*       configuration.
+* Input:  VIN
+* Output: V(1), V(2)
+* Analysis:
+*       An series RC circuit is connected to pulse voltage source which goes from
+*       0V to 1V after a 10us delay, with rise and fall times of 1us.  The
+*       capacitor voltage should reach 90% of its maximum value, 1V,  in
+*               time = (3*R*C) + rise + delay
+*                             time        time
+*                    = (3 * 1E3 * 20E-9) + 1E-6 + 10E-6
+*                    = 71us
+*       Therefore, at 71us, the capacitor voltage should be at least  0.9V.
+*       A transient analysis of the circuit voltage versus time is performed to e
+*       determine the capacitor voltage, V(2).
+*###############################################################################
+VIN  1 0 PULSE(0 1 10U 1U 1U 80U)
+R    1 2 1K
+C    2 0 20N
+.TRAN 0.5U 100U
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) 
+* For constant timestep output use this options flag
+.OPTIONS TIMEINT CONSTSTEP=1
+.END

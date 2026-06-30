@@ -1,0 +1,13 @@
+Test
+
+d1 1a 0 jmod1
+RS 1 1a 1
+VAmon1 1 2 0v
+Vin 2 0 DC 5V
+
+.model jmod1 D (is=1.5)
+.DC VIN 0 5 .5
+.print DC V(2) I(vamon1)
+
+.end
+

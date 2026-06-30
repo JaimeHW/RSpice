@@ -1,0 +1,39 @@
+Test Name: BUG_385
+Owner: Eric Keiter
+Test netlists: none 
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Bug 385 requested that Xyce support PSPICE-style DC options.  This meant
+support DEC, OCT and LIST sweeps, in addition to LIN sweeps, which have
+always been the supported default in Xyce.
+
+This bug is a subset of bug # 528, which was also fixed.
+
+There are regression tests that cover this bug, so if the regression 
+test suit is passing on all platforms this bug should be considered fixed.
+ 
+Procedure:
+============
+Run nightly regression tests.  Make sure the DC_UPGRADE tests all pass.  They
+are:
+
+Xyce_Test/Netlists/DC_UPGRADE/dcOct.cir
+Xyce_Test/Netlists/DC_UPGRADE/dcDec.cir
+Xyce_Test/Netlists/DC_UPGRADE/dcList.cir
+
+Verification:
+=============
+Passes if the 3 regression tests pass. 
+ 
+Notes:
+======
+These 3 regression tests are adequate for this bug (385).
+
+The are  neccessary, but not sufficient, for the duplicate (superset) bug # 528,
+which also covers .STEP.
+

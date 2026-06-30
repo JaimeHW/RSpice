@@ -1,0 +1,29 @@
+Test Circuit for Mutually Coupled Inductors
+
+VS 0 1 SIN(0 169.7 60HZ)
+R1 1 2 1K
+R2 3 0 1K
+L1 2 0 10
+L2 3 0 20
+K1 L1 L2 0.75 txmod
+.model txmod core 
+
+.subckt mysub n1 n2 n3 
+r1s n1 n2 1000
+r2s n3 0  1000
+L1s n2 0  1mH
+L2s n3 0  1mH   
+k1s L1s L2s 0.75 txmod
+.ends
+
+xtxs 1 4 5 mysub
+
+.TRAN 100US 25MS
+
+.PRINT TRAN I(VS) I(L1) n(ymin!k1_l1_branch) I(L2) n(ymin!k1_l2_branch)  
++ I(xtxs:L1s) n(y:xtxs:min!k1s_l1s_branch) I(xtxs:l2s) n(y:xtxs:min!k1s_l2s_branch)
+
+*COMP V(2) reltol=0.02
+*COMP V(3) reltol=0.02
+.END
+

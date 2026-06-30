@@ -1,0 +1,70 @@
+* Test TRAN mode support for the TRIG-TARG measure
+*
+*
+*
+* See gitlab-ex issue 289 for more details
+*************************************************
+
+VPWL1 1  0  pwl(0 0.1 2.5m 0.5 5m 0 7.5m 0.4 10m 0)
+V3    3  0  SIN(0 1 200)
+V4    4  0  SIN(0 1 200 0 0 90)
+
+R1  1  0  2
+R3  3  0  1
+R4  4  0  1
+
+.OPTIONS OUTPUT INITIAL_INTERVAL=1e-4
+.TRAN 0 10ms
+.PRINT TRAN V(1) V(3) V(4) I(R1)
+
+* AT test
+.MEASURE TRAN TrigTargAT TRIG AT=2ms TARG AT=8ms
+.MEASURE TRAN TrigTargAT1 TRIG V(1) VAL=0.2 CROSS=1 TARG AT=8ms
+.MEASURE TRAN TrigTargAT2 TRIG AT=2ms TARG V(1) VAL=0.2 CROSS=1
+
+* Base case
+.MEASURE TRAN TrigTarg1 TRIG V(1)=0.2 CROSS=1 TARG V(1)=0.3 CROSS=1
+
+* Test that negative measure values are allowed
+.MEASURE TRAN TrigTarg2 TRIG V(1)=0.2 CROSS=1 TARG V(1)=0.3 CROSS=2
+.MEASURE TRAN TrigTarg3 TRIG V(1)=0.2 CROSS=2 TARG V(1)=0.3 CROSS=1
+
+* Repeat tests with LAST keyword and CROSS=-1
+.MEASURE TRAN TrigTarg4 TRIG v(1)=0.2 CROSS=1 TARG v(1)=0.2 CROSS=LAST
+.MEASURE TRAN TrigTarg5 TRIG v(1)=0.2 CROSS=-1 TARG v(1)=0.2 CROSS=1
+
+* Add TD for both TRIG and TARG.  Note that the TRIG TD value will also be used
+* for the TARG TD value, if only the TRIG TD value is given.  An "early" TD is
+* essentially ignored.
+.MEASURE TRAN TrigTarg6 TRIG V(1)=0.2 TD=2ms CROSS=1 TARG V(1)=0.3 CROSS=1
+.MEASURE TRAN TrigTarg7 TRIG V(1)=0.2 TD=6ms CROSS=1 TARG V(1)=0.3 CROSS=1 TD=2ms
+.MEASURE TRAN TrigTarg8 TRIG V(1)=0.2 CROSS=1 TARG V(1)=0.3 CROSS=1 TD=8ms
+.MEASURE TRAN TDearly TRIG V(1)=0.2 TD=-0.1 CROSS=1 TARG V(1)=0.3 CROSS=1 TD=-0.2
+
+* Repeat core tests with RISE and FALL.  Also test TRIG and TARG using different signals.
+.MEASURE TRAN RiseFall1 TRIG v(1)=0.3 RISE=1 TARG v(3)=0.45 FALL=2
+.MEASURE TRAN RiseFall2 TRIG v(3)=0.45 RISE=2 TARG v(1)=0.3 FALL=1
+
+.MEASURE TRAN RiseFall3 TRIG v(1)=0.4 CROSS=1 TARG v(3)=0.45 RISE=LAST
+.MEASURE TRAN RiseFall4 TRIG v(1)=0.4 FALL=LAST TARG v(3)=0.45 CROSS=1
+
+* Variables for TRIG and TARG, with and without expressions.
+.MEASURE TRAN TrigTargVar TRIG V(3)={V(4)} CROSS=2  TARG V(3)=V(4) CROSS=3 
+.MEASURE TRAN TrigTargVarEXP TRIG {V(3)}={V(4)} CROSS=2  TARG {V(3)}={V(4)} CROSS=3
+
+* Test lead current
+.MEASURE TRAN TrigTargCurr TRIG I(R1)=0.1 CROSS=1 TARG I(R1)=0.2 CROSS=1
+
+* Both TDs get ignored if both ATs at specified.  However, TRIG TD is used for
+* the TARG clause in the second case.
+.MEASURE TRAN AtTD1 TRIG AT=2ms TD=5ms TARG AT=8ms TD=9ms
+.MEASURE TRAN AtTD2 TRIG AT=1ms TD=2ms TARG V(1)=0.3 CROSS=1
+
+* Failed measures
+.MEASURE TRAN ATearly TRIG AT=-10ms TARG AT=-10ms
+.MEASURE TRAN ATlate  TRIG AT=20ms TARG AT=20ms
+.MEASURE TRAN TrigTDLate TRIG V(1)=0.2 CROSS=1 TD=15ms TARG V(1)=0.3 CROSS=1 TD=2ms
+.MEASURE TRAN TargTDLate TRIG V(1)=0.2 CROSS=1 TARG V(1)=0.3 CROSS=1 TD=12ms
+.MEASURE TRAN ValNotFound TRIG V(1)=2 CROSS=1 TARG V(1)=2 CROSS=2
+
+.END

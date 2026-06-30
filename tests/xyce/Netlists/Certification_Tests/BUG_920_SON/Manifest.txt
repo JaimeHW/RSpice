@@ -1,0 +1,8 @@
+bug920.cir
+bug920.cir.sh
+homotopy-no-output.cir
+homotopy-multiple-lines.cir
+homotopy-tran-order1.cir
+homotopy-tran-order2.cir
+exclude
+tags

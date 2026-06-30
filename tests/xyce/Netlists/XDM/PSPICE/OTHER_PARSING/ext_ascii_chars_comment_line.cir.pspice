@@ -1,0 +1,18 @@
+* This netlist tests that non-ASCII characters in a PSpice line do
+* not cause XDM to fail.  It only tests for a non-ASCII character in
+* a comment line, since that's the only use-case that we've seen so far.
+
+* The possibly offending line. Dash is from the extended ASCII character set REVISED–MAY 2004.
+* It is character <96> from the extended ASCII character set.
+
+*Analysis directives and output: 
+.TRAN  0 1ms 0
+.PROBE  V(N04173) N(N03179)
+
+R_R1         N04173 N03179  1K TC=0,0 
+R_R2         N03179 0  2K TC=0,0 
+V_V1         N04173 0  AC 1
++SIN 0 1 1KHz 0 0 0
+
+.END
+

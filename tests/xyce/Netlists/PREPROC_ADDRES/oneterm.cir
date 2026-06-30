@@ -1,0 +1,74 @@
+*Testing addition of resistors to nodes only connected to one device terminal
+*******************************************************************
+* Tier:  ?????
+* Directory/Circuit name:  PREPROC_ADDRES/oneterm.cir
+* Description:  Runs a transient analysis to make sure that resistors are being
+*               properly added to the netlist with nodes which are connected to
+*               only one device terminal.
+*
+* Input:  Vin=V(1)
+* Outputs:  V(2) and V(X1:2)
+*
+* NOTES:  We test the operation of the netlist command 
+*
+*		.PREPROCESS ADDRESISTORS ONETERMINAL <RESISTANCE>
+* 
+*         whose function is the following:  when invoked, Xyce will create
+*         a copy of the netlist file (with name "filename_xyce.cir", where 
+*         "filename" is the name of the original netlist file) that contains
+*         a set of resistors, all with value <RESISTANCE>, which connect to 
+*         ground all nodes which are connected to only one device terminal in
+*         the orignal netlistfile.  This new file is a valid Xyce netlist which
+*         can then be run by Xyce.
+*
+*	  The circuit we consider here to test this functionality is, 
+*         essentially, two circuits in parallel.  Each circuit connects a 
+*         1V DC voltage source to a capacitor:  one node of the cap is 
+*	  connected to the voltage source, and the other node of the cap 
+*         floats.  The reason why we simulate two such circuits is to test the
+*	  ability of Xyce to add resistors for nodes which are connected to 
+*         only one device terminal that lie in a subcircuit (in one of the 
+*         parallel circuits, we define a subcircuit called "capacitor" to test 
+*         this functionality).  
+*
+*         In each case, the .preprocess command specifies that a 1 ohm 
+*         resistor should be added to each floating node (the second 
+*         .PREPROCESS statement is a "red herring" to ensure that we're 
+*         correctly identifying the node as a node which is connected to only 
+*         one device terminal, rather than a node that has no DC path to gnd).
+*         If this is performed correctly, the output voltage for each node 
+*         specified in the .tran statement below should be equal to 
+*  
+*         vout(t) = e^(-t), t >= 0
+*          
+*         Note that in order to obtain this output, we need to run TWO 
+*         Xyce simulations.  In the first, the .preprocess command is run to
+*         create the netlist file with the added resistors (the transient 
+*         command is also run, but without the resistors in place; the output
+*         voltages in this case should both be equal to 1 for all time).  We
+*         then run Xyce on the *copy* of the netlist file and perform a 
+*         goldstandard comparison on the output of this second simulation.
+*
+*         As a final note, we have to crank up the time integrator tolerances
+*         quite a bit to make sure that we get accurate matching between the
+*         simulated and analytical results.
+*
+* Created by:  K. R. Santarelli 12/07
+*
+*********************************************************************
+
+Vin 1 0 DC 1
+C1 1 2 1 IC=0
+X1 1 capacitor
+
+.subckt capacitor 1
+C2 1 2 1 IC=0
+.ends
+
+.preprocess addresistors nodcpath 0.0001
+.preprocess addresistors oneterminal 1
+
+.tran 0 2 1m
+.options timeint abstol=1e-12 reltol=1e-6
+.print tran V(2) V(X1:2)
+.end 

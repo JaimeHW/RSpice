@@ -1,0 +1,26 @@
+*************************************************************
+* Test the multiplicity factor (M) for Capacitor device,
+* with an IC on the capacitor.  This version does not test
+* the semiconductor or solution-dependent formulations 
+* with IC specified.
+*
+* See SON Bugs 834 and 874 for more details.
+*************************************************************
+
+* Test cases where the capacitor has an IC.  Voltages, 
+*currents, power for circuits 1 and 2 should be the same.
+V1  1  0 0V 
+R1  1a 1 1K 
+C1  1a 0 C=40u IC=1
+
+V2  2  0 0V 
+R2  2a 2 1K 
+C2  2a 0 C=20u M=2 IC=1
+
+.options timeint method=trap 
+.options nonlin-tran rhstol=1.0e-7 
+.TRAN 0.5U 400ms
+
+.PRINT TRAN V(1a) V(2a) I(C1) I(C2) P(C1) P(C2)
+
+.END

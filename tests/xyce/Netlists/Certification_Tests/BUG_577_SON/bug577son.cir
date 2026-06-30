@@ -1,0 +1,57 @@
+* This test is to ensure that the B-H loop data is 
+* accessible in a consistent way for tranformers at the 
+* top level circuit context and a lower, subcircuit context. 
+*
+* Test of Xyce's core model using openly available PSPICE core data for
+* the K528T500_3C8 ferroxcube toroid core
+* This is meant to create a B-H loop plot
+
+*NETLIST based on the application note:
+* http://www.orcad.com/documents/community.an/pspice/tn14.aspx
+* in which it is explained how to extract core models from B-H loops, and
+* which gives a schematic for a B-H loop test circuit.  The circuit
+* below is exactly the circuit in the application note.
+
+.tran 0 4 
+
+*.options timeint method=gear
+*comp v(1) offset=5e-2
+*comp v(2) offset=6e-2
+*comp v(3) offset=8e-2
+
+.subckt txf_sbk node1 node2 
+
+Lp1       node1 0  20
+Lp2       node2 0  40
+
+ktranssub  Lp1 Lp2 1 K528T500_3C8
+.model K528T500_3C8 Core(MS=415.2K A=44.82 C=.4112 K=25.74
++ Area=1.17 Path=8.49 )
+
+.ends
+
+
+.print tran  v(1) n(ymin!ktrans1_h) n(ymin!ktrans1_b) v(2) v(3) n(xtx1:ymin!ktranssub_h) n(xtx1:ymin!ktranssub_b)
+
+Rt1       1 0  1
+Lp1       1 0  20
+
+I1 1 0 sin(0 .1 1Hz 1)
+I2 1 0 sin(0 .2 1Hz 2)
+I3 1 0 sin(0 .8 1Hz 3)
+
+ktrans1  Lp1 1 K528T500_3C8
+.model K528T500_3C8 Core(MS=415.2K A=44.82 C=.4112 K=25.74
++ Area=1.17 Path=8.49 )
+
+
+xtx1 2 3 txf_sbk 
+
+Ip1 2 0 sin(0 .1 1Hz 1)
+Ip2 2 0 sin(0 .2 1Hz 2)
+Ip3 2 0 sin(0 .8 1Hz 3)
+
+rload 3 0 100
+
+.end
+

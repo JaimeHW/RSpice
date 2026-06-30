@@ -1,0 +1,13 @@
+RC_data.cir
+RC_simple.cir
+RC_simple.cir.sh
+RC_data_hertz.cir
+RC_simple_hertz.cir
+RC_simple_hertz.cir.sh
+abmfreq1.cir
+abmfreq1.cir.sh
+abmfreq1_data.cir
+abmhertz1.cir
+abmhertz1.cir.sh
+abmhertz1_data.cir
+tags

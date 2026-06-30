@@ -1,0 +1,6 @@
+README
+bug_40.cir
+bug_40.cir.sh
+bug_40.out
+tags
+options

@@ -1,0 +1,13 @@
+*Libraries: 
+* Profile Libraries :
+* Local Libraries :
+* Generated using PSpice 16.6.0
+
+*Analysis directives: 
+.TRAN  0 5ms 0 
+.PROBE64 N(N14375) N(N14713) N(N14875) N(N15043) N(N11767) 
+*.INC "./SCHEMATIC1.net"
+.INC ".\SCHEMATIC1.net"
+
+.END
+

@@ -1,0 +1,6 @@
+RLC_mesh2.cir
+RLC_mesh2_mor.cir
+RLC_mesh2_mor.cir.sh
+RLC_mesh2_top.cir
+exclude
+tags

@@ -1,0 +1,36 @@
+Test "idvg0" from psp QA symmetric/pmos
+*
+* The PSP qa reference lists this test as:
+*
+*// Id-Vg @ Vs=0V, Vb=-1.0V, Vd=0.05 & 1.0V, SWIMPACT=1 SWIGATE=SWGIDL=SWJUNCAP=0
+*test                        idvgh_swimpact1
+*biases                      V(s)=0 V(b)=1.0
+*biasList                    V(d)=-0.05,-1.0
+*biasSweep                   V(g)=1.0,-1.2,-0.01
+*outputs                     I(d) I(g) I(s) I(b)
+*instanceParameters          W=10.0e-6 L=0.1e-6
+*modelParameters             parameters/psp103_params
+*modelParameters             SWIMPACT=1 SWIGATE=0 SWGIDL=0 SWJUNCAP=0
+*
+******
+* PSP defines the drain, source, gate, and bulk currents as positive when they're into the 
+* device, hence the goofy organization of these probe voltage sources.
+*
+*********
+
+.include "psp_pmos_idvg0_swimpact1.model"
+M1 D G S B pspqap W=10.0e-6 L=0.1e-6
+
+Vg G Ga DC 0v
+Vgprobe 0 Ga 0
+Vd D Da DC 0v
+Vdprobe 0 Da 0
+Vs S Sa DC 0v
+Vsprobe 0 Sa 0
+Vb B Ba DC 1.0v
+Vbprobe 0 Ba 0
+
+.dc Vg 1 -1.2 -0.01  Vd LIST -0.05 -1.0
+.step TEMP LIST 27 -50 150
+.print DC V(g,ga) V(d,da) TEMP I(Vdprobe) I(Vgprobe) I(Vsprobe) I(Vbprobe)
+.end

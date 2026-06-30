@@ -1,0 +1,15 @@
+*Xyce netlist for testing various piecewise line source syntaxes
+
+.TRAN 0 5ms
+.PRINT TRAN V(N14375) V(N14713) V(N14875) V(N15043)
+
+R_R1         N14375 0  1k
+V_V1         N14375 0  PWL 1e-3 0.5 2e-3 1 3e-3 1 4e-3 0.5
+R_R2         N14713 0  1k
+V_V2         N14713 0  PWL 1e-3 0.5 2e-3 1 3e-3 1 4e-3 0.5
+V_V3         N14875 0  PWL 1e-3 0.5 2e-3 1 3e-3 1 4e-3 0.5
+R_R3         N14875 0  1k
+R_R4         N15043 0  1k
+V_V4         N15043 0  PWL 1e-3 0.5 2e-3 1 3e-3 1 4e-3 0.5
+
+.END

@@ -1,0 +1,56 @@
+This set of tests is meant to demonstrate the correctness of Xyce when
+various delimiters are specified in the netlist.
+
+There are 8 circuits here, exercising DC and transient output in each of four
+cases:
+  1) No delimiter specified
+  2) delimiter=tab specified
+  3) delimiter=comma specified
+  4) an invalid delimiter specified
+
+SUMMARY:
+  PARALLEL RUNS NOT NEEDED.  These netlists are too small.
+  Run each of the 8 netlists.
+  Compare against the gold standard with a version of xyce_verify.pl built
+    after 4 June 2003 (prior versions did not properly parse comma and tab
+    delimited output files).
+  The results should match exactly, and xyce_verify should exit with no output
+   and with an exit code of 0.
+
+  ADDITIONALLY:  check each .prn file to see that it is in fact delimited
+   by the character specified:
+
+- transient_defaults.cir.prn and DC_defaults.cir.prn should be space delimited
+- transient_tab.cir.prn and DC_tab.cir.prn should be tab delimited
+- transient_comma.cir.prn and DC_comma.cir.prn should be comma delimited
+- transient_delimiter_invalid.cir.prn and DC_delimiter_invalid.cir.prn should
+  be space delimited
+
+  FURTHER:
+    In the console output, Xyce should produce no warnings or error messages
+  about the delimiter for the default, tab and comma cases, and should
+  print a warning about the invalid delimiter specified in the
+  delimiter_invalid cases.
+
+COMMENTS:
+  The transient and DC netlists in this test were taken from BUG_128
+and the test suite's "TEST1" directories, respectively.  The gold
+standards were all derived from the "gold standards" for those tests.
+The "defaults" gold standards were exact copies of the BUG_128 and
+TEST1 gold standards.  The tab and comma gold standards are exactly
+the "defaults" gold standard with the delimiters hand-edited.
+
+In some future version of Xyce it is conceivable that numerical
+differences could begin to cause testing failures on this issue.  At
+that point the gold standards should be 
+What is required of this test is that 
+  - the "defaults" run produce no warnings about delimiters and
+   produce results that are considered correct (i.e. bug 120 and
+   "TEST1" should both pass normally, and this test should agree with
+   them).
+  - The tab and comma tests should produce results that are identical
+   to the "defaults" test except for the delimiter, and there should be
+   no console warnings.
+  - The "delimiter_invalid" tests should produce output that is
+   exactly the same as the "defaults" test, but there should be a console
+   warning.

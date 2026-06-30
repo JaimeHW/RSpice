@@ -1,0 +1,19 @@
+*Test of passing subcircuit parameter values that are global params
+* This test is the baseline for the B series of bug 1801 tests.  This netlist
+* doesn't use subcircuits, and has always worked.  Prior to the fix, the 
+* other ones didn't do the right thing.
+
+.global_param resval=1
+
+R1 1 0 {resval+(resval+1)}
+V1 1 0 5V
+
+
+*10001 because sometimes there's roundoff in xyce_verify and it gets 
+* confused about where the end is...
+.step dec resval 1 10001 5
+.dc v1 5 5 1
+.print dc V(1) I(V1)
+
+
+.end

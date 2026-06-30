@@ -1,0 +1,57 @@
+* source GSOURCETEST
+
+V_V6         N388954 0  AC 1
++SIN 0V 1V 1e6 0 0 0
+R_R10         0 N388948  1 TC=0,0 
+R_R11         0 N388906  1 TC=0,0 
+G_G1         N388906 0 N388954 N388948 2
+
+* test the POLY form of the G-Source
+R_R16         0 N391728  1 TC=0,0 
+V_V9         N391734 0  AC 1
++SIN 0V 2V 1e6 0 0 0
+R_R17         0 N391678  1 TC=0,0 
+G_G2         N391678 0 POLY(1) N391734 N391728 0.0 2
+
+* test the VALUE form of the G-Source
+G_G3         N392673 0 VALUE { {2*V(N392868,0)} }
+V_V10         N392475 0 DC=1
+R_R18         N392673 0  1 TC=0,0 
+V_V11         N392868 0  AC 1
++SIN 0V 1.5V 1e6 0 0 0
+R_R19         N392868 0  1 TC=0,0 
+
+* test the TABLE form of the G-Source
+R_R20         N393403 0  1 TC=0,0 
+G_G4         N393403 0 TABLE { v(N393371,0) } 
++ ( (-1,-3) (1,3) )
+V_V12         N393371 0  AC 1
++SIN 0V 0.75V 1e6 0 0 0
+
+*Test of G-Source syntax with Global Node
+R1 $G_CLK 0 1
+V1 $G_CLK 0  AC 1
++SIN 0V 1V 1e6 0 0 0
+
+R2  2 0 1
+G2  2 0 VALUE={2*V($G_CLK)} 
+
+R3  3 0 1
+G3  3 0 VALUE={3*V($G_CLK)} 
+
+R4  4 0 1
+G4  4 0 VALUE {IF(((V($G_CLK) >= 0.8)&(V($G_CLK) >= 0.8)),3.5, 3.5)}
+
+* test for warning messages for PSpice FREQ, LAPLACE and CHEBYSHEV forms
+* of the G-Source, since they don't have a legal Xyce translation.
+* These syntax examples come from the PSpice Reference Manual
+GLAPLACE bogo_node 0 LAPLACE {V(10)} = {1/(1+.001*s)}
+GFREQ bogo_node 0 FREQ {V(10)}=(0,0,0)(5kHz, 0,0)(6kHz -60, 0) DELAY=3.2ms
+GCHEB bogo_node 0 CHEBYSHEV {V(10)} = LP 800 1.2K .1dB 50dB
+
+
+
+
+
+
+

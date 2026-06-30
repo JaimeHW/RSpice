@@ -1,0 +1,14 @@
+dcBaseline1.cir
+dcDecBaseline.cir
+dcDecExpr.cir
+dcDecExpr.cir.sh
+dcExpr1.cir
+dcExpr1.cir.sh
+dcListBaseline.cir
+dcListExpr.cir
+dcListExpr.cir.sh
+dcOctBaseline.cir
+dcOctExpr.cir
+dcOctExpr.cir.sh
+exclude
+tags

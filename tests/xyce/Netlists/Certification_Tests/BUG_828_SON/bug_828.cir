@@ -1,0 +1,17 @@
+* Demonstration of bug 828
+*
+* This test would fail with an "Unable to differentiate" error
+* on the I= expression of device B1 in all versions of Xyce prior to
+* commit b069bf3c.
+*
+.param T0=25
+.func BUSTED(I) {1.5m*I*exp((TEMP-T0)/125.7)}
+
+V1 1 0 pulse 0 20 0 1n 1n 50n 100n
+R1 1 0 1
+B1 2 0 I={BUSTED(I(V1))}
+R2 2 0 1
+
+.tran 1n 500n
+.print tran V(1) I(V1) V(2) I(B1)
+.end

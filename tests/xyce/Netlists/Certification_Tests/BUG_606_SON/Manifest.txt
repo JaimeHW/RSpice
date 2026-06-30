@@ -1,0 +1,9 @@
+bug606son.cir
+bug606son.cir.sh
+global_params.cir
+global_params_dev_options.cir
+global_params_step.cir
+global_params_step.cir.res.gs
+resistor.cir
+resistor.cir.res.gs
+tags

@@ -1,0 +1,15 @@
+* This netlist is used to test the error messages from the Python setADCWidths() 
+* and updateTimeVoltagePairs() methods, generated from within xyce_interface.py, 
+* when their input array sizes are not the same size. 
+YADC adc1 1 0 simpleADC R=1T
+ydac dac1 2 3 
+.model simpleADC ADC(settlingtime=50ns uppervoltagelimit=2 lowervoltagelimit=0 width=2)
+.model simpleDAC DAC(tr=5e-9 tf=5e-9)
+
+v2 2 0 1
+R3 3 0 1
+v1 1 0 PWL 0 0 1e-4 2
+.TRAN 0 1e-4 
+.PRINT TRAN V(1) V(2)
+.END
+

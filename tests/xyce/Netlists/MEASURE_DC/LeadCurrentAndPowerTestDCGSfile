@@ -1,0 +1,18 @@
+ ***** Measure Functions *****
+
+MAXI = 4.545455e+00 at VSRC1 value = 5.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00 Measure End VSRC1 Value= 5.000000e+00
+
+MAXIFT = 3.636364e+00 at VSRC1 value = 4.000000e+00
+Measure Start VSRC1 Value= 2.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+MAXP = 2.066116e+00 at VSRC1 value = 5.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00 Measure End VSRC1 Value= 5.000000e+00
+
+MAXW = 2.066116e+00 at VSRC1 value = 5.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00 Measure End VSRC1 Value= 5.000000e+00
+
+MAXN = -9.090909e-01 at VSRC1 value = 1.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00 Measure End VSRC1 Value= 5.000000e+00
+
+

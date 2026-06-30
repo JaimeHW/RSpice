@@ -1,0 +1,29 @@
+Test Name: BUG_186
+Owner: Eric Rankin
+Test netlists: none 
+GS files: none
+Mode: serial, parallel 
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+bug 186:  Make Xyce compile-able and callable as a library
+
+Procedure:
+============
+configure && make && make install
+
+Verification:
+=============
+"make install" will create in the $prefix directory
+  $prefix/bin/Xyce
+  $prefix/lib/libxyce.la
+
+Windows builds may not have libxyce.la, however, the same stub
+and static object (libxyce.a) are used to create bin/Xyce
+
+Notes:
+======
+A successful configure and make confirms this bug is fixed because
+the default Xyce executable is constructed from libtoolized objects.

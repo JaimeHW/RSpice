@@ -1,0 +1,24 @@
+********************************************************
+* Test that Xyce exits gracefully with a reasonable error
+* message if the specified output file is in a subdirectory
+* that does not exist.
+*
+* The contents of this netlist doesn't really matter.
+* The .PRINT TRAN line is trying to write to a file
+* in a non-existent subdirectory. 
+*
+* Note: this netlist will also be used to test the -r
+* command line option.  It also verifies that the -r
+* command line option takes precedence over the FILE=
+* specified on the .PRINT line.
+*********************************************************
+V1 1 0 SIN(0 1 1HZ)
+R1 1 2 1
+R2 2 0 2
+
+.TRAN 0 1S
+
+* attempting to write to a file in a non-existent subdirectory
+.PRINT TRAN FILE=bogo_dir/output.prn V(2)
+
+.END 

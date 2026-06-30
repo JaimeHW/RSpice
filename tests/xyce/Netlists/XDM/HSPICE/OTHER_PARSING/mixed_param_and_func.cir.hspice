@@ -1,0 +1,18 @@
+$mixed param func
+* Netlist tests XDM can properly parse out functions
+* and parameters mixed together on the same line in 
+* a .PARAM statement, and that it correct outputs 
+* the parameter or function to a .PARAM or .FUNC
+* statement in Xyce (see issue #100 on XDM gitlab)
+
+.PARAM a1=11 square(X) = 'X*X' a2=3
+.param multby2(x) = '2*x' a3=1
+.param a4=5
+.param a5=8 multby1(x)='1*x' addby17(X)='x+17'
+
+VA 1 0 dc=0
+R1 1 2 'square(a4)+addby17(a5)'
+R2 2 0 'multby2(a1)+multby1(a2)'
+
+.DC VA 0 10 1
+.PRINT DC v(1) v(2)

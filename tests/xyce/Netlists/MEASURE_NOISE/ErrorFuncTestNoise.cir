@@ -1,0 +1,55 @@
+* Test NOISE mode support for the ERR, ERR1 and ERR2 measures. It was
+* deemed sufficient to mostly just test with the VR and VI operators.
+* Expressions are also tested. One current operator (IM) is tested
+* for a branch current.
+*
+* See SON Bug 1301 for more details.
+********************************************************************
+
+.GLOBAL_PARAM P1=-1.5
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 50
+RLP2  4 5 50
+CLP1  5 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 1MEG 1
+.PRINT NOISE ERR1 VR(4) VI(4) VR(5) VI(5) VP(5) IM(EAMP) err2 INOISE ONOISE
+
+* ERR and ERR1
+.MEASURE NOISE ERR  ERR  vr(4) vr(5)
+.meas    noise err1 err1 vr(4) vr(5)
+.MEASURE NOISE ERR1MV0.1 ERR1 VR(4) VR(5) MINVAL=0.4
+.MEASURE NOISE ERR1YMIN0.3 ERR1 VR(4) VR(5) YMIN=0.45
+.MEASURE NOISE ERR1IGNOR0.3 ERR1 VR(4) VR(5) IGNOR=0.45
+.MEASURE NOISE ERR1YMAX0.7 ERR1 VR(4) VR(5) YMAX=0.495
+.MEASURE NOISE ERR1EXP ERR1 {VR(4)+1} {VR(5)+1}
+
+* ERR2
+.MEASURE NOISE ERR2 ERR2 vr(4) vr(5)
+.MEASURE NOISE ERR2MV0.1 ERR2 VR(4) VR(5) MINVAL=0.4
+.MEASURE NOISE ERR2YMIN0.3 ERR2 VR(4) VR(5) YMIN=0.45
+.MEASURE NOISE ERR2IGNORE0.3 ERR2 VR(4) VR(5) IGNORE=0.45
+.MEASURE NOISE ERR2YMAX0.7 ERR2 VR(4) VR(5) YMAX=0.495
+.MEASURE NOISE ERR2EXP ERR2 {VR(4)+1} {VR(5)+1}
+
+* test VI() operator, for ERR1 only
+.MEASURE NOISE ERR1VI ERR1 vi(4) vi(5)
+
+* FROM-TO
+.MEASURE NOISE ERR1FT ERR1 vr(4) vr(5) FROM=1e3 TO=1e5
+
+* Branch current
+.MEASURE NOISE ERR1IM ERR1 IM(eamp) {vi(5)/1000}
+
+* Tests should fail since the FROM-T0 windows have various problems.
+.measure noise err1Fail err1 vr(4) vr(5) FROM=1e7 TO=1e8
+.measure noise err2Fail err2 vr(4) vr(5) FROM=1e6 TO=1e2
+
+.END

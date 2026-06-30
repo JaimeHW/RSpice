@@ -1,0 +1,136 @@
+IEEE 14 Bus Test Case, in PQ Rectangular Solution Format
+
+*.options device testjac=1 testjacwarn=1 TJABSTOL=1e-7 TJRELTOL=5
+
+*********************************************
+* Simulation control statements             *
+*********************************************
+.DC V1R 1.06 1.06 1
+
+*********************************************
+* Bus 1 is the slack bus.  Ammeter          *
+* is wired so that current flows into Bus 1 *
+*********************************************
+V1R Bus1R ammBus1P 1.06V
+V1I Bus1I ammBus1Q 0V
+Vamm1P 0 ammBus1P 0V
+Vamm1Q 0 ammBus1Q 0V
+
+*********************************************
+* Branch Definitions                        *
+*********************************************
+YPowerGridBranch pg1_2 bus1R bus2R bus1I bus2I AT=PQR R=0.01938 X=0.05917 B=0.0528
+YPowerGridBranch pg1_5 bus1R bus5R bus1I bus5I AT=PQR R=0.05403 X=0.22304 B=0.0492
+YPowerGridBranch pg2_3 bus2R bus3R bus2I bus3I AT=PQR R=0.04699 X=0.19797 B=0.0438
+YPowerGridBranch pg2_4 bus2R bus4R bus2I bus4I AT=PQR R=0.05811 X=0.17632 B=0.034
+YPowerGridBranch pg2_5 bus2R bus5R bus2I bus5I AT=PQR R=0.05695 X=0.17388 B=0.0346
+YPowerGridBranch pg3_4 bus3R bus4R bus3I bus4I AT=PQR R=0.06701 X=0.17103 B=0.0128
+YPowerGridBranch pg4_5 bus4R bus5R bus4I bus5I AT=PQR R=0.01335 X=0.04211 B=0
+YPowerGridBranch pg6_11 bus6R bus11R bus6I bus11I AT=PQR R=0.09498 X=0.1989 B=0
+YPowerGridBranch pg6_12 bus6R bus12R bus6I bus12I AT=PQR R=0.12291 X=0.25581 B=0
+YPowerGridBranch pg6_13 bus6R bus13R bus6I bus13I AT=PQR R=0.06615 X=0.13027 B=0
+YPowerGridBranch pg7_8 bus7R bus8R bus7I bus8I AT=PQR R=0 X=0.17615 B=0
+YPowerGridBranch pg7_9 bus7R bus9R bus7I bus9I AT=PQR R=0 X=0.11001 B=0
+YPowerGridBranch pg9_10 bus9R bus10R bus9I bus10I AT=PQR R=0.03181 X=0.0845 B=0
+YPowerGridBranch pg9_14 bus9R bus14R bus9I bus14I AT=PQR R=0.12711 X=0.27038 B=0
+YPowerGridBranch pg10_11 bus10R bus11R bus10I bus11I AT=PQR R=0.08205 X=0.19207 B=0
+YPowerGridBranch pg12_13 bus12R bus13R bus12I bus13I AT=PQR R=0.22092 X=0.19988 B=0
+YPowerGridBranch pg13_14 bus13R bus14R bus13I bus14I AT=PQR R=0.17093 X=0.34802 B=0
+
+*********************************************
+* Transformer Definitions                   *
+*********************************************
+YPowerGridTransformer pg4_7 bus4R bus7R bus4I bus7I AT=PQR R=0 X=0.20912 TR=0.978 PS={0*PI/180}
+YPowerGridTransformer pg4_9 bus4R bus9R bus4I bus9I AT=PQR R=0 X=0.55618 TR=0.969 PS={0*PI/180}
+YPowerGridTransformer pg5_6 bus5R bus6R bus5I bus6I AT=PQR R=0 X=0.25202 TR=0.932 PS={0*PI/180}
+
+*********************************************
+* Bus Shunt Definitions                     *
+*********************************************
+YPowerGridBusShunt pg9_GND bus9R 0 bus9I 0 AT=PQR G=0 B=0.19
+
+*****************************************************
+* Gen Bus model only implemented for Polar formats. *
+* Terminals are reversed on IGen, and ammeters      *
+* are wired, so that current (P,Q) flows into bus   *
+*****************************************************
+YPGGB pvb2 bus2Th ammbus2P bus2VM ammBus2Q AT=PQP VM=1.045 P=0.4
+Vamm2P 0 ammBus2P 0V
+Vamm2Q 0 ammBus2Q 0V
+BV2R bus2R bus2Th  V={V(bus2VM)*cos(V(bus2Th)) - V(bus2Th)}
+BV2I bus2I bus2VM V={V(bus2VM)*sin(V(bus2Th)) - V(bus2VM)}
+.NODESET V(bus2VM)=1.045 V(bus2Th)=0
+
+YPGGB pvb3 bus3Th ammbus3P bus3VM ammBus3Q AT=PQP VM=1.01 P=0
+Vamm3P 0 ammBus3P 0V
+Vamm3Q 0 ammBus3Q 0V
+BV3R bus3R bus3Th  V={V(bus3VM)*cos(V(bus3Th)) - V(bus3Th)}
+BV3I bus3I bus3VM V={V(bus3VM)*sin(V(bus3Th)) - V(bus3VM)}
+.NODESET V(bus3VM)=1.01 V(bus3Th)=0
+
+YPGGB pvb6 bus6Th ammbus6P bus6VM ammBus6Q AT=PQP VM=1.07 P=0
+Vamm6P 0 ammBus6P 0V
+Vamm6Q 0 ammBus6Q 0V
+BV6R bus6R bus6Th  V={V(bus6VM)*cos(V(bus6Th)) - V(bus6Th)}
+BV6I bus6I bus6VM V={V(bus6VM)*sin(V(bus6Th)) - V(bus6VM)}
+.NODESET V(bus6VM)=1.07 V(bus6Th)=0
+
+YPGGB pvb8 bus8Th ammbus8P bus8VM ammBus8Q AT=PQP VM=1.09 P=0
+Vamm8P 0 ammBus8P 0V
+Vamm8Q 0 ammBus8Q 0V
+BV8R bus8R bus8Th  V={V(bus8VM)*cos(V(bus8Th)) - V(bus8Th)}
+BV8I bus8I bus8VM V={V(bus8VM)*sin(V(bus8Th)) - V(bus8VM)}
+.NODESET V(bus8VM)=1.09 V(bus8Th)=0
+
+*********************************************
+* Load Definitions                          *
+*********************************************
+ILoad2P bus2R 0 0.217
+ILoad2Q bus2I 0 0.127
+ILoad3P bus3R 0 0.942
+ILoad3Q bus3I 0 0.19
+ILoad4P bus4R 0 0.478
+ILoad4Q bus4I 0 -0.039
+ILoad5P bus5R 0 0.076
+ILoad5Q bus5I 0 0.016
+ILoad6P bus6R 0 0.112
+ILoad6Q bus6I 0 0.075
+ILoad7P bus7R 0 0
+ILoad7Q bus7I 0 0
+ILoad9P bus9R 0 0.295
+ILoad9Q bus9I 0 0.166
+ILoad10P bus10R 0 0.09
+ILoad10Q bus10I 0 0.058
+ILoad11P bus11R 0 0.035
+ILoad11Q bus11I 0 0.018
+ILoad12P bus12R 0 0.061
+ILoad12Q bus12I 0 0.016
+ILoad13P bus13R 0 0.135
+ILoad13Q bus13I 0 0.058
+ILoad14P bus14R 0 0.149
+ILoad14Q bus14I 0 0.05
+
+*************************************************************
+* .NODESET used to enforce "flat start" for PQ formulations *
+*************************************************************
+.NODESET V(bus1R)=1 V(bus1I)=0 V(bus2R)=1 V(bus2I)=0 V(bus3R)=1 V(bus3I)=0
++ V(bus4R)=1 V(bus4I)=0 V(bus5R)=1 V(bus5I)=0 V(bus6R)=1 V(bus6I)=0
++ V(bus7R)=1 V(bus7I)=0 V(bus8R)=1 V(bus8I)=0 V(bus9R)=1 V(bus9I)=0
++ V(bus10R)=1 V(bus10I)=0 V(bus11R)=1 V(bus11I)=0 V(bus12R)=1 V(bus12I)=0
++ V(bus13R)=1 V(bus13I)=0 V(bus14R)=1 V(bus14I)=0 
+
+*********************************************
+* Output Statements                         *
+*********************************************
+.PRINT DC width=10 precision=6
++ V(bus1R) V(bus1I) V(bus2R) V(bus2I) V(bus3R) V(bus3I) V(bus4R) V(bus4I)
++ V(bus5R) V(bus5I) V(bus6R) V(bus6I) V(bus7R) V(bus7I) V(bus8R) V(bus8I)
++ V(bus9R) V(bus9I) V(bus10R) V(bus10I) V(bus11R) V(bus11I) V(bus12R) V(bus12I)
++ V(bus13R) V(bus13I) V(bus14R) V(bus14I) 
++ I(Vamm1P) I(Vamm1Q) I(Vamm2P) I(Vamm2Q) I(Vamm3P) I(Vamm3Q) 
++ I(ILoad4P) I(ILoad4Q) I(ILoad5P) I(ILoad5Q) I(Vamm6P) I(Vamm6Q) 
++ I(ILoad7P) I(ILoad7Q) I(Vamm8P) I(Vamm8Q) I(ILoad9P) I(ILoad9Q) 
++ I(ILoad10P) I(ILoad10Q) I(ILoad11P) I(ILoad11Q) I(ILoad12P) I(ILoad12Q) 
++ I(ILoad13P) I(ILoad13Q) I(ILoad14P) I(ILoad14Q) 
+
+.end

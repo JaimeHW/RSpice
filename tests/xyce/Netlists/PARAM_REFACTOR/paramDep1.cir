@@ -1,0 +1,13 @@
+Test for gitlab-ex issue 157
+
+.options device temp=25
+
+.global_param barney={TEMP}
+.param fred={barney}
+
+R1 1 0 {fred}
+V1 1 0 5V
+.DC V1 0 5V 1V
+.PRINT DC V(1) I(V1) {fred} {barney} {R1}
+.END
+

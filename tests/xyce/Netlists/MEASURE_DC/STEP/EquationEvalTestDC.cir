@@ -1,0 +1,53 @@
+Test DC mode support for EQN Measure 
+**********************************************************************
+*
+* This bug covers:
+*   1) the case of one variable (vsrc1) in the .DC line 
+*      and one variable (vsrc2) in the .STEP statement.
+*
+*   2) The DC values of the swept variable (vsrc1) are monotonically
+*      decreasing.
+*
+* See SON Bug 884 for more details.
+************************************************************
+vsrc1   1a 0 1
+rload1a 1a 1b 0.1
+rload1b 1b 0 1
+
+vsrc2   2a 0 1
+rload2a 2a 1b 0.2
+
+* Reverse the step order on vsrc1 (from the test in MEASURE_DC)
+* to make sure that both increasing and decreasing sequences of
+* values are tested.
+.DC vsrc1 5 1 -1
+.STEP VSRC2 2 5 3
+
+* Note: vsrc1:DCV0 is the syntax for printing the DC value of vsrc1,
+* at it is swept. 
+.print dc vsrc1:DCV0  vsrc2:DCV0 v(1a) v(1b) VV1 VV2 vv2from vv2to vv2ft vv2tf dif
+
+* PARAM is a synonym for EQN for Xyce 
+.measure dc vv1 PARAM {v(1b)+1.0} 
+.measure dc vv2 EQN {v(1b)+12.0}
+.measure dc vv2from EQN {v(1b)+12.0} FROM=4
+.measure dc vv2to EQN {v(1b)+12.0} TO=4
+
+ * these should get the same answer
+.measure dc vv2ft EQN {v(1b)+12.0} FROM=2 TO=4
+.measure dc vv2tf EQN {v(1b)+12.0} FROM=4 TO=2
+
+.measure dc dif EQN {vv1-vv2} 
+
+* Tests should fail since the FROM-T0 windows do not overlap
+* with the stepped values for VSRC1:DCV0
+.measure dc eqnFail1 EQN {v(1b)+1.0} FROM=-4 TO=-2
+.measure dc eqnFail2 EQN {v(1b)+1.0} FROM=8 TO=6
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.  
+* This is needed for compatibility for testing with a verbose build, which 
+* is often used by the Xyce developers.
+.measure dc lastMeasure max v(1b) 
+
+.END
+

@@ -1,0 +1,15 @@
+Test Circuit for the Inductor model types
+*
+B1 0 1  I = {10 * TIME * EXP( - 5*TIME)}
+VMON 1 2 0
+R1 2 3  0.000001
+L1 3 0 IND1 10mH TEMP=90
+L2 3 0 IND2 10mH TEMP=90
+L3 3 0 {10mH*2*(1+0.010*(90-27)+0.926e-4*(90-27)**2)}
+.MODEL IND1 L  ( TC1=0.010 TC2=0.926e-4 L=2)
+.MODEL IND2 IND  ( TC1=0.010 TC2=0.926e-4 L=2)
+*
+.TRAN 0.1MS 20MS
+.PRINT TRAN I(VMON) V(3) I(L1) I(L2) I(L3)
+.END
+

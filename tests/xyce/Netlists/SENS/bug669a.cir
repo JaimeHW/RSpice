@@ -1,0 +1,15 @@
+Test for default device params being used by .sens, which is the subject of bug 669
+
+Vtest 1 0 5.0
+Rtest 1 0 1.0
+
+.DC Vtest 1 1 1
+
+* Prior to fixing bug 669, this param specification didn't work.
+.sens objfunc={I(Vtest)} param=Rtest
+
+.print sens v(1)
+.options SENSITIVITY direct=0 adjoint=1  
+
+.options device debuglevel=-100
+.options timeint debuglevel=-100

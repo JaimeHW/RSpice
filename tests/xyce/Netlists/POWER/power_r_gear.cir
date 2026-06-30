@@ -1,0 +1,15 @@
+Power test for resistor
+*
+VIN  0 1 sin(0 1 4 0 0 ) ; PULSE(0 1 10U 1U 1U 100m)
+R1   1 2 1K
+.param R2val=200
+R2a  2 0 {r2val}
+R2b  0 2 {r2val}
+
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.5U 400ms
+.PRINT TRAN v(1) v(2) I(r1) {I(r1)*(v(1)-v(2))} p(r1) w(r1)
++ I(r2a) {I(r2a)*(v(2)-v(0))} p(r2a) w(r2a) {I(r2b)*(v(0)-v(2))} p(r2b) w(r2b)
+
+.END

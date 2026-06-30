@@ -1,0 +1,38 @@
+*******************************************************************
+* Test for I(*), P*() and W(*) with Y devices that do not implement
+* lead currents. Those devices should be "silently ignored" when
+* the variable lists for the I(*), P(*) and W(*) requests are made.
+*
+* See SON Bugs 988 and 715 for more details.
+****************************************************************
+
+I1 1 0 sin(0 1 1KHz)
+R1 1 0 1
+R2 2 0 1
+
+* mutual inductor definition
+L1 1 0 1mH
+L2 2 0 1mH
+K1 L1 L2 0.75
+
+* disconnected AND and OR gates, that don't stop the circuit from
+* actually running.
+UAND1 AND(4) dig_pn 0 in_1 in_2 in_3 in_4 out_1 DMOD1
+.model DMOD1 DIG ( DELAY=20ns )
+YOR OR1 A B J  DMOD2
+.model DMOD2 DIG (VREF=0 VLO=0 VHI=12 DELAY=125ns )
+
+* accelerated mass example
+.param mass=2
+.param K=25.5
+.param c=0.5
+.param amag=0.5
+.param omega=3.56999165180658
+B1 acc 0 V={(-K*v(pos)-c*v(vel))/mass+amag*sin(omega*TIME)}
+r4 acc 0 1
+yacc acc1 acc vel pos v0=0 x0=0.4
+
+.TRAN 0 1ms
+.PRINT TRAN V(2) I(*) P(*) W(*)
+
+.end

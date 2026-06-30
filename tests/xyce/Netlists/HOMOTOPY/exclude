@@ -1,0 +1,31 @@
+# These subcircuits are removed from the default search for tests because they
+# are covered by master shell scripts which run these and diff the output
+# rather than checking against a gold standard.
+continuation1.cir
+continuation2.cir
+continuation3.cir
+continuation4.cir
+continuation1_mos1.cir
+continuation2_mos1.cir
+continuation3_mos1.cir
+continuation4_mos1.cir
+continuation1_mos2.cir
+continuation2_mos2.cir
+continuation3_mos2.cir
+continuation4_mos2.cir
+continuation1_mos3.cir
+continuation2_mos3.cir
+continuation3_mos3.cir
+continuation4_mos3.cir
+continuation1_mos6.cir
+continuation2_mos6.cir
+continuation3_mos6.cir
+continuation4_mos6.cir
+continuation1_bsim3.cir
+continuation2_bsim3.cir
+continuation3_bsim3.cir
+continuation4_bsim3.cir
+continuation1_bsim4.cir
+continuation2_bsim4.cir
+continuation3_bsim4.cir
+continuation4_bsim4.cir

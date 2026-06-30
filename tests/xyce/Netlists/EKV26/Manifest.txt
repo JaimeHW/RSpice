@@ -1,0 +1,4 @@
+test_ekv26_nmos.cir
+test_ekv26_pmos.cir
+inverter_transient_ekv26.cir
+tags

@@ -1,0 +1,27 @@
+test demonstrating bug 457.
+* 
+* V(test1) should equal 1/V(test3)
+* V(test2) should equal 1/V(test4)
+* 
+
+Vtest1  test1 0 {10.0**(log10(doping))}
+Rtest1  test1 0 1.0
+
+Vtest2  test2 0 {10.0**(0.2*log10(doping))}
+Rtest2  test2 0 1.0
+
+Vtest3  test3 0 {10.0**(-1*log10(doping))}
+Rtest3  test3 0 1.0
+
+Vtest4  test4 0 {10.0**(-0.2*log10(doping))}
+Rtest4  test4 0 1.0
+
+V1 1 0 DC 1
+* Step over doping:
+.global_param doping=1.0e15
+.step doping list 3e+15   4e+15   5e+15   6e+15
+.DC V1 1 2 1
+.print DC V(1) V(test1) V(test2) V(test3) V(test4)
+
+.END
+

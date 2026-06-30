@@ -1,0 +1,74 @@
+COMPARATOR - BSIM3 Sensitivity Analysis
+
+*One Bit Comparator. Takes Two Inputs (A and B), and returns Two Ouputs - 
+*node 8 - (high when two signalsare equal) and 
+* node 9 (high when A is Larger Then B).
+
+* DCOP Analysis 
+* This circuit has been modified from the original to test out Xyce's
+* sensitivity and optimization capabilities.  Still a work in progress.
+* ERK.   One change - it is now a DCOP calculation rather than a 
+* transient.
+
+*circuit description
+
+M1 Anot A E1 E1  PMOS w=3.6u l=1.2u
+M2 Anot A 0 0 NMOS w=1.8u l=1.2u
+M3 Bnot B E1 E1  PMOS w=3.6u l=1.2u
+M4 Bnot B 0 0 NMOS w=1.8u l=1.2u
+M5 AorBnot 0 E1 E1 PMOS w=1.8u l=3.6u
+M6 AorBnot B 1 0 NMOS w=1.8u l=1.2u
+M7 1 Anot 0 0 NMOS w=1.8u l=1.2u
+M8 Lnot 0 E1 E1 PMOS w=1.8u l=3.6u
+M9 Lnot Bnot 2 0 NMOS w=1.8u l=1.2u
+M10 2 A 0 0 NMOS w=1.8u l=1.2u
+M11 Qnot 0 E1 E1  PMOS w=3.6u l=3.6u
+M12 Qnot AorBnot 3 0 NMOS w=1.8u l=1.2u
+M13 3 Lnot 0 0 NMOS w=1.8u l=1.2u
+MQLO 8 Qnot E1 E1  PMOS w=3.6u l=1.2u
+MQL1 8 Qnot 0 0 NMOS w=1.8u l=1.2u
+MLTO 9 Lnot E1 E1  PMOS w=3.6u l=1.2u
+MLT1 9 Lnot 0 0 NMOS w=1.8u l=1.2u
+CQ Qnot 0 30f
+CL Lnot 0 10f
+
+Vdd E1 0 5
+Va A 0  pulse(0 5 10ns .1ns .1ns 15ns 30ns)
+Vb B 0 0
+
+.model nmos nmos (level=9)
+.model pmos pmos (level=9)
+
+*.model NMOS NMOS (level=9)
+*.model PMOS PMOS (level=9)
+
+* dcop analysis
+.dc VDD 5 5 1
+.print dc v(a) v(b) v(9) v(8) 
+
+*.options timeint conststep=1 bpenable=0
+.options device debuglevel=-10
+
+* sensitivity options and parameters.
+* Stuff on the "SENS" line is similar to what one might put on the
+* .options NONLIN line.  SENS-PARAMS is only for a list of parameters
+* to use for a sensitivity calculation.  If the parameter is "=1" it
+* means "use this parameter".  If "=0", it means don't use.
+
+.SENS objfunc={0.5 * (V(8)-4.0)**2.0}
+* Interesting.  This set of params (for M11 and M12) give different results for direct and adjoint.
+* M11 and M12 are not directly connected to v(8), which is the only solution variable in the objective function.
+* The Adjoint calculation says dOdp is zero for each parameter, which kind of makes sense.  The Direct
+* calculation gives nonzeros, which doesn't.  hmmm.
++ param=M11:w,M11:L,M12:w,M12:L
+* This set of params (for MQLO and MQL1) give matching results for direct and adjoint.  These two
+* transistors are directly connected to V(8), so there *should* have been a strong dependence, which
+* is predicted by both adjoint and direct.  As MQLO and MQL1 are PMOS and NMOS, respectively, only the
+* "on" transistor should have a big sensitivity.  In this case that is the MQLO PMOS transistor.
++ param=MQLO:w,MQLO:L,MQL1:w,MQL1:L
+
+.options nonlin nox=0 debuglevel=-100
+
+.END
+
+

@@ -1,0 +1,30 @@
+***************************************************************
+* The I(*) wildcards should ignore the T devices in this
+* netlist.  The T devices should be included in the P(*)
+* output though.  The I1(*) and I2(TLINE2*) wildcards should also
+* work for the T devices.
+*
+* See SON Bug 1317 for more details.
+***************************************************************
+VIN 1 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)
+
+* current flows into terminal 1, and out of terminal 2, of TLINE1
+RIN1 1 2 50
+TLINE1 2 0 3 0 Z0=50 TD=10N
+RL1 3 0 50
+
+* current flows into terminal 2, and out of terminal 1, of TLINE2
+RIN2 1 4 50
+TLINE2 5 0 4 0 Z0=50 TD=10N
+RL2 5 0 50
+
+* current flows into terminal 1, and out of terminal 2, of TLINE2a
+RIN2a 1 6 50
+TLINE2a 6 0 7 0 Z0=50 TD=10N
+RL2a 7 0 50
+
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.25N 50N
+.PRINT TRAN i(*) p(*) i1(*) i2(TLINE2*)
+
+.END

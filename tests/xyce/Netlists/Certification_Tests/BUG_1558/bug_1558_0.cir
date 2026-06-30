@@ -1,0 +1,17 @@
+* Baseline test for bug 1558
+
+X1 1 0 simple PARAMS: R=100k
+V1 1 0 DC 5v
+
+.dc v1 0 5 1
+.print dc v(1) I(V1)
+
+
+
+.subckt simple a b PARAMS: R=100
+
+R1 a b {R}
+
+.ends
+
+.end

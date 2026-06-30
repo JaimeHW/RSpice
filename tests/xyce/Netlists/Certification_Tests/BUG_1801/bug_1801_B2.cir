@@ -1,0 +1,21 @@
+*Test of passing subcircuit parameter values that are global params
+* This tests use of a user-defined function inside a subcircuit that is passed
+* a global param.
+
+.global_param resval=1
+.func res(x) {x+(x+1)}
+X1 1 0 RESSUB PARAMS: resistance={resval}
+V1 1 0 5V
+
+
+*10001 because sometimes there's roundoff in xyce_verify and it gets 
+* confused about where the end is...
+.step dec resval 1 10001 5
+.dc v1 5 5 1
+.print dc V(1) I(V1)
+
+.subckt ressub a b params: resistance=100k
+R1 a b {res(resistance)}
+.ends
+
+.end

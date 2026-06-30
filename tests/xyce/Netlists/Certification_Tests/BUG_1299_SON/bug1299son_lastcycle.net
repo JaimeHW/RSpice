@@ -1,0 +1,13 @@
+* netlist to assure that various
+* combinations of output-limiting options work
+* together
+* In this version, we only limit output to final period of
+* sinusoidal source through a resistor
+
+vin   1 0 sin(0 1 1Hz 0 0 90) 
+r1 1 0 1k
+
+* tstart=4s should prevent output prior to t=4
+.tran 0.1 5 4
+.print tran v(1)
+.end

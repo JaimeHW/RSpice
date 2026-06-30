@@ -1,0 +1,24 @@
+Test Name: BUG_458
+Owner: Robert Hoekstra
+Test netlists: bug458.cir
+GS files: bug458.cir.prn
+Mode:  Serial
+Comparator: none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Requests availability of KLU solver for Xyce.
+ 
+Procedure:
+============
+Run bug458.cir in serial.
+
+Verification:
+=============
+Passes if netlist runs to completion with no errors.
+ 
+Notes:
+======
+
+

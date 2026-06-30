@@ -1,0 +1,78 @@
+THIS CIRCUIT TESTS A CHAIN of 2-INPUT NAND GATES WITH BJT MODEL
+* This is a 2-input NAND.  
+* This file produces/creates the DCOP restart file.
+
+** Analysis setup **
+*
+*.tran 20ns 1us
+.dc VDD 5 5 1
+.save type=ic  file=bjt.ic  level=all
+
+.options nonlin nlstrategy=0 searchmethod=0 in_forcing=0
++ maxstep=200 continuation=1 reltol=1.0e-2 abstol=1.0e-6 rhstol=1.0e-4
++ memory=0
+
+.options loca
++ stepper=natural
++ predictor=constant
++ stepcontrol=adaptive
++ conparam=GSTEPPING
++ initialvalue=4
++ minvalue=-4
++ maxvalue=4
++ initialstepsize=-2
++ minstepsize=1.0e-6
++ maxstepsize=1.0e+12
++ aggressiveness=0.01
++ maxsteps=400
++ maxnliters=20
+
+
+VDD 	$G_VDDNODE	0	5V
+VIN1          1 0  5V PULSE (5V 0V 3us 25ns 250ns 4us 8.275us)
+VIN2          2 0  0V PULSE (0V 5V 2us 25ns 250ns 4us 8.275us)
+
+XN1  1  2  OUT1  NAND
+XN2  1   OUT1  OUT2  NAND
+XN3  1   OUT2  OUT3  NAND
+XN4  1   OUT3  OUT4  NAND
+XN5  1   OUT4  OUT5  NAND
+XN6  1   OUT5  OUT6  NAND
+XN7  1   OUT6  OUT7  NAND
+XN8  1   OUT7  OUT8  NAND
+XN9  1   OUT8  OUT9  NAND
+XN10  1   OUT9  OUT10  NAND
+XN11  1   OUT10  OUT11  NAND
+XN12  1   OUT11  OUT12  NAND
+XN13  1   OUT12  OUT13  NAND
+XN14  1   OUT13  OUT14  NAND
+XN15  1   OUT14  OUT15  NAND
+
+.print dc V(OUT1) v(OUT2) V(OUT9) v(OUT10) V(1) V(2)
+
+.subckt nand   INP1  INP2  VOUT 
+RB1	$G_VDDNODE	VB1	4K
+QIN1	VB2	VB1	INP1	NPN
+QIN2	VB2	VB1	INP2	NPN
+RC2	$G_VDDNODE	VC2	1.6K
+Q3	VC2	VB2	VB3	NPN
+RC3	$G_VDDNODE	VOUT	4K
+Q4	VOUT	VB3	0	NPN
+RB3	VB3	0	1K
+.ENDS
+
+**************************
+.MODEL NPN NPN (           IS     = 3.97589E-14
++ BF     = 195.3412        NF     = 1.0040078       VAF    = 53.081
++ IKF    = 0.976           ISE    = 1.60241E-14     NE     = 1.4791931
++ BR     = 1.1107942       NR     = 0.9928261       VAR    = 11.3571702
++ IKR    = 2.4993953       ISC    = 1.88505E-12     NC     = 1.1838278
++ RB     = 56.5826472      IRB    = 1.50459E-4      RBM    = 5.2592283
++ RE     = 0.0402974       RC     = 0.4208          XTI    = 5.8315
++ EG     = 1.11            XTB    = 1.6486          TF     = 3.3E-10
++ XTF    = 6               ITF    = 0.32            VTF    = 0.574
++ PTF    = 25.832          TR     = 3.75E-7         CJE    = 2.56E-11
++ VJE    = 0.682256        MJE    = 0.3358856       FC     = 0.83
++ CJC    = 1.40625E-11     VJC    = 0.5417393       MJC    = 0.4547893       )
+**************************
+.END

@@ -1,0 +1,20 @@
+*// Test-bench for silicon MVS2 model
+*// simulates the dc I-V characteristics of the transistor
+
+M1 drain gate source mvs_2_0_0_hemt
+Vdrain drain 0  dc 0.5
+Vgate gate 0 dc 0.8
+Vsource source 0 dc {0}
+
+.dc vdrain 0 0.8 0.001 
+.print dc v(drain) v(gate) I(vdrain)
+
+
+.model MVS_2_0_0_HEMT nmos
++ level=2001 W=1e-6 Lgdr=30e-9 dLg=0 Cins = 3.17e-2 B = 6.8e-9 dqm0 = 4.6e-9 beta=1.55 n0=1.35
++ nd=0.0 delta=120e-3 energy_diff_volt = -30.9e-3 Rc0 = 160e-6 nacc = 2.25e16 ksee = 0.1 meff=0.041
++ eps=13.6 mu_eff = 1.0 
+
+
+.end
+

@@ -1,0 +1,26 @@
+* test error handling for bug 971
+
+V1 1 0 1
+L1 1 2 1e-3
+R1 2 0 1
+C1 2 0 1e-9
+
+I1 3 0 1
+R3 3 0 1
+
+.SUBCKT Rsub a d
+L4 a b 2e-3
+R4 b c 2
+C4 c d 2e-9
+I1 a d 0.1
+.ENDS
+
+V4 4 0
+X1 4 5 Rsub
+R5 5 0 1
+
+.DC V1 1 1 1
+.PRINT DC V(1) R1:BLEEM X1:R1:BLEEM L1:BLEEM X1:L1:BLEEM
++ C1:BLEEM X1:C1:BLEEM I1:BLEEM X1:I1:BLEEM
+
+.END

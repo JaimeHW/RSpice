@@ -1,0 +1,2 @@
+serial, nightly, parallel,  analytic, globalparam, embeddedsampling, mc, uniform
+valgrind

@@ -1,0 +1,15 @@
+HB test of print output format
+*
+* Trivial resistor circuit
+*
+
+R1 1 0 10
+v1 1 0 sin 0 1V 1e4 0 0
+R2 1 2 10
+R3 0 2 10
+
+.print HB v(1) I(v1)
+.print HB_TD v(2)
+.hb 1e4
+
+.end

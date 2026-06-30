@@ -1,0 +1,38 @@
+Test errors for measure types that are not supported for FFT
+******************************************************************************
+* At present, only the ENOB, FIND, SFDR, SNDR and THD measure types are
+* supported for TRAN mode for .MEASURE FFT.  This tests the error messages
+* from the other valid types, that aren't supported for FFT measures.
+*
+* The netlist, .FFT and .TRAN print/analysis statements in this netlist
+* don't really matter.
+*
+*******************************************************************
+
+.TRAN 0 1
+.OPTIONS FFT FFT_ACCURATE=1 FFTOUT=1
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+.FFT V(1) NP=8 WINDOW=HANN
+
+.MEASURE FFT AVG AVG V(1)
+.MEASURE FFT DERIV DERIV SNDR V(1)
+.MEASURE FFT DUTY DUTY V(1)
+.MEASURE FFT ERR ERR V(1)
+.MEASURE FFT ERR2 ERR2 V(1)
+.MEASURE FFT ERROR ERROR V(1)
+.MEASURE FFT FOUR FOUR V(1)
+.MEASURE FFT INTEG INTEG V(1)
+.MEASURE FFT MIN MIN V(1)
+.MEASURE FFT MAX MAX V(1)
+.MEASURE FFT OFF_TIME OFF_TIME V(1)
+.MEASURE FFT ON_TIME ON_TIME V(1)
+.MEASURE FFT PP PP V(1)
+.MEASURE FFT RMS RMS V(1)
+.measure fft trigTarg TRIG v(1)=0.1 TARG v(1)=0.99
+
+.PRINT TRAN V(1) V(2)
+.END

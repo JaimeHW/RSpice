@@ -1,0 +1,16 @@
+* Test that the Python methods setADCWidths(), getADCWidths(), getADCMap()
+* getTimeStatePairsADC(), getTimeVoltagePairsADC() and getNumDevices()
+* return 0 if there are no ADCs in the netlist. Also, that the Python
+* interface doesn't crash in that case.  Note that the .py file
+* only initializes the N_CIR_Xyce object.  It does not
+* run the simulation.  So, there is .prn file made by this
+* test.
+
+V1 1 0 SIN(0 1 1)
+R1 1 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1)
+
+.END
+

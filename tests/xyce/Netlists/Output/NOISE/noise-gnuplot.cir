@@ -1,0 +1,22 @@
+********************************************************
+* Test FORMAT=GNUPLOT without .STEP.  This should 
+* produce the same .NOISE.prn file as FORMAT=STD. 
+*
+* This also tests FORMAT=SPLOT, which should produce
+* the same output file for the non-step case.
+********************************************************
+
+V1  1 0 DC 5.0 AC  1.0   
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 100MEG 1
+.PRINT NOISE FORMAT=GNUPLOT V(4) VR(4) VI(4) INOISE ONOISE
+.PRINT NOISE FORMAT=SPLOT FILE=noise-gnuplot.cir.NOISE.splot.prn V(4) VR(4) VI(4) INOISE ONOISE
+
+.END

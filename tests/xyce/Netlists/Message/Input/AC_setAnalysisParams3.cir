@@ -1,0 +1,17 @@
+********************************************************
+* Test error messsage when .AC line has an invalid
+* <end frequency> entry, that is 0.
+*
+* See SON Bug 1146 for more details.
+********************************************************
+
+* Trivial high-pass filter (V-C-R) circuit.
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.print AC vm(b)
+.ac dec 5 100 0
+
+.end
+

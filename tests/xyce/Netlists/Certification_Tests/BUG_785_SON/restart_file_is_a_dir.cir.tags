@@ -1,0 +1,4 @@
+serial, parallel, nightly
+restart
+bug785
+errorexit

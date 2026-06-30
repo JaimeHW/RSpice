@@ -1,0 +1,35 @@
+Test Name: bug_401
+Owner: Eric Rankin
+Test netlists: extra-space.cir
+               bad-device-line.cir
+               worse-device-line.cir
+GS files: none
+Mode:  Serial and Parallel (Do not test linux_MPICH or alpha_osf1_MPI)
+Comparator: none
+Version of Xyce: Release_2.0
+ 
+Description:
+============
+Bug 401:  Xyce segfaults when it encounters an instance line for a 
+non-existent device type. Blank lines at the start of the netlist 
+also caused problems.
+ 
+Procedure:
+============
+runxyce or xmpirun on each of the three netlists.  
+ 
+Verification:
+=============
+Passes if Xyce aborts with an error message for each netlist. 
+ 
+Notes:
+======
+Xyce should not segfault.
+
+extra-space.cir and bad-device-line.cir error message is related to 
+missing metadata (2004.11.01).  worse-devivce-line.cir error message
+is related to illegal values on the device line.
+
+(2004.12.20 RJH) Currently, Xyce leaves zombie processes on linux_MPICH
+and alpha_osf1_MPI runs.  This will be addressed in the next release (not 2.1).
+ICC was tested and does not exhibit this problem.

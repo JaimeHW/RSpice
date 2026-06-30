@@ -1,0 +1,108 @@
+*-------------------------------------------------------------------------
+* Copyright Notice
+*
+* Copyright (c) 2000, Sandia Corporation, Albuquerque, NM.
+*-------------------------------------------------------------------------
+*
+*-------------------------------------------------------------------------
+* Filename       : $RCSfile$
+*
+* Purpose        : This test circuit should cause a fatal error, because
+*                  it contains user-specified electrodes which overlap.
+*
+* Special Notes  : 
+*
+* Creator        : Eric R. Keiter, 9233, Computational Sciences
+*
+* Creation Date  : 09/22/04
+*
+* Revision Information:
+* ---------------------
+*
+* Revision Number: $Revision$
+*
+* Revision Date  : $Date$
+*
+* Current Owner  : $Author$
+*-------------------------------------------------------------------------
+
+.param len=2.0e-3
+.param wid=1.0e-3
+.param elen=2.0e-4
+.param ewid=2.0e-4
+.param space=1.0e-4
+
+* electrode begin, end parameters for p-type material:
+.param ps1={space}
+* 1.0e-4
+.param pe1={ps1+elen}
+* 3.0e-4
+
+.param ps2={pe1+space}
+* 4.0e-4
+.param pe2={ps2+elen}
+* 6.0e-4
+
+.param ps3={pe2+space}
+* 7.0e-4
+.param pe3={ps3+elen}
+* 9.0e-4
+
+* electrode begin, end parameters for n-type material:
+.param ns1={space}
+.param ne1={ns1+elen}
+
+.param ns2={ne1+space}
+.param ne2={ns2+elen}
+
+.param ns3={ne2+space}
+.param ne3={ns3+elen}
+
+* some doping stuff.
+.param dwid ={0.25*len}
+.param dxloc={0.50*len}
+.param dyloc={0.80*wid}
+
+
+YPDE DIO1  1 2 3 4 5 6 PDEBJT 
++ meshfile=internal.msh 
++ node = {name  =  p1,  p2,  p3,    n1,    n2,  n3
++         side  = top, top, top, right, right, right
++         start = {ps1}, {ps2}, {ps3}, {ns1},{ns2},{ns3}
++         end   = {pe1}, {pe2}, {pe3}, {ne1+2.0*elen},{ne2},{ne3} }
+* Doping:
++ region = { name     =      reg1, reg2
++            function =  gaussian, uniform
++            type     =     ptype, ntype
++            nmax     =   1.0e+18, 1.0e+15
++            nmin     =   1.0e+12, 0.0
++            xloc     =   {dxloc}, 0.0
++            xwidth   =    {dwid}, 0.0
++            yloc     =   {dyloc}, 0.0
++            ywidth   =    {dwid}, 0.0
++            flatx    =     -1   , 0
++            flaty    =      1   , 0 }
++ sgplotlevel=0 tecplotlevel=2 
+*outputnlpoisson=1
++ l={len}  w={wid}
++ nx=30  ny=30
+
+VMON1 1 0 +0.0
+VMON2 2 0 +0.0
+VMON3 3 0 +0.0
+VMON4 4 0 +0.0
+VMON5 5 0 +0.0
+VMON6 6 0 +0.0
+
+.MODEL PDEBJT   ZOD  level=2
+
+.DC VMON1 0.0 0.0 0.2
+
+.options NONLIN maxstep=70 maxsearchstep=1 searchmethod=2  nox=0
+
+.options TIMEINT reltol=1.0e-3 abstol=1.0e-6 DOUBLEDCOP=NL_POISSON 
+
+.PRINT DC I(VMON1) I(VMON2) I(VMON3) I(VMON4) I(VMON5) I(VMON6)
+
+.END
+

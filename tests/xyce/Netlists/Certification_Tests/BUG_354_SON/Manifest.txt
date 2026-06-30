@@ -1,0 +1,8 @@
+bad_function.cir
+bad_function.cir.sh
+bad_leadcurrent.cir
+bad_leadcurrent.cir.sh
+bad_parameter.cir
+bad_parameter.cir.sh
+tags
+options

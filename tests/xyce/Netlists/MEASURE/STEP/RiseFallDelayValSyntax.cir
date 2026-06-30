@@ -1,0 +1,37 @@
+* A test of the measure TRIG and TARG functionality, using the legacy
+* TRIG-TARG mode. So, it tests the RiseFallDelay class.
+* See gitlab-ex issue 303 for more details.
+* 
+* These tests cover the HSpice standard VAL=<value> syntax for
+* trig-targ measures.  The goal of the test is to verify that these
+* various ways of specifying the objective value all get the same
+* answer:
+*         v(1)=0.1   (which is the Xyce standard syntax)
+*         v(1) 0.1   (which is an allowed alternative Xyce syntax)
+*         v(1) VAL=0.1   (which is the HSpice style)
+*******************************************************************************
+*
+* sine source suffices for this test
+VS1  1  0  SIN(0 1.0 1KHZ 0 0)
+
+R1  1  0  100
+
+* use legacy trig-targ mode
+.OPTIONS MEASURE USE_LTTM=1
+
+.TRAN 0 1ms 0 0.01ms
+.step VS1:VA 1 2 1.0
+
+.PRINT TRAN FORMAT=NOINDEX V(1)
+
+* these should all get the same measure value
+.measure tran riseSine0 TRIG v(1) VAL=0.1 TARG v(1)=0.99
+.measure tran riseSine1 TRIG v(1) 0.1 TARG v(1)=0.99
+.measure tran riseSine2 TRIG v(1)=0.1 TARG v(1)=0.99
+.measure tran riseSine3 TRIG v(1)=0.1 TARG v(1) VAL=0.99
+.measure tran riseSine4 TRIG v(1)=0.1 TARG v(1) 0.99
+.measure tran riseSine5 TRIG v(1)=0.1 TARG v(1)=0.99
+.measure tran riseSine6 TRIG v(1) VAL=0.1 TARG v(1) VAL=0.99
+
+.END
+

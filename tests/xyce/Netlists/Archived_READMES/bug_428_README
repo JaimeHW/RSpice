@@ -1,0 +1,11 @@
+NOTES:
+  Bug 428 address problem with Bsrc not finding node names in its
+  expression if there were lower case letters in the original name.
+
+HOWTO: 
+  Run netlist 'bug428.cir'.
+  Compare output to 'bug428.cir.prn'.
+
+SERIAL/PARALLEL:
+  This test should be run in SERIAL only.
+

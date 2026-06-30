@@ -1,0 +1,18 @@
+Netlist to demonstrate Vt bug
+**************************************************************
+* This netlist tests SON Bug 606, 654 and 1033.  SON Bug 606
+* was about making VT work within expressions.  SON Bugs
+* 654 and 1033 are then about making TEMP and VT work 
+* correctly as "dependent parameters" for all Xyce devices.  
+**************************************************************
+
+B2 3 0 V={TEMP+273.15}
+R3 3 0 1
+
+B3 4 0 V={Vt}
+R4 4 0 1
+.OP
+
+.step TEMP 27 30 1
+.PRINT DC V(3) {TEMP+273.15} {(TEMP+273.15)*(1.3806226e-23/1.6021918e-19)} V(4) {Vt} 
+.END

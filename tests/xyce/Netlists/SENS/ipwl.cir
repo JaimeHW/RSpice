@@ -1,0 +1,22 @@
+* Transient sensitivity example, IPWL source, analytical derivatives
+**********************************************************************
+.param cap=10u
+.param res=1K
+
+i1 0 1 PWL(0 0 1s 1 2s -1 3s -0.5 4s 0.25 5s 0.75 6s 4.0  )
+r1 1 2 res
+c1 2 0 cap
+r2 2 3 res
+c2 3 0 cap
+r3 3 4 res
+c3 4 0 cap
+r4 4 0 res
+
+.tran .1s 7s
+.print tran v(1) v(2) v(3) v(4)
+
+* Sensitivity commands
+.print sens
+.SENS objfunc={V(4)} param=i1:v0,i1:v1,i1:v2,i1:v3,i1:v4,i1:v5,i1:v6
+.options sensitivity direct=1 adjoint=0 forceanalytic=true
+.end

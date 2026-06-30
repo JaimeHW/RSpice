@@ -1,0 +1,38 @@
+*************************************************************
+* Test the multiplicity factor (M) for Solution-Dependent 
+* Capacitor device. Test stepping over M. 
+*
+*
+*
+* See SON Bug 834 for more details.
+*************************************************************
+
+VREF ref 0  sin(0 0 1e-6)
+RREF ref 0  1K
+
+* baseline case1
+V1   1  0 PULSE(0 1 10U 1U 1U 100m) 
+R1   1a 1 1K 
+C1a  1a 0 C={40u + V(ref)} 
+C1b  1a 0 C={40u + V(ref)}
+
+* baseline case2
+V2   2  0 PULSE(0 1 10U 1U 1U 100m) 
+R2   2a 2 1K 
+C2   2a 0 C={40u + V(ref)} 
+
+* Solution-dependent capacitor with multiplicity factor
+V3   3  0 PULSE(0 1 10U 1U 1U 100m) 
+R3   3a 2 1K 
+C3   3a 0 {40u + V(ref)} M=2
+
+.options timeint method=trap 
+.options nonlin-tran rhstol=1.0e-7 
+.TRAN 0.5U 400ms
+.STEP C3:M 1 2 1
+
+.PRINT TRAN V(1a) V(2a) V(3a) {I(C1A)+I(C1B)} I(C2) I(C3)
++ {P(C1A)+P(C1B)} P(C2) P(C3)
+
+
+.END

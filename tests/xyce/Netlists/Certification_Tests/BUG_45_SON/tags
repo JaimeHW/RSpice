@@ -1,0 +1,3 @@
+serial, parallel, nightly
+valgrind
+bug45, errorexit

@@ -1,0 +1,67 @@
+* Test DC mode support for TRIG-TARG Measures.
+*
+* This bug covers:
+*
+*   1) The case of one variable (vsrc1) on the .DC line,
+*      with one variable (vsrc2) in the .STEP statement.
+*
+*   2) The DC values of the swept variable (vsrc1) are
+*      monotonically decreasing.
+*
+* See gitlab-ex issue 293 for more details.
+****************************************************************
+
+.GLOBAL_PARAM P1=4
+
+V1  1 0 1
+R1  1 0 1
+
+B2 2 0 V={(V(1)-2.5)*(V(1)-2.5)*(V(1)-7.5)*(V(1)-7.5)/P1}
+R2 2 3 1
+R3 3 0 1
+
+* Reverse the step order on v1 (from the test in MEASURE_DC)
+* to make sure that both increasing and decreasing sequences of
+* values are tested.
+.DC v1 10 1 -1
+.STEP P1 4 6 2
+.print dc v(1) v(2) v(3) P1
+
+* AT tests
+.MEASURE DC TRIGTARGAT TRIG AT=2.5 TARG AT=7.5
+.MEASURE DC TRIGTARGAT1 TRIG AT=2.5 TARG V(2)=5 CROSS=1
+.MEASURE DC TRIGTARGAT2 TRIG V(2)=5 CROSS=1 TARG AT=7.5
+
+* Basic tests
+.MEASURE DC TRIGTARG1 TRIG V(2)=3 CROSS=1 TARG V(2)=7 CROSS=1 
+.MEASURE DC TRIGTARG2 TRIG V(2)=3 CROSS=1 TARG V(2)=7 CROSS=2
+.MEASURE DC TRIGTARG3 TRIG V(2)=3 CROSS=2 TARG V(2)=7 CROSS=1
+
+* Repeat core tests with RISE and FALL.
+.MEASURE DC RISEFALL1 TRIG V(2)=3 RISE=1 TARG V(3)=1 FALL=2 
+.MEASURE DC RISEFALL2 TRIG V(2)=3 RISE=2 TARG V(3)=1 FALL=1
+
+* Test with LAST and CROSS=-1
+.MEASURE DC TRIGTARG4 TRIG V(2)=3 CROSS=LAST TARG V(2)=7 CROSS=-1 
+.MEASURE DC TRIGTARG5 TRIG V(2)=3 CROSS=1 TARG V(2)=7 FALL=LAST 
+.MEASURE DC TRIGTARG6 TRIG V(2)=3 RISE=LAST TARG V(2)=7 CROSS=1
+
+* For DC measuse, the TD value does not depend on the sweep direction.
+* So, the second measure should fail.
+.MEASURE DC TRIGTARG7 TRIG V(2)=3 CROSS=1 TD=7 TARG V(2)=7 CROSS=1 
+.MEASURE DC TRIGTARG8 TRIG V(2)=3 CROSS=1 TD=8.5 TARG V(2)=7 CROSS=1
+.MEASURE DC TDearly TRIG V(2)=3 CROSS=1 TD=0.5 TARG V(2)=7 CROSS=1
+
+* failed measures
+.MEASURE DC ATEarly TRIG AT=0 TARG AT=-1
+.MEASURE DC ATLate TRIG AT=11 TARG AT=12
+.MEASURE DC TrigTDLate TRIG v(2)=3 CROSS=1 TD=15 TARG v(2)=7 CROSS=1 TD=2
+.MEASURE DC TargTDLate TRIG v(2)=3 CROSS=1 TARG v(2)=7 CROSS=2 TD=12
+.MEASURE DC ValNotFound TRIG v(2)=200 CROSS=1 TARG v(2)=-200 CROSS=2
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure dc lastMeasure min v(2)
+
+.END

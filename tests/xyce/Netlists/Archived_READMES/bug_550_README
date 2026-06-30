@@ -1,0 +1,31 @@
+Test Name: BUG_550
+Owner: Eric Keiter
+Test netlists: none 
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Bug 550 reported that a core dump would happen if the CJO level=3 diode
+model paremter was set to zero.  This happened on linux, but not on
+other platforms (that I tested).  The original report was for linux.
+
+Procedure:
+============
+The circuit which was attached to the bugzilla issue should work fine
+as a test circuit.  It didn't take very long to run.  This circuit has
+been placed in this directory, and is named "bug550.cir".
+
+Verification:
+=============
+Run bug550.cir on linux in serial.  Don't bother with parallel or any
+other platform.  If it finishes without a coredump, consider this bugfix
+verified.
+
+ 
+Notes:
+======
+
+

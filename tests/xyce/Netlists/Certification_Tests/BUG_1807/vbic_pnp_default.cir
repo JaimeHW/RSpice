@@ -1,0 +1,19 @@
+PNP VBIC Bipolar Transistor Circuit Netlist
+VPOS  1 0 DC 5V
+VBB   6 0 DC -2V
+RE    1 2 2K
+RB    3 4 190K
+Q 5 3 7 PBJT
+*
+* Zero volt sources acting as an ammeter to measure the
+* base, collector, and emmitter currents, respectively
+VMON1 4 6 0
+VMON2 5 0 0
+VMON3 2 7 0
+* VBIC currently has several default-zero resistances, and no  node collapse,
+* so this is mandatory:
+.options device minres=0.001
+.MODEL PBJT PNP level=11
+.DC VPOS 0 5 1 VBB 0 -2 -0.5
+.PRINT DC V(1) V(6) I(VMON1) I(VMON2) I(VMON3)
+.END

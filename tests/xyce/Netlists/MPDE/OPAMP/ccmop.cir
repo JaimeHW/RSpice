@@ -1,0 +1,90 @@
+Fully differential OpAmp 
+*
+* Fully Differential Op Amp composed of 
+* two single ended current mirror output opamps
+*
+* From "Analog Integrated Circuit Design" 
+* by D. A. Johns and Ken Martin 
+* published by John Wiley & Sons, INC 1997
+*
+* Adapted from implementation in GnuQAPP
+*
+
+.model PMOS4 PMOS( level=2 WL=4 )
+.model PMOS1 PMOS( level=2 WL=1 )
+.model NMOS4 NMOS( level=2 WL=4 )
+.model NMOS1 NMOS( level=2 WL=1 )
+
+.param CExt=1e-11 CInt=1e-13 Au=0.0008
+
+.subckt NCCM41 1 2 GND
+M1 1 1  3  GND NMOS1
+M2 3 3 GND GND NMOS1
+M3 2 1  4  GND NMOS4
+M4 4 3 GND GND NMOS4
+C1 1 0 {CInt}
+C2 2 0 {CInt}
+C3 3 0 {CInt}
+C4 4 0 {CInt}
+.ends
+
+.subckt PCCM41 1 2 N_VDD
+M1 1 1  3  N_VDD PMOS1
+M2 3 3 N_VDD N_VDD PMOS1
+M3 2 1  4  N_VDD PMOS4
+M4 4 3 N_VDD N_VDD PMOS4
+C1 1 0 {CInt}
+C2 2 0 {CInt}
+C3 3 0 {CInt}
+C4 4 0 {CInt}
+.ends
+
+.subckt PCCM11 1 2 N_VDD
+M1 1 1  3  N_VDD PMOS1
+M2 3 3 N_VDD N_VDD PMOS1
+M3 2 1  4  N_VDD PMOS1
+M4 4 3 N_VDD N_VDD PMOS1
+C1 1 0 {CInt}
+C2 2 0 {CInt}
+C3 3 0 {CInt}
+C4 4 0 {CInt}
+.ends
+
+VDDef N_VDD 0 DC 5V
+ 
+XN1   1  N_Vout1  0  NCCM41
+XP1   2    1     N_VDD PCCM11
+M1    2   N_Vin1  3  NMOS1
+M2    8   N_Vin2  3  NMOS1
+M3    7   N_Vin1  4  NMOS1
+M4    5   N_Vin2  4  NMOS1
+XP2   5    6   N_VDD PCCM11
+XN2   6  N_Vout2  0  NCCM41
+XP3   8  N_Vout1 N_VDD PCCM41
+XP4   7  N_Vout2 N_VDD PCCM41
+
+I1    3    0   DC 61e-6
+I2    4    0   DC 61e-6
+
+CVout1 N_Vout1 0 {CExt}
+CVout2 N_Vout2 0 {CExt}
+
+CVin1 N_Vin1 0 {CInt}
+CVin2 N_Vin2 0 {CInt}
+
+CI1 3 0 {CInt}
+CI2 4 0 {CInt}
+
+Vin1  NR_Vin1 0      DC 2.5 {2.5+Au*(sin(2*pi*time2)+pulse(time1,0,1,0.1,0.1,0.1,0.4,1))}
+RVin1 NR_Vin1 N_Vin1 1
+
+Vin2  NR_Vin2 0      DC 2.5 {2.5-Au*(sin(2*pi*time2)+pulse(time1,0,1,0.1,0.1,0.1,0.4,1))}
+RVin2 NR_Vin2 N_Vin2 1
+
+.print tran V(N_Vin1) V(N_Vout1) V(N_Vin2) V(N_Vout2)
+*.tran 1e-8 1e-4
+.dc VDDef 5v 5v 1v
+*.options timeint method=8
+*.options device finitediff=1
+
+.end

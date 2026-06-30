@@ -1,0 +1,55 @@
+* Test AC mode support for the RF parameter operators
+* for the EQN, MAX, MIN and PP measures.
+*
+* It is important to test the operators both within
+* and outside of expression delimiters.  Also, the
+* netlist does not have a .PRINT AC line.  This tests
+* that the S and Z parameter matrices get made properly
+* by the AC object, when the .LIN line only requests
+* Y paramter output.
+*
+* See SON Bug 1221 for more details
+**************************************************
+
+* RC ladder circuit
+
+P1 1 0   port=1  z0=50
+
+C1 2 0 1e-2
+Rgs 1 2 0.02
+
+.subckt RCBlock IN OUT GND
+R1 IN OUT 20
+C1 IN OUT 1p
+Cg1 OUT GND 1p
+.ends
+
+X1 2 3 0 RCBlock
+X2 3 4 0 RCBlock
+X3 4 5 0 RCBlock
+X4 5 6 0 RCBlock
+X5 6 7 0 RCBlock
+X6 7 8 0 RCBlock
+X7 8 9 0 RCBlock
+X8 9 10 0 RCBlock
+X9 10 11 0 RCBlock
+X10 11 12 0 RCBlock
+
+.AC DEC 10 10  1e5
+.LIN LINTYPE=Y
+
+.MEASURE AC MAXSR11 MAX SR(1,1)
+.MEASURE AC MAXYDB11 MAX YDB(1,1)
+.MEASURE AC MINSI11 MIN si(1,1)
+.MEASURE AC MAXZP11 MAX ZP(1,1)
+.MEASURE AC PPSI11 PP SI(1,1)
+.MEASURE AC EQNYM11 EQN ym(1,1)
+
+.MEASURE AC MAXSR11_EXP MAX {SR(1,1)}
+.MEASURE AC MAXYDB11_EXP MAX {YDB(1,1)}
+.MEASURE AC MINSI11_EXP MIN {SI(1,1)}
+.MEASURE AC MAXZP11_EXP MAX {zp(1,1)}
+.MEASURE AC PPSI11_EXP PP {si(1,1)}
+.MEASURE AC EQNYM11_EXP EQN {ym(1,1)}
+
+.END

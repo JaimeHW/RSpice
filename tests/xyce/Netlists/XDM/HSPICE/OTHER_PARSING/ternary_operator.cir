@@ -1,0 +1,22 @@
+* ternary operator
+* Xyce netlist for corresponding HSPICE netlist
+* Netlist tests XDM correctly translates  
+* expressions with ternary operators
+* (see issue #102 on XDM gitlab).
+
+.OPTIONS DEVICE TNOM=25
+
+.PARAM FLAG1=1
+.PARAM FLAG2=-1
+.PARAM VAL1='flag1>0?4 :8'
+.PARAM VAL2=4
+.PARAM VAL3=8
+.FUNC VAL4(x,y) 'x>0?y>0?4 :8 :8'
+
+VA 1 0 DC 0
+R1 1 2 R=VAL1
+R2 2 3 R='FLAG2>0?VAL2 :VAL3'
+R3 3 0 R='VAL4(FLAG1,FLAG2)'
+
+.DC LIN VA 0 10 1
+.PRINT DC FORMAT=PROBE V(1) V(2)

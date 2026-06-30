@@ -1,0 +1,35 @@
+*Analysis directives:
+.TRAN  0 10ms
+.PRINT TRAN V(N15206) V(N15971) V(N15554) V(N15997)
++  V(N16554) V(N16997)
+
+* RC Decay
+R_R1         N15206 N15971  1k 
+R_R2         N15975 N15971  10 
+C_C1         N16095 N15975  1u  
+R_R3         N16095 0  10 
+V_V1         N15206 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+
+*RC Decay with IC
+V_V2         N15554 0  
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s
+R_R4         N15554 N15997  1k 
+R_R5         N15967 N15997  10
+C_C2         N16112 N15967  1u 
+R_R6         N16112 0  10 
+.IC         V(N15967) =0.5
+
+*RC Decay with IC in subcircuit
+V_V3         N16554 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+R_R7         N16554 N16997  1k 
+X_X1         N16997 N17112  IC_Subckt params: vmid=0.5
+R_R8         N17112 0 10 
+
+.SUBCKT IC_Subckt in out params: vmid=5.0
+R1          in  mid 10
+C1          mid out 1u
+.IC         V($G_VCC)=0.0; setting ic of global node here should cause warning
+.IC         V(mid)={vmid}
+.ENDS
+
+.END

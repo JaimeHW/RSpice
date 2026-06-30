@@ -1,0 +1,4 @@
+serial, nightly, ac
+genext
+library
+requirestestbinary

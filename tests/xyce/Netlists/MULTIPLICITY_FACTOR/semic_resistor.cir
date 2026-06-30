@@ -1,0 +1,37 @@
+******************************************************
+* Test the multiplicity factor (M) for semiconductor
+* versions of the Resistor devices.
+* Testing for .DC analysis is okay for the Resistor
+* devices.  Test both the Level 1 and Level 2
+* formulations.
+*
+*
+* See SON Bug 834 for more details.
+******************************************************
+
+* Level 1 Resistor
+V1  1   0 1
+R1a 1a  0 1000 
+R1  1  1a RMOD1 L=1000U W=1U
+.MODEL RMOD1 R (RSH=1 TNOM=20 TC1=0.1)
+
+* Level 2 resistor
+V2  2   0 1
+R2a 2a  0 1000 
+R2  2  2a RMOD2 L=1000U W=1U
+.MODEL RMOD2 R (LEVEL=2 RSH=1 TNOM=20 TC1=0.1)
+
+* Stepping over M for the R1 and R2 devices.
+* Also step over temperature.
+* This should be adequate for this test.
+.STEP R1:M 1 2 1
+.STEP R2:M 1 2 1
+.STEP TEMP 20 30 10
+
+* analysis and print statements.  To be conservative
+* make sure that I() and P() work with M.
+.DC V1 1 1 1
+.PRINT DC R1:M R2:M V(1a) I(R1) P(R1) 
++ V(2a) I(R2) P(R2) 
+
+.END

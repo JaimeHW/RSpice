@@ -1,0 +1,17 @@
+tags
+diodeClipperMeasure.cir
+diodeClipperMeasure.cir.sh
+diodeClipperMeasure.cir.xdm.D.gs.out
+query.cir
+query.cir.sh
+query.cir.xdm.C.gs.out
+query.cir.xdm.L.gs.out
+query.cir.xdm.R.gs.out
+query.cir.xdm.ALL.gs.out
+queryQ.cir
+queryQ.cir.sh
+queryQ.cir.xdm.Q.gs.out
+queryX.cir
+queryX.cir.sh
+queryX.cir.xdm.X.gs.out
+pwlFile1.txt

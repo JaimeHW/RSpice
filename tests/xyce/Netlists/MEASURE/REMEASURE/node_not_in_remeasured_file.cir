@@ -1,0 +1,26 @@
+* Test error messages when trying to re-measure a 
+* nodal voltage (e.g., V(2) or N(3)) that is not in 
+* the remeasured .prn file.  The other cases are
+* nodes 4 and 5 only appear in a voltage-difference
+* operator, and node 6 only appears within an
+* expression on the .PRINT line.  See SON Bugs 707, 
+* 718 and 999 for more details.
+
+V1 1 0 SIN(0 1 1)
+R1 1 2 1
+R2 2 3 1
+R3 3 4 1
+R4 4 5 1
+R5 5 6 1
+R6 6 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(4,5) {V(6)}
+
+* Test both V() and N()
+.MEASURE TRAN NONODEV MAX V(2)
+.MEASURE TRAN NONODEN MAX N(3)
+.MEASURE TRAN NODEINVDIFF MAX V(4)
+.MEASURE TRAN NODEINEXP MAX V(6)
+
+.END

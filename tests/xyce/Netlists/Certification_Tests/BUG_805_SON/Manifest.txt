@@ -1,0 +1,9 @@
+bug805_all.cir
+bug805_all.cir.sh
+bug805_top.cir
+bug805_top2.cir
+mil_test1.lib	
+mil_test2a.lib	
+mil_test2b.lib
+exclude
+tags

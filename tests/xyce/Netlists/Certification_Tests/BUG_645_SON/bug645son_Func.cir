@@ -1,0 +1,14 @@
+Testing the use of .func and .param in objective functions
+
+.DC V1 1 1 1
+.param res=2
+.func powerTestFunc(I) {res*I*I}
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 0.5
+
+.print sens
+.SENS objfunc={powerTestFunc(I(V1))} param=R1:R
+
+.end

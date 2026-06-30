@@ -1,0 +1,53 @@
+* Xyce netlist for testing xdm query mode (-q) for X (.subckt)
+* for various potentially problematic syntaxes.
+
+*Analysis directives: 
+.TRAN  0 10ms 0
+.PRINT TRAN FORMAT=PROBE V(1a) V(2a) V(3a)
+
+*Simple RC Decay, using RC_Subckt1
+V1    1  0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+R1a   1 1a  1k 
+X1   1a 1b  RC_Subckt1
+R1c  1b  0  10 
+
+*no comment lines
+.SUBCKT RC_Subckt1 in out
+Rsub    in  mid 10
+Csub    mid out 1u
+.ENDS
+
+*Simple RC Decay , using RC_Subckt2
+V2     2  0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+R2a    2 2a  1k 
+X2    2a 2b  RC_Subckt2 
+R2c   2b  0  10 
+
+*inline comments
+.SUBCKT RC_Subckt2
++ in; input node 
++ out; output node
+Rsub1    in  mid 10
+Csub1    mid out 1u
+.ENDS
+
+*Simple RC Decay, using RC_subckt3
+V3     3  0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+R3a    3 3a  1k 
+X3    3a 3b  RC_Subckt3
+R3c   3b  0  10 
+
+*using comment lines
+.SUBCKT RC_Subckt3 
+* input node
++ in 
+* output node
++ out
+Rsub    in  mid 10
+Csub    mid out 1u
+.ENDS
+
+.END
+
+
+

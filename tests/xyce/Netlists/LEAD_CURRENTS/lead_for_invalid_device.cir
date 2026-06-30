@@ -1,0 +1,22 @@
+****************************************************************
+* Test for I() for invalid devices.  I() is implemented for the 
+* requested device though. 
+*
+* The goal of this test is to ensure that Xyce exits gracefully
+* with a reasonable error message.
+* 
+*
+* See SON Bug 833 for more details.
+****************************************************************
+* This is a valid I-R circuit.  It is in here for "test 
+* development" to help prove that the circuit actually works 
+* in .TRAN
+I1 1 0 sin(0 1 1KHz)
+R1 1 0 1
+
+.TRAN 0 1ms
+* Node 3 and device RBogo are invalid, even though I() is
+* supported for the R device.
+.PRINT TRAN V(2) I(RBogo)
+
+.end

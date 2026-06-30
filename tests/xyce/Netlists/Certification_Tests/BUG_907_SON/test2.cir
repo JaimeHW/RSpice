@@ -1,0 +1,17 @@
+% Test of hierarhical libraries
+
+vd d 0 dc 1.8
+vg g 0 dc 0
+
+r1 g d 1k
+
+.dc vg 0 1.8 0.01
+
+.print dc i(vd) i(vf) 
+
+.param x2  = '(x)/3.0'
+
+.lib lib3.lib lib4_top
+
+.end
+

@@ -1,0 +1,49 @@
+* macro statement
+* XDM netlist for corresponding HSPICE netlist.
+* Netlist tests XDM macro statement translations, 
+* which is a synonym for suckt in HSPICE. XDM should
+* translate the macro statement into a subckt 
+* statement. Netlists also includes subckt statements
+* to check that mixed macro and subckt statements
+* won't cause problems, .param statements inside
+* the .macro scope to make sure the macro instance
+* parameters will be separated from .param statements,
+* and tests of node delineations involving the .macro 
+* statement.
+
+.OPTIONS DEVICE TNOM=25  
+.SUBCKT subckt_resistor a b PARAMS: RESISTANCE=1 RESISTANCE2=1
+.PARAM VAL2=3 VAL1=2
+R1 a a1 R=resistance
+R2 a1 a2 R=resistance2
+R3 a2 b R=VAL1+VAL2
+.ENDS subckt_resistor
+
+.SUBCKT subckt_resistor2 a b PARAMS: RESISTANCE=1 RESISTANCE2=1
+R1 a a1 R=resistance
+R2 a1 b R=resistance2
+.ENDS
+
+.SUBCKT subckt_rc a b PARAMS: RESISTANCE=1 CAPACITANCE=10p
+.PARAM VAL1=10
+R1 a a1 R=resistance
+R2 a1 b R=VAL1
+C1 b 0 C=capacitance
+.ENDS
+
+.PARAM VAL3=10
+VA 1 0 PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+X1 1 2 subckt_resistor2 PARAMS: RESISTANCE=10 RESISTANCE2=10
+X2 2 3 subckt_resistor PARAMS: RESISTANCE=VAL3 RESISTANCE2=5
+X3 3 4 subckt_rc PARAMS: RESISTANCE=10 CAPACITANCE=1u
+C4 4 0 C=10u
+
+.IC V(X3.B)=0.5
+
+.TRAN 10u 10ms 0 UIC
+
+* The .PRINT line needs the actual output variable that will be
+* printed out (rather an output variable with wildcards) for 
+* xyce_verify to succeed. Still, this accomplishes the check for
+* correct translation and output of wildcards from HSPICE.
+.PRINT TRAN FORMAT=PROBE V(X1.A1) V(X2.A1) V(X2.B) V(4) 

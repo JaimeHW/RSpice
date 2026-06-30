@@ -1,0 +1,4 @@
+* This file is included with ../ from within a file
+* in the sub2 subdirectory
+
+R5 1 0 5

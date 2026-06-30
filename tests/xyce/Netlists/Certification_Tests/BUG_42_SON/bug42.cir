@@ -1,0 +1,9 @@
+*Test to make sure that .lib is a synonym for .inc
+
+.lib resistance.txt
+
+V1 1 0 DC 1
+R1 1 0 res
+
+.DC V1 1 1 0.1
+.END

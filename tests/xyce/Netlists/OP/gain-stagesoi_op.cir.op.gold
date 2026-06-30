@@ -1,0 +1,12 @@
+Number of BSIM3 SOI models: 1
+           name           NMOS
+Number of BSIM3 SOI instances: 1
+           name             M1
+Number of Independent Voltage Source models: 1
+           nameV level 1 (Independent Voltage Source)
+Number of Independent Voltage Source instances: 2
+           name           VDD1            VIN
+Number of Resistor models: 1
+           nameR level 1 (Resistor)
+Number of Resistor instances: 2
+           name          RLOAD        RSOURCE

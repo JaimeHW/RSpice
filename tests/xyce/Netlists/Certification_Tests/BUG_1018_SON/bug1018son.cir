@@ -1,0 +1,30 @@
+Test fix of bug 1018 for a Verilog-A device
+
+* Prior to investigation of bug 1018 (SON), Xyce/ADMS generated
+* "setupPointers" functions for devices using the returnRawEntryPointer
+* function of the Linear::Matrix class.  This was improper use of that
+* function, and a few other devices (from which the ADMS usage was copied)
+* also use it improperly.  As a result the devices could under certain
+* conditions segfault in parallel.  As part of investigating the issue,
+* Xyce/ADMS was modified to stop doing that and to get pointers a different,
+* correct way, more in line with how legacy devices do it.
+*
+* Prior to the fix (commits 581e28313 and 84058e8f2), this netlist
+* would have segfaulted in parallel.  It would run fine in serial.
+
+* This test is deliberately tagged to run only in parallel, because it was
+* only in parallel that this was ever a problem.  It need not be run in
+* serial.
+
+V0 MyVccNet 0 DC 1.8
+D1 AnodeOfMosDiode 0 jc1
+.model jc1 d(level=200)
+
+* The presence of this current source was actually the determining factor
+* in causing the crashes.  If the diode were connected directly to the
+* voltage source V0, it would have worked.
+I0 MyVccNet AnodeOfMosDiode DC 5e-6
+
+.DC V0 1.8 1.8 1
+.PRINT DC V(MyVccNet) I(V0) V(AnodeOfMosDiode)
+.end

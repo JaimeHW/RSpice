@@ -1,0 +1,20 @@
+Regression test for simple normal distribution sampling, .param version
+
+.param testNorm={aunif(2k,1k)}
+.param R1value={testNorm*2.0}
+
+R2 1 0 6K
+R1 1 2 {R1value}
+v1 2 0 1000V
+
+.dc v1 1000 1000 1
+
+.SAMPLING useExpr=true
+
+.options samples numsamples=10000
++ outputs={R1:R},{V(1)}
++ sample_type=lhs
++ stdoutput=true
+
+.end
+

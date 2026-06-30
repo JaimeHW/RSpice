@@ -1,0 +1,13 @@
+Output manager test for bug 302
+* One of the regression tests to show proper functioning of the DELIMITER
+* option for .print statements
+*
+c1 1 0 1uF IC=1
+R1 1 2 1K
+v1 2 0 0V
+* This should test both that TAB works and that proper case handling works
+.print tran DELIMITER=wrong v(1)
+.options timeint reltol=1e-3
+.options nonlin-tran reltol=1e-3
+.tran 0 5ms
+.end

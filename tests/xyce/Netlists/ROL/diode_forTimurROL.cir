@@ -1,0 +1,31 @@
+level=1 diode circuit
+*
+* ERK.  1/22/2014.
+*
+V2 2 0 0.21
+D2 2 0 DA
+
+.inc measurementsDC.dat
+.param iv2=0
+
+* Setting model not at initial params or optimal params
+.MODEL DA D  (IS=1.0e-11  RS=0.375  N=1.0) 
+
+*.measure dc l2err err1 par({iv2}) {-I(V2)}
+
+*.STEP DA:IS 1.0e-12 1.0e-12 1.0e-12
+*.STEP DA:RS 0.25 0.25 1.0e-1
+*.SENS objfunc={-I(V2)} param=DA:IS,DA:RS
+*.DC V2 0.0 1.0 0.01 
+*.dc data=meas
+.rol rol_filename=input.xml param_filename=diode_forTimurROL.param
+.rol_dc data=meas
+*.rol_dc V2 0.0 1.0 0.01  
+.rol_obj DC l2err error {iv2} {-I(V2)}
+
+.options device voltlim=0
+.print DC v(2) {-I(V2)} {iv2}
+*.print SENS format=std 
+
+.END
+

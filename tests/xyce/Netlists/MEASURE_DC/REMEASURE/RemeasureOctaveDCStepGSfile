@@ -1,0 +1,23 @@
+In OutputMgr::remeasure 
+file to reprocess through measure and/or fft functions: RemeasureOctaveDCStep.cir.prn
+
+ ***** Measure Functions *****
+
+MAXV1B = 1.156250e+01 at VSRC1 value = 1.600000e+01
+Measure Start VSRC1 Value= 1.000000e+00 Measure End VSRC1 Value= 1.600000e+01
+
+MAXV1BFT = 6.562500e+00 at VSRC1 value = 8.000000e+00
+Measure Start VSRC1 Value= 1.500000e+00 Measure End VSRC1 Value= 8.500000e+00
+
+MINV1B = 1.250000e+00 at VSRC1 value = 1.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00 Measure End VSRC1 Value= 1.600000e+01
+
+MINV1BFT = 1.875000e+00 at VSRC1 value = 2.000000e+00
+Measure Start VSRC1 Value= 1.500000e+00 Measure End VSRC1 Value= 8.500000e+00
+
+PPV1B = 1.031250e+01 with max at VSRC1 value= 1.600000e+01 and min at VSRC1 value= 1.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00 Measure End VSRC1 Value= 1.600000e+01
+
+PPV1BFT = 4.687500e+00 with max at VSRC1 value= 8.000000e+00 and min at VSRC1 value= 2.000000e+00
+Measure Start VSRC1 Value= 1.500000e+00 Measure End VSRC1 Value= 8.500000e+00
+

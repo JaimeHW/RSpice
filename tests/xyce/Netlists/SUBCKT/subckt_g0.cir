@@ -1,0 +1,22 @@
+Test of global parameter usage inside a subcircuit
+* Baseline: both parameters are global
+.PARAM Dwgc = 1.0e-3
+.PARAM Res = {1 / Dwgc}
+
+
+VA 1 0  1V
+xSPwgc 1 2 wgc
+R2 2 0 1e3
+
+
+.SUBCKT wgc t1 t2
+R1 t1 t2 {Res}
+.ENDS
+    
+.PRINT TRAN V(1) V(2)
+.TRAN 0 10
+*COMP TIME  reltol=1e-7 abstol=1e-7
+*COMP V(1)  reltol=1e-7 abstol=1e-7
+*COMP V(2)  reltol=1e-7 abstol=1e-7
+ 
+.END

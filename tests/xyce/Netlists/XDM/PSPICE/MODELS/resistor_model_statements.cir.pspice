@@ -1,0 +1,31 @@
+*********************************************************************************
+* This test covers SRN Bug 2026 ("xdm Handling of PSpice Resistor, Inductor and 
+* Capacitor Model Cards).  This test covers the Resistor Model Card.
+*
+* The test for R_R3 includes the use of both TC1 (linear temperature coefficient)
+* and TC2 (quadratic temperature coefficient).  So, this test also verifies
+* that the PSpice .TEMP <value> line becomes .OPTIONS DEVICE TEMP=<value>
+* in Xyce.
+********************************************************************************
+
+*Analysis directives: 
+.TRAN  0 1us 0
+.PROBE I(V_V1) I(R_R1) I(R_R2) I(R_R3)
+
+* Test Resistor Model Card
+* Current through R_R1 should be 2x the current through R_R2
+R_R1 1 0 R_R1_MOD 1 
+.MODEL R_R1_MOD RES R=2 TC1=0 TC2=0
+R_R2 1 0 R_R2_MOD 1 
+.MODEL R_R2_MOD RES R=4 TC1=0 TC2=0
+
+* set circuit temperature, and use both TC1 and TC2.
+* Current through R_R1 should be 4x the current through R_R3
+.TEMP 40
+R_R3 1 0 R_R3_MOD 1
+.MODEL R_R3_MOD RES R=2 TC1=0.2 TC2=0.01 T_MEASURED=30
+
+V_V1  1 0  AC 1 SIN 0 1 1e6 0 0 0
+
+.END
+

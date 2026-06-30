@@ -1,0 +1,14 @@
+Test of series RC circuit in HB
+* this version is a straight Xyce circuit, used as a baseline against which
+* to compare the "external coupled" version.
+
+
+V1 1 0 SIN (0 1 1e4)
+* 1K ohm Resistor implemented as external device
+R1 1 2 1K
+C1 2 0 1u
+
+.hb 1e4
+.options hbint numfreq=5 tahb=0
+.print HB v(1) V(2) I(v1) 
+.end

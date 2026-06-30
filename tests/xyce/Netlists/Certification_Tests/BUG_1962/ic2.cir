@@ -1,0 +1,41 @@
+***********************************************************
+* Set an IC on a node name that is a subcircuit interface
+* node.  Also test that bug is fixed for hierarchical 
+* subcircuits.  See SRN Bug 1962 for more details.
+*
+***********************************************************
+
+.TRAN 0 10ms
+.PRINT TRAN V(2) V(3) V(X1:in) V(X1:out) V(X2:X1:out)
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.5ms
+
+V1  1 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+R1  1 2  1k 
+X1  2 3  IC_Subckt
+R2  3 0  10 
+
+* this should get the same answer as with .IC V(3)=0.5
+* which is how the gold standard was made.
+*.IC V(X1:out)=0.5
+
+.SUBCKT IC_Subckt in out
+R1  in  mid 10
+C1  mid out 1u
+.IC V(out)=0.5
+.ENDS
+
+* test that bug is fixed for hierarchical subcircuits
+*.IC V(X2:X1:out)=0.5
+
+R4  1 4  1k 
+X2  4 5  IC_SubSubckt
+R5  5 0  10 
+
+.SUBCKT IC_SubSubckt in out
+R1 in a 1
+X1 a b IC_Subckt
+R2 b out 1
+.ENDS
+
+.END
+

@@ -1,0 +1,20 @@
+* Thermal / resistivity properties for copper
+
+* resistivity is in unis of ohm*m
+
+.model copperLinear r ( level=2
++ resistivity=
++ {table(temp+273.15,
++      0,         0.5e-9,
++      100,        3e-9,
++      1000,       6.6e-8
++  )} 
+
+* heat capacity is in units or J/K/m**3
+
+* density (8.92e+3 kg/m**3) times table in J/K/kg
++             heatcapacity={8.92e+3*table(temp+273.15,
++      0,         1,
++      1000,      1500 
++  )} )
+

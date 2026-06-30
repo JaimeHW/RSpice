@@ -1,0 +1,23 @@
+Netlist to Test the Xyce Voltage Controlled Current Source Model, multiplier+expression version
+******************************************************************************
+*	Based on the original vccs.cir test, but current is 10x larger.
+*
+* This is modified from vccs_m, to use the expression library.  This means that
+* behind the scenes, Xyce will convert this to a Bsource.  So, this test 
+* effectively tests is (1) the Bsrc multiplier works and (2) if the internal 
+* conversion from Gsource to Bsource works correctly.
+*
+* This case is linear, but the use of expressions allows for nonlinear G-sources.
+****************************************************************************** 
+VIN 1 0 DC 12V
+G 3 0 cur='v(2,0)*0.02' M=10
+R1 1 2 300
+R2 2 0 900
+R3 3 0 200
+R4 3 0 200
+.DC VIN 1 12 1
+.PRINT DC V(1) V(2) V(3) 
+* NOTE: XYCE DOES NOT CURRENTLY SUPPORT TRANSFER FUNCTION ANALYSIS 
+* THIS PORTION HAS BEEN COMMENTED OUT UNTIL TF IS SUPPORTED
+*.TF V(3) V
+.END

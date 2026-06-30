@@ -1,0 +1,46 @@
+Regression test to test error and warning messages from bad .OPTIONS lines, see SON Bug 668
+********************************************************************************
+* The actual RC circuit doesn't matter, other than a working circuit is needed
+********************************************************************************
+c1 1 0 1uF IC=1
+R1 1 2 1K
+v1 2 0 0V
+.print tran v(1)
+.tran 0 5ms
+
+* the regression tests, as of Xyce 6.3
+* the first line is actually valid.
+.options timeint reltol=1e-6 abstol=1e-6
+.options post
+.options timeint reltol 1e-6 abstol=1e-6
+
+* these additional tests were added for Xyce 6.4.
+* these tests cause a fatal error, since subsequent processing would
+* likely cause a core dump
+.OPTIONS
+
+* <val> is missing
+.OPTIONS LINSOL type=
+
+* <name> is missing
+.OPTIONS LINSOL =KSPARSE
+.OPTIONS LINSOL=KSPARSE
+
+* test timeint, with multiple parameters, with the error
+* being in the second set <name>=<val> specifiers
+.options timeint reltol=1e-6 abstol=
+.options timeint reltol=1e-6 =1e-6
+.options timeint reltol=1e-6 abstol 1e-6
+
+* these next sets of tests emit a warning message, and run 
+* This is missing <name>=<val> 
+.OPTIONS LINSOL
+
+* =<val> is missing. 
+.OPTIONS LINSOL type
+.OPTIONS LINSOL KSPARSE
+
+*missing option name
+.OPTIONS type=KSPARSE
+
+.end

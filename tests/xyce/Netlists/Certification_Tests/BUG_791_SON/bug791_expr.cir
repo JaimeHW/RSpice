@@ -1,0 +1,8 @@
+Test: run a B source with SPICE_SIN function.
+* This test should match the baseline exactly
+BV1 1 0 V={SPICE_SIN(0,10,1kHz)}
+R1 1 0 1
+
+.print tran V(1)
+.tran 1u 5m
+.end

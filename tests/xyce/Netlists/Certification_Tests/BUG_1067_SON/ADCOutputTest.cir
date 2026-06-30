@@ -1,0 +1,14 @@
+* This netlist is used to test access to the internal
+* output state variable of the ADC so that one can 
+* get the value of the ADC output during a simulation.
+
+*
+YADC adc1 1 0 simpleADC R=1T WIDTH=2
+YADC adc2 1 0 simpleADC R=1T
+.model simpleADC ADC(settlingtime=50ns uppervoltagelimit=2 lowervoltagelimit=0 width=3)
+
+v1 1 0 PWL 0 0 1e-4 2
+
+.TRAN 0 1e-4 0 1e-7
+.PRINT TRAN V(1) n(YADC!ADC1_STATE) n(YADC!ADC2_STATE)
+.END

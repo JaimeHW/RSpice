@@ -1,0 +1,57 @@
+transient diode circuit sensitivity calculation.  
+* This version uses finite differences
+
+* Baseline circuit
+Ra 1a 2a 0.0001
+V2a 2a 0 0.0 SIN(0 5 100K)
+V1a 3a 0 0.0
+
+D2a 1a 3a DZRa 
+.MODEL DZRa D( level=2
++         IS = 1E-14
++         RS = 10.8
++          N = 1
++         TT = 0
++        CJO = 1P
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 7.255
++        IBV = .001
++ tbv1 = 0.00013
++ tbv2 = -5e-8
++ )
+
+.options timeint method=gear
+
+.TRAN 0 2e-5
+
+*comp V(2) offset=6.0
+*comp I(V1) offset=0.05
+*comp I(V1)_DZR:VJ  offset=3.0e-6
+*comp I(V1)_DZR:CJO offset=5.0e+6
+*comp I(V1)_DZR:EG  offset=-0.0001
+*comp I(V1)_DZR:XTI offset=-1.0e-6
+*comp I(V1)_DZR:M   offset=6.0e-6
+*comp I(V1)_DZR:IS  offset=1.0e+9
+*comp I(V1)_DZR:RS  offset=-0.005
+*comp I(V1)_DZR:N  offset=-0.01
+
+.print TRAN V(2)
++ I(V1)
++ I(V1)_DZR:VJ
++ I(V1)_DZR:CJO
++ I(V1)_DZR:EG
++ I(V1)_DZR:XTI
++ I(V1)_DZR:M
++ I(V1)_DZR:IS
++ I(V1)_DZR:RS
++ I(V1)_DZR:N
+
+.options device temp=25
+
+.END

@@ -1,0 +1,69 @@
+TEST OF A 1-BIT ADDER WITH SWITCHES
+*
+* Will add comments to this netlist at a later time. Regina Schells 6/1
+*
+* MAIN CIRCUIT 
+* 
+X1 1 2 3 9 13 99 ONEBIT
+RINA 1 0 {res1}
+RINB 2 0 {res1}
+RCIN 3 0 1K
+RBIT0 9 0 1K
+RCOUT 13 0 1K
+VCC 99 0 5
+VINA 1 0 PULSE(0 3 0 10N 10N 10N 50N)
+VINB 2 0 PULSE(0 3 0 10N 10N 20N 100N)
+VCIN 3 0 PULSE(0 3 100N 10N 10N 100N 200N)
+.param res1=1K
+.param res=1 ; global res, wrong results if this is ever used
+.func f_res(r_in) {r_in-1K} ; global f_res, wrong results if used
+.TRAN 0.5N 200N
+.PRINT TRAN V(1) V(2) V(3) V(9) V(13)
+.OPTIONS TIMEINT ABSTOL=1.0E-3 RELTOL=1.0E-3
+*
+.subckt myres 1 2
+Rmine 1 2 {res/2}
+.param res=2K ; wrong results if chosen res is from parent contexts
+.ends
+*
+.SUBCKT ONEBIT 1 2 3 4 5 6
+* TERMINALS: A B CIN OUT COUT VCC
+X1 1 2 7 6 XOR
+X2 1 2 8 6 AND
+X3 7 3 4 6 XOR params: r={res/1000} ; wrong results if local res not used
+.param res=1K
+*
+*X5 8 9 5 6 OR
+*
+* following two lines plust the S1 line at the bottom of the ONEBIT
+* subcircuit definition were originally a part of the "OR" subcircuit.
+* This placement will test bug 311, the model SW must be found in the local 
+* context.
+RL 5 0 {res}
+S2 5 6 9 0 SW
+*.ENDS OR
+*
+.MODEL SW VSWITCH (RON=1 ROFF=1MEG VON=2.51 VOFF=2.5)
+.SUBCKT AND 1 2 3 4
+* TERMINALS A B OUT VCC
+*
+S1 4 5 1 0 SW
+XR 3 0 myres
+S2 5 3 2 0 SW
+.ENDS AND
+*
+.SUBCKT XOR 1 2 3 4 params: r=1
+* TERMINALS A B OUT VCC
+.func f_res(r_in) {1000*r_in} ; should override f_res in main circuit
+.param res2={10*r}
+RL 3 0 {f_res(res2/10)} ; will fail if we cannot find res2 locally
+*                         wrong results if local f_res not used
+S1 4 3 1 2 SW
+S2 4 3 2 1 SW
+.ENDS XOR
+*
+X4 3 7 9 6 AND ; these two lines of ONEBIT here to test context switching
+S1 5 6 8 0 SW
+.ENDS ONEBIT
+*
+.END   

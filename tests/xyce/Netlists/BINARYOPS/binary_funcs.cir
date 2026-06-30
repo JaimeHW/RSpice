@@ -1,0 +1,20 @@
+Test Circuit for pwr function
+
+VS   1  0  2
+RS   1  0  100k
+VT   2  0  2
+RT   2  0  100k
+B3   3  0  V = {pwr(V(1),v(2))}
+R3   3  0  100K
+B4   4  0  V = {pwrs(-V(1),v(2))}
+R4   4  0  100K
+B5   5  0  V = {limit(pwr(V(1),v(2)), 2.1, 8.2)}
+R5   5  0  100K
+B6   6  0  V = {max(v(1),v(2))}
+R6   6  0  100K
+B7   7  0  V = {min(v(1),v(2))}
+R7   7  0  100K
+.DC VS 1 4 1
+.PRINT DC V(1) V(2) V(3) V(4) V(5) V(6) V(7)
+.END
+

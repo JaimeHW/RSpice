@@ -1,0 +1,19 @@
+* Lead Current test for component inductors in linear mutual inductors
+* for a .AC analysis
+
+V1 1 0 DC 1.0 AC 1.0
+R1 1 2a 1
+VP1 2a 2 0
+R3 3a 0 1
+VP2 3a 3 0
+
+* mutual inductor 1 definition
+L1 2 0 1mH
+L2 3 0 1mH
+K1 L1 L2 0.75
+
+.OP
+.AC DEC 5 100 1e5
+.PRINT AC VM(2) VM(3) I(VP1) I(VP2) I(L1) I(L2)
+
+.END

@@ -1,0 +1,21 @@
+Basic dual diode circuit for baseline calculation
+
+*Tests use of subcircuit parameters  used in .model statements.
+*THIS TEST FAILS WITH RELEASE 1.1 OF XYCE, but passes with the (newer) version 
+* of Xyce that's at the head of the repository when I wrote the test!  
+
+V1 1 0 DC 5V
+R1 1 2 2K
+Vmon1 2 3 0V
+XD1 3 0 DMODsub IS0=100FA
+Vmon2 2 4 0V
+XD2 4 0 DMODsub IS0=200FA
+
+.subckt DMODsub 1 2 IS0=1A
+.model DMOD1 D (IS={IS0})
+D1 1 2 DMOD1
+.ends
+
+.dc V1 0 5 1
+.print DC v(1) I(v1) I(vmon1) I(vmon2)
+.end

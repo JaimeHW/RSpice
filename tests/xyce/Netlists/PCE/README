@@ -1,0 +1,10 @@
+This directory contains polynomial chaos expansion (PCE) tests.
+
+There are several different varieties of PCE and each type has a different
+subdirectory.
+
+NISP = non-intrusive spectral projection  
+NI_REGRESSION = non-intrusive regression PCE
+PCE = fully intrusive projection PCE
+
+

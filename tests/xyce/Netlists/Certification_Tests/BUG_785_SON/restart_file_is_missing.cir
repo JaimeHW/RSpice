@@ -1,0 +1,21 @@
+********************************************************
+* Test that Xyce exits gracefully with a reasonable error
+* message if the specified restart file does not exist.
+*
+* The contents of this netlist doesn't really matter.
+* The .OPTIONS RESTART line uses bogo_file, which does
+* not exist.
+*
+*
+*********************************************************
+V1 1 0 SIN(0 1 1HZ)
+R1 1 2 1
+R2 2 0 2
+
+.TRAN 0 1S
+.PRINT TRAN V(2)
+
+* bogo_file does not exist
+.OPTIONS RESTART FILE=bogo_file START_TIME=0
+
+.END 

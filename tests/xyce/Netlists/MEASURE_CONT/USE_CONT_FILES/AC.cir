@@ -1,0 +1,45 @@
+* This netlist will make separate .ma0 files for each
+* AC_CONT measure, by explicitly setting the value for
+* .OPTIONS MEASURE USE_CONT_FILES.
+*
+* See SON Bug 1274 for more details
+*****************************************************
+
+.OPTIONS MEASURE USE_CONT_FILES=1
+
+* Used to adjust reference frequency from 1Hz to 10Hz
+.PARAM scaleFactor=10
+
+V1 a 0 DC 0V AC 1
+
+* 7th order Chebychev LPF with 2dB of passband ripple.
+* This is not a realistic passband ripple level, but is
+* useful for this test.
+RS a b 1
+C1 b 0 {2.865/scaleFactor}
+L2 b c {0.912/scaleFactor}
+C3 c 0 {3.8774/scaleFactor}
+L4 c d {0.9537/scaleFactor}
+C5 d 0 {3.8774/scaleFactor}
+L6 d e {0.912/scaleFactor}
+C7 e 0 {2.8650/scaleFactor}
+
+* The magnitude at DC is RL/(RL + RS)
+RL e 0 1.0
+
+.ac dec 20 1e-2 10
+.print AC vm(a) vm(b) vm(c) vm(d) vm(e)
+
+.MEASURE AC derivCrossTest1 DERIV vm(d) WHEN vm(e)=0.45
+.MEASURE AC_CONT derivCrossContTest1 DERIVATIVE vm(d) WHEN vm(e)=0.45
+
+.MEASURE AC whenCrossTest1 WHEN vm(e)=0.45
+.MEASURE AC_CONT whenCrossContTest1 WHEN vm(e)=0.45
+
+.MEASURE AC findCrossTest1 FIND VM(d) WHEN VM(e)=0.45
+.MEASURE AC_CONT findCrossContTest1 FIND VM(d) WHEN VM(e)=0.45
+
+.MEASURE AC TrigTarg1 TRIG vm(e) VAL=0.40 CROSS=1 TARG vm(e)=0.45 CROSS=1
+.MEASURE AC_CONT TrigTargCont1 TRIG vm(e)=0.40 CROSS=1 TARG vm(e) VAL=0.45 CROSS=1
+
+.END

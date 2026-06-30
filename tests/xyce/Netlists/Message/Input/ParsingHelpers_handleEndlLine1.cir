@@ -1,0 +1,19 @@
+************************************************
+* Test for .ENDL error handling for improperly
+* formatted library files.
+*
+* See SON Bug 980 for more details.
+************************************************
+
+.LIB bogoLib1 low
+.LIB bogoLib1 nom
+.LIB bogoLib1 high
+
+V1 1 0 1
+R1 1 0 1
+
+.DC V1 1 2 1
+.PRINT DC V(1)
+
+.END
+

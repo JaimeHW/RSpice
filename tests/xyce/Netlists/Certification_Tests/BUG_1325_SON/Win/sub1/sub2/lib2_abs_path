@@ -1,0 +1,5 @@
+* sub1/sub2/lib2_abs_path file
+
+.LIB LIB_ABS
+.PARAM RVAL=2
+.ENDL LIB_ABS

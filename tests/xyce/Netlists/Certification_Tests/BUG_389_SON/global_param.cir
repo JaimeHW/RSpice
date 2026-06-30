@@ -1,0 +1,27 @@
+* test circuit.  
+
+.global_param lengthScalar=12.0
+.global_param Rinner=1e-2; ohm/foot
+.global_param Router=5e-3; ohm/foot
+.global_param Lcable=0.1u; H/foot
+.global_param Ccable=35p ; F/foot
+
+.subckt rlc_len I O  
+L1 I 3  {Lcable*lengthScalar}
+C1 O 0  {Ccable*lengthScalar}
+R1 3 O  {Rinner*lengthScalar}
+.ends rlc_len
+
+*                 v1 v2 td tr tf pw per
+VsigGen 1 0 pulse(0.0 1.0 0.0 5ns 5ns 0.49e-6 1.0e-6)
+RsigGen 1 1b 50
+X_bigline DUT  1b rlc_len
+
+.hb 1e6
+.print hb format=tecplot precision=7 V(1) V(1B) 
+
+.options hbint numfreq=101 tahb=0
+
+.options timeint method=gear
+
+.options nonlin-hb maxstep=2

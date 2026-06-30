@@ -1,0 +1,29 @@
+A test of the Piecewise Emperical Model memristor device
+*
+
+vsrc n1 0  sin( 0 0.5 100 0 )
+
+
+.model mrm1 memristor level=4 
++ fxpdata=fxp_table.dat
++ fxmdata=fxm_table.dat
++ I1=85.37e-6 I2=90.16e-6 V1=0.265 V2=0.265 G0=130.72e-6
++ VP=0.7 VN=1.0 d1=9.87 d2=-4.82
++ C1=1000 C2=1000
+
+ymemristor mr1 n1 n2 mrm1
+
+rptg1 n2 0 50 
+
+
+*COMP v(n1,n2) offset=1
+*COMP i(ymemristor!mr1) abstol=0.002
+*COMP n(ymemristor!mr1_x) abstol=0.01
+*COMP n(ymemristor!mr1:r)  reltol=0.02
+
+.print tran  v(n1,n2)  i(ymemristor!mr1) n(ymemristor!mr1_x) n(ymemristor!mr1:r) 
+
+.tran 0 60e-4
+
+.end
+

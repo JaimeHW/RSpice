@@ -1,0 +1,30 @@
+Test of E-sources with PDE devices, to certify resolution of bug 978 SON.
+*
+* This circuit is identical to diopde.cir, and will produce the same answer.  
+* The only difference is that the voltage supplied to the series resistor
+* comes from an E-source rather than a Vsrc.
+*
+* Eric Keiter, SNL
+*
+V1 ref 0 -0.1
+R1 ref 0 1.0
+
+R 1 2 1000.0
+E 2 0 ref 0 2
+
+
+YPDE d1 1 0 DIODE na=1.0e15 nd=1.0e15  tecplotlevel=0 gnuplotlevel=0
++ graded=0 l=5.0e-4 wj=0.1e-3 nx=101  area=1.0 
++ mobmodel=carr
+* The old intrinsic calculation was used to generate gold standard.
+* It is inaccurate, however. 
++ useOldNi=true
+
+.MODEL DIODE  ZOD 
+.DC V1 0.0 -0.105 -0.005
+
+.options NONLIN maxstep=50 maxsearchstep=3 searchmethod=1 abstol=1.0e-17
+
+.print DC v(ref) v(2) v(1) I(E)
+
+.END

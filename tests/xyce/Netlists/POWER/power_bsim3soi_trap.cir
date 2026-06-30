@@ -1,0 +1,21 @@
+* power test for BSIM3 SOI MOSFET (MOSFET Level 10)
+* simple gain stage, testing out default params of the BSIM SOI model, 
+* version 3.2
+
+M1 3 2 0 0 nmos w=4u l=1u 
+Rsource 1 2 100k
+Rload 3 vdd 25k
+
+Vdd1 vdd 0 5 
+Vin 1 0 sin(1.44 0.1 1e+8 0 0)
+
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-8
+.tran 1e-9 1e-7
+.print tran P(M1) w(M1) {ID(M1)*V(3) + IG(M1)*V(2)} 
++ {-1*(P(Vdd1)+P(Vin)+P(Rsource)+P(Rload))}
+
+.model nmos nmos level=10
+
+.end
+

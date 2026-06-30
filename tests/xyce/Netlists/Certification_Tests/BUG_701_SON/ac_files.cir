@@ -1,0 +1,24 @@
+*****************************************************
+* Test of AC output with FILE= qualifier.  This
+* netlist has a .OP statement so that the time-domain
+* file is also made.  See SON Bug 701 for more
+* details.
+*
+* Trivial high-pass filter (V-C-R) circuit, just do
+* an AC sweep and watch the output.
+*
+*****************************************************
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+* use an explicit .PRINT AC_IC line with a different
+* file name than the .PRINT AC line 
+.print AC FILE=ac_bleem vr(b) vi(b)
+.PRINT AC_IC FILE=ac_bleem_td vr(b) vi(b)
+
+.OP
+.ac dec 5 100Hz 10e6
+
+.end
+

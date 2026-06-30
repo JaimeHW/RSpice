@@ -1,0 +1,130 @@
+ ***** Measure Functions ***** 
+
+MAXVR4 = 5.000000e-01 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVI4 = -4.995132e-05 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINVR4 = 2.502435e-01 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINVI4 = -2.499999e-01 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPVR4 = 2.497565e-01 with max at freq= 1.000000e+02 and min at freq= 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPVI4 = 2.499499e-01 with max at freq= 1.000000e+02 and min at freq= 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVR4EXP = 1.500000e+00 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVI4EXP = 9.999500e-01 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVR4FROMTO = 4.999995e-01 at freq = 1.000000e+03
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+MINVR4FROMTO = 4.950590e-01 at freq = 1.000000e+05
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+PPVR4FROMTO = 4.940457e-03 with max at freq= 1.000000e+03 and min at freq= 1.000000e+05
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+MAXIMEAMP = 3.533812e-03 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINIMEAMP = 4.970390e-04 at freq = 1.000000e+05
+Measure Start Freq= 1.000000e+05	Measure End Freq= 1.000000e+06
+
+PPIMEAMP = 3.036773e-03 with max at freq= 1.000000e+06 and min at freq= 1.000000e+05
+Measure Start Freq= 1.000000e+05	Measure End Freq= 1.000000e+06
+
+Netlist warning: MAXFROMTOFAIL1 failed. FROM value > highest frequency value
+MAXFROMTOFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: MAXFROMTOFAIL2 failed. TO value < FROM value
+MAXFROMTOFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: MINFROMTOFAIL1 failed. TO value <= 0
+MINFROMTOFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: MINFROMTOFAIL2 failed. FROM value > highest frequency value
+MINFROMTOFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: PPFROMTOFAIL1 failed. FROM value > highest frequency value
+PPFROMTOFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+LASTMEASURE = 5.000000e-01 at freq = 1.000000e+02
+ ***** Measure Functions ***** 
+
+MAXVR4 = 5.000000e-01 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVI4 = -9.990264e-05 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINVR4 = 1.001559e-01 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINVI4 = -2.435927e-01 at freq = 3.981072e+05
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPVR4 = 3.998440e-01 with max at freq= 1.000000e+02 and min at freq= 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+PPVI4 = 2.434928e-01 with max at freq= 1.000000e+02 and min at freq= 3.981072e+05
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVR4EXP = 1.500000e+00 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVI4EXP = 9.999001e-01 at freq = 1.000000e+02
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MAXVR4FROMTO = 4.999980e-01 at freq = 1.000000e+03
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+MINVR4FROMTO = 4.808052e-01 at freq = 1.000000e+05
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+PPVR4FROMTO = 1.919278e-02 with max at freq= 1.000000e+03 and min at freq= 1.000000e+05
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+MAXIMEAMP = 2.235632e-03 at freq = 1.000000e+06
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+MINIMEAMP = 4.898314e-04 at freq = 1.000000e+05
+Measure Start Freq= 1.000000e+05	Measure End Freq= 1.000000e+06
+
+PPIMEAMP = 1.745801e-03 with max at freq= 1.000000e+06 and min at freq= 1.000000e+05
+Measure Start Freq= 1.000000e+05	Measure End Freq= 1.000000e+06
+
+Netlist warning: MAXFROMTOFAIL1 failed. FROM value > highest frequency value
+MAXFROMTOFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: MAXFROMTOFAIL2 failed. TO value < FROM value
+MAXFROMTOFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: MINFROMTOFAIL1 failed. TO value <= 0
+MINFROMTOFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: MINFROMTOFAIL2 failed. FROM value > highest frequency value
+MINFROMTOFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: PPFROMTOFAIL1 failed. FROM value > highest frequency value
+PPFROMTOFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+LASTMEASURE = 5.000000e-01 at freq = 1.000000e+02

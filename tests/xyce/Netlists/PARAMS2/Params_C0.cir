@@ -1,0 +1,11 @@
+Basic diode circuit for baseline calculation
+* All this does is provide a standard against which alternate versions
+* of the circuit can be compared
+
+D1 1 0 DMOD1
+V1 1 0 DC 5V
+
+.model DMOD1 D (IS=100FA RS=2K)
+.dc V1 0 5 1
+.print DC v(1) I(v1)
+.end

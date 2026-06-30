@@ -1,0 +1,90 @@
+BUG_318 model scoping test
+* This netlist will only produce correct results if Xyce is doing proper
+* scoping of .model statements that include expressions involving subcircuit
+* parameters.
+* 
+* Taken from test suite circuit sandler28
+* Polarity Gain Circuit
+********************************************************************************
+* Tier No.: 3
+* Directory/Circuit Name:SANDLER28/sandler28.cir
+* Description:  The gain circuit netlist was developed by Steve Sandler to 
+*       compare the validity of simulations using 3 different circuit simulation
+*       tools.  The results were compared to measured data.
+* Input: VIN=V(4)
+* Output: V(11), V(4)
+********************************************************************************
+
+*
+* MAIN CIRCUIT DEFINITION
+*
+VIN 4 0 PULSE(0 4 0 1N 1N 1M 2M)
+V1 3 0 15
+V2 1 0 -15
+C1 3 0 4.7U
+C2 1 0 4.7U
+C3 3 0 .1U
+C4 1 0 .1U
+R1 5 6 9.84K
+R2 5 0 4.66K
+R3 7 2 9.76K
+R4 7 8 4.66K
+R5 2 9 9.86K
+R6 6 9 9.77K
+R7 10 0 4.66K
+R8 9 11 9.79K
+R9 12 0 4.65K
+X6 10 7 3 1 2 UA741T params: p1=1
+X7 4 8 3 1 8 UA741T
+X8 8 5 3 1 6 UA741T
+X9 12 9 3 1 11 UA741T params: p1=2
+*
+* ANALYSIS, PRINT AND OPTION STATEMENTS
+*
+.TRAN 5U 7M
+*COMP V(4)  ABSTOL=1.0e-10 RELTOL=1.0-e8
+*COMP V(11) ABSTOL=1.0e-10 RELTOL=1.0-e8
+.PRINT TRAN V(4)  V(11)
+*ALIAS  V(4)=INPUT V(11)=OUTPUT
+************************************
+* SUBCIRCUIT DEFINITION
+*************************************
+.SUBCKT UA741T    1 2 3 4 5 params: p1=0
+*
+C1   11 12 4.664E-12
+C2    6  7 20.00E-12
+DC    5 53 DX
+DE   54  5 DX
+DLP  90 91 DX
+DLN  92 90 DX
+DP    4  3 DX
+BGND 99 0 V={POLY(2) V(3) v(4) 0 .5 .5}
+BB 7 99 I={POLY(5) I(VB) I(VC)  I(VE)  I(VLP) I(VLN)  0 10.61E6 -10E6 10E6 10E6 -10E6}
+GA 6  0 11 12 137.7E-6
+GCM 0  6 10 99 2.574E-9
+IEE  10  4 DC 10.16E-6
+*HLIM 90  0 VLIM 1K
+BHLIM 90 0 V={I(VLIM)}
+Q1   11  2 13 QX
+Q2   12  1 14 QX
+R2    6  9 100.0E3
+RC1   3 11 7.957E3
+RC2   3 12 7.957E3
+RE1  13 10 2.740E3
+RE2  14 10 2.740E3
+REE  10 99 19.69E6
+RO1   8  5 150
+RO2   7 99 150
+RP    3  4 18.11E3
+VB    9  0 DC 0
+VC 3 53 DC 2.600
+VE   54  4 DC 2.600
+VLIM  7  8 DC 0
+VLP  91  0 DC 25
+VLN   0 92 DC 25
+.MODEL DX D(IS=800.0E-18)
+.MODEL QX NPN(IS=800.0E-18 BF={62.50-p1})
+.ENDS
+************************************************
+.END
+

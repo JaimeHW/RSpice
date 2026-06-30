@@ -1,0 +1,13 @@
+
+APerfect nonsense that is too easy to get from a user!
+* The bug is that there are two lines above instead of one.  The first
+* is treated in the SPICE grammar as the title of the run, but the second
+* should be flagged as an error.  Currently Xyce segfaults while looking
+* for metadata for the A device (there is no such device)
+
+R1 1 0 1meg
+V1 1 0 DC 1V
+.DC V1 1 1 1 
+.PRINT DC V(1)
+.end
+

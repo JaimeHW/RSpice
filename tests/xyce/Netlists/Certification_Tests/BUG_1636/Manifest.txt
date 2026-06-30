@@ -1,0 +1,4 @@
+foo.cir
+foo.cir.sh
+models.inc
+tags

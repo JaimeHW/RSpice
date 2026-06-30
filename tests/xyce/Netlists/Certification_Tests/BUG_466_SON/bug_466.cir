@@ -1,0 +1,34 @@
+Simple test of .RESULT capability
+*
+R1 a b 10.0
+R2 b 0 2.0
+
+*            V0  VA FREQ TD THETA
+Va a 0  sin ( 5.0  {v_amplitude} 0.05 0.0 0.0)
+
+* transient analysis
+* Note:  For this test to work, this needs to be a format=tecplot file!
+* This is because the perl script needs to determine the value of R1, 
+* and that isn't output in a standard format *prn file.  It is, however, 
+* in the AUXDATA that is output for tecplot.
+.tran 0.5s 60s
+.print tran v(a) v(b) 
+
+.options timeint debuglevel=-100
+.options device debuglevel=-100
+
+.param par1=1.0
+.param par2=2.0
+.param par3=4.0
+
+.global_param v_amplitude=2.0
+
+.step R1 10.0 15.0 1 
+.step v_amplitude 1.0 3.0 1.0
+*
+.result {v(a)}  
+.result {v(b)}
+.result {par1/par2}
+.result {par2/par3}
+*
+.END

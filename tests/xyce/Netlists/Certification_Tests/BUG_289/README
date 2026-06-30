@@ -1,0 +1,16 @@
+NOTES:
+  Bug 289 is a feature request for the date and to get displayed at 
+  the start of a Xyce run.  It is implemented as a part of the 
+  execution scripts.
+
+HOWTO: (no compare)
+  1) Verify that the date and time are displayed when Xyce is run
+     using the execution scripts (runxyce and xmpirun).  The date
+     and time will appear just after the copyright notice.  
+
+SERIAL/PARALLEL:
+  This test may be run in SERIAL or PARALLEL.  
+
+NOTE:  03/15/06 tscoffe:  This feature is implemented in the "runxyce" script
+that actually calls Xyce, so this test will fail when applied to a Xyce binary
+directly.  

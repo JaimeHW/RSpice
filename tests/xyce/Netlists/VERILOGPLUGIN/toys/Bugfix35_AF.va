@@ -1,0 +1,53 @@
+// This is just a resistor with a completely unused analog function that
+// makes use of ceil and floor.  It exists solely to test that Xyce/ADMS
+// doesn't puke on ceil and floor in analog functions, and that a plugin
+// can be built from the resulting C++ code.
+
+`include "disciplines.vams"
+`include "constants.vams"
+// Xyce's K is not the one in constants.vams!
+`define X_K (1.3806226e23)
+
+(*xyceModelGroup="Resistor", xyceSpiceDeviceName="R", xyceLevelNumber="6"*)
+module resistor (p,n);
+   electrical p,n;
+   inout p,n;
+
+   (*desc="Resistance", type="instance"*) parameter real R=1 from (0:inf);
+
+   real           Ir;
+   real           tdevK;
+   real           conductance;
+
+   analog function real get_nuintd;
+      input nf;
+      real nf;
+
+      input   minsd;
+      real    minsd;
+      begin
+
+         if ((((nf/2.0)<0) ? (nf-ceil(nf/2.0)*2.0):(nf-floor(nf/2.0)*2.0))  != 0)
+           //odd
+           get_nuintd = 2.0 * max((nf - 1.0) / 2.0, 0.0);
+         else
+           begin
+              //even
+              if (minsd == 1)
+                // minimize # of source
+                get_nuintd = 2.0 * max(nf / 2.0 - 1.0, 0.0);
+              else
+                get_nuintd = nf;
+           end
+      end
+   endfunction
+
+   analog
+     begin
+        tdevK=$temperature;
+        conductance=1.0/R;
+        Ir=V(p,n)*conductance;
+        I(p,n) <+ Ir;
+        I(p,n) <+ white_noise(4*`X_K*tdevK*conductance,"thermal");
+     end
+endmodule

@@ -1,0 +1,2 @@
+User warning: Voltage Node ($G_BAD_PATH) does not have a DC path to ground
+User warning: Voltage Node (BAD_ONE) connected to only 1 device Terminal

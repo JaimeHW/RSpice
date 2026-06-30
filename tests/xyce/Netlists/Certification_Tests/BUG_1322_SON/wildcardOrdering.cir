@@ -1,0 +1,16 @@
+* Test that the wildcard ordering, of V(*) I(*) vs. I(*) V(*) is
+* preserved in the two output files.
+
+V1 1 0 1
+R1 1 0 2
+V2 2 0 2
+R2 2 0 2
+
+.TRAN 0 1
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.2
+
+* The case of the first word on the next two lines matters for the .sh file
+.print tran V(*) I(*)
+.PRINT tran FILE=wildcardOrdering.cir.prn1 I(*) V(*)
+
+.END

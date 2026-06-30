@@ -1,0 +1,40 @@
+Test Name: XXX
+Owner: 
+Test netlists: xxx.cir
+               xxx_b.cir         # optional
+               include_files     # optional
+GS files: xxx.cir.prn | none
+Mode:  Serial and Parallel  | Serial | Parallel
+Comparator:  xyce_verify.pl | compare | diff | none
+Version of Xyce: Release_2.1       # the first version where this bug was tested.
+ 
+Description:
+============
+Summary of the bug and/or the test objective.
+ 
+Procedure:
+============
+Explain how to run this test.  
+The default procedure is:
+  run_xyce -o ${OUT_DIR}/xxx.cir.prn xxx.cir > ${OUT_DIR}/xxx.cir.log
+    or
+  xmpirun -np 2 -o ${OUT_DIR}/xxx.cir.prn xxx.cir > ${OUT_DIR}/xxx.cir.log
+  xyce_verify.pl xxx.cir xxx.cir.prn.gs ${OUT_DIR}xxx.cir.prn  ${OUT_DIR}/xxx.plt
+
+Specify any variations from the following defaults:
+  xyce run-time options.  None, except -o (location of the output.)
+  np. For parallel runs, the default number of processors is 2.
+  box compare args.  The default command is:
+     compare xxx.cir.prn.gs xxx.cir.prn  0.02 1.e-6 0.02 > ${OUT_DIR}/xxx.compare
+ 
+Verification:
+=============
+Pass/Fail criteria.  How do we know if it worked?
+Ex: Passes if Xyce and xyce_verify.pl return a 0 exit code.  
+or Passes if Xyce returns a 0 exit code, xyce_verify.pl returns an exit code of 20, and
+yada yada yada.  
+
+ 
+Notes:
+======
+Any additional information that might be helpful.

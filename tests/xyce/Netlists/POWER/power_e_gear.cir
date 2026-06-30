@@ -1,0 +1,32 @@
+Power test for E-Source (Voltage Controlled Voltage Source)
+* Test linear, POLY, VALUE and TABLE formats
+
+B1  1 0 V={2.0*sin(2*pi*TIME) }
+R1   1 2 1K
+R2   0 2 100
+
+ELIN  3 0 1 0 1
+R3    3 4 1K
+R4    0 4 100
+
+EPOLY 5 0 POLY(2) 3 0 4 0 0 .5 .5
+R5    5 6 1K
+R6    0 6 100
+
+EVALUE 7 0 VALUE = 5V*SQRT(V(1,0))
+R7     7 8 1K
+R8     0 8 100
+
+ETABLE  9 0 TABLE V(1,0) = (0,1) (1,2)
+R9      9 10 1K
+R10     0 10 100
+
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0 1.0
+.PRINT TRAN FORMAT=noindex v(3) I(Elin) {I(Elin)*v(3)} p(Elin) W(Elin)
++ v(5) I(Epoly) {I(Epoly)*v(5)} p(Epoly) W(Epoly)
++ v(7) I(Evalue) {I(Evalue)*v(7)} p(Evalue) W(Evalue)
++ v(9) I(Etable) {I(Etable)*v(9)} p(Etable) W(Etable)
+
+.END

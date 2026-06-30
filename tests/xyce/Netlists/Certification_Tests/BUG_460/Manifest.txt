@@ -1,0 +1,8 @@
+README
+bug_460.cir
+bug_460.cir.dat.gs.pl
+bug_460.cir.prn.gs.pl
+bug_460.cir.res.gs
+bug_460.cir.res.gs.pl
+bug_460.cir.sh
+tags

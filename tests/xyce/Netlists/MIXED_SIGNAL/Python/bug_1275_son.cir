@@ -1,0 +1,16 @@
+* Certification test for SON Bug 1275
+
+.model ADCmodel ADC (settlingtime=50ns uppervoltagelimit=6 lowervoltagelimit=0)
+
+YADC VDD vdd 0  ADCModel
+YADC VOUT vout 0  ADCModel
+
+R1 vout vdd  10K
+R2 0 vout  10K
+
+v1 vdd  0 pulse(0 2.0 0 0.5m 0.5m 0.5m 1.5m)
+
+.tran 1e-6 4e-3
+.print tran v(*)
+
+.end

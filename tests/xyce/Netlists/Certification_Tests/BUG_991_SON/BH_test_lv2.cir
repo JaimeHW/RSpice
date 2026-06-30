@@ -1,0 +1,43 @@
+*Test of Xyce's core model using openly available PSPICE core data for
+* the K528T500_3C8 ferroxcube toroid core
+* This is meant to create a B-H loop plot
+*
+*Modified to use Jiles-Atherton data from Philips 7th Edition for 3C80
+* ferrite and current dimensions
+*
+*NETLIST based on the application note:
+* http://www.orcad.com/documents/community.an/pspice/tn14.aspx
+* in which it is explained how to extract core models from B-H loops, and
+* which gives a schematic for a B-H loop test circuit.  The circuit
+* below is exactly the circuit in the application note.
+
+.tran 0 4
+
+* Ranges of the output
+* v(1)  +/- 0.015
+* i(Lp1) +/- 1.5
+* n(ymin!ktrans1_m) +/- 400 
+* n(ymin!ktrans1_h) +/- 4
+* n(ymin!ktrans1_b) +/- 5000
+*
+*comp v(1)   offset=.02
+*comp i(Lp1) offset=2.0
+*comp n(ymin!ktrans1_m) offset=4e5
+*comp n(ymin!ktrans1_h) offset=4
+*comp n(ymin!ktrans1_b) offset=5000
+
+
+.print tran v(1)  i(Lp1) n(ymin!ktrans1_m) n(ymin!ktrans1_h) n(ymin!ktrans1_b)
+Rt1       1 0  1
+Lp1       1 0  20
+
+I1 1 0 sin(0 .1 1Hz 1)
+I2 1 0 sin(0 .2 1Hz 2)
+I3 1 0 sin(0 .8 1Hz 3)
+
+ktrans1  Lp1 1 TX39-20-13_3C80_25C
+
+.model TX39-20-13_3C80_25C core (level=2 MS=510K A=62 C=0.92 K=25 ALPHA=3.7e-4
++ Area=1.12 gap=0.005 Path=8.49 )
+
+.end

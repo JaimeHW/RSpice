@@ -1,0 +1,13 @@
+* simple test netlist for IBIS device development
+
+YIBIS buffer1 1 0 2 0 FILE=at16245.ibs Model=AT16245_IN
+
+R1 1 0 1
+V2 2 0 PWL 0 -5 1 0
+R2 2 0 1
+
+.TRAN 0 1
+.PRINT TRAN PRECISION=3 V(1) v(2) I(R1) I(yibis!buffer1)
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.02
+
+.END

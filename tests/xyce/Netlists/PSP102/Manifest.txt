@@ -1,0 +1,5 @@
+idvg0_Id_T27.cir
+idvg0_Id_T27_pmos.cir
+invert_psp.cir
+psp102_outvars.cir
+tags

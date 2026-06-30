@@ -1,0 +1,60 @@
+* Test of LTRA RC
+*
+* R = 0.05 ohms per unit length
+* C = 20pF per unit length
+
+v1 1 0 pulse(0 1 1ns 1ns 1ns 20ns 40ns)
+
+
+*********************************************************
+* You can check the LTRA model by using a distributed
+* RC model instead. Uncomment the "x1" and comment the
+* "o1" to run the distributed RC network.
+*********************************************************
+*x1 1 2 hundredunits
+o1 1 0 2 0 rcline
+
+rload 2 0 10
+
+.model rcline ltra r=0.05 g=0 l=0 c=20pF len=100 steplimit=1 compactrel=1.0e-3 compactabs=1.0e-14
+
+.tran 0.1ns 120ns 0 0.15ns noop
+.print tran v(1) v(2)
+
+*****************************************************************************
+*****************************************************************************
+*** Subcircuits to model the transmission line with distributed elements
+*****************************************************************************
+*****************************************************************************
+
+.subckt rclump 1 2
+r1 1 2 0.05
+c1 2 0 20pF
+.ends rclump
+
+.subckt tenunits 1 2
+x1 1 3 rclump
+x2 3 4 rclump
+x3 4 5 rclump
+x4 5 6 rclump
+x5 6 7 rclump
+x6 7 8 rclump
+x7 8 9 rclump
+x8 9 10 rclump
+x9 10 11 rclump
+x10 11 2 rclump
+.ends
+
+.subckt hundredunits 1 2
+x1  1 3 tenunits
+x2  3 4 tenunits
+x3  4 5 tenunits
+x4  5 6 tenunits
+x5  6 7 tenunits
+x6  7 8 tenunits
+x7  8 9 tenunits
+x8  9 10 tenunits
+x9  10 11 tenunits
+x10 11 2 tenunits
+.ends
+

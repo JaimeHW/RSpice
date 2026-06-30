@@ -1,0 +1,33 @@
+**********************************************************
+* Test that blank .PRINT lines do not cause a segfault.
+* Test both without and with a FILE= qualifier.  Also
+* test that "print line concatenation" still works with
+* a FILE= qualifier.
+*
+* The segfault would occur if a "blank" .PRINT line
+* (without any variables on it) came after any non-blank
+* .PRINT line.  It is sufficient to just do this test 
+* for .TRAN with STD print format.  See SRN Bug 2073 for 
+* more details.
+* *********************************************************
+.tran 0 1
+.options output initial_interval=0.1 
+
+V1 1 0 PWL 0 0 1 1
+R1 1 2 1
+R2 2 3 1
+R3 3 4 1
+R4 4 5 1
+R5 5 0 1
+
+* non-blank .PRINT line must be first .PRINT line in
+* the test netlist.
+.PRINT TRAN V(1) V(2) 
+.PRINT TRAN 
+
+.PRINT TRAN FILE=blankPrint.cir.prn2
+.PRINT TRAN FILE=blankPrint.cir.prn2 V(3)
+.PRINT TRAN FILE=blankPrint.cir.prn2 v(4) V(5) 
+
+
+.END

@@ -1,0 +1,17 @@
+Power test for B-Source.  
+* Test both the voltage (B1) and current (B3) formulations
+B1   1 0 V={2.0*sin(2*pi*TIME) }
+R1   1 2 1K
+R2   0 2 100
+
+B3   3 0 I={2.0*sin(2*pi*TIME) }
+R3   3 4 1K
+R4   0 4 100
+
+.options timeint method=gear
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0 1.0
+.PRINT TRAN FORMAT=noindex v(1) I(B1) {I(B1)*v(1)} p(B1) w(B1)
++ v(3) I(B3) {I(B3)*v(3)} p(B3) w(B3)
+
+.END

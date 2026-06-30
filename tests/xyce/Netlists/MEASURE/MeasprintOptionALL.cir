@@ -1,0 +1,21 @@
+********************************************************
+* Test .OPTIONS MEASURE MEASPRINT=ALL.  This should
+* generate both the .mt0 file and the measure output 
+* to stdout.
+*
+* See SON Bugs 1054 and 1057.
+********************************************************
+
+V1 1 0 PWL 0 -1 1 1
+R1 1 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1)
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.1
+
+.MEASURE TRAN MAXV1 MAX V(1)
+.MEASURE TRAN MINV1 MIN V(1)
+
+.OPTIONS MEASURE MEASPRINT=ALL
+.END
+

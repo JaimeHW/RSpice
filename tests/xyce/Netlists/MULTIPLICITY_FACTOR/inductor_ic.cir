@@ -1,0 +1,42 @@
+*************************************************************
+* Test Initial Condition (IC) instance parameter with 
+* Multiplicity Factor (M) instance parameter for Inductor 
+* device.
+* 
+*
+*
+* See SON Bug 834 for more details.
+*************************************************************
+*COMP V(1)  OFFSET=2 
+*COMP V(1a) OFFSET=2 
+*COMP V(2a) OFFSET=2
+*COMP V(3a) OFFSET=2
+*COMP V(4a) OFFSET=2
+
+* V(1a) and V(2a) should be the same.  These two devices 
+* partially duplicate some of the testing in inductor.  
+* However, they provide baseline numbers for the inductor 
+* lead currents in the absence of IC.
+V1  1 0 sin(1 1 1KHz 0 0 ) 
+L1  1a 0 L=10mH 
+R1  1 1a 0.001
+
+V2  2  0 sin(1 1 1KHz 0 0 ) 
+L2  2a 0 L=20mH M=2
+R2  2 2a 0.001
+
+* V(3a) and V(4a) will not be the same, since M does not 
+* multiply the IC value.  Instead the initial current will
+* be set by IC, rather then M*IC. 
+V3  3 0 sin(1 1 1KHz 0 0 ) 
+L3  3a 0 L=10mH IC=1500
+R3  3 3a 0.001
+
+V4  4  0 sin(1 1 1KHz 0 0 ) 
+L4  4a 0 L=20mH M=2 IC=750
+R4  4 4a 0.001
+
+.TRAN 0 0.005
+.PRINT TRAN V(1) V(1a) I(L1) V(2a) I(L2) V(3a) I(L3) V(4a) I(L4) 
+
+.END

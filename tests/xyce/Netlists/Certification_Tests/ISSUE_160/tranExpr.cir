@@ -1,0 +1,13 @@
+Regression test to show proper transient RC circuit
+
+c1 1 0 1uF IC=1
+R1 1 2 1K
+v1 2 0 0V
+.print tran v(1)
+
+.param initial_step_value=0.0
+.param final_time_value=5ms
+.tran {initial_step_value} {final_time_value}
+.options timeint reltol=1e-6 abstol=1e-6
+.end
+

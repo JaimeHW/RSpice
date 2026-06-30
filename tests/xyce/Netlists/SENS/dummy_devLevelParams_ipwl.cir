@@ -1,0 +1,36 @@
+* Transient sensitivity example, IPWL source "dummy" file to provide variable 
+* list to xyce_verify.  This file is not run as part of the test, just parsed.
+**********************************************************************
+.param cap=10u
+.param res=1K
+
+ipulse 0 1 PWL(0 0 1s 1 2s -1 3s -0.5 4s 0.25 5s 0.75 6s 4.0  )
+r1 1 2 res
+c1 2 0 cap
+r2 2 3 res
+c2 3 0 cap
+r3 3 4 res
+c3 4 0 cap
+r4 4 0 res
+
+*comp v(4) offset=0.1
+*comp v(4)_v0  offset=0.1
+*comp v(4)_v1  offset=0.1
+*comp v(4)_v2
+*comp v(4)_v3  offset=1500.0
+*comp v(4)_v4  offset=-1.0
+*comp v(4)_v5  offset=1.0
+*comp v(4)_v6  offset=100000.0
+
+.tran .1s 7s
+.print tran
++ v(4)
++ v(4)_v0
++ v(4)_v1
++ v(4)_v2
++ v(4)_v3
++ v(4)_v4
++ v(4)_v5
++ v(4)_v6
+
+.end

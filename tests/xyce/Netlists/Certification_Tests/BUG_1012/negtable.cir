@@ -1,0 +1,10 @@
+Diagnostic for negative values in table causing a parser error
+
+V1  1  0  PULSE (-2 2 0.1 0.1 0.1 0.5 1)
+E2  2  0  Table {v(1)} = (-1,1) (1,-1)
+R1  1  0  1
+R2  2  0  1
+
+.tran 0 1
+.print tran V(1) V(2)
+.end

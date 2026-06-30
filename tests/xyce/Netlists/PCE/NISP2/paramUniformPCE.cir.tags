@@ -1,0 +1,9 @@
+serial, nightly,  parallel, uniform, expression, issue200
+capacitor
+sampling
+pce
+quadrature_pce
+nisp
+required:stokhos
+valgrind
+issue84

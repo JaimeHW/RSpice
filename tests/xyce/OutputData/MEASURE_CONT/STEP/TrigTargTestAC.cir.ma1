@@ -1,0 +1,21 @@
+TRIGTARGCONTAT = 4.700000e+02                     targ = 5.000000e+02                    trig = 3.000000e+01
+TRIGTARGCONTAT1 = -4.975982e+00                    targ = 2.502402e+01                    trig = 3.000000e+01
+TRIGTARGCONTAT2 = 4.749760e+02                    targ = 5.000000e+02                    trig = 2.502402e+01
+TRIGTARG1 = -3.063522e+00                    targ = 1.430844e+01                    trig = 1.737197e+01
+TRIGTARG1 = 2.463392e+00                    targ = 6.103204e+01                    trig = 5.856865e+01
+TRIGTARG1 = -3.299782e+00                    targ = 8.800210e+01                    trig = 9.130189e+01
+TRIGTARG1 = 1.832580e+00                    targ = 1.217149e+02                    trig = 1.198824e+02
+TRIGTARG1 = -8.913331e+00                    targ = 1.865737e+02                    trig = 1.954871e+02
+TRIGTARG2 = 4.366007e+01                    targ = 6.103204e+01                    trig = 1.737197e+01
+TRIGTARG2 = 2.943346e+01                    targ = 8.800210e+01                    trig = 5.856865e+01
+TRIGTARG2 = 3.041305e+01                    targ = 1.217149e+02                    trig = 9.130189e+01
+TRIGTARG2 = 6.669139e+01                    targ = 1.865737e+02                    trig = 1.198824e+02
+TRIGTARG3 = -4.426020e+01                    targ = 1.430844e+01                    trig = 5.856865e+01
+TRIGTARG3 = -3.026985e+01                    targ = 6.103204e+01                    trig = 9.130189e+01
+TRIGTARG3 = -3.188025e+01                    targ = 8.800210e+01                    trig = 1.198824e+02
+TRIGTARG3 = -7.377214e+01                    targ = 1.217149e+02                    trig = 1.954871e+02
+RISEFALL1 = 7.143646e+01                    targ = 1.300051e+02                    trig = 5.856865e+01
+RISEFALL1 = 5.274411e+01                    targ = 1.726265e+02                    trig = 1.198824e+02
+RISEFALL2 = -7.142037e+01                    targ = 6.103204e+01                    trig = 1.324524e+02
+RISEFALL2 = -5.219723e+01                    targ = 1.217149e+02                    trig = 1.739122e+02
+LASTMEASURE = 6.034041e-01

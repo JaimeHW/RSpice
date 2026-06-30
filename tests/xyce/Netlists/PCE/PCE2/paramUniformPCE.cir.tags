@@ -1,0 +1,7 @@
+serial, nightly,  parallel, analytic, issue200
+pce
+intrusive_pce
+quadrature_pce
+required:stokhos
+valgrind
+issue84

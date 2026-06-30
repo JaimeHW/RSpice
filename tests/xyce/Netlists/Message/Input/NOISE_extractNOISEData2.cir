@@ -1,0 +1,28 @@
+********************************************************
+* Test error messsage when .NOISE line lacks enough
+* fields, and DATA= is used.
+*
+*
+* See SON Bug 1042 for more details.
+********************************************************
+
+* noise analysis: resistor divider, amp, and lp filter
+*
+* resistor divider
+v1  1 0 dc 5.0 ac 1.0
+r1  1 2 100k
+r2  2 0 100k
+*
+* amp and lp filter
+eamp  3 0 2 0 1
+rlp1  3 4 100
+clp1  4 0 1.59nf
+*
+
+.noise  v(4)  v1  data=
+
+.print noise V(4) {log(onoise)} {log(inoise)}
++ {log(dno(rlp1))} {log(dno(r2))} {log(dno(r1))}
++ {log(dni(rlp1))} {log(dni(r2))} {log(dni(r1))}
+
+.end

@@ -1,0 +1,18 @@
+N-Channel MESFET Circuit
+*
+VDS 1 0 0
+VIDS 1 2 0
+VGS 3 0 0
+Z1 2 3 0 MESMOD AREA=2
+.step lin mesmod:rd 40 100 20
+.step lin mesmod:rs 40 100 20
+.DC VGS -1.75V 0 50MV VDS 0.1V 1.9V 1.8V
+.PRINT DC V(3) V(1) MESMOD:rd MESMOD:rs I(VIDS)
+
+.MODEL MESMOD NMF
++ LEVEL=1 BETA=1.4E-3
++ RD=46 RS=46 VTO=-1.3 LAMBDA=0.03 ALPHA=3
+
+*COMP I(VIDS) zerotol=1.0e-11
+.END
+

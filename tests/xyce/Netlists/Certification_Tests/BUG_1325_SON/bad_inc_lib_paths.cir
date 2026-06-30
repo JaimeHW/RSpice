@@ -1,0 +1,24 @@
+* Test error handling for invalid file names on their
+* .INC and .LIB lines, where the files may be in
+* subdirectories. This also tests a valid .INC line that
+* includes a file (in a subdirectory) with invalid .INC
+* and .LIB lines in it.
+**********************************************************
+
+* These are all invalid lines
+.INC sub1/include_bogo1
+.INC include_bogo
+
+.LIB sub1/lib_bogo1 LIB_BOGO1
+.LIB lib_bogo LIB_BOGO
+
+* This includes a valid file with  invalid .INC and .LIB lines in it
+.INC sub1/include_with_bogo_line
+
+.DC V1 1 5 1
+.PRINT DC V(1)
+
+V1 1 0 1
+R1 1 0 1
+
+.END

@@ -1,0 +1,47 @@
+***************************************************************
+* * Test -o command line option for .PRINT PCE. Key points
+* (after the changes for Issue 222) are:
+*
+*  1) The parameters FORMAT=CSV and FILE=esFoo on the
+*     .PRINT ES line should be ignored.
+*
+*  2) The .PRINT DC line should also produce output.
+*
+*  3) the .PRINT output should go to the file specified by -o,
+*      and not to the default file name or the file
+*      specified with FILE=.  It should be a FORMAT=STD
+*      file with space as the delimiter, with the default
+*      extensions (e.g., dashoFile.PCE.prn or dashoFile.prn).
+*
+*  4) the .sh file will use -o pceOutput.PCE.prn to test
+*      that the default print extension is removed from the
+*      dashoFilename.
+*
+* See SON Bug 1231 for more details.
+***************************************************************
+
+.global_param R1value={1000.0}
+.global_param R2value={1000.0}
+
+R2 1 0 {R2value}
+R1 1 2 {R1value}
+Von 2 0 5
+
+.dc Von 5 5 1
+
+.print dc v(1)
+.PRINT PCE PRECISION=6 FORMAT=CSV FILE=pceFoo
+
+.PCE
++ param=R1value
++ type=normal
++ means=1000.0
++ std_deviations=200.0
+
+.options PCES
++ order=2
++ outputs={v(1)}
+
+.options nonlin nox=0
+
+.end

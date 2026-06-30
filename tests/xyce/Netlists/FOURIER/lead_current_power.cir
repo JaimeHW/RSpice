@@ -1,0 +1,33 @@
+****************************************************************
+* A simple test of a fourier transform using I(), P() and W()
+* The Fourier transform of I(R1) should be a tone with magnitude
+* 2 at 1 HZ.  The Fourier transform of P(R1) and W(R1) should 
+* have tones at DC and 2 HZ with magnitude of 2.
+*
+* This test also tests that:
+*   a) multiple .FOUR lines with the same fundamental frequency 
+*      work correctly.
+*   b) muliple <freq> are supported.
+*   c) the .FOUR lines for those multiple frequencies can be
+*      intermixed.
+*   d) N() works
+*   e) An expression {{W(R1)}-1} works.  (Note: this also tests
+*      SRN Bug 2039 for .FOUR lines)
+****************************************************************
+V1 1 0 SIN(0 2 1)
+R1 1 0 1
+
+V2 2 0 SIN(0 1 2)
+R2 2 0 1
+
+.TRAN 10ms 1 
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.01
+.PRINT TRAN I(R1) I(R2)
+.four 1 I(R1) P(R1)
+.four 2 I(R2) P(R2) 
+.four 1 W(R1)
+.four 2 W(R2)
+.four 1 {{W(R1)}-1}
+.four 1 N(V1_BRANCH)
+
+.end

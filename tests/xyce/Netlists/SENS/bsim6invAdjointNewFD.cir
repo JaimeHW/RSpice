@@ -1,0 +1,75 @@
+*Sample netlist for BSIM6.  This tests is for checking finite difference derivatives with adjoints
+*Inverter Transient
+
+.options timeint method=gear debuglevel=-100
+.options device temp=25 debuglevel=-100
+
+*.hdl "bsim6.va"
+.include "modelcard_xyce.nmos"
+.include "modelcard_xyce.pmos"
+
+* --- Voltage Sources ---
+vdd   supply  0 dc 1.0
+VIN1 vi 0 PWL(0S 0V  7.0e-8 0V 0.1us 1.0V )
+
+* --- Inverter Subcircuit ---
+.subckt inverter vin vout vdd gnd
+Mp1 vout vin vdd gnd pmos W=10u L=10u 
+Mn1 vout vin gnd gnd nmos W=10u L=10u 
+.ends
+
+* --- Inverter ---
+Xinv1  vi 1 supply 0 inverter
+Xinv2  1 2 supply 0 inverter
+Xinv3  2 3 supply 0 inverter
+Xinv4  3 4 supply 0 inverter
+Xinv5  4 vo supply 0 inverter
+
+* --- Transient Analysis ---
+.tran 2ns 1us
+
+.print tran format=tecplot v(vi) v(1) v(2) v(3) v(4) v(vo) {ddt(v(vo))} 
+
+.SENS objfunc={V(VO)}
++ param=
++ XINV1:MP1:W,
++ XINV1:MP1:L,
++ XINV1:MN1:W,
++ XINV1:MN1:L,
++ XINV2:MP1:W,
++ XINV2:MP1:L,
++ XINV2:MN1:W,
++ XINV2:MN1:L,
++ XINV3:MP1:W,
++ XINV3:MP1:L,
++ XINV3:MN1:W,
++ XINV3:MN1:L,
++ XINV4:MP1:W,
++ XINV4:MP1:L,
++ XINV4:MN1:W,
++ XINV4:MN1:L,
++ XINV5:MP1:W,
++ XINV5:MP1:L,
++ XINV5:MN1:W,
++ XINV5:MN1:L,
++ nmos:TOXE,
++ pmos:TOXE
+
+* Adjoint is to only be performed at 1 time point.  
+.options SENSITIVITY STDOUTPUT=1 DIAGNOSTICFILE=0 adjoint=1 direct=0  forceDeviceFD=true
++ adjointTimePoints=1.0e-7
+
+* This signal gets its error absolutely swamped by the very tiny value in
+* the very first of three data points, and so it fails on a handful of
+* platforms.  Tweaking abstol in this way makes it less sensitive to that
+* one point.
+*COMP d_{v(vo)}/d_xinv1:mp1:w_adj abstol=1e-7
+
+.print TRANADJOINT 
+*format=tecplot 
+
+* this is here to fool xyce verify.
+.print sens
+
+.end
+

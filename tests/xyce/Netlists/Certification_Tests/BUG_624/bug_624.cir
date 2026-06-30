@@ -1,0 +1,19 @@
+Test Circuit for unrecognized parameters
+*
+* This circuit attempts to step a non-existent resistor parameter 'BOGUS'
+* Xyce should error out with an error:
+*
+* User Fatal: Unable to find parameter R1:BOGUS
+*
+IS   1  0  0
+R1   1  0  10
+B1   3  0  V = {-(abs(V(1)))}
+R2   3  4  100
+R3   4  0  100K
+.step R1:BOGUS 1 10 1
+.DC IS -10 10 1
+.PRINT DC  I(IS) V(1) V(3)
+.END
+
+
+

@@ -1,0 +1,50 @@
+Test Name: BUG 397
+Owner: ???
+Test netlists: diode.cir
+GS files: none
+Mode:  Serial 
+Comparator:  diode.cir.sh
+Version of Xyce: Release_2.1       # the first version where this bug was tested.
+ 
+Description:
+============
+  Bug 397 addresses a problem with empty log files.  When the "-l" flag 
+  is used, the created log file contains no data and the output is
+  sent to stdout, which is usually the monitor.  
+
+Procedure:
+============
+  1) Xyce -l sample.log diode.cir 
+  2) Verify that no output appears on stdout. 
+  3) Open the newly created sample.log file.  It should contain the
+     data that normally appears on the screen when "-l" is not used.
+
+Notes:
+======
+  This test should be run in SERIAL only.  
+
+The included script, diode.cir.sh, checks that all the output that
+would appear on standard out without the -l flag is placed into the
+log file when the -l flag is given.  Because NOX doesn't know about
+the -l flag, NOX output that is displayed when Xyce is compiled with
+--enable-verbose_nonlinear is sent to standard out whether -l is given
+or not.  Therefore this test will *always* fail unless a non-verbose
+version of Xyce is used (such as those that are generated for release
+purposes).
+
+
+Note added by ERK, 10/22/2009: 
+I have modified this test, slightly to also certify bug 1727 on the 
+SRN version of bugzilla (charleston).  That bug was about unwanted,
+verbose output, using a non-verbose build of Xyce, that happened 
+when running a transient netlist that used erroroption=1 and 
+method=7 (trapezoid).    The only reasonable way to test that 
+this was fixed was to limit it to non-verbose testing, and to then
+do a test very similar to the one done here.  I've modifed the
+circuit to be transient, and I've also modified the netlist to
+use trapezoid.
+
+
+
+
+

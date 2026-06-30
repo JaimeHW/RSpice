@@ -1,0 +1,90 @@
+DC DC Flyback Converter
+*
+* This is a test circuit supplied by Matt Kerschen
+* It should be Unclassified, Unlimited Release
+* Here's how he developed it:
+*
+* It is just a standard topology for a flyback converter and 
+* then I made up the values.
+*
+* The picture in the attachment came from an EMA training class.  
+* I added the resistors and used existing models that I had 
+* for an NPN transistor and HV rectifier diode.
+*
+
+.tran  0 2.0e-3 0 1e-7 
+.print tran v(n8)
+
+*.options mpdeint ic=2 auton2=false saveicdata=1 startupperiods=10 oscsrc=v1 diff=0
+*.options timeint maxord=1 erroption=1 
+
+*V1    n1   0    10V
+V1    n1   0    PULSE(0.0 5.0 0.0us 10ns 10ns 10us 20us)
+R1    n1   n2   10
+L1    n2   n5   1.0e-5
+L2    0    n6    1.0e-4
+K1    L1   L2   1.0
+Q3    n5   n4   0     Q2N2222
+R2    n3   n4   100
+*V2    n3   0    PULSE(0.0 5.0 0.0us 10ns 10ns 10us 20us)
+V2    n3    0   5V    
+D1    n6   n7   Z50FF3_27C
+R3    n7   n8   1.0e3
+C1    n8   0    1.0e-9
+R4    n8   0    100.0e9
+
+*
+* MODEL DEFINITIONS
+*
+.MODEL Z50FF3_27C D( 
++ LEVEL = 2         ; use for XYCE
++ IS = 3.18E-10
++ N = 7.8
++ BV = 5000
++ IBV = 1E-6 
++ RS = 12
++ CJO = 1.476E-11
++ VJ = 6.545
++ M = 0.3499 
++ FC = 0.5
++ TT = 8.3E-8
++ EG = 9.99
++ XTI = 27 
++ IKF = 0.003531
++ NR = 2
++ ISR = 0)
+
+ 
+.model Q2N2222 NPN(
++ Is=14.34f
++ Xti=3
++ Eg=1.11
++ Vaf=74.03
++ Bf=255.9
++ Ne=1.307
++ Ise=14.34f
++ Ikf=.2847
++ Xtb=1.5
++ Br=6.092
++ Nc=2
++ Isc=0
++ Ikr=0
++ Rc=1
++ Cjc=7.306p
++ Mjc=.3416
++ Vjc=.75
++ Fc=.5
++ Cje=22.01p
++ Mje=.377
++ Vje=.75
++ Tr=46.91n
++ Tf=411.1p
++ Itf=.6
++ Vtf=1.7
++ Xtf=3
++ Rb=10)
+
+
+
+
+.end

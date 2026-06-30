@@ -1,0 +1,19 @@
+A test of the measure freq functionality
+*******************************************************************************
+*
+* a few sources of different types
+VS  1  0  SIN(0 1.0 1KHZ 0 0)
+VP  2  0  PULSE( 0 100 0.2ms 0.2ms 0.2ms 1ms 2ms )
+
+R1  1  0  100
+R2  2  0  100
+
+.TRAN 0  100ms
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) 
+
+
+.measure tran freqAll FREQ v(1) ON=0.75 OFF=0.25 FROM=50e-3 TO=75e-3
+.measure tran freqTop FREQ v(2) ON=75 OFF=25  FROM=50e-3 TO=76e-3
+
+.END
+

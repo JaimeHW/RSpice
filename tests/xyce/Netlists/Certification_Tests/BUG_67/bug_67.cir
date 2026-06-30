@@ -1,0 +1,111 @@
+INVERTED BESSEL-THOMPSON DELAY HIGH-PASS FILTER 
+********************************************************************************
+* Tier No.: 3
+* Directory/Circuit Name:SANDLER6/sandler6.cir
+* Description: A Bessel Thompson delay high-pass filter circuit netlist 
+*       developed by Steve Sandler to compare the validity of simulations
+*       using three different circuit simulation tools. The results were compared
+*       to measured data. 
+* Input: V5 = V(8)
+* Output: V(7) V(8)
+*******************************************************************************
+* MAIN CIRCUIT DEFINITION
+*
+R2 3 4 4.65K
+C1 2 3 10.28N
+X1 2 4 5 6 4 LM124N
+V1 5 0 10
+V2 6 0 -10
+R3 9 0 8.21K
+R4 10 7 3.24K
+C2 9 10 10.5N
+C3 4 10 10.25N
+X2 9 7 11 12 7 LM124N
+V3 11 0 10
+V4 12 0 -10
+C4 8 3 10N
+V5 8 0 PULSE(0 2 100U 1U 1U 1000U 2000U)
+R1 2 0 5.56K
+*
+* ANALYSIS, PRINT AND OPTION STATEMENTS
+.TRAN 1U 1000U 0 5U
+*.OPTIONS METHOD=GEAR RELTOL=.001 ACCT
+.PRINT TRAN  V(7)  V(8)
+*ALIAS  V(7)=BESSELOUT,V(8)=INPUT,V(10)=STAGE1
+*
+***************************
+* SUBCIRCUIT DEFINITION
+***************************
+.SUBCKT LM124N      1   2  99  50  28
+*
+*FEATURES:
+*ELIMINATES NEED FOR DUAL SUPPLIES
+*LARGE DC VOLTAGE GAIN =             100DB
+*HIGH BANDWIDTH =                     1MHZ
+*LOW INPUT OFFSET VOLTAGE =            2MV
+*WIDE SUPPLY RANGE =        +-1.5V TO +-16V
+*NOTE: MODEL IS FOR SINGLE DEVICE ONLY AND SIMULATED
+*      SUPPLY CURRENT IS 1/4 OF TOTAL DEVICE CURRENT.
+*      OUTPUT CROSSOVER DISTORTION WITH DUAL SUPPLIES
+*      IS NOT MODELED.
+*INPUT STAGE
+IOS 2 1 3N
+*^INPUT OFFSET CURRENT
+R1 1 3 500K
+R2 3 2 500K
+I1 99 4 100U
+R3 5 50 517
+R4 6 50 517
+Q1 5 2 4 QX
+Q2 6 7 4 QX
+C4 5 6 128.27P
+*COMMON MODE EFFECT
+I2 99 50 75U
+*^QUIESCENT SUPPLY CURRENT
+*EOS 7 1 POLY(1) 16 49  1E-3 1
+BOS 7 1 V={POLY(1) v(16,49)  1E-3 1}
+*INPUT OFFSET VOLTAGE.^
+R8 99 49 60K
+R9 49 50 60K
+*OUTPUT VOLTAGE LIMITING
+V2 99 8 1.63
+D1 9 8 DX
+D2 10 9 DX
+V3 10 50 0.635
+*SECOND STAGE
+EH 99 98 99 49 1
+*G1 98 9 POLY(1) 5 6  0 9.87772E-4 0 .3459
+B1 98 9 I={POLY(1) V(5,6) 0 9.87772E-4 0 .3459}
+R5 98 9 101.2433MEG
+C3 98 9 200P
+*POLE STAGE
+G3 98 15 9 49 1E-6
+R12 98 15 1MEG
+C5 98 15 7.9577E-14
+*COMMON-MODE ZERO STAGE
+G4 98 16 3 49 5.6234E-8
+L2 98 17 15.9M
+R13 17 16 1K
+*OUTPUT STAGE
+*F6 50 99 POLY(1) V6 300u 1
+B6 50 99 I={POLY I(V6) 300u 1}
+E1 99 23 99 15 1
+R16 24 23 17.5
+D5 26 24 DX
+V6 26 22 .63V
+R17 23 25 17.5
+D6 25 27 DX
+V7 22 27 .63V
+V5 22 21 0.27V
+D4 21 15 DX
+V4 20 22 0.27V
+D3 15 20 DX
+L3 22 28 500P
+RL3 22 28 100K
+*MODELS USED
+.MODEL DX D(IS=1E-15)
+.MODEL QX PNP(BF=1.111E3)
+.ENDS
+******************************************************
+.END
+

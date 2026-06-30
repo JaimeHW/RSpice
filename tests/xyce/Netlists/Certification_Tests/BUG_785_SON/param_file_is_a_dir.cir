@@ -1,0 +1,27 @@
+********************************************************
+* Test that Xyce emits a reasonable warning message 
+* if the specified parameter file (from the -prf command 
+* line option) is actually a directory name. Xyce will then exit, 
+* since the parameters dakota_R1R and dakota_C1C (for the R1
+* C1 devices) do not have valid values.
+*
+* The contents of this netlist was taken from the test
+* PARAM_RSP/rc_template.  It is a "Dakotized" netlist.
+*
+*********************************************************
+
+* run this with Xyce -prf <param file> -rsf <response file> rc_template.cir
+*
+* Xyce will fill in var "dakota_C1C" with value from the param file
+
+V1  1  0  pulse (1  0  2e-4  1e-9 1e-9  1 1 100)
+R1  1  OBJ  dakota_R1R
+C1  OBJ 0   dakota_C1C
+
+.measure tran TimeAt2 when v(OBJ)=0.35 MINVAL=0.02
+
+.tran 0 1e-3
+.print tran V(OBJ)
+.end
+
+

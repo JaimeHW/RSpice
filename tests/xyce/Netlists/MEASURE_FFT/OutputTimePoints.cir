@@ -1,0 +1,29 @@
+* This tests that .OPTIONS OUTPUT OUTPUTTIMEPOINTS is
+* compatible with FFT_ACCURATE=1.
+*
+* See SON Bugs 1280 and 1327 for more details.
+******************************************************
+
+.TRAN 0 1
+.OPTIONS FFT FFTOUT=1 FFT_ACCURATE=1
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+V3 3 0 PWL 0 1 1 0
+R3 3 0 1
+
+.FFT V(1) NP=8 WINDOW=HANN
+
+* Also test that a TRAN measure work correctly at t=0
+* for OUTPUTTIMEPOINTS.
+.MEASURE TRAN MAXV3 MAX V(3)
+
+* Purposefully pick a sparse set of output times that
+* are not equal to any of the .FFT line's sample times.
+* Also don't include t=0.
+.OPTIONS OUTPUT OUTPUTTIMEPOINTS=0.33,0.66
+
+.PRINT TRAN V(1)
+.END

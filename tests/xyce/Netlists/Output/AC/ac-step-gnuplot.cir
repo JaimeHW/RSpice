@@ -1,0 +1,30 @@
+********************************************************
+* Test FORMAT=GNUPLOT with .STEP.  This should produce 
+* the same FD.prn file as FORMAT=STD, but with two 
+* blank lines before steps 1,2, ... N-1.  Note that
+* first step is "step 0".  In this netlist, N is 4.
+*
+* Also test FORMAT=SPLOT with .STEP. This should
+* produce the same FD.prn file as FORMAT=STD, but
+* with one blank line before steps 1,2, ... N-1.
+*
+* Note:  This netlist can use the shorthand" syntax of 
+* .STEP R1 rather than .STEP R1:R since the R and C 
+* devices have instanceDefaultParameter set to R and C, 
+* respectively.  See SON Bug 972 for more details.
+********************************************************
+
+* Trivial high-pass filter (V-C-R) circuit
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+* step over two variables. 
+.STEP R1 0.5 2 1.5
+.STEP C1 1e-7 1e-6 9e-7
+.print AC FORMAT=GNUPLOT R1:R C1:C vm(b)
+.print AC FORMAT=SPLOT FILE=ac-step-gnuplot.cir.FD.splot.prn R1:R C1:C vm(b)
+.ac dec 5 100Hz 1e6
+
+.end
+

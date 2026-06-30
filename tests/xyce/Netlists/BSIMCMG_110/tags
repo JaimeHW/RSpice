@@ -1,0 +1,5 @@
+serial, parallel, nightly
+bsimcmg
+bsimcmg110
+adms
+valgrind

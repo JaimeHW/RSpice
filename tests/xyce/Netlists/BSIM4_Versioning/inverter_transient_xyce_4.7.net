@@ -1,0 +1,37 @@
+*Sample netlist for BSIM4
+*Inverter Transient
+
+.options device temp=25
+
+.include "ASU_47.txt"
+
+* --- Voltage Sources ---
+vdd   supply  0 dc 1.0
+VIN1  vi 0  dc 0.5V PULSE (0.5V 0V 150ns 5ns 5ns 150ns 310ns)
+*vin  vi  0 dc 0.5 sin (0.5 0.5 1MEG)
+
+* --- Inverter Subcircuit ---
+.subckt inverter vin vout vdd gnd
+Mp1 vout vin vdd gnd pmos W=135n L=45n
+Mn1 vout vin gnd gnd nmos W=135n L=45n
+.ends
+
+* --- Inverter ---
+Xinv1  vi 1 supply 0 inverter
+Xinv2  1 2 supply 0 inverter
+Xinv3  2 3 supply 0 inverter
+Xinv4  3 4 supply 0 inverter
+Xinv5  4 vo supply 0 inverter
+* --- Transient Analysis ---
+.tran 10n 2u
+
+*COMP V(vi) offset=.01
+*COMP V(1) offset=.02
+*COMP V(2) offset=.03
+*COMP V(3) offset=.05
+*COMP V(4) offset=.07
+*COMP V(vo) offset=.08
+.print tran v(vi) v(1) v(2) v(3) v(4) v(vo)
+
+.end
+

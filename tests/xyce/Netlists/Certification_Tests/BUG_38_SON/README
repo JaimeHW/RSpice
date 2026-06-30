@@ -1,0 +1,32 @@
+Test Name: bug_38_son
+Owner: elranki 
+Test netlists: bug_38_son.cir
+               bug_38_son_p.cir
+GS files: none
+Mode:  Serial
+Comparator:  diff
+Version of Xyce: Release_4.1
+
+ 
+Description:
+============
+Tests parsing of netlists that have subcircuit nodes surrounded by 
+parenthesis (HSpice-ism).
+ 
+
+Procedure:
+============
+  runxyce bug_38_son.cir
+  runxyce bug_38_son_p.cir
+  diff bug_38_son.cir.prn bug_38_son_p.cir.prn
+
+
+Verification:
+=============
+Passes if Xyce does not exit with error for bug_38_son_p.cir, and the
+output for both netlists is the same.
+
+ 
+Notes:
+======
+A warning message may print.  This is acceptable.

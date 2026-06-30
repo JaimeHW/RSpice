@@ -1,0 +1,18 @@
+* This netlist tests various T-Spice syntaxes for G-Sources
+
+* source that supplies the controlling voltage
+R1 1 0  1 
+V1 1 0  SIN(0V 1V 1e3 0 0 0)
+
+* linear form
+G2 2 0 1 0 2
+R2 2 0 1
+
+* poly form
+G3 3 0 poly(1) 1 0 0 3
+R3 3 0 1
+
+.tran 10u 1ms
+.print tran I(R1) I(R2) I(R3) 
+
+.end

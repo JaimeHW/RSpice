@@ -1,0 +1,13 @@
+Transmission Line Circuit
+**************************************************************
+* Tests that transmission line correctly zeros itself during
+* .step loops
+*************************************************************** 
+VIN 1 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)
+RIN 1 2 50
+TLINE 2 0 3 0 Z0=50 TD=10N
+RL 3 0 50
+.STEP TLINE:TD 10N 50N 10N
+.TRAN 0.25N 50N
+.PRINT TRAN precision=12 width=21 {V(2)} {V(3)+1.5}
+.END

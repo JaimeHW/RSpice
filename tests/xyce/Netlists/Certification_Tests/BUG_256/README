@@ -1,0 +1,18 @@
+This bug tests that the Trapezoid time integrator
+in Xyce (.options timeint method=7 which is the
+default for Xyce 5.3 and on) respects requests
+for .options initial_interval=  where the 
+user is requesting output at specific 
+time points.  With the simple circuit
+on this bug, Trap would take about 132 time steps
+on it's own, but 201 with the specified output 
+interval.
+
+The test script bug_256.cir.sh attempts
+to ensure that more that 200 time steps
+have been taken.
+
+There is a related test in BUG_133
+
+
+ 

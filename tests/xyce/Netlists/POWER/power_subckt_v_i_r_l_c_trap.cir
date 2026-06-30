@@ -1,0 +1,59 @@
+test of printing power in subcircuits for v,i,r,l c and thermal resistor
+
+* circuit and subcircuit definition for V-R-L-C test
+V1   1 0 SIN(0 2 10 0)
+R1   1 2 1
+C1   2 3 1u
+L1   3 0 1m
+
+X1 a c MySubcircuit_1
+
+.SUBCKT MYSUBCIRCUIT_1 a c
+V2   a 0 SIN(0 2 10 0)
+R2   a b 1
+C2   b c 1u
+L2   c 0 1m
+.ENDS 
+
+* circuit and subcircuit definition for I and thermal resistor test
+I1  4 0 sin(0 2 10 0 ) 
+R4  4 5 copper L=0.1 a=1e-5
+R5  5 0 copper L=0.1 a=1e-5
+
+X2 d e MySubcircuit_2
+
+*subcircuit definition for I test
+.SUBCKT MYSUBCIRCUIT_2 d e
+I2  d 0 sin(0 2 10 0 ) 
+R6  d e copper L=0.1 a=1e-5
+R7  e 0 copper L=0.1 a=1e-5
+.ENDS 
+
+* Thermal / resistivity properties for copper
+* resistivity is in units of ohm*m
+.model copper r ( level=2
++ resistivity=
++ {table(temp+273.15,
++      0,         0.5e-9,
++      100,        3e-9,
++      1000,       6.6e-8
++  )} 
+
+* heat capacity is in units or J/K/m**3
+* density (8.92e+3 kg/m**3) times table in J/K/kg
++ heatcapacity={8.92e+3*table(temp+273.15,
++      0,         1,
++      1000,      1500 
++  )} )
+
+.options timeint method=trap 
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.5U 100ms
+.PRINT TRAN p(v1) p(X1:v2) w(v1) w(X1:v2) 
++ p(i1) p(X2:i2) w(i1) w(X2:i2) 
++ p(r1) p(X1:r2) w(r1) w(X1:r2)
++ p(c1) p(X1:c2) w(c1) w(X1:c2) 
++ p(l1) p(X1:l2) w(l1) w(X1:l2)
++ p(R4) p(X2:R6) w(R4) w(X2:R6)
+
+.END

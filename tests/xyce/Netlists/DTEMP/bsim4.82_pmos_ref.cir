@@ -1,0 +1,18 @@
+* PMOS Id-Vd
+
+.include modelcard.4.82.pmos
+
+.param tempParam=10
+m1 2 1 0 b p1 W=10.0u L=0.09u NF=5 temp={tempParam}
+
+vg 1 0 -1.2
+vd 2 0 -1.2
+vb b 0  0.0
+
+.dc vd 0.0 -1.18 -0.02 vg -0.2 -1.2 -0.2
+.step tempParam list 15 25 35
+
+.print dc v(2) v(1) i(vd)
+
+.end
+

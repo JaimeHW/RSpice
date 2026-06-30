@@ -1,0 +1,17 @@
+generic blocking oscillator
+c1 1 0 100e-12
+c2 2 0 100e-12
+c3 2 3 1e-7
+r1 4 2 1e4
+r2 2 0 1e3
+q1 1 2 0  nbjt
+vdd 4 0  12
+l1 4 1 5.625e-2
+l2 3 0 1.5e-2
+k1 l1 l2  2.35e-2
+
+.MODEL NBJT NPN (BF=100)
+
+.tran 1ns 100us  NOOP
+.print tran format=tecplot v(1) v(2) v(3) v(4) 
+

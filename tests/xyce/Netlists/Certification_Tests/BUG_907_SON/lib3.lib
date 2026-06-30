@@ -1,0 +1,9 @@
+.lib lib4_B
+.param x = 1
+vf f 0 dc 1.5
+.endl lib4_B
+
+.lib lib4_top
+.lib lib4.lib lib4_A
+.lib lib3.lib lib4_B
+.endl lib4_top

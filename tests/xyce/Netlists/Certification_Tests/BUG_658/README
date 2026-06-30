@@ -1,0 +1,27 @@
+Test Name: BUG_658
+Owner: Eric Rankin 
+Test netlists: diode.cir
+GS files:  none
+Mode:  Serial 
+Comparator:  none
+Version of Xyce: Release_3.0
+ 
+Description:
+============
+Add support for .raw file format.
+
+This test confirms that Xyce will generate both a binary and ascii rawfile.
+ 
+Procedure:
+============
+  runxyce -r ${OUT_DIR}/diode.raw diode.cir
+  runxyce -r ${OUT_DIR}/diode.raw_txt -a diode.cir
+
+Verification:
+=============
+  Passes if the files diode.raw and diode.raw_txt are created. 
+
+Notes:
+======
+This test does not determine the validity of the rawfile's contents.  Manual
+inspection of the .raw_txt and .raw headers may be helpful.

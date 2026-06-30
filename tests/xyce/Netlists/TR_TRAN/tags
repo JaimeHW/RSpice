@@ -1,0 +1,4 @@
+serial, nightly, parallel, tr
+resistor
+capacitor
+bsim3

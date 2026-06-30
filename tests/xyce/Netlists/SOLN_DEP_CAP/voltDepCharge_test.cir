@@ -1,0 +1,35 @@
+*TEST MOS_PCAP
+ 
+.global_param V_OFFSET=-3.3
+
+XC2 VDD 0 mos_pcap CA=525.431f
+
+VD VDD 0 SIN('V_OFFSET' 1 1MEG 0 0)
+
+.options nonlin-tran reltol=1e-4 abstol=1e-7
+.options timeint reltol=1e-3 abstol=1e-6 method=7 newlte=1 newbpstepping=1 
+.tran 1n 2u
+.step V_OFFSET -3.3 3.31 0.1
+.print tran  V_OFFSET V(VDD)
++ I(XC2:Vc) {525.431f*(.610+.390*tanh((V(VDD)-.8159)/.7586))}
+ 
+.subckt mos_pcap 1 2 CA=500f
+ 
+.param
++c0=0.610
++c1=0.390
++v0=0.8159
++v1=0.7686
+ 
+Vc 1 1a 0
+
+*In this version, we specify the expression for charge instead of capacitance.
+* The capacitance expression in voltDepCap_test.cir is exactly the derivative
+* of this expression with respect to v(1,2).  We should match voltDepCap_test
+* and voltDepCap_baseline exactly with this expression.
+c_mcap 1a 2 q='ca*(c1*v1*ln(cosh((v(1,2)-v0)/v1))+c0*v(1,2))'
+
+.ends
+
+.end
+

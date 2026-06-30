@@ -1,0 +1,3 @@
+# This test needs to be excluded from regularly searched tests.
+TL1X.cir
+TL1X_mpi.cir

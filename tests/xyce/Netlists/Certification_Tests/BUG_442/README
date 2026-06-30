@@ -1,0 +1,53 @@
+Test Name: BUG_442
+Owner: Tom Russo
+Test netlists: bug_442_baseline.cir
+               bug_442_restarted.cir
+               bug_442_baseline_unpacked.cir 
+               bug_442_restarted_unpacked.cir
+GS files: none
+Mode:  Serial
+Comparator:  xyce_verify.pl
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+
+Bug 442 called for the implementation of restart capability on devices
+with history, specifically the Transmission line.  It also exposed an
+incomplete implementation of "unpacked" restart files that are
+required on windows platforms and available on all platforms.
+ 
+Procedure:
+============
+Run the baseline netlists:
+   runxyce bug_442_baseline.cir
+   runxyce bug_442_baseline_unpacked.cir
+This will create restart files that the restarted netlists try to use:
+   runxyce bug_442_restarted.cir
+   runxyce bug_442_restarted_unpacked.cir
+
+Run xyce_verify.pl on the two resulting output files:
+   xyce_verify.pl bug_442_baseline.cir bug_442_baseline.cir.prn bug_442_restarted.cir.prn
+   xyce_verify.pl bug_442_baseline_unpacked.cir bug_442_baseline_unpacked.cir.prn bug_442_restarted_unpacked.cir.prn
+
+It should also be the case that the restarted output generated from
+packed and unpacked files should match:
+
+   xyce_verify.pl bug_442_restarted.cir bug_442_restarted.cir.prn bug_442_restarted_unpacked.cir.prn
+
+Verification:
+=============
+Passes if Xyce and xyce_verify.pl return a 0 exit code.  
+ 
+Notes:
+======
+The final step relies on xyce_verify's ability to interpolate the baseline 
+solution to only the points contained in the test case.  Since the restarted
+output starts at a later time than the baseline does, but they should match
+exactly for all the times in the restarted run, that's OK.
+
+On Windows platforms (only!), the unpacked test is redundant because on
+this platform restarts are always unpacked.  Therefore
+"bug_442_*_unpacked.cir" need not be run on windows, and the final
+comparison between restarted outputs is unnecessary and meaningless.
+

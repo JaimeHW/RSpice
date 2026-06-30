@@ -1,0 +1,22 @@
+In versions of Xyce prior to 1.0.1 the model parameter TNOM was
+incorrectly used by the BJT code.  It is supposed to be the "nominal
+temperature" in celsius.  Internally, the code expects the temperature
+in Kelvin.  Other devices properly convert TNOM to kelvin on reading it in.
+
+Prior to release 1.0.1 the netlist bug_159_1.cir would fail to
+converge to the operating point (because it was attempting to run at
+T=27C with TNOM specified as 27K, a dramatically different temperature).
+bug_159_2.cir produces the same output both pre- and post-1.0.1 because it
+doesn't specify TNOM.
+
+In versions of Xyce from 1.0.1 on, both bug_159_1.cir and
+bug_159_2.cir produce the same output (bug_159_1.cir specifies
+TNOM=27, which is the same as the default value used (without
+specifying it) in bug_159_2.cir).
+
+Summary:
+  1) Run Xyce on both netlists here
+  2) use xyce_verify.pl to compare the two resulting outputs.  They should
+     match exactly.
+
+Do not run this netlist in parallel.

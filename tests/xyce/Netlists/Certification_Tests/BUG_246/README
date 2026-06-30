@@ -1,0 +1,22 @@
+Bug Number: 246
+Test netlist: bug_246.cir
+
+NOTE tscoffe 02/02/06 This test was completely replaced with a simpler test (DIODE/diode.cir + mods).
+
+Description:
+============
+This test checks that it is permissible to have a device and model with
+the same name.  And it checks that sub circuit instance nodes names are case
+insensitive.
+
+Verification
+============
+Run Xyce in serial on the netlist.
+
+Compare against the results in the given prn file using the xyce_verify.pl program.
+
+Special Notes:
+==============
+Parallel testing is not needed for this case.
+
+

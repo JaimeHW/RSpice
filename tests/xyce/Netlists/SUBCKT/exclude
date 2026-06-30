@@ -1,0 +1,46 @@
+# These subcircuits are removed from the default search for tests because they
+# are covered by master shell scripts which run these and diff the output
+# rather than checking against a gold standard.
+# subckt_a.cir checks the a-series
+subckt_a0.cir
+subckt_a1.cir
+subckt_a2.cir
+subckt_a3.cir
+subckt_a4.cir
+subckt_a5.cir
+subckt_a3_hs.cir
+subckt_a4_hs.cir
+subckt_a5_hs.cir
+subckt_a1_dup.cir
+subckt_a2_dup.cir
+# subckt_b.cir checks the b-series
+subckt_b0.cir
+subckt_b1.cir
+subckt_b2.cir
+subckt_b3.cir
+subckt_b2_hs.cir
+subckt_b3_hs.cir
+# subckt_e.cir checks the e-series
+subckt_e0.cir
+subckt_e1.cir
+subckt_e2.cir
+subckt_e3.cir
+# subckt_f.cir checks the f-series
+subckt_f0.cir
+subckt_f1.cir
+# subckt_g.cir checks the g-series
+subckt_g0.cir
+subckt_g1.cir
+#subckt_h0.cir # This is a lone subckt test
+#subckt_i1.cir # This one looks like it needs an i0 test
+#subckt_i2.cir
+#subckt_i3.cir
+#subckt_j1.cir # This is a lone subckt test
+# subckt_k.cir checks the k-series
+subckt_k0.cir
+subckt_k1.cir
+subckt_k2.cir
+subckt_k3.cir
+# subckt_l.cir checks the l-series
+subckt_l0.cir
+subckt_l1.cir

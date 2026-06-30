@@ -1,0 +1,23 @@
+$voltage controlled sources
+* This netlist test XDM will strip out the extra
+* identifiers in the voltage controlled sources 
+* (VCVS and VCCS) that can appear in HSPICE.
+
+
+VA IN 0 dc=0
+E1 1 0 vcVS IN 0 2
+R1 1 2 10
+R2 2 0 10
+E2 3 0 IN 0 1
+R3 3 4 10
+R4 4 0 10
+G1 5 0 vCcS IN 0 -0.1
+R5 5 6 10
+R6 6 0 10
+G2 7 0 IN 0 -0.2
+R7 7 8 10
+R8 8 0 10
+
+
+.DC VA 0 10 1
+.PRINT DC v(in) v(2) v(4) v(6) v(8)

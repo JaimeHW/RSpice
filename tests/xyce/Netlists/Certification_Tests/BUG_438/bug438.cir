@@ -1,0 +1,30 @@
+Transformer Test Circuit 
+* Note. The two voltage signals are offset by 200.0 to avoid crossing
+* the zero axis.  Axis crossings cause problems for xyce_verify.
+
+.tran 0 0.4e-3
+
+*COMP v(3) offset=50
+*COMP v(4) offset=50
+*COMP n(ymin!ktrans1_h) offset=50
+*COMP n(ymin!ktrans1_b) offset=1000
+*COMP n(ymin!ktrans1_Lp1_branch) offset=1
+
+.print tran v(3) v(4) n(ymin!ktrans1_h) n(ymin!ktrans1_b)
++ n(ymin!ktrans1_Lp1_branch)
+
+.PARAM Vin=340 Rs=1k
+*.options nonlin-tran nox=1
+
+Vmon2     1 2  DC 0V
+Vin2      1 0  SIN(0 500 5KHz 0 0)
+Rt1       2 3  {Rs}
+Lp1       3 0  50
+Lp2       0 6  50
+Lp3       4 0  20
+Lp4       0 5  10
+
+ktrans1  Lp1 Lp2 Lp3 Lp4 1  trans_core
+.model trans_core CORE
+
+.END

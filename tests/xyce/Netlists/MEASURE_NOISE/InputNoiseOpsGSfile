@@ -1,0 +1,119 @@
+ ***** Measure Functions ***** 
+
+INOISEAVG = 1.197014e-11
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIR4AVG = 3.939680e-14
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1AVG = 2.165430e-12
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1IBAVG = 2.148099e-12
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+INOISDERIV = -9.102515e-11 for AT = 5.000000e-02
+
+DNIR4DERIV = -7.635137e-13 for AT = 5.000000e-02
+
+DNIQ1DERIV = -4.197100e-11 for AT = 5.000000e-02
+
+DNIQ1IBDERIV = -4.163509e-11 for AT = 5.000000e-02
+
+INOISEEQN = 2.770514e-13
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIR4EQN = 3.397873e-15
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1EQN = 1.865386e-13
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1IBEQN = 1.850454e-13
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+FITERRORINOISE = 8.328668e-11
+COMP_FUNCTION was L1NORM
+Measure Start Freq= 1.000000e-02        Measure End Freq= 1.000000e-01
+
+FITERRORDNIR4 = 1.230413e-13
+COMP_FUNCTION was L1NORM
+Measure Start Freq= 1.000000e-02        Measure End Freq= 1.000000e-01
+
+FITERRORDNIQ1 = 3.705784e-12
+COMP_FUNCTION was L1NORM
+Measure Start Freq= 1.000000e-02        Measure End Freq= 1.000000e-01
+
+FITERRORDNIQ1IB = 3.678372e-12
+COMP_FUNCTION was L1NORM
+Measure Start Freq= 1.000000e-02        Measure End Freq= 1.000000e-01
+
+INOISEFIND = 1.273607e-12 for AT = 5.000000e-02
+
+DNIQ1FIND = 7.401799e-13 for AT = 5.000000e-02
+
+INOISEINTEG = 1.077313e-12
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIR4INTEG = 3.545712e-15
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1INTEG = 1.948887e-13
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1IBINTEG = 1.933289e-13
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+INOISEMAX = 1.641757e-10 at freq = 1.000000e-02
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIR4MAX = 3.393439e-13 at freq = 1.000000e-02
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1MAX = 1.865378e-11 at freq = 1.000000e-02
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1IBMAX = 1.850449e-11 at freq = 1.000000e-02
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+INOISEMIN = 2.770514e-13 at freq = 1.000000e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIR4MIN = 3.397873e-15 at freq = 1.000000e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1MIN = 1.865386e-13 at freq = 1.000000e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1IBMIN = 1.850454e-13 at freq = 1.000000e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+INOISEPP = 1.638986e-10 with max at freq= 1.000000e-02 and min at freq= 1.000000e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIR4PP = 3.359460e-13 with max at freq= 1.000000e-02 and min at freq= 1.000000e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1PP = 1.846724e-11 with max at freq= 1.000000e-02 and min at freq= 1.000000e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1IBPP = 1.831944e-11 with max at freq= 1.000000e-02 and min at freq= 1.000000e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+INOISERMS = 3.906830e-11
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIR4RMS = 8.629385e-14
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1RMS = 4.743535e-12
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+DNIQ1IBRMS = 4.705570e-12
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-01
+
+INOISETT = 3.135923e-02 with targ = 5.627601e-02 and trig = 2.491679e-02
+
+DNIQ1TT = 2.419239e-02 with targ = 4.395182e-02 and trig = 1.975944e-02
+
+

@@ -1,0 +1,92 @@
+some tests for SON Bug 479
+*******************************************************
+*
+* examples of how to output the time of the maximum and
+* minimum current through R1 and R2 to the .mt0 file
+
+VPWL1  1  0 PWL(0 0 0.2 0.5 0.4 0 0.6 0.75 0.8 0 1.0 0.25 1.2 0.0)
+VPWL2  2  0 PWL(0 0 0.2 0.5 0.4 0 0.6 0.50 0.8 0 1.0 0.50 1.2 0.0)
+
+* VPWL3 and VPWL4 are simply the negative versions of VPWL1 and VPWL2
+VPWL3  3  0 PWL(0 0 0.2 -0.5 0.4 0 0.6 -0.75 0.8 0 1.0 -0.25 1.2 0.0)
+VPWL4  4  0 PWL(0 0 0.2 -0.5 0.4 0 0.6 -0.50 0.8 0 1.0 -0.50 1.2 0.0)
+
+R1  1  0  10
+R2  2  0  10
+
+R3  3  0 10
+R4  4  0 10
+
+.TRAN 0 1.2s
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.01
+.PRINT TRAN FORMAT=NOINDEX V(1) I(R1) V(2) I(R2) V(3) I(R3) V(4) I(R4)
+
+* This works when the signal has one clearly defined maximum or minimum
+* It
+.measure tran max_currentIR1 max I(R1)
+.measure tran time_of_maxIR1 when I(R1)=max_currentIR1 CROSS=LAST
+
+.measure tran min_currentIR3 min I(R3)
+.measure tran time_of_minIR3 when I(R3)=min_currentIR3 CROSS=LAST
+
+* these are the preferred approach, using the OUTPUT keyword, since
+* it works correctly with RISE, FALL and LAST keywords.
+* output time and value for max's of I(R1)
+.measure tran timeOfMaxIR1 max I(R1) OUTPUT=Time
+.measure tran valueOfMaxIR1 max I(R1) OUTPUT=Value
+.measure tran valueOfMaxIRa max I(R1)
+
+.measure tran timeOfMaxIR1Rise1 max I(R1) RISE=1 OUTPUT=Time
+.measure tran valueOfMaxIR1Rise1 max I(R1) RISE=1 OUTPUT=Value
+.measure tran valueOfMaxIR1Rise1a max I(R1) RISE=1
+
+.measure tran timeOfMaxIR1RiseLast max I(R1) RISE=LAST OUTPUT=Time
+.measure tran valueOfMaxIR1RiseLast max I(R1) RISE=LAST OUTPUT=Value
+.measure tran valueOfMaxIR1RiseLastA max I(R1) RISE=LAST
+
+* output time and value for max's of I(R2)
+.measure tran timeOfMaxIR2 max I(R2) OUTPUT=Time
+.measure tran valueOfMaxIR2 max I(R2) OUTPUT=Value
+.measure tran valueOfMaxIR2a max I(R2)
+
+.measure tran timeOfMaxIR2Rise2 max I(R2) RISE=2 OUTPUT=Time
+.measure tran valueOfMaxIR2Rise2 max I(R2) RISE=2 OUTPUT=Value
+.measure tran valueOfMaxIR2Rise2a max I(R2) RISE=2
+
+.measure tran timeOfMaxIR2RiseLast max I(R2) RISE=LAST OUTPUT=Time
+.measure tran valueOfMaxIR2RiseLast max I(R2) RISE=LAST OUTPUT=Value
+.measure tran valueOfMaxIR2RiseLastA max I(R2) RISE=LAST
+
+* output time and value for min's of I(R3)
+.measure tran timeOfMinIR3 min I(R3) OUTPUT=Time
+.measure tran valueOfMinIR3 min I(R3) OUTPUT=Value
+.measure tran valueOfMinIR3a min I(R3)
+
+.measure tran timeOfMinIR3Rise1 min I(R3) FALL=1 OUTPUT=Time
+.measure tran valueOfMinIR3Rise1 min I(R3) FALL=1 OUTPUT=Value
+.measure tran valueOfMinIR3Rise1a min I(R3) FALL=1
+
+.measure tran timeOfMinIR3RiseLast min I(R3) FALL=LAST OUTPUT=Time
+.measure tran valueOfMinIR3RiseLast min I(R3) FALL=LAST OUTPUT=Value
+.measure tran valueOfMinIR3RiseLastA min I(R3) FALL=LAST
+
+* output time and value for min's of I(R4)
+.measure tran timeOfMinIR4 min I(R4) OUTPUT=Time
+.measure tran valueOfMinIR4 min I(R4) OUTPUT=Value
+.measure tran valueOfMinIR4a min I(R4)
+
+.measure tran timeOfMinV4Rise1 min I(R4) FALL=2 OUTPUT=Time
+.measure tran valueOfMinV4Rise1 min I(R4) FALL=2 OUTPUT=Value
+.measure tran valueOfMinV4Rise1a min I(R4) FALL=2
+
+.measure tran timeOfMinV4RiseLast min I(R4) FALL=LAST OUTPUT=Time
+.measure tran valueOfMinV4RiseLast min I(R4) FALL=LAST OUTPUT=Value
+.measure tran valueOfMinV4RiseLastA min I(R4) FALL=LAST
+
+* test that any other string for OUTPUT= defaults to VALUE
+.measure tran bogoValue1 max I(R1) OUTPUT=BogoValue
+.measure tran bogoValue2 max I(R1) OUTPUT=1
+.measure tran bogoValue3 min I(R3) OUTPUT=BogoValue
+.measure tran bogoValue4 min I(R3) OUTPUT=1
+
+.END

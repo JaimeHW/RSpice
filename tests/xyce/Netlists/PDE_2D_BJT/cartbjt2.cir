@@ -1,0 +1,114 @@
+*-------------------------------------------------------------------------
+* Copyright Notice
+*
+* Copyright (c) 2000, Sandia Corporation, Albuquerque, NM.
+*-------------------------------------------------------------------------
+*
+*-------------------------------------------------------------------------
+* Filename       : $RCSfile$
+*
+* Purpose        : Cartesian PDE BJT test circuit
+*
+* Special Notes  : See pnp1.cir from the test suite.  It is a very similar
+*                  problem, except that this one uses a drift-diffusion 
+*                  PDE simulation, rather than a SPICE-style lumped
+*                  parameter model.
+*
+*                  Note that the meshfile is specified to be "internal.msh".
+*                  This specification forces Xyce to generate its own
+*                  mesh internally, rather than read it in from an external
+*                  file.  For internally generate meshes, Xyce is not 
+*                  very flexible - there are a couple of hardwired problems.
+*                  For a 3-terminal device, the hardwired default problem
+*                  is a BJT device.
+*
+*                  The mesh specified here is fairly course (30x15), but
+*                  the problem can also be solved with much finer meshes.
+*
+*                  Courser meshes will also work, but the results won't 
+*                  look that great to plot.  The value for nx shouldn't
+*                  be smaller than 11, as the smallest mesh features
+*                  for this BJT are about 1/10th of the length of the 
+*                  device.  All the electrodes are connected along 
+*                  the top of the device (x=xmin-xmax, y=ymax).
+*
+*                  To plot the results, change the sgplotlevel or
+*                  the tecplotlevel to 1, depending upon which plotting
+*                  program you wish to use.
+*
+*
+* Creator        : Eric R. Keiter, 9233, Computational Sciences
+*
+* Creation Date  : 10/26/00
+*
+* Revision Information:
+* ---------------------
+*
+* Revision Number: $Revision$
+*
+* Revision Date  : $Date$
+*
+* Current Owner  : $Author$
+*-------------------------------------------------------------------------
+
+VPOS  1 0 DC 5V
+*VBB   6 0 DC -2V
+BBB   6 0 V={-V(T1)}
+RE    1 2 2K
+RB    3 4 190K
+
+YPDE BJT 5 3 7 PDEBJT meshfile=internal.msh 
++ node = {name = collector, base, emitter}
++ sgplotlevel=0 tecplotlevel=0
++ l=2.0e-3  w=1.0e-3
++ nx=30     ny=15
++ mobmodel=carr
+* The old intrinsic calculation was used to generate gold standard.
+* It is inaccurate, however. 
++ useOldNi=true
+
+
+* Zero volt sources acting as an ammeter to measure the
+* base, collector, and emmitter currents, respectively
+VMON1 4 6 0
+VMON2 5 0 0
+VMON3 2 7 0 
+
+VMON T2 0 0.0
+RMON T2 0 1.0
+
+VBB T1 0 2V
+RBB T1 0 1.0
+
+.MODEL PDEBJT   ZOD  level=2
+
+*.DC VBB 0.0 -0.5 -0.5 VPOS 0.0 0.5 0.5 
+
+************************************
+* **** Start Homotopy Setup ****
+************************************
+.options nonlin nlstrategy=0 searchmethod=2
++ maxstep=30 maxsearchstep=1 continuation=1
+
+.options loca stepper=0 predictor=0 stepcontrol=0
++ conparam=VPOS,VBB
++ initialvalue=0.0,0.0 minvalue=0.0,0.0 maxvalue=2.0,2.0
++ initialstepsize=0.2,0.2 minstepsize=1.0e-4,1.0e-4 maxstepsize=0.2,0.2
++ aggressiveness=1.0,1.0
++ maxsteps=5000 maxnliters=200
+**********************************
+* **** End Homotopy Setup ****
+**********************************
+
+*.options NONLIN maxstep=30 maxsearchstep=1 searchmethod=2 
+*+in_forcing=0 nlstrategy=0 debuglevel=-1
+
+.options TIMEINT reltol=1.0e-3 abstol=1.0e-6 doubledcop=drift_diffusion
+
+.options LINSOL type=klu
+
+.DC VMON 0.0 0.0 1.0
+.PRINT DC V(T2) V(1) V(6) I(VMON1) I(VMON2) I(VMON3)
+
+.END
+

@@ -1,0 +1,29 @@
+*******************************************************
+* For SON Bug 744
+*
+* Illustrate that a comma is often a valid 
+* character for a device or node name.  However,
+* the comma may not work in a .PRINT line.
+* In addition, the device names (with , in them) may
+* be incorrect in the symbol table.
+*
+* This test shows that a comma in a device name on a 
+* .PRINT line can cause a parsing failure.
+******************************************************* 
+.DC v1 1 1 1
+v1 1 0 1
+r1 1 0 1
+
+* all of these lines actually pass netlist parsing for 
+* a V-device, at least, in Xyce 6.5.
+v2, 2 0 1
+v3 3, 0 1
+v4 , 0 1
+v, 4 0 1
+
+* Both of these .PRINT statements will cause netlist 
+* parsing errors.  Just testing one for now.
+.PRINT DC I(v2,) 
+*.PRINT DC I(v,)
+
+.end

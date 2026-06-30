@@ -1,0 +1,34 @@
+Test Name: BUG_690
+Owner: Eric Rankin
+Test netlists: misspelled.cir
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_3.0
+ 
+
+Description:
+============
+Xyce would segfault (bus error on OSX) if the ".SUBCKT" was spelled
+incorrectly (e.g. ".SUBKCT").  This parser failure appeared when switching 
+circuit contexts referenced a null ptr.
+
+Procedure:
+============
+runxyce misspelled.cir
+
+Note the warning and error messages that are displayed. 
+
+
+Verification:
+=============
+A warning/error message should be displayed.
+
+Verify that Xyce does not segfault (or bus error on OSX). 
+ 
+
+Notes:
+======
+
+
+

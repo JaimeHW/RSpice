@@ -1,0 +1,35 @@
+Current Source - Pulse Signal
+**********************************************************************
+.param cap=10u
+.param res=1K
+
+ipulse 0 1 pulse(1a 5a 1s 0.1s 0.4s 0.5s 2s)
+r1 1 2 res
+c1 2 0 cap
+r2 2 3 res
+c2 3 0 cap
+r3 3 4 res
+c3 4 0 cap
+r4 4 0 res
+
+
+*comp v(4)_v1 offset=1.0e2
+*comp v(4)_v2  offset=1.0e2
+*comp v(4)_td offset=35e3
+*comp v(4)_tr  offset=25e3
+*comp v(4)_tf offset=1.0e3
+*comp v(4)_pw   offset=1.0e2
+*comp v(4)_per  offset=70e3
+
+.tran .1s 7s
+.print tran 
++ v(4)
++ v(4)_v1
++ v(4)_v2
++ v(4)_td
++ v(4)_tr
++ v(4)_tf
++ v(4)_pw
++ v(4)_per
+
+.end

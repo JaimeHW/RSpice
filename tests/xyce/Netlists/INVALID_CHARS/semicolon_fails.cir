@@ -1,0 +1,30 @@
+*******************************************************
+* For SON Bug 744
+*
+* Illustrate that a semicolon is usually an invalid 
+* character for a device or node name.  This is because 
+* semicolon denotes an in-line comment in Xyce.  The 
+* instance line for r2 shows that ; sometimes does work
+* though.
+*
+*
+*
+*******************************************************
+.print DC WIDTH=6 PRECISION=1 v(1) 
+.DC v1 1 1 1
+v1 1 0 1
+r1 1 0 1
+
+* Note this is a case where 2; is a valid node name, since the
+* resistor device has a default value of 0.  So, Xyce reads this
+* line as r2 1 2 with no value specified for the resistance of r2.
+r2 1 2;
+
+* all of these lines will fail netlist parsing since semicolon
+* denotes an in-line comment in Xyce.
+v2; 1 0 1
+v3 1; 0 1
+v4 ; 0 1
+v; 1 0 1
+
+.end

@@ -1,0 +1,13 @@
+Missing source function argument
+V1a 1 0 ac 1 2 sin
+V1b 1 0 ac 1 2 sin 1
+V1c 1 0 ac 1 2 sin(1)
+V1d 1 0 ac 15 0 sin fred(1)
+V2 1 0 ac 15 0 sin (1 2 3)
+V3 2 1 ac 12 35
+V4 3 2 ac 22 -64
+R1 3 0 10K
+ 
+.ac lin 1 60 60
+.print ac vm(3,0) vp(3,0)
+.end

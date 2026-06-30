@@ -1,0 +1,30 @@
+Test Name: Duplicate Node error in .subckt
+Owner: Dave Shirley
+Test netlists: bug_784.cir
+GS files: none
+Mode:  Serial and Parallel
+Comparator:  none
+Version of Xyce: Development branch, 10 Aug 2005
+ 
+Description:
+============
+This test checks that an error is returned when there is a duplicate node appearing
+in a .subckt line.
+ 
+Procedure:
+============
+Run Xyce on the netlist
+ 
+Verification:
+=============
+Xyce should exit with fatal error:
+
+User Fatal: Error in file z at or near line 7
+ Duplicate node: b
+
+Notes:
+======
+Parallel should give the same error.  Both should exit gracefully.
+
+This test will not fail as expected in versions of Xyce prior to 10
+Aug 2005, or in the release branch for Release 3.0.

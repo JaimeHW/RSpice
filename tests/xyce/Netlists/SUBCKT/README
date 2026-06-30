@@ -1,0 +1,15 @@
+This test is not really designed to be run in the "compare all
+netlists against a gold standard with the 'compare' program" mode.  It
+is intended that all netlists will be run and their output compared to
+the output of test subckt_a0.cir
+
+All of the "subckt_a?.cir" netlists should match test subckt_a0.cir
+exactly.  I have tested this with xyce_verify.pl on one platform.
+
+Because nobody's set up to work that way yet, I have provided "gold
+standard" files that are actually copies of the output of
+subckt_a0.cir.  When XTF reaches the stage where all developers are
+using it, we should switch to the mode of running all the netlists on
+one platform and comparing everything to test subckt_a0.cir.  At that
+time, it would be appropriate to retain a subckt_a0.cir.prn gold
+standard to be sure that that baseline test is correct.

@@ -1,0 +1,25 @@
+*
+* Base case with only a .PRINT TRAN line.  This case is
+* known to work correctly because of tests in Output/TRAN
+*
+* If this invocation is used:
+*
+*   Xyce -r tran.cir.raw -a tran.cir
+*
+* then Xyce will:
+*
+*   a) make the ASCII-formatted raw file tran.cir.raw
+*
+*   b) not make the file tran.cir.prn 
+*
+********************************************************
+
+V1 1 0 PWL 0 0 1 1
+R1 1 2 1
+R2 2 0 1
+
+.options output initial_interval=0.2
+.PRINT TRAN R1:R R2:R V(1) V(2)
+.TRAN 0 1 
+
+.end

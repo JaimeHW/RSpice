@@ -1,0 +1,45 @@
+# A simple Dakota input file
+# optpp_q_newton conmin_frcg coliny_direct
+
+strategy, \
+    single_method, \
+    tabular_graphics_data
+
+method, \
+    conmin_frcg  \
+    convergence_tolerance = 1.0e-7 \
+    max_function_evaluations = 1000 \
+    max_iterations = 1000
+
+variables, \
+    continuous_design = 2 \
+    descriptors    'dakota_A0'  'dakota_AGS' \
+    initial_point    4.0         0.0235629    \
+    lower_bounds     0.0144034   0.00235629  \
+    upper_bounds   14.4034       2.35629     \
+    
+interface,                                      	
+    system,                     			
+	  asynchronous 					
+	  evaluation_concurrency = 1			
+    analysis_driver =   '/Users/rlschie/src/XyceBUILD/XyceRelease/src/Xyce -l opt_soi.log opt_soi.cir -prf '
+    parameters_file =    'params.in'		
+	  results_file    =    'results.out'	
+    work_directory 
+    named='workdir'
+    template_files = 'opt_soi.cir' 'opt_soi.dat'
+    directory_tag
+    directory_save
+    file_save					
+	  file_tag
+
+
+responses, \
+    num_objective_functions = 1 \
+    id_responses = 'XyceSimulations' \
+    response_descriptors = 'VSQ' \
+    numerical_gradients \
+      method_source dakota \
+      interval_type forward \
+      fd_gradient_step_size  1.44034  0.235629    \
+    no_hessians

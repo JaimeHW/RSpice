@@ -1,0 +1,6 @@
+bug_652a.cir
+bug_652a.cir.sh
+bug_652b.cir
+bug_652c.cir
+exclude
+tags

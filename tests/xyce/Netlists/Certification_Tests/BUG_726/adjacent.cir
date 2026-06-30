@@ -1,0 +1,24 @@
+Test Circuit for bug 702
+
+* 
+* Xyce fails to detect multiple K devices appearing the the same line.  A
+* manual correct is to insert a newline just before the K2. This test comes
+* from the regression test MINDUCTORS/cpldLMIs.cir
+* 
+VS 1 0 SIN(0 169.7 60HZ)
+R1 1 2 1K
+L1 2 0 1mH
+R2 3 0 1K
+L2 3 0 1mH
+K1 L1 L2 0.75 K2 L1 L3 0.8
+R3 4 0 1K
+L3 4 0 1mH
+.TRAN 100US 25MS
+
+* Xyce option needed when default is changed to 1 (Backward Euler).
+* Also serves as useful test of non-default method.
+.OPTIONS TIMEINT METHOD=2
+
+.PRINT TRAN I(VS) V(2) V(3) V(4)
+.END
+

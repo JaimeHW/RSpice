@@ -1,0 +1,20 @@
+P-channel mosfet circuit 
+
+vdd 2 0 dc 5v
+r1 2 1 50k
+r2 1 0 50k
+rd 4 0 7.5k
+vmon 3 4 0
+
+.param tempParam=15
+m1 3 1 2 2 pfet l=10u w=160u temp={tempParam}
+.model pfet pmos(level=1 kp=25u vto=-0.8v)
+
+.options device temp=15
+
+.dc vdd 0 5 1
+.print dc v(2) i(vmon) v(2,3) v(2,1)
+
+.step tempParam list 15 25 35
+
+.end

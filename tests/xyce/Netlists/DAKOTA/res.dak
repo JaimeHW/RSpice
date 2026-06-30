@@ -1,0 +1,33 @@
+# Single parameter sampling of a resistor whose resistance 
+# is sampled from a normal distribution with mean 10 ohms
+# and standard deviation 2.5Ohms.
+
+environment
+  results_output, 
+    results_output_file 'resLHS'
+
+model 
+  single
+
+method,								
+  sampling
+  sample_type lhs
+  seed 6493
+  samples=100
+
+variables,
+  normal_uncertain=1
+  means = 10.0
+  std_deviations = 2.5
+  descriptors  = 'R1value'
+
+interface,							
+    direct
+    analysis_driver =    'Xyce'
+
+responses,							
+	num_response_functions = 1				
+        id_responses = 'XyceSimulations'
+        response_descriptors = 'FOOBAR'
+        no_gradients
+	no_hessians

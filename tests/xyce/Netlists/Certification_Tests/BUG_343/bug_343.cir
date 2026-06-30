@@ -1,0 +1,15 @@
+Test of .options output initial_interval=  without following time/timestep pair
+V1 1 0 sin(11 10 1KHz)
+R1 1 0 100
+
+.tran 0 10ms
+.options output initial_interval=.25ms
+
+*These comp lines loosen the test considerably, but still allow the real
+* issue to be tested.  They are necessary to let new DAE's interpolated results
+* be considered comparable to old DAE's uninterpolated results
+*comp v(1) reltol=0.1
+*comp i(v1) reltol=0.1
+.print tran  V(1) I(V1)
+
+.end

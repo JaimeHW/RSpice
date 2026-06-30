@@ -1,0 +1,16 @@
+Test of diode parameter synonyms
+* Baseline test, primary parameter names
+V1 1 0 PULSE (0v 5V 1us 10ns 10ns 1us 2us)
+D1 1 2 DFOR
+R1 2 0 10k
+.MODEL DFOR D
++ JS = 2.355E-14 N = 1.112 VB = 1000 IBV = 0.001
++ RS = 0.137 CJ = 2.993E-10 VJ = 0.5033 M = 0.3144
++ FC = 0.5 EG = 1.11 XTI = 3 TT = 1.7E-07
+
+.print TRAN V(1) V(2)
+.tran 10ns 6us
+*COMP TIME  reltol=1e-7 abstol=1e-7
+*COMP V(1)  reltol=1e-7 abstol=1e-7
+*COMP V(2)  reltol=1e-7 abstol=1e-7
+.end

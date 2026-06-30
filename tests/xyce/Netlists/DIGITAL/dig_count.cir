@@ -1,0 +1,59 @@
+Digital  Counter Circuit
+
+*COMP v(out_3) reltol=0.02
+*COMP v(out_2) reltol=0.02
+*COMP v(out_1) reltol=0.02
+*COMP v(out_0) reltol=0.02
+
+* Analysis Commands
+.options timeint reltol=1.0e-3
+.tran 10ns 1.2us
+
+* Output
+.print tran PRECISION=10 WIDTH=19 v(trigger) v(out_3) v(out_2) v(out_1) v(out_0) v(Xs1:Xl1:triginv)
+
+* Set digital default parameters:
+.param R1HI=5 R1LO=200 R0HI=200 R0LO=5 RIN=1000 R1=100
+.param SW=5.e-9  CAPOUT=1.e-12  CAPIN=1.e-12
+.param V_LO=0 V_REF=0 V_HI=3
+
+
+V_hi    HIGH    0    {V_HI}
+V_V1    trigger 0  PULSE ({V_LO} {V_HI} 100ns 20ns 20ns 200ns 400ns)
+
+Xs1    trigger    HIGH    out_0    1    stage params: val=1
+Xs2    trigger    1    out_1    2    stage params: val=0
+Xs3    trigger    2    out_2    3    stage params: val=1
+Xs4    trigger    3    out_3    4    stage params: val=false
+
+.subckt latch trigger in out params: valx=0
+V_dpn dig_pn 0 {V_HI}
+UININV	      INV    dig_pn	0    in      inb           DMOD
+UOR1A	      OR(2)  dig_pn	0    in      trigger s1a   DMOD
+UOR1B	      OR(2)  dig_pn	0  inb     trigger s1b   DMOD
+UNAND1A	      NAND(2) dig_pn	0   s1a     n1b     n1a   DMOD
+UNADN1B	      NAND(2)  dig_pn	0  s1b     n1a     n1b   DMOD
+UTINV	      INV      dig_pn	0   trigger triginv       DMOD
+UOR2A	      OR(2)    dig_pn	0  n1a     triginv s2a   DMOD
+UOR2B	      OR(2)    dig_pn	0  n1b     triginv s2b   DMOD
+UNAND2A	      NAND(2)  dig_pn	0	s2a     n2b     out   DMOD ic=valx
+UNAND2B       NAND(2)  dig_pn	0	 out     s2b     n2b   DMOD
+.ends latch
+
+.subckt stage trigger c_in out c_out params: val=0
+V_dpn dig_pn 0 {V_HI}
+Ulow    XOR    dig_pn	0	c_in    out    1  DMOD
+Uhigh	AND(2) dig_pn	0   	c_in    out    c_out  DMOD
+Xl1    trigger    1    out   latch params: valx={val}
+.ends stage
+
+.model DMOD DIG ( CLO=CAPOUT  CHI=CAPOUT
++ S0RLO=R0LO  S0RHI=R0HI  S0TSW=SW
++ S0VLO=-1  S0VHI=1.8
++ S1RLO=R1LO  S1RHI=R1HI  S1TSW=SW
++ S1VLO=1  S1VHI=3
++ RLOAD=RIN   CLOAD=CAPIN 
++ DELAY=20ns )
+
+
+.end

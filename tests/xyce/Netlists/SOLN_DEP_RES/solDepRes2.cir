@@ -1,0 +1,32 @@
+Test for solution dependent resistor.
+
+Vcontrol cntl 0 2.0
+Rcontrol cntl 0 1.0
+
+Vcontrol2 cntl2 0 0.5
+Rcontrol2 cntl2 0 1.0
+
+.param scalar=2.0
+
+V1 1 0 2.0
+R1 1 2 1.0
+R2 2 0 R={1.0+scalar*V(cntl)*V(cntl2)}
+*
+* 1.0+2.0*2.0*0.5 = 3.0 value
+* dv(cntl) =  2.0*0.5 = 1.0
+* dv(cntl2) = 2.0*2.0 = 4.0
+
+
+.DC V1 2 2 1
+.Print dc V(1) V(2) R2:R V(cntl) V(cntl2)
++ {1.0+scalar*V(cntl)*V(cntl2)}
++ {ddx(1.0+scalar*V(cntl)*V(cntl2),v(cntl))}
++ {ddx(1.0+scalar*V(cntl)*V(cntl2),v(cntl2))}
++ {1.0/(1.0+scalar*V(cntl)*V(cntl2))}
++ {ddx(1.0/(1.0+scalar*V(cntl)*V(cntl2)),v(cntl))}
++ {ddx(1.0/(1.0+scalar*V(cntl)*V(cntl2)),v(cntl2))}
++ I(V1)
++ {V(2)/(1.0+scalar*V(cntl)*V(cntl2))}
++ {ddx(V(2)/(1.0+scalar*V(cntl)*V(cntl2)),v(cntl))}
++ {ddx(V(2)/(1.0+scalar*V(cntl)*V(cntl2)),v(cntl2))}
+

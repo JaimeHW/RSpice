@@ -1,0 +1,19 @@
+Bug Number: 281
+Test netlist: bug_281.cir
+
+Description:
+============
+This test checks that the error message for an incorrectly formed .DC line
+gives the desired message.
+
+Verification
+============
+Run Xyce on the netlist. The run should abort with the following message:
+
+    User Fatal: Error in file bug_281.cir at or near line 7
+     .DC line not formatted correctly, has unexpected number of
+     fields
+
+Special Notes:
+==============
+None.

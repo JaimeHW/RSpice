@@ -1,0 +1,59 @@
+test circuit to test Inductor Model 
+*
+.tran 2ns 0.8ms 
+
+* Ouput Options to determine what parameters gets printed
+.print tran V(2a) V(2b) V(2c) V(2d) V(2e) V(2f) V(2g)
+ 
+* General Comments about the netlist
+* circuits suffixed with a,b,c have varying inductor values explicitly
+* circuits suffixed with d,e,f should have varying inductor values by multiplier
+
+.options DEVICE TEMP=37
+
+* ----- N E T L I ST -------------------------
+
+Vpulsea       2a         1a           pulse(0 1 1.0e-5 1e-4 1e-4 1e-6 1e-3)
+r1a           1a         0            400.0
+L1a           2a         0            5m
+C1a           1a         0            0.01e-6
+
+Vpulseb       2b         1b           pulse(0 1 1.0e-5 1e-4 1e-4 1e-6 1e-3)
+r1b           1b         0            400.0
+L1b           2b         0            10m
+C1b           1b         0            0.01e-6
+
+Vpulsec       2c         1c           pulse(0 1 1.0e-5 1e-4 1e-4 1e-6 1e-3)
+r1c           1c         0            400.0
+L1c           2c         0            15m
+C1c           1c         0            0.01e-6
+
+Vpulsed       2d         1d           pulse(0 1 0.4e-3 1e-4 1e-4 1e-6 1e-3)
+r1d           1d         0            400.0
+L1d           2d         0            Ind_d 5m
+C1d           1d         0            0.01e-6
+
+Vpulsee       2e         1e           pulse(0 1 0.45e-3 1e-4 1e-4 1e-6 1e-3)
+r1e           1e         0            400.0
+L1e           2e         0            Ind_e 5m
+C1e           1e         0            0.01e-6
+
+Vpulsef       2f         1f           pulse(0 1 0.50e-3 1e-4 1e-4 1e-6 1e-3)
+r1f           1f         0            400.0
+L1f           2f         0            Ind_f 5m
+C1f           1f         0            0.01e-6
+
+Vpulseg       2g         1g           pulse(0 1 0.50e-3 1e-4 1e-4 1e-6 1e-3)
+r1g           1g         0            400.0
+L1g           2g         0            Ind_g 5m
+C1g           1g         0            0.01e-6
+
+.param mL1=1.0 mL2=2.0 mL3=3.0 
+
+* ----- M O D E L S ---------------------------
+.model    Ind_d   L (L={mL1})
+.model    Ind_e   L (L={mL2})
+.model    Ind_f   L (L={mL3})
+.model    Ind_g   L (TC1=0.010 TC2=0.001)
+.end
+

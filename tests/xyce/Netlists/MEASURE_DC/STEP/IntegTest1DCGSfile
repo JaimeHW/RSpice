@@ -1,0 +1,54 @@
+ ***** Measure Functions ***** 
+
+INTEGV1B = -1.000000e+01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+INTEG1BFROM = -3.750000e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+INTEG1BTO = -6.250000e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 3.000000e+00
+
+INTEG1BFT1 = -5.000000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 2.000000e+00
+
+INTEG1BFT2 = 5.000000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 2.000000e+00
+
+INTEG1BFT1PT = 0.000000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+INTEGFAIL1 = FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+INTEGFAIL2 = FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+LASTMEASURE = 3.750000e+00 at VSRC1 value = 5.000000e+00
+ ***** Measure Functions ***** 
+
+INTEGV1B = -1.375000e+01
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+INTEG1BFROM = -5.625000e+00
+Measure Start VSRC1 Value= 3.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+INTEG1BTO = -8.125000e+00
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 3.000000e+00
+
+INTEG1BFT1 = -6.875000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 2.000000e+00
+
+INTEG1BFT2 = 6.875000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 2.000000e+00
+
+INTEG1BFT1PT = 0.000000e+00
+Measure Start VSRC1 Value= 4.000000e+00	Measure End VSRC1 Value= 4.000000e+00
+
+INTEGFAIL1 = FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+INTEGFAIL2 = FAILED
+Measure Start VSRC1 Value= 5.000000e+00	Measure End VSRC1 Value= 1.000000e+00
+
+LASTMEASURE = 4.687500e+00 at VSRC1 value = 5.000000e+00

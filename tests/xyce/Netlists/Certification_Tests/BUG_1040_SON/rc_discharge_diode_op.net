@@ -1,0 +1,10 @@
+* Test rc discharge with noop
+R1 1 2 1K
+d1 2 0 D1N3940
+C1 1 0 1u IC=1
+.tran 0 2m
+.print tran V(1) V(2)
+.MODEL D1N3940 D(IS = 4E-10 RS = .105 N = 1.48 TT = 8E-7 CJO = 1.95E-11
++VJ = .4 M = .38 EG = 1.36 XTI = -8 KF = 0 AF = 1 FC = .9 BV = 600
++IBV = 1E-4)
+.end

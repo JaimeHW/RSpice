@@ -1,0 +1,25 @@
+* Test case for bug 812, in which use of parameters whose names match
+* the name of an accessor function (print line or expression use)
+* would break the use of that accessor
+
+.global_param N = '4'
+.global_param V = '1'
+.global_param I = '5'
+.global_param ID = '65535'
+.global_param vds = '1'
+.global_param vod = '0.5'
+
+.MODEL NCH_MSIM NMOS (LEVEL = 49 VERSION=3.1 TOX=4.1E-9)
+
+Ii_38 0 N__40 dc 0.0001 ac 0 0
+Mmn_1 vds N__37 0 0  nch_msim 
+Mmn_27 N__40 N__40 0 0  NCH_MSIM 
+Vv_14 vds 0 'vds' ac 0 0
+Vv_34 N__37 N__40 'vod' ac 0 0
+
+.dc Vv_14 1 1 1
+.print dc V(vds) v(N__40) v(0) n(Mmn_1:vdsat) I(Vv_14) ID(Mmn_27)
++ {v(N__40)} {n(Mmn_1:vdsat)} {I(Vv_14)} {ID(Mmn_27)}
+
+.end
+

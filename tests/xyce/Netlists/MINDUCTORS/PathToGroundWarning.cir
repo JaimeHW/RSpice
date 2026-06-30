@@ -1,0 +1,25 @@
+Verify that Xyce follows the path to ground through mutual inductors
+
+L1a 1 2 1m
+L1b 2 0 1m
+L2a 3 4 1m
+L2b 4 0 1m
+Ka L1a L2a .2e-6
+Kb L1b L2b .3e-6
+
+L3a 6 7 100
+L3b 7 0 100
+L4a 8 9 100
+L4b 9 0 100
+Kc L3a L4a 1.0 nlcore
+Kd L3b L4b 1.0 nlcore
+
+.model nlcore core 
+
+.print tran v(1)
+.TRAN 1e-9 1e-6 
+
+
+
+.end
+

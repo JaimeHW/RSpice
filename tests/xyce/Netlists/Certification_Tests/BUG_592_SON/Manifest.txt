@@ -1,0 +1,4 @@
+bug_592.cir
+bug_592.cir.sh
+exclude
+tags

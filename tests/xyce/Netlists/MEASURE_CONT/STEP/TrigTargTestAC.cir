@@ -1,0 +1,56 @@
+* Test AC mode support for the AC_CONT version of
+* TRIG-TARG measures.
+*
+* See SON Bugs 1335 and gitlab-ex issue 303 for more details
+*****************************************************
+
+* For testing convenience send the output for the AC_CONT
+* measures to the <netlistName>.ma0 file.
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+* Used to adjust reference frequency from 1Hz to 1KHz
+.PARAM scaleFactor=1e3
+
+V1 a 0 DC 0V AC 1
+
+* 7th order Chebychev LPF with 2dB of passband ripple.
+* This is not a realistic passband ripple level, but is
+* useful for this test.
+RS a b 1
+C1 b 0 {2.865/scaleFactor}
+L2 b c {0.912/scaleFactor}
+C3 c 0 {3.8774/scaleFactor}
+L4 c d {0.9537/scaleFactor}
+C5 d 0 {3.8774/scaleFactor}
+L6 d e {0.912/scaleFactor}
+C7 e 0 {2.8650/scaleFactor}
+
+* The magnitude at DC is RL/(RL + RS)
+RL e 0 1
+
+.STEP RL 1 1.5 0.5
+.ac dec 20 1 1000
+.print AC vm(a) vm(b) vm(c) vm(d) vm(e)
+
+* test combos of AT used by only TRIG, only TARG, or both.
+.MEASURE AC_CONT TrigTargContAT TRIG AT=30 TARG AT=500
+.MEASURE AC_CONT TrigTargContAT1 TRIG AT=30 TARG vm(e)=0.45 CROSS=1
+.MEASURE AC_CONT TrigTargContAT2 TRIG vm(e)=0.45 CROSS=1 TARG AT=500
+
+* test base case
+.MEASURE AC_CONT TrigTarg1 TRIG vm(b)=0.40 CROSS=1 TARG vm(b)=0.45 CROSS=1
+
+* test that the first N TRIGs are matched with the first N TARGs
+.MEASURE AC_CONT TrigTarg2 TRIG vm(b)=0.40 CROSS=1 TARG vm(b)=0.45 CROSS=2
+.MEASURE AC_CONT TrigTarg3 TRIG vm(b)=0.40 CROSS=2 TARG vm(b)=0.45 CROSS=1
+
+* Repeat with RISE and FALL.  Also test TRIG and TARG using different signals.
+.MEASURE AC_CONT RiseFall1 TRIG vm(b)=0.40 RISE=1 TARG vm(c)=0.45 FALL=2
+.MEASURE AC_CONT RiseFall2 TRIG vm(c)=0.40 FALL=2 TARG vm(b)=0.45 RISE=1
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure ac lastMeasure max VM(e)
+
+.END

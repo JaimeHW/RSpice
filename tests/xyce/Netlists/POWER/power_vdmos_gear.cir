@@ -1,0 +1,50 @@
+power test for vdmos (MOSFET Level 18)
+*
+VD 0 3 -0.5
+VG 0 4 10 pulse(0 -10 300ns 50ns 50ns 400ns 1000ns)
+VS 0 2 0
+VB 0 1 0
+M1 3 4 2 1 IRF130 W=0.386 L=2.5u
+*
+VDp 0 3p 0.5
+VGp 0 4p 10 pulse(0 10 300ns 50ns 50ns 400ns 1000ns)
+VSp 0 2p 0
+VBp 0 1p 0
+M1p 3p 4p 2p 1p IRF130p W=0.386 L=2.5u
+*
+.MODEL IRF130 NMOS LEVEL=18
++ CV=1
++ CVE=1
++ VTO=3.5
++ RD= 0
++ RS= 0.005
++ LAMBDA=0
++ M=3
++ SIGMA0=0
++ UO=230
++ VMAX=4e4
++ DELTA=5
++ TOX=50nm
+*
+.MODEL IRF130p PMOS LEVEL=18
++ CV=1
++ CVE=1
++ VTO=-3.5
++ RD= 0
++ RS= 0.005
++ LAMBDA=0
++ M=3
++ SIGMA0=0
++ UO=230
++ VMAX=4e4
++ DELTA=5
++ TOX=50nm
+*
+.TRAN 0.5n 1u 0u 2n
+
+.PRINT TRAN P(M1) W(M1) {ID(M1)*(V(3)-V(2)) + IG(M1)*(V(4)-V(2))} {-1*(P(VD)+P(VG))}
++ P(M1p) W(M1p) {ID(M1p)*(V(3p)-V(2p)) + IG(M1p)*(V(4p)-V(2p))} {-1*(P(VDp)+P(VGp))}
+.options timeint method=gear newbpstepping=0
+.options nonlin-tran rhstol=1.0e-8
+.END
+

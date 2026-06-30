@@ -1,0 +1,26 @@
+A test case where a subcircuit is removed.
+* here rbad causes in and out to be combined.  
+* this forces ct2 to be remved
+
+* supernoding is off by default.  activate it
+.options topology supernode=true
+
+
+.subckt badSub in out
+rbad in out 0
+rt1  in a1  100
+ct2  in out 1e-6
+rt3  a1 out 100
+.ends
+
+
+* test case when resistance is given a zero
+V1 a 0 5V
+xbadSubInst a b badSub
+R2 b 0 50
+
+.DC V1 0 5V 1V
+.PRINT dc V(a) 
+
+
+.END

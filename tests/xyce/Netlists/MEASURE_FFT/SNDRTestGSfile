@@ -1,0 +1,25 @@
+ ***** Measure Functions ***** 
+
+SNDRV1 = 1.950263e+01
+
+SNDRV12 = 7.937518e+00
+
+SNDREXP = 3.932554e+00
+
+SNDRIR3 = 4.757605e-01
+
+MAXV3 = 1.000000e+00 at time = 2.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+EQN1 = 1.950263e+01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+EQN2 = 1.950263e+01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+PARAM1 = 3.932554e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+SNDRV4 = -2.653115e+01
+
+

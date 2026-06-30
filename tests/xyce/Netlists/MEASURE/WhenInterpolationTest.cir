@@ -1,0 +1,44 @@
+* A test that the interpolated WHEN time is correct when the
+* FROM and TO qualifiers are not equal to a time-step given
+* in the remeasured output file.  This covers DERIV-WHEN and
+* FIND-WHEN measures.
+*
+* See SON Bug 1304 for more details.
+********************************************************
+
+V1   1  0  PWL 0 0 0.5 1 1 0
+V2   2  0  PWL 0 0 1 5
+E2   3  0  VALUE={(V(2)-2)*(V(2)-2)}
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+
+.TRAN 0 1
+
+* use CSV format and this specific file name to work around some limitations of
+* what file names are allowed in Manifest.txt
+.PRINT TRAN FORMAT=CSV FILE=WhenInterpolationTest.csv V(1) V(3)
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.1
+
+* Test that the interpolated WHEN frequency is within the measure window.
+* So, the first and third measures should find the first time v(1)=0.7.
+* The second one should find the second time.
+.measure tran WHEN1 WHEN V(1)=0.7  FROM=0.32
+.measure tran WHEN2 WHEN V(1)=0.7  FROM=0.38
+.measure tran WHEN3 WHEN V(1)=0.7  FROM=0.32 TO=0.38
+
+* The second measure should fail.
+.measure tran WHEN4 WHEN V(3)=5  TO=0.87
+.measure tran WHEN5 WHEN V(3)=5  TO=0.82
+
+* Repeat tests for DERIV-WHEN
+.measure tran DERIV1 DERIV V(1) WHEN V(1)=0.7  FROM=0.32
+.measure tran DERIV2 DERIV V(1) WHEN V(1)=0.7  FROM=0.38
+.measure tran DERIV3 DERIV V(1) WHEN V(1)=0.7  FROM=0.32 TO=0.38
+
+* The second measure should fail.
+.measure tran DERIV4 DERIV V(3) WHEN V(3)=5  TO=0.87
+.measure tran DERIV5 DERIV V(3) WHEN V(3)=5  TO=0.82
+
+.END

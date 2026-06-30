@@ -24,7 +24,7 @@ force.
    - **(b) algorithm studied / translated at equation level** from a named ngspice file. The named file's license header was read in the local ngspice-46 tree.
    - **(c) direct port / verbatim copy** of code or files. License of the source file attaches.
 3. ngspice's `COPYING` (root of ngspice-46) was read in full to map its mixed-license structure.
-4. Vendored assets checked: `tests/` deck tree, `models/`, `assets/`, embedded fonts.
+4. Vendored assets checked: `tests/ngspice/` and `tests/xyce/` deck trees, `models/`, `assets/`, embedded fonts.
 5. Direct dependencies of all seven workspace crates were enumerated from `Cargo.toml` files and license fields confirmed from the local cargo registry cache.
 
 ## 2. ngspice-46 license structure (from its `COPYING`)
@@ -59,7 +59,7 @@ Risk legend: **none** = behavioral only; **low** = BSD-3 attribution required (n
 | `crates/rspice-core/src/device/cpl_native.rs` (3.6k lines; self-describes as "direct, private port") | `src/spicelib/devices/cpl/cplsetup.c`, `cpl/cplload.c` | Modified BSD — "Copyright 1992 Regents of the University of California. Author: 1992 Charles Hough" | low | Attribution added to `NOTICE`; recommend in-file header notice. |
 | `crates/rspice-core/src/device/transmission_line/txl.rs` (1.1k lines, TXL convolution runtime incl. integer-picosecond clock) | `src/spicelib/devices/txl/txlload.c` (+ txl setup) | Modified BSD — same Charles Hough / UC Regents header | low | Same as above. |
 | `models/veriloga/bsim4.va` (former vendored file, now removed) | Not from ngspice: UC Berkeley **BSIM4 v4.8 Verilog-A** ("Copyright 2001 Regents of the University of California", Liu/Xi/Cao/Wan/Chan/Hu), Xyce-adapted variant (`__XYCE_VAMS__` define) | Berkeley BSIM license (BSD-3-Clause in current BSIM releases); header carried only the Regents copyright block | resolved | The ambiguous root-level placeholder was removed when the shipped Verilog-A library was reorganized under `models/veriloga/cmc/`. Do not reintroduce Xyce-sourced `.va` files; use package-local upstream CMC sources instead. |
-| `tests/` (entire tree: 113 `.cir` decks, `.out` oracles, `bin/` scripts incl. `ngspice.pm`, `check.sh`, CMC `qaSpec` harness, `Makefile.am`s, `README`, `ChangeLog`) | ngspice-46 `tests/` with one documented local normalization in `bsim3soifd/nmosfd.mod` (`RTH0 94 = .006` -> `RTH0 = .006`) | Modified BSD — `COPYING` explicitly covers "test and example files" | low | Attribution added to `NOTICE`. See §4. |
+| `tests/ngspice/` (entire tree: 113 `.cir` decks, `.out` oracles, `bin/` scripts incl. `ngspice.pm`, `check.sh`, CMC `qaSpec` harness, `Makefile.am`s, `README`, `ChangeLog`) | ngspice-46 `tests/` with one documented local normalization in `bsim3soifd/nmosfd.mod` (`RTH0 94 = .006` -> `RTH0 = .006`) | Modified BSD — `COPYING` explicitly covers "test and example files" | low | Attribution added to `NOTICE`. See §4. |
 
 ### Class (b) — algorithms studied / equations translated from named ngspice files (all Modified BSD)
 
@@ -94,10 +94,10 @@ Risk legend: **none** = behavioral only; **low** = BSD-3 attribution required (n
 
 ## 4. Vendored test decks assessment
 
-- `tests/` is a vendored copy of ngspice-46's `tests/` directory (113 `.cir` decks plus reference `.out` files, the Perl/shell QA harness in `tests/bin/`, `Makefile.am`s, and ngspice's own `tests/README`) with one documented model-card normalization in `bsim3soifd/nmosfd.mod`: `RTH0 94 = .006` is corrected to `RTH0 = .006`, matching the sibling BSIM3SOI model cards. The recorded `.out` oracles are unchanged. Some decks originate from Spice3f5 and MacSpice3f4 per their comment headers; all are distributed by ngspice under its blanket Modified BSD grant ("source code, test and example files").
+- `tests/ngspice/` is a vendored copy of ngspice-46's `tests/` directory (113 `.cir` decks plus reference `.out` files, the Perl/shell QA harness in `tests/ngspice/bin/`, `Makefile.am`s, and ngspice's own `tests/README`) with one documented model-card normalization in `bsim3soifd/nmosfd.mod`: `RTH0 94 = .006` is corrected to `RTH0 = .006`, matching the sibling BSIM3SOI model cards. The recorded `.out` oracles are unchanged. Some decks originate from Spice3f5 and MacSpice3f4 per their comment headers; all are distributed by ngspice under its blanket Modified BSD grant ("source code, test and example files").
 - **Redistribution in a commercial/proprietary repo is permitted** under BSD-3 provided the copyright notice, condition list, and disclaimer are reproduced — now done in the repository `NOTICE`.
-- **Xyce_Regression (GPL-3):** verified that nothing from it is vendored — `grep -ril xyce tests/` returns no hits. Project policy (CI-clone-only) is being followed for `tests/`. The former Xyce-marked `models/veriloga/bsim4.va` placeholder has been removed.
-- The CMC-style QA scripts (`tests/bin/ngspice.pm`, `run_cmc_check`, `qaSpec` files) ship inside ngspice's `tests/` and carry no separate license header; they fall under the same blanket BSD statement.
+- **Xyce_Regression (GPL-3.0-or-later):** `tests/xyce/` vendors the runtime regression materials from `C:\Users\James\Desktop\Xyce_Regression-master`: `Netlists/`, `OutputData/`, `TestScripts/`, upstream `README.md`, `COPYING`, and `RSPICE-VENDORING.md`. Upstream CMake/CTest configuration files are intentionally omitted because RSpice does not run this corpus through upstream CTest. The local checkout's README referenced `COPYING` but no `COPYING` file was present locally, so RSpice added GPL-3.0 text at `tests/xyce/COPYING`. GPL terms apply to redistribution of this corpus.
+- The CMC-style QA scripts (`tests/ngspice/bin/ngspice.pm`, `run_cmc_check`, `qaSpec` files) ship inside ngspice's `tests/` and carry no separate license header; they fall under the same blanket BSD statement.
 
 ## 5. Embedded assets
 
@@ -129,7 +129,7 @@ No LGPL/GPL crates in the dependency graph's direct tier. (`rustyhdf5` confirmed
 2. **Solver work:** continue implementing KLU-class behavior from published papers (Davis/Palamadai Natarajan, AMD/BTF literature), black-box behavior, and permissively licensed Rust libraries (`faer`). Do **not** read KLU source as a reference. If a KLU binding is ever truly needed, link SuiteSparse KLU dynamically and respect LGPL terms — keep it an optional, clearly isolated feature and record a new audit addendum.
 3. **A `table` code model** for xspice compatibility must be written from the ngspice manual's description only — the reference implementation is GPLv2+.
 4. When porting any further ngspice device (BSD-covered dirs), check the file header first, and carry the upstream copyright line into the Rust module header at port time, plus a `NOTICE` entry.
-5. Keep Xyce and Xyce_Regression (GPL-3) CI-clone-only; never vendor decks, scripts, or `.va` files from those repos. If BSIM4 Verilog-A is reintroduced, use only a pristine official upstream source and record provenance in this audit and `NOTICE`.
+5. Keep Xyce_Regression GPL-3.0-or-later materials isolated under `tests/xyce/` with `COPYING`, upstream README, and `RSPICE-VENDORING.md`; do not mix Xyce scripts or generated model sources into RSpice source modules. If BSIM4 Verilog-A is reintroduced, use only a pristine official upstream source and record provenance in this audit and `NOTICE`.
 6. The ngspice **manual** is CC-BY-SA 4.0: don't paste manual text into RSpice docs (share-alike would attach); paraphrase.
 7. ngspice oracle *outputs* (waveform tables, gdb-extracted fixtures) are safe to check in; keep labeling them with the generating version as is current practice.
 

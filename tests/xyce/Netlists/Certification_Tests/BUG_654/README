@@ -1,0 +1,31 @@
+Test Name: BUG_654
+Owner: Eric Rankin 
+Test netlists: macterminator.cir
+GS files:  none
+Mode:  Serial and Parallel
+Comparator:  none
+Version of Xyce: Release_3.0       
+ 
+Description:
+============
+Xyce does not reach topology stage when reading in a file with with Macintosh 
+style line terminators.
+ 
+Procedure:
+============
+  run_xyce macterminator.cir 
+    or
+  xmpirun -np 2 macterminator.cir
+ 
+Verification:
+=============
+Passes if Xyce returns a 0 exit code (no error).
+
+Notes:
+======
+This is a very small circuit, therefore it should run rather quickly on 
+all platforms.  If Xyce does not exit within a "resonable" amount of time, 
+this is still broken.  (Xyce appears to be running when it is actually hung.)
+
+Be careful to preserve the mac line terminators when tranferring 
+macteminator.cir between machines.

@@ -1,0 +1,91 @@
+*
+* This is a test which makes two level 3 Synapses
+* which have a probablistic chance of firing.
+*
+* In BUG 700, the use of the random number generator
+* was broken so that both synapses fired at the same
+* time. The result was that the two output columns
+* V(a12) and V(a22) were the same.
+*
+* With bug 700 fixed, the output columns V(a12)
+* and V(a22) are different.  The shell script 
+* that calls this test verifies that the columns
+* are different and passes if they are 
+* and fails if they are the same. 
+*
+*
+*
+*
+*
+*Test Probablity and synaptic weights 
+* Defining synapse parameters at model level vs instance level
+
+.options timeint method=7 newlte=1 newbpstepping=1 reltol=1e-4
+
+* Parameters for inpit current
+.param AMP={3.14159*.1825e-12}
+.param WIDTH={1e-3}
+.param PERIOD = {400e-3}
+
+*Input Current at two neurons
+InI1 0 a1 PULSE( 0 {AMP} {400e-3} 1.0e-6 1.0e-6 {WIDTH} {PERIOD} )
+InI2 0 a2 PULSE( 0 {AMP} {400e-3} 1.0e-6 1.0e-6 {WIDTH} {PERIOD} )
+
+*HH Membrane parameters
+.param segLength = 1e-4     ; [cm]
+.param segDiameter = 1e-4   ; [cm]
+.param segSurfaceArea = { 3.14159 * segDiameter * segLength }
+.param memC = { 1.0e-6 * segSurfaceArea } ; [F]
+.param rm = { 4.0e4 / segSurfaceArea }  ; [ohm]
+.param memG = { 1 / rm }                ; [1/ohm]
+.param revE = -0.065                    ; [V]
+
+* active conductances
+* Na specific conductance is 1200 S/m^2 = 1.2e-1 S/cm^2
+.param gnas = { 0.12 * segSurfaceArea }   ; [S]
+.param ErevNa = 0.05                      ; [V]
+* K specific conductance is 360 S/m^2 = 3.6e-2 S/cm^2
+.param gks  = { 0.036 * segSurfaceArea }  ; [S]
+.param ErevK = -0.077     
+
+.model HH_Params neuron level=1 cMem={memC}  gMem={memG} eLeak={revE}
++ gNa={gnas}  gK={gks} eNa={ErevNa} eK={ErevK} vRest={revE}
+
+
+*CREATE TWO NEURON INSTANCES
+yneuron HH1 a1 0 HH_Params
+yneuron HH2 a2 0 HH_Params
+yneuron HH12 a12 0 HH_Params
+yneuron HH22 a22 0 HH_Params
+
+*Setting initial condition to rest
+.ic v(a1)=-72.655e-3
+.ic v(a2)=-72.655e-3
+.ic v(a12)=-72.655e-3
+.ic v(a22)=-72.655e-3
+
+.param gRheo=1.318e-12
+.param N_Neu=1
+
+*One to one synapse model
+.model synParams1 synapse level=3 vThresh={-45.3e-3} delay={1e-4}
++ gMax={gRheo/N_Neu} eRev={0} tau1={1e-4} tau2={5e-3}
++ ALTD={5e-2} ALTP={8.5} L1TAU=23e-3 L2TAU=7e-3 L3TAU= 46e-3
++ R=-72.655e-3 S=-45.3e-3 WINIT=1 WMAX=1.6 WMIN=0
+
+*Synapses with same probabilities
+ysynapse syn1 a1 a12 synParams1 P={0.5}
+ysynapse syn2 a2 a22 synParams1 P={0.5}
+
+.tran 0 16.4
+
+*.print tran format=tecplot V(a1) V(a2) V(a12) V(a22)
+*
+* if BUG 700 SON has been fixed then these two
+* columns of output V(a12) and V(a22) will 
+* be different.
+*
+.print tran V(a12) V(a22)
+
+.end
+

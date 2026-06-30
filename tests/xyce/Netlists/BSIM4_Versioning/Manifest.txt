@@ -1,0 +1,10 @@
+bsim4_test1.cir
+bsim4_test1.cir.sh
+ASU_45.txt
+ASU_47.txt
+inverter_transient_xyce.cir
+inverter_transient_xyce.cir.sh
+inverter_transient_xyce_4.7.net
+bsim4_test1.cir
+bsim4_test1.cir.sh
+tags

@@ -1,0 +1,23 @@
+* a simple transformer test circuit
+* 
+* based on the article: Using Transformers in LTspice/SwitcherCAD III by Mike Engelhardt
+* Looks like it was publised in as an application note for LTspice in DesignIdeas
+*
+
+vsrc 0 1 sin(0 3.0 10 0 0) 
+
+L1 1 2 2.0e-3
+L2 0 3 8.1e-3
+L3 3 4 8.1e-3 
+ktran1 l1 l2 l3 1.0
+
+rload 2 0 1
+rload2 4 0 1
+
+
+.tran 0 0.4
+.print tran v(1) v(3) v(4)
+
+.end
+
+

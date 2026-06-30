@@ -1,0 +1,7 @@
+*test resistor lead current
+V1 1 0 pwl 0 0 1 1
+r1 1 0 1
+.tran 1m 1
+.print tran format=raw file=bug_519_SON.cir.raw v(1) i(r1)
+.end
+

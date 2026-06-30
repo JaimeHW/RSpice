@@ -1,0 +1,25 @@
+Test for solution dependent resistor.
+
+.param scalar=2.0
+
+V1 1 0 2.0
+R1 1 2 1.0
+X1 2 0 soldepres
+
+.subckt soldepres 1 2
+Vcontrol cntl 2 2.0
+Rcontrol cntl 2 1.0
+
+R2 1 2 R={1.0+scalar*V(cntl)}
+.ends
+
+.DC V1 2 2 1
+.Print dc V(1) V(2) X1:R2:R V(X1:cntl) 
++ {1.0+scalar*V(X1:cntl)}
++ {ddx(1.0+scalar*V(X1:cntl),v(X1:cntl))}
++ {1.0/(1.0+scalar*V(X1:cntl))}
++ {ddx(1.0/(1.0+scalar*V(X1:cntl)),v(X1:cntl))}
++ I(V1)
++ {V(2)/(1.0+scalar*V(X1:cntl))}
++ {ddx(V(2)/(1.0+scalar*V(X1:cntl)),v(X1:cntl))}
+

@@ -1,0 +1,21 @@
+* source PWL_TEST
+
+R_R1         N14375 0  1k TC1=0 TC2=0
+* PWL Syntax Example 1
+V_V1         N14375 0
++PWL 1e-3 0.5 2e-3 1 3e-3 1 4e-3 0.5
+
+R_R2         N14713 0  1k TC1=0 TC2=0
+* PWL Syntax Example 2
+V_V2         N14713 0
++PWL (1e-3 0.5 2e-3 1 3e-3 1 4e-3 0.5)
+
+* PWL Syntax Example 3
+V_V3         N14875 0
++PWL (1e-3 0.5 2e-3 1 3e-3 1 4e-3 0.5)
+R_R3         N14875 0  1k TC1=0 TC2=0
+
+* PWL Syntax Example 4
+R_R4         N15043 0  1k TC1=0 TC2=0
+V_V4         N15043 0
++PWL(   1e-3 0.5   2e-3 1  3e-3 1  4e-3  0.5)

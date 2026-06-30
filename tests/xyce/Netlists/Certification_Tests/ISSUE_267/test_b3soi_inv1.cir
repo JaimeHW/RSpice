@@ -1,0 +1,135 @@
+* Test for subckt multipliers on the B3SOI device 
+
+VDDdev  vdd1 0 4V
+RIN in1 1 1K
+VIN1  1 0  4V PULSE (4V 0V 1.5us 5ns 5ns 1.5us 3.01us)
+R1    out1  0  10K
+C2    out1  0  0.1p
+
+Vmon1 pbulk1 0 4
+Vmon2 nbulk1 0 0
+
+X1 in1 nbulk1 out1 pbulk1 vdd1 vss1 inv PARAMS: DSL=0.95U LNMOS=0.35U
++ LPMOS=0.45U WNMOS=2.0U WPMOS=4.0U  M=20
+
+.tran 20ns 30us
+.print tran v(in1) v(out1)
+
+.SUBCKT inv IN NBULK OUT PBULK VDD VSS  PARAMS: M=3
+MN1 OUT IN VSS 0 NBULK MN L=LNMOS W=WNMOS M=1 AD={DSL*WNMOS} AS={DSL*WNMOS}
++ PD={2*(DSL+WNMOS)} PS={2*(DSL+WNMOS)}
+MP1 OUT IN VDD 0 PBULK MP L=LPMOS W=WPMOS M=1 AD={DSL*WPMOS} AS={DSL*WPMOS}
++ PD={2*(DSL+WPMOS)} PS={2*(DSL+WPMOS)}
+.ENDS inv
+
+.MODEL MP PMOS (                                    LEVEL   = 10
++TNOM    = 27             VERSION = 3.1            TOX     = 7E-9
++TSI     = 2.5E-7         TBOX    = 2E-7           XJ      = 2.5E-7
++NCH     = 2E17           NSUB    = 8.7E16         VTH0    = -0.8919795
++K1      = 0.5779627      K2      = 0              K3      = 10.674425
++K3B     = -1.667965      K1W1    = 0              K1W2    = 0
++KB1     = 0              W0      = 4.290269E-10   NLX     = 1.427855E-8
++DVT0W   = 0              AGIDL   = 0              BGIDL   = 0
++NGIDL   = 1.2            DVT1W   = 0              DVT2W   = -0.032
++DVT0    = 1.8670838      DVT1    = 0.1596407      DVT2    = -4.984035E-5
++U0      = 193.0746561    UA      = 1.353159E-9    UB      = 1E-18
++UC      = -4.25421E-11   VSAT    = 3.5E5          A0      = 1.4693255
++AGS     = 0.2484145      B0      = -1.65897E-10   B1      = -1E-7
++FBJTII  = 0              ESATII  = 1E7            SII0    = 0.5
++SII1    = 0.1            SII2    = 0              SIID    = 0
++KETA    = -0.1195058     KETAS   = 0              RTH0    = 0
++A1      = 0              A2      = 1              RDSW    = 184.0550681
++PRWG    = 0              PRWB    = 0              WR      = 1
++WINT    = 5.274095E-10   LINT    = 5.163594E-10   DWG     = 0
++DWB     = 0              DWBC    = 0              VOFF    = -0.1451438
++NFACTOR = 0.9223933      CIT     = 0              CDSC    = 2.4E-4
++CDSCD   = 0              CDSCB   = 0              BETA0   = 0.0157666
++BETA1   = 0              BETA2   = 0.1            ETA0    = 0.081967
++ETAB    = -0.03          DSUB    = 0.56           PCLM    = 9.1132344
++PDIBLC1 = 0              PDIBLC2 = 1E-5           PDIBLCB = 0
++DROUT   = 1              PVAG    = 0              DELTA   = 4.961309E-3
++ALPHA0  = 5.414727E-10   VDSATII0= 0.9            MOBMOD  = 1
++TII     = 0              PRT     = 0              UTE     = -1.0293119
++KT1     = -0.3074722     KT1L    = 1.12321E-9     LII     = 0
++KT2     = 9.096738E-4    UA1     = 1.637409E-9    UB1     = -2.60853E-18
++UC1     = -8.58504E-11   AT      = 1E3            WL      = 0
++WLN     = 1              WW      = 0              WWN     = 1
++WWL     = 0              LL      = 0              LLN     = 1
++LW      = 0              LWN     = 1              LWL     = 0
++EF      = 1              AF      = 1              KF      = 0
++CAPMOD  = 2              XPART   = 0              CJSWG   = 6.763353E-10
++PBSWG   = 0.8215635      MJSWG   = 0.3406653      CSDESW  = 0
++CGDO    = 5.1339E-10     CGSO    = 5.757672E-10   PARAMCHK= 0
++BINUNIT = 1              SHMOD   = 1              RBODY   = 0
++RBSH    = 0              NDIODE  = 1              NTUN    = 10
++VTUN0   = 0              ISBJT   = 1E-6           NBJT    = 1
++LBJT0   = 2E-7           VABJT   = 10             AELY    = 0
++AHLI    = 0              ISDIF   = 3.596086E-5    ISREC   = 4.318801E-6
++ISTUN   = 1E-3           XBJT    = 0.995676       XDIF    = 1
++XREC    = 1              XTUN    = 0              NTRECF  = 0
++NTRECR  = 0              LN      = 2E-6           NRECF0  = 2
++NRECR0  = 10             VREC0   = 0              ASD     = 0.3
++DLCB    = 0              DLBG    = 0              DELVT   = 0
++FBODY   = 1              ACDE    = 1              MOIN    = 15
++LDIF0   = 1              NDIF    = -1             RSH     = 8
++SOIMOD  = 0              VBSA    = -2.79869E-28   NOFFFD  = 1
++VOFFFD  = 0              MOINFD  = 1E3            )
+
+* DATE: Sep 18/06                                                               
+* LOT: SOI                   WAF: TH043008A.02                                  
+* DIE: X3Y6                  DEV: N18_0pt6                                      
+* Temp= 27                                                                      
+.MODEL MN NMOS (                                    LEVEL   = 10
++TNOM    = 27             VERSION = 3.1            TOX     = 7E-9
++TSI     = 2.5E-7         TBOX    = 2E-7           XJ      = 2.5E-7
++NCH     = 2E17           NSUB    = 8.7E16         VTH0    = 0.6248008
++K1      = 0.7080251      K2      = -4.982435E-5   K3      = 16.4826151
++K3B     = -2.9290625     K1W1    = 0              K1W2    = 0
++KB1     = 2              W0      = 0              NLX     = 1.306268E-7
++DVT0W   = 0              AGIDL   = 0              BGIDL   = 0
++NGIDL   = 1.2            DVT1W   = 0              DVT2W   = -0.032
++DVT0    = 2.4329612      DVT1    = 0.6075142      DVT2    = -0.0119599
++U0      = 652.7043744    UA      = 2.583052E-9    UB      = 7.006189E-19
++UC      = 8.43888E-11    VSAT    = 8.221971E4     A0      = 1.1690329
++AGS     = 0.2515985      B0      = -4.314385E-8   B1      = 1E-7
++FBJTII  = 0              ESATII  = 1E7            SII0    = 0.5
++SII1    = 0.1            SII2    = 0              SIID    = 0
++KETA    = -1             KETAS   = 0              RTH0    = 0
++A1      = 0              A2      = 1              RDSW    = 435.7762129
++PRWG    = 0              PRWB    = 0              WR      = 1
++WINT    = 5.443232E-10   LINT    = 1.947243E-10   DWG     = 0
++DWB     = 0              DWBC    = 0              VOFF    = -0.18
++NFACTOR = 1.4827865      CIT     = 0              CDSC    = 2.4E-4
++CDSCD   = 0              CDSCB   = 0              BETA0   = 0.042103
++BETA1   = 0              BETA2   = 0.1            ETA0    = 0.0709826
++ETAB    = -0.03          DSUB    = 0.56           PCLM    = 1.1631531
++PDIBLC1 = 0.3190511      PDIBLC2 = 0.01           PDIBLCB = 0
++DROUT   = 0.5615503      PVAG    = 0.0105384      DELTA   = 8.626468E-3
++ALPHA0  = 0              VDSATII0= 0.9            MOBMOD  = 1
++TII     = 0              PRT     = 0              UTE     = -1.3210287
++KT1     = -0.3           KT1L    = 2.472181E-10   LII     = 0
++KT2     = 7.288745E-3    UA1     = 3.918782E-9    UB1     = -5.40028E-18
++UC1     = -1E-10         AT      = 1E3            WL      = 0
++WLN     = 1              WW      = 0              WWN     = 1
++WWL     = 0              LL      = 0              LLN     = 1
++LW      = 0              LWN     = 1              LWL     = 0
++EF      = 1              AF      = 1              KF      = 0
++CAPMOD  = 2              XPART   = 0              CJSWG   = 6.590599E-10
++PBSWG   = 0.8085515      MJSWG   = 0.2478329      CSDESW  = 0
++CGDO    = 4.252458E-10   CGSO    = 5.366957E-10   PARAMCHK= 0
++BINUNIT = 1              SHMOD   = 1              RBODY   = 0
++RBSH    = 0              NDIODE  = 1              NTUN    = 10
++VTUN0   = 0              ISBJT   = 1E-6           NBJT    = 1
++LBJT0   = 2E-7           VABJT   = 10             AELY    = 0
++AHLI    = 0              ISDIF   = 4.784073E-6    ISREC   = 4.516782E-5
++ISTUN   = 4.941193E-6    XBJT    = 1.0971718      XDIF    = 1
++XREC    = 1              XTUN    = 0              NTRECF  = 0
++NTRECR  = 0              LN      = 2E-6           NRECF0  = 2
++NRECR0  = 10             VREC0   = 0              ASD     = 0.3
++DLCB    = 0              DLBG    = 0              DELVT   = 0
++FBODY   = 1              ACDE    = 1              MOIN    = 15
++LDIF0   = 1              NDIF    = -1             RSH     = 8
++SOIMOD  = 0              VBSA    = 4.032144E-3    NOFFFD  = 1
++VOFFFD  = 0              MOINFD  = 1E3            )
+
+.end

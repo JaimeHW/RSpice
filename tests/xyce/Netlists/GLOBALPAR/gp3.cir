@@ -1,0 +1,9 @@
+
+.global_param x2={2+time*2}
+.global_param p={1+x2}
+v 1 0 1
+r 1 0 {p}
+.tran 0 1
+.print tran i(r)
+*COMP i(r) reltol=0.02
+.end

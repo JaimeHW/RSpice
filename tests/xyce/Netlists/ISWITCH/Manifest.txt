@@ -1,0 +1,5 @@
+iswitch.cir
+iswitch_spice.cir
+iswitchHyst1.cir
+iswitchHyst1.cir.tags
+tags

@@ -1,0 +1,37 @@
+Test Name: BUG_536
+Owner: Eric Keiter
+Test netlists: bug536.cir
+GS files: bug536.cir.prn
+Mode:  Serial
+Comparator:  xyce_verify.pl
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Bug 536 reported a problem that applied to the internal workings of
+several semiconductor device models.  This problem had to do with
+the "MODEINITJCT" flag, which has to do with the manner in which
+junction voltages are initialized.  It was not being handled properly 
+for sweeps.
+
+A circuit was attached (by Albert Nunez) which caused this error.  This
+is a good test to use for certification - it doesn't take long to run.  It
+sweeps through 50 values and has about 5 devices.
+
+Procedure:
+============
+
+Run the circuit bug536.cir.  Compare with the gold standard output data 
+(bug536.cir.prn.gs).  This circuit is too small for parallel, so only do 
+this in serial.
+
+Verification:
+=============
+
+On each platform, Xyce should exit with a 0 exit code and xyce_verify.pl
+should exit with no warnings and with exit code 0.
+
+Notes:
+======
+
+

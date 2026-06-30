@@ -1,0 +1,19 @@
+* bsimsoi translation
+* Xyce netlist for corresponding Spectre netlist.
+* Netlist tests XDM will properly translate the
+* bsimsoi device in Spectre into Xyce mosfet
+* level=10. The translation should handle if the
+* device has more than 4 nodes (up to 7).
+* See issues #143 and #147 on XDM gitlab
+
+Vvdd vdd 0 DC 2
+Vvg in 0 SIN(1 1 1K 0 0 0)
+Mp1 out in vdd 0 pfet L=0.5e-6 W=1e-6
+Mn1 out in 0 0 0 nfet L=0.5e-6 W=1e-6
+
+.MODEL nfet NMOS TOX=8e-9 VERSION=3.2 LEVEL=10
+.MODEL pfet PMOS TOX=8e-9 VERSION=3.2 LEVEL=10
+
+.TRAN 0 2ms
+
+.PRINT TRAN V(in) V(out)

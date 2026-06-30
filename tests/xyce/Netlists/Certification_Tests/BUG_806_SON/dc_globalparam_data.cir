@@ -1,0 +1,44 @@
+Test for .DATA and its use in DC sweeps
+*
+* Eric Keiter
+* 9/9/2018
+*
+.global_param r1param=10
+.global_param r2param=5
+
+VT1 4 0 10V
+R1 4 5 'r1param'
+R2 5 0 'r2param'
+
+.data test
++ r1param r2param
++ 8.0000e+00  4.0000e+00 
++ 9.0000e+00  4.0000e+00 
++ 1.0000e+01  4.0000e+00 
++ 1.1000e+01  4.0000e+00 
++ 1.2000e+01  4.0000e+00 
++ 8.0000e+00  5.0000e+00 
++ 9.0000e+00  5.0000e+00 
++ 1.0000e+01  5.0000e+00 
++ 1.1000e+01  5.0000e+00 
++ 1.2000e+01  5.0000e+00 
++ 8.0000e+00  6.0000e+00 
++ 9.0000e+00  6.0000e+00 
++ 1.0000e+01  6.0000e+00 
++ 1.1000e+01  6.0000e+00 
++ 1.2000e+01  6.0000e+00 
+.enddata
+* Note, the "enddata" statement will be ignored by Xyce.  
+* It is part of the HSpice syntax for .DATA
+
+* verify that the .DC data=<name> line takes precedence, and
+* that this .DC line is not used
+.DC VT1 10 15 1
+
+* this .DC line should get used
+.DC data=test
+
+.print DC precision=4 {R1:R} {R2:R} V(4) V(5)
+
+.END
+

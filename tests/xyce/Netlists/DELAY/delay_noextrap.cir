@@ -1,0 +1,15 @@
+Basic function test of delay device
+VIN 1 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)
+R0 1 0 1
+
+VIN_delayed 4 0 PULSE(0 5 10N 0.1N 0.1N 5N 25N)
+R2 4 0 1
+
+YDELAY delay1 2 0 1 0 TD=10N EXTRAPOLATION=false
+R1 2 0 1
+
+.TRAN 0.25N 50N
+*comp {V(4)-V(2)} offset=1e-14
+.PRINT TRAN V(1) V(2) V(4) {V(4)-V(2)}
+*.PRINT TRAN V(1) V(2)
+.END

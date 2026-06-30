@@ -1,0 +1,5 @@
+SCHEMATIC1.net
+exclude
+lossless_transline.cir
+lossless_transline.cir.pspice
+lossless_transline.cir.sh

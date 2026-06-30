@@ -1,0 +1,49 @@
+In OutputMgr::remeasure 
+file to reprocess through measure and/or fft functions: RemeasureStdOutTest.csv
+***** Processing Data for Step 0
+
+ ***** FFT Analyses ***** 
+
+FFT analysis for V(2):
+  Window: HANN, Start Time: 0.000000e+00, Stop Time: 1.000000e+00
+  First Harmonic: 1.000000e+00, Start Freq: 1.000000e+00, Stop Freq: 8.000000e+00
+
+      THD = -8.950346e+00 dB ( 3.568475e-01 )
+     SNDR = 8.950346e+00 dB
+     ENOB = 1.194410e+00 bit
+      SNR = 2.000000e+02 dB
+     SFDR = 1.167705e+01 dB at frequency 3.000000e+00
+
+    1.000000e+00 Hz     3.546282e+01 dB  at    -8.767416e+01 Deg.  Harmonic #           1
+    3.000000e+00 Hz     2.378577e+01 dB  at     1.007130e+02 Deg.  Harmonic #           3
+    2.000000e+00 Hz     2.315416e+01 dB  at     1.278763e+02 Deg.  Harmonic #           2
+    4.000000e+00 Hz     2.327083e+00 dB  at    -6.748707e+01 Deg.  Harmonic #           4
+    5.000000e+00 Hz    -5.646074e+00 dB  at    -5.675474e+01 Deg.  Harmonic #           5
+    6.000000e+00 Hz    -1.077727e+01 dB  at    -4.280205e+01 Deg.  Harmonic #           6
+    7.000000e+00 Hz    -1.406713e+01 dB  at    -2.378380e+01 Deg.  Harmonic #           7
+    8.000000e+00 Hz    -1.527093e+01 dB  at     0.000000e+00 Deg.  Harmonic #           8
+
+***** Processing Data for Step 1
+
+ ***** FFT Analyses ***** 
+
+FFT analysis for V(2):
+  Window: HANN, Start Time: 0.000000e+00, Stop Time: 1.000000e+00
+  First Harmonic: 1.000000e+00, Start Freq: 1.000000e+00, Stop Freq: 8.000000e+00
+
+      THD = -8.773596e+00 dB ( 3.641835e-01 )
+     SNDR = 8.773596e+00 dB
+     ENOB = 1.165049e+00 bit
+      SNR = 2.000000e+02 dB
+     SFDR = 1.040910e+01 dB at frequency 2.000000e+00
+
+    1.000000e+00 Hz     3.744891e+01 dB  at    -8.826834e+01 Deg.  Harmonic #           1
+    2.000000e+00 Hz     2.703980e+01 dB  at     1.180435e+02 Deg.  Harmonic #           2
+    3.000000e+00 Hz     2.359445e+01 dB  at     1.005499e+02 Deg.  Harmonic #           3
+    4.000000e+00 Hz     3.005912e+00 dB  at    -6.724185e+01 Deg.  Harmonic #           4
+    5.000000e+00 Hz    -4.841408e+00 dB  at    -5.653151e+01 Deg.  Harmonic #           5
+    6.000000e+00 Hz    -9.920635e+00 dB  at    -4.261007e+01 Deg.  Harmonic #           6
+    7.000000e+00 Hz    -1.318120e+01 dB  at    -2.365929e+01 Deg.  Harmonic #           7
+    8.000000e+00 Hz    -1.437374e+01 dB  at     0.000000e+00 Deg.  Harmonic #           8
+
+***** Remeasure analysis complete

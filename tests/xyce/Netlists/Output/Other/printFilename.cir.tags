@@ -1,0 +1,2 @@
+serial, nightly, hb, output
+required:fft

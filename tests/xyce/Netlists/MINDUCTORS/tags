@@ -1,0 +1,5 @@
+serial, nightly,  parallel
+valgrind
+inductor
+mutualinductor
+

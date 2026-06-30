@@ -1,0 +1,10 @@
+*Demonstrate busted subckt-in-lib issue
+
+.lib "foobar.lib" foobar
+
+X1 1 2 0 borked
+V1 1 0 1V
+
+.dc V1 1 5 1
+.print dc v(1) V(2) 
+.end

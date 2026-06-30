@@ -1,0 +1,41 @@
+* Transient sensitivity example, SFFM source, finite difference (netlist level) sensitivity
+*****************************************************************************
+.param v0 = 1.0
+.param va = 1.0
+.param fc = 1meg
+.param mdi = 2.0
+.param fs = 250k
+
+* original
+isffm 0 1 sffm({v0} {va} {fc} {mdi} {fs})
+r1   1 0 1
+
+* v0 delta
+isffmA 0 1A sffm({v0*(1+1e-8)} {va} {fc} {mdi} {fs})
+r1A   1A 0 1
+
+* va delta
+isffmB 0 1B sffm({v0} {va*(1+1e-8)} {fc} {mdi} {fs})
+r1B   1B 0 1
+
+* fc delta
+isffmC 0 1C sffm({v0} {va} {fc*(1+1e-8)} {mdi} {fs})
+r1C   1C 0 1
+
+* mdi delta
+isffmD 0 1D sffm({v0} {va} {fc} {mdi*(1+1e-8)} {fs})
+r1D   1D 0 1
+
+* fs delta
+isffmE 0 1E sffm({v0} {va} {fc} {mdi} {fs*(1+1e-8)})
+r1E   1E 0 1
+
+.tran 0 10us 
+.print tran v(1)
++ { (v(1A)-v(1))/(v0*1.0e-8) }
++ { (v(1B)-v(1))/(va*1.0e-8) }
++ { (v(1C)-v(1))/(fc*1.0e-8) }
++ { (v(1D)-v(1))/(mdi*1.0e-8) }
++ { (v(1E)-v(1))/(fs*1.0e-8) }
+
+.end

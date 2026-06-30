@@ -1,0 +1,38 @@
+* Test AC mode support for INTEG measures.
+* To be conservative, there are subtests for each
+* valid operator (V, VR, VI, VP, VM and VDB) for
+* each measure type. Expressions are also tested.
+*
+* See SON Bug 1282 for more details
+*****************************************************
+
+* Trivial high-pass filter (V-C-R) circuit
+R1 b 0 2
+C1 a b 1m
+V1 a 0 DC 0V AC 1
+
+.print AC vr(b) vi(b) vm(b) vp(b) vdb(b)
+.ac dec 5 1Hz 1e3
+.STEP R1 0.5 2 1.5
+
+* MAX
+.MEASURE AC integvb integ v(b)
+.MEASURE AC integvmb integ vm(b)
+.MEASURE AC integvrb integ vr(b)
+.MEASURE AC integvib integ vi(b)
+.MEASURE AC integvdbb integ vdb(b)
+
+* Use expression with vp(), since VP(b) is much larger
+* the other values
+.MEASURE AC integvpbExp integ {vp(b)/100}
+
+* Tests should fail since the FROM-T0 windows have various problems.
+.measure ac integFail1 integ v(b) FROM=1e4 TO=1e5
+.measure ac integFail2 integ vr(b) FROM=1e3 TO=1e0
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure ac lastMeasure max vm(b)
+
+.end

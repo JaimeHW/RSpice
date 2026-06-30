@@ -1,0 +1,32 @@
+Test Name: BUG_1296
+Owner: Eric Rankin 
+Test netlists:  1296.cir
+
+GS files: none 
+Mode:  Serial 
+Comparator:  none 
+Version of Xyce: Release_4.0 
+
+ 
+Description:
+============
+This test confirms that vector valued parameters appearing at the end of a 
+netlist line are properly parsed.
+
+Prior to the fix 1296.cir would segfault in Xyce 4.0
+
+ 
+Procedure:
+============
+run_xyce 1295.cir 
+
+ 
+Verification:
+=============
+Passes if Xyce does not segfault
+
+ 
+Notes:
+======
+Derived from regression test MPDE/invert1_MPDE.cir.
+

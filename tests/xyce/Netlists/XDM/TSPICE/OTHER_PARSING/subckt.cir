@@ -1,0 +1,32 @@
+* Xyce netlist for testing .SUBCKT and X lines
+ 
+.TRAN  10us 1ms
+
+* Note: Printing of voltages in the subcircuit is commented out,
+* since the xdm translation of that feature (dot vs. colon)
+* may not work yet.  
+.PRINT TRAN FORMAT=PROBE V(1) V(2)
+*+ V(X1:B) I(X1:RX1)
+
+* simple voltage divider circuit. but first "resistor" is two 
+* series resistor in a subcircuit
+X1         1 2  TwoRes 
+R1         2 0  20  
+V1         1 0  SIN(0 1 1KHz 0 0 0)
+
+X2         2  2a  TwoResParam 
+R2         2a  0  20  
+V2         2   0  SIN(0 1 1KHz 0 0 0)
+
+.SUBCKT TwoRes A C
+RX1 A B R=5 
+RX2 B C R=5 
+.ENDS
+
+* add a parameter to the subcircuit definition line
+.SUBCKT TwoResParam A C P1=10
+RX1 A B R={P1} 
+RX2 B C R=5 
+.ENDS
+
+.END

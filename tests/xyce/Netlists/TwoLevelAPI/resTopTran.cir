@@ -1,0 +1,14 @@
+Resistor Circuit Netlist - top level
+
+R 2 3 1.0e-2
+* 10 periods for this simulation
+VIN1 1 0 1V SIN(1 2 10)
+VIN2 3 0 DC 2V
+
+YEXT y1 1 2 externcode=xyce netlist=resInnerTran.cir
+
+.tran 0.001 1
+.PRINT tran V(1) I(VIN1) 
+.options nonlin maxstep=10 nox=0 debuglevel=100
+*
+.END

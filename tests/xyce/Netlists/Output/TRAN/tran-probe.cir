@@ -1,0 +1,16 @@
+TRAN test of FORMAT=PROBE output format
+*
+* Trivial resistor circuit, just do a transient and watch the output
+*
+
+R1 1 0 1
+V1  1  0  PWL 0.0 0.0 1.0 1.0
+
+.print TRAN FORMAT=PROBE v(1) I(v1)
+.tran 0s 1s
+
+* use fixed time-steps in the output file when comparing .csd files to
+* a gold standard
+.OPTIONS output initial_interval=0.2s
+
+.end

@@ -1,0 +1,27 @@
+* This netlist is used to test the Python setADCWidths() and 
+* getADCWidths() methods for both valid and invalid YADC 
+* device names.  It also tests the getTimeVoltagePairsADC() 
+* method for valid YADC names.  It also tests that the width 
+* value on the instance line takes precedence over the width 
+* value in the model card.  This netlist also tests the 
+* getADCMap() method when the netlist has YADC devices in it.
+* It also tests the getNumDevices() method when the netlist has
+* YADC devices in it.
+
+* Note: these WIDTH values will be overwritten by the Python program.
+* However, before that ADC1 will use the width value from the instance
+* line, while ADC2 will use the width value from the model card.
+YADC adc1 1 0 simpleADC R=1T WIDTH=1
+YADC adc2 1 0 simpleADC R=1T WIDTH=8
+YADC adc3 1 0 simpleADC R=1T WIDTH=12
+.model simpleADC ADC(settlingtime=50ns uppervoltagelimit=2 lowervoltagelimit=0 width=4)
+
+v1 1 0 PWL 0 0 1e-4 2
+
+* Limit the max. time step so that the simulation takes at
+* least 1000 steps.  This is needed for the comparison of
+* Python-generated timeArray and voltageArray in the .sh file.
+.TRAN 0 1e-4 0 1e-7
+.PRINT TRAN V(1) YADC!ADC1:WIDTH YADC!ADC2:WIDTH  n(YADC!ADC1_STATE) n(YADC!ADC2_STATE)
+.END
+

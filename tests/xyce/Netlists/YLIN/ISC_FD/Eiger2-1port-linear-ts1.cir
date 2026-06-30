@@ -1,0 +1,27 @@
+* 1-port example. Input is Y-parameter data in RI format in Touchstone 1
+* format, but it also includes the frequency-domain short-circuit current
+* data for that port.
+*
+* Note that this netlist does not have the R2 load resistor in it.
+* This is because that resistance is already included in the
+* Y-parameter model used by YLIN_MOD1.
+
+.model diod d
+
+.options hbint numfreq=60 tahb=0
+.hb 1e7
+*.hb 1e8
+*.hb 0.75e8
+*.hb  5e7
+.print hb v(1)
+*i(d1)  i(r1)
+*i(r1)
+
+*v1 1 0  sin  0 5 5e7
+YLIN YLIN1 1 0 YLIN_MOD1
+.MODEL YLIN_MOD1 LIN TSTONEFILE=wire1-ts1.txt  isc_fd=1
+*d1 1 0 diod
+
+r1 1 0 50
+
+.end

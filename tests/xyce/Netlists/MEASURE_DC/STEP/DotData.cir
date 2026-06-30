@@ -1,0 +1,67 @@
+************************************************
+* Test .DATA and its use with .MEASURE and .STEP
+* and -remeasure for .DC.
+*
+* See SON Bugs 1160 and 1307 for more details.
+************************************************
+
+VT1 4 0 10V
+R1  4 5 10
+R2  5 0 5
+
+.data test
++ r1   r2
++ 8.0000e+00  4.0000e+00
++ 9.0000e+00  4.0000e+00
++ 1.0000e+01  4.0000e+00
++ 1.1000e+01  4.0000e+00
++ 1.2000e+01  4.0000e+00
++ 8.0000e+00  5.0000e+00
++ 9.0000e+00  5.0000e+00
++ 1.0000e+01  5.0000e+00
++ 1.1000e+01  5.0000e+00
++ 1.2000e+01  5.0000e+00
++ 8.0000e+00  6.0000e+00
++ 9.0000e+00  6.0000e+00
++ 1.0000e+01  6.0000e+00
++ 1.1000e+01  6.0000e+00
++ 1.2000e+01  6.0000e+00
+.enddata
+
+.DC data=test
+.print DC {R1:R} {R2:R} V(4) V(5)
+.STEP VT1 10 12 2
+
+.MEASURE DC MAXV5 MAX V(5)
+.MEASURE DC MAXV5TO MAX V(5) TO=8
+
+.MEASURE DC MINV5 MIN V(5)
+.MEASURE DC MINV5FROM MIN V(5) FROM=8
+
+.MEASURE DC PPV5 PP V(5)
+
+.MEASURE DC AVGV5 AVG V(5)
+.MEASURE DC AVGV5TO AVG V(5) TO=8
+.MEASURE DC AVGV5FROM AVG V(5) FROM=8
+
+.MEASURE DC INTEGV5 INTEG V(5)
+.MEASURE DC INTEGV5TO INTEG V(5) TO=8
+.MEASURE DC INTEGV5FROM INTEG V(5) FROM=8
+
+.MEASURE DC RMSV5 RMS V(5)
+.MEASURE DC RMSV5TO RMS V(5) TO=8
+.MEASURE DC RMSV5FROM RMS V(5) FROM=8
+
+.MEASURE DC FINDV5 WHEN V(5)=3
+.MEASURE DC DERIVV5 DERIV V(5) WHEN V(5)=3
+
+.MEASURE DC ERR1 ERR1 V(5) V(4)
+.MEASURE DC ERR1TO ERR1 V(5) V(4) TO=8
+.MEASURE DC ERR1FROM ERR2 V(5) V(4) FROM=8
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure dc lastMeasure max v(5)
+
+.END

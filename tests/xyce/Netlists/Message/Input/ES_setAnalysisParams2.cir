@@ -1,0 +1,27 @@
+* Test error message for illegal value for ALPHA
+* parameter on .EMBEDDEDSAMPLING line.
+*
+* See SON Bug 1224 for more details.
+****************************************************************
+
+R2 1 0 3K
+R1 1 2 2K
+v1 2 0 10V
+
+.dc v1 10 10 1
+
+.print dc format=tecplot v(1)
+.PRINT ES
+
+.EMBEDDEDSAMPLING
++ param=R1
++ type=gamma
++ alpha=0
++ beta=0.03
+
+.options EMBEDDEDSAMPLES numsamples=50
++ outputs={v(1)}
++ sample_type=random
++ stdoutput=true
+
+.end

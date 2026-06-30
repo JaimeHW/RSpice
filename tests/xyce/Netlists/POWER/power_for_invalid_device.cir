@@ -1,0 +1,23 @@
+****************************************************************
+* Test for P() and W() for invalid devices.  
+* P() and W() are implemented for the requested device though. 
+* 
+* The goal of this test is to ensure that Xyce exits gracefully
+* with a reasonable error message.
+* 
+*
+* See SON Bug 833 for more details.
+****************************************************************
+* This is a valid V-R-R circuit.  It is in here for "test 
+* development" to help prove that the circuit actually works 
+* in .TRAN
+V1 1 0 sin(0 1 1KHz)
+R1 1 2 1
+R2 2 0 1
+
+.TRAN 0 1ms
+* Node 3 and device RBogo are invalid, even though P()
+* and W() are supported for the R device.
+.PRINT TRAN V(3) P(RBogo) W(RVapor)
+
+.end

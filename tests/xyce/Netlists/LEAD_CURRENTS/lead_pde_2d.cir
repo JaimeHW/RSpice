@@ -1,0 +1,39 @@
+Lead current test for 2D PDE device
+*
+* Also tests the three allowed forms (in .print) for lead currents
+* for this type of device
+*
+VPOS  1 0 DC 5V
+VBB   6 0 DC -2V
+RE    1 2 2K
+RB    3 4 190K
+
+YPDE BJT 5 3 7 PDEBJT meshfile=internal.msh 
++ node = {name = collector, base, emitter}
++ sgplotlevel=0 tecplotlevel=0
++ l=2.0e-3  w=1.0e-3
++ nx=30     ny=15
+
+
+* Zero volt sources acting as an ammeter to measure the
+* base, collector, and emmitter currents, respectively
+VMONB 6 4 0
+VMONC 0 5 0
+VMONE 2 7 0 
+
+.MODEL PDEBJT   ZOD  level=2
+
+.DC VPOS 0.0 2.0 1.0 VBB 0.0 -0.5 -0.5 
+
+*.options LINSOL type=superlu
+.options LINSOL type=klu
+.options NONLIN maxstep=70 maxsearchstep=1 searchmethod=2 
++in_forcing=0 nlstrategy=0 debuglevel=-1
+
+.options TIMEINT reltol=1.0e-3 abstol=1.0e-6 
+.options DEVICE numjac=0 debuglevel=0
+
+.PRINT DC V(1) V(6) I(VMONC) I1(Y%PDE%BJT) I(VMONB) I2(YPDE BJT) I(VMONE) I3(BJT)
+
+.END
+

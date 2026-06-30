@@ -1,0 +1,16 @@
+Regression test for simple normal distribution sampling
+
+Isrc 1 0 AC 1 0 sin(0 1 1e+5 0 0)
+R1 1 0 {agauss(1k,0.2k,1)}
+C1 1 0 2e-6
+
+.print ac v(1)
+.ac dec 10 1 1e5
+
+.SAMPLING 
++ useExpr=true
+
+.options SAMPLES numsamples=10
+
+.end
+

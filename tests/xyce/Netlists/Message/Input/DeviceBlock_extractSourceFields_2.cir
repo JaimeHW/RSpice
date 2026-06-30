@@ -1,0 +1,13 @@
+Invalid level for model
+VDD 5 0 DC 18V ; inline comment test
+R1 5 1 47MEG ; second inline comment
+R2 1 0 22MEG ; and another
+RD 5 4 2.2K
+RS 2 0 500; just one more
+VMON 4 3 0
+M1 3 1 2 2 NFET 
+.MODEL NFET NMOS(LEVEL=12345 KP=0.5M VTO=2V)
+.DC VDD 18 18 1
+.PRINT DC V(5) I(VMON) {V(3)-V(2)} {V(1)-V(2)}
+.OPTIONS NONLIN in_forcing=0
+.END

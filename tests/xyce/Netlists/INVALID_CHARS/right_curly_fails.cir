@@ -1,0 +1,29 @@
+*******************************************************
+* For SON Bug 744
+*
+* Illustrate that a right curly bracket is usually an invalid 
+* character for a device or node name.  This is because 
+* pairs of { } denote an expression in Xyce.  The v3 instance
+* line does illustrate a case with 1{ is a valid node name.
+*
+*
+*
+*******************************************************
+.print DC v(1)
+.DC v1 1 1 1
+v1 1 0 1
+r1 1 0 1
+
+* all of these lines will fail netlist parsing since { }
+* is used to denote an expression in Xyce
+v2{ 2 0 1
+v4 { 0 1
+v{ 5 0 1
+
+* The v3 instance line actually passes netlist parsing, but
+* in Xyce 6.5, the node name actually comes out as 
+* Voltage Node ({ 0 1), so it would fail netlist parsing in
+* .PRINT statement.
+v3 1{ 0 1
+
+.end

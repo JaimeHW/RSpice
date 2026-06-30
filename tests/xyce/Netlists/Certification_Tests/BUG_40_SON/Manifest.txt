@@ -1,0 +1,4 @@
+bug40.cir
+bug40.cir.gs.pl
+tags
+bug40.cir.sh

@@ -1,0 +1,42 @@
+*********************************************************
+* Test that parameters and global parameters work when
+* the TEMP instance variable is an expression-based parameter
+* and a .OPTIONS DEVICE TEMP=<val> line is used to set the
+* device temperature.  See SON Bug 1203 for more details.
+*
+*******************************************************
+
+.PARAM ptemp=10
+.GLOBAL_PARAM ATEMP={TEMP+10}
+.GLOBAL_PARAM DTEMP=10
+.GLOBAL_PARAM GTEMP=47
+.FUNC TFUNC(x) {x+DTEMP}
+
+.OPTIONS DEVICE TEMP=37
+
+* R1:R should be 3
+V1 1 0 1
+R1 1 0 1  TC=0.1 temp={temp+ptemp}
+
+* R2:R should be 4
+V2 2 0 1
+R2 2 0 1 TC=0.1 temp={GTEMP+DTEMP}
+
+* R3:R should be 3
+V3 3 0 1
+R3 3 0 1 TC=0.1 temp={ATEMP}
+
+* This should use the value from the .OPTIONS DEVICE TEMP=<val>
+* line.  So, R4:4 should be 2
+V4 4 0 1
+R4 4 0 1 TC=0.1
+
+* R5:R should be 3
+V5 5 0 1
+R5 5 0 1 TC=0.1 temp={tfunc(temp)}
+
+.DC V2 1 5 1
+.PRINT DC V(2) I(R1) R1:TEMP I(R2) R2:TEMP I(R3) R3:TEMP
++ I(R4) R4:TEMP {tfunc(temp)} I(R5) R5:TEMP
+
+.END

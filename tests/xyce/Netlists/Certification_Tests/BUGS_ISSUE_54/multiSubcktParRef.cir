@@ -1,0 +1,13 @@
+Simple example demonstrating subcircuit parameter error - reference circuit
+* R1 and R2 should have values of 1 and 10.  If the other circuit gets
+* parameter precedence wrong, then the values may be different.
+
+R1 1 XTEST:2 1.0
+R2 XTEST:2 0 10.0
+
+Vtest 1  0  1.0
+
+.print DC V(1) V(XTEST:2)
+.DC Vtest 1 1 1
+
+.end

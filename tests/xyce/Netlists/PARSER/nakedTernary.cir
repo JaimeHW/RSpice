@@ -1,0 +1,70 @@
+* This test ensures that expressions involving ternary expressions 
+* can be processed by the parser, even if they are NOT surrounded by 
+* curly braces.
+*
+* this is tricky, b/c on .param lines, if curly braces are not used, then
+* the equal sign is the only delimeter.  This can confuse the parser if
+* we aren't careful, whenever an expression includes comparison operators (which 
+* sometimes include "=" character).  Fortunately, the list of comparison 
+* operators that include "=" is short.
+*
+* Ternary operators are also problematic because of the colon ":" which is 
+* also a legal character in parameter names.  So, (A==B)?C:D is ambiguous to 
+* the parser.  "C:" could be a parameter name.  The guidance is thus, if not
+* using parenthesis, to always have whitespace between the colon and the other
+* fields.  So, {(A==B)?C :D} is valid.  There is no conflict with :D because
+* parameter names are not allowed to *start* with a colon.
+
+* But, without curly braces or single quotes, this spacing guidance doesn't 
+* work either, because the earlier stages of Xyce parsing remove any 
+* whitespace.    So, for "naked" expressions, it is necessary to use 
+* parenthesis.
+
+.param x=0.5
+*.param test1= x>0?2*x :0; doesn't work, because the separated field tool removes the space
+.param test1= (x>0)?(2*x):(0) ; works because the parens remove ambiguity
+*.param test1={x>0?2*x :0} ; works, b/c inside curly braces
+
+.param A = 4.0
+.param B = 3.0
+.param C = 2.0
+.param D = 1.0
+
+* these expressions test2-test5 are from the reference guide.  
+* They are not part of this test b/c they are not "naked" (i.e. have curly braces)
+* However, they were used as inspiration for tests 6-9 below.
+**.param test2= {(A==B)?C:D}  ; this expression will generate a syntax error
+*.param test3= {(A==B)?C :D}  ; this expression is acceptable
+*.param test4= {(A==B)?C+0:D}  ; this expression is acceptable
+*.param test5= {(A==B)?(C):D}  ; this expression is acceptable
+
+*.param test6= (A==B)?C:D  ; this expression will generate a syntax error
+*.param test7= (A==B)?C :D  ; this expression will generate a syntax error
+.param test8= (A==B)?C+0:D  ; this expression is acceptable
+.param test9= (A==B)?(C):D  ; this expression is acceptable
+
+.param test10= (A>=B)?(C):D
+.param test11= (A<=B)?(C):D
+.param test12= (A!=B)?(C):D
+
+R1 1 0 {test1}
+V1 1 0 1.0
+
+R2 2 0 {test8}
+V2 2 0 1.0
+
+R3 3 0 {test9}
+V3 3 0 1.0
+
+R4 4 0 {test10}
+V4 4 0 1.0
+
+R5 5 0 {test11}
+V5 5 0 1.0
+
+R6 6 0 {test12}
+V6 6 0 1.0
+
+.DC V1 1.0 1.0 1.0
+.PRINT DC V(1) V(2) V(3) {test1} {test8} {test9} {test10} {test11} {test12}
+.end

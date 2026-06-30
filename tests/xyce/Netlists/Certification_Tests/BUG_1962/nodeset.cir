@@ -1,0 +1,67 @@
+**************************************************************
+* Set a NODESET on a node name that is a subcircuit interface
+* node. The "top level" version and the subcircuit version
+* should get the same answer.  Also test that the bug is fixed 
+* for hierarchical subcircuits. See SRN Bug 1962 for more 
+* details.
+*
+**************************************************************
+
+.TRAN 0 1ms
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.2ms
+.PRINT TRAN V(in_1) V(out_1) V(out_2) V(X1:in_1) V(X1:out_1) V(X1:out_2)
++ V(X2:X1:in_1) V(X2:X1:out_1) 
+
+* Parameterize the output levels
+.PARAM VOH=5
+.PARAM VOL=0
+
+********************************************************
+* This top-level circuit and the X1 sub-circuit should 
+* have all of the printed voltages equal to VOH.  They
+* will be equal to VOL if the nodesets are not working
+* correctly.
+*********************************************************
+E_ABM1 out_1 0 VALUE={ IF( (V(in_1) > 1.4), IF( (V(in_1) > 1.5), VOH, 50*(V(in_1)-1.4) ), VOL )} 
+ROUT1 out_1 0 1K
+
+E_ABM2 out_2 0 VALUE={ IF( (V(out_1) > 1.4), IF( (V(out_1) > 1.5), VOH, 50*(V(out_1)-1.4) ), VOL )} 
+ROUT2 out_2 0 1K
+C_OUT2 out_2 in_1 1u
+
+.NODESET V(in_1)=5
+
+X1 5 ABM_SUB
+.NODESET V(X1:in_1)=5
+
+V1 1 6 1
+X2 6 7 ABM_SUBSUB
+R1 7 0 1
+.NODESET V(X2:X1:in_1)=5
+
+******************************************************
+* Instantiate the top-level circuit as a subcircuit
+******************************************************
+.SUBCKT ABM_SUB in_1 
+
+E_ABM1 out_1 0 VALUE={ IF( (V(in_1) > 1.4), IF( (V(in_1) > 1.5), VOH, 50*(V(in_1)-1.4) ), VOL )} 
+ROUT1 out_1 0 1K
+
+E_ABM2 out_2 0 VALUE={ IF( (V(out_1) > 1.4), IF( (V(out_1) > 1.5), VOH, 50*(V(out_1)-1.4) ), VOL )} 
+ROUT2 out_2 0 1K
+C_OUT2 out_2 in_1 1u
+
+.ENDS
+
+******************************************************
+* hierarchical version
+******************************************************
+.SUBCKT ABM_SUBSUB a b
+R1 a b 1 
+X1 foo ABM_SUB
+.NODESET V(X1:in_1)=5
+.ENDS
+
+
+.END
+

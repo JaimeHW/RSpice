@@ -1,0 +1,19 @@
+A test circuit for the use of SDT on the .print line.  Test for bug 963 SON
+
+.param frequency=5
+.param amp=5
+
+* the delay (1/4 of the period) will make this a cosine function
+* it also means that the integrated quantity, v(2) starts at a nonzero
+* value at time=0.  This use case was broken prior to bug 963 resolution.
+Vsrc2 2 0 sin( 0 {amp} {frequency} {-1/(4*frequency)} 0 )
+rload2 2 0 1000
+
+Bsrc 1 0 V={sdt(v(2))}
+Rsrc 1 0 1.0
+
+.print tran {0.1 + abs(v(1)-sdt(v(2)))}
+
+.tran 0 1
+.end
+

@@ -1,0 +1,25 @@
+
+V1   1   0   1.0
+Xr   1   2  g1  rsub
+R2   2   0   1
+V2   G1  0   4
+
+.global g1 g2
+.tran 1ps 1ns
+.print tran V(2) v(g1) V(2a) v(g2)
+
+.subckt rsub  a  b g1
+Rab  a  b  2
+Rbg  G1  b  3
+.ends
+
+V1a   1a   0   2.0
+Xra   1a   2a  g2  rsub2
+R2a   2a   0   1a
+V2a   G2  0   6.0
+
+.subckt rsub2  a  b g2
+Rab  a  b  2
+Rbg  G2  b  3
+.ends
+

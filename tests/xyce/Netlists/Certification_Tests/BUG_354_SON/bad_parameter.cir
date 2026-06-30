@@ -1,0 +1,12 @@
+* test of bad parameter on the .print line
+
+
+va 0 1 5
+rb 1 2 100
+rc 2 0 100
+
+
+.tran 0 1
+.print tran {bar} 
+
+.end

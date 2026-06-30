@@ -1,0 +1,33 @@
+ ***** Measure Functions ***** 
+
+SFDRV1 = 1.977330e+01
+
+SFDRV12 = 8.064303e+00
+
+SFDREXP = 3.986011e+00
+
+SFDRIR3 = 1.228622e+00
+
+MAXV3 = 1.000000e+00 at time = 2.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+EQN1 = 1.977330e+01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+EQN2 = 1.977330e+01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+PARAM1 = 3.986011e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+SFDRV4 = 9.119191e+00
+
+SFDRMINF5V4 = 2.037534e+01
+
+SFDRFMAX5 = 5.505190e+00
+
+SFDRFMAX2 = 3.114673e+00
+
+SFDRFMAX3 = 2.233232e+00
+
+

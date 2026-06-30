@@ -1,0 +1,20 @@
+*2-port example. Input is Y-parameter data in RI format.
+*
+* Note that this netlist does not have the R2 load resistor in it.
+* This is because that resistance is already included in the
+* Y-parameter model used by YLIN_MOD1.
+
+.model diod d
+
+.options hbint numfreq=10 tahb=0
+.hb 0.5e5
+.print hb v(2)
+
+*v1 1 0  sin  0 5 1e5
+v1 1 0  sin  0 5  0.5e5
+YLIN YLIN1 1 0 2 0 YLIN_MOD1
+.MODEL YLIN_MOD1 LIN TSTONEFILE=test_sp.cir.s2p  interpolation=2
+*r1  2 0 50
+d1  2 0 diod
+
+.end

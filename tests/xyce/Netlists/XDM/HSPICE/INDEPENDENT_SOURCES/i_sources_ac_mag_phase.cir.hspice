@@ -1,0 +1,10 @@
+* HSPICE netlist for testing current sources with AC magnitude and phase
+
+.TRAN 1ms 1s
+.PRINT TRAN V(1) V(2) I(R2)
+
+IIN 1 0 AC=10V,90
+R1 1 2 100
+R2 2 0 75
+
+.END

@@ -1,0 +1,18 @@
+*********************************************************
+* Testing that an attempt to use "specials" in a .PARAM
+* statement will cause a netlist parsing error with
+* a reasonable error message.  This covers the
+* top-level case.
+*
+*********************************************************
+
+.PARAM PA = TEMP
+.PARAM PB = {2*VT}
+.PARAM PC = {TIME}
+.PARAM PD = {TEMPER}
+.DC V1 1 1 1
+V1 1 0 1
+R1 1 0 {PA}
+
+.PRINT DC R1:R I(R1) {PA} {TEMP} {PB} {VT} {PC} {TIME} {PD} {TEMPER}
+.END

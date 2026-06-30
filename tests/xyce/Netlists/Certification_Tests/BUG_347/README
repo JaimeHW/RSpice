@@ -1,0 +1,31 @@
+NOTES:
+  Bug 347 addresses a problem Windows users have with running Xyce on 
+  a netlist in a directory that has spaces in path.  This occurs when 
+  using the runxyce.bat script.
+
+HOWTO: (no compare)
+  1) Copy the netlist file to a directory that has spaces in its name,
+     such as C:\PATH WITH SPACES\diode.cir 
+  2) Using runxyce.bat, try to execute Xyce with the netlist in this
+     location.  
+       runxyce.bat C:\PATH WITH SPACES\diode.cir
+  3) Note there is an error.  The User's Guide indicate that paths
+     with spaces must be wrapped in quotes.
+        runxyce.bat "C:\PATH WITH SPACES\diode.cir"
+  4) Verify that the path with quotes does not generate an error as
+     in step (2) above. 
+
+SERIAL/PARALLEL:
+  This test should be run in SERIAL on Windows only.  
+
+Notes:  03/15/06 tscoffe:  This test can be performed on Unix too, but there
+are some exceptions.  The runxyce script (as written), does not pass parameters
+to Xyce with quotes intact, so you can not use files or directories that have
+spaces in them with the current runxyce script.  But you can use spaces in
+filenames when calling the Xyce binary directly, as long as you put quotes
+around the filename.  Under Windows, the runxyce.bat script _does_ pass
+arguments with quotes.  When the script for this test is run under XTF, it will
+locate the Xyce binary and use that instead, otherwise this test will fail when
+it is passed runxyce, as in release testing.   Therefore, this test can be
+applied to all platforms before release testing, but then should be limited to
+Windows for actual release testing.

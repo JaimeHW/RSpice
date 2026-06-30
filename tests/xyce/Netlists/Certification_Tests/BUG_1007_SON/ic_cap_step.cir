@@ -1,0 +1,14 @@
+Test of .IC with .STEP.  
+
+.ic v(1)=1.0
+
+c1 1 0 1uF 
+R1 1 2 1K
+v1 2 0 0V
+
+.step dec c1:c 1u 100u 1
+.print tran v(1)
+.tran 0 5ms
+.options timeint reltol=1e-6 abstol=1e-6
+.end
+

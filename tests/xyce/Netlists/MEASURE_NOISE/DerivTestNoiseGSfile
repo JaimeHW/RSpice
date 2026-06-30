@@ -1,0 +1,77 @@
+ ***** Measure Functions ***** 
+
+DERIVVROUTAT1 = -8.663736e-01 for AT = 1.000000e+00
+
+DERIVVROUTBAT5 = -5.237892e-01 for AT = 5.000000e+00
+
+DERIVVIOUTBAT5 = 1.986427e-01 for AT = 5.000000e+00
+
+DERIVVROUTAT0.01 = 1.083053e+00 for AT = 1.000000e-02
+
+ATFT = 1.083053e+00 for AT = 1.000000e-02
+
+WHEN = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+WHENFT = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e-02
+
+CONSTANT-AT = 0.000000e+00 for AT = 5.000000e+00
+
+CONSTANT-WHEN1 = 0.000000e+00 at freq = 5.846612e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+CONSTANT-WHEN2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVWHENVROUT1 = -6.026308e-01 at freq = 5.846612e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP1 = 6.948642e-01 at freq = 3.106569e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP2 = 1.303230e+00 at freq = 1.491337e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP3 = 1.303230e+00 at freq = 1.491337e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP4 = 3.170457e-01 at freq = 4.341788e+00
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+DERIVEXP5 = -2.186783e+00 at freq = 5.846612e-01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+FROM1 = 1.286611e-02 at freq = 3.311124e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+03
+
+FROM2 = -1.712949e+00 at freq = 2.889384e-01
+Measure Start Freq= 2.800000e-01	Measure End Freq= 1.000000e+03
+
+FROM3 = 1.286611e-02 at freq = 3.311124e+01
+Measure Start Freq= 3.000000e-01	Measure End Freq= 1.000000e+03
+
+FROM4 = -1.712949e+00 at freq = 2.889384e-01
+Measure Start Freq= 2.600000e-01	Measure End Freq= 2.900000e-01
+
+TO1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.050000e+01
+
+TO2 = -6.263738e-02 at freq = 1.168456e+01
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.200000e+01
+
+DERIVIMV1 = 6.281163e-01 for AT = 5.000000e-02
+
+Netlist warning: DERIVFAIL1 failed. AT value outside frequency sweep window
+DERIVFAIL1 = 0.000000e+00 FAILED for AT = 1.000000e+04
+
+DERIVFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e-02	Measure End Freq= 1.000000e+03
+
+Netlist warning: ATFAILFROM failed. AT value outside measurement window
+ATFAILFROM = 0.000000e+00 FAILED for AT = 1.000000e+00
+
+Netlist warning: ATFAILTO failed. AT value outside measurement window
+ATFAILTO = 0.000000e+00 FAILED for AT = 1.000000e+01
+
+

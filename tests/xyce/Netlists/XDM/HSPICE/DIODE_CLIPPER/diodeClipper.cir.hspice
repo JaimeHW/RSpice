@@ -1,0 +1,31 @@
+* In addition to showing how XDM works on the UUR DIODE clipper example
+* from the Xyce Users' guide, this HSpice netlist also illustrates the
+* problem of converting HSpice .PROBE to Xyce .PRINT
+
+*Libraries
+.lib nom.lib nom
+
+*Analysis directives:
+.TRAN  0.1ms 2ms
+.OPTION CONVERGE=0 ITL1=1000 ITL2=2000 ITL4=1000 RELTOL=0.05 ABSTOL=1.0E-5 VNTOL=.001 PIVTOL=1.0E-10
+.PRINT TRAN V(N04173) V(N03179) V(N03334) V(N04104)
+
+*Voltage Sources
+V1 N04104 0 5Vdc
+V2 N04173 0 AC 1
++SIN 0 10 1KHz
+
+*Diodes
+D1 N03179 N04104 D1N3940
+D2 0 N03179 d1n3940
+
+*Resistors
+R1 N03179 N04173 1k
+R2 N04104 N03179 3.3k
+R3 N03179 0 3.3K
+R4 N03334 0 5.6k
+
+*Capacitor
+C1 N03179 N03334 0.47u
+
+.END

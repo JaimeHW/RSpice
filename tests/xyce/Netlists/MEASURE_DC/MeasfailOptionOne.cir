@@ -1,0 +1,20 @@
+A test of .OPTION MEASURE MEASFAIL=1 
+*******************************************************************
+* A Xyce netlist that has a .OP statement but not a .DC
+* statement will produced FAILED measures for all
+* currently valid DC measures.  That behavior may be changed
+* in a future release.  See SON Bug 997 for more details .
+*********************************************************
+.op
+.PRINT DC V(1) V(2) ; this works even with no .DC statement in the netlist
+
+V1 1 0 1
+R1 1 2 1
+R2 2 1 1
+
+.OPTIONS MEASURE MEASFAIL=1
+.measure dc FitErrorInfPrn error v(2) file=DotOpDotDCRawData.prn comp_function=infnorm indepvarcol=1 depvarcol=2
+
+.END
+
+

@@ -1,0 +1,38 @@
+Unit Test for 4-input OR Digital Device
+
+*COMP v(out_1) reltol=0.02
+
+* Analysis Commands
+.options timeint reltol=1.0e-3
+.tran 10ns 2us
+
+* Sources
+V1 in_1 0  PULSE ({V_HI} {V_LO} 100ns 20ns 20ns 80ns 200ns)
+V2 in_2 0  PULSE ({V_HI} {V_LO} 100ns 20ns 20ns 180ns 400ns)
+V3 in_3 0  PULSE ({V_HI} {V_LO} 100ns 20ns 20ns 380ns 800ns)
+V4 in_4 0  PULSE ({V_HI} {V_LO} 100ns 20ns 20ns 780ns 1600ns)
+
+* Output
+.print tran PRECISION=10 WIDTH=19 v(in_1) v(in_2) v(in_3) v(in_4) v(out_1)
+
+* Set digital default parameters:
+.param R1HI=5 R1LO=200 R0HI=200 R0LO=5 RIN=1000 R1=100
+.param SW=5.e-9  CAPOUT=1.e-12  CAPIN=1.e-12
+.param V_LO=0 V_REF=0 V_HI=3
+
+* Digital power node
+V_dpn dig_pn 0 3V 
+
+UOR1 OR(4) dig_pn 0 in_1 in_2 in_3 in_4 out_1 DMOD
+
+R1 out_1 0 100K
+
+.model DMOD DIG ( CLO=CAPOUT  CHI=CAPOUT
++ S0RLO=R0LO  S0RHI=R0HI  S0TSW=SW
++ S0VLO=-1  S0VHI=1.8
++ S1RLO=R1LO  S1RHI=R1HI  S1TSW=SW
++ S1VLO=1  S1VHI=3
++ RLOAD=RIN   CLOAD=CAPIN 
++ DELAY=20ns )
+
+.end

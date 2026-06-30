@@ -1,0 +1,12 @@
+Netlist to Test Xyce with RLC in recursively included library
+
+*This library will include itself, causing an error.
+.include rlc.lib
+v1 1 0 10 pulse(0 10 0 0 0 10 10)
+
+.tran  0.01 10 0
+* Note: the current has 1 subtracted from it to help with xyce_verify.
+.print tran v(1) {i(v1)-1.0}
+.options timeint reltol=1.0e-3
+.end
+

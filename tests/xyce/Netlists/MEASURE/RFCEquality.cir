@@ -1,0 +1,39 @@
+A test of equality for the RFC level in MAX and MIN
+*******************************************************************************
+* TRIG and TARG use separate functions for calculating the RFC levels. So, they
+* are tested in the RFCEqualityTrigTarg test.
+*
+* AVG, DERIV, DUTY, FIND, FIND-WHEN, INTEG, MAX, MIN, PP and RMS all use a
+* common set of functions.  So, this test only considers MAX and MIN. That
+* should be sufficient for now.
+*
+* Use PWL sources, since we want to test equality for the Rise/Fall/Cross
+* tests for both MAX and MIN.
+
+VPWL1  1  0 PWL(0 0 0.25 0.5 0.5 0 0.75 0.5 1 0)
+VPWL2  2  0 PWL(0 0 0.25 -0.5 0.5 0 0.75 -0.5 1 0)  
+
+R1  1  0  100K
+R2  2  0  100K
+
+.TRAN 0 1
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.01
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2)
+
+* test equality in RFC clauses.  
+* Rising waveform, with MAX measures
+.measure tran maxEqualRise05V1 max v(1) RFC_LEVEL=0.5 RISE=1
+.measure tran maxEqualFall05V1 max v(1) RFC_LEVEL=0.5 FALL=1
+.measure tran maxEqualCross05V1 max v(1) RFC_LEVEL=0.5 CROSS=1
+* if RFC_LEVEL is not specified then a Cross level of 0 is used.
+.measure tran maxEqualCross0V1 max v(1) CROSS=1
+
+* Falling waveform, with MIN measures
+.measure tran minEqualRise05V2 min v(2) RFC_LEVEL=-0.5 RISE=1
+.measure tran minEqualFall05V2 min v(2) RFC_LEVEL=-0.5 FALL=1
+.measure tran minEqualCross05V2 min v(2) RFC_LEVEL=-0.5 CROSS=1
+* if RFC_LEVEL is not specified then a Cross level of 0 is used.
+.measure tran minEqualCross0V2 min v(2) CROSS=1
+
+.END
+

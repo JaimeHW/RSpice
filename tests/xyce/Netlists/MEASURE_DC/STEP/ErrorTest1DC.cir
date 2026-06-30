@@ -1,0 +1,51 @@
+* Test DC mode support for ERROR Measure
+*
+* This bug covers the case of one variable (vsrc1) on 
+* the .DC line, with one variable (vsrc2) in the
+* .STEP statement.
+*
+* See SON Bug 888 for more details.
+******************************************************** 
+
+* Note: the comparison files (RawData) for this test are the
+* same as the onex used for the test MEASURE/ErrorTest1DC
+
+vsrc1   1a 0 1
+rload1a 1a 1b 0.12
+rload1b 1b 0 1
+
+vsrc2   2a 0 1
+rload2a 2a 1b 0.2
+
+.DC vsrc1 1 5 1
+.STEP VSRC2 2 5 3
+.print dc vsrc1:DCV0 vsrc2:DCV0 RLOAD1A:R v(1a) v(2a) v(1b)  
+
+*Test with FILE= in .PRN format.  All three norms
+.measure dc FitErrorInfPrn error v(1b) file=ErrorTest1DCRawData.prn comp_function=infnorm indepvarcol=1 depvarcol=5
+.measure dc FitErrorL1Prn error v(1b) file=ErrorTest1DCRawData.prn comp_function=l1norm indepvarcol=1 depvarcol=5
+.measure dc FitErrorL2Prn error v(1b) file=ErrorTest1DCRawData.prn comp_function=l2norm indepvarcol=1 depvarcol=5
+
+*Test with FILE= in .CSD format.
+.measure dc FitErrorInfcsd error v(1b) file=ErrorTest1DCRawData.csd comp_function=INFNORM indepvarcol=0 depvarcol=5
+.measure dc FitErrorL1csd error v(1b) file=ErrorTest1DCRawData.csd comp_function=L1NORM indepvarcol=0 depvarcol=5
+.measure dc FitErrorL2csd error v(1b) file=ErrorTest1DCRawData.csd comp_function=L2NORM indepvarcol=0 depvarcol=5
+
+*Test with FILE= in .CSV format.
+.measure dc FitErrorInfcsv error v(1b) file=ErrorTest1DCRawData.csv comp_function=INFNORM indepvarcol=0 depvarcol=4
+.measure dc FitErrorL1csv error v(1b) file=ErrorTest1DCRawData.csv comp_function=L1NORM indepvarcol=0 depvarcol=4
+.measure dc FitErrorL2csv error v(1b) file=ErrorTest1DCRawData.csv comp_function=L2NORM indepvarcol=0 depvarcol=4
+
+* Test with FILE= in Comma-Delimited .PRN format
+.measure dc FitErrorInfCDPrn error v(1b) file=ErrorTest1DCCommaDelimRawData.prn comp_function=infnorm indepvarcol=1 depvarcol=5
+.measure dc FitErrorL1CDPrn error v(1b) file=ErrorTest1DCCommaDelimRawData.prn comp_function=l1norm indepvarcol=1 depvarcol=5
+.measure dc FitErrorL2CDPrn error v(1b) file=ErrorTest1DCCommaDelimRawData.prn comp_function=l2norm indepvarcol=1 depvarcol=5
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.  
+* This is needed for compatibility for testing with a verbose build, which 
+* is often used by the Xyce developers.
+.measure dc lastMeasure max v(1b) 
+
+.end
+
+

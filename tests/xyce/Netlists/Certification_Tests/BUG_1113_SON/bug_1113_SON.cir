@@ -1,0 +1,17 @@
+* Test E and G source syntaxes with VOL and CUR keywords.
+* For HSPICE compatibility, Xyce allows VOL as a synonym for
+* VALUE for the E-source and CUR as a synonym for VALUE for
+* the G-source
+
+V1 1 0 1
+R1 1 0 1
+
+E2 2 0 VOL=2*V(1)
+R2 2 0 1
+
+G3 3 0 CUR=3*V(1)
+R3 3 0 1
+
+.DC V1 1 5 1
+.PRINT DC V(1) V(2) V(3)
+.END

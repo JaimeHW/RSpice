@@ -1,0 +1,24 @@
+A test of the measure find/when functionality.
+* When clause compares two voltages.  
+*****************************************************************
+*
+* a few sources of different types
+VS  1  0  SIN(0 1.0 1KHZ 0 0)
+VP  2  0  PWL(0.0 0.1 1ms 1.0 2ms 0.1)
+VDC 3  0  0.5
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+
+.TRAN 0 2ms 0 0.01ms
+.STEP VDC 0.25 0.75 0.5
+
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3)
+
+.measure tran v1hitv2 when v(1)=v(2) 
+.measure tran v1hitv3 when v(1)=v(3) 
+.measure tran v2whenv1hitv3 FIND v(2) when v(1)=v(3) 
+
+.END
+

@@ -1,0 +1,19 @@
+*Xyce Gold Netlist 
+
+*Analysis directives: 
+.TRAN  0 200ms
+.PRINT TRAN FORMAT=PROBE I(V_V1) I(R_R1) I(L_L1) I(V_V2) I(R_R2) I(L_L2)
+
+* Same two R-L circuits, but with different L values in the Model Cards
+R_R1 1 1a 1K
+L_L1 1a 0 L_L1_MOD 1m 
+.MODEL L_L1_MOD L L=5000 TC1=0 TC2=0
+V_V1 1 0 PULSE(0 1 10U 1U 1U 100m)
+
+R_R2 2 2a 1K
+L_L2 2a 0 L_L2_MOD 10m 
+.MODEL L_L2_MOD L L=100 TC1=0 TC2=0
+V_V2 2 0 PULSE(0 1 10U 1U 1U 100m)
+
+.END
+

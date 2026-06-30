@@ -1,0 +1,20 @@
+Testing Hspice version of "limit" functionality
+*
+*  limit(nominal,abs_variation)
+*
+*  If running with sampling, then this operator returns either
+*  nominal+abs_variation. or nominal-abs_variation, with equal
+*  probability.
+*
+*  If running without sampling, this operator should return the
+*  nominal value.  This test is a non-sampling test, so the value
+*  of "res" should be 1.0.
+*
+.param res = {limit(1,1)}
+
+I1 1 0 DC -1
+R1 1 0 res
+
+.DC I1 -1 -1 -.1
+.print DC I(I1) V(1)
+.end

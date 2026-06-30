@@ -1,0 +1,31 @@
+*********************************************************************
+* Xyce netlist for testing Spectre comment lines.  A simple
+* V-R-R circuit suffices.  See SRN Bug 2065, and the Spectre
+* netlist, for the format of the Spectre comment and
+* continuation lines that are being tested.  However, the 
+* brief summary of the comment lines is:
+*   1) Comment lines that start with //
+*
+*   2) Comment lines that start with *
+*
+*   3) In-line comments like this that have "space followed by //":
+*     R1 (net7 V2) resistor r=1K // this is an inline Spectre comment
+*
+* We also check that the title line (first line) of the Spectre 
+* netlist appears in the translated Xyce netlist.
+*
+* The final check is on continuation lines that don't have a space 
+* before the backslash (\) continuation character.  See the instance 
+* line for V1 in the Spectre netlist.
+*********************************************************************
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PRINT TRAN V(V2) 
+
+RR1        net7 V2  1k 
+RR2        0 V2 2K 
+VV1        net7 0 SIN(0 1 1KHz 0 0 0)
+
+.END
+

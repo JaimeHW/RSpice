@@ -1,0 +1,49 @@
+***************************************************************
+* Calculate both the direct and adjoint sensitivities for
+* the case of two objective functions and two parameters.
+* This file has both a .PRINT AC and a .PRINT SENS line.
+*
+* The key points (after the changes for Issue 222) are:
+*
+*   1) the -o command line option should produce output from
+*      the .PRINT AC output.
+*
+*   2) there should also be output from the .PRINT SENS line.
+*
+*   3) the .PRINT AC_IC output should be made as a "fallback"
+*      output, since the netlist has a .OP statement in it.
+*
+*   4) the output should go to the file specified by -o,
+*      and not to the default file name or the file
+*      specified with FILE=.  It should be a FORMAT=STD
+*      file with space as the delimiter, with the default
+*      extensions (e.g., dashoFile.FD.prn or dashoFile.TD.prn
+*      or dashoFile.FD.SENS.prn).
+*
+*   5) the .sh file will run this netlist with -delim COMMA
+*      to verify that command line option is ignored when
+*      -o is also specified.
+*
+*   6) the .sh file will use -o acSensOutput.FD.prn to test
+*      that the default print extension is removed from the
+*      dashoFilename.
+*
+*
+* See SON Bug 1170 for more details.
+***************************************************************
+
+* Trivial high-pass filter
+
+R2 c 0 1
+R1 b c 1
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.SENS OBJVARS=b,C PARAM=R1:R,c1:c
+.options sensitivity direct=1 adjoint=1 stdoutput=1
+.print AC file=acSensFoo v(b) R1:R
+.PRINT SENS file=acSensFoo1 FORMAT=CSV v(c) C1:C
+.ac dec 5 100Hz 1e6
+.OP
+
+.end

@@ -1,0 +1,15 @@
+This is a test of printing values from .param lines
+
+.param Volt0=1
+.param Volt2=2
+.param T1=.05
+V1 1 0 PWL ( 0 {VOLT0} {T1} {VOLT2})
+R1 1 0 1
+bv1 vol2 0 v={volt2}
+rv1 vol2 0 1
+
+.print tran v(1) I(v1) v(vol2)
+
+.tran 1ms .1s
+.end
+

@@ -1,0 +1,47 @@
+****************************************************
+* Test Touchstone1 output using a 1-Port Linear
+* analysis.  This verifies that one netlist can request
+* S-, Y- and Z-parameter output in three separate
+* output files.
+*
+* There is no .PRINT AC line. This tests that the
+* logic for requesting that the S-parameter and
+* Z-parameter matrices get made and converted works
+* correctly even in the absence of requests for
+* S() or Z() operators on a .PRINT AC line.
+*
+* See SON Bug 1199 for more details.
+****************************************************
+
+* RC ladder circuit
+* Note that all ports (P devices) must use a common
+* Reference Node, which is 0 here.
+P1 1  0  port=1  z0=50
+
+C1 2 0 1e-2
+Rgs 1 2 0.02
+
+.subckt RCBlock IN OUT GND
+R1 IN OUT 20
+C1 IN OUT 1p
+Cg1 OUT GND 1p
+.ends
+
+X1 2 3 0 RCBlock
+X2 3 4 0 RCBlock
+X3 4 5 0 RCBlock
+X4 5 6 0 RCBlock
+X5 6 7 0 RCBlock
+X6 7 8 0 RCBlock
+X7 8 9 0 RCBlock
+X8 9 10 0 RCBlock
+X9 10 11 0 RCBlock
+X10 11 12 0 RCBlock
+
+.AC DEC 10 10  1e5
+
+.LIN FORMAT=TOUCHSTONE
+.LIN FORMAT=TOUCHSTONE LINTYPE=Y FILE=multi-parameter.cir.yparams.s1p
+.LIN FORMAT=TOUCHSTONE LINTYPE=Z FILE=multi-parameter.cir.zparams.s1p
+
+.END

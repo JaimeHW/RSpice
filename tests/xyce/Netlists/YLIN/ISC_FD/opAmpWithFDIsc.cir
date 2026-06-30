@@ -1,0 +1,17 @@
+* 2-port example with made-up frequency-domain short-circuit current data.
+* This netlist also uses an ideal gain element (with a gain
+* of 5) as a stand-in for an actual Op Amp circuit.
+*
+* See SON Bugs 1215 and 1294 for more details.
+**************************************************************************
+
+.options hbint numfreq=10 tahb=0
+.hb 1e4
+.print hb v(1) v(2) i(v1)
+
+v1 1 0  sin  0 1 1e4
+YLIN YLIN1 1 0 2 0 YLIN_MOD1
+.MODEL YLIN_MOD1 LIN TSTONEFILE=opAmpWithFDIsc.cir.s2p ISC_FD=true
+R2 2 0 50
+
+.end

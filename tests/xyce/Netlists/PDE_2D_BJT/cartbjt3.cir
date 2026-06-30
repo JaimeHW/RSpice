@@ -1,0 +1,85 @@
+*-------------------------------------------------------------------------
+* Copyright Notice
+*
+* Copyright (c) 2000, Sandia Corporation, Albuquerque, NM.
+*-------------------------------------------------------------------------
+*
+*-------------------------------------------------------------------------
+* Filename       : $RCSfile$
+*
+* Purpose        : Cartesian PDE BJT test circuit
+*
+* Special Notes  : This circuit is identical to the cartbjt2.cir circuit, 
+*                  except that the final voltage values are really large, 
+*                  and the homotopy is intentionally very agressive to 
+*                  produce step failures.  This circuit is a test for
+*                  bug 1958 on charleston.
+*
+* Creator        : Eric R. Keiter, SNL
+*
+* Creation Date  : 4/22/2015
+*
+* Revision Information:
+* ---------------------
+*
+* Revision Number: $Revision$
+*
+* Revision Date  : $Date$
+*
+* Current Owner  : $Author$
+*-------------------------------------------------------------------------
+VPOS  1 0 DC 5V
+BBB   6 0 V={-V(T1)}
+RE    1 2 2K
+RB    3 4 190K
+
+YPDE BJT 5 3 7 PDEBJT meshfile=internal.msh 
++ node = {name = collector, base, emitter}
++ sgplotlevel=0 tecplotlevel=1
++ l=2.0e-3  w=1.0e-3
++ nx=30     ny=15
++ mobmodel=carr
+* The old intrinsic calculation was used to generate gold standard.
+* It is inaccurate, however. 
++ useOldNi=true
+
+* Zero volt sources acting as an ammeter to measure the
+* base, collector, and emmitter currents, respectively
+VMON1 4 6 0
+VMON2 5 0 0
+VMON3 2 7 0 
+
+VMON T2 0 0.0
+RMON T2 0 1.0
+
+VBB T1 0 2V
+RBB T1 0 1.0
+
+.MODEL PDEBJT   ZOD  level=2
+
+************************************
+* **** Start Homotopy Setup ****
+************************************
+.options nonlin nlstrategy=0 searchmethod=2
++ maxstep=30 maxsearchstep=1 continuation=1
+
+.options loca stepper=0 predictor=0 stepcontrol=0
++ conparam=VPOS,VBB
++ initialvalue=0.0,0.0 minvalue=0.0,0.0 maxvalue=15.0,15.0
++ initialstepsize=15.0,15.0 minstepsize=1.0e-4,1.0e-4 maxstepsize=15.0,15.0
++ aggressiveness=1.0,1.0
++ maxsteps=5000 maxnliters=200
+**********************************
+* **** End Homotopy Setup ****
+**********************************
+.options TIMEINT reltol=1.0e-3 abstol=1.0e-6 doubledcop=drift_diffusion
+
+.options LINSOL type=klu
+
+.DC VMON 0.0 0.0 1.0
+.PRINT DC V(T2) V(1) V(6) I(VMON1) I(VMON2) I(VMON3)
+
+.print homotopy V(T2) V(1) V(6) I(VMON1) I(VMON2) I(VMON3)
+
+.END
+

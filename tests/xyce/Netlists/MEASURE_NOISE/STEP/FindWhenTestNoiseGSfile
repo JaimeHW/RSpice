@@ -1,0 +1,72 @@
+ ***** Measure Functions ***** 
+
+WHENVR4 = 1.593500e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENVI4 = 2.661898e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENVR3 = 2.236032e-01 at freq = 1.593500e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENVI3 = 7.919046e-02 at freq = 2.661898e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+AT1 = 6.185508e-02 for AT = 1.000000e+00
+
+AT30 = 1.247232e-01 for AT = 3.000000e+01
+
+AT50 = 1.077652e+00 for AT = 5.000000e+01
+
+FINDVM3AWHENVM4EXP1 = 2.000000e-01 at freq = 1.072230e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVM3AWHENVM4EXP2 = 2.000000e-01 at freq = 1.072230e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVM3AWHENVM4EXP3 = 1.200000e+00 at freq = 1.072230e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVM3AWHENVM4EXP4 = 1.200000e+00 at freq = 1.072230e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVR3AWHENVM4EXP5 = 1.249768e-01 at freq = 7.958123e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+LASTMEASURE = 4.984243e-01 at freq = 1.000000e+02
+ ***** Measure Functions ***** 
+
+WHENVR4 = 1.073853e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENVI4 = 1.776112e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENVR3 = 1.490436e-01 at freq = 1.073853e+01
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+WHENVI3 = 5.281598e-02 at freq = 1.776112e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+AT1 = 9.101400e-02 for AT = 1.000000e+00
+
+AT30 = 8.645272e-02 for AT = 3.000000e+01
+
+AT50 = 1.052491e+00 for AT = 5.000000e+01
+
+FINDVM3AWHENVM4EXP1 = 1.333333e-01 at freq = 7.163666e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVM3AWHENVM4EXP2 = 1.333333e-01 at freq = 7.163666e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVM3AWHENVM4EXP3 = 1.133333e+00 at freq = 7.163666e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVM3AWHENVM4EXP4 = 1.133333e+00 at freq = 7.163666e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+FINDVR3AWHENVM4EXP5 = 8.294698e-02 at freq = 5.308204e+00
+Measure Start Freq= 1.000000e+00	Measure End Freq= 1.000000e+02
+
+LASTMEASURE = 4.992979e-01 at freq = 1.000000e+02

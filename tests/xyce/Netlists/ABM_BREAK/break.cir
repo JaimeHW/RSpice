@@ -1,0 +1,23 @@
+Test Circuit for Breakpoints in Dependent Source
+********************************************************************************
+* Test setting of breakpoint for time-dependent expressions that appears in
+* dependent sources.
+*
+* Breakpoints should be generated for node 1 at:
+*       ( 0.01, 0.011, 0.061, 0.062 ) + 0.15 * N
+* Breakpoints should be generated for node 2 at:
+*       0.3, 0.301, 0.302, 0.6, 1
+* Breakpoints should be generated for node 3 at:
+*       ( 0.712867414, 0.128713259 ) + 0.2 * N
+*
+* The circuit should miscompare if breakpoints are missed
+********************************************************************************
+V1   1  0  PULSE(0 3 0.01 1ms 1ms 0.05 0.15)
+B2   2  0  V = {Table(time, 0, 0, 0.3, 0, 0.301, 2, 0.302, 2, 0.6, 1, 1, 1)}
+B3   3  0  V = {v(2) + v(1) * if(abs(sin(5*PI*time)) > 0.9, (abs(sin(5*PI*time))-0.9)*10, 0)}
+R1   1  0  1K
+R2   2  0  1K
+R3   3  0  1K
+.tran 1ns 1
+.PRINT TRAN V(1) V(2) V(3)
+.END

@@ -1,0 +1,3 @@
+.subckt testsub a b c
+r1 a b 1
+r2 b c 1

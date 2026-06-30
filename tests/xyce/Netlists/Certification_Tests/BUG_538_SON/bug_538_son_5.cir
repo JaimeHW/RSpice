@@ -1,0 +1,37 @@
+Multiple print HB lines
+* This test of a simple inverter circuit has multiple .print HB lines to
+* the same file.  It should produce a single file with contents that
+* are identical to one produced by a single .print line with all the variables
+* on it.
+
+.hb 1e5
+.print hb {v(vout)+1.0}
+.print hb {v(in) +4.0}
+.print hb {v(1) +4.0}
+.print hb ig(MP1)
+.print hb ig(MN1)
+.print hb is(MP1)
+.print hb id(MN1)
+.print hb id(MP1)
+
+.options hbint numfreq=30 STARTUPPERIODS=2
+.options linsol-hb type=aztecoo 
+
+
+VDDdev 	VDD	0	3V
+RIN	IN	1	1K
+*                   v1 v2   td  tr  tf   pw   per
+*VIN1  1	0  5V PULSE (5V 0V 1.5us 5ns 5ns 1.5us 3us)
+*VIN1  1	0  5V PULSE (5V 0V 1.5us 0.15us 0.15us 1.5us 3.3us)
+VIN1 1 0 sin 0  3V 1e5 0 0
+
+R1    VOUT  0  10K
+C2    VOUT  0  0.1p
+MN1   VOUT  IN 0 0 CD4012_NMOS L=5u W=175u
+MP1   VOUT IN VDD VDD CD4012_PMOS L=5u W=270u
+**************************************************************************
+.MODEL cd4012_pmos PMOS (LEVEL=2)
+**************************************************************************
+.MODEL cd4012_nmos NMOS (
++ LEVEL = 2)
+.END

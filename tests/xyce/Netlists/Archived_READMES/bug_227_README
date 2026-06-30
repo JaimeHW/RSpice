@@ -1,0 +1,46 @@
+==>BUG_229/ README <==
+Bug Number: BUG_229
+Owner: Tom Russo
+Test Netlists:  bug_229_baseline.cir
+			bug_229_t1.cir 
+GS Files: none
+Mode: Serial
+Comparator: xyce_verify.pl
+Version of Xyce: Release_2.1    # the first version where this bug was tested.
+
+Description:
+=======
+This test case tests nested function handling.
+
+According to the original bug report, prior to release 1.1 Xyce would mishandle evaluation of nested functions.
+
+	?If a B-source contains nested functions such as in the following:
+		B1 n1 n2 V={f(g(val)}
+	Then the function g does not get resolved properly.?
+
+The original test case, which was exactly the same as the old netlist for bug 227, and only slightly different from the old netlists for bug 223 and 224, didn?t even HAVE such a B source (it did have a function that was itself defined in terms of another function)
+
+This set of bug test netlists attempts to test nested functions without relying on the overly complex (bug 406) and numerically troublesome (bug 594) test case that was originally used for this bug.
+
+
+Procedure:
+=======
+
+Run  all netlists;
+Compare the output of t* netlist to output of the bug_229_baseline.cir using xyce_verify.pl:
+	runxyce bug_229_baseline.cir
+	runxyce bug_229_t1.cir
+	runxyce bug_229_t2.cir
+[? ]
+	xyce_verify.pl bug_229_baseline.cir bug_229_baseline.cir.prn \ 	bug_229_t1.cir.prn
+	xyce_verify.pl bug_229_baseline.cir bug_229_baseline.cir.prn \ 	bug_229_t2.cir.prn
+[? ]
+
+Verification:
+========
+
+Passes if Xyce and xyce_verify.pl return a 0 exit code.
+
+Notes:
+=========
+This test was created long after the original bug was fixed. The bug was fixed prior to Release 1.1, and this test was entered just prior to Release 2.1.  I have attempted to capture the correct issue in these tests, but that is difficult given the fact that the original bug report mentioned one type of failure and the original gut test tested something else entirely.

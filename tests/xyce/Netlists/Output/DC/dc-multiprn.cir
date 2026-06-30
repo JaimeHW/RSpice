@@ -1,0 +1,15 @@
+DC test of print output format
+*
+* Trivial resistor circuit, just do a DC sweep and watch the output
+*
+
+.dc v1 0 10 .1
+
+R1 1 0 20
+R2 2 1 10
+V1 2 0 DC 0V
+
+.print DC file=dc-multiprn.cir.V1.prn v(2) I(v1)
+.print DC file=dc-multiprn.cir.V2.prn v(2) v(1) I(v1)
+
+.end

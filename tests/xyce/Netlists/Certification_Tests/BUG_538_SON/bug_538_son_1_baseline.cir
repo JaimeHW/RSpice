@@ -1,0 +1,11 @@
+Test of multiple print lines -- baseline
+* This netlist has a single print line, and is meant to be compared to
+* the output of the netlist with the matching name without "_baseline" in it.
+R1 1 0 10
+V1 1 0 sin (0 10 10MEG 0 0)
+
+.print TRAN v(1) I(v1)
+
+.tran 1ns 10ns
+
+.end

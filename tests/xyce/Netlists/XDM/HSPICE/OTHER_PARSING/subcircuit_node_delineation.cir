@@ -1,0 +1,40 @@
+*subcircuit instance parameters
+* Netlist tests XDM subcircuit translations.
+* XDM should keep the HSPICE "." node delineation
+* when translating to the Xyce in the output variables as
+* well as in the .IC statement. In addition, wildcards
+* in subcircuit delineations ought to be removed. 
+* Finally, XDM ought to be able to distinguish between
+* subckt instance parameters and parameters inside
+* subckts. See issues #66, #116, #136 and #293 on XDM 
+* gitlab.
+
+.OPTIONS DEVICE TNOM=25 
+.SUBCKT subckt_resistor a b PARAMS: RESISTANCE1=1 RESISTANCE2=1
+.PARAM VAL2=3 VAL1=2
+R1 a a1 R=resistance1
+R2 a1 a2 R=resistance2
+R3 a2 b R={VAL1+VAL2}
+.ENDS
+
+.SUBCKT subckt_rc a b PARAMS: RESISTANCE=1 CAPACITANCE=10p
+.PARAM VAL1=10
+R1 a a1 R=resistance
+R2 a1 b R=VAL1
+C1 b 0 C=capacitance
+.ENDS
+
+.PARAM VAL3=10
+VA 1 0 PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+X1 1 2 SUBCKT_RESISTOR PARAMS: RESISTANCE1=VAL3 RESISTANCE2=5
+X2 2 3 SUBCKT_RC PARAMS: RESISTANCE=10 CAPACITANCE=1u
+C2 3 0 C=10u
+.IC V(X2.B)=0.5
+
+.TRAN 10u 10ms 0 UIC
+
+* The .PRINT line needs the actual output variable that will be
+* printed out (rather an output variable with wildcards) for 
+* xyce_verify to succeed. Still, this accomplishes the check for
+* correct translation and output of wildcards from HSPICE.
+.PRINT TRAN FORMAT=PROBE V(X1.A2) V(X1.A1) V(X2.A1) V(X2.B) V(3)

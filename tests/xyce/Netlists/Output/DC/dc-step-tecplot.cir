@@ -1,0 +1,23 @@
+PNP Bipolar Transistor Circuit Netlist
+* Test of .step with tecplot output for DC.
+VPOS  1 0 DC 5V
+VBB   6 0 DC -2V
+RE    1 2 2K
+RB    3 4 190K
+Q 5 3 7 PBJT
+*
+* Zero volt sources acting as an ammeter to measure the
+* base, collector, and emmitter currents, respectively
+VMON1 4 6 0
+VMON2 5 0 0
+VMON3 2 7 0 
+.MODEL PBJT PNP (IS=100FA BF=60)
+.DC VPOS 0 5 1
+
+* This netlist can use the shorthand" syntax of .STEP VBB 
+* rather than .STEP VBB:DCV0 since the V device has DCV0
+* as it instanceDefaultParameter.  See SON Bug 972 for 
+* more details. 
+.STEP VBB 0 -2 -0.5
+.PRINT DC format=tecplot V(1) V(6) I(VMON1) I(VMON2) I(VMON3)
+.END

@@ -1,0 +1,13 @@
+* This netlist is invalid because the .TRAN statement
+* has been commented out.  The test's goal is to verify
+* that the Xyce error messages appear in stdout and that
+* the xyce_interface.py does not crash afterwards.
+
+V1 1 0 SIN(0 1 1)
+R1 1 0 1
+
+*.TRAN 0 1
+.PRINT TRAN V(1)
+
+.END
+

@@ -1,0 +1,31 @@
+* correct_instance_parameters_translation_inside_subckt
+* Xyce netlist for corresponding HSPICE netlist.
+* Netlist tests XDM will translate the correct instance
+* parameters for a device based on it's associated .MODEL 
+* statement when they are both in a .SUBCKT. The results
+* are compared to a gold standard output, which was 
+* verified against HSPICE's output (see  issue #138 on 
+* on XDM gitlab).
+
+.OPTIONS DEVICE TNOM=25 TEMP=25
+VD 1 0 DC 0.05
+VG 2 0 DC 0
+X1 1 2 0 0 nfet 
++ PARAMS: L=60e-9 W=210e-9 AD=34e-15 AS=34e-15 PD=750e-9 PS=750e-9 NRD=480e-3 NRS=480.2e-3 NF=1 SA=160e-9 SB=160e-9 SD=0
+
+.DC LIN vg 0 1.2 0.05
+.PRINT DC FORMAT=PROBE V(2) I(VD)
+
+.SUBCKT nfet 1 2 3 4 
++ PARAMS: W=0u L=0u AS=0p AD=0p PS=0u PD=0u NRD=0 NRS=0 DTEMP=0 NF=1 SA=0 SB=0 SD=0
+
+Main 1 2 3 4 nfet 
++ PS=ps AD=ad L=l NF=nf NRD=nrd W=w AS=as PD=pd NRS=nrs SB=sb SA=sa SD=sd
+
+
+.MODEL nfet NMOS LEVEL=14
+
+.ENDS nfet
+
+.END
+

@@ -1,0 +1,46 @@
+Testing VBIC NAND gate with .STEP
+
+.tran 20ns 10us
+
+.step XN1:RTA1:R 0.9e6 1e6 1e5
+
+.options device mincap=1nf debuglevel=-100
+.options timeint debuglevel=-100
+
+VDD 	G_VDDNODE	0	5V
+VIN1          1 0  5V PULSE (5V 0V 3us 0.5ns 0.5ns 4us 8.275us)
+VIN2          2 0  0V PULSE (0V 5V 2us 0.5ns 0.5ns 4us 8.275us)
+
+XN1  1  2  OUT1  NAND
+XN2  1   OUT1  OUT2  NAND
+
+*comp V(OUT1) offset=1.0e-4
+*comp V(OUT2) offset=1.0e-4
+.print tran V(OUT1) v(OUT2) V(1) V(2)
+
+.subckt nand   INP1  INP2  VOUT
+RB1	G_VDDNODE	VB1	4K
+QIN1	VB2	VB1	INP1	dta1 vbicmodel
+QIN2	VB2	VB1	INP2	dtb1 vbicmodel
+RC2	G_VDDNODE	VC2	1.6K
+Q3	VC2	VB2	VB3	dtc1 vbicmodel
+RC3	G_VDDNODE	VOUT	4K
+Q4	VOUT	VB3	0	dtd1 vbicmodel
+RB3	VB3	0	1K
+
+rta1         dta1    0      1e6
+rtb1         dtb1    0      1e6
+rtc1         dtc1    0      1e6
+rtd1         dtd1    0      1e6
+.ENDS
+
+.model vbicmodel npn
++ level=11
++ RBI=10 RBP=1e-9 RBX=3.5 RCI=1.8 RCX=4.5 RE=0.8 RS=1e+10
++ RTH=200
++ IS=6e-24
++ IBCI=1.6e-14 IBCN=9.4e-14 IBEI=5.9e-24 IBEN=2.4e-17
++ NBBE=1 NCI=1.933 NCN=1.97 NCNP=2 NEI=1.169 NEN=2.21 NF=1.02 NFP=1 NKF=0.12
++ VBBE=7.7
+
+.END

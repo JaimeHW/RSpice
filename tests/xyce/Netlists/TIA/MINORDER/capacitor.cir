@@ -1,0 +1,64 @@
+Regression test to show proper transient RC circuit
+********************************************************************************
+* Tier No.:  1
+* Directory/Circuit Name:  CAPACITOR/capacitor.cir
+* 
+* Todd Coffey (circuit copied from Bug 128,280,908, Tom Russo)
+*
+* This is a simple RC circuit used to test the method of manufactured solution (MMS) for order verification (OV) of the time integrator (TI).
+* Using the Kirchhoff voltage low, the differential equation representing this simple network is 
+*           (V(Source)-V(1))/R=C*(dV(1)/dt)   (1) and 
+*            V(Source)=V(1)+RC*(dV(1)/dt)     (2)
+*  We can manufacture analytic solution for V(1), substitute it in (2) and find  V(Source). 
+*  V(Source)is simulated in Xyce using B source and the results for V(1)(voltage drop across the capacitor) produced by Xyce 
+*  and a scrip that calculate V(1) analytically are compared. 
+*  To verify the order of accuracy of the time integrator, the following steps need to be executed:
+*  For a given order x :
+*    1.	Start with relatively large time step delta t.
+*    2.	Each sub-sequential value for  delta t is halved.
+*    3.	For each delta t, compute the relative L2 norm as follows:
+*   error =SQRT(1/N*sum_{i=1}^{N}((V1xyce(i)-V1gs(i))/V1gs(i))^2
+*    4.	Consider at minimum   six values for delta t .
+*    5.	Once the L2 error is calculated for each delta t, the errors calculations are fitted to power low C*(delta t)^x 
+* via least squares, where C is to be determined by the fit and x is the order of  the time integrator.
+*
+* The provided perl script will generate the correct analytic solution for this
+* circuit.  Simply run as "./rc.cir.prn.gs.pl" and it will take the rc.cir.prn
+* file and generate an rc.cir.prn.gs file which uses the same time points as in
+* rc.cir.prn.
+*
+* The gold standard was generated from 
+* > ./rc.cir.prn.gs.pl
+* > cp rc.cir.prn.gs ../../OutputData/CAPACITOR/rc.cir.prn
+*
+* These high relative and absolute tolerances are required to match the
+* analytic solution.
+*
+********************************************************************************
+.param C=1uF R=1K A=10 frequency=10K S={2*pi*frequency} B=10
+
+*.FUNC soln(t) {A*cos(S*t)}
+*.FUNC source(t) {A*cos(S*t)-A*S*R*C*sin(S*t)}
+
+.FUNC soln(t) {B+A*cos(S*t)}
+.FUNC source(t) {B+A*cos(S*t)-A*S*R*C*sin(S*t)}
+
+*.FUNC soln(t) {A*t*t}
+*.FUNC source(t) {A*t*t+2*A*R*C*t}
+
+*.FUNC soln(t) {A*sin(S*t)}
+*.FUNC source(t) {A*sin(S*t)+A*S*R*C*cos(S*t)}
+
+*.FUNC soln(t) {B+exp(-A*t)}
+*.FUNC source(t) {B+exp(-A*t)-A*R*C*exp(-A*t)}
+
+*.FUNC soln(t) {B+exp(A*t)}
+*.FUNC source(t) {B+exp(A*t)+A*R*C*exp(A*t)}
+
+c1 1 0 {C} IC={soln(0.0)}
+R1 1 2 {R}
+B1 2 0 V={source(TIME)}
+.print tran v(1)
+.tran 0 5ms 
+.options timeint reltol=1e-4 abstol=1e-4 maxord=5 minord=4
+.end

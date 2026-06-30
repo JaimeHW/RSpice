@@ -1,0 +1,4 @@
+serial, parallel, nightly, output
+valgrind
+mpde, wampde
+required:fft

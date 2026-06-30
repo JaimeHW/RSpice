@@ -1,0 +1,22 @@
+* Invalid inductor lines within a mutual inductor definition
+
+Vinput node1 0 sin(0 14 120 0 0)
+
+*A and B must be numbers
+Llead1 node1 0 A
+Llead2 node2 node3 {B}
+Llead3 node3 node4 100
+K1 Llead1 Llead2 Llead3 1.0 nlcore
+
+.model nlcore CORE c=0.001
+
+rload1   node2 0 100
+rload2   node3 0 100
+rpathtg1 node4 0 1
+
+.print tran v(node1) v(node2)
+
+.tran 0 1e-3
+
+.end
+

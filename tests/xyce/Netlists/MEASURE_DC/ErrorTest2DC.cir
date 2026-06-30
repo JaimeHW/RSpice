@@ -1,0 +1,46 @@
+* Test DC mode support for ERROR Measure
+*
+* This bug covers the case of two variables in the .DC
+* line without a .STEP statement.
+*
+* See SON Bug 888 for more details.
+********************************************************
+
+* Note: comparison file (RawData) was made was rload1a=0.1.
+* The simulation is run with rload1a=0.12.
+vsrc1   1a 0 1
+*rload1a 1a 1b 0.1
+rload1a 1a 1b 0.12
+rload1b 1b 0 1
+
+vsrc2   2a 0 1
+rload2a 2a 1b 0.2
+
+.DC vsrc1 1 5 1 vsrc2 2 5 3
+
+* Note: vsrc1:DCV0 is the syntax for printing the DC value of vsrc1,
+.print dc vsrc1:DCV0 vsrc2:DCV0 RLOAD1A:R v(1a) v(2a) v(1b) 
+
+*Test with FILE= in .PRN format.  All three norms
+.measure dc FitErrorInfPrn error v(1b) file=ErrorTest2DCRawData.prn comp_function=infnorm indepvarcol=1 depvarcol=6
+.measure dc FitErrorL1Prn error v(1b) file=ErrorTest2DCRawData.prn comp_function=l1norm indepvarcol=1 depvarcol=6
+.measure dc FitErrorL2Prn error v(1b) file=ErrorTest2DCRawData.prn comp_function=l2norm indepvarcol=1 depvarcol=6
+
+*Test with FILE= in .CSD format.
+.measure dc FitErrorInfcsd error v(1b) file=ErrorTest2DCRawData.csd comp_function=INFNORM indepvarcol=0 depvarcol=6
+.measure dc FitErrorL1csd error v(1b) file=ErrorTest2DCRawData.csd comp_function=L1NORM indepvarcol=0 depvarcol=6
+.measure dc FitErrorL2csd error v(1b) file=ErrorTest2DCRawData.csd comp_function=L2NORM indepvarcol=0 depvarcol=6
+
+*Test with FILE= in .CSV format.
+.measure dc FitErrorInfcsv error v(1b) file=ErrorTest2DCRawData.csv comp_function=INFNORM indepvarcol=0 depvarcol=5
+.measure dc FitErrorL1csv error v(1b) file=ErrorTest2DCRawData.csv comp_function=L1NORM indepvarcol=0 depvarcol=5
+.measure dc FitErrorL2csv error v(1b) file=ErrorTest2DCRawData.csv comp_function=L2NORM indepvarcol=0 depvarcol=5
+
+* Test with FILE= in Comma-Delimited .PRN format
+.measure dc FitErrorInfCDPrn error v(1b) file=ErrorTest2DCCommaDelimRawData.prn comp_function=infnorm indepvarcol=1 depvarcol=6
+.measure dc FitErrorL1CDPrn error v(1b) file=ErrorTest2DCCommaDelimRawData.prn comp_function=l1norm indepvarcol=1 depvarcol=6
+.measure dc FitErrorL2CDPrn error v(1b) file=ErrorTest2DCCommaDelimRawData.prn comp_function=l2norm indepvarcol=1 depvarcol=6
+
+.end
+
+

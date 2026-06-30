@@ -1,0 +1,13 @@
+N-Channel Mosfet Circuit 
+**************************************************************
+VDD 5 0 DC 18V
+VGG 3 0 DC 5V
+R1 5 1 47MEG
+R2 1 0 22MEG
+RD 5 4 2.2K
+RS 2 0 500
+M1 3 1 2 2 NFET 
+.MODEL NFET NMOS(LEVEL=1 KP=0.5M VTO=2V)
+.DC VGG 0 18 1 VDD 0 18 1
+.PRINT DC V(3) V(5) V(3,2) V(1,2)
+.END

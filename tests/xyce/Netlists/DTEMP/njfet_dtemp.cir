@@ -1,0 +1,38 @@
+DTEMP Test circuit for N-Channel JFET
+***********************************
+*
+*drain curves
+vds 1 0 0
+vgs 2 0 0
+*
+vidmon 1 1a 0
+vigmon 2 2a 0
+vismon 0 3 0
+*
+.dc vgs 0 -1.875 -0.625 vds 0 15 1
+.print dc v(1) v(2) i(vidmon)
+.step dtempParam list -10 0 10
+
+.options device temp=25
+*
+.param dtempParam=10
+jtest 1a 2a 3 sa2109  dtemp={dtempParam}
+*
+.model sa2109 njf
++ level=1
++ beta= 0.00002690
++ vto = -3.795
++ pb = 1.07
++ lambda = 0.0181
++ b = 0.605;
++ rd = 338.0
++ rs = 232.0
++ fc = 0.5
++ is = 1.393e-10
++ af = 1.0
++ kf = 0.05
++ cgs= 0
++ cgd= 0
+*
+.end
+

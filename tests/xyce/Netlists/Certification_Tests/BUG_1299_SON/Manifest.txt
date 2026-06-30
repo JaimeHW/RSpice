@@ -1,0 +1,8 @@
+bug1299son.cir
+bug1299son.cir.sh
+bug1299son_fixedinterval.net
+bug1299son_fixedinterval_gear.net
+bug1299son_lastcycle.net
+bug1299son_lastcycle_fixedinterval.net
+bug1299son_lastcycle_fixedinterval_gear.net
+bug1299son_lastcycle_gear.net

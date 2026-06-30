@@ -1,0 +1,36 @@
+* Testing the 1D PDE BJT capability
+* This is based on the ramp_test1.cir that was created for the 
+* Gummel-Poon model.
+***************************************************************************
+V1 1 0 DC 0 PWL (0 0 1 1) 
+*--------------------------------------------------------------------------------
+*ypde npnop3 COL BAS GND pdebjt    
+ypde npnop3 1 1 0 pdebjt    
++ C0=1.0e+17
++ tecplotlevel=0 
++ gnuplotlevel=0
++ mobmodel=philips
++ fielddep=true
++ l=9.0e-4 nx=100
+* DOPING REGIONS:
++ region={name       =            reg1,  reg2
++         function   =            file, file
++         file       =       boron.dat, phos.dat
++         nmaxchop   =         1.5e+18, 3.3e+19
++         type       =           ptype,  ntype
++         species    =              BM,  PP }
+*
+* ELECTRODES:
++ node={name           = collector,      base,  emitter
++       bc             = dirichlet, dirichlet,  dirichlet
++       side           =     right,    middle,  left
+*+       area           =    2.0e-6,    2.0e-6,  2.0e-6
++       area           =    2.0e-1,    2.0e-1,  2.0e-1
++       location       =    9.0e-4,    3.0e-4,  0.0 }
+*
+.MODEL pdebjt ZOD  level=1
+*--------------------------------------------------------------------------------
+.tran 1u .8
+.print tran V(1) I(V1)
+.options timeint abstol=1e-12 reltol=1e-6 
+.end

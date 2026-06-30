@@ -1,0 +1,15 @@
+Test deomnstrating failure of expressions that access subcircuit input nodes
+* Related to, but not the same as BUG 792 on Charleston.
+
+.subckt simple_r n1 n2
+r1 n1 n3 1k
+r2 n2 n3 1k
+.ends
+
+x1 1 0 simple_r
+v1 0 1 sin(0 1 1kHz 0 0)
+
+.tran 1u 5m
+.print tran V(x1:n1) V(x1:n3) V(x1:n1,x1:n3) {V(x1:n1)} {V(x1:n3)} {V(x1:n1,x1:n3)}
+
+.end

@@ -1,0 +1,24 @@
+* Test ERR, ERR1 and ERR2 measures.
+*
+* See SON Bug 1278 for more details.
+*************************************
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(2) I(R1) I(R2a)
+
+V1 1 0 PWL 0 0 1 5
+R1 1 2 1
+R2a 2 0 6
+R2b 2 0 6
+
+.MEASURE TRAN ERR ERR V(1) V(2)
+.MEASURE TRAN ERR1 ERR1 V(1) V(2)
+.MEASURE TRAN ERR1RO ERR1 V(2) V(1)
+
+.MEASURE TRAN ERR2 ERR2 V(1) V(2)
+.MEASURE TRAN ERR2RO ERR2 V(2) V(1)
+
+* Lead current
+.MEASURE TRAN ERR1I ERR1 I(R1) I(R2a)
+
+.END

@@ -1,0 +1,27 @@
+*********************************************************
+* A Xyce netlist that has a .OP statement but not a .DC
+* statement will produced FAILED measures for all
+* currently valid DC measures.  That is not optimal, and
+* should be changed.  The HSpice behavior is to simply
+* ignore the .MEASURE DC statements in this case.
+*********************************************************
+.op
+.PRINT DC V(1) V(2) ; this works even with no .DC statement in the netlist
+
+V1 1 0 1
+R1 1 2 1
+R2 2 1 1
+
+.MEASURE DC avgv2 AVG v(2)
+.MEASURE DC derivv2 DERIV V(2) AT=2.5
+.MEASURE DC err1 ERR1 V(1) {V(2)/2}
+.measure dc FitErrorInfPrn error v(2) file=DotOpDotDCRawData.prn comp_function=infnorm indepvarcol=1 depvarcol=2
+.MEASURE DC integv2 INTEG V(2)
+.MEASURE DC maxv2 MAX V(2)
+.MEASURE DC minv2 MIN V(2)
+.MEASURE DC ppv2 PP V(2)
+.MEASURE DC rmsv2 RMS V(2)
+.MEASURE DC whenv2 WHEN v(2)=4
+
+.END
+

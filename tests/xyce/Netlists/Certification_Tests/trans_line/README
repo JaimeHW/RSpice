@@ -1,0 +1,4 @@
+Be sure to use the _mpi version for parallel runs since there are specific options
+set for such.
+
+TL1X_mpi.cir.prn is a copy of TL1X.cir.prn for the parallel comparison. -- rja

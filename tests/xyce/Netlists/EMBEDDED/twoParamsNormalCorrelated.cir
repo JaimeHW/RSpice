@@ -1,0 +1,33 @@
+* two-parameter normal distribution sampling example, including correlations via covariance matrix
+c1 1 0 1uF 
+R2 1 0 1K
+R1 1 2 1K
+v1 2 0 1V
+
+.dc v1 1 1 1
+.print dc v(1) R1:R C1:C
+
+.EMBEDDEDSAMPLING 
++ param=R1,c1
++ type=normal,normal
++ means=3K,1uF
++ std_deviations=1K,0.2uF
+
+* The covariance matrix is specified as a vector in 
+* row-major form.  So row 0, followed by row 1, 
+* followed by row 2, etc.
+*
+* variance = stdDev^2
+*
+* The outputs are not tested because the sample size is too small for good statistics.  
+* But interesting to look at for a sanity check.
+*
+* embedded outputs for device parameters like R1:R don't work yet.  ERK. 2/8/2019
+.options embeddedsamples numsamples=30
++ covmatrix=1e6,1.0e-3,1.0e-3,4e-14
+*+ OUTPUTS={V(1)},{R1:R},{C1:C}
++ OUTPUTS={V(1)}
++ SAMPLE_TYPE=MC
+
+.end
+

@@ -1,0 +1,5 @@
+nightly, serial, pce, tran, bsim3
+embeddedsampling
+quadrature_pce
+nisp
+required:stokhos

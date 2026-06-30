@@ -1,0 +1,21 @@
+Regression test for simple normal distribution sampling.
+
+.global_param testnorm={limit(2.5K,0.5K)}
+.global_param r1value={testnorm*2.0}
+
+r2 1 0 7k
+r1 1 2 {r1value}
+v1 2 0 1000v
+
+.dc v1 1000 1000 1
+
+.sampling 
++ useExpr=true
+
+.options samples numsamples=10000
++ outputs={R1:R}
++ sample_type=lhs
++ stdoutput=true
+
+.end
+

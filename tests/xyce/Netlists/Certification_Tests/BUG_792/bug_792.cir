@@ -1,0 +1,15 @@
+Test of spice subckt handling
+
+V1 1 0 DC 1V
+Xvd 1 2 voltage_div
+R1 2 0 2k
+
+.DC v1 0 1 .5
+.print DC V(1) V(xvd:3) V(xvd:2) {V(xvd:3)} {V(xvd:2)}
+
+
+.subckt voltage_div 1 2 
+R1 1 3 1k
+R2 3 2 1k
+.ends
+

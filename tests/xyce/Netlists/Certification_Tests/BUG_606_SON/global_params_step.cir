@@ -1,0 +1,36 @@
+**************************************************************
+* This netlist tests SON Bug 1033 for global parameters
+* that use VT and TEMP.  It uses those global parameters
+* in instance and model parameters for the level 1 resistor.
+* It is also important to test that both TEMP and VT can be
+* use within one global parameter definition.  This covers
+* the case with .STEP.
+*
+*This test is also related to SON Bugs 654 and 1033.
+**********************************************************
+.GLOBAL_PARAM RTEMP={TEMP}
+.GLOBAL_PARAM PARAMMULT={TEMP*VT}
+.GLOBAL_PARAM RVT={VT}
+
+V1  1 0 1
+R1 1 0 {RTEMP}
+
+V2 2 0 1
+R2 2 0 {RVT}
+
+V3 3 0 1
+R3 3 0 RMOD1 1
+
+V4 4 0 1
+R4 4 0 RMOD2 1
+
+.MODEL RMOD1 R R={RTEMP}
+.MODEL RMOD2 R R={RVT}
+
+.DC V1 1 1 1
+.STEP TEMP 27 37 10
+.PRINT DC V(1) RTEMP {1/RTEMP} RVT {1/RVT} PARAMMULT
++ R1:R I(R1) R2:R I(R2) R3:R I(R3) R4:R I(R4) 
+.END
+
+

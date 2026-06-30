@@ -1,0 +1,36 @@
+Lossy Transmission Line Circuits
+*********************************************************
+* Test of bad model cards, where one of the model
+* parameters has a negative value.  Use an RLC model
+* since that is a valid model type for the O device
+*
+*
+*
+*
+*
+*
+********************************************************
+o1 1 0 2 0 rneg
+.model rneg ltra r=-0.05 l=20uH C=20pF LEN=1
+
+o2 1 0 2 0 lneg
+.model lneg ltra r=0.05 l=-20uH C=20pF LEN=1
+
+o3 1 0 2 0 cneg
+.model cneg ltra r=0.05 l=20uH C=-20pF LEN=1
+
+o4 1 0 2 0 gneg
+.model gneg ltra r=0.05 g=-20 LEN=1
+
+o5 1 0 2 0 neglen
+.model neglen ltra r=0.05 l=20uH C=20pF LEN=-11
+
+v1 1 0 pulse(0 1 1ns 1ns 1ns 20ns 40ns)
+rload 2 0 10
+
+.tran 0.1ns 120ns 0 0.15ns
+.print tran v(1) v(2)
+
+.end
+
+

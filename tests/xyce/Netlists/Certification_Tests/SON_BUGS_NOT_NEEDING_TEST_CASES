@@ -1,0 +1,1253 @@
+The following bugs in the Bugzilla Issue Tracking System are of a nature that
+doesn't lend itself to testing the way we do other bugs.  This version of
+the file is for SON bugs ONLY.  Any OUO bugs should go into the old
+version of the file.
+
+These bugs are all recorded in the SON version of bugzilla.  As of this
+writing the address is http://joseki.sandia.gov/bugzilla/
+
+-----
+ERK 2008.06.19
+
+BUG 7.   This bug is certified by ABM_POW/abmpow1.cir .
+
+BUG 8.   This bug is certified by ABM_POW/abmpow2.cir and ABM_POW/abmpow3.cir .
+
+BUG 12.  This bug is a failure of an existing test: (Certification_Tests/BUG_307/bug_307_d)
+           so no new test is needed.
+
+BUG 14.  This bug is a documentation bug (Create source code style-guide for Xyce), 
+           so no test is needed.
+
+BUG 15.  This bug is a documentation bug (Create a device implementation checklist), 
+           so no test is needed.
+
+BUG 18.  This bug is a duplicate, so no test is needed.
+
+----
+RLS 2008.06.23
+
+BUG_17  WAMPDE/invert1 is already a test case run as part of
+        regression testing
+
+BUG_23 a test is in place under GROUND_PATH
+
+
+--------------
+ELR 2008.07.07
+
+BUG 26:  This was an error with the XTF config files.    
+
+
+--------------
+TVR 2008.12.08
+
+BUG 31: This was about the failure of the BSIM4_bodymod* tests, which are no
+longer failing after the 4.1 branch was merged to the main trunk.
+
+BUG 72: This was about the failure of TimeDepMutInd test cases after a
+refactor of the output manager on 32 bit platforms.
+
+
+--------------
+ELR 2009.01.14
+
+BUG 53:  This was a failure of an existing test, BUG_374.  It was corrected
+         with the bug 1455 fix. 
+
+BUG 56:  This was a failure of existing tests, BSRC/Bsrc_B1 and BSRC/Bsrc_D1.
+
+BUG 63:  This was a failure of an existing test, BUG_668.  The python scripts
+         used in this test were modified to run correctly under load. 
+
+BUG 97:  This was a request to change the build/test procedure on Win32.  New
+         scripts using CMake are now in use.  
+
+-------------
+RLS 2009.02.25
+
+BUG 16:  This bug involved chaning the ADC and DAC devices to use the 
+         DeviceTemplate classes that Eric developed. This work is done
+         but not directly testable.  An indirect test is that 
+         BUG 1658 (in SandiaTests/CertificationTests) would not pass
+         on BRANCH_TURBO without the templating being done.  
+
+
+--------------
+ELR 2009.03.18
+
+BUG 95:  This was change to the #include order, config headers, and Win32 
+         build system.
+
+--------------
+HKT 2009.06.01
+
+BUG 29:  The Boost library was removed from Xyce since it was unused code
+and not involved in testing.  Thus no bug is needed.
+
+BUG 51:  Failure of existing test, BUG_42_SON.
+
+BUG 55:  Xyce was upgraded to use Trilinos 9.0.  All current tests test this bug.
+
+BUG 60:  Failure of existing test, BUG_381/bug_381.
+
+BUG 64:  Failure of existing test, BUG_846/ring51_loca.
+
+BUG 78:  This enhancement to the N_UT_Graph::getCenter() call particularly affects
+large circuits, no test needed for this enhancement.
+
+BUG 79:  Failure of all parallel tests because wrong partitioning parameters were
+being passed to Isorropia-Zoltan.  No test needed.
+
+BUG 127: Failure of existing test, BUG_133/bug_133.
+
+BUG 133: Failure of all tests for Trilinos development branch, that has been fixed, 
+no test needed.
+
+
+-----------------
+KRS 2009.06.16
+
+BUG 91:  Documentation issue; no test required.
+
+BUG 123:  Failure of existing test, SAVE_AND_LOAD/bjt_save.
+
+BUG 128:  Failure of existing test, BUG_25_SON/testCombined1.
+
+--------------
+HKT 2009.06.01
+
+BUG 29:  The Boost library was removed from Xyce since it was unused code
+and not involved in testing.  Thus no bug is needed.
+
+BUG 51:  Failure of existing test, BUG_42_SON.
+
+BUG 55:  Xyce was upgraded to use Trilinos 9.0.  All current tests test this bug.
+
+BUG 60:  Failure of existing test, BUG_381/bug_381.
+
+BUG 64:  Failure of existing test, BUG_846/ring51_loca.
+
+BUG 78:  This enhancement to the N_UT_Graph::getCenter() call particularly affects
+large circuits, no test needed for this enhancement.
+
+BUG 79:  Failure of all parallel tests because wrong partitioning parameters were
+being passed to Isorropia-Zoltan.  No test needed.
+
+BUG 127: Failure of existing test, BUG_133/bug_133.
+
+BUG 133: Failure of all tests for Trilinos development branch, that has been fixed, 
+no test needed.
+
+-------------
+RLS 2009.06.02
+
+BUG 10:  FFT interface was added to Xyce and it tested by unit test, 
+         Xyce/src/test/XyceUnitTest/FFT.C and having this bug fixed is a 
+         requirement for any of the HB tests to run (as in HB/RC/simpleRC-hb).
+
+BUG 33:  MPDE analysis has been moved under the Analysis manager via. N_ANP_MPDE class.
+
+BUG 90:  Failure of an existing test case DAKOTA/opt_rc.  Test case now passes.
+
+BUG 98:  Failure of an existing test HB/RC/simpleRC-hb.  Test case now passes.
+
+BUG 109: Failure of an existing test POWERNODE/sixNode.  Test case now passes.
+
+BUG 111: Failure of an existing test case BSRC/Bsrc_D1.  Test case now passes.
+
+BUG 116: This was a memory error found by valgrind.  It has been fixed an no longer
+         shows up as a valgrind error.
+
+BUG 119: Failure of an exiting test: Certification_Tests/BUG_318.  Test case now passes.
+
+
+---------------
+ERK 2009.06.09
+
+BUG 125: This was a failure of an existing test case: BSRC/Bsrc_C1 fails parallel testing
+
+BUG 120: This was a failure of an existing test case: /Net/Proj/Xyce/XTF//Xyce_Output/Tip/Wed_Serial_BRANCH_TURBO/Intel_OSX_Serial-icc101_tri9_norad-norad/Xyce_Regression//Netlists//MPDE/invert1.cir.out
+
+BUG 129: This was a failure of an existing test case: BUG_668/bug_668 fails windows_serial testing
+
+BUG 106: This was a failure of an existing test case:  Certification_Tests/BUG_702 tests fail in BRANCH_TURBO
+
+BUG 124: This was a failure of an existing test case: /AGECAP/agecap_master fails serial testing
+
+BUG 110: This was a failure of an existing test case: WAMPDE/OSCILLATOR/lcosc fails in BRANCH_TURBO
+
+BUG 134: This was a failure of an existing test case: BUG_668/bug_668 fails serial testing on OSX
+
+BUG 128: This was a failure of an existing test case: /BUG_25_SON/testCombined1 fails parallel testing
+
+BUG 73: This was a failure of an existing test case: TEMPIND/tempind failing 64-bit parallel linux with Trilinos 9
+
+BUG 123: This was a failure of an existing test case: SAVE_AND_LOAD/bjt_save fails in windows serial testing
+
+BUG 87: This was a failure of an existing test case: HOMOTOPY/bjt_expord fails parallel testing
+
+BUG 52: This was a failure of an existing test case: CircuitSim90/MOS2/g1310 fails serial testing
+
+BUG 67: This was a failure of an existing test case: SANDLER2/sandler2 & SANDLER22/sandler22 failing on 64-bit linux parallel
+
+BUG 118: This was a failure of an existing test case: AGECAP/agecap_master fails in TURBO with OPENMP
+
+BUG 58: This was a failure of an existing test case: COMPARATOR/comparator fails Intel 64-bit linux with Trilinos 9
+
+BUG 71: This was a failure of an existing test case: SUBCKT/subckt_l failing on multiple platforms.
+
+BUG 122: This was a failure of an existing test case: BUG_668/bug_668 fails windows_serial testing
+
+BUG 131: This was a failure of an existing test case: SANDLER22/sandler22
+
+BUG 108: This was a failure of an existing test case:  MPDE/sandler24 fails in BRANCH_TURBO
+
+BUG 126: This was a failure of an existing test case: MOS1_Invert_Cascade/inverter_cascade_15 fails parallel testing
+
+BUG 112: This was a failure of an existing test case: SANDLER24/sandler24 fails Intel64_OSX_Serial-icc101_tri9_qaspr in TURBO-OP
+
+BUG 121: This was a failure of an existing test case: Certification_Tests/BUG_702/missing-initcond
+
+BUG 107: This was a failure of an existing test case: INIT_CONDS/inv1xIC fails in BRANCH_TURBO
+
+BUG 76: This was a failure of an existing test case: Certification_Tests/BUG_39_SON/bug39_agauss & bug39_int & bug39_limit & bug39_pow & bug39_sign
+
+BUG 115: This was a failure of an existing test case: Certification_Tests/BUG_138/bug_138_2 failures.
+
+BUG 113: This was a failure of an existing test case: SANDLER21/sandler21 fails compare in TURBO with OPENMP
+
+BUG 130: This was a failure of an existing test case: BUG_846/ring51_location fails parallel testing
+
+BUG 114: This was a failure of an existing test case: HB/invert_hb tests failing
+
+BUG 117: This was a failure of an existing test case: HB/gilbert_cell_hb fails on TURBO but not development branch.
+
+BUG 88: This was a failure of an existing test case: HB/invert_hb fails Intel_Windows testing
+
+BUG 69: This was a failure of an existing test case: SOURCES/ebh
+
+BUG 62: This was a failure of an existing test case: Certification_Tests/BUG_574/bug_574_mpi
+
+BUG 68: This was a failure of an existing test case: SEMIC_CAPACITOR/semicap
+
+BUG 65: This was a failure of an existing test case: CircuitSim90/MOS3/mike2
+
+BUG 57: This was a failure of an existing test case: BUG_1301/rlc_tranline
+
+BUG 70: This was a failure of an existing test case: SOURCES/ebh_sub
+
+
+
+BUG 32:  In low temperature BJT simulations Xyce differs from Spice.  This bug
+was a WONTFIX.
+
+BUG 91:  This is a documentation bug:  UIC is not mentioned in Ref Guide under .TRAN
+
+-----
+TVR 2009.06.10
+
+BUG 77: This was an internal refactor of how vector parameters for LOCA were
+processed on input.  There were existing test cases for this usage,
+and they continue to work properly.  
+
+BUG 74: This bug caused massive failures in regression testing on
+32-bit machines.  As such, the entire regression suite serves as
+verification of the fix.  No additional test cases needed.
+
+BUG 83: A purely internal change that is only apparent when building
+Xyce with assertions disabled (-DNDEBUG).  Tested by the Alegra group,
+who are the only ones who build Xyce in this manner.
+
+
+--------------
+ELR 2009.06.15
+
+BUG 59:  Regression test failure (Certification_Tests/BUG_25_SON)
+
+BUG 60:  Regression test failure (Certification_Tests/BUG_40_SON)
+
+BUG 132: This is an installer bug for hosts that do not have the correct
+         XTF environment (libs, MKL, etc.).
+
+-----
+HKT 2009.06.17
+
+BUG 81: This was a failure of an existing test case: HB/invert_hb tests failing in serial and parallel
+
+-----
+HKT 2009.09.29
+
+BUG 84:  This was a removal of unused standard library code.
+
+BUG 143: Duplicate of bug 152.
+
+BUG 144: Duplicate of bug 152.
+
+BUG 145: Duplicate of bug 152.
+
+BUG 146: Duplicate of bug 152.
+
+BUG 150: Regression test failure (SUBCKT/subckt_a)
+
+BUG 152: Several test failed due to the symmetrizing issue with Zoltan.
+  Thus, no additional test is needed.
+
+-----
+ERK 2009.10.13
+
+BUG 42.  The feature tested by this bug is now deprecated, so the test is 
+now excluded.
+
+BUG 158:  Be sure that all trilinos 10 libraries are built with reasonable optimization level.
+          This is a support library issue.  Optimized Trilinos 10 is now 
+          integrated into all testing.
+          
+
+
+-----
+TVR 2009.10.21
+BUG 30:  Post-release 4.1 merge needs no specific test case.  Bonsai records are sufficient
+   to demonstrate that the merge was done.  This note should have been added to this file
+   well over a year ago.
+
+-----
+RLS 2009.10.22
+BUG 142:  This was a bug to release the official documentation for Xyce 5.0.  This has
+  been done via web file share and does not need a test case.
+
+-----
+ERK 2009.10.22
+
+BUG 45:  This bug is about removal of deprecated code (old-DAE code), so 
+         not directly testable.
+
+
+BUG 149:  Test failure bug, so no new test needed.
+BUG 147:  Test failure bug, so no new test needed.
+BUG 34:   Test failure bug, so no new test needed.
+BUG 139:  Test failure bug, so no new test needed.
+BUG 138:  Test failure bug, so no new test needed.
+
+-----
+HKT 2009.10.26
+
+BUG 153:  Test failure bug, so no new test needed.
+BUG 158:  Testing bug, making sure that the correct optimization was used to build Trilinos 10 libraries.
+  This is not directly testable.
+
+-----
+RLS 2009.10.27
+
+BUG 66    This is a duplicate of bug 98 SON.  No test case is needed.
+ 
+-----
+HKT 2010.02.26
+
+BUG 178:  This capability described in this bug turned out to be a bad idea,
+          in that it was not going to work at the parsing level it was proposed.          It was resolved as "invalid", thus no test is needed.
+
+-----
+TVR 2010.02.26
+
+BUG 183   This bug was only tripped when Xyce_DEBUG_TIME is selected, and we
+          do not test DEBUG builds.  I can therefore not create a test case
+          that would be able to catch this problem in normal testing.
+
+-----
+HKT 2010.03.02
+
+BUG 162   This bug was only tripped when Xyce_DEBUG_TIME is selected, and we
+          do not test DEBUG builds.  I can therefore not create a test case
+          that would be able to catch this problem in normal testing.
+BUG 161   This bug is to clean up a feature in Xyce and does not require a test case.
+
+-----
+ELR 2010.03.08
+
+BUG 175   This bug is tested by the XygraAPI test.
+BUG 174   This is regression script configuration related bug.
+
+-----
+RLS 2010.03.08
+BUG 171   This bug has a test case in Xyce_Regression/Netlists/SandiaTests/TIME_STEP_RECV
+BUG 177   This bug has test cases in Netlists/SUPERNODE
+
+-----
+HKT 2010.03.08
+
+BUG 170   This bug has a test case in the Xyce_Regression/Netlists/ROM directory.  
+          This test runs, and compares, a transmission line (RC ladder) with 100 blocks
+          and a reduced-model of this transmission line of dimension 10.
+
+-----
+RLS 2010.03.09
+
+BUG 105  This bug is tested by Xyce_SandiaRegression/Netlists/TIME_STEP_RECV.  It's
+         unfortunate that an SON bug is tested by an SRN Circuit, but that circuit
+         was a good choice for this test case.
+
+-----
+HKT 2010.03.12
+
+BUG 169  This is a release 5.1.2 bug, so it does not need a test.
+
+-----
+TVR 2010.03.16
+
+BUG 160:  This bug involved removing use of the "compare" program from the
+          test suite.  No separate test case is needed.  Right now, the
+          "run_xyce_regression" script sets the value of the XYCE_COMPARE
+          variable to "NEVER_USED."  Should any test case try to use compare,
+          it will fail with a "command not found" error.  As of now, none do.
+
+-----
+ERK 2010.03.25
+
+BUG 185: Title: PDE_1D_DIODE test case produces output 7 times smaller than 
+          gold standard.
+
+         This bug was related to bug 160, above.  It is verified by the 
+         existing PDE_1D_DIODE test case.
+
+-----
+TVR 2010.03.29
+BUG 172: The bug was about reported failures in the VALGRIND test when run with
+   Valgrind 3.5.0.  There is no need for an additional test case.  At the moment
+   valgrind 3.5.0 is only in use on one of the build-supported platforms, but
+   there is still noneed for a separate test case.
+
+BUG 186: The test case for this is the VALGRIND test, as modified to report
+  leaks as failures.  Prior to the fix, almost every test was flagged as a
+  failure.
+
+-----
+RLS 2010.08.03
+BUG 192:  This bug is tested by MAX_TIME_STEP/max_time_step.cir and thus
+   does not need an additional test.  The bug was a request to change
+   the order of the arguments to the schedule() function which is tested
+   by the above test.
+
+------
+ELR 2011.01.18
+BUG 189:  Update Valgrind to latest version, 3.5.0
+          Valgrind 3.5.0 is installed in the common arch dirs and used in 
+          the VALGRIND set of tests.
+          
+------
+RLS 2011.01.21
+BUG 179, BUG 180, BUG 181 These three tests are small neuron device
+  circuits that were failing  in serial and parallel.  The tests are all 
+  passing in serial and only tested there currently.
+BUG 184:  This was extra debug output that has been removed.  If it were 
+  still there, it would break the DEV_PARAMS test.
+  
+------
+HKT 2011.01.31
+
+BUG 173:  This was a bug to create an interface to the FFTW library and is
+  already being tested by the HB/gilbert_cell_hb, HB/invert_hb, and HB/RC/simpleRC-hb
+  tests.
+
+BUG 137:  This bug was to create a test for the BTF preconditioner.  This
+  was accomplished by changing the linear solver options on Fastrack's 1K circuit
+  to use the BTF preconditioner instead of the direct solver, which is tested weekly.
+
+BUG 187:  This bug is a memory leak that is being tested by the VALGRIND test.
+
+------
+TVR 2011.02.14
+
+BUG 202: This bug involves failure of DIODE/Level2_Temp_Dep_Breakdown when run through
+the VALGRIND test.  The VALGRIND test is sufficient to serve as regression test for
+this bug, and no additional test is necessary.
+
+
+ERK  2012.03.07
+-------
+BUG 226:  Add capability to have a second state vector.  This is 
+          a refactor, and is thus tested implicitly by the entire
+          test suite.
+
+
+RLS 2012.03.20
+-------
+BUG 224:  Added test in Netlists/RESISTOR_TD/temp_dep_2.cir 
+BUG 225:  Added Certification_Tests/BUG_225 
+
+
+ERK 2012.4.10
+-------
+BUG 237:  MOSFET homotopy using inconsistent specification for mos=1,2,3,6 
+          Tested by Xyce_Regression/Netlists/HOMOTOPY/continuation*sh tests.
+
+BUG 238:  bug summary:GMIN homotopy and .STEP do not run in the same netlist. 
+          Tested by Xyce_Regression/Netlists/GMIN_STEPPING/gstep_dotStep.cir.
+
+BUG 242:  bug summary:Make GMIN stepping specification simpler
+          Tested by Xyce_Regression/Netlists/ACtests/gminstepping and
+          Xyce_Regression/Netlists/gstep_cont3.cir.sh.
+
+BUG 243:  Make GMIN stepping and .IC work at the same time. This is tested 
+       by the Xyce_Regression/Netlists/IC_AND_NODESET/ic_gmin_bjt.cir test.
+
+ERK 2012.5.24
+-------
+BUG 163:  Refactor device package to not have PtrPtr's anymore.  This 
+          was a refactor, so not directly testable.  Tested implicitly
+          by entire test suite.
+
+BUG 198:  .IC and .NODESET undocumented in reference guide 
+          This is a documentation bug, so no meaningful test.
+
+BUG 233:  Make TECPLOT formatted out use a .dat rather than .prn suffix.
+          This is tested by the following existing tests: 
+          Xyce_Regression/Netlists/Certification_Tests/BUG_668
+          Xyce_Regression/Netlists/Certification_Tests/BUG_460
+
+BUG 239:  AC output files don't handle .STEP well.  Tested by 
+          Xyce_Regression/Netlists/ACtests/bsim3/step-op-amp.cir.
+
+TVR 2012.5.24
+-------
+
+BUG 228 While GCC 4.6 is not part of nightly testing on any platform
+yet, both Eric Keiter and I have been routinely using GCC 4.6 in our
+development, so it is safe to say this bug is "VERIFIED."  Once GCC
+4.6 replaces GCC 4.4 in nightly testing, it will be sufficient test
+for the fix of bug 228 that the entire test suite actually runs
+without hanging on a large subset of netlists.  So no specific,
+individual test case for bug 228 is needed.
+
+TM 2012.5.24
+-------
+
+BUG 216:  fix voltage sources so that they correctly handle multiple source types. Tested by 
+          Xyce_Regression/Netlists/ACtests/bsim3/gain-stage.cir
+	  Xyce_Regression/Netlists/ACtests/bsim3/gain-stage1.cir   
+
+TM 2012.5.29
+-------
+
+BUG 212:  BSIM3 gives different answer than spice3 for AC. Tested by 
+          Xyce_Regression/Netlists/ACtests/bsim3/gain-stage.cir
+	  Xyce_Regression/Netlists/ACtests/bsim3/gain-stage1.cir 
+
+BUG 213:  Level=3 MOSFET gives a different answer than spice3 for simple AC analysis example. Tested by 
+          Xyce_Regression/Netlists/ACtests/mos/gain-stage3.cir
+
+BUG 214:  Level=1, 2, 6 MOSFET gives a different answer than spice3 for simple AC analysis example. Tested by 
+          Xyce_Regression/Netlists/ACtests/mos/gain-stage1.cir
+	  Xyce_Regression/Netlists/ACtests/mos/gain-stage2.cir  
+          Xyce_Regression/Netlists/ACtests/mos/gain-stage6.cir
+
+BUG 240:  AC analysis gives wrong answer with .STEP. Tested by 
+          Xyce_Regression/Netlists/ACtests/bsim3/step-op-amp.cir
+          
+RLS 2012.5.29
+---------
+
+BUG 215  Bug was a failure of a test.  The bug is tested by NEURON/rallpack3.cir
+
+BUG 223  Bug is tested by tests in the MEASURE director.  Specifically
+Netlists/MEASURE/AverageTest.cir	Netlists/MEASURE/FreqTest.cir		Netlists/MEASURE/Off_TimeTest.cir
+Netlists/MEASURE/DerivativeTest.cir	Netlists/MEASURE/IntegralTest.cir	Netlists/MEASURE/On_TimeTest.cir
+Netlists/MEASURE/DutyTest.cir		Netlists/MEASURE/MaxTest.cir		Netlists/MEASURE/PPTest.cir
+Netlists/MEASURE/FindWhenTest.cir	Netlists/MEASURE/MinTest.cir		Netlists/MEASURE/RMSTest.cir
+
+BUG 224  Bug is tested by Netlists/RESISTOR_TD/temp_dep_2.cir.
+
+TM 2012.5.30
+-------
+
+BUG 166:  Tested by all the tests in
+          Xyce_Regression/Netlists/ACtests/
+
+TVR 25 Jun 2012
+----
+
+BUG 253: This is an umbrella bug to document testing Xyce installers
+          on COE machines by running the whole test suite there.  It
+          does not get its own individual test case.
+
+BUG 254: This was a bug to check the same binaries that were installed
+         by installers on development machines -- in early runs, the
+         build tested was an autoconf'd build and the build bundled
+         was a cmake build, leading to a possible testing hole.
+         Process is documented in the bug report and in
+         /Net/Proj/Xyce/Xyce_Release_5.3_QA/README_5.3_QA.  No
+         separate individual test case is needed.
+         
+RLS 22 Oct 2012
+-----
+BUG 232 : This is an umbrella bug for the release of 5.3  No test cases are 
+          needed for such a bug.
+
+TM 22 Oct 2012
+-----
+BUG 200: This is a bug created for the release 5.2. No test cases are 
+         needed for this bug.
+
+TVR 17 Dec 2012
+-----
+
+BUG 281: This bug involves only removing a deprecated IFDEF, and
+cannot be tested other than by assuring the code builds.  This is done
+in nightly testing, including the ALLDEBUG build, so no special test
+is required.
+
+RLS 17 Dec 2012
+-----
+
+BUG 283: This bug involved removing code behind an Xyce_NEW_MUILTITHREADED_LOAD ifdef 
+that was used to test OpenMP threading for device loads.  It can't be tested directly
+other than through nightly testing.  
+
+------
+HKT 2013.03.18
+
+BUG 294:  This bug was found while trying to change the linear solver defaults to use
+  KLU for smaller circuits.  The SAVE_AND_LOAD/bjt_load.cir suffered a DCOP failure when KLU
+  was used as the linear solver, so that parallel test now serves as the test for this bug.
+
+------
+TVR 2013.04.16
+
+BUG 13: This joseki bug demanded that the BJT "OFF" parameter be
+handled in a SPICE3F5 compatible way.  No test case exists that shows
+that our prior method of using OFF in the BJT was inadequate, but
+during development of fixes for Charleston bug 1461 it was found
+inadequate for the MOSFET, and so it was concluded that we should be
+doing things the SPICE way instead of less carefully.  We have one
+existing BJT test case that uses OFF (BJT_OFF/bjt_off.cir), and this
+single test case works with or without the bug 13 fixes.  I have
+copied this test case to the SandiaTests and re-used it for the level
+2 BJT, as well.  This is the best we can do.  I should note that the
+original implementation of "OFF" was done to fix bug 545 on charleston
+back in 2007, and no test case for that was ever created.  BJT_OFF was
+created much later, in response to bug 693, when a test case was found
+that required OFF to converge.
+
+------
+TVR 2013.04.22
+
+BUG 303:  This bug called for removal of some dead experimental code that was
+never being used nor even completely compiled and linked.  No test case needed,
+as all that is necessary to verify that the code is removed correctly is that
+the serial and parallel regression testing continues to work without it.
+
+------
+TVR 2013.04.24
+
+BUG 301: This bug calls for the update of the Xyce/ADMS verilog-to-C++
+back-end.  It is tested by all of the tests for devices that were
+converted to C++ from verilog (VBIC, HBT_X, PSP, and EKV).  No
+separate test case is required.
+
+
+------
+ERK 2013.06.19
+
+BUG 168: This bug should have been closed a long time ago.  It is entitled
+"Release 5.1.1" and was originally reported in 2009.  It is a minor ("patch"?)
+release of release 5.1, and only addresses API issues.   As a blocker bug,
+it does not need a test case.
+
+------
+TVR 2013.06.25
+
+BUG 329 (and 322,323, 324,326, 327, 328 and 290): This bug and all its
+indirect blockers are about building and using Trilinos 11.2.3 (and
+later 11.2.4).  There is no need for a separate test case, as this library
+gets tested in nightly and weekly testing on all platforms.
+
+------
+ERK 2013.06.25
+
+BUG 343: "Get rid of CircuitStatePKG".  This bug was about getting rid of
+code that wasn't being used.  So, no certification test is needed, other
+than the general test of not breaking the entire test suite.
+
+
+------
+TVR 2013.07.01
+
+BUG 248: "Fix autoconf to handle incomplete source trees" Until this
+bug was fixed, "bootstrap" would not work properly unless *all* of
+Xyce was present, including the non-free and export controlled source
+code.  Nightly testing is never done with such incomplete source
+trees, so it is not possible to test this with nightly regression.
+However, one of our developers (Ting) always builds with an incomplete
+source tree, and so this bug is implicitly tested that way.  And before 
+marking the bug VERIFIED FIXED, I tested it on a checkout of Xyce lacking
+Xyce_NonFree and SandiaModels.  Bootstrap and configure no longer complain
+about missing trees.
+
+------
+TVR 2013.07.02
+
+BUG 311: "Test 'XyceAsLibrary/FFTInterface' is not actually running
+correctly, and is a bad test".  The test is no longer crashing, and is
+tested nightly.  No further regression test needed.  The test is
+actually still bad, because it doesn't verify results, but it does
+test that the FFT interface builds and runs.
+
+
+------
+RLS 2013.07.09
+
+BUG 36: Printing a B source current improperly uses 
+"lead current" technique instead of solution vector.
+This bug was fixed as part of a lead current refactor (see bug 1357 
+on charleston).  The b-source device no longer has a device
+parameter "DEV_I", thus printing the current through a B-source
+cannot use the "DEV_I" to get the lead current.  Now it 
+correctly get such values from the solution vector.
+While there is not a clean test case for this bug, 
+B-source lead currents are used extensively in 
+our device lead current tests  (see Netlists/LEAD_CURRENTS)
+
+
+------
+TVR 2013.07.17
+
+BUG 356:  This was about the Output/AC/op-raw.cir test failing on Windows.
+So long as that test passes on Windows, the bug is verified.  No special
+"BUG_356" test is needed.
+
+------
+HKT 2013.07.30
+
+BUG 318:  This was an enhancement to the HB output that orders the frequencies
+from negative to positive.  This is being tested nightly by the HB/RC/simple-hb.cir
+test, whose script is checking that the frequencies are output in ascending order.
+
+BUG 314:  HB was refactored and fixed so that it now works.  Furthermore, the
+test scripts for the HB tests have been rewritten so that they ensure that HB analysis
+completes and the results are compared.  The tests in Netlists/HB are run nightly,
+so this bug does not need more test cases.
+
+-------
+RLS 2013.08.01
+
+BUG_176: This bug was a change in how the analysis manager handles an object when 
+the simulation is paused and Xyce turns control over to an external program.  
+This was an efficiency issue and is untestable by our current testing framework.
+
+BUG 258: This bug is tested by the test Netlists/NEURON/CG_STDP_test.cir 
+
+BUG 262: This bug was a code refactor of the getPrintValue function in
+the OutputManager.  This work as been done and resulted in the context
+setting functions of N_UTL_Parm and the setParmContextType() and changes
+to getPrintValue in the OutputManager.  Dave has doen a more extensive
+refactor in  bug 313"Refactor Output Manager in more object-oriented
+style".  Follow up work is described in bug 350 "Refactor
+setParamContextType_ and getPrintValue in OutputMgr with inherent
+parallelism" to make these functions more efficient in parallel.
+
+BUG_217: level 1 neuron failing rallpack2. 
+BUG_218: level 6 neuron failing rallpack2.  These were failing test cases
+that are checked by the original test case on the bug report
+
+BUG_279: Remove all "WINDOWS_BUILD" ifdefs.  This was a code change and 
+isn't directly testable.  We continue to do nightly builds under
+windows, so the changes have not broken the existing code.
+
+BUG_282: remove Xyce_EXTRA_STATE_VECTOR ifdef.  This was a code change that
+activated a development aspect of the code (an extra state vector). This is 
+activated all the time and tested by the lead current tests that rely on 
+a state vector.
+
+BUG_284: remove the SPICE_MIMIC ifdef from the BSIM4.  This was a code change 
+to remove some ifdef'ed code from Xyce.  It is not testable within our 
+current testing framework but a "grep" on the device file shows that it is 
+gone.
+
+BUG_219:  This was a error in the code that was not causing an 
+observable calculation error.  Christy fixed it in the code, 
+but it is not externally testable.
+
+BUG_300: Near a breakpoint Trap can end up with a negative time step. 
+I have been unable to recreate a simple circuit that demonstrates the
+original problem.  The complex customer circuit no longer shows a
+negative time step.  The code has been changed as described in the bug 
+report.
+
+BUG_310:  This was a rewrite of several tests for .measure.  I've
+updated all of the tests within the Netlists/MEASURE directory to
+examine the data Xyce outputs, then calculate the desired .measure and
+compare that result to what Xyce has calculated.  In the case of the
+Foruier measure, I use a gold standard file of what we accept as the
+right result for the comparison.  So, if Xyce's fourier results ever
+change then we should detect it with a failure on the
+MEASURE/FourierTest.cir caes.
+
+Bug 337 - fft (fftw or intel_fft) should be required:  This was a change
+in the build system and isn't directly testable.  However, nightly tests
+that use fourier like HB, .measure and .four are running and would fail
+if fft were not found and used during the build.
+
+BUG_352:  This was a failing test case that is checked by the original test 
+case on the bug report: BUG_269_SON.
+
+------
+TVR 2013.08.08
+
+BUG 349: this is a documentation issue, and as such needs no test case.
+BUG 296: this is another documentation issue.  No test case needed.
+BUG 362: This is actually Ting's bug, but I'm putting the note in myself.  
+         Bug 362 is about the failure of the BUG_456 test case.  So it needs 
+         no additional test case.
+BUG 295: another documentation issue.  No test case.
+
+
+BUG 288: This was an issue to update all of our autotools to later
+    versions.  Not only was that done, but autotool output was removed
+    from the repository.  This is effectively tested nightly by
+    regular regression testing, which does a bootstrap immediately
+    after the CVS update.  No special test case needed.
+
+BUG 299: Already tested as DEV_DOC
+
+BUG 313: The entire Output directory tree serves as the test cases for
+the refactored output manager
+
+BUG 314: Tested by Output/*/*-raw* tests
+
+BUG 315: Tested by Output/HB tests
+
+BUG 317: Broken test Certification_Tests/BUG_1416 was the bug
+
+BUG 320: Already tested as DEV_PARAMS
+
+BUG 321: Source code style change, no testing needed
+
+BUG 330: Already tested as VALGRIND
+
+BUG 331: Tested by Output/HB tests
+
+BUG 334: The entire Output directory tree are the comprehesive output
+test cases
+
+BUG 342: Already tested as DEV_DOC
+
+BUG 345: Tested by BUG_269_SON
+
+BUG 353: Tested by Output/AC tests, nite that these are not runin
+parallel as AC is not ready.
+
+BUG 358: Tested by Output/*/*-raw* tests
+
+------
+HKT 2013.08.19
+
+BUG 344: Belos enabled by default.  This is a change to the build system, so
+nightly testing would fail if Belos was not found.  Also, Belos is being tested
+nightly in an fft test requiring a large number of harmonics: 
+Certification_Tests/BUG_1902/largeRCladder_belos.cir
+
+------
+TVR 2013.08.19
+BUG 363:  A documentation issue doesn't need test cases.
+
+--------
+RLS 2013-08-19
+
+BUG 220 is tested by NEURON/synapticCurrent-level4
+and synapseDCOP-level4.
+
+BUG 236 is tested by NEURON/dlambda.cir
+
+BUG 257 is tested by NEURON/Neuron9.cir 
+
+BUG 312 is a documentation bug.  The reference and users guides
+have been updated and this can be manually verified, but there is 
+not a way for one to test the documentation with our current 
+test framework.
+
+
+------
+ERK  2013.08.20
+
+BUG 263:  This is a duplicate of charleston bug 1871, which was closed for
+          release 5.3.  PDE devices are tested nightly in parallel, so no 
+          test case is needed. 
+
+------
+HKT 2013.08.20
+
+BUG 103:  The .FOUR analysis feature is being tested by the CMOS inverter and 
+  Gilbert Cell tests in the Fourier test directory.  No additional test case is needed.
+
+BUG 290:  Trilinos was updated to use version 11.2.4, which is implicitly checked 
+  nightly through regression testing.  No additional test case is needed.
+
+BUG 294:  The SAVE_AND_LOAD/bjt_load.cir test was failing in parallel with KLU.  Now
+  KLU is the default linear solver for problems that small and this circuit is passing nightly
+  parallel testing.  No additional test cases is needed.
+
+BUG 351:  The duplication of .measure output in parallel is being tested by the 
+  nightly tests for .measure.  No additional test case is needed.
+
+BUG 348:  The update of the HB section of the users guide is not testable.
+
+-----
+RLS 2013.08.22
+
+BUG 249:  This was a code change to remove the use of a depreciated macro.  It is
+  not directly testable, but one can verify the macro's removal and the 
+  lack of compilers warnings.
+
+------
+TM 2013.08.26
+BUG 104: The newbpstepping options is on by default. It is tested by all the tests that use default timeint options. No additional test case is needed.
+
+BUG 347: The update of the time integration section of the users guide is not testable.
+
+------
+cew 2013.08.27
+
+BUG 196:  This was an "umbrella" bug for neuron modeling.  There were several neuron and synapse devices added in the "Neuron Modeling" component and individually tested with tests in the Xyce_Regression/Netlists/NEURON directory.
+
+-----
+ERK 2013.08.27
+BUG 155:  This bug is tested by all the tests in the LTRA directory:
+          ltra1, ltra2, ltra3, square-wave-gen-resistor, square-wave-gen-resistor-compact
+
+BUG 251:  Re-establish DC sensitivity capability.  This is tested by two tests in the Xyce_Regression/Netlists/SENS directory:  res.cir and ampSens.cir.
+
+
+BUG 285:  this is not a directly testable bug.  It was entitled, "remove Xyce_AUTOMATIC_MODEL_SELECTION from the BSIM3 (and anywhere else it may be)".
+
+BUG 304: Entitled "HB is busted, even though the HB regression tests are passing"   This was a "test is broken bug", so it is certified by the fixed tests.  The relevant tests are:  
+Xyce_Regression/Netlists/HB/gilbert_cell_hb
+Xyce_Regression/Netlists/HB/invert_hb
+Xyce_Regression/Netlists/HB/simpleRC-hb
+
+BUG 336:  Entitled, "Remove the Xyce_DEBUG_SOI_VOLTLIM ifdef".  This is not a testable bug.
+
+BUG 280:  Entitled, "remove deprecated ifdefs".  This is a blocker bug, for a bunch of bugs that
+are not directly testable.
+
+----
+TVR 2013-10-28
+BUG 393: Bug is tested by parallel testing of the Output/AC/ac-raw and
+Output/AC/ac-raw-ascii test cases, which had previously been broken in
+
+----
+DGB 2013-10-28
+BUG 403: This is tested by Output/TRAN/tran-homotopy-prn-file.cir
+BUG 1119: This is tested Output/DC/dc-noprn.cir
+
+----
+TVR 2013-10-30
+BUG 235: Bug is tested by netlists in "BSIMCMG" directory instead of a
+"BUG_235_SON" certification test.
+
+----
+DGB 2013-12-4
+BUG 1743: This will likely always be excluded, but the guts of the
+Habanero test harness are saved here.  The makefile would have to be
+hacked.
+
+----
+JCV 2013-12-04
+BUG 291: "Establish an external download/documentation site for Xyce"
+The site is up, and obviously does not need a test case.
+
+----
+TVR 2013-12-12
+BUG 436: Bug is tested by netlists and scripts in "OPTIONS_OUTPUT"
+directory instead of BUG_436_SON certification test.
+
+----
+RLS 2014-02-06
+BUG 431:  This bug was a test case failure for two neuron
+related circuits: NEURON/CS_Patch.cir and NEURON/rallpack1-1000levels.cir.  
+The issue was resolved by making the solver be the same
+for both serial and parallel runs (linsol type=klu) as 
+noted in the bug report.  No further test case is needed
+
+----
+DGB 2014-02-18
+BUG 464:  This bug is tested using the new Message/Input/handleLinePass1_1 test.
+
+---
+DGB 2014-02-18
+BUG 462:  The code has been fixed.  No need for a test.
+
+---
+DGB 2014-02-18
+BUG 463:  The Message/Device tests now check for a variety of device and
+model naming errors.  This bug is tested by 
+Message/Device/DeviceModel_setModeParams_3.cir
+
+---
+DGB 2014-03-06
+BUG 387:  .LIB has a varied syntax based on inclusion depth
+This bug is tested by Message/Input/CircuitBlock_parseIncludeFile_*.cir
+
+---
+DGB 2014-03-07
+BUG 401:  Usage of VM with two nodes, etc
+This bug is tested by Output/HB/hb-prn-diff.cir
+
+BUG 409:  Bug required refactor of device code for setting up devices and 
+models associated with them, and cannot be tested through the nightly testing 
+process.  To verify, see source code and note that the 'addModelType' method 
+and similar code from the old interface are no longer used in any device model.
+
+BUG 443:  Bug is about excess white space being emitted in parallel runs, and
+is not tested automatically.  To verify, run a test case such as 
+DC_UPGRADE/dcOct.cir with a parallel build on two processors, and check that 
+large amounts of white space are not present between the "Initializing..." line 
+and the "Solution Summary" line of the console output.
+
+BUG 462:  Coding change, all tests using devices are candidates.  
+N_DEV_ACC demonstrates that the registerModelType() is no longer needed.
+
+----
+HKT 2014-03-04
+
+BUG 197:  The parallel single-tone HB capability in Xyce is being tested nightly
+by HB/gilbert_cell_hb, HB/invert_hb, and HB/RC/simpleRC-hb.  No additional test is needed.
+
+BUG 340:  The current tests for this bug, Certification_Tests/BUG_340/stepRC-hb and
+SandiaTests/C_T/BUG_340_SON/stepHBtest, ensure that single-tone HB works with .STEP.
+
+BUG 417:  The parallel AC capability in Xyce is being tested nightly by all the circuits
+in the ACtests directory.  No additional test is needed.
+
+BUG 418:  The parallel MPDE capability in Xyce is being tested nightly by both of the
+circuits in the MPDE directory.  No additional test is needed.
+
+BUG 444:  The VALGRIND error for the Output/HB/hb-step-tecplot.cir is no longer being reported
+in nightly testing.  No additional test is necessary.
+
+----
+TVR 2014-03-04
+
+BUG 411: Tested by nightly VALGRIND tests.  No separate test case needed.
+
+BUG 445: tested by nighly ParallelBuildSerialRun tests.  No separate
+test case needed.
+
+BUG 413: tested by the test case called "BUG_1803" --- this is a
+related issue, and bug 413 was actually addressed by the fix to that
+bug.
+-----
+RLS 2014-03-04
+
+BUG 460: This bug was for a new feature in the .measure work.  Thus, the test
+case is located in MEASURE/EquationEvalTest.cir 
+-----
+TVR 2014-03-05
+
+BUG 408: The issue prevented porting the BSIMCMG model to Xyce.  The
+fix is tested by the presence of the BSIMCMG model in Xyce and all the
+BSIMCMG test cases demonstrate that. They are BSIMCMG{ac, gummel_n,
+gummel_p, inverter_transient}.
+
+
+BUG 382: This is tested only by verifying manually that the ADMS
+back-end no longer generates broken code.  It can be checked using the
+script "generate_ADMS.sh" in the Xyce/utils directory on a machine
+that has admsXml installed.  The script is run from the TOP LEVEL
+directory of Xyce, as "sh utils/generate_ADMS.sh", piping the results
+to a file or pager.  The diffs between the existing code in the device
+package and the auto-generated code from ADMS will be sent to standard
+out.
+
+BUG 392: The ability to specify a verilog parameter as both an
+instance and model parameter is tested by the presence of "LRSD" as
+both an instance and model parameter when the DEV_PARAMS test case
+runs.
+
+BUG 446: Tested by the Output/AC/ac-step-prn and Output/AC/op-step-prn
+test cases.  The bug was about these cases failing.
+
+BUG 420: This is a test of debugging output formatting, and as such
+cannot be tested except manually, by verifying that when debugging
+output specifies newlines in the code they actually show up on console
+output.
+
+BUG 422: The issue is tested by the presence of Intel compiler builds on RHEL6 every night.
+-----
+ERK 2014-03-05
+
+BUG 423:  This issue is tested by Xyce_Regression/Netlists/Output/DC/dc-step-tecplot.cir and
+Xyce_Regression/Netlists/Output/TRAN/tran-step-tecplot.cir .
+
+---
+DGB 2013-03-10
+BUG 476: This issue is tested by Message/Input/CmdParse_usage
+
+--- 
+TM 2014-03-10 
+
+BUG 404: The issue is tested by HB/circuit3.cir. No additional test is needed.
+
+BUG 474: The issue is tested by all tests in the HB directory.
+
+BUG 475: The issue is tested by all tests that use voltage limiting. 
+
+-----
+RLS 2014-03-10
+
+BUG 481:  This issue was a feature request tested by the tests:
+Xyce_Regression/Netlists/MEASURE/AverageTestInc.cir
+Xyce_Regression/Netlists/MEASURE/FindWhenTestInc.cir
+
+---
+DGB 2014-03-11
+BUG 194:  The README and sample makefiles, etc exist in the user_plugin
+directory in the Xyce source directory.
+
+---
+DGB 2014-03-11
+BUG 394: This is just debugging output comingled to stdout.
+    -l cout -per-processor on a debug compile should produce messy output.
+
+-----
+TVR 2014-03-11
+
+BUG 289: This issue is tested by the test cases
+TEMPIND/tempind_instance and TEMPCAP/tempcap_instance.  They are
+identical to the versions in tempind and tempcap, but with TC1 and TC2
+specified on the instance line, and very, very wrong values of TC1 and
+TC2 in the model card.  The gold standards are generated from exactly
+the same scripts as tempind and tempcap, so the only way those tests
+can pass is if TC1 and TC2 on the instance line override TC1 and TC2
+of the model card as per the bug report requirements.  There is no
+separate BUG_289 test case.
+
+-----
+ERK 2014-03-13
+
+BUG 421:  This bug is tested by the tests in the 
+Xyce_Regression/Netlists/Output/HOMOTOPY directory.
+
+---
+DGB 2014-03-13
+BUG 482:  This BUG is tests by Output/TRAN/tran-raw-override-noprint.cir
+
+-----
+TVR 2014-03-13
+
+BUG 367:  This bug is regarding documentation of the expression library in the
+reference guide.  No test is necessary.
+
+-----
+ERK 2014-03-14
+
+BUG 448:  This bug is tested by the tests in the 
+Xyce_Regression/Netlists/SENS/diode.cir.sh
+Xyce_Regression/Netlists/Output/SENS/diode.cir.sh
+
+---
+PES 2014-03-14
+BUG 397: This bug is tested by DIGITAL/buf_unit_test.cir
+
+BUG 398: This bug is tested by DIGITAL/and4_unit_test.cir,
+DIGITAL/nand4_unit_test.cir, DIGITAL/or4_unit_test.cir and
+DIGITAL/nor4_unit_test.cir.  The other digital devices still have
+a fixed number of inputs, per their specs.
+
+-----
+ERK 2014-03-18
+
+BUG 456: This is a documentation bug, not directly testable.
+
+---
+DGB 2014-04-03
+BUG 493: This bug is tested by the Message/Input/DeviceBlock_extractSourceFields_1.cir
+
+---
+PES 2014-04-28
+BUG 497: This bug is tested by VPWL/vpwl_filebased.cir 
+using the waveform definition in VPWL/vpwl.csv 
+
+
+---
+ERK 2014-05-08
+BUG 503.  This bug is tested in under the Sandia tests in Xyce_SandiaRegression/Netlists/PIKES
+
+---
+PES 2014-06-12
+BUG 396:  This bug is tested by three unit tests in DIGITAL.  The
+tests are dltch_dc_test.cir (which tests the DCOP calculations),
+dltch_enable_test.cir (which tests the interactions of the data and
+enable lines) and dltch_preset_clear_test.cir (which adds tests for
+PREB and CLRB).
+
+---
+TVR 2014-07-22
+BUG 510: This bug is tested by the test case VSIN/bug510.cir, which mimics the 
+test VSIN/bug1679 but using *COMP V(VINP) offset=.1 instead of printing 
+{V(VINP)+.1} and changing the gold standard.
+
+BUG 391: This bug changes the number of internal state variables for
+capacitors that have their capacitance defined by global parameters in
+expressions.  I will not be able to construct a meaningful test case,
+as the fix does NOT impact any external behavior at all.
+
+BUG 500: OpenMPI 1.8 is in use on OS X in nightly testing, and this 
+constitutes testing of the bug.  There is no special test case.
+
+---
+DGB 2014-07-22
+BUG 483: This bug is tests by Output/DC/dc-raw-ascii.cir.sh
+
+---
+HKT 2014-08-04
+BUG 190:  MPDE tests are included in nightly valgrind test.
+BUG 502:  Failures of nightly regression Fourier tests on unsupported platforms.
+          No additional tests necessary, just hand testing of current Fourier tests.
+BUG 506:  Code design change; no test is necessary.
+BUG 508:  Code design change; no test is necessary.
+
+---
+PES 2014-08-05
+BUG 511: Removed unused .OUTPUT feature.  No test needed for deletion 
+of a feature.  
+
+BUG 368: Tests for the repeat (R) and time delay (TD) functions of PWL source were added to the IPWL and VPWL subdirectories.
+
+---
+DGB 2014-08-16
+BUG 488: Using the new .PRINT HB_IC allow the user to specify the output
+for the .hb_ic files.
+
+BUG 484: Added r1:r to Output/DC tests.
+
+BUG 438: The Output/*/*-step-*.cir tests the stepping output.
+
+BUG 509: THe Output/*/*-tecplot*.cir tests produce the desired output.
+
+BUG 515: VALGRIND failures are gone and are tested by the VALGRIND test every
+day.
+
+
+
+---
+ERK 2014-08-26
+BUG 441: This is tested by ac-step-tecplot.cir, in the Xyce_Regression/Netlists/Output/AC directory.
+
+---
+TM 2014-08-28
+BUG 439: The bug is tested by the tests in the Xyce_Regression/Netlists/TIA/Interpolation_TIA directory.
+
+---
+ERK 2014-09-02
+BUG 473: This bug was declared invalid, so no test.
+BUG 449: implement transient direct sensitivities.  This is tested by Xyce_Regression/Netlists/SENS/sensCapGear.cir and Xyce_Regression/Netlists/SENS/sensCapTrapOrder1.cir
+
+---
+TM 2014-09-03
+BUG 442: The bug is tested by Xyce_Regression/Netlists/TIA/HB/RC/simpleRC-hb.cir, Netlists/HB/circuit3.cir, Netlists/HB/invert_hb.cir and Netlists/Output/HB/hb-prn.cir
+
+---
+---
+---
+As of 2014-09-02 this document is deprecated. Document any reasons a bug does
+not need a test case directly in the Bugzilla bug report.

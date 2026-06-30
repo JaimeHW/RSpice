@@ -1,0 +1,14 @@
+dup-toplevel.cir
+* this circuit demonstrates a parser error, in which 2 sources of the same
+* name are specified, and not trapped.
+
+V1 22 0 4
+V1 1 0 5
+
+R1 1 22 1
+R2 22 0 1
+
+.dc V1 7 7 1
+.print dc V(1) V(22)
+
+

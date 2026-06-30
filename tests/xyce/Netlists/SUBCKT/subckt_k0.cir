@@ -1,0 +1,31 @@
+Baseline for subcircuit/expression tests
+****************************************************************************
+*
+* Tests that expressions used in subcircuits work properly when using both
+* local nodes and nodes from the .subckt line.
+*
+* This is the baseline test.  Other test cases in this set should produce
+* identical results.
+*
+****************************************************************************
+
+
+V1 1 0 5V
+R1 1 0 1
+V2 2 0 10V
+R2 2 0 1
+V3 3 0 100V
+R3 3 0 1
+
+
+B1 4 0 V={V(3)+V(2)*V(1)}
+R4 4 0 1
+
+.print DC V(2) V(1) V(3) V(4)
+.DC V2 0 10 1
+*COMP V(2) reltol=1e-7 abstol=1e-7
+*COMP V(1) reltol=1e-7 abstol=1e-7
+*COMP V(3) reltol=1e-7 abstol=1e-7
+*COMP V(4) reltol=1e-7 abstol=1e-7
+
+.end

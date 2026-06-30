@@ -1,0 +1,36 @@
+* Sensitivity of collector current to amplifier component
+* This circuit was found  on page 298 of the book,
+* "PSPICE and MATLAB for Electronics: An Integrated Approach" by John Okyere Attia.
+*
+* The relevant pages are excerpted in google books, and includes a printout of the
+* PSPICE output.
+*
+
+VCC 4 0 DC 1
+RB1 4 1 40k
+RB2 1 0 10k
+RE 2 0 1K
+RC 5 3 6K
+VM 4 5 DC 0; monitor collector current
+Q1 3 1 2 0 vbicpnp
+
+.DC VCC -1 -10 -0.4
+
+.print dc v(4) I(VM)
+.print sens v(4)
+
+
+.SENS param=
++ vbicpnp:is,
++ vbicpnp:ibei,
++ vbicpnp:rci,
++ vbicpnp:mc,
++ vbicpnp:nf,
++ vbicpnp:tnom
++objfunc={I(VM)}
+
+.options SENSITIVITY direct=1 adjoint=0
+
+.model vbicpnp pnp
++ LEVEL=11  rcx=0.001 rci=0.0015 rbx=0.001 rbi=0 re=0.001 rb=0.001 rc=0.001
++ tnom=27

@@ -1,0 +1,20 @@
+Simple RC circuit for trap test with initial_interval 
+
+* without the initial_interval specified, Xyce would output
+* several small time steps at the beginning and then jump
+* to near 6.0e-3 when the pulse starts.
+* with the initial_interval specified, Xyce outputs
+* time = 0, 1.0e-3, 2.0e-3, ...
+
+
+.options output initial_interval=1.0e-3
+
+*Iin a 0 PULSE( 0 120.0e-6 6.0e-3 1.0e-6 1.0e-6 0.2 1.0e10)
+Iin a 0 SIN(0 120.0e-6 5 0 0 )
+Ctest a 0 1.0e-6
+Rload a 0 100.0
+
+.tran 0 0.20	; duration of sim
+.print tran v(a) 
+.end
+

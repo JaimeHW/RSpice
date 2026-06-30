@@ -1,0 +1,13 @@
+*Xyce Gold Netlist
+
+*Analysis directives:
+.TRAN  0 400ms
+.PRINT TRAN FORMAT=PROBE I(V1) I(R1) I(C1)
+
+R1 2 1 1K
+C1 2 0 C1_MOD 40u
+.MODEL C1_MOD C C=2 TC1=0 TC2=0
+
+V1  1 0  PULSE(0 1 10U 1U 1U 100m)
+
+.END

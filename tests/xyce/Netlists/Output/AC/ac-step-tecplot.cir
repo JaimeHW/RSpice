@@ -1,0 +1,10 @@
+Simple AC circuit
+
+Vsrc 2 0 ac 1 0 sin(0 1 1e+5 0 0)
+R1 1 0 1e3
+C1 1 2 2e-6
+
+.print ac format=tecplot v(1) I(Vsrc)
+.ac dec 10 1 2e3 
+.step dec R1 1e2 1e4 10
+.end

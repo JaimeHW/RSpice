@@ -1,0 +1,3061 @@
+cable simulation - rallpack 3 with 1000 level 1 neurons
+
+
+.tran 0 0.25  
+.options output initial_interval=5.0e-5
+* I believe this is the options line Ting recommended - see 3/11/11 email from her
+.options timeint method=7 newlte=1 newbpstepping=1 delmax=5e-5  
+.options linsol type=klu
+
+
+* rallpack 3 calls for a steady current input.  But we need to use PULSE so
+* that the current will be off during dcop calculation
+*   pulse( initial_value pulse_value delay_time rise_time fall_time pulse _width period)
+Iin 0 in0 PULSE( 0 1.0e-10 1.0e-12 0.0 0.0 1.0e10 1.0e10)
+
+* cable is 1mm long and 1 micron in diameter
+* 1000 segments, each 1 micron long and 1 micron in diameter
+.param nSeg = 1000
+.param segLength = 1.0e-4     ; [cm]
+.param segDiameter = 1.0e-4   ; [cm]
+.param segSurfaceArea = { 3.14159 * segDiameter * segLength }
+
+* specific membrane capacitance 1uF/cm^2 
+.param memC = { 1.0e-6 * segSurfaceArea } ; [F]
+
+* leak current has membrane resistivity of 40,000 ohm cm^2, with reversal potential of -65mV
+.param rm = { 4.0e4 / segSurfaceArea }    ; [ohm]
+.param memG = { 1 / rm }                  ; [1/ohm]
+.param revE = -0.065                      ; [V]
+
+* active conductances
+* Na specific conductance is 1200 S/m^2 = 1.2e-1 S/cm^2
+.param gnas = { 0.12 * segSurfaceArea }   ; [S]
+.param ErevNa = 0.05                      ; [V]
+* K specific conductance is 360 S/m^2 = 3.6e-2 S/cm^2
+.param gks  = { 0.036 * segSurfaceArea }  ; [S]
+.param ErevK = -0.077                     ; [V]
+
+* neuron model
+.model segParams neuron level=1 cMem={memC}  gMem={memG} eLeak={revE}  gNa={gnas}  gK={gks} eNa={ErevNa} eK={ErevK} vRest={revE}
+
+* segments are connected by a resistor; axial resistance is 4*Ra*l/(pi*d^2); Ra for rallpack 1 is 100 ohm cm
+* if segments were different, we'd want two resistors between each pair of segments to handle the differences, but here it doesnt' matter
+.param Ra = 100.0
+.param rInterSeg = { 4 * Ra * segLength / ( 3.14159 * segDiameter * segDiameter ) }
+
+* here is how we define one neuron
+* yneuron neuron1 in1 0 segParams
+
+* loop below creates a resistor between each pair of neuron devices, which means one less resistor than compartments
+* add a resistor with resistivity for half a compartment at each end of the cable
+* this is the first one
+R01 in0 in1 {rInterSeg/2.0} 
+ 
+  
+yneuron neuron1 in1 0 segParams
+R12 in1 in2 {rInterSeg}
+.ic v(in1) = -0.065
+yneuron neuron2 in2 0 segParams
+R23 in2 in3 {rInterSeg}
+.ic v(in2) = -0.065
+yneuron neuron3 in3 0 segParams
+R34 in3 in4 {rInterSeg}
+.ic v(in3) = -0.065
+yneuron neuron4 in4 0 segParams
+R45 in4 in5 {rInterSeg}
+.ic v(in4) = -0.065
+yneuron neuron5 in5 0 segParams
+R56 in5 in6 {rInterSeg}
+.ic v(in5) = -0.065
+yneuron neuron6 in6 0 segParams
+R67 in6 in7 {rInterSeg}
+.ic v(in6) = -0.065
+yneuron neuron7 in7 0 segParams
+R78 in7 in8 {rInterSeg}
+.ic v(in7) = -0.065
+yneuron neuron8 in8 0 segParams
+R89 in8 in9 {rInterSeg}
+.ic v(in8) = -0.065
+yneuron neuron9 in9 0 segParams
+R910 in9 in10 {rInterSeg}
+.ic v(in9) = -0.065
+yneuron neuron10 in10 0 segParams
+R1011 in10 in11 {rInterSeg}
+.ic v(in10) = -0.065
+yneuron neuron11 in11 0 segParams
+R1112 in11 in12 {rInterSeg}
+.ic v(in11) = -0.065
+yneuron neuron12 in12 0 segParams
+R1213 in12 in13 {rInterSeg}
+.ic v(in12) = -0.065
+yneuron neuron13 in13 0 segParams
+R1314 in13 in14 {rInterSeg}
+.ic v(in13) = -0.065
+yneuron neuron14 in14 0 segParams
+R1415 in14 in15 {rInterSeg}
+.ic v(in14) = -0.065
+yneuron neuron15 in15 0 segParams
+R1516 in15 in16 {rInterSeg}
+.ic v(in15) = -0.065
+yneuron neuron16 in16 0 segParams
+R1617 in16 in17 {rInterSeg}
+.ic v(in16) = -0.065
+yneuron neuron17 in17 0 segParams
+R1718 in17 in18 {rInterSeg}
+.ic v(in17) = -0.065
+yneuron neuron18 in18 0 segParams
+R1819 in18 in19 {rInterSeg}
+.ic v(in18) = -0.065
+yneuron neuron19 in19 0 segParams
+R1920 in19 in20 {rInterSeg}
+.ic v(in19) = -0.065
+yneuron neuron20 in20 0 segParams
+R2021 in20 in21 {rInterSeg}
+.ic v(in20) = -0.065
+yneuron neuron21 in21 0 segParams
+R2122 in21 in22 {rInterSeg}
+.ic v(in21) = -0.065
+yneuron neuron22 in22 0 segParams
+R2223 in22 in23 {rInterSeg}
+.ic v(in22) = -0.065
+yneuron neuron23 in23 0 segParams
+R2324 in23 in24 {rInterSeg}
+.ic v(in23) = -0.065
+yneuron neuron24 in24 0 segParams
+R2425 in24 in25 {rInterSeg}
+.ic v(in24) = -0.065
+yneuron neuron25 in25 0 segParams
+R2526 in25 in26 {rInterSeg}
+.ic v(in25) = -0.065
+yneuron neuron26 in26 0 segParams
+R2627 in26 in27 {rInterSeg}
+.ic v(in26) = -0.065
+yneuron neuron27 in27 0 segParams
+R2728 in27 in28 {rInterSeg}
+.ic v(in27) = -0.065
+yneuron neuron28 in28 0 segParams
+R2829 in28 in29 {rInterSeg}
+.ic v(in28) = -0.065
+yneuron neuron29 in29 0 segParams
+R2930 in29 in30 {rInterSeg}
+.ic v(in29) = -0.065
+yneuron neuron30 in30 0 segParams
+R3031 in30 in31 {rInterSeg}
+.ic v(in30) = -0.065
+yneuron neuron31 in31 0 segParams
+R3132 in31 in32 {rInterSeg}
+.ic v(in31) = -0.065
+yneuron neuron32 in32 0 segParams
+R3233 in32 in33 {rInterSeg}
+.ic v(in32) = -0.065
+yneuron neuron33 in33 0 segParams
+R3334 in33 in34 {rInterSeg}
+.ic v(in33) = -0.065
+yneuron neuron34 in34 0 segParams
+R3435 in34 in35 {rInterSeg}
+.ic v(in34) = -0.065
+yneuron neuron35 in35 0 segParams
+R3536 in35 in36 {rInterSeg}
+.ic v(in35) = -0.065
+yneuron neuron36 in36 0 segParams
+R3637 in36 in37 {rInterSeg}
+.ic v(in36) = -0.065
+yneuron neuron37 in37 0 segParams
+R3738 in37 in38 {rInterSeg}
+.ic v(in37) = -0.065
+yneuron neuron38 in38 0 segParams
+R3839 in38 in39 {rInterSeg}
+.ic v(in38) = -0.065
+yneuron neuron39 in39 0 segParams
+R3940 in39 in40 {rInterSeg}
+.ic v(in39) = -0.065
+yneuron neuron40 in40 0 segParams
+R4041 in40 in41 {rInterSeg}
+.ic v(in40) = -0.065
+yneuron neuron41 in41 0 segParams
+R4142 in41 in42 {rInterSeg}
+.ic v(in41) = -0.065
+yneuron neuron42 in42 0 segParams
+R4243 in42 in43 {rInterSeg}
+.ic v(in42) = -0.065
+yneuron neuron43 in43 0 segParams
+R4344 in43 in44 {rInterSeg}
+.ic v(in43) = -0.065
+yneuron neuron44 in44 0 segParams
+R4445 in44 in45 {rInterSeg}
+.ic v(in44) = -0.065
+yneuron neuron45 in45 0 segParams
+R4546 in45 in46 {rInterSeg}
+.ic v(in45) = -0.065
+yneuron neuron46 in46 0 segParams
+R4647 in46 in47 {rInterSeg}
+.ic v(in46) = -0.065
+yneuron neuron47 in47 0 segParams
+R4748 in47 in48 {rInterSeg}
+.ic v(in47) = -0.065
+yneuron neuron48 in48 0 segParams
+R4849 in48 in49 {rInterSeg}
+.ic v(in48) = -0.065
+yneuron neuron49 in49 0 segParams
+R4950 in49 in50 {rInterSeg}
+.ic v(in49) = -0.065
+yneuron neuron50 in50 0 segParams
+R5051 in50 in51 {rInterSeg}
+.ic v(in50) = -0.065
+yneuron neuron51 in51 0 segParams
+R5152 in51 in52 {rInterSeg}
+.ic v(in51) = -0.065
+yneuron neuron52 in52 0 segParams
+R5253 in52 in53 {rInterSeg}
+.ic v(in52) = -0.065
+yneuron neuron53 in53 0 segParams
+R5354 in53 in54 {rInterSeg}
+.ic v(in53) = -0.065
+yneuron neuron54 in54 0 segParams
+R5455 in54 in55 {rInterSeg}
+.ic v(in54) = -0.065
+yneuron neuron55 in55 0 segParams
+R5556 in55 in56 {rInterSeg}
+.ic v(in55) = -0.065
+yneuron neuron56 in56 0 segParams
+R5657 in56 in57 {rInterSeg}
+.ic v(in56) = -0.065
+yneuron neuron57 in57 0 segParams
+R5758 in57 in58 {rInterSeg}
+.ic v(in57) = -0.065
+yneuron neuron58 in58 0 segParams
+R5859 in58 in59 {rInterSeg}
+.ic v(in58) = -0.065
+yneuron neuron59 in59 0 segParams
+R5960 in59 in60 {rInterSeg}
+.ic v(in59) = -0.065
+yneuron neuron60 in60 0 segParams
+R6061 in60 in61 {rInterSeg}
+.ic v(in60) = -0.065
+yneuron neuron61 in61 0 segParams
+R6162 in61 in62 {rInterSeg}
+.ic v(in61) = -0.065
+yneuron neuron62 in62 0 segParams
+R6263 in62 in63 {rInterSeg}
+.ic v(in62) = -0.065
+yneuron neuron63 in63 0 segParams
+R6364 in63 in64 {rInterSeg}
+.ic v(in63) = -0.065
+yneuron neuron64 in64 0 segParams
+R6465 in64 in65 {rInterSeg}
+.ic v(in64) = -0.065
+yneuron neuron65 in65 0 segParams
+R6566 in65 in66 {rInterSeg}
+.ic v(in65) = -0.065
+yneuron neuron66 in66 0 segParams
+R6667 in66 in67 {rInterSeg}
+.ic v(in66) = -0.065
+yneuron neuron67 in67 0 segParams
+R6768 in67 in68 {rInterSeg}
+.ic v(in67) = -0.065
+yneuron neuron68 in68 0 segParams
+R6869 in68 in69 {rInterSeg}
+.ic v(in68) = -0.065
+yneuron neuron69 in69 0 segParams
+R6970 in69 in70 {rInterSeg}
+.ic v(in69) = -0.065
+yneuron neuron70 in70 0 segParams
+R7071 in70 in71 {rInterSeg}
+.ic v(in70) = -0.065
+yneuron neuron71 in71 0 segParams
+R7172 in71 in72 {rInterSeg}
+.ic v(in71) = -0.065
+yneuron neuron72 in72 0 segParams
+R7273 in72 in73 {rInterSeg}
+.ic v(in72) = -0.065
+yneuron neuron73 in73 0 segParams
+R7374 in73 in74 {rInterSeg}
+.ic v(in73) = -0.065
+yneuron neuron74 in74 0 segParams
+R7475 in74 in75 {rInterSeg}
+.ic v(in74) = -0.065
+yneuron neuron75 in75 0 segParams
+R7576 in75 in76 {rInterSeg}
+.ic v(in75) = -0.065
+yneuron neuron76 in76 0 segParams
+R7677 in76 in77 {rInterSeg}
+.ic v(in76) = -0.065
+yneuron neuron77 in77 0 segParams
+R7778 in77 in78 {rInterSeg}
+.ic v(in77) = -0.065
+yneuron neuron78 in78 0 segParams
+R7879 in78 in79 {rInterSeg}
+.ic v(in78) = -0.065
+yneuron neuron79 in79 0 segParams
+R7980 in79 in80 {rInterSeg}
+.ic v(in79) = -0.065
+yneuron neuron80 in80 0 segParams
+R8081 in80 in81 {rInterSeg}
+.ic v(in80) = -0.065
+yneuron neuron81 in81 0 segParams
+R8182 in81 in82 {rInterSeg}
+.ic v(in81) = -0.065
+yneuron neuron82 in82 0 segParams
+R8283 in82 in83 {rInterSeg}
+.ic v(in82) = -0.065
+yneuron neuron83 in83 0 segParams
+R8384 in83 in84 {rInterSeg}
+.ic v(in83) = -0.065
+yneuron neuron84 in84 0 segParams
+R8485 in84 in85 {rInterSeg}
+.ic v(in84) = -0.065
+yneuron neuron85 in85 0 segParams
+R8586 in85 in86 {rInterSeg}
+.ic v(in85) = -0.065
+yneuron neuron86 in86 0 segParams
+R8687 in86 in87 {rInterSeg}
+.ic v(in86) = -0.065
+yneuron neuron87 in87 0 segParams
+R8788 in87 in88 {rInterSeg}
+.ic v(in87) = -0.065
+yneuron neuron88 in88 0 segParams
+R8889 in88 in89 {rInterSeg}
+.ic v(in88) = -0.065
+yneuron neuron89 in89 0 segParams
+R8990 in89 in90 {rInterSeg}
+.ic v(in89) = -0.065
+yneuron neuron90 in90 0 segParams
+R9091 in90 in91 {rInterSeg}
+.ic v(in90) = -0.065
+yneuron neuron91 in91 0 segParams
+R9192 in91 in92 {rInterSeg}
+.ic v(in91) = -0.065
+yneuron neuron92 in92 0 segParams
+R9293 in92 in93 {rInterSeg}
+.ic v(in92) = -0.065
+yneuron neuron93 in93 0 segParams
+R9394 in93 in94 {rInterSeg}
+.ic v(in93) = -0.065
+yneuron neuron94 in94 0 segParams
+R9495 in94 in95 {rInterSeg}
+.ic v(in94) = -0.065
+yneuron neuron95 in95 0 segParams
+R9596 in95 in96 {rInterSeg}
+.ic v(in95) = -0.065
+yneuron neuron96 in96 0 segParams
+R9697 in96 in97 {rInterSeg}
+.ic v(in96) = -0.065
+yneuron neuron97 in97 0 segParams
+R9798 in97 in98 {rInterSeg}
+.ic v(in97) = -0.065
+yneuron neuron98 in98 0 segParams
+R9899 in98 in99 {rInterSeg}
+.ic v(in98) = -0.065
+yneuron neuron99 in99 0 segParams
+R99100 in99 in100 {rInterSeg}
+.ic v(in99) = -0.065
+yneuron neuron100 in100 0 segParams
+R100101 in100 in101 {rInterSeg}
+.ic v(in100) = -0.065
+yneuron neuron101 in101 0 segParams
+R101102 in101 in102 {rInterSeg}
+.ic v(in101) = -0.065
+yneuron neuron102 in102 0 segParams
+R102103 in102 in103 {rInterSeg}
+.ic v(in102) = -0.065
+yneuron neuron103 in103 0 segParams
+R103104 in103 in104 {rInterSeg}
+.ic v(in103) = -0.065
+yneuron neuron104 in104 0 segParams
+R104105 in104 in105 {rInterSeg}
+.ic v(in104) = -0.065
+yneuron neuron105 in105 0 segParams
+R105106 in105 in106 {rInterSeg}
+.ic v(in105) = -0.065
+yneuron neuron106 in106 0 segParams
+R106107 in106 in107 {rInterSeg}
+.ic v(in106) = -0.065
+yneuron neuron107 in107 0 segParams
+R107108 in107 in108 {rInterSeg}
+.ic v(in107) = -0.065
+yneuron neuron108 in108 0 segParams
+R108109 in108 in109 {rInterSeg}
+.ic v(in108) = -0.065
+yneuron neuron109 in109 0 segParams
+R109110 in109 in110 {rInterSeg}
+.ic v(in109) = -0.065
+yneuron neuron110 in110 0 segParams
+R110111 in110 in111 {rInterSeg}
+.ic v(in110) = -0.065
+yneuron neuron111 in111 0 segParams
+R111112 in111 in112 {rInterSeg}
+.ic v(in111) = -0.065
+yneuron neuron112 in112 0 segParams
+R112113 in112 in113 {rInterSeg}
+.ic v(in112) = -0.065
+yneuron neuron113 in113 0 segParams
+R113114 in113 in114 {rInterSeg}
+.ic v(in113) = -0.065
+yneuron neuron114 in114 0 segParams
+R114115 in114 in115 {rInterSeg}
+.ic v(in114) = -0.065
+yneuron neuron115 in115 0 segParams
+R115116 in115 in116 {rInterSeg}
+.ic v(in115) = -0.065
+yneuron neuron116 in116 0 segParams
+R116117 in116 in117 {rInterSeg}
+.ic v(in116) = -0.065
+yneuron neuron117 in117 0 segParams
+R117118 in117 in118 {rInterSeg}
+.ic v(in117) = -0.065
+yneuron neuron118 in118 0 segParams
+R118119 in118 in119 {rInterSeg}
+.ic v(in118) = -0.065
+yneuron neuron119 in119 0 segParams
+R119120 in119 in120 {rInterSeg}
+.ic v(in119) = -0.065
+yneuron neuron120 in120 0 segParams
+R120121 in120 in121 {rInterSeg}
+.ic v(in120) = -0.065
+yneuron neuron121 in121 0 segParams
+R121122 in121 in122 {rInterSeg}
+.ic v(in121) = -0.065
+yneuron neuron122 in122 0 segParams
+R122123 in122 in123 {rInterSeg}
+.ic v(in122) = -0.065
+yneuron neuron123 in123 0 segParams
+R123124 in123 in124 {rInterSeg}
+.ic v(in123) = -0.065
+yneuron neuron124 in124 0 segParams
+R124125 in124 in125 {rInterSeg}
+.ic v(in124) = -0.065
+yneuron neuron125 in125 0 segParams
+R125126 in125 in126 {rInterSeg}
+.ic v(in125) = -0.065
+yneuron neuron126 in126 0 segParams
+R126127 in126 in127 {rInterSeg}
+.ic v(in126) = -0.065
+yneuron neuron127 in127 0 segParams
+R127128 in127 in128 {rInterSeg}
+.ic v(in127) = -0.065
+yneuron neuron128 in128 0 segParams
+R128129 in128 in129 {rInterSeg}
+.ic v(in128) = -0.065
+yneuron neuron129 in129 0 segParams
+R129130 in129 in130 {rInterSeg}
+.ic v(in129) = -0.065
+yneuron neuron130 in130 0 segParams
+R130131 in130 in131 {rInterSeg}
+.ic v(in130) = -0.065
+yneuron neuron131 in131 0 segParams
+R131132 in131 in132 {rInterSeg}
+.ic v(in131) = -0.065
+yneuron neuron132 in132 0 segParams
+R132133 in132 in133 {rInterSeg}
+.ic v(in132) = -0.065
+yneuron neuron133 in133 0 segParams
+R133134 in133 in134 {rInterSeg}
+.ic v(in133) = -0.065
+yneuron neuron134 in134 0 segParams
+R134135 in134 in135 {rInterSeg}
+.ic v(in134) = -0.065
+yneuron neuron135 in135 0 segParams
+R135136 in135 in136 {rInterSeg}
+.ic v(in135) = -0.065
+yneuron neuron136 in136 0 segParams
+R136137 in136 in137 {rInterSeg}
+.ic v(in136) = -0.065
+yneuron neuron137 in137 0 segParams
+R137138 in137 in138 {rInterSeg}
+.ic v(in137) = -0.065
+yneuron neuron138 in138 0 segParams
+R138139 in138 in139 {rInterSeg}
+.ic v(in138) = -0.065
+yneuron neuron139 in139 0 segParams
+R139140 in139 in140 {rInterSeg}
+.ic v(in139) = -0.065
+yneuron neuron140 in140 0 segParams
+R140141 in140 in141 {rInterSeg}
+.ic v(in140) = -0.065
+yneuron neuron141 in141 0 segParams
+R141142 in141 in142 {rInterSeg}
+.ic v(in141) = -0.065
+yneuron neuron142 in142 0 segParams
+R142143 in142 in143 {rInterSeg}
+.ic v(in142) = -0.065
+yneuron neuron143 in143 0 segParams
+R143144 in143 in144 {rInterSeg}
+.ic v(in143) = -0.065
+yneuron neuron144 in144 0 segParams
+R144145 in144 in145 {rInterSeg}
+.ic v(in144) = -0.065
+yneuron neuron145 in145 0 segParams
+R145146 in145 in146 {rInterSeg}
+.ic v(in145) = -0.065
+yneuron neuron146 in146 0 segParams
+R146147 in146 in147 {rInterSeg}
+.ic v(in146) = -0.065
+yneuron neuron147 in147 0 segParams
+R147148 in147 in148 {rInterSeg}
+.ic v(in147) = -0.065
+yneuron neuron148 in148 0 segParams
+R148149 in148 in149 {rInterSeg}
+.ic v(in148) = -0.065
+yneuron neuron149 in149 0 segParams
+R149150 in149 in150 {rInterSeg}
+.ic v(in149) = -0.065
+yneuron neuron150 in150 0 segParams
+R150151 in150 in151 {rInterSeg}
+.ic v(in150) = -0.065
+yneuron neuron151 in151 0 segParams
+R151152 in151 in152 {rInterSeg}
+.ic v(in151) = -0.065
+yneuron neuron152 in152 0 segParams
+R152153 in152 in153 {rInterSeg}
+.ic v(in152) = -0.065
+yneuron neuron153 in153 0 segParams
+R153154 in153 in154 {rInterSeg}
+.ic v(in153) = -0.065
+yneuron neuron154 in154 0 segParams
+R154155 in154 in155 {rInterSeg}
+.ic v(in154) = -0.065
+yneuron neuron155 in155 0 segParams
+R155156 in155 in156 {rInterSeg}
+.ic v(in155) = -0.065
+yneuron neuron156 in156 0 segParams
+R156157 in156 in157 {rInterSeg}
+.ic v(in156) = -0.065
+yneuron neuron157 in157 0 segParams
+R157158 in157 in158 {rInterSeg}
+.ic v(in157) = -0.065
+yneuron neuron158 in158 0 segParams
+R158159 in158 in159 {rInterSeg}
+.ic v(in158) = -0.065
+yneuron neuron159 in159 0 segParams
+R159160 in159 in160 {rInterSeg}
+.ic v(in159) = -0.065
+yneuron neuron160 in160 0 segParams
+R160161 in160 in161 {rInterSeg}
+.ic v(in160) = -0.065
+yneuron neuron161 in161 0 segParams
+R161162 in161 in162 {rInterSeg}
+.ic v(in161) = -0.065
+yneuron neuron162 in162 0 segParams
+R162163 in162 in163 {rInterSeg}
+.ic v(in162) = -0.065
+yneuron neuron163 in163 0 segParams
+R163164 in163 in164 {rInterSeg}
+.ic v(in163) = -0.065
+yneuron neuron164 in164 0 segParams
+R164165 in164 in165 {rInterSeg}
+.ic v(in164) = -0.065
+yneuron neuron165 in165 0 segParams
+R165166 in165 in166 {rInterSeg}
+.ic v(in165) = -0.065
+yneuron neuron166 in166 0 segParams
+R166167 in166 in167 {rInterSeg}
+.ic v(in166) = -0.065
+yneuron neuron167 in167 0 segParams
+R167168 in167 in168 {rInterSeg}
+.ic v(in167) = -0.065
+yneuron neuron168 in168 0 segParams
+R168169 in168 in169 {rInterSeg}
+.ic v(in168) = -0.065
+yneuron neuron169 in169 0 segParams
+R169170 in169 in170 {rInterSeg}
+.ic v(in169) = -0.065
+yneuron neuron170 in170 0 segParams
+R170171 in170 in171 {rInterSeg}
+.ic v(in170) = -0.065
+yneuron neuron171 in171 0 segParams
+R171172 in171 in172 {rInterSeg}
+.ic v(in171) = -0.065
+yneuron neuron172 in172 0 segParams
+R172173 in172 in173 {rInterSeg}
+.ic v(in172) = -0.065
+yneuron neuron173 in173 0 segParams
+R173174 in173 in174 {rInterSeg}
+.ic v(in173) = -0.065
+yneuron neuron174 in174 0 segParams
+R174175 in174 in175 {rInterSeg}
+.ic v(in174) = -0.065
+yneuron neuron175 in175 0 segParams
+R175176 in175 in176 {rInterSeg}
+.ic v(in175) = -0.065
+yneuron neuron176 in176 0 segParams
+R176177 in176 in177 {rInterSeg}
+.ic v(in176) = -0.065
+yneuron neuron177 in177 0 segParams
+R177178 in177 in178 {rInterSeg}
+.ic v(in177) = -0.065
+yneuron neuron178 in178 0 segParams
+R178179 in178 in179 {rInterSeg}
+.ic v(in178) = -0.065
+yneuron neuron179 in179 0 segParams
+R179180 in179 in180 {rInterSeg}
+.ic v(in179) = -0.065
+yneuron neuron180 in180 0 segParams
+R180181 in180 in181 {rInterSeg}
+.ic v(in180) = -0.065
+yneuron neuron181 in181 0 segParams
+R181182 in181 in182 {rInterSeg}
+.ic v(in181) = -0.065
+yneuron neuron182 in182 0 segParams
+R182183 in182 in183 {rInterSeg}
+.ic v(in182) = -0.065
+yneuron neuron183 in183 0 segParams
+R183184 in183 in184 {rInterSeg}
+.ic v(in183) = -0.065
+yneuron neuron184 in184 0 segParams
+R184185 in184 in185 {rInterSeg}
+.ic v(in184) = -0.065
+yneuron neuron185 in185 0 segParams
+R185186 in185 in186 {rInterSeg}
+.ic v(in185) = -0.065
+yneuron neuron186 in186 0 segParams
+R186187 in186 in187 {rInterSeg}
+.ic v(in186) = -0.065
+yneuron neuron187 in187 0 segParams
+R187188 in187 in188 {rInterSeg}
+.ic v(in187) = -0.065
+yneuron neuron188 in188 0 segParams
+R188189 in188 in189 {rInterSeg}
+.ic v(in188) = -0.065
+yneuron neuron189 in189 0 segParams
+R189190 in189 in190 {rInterSeg}
+.ic v(in189) = -0.065
+yneuron neuron190 in190 0 segParams
+R190191 in190 in191 {rInterSeg}
+.ic v(in190) = -0.065
+yneuron neuron191 in191 0 segParams
+R191192 in191 in192 {rInterSeg}
+.ic v(in191) = -0.065
+yneuron neuron192 in192 0 segParams
+R192193 in192 in193 {rInterSeg}
+.ic v(in192) = -0.065
+yneuron neuron193 in193 0 segParams
+R193194 in193 in194 {rInterSeg}
+.ic v(in193) = -0.065
+yneuron neuron194 in194 0 segParams
+R194195 in194 in195 {rInterSeg}
+.ic v(in194) = -0.065
+yneuron neuron195 in195 0 segParams
+R195196 in195 in196 {rInterSeg}
+.ic v(in195) = -0.065
+yneuron neuron196 in196 0 segParams
+R196197 in196 in197 {rInterSeg}
+.ic v(in196) = -0.065
+yneuron neuron197 in197 0 segParams
+R197198 in197 in198 {rInterSeg}
+.ic v(in197) = -0.065
+yneuron neuron198 in198 0 segParams
+R198199 in198 in199 {rInterSeg}
+.ic v(in198) = -0.065
+yneuron neuron199 in199 0 segParams
+R199200 in199 in200 {rInterSeg}
+.ic v(in199) = -0.065
+yneuron neuron200 in200 0 segParams
+R200201 in200 in201 {rInterSeg}
+.ic v(in200) = -0.065
+yneuron neuron201 in201 0 segParams
+R201202 in201 in202 {rInterSeg}
+.ic v(in201) = -0.065
+yneuron neuron202 in202 0 segParams
+R202203 in202 in203 {rInterSeg}
+.ic v(in202) = -0.065
+yneuron neuron203 in203 0 segParams
+R203204 in203 in204 {rInterSeg}
+.ic v(in203) = -0.065
+yneuron neuron204 in204 0 segParams
+R204205 in204 in205 {rInterSeg}
+.ic v(in204) = -0.065
+yneuron neuron205 in205 0 segParams
+R205206 in205 in206 {rInterSeg}
+.ic v(in205) = -0.065
+yneuron neuron206 in206 0 segParams
+R206207 in206 in207 {rInterSeg}
+.ic v(in206) = -0.065
+yneuron neuron207 in207 0 segParams
+R207208 in207 in208 {rInterSeg}
+.ic v(in207) = -0.065
+yneuron neuron208 in208 0 segParams
+R208209 in208 in209 {rInterSeg}
+.ic v(in208) = -0.065
+yneuron neuron209 in209 0 segParams
+R209210 in209 in210 {rInterSeg}
+.ic v(in209) = -0.065
+yneuron neuron210 in210 0 segParams
+R210211 in210 in211 {rInterSeg}
+.ic v(in210) = -0.065
+yneuron neuron211 in211 0 segParams
+R211212 in211 in212 {rInterSeg}
+.ic v(in211) = -0.065
+yneuron neuron212 in212 0 segParams
+R212213 in212 in213 {rInterSeg}
+.ic v(in212) = -0.065
+yneuron neuron213 in213 0 segParams
+R213214 in213 in214 {rInterSeg}
+.ic v(in213) = -0.065
+yneuron neuron214 in214 0 segParams
+R214215 in214 in215 {rInterSeg}
+.ic v(in214) = -0.065
+yneuron neuron215 in215 0 segParams
+R215216 in215 in216 {rInterSeg}
+.ic v(in215) = -0.065
+yneuron neuron216 in216 0 segParams
+R216217 in216 in217 {rInterSeg}
+.ic v(in216) = -0.065
+yneuron neuron217 in217 0 segParams
+R217218 in217 in218 {rInterSeg}
+.ic v(in217) = -0.065
+yneuron neuron218 in218 0 segParams
+R218219 in218 in219 {rInterSeg}
+.ic v(in218) = -0.065
+yneuron neuron219 in219 0 segParams
+R219220 in219 in220 {rInterSeg}
+.ic v(in219) = -0.065
+yneuron neuron220 in220 0 segParams
+R220221 in220 in221 {rInterSeg}
+.ic v(in220) = -0.065
+yneuron neuron221 in221 0 segParams
+R221222 in221 in222 {rInterSeg}
+.ic v(in221) = -0.065
+yneuron neuron222 in222 0 segParams
+R222223 in222 in223 {rInterSeg}
+.ic v(in222) = -0.065
+yneuron neuron223 in223 0 segParams
+R223224 in223 in224 {rInterSeg}
+.ic v(in223) = -0.065
+yneuron neuron224 in224 0 segParams
+R224225 in224 in225 {rInterSeg}
+.ic v(in224) = -0.065
+yneuron neuron225 in225 0 segParams
+R225226 in225 in226 {rInterSeg}
+.ic v(in225) = -0.065
+yneuron neuron226 in226 0 segParams
+R226227 in226 in227 {rInterSeg}
+.ic v(in226) = -0.065
+yneuron neuron227 in227 0 segParams
+R227228 in227 in228 {rInterSeg}
+.ic v(in227) = -0.065
+yneuron neuron228 in228 0 segParams
+R228229 in228 in229 {rInterSeg}
+.ic v(in228) = -0.065
+yneuron neuron229 in229 0 segParams
+R229230 in229 in230 {rInterSeg}
+.ic v(in229) = -0.065
+yneuron neuron230 in230 0 segParams
+R230231 in230 in231 {rInterSeg}
+.ic v(in230) = -0.065
+yneuron neuron231 in231 0 segParams
+R231232 in231 in232 {rInterSeg}
+.ic v(in231) = -0.065
+yneuron neuron232 in232 0 segParams
+R232233 in232 in233 {rInterSeg}
+.ic v(in232) = -0.065
+yneuron neuron233 in233 0 segParams
+R233234 in233 in234 {rInterSeg}
+.ic v(in233) = -0.065
+yneuron neuron234 in234 0 segParams
+R234235 in234 in235 {rInterSeg}
+.ic v(in234) = -0.065
+yneuron neuron235 in235 0 segParams
+R235236 in235 in236 {rInterSeg}
+.ic v(in235) = -0.065
+yneuron neuron236 in236 0 segParams
+R236237 in236 in237 {rInterSeg}
+.ic v(in236) = -0.065
+yneuron neuron237 in237 0 segParams
+R237238 in237 in238 {rInterSeg}
+.ic v(in237) = -0.065
+yneuron neuron238 in238 0 segParams
+R238239 in238 in239 {rInterSeg}
+.ic v(in238) = -0.065
+yneuron neuron239 in239 0 segParams
+R239240 in239 in240 {rInterSeg}
+.ic v(in239) = -0.065
+yneuron neuron240 in240 0 segParams
+R240241 in240 in241 {rInterSeg}
+.ic v(in240) = -0.065
+yneuron neuron241 in241 0 segParams
+R241242 in241 in242 {rInterSeg}
+.ic v(in241) = -0.065
+yneuron neuron242 in242 0 segParams
+R242243 in242 in243 {rInterSeg}
+.ic v(in242) = -0.065
+yneuron neuron243 in243 0 segParams
+R243244 in243 in244 {rInterSeg}
+.ic v(in243) = -0.065
+yneuron neuron244 in244 0 segParams
+R244245 in244 in245 {rInterSeg}
+.ic v(in244) = -0.065
+yneuron neuron245 in245 0 segParams
+R245246 in245 in246 {rInterSeg}
+.ic v(in245) = -0.065
+yneuron neuron246 in246 0 segParams
+R246247 in246 in247 {rInterSeg}
+.ic v(in246) = -0.065
+yneuron neuron247 in247 0 segParams
+R247248 in247 in248 {rInterSeg}
+.ic v(in247) = -0.065
+yneuron neuron248 in248 0 segParams
+R248249 in248 in249 {rInterSeg}
+.ic v(in248) = -0.065
+yneuron neuron249 in249 0 segParams
+R249250 in249 in250 {rInterSeg}
+.ic v(in249) = -0.065
+yneuron neuron250 in250 0 segParams
+R250251 in250 in251 {rInterSeg}
+.ic v(in250) = -0.065
+yneuron neuron251 in251 0 segParams
+R251252 in251 in252 {rInterSeg}
+.ic v(in251) = -0.065
+yneuron neuron252 in252 0 segParams
+R252253 in252 in253 {rInterSeg}
+.ic v(in252) = -0.065
+yneuron neuron253 in253 0 segParams
+R253254 in253 in254 {rInterSeg}
+.ic v(in253) = -0.065
+yneuron neuron254 in254 0 segParams
+R254255 in254 in255 {rInterSeg}
+.ic v(in254) = -0.065
+yneuron neuron255 in255 0 segParams
+R255256 in255 in256 {rInterSeg}
+.ic v(in255) = -0.065
+yneuron neuron256 in256 0 segParams
+R256257 in256 in257 {rInterSeg}
+.ic v(in256) = -0.065
+yneuron neuron257 in257 0 segParams
+R257258 in257 in258 {rInterSeg}
+.ic v(in257) = -0.065
+yneuron neuron258 in258 0 segParams
+R258259 in258 in259 {rInterSeg}
+.ic v(in258) = -0.065
+yneuron neuron259 in259 0 segParams
+R259260 in259 in260 {rInterSeg}
+.ic v(in259) = -0.065
+yneuron neuron260 in260 0 segParams
+R260261 in260 in261 {rInterSeg}
+.ic v(in260) = -0.065
+yneuron neuron261 in261 0 segParams
+R261262 in261 in262 {rInterSeg}
+.ic v(in261) = -0.065
+yneuron neuron262 in262 0 segParams
+R262263 in262 in263 {rInterSeg}
+.ic v(in262) = -0.065
+yneuron neuron263 in263 0 segParams
+R263264 in263 in264 {rInterSeg}
+.ic v(in263) = -0.065
+yneuron neuron264 in264 0 segParams
+R264265 in264 in265 {rInterSeg}
+.ic v(in264) = -0.065
+yneuron neuron265 in265 0 segParams
+R265266 in265 in266 {rInterSeg}
+.ic v(in265) = -0.065
+yneuron neuron266 in266 0 segParams
+R266267 in266 in267 {rInterSeg}
+.ic v(in266) = -0.065
+yneuron neuron267 in267 0 segParams
+R267268 in267 in268 {rInterSeg}
+.ic v(in267) = -0.065
+yneuron neuron268 in268 0 segParams
+R268269 in268 in269 {rInterSeg}
+.ic v(in268) = -0.065
+yneuron neuron269 in269 0 segParams
+R269270 in269 in270 {rInterSeg}
+.ic v(in269) = -0.065
+yneuron neuron270 in270 0 segParams
+R270271 in270 in271 {rInterSeg}
+.ic v(in270) = -0.065
+yneuron neuron271 in271 0 segParams
+R271272 in271 in272 {rInterSeg}
+.ic v(in271) = -0.065
+yneuron neuron272 in272 0 segParams
+R272273 in272 in273 {rInterSeg}
+.ic v(in272) = -0.065
+yneuron neuron273 in273 0 segParams
+R273274 in273 in274 {rInterSeg}
+.ic v(in273) = -0.065
+yneuron neuron274 in274 0 segParams
+R274275 in274 in275 {rInterSeg}
+.ic v(in274) = -0.065
+yneuron neuron275 in275 0 segParams
+R275276 in275 in276 {rInterSeg}
+.ic v(in275) = -0.065
+yneuron neuron276 in276 0 segParams
+R276277 in276 in277 {rInterSeg}
+.ic v(in276) = -0.065
+yneuron neuron277 in277 0 segParams
+R277278 in277 in278 {rInterSeg}
+.ic v(in277) = -0.065
+yneuron neuron278 in278 0 segParams
+R278279 in278 in279 {rInterSeg}
+.ic v(in278) = -0.065
+yneuron neuron279 in279 0 segParams
+R279280 in279 in280 {rInterSeg}
+.ic v(in279) = -0.065
+yneuron neuron280 in280 0 segParams
+R280281 in280 in281 {rInterSeg}
+.ic v(in280) = -0.065
+yneuron neuron281 in281 0 segParams
+R281282 in281 in282 {rInterSeg}
+.ic v(in281) = -0.065
+yneuron neuron282 in282 0 segParams
+R282283 in282 in283 {rInterSeg}
+.ic v(in282) = -0.065
+yneuron neuron283 in283 0 segParams
+R283284 in283 in284 {rInterSeg}
+.ic v(in283) = -0.065
+yneuron neuron284 in284 0 segParams
+R284285 in284 in285 {rInterSeg}
+.ic v(in284) = -0.065
+yneuron neuron285 in285 0 segParams
+R285286 in285 in286 {rInterSeg}
+.ic v(in285) = -0.065
+yneuron neuron286 in286 0 segParams
+R286287 in286 in287 {rInterSeg}
+.ic v(in286) = -0.065
+yneuron neuron287 in287 0 segParams
+R287288 in287 in288 {rInterSeg}
+.ic v(in287) = -0.065
+yneuron neuron288 in288 0 segParams
+R288289 in288 in289 {rInterSeg}
+.ic v(in288) = -0.065
+yneuron neuron289 in289 0 segParams
+R289290 in289 in290 {rInterSeg}
+.ic v(in289) = -0.065
+yneuron neuron290 in290 0 segParams
+R290291 in290 in291 {rInterSeg}
+.ic v(in290) = -0.065
+yneuron neuron291 in291 0 segParams
+R291292 in291 in292 {rInterSeg}
+.ic v(in291) = -0.065
+yneuron neuron292 in292 0 segParams
+R292293 in292 in293 {rInterSeg}
+.ic v(in292) = -0.065
+yneuron neuron293 in293 0 segParams
+R293294 in293 in294 {rInterSeg}
+.ic v(in293) = -0.065
+yneuron neuron294 in294 0 segParams
+R294295 in294 in295 {rInterSeg}
+.ic v(in294) = -0.065
+yneuron neuron295 in295 0 segParams
+R295296 in295 in296 {rInterSeg}
+.ic v(in295) = -0.065
+yneuron neuron296 in296 0 segParams
+R296297 in296 in297 {rInterSeg}
+.ic v(in296) = -0.065
+yneuron neuron297 in297 0 segParams
+R297298 in297 in298 {rInterSeg}
+.ic v(in297) = -0.065
+yneuron neuron298 in298 0 segParams
+R298299 in298 in299 {rInterSeg}
+.ic v(in298) = -0.065
+yneuron neuron299 in299 0 segParams
+R299300 in299 in300 {rInterSeg}
+.ic v(in299) = -0.065
+yneuron neuron300 in300 0 segParams
+R300301 in300 in301 {rInterSeg}
+.ic v(in300) = -0.065
+yneuron neuron301 in301 0 segParams
+R301302 in301 in302 {rInterSeg}
+.ic v(in301) = -0.065
+yneuron neuron302 in302 0 segParams
+R302303 in302 in303 {rInterSeg}
+.ic v(in302) = -0.065
+yneuron neuron303 in303 0 segParams
+R303304 in303 in304 {rInterSeg}
+.ic v(in303) = -0.065
+yneuron neuron304 in304 0 segParams
+R304305 in304 in305 {rInterSeg}
+.ic v(in304) = -0.065
+yneuron neuron305 in305 0 segParams
+R305306 in305 in306 {rInterSeg}
+.ic v(in305) = -0.065
+yneuron neuron306 in306 0 segParams
+R306307 in306 in307 {rInterSeg}
+.ic v(in306) = -0.065
+yneuron neuron307 in307 0 segParams
+R307308 in307 in308 {rInterSeg}
+.ic v(in307) = -0.065
+yneuron neuron308 in308 0 segParams
+R308309 in308 in309 {rInterSeg}
+.ic v(in308) = -0.065
+yneuron neuron309 in309 0 segParams
+R309310 in309 in310 {rInterSeg}
+.ic v(in309) = -0.065
+yneuron neuron310 in310 0 segParams
+R310311 in310 in311 {rInterSeg}
+.ic v(in310) = -0.065
+yneuron neuron311 in311 0 segParams
+R311312 in311 in312 {rInterSeg}
+.ic v(in311) = -0.065
+yneuron neuron312 in312 0 segParams
+R312313 in312 in313 {rInterSeg}
+.ic v(in312) = -0.065
+yneuron neuron313 in313 0 segParams
+R313314 in313 in314 {rInterSeg}
+.ic v(in313) = -0.065
+yneuron neuron314 in314 0 segParams
+R314315 in314 in315 {rInterSeg}
+.ic v(in314) = -0.065
+yneuron neuron315 in315 0 segParams
+R315316 in315 in316 {rInterSeg}
+.ic v(in315) = -0.065
+yneuron neuron316 in316 0 segParams
+R316317 in316 in317 {rInterSeg}
+.ic v(in316) = -0.065
+yneuron neuron317 in317 0 segParams
+R317318 in317 in318 {rInterSeg}
+.ic v(in317) = -0.065
+yneuron neuron318 in318 0 segParams
+R318319 in318 in319 {rInterSeg}
+.ic v(in318) = -0.065
+yneuron neuron319 in319 0 segParams
+R319320 in319 in320 {rInterSeg}
+.ic v(in319) = -0.065
+yneuron neuron320 in320 0 segParams
+R320321 in320 in321 {rInterSeg}
+.ic v(in320) = -0.065
+yneuron neuron321 in321 0 segParams
+R321322 in321 in322 {rInterSeg}
+.ic v(in321) = -0.065
+yneuron neuron322 in322 0 segParams
+R322323 in322 in323 {rInterSeg}
+.ic v(in322) = -0.065
+yneuron neuron323 in323 0 segParams
+R323324 in323 in324 {rInterSeg}
+.ic v(in323) = -0.065
+yneuron neuron324 in324 0 segParams
+R324325 in324 in325 {rInterSeg}
+.ic v(in324) = -0.065
+yneuron neuron325 in325 0 segParams
+R325326 in325 in326 {rInterSeg}
+.ic v(in325) = -0.065
+yneuron neuron326 in326 0 segParams
+R326327 in326 in327 {rInterSeg}
+.ic v(in326) = -0.065
+yneuron neuron327 in327 0 segParams
+R327328 in327 in328 {rInterSeg}
+.ic v(in327) = -0.065
+yneuron neuron328 in328 0 segParams
+R328329 in328 in329 {rInterSeg}
+.ic v(in328) = -0.065
+yneuron neuron329 in329 0 segParams
+R329330 in329 in330 {rInterSeg}
+.ic v(in329) = -0.065
+yneuron neuron330 in330 0 segParams
+R330331 in330 in331 {rInterSeg}
+.ic v(in330) = -0.065
+yneuron neuron331 in331 0 segParams
+R331332 in331 in332 {rInterSeg}
+.ic v(in331) = -0.065
+yneuron neuron332 in332 0 segParams
+R332333 in332 in333 {rInterSeg}
+.ic v(in332) = -0.065
+yneuron neuron333 in333 0 segParams
+R333334 in333 in334 {rInterSeg}
+.ic v(in333) = -0.065
+yneuron neuron334 in334 0 segParams
+R334335 in334 in335 {rInterSeg}
+.ic v(in334) = -0.065
+yneuron neuron335 in335 0 segParams
+R335336 in335 in336 {rInterSeg}
+.ic v(in335) = -0.065
+yneuron neuron336 in336 0 segParams
+R336337 in336 in337 {rInterSeg}
+.ic v(in336) = -0.065
+yneuron neuron337 in337 0 segParams
+R337338 in337 in338 {rInterSeg}
+.ic v(in337) = -0.065
+yneuron neuron338 in338 0 segParams
+R338339 in338 in339 {rInterSeg}
+.ic v(in338) = -0.065
+yneuron neuron339 in339 0 segParams
+R339340 in339 in340 {rInterSeg}
+.ic v(in339) = -0.065
+yneuron neuron340 in340 0 segParams
+R340341 in340 in341 {rInterSeg}
+.ic v(in340) = -0.065
+yneuron neuron341 in341 0 segParams
+R341342 in341 in342 {rInterSeg}
+.ic v(in341) = -0.065
+yneuron neuron342 in342 0 segParams
+R342343 in342 in343 {rInterSeg}
+.ic v(in342) = -0.065
+yneuron neuron343 in343 0 segParams
+R343344 in343 in344 {rInterSeg}
+.ic v(in343) = -0.065
+yneuron neuron344 in344 0 segParams
+R344345 in344 in345 {rInterSeg}
+.ic v(in344) = -0.065
+yneuron neuron345 in345 0 segParams
+R345346 in345 in346 {rInterSeg}
+.ic v(in345) = -0.065
+yneuron neuron346 in346 0 segParams
+R346347 in346 in347 {rInterSeg}
+.ic v(in346) = -0.065
+yneuron neuron347 in347 0 segParams
+R347348 in347 in348 {rInterSeg}
+.ic v(in347) = -0.065
+yneuron neuron348 in348 0 segParams
+R348349 in348 in349 {rInterSeg}
+.ic v(in348) = -0.065
+yneuron neuron349 in349 0 segParams
+R349350 in349 in350 {rInterSeg}
+.ic v(in349) = -0.065
+yneuron neuron350 in350 0 segParams
+R350351 in350 in351 {rInterSeg}
+.ic v(in350) = -0.065
+yneuron neuron351 in351 0 segParams
+R351352 in351 in352 {rInterSeg}
+.ic v(in351) = -0.065
+yneuron neuron352 in352 0 segParams
+R352353 in352 in353 {rInterSeg}
+.ic v(in352) = -0.065
+yneuron neuron353 in353 0 segParams
+R353354 in353 in354 {rInterSeg}
+.ic v(in353) = -0.065
+yneuron neuron354 in354 0 segParams
+R354355 in354 in355 {rInterSeg}
+.ic v(in354) = -0.065
+yneuron neuron355 in355 0 segParams
+R355356 in355 in356 {rInterSeg}
+.ic v(in355) = -0.065
+yneuron neuron356 in356 0 segParams
+R356357 in356 in357 {rInterSeg}
+.ic v(in356) = -0.065
+yneuron neuron357 in357 0 segParams
+R357358 in357 in358 {rInterSeg}
+.ic v(in357) = -0.065
+yneuron neuron358 in358 0 segParams
+R358359 in358 in359 {rInterSeg}
+.ic v(in358) = -0.065
+yneuron neuron359 in359 0 segParams
+R359360 in359 in360 {rInterSeg}
+.ic v(in359) = -0.065
+yneuron neuron360 in360 0 segParams
+R360361 in360 in361 {rInterSeg}
+.ic v(in360) = -0.065
+yneuron neuron361 in361 0 segParams
+R361362 in361 in362 {rInterSeg}
+.ic v(in361) = -0.065
+yneuron neuron362 in362 0 segParams
+R362363 in362 in363 {rInterSeg}
+.ic v(in362) = -0.065
+yneuron neuron363 in363 0 segParams
+R363364 in363 in364 {rInterSeg}
+.ic v(in363) = -0.065
+yneuron neuron364 in364 0 segParams
+R364365 in364 in365 {rInterSeg}
+.ic v(in364) = -0.065
+yneuron neuron365 in365 0 segParams
+R365366 in365 in366 {rInterSeg}
+.ic v(in365) = -0.065
+yneuron neuron366 in366 0 segParams
+R366367 in366 in367 {rInterSeg}
+.ic v(in366) = -0.065
+yneuron neuron367 in367 0 segParams
+R367368 in367 in368 {rInterSeg}
+.ic v(in367) = -0.065
+yneuron neuron368 in368 0 segParams
+R368369 in368 in369 {rInterSeg}
+.ic v(in368) = -0.065
+yneuron neuron369 in369 0 segParams
+R369370 in369 in370 {rInterSeg}
+.ic v(in369) = -0.065
+yneuron neuron370 in370 0 segParams
+R370371 in370 in371 {rInterSeg}
+.ic v(in370) = -0.065
+yneuron neuron371 in371 0 segParams
+R371372 in371 in372 {rInterSeg}
+.ic v(in371) = -0.065
+yneuron neuron372 in372 0 segParams
+R372373 in372 in373 {rInterSeg}
+.ic v(in372) = -0.065
+yneuron neuron373 in373 0 segParams
+R373374 in373 in374 {rInterSeg}
+.ic v(in373) = -0.065
+yneuron neuron374 in374 0 segParams
+R374375 in374 in375 {rInterSeg}
+.ic v(in374) = -0.065
+yneuron neuron375 in375 0 segParams
+R375376 in375 in376 {rInterSeg}
+.ic v(in375) = -0.065
+yneuron neuron376 in376 0 segParams
+R376377 in376 in377 {rInterSeg}
+.ic v(in376) = -0.065
+yneuron neuron377 in377 0 segParams
+R377378 in377 in378 {rInterSeg}
+.ic v(in377) = -0.065
+yneuron neuron378 in378 0 segParams
+R378379 in378 in379 {rInterSeg}
+.ic v(in378) = -0.065
+yneuron neuron379 in379 0 segParams
+R379380 in379 in380 {rInterSeg}
+.ic v(in379) = -0.065
+yneuron neuron380 in380 0 segParams
+R380381 in380 in381 {rInterSeg}
+.ic v(in380) = -0.065
+yneuron neuron381 in381 0 segParams
+R381382 in381 in382 {rInterSeg}
+.ic v(in381) = -0.065
+yneuron neuron382 in382 0 segParams
+R382383 in382 in383 {rInterSeg}
+.ic v(in382) = -0.065
+yneuron neuron383 in383 0 segParams
+R383384 in383 in384 {rInterSeg}
+.ic v(in383) = -0.065
+yneuron neuron384 in384 0 segParams
+R384385 in384 in385 {rInterSeg}
+.ic v(in384) = -0.065
+yneuron neuron385 in385 0 segParams
+R385386 in385 in386 {rInterSeg}
+.ic v(in385) = -0.065
+yneuron neuron386 in386 0 segParams
+R386387 in386 in387 {rInterSeg}
+.ic v(in386) = -0.065
+yneuron neuron387 in387 0 segParams
+R387388 in387 in388 {rInterSeg}
+.ic v(in387) = -0.065
+yneuron neuron388 in388 0 segParams
+R388389 in388 in389 {rInterSeg}
+.ic v(in388) = -0.065
+yneuron neuron389 in389 0 segParams
+R389390 in389 in390 {rInterSeg}
+.ic v(in389) = -0.065
+yneuron neuron390 in390 0 segParams
+R390391 in390 in391 {rInterSeg}
+.ic v(in390) = -0.065
+yneuron neuron391 in391 0 segParams
+R391392 in391 in392 {rInterSeg}
+.ic v(in391) = -0.065
+yneuron neuron392 in392 0 segParams
+R392393 in392 in393 {rInterSeg}
+.ic v(in392) = -0.065
+yneuron neuron393 in393 0 segParams
+R393394 in393 in394 {rInterSeg}
+.ic v(in393) = -0.065
+yneuron neuron394 in394 0 segParams
+R394395 in394 in395 {rInterSeg}
+.ic v(in394) = -0.065
+yneuron neuron395 in395 0 segParams
+R395396 in395 in396 {rInterSeg}
+.ic v(in395) = -0.065
+yneuron neuron396 in396 0 segParams
+R396397 in396 in397 {rInterSeg}
+.ic v(in396) = -0.065
+yneuron neuron397 in397 0 segParams
+R397398 in397 in398 {rInterSeg}
+.ic v(in397) = -0.065
+yneuron neuron398 in398 0 segParams
+R398399 in398 in399 {rInterSeg}
+.ic v(in398) = -0.065
+yneuron neuron399 in399 0 segParams
+R399400 in399 in400 {rInterSeg}
+.ic v(in399) = -0.065
+yneuron neuron400 in400 0 segParams
+R400401 in400 in401 {rInterSeg}
+.ic v(in400) = -0.065
+yneuron neuron401 in401 0 segParams
+R401402 in401 in402 {rInterSeg}
+.ic v(in401) = -0.065
+yneuron neuron402 in402 0 segParams
+R402403 in402 in403 {rInterSeg}
+.ic v(in402) = -0.065
+yneuron neuron403 in403 0 segParams
+R403404 in403 in404 {rInterSeg}
+.ic v(in403) = -0.065
+yneuron neuron404 in404 0 segParams
+R404405 in404 in405 {rInterSeg}
+.ic v(in404) = -0.065
+yneuron neuron405 in405 0 segParams
+R405406 in405 in406 {rInterSeg}
+.ic v(in405) = -0.065
+yneuron neuron406 in406 0 segParams
+R406407 in406 in407 {rInterSeg}
+.ic v(in406) = -0.065
+yneuron neuron407 in407 0 segParams
+R407408 in407 in408 {rInterSeg}
+.ic v(in407) = -0.065
+yneuron neuron408 in408 0 segParams
+R408409 in408 in409 {rInterSeg}
+.ic v(in408) = -0.065
+yneuron neuron409 in409 0 segParams
+R409410 in409 in410 {rInterSeg}
+.ic v(in409) = -0.065
+yneuron neuron410 in410 0 segParams
+R410411 in410 in411 {rInterSeg}
+.ic v(in410) = -0.065
+yneuron neuron411 in411 0 segParams
+R411412 in411 in412 {rInterSeg}
+.ic v(in411) = -0.065
+yneuron neuron412 in412 0 segParams
+R412413 in412 in413 {rInterSeg}
+.ic v(in412) = -0.065
+yneuron neuron413 in413 0 segParams
+R413414 in413 in414 {rInterSeg}
+.ic v(in413) = -0.065
+yneuron neuron414 in414 0 segParams
+R414415 in414 in415 {rInterSeg}
+.ic v(in414) = -0.065
+yneuron neuron415 in415 0 segParams
+R415416 in415 in416 {rInterSeg}
+.ic v(in415) = -0.065
+yneuron neuron416 in416 0 segParams
+R416417 in416 in417 {rInterSeg}
+.ic v(in416) = -0.065
+yneuron neuron417 in417 0 segParams
+R417418 in417 in418 {rInterSeg}
+.ic v(in417) = -0.065
+yneuron neuron418 in418 0 segParams
+R418419 in418 in419 {rInterSeg}
+.ic v(in418) = -0.065
+yneuron neuron419 in419 0 segParams
+R419420 in419 in420 {rInterSeg}
+.ic v(in419) = -0.065
+yneuron neuron420 in420 0 segParams
+R420421 in420 in421 {rInterSeg}
+.ic v(in420) = -0.065
+yneuron neuron421 in421 0 segParams
+R421422 in421 in422 {rInterSeg}
+.ic v(in421) = -0.065
+yneuron neuron422 in422 0 segParams
+R422423 in422 in423 {rInterSeg}
+.ic v(in422) = -0.065
+yneuron neuron423 in423 0 segParams
+R423424 in423 in424 {rInterSeg}
+.ic v(in423) = -0.065
+yneuron neuron424 in424 0 segParams
+R424425 in424 in425 {rInterSeg}
+.ic v(in424) = -0.065
+yneuron neuron425 in425 0 segParams
+R425426 in425 in426 {rInterSeg}
+.ic v(in425) = -0.065
+yneuron neuron426 in426 0 segParams
+R426427 in426 in427 {rInterSeg}
+.ic v(in426) = -0.065
+yneuron neuron427 in427 0 segParams
+R427428 in427 in428 {rInterSeg}
+.ic v(in427) = -0.065
+yneuron neuron428 in428 0 segParams
+R428429 in428 in429 {rInterSeg}
+.ic v(in428) = -0.065
+yneuron neuron429 in429 0 segParams
+R429430 in429 in430 {rInterSeg}
+.ic v(in429) = -0.065
+yneuron neuron430 in430 0 segParams
+R430431 in430 in431 {rInterSeg}
+.ic v(in430) = -0.065
+yneuron neuron431 in431 0 segParams
+R431432 in431 in432 {rInterSeg}
+.ic v(in431) = -0.065
+yneuron neuron432 in432 0 segParams
+R432433 in432 in433 {rInterSeg}
+.ic v(in432) = -0.065
+yneuron neuron433 in433 0 segParams
+R433434 in433 in434 {rInterSeg}
+.ic v(in433) = -0.065
+yneuron neuron434 in434 0 segParams
+R434435 in434 in435 {rInterSeg}
+.ic v(in434) = -0.065
+yneuron neuron435 in435 0 segParams
+R435436 in435 in436 {rInterSeg}
+.ic v(in435) = -0.065
+yneuron neuron436 in436 0 segParams
+R436437 in436 in437 {rInterSeg}
+.ic v(in436) = -0.065
+yneuron neuron437 in437 0 segParams
+R437438 in437 in438 {rInterSeg}
+.ic v(in437) = -0.065
+yneuron neuron438 in438 0 segParams
+R438439 in438 in439 {rInterSeg}
+.ic v(in438) = -0.065
+yneuron neuron439 in439 0 segParams
+R439440 in439 in440 {rInterSeg}
+.ic v(in439) = -0.065
+yneuron neuron440 in440 0 segParams
+R440441 in440 in441 {rInterSeg}
+.ic v(in440) = -0.065
+yneuron neuron441 in441 0 segParams
+R441442 in441 in442 {rInterSeg}
+.ic v(in441) = -0.065
+yneuron neuron442 in442 0 segParams
+R442443 in442 in443 {rInterSeg}
+.ic v(in442) = -0.065
+yneuron neuron443 in443 0 segParams
+R443444 in443 in444 {rInterSeg}
+.ic v(in443) = -0.065
+yneuron neuron444 in444 0 segParams
+R444445 in444 in445 {rInterSeg}
+.ic v(in444) = -0.065
+yneuron neuron445 in445 0 segParams
+R445446 in445 in446 {rInterSeg}
+.ic v(in445) = -0.065
+yneuron neuron446 in446 0 segParams
+R446447 in446 in447 {rInterSeg}
+.ic v(in446) = -0.065
+yneuron neuron447 in447 0 segParams
+R447448 in447 in448 {rInterSeg}
+.ic v(in447) = -0.065
+yneuron neuron448 in448 0 segParams
+R448449 in448 in449 {rInterSeg}
+.ic v(in448) = -0.065
+yneuron neuron449 in449 0 segParams
+R449450 in449 in450 {rInterSeg}
+.ic v(in449) = -0.065
+yneuron neuron450 in450 0 segParams
+R450451 in450 in451 {rInterSeg}
+.ic v(in450) = -0.065
+yneuron neuron451 in451 0 segParams
+R451452 in451 in452 {rInterSeg}
+.ic v(in451) = -0.065
+yneuron neuron452 in452 0 segParams
+R452453 in452 in453 {rInterSeg}
+.ic v(in452) = -0.065
+yneuron neuron453 in453 0 segParams
+R453454 in453 in454 {rInterSeg}
+.ic v(in453) = -0.065
+yneuron neuron454 in454 0 segParams
+R454455 in454 in455 {rInterSeg}
+.ic v(in454) = -0.065
+yneuron neuron455 in455 0 segParams
+R455456 in455 in456 {rInterSeg}
+.ic v(in455) = -0.065
+yneuron neuron456 in456 0 segParams
+R456457 in456 in457 {rInterSeg}
+.ic v(in456) = -0.065
+yneuron neuron457 in457 0 segParams
+R457458 in457 in458 {rInterSeg}
+.ic v(in457) = -0.065
+yneuron neuron458 in458 0 segParams
+R458459 in458 in459 {rInterSeg}
+.ic v(in458) = -0.065
+yneuron neuron459 in459 0 segParams
+R459460 in459 in460 {rInterSeg}
+.ic v(in459) = -0.065
+yneuron neuron460 in460 0 segParams
+R460461 in460 in461 {rInterSeg}
+.ic v(in460) = -0.065
+yneuron neuron461 in461 0 segParams
+R461462 in461 in462 {rInterSeg}
+.ic v(in461) = -0.065
+yneuron neuron462 in462 0 segParams
+R462463 in462 in463 {rInterSeg}
+.ic v(in462) = -0.065
+yneuron neuron463 in463 0 segParams
+R463464 in463 in464 {rInterSeg}
+.ic v(in463) = -0.065
+yneuron neuron464 in464 0 segParams
+R464465 in464 in465 {rInterSeg}
+.ic v(in464) = -0.065
+yneuron neuron465 in465 0 segParams
+R465466 in465 in466 {rInterSeg}
+.ic v(in465) = -0.065
+yneuron neuron466 in466 0 segParams
+R466467 in466 in467 {rInterSeg}
+.ic v(in466) = -0.065
+yneuron neuron467 in467 0 segParams
+R467468 in467 in468 {rInterSeg}
+.ic v(in467) = -0.065
+yneuron neuron468 in468 0 segParams
+R468469 in468 in469 {rInterSeg}
+.ic v(in468) = -0.065
+yneuron neuron469 in469 0 segParams
+R469470 in469 in470 {rInterSeg}
+.ic v(in469) = -0.065
+yneuron neuron470 in470 0 segParams
+R470471 in470 in471 {rInterSeg}
+.ic v(in470) = -0.065
+yneuron neuron471 in471 0 segParams
+R471472 in471 in472 {rInterSeg}
+.ic v(in471) = -0.065
+yneuron neuron472 in472 0 segParams
+R472473 in472 in473 {rInterSeg}
+.ic v(in472) = -0.065
+yneuron neuron473 in473 0 segParams
+R473474 in473 in474 {rInterSeg}
+.ic v(in473) = -0.065
+yneuron neuron474 in474 0 segParams
+R474475 in474 in475 {rInterSeg}
+.ic v(in474) = -0.065
+yneuron neuron475 in475 0 segParams
+R475476 in475 in476 {rInterSeg}
+.ic v(in475) = -0.065
+yneuron neuron476 in476 0 segParams
+R476477 in476 in477 {rInterSeg}
+.ic v(in476) = -0.065
+yneuron neuron477 in477 0 segParams
+R477478 in477 in478 {rInterSeg}
+.ic v(in477) = -0.065
+yneuron neuron478 in478 0 segParams
+R478479 in478 in479 {rInterSeg}
+.ic v(in478) = -0.065
+yneuron neuron479 in479 0 segParams
+R479480 in479 in480 {rInterSeg}
+.ic v(in479) = -0.065
+yneuron neuron480 in480 0 segParams
+R480481 in480 in481 {rInterSeg}
+.ic v(in480) = -0.065
+yneuron neuron481 in481 0 segParams
+R481482 in481 in482 {rInterSeg}
+.ic v(in481) = -0.065
+yneuron neuron482 in482 0 segParams
+R482483 in482 in483 {rInterSeg}
+.ic v(in482) = -0.065
+yneuron neuron483 in483 0 segParams
+R483484 in483 in484 {rInterSeg}
+.ic v(in483) = -0.065
+yneuron neuron484 in484 0 segParams
+R484485 in484 in485 {rInterSeg}
+.ic v(in484) = -0.065
+yneuron neuron485 in485 0 segParams
+R485486 in485 in486 {rInterSeg}
+.ic v(in485) = -0.065
+yneuron neuron486 in486 0 segParams
+R486487 in486 in487 {rInterSeg}
+.ic v(in486) = -0.065
+yneuron neuron487 in487 0 segParams
+R487488 in487 in488 {rInterSeg}
+.ic v(in487) = -0.065
+yneuron neuron488 in488 0 segParams
+R488489 in488 in489 {rInterSeg}
+.ic v(in488) = -0.065
+yneuron neuron489 in489 0 segParams
+R489490 in489 in490 {rInterSeg}
+.ic v(in489) = -0.065
+yneuron neuron490 in490 0 segParams
+R490491 in490 in491 {rInterSeg}
+.ic v(in490) = -0.065
+yneuron neuron491 in491 0 segParams
+R491492 in491 in492 {rInterSeg}
+.ic v(in491) = -0.065
+yneuron neuron492 in492 0 segParams
+R492493 in492 in493 {rInterSeg}
+.ic v(in492) = -0.065
+yneuron neuron493 in493 0 segParams
+R493494 in493 in494 {rInterSeg}
+.ic v(in493) = -0.065
+yneuron neuron494 in494 0 segParams
+R494495 in494 in495 {rInterSeg}
+.ic v(in494) = -0.065
+yneuron neuron495 in495 0 segParams
+R495496 in495 in496 {rInterSeg}
+.ic v(in495) = -0.065
+yneuron neuron496 in496 0 segParams
+R496497 in496 in497 {rInterSeg}
+.ic v(in496) = -0.065
+yneuron neuron497 in497 0 segParams
+R497498 in497 in498 {rInterSeg}
+.ic v(in497) = -0.065
+yneuron neuron498 in498 0 segParams
+R498499 in498 in499 {rInterSeg}
+.ic v(in498) = -0.065
+yneuron neuron499 in499 0 segParams
+R499500 in499 in500 {rInterSeg}
+.ic v(in499) = -0.065
+yneuron neuron500 in500 0 segParams
+R500501 in500 in501 {rInterSeg}
+.ic v(in500) = -0.065
+yneuron neuron501 in501 0 segParams
+R501502 in501 in502 {rInterSeg}
+.ic v(in501) = -0.065
+yneuron neuron502 in502 0 segParams
+R502503 in502 in503 {rInterSeg}
+.ic v(in502) = -0.065
+yneuron neuron503 in503 0 segParams
+R503504 in503 in504 {rInterSeg}
+.ic v(in503) = -0.065
+yneuron neuron504 in504 0 segParams
+R504505 in504 in505 {rInterSeg}
+.ic v(in504) = -0.065
+yneuron neuron505 in505 0 segParams
+R505506 in505 in506 {rInterSeg}
+.ic v(in505) = -0.065
+yneuron neuron506 in506 0 segParams
+R506507 in506 in507 {rInterSeg}
+.ic v(in506) = -0.065
+yneuron neuron507 in507 0 segParams
+R507508 in507 in508 {rInterSeg}
+.ic v(in507) = -0.065
+yneuron neuron508 in508 0 segParams
+R508509 in508 in509 {rInterSeg}
+.ic v(in508) = -0.065
+yneuron neuron509 in509 0 segParams
+R509510 in509 in510 {rInterSeg}
+.ic v(in509) = -0.065
+yneuron neuron510 in510 0 segParams
+R510511 in510 in511 {rInterSeg}
+.ic v(in510) = -0.065
+yneuron neuron511 in511 0 segParams
+R511512 in511 in512 {rInterSeg}
+.ic v(in511) = -0.065
+yneuron neuron512 in512 0 segParams
+R512513 in512 in513 {rInterSeg}
+.ic v(in512) = -0.065
+yneuron neuron513 in513 0 segParams
+R513514 in513 in514 {rInterSeg}
+.ic v(in513) = -0.065
+yneuron neuron514 in514 0 segParams
+R514515 in514 in515 {rInterSeg}
+.ic v(in514) = -0.065
+yneuron neuron515 in515 0 segParams
+R515516 in515 in516 {rInterSeg}
+.ic v(in515) = -0.065
+yneuron neuron516 in516 0 segParams
+R516517 in516 in517 {rInterSeg}
+.ic v(in516) = -0.065
+yneuron neuron517 in517 0 segParams
+R517518 in517 in518 {rInterSeg}
+.ic v(in517) = -0.065
+yneuron neuron518 in518 0 segParams
+R518519 in518 in519 {rInterSeg}
+.ic v(in518) = -0.065
+yneuron neuron519 in519 0 segParams
+R519520 in519 in520 {rInterSeg}
+.ic v(in519) = -0.065
+yneuron neuron520 in520 0 segParams
+R520521 in520 in521 {rInterSeg}
+.ic v(in520) = -0.065
+yneuron neuron521 in521 0 segParams
+R521522 in521 in522 {rInterSeg}
+.ic v(in521) = -0.065
+yneuron neuron522 in522 0 segParams
+R522523 in522 in523 {rInterSeg}
+.ic v(in522) = -0.065
+yneuron neuron523 in523 0 segParams
+R523524 in523 in524 {rInterSeg}
+.ic v(in523) = -0.065
+yneuron neuron524 in524 0 segParams
+R524525 in524 in525 {rInterSeg}
+.ic v(in524) = -0.065
+yneuron neuron525 in525 0 segParams
+R525526 in525 in526 {rInterSeg}
+.ic v(in525) = -0.065
+yneuron neuron526 in526 0 segParams
+R526527 in526 in527 {rInterSeg}
+.ic v(in526) = -0.065
+yneuron neuron527 in527 0 segParams
+R527528 in527 in528 {rInterSeg}
+.ic v(in527) = -0.065
+yneuron neuron528 in528 0 segParams
+R528529 in528 in529 {rInterSeg}
+.ic v(in528) = -0.065
+yneuron neuron529 in529 0 segParams
+R529530 in529 in530 {rInterSeg}
+.ic v(in529) = -0.065
+yneuron neuron530 in530 0 segParams
+R530531 in530 in531 {rInterSeg}
+.ic v(in530) = -0.065
+yneuron neuron531 in531 0 segParams
+R531532 in531 in532 {rInterSeg}
+.ic v(in531) = -0.065
+yneuron neuron532 in532 0 segParams
+R532533 in532 in533 {rInterSeg}
+.ic v(in532) = -0.065
+yneuron neuron533 in533 0 segParams
+R533534 in533 in534 {rInterSeg}
+.ic v(in533) = -0.065
+yneuron neuron534 in534 0 segParams
+R534535 in534 in535 {rInterSeg}
+.ic v(in534) = -0.065
+yneuron neuron535 in535 0 segParams
+R535536 in535 in536 {rInterSeg}
+.ic v(in535) = -0.065
+yneuron neuron536 in536 0 segParams
+R536537 in536 in537 {rInterSeg}
+.ic v(in536) = -0.065
+yneuron neuron537 in537 0 segParams
+R537538 in537 in538 {rInterSeg}
+.ic v(in537) = -0.065
+yneuron neuron538 in538 0 segParams
+R538539 in538 in539 {rInterSeg}
+.ic v(in538) = -0.065
+yneuron neuron539 in539 0 segParams
+R539540 in539 in540 {rInterSeg}
+.ic v(in539) = -0.065
+yneuron neuron540 in540 0 segParams
+R540541 in540 in541 {rInterSeg}
+.ic v(in540) = -0.065
+yneuron neuron541 in541 0 segParams
+R541542 in541 in542 {rInterSeg}
+.ic v(in541) = -0.065
+yneuron neuron542 in542 0 segParams
+R542543 in542 in543 {rInterSeg}
+.ic v(in542) = -0.065
+yneuron neuron543 in543 0 segParams
+R543544 in543 in544 {rInterSeg}
+.ic v(in543) = -0.065
+yneuron neuron544 in544 0 segParams
+R544545 in544 in545 {rInterSeg}
+.ic v(in544) = -0.065
+yneuron neuron545 in545 0 segParams
+R545546 in545 in546 {rInterSeg}
+.ic v(in545) = -0.065
+yneuron neuron546 in546 0 segParams
+R546547 in546 in547 {rInterSeg}
+.ic v(in546) = -0.065
+yneuron neuron547 in547 0 segParams
+R547548 in547 in548 {rInterSeg}
+.ic v(in547) = -0.065
+yneuron neuron548 in548 0 segParams
+R548549 in548 in549 {rInterSeg}
+.ic v(in548) = -0.065
+yneuron neuron549 in549 0 segParams
+R549550 in549 in550 {rInterSeg}
+.ic v(in549) = -0.065
+yneuron neuron550 in550 0 segParams
+R550551 in550 in551 {rInterSeg}
+.ic v(in550) = -0.065
+yneuron neuron551 in551 0 segParams
+R551552 in551 in552 {rInterSeg}
+.ic v(in551) = -0.065
+yneuron neuron552 in552 0 segParams
+R552553 in552 in553 {rInterSeg}
+.ic v(in552) = -0.065
+yneuron neuron553 in553 0 segParams
+R553554 in553 in554 {rInterSeg}
+.ic v(in553) = -0.065
+yneuron neuron554 in554 0 segParams
+R554555 in554 in555 {rInterSeg}
+.ic v(in554) = -0.065
+yneuron neuron555 in555 0 segParams
+R555556 in555 in556 {rInterSeg}
+.ic v(in555) = -0.065
+yneuron neuron556 in556 0 segParams
+R556557 in556 in557 {rInterSeg}
+.ic v(in556) = -0.065
+yneuron neuron557 in557 0 segParams
+R557558 in557 in558 {rInterSeg}
+.ic v(in557) = -0.065
+yneuron neuron558 in558 0 segParams
+R558559 in558 in559 {rInterSeg}
+.ic v(in558) = -0.065
+yneuron neuron559 in559 0 segParams
+R559560 in559 in560 {rInterSeg}
+.ic v(in559) = -0.065
+yneuron neuron560 in560 0 segParams
+R560561 in560 in561 {rInterSeg}
+.ic v(in560) = -0.065
+yneuron neuron561 in561 0 segParams
+R561562 in561 in562 {rInterSeg}
+.ic v(in561) = -0.065
+yneuron neuron562 in562 0 segParams
+R562563 in562 in563 {rInterSeg}
+.ic v(in562) = -0.065
+yneuron neuron563 in563 0 segParams
+R563564 in563 in564 {rInterSeg}
+.ic v(in563) = -0.065
+yneuron neuron564 in564 0 segParams
+R564565 in564 in565 {rInterSeg}
+.ic v(in564) = -0.065
+yneuron neuron565 in565 0 segParams
+R565566 in565 in566 {rInterSeg}
+.ic v(in565) = -0.065
+yneuron neuron566 in566 0 segParams
+R566567 in566 in567 {rInterSeg}
+.ic v(in566) = -0.065
+yneuron neuron567 in567 0 segParams
+R567568 in567 in568 {rInterSeg}
+.ic v(in567) = -0.065
+yneuron neuron568 in568 0 segParams
+R568569 in568 in569 {rInterSeg}
+.ic v(in568) = -0.065
+yneuron neuron569 in569 0 segParams
+R569570 in569 in570 {rInterSeg}
+.ic v(in569) = -0.065
+yneuron neuron570 in570 0 segParams
+R570571 in570 in571 {rInterSeg}
+.ic v(in570) = -0.065
+yneuron neuron571 in571 0 segParams
+R571572 in571 in572 {rInterSeg}
+.ic v(in571) = -0.065
+yneuron neuron572 in572 0 segParams
+R572573 in572 in573 {rInterSeg}
+.ic v(in572) = -0.065
+yneuron neuron573 in573 0 segParams
+R573574 in573 in574 {rInterSeg}
+.ic v(in573) = -0.065
+yneuron neuron574 in574 0 segParams
+R574575 in574 in575 {rInterSeg}
+.ic v(in574) = -0.065
+yneuron neuron575 in575 0 segParams
+R575576 in575 in576 {rInterSeg}
+.ic v(in575) = -0.065
+yneuron neuron576 in576 0 segParams
+R576577 in576 in577 {rInterSeg}
+.ic v(in576) = -0.065
+yneuron neuron577 in577 0 segParams
+R577578 in577 in578 {rInterSeg}
+.ic v(in577) = -0.065
+yneuron neuron578 in578 0 segParams
+R578579 in578 in579 {rInterSeg}
+.ic v(in578) = -0.065
+yneuron neuron579 in579 0 segParams
+R579580 in579 in580 {rInterSeg}
+.ic v(in579) = -0.065
+yneuron neuron580 in580 0 segParams
+R580581 in580 in581 {rInterSeg}
+.ic v(in580) = -0.065
+yneuron neuron581 in581 0 segParams
+R581582 in581 in582 {rInterSeg}
+.ic v(in581) = -0.065
+yneuron neuron582 in582 0 segParams
+R582583 in582 in583 {rInterSeg}
+.ic v(in582) = -0.065
+yneuron neuron583 in583 0 segParams
+R583584 in583 in584 {rInterSeg}
+.ic v(in583) = -0.065
+yneuron neuron584 in584 0 segParams
+R584585 in584 in585 {rInterSeg}
+.ic v(in584) = -0.065
+yneuron neuron585 in585 0 segParams
+R585586 in585 in586 {rInterSeg}
+.ic v(in585) = -0.065
+yneuron neuron586 in586 0 segParams
+R586587 in586 in587 {rInterSeg}
+.ic v(in586) = -0.065
+yneuron neuron587 in587 0 segParams
+R587588 in587 in588 {rInterSeg}
+.ic v(in587) = -0.065
+yneuron neuron588 in588 0 segParams
+R588589 in588 in589 {rInterSeg}
+.ic v(in588) = -0.065
+yneuron neuron589 in589 0 segParams
+R589590 in589 in590 {rInterSeg}
+.ic v(in589) = -0.065
+yneuron neuron590 in590 0 segParams
+R590591 in590 in591 {rInterSeg}
+.ic v(in590) = -0.065
+yneuron neuron591 in591 0 segParams
+R591592 in591 in592 {rInterSeg}
+.ic v(in591) = -0.065
+yneuron neuron592 in592 0 segParams
+R592593 in592 in593 {rInterSeg}
+.ic v(in592) = -0.065
+yneuron neuron593 in593 0 segParams
+R593594 in593 in594 {rInterSeg}
+.ic v(in593) = -0.065
+yneuron neuron594 in594 0 segParams
+R594595 in594 in595 {rInterSeg}
+.ic v(in594) = -0.065
+yneuron neuron595 in595 0 segParams
+R595596 in595 in596 {rInterSeg}
+.ic v(in595) = -0.065
+yneuron neuron596 in596 0 segParams
+R596597 in596 in597 {rInterSeg}
+.ic v(in596) = -0.065
+yneuron neuron597 in597 0 segParams
+R597598 in597 in598 {rInterSeg}
+.ic v(in597) = -0.065
+yneuron neuron598 in598 0 segParams
+R598599 in598 in599 {rInterSeg}
+.ic v(in598) = -0.065
+yneuron neuron599 in599 0 segParams
+R599600 in599 in600 {rInterSeg}
+.ic v(in599) = -0.065
+yneuron neuron600 in600 0 segParams
+R600601 in600 in601 {rInterSeg}
+.ic v(in600) = -0.065
+yneuron neuron601 in601 0 segParams
+R601602 in601 in602 {rInterSeg}
+.ic v(in601) = -0.065
+yneuron neuron602 in602 0 segParams
+R602603 in602 in603 {rInterSeg}
+.ic v(in602) = -0.065
+yneuron neuron603 in603 0 segParams
+R603604 in603 in604 {rInterSeg}
+.ic v(in603) = -0.065
+yneuron neuron604 in604 0 segParams
+R604605 in604 in605 {rInterSeg}
+.ic v(in604) = -0.065
+yneuron neuron605 in605 0 segParams
+R605606 in605 in606 {rInterSeg}
+.ic v(in605) = -0.065
+yneuron neuron606 in606 0 segParams
+R606607 in606 in607 {rInterSeg}
+.ic v(in606) = -0.065
+yneuron neuron607 in607 0 segParams
+R607608 in607 in608 {rInterSeg}
+.ic v(in607) = -0.065
+yneuron neuron608 in608 0 segParams
+R608609 in608 in609 {rInterSeg}
+.ic v(in608) = -0.065
+yneuron neuron609 in609 0 segParams
+R609610 in609 in610 {rInterSeg}
+.ic v(in609) = -0.065
+yneuron neuron610 in610 0 segParams
+R610611 in610 in611 {rInterSeg}
+.ic v(in610) = -0.065
+yneuron neuron611 in611 0 segParams
+R611612 in611 in612 {rInterSeg}
+.ic v(in611) = -0.065
+yneuron neuron612 in612 0 segParams
+R612613 in612 in613 {rInterSeg}
+.ic v(in612) = -0.065
+yneuron neuron613 in613 0 segParams
+R613614 in613 in614 {rInterSeg}
+.ic v(in613) = -0.065
+yneuron neuron614 in614 0 segParams
+R614615 in614 in615 {rInterSeg}
+.ic v(in614) = -0.065
+yneuron neuron615 in615 0 segParams
+R615616 in615 in616 {rInterSeg}
+.ic v(in615) = -0.065
+yneuron neuron616 in616 0 segParams
+R616617 in616 in617 {rInterSeg}
+.ic v(in616) = -0.065
+yneuron neuron617 in617 0 segParams
+R617618 in617 in618 {rInterSeg}
+.ic v(in617) = -0.065
+yneuron neuron618 in618 0 segParams
+R618619 in618 in619 {rInterSeg}
+.ic v(in618) = -0.065
+yneuron neuron619 in619 0 segParams
+R619620 in619 in620 {rInterSeg}
+.ic v(in619) = -0.065
+yneuron neuron620 in620 0 segParams
+R620621 in620 in621 {rInterSeg}
+.ic v(in620) = -0.065
+yneuron neuron621 in621 0 segParams
+R621622 in621 in622 {rInterSeg}
+.ic v(in621) = -0.065
+yneuron neuron622 in622 0 segParams
+R622623 in622 in623 {rInterSeg}
+.ic v(in622) = -0.065
+yneuron neuron623 in623 0 segParams
+R623624 in623 in624 {rInterSeg}
+.ic v(in623) = -0.065
+yneuron neuron624 in624 0 segParams
+R624625 in624 in625 {rInterSeg}
+.ic v(in624) = -0.065
+yneuron neuron625 in625 0 segParams
+R625626 in625 in626 {rInterSeg}
+.ic v(in625) = -0.065
+yneuron neuron626 in626 0 segParams
+R626627 in626 in627 {rInterSeg}
+.ic v(in626) = -0.065
+yneuron neuron627 in627 0 segParams
+R627628 in627 in628 {rInterSeg}
+.ic v(in627) = -0.065
+yneuron neuron628 in628 0 segParams
+R628629 in628 in629 {rInterSeg}
+.ic v(in628) = -0.065
+yneuron neuron629 in629 0 segParams
+R629630 in629 in630 {rInterSeg}
+.ic v(in629) = -0.065
+yneuron neuron630 in630 0 segParams
+R630631 in630 in631 {rInterSeg}
+.ic v(in630) = -0.065
+yneuron neuron631 in631 0 segParams
+R631632 in631 in632 {rInterSeg}
+.ic v(in631) = -0.065
+yneuron neuron632 in632 0 segParams
+R632633 in632 in633 {rInterSeg}
+.ic v(in632) = -0.065
+yneuron neuron633 in633 0 segParams
+R633634 in633 in634 {rInterSeg}
+.ic v(in633) = -0.065
+yneuron neuron634 in634 0 segParams
+R634635 in634 in635 {rInterSeg}
+.ic v(in634) = -0.065
+yneuron neuron635 in635 0 segParams
+R635636 in635 in636 {rInterSeg}
+.ic v(in635) = -0.065
+yneuron neuron636 in636 0 segParams
+R636637 in636 in637 {rInterSeg}
+.ic v(in636) = -0.065
+yneuron neuron637 in637 0 segParams
+R637638 in637 in638 {rInterSeg}
+.ic v(in637) = -0.065
+yneuron neuron638 in638 0 segParams
+R638639 in638 in639 {rInterSeg}
+.ic v(in638) = -0.065
+yneuron neuron639 in639 0 segParams
+R639640 in639 in640 {rInterSeg}
+.ic v(in639) = -0.065
+yneuron neuron640 in640 0 segParams
+R640641 in640 in641 {rInterSeg}
+.ic v(in640) = -0.065
+yneuron neuron641 in641 0 segParams
+R641642 in641 in642 {rInterSeg}
+.ic v(in641) = -0.065
+yneuron neuron642 in642 0 segParams
+R642643 in642 in643 {rInterSeg}
+.ic v(in642) = -0.065
+yneuron neuron643 in643 0 segParams
+R643644 in643 in644 {rInterSeg}
+.ic v(in643) = -0.065
+yneuron neuron644 in644 0 segParams
+R644645 in644 in645 {rInterSeg}
+.ic v(in644) = -0.065
+yneuron neuron645 in645 0 segParams
+R645646 in645 in646 {rInterSeg}
+.ic v(in645) = -0.065
+yneuron neuron646 in646 0 segParams
+R646647 in646 in647 {rInterSeg}
+.ic v(in646) = -0.065
+yneuron neuron647 in647 0 segParams
+R647648 in647 in648 {rInterSeg}
+.ic v(in647) = -0.065
+yneuron neuron648 in648 0 segParams
+R648649 in648 in649 {rInterSeg}
+.ic v(in648) = -0.065
+yneuron neuron649 in649 0 segParams
+R649650 in649 in650 {rInterSeg}
+.ic v(in649) = -0.065
+yneuron neuron650 in650 0 segParams
+R650651 in650 in651 {rInterSeg}
+.ic v(in650) = -0.065
+yneuron neuron651 in651 0 segParams
+R651652 in651 in652 {rInterSeg}
+.ic v(in651) = -0.065
+yneuron neuron652 in652 0 segParams
+R652653 in652 in653 {rInterSeg}
+.ic v(in652) = -0.065
+yneuron neuron653 in653 0 segParams
+R653654 in653 in654 {rInterSeg}
+.ic v(in653) = -0.065
+yneuron neuron654 in654 0 segParams
+R654655 in654 in655 {rInterSeg}
+.ic v(in654) = -0.065
+yneuron neuron655 in655 0 segParams
+R655656 in655 in656 {rInterSeg}
+.ic v(in655) = -0.065
+yneuron neuron656 in656 0 segParams
+R656657 in656 in657 {rInterSeg}
+.ic v(in656) = -0.065
+yneuron neuron657 in657 0 segParams
+R657658 in657 in658 {rInterSeg}
+.ic v(in657) = -0.065
+yneuron neuron658 in658 0 segParams
+R658659 in658 in659 {rInterSeg}
+.ic v(in658) = -0.065
+yneuron neuron659 in659 0 segParams
+R659660 in659 in660 {rInterSeg}
+.ic v(in659) = -0.065
+yneuron neuron660 in660 0 segParams
+R660661 in660 in661 {rInterSeg}
+.ic v(in660) = -0.065
+yneuron neuron661 in661 0 segParams
+R661662 in661 in662 {rInterSeg}
+.ic v(in661) = -0.065
+yneuron neuron662 in662 0 segParams
+R662663 in662 in663 {rInterSeg}
+.ic v(in662) = -0.065
+yneuron neuron663 in663 0 segParams
+R663664 in663 in664 {rInterSeg}
+.ic v(in663) = -0.065
+yneuron neuron664 in664 0 segParams
+R664665 in664 in665 {rInterSeg}
+.ic v(in664) = -0.065
+yneuron neuron665 in665 0 segParams
+R665666 in665 in666 {rInterSeg}
+.ic v(in665) = -0.065
+yneuron neuron666 in666 0 segParams
+R666667 in666 in667 {rInterSeg}
+.ic v(in666) = -0.065
+yneuron neuron667 in667 0 segParams
+R667668 in667 in668 {rInterSeg}
+.ic v(in667) = -0.065
+yneuron neuron668 in668 0 segParams
+R668669 in668 in669 {rInterSeg}
+.ic v(in668) = -0.065
+yneuron neuron669 in669 0 segParams
+R669670 in669 in670 {rInterSeg}
+.ic v(in669) = -0.065
+yneuron neuron670 in670 0 segParams
+R670671 in670 in671 {rInterSeg}
+.ic v(in670) = -0.065
+yneuron neuron671 in671 0 segParams
+R671672 in671 in672 {rInterSeg}
+.ic v(in671) = -0.065
+yneuron neuron672 in672 0 segParams
+R672673 in672 in673 {rInterSeg}
+.ic v(in672) = -0.065
+yneuron neuron673 in673 0 segParams
+R673674 in673 in674 {rInterSeg}
+.ic v(in673) = -0.065
+yneuron neuron674 in674 0 segParams
+R674675 in674 in675 {rInterSeg}
+.ic v(in674) = -0.065
+yneuron neuron675 in675 0 segParams
+R675676 in675 in676 {rInterSeg}
+.ic v(in675) = -0.065
+yneuron neuron676 in676 0 segParams
+R676677 in676 in677 {rInterSeg}
+.ic v(in676) = -0.065
+yneuron neuron677 in677 0 segParams
+R677678 in677 in678 {rInterSeg}
+.ic v(in677) = -0.065
+yneuron neuron678 in678 0 segParams
+R678679 in678 in679 {rInterSeg}
+.ic v(in678) = -0.065
+yneuron neuron679 in679 0 segParams
+R679680 in679 in680 {rInterSeg}
+.ic v(in679) = -0.065
+yneuron neuron680 in680 0 segParams
+R680681 in680 in681 {rInterSeg}
+.ic v(in680) = -0.065
+yneuron neuron681 in681 0 segParams
+R681682 in681 in682 {rInterSeg}
+.ic v(in681) = -0.065
+yneuron neuron682 in682 0 segParams
+R682683 in682 in683 {rInterSeg}
+.ic v(in682) = -0.065
+yneuron neuron683 in683 0 segParams
+R683684 in683 in684 {rInterSeg}
+.ic v(in683) = -0.065
+yneuron neuron684 in684 0 segParams
+R684685 in684 in685 {rInterSeg}
+.ic v(in684) = -0.065
+yneuron neuron685 in685 0 segParams
+R685686 in685 in686 {rInterSeg}
+.ic v(in685) = -0.065
+yneuron neuron686 in686 0 segParams
+R686687 in686 in687 {rInterSeg}
+.ic v(in686) = -0.065
+yneuron neuron687 in687 0 segParams
+R687688 in687 in688 {rInterSeg}
+.ic v(in687) = -0.065
+yneuron neuron688 in688 0 segParams
+R688689 in688 in689 {rInterSeg}
+.ic v(in688) = -0.065
+yneuron neuron689 in689 0 segParams
+R689690 in689 in690 {rInterSeg}
+.ic v(in689) = -0.065
+yneuron neuron690 in690 0 segParams
+R690691 in690 in691 {rInterSeg}
+.ic v(in690) = -0.065
+yneuron neuron691 in691 0 segParams
+R691692 in691 in692 {rInterSeg}
+.ic v(in691) = -0.065
+yneuron neuron692 in692 0 segParams
+R692693 in692 in693 {rInterSeg}
+.ic v(in692) = -0.065
+yneuron neuron693 in693 0 segParams
+R693694 in693 in694 {rInterSeg}
+.ic v(in693) = -0.065
+yneuron neuron694 in694 0 segParams
+R694695 in694 in695 {rInterSeg}
+.ic v(in694) = -0.065
+yneuron neuron695 in695 0 segParams
+R695696 in695 in696 {rInterSeg}
+.ic v(in695) = -0.065
+yneuron neuron696 in696 0 segParams
+R696697 in696 in697 {rInterSeg}
+.ic v(in696) = -0.065
+yneuron neuron697 in697 0 segParams
+R697698 in697 in698 {rInterSeg}
+.ic v(in697) = -0.065
+yneuron neuron698 in698 0 segParams
+R698699 in698 in699 {rInterSeg}
+.ic v(in698) = -0.065
+yneuron neuron699 in699 0 segParams
+R699700 in699 in700 {rInterSeg}
+.ic v(in699) = -0.065
+yneuron neuron700 in700 0 segParams
+R700701 in700 in701 {rInterSeg}
+.ic v(in700) = -0.065
+yneuron neuron701 in701 0 segParams
+R701702 in701 in702 {rInterSeg}
+.ic v(in701) = -0.065
+yneuron neuron702 in702 0 segParams
+R702703 in702 in703 {rInterSeg}
+.ic v(in702) = -0.065
+yneuron neuron703 in703 0 segParams
+R703704 in703 in704 {rInterSeg}
+.ic v(in703) = -0.065
+yneuron neuron704 in704 0 segParams
+R704705 in704 in705 {rInterSeg}
+.ic v(in704) = -0.065
+yneuron neuron705 in705 0 segParams
+R705706 in705 in706 {rInterSeg}
+.ic v(in705) = -0.065
+yneuron neuron706 in706 0 segParams
+R706707 in706 in707 {rInterSeg}
+.ic v(in706) = -0.065
+yneuron neuron707 in707 0 segParams
+R707708 in707 in708 {rInterSeg}
+.ic v(in707) = -0.065
+yneuron neuron708 in708 0 segParams
+R708709 in708 in709 {rInterSeg}
+.ic v(in708) = -0.065
+yneuron neuron709 in709 0 segParams
+R709710 in709 in710 {rInterSeg}
+.ic v(in709) = -0.065
+yneuron neuron710 in710 0 segParams
+R710711 in710 in711 {rInterSeg}
+.ic v(in710) = -0.065
+yneuron neuron711 in711 0 segParams
+R711712 in711 in712 {rInterSeg}
+.ic v(in711) = -0.065
+yneuron neuron712 in712 0 segParams
+R712713 in712 in713 {rInterSeg}
+.ic v(in712) = -0.065
+yneuron neuron713 in713 0 segParams
+R713714 in713 in714 {rInterSeg}
+.ic v(in713) = -0.065
+yneuron neuron714 in714 0 segParams
+R714715 in714 in715 {rInterSeg}
+.ic v(in714) = -0.065
+yneuron neuron715 in715 0 segParams
+R715716 in715 in716 {rInterSeg}
+.ic v(in715) = -0.065
+yneuron neuron716 in716 0 segParams
+R716717 in716 in717 {rInterSeg}
+.ic v(in716) = -0.065
+yneuron neuron717 in717 0 segParams
+R717718 in717 in718 {rInterSeg}
+.ic v(in717) = -0.065
+yneuron neuron718 in718 0 segParams
+R718719 in718 in719 {rInterSeg}
+.ic v(in718) = -0.065
+yneuron neuron719 in719 0 segParams
+R719720 in719 in720 {rInterSeg}
+.ic v(in719) = -0.065
+yneuron neuron720 in720 0 segParams
+R720721 in720 in721 {rInterSeg}
+.ic v(in720) = -0.065
+yneuron neuron721 in721 0 segParams
+R721722 in721 in722 {rInterSeg}
+.ic v(in721) = -0.065
+yneuron neuron722 in722 0 segParams
+R722723 in722 in723 {rInterSeg}
+.ic v(in722) = -0.065
+yneuron neuron723 in723 0 segParams
+R723724 in723 in724 {rInterSeg}
+.ic v(in723) = -0.065
+yneuron neuron724 in724 0 segParams
+R724725 in724 in725 {rInterSeg}
+.ic v(in724) = -0.065
+yneuron neuron725 in725 0 segParams
+R725726 in725 in726 {rInterSeg}
+.ic v(in725) = -0.065
+yneuron neuron726 in726 0 segParams
+R726727 in726 in727 {rInterSeg}
+.ic v(in726) = -0.065
+yneuron neuron727 in727 0 segParams
+R727728 in727 in728 {rInterSeg}
+.ic v(in727) = -0.065
+yneuron neuron728 in728 0 segParams
+R728729 in728 in729 {rInterSeg}
+.ic v(in728) = -0.065
+yneuron neuron729 in729 0 segParams
+R729730 in729 in730 {rInterSeg}
+.ic v(in729) = -0.065
+yneuron neuron730 in730 0 segParams
+R730731 in730 in731 {rInterSeg}
+.ic v(in730) = -0.065
+yneuron neuron731 in731 0 segParams
+R731732 in731 in732 {rInterSeg}
+.ic v(in731) = -0.065
+yneuron neuron732 in732 0 segParams
+R732733 in732 in733 {rInterSeg}
+.ic v(in732) = -0.065
+yneuron neuron733 in733 0 segParams
+R733734 in733 in734 {rInterSeg}
+.ic v(in733) = -0.065
+yneuron neuron734 in734 0 segParams
+R734735 in734 in735 {rInterSeg}
+.ic v(in734) = -0.065
+yneuron neuron735 in735 0 segParams
+R735736 in735 in736 {rInterSeg}
+.ic v(in735) = -0.065
+yneuron neuron736 in736 0 segParams
+R736737 in736 in737 {rInterSeg}
+.ic v(in736) = -0.065
+yneuron neuron737 in737 0 segParams
+R737738 in737 in738 {rInterSeg}
+.ic v(in737) = -0.065
+yneuron neuron738 in738 0 segParams
+R738739 in738 in739 {rInterSeg}
+.ic v(in738) = -0.065
+yneuron neuron739 in739 0 segParams
+R739740 in739 in740 {rInterSeg}
+.ic v(in739) = -0.065
+yneuron neuron740 in740 0 segParams
+R740741 in740 in741 {rInterSeg}
+.ic v(in740) = -0.065
+yneuron neuron741 in741 0 segParams
+R741742 in741 in742 {rInterSeg}
+.ic v(in741) = -0.065
+yneuron neuron742 in742 0 segParams
+R742743 in742 in743 {rInterSeg}
+.ic v(in742) = -0.065
+yneuron neuron743 in743 0 segParams
+R743744 in743 in744 {rInterSeg}
+.ic v(in743) = -0.065
+yneuron neuron744 in744 0 segParams
+R744745 in744 in745 {rInterSeg}
+.ic v(in744) = -0.065
+yneuron neuron745 in745 0 segParams
+R745746 in745 in746 {rInterSeg}
+.ic v(in745) = -0.065
+yneuron neuron746 in746 0 segParams
+R746747 in746 in747 {rInterSeg}
+.ic v(in746) = -0.065
+yneuron neuron747 in747 0 segParams
+R747748 in747 in748 {rInterSeg}
+.ic v(in747) = -0.065
+yneuron neuron748 in748 0 segParams
+R748749 in748 in749 {rInterSeg}
+.ic v(in748) = -0.065
+yneuron neuron749 in749 0 segParams
+R749750 in749 in750 {rInterSeg}
+.ic v(in749) = -0.065
+yneuron neuron750 in750 0 segParams
+R750751 in750 in751 {rInterSeg}
+.ic v(in750) = -0.065
+yneuron neuron751 in751 0 segParams
+R751752 in751 in752 {rInterSeg}
+.ic v(in751) = -0.065
+yneuron neuron752 in752 0 segParams
+R752753 in752 in753 {rInterSeg}
+.ic v(in752) = -0.065
+yneuron neuron753 in753 0 segParams
+R753754 in753 in754 {rInterSeg}
+.ic v(in753) = -0.065
+yneuron neuron754 in754 0 segParams
+R754755 in754 in755 {rInterSeg}
+.ic v(in754) = -0.065
+yneuron neuron755 in755 0 segParams
+R755756 in755 in756 {rInterSeg}
+.ic v(in755) = -0.065
+yneuron neuron756 in756 0 segParams
+R756757 in756 in757 {rInterSeg}
+.ic v(in756) = -0.065
+yneuron neuron757 in757 0 segParams
+R757758 in757 in758 {rInterSeg}
+.ic v(in757) = -0.065
+yneuron neuron758 in758 0 segParams
+R758759 in758 in759 {rInterSeg}
+.ic v(in758) = -0.065
+yneuron neuron759 in759 0 segParams
+R759760 in759 in760 {rInterSeg}
+.ic v(in759) = -0.065
+yneuron neuron760 in760 0 segParams
+R760761 in760 in761 {rInterSeg}
+.ic v(in760) = -0.065
+yneuron neuron761 in761 0 segParams
+R761762 in761 in762 {rInterSeg}
+.ic v(in761) = -0.065
+yneuron neuron762 in762 0 segParams
+R762763 in762 in763 {rInterSeg}
+.ic v(in762) = -0.065
+yneuron neuron763 in763 0 segParams
+R763764 in763 in764 {rInterSeg}
+.ic v(in763) = -0.065
+yneuron neuron764 in764 0 segParams
+R764765 in764 in765 {rInterSeg}
+.ic v(in764) = -0.065
+yneuron neuron765 in765 0 segParams
+R765766 in765 in766 {rInterSeg}
+.ic v(in765) = -0.065
+yneuron neuron766 in766 0 segParams
+R766767 in766 in767 {rInterSeg}
+.ic v(in766) = -0.065
+yneuron neuron767 in767 0 segParams
+R767768 in767 in768 {rInterSeg}
+.ic v(in767) = -0.065
+yneuron neuron768 in768 0 segParams
+R768769 in768 in769 {rInterSeg}
+.ic v(in768) = -0.065
+yneuron neuron769 in769 0 segParams
+R769770 in769 in770 {rInterSeg}
+.ic v(in769) = -0.065
+yneuron neuron770 in770 0 segParams
+R770771 in770 in771 {rInterSeg}
+.ic v(in770) = -0.065
+yneuron neuron771 in771 0 segParams
+R771772 in771 in772 {rInterSeg}
+.ic v(in771) = -0.065
+yneuron neuron772 in772 0 segParams
+R772773 in772 in773 {rInterSeg}
+.ic v(in772) = -0.065
+yneuron neuron773 in773 0 segParams
+R773774 in773 in774 {rInterSeg}
+.ic v(in773) = -0.065
+yneuron neuron774 in774 0 segParams
+R774775 in774 in775 {rInterSeg}
+.ic v(in774) = -0.065
+yneuron neuron775 in775 0 segParams
+R775776 in775 in776 {rInterSeg}
+.ic v(in775) = -0.065
+yneuron neuron776 in776 0 segParams
+R776777 in776 in777 {rInterSeg}
+.ic v(in776) = -0.065
+yneuron neuron777 in777 0 segParams
+R777778 in777 in778 {rInterSeg}
+.ic v(in777) = -0.065
+yneuron neuron778 in778 0 segParams
+R778779 in778 in779 {rInterSeg}
+.ic v(in778) = -0.065
+yneuron neuron779 in779 0 segParams
+R779780 in779 in780 {rInterSeg}
+.ic v(in779) = -0.065
+yneuron neuron780 in780 0 segParams
+R780781 in780 in781 {rInterSeg}
+.ic v(in780) = -0.065
+yneuron neuron781 in781 0 segParams
+R781782 in781 in782 {rInterSeg}
+.ic v(in781) = -0.065
+yneuron neuron782 in782 0 segParams
+R782783 in782 in783 {rInterSeg}
+.ic v(in782) = -0.065
+yneuron neuron783 in783 0 segParams
+R783784 in783 in784 {rInterSeg}
+.ic v(in783) = -0.065
+yneuron neuron784 in784 0 segParams
+R784785 in784 in785 {rInterSeg}
+.ic v(in784) = -0.065
+yneuron neuron785 in785 0 segParams
+R785786 in785 in786 {rInterSeg}
+.ic v(in785) = -0.065
+yneuron neuron786 in786 0 segParams
+R786787 in786 in787 {rInterSeg}
+.ic v(in786) = -0.065
+yneuron neuron787 in787 0 segParams
+R787788 in787 in788 {rInterSeg}
+.ic v(in787) = -0.065
+yneuron neuron788 in788 0 segParams
+R788789 in788 in789 {rInterSeg}
+.ic v(in788) = -0.065
+yneuron neuron789 in789 0 segParams
+R789790 in789 in790 {rInterSeg}
+.ic v(in789) = -0.065
+yneuron neuron790 in790 0 segParams
+R790791 in790 in791 {rInterSeg}
+.ic v(in790) = -0.065
+yneuron neuron791 in791 0 segParams
+R791792 in791 in792 {rInterSeg}
+.ic v(in791) = -0.065
+yneuron neuron792 in792 0 segParams
+R792793 in792 in793 {rInterSeg}
+.ic v(in792) = -0.065
+yneuron neuron793 in793 0 segParams
+R793794 in793 in794 {rInterSeg}
+.ic v(in793) = -0.065
+yneuron neuron794 in794 0 segParams
+R794795 in794 in795 {rInterSeg}
+.ic v(in794) = -0.065
+yneuron neuron795 in795 0 segParams
+R795796 in795 in796 {rInterSeg}
+.ic v(in795) = -0.065
+yneuron neuron796 in796 0 segParams
+R796797 in796 in797 {rInterSeg}
+.ic v(in796) = -0.065
+yneuron neuron797 in797 0 segParams
+R797798 in797 in798 {rInterSeg}
+.ic v(in797) = -0.065
+yneuron neuron798 in798 0 segParams
+R798799 in798 in799 {rInterSeg}
+.ic v(in798) = -0.065
+yneuron neuron799 in799 0 segParams
+R799800 in799 in800 {rInterSeg}
+.ic v(in799) = -0.065
+yneuron neuron800 in800 0 segParams
+R800801 in800 in801 {rInterSeg}
+.ic v(in800) = -0.065
+yneuron neuron801 in801 0 segParams
+R801802 in801 in802 {rInterSeg}
+.ic v(in801) = -0.065
+yneuron neuron802 in802 0 segParams
+R802803 in802 in803 {rInterSeg}
+.ic v(in802) = -0.065
+yneuron neuron803 in803 0 segParams
+R803804 in803 in804 {rInterSeg}
+.ic v(in803) = -0.065
+yneuron neuron804 in804 0 segParams
+R804805 in804 in805 {rInterSeg}
+.ic v(in804) = -0.065
+yneuron neuron805 in805 0 segParams
+R805806 in805 in806 {rInterSeg}
+.ic v(in805) = -0.065
+yneuron neuron806 in806 0 segParams
+R806807 in806 in807 {rInterSeg}
+.ic v(in806) = -0.065
+yneuron neuron807 in807 0 segParams
+R807808 in807 in808 {rInterSeg}
+.ic v(in807) = -0.065
+yneuron neuron808 in808 0 segParams
+R808809 in808 in809 {rInterSeg}
+.ic v(in808) = -0.065
+yneuron neuron809 in809 0 segParams
+R809810 in809 in810 {rInterSeg}
+.ic v(in809) = -0.065
+yneuron neuron810 in810 0 segParams
+R810811 in810 in811 {rInterSeg}
+.ic v(in810) = -0.065
+yneuron neuron811 in811 0 segParams
+R811812 in811 in812 {rInterSeg}
+.ic v(in811) = -0.065
+yneuron neuron812 in812 0 segParams
+R812813 in812 in813 {rInterSeg}
+.ic v(in812) = -0.065
+yneuron neuron813 in813 0 segParams
+R813814 in813 in814 {rInterSeg}
+.ic v(in813) = -0.065
+yneuron neuron814 in814 0 segParams
+R814815 in814 in815 {rInterSeg}
+.ic v(in814) = -0.065
+yneuron neuron815 in815 0 segParams
+R815816 in815 in816 {rInterSeg}
+.ic v(in815) = -0.065
+yneuron neuron816 in816 0 segParams
+R816817 in816 in817 {rInterSeg}
+.ic v(in816) = -0.065
+yneuron neuron817 in817 0 segParams
+R817818 in817 in818 {rInterSeg}
+.ic v(in817) = -0.065
+yneuron neuron818 in818 0 segParams
+R818819 in818 in819 {rInterSeg}
+.ic v(in818) = -0.065
+yneuron neuron819 in819 0 segParams
+R819820 in819 in820 {rInterSeg}
+.ic v(in819) = -0.065
+yneuron neuron820 in820 0 segParams
+R820821 in820 in821 {rInterSeg}
+.ic v(in820) = -0.065
+yneuron neuron821 in821 0 segParams
+R821822 in821 in822 {rInterSeg}
+.ic v(in821) = -0.065
+yneuron neuron822 in822 0 segParams
+R822823 in822 in823 {rInterSeg}
+.ic v(in822) = -0.065
+yneuron neuron823 in823 0 segParams
+R823824 in823 in824 {rInterSeg}
+.ic v(in823) = -0.065
+yneuron neuron824 in824 0 segParams
+R824825 in824 in825 {rInterSeg}
+.ic v(in824) = -0.065
+yneuron neuron825 in825 0 segParams
+R825826 in825 in826 {rInterSeg}
+.ic v(in825) = -0.065
+yneuron neuron826 in826 0 segParams
+R826827 in826 in827 {rInterSeg}
+.ic v(in826) = -0.065
+yneuron neuron827 in827 0 segParams
+R827828 in827 in828 {rInterSeg}
+.ic v(in827) = -0.065
+yneuron neuron828 in828 0 segParams
+R828829 in828 in829 {rInterSeg}
+.ic v(in828) = -0.065
+yneuron neuron829 in829 0 segParams
+R829830 in829 in830 {rInterSeg}
+.ic v(in829) = -0.065
+yneuron neuron830 in830 0 segParams
+R830831 in830 in831 {rInterSeg}
+.ic v(in830) = -0.065
+yneuron neuron831 in831 0 segParams
+R831832 in831 in832 {rInterSeg}
+.ic v(in831) = -0.065
+yneuron neuron832 in832 0 segParams
+R832833 in832 in833 {rInterSeg}
+.ic v(in832) = -0.065
+yneuron neuron833 in833 0 segParams
+R833834 in833 in834 {rInterSeg}
+.ic v(in833) = -0.065
+yneuron neuron834 in834 0 segParams
+R834835 in834 in835 {rInterSeg}
+.ic v(in834) = -0.065
+yneuron neuron835 in835 0 segParams
+R835836 in835 in836 {rInterSeg}
+.ic v(in835) = -0.065
+yneuron neuron836 in836 0 segParams
+R836837 in836 in837 {rInterSeg}
+.ic v(in836) = -0.065
+yneuron neuron837 in837 0 segParams
+R837838 in837 in838 {rInterSeg}
+.ic v(in837) = -0.065
+yneuron neuron838 in838 0 segParams
+R838839 in838 in839 {rInterSeg}
+.ic v(in838) = -0.065
+yneuron neuron839 in839 0 segParams
+R839840 in839 in840 {rInterSeg}
+.ic v(in839) = -0.065
+yneuron neuron840 in840 0 segParams
+R840841 in840 in841 {rInterSeg}
+.ic v(in840) = -0.065
+yneuron neuron841 in841 0 segParams
+R841842 in841 in842 {rInterSeg}
+.ic v(in841) = -0.065
+yneuron neuron842 in842 0 segParams
+R842843 in842 in843 {rInterSeg}
+.ic v(in842) = -0.065
+yneuron neuron843 in843 0 segParams
+R843844 in843 in844 {rInterSeg}
+.ic v(in843) = -0.065
+yneuron neuron844 in844 0 segParams
+R844845 in844 in845 {rInterSeg}
+.ic v(in844) = -0.065
+yneuron neuron845 in845 0 segParams
+R845846 in845 in846 {rInterSeg}
+.ic v(in845) = -0.065
+yneuron neuron846 in846 0 segParams
+R846847 in846 in847 {rInterSeg}
+.ic v(in846) = -0.065
+yneuron neuron847 in847 0 segParams
+R847848 in847 in848 {rInterSeg}
+.ic v(in847) = -0.065
+yneuron neuron848 in848 0 segParams
+R848849 in848 in849 {rInterSeg}
+.ic v(in848) = -0.065
+yneuron neuron849 in849 0 segParams
+R849850 in849 in850 {rInterSeg}
+.ic v(in849) = -0.065
+yneuron neuron850 in850 0 segParams
+R850851 in850 in851 {rInterSeg}
+.ic v(in850) = -0.065
+yneuron neuron851 in851 0 segParams
+R851852 in851 in852 {rInterSeg}
+.ic v(in851) = -0.065
+yneuron neuron852 in852 0 segParams
+R852853 in852 in853 {rInterSeg}
+.ic v(in852) = -0.065
+yneuron neuron853 in853 0 segParams
+R853854 in853 in854 {rInterSeg}
+.ic v(in853) = -0.065
+yneuron neuron854 in854 0 segParams
+R854855 in854 in855 {rInterSeg}
+.ic v(in854) = -0.065
+yneuron neuron855 in855 0 segParams
+R855856 in855 in856 {rInterSeg}
+.ic v(in855) = -0.065
+yneuron neuron856 in856 0 segParams
+R856857 in856 in857 {rInterSeg}
+.ic v(in856) = -0.065
+yneuron neuron857 in857 0 segParams
+R857858 in857 in858 {rInterSeg}
+.ic v(in857) = -0.065
+yneuron neuron858 in858 0 segParams
+R858859 in858 in859 {rInterSeg}
+.ic v(in858) = -0.065
+yneuron neuron859 in859 0 segParams
+R859860 in859 in860 {rInterSeg}
+.ic v(in859) = -0.065
+yneuron neuron860 in860 0 segParams
+R860861 in860 in861 {rInterSeg}
+.ic v(in860) = -0.065
+yneuron neuron861 in861 0 segParams
+R861862 in861 in862 {rInterSeg}
+.ic v(in861) = -0.065
+yneuron neuron862 in862 0 segParams
+R862863 in862 in863 {rInterSeg}
+.ic v(in862) = -0.065
+yneuron neuron863 in863 0 segParams
+R863864 in863 in864 {rInterSeg}
+.ic v(in863) = -0.065
+yneuron neuron864 in864 0 segParams
+R864865 in864 in865 {rInterSeg}
+.ic v(in864) = -0.065
+yneuron neuron865 in865 0 segParams
+R865866 in865 in866 {rInterSeg}
+.ic v(in865) = -0.065
+yneuron neuron866 in866 0 segParams
+R866867 in866 in867 {rInterSeg}
+.ic v(in866) = -0.065
+yneuron neuron867 in867 0 segParams
+R867868 in867 in868 {rInterSeg}
+.ic v(in867) = -0.065
+yneuron neuron868 in868 0 segParams
+R868869 in868 in869 {rInterSeg}
+.ic v(in868) = -0.065
+yneuron neuron869 in869 0 segParams
+R869870 in869 in870 {rInterSeg}
+.ic v(in869) = -0.065
+yneuron neuron870 in870 0 segParams
+R870871 in870 in871 {rInterSeg}
+.ic v(in870) = -0.065
+yneuron neuron871 in871 0 segParams
+R871872 in871 in872 {rInterSeg}
+.ic v(in871) = -0.065
+yneuron neuron872 in872 0 segParams
+R872873 in872 in873 {rInterSeg}
+.ic v(in872) = -0.065
+yneuron neuron873 in873 0 segParams
+R873874 in873 in874 {rInterSeg}
+.ic v(in873) = -0.065
+yneuron neuron874 in874 0 segParams
+R874875 in874 in875 {rInterSeg}
+.ic v(in874) = -0.065
+yneuron neuron875 in875 0 segParams
+R875876 in875 in876 {rInterSeg}
+.ic v(in875) = -0.065
+yneuron neuron876 in876 0 segParams
+R876877 in876 in877 {rInterSeg}
+.ic v(in876) = -0.065
+yneuron neuron877 in877 0 segParams
+R877878 in877 in878 {rInterSeg}
+.ic v(in877) = -0.065
+yneuron neuron878 in878 0 segParams
+R878879 in878 in879 {rInterSeg}
+.ic v(in878) = -0.065
+yneuron neuron879 in879 0 segParams
+R879880 in879 in880 {rInterSeg}
+.ic v(in879) = -0.065
+yneuron neuron880 in880 0 segParams
+R880881 in880 in881 {rInterSeg}
+.ic v(in880) = -0.065
+yneuron neuron881 in881 0 segParams
+R881882 in881 in882 {rInterSeg}
+.ic v(in881) = -0.065
+yneuron neuron882 in882 0 segParams
+R882883 in882 in883 {rInterSeg}
+.ic v(in882) = -0.065
+yneuron neuron883 in883 0 segParams
+R883884 in883 in884 {rInterSeg}
+.ic v(in883) = -0.065
+yneuron neuron884 in884 0 segParams
+R884885 in884 in885 {rInterSeg}
+.ic v(in884) = -0.065
+yneuron neuron885 in885 0 segParams
+R885886 in885 in886 {rInterSeg}
+.ic v(in885) = -0.065
+yneuron neuron886 in886 0 segParams
+R886887 in886 in887 {rInterSeg}
+.ic v(in886) = -0.065
+yneuron neuron887 in887 0 segParams
+R887888 in887 in888 {rInterSeg}
+.ic v(in887) = -0.065
+yneuron neuron888 in888 0 segParams
+R888889 in888 in889 {rInterSeg}
+.ic v(in888) = -0.065
+yneuron neuron889 in889 0 segParams
+R889890 in889 in890 {rInterSeg}
+.ic v(in889) = -0.065
+yneuron neuron890 in890 0 segParams
+R890891 in890 in891 {rInterSeg}
+.ic v(in890) = -0.065
+yneuron neuron891 in891 0 segParams
+R891892 in891 in892 {rInterSeg}
+.ic v(in891) = -0.065
+yneuron neuron892 in892 0 segParams
+R892893 in892 in893 {rInterSeg}
+.ic v(in892) = -0.065
+yneuron neuron893 in893 0 segParams
+R893894 in893 in894 {rInterSeg}
+.ic v(in893) = -0.065
+yneuron neuron894 in894 0 segParams
+R894895 in894 in895 {rInterSeg}
+.ic v(in894) = -0.065
+yneuron neuron895 in895 0 segParams
+R895896 in895 in896 {rInterSeg}
+.ic v(in895) = -0.065
+yneuron neuron896 in896 0 segParams
+R896897 in896 in897 {rInterSeg}
+.ic v(in896) = -0.065
+yneuron neuron897 in897 0 segParams
+R897898 in897 in898 {rInterSeg}
+.ic v(in897) = -0.065
+yneuron neuron898 in898 0 segParams
+R898899 in898 in899 {rInterSeg}
+.ic v(in898) = -0.065
+yneuron neuron899 in899 0 segParams
+R899900 in899 in900 {rInterSeg}
+.ic v(in899) = -0.065
+yneuron neuron900 in900 0 segParams
+R900901 in900 in901 {rInterSeg}
+.ic v(in900) = -0.065
+yneuron neuron901 in901 0 segParams
+R901902 in901 in902 {rInterSeg}
+.ic v(in901) = -0.065
+yneuron neuron902 in902 0 segParams
+R902903 in902 in903 {rInterSeg}
+.ic v(in902) = -0.065
+yneuron neuron903 in903 0 segParams
+R903904 in903 in904 {rInterSeg}
+.ic v(in903) = -0.065
+yneuron neuron904 in904 0 segParams
+R904905 in904 in905 {rInterSeg}
+.ic v(in904) = -0.065
+yneuron neuron905 in905 0 segParams
+R905906 in905 in906 {rInterSeg}
+.ic v(in905) = -0.065
+yneuron neuron906 in906 0 segParams
+R906907 in906 in907 {rInterSeg}
+.ic v(in906) = -0.065
+yneuron neuron907 in907 0 segParams
+R907908 in907 in908 {rInterSeg}
+.ic v(in907) = -0.065
+yneuron neuron908 in908 0 segParams
+R908909 in908 in909 {rInterSeg}
+.ic v(in908) = -0.065
+yneuron neuron909 in909 0 segParams
+R909910 in909 in910 {rInterSeg}
+.ic v(in909) = -0.065
+yneuron neuron910 in910 0 segParams
+R910911 in910 in911 {rInterSeg}
+.ic v(in910) = -0.065
+yneuron neuron911 in911 0 segParams
+R911912 in911 in912 {rInterSeg}
+.ic v(in911) = -0.065
+yneuron neuron912 in912 0 segParams
+R912913 in912 in913 {rInterSeg}
+.ic v(in912) = -0.065
+yneuron neuron913 in913 0 segParams
+R913914 in913 in914 {rInterSeg}
+.ic v(in913) = -0.065
+yneuron neuron914 in914 0 segParams
+R914915 in914 in915 {rInterSeg}
+.ic v(in914) = -0.065
+yneuron neuron915 in915 0 segParams
+R915916 in915 in916 {rInterSeg}
+.ic v(in915) = -0.065
+yneuron neuron916 in916 0 segParams
+R916917 in916 in917 {rInterSeg}
+.ic v(in916) = -0.065
+yneuron neuron917 in917 0 segParams
+R917918 in917 in918 {rInterSeg}
+.ic v(in917) = -0.065
+yneuron neuron918 in918 0 segParams
+R918919 in918 in919 {rInterSeg}
+.ic v(in918) = -0.065
+yneuron neuron919 in919 0 segParams
+R919920 in919 in920 {rInterSeg}
+.ic v(in919) = -0.065
+yneuron neuron920 in920 0 segParams
+R920921 in920 in921 {rInterSeg}
+.ic v(in920) = -0.065
+yneuron neuron921 in921 0 segParams
+R921922 in921 in922 {rInterSeg}
+.ic v(in921) = -0.065
+yneuron neuron922 in922 0 segParams
+R922923 in922 in923 {rInterSeg}
+.ic v(in922) = -0.065
+yneuron neuron923 in923 0 segParams
+R923924 in923 in924 {rInterSeg}
+.ic v(in923) = -0.065
+yneuron neuron924 in924 0 segParams
+R924925 in924 in925 {rInterSeg}
+.ic v(in924) = -0.065
+yneuron neuron925 in925 0 segParams
+R925926 in925 in926 {rInterSeg}
+.ic v(in925) = -0.065
+yneuron neuron926 in926 0 segParams
+R926927 in926 in927 {rInterSeg}
+.ic v(in926) = -0.065
+yneuron neuron927 in927 0 segParams
+R927928 in927 in928 {rInterSeg}
+.ic v(in927) = -0.065
+yneuron neuron928 in928 0 segParams
+R928929 in928 in929 {rInterSeg}
+.ic v(in928) = -0.065
+yneuron neuron929 in929 0 segParams
+R929930 in929 in930 {rInterSeg}
+.ic v(in929) = -0.065
+yneuron neuron930 in930 0 segParams
+R930931 in930 in931 {rInterSeg}
+.ic v(in930) = -0.065
+yneuron neuron931 in931 0 segParams
+R931932 in931 in932 {rInterSeg}
+.ic v(in931) = -0.065
+yneuron neuron932 in932 0 segParams
+R932933 in932 in933 {rInterSeg}
+.ic v(in932) = -0.065
+yneuron neuron933 in933 0 segParams
+R933934 in933 in934 {rInterSeg}
+.ic v(in933) = -0.065
+yneuron neuron934 in934 0 segParams
+R934935 in934 in935 {rInterSeg}
+.ic v(in934) = -0.065
+yneuron neuron935 in935 0 segParams
+R935936 in935 in936 {rInterSeg}
+.ic v(in935) = -0.065
+yneuron neuron936 in936 0 segParams
+R936937 in936 in937 {rInterSeg}
+.ic v(in936) = -0.065
+yneuron neuron937 in937 0 segParams
+R937938 in937 in938 {rInterSeg}
+.ic v(in937) = -0.065
+yneuron neuron938 in938 0 segParams
+R938939 in938 in939 {rInterSeg}
+.ic v(in938) = -0.065
+yneuron neuron939 in939 0 segParams
+R939940 in939 in940 {rInterSeg}
+.ic v(in939) = -0.065
+yneuron neuron940 in940 0 segParams
+R940941 in940 in941 {rInterSeg}
+.ic v(in940) = -0.065
+yneuron neuron941 in941 0 segParams
+R941942 in941 in942 {rInterSeg}
+.ic v(in941) = -0.065
+yneuron neuron942 in942 0 segParams
+R942943 in942 in943 {rInterSeg}
+.ic v(in942) = -0.065
+yneuron neuron943 in943 0 segParams
+R943944 in943 in944 {rInterSeg}
+.ic v(in943) = -0.065
+yneuron neuron944 in944 0 segParams
+R944945 in944 in945 {rInterSeg}
+.ic v(in944) = -0.065
+yneuron neuron945 in945 0 segParams
+R945946 in945 in946 {rInterSeg}
+.ic v(in945) = -0.065
+yneuron neuron946 in946 0 segParams
+R946947 in946 in947 {rInterSeg}
+.ic v(in946) = -0.065
+yneuron neuron947 in947 0 segParams
+R947948 in947 in948 {rInterSeg}
+.ic v(in947) = -0.065
+yneuron neuron948 in948 0 segParams
+R948949 in948 in949 {rInterSeg}
+.ic v(in948) = -0.065
+yneuron neuron949 in949 0 segParams
+R949950 in949 in950 {rInterSeg}
+.ic v(in949) = -0.065
+yneuron neuron950 in950 0 segParams
+R950951 in950 in951 {rInterSeg}
+.ic v(in950) = -0.065
+yneuron neuron951 in951 0 segParams
+R951952 in951 in952 {rInterSeg}
+.ic v(in951) = -0.065
+yneuron neuron952 in952 0 segParams
+R952953 in952 in953 {rInterSeg}
+.ic v(in952) = -0.065
+yneuron neuron953 in953 0 segParams
+R953954 in953 in954 {rInterSeg}
+.ic v(in953) = -0.065
+yneuron neuron954 in954 0 segParams
+R954955 in954 in955 {rInterSeg}
+.ic v(in954) = -0.065
+yneuron neuron955 in955 0 segParams
+R955956 in955 in956 {rInterSeg}
+.ic v(in955) = -0.065
+yneuron neuron956 in956 0 segParams
+R956957 in956 in957 {rInterSeg}
+.ic v(in956) = -0.065
+yneuron neuron957 in957 0 segParams
+R957958 in957 in958 {rInterSeg}
+.ic v(in957) = -0.065
+yneuron neuron958 in958 0 segParams
+R958959 in958 in959 {rInterSeg}
+.ic v(in958) = -0.065
+yneuron neuron959 in959 0 segParams
+R959960 in959 in960 {rInterSeg}
+.ic v(in959) = -0.065
+yneuron neuron960 in960 0 segParams
+R960961 in960 in961 {rInterSeg}
+.ic v(in960) = -0.065
+yneuron neuron961 in961 0 segParams
+R961962 in961 in962 {rInterSeg}
+.ic v(in961) = -0.065
+yneuron neuron962 in962 0 segParams
+R962963 in962 in963 {rInterSeg}
+.ic v(in962) = -0.065
+yneuron neuron963 in963 0 segParams
+R963964 in963 in964 {rInterSeg}
+.ic v(in963) = -0.065
+yneuron neuron964 in964 0 segParams
+R964965 in964 in965 {rInterSeg}
+.ic v(in964) = -0.065
+yneuron neuron965 in965 0 segParams
+R965966 in965 in966 {rInterSeg}
+.ic v(in965) = -0.065
+yneuron neuron966 in966 0 segParams
+R966967 in966 in967 {rInterSeg}
+.ic v(in966) = -0.065
+yneuron neuron967 in967 0 segParams
+R967968 in967 in968 {rInterSeg}
+.ic v(in967) = -0.065
+yneuron neuron968 in968 0 segParams
+R968969 in968 in969 {rInterSeg}
+.ic v(in968) = -0.065
+yneuron neuron969 in969 0 segParams
+R969970 in969 in970 {rInterSeg}
+.ic v(in969) = -0.065
+yneuron neuron970 in970 0 segParams
+R970971 in970 in971 {rInterSeg}
+.ic v(in970) = -0.065
+yneuron neuron971 in971 0 segParams
+R971972 in971 in972 {rInterSeg}
+.ic v(in971) = -0.065
+yneuron neuron972 in972 0 segParams
+R972973 in972 in973 {rInterSeg}
+.ic v(in972) = -0.065
+yneuron neuron973 in973 0 segParams
+R973974 in973 in974 {rInterSeg}
+.ic v(in973) = -0.065
+yneuron neuron974 in974 0 segParams
+R974975 in974 in975 {rInterSeg}
+.ic v(in974) = -0.065
+yneuron neuron975 in975 0 segParams
+R975976 in975 in976 {rInterSeg}
+.ic v(in975) = -0.065
+yneuron neuron976 in976 0 segParams
+R976977 in976 in977 {rInterSeg}
+.ic v(in976) = -0.065
+yneuron neuron977 in977 0 segParams
+R977978 in977 in978 {rInterSeg}
+.ic v(in977) = -0.065
+yneuron neuron978 in978 0 segParams
+R978979 in978 in979 {rInterSeg}
+.ic v(in978) = -0.065
+yneuron neuron979 in979 0 segParams
+R979980 in979 in980 {rInterSeg}
+.ic v(in979) = -0.065
+yneuron neuron980 in980 0 segParams
+R980981 in980 in981 {rInterSeg}
+.ic v(in980) = -0.065
+yneuron neuron981 in981 0 segParams
+R981982 in981 in982 {rInterSeg}
+.ic v(in981) = -0.065
+yneuron neuron982 in982 0 segParams
+R982983 in982 in983 {rInterSeg}
+.ic v(in982) = -0.065
+yneuron neuron983 in983 0 segParams
+R983984 in983 in984 {rInterSeg}
+.ic v(in983) = -0.065
+yneuron neuron984 in984 0 segParams
+R984985 in984 in985 {rInterSeg}
+.ic v(in984) = -0.065
+yneuron neuron985 in985 0 segParams
+R985986 in985 in986 {rInterSeg}
+.ic v(in985) = -0.065
+yneuron neuron986 in986 0 segParams
+R986987 in986 in987 {rInterSeg}
+.ic v(in986) = -0.065
+yneuron neuron987 in987 0 segParams
+R987988 in987 in988 {rInterSeg}
+.ic v(in987) = -0.065
+yneuron neuron988 in988 0 segParams
+R988989 in988 in989 {rInterSeg}
+.ic v(in988) = -0.065
+yneuron neuron989 in989 0 segParams
+R989990 in989 in990 {rInterSeg}
+.ic v(in989) = -0.065
+yneuron neuron990 in990 0 segParams
+R990991 in990 in991 {rInterSeg}
+.ic v(in990) = -0.065
+yneuron neuron991 in991 0 segParams
+R991992 in991 in992 {rInterSeg}
+.ic v(in991) = -0.065
+yneuron neuron992 in992 0 segParams
+R992993 in992 in993 {rInterSeg}
+.ic v(in992) = -0.065
+yneuron neuron993 in993 0 segParams
+R993994 in993 in994 {rInterSeg}
+.ic v(in993) = -0.065
+yneuron neuron994 in994 0 segParams
+R994995 in994 in995 {rInterSeg}
+.ic v(in994) = -0.065
+yneuron neuron995 in995 0 segParams
+R995996 in995 in996 {rInterSeg}
+.ic v(in995) = -0.065
+yneuron neuron996 in996 0 segParams
+R996997 in996 in997 {rInterSeg}
+.ic v(in996) = -0.065
+yneuron neuron997 in997 0 segParams
+R997998 in997 in998 {rInterSeg}
+.ic v(in997) = -0.065
+yneuron neuron998 in998 0 segParams
+R998999 in998 in999 {rInterSeg}
+.ic v(in998) = -0.065
+yneuron neuron999 in999 0 segParams
+R9991000 in999 in1000 {rInterSeg}
+.ic v(in999) = -0.065
+yneuron neuron1000 in1000 0 segParams
+* final resistor
+Rend in1000 out {rInterSeg/2.0}
+
+.print tran 
++ v(in1) 
++ v(out) 
+
+.end

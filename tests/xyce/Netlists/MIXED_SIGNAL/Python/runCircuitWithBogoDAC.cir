@@ -1,0 +1,14 @@
+* This netlist is used to test the Python updateTimeVoltagePairs() 
+* method when it is invoked with a DAC name that does not exist 
+* in the netlist.
+
+YDAC dac1 2 0 simpleDAC
+.model simpleDAC DAC(tr=5e-9 tf=5e-9)
+rd1 2 0 100
+
+.TRAN 0  1.0e-4
+.PRINT TRAN V(2)
+.OPTIONS OUTPUT INITIAL_INTERVAL=1e-5
+.END
+
+

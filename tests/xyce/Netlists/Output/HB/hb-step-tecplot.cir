@@ -1,0 +1,32 @@
+*****************************************************************
+* Test HB with .STEP tecplot output.  This netlist also tests
+* SON Bug 928.
+*****************************************************************
+*
+* Because we use VP and IP here, it is pretty essential that there be nontrivial
+* power in frequencies other than the fundamental -- using a sinusoidal
+* input source and only linear devices would have what is essentially
+* roundoff error in all frequencies other than the fundamental.   This
+* leads to platform-dependent failure when comparing the VP signal.
+*
+* Thus, we're driving this with a roughly square wave and making the
+* circuit slightly non-linear.
+*
+*
+
+R1 1 0 1k
+C1 1 0 1p
+D1 2 1 D1N3940
+.MODEL D1N3940 D (IS=4e-10 RS=.105 N=1.48 TT=8e-7 CJO=1.95E-11 VJ=.4 M=.38 EG=1.36 XTI=-8 KF=0 AF=1 FC=.9 BV=600 IBV=1e-4)
+*            low high td tr  tf  pulsewidth    period
+v1 2 0 pulse 1V 2V  0 1e-5 1e-5 {1/1e4/2-1e-5 } {1/1e4}
+
+.print HB FORMAT=TECPLOT v(1) vr(1) vi(1) vm(1) vp(1) vdb(1) i(v1) ir(v1) ii(v1) im(v1) ip(v1) idb(v1) i(r1) ir(r1) ii(r1) im(r1) ip(r1) idb(r1)
+.hb 1e4
+
+.STEP R1:R 500 1500 500
+
+* Note: The use of numfreq=50 here triggers SON Bug 928
+.options hbint numfreq=50
+
+.end

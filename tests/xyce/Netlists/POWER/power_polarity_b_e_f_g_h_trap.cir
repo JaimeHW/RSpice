@@ -1,0 +1,104 @@
+test of printing power for both polarities for b,e,f,g and h sources
+
+* Voltage Form B-Source
+BV1  	bv1_1 0 V={2.0*sin(10*pi*TIME)}
+R1_bv1  bv1_1 bv1_2 100
+R2_bv1  bv1_2 0 1K
+
+BV2  	0 bv2_a V={2.0*sin(10*pi*TIME)}
+R1_bv2  bv2_a bv2_b 100
+R2_bv2  bv2_b 0 1K 
+
+* Current Form B-Source
+BI1  	bi1_1 0 I={2.0*sin(10*pi*TIME)}
+R1_bi1  bi1_1 bi1_2 100
+R2_bi1  bi1_2 0 1K
+
+BI2  	0 bi2_a I={2.0*sin(10*pi*TIME)}
+R1_bi2  bi2_a bi2_b 100
+R2_bi2  bi2_b 0 1K
+
+* circuit and subcircuit definition for Linear E-Source
+EL1     el1_1 0 bv1_1 0 1
+R1_el1  el1_1 el1_2 100
+R2_el1  el1_2 0 1K
+
+BEL  	bel_1 0 V={2.0*sin(10*pi*TIME)}
+EL2  	0 el2_a bel_1 0 1
+R1_el2  el2_a el2_b 100
+R2_el2  el2_b 0 1K
+
+* circuit and subcircuit definition for Value form of E-Source
+EV1     ev1_1 0 VALUE=5V*SQRT(V(bv1_1,0))
+R1_ev1  ev1_1 ev1_2 100
+R2_ev1  ev1_2 0 1K
+
+BEV  	bev_1 0 V={2.0*sin(10*pi*TIME)}
+R1_bev  bev_1 bev_2 100
+R2_bev  bev_2 0 1K
+EV2  	0 ev2_a  VALUE=5V*SQRT(V(bev_1,0))
+R1_ev2  ev2_a ev2_b 100
+R2_ev2  ev2_b 0 1K
+
+* Linear form of F-Source
+FL1     fl1_1 0 bv1 1
+R1_fl1  fl1_1 fl1_2 100
+R2_fl1  fl1_2 0 1K
+
+BFL  	bfl_1 0 V={2.0*sin(10*pi*TIME)}
+R1_bfl  bfl_1 bfl_2 100
+R2_bfl  bfl_2 0 1K
+FL2  	0 fl2_a bfl 1
+R1_fl2  fl2_a fl2_b 100
+R2_fl2  fl2_b 0 1K
+
+* Linear form of G-Source
+GL1     gl1_1 0 bv1_1 0 1
+R1_gl1  gl1_1 gl1_2 100
+R2_gl1  gl1_2 0 1K
+
+BGL  	bgl_1 0 V={2.0*sin(10*pi*TIME)}
+R1_bgl  bgl_1 bgl_2 100
+R2_bgl  bgl_2 0 1K
+GL2  	0 gl2_a bgl_1 0 1
+R1_gl2  gl2_a gl2_b 100
+R2_gl2  gl2_b 0 1K
+
+* Value form of G-Source
+GV1     gv1_1 0 VALUE=5V*SQRT(V(bv1_1,0))
+R1_gv1  gv1_1 gv1_2 100
+R2_gv1  gv1_2 0 1K
+
+BGV  	bgv_1 0 V={2.0*sin(10*pi*TIME)}
+R1_bgv  bgv_1 bgv_2 100
+R2_bgv  bgv_2 0 1K
+GV2  	0 gv2_a  VALUE=5V*SQRT(V(bgv_1,0))
+R1_gv2  gv2_a gv2_b 100
+R2_gv2  gv2_b 0 1K
+
+* Linear form of H-Source
+HL1     hl1_1 0 bv1 1
+R1_hl1  hl1_1 hl1_2 100
+R2_hl1  hl1_2 0 1K
+
+BHL  	bhl_1 0 V={2.0*sin(10*pi*TIME)}
+R1_bhl  bhl_1 bhl_2 100
+R2_bhl  bhl_2 0 1K
+HL2  	0 hl2_a bhl 1
+R1_hl2  hl2_a hl2_b 100
+R2_hl2  hl2_b 0 1K
+
+.options timeint method=trap 
+.options nonlin-tran rhstol=1.0e-7
+.TRAN 0.5U 100ms
+.options output initial_interval=1ms
+.PRINT TRAN p(BV1) p(BV2) w(BV1) w(BV2) 
++ p(BI1) p(BI2) w(BI1) w(BI2) 
++ p(EL1) p(EL2) w(EL1) w(EL2) 
++ p(EV1) p(EV2) w(EV1) w(EV2) 
++ p(FL1) p(FL2) w(FL1) w(FL2)
++ p(GL1) p(GL2) w(GL1) w(GL2)
++ p(GV1) p(GV2) w(GV1) w(GV2)
++ p(HL1) p(HL2) w(HL1) w(HL2)
+
+.END

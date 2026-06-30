@@ -1,0 +1,45 @@
+transient diode circuit adjoint sensitivity calculation
+* This version uses Xyce's analytic capability and transient adjoint sensitivity algorithm.
+*
+R 1 2 0.0001
+V2 2 0 0.0 SIN(0 5 100K)
+V1 3 0 0.0
+
+D2 1 3 DZR 
+.MODEL DZR D( level=2
++         IS = 1E-14
++         RS = 10.8
++          N = 1
++         TT = 0
++        CJO = 1P
++         VJ = 1
++          M = .5
++         EG = 1.11
++        XTI = 3
++         KF = 0
++         AF = 1
++         FC = .5
++         BV = 7.255
++        IBV = .001
++ tbv1 = 0.00013
++ tbv2 = -5e-8
++ )
+
+.SENS objfunc={I(V1)} 
++ param=DZR:VJ,DZR:CJO,DZR:EG,DZR:XTI,DZR:M,DZR:IS,DZR:RS,DZR:N
+
+.options SENSITIVITY STDOUTPUT=0 adjoint=1 direct=0  
+*+ FULLADJOINTTIMERANGE=1
+*+ OUTPUTLAMBDA=1 OUTPUTTRANSIENTADJOINT=1  
+
+.options timeint method=gear
+
+.TRAN 0 2e-5
+
+.print TRAN v(2) I(V1)
+.print TRANADJOINT  v(2)
+
+.options device temp=25 debuglevel=-100
+
+.END
+

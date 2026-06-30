@@ -1,0 +1,42 @@
+***************************************************************
+* Test that segfault's and/or "improper simulation runs"
+* no longer exist when the netlist:
+*
+*   1) defines a user-defined function (with .FUNC statement)
+*      with N variables (e.g, mu and sigma for Func. A below).
+*
+*   2) subsequent function invocations in an expression use a
+*      different (and incorrect) number of variables.
+*
+* Note: This bug would occur when the user defined function was
+* used as part of a binary expression (e.g, in Bsrc B1).
+*
+****************************************************************
+
+* User defined functions (udf) from the bug report for SON Bug 850.
+* These functions were called UGAUSS in the bug report.
+.FUNC udfA(mu,sigma) {exp(mu/sigma)}       ; User Defined Func. A
+.func udfB(mu,sigma,t) {exp((t-mu)/sigma)} ; User Defined Func. B
+
+VTEST    1    0     10
+R1       1    2     50
+
+* All of these B-source statements should produce a netlist parsing error.
+* The inline comments give their behavior with Xyce 6.7.
+
+* udfA should have two arguments, but is given three arguments
+B1 2 0     I = {(V(2)+udfA(10m,1u,23))/50} ; segfault with Func. A
+B2 2 0     I = {udfA(10m,1u,23)/50}   ; runs fine with Func. A, but shouldn't
+B3 2 0     I = {udfA(10m,1u,23)+V(2)} ; segfaults with Func. A.
+B4 2 0     I = {udfA(10m,1u,23)}      ; correctly aborts with Func. A 
+
+* udfB should have three arguments, and is only given two arguments
+B5 2 0     I = {(V(2)+udfB(10m,1u))/50}  ; segfault with Func. B
+B6 2 0     I = {(udfB(10m,1u)+V(2))/50}  ; segfault with Func. B  
+B7 2 0     I = {(udfB(20m,1u))/50}    ; runs fine with Func. B, but shouldn't
+
+.TRAN 0 20m
+.PRINT TRAN V(1) V(2)
+
+.END
+

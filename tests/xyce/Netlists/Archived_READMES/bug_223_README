@@ -1,0 +1,35 @@
+==>BUG_223/ README <==
+Bug Number: BUG_223
+Owner: Tom Russo
+Test Netlists:  bug_223_baseline.cir
+			bug_223_demonstration.cir 
+GS Files: none
+Mode: Serial
+Comparator: xyce_verify.pl
+Version of Xyce: Release_2.1    # the first version where this bug was tested.
+
+Description:
+=======
+But was that Xyce was improperly parsing .param statements where commas were used to separate PARAMETER=VALUE groups.
+
+The original test for this problem was an overly complex netlist that experienced severe numerical errors for reasons unrelated to the bug it was meant to test (see bugs 406 and 594).
+
+In this modified test, a netlist with commas in the.param statement is run, and should produce identical results when compared to the same netlist without commas.
+
+Procedure:
+=======
+
+Run both netlists (bug_223_baseline.cir and bug_223_demonstration.cir). Compare the output on bug_223_demonstration.cir to that of bug_223_baseline.cir using xyce_verify.pl.
+
+	Runxyce bug_223_baseline.cir
+	Runxyce bug_223_demonstartion.cir
+	Xyce_verify.pl bug_223_baseeline.cir bug_223_baseline.cir.prn \
+          		Bug_223_demonstration.cir.prn
+
+Verification:
+=========
+Passes if Xyce and xyc_verify.pl return a 0 exit code.
+
+ Notes:
+=========
+

@@ -1,0 +1,99 @@
+* A gilbert cell mixer, taken from a schematic off a ham radio web page
+* http://engphys.mcmaster.ca/~elmer101/swgilb.html
+* The original was used in a PSPICE simulation.  I had to guess at the
+* transistors used, so I just used a model for a 2n2222 out of the SPUDS
+* database.
+R5 1 2 100
+Q3 3 2 4 QB2T2222
+Q4 5 6 4 QB2T2222
+Q5 3 6 8 QB2T2222
+Q6 5 2 8 QB2T2222
+R6 2 1 100
+*the local oscillator
+*VLO 6 2 DC 0 SIN(0 .05V 1e4 0 0)
+*VLO 6 2 DC .05V
+VLO 6 2 DC 0 SIN(0 .05V  1e5 0 0)
+Q1 4 10 11 QB2T2222
+R1 11 12 10
+R2 12 13 10
+* input bias current
+I1 12 0 DC 1.8mA
+Q2 8 15 13 QB2T2222
+R4 15 16 1500
+R3 16 10 1500
+V1 16 0 DC 1.8V
+*the input voltage to be mixed with the LO
+*V5 15 10 DC 0 sin(0 .05V 3e6 0 0)
+V5 15 10 DC 0 sin(0 .05V 2e2 0 0)
+*V5 15 10 DC 0 sin(0 .5V 3e6 0 0)
+R7 5 17 1500
+R8 3 17 1500
+V3 17 0 DC 8V
+V2 1 0 DC 6V
+.MODEL DEFAULTS NPN
+.MODEL QB2T2222  NPN    (
++         IS = 3.136905E-14
++         BF = 189
++         NF = 0.9977664
++        VAF = 29.7280913
++        IKF = 0.7405619
++        ISE = 8.49314E-15
++         NE = 1.3186316
++         BR = 38.9531224
++         NR = 0.9833179
++        VAR = 28.5119855
++        IKR = 4.632395E-3
++        ISC = 4.624043E-14
++         NC = 1.225899
++         RB = 2.0158781
++        IRB = 0.0227681
++        RBM = 0.9730261
++         RE = 0.0501513
++         RC = 0.6333
++        CJE = 2.369655E-11
++        VJE = 0.6884357
++        MJE = 0.3054743
++         TF = 5.3E-10
++        XTF = 48.5321578
++        VTF = 5.3020062
++        ITF = 1.1
++        PTF = 14.6099207
++        CJC = 8.602583E-12
++        VJC = 0.4708887
++        MJC = 0.3063885
++       XCJC = 1
++         TR = 74E-9
++        CJS = 1e-12
++        VJS = .75
++        MJS = 0
++        XTB = 0.87435
++         EG = 1.11
++        XTI = 5.825
++         KF = 0
++         AF = 1
++         FC = 0.5
++ )
+*.TRAN  1e-6 5e-3
+*.mpde 0 1.0e-4
+*.options mpdeint ic=2 auton2=true saveicdata=1 diff=0 oscsrc=V5
+.hb 1e5 2e2
+.options hbint numfreq=11,7  saveicdata=1 STARTUPPERIODS=2 tahb=1 intmodmax=3
+*.options nonlin in_forcing=0
+*.options timeint reltol=1e-4
+*maxord=1
+*.options device voltlim=1 debuglevel=-1
+* v(6,2) should be the LO voltage, v(15,10) is the input
+* output is viewed as difference between collector voltages of Q4/Q6 and Q3/Q5.
+* Basically the output should be the product of LO and input voltage, but
+* not exactly.  A fourier transform will show extra frequency components.
+* Spurious mixer products (harmonics) are inevitable, although minimized
+* by lower input amplitudes.
+*.PRINT TRAN v(6,2) v(15,10) v(5,3)
+.PRINT HB v(6,2) v(15,10) v(5,3)
+*.save v(6,2) v(15,10) v(5,3)
+*.PLOT TRAN v(5,3)
+*.four 1MEG v(5,3)
+*COMP v(5,3) offset=1.5  reltol=0.02
+
+*COMP v(6,2) offset=.1
+.end

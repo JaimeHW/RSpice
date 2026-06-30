@@ -1,0 +1,123 @@
+* Test NOISE mode support for the NOISE_CONT version of
+* DERIV-AT and DERIV-WHEN measures.
+*
+* See SON Bugs 1274, 1304 and 1313 for more details
+*****************************************************
+
+* For testing convenience send the output for the NOISE_CONT
+* measures to the <netlistName>.ma0 file.
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+* Used to adjust reference frequency from 1Hz to 10Hz
+.PARAM scaleFactor=10
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP   3 0 2 0 2
+
+* 7th order Chebychev LPF with 2dB of passband ripple.
+* This is not a realistic passband ripple level, but is
+* useful for this test.
+RS 3 b 1
+C1 b 0 {2.865/scaleFactor}
+L2 b c {0.912/scaleFactor}
+C3 c 0 {3.8774/scaleFactor}
+L4 c d {0.9537/scaleFactor}
+C5 d 0 {3.8774/scaleFactor}
+L6 d e {0.912/scaleFactor}
+C7 e 0 {2.8650/scaleFactor}
+RL e 0 1.0
+
+.NOISE  V(e)  V1  DEC 20 1e-2 10
+.STEP RL 1 1.5 0.5
+.print NOISE vm(3) vm(b) vm(c) vm(d) vm(e)
++ derivCrossContTest2 derivCrossContTest3 derivCrossContTest4
++ derivCrossNeg2 derivCrossContNeg2 derivCrossNeg6 derivCrossContNeg6
+
+* The non-continuous version should return the first crossing.
+* The continuous version should return all crossings.
+.MEASURE NOISE derivCrossTest1 DERIV vm(d) WHEN vm(e)=0.45
+.MEASURE NOISE_CONT derivCrossContTest1 DERIVATIVE vm(d) WHEN vm(e)=0.45
+
+* Non-continuous version should return first crossing.
+* Continuous version should return all crossings, starting
+* with the first one.
+.MEASURE NOISE derivCrossTest2 DERIV vm(d) WHEN vm(e)=0.45 CROSS=1
+.MEASURE NOISE_CONT derivCrossContTest2 DERIV vm(d) WHEN vm(e)=0.45 CROSS=1
+
+* Non-continuous version should return second crossing.
+* Continuous version should return all crossings, starting
+* with the second one.
+.MEASURE NOISE derivCrossTest3 DERIV vm(d) WHEN vm(e)=0.45 CROSS=2
+.MEASURE NOISE_CONT derivCrossContTest3 DERIV vm(d) WHEN vm(e)=0.45 CROSS=2
+
+* These should both return the last crossing
+.MEASURE NOISE derivCrossTest4 DERIV vm(d)  WHEN VM(e)=0.45 CROSS=LAST
+.MEASURE NOISE_CONT derivCrossContTest4 DERIV vm(d) WHEN VM(e)=0.45 CROSS=LAST
+
+* DERIV-AT measures
+* These should give the same answer
+.MEASURE NOISE atTest DERIV VM(e) AT=2
+.MEASURE NOISE_CONT atContTest DERIV VM(e) AT=2
+
+*****************************************************
+* test RISE and FAll qualifiers DERIV-WHEN
+.MEASURE NOISE_CONT derivRiseContTest1 DERIV VM(d) WHEN VM(e)=0.45 RISE=1
+.MEASURE NOISE_CONT derivRiseContTest2 DERIV VM(d) WHEN VM(e)=0.45 RISE=2
+.MEASURE NOISE_CONT derivRiseContTest3 DERIV VM(d) WHEN VM(e)=0.45 RISE=LAST
+
+.MEASURE NOISE_CONT derivFallContTest1 DERIV VM(d) WHEN VM(e)=0.45 FALL=1
+.MEASURE NOISE_CONT derivFallContTest2 DERIV VM(d) WHEN VM(e)=0.45 FALL=2
+.MEASURE NOISE_CONT derivFallContTest3 DERIV VM(d) WHEN VM(e)=0.45 FALL=LAST
+
+************************************************************************
+* Use of FROM-TO.  Only the rise, fall or cross values within the
+* FROM-TO windows should be returned, starting at the requested value.
+* For CROSS=LAST, only the last one within the FROM-TO window is returned
+.MEASURE NOISE_CONT derivCross1ContFrom DERIV VM(d) WHEN VM(e)=0.45 CROSS=1 FROM=0.5
+.MEASURE NOISE_CONT derivCross2ContFrom DERIV VM(d) WHEN VM(e)=0.45 CROSS=2 FROM=0.5
+.MEASURE NOISE_CONT derivCrossContTo DERIV VM(d) WHEN VM(e)=0.45 CROSS=1 TO=1
+.MEASURE NOISE_CONT derivRiseContTo DERIV VM(d) WHEN VM(e)=0.45 RISE=1 TO=1
+.MEASURE NOISE_CONT derivFallContFrom DERIV VM(d) WHEN VM(e)=0.45 FALL=1 FROM=0.5
+.MEASURE NOISE_CONT derivCrossContToLast DERIV VM(d) WHEN VM(e)=0.45 CROSS=LAST TO=1
+
+*********************************************************
+* Test negative values
+.MEASURE NOISE derivCrossNeg2 DERIV VM(d) WHEN VM(e)=0.45 CROSS=-2
+.MEASURE NOISE derivCrossNeg3 DERIV VM(d) WHEN VM(e)=0.45 CROSS=-3
+.MEASURE NOISE derivCrossNeg6 DERIV VM(d) WHEN VM(e)=0.45 CROSS=-6
+.MEASURE NOISE_CONT derivCrossContNeg1 DERIV VM(d) WHEN VM(e)=0.45 CROSS=-1
+.MEASURE NOISE_CONT derivCrossContNeg2 DERIV VM(d) WHEN VM(e)=0.45 CROSS=-2
+.MEASURE NOISE_CONT derivCrossContNeg3 DERIV VM(d) WHEN VM(e)=0.45 CROSS=-3
+.MEASURE NOISE_CONT derivCrossContNeg6 DERIV VM(d) WHEN VM(e)=0.45 CROSS=-6
+
+.MEASURE NOISE derivRiseNeg2 DERIV VM(d) WHEN VM(e)=0.45 RISE=-2
+.MEASURE NOISE derivRiseNeg3 DERIV VM(d) WHEN VM(e)=0.45 RISE=-3
+.MEASURE NOISE_CONT derivRiseContNeg1 DERIV VM(d) WHEN VM(e)=0.45 RISE=-1
+.MEASURE NOISE_CONT derivRiseContNeg2 DERIV VM(d) WHEN VM(e)=0.45 RISE=-2
+.MEASURE NOISE_CONT derivRiseContNeg3 DERIV VM(d) WHEN VM(e)=0.45 RISE=-3
+
+.MEASURE NOISE derivFallNeg2 DERIV VM(d) WHEN VM(e)=0.45 FALL=-2
+.MEASURE NOISE derivFallNeg4 DERIV VM(d) WHEN VM(e)=0.45 FALL=-4
+.MEASURE NOISE_CONT derivFallContNeg1 DERIV VM(d) WHEN VM(e)=0.45 FALL=-1
+.MEASURE NOISE_CONT derivFallContNeg2 DERIV VM(d) WHEN VM(e)=0.45 FALL=-2
+.MEASURE NOISE_CONT derivFallContNeg4 DERIV VM(d) WHEN VM(e)=0.45 FALL=-4
+
+*************************************************
+* test failed measures
+.MEASURE NOISE_CONT derivCrossContFail1 DERIV VM(b) WHEN VM(e)=1
+.MEASURE NOISE_CONT atContFail DERIV VM(b) at=200
+.MEASURE NOISE_CONT derivCrossContFail2 DERIV VM(b) WHEN VM(e)=0.45 CROSS=6
+.MEASURE NOISE_CONT derivRiseContFail DERIV VM(b) WHEN VM(e)=0.45 RISE=4
+.MEASURE NOISE_CONT derivFallContFail DERIV VM(b) WHEN VM(e)=0.45 FALL=4
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure noise lastMeasure max VM(e)
+
+.END

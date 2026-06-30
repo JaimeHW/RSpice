@@ -1,0 +1,29 @@
+Test Name: bug_1358
+Owner: elranki 
+Test netlists: bug_1358_braces.cir
+               bug_1358_quotes.cir
+GS files: none
+Mode:  Serial
+Comparator: diff       
+Version of Xyce: Release_4.1 
+ 
+Description:
+============
+This test confirms that single quotes may surround expressions instead of 
+curly braces.  (SmartSpice/HSpice compatibility)
+
+Procedure:
+============
+  run_xyce bug_1358_quotes.cir
+  run_xyce bug_1358_braces.cir
+  diff bug_1358_quotes.cir.prn bug_1358_braces.cir.prn 
+
+ 
+Verification:
+=============
+Passes if the output is identical.
+
+ 
+Notes:
+======
+'Nested 'quotes'' and mixed {nested 'braces/quotes'} are not included in this bugfix.

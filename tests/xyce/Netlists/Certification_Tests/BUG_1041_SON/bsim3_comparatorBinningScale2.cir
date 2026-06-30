@@ -1,0 +1,50 @@
+COMPARATOR - BSIM3 Transient Analysis, Binning version
+* This test also tests the use of "options parser scale".  
+* It also ensures that "scale" works even when agauss is used. (see issue #239)   
+* Before fixing issue #239, the presence of agauss would cause the model to be 
+* set up more than once, and would incorrectly cause scale to applied more than once.
+
+M1 Anot A E1 E1  PMOS w=3.6 l=1.2
+M2 Anot A 0 0 NMOS w=1.8 l=1.2
+M3 Bnot B E1 E1  PMOS w=3.6 l=1.2
+M4 Bnot B 0 0 NMOS w=1.8 l=1.2
+M5 AorBnot 0 E1 E1 PMOS w=1.8 l=3.6
+M6 AorBnot B 1 0 NMOS w=1.8 l=1.2
+M7 1 Anot 0 0 NMOS w=1.8 l=1.2
+M8 Lnot 0 E1 E1 PMOS w=1.8 l=3.6
+M9 Lnot Bnot 2 0 NMOS w=1.8 l=1.2
+M10 2 A 0 0 NMOS w=1.8 l=1.2
+M11 Qnot 0 E1 E1  PMOS w=3.6 l=3.6
+M12 Qnot AorBnot 3 0 NMOS w=1.8 l=1.2
+M13 3 Lnot 0 0 NMOS w=1.8 l=1.2
+MQLO 8 Qnot E1 E1  PMOS w=3.6 l=1.2
+MQL1 8 Qnot 0 0 NMOS w=1.8 l=1.2
+MLTO 9 Lnot E1 E1  PMOS w=3.6 l=1.2
+MLT1 9 Lnot 0 0 NMOS w=1.8 l=1.2
+CQ Qnot 0 30f
+CL Lnot 0 10f
+
+Vdd E1 0 5
+Va A 0  pulse(0 5 10ns .1ns .1ns 15ns 30ns)
+Vb B 0 0
+
+.model nmos.1 nmos (level=9 lmin=0.1u lmax=3u  wmin=0.1u wmax=3u  vth0='agauss(0.7,0.07,1)')
+.model nmos.2 nmos (level=9 lmin=0.1u lmax=3u  wmin=3u  wmax=10u  vth0='agauss(0.7,0.07,1)')
+.model nmos.3 nmos (level=9 lmin=3u   lmax=10u wmin=0.1u wmax=3u  vth0='agauss(0.7,0.07,1)')
+.model nmos.4 nmos (level=9 lmin=3u   lmax=10u wmin=3u  wmax=10u  vth0='agauss(0.7,0.07,1)')
+
+.model pmos.1 pmos (level=9 lmin=0.1u lmax=3u wmin=0.1u wmax=3u   vth0='agauss(-0.7,0.07,1)')
+.model pmos.2 pmos (level=9 lmin=0.1u lmax=3u wmin=3u  wmax=10u   vth0='agauss(-0.7,0.07,1)')
+.model pmos.3 pmos (level=9 lmin=3u lmax=10u wmin=0.1u wmax=3u    vth0='agauss(-0.7,0.07,1)')
+.model pmos.4 pmos (level=9 lmin=3u lmax=10u wmin=3u  wmax=10u    vth0='agauss(-0.7,0.07,1)')
+
+.options parser scale=1.0e-6
+.options device debuglevel=-100
+
+* transient analysis
+.tran 1ns 60ns
+*.print tran v(a) v(b) v(9) v(8)
+.print tran precision=12 width=21 v(a) v(b) {v(9)+0.2} {v(8)+0.2}
+
+.END
+

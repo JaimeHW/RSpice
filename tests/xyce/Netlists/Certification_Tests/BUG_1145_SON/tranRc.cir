@@ -1,0 +1,12 @@
+* test for bug 1145 SON
+
+.global_param ic1=1.0
+.ic v(1)={ic1}
+
+c1 1 0 1uF 
+R1 1 2 1K
+v1 2 0 0V
+.print tran v(1)
+.tran 0 5ms
+
+.end

@@ -1,0 +1,46 @@
+Simple RC circuit
+*
+* Eric Keiter, SNL
+*
+* Tests simultaneous sweeps of frequency, magnitude and phase, using a
+* data table to specify frequency, magnitude and phase.
+
+.global_param mag={log10(freq)+1}
+.global_param phase={0.1*mag}
+.global_param r1val={mag*1.0e3}
+.global_param c1val={(1.0+mag)*1.0e-6}
+
+* use expressions to compute analytic solution.  As the expression
+* library does not support complex numbers, use real equivalent form.
+.global_param g={1/r1val}
+.global_param c={c1val}
+.global_param omega = {2.0 * pi * freq}
+
+.global_param Ireal = {-mag * cos(2.0*pi*phase/360.0)}
+.global_param Iimag = {-mag * sin(2.0*pi*phase/360.0)}
+
+* matrix determinants
+.global_param detJ      = {g*g - (-c)*c*omega*omega}
+.global_param detV1real = {Ireal*g - (-c)*omega*Iimag}
+.global_param detV1imag = {g*Iimag - c*omega*Ireal}
+
+* analytic solution, via Cramer's rule:
+.global_param V1real = {detV1real/detJ}
+.global_param V1imag = {detV1imag/detJ}
+
+Isrc 1 0 AC {mag} {phase} 
+R1 1 0 {r1val}
+C1 1 0 {c1val}
+
+* V1real and vr(1) should match
+* V1imag and vi(1) should match
+.print ac 
+*+ v(1)
+*+ V1real
+*+ V1imag
++ {0.001 + abs(V1real - vr(1))}
++ {0.001 + abs(V1imag - vi(1))}
+
+.AC DEC 1 1 1e5
+
+.END

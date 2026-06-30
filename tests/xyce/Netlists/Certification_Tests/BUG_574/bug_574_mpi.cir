@@ -1,0 +1,25 @@
+COMPARATOR - BSIM3 Transient Analysis
+* 
+*
+
+R1 a b 1.0
+R2 b c 2.0
+R3 c d 3.0
+R4 d e 4.0
+R5 e f 5.0
+R6 f g 6.0
+R7 g h 7.0
+R8 h 0 8.0
+
+*            V0  VA FREQ TD THETA
+Va a 0  sin ( 5.0  2.0 0.05 0.0 0.0)
+
+.model nmos nmos (level=9)
+.model pmos pmos (level=9)
+
+* transient analysis
+.tran 0.1s 60s
+.print tran v(a) v(b) {(abs(v(a)))-10.0} {((v(b)+2.0)**2.0)*1.0e3}
+
+.END
+

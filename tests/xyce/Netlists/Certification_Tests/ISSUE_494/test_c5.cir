@@ -1,0 +1,21 @@
+test multiplier
+
+Vin 1 0 1.0
+Rin 1 2 1.0
+
+.global_param Mval={15}
+Xtest1 2 3 testA  M={Mval}
+Xtest2 3 0 testA  M={Mval}
+
+.subckt testA A B 
+.param fred=2
+Xtest A B testB M='0.5*fred'
+.ends
+
+.subckt testB A B 
+R1 A B 0.5 M=4
+.ends
+
+.DC Vin 1 1 1
+.PRINT DC V(1) V(2) V(3) I(Vin)  { Xtest1:Xtest:R1:R } { Xtest2:Xtest:R1:R }
+

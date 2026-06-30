@@ -1,0 +1,6 @@
+Manifest.txt
+exclude
+issue565_566.cir
+issue565_566.cir.sh
+issue565_566ref.cir
+tags

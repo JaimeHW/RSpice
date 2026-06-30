@@ -1,0 +1,30 @@
+
+This test is designed to check linking to Xyce as a library for 
+mixed signal simulations.  The binary program for this test
+is in the Xyce repository and can be built by going to:
+
+Xyce/test/XyceAsLibrary
+
+and typeing "make" to build the test program.  Then run the program
+on the netlist in this directory.
+
+This test covers the following BUGS:
+
+BUG 1466 simulateUntil() fails to return upon change
+BUG 1467 ADC and DAC are not new DAE compatible
+BUG 1499 Use raw names for ADC and DAC devices
+BUG 1500 Breakpoint needed at end of ramp
+
+
+How to run this test:
+
+1) In the Xyce build directory go to "test/XyceAsLibrary" and type make
+
+2) Run the resulting program on this netlist:
+   XyceLibTest ADC_DACtest.cir ; echo $?
+   
+3) if the exit code is 0, then the test passes.
+
+
+
+

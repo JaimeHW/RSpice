@@ -1,0 +1,25 @@
+*******************************************************************************
+* This netlist is equivalent to Step 1 for the DerivativeVariableTest.cir
+* netlist.  It has VS3:V0=0.9
+*
+*******************************************************************************
+*
+* a few sources of different types
+VS1  1  0  SIN(0 1.0 1KHZ 0 0)
+VS2  2  0  SIN(-0.5 1.0 1KHZ 0 0)
+V3   3  0  0.9
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+
+.TRAN 0 1ms 0 0.01ms
+
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3)
+
+.measure tran deriv1when1eq2 deriv v(2) when v(1)=0.7  
+.measure tran deriv1when3 deriv v(2) when v(1)=v(3)
+.measure tran deriv2 deriv v(2) when v(2)=0.2 
+
+.END
+

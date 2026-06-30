@@ -1,0 +1,24 @@
+Test Name: BUG_565
+Owner: Eric Keiter
+Test netlists: none 
+GS files: none
+Mode:  Serial
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+Bug 565 turned out to be the same issue as in bug 536.  
+
+Procedure:
+============
+Same as for bug 536.
+
+Verification:
+=============
+If bug 536 has been verified, so has this one.
+ 
+Notes:
+======
+
+

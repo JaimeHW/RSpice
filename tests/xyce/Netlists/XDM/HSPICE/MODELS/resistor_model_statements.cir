@@ -1,0 +1,20 @@
+*Xyce Gold Netlist
+
+*Analysis directives:
+.TRAN  0 1us
+.PRINT TRAN FORMAT=PROBE I(V1) I(R1) I(R2) I(R3)
+
+R1 1 0 R1_MOD 1
+.MODEL R1_MOD R R=2 TC1=0 TC2=0
+R2 1 0 R2_MOD 1
+.MODEL R2_MOD R R=4 TC1=0 TC2=0
+
+* set device temperatures, and use both TC1 and TC2
+*.OPTIONS DEVICE TEMP=40
+R3 1 0 R3_MOD 1
+*.MODEL R3_MOD R=2 TC1=0.2 TC2=0.01 TNOM=30
+.MODEL R3_MOD R R=2 TC1=0 TC2=0
+
+V1  1 0 SIN(0 1 1e6 0 0 0)
+
+.END

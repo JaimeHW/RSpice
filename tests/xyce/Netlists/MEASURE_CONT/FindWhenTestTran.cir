@@ -1,0 +1,129 @@
+* Test TRAN mode support for the TRAN_CONT version of
+* FIND-AT, FIND-WHEN and WHEN Measures.
+*
+* See SON Bug 1274 for more details.
+********************************************************
+
+* For testing convenience send the output for the TRAN_CONT
+* measures to the <netlistName>.mt0 file.
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+*
+VPWL1 1  0  pwl(0 0.1 2.5m 0.5 5m 0 7.5m 0.4 10m 0)
+VPWL2 2  0  pwl(0 0.5 10m 0)
+
+R1  1  0  100
+R2  2  0  100
+
+.TRAN 0 10ms
+.PRINT TRAN V(1) V(2)
++ whenCrossContTest2 whenCrossContTest2 whenCrossContTest3 whenCrossContTest4
++ whenCrossNeg2 whenCrossContNeg2 whenCrossNeg5 whenCrossContNeg5
+
+* Non-continuous version should return first crossing.
+* Continuous version should return all crossings.
+.measure tran whenCrossTest1 when v(1)=0.2
+.measure TRAN_CONT whenCrossContTest1 WHEN v(1)=0.2
+
+* Non-continuous version should return first crossing.
+* Continuous version should return all crossings, starting
+* with the first one.
+.measure tran whenCrossTest2 when v(1)=0.2 CROSS=1
+.measure TRAN_CONT whenCrossContTest2 when v(1)=0.2 CROSS=1
+
+* Non-continuous version should return second crossing.
+* Continuous version should return all crossings, starting
+* with the second one.
+.measure tran whenCrossTest3 when v(1)=0.2 CROSS=2
+.measure TRAN_CONT whenCrossContTest3 when v(1)=0.2 CROSS=2
+
+* These should both return the last crossing
+.measure tran whenCrossTest4 when v(1)=0.2 CROSS=LAST
+.measure TRAN_CONT whenCrossContTest4 when v(1)=0.2 CROSS=LAST
+
+* FIND-AT measures
+* These should give the same answer
+.measure tran atTest find v(1) at=2e-3
+.measure tran_cont atContTest find v(1) At=2e-3
+
+******************************************************
+* Repeat WHEN tests as FIND-WHEN measures
+.measure TRAN findCrossTest1 find V(2) when v(1)=0.2
+.measure TRAN_CONT findCrossContTest1 find V(2) when v(1)=0.2
+
+.measure TRAN findCrossTest2 find V(2) when v(1)=0.2 CROSS=1
+.measure TRAN_CONT findCrossContTest2 find V(2) when v(1)=0.2 CROSS=1
+
+.measure TRAN findCrossTest3 find V(2) when v(1)=0.2 CROSS=2
+.measure TRAN_CONT findCrossContTest3 find V(2) when v(1)=0.2 CROSS=2
+
+.measure TRAN findCrossTest4 find V(2) when v(1)=0.2 CROSS=LAST
+.measure TRAN_CONT findCrossContTest4 find V(2) when v(1)=0.2 CROSS=last
+
+*****************************************************
+* test RISE and FAll qualifiers for WHEN and FIND-WHEN
+.MEASURE TRAN_CONT whenRiseContTest1 WHEN V(1)=0.2 RISE=1
+.MEASURE TRAN_CONT whenRiseContTest2 WHEN V(1)=0.2 RISE=2
+.MEASURE TRAN_CONT whenRiseContTest3 WHEN V(1)=0.2 RISE=LAST
+
+.MEASURE TRAN_CONT whenFallContTest1 WHEN V(1)=0.2 FALL=1
+.MEASURE TRAN_CONT whenFallContTest2 WHEN V(1)=0.2 FALL=2
+.MEASURE TRAN_CONT whenFallContTest3 WHEN V(1)=0.2 FALL=LAST
+
+.MEASURE TRAN_CONT findRiseContTest1 FIND V(2) WHEN V(1)=0.2 RISE=1
+.MEASURE TRAN_CONT findRiseContTest2 FIND V(2) WHEN V(1)=0.2 RISE=2
+.MEASURE TRAN_CONT findRiseContTest3 FIND V(2) WHEN V(1)=0.2 RISE=LAST
+
+.MEASURE TRAN_CONT findFallContTest1 FIND V(2) WHEN V(1)=0.2 FALL=1
+.MEASURE TRAN_CONT findFallContTest2 FIND V(2) WHEN V(1)=0.2 FALL=2
+.MEASURE TRAN_CONT findFallContTest3 FIND V(2) WHEN V(1)=0.2 FALL=LAST
+
+************************************************************************
+* Use of FROM-TO.  Only the rise, fall or cross values within the
+* FROM-TO windows should be returned, starting at the requested value.
+* For CROSS=LAST, only the last one within the FROM-TO window is returned
+.MEASURE TRAN whenCross1From1ms WHEN V(1)=0.2 CROSS=1 FROM=1e-3
+.MEASURE TRAN whenCross2From1ms WHEN V(1)=0.2 CROSS=2 FROM=1e-3
+.MEASURE TRAN whenCrossTo8ms WHEN V(1)=0.2 CROSS=1 TO=8e-3
+.MEASURE TRAN whenRiseTo5ms WHEN V(1)=0.2 RISE=1 TO=5e-3
+.MEASURE TRAN whenFallFrom5ms WHEN V(1)=0.2 FALL=1 FROM=5e-3
+.MEASURE TRAN whenCrossToLast WHEN V(1)=0.2 CROSS=LAST TO=8e-3
+
+.MEASURE TRAN_CONT whenCross1ContFrom1ms WHEN V(1)=0.2 CROSS=1 FROM=1e-3
+.MEASURE TRAN_CONT whenCross2ContFrom1ms WHEN V(1)=0.2 CROSS=2 FROM=1e-3
+.MEASURE TRAN_CONT whenCrossContTo8ms WHEN V(1)=0.2 CROSS=1 TO=8e-3
+.MEASURE TRAN_CONT whenRiseContTo5ms WHEN V(1)=0.2 RISE=1 TO=5e-3
+.MEASURE TRAN_CONT whenFallContFrom5ms WHEN V(1)=0.2 FALL=1 FROM=5e-3
+.MEASURE TRAN_CONT whenCrossContToLast WHEN V(1)=0.2 CROSS=LAST TO=8e-3
+
+*********************************************************
+* Test negative values
+.MEASURE TRAN whenCrossNeg2 WHEN V(1)=0.2 CROSS=-2
+.MEASURE TRAN whenCrossNeg3 WHEN V(1)=0.2 CROSS=-3
+.MEASURE TRAN whenCrossNeg5 WHEN V(1)=0.2 CROSS=-5
+.MEASURE TRAN_CONT whenCrossContNeg1 WHEN V(1)=0.2 CROSS=-1
+.MEASURE TRAN_CONT whenCrossContNeg2 WHEN V(1)=0.2 CROSS=-2
+.MEASURE TRAN_CONT whenCrossContNeg3 WHEN V(1)=0.2 CROSS=-3
+.MEASURE TRAN_CONT whenCrossContNeg5 WHEN V(1)=0.2 CROSS=-5
+
+.MEASURE TRAN whenRiseNeg2 WHEN V(1)=0.2 RISE=-2
+.MEASURE TRAN whenRiseNeg3 WHEN V(1)=0.2 RISE=-3
+.MEASURE TRAN_CONT whenRiseContNeg1 WHEN V(1)=0.2 RISE=-1
+.MEASURE TRAN_CONT whenRiseContNeg2 WHEN V(1)=0.2 RISE=-2
+.MEASURE TRAN_CONT whenRiseContNeg3 WHEN V(1)=0.2 RISE=-3
+
+.MEASURE TRAN whenFallNeg2 WHEN V(1)=0.2 FALL=-2
+.MEASURE TRAN whenFallNeg3 WHEN V(1)=0.2 FALL=-3
+.MEASURE TRAN_CONT whenFallContNeg1 WHEN V(1)=0.2 FALL=-1
+.MEASURE TRAN_CONT whenFallContNeg2 WHEN V(1)=0.2 FALL=-2
+.MEASURE TRAN_CONT whenFallContNeg3 WHEN V(1)=0.2 FALL=-3
+
+*************************************************
+* test failed measures
+.MEASURE TRAN_CONT whenCrossContFail1 WHEN V(1)=1
+.MEASURE TRAN_CONT atContFail FIND V(1) at=20e-3
+.MEASURE TRAN_CONT whenCrossContFail2 WHEN V(1)=0.2 CROSS=5
+.MEASURE TRAN_CONT whenRiseContFail WHEN V(1)=0.2 RISE=3
+.MEASURE TRAN_CONT whenFallContFail WHEN V(1)=0.2 FALL=3
+
+.END

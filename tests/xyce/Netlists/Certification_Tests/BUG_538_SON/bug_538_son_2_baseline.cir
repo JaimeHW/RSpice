@@ -1,0 +1,16 @@
+Test of multiple print lines
+* This netlist has two .print TRAN lines to different files.  This is the
+* way users had to use .print prior to 6.4.  
+* both outputs should match the outputs of the netlist with
+* the same name as this one, with "_baseline" removed, which uses the new
+* "aggregate multiple print lines" feature.  
+
+R1 1 0 10
+V1 1 0 sin (0 10 10MEG 0 0)
+
+.print TRAN v(1) I(v1)
+.print TRAN file=bug538_2_df_bl I(v1) v(1)
+
+.tran 1ns 10ns
+
+.end

@@ -1,0 +1,17 @@
+* Test for Issue #282, to allow b3soi voltage limiting to be turned off.
+
+M1 3 2 0 0 nmos w=4u l=1u 
+Rsource 1 2 100k
+Rload 3 vdd 25k
+
+Vdd1 vdd 0 5 
+Vin 1 0 sin(1.44 0.1 1e+8 0 0)
+
+.tran 1e-9 1e-7
+.print tran v(3)  v(1) 
+
+.model nmos nmos level=10
+
+.options device b3soivoltlim=0
+.end
+

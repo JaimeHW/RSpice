@@ -1,0 +1,10 @@
+*
+* This "circuit" exists to provide a meaningful .PRINT line to xyce_verify.pl.
+*
+* It isn't supposed to be run, and will exit with error.
+*
+
+.tran 1.0e-8
+.print tran {v(1)+4}
+
+.end

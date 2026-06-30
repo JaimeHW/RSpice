@@ -1,0 +1,4 @@
+nightly
+serial, parallel
+ac, measure, errorexit
+

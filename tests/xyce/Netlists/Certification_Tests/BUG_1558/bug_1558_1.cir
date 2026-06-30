@@ -1,0 +1,19 @@
+* test for bug 1558
+* This version removes the "params:" from the subcircuit definition.  The
+* desired effect in the bug 1558 request is that this should still produce
+* the same results as the baseline.
+
+X1 1 0 simple PARAMS: R=100k
+V1 1 0 DC 5v
+
+.dc v1 0 5 1
+.print dc v(1) I(V1)
+
+
+.subckt simple a b 
+
+R1 a b {R}
+
+.ends
+
+.end

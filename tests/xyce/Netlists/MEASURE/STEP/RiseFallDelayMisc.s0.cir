@@ -1,0 +1,31 @@
+*******************************************************************************
+* This netlist is equivalent to Step 0 for the RiseFallDelayMisc.cir netlist.
+* It has VDC:V0=0.4
+*
+*******************************************************************************
+*
+* a few sources of different types
+VS  1  0  SIN(0 1.0 1KHZ 0 0)
+VP  2  0  PULSE(-2 3 0.2ms 0.5ms 0.5ms 1ms 2ms )
+VDC 3  0  0.4
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+
+.TRAN 0 3ms 0 0.01ms
+
+* use legacy trig-targ mode
+.OPTIONS MEASURE USE_LTTM=1
+
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3)
+
+.measure tran m1 TRIG V(1)=0.5  TARG V(2)=0.5
+.measure tran m2 TRIG V(1)=v(3) TARG V(2)=0.5
+.measure tran m3 TRIG V(1)=0.5  TARG V(2)=V(3)
+.measure tran m4 TRIG V(1)=V(3) TARG V(2)=V(3)
+.measure tran m5 TRIG AT=1e-3   TARG V(2)=0.5
+.measure tran m6 TRIG AT=1e-3   TARG V(2)=V(3)
+
+.END
+

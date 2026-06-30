@@ -1,0 +1,19 @@
+**********************************************************
+* Netlist tests that AC output in TOUCHSTONE or TOUCHSTONE2
+* formats default to STD format (.prn file with an Index column)
+*
+*********************************************************
+
+* Trivial high-pass filter
+
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+* use .OP so that the .PRINT AC_IC output is made also
+.OP
+.print AC FORMAT=TOUCHSTONE vm(b)
+.print AC_IC FORMAT=TOUCHSTONE2 vm(b)
+.ac dec 5 100Hz 1e6
+
+.end

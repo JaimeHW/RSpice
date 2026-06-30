@@ -1,0 +1,16 @@
+* Xyce gold netlist
+.TRAN  0 1ms
+
+.PRINT TRAN FORMAT=PROBE V(N04173) V(N03179) V(X_X1:B)
+
+X_X1         N04173 N03179  TwoRes 
+R_R2         N03179 0  20 
+V_V1         N04173 0 SIN(0 1 1KHz 0 0 0)
+
+.SUBCKT TwoRes A C
+R_RX1 A B 5  
+R_RX2 B C 5
+.ENDS
+
+.END
+

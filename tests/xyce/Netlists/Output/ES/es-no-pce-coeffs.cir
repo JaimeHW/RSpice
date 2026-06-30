@@ -1,0 +1,38 @@
+* Test the .PRINT ES line for OUTPUT_PCE_COEFFS=true
+* when projection_pce=false and regression_pce=false
+* on the .OPTIONS EMBEDDEDSAMPLES line.  That request
+* should be silently ignored.
+*
+* See SON Bug 1201 for more details.
+******************************************************
+
+.global_param R1value={1000.0}
+.global_param R2value={1000.0}
+.global_param Vvalue={5.0}
+
+R2 1 0 {R2value}
+R1 1 2 {R1value}
+Von 2 0 {Vvalue}
+
+.DC Von 5 5 1
+.PRINT DC V(2)
+
+* 10 normally distributed samples
+.EMBEDDEDSAMPLING
++ param=R1value
++ type=normal
++ means=1000.0
++ std_deviations=200.0
+
+* Pick an output quantity that is essentially constant,
+* so that the test doesn't have to use a large number
+* samples.
+.options EMBEDDEDSAMPLES
++ OUTPUTS={V(2)}
++ numsamples=10
+
+.PRINT ES PRECISION=6 OUTPUT_PCE_COEFFS=TRUE
+
+.end
+
+

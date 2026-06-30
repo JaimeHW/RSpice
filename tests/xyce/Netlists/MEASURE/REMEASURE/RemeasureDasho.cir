@@ -1,0 +1,15 @@
+* A test of re-measure when -o is used on the command line
+* along with -remeasure
+*
+* See Issue 233 for more details.
+*************************************************************
+
+V1 1 0 SIN(0 1 1)
+R1 1 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1)
+
+.MEASURE TRAN MAXV1 MAX V(1)
+
+.END

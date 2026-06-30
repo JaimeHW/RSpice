@@ -1,0 +1,14 @@
+testing breakpoints 
+
+VOFF A 0 2.0
+VEXP 1 A exp(0.0 5.0 0 1ms 1s)
+R1   1 2 1
+C1   2 0 1
+
+.TRAN 1ms 5ms
+.print tran v(1)
+
+
+.options timeint erroption=1 breakpoints=1ms,2ms,3ms,4ms
+
+

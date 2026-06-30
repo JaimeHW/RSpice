@@ -1,0 +1,20 @@
+***********************************************************************
+* This netlist is equivalent to Step 0 for the step_test.cir netlist.
+* It has M2:W=40u
+*
+***********************************************************************
+
+*CMOS INVERTER
+*
+M1 2 1 0 0 NMOS W = 20U L = 5U
+M2 2 1 3 3 PMOS W = 40U L = 5U
+VDD 3 0 5
+VIN 1 0 SIN 2.5 2.5 20MEG
+.MODEL NMOS NMOS LEVEL = 3 CGDO = .2N CGSO = .2N CGBO = 2N
+.MODEL PMOS PMOS LEVEL = 3 CGDO = .2N CGSO = .2N CGBO = 2N
+
+.TRAN 1N 100N
+.FOUR 20MEG V(1) V(2)
+.PRINT TRAN V(2) V(1)
+
+.END

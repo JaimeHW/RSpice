@@ -1,0 +1,60 @@
+* Test NOISE mode support for MAX, MIN and PP measures. It was
+* deemed sufficient to mostly just test with the VR and VI
+* operators for each measure type.  Expressions are also
+* tested. One current operator (IM) is tested for a branch
+* current.
+*
+* See SON Bug 1301 for more details.
+*************************************************************
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 1MEG 1
+.PRINT NOISE VR(4) VI(4) IM(EAMP) maxvr4 minvr4 ppvr4 INOISE ONOISE
+
+* MAX
+.MEASURE NOISE maxvr4 MAX vr(4)
+.meas    noise maxvi4 max vi(4)
+
+* MIN
+.MEASURE NOISE minvr4 MIN vr(4)
+.MEASURE NOISE minvi4 min vi(4)
+
+* PP
+.MEASURE NOISE ppvr4 PP vr(4)
+.MEASURE NOISE ppvi4 pp vi(4)
+
+* Use expressions
+.MEASURE NOISE maxvr4Exp max {1+vr(4)}
+.MEASURE NOISE maxvi4Exp max {1+vi(4)}
+
+* add FROM-TO
+.MEASURE NOISE maxvr4FromTo max vr(4) FROM=1e3 TO=1e5
+.MEASURE NOISE minvr4FromTo min vr(4) FROM=1e3 TO=1e5
+.MEASURE NOISE ppvr4FromTo pp vr(4) FROM=1e3 TO=1e5
+
+* OUTPUT= qualifier
+.MEASURE NOISE FreqOfMaxv4b max vr(4) OUTPUT=FREQ
+.MEASURE NOISE FreqOfMinv4b min vr(4) OUTPUT=FREQ
+
+* branch currents
+.MEASURE NOISE maximeamp max IM(EAMP)
+.MEASURE NOISE minimeamp min IM(EAMP)  FROM=1e5
+.MEASURE NOISE ppimeamp  pp  IM(EAMP)  FROM=1e5
+
+* Tests should fail since the FROM-T0 windows have various problems.
+.measure noise maxFromToFail1 max v(4) FROM=1e7 TO=1e8
+.measure noise maxFromToFail2 max vr(4) FROM=1e6 TO=1e2
+.measure noise minFromToFail1 min vi(4) TO=-1e6
+.measure noise minFromToFail2 min vm(4) FROM=1e7 TO=1e8
+.measure noise ppFromToFail1 pp vp(4) FROM=1e7 TO=1e8
+
+.END

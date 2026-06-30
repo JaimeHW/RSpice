@@ -1,0 +1,92 @@
+ ***** Measure Functions ***** 
+
+Netlist warning: AVGFAILFROM failed. FROM or TD value > sim end time
+AVGFAILFROM = -1.000000e+02 FAILED
+Measure Start Time= 2.000000e-03	Measure End Time= 1.000000e-03
+
+DERIVVALWHENFAIL = -1.000000e+02 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: DERIVVALATFAIL failed. AT value outside sim window
+DERIVVALATFAIL = -1.000000e+02 FAILED for AT = 5.000000e+00
+
+Netlist warning: DUTYFAILFROM failed. FROM or TD value > sim end time
+DUTYFAILFROM = FAILED
+Measure Start Time= 2.000000e-03	Measure End Time= 1.000000e-03
+
+Netlist warning: EQNFAILTO failed. TO value < FROM value
+EQNFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: ERR1FAIL failed. TO value < FROM value
+ERR1FAIL = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: ERR2FAIL failed. TO value < FROM value
+ERR2FAIL = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+WHENVALFAIL = -1.000000e+02 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+FINDWHENVAL = -1.000000e+02 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: FOURFAIL failed. FROM or TD value > sim end time
+FOURFAIL: FAILED
+
+Netlist warning: FREQFAILTO failed. TO value < FROM value
+FREQFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: INTEGFAILFROM failed. FROM or TD value > sim end time
+INTEGFAILFROM = FAILED
+Measure Start Time= 2.000000e-03	Measure End Time= 1.000000e-03
+
+Netlist warning: MAXFAILRISE failed. Measured Rise,Fall,Cross=(2,1,1)
+MAXFAILRISE = -1.000000e+02 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: MINFAILFALL failed. Measured Rise,Fall,Cross=(2,1,1)
+MINFAILFALL = -1.000000e+02 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: OFFFAILTO failed. TO value < FROM value
+OFFFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: ONFAILTO failed. TO value < FROM value
+ONFAILTO = FAILED
+Measure Start Time= 1.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: PPFAILFALL failed. Measured Rise,Fall,Cross=(2,1,1)
+PPFAILFALL = -1.000000e+02 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: RMSFAILFROM failed. FROM or TD value > sim end time
+RMSFAILFROM = -1.000000e+02 FAILED
+Measure Start Time= 2.000000e-03	Measure End Time= 1.000000e-03
+
+TRIGTARGFAIL = -1.000000e+02 FAILED with trig time= 1.594597e-05 and targ time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: TRIGTARGATFAIL failed. AT value outside sim window
+TRIGTARGATFAIL = -1.000000e+02 FAILED with trig time= 0.000000e+00 and targ time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+DERIVVALWHENFAILCONT = FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: DERIVVALATFAILCONT failed. AT value outside sim window
+DERIVVALATFAILCONT = FAILED for AT = 5.000000e+00
+
+WHENVALFAILCONT = -1.000000e+02 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+FINDWHENVALCONT = -1.000000e+02 FAILED
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e-03
+
+Netlist warning: FINDATVALFAILCONT failed. AT value outside sim window
+FINDATVALFAILCONT = -1.000000e+02 FAILED for AT = 2.000000e-03
+
+

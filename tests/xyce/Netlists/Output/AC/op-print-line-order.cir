@@ -1,0 +1,28 @@
+***************************************************
+* This netlist tests the ordering of the .PRINT AC
+* and .PRINT AC_IC lines.  See SON Bug 942 for
+* more details.
+*
+****************************************************
+
+* Trivial high-pass filter, with extra "taps" on
+* R-branch to check print-line concatenation.
+R5 f 0 0.4
+R4 e f 0.4
+R3 d e 0.4
+R2 c d 0.4
+R1 b c 0.4
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+* these print lines should not be re-ordered without
+* consulting SON Bug 942 first.
+.PRINT AC_IC R1:R vm(c)
+.PRINT AC_IC R2:R vm(d)
+.PRINT AC_IC FILE=op-print-line-order-fileout R3:R vm(e)
+.PRINT AC_IC FILE=op-print-line-order-fileout R4:R vm(f)
+.PRINT AC vm(a)
+.print AC vm(b) 
+.ac dec 5 100Hz 1e6
+.OP
+.end 

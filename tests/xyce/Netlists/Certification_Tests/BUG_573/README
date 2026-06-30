@@ -1,0 +1,27 @@
+Test Name: 573
+Owner: Eric Rankin 
+Test netlists: userOneD.cir
+GS files: userOneD.cir.prn 
+Mode:  Serial
+Comparator:  compare 
+Version of Xyce: Release_2.1  
+ 
+Description:
+============
+bug 573 expressions and parameters don't work inside of vector-composite.
+ 
+Procedure:
+============
+The default procedure is:
+  run_xyce -o ${OUT_DIR}/userOneD.cir.prn userOneD.cir 
+  compare userOneD.cir.prn.gs userOneD.cir.prn 0.02 1.e-6 0.02
+ 
+Verification:
+=============
+Use compare to check results.
+ 
+Notes:
+======
+This is really a copy of regression test PDE_1D_TRAN that uses expressions
+and parameters in place of hardcoded values.  Other than this, everything
+is the same.

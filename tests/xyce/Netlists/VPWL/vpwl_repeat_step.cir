@@ -1,0 +1,47 @@
+Voltage Source - Piece Wise Linear Signal with .STEP
+**************************************************************
+
+.param td1=1
+.param td2=2
+.param td3=3
+.param td_step=0
+
+.param r1=0
+.param r2=2
+.param r3=7
+.param r_step=0
+
+* "gold" standard for step 1  (compare manually)
+VPWL4 4 0 PWL(0S 0V  2S 3V  3S 2V  4S 2V  4.01V 5V  4.5S 5V
++ 4.51S -2V  7S 1V  9S -1V  9.01S 4V  10S 3V) 
++ TD={td1} R={r1}
+R4 4 0 500
+
+* "gold" standard for step 2  (compare manually)
+VPWL5 5 0 PWL(0S 0V  2S 3V  3S 2V  4S 2V  4.01V 5V  4.5S 5V
++ 4.51S -2V  7S 1V  9S -1V  9.01S 4V  10S 3V) TD={td2} R={r2}
+R5 5 0 500
+
+* "gold" standard for step 3  (compare manually)
+VPWL6 6 0 PWL 0S 0V,  2S 3V,  3S 2V,  4S 2V,  4.01V 5V,  4.5S 5V
++ 4.51S -2V,  7S 1V,  9S -1V,  9.01S 4V,  10S 3V  
++ TD={td3} R={r3}
+R6 6 0 500
+
+VPWL7 7 0 PWL(0S 0V  2S 3V  3S 2V  4S 2V  4.01V 5V  4.5S 5V
++ 4.51S -2V  7S 1V  9S -1V  9.01S 4V  10S 3V) TD={td_step} R={r_step}
+R7 7 0 500
+
+.step data=fred
+
+.data fred
++ r_step  td_step
++ 0 1
++ 2 2
++ 7 3
+.enddata
+
+.TRAN 0.01S 30S
+.PRINT TRAN V(7)  V(4)  V(5)  V(6)
+
+.END 

@@ -1,0 +1,17 @@
+***********************************************************
+* A Xyce netlist that has a .OP statement but not a .TRAN
+* statement will produce a fatal error during netlist
+* parsing.  That is not optimal, and should be changed.
+* The HSpice behavior is to simply ignore the .MEASURE 
+* TRAN statement in this case.
+***********************************************************
+.op
+
+V1 1 0 SIN(0 1 1) 
+R1 1 2 1
+R2 2 1 1
+
+.MEASURE TRAN maxv2 MAX V(2)
+
+.END
+

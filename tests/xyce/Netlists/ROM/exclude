@@ -1,0 +1,10 @@
+RC_ladder100.cir
+RC_ladder_top10_mask1.cir
+RC_ladder_top10_twolevel1.cir
+RC_ladder_top10_xyce.cir
+RLC_ladder100.cir
+RLC_ladder_top30_mask1.cir
+RLC_ladder_top30_twolevel1.cir
+RLC_ladder_top30_xyce.cir
+cab_dak_sig_o_simple_top2.cir
+cab_dak_sig_o_simple.cir

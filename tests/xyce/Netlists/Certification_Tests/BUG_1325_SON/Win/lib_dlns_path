@@ -1,0 +1,6 @@
+* This file will be included, from one subdirectory down, via a Windows
+* drive letter path that does not have a file separator in it
+
+.LIB LIB_DLNS
+.PARAM RVAL=3
+.ENDL LIB_DLNS

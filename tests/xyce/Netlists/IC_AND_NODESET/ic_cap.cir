@@ -1,0 +1,29 @@
+Regression test to show proper transient RC circuit
+********************************************************************************
+* erkeite.  10/15/2007.
+*
+* This test is a simple test of .ic.  It is nearly identical to the
+* CAPACITOR/capacitor.cir test, except that it relies on .IC rather than
+* IC= on the device instance line.  The result should be exactly the same.
+* Similar to that test, this test compares directly to an analytic
+* solution, rather than a numerically-generated gold standard.
+*
+* This version of the test uses the .IC form:  
+*   .ic v(node1)=val1  <v(node2)=val2> ...
+*
+*  Another, nearly identical test, IC_AND_NODESET/ic_cap2.cir, is exactly
+*  the same except that it uses the form:
+*  .ic node1 value1  <node2 value2>  <node3 value3> ...
+*
+********************************************************************************
+.ic v(1)=1.0
+
+c1 1 0 1uF 
+*IC=1
+R1 1 2 1K
+v1 2 0 0V
+.print tran v(1)
+.tran 0 5ms
+.options timeint reltol=1e-6 abstol=1e-6
+.end
+

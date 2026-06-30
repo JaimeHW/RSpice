@@ -1,0 +1,2 @@
+serial, nightly, parallel,  analytic, globalparam, sampling, mc, normal, bug1190son, issue167
+valgrind

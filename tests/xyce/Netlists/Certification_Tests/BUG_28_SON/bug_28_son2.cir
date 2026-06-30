@@ -1,0 +1,39 @@
+* Test Circuit
+* This circuit comes from an open-source, external user
+* The .param line inside the subcircuit was not being resolved because
+* of the presence of the K line in the subcircuit
+* The problem was improper attempts to resolve context when mutual inductors
+* were present.
+
+* Define param1 and assign it a value 3.0
+.param
++   param1  = 3.0
+
+* Define subckt1
+.subckt subckt1 node1 node2
+* Define param2 and assign it the value of param1
+.param
++ param2 = {param1}
+
+l1 node1 Int 3e-9
+r1 Int node2 100
+
+l2 node2 Int2 3e-9
+r2 Int2 node2 100
+
+k1 l1 l2 0.5
+.ends subckt1
+
+
+* Define a simple supply voltage source
+V0 vcc 0 1V
+
+* performa a DC sweep
+.dc v0 0 1 .1
+
+* Print the supply current to a file.
+.PRINT DC V(vcc) I(V0)
+
+* Instanciate the subckt
+X0 vcc 0 subckt1
+

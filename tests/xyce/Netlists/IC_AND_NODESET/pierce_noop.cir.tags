@@ -1,0 +1,4 @@
+serial, nightly, parallel, ic
+bjt,bjtlev1
+resistor
+capacitor

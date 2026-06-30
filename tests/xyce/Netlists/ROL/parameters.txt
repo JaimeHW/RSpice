@@ -1,0 +1,3 @@
+DeviceName  ParamName  InitGuess  LoBound  UpBound
+DA          IS         1.e-10     1.e-15   1.e-4
+DA          RS         0.5        1.e-8    1.e+2

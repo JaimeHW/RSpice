@@ -1,0 +1,17 @@
+* This netlist will produce a DCOP failure because it has two
+* voltage sources in parallel.  (See the "DC Operating Point 
+* Calculation Failures in Xyce" section of the Xyce Reference
+* Guide for more details.)  It will be used to test the behavior 
+* of the Python methods runSimulation() and simulateUntil() 
+* for this case. 
+
+V1a 1 0 SIN(0 1 1)
+V1  1 0 SIN(0 1 1)
+R1  1 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1)
+.MEASURE TRAN MAXV1 MAX V(1)
+
+.END
+

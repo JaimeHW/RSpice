@@ -1,0 +1,31 @@
+*************************************************
+* Test START and STOP qualifers on .FFT line.
+*
+* See SON Bug 1334 for more details.
+*************************************************
+
+.OPTIONS FFT FFTOUT=1
+.TRAN 0 1
+.PRINT TRAN V(1) V(2) V(3)
+
+V1 1 0 PWL 0 0 0.5 1 1 0
+R1 1 0 1
+
+V2 2 0 PWL 0 0 0.25 1 0.5 0 1 0
+R2 2 0 1
+
+V3 3 0 PWL 0 0 0.5 0 0.75 1 1 0
+R3 3 0 1
+
+.FFT V(1) NP=16 FORMAT=UNORM WINDOW=RECT
+
+.FFT V(2) NP=16 STOP=0.5 FORMAT=UNORM WINDOW=RECT
+.FFT V(2) NP=16 TO=0.5 FORMAT=UNORM WINDOW=RECT
+
+.FFT V(3) NP=16 START=0.5 FORMAT=UNORM WINDOW=RECT
+.FFT V(3) NP=16 FROM=0.5 FORMAT=UNORM WINDOW=RECT
+
+.FFT V(2) NP=16 FORMAT=UNORM WINDOW=RECT
+.FFT V(3) NP=16 FORMAT=UNORM WINDOW=RECT
+
+.END

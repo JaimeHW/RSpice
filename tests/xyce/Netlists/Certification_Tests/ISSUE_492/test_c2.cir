@@ -1,0 +1,22 @@
+test multiplier
+
+Vin 1 0 1.0
+Rin 1 2 1.0
+
+.param Mval=5
+
+Xtest1 2 3 testA M={Mval/3/4}
+Xtest2 3 0 testA M={Mval/3/4}
+
+.global_param Mval2=3
+.subckt testA A B 
+Xtest A B testB M={Mval2}
+.ends
+
+.subckt testB A B 
+R1 A B 0.5  M=4
+.ends
+
+.dc Mval list 50 60 70
+.PRINT DC Mval V(1) V(2) V(3) I(Vin)  { Xtest1:Xtest:R1:R } { Xtest2:Xtest:R1:R }
+

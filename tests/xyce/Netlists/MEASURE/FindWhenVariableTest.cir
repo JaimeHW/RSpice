@@ -1,0 +1,54 @@
+A test of the measure find/when functionality.
+* The WHEN clause compares two voltages, both of which
+* may be variable.  Also test the case where either side
+* of the equality in the WHEN clause uses an expression.
+*
+* It also verifies that the WHEN clause of a DERIV measure
+* gets the same answer (time value) as the equivalent WHEN
+* measure for the case where those two WHEN clauses use
+* two voltages that are variable.
+*
+* This also tests the FIND-AT syntax.
+*
+* See SON Bugs 1273, 1282 and 1289 for more details.
+********************************************************
+*
+V1  1  0  PWL 0 0 0.25 1 0.5 0 0.75 1 1 0
+V2  2  0  PWL 0 1 0.5 0 1 1
+VDC 3  0  0.5
+V4  4  0  PWL 0 0 0.5 1 1 0
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+R4  4  0  100
+
+.TRAN 0 1
+
+.PRINT TRAN V(1) V(2) V(3) {V(3)+0.1} V(4)
+
+.measure tran v1hitv2rise1 when v(1)=v(2) RISE=1
+.measure tran v1hitv2falllast when v(1)=v(2) FALL=LAST
+.measure tran v1hitv3 when v(1)=v(3)
+.measure tran v2whenv1hitv3 FIND v(2) when v(1)=v(3)
+.measure tran v4hitv2 when v(4)=v(2)
+.measure tran v4hitv2exp when v(4)={v(2)+0.1}
+
+* the purpose of these two tests is to verify that the WHEN clause
+* of a DERIV measure gets the same answer as the equivalent WHEN measure
+.measure tran derivv4hitv2 DERIV V(4) when v(4)=v(2)
+.measure tran derivv4hitv2exp DERIV V(4) when v(4)={v(2)+0.1}
+
+.measure tran whenexp1 when v(1)={v(3)+0.1}
+.measure tran whenexp2 when {v(1)-0.1}=v(3)
+
+.measure tran findexp1 find v(2) when v(1)={v(3)+0.1}
+.measure tran findexp2 find v(2) when {v(1)-0.1}=v(3)
+
+* test FIND-AT
+.measure tran findv3at0 find v(3) at=0
+.measure tran findv1at0.25 find v(1) at=0.25
+.measure tran findv1at0.6 find v(1) at=0.6
+.measure tran findv1expat0.6 find {v(1)+1} at=0.6
+
+.END

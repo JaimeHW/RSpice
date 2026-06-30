@@ -1,0 +1,19 @@
+***************************************************
+* This version will be run with the -hspice-ext
+* command line option.  So, the a and A on the R1
+* and R2 lines will be parsed as 1e-18.
+*
+* See SON Bugs 472 and 1136 for more details.
+*
+***************************************************
+V1 1 0 1
+R1 1 2 1a
+R2 2 0 1A
+
+* Normalize the answers, so that they match the values
+* for the "A is Amp" run
+.PRINT DC {I(V1)/1e18} {1e18*R1.R} {1e18*R2.R}
+.DC V1 1 5 1
+
+.END
+

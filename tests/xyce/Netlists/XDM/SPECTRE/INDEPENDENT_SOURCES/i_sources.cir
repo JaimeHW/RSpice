@@ -1,0 +1,58 @@
+* Xyce netlist for testing Spectre I-Sources.  Note that
+* the device "names" in the Spectre netlist are (for example)
+* R4 and I44.  However, the Spectre instance lines are of the 
+* form:
+*
+*   R4 (net08 0) resistor r=1K
+*   I44 (net08 0) isource dc=1 type=dc
+*
+* So, on a Spectre instance line, it is the "resistor" and "isource" 
+* keywords that identify the devices as Resistors or Current Sources.
+* So, the xdm translation will turn those devices into RR4 and II44 
+* in the translated Xyce netlist.  For this reason, the device names 
+* in this "Gold" Xyce netlist are (for example) RR4 and II44, to match
+* what the device names will be in the xdm-translated Xyce netlist.
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PRINT TRAN I(RR1) I(RR2) I(RR3) I(RR4) I(RR5) I(RR6) I(RR7)
+
+**********************************************************
+*AC Source syntaxes 
+**********************************************************
+*SIN source, no DC offset.  1V amplitude.  Freq. of 1KHz
+RR1        net8 0  1K 
+II11       net8 0 SIN(0 1 1KHz 0 0 0)
+
+* With DC Offset of 1A
+RR5        net6 0  1K 
+II55       net6 0 SIN(1 1 1KHz 0 0 0)
+
+* With DC Offset of 1A
+RR7        net7 0  1K 
+II77       net7 0 SIN(1 1 1KHz 0 0 0)
+
+* Pulse source.  Xyce parameters within pulse( ) spec are:
+* V1 (initial value), V2 (pulse value), TD (delay time),
+* TR (rise time), TF (fall time), PW (pulse width) and PER (period)
+II66 net12 0 pulse(1 10 50e-6 50e-6 70e-6 200e-6 400e-6) 
+RR6 net12 0 R=1K
+
+* Exp source.  Xyce parameters within exp() spec are:
+* V1 (initial amplitude), V2 (amplitude), TD1 (rise delay time),
+* TAU1 (rise time constant), TD2 (fall delay time) and
+* TAU2 (fall time constant)
+II44       net08 0  exp(0 1 100e-6 20e-6 600e-6 40e-6) 
+RR4        net08 0  1k 
+
+****************************************************
+* DC source syntaxes
+****************************************************
+RR2        net06 0  1k 
+II22       net06 0  5
+
+RR3        net010 0  1k 
+II33       net010 0  1
+
+.END
+

@@ -1,0 +1,29 @@
+NOTES:
+  Bug 408 addresses a problem with how Xyce exits due to errors
+  associated with NOX, LOCA, and the Xyce interface to each.  Fatal
+  errors were being thrown but not caught.  This resulted in seg
+  faults in some cases.  Now when a fatal error occurs, the Xyce error
+  handler is called and there is a graceful exit.
+
+HOWTO: (no compare)
+  1) Xyce test.cir 
+  2) Verify that the run fails and exits with the following error: 
+
+ ***** Initializing...
+ noxFlag is: TRUE
+
+Dev Fatal: Error: N_NLS_NOX::ParameterSet::parseOptionBlock() - option
+ "continuation=3" requires Xyce to be built with
+ -DXyce_NOX_LOCA_ARTIFICIAL_HOMOTOPY_SUPPORT in the configure
+ script.  Please rebuild Xyce or choose a different continuation
+ method.
+
+Dev Fatal: Error: N_NLS_NOX::ParameterSet::parseOptionBlock() - option
+ "continuation=3" requires Xyce to be built with
+ -DXyce_NOX_LOCA_ARTIFICIAL_HOMOTOPY_SUPPORT in the configure
+ script.  Please rebuild Xyce or choose a different continuation
+ method.
+
+SERIAL/PARALLEL:
+  This test should be run in SERIAL only.  
+

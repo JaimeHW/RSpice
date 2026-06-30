@@ -1,0 +1,87 @@
+* A test of .OPTIONS MEASURE MEASFAIL=0  when The DEFAULT_VAL qualifier
+* on the .MEASURE lines is used. The failed measures should
+* output 2 to the <netlistName>.mt0 file.
+
+*
+* This test uses the legacy TRIG-TARG mode, so it tests the
+* RiseFallDelay class.  See gitlab-ex issue 303 for more details.
+*******************************************************************
+VS1  1  0  SIN(0 1.0 1KHZ 0 0.9)
+VS2  2  0  SIN(0 -1.0 1KHz 0 0.9)
+R1  1  0  100
+R2  2  0  100
+
+* use legacy trig-targ mode
+.OPTIONS MEASURE USE_LTTM=1
+
+.TRAN 0  1ms
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.00001
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2)
+.OPTIONS MEASURE MEASFAIL=0
+
+* test at least one failed measure for each measure type
+* AVG
+.measure tran avgFailFrom avg V(1) FROM=2e-3 DEFAULT_VAL=2
+
+*DERIV
+.measure tran derivValWhenFail deriv V(1) WHEN V(1)=5 DEFAULT_VAL=2
+.measure tran derivValAtFail deriv V(1) AT=5 DEFAULT_VAL=2
+
+* DUTY
+.measure tran dutyFailFrom duty V(1) FROM=2ms DEFAULT_VAL=2
+
+*EQN
+.measure tran eqnFailTo EQN {V(1)-1} FROM=1 TO=1e-3 DEFAULT_VAL=2
+
+* ERR1 and ERR2
+.measure tran err1Fail ERR1 V(1) V(2) FROM=1 TO=1e-3 DEFAULT_VAL=2
+.measure tran err2Fail ERR2 V(1) V(2) FROM=1 TO=1e-3 DEFAULT_VAL=2
+
+* FIND WHEN
+.measure tran whenValFail WHEN V(1)=5 DEFAULT_VAL=2
+.measure tran findWhenVal FIND V(2) WHEN V(1)=5 DEFAULT_VAL=2
+
+*FOUR
+.measure tran fourfail FOUR V(1) AT=1e6 TD=2e-3 DEFAULT_VAL=2
+
+*FREQ
+.measure tran freqFailTo FREQ v(1) ON=0.75 OFF=0.25 FROM=1 TO=1e-3 DEFAULT_VAL=2
+
+* INTEG
+.measure tran integFailFrom integ V(1) From=2e-3 DEFAULT_VAL=2
+
+* MAX
+.measure tran maxFailRise max V(1) RISE=4 DEFAULT_VAL=2
+
+* MIN
+.measure tran minFailFall min V(1) FALL=4 DEFAULT_VAL=2
+
+* OFF_TIME
+.measure tran offFailTo off_time V(1) OFF=0 FROM=1 TO=1e-3 DEFAULT_VAL=2
+
+* ON_TIME
+.measure tran onFailTo on_time V(1) ON=0 FROM=1 TO=1e-3 DEFAULT_VAL=2
+
+* PP
+.measure tran ppFailFall pp V(1) FALL=4 DEFAULT_VAL=2
+
+* RMS
+.measure tran rmsFailFrom rms V(1) FROM=2e-3 DEFAULT_VAL=2
+
+*TRIG/TARG (RiseFallDelay)
+.measure tran trigTargFail trig v(1) frac_max=0.1 targ v(1) frac_max=2 DEFAULT_VAL=2
+.measure tran trigTargAtFail TRIG AT=2e-3 TARG V(2)=0.5 DEFAULT_VAL=2
+
+* for testing convenience do not make separate .mt0 files
+* for each TRAN_CONT measure
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+.measure tran_cont derivValWhenFailCont deriv V(1) WHEN V(1)=5 DEFAULT_VAL=2
+.measure tran_cont derivValAtFailCont deriv V(1) AT=5 DEFAULT_VAL=2
+
+.measure tran_cont whenValFailCont WHEN V(1)=5 DEFAULT_VAL=2
+.measure tran_cont findWhenValCont FIND V(2) WHEN V(1)=5 DEFAULT_VAL=2
+.measure tran_cont FindAtValFailCont Find V(1)=5 AT=2e-3 DEFAULT_VAL=2
+
+.END
+

@@ -1,0 +1,119 @@
+ ***** Measure Functions ***** 
+
+M1 = 7.000000e-01 with max at time= 1.000000e+00 and min at time= 3.000000e-01
+Measure Start Time= 3.000000e-01	Measure End Time= 1.000000e+00
+
+M2 = 7.000000e-01 with max at time= 1.000000e+00 and min at time= 3.000000e-01
+Measure Start Time= 3.000000e-01	Measure End Time= 1.000000e+00
+
+M2PAR = 7.000000e-01 with max at time= 1.000000e+00 and min at time= 3.000000e-01
+Measure Start Time= 3.000000e-01	Measure End Time= 1.000000e+00
+
+M2PAREN = 7.000000e-01 with max at time= 1.000000e+00 and min at time= 3.000000e-01
+Measure Start Time= 3.000000e-01	Measure End Time= 1.000000e+00
+
+M3 = 9.000000e-01 with max at time= 1.000000e+00 and min at time= 1.000000e-01
+Measure Start Time= 1.000000e-01	Measure End Time= 1.000000e+00
+
+M4 = 7.000000e-01 with max at time= 7.000000e-01 and min at time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 7.000000e-01
+
+M5NE = -6.894010e-01 at time = 3.675870e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+Fall 1: Start Time= 1.214748e-01	End Time= 6.171688e-01
+
+M5 = -6.894010e-01 at time = 3.675870e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+Fall 1: Start Time= 1.214748e-01	End Time= 6.171688e-01
+
+M6NE = -6.892807e-01 at time = 3.705239e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+Rise 2: Start Time= 3.705239e-01	End Time= 8.666282e-01
+
+M6 = -6.892807e-01 at time = 3.705239e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+Rise 2: Start Time= 3.705239e-01	End Time= 8.666282e-01
+
+M7NE = -6.894010e-01 at time = 3.675870e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+Cross 1: Start Time= 2.540104e-01	End Time= 4.909397e-01
+
+M7 = -6.894010e-01 at time = 3.675870e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+Cross 1: Start Time= 2.540104e-01	End Time= 4.909397e-01
+
+M8NE = -5.217425e+00 for AT = 7.000000e-01
+
+M8 = -5.217425e+00 for AT = 7.000000e-01
+
+M9 = 2.918855e-01 at time = 7.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M9PAR = 2.918855e-01 at time = 7.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M9PAREN = 2.918855e-01 at time = 7.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M9EXP2 = 1.291886e+00 at time = 7.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M9PAR2 = 1.291886e+00 at time = 7.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M9PAREN2 = 1.291886e+00 at time = 7.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M10NE = 1.599135e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M10 = 1.599135e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M11 = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M12 = 3.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M12PAR = 3.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M12PARENS = 3.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M13 = 2.000000e-01 with trig time= 1.000000e-01 and targ time= 3.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M13EXP = 2.000000e-01 with trig time= 1.000000e-01 and targ time= 3.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M13PARAM = 2.000000e-01 with trig time= 1.000000e-01 and targ time= 3.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M13PAR = 2.000000e-01 with trig time= 1.000000e-01 and targ time= 3.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M13PAREN = 2.000000e-01 with trig time= 1.000000e-01 and targ time= 3.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M14VAR = 6.000000e-01 with trig time= 2.000000e-01 and targ time= 8.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M14VAREXP = 6.000000e-01 with trig time= 2.000000e-01 and targ time= 8.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M14VARPARAM = 6.000000e-01 with trig time= 2.000000e-01 and targ time= 8.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M14VARPAR = 6.000000e-01 with trig time= 2.000000e-01 and targ time= 8.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+M14VARPAREN = 6.000000e-01 with trig time= 2.000000e-01 and targ time= 8.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+Netlist warning: M15 failed. FROM or TD value > sim end time
+M15 = -5.000000e+00 FAILED
+Measure Start Time= 1.100000e+00	Measure End Time= 1.000000e+00
+
+

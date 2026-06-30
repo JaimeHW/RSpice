@@ -1,0 +1,63 @@
+NPN Bipolar Transistor Circuit Netlist, patterned after the npn1.cir Gummel-Poon test.
+*
+* This circuit only makes it through the sweep if I use LOCA to seep the voltage
+* source, rather than a DC sweep.  
+*
+VCC  4 0 DC 12V
+RC 3 4 2K
+RB 4 5 377K
+* Zero volt sources used as ammeters to measure the
+* base and collector currents, respectively
+VMON1 5 1 0
+VMON2 3 2 0
+*Q 2 1 0 NBJT
+*.MODEL NBJT NPN (BF=100)
+
+*--------------------------------------------------------------------------------
+*ypde npnop3 COL BAS GND pdebjt    
+ypde npnop5 2 1 0 pdebjt    
++ C0=1.0e+17
++ tecplotlevel=2 
++ gnuplotlevel=0
++ mobmodel=philips
++ fielddep=true
++ l=9.0e-4 nx=50
+* DOPING REGIONS:
++ region={name       =            reg1,  reg2
++         function   =            file, file
++         file       =       boron.dat, phos.dat
++         nmaxchop   =         1.5e+18, 3.3e+19
++         type       =           ptype,  ntype
++         species    =              BM,  PP }
+*
+* ELECTRODES:
++ node={name           = collector,      base,  emitter
++       bc             = dirichlet, dirichlet,  dirichlet
++       side           =     right,    middle,  left
++       area           =    1.0e-2,    1.0e-2,  1.0e-2
++       location       =    9.0e-4,    3.0e-4,  0.0 }
+*
+.MODEL pdebjt ZOD  level=1
+*--------------------------------------------------------------------------------
+.options nonlin nlstrategy=0 searchmethod=0 
++ maxstep=50 maxsearchstep=20 continuation=1
+
+* natural continuation, adaptive step control, tangent predictor 
+.options loca stepper=NAT stepcontrol=ADA predictor=TAN
++ conparam=VCC
++ initialvalue=0.0 minvalue=0.0 maxvalue=12.0
++ initialstepsize=0.01 minstepsize=0.0001 maxstepsize=0.1 aggressiveness=1.0
++ maxsteps=5000 maxnliters=80
+
+.options timeint doubledcop=drift_diffusion 
+
+*.OP
+.DC RC:R  2K 2K 2K
+
+* this line causes the code to segfault (3/18/2014, release 6.1 branch)
+.PRINT DC format=tecplot RC:R V(4) I(VMON1) I(VMON2) V(1) V(2) 
+
+* this line runs OK (3/18/2014, release 6.1 branch)
+*.PRINT DC format=tecplot V(4) I(VMON1) I(VMON2) V(1) V(2) 
+
+.END

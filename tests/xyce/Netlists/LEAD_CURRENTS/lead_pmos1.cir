@@ -1,0 +1,32 @@
+Lead current test for MOS 1
+*
+VDD 2 0 DC 5V
+R1 2 1 50K
+R2 1 0 50K
+RD 4 0 7.5K
+VMOND 4 3 0
+VMONG 1 1g 0
+VMONS 2 2s 0
+VMONB 2 2b 0
+M1 3 1g 2s 2b PFET L=10U W=160U
+.MODEL PFET PMOS(LEVEL=1 KP=25U VTO=-0.8V)
+.DC VDD 0 8 1
+
+*COMP {ID(M1)-I(VMOND)} abstol=1.0e-9 zerotol=1.0e-7
+*COMP {IG(M1)-I(VMONG)} abstol=1.0e-9 zerotol=1.0e-7
+*COMP {IS(M1)-I(VMONS)} abstol=1.0e-9 zerotol=1.0e-7
+*COMP {IB(M1)-I(VMONB)} abstol=1.0e-9 zerotol=1.0e-7
+
+.options nonlin rhstol=1.0e-7
+.PRINT DC V(2) ID(M1) IG(M1) IS(M1) IB(M1) {ID(M1)-I(VMOND)} {IG(M1)-I(VMONG)} {IS(M1)-I(VMONS)} {IB(M1)-I(VMONB)}
+
+.measure dc maxmag1   max {abs(ID(M1)-I(VMOND))} failvalue=1e-8
+.measure dc totalrms1 rms {ID(M1)-I(VMOND)} failvalue=1e-8 
+.measure dc maxmag2   max {abs(IG(M1)-I(VMONG))} failvalue=1e-8
+.measure dc totalrms2 rms {IG(M1)-I(VMONG)} failvalue=1e-8 
+.measure dc maxmag3   max {abs(IS(M1)-I(VMONS))} failvalue=1e-8
+.measure dc totalrms3 rms {IS(M1)-I(VMONS)} failvalue=1e-8 
+.measure dc maxmag4   max {abs(IB(M1)-I(VMONB))} failvalue=1e-8
+.measure dc totalrms4 rms {IB(M1)-I(VMONB)} failvalue=1e-8
+
+.END

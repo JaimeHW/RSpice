@@ -1,0 +1,47 @@
+* Test TRAN mode support for the TRIG-TARG measure
+*
+*
+* See gitlab-ex issue 289 for more details
+*************************************************
+
+VPWL1 1  0  pwl(0 0.1 2.5m 0.5 5m 0 7.5m 0.4 10m 0)
+V3    3  0  SIN(0 1 200)
+
+R1a  1  1a  1
+R1b  1a  0  1
+R4   3   0  1
+
+.TRAN 0 10ms
+.PRINT TRAN V(1) V(1a) V(3)
+.STEP R1b 1.5 2 0.5
+
+* AT test
+.MEASURE TRAN TrigTargAT TRIG AT=2ms TARG AT=8ms
+.MEASURE TRAN TrigTargAT1 TRIG V(1a) VAL=0.2 CROSS=1 TARG AT=8ms
+.MEASURE TRAN TrigTargAT2 TRIG AT=2ms TARG V(1a) VAL=0.2 CROSS=1
+
+* Base case
+.MEASURE TRAN TrigTarg1 TRIG V(1a)=0.2 CROSS=1 TARG V(1a)=0.3 CROSS=1
+
+* Test that negative measure values are allowed
+.MEASURE TRAN TrigTarg2 TRIG V(1a)=0.2 CROSS=1 TARG V(1a)=0.25 CROSS=2
+.MEASURE TRAN TrigTarg3 TRIG V(1a)=0.1 CROSS=2 TARG V(1a)=0.2 CROSS=1
+
+* Repeat tests with LAST keyword and CROSS=-1
+.MEASURE TRAN TrigTarg4 TRIG v(1a)=0.2 CROSS=1 TARG v(1a)=0.2 CROSS=LAST
+.MEASURE TRAN TrigTarg5 TRIG v(1a)=0.2 CROSS=-1 TARG v(1a)=0.2 CROSS=1
+
+* Add TD for both TRIG and TARG.  Note that the TRIG TD value will also be used
+* for the TARG TD value, if only the TRIG TD value is given.
+.MEASURE TRAN TrigTarg6 TRIG V(1a)=0.2 TD=2ms CROSS=1 TARG V(1a)=0.3 CROSS=1
+.MEASURE TRAN TrigTarg7 TRIG V(1a)=0.2 TD=6ms CROSS=1 TARG V(1a)=0.3 CROSS=1 TD=2ms
+.MEASURE TRAN TrigTarg8 TRIG V(1a)=0.1 CROSS=1 TARG V(1a)=0.15 CROSS=1 TD=8ms
+
+* Repeat core tests with RISE and FALL.  Also test TRIG and TARG using different signals.
+.MEASURE TRAN RiseFall1 TRIG v(1a)=0.1 RISE=1 TARG v(3)=0.1 FALL=2
+.MEASURE TRAN RiseFall2 TRIG v(3)=0.1 RISE=2 TARG v(1a)=0.1 FALL=1
+
+.MEASURE TRAN RiseFall3 TRIG v(1a)=0.1 CROSS=1 TARG v(3)=0.1 RISE=LAST
+.MEASURE TRAN RiseFall4 TRIG v(1a)=0.1 FALL=LAST TARG v(3)=0.1 CROSS=1
+
+.END

@@ -1,0 +1,104 @@
+Todd_test.cir is a transformer charging a load
+
+** Analysis setup **
+.tran 100ns 100ms
+*.tran 100ns 1ms
+* Scott's New Options
+*.OPTIONS TIMEINT abstol=1.0e-12 reltol=1.0e-0 method=1
+*.OPTIONS NONLIN-TRAN abstol=1.0e-12 reltol=1.0e-0
+*+ deltaxtol=0.1
+*+ maxstep=100
+*+ searchmethod=2
+*+ maxsearchstep=2
+*+ rhstol=1E-03
+*.OPTIONS NONLIN reltol=1e-03 abstol=1e-12
+
+*.OPTIONS OUTPUT initial_interval=5us 10ns  100ns
+*.OPTIONS RESTART  JOB=Todd_test initial_interval=500e-6 5e-3 10E-3 100e-3 50e-3
+
+*.OPTIONS RESTART FILE=Todd_test1.8 JOB=Todd_test
+*+ initial_interval=500e-6 5e-3 10E-3 100e-3 50e-3
+ 
+*.PRINT tran FORMAT=PROBE V(HV-X) V(N_0008) V(N_0007) V(OscOut)
+.PRINT tran V(HV-X) V(N_0008) V(N_0007) V(OscOut)
+R_R103         0 N_0001  100  
+R_R104         0 N_0002  6.3k  
+D_CR101         0 N_0002 D357133 
+R_R102         N_0001 N_0003  2K  
+R_R105         N_0003 N_0002  2K  
+C_C101         N_0003 0  1u  
+R_R106         N_0004 0  5  
+Q_Q101         N_0005 N_0001 N_0006 Q2045A
+X_T101         N_0006 N_0004 OscOut N_0002 N_0003 N_0005 TX3086
+R_R101         N_0007 N_0003  100  
+R_Rpwr         N_0008 N_0007  0.5  
+V_VA         N_0008 0 DC 0 PULSE (0 36 1us 100ns 100ns 8 12)
+R_R331         0 N_0009  10K  
+R_R332         N_0009 HV-X  10Meg  
+R_R334         N_0009 HV-X  10Meg  
+R_R333         0 N_0009  10K  
+C_C332         N_0009 0  .01U 
+C_C331         HV-X 0  2U 
+D_CR302         OscOut HV-X D159700 
+.MODEL D357133 D  ( IS = 3.209E-09 RS = 0.03715 N = 1.773 TT = 3.59E-06 
++ CJO = 1.938E-11 VJ = 0.4717 M = 0.396 EG = 1.152 XTI = 0.55 KF = 0 AF = 1 
++ FC = 0.5 BV = 908 IBV = 0.001 ) 
+.MODEL Q2045A NPN     ( IS = 1.439937E-12 BF = 280.8095457 NF = 0.9844321 
++ VAF = 229.9286202 IKF = 6.443437 ISE = 2.496538E-13 NE = 1.2026533 
++ BR = 25.3772083 NR = 0.9748103 VAR = 38.1579873 IKR = 0.4692 
++ ISC = 1.394255E-11 NC = 1.2221752 RB = 8.6270484 IRB = 5.745662E-3 
++ RBM = 0.2865 RE = 0.0314563 RC = 0.11238 CJE = 1.718663E-9 VJE = 0.7103184 
++ MJE = 0.3512196 TF = 1.496592E-9 XTF = 0.0834954 VTF = 2.5679259 
++ ITF = 3.601273E-10 PTF = 18.813 CJC = 1.713854E-9 VJC = 0.7275838 
++ MJC = 0.3555563 XCJC = 1 TR = 450E-9 CJS = 0 VJS = .75 MJS = 0 XTB = 2.235 
++ EG = 1.11 XTI = 5.766 KF = 0 AF = 1 FC = 0.5 )    
+.SUBCKT TX3086 8T   SCT  12T   60T PCT   44T 
+*	         LS2   LS1 	 LP1  LP2
+R2         2 1  .055  
+R13         4 3  750k  
+R1         6 5  .77  
+Lleak  7 8  6.54uH
+R6         6 9  1650  
+L1         5 9  3.5uH  
+R15         10 3  .01m  
+C6         6 11  118p  
+R10         12 20  13k  
+L2     1 12  0.15uH  
+R7         2 12  70  
+R11         20 13  30k  
+R4         15 14  .12  
+R14         16 20  .01m  
+R16         13 17  .01m  
+C3         4 10  118p  
+R17         11 4  .01m  
+R18         20 SCT  .01m  
+R12         6 4  406k  
+R19         3 8  3080  
+R5         18 9  .01m  
+R9         19 8  .01m  
+R3         3 7  1.4  
+C5         12 16  118p  
+C4         17 20  118p  
+R24         13 12T  .01m  
+R25         12 8T  .01m  
+R26         60T 3  .01m  
+R27         PCT 4  .01m  
+R28         44T 6  .01m  
+Lsleak         14 13  0.34uH 
+R8         15 13  160  
+C1         15 19  20p  
+C2         2 18  20p  
+R22         4 20  100MEG  
+LP1_TX3         8 4 60
+LP2_TX3        4 9 44
+LS1_TX3        15 20 12
+LS2_TX3        20 2 8
+K_TX3        LP1_TX3 LP2_TX3 LS1_TX3 LS2_TX3 1 K1811PL_3B7
+.model K1811PL_3B7 CORE(Ms=310K A=45.01 C=.396  K=26.98 Area=.433 Path=2.58)
+.ENDS TX3086
+.model D159700  D( IS = 4.289E-09 RS = 1.133 N = 18.1 TT = 2.34E-6
++ CJO = 2.818E-12 VJ = 5.55 M = 0.3784 EG = 11.11 XTI = 30 KF = 0 AF = 1 
++ FC = 0.5 BV = 6.5E+3 IBV = 1E-6 )
+.END
+
+

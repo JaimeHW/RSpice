@@ -1,0 +1,19 @@
+*
+* circuit with an intentional discontinuity 
+*
+
+Vin 1 0 pulse 0 5 1e-7 1e-6 1e-6 1e-3 2e-3
+
+rload 1 2 10
+lload 2 3 1e-5
+rload2 3 0 100
+
+
+
+.options diagnostic DISCLIMIT=1e-3 diagfilename=DC_DisconCheck1.dia
+.print dc v(1) v(2) v(3)
+
+.dc vin -1 6 1
+
+.end
+

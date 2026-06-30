@@ -1,0 +1,28 @@
+$special variables
+* Xyce netlist for corresponding HSPICE netlist.
+* Netlist tests XDM recognizes special variables 
+* in source & target languages, and makes the
+* appropriate translation if possible or comments
+* out the line if not. The HSPICE special
+* variable "temper" can be translated, into "temp"
+* in Xyce. Special variable "hertz" will
+* be translated into the variable "freq".
+* A parameter name of "vt" or an expression
+* that uses a parameter "vt" in HSPICE will 
+* have warnings and be commented out (see issue
+* #69 on XDM gitlab).
+
+.OPTIONS DEVICE TEMP=25
+.PARAM KTQ='1.38e-23*TEMP/1.602e-19'
+.FUNC FS(X) 'X*2*pi*FREQ'
+.PARAM XYCE_VT='3'
+.PARAM USESVT1='2'
+.PARAM USESVT2='2*XYCE_VT'
+
+VA 1 0 DC 0.8 AC 1
+R1 1 2 R='TEMP'
+C1 2 0 C=1n
+.AC dec 2 1000 100000
+
+.PRINT AC FORMAT=PROBE '-II(VA)/(2*3.14*FREQ)' 'TEMP' 'ktq' 
+

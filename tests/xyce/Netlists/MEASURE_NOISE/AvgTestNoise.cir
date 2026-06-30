@@ -1,0 +1,47 @@
+* Test NOISE mode support for the AVG measure. It was deemed sufficient
+* to mostly just test with the VR and VI operators.  Expressions
+* are also tested. One current operator (IM) is tested for a branch
+* current.
+*
+* This also tests that a .FFT line is ignored for a .NOISE analysis.
+*
+* See SON Bugs 1301 and 1327 for more details.
+********************************************************************
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 1MEG 1
+.PRINT NOISE VR(4) VI(4) IM(EAMP) avgvr4 INOISE ONOISE
+
+* This line should not actually produce any .FFT output
+.FFT V(4) NP=8
+
+* AVG
+.MEASURE NOISE avgvr4 AVG vr(4)
+.meas    noise avgvi4 avg vi(4)
+
+* Use expression
+.MEASURE NOISE avgvr4Exp avg {1+vr(4)}
+
+* add FROM-TO
+.MEASURE NOISE avgvr4FromTo avg vr(4) FROM=1e3 TO=1e5
+
+* branch current
+.MEASURE NOISE avgimeamp avg IM(EAMP)
+
+* FROM=TO value is a failed measure, by definition for AVG measure.
+.MEASURE NOISE avgvm4FromTo1Pt avg vm(4) FROM=1e3 TO=1e3
+
+* Tests should fail since the FROM-T0 windows have various problems.
+.measure noise avgFail1 avg v(4) FROM=1e7 TO=1e8
+.measure noise avgFail2 avg vr(4) FROM=1e6 TO=1e2
+
+.END

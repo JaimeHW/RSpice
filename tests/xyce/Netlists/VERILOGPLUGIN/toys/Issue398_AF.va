@@ -1,0 +1,43 @@
+`include "disciplines.vams"
+`include "constants.vams"
+
+`define attr(txt) (*txt*)
+
+module difftosingle (in1,in2,in3,in4,sel0,sel1,out);
+     input in1, in2, in3, in4, sel0, sel1;
+     electrical in1, in2, in3, in4, sel0, sel1;
+
+     output out;
+     electrical out;
+
+     real result;
+     real selection;
+
+analog function real select_a_port;
+   input  selection, v1,v2,v3,v4;
+   real   selection,v1,v2,v3;
+
+   real   result;
+   begin
+      case (selection)
+        0: result = v1;
+        1: result = v2;
+        2: result = v3;
+        3: result = v4;
+        
+      endcase // case (selection)
+      select_a_port=result;
+   end
+endfunction
+
+   analog begin
+      // (A AND NOT S0 AND NOT S1) OR (B AND S0 AND NOT S1) OR (C AND NOT S0 AND S1) OR (D AND S0 AND S1)
+      if (V(sel1) < 0.5)
+        selection = V(sel0) > 0.5 ? 1 : 0;
+      else
+        selection = V(sel0) > 0.5 ? 3 : 2;
+      result = select_a_port(selection,V(in1),V(in2),V(in3),V(in4));
+      V(out) <+ result;
+   end
+endmodule
+

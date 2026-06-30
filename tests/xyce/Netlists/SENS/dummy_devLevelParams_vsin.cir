@@ -1,0 +1,33 @@
+* Transient sensitivity example, sine source, analytical sensitivity
+.param cap=0.1u
+.param res=1K
+
+c1 1 0 cap
+c2 2 0 cap
+R1 1 3 res
+R2 1 2 res
+
+Vin 3 0 SIN(0 1 100K -2.5U 0.0 -90.0
+
+* Transient commands
+.tran 0 10us uic
+.options timeint reltol=1e-6 abstol=1e-6
+
+*comp v(2) offset=0.1
+*comp v(2)_v0 offset=0.1
+*comp v(2)_va  offset=0.1
+*comp v(2)_freq offset=1e-7
+*comp v(2)_td  offset=500.0
+*comp v(2)_theta offset=1.0e-6
+*comp v(2)_phase offset=1.0e-5
+
+.print tran v(2)
++v(2)_v0
++v(2)_va
++v(2)_freq
++v(2)_td
++v(2)_theta
++v(2)_phase
+
+.end
+

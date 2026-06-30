@@ -1,0 +1,9 @@
+* test bogo print type on .PRINT line
+
+V1 1 0 1
+R1 1 0 1
+
+.DC V1 1 5 1
+.PRINT BOGO V(1)
+
+.END

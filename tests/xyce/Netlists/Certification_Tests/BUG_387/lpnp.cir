@@ -1,0 +1,20 @@
+PNP Bipolar Transistor Circuit Netlist
+***************************************************************
+* This should exit with an error... Xyce does not have an "LPNP
+* transistor model type
+***************************************************************
+VPOS  1 0 DC 5V
+VBB   6 0 DC -2V
+RE    1 2 2K
+RB    3 4 190K
+Q 5 3 7 PBJT
+*
+* Zero volt sources acting as an ammeter to measure the
+* base, collector, and emmitter currents, respectively
+VMON1 4 6 0
+VMON2 5 0 0
+VMON3 2 7 0 
+.MODEL PBJT LPNP (IS=100FA BF=60)
+.DC VPOS 5 5 1 VBB -2 -2 1
+.PRINT DC V(1) I(VMON1) I(VMON2) I(VMON3)
+.END

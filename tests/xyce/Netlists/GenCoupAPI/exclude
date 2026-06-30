@@ -1,0 +1,16 @@
+rlc_series_vccs.cir
+rlc_series_vccs_nogenext.cir
+rlc_series_vccs_AC.cir
+rlc_series_vccs_AC_nogenext.cir
+rc_hb.cir
+rc_hb_nogenext.cir
+python_rlc_series_vccs.cir
+python_gmls_rlc_series_vccs.cir
+python_tfdnn_rlc_series_vccs.cir
+python_gmls_diode_no_limiting.cir
+python_gmls_diode_with_limiting.cir
+python_tfdnn_diode_no_limiting.cir
+diode_no_limiting_nogenext.cir
+diode_with_limiting_nogenext.cir
+python_diode_no_limiting.cir
+python_diode_with_limiting.cir

@@ -1,0 +1,3 @@
+* This file should get included in the netlist, via a path that
+* relative to the ../sub1 subdirectory.
+R4 1 0 4

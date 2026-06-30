@@ -1,0 +1,75 @@
+*************************************************************
+* Test various fatal error messages for the Capacitor.   
+* This include the semiconductor and solution-dependent
+* formulations also.
+*
+*
+* See SON Bug 860.
+*************************************************************
+
+* C value missing from instance line.
+c1 1  0 IC=1 
+r1 1 1a 1K 
+v1 1a 0 0V 
+
+* C value missing from instance line, and device also 
+* has a model card.
+c2 2 0 CMOD IC=1 
+r2 2 2a 1K 
+v2 2a  0 0V 
+.MODEL CMOD C(TC1=0.1)
+
+* repeat first test, but with AGE instance parameter 
+* defined. C and L values missing from instance line.
+c3 3  0 IC=1 AGE=1
+r3 3 3a 1K 
+v3 3a 0 0V 
+
+* semiconductor capacitor, missing the L instance parameter
+c4 4  0 CMODEL W=1U
+r4 4 4a 1K
+v4 4a 0 0V
+.MODEL CMODEL C (NARROW=0.01U)
+
+* semiconductor capacitor, with AGE parameter specified
+c5 5  0 CMODEL L=1000u W=1U AGE=1
+r5 5 5a 1K
+v5 5a 0 0V
+
+* Cannot use non-solution variable in definition of
+* C for a solution-dependent capacitor.
+c6 6  0 C='1e-6*I(R9)' IC=1
+r6 6 6a 1K 
+v6 6a 0 0V 
+
+* Cannot use time derivative of a solution variable in 
+* definition of C for a solution-dependent capacitor.
+c7 7  0 C='1e-6*ddt(V(9))' IC=1
+r7 7 7a 1K 
+v7 7a 0 0V
+
+* Only the C instance parameter can depend on solution
+* variables.  L (length) instance parameter cannot.
+c8 8  0 CMODEL L='1e-6*V(9)' W=1u IC=1
+r8 8 8a 1K 
+v8 8a 0 0V
+
+* used in definition of C for solution-dependent capacitors
+v9 9 0 5
+r9 9 0 1
+
+* Both C and Q can not be defined as being solution dependent
+c10 10   0 CMODEL C='1e-6*V(9)' Q= '1e-6*V(9)'
+r10 10 10a 1K
+v10 10a  0 0V
+
+* Can not use IC if Q is defined as being solution dependent
+c11 10   0 CMODEL Q= '1e-6*V(9)' IC=1
+r11 11 11a 1K
+v11 11a  0 0V
+
+.print tran v(1) v(2) v(3) v(4) v(5) v(6) v(7) v(8) v(10) v(11)
+.tran 0 5ms 
+.options timeint reltol=1e-6 abstol=1e-6 
+
+.end

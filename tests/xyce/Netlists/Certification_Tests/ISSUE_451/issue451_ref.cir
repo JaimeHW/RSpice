@@ -1,0 +1,24 @@
+* example use case for fully resolved nodes.  This is the equivalent reference circuit
+
+Vin 1 0 1.0
+Rin 1 2 1.0
+X1 2 3 test
+Rout 3 0 1.0
+
+.subckt test A B
+Rt1 A testNode 1.0
+Rt2 testNode B 1.0
+
+* test fragment
+Itest2 0 fred 1.0
+Rtest2 testNode fred 1.0
+Rtest3 testNode 0 1.0
+.ends
+
+* this works: (This I expected)
+Btest1 eric 0 V = {V(X1:testNode)}
+Rtest1 eric 0 1.0
+
+.op
+.print dc v(3) v(eric) v(2) v(1) v(x1:testnode)
+

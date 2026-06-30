@@ -1,0 +1,42 @@
+* Test NOISE mode support for the RMS measure. It was deemed sufficient
+* to mostly just test with the VR and VI operators.  Expressions
+* are also tested. One current operator (IM) is tested for a branch
+* current.
+*
+* See SON Bug 1301 for more details.
+********************************************************************
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 1MEG 1
+.PRINT NOISE VR(4) VI(4) IM(EAMP) rmsvr4 INOISE ONOISE
+
+* RMS
+.MEASURE NOISE rmsvr4 RMS vr(4)
+.meas    noise rmsvi4 rms vi(4)
+
+* Use expression
+.MEASURE NOISE rmsvr4Exp rms {1+vr(4)}
+
+* add FROM-TO
+.MEASURE NOISE rmsvr4FromTo rms vr(4) FROM=1e3 TO=1e5
+
+* branch current
+.MEASURE NOISE rmsimeamp rms IM(EAMP)
+
+* FROM=TO value is a failed measure, by definition for RMS measure.
+.MEASURE NOISE rmsvm4FromTo1Pt rms vm(4) FROM=1e3 TO=1e3
+
+* Tests should fail since the FROM-T0 windows have various problems.
+.measure noise rmsFail1 rms v(4) FROM=1e7 TO=1e8
+.measure noise rmsFail2 rms vr(4) FROM=1e6 TO=1e2
+
+.END

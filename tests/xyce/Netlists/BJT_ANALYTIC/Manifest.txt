@@ -1,0 +1,7 @@
+ramp_test1.cir
+ramp_test1.cir.gs.pl
+ramp_test1.cir.sh
+ramp_test2.cir
+ramp_test2.cir.gs.pl
+ramp_test2.cir.sh
+tags

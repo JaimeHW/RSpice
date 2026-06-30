@@ -1,0 +1,30 @@
+* This .LIN analysis was used to generate the input files for
+* the various YLIN device tests given by the FILE= qualifiers
+* on the .LIN lines.  This netlist is not run as part of
+* any regression test.
+
+P1 1 0 port=1 ; this analysis uses a default Z0=50 for each port
+P2 2 0 port=2
+
+.LIN lintype=s FILE=ylin-2port-sparam.cir.s2p format=touchstone2 precision=12
+.LIN lintype=y FILE=ylin-2port-yparam.cir.y2p format=touchstone2 precision=12
+.LIN lintype=z FILE=ylin-2port-zparam.cir.z2p format=touchstone2 precision=12
+.LIN lintype=y FILE=ylin-2port-yparam-ma.cir.y2p format=touchstone2 dataformat=ma precision=12
+.LIN lintype=y FILE=ylin-2port-yparam-db.cir.y2p format=touchstone2 dataformat=db precision=12
+.LIN lintype=y FILE=ylin-2port-yparam-ts1.cir.y2p format=touchstone precision=12
+
+* Note this file was subsequently manually edited since the default frequency multiplier for
+* Touchstone 2 files is GHz.  The Option line was also manually edited to only have a # character
+* on it.
+.LIN lintype=s FILE=ylin-2port-defaultOptions.cir.s2p format=touchstone2 dataformat=ma precision=12
+
+.model testLine  transline r=0.2 g=0 l=9.13e-9 c=3.65e-12
+ytransline  line1  1 2  testLine len=10 lumps=5000
+
+* Add a load resistor so that the Z parameters have reasonable
+* values at DC
+R2 2 0 1
+
+.AC LIN 11 0 10e5
+
+.end

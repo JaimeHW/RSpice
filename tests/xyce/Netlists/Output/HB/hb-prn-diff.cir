@@ -1,0 +1,26 @@
+Test circuit for AC output through expressions
+
+* It is important to have a signal with significant harmonics throught
+* the HB spectrum.  Using a sin source here leads to most solution magnitudes
+* being *very* small (roundoff error) and therefore the phase is effectively
+* a random number, leading to cross-platform compare failures.  
+* Using a PULSE source instead makes the phase meaningful.
+* Here, the period is 1e-4, and the PW parameter is half of that minus the
+* rise and fall times
+*             TL TH TD TR TF PW          PER
+v1 a 0   sin  1  1 1e5
+*v1 a 0 PULSE( 1V 5V 0  5n 5n {.5e-4-10n} 1e-4) AC 1
+R1 a b 1k
+
+d1 b 0 dmod
+
+.model  dmod d
+*R2 b 0 2
+*C1 b 0  1u
+*C1 a b 1u
+
+.hb 1e5
+.print hb V(A) V(B) V(A,B) VR(A,B) VI(A,B) VM(A,B) VDB(A,B) VP(A,B)
+
+.options hbint numfreq=50   loadtimesources=0
+.end

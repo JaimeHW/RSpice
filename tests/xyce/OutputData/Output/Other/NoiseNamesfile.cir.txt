@@ -1,0 +1,39 @@
+Valid DNO() and DNI() operators for this netlist.
+Format is DNO(deviceName) for the total output noise for a device
+or DNO(deviceName, noiseSource) for an individual output noise contribution.
+If a device (e.g., R1) only has one noise source then use DNO(R1) to
+get the total output noise.
+
+deviceName 	 noiseType
+R6
+R5
+R4
+RLOAD
+M2
+M2	flicker_b_gnd
+M2	flicker_di_si_flicker_noise_in_channel_internal_nodes_#2
+M2	flicker_g_gnd_gate_flicker_noise
+M2	white_d_di
+M2	white_di_si
+M2	white_di_si_thermal_noise_in_channel_internal_nodes_#2
+M2	white_g_gnd_gate_shot_noise
+M2	white_noi_gnd
+M2	white_s_si
+M1
+M1	flicker_di_si_flicker
+M1	white_d_di_thermal
+M1	white_di_si_thermal
+M1	white_g_di_shot
+M1	white_g_e_shot
+M1	white_g_si_shot
+M1	white_s_si_thermal
+Q1
+Q1	rc
+Q1	rb
+Q1	re
+Q1	ic
+Q1	ib
+Q1	fn
+R2
+R3
+R1

@@ -1,0 +1,15 @@
+* test that a device param can depend indirectly on temperature via a .param
+
+.options device temp=23
+
+.param res='temper'
+
+VA 1 0 1.0
+R1 1 2 'res'
+R2 2 0 25
+.DC VA 1 1 1
+
+.step temp list 23 24 25
+
+.PRINT DC V(1) {TEMPER}  R1:R V(2)
+

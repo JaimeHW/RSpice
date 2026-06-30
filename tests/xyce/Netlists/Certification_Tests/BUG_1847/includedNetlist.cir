@@ -1,0 +1,4 @@
+
+* the include file with a .print line
+
+.PRINT TRAN FORMAT=RAW FILE=bug1847inc.raw V(1) V(2) V(3)

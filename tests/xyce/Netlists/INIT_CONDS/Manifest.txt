@@ -1,0 +1,8 @@
+comparatorIC.cir
+comparatorICnonVector.cir
+inv1xIC.cir
+inv1xIC.cir.tags
+modelcard.nmos
+modelcard.pmos
+ring_osc_bsim3.cir
+tags

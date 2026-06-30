@@ -1,0 +1,44 @@
+* A test of equality for the TRIG and TARG levels, using the legacy
+* TRIG-TARG mode.  So, it tests the RiseFallDelay class.
+* See gitlab-ex issue 303 for more details.
+*******************************************************************************
+*
+* Use PWL sources, since we want to test equality for the Rise/Fall/Cross
+* tests in both TRIG and TARG.
+
+VPWL1  1  0 PWL(0 0 0.5 0.5 1 0)
+VPWL2  2  0 PWL(0 0 0.5 -0.5 1 0)  
+
+R1  1  0  100K
+R2  2  0  100K
+
+* use legacy trig-targ mode
+.OPTIONS MEASURE USE_LTTM=1
+
+.TRAN 0  1
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.01
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2)
+
+* test equality in TRIG and TARG clauses.  Since this is a rising
+* waveform, the FALL=1 example should fail.
+.measure tran trigEqualRiseV1 trig v(1)=0.5 RISE=1 targ v(1)=0.25 FALL=1
+.measure tran trigEqualFallV1 trig v(1)=0.5 FALL=1 targ v(1)=0.25 FALL=1
+.measure tran trigEqualCrossV1 trig v(1)=0.5 CROSS=1 targ v(1)=0.25 FALL=1
+
+* Since this is a falling waveform, the RISE=1 example should fail.
+.measure tran trigEqualRiseV2 trig v(2)=-0.5 RISE=1 targ v(2)=-0.25 RISE=1
+.measure tran trigEqualFallV2 trig v(2)=-0.5 FALL=1 targ v(2)=-0.25 RISE=1
+.measure tran trigEqualCrossV2 trig v(2)=-0.5 CROSS=1 targ v(2)=-0.25 RISE=1
+
+* Since this is a rising waveform, the FALL=1 example should fail.
+.measure tran targEqualRiseV1 trig v(1)=0.25 RISE=1 targ v(1)=0.5 RISE=1
+.measure tran targEqualFallV1 trig v(1)=0.25 RISE=1 targ v(1)=0.5 FALL=1
+.measure tran targEqualCrossV1 trig v(1)=0.25 RISE=1 targ v(1)=0.5 CROSS=1
+
+* Since this is a falling waveform, the RISE=1 example should fail.
+.measure tran targEqualRiseV2 trig v(2)=-0.25 FALL=1 targ v(2)=-0.5 RISE=1
+.measure tran targEqualFallV2 trig v(2)=-0.25 FALL=1 targ v(2)=-0.5 FALL=1
+.measure tran targEqualCrossV2 trig v(2)=-0.25 FALL=1 targ v(2)=-0.5 CROSS=1
+
+.END
+

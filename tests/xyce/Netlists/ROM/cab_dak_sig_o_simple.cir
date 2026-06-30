@@ -1,0 +1,295 @@
+test circuit to produce cable matching with Dakota
+*
+*---------------------------------------------------------------------------------
+*THIS FILE REPRODUCES SIGNAL C O TESTS.
+*THIS SIM PRINTS V(SCOPE) SIGNAL AND THE TERMINAL END IS TERMINATED WITH 1E6 OHMS.
+*---------------------------------------------------------------------------------
+
+.tran 0.1ns 0.4us
+*.options timeint method=1
+
+* Options for solvers
+*.options dakota inputfile=cable.dak outputfile=cableout.out
+
+* Ouput Options to determine what parameters gets printed
+*.print tran format=tecplot I(Vmonstart) I(Vmonend) V(pwrresist) V(terminal)  
+.print tran V(scope)   
+
+*COMP v(scope) offset=0.5 
+* General Comments about the netlist
+* Cable models, full model=XcableModel, 10*(unit cable)=XUC_10X, 100*(unit cable)=XUC_100X
+
+*.mor 300 pwrplus scope terminal
+*.options mor_opts method=prima saveredsys=1 comporigtf=1 compredtf=1 comptype=dec compnp=20 compfstart=1.0 compfstop=1e9 exppoint=0.0
+
+
+* ----- N E T L I ST -------------------------
+
+Vpulse        pwrplus    0 pulse(0 9.9 0 3E-9 4E-9 0.3E-8 1E-4)
+*Vscope           scope      0            0
+*Vterm            terminal   0            0
+
+rpwrsupply    pwrplus    pwrresist    115.0
+rpulseterm    pwrresist  0            50
+X_UP          pwrresist  teepwr       XUC3_10X
+R1Wil_QWav    teepwr     teecable     70
+R2Wil_QWav    teepwr     teescope     70
+RCWil_QWav    teescope   teecable     100
+X_US          teescope   scope        XUC3_10X
+rscope        0          scope        1e6
+rscopeterm    0          scope        50
+*Vmonstart     teecable   monitor      0.0
+*X_UC          monitor    cableend     XUC60_600X
+X_UC           teecable   cableend     XUC60_600X
+X_UC2         cableend   cableend2    XUC20_200X
+X_UC3         cableend2  cableend3    XUC12_120X
+*X_UC4         cableend3  cableend4    XUC3_30X
+*Vmonend       terminal   cableend4    0.0
+X_UC4         cableend3   terminal     XUC3_30X
+*rterm        0          terminal     50
+rtermscope    0          terminal     1E6
+
+******************************************************************************************
+**************** D C    M E A S U R E M EN T S *******************************************
+*  60 foot cable with nominal 29.0 pF/foot capacitance = 2.90pf/unit cable
+*  60 foot cable with nominal 0.186 uH/foot inductance = 0.0186uH/unit cable
+*  60 foot cable with nominal 0.0148 ohms/foot resistance = 0.00148ohms/unit cable 
+******************************************************************************************
+
+******************************************************************************************
+**************** D C    M E A S U R E M EN T S *******************************************
+*  20 foot cable with nominal 28.7 pF/foot capacitance = 2.87pf/unit cable
+*  20 foot cable with nominal 0.163 uH/foot inductance = 0.0163uH/unit cable
+*  20 foot cable with nominal 0.0148 ohms/foot resistance = 0.00148ohms/unit cable 
+******************************************************************************************
+
+******************************************************************************************
+**************** D C    M E A S U R E M EN T S *******************************************
+*  pigstail 12 foot cable with nominal 27.5 pF/foot capacitance = 2.75pf/unit cable
+*  pigstail 12 foot cable with nominal 0.163 uH/foot inductance = 0.0163uH/unit cable
+*  pigstail 12 foot cable with nominal 0.084 ohms/foot resistance = 0.0084ohms/unit cable 
+******************************************************************************************
+
+******************************************************************************************
+**************** D C    M E A S U R E M EN T S *******************************************
+*  military connector with nominal 7.89 uH
+******************************************************************************************
+
+******************************************************************************************
+**************** D C    M E A S U R E M EN T S *******************************************
+*  pigstail 3 foot cable with nominal 27.5 pF/foot capacitance = 2.75pf/unit cable
+*  pigstail 3 foot cable with nominal 0.163 uH/foot inductance = 0.0163uH/unit cable
+*  pigstail 3 foot cable with nominal 0.084 ohms/foot resistance = 0.0084ohms/unit cable 
+******************************************************************************************
+
+* ______ S U B C I R C U I T S ___________________
+
+.SUBCKT X60UnitCable I O 
+L_L1         I 1  1.1e-8
+R_R1         1 O  0.00148 
+R_R3         O 0  1.0e9
+C_C1         O 0  2.849e-12
+.ENDS    X60UnitCable
+
+.SUBCKT X20UnitCable I O 
+L_L1         I 1  5.0e-9
+R_R1         1 O  0.00148 
+R_R3         O 0  1.0e9
+C_C1         O 0  3.28e-12
+.ENDS    X20UnitCable
+
+.SUBCKT XUC60_10X I O 
+X_U0         I 1 X60UnitCable
+X_U1         1 2 X60UnitCable
+X_U2         2 3 X60UnitCable
+X_U3         3 4 X60UnitCable
+X_U4         4 5 X60UnitCable
+X_U5         5 6 X60UnitCable
+X_U6         6 7 X60UnitCable
+X_U7         7 8 X60UnitCable
+X_U8         8 9 X60UnitCable
+X_U9         9 O X60UnitCable
+.ENDS    XUC60_10X
+
+.SUBCKT XUC20_10X I O 
+X_U0         I 1 X20UnitCable
+X_U1         1 2 X20UnitCable
+X_U2         2 3 X20UnitCable
+X_U3         3 4 X20UnitCable
+X_U4         4 5 X20UnitCable
+X_U5         5 6 X20UnitCable
+X_U6         6 7 X20UnitCable
+X_U7         7 8 X20UnitCable
+X_U8         8 9 X20UnitCable
+X_U9         9 O X20UnitCable
+.ENDS    XUC20_10X
+
+.SUBCKT XUC60_20X I O 
+X_U0         I 1 XUC60_10X
+X_U1         1 O XUC60_10X
+.ENDS    XUC60_20X
+
+.SUBCKT XUC20_20X I O 
+X_U0         I 1 XUC20_10X
+X_U1         1 O XUC20_10X
+.ENDS    XUC20_20X
+
+.SUBCKT XUC60_40X I O 
+X_U0         I 1 XUC60_20X
+X_U1         1 O XUC60_20X
+.ENDS    XUC60_40X
+
+.SUBCKT XUC20_40X I O 
+X_U0         I 1 XUC20_20X
+X_U1         1 O XUC20_20X
+.ENDS    XUC20_40X
+
+.SUBCKT XUC60_80X I O 
+X_U0         I 1 XUC60_40X
+X_U1         1 O XUC60_40X
+.ENDS    XUC60_80X
+
+.SUBCKT XUC20_80X I O 
+X_U0         I 1 XUC20_40X
+X_U1         1 O XUC20_40X
+.ENDS    XUC20_80X
+
+.SUBCKT XUC60_100X I O 
+X_U0         I 1 XUC60_80X
+X_U1         1 O XUC60_20X
+.ENDS    XUC60_100X
+
+.SUBCKT XUC20_100X I O 
+X_U0         I 1 XUC20_80X
+X_U1         1 O XUC20_20X
+.ENDS    XUC20_100X
+
+.SUBCKT XUC60_200X I O 
+X_U0         I 1 XUC60_100X
+X_U1         1 O XUC60_100X
+.ENDS    XUC60_200X
+
+.SUBCKT XUC20_200X I O 
+X_U0         I 1 XUC20_100X
+X_U1         1 O XUC20_100X
+.ENDS    XUC20_200X
+
+.SUBCKT XUC60_600X I O 
+X_U0         I 1 XUC60_200X
+X_U1         1 2 XUC60_200X
+X_U2         2 O XUC60_200X
+.ENDS    XUC60_600X
+
+* ______ S U B C I R C U I T S ___________________
+
+.SUBCKT X12UnitCable I O 
+L_L1         I 1  5.0e-9 
+R_R1         1 O  0.00148 
+R_R3         O 0  1e9
+C_C1         O 0  3.28e-12
+.ENDS    X12UnitCable
+
+.SUBCKT X3UnitCable I O 
+L_L1         I 1  5.0e-9 
+R_R1         1 O  0.00148
+R_R3         O 0  1e9
+C_C1         O 0  3.28e-12
+.ENDS    X3UnitCable
+
+.SUBCKT XUC12_10X I O 
+X_U0         I 1 X12UnitCable
+X_U1         1 2 X12UnitCable
+X_U2         2 3 X12UnitCable
+X_U3         3 4 X12UnitCable
+X_U4         4 5 X12UnitCable
+X_U5         5 6 X12UnitCable
+X_U6         6 7 X12UnitCable
+X_U7         7 8 X12UnitCable
+X_U8         8 9 X12UnitCable
+X_U9         9 O X12UnitCable
+.ENDS    XUC12_10X
+
+.SUBCKT XUC3_10X I O 
+X_U0         I 1 X3UnitCable
+X_U1         1 2 X3UnitCable
+X_U2         2 3 X3UnitCable
+X_U3         3 4 X3UnitCable
+X_U4         4 5 X3UnitCable
+X_U5         5 6 X3UnitCable
+X_U6         6 7 X3UnitCable
+X_U7         7 8 X3UnitCable
+X_U8         8 9 X3UnitCable
+X_U9         9 O X3UnitCable
+.ENDS    XUC3_10X
+
+.SUBCKT XUC12_20X I O 
+X_U0         I 1 XUC12_10X
+X_U1         1 O XUC12_10X
+.ENDS    XUC12_20X
+
+.SUBCKT XUC3_20X I O 
+X_U0         I 1 XUC3_10X
+X_U1         1 O XUC3_10X
+.ENDS    XUC3_20X
+
+.SUBCKT XUC3_30X I O 
+X_U0         I 1 XUC3_20X
+X_U1         1 O XUC3_10X
+.ENDS    XUC3_30X
+
+.SUBCKT XUC12_40X I O 
+X_U0         I 1 XUC12_20X
+X_U1         1 O XUC12_20X
+.ENDS    XUC12_40X
+
+.SUBCKT XUC3_40X I O 
+X_U0         I 1 XUC3_20X
+X_U1         1 O XUC3_20X
+.ENDS    XUC3_40X
+
+.SUBCKT XUC12_80X I O 
+X_U0         I 1 XUC12_40X
+X_U1         1 O XUC12_40X
+.ENDS    XUC12_80X
+
+.SUBCKT XUC3_80X I O 
+X_U0         I 1 XUC3_40X
+X_U1         1 O XUC3_40X
+.ENDS    XUC3_80X
+
+.SUBCKT XUC12_100X I O 
+X_U0         I 1 XUC12_80X
+X_U1         1 O XUC12_20X
+.ENDS    XUC12_100X
+
+.SUBCKT XUC12_120X I O 
+X_U0         I 1 XUC12_100X
+X_U1         1 O XUC12_20X
+.ENDS    XUC12_120X
+
+.SUBCKT XUC3_100X I O 
+X_U0         I 1 XUC3_80X
+X_U1         1 O XUC3_20X
+.ENDS    XUC3_100X
+
+.SUBCKT XUC12_200X I O 
+X_U0         I 1 XUC12_100X
+X_U1         1 O XUC12_100X
+.ENDS    XUC12_200X
+
+.SUBCKT XUC3_200X I O 
+X_U0         I 1 XUC3_100X
+X_U1         1 O XUC3_100X
+.ENDS    XUC3_200X
+
+.SUBCKT XUC12_600X I O 
+X_U0         I 1 XUC12_200X
+X_U1         1 2 XUC12_200X
+X_U2         2 O XUC12_200X
+.ENDS    XUC12_600X
+
+* ______E N D ________________________________
+.End
+
+* ______E N D ________________________________
+.End

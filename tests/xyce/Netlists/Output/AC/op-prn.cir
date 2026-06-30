@@ -1,0 +1,19 @@
+*********************************************************
+* AC test of print output format with .OP
+*
+* For "testing diversity", this netlist has the .OP
+* statement before the .AC statement.  See SON Bug 942.
+********************************************************
+*
+* Trivial resistor circuit, just do a AC sweep and watch the output
+*
+
+R1 1 0 10
+V1 1 0 DC 0V
+
+.print AC v(1) I(v1)
+.op
+.ac dec 10 100Hz 1000MegHz
+
+
+.end

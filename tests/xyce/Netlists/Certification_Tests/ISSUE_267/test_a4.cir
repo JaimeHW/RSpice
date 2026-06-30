@@ -1,0 +1,16 @@
+test multiplier
+
+Vin 1 0 1.0
+Rin 1 2 1.0
+
+Xtest1 2 3 test M=5
+Xtest2 3 0 test M=5
+
+.subckt test A B PARAMS: M=2
+.param M=17
+R1 A B 0.5
+.ends
+
+.DC Vin 1 1 1
+.PRINT DC V(1) V(2) V(3) I(Vin) 
+

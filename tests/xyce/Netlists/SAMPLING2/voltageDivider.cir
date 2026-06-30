@@ -1,0 +1,28 @@
+Regression test for simple normal distribution sampling, with random expression operators
+*
+* This test is here because it has 4 params, a slightly less 
+* trivial number than most of the other tests.  This is
+* important because the this use case was broken in parallel 
+* at one point.
+*
+
+R4 b 0 {agauss(4k,0.4k,1)}
+R3 a b {agauss(1k,0.1k,1)}
+R2 1 a {agauss(2k,0.2k,1)}
+R1 1 2 {agauss(3k,0.1k,1)}
+v1 2 0 10V
+
+.dc v1 10 10 1
+
+.print dc v(1)
+
+.SAMPLING 
++ useExpr=true
+
+.options SAMPLES numsamples=10
++ outputs={v(1)}
++ sample_type=lhs
++ stdoutput=true
+
+.end
+

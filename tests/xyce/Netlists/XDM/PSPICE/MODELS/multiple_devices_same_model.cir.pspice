@@ -1,0 +1,42 @@
+* PSpice netlist for testing that XDM can handle multiple devices 
+* using the same model card in a PSpice netlist. 
+* See SRN Bug 1989 for more details.
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PROBE V([N01192]) V([N011460]) V([N07223]) 
++ V([N07602]) V([N075620]) V([N07662])
+
+* It uses two two identical Resistor-Diode-Resistor circuits.  
+R_R1         N01192 N011460  1000 TC=0,0 
+V_V1         N01192 0  AC 1
++SIN 0 1 1KHz 0 0 0
+R_R2         N07223 0  1k TC=0,0 
+D_D1         N011460 N07223 D1N3940 
+
+R_R3         N07602 N075620  1000 TC=0,0 
+R_R4         N07662 0  1k TC=0,0 
+D_D2         N075620 N07662 D1N3940 
+V_V2         N07602 0  AC 1
++SIN 0 1 1KHz 0 0 0
+
+* Diode model from the Diode Clipper example in the Xyce Users' Guide
+.MODEL D1N3940 D(
++         IS = 4E-10
++         RS = .105
++          N = 1.48
++         TT = 8E-7
++        CJO = 1.95E-11
++         VJ = .4
++          M = .38
++         EG = 1.36
++        XTI = -8
++         KF = 0
++         AF = 1
++         FC = .9
++         BV = 600
++        IBV = 1E-4
++ )
+
+.END
+

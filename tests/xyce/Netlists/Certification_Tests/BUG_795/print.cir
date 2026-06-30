@@ -1,0 +1,5 @@
+
+v1 1 0 1
+r1 1 0 1
+.tran 1ns 1us
+.end

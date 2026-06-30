@@ -1,0 +1,33 @@
+Test of BSIM-CMG output variable features for PMOS
+*Sample netlist for BSIM-MG
+*Drain current symmetry
+
+
+.include "modelcard.pmos_xyce"
+.options device temp=25
+
+* --- Voltage Sources ---
+vdrain drain 0 dc 0
+esource source 0 drain 0 -1
+vgate gate  0 dc -1.0
+vbulk bulk 0 dc 0
+
+
+* --- Transistor ---
+M1 drain gate source bulk pmos1 TFIN=15n L=30n NFIN=10 NRS=1 NRD=1
+
+* Second transistor for finite differencing
+Bdrain drain2 0 V={V(drain)}
+Bgate gate2 0  V={V(gate)-((V(gate)==0)?.00000001:(1e-8*abs(v(gate))))}
+Bsource source2 0 V={V(source)}
+Bbulk bulk2 0 V={V(bulk)}
+
+M2 drain2 gate2 source2 bulk2 pmos1 TFIN=15n L=30n NFIN=10 NRS=1 NRD=1
+
+* --- DC Analysis ---
+.dc vdrain -0.1 0.1 0.001 vgate 0.0 -1.0 -0.2
+*COMP {N(M1:gm)-{(N(M2:ids)-N(M1:ids))/(V(gate2)-V(gate))}} abstol=1e-9
+.print dc v(drain) v(gate)  N(M1:ids) {(N(M2:ids)-N(M1:ids))/(V(gate2)-V(gate))} N(M1:gm) {N(M1:gm)-{(N(M2:ids)-N(M1:ids))/(V(gate2)-V(gate))}}  N(M1:Vth) N(M1:Vds) N(M1:Vbs) N(M1:Vgs) N(M1:Vdsat)
+
+
+.end

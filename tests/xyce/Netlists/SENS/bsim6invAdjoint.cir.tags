@@ -1,0 +1,4 @@
+serial, parallel, nightly, sens, adjoint
+bsim6, admssens
+resistor
+adms

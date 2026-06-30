@@ -1,0 +1,72 @@
+THIS CIRCUIT TESTS A CHAIN of 2-INPUT NAND GATES WITH BJT MODEL
+* However, the main purpose is to test the .ic file, that was made 
+* with a .SAVE command.  
+*
+* This is a 2-input NAND.  Input 1 is at node 1, while input 2 is at node 2.
+* VIN1 and VIN2 are the input signals.  Both signals have to be high to have
+* a low ouput. VIN1 and VIN2 are both high (5V) at 2us,10us,18us, and 26us.
+* The output, VOUT, is low (0V) for 1.2us.  Although the 2 input signals are
+* only high at the same time for 1us,the output stays low for ~1.2us due to
+* the parameter Tr, reverse transit time, in the BJT model.  Tr=375ns.  Reverse
+* transit time and junction capacitance determine the switching characterisitics
+* of the model.  A chain of nands is set up such that the output nodes consist
+* of alternalyly high and low signals at the beginning.  This is primarily a
+* test if convergence for the DCOP using homotopy based on the exp() function.
+
+** Analysis setup **
+*
+.tran 20ns 1us
+.include bjt.ic
+
+VDD 	$G_VDDNODE	0	5V
+VIN1          1 0  5V PULSE (5V 0V 3us 25ns 250ns 4us 8.275us)
+VIN2          2 0  0V PULSE (0V 5V 2us 25ns 250ns 4us 8.275us)
+
+XN1  1  2  OUT1  NAND
+XN2  1   OUT1  OUT2  NAND
+XN3  1   OUT2  OUT3  NAND
+XN4  1   OUT3  OUT4  NAND
+XN5  1   OUT4  OUT5  NAND
+XN6  1   OUT5  OUT6  NAND
+XN7  1   OUT6  OUT7  NAND
+XN8  1   OUT7  OUT8  NAND
+XN9  1   OUT8  OUT9  NAND
+XN10  1   OUT9  OUT10  NAND
+XN11  1   OUT10  OUT11  NAND
+XN12  1   OUT11  OUT12  NAND
+XN13  1   OUT12  OUT13  NAND
+XN14  1   OUT13  OUT14  NAND
+XN15  1   OUT14  OUT15  NAND
+XN16  1   OUT15  OUT16  NAND
+XN17  1   OUT16  OUT17  NAND
+XN18  1   OUT17  OUT18  NAND
+XN19  1   OUT18  OUT19  NAND
+XN20  1   OUT19  OUT20  NAND
+.print tran V(OUT1) v(OUT2) V(OUT19) v(OUT20) V(1) V(2)
+
+.subckt nand   INP1  INP2  VOUT 
+RB1	$G_VDDNODE	VB1	4K
+QIN1	VB2	VB1	INP1	NPN
+QIN2	VB2	VB1	INP2	NPN
+RC2	$G_VDDNODE	VC2	1.6K
+Q3	VC2	VB2	VB3	NPN
+RC3	$G_VDDNODE	VOUT	4K
+Q4	VOUT	VB3	0	NPN
+RB3	VB3	0	1K
+.ENDS
+
+**************************
+.MODEL NPN NPN (           IS     = 3.97589E-14
++ BF     = 195.3412        NF     = 1.0040078       VAF    = 53.081
++ IKF    = 0.976           ISE    = 1.60241E-14     NE     = 1.4791931
++ BR     = 1.1107942       NR     = 0.9928261       VAR    = 11.3571702
++ IKR    = 2.4993953       ISC    = 1.88505E-12     NC     = 1.1838278
++ RB     = 56.5826472      IRB    = 1.50459E-4      RBM    = 5.2592283
++ RE     = 0.0402974       RC     = 0.4208          XTI    = 5.8315
++ EG     = 1.11            XTB    = 1.6486          TF     = 3.3E-10
++ XTF    = 6               ITF    = 0.32            VTF    = 0.574
++ PTF    = 25.832          TR     = 3.75E-7         CJE    = 2.56E-11
++ VJE    = 0.682256        MJE    = 0.3358856       FC     = 0.83
++ CJC    = 1.40625E-11     VJC    = 0.5417393       MJC    = 0.4547893       )
+**************************
+.END

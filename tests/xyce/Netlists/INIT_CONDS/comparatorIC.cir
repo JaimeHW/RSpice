@@ -1,0 +1,46 @@
+COMPARATOR - BSIM3 Transient Analysis
+*
+*One Bit Comparator. Takes Two Inputs (A and B), and returns Two Ouputs -
+*node 8 - (high when two signalsare equal) and node 9 (high when A is Larger Then B).
+* Transient Analysis with initial conditions applied on M2
+
+*circuit description
+*M drain gate source bulk
+
+
+M1 Anot A E1 E1  PMOS w=3.6u l=1.2u  
+M2 Anot A 0 0 NMOS w=1.8u l=1.2u IC=0,5
+M3 Bnot B E1 E1  PMOS w=3.6u l=1.2u  
+M4 Bnot B 0 0 NMOS w=1.8u l=1.2u 
+M5 AorBnot 0 E1 E1 PMOS w=1.8u l=3.6u
+M6 AorBnot B 1 0 NMOS w=1.8u l=1.2u
+M7 1 Anot 0 0 NMOS w=1.8u l=1.2u
+M8 Lnot 0 E1 E1 PMOS w=1.8u l=3.6u
+M9 Lnot Bnot 2 0 NMOS w=1.8u l=1.2u
+M10 2 A 0 0 NMOS w=1.8u l=1.2u
+M11 Qnot 0 E1 E1  PMOS w=3.6u l=3.6u
+M12 Qnot AorBnot 3 0 NMOS w=1.8u l=1.2u 
+M13 3 Lnot 0 0 NMOS w=1.8u l=1.2u 
+MQLO 8 Qnot E1 E1  PMOS w=3.6u l=1.2u 
+MQL1 8 Qnot 0 0 NMOS w=1.8u l=1.2u
+MLTO 9 Lnot E1 E1  PMOS w=3.6u l=1.2u 
+MLT1 9 Lnot 0 0 NMOS w=1.8u l=1.2u 
+CQ Qnot 0 30f
+CL Lnot 0 10f
+
+Rdifa A Ap 1
+Rdifb B Bp 1
+Cdifc A 0 1e-9
+
+Vdd E1 0 5
+Va Ap 0  pulse(0 5 10ns .1ns .1ns 15ns 30ns)
+Vb Bp 0 0
+
+.model nmos nmos (level=9)
+.model pmos pmos (level=9)
+
+* transient analysis
+.tran 0 3.0e-8 
+.print tran {v(a)+1.0}
+.END
+

@@ -1,0 +1,24 @@
+* Simple Xyce netlist for testing that the PSpice netlist lines 
+* .OPTIONS ITL1 or .OPTIONS ITL4 lines without values do not 
+* cause xdm to output an empty Xyce netlist.  This is part of 
+* SRN Bug 2020.
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PRINT TRAN FORMAT=PROBE V(1) V(2) 
+
+*AC Source syntaxes
+R_R1        1 2  1k 
+R_R2        2 0  2K 
+V_V1        1 0 SIN(0 1 1KHz 0 0 0)
+
+* Xyce .OPTIONS lines.  These options should be the same as what is 
+* in the translated Xyce netlist.  Otherwise, the Gold and translated Xyce
+* netlists may get "different" answers (e.g., by using different time-steps).
+* That could mess up the XDM regression test's somewhat-naive comparisons 
+* of the two Xyce .csd files.
+.OPTIONS NONLIN MAXSTEP=200
+.OPTIONS NONLIN-TRAN MAXSTEP=20
+
+.END
+

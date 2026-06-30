@@ -1,0 +1,12 @@
+TRAN test of -r output ASCII format
+*
+* Trivial resistor circuit, just do a transient and watch the output
+*
+
+R1 1 0 10
+V1 1 0 sin (0 10 10MEG 0 0)
+
+.print TRAN v(1) I(v1)
+.tran 1ns 10ns
+
+.end

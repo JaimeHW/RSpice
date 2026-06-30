@@ -1,0 +1,22 @@
+Resistor sensitivity test, testing the period separator in the param list and objective function
+*
+* this netlist is the "baseline" so it should not be run with any -hspice-ext options.
+*
+V1 1 0 5V
+XsubR 1 0  SubR1
+
+.subckt SubR1 S1 S2
+R1 S1 B   10.0
+R2 B S2 10.0
+.ends
+
+.dc V1 5 5 1
+.print dc v(1) v(XsubR:B) v(XsubR:S1) 
+
+.SENS objfunc={0.5*(V(XsubR:B)-3.0)**2.0} param=XsubR:R1:R,XsubR:R2:R
+.options SENSITIVITY direct=1 adjoint=1  diagnosticfile=0
+
+.print sens
+
+.END
+

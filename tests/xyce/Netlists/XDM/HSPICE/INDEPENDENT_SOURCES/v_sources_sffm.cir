@@ -1,0 +1,8 @@
+* Xyce netlist for testing SFFM V-Sources
+
+VSFF1 15 0 DC 3V SFFM(0V 1V 20K 10 5K)
+RSSF1 15 0 1
+.TRAN 0 .5ms 0
+.PRINT TRAN FORMAT=PROBE V(15)
+
+.END

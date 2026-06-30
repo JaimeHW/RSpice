@@ -1,0 +1,7 @@
+Capacitor Circuit Netlist
+VIN  1 0 PULSE(0 1 10U 1U 1U 80U)
+R    1 2 1K
+C    2 0 20N
+.TRAN 0.5U 100U
+.PRINT TRAN format=probe V(1) V(2) 
+.END

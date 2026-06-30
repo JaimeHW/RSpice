@@ -1,0 +1,27 @@
+* BUG 23
+*
+* This circuit mistakenly reported that N3 and N4 
+* have no path to ground.  With this bug fixed,
+* Xyce will not issue a warning
+*
+* source MUTUALL_TEST 
+V_Vn         N1 0 1 
+R_Rn1         N1 N2  1e-3 
+L_Ln1         N2 N3  5p 
+R_Rn2         N3 N4  1e-3 
+L_Ln2         N4 N5  5p 
+R_Rout         0 N5  100 
+V_Vm         M1 0 1 
+R_Rm1         M1 M2  1e-3 
+L_Lm1         M2 M3  5p 
+R_Rm2         M3 M4  1e-3 
+L_Lm2         M4 M5  5p 
+R_Rout2         0 M5  100 
+Kn_K2         L_Ln2 L_Lm2     0.001 
+Kn_K1         L_Ln1 L_Lm1     0.001 
+**** 
+.tran 1n 1 
+.print tran format=noindex 
++v(n1) 
+.end
+

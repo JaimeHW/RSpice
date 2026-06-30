@@ -1,0 +1,21 @@
+******************************************************************
+* The purpose of this file is to show that trying to remeasure
+* a .MEASURE line with a valid mode (e.g., .AC) but an invalid
+* measure type (e.g., DUTY for .AC) will produce a graceful exit.
+*
+*
+*
+*
+*******************************************************************
+
+vsrc1  1a 0 AC 1 SIN(0 1 1)
+rload1 1a 1b 0.1
+cload1 1b 0 1
+
+.print ac vm(1a) vm(1b) {-20*log10(vm(1b)/vm(1a))}
+.AC lin 13 10 120
+
+.MEASURE AC DUTY1 DUTY VM(1a)
+
+.END
+

@@ -1,0 +1,91 @@
+* Test AC mode support for the FIND-AT, FIND-WHEN and WHEN
+* measures.  To be conservative, there are subtests for each
+* valid operator (V, VR, VI, VP, VM and VDB) for
+* each measure type.  One current operator (IM) is tested
+* for a branch current for the FIND measure.
+*
+* See SON Bug 1270 for more details.
+*****************************************************
+
+* trivial high-pass filter (V-C-R) circuit
+
+R2 c 0 1
+R1 b c 1
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.print AC vr(b) vi(b) vm(b) vp(b) vdb(b)
++ vr(c) vi(c) vm(c) vp(c) vdb(c) im(v1)
+.ac dec 5 100Hz 1e6
+
+* WHEN
+.MEASURE AC whenvmb0.5 WHEN vm(b)= 0.5
+.MEASURE AC whenvrb0.5 WHEN vr(b)= 0.5
+.MEASURE AC whenvib0.1 WHEN vi(b)= 0.1
+.MEASURE AC whenvbp50 WHEN vp(b)= 50
+.MEASURE AC whenimv10.25 WHEN im(v1) = 0.25
+
+* FIND-WHEN
+.MEASURE AC findvmcwhenvmb0.5 find vm(c) when vm(b)= 0.5
+.MEASURE AC findvrcwhenvrb0.5 find vr(c) when vr(b)= 0.5
+.MEASURE AC findvicwhenvib0.1 find vi(c) when vi(b)= 0.1
+.MEASURE AC findvpcwhenvpb50 find vp(c) when vp(b)= 50.0
+
+* FIND-AT
+.MEASURE AC vibat1e2 FIND vi(b) at=1e2 ; first sweep value
+.MEASURE AC vibat1e4 FIND vi(b) at 1e4
+.MEASURE AC vibat3e4 FIND vi(b) at 3e4
+.MEASURE AC vibexpat5e4 FIND {vi(b)+1} at 5e4
+
+* Expressions with WHEN measure
+.MEASURE AC whenExp1 when vr(b)=vi(b)
+.MEASURE AC whenExp2 when {vm(b)+0.1}=0.5
+.MEASURE AC whenExp3 when vm(b)={0.3+0.2}
+.MEASURE AC whenExp4 when vr(b)={vi(b)+0.3}
+
+* Expressions, with FIND-WHEN measure
+.MEASURE AC findvmcwhenvmbExp1 find vm(c) when {vm(b)+0.1}=0.5
+.MEASURE AC findvmcwhenvmbExp2 find vm(c) when vm(b)={0.3+0.2}
+.MEASURE AC findvmcwhenvmbExp3 find {vm(c)+1} when {vm(b)+0.1}=0.5
+.MEASURE AC findvmcwhenvmbExp4 find {vm(c)+1} when vm(b)={0.3+0.2}
+.MEASURE AC findvrcwhenvmbExp5 find vr(c) when vr(b)=vi(b)
+
+* Use of other measures in WHEN and FIND-WHEN
+.MEASURE AC eqnvmc EQN {vm(c)}
+.MEASURE AC wheneqnvmc when EQNVMC=0.1
+.MEASURE AC findwheneqnvmc find eqnvmc when vm(b)=0.5
+
+* Use of FREQ special variable in FIND measure.  (Note: this is
+* essentially a bad way to do a WHEN measure, but it should work.)
+.MEASURE AC findFreqwhenvmb0.5 find {FREQ} when vm(b)= 0.5
+
+* FROM
+.MEASURE AC whenvibfrom10K when vi(b)=0.2 FROM=1e4
+
+* Test that the interpolated WHEN frequency is within the measure window.
+* So, the first and third measures should find the first time vi(b)=0.1.
+* The second one should find the second time.
+.MEASURE AC whenvibfrom8K when vi(b)=0.1 FROM=8e3
+.MEASURE AC whenvibfrom9K when vi(b)=0.1 FROM=9e3
+.MEASURE AC whenvibft when vi(b)=0.1 FROM=7e3 TO=9e3
+
+* The second measure should fail.
+.MEASURE AC whenvrbto25e4 when vr(b)=0.87 TO=2.5e5
+.MEASURE AC whenvrbto20e4 when vr(b)=0.87 TO=2e5
+
+* measures should fail
+.measure ac FAIL1 WHEN vm(b)=2
+.measure ac FAIL2 FIND vm(c) WHEN vm(b)=2
+.measure ac FAIL3 FIND vm(c) AT=1e7
+
+* Tests should return since the FROM-T0 windows
+* have various problems.
+.measure ac whenFail WHEN vm(b)=0.5 FROM=1e7 TO=1e8
+.measure ac findWhenFail FIND vm(c) WHEN vm(b)=0.5 FROM=1e6 TO=1e2
+
+* FROM and TO qualifiers take precedence over AT.
+* So, these are failed measures.
+.MEASURE AC atFailFrom find VI(b) AT=800 FROM=1000
+.MEASURE AC atFailTo find VI(b) AT=800 TO=500
+
+.END

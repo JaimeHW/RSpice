@@ -1,0 +1,57 @@
+*Test of dependent parameter handling in mutual inductors
+
+* Because the mutual inductor device was not properly updating its internal
+* copies of the coupled inductance list in processParams, using .step on
+* any global param that was used in L value expressions would not actually
+* cause the simulation to change behavior, even after bug 28's fix of
+* global parameter handling during context resolution for MIs.
+
+* This test case .steps a scale factor that is being applied to the L2
+* inductor that is coupled to L1 via Ktrans.
+
+* This netlist is one of 3 individual, non-stepped runs that will be
+* performed by the test script, and compared to the main .stepped netlist.
+
+
+.global_param pL1 = 6.67e-6
+.subckt transformer_v2 trans_start trans_end
+.param pRHi = 0.34e-6
+.param pC1 = 2.4e-9
+.param pCo = 28.9e-9
+.param pC2 = 1.64e-15
+.param pRLo = 0.233e-6
+.param pRL1 = 47.6e-9
+.param pRC1 = 0.26e-6
+.param pRL2 = 0.2
+.param pRC2 = 7.6
+
+V_Meas_Trans_HV         TRANS_START     TRANS_HV        0
+V_Meas_Trans_LV         TRANS_LV        TRANS_END       0
+
+R_rhi        TRANS_HV    NODE1       pRHi
+C1           NODE1       NODE3       pC1
+RC1          NODE3       0           pRC1
+L1           NODE1       NODE4       pL1
+RL1          NODE4       0           pRL1
+Co           NODE1       NODE2       pCo
+L2           NODE2       NODE5       2.325e-6
+Ktrans       L1  L2  .75
+RL2          NODE5       0           pRL2
+C2           NODE2       NODE6       pC2
+RC2          NODE6       0           pRC2
+RLo          NODE2       TRANS_LV    pRLo
+
+.ends
+
+xtest node1 node2 TRANSFORMER_V2 
+
+r1 node1 0 100
+r2 node2 0 100
+
+vsrc node1 0 sin( 0 10.0 100k)
+
+.tran 0 .1m
+.print tran v(node1) v(node2)
+.options output PRINTFOOTER=false
+.end
+

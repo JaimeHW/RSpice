@@ -1,0 +1,3 @@
+bug_604.cir
+bug_604.cir.sh
+tags

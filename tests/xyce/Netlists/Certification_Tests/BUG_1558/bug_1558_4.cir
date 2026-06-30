@@ -1,0 +1,21 @@
+* test for bug 1558
+* In this version, the subcircuit *HAS* no R parameter even though the instance
+* passes one in.  The param should be ignored and the result should be that
+* we still match the baseline.
+
+.param R=1k
+
+X1 1 0 simple PARAMS: R=100k
+V1 1 0 DC 5v
+
+.dc v1 0 5 1
+.print dc v(1) I(V1)
+
+
+.subckt simple a b 
+
+R1 a b 100k
+
+.ends
+
+.end

@@ -1,0 +1,7 @@
+README
+bug402SpiceTempOptions.cir
+bug402XyceTempOptions.cir
+bug402son.cir
+bug402son.cir.sh
+exclude
+tags

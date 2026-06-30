@@ -1,0 +1,46 @@
+two-level test case - top level
+**************************************************************
+*
+* Eric Keiter, Sandia Labs.  2/7/2007.
+*
+* The goal of this test is to insure that it is possible to run 
+* with the 2-level algorithm when the yext device has more
+* than 4 nodal connections to the inner problem.  In parallel, 
+* this has sometimes been an issue.  This test should be run in
+* both serial and parallel.
+*
+* This result of this test should be compared against an
+* equivalent, single-level problem.
+*
+**************************************************************
+.tran 20ns 10us
+.print tran format=std precision=13 width=21 v(1a) v(2a) v(3a) v(4a) 
+*.print tran format=tecplot precision=13 width=21 v(1a) v(2a) v(3a) v(4a)
+vhi 	realvdd	0	7v
+vlo     realvss 0       2v 
+vin1          1 0  7v pulse (7v 2v 3us 25ns 250ns 4us 8us)
+vin2          2 0  2v pulse (2v 7v 2us 25ns 250ns 4us 8us)
+vin3          3 0  7v pulse (7v 2v 1us 25ns 250ns 4us 8us)
+vin4          4 0  2v pulse (2v 7v 4us 25ns 250ns 4us 8us)
+
+rvdd realvdd vdd 1
+cvdd realvdd 0   1pf
+rvss realvss vss 1
+cvss realvss 0   1pf
+
+rvin1 1 1a 1
+cvin1 1 0  1pf
+rvin2 2 2a 1
+cvin2 2 0  1pf
+rvin3 3 3a 1
+cvin3 3 0  1pf
+rvin4 4 4a 1
+cvin4 4 0  1pf
+
+yext y1 vdd vss 1a 2a 3a 4a externcode=xyce netlist=sixNode_in.cir
++ voltlim=1
++ node={name=vconnectvdd,vconnectvss,vconnect1a,vconnect2a,vconnect3a,vconnect4a
++       initval = 7, 2, 7, 2, 7, 2}
+
+.end
+

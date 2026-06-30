@@ -1,0 +1,12 @@
+* Test invalid math operator in .FUNC line
+*
+* This is related to SON Bug 1196.
+***************************************
+
+.FUNC afunc(b, n) 'b =# n'
+V1 1 0 SIN(0 1 1)
+R1 1 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(1)
+.END

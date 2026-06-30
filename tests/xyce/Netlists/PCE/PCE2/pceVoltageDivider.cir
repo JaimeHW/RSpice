@@ -1,0 +1,21 @@
+Regression test for intrusive PCE, expression operator version
+
+R2 1 0 {agauss(2k,0.2k,1)}
+R1 1 2 {agauss(3k,0.1k,1)}
+v1 2 0 10V
+
+.dc v1 10 10 1
+
+.print dc format=tecplot v(1)
+
+.PCE
++ useExpr=true
+
+.options PCES
++ output_pce_coeffs=true
++ order=3
++ outputs={v(1)}
++ stdoutput=true
+
+.end
+

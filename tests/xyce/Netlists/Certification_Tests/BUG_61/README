@@ -1,0 +1,19 @@
+Bug Number: 61
+Test netlist: capacitor.cir
+
+Description:
+============
+This test checks for the FORMAT=NOINDEX feature.
+
+Verification
+============
+Run Xyce in serial on the netlist.
+
+Since the format of the prn file differs from what the comparison utilities
+expect, they cannot be used in this case. It suffices to examine the
+prn file produced and verify that it does NOT have an "Index" column.
+The remainder of the data can be ignored.
+
+Special Notes:
+==============
+Parallel testing is not needed.

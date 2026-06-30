@@ -1,0 +1,7 @@
+tags
+tempind.cir
+tempind.cir.prn.gs.pl
+tempind_instance.cir
+tempind_instance.cir.prn.gs.pl
+tempind_instance2.cir
+tempind_instance2.cir.prn.gs.pl

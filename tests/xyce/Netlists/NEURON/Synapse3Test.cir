@@ -1,0 +1,47 @@
+Two neuons connected by a delay synapse
+
+
+* This is a standard current pulse to start an activation
+
+.tran 0 0.1
+
+.print tran format=noindex V(in1) V(in2) n(y%synapse%syn_r)
+
+* i(iin) v(b) n(y%neuron%neuron1_m) n(y%neuron%neuron1_h) n(y%neuron%neuron1_n)
+
+
+* standard area is 30x30xpi um2 = 30e-6 * 30e-6 * pi m^2 
+*                               = 3e-5 * 3e-5 * pi m^2 = 3e-3 * 3e-3 * pi cm^2 
+* scale GK, Gna, manebrane capacitance, membrane conductivity
+.param area = {3.0e-3 * 3.0e-3 * 3.141529}  ; [cm^2]
+.param gks  = {0.036 * area }               ; [0.036 S/cm^2  * [area cm^2] ]
+.param gnas = {0.120 * area }               ; [0.120 S/cm^2  * [area cm^2] ]
+.param memC = {1.0e-6 * area }              ; [1.0uF/cm^2    * [area cm^2] ]
+.param memG = {0.0003 * area }              ; [0.0003 S/cm^2 * [area cm^2] ] 
+
+*
+* Using the above neuron model
+*
+.model hhParams neuron level=1 cMem={memC}  gMem={memG} vRest=0.010613  eNa=0.115 gNa={gnas}  eK=-0.012  gK={gks} 
+*.model synParams synapse level=1 alpha=1.1e6 beta=190 Tmax=1e-3 Vp=2e-3 Kp=5e-3 gmax=1e-10 Erev=0.0
+.model synParams synapse level=2 gmax=1.0e-7 erev=-10.0e-3 alpha=2.0e3 beta=1.0e3 vp=0.0 tmax=1.0e3
+
+.model simpleSynapse synapse level=3
+
+*   initial value pulse value delay rise time fall time duration period
+Iin 0 in1 PULSE( 0 4.0e-9 1.0e-3 1.0e-4 1.0e-4 1.0e-3 1.0e10)
+
+
+
+yneuron neuron1  in1 0 hhParams
+
+
+
+
+
+* ysynapse synapse1 in1 0 in2 0 simpleSynapse TD=1.0e-3 Z0=1 
+* TLINE in1 0 in2 0 Z0=1e6 TD=1.0e-2
+ysynapse syn in1 in2  synParams
+yneuron neuron2  in2 0 hhParams
+
+.end

@@ -1,0 +1,50 @@
+pierce oscillator
+* erkeite: 9/30/2007.
+*
+* This circuit is a pierce oscillator, which needs an inconsistent
+* initial condition to start oscillating.   It was originally created
+* by Ting Mei.  It will only oscillate if it doesn't solve the DCOP.  
+* This particular circuit also needs relatively high time 
+* integration tolerances to oscillate as well.  With the defaults, it
+* does not oscillate for some initial conditions.
+*
+* If this circuit is started with a zero initial condition (with UIC or NOOP
+* on the .tran line but no .IC statement), it takes millions and millions
+* of cycles to get to steady state.  
+*
+* In steady state, v(2) should oscillate with an amplitude of slightly 
+* less than 10,000 volts.  I have not calculated the exact number, but it
+* is near that size.  By starting with .IC set to have v(2)=10,000, 
+* the circuit starts out closer to its steady state.  
+* To save time, this circuit only runs for 10 cycles of the V(2) 
+* oscillation. It does not achieve steady state, as it needs to go
+* much longer to get there, but it is still a good test of .IC 
+* with UIC.
+
+c1 1 0 100e-12
+c2 3 0 100e-12
+c3 2 3 99.5e-15
+c4 1 3 25e-12
+l1 2 4 2.55e-3  
+r1 1 3 1e5
+r2 3 5 2.2e3
+r3 1 4 6.4
+v1 5 0 12
+
+Q1 3 1 0 NBJT
+.MODEL NBJT NPN (BF=100)
+
+*.tran 1ns 1000us  NOOP
+*.tran 1ns 100us  NOOP
+.tran 1ns 1us  NOOP
+
+.ic v(2)=-10000.0 v(5)=12.0
+
+* these must be offset to avoid crossing zero:
+.print tran  {v(2)+11000.0} {v(3)+1.0}
+*.options timeint reltol=1.0e-5 debuglevel=-100 method=2
+.options timeint  method=7 newlte=1 reltol=0.1e-3 
+.options device debuglevel=-100
+.options nonlin debuglevel=-100
+.options nonlin-tran debuglevel=-100
+

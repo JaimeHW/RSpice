@@ -1,0 +1,396 @@
+RLC Tran Line Circuit
+
+* This circuit is just a large collection of R, L and C components
+* to mimic a transmission line.  For this test, we want to ensure
+* Xyce can calculate voltage differences like V(node1,node2) on 
+* the PRINT line.  This works in serial, but failed in parallel if
+* node1 and node2 were not on the same processor.  To check the bugfix
+* we'll run this circuit in parallel and then try and print 
+* V(firstNode, [almost every other node in the circuit] )
+* which ensures that we will get a combination of nodes on different
+* processors.
+
+*
+* Resistance: 10 - 100 Ohm
+* Inductance: 1 - 10 nH
+* Capacitance: 1 - 10 pF
+*
+.PARAM ResNode=10      
+.PARAM IndNode=1.0e-9 
+.PARAM CapNode=1.0e-12
+
+*
+* here's a node of the line
+*
+.SUBCKT rlcNode inNode outNode
+Rr1 inNode   int1    {ResNode}
+Ll1 int1     outNode {IndNode}
+Cc1 outNode  0       {CapNode}
+.ends
+
+*
+* This is ten nodes
+*
+.SUBCKT rlcNode10 inNode outNode
+xNode1   inNode n1       rlcNode
+xNode2   n1     n2       rlcNode
+xNode3   n2     n3       rlcNode
+xNode4   n3     n4       rlcNode
+xNode5   n4     n5       rlcNode
+xNode6   n5     n6       rlcNode
+xNode7   n6     n7       rlcNode
+xNode8   n7     n8       rlcNode
+xNode9   n8     n9       rlcNode
+xNode10  n9     outNode  rlcNode
+.ends
+
+*
+* This is 100 nodes
+*
+.SUBCKT rlcNode100 inNode outNode
+xNode1   inNode n1       rlcNode10
+xNode2   n1     n2       rlcNode10
+xNode3   n2     n3       rlcNode10
+xNode4   n3     n4       rlcNode10
+xNode5   n4     n5       rlcNode10
+xNode6   n5     n6       rlcNode10
+xNode7   n6     n7       rlcNode10
+xNode8   n7     n8       rlcNode10
+xNode9   n8     n9       rlcNode10
+xNode10  n9     outNode  rlcNode10
+.ends
+
+*
+* This is 1000 nodes
+*
+.SUBCKT rlcNode1000 inNode outNode
+xNode1   inNode n1       rlcNode100
+xNode2   n1     n2       rlcNode100
+xNode3   n2     n3       rlcNode100
+xNode4   n3     n4       rlcNode100
+xNode5   n4     n5       rlcNode100
+xNode6   n5     n6       rlcNode100
+xNode7   n6     n7       rlcNode100
+xNode8   n7     n8       rlcNode100
+xNode9   n8     n9       rlcNode100
+xNode10  n9     outNode  rlcNode100
+.ends
+
+
+
+Vs n1 0 SIN( 0.0 10.0 60 0 0 )
+
+
+* here we instantiate each subcircuit which is a group of nodes
+xLineSeg1  n1    n2  rlcNode100
+xLineSeg2  n2    n3  rlcNode100
+xLineSeg3  n3    n4  rlcNode100
+Rbig n4 0 1.0e3
+
+.tran 0 0.05
+.print tran 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode1:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode1:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode1:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode1:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode1:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode1:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode1:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode1:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode1:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode1:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode2:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode2:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode2:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode2:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode2:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode2:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode2:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode2:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode2:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode2:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode3:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode3:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode3:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode3:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode3:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode3:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode3:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode3:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode3:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode3:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode5:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode5:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode5:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode5:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode5:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode5:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode5:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode5:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode5:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode5:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode6:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode6:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode6:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode6:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode6:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode6:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode6:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode6:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode6:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode6:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode7:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode7:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode7:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode7:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode7:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode7:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode7:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode7:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode7:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode7:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode8:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode4:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode9:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode9:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode9:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode9:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode9:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode9:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode9:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode9:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode9:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode9:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode10:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode10:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode10:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode10:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode10:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode10:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode10:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode10:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode10:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg1:xNode10:xNode10:int1)
++
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode1:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode1:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode1:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode1:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode1:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode1:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode1:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode1:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode1:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode1:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode2:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode2:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode2:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode2:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode2:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode2:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode2:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode2:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode2:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode2:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode3:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode3:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode3:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode3:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode3:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode3:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode3:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode3:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode3:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode3:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode5:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode5:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode5:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode5:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode5:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode5:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode5:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode5:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode5:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode5:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode6:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode6:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode6:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode6:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode6:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode6:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode6:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode6:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode6:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode6:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode7:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode7:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode7:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode7:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode7:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode7:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode7:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode7:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode7:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode7:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode8:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode4:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode9:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode9:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode9:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode9:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode9:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode9:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode9:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode9:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode9:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode9:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode10:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode10:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode10:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode10:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode10:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode10:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode10:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode10:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode10:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg2:xNode10:xNode10:int1)
++
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode1:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode1:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode1:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode1:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode1:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode1:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode1:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode1:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode1:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode1:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode2:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode2:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode2:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode2:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode2:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode2:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode2:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode2:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode2:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode2:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode3:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode3:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode3:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode3:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode3:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode3:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode3:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode3:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode3:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode3:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode5:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode5:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode5:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode5:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode5:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode5:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode5:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode5:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode5:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode5:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode6:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode6:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode6:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode6:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode6:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode6:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode6:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode6:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode6:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode6:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode7:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode7:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode7:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode7:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode7:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode7:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode7:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode7:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode7:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode7:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode8:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode4:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode9:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode9:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode9:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode9:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode9:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode9:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode9:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode9:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode9:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode9:xNode10:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode10:xNode1:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode10:xNode2:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode10:xNode3:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode10:xNode4:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode10:xNode5:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode10:xNode6:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode10:xNode7:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode10:xNode8:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode10:xNode9:int1) 
++ v(xLineSeg1:xNode1:xNode1:int1, xLineSeg3:xNode10:xNode10:int1)
+
+.end
+

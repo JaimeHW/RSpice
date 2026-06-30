@@ -1,0 +1,83 @@
+*-------------------------------------------------------------------------
+* Copyright Notice
+*
+* Copyright (c) 2000, Sandia Corporation, Albuquerque, NM.
+*-------------------------------------------------------------------------
+*
+*-------------------------------------------------------------------------
+* Filename       : $RCSfile$
+*
+* Purpose        : This test is with respect to the SON bug 604, which was
+*                  about being able to use the doubledcop specification,
+*                  when doing a .OP (rather than .DC or .TRAN) calculation.
+*
+* Special Notes  : This only does the nonlinear poisson calculation, so it
+*                  should be fast.  Also, the v2 node has been set to 
+*                  have a voltage that is nonzero.  If running the drift-diffusion
+*                  calculation, then the output currents should be nonzero.
+*                  But, if running the NL poisson calculation ONLY, the output
+*                  currents should be exactly zero.  The gold standard for
+*                  the test is for all the currents to be exactly zero, so
+*                  if the doubledcop specification works correctly, this
+*                  test will pass.
+*
+* Creator        : Eric Keiter
+*
+* Creation Date  : 
+*
+* Revision Information:
+* ---------------------
+*
+* Revision Number: $Revision$
+*
+* Revision Date  : $Date$
+*
+* Current Owner  : $Author$
+*-------------------------------------------------------------------------
+v2  2 0  1.0
+v3  3 0  0.0
+v4  4 0  0.0
+v5  5 0  0.0
+v6  6 0  0.0
+v7  7 0  0.0
+*-------------------------------------------------------------------------
+YPDE DIODE 2 3 4 5 6 7 PDEDIODE 
++ sgplotlevel=0 tecplotlevel=0 gnuplotlevel=0 txtdatalevel=0
++ mobmodel=carr voltlim=0 cyl=0 meshfile=internal.msh 
++ outputnlpoisson=1
++ nx=15  l=70.0e-4
++ ny=13  w=26.0e-4 
+* The old intrinsic calculation was used to generate gold standard.
+* It is inaccurate, however. 
++ useOldNi=true
+* ELECTRODES:
++ node={name           =     anode, cathode,  n4, n5, n6, n7
++       bc        =dirichlet,dirichlet,dirichlet,dirichlet,dirichlet,dirichlet
++       side           =       top, bottom,left,left, right,right
++       start          =     0.002, 0.002, 0.0005,0.0015,0.0005,0.0015
++       end            =     0.005, 0.005, 0.0010,0.0020,0.0010,0.0020
++       material       =   neutral, neutral,neutral,neutral,neutral,neutral
++       oxideBndryFlag =         0, 0, 0, 0, 0, 0
++       oxcharge       =       0.0, 0.0, 0.0, 0.0, 0.0, 0.0 }
+*DOPING REGIONS:
++ region= {name     =       reg1,     reg2
++          function =    uniform, gaussian 
++          type     =      ntype,    ptype 
++          nmax     =    4.0e+16,  1.0e+19 
++          nmin     =    4.0e+16,  4.0e+16 
++          xloc     =        0.0,   0.0035
++          xwidth   =        0.0,   0.0015
++          flatx    =          0,        0  
++          yloc     =        0.0,   0.0026
++          ywidth   =        0.0,   0.0015 
++          flaty    =          0,        0 }
+*-------------------------------------------------------------------------
+.MODEL PDEDIODE  ZOD  level=2 
+.options NONLIN maxstep=40 maxsearchstep=2 
+
+.options TIMEINT DOUBLEDCOP=NL_POISSON
+
+.OP
+
+.print DC V(2) I(V2) I(V3)
+.END

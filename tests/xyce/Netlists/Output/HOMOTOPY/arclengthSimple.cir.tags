@@ -1,0 +1,5 @@
+serial, nightly,  parallel
+homotopy
+arclength
+bug486
+scipy

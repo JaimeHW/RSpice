@@ -1,0 +1,159 @@
+ ***** Measure Functions ***** 
+
+MAX_CURRENTIR1 = 7.500000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+TIME_OF_MAXIR1 = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+MIN_CURRENTIR3 = -7.500000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+TIME_OF_MINIR3 = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+TIMEOFMAXIR1 = 7.500000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+VALUEOFMAXIR1 = 7.500000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+VALUEOFMAXIRA = 7.500000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+TIMEOFMAXIR1RISE1 = 5.000000e-02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Rise 1: Start Time= 1.000000e-10	End Time= 4.000000e-01
+
+VALUEOFMAXIR1RISE1 = 5.000000e-02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Rise 1: Start Time= 1.000000e-10	End Time= 4.000000e-01
+
+VALUEOFMAXIR1RISE1A = 5.000000e-02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Rise 1: Start Time= 1.000000e-10	End Time= 4.000000e-01
+
+TIMEOFMAXIR1RISELAST = 2.500000e-02 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Last Rise: Start Time= 8.000469e-01	End Time= 1.200000e+00
+
+VALUEOFMAXIR1RISELAST = 2.500000e-02 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Last Rise: Start Time= 8.000469e-01	End Time= 1.200000e+00
+
+VALUEOFMAXIR1RISELASTA = 2.500000e-02 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Last Rise: Start Time= 8.000469e-01	End Time= 1.200000e+00
+
+TIMEOFMAXIR2 = 5.000000e-02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+VALUEOFMAXIR2 = 5.000000e-02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+VALUEOFMAXIR2A = 5.000000e-02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+TIMEOFMAXIR2RISE2 = 5.000000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Rise 2: Start Time= 4.000469e-01	End Time= 8.000000e-01
+
+VALUEOFMAXIR2RISE2 = 5.000000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Rise 2: Start Time= 4.000469e-01	End Time= 8.000000e-01
+
+VALUEOFMAXIR2RISE2A = 5.000000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Rise 2: Start Time= 4.000469e-01	End Time= 8.000000e-01
+
+TIMEOFMAXIR2RISELAST = 5.000000e-02 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Last Rise: Start Time= 8.000469e-01	End Time= 1.200000e+00
+
+VALUEOFMAXIR2RISELAST = 5.000000e-02 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Last Rise: Start Time= 8.000469e-01	End Time= 1.200000e+00
+
+VALUEOFMAXIR2RISELASTA = 5.000000e-02 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Last Rise: Start Time= 8.000469e-01	End Time= 1.200000e+00
+
+TIMEOFMINIR3 = -7.500000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+VALUEOFMINIR3 = -7.500000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+VALUEOFMINIR3A = -7.500000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+TIMEOFMINIR3RISE1 = -5.000000e-02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Fall 1: Start Time= 1.000000e-10	End Time= 4.000000e-01
+
+VALUEOFMINIR3RISE1 = -5.000000e-02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Fall 1: Start Time= 1.000000e-10	End Time= 4.000000e-01
+
+VALUEOFMINIR3RISE1A = -5.000000e-02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Fall 1: Start Time= 1.000000e-10	End Time= 4.000000e-01
+
+TIMEOFMINIR3RISELAST = -2.500000e-02 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Last Fall: Start Time= 8.000469e-01	End Time= 1.200000e+00
+
+VALUEOFMINIR3RISELAST = -2.500000e-02 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Last Fall: Start Time= 8.000469e-01	End Time= 1.200000e+00
+
+VALUEOFMINIR3RISELASTA = -2.500000e-02 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Last Fall: Start Time= 8.000469e-01	End Time= 1.200000e+00
+
+TIMEOFMINIR4 = -5.000000e-02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+VALUEOFMINIR4 = -5.000000e-02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+VALUEOFMINIR4A = -5.000000e-02 at time = 2.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+TIMEOFMINV4RISE1 = -5.000000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Fall 2: Start Time= 4.000469e-01	End Time= 8.000000e-01
+
+VALUEOFMINV4RISE1 = -5.000000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Fall 2: Start Time= 4.000469e-01	End Time= 8.000000e-01
+
+VALUEOFMINV4RISE1A = -5.000000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Fall 2: Start Time= 4.000469e-01	End Time= 8.000000e-01
+
+TIMEOFMINV4RISELAST = -5.000000e-02 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Last Fall: Start Time= 8.000469e-01	End Time= 1.200000e+00
+
+VALUEOFMINV4RISELAST = -5.000000e-02 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Last Fall: Start Time= 8.000469e-01	End Time= 1.200000e+00
+
+VALUEOFMINV4RISELASTA = -5.000000e-02 at time = 1.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+Last Fall: Start Time= 8.000469e-01	End Time= 1.200000e+00
+
+BOGOVALUE1 = 7.500000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+BOGOVALUE2 = 7.500000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+BOGOVALUE3 = -7.500000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+BOGOVALUE4 = -7.500000e-02 at time = 6.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.200000e+00
+
+

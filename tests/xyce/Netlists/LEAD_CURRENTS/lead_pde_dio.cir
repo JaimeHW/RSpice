@@ -1,0 +1,49 @@
+*-------------------------------------------------------------------------
+* Copyright Notice
+*
+* Copyright (c) 2000, Sandia Corporation, Albuquerque, NM.
+*-------------------------------------------------------------------------
+*
+*-------------------------------------------------------------------------
+* Filename       : $RCSfile$
+*
+* Purpose        : PDE Diode test circuit 
+*
+* Special Notes  : This is a very simple test of the 1-D PDE diode device
+*                  in Xyce.  DC sweep.  Full Newton only.
+*
+* Creator        : Eric R. Keiter, 9233, Computational Sciences
+*
+* Creation Date  : 10/26/00
+*
+* Revision Information:
+* ---------------------
+*
+* Revision Number: $Revision$
+*
+* Revision Date  : $Date$
+*
+* Current Owner  : $Author$
+*-------------------------------------------------------------------------
+R 1 2 1000.0
+V1 0 2 0.21
+YPDE d1 1 0 DIODE na=1.0e15 nd=1.0e15 
++ graded=0 l=5.0e-4 wj=0.1e-3 nx=101  area=1.0 
++ mobmodel=carr
+* The old intrinsic calculation was used to generate gold standard.
+* It is inaccurate, however. 
++ useOldNi=true
+
+.MODEL DIODE  ZOD 
+.DC V1 0.0 -0.21 -0.01
+
+.options LINSOL type=klu
+.options NONLIN maxstep=50 maxsearchstep=3 searchmethod=1 in_forcing=0 
++ nlstrategy=0 abstol=1.0e-17
+
+.options TIMEINT reltol=1.0e-5 abstol=1.0e-8 
+.options DEVICE numjac=0 debuglevel=-1
+
+*comp {I(V1)-I(D1)} abstol=1.0e-5
+.print DC v(2) v(1) {I(V1)-I(D1)}
+.END

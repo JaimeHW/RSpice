@@ -1,0 +1,24 @@
+
+# A is the food and is considered constant
+# X is the prey
+# Y is the predator
+species
+Aspec 0.0 0.0 0  const
+Xspec 0.0 0.0 0
+Yspec 0.0 0.0 0
+Bspec 0.0 0.0 0  
+end
+
+reactions
+Aspec+Xspec->2*Xspec; simple(1.0)
+Xspec+Yspec->2*Yspec; simple(0.005)
+Yspec->Bspec; simple(0.6)
+end
+
+initial_conditions
+Xspec 50.0
+Yspec 100.0
+Aspec 1.0
+Bspec 0.0
+end
+

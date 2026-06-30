@@ -1,0 +1,72 @@
+
+1/19/2008
+
+Circuit log.  Eric Keiter.
+
+----------------------------------------------------------------------
+Circuit          total          total       MOS2 
+ name          Unknowns        Devices    Devices      Status 
+----------------------------------------------------------------------
+                                                    fails DCOP w/Newton
+add20.cir        2479           5091          958   but DCOP works with
+                                                    GMIN-stepping.
+                                                    Gets a time-step-
+                                                    too-small 50% thru.
+----------------------------------------------------------------------
+                                                     fails DCOP w/Newton
+add32.cir        5092           2850         1984    but works with 
+                                                     GMIN-stepping
+
+                                                     Transient takes a
+                                                     pretty long time.
+----------------------------------------------------------------------
+chip2.cir       46850          40385        18816    Runs fine,
+                                 but transient takes a really 
+                                 long time, approx 9 hours on 
+                                 ragnarok. (serial)
+----------------------------------------------------------------------
+                                                         
+dac.cir          6366          13928         2635   Only works
+                                              if GMIN stepping is used.  
+                                              Straight Newton and 
+                                              continuation=2 fail.
+
+----------------------------------------------------------------------
+fadd32.cir        754            330          288    runs slowly.
+----------------------------------------------------------------------
+mem_plus.cir    17788          21743         7454          YES
+----------------------------------------------------------------------
+pc_frame.cir   Doesn't work yet.  
+Netlist needs unique mosfet instance names.
+----------------------------------------------------------------------
+pchip.cir        2298           1294          942  time-step-too-small
+----------------------------------------------------------------------
+ram2k.cir       32632          14059        13880    runs, but takes 
+                                                     90-100 minutes on 
+                                                     ragnarok (serial, 
+                                                     3.0GHz intel-mac)
+----------------------------------------------------------------------
+smult20.cir     28759          46075        11559    DCOP fails.
+                                                     Node 5592 does lacks 
+                                                     DC path to gnd
+----------------------------------------------------------------------
+sqrt.cir         2900           2219         1188    runs fine.  Has 
+                                                     at least one sticking
+                                                     point in transient.
+                                                     (about 3/4 of the 
+                                                     way thru)
+                                                     Takes about 10 minutes
+                                                     on ragnarok.
+----------------------------------------------------------------------
+sram.cir         2374           1047         1008    DCOP fails
+----------------------------------------------------------------------
+voter.cir       10217           4727         4243    Runs, but takes
+                                                  about 4 hours on 
+                                                  ragnoark in serial.
+----------------------------------------------------------------------
+voter25.cir       199             82           74    Runs fine, quick. 
+----------------------------------------------------------------------
+
+
+
+

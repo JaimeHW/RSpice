@@ -1,0 +1,7 @@
+README
+dup-subcircuit.cir
+dup-subcircuit.cir.sh
+dup-toplevel.cir
+dup-toplevel.cir.sh
+tags
+options

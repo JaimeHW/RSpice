@@ -1,0 +1,8 @@
+README
+bug_805.cir
+bug_805.cir.sh
+colpitts_osc1.cir
+colpitts_osc2.cir
+colpitts_osc3.cir
+exclude
+tags

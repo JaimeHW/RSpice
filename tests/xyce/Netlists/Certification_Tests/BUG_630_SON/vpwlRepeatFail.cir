@@ -1,0 +1,10 @@
+* test should fail because R < 0
+.TRAN 0 1
+V1 1 0 PWL (0.0 0.0 1.0 1.0) R=-1
+R1 1 0 500
+
+V2 2 0 PWL (0.0 0.0 1.0 1.0) R=1
+R2 2 0 500
+
+.PRINT TRAN V(1) V(2)
+.END

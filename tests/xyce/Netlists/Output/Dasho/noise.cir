@@ -1,0 +1,37 @@
+***************************************************************
+* For testing -o (after the changes for Issue 222), the key
+* points are that the netlist has:
+*
+*   1) multiple .PRINT NOISE statements with formats
+*      other than FORMAT=STD.  Print line concatenation
+*      should still work.
+*
+*   2) the output should go to the file specified by -o,
+*      and not to the default file name or the file
+*      specified with FILE=.  It should be a FORMAT=STD
+*      file with space as the delimiter, with the default
+*      extension (dashoFile.NOISE.prn).
+*
+*   3) the .sh file will use -o noiseOutput.NOISE.prn to test
+*      that the default print extension is removed from the
+*      dashoFilename.
+*
+****************************************************************
+
+* NOISE ANALYSIS: RESISTOR DIVIDER, AMP, AND LP FILTER
+*
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP  3 0 2 0 1
+RLP1  3 4 100
+CLP1  4 0 1.59NF
+
+.NOISE  V(4)  V1  DEC  5 100 100MEG 1
+.PRINT NOISE FORMAT=NOINDEX DELIMITER=COMMA V(4) VR(4)
+.PRINT NOISE FORMAT=CSV FILE=noiseFoo VI(4) INOISE ONOISE
+
+.END

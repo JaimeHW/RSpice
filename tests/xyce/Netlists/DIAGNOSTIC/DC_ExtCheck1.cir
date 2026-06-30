@@ -1,0 +1,19 @@
+*
+* a simple DC circuit 
+*
+
+Vsrc A  B  sin(0 5.0 60 0 0 0)
+
+Rload B C 100
+Rptg A 0 1e6
+Lload C D 1e-6
+Cbad  D B 1e-9
+
+.print dc v(a) v(b) v(c) v(d)
+
+.options diagnostic EXTREMALIMIT=6.0 diagfilename=DC_ExtCheck1.dia
+
+.dc Vsrc -1 10 1
+
+.end
+

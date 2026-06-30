@@ -1,0 +1,25 @@
+* This is a test for issue 195, to see if .param with expressions can 
+* be parsed even when they don't have curly braces or single quotes
+* for delimeters
+
+.param test1=1.0
+.param test2=1.0
+.param test3=1.0ps
+.param test4=1.0ps
+.param test5=1.0ps
+.param test6=1.0ps
+
+* This line mixes and matches several different formatters.  One param uses curly 
+* braces and the others do not.  One uses single quotes, and the others do
+* not.  One uses a comma delimeter between params and the rest do not.  One expression
+* has spaces in it, the others do not.
+.param V1=test1+0.1 V2='2.0*test2' TD=0.5*test3 TR=0.3 * test4, TF=0.4*test5 PW={10.0*test6}
+
+B1  1   0  v={spice_pulse(v1,v2,td,tr,tf,pw)}
+r1  1   0  1k
+
+.tran 0.1ns 100ps
+.options timeint reltol=1e-3 
+.print tran v(1) 
+.end
+

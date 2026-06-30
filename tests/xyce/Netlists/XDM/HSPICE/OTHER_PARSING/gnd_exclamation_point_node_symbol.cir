@@ -1,0 +1,17 @@
+* gnd! node symbols
+* Xyce netlist for corresponding HSPICE netlist
+* Netlist tests XDM translation of ground node synonym.
+* XDM should detect the node "gnd!" (case insensitive)
+* and add in a .PREPROCESS directive to make it
+* equivalent to node "0" (see issues #61 & #82 on XDM
+* gitlab).
+
+.PREPROCESS REPLACEGROUND TRUE
+.OPTIONS DEVICE TNOM=25 
+VA 1 0 DC 0
+R1 1 2 R=10
+R2 2 GND! R=10
+.DC VA 0 10 1
+
+
+.PRINT DC FORMAT=PROBE V(1) V(2) 

@@ -1,0 +1,36 @@
+*************************************************************
+* Test Embedded Sampling output for .DC for FORMAT=STD
+* with .OPTIONS OUTPUT PRINTHEADER=FALSE PRINTFOOTER=FALSE
+*
+* See SON Bugs 1201 and 1252 for more details.
+********************************************************
+
+*Regression test for simple normal distribution sampling
+
+R2 1 0 3K
+R1 1 2 2K
+v1 2 0 10V
+
+.dc v1 10 10 1
+
+.print dc v(1)
+
+.EMBEDDEDSAMPLING
++ param=R1,R2
++ type=normal,normal
++ means=3K,2K
++ std_deviations=0.1K,0.2K
+
+* Use mixed case for outputs= arguments
+.options EMBEDDEDSAMPLES numsamples=50
++ projection_pce=true
++ order=3
++ outputs={v(1)},{V(1)+1},{I(v1)},{V(2,1)}
++ sample_type=lhs
++ stdoutput=true
+
+.PRINT ES
+
+.OPTIONS OUTPUT PRINTHEADER=FALSE PRINTFOOTER=FALSE
+
+.END

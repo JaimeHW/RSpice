@@ -1,0 +1,23 @@
+Intrusive PCE circuit to propagate a simple uniform distribution. .param version, with expression operators
+*
+.param testNorm={aunif(2k,1k)}
+.param R1value={testNorm*2.0}
+
+R2 1 0 6K
+R1 1 2 {R1value}
+v1 2 0 1000V
+
+.dc v1 1000 1000 1
+
+.print dc format=tecplot v(1)
+
+.result {v(1)}
+*
+.PCE useExpr=true
+
+.options PCES 
++ order=5
++ outputs={v(1)}
++ stdoutput=true
+
+.end

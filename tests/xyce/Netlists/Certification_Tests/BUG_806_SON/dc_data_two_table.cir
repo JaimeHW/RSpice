@@ -1,0 +1,33 @@
+Test for .DATA and its use in DC sweeps
+* with two tables.  This is NOT how DATA would normally
+* be used, and is NOT recommended.  However Xyce should be
+* robust against this use case since it does work correctly
+* if the two tables use disjoint variables.
+*
+* See SON Bug 1197 for more details.
+***********************************************************
+V1  1 0 1
+R1  1 2 1
+R2  2 0 1
+
+.data R1table
++ r1
++ 1.0000e+00
++ 2.0000e+00
+.enddata
+* The "enddata" statement will be ignored by Xyce.
+* It is part of the HSpice syntax for .DATA
+
+.data R2table
++  r2
++ 3.0000e+00
++ 4.0000e+00
+.enddata
+
+.DC data=R1table
+.DC data=R2table
+
+.print DC precision=4 {R1:R} {R2:R} V(2)
+
+.END
+

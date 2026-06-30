@@ -1,0 +1,25 @@
+Test Name: BUG_392
+Owner: Eric Rankin
+Test netlists: none 
+GS files: none
+Mode: serial, parallel 
+Comparator:  none
+Version of Xyce: Release_2.1
+ 
+Description:
+============
+bug 392:  Remove "old parser" components and options
+
+Similar to bug 391.  This bug additionally required removal of command line options
+for selecting between old and new parser. 
+
+Procedure:
+============
+This is not testable.  The "old parser" code is no longer in Xyce
+
+Verification:
+=============
+ 
+Notes:
+======
+

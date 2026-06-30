@@ -1,0 +1,5 @@
+serial, nightly,  parallel, homotopy
+valgrind
+b3soi
+resistor
+capacitor

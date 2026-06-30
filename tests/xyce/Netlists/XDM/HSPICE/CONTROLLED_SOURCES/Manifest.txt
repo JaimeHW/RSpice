@@ -1,0 +1,17 @@
+exclude
+dummylib.lib
+current_controlled_sources_w_extraneous_identifiers.cir.hspice
+current_controlled_sources_w_extraneous_identifiers.cir
+current_controlled_sources_w_extraneous_identifiers.cir.sh
+voltage_controlled_sources_w_extraneous_identifiers.cir.hspice
+voltage_controlled_sources_w_extraneous_identifiers.cir
+voltage_controlled_sources_w_extraneous_identifiers.cir.sh
+f_sources.cir
+f_sources.cir.hspice
+f_sources.cir.sh
+f_sources.net
+h_sources.cir
+h_sources.cir.hspice
+h_sources.cir.sh
+h_sources.net
+tags

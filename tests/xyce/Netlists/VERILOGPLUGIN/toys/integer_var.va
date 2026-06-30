@@ -1,0 +1,15 @@
+`include "disciplines.vams"
+
+module demo(a, b);
+    inout a, b;
+    electrical a, b;
+
+    analog begin
+	integer i;
+	//real i;
+
+	i = V(a) >= V(b) ? 1.0 : 1.0;
+
+	I(a, b) <+ i * V(a, b);
+    end
+endmodule

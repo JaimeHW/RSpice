@@ -1,0 +1,16 @@
+* Simple circuit to check that curly braces inside an expression are equivalent to parens
+.param foobie=1
+.global_param bletch=2
+
+V1 1 0 SIN(0 5 100K -2.5U)
+R0 1 0 500
+
+B1 2 0 V={(bletch-foobie)*I(V1)}
+R1 2 0 1
+
+B1a 2a 0 V={{bletch-foobie}*I(V1)}
+R1a 2a 0 1
+
+.tran 1us 10us
+.print tran {V(2)-V(2a)}
+.end

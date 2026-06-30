@@ -1,0 +1,53 @@
+Lead current test for B3SOI
+* PMOS version
+
+.tran 20ns 3us
+*COMP {i(vmodd)-id(mp1)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {i(vmodg)-ig(mp1)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {i(vmods)-is(mp1)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {i(vmode)-ie(mp1)} abstol=1.0e-6 zerotol=1.0e-7
+*COMP {i(vmodb)-ib(mp1)} abstol=1.0e-6 zerotol=1.0e-7
+.print tran {i(vmodd)-id(mp1)} {i(vmodg)-ig(mp1)} {i(vmods)-is(mp1)} {i(vmode)-ie(mp1)} {i(vmodb)-ib(mp1)}
+
+.measure tran maxmag1   max {abs(i(vmodd)-id(mp1))} failvalue=1e-6
+.measure tran totalrms1 rms {i(vmodd)-id(mp1)} failvalue=1e-6 
+.measure tran maxmag2   max {abs(i(vmodg)-ig(mp1))} failvalue=1e-6
+.measure tran totalrms2 rms {i(vmodg)-ig(mp1)} failvalue=1e-6 
+.measure tran maxmag3   max {abs(i(vmods)-is(mp1))} failvalue=1e-6
+.measure tran totalrms3 rms {i(vmods)-is(mp1)} failvalue=1e-6 
+.measure tran maxmag4   max {abs(i(vmode)-ie(mp1))} failvalue=1e-6
+.measure tran totalrms4 rms {i(vmode)-ie(mp1)} failvalue=1e-6 
+.measure tran maxmag5   max {abs(i(vmodb)-ib(mp1))} failvalue=1e-6
+.measure tran totalrms5 rms {i(vmodb)-ib(mp1)} failvalue=1e-6 
+
+.options device mincap=1uf 
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-7
+
+vdddev 	vdd	0	4V
+rin	in	1	1K
+vin  1	0  0V pulse (0V 4V 1.5us 5ns 5ns 1.5us 3.01us)
+r1    vout  1  100K  
+c2    vout  0  1.0p 
+
+Rpd vout pd 1
+Rpg in   pg 1
+Rps vdd  ps 1
+Rpe 0    pe 1
+Rpb 0    pb 1e+8
+
+vmodd pd pda 0
+vmodg pg pga 0
+vmods ps psa 0
+vmode pe pea 0
+vmodb pb pba 0
+
+MP1 pda pga psa pea pba  cmosp L=0.258u W=19.585u
+
+.MODEL cmosp pmos (   LEVEL   = 10
++ soimod = 0
++ rgatemod = 1
++ mobmod = 2  capmod = 2
++ shmod = 1  igmod = 0  paramchk = 0 )
+
+.END

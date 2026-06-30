@@ -1,0 +1,26 @@
+* Both acobjfunc and objvars can now be specified on a .SENS line (Glitlab issue 270)
+*
+* This netlist is part of a test for a rule/behavior change introduced with the
+* code changes for Gitlab issue 270. Before the change, AC sensitivity objective
+* functions could only be defined by one of objvars or acobjfunc (both could not be
+* used on the same .SENS line). This netlist follows the ‘old’ convention and just
+* uses objvars to define AC sensitivity objective functions. Only the sensitivity
+* results are printed and used for comparison in this test.
+
+v1 1 0 ac 10
+r1 1 2 4.7K
+c1 2 0 47n
+r2 2 3 4.7K
+c2 3 0 47n
+r3 3 4 4.7K
+c3 4 0 47n
+
+.ac dec 10 1 10K
+
+*This is used to create the gold standard to validate new behavior:
+.sens objvars=2,2,3,4,3,4 param=r1:r,c1:c,r2:r,c2:c,r3:r,c3:c
+
+.options sensitivity direct=1 adjoint=1 stdoutput=0
+.print sens
+
+.end

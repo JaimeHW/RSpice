@@ -1,0 +1,43 @@
+// Generated for: spectre
+// Generated on: Jan 30 09:32:20 2017
+// Design library name: xyce_translator_prj
+// Design cell name: Subckt_test
+// Design view name: schematic
+simulator lang=spectre
+global 0
+//include "/usr/local/cadence/ic-5.1.41usr5/tools/dfII/samples/artist/ahdlLib/quantity.spectre"
+
+// Library name: xyce_translator_prj
+// Cell name: R_subckt
+// View name: schematic
+subckt R_subckt Vnode1_I2 P2
+    L1 (VL1 P2) inductor l=100n
+    R1 (Vnode1_I2 VL1) resistor r=5K
+    R2 (Vnode1_I2 P2) resistor r=10K
+ends R_subckt
+// End of subcircuit definition.
+
+// Library name: xyce_translator_prj
+// Cell name: Subckt_test
+// View name: schematic
+R2 (Vnode2 0) resistor r=10K
+R1 (Vnode2 VL1) resistor r=5K
+L1 (VL1 0) inductor l=100n
+V2 (Vnode2 0) vsource mag=500.0m phase=0 type=sine sinedc=1 freq=5K
+V1 (Vnode1 0) vsource mag=500.0m phase=0 type=sine sinedc=1 freq=5K
+I2 (Vnode1 0) R_subckt
+simulatorOptions options reltol=1e-3 vabstol=1e-6 iabstol=1e-12 temp=27 \
+    tnom=27 scalem=1.0 scale=1.0 gmin=1e-12 rforce=1 maxnotes=5 maxwarns=5 \
+    digits=5 cols=80 pivrel=1e-3 sensfile="../psf/sens.output" \
+    checklimitdest=psf 
+tran tran stop=1m errpreset=moderate write="spectre.ic" \
+    writefinal="spectre.fc" annotate=status maxiters=5 
+finalTimeOP info what=oppoint where=rawfile
+modelParameter info what=models where=rawfile
+element info what=inst where=rawfile
+outputParameter info what=output where=rawfile
+designParamVals info what=parameters where=rawfile
+primitives info what=primitives where=rawfile
+subckts info what=subckts  where=rawfile
+save Vnode1 I2.R1:1 I2.VL1 I2.R2:1 Vnode2 R1:1 VL1 R2:1 
+saveOptions options save=allpub

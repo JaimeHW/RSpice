@@ -1,0 +1,35 @@
+*************************************************************
+* Test the multiplicity factor (M) for Thermal Resistor device.
+* Testing for .DC analysis is okay for the Thermal Resistor
+* device.
+*
+*
+* See SON Bug 834 for more details.
+*************************************************************
+
+*model cards
+.include copper.constant
+.include copper.linear
+
+* These two tests are similar to ones in THERMAL_RESISTOR,
+* but the test will later step over M for R2.
+V1  1   0  1
+R1a 1  1a  1.68e-4
+R1  1a  0 copperConstant L=0.1 a=1e-5 M=1
+
+V2  2   0  1
+R2a 2  2a  1.65205e-04
+R2  2a  0 copperLinear L=0.1 a=1e-5 M=1
+
+* step over M and L for the R2
+* and also over Temperature
+.STEP R2:M 1 2 1
+.STEP R2:L 0.1 0.2 0.1
+.STEP TEMP 20 30 10
+
+* Analysis and print statements.  To be conservative
+* make sure that I() and P() work with M.
+.DC V1 1 1 1
+.PRINT DC R1:R R2:L R2:M R2:R V(1a) I(R1) P(R1) V(2a) I(R2) P(R2)
+
+.END

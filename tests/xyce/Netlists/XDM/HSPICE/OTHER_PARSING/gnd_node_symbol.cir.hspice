@@ -1,0 +1,13 @@
+$ ground node symbols
+* Netlist tests XDM translation of ground node synonym.
+* XDM should detect the node "gnd" (case insensitive)
+* and add in a .PREPROCESS directive to make it
+* equivalent to node "0" (see issues #61 & #82 on XDM
+* gitlab).
+
+VA 1 0 dc=0
+R1 1 2 10
+R2 2 gnd 10
+
+.DC VA 0 10 1
+.PRINT DC V(1) V(2) 

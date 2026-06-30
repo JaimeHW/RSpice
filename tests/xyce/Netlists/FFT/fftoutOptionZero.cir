@@ -1,0 +1,18 @@
+**************************************************
+* Test BART window, and the default value (0) for
+*. OPTIONS FFT FFTOUT.  So, this netlist should
+* not output the optional THD, ENOB, SFDR and
+* SNDR information.
+*
+**************************************************
+.TRAN 0 1
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+.PRINT TRAN V(1) V(2)
+
+.FFT V(1) NP=8 WINDOW=BART FORMAT=UNORM
+
+.END

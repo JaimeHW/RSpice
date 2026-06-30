@@ -1,0 +1,13 @@
+* Remeasure a FORMAT=STD file that has a STEPNUM column
+*******************************************************
+
+V1 1 0 SIN(0 1 1)
+R1 1 2 1
+R2 2 0 1
+
+.OPTIONS OUTPUT ADD_STEPNUM_COL=TRUE
+.PRINT TRAN R1:R R2:R V(1) V(2)
+.TRAN 0 1
+.MEASURE TRAN MAXV2 MAX V(2)
+
+.END

@@ -1,0 +1,21 @@
+ ***** Measure Functions *****
+
+MAXIR1 = 4.999949e-01 at time = 1.249280e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 2.000000e-03
+
+MAXPR1 = 4.999930e-01 at time = 7.494041e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 2.000000e-03
+
+MAXWR1 = 4.999930e-01 at time = 7.494041e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 2.000000e-03
+
+MAXIR23 = 4.999966e-01 at time = 1.625293e-03
+Measure Start Time= 0.000000e+00	Measure End Time= 2.000000e-03
+
+MAXPR45 = 3.999626e+00 at time = 4.161535e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 2.000000e-03
+
+MAXWR67 = 7.499996e+00 at time = 6.874725e-04
+Measure Start Time= 0.000000e+00	Measure End Time= 2.000000e-03
+
+

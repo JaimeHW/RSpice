@@ -1,0 +1,68 @@
+*************************************************************
+* Test the multiplicity factor (M) for Inductor device.
+* Test stepping over M for L2 and temperature for L4 and L5. 
+* 
+* Note: this test is based on the test in INDUCTOR
+*
+* See SON Bug 834 for more details.
+*************************************************************
+
+*COMP V(1)  OFFSET=1 
+*COMP V(1a) OFFSET=1 
+*COMP V(L1) OFFSET=1 
+*COMP V(2)  OFFSET=1
+*COMP V(2a) OFFSET=1
+*COMP P(L2) OFFSET=1
+*COMP V(3)  OFFSET=1
+*COMP V(3a) OFFSET=1
+*COMP P(L3) OFFSET=1 
+*COMP V(4)  OFFSET=1
+*COMP V(4a) OFFSET=1
+*COMP P(L4) OFFSET=1
+*COMP V(5)  OFFSET=1
+*COMP V(5a) OFFSET=1
+*COMP P(L5) OFFSET=1
+*COMP V(6)  OFFSET=1
+*COMP V(6a) OFFSET=1
+*COMP P(L6) OFFSET=1
+
+I1 1 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS) 
+L1 1a 0 L=10mH  
+R1 1 1a 0.001
+
+* Values should same as L1, for M=0.5
+I2 2 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS) 
+L2 2a 0 L=5mH M=0.5
+R2 2 2a 0.001 
+
+* Should get the same answer as L2, for M=1
+I3 3 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS) 
+L3 3a 0 L=5mH 
+R3 3 3a 0.001 
+
+* Values should be same as L3 for TEMP=20.
+* Values should equal L6 for TEMP=30.
+I4 4 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS) 
+L4 4a 0 LMOD L=10mH M=2
+R4 4 4a 0.001 
+
+* Values should be same as L3 for TEMP=20.
+* Values should equal L6 for TEMP=30.
+I5 5 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS) 
+L5 5a 0 LMOD L=5mH 
+R5 5 5a 0.001 
+.MODEL LMOD L(TNOM=20 TC1=0.2)
+
+* baseline case for L4 and L5 for TEMP=30, 
+I6 6 0 PULSE(0 5V 0 1MS 1MS 10MS 25MS) 
+L6 6a 0 L=15mH 
+R6 6 6a 0.001 
+
+.options timeint newbpstepping=0 reltol=1.0e-4
+.STEP TEMP 20 30 10
+.STEP L2:M 0.5 1 0.5
+.TRAN 0.1MS 20MS 
+.PRINT TRAN V(1) V(1a) P(L1) V(2) V(2a) P(L2) V(3) V(3a) P(L3) 
++ V(4) V(4a) P(L4) V(5) V(5a) P(L5) V(6) V(6a) P(L6)
+
+.END

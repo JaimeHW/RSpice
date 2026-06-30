@@ -1,0 +1,20 @@
+********************************************************
+* Test error messsage when .DATA line does not have
+* enough fields on it.  In this example, it is missing
+* any values for the R1 parameter.
+*
+* See SON Bug 1188 for more details.
+********************************************************
+
+R2 2 0 1
+R1 1 2 1
+V1 1 0 1
+
+.DATA table
++ R1
+.enddata
+
+.print DC v(2)
+.dc data=table
+
+.end

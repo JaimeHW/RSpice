@@ -1,0 +1,15 @@
+ ***** Measure Functions ***** 
+
+FITERRORPRNL1VR4 = 7.740998e-02
+COMP_FUNCTION was L1NORM
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+FITERRORPRNL1VI4 = 6.248135e-02
+COMP_FUNCTION was L1NORM
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+FITERRORPRNL2IM = 1.987699e-04
+COMP_FUNCTION was L2NORM
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+

@@ -1,0 +1,43 @@
+Bug 113 requests that the voltage controlled switch support an ON and OFF
+keyword.  
+
+TVR implemented an ON and OFF parameter that can be specified so:
+   S1 1 0 3 0 SW ON
+
+The only function of the ON and OFF parameter is to specify the state of the
+switch at the first step of the operating point calculation.  It shouldn't
+have much effect in most simple circuits, as most times the operating point
+converges to the correct result anyway ---  so it's hard to get a meaningful
+simple test of this feature.
+
+A simple verification that it's working would be to run Xyce and observe
+the summary at the end of the run.  VSWITCH_NOIC.cir should take 3 newton 
+iterations, VSWITCH_ON_OFF.cir takes only 2.  This should be adequate
+for release testing.
+
+A better way to observe that this is working correctly is to run the two 
+netlists in this directory with a version of the code compiles with nonlinear 
+solver verbosity turned on.  The VSWITCH_NOIC.cir netlist has no initial 
+condition specifier, and so the operating point begins with the (wrong) 
+assumption that the switch is open.  The first newton iteration gives a large 
+residual (about 5e+6), and then settles on much smaller values.  
+VSWITCH_ON_OFF.cir has the ON parameter, setting the initial guess at the 
+switch state to the correct ON value, and so goes right to small residuals.
+
+Both should produce identical .prn files, so looking at the .prn output 
+is NOT sufficient.
+
+SUMMARY:
+  1) Run Xyce on both netlists, saving the console output
+  2) Examine the line in the console output that contains 
+     "Number of Jacobians Evaluated:"  VSWITCH_NOIC should have a 3 here,
+     VSWITCH_ON_OFF should have 2.
+----
+THIS TEST WILL NOT RUN IN PARALLEL WITH DMA ON.
+
+The netlist is small enough that with DMA on it generates a degenerate matrix.
+It could be run in parallel on two processors with "-dma off" but need not be.
+
+My apologies for not having this statement in the README before the release
+testing began.
+

@@ -1,0 +1,43 @@
+***********************************************************
+* Voltages from subcircuit interface nodes, used both in 
+* an expression and outside of an expression, on a .PRINT
+* line.  Also test that the bug is fixed for hierarchical 
+* subcircuits.  See SRN Bug 1962 for more details.
+*
+***********************************************************
+ 
+V1 1 0 PWL 0 0 1 1
+X1 1 2 MySubcircuit1
+R2 2 0 0.5
+
+X2 1 4 MySubcircuit2
+R4 4 0 0.5
+
+X3 1 5 MySubcircuit3
+R5 5 0 0.5
+
+*subcircuit definitions
+.SUBCKT MYSUBCIRCUIT1 a c 
+R1   a b 0.5
+R2   b c 0.5
+.ENDS 
+
+.SUBCKT MYSUBCIRCUIT2 d f 
+R1   d e 0.5
+R2   e f 0.5
+.ENDS
+
+* test that bug is fixed for hierarchical subcircuits
+.SUBCKT MYSUBCIRCUIT3 g j
+R1 g h 0.5
+X1 h i MYSUBCIRCUIT1
+R2 i j 0.5
+.ENDS  
+
+.TRAN 0 1
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.2
+.PRINT TRAN {V(X1:a)*V(X1:c)} V(X2:f)
++ {V(X3:X1:a)}
+
+.END
+

@@ -1,0 +1,25 @@
+* Example of PSpice Resistor Model Cards & Multiple Temperatures
+* Xyce netlist for corresponding PSPICE netlist
+* Netlist tests XDM translation of multiple temperature
+* values in a .TEMP statement. XDM should translate this
+* into a .STEP command for data in a .DATA table (see
+* issue #142 on XDM gitlab).
+
+R_R1 N397302 0 R_R1_MOD R=1
+.MODEL R_R1_MOD R R=2 LEVEL=1
+R_R2 N397302 0 R_R2_MOD R=1
+.MODEL R_R2_MOD R TNOM=30 R=2 TC2=0.01 TC1=0.2 LEVEL=1
+V_V1 N397302 0 AC 1 SIN(0V 2V 1e6 0 0 0)
+
+.TRAN 0 1us 0
+.STEP DATA=XDMgeneratedTable 
+.DATA XDMgeneratedTable 
++ temp
++ 40
++ 50
++ 70
+.ENDDATA 
+
+.PRINT TRAN FORMAT=PROBE V(N397302) I(R_R1) I(R_R2)
+
+.ENDS

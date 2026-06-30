@@ -1,0 +1,12 @@
+test
+
+.options nonlin nox=0
+.options nonlin-tran nox=0
+
+R1  1 2  5.0
+
+.tran 0.01 1 
+
+.print tran v(1) v(2)
+
+

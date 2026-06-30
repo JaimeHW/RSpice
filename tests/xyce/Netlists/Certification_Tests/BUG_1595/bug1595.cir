@@ -1,0 +1,26 @@
+****************************************************
+* Example netlist for SRN Bug 1595.  Until that
+* bug is fixed, this netlist will produce a 
+* netlist parsing error if the K1 instance line
+* at the top-level of the circuit is used.  It
+* will run fine, if the K1 instance line in the
+* subcircuit definition for ML_SUB is used instead.
+****************************************************
+
+V1S 1S 0 sin(0 1 1KHz)
+R1S 1S 2S 1
+R3S 3S 0 1
+X1 2S 3S ML_SUB
+
+.SUBCKT ML_SUB a b
+L1 a 0 1mH
+L2 b 0 1mH
+*K1 L1 L2 0.75
+.ENDS
+K1 X1:L1 X1:L2 0.75
+
+.TRAN 0 1ms
+.PRINT TRAN V(2s) V(X1:a)
+
+.END
+

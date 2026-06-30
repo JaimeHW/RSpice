@@ -1,0 +1,13 @@
+simple RC -- CSV version
+
+*.tran 0 1.0e-3 0 1e-6
+.hb 1e5
+.print hb FORMAT=CSV  v(1) v(2) i(c1) i(r1) i(v1)
+.options hbint numfreq=1 numtpts =100 
+.options linsol-hb prec_type=block_jacobi
+
+v1 1 0 sin 0 1V 1e5 0 0
+r1 1 2 1k
+c1 2 0 2u
+
+.end

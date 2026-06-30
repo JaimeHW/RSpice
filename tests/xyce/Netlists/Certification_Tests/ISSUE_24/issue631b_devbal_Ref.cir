@@ -1,0 +1,21 @@
+Local Variation test for subcircuit arguments (issue 631)
+
+r1 1 2 5.0
+x1 2 0 sub1  arg1={aunif(5,5)}
+V1 1 0 DC 10V
+ 
+.subckt sub1 in out  arg1=1
+r1 in out {arg1}
+.ends
+ 
+.print DC r1:r x1:r1:r
+.dc v1 5 15 5
+ 
+.SAMPLING useExpr=true
+.options SAMPLES numsamples=2 seed=1923635719
+
+* For device balance parallel distribution
+.options dist strategy=2
+
+.end
+

@@ -1,0 +1,34 @@
+*******************************************************************************
+* This netlist is equivalent to Step 1 for the RiseFallCrossTest.cir netlist.
+* It has VS1:VA=2
+*
+*******************************************************************************
+*
+** use a damped sinusoid
+VS  1  0  SIN(0 2 1KHZ 0 2.0)
+VP  2  0  PULSE( 0 100 0.2ms 0.2ms 0.2ms 1ms 2ms )
+
+R1  1  0  100
+R2  2  0  100
+
+* Use MEASFAIL to test the reset of the default calculation value
+.OPTIONS MEASURE MEASFAIL=0
+
+.TRAN 0  10ms
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2)
+
+* test RISE, FALL and CROSS qualifiers
+.measure tran Rise4 min V(1) RISE=4
+.measure tran Fall3 min V(1) FALL=3
+.measure tran Cross8 min V(1) CROSS=8
+
+* this test should return -1 since the RISE, FALl and CROSS 
+* values are too high
+.measure tran returnNegOneRise min V(1) RISE=12 default_val=-1
+.measure tran returnNegOneFall min V(1) FALL=11 default_val=-1
+.measure tran returnNegOneCross min V(1) CROSS=20 default_val=-1
+
+.measure tran v2Rise4 min V(2) RISE=4
+
+.END
+

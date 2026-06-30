@@ -1,0 +1,33 @@
+* Test bad measure lines that have too many variables
+* on their lines.  All of these measure types are only
+* allowed to have one variable.
+
+.TRAN 0 1
+.PRINT TRAN V(1) V(2)
+V1 1 0 SIN(0 1 1)
+R1 1 2 1
+R2 2 0 1
+
+.MEASURE TRAN AVG AVG V(1) V(2)
+.MEASURE TRAN DUTY DUTY V(1) V(2)
+.MEASURE TRAN EQN EQN V(1) V(2)
+.MEASURE TRAN ERROR ERROR v(1) v(2) FILE=ErrorTestRawData.prn
++ comp_function=l2norm indepvarcol=1 depvarcol=2
+.MEASURE TRAN FOUR FOUR V(1) V(2) AT=1
+.MEASURE TRAN FREQ FREQ V(1) V(2)
+.MEASURE TRAN INTEG INTEG V(1) V(2)
+.MEASURE TRAN MAX MAX V(1) V(2)
+.MEASURE TRAN MIN MIN V(1) V(2)
+.MEASURE TRAN OFF_TIME OFF_TIME V(1) V(2)
+.MEASURE TRAN ON_TIME ON_TIME V(1) V(2)
+.MEASURE TRAN PP PP V(1) V(2)
+.MEASURE TRAN RMS RMS V(1) V(2)
+
+* bad .MEASURE lines mentioned in SON Bug 1134
+.MEASURE TRAN M1 MAX V(1)+ V(2)
+.MEASURE TRAN M2 MAX V(1) + V(2)
+
+* add one good measure also
+.MEASURE TRAN MAXGOOD MAX V(1)
+
+.END

@@ -1,0 +1,49 @@
+P-Channel Mosfet Circuit
+**************************************************************
+* This is only to test out the doping profile.
+*
+* Designed to be similar to the regression test, pmos1.cir.
+*
+* Note: The gate electrode is not set to be an insulator, so 
+*       this device can't behave like a MOSFET.
+*
+**************************************************************
+VDD 2 0 DC 5V
+R1 2 1 50K
+R2 1 0 50K
+RD 4 0 7.5K
+VMON 3 4 0.0
+
+YPDE FET1 3 1 2 2 PFET sgplotLevel=0 tecplotLevel=0 gnuplotlevel=0
++ txtdatalevel=2
++ outputnlpoisson=1
++ mobmodel=carr
++ type=PMOS
++ nx=51 l=1.0e-3
++ ny=25 w=5.0e-4
++ node = { name  =   source,  gate, drain, sub
++          start =      0.0, 3.0e-4, 8.0e-4, 0.0
++            end =   2.0e-4, 7.0e-4, 1.0e-3, 1.0e-3
++           side =      top,    top,   top, bottom
++       material =  neutral, neutral, neutral, neutral
++ oxideBndryFlag =        0,     0, 0,   0}
+
+.MODEL PFET ZOD level=2
+
+* Nonlinear solver params:
+.options NONLIN maxstep=40 maxsearchstep=2 searchmethod=0 
++ in_forcing=0 nlstrategy=0 debuglevel=0 
+
+* Time integration params:
+.options TIMEINT reltol=1.0e-3 abstol=1.0e-6 DOUBLEDCOP=NL_POISSON
+
+* Linear solver params:
+.options LINSOL type=klu
+
+.options DEVICE voltlim=0
+
+.DC VDD 0 0 1.0
+.print DC V(2) V(1) V(3)
+
+.END
+

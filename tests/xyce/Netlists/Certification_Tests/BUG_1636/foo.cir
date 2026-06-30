@@ -1,0 +1,26 @@
+Test of multiple includes of the same file
+
+.subckt INVERTER IN OUT VDD GND
+MN1 OUT IN GND GND CMOSN L=0.35U W=4.2U AD=4.2P AS=4.2P PD=10U PS=10U
+MP1 OUT IN VDD VDD CMOSP L=0.46U W=1U  AD=1P   AS=1P   PD=4U  PS=4U
+.include models.inc
+.ends
+
+* In versions of Xyce prior to 20 April 2009, this would be an error:
+.include models.inc
+
+* A small load (R1, C1) is applied to the output node, VOUT. The input signal
+* is at 5V for 1.5us and then at 0V for 1.5us. The voltage at VOUT is high (4.8V)
+* when VIN1 is low and vice versa.
+** Analysis setup **
+*
+.tran 20ns 30us
+.print tran PRECISION=10 WIDTH=19 v(vout) v(in) v(1)
+.options timeint reltol=5e-3 abstol=1e-3
+VDDdev  VDD     0       5V
+RIN     IN      1       1K
+VIN1  1 0  5V PULSE (5V 0V 1.5us 5ns 5ns 1.5us 3.01us)
+R1    VOUT  0  10K  
+C2    VOUT  0  0.1p
+XINV1 IN VOUT VDD 0 INVERTER
+.end

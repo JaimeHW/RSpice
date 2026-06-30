@@ -1,0 +1,31 @@
+TRAN test of output format with homotopy
+*
+* Trivial resistor circuit, just do a transient and watch the output
+*
+
+R1 1 0 10
+V1 1 0 sin (0 10 10MEG 0 0)
+
+.print TRAN v(1) I(v1)
+.print HOMOTOPY v(1) I(v1)
+.tran 1ns 10ns
+
+************************************
+* **** Start Homotopy Setup ****
+************************************
+.options nonlin nlstrategy=0 searchmethod=0
++ maxstep=50 maxsearchstep=20 in_forcing=0 AZ_Tol=1.0e-6 memory=0
++ continuation=1
+
+.options loca stepper=0 predictor=0 stepcontrol=0
++ conparam=mosfet:gainscale,mosfet:nltermscale
++ initialvalue=0.0,0.0 minvalue=-1.0,-1.0 maxvalue=1.0,1.0
++ initialstepsize=0.2,0.2 minstepsize=1.0e-4,1.0e-4 maxstepsize=0.2,0.2
++ aggressiveness=1.0,1.0
++ maxsteps=5000 maxnliters=200
+**********************************
+* **** End Homotopy Setup ****
+**********************************
+
+
+.end

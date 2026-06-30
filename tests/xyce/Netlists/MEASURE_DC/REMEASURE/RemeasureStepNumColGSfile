@@ -1,0 +1,14 @@
+In OutputMgr::remeasure 
+file to reprocess through measure and/or fft functions: RemeasureStepNumCol.cir.prn
+
+ ***** Measure Functions ***** 
+
+MAXV1B = 1.093750e+01 at VSRC1 value = 1.500000e+01
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 1.500000e+01
+
+MINV1B = 1.250000e+00 at VSRC1 value = 1.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 1.500000e+01
+
+PPV1B = 9.687500e+00 with max at VSRC1 value= 1.500000e+01 and min at VSRC1 value= 1.000000e+00
+Measure Start VSRC1 Value= 1.000000e+00	Measure End VSRC1 Value= 1.500000e+01
+

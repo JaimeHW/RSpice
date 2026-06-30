@@ -1,0 +1,39 @@
+* 3 stage RC Ladder.
+*
+.global_param cap=2e-6
+.global_param res=1e3
+
+.global_param mag=1
+.global_param phase=0.1
+
+Isrc 1 0 AC {mag} {phase} 
+Rgs 1 2 0.02
+
+.subckt RCBlock IN OUT GND
+R1 IN OUT {res}
+C1 IN OUT {cap}
+Cg1 OUT GND 1e-7
+.ends
+
+X1 2 3 0 RCBlock
+X2 3 4 0 RCBlock
+X3 4 5 0 RCBlock
+
+.data table
++ mag phase freq
++  2.0   0.2  1.0e1
++  3.0   0.3  1.0e2
++  4.0   0.4  1.0e3
++  5.0   0.5  1.0e4
++  6.0   0.6  1.0e5
+.enddata
+
+.print ac 
++ {mag}
++ {phase}
++ {Isrc:acmag}
++ {Isrc:acphase}
++ v(5)
+
+.AC data=table
+

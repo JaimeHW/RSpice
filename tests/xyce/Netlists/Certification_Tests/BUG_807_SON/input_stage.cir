@@ -1,0 +1,25 @@
+
+.include ASU_45.txt
+.param Rw_in = 1.5
+.param Rvw_in = 1.5
+
+Vrow1 Nvin1 0 PWL(0 0 0.9n 0 1n 1 6n 1 6.1n 0)
+Rw_vin1 Nvin1 Ndin1  {Rvw_in}
+Mda1 dd Ndin1 mid1 dd PMOS l=45n w=135n
+Mdb1 mid1 Ndin1 ss ss NMOS l=45n w=135n
+Mdc1 dd mid1 Nin1 dd PMOS l=45n w=4500n
+Mdd1 Nin1 mid1 ss ss NMOS l=45n w=4500n
+
+Rw_in1 Nin1 Na1_1 {Rw_in}
+RDUMMY Na1_1 0 1
+
+Vdrive_high dd 0 PWL(0 0 0.9n 0 1n 1 6n 1 6.1n 0)
+Vdrive_low ss 0 0
+
+*COMP V(dd) offset=.01
+*COMP V(Nvin1) offset=.01
+*COMP V(Ndin1) offset=.01
+*COMP V(Nin1) offset=.01
+.print tran v(dd) V(Nvin1) V(Ndin1) V(Nin1)
+.tran .01n 8n 0 .0001n
+

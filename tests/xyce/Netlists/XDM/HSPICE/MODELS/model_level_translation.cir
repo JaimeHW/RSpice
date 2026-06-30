@@ -1,0 +1,22 @@
+* Xyce netlist
+
+*Analysis directives:
+.TRAN 1us 500us
+.PRINT TRAN FORMAT=PROBE V(2) I(VDS)
+
+M1 2 1 0 0 Bsim3 W=4.1 L=2.0e-6 NRS=1
+VGS 1 0 25
+VDS 2 0 SIN(0V 50V 1e3 0 0 0)
+
+.model BSIM3 NMOS (LEVEL=9 MOBMOD=3 CAPMOD=2 PARAMCHK=1 NQSMOD=0
++ TOX=1100e-10   XJ=1.4e-6    NCH=1.3e17     UA=2.56e-9
++ U0=700         VSAT=1.0e5   DROUT=20.0
++ DELTA=0.10     PSCBE2=0     RSH=1.09e-3
++ VTH0=4.75      VOFF=-0.1    NFACTOR=1.1
++ LINT=5.8e-7    DLC=1.4e-7   FC=0.5
++ CGSO=1.2e-13   CGSL=0       CGDO=2.0e-13
++ CGDL=6.15e-10  CJ=0         CF=0
++ CKAPPA=0.02    KT1=-1.78    KT2=0
++ UA1=2.55e-10   NJ=10 )
+
+.END

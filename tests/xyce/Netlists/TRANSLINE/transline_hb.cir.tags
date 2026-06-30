@@ -1,0 +1,3 @@
+serial, nightly,  parallel, transline, hb
+valgrind
+required:fft

@@ -1,0 +1,58 @@
+ ***** Measure Functions ***** 
+
+RMSVR4 = 4.024423e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+RMSVI4 = 1.863353e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+RMSVR4EXP = 1.395952e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+RMSVR4FROMTO = 4.982781e-01
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+RMSIMEAMP = 2.309098e-03
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+RMSVM4FROMTO1PT = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+03
+
+Netlist warning: RMSFAIL1 failed. FROM value > highest frequency value
+RMSFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: RMSFAIL2 failed. TO value < FROM value
+RMSFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+LASTMEASURE = 4.434869e-01
+ ***** Measure Functions ***** 
+
+RMSVR4 = 3.109454e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+RMSVI4 = 2.084973e-01
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+RMSVR4EXP = 1.287369e+00
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+RMSVR4FROMTO = 4.932827e-01
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+05
+
+RMSIMEAMP = 1.657120e-03
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+RMSVM4FROMTO1PT = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+03	Measure End Freq= 1.000000e+03
+
+Netlist warning: RMSFAIL1 failed. FROM value > highest frequency value
+RMSFAIL1 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+Netlist warning: RMSFAIL2 failed. TO value < FROM value
+RMSFAIL2 = 0.000000e+00 FAILED
+Measure Start Freq= 1.000000e+02	Measure End Freq= 1.000000e+06
+
+LASTMEASURE = 3.743771e-01

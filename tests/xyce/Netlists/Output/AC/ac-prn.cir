@@ -1,0 +1,17 @@
+AC test of print output format
+*
+* Trivial high-pass filter (V-C-R) circuit, just do a AC sweep and watch the output
+* Various V(b) and N(b) columns should match.
+*
+
+R1 b 0 2
+C1 a b 1u
+V1 a 0 DC 0V AC 1
+
+.print AC 
++ v(b) n(b) vr(b) vi(b) vm(b) vp(b) vdb(b)
++ i(v1) ir(v1) ii(v1) im(v1) ip(v1) idb(v1)
+
+.ac dec 5 100Hz 10e6
+
+.end

@@ -1,0 +1,16 @@
+Test of global params in VSRC combined with voltage source stepping
+
+.global_param dvdd = '1.8'
+
+V1 1 0 'dvdd'
+R1 1 2 1.0
+R2 2 0 2.0
+
+.DC R1 1.0 1.0 1.0
+.PRINT dc R1 V(1) V(2)
+.options output PRINTFOOTER=false
+
+.step dvdd list 1.5 1.6 1.7 1.8 2.0
+
+.options nonlin continuation=sourcestep2
+

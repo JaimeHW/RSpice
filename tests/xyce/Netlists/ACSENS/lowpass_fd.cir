@@ -1,0 +1,31 @@
+Lowpass filter from https://www.electronics-tutorials.ws/filter/filter_2.html
+
+.param dr=0.001k
+
+v1 1 0 ac 10
+r1 1 2 4.7k
+c1 2 0 47n
+
+v2 1b 0 ac 10
+r2 1b 2b {4.7k+dr}
+c2 2b 0 47n
+
+*.ac dec 10 1 10k
+*.ac lin 1 720 720
+.ac lin 1 360 360
+.print ac format=tecplot  vm(1) vp(1) vm(2) vp(2)   
+*+ {20*log(vm(2)/vm(1))}  
++ vm(2b) vp(2b) 
+*
++ { (vm(2b)-vm(2))/dr }
++ { (vp(2b)-vp(2))/dr }
+*
++ { (vr(2b)-vr(2))/dr }
++ { (vi(2b)-vi(2))/dr }
+
+*.sens objvars=2 param=r1:r
+*.options sensitivity direct=1 adjoint=1  stdoutput=1
+
+.options device debuglevel=-100
+
+.end 

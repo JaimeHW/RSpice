@@ -1,0 +1,48 @@
+* This test ensures that expressions involving if-statement expressions 
+* can be processed by the parser, even if they are NOT surrounded by 
+* curly braces.
+*
+* this is tricky, b/c on .param lines, if curly braces are not used, then
+* the equal sign is the only delimeter.  This can confuse the parser if
+* we aren't careful, whenever an expression includes comparison operators (which 
+* sometimes include "=" character).  Fortunately, the list of comparison 
+* operators that include "=" is short.
+
+.param x=3.0
+.param y=-3.0
+
+.param test1= if(x>0,2*x,0)
+.param test2= if((1+y>0),2*y,0+2)
+
+.param A = 1.0
+.param B = 2.0
+.param C = 3.0
+.param D = 4.0
+
+.param test3= if(A==B,C+0,D)
+.param test4= if(A>=B,C+0,D)
+.param test5= if(A<=B,C+0,D)
+.param test6= if(A!=B,C+0,D)
+
+R1 1 0 {test1}
+V1 1 0 1.0
+
+R2 2 0 {test2}
+V2 2 0 1.0
+
+R3 3 0 {test3}
+V3 3 0 1.0
+
+R4 4 0 {test4}
+V4 4 0 1.0
+
+R5 5 0 {test5}
+V5 5 0 1.0
+
+R6 6 0 {test6}
+V6 6 0 1.0
+
+.DC V1 1.0 1.0 1.0
+.PRINT DC V(1) V(2) V(3) V(4) V(5) {test1} {test2} {test3} {test4} {test5} {test6}
+.end
+

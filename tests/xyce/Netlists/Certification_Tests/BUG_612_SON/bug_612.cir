@@ -1,0 +1,18 @@
+Simple Illustration of core-dump
+R1 a b 10.0
+R2 b 0 2.0
+
+*            V0  VA FREQ TD THETA
+Va a 0  sin ( 5.0  {v_amplitude} 0.05 0.0 0.0)
+
+.tran 0.5s 60s
+.print tran v(a) v(b) 
+
+.global_param v_amplitude=2.0
+
+.step R1 10.0 15.0 1 
+.step v_amplitude 1.0 3.0 1.0
+
+.result {v(a),v(b)}
+
+.END

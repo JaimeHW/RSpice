@@ -1,0 +1,16 @@
+Test of E/B/H source currents in expressions
+R1  1  0  1
+R2  2  0  2
+R3a 3a 0  3
+R3b 3b 0  3
+R4a 4a 0  4
+R4b 4b 0  4
+V1  1  0  SIN(0 1 1)
+B2  2  0  V={2*v(1)}
+E3  3a 0  value={-I(B2)}
+H3  3b 0  B2 2
+B4a 4a 0  V={I(E3)+I(B2)}
+B4b 4b 0  V={-I(H3)/2+I(B2)}
+.tran 0 1
+.print tran v(1) v(2) v(3a) v(3b) {v(4a)-v(4b)} {V(2)/2+V(3a)/3+V(4a)}
+.end

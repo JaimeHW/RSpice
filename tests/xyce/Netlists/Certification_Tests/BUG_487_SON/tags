@@ -1,0 +1,3 @@
+serial, pde, skipnlpoisson
+nightly
+required:noverbose

@@ -1,0 +1,4 @@
+nightly, serial, parallel, power
+valgrind
+bsim6
+adms

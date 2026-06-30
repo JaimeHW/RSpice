@@ -1,0 +1,17 @@
+********************************************************
+* Test FORMAT=CSV without .STEP.  
+*
+********************************************************
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+
+.PRINT DC R1:R R2:R V(1) V(2)
+.DC V1 1 25 1 
+
+.sens objfunc={V(2)} param=R2:R 
+.print SENS FORMAT=CSV V(1) R1:R R2:R
+.options SENSITIVITY direct=1 adjoint=0  
+
+.end

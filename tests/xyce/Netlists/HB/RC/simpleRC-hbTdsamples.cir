@@ -1,0 +1,26 @@
+simple RC
+*
+
+*.tran 0 1.0e-3 0 1e-6
+.hb 1e5
+.print hb  v(1) v(2) i(c1) i(r1) i(v1)
+*.dc lin v1 0 1 0.1
+*.print dc  v(1) v(2) i(v1) i(r1)
+
+*.options mpdeint ic=2 auton2=true saveicdata=1  diff=0 wampde=1 phase=0 phasecoeff=0  T2=1e-5 oscout=1
+.options hbint numfreq=11 numtpts =100 
+*.options timeint maxord=1
+*.options timeint reltol=1e-3
+*.options timeint-mpde erroption=1
+*.options timeint method=7 reltol=1e-3   DEBUGLEVEL=0
+*.options timeint erroption=1
+*.options nonlin maxstep=10
+*.options device voltlim=0
+
+v1 1 0 sin 0 1V 1e5 0 0
+*v1 1 0 DC 3.7V
+r1 1 2 1k
+c1 2 0 2u
+*r2 2 0 1k
+
+.end

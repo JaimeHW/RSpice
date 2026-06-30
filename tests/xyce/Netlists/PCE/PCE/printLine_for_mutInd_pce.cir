@@ -1,0 +1,17 @@
+PCE test mutual inductor
+*
+* This "circuit" exists to provide a meaningful .PRINT line to xyce_verify.pl.  
+*
+* It isn't supposed to be run, and will exit with error.
+*
+
+*COMP {v(2)}_quad_pce_mean      OFFSET=1.0
+*COMP {v(2)}_quad_pce_meanPlus  OFFSET=1.0
+*COMP {v(2)}_quad_pce_meanMinus OFFSET=1.0
+*COMP {v(2)}_quad_pce_stddev    OFFSET=1.0
+*COMP {v(2)}_quad_pce_variance  OFFSET=1.0
+
+.print tran {v(2)}_quad_pce_mean    {v(2)}_quad_pce_meanPlus    {v(2)}_quad_pce_meanMinus    {v(2)}_quad_pce_stddev    {v(2)}_quad_pce_variance
+
+.tran 1ns 1.5e-6
+

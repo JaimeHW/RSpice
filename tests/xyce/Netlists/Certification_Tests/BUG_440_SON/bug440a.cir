@@ -1,0 +1,12 @@
+test of resistor lead current in .measure
+
+VDC  1a 0 1.0
+VCOS 1 1a SIN(0 5 100K -2.5U)
+RTEST 1 0 500
+.TRAN 1US 10US
+.print tran v(1)  I(rtest)
+
+.MEASURE TRAN max1 MAX {I(rtest)}
+.MEASURE TRAN max2 MAX I(rtest)
+
+

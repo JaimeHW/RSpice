@@ -1,0 +1,4 @@
+bug42.cir
+bug42.cir.sh
+resistance.txt
+tags

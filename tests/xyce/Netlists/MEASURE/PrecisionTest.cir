@@ -1,0 +1,60 @@
+* A test of the PRECISION keyword in .MEASURE.
+* This tests AVG, DERIV, ERROR, FIND, MAX, MIN, PP, RMS and TRIG/TARG.
+* The other measures use the output functions from the base class.  That
+* code is tested with the INTEG measure.  This also covers DERIV-AT
+* and FIND-AT for TRAN_CONT measure mode.
+*******************************************************************************
+*
+*
+PWL1 1 0  PWL 0 0 0.5 1 1 0
+R1  1  0  100
+
+* used to generate comparison file for ERROR measures
+*PWL2  2 0  PWL 0 0 0.5 0.8 1 0
+*R2 2 0 100
+*.PRINT TRAN FILE=MeasdgtOption_comp_file.prn V(2)
+
+.TRAN 0 1
+
+.PRINT TRAN FORMAT=NOINDEX V(1)
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.05
+
+* AVG
+.measure tran avgValWP avg V(1) precision=10
+
+* DERIV
+.measure tran derivWhenWP deriv V(1) WHEN V(1)=0.2 PRECISION=10
+.measure tran derivATwp deriv V(1) AT=0.4 PRECISION=10
+
+* ERROR
+.measure tran errorValWP ERROR v(1) FILE=MeasdgtOption_comp_file.prn COMP_FUNCTION=L1NORM INDEPVARCOL=1 DEPVARCOL=2 precision=10
+
+* FIND
+.measure tran findAtWP FIND V(1) AT=0.2 precision=10
+
+.measure tran integValWP integ V(1) precision=10
+
+* MAX
+.measure tran maxValWP max V(1) precision=10
+
+* MIN
+.measure tran minValWP min V(1) precision=10
+
+* PP
+.measure tran ppValWP PP V(1) precision=10
+
+* RMS
+.measure tran rmsValWP RMS V(1) precision=10
+
+* TRIG/TARG
+.measure tran riseValWP TRIG v(1)=0.1 TARG v(1)=0.9 PRECISION=10
+
+* for testing convenience do not make separate .mt0 files
+* for each TRAN_CONT measure
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+.measure tran_cont deriv_at_cont_wp deriv v(1) at=0.6 precision=10
+.measure tran_cont find_at_cont_wp find v(1) at=0.6 precision=10
+
+.END
+

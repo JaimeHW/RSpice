@@ -1,0 +1,16 @@
+Test
+* This is the test for handling of parameter definition in one
+* include file and usage in another.
+* 
+* The code should produce results identical to those of subckt_f0
+
+.include parameters.lib
+.include usage.lib
+
+XR1 1 2 frobnitz
+R2 2 0 3K
+V1 1 0 5V
+
+.DC V1 1 5 1 
+.print dc v(1) v(2)
+.end

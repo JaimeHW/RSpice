@@ -1,0 +1,47 @@
+******************************************************
+* Test the multiplicity factor (M) for Resistor device.
+* Testing for .DC analysis is okay for the Resistor
+* device.
+*
+*
+* See SON Bug 834 for more details.
+******************************************************
+
+* Make sure Resistor device still works without M being specified.
+V1  1   0 1
+R1a 1a  0 1 
+R1  1  1a 1
+
+* Specify M, and later step over both M and R for the R2 device.
+V2  2   0 1
+R2a 2a  0 1 
+R2  2  2a 1.25 M=2.5
+
+* Specify M, but have a Resistance multiplier (R) in the model 
+* card also.  Effective multiplier becomes R/M.
+V3  3   0 1
+R3a 3a  0 1 
+R3  3  3a R3model R=1.25 M=2.5 TC1=0.1
+.MODEL R3model R R=4 LEVEL=1 TNOM=20
+
+* Make sure it works, even if the R-value is zero.
+V4   4   0  1
+R4   4  4a  1 
+R4a  4a 4b 0 M=2.5
+R4b  4b  0  1 
+
+* Stepping over M and R, for the R2 device.
+* Step over temperature to test the R3 device.
+* This should be adequate
+* for this test.
+.STEP R2:R 1.25 2.5 1.25
+.STEP R2:M 2.5 5.0 2.5
+.STEP TEMP 20 30 10
+
+* analysis and print statements.  To be conservative
+* make sure that I() and P() work with M.
+.DC V1 1 1 1
+.PRINT DC V(1a) I(R1) P(R1) V(2a) I(R2) P(R2)
++  V(3a) I(R3) P(R3) V(4b) I(R4b) P(R4b) 
+
+.END

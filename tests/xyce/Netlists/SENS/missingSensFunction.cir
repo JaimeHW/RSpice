@@ -1,0 +1,25 @@
+********************************************************************************
+* Regression test to test error messages from a bad .SENS line 
+* that is missing the OBJFUNC value(s).  See GitLab bug 371 
+* for more details.
+*
+* The actual circuit doesn't matter, other than a working circuit is needed.
+********************************************************************************
+
+V1 1 0 PWL 0 0 1 1
+R1 1 2 1
+R2 2 0 1
+
+.TRAN 0 1
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.2
+.PRINT TRAN V(1) V(2)
+
+.print SENS V(1) V(2) R2:R
+.options SENSITIVITY direct=1 adjoint=0
+
+* Testing incomplete .sens line - missing objective functions
+.sens param=r1:r,r2:r
+
+.END
+
+

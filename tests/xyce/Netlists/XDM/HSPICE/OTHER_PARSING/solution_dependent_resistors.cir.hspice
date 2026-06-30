@@ -1,0 +1,19 @@
+$ solution dependent resistors
+* This netlist tests XDM is capable of recognizing
+* analog behavioral modeling resistors, and specifically
+* the case when the ABM expression involves the 
+* V(<node name>) and V(<node name>, <node name>) 
+* constructs. The translation should then transform
+* these resistors to B-elements with a current
+* expression. The expression should be the voltage
+* across the resistor nodes divided by the resistance.
+* See issue #155 on XDM gitlab.
+
+va 1 0 dc=0
+r1 1 2 'sqrt(4)'
+r2 2 3 '1+v(1,0)*v(1,0)'
+r3 3 4 '2*v(1)'
+r4 4 0 'v(1)*2'
+
+.dc va 1 10 1
+.print dc v(1) v(4)

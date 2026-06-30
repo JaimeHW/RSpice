@@ -1,0 +1,13 @@
+* This netlist is used to test the Python initialize(),
+* runSimulation() and close() methods when the Python
+* interface has multiple xyce objects open
+V2 2 0 SIN(0 2 1)
+R2 2 0 1
+
+.TRAN 0 1
+.PRINT TRAN V(2)
+.MEASURE TRAN MAXV2 MAX V(2)
+.MEASURE TRAN MINV2 MIN V(2)
+
+.END
+

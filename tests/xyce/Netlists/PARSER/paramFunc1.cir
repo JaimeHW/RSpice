@@ -1,0 +1,15 @@
+* Test syntax for function specified with .param keyword.
+* Xyce functions were originally implemented with 
+* the .func keyword, but some simulators specify 
+* functions as a special type of .param.
+
+.param a=1.0
+.param ftest(x)={2*x}
+
+v1 1 0 1.0 
+r1 1 2 {ftest(2.0)+a}
+r2 2 0 1.0
+
+.dc v1 1 1 1
+.print dc v(1) v(2) {r1:r}
+

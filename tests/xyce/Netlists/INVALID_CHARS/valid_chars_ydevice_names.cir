@@ -1,0 +1,131 @@
+*******************************************************
+* For SON Bug 744
+*
+* Test of what non-alphanumeric characters are legal in 
+* a Xyce Y-device name.  This includes the
+* following characters only in top-level circuits: 
+*
+* ` ~ ! @ # $ % ^ & * - _ + [ ] | \ < > . /
+*
+* This also tests that these characters work in a
+* .PRINT TRAN statement.  The exceptions are *, 1* ? and ?,
+* which are wildcard syntaxes.  They are tested as part
+* of SON Bug 1211.
+*
+* The * and ? characters can be used in a device name, but the
+* same caveats apply for I(), P() and W() operators on a
+* .PRINT line and are also tested by SON Bug 1211.
+*
+*******************************************************
+.print TRAN WIDTH=8 PRECISION=2 v(in) v(1`) v(1~) v(1!) v(1@) 
++ v(1#) v(1$) v(1%) v(1^) v(1&)v(1-) v(1_) v(1+) v(1[) 
++ v(1]) v(1|) v(1\) v(1<) v(1>) v(1.) v(1/) 
++ v(`) v(~) v(!) v(@) v(#) v($) v(%) v(^) v(&) v(-) v(_) 
++ v(+) v([) v(]) v(|) v(\) v(<) v(>) v(.) v(/) 
+
+.tran 10ns 250ns
+v1 in 0  PULSE ({V_HI} {V_LO} 100ns 20ns 20ns 80ns 200ns)
+
+* Set digital default parameters:
+.param R1HI=5 R1LO=200 R0HI=200 R0LO=5 RIN=1000 R1=100
+.param SW=5.e-9  CAPOUT=1.e-12  CAPIN=1.e-12
+.param V_LO=0 V_REF=0 V_HI=3
+
+* test 1 followed by the special character
+YINV 1` in 1` DMOD
+R1` 1` 0 100K
+YINV 1~ in 1~ DMOD
+R1~ 1~ 0 100K
+YINV 1! in 1! DMOD
+R1! 1! 0 100K
+YINV 1@ in 1@ DMOD
+R1@ 1@ 0 100K
+YINV 1# in 1# DMOD
+R1# 1# 0 100K
+YINV 1$ in 1$ DMOD
+R1$ 1$ 0 100K
+YINV 1% in 1% DMOD
+R1% 1% 0 100K
+YINV 1^ in 1^ DMOD
+R1^ 1^ 0 100K
+YINV 1& in 1& DMOD
+R1& 1& 0 100K
+YINV 1* in 1* DMOD
+R1* 1* 0 100K
+YINV 1- in 1- DMOD
+R1- 1- 0 100K
+YINV 1_ in 1_ DMOD
+R1_ 1_ 0 100K
+YINV 1+ in 1+ DMOD
+R1+ 1+ 0 100K
+YINV 1[ in 1[ DMOD 
+R1[ 1[ 0 100K
+YINV 1] in 1] DMOD
+R1] 1] 0 100K
+YINV 1| in 1| DMOD
+R1| 1| 0 100K
+YINV 1\ in 1\ DMOD
+R1\ 1\ 0 100K
+YINV 1< in 1< DMOD
+R1< 1< 0 100K
+YINV 1> in 1> DMOD
+R1> 1> 0 100K
+YINV 1. in 1. DMOD
+R1. 1. 0 100K
+YINV 1/ in 1/ DMOD
+R1/ 1/ 0 100K
+
+* test with just the special character
+YINV ` in ` DMOD
+R` ` 0 100K
+YINV ~ in ~ DMOD
+R~ ~ 0 100K
+YINV ! in ! DMOD
+R! ! 0 100K
+YINV @ in @ DMOD
+R@ @ 0 100K
+YINV # in # DMOD
+R# # 0 100K
+YINV $ in $ DMOD
+R$ $ 0 100K
+YINV % in % DMOD
+R% % 0 100K
+YINV ^ in ^ DMOD
+R^ ^ 0 100K
+YINV & in & DMOD
+R& & 0 100K
+YINV * in 2* DMOD
+R* * 0 100K
+YINV - in - DMOD
+R- - 0 100K
+YINV _ in _ DMOD
+R_ _ 0 100K
+YINV + in + DMOD
+R+ + 0 100K
+YINV [ in [ DMOD 
+R[ [ 0 100K
+YINV ] in ] DMOD
+R] ] 0 100K
+YINV | in | DMOD
+R| | 0 100K
+YINV \ in \ DMOD
+R\ \ 0 100K
+YINV < in < DMOD
+R< < 0 100K
+YINV > in > DMOD
+R> > 0 100K
+YINV . in . DMOD
+R. . 0 100K
+YINV / in / DMOD
+R/ / 0 100K
+
+.model DMOD DIG ( CLO=CAPOUT  CHI=CAPOUT
++ S0RLO=R0LO  S0RHI=R0HI  S0TSW=SW
++ S0VLO=-1  S0VHI=1.8
++ S1RLO=R1LO  S1RHI=R1HI  S1TSW=SW
++ S1VLO=1  S1VHI=3
++ RLOAD=RIN   CLOAD=CAPIN
++ VREF=V_REF VLO=V_LO VHI=V_HI 
++ DELAY=10ns )
+
+.end

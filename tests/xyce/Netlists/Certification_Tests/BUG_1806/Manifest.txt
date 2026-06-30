@@ -1,0 +1,6 @@
+bug_1806.cir
+bug_1806.cir.sh
+bug_1806_2.cir
+bug_1806_2a.cir
+exclude
+tags

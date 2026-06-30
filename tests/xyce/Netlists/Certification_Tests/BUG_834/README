@@ -1,0 +1,61 @@
+Test Name: BUG_834
+Owner: Eric Keiter
+Test netlists:
+GS files:
+Mode:  N/A
+Comparator:  
+Version of Xyce: Release_3.0.1
+                                                                                                                                              
+Description:
+============
+Transition from homotopy-based tranOP to transient phase broken.
+
+This is a blocker for bug 822.
+
+The bug had to do with the device package setParam function, which is normally
+called throughout a homotopy solve, being called afterwards during  the
+transient phase, even though the nonlinear solves for transient steps were
+no longer using homotopy.  The result was that if homotopy was used for
+a DCOP calculation, then setParam was called during the subsequent transient,
+with the *initial* values of the various homotopy values being imposed.
+
+So, if the homotopy was a natural parameter homotopy, in which a voltage source
+was ramped from (say) 0.0 to 4.0 volts, then at the end of the DCOP the
+value of that voltage source was 4.0 Volts.  Then, when the transient started,
+the setParam function was called during the standard newton solve, resetting
+the voltage source value to 0.0.  As a standard newton solve doesn't sweep any
+parameters, the voltage source just stays at zero from that point onward.
+
+So, the result is that there is a very abrupt change in the solution,
+immediately after the DCOP, which is very obviously incorrect.
+
+================================================================================
+
+Test Procedure:
+There are two circuits here.  inv_loca.cir, and inv.cir.  They are the same
+transient inverter circuit, except that inv_loca.cir uses a homotopy 
+algorithm for the DCOP phase, while inv.cir does not.  
+
+Run both of these circuits:
+
+Xyce inv.cir >& inv.out &  <return>
+Xyce inv_loca.cir >& inv_loca.out &  <return>
+
+Then do a "diff" of these two *prn files:
+
+diff inv.cir.prn  inv_loca.cir.prn <return>
+
+This test should be run on every serial platform.  It is too small for
+parallel, so don't run in parallel.
+
+Test Verification:
+
+The diff should reveal NO differences.  The 2 prn files should be 100% 
+identical.
+
+Test Notes:
+
+There is no gold standard.  This is a comparison of Xyce on a given platform
+to Xyce on that same platform.
+
+

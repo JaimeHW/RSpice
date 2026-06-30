@@ -1,0 +1,78 @@
+embedded sampling version of a CMOS inverter
+
+.param inFreq=1e6
+.param inPer={1/inFreq};
+
+.param A=1
+.param td={inPer/2-inPer/10}
+.param tr={inPer/10}
+.param tf={inPer/10}
+.param pw={inPer/2-inPer/10}
+.param per={inPer}
+.param offset=0
+
+.param vdd=1
+VS_VDD vdd 0 DC {vdd}
+*Vin gate 0 pulse( {A} 0.0 {td} {tr} {tf} {pw} {per} )
+Vin gate 0 pulse( 0.0 {A} {td} {tr} {tf} {pw} {per} )
+
+M1 drain gate 0 0 NMOS w=0.18e-6 l=0.18e-6 
+M2 drain gate vdd vdd PMOS  w =0.54e-6 ; l=0.18e-6 
+
+.model nmos nmos (level=9 toxm=4.1e-9 tnom=27 xj=1e-7 
++ k1=0.6064385 k3b=2.763267 dvt0w=0 dvt0=1.3330881 u0=258.9066683 uc=5.105195e-11 
++ ags=0.4044483 keta=-2.730673e-3 rdsw=105 wr=1 dwg=-3.773529e-9 dwb=5.239518e-9 
++ cit=0 cdscb=0 dsub=0.0167866 pdiblc2=3.38377e-3 pscbe1=8e10 delta=0.01 prt=0 
++ kt1l=0 ub1=-7.61e-18 wl=0 wwn=1 lln=1 lwl=0 cgdo=7.9e-10 cj=9.539798e-4 
++ cjsw=2.53972e-10 cjswg=3.3e-10 cf=0 pk2=-4.42044e-4 pu0=10.8203648 
++ pvsat=1.388017e3 tox=4.1e-9 nch=2.3549e17 k2=1.63871e-3 w0=1e-7 dvt1w=0 
++ dvt1=0.3683763 ua=-1.504141e-9 vsat=9.896282e4 b0=-4.706134e-8 a1=5.916677e-4 
++ prwg=0.5 wint=0 voff=-0.0883818 cdsc=2.4e-4 eta0=2.470369e-3 pclm=0.7326932 
++ pdiblcb=-0.1 pscbe2=1.254966e-9 rsh=6.5 ute=-1.5 kt2=0.022 uc1=-5.6e-11 wln=1 
++ wwl=0 lw=0 capmod=2 cgso=7.9e-10 pb=0.8 pbsw=0.8 pbswg=0.8 pvth0=7.505753e-4 
++ wketa=3.100384e-3 pua=2.896652e-11 peta0=8.758549e-5 vth0=0.3696986 k3=1e-3 
++ nlx=1.71872e-7 dvt2w=0 dvt2=0.0540199 ub=2.428646e-18 a0=1.8904342 
++ b1=1.294942e-6 a2=0.9069159 prwb=-0.2 lint=1.69494e-8 nfactor=2.1821266 cdscd=0 
++ etab=1.047744e-5 pdiblc1=0.1823102 drout=0.7469045 pvag=0 mobmod=1 kt1=-0.11 
++ ua1=4.31e-9 at=3.3e4 ww=0 ll=0 lwn=1 xpart=0.5 cgbo=1e-12 mj=0.380768 
++ mjsw=0.1061193 mjswg=0.1061193 prdsw=-2.7650517 lketa=-0.0104103 
++ pub=1.684125e-23 pketa=1.549791e-3)
+
+.model pmos pmos (level=9 tnom =27 nch =4.1589e17 
++ k2 =0.0258663 w0 =1e-6 dvt1w =0 dvt0=0.6117215 u0=106.5280265 uc=-1e-10 
++ ags=0.3667554 keta=0.0237092 rdsw=304.9893888 wr=1 dwg=-2.44019e-8 
++ dwb=-9.06003e-10 cit=0 cdscb=0 dsub=1.0998181 pdiblc2=0.0420477 
++ pscbe1=1.073111e10 delta=0.01 prt=0 kt1l=0 ub1=-7.61e-18 wl=0 wwn=1 lln=1 
++ lwl=0 cgdo=6.41e-10 cj=1.200422e-3 cjsw=2.001802e-10 cjswg=4.22e-10 cf=0 
++ pk2=1.799383e-3 pu0=-1.3399122 pvsat=-50 l =0.18e-6 tox =4.1e-9 
++ vth0 =-0.3835898 k3 =0 nlx =1.20187e-7 dvt2w =0 dvt1=0.2286816 ua=1.125454e-9 
++ vsat=1.593712e5 b0=5.263128e-7 a1=0.2276342 prwg=0.5 wint=0 voff=-0.0878287 
++ cdsc=2.4e-4 eta0=0.1672562 pclm=2.2249148 pdiblcb=-1e-3 pscbe2=3.099395e-9 
++ rsh=7.4 ute=-1.5 kt2=0.022 uc1=-5.6e-11 wln=1 wwl=0 lw=0 capmod=2 cgso=6.41e-10 
++ pb=0.8478616 pbsw=0.8483594 pbswg=0.8483594 pvth0=2.098588e-3 wketa=0.0295614 
++ pua=-5.27759e-11 peta0=1.003159e-4 toxm =4.1e-9 xj =1e-7 k1 =0.59111 
++ k3b =7.9143108 dvt0w =0 dvt2=0.1 ub=1e-21 a0=1.6904754 b1=1.496707e-6 
++ a2=0.6915706 prwb=0.2553725 lint=3.217673e-8 nfactor=1.8560303 cdscd=0 
++ etab=-0.1249603 pdiblc1=8.275696e-4 drout=0 pvag=15 mobmod=1 kt1=-0.11 
++ ua1=4.31e-9 at=3.3e4 ww=0 ll=0 lwn=1 xpart=0.5 cgbo=1e-12 mj=0.4105254 
++ mjsw=0.3400571 mjswg=0.3400571 prdsw=4.4771801 lketa=-1.935751e-3 pub=1e-21 
++ pketa=-3.434535e-3)
+
+.options device debuglevel=-100
+.options linsol type=basker
+
+.EMBEDDEDSAMPLING
++ param=nmos:vth0,pmos:vth0
++ type=uniform, uniform
++ lower_bounds=+0.4,-0.7
++ upper_bounds=+0.7,-0.4
+
+.options EMBEDDEDSAMPLES outputs={v(drain)} numsamples=100
++ regression_pce=true
++ output_Sample_Stats=false
+
+*COMP {v(drain)} reltol=0.015
+.PRINT ES PRECISION=6 FORMAT=TECPLOT output_Sample_Stats=false
+
+.tran 1ns 1.5e-6
+

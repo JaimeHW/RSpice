@@ -1,0 +1,69 @@
+**********************************************************************
+*Test for SON Bug 903 for .TRAN analysis
+*
+* Notes:
+*   1) Both .PRINT TRAN FORMAT=PROBE lines are needed in order to
+*      test all of the branches in the code that makes the #N lines
+*      in a .CSD file for .TRAN analyses.  If they are changed then
+*      something like gdb should be used to verify that all of 
+*      those branches are still taken.  See SON Bug 903 for 
+*      more details.
+*
+*   2) This test assumes that Xyce will only put 128 characters on
+*      each line in the #N section of the .CSD file header. A node
+*      name (say node1) will be effectively padded with 6 characters
+*      because it would become 'V(node1') followed by a space on the
+*      #N line.  So, this test uses node names that are 122 and 121
+*      characters long, since they "pad out" to 128 and 127 characters
+*      on the #N line.
+*      
+**********************************************************************
+
+.TRAN 0 1S
+.OPTIONS output initial_interval=0.2s
+
+* this print line is tested against GSfile1
+.PRINT TRAN FORMAT=PROBE FILE=bug_903.cir.pline1.csd
++ V(name_is_122_characters_its_really_really_really_really_really_really_really_really_really_really_really_really_really_long)
++ V(name_is_121_characters_its_less_really_really_really_really_really_really_really_really_really_really_really_really_longg)
++ V(1) V(2) V(3) V(4) V(5) V(6) V(7) V(8) V(9) V(10) V(11) V(12) V(13) V(14)
+ 
+* this print line is tested against GSfile2
+.PRINT TRAN FORMAT=PROBE FILE=bug_903.cir.pline2.csd
++ V(2) V(3) 
++ V(NAME_IS_122_CHARACTERS_ITS_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_LONG) 
++ V(4) V(5) V(10) V(6) 
++ V(NAME_IS_121_CHARACTERS_ITS_LESS_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_REALLY_LONGG) 
++ V(7) V(8) V(13) V(9) V(14) V(11) V(12) V(1) 
+
+VS1  1  0  PWL 0.0 0.0 1.0 10.0  
+R1   1  2  1
+R2   2  3  1
+R3   3  4  1
+R4   4  5  1
+R5   5  6  1
+R6   6  7  1
+R7   7  8  1
+R8   8  9  1
+R9   9  10 1 
+R10 10  0  1
+
+VS2 11  0  PWL 0.0 0.0 1.0 6.0
+R11 11  12 1
+R12 12  13 1
+R13 13  14 1
+R14 14  
++name_is_122_characters_its_really_really_really_really_really_really_really_really_really_really_really_really_really_long
++R=1
+
+R15 
++name_is_122_characters_its_really_really_really_really_really_really_really_really_really_really_really_really_really_long
++name_is_121_characters_its_less_really_really_really_really_really_really_really_really_really_really_really_really_longg 
++R=1
+
+R16 
++name_is_121_characters_its_less_really_really_really_really_really_really_really_really_really_really_really_really_longg
++0 1
+
+.END
+

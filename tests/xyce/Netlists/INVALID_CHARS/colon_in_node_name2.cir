@@ -1,0 +1,42 @@
+*******************************************************
+* For SON Bug 744
+*
+* Issue 223
+*
+* This test must be run using -hspice-ext all 
+* or -hspice-ext separator.
+*
+* Illustrate that a colon is valid as a node name both
+* in a top-level circuit and in various depths of 
+* subcircuits.  
+*******************************************************
+.print DC FORMAT=NOINDEX V(1) V(1:) 
++ V(:) V(X1.1:) V(X1.:) V(X1.X2.1:) V(X1.X2.:) 
+
+.DC V1 1 1 1
+V1 1 0 1
+r1 1 0 1
+v2 2 0 1
+r2 2 0 1
+X1 2 0 sub1
+
+v3 1: 0 1
+v4 : 0 1
+
+.SUBCKT sub1 a b
+R1 a b 1
+v1 1: 0 1
+v2 : 0 1
+
+v3 3 0 1
+r3 3 0 1
+X2 3 0 sub2
+.ENDS
+
+.SUBCKT sub2 c d
+R1 c d 1
+v5 1: 0 1
+v6 : 0 1
+.ENDS
+
+.end

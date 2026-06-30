@@ -1,0 +1,611 @@
+|************************************************************************
+| IBIS file AT16245 Tri_State Register created by
+| Symmetry Design Systems, Inc.
+| (415)949-9600
+|************************************************************************
+|
+[IBIS ver]     2.1 |this is a comment
+[File name]    at16245.ibs
+[File Rev]     1.0
+[Date]         Jan 15, 1996
+[Source]       Atmel spice models
+[Notes]        This ibis package is made for Atmel AT16245.
+               It includes following models:
+               AT16245_IN
+               AT16245_OUT
+[Disclaimer]   This information is for modeling purpose only.
+[Copyright]    Copyright 1996 by Atmel
+|
+|************************************************************************
+|                      Component AT16245
+|************************************************************************
+|
+[Component]      AT16245
+[Manufacturer]   ATMEL
+[Package]
+|variable         typ         min         max
+|
+R_pkg            200.00m      NA          NA
+L_pkg            7.0nH        NA          NA
+C_pkg            1.5pF        NA          NA
+|
+[Pin]  signal_name      model_name     R_pin     L_pin     C_pin
+|
+1       1DIR            AT16245_IN
+2       1B1             AT16245_OUT
+3       1B2             AT16245_OUT
+4       GND             GND
+5       1B3             AT16245_OUT
+6       1B4             AT16245_OUT
+7       VCC             POWER
+8       1B5             AT16245_OUT
+9       1B6             AT16245_OUT
+10      GND             GND
+11      1B7             AT16245_OUT
+12      1B8             AT16245_OUT
+13      2B1             AT16245_OUT
+14      2B2             AT16245_OUT
+15      GND             GND
+16      2B3             AT16245_OUT
+17      2B4             AT16245_OUT
+18      VCC             POWER
+19      2B5             AT16245_OUT
+20      2B6             AT16245_OUT
+21      GND             GND
+22      2B7             AT16245_OUT
+23      2B8             AT16245_OUT
+24      2DIR            AT16245_IN
+25      2OE             AT16245_IN
+26      2A8             AT16245_OUT
+27      2A7             AT16245_OUT
+28      GND             GND
+29      2A6             AT16245_OUT
+30      2A5             AT16245_OUT
+31      VCC             POWER
+32      2A4             AT16245_OUT
+33      2A3             AT16245_OUT
+34      GND             GND
+35      2A2             AT16245_OUT
+36      2A1             AT16245_OUT
+37      1A8             AT16245_OUT
+38      1A7             AT16245_OUT
+39      GND             GND
+40      1A6             AT16245_OUT
+41      1A5             AT16245_OUT
+42      VCC             POWER
+43      1A4             AT16245_OUT
+44      1A3             AT16245_OUT
+45      GND             GND
+46      1A2             AT16245_OUT
+47      1A1             AT16245_OUT
+48      1OE             AT16245_IN
+|
+|************************************************************************
+|                       Model AT16245_IN
+|************************************************************************
+|
+[Model]     AT16245_IN
+Model_type  Input
+Polarity    Non-Inverting
+Vinl = 0.8V
+Vinh = 2.0V
+|
+|Variable            typ    min    max
+C_comp              3.4p   2.0p   6.0p
+|
+|Variable            typ    min    max
+[Voltage Range]      5.0    4.75   5.25
+|
+|Variable            typ    min    max
+[Temperature Range]  25     0      85
+|
+[GND Clamp]
+|
+|Volts    I(typ)    I(min)    I(max)
+-5.00  -4.269e+00     NA        NA   
+-4.90  -4.170e+00     NA        NA   
+-4.80  -4.071e+00     NA        NA   
+-4.70  -3.972e+00     NA        NA   
+-4.60  -3.874e+00     NA        NA   
+-4.50  -3.775e+00     NA        NA   
+-4.40  -3.676e+00     NA        NA   
+-4.30  -3.577e+00     NA        NA   
+-4.20  -3.478e+00     NA        NA   
+-4.10  -3.380e+00     NA        NA   
+-4.00  -3.281e+00     NA        NA   
+-3.90  -3.182e+00     NA        NA   
+-3.80  -3.083e+00     NA        NA   
+-3.70  -2.985e+00     NA        NA   
+-3.60  -2.886e+00     NA        NA   
+-3.50  -2.787e+00     NA        NA   
+-3.40  -2.689e+00     NA        NA   
+-3.30  -2.590e+00     NA        NA   
+-3.20  -2.492e+00     NA        NA   
+-3.10  -2.393e+00     NA        NA   
+-3.00  -2.295e+00     NA        NA   
+-2.90  -2.196e+00     NA        NA   
+-2.80  -2.098e+00     NA        NA   
+-2.70  -2.000e+00     NA        NA   
+-2.60  -1.902e+00     NA        NA   
+-2.50  -1.804e+00     NA        NA   
+-2.40  -1.705e+00     NA        NA   
+-2.30  -1.607e+00     NA        NA   
+-2.20  -1.510e+00     NA        NA   
+-2.10  -1.412e+00     NA        NA   
+-2.00  -1.314e+00     NA        NA   
+-1.90  -1.217e+00     NA        NA   
+-1.80  -1.119e+00     NA        NA   
+-1.70  -1.022e+00     NA        NA   
+-1.60  -9.255e-01     NA        NA   
+-1.50  -8.288e-01     NA        NA   
+-1.40  -7.325e-01     NA        NA   
+-1.30  -6.366e-01     NA        NA   
+-1.20  -5.412e-01     NA        NA   
+-1.10  -4.467e-01     NA        NA   
+-1.00  -3.532e-01     NA        NA   
+-0.90  -2.614e-01     NA        NA   
+-0.80  -1.726e-01     NA        NA   
+-0.70  -8.983e-02     NA        NA   
+-0.60  -2.419e-02     NA        NA   
+-0.50  -1.292e-03     NA        NA   
+-0.40  -5.192e-05     NA        NA   
+-0.30  -1.779e-05     NA        NA   
+-0.20  -1.129e-05     NA        NA   
+-0.10  -5.577e-06     NA        NA   
++0.00  +0.000e+00     NA        NA   
++5.00  +0.000e+00     NA        NA   
+|
+[POWER Clamp]
+|
+|Volts    I(typ)    I(min)    I(max)
+-5.00  +4.217e+00     NA        NA   
+-4.90  +4.119e+00     NA        NA   
+-4.80  +4.020e+00     NA        NA   
+-4.70  +3.922e+00     NA        NA   
+-4.60  +3.824e+00     NA        NA   
+-4.50  +3.726e+00     NA        NA   
+-4.40  +3.628e+00     NA        NA   
+-4.30  +3.530e+00     NA        NA   
+-4.20  +3.432e+00     NA        NA   
+-4.10  +3.333e+00     NA        NA   
+-4.00  +3.235e+00     NA        NA   
+-3.90  +3.137e+00     NA        NA   
+-3.80  +3.039e+00     NA        NA   
+-3.70  +2.941e+00     NA        NA   
+-3.60  +2.843e+00     NA        NA   
+-3.50  +2.746e+00     NA        NA   
+-3.40  +2.648e+00     NA        NA   
+-3.30  +2.550e+00     NA        NA   
+-3.20  +2.452e+00     NA        NA   
+-3.10  +2.354e+00     NA        NA   
+-3.00  +2.257e+00     NA        NA   
+-2.90  +2.159e+00     NA        NA   
+-2.80  +2.061e+00     NA        NA   
+-2.70  +1.964e+00     NA        NA   
+-2.60  +1.866e+00     NA        NA   
+-2.50  +1.769e+00     NA        NA   
+-2.40  +1.671e+00     NA        NA   
+-2.30  +1.574e+00     NA        NA   
+-2.20  +1.477e+00     NA        NA   
+-2.10  +1.380e+00     NA        NA   
+-2.00  +1.283e+00     NA        NA   
+-1.90  +1.186e+00     NA        NA   
+-1.80  +1.089e+00     NA        NA   
+-1.70  +9.933e-01     NA        NA   
+-1.60  +8.971e-01     NA        NA   
+-1.50  +8.012e-01     NA        NA   
+-1.40  +7.056e-01     NA        NA   
+-1.30  +6.105e-01     NA        NA   
+-1.20  +5.159e-01     NA        NA   
+-1.10  +4.222e-01     NA        NA   
+-1.00  +3.297e-01     NA        NA   
+-0.90  +2.391e-01     NA        NA   
+-0.80  +1.518e-01     NA        NA   
+-0.70  +7.194e-02     NA        NA   
+-0.60  +1.426e-02     NA        NA   
+-0.50  +5.020e-04     NA        NA   
+-0.40  +1.075e-05     NA        NA   
+-0.30  +0.000e+00     NA        NA   
++0.00  +0.000e+00     NA        NA   
+|
+|************************************************************************
+|                       Model AT16245_OUT
+|************************************************************************
+|
+[Model]     AT16245_OUT
+Model_type  3-state
+Polarity    Non-Inverting
+Vmeas = 1.6
+Rref  = 50.00
+Vref  = 0
+|
+|Variable            typ    min    max
+C_comp               3.4p   2.0p   6.0p
+|
+|Variable              typ    min    max
+[Voltage Range]        5.0    4.75   5.25
+[GND Clamp Reference]  0.0    0.0    0.0
+|
+|Variable            typ    min    max
+[Temperature Range]  25     0      85
+|
+[Pulldown]
+|
+|Volts    I(typ)    I(min)    I(max)
+-5.00  +0.000e+00     NA        NA   
+-4.00  +0.000e+00     NA        NA   
+-3.00  +0.000e+00     NA        NA   
+-2.00  +0.000e+00     NA        NA   
+-1.00  +0.000e+00     NA        NA   
++0.00  +0.000e+00     NA        NA   
++0.20  +6.073e-03     NA        NA   
++0.40  +1.146e-02     NA        NA   
++0.60  +1.621e-02     NA        NA   
++0.80  +2.038e-02     NA        NA   
++1.00  +2.400e-02     NA        NA   
++1.20  +2.711e-02     NA        NA   
++1.40  +2.301e-01     NA        NA   
++1.60  +2.496e-01     NA        NA   
++1.80  +2.662e-01     NA        NA   
++2.00  +2.797e-01     NA        NA   
++2.20  +2.919e-01     NA        NA   
++2.40  +3.010e-01     NA        NA   
++2.60  +3.061e-01     NA        NA   
++2.80  +3.090e-01     NA        NA   
++3.00  +3.111e-01     NA        NA   
++3.20  +3.127e-01     NA        NA   
++3.40  +3.141e-01     NA        NA   
++3.60  +3.152e-01     NA        NA   
++3.80  +3.163e-01     NA        NA   
++4.00  +3.172e-01     NA        NA   
++4.20  +3.181e-01     NA        NA   
++4.40  +3.190e-01     NA        NA   
++4.60  +3.198e-01     NA        NA   
++4.80  +3.205e-01     NA        NA   
++5.00  +3.213e-01     NA        NA   
++5.20  +3.221e-01     NA        NA   
++5.40  +3.228e-01     NA        NA   
++5.60  +3.236e-01     NA        NA   
++5.80  +3.240e-01     NA        NA   
++6.00  +3.300e-01     NA        NA   
++6.20  +3.300e-01     NA        NA   
++6.40  +3.300e-01     NA        NA   
++6.60  +3.300e-01     NA        NA   
++6.80  +3.300e-01     NA        NA   
+|
+[Pullup]
+|
+|Volts    I(typ)    I(min)    I(max)
+-5.00  +0.000e+00     NA        NA   
+-4.80  +0.000e+00     NA        NA   
+-4.60  +0.000e+00     NA        NA   
+-4.40  +0.000e+00     NA        NA   
+-4.20  +0.000e+00     NA        NA   
+-4.00  +0.000e+00     NA        NA   
+-3.80  +0.000e+00     NA        NA   
+-3.60  +0.000e+00     NA        NA   
+-3.40  +0.000e+00     NA        NA   
+-3.20  +0.000e+00     NA        NA   
+-3.00  +0.000e+00     NA        NA   
+-2.80  +0.000e+00     NA        NA   
+-2.60  +0.000e+00     NA        NA   
+-2.40  +0.000e+00     NA        NA   
+-2.20  +0.000e+00     NA        NA   
+-2.00  +0.000e+00     NA        NA   
+-1.80  +0.000e+00     NA        NA   
+-1.60  +0.000e+00     NA        NA   
+-1.40  +0.000e+00     NA        NA   
+-1.20  +0.000e+00     NA        NA   
+-1.00  +0.000e+00     NA        NA   
+-0.80  +0.000e+00     NA        NA   
+-0.60  +0.000e+00     NA        NA   
+-0.40  +0.000e+00     NA        NA   
+-0.20  +0.000e+00     NA        NA   
++0.00  +0.000e+00     NA        NA   
++0.20  +0.000e+00     NA        NA   
++0.40  +0.000e+00     NA        NA   
++0.60  +0.000e+00     NA        NA   
++0.80  +0.000e+00     NA        NA   
++1.00  +0.000e+00     NA        NA   
++1.20  +0.000e+00     NA        NA   
++1.40  -1.540e-08     NA        NA   
++1.60  -1.787e-05     NA        NA   
++1.80  -6.737e-04     NA        NA   
++2.00  -3.947e-03     NA        NA   
++2.20  -8.954e-03     NA        NA   
++2.40  -1.495e-02     NA        NA   
++2.60  -2.163e-02     NA        NA   
++2.80  -2.883e-02     NA        NA   
++3.00  -3.642e-02     NA        NA   
++3.20  -4.432e-02     NA        NA   
++3.40  -5.257e-02     NA        NA   
++4.00  -5.710e-02     NA        NA   
++4.20  -6.629e-02     NA        NA   
++4.40  -7.559e-02     NA        NA   
++4.60  -1.051e-01     NA        NA   
++4.80  -1.143e-01     NA        NA   
++5.00  -1.276e-01     NA        NA   
++5.20  -1.575e-01     NA        NA   
++5.40  -1.714e-01     NA        NA   
+|
+[GND Clamp]
+|
+|Volts    I(typ)    I(min)    I(max)
+-5.00  -4.227e+00     NA        NA   
+-4.80  -4.031e+00     NA        NA   
+-4.60  -3.834e+00     NA        NA   
+-4.40  -3.637e+00     NA        NA   
+-4.20  -3.441e+00     NA        NA   
+-4.00  -3.245e+00     NA        NA   
+-3.80  -3.048e+00     NA        NA   
+-3.60  -2.852e+00     NA        NA   
+-3.40  -2.656e+00     NA        NA   
+-3.20  -2.460e+00     NA        NA   
+-3.00  -2.265e+00     NA        NA   
+-2.80  -2.069e+00     NA        NA   
+-2.60  -1.874e+00     NA        NA   
+-2.40  -1.679e+00     NA        NA   
+-2.20  -1.484e+00     NA        NA   
+-2.00  -1.290e+00     NA        NA   
+-1.80  -1.096e+00     NA        NA   
+-1.60  -9.043e-01     NA        NA   
+-1.40  -7.130e-01     NA        NA   
+-1.20  -5.239e-01     NA        NA   
+-1.00  -3.391e-01     NA        NA   
+-0.80  -1.661e-01     NA        NA   
+-0.60  -5.746e-02     NA        NA   
+-0.40  -3.637e-02     NA        NA   
+-0.20  -1.129e-05     NA        NA   
++0.00  +0.000e+00     NA        NA   
++5.00  +0.000e+00     NA        NA   
+|
+[POWER Clamp]
+|
+|Volts    I(typ)    I(min)    I(max)
+-5.00  +4.322e-01     NA        NA   
+-4.80  +4.123e-01     NA        NA   
+-4.60  +3.924e-01     NA        NA   
+-4.40  +3.726e-01     NA        NA   
+-4.20  +3.528e-01     NA        NA   
+-4.00  +3.329e-01     NA        NA   
+-3.80  +3.131e-01     NA        NA   
+-3.60  +2.933e-01     NA        NA   
+-3.40  +2.735e-01     NA        NA   
+-3.20  +2.537e-01     NA        NA   
+-3.00  +2.340e-01     NA        NA   
+-2.80  +2.142e-01     NA        NA   
+-2.60  +1.945e-01     NA        NA   
+-2.40  +1.748e-01     NA        NA   
+-2.20  +1.551e-01     NA        NA   
+-2.00  +1.355e-01     NA        NA   
+-1.80  +1.159e-01     NA        NA   
+-1.60  +9.641e-02     NA        NA   
+-1.40  +7.701e-02     NA        NA   
+-1.20  +5.778e-02     NA        NA   
+-1.00  +3.882e-02     NA        NA   
+-0.80  +2.049e-02     NA        NA   
+-0.60  +4.438e-03     NA        NA   
+-0.40  +1.071e-05     NA        NA   
+-0.20  +0.000e+00     NA        NA   
++0.00  +0.000e+00     NA        NA   
+|
+[Ramp]
+|Variable    typ    min    max
+dV/dt_r  1.56/0.20n     NA        NA   
+dV/dt_f  1.81/0.40n     NA        NA   
+|
+[Rising Waveform]
+R_fixture = 50
+V_fixture = 0
+C_fixture = 0.0p
+|
+|Time    V(typ)   V(min)    V(max)
+0.00E+00	0.0023	NA	NA
+2.00E-10	0.5330	NA	NA
+4.00E-10	2.5259	NA	NA
+6.00E-10	3.2881	NA	NA
+8.00E-10	3.4445	NA	NA
+1.00E-09	3.4430	NA	NA
+1.20E-09	3.3939	NA	NA
+1.40E-09	3.2827	NA	NA
+1.60E-09	3.0596	NA	NA
+1.80E-09	2.8487	NA	NA
+2.00E-09	2.6685	NA	NA
+2.20E-09	2.5152	NA	NA
+2.40E-09	2.3871	NA	NA
+2.60E-09	2.2798	NA	NA
+2.80E-09	2.1878	NA	NA
+3.00E-09	2.1111	NA	NA
+3.20E-09	2.0467	NA	NA
+3.40E-09	1.9930	NA	NA
+3.60E-09	1.9470	NA	NA
+3.80E-09	1.9086	NA	NA
+4.00E-09	1.8772	NA	NA
+4.20E-09	1.8527	NA	NA
+4.40E-09	1.8335	NA	NA
+4.60E-09	1.8197	NA	NA
+4.80E-09	1.8113	NA	NA
+5.00E-09	1.8051	NA	NA
+5.20E-09	1.8021	NA	NA
+5.40E-09	1.8021	NA	NA
+5.60E-09	1.8036	NA	NA
+5.80E-09	1.8059	NA	NA
+6.00E-09	1.8097	NA	NA
+6.20E-09	1.8143	NA	NA
+6.40E-09	1.8197	NA	NA
+6.60E-09	1.8251	NA	NA
+6.80E-09	1.8304	NA	NA
+7.00E-09	1.8358	NA	NA
+7.20E-09	1.8404	NA	NA
+7.40E-09	1.8450	NA	NA
+7.60E-09	1.8496	NA	NA
+7.80E-09	1.8542	NA	NA
+8.00E-09	1.8580	NA	NA
+8.20E-09	1.8619	NA	NA
+8.40E-09	1.8657	NA	NA
+8.60E-09	1.8688	NA	NA
+8.80E-09	1.8726	NA	NA
+9.00E-09	1.8757	NA	NA
+9.20E-09	1.8780	NA	NA
+9.40E-09	1.8810	NA	NA
+9.60E-09	1.8833	NA	NA
+9.80E-09	1.8864	NA	NA
+1.00E-08	1.8887	NA	NA
+1.02E-08	1.8910	NA	NA
+1.04E-08	1.8925	NA	NA
+1.06E-08	1.8948	NA	NA
+1.08E-08	1.8964	NA	NA
+1.10E-08	1.8987	NA	NA
+1.12E-08	1.9002	NA	NA
+1.14E-08	1.9017	NA	NA
+1.16E-08	1.9040	NA	NA
+1.18E-08	1.9056	NA	NA
+1.20E-08	1.9071	NA	NA
+1.22E-08	1.9086	NA	NA
+1.24E-08	1.9094	NA	NA
+1.26E-08	1.9109	NA	NA
+1.28E-08	1.9125	NA	NA
+1.30E-08	1.9132	NA	NA
+1.32E-08	1.9148	NA	NA
+1.34E-08	1.9163	NA	NA
+1.36E-08	1.9171	NA	NA
+1.38E-08	1.9186	NA	NA
+1.40E-08	1.9194	NA	NA
+1.42E-08	1.9201	NA	NA
+1.44E-08	1.9217	NA	NA
+1.46E-08	1.9224	NA	NA
+1.48E-08	1.9232	NA	NA
+1.50E-08	1.9247	NA	NA
+1.52E-08	1.9255	NA	NA
+1.54E-08	1.9263	NA	NA
+1.56E-08	1.9270	NA	NA
+1.58E-08	1.9278	NA	NA
+1.60E-08	1.9286	NA	NA
+1.62E-08	1.9293	NA	NA
+1.64E-08	1.9301	NA	NA
+1.66E-08	1.9309	NA	NA
+1.68E-08	1.9316	NA	NA
+1.70E-08	1.9324	NA	NA
+1.72E-08	1.9332	NA	NA
+1.74E-08	1.9339	NA	NA
+1.76E-08	1.9347	NA	NA
+1.78E-08	1.9355	NA	NA
+1.80E-08	1.9362	NA	NA
+1.82E-08	1.9370	NA	NA
+1.84E-08	1.9378	NA	NA
+1.88E-08	1.9385	NA	NA
+1.90E-08	1.9393	NA	NA
+1.92E-08	1.9401	NA	NA
+1.94E-08	1.9401	NA	NA
+1.96E-08	1.9408	NA	NA
+1.98E-08	1.9416	NA	NA
+2.00E-08	1.9424	NA	NA  
+|
+[Falling Waveform]
+R_fixture = 50
+C_fixture = 0.0p
+V_fixture = 5.0
+|
+|Time    V(typ)   V(min)    V(max)
+0.00E+00	4.9999	NA	NA
+1.00E-10	4.9891	NA	NA
+3.00E-10	4.8663	NA	NA
+4.00E-10	4.4131	NA	NA
+5.00E-10	3.8101	NA	NA
+6.00E-10	3.1248	NA	NA
+7.00E-10	2.4179	NA	NA
+8.00E-10	1.8265	NA	NA
+9.00E-10	1.4605	NA	NA
+1.00E-09	1.2460	NA	NA
+1.10E-09	1.1113	NA	NA
+1.20E-09	1.0201	NA	NA
+1.30E-09	0.9584	NA	NA
+1.40E-09	0.9199	NA	NA
+1.50E-09	0.9022	NA	NA
+1.60E-09	0.8945	NA	NA
+1.70E-09	0.8898	NA	NA
+1.80E-09	0.8877	NA	NA
+1.90E-09	0.8881	NA	NA
+2.00E-09	0.8928	NA	NA
+2.10E-09	0.9041	NA	NA
+2.20E-09	0.9294	NA	NA
+2.30E-09	0.9837	NA	NA
+2.40E-09	1.0765	NA	NA
+2.50E-09	1.1520	NA	NA
+2.60E-09	1.2044	NA	NA
+2.70E-09	1.2361	NA	NA
+2.80E-09	1.2570	NA	NA
+2.90E-09	1.2703	NA	NA
+3.00E-09	1.2775	NA	NA
+3.10E-09	1.2807	NA	NA
+3.20E-09	1.2815	NA	NA
+3.30E-09	1.2811	NA	NA
+3.40E-09	1.2803	NA	NA
+3.50E-09	1.2796	NA	NA
+3.60E-09	1.2792	NA	NA
+3.70E-09	1.2790	NA	NA
+3.80E-09	1.2784	NA	NA
+3.90E-09	1.2773	NA	NA
+4.00E-09	1.2760	NA	NA
+4.10E-09	1.2749	NA	NA
+4.20E-09	1.2741	NA	NA
+4.30E-09	1.2736	NA	NA
+4.40E-09	1.2730	NA	NA
+4.50E-09	1.2721	NA	NA
+4.60E-09	1.2711	NA	NA
+4.70E-09	1.2699	NA	NA
+4.80E-09	1.2687	NA	NA
+4.90E-09	1.2675	NA	NA
+5.00E-09	1.2663	NA	NA
+5.10E-09	1.2652	NA	NA
+5.20E-09	1.2641	NA	NA
+5.30E-09	1.2630	NA	NA
+5.40E-09	1.2621	NA	NA
+5.50E-09	1.2611	NA	NA
+5.60E-09	1.2603	NA	NA
+5.70E-09	1.2595	NA	NA
+5.80E-09	1.2589	NA	NA
+5.90E-09	1.2580	NA	NA
+6.00E-09	1.2574	NA	NA
+6.10E-09	1.2567	NA	NA
+6.20E-09	1.2562	NA	NA
+6.30E-09	1.2555	NA	NA
+6.40E-09	1.2549	NA	NA
+6.50E-09	1.2545	NA	NA
+6.60E-09	1.2540	NA	NA
+6.70E-09	1.2535	NA	NA
+6.80E-09	1.2531	NA	NA
+6.90E-09	1.2526	NA	NA
+7.00E-09	1.2522	NA	NA
+7.10E-09	1.2518	NA	NA
+7.20E-09	1.2514	NA	NA
+7.30E-09	1.2512	NA	NA
+7.40E-09	1.2508	NA	NA
+7.50E-09	1.2505	NA	NA
+7.60E-09	1.2501	NA	NA
+7.70E-09	1.2498	NA	NA
+7.80E-09	1.2495	NA	NA
+7.90E-09	1.2493	NA	NA
+8.00E-09	1.2490	NA	NA
+8.10E-09	1.2487	NA	NA
+8.20E-09	1.2485	NA	NA
+8.30E-09	1.2483	NA	NA
+8.40E-09	1.2481	NA	NA
+8.50E-09	1.2478	NA	NA
+8.60E-09	1.2477	NA	NA
+8.70E-09	1.2474	NA	NA
+8.80E-09	1.2473	NA	NA
+8.90E-09	1.2470	NA	NA
+9.00E-09	1.2468	NA	NA
+9.10E-09	1.2466	NA	NA
+9.20E-09	1.2464	NA	NA
+9.30E-09	1.2463	NA	NA
+9.40E-09	1.2460	NA	NA
+9.50E-09	1.2459	NA	NA
+9.60E-09	1.2458	NA	NA
+9.70E-09	1.2456	NA	NA
+9.80E-09	1.2455	NA	NA
+9.90E-09	1.2454	NA	NA
+1.00E-08	1.2451	NA	NA
+|
+[END]

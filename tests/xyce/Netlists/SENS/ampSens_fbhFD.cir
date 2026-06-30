@@ -1,0 +1,50 @@
+* Sensitivity of collector current to amplifier component
+* This circuit was found  on page 298 of the book, 
+* "PSPICE and MATLAB for Electronics: An Integrated Approach" by John Okyere Attia.  
+*
+* The relevant pages are excerpted in google books, and includes a printout of the 
+* PSPICE output.
+*
+
+VCC 4 0 DC 1
+RB1 4 1 40k
+RB2 1 0 10k
+RE 2 0 1K
+RC 5 3 6K
+VM 4 5 DC 0; monitor collector current
+Q1 3 1 2 0 fbh_def
+
+.DC VCC 1 10 0.4
+
+* NOTE:  printing of parameters commented out due to parallel bug.
+.print dc v(4) I(VM) ; fbh_def:bf fbh_def:nf fbh_def:vaf fbh_def:tnom
+.print sens v(4)
+
+
+.SENS param=
++ fbh_def:bf,
++ fbh_def:nf,
++ fbh_def:tnom
++objfunc={I(VM)} 
+
+.options SENSITIVITY direct=1 adjoint=0 forcefd=1
+
+* FBH NPN model sent from author
+.model fbh_def npn
++ LEVEL=23
++ Rth=600 Cth=700n
++ Vgr=0.8 kc=0 Cmin=0.45f Cpb=20e-15
++ XCjc=0.90 BVebo=0 J0=1.0e-3 Cpc=20e-15
++ Jsf=5.5e-27 Jsc=0.0 Tr=0.5p XJ0=1 Kfb=0
++ nf=1.01 nc=0.0 Trx=0.5p Rci0=400 Afb=1
++ Vg=1.65 Rcxx=1 Tf=0.45p Jk=6e-4 Ffeb=1
++ Jse=6.408e-24 Vgc=0.0 Tft=0 RJk=2e6 Kb=0
++ ne=1.35 Bf=150 Thcs=1.4e-12 Vces=0.03 Ab=1
++ Rbxx=1.192k kBeta=0.2 Ahc=0.0005 Rc=0.8 Fb=1
++ Vgb=1.25 Br=2 Cje=1f Re=1.35 Kfe=0
++ Jsee=0.0 VAF=0.0 mje=0.5 Rb=1.1 Afe=1
++ nee=1.2 VAR=0.0 Vje=1.13 Rb2=3.5 Ffee=1
++ Rbbxx=3k IKF=0.0 Cjc=1f Lc=43e-12 Tnom=25.0
++ Vgbb=1.23 IKR=0.0 mjc=0.57 Le=1e-12
++ Jsr=7e-17 Mc=0 Vjc=1.3 Lb=49e-12
++ nr=1.55 BVceo=0 kjc=0.48 Cq=1f

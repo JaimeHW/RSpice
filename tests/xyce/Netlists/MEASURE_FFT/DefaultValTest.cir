@@ -1,0 +1,32 @@
+* Test that FFT measures return their default value, until
+* the FFT results are calculated.  This also tests that
+* .OPTIONS OUTPUT INITIAL_INTERVAL is compatible with
+* FFT_ACCURATE .  That combination will not work with the
+* requested value of FFT_ACCURATE=1.  So, FFT_ACCURATE is
+* set to 0 by Xyce, with a warning message issued.
+*
+* See SON Bugs 1280 and 1327 for more details.
+******************************************************
+
+.TRAN 0 1
+.OPTIONS FFT FFTOUT=1 FFT_ACCURATE=1
+
+V1 1 0 SIN(0 500 1)
+V3 3 0 SIN(0 200 2)
+R1 1 2 1
+R2 2 0 1
+R3 3 2 1
+
+.FFT V(2) NP=8 WINDOW=HANN FORMAT=UNORM
+
+.MEASURE FFT ENOB ENOB V(2)
+.MEASURE FFT FIND FIND V(2) AT=1
+.MEASURE FFT SFDR SFDR V(2)
+.MEASURE FFT SNDR SNDR V(2)
+.MEASURE FFT SNR SNR V(2)
+.MEASURE FFT THD THD V(2)
+
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.1
+.PRINT TRAN ENOB FIND SFDR SNDR SNR THD
+
+.END

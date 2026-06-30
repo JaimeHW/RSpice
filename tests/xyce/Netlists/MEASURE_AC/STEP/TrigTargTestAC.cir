@@ -1,0 +1,57 @@
+* Test AC mode support for the TRIG-TARG measure
+*
+*
+*
+* See gitlab-ex issue 289 for more details
+*************************************************
+
+* Used to adjust reference frequency from 1Hz to 1KHz
+.PARAM scaleFactor=1e3
+
+V1 a 0 DC 0V AC 1
+
+* 7th order Chebychev LPF with 2dB of passband ripple.
+* This is not a realistic passband ripple level, but is
+* useful for this test.
+RS a b 1
+C1 b 0 {2.865/scaleFactor}
+L2 b c {0.912/scaleFactor}
+C3 c 0 {3.8774/scaleFactor}
+L4 c d {0.9537/scaleFactor}
+C5 d 0 {3.8774/scaleFactor}
+L6 d e {0.912/scaleFactor}
+C7 e 0 {2.8650/scaleFactor}
+
+* The magnitude at DC is RL/(RL + RS)
+RL e 0 1.0
+
+.ac dec 20 1 1000
+.print AC vm(a) vm(b) vm(c) vm(d) vm(e)
+.STEP RL 1 1.5 0.5
+
+.MEASURE AC TrigTargAT TRIG AT=30 TARG AT=500
+
+* Test that negative measure values are allowed
+.MEASURE AC TrigTarg1 TRIG vm(e)=0.45 CROSS=1 TARG vm(e)=0.45 CROSS=2
+.MEASURE AC TrigTarg2 TRIG vm(e)=0.45 CROSS=2 TARG vm(e)=0.45 CROSS=1
+
+* Repeat tests with LAST keywords and cross=-1
+.MEASURE AC TrigTarg3 TRIG vm(e)=0.45 CROSS=1 TARG vm(e)=0.45 CROSS=-1
+.MEASURE AC TrigTarg4 TRIG vm(e)=0.45 CROSS=LAST TARG vm(e)=0.45 CROSS=1
+
+* Add TD for both TRIG and TARG
+.MEASURE AC TrigTarg5 TRIG vm(e) VAL=0.45 TD=30 CROSS=1 TARG vm(e) VAL=0.45 TD=70 CROSS=2
+
+* Repeat core tests with RISE and FALL.  Also test TRIG and TARG using different signals.
+.MEASURE AC RiseFall1 TRIG vm(e)=0.45 RISE=1 TARG vm(e)=0.45 FALL=2
+.MEASURE AC RiseFall2 TRIG vm(e)=0.45 RISE=2 TARG vm(e)=0.45 FALL=1
+
+.MEASURE AC RiseFall3 TRIG vm(e)=0.45 CROSS=1 TARG vm(d)=0.45 RISE=LAST
+.MEASURE AC RiseFall4 TRIG vm(d)=0.45 FALL=LAST TARG vm(e)=0.45 CROSS=1
+
+* Signifies end of test. .sh file looks for a measure named lastMeasure.
+* This is needed for compatibility for testing with a verbose build, which
+* is often used by the Xyce developers.
+.measure ac lastMeasure max vm(b)
+
+.END

@@ -13,13 +13,12 @@ noise, a CLI S-parameter path over `.ac`, HSPICE-style `.alter`/`.data`, and
 the default KLU-class real linear-solver backend.
 
 Status note (2026-06-25): canonical Verilog-A IR and the first build-time
-Verilog-A-to-Rust backend have also landed behind `veriloga-builtins`, with a
-generated registry materialized under `crates/rspice-core/src/device/`.
-Treat that as infrastructure and feature-gated qualification work, not completed
-WS2 product support; CMC oracle qualification, default feature selection,
-performance gates, and user-facing artifact contracts remain open. Remaining
-bullets below should be read as qualification, corpus coverage, and
-compatibility closure unless they explicitly describe an unimplemented surface.
+Verilog-A-to-Rust backend are now the default product path through
+`veriloga-builtins`, with a generated registry materialized under
+`crates/rspice-core/src/device/`. Remaining bullets below should be read as
+qualification, corpus coverage, performance gates, artifact-contract hardening,
+and compatibility closure unless they explicitly describe an unimplemented
+surface.
 
 Ground rules (carried over from the regression program, non-negotiable):
 
@@ -74,7 +73,7 @@ measurement infrastructure to define "done."
 - Triage each category: runnable-now → add to harness with live-ngspice-generated references;
   feature-gap → file as acceptance test for the owning workstream (e.g. `sp/` → WS4, `digital/` →
   WS5, `Monte_Carlo/` (uses agauss) → WS1).
-- License: same ngspice licensing as the already-vendored `tests/` tree (BSD-style core) — keep
+- License: same ngspice licensing as the already-vendored `tests/ngspice/` tree (BSD-style core) — keep
   upstream notice files alongside vendored decks.
 
 ### M0.3 — External public corpora (the user-facing validation answer)
@@ -83,7 +82,7 @@ measurement infrastructure to define "done."
 | SkyWater **sky130** PDK | Binned BSIM4 cards (63 bins/device), 7 corners, AGAUSS MC mismatch, real foundry decks | Apache-2.0 | Vendor a pinned subset (cards + smoke circuits); full PDK fetched in CI |
 | **GF180MCU** PDK | Second independent foundry BSIM4 card set (180 nm) | Apache-2.0 | Same pattern |
 | **IHP SG13G2** PDK | **PSP 103.6** MOSFETs + **HICUM/L2** SiGe HBTs (350 GHz fT) — the system test for WS2 and WS4 RF | Apache-2.0 | Same pattern |
-| **Xyce_Regression** (Sandia) | 2000+ netlists with gold outputs; HB/AC/noise/devices breadth | GPL-3 | **Do not vendor** into the source-available tree; CI clones at run time into an external-corpus runner; results compared via our harness |
+| **Xyce_Regression** (Sandia) | 2000+ netlists with gold outputs; HB/AC/noise/devices breadth | GPL-3 | Vendor under `tests/xyce/` with upstream README, `COPYING`, and `RSPICE-VENDORING.md`; keep isolated from product/runtime code and run through a Xyce-specific adapter |
 | Sandia **XDM** converter | Authoritative PSPICE/HSPICE dialect semantics (reference, not dependency) | GPL-3 | Read-only reference for WS1 dialect tables |
 | CMC standard models (Si2): BSIM-CMG v112, BSIM-IMG, BSIM-BULK, PSP, HICUM L0/L2, MEXTRAM, ASM-HEMT, MVSG | Verilog-A sources; private official QA decks require CMC membership and are not a planned gate without access | Public download (form); package-specific redistribution terms | Shipped, redistributable Verilog-A packages live under `models/veriloga/cmc/`; OMI remains excluded pending separate review |
 | Berkeley SPICE3f5 test decks | Classic core-engine decks | UC Berkeley | Vendor |
@@ -181,7 +180,7 @@ implementations from those sources.
 ### M2.2 — CMC standard models, in priority order
 1. **PSP 103/104** (IHP PDK MOSFETs validate it; analog/RF foundries use it) — generated Rust
    from CMC Verilog-A, with QA decks from Si2 where available.
-2. **HICUM/L2** (IHP SiGe HBTs validate it; unlocks the vendored-but-dormant `tests/hicum2`) —
+2. **HICUM/L2** (IHP SiGe HBTs validate it; unlocks the vendored-but-dormant `tests/ngspice/hicum2`) —
    generated Rust from CMC/Xyce Verilog-A sources, not a new hand-native port.
 3. **BSIM-CMG v112** (FinFET — table stakes for "advanced-node" claims; QA decks from Si2) —
    generated Rust from `models/veriloga/cmc/BSIM-CMG_112.1.0_04282026`.
@@ -189,7 +188,7 @@ implementations from those sources.
    **ASM-HEMT / MVSG** (GaN CMC qualification beyond the in-tree physics-style model) — generated
    Rust from the shipped CMC Verilog-A packages.
 5. **HiSIM2/HiSIM-HV** via VA if sources obtainable; else native port later (unlocks vendored
-   `tests/hisim*`).
+   `tests/ngspice/hisim*`).
 - Each model lands with: generated Rust source/artifact provenance, CMC QA deck run,
   gm/gds/caps continuity sweep tests (C∞ checks),
   ngspice/Xyce cross-oracle where they implement it, and activation of the corresponding dormant
@@ -287,14 +286,14 @@ before M0.5 baselines exist.
 ## WS5 — Mixed-signal completion
 
 **Recommendation: finish it** (bounded scope) — ngspice parity claims ring hollow without XSPICE,
-the vendored `tests/xspice` + `examples/xspice|digital` corpora already exist as acceptance tests,
+the vendored `tests/ngspice/xspice` + `examples/xspice|digital` corpora already exist as acceptance tests,
 and power/system users expect behavioral digital.
 
 - M5.1: event-driven core: typed event queues, delays, inertial/transport semantics, hybrid
   analog/event scheduler integration with the transient loop (breakpoint injection on events).
 - M5.2: the 12 workhorse code models: d_dff/d_latch/gates/d_state, adc_bridge/dac_bridge,
   s_xfer, gain/summer/mult, oneshot, pwm, sampled-data filter.
-- M5.3: acceptance = vendored `tests/xspice` suite green + `examples/digital` triage; document
+- M5.3: acceptance = vendored `tests/ngspice/xspice` suite green + `examples/digital` triage; document
   the supported subset vs full XSPICE explicitly.
 
 ---

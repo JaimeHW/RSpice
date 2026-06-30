@@ -1,0 +1,20 @@
+* Verilog-A vbic_3T_et_cf test circuit
+* This test uses two identical vbic devices in parallel
+
+vbe bx 0  0
+vcb cx bx 0
+vib bx b  0
+vic cx c  0
+
+*two in parallel, but separate self-heating nodes
+q1 c  b  0 vbicmodel
+q2 c  b  0 vbicmodel
+
+.model vbicmodel npn
++ level=11
++ RCX=10 RCI=10 RBX=1 RBI=10 RE=1 RBP=10 RS=10
++ IBEN=1.0e-13 RTH=100
+
+.dc vbe 0.5 1.0 0.02
+.print dc v(bx) i(vib) i(vic)
+.end

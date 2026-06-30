@@ -1,0 +1,74 @@
+* Test TRAN mode support for the TRAN_CONT version of
+* TRIG-TARG measures.
+*
+* See SON Bugs 1274, 1313 and 1335 and gitlab-ex issue 303 for more details.
+********************************************************************
+
+* For testing convenience send the output for the NOISE_CONT
+* measures to the <netlistName>.ma0 file.
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+* Used to adjust reference frequency from 1Hz to 1KHz
+.PARAM scaleFactor=1e3
+
+* RESISTOR DIVIDER
+V1  1 0 DC 5.0 AC  1.0
+R1  1 2 100K
+R2  2 0 100K
+*
+* AMP AND LP FILTER
+EAMP   3 0 2 0 2
+* 7th order Chebychev LPF with 2dB of passband ripple.
+* This is not a realistic passband ripple level, but is
+* useful for this test.
+RS 3 b 1
+C1 b 0 {2.865/scaleFactor}
+L2 b c {0.912/scaleFactor}
+C3 c 0 {3.8774/scaleFactor}
+L4 c d {0.9537/scaleFactor}
+C5 d 0 {3.8774/scaleFactor}
+L6 d e {0.912/scaleFactor}
+C7 e 0 {2.8650/scaleFactor}
+RL e 0 1.0
+
+.NOISE  V(e)  V1  DEC  20 1 1000
+.PRINT NOISE VM(3) vm(b) vm(c) vm(d) vm(e)
+
+* test combos of AT used by only TRIG, only TARG, or both.  Also test
+* VAL= syntax.
+.MEASURE NOISE_CONT TrigTargContAT TRIG AT=30 TARG AT=500
+.MEASURE NOISE_CONT TrigTargContAT1 TRIG AT=30 TARG vm(e) VAL=0.45 CROSS=1
+.MEASURE NOISE_CONT TrigTargContAT2 TRIG vm(e) VAL=0.45 CROSS=1 TARG AT=500
+
+* test base case
+.MEASURE NOISE_CONT TrigTarg1 TRIG vm(b)=0.40 CROSS=1 TARG vm(b)=0.45 CROSS=1
+
+* test that the first N TRIGs are matched with the first N TARGs.
+.MEASURE NOISE_CONT TrigTarg2 TRIG vm(b)=0.40 CROSS=1 TARG vm(b)=0.45 CROSS=2
+.MEASURE NOISE_CONT TrigTarg3 TRIG vm(b)=0.40 CROSS=2 TARG vm(b)=0.45 CROSS=1
+
+* Add TD for both TRIG and TARG.  Note that the TRIG TD value will also be used
+* for the TARG TD value, if only the TRIG TD value is given.  An "early" TD is
+* essentially ignored.
+.MEASURE NOISE_CONT TrigTarg4 TRIG vm(b)=0.40 CROSS=1 TD=90 TARG vm(b)=0.45 CROSS=1
+.MEASURE NOISE_CONT TrigTarg5 TRIG vm(b)=0.40 CROSS=1 TD=90 TARG vm(b)=0.45 CROSS=1 TD=10
+.MEASURE NOISE_CONT TrigTarg6 TRIG vm(b)=0.40 CROSS=1 TARG vm(b)=0.45 CROSS=1 TD=50
+.MEASURE NOISE_CONT TDearly TRIG vm(b)=0.40 TD=0.1 CROSS=4 TARG vm(b)=0.45 CROSS=4 TD=0.2
+
+* Repeat with RISE and FALL.  Also test TRIG and TARG using different signals.
+.MEASURE NOISE_CONT RiseFall1 TRIG vm(b)=0.40 RISE=1 TARG vm(c)=0.45 FALL=2
+.MEASURE NOISE_CONT RiseFall2 TRIG vm(c)=0.40 FALL=2 TARG vm(b)=0.45 RISE=1
+
+* Both TDs get ignored if both ATs at specified.  However, TRIG TD is used for
+* the TARG clause in the second case
+.MEASURE NOISE_CONT AtTD1 TRIG AT=30 TD=50 TARG AT=500 TD=600
+.MEASURE NOISE_CONT AtTD2 TRIG AT=30 TD=70 TARG vm(b)=0.45 CROSS=1
+
+* Failed measures
+.MEASURE NOISE_CONT ATEarly TRIG AT=0.1 TARG AT=0.1
+.MEASURE NOISE_CONT ATLate TRIG AT=2000 TARG AT=2000
+.MEASURE NOISE_CONT TrigTDLate TRIG vm(e)=0.45 CROSS=1 TD=1500 TARG vm(b)=0.45 CROSS=1 TD=10
+.MEASURE NOISE_CONT TargTDLate TRIG vm(e)=0.45 CROSS=1 TARG vm(e)=0.45 CROSS=2 TD=2000
+.MEASURE NOISE_CONT ValNotFound TRIG vm(e)=2 CROSS=1 TARG vm(e)=2 CROSS=2
+
+.END

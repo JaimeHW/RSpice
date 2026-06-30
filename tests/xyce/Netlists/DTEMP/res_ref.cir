@@ -1,0 +1,13 @@
+Netlist to Test the Xyce Resistor Model
+
+* patterned after the RESISTOR_TD/temp_dep.cir test, loosely
+
+R1 1 0 1K RMODEL 
+V1 1 0 5V
+.DC V1 0 5V 1V
+.MODEL RMODEL R (TC1=0.0007325 TC2=-2.217E-07)  
+
+.PRINT DC V(1) I(V1)
+.step TEMP list -55 25 72 
+
+.END

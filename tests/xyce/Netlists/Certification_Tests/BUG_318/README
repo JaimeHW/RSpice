@@ -1,0 +1,24 @@
+Bug Number: 318
+Test netlist: bug_318.cir
+
+Description:
+============
+Bug 318 deals with problems with model scoping rules. Parameterized models
+need to be scoped by device instance. This test checks that this happens
+properly.
+
+This test compares a netlist that depends on the bug being fixed to a netlist
+that has had a workaround implemented to avoid the bug.  If the bug is fixed,
+both should agree.
+
+Verification
+============
+Run Xyce on both the netlists in this directory.
+
+Compare the two results to each other using xyce_verify.pl:
+
+   xyce_verify.pl bug_318.cir bug_318_noscope.cir.prn bug_318.cir.prn
+
+Special Notes:
+==============
+None.

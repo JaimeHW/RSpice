@@ -1,0 +1,9 @@
+* test the use of "exp" as a constant = exp(1.0)
+.PARAM r0={exp}
+V1 1 0 10
+R1 1 2 1
+R2 2 0 {2*r0}
+
+.DC V1 10 10 1
+.PRINT DC V(1) V(2) R1:R {R0}
+.END

@@ -1,0 +1,93 @@
+ ***** Measure Functions ***** 
+
+FINDV1AT0 = 4.375000e-01 at 0.000000e+00 Hz (rounded from 0.000000e+00 Hz)
+
+FINDVR1AT0 = 4.375000e-01 at 0.000000e+00 Hz (rounded from 0.000000e+00 Hz)
+
+FINDVI1AT0 = 0.000000e+00 at 0.000000e+00 Hz (rounded from 0.000000e+00 Hz)
+
+FINDVM1AT0 = 4.375000e-01 at 0.000000e+00 Hz (rounded from 0.000000e+00 Hz)
+
+FINDVP1AT0 = 0.000000e+00 at 0.000000e+00 Hz (rounded from 0.000000e+00 Hz)
+
+FINDVDB1AT0 = -7.180439e+00 at 0.000000e+00 Hz (rounded from 0.000000e+00 Hz)
+
+FINDV1AT1 = 5.200051e-01 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+FINDVR1AT1 = -4.804221e-01 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+FINDVI1AT1 = -1.989973e-01 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+FINDVM1AT1 = 5.200051e-01 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+FINDVP1AT1 = -1.575000e+02 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+FINDVDB1AT1 = -5.679847e+00 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+FINDV1AT2 = 5.337556e-02 at 2.000000e+00 Hz (rounded from 2.000000e+00 Hz)
+
+FINDVR1AT2 = 3.774222e-02 at 2.000000e+00 Hz (rounded from 2.000000e+00 Hz)
+
+FINDVI1AT2 = 3.774222e-02 at 2.000000e+00 Hz (rounded from 2.000000e+00 Hz)
+
+FINDVM1AT2 = 5.337556e-02 at 2.000000e+00 Hz (rounded from 2.000000e+00 Hz)
+
+FINDVP1AT2 = 4.500000e+01 at 2.000000e+00 Hz (rounded from 2.000000e+00 Hz)
+
+FINDVDB1AT2 = -2.545315e+01 at 2.000000e+00 Hz (rounded from 2.000000e+00 Hz)
+
+FINDV1AT3 = 1.353568e-02 at 3.000000e+00 Hz (rounded from 3.000000e+00 Hz)
+
+FINDVR1AT3 = 5.179880e-03 at 3.000000e+00 Hz (rounded from 3.000000e+00 Hz)
+
+FINDVI1AT3 = 1.250534e-02 at 3.000000e+00 Hz (rounded from 3.000000e+00 Hz)
+
+FINDVM1AT3 = 1.353568e-02 at 3.000000e+00 Hz (rounded from 3.000000e+00 Hz)
+
+FINDVP1AT3 = 6.750000e+01 at 3.000000e+00 Hz (rounded from 3.000000e+00 Hz)
+
+FINDVDB1AT3 = -3.737040e+01 at 3.000000e+00 Hz (rounded from 3.000000e+00 Hz)
+
+FINDV12 = 2.340516e-01 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+FINDI3 = 2.569748e-01 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+FINDDIR3 = -6.540057e-02 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+FINDII3 = -2.485132e-01 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+FINDIM3 = 2.569748e-01 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+FINDIP3 = -1.047441e+02 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+FINDIDB3 = -1.180219e+01 at 1.000000e+00 Hz (rounded from 1.000000e+00 Hz)
+
+MAXV3 = 1.000000e+00 at time = 2.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+FINDVR1ROUND1 = -4.804221e-01 at 1.000000e+00 Hz (rounded from 1.250000e+00 Hz)
+
+FINDVI1ROUND2A = 3.774222e-02 at 2.000000e+00 Hz (rounded from 1.750000e+00 Hz)
+
+FINDVM1ROUND2B = 5.337556e-02 at 2.000000e+00 Hz (rounded from 2.400000e+00 Hz)
+
+FINDVP1ROUND3 = 6.750000e+01 at 3.000000e+00 Hz (rounded from 2.900000e+00 Hz)
+
+FINDVDB1ROUND0 = -7.180439e+00 at 0.000000e+00 Hz (rounded from 3.000000e-01 Hz)
+
+EQN1 = -4.804221e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+EQN2 = -4.804221e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+PARAM1 = -4.804221e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+Netlist warning: FAILV1ATMINUS1 failed. AT value outside FFT frequency bounds
+FAILV1ATMINUS1 = 0.000000e+00 FAILED at -1.000000e+00 Hz (rounded from -1.000000e+00 Hz)
+
+Netlist warning: FAILV1AT5 failed. AT value outside FFT frequency bounds
+FAILV1AT5 = 0.000000e+00 FAILED at 5.000000e+00 Hz (rounded from 5.000000e+00 Hz)
+
+

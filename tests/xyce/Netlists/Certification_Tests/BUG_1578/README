@@ -1,0 +1,37 @@
+Test Name: BUG_1578
+Owner:  Tom Russo
+Test netlists: bug_1578.cir
+GS files: none
+Mode:  Serial
+Comparator: none 
+Version of Xyce: Release_4.1       # the first version where this bug was tested.
+ 
+Description:
+============
+
+This test verifies that Xyce prints a reasonable, descriptive, and helpful error message 
+when Xyce encounters a netlist line with an illegal device type (i.e. a line with an invalid 
+first character).  Prior to the fix of bug 1578, Xyce simply printed "defaultModel not 
+implemented for this device" with no indication of what device, what part of the netlist, 
+or anything else.
+
+ 
+Procedure:
+============
+
+Run Xyce on the netlist using the supplied perl script through run_xyce_regression.  The
+perl script runs the netlist and checks that the error message:
+  User Fatal: Error in file bug_1578.cir at or near line 10
+   Invalid device type for device NETLIST
+is printed.
+
+To run by hand, just run Xyce on the supplied netlist and check for the presence of that
+error message.
+ 
+Verification:
+=============
+Test passes if the error message is as described in Procedure.  Fails if Xyce prints
+"defaultModel not implemented for this device."
+ 
+Notes:
+======

@@ -1,0 +1,43 @@
+Regression test for truncated normal distribution sampling (MC)
+*
+* The circuit is a simple voltage divider, so it has an analytic solution
+* Also, the propagated mean, max and min can be computed analytically as well.
+*
+* Here is the results of that analytical analysis:
+*
+* analytical mean of R1 is 4.0e+3
+* analytical max  of R1 is 2.0e+3
+* analytical min  of R1 is 6.0e+3
+*
+* analytical mean of V1 is 600
+*
+* Analysis details:
+*
+* solution to voltage divider:  v(1) = V(2) * R2/(R1+R2)
+*
+* analytical mean of v(1) is: 1000 * 6/(4+6) = 1000 * 6/10 = 600
+* analytical max  of v(1) is: 1000 * 6/(2+6) = 1000 * 6/8  = 750
+* analytical min  of v(1) is: 1000 * 6/(6+6) = 1000 * 6/12 = 500
+
+R2 1 0 6K
+R1 1 2 1K
+v1 2 0 1000V
+
+.dc v1 1000 1000 1
+
+* normally distributed samples, mean=3k; std deviation=1k
+.sampling 
++ param=r1:r
++ type=normal
++ means=4k
++ std_deviations=1k
++ lower_bounds=2k 
++ upper_bounds=6k 
+
+.options samples numsamples=10000
++ outputs={R1:R},{V(1)}
++ sample_type=lhs
++ stdoutput=true
+
+.end
+

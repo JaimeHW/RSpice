@@ -1,0 +1,58 @@
+Test that P() and W() work in expressions
+* test both top-level circuits and subcircuits
+
+* Offset signals from zero, to avoid issues with integrated
+* error because of zero-crossings when using xyce_verify.
+*COMP I(V1) offset=1e-3
+*COMP {I(V1)*v(1)} offset=1e-3
+*COMP P(V1) offset=1e-3 
+*COMP {P(V1)} offset=1e-3 
+*COMP W(V1) offset=1e-3
+*COMP {W(V1)} offset=1e-3
+*COMP P(X1:V2) offset=1e-3
+*COMP {P(X1:V2)} offset=1e-3
+*COMP W(X1:V2) offset=1e-3
+*COMP {W(X1:V2)} offset=1e-3
+*COMP P(R1) offset=1e-3
+*COMP {P(R1)} offset=1e-3 
+*COMP W(R1) offset=1e-3
+*COMP {W(R1)} offset=1e-3
+*COMP P(X1:R2) offset=1e-3 
+*COMP {P(X1:R2)} offset=1e-3 
+*COMP W(X1:R2) offset=1e-3
+*COMP {W(X1:R2)} offset=1e-3
+*COMP P(C1) offset=1e-3 
+*COMP {P(C1)} offset=1e-3 
+*COMP W(C1) offset=1e-3
+*COMP {W(C1)} offset=1e-3
+*COMP P(X1:C2) offset=1e-3
+*COMP {P(X1:C2)} offset=1e-3 
+*COMP W(X1:C2) offset=1e-3
+*COMP {W(X1:C2)} offset=1e-3
+
+V1   1 0 SIN(0 2 10 0)
+R1   1 2 1
+C1   2 0 1u
+
+X1 a c MySubcircuit_1
+
+.SUBCKT MYSUBCIRCUIT_1 a c
+V2   a 0 SIN(0 2 10 0)
+R2   a b 1
+C2   b 0 1u
+.ENDS
+
+.options timeint method=trap
+.options nonlin-tran rhstol=1.0e-7
+.options output initial_interval=1ms
+.TRAN 0 50ms
+.PRINT TRAN V(1) I(V1) {I(V1)*v(1)} 
++ P(V1) {P(V1)} W(V1) {W(V1)}
++ P(X1:V2) {P(X1:V2)} W(X1:V2) {W(X1:V2)}
++ P(R1) {P(R1)} W(R1) {W(R1)}
++ P(X1:R2) {P(X1:R2)} W(X1:R2) {W(X1:R2)}
++ P(C1) {P(C1)} W(C1) {W(C1)}
++ P(X1:C2) {P(X1:C2)} W(X1:C2) {W(X1:C2)}
+
+.END
+dgbaur@s970399 (Xyce_Regression master) BUG_629_SON $ 

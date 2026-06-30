@@ -1,0 +1,40 @@
+simple LC Tank Oscillator
+*
+
+*.tran 0 1.0e-8 
+*.mpde 0 1.0e-8 
+
+*.tran 1e-11 1.0e-8 0 1e-11 NOOP
+*.print tran {v(1)+3} {i(L1)+1}
+*.print tran {v(1)+2} 
+*.print tran v(1) i(L1)
+
+.param pi = 3.1415926
+.param L = {4.869e-7/2/pi}
+.param C = {2e-12/2/pi}
+.param R = 1k
+.param Gn = {-1.1*1/R}
+.param satval = {1/R}
+
+*.options mpdeint ic=5 auton2=true T2=9.8681e-10 saveicdata=1 diff=1 wampde=1 phase=1 phasecoeff=0 oscout="I(L1)" 
+*.options timeint OUTPUTINTERPMPDE=0 DEBUGLEVEL=0 
+*.options timeint method=7 newlte=1 
+*.options timeint  method=7 erroption=1 delmax=0.1e-10 
+ 
+*v1 1 0
+*v1 1 0 DC 3.7V
+r1 1 0 R 
+c1 1 0 C
+l1 1 0 L
+B1 1 0 I={satval*tanh(Gn/satval*V(1))}
+
+*.ic V(1)=0.53
+
+.ic V(1)=0.1
+
+.hb 1.013e9
+.print hb v(1) i(L1)
+
+.options hbint numfreq= 10 hbosc=1 refnode= "V(1)" startupperiods =25
+.options linsol-hb prec_type=block_jacobi
+.end

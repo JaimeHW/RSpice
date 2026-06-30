@@ -1,0 +1,33 @@
+* Test TRAN mode support for the TRAN_CONT version of
+* TRIG-TARG Measures.
+*
+* See SON Bug 1335 and gitlab-ex issue 303 for more details.
+********************************************************
+
+* For testing convenience send the output for the TRAN_CONT
+* measures to the <netlistName>.mt0 file.
+.OPTIONS MEASURE USE_CONT_FILES=0
+
+*
+VPWL1 1  0  pwl(0 0.1 2.5m 0.5 5m 0 7.5m 0.4 10m 0)
+VPWL2 2  0  pwl(0 0.5 10m 0)
+
+R1a 1  1a  100
+R1b 1a  0  150
+R2  2   0  100
+
+.TRAN 0 10ms
+.PRINT TRAN V(1) V(1a) V(2)
+
+.MEASURE TRAN_CONT TrigTargContAT TRIG AT=2ms TARG AT=8ms
+.MEASURE TRAN_CONT TrigTargContAT1 TRIG V(1a) VAL=0.2 CROSS=1 TARG AT=8ms
+.MEASURE TRAN_CONT TrigTargContAT2 TRIG AT=2ms TARG V(1a) VAL=0.2 CROSS=1
+
+.MEASURE TRAN_CONT TrigTarg1 TRIG V(1a) VAL=0.2 CROSS=1 TARG V(1a) VAL=0.3 CROSS=1
+.MEASURE TRAN_CONT TrigTarg2 TRIG V(1a) VAL=0.2 CROSS=1 TARG V(1a) VAL=0.1 CROSS=2
+.MEASURE TRAN_CONT TrigTarg3 TRIG V(1a) VAL=0.2 CROSS=2 TARG V(1a) VAL=0.3 CROSS=1
+
+* Simple RISE/FALL test
+.MEASURE TRAN_CONT TrigTarg4 TRIG V(1a)=0.2 RISE=1 TARG V(1a)=0.1 FALL=1
+
+.END

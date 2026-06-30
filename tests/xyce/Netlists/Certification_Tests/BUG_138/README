@@ -1,0 +1,34 @@
+Bug Number: 138
+Test netlist: bug_138_1.cir
+              bug_138_2.cir
+
+Description:
+============
+This test checks for proper handling of E, F, G, and H sources when
+they are converted to B-sources.
+
+Verification
+============
+Run Xyce on each of the netlists bug_138_1.cir and bug_138_2.cir.
+
+Compare against the results in the given prn files using xyce_verify.pl or
+"compare".
+
+Special Notes:
+==============
+
+Gold standard for bug_138_2.cir.prn had to be changed on 20 October 2004, 
+because Xyce will no longer match output with previous versions.  This is
+due to changes in the handling of the third .TRAN parameter ("Tstart") between
+release 2.0 and release 2.1.  It is impossible to massage the new netlist
+to produce the same (broken) output as the old code did.  It is simply
+necessary to change what we expect to match.
+
+On 16 Dec 2004, Rob Hoekstra added ".options linsol type=superlu" to
+bug_138_2.cir to address convergence failure problems when this
+netlist was run on SGI platforms in parallel.  This set of options is
+invalid in versions of xyce prior to release 2.1.  No other platform
+experienced convergence failures in parallel using AZTEC iterative
+solvers, but since solver issues are not the focus of this bug test it
+is reasonable to use whatever options are needed to get it to run and
+match the gold standard.  The test is a test of parser function only.

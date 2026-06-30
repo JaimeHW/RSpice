@@ -1,0 +1,29 @@
+*******************************************************
+* For SON Bug 744
+*
+* Illustrate that a single quote is not a valid 
+* character for a device or node name. This is 
+* apparently because ' is replaced with a 
+* right curly bracket internal to Xyce.
+* If ' is accepted as a node name then the entry
+* in the symbol table will likely be incorrect.
+*
+*
+*
+*
+******************************************************* 
+.DC v1 1 1 1
+v1 1 0 1
+r1 1 0 1
+
+* All of these lines fail netlist parsing for 
+* a V-device.
+v2' 2 0 1
+v4 ' 0 1
+v' 4 0 1
+
+* This instance line may pass netlist parsing but will likley
+* be wrong in the symbol table. 
+v3 3' 0 1
+
+.end

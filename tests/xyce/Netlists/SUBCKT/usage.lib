@@ -1,0 +1,4 @@
+.subckt frobnitz 1 2 
+.param RES={foobie*3}
+R1 1 2 {RES}
+.ends

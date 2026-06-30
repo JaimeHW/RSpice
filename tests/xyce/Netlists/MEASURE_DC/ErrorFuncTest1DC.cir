@@ -1,0 +1,65 @@
+* Test DC mode support for ERR, ERR1 and ERR2 Measures
+*
+* This bug covers:
+*   1) the case of one variable in the .DC line,
+*      without a .STEP statement.  The sweep variable
+*      is ascending.
+*
+*   2) the use of FROM and TO statements.
+*
+*   3) Use of a global parameter.
+*
+*   4) That the WEIGHT qualifier has no effect on the
+*      measure values, and does not cause parsing errors.
+*
+* See SON Bug 1278 for more details.
+**********************************************************
+
+.GLOBAL_PARAM P1=2.5
+
+V3 3 0 2.5
+R3 3 0 1
+
+.DC V1 -5 5 1
+.PRINT DC V(1) V(2) V(3) I(R1) I(R3)
+
+V1 1 0 1
+R1 1 2 1
+R2 2 0 3
+
+* ERR and ERR1 measures
+.MEASURE DC ERR ERR V(1) V(2)
+.MEASURE DC ERR1 ERR1 V(1) V(2)
+.MEASURE DC ERR1WT ERR1 V(1) V(2) WEIGHT=2
+.MEASURE DC ERR1RO ERR1 V(2) V(1)
+.MEASURE DC ERR1MV1.5 ERR1 V(1) V(2) MINVAL=1.5
+.MEASURE DC ERR1YMIN2.5 ERR1 V(1) V(3) YMIN=2.5
+.MEASURE DC ERR1IGNOR2.5 ERR1 V(1) V(3) IGNOR=2.5
+.MEASURE DC ERR1YMAX3.5 ERR1 V(1) {P1} YMAX=3.5
+.MEASURE DC ERR1From ERR1 PAR('V(1)*V(1)') V(1) FROM=3
+.MEASURE DC ERR1To ERR1 PAR('V(1)*V(1)') V(1) TO=3
+.MEASURE DC ERR1FT ERR1 {V(1)*V(1)} V(1) FROM=0 TO=4
+.MEASURE DC ERR1TF ERR1 {V(1)*V(1)} V(1) FROM=4 TO=0
+
+* ERR2 measures
+.MEASURE DC ERR2 ERR2 V(1) V(2)
+.MEASURE DC ERR2WT ERR2 V(1) V(2) WEIGHT=2
+.MEASURE DC ERR2RO ERR2 V(2) V(1)
+.MEASURE DC ERR2MV1.5 ERR2 V(1) V(2) MINVAL=1.5
+.MEASURE DC ERR2YMIN2.5 ERR2 V(1) V(3) YMIN=2.5
+.MEASURE DC ERR2IGNORE2.5 ERR2 V(1) V(3) IGNORE=2.5
+.MEASURE DC ERR2YMAX3.5 ERR2 V(1) {P1} YMAX=3.5
+.MEASURE DC ERR2From ERR2 PAR('V(1)*V(1)') V(1) FROM=3
+.MEASURE DC ERR2To ERR2 PAR('V(1)*V(1)') V(1) TO=3
+.MEASURE DC ERR2FT ERR2 {V(1)*V(1)} V(1) FROM=0 TO=4
+.MEASURE DC ERR2TF ERR2 {V(1)*V(1)} V(1) FROM=4 TO=0
+
+* Current OP
+.MEASURE DC ERR1I ERR1 I(R1) I(R3)
+
+* Tests should fail since the FROM-T0 windows
+* donot overlap with the stepped values for VSRC1:DCV0
+.measure dc Err1Fail ERR1 v(1) v(2) FROM=-8 TO=-6
+.measure dc Err2Fail ERR2 v(1) v(2) FROM=8 TO=6
+
+.END

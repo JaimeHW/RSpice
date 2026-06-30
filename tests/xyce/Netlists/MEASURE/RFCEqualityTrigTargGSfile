@@ -1,0 +1,39 @@
+ ***** Measure Functions ***** 
+
+TRIGEQUALRISEV1 = 2.500000e-01 with trig time= 5.000000e-01 and targ time= 7.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+TRIGEQUALFALLV1 = 0.000000e+00 FAILED with trig time= 0.000000e+00 and targ time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+TRIGEQUALCROSSV1 = 2.500000e-01 with trig time= 5.000000e-01 and targ time= 7.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+TRIGEQUALRISEV2 = 0.000000e+00 FAILED with trig time= 0.000000e+00 and targ time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+TRIGEQUALFALLV2 = 2.500000e-01 with trig time= 5.000000e-01 and targ time= 7.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+TRIGEQUALCROSSV2 = 2.500000e-01 with trig time= 5.000000e-01 and targ time= 7.500000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+TARGEQUALRISEV1 = 2.500000e-01 with trig time= 2.500000e-01 and targ time= 5.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+TARGEQUALFALLV1 = 0.000000e+00 FAILED with trig time= 2.500000e-01 and targ time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+TARGEQUALCROSSV1 = 2.500000e-01 with trig time= 2.500000e-01 and targ time= 5.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+TARGEQUALRISEV2 = 0.000000e+00 FAILED with trig time= 2.500000e-01 and targ time= 0.000000e+00
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+TARGEQUALFALLV2 = 2.500000e-01 with trig time= 2.500000e-01 and targ time= 5.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+TARGEQUALCROSSV2 = 2.500000e-01 with trig time= 2.500000e-01 and targ time= 5.000000e-01
+Measure Start Time= 0.000000e+00	Measure End Time= 1.000000e+00
+
+

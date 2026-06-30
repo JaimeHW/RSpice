@@ -1,0 +1,195 @@
+UW ARCHIVE           IEEE 30 Bus Test Case
+* In this test, the upper QMAX limit at GenBus 2 is enforced.
+* The Q limits at GenBus 5, 8, 11 and 13 are not hit.
+* Test case at https://www.ee.washington.edu/research/pstca/pf30/pg_tca30bus.htm
+
+*********************************************
+* Simulation control statements             *
+*********************************************
+.DC V1VM 1.06 1.06 1
+
+*********************************************
+* Bus 1 is the slack bus.  Ammeter          *
+* is wired so that current flows into Bus 1 *
+*********************************************
+V1Th Bus1Th ammBus1P 0V
+V1VM Bus1VM ammBus1Q 1.06V
+Vamm1P 0 ammBus1P 0V
+Vamm1Q 0 ammBus1Q 0V
+
+*********************************************
+* Branch Definitions                        *
+*********************************************
+YPowerGridBranch pg1_2 bus1Th bus2Th bus1VM bus2VM AT=PQP R=0.0192 X=0.0575 B=0.0528
+YPowerGridBranch pg1_3 bus1Th bus3Th bus1VM bus3VM AT=PQP R=0.0452 X=0.1652 B=0.0408
+YPowerGridBranch pg2_4 bus2Th bus4Th bus2VM bus4VM AT=PQP R=0.057 X=0.1737 B=0.0368
+YPowerGridBranch pg3_4 bus3Th bus4Th bus3VM bus4VM AT=PQP R=0.0132 X=0.0379 B=0.0084
+YPowerGridBranch pg2_5 bus2Th bus5Th bus2VM bus5VM AT=PQP R=0.0472 X=0.1983 B=0.0418
+YPowerGridBranch pg2_6 bus2Th bus6Th bus2VM bus6VM AT=PQP R=0.0581 X=0.1763 B=0.0374
+YPowerGridBranch pg4_6 bus4Th bus6Th bus4VM bus6VM AT=PQP R=0.0119 X=0.0414 B=0.009
+YPowerGridBranch pg5_7 bus5Th bus7Th bus5VM bus7VM AT=PQP R=0.046 X=0.116 B=0.0204
+YPowerGridBranch pg6_7 bus6Th bus7Th bus6VM bus7VM AT=PQP R=0.0267 X=0.082 B=0.017
+YPowerGridBranch pg6_8 bus6Th bus8Th bus6VM bus8VM AT=PQP R=0.012 X=0.042 B=0.009
+YPowerGridBranch pg9_11 bus9Th bus11Th bus9VM bus11VM AT=PQP R=0 X=0.208 B=0
+YPowerGridBranch pg9_10 bus9Th bus10Th bus9VM bus10VM AT=PQP R=0 X=0.11 B=0
+YPowerGridBranch pg12_13 bus12Th bus13Th bus12VM bus13VM AT=PQP R=0 X=0.14 B=0
+YPowerGridBranch pg12_14 bus12Th bus14Th bus12VM bus14VM AT=PQP R=0.1231 X=0.2559 B=0
+YPowerGridBranch pg12_15 bus12Th bus15Th bus12VM bus15VM AT=PQP R=0.0662 X=0.1304 B=0
+YPowerGridBranch pg12_16 bus12Th bus16Th bus12VM bus16VM AT=PQP R=0.0945 X=0.1987 B=0
+YPowerGridBranch pg14_15 bus14Th bus15Th bus14VM bus15VM AT=PQP R=0.221 X=0.1997 B=0
+YPowerGridBranch pg16_17 bus16Th bus17Th bus16VM bus17VM AT=PQP R=0.0524 X=0.1923 B=0
+YPowerGridBranch pg15_18 bus15Th bus18Th bus15VM bus18VM AT=PQP R=0.1073 X=0.2185 B=0
+YPowerGridBranch pg18_19 bus18Th bus19Th bus18VM bus19VM AT=PQP R=0.0639 X=0.1292 B=0
+YPowerGridBranch pg19_20 bus19Th bus20Th bus19VM bus20VM AT=PQP R=0.034 X=0.068 B=0
+YPowerGridBranch pg10_20 bus10Th bus20Th bus10VM bus20VM AT=PQP R=0.0936 X=0.209 B=0
+YPowerGridBranch pg10_17 bus10Th bus17Th bus10VM bus17VM AT=PQP R=0.0324 X=0.0845 B=0
+YPowerGridBranch pg10_21 bus10Th bus21Th bus10VM bus21VM AT=PQP R=0.0348 X=0.0749 B=0
+YPowerGridBranch pg10_22 bus10Th bus22Th bus10VM bus22VM AT=PQP R=0.0727 X=0.1499 B=0
+YPowerGridBranch pg21_22 bus21Th bus22Th bus21VM bus22VM AT=PQP R=0.0116 X=0.0236 B=0
+YPowerGridBranch pg15_23 bus15Th bus23Th bus15VM bus23VM AT=PQP R=0.1 X=0.202 B=0
+YPowerGridBranch pg22_24 bus22Th bus24Th bus22VM bus24VM AT=PQP R=0.115 X=0.179 B=0
+YPowerGridBranch pg23_24 bus23Th bus24Th bus23VM bus24VM AT=PQP R=0.132 X=0.27 B=0
+YPowerGridBranch pg24_25 bus24Th bus25Th bus24VM bus25VM AT=PQP R=0.1885 X=0.3292 B=0
+YPowerGridBranch pg25_26 bus25Th bus26Th bus25VM bus26VM AT=PQP R=0.2544 X=0.38 B=0
+YPowerGridBranch pg25_27 bus25Th bus27Th bus25VM bus27VM AT=PQP R=0.1093 X=0.2087 B=0
+YPowerGridBranch pg27_29 bus27Th bus29Th bus27VM bus29VM AT=PQP R=0.2198 X=0.4153 B=0
+YPowerGridBranch pg27_30 bus27Th bus30Th bus27VM bus30VM AT=PQP R=0.3202 X=0.6027 B=0
+YPowerGridBranch pg29_30 bus29Th bus30Th bus29VM bus30VM AT=PQP R=0.2399 X=0.4533 B=0
+YPowerGridBranch pg8_28 bus8Th bus28Th bus8VM bus28VM AT=PQP R=0.0636 X=0.2 B=0.0428
+YPowerGridBranch pg6_28 bus6Th bus28Th bus6VM bus28VM AT=PQP R=0.0169 X=0.0599 B=0.013
+
+*********************************************
+* Transformer Definitions                   *
+*********************************************
+YPowerGridTransformer pg6_9 bus6Th bus9Th bus6VM bus9VM AT=PQP R=0 X=0.208 TR=0.978 PS={0*PI/180}
+YPowerGridTransformer pg6_10 bus6Th bus10Th bus6VM bus10VM AT=PQP R=0 X=0.556 TR=0.969 PS={0*PI/180}
+YPowerGridTransformer pg4_12 bus4Th bus12Th bus4VM bus12VM AT=PQP R=0 X=0.256 TR=0.932 PS={0*PI/180}
+YPowerGridTransformer pg28_27 bus28Th bus27Th bus28VM bus27VM AT=PQP R=0 X=0.396 TR=0.968 PS={0*PI/180}
+
+*********************************************
+* Bus Shunt Definitions                     *
+*********************************************
+YPowerGridBusShunt pg10_GND bus10Th 0 bus10VM 0 AT=PQP G=0 B=0.19
+YPowerGridBusShunt pg24_GND bus24Th 0 bus24VM 0 AT=PQP G=0 B=0.043
+
+****************************************************
+* PV Bus model only implemented for PQ Polar.      *
+* Terminals are reversed on IGen, and ammeters     *
+* are wired, so that current (P,Q) flows into bus. *
+****************************************************
+YPGGB pvb2 bus2Th ammbus2P bus2VM ammBus2Q AT=PQP VM=1.045 P=0.4 QMAX=0.5 QMin=-0.4
+Vamm2P 0 ammBus2P 0V
+Vamm2Q 0 ammBus2Q 0V
+
+YPGGB pvb5 bus5Th ammbus5P bus5VM ammBus5Q AT=PQP VM=1.01 P=0 QMAX=0.4 QMin=-0.4
+Vamm5P 0 ammBus5P 0V
+Vamm5Q 0 ammBus5Q 0V
+
+YPGGB pvb8 bus8Th ammbus8P bus8VM ammBus8Q AT=PQP VM=1.01 P=0 QMAX=0.4 QMin=-0.1
+Vamm8P 0 ammBus8P 0V
+Vamm8Q 0 ammBus8Q 0V
+
+YPGGB pvb11 bus11Th ammbus11P bus11VM ammBus11Q AT=PQP VM=1.082 P=0 QMAX=0.24 QMin=-0.06
+Vamm11P 0 ammBus11P 0V
+Vamm11Q 0 ammBus11Q 0V
+
+YPGGB pvb13 bus13Th ammbus13P bus13VM ammBus13Q AT=PQP VM=1.071 P=0 QMAX=0.24 QMin=-0.06
+Vamm13P 0 ammBus13P 0V
+Vamm13Q 0 ammBus13Q 0V
+
+*********************************************
+* Load Definitions                          *
+*********************************************
+ILoad2P bus2Th 0 0.217
+ILoad2Q bus2VM 0 0.127
+ILoad3P bus3Th 0 0.024
+ILoad3Q bus3VM 0 0.012
+ILoad4P bus4Th 0 0.076
+ILoad4Q bus4VM 0 0.016
+ILoad5P bus5Th 0 0.942
+ILoad5Q bus5VM 0 0.19
+ILoad6P bus6Th 0 0
+ILoad6Q bus6VM 0 0
+ILoad7P bus7Th 0 0.228
+ILoad7Q bus7VM 0 0.109
+ILoad8P bus8Th 0 0.3
+ILoad8Q bus8VM 0 0.3
+ILoad9P bus9Th 0 0
+ILoad9Q bus9VM 0 0
+ILoad10P bus10Th 0 0.058
+ILoad10Q bus10VM 0 0.02
+ILoad12P bus12Th 0 0.112
+ILoad12Q bus12VM 0 0.075
+ILoad14P bus14Th 0 0.062
+ILoad14Q bus14VM 0 0.016
+ILoad15P bus15Th 0 0.082
+ILoad15Q bus15VM 0 0.025
+ILoad16P bus16Th 0 0.035
+ILoad16Q bus16VM 0 0.018
+ILoad17P bus17Th 0 0.09
+ILoad17Q bus17VM 0 0.058
+ILoad18P bus18Th 0 0.032
+ILoad18Q bus18VM 0 0.009
+ILoad19P bus19Th 0 0.095
+ILoad19Q bus19VM 0 0.034
+ILoad20P bus20Th 0 0.022
+ILoad20Q bus20VM 0 0.007
+ILoad21P bus21Th 0 0.175
+ILoad21Q bus21VM 0 0.112
+ILoad22P bus22Th 0 0
+ILoad22Q bus22VM 0 0
+ILoad23P bus23Th 0 0.032
+ILoad23Q bus23VM 0 0.016
+ILoad24P bus24Th 0 0.087
+ILoad24Q bus24VM 0 0.067
+ILoad25P bus25Th 0 0
+ILoad25Q bus25VM 0 0
+ILoad26P bus26Th 0 0.035
+ILoad26Q bus26VM 0 0.023
+ILoad27P bus27Th 0 0
+ILoad27Q bus27VM 0 0
+ILoad28P bus28Th 0 0
+ILoad28Q bus28VM 0 0
+ILoad29P bus29Th 0 0.024
+ILoad29Q bus29VM 0 0.009
+ILoad30P bus30Th 0 0.106
+ILoad30Q bus30VM 0 0.019
+
+*************************************************************
+* .NODESET used to enforce "flat start" for PQ formulations *
+*************************************************************
+.NODESET V(bus1Th)=0 V(bus1VM)=1 V(bus2Th)=0 V(bus2VM)=1 V(bus3Th)=0 V(bus3VM)=1
++ V(bus4Th)=0 V(bus4VM)=1 V(bus5Th)=0 V(bus5VM)=1 V(bus6Th)=0 V(bus6VM)=1
++ V(bus7Th)=0 V(bus7VM)=1 V(bus8Th)=0 V(bus8VM)=1 V(bus9Th)=0 V(bus9VM)=1
++ V(bus10Th)=0 V(bus10VM)=1 V(bus11Th)=0 V(bus11VM)=1 V(bus12Th)=0 V(bus12VM)=1
++ V(bus13Th)=0 V(bus13VM)=1 V(bus14Th)=0 V(bus14VM)=1 V(bus15Th)=0 V(bus15VM)=1
++ V(bus16Th)=0 V(bus16VM)=1 V(bus17Th)=0 V(bus17VM)=1 V(bus18Th)=0 V(bus18VM)=1
++ V(bus19Th)=0 V(bus19VM)=1 V(bus20Th)=0 V(bus20VM)=1 V(bus21Th)=0 V(bus21VM)=1
++ V(bus22Th)=0 V(bus22VM)=1 V(bus23Th)=0 V(bus23VM)=1 V(bus24Th)=0 V(bus24VM)=1
++ V(bus25Th)=0 V(bus25VM)=1 V(bus26Th)=0 V(bus26VM)=1 V(bus27Th)=0 V(bus27VM)=1
++ V(bus28Th)=0 V(bus28VM)=1 V(bus29Th)=0 V(bus29VM)=1 V(bus30Th)=0 V(bus30VM)=1
+
+*********************************************
+* Output Statements                         *
+*********************************************
+.PRINT DC width=10 precision=6
++ V(bus1Th) V(bus1VM) V(bus2Th) V(bus2VM) V(bus3Th) V(bus3VM) V(bus4Th) V(bus4VM)
++ V(bus5Th) V(bus5VM) V(bus6Th) V(bus6VM) V(bus7Th) V(bus7VM) V(bus8Th) V(bus8VM)
++ V(bus9Th) V(bus9VM) V(bus10Th) V(bus10VM) V(bus11Th) V(bus11VM) V(bus12Th) V(bus12VM)
++ V(bus13Th) V(bus13VM) V(bus14Th) V(bus14VM) V(bus15Th) V(bus15VM) V(bus16Th) V(bus16VM)
++ V(bus17Th) V(bus17VM) V(bus18Th) V(bus18VM) V(bus19Th) V(bus19VM) V(bus20Th) V(bus20VM)
++ V(bus21Th) V(bus21VM) V(bus22Th) V(bus22VM) V(bus23Th) V(bus23VM) V(bus24Th) V(bus24VM)
++ V(bus25Th) V(bus25VM) V(bus26Th) V(bus26VM) V(bus27Th) V(bus27VM) V(bus28Th) V(bus28VM)
++ V(bus29Th) V(bus29VM) V(bus30Th) V(bus30VM) 
++ I(Vamm1P) I(Vamm1Q) I(Vamm2P) I(Vamm2Q) I(ILoad3P) I(ILoad3Q) 
++ I(ILoad4P) I(ILoad4Q) I(Vamm5P) I(Vamm5Q) I(ILoad6P) I(ILoad6Q) 
++ I(ILoad7P) I(ILoad7Q) I(Vamm8P) I(Vamm8Q) I(ILoad9P) I(ILoad9Q) 
++ I(ILoad10P) I(ILoad10Q) I(Vamm11P) I(Vamm11Q) I(ILoad12P) I(ILoad12Q) 
++ I(Vamm13P) I(Vamm13Q) I(ILoad14P) I(ILoad14Q) I(ILoad15P) I(ILoad15Q) 
++ I(ILoad16P) I(ILoad16Q) I(ILoad17P) I(ILoad17Q) I(ILoad18P) I(ILoad18Q) 
++ I(ILoad19P) I(ILoad19Q) I(ILoad20P) I(ILoad20Q) I(ILoad21P) I(ILoad21Q) 
++ I(ILoad22P) I(ILoad22Q) I(ILoad23P) I(ILoad23Q) I(ILoad24P) I(ILoad24Q) 
++ I(ILoad25P) I(ILoad25Q) I(ILoad26P) I(ILoad26Q) I(ILoad27P) I(ILoad27Q) 
++ I(ILoad28P) I(ILoad28Q) I(ILoad29P) I(ILoad29Q) I(ILoad30P) I(ILoad30Q) 
+
+.end

@@ -1,0 +1,60 @@
+* Testing the 1D PDE BJT capability
+* This is based on the ramp_test1.cir that was created for the 
+* Gummel-Poon model.
+***************************************************************************
+*V1 1 0 DC 0 PWL (0 0 1 1) 
+V1 1 0 0.0
+*--------------------------------------------------------------------------------
+ypde npnop3 1 1 0 pdebjt    
++ C0=1.0e+17
++ tecplotlevel=0 
++ gnuplotlevel=0
++ mobmodel=philips
++ fielddep=true
++ l=9.0e-4 nx=100
+* DOPING REGIONS:
++ region={name       =            reg1,  reg2
++         function   =            file, file
++         file       =       boron.dat, phos.dat
++         nmaxchop   =         1.5e+18, 3.3e+19
++         type       =           ptype,  ntype
++         species    =              BM,  PP }
+*
+* ELECTRODES:
++ node={name           = collector,      base,  emitter
++       bc             = dirichlet, dirichlet,  dirichlet
++       side           =     right,    middle,  left
+*+       area           =    2.0e-6,    2.0e-6,  2.0e-6
++       area           =    2.0e-1,    2.0e-1,  2.0e-1
++       location       =    9.0e-4,    3.0e-4,  0.0 }
+*
+.MODEL pdebjt ZOD  level=1
+*--------------------------------------------------------------------------------
+
+
+* Dummy section for Xyce
+Vnon nonsense 0 0
+Rnon nonsense 0 1.0
+.dc Vnon 0 0 1.0
+.print dc V(nonsense) V(1) I(V1)
+
+
+* Turn on LOCA and set up the parameter
+.OPTIONS nonlin continuation=1 maxstep=20
+.OPTIONS loca stepper=0 predictor=0 stepcontrol=0
++ conparam=V1:DCV0
++ initialvalue=0.0 minvalue=0.0 maxvalue=1.0
++ initialstepsize=0.8 minstepsize=1.0e-8 maxstepsize=1.0
++ aggressiveness=1.0
++ maxsteps=1000 
+* Note, as of this writing, maxnliters is ignored.  To set the max number of Newton steps, 
+* set max step on the .options nonlin line.
+*+ maxnliters=200
+
+.OPTIONS device debuglevel=-100
+.OPTIONS timeint debuglevel=-100
+
+.print HOMOTOPY V(1) I(V1)
+
+.end
+

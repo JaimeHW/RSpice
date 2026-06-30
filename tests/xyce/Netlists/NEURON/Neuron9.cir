@@ -1,0 +1,33 @@
+Test of level 9 neuron 
+* This test is based on the NEURON code for the benchmark described in Brette et al 2007
+* The 'gold standard' for this test is based on the output from the NEURON test of intrinsic cell properties
+
+.options timeint method=7 newlte=1 newbpstepping=1 reltol=1e-3
+
+.tran 0 1.0   
+
+* pulse( initial_value pulse_value delay_time rise_time fall_time pulse_width period)
+Iin 0 a PULSE( 0 0.02e-9 0.05 0.0 0.0 0.75 1.0e10)
+
+* cell size:  L = diam = 79.7885 microns
+.param L = {79.7885e-4}	; cm
+.param area = {L * L * 3.141529}  ; [cm^2]
+
+* biophysics
+.param memC = {1.0e-6 * area }              ; [1.0uF/cm^2    * [area cm^2] ]
+.param gks  = {0.03 * area }               ; [0.03 S/cm^2  * [area cm^2] ]
+.param gnas = {0.1 * area }                ; [0.1 S/cm^2  * [area cm^2] ]
+.param memG = {5.0e-5 * area }              ; [5e-5 S/cm^2 * [area cm^2] ] 	
+.param memV = {-0.065}
+.param vNa = {0.05}
+.param vK = {-0.09}
+
+.model hhParams neuron level=9 cMem={memC}  gMem={memG} eLeak={memV} vRest={memV}  eNa={vNa} gNa={gnas}  eK={vK}  gK={gks} 
+
+yneuron neuron1  a 0 hhParams 
+
+.ic v(a)=-0.065
+
+.print tran v(a) n(yneuron!neuron1_m) n(yneuron!neuron1_h) n(yneuron!neuron1_n) i(Iin) 
+
+.end

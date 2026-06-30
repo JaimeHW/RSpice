@@ -1,0 +1,39 @@
+* test bug 971 for R, L, C, V and I devices
+
+V1 1 0 1
+L1 1 2 1e-3
+R1 2 0 1
+C1 2 0 1e-6
+
+I1 3 0 1
+R3 3 0 1
+
+.SUBCKT Rsub a d
+L4 a b 2e-3
+R4 b c 2
+C4 c d 2e-6
+I1 a d 0.1
+.ENDS
+
+.SUBCKT Rsubsub a d
+R1 a b 1
+X1 b c RSUB
+R2 c d 3
+.ENDS
+
+V4 4 0
+X1 4 5 Rsub
+R5 5 0 1
+
+V6 6 0 1
+X2 6 7 Rsubsub
+R7 7 0 1
+
+.DC V1 1 1 1
+.PRINT DC V(1) V1 V1:DCV0 {V1:DCV0} R1 {R1} R1:R C1 {C1} C1:C L1 {L1} L1:L I1 {I1} I1:DCV0
++ X1:R4:R X1:R4 {X2:X1:R4:R} X2:X1:R4
++ X1:C4:C X1:C4 {X2:X1:C4:C} X2:X1:C4
++ X1:L4:L X1:L4 {X2:X1:L4:L} X2:X1:L4
++ X1:I1 {X1:I1} X2:X1:I1 {X2:X1:I1}
+
+.END

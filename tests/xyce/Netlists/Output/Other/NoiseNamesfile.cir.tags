@@ -1,0 +1,5 @@
+serial, parallel, nightly
+noisenamesfile, noise
+ekv, adms
+required:nonfree
+valgrind

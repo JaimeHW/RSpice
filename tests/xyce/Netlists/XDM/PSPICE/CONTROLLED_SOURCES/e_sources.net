@@ -1,0 +1,63 @@
+* source ESOURCETEST
+
+* Test (with E_E1) that extra {} do not matter,
+* and also test VALUE syntax for E1
+E_E1         N382063 0 VALUE { {2*V(N382405,0)} }
+E_E2         N381794 0 N380960 0 1.5
+
+*V_V2 and V_V3 are used as DC inputs to the E-Sources
+V_V2         N381000 0 DC=1
+R_R3         N381794 0  1 TC=0,0 
+R_R2         N382063 0  1 TC=0,0 
+R_R1         N382405 0  1 TC=0,0 
+V_V1         N382405 0  AC 1
++SIN 0V 1V 1e6 0 0 0
+V_V3         N380960 0 DC 1
+
+* Test E-source POLY syntax
+E_E4         N386932 0 POLY(1) N380960 0 0.0 2
+R_R7         N386932 0  1 TC=0,0
+
+* test the E-Source TABLE syntax
+R_R21         N395329 0  1 TC=0,0 
+V_V13         N395297 0  AC 1
++SIN 0V 1V 1e6 0 0 0
+E_E5         N395329 0 TABLE { V(N395297, 0) } 
++ ( (-1,-3) (1,3) )
+
+* test NOT (~) syntax in E-Source definition.  
+E_E3         N384791 0 VALUE { IF( ~(V(N380960) >= 0) , 0, 1)  }
+R_R4         N384791 0  1 TC=0,0
+
+*Tests of E-Source syntaxes with Global Node
+RG1 $G_CLK 0 1
+VG1 $G_CLK 0  AC 1
++SIN 0V 1V 1e6 0 0 0
+
+RG2  2 0 1
+EG2  2 0 VALUE={2*V($G_CLK)} 
+
+RG3  3 0 1
+EG3  3 0 VALUE={3*V($G_CLK)} 
+
+RG4  4 0 1
+EG4  4 0 VALUE {IF(((V($G_CLK) >= 0.8)&(V($G_CLK) >= 0.8)),3.5, 3.5)}
+
+* test for warning messages for PSpice FREQ, LAPLACE and CHEBYSHEV forms
+* of the E-Source, since they don't have a legal Xyce translation.
+* These syntax examples come from the PSpice Reference Manual
+ELAPLACE bogo_node 0 LAPLACE {V(10)} = {1/(1+.001*s)}
+EFREQ bogo_node 0 FREQ {V(10)}=(0,0,0)(5kHz, 0,0)(6kHz -60, 0) DELAY=3.2ms
+ECHEB bogo_node 0 CHEBYSHEV {V(10)} = LP 800 1.2K .1dB 50dB
+
+* This is an undocumented PSpice syntax (ERROR=) that we're seen 
+* a few times in customer netlists.  It does not have a legal Xyce
+* translation, and is commented out by xdm.
+E2 2 0 VALUE={2*V(1)} ERROR={ERROR(1==0,"ZERO VALUED COMPONENT")}
+
+
+
+
+
+
+

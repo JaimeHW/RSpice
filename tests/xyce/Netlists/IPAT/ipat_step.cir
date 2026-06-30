@@ -1,0 +1,24 @@
+* Test Pattern source with .STEP.  The source
+* specification is:
+*
+*   PAT (VHI VLO TD TR TF TSAMPLE DATA)
+*
+* At present, stepping over the repeat count (R)
+* does not work.  See SON Bug 1165 for more details.
+*
+*************************************************
+
+I1 1 0 PAT (5 0 0n 1n 2n 5n b1010 R=0)
+R1 1 0 1
+
+.STEP data=test
+.DATA test
++ I1:VHI I1:VLO I1:TD   I1:TR  I1:TF  I1:TSAMPLE
++    5      1    0       1ns    2ns    5ns
++    6      2    5ns     2ns    1ns   10ns
+.ENDDATA
+
+.TRAN 0 50n
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.5n
+.PRINT TRAN I(I1)
+.END

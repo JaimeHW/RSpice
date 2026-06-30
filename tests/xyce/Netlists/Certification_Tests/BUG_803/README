@@ -1,0 +1,28 @@
+Test Name: Duplicate Y device check
+Owner: Dave Shirley
+Test netlists: YDup.cir
+GS files: none
+Mode:  Serial and parallel
+Comparator:  none
+Version of Xyce: Release_3.0.1
+ 
+Description:
+============
+This tests that a diagnostic is produced when there are Y devices with identical
+names.
+ 
+Procedure:
+============
+  run_xyce -o ${OUT_DIR}/YDup.cir.prn YDup.cir > ${OUT_DIR}/YDup.cir.log
+  xmpirun -np 2 -o ${OUT_DIR}/YDup.cir.prn YDup.cir > ${OUT_DIR}/YDup.cir.log
+ 
+Verification:
+=============
+Passes if a diagnostic is produced indicating duplicate device YPDE like:
+
+User Fatal: Error in file YDup.cir at or near line 32
+ Duplicate device name detected: Y%PDE%D1
+ 
+Notes:
+======
+None

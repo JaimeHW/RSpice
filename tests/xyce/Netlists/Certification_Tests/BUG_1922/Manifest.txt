@@ -1,0 +1,6 @@
+bug1922.cir
+exclude
+pspice_netlist.cir
+pspice_netlist.cir.prn
+pspice_netlist.csd
+tags

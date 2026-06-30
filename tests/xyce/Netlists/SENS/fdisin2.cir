@@ -1,0 +1,47 @@
+Transient sensitivity example, sine source, finite difference (netlist level) sensitivity
+*****************************************************************************
+.param v0=0.3
+.param va=1
+.param f=500hz
+.param td=0
+.param phase=500
+.param theta=0
+
+* original
+isin 0 1 sin({v0} {va} {f} {td} {phase} {theta})
+r1   1 0 1
+
+* delta for v0
+isinA 0 1A sin({v0*(1+1.0e-8)} {va} {f} {td} {phase} {theta})
+r1A   1A 0 1
+
+* delta for va
+isinB 0 1B sin({v0} {va*(1+1e-8)} {f} {td} {phase} {theta})
+r1B   1B 0 1
+
+* delta for frequency
+isinC 0 1C sin({v0} {va} {f*(1+1e-8)} {td} {phase} {theta})
+r1C   1C 0 1
+
+* delta for td
+isinD 0 1D sin({v0} {va} {f} {td+1e-8} {phase} {theta})
+r1D   1D 0 1
+
+* delta for phase
+isinE 0 1E sin({v0} {va} {f} {td} {phase*(1+1e-8)} {theta})
+r1E   1E 0 1
+
+* delta for theta
+isinF 0 1F sin({v0} {va} {f} {td} {phase} {theta+1e-8})
+r1F   1F 0 1
+
+.tran 0.06ms 6ms
+.print tran v(1)
++ { (v(1A)-v(1))/(v0*1.0e-8) }
++ { (v(1B)-v(1))/(va*1.0e-8) }
++ { (v(1C)-v(1))/(f*1.0e-8) }
++ { (v(1D)-v(1))/(1.0e-8) }
++ { (v(1E)-v(1))/(phase*1.0e-8) }
++ { (v(1F)-v(1))/(1.0e-8) }
+
+.end

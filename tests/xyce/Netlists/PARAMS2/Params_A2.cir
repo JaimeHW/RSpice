@@ -1,0 +1,11 @@
+Test to see that use of a function-based expression works in device line
+* If all is well, this should produce examples identical to those of
+* Resist_Control
+.func RES(X) {2*X}
+.param RES0=5k
+R1 1 0 {RES(RES0)}
+V1 1 0 DC 5V
+
+.dc V1 0 5 1
+.print DC v(1) I(v1)
+.end

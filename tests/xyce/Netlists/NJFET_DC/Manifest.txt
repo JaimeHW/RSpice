@@ -1,0 +1,4 @@
+njfet-2109.cir
+njfet.cir
+njfet.cir.res.gs
+tags

@@ -1,0 +1,12 @@
+Test use of global param in a function
+.global_param vs=0
+.func sum(a) {a+vs}
+V1 1 0 {2+sum(1)+1000*time}
+R1 1 2 5
+R2 2 0 5
+.Step Vs -1.0 0.5 0.5
+*
+.tran 1ns 1ms
+.PRINT TRAN I(R1)
+*
+.END

@@ -1,0 +1,56 @@
+********************************************************
+* This netlist uses HSPICE syntaxes for random 
+* operators.
+*
+********************************************************
+
+* These should return the mean values of 1 
+.PARAM PA={AGAUSS(1,1,1)}
+.PARAM PB={GAUSS(1,1,1)}
+.PARAM PC={2.0*RAND()}
+.PARAM PD={UNIF(1,1)}
+.PARAM PE={AUNIF(1,1)}
+
+.PARAM PA2={AGAUSS(1,1)}
+.PARAM PB2={GAUSS(1,1)}
+
+.DC V1 1 1 1
+
+V1 1 0 1
+R1 1 0 {2*PA}
+
+V2 2 0 1
+R2 2 0 {2*PB}
+
+V3 3 0 1
+R3 3 0 {2*PC}
+
+V4 4 0 1
+R4 4 0 {2*PD}
+
+V5 5 0 1
+R5 5 0 {2*PE}
+
+V1B 1B 0 1
+R1B 1B 0 {2*PA2}
+
+V2B 2B 0 1
+R2B 2B 0 {2*PB2}
+
+.PRINT DC V(1) 
++ I(R1) 
++ I(R2) 
++ I(R3) 
++ I(R4) 
++ I(R5) 
++ I(R1B) 
++ I(R2B) 
++ {PA} 
++ {PB}
++ {PC}
++ {PD}
++ {PE}
++ {PA2}
++ {PB2}
+
+.END

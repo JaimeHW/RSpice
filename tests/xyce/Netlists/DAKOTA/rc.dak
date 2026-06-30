@@ -1,0 +1,35 @@
+# Perform a random sampling over resistance and capacitance
+# of a simple series RC circuit.
+# Both resistor and capacitor are treated as if they have 
+# 5% tolerance.  The response of interest is the RC time constant
+# computed by Xyce.
+
+environment
+  results_output, 
+    results_output_file 'rcLHS'
+
+model 
+  single
+
+method,								
+  sampling
+  sample_type lhs
+  seed 6493
+  samples=100
+
+variables,
+  normal_uncertain=2
+  means = 1e3 1e-6
+  std_deviations = 50 .05e-6
+  descriptors  = 'resistance' 'capacitance'
+
+interface,							
+    direct
+    analysis_driver =    'Xyce'
+
+responses,							
+	num_response_functions = 1				
+        id_responses = 'XyceSimulations'
+        response_descriptors = 'timeconst'
+        no_gradients
+	no_hessians

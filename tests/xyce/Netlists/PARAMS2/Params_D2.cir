@@ -1,0 +1,24 @@
+Basic dual diode circuit for baseline calculation
+* Tests use of expressions in .model parameters inside subcircuits
+.param IS0=100FA
+
+V1 1 0 DC 5V
+R1 1 2 2K
+Vmon1 2 3 0V
+XD1 3 0 DMOD1sub
+Vmon2 2 4 0V
+XD2 4 0 DMOD2sub
+
+.subckt DMOD1sub 1 2 
+.model DMOD1 D (IS={IS0})
+D1 1 2 DMOD1
+.ends
+
+.subckt DMOD2sub 1 2 
+.model DMOD2 D (IS={2*IS0})
+D1 1 2 DMOD2
+.ends
+
+.dc V1 0 5 1
+.print DC v(1) I(v1) I(vmon1) I(vmon2)
+.end

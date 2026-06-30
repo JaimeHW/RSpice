@@ -1,0 +1,23 @@
+Minimum capacitance/resistance test circuit
+*
+.options DEVICE MINRES=1 MINCAP=1nf
+VIN 1 0 PULSE ( 5 -1 0.05ms 100ns 100ns 0.1ms 0.2ms )
+R1 1 2a 20
+D1 2a 0 DMODA
+R2 1 2b 20
+D2 2b 0 DMODB
+R3 1 2c 20
+D3 2c 0 DMODC
+R4 1 2d 20
+D4 2d 0 DMODD
+.MODEL DMODA D (IS=100FA)
+.MODEL DMODB D (IS=100FA CJ0=1nf RS=1)
+.MODEL DMODC D (IS=100FA CJ0=1nf RS=5)
+.MODEL DMODD D (IS=100FA RS=5)
+.TRAN 0 0.5ms
+.PRINT TRAN V(2a) {V(2a)/V(2b)} {I(R1)/I(R2)}
++ V(2c) {V(2c)/V(2d)} {I(R3)/I(R4)}
+
+.options timeint reltol=1e-4
+*
+.END

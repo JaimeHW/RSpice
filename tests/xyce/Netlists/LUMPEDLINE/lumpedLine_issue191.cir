@@ -1,0 +1,19 @@
+Test lumped model circuit
+
+*                 v1 v2 td tr tf pw per
+VsigGen 1 0 1.0
+RsigGen 1 1b 50
+
+YTRANSLINE ERIC  DUT 1b  testLine
++ len=12.0 lumps=1440
+
+.model testLine transline r=1.0e-3 l=0.5u c=60p
+
+.dc VsigGen 1.0 1.0 1.0
+
+.options linsol type=klu
+
+*comp V(2) offset=-0.2
+*comp I(V1) offset=-0.2
+.print dc V(1) V(1B) {YTRANSLINE!ERIC:len} YTRANSLINE!ERIC:len
+

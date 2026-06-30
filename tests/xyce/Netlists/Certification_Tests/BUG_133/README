@@ -1,0 +1,27 @@
+Bug Number: 133
+Test netlist: bug_133.cir
+
+Description:
+============
+Bug 133 is a feature request for the capability to parse .OUTPUT lines
+and treat them properly.
+
+Verification
+============
+Run Xyce on the netlist.
+
+Examine the output to determine whether Xyce is outputting once every
+microsecond for the first 500 microseconds, and once ever 10
+microseconds thereafter.  We have no automated tool that can determine
+that as of Release 2.0.
+
+
+Special Notes:
+==============
+
+It is incorrect to use "xyce_verify.pl" or "compare" to check this
+bug.  Both of those comparators use time-smoothing techniques to get
+around the variations of output interval in different codes or
+versions of a single code.  Using such techniques would in fact *mask*
+any failure of Xyce to treat .output and .options output lines
+correctly.  

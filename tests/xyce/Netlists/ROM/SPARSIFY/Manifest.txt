@@ -1,0 +1,8 @@
+RLC_ladder100.cir
+RLC_ladder100_mor.cir
+RLC_ladder100_mor.cir.sh
+RLC_ladder100_mor.cir.tags
+RLC_ladder100_mor_sparsify.cir
+RLC_ladder_top30.cir
+exclude
+tags

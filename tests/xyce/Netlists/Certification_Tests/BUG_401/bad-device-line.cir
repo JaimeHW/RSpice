@@ -1,0 +1,11 @@
+
+* The user forgot  to put a star in front of the comment below.
+* Xyce segfaults and produces a core file as a reward, without a single
+* error message.
+An example of perfect nonsense that is too easy to get from a user!
+R1 1 0 1meg
+V1 1 0 DC 1V
+.DC V1 1 1 1 
+.PRINT DC V(1)
+.end
+

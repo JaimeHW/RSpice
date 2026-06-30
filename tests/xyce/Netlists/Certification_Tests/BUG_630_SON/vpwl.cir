@@ -1,0 +1,18 @@
+* Test circuit for vpwl definitions with either one
+* time-voltage pair or a missing value at (0,0).
+.TRAN 0 3
+
+V1 1 0 PWL(0.0 0.0)
+R1 1 0  500
+
+V2 2 0  PWL(1.0 1.0)
+R2 2 0  500
+
+V3 3 0  PWL(0.5 0.5 1.0 1.0 1.5 0.5) R=0.5
+R3 3 0  500
+
+V4 4 0  PWL (1.0 1.0) R=0
+R4 4 0  500
+
+.PRINT TRAN V(1) V(2) V(3) V(4)
+.END

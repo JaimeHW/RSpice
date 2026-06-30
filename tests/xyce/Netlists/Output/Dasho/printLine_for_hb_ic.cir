@@ -1,0 +1,8 @@
+* This "circuit" exists to provide a meaningful .PRINT line
+* to xyce_verify.pl for the .PRINT HB_IC line in the hb.cir test.
+*
+* It isn't supposed to be run, and will exit with error.
+*
+
+.PRINT HB i(r1)
+.HB 1e4

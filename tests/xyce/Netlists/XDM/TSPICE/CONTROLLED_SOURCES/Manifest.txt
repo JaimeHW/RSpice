@@ -1,0 +1,15 @@
+exclude
+tags
+e_sources.cir.sh
+e_sources.cir
+e_sources.cir.tspice
+f_sources.cir.sh
+f_sources.cir
+f_sources.cir.tspice
+g_sources.cir.sh
+g_sources.cir
+g_sources.cir.tspice
+h_sources.cir.sh
+h_sources.cir
+h_sources.cir.tspice
+

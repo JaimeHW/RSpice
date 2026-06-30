@@ -1,0 +1,30 @@
+# See https://en.wikipedia.org/wiki/Oregonator
+# http://www.scholarpedia.org/article/Oregonator
+# Parameters are from the scholarpedia page
+species
+Aspec 0.0 0.0 0  const
+Bspec 0.0 0.0 0  const
+
+Pspec 0.0 0.0 0 
+
+Xspec 0.0 0.0 0
+Yspec 0.0 0.0 0
+Zspec 0.0 0.0 0
+end
+
+reactions
+Aspec+Yspec->Xspec+Pspec;     simple(1.28)
+Xspec+Yspec->2*Pspec;         simple(2.4e6)
+Aspec+Xspec->2*Xspec+2*Zspec; simple(33.6)
+2*Xspec->Pspec;               simple(2.4e3)
+2*Bspec+2*Zspec->Yspec;       simple(1.0)
+end
+
+initial_conditions
+Xspec 1.0
+Yspec 1.0
+Zspec 1.0
+Aspec 0.06
+Bspec 0.02
+end
+

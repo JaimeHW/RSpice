@@ -1,0 +1,10 @@
+Testing paramters
+.dc V1 1 1 1
+X1 1 0 
+V1 1 0 1
+.print DC I(V1)
+
+.subckt foobie 1 2 
+R1 1 2 100
+R2 1 2 100
+.ends

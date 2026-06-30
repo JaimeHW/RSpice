@@ -1,0 +1,19 @@
+BUG 1301 test case
+
+The inital problem behind bug 1301 was that printing a voltage difference
+from the PRINT line with the syntax:
+
+.print v(node1, node2)
+
+would fail in parallel.  
+
+This failure occurred when node1 and node2 were not on the same processor.
+
+The test for fixing this bug is a large RLC circuit where we print the voltage 
+difference between the first node and most of the other nodes in this circuit
+of about 900 nodes.  This gives us a very good chance that the two nodes 
+involved in the voltage difference do not lie on the same processor.
+
+Thus, all the script for this test does is to check that Xyce ran without 
+exiting with an error.  
+

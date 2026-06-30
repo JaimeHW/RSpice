@@ -1,0 +1,5 @@
+nightly, serial, sensitivity, pce, tran
+quadrature_pce
+nisp
+required:stokhos
+exclude

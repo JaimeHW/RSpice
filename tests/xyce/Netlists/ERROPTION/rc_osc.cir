@@ -1,0 +1,21 @@
+rc_osc test
+*
+* The point of this test is to exercise the erroption=1 setting.
+* This option turns off LTE (local trunction error) time step control.
+* In order to get an accurate solution with this setting, it is necessary
+* to set the maximum time step on the tran line, so this is also a test
+* of that capability.  In this case dtmax=2.0e-7.
+*
+* This test is nearly identical to CAPACITOR/rc_osc.cir, except for
+* the time step control.
+*
+*COMP {v(2)+0.002} RELTOL=0.02
+.tran 0 5.0e-4  0.0 5.0e-7
+.print tran {v(2)+0.002}  
+.options timeint erroption=1
+
+v1 1 0 sin 0 1V 1e5 0 0
+r1 1 2 1k
+c1 2 0 2u
+
+.end

@@ -1,0 +1,37 @@
+*******************************************************************************
+* A test of the measure MIN functionality with PRINT qualifiers
+* The PRINT qualifiers on a .MEASURE line should work as follows:
+*    1) PRINT=NONE should suppress the measure output in both the 
+*       .mt0 file and stdout.
+*    2) PRINT=STDOUT should suppress the measure output to the .mt0 file.
+*    3) PRINT=ALL should print the measure output in both the .mt0 file
+*        and stdout.  
+*    4) Omitting the PRINT= qualifier should default to ALL.
+*    5) Using a value other than ALL, NONE or STDOUT should default to ALL.    
+*******************************************************************************
+*
+VS1  1  0  SIN(0 1.0 1KHZ 0 0)
+VS2  2  0  SIN(-0.5 1.0 1KHZ 0 500)
+VS3  3  0  SIN(0.5 -1.0 1KHZ 0 500)
+VS4  4  0  SIN(0 2.0 1KHZ 0 0)
+VS5  5  0  SIN(0 -2.0 1KHZ 0 0)
+
+R1  1  0  100
+R2  2  0  100
+R3  3  0  100
+R4  4  0  100
+R5  5  0  100
+
+.TRAN 0  2ms
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.00001
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2) V(3) V(4) V(5)
+
+* Test the various options.  Also use mixed case.
+.measure tran minSineOne  min V(1) PRINT=None
+.measure tran minSinTwo   min V(2) PRINT=StdOut
+.measure tran minSinThree min V(3) PRINT=ALL
+.measure tran minSinFour  min V(4) PRINT=BOGO
+.measure tran sinSinFive  min V(5) 
+
+.END
+

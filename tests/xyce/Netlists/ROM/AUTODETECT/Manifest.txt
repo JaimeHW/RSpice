@@ -1,0 +1,7 @@
+exclude
+rc_ladder_lib.inc
+rc_simple.cir
+rc_simple_mor.cir
+rc_simple_mor.cir.sh
+rcd_ladder_lib.inc
+tags

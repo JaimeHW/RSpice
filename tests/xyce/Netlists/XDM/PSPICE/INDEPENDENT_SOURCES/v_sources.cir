@@ -1,0 +1,26 @@
+* Xyce netlist for testing V-Sources
+
+*Analysis directives: 
+.TRAN  0 1ms 0
+.PRINT TRAN FORMAT=PROBE  V(2) V(4) V(6) V(8)
+
+*AC Source syntaxes
+R_R1        1 2  1k 
+R_R2        2 0  2K 
+V_V1        1 0 SIN(0 1 1KHz 0 0 0)
+
+* DC source syntaxes
+R_R3        3 4  1k 
+R_R4        4 0  2K 
+V_V3        3 0  5
+
+R_R5        5 6  1k 
+R_R6        6 0  2K 
+V_V5        5 0  1
+
+R_R7        7 8  1k 
+R_R8        8 0  2K 
+V_V7        7 0  1
+
+.END
+

@@ -1,0 +1,63 @@
+******************************************************
+* Test of PSpice E-Source and G-Source Table syntaxes
+*
+* These are documented syntaxes, that are the same
+* in Xyce:  
+*     E5    5 0 TABLE {V(1, 0)} = (-2,-3) (2,3)
+*     G13  13 0 TABLE {V(1, 0)} = (-2,-6) (2,6)
+*
+* The others given below work with the CEE version of 
+* PSpice 16.6
+*
+* See SON Bug 539 and SRN Bug 2045 for more details.
+******************************************************
+
+R2      2 0 1 TC=0,0 
+R3      3 0 1 TC=0,0
+R4      4 0 1 TC=0,0
+R5      5 0 1 TC=0,0
+R6      6 0 1 TC=0,0 
+R7      7 0 1 TC=0,0
+R8      8 0 1 TC=0,0
+R9      9 0 1 TC=0,0
+R10    10 0 1 TC=0,0 
+R11    11 0 1 TC=0,0
+R12    12 0 1 TC=0,0
+R13    13 0 1 TC=0,0
+R14    14 0 1 TC=0,0 
+R15    15 0 1 TC=0,0
+R16    16 0 1 TC=0,0
+R17    17 0 1 TC=0,0
+V1      1 0  AC 1
++SIN 0V 1V 1e6 0 0 0
+
+* No equal sign after expression.  Extra parens around table spec.
+E2         2 0 TABLE { V(1, 0) }  ( (-2,-3) (2,3) )
+* No equal sign after expression.
+E3         3 0 TABLE { V(1, 0) }  (-2,-4) (2,4)
+* Extra parens around table spec.
+E4         4 0 TABLE { V(1, 0) } = ( (-2,-5) (2,5) )
+* documented E-Source syntax
+E5         5 0 TABLE { V(1, 0) } = (-2,-6) (2,6)
+* next four are missing the commas in the table spec.
+E6         6 0 TABLE { V(1, 0) }  ( (-2 -7) (2 7) )
+E7         7 0 TABLE { V(1, 0) }  (-2 -8) (2 8)
+E8         8 0 TABLE { V(1, 0) } = ( (-2 -9) (2 9) )
+E9         9 0 TABLE { V(1, 0) } = (-2 -10) (2 10)
+
+* repeat the subtests, but with G-sources
+G10       10 0 TABLE { V(1, 0) }  ( (-2,-3) (2,3) )
+G11       11 0 TABLE { V(1, 0) }  (-2,-4) (2,4)
+G12       12 0 TABLE { V(1, 0) } = ( (-2,-5) (2,5) )
+G13       13 0 TABLE { V(1, 0) } = (-2,-6) (2,6)
+G14       14 0 TABLE { V(1, 0) } ( (-2 -7) (2 7) )
+G15       15 0 TABLE { V(1, 0) } (-2 -8) (2 8)
+G16       16 0 TABLE { V(1, 0) } = ( (-2 -9) (2 9) )
+G17       17 0 TABLE { V(1, 0) } = (-2 -10) (2 10)
+
+.TRAN 0 1U
+.PROBE/CSDF V(1) V(2) V(3) V(4) V(5)
++ V(6) V(7) V(8) V(9) V(10) V(11)
++ V(12) V(13) V(14) V(15) V(16) V(17)
+
+.END
