@@ -63,6 +63,8 @@ pub struct PlanStats {
 }
 
 pub struct NativeModel {
+    pub num_terminals: usize,
+    pub num_internal_nodes: usize,
     pub num_variables: usize,
     pub num_parameters: usize,
     image: ExecutableMemory,
@@ -74,6 +76,8 @@ pub struct NativeModel {
 impl std::fmt::Debug for NativeModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeModel")
+            .field("num_terminals", &self.num_terminals)
+            .field("num_internal_nodes", &self.num_internal_nodes)
             .field("num_variables", &self.num_variables)
             .field("num_parameters", &self.num_parameters)
             .field("image_len", &self.image.len())
@@ -97,6 +101,8 @@ impl NativeModel {
     ) -> JitResult<Self> {
         let current_dependencies = Self::empty_current_dependencies(&entries);
         Self::from_executable_image_with_dependencies(
+            0,
+            0,
             num_variables,
             num_parameters,
             image,
@@ -106,6 +112,8 @@ impl NativeModel {
     }
 
     pub(crate) fn from_executable_image_with_dependencies(
+        num_terminals: usize,
+        num_internal_nodes: usize,
         num_variables: usize,
         num_parameters: usize,
         image: ExecutableMemory,
@@ -132,6 +140,8 @@ impl NativeModel {
         };
 
         Ok(Self {
+            num_terminals,
+            num_internal_nodes,
             num_variables,
             num_parameters,
             image,

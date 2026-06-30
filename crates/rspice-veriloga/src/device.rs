@@ -878,6 +878,27 @@ impl VerilogADevice {
         ))
     }
 
+    #[cfg(feature = "native")]
+    fn missing_native_voltage_storage(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT voltage storage has {available} terminal slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_internal_voltage_storage(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT internal-voltage storage has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_port_connected_storage(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT port-connected storage has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
     #[cfg(not(feature = "native"))]
     fn refresh_static_conditions(&mut self) {
         let model = &self.model;
@@ -1491,8 +1512,41 @@ impl VerilogADevice {
 
     #[cfg(feature = "native")]
     fn validate_native_storage(context: &VmContext, native: &NativeModel) -> Result<(), VmError> {
+        Self::validate_native_voltage_storage(
+            context,
+            native.num_terminals,
+            native.num_internal_nodes,
+        )?;
         Self::validate_native_parameter_storage(context, native.num_parameters)?;
         Self::validate_native_variable_storage(context, native.num_variables)
+    }
+
+    #[cfg(feature = "native")]
+    fn validate_native_voltage_storage(
+        context: &VmContext,
+        required_terminals: usize,
+        required_internal_nodes: usize,
+    ) -> Result<(), VmError> {
+        if context.voltages.len() < required_terminals {
+            return Err(Self::missing_native_voltage_storage(
+                required_terminals,
+                context.voltages.len(),
+            ));
+        }
+        if context.internal_voltages.len() < required_internal_nodes {
+            return Err(Self::missing_native_internal_voltage_storage(
+                required_internal_nodes,
+                context.internal_voltages.len(),
+            ));
+        }
+        if context.port_connected.len() < required_terminals {
+            return Err(Self::missing_native_port_connected_storage(
+                required_terminals,
+                context.port_connected.len(),
+            ));
+        }
+
+        Ok(())
     }
 
     #[cfg(feature = "native")]
@@ -1584,6 +1638,11 @@ impl VerilogADevice {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
+        Self::validate_native_voltage_storage(
+            vm.context,
+            native.num_terminals,
+            native.num_internal_nodes,
+        )?;
         Self::validate_native_parameter_storage(vm.context, native.num_parameters)?;
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_mut_ptr();
@@ -2821,6 +2880,34 @@ endmodule
             .expect_err("missing variable storage must hard-fail in native mode");
 
         assert_native_hard_fail(err, "variable storage");
+    }
+
+    #[test]
+    fn native_voltage_storage_preflight_errors_use_hard_fail_contract() {
+        let context = VmContext::with_internal_nodes(0, 0);
+        let err = VerilogADevice::validate_native_voltage_storage(&context, 1, 0)
+            .expect_err("missing terminal voltage storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "voltage storage");
+    }
+
+    #[test]
+    fn native_internal_voltage_storage_preflight_errors_use_hard_fail_contract() {
+        let context = VmContext::with_internal_nodes(1, 0);
+        let err = VerilogADevice::validate_native_voltage_storage(&context, 1, 1)
+            .expect_err("missing internal voltage storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "internal-voltage storage");
+    }
+
+    #[test]
+    fn native_port_connected_storage_preflight_errors_use_hard_fail_contract() {
+        let mut context = VmContext::with_internal_nodes(1, 0);
+        context.port_connected.clear();
+        let err = VerilogADevice::validate_native_voltage_storage(&context, 1, 0)
+            .expect_err("missing port-connected storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "port-connected storage");
     }
 
     #[test]

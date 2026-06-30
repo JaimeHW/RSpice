@@ -343,6 +343,8 @@ fn compile_model_inner(
 
     let executable = ExecutableMemory::allocate(&image)?;
     NativeModel::from_executable_image_with_dependencies(
+        model.num_terminals,
+        model.internal_nodes,
         model.num_variables,
         model.parameters.len(),
         executable,
