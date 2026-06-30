@@ -59,7 +59,7 @@ fn compile_model_inner(
     };
 
     let mut image = Vec::new();
-    let assignment = append_assignment_entry(model, &mut image)
+    let (assignment, assignment_dependencies) = append_assignment_entry(model, &mut image)
         .map_err(|error| context_jit_error(error, "assignments"))?;
 
     let mut parameter_defaults = Vec::with_capacity(model.parameters.len());
@@ -322,6 +322,9 @@ fn compile_model_inner(
         noise_exponents,
     };
     let current_dependencies = NativeCurrentDependencies {
+        assignment_current_pairs: assignment_dependencies.current_pairs,
+        assignment_prior_currents: assignment_dependencies.prior_currents,
+        assignment_branch_unknowns: assignment_dependencies.branch_unknowns,
         static_condition_branch_unknowns: static_condition_branch_unknown_dependencies,
         stamp_values: stamp_value_current_dependencies,
         stamp_value_prior_currents: stamp_value_prior_current_dependencies,
@@ -2929,12 +2932,24 @@ fn lower_stamp_value_program(
     )
 }
 
-fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitResult<CodeOffset> {
+#[derive(Debug, Default)]
+struct AssignmentDependencies {
+    current_pairs: Vec<usize>,
+    prior_currents: Vec<usize>,
+    branch_unknowns: Vec<usize>,
+}
+
+fn append_assignment_entry(
+    model: &CompiledModel,
+    image: &mut Vec<u8>,
+) -> JitResult<(CodeOffset, AssignmentDependencies)> {
     let live_assignment_steps = live_native_assignment_steps(model);
     let assignments = live_assignment_steps
         .iter()
         .map(|step| lower_assignment_step(model, step))
         .collect::<JitResult<Vec<_>>>()?;
+    let mut dependencies = AssignmentDependencies::default();
+    collect_assignment_dependencies(&assignments, &mut dependencies);
 
     let bytes = if assignments.is_empty() {
         vec![0xC3]
@@ -2943,7 +2958,54 @@ fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitRes
     };
     let offset = align_image_for_entry(image);
     image.extend_from_slice(&bytes);
-    Ok(offset)
+    Ok((offset, dependencies))
+}
+
+fn collect_assignment_dependencies(
+    assignments: &[NativeAssignment],
+    dependencies: &mut AssignmentDependencies,
+) {
+    for assignment in assignments {
+        match assignment {
+            NativeAssignment::Direct { program, .. } => {
+                collect_assignment_program_dependencies(program, dependencies);
+            }
+            NativeAssignment::Indexed { index, value, .. } => {
+                collect_assignment_program_dependencies(index, dependencies);
+                collect_assignment_program_dependencies(value, dependencies);
+            }
+            NativeAssignment::Loop { condition, body } => {
+                collect_assignment_program_dependencies(condition, dependencies);
+                collect_assignment_dependencies(body, dependencies);
+            }
+        }
+    }
+}
+
+fn collect_assignment_program_dependencies(
+    program: &NativeProgram,
+    dependencies: &mut AssignmentDependencies,
+) {
+    push_unique_indices(
+        &mut dependencies.current_pairs,
+        program.current_pair_dependencies(),
+    );
+    push_unique_indices(
+        &mut dependencies.prior_currents,
+        program.prior_current_dependencies(),
+    );
+    push_unique_indices(
+        &mut dependencies.branch_unknowns,
+        program.branch_unknown_dependencies(),
+    );
+}
+
+fn push_unique_indices(target: &mut Vec<usize>, source: &[usize]) {
+    for index in source {
+        if !target.contains(index) {
+            target.push(*index);
+        }
+    }
 }
 
 fn live_native_assignment_steps(model: &CompiledModel) -> Vec<AssignmentStep> {
@@ -3095,6 +3157,7 @@ fn lower_assignment_step(
     let limits = NativeLoweringLimits::for_model(model);
     match step {
         AssignmentStep::Assign(assignment) => {
+            validate_assignment_target(model, assignment.var_index)?;
             let program = NativeProgram::from_bytecode(
                 model.name.clone(),
                 EntryKind::Assignment,
@@ -3126,6 +3189,7 @@ fn lower_assignment_step(
                 limits,
             )?;
             if let Some(var_index) = constant_indexed_assignment_slot(&index, *base, *len, *lower) {
+                validate_assignment_target(model, var_index)?;
                 return Ok(NativeAssignment::Direct {
                     var_index,
                     program: value,
@@ -3153,6 +3217,21 @@ fn lower_assignment_step(
             Ok(NativeAssignment::Loop { condition, body })
         }
     }
+}
+
+fn validate_assignment_target(model: &CompiledModel, var_index: usize) -> JitResult<()> {
+    if var_index >= model.num_variables {
+        return Err(JitError::InternalCompilerError {
+            model: model.name.clone(),
+            detail: format!(
+                "native assignment target variable {var_index} outside variable storage length {}",
+                model.num_variables
+            )
+            .into(),
+        });
+    }
+
+    Ok(())
 }
 
 fn constant_indexed_assignment_slot(
@@ -5102,6 +5181,29 @@ endmodule
     }
 
     #[test]
+    fn lower_assignment_step_rejects_direct_target_outside_variable_storage() {
+        let model = compiled_model_with_variables(1);
+        let step = AssignmentStep::Assign(crate::codegen::AssignmentProgram {
+            var_index: 1,
+            program: BytecodeProgram {
+                instructions: vec![Instruction::PushConst(11.0)],
+            },
+        });
+
+        let error = lower_assignment_step(&model, &step)
+            .expect_err("native assignment target must stay inside variable storage");
+        let message = error.to_string();
+        assert!(
+            message.contains("assignment target variable 1"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "native assignment target error must preserve hard-JIT contract: {message}"
+        );
+    }
+
+    #[test]
     fn lower_assignment_step_preserves_unsafe_indexed_writes_on_helper_path() {
         let cases = [
             ("dynamic", vec![Instruction::PushVariable(0)], 0),
@@ -5209,6 +5311,9 @@ endmodule
                 .collect(),
         };
         let dependencies = NativeCurrentDependencies {
+            assignment_current_pairs: Vec::new(),
+            assignment_prior_currents: Vec::new(),
+            assignment_branch_unknowns: Vec::new(),
             static_condition_branch_unknowns: vec![Vec::new(); entries.static_conditions.len()],
             stamp_values: vec![Vec::new(); entries.stamp_values.len()],
             stamp_value_prior_currents: vec![Vec::new(); entries.stamp_values.len()],

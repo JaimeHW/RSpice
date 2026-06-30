@@ -1645,6 +1645,9 @@ impl VerilogADevice {
         )?;
         Self::validate_native_parameter_storage(vm.context, native.num_parameters)?;
         Self::validate_native_variable_storage(vm.context, native.num_variables)?;
+        Self::validate_native_current_pairs(vm.context, native.assignment_current_pairs())?;
+        Self::validate_native_prior_currents(vm.context, native.assignment_prior_currents())?;
+        Self::validate_native_branch_unknowns(vm.context, native.assignment_branch_unknowns())?;
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_mut_ptr();
         clear_native_runtime_error();
@@ -2851,6 +2854,42 @@ endmodule
         let context = VmContext::with_internal_nodes(0, 0);
         let err = VerilogADevice::validate_native_branch_unknowns(&context, &[0])
             .expect_err("missing branch-current storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "branch-current unknown 0");
+    }
+
+    #[test]
+    fn native_assignment_branch_unknown_preflight_errors_before_dispatch() {
+        let source = r#"
+`include "disciplines.vams"
+module assignment_branch_unknown_preflight(p, n);
+    inout p, n;
+    electrical p, n;
+    real sensed;
+    analog begin
+        sensed = I(p, n);
+        V(p, n) <+ sensed;
+    end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile assignment model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile assignment canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("ABRANCH1", model, &artifact, &[1, 0])
+                .expect("assignment branch-current model uses native JIT");
+        assert_eq!(
+            device.context.branch_current_values.len(),
+            1,
+            "fixture must allocate one branch-current unknown"
+        );
+
+        device.context.branch_current_values.clear();
+        let err = device
+            .try_evaluate()
+            .expect_err("assignment branch-current load must preflight before native dispatch");
 
         assert_native_hard_fail(err, "branch-current unknown 0");
     }

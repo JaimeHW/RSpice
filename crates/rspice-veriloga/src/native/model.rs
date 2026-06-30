@@ -33,6 +33,9 @@ pub(crate) struct NativeEntryOffsets {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct NativeCurrentDependencies {
+    pub assignment_current_pairs: Vec<usize>,
+    pub assignment_prior_currents: Vec<usize>,
+    pub assignment_branch_unknowns: Vec<usize>,
     pub static_condition_branch_unknowns: Vec<Vec<usize>>,
     pub stamp_values: Vec<Vec<usize>>,
     pub stamp_value_prior_currents: Vec<Vec<usize>>,
@@ -281,6 +284,9 @@ impl NativeModel {
 
     fn empty_current_dependencies(entries: &NativeEntryOffsets) -> NativeCurrentDependencies {
         NativeCurrentDependencies {
+            assignment_current_pairs: Vec::new(),
+            assignment_prior_currents: Vec::new(),
+            assignment_branch_unknowns: Vec::new(),
             static_condition_branch_unknowns: vec![Vec::new(); entries.static_conditions.len()],
             stamp_values: vec![Vec::new(); entries.stamp_values.len()],
             stamp_value_prior_currents: vec![Vec::new(); entries.stamp_values.len()],
@@ -400,6 +406,18 @@ impl NativeModel {
             unsafe { std::mem::transmute(self.entry_ptr(self.entries.assignment)) };
         // Safety: callers provide pointers matching the native assignment ABI.
         unsafe { entry(ctx as *const EvalContext, vars) };
+    }
+
+    pub(crate) fn assignment_current_pairs(&self) -> &[usize] {
+        &self.current_dependencies.assignment_current_pairs
+    }
+
+    pub(crate) fn assignment_prior_currents(&self) -> &[usize] {
+        &self.current_dependencies.assignment_prior_currents
+    }
+
+    pub(crate) fn assignment_branch_unknowns(&self) -> &[usize] {
+        &self.current_dependencies.assignment_branch_unknowns
     }
 
     pub(crate) fn run_parameter_default(
