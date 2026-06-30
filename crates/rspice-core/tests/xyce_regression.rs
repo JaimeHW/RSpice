@@ -332,6 +332,30 @@ fn test_xyce_diode_sidewall_cd_cases_run() {
 }
 
 #[test]
+fn test_xyce_include_alias_and_path_resolution_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_1131_SON/bug_1131.cir",
+        "Netlists/Certification_Tests/BUG_1325_SON/inc_lib_file_relative_path.cir",
+        "Netlists/Certification_Tests/BUG_1325_SON/Win/drive_letter_no_slash_path.cir",
+        "Netlists/Certification_Tests/BUG_1325_SON/Win/inc_lib_file_relative_path.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a numeric Xyce include-path comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_subckt_wrapper_family_members_run_natively() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

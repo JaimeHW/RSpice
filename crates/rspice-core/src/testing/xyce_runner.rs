@@ -1374,11 +1374,6 @@ impl XyceTestRunner {
                             .to_string(),
                     );
                 }
-                ".inc" | ".incl" => {
-                    return Err(format!(
-                        "deck uses HSPICE include alias '{directive}'; Xyce include-alias semantics are not implemented yet"
-                    ));
-                }
                 _ => {}
             }
         }

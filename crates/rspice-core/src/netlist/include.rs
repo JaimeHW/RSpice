@@ -2,6 +2,7 @@
 //!
 //! Handles file inclusion for SPICE netlists, supporting:
 //! - `.INCLUDE "filename"` - Include entire file contents
+//! - `.INC "filename"` / `.INCL "filename"` - HSPICE/Xyce include aliases
 //! - `.LIB "filename" [section]` - Include library section
 //!
 //! Features:
@@ -135,8 +136,23 @@ impl IncludeProcessor {
     fn resolve_path_from(&self, base_dir: &Path, filename: &str) -> Result<PathBuf, ParseError> {
         // Remove quotes if present
         let clean_name = filename.trim_matches('"').trim_matches('\'');
-
         let path = Path::new(clean_name);
+
+        if let Some(relative_to_execution_dir) = windows_drive_relative_suffix(clean_name) {
+            let relative = spice_relative_path(relative_to_execution_dir);
+            let candidate = self.base_dir.join(relative);
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "Include file not found: {} (searched {})",
+                    clean_name,
+                    self.base_dir.display()
+                ),
+            });
+        }
 
         // If absolute, use as-is
         if path.is_absolute() {
@@ -150,14 +166,22 @@ impl IncludeProcessor {
         }
 
         // Try relative to base directory first
-        let relative = base_dir.join(path);
+        let relative_path = spice_relative_path(clean_name);
+        let relative = base_dir.join(&relative_path);
         if relative.exists() {
             return Ok(relative);
         }
 
+        // Xyce resolves nested include/lib paths relative to the including file
+        // first, then falls back to the top-level netlist directory.
+        let top_level_relative = self.base_dir.join(&relative_path);
+        if top_level_relative.exists() {
+            return Ok(top_level_relative);
+        }
+
         // Try library search paths
         for lib_path in &self.lib_paths {
-            let candidate = lib_path.join(path);
+            let candidate = lib_path.join(&relative_path);
             if candidate.exists() {
                 return Ok(candidate);
             }
@@ -167,7 +191,7 @@ impl IncludeProcessor {
         let common_paths = ["lib", "models", "../lib", "../models"];
 
         for common in common_paths {
-            let candidate = base_dir.join(common).join(path);
+            let candidate = base_dir.join(common).join(&relative_path);
             if candidate.exists() {
                 return Ok(candidate);
             }
@@ -246,9 +270,7 @@ impl IncludeProcessor {
             let trimmed = line.trim();
             let upper = trimmed.to_ascii_uppercase();
 
-            if (upper.starts_with(".INCLUDE") || upper.starts_with(".INC "))
-                && let Some(filename) = parse_include_directive(trimmed)
-            {
+            if let Some(filename) = parse_include_directive(trimmed) {
                 // SPEF files are parasitic data, not SPICE text: route to
                 // the back-annotation pass (`.spef_include`) with the path
                 // resolved here, where include search rules apply.
@@ -425,22 +447,18 @@ fn strip_terminal_end_cards(content: &str) -> String {
 // Helper Functions
 //=============================================================================
 
-/// Parse an include or lib directive line
+/// Parse an include directive line
 ///
-/// Extracts the filename and optional section from the line.
-/// Handles various quote styles and whitespace.
+/// Extracts the filename from `.include`, `.inc`, and `.incl` directives.
+/// Handles quote styles and whitespace without accepting longer lookalike
+/// directive names.
 pub fn parse_include_directive(line: &str) -> Option<String> {
     let trimmed = line.trim();
-    let upper = trimmed.to_uppercase();
-
-    if !upper.starts_with(".INCLUDE") && !upper.starts_with(".INC") {
+    let (directive, rest) = split_directive(trimmed)?;
+    if !matches_ignore_ascii_case(directive, &[".include", ".inc", ".incl"]) {
         return None;
     }
-
-    let rest = upper
-        .strip_prefix(".INCLUDE")
-        .map(|_| trimmed[8..].trim())
-        .or_else(|| upper.strip_prefix(".INC").map(|_| trimmed[4..].trim()))?;
+    let rest = rest.trim();
 
     // Handle quoted paths
     if let Some(quoted) = rest.strip_prefix('"') {
@@ -455,6 +473,47 @@ pub fn parse_include_directive(line: &str) -> Option<String> {
 
     // Unquoted - take first word
     Some(rest.split_whitespace().next()?.to_string())
+}
+
+fn split_directive(line: &str) -> Option<(&str, &str)> {
+    let mut end = line.len();
+    for (index, ch) in line.char_indices() {
+        if ch.is_whitespace() {
+            end = index;
+            break;
+        }
+    }
+    let directive = &line[..end];
+    if directive.is_empty() {
+        return None;
+    }
+    Some((directive, &line[end..]))
+}
+
+fn matches_ignore_ascii_case(value: &str, accepted: &[&str]) -> bool {
+    accepted
+        .iter()
+        .any(|accepted| value.eq_ignore_ascii_case(accepted))
+}
+
+fn windows_drive_relative_suffix(path: &str) -> Option<&str> {
+    let bytes = path.as_bytes();
+    if bytes.len() < 3 || bytes[1] != b':' || !bytes[0].is_ascii_alphabetic() {
+        return None;
+    }
+    if matches!(bytes[2], b'/' | b'\\') {
+        return None;
+    }
+    Some(&path[2..])
+}
+
+fn spice_relative_path(path: &str) -> PathBuf {
+    path.split(['/', '\\'])
+        .filter(|component| !component.is_empty() && *component != ".")
+        .fold(PathBuf::new(), |mut out, component| {
+            out.push(component);
+            out
+        })
 }
 
 /// Parse a lib directive line
@@ -516,6 +575,113 @@ pub fn parse_lib_directive(line: &str) -> Option<(String, Option<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn include_directive_parser_accepts_xyce_aliases_exactly() {
+        assert_eq!(
+            parse_include_directive(".include \"model cards/mod.inc\"").as_deref(),
+            Some("model cards/mod.inc")
+        );
+        assert_eq!(
+            parse_include_directive(".INC incFile1").as_deref(),
+            Some("incFile1")
+        );
+        assert_eq!(
+            parse_include_directive(".incl 'sub1/include1'").as_deref(),
+            Some("sub1/include1")
+        );
+        assert_eq!(parse_include_directive(".includex bad"), None);
+        assert_eq!(parse_include_directive(".incbin bad"), None);
+    }
+
+    #[test]
+    fn include_processor_expands_xyce_include_aliases() {
+        let dir = unique_include_temp_dir("aliases");
+        std::fs::create_dir_all(&dir).expect("create include alias fixture");
+        let deck_path = dir.join("deck.cir");
+        std::fs::write(dir.join("incFile1"), "R1 1 2 1\n").expect("write incFile1");
+        std::fs::write(dir.join("incFile2"), "R2 2 3 1\n").expect("write incFile2");
+        std::fs::write(dir.join("incFile3"), "R3 3 0 1\n").expect("write incFile3");
+
+        let deck = ".INC incFile1\n.INCL incFile2\n.INCLUDE incFile3\n";
+        std::fs::write(&deck_path, deck).expect("write deck");
+        let mut processor = IncludeProcessor::new(&deck_path);
+        let expanded = processor
+            .expand_content(deck, &deck_path)
+            .expect("include aliases expand");
+
+        assert!(expanded.contains("R1 1 2 1"), "{expanded}");
+        assert!(expanded.contains("R2 2 3 1"), "{expanded}");
+        assert!(expanded.contains("R3 3 0 1"), "{expanded}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn include_processor_uses_xyce_top_level_fallback_after_local_path() {
+        let dir = unique_include_temp_dir("fallback");
+        let sub1 = dir.join("sub1");
+        let sub2 = sub1.join("sub2");
+        std::fs::create_dir_all(&sub2).expect("create nested include fixture");
+        let deck_path = dir.join("deck.cir");
+        std::fs::write(
+            sub1.join("include1"),
+            ".INC sub2/local\n.INC sub1/sub2/top\n.INC precedence/wins_local\n",
+        )
+        .expect("write include1");
+        std::fs::write(sub2.join("local"), "RLOCAL 1 0 3\n").expect("write local include");
+        std::fs::write(sub2.join("top"), "RTOP 1 0 4\n").expect("write fallback include");
+        std::fs::create_dir_all(sub1.join("precedence")).expect("create local precedence dir");
+        std::fs::create_dir_all(dir.join("precedence")).expect("create top precedence dir");
+        std::fs::write(sub1.join("precedence").join("wins_local"), "RWIN 1 0 5\n")
+            .expect("write local precedence include");
+        std::fs::write(dir.join("precedence").join("wins_local"), "RLOSE 1 0 6\n")
+            .expect("write top precedence include");
+
+        let deck = ".INC sub1/include1\n";
+        std::fs::write(&deck_path, deck).expect("write deck");
+        let mut processor = IncludeProcessor::new(&deck_path);
+        let expanded = processor
+            .expand_content(deck, &deck_path)
+            .expect("nested include fallback expands");
+
+        assert!(expanded.contains("RLOCAL 1 0 3"), "{expanded}");
+        assert!(expanded.contains("RTOP 1 0 4"), "{expanded}");
+        assert!(expanded.contains("RWIN 1 0 5"), "{expanded}");
+        assert!(!expanded.contains("RLOSE"), "{expanded}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn include_processor_resolves_xyce_drive_relative_paths_from_top_level() {
+        let dir = unique_include_temp_dir("drive-relative");
+        let sub1 = dir.join("sub1");
+        std::fs::create_dir_all(&sub1).expect("create drive-relative fixture");
+        let deck_path = dir.join("deck.cir");
+        std::fs::write(sub1.join("include1"), ".INC C:drive_file\n")
+            .expect("write drive-relative include");
+        std::fs::write(dir.join("drive_file"), "RDRIVE 1 0 7\n").expect("write drive file");
+
+        let deck = ".INC sub1\\include1\n";
+        std::fs::write(&deck_path, deck).expect("write deck");
+        let mut processor = IncludeProcessor::new(&deck_path);
+        let expanded = processor
+            .expand_content(deck, &deck_path)
+            .expect("drive-relative include expands");
+
+        assert!(expanded.contains("RDRIVE 1 0 7"), "{expanded}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn unique_include_temp_dir(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "rspice-include-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        ))
+    }
 
     fn extract(content: &str, section: &str) -> String {
         IncludeProcessor::new(std::path::Path::new("."))
