@@ -55,9 +55,10 @@ fn compile_model_inner(
     let mut parameter_defaults = Vec::with_capacity(model.parameters.len());
     for (parameter_index, parameter) in model.parameters.iter().enumerate() {
         let default_entry = if let Some(program) = &parameter.default_program {
-            let program = NativeProgram::from_bytecode(
-                model.name.clone(),
-                EntryKind::ParameterDefault,
+            let program = lower_parameter_default_program(
+                model,
+                canonical_mir,
+                parameter_index,
                 program,
                 base_limits,
             )
@@ -292,6 +293,52 @@ fn compile_model_inner(
         executable,
         entries,
         current_dependencies,
+    )
+}
+
+fn lower_parameter_default_program(
+    model: &CompiledModel,
+    canonical_mir: Option<&MirModel>,
+    parameter_index: usize,
+    bytecode_program: &crate::codegen::BytecodeProgram,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<NativeProgram> {
+    if let Some(mir) = canonical_mir {
+        let parameter =
+            mir.parameters
+                .get(parameter_index)
+                .ok_or_else(|| JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: format!(
+                        "canonical parameter index {parameter_index} is outside parameter table"
+                    )
+                    .into(),
+                })?;
+        let expr = parameter
+            .default_expr
+            .as_ref()
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical parameter '{}' is missing dependent default expression",
+                    parameter.name
+                )
+                .into(),
+            })?;
+        return NativeProgram::from_mir_expression(
+            model.name.clone(),
+            EntryKind::ParameterDefault,
+            mir,
+            expr.id,
+            limits,
+        );
+    }
+
+    NativeProgram::from_bytecode(
+        model.name.clone(),
+        EntryKind::ParameterDefault,
+        bytecode_program,
+        limits,
     )
 }
 
@@ -625,6 +672,8 @@ fn validate_canonical_artifact_for_model(
         });
     }
 
+    validate_canonical_parameters_for_model(model, &artifact.mir)?;
+
     if artifact.mir.equations.len() != model.stamp_programs.len() {
         return Err(JitError::InvalidCanonicalIr {
             model: model.name.clone(),
@@ -645,6 +694,55 @@ fn validate_canonical_artifact_for_model(
         .enumerate()
     {
         validate_canonical_equation_matches_stamp(model, &artifact.mir, index, equation, stamp)?;
+    }
+
+    Ok(())
+}
+
+fn validate_canonical_parameters_for_model(model: &CompiledModel, mir: &MirModel) -> JitResult<()> {
+    if mir.parameters.len() != model.parameters.len() {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical parameter count {} does not match compiled parameter count {}",
+                mir.parameters.len(),
+                model.parameters.len()
+            )
+            .into(),
+        });
+    }
+
+    for (index, (canonical, compiled)) in mir.parameters.iter().zip(&model.parameters).enumerate() {
+        if canonical.name != compiled.name {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical parameter {index} name '{}' does not match compiled parameter '{}'",
+                    canonical.name, compiled.name
+                )
+                .into(),
+            });
+        }
+        if compiled.default_program.is_none() && canonical.default != Some(compiled.default) {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical parameter '{}' default {:?} does not match compiled default {}",
+                    canonical.name, canonical.default, compiled.default
+                )
+                .into(),
+            });
+        }
+        if compiled.default_program.is_some() && canonical.default_expr.is_none() {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical parameter '{}' is missing dependent default expression",
+                    canonical.name
+                )
+                .into(),
+            });
+        }
     }
 
     Ok(())
@@ -1593,6 +1691,78 @@ endmodule
         assert!(
             message.contains("no interpreter fallback"),
             "canonical kind mismatch must keep hard-JIT contract: {message}"
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_uses_mir_parameter_defaults() {
+        let source = r#"
+module native_canonical_param_default(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real base = 2.0;
+  parameter real derived = base * 3.0;
+  analog I(p, n) <+ V(p, n) * derived;
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        model.parameters[1].default_program = Some(BytecodeProgram {
+            instructions: vec![Instruction::PushConst(99.0)],
+        });
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical parameter default compiles to native x64");
+        let params = [2.0_f64, 0.0];
+        let ctx = eval_context(&params, &[]);
+        let value = native
+            .run_parameter_default(1, &ctx, std::ptr::null())
+            .expect("derived parameter default has native entry");
+
+        assert_eq!(value, 6.0);
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_rejects_mismatched_parameter_defaults() {
+        let model_source = r#"
+module native_canonical_param_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real base = 2.0;
+  parameter real derived = base * 3.0;
+  analog I(p, n) <+ V(p, n) * derived;
+endmodule
+"#;
+        let artifact_source = r#"
+module native_canonical_param_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real base = 4.0;
+  parameter real derived = base * 3.0;
+  analog I(p, n) <+ V(p, n) * derived;
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(model_source)
+            .expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(artifact_source)
+            .expect("compile mismatched canonical IR");
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("same-name mismatched parameter default must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("canonical parameter 'base' default"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical parameter mismatch must keep hard-JIT contract: {message}"
         );
     }
 
