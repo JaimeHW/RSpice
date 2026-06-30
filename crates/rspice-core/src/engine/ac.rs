@@ -266,28 +266,115 @@ impl Engine {
         matrix: &mut ComplexMatrix,
         row: usize,
         connection: &crate::xspice::PortConnection,
-        partial: Value,
+        partial: Complex64,
         sign: Value,
+        num_nodes: usize,
     ) {
+        let signed = partial * sign;
         match connection {
             crate::xspice::PortConnection::Analog(node) => {
                 if *node > 0 {
-                    matrix.add_real(row, *node - 1, sign * partial);
+                    matrix.add(row, *node - 1, signed);
                 }
             }
             crate::xspice::PortConnection::Differential(pos, neg) => {
                 if *pos > 0 {
-                    matrix.add_real(row, *pos - 1, sign * partial);
+                    matrix.add(row, *pos - 1, signed);
                 }
                 if *neg > 0 {
-                    matrix.add_real(row, *neg - 1, -sign * partial);
+                    matrix.add(row, *neg - 1, -signed);
+                }
+            }
+            crate::xspice::PortConnection::CurrentProbe { branch_ordinal, .. }
+            | crate::xspice::PortConnection::BranchCurrent { branch_ordinal }
+            | crate::xspice::PortConnection::Hybrid { branch_ordinal, .. } => {
+                if *branch_ordinal > 0 {
+                    matrix.add(row, num_nodes + *branch_ordinal - 1, signed);
+                }
+            }
+            crate::xspice::PortConnection::NamedBranchCurrent {
+                branch_ordinal: Some(branch_ordinal),
+                ..
+            } => {
+                if *branch_ordinal > 0 {
+                    matrix.add(row, num_nodes + *branch_ordinal - 1, signed);
                 }
             }
             _ => {}
         }
     }
 
-    fn stamp_xspice_small_signal_ac(circuit: &CircuitData, ac_matrix: &mut ComplexMatrix) {
+    fn stamp_xspice_ac_vector_control_partial(
+        matrix: &mut ComplexMatrix,
+        row: usize,
+        connection: &crate::xspice::PortConnection,
+        index: usize,
+        partial: Complex64,
+        sign: Value,
+        num_nodes: usize,
+    ) {
+        let signed = partial * sign;
+        match connection {
+            crate::xspice::PortConnection::AnalogVector(nodes) => {
+                if let Some(node) = nodes.get(index)
+                    && *node > 0
+                {
+                    matrix.add(row, *node - 1, signed);
+                }
+            }
+            crate::xspice::PortConnection::TypedAnalogVector(elements) => {
+                let Some(element) = elements.get(index) else {
+                    return;
+                };
+                match element {
+                    crate::xspice::AnalogInputConnection::Node(node) => {
+                        if *node > 0 {
+                            matrix.add(row, *node - 1, signed);
+                        }
+                    }
+                    crate::xspice::AnalogInputConnection::Differential(pos, neg) => {
+                        if *pos > 0 {
+                            matrix.add(row, *pos - 1, signed);
+                        }
+                        if *neg > 0 {
+                            matrix.add(row, *neg - 1, -signed);
+                        }
+                    }
+                    crate::xspice::AnalogInputConnection::CurrentProbe {
+                        branch_ordinal,
+                        ..
+                    }
+                    | crate::xspice::AnalogInputConnection::BranchCurrent { branch_ordinal }
+                    | crate::xspice::AnalogInputConnection::Hybrid { branch_ordinal, .. } => {
+                        if *branch_ordinal > 0 {
+                            matrix.add(row, num_nodes + *branch_ordinal - 1, signed);
+                        }
+                    }
+                    crate::xspice::AnalogInputConnection::NamedBranchCurrent {
+                        branch_ordinal: Some(branch_ordinal),
+                        ..
+                    } => {
+                        if *branch_ordinal > 0 {
+                            matrix.add(row, num_nodes + *branch_ordinal - 1, signed);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn is_nonzero_finite_complex(value: Complex64) -> bool {
+        value != Complex64::new(0.0, 0.0) && value.re.is_finite() && value.im.is_finite()
+    }
+
+    fn stamp_xspice_small_signal_ac(
+        circuit: &CircuitData,
+        ac_matrix: &mut ComplexMatrix,
+        frequency_hz: Value,
+    ) {
+        let num_nodes = circuit.num_nodes();
         for instance in &circuit.xspice_instances {
             let ports = instance.ports();
             for (port_idx, connection) in instance.connections().iter().enumerate() {
@@ -330,8 +417,10 @@ impl Engine {
                             _ => continue,
                         }
 
-                        for (control_port, partial) in instance.output_input_partials(&port.name) {
-                            if partial == 0.0 || !partial.is_finite() {
+                        for (control_port, partial) in
+                            instance.output_input_ac_partials(&port.name, frequency_hz)
+                        {
+                            if !Self::is_nonzero_finite_complex(partial) {
                                 continue;
                             }
                             if let Some(control_connection) = instance.connection(&control_port) {
@@ -341,13 +430,34 @@ impl Engine {
                                     control_connection,
                                     partial,
                                     -1.0,
+                                    num_nodes,
+                                );
+                            }
+                        }
+                        for (control_port, index, partial) in
+                            instance.output_input_vector_ac_partials(&port.name, frequency_hz)
+                        {
+                            if !Self::is_nonzero_finite_complex(partial) {
+                                continue;
+                            }
+                            if let Some(control_connection) = instance.connection(&control_port) {
+                                Self::stamp_xspice_ac_vector_control_partial(
+                                    ac_matrix,
+                                    br_idx,
+                                    control_connection,
+                                    index,
+                                    partial,
+                                    -1.0,
+                                    num_nodes,
                                 );
                             }
                         }
                     }
                     crate::xspice::PortType::Current => {
-                        for (control_port, partial) in instance.output_input_partials(&port.name) {
-                            if partial == 0.0 || !partial.is_finite() {
+                        for (control_port, partial) in
+                            instance.output_input_ac_partials(&port.name, frequency_hz)
+                        {
+                            if !Self::is_nonzero_finite_complex(partial) {
                                 continue;
                             }
                             let Some(control_connection) = instance.connection(&control_port)
@@ -363,6 +473,7 @@ impl Engine {
                                             control_connection,
                                             partial,
                                             1.0,
+                                            num_nodes,
                                         );
                                     }
                                 }
@@ -374,6 +485,7 @@ impl Engine {
                                             control_connection,
                                             partial,
                                             1.0,
+                                            num_nodes,
                                         );
                                     }
                                     if *neg > 0 {
@@ -383,6 +495,7 @@ impl Engine {
                                             control_connection,
                                             partial,
                                             -1.0,
+                                            num_nodes,
                                         );
                                     }
                                 }
@@ -394,6 +507,7 @@ impl Engine {
                                             control_connection,
                                             partial,
                                             1.0,
+                                            num_nodes,
                                         );
                                     }
                                     if *neg > 0 {
@@ -403,6 +517,59 @@ impl Engine {
                                             control_connection,
                                             partial,
                                             -1.0,
+                                            num_nodes,
+                                        );
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        for (control_port, index, partial) in
+                            instance.output_input_vector_ac_partials(&port.name, frequency_hz)
+                        {
+                            if !Self::is_nonzero_finite_complex(partial) {
+                                continue;
+                            }
+                            let Some(control_connection) = instance.connection(&control_port)
+                            else {
+                                continue;
+                            };
+                            match connection {
+                                crate::xspice::PortConnection::Analog(node) => {
+                                    if *node > 0 {
+                                        Self::stamp_xspice_ac_vector_control_partial(
+                                            ac_matrix,
+                                            *node - 1,
+                                            control_connection,
+                                            index,
+                                            partial,
+                                            1.0,
+                                            num_nodes,
+                                        );
+                                    }
+                                }
+                                crate::xspice::PortConnection::Differential(pos, neg)
+                                | crate::xspice::PortConnection::CurrentOutput { pos, neg } => {
+                                    if *pos > 0 {
+                                        Self::stamp_xspice_ac_vector_control_partial(
+                                            ac_matrix,
+                                            *pos - 1,
+                                            control_connection,
+                                            index,
+                                            partial,
+                                            1.0,
+                                            num_nodes,
+                                        );
+                                    }
+                                    if *neg > 0 {
+                                        Self::stamp_xspice_ac_vector_control_partial(
+                                            ac_matrix,
+                                            *neg - 1,
+                                            control_connection,
+                                            index,
+                                            partial,
+                                            -1.0,
+                                            num_nodes,
                                         );
                                     }
                                 }
@@ -1412,7 +1579,7 @@ impl Engine {
             }
         }
 
-        Self::stamp_xspice_small_signal_ac(circuit, ac_matrix);
+        Self::stamp_xspice_small_signal_ac(circuit, ac_matrix, frequency_hz);
 
         // Add small diagonal for numerical stability
         for i in 0..size {
