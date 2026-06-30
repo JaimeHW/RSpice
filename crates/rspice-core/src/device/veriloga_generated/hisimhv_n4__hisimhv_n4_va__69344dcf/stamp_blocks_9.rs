@@ -5,6 +5,664 @@ use super::super::state::{Instance, Parameters};
 
 impl Instance {
 
+    pub(super) fn stamp_reactive_block_35(
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+    ) {
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) {
+            s.store_mul_sub_rhs(335, 154, 1850, 1853);
+            s.store_exp(336, 335);
+        }
+
+        s.b[2001] = (s.v[1850] >= s.v[1853]);
+        s.store_scalar(2001, if s.b[2001] { 1.0 } else { 0.0 });
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[2001]) {
+            s.copy_ad(1889, 1859);
+            s.store_scalar(1892, 0.0);
+            s.store_scalar(1861, 0.0);
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && (!s.b[2001])) {
+            s.store_scalar(1889, 0.0);
+            s.store_mul_sqrt_ad_rhs(1892, 209, A::offset(A::sub(A::offset(s.ad_value(336), (-1.0)), s.ad_value(335)), 1e-15));
+        }
+
+        s.b[2002] = (s.v[1833] > s.v[965]);
+        s.store_scalar(2002, if s.b[2002] { 1.0 } else { 0.0 });
+
+        if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && (!s.b[2001])) && s.b[2002]) {
+            s.store_scalar(1861, 0.0);
+        }
+
+        if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && (!s.b[2001])) && (!s.b[2002])) {
+            s.store_mul_sqrt_ad_rhs(337, 209, A::sub(A::mul(s.ad_value(210), A::sub(A::exp(A::mul_scaled_lhs(s.ad_value(154), -1.0, A::sub(s.ad_value(1850), s.ad_value(1883)))), A::exp(A::mul_scaled_lhs(s.ad_value(154), -1.0, A::sub(s.ad_value(1853), s.ad_value(1883)))))), s.ad_value(335)));
+            s.store_add_scaled_product_right_ad(1861, 337, 1.0, 209, A::sqrt_scaled_input(s.ad_value(335), -1.0), (-1.0));
+        }
+
+        s.b[2003] = (((s.v[1850] - s.v[1848]) < s.v[1907]) && (s.v[1907] >= 0.0));
+        s.store_scalar(2003, if s.b[2003] { 1.0 } else { 0.0 });
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[2003]) {
+            s.store_add_scaled_inputs3_indices(781, 1907, 1.0, 1850, -1.0, 1848, 1.0);
+            s.store_square(722, 781);
+            s.store_square(723, 1907);
+            s.store_scalar(724, 1.0);
+            s.store_scalar(725, 1.0);
+            s.store_scalar(719, 0.0);
+            s.store_scalar(720, 0.0);
+            s.store_scalar(770, 0.0);
+            s.store_scalar(726, 0.0);
+            s.store_mul(724, 724, 722);
+            s.store_mul(725, 725, 723);
+            s.store_mul(724, 724, 722);
+            s.store_mul(725, 725, 723);
+            s.store_mul(724, 724, 722);
+            s.store_mul(725, 725, 723);
+            s.store_mul(724, 724, 722);
+            s.store_mul(725, 725, 723);
+            s.store_add(770, 724, 725);
+            s.copy_ad(726, 770);
+        }
+
+        s.b[2004] = ((((4.0 == 1.0) || (4.0 == 2.0)) || (4.0 == 4.0)) || (4.0 == 8.0));
+        s.store_scalar(2004, if s.b[2004] { 1.0 } else { 0.0 });
+
+        s.b[2005] = (4.0 == 1.0);
+        s.store_scalar(2005, if s.b[2005] { 1.0 } else { 0.0 });
+
+        if (((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[2003]) && s.b[2004]) && s.b[2005]) {
+            s.store_scalar(720, 1.0);
+        }
+
+        s.b[2006] = (4.0 == 2.0);
+        s.store_scalar(2006, if s.b[2006] { 1.0 } else { 0.0 });
+
+        if ((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[2003]) && s.b[2004]) && (!s.b[2005])) && s.b[2006]) {
+            s.store_scalar(720, 2.0);
+        }
+
+        s.b[2007] = (4.0 == 4.0);
+        s.store_scalar(2007, if s.b[2007] { 1.0 } else { 0.0 });
+
+        if (((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[2003]) && s.b[2004]) && (!s.b[2005])) && (!s.b[2006])) && s.b[2007]) {
+            s.store_scalar(720, 3.0);
+        }
+
+        s.b[2008] = (4.0 == 8.0);
+        s.store_scalar(2008, if s.b[2008] { 1.0 } else { 0.0 });
+
+        if ((((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[2003]) && s.b[2004]) && (!s.b[2005])) && (!s.b[2006])) && (!s.b[2007])) && s.b[2008]) {
+            s.store_scalar(720, 4.0);
+        }
+
+        if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[2003]) && s.b[2004]) {
+            s.store_scalar(719, 0.0);
+        }
+
+        let mut assign40230_loop_guard: usize = 0;
+        while {
+            let assign40230_cond_e53246: f64 = if (((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[2003]) && s.b[2004]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
+            assign40230_cond_e53246 != 0.0
+        } {
+            assign40230_loop_guard += 1;
+            assert!(assign40230_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[2003]) && s.b[2004]) {
+                s.store_sqrt(726, 726);
+                s.store_offset(719, 719, 1.0);
+            }
+        }
+
+        if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[2003]) && (!s.b[2004])) {
+            if (s.v[726] == 0.0) {
+                s.store_scalar(726, 0.0);
+            } else {
+                s.store_powf(726, 726, (1.0 / (2.0 * 4.0)));
+            }
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[2003]) {
+            s.store_div_from_scalar(726, 1.0, 726);
+            s.store_mul3_lhs(780, 781, 1907, 726);
+            s.store_div_scaled_product3_indices(334, 1907, 725, 726, 1.0, 770, 1.0);
+            s.store_sub(336, 1907, 780);
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[2003]) {
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && (!s.b[2003])) {
+            s.store_sub(336, 1850, 1848);
+            s.store_scalar(334, 1.0);
+        }
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) {
+            s.store_offset_add_scaled_product(338, A::offset(A::exp(A::mul(s.ad_value(154), s.ad_value(336))), (-1.0)), 1.0, s.ad_value(154), s.ad_value(336), (-1.0), 1e-15);
+            s.store_mul_scaled_sqrt_rhs(1886, 209, -1.0, 338);
+        }
+
+        if (s.b[1439] && (s.b[1441] && (!s.b[1440]))) {
+            s.copy_ad(87, 1849);
+            s.copy_ad(91, 1850);
+            s.store_sub(94, 1850, 1849);
+            s.store_scaled_sub(335, 790, 94, 0.5);
+            s.store_scale(781, 335, (2.0 * 1.0 / ((p.p263 * 0.1))));
+            s.store_offset_mul_offset_rhs_ad_rhs(782, 781, A::mul_offset_rhs(s.ad_value(781), A::mul_offset_rhs(s.ad_value(781), A::mul_offset_rhs(s.ad_value(781), A::mul(s.ad_value(781), A::scale_offset(s.ad_value(781), (1.0 / 5040.0), (1.0 / 720.0))), (1.0 / 120.0)), (1.0 / 24.0)), (1.0 / 6.0)), (1.0 / 2.0), 1.0);
+            s.store_offset_mul_offset_rhs_ad_rhs(783, 781, A::mul_offset_rhs(s.ad_value(781), A::mul_offset_rhs(s.ad_value(781), A::mul(s.ad_value(781), A::scale_offset(s.ad_value(781), (1.0 / 840.0), (1.0 / 144.0))), (1.0 / 30.0)), (1.0 / 8.0)), (1.0 / 3.0), (1.0 / 2.0));
+            s.store_div_from_scalar(110, (p.p263 * 0.1), 782);
+            s.store_div_scaled_inputs_square_rhs(336, 783, (-2.0), 782, 1.0);
+        }
+
+        s.b[2009] = ((s.v[110] < ((10.0 * 2.220446049250313e-16) + (10.0 * 2.220446049250313e-16))) && ((10.0 * 2.220446049250313e-16) >= 0.0));
+        s.store_scalar(2009, if s.b[2009] { 1.0 } else { 0.0 });
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2009]) {
+            s.store_sub_from_scalar(781, ((10.0 * 2.220446049250313e-16) + (10.0 * 2.220446049250313e-16)), 110);
+            s.store_square(722, 781);
+            s.store_scalar(723, ((10.0 * 2.220446049250313e-16) * (10.0 * 2.220446049250313e-16)));
+            s.store_scalar(724, 1.0);
+            s.store_scalar(725, 1.0);
+            s.store_scalar(719, 0.0);
+            s.store_scalar(720, 0.0);
+            s.store_scalar(770, 0.0);
+            s.store_scalar(726, 0.0);
+            s.store_mul(724, 724, 722);
+            s.store_mul(725, 725, 723);
+            s.store_mul(724, 724, 722);
+            s.store_mul(725, 725, 723);
+            s.store_add(770, 724, 725);
+            s.copy_ad(726, 770);
+        }
+
+        s.b[2010] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));
+        s.store_scalar(2010, if s.b[2010] { 1.0 } else { 0.0 });
+
+        s.b[2011] = (2.0 == 1.0);
+        s.store_scalar(2011, if s.b[2011] { 1.0 } else { 0.0 });
+
+        if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2009]) && s.b[2010]) && s.b[2011]) {
+            s.store_scalar(720, 1.0);
+        }
+
+        s.b[2012] = (2.0 == 2.0);
+        s.store_scalar(2012, if s.b[2012] { 1.0 } else { 0.0 });
+
+        if (((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2009]) && s.b[2010]) && (!s.b[2011])) && s.b[2012]) {
+            s.store_scalar(720, 2.0);
+        }
+
+        s.b[2013] = (2.0 == 4.0);
+        s.store_scalar(2013, if s.b[2013] { 1.0 } else { 0.0 });
+
+        if ((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2009]) && s.b[2010]) && (!s.b[2011])) && (!s.b[2012])) && s.b[2013]) {
+            s.store_scalar(720, 3.0);
+        }
+
+        s.b[2014] = (2.0 == 8.0);
+        s.store_scalar(2014, if s.b[2014] { 1.0 } else { 0.0 });
+
+        if (((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2009]) && s.b[2010]) && (!s.b[2011])) && (!s.b[2012])) && (!s.b[2013])) && s.b[2014]) {
+            s.store_scalar(720, 4.0);
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2009]) && s.b[2010]) {
+            s.store_scalar(719, 0.0);
+        }
+
+        let mut assign40690_loop_guard: usize = 0;
+        while {
+            let assign40690_cond_e53976: f64 = if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2009]) && s.b[2010]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
+            assign40690_cond_e53976 != 0.0
+        } {
+            assign40690_loop_guard += 1;
+            assert!(assign40690_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2009]) && s.b[2010]) {
+                s.store_sqrt(726, 726);
+                s.store_offset(719, 719, 1.0);
+            }
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2009]) && (!s.b[2010])) {
+            if (s.v[726] == 0.0) {
+                s.store_scalar(726, 0.0);
+            } else {
+                s.store_powf(726, 726, (1.0 / (2.0 * 2.0)));
+            }
+        }
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2009]) {
+            s.store_div_from_scalar(726, 1.0, 726);
+            s.store_scaled_mul(780, 781, 726, (10.0 * 2.220446049250313e-16));
+            s.store_div_scaled_product_indices(334, 725, 726, (10.0 * 2.220446049250313e-16), 770, 1.0);
+            s.store_sub_from_scalar(110, ((10.0 * 2.220446049250313e-16) + (10.0 * 2.220446049250313e-16)), 780);
+        }
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2009]) {
+        }
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2009])) {
+        }
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2009])) {
+            s.store_scalar(334, 1.0);
+        }
+
+        if (s.b[1439] && (s.b[1441] && (!s.b[1440]))) {
+            s.store_add(109, 87, 110);
+        }
+
+        s.b[2015] = (((s.v[109] - s.v[1847]) < s.v[1907]) && (s.v[1907] >= 0.0));
+        s.store_scalar(2015, if s.b[2015] { 1.0 } else { 0.0 });
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2015]) {
+            s.store_add_scaled_inputs3_indices(781, 1907, 1.0, 109, -1.0, 1847, 1.0);
+            s.store_square(722, 781);
+            s.store_square(723, 1907);
+            s.store_scalar(724, 1.0);
+            s.store_scalar(725, 1.0);
+            s.store_scalar(719, 0.0);
+            s.store_scalar(720, 0.0);
+            s.store_scalar(770, 0.0);
+            s.store_scalar(726, 0.0);
+            s.store_mul(724, 724, 722);
+            s.store_mul(725, 725, 723);
+            s.store_mul(724, 724, 722);
+            s.store_mul(725, 725, 723);
+            s.store_mul(724, 724, 722);
+            s.store_mul(725, 725, 723);
+            s.store_mul(724, 724, 722);
+            s.store_mul(725, 725, 723);
+            s.store_add(770, 724, 725);
+            s.copy_ad(726, 770);
+        }
+
+        s.b[2016] = ((((4.0 == 1.0) || (4.0 == 2.0)) || (4.0 == 4.0)) || (4.0 == 8.0));
+        s.store_scalar(2016, if s.b[2016] { 1.0 } else { 0.0 });
+
+        s.b[2017] = (4.0 == 1.0);
+        s.store_scalar(2017, if s.b[2017] { 1.0 } else { 0.0 });
+
+        if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2015]) && s.b[2016]) && s.b[2017]) {
+            s.store_scalar(720, 1.0);
+        }
+
+        s.b[2018] = (4.0 == 2.0);
+        s.store_scalar(2018, if s.b[2018] { 1.0 } else { 0.0 });
+
+        if (((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2015]) && s.b[2016]) && (!s.b[2017])) && s.b[2018]) {
+            s.store_scalar(720, 2.0);
+        }
+
+        s.b[2019] = (4.0 == 4.0);
+        s.store_scalar(2019, if s.b[2019] { 1.0 } else { 0.0 });
+
+        if ((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2015]) && s.b[2016]) && (!s.b[2017])) && (!s.b[2018])) && s.b[2019]) {
+            s.store_scalar(720, 3.0);
+        }
+
+    }
+
+    pub(super) fn stamp_reactive_block_36(
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+    ) {
+        s.b[2020] = (4.0 == 8.0);
+        s.store_scalar(2020, if s.b[2020] { 1.0 } else { 0.0 });
+
+        if (((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2015]) && s.b[2016]) && (!s.b[2017])) && (!s.b[2018])) && (!s.b[2019])) && s.b[2020]) {
+            s.store_scalar(720, 4.0);
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2015]) && s.b[2016]) {
+            s.store_scalar(719, 0.0);
+        }
+
+        let mut assign41090_loop_guard: usize = 0;
+        while {
+            let assign41090_cond_e54524: f64 = if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2015]) && s.b[2016]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
+            assign41090_cond_e54524 != 0.0
+        } {
+            assign41090_loop_guard += 1;
+            assert!(assign41090_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2015]) && s.b[2016]) {
+                s.store_sqrt(726, 726);
+                s.store_offset(719, 719, 1.0);
+            }
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2015]) && (!s.b[2016])) {
+            if (s.v[726] == 0.0) {
+                s.store_scalar(726, 0.0);
+            } else {
+                s.store_powf(726, 726, (1.0 / (2.0 * 4.0)));
+            }
+        }
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2015]) {
+            s.store_div_from_scalar(726, 1.0, 726);
+            s.store_mul3_lhs(780, 781, 1907, 726);
+            s.store_div_scaled_product3_indices(334, 1907, 725, 726, 1.0, 770, 1.0);
+            s.store_sub(336, 1907, 780);
+        }
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2015]) {
+        }
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2015])) {
+            s.store_sub(336, 109, 1847);
+            s.store_scalar(334, 1.0);
+        }
+
+        if (s.b[1439] && (s.b[1441] && (!s.b[1440]))) {
+            s.store_offset_add_scaled_product(338, A::offset(A::exp(A::mul(s.ad_value(154), s.ad_value(336))), (-1.0)), 1.0, s.ad_value(154), s.ad_value(336), (-1.0), 1e-15);
+            s.store_mul_scaled_sqrt_rhs(1887, 209, -1.0, 338);
+        }
+
+        s.b[2026] = (s.v[1832] > s.v[965]);
+        s.store_scalar(2026, if s.b[2026] { 1.0 } else { 0.0 });
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && s.b[2026]) {
+            s.copy_ad(981, 1830);
+        }
+
+        s.b[2027] = ((s.v[87] > (-0.1)) && (0.1 >= 0.0));
+        s.store_scalar(2027, if s.b[2027] { 1.0 } else { 0.0 });
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) {
+            s.store_offset(781, 87, 0.1);
+            s.store_square(722, 781);
+            s.store_scalar(723, (0.1 * 0.1));
+            s.store_scalar(724, 1.0);
+            s.store_scalar(725, 1.0);
+            s.store_scalar(719, 0.0);
+            s.store_scalar(720, 0.0);
+            s.store_scalar(770, 0.0);
+            s.store_scalar(726, 0.0);
+            s.store_scalar(719, 0.0);
+        }
+
+        let mut assign41330_loop_guard: usize = 0;
+        while {
+            let assign41330_cond_e54894: f64 = if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) && (s.v[719] < s.v[1910])) { 1.0 } else { 0.0 };
+            assign41330_cond_e54894 != 0.0
+        } {
+            assign41330_loop_guard += 1;
+            assert!(assign41330_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) {
+                s.store_mul(724, 724, 722);
+                s.store_mul(725, 725, 723);
+                s.store_offset(719, 719, 1.0);
+            }
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) {
+            s.store_add(770, 724, 725);
+            s.copy_ad(726, 770);
+        }
+
+        s.b[2028] = ((((s.v[1910] == 1.0) || (s.v[1910] == 2.0)) || (s.v[1910] == 4.0)) || (s.v[1910] == 8.0));
+        s.store_scalar(2028, if s.b[2028] { 1.0 } else { 0.0 });
+
+        s.b[2029] = (s.v[1910] == 1.0);
+        s.store_scalar(2029, if s.b[2029] { 1.0 } else { 0.0 });
+
+        if (((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) && s.b[2028]) && s.b[2029]) {
+            s.store_scalar(720, 1.0);
+        }
+
+        s.b[2030] = (s.v[1910] == 2.0);
+        s.store_scalar(2030, if s.b[2030] { 1.0 } else { 0.0 });
+
+        if ((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) && s.b[2028]) && (!s.b[2029])) && s.b[2030]) {
+            s.store_scalar(720, 2.0);
+        }
+
+        s.b[2031] = (s.v[1910] == 4.0);
+        s.store_scalar(2031, if s.b[2031] { 1.0 } else { 0.0 });
+
+        if (((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) && s.b[2028]) && (!s.b[2029])) && (!s.b[2030])) && s.b[2031]) {
+            s.store_scalar(720, 3.0);
+        }
+
+        s.b[2032] = (s.v[1910] == 8.0);
+        s.store_scalar(2032, if s.b[2032] { 1.0 } else { 0.0 });
+
+        if ((((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) && s.b[2028]) && (!s.b[2029])) && (!s.b[2030])) && (!s.b[2031])) && s.b[2032]) {
+            s.store_scalar(720, 4.0);
+        }
+
+        if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) && s.b[2028]) {
+            s.store_scalar(719, 0.0);
+        }
+
+        let mut assign41460_loop_guard: usize = 0;
+        while {
+            let assign41460_cond_e55122: f64 = if (((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) && s.b[2028]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
+            assign41460_cond_e55122 != 0.0
+        } {
+            assign41460_loop_guard += 1;
+            assert!(assign41460_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) && s.b[2028]) {
+                s.store_sqrt(726, 726);
+                s.store_offset(719, 719, 1.0);
+            }
+        }
+
+        if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) && (!s.b[2028])) {
+            if (s.v[726] == 0.0) {
+                s.store_scalar(726, 0.0);
+            } else {
+                s.store_pow_ad(726, s.ad_value(726), A::div_from_scalar(1.0, A::scale(s.ad_value(1910), 2.0)));
+            }
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) {
+            s.store_div_from_scalar(726, 1.0, 726);
+            s.store_scaled_mul(780, 781, 726, 0.1);
+            s.store_div_scaled_product_indices(334, 725, 726, 0.1, 770, 1.0);
+            s.store_offset(983, 780, (-0.1));
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2027]) {
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && (!s.b[2027])) {
+            s.copy_ad(983, 87);
+            s.store_scalar(334, 1.0);
+        }
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) {
+            s.store_add_scaled_inputs3_offset_indices(1912, 791, 1.0, 85, (-1.0), 1908, 1.0, (-(s.v[462] - p.p392)));
+            s.store_sub(1911, 791, 1912);
+        }
+
+        s.b[2033] = ((s.v[1911] > (-s.v[1909])) && (s.v[1909] >= 0.0));
+        s.store_scalar(2033, if s.b[2033] { 1.0 } else { 0.0 });
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) {
+            s.store_add(781, 1911, 1909);
+            s.store_square(722, 781);
+            s.store_square(723, 1909);
+            s.store_scalar(724, 1.0);
+            s.store_scalar(725, 1.0);
+            s.store_scalar(719, 0.0);
+            s.store_scalar(720, 0.0);
+            s.store_scalar(770, 0.0);
+            s.store_scalar(726, 0.0);
+            s.store_scalar(719, 0.0);
+        }
+
+        let mut assign41680_loop_guard: usize = 0;
+        while {
+            let assign41680_cond_e55507: f64 = if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) && (s.v[719] < s.v[1910])) { 1.0 } else { 0.0 };
+            assign41680_cond_e55507 != 0.0
+        } {
+            assign41680_loop_guard += 1;
+            assert!(assign41680_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) {
+                s.store_mul(724, 724, 722);
+                s.store_mul(725, 725, 723);
+                s.store_offset(719, 719, 1.0);
+            }
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) {
+            s.store_add(770, 724, 725);
+            s.copy_ad(726, 770);
+        }
+
+        s.b[2034] = ((((s.v[1910] == 1.0) || (s.v[1910] == 2.0)) || (s.v[1910] == 4.0)) || (s.v[1910] == 8.0));
+        s.store_scalar(2034, if s.b[2034] { 1.0 } else { 0.0 });
+
+        s.b[2035] = (s.v[1910] == 1.0);
+        s.store_scalar(2035, if s.b[2035] { 1.0 } else { 0.0 });
+
+        if (((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) && s.b[2034]) && s.b[2035]) {
+            s.store_scalar(720, 1.0);
+        }
+
+        s.b[2036] = (s.v[1910] == 2.0);
+        s.store_scalar(2036, if s.b[2036] { 1.0 } else { 0.0 });
+
+        if ((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) && s.b[2034]) && (!s.b[2035])) && s.b[2036]) {
+            s.store_scalar(720, 2.0);
+        }
+
+        s.b[2037] = (s.v[1910] == 4.0);
+        s.store_scalar(2037, if s.b[2037] { 1.0 } else { 0.0 });
+
+        if (((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) && s.b[2034]) && (!s.b[2035])) && (!s.b[2036])) && s.b[2037]) {
+            s.store_scalar(720, 3.0);
+        }
+
+        s.b[2038] = (s.v[1910] == 8.0);
+        s.store_scalar(2038, if s.b[2038] { 1.0 } else { 0.0 });
+
+        if ((((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) && s.b[2034]) && (!s.b[2035])) && (!s.b[2036])) && (!s.b[2037])) && s.b[2038]) {
+            s.store_scalar(720, 4.0);
+        }
+
+        if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) && s.b[2034]) {
+            s.store_scalar(719, 0.0);
+        }
+
+        let mut assign41810_loop_guard: usize = 0;
+        while {
+            let assign41810_cond_e55735: f64 = if (((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) && s.b[2034]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
+            assign41810_cond_e55735 != 0.0
+        } {
+            assign41810_loop_guard += 1;
+            assert!(assign41810_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) && s.b[2034]) {
+                s.store_sqrt(726, 726);
+                s.store_offset(719, 719, 1.0);
+            }
+        }
+
+        if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) && (!s.b[2034])) {
+            if (s.v[726] == 0.0) {
+                s.store_scalar(726, 0.0);
+            } else {
+                s.store_pow_ad(726, s.ad_value(726), A::div_from_scalar(1.0, A::scale(s.ad_value(1910), 2.0)));
+            }
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) {
+            s.store_div_from_scalar(726, 1.0, 726);
+            s.store_mul3_lhs(780, 781, 1909, 726);
+            s.store_div_scaled_product3_indices(334, 1909, 725, 726, 1.0, 770, 1.0);
+            s.store_add_scaled_inputs(1911, 1909, -1.0, 780, 1.0);
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2033]) {
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && (!s.b[2033])) {
+        }
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && (!s.b[2033])) {
+            s.store_scalar(334, 1.0);
+        }
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) {
+            s.store_scalar(79, 0.0);
+            s.store_scalar(97, 1.0);
+        }
+
+        let mut assign41920_loop_guard: usize = 0;
+        while {
+            let assign41920_cond_e55951: f64 = if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && (s.v[97] <= 150.0)) { 1.0 } else { 0.0 };
+            assign41920_cond_e55951 != 0.0
+        } {
+            assign41920_loop_guard += 1;
+            assert!(assign41920_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) {
+                s.store_mul(335, 154, 983);
+                s.store_exp(336, 335);
+            }
+            s.b[2039] = (s.v[983] >= 0.0);
+            s.store_scalar(2039, if s.b[2039] { 1.0 } else { 0.0 });
+            if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2039]) {
+                s.store_mul_scaled_sqrt_ad_rhs(2024, 209, -1.0, A::offset(A::sub(A::offset(s.ad_value(336), (-1.0)), s.ad_value(335)), 1e-15));
+                s.store_mul_div_scaled_product_mixed_aiii(2025, A::add_scaled_product(s.ad_value(154), (-1.0), s.ad_value(154), s.ad_value(336), 1.0), 209, 209, 0.5, 2024, 1.0);
+            }
+            if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && (!s.b[2039])) {
+                s.store_exp_mul_scaled_lhs_mixed_ia(337, 154, -1.0, A::sub(s.ad_value(983), s.ad_value(1883)));
+                s.store_exp_mul_scaled_lhs_indices(338, 154, 1.0, 1883);
+                s.store_mul_sqrt_ad_rhs(2024, 209, A::offset(A::add_scaled_inputs_product(A::offset(s.ad_value(336), (-1.0)), 1.0, s.ad_value(335), (-1.0), s.ad_value(210), A::sub(s.ad_value(337), s.ad_value(338)), 1.0), 1e-15));
+                s.store_div_scaled_product_indices(339, 209, 209, 0.5, 2024, 1.0);
+                s.store_mul_add_ad_rhs(2025, 339, A::add_scaled_product(s.ad_value(154), (-1.0), s.ad_value(154), s.ad_value(336), 1.0), A::mul3_scaled_output(s.ad_value(210), s.ad_value(154), s.ad_value(337), -1.0));
+            }
+            if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && (s.v[79] != 0.0)) {
+                s.store_scalar(97, (150.0 + 1.0));
+            }
+            if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && (s.v[79] == 0.0)) {
+                s.store_add_scaled_product_right_sub(1866, 2024, 1.0, 185, 1911, 983, 1.0);
+                s.store_sub(1867, 2025, 185);
+                s.store_div_scaled_inputs_indices(1878, 1866, -1.0, 1867, 1.0);
+            }
+            s.b[2040] = (((s.v[1878]) as f64).abs() < (1e-10 * 100.0));
+            s.store_scalar(2040, if s.b[2040] { 1.0 } else { 0.0 });
+            if ((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && (s.v[79] == 0.0)) && s.b[2040]) {
+                s.store_scalar(79, 1.0);
+            }
+            s.b[2041] = (s.v[1878] > 0.1);
+            s.store_scalar(2041, if s.b[2041] { 1.0 } else { 0.0 });
+            if (((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && (s.v[79] == 0.0)) && (!s.b[2040])) && s.b[2041]) {
+                s.store_scalar(1878, 0.1);
+            }
+            s.b[2042] = (s.v[1878] < (-0.1));
+            s.store_scalar(2042, if s.b[2042] { 1.0 } else { 0.0 });
+            if ((((((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && (s.v[79] == 0.0)) && (!s.b[2040])) && (!s.b[2041])) && s.b[2042]) {
+                s.store_scalar(1878, (-0.1));
+            }
+            if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && (s.v[79] == 0.0)) {
+                s.store_add(983, 983, 1878);
+            }
+            if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) {
+                s.store_offset(97, 97, 1.0);
+            }
+        }
+
+        if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) {
+            s.store_neg(983, 983);
+            s.store_mul3_affine_lhs(2022, 1901, 1830, (0.5 * 9662367879.197212), 0.0, 1830);
+            s.store_scaled_sqrt_mul_scaled_lhs(334, 154, 2.0, 2022, p.p394);
+            s.store_scaled_add_ad(335, A::exp(s.ad_value(334)), A::exp_scaled_input(s.ad_value(334), -1.0), 0.5);
+            s.store_div_ln_lhs(2023, 335, 2022);
+            s.store_mul(332, 2023, 983);
+            s.store_exp_mul_scaled_lhs_indices(334, 2023, -1.0, 2022);
+        }
+
+        s.b[2044] = (((s.v[332]) as f64).abs() > 1e-8);
+        s.store_scalar(2044, if s.b[2044] { 1.0 } else { 0.0 });
+
+        if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && s.b[2044]) {
+            s.store_mul_exp_lhs(335, 332, 334);
+        }
+
+    }
+
     pub(super) fn stamp_reactive_block_37(
         s: &mut ReactiveScratch,
         p: &Parameters,
@@ -4140,704 +4798,6 @@ impl Instance {
             s.store_scalar(720, 0.0);
             s.store_scalar(770, 0.0);
             s.store_scalar(726, 0.0);
-            s.store_scalar(719, 0.0);
-        }
-
-    }
-
-    pub(super) fn stamp_reactive_block_51(
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-    ) {
-        let mut assign54530_loop_guard: usize = 0;
-        while {
-            let assign54530_cond_e84105: f64 = if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) && (s.v[719] < s.v[2139])) { 1.0 } else { 0.0 };
-            assign54530_cond_e84105 != 0.0
-        } {
-            assign54530_loop_guard += 1;
-            assert!(assign54530_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
-            if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) {
-                s.store_mul(724, 724, 722);
-                s.store_mul(725, 725, 723);
-                s.store_offset(719, 719, 1.0);
-            }
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) {
-            s.store_add(770, 724, 725);
-            s.copy_ad(726, 770);
-        }
-
-        s.b[2372] = ((((s.v[2139] == 1.0) || (s.v[2139] == 2.0)) || (s.v[2139] == 4.0)) || (s.v[2139] == 8.0));
-        s.store_scalar(2372, if s.b[2372] { 1.0 } else { 0.0 });
-
-        s.b[2373] = (s.v[2139] == 1.0);
-        s.store_scalar(2373, if s.b[2373] { 1.0 } else { 0.0 });
-
-        if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) && s.b[2372]) && s.b[2373]) {
-            s.store_scalar(720, 1.0);
-        }
-
-        s.b[2374] = (s.v[2139] == 2.0);
-        s.store_scalar(2374, if s.b[2374] { 1.0 } else { 0.0 });
-
-        if ((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) && s.b[2372]) && (!s.b[2373])) && s.b[2374]) {
-            s.store_scalar(720, 2.0);
-        }
-
-        s.b[2375] = (s.v[2139] == 4.0);
-        s.store_scalar(2375, if s.b[2375] { 1.0 } else { 0.0 });
-
-        if (((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) && s.b[2372]) && (!s.b[2373])) && (!s.b[2374])) && s.b[2375]) {
-            s.store_scalar(720, 3.0);
-        }
-
-        s.b[2376] = (s.v[2139] == 8.0);
-        s.store_scalar(2376, if s.b[2376] { 1.0 } else { 0.0 });
-
-        if ((((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) && s.b[2372]) && (!s.b[2373])) && (!s.b[2374])) && (!s.b[2375])) && s.b[2376]) {
-            s.store_scalar(720, 4.0);
-        }
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) && s.b[2372]) {
-            s.store_scalar(719, 0.0);
-        }
-
-        let mut assign54660_loop_guard: usize = 0;
-        while {
-            let assign54660_cond_e84355: f64 = if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) && s.b[2372]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
-            assign54660_cond_e84355 != 0.0
-        } {
-            assign54660_loop_guard += 1;
-            assert!(assign54660_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
-            if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) && s.b[2372]) {
-                s.store_sqrt(726, 726);
-                s.store_offset(719, 719, 1.0);
-            }
-        }
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) && (!s.b[2372])) {
-            if (s.v[726] == 0.0) {
-                s.store_scalar(726, 0.0);
-            } else {
-                s.store_pow_ad(726, s.ad_value(726), A::div_from_scalar(1.0, A::scale(s.ad_value(2139), 2.0)));
-            }
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) {
-            s.store_div_from_scalar(726, 1.0, 726);
-            s.store_mul3_lhs(780, 781, 2138, 726);
-            s.store_div_scaled_product3_indices(334, 2138, 725, 726, 1.0, 770, 1.0);
-            s.store_add_scaled_inputs(983, 2138, -1.0, 780, 1.0);
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2371]) {
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2371])) {
-            s.copy_ad(983, 2149);
-            s.store_scalar(334, 1.0);
-        }
-
-        if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) {
-            s.store_neg(983, 983);
-            s.store_mul3_affine_lhs(2316, 2129, 2144, (0.5 * 9662367879.197212), 0.0, 2144);
-            s.store_mul_sqrt_ad_rhs(334, 2148, A::mul_scaled_lhs(s.ad_value(154), 2.0, s.ad_value(2316)));
-            s.store_scaled_add_ad(335, A::exp(s.ad_value(334)), A::exp_scaled_input(s.ad_value(334), -1.0), 0.5);
-        }
-
-        s.b[2377] = (((s.v[334]) as f64).abs() > 0.0001);
-        s.store_scalar(2377, if s.b[2377] { 1.0 } else { 0.0 });
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2377]) {
-            s.store_div_ln_lhs(2317, 335, 2316);
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2377])) {
-            s.store_mul3_ad_middle(2317, A::square(s.ad_value(2148)), 154, A::sub_from_scalar(1.0, A::mul_scaled_lhs(s.ad_value(334), 0.1666666666666667, s.ad_value(334))));
-        }
-
-        if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) {
-            s.store_mul(332, 2317, 983);
-        }
-
-        s.b[2378] = (s.v[332] > 500.0);
-        s.store_scalar(2378, if s.b[2378] { 1.0 } else { 0.0 });
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2378]) {
-            s.store_sub(2161, 983, 2316);
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2378])) {
-            s.store_exp_mul_scaled_lhs_indices(334, 2317, -1.0, 2316);
-        }
-
-        s.b[2379] = (((s.v[332]) as f64).abs() > 1e-8);
-        s.store_scalar(2379, if s.b[2379] { 1.0 } else { 0.0 });
-
-        s.b[2380] = (s.v[332] >= 500.0);
-        s.store_scalar(2380, if s.b[2380] { 1.0 } else { 0.0 });
-
-        if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2378])) && s.b[2379]) && s.b[2380]) {
-            s.store_scaled_offset(335, 332, ((1.0) + ((-500.0))), 1.403592217853e217);
-            s.store_scalar(337, 1.403592217853e217);
-        }
-
-        if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2378])) && s.b[2379]) && (!s.b[2380])) {
-            s.copy_ad(781, 332);
-            s.store_scalar(335, 1.0);
-        }
-
-        let mut assign54920_loop_guard: usize = 0;
-        while {
-            let assign54920_cond_e84865: f64 = if ((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2378])) && s.b[2379]) && (!s.b[2380])) && (s.v[781] >= 60.0)) { 1.0 } else { 0.0 };
-            assign54920_cond_e84865 != 0.0
-        } {
-            assign54920_loop_guard += 1;
-            assert!(assign54920_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
-            if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2378])) && s.b[2379]) && (!s.b[2380])) {
-                s.store_scale(335, 335, 1.14200738981568e26);
-                s.store_offset(781, 781, (-60.0));
-            }
-        }
-
-        if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2378])) && s.b[2379]) && (!s.b[2380])) {
-            s.store_mul_exp_rhs(335, 335, 781);
-            s.copy_ad(337, 335);
-        }
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2378])) && s.b[2379]) {
-            s.store_mul(335, 335, 334);
-            s.store_sub(336, 335, 334);
-        }
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2378])) && (!s.b[2379])) {
-            s.store_mul_offset_lhs(335, 332, 1.0, 334);
-            s.store_mul_ad_product_lhs_mixed_ia(336, 332, A::scale_offset(s.ad_value(332), 0.5, 1.0), 334);
-        }
-
-        s.b[2381] = (((s.v[336]) as f64).abs() > 1e-8);
-        s.store_scalar(2381, if s.b[2381] { 1.0 } else { 0.0 });
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2378])) && s.b[2381]) {
-            s.store_div_ln_offset_lhs(2161, 336, 1.0, 2317);
-        }
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2378])) && (!s.b[2381])) {
-            s.store_div(2161, 336, 2317);
-        }
-
-        if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) {
-            s.store_sub(336, 983, 2161);
-        }
-
-        s.b[2382] = (0.0 == 0.0);
-        s.store_scalar(2382, if s.b[2382] { 1.0 } else { 0.0 });
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2382]) {
-            if (s.v[336] < 0.0) {
-                s.store_neg_ad(2143, A::sqrt(A::mul_scaled_lhs(s.ad_value(2132), -1.0, s.ad_value(336))));
-            } else {
-                s.store_sqrt_mul(2143, 2132, 336);
-            }
-        }
-
-        s.b[2383] = (s.v[336] < 0.0);
-        s.store_scalar(2383, if s.b[2383] { 1.0 } else { 0.0 });
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2382])) && s.b[2383]) {
-            s.store_mul(337, 154, 336);
-            s.store_neg_ad(2143, A::sqrt(A::mul3(s.ad_value(2132), s.ad_value(155), A::offset(A::sub(A::exp(s.ad_value(337)), s.ad_value(337)), (-1.0)))));
-        }
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2382])) && (!s.b[2383])) {
-            s.store_mul_neg_lhs(337, 154, 336);
-            s.store_sqrt_ad(2143, A::mul3(s.ad_value(2132), s.ad_value(155), A::offset(A::sub(A::exp(s.ad_value(337)), s.ad_value(337)), (-1.0))));
-        }
-
-        if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) {
-            s.store_sub(990, 2144, 2143);
-        }
-
-        s.b[2384] = ((s.v[990] < 1e-16) && (1e-16 >= 0.0));
-        s.store_scalar(2384, if s.b[2384] { 1.0 } else { 0.0 });
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2384]) {
-            s.store_sub_from_scalar(781, 1e-16, 990);
-            s.store_square(722, 781);
-            s.store_scalar(723, (1e-16 * 1e-16));
-            s.store_scalar(724, 1.0);
-            s.store_scalar(725, 1.0);
-            s.store_scalar(719, 0.0);
-            s.store_scalar(720, 0.0);
-            s.store_scalar(770, 0.0);
-            s.store_scalar(726, 0.0);
-            s.store_mul(724, 724, 722);
-            s.store_mul(725, 725, 723);
-            s.store_mul(724, 724, 722);
-            s.store_mul(725, 725, 723);
-            s.store_add(770, 724, 725);
-            s.copy_ad(726, 770);
-        }
-
-        s.b[2385] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));
-        s.store_scalar(2385, if s.b[2385] { 1.0 } else { 0.0 });
-
-        s.b[2386] = (2.0 == 1.0);
-        s.store_scalar(2386, if s.b[2386] { 1.0 } else { 0.0 });
-
-        if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2384]) && s.b[2385]) && s.b[2386]) {
-            s.store_scalar(720, 1.0);
-        }
-
-        s.b[2387] = (2.0 == 2.0);
-        s.store_scalar(2387, if s.b[2387] { 1.0 } else { 0.0 });
-
-        if ((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2384]) && s.b[2385]) && (!s.b[2386])) && s.b[2387]) {
-            s.store_scalar(720, 2.0);
-        }
-
-        s.b[2388] = (2.0 == 4.0);
-        s.store_scalar(2388, if s.b[2388] { 1.0 } else { 0.0 });
-
-        if (((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2384]) && s.b[2385]) && (!s.b[2386])) && (!s.b[2387])) && s.b[2388]) {
-            s.store_scalar(720, 3.0);
-        }
-
-        s.b[2389] = (2.0 == 8.0);
-        s.store_scalar(2389, if s.b[2389] { 1.0 } else { 0.0 });
-
-        if ((((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2384]) && s.b[2385]) && (!s.b[2386])) && (!s.b[2387])) && (!s.b[2388])) && s.b[2389]) {
-            s.store_scalar(720, 4.0);
-        }
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2384]) && s.b[2385]) {
-            s.store_scalar(719, 0.0);
-        }
-
-        let mut assign55370_loop_guard: usize = 0;
-        while {
-            let assign55370_cond_e85704: f64 = if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2384]) && s.b[2385]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
-            assign55370_cond_e85704 != 0.0
-        } {
-            assign55370_loop_guard += 1;
-            assert!(assign55370_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
-            if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2384]) && s.b[2385]) {
-                s.store_sqrt(726, 726);
-                s.store_offset(719, 719, 1.0);
-            }
-        }
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2384]) && (!s.b[2385])) {
-            if (s.v[726] == 0.0) {
-                s.store_scalar(726, 0.0);
-            } else {
-                s.store_powf(726, 726, (1.0 / (2.0 * 2.0)));
-            }
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2384]) {
-            s.store_div_from_scalar(726, 1.0, 726);
-            s.store_scaled_mul(780, 781, 726, 1e-16);
-            s.store_div_scaled_product_indices(334, 725, 726, 1e-16, 770, 1.0);
-            s.store_sub_from_scalar(990, 1e-16, 780);
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2384]) {
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2384])) {
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (!s.b[2384])) {
-            s.store_scalar(334, 1.0);
-        }
-
-        s.b[2390] = (2.0 == 1.0);
-        s.store_scalar(2390, if s.b[2390] { 1.0 } else { 0.0 });
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && s.b[2390]) {
-            s.copy_ad(2151, 990);
-        }
-
-        s.b[2391] = (0.0 == 0.0);
-        s.store_scalar(2391, if s.b[2391] { 1.0 } else { 0.0 });
-
-        if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) {
-            s.copy_ad(989, 349);
-            s.store_scaled_add(344, 2113, 155, p.p396);
-            s.store_offset_mul_ad(338, s.ad_value(2131), A::sub(s.ad_value(85), s.ad_value(344)), 1.0);
-            s.store_offset(339, 2131, 1.0);
-        }
-
-        s.b[2392] = ((s.v[338] < s.v[339]) && (s.v[339] >= 0.0));
-        s.store_scalar(2392, if s.b[2392] { 1.0 } else { 0.0 });
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2392]) {
-            s.store_sub(781, 339, 338);
-            s.store_square(722, 781);
-            s.store_square(723, 339);
-            s.store_scalar(724, 1.0);
-            s.store_scalar(725, 1.0);
-            s.store_scalar(719, 0.0);
-            s.store_scalar(720, 0.0);
-            s.store_scalar(770, 0.0);
-            s.store_scalar(726, 0.0);
-            s.store_mul(724, 724, 722);
-            s.store_mul(725, 725, 723);
-            s.store_mul(724, 724, 722);
-            s.store_mul(725, 725, 723);
-            s.store_add(770, 724, 725);
-            s.copy_ad(726, 770);
-        }
-
-        s.b[2393] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));
-        s.store_scalar(2393, if s.b[2393] { 1.0 } else { 0.0 });
-
-        s.b[2394] = (2.0 == 1.0);
-        s.store_scalar(2394, if s.b[2394] { 1.0 } else { 0.0 });
-
-    }
-
-    pub(super) fn stamp_reactive_block_52(
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-    ) {
-        if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2392]) && s.b[2393]) && s.b[2394]) {
-            s.store_scalar(720, 1.0);
-        }
-
-        s.b[2395] = (2.0 == 2.0);
-        s.store_scalar(2395, if s.b[2395] { 1.0 } else { 0.0 });
-
-        if ((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2392]) && s.b[2393]) && (!s.b[2394])) && s.b[2395]) {
-            s.store_scalar(720, 2.0);
-        }
-
-        s.b[2396] = (2.0 == 4.0);
-        s.store_scalar(2396, if s.b[2396] { 1.0 } else { 0.0 });
-
-        if (((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2392]) && s.b[2393]) && (!s.b[2394])) && (!s.b[2395])) && s.b[2396]) {
-            s.store_scalar(720, 3.0);
-        }
-
-        s.b[2397] = (2.0 == 8.0);
-        s.store_scalar(2397, if s.b[2397] { 1.0 } else { 0.0 });
-
-        if ((((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2392]) && s.b[2393]) && (!s.b[2394])) && (!s.b[2395])) && (!s.b[2396])) && s.b[2397]) {
-            s.store_scalar(720, 4.0);
-        }
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2392]) && s.b[2393]) {
-            s.store_scalar(719, 0.0);
-        }
-
-        let mut assign55790_loop_guard: usize = 0;
-        while {
-            let assign55790_cond_e86397: f64 = if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2392]) && s.b[2393]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
-            assign55790_cond_e86397 != 0.0
-        } {
-            assign55790_loop_guard += 1;
-            assert!(assign55790_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
-            if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2392]) && s.b[2393]) {
-                s.store_sqrt(726, 726);
-                s.store_offset(719, 719, 1.0);
-            }
-        }
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2392]) && (!s.b[2393])) {
-            if (s.v[726] == 0.0) {
-                s.store_scalar(726, 0.0);
-            } else {
-                s.store_powf(726, 726, (1.0 / (2.0 * 2.0)));
-            }
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2392]) {
-            s.store_div_from_scalar(726, 1.0, 726);
-            s.store_mul3_lhs(780, 781, 339, 726);
-            s.store_div_scaled_product3_indices(334, 339, 725, 726, 1.0, 770, 1.0);
-            s.store_sub(338, 339, 780);
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2392]) {
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && (!s.b[2392])) {
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && (!s.b[2392])) {
-            s.store_scalar(334, 1.0);
-        }
-
-        if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) {
-            s.store_sqrt(337, 338);
-            s.store_add_mul_sub_from_scalar_rhs_indices(344, 85, 2130, 1.0, 337);
-        }
-
-        s.b[2398] = ((s.v[344] < (s.v[972] + p.p405)) && (p.p405 >= 0.0));
-        s.store_scalar(2398, if s.b[2398] { 1.0 } else { 0.0 });
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2398]) {
-            s.store_sub_offset_lhs(781, 972, p.p405, 344);
-            s.store_square(722, 781);
-            s.store_scalar(723, (p.p405 * p.p405));
-            s.store_scalar(724, 1.0);
-            s.store_scalar(725, 1.0);
-            s.store_scalar(719, 0.0);
-            s.store_scalar(720, 0.0);
-            s.store_scalar(770, 0.0);
-            s.store_scalar(726, 0.0);
-            s.store_mul(724, 724, 722);
-            s.store_mul(725, 725, 723);
-            s.store_mul(724, 724, 722);
-            s.store_mul(725, 725, 723);
-            s.store_add(770, 724, 725);
-            s.copy_ad(726, 770);
-        }
-
-        s.b[2399] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));
-        s.store_scalar(2399, if s.b[2399] { 1.0 } else { 0.0 });
-
-        s.b[2400] = (2.0 == 1.0);
-        s.store_scalar(2400, if s.b[2400] { 1.0 } else { 0.0 });
-
-        if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2398]) && s.b[2399]) && s.b[2400]) {
-            s.store_scalar(720, 1.0);
-        }
-
-        s.b[2401] = (2.0 == 2.0);
-        s.store_scalar(2401, if s.b[2401] { 1.0 } else { 0.0 });
-
-        if ((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2398]) && s.b[2399]) && (!s.b[2400])) && s.b[2401]) {
-            s.store_scalar(720, 2.0);
-        }
-
-        s.b[2402] = (2.0 == 4.0);
-        s.store_scalar(2402, if s.b[2402] { 1.0 } else { 0.0 });
-
-        if (((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2398]) && s.b[2399]) && (!s.b[2400])) && (!s.b[2401])) && s.b[2402]) {
-            s.store_scalar(720, 3.0);
-        }
-
-        s.b[2403] = (2.0 == 8.0);
-        s.store_scalar(2403, if s.b[2403] { 1.0 } else { 0.0 });
-
-        if ((((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2398]) && s.b[2399]) && (!s.b[2400])) && (!s.b[2401])) && (!s.b[2402])) && s.b[2403]) {
-            s.store_scalar(720, 4.0);
-        }
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2398]) && s.b[2399]) {
-            s.store_scalar(719, 0.0);
-        }
-
-        let mut assign56160_loop_guard: usize = 0;
-        while {
-            let assign56160_cond_e87027: f64 = if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2398]) && s.b[2399]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
-            assign56160_cond_e87027 != 0.0
-        } {
-            assign56160_loop_guard += 1;
-            assert!(assign56160_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
-            if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2398]) && s.b[2399]) {
-                s.store_sqrt(726, 726);
-                s.store_offset(719, 719, 1.0);
-            }
-        }
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2398]) && (!s.b[2399])) {
-            if (s.v[726] == 0.0) {
-                s.store_scalar(726, 0.0);
-            } else {
-                s.store_powf(726, 726, (1.0 / (2.0 * 2.0)));
-            }
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2398]) {
-            s.store_div_from_scalar(726, 1.0, 726);
-            s.store_scaled_mul(780, 781, 726, p.p405);
-            s.store_div_scaled_product_indices(334, 725, 726, p.p405, 770, 1.0);
-            s.store_sub_offset_lhs(992, 972, p.p405, 780);
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && s.b[2398]) {
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2391]) && (!s.b[2398])) {
-            s.copy_ad(992, 344);
-            s.store_scalar(334, 1.0);
-        }
-
-        if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) {
-            s.copy_ad(2155, 2141);
-            s.store_offset_mul(338, 2131, 2155, 1.0);
-        }
-
-        if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) {
-            if (s.v[338] > 0.0) {
-                s.store_sqrt(337, 338);
-            } else {
-                s.store_scaled_sqrt_scaled_input(337, 338, -1.0, -1.0);
-            }
-        }
-
-        if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) {
-            s.store_add_mul_sub_from_scalar_rhs_indices(2156, 2155, 2130, 1.0, 337);
-            s.copy_ad(2152, 2156);
-            s.store_scalar(79, 0.0);
-            s.store_scalar(97, 1.0);
-        }
-
-        let mut assign56320_loop_guard: usize = 0;
-        while {
-            let assign56320_cond_e87348: f64 = if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) && (s.v[97] <= 150.0)) { 1.0 } else { 0.0 };
-            assign56320_cond_e87348 != 0.0
-        } {
-            assign56320_loop_guard += 1;
-            assert!(assign56320_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
-            if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) {
-                s.store_mul_neg_lhs(335, 154, 2152);
-                s.store_exp(336, 335);
-                s.store_sqrt_div_scaled_inputs(338, 2110, 2.0, 154, 1.0);
-                s.store_offset_sub(344, 336, 335, (-1.0));
-                s.store_mul_sqrt_ad_rhs(2153, 338, A::offset(s.ad_value(344), 1e-15));
-            }
-            s.b[2404] = (s.v[335] > 0.0);
-            s.store_scalar(2404, if s.b[2404] { 1.0 } else { 0.0 });
-            if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) && s.b[2404]) {
-                s.store_neg(2153, 2153);
-            }
-            if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) {
-                s.store_div_scaled_product3_indices(345, 338, 338, 154, 0.5, 2153, 1.0);
-                s.store_mul_sub_from_scalar_rhs(2154, 345, 1.0, 336);
-            }
-            if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) && (s.v[79] != 0.0)) {
-                s.store_scalar(97, (150.0 + 1.0));
-            }
-            if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) && (s.v[79] == 0.0)) {
-                s.store_add_scaled_product_right_sub(2096, 2153, 1.0, 185, 2155, 2152, -1.0);
-                s.store_add(2097, 185, 2154);
-                s.store_div_scaled_inputs_indices(2108, 2096, -1.0, 2097, 1.0);
-            }
-            s.b[2405] = (((s.v[2108]) as f64).abs() < 1e-10);
-            s.store_scalar(2405, if s.b[2405] { 1.0 } else { 0.0 });
-            if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) && (s.v[79] == 0.0)) && s.b[2405]) {
-                s.store_scalar(79, 1.0);
-            }
-            s.b[2406] = (s.v[2108] > 0.1);
-            s.store_scalar(2406, if s.b[2406] { 1.0 } else { 0.0 });
-            if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) && (s.v[79] == 0.0)) && (!s.b[2405])) && s.b[2406]) {
-                s.store_scalar(2108, 0.1);
-            }
-            s.b[2407] = (s.v[2108] < (-0.1));
-            s.store_scalar(2407, if s.b[2407] { 1.0 } else { 0.0 });
-            if ((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) && (s.v[79] == 0.0)) && (!s.b[2405])) && (!s.b[2406])) && s.b[2407]) {
-                s.store_scalar(2108, (-0.1));
-            }
-            if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) && (s.v[79] == 0.0)) {
-                s.store_add(2152, 2152, 2108);
-            }
-            if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) {
-                s.store_offset(97, 97, 1.0);
-            }
-        }
-
-        if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) {
-            s.copy_ad(2149, 2152);
-            s.copy_ad(989, 349);
-            s.store_sqrt_square_offset(782, 2149, ((4.0 * p.p405) * p.p405));
-            s.store_offset_scaled_div(334, 2149, 782, 0.5, 0.5);
-            s.store_scaled_add(992, 2149, 782, 0.5);
-        }
-
-        s.b[2408] = (s.v[992] < 0.0);
-        s.store_scalar(2408, if s.b[2408] { 1.0 } else { 0.0 });
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) && s.b[2408]) {
-            s.store_scalar(992, 0.0);
-            s.store_scalar(334, 0.0);
-        }
-
-        if (s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) {
-            s.store_div(335, 989, 992);
-        }
-
-        if (s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) {
-            if (s.v[335] == 0.0) {
-                s.store_scalar(336, 0.0);
-            } else {
-                s.store_powf(336, 335, (p.p383 - 1.0));
-            }
-        }
-
-        if (s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) {
-            s.store_offset_mul(337, 336, 335, 1.0);
-        }
-
-        if (s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) {
-            if (s.v[337] == 0.0) {
-                s.store_scalar(338, 0.0);
-            } else {
-                s.store_powf(338, 337, ((1.0 / p.p383) - 1.0));
-            }
-        }
-
-        if (s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) {
-            s.store_mul(340, 338, 337);
-        }
-
-        s.b[2409] = ((s.v[349] > (s.v[972] - (s.v[972] * 0.5))) && ((s.v[972] * 0.5) >= 0.0));
-        s.store_scalar(2409, if s.b[2409] { 1.0 } else { 0.0 });
-
-        if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2409]) {
-            s.store_add_scaled_inputs3_indices(781, 349, 1.0, 972, (-1.0), 972, 0.5);
-            s.store_square(722, 781);
-            s.store_scaled_mul(723, 972, 972, (0.5 * 0.5));
-            s.store_scalar(724, 1.0);
-            s.store_scalar(725, 1.0);
-            s.store_scalar(719, 0.0);
-            s.store_scalar(720, 0.0);
-            s.store_scalar(770, 0.0);
-            s.store_scalar(726, 0.0);
-            s.store_mul(724, 724, 722);
-            s.store_mul(725, 725, 723);
-            s.store_mul(724, 724, 722);
-            s.store_mul(725, 725, 723);
-            s.store_add(770, 724, 725);
-            s.copy_ad(726, 770);
-        }
-
-        s.b[2410] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));
-        s.store_scalar(2410, if s.b[2410] { 1.0 } else { 0.0 });
-
-        s.b[2411] = (2.0 == 1.0);
-        s.store_scalar(2411, if s.b[2411] { 1.0 } else { 0.0 });
-
-        if ((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2409]) && s.b[2410]) && s.b[2411]) {
-            s.store_scalar(720, 1.0);
-        }
-
-        s.b[2412] = (2.0 == 2.0);
-        s.store_scalar(2412, if s.b[2412] { 1.0 } else { 0.0 });
-
-        if (((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2409]) && s.b[2410]) && (!s.b[2411])) && s.b[2412]) {
-            s.store_scalar(720, 2.0);
-        }
-
-        s.b[2413] = (2.0 == 4.0);
-        s.store_scalar(2413, if s.b[2413] { 1.0 } else { 0.0 });
-
-        if ((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2409]) && s.b[2410]) && (!s.b[2411])) && (!s.b[2412])) && s.b[2413]) {
-            s.store_scalar(720, 3.0);
-        }
-
-        s.b[2414] = (2.0 == 8.0);
-        s.store_scalar(2414, if s.b[2414] { 1.0 } else { 0.0 });
-
-        if (((((((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2409]) && s.b[2410]) && (!s.b[2411])) && (!s.b[2412])) && (!s.b[2413])) && s.b[2414]) {
-            s.store_scalar(720, 4.0);
-        }
-
-        if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && s.b[2409]) && s.b[2410]) {
             s.store_scalar(719, 0.0);
         }
 

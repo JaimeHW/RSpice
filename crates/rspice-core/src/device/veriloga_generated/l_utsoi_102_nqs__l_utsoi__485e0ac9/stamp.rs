@@ -307,11 +307,14 @@ impl Instance {
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),
         };
 
-        Self::stamp_transient_block_0(ctx, s, p);
-        Self::stamp_transient_block_1(s, p, param_given);
+        let mut var_kfracinv_i: f64 = 0.0;
+        let mut var_guard83: f64 = 0.0;
+
+        Self::stamp_transient_block_0(ctx, s, p, &mut var_guard83);
+        Self::stamp_transient_block_1(s, p, param_given, var_guard83, &mut var_kfracinv_i);
         Self::stamp_transient_block_2(s, p);
         Self::stamp_transient_block_3(s, p, param_given);
-        Self::stamp_transient_block_4(s, p);
+        Self::stamp_transient_block_4(s, p, var_guard83, &mut var_kfracinv_i);
         Self::stamp_transient_block_5(ctx, s, p, nodes);
         Self::stamp_transient_block_6(ctx, s, p, nodes);
         Self::stamp_transient_block_7(s, p);
@@ -340,8 +343,8 @@ impl Instance {
         Self::stamp_transient_block_30(s, p);
         Self::stamp_transient_block_31(s, p);
 
-        Self::stamp_transient_equations_block_0(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous);
-        Self::stamp_transient_equations_block_1(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous);
+        Self::stamp_transient_equations_block_0(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, var_kfracinv_i);
+        Self::stamp_transient_equations_block_1(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, var_kfracinv_i);
         let eq39_value: f64 = 0.0;
         stamper.stamp_current_const_local(
             Some(5),
