@@ -7662,6 +7662,8 @@ mod tests {
         assert_eq!(f(&ctx, std::ptr::null()), 7.5);
         ctx.temperature = -0.0;
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
+        ctx.temperature = f64::from_bits(0xfff0_0000_0000_0001);
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0x7ff0_0000_0000_0001);
         ctx.temperature = f64::from_bits(0xfff8_0000_0000_0001);
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0x7ff8_0000_0000_0001);
     }
