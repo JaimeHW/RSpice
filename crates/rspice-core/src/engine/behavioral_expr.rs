@@ -58,7 +58,9 @@ impl<'a> FunctionExpander<'a> {
         match expr {
             NetExpr::Number(v) => Ok(NetExpr::Number(*v)),
             NetExpr::Param(name) => {
-                if let Some(v) = self.params.get(name) {
+                if is_behavioral_runtime_symbol(name) {
+                    Ok(NetExpr::Param(name.clone()))
+                } else if let Some(v) = self.params.get(name) {
                     Ok(NetExpr::Number(v))
                 } else {
                     Ok(NetExpr::Param(name.clone()))
@@ -131,6 +133,10 @@ impl<'a> FunctionExpander<'a> {
             }
         }
     }
+}
+
+fn is_behavioral_runtime_symbol(name: &str) -> bool {
+    name.eq_ignore_ascii_case("TEMPER")
 }
 
 fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> NetExpr {
