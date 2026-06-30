@@ -1,6 +1,7 @@
 use super::*;
 use crate::Value;
 use crate::xspice::{CmError, EvaluationPhase};
+use std::sync::{Arc, Mutex};
 
 //=============================================================================
 // Memory
@@ -19,6 +20,9 @@ const D_RAM_SELECT_VALUE_MAX: i64 = 32_767;
 const D_RAM_IC_MIN: i64 = 0;
 const D_RAM_IC_MAX: i64 = 2;
 const D_RAM_READ_DELAY_MIN: Value = 1.0e-12;
+const D_RAM_SCRATCH_STATE_RESOURCE: &str = "d_ram.scratch_state";
+
+type DRamScratchStateResource = Mutex<Vec<i64>>;
 
 #[derive(Debug, Clone, Copy)]
 struct DMemoryShape {
@@ -174,10 +178,13 @@ fn d_ram_state_len(shape: DMemoryShape) -> usize {
     shape.memory_start + shape.memory_bits
 }
 
-fn d_ram_state_snapshot(ctx: &CmContext, shape: DMemoryShape) -> Vec<i64> {
-    (0..d_ram_state_len(shape))
-        .map(|index| ctx.int_state(index))
-        .collect()
+fn d_ram_fill_state_snapshot(ctx: &CmContext, shape: DMemoryShape, state: &mut Vec<i64>) {
+    let len = d_ram_state_len(shape);
+    state.clear();
+    state.reserve(len);
+    for index in 0..len {
+        state.push(ctx.int_state(index));
+    }
 }
 
 fn d_ram_state(ctx: &CmContext, scratch_state: Option<&[i64]>, index: usize) -> i64 {
@@ -188,11 +195,11 @@ fn d_ram_state(ctx: &CmContext, scratch_state: Option<&[i64]>, index: usize) -> 
 
 fn d_ram_set_state(
     ctx: &mut CmContext,
-    scratch_state: &mut Option<Vec<i64>>,
+    scratch_state: &mut Option<&mut [i64]>,
     index: usize,
     value: i64,
 ) {
-    if let Some(state) = scratch_state.as_mut() {
+    if let Some(state) = scratch_state.as_deref_mut() {
         if index < state.len() {
             state[index] = value;
         }
@@ -203,7 +210,7 @@ fn d_ram_set_state(
 
 fn d_ram_write_word(
     ctx: &mut CmContext,
-    scratch_state: &mut Option<Vec<i64>>,
+    scratch_state: &mut Option<&mut [i64]>,
     shape: DMemoryShape,
     address_index: Option<usize>,
 ) {
@@ -289,7 +296,7 @@ fn d_ram_set_input_data_outputs(
 
 fn d_ram_store_previous(
     ctx: &mut CmContext,
-    scratch_state: &mut Option<Vec<i64>>,
+    scratch_state: &mut Option<&mut [i64]>,
     shape: DMemoryShape,
     write_en: i64,
     select: i64,
@@ -328,6 +335,89 @@ fn d_ram_previous_data_changed(
         d_ram_state(ctx, scratch_state, data_start + idx)
             != d_ram_input_state_code(ctx, "data_in", idx)
     })
+}
+
+fn d_ram_evaluate_with_state(
+    ctx: &mut CmContext,
+    shape: DMemoryShape,
+    write_en: i64,
+    select: i64,
+    address_index: Option<usize>,
+    ic: i64,
+    read_delay: Value,
+    mut scratch_state: Option<&mut [i64]>,
+) -> CmResult<()> {
+    if ctx.time == 0.0 || d_ram_state(ctx, scratch_state.as_deref(), D_RAM_INITIALIZED) == 0 {
+        for bit in 0..shape.memory_bits {
+            d_ram_set_state(ctx, &mut scratch_state, shape.memory_start + bit, ic);
+        }
+
+        if select == 1 && write_en == 0 {
+            d_ram_set_uniform_outputs(ctx, shape, ic, DigitalStrength::Strong, 0.0);
+        } else {
+            d_ram_set_uniform_outputs(ctx, shape, 2, DigitalStrength::HighZ, 0.0);
+        }
+
+        d_ram_set_state(ctx, &mut scratch_state, D_RAM_INITIALIZED, 1);
+        d_ram_store_previous(ctx, &mut scratch_state, shape, write_en, select);
+        return Ok(());
+    }
+
+    let select_changed = select != d_ram_state(ctx, scratch_state.as_deref(), D_RAM_PREV_SELECT);
+    let write_changed = write_en != d_ram_state(ctx, scratch_state.as_deref(), D_RAM_PREV_WRITE_EN);
+    let address_changed = d_ram_previous_address_changed(ctx, scratch_state.as_deref(), shape);
+    let data_changed = d_ram_previous_data_changed(ctx, scratch_state.as_deref(), shape);
+
+    if select_changed {
+        if select == 1 {
+            if write_en == 0 {
+                d_ram_set_outputs(
+                    ctx,
+                    scratch_state.as_deref(),
+                    shape,
+                    address_index,
+                    DigitalStrength::Strong,
+                    read_delay,
+                );
+            } else {
+                d_ram_write_word(ctx, &mut scratch_state, shape, address_index);
+                d_ram_set_input_data_outputs(
+                    ctx,
+                    shape,
+                    address_index,
+                    DigitalStrength::HighZ,
+                    read_delay,
+                );
+            }
+        } else if write_en == 0 {
+            d_ram_set_uniform_outputs(ctx, shape, 2, DigitalStrength::HighZ, read_delay);
+        }
+    } else if write_changed || address_changed || data_changed {
+        if write_en == 1 {
+            if select == 1 {
+                d_ram_write_word(ctx, &mut scratch_state, shape, address_index);
+                d_ram_set_input_data_outputs(
+                    ctx,
+                    shape,
+                    address_index,
+                    DigitalStrength::HighZ,
+                    read_delay,
+                );
+            }
+        } else if select == 1 {
+            d_ram_set_outputs(
+                ctx,
+                scratch_state.as_deref(),
+                shape,
+                address_index,
+                DigitalStrength::Strong,
+                read_delay,
+            );
+        }
+    }
+
+    d_ram_store_previous(ctx, &mut scratch_state, shape, write_en, select);
+    Ok(())
 }
 
 impl CodeModel for DigitalRam {
@@ -375,6 +465,10 @@ impl CodeModel for DigitalRam {
         let shape = d_ram_shape(ctx)?;
         ctx.allocate_int_states(shape.memory_start + shape.memory_bits);
         ctx.set_int_state(D_RAM_INITIALIZED, 0);
+        ctx.set_resource(
+            D_RAM_SCRATCH_STATE_RESOURCE,
+            Arc::new(Mutex::new(Vec::<i64>::new())),
+        );
         Ok(())
     }
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -384,82 +478,37 @@ impl CodeModel for DigitalRam {
         let address_index = d_ram_address_index(ctx, shape);
         let ic = d_ram_integer_param(ctx, "ic", 2.0, D_RAM_IC_MIN, D_RAM_IC_MAX);
         let read_delay = d_ram_read_delay(ctx);
-        let mut scratch_state = (ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe)
-            .then(|| d_ram_state_snapshot(ctx, shape));
 
-        if ctx.time == 0.0 || d_ram_state(ctx, scratch_state.as_deref(), D_RAM_INITIALIZED) == 0 {
-            for bit in 0..shape.memory_bits {
-                d_ram_set_state(ctx, &mut scratch_state, shape.memory_start + bit, ic);
-            }
-
-            if select == 1 && write_en == 0 {
-                d_ram_set_uniform_outputs(ctx, shape, ic, DigitalStrength::Strong, 0.0);
-            } else {
-                d_ram_set_uniform_outputs(ctx, shape, 2, DigitalStrength::HighZ, 0.0);
-            }
-
-            d_ram_set_state(ctx, &mut scratch_state, D_RAM_INITIALIZED, 1);
-            d_ram_store_previous(ctx, &mut scratch_state, shape, write_en, select);
-            return Ok(());
+        if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
+            let scratch = ctx
+                .resource::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
+                .ok_or_else(|| d_ram_error("scratch state is not initialized"))?;
+            let mut scratch = scratch
+                .lock()
+                .map_err(|_| d_ram_error("scratch state lock is poisoned"))?;
+            d_ram_fill_state_snapshot(ctx, shape, &mut scratch);
+            return d_ram_evaluate_with_state(
+                ctx,
+                shape,
+                write_en,
+                select,
+                address_index,
+                ic,
+                read_delay,
+                Some(scratch.as_mut_slice()),
+            );
         }
 
-        let select_changed =
-            select != d_ram_state(ctx, scratch_state.as_deref(), D_RAM_PREV_SELECT);
-        let write_changed =
-            write_en != d_ram_state(ctx, scratch_state.as_deref(), D_RAM_PREV_WRITE_EN);
-        let address_changed = d_ram_previous_address_changed(ctx, scratch_state.as_deref(), shape);
-        let data_changed = d_ram_previous_data_changed(ctx, scratch_state.as_deref(), shape);
-
-        if select_changed {
-            if select == 1 {
-                if write_en == 0 {
-                    d_ram_set_outputs(
-                        ctx,
-                        scratch_state.as_deref(),
-                        shape,
-                        address_index,
-                        DigitalStrength::Strong,
-                        read_delay,
-                    );
-                } else {
-                    d_ram_write_word(ctx, &mut scratch_state, shape, address_index);
-                    d_ram_set_input_data_outputs(
-                        ctx,
-                        shape,
-                        address_index,
-                        DigitalStrength::HighZ,
-                        read_delay,
-                    );
-                }
-            } else if write_en == 0 {
-                d_ram_set_uniform_outputs(ctx, shape, 2, DigitalStrength::HighZ, read_delay);
-            }
-        } else if write_changed || address_changed || data_changed {
-            if write_en == 1 {
-                if select == 1 {
-                    d_ram_write_word(ctx, &mut scratch_state, shape, address_index);
-                    d_ram_set_input_data_outputs(
-                        ctx,
-                        shape,
-                        address_index,
-                        DigitalStrength::HighZ,
-                        read_delay,
-                    );
-                }
-            } else if select == 1 {
-                d_ram_set_outputs(
-                    ctx,
-                    scratch_state.as_deref(),
-                    shape,
-                    address_index,
-                    DigitalStrength::Strong,
-                    read_delay,
-                );
-            }
-        }
-
-        d_ram_store_previous(ctx, &mut scratch_state, shape, write_en, select);
-        Ok(())
+        d_ram_evaluate_with_state(
+            ctx,
+            shape,
+            write_en,
+            select,
+            address_index,
+            ic,
+            read_delay,
+            None,
+        )
     }
 }
 
@@ -751,6 +800,46 @@ mod tests {
             readback,
             DigitalValue::one(),
             "accepted read after rollbackable write probe must see the committed memory"
+        );
+    }
+
+    #[test]
+    fn d_ram_rollbackable_probe_reuses_snapshot_buffer() {
+        let mut ctx = ram_context();
+        DigitalRam.init(&mut ctx).expect("d_ram initializes");
+
+        evaluate_ram(&mut ctx, 0.0);
+        let _ = take_data_out(&mut ctx);
+
+        let shape = d_ram_shape(&ctx).expect("test RAM shape is valid");
+        let cell = d_ram_memory_index(shape, 0, 0);
+        assert_eq!(ctx.int_state(cell), 1);
+
+        ctx.set_input_digital("write_en", DigitalValue::one());
+        ctx.set_input(
+            "data_in",
+            InputValue::DigitalVector(vec![DigitalValue::zero()]),
+        );
+        evaluate_ram_with_phase(&mut ctx, 1.0e-9, EvaluationPhase::RollbackableProbe);
+        let _ = take_data_out(&mut ctx);
+
+        let scratch = ctx
+            .resource::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
+            .expect("d_ram scratch state is installed");
+        let guard = scratch.lock().expect("d_ram scratch state locks");
+        assert_eq!(guard.len(), d_ram_state_len(shape));
+        let first_ptr = guard.as_ptr();
+        let first_capacity = guard.capacity();
+        drop(guard);
+
+        evaluate_ram_with_phase(&mut ctx, 2.0e-9, EvaluationPhase::RollbackableProbe);
+        let guard = scratch.lock().expect("d_ram scratch state locks again");
+        assert_eq!(guard.as_ptr(), first_ptr);
+        assert_eq!(guard.capacity(), first_capacity);
+        assert_eq!(
+            ctx.int_state(cell),
+            1,
+            "rollbackable probes must continue to leave committed RAM untouched"
         );
     }
 }
