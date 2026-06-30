@@ -3687,7 +3687,8 @@ mod tests {
         WORD_BYTES, X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
         compile_assignment_function, compile_assignment_pass_function, compile_value_function,
         entry_ctx_arg_reg, entry_vars_arg_reg, native_op_reads_entry_args,
-        native_op_uses_helper_call, rspice_exp, value_program_needs_saved_entry_args,
+        native_op_uses_helper_call, program_uses_helper_calls, rspice_exp,
+        value_program_needs_saved_entry_args,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -9527,6 +9528,151 @@ mod tests {
     }
 
     #[test]
+    fn native_x64_hot_path_codegen_stays_compact_and_avoids_unneeded_calls() {
+        let cases = [
+            (
+                "constant_leaf",
+                native_program(EntryKind::StampValue, vec![Instruction::PushConst(1.0)], 0),
+                32,
+                false,
+            ),
+            (
+                "arithmetic_context",
+                native_program(
+                    EntryKind::StampValue,
+                    vec![
+                        Instruction::PushParam(0),
+                        Instruction::PushParam(1),
+                        Instruction::Mul,
+                        Instruction::PushVariable(0),
+                        Instruction::Add,
+                        Instruction::PushVoltage(0, 1),
+                        Instruction::Add,
+                        Instruction::PushTemperature,
+                        Instruction::PushConst(0.01),
+                        Instruction::Mul,
+                        Instruction::Add,
+                    ],
+                    2,
+                ),
+                192,
+                false,
+            ),
+            (
+                "param_variable_dot8",
+                native_program(
+                    EntryKind::StampValue,
+                    vec![
+                        Instruction::PushParam(0),
+                        Instruction::PushVariable(0),
+                        Instruction::Mul,
+                        Instruction::PushParam(1),
+                        Instruction::PushVariable(1),
+                        Instruction::Mul,
+                        Instruction::Add,
+                        Instruction::PushParam(2),
+                        Instruction::PushVariable(2),
+                        Instruction::Mul,
+                        Instruction::Add,
+                        Instruction::PushParam(3),
+                        Instruction::PushVariable(3),
+                        Instruction::Mul,
+                        Instruction::Add,
+                        Instruction::PushParam(4),
+                        Instruction::PushVariable(4),
+                        Instruction::Mul,
+                        Instruction::Add,
+                        Instruction::PushParam(5),
+                        Instruction::PushVariable(5),
+                        Instruction::Mul,
+                        Instruction::Add,
+                        Instruction::PushParam(6),
+                        Instruction::PushVariable(6),
+                        Instruction::Mul,
+                        Instruction::Add,
+                        Instruction::PushParam(7),
+                        Instruction::PushVariable(7),
+                        Instruction::Mul,
+                        Instruction::Add,
+                    ],
+                    0,
+                ),
+                384,
+                false,
+            ),
+            (
+                "same_storage_voltage_pair",
+                native_program(
+                    EntryKind::StampValue,
+                    vec![
+                        Instruction::PushVoltage(0, 1),
+                        Instruction::PushVoltage(2, 3),
+                        Instruction::Add,
+                    ],
+                    4,
+                ),
+                96,
+                false,
+            ),
+            (
+                "dynamic_index_inline",
+                native_program(
+                    EntryKind::StampValue,
+                    vec![
+                        Instruction::PushVariable(0),
+                        Instruction::PushVariableDyn {
+                            base: 1,
+                            len: 4,
+                            lower: 0,
+                        },
+                        Instruction::PushParam(0),
+                        Instruction::Add,
+                    ],
+                    0,
+                ),
+                320,
+                true,
+            ),
+            (
+                "integer_bitwise",
+                native_program(
+                    EntryKind::StampValue,
+                    vec![
+                        Instruction::PushParam(2),
+                        Instruction::PushParam(3),
+                        Instruction::BitAnd,
+                        Instruction::PushVariable(0),
+                        Instruction::Add,
+                    ],
+                    0,
+                ),
+                256,
+                false,
+            ),
+        ];
+
+        for (name, program, max_bytes, allow_cold_error_call) in cases {
+            assert!(
+                !program_uses_helper_calls(&program),
+                "{name}: hot path should remain helper-free at lowering"
+            );
+
+            let bytes = compile_value_function(&program).expect("compile hot path");
+            if !allow_cold_error_call {
+                assert!(
+                    !contains_bytes(&bytes, &call_rax_bytes()),
+                    "{name}: helper-free hot path emitted an indirect helper call"
+                );
+            }
+            assert!(
+                bytes.len() <= max_bytes,
+                "{name}: generated {} bytes, budget {max_bytes}",
+                bytes.len()
+            );
+        }
+    }
+
+    #[test]
     #[ignore = "release-only direct native x64 throughput probe; run with --release --features native -- --ignored --nocapture"]
     fn native_x64_microbench_reports_direct_call_throughput() {
         assert!(
@@ -10095,6 +10241,12 @@ mod tests {
     fn mov_r11_rsp_bytes() -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        encoder.into_bytes()
+    }
+
+    fn call_rax_bytes() -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.call_r64(Gpr::Rax);
         encoder.into_bytes()
     }
 
