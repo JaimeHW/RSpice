@@ -463,11 +463,6 @@ fn xfer_table_data(points: Vec<XferPoint>) -> XferTableData {
     }
 }
 
-fn xfer_table_signature(ctx: &CmContext) -> XferTableSignature {
-    let file = ctx.string_param("file").unwrap_or("").trim().to_string();
-    xfer_table_signature_with_virtual_stamp(ctx, data_file::virtual_data_file_stamp(&file))
-}
-
 fn xfer_table_signature_with_virtual_stamp(
     ctx: &CmContext,
     file_virtual_stamp: Option<data_file::DataFileStamp>,
@@ -489,6 +484,22 @@ fn xfer_table_signature_with_virtual_stamp(
     }
 }
 
+fn xfer_table_signature_matches(ctx: &CmContext, signature: &XferTableSignature) -> bool {
+    let file = ctx.string_param("file").unwrap_or("").trim();
+    signature.file == file
+        && signature.file_virtual_stamp == data_file::virtual_data_file_stamp(file)
+        && ctx.real_vector_param("table").unwrap_or(&[]) == signature.table.as_slice()
+        && signature.table_provided == ctx.param_was_provided("table")
+        && signature.r_i == ctx.param("r_i")
+        && signature.r_i_provided == ctx.param_was_provided("r_i")
+        && signature.db == ctx.param("db")
+        && signature.db_provided == ctx.param_was_provided("db")
+        && signature.rad == ctx.param("rad")
+        && signature.rad_provided == ctx.param_was_provided("rad")
+        && signature.span == ctx.param("span")
+        && signature.offset == ctx.param("offset")
+}
+
 fn cache_xfer_table(ctx: &mut CmContext) {
     let (file_virtual_stamp, result) = xfer_table_uncached(ctx);
     let signature = xfer_table_signature_with_virtual_stamp(ctx, file_virtual_stamp);
@@ -501,7 +512,7 @@ fn cache_xfer_table(ctx: &mut CmContext) {
 
 fn xfer_table(ctx: &CmContext) -> CmResult<Arc<XferTableData>> {
     if let Some(resource) = ctx.resource::<XferTableResource>(XFER_TABLE_RESOURCE) {
-        if resource.signature == xfer_table_signature(ctx) {
+        if xfer_table_signature_matches(ctx, &resource.signature) {
             return resource.result.clone();
         }
     }
@@ -682,6 +693,16 @@ fn s_xfer_coefficient_signature(ctx: &CmContext) -> SXferCoefficientSignature {
     }
 }
 
+fn s_xfer_coefficient_signature_matches(
+    ctx: &CmContext,
+    signature: &SXferCoefficientSignature,
+) -> bool {
+    signature.gain == ctx.param("gain")
+        && signature.denormalized_freq == ctx.param_or("denormalized_freq", 1.0)
+        && ctx.real_vector_param("num_coeff").unwrap_or(&[]) == signature.num_coeff.as_slice()
+        && ctx.real_vector_param("den_coeff").unwrap_or(&[]) == signature.den_coeff.as_slice()
+}
+
 fn cache_s_xfer_coefficients(ctx: &mut CmContext) -> CmResult<Option<Arc<SXferCoefficients>>> {
     let signature = s_xfer_coefficient_signature(ctx);
     let coefficients = if s_xfer_improper_order(ctx) {
@@ -701,7 +722,7 @@ fn cache_s_xfer_coefficients(ctx: &mut CmContext) -> CmResult<Option<Arc<SXferCo
 
 fn s_xfer_coefficients_for_context(ctx: &CmContext) -> CmResult<Option<Arc<SXferCoefficients>>> {
     if let Some(resource) = ctx.resource::<SXferCoefficientResource>(SXFER_COEFFICIENT_RESOURCE) {
-        if resource.signature == s_xfer_coefficient_signature(ctx) {
+        if s_xfer_coefficient_signature_matches(ctx, &resource.signature) {
             return Ok(resource.coefficients.clone());
         }
     }
