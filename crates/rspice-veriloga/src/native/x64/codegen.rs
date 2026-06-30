@@ -1403,7 +1403,7 @@ impl FunctionCompiler {
             self.encoder.mov_r64_r64(Gpr::R10, entry_ctx_arg_reg());
         }
 
-        self.emit_rust_f64_to_i64(left, Gpr::Rax)?;
+        self.emit_rust_f64_to_i64(left, Gpr::R11)?;
         self.emit_rust_f64_to_i64(right, Gpr::Rcx)?;
         self.encoder.test_r64_r64(Gpr::Rcx, Gpr::Rcx);
         let negative_count = self.encoder.jcc_rel32_placeholder(ConditionCode::Negative);
@@ -1412,8 +1412,8 @@ impl FunctionCompiler {
             .encoder
             .jcc_rel32_placeholder(ConditionCode::AboveOrEqual);
         match op {
-            IntegerBinaryOp::Shl => self.encoder.shl_r64_cl(Gpr::Rax),
-            IntegerBinaryOp::Shr => self.encoder.sar_r64_cl(Gpr::Rax),
+            IntegerBinaryOp::Shl => self.encoder.shl_r64_cl(Gpr::R11),
+            IntegerBinaryOp::Shr => self.encoder.sar_r64_cl(Gpr::R11),
             IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
                 unreachable!("bitwise integer ops use emit_integer_bitwise_op")
             }
@@ -1422,7 +1422,7 @@ impl FunctionCompiler {
         if restore_entry_ctx {
             self.encoder.mov_r64_r64(entry_ctx_arg_reg(), Gpr::R10);
         }
-        self.encoder.cvtsi2sd_xmm_r64(left, Gpr::Rax);
+        self.encoder.cvtsi2sd_xmm_r64(left, Gpr::R11);
         let valid_count_done = self.encoder.jmp_rel32_placeholder();
 
         self.patch_rel32_to_current(negative_count)?;
@@ -3394,9 +3394,7 @@ fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
             | NativeOp::Extremum(_)
             | NativeOp::ExtremumConst(_, _)
             | NativeOp::UnaryMath(UnaryMathOp::Floor | UnaryMathOp::Ceil)
-            | NativeOp::IntegerBinary(
-                IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor,
-            )
+            | NativeOp::IntegerBinary(_)
             | NativeOp::WhiteNoise
             | NativeOp::FlickerNoise
     )
@@ -3937,6 +3935,8 @@ mod tests {
                 NativeOp::ExtremumConst(ExtremumOp::Max, 2.0),
                 NativeOp::LoadParam(3),
                 NativeOp::Add,
+                NativeOp::LoadParam(4),
+                NativeOp::IntegerBinary(IntegerBinaryOp::Shl),
             ],
             2,
             Vec::new(),
@@ -3954,10 +3954,10 @@ mod tests {
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(entry) };
-        let params = [6.75_f64, 4.0_f64, 3.0_f64, 5.0_f64];
+        let params = [6.75_f64, 4.0_f64, 3.0_f64, 5.0_f64, 1.0_f64];
         let ctx = eval_context(&params, &[], &[], &[]);
 
-        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 7.0_f64.to_bits());
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 14.0_f64.to_bits());
     }
 
     #[test]
@@ -7924,7 +7924,7 @@ mod tests {
                 "{name}: runtime shifts should not pay helper-call prologue"
             );
             assert!(
-                contains_bytes(&bytes, &xor_r64_bytes(Gpr::Rax, Gpr::Rax)),
+                contains_bytes(&bytes, &xor_r64_bytes(Gpr::R11, Gpr::R11)),
                 "{name}: f64-to-i64 NaN path should zero the left operand with a zero idiom"
             );
             assert!(
@@ -7932,7 +7932,7 @@ mod tests {
                 "{name}: f64-to-i64 NaN path should zero the shift count with a zero idiom"
             );
             assert!(
-                !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::Rax, 0)),
+                !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::R11, 0)),
                 "{name}: f64-to-i64 NaN path should not materialize zero as a 64-bit immediate"
             );
             assert!(
