@@ -1,7 +1,7 @@
 use super::*;
 use crate::Value;
 use crate::xspice::{CmError, EvaluationPhase, PortDirection};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 #[derive(Debug, Default)]
 pub struct DigitalOscillator;
@@ -13,6 +13,7 @@ pub struct DigitalPwmOscillator;
 pub struct NumericallyControlledOscillator;
 
 const MIN_FREQUENCY: Value = 1.0e-16;
+const CONTROL_TABLE_RESOURCE: &str = "xspice.digital_oscillator.control_table";
 const FACTOR1: Value = 0.75;
 const FACTOR2: Value = 0.8;
 const TIME_EPSILON: Value = 1.0e-18;
@@ -24,6 +25,29 @@ const OSC_LAST_STATE: usize = 0;
 const OSC_INITIALIZED: usize = 1;
 const NCO_NEXT_TIME: usize = 0;
 const NCO_OUTPUT_STATE: usize = 0;
+
+#[derive(Debug, Clone, Copy)]
+struct ControlTablePoint {
+    control: Value,
+    value: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ControlTableSignature {
+    model: &'static str,
+    control_name: &'static str,
+    value_name: &'static str,
+    controls_present: bool,
+    values_present: bool,
+    controls: Vec<Value>,
+    values: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct ControlTableResource {
+    signature: ControlTableSignature,
+    result: CmResult<Option<Arc<Vec<ControlTablePoint>>>>,
+}
 
 fn digital_oscillator_ports() -> &'static [PortSpec] {
     static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
@@ -124,26 +148,89 @@ fn oscillator_error(model: &str, message: impl Into<String>) -> CmError {
     CmError::EvaluationError(format!("{model}: {}", message.into()))
 }
 
-fn validate_table<'a>(
-    ctx: &'a CmContext,
-    model: &str,
-    control_name: &str,
-    value_name: &str,
-) -> CmResult<(&'a [Value], &'a [Value])> {
-    validate_table_optional(ctx, model, control_name, value_name)?.ok_or_else(|| {
-        oscillator_error(
-            model,
-            format!("badly-formed control table {control_name}/{value_name}"),
-        )
-    })
+fn sanitize_d_osc_frequency(frequency: Value) -> Value {
+    if frequency <= 0.0 {
+        MIN_FREQUENCY
+    } else {
+        frequency
+    }
 }
 
-fn validate_table_optional<'a>(
-    ctx: &'a CmContext,
+fn sanitize_d_pwm_duty_cycle(duty: Value) -> Value {
+    duty.clamp(0.01, 0.99)
+}
+
+fn control_table_signature(
+    ctx: &CmContext,
+    model: &'static str,
+    control_name: &'static str,
+    value_name: &'static str,
+) -> ControlTableSignature {
+    let controls = ctx.real_vector_param(control_name);
+    let values = ctx.real_vector_param(value_name);
+    ControlTableSignature {
+        model,
+        control_name,
+        value_name,
+        controls_present: controls.is_some(),
+        values_present: values.is_some(),
+        controls: controls.unwrap_or(&[]).to_vec(),
+        values: values.unwrap_or(&[]).to_vec(),
+    }
+}
+
+#[cfg(test)]
+fn validate_table(
+    ctx: &mut CmContext,
+    model: &'static str,
+    control_name: &'static str,
+    value_name: &'static str,
+    sanitize_value: fn(Value) -> Value,
+) -> CmResult<Arc<Vec<ControlTablePoint>>> {
+    validate_table_optional(ctx, model, control_name, value_name, sanitize_value)?.ok_or_else(
+        || {
+            oscillator_error(
+                model,
+                format!("badly-formed control table {control_name}/{value_name}"),
+            )
+        },
+    )
+}
+
+fn validate_table_optional(
+    ctx: &mut CmContext,
+    model: &'static str,
+    control_name: &'static str,
+    value_name: &'static str,
+    sanitize_value: fn(Value) -> Value,
+) -> CmResult<Option<Arc<Vec<ControlTablePoint>>>> {
+    let signature = control_table_signature(ctx, model, control_name, value_name);
+    if let Some(resource) = ctx.resource::<ControlTableResource>(CONTROL_TABLE_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.result.clone();
+    }
+
+    let result =
+        validate_table_optional_uncached(ctx, model, control_name, value_name, sanitize_value)
+            .map(|table| table.map(Arc::new));
+    ctx.set_resource(
+        CONTROL_TABLE_RESOURCE,
+        Arc::new(ControlTableResource {
+            signature,
+            result: result.clone(),
+        }),
+    );
+    result
+}
+
+fn validate_table_optional_uncached(
+    ctx: &CmContext,
     model: &str,
     control_name: &str,
     value_name: &str,
-) -> CmResult<Option<(&'a [Value], &'a [Value])>> {
+    sanitize_value: fn(Value) -> Value,
+) -> CmResult<Option<Vec<ControlTablePoint>>> {
     let controls = ctx
         .real_vector_param(control_name)
         .ok_or_else(|| CmError::MissingParameter(control_name.to_string()))?;
@@ -183,31 +270,35 @@ fn validate_table_optional<'a>(
         }
     }
 
-    Ok(Some((controls, values)))
+    Ok(Some(
+        controls
+            .iter()
+            .zip(values)
+            .map(|(&control, &value)| ControlTablePoint {
+                control,
+                value: sanitize_value(value),
+            })
+            .collect(),
+    ))
 }
 
-fn interpolate_table(
-    controls: &[Value],
-    values: &[Value],
-    control: Value,
-    sanitize_value: impl Fn(Value) -> Value,
-) -> Value {
-    let right_index = controls
+fn interpolate_table(table: &[ControlTablePoint], control: Value) -> Value {
+    let right_index = table
         .iter()
-        .position(|&point| point > control)
-        .unwrap_or(controls.len());
+        .position(|point| point.control > control)
+        .unwrap_or(table.len());
     let left = if right_index == 0 {
         0
-    } else if right_index == controls.len() {
-        controls.len() - 2
+    } else if right_index == table.len() {
+        table.len() - 2
     } else {
         right_index - 1
     };
     let right = left + 1;
-    let left_control = controls[left];
-    let right_control = controls[right];
-    let left_value = sanitize_value(values[left]);
-    let right_value = sanitize_value(values[right]);
+    let left_control = table[left].control;
+    let right_control = table[right].control;
+    let left_value = table[left].value;
+    let right_value = table[right].value;
     let span = right_control - left_control;
     if span.abs() <= Value::EPSILON {
         return left_value;
@@ -215,24 +306,36 @@ fn interpolate_table(
     left_value + (control - left_control) * ((right_value - left_value) / span)
 }
 
-fn d_osc_period(ctx: &CmContext) -> CmResult<Value> {
-    let (controls, frequencies) = validate_table(ctx, "d_osc", "cntl_array", "freq_array")?;
-    let frequency = interpolate_table(controls, frequencies, ctx.input("cntl_in"), |frequency| {
-        if frequency <= 0.0 {
-            MIN_FREQUENCY
-        } else {
-            frequency
-        }
-    });
-    Ok(1.0 / frequency)
+fn d_osc_period_from_table(table: &[ControlTablePoint], control: Value) -> Value {
+    1.0 / interpolate_table(table, control)
 }
 
-fn d_pwm_duty_cycle(ctx: &CmContext) -> CmResult<Value> {
-    let (controls, duties) = validate_table(ctx, "d_pwm", "cntl_array", "dc_array")?;
-    let duty = interpolate_table(controls, duties, ctx.input("cntl_in"), |duty| {
-        duty.clamp(0.01, 0.99)
-    });
-    Ok(duty.clamp(0.01, 0.99))
+#[cfg(test)]
+fn d_osc_period(ctx: &mut CmContext) -> CmResult<Value> {
+    let table = validate_table(
+        ctx,
+        "d_osc",
+        "cntl_array",
+        "freq_array",
+        sanitize_d_osc_frequency,
+    )?;
+    Ok(d_osc_period_from_table(&table, ctx.input("cntl_in")))
+}
+
+fn d_pwm_duty_cycle_from_table(table: &[ControlTablePoint], control: Value) -> Value {
+    sanitize_d_pwm_duty_cycle(interpolate_table(table, control))
+}
+
+#[cfg(test)]
+fn d_pwm_duty_cycle(ctx: &mut CmContext) -> CmResult<Value> {
+    let table = validate_table(
+        ctx,
+        "d_pwm",
+        "cntl_array",
+        "dc_array",
+        sanitize_d_pwm_duty_cycle,
+    )?;
+    Ok(d_pwm_duty_cycle_from_table(&table, ctx.input("cntl_in")))
 }
 
 fn d_osc_duty_cycle(ctx: &CmContext) -> CmResult<Value> {
@@ -526,8 +629,14 @@ impl CodeModel for DigitalOscillator {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let has_table =
-            validate_table_optional(ctx, "d_osc", "cntl_array", "freq_array")?.is_some();
+        let has_table = validate_table_optional(
+            ctx,
+            "d_osc",
+            "cntl_array",
+            "freq_array",
+            sanitize_d_osc_frequency,
+        )?
+        .is_some();
         d_osc_duty_cycle(ctx)?;
         scalar_finite_param(ctx, "d_osc", "init_phase")?;
         scalar_finite_param(ctx, "d_osc", "rise_delay")?;
@@ -543,10 +652,17 @@ impl CodeModel for DigitalOscillator {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        if validate_table_optional(ctx, "d_osc", "cntl_array", "freq_array")?.is_none() {
+        let Some(table) = validate_table_optional(
+            ctx,
+            "d_osc",
+            "cntl_array",
+            "freq_array",
+            sanitize_d_osc_frequency,
+        )?
+        else {
             return Ok(());
-        }
-        let period = d_osc_period(ctx)?;
+        };
+        let period = d_osc_period_from_table(&table, ctx.input("cntl_in"));
         let duty_cycle = d_osc_duty_cycle(ctx)?;
         evaluate_digital_oscillator(ctx, period, duty_cycle)
     }
@@ -570,7 +686,14 @@ impl CodeModel for DigitalPwmOscillator {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let has_table = validate_table_optional(ctx, "d_pwm", "cntl_array", "dc_array")?.is_some();
+        let has_table = validate_table_optional(
+            ctx,
+            "d_pwm",
+            "cntl_array",
+            "dc_array",
+            sanitize_d_pwm_duty_cycle,
+        )?
+        .is_some();
         d_pwm_frequency(ctx)?;
         scalar_finite_param(ctx, "d_pwm", "init_phase")?;
         scalar_finite_param(ctx, "d_pwm", "rise_delay")?;
@@ -586,11 +709,18 @@ impl CodeModel for DigitalPwmOscillator {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        if validate_table_optional(ctx, "d_pwm", "cntl_array", "dc_array")?.is_none() {
+        let Some(table) = validate_table_optional(
+            ctx,
+            "d_pwm",
+            "cntl_array",
+            "dc_array",
+            sanitize_d_pwm_duty_cycle,
+        )?
+        else {
             return Ok(());
-        }
+        };
         let frequency = d_pwm_frequency(ctx)?;
-        let duty_cycle = d_pwm_duty_cycle(ctx)?;
+        let duty_cycle = d_pwm_duty_cycle_from_table(&table, ctx.input("cntl_in"));
         evaluate_digital_oscillator(ctx, 1.0 / frequency, duty_cycle)
     }
 }
@@ -636,7 +766,51 @@ mod tests {
         ctx.set_real_vector_param("dc_array", vec![0.0, 1.0]);
         ctx.set_input_analog("cntl_in", 0.0);
 
-        assert!((d_pwm_duty_cycle(&ctx).unwrap() - 0.5).abs() < 1.0e-15);
+        assert!((d_pwm_duty_cycle(&mut ctx).unwrap() - 0.5).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn digital_oscillator_control_table_cache_reloads_when_params_change() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("cntl_array", vec![0.0, 1.0]);
+        ctx.set_real_vector_param("freq_array", vec![1.0e6, 2.0e6]);
+
+        let first = validate_table(
+            &mut ctx,
+            "d_osc",
+            "cntl_array",
+            "freq_array",
+            sanitize_d_osc_frequency,
+        )
+        .expect("control table loads");
+        let second = validate_table(
+            &mut ctx,
+            "d_osc",
+            "cntl_array",
+            "freq_array",
+            sanitize_d_osc_frequency,
+        )
+        .expect("control table reloads");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "unchanged digital oscillator table parameters should reuse the parsed table"
+        );
+        assert_eq!(first[1].value, 2.0e6);
+
+        ctx.set_real_vector_param("freq_array", vec![1.0e6, 3.0e6]);
+        let updated = validate_table(
+            &mut ctx,
+            "d_osc",
+            "cntl_array",
+            "freq_array",
+            sanitize_d_osc_frequency,
+        )
+        .expect("updated control table loads");
+        assert!(
+            !Arc::ptr_eq(&first, &updated),
+            "changed digital oscillator table parameters must refresh the parsed table"
+        );
+        assert_eq!(updated[1].value, 3.0e6);
     }
 
     fn nco_context_for_bits(bits: [DigitalValue; 7]) -> CmContext {
@@ -782,7 +956,7 @@ mod tests {
         ctx.set_real_vector_param("freq_array", vec![1.0e9, 1.0e-16]);
         ctx.set_input_analog("cntl_in", 2.0);
 
-        let period = d_osc_period(&ctx).expect("negative high-side extrapolation is finite");
+        let period = d_osc_period(&mut ctx).expect("negative high-side extrapolation is finite");
 
         assert!(
             (period + 1.0e-9).abs() < 1.0e-18,
