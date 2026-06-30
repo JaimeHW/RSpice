@@ -388,6 +388,9 @@ impl FunctionCompiler {
                 NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
                 NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
                 NativeOp::IntegerBinary(op) => self.emit_integer_binary(op)?,
+                NativeOp::IntegerShiftConst(op, count) => {
+                    self.emit_integer_shift_const(op, count)?
+                }
                 NativeOp::TableLookup(table_id) => {
                     self.emit_table_helper_call(table_id, rspice_table_lookup_native)?
                 }
@@ -1429,6 +1432,27 @@ impl FunctionCompiler {
         self.patch_rel32_to_current(too_large_count)?;
         self.emit_integer_shift_count_error_return();
         self.patch_rel32_to_current(valid_count_done)?;
+        Ok(())
+    }
+
+    fn emit_integer_shift_const(&mut self, op: IntegerBinaryOp, count: u8) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "constant integer shift requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.emit_rust_f64_to_i64(target, Gpr::R11)?;
+        match op {
+            IntegerBinaryOp::Shl => self.encoder.shl_r64_imm8(Gpr::R11, count),
+            IntegerBinaryOp::Shr => self.encoder.sar_r64_imm8(Gpr::R11, count),
+            IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
+                unreachable!("constant integer shifts only accept shl/shr")
+            }
+        }
+        self.encoder.cvtsi2sd_xmm_r64(target, Gpr::R11);
         Ok(())
     }
 
@@ -3349,6 +3373,7 @@ fn native_op_reads_entry_args(op: NativeOp) -> bool {
             | NativeOp::UnaryMath(_)
             | NativeOp::BinaryMath(_)
             | NativeOp::IntegerBinary(_)
+            | NativeOp::IntegerShiftConst(_, _)
             | NativeOp::WhiteNoise
             | NativeOp::FlickerNoise
     )
@@ -3399,6 +3424,7 @@ fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
                 | NativeOp::ExtremumConst(_, _)
                 | NativeOp::UnaryMath(UnaryMathOp::Floor | UnaryMathOp::Ceil)
                 | NativeOp::IntegerBinary(_)
+                | NativeOp::IntegerShiftConst(_, _)
                 | NativeOp::WhiteNoise
                 | NativeOp::FlickerNoise
         ),
@@ -7931,6 +7957,82 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_computes_constant_rhs_shifts_without_count_checks() {
+        let cases = [
+            (
+                "shl",
+                Instruction::Shl,
+                IntegerBinaryOp::Shl,
+                3.0,
+                2.0,
+                runtime_shl(3.0, 2.0),
+                shift_imm_bytes(IntegerBinaryOp::Shl, Gpr::R11, 2),
+            ),
+            (
+                "shr-negative",
+                Instruction::Shr,
+                IntegerBinaryOp::Shr,
+                -16.0,
+                2.75,
+                runtime_shr(-16.0, 2.75),
+                shift_imm_bytes(IntegerBinaryOp::Shr, Gpr::R11, 2),
+            ),
+        ];
+
+        for (name, instruction, expected_op, left, right, integer_expected, shift_bytes) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushParam(0),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+                0,
+            );
+            assert_eq!(
+                program.ops(),
+                &[
+                    NativeOp::LoadParam(0),
+                    NativeOp::IntegerShiftConst(expected_op, right as i64 as u8),
+                ],
+                "{name}: valid constant count should lower to an immediate shift"
+            );
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{name}: immediate shift should not allocate an RHS stack slot"
+            );
+
+            let bytes = compile_value_function(&program).expect("compile constant shift leaf");
+            assert!(
+                contains_bytes(&bytes, &shift_bytes),
+                "{name}: generated code should use an imm8 shift"
+            );
+            assert!(
+                !contains_bytes(&bytes, &cmp_r64_imm32_bytes(Gpr::Rcx, 64)),
+                "{name}: constant count shifts should not emit runtime count bounds checks"
+            );
+            assert!(
+                !contains_bytes(&bytes, &xor_r64_bytes(Gpr::Rcx, Gpr::Rcx)),
+                "{name}: constant count shifts should not convert an RHS count through RCX"
+            );
+
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate constant shift leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let params = [left];
+            let ctx = eval_context(&params, &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                integer_expected.to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_computes_runtime_shifts_without_helper_call() {
         let cases = [
             ("shl", Instruction::Shl, 3.0, 2.0, runtime_shl(3.0, 2.0)),
@@ -9787,6 +9889,18 @@ mod tests {
     fn cmp_r64_imm32_bytes(register: Gpr, value: i32) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.cmp_r64_imm32(register, value);
+        encoder.into_bytes()
+    }
+
+    fn shift_imm_bytes(op: IntegerBinaryOp, register: Gpr, count: u8) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        match op {
+            IntegerBinaryOp::Shl => encoder.shl_r64_imm8(register, count),
+            IntegerBinaryOp::Shr => encoder.sar_r64_imm8(register, count),
+            IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
+                unreachable!("shift byte helper only accepts shl/shr")
+            }
+        }
         encoder.into_bytes()
     }
 
