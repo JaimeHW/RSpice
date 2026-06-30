@@ -86,6 +86,47 @@ struct CoupledMicrostripPropagation {
 }
 
 #[inline]
+fn port_eq(output_port: &str, expected: &str) -> bool {
+    output_port.eq_ignore_ascii_case(expected)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputPortKey {
+    In,
+    Out,
+    Port1,
+    Port2,
+    P1,
+    P2,
+    P3,
+    P4,
+    Other,
+}
+
+#[inline]
+fn output_port_key(output_port: &str) -> OutputPortKey {
+    if port_eq(output_port, "in") {
+        OutputPortKey::In
+    } else if port_eq(output_port, "out") {
+        OutputPortKey::Out
+    } else if port_eq(output_port, "port1") {
+        OutputPortKey::Port1
+    } else if port_eq(output_port, "port2") {
+        OutputPortKey::Port2
+    } else if port_eq(output_port, "p1") {
+        OutputPortKey::P1
+    } else if port_eq(output_port, "p2") {
+        OutputPortKey::P2
+    } else if port_eq(output_port, "p3") {
+        OutputPortKey::P3
+    } else if port_eq(output_port, "p4") {
+        OutputPortKey::P4
+    } else {
+        OutputPortKey::Other
+    }
+}
+
+#[inline]
 fn sqr(x: Value) -> Value {
     x * x
 }
@@ -1646,15 +1687,15 @@ impl CodeModel for GenericTransmissionLine {
         if missing_delayed_sample {
             return Vec::new();
         }
-        match output_port.to_ascii_lowercase().as_str() {
-            "in" if delayed => vec![("in".to_string(), impedance)],
-            "out" if delayed => vec![("out".to_string(), impedance)],
-            "in" => vec![
+        match output_port_key(output_port) {
+            OutputPortKey::In if delayed => vec![("in".to_string(), impedance)],
+            OutputPortKey::Out if delayed => vec![("out".to_string(), impedance)],
+            OutputPortKey::In => vec![
                 ("V2sens".to_string(), 1.0),
                 ("out".to_string(), impedance),
                 ("in".to_string(), impedance),
             ],
-            "out" => vec![
+            OutputPortKey::Out => vec![
                 ("V1sens".to_string(), 1.0),
                 ("in".to_string(), impedance),
                 ("out".to_string(), impedance),
@@ -1672,9 +1713,9 @@ impl CodeModel for GenericTransmissionLine {
         let Ok((z11, z21)) = tline_ac_impedances(ctx, frequency) else {
             return Vec::new();
         };
-        match output_port.to_ascii_lowercase().as_str() {
-            "in" => vec![("in".to_string(), z11), ("out".to_string(), z21)],
-            "out" => vec![("out".to_string(), z11), ("in".to_string(), z21)],
+        match output_port_key(output_port) {
+            OutputPortKey::In => vec![("in".to_string(), z11), ("out".to_string(), z21)],
+            OutputPortKey::Out => vec![("out".to_string(), z11), ("in".to_string(), z21)],
             _ => Vec::new(),
         }
     }
@@ -1746,15 +1787,15 @@ impl CodeModel for MicrostripLine {
         if missing_delayed_sample {
             return Vec::new();
         }
-        match output_port.to_ascii_lowercase().as_str() {
-            "port1" if delayed => vec![("port1".to_string(), propagation.zl)],
-            "port2" if delayed => vec![("port2".to_string(), propagation.zl)],
-            "port1" => vec![
+        match output_port_key(output_port) {
+            OutputPortKey::Port1 if delayed => vec![("port1".to_string(), propagation.zl)],
+            OutputPortKey::Port2 if delayed => vec![("port2".to_string(), propagation.zl)],
+            OutputPortKey::Port1 => vec![
                 ("V2sens".to_string(), 1.0),
                 ("port2".to_string(), propagation.zl),
                 ("port1".to_string(), propagation.zl),
             ],
-            "port2" => vec![
+            OutputPortKey::Port2 => vec![
                 ("V1sens".to_string(), 1.0),
                 ("port1".to_string(), propagation.zl),
                 ("port2".to_string(), propagation.zl),
@@ -1772,9 +1813,9 @@ impl CodeModel for MicrostripLine {
         let Ok((z11, z21)) = mlin_ac_impedances(ctx, frequency) else {
             return Vec::new();
         };
-        match output_port.to_ascii_lowercase().as_str() {
-            "port1" => vec![("port1".to_string(), z11), ("port2".to_string(), z21)],
-            "port2" => vec![("port2".to_string(), z11), ("port1".to_string(), z21)],
+        match output_port_key(output_port) {
+            OutputPortKey::Port1 => vec![("port1".to_string(), z11), ("port2".to_string(), z21)],
+            OutputPortKey::Port2 => vec![("port2".to_string(), z11), ("port1".to_string(), z21)],
             _ => Vec::new(),
         }
     }
@@ -1855,11 +1896,11 @@ impl CodeModel for CoupledTransmissionLine {
             };
             let zsum = 0.5 * (ze + zo);
             let zdiff = 0.5 * (ze - zo);
-            return match output_port.to_ascii_lowercase().as_str() {
-                "p1" => vec![("p1".to_string(), zsum), ("p4".to_string(), zdiff)],
-                "p2" => vec![("p2".to_string(), zsum), ("p3".to_string(), zdiff)],
-                "p3" => vec![("p2".to_string(), zdiff), ("p3".to_string(), zsum)],
-                "p4" => vec![("p1".to_string(), zdiff), ("p4".to_string(), zsum)],
+            return match output_port_key(output_port) {
+                OutputPortKey::P1 => vec![("p1".to_string(), zsum), ("p4".to_string(), zdiff)],
+                OutputPortKey::P2 => vec![("p2".to_string(), zsum), ("p3".to_string(), zdiff)],
+                OutputPortKey::P3 => vec![("p2".to_string(), zdiff), ("p3".to_string(), zsum)],
+                OutputPortKey::P4 => vec![("p1".to_string(), zdiff), ("p4".to_string(), zsum)],
                 _ => Vec::new(),
             };
         }
@@ -1868,23 +1909,23 @@ impl CodeModel for CoupledTransmissionLine {
             return Vec::new();
         }
 
-        match output_port.to_ascii_lowercase().as_str() {
-            "p1" => vec![
+        match output_port_key(output_port) {
+            OutputPortKey::P1 => vec![
                 ("p2s".to_string(), 1.0),
                 ("p2".to_string(), z),
                 ("p1".to_string(), z),
             ],
-            "p2" => vec![
+            OutputPortKey::P2 => vec![
                 ("p1s".to_string(), 1.0),
                 ("p1".to_string(), z),
                 ("p2".to_string(), z),
             ],
-            "p3" => vec![
+            OutputPortKey::P3 => vec![
                 ("p4s".to_string(), 1.0),
                 ("p4".to_string(), z),
                 ("p3".to_string(), z),
             ],
-            "p4" => vec![
+            OutputPortKey::P4 => vec![
                 ("p3s".to_string(), 1.0),
                 ("p3".to_string(), z),
                 ("p4".to_string(), z),
@@ -1902,26 +1943,26 @@ impl CodeModel for CoupledTransmissionLine {
         let Ok((z11, z12, z13, z14)) = cpline_ac_impedances(ctx, frequency) else {
             return Vec::new();
         };
-        match output_port.to_ascii_lowercase().as_str() {
-            "p1" => vec![
+        match output_port_key(output_port) {
+            OutputPortKey::P1 => vec![
                 ("p1".to_string(), z11),
                 ("p2".to_string(), z12),
                 ("p3".to_string(), z13),
                 ("p4".to_string(), z14),
             ],
-            "p2" => vec![
+            OutputPortKey::P2 => vec![
                 ("p1".to_string(), z12),
                 ("p2".to_string(), z11),
                 ("p3".to_string(), z14),
                 ("p4".to_string(), z13),
             ],
-            "p3" => vec![
+            OutputPortKey::P3 => vec![
                 ("p1".to_string(), z13),
                 ("p2".to_string(), z14),
                 ("p3".to_string(), z11),
                 ("p4".to_string(), z12),
             ],
-            "p4" => vec![
+            OutputPortKey::P4 => vec![
                 ("p1".to_string(), z14),
                 ("p2".to_string(), z13),
                 ("p3".to_string(), z12),
@@ -2000,11 +2041,11 @@ impl CodeModel for CoupledMicrostripLine {
         if cpmlin_has_delayed_sample(ctx) {
             let zsum = 0.5 * (propagation.ze + propagation.zo);
             let zdiff = 0.5 * (propagation.ze - propagation.zo);
-            return match output_port.to_ascii_lowercase().as_str() {
-                "p1" => vec![("p1".to_string(), zsum), ("p4".to_string(), zdiff)],
-                "p2" => vec![("p2".to_string(), zsum), ("p3".to_string(), zdiff)],
-                "p3" => vec![("p2".to_string(), zdiff), ("p3".to_string(), zsum)],
-                "p4" => vec![("p1".to_string(), zdiff), ("p4".to_string(), zsum)],
+            return match output_port_key(output_port) {
+                OutputPortKey::P1 => vec![("p1".to_string(), zsum), ("p4".to_string(), zdiff)],
+                OutputPortKey::P2 => vec![("p2".to_string(), zsum), ("p3".to_string(), zdiff)],
+                OutputPortKey::P3 => vec![("p2".to_string(), zdiff), ("p3".to_string(), zsum)],
+                OutputPortKey::P4 => vec![("p1".to_string(), zdiff), ("p4".to_string(), zsum)],
                 _ => Vec::new(),
             };
         }
@@ -2018,23 +2059,23 @@ impl CodeModel for CoupledMicrostripLine {
         }
 
         let z = (propagation.ze * propagation.zo).sqrt();
-        match output_port.to_ascii_lowercase().as_str() {
-            "p1" => vec![
+        match output_port_key(output_port) {
+            OutputPortKey::P1 => vec![
                 ("p2s".to_string(), 1.0),
                 ("p2".to_string(), z),
                 ("p1".to_string(), z),
             ],
-            "p2" => vec![
+            OutputPortKey::P2 => vec![
                 ("p1s".to_string(), 1.0),
                 ("p1".to_string(), z),
                 ("p2".to_string(), z),
             ],
-            "p3" => vec![
+            OutputPortKey::P3 => vec![
                 ("p4s".to_string(), 1.0),
                 ("p4".to_string(), z),
                 ("p3".to_string(), z),
             ],
-            "p4" => vec![
+            OutputPortKey::P4 => vec![
                 ("p3s".to_string(), 1.0),
                 ("p3".to_string(), z),
                 ("p4".to_string(), z),
@@ -2052,26 +2093,26 @@ impl CodeModel for CoupledMicrostripLine {
         let Ok((z11, z12, z13, z14)) = cpmlin_ac_impedances(ctx, frequency) else {
             return Vec::new();
         };
-        match output_port.to_ascii_lowercase().as_str() {
-            "p1" => vec![
+        match output_port_key(output_port) {
+            OutputPortKey::P1 => vec![
                 ("p1".to_string(), z11),
                 ("p2".to_string(), z12),
                 ("p3".to_string(), z13),
                 ("p4".to_string(), z14),
             ],
-            "p2" => vec![
+            OutputPortKey::P2 => vec![
                 ("p1".to_string(), z12),
                 ("p2".to_string(), z11),
                 ("p3".to_string(), z14),
                 ("p4".to_string(), z13),
             ],
-            "p3" => vec![
+            OutputPortKey::P3 => vec![
                 ("p1".to_string(), z13),
                 ("p2".to_string(), z14),
                 ("p3".to_string(), z11),
                 ("p4".to_string(), z12),
             ],
-            "p4" => vec![
+            OutputPortKey::P4 => vec![
                 ("p1".to_string(), z14),
                 ("p2".to_string(), z13),
                 ("p3".to_string(), z12),
