@@ -6,7 +6,7 @@ use crate::vm::terminal_pair_current_endpoints;
 type AssignmentEntry = unsafe extern "C" fn(*const EvalContext, *mut f64);
 type ValueEntry = unsafe extern "C" fn(*const EvalContext, *const f64) -> f64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct CodeOffset(usize);
 
 impl CodeOffset {
@@ -18,6 +18,40 @@ impl CodeOffset {
     #[allow(dead_code)]
     pub(crate) fn as_usize(self) -> usize {
         self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NativeEntryStarts {
+    starts: Vec<CodeOffset>,
+}
+
+impl NativeEntryStarts {
+    pub(crate) fn new(mut starts: Vec<CodeOffset>) -> Self {
+        starts.sort_unstable();
+        starts.dedup();
+        Self { starts }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_entries(entries: &NativeEntryOffsets) -> Self {
+        let mut starts = vec![entries.assignment];
+        starts.extend(entries.parameter_defaults.iter().flatten().copied());
+        starts.extend(entries.static_conditions.iter().flatten().copied());
+        starts.extend(entries.stamp_values.iter().copied());
+        starts.extend(entries.jacobians.iter().flatten().copied());
+        starts.extend(entries.reactive_jacobians.iter().flatten().copied());
+        starts.extend(entries.noise_psd.iter().copied());
+        starts.extend(entries.noise_exponents.iter().flatten().copied());
+        Self::new(starts)
+    }
+
+    fn contains(&self, offset: CodeOffset) -> bool {
+        self.starts.binary_search(&offset).is_ok()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = CodeOffset> + '_ {
+        self.starts.iter().copied()
     }
 }
 
@@ -214,7 +248,7 @@ unsafe impl Send for NativeModel {}
 unsafe impl Sync for NativeModel {}
 
 impl NativeModel {
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn from_executable_image(
         num_variables: usize,
         num_parameters: usize,
@@ -222,6 +256,7 @@ impl NativeModel {
         entries: NativeEntryOffsets,
     ) -> JitResult<Self> {
         let current_dependencies = Self::empty_current_dependencies(&entries);
+        let entry_starts = NativeEntryStarts::from_entries(&entries);
         Self::from_executable_image_with_dependencies(
             0,
             0,
@@ -230,6 +265,7 @@ impl NativeModel {
             0,
             image,
             entries,
+            entry_starts,
             current_dependencies,
             NativeRequiredStorage::default(),
         )
@@ -243,10 +279,11 @@ impl NativeModel {
         num_branch_unknowns: usize,
         image: ExecutableMemory,
         entries: NativeEntryOffsets,
+        entry_starts: NativeEntryStarts,
         current_dependencies: NativeCurrentDependencies,
         required_storage: NativeRequiredStorage,
     ) -> JitResult<Self> {
-        Self::validate_entry_offsets(&entries, image.len(), num_parameters)?;
+        Self::validate_entry_offsets(&entries, &entry_starts, image.len(), num_parameters)?;
         Self::validate_current_dependencies(
             &entries,
             &current_dependencies,
@@ -342,6 +379,7 @@ impl NativeModel {
         };
 
         let current_dependencies = Self::empty_current_dependencies(&entries);
+        let entry_starts = NativeEntryStarts::from_entries(&entries);
         Self::from_executable_image_with_dependencies(
             num_terminals,
             num_internal_nodes,
@@ -350,6 +388,7 @@ impl NativeModel {
             0,
             image,
             entries,
+            entry_starts,
             current_dependencies,
             NativeRequiredStorage::default(),
         )
@@ -359,6 +398,7 @@ impl NativeModel {
     #[allow(dead_code)]
     fn validate_entry_offsets(
         entries: &NativeEntryOffsets,
+        entry_starts: &NativeEntryStarts,
         image_len: usize,
         num_parameters: usize,
     ) -> JitResult<()> {
@@ -398,37 +438,41 @@ impl NativeModel {
             });
         }
 
-        Self::validate_entry_offset(entries.assignment, image_len)?;
+        for offset in entry_starts.iter() {
+            Self::validate_entry_start(offset, image_len)?;
+        }
+
+        Self::validate_entry_offset(entries.assignment, entry_starts, image_len)?;
         for offset in entries.parameter_defaults.iter().flatten() {
-            Self::validate_entry_offset(*offset, image_len)?;
+            Self::validate_entry_offset(*offset, entry_starts, image_len)?;
         }
         for offset in entries.static_conditions.iter().flatten() {
-            Self::validate_entry_offset(*offset, image_len)?;
+            Self::validate_entry_offset(*offset, entry_starts, image_len)?;
         }
         for offset in &entries.stamp_values {
-            Self::validate_entry_offset(*offset, image_len)?;
+            Self::validate_entry_offset(*offset, entry_starts, image_len)?;
         }
         for stamp_entries in &entries.jacobians {
             for offset in stamp_entries {
-                Self::validate_entry_offset(*offset, image_len)?;
+                Self::validate_entry_offset(*offset, entry_starts, image_len)?;
             }
         }
         for stamp_entries in &entries.reactive_jacobians {
             for offset in stamp_entries {
-                Self::validate_entry_offset(*offset, image_len)?;
+                Self::validate_entry_offset(*offset, entry_starts, image_len)?;
             }
         }
         for offset in &entries.noise_psd {
-            Self::validate_entry_offset(*offset, image_len)?;
+            Self::validate_entry_offset(*offset, entry_starts, image_len)?;
         }
         for offset in entries.noise_exponents.iter().flatten() {
-            Self::validate_entry_offset(*offset, image_len)?;
+            Self::validate_entry_offset(*offset, entry_starts, image_len)?;
         }
         Ok(())
     }
 
     #[allow(dead_code)]
-    fn validate_entry_offset(offset: CodeOffset, image_len: usize) -> JitResult<()> {
+    fn validate_entry_start(offset: CodeOffset, image_len: usize) -> JitResult<()> {
         if offset.0 >= image_len {
             return Err(JitError::ExecutableMemory {
                 detail: format!(
@@ -441,6 +485,26 @@ impl NativeModel {
         Ok(())
     }
 
+    #[allow(dead_code)]
+    fn validate_entry_offset(
+        offset: CodeOffset,
+        entry_starts: &NativeEntryStarts,
+        image_len: usize,
+    ) -> JitResult<()> {
+        Self::validate_entry_start(offset, image_len)?;
+        if !entry_starts.contains(offset) {
+            return Err(JitError::ExecutableMemory {
+                detail: format!(
+                    "entry offset {} was not recorded as a native function start; no interpreter fallback",
+                    offset.0
+                )
+                .into(),
+            });
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
     fn empty_current_dependencies(entries: &NativeEntryOffsets) -> NativeCurrentDependencies {
         NativeCurrentDependencies {
             assignment_current_pairs: Vec::new(),
@@ -1109,8 +1173,8 @@ fn append_test_value_stub(bytes: &mut Vec<u8>, value: u32) -> CodeOffset {
 mod tests {
     use super::super::runtime::ExecutableMemory;
     use super::{
-        CodeOffset, EvalContext, NativeEntryOffsets, NativeModel, NativeRequiredStorage,
-        append_test_value_stub,
+        CodeOffset, EvalContext, NativeEntryOffsets, NativeEntryStarts, NativeModel,
+        NativeRequiredStorage, append_test_value_stub,
     };
     use std::sync::{Arc, Barrier};
 
@@ -1269,6 +1333,44 @@ mod tests {
     }
 
     #[test]
+    fn native_model_rejects_entry_offsets_not_recorded_as_function_starts() {
+        let image =
+            ExecutableMemory::allocate(&[0xC3, 0x90, 0xC3]).expect("allocate native test image");
+        let entries = NativeEntryOffsets {
+            assignment: CodeOffset::new(0),
+            parameter_defaults: vec![],
+            static_conditions: vec![None],
+            stamp_values: vec![CodeOffset::new(1)],
+            jacobians: vec![vec![]],
+            reactive_jacobians: vec![vec![]],
+            noise_psd: vec![],
+            noise_exponents: vec![],
+        };
+        let dependencies = NativeModel::empty_current_dependencies(&entries);
+
+        let error = NativeModel::from_executable_image_with_dependencies(
+            0,
+            0,
+            0,
+            0,
+            0,
+            image,
+            entries,
+            NativeEntryStarts::new(vec![CodeOffset::new(0)]),
+            dependencies,
+            NativeRequiredStorage::default(),
+        )
+        .expect_err("entry inside image but outside recorded function starts must be rejected");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("not recorded as a native function start"),
+            "{message}"
+        );
+        assert!(message.contains("no interpreter fallback"), "{message}");
+    }
+
+    #[test]
     fn native_model_rejects_parameter_default_shape_mismatch() {
         let image = ExecutableMemory::allocate(&[0xC3]).expect("allocate native test image");
         let error = NativeModel::from_executable_image(
@@ -1355,6 +1457,7 @@ mod tests {
             noise_psd: vec![],
             noise_exponents: vec![],
         };
+        let entry_starts = NativeEntryStarts::from_entries(&entries);
         let mut dependencies = NativeModel::empty_current_dependencies(&entries);
         dependencies.stamp_values[0].push(3);
 
@@ -1366,6 +1469,7 @@ mod tests {
             0,
             image,
             entries,
+            entry_starts,
             dependencies,
             NativeRequiredStorage::default(),
         )
@@ -1395,6 +1499,7 @@ mod tests {
             noise_psd: vec![],
             noise_exponents: vec![],
         };
+        let entry_starts = NativeEntryStarts::from_entries(&entries);
         let mut dependencies = NativeModel::empty_current_dependencies(&entries);
         dependencies.stamp_value_prior_currents[0].push(1);
 
@@ -1406,6 +1511,7 @@ mod tests {
             0,
             image,
             entries,
+            entry_starts,
             dependencies,
             NativeRequiredStorage::default(),
         )
@@ -1438,6 +1544,7 @@ mod tests {
             noise_psd: vec![],
             noise_exponents: vec![],
         };
+        let entry_starts = NativeEntryStarts::from_entries(&entries);
         let mut dependencies = NativeModel::empty_current_dependencies(&entries);
         dependencies.stamp_value_branch_unknowns[0].push(1);
 
@@ -1449,6 +1556,7 @@ mod tests {
             1,
             image,
             entries,
+            entry_starts,
             dependencies,
             NativeRequiredStorage::default(),
         )
