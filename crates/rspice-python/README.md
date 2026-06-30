@@ -118,10 +118,6 @@ matching TRAN, DC, AC, and NOISE `.MEAS` statements after it executes the deck.
 Standalone `Engine.measure(...)` is intentionally narrower today: it accepts
 `TransientResult` and `DcSweepResult` only.
 
-A complete pytest-based circuit CI example lives in
-[examples/analog_ci/](examples/analog_ci/) and is run by this repository's
-Python workflow.
-
 Supported `.MEAS` forms: `MAX`, `MIN`, `AVG`, `RMS`, `PP`, `INTEG`
 (`FROM=`/`TO=` windows), `FIND ... AT=` / `FIND ... WHEN ...` (including
 `FIND TIME WHEN ...`), and `TRIG ... TARG ...` delay measurements. Signals

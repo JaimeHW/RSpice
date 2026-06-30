@@ -113,18 +113,6 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("runs-on: macos-latest", workflow)
         self.assertIn("cargo check -p rspice-cli -p rspice-ui", workflow)
 
-    def test_python_workflow_runs_when_examples_change(self) -> None:
-        workflow = read_text(".github/workflows/python.yml")
-
-        self.assertIn('- "crates/rspice-python/examples/**"', workflow)
-        self.assertEqual(
-            workflow.count('- "crates/rspice-python/examples/**"'),
-            2,
-            "python workflow must include the rspice-python examples path for push and pull_request filters",
-        )
-        self.assertIn("working-directory: crates/rspice-python", workflow)
-        self.assertIn("python -m pytest examples/analog_ci -v --tb=short", workflow)
-
     def test_platform_support_matrix_documents_evidence_and_mobile_limits(self) -> None:
         matrix = read_text("docs/platform-support.md")
 
