@@ -901,8 +901,8 @@ impl CodeModel for DigitalStateMachine {
                 }
             }
         } else if reset_state_code != 1 && clk_state != prev_clk && clk_state == 1 {
-            let inputs = ctx.input_digital_vector("in");
-            if let Some(next_state) = d_state_next(&table, current_state, &inputs) {
+            let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
+            if let Some(next_state) = d_state_next(&table, current_state, inputs) {
                 current_state = next_state;
                 if let Some(outputs) = d_state_outputs(&table, current_state) {
                     ctx.set_output_digital_vector("out", outputs, clk_delay);

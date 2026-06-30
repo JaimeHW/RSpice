@@ -62,10 +62,10 @@ fn d_cosim_inout_port() -> PortSpec {
 }
 
 fn sized_digital_vector(ctx: &CmContext, name: &str, width: usize) -> Vec<DigitalValue> {
-    let mut values = ctx.input_digital_vector(name);
-    values.resize(width, DigitalValue::default());
-    values.truncate(width);
-    values
+    let values = ctx.input_digital_vector_values(name).unwrap_or(&[]);
+    (0..width)
+        .map(|index| values.get(index).copied().unwrap_or_default())
+        .collect()
 }
 
 fn event_is_new(event_time: Value, previous_time: Value) -> bool {
