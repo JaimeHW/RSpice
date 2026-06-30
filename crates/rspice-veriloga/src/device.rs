@@ -857,6 +857,27 @@ impl VerilogADevice {
         ))
     }
 
+    #[cfg(feature = "native")]
+    fn missing_native_parameter_storage(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT parameter storage has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_param_given_storage(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT parameter-given storage has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_variable_storage(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT variable storage has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
     #[cfg(not(feature = "native"))]
     fn refresh_static_conditions(&mut self) {
         let model = &self.model;
@@ -1368,6 +1389,8 @@ impl VerilogADevice {
             return Err(Self::missing_native_noise_exponent_entry(index));
         }
 
+        Self::validate_native_storage(vm.context, native)?;
+
         let current_pairs = match entry {
             NativeValueEntry::ParameterDefault(_) => &[],
             NativeValueEntry::StaticCondition(_) => &[],
@@ -1467,6 +1490,48 @@ impl VerilogADevice {
     }
 
     #[cfg(feature = "native")]
+    fn validate_native_storage(context: &VmContext, native: &NativeModel) -> Result<(), VmError> {
+        Self::validate_native_parameter_storage(context, native.num_parameters)?;
+        Self::validate_native_variable_storage(context, native.num_variables)
+    }
+
+    #[cfg(feature = "native")]
+    fn validate_native_parameter_storage(
+        context: &VmContext,
+        required: usize,
+    ) -> Result<(), VmError> {
+        if context.parameters.len() < required {
+            return Err(Self::missing_native_parameter_storage(
+                required,
+                context.parameters.len(),
+            ));
+        }
+        if context.param_given.len() < required {
+            return Err(Self::missing_native_param_given_storage(
+                required,
+                context.param_given.len(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "native")]
+    fn validate_native_variable_storage(
+        context: &VmContext,
+        required: usize,
+    ) -> Result<(), VmError> {
+        if context.variables.len() < required {
+            return Err(Self::missing_native_variable_storage(
+                required,
+                context.variables.len(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "native")]
     fn validate_native_prior_currents(
         context: &VmContext,
         prior_currents: &[usize],
@@ -1519,6 +1584,7 @@ impl VerilogADevice {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
+        Self::validate_native_parameter_storage(vm.context, native.num_parameters)?;
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_mut_ptr();
         clear_native_runtime_error();
@@ -2727,6 +2793,34 @@ endmodule
             .expect_err("missing branch-current storage must hard-fail in native mode");
 
         assert_native_hard_fail(err, "branch-current unknown 0");
+    }
+
+    #[test]
+    fn native_parameter_storage_preflight_errors_use_hard_fail_contract() {
+        let context = VmContext::with_internal_nodes(0, 0);
+        let err = VerilogADevice::validate_native_parameter_storage(&context, 1)
+            .expect_err("missing parameter storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "parameter storage");
+    }
+
+    #[test]
+    fn native_param_given_storage_preflight_errors_use_hard_fail_contract() {
+        let mut context = VmContext::with_internal_nodes(0, 0);
+        context.parameters.push(0.0);
+        let err = VerilogADevice::validate_native_parameter_storage(&context, 1)
+            .expect_err("missing parameter-given storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "parameter-given storage");
+    }
+
+    #[test]
+    fn native_variable_storage_preflight_errors_use_hard_fail_contract() {
+        let context = VmContext::with_internal_nodes(0, 0);
+        let err = VerilogADevice::validate_native_variable_storage(&context, 1)
+            .expect_err("missing variable storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "variable storage");
     }
 
     #[test]
