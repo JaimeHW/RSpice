@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 const BOUNDARY_DERIVATIVE_RAMP_FRACTION: Value = 0.125;
 const TABLE2D_RESOURCE: &str = "xspice.table2d.data";
 const TABLE3D_RESOURCE: &str = "xspice.table3d.data";
+const TABLE_EVAL_SCRATCH_RESOURCE: &str = "xspice.table.eval_scratch";
 
 #[derive(Debug, Default)]
 pub struct Table2D;
@@ -212,6 +213,18 @@ struct Table3DResource {
     file: String,
     virtual_stamp: Option<data_file::DataFileStamp>,
     table: Arc<Table3DData>,
+}
+
+#[derive(Debug, Default)]
+struct TableEvalScratch {
+    values_along_y: Vec<Value>,
+    dx_along_y: Vec<Value>,
+    x_scratch: Vec<Value>,
+    y_scratch: Vec<Value>,
+    values_over_zy: Vec<Value>,
+    dx_over_zy: Vec<Value>,
+    yz_x_scratch: Vec<Value>,
+    yz_y_scratch: Vec<Value>,
 }
 
 #[derive(Debug)]
@@ -632,8 +645,32 @@ fn table3d_resource(ctx: &CmContext, file: &str) -> Option<Arc<Table3DData>> {
         .then(|| Arc::clone(&resource.table))
 }
 
+fn ensure_table_eval_scratch(ctx: &mut CmContext) {
+    if ctx
+        .resource::<Mutex<TableEvalScratch>>(TABLE_EVAL_SCRATCH_RESOURCE)
+        .is_none()
+    {
+        ctx.set_resource(
+            TABLE_EVAL_SCRATCH_RESOURCE,
+            Arc::new(Mutex::new(TableEvalScratch::default())),
+        );
+    }
+}
+
+fn with_table_eval_scratch<R>(
+    ctx: &CmContext,
+    evaluate: impl FnOnce(&mut TableEvalScratch) -> R,
+) -> Option<R> {
+    let scratch = ctx.resource::<Mutex<TableEvalScratch>>(TABLE_EVAL_SCRATCH_RESOURCE)?;
+    let mut scratch = scratch
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    Some(evaluate(&mut scratch))
+}
+
 fn load_table2d_for_context(ctx: &mut CmContext, file: &str) -> CmResult<Arc<Table2DData>> {
     if let Some(table) = table2d_resource(ctx, file) {
+        ensure_table_eval_scratch(ctx);
         return Ok(table);
     }
 
@@ -646,11 +683,13 @@ fn load_table2d_for_context(ctx: &mut CmContext, file: &str) -> CmResult<Arc<Tab
             table: Arc::clone(&table),
         }),
     );
+    ensure_table_eval_scratch(ctx);
     Ok(table)
 }
 
 fn load_table3d_for_context(ctx: &mut CmContext, file: &str) -> CmResult<Arc<Table3DData>> {
     if let Some(table) = table3d_resource(ctx, file) {
+        ensure_table_eval_scratch(ctx);
         return Ok(table);
     }
 
@@ -663,6 +702,7 @@ fn load_table3d_for_context(ctx: &mut CmContext, file: &str) -> CmResult<Arc<Tab
             table: Arc::clone(&table),
         }),
     );
+    ensure_table_eval_scratch(ctx);
     Ok(table)
 }
 
@@ -952,14 +992,29 @@ fn table2d_eno_derivatives(
     x_axis: AxisEval,
     y_axis: AxisEval,
 ) -> Eno2dEval {
-    eno2d_eval_grid(
+    let mut scratch = TableEvalScratch::default();
+    table2d_eno_derivatives_with_scratch(table, order, x_axis, y_axis, &mut scratch)
+}
+
+fn table2d_eno_derivatives_with_scratch(
+    table: &Table2DData,
+    order: usize,
+    x_axis: AxisEval,
+    y_axis: AxisEval,
+    scratch: &mut TableEvalScratch,
+) -> Eno2dEval {
+    eno2d_eval_grid_with_scratch(
         table.y.len(),
-        |y| table2d_row(table, y),
+        &mut |y| table2d_row(table, y),
         order,
         x_axis.eno_index,
         y_axis.eno_index,
         x_axis.eno_offset,
         y_axis.eno_offset,
+        &mut scratch.values_along_y,
+        &mut scratch.dx_along_y,
+        &mut scratch.x_scratch,
+        &mut scratch.y_scratch,
     )
 }
 
@@ -970,15 +1025,28 @@ fn table3d_eno_derivatives(
     y_axis: AxisEval,
     z_axis: AxisEval,
 ) -> Eno3dEval {
+    let mut scratch = TableEvalScratch::default();
+    table3d_eno_derivatives_with_scratch(table, order, x_axis, y_axis, z_axis, &mut scratch)
+}
+
+fn table3d_eno_derivatives_with_scratch(
+    table: &Table3DData,
+    order: usize,
+    x_axis: AxisEval,
+    y_axis: AxisEval,
+    z_axis: AxisEval,
+    scratch: &mut TableEvalScratch,
+) -> Eno3dEval {
     let yz_window = 2 * order - 2;
     let y_window_start = eno_window_start(y_axis.eno_index, order, table.y.len());
     let z_window_start = eno_window_start(z_axis.eno_index, order, table.z.len());
     let y_local_index = y_axis.eno_index - y_window_start;
     let z_local_index = z_axis.eno_index - z_window_start;
 
-    let mut values_over_zy = Vec::with_capacity(yz_window * yz_window);
-    let mut dx_over_zy = Vec::with_capacity(yz_window * yz_window);
-    let mut x_scratch = Vec::new();
+    scratch.values_over_zy.clear();
+    scratch.dx_over_zy.clear();
+    scratch.values_over_zy.reserve(yz_window * yz_window);
+    scratch.dx_over_zy.reserve(yz_window * yz_window);
     for z in z_window_start..z_window_start + yz_window {
         for y in y_window_start..y_window_start + yz_window {
             let eval = eno1d_eval_with_scratch(
@@ -986,48 +1054,44 @@ fn table3d_eno_derivatives(
                 order,
                 x_axis.eno_index,
                 x_axis.eno_offset,
-                &mut x_scratch,
+                &mut scratch.x_scratch,
             );
-            values_over_zy.push(eval.value);
-            dx_over_zy.push(eval.derivative);
+            scratch.values_over_zy.push(eval.value);
+            scratch.dx_over_zy.push(eval.derivative);
         }
     }
 
-    let mut values_along_y = Vec::new();
-    let mut dx_along_y = Vec::new();
-    let mut yz_x_scratch = Vec::new();
-    let mut yz_y_scratch = Vec::new();
     let yz_eval = eno2d_eval_grid_with_scratch(
         yz_window,
         &mut |row| {
             let start = row * yz_window;
-            &values_over_zy[start..start + yz_window]
+            &scratch.values_over_zy[start..start + yz_window]
         },
         order,
         y_local_index,
         z_local_index,
         y_axis.eno_offset,
         z_axis.eno_offset,
-        &mut values_along_y,
-        &mut dx_along_y,
-        &mut yz_x_scratch,
-        &mut yz_y_scratch,
+        &mut scratch.values_along_y,
+        &mut scratch.dx_along_y,
+        &mut scratch.yz_x_scratch,
+        &mut scratch.yz_y_scratch,
     );
     let dx_eval = eno2d_eval_grid_with_scratch(
         yz_window,
         &mut |row| {
             let start = row * yz_window;
-            &dx_over_zy[start..start + yz_window]
+            &scratch.dx_over_zy[start..start + yz_window]
         },
         order,
         y_local_index,
         z_local_index,
         y_axis.eno_offset,
         z_axis.eno_offset,
-        &mut values_along_y,
-        &mut dx_along_y,
-        &mut yz_x_scratch,
-        &mut yz_y_scratch,
+        &mut scratch.values_along_y,
+        &mut scratch.dx_along_y,
+        &mut scratch.yz_x_scratch,
+        &mut scratch.yz_y_scratch,
     );
 
     Eno3dEval {
@@ -1038,6 +1102,17 @@ fn table3d_eno_derivatives(
 }
 
 fn evaluate_table2d_data(table: &Table2DData, order: usize, x: Value, y: Value) -> TableEval2D {
+    let mut scratch = TableEvalScratch::default();
+    evaluate_table2d_data_with_scratch(table, order, x, y, &mut scratch)
+}
+
+fn evaluate_table2d_data_with_scratch(
+    table: &Table2DData,
+    order: usize,
+    x: Value,
+    y: Value,
+    scratch: &mut TableEvalScratch,
+) -> TableEval2D {
     let x_axis = axis_eval(&table.x, x);
     let y_axis = axis_eval(&table.y, y);
     let x0 = x_axis.lower;
@@ -1059,7 +1134,7 @@ fn evaluate_table2d_data(table: &Table2DData, order: usize, x: Value, y: Value) 
         + one_minus_tx * ty * v01
         + tx * ty * v11;
 
-    let derivatives = table2d_eno_derivatives(table, order, x_axis, y_axis);
+    let derivatives = table2d_eno_derivatives_with_scratch(table, order, x_axis, y_axis, scratch);
     let dx = derivatives.dx / x_axis.local_diff * x_axis.derivative_scale;
     let dy = derivatives.dy / y_axis.local_diff * y_axis.derivative_scale;
 
@@ -1072,6 +1147,18 @@ fn evaluate_table3d_data(
     x: Value,
     y: Value,
     z: Value,
+) -> TableEval3D {
+    let mut scratch = TableEvalScratch::default();
+    evaluate_table3d_data_with_scratch(table, order, x, y, z, &mut scratch)
+}
+
+fn evaluate_table3d_data_with_scratch(
+    table: &Table3DData,
+    order: usize,
+    x: Value,
+    y: Value,
+    z: Value,
+    scratch: &mut TableEvalScratch,
 ) -> TableEval3D {
     let x_axis = axis_eval(&table.x, x);
     let y_axis = axis_eval(&table.y, y);
@@ -1102,7 +1189,8 @@ fn evaluate_table3d_data(
         }
     }
 
-    let derivatives = table3d_eno_derivatives(table, order, x_axis, y_axis, z_axis);
+    let derivatives =
+        table3d_eno_derivatives_with_scratch(table, order, x_axis, y_axis, z_axis, scratch);
 
     TableEval3D {
         value,
@@ -1123,7 +1211,12 @@ fn scaled_table2d_eval(ctx: &CmContext) -> CmResult<TableEval2D> {
     let table = load_table2d_from_context(ctx, file)?;
     let order = table_order(ctx)?;
     validate_table2d_order(&table, order)?;
-    let raw = evaluate_table2d_data(&table, order, ctx.input("inx"), ctx.input("iny"));
+    let inx = ctx.input("inx");
+    let iny = ctx.input("iny");
+    let raw = with_table_eval_scratch(ctx, |scratch| {
+        evaluate_table2d_data_with_scratch(&table, order, inx, iny, scratch)
+    })
+    .unwrap_or_else(|| evaluate_table2d_data(&table, order, inx, iny));
     let gain = ctx.param("gain");
     Ok(TableEval2D {
         value: ctx.param("offset") + gain * raw.value,
@@ -1137,13 +1230,13 @@ fn scaled_table3d_eval(ctx: &CmContext) -> CmResult<TableEval3D> {
     let table = load_table3d_from_context(ctx, file)?;
     let order = table_order(ctx)?;
     validate_table3d_order(&table, order)?;
-    let raw = evaluate_table3d_data(
-        &table,
-        order,
-        ctx.input("inx"),
-        ctx.input("iny"),
-        ctx.input("inz"),
-    );
+    let inx = ctx.input("inx");
+    let iny = ctx.input("iny");
+    let inz = ctx.input("inz");
+    let raw = with_table_eval_scratch(ctx, |scratch| {
+        evaluate_table3d_data_with_scratch(&table, order, inx, iny, inz, scratch)
+    })
+    .unwrap_or_else(|| evaluate_table3d_data(&table, order, inx, iny, inz));
     let gain = ctx.param("gain");
     Ok(TableEval3D {
         value: ctx.param("offset") + gain * raw.value,
@@ -1423,6 +1516,105 @@ mod tests {
         assert_eq!(scratch.capacity(), capacity);
         assert_eq!(again.value, expected_again.value);
         assert_eq!(again.derivative, expected_again.derivative);
+    }
+
+    #[test]
+    fn table2d_eval_reused_scratch_matches_allocating_wrapper() {
+        let axis = vec![0.0, 1.0, 2.0, 3.0, 4.0];
+        let mut values = Vec::new();
+        for &y in &axis {
+            for &x in &axis {
+                values.push(x * x + 0.5 * y * y + x * y);
+            }
+        }
+        let table = Table2DData {
+            x: axis.clone(),
+            y: axis,
+            values,
+        };
+        let mut scratch = TableEvalScratch::default();
+
+        let fast = evaluate_table2d_data_with_scratch(&table, 3, 1.4, 2.2, &mut scratch);
+        let expected = evaluate_table2d_data(&table, 3, 1.4, 2.2);
+        assert_eq!(fast.value, expected.value);
+        assert_eq!(fast.dx, expected.dx);
+        assert_eq!(fast.dy, expected.dy);
+
+        let capacities = (
+            scratch.values_along_y.capacity(),
+            scratch.dx_along_y.capacity(),
+            scratch.x_scratch.capacity(),
+            scratch.y_scratch.capacity(),
+        );
+        let again = evaluate_table2d_data_with_scratch(&table, 3, 2.1, 1.6, &mut scratch);
+        let expected_again = evaluate_table2d_data(&table, 3, 2.1, 1.6);
+        assert_eq!(
+            (
+                scratch.values_along_y.capacity(),
+                scratch.dx_along_y.capacity(),
+                scratch.x_scratch.capacity(),
+                scratch.y_scratch.capacity(),
+            ),
+            capacities
+        );
+        assert_eq!(again.value, expected_again.value);
+        assert_eq!(again.dx, expected_again.dx);
+        assert_eq!(again.dy, expected_again.dy);
+    }
+
+    #[test]
+    fn table3d_eval_reused_scratch_matches_allocating_wrapper() {
+        let axis = vec![0.0, 1.0, 2.0, 3.0, 4.0];
+        let mut values = Vec::new();
+        for &z in &axis {
+            for &y in &axis {
+                for &x in &axis {
+                    values.push(x * x + 0.5 * y * y + 0.25 * z * z + x * y + y * z);
+                }
+            }
+        }
+        let table = Table3DData {
+            x: axis.clone(),
+            y: axis.clone(),
+            z: axis,
+            values,
+        };
+        let mut scratch = TableEvalScratch::default();
+
+        let fast = evaluate_table3d_data_with_scratch(&table, 3, 1.4, 2.2, 0.7, &mut scratch);
+        let expected = evaluate_table3d_data(&table, 3, 1.4, 2.2, 0.7);
+        assert_eq!(fast.value, expected.value);
+        assert_eq!(fast.dx, expected.dx);
+        assert_eq!(fast.dy, expected.dy);
+        assert_eq!(fast.dz, expected.dz);
+
+        let capacities = (
+            scratch.values_over_zy.capacity(),
+            scratch.dx_over_zy.capacity(),
+            scratch.values_along_y.capacity(),
+            scratch.dx_along_y.capacity(),
+            scratch.x_scratch.capacity(),
+            scratch.yz_x_scratch.capacity(),
+            scratch.yz_y_scratch.capacity(),
+        );
+        let again = evaluate_table3d_data_with_scratch(&table, 3, 2.1, 1.6, 3.2, &mut scratch);
+        let expected_again = evaluate_table3d_data(&table, 3, 2.1, 1.6, 3.2);
+        assert_eq!(
+            (
+                scratch.values_over_zy.capacity(),
+                scratch.dx_over_zy.capacity(),
+                scratch.values_along_y.capacity(),
+                scratch.dx_along_y.capacity(),
+                scratch.x_scratch.capacity(),
+                scratch.yz_x_scratch.capacity(),
+                scratch.yz_y_scratch.capacity(),
+            ),
+            capacities
+        );
+        assert_eq!(again.value, expected_again.value);
+        assert_eq!(again.dx, expected_again.dx);
+        assert_eq!(again.dy, expected_again.dy);
+        assert_eq!(again.dz, expected_again.dz);
     }
 
     #[test]
