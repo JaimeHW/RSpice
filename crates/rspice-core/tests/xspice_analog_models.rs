@@ -243,6 +243,125 @@ fn xspice_tline_transient_uses_delayed_remote_history_after_time_of_flight() {
 }
 
 #[test]
+fn xspice_cpline_ac_partials_match_official_even_odd_matrix() {
+    let model = rspice_core::xspice::models::CoupledTransmissionLine;
+    let mut ctx = CmContext::new();
+    ctx.set_param("l", 0.2);
+    ctx.set_param("ze", 80.0);
+    ctx.set_param("zo", 40.0);
+    ctx.set_param("ere", 2.25);
+    ctx.set_param("ero", 1.44);
+    ctx.set_param("ae", 1.5);
+    ctx.set_param("ao", 3.0);
+
+    let frequency = 1.0e9;
+    let omega = std::f64::consts::TAU * frequency;
+    let length = 0.2;
+    let arg_e = Complex64::new(
+        10.0_f64.powf(0.05 * 1.5).ln() * length / 2.0,
+        omega * length / 299_792_458.0 * 2.25_f64.sqrt(),
+    );
+    let arg_o = Complex64::new(
+        10.0_f64.powf(0.05 * 3.0).ln() * length / 2.0,
+        omega * length / 299_792_458.0 * 1.44_f64.sqrt(),
+    );
+    let ze = Complex64::new(80.0, 0.0);
+    let zo = Complex64::new(40.0, 0.0);
+    let z11 = zo / (arg_o.tanh() * 2.0) + ze / (arg_e.tanh() * 2.0);
+    let z12 = zo / (arg_o.sinh() * 2.0) + ze / (arg_e.sinh() * 2.0);
+    let z13 = ze / (arg_e.sinh() * 2.0) - zo / (arg_o.sinh() * 2.0);
+    let z14 = ze / (arg_e.tanh() * 2.0) - zo / (arg_o.tanh() * 2.0);
+
+    let p1 = model.output_input_ac_partials(&ctx, "p1", frequency);
+    let p3 = model.output_input_ac_partials(&ctx, "p3", frequency);
+
+    assert!((complex_partial(&p1, "p1", "cpline p1") - z11).norm() < 1.0e-9);
+    assert!((complex_partial(&p1, "p2", "cpline p1") - z12).norm() < 1.0e-9);
+    assert!((complex_partial(&p1, "p3", "cpline p1") - z13).norm() < 1.0e-9);
+    assert!((complex_partial(&p1, "p4", "cpline p1") - z14).norm() < 1.0e-9);
+    assert!((complex_partial(&p3, "p1", "cpline p3") - z13).norm() < 1.0e-9);
+    assert!((complex_partial(&p3, "p2", "cpline p3") - z14).norm() < 1.0e-9);
+    assert!((complex_partial(&p3, "p3", "cpline p3") - z11).norm() < 1.0e-9);
+    assert!((complex_partial(&p3, "p4", "cpline p3") - z12).norm() < 1.0e-9);
+}
+
+#[test]
+fn xspice_cpline_transient_uses_delayed_even_odd_modal_history() {
+    let model = rspice_core::xspice::models::CoupledTransmissionLine;
+    let mut ctx = CmContext::new();
+    let delay = 1.0e-9;
+    ctx.analysis = AnalysisType::Transient;
+    ctx.set_param("l", delay * 299_792_458.0);
+    ctx.set_param("ze", 80.0);
+    ctx.set_param("zo", 40.0);
+    ctx.set_param("ere", 1.0);
+    ctx.set_param("ero", 1.0);
+    ctx.set_param("ae", 0.0);
+    ctx.set_param("ao", 0.0);
+
+    ctx.time = 0.0;
+    for (name, value) in [
+        ("p1s", 1.0),
+        ("p2s", 2.0),
+        ("p3s", 3.0),
+        ("p4s", 4.0),
+        ("p1", 0.01),
+        ("p2", 0.02),
+        ("p3", 0.03),
+        ("p4", 0.04),
+    ] {
+        ctx.set_input_analog(name, value);
+    }
+    model.evaluate(&mut ctx).expect("cpline evaluates at t=0");
+    for port in ["p1", "p2", "p3", "p4"] {
+        assert_eq!(
+            ctx.output(port),
+            0.0,
+            "cpline transient branch is delayed before time of flight"
+        );
+    }
+
+    ctx.time = 0.5e-9;
+    for (name, value) in [
+        ("p1s", 4.0),
+        ("p2s", 8.0),
+        ("p3s", 10.0),
+        ("p4s", 2.0),
+        ("p1", 0.03),
+        ("p2", 0.04),
+        ("p3", 0.05),
+        ("p4", 0.02),
+    ] {
+        ctx.set_input_analog(name, value);
+    }
+    model
+        .evaluate(&mut ctx)
+        .expect("cpline records pre-flight history sample");
+
+    ctx.time = 1.5e-9;
+    for (name, value) in [
+        ("p1s", 20.0),
+        ("p2s", 30.0),
+        ("p3s", 40.0),
+        ("p4s", 50.0),
+        ("p1", 0.07),
+        ("p2", 0.11),
+        ("p3", 0.13),
+        ("p4", 0.17),
+    ] {
+        ctx.set_input_analog(name, value);
+    }
+    model
+        .evaluate(&mut ctx)
+        .expect("cpline evaluates delayed transient branch");
+
+    assert!((ctx.output("p1") - 19.0).abs() < 1.0e-12);
+    assert!((ctx.output("p2") - 15.4).abs() < 1.0e-12);
+    assert!((ctx.output("p3") - 13.8).abs() < 1.0e-12);
+    assert!((ctx.output("p4") - 25.4).abs() < 1.0e-12);
+}
+
+#[test]
 fn xspice_waveform_oscillators_accept_official_current_output_ports() {
     let registry = CodeModelRegistry::with_builtins();
 
