@@ -2204,6 +2204,7 @@ impl NativeProgram {
                 format!("final stack depth {depth}, expected 1"),
             ));
         }
+        validate_entry_ops(model.clone(), entry_kind, &ops)?;
         let optimized_max_stack_depth =
             compute_native_max_stack_depth(model.clone(), entry_kind, &ops)?;
         debug_assert!(optimized_max_stack_depth <= max_stack_depth);
@@ -2256,8 +2257,9 @@ impl NativeProgram {
                 format!("final stack depth {}, expected 1", lowerer.depth),
             ));
         }
+        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
         let optimized_max_stack_depth =
-            compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
+            compute_native_max_stack_depth(model.clone(), entry_kind, &lowerer.ops)?;
         debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
         let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
 
@@ -2317,8 +2319,9 @@ impl NativeProgram {
                 format!("final stack depth {}, expected 1", lowerer.depth),
             ));
         }
+        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
         let optimized_max_stack_depth =
-            compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
+            compute_native_max_stack_depth(model.clone(), entry_kind, &lowerer.ops)?;
         debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
         let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
 
@@ -2370,8 +2373,9 @@ impl NativeProgram {
                 format!("final stack depth {}, expected 1", lowerer.depth),
             ));
         }
+        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
         let optimized_max_stack_depth =
-            compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
+            compute_native_max_stack_depth(model.clone(), entry_kind, &lowerer.ops)?;
         debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
         let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
 
@@ -6244,6 +6248,138 @@ fn validate_entry_instruction(
     Ok(())
 }
 
+fn validate_entry_ops(model: SmolStr, entry_kind: EntryKind, ops: &[NativeOp]) -> JitResult<()> {
+    for op in ops {
+        let allowed = match entry_kind {
+            EntryKind::ParameterDefault => is_parameter_default_op(op),
+            EntryKind::StaticCondition => is_static_condition_op(op),
+            EntryKind::Assignment
+            | EntryKind::StampValue
+            | EntryKind::Jacobian
+            | EntryKind::ReactiveJacobian => true,
+        };
+
+        if !allowed {
+            return Err(JitError::unsupported_program_op(
+                model,
+                format!("{entry_kind:?} {}", native_op_name(op)),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn is_parameter_default_op(op: &NativeOp) -> bool {
+    matches!(
+        op,
+        NativeOp::Const(_)
+            | NativeOp::LoadParam(_)
+            | NativeOp::LoadParamGiven(_)
+            | NativeOp::Add
+            | NativeOp::Sub
+            | NativeOp::Mul
+            | NativeOp::Div
+            | NativeOp::AddConst(_)
+            | NativeOp::SubConst(_)
+            | NativeOp::MulConst(_)
+            | NativeOp::DivConst(_)
+            | NativeOp::SubFromConst(_)
+            | NativeOp::DivFromConst(_)
+            | NativeOp::Neg
+            | NativeOp::Abs
+            | NativeOp::Square
+            | NativeOp::Sqrt
+            | NativeOp::Compare(_)
+            | NativeOp::CompareConst(_, _)
+            | NativeOp::Logical(_)
+            | NativeOp::LogicalConst(_, _)
+            | NativeOp::IfElse
+            | NativeOp::Extremum(_)
+            | NativeOp::ExtremumConst(_, _)
+            | NativeOp::UnaryMath(_)
+            | NativeOp::BinaryMath(_)
+            | NativeOp::IntegerBinary(_)
+            | NativeOp::IntegerShiftConst(_, _)
+    )
+}
+
+fn is_static_condition_op(op: &NativeOp) -> bool {
+    is_parameter_default_op(op)
+        || matches!(
+            op,
+            NativeOp::LoadPortConnected(_)
+                | NativeOp::LoadVariable(_)
+                | NativeOp::LoadVariableDyn { .. }
+                | NativeOp::LoadTemperature
+                | NativeOp::LoadThermalVoltage
+                | NativeOp::LoadMfactor
+        )
+}
+
+fn native_op_name(op: &NativeOp) -> &'static str {
+    match op {
+        NativeOp::Const(_) => "Const",
+        NativeOp::LoadParam(_) => "LoadParam",
+        NativeOp::LoadParamGiven(_) => "LoadParamGiven",
+        NativeOp::LoadPortConnected(_) => "LoadPortConnected",
+        NativeOp::LoadVoltage { .. } => "LoadVoltage",
+        NativeOp::LoadCurrent(_) => "LoadCurrent",
+        NativeOp::LoadPriorCurrent(_) => "LoadPriorCurrent",
+        NativeOp::LoadInternalVoltage(_) => "LoadInternalVoltage",
+        NativeOp::LoadVariable(_) => "LoadVariable",
+        NativeOp::LoadVariableDyn { .. } => "LoadVariableDyn",
+        NativeOp::LoadBranchUnknown(_) => "LoadBranchUnknown",
+        NativeOp::LoadTemperature => "LoadTemperature",
+        NativeOp::LoadThermalVoltage => "LoadThermalVoltage",
+        NativeOp::LoadTime => "LoadTime",
+        NativeOp::Analysis(_) => "Analysis",
+        NativeOp::LoadMfactor => "LoadMfactor",
+        NativeOp::Add => "Add",
+        NativeOp::Sub => "Sub",
+        NativeOp::Mul => "Mul",
+        NativeOp::Div => "Div",
+        NativeOp::AddConst(_) => "AddConst",
+        NativeOp::SubConst(_) => "SubConst",
+        NativeOp::MulConst(_) => "MulConst",
+        NativeOp::DivConst(_) => "DivConst",
+        NativeOp::SubFromConst(_) => "SubFromConst",
+        NativeOp::DivFromConst(_) => "DivFromConst",
+        NativeOp::Neg => "Neg",
+        NativeOp::Abs => "Abs",
+        NativeOp::Square => "Square",
+        NativeOp::Sqrt => "Sqrt",
+        NativeOp::Compare(_) => "Compare",
+        NativeOp::CompareConst(_, _) => "CompareConst",
+        NativeOp::Logical(_) => "Logical",
+        NativeOp::LogicalConst(_, _) => "LogicalConst",
+        NativeOp::IfElse => "IfElse",
+        NativeOp::Extremum(_) => "Extremum",
+        NativeOp::ExtremumConst(_, _) => "ExtremumConst",
+        NativeOp::UnaryMath(_) => "UnaryMath",
+        NativeOp::BinaryMath(_) => "BinaryMath",
+        NativeOp::IntegerBinary(_) => "IntegerBinary",
+        NativeOp::IntegerShiftConst(_, _) => "IntegerShiftConst",
+        NativeOp::TableLookup(_) => "TableLookup",
+        NativeOp::TableDerivative(_) => "TableDerivative",
+        NativeOp::LimitState(_) => "LimitState",
+        NativeOp::LaplaceState(_) => "LaplaceState",
+        NativeOp::ZiState(_) => "ZiState",
+        NativeOp::TimerState(_) => "TimerState",
+        NativeOp::TransitionState(_) => "TransitionState",
+        NativeOp::SlewState(_) => "SlewState",
+        NativeOp::AbsDelayState(_) => "AbsDelayState",
+        NativeOp::CrossState(_) => "CrossState",
+        NativeOp::WhiteNoise => "WhiteNoise",
+        NativeOp::FlickerNoise => "FlickerNoise",
+        NativeOp::DdtState(_) => "DdtState",
+        NativeOp::DdtJacobian => "DdtJacobian",
+        NativeOp::IdtState(_) => "IdtState",
+        NativeOp::IdtJacobian => "IdtJacobian",
+        NativeOp::IdtModState(_) => "IdtModState",
+    }
+}
+
 fn is_parameter_default_instruction(instruction: &Instruction) -> bool {
     matches!(
         instruction,
@@ -7667,6 +7803,76 @@ endmodule
             ]
         );
         assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn mir_parameter_default_rejects_branch_unknown_load() {
+        let source = r#"
+module mir_parameter_default_branch_unknown(p, n);
+  inout p, n;
+  electrical p, n;
+  branch (p, n) probe;
+  analog begin
+    V(probe) <+ I(probe);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let equation_id = crate::canonical_ir::EquationId::new(0);
+        let root = artifact.mir.equations[0].expression.id;
+
+        let error = NativeProgram::from_mir_expression_for_equation(
+            "mir_parameter_default_branch_unknown",
+            EntryKind::ParameterDefault,
+            &artifact.mir,
+            equation_id,
+            root,
+            NativeLoweringLimits::new(2, 0, 0, 0, 1),
+        )
+        .expect_err("parameter defaults must not read branch-current unknowns");
+        let msg = error.to_string();
+        assert!(
+            msg.contains("ParameterDefault LoadBranchUnknown"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn mir_static_condition_rejects_current_pair_load() {
+        let source = r#"
+module mir_static_condition_current_pair(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ I(p, n);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let equation_id = crate::canonical_ir::EquationId::new(0);
+        let root = artifact.mir.equations[0].expression.id;
+        let available = [
+            current_pair_index("mir_static_condition_current_pair".into(), 0, 1, 2)
+                .expect("terminal current pair exists"),
+        ];
+
+        let error = NativeProgram::from_mir_expression_for_equation(
+            "mir_static_condition_current_pair",
+            EntryKind::StaticCondition,
+            &artifact.mir,
+            equation_id,
+            root,
+            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_available_current_pairs(&available),
+        )
+        .expect_err("static conditions must not read terminal-pair currents");
+        let msg = error.to_string();
+        assert!(msg.contains("StaticCondition LoadCurrent"), "got: {msg}");
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
     }
 
     #[test]
