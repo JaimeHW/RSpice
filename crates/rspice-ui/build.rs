@@ -68,9 +68,8 @@ fn main() {
             let icon = manifest_dir
                 .join("..")
                 .join("..")
-                .join("design")
+                .join("assets")
                 .join("brand")
-                .join("export")
                 .join("rspice.ico");
             println!("cargo:rerun-if-changed={}", icon.display());
             match icon.to_str() {

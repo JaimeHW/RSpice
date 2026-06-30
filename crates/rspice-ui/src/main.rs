@@ -12,7 +12,7 @@
 /// returns `None` on any decode surprise so a bad asset never blocks startup.
 #[cfg(not(target_arch = "wasm32"))]
 fn load_window_icon() -> Option<egui::IconData> {
-    const ICON_PNG: &[u8] = include_bytes!("../../../design/brand/export/icon-256.png");
+    const ICON_PNG: &[u8] = include_bytes!("../../../assets/brand/icon-256.png");
 
     let mut decoder = png::Decoder::new(std::io::Cursor::new(ICON_PNG));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
