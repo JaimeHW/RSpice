@@ -206,6 +206,10 @@ pub(super) fn native_ekv3_level(level: i32) -> bool {
     level == 301
 }
 
+pub(super) fn native_ekv26_level(level: i32) -> bool {
+    level == 260
+}
+
 pub(super) fn known_advanced_mos_level_without_native(level: i32) -> bool {
     matches!(
         level,

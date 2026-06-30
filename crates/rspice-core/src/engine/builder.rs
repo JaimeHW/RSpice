@@ -1332,7 +1332,7 @@ impl Engine {
                     // generated Verilog-A builtins are not enabled. Feature
                     // builds with the generated EKV builtin route before this
                     // point.
-                    if level == 260
+                    if native_ekv26_level(level)
                         && let Some(params_map) = params_map.as_ref()
                     {
                         let device_model =
@@ -1437,7 +1437,8 @@ impl Engine {
                             MOS1/MOS2/MOS3/MOS6), 4/5 (legacy BSIM1/BSIM2), \
                              9 (ngspice MOS9), 8/49 plus Xyce-style 9 \
                              (BSIM3v3.3), 14/54 (BSIM4 v4.8), 10/55/56/57 \
-                             (native BSIMSOI), 18 (native VDMOS), and 301 (EKV3). \
+                             (native BSIMSOI), 18 (native VDMOS), 260 (EKV26), \
+                             and 301 (EKV3). \
                             Unsupported MOS levels must fail closed until native support \
                             and reference-backed validation are added.",
                             element.name, model, descriptor

@@ -8,8 +8,9 @@
 //! LEVEL=3 routes natively as Berkeley MOS3; LEVEL=9 routes either
 //! to ngspice MOS9 or Xyce BSIM3 by dialect/parameter surface; LEVEL=8/49
 //! route to the native BSIM3v3.3 port, LEVEL=14/54 to the native BSIM4 v4.8
-//! port, LEVEL=301 to the native EKV3 NMOS150 slice, and CMC/HiSIM levels are
-//! named fail-closed advanced families until Verilog-A-to-Rust codegen lands.
+//! port, LEVEL=260 to EKV 2.6, LEVEL=301 to the native EKV3 NMOS150 slice,
+//! and CMC/HiSIM levels are named fail-closed advanced families until
+//! Verilog-A-to-Rust codegen lands.
 
 use rspice_core::circuit::DeviceOpReport;
 use rspice_core::engine::{Engine, SimulationConfig};
@@ -245,8 +246,8 @@ fn level9_deferred_bsim3_signature_fails_closed_instead_of_mos9() {
 #[test]
 fn level9_string_bsim3_version_routes_to_bsim3_not_mos9() {
     let deck = op_deck(".model nmod NMOS (LEVEL=9 VERSION=\"3.2.2\")", "");
-    let report = run_report(&deck)
-        .expect("string BSIM3 VERSION metadata should route to native BSIM3");
+    let report =
+        run_report(&deck).expect("string BSIM3 VERSION metadata should route to native BSIM3");
     let entry = report
         .entries
         .iter()
