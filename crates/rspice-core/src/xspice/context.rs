@@ -1781,9 +1781,19 @@ impl CmContext {
         std::mem::take(&mut self.stamps)
     }
 
+    /// Drain conductance stamps while preserving the queue allocation.
+    pub(crate) fn drain_stamps(&mut self) -> Drain<'_, (usize, usize, Value)> {
+        self.stamps.drain(..)
+    }
+
     /// Get all RHS contributions and clear
     pub fn take_rhs(&mut self) -> Vec<(usize, Value)> {
         std::mem::take(&mut self.rhs)
+    }
+
+    /// Drain RHS contributions while preserving the queue allocation.
+    pub(crate) fn drain_rhs(&mut self) -> Drain<'_, (usize, Value)> {
+        self.rhs.drain(..)
     }
 
     /// Clear queued matrix and RHS contributions.
@@ -2266,6 +2276,27 @@ mod tests {
         assert_eq!(breakpoints, vec![1.0e-9, 2.0e-9]);
         assert!(ctx.requested_breakpoints.is_empty());
         assert_eq!(ctx.requested_breakpoints.capacity(), capacity);
+    }
+
+    #[test]
+    fn matrix_stamp_drains_preserve_queue_capacity() {
+        let mut ctx = CmContext::new();
+
+        ctx.stamp_conductance(1, 2, 3.0);
+        ctx.stamp_conductance(4, 5, 6.0);
+        let stamp_capacity = ctx.stamps.capacity();
+        let stamps = ctx.drain_stamps().collect::<Vec<_>>();
+        assert_eq!(stamps, vec![(1, 2, 3.0), (4, 5, 6.0)]);
+        assert!(ctx.stamps.is_empty());
+        assert_eq!(ctx.stamps.capacity(), stamp_capacity);
+
+        ctx.stamp_rhs(7, 8.0);
+        ctx.stamp_rhs(9, 10.0);
+        let rhs_capacity = ctx.rhs.capacity();
+        let rhs = ctx.drain_rhs().collect::<Vec<_>>();
+        assert_eq!(rhs, vec![(7, 8.0), (9, 10.0)]);
+        assert!(ctx.rhs.is_empty());
+        assert_eq!(ctx.rhs.capacity(), rhs_capacity);
     }
 
     #[test]

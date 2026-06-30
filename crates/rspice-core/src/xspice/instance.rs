@@ -1479,10 +1479,10 @@ impl XspiceInstance {
         }
 
         // Process any queued stamps from the model
-        for (row, col, value) in self.context.take_stamps() {
+        for (row, col, value) in self.context.drain_stamps() {
             matrix_add(row, col, value);
         }
-        for (node, value) in self.context.take_rhs() {
+        for (node, value) in self.context.drain_rhs() {
             rhs_add(node, value);
         }
     }
