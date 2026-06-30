@@ -166,12 +166,11 @@ impl<'a> Lexer<'a> {
     fn read_ident(&mut self) -> String {
         let mut s = String::new();
         while let Some(&c) = self.chars.peek() {
-            let is_bang_name_char = c == '!'
-                && {
-                    let mut probe = self.chars.clone();
-                    probe.next();
-                    probe.peek() != Some(&'=')
-                };
+            let is_bang_name_char = c == '!' && {
+                let mut probe = self.chars.clone();
+                probe.next();
+                probe.peek() != Some(&'=')
+            };
             if c.is_alphanumeric()
                 || c == '_'
                 || c == '.'
