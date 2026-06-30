@@ -3681,12 +3681,13 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        BRANCH_CURRENTS_OFFSET, DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64,
-        I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, PARAMS_OFFSET,
-        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, VOLTAGES_OFFSET,
-        WORD_BYTES, X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
-        compile_assignment_function, compile_assignment_pass_function, compile_value_function,
-        entry_ctx_arg_reg, entry_vars_arg_reg, native_op_reads_entry_args,
+        BRANCH_CURRENTS_OFFSET, ConditionCode, ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES,
+        FunctionCompiler, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET,
+        K_BOLTZMANN, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET, Q_ELECTRON,
+        ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, TableHelper, TimerHelper,
+        VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls,
+        call_result_disp, compile_assignment_function, compile_assignment_pass_function,
+        compile_value_function, entry_ctx_arg_reg, entry_vars_arg_reg, native_op_reads_entry_args,
         native_op_uses_helper_call, program_uses_helper_calls, rspice_exp,
         value_program_needs_saved_entry_args,
     };
@@ -4273,6 +4274,86 @@ mod tests {
                 "{name} must still force saved entry args after an earlier continuing helper"
             );
         }
+    }
+
+    #[test]
+    fn generated_helper_call_abi_sentinels_receive_mixed_arguments() {
+        let table = [
+            LookupTable::from_data(vec![0.0, 1.0], vec![2.0, 3.0]),
+            LookupTable::from_data(vec![0.0, 1.0], vec![4.0, 5.0]),
+        ];
+        ABI_EXPECTED_TABLE_PTR.store(table.as_ptr() as usize, std::sync::atomic::Ordering::SeqCst);
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.lookup_tables = table.as_ptr();
+        ctx.lookup_tables_len = table.len();
+        ctx.time = 12.0;
+        ctx.temperature = 315.0;
+        ctx.multiplicity = 3.0;
+
+        assert_f64_matches(
+            run_table_helper_sentinel(abi_sentinel_table_helper, &ctx),
+            101.0,
+            "table helper ABI sentinel",
+        );
+        assert_f64_matches(
+            run_context_filter_helper_sentinel(abi_sentinel_context_filter_helper, &ctx),
+            202.0,
+            "context filter helper ABI sentinel",
+        );
+        assert_f64_matches(
+            run_timer_helper_sentinel(abi_sentinel_timer_helper, &ctx),
+            303.0,
+            "timer helper ABI sentinel",
+        );
+        assert_f64_matches(
+            run_operand_context_filter_helper_sentinel(
+                abi_sentinel_operand_context_filter_helper,
+                &ctx,
+            ),
+            404.0,
+            "operand context filter helper ABI sentinel",
+        );
+    }
+
+    #[test]
+    fn generated_helper_call_abi_sentinels_enter_helpers_with_aligned_stack() {
+        let alignment_helper_memory = stack_alignment_helper_memory();
+        let helper_ptr = alignment_helper_memory
+            .ptr_at(0)
+            .expect("alignment helper entry point");
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.time = 12.0;
+        ctx.temperature = 315.0;
+        ctx.multiplicity = 3.0;
+
+        let table_helper: TableHelper = unsafe { std::mem::transmute(helper_ptr) };
+        assert_f64_matches(
+            run_table_helper_sentinel(table_helper, &ctx),
+            1.0,
+            "table helper stack alignment",
+        );
+
+        let context_filter_helper: ContextFilterHelper = unsafe { std::mem::transmute(helper_ptr) };
+        assert_f64_matches(
+            run_context_filter_helper_sentinel(context_filter_helper, &ctx),
+            1.0,
+            "context filter helper stack alignment",
+        );
+
+        let timer_helper: TimerHelper = unsafe { std::mem::transmute(helper_ptr) };
+        assert_f64_matches(
+            run_timer_helper_sentinel(timer_helper, &ctx),
+            1.0,
+            "timer helper stack alignment",
+        );
+
+        let operand_context_filter_helper: OperandContextFilterHelper =
+            unsafe { std::mem::transmute(helper_ptr) };
+        assert_f64_matches(
+            run_operand_context_filter_helper_sentinel(operand_context_filter_helper, &ctx),
+            1.0,
+            "operand context filter helper stack alignment",
+        );
     }
 
     #[test]
@@ -9999,6 +10080,179 @@ mod tests {
 
     fn test_storage_limit() -> usize {
         XMM_STACK.len() + 1
+    }
+
+    static ABI_EXPECTED_TABLE_PTR: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+
+    fn run_table_helper_sentinel(helper: TableHelper, ctx: &EvalContext) -> f64 {
+        let mut compiler = abi_sentinel_compiler();
+        push_abi_sentinel_const(&mut compiler, 3.25);
+        compiler
+            .emit_table_helper_call(7, helper)
+            .expect("emit table helper ABI sentinel");
+        run_abi_sentinel_value(compiler, ctx)
+    }
+
+    fn run_context_filter_helper_sentinel(helper: ContextFilterHelper, ctx: &EvalContext) -> f64 {
+        let mut compiler = abi_sentinel_compiler();
+        let target = push_abi_sentinel_const(&mut compiler, 4.5);
+        compiler
+            .emit_context_filter_helper_call(target, 9, helper)
+            .expect("emit context filter helper ABI sentinel");
+        run_abi_sentinel_value(compiler, ctx)
+    }
+
+    fn run_timer_helper_sentinel(helper: TimerHelper, ctx: &EvalContext) -> f64 {
+        let mut compiler = abi_sentinel_compiler();
+        let start = push_abi_sentinel_const(&mut compiler, 1.25);
+        let period = push_abi_sentinel_const(&mut compiler, 0.75);
+        compiler.emit_timer_helper_call(start, period, helper);
+        run_abi_sentinel_value(compiler, ctx)
+    }
+
+    fn run_operand_context_filter_helper_sentinel(
+        helper: OperandContextFilterHelper,
+        ctx: &EvalContext,
+    ) -> f64 {
+        let mut compiler = abi_sentinel_compiler();
+        push_abi_sentinel_const(&mut compiler, 99.0);
+        let input = push_abi_sentinel_const(&mut compiler, 2.0);
+        push_abi_sentinel_const(&mut compiler, 3.0);
+        push_abi_sentinel_const(&mut compiler, 4.0);
+        compiler.emit_operand_context_filter_helper_call(input, 3, 11, helper);
+        compiler.encoder.movsd_xmm_xmm(Xmm::Xmm0, input);
+        run_abi_sentinel_value(compiler, ctx)
+    }
+
+    fn abi_sentinel_compiler() -> FunctionCompiler {
+        FunctionCompiler::new(true, false, 0, None, None, 0)
+    }
+
+    fn push_abi_sentinel_const(compiler: &mut FunctionCompiler, value: f64) -> Xmm {
+        let register = compiler.push_register().expect("ABI sentinel stack slot");
+        compiler.emit_constant_load(register, value);
+        register
+    }
+
+    fn run_abi_sentinel_value(compiler: FunctionCompiler, ctx: &EvalContext) -> f64 {
+        let bytes = compiler
+            .finish_value_function()
+            .expect("finish ABI sentinel value function");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate ABI sentinel function");
+        let entry = memory.ptr_at(0).expect("ABI sentinel entry point");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        f(ctx, std::ptr::null())
+    }
+
+    unsafe extern "C" fn abi_sentinel_table_helper(
+        input: f64,
+        tables: *const LookupTable,
+        table_count: usize,
+        table_id: usize,
+    ) -> f64 {
+        if input.to_bits() != 3.25_f64.to_bits() {
+            return -1.0;
+        }
+        let expected = ABI_EXPECTED_TABLE_PTR.load(std::sync::atomic::Ordering::SeqCst);
+        if tables as usize != expected {
+            return -2.0;
+        }
+        if table_count != 2 {
+            return -3.0;
+        }
+        if table_id != 7 {
+            return -4.0;
+        }
+        101.0
+    }
+
+    unsafe extern "C" fn abi_sentinel_context_filter_helper(
+        input: f64,
+        ctx: *const EvalContext,
+        filter_id: usize,
+    ) -> f64 {
+        if input.to_bits() != 4.5_f64.to_bits() {
+            return -10.0;
+        }
+        if filter_id != 9 {
+            return -11.0;
+        }
+        let Some(ctx) = (unsafe { ctx.as_ref() }) else {
+            return -12.0;
+        };
+        if ctx.time.to_bits() != 12.0_f64.to_bits()
+            || ctx.temperature.to_bits() != 315.0_f64.to_bits()
+            || ctx.multiplicity.to_bits() != 3.0_f64.to_bits()
+        {
+            return -13.0;
+        }
+        202.0
+    }
+
+    unsafe extern "C" fn abi_sentinel_timer_helper(
+        start: f64,
+        period: f64,
+        ctx: *const EvalContext,
+    ) -> f64 {
+        if start.to_bits() != 1.25_f64.to_bits() {
+            return -20.0;
+        }
+        if period.to_bits() != 0.75_f64.to_bits() {
+            return -21.0;
+        }
+        let Some(ctx) = (unsafe { ctx.as_ref() }) else {
+            return -22.0;
+        };
+        if ctx.time.to_bits() != 12.0_f64.to_bits()
+            || ctx.multiplicity.to_bits() != 3.0_f64.to_bits()
+        {
+            return -23.0;
+        }
+        303.0
+    }
+
+    unsafe extern "C" fn abi_sentinel_operand_context_filter_helper(
+        operands: *const f64,
+        ctx: *const EvalContext,
+        filter_id: usize,
+    ) -> f64 {
+        if filter_id != 11 {
+            return -30.0;
+        }
+        let Some(ctx) = (unsafe { ctx.as_ref() }) else {
+            return -31.0;
+        };
+        if ctx.temperature.to_bits() != 315.0_f64.to_bits()
+            || ctx.multiplicity.to_bits() != 3.0_f64.to_bits()
+        {
+            return -32.0;
+        }
+        if operands.is_null() {
+            return -33.0;
+        }
+        let operands = unsafe { std::slice::from_raw_parts(operands, 3) };
+        if operands[0].to_bits() != 2.0_f64.to_bits()
+            || operands[1].to_bits() != 3.0_f64.to_bits()
+            || operands[2].to_bits() != 4.0_f64.to_bits()
+        {
+            return -34.0;
+        }
+        404.0
+    }
+
+    fn stack_alignment_helper_memory() -> ExecutableMemory {
+        let mut encoder = X64Encoder::new();
+        encoder.mov_r64_r64(Gpr::Rax, Gpr::Rsp);
+        encoder.mov_r64_imm32(Gpr::R11, 15);
+        encoder.and_r64_r64(Gpr::Rax, Gpr::R11);
+        encoder.cmp_r64_imm32(Gpr::Rax, 8);
+        encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
+        encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
+        encoder.cvtsi2sd_xmm_r32(Xmm::Xmm0, Gpr::R10);
+        encoder.ret();
+        ExecutableMemory::allocate(&encoder.into_bytes()).expect("allocate stack helper sentinel")
     }
 
     fn eval_context(
