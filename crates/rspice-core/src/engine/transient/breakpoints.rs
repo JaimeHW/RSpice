@@ -607,7 +607,7 @@ mod tests {
         )
         .expect("pwlts instance constructs");
         let mut circuit = crate::circuit::Circuit::new();
-        circuit.xspice_instances.push(instance);
+        circuit.add_xspice_instance(instance);
 
         let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-21);
         Engine::collect_transient_source_breakpoints(&circuit, 2.5e-9, 1.0e-9, &mut breakpoints);

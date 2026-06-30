@@ -54,6 +54,7 @@ impl CircuitData {
             behavioral_sources: BehavioralSources::new(),
             // XSPICE instances
             xspice_instances: Vec::new(),
+            xspice_has_event_driven_devices: false,
             xspice_digital_values: HashMap::new(),
             xspice_digital_drivers: HashMap::new(),
             xspice_digital_event_times: HashMap::new(),

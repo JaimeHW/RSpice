@@ -2880,7 +2880,7 @@ impl Engine {
                         ))
                     })?;
 
-                    circuit.xspice_instances.push(instance);
+                    circuit.add_xspice_instance(instance);
                     log::debug!(
                         "Created XSPICE instance {}: model={}, ports={}",
                         element.name,

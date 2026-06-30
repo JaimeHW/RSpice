@@ -351,6 +351,8 @@ pub struct CircuitData {
     // XSPICE code model instances
     /// XSPICE instance storage for code model evaluation
     pub(crate) xspice_instances: Vec<XspiceInstance>,
+    /// Cached presence of event-driven XSPICE ports.
+    pub(crate) xspice_has_event_driven_devices: bool,
     /// Circuit-level digital node values driven by XSPICE events.
     pub(crate) xspice_digital_values: HashMap<NodeId, DigitalValue>,
     /// Per-output digital driver values, resolved onto digital nodes.

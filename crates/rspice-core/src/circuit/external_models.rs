@@ -86,15 +86,19 @@ impl CircuitData {
         !self.xspice_instances.is_empty()
     }
 
+    /// Add an XSPICE code model instance and update derived circuit metadata.
+    pub(crate) fn add_xspice_instance(&mut self, instance: XspiceInstance) {
+        self.xspice_has_event_driven_devices |= instance
+            .ports()
+            .iter()
+            .any(|port| port.default_type.is_event_driven());
+        self.xspice_instances.push(instance);
+    }
+
     /// Check if any XSPICE instance participates in event-driven scheduling.
     #[inline]
     pub fn has_xspice_event_driven_devices(&self) -> bool {
-        self.xspice_instances.iter().any(|instance| {
-            instance
-                .ports()
-                .iter()
-                .any(|port| port.default_type.is_event_driven())
-        })
+        self.xspice_has_event_driven_devices
     }
 
     /// Set transient run context on all XSPICE instances.
@@ -1856,10 +1860,28 @@ mod tests {
     }
 
     #[test]
+    fn add_xspice_instance_caches_event_driven_presence() {
+        let mut circuit = CircuitData::new();
+        assert!(!circuit.has_xspice_event_driven_devices());
+
+        circuit.add_xspice_instance(output_instance(
+            PortType::Voltage,
+            PortConnection::Analog(1),
+        ));
+        assert!(!circuit.has_xspice_event_driven_devices());
+
+        circuit.add_xspice_instance(output_instance(
+            PortType::Digital,
+            PortConnection::Digital(2),
+        ));
+        assert!(circuit.has_xspice_event_driven_devices());
+    }
+
+    #[test]
     fn evaluate_xspice_reports_model_errors_without_stamping_stale_outputs() {
         let mut circuit = CircuitData::new();
         circuit.get_or_create_node("n1");
-        circuit.xspice_instances.push(failing_instance());
+        circuit.add_xspice_instance(failing_instance());
 
         circuit.evaluate_xspice_with_analysis(0.0, 1e-9, &[0.0], AnalysisType::Transient);
         let err = circuit
@@ -1874,7 +1896,7 @@ mod tests {
     fn stamp_xspice_skips_out_of_range_current_output_without_panicking() {
         let mut circuit = CircuitData::new();
         circuit.get_or_create_node("n1");
-        circuit.xspice_instances.push(output_instance(
+        circuit.add_xspice_instance(output_instance(
             PortType::Current,
             PortConnection::Analog(2),
         ));
@@ -1896,7 +1918,7 @@ mod tests {
     fn accepted_xspice_timestep_exposes_requested_breakpoints() {
         let mut circuit = CircuitData::new();
         circuit.get_or_create_node("n1");
-        circuit.xspice_instances.push(breakpoint_instance());
+        circuit.add_xspice_instance(breakpoint_instance());
 
         circuit.accept_xspice_transient_timestep(2.0e-9, 1.0e-9, &[0.0]);
 
@@ -1911,9 +1933,7 @@ mod tests {
         let seen_phases = Arc::new(Mutex::new(Vec::new()));
         let mut circuit = CircuitData::new();
         circuit.get_or_create_node("n1");
-        circuit
-            .xspice_instances
-            .push(phase_probe_instance(Arc::clone(&seen_phases)));
+        circuit.add_xspice_instance(phase_probe_instance(Arc::clone(&seen_phases)));
         let mut matrix =
             StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("1x1 matrix should construct");
         let mut rhs = vec![0.0];
@@ -1942,7 +1962,7 @@ mod tests {
 
         let mut circuit = CircuitData::new();
         circuit.get_or_create_node("n1");
-        circuit.xspice_instances.push(instance);
+        circuit.add_xspice_instance(instance);
         circuit.evaluate_xspice_with_analysis(0.0, 1e-9, &[0.0], AnalysisType::Transient);
 
         let mut matrix =
@@ -1977,7 +1997,7 @@ mod tests {
         instance
             .set_output_branch(1, branch)
             .expect("test instance should accept branch assignment");
-        circuit.xspice_instances.push(instance);
+        circuit.add_xspice_instance(instance);
 
         circuit.evaluate_xspice_with_analysis(0.0, 1e-9, &[0.0, 0.0], AnalysisType::DcOp);
         let in_row = in_node - 1;
@@ -2032,7 +2052,7 @@ mod tests {
         let mut circuit = CircuitData::new();
         let in_node = circuit.get_or_create_node("in");
         let out_node = circuit.get_or_create_node("out");
-        circuit.xspice_instances.push(instance);
+        circuit.add_xspice_instance(instance);
 
         circuit.evaluate_xspice_with_analysis(0.0, 1e-9, &[3.0, 0.0], AnalysisType::DcOp);
         let in_row = in_node - 1;
@@ -2085,7 +2105,7 @@ mod tests {
         instance
             .set_output_branch(1, branch)
             .expect("test instance should accept branch assignment");
-        circuit.xspice_instances.push(instance);
+        circuit.add_xspice_instance(instance);
 
         circuit.evaluate_xspice_with_analysis(0.0, 1e-9, &[0.0, 2.0, 0.0], AnalysisType::DcOp);
         let in0_row = in0_node - 1;
@@ -2147,7 +2167,7 @@ mod tests {
         instance
             .set_output_vector_branch(1, 1, out1_branch)
             .expect("test instance should accept out[1] branch assignment");
-        circuit.xspice_instances.push(instance);
+        circuit.add_xspice_instance(instance);
 
         circuit.evaluate_xspice_with_analysis(0.0, 1e-9, &[1.0, 2.0, 0.0, 0.0], AnalysisType::DcOp);
         let in0_row = in0_node - 1;
