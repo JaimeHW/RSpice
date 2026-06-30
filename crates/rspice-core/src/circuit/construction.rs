@@ -64,6 +64,8 @@ impl CircuitData {
             xspice_event_queue: EventQueue::new(),
             xspice_touched_digital_nodes: Vec::new(),
             xspice_touched_real_nodes: Vec::new(),
+            xspice_resolved_digital_nodes: HashMap::new(),
+            xspice_resolved_real_nodes: HashMap::new(),
             xspice_registry: Arc::new(CodeModelRegistry::with_builtins()),
             xspice_evaluation_error: None,
             // Verilog-A devices

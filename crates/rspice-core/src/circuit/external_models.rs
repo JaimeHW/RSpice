@@ -11,36 +11,15 @@ fn apply_xspice_events_at_or_before(
     event_queue: &mut crate::xspice::EventQueue,
     touched_digital_nodes: &mut Vec<NodeId>,
     touched_real_nodes: &mut Vec<NodeId>,
+    resolved_digital_nodes: &mut HashMap<NodeId, crate::xspice::DigitalValue>,
+    resolved_real_nodes: &mut HashMap<NodeId, Value>,
     time: Value,
 ) -> bool {
-    fn resolve_node_drivers(
-        drivers: &HashMap<(NodeId, String, String), crate::xspice::DigitalValue>,
-        node_id: NodeId,
-    ) -> Option<crate::xspice::DigitalValue> {
-        drivers
-            .iter()
-            .filter_map(|((driver_node, _, _), value)| (*driver_node == node_id).then_some(*value))
-            .reduce(|acc, value| acc.resolve(&value))
-    }
-
-    fn resolve_real_node_drivers(
-        drivers: &HashMap<(NodeId, String, String), Value>,
-        node_id: NodeId,
-    ) -> Option<Value> {
-        let mut found = false;
-        let mut sum = 0.0;
-        for ((driver_node, _, _), value) in drivers {
-            if *driver_node == node_id {
-                found = true;
-                sum += *value;
-            }
-        }
-        found.then_some(sum)
-    }
-
     let mut changed = false;
     touched_digital_nodes.clear();
     touched_real_nodes.clear();
+    resolved_digital_nodes.clear();
+    resolved_real_nodes.clear();
     event_queue.drain_events_at(time, |event| {
         let driver_key = (event.node_id, event.instance, event.port_name);
         match event.value {
@@ -62,13 +41,36 @@ fn apply_xspice_events_at_or_before(
     touched_digital_nodes.dedup();
     touched_real_nodes.sort_unstable();
     touched_real_nodes.dedup();
+    if !touched_digital_nodes.is_empty() {
+        for ((driver_node, _, _), value) in digital_drivers.iter() {
+            if touched_digital_nodes.binary_search(driver_node).is_ok() {
+                resolved_digital_nodes
+                    .entry(*driver_node)
+                    .and_modify(|resolved| *resolved = resolved.resolve(value))
+                    .or_insert(*value);
+            }
+        }
+    }
+    if !touched_real_nodes.is_empty() {
+        for ((driver_node, _, _), value) in real_drivers.iter() {
+            if touched_real_nodes.binary_search(driver_node).is_ok() {
+                resolved_real_nodes
+                    .entry(*driver_node)
+                    .and_modify(|resolved| *resolved += *value)
+                    .or_insert(*value);
+            }
+        }
+    }
     for &node_id in touched_digital_nodes.iter() {
-        let resolved = resolve_node_drivers(digital_drivers, node_id).unwrap_or_default();
+        let resolved = resolved_digital_nodes
+            .get(&node_id)
+            .copied()
+            .unwrap_or_default();
         let previous_value = digital_values.insert(node_id, resolved);
         changed |= previous_value != Some(resolved);
     }
     for &node_id in touched_real_nodes.iter() {
-        let resolved = resolve_real_node_drivers(real_drivers, node_id).unwrap_or(0.0);
+        let resolved = resolved_real_nodes.get(&node_id).copied().unwrap_or(0.0);
         let previous_value = real_values.insert(node_id, resolved);
         changed |= previous_value != Some(resolved);
     }
@@ -275,6 +277,8 @@ impl CircuitData {
             let event_queue = &mut self.xspice_event_queue;
             let touched_digital_nodes = &mut self.xspice_touched_digital_nodes;
             let touched_real_nodes = &mut self.xspice_touched_real_nodes;
+            let resolved_digital_nodes = &mut self.xspice_resolved_digital_nodes;
+            let resolved_real_nodes = &mut self.xspice_resolved_real_nodes;
             let mut changed = apply_xspice_events_at_or_before(
                 digital_values,
                 digital_drivers,
@@ -285,6 +289,8 @@ impl CircuitData {
                 event_queue,
                 touched_digital_nodes,
                 touched_real_nodes,
+                resolved_digital_nodes,
+                resolved_real_nodes,
                 time,
             );
 
@@ -317,6 +323,8 @@ impl CircuitData {
                     event_queue,
                     touched_digital_nodes,
                     touched_real_nodes,
+                    resolved_digital_nodes,
+                    resolved_real_nodes,
                     time,
                 );
             }
@@ -1403,8 +1411,12 @@ mod tests {
         let mut event_queue = EventQueue::new();
         let mut touched_digital_nodes = Vec::with_capacity(4);
         let mut touched_real_nodes = Vec::with_capacity(4);
+        let mut resolved_digital_nodes = HashMap::with_capacity(4);
+        let mut resolved_real_nodes = HashMap::with_capacity(4);
         let digital_capacity = touched_digital_nodes.capacity();
         let real_capacity = touched_real_nodes.capacity();
+        let resolved_digital_capacity = resolved_digital_nodes.capacity();
+        let resolved_real_capacity = resolved_real_nodes.capacity();
 
         event_queue.schedule(Event::new(
             1.0e-9,
@@ -1433,6 +1445,8 @@ mod tests {
             &mut event_queue,
             &mut touched_digital_nodes,
             &mut touched_real_nodes,
+            &mut resolved_digital_nodes,
+            &mut resolved_real_nodes,
             1.0e-9,
         ));
 
@@ -1440,6 +1454,13 @@ mod tests {
         assert_eq!(touched_real_nodes, vec![2]);
         assert_eq!(touched_digital_nodes.capacity(), digital_capacity);
         assert_eq!(touched_real_nodes.capacity(), real_capacity);
+        assert_eq!(resolved_digital_nodes.capacity(), resolved_digital_capacity);
+        assert_eq!(resolved_real_nodes.capacity(), resolved_real_capacity);
+        assert_eq!(
+            resolved_digital_nodes.get(&1).copied(),
+            Some(DigitalValue::one())
+        );
+        assert_eq!(resolved_real_nodes.get(&2).copied(), Some(3.0));
         assert_eq!(digital_values.get(&1).copied(), Some(DigitalValue::one()));
         assert_eq!(digital_event_times.get(&1).copied(), Some(1.0e-9));
         assert_eq!(real_values.get(&2).copied(), Some(3.0));
@@ -1456,13 +1477,19 @@ mod tests {
             &mut event_queue,
             &mut touched_digital_nodes,
             &mut touched_real_nodes,
+            &mut resolved_digital_nodes,
+            &mut resolved_real_nodes,
             1.0e-9,
         ));
 
         assert!(touched_digital_nodes.is_empty());
         assert!(touched_real_nodes.is_empty());
+        assert!(resolved_digital_nodes.is_empty());
+        assert!(resolved_real_nodes.is_empty());
         assert_eq!(touched_digital_nodes.capacity(), digital_capacity);
         assert_eq!(touched_real_nodes.capacity(), real_capacity);
+        assert_eq!(resolved_digital_nodes.capacity(), resolved_digital_capacity);
+        assert_eq!(resolved_real_nodes.capacity(), resolved_real_capacity);
     }
 
     struct OutputModel {
