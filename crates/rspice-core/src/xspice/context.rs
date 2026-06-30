@@ -676,27 +676,49 @@ impl CmContext {
 
     /// Set an input value (used by circuit integration)
     pub fn set_input(&mut self, name: &str, value: InputValue) {
-        self.inputs.insert(name.to_string(), value);
+        match self.inputs.get_mut(name) {
+            Some(existing) => *existing = value,
+            None => {
+                self.inputs.insert(name.to_string(), value);
+            }
+        }
     }
 
     /// Set analog input by name
     pub fn set_input_analog(&mut self, name: &str, value: Value) {
-        self.inputs.insert(
-            name.to_string(),
-            InputValue::Analog(AnalogValue::new(value)),
-        );
+        let value = AnalogValue::new(value);
+        match self.inputs.get_mut(name) {
+            Some(InputValue::Analog(existing)) => *existing = value,
+            Some(existing) => *existing = InputValue::Analog(value),
+            None => {
+                self.inputs
+                    .insert(name.to_string(), InputValue::Analog(value));
+            }
+        }
     }
 
     /// Set digital input by name
     pub fn set_input_digital(&mut self, name: &str, value: DigitalValue) {
-        self.inputs
-            .insert(name.to_string(), InputValue::Digital(value));
+        match self.inputs.get_mut(name) {
+            Some(InputValue::Digital(existing)) => *existing = value,
+            Some(existing) => *existing = InputValue::Digital(value),
+            None => {
+                self.inputs
+                    .insert(name.to_string(), InputValue::Digital(value));
+            }
+        }
     }
 
     /// Set real input by name
     pub fn set_input_real(&mut self, name: &str, value: Value) {
-        self.inputs
-            .insert(name.to_string(), InputValue::Real(value));
+        match self.inputs.get_mut(name) {
+            Some(InputValue::Real(existing)) => *existing = value,
+            Some(existing) => *existing = InputValue::Real(value),
+            None => {
+                self.inputs
+                    .insert(name.to_string(), InputValue::Real(value));
+            }
+        }
     }
 
     /// Set analog vector input values while reusing an existing vector buffer.
@@ -806,13 +828,26 @@ impl CmContext {
 
     /// Set last event time for a scalar digital input.
     pub fn set_input_digital_event_time(&mut self, name: &str, time: Value) {
-        self.input_event_times.insert(name.to_string(), time);
+        match self.input_event_times.get_mut(name) {
+            Some(existing) => *existing = time,
+            None => {
+                self.input_event_times.insert(name.to_string(), time);
+            }
+        }
     }
 
     /// Set per-element event times for a digital input vector.
     pub fn set_input_digital_vector_event_times(&mut self, name: &str, times: Vec<Option<Value>>) {
-        self.input_vector_event_times
-            .insert(name.to_string(), times);
+        match self.input_vector_event_times.get_mut(name) {
+            Some(existing) => {
+                existing.clear();
+                existing.extend(times);
+            }
+            None => {
+                self.input_vector_event_times
+                    .insert(name.to_string(), times);
+            }
+        }
     }
 
     /// Set per-element event times while reusing an existing vector buffer.
@@ -845,7 +880,12 @@ impl CmContext {
 
     /// Set last event time for a scalar real input.
     pub fn set_input_real_event_time(&mut self, name: &str, time: Value) {
-        self.input_event_times.insert(name.to_string(), time);
+        match self.input_event_times.get_mut(name) {
+            Some(existing) => *existing = time,
+            None => {
+                self.input_event_times.insert(name.to_string(), time);
+            }
+        }
     }
 
     //-------------------------------------------------------------------------
@@ -1924,6 +1964,37 @@ mod tests {
     }
 
     #[test]
+    fn scalar_input_setters_replace_values_without_growing_maps() {
+        let mut ctx = CmContext::new();
+
+        ctx.set_input_analog("in", 1.0);
+        ctx.set_input_analog("in", 2.0);
+        assert_eq!(ctx.input("in"), 2.0);
+        assert_eq!(ctx.inputs.len(), 1);
+
+        ctx.set_input_digital("in", DigitalValue::one());
+        assert_eq!(ctx.input_digital("in"), Some(DigitalValue::one()));
+        assert_eq!(ctx.inputs.len(), 1);
+
+        ctx.set_input_real("in", 3.0);
+        assert_eq!(ctx.input_real("in"), Some(3.0));
+        assert_eq!(ctx.inputs.len(), 1);
+
+        ctx.set_input("in", InputValue::Digital(DigitalValue::zero()));
+        assert_eq!(ctx.input_digital("in"), Some(DigitalValue::zero()));
+        assert_eq!(ctx.inputs.len(), 1);
+
+        ctx.set_input_digital_event_time("clk", 1.0e-9);
+        ctx.set_input_digital_event_time("clk", 2.0e-9);
+        assert_eq!(ctx.input_digital_event_time("clk"), Some(2.0e-9));
+        assert_eq!(ctx.input_event_times.len(), 1);
+
+        ctx.set_input_real_event_time("clk", 3.0e-9);
+        assert_eq!(ctx.input_real_event_time("clk"), Some(3.0e-9));
+        assert_eq!(ctx.input_event_times.len(), 1);
+    }
+
+    #[test]
     fn vector_input_setters_reuse_existing_buffers() {
         let mut ctx = CmContext::new();
 
@@ -1948,15 +2019,19 @@ mod tests {
             other => panic!("expected reused digital vector input, got {other:?}"),
         }
 
-        ctx.set_input_digital_vector_event_times_from_fn("din", 4, |index| {
-            Some(index as Value * 1.0e-9)
-        });
+        ctx.set_input_digital_vector_event_times(
+            "din",
+            vec![Some(0.0), Some(1.0e-9), Some(2.0e-9), Some(3.0e-9)],
+        );
         let times_ptr = ctx.input_vector_event_times["din"].as_ptr();
         ctx.set_input_digital_vector_event_times_from_fn("din", 2, |index| {
             (index == 1).then_some(3.0e-9)
         });
         assert_eq!(ctx.input_digital_vector_event_time("din", 0), None);
         assert_eq!(ctx.input_digital_vector_event_time("din", 1), Some(3.0e-9));
+        assert_eq!(ctx.input_vector_event_times["din"].as_ptr(), times_ptr);
+        ctx.set_input_digital_vector_event_times("din", vec![Some(5.0e-9)]);
+        assert_eq!(ctx.input_digital_vector_event_time("din", 0), Some(5.0e-9));
         assert_eq!(ctx.input_vector_event_times["din"].as_ptr(), times_ptr);
 
         ctx.set_input_analog_vector_from_fn("ain", 3, |index| AnalogValue::new(index as Value));
