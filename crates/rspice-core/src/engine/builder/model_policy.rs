@@ -253,17 +253,17 @@ pub(super) fn bjt_level_matches(level: f64, expected: f64) -> bool {
     level.is_finite() && level == expected
 }
 
-pub(super) fn known_unsupported_bjt_family(level: f64) -> Option<(&'static str, &'static str)> {
-    if bjt_level_matches(level, 23.0) {
-        return Some(("Xyce HBT_X", "Q level 23"));
-    }
-    if bjt_level_matches(level, 4.0)
+pub(super) fn is_native_vbic_bjt_level(level: f64) -> bool {
+    bjt_level_matches(level, 4.0)
         || bjt_level_matches(level, 9.0)
         || bjt_level_matches(level, 11.0)
         || bjt_level_matches(level, 12.0)
         || bjt_level_matches(level, 13.0)
-    {
-        return Some(("VBIC", "Q level 4/9/11/12/13"));
+}
+
+pub(super) fn known_unsupported_bjt_family(level: f64) -> Option<(&'static str, &'static str)> {
+    if bjt_level_matches(level, 23.0) {
+        return Some(("Xyce HBT_X", "Q level 23"));
     }
     if bjt_level_matches(level, 8.0) {
         return Some(("ngspice HICUM/L2", "Q level 8"));
@@ -285,7 +285,7 @@ pub(super) fn supported_diode_level(level: f64) -> bool {
 }
 
 pub(super) fn supported_bjt_level(level: f64) -> bool {
-    legacy_gummel_poon_bjt_level(level)
+    legacy_gummel_poon_bjt_level(level) || is_native_vbic_bjt_level(level)
 }
 
 pub(super) fn legacy_gummel_poon_bjt_level(level: f64) -> bool {
@@ -333,7 +333,26 @@ pub(super) fn validate_bjt_model_level(
         }
     }
 
-    reject_unsupported_vbic13_params(element_name, model, params, expr_params, string_params)?;
+    let native_vbic_level = level.is_some_and(is_native_vbic_bjt_level);
+    reject_unsupported_vbic13_params(
+        element_name,
+        model,
+        params,
+        expr_params,
+        string_params,
+        native_vbic_level,
+    )?;
+
+    if native_vbic_level {
+        reject_deferred_native_bjt_model_params(
+            element_name,
+            model,
+            "VBIC",
+            params,
+            expr_params,
+            string_params,
+        )?;
+    }
 
     let Some(level) = level else {
         return Ok(());
@@ -344,9 +363,9 @@ pub(super) fn validate_bjt_model_level(
             let descriptor = bjt_level_descriptor(level);
             return Err(SimulationError::Circuit(format!(
                 "BJT '{element_name}': model '{model}' requests {family} {descriptor} ({selector}), \
-                 which has no native implementation. Use the generated Verilog-A builtins for \
-                 commercial compact-model families; they must not fall back to any other native \
-                 BJT model family or runtime Verilog-A."
+                 which has no native implementation. Advanced CMC BJT families are future \
+                 Verilog-A-to-Rust codegen targets and must not fall back to any other BJT model \
+                 family or runtime Verilog-A."
             )));
         }
 
@@ -354,9 +373,41 @@ pub(super) fn validate_bjt_model_level(
         return Err(SimulationError::Circuit(format!(
             "BJT '{element_name}': model '{model}' requests {descriptor}, which has no native \
              implementation. Supported BJT model levels: legacy Gummel-Poon (no LEVEL or \
-             LEVEL=1/2). Advanced CMC BJT models are generated from Verilog-A rather than \
-             hand-written here."
+             LEVEL=1/2), and LEVEL=4/9/11/12/13 (VBIC). Advanced CMC BJT models are generated \
+             from Verilog-A rather than hand-written here."
         )));
+    }
+
+    Ok(())
+}
+
+pub(super) fn reject_deferred_native_bjt_model_params(
+    element_name: &str,
+    model: &str,
+    family: &str,
+    params: &HashMap<String, f64>,
+    expr_params: &[(String, String)],
+    string_params: &[(String, String)],
+) -> Result<(), SimulationError> {
+    for (name, expr) in expr_params {
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': native {family} model '{model}' uses unresolved model parameter {name}={expr}; \
+             native {family} model parameters must be finite numeric literals"
+        )));
+    }
+    for (name, value) in string_params {
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': native {family} model '{model}' uses non-numeric model parameter {name}=\"{value}\"; \
+             native {family} model parameters must be finite numeric literals"
+        )));
+    }
+    for (name, value) in params {
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': native {family} model '{model}' uses non-finite model parameter {name}={value}; \
+                 native {family} model parameters must be finite numeric literals"
+            )));
+        }
     }
 
     Ok(())
@@ -384,6 +435,7 @@ pub(super) fn reject_unsupported_vbic13_params(
     params: &HashMap<String, f64>,
     expr_params: &[(String, String)],
     string_params: &[(String, String)],
+    native_vbic_level: bool,
 ) -> Result<(), SimulationError> {
     let mut present: Vec<&'static str> = Vec::new();
     for param in VBIC13_PARAMS

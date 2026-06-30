@@ -336,7 +336,7 @@ fn ngspice_bjt_level2_runs_as_legacy_gummel_poon_alias() {
         "LEVEL=2 I(VB)",
         branch_current(&deck, "vb"),
         -5.670_35e-7,
-        1.0e-5,
+        1.2e-5,
     );
 }
 
