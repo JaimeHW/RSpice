@@ -105,6 +105,11 @@ fn lookup_table_signature(ctx: &CmContext) -> LookupTableSignature {
     }
 }
 
+fn lookup_table_signature_matches(ctx: &CmContext, signature: &LookupTableSignature) -> bool {
+    ctx.real_vector_param("x_array").unwrap_or(&[]) == signature.x_values.as_slice()
+        && ctx.real_vector_param("y_array").unwrap_or(&[]) == signature.y_values.as_slice()
+}
+
 fn lookup_table_uncached(ctx: &CmContext) -> CmResult<Vec<LookupPoint>> {
     let x_values = ctx
         .real_vector_param("x_array")
@@ -116,6 +121,12 @@ fn lookup_table_uncached(ctx: &CmContext) -> CmResult<Vec<LookupPoint>> {
 }
 
 fn cache_lookup_table(ctx: &mut CmContext) {
+    if let Some(resource) = ctx.resource::<LookupTableResource>(LOOKUP_TABLE_RESOURCE)
+        && lookup_table_signature_matches(ctx, &resource.signature)
+    {
+        return;
+    }
+
     let signature = lookup_table_signature(ctx);
     let points = lookup_table_uncached(ctx).map(Arc::new);
     ctx.set_resource(
@@ -125,9 +136,8 @@ fn cache_lookup_table(ctx: &mut CmContext) {
 }
 
 fn lookup_table(ctx: &CmContext) -> CmResult<Arc<Vec<LookupPoint>>> {
-    let signature = lookup_table_signature(ctx);
     if let Some(resource) = ctx.resource::<LookupTableResource>(LOOKUP_TABLE_RESOURCE)
-        && resource.signature == signature
+        && lookup_table_signature_matches(ctx, &resource.signature)
     {
         return resource.points.clone();
     }
@@ -491,6 +501,23 @@ mod tests {
             (actual - expected).abs() <= 1.0e-12,
             "expected {expected:e}, got {actual:e}"
         );
+    }
+
+    #[test]
+    fn lookup_table_cache_reloads_when_params_change() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("x_array", vec![0.0, 1.0]);
+        ctx.set_real_vector_param("y_array", vec![0.0, 10.0]);
+        cache_lookup_table(&mut ctx);
+
+        let before = evaluate_lookup_context(&ctx, 0.5).expect("initial table");
+        assert_near(before.value, 5.0);
+        assert_near(before.slope, 10.0);
+
+        ctx.set_real_vector_param("y_array", vec![0.0, 20.0]);
+        let after = evaluate_lookup_context(&ctx, 0.5).expect("updated table");
+        assert_near(after.value, 10.0);
+        assert_near(after.slope, 20.0);
     }
 
     #[test]
