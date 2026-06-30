@@ -39,7 +39,7 @@ fn xyce_level10_default_gain_stage() -> &'static str {
 }
 
 fn b3soidd_n1_model_card() -> &'static str {
-    include_str!("../../../tests/bsim3soidd/nmosdd.mod")
+    include_str!("../../../tests/ngspice/bsim3soidd/nmosdd.mod")
 }
 
 fn xyce_bsim3soi_self_heating_model_card() -> &'static str {
