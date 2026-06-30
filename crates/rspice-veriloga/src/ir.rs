@@ -1215,14 +1215,23 @@ impl DeviceIR {
     /// Check whether an expression depends only on parameters and constants
     /// (valid for instance-time parameter default evaluation)
     fn is_static_param_expr(expr: &IrExpr) -> bool {
-        Self::is_instance_static_expr(expr, &HashSet::new())
+        Self::is_instance_static_expr_with_options(expr, &HashSet::new(), false)
     }
 
     /// Check whether an expression is fixed per instance: it depends only
-    /// on parameters, constants, temperature, and variables proven
-    /// instance-static. Such expressions may gate device topology.
+    /// on parameters, constants, temperature, analysis type, and variables
+    /// proven instance-static. Such expressions may gate device topology.
     fn is_instance_static_expr(expr: &IrExpr, static_vars: &HashSet<SmolStr>) -> bool {
-        let recurse = |e: &IrExpr| Self::is_instance_static_expr(e, static_vars);
+        Self::is_instance_static_expr_with_options(expr, static_vars, true)
+    }
+
+    fn is_instance_static_expr_with_options(
+        expr: &IrExpr,
+        static_vars: &HashSet<SmolStr>,
+        allow_analysis: bool,
+    ) -> bool {
+        let recurse =
+            |e: &IrExpr| Self::is_instance_static_expr_with_options(e, static_vars, allow_analysis);
         match expr {
             IrExpr::Const(_)
             | IrExpr::Param(_)
@@ -1249,6 +1258,7 @@ impl DeviceIR {
             IrExpr::Unary(_, e) | IrExpr::Limexp(e) => recurse(e),
             IrExpr::Call(_, args) => args.iter().all(recurse),
             IrExpr::Conditional(c, t, e) => recurse(c) && recurse(t) && recurse(e),
+            IrExpr::Analysis(_) => allow_analysis,
             _ => false,
         }
     }

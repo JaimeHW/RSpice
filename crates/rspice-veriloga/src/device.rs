@@ -670,7 +670,30 @@ impl VerilogADevice {
 
     /// Set the analysis type (0=dc, 1=ac, 2=tran, 3=noise, 4=ic)
     pub fn set_analysis_type(&mut self, analysis: u8) {
+        self.try_set_analysis_type(analysis).unwrap_or_else(|err| {
+            panic!(
+                "Verilog-A device '{}' model '{}' analysis update failed: {}",
+                self.name, self.model.name, err
+            )
+        });
+    }
+
+    /// Checked analysis update for callers that can surface native static
+    /// guard refresh failures as diagnostics instead of panicking.
+    pub fn try_set_analysis_type(&mut self, analysis: u8) -> Result<(), VmError> {
+        if self.context.analysis_type == analysis {
+            return Ok(());
+        }
+
         self.context.analysis_type = analysis;
+
+        #[cfg(feature = "native")]
+        self.try_refresh_static_conditions()?;
+
+        #[cfg(not(feature = "native"))]
+        self.refresh_static_conditions();
+
+        Ok(())
     }
 
     /// Commit integrator state after an accepted timestep
@@ -2558,6 +2581,60 @@ endmodule
             .expect("native mode must refresh static conditions without bytecode fallback");
 
         assert!(device.program_active.iter().all(|active| *active));
+    }
+
+    #[test]
+    fn native_analysis_static_condition_refreshes_when_analysis_type_changes() {
+        let source = r#"
+`include "disciplines.vams"
+module analysis_static_condition(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        if (analysis("static"))
+            I(p, n) <+ V(p, n);
+    end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(source)
+            .expect("compile analysis static-condition model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile analysis static-condition canonical IR");
+        assert!(
+            model
+                .stamp_programs
+                .iter()
+                .any(|program| program.static_condition.is_some()),
+            "analysis(\"static\") guard should be peeled into a topology guard"
+        );
+
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("ANSTATIC1", model, &artifact, &[1, 0])
+                .expect("analysis static condition compiles natively");
+
+        assert!(
+            device.program_active.iter().all(|active| *active),
+            "default DC analysis should activate analysis(\"static\") guarded stamps"
+        );
+
+        device
+            .try_set_analysis_type(2)
+            .expect("transient analysis change refreshes native static conditions");
+        assert!(
+            device.program_active.iter().all(|active| !*active),
+            "transient analysis should deactivate analysis(\"static\") guarded stamps"
+        );
+
+        device
+            .try_set_analysis_type(4)
+            .expect("IC analysis change refreshes native static conditions");
+        assert!(
+            device.program_active.iter().all(|active| *active),
+            "IC analysis should reactivate analysis(\"static\") guarded stamps"
+        );
     }
 
     #[test]

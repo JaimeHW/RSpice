@@ -2033,6 +2033,7 @@ impl NativeProgram {
                 format!("final stack depth {depth}, expected 1"),
             ));
         }
+        validate_entry_ops(model.clone(), entry_kind, &ops)?;
         let optimized_max_stack_depth =
             compute_native_max_stack_depth(model.clone(), entry_kind, &ops)?;
         debug_assert!(optimized_max_stack_depth <= max_stack_depth);
@@ -2083,6 +2084,7 @@ impl NativeProgram {
                 format!("final stack depth {}, expected 1", lowerer.depth),
             ));
         }
+        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
         let optimized_max_stack_depth =
             compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
         debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
@@ -4143,6 +4145,137 @@ fn validate_entry_instruction(
     Ok(())
 }
 
+fn validate_entry_ops(model: SmolStr, entry_kind: EntryKind, ops: &[NativeOp]) -> JitResult<()> {
+    for op in ops {
+        let allowed = match entry_kind {
+            EntryKind::ParameterDefault => is_parameter_default_op(op),
+            EntryKind::StaticCondition => is_static_condition_op(op),
+            EntryKind::Assignment
+            | EntryKind::StampValue
+            | EntryKind::Jacobian
+            | EntryKind::ReactiveJacobian => true,
+        };
+
+        if !allowed {
+            return Err(JitError::unsupported_program_op(
+                model,
+                format!("{entry_kind:?} {}", native_op_name(op)),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn is_parameter_default_op(op: &NativeOp) -> bool {
+    matches!(
+        op,
+        NativeOp::Const(_)
+            | NativeOp::LoadParam(_)
+            | NativeOp::LoadParamGiven(_)
+            | NativeOp::Add
+            | NativeOp::Sub
+            | NativeOp::Mul
+            | NativeOp::Div
+            | NativeOp::AddConst(_)
+            | NativeOp::SubConst(_)
+            | NativeOp::MulConst(_)
+            | NativeOp::DivConst(_)
+            | NativeOp::SubFromConst(_)
+            | NativeOp::DivFromConst(_)
+            | NativeOp::Neg
+            | NativeOp::Abs
+            | NativeOp::Square
+            | NativeOp::Sqrt
+            | NativeOp::Compare(_)
+            | NativeOp::CompareConst(_, _)
+            | NativeOp::Logical(_)
+            | NativeOp::LogicalConst(_, _)
+            | NativeOp::IfElse
+            | NativeOp::Extremum(_)
+            | NativeOp::ExtremumConst(_, _)
+            | NativeOp::UnaryMath(_)
+            | NativeOp::BinaryMath(_)
+            | NativeOp::IntegerBinary(_)
+    )
+}
+
+fn is_static_condition_op(op: &NativeOp) -> bool {
+    is_parameter_default_op(op)
+        || matches!(
+            op,
+            NativeOp::LoadPortConnected(_)
+                | NativeOp::LoadVariable(_)
+                | NativeOp::LoadVariableDyn { .. }
+                | NativeOp::LoadTemperature
+                | NativeOp::LoadThermalVoltage
+                | NativeOp::Analysis(_)
+                | NativeOp::LoadMfactor
+        )
+}
+
+fn native_op_name(op: &NativeOp) -> &'static str {
+    match op {
+        NativeOp::Const(_) => "Const",
+        NativeOp::LoadParam(_) => "LoadParam",
+        NativeOp::LoadParamGiven(_) => "LoadParamGiven",
+        NativeOp::LoadPortConnected(_) => "LoadPortConnected",
+        NativeOp::LoadVoltage { .. } => "LoadVoltage",
+        NativeOp::LoadCurrent(_) => "LoadCurrent",
+        NativeOp::LoadPriorCurrent(_) => "LoadPriorCurrent",
+        NativeOp::LoadInternalVoltage(_) => "LoadInternalVoltage",
+        NativeOp::LoadVariable(_) => "LoadVariable",
+        NativeOp::LoadVariableDyn { .. } => "LoadVariableDyn",
+        NativeOp::LoadBranchUnknown(_) => "LoadBranchUnknown",
+        NativeOp::LoadTemperature => "LoadTemperature",
+        NativeOp::LoadThermalVoltage => "LoadThermalVoltage",
+        NativeOp::LoadTime => "LoadTime",
+        NativeOp::Analysis(_) => "Analysis",
+        NativeOp::LoadMfactor => "LoadMfactor",
+        NativeOp::Add => "Add",
+        NativeOp::Sub => "Sub",
+        NativeOp::Mul => "Mul",
+        NativeOp::Div => "Div",
+        NativeOp::AddConst(_) => "AddConst",
+        NativeOp::SubConst(_) => "SubConst",
+        NativeOp::MulConst(_) => "MulConst",
+        NativeOp::DivConst(_) => "DivConst",
+        NativeOp::SubFromConst(_) => "SubFromConst",
+        NativeOp::DivFromConst(_) => "DivFromConst",
+        NativeOp::Neg => "Neg",
+        NativeOp::Abs => "Abs",
+        NativeOp::Square => "Square",
+        NativeOp::Sqrt => "Sqrt",
+        NativeOp::Compare(_) => "Compare",
+        NativeOp::CompareConst(_, _) => "CompareConst",
+        NativeOp::Logical(_) => "Logical",
+        NativeOp::LogicalConst(_, _) => "LogicalConst",
+        NativeOp::IfElse => "IfElse",
+        NativeOp::Extremum(_) => "Extremum",
+        NativeOp::ExtremumConst(_, _) => "ExtremumConst",
+        NativeOp::UnaryMath(_) => "UnaryMath",
+        NativeOp::BinaryMath(_) => "BinaryMath",
+        NativeOp::IntegerBinary(_) => "IntegerBinary",
+        NativeOp::TableLookup(_) => "TableLookup",
+        NativeOp::TableDerivative(_) => "TableDerivative",
+        NativeOp::LimitState(_) => "LimitState",
+        NativeOp::LaplaceState(_) => "LaplaceState",
+        NativeOp::ZiState(_) => "ZiState",
+        NativeOp::TimerState(_) => "TimerState",
+        NativeOp::TransitionState(_) => "TransitionState",
+        NativeOp::SlewState(_) => "SlewState",
+        NativeOp::AbsDelayState(_) => "AbsDelayState",
+        NativeOp::CrossState(_) => "CrossState",
+        NativeOp::WhiteNoise => "WhiteNoise",
+        NativeOp::FlickerNoise => "FlickerNoise",
+        NativeOp::DdtState(_) => "DdtState",
+        NativeOp::DdtJacobian => "DdtJacobian",
+        NativeOp::IdtState(_) => "IdtState",
+        NativeOp::IdtJacobian => "IdtJacobian",
+        NativeOp::IdtModState(_) => "IdtModState",
+    }
+}
+
 fn is_parameter_default_instruction(instruction: &Instruction) -> bool {
     matches!(
         instruction,
@@ -4207,6 +4340,7 @@ fn is_static_condition_instruction(instruction: &Instruction) -> bool {
             | Instruction::PushTemperature
             | Instruction::PushVt
             | Instruction::PushMfactor
+            | Instruction::Analysis(_)
             | Instruction::Add
             | Instruction::Sub
             | Instruction::Mul
@@ -7680,6 +7814,34 @@ endmodule
             );
             assert_eq!(lowered.max_stack_depth(), 1);
         }
+    }
+
+    #[test]
+    fn restricted_static_conditions_accept_analysis_without_fallback() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::Analysis(5),
+                Instruction::PushConst(0.5),
+                Instruction::Gt,
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "static-analysis",
+            EntryKind::StaticCondition,
+            &program,
+            limits(0, 0),
+        )
+        .expect("analysis() has a direct native x64 static-condition lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::Analysis(5),
+                NativeOp::CompareConst(CompareOp::Gt, 0.5)
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 1);
     }
 
     #[test]
