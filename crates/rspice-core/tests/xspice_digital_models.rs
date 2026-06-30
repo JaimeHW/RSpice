@@ -969,6 +969,97 @@ apwm ctrl [out] pwm
 }
 
 #[test]
+fn nco_registers_official_example_model_and_enforces_seven_bit_input() {
+    let registry = CodeModelRegistry::with_builtins();
+    let nco = registry.get("nco").expect("nco is registered");
+
+    XspiceInstance::new(
+        "a_nco",
+        nco.clone(),
+        vec![
+            PortConnection::DigitalVector(vec![1, 2, 3, 4, 5, 6, 7]),
+            PortConnection::Digital(8),
+        ],
+        &[("delay".to_string(), 1.0e-15)],
+        &[],
+        &[],
+        &[],
+    )
+    .expect("official nco accepts exactly seven digital input bits");
+
+    let err = XspiceInstance::new(
+        "a_nco_short",
+        nco.clone(),
+        vec![
+            PortConnection::DigitalVector(vec![1, 2, 3, 4, 5, 6]),
+            PortConnection::Digital(8),
+        ],
+        &[],
+        &[],
+        &[],
+        &[],
+    )
+    .expect_err("official nco input vector must require seven bits");
+    assert!(
+        err.to_string().contains("expects at least 7"),
+        "short nco input vector should be rejected by the official port bound, got {err}"
+    );
+
+    let err = XspiceInstance::new(
+        "a_nco_bad_delay",
+        nco,
+        vec![
+            PortConnection::DigitalVector(vec![1, 2, 3, 4, 5, 6, 7]),
+            PortConnection::Digital(8),
+        ],
+        &[("delay".to_string(), 0.0)],
+        &[],
+        &[],
+        &[],
+    )
+    .expect_err("official nco delay lower bound must be enforced");
+    assert!(
+        err.to_string().contains("below minimum 0.000000000000001"),
+        "nco delay=0 should be rejected by the official 1e-15 lower bound, got {err}"
+    );
+}
+
+#[test]
+fn nco_transient_toggles_from_midi_note_zero_like_ngspice_example() {
+    let result = run_temp_deck(
+        "rspice-nco-note-zero",
+        "0 0s 0s 0s 0s 0s 0s 0s\n",
+        "\
+* XSPICE nco example model: 7-bit MIDI note 0, scaled up for a short regression
+a_src [b6 b5 b4 b3 b2 b1 b0] src
+a_nco [b6 b5 b4 b3 b2 b1 b0] [out] osc
+.model src d_source (input_file=\"stim.stim\")
+.model osc nco (mult_factor=1e9 delay=2p)
+.end
+",
+        260.0e-12,
+        5.0e-12,
+    );
+    let trace = digital_tokens(&result, "out");
+    let half_period = 1.0 / (8.17578e9);
+    let first_high = half_period + 2.0e-12;
+    let first_low = 2.0 * half_period + 2.0e-12;
+
+    assert!(
+        trace
+            .iter()
+            .any(|(time, token)| (*time - first_high).abs() <= 2.0e-15 && token == "1s"),
+        "nco should drive high at half-period plus delay ({first_high:e}); got {trace:?}"
+    );
+    assert!(
+        trace
+            .iter()
+            .any(|(time, token)| (*time - first_low).abs() <= 2.0e-15 && token == "0s"),
+        "nco should drive low at the next half-period plus delay ({first_low:e}); got {trace:?}"
+    );
+}
+
+#[test]
 fn digital_oscillators_reject_table_vectors_below_official_minimum_length() {
     let registry = CodeModelRegistry::with_builtins();
 

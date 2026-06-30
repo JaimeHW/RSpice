@@ -9,14 +9,21 @@ pub struct DigitalOscillator;
 #[derive(Debug, Default)]
 pub struct DigitalPwmOscillator;
 
+#[derive(Debug, Default)]
+pub struct NumericallyControlledOscillator;
+
 const MIN_FREQUENCY: Value = 1.0e-16;
 const FACTOR1: Value = 0.75;
 const FACTOR2: Value = 0.8;
 const TIME_EPSILON: Value = 1.0e-18;
+const NCO_BASE_FREQUENCY: Value = 8.17578;
+const NCO_SEMITONE_RATIO: Value = 1.059_463_094;
 
 const OSC_LAST_TIME: usize = 0;
 const OSC_LAST_STATE: usize = 0;
 const OSC_INITIALIZED: usize = 1;
+const NCO_NEXT_TIME: usize = 0;
+const NCO_OUTPUT_STATE: usize = 0;
 
 fn digital_oscillator_ports() -> &'static [PortSpec] {
     static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
@@ -38,6 +45,18 @@ fn digital_oscillator_ports() -> &'static [PortSpec] {
                 description: "Control input".to_string(),
             },
             PortSpec::output("out", PortType::Digital).with_description("Digital output"),
+        ]
+    })
+}
+
+fn nco_ports() -> &'static [PortSpec] {
+    static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+    PORTS.get_or_init(|| {
+        vec![
+            PortSpec::vector_input("in", PortType::Digital)
+                .with_vector_len_range(7, 7)
+                .with_description("7-bit MIDI program input"),
+            PortSpec::output("out", PortType::Digital).with_description("Oscillator output"),
         ]
     })
 }
@@ -82,6 +101,20 @@ fn d_pwm_params() -> &'static [ParamSpec] {
                 .with_description("Unused compatibility delay, accepted outside official limits"),
             ParamSpec::real("fall_delay", 1.0e-9)
                 .with_description("Unused compatibility delay, accepted outside official limits"),
+        ]
+    })
+}
+
+fn nco_params() -> &'static [ParamSpec] {
+    static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+    PARAMS.get_or_init(|| {
+        vec![
+            ParamSpec::real("delay", 1.0e-9)
+                .with_min(1.0e-15)
+                .with_description("Output event delay"),
+            ParamSpec::real("mult_factor", 1.0)
+                .with_min(1.0e-9)
+                .with_description("Frequency multiplier"),
         ]
     })
 }
@@ -298,6 +331,53 @@ fn request_future_breakpoint(ctx: &mut CmContext, time: Value) {
     }
 }
 
+fn nco_param_min(ctx: &CmContext, name: &str, default: Value, min: Value) -> CmResult<Value> {
+    let value = ctx.param_or(name, default);
+    if !value.is_finite() || value < min {
+        return Err(oscillator_error(
+            "nco",
+            format!("{name} must be finite and >= {min:e}, got {value}"),
+        ));
+    }
+    Ok(value)
+}
+
+fn nco_note_index(ctx: &CmContext) -> usize {
+    let inputs = ctx.input_digital_vector("in");
+    let mut index = 0usize;
+    let mut scale_factor = 64usize;
+    for bit in 0..7 {
+        if inputs
+            .get(bit)
+            .is_some_and(|value| value.state == DigitalState::One)
+        {
+            index += scale_factor;
+        }
+        scale_factor /= 2;
+    }
+    index
+}
+
+fn nco_half_period(ctx: &CmContext) -> CmResult<Value> {
+    let mult_factor = nco_param_min(ctx, "mult_factor", 1.0, 1.0e-9)?;
+    let index = nco_note_index(ctx);
+    let frequency = NCO_BASE_FREQUENCY * mult_factor * NCO_SEMITONE_RATIO.powi(index as i32);
+    if !frequency.is_finite() || frequency <= 0.0 {
+        return Err(oscillator_error(
+            "nco",
+            format!("computed frequency must be positive and finite, got {frequency:e}"),
+        ));
+    }
+    Ok(1.0 / frequency)
+}
+
+fn nco_set_state(ctx: &mut CmContext, next_time: Value, output_state: i64) {
+    if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+        ctx.set_state(NCO_NEXT_TIME, next_time);
+        ctx.set_int_state(NCO_OUTPUT_STATE, output_state);
+    }
+}
+
 fn evaluate_digital_oscillator(
     ctx: &mut CmContext,
     period: Value,
@@ -365,6 +445,66 @@ fn evaluate_digital_oscillator(
     };
     request_future_breakpoint(ctx, transition_time + FACTOR2 * next_interval);
     Ok(())
+}
+
+impl CodeModel for NumericallyControlledOscillator {
+    fn name(&self) -> &str {
+        "nco"
+    }
+
+    fn description(&self) -> &str {
+        "MIDI numerically controlled oscillator"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        nco_ports()
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        nco_params()
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        nco_param_min(ctx, "delay", 1.0e-9, 1.0e-15)?;
+        nco_param_min(ctx, "mult_factor", 1.0, 1.0e-9)?;
+        ctx.allocate_states(1);
+        ctx.allocate_int_states(1);
+        ctx.set_initial_state(NCO_NEXT_TIME, 0.0);
+        ctx.set_int_state(NCO_OUTPUT_STATE, 0);
+        Ok(())
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let half_period = nco_half_period(ctx)?;
+        if !ctx.is_transient() || ctx.time == 0.0 {
+            let output_state = ctx.int_state(NCO_OUTPUT_STATE);
+            nco_set_state(ctx, half_period, output_state);
+            request_future_breakpoint(ctx, half_period);
+            ctx.set_output_digital("out", state_to_value(output_state), 0.0);
+            return Ok(());
+        }
+
+        let next_time = ctx.state(NCO_NEXT_TIME);
+        if ctx.time + TIME_EPSILON < next_time {
+            request_future_breakpoint(ctx, next_time);
+            return Ok(());
+        }
+
+        let output_state = 1 - ctx.int_state(NCO_OUTPUT_STATE);
+        let following_time = ctx.time + half_period;
+        nco_set_state(ctx, following_time, output_state);
+        request_future_breakpoint(ctx, following_time);
+        ctx.set_output_digital(
+            "out",
+            state_to_value(output_state),
+            nco_param_min(ctx, "delay", 1.0e-9, 1.0e-15)?,
+        );
+        Ok(())
+    }
+
+    fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
+        Ok(vec![nco_half_period(ctx)?])
+    }
 }
 
 impl CodeModel for DigitalOscillator {
@@ -458,6 +598,7 @@ impl CodeModel for DigitalPwmOscillator {
 mod tests {
     use super::*;
     use crate::xspice::AnalysisType;
+    use crate::xspice::context::{InputValue, PendingDigitalEvent};
 
     #[test]
     fn digital_oscillators_ignore_bad_control_tables_like_ngspice() {
@@ -495,6 +636,142 @@ mod tests {
         ctx.set_input_analog("cntl_in", 0.0);
 
         assert!((d_pwm_duty_cycle(&ctx).unwrap() - 0.5).abs() < 1.0e-15);
+    }
+
+    fn nco_context_for_bits(bits: [DigitalValue; 7]) -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.set_param("delay", 2.0e-12);
+        ctx.set_param("mult_factor", 1.0e9);
+        ctx.set_input("in", InputValue::DigitalVector(bits.to_vec()));
+        ctx.init_output("out", PortType::Digital);
+        NumericallyControlledOscillator
+            .init(&mut ctx)
+            .expect("nco initializes");
+        ctx
+    }
+
+    fn scalar_event(events: &[PendingDigitalEvent]) -> DigitalValue {
+        assert_eq!(
+            events.len(),
+            1,
+            "expected one digital event, got {events:?}"
+        );
+        assert_eq!(events[0].port_name, "out");
+        assert_eq!(events[0].start_index, 0);
+        assert_eq!(events[0].values.len(), 1);
+        events[0].values[0]
+    }
+
+    #[test]
+    fn nco_decodes_official_seven_bit_midi_input_order() {
+        let mut ctx = nco_context_for_bits([
+            DigitalValue::one(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+        ]);
+
+        assert_eq!(nco_note_index(&ctx), 64);
+        NumericallyControlledOscillator
+            .evaluate(&mut ctx)
+            .expect("initial nco evaluation");
+        let expected = 1.0 / (NCO_BASE_FREQUENCY * 1.0e9 * NCO_SEMITONE_RATIO.powi(64));
+        assert!(
+            (ctx.state(NCO_NEXT_TIME) - expected).abs() <= 1.0e-18,
+            "nco should weight the first input bit as 64; expected {expected:e}, got {:e}",
+            ctx.state(NCO_NEXT_TIME)
+        );
+        assert_eq!(
+            scalar_event(&ctx.take_pending_events()),
+            DigitalValue::zero()
+        );
+    }
+
+    #[test]
+    fn nco_counts_only_strong_one_inputs_like_official_example() {
+        let mut ctx = nco_context_for_bits([
+            DigitalValue::new(DigitalState::OneR, DigitalStrength::Resistive),
+            DigitalValue::one(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+        ]);
+
+        assert_eq!(nco_note_index(&ctx), 32);
+        NumericallyControlledOscillator
+            .evaluate(&mut ctx)
+            .expect("initial nco evaluation");
+        let expected = 1.0 / (NCO_BASE_FREQUENCY * 1.0e9 * NCO_SEMITONE_RATIO.powi(32));
+        assert!(
+            (ctx.state(NCO_NEXT_TIME) - expected).abs() <= 1.0e-18,
+            "resistive high must not be counted by the official INPUT_STATE == ONE check"
+        );
+    }
+
+    #[test]
+    fn nco_toggles_on_requested_times_with_output_delay() {
+        let mut ctx = nco_context_for_bits([
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+        ]);
+
+        NumericallyControlledOscillator
+            .evaluate(&mut ctx)
+            .expect("initial nco evaluation");
+        let first_toggle = ctx.state(NCO_NEXT_TIME);
+        let _ = ctx.take_pending_events();
+
+        ctx.time = first_toggle;
+        NumericallyControlledOscillator
+            .evaluate(&mut ctx)
+            .expect("first nco toggle");
+        let events = ctx.take_pending_events();
+        assert_eq!(scalar_event(&events), DigitalValue::one());
+        assert_eq!(events[0].delay, 2.0e-12);
+        assert_eq!(ctx.int_state(NCO_OUTPUT_STATE), 1);
+        assert!((ctx.state(NCO_NEXT_TIME) - 2.0 * first_toggle).abs() <= 1.0e-18);
+    }
+
+    #[test]
+    fn nco_rollbackable_probe_does_not_commit_timing_state() {
+        let mut ctx = nco_context_for_bits([
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+            DigitalValue::zero(),
+        ]);
+
+        NumericallyControlledOscillator
+            .evaluate(&mut ctx)
+            .expect("initial nco evaluation");
+        let first_toggle = ctx.state(NCO_NEXT_TIME);
+        let _ = ctx.take_pending_events();
+
+        ctx.time = first_toggle;
+        ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+        NumericallyControlledOscillator
+            .evaluate(&mut ctx)
+            .expect("rollback nco toggle");
+        assert_eq!(ctx.int_state(NCO_OUTPUT_STATE), 0);
+        assert_eq!(ctx.state(NCO_NEXT_TIME), first_toggle);
+        assert_eq!(
+            scalar_event(&ctx.take_pending_events()),
+            DigitalValue::one()
+        );
     }
 
     #[test]

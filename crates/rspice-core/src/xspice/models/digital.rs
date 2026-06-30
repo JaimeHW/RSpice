@@ -24,7 +24,7 @@ pub use gates::{
 };
 pub use lookup::{DigitalGenericLookupTable, DigitalLookupTable};
 pub use memory::DigitalRam;
-pub use oscillators::{DigitalOscillator, DigitalPwmOscillator};
+pub use oscillators::{DigitalOscillator, DigitalPwmOscillator, NumericallyControlledOscillator};
 pub use process::DigitalProcess;
 pub use sequential::{
     DFlipFlop, DLatch, DigitalFrequencyDivider, JkFlipFlop, SrFlipFlop, SrLatch, TFlipFlop,

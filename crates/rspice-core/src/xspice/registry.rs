@@ -85,6 +85,7 @@ const BUILTIN_MODEL_NAMES: &[&str] = &[
     "msopen",
     "mult",
     "multi_input_pwl",
+    "nco",
     "oneshot",
     "potentiometer",
     "pswitch",
@@ -254,6 +255,7 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::DigitalGenericLookupTable));
         self.register(Arc::new(super::models::DigitalOscillator));
         self.register(Arc::new(super::models::DigitalPwmOscillator));
+        self.register(Arc::new(super::models::NumericallyControlledOscillator));
         self.register(Arc::new(super::models::DigitalProcess));
         self.register(Arc::new(super::models::DigitalCosim));
 

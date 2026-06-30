@@ -64,6 +64,7 @@
 //! - **d_lut** / **d_genlut** - Digital lookup tables
 //! - **d_fdiv** - Digital frequency divider
 //! - **d_osc** / **d_pwm** - Controlled digital oscillators
+//! - **nco** - MIDI numerically controlled oscillator
 //! - **d_process** - External digital process co-simulation
 //! - **d_cosim** - External irreversible digital co-simulation
 //! - **d_dff** - D flip-flop
@@ -135,8 +136,8 @@ pub use digital::{
     DigitalGenericLookupTable, DigitalInverter, DigitalLookupTable, DigitalNand, DigitalNor,
     DigitalOpenCollector, DigitalOpenEmitter, DigitalOr, DigitalOscillator, DigitalProcess,
     DigitalPulldown, DigitalPullup, DigitalPwmOscillator, DigitalRam, DigitalSource,
-    DigitalStateMachine, DigitalTristate, DigitalXnor, DigitalXor, JkFlipFlop, SrFlipFlop, SrLatch,
-    TFlipFlop,
+    DigitalStateMachine, DigitalTristate, DigitalXnor, DigitalXor, JkFlipFlop,
+    NumericallyControlledOscillator, SrFlipFlop, SrLatch, TFlipFlop,
 };
 
 pub use lookup::{PiecewiseLinear, PiecewiseLinearTimeSeries};
