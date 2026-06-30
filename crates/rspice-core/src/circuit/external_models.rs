@@ -940,7 +940,7 @@ impl CircuitData {
             let ports = instance.ports();
             // Get contributions from each output port
             for (port_idx, connection) in instance.connections().iter().enumerate() {
-                if let Some(contributions) = instance.get_analog_vector_contributions(port_idx) {
+                if instance.has_analog_vector_contributions(port_idx) {
                     let Some(port) = ports.get(port_idx) else {
                         continue;
                     };
@@ -948,7 +948,7 @@ impl CircuitData {
                         crate::xspice::PortConnection::AnalogVector(nodes) => {
                             for (index, node) in nodes.iter().copied().enumerate() {
                                 let (conductance, current) =
-                                    contributions.get(index).copied().unwrap_or((0.0, 0.0));
+                                    instance.analog_vector_contribution_at(port_idx, index);
                                 match port.default_type {
                                     crate::xspice::PortType::Voltage
                                     | crate::xspice::PortType::DifferentialVoltage => {
@@ -991,7 +991,7 @@ impl CircuitData {
                         crate::xspice::PortConnection::TypedAnalogVector(elements) => {
                             for (index, element) in elements.iter().enumerate() {
                                 let (conductance, current) =
-                                    contributions.get(index).copied().unwrap_or((0.0, 0.0));
+                                    instance.analog_vector_contribution_at(port_idx, index);
                                 match element {
                                     crate::xspice::AnalogInputConnection::Node(node) => {
                                         match port.default_type {

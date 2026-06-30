@@ -1911,25 +1911,44 @@ impl XspiceInstance {
         }
     }
 
-    /// Get analog vector contributions (conductance, current/value) for stamping.
-    pub fn get_analog_vector_contributions(&self, port_idx: usize) -> Option<Vec<(Value, Value)>> {
-        let port = self.ports.get(port_idx)?;
-        let is_output = port.direction == super::PortDirection::Out;
-        if !is_output || !port.is_vector || !port.default_type.is_analog() {
-            return None;
+    /// Whether a port produces analog vector contributions for stamping.
+    pub fn has_analog_vector_contributions(&self, port_idx: usize) -> bool {
+        self.ports.get(port_idx).is_some_and(|port| {
+            port.direction == super::PortDirection::Out
+                && port.is_vector
+                && port.default_type.is_analog()
+        })
+    }
+
+    /// Get one analog vector contribution without allocating the full vector.
+    pub fn analog_vector_contribution_at(
+        &self,
+        port_idx: usize,
+        output_index: usize,
+    ) -> (Value, Value) {
+        let Some(port) = self.ports.get(port_idx) else {
+            return (0.0, 0.0);
+        };
+        if !self.has_analog_vector_contributions(port_idx) {
+            return (0.0, 0.0);
         }
 
+        (
+            self.context.partial_vector_value(&port.name, output_index),
+            self.context.output_vector_value(&port.name, output_index),
+        )
+    }
+
+    /// Get analog vector contributions (conductance, current/value) for stamping.
+    pub fn get_analog_vector_contributions(&self, port_idx: usize) -> Option<Vec<(Value, Value)>> {
+        if !self.has_analog_vector_contributions(port_idx) {
+            return None;
+        }
+        let port = self.ports.get(port_idx)?;
         let width = self.context.port_width(&port.name);
-        let outputs = self.context.output_vector(&port.name);
-        let partials = self.context.partial_vector(&port.name);
         Some(
             (0..width)
-                .map(|index| {
-                    (
-                        partials.get(index).copied().unwrap_or(0.0),
-                        outputs.get(index).copied().unwrap_or(0.0),
-                    )
-                })
+                .map(|index| self.analog_vector_contribution_at(port_idx, index))
                 .collect(),
         )
     }
@@ -2610,6 +2629,36 @@ mod tests {
 
         assert!(matches!(err, CmError::InvalidPortConnection(_)));
         assert!(err.to_string().contains("out"));
+    }
+
+    #[test]
+    fn analog_vector_contribution_accessor_avoids_full_vector_allocation() {
+        let model = model_with_ports(vec![PortSpec::vector_output("out", PortType::Current)]);
+        let mut instance = XspiceInstance::new(
+            "Avecout",
+            Arc::new(model),
+            vec![PortConnection::AnalogVector(vec![1, 2])],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("analog vector output should construct");
+
+        instance
+            .context
+            .set_output_vector_with_partials("out", vec![1.5, 2.5], vec![0.25, 0.5]);
+
+        assert!(instance.has_analog_vector_contributions(0));
+        assert_eq!(instance.analog_vector_contribution_at(0, 0), (0.25, 1.5));
+        assert_eq!(instance.analog_vector_contribution_at(0, 1), (0.5, 2.5));
+        assert_eq!(instance.analog_vector_contribution_at(0, 2), (0.0, 0.0));
+        assert_eq!(
+            instance
+                .get_analog_vector_contributions(0)
+                .expect("vector contributions should still be available"),
+            vec![(0.25, 1.5), (0.5, 2.5)]
+        );
     }
 
     #[test]
