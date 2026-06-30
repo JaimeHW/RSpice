@@ -378,20 +378,37 @@ fn transformed_rows_signature(
     }
 }
 
+fn transformed_rows_signature_matches(
+    ctx: &CmContext,
+    signature: &FileSourceTransformedRowsSignature,
+    file: &str,
+    width: usize,
+    virtual_stamp: Option<data_file::DataFileStamp>,
+) -> bool {
+    signature.file == file
+        && signature.width == width
+        && signature.virtual_stamp == virtual_stamp
+        && signature.timeoffset == ctx.param("timeoffset")
+        && signature.timescale == ctx.param("timescale")
+        && signature.timerelative == bool_param(ctx, "timerelative")
+        && ctx.real_vector_param("amploffset").unwrap_or(&[]) == signature.amploffset.as_slice()
+        && ctx.real_vector_param("amplscale").unwrap_or(&[]) == signature.amplscale.as_slice()
+}
+
 fn transformed_rows_for_context(
     ctx: &mut CmContext,
     file: &str,
     width: usize,
 ) -> CmResult<Arc<FileSourceRowsData>> {
     let (raw_fields, virtual_stamp) = load_filesource_for_context(ctx, file, width)?;
-    let signature = transformed_rows_signature(ctx, file, width, virtual_stamp);
     if let Some(resource) =
         ctx.resource::<FileSourceTransformedRowsResource>(FILESOURCE_TRANSFORMED_ROWS_RESOURCE)
-        && resource.signature == signature
+        && transformed_rows_signature_matches(ctx, &resource.signature, file, width, virtual_stamp)
     {
         return resource.rows.clone();
     }
 
+    let signature = transformed_rows_signature(ctx, file, width, virtual_stamp);
     let rows = transform_rows(ctx, &raw_fields, width).map(Arc::new);
     ctx.set_resource(
         FILESOURCE_TRANSFORMED_ROWS_RESOURCE,
@@ -409,10 +426,9 @@ fn transformed_rows_from_context(
     width: usize,
 ) -> CmResult<Arc<FileSourceRowsData>> {
     let (raw_fields, virtual_stamp) = load_filesource_from_context(ctx, file, width)?;
-    let signature = transformed_rows_signature(ctx, file, width, virtual_stamp);
     if let Some(resource) =
         ctx.resource::<FileSourceTransformedRowsResource>(FILESOURCE_TRANSFORMED_ROWS_RESOURCE)
-        && resource.signature == signature
+        && transformed_rows_signature_matches(ctx, &resource.signature, file, width, virtual_stamp)
     {
         return resource.rows.clone();
     }
