@@ -4,9 +4,9 @@
 //! to the runtime circuit representation.
 
 #![allow(clippy::needless_range_loop)]
-use super::behavioral_expr::prepare_behavioral_expression;
 use super::{Engine, JfetLevel2Model, SimulationError, SpiceDialect, extract_dc_value};
 use crate::device::{JfetChannelModel, MosBodyJunctionModel};
+use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{Element, ElementKind, SourceSpec, XspicePort, flatten_netlist_with_models};
 use crate::{CircuitData, Netlist};
 #[cfg(feature = "veriloga")]

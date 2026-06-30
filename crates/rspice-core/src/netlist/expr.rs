@@ -10,6 +10,7 @@ use crate::Value;
 use std::collections::HashMap;
 
 mod api;
+mod behavioral;
 mod context;
 mod error;
 mod eval;
@@ -22,6 +23,7 @@ mod tests;
 use parser::ExprParser;
 
 pub use api::{eval_expression, eval_simple, parse_expression};
+pub use behavioral::prepare_behavioral_expression;
 pub use context::{DEFAULT_RANDOM_SEED, FunctionDef, ParamContext, RandomState};
 pub use error::ExprError;
 pub use eval::evaluate;

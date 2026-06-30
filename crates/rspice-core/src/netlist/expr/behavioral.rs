@@ -1,11 +1,11 @@
-//! Behavioral expression preprocessing for circuit build.
+//! Behavioral expression preprocessing shared by flattening and circuit build.
 //!
-//! This module expands user-defined `.FUNC` calls into plain expressions before
-//! strict behavioral parsing/compilation.
+//! User-defined `.FUNC` calls and scalar `.PARAM` references are expanded here,
+//! while circuit-state probes such as `V(...)` and `I(...)` remain symbolic for
+//! the behavioral compiler and final circuit binding pass.
 
-use crate::netlist::ParamContext;
-use crate::netlist::expr::{
-    BinOpKind, Expr as NetExpr, UnaryOpKind, parse_expression as parse_net_expr,
+use super::{
+    BinOpKind, Expr as NetExpr, ParamContext, UnaryOpKind, parse_expression as parse_net_expr,
 };
 use std::collections::HashMap;
 
@@ -14,8 +14,8 @@ const MAX_FUNCTION_EXPANSION_DEPTH: usize = 64;
 /// Prepare a behavioral source expression for strict compilation.
 ///
 /// - Expands user-defined `.FUNC` calls recursively.
-/// - Substitutes globally-defined `.PARAM` identifiers when available.
-/// - Leaves non-user function calls (e.g., `V(...)`, `SIN(...)`) untouched.
+/// - Substitutes scoped `.PARAM` identifiers when available.
+/// - Leaves non-user function calls and circuit probes untouched.
 pub fn prepare_behavioral_expression(
     expression: &str,
     params: &ParamContext,
@@ -74,6 +74,10 @@ impl<'a> FunctionExpander<'a> {
                 op: *op,
                 left: Box::new(self.expand_expr(left, depth + 1)?),
                 right: Box::new(self.expand_expr(right, depth + 1)?),
+            }),
+            NetExpr::FnCall { name, args } if is_circuit_probe(name) => Ok(NetExpr::FnCall {
+                name: name.clone(),
+                args: args.clone(),
             }),
             NetExpr::FnCall { name, args } => {
                 let expanded_args = args
@@ -139,6 +143,10 @@ fn is_behavioral_runtime_symbol(name: &str) -> bool {
     name.eq_ignore_ascii_case("TEMPER")
 }
 
+fn is_circuit_probe(name: &str) -> bool {
+    name.eq_ignore_ascii_case("V") || name.eq_ignore_ascii_case("I")
+}
+
 fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> NetExpr {
     match expr {
         NetExpr::Number(v) => NetExpr::Number(*v),
@@ -160,10 +168,7 @@ fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> 
             args: fn_args,
         } => NetExpr::FnCall {
             name: name.clone(),
-            args: if name.eq_ignore_ascii_case("V") || name.eq_ignore_ascii_case("I") {
-                // Preserve symbolic probe references in V(...) / I(...). ngspice
-                // resolves these against circuit node/branch namespaces, even
-                // when formal .FUNC argument names collide with probe symbols.
+            args: if is_circuit_probe(name) {
                 fn_args.clone()
             } else {
                 fn_args

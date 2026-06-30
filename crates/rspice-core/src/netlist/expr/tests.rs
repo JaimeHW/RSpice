@@ -19,6 +19,20 @@ fn bare_named_constants_parse_as_numbers() {
     assert!((eval_with(&ctx, "exp(1)") - std::f64::consts::E).abs() < 1.0e-15);
 }
 
+#[test]
+fn behavioral_preparation_expands_functions_without_substituting_probe_names() {
+    let mut ctx = ParamContext::new();
+    ctx.set("scale", 2.0);
+    ctx.set("node", 9.0);
+    ctx.set("vsense", 7.0);
+    ctx.define_function("gain", vec!["x".to_string(), "y".to_string()], "scale*x*y");
+
+    let prepared = prepare_behavioral_expression("gain(V(node), I(vsense))", &ctx)
+        .expect("behavioral expression prepares");
+
+    assert_eq!(prepared, "((2*V(NODE))*I(VSENSE))");
+}
+
 //=============================================================================
 // RandomState: determinism and distribution
 //=============================================================================

@@ -20,7 +20,6 @@
 
 mod ac;
 mod advanced;
-mod behavioral_expr;
 mod builder;
 mod config;
 mod config_resolver;

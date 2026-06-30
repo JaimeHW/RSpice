@@ -4073,6 +4073,49 @@ mod tests {
     }
 
     #[test]
+    fn subckt_body_function_expands_inside_behavioral_source_when_flattened() {
+        let netlist = Netlist::parse(
+            "subckt behavioral function scope\n\
+             X1 2 3 1 FooCkt\n\
+             X2 4 5 1 FooCkt PARAMS: coef=2\n\
+             .subckt FooCkt A B CTL PARAMS: coef=1\n\
+             .func F1(X) {coef*X*X}\n\
+             B1 A 0 V={F1(V(CTL))}\n\
+             R1 A B 10k\n\
+             R2 B 0 5k\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("subcircuit behavioral function deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("subcircuit behavioral function flattens");
+        let x1_expression = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::BehavioralVoltage { expression, .. } if element.name == "X1.B1" => {
+                    Some(expression.as_str())
+                }
+                _ => None,
+            })
+            .expect("X1 behavioral source exists");
+        let x2_expression = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::BehavioralVoltage { expression, .. } if element.name == "X2.B1" => {
+                    Some(expression.as_str())
+                }
+                _ => None,
+            })
+            .expect("X2 behavioral source exists");
+
+        assert_eq!(x1_expression, "((1*V(1))*V(1))");
+        assert_eq!(x2_expression, "((2*V(1))*V(1))");
+    }
+
+    #[test]
     fn passive_unit_words_after_numeric_values_are_consumed() {
         let netlist = Netlist::parse(
             "passive unit words\n\

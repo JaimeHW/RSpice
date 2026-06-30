@@ -15,6 +15,7 @@
 //! - Proper parameter scoping with precedence resolution
 
 #![allow(clippy::too_many_arguments)]
+use super::expr::prepare_behavioral_expression;
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
 use super::{
@@ -965,6 +966,33 @@ impl<'a> Flattener<'a> {
                 real_vector_expr_params: Vec::new(),
             },
 
+            ElementKind::BehavioralVoltage {
+                expression,
+                tc1,
+                tc2,
+            } => ElementKind::BehavioralVoltage {
+                expression: self.prepare_scoped_behavioral_expression(
+                    expression,
+                    scope,
+                    element_path,
+                )?,
+                tc1: *tc1,
+                tc2: *tc2,
+            },
+            ElementKind::BehavioralCurrent {
+                expression,
+                tc1,
+                tc2,
+            } => ElementKind::BehavioralCurrent {
+                expression: self.prepare_scoped_behavioral_expression(
+                    expression,
+                    scope,
+                    element_path,
+                )?,
+                tc1: *tc1,
+                tc2: *tc2,
+            },
+
             // Controlled sources
             ElementKind::Vcvs {
                 gain,
@@ -1051,6 +1079,20 @@ impl<'a> Flattener<'a> {
             }
         }
         Ok(merged)
+    }
+
+    fn prepare_scoped_behavioral_expression(
+        &self,
+        expression: &str,
+        scope: &ParamContext,
+        element_path: &str,
+    ) -> Result<String, ParseError> {
+        prepare_behavioral_expression(expression, scope).map_err(|err| {
+            ParseError::InvalidValue(format!(
+                "behavioral expression for element '{}' could not be prepared: {}",
+                element_path, err
+            ))
+        })
     }
 
     fn merge_deferred_string_params(
