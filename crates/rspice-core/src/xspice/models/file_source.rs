@@ -459,7 +459,11 @@ fn transform_rows(
     let amplscale = vector_transform_param(ctx, "amplscale")?;
     let amploffset = vector_transform_param(ctx, "amploffset")?;
 
-    let mut fields = Vec::with_capacity(raw_fields.len());
+    let expected_columns = width + 1;
+    let mut rows = Vec::with_capacity(raw_fields.len() / expected_columns);
+    let mut row_time = 0.0;
+    let mut row_values = Vec::with_capacity(width);
+    let mut row_column = 0;
     let mut previous_time = timeoffset;
     for raw in raw_fields {
         let value = match raw.role {
@@ -486,16 +490,21 @@ fn transform_rows(
                 raw.value * scale + offset
             }
         };
-        fields.push(value);
-    }
 
-    let expected_columns = width + 1;
-    let mut rows = Vec::with_capacity(fields.len() / expected_columns);
-    for chunk in fields.chunks_exact(expected_columns) {
-        rows.push(FileSourceRow {
-            time: chunk[0],
-            values: chunk[1..].to_vec(),
-        });
+        if row_column == 0 {
+            row_time = value;
+            row_values.clear();
+        } else {
+            row_values.push(value);
+        }
+        row_column += 1;
+        if row_column == expected_columns {
+            rows.push(FileSourceRow {
+                time: row_time,
+                values: row_values.clone(),
+            });
+            row_column = 0;
+        }
     }
 
     if rows.is_empty() {
