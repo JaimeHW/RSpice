@@ -9,7 +9,9 @@ use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
 };
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+const POLY_PLAN_RESOURCE: &str = "xspice.spice2poly.plan";
 
 #[derive(Debug, Default)]
 pub struct Spice2Poly;
@@ -21,6 +23,30 @@ pub struct IcmSpice2Poly;
 struct PolyEval {
     value: Value,
     partials: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct PolyTerm {
+    coefficient: Value,
+    exponents: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+struct PolyPlan {
+    constant: Value,
+    terms: Vec<PolyTerm>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct PolyPlanSignature {
+    input_count: usize,
+    coef: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct PolyPlanResource {
+    signature: PolyPlanSignature,
+    plan: CmResult<Arc<PolyPlan>>,
 }
 
 fn ports() -> &'static [PortSpec] {
@@ -77,6 +103,27 @@ fn invalid_param(name: &str, message: impl Into<String>) -> CmError {
     }
 }
 
+fn validate_coef(coef: &[Value]) -> CmResult<()> {
+    if coef.len() < 2 {
+        return Err(invalid_param(
+            "coef",
+            format!(
+                "coefficient vector requires at least 2 values, got {}",
+                coef.len()
+            ),
+        ));
+    }
+    for (index, value) in coef.iter().enumerate() {
+        if !value.is_finite() {
+            return Err(invalid_param(
+                "coef",
+                format!("coefficient {index} must be finite, got {value}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn checked_inputs(ctx: &CmContext) -> CmResult<&[AnalogValue]> {
     let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if inputs.is_empty() {
@@ -100,23 +147,7 @@ fn checked_coef(ctx: &CmContext) -> CmResult<&[Value]> {
     let coef = ctx
         .real_vector_param("coef")
         .ok_or_else(|| CmError::MissingParameter("coef".to_string()))?;
-    if coef.len() < 2 {
-        return Err(invalid_param(
-            "coef",
-            format!(
-                "coefficient vector requires at least 2 values, got {}",
-                coef.len()
-            ),
-        ));
-    }
-    for (index, value) in coef.iter().enumerate() {
-        if !value.is_finite() {
-            return Err(invalid_param(
-                "coef",
-                format!("coefficient {index} must be finite, got {value}"),
-            ));
-        }
-    }
+    validate_coef(coef)?;
     Ok(coef)
 }
 
@@ -179,36 +210,92 @@ fn nxtpwr(pwrseq: &mut [usize]) {
     pwrseq[k - 2] -= 1;
 }
 
-fn evaluate_poly(inputs: &[AnalogValue], coef: &[Value], multiplier: Value) -> PolyEval {
-    let mut exponents = vec![0usize; inputs.len()];
-    let mut value = coef[0];
-    let mut partials = vec![0.0; inputs.len()];
+fn poly_plan_signature(ctx: &CmContext, input_count: usize) -> CmResult<PolyPlanSignature> {
+    let coef = ctx
+        .real_vector_param("coef")
+        .ok_or_else(|| CmError::MissingParameter("coef".to_string()))?;
+    Ok(PolyPlanSignature {
+        input_count,
+        coef: coef.to_vec(),
+    })
+}
 
+fn build_poly_plan(input_count: usize, coef: &[Value]) -> CmResult<Arc<PolyPlan>> {
+    validate_coef(coef)?;
+
+    let mut exponents = vec![0usize; input_count];
+    let mut terms = Vec::with_capacity(coef.len() - 1);
     for coefficient in coef.iter().skip(1).copied() {
         nxtpwr(&mut exponents);
+        terms.push(PolyTerm {
+            coefficient,
+            exponents: exponents.clone(),
+        });
+    }
 
+    Ok(Arc::new(PolyPlan {
+        constant: coef[0],
+        terms,
+    }))
+}
+
+fn cache_poly_plan(ctx: &mut CmContext, input_count: usize) -> CmResult<Arc<PolyPlan>> {
+    let signature = poly_plan_signature(ctx, input_count)?;
+    if let Some(resource) = ctx.resource::<PolyPlanResource>(POLY_PLAN_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.plan.clone();
+    }
+
+    let plan = build_poly_plan(input_count, &signature.coef);
+    ctx.set_resource(
+        POLY_PLAN_RESOURCE,
+        Arc::new(PolyPlanResource {
+            signature,
+            plan: plan.clone(),
+        }),
+    );
+    plan
+}
+
+fn poly_plan(ctx: &CmContext, input_count: usize) -> CmResult<Arc<PolyPlan>> {
+    let signature = poly_plan_signature(ctx, input_count)?;
+    if let Some(resource) = ctx.resource::<PolyPlanResource>(POLY_PLAN_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.plan.clone();
+    }
+
+    build_poly_plan(input_count, &signature.coef)
+}
+
+fn evaluate_poly(inputs: &[AnalogValue], plan: &PolyPlan, multiplier: Value) -> PolyEval {
+    let mut value = plan.constant;
+    let mut partials = vec![0.0; inputs.len()];
+
+    for term in &plan.terms {
         let mut product = 1.0;
-        for (input, exponent) in inputs.iter().zip(exponents.iter().copied()) {
+        for (input, exponent) in inputs.iter().zip(term.exponents.iter().copied()) {
             product *= evterm(input.value, exponent);
         }
-        value += coefficient * product;
+        value += term.coefficient * product;
 
         for input_index in 0..inputs.len() {
-            let exponent = exponents[input_index];
+            let exponent = term.exponents[input_index];
             if exponent == 0 {
                 continue;
             }
 
             let mut partial_product = exponent as Value;
             for (term_index, input) in inputs.iter().enumerate() {
-                let term_exponent = exponents[term_index];
+                let term_exponent = term.exponents[term_index];
                 partial_product *= if term_index == input_index {
                     evterm(input.value, term_exponent - 1)
                 } else {
                     evterm(input.value, term_exponent)
                 };
             }
-            partials[input_index] += coefficient * partial_product;
+            partials[input_index] += term.coefficient * partial_product;
         }
     }
 
@@ -222,9 +309,17 @@ fn evaluate_poly(inputs: &[AnalogValue], coef: &[Value], multiplier: Value) -> P
 
 fn evaluate_context(ctx: &CmContext) -> CmResult<PolyEval> {
     let inputs = checked_inputs(ctx)?;
-    let coef = checked_coef(ctx)?;
+    let plan = poly_plan(ctx, inputs.len())?;
     let multiplier = checked_multiplier(ctx)?;
-    Ok(evaluate_poly(inputs, coef, multiplier))
+    Ok(evaluate_poly(inputs, &plan, multiplier))
+}
+
+fn evaluate_context_cached(ctx: &mut CmContext) -> CmResult<PolyEval> {
+    let input_count = checked_inputs(ctx)?.len();
+    let plan = cache_poly_plan(ctx, input_count)?;
+    let inputs = checked_inputs(ctx)?;
+    let multiplier = checked_multiplier(ctx)?;
+    Ok(evaluate_poly(inputs, &plan, multiplier))
 }
 
 impl CodeModel for Spice2Poly {
@@ -251,7 +346,7 @@ impl CodeModel for Spice2Poly {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let result = evaluate_context(ctx)?;
+        let result = evaluate_context_cached(ctx)?;
         ctx.set_output_with_partial("out", result.value, 0.0);
         Ok(())
     }
@@ -382,10 +477,29 @@ mod tests {
     #[test]
     fn polynomial_value_and_partials_use_multiplier() {
         let inputs = vec![AnalogValue::new(2.0), AnalogValue::new(3.0)];
-        let result = evaluate_poly(&inputs, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2.0);
+        let plan = build_poly_plan(inputs.len(), &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+            .expect("valid polynomial plan");
+        let result = evaluate_poly(&inputs, &plan, 2.0);
 
         assert!((result.value - 228.0).abs() < 1.0e-12);
         assert!((result.partials[0] - 66.0).abs() < 1.0e-12);
         assert!((result.partials[1] - 98.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn plan_cache_reloads_when_coef_or_width_changes() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("coef", vec![1.0, 2.0, 3.0]);
+
+        let first = cache_poly_plan(&mut ctx, 2).expect("valid polynomial plan");
+        let second = cache_poly_plan(&mut ctx, 2).expect("cached polynomial plan");
+        assert!(Arc::ptr_eq(&first, &second));
+
+        let wider = cache_poly_plan(&mut ctx, 3).expect("reloaded polynomial plan");
+        assert!(!Arc::ptr_eq(&first, &wider));
+
+        ctx.set_real_vector_param("coef", vec![1.0, 2.0, 4.0]);
+        let updated = cache_poly_plan(&mut ctx, 3).expect("updated polynomial plan");
+        assert!(!Arc::ptr_eq(&wider, &updated));
     }
 }
