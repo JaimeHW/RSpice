@@ -107,6 +107,7 @@ d1 a 0 dmod
         i_r
     );
     assert!(get("gd") > 0.0, "conductance positive in forward bias");
+    assert!(get("cd").is_finite(), "capacitance is reported");
 }
 
 #[test]

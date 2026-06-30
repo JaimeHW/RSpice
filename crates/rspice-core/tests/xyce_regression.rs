@@ -8,6 +8,12 @@ use rspice_core::testing::{XyceDeckSection, XyceRunnerConfig, XyceTestRunner};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+
+fn xyce_runner_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 fn get_xyce_tests_dir() -> PathBuf {
     PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"))
@@ -233,6 +239,7 @@ fn test_xyce_wrapper_manifest_covers_trimmed_sidecar_contracts() {
 
 #[test]
 fn test_xyce_static_prn_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -299,7 +306,34 @@ fn test_xyce_static_prn_cases_run() {
 }
 
 #[test]
+fn test_xyce_diode_sidewall_cd_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/DIODE/diode_with_sidewall.cir",
+        "Netlists/DIODE/diode_with_sidewall_fcs.cir",
+        "Netlists/DIODE/diode_with_sidewall_mjsw.cir",
+        "Netlists/DIODE/diode_with_sidewall_nbv.cir",
+        "Netlists/DIODE/diode_with_sidewall_ns.cir",
+        "Netlists/DIODE/diode_with_sidewall_php.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a numeric Xyce diode sidewall Cd comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_subckt_wrapper_family_members_run_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -322,6 +356,7 @@ fn test_xyce_subckt_wrapper_family_members_run_natively() {
 
 #[test]
 fn test_xyce_bsim_gm_device_operating_point_probes_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -349,6 +384,7 @@ fn test_xyce_bsim_gm_device_operating_point_probes_run() {
 
 #[test]
 fn test_xyce_bsimsoi3_gmin_scaling_dc_sweep_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/BSIMSOI3/dcSweepNoGminScaling.cir";
@@ -367,6 +403,7 @@ fn test_xyce_bsimsoi3_gmin_scaling_dc_sweep_runs() {
 
 #[test]
 fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -387,6 +424,7 @@ fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
 
 #[test]
 fn test_full_xyce_suite_summary_accounts_for_every_deck() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
