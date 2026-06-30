@@ -1417,6 +1417,85 @@ fn rust_backend_auto_uses_local_storage_for_hybrid_straight_line_assignments() {
 }
 
 #[test]
+fn rust_backend_auto_keeps_hybrid_local_storage_when_residual_needs_scratch() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(hybrid_local_storage_with_scratch_residual_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile hybrid local assignments with scratch residual through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("eval_ddt") && stamp.contains("stamper.stamp_current_node2_local("),
+        "DDT current should still use the scalar hybrid stamp path:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("let s = match &mut self.scratch"),
+        "the analysis-gated nonlinear residual should still allocate scratch AD:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("let mut var_drive: f64 = 0.0;")
+            && stamp.contains("let mut var_shaped: f64 = 0.0;")
+            && stamp.contains("var_drive_dn0")
+            && stamp.contains("var_shaped_dn0"),
+        "scratch-required residual equations must not force scratch-free residual assignments out of local scalar storage:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("let mut var_legacy"),
+        "variables used only by scratch-required residual equations should stay scratch-backed until that residual is scalarized:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_") || stamp.contains("s.ad_value("),
+        "regression fixture should exercise residual scratch AD lowering:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_bounds_hybrid_local_storage_width() {
+    let source = wide_hybrid_local_storage_guard_source(35, 470);
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&source)
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile wide hybrid local-storage guard fixture through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("eval_ddt") && stamp.contains("stamper.stamp_current_node2_local("),
+        "fixture should remain on the scalar-hybrid path for the DDT contribution:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("let s = match &mut self.scratch"),
+        "wide residual assignment chains should remain scratch-backed until sparse scalar locals are available:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("let mut var_x0") && !stamp.contains("let mut var_x469"),
+        "wide residual assignment chains must not expand into unbounded scalar local derivative storage:\n{stamp}"
+    );
+}
+
+#[test]
 fn rust_backend_auto_scalarizes_hybrid_potential_equations() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(potential_runtime_bounded_loop_source())
@@ -18203,6 +18282,85 @@ module hybrid_idt_straight_line_assignments(p, n);
     end
 endmodule
 "#
+}
+
+fn hybrid_local_storage_with_scratch_residual_source() -> &'static str {
+    r#"
+module hybrid_local_storage_scratch_residual(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from [0:inf);
+    parameter real gain = 2.0;
+    parameter real alpha = 1.5;
+    real drive;
+    real shaped;
+    real legacy;
+    analog begin
+        drive = gain * V(p, n);
+        shaped = drive + V(p, n) * V(p, n);
+        legacy = sqrt(abs(V(p, n)) + 1.0)
+            + exp(V(p, n) * 0.01)
+            + ln(1.0 + V(p, n) * V(p, n))
+            + sin(V(p, n))
+            + cos(V(p, n))
+            + tanh(V(p, n))
+            + atan(V(p, n));
+        I(p, n) <+ ddt(c * V(p, n));
+        I(p, n) <+ analysis("dc") ? shaped : (drive * 0.5);
+        I(p, n) <+ analysis("tran") ? (
+            legacy
+            + sqrt(abs(V(p, n)) + 1.0)
+            + exp(V(p, n) * 0.01)
+            + ln(1.0 + V(p, n) * V(p, n))
+            + sin(V(p, n))
+            + cos(V(p, n))
+            + tanh(V(p, n))
+            + atan(V(p, n))
+            + pow(abs(V(p, n)) + 1.0, alpha)
+        ) : 0.0;
+    end
+endmodule
+"#
+}
+
+fn wide_hybrid_local_storage_guard_source(node_count: usize, variable_count: usize) -> String {
+    let nodes = (0..node_count)
+        .map(|index| format!("p{index}"))
+        .collect::<Vec<_>>();
+    let mut source = String::new();
+    source.push_str("module wide_hybrid_local_guard(");
+    source.push_str(&nodes.join(", "));
+    source.push_str(");\n");
+    source.push_str("    inout ");
+    source.push_str(&nodes.join(", "));
+    source.push_str(";\n");
+    source.push_str("    electrical ");
+    source.push_str(&nodes.join(", "));
+    source.push_str(";\n");
+    source.push_str("    parameter real c = 1e-12 from [0:inf);\n");
+    for index in 0..variable_count {
+        source.push_str(&format!("    real x{index};\n"));
+    }
+    source.push_str("    analog begin\n");
+    source.push_str("        I(p0, p1) <+ ddt(c * V(p0, p1));\n");
+    for index in 0..variable_count {
+        let pos = index % node_count;
+        let neg = (index + 1) % node_count;
+        if index == 0 {
+            source.push_str(&format!("        x0 = V(p{pos}, p{neg});\n"));
+        } else {
+            source.push_str(&format!(
+                "        x{index} = x{} + V(p{pos}, p{neg});\n",
+                index - 1
+            ));
+        }
+    }
+    source.push_str(&format!(
+        "        I(p0, p1) <+ analysis(\"dc\") ? x{} : 0.0;\n",
+        variable_count - 1
+    ));
+    source.push_str("    end\nendmodule\n");
+    source
 }
 
 fn potential_runtime_bounded_loop_source() -> &'static str {
