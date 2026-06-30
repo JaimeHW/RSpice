@@ -1193,15 +1193,16 @@ pub fn eval(
     let vbd = vbs - vds; // device-frame Vbd
     let n_vtm1 = vtm * p.ndiode;
 
-    // DEXP: ngspice's exp clamped above 40 to a linear extension (returns value
-    // and its derivative factor).
+    // DEXP: ngspice/Xyce BSIMSOI3 clamp with an upper linear extension and a
+    // constant lower tail (returns value and derivative factor).
     let dexp = |arg: Value| -> (Value, Value) {
-        if arg > 40.0 {
-            let e = 2.353_852_668_370_2e17; // exp(40)
-            (e * (arg - 39.0), e)
-        } else if arg < -40.0 {
-            let e = 4.248_354_255_291_589e-18; // exp(-40)
-            (e * (41.0 + arg), e)
+        const MAX_EXPL: Value = 2.688_117_142e43;
+        const MIN_EXPL: Value = 3.720_075_976e-44;
+        const EXPL_THRESHOLD: Value = 100.0;
+        if arg > EXPL_THRESHOLD {
+            (MAX_EXPL * (1.0 + arg - EXPL_THRESHOLD), MAX_EXPL)
+        } else if arg < -EXPL_THRESHOLD {
+            (MIN_EXPL, 0.0)
         } else {
             let e = arg.exp();
             (e, e)

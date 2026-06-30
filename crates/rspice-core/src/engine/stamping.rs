@@ -10,14 +10,14 @@ impl Engine {
     /// Final DC nodal gmin floor.
     ///
     /// B3SOI floating-body currents can be in the e-18 A range at a valid DC
-    /// operating point. A global e-15 shunt visibly deforms those roots, while
-    /// ngspice's SOI body-row floor is effectively e-18 (`CKTgmin * 1e-6`).
-    /// Keep explicit homotopy gmin steps unchanged; only reduce the physical
-    /// final floor for circuits containing native BSIM3-SOI devices.
+    /// operating point. Xyce/ngspice apply their BSIMSOI GMIN inside the device
+    /// load; adding a second simulator-level final shunt visibly deforms those
+    /// roots. Keep explicit homotopy GMIN steps unchanged, but solve the final
+    /// native BSIM3-SOI DC system without an extra nodal floor.
     pub(in crate::engine) fn dc_nodal_gmin_floor(&self, circuit: &CircuitData) -> Value {
         let gmin = self.config.convergence_config.gmin_target.max(0.0);
         if circuit.has_b3soi_devices() {
-            gmin.min(1.0e-18)
+            0.0
         } else {
             gmin
         }
