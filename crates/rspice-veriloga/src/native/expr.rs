@@ -8211,6 +8211,7 @@ fn is_static_condition_op(op: &NativeOp) -> bool {
                 | NativeOp::LoadVariableDyn { .. }
                 | NativeOp::LoadTemperature
                 | NativeOp::LoadThermalVoltage
+                | NativeOp::Analysis(_)
                 | NativeOp::LoadMfactor
         )
 }
@@ -8346,6 +8347,7 @@ fn is_static_condition_instruction(instruction: &Instruction) -> bool {
             | Instruction::PushTemperature
             | Instruction::PushVt
             | Instruction::PushMfactor
+            | Instruction::Analysis(_)
             | Instruction::Add
             | Instruction::Sub
             | Instruction::Mul
@@ -12668,6 +12670,34 @@ endmodule
             assert_eq!(lowered.ops(), expected_ops.as_slice(), "{case}");
             assert_eq!(lowered.max_stack_depth(), 1, "{case}");
         }
+    }
+
+    #[test]
+    fn restricted_static_conditions_accept_analysis_without_fallback() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::Analysis(5),
+                Instruction::PushConst(0.5),
+                Instruction::Gt,
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "static-analysis",
+            EntryKind::StaticCondition,
+            &program,
+            limits(0, 0),
+        )
+        .expect("analysis() has a direct native x64 static-condition lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::Analysis(5),
+                NativeOp::CompareConst(CompareOp::Gt, 0.5)
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 1);
     }
 
     #[test]
