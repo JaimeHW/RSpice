@@ -51,6 +51,7 @@ pub struct SimulationConfigOverrides {
     pub max_timestep: Option<Value>,
     pub integration_method: Option<IntegrationMethod>,
     pub transient_trtol: Option<Value>,
+    pub ramptime: Option<Value>,
     pub convergence_preset: Option<ConvergencePreset>,
     /// Legacy RELTOL knob: updates both `SimulationConfig::tolerance` and
     /// `ConvergenceConfig::voltage_reltol`.
@@ -83,6 +84,7 @@ pub fn resolve_simulation_config(
     let mut max_timestep = base.max_timestep;
     let mut integration_method = base.integration_method;
     let mut transient_trtol = base.transient_trtol;
+    let mut ramptime = base.ramptime;
     let mut tolerance = base.tolerance;
     let mut voltage_reltol = base.convergence_config.voltage_reltol;
     let mut voltage_abstol = base.convergence_config.voltage_abstol;
@@ -110,6 +112,9 @@ pub fn resolve_simulation_config(
         }
         if let Some(trtol) = opts.trtol {
             transient_trtol = trtol;
+        }
+        if let Some(value) = opts.ramptime {
+            ramptime = value;
         }
         if let Some(reltol) = opts.reltol {
             tolerance = reltol;
@@ -154,6 +159,9 @@ pub fn resolve_simulation_config(
     if let Some(trtol) = overrides.transient_trtol {
         transient_trtol = trtol;
     }
+    if let Some(value) = overrides.ramptime {
+        ramptime = value;
+    }
     if let Some(reltol) = overrides.reltol {
         tolerance = reltol;
         voltage_reltol = reltol;
@@ -195,6 +203,7 @@ pub fn resolve_simulation_config(
     resolved.max_timestep = max_timestep;
     resolved.integration_method = integration_method;
     resolved.transient_trtol = transient_trtol;
+    resolved.ramptime = ramptime;
     resolved.tolerance = tolerance;
     resolved.convergence_config.voltage_reltol = voltage_reltol;
     resolved.convergence_config.voltage_abstol = voltage_abstol;

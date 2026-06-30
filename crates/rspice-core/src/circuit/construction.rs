@@ -584,6 +584,23 @@ impl CircuitData {
         Ok(())
     }
 
+    /// Resolve XSPICE `%vnam` branch-current references after all branch-bearing
+    /// elements have been allocated.
+    pub fn resolve_xspice_branch_references(&mut self) -> Result<(), CircuitError> {
+        let branch_lookup = self.branch_names.clone();
+        for instance in &mut self.xspice_instances {
+            instance
+                .resolve_branch_references(|name| {
+                    branch_lookup
+                        .get(name)
+                        .or_else(|| branch_lookup.get(&name.to_uppercase()))
+                        .copied()
+                })
+                .map_err(|err| CircuitError::InvalidComponent(err.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Convert branch ordinal to matrix index
     /// Branch ordinals start at 1, matrix indices for branches start at num_nodes
     pub fn get_branch_matrix_index(&self, branch_ordinal: NodeId) -> usize {

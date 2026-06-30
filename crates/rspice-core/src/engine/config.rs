@@ -57,6 +57,8 @@ pub struct SimulationConfig {
     pub max_timestep: Value,
     /// Temperature in Kelvin
     pub temperature: Value,
+    /// Transient source/code-model ramping time in seconds. A value <= 0 disables it.
+    pub ramptime: Value,
     /// Integration method for transient analysis
     pub integration_method: crate::analysis::IntegrationMethod,
     /// Broad SPICE compatibility policy used by config resolution.
@@ -299,6 +301,7 @@ impl Default for SimulationConfig {
             min_timestep: crate::constants::MIN_TIMESTEP,
             max_timestep: crate::constants::MAX_TIMESTEP,
             temperature: crate::constants::TEMP_REFERENCE,
+            ramptime: 0.0,
             integration_method: crate::analysis::IntegrationMethod::TrapGear,
             spice_dialect: SpiceDialect::BestAvailable,
             jfet_level2_model: JfetLevel2Model::DialectDefault,
