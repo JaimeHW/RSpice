@@ -50,7 +50,10 @@ const STATE_PREV_LEN_OFFSET: i32 = 288;
 const STATE_VALUES_LEN_OFFSET: i32 = 296;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const LITERAL_POOL_ALIGNMENT: usize = WORD_BYTES;
+const VECTOR_LITERAL_ALIGNMENT: usize = 16;
 const LITERAL_POOL_PADDING_BYTE: u8 = 0x90;
+const ABS_VALUE_MASK_LOW: u64 = 0x7fff_ffff_ffff_ffff;
+const ABS_VALUE_MASK_HIGH: u64 = 0;
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
 const BOOLEAN_EPSILON: f64 = 1.0e-15;
@@ -213,6 +216,7 @@ struct FunctionCompiler {
     encoder: X64Encoder,
     depth: usize,
     literals: Vec<LiteralPatch>,
+    vector_literals: Vec<VectorLiteralPatch>,
     uses_helper_calls: bool,
     saves_entry_args: bool,
     local_frame_bytes: i32,
@@ -226,6 +230,12 @@ struct FunctionCompiler {
 struct LiteralPatch {
     displacement_offset: usize,
     value: f64,
+}
+
+#[derive(Debug)]
+struct VectorLiteralPatch {
+    displacement_offset: usize,
+    lanes: [u64; 2],
 }
 
 impl FunctionCompiler {
@@ -246,6 +256,7 @@ impl FunctionCompiler {
             encoder: X64Encoder::new(),
             depth: 0,
             literals: Vec::new(),
+            vector_literals: Vec::new(),
             uses_helper_calls,
             saves_entry_args,
             local_frame_bytes,
@@ -837,11 +848,12 @@ impl FunctionCompiler {
         Ok(())
     }
 
-    fn emit_abs_register(&mut self, target: Xmm, scratch: Gpr) {
-        debug_assert_ne!(scratch, Gpr::Rax);
-        self.encoder.movq_r64_xmm(scratch, target);
-        self.encoder.btr_r64_imm8(scratch, 63);
-        self.encoder.movq_xmm_r64(target, scratch);
+    fn emit_abs_register(&mut self, target: Xmm, _scratch: Gpr) {
+        let displacement_offset = self.encoder.andpd_xmm_m128_rip_disp32(target, 0);
+        self.vector_literals.push(VectorLiteralPatch {
+            displacement_offset,
+            lanes: [ABS_VALUE_MASK_LOW, ABS_VALUE_MASK_HIGH],
+        });
     }
 
     fn emit_sqrt(&mut self) -> JitResult<()> {
@@ -3094,6 +3106,36 @@ impl FunctionCompiler {
                 .copy_from_slice(&displacement.to_le_bytes());
         }
 
+        let mut vector_literal_offsets: Vec<([u64; 2], usize)> = Vec::new();
+        if !self.vector_literals.is_empty() {
+            let padding = (VECTOR_LITERAL_ALIGNMENT - (bytes.len() % VECTOR_LITERAL_ALIGNMENT))
+                % VECTOR_LITERAL_ALIGNMENT;
+            bytes.resize(bytes.len() + padding, LITERAL_POOL_PADDING_BYTE);
+        }
+        for literal in &self.vector_literals {
+            let literal_offset = vector_literal_offsets
+                .iter()
+                .find_map(|(candidate, offset)| (*candidate == literal.lanes).then_some(*offset))
+                .unwrap_or_else(|| {
+                    let offset = bytes.len();
+                    bytes.extend_from_slice(&literal.lanes[0].to_le_bytes());
+                    bytes.extend_from_slice(&literal.lanes[1].to_le_bytes());
+                    vector_literal_offsets.push((literal.lanes, offset));
+                    offset
+                });
+            let next_instruction_offset = literal.displacement_offset + std::mem::size_of::<i32>();
+            let displacement = i32::try_from(
+                literal_offset as isize - next_instruction_offset as isize,
+            )
+            .map_err(|_| JitError::Relocation {
+                model: MODEL.into(),
+                detail: "vector literal pool displacement does not fit in i32".into(),
+            })?;
+
+            bytes[literal.displacement_offset..literal.displacement_offset + 4]
+                .copy_from_slice(&displacement.to_le_bytes());
+        }
+
         Ok(bytes)
     }
 
@@ -3687,11 +3729,12 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        BRANCH_CURRENTS_OFFSET, ConditionCode, ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES,
-        FunctionCompiler, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET,
-        K_BOLTZMANN, LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper,
-        PARAMS_OFFSET, Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES,
-        TableHelper, TimerHelper, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
+        ABS_VALUE_MASK_HIGH, ABS_VALUE_MASK_LOW, BRANCH_CURRENTS_OFFSET, ConditionCode,
+        ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES, FunctionCompiler, Gpr,
+        I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
+        LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET,
+        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, TableHelper, TimerHelper,
+        VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
         assignment_uses_helper_calls, call_result_disp, call_spill_disp,
         compile_assignment_function, compile_assignment_pass_function, compile_value_function,
         entry_ctx_arg_reg, entry_vars_arg_reg, native_op_reads_entry_args,
@@ -3747,6 +3790,31 @@ mod tests {
             three_offset % LITERAL_POOL_ALIGNMENT,
             0,
             "subsequent literal should stay naturally aligned"
+        );
+    }
+
+    #[test]
+    fn vector_literal_pool_reuses_abs_masks_and_aligns_to_16_bytes() {
+        let mut compiler = FunctionCompiler::new(false, false, 0, None, None, 0);
+        compiler.encoder.ret();
+        compiler.emit_abs_register(Xmm::Xmm0, Gpr::R11);
+        compiler.emit_abs_register(Xmm::Xmm1, Gpr::R11);
+
+        let bytes = compiler
+            .finish_with_literals()
+            .expect("vector literal pool relocation succeeds");
+        let mask = abs_value_mask_bytes();
+        let mask_offset = find_bytes(&bytes, &mask).expect("abs mask literal is present");
+
+        assert_eq!(
+            count_bytes(&bytes, &mask),
+            1,
+            "duplicate vector masks should share one pool slot"
+        );
+        assert_eq!(
+            mask_offset % VECTOR_LITERAL_ALIGNMENT,
+            0,
+            "vector literal should be naturally aligned"
         );
     }
 
@@ -7401,17 +7469,40 @@ mod tests {
     fn generated_value_leaf_computes_abs_in_place() {
         let program = native_program(
             EntryKind::StampValue,
-            vec![Instruction::PushConst(-7.5), Instruction::Abs],
+            vec![Instruction::PushTemperature, Instruction::Abs],
             0,
         );
         let bytes = compile_value_function(&program).expect("compile abs leaf");
+        assert!(
+            contains_bytes(&bytes, &andpd_rip_prefix_bytes(Xmm::Xmm0)),
+            "abs should clear the sign bit with a RIP-relative vector mask"
+        );
+        assert!(
+            !contains_bytes(
+                &bytes,
+                &scalar_abs_integer_bit_clear_bytes(Xmm::Xmm0, Gpr::R11)
+            ),
+            "abs should not roundtrip through a GPR"
+        );
+        let mask_offset =
+            find_bytes(&bytes, &abs_value_mask_bytes()).expect("abs mask literal is present");
+        assert_eq!(
+            mask_offset % VECTOR_LITERAL_ALIGNMENT,
+            0,
+            "abs mask literal should be 16-byte aligned"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate abs leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(entry) };
-        let ctx = eval_context(&[], &[], &[], &[]);
+        let mut ctx = eval_context(&[], &[], &[], &[]);
 
+        ctx.temperature = -7.5;
         assert_eq!(f(&ctx, std::ptr::null()), 7.5);
+        ctx.temperature = -0.0;
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
+        ctx.temperature = f64::from_bits(0xfff8_0000_0000_0001);
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0x7ff8_0000_0000_0001);
     }
 
     #[test]
@@ -10658,6 +10749,27 @@ mod tests {
     fn xorpd_xmm_bytes(dst: Xmm, src: Xmm) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.xorpd_xmm_xmm(dst, src);
+        encoder.into_bytes()
+    }
+
+    fn andpd_rip_prefix_bytes(target: Xmm) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.andpd_xmm_m128_rip_disp32(target, 0);
+        encoder.into_bytes()[..4].to_vec()
+    }
+
+    fn abs_value_mask_bytes() -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(16);
+        bytes.extend_from_slice(&ABS_VALUE_MASK_LOW.to_le_bytes());
+        bytes.extend_from_slice(&ABS_VALUE_MASK_HIGH.to_le_bytes());
+        bytes
+    }
+
+    fn scalar_abs_integer_bit_clear_bytes(target: Xmm, scratch: Gpr) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.movq_r64_xmm(scratch, target);
+        encoder.btr_r64_imm8(scratch, 63);
+        encoder.movq_xmm_r64(target, scratch);
         encoder.into_bytes()
     }
 
