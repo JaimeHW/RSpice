@@ -241,6 +241,7 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/RESISTOR/resistor_neg.cir",
         "Netlists/ABM_EXPLN/exp_const.cir",
         "Netlists/BJT_PSPICE_NK/bjt_test_nk.cir",
+        "Netlists/Certification_Tests/BUG_302/DC_comma.cir",
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(

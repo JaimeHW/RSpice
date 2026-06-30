@@ -183,6 +183,12 @@ struct XycePrnTable {
     rows: Vec<Vec<f64>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XycePrnDelimiter {
+    Whitespace,
+    Comma,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct DeadlineAbort {
     start: Instant,
@@ -1273,10 +1279,9 @@ impl XyceTestRunner {
         else {
             return Err("Xyce .prn table has no header".to_string());
         };
-        let columns = header
-            .split_whitespace()
-            .map(str::to_string)
-            .collect::<Vec<_>>();
+        let delimiter = Self::prn_header_delimiter(header)
+            .ok_or_else(|| format!("invalid Xyce .prn header '{}'", header))?;
+        let columns = Self::parse_prn_columns(header, delimiter);
         if columns.is_empty() {
             return Err("Xyce .prn header has no columns".to_string());
         }
@@ -1293,7 +1298,9 @@ impl XyceTestRunner {
                 continue;
             }
             if Self::is_prn_header_line(line) {
-                let repeated_columns = Self::parse_prn_columns(line);
+                let repeated_delimiter = Self::prn_header_delimiter(line)
+                    .ok_or_else(|| format!("invalid repeated Xyce .prn header '{}'", line))?;
+                let repeated_columns = Self::parse_prn_columns(line, repeated_delimiter);
                 if Self::same_prn_columns(&columns, &repeated_columns) {
                     continue;
                 }
@@ -1302,8 +1309,7 @@ impl XyceTestRunner {
                     line_number
                 ));
             }
-            let values = line
-                .split_whitespace()
+            let values = Self::split_prn_fields(line, delimiter)
                 .map(|token| {
                     token.parse::<f64>().map_err(|err| {
                         format!(
@@ -1331,14 +1337,42 @@ impl XyceTestRunner {
         Ok(XycePrnTable { columns, rows })
     }
 
-    fn parse_prn_columns(line: &str) -> Vec<String> {
-        line.split_whitespace().map(str::to_string).collect()
+    fn parse_prn_columns(line: &str, delimiter: XycePrnDelimiter) -> Vec<String> {
+        Self::split_prn_fields(line, delimiter)
+            .map(str::to_string)
+            .collect()
     }
 
     fn is_prn_header_line(line: &str) -> bool {
-        line.split_whitespace()
+        Self::prn_header_delimiter(line).is_some()
+    }
+
+    fn prn_header_delimiter(line: &str) -> Option<XycePrnDelimiter> {
+        if line
+            .split(',')
+            .next()
+            .is_some_and(|token| token.trim().eq_ignore_ascii_case("index"))
+        {
+            return Some(XycePrnDelimiter::Comma);
+        }
+        if line
+            .split_whitespace()
             .next()
             .is_some_and(|token| token.eq_ignore_ascii_case("index"))
+        {
+            return Some(XycePrnDelimiter::Whitespace);
+        }
+        None
+    }
+
+    fn split_prn_fields(
+        line: &str,
+        delimiter: XycePrnDelimiter,
+    ) -> Box<dyn Iterator<Item = &str> + '_> {
+        match delimiter {
+            XycePrnDelimiter::Whitespace => Box::new(line.split_whitespace()),
+            XycePrnDelimiter::Comma => Box::new(line.split(',').map(str::trim)),
+        }
     }
 
     fn same_prn_columns(left: &[String], right: &[String]) -> bool {
@@ -1603,6 +1637,28 @@ Total CPU time: 0.110 seconds.
         );
         assert_eq!(table.rows.len(), 3);
         assert_eq!(table.rows[2], vec![2.0, 0.04, 0.04, 0.2]);
+    }
+
+    #[test]
+    fn prn_parser_accepts_comma_delimited_dc_output() {
+        let table = XyceTestRunner::parse_prn_table(
+            r#"Index,V(2),V(1),I(VDS)
+0,0.00000000e+00,0.00000000e+00,0.00000000e+00
+1,5.00000000e-02,0.00000000e+00,-3.05537186e-09
+End of Xyce(TM) Simulation
+"#,
+        )
+        .expect("parser accepts comma-delimited Xyce PRN output");
+
+        assert_eq!(
+            table.columns,
+            ["Index", "V(2)", "V(1)", "I(VDS)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(table.rows.len(), 2);
+        assert_eq!(table.rows[1], vec![1.0, 0.05, 0.0, -3.05537186e-9]);
     }
 
     #[test]
