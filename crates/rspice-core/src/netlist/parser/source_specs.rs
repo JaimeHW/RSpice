@@ -70,10 +70,14 @@ pub(super) fn parse_source_spec(
                 stream.advance();
                 // Allow optional = after DC (e.g., "dc = 5" or "dc 5")
                 skip_commas(stream);
-                stream.consume(&TokenKind::Equals);
-                dc_value = Some(expect_finite_source_value(
-                    stream, line_num, params, "DC", "value",
-                )?);
+                let had_equals = stream.consume(&TokenKind::Equals);
+                if !had_equals && dc_term_is_omitted(stream) {
+                    dc_value = Some(0.0);
+                } else {
+                    dc_value = Some(expect_finite_source_value(
+                        stream, line_num, params, "DC", "value",
+                    )?);
+                }
             }
             "AC" if ac_terms.is_none() => {
                 stream.advance();
@@ -234,6 +238,14 @@ fn optional_ac_value_or_default(
 }
 
 fn ac_term_is_omitted(stream: &TokenStream) -> bool {
+    match &stream.peek().kind {
+        TokenKind::Newline | TokenKind::Eof => true,
+        TokenKind::Ident(keyword) => is_source_level_keyword(keyword),
+        _ => false,
+    }
+}
+
+fn dc_term_is_omitted(stream: &TokenStream) -> bool {
     match &stream.peek().kind {
         TokenKind::Newline | TokenKind::Eof => true,
         TokenKind::Ident(keyword) => is_source_level_keyword(keyword),

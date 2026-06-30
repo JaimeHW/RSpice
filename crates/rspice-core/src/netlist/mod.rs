@@ -3611,6 +3611,24 @@ mod tests {
                 ..
             } if *ac_magnitude == 1.0 && matches!(transient.as_ref(), SourceSpec::Sin { .. })
         ));
+
+        // Ngspice accepts DC with no scalar value when the transient source
+        // keyword follows directly.
+        let netlist = Netlist::parse(
+            "src order\n\
+             Vin 1 0 DC PWL(0 0 1m 1)\n\
+             R1 1 0 1k\n\
+             .tran 1u 1m\n\
+             .end\n",
+        )
+        .expect("omitted DC value before transient parses");
+        assert!(matches!(
+            first_source_spec(&netlist),
+            SourceSpec::DcTransient {
+                dc_value,
+                transient,
+            } if *dc_value == 0.0 && matches!(transient.as_ref(), SourceSpec::Pwl { .. })
+        ));
     }
 
     #[test]
