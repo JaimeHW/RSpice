@@ -219,11 +219,12 @@ coverage; it is not a substitute for importing the extension in pytest.
 
 ## Validation
 
-Correctness is measured rather than assumed, at four levels: unit tests in each crate, integration tests, oracle-replay fixtures for history-coupled device runtimes, and a regression harness that runs the vendored ngspice test suite deck-by-deck against the RSpice engine — comparing row-by-row against ngspice's reference outputs at 2% relative tolerance with probe-aware absolute floors. The active ngspice corpus lives under `tests/ngspice/`; `tests/xyce/` vendors the Xyce Regression Suite for a future Xyce-specific adapter and is not run by the ngspice harness. Every executed analysis must be backed by a validation oracle, so no deck can pass silently, and each deck runs in a watchdog-supervised process so a hung simulation cannot stall the suite. Current CI separates harness discipline from conformance status: nightly release runs ratchet against the recorded failure watermark in `.github/workflows/nightly.yml`; that watermark should only tighten as decks are fixed.
+Correctness is measured rather than assumed, at four levels: unit tests in each crate, integration tests, oracle-replay fixtures for history-coupled device runtimes, and simulator corpus harnesses. The ngspice harness runs the vendored `tests/ngspice/` suite deck-by-deck against the RSpice engine, comparing row-by-row against ngspice reference outputs at 2% relative tolerance with probe-aware absolute floors. The Xyce harness runs separately against the vendored `tests/xyce/` corpus, discovers every vendored `.cir` file, does not execute upstream Perl/Bash scripts, and reports unsupported Xyce contracts explicitly instead of omitting decks. Every executed analysis must be backed by a validation oracle, so no deck can pass silently, and each ngspice deck runs in a watchdog-supervised process so a hung simulation cannot stall that suite. Current CI separates harness discipline from conformance status: nightly release runs ratchet against the recorded failure watermark in `.github/workflows/nightly.yml`; that watermark should only tighten as decks are fixed.
 
 ```bash
 cargo test --release -p rspice-core                            # unit + integration
 cargo test --release -p rspice-core --test ngspice_regression  # ngspice suite
+cargo test --release -p rspice-core --test xyce_regression     # Xyce corpus
 ```
 
 The harness design — oracle-replay methodology, comparison gating, debug environment variables — is documented in [docs/testing.md](docs/testing.md).

@@ -7,7 +7,7 @@ RSpice treats accuracy as something to be measured continuously against external
 1. **Unit tests** inside each crate, covering models, parsers, and solvers in isolation.
 2. **Oracle-replay fixture tests** for history-coupled device runtimes, which pin a device's internal recursion to data extracted from an instrumented ngspice run (see below).
 3. **Integration tests** under `crates/rspice-core/tests/`, exercising full netlist-to-result flows.
-4. **An ngspice regression harness** that runs the official ngspice test suite (vendored under `tests/ngspice/`, including the checked-in reference `.out` oracles) against the RSpice engine.
+4. **Simulator corpus harnesses** that run the vendored ngspice and Xyce corpora against the RSpice engine with corpus-specific reference adapters.
 
 ## Running the suites
 
@@ -18,6 +18,9 @@ cargo test --release -p rspice-core
 # The ngspice regression suite only
 cargo test --release -p rspice-core --test ngspice_regression
 
+# The Xyce regression corpus adapter only
+cargo test --release -p rspice-core --test xyce_regression
+
 # One suite (e.g. transient decks), with per-deck pass/fail and mismatch detail
 cargo test --release -p rspice-core --test ngspice_regression -- test_ngspice_transient_suite
 ```
@@ -25,12 +28,11 @@ cargo test --release -p rspice-core --test ngspice_regression -- test_ngspice_tr
 ## Vendored corpora
 
 `tests/` is a container for upstream simulator corpora. `tests/ngspice/` is
-the active ngspice-46 corpus used by the Rust regression harness.
+the active ngspice-46 corpus used by the ngspice Rust regression harness.
 `tests/xyce/` contains the Xyce Regression Suite runtime materials
 (`Netlists/`, `OutputData/`, and `TestScripts/`) plus GPL/vendoring notices.
-The Xyce corpus is intentionally not run by `ngspice_regression`; it needs a
-separate adapter because its layout and `.prn` references differ from the
-ngspice `.out` suite.
+The Xyce corpus is run by the separate `xyce_regression` adapter because its
+layout and `.prn` references differ from the ngspice `.out` suite.
 
 ## Oracle-replay fixture tests
 
@@ -45,6 +47,22 @@ The harness (`crates/rspice-core/src/testing/ngspice_runner/`) discovers every `
 Because reference tables sample each binary's internally chosen timesteps, two narrowly gated fallbacks keep the comparison measuring accuracy rather than step-sequence reproduction: steep transient rows allow a slope-gated time-jitter window of one local reference timestep (ngspice itself reproduces its own tables only to within a step at fast edges), and rows where the reference oscillates at sample scale are compared against the local reference envelope. Operating points, smooth regions, and settled levels always keep the strict pointwise tolerances.
 
 Each deck runs in an isolated watchdog-supervised process (`rspice-ngspice-case-runner`), so a hung simulation cannot stall the suite.
+
+## Xyce regression harness
+
+The Xyce harness (`crates/rspice-core/src/testing/xyce_runner.rs`) discovers
+every vendored `.cir` file under `tests/xyce/`, including upstream
+`TestScripts/` fixtures. The full-corpus test fails if any vendored deck is
+invisible to discovery. Upstream Perl and Bash scripts remain vendored for
+provenance, but the RSpice harness does not execute them.
+
+Numerical execution is capability-based rather than hand-picked. A deck runs
+when the Rust adapter can prove a supported contract: currently a direct
+linear R/V/I one-dimensional `.DC` deck with one `.PRINT DC` table and a
+checked-in static Xyce `.prn` oracle in `OutputData/`. Unsupported Xyce
+features are reported as named `EXPECTED_UNSUPPORTED` results, not skipped or
+omitted. As engine and adapter support expands, more decks automatically move
+from expected-unsupported accounting into numeric `.prn` comparisons.
 
 ### Conformance status and ratchet
 
