@@ -85,6 +85,11 @@ class CiConfigurationTests(unittest.TestCase):
             "cargo test -p rspice-veriloga --release --features native --test native_contract -- --test-threads=1",
             workflow,
         )
+        self.assertIn("Smoke Verilog-A native JIT benchmark gate (Linux x64)", workflow)
+        self.assertIn(
+            "cargo run -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 0.1",
+            workflow,
+        )
         self.assertIn("Test UI library (Linux)", workflow)
         self.assertIn("cargo test -p rspice-ui --lib", workflow)
         self.assertGreaterEqual(
@@ -119,6 +124,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("Verilog-A native JIT unit tests", workflow)
         self.assertIn("Verilog-A native JIT contract tests", workflow)
         self.assertIn("Verilog-A native multiplicity tests", workflow)
+        self.assertIn("Smoke Verilog-A native JIT benchmark gate", workflow)
         self.assertIn(
             "cargo test -p rspice-veriloga --features native native:: -- --test-threads=1",
             workflow,
@@ -129,6 +135,10 @@ class CiConfigurationTests(unittest.TestCase):
         )
         self.assertIn(
             "cargo test -p rspice-veriloga --features native --test mfactor -- --test-threads=1",
+            workflow,
+        )
+        self.assertIn(
+            "cargo run -p rspice-bench -- native-jit --iterations 1000 --samples 2 --min-speedup 0.1",
             workflow,
         )
 

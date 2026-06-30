@@ -75,6 +75,8 @@ jobs:
         run: cargo test -p rspice-veriloga --features native --test mfactor -- --test-threads=1
       - name: Test Verilog-A native contract (Linux x64 release)
         run: cargo test -p rspice-veriloga --release --features native --test native_contract -- --test-threads=1
+      - name: Smoke Verilog-A native JIT benchmark gate (Linux x64)
+        run: cargo run -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 0.1
       - name: Clear non-UI test artifacts
         run: cargo clean
       - name: Test UI library (Linux)
@@ -100,6 +102,8 @@ jobs:
         run: cargo test -p rspice-veriloga --features native --test native_contract -- --test-threads=1
       - name: Verilog-A native multiplicity tests
         run: cargo test -p rspice-veriloga --features native --test mfactor -- --test-threads=1
+      - name: Smoke Verilog-A native JIT benchmark gate
+        run: cargo run -p rspice-bench -- native-jit --iterations 1000 --samples 2 --min-speedup 0.1
 
   check-macos-desktop:
     name: Check desktop UI/CLI (macOS)
