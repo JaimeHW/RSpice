@@ -29,6 +29,12 @@ pub struct CodeGenerator {
 pub struct CompiledModel {
     /// Model name
     pub name: SmolStr,
+    /// Stable digest of the preprocessed source text used to produce this
+    /// model. Canonical-native compilation requires this to match the
+    /// canonical IR artifact so bytecode-era assignment lowering cannot be
+    /// mixed with unrelated MIR/HIR.
+    #[serde(default)]
+    pub source_digest: SmolStr,
     /// Number of terminals
     pub num_terminals: usize,
     /// Terminal names

@@ -2523,6 +2523,37 @@ fn validate_canonical_artifact_for_model(
         validate_canonical_equation_matches_stamp(model, &artifact.mir, index, equation, stamp)?;
     }
 
+    validate_canonical_source_digest_for_model(model, artifact)?;
+
+    Ok(())
+}
+
+fn validate_canonical_source_digest_for_model(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<()> {
+    if model.source_digest.is_empty() {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: concat!(
+                "compiled model is missing source digest for canonical native compilation; ",
+                "rebuild it with a digest-aware compiler/codegen path"
+            )
+            .into(),
+        });
+    }
+
+    if model.source_digest != artifact.metadata.source_digest {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical source digest '{}' does not match compiled model source digest '{}'",
+                artifact.metadata.source_digest, model.source_digest
+            )
+            .into(),
+        });
+    }
+
     Ok(())
 }
 
@@ -3561,6 +3592,88 @@ endmodule
     }
 
     #[test]
+    fn compile_model_with_canonical_ir_rejects_assignment_source_mismatch() {
+        let model_source = r#"
+module native_canonical_assignment_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  real x;
+  analog begin
+    x = 1.0;
+    I(p, n) <+ V(p, n);
+  end
+endmodule
+"#;
+        let artifact_source = r#"
+module native_canonical_assignment_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  real x;
+  analog begin
+    x = 2.0;
+    I(p, n) <+ V(p, n);
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(model_source)
+            .expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(artifact_source)
+            .expect("compile assignment-mismatched canonical IR");
+        assert!(
+            !model.assignment_steps.is_empty(),
+            "test must exercise bytecode-era assignment lowering"
+        );
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("same-stamp assignment source mismatch must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("canonical source digest"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical assignment mismatch must keep hard-JIT contract: {message}"
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_rejects_missing_model_source_digest() {
+        let source = r#"
+module native_canonical_missing_digest_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ V(p, n);
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        model.source_digest = SmolStr::default();
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("digest-less compiled model must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("missing source digest"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("digest-aware compiler/codegen path"),
+            "missing-digest error must name the required rebuild path: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "missing-digest error must keep hard-JIT contract: {message}"
+        );
+    }
+
+    #[test]
     fn compile_model_with_canonical_ir_rejects_mismatched_stamp_kind() {
         let model_source = r#"
 module native_canonical_kind_guard(p, n);
@@ -3750,12 +3863,13 @@ module native_canonical_static_guard_shape(p, n);
 endmodule
 "#;
         let compiler = VerilogACompiler::new(CompilerOptions::default());
-        let model = compiler
+        let mut model = compiler
             .compile(model_source)
             .expect("compile bytecode model");
         let artifact = compiler
             .compile_canonical_ir(artifact_source)
             .expect("compile mismatched canonical IR");
+        model.source_digest = artifact.metadata.source_digest.clone();
         assert!(
             model
                 .stamp_programs
@@ -3860,12 +3974,13 @@ module native_canonical_noise_kind_guard(p, n);
 endmodule
 "#;
         let compiler = VerilogACompiler::new(CompilerOptions::default());
-        let model = compiler
+        let mut model = compiler
             .compile(model_source)
             .expect("compile bytecode model");
         let artifact = compiler
             .compile_canonical_ir(artifact_source)
             .expect("compile mismatched canonical IR");
+        model.source_digest = artifact.metadata.source_digest.clone();
 
         let error = compile_model_with_canonical_ir(&model, &artifact)
             .expect_err("canonical/compiled noise kind drift must fail native compile");
@@ -6666,6 +6781,7 @@ endmodule
     fn compiled_model_with_variables(num_variables: usize) -> CompiledModel {
         CompiledModel {
             name: SmolStr::new("native_x64_assignment_test"),
+            source_digest: SmolStr::default(),
             num_terminals: 0,
             terminal_names: Vec::new(),
             parameters: Vec::new(),

@@ -56,6 +56,19 @@ impl CodeGenerator {
         self.generate_module(analyzed, None)
     }
 
+    /// Generate compiled model from analyzed file with a stable source digest.
+    ///
+    /// Use this when the resulting model may be paired with a canonical IR
+    /// artifact for native JIT compilation. The digest must identify the same
+    /// preprocessed source text used to produce the canonical artifact.
+    pub fn generate_with_source_digest(
+        &self,
+        analyzed: &AnalyzedFile,
+        source_digest: impl Into<SmolStr>,
+    ) -> CompileResult<CompiledModel> {
+        self.generate_module_with_source_digest(analyzed, None, source_digest)
+    }
+
     /// Generate compiled model for one module of an analyzed file
     ///
     /// `module_name` selects the module to compile (foundry releases ship
@@ -66,6 +79,29 @@ impl CodeGenerator {
         &self,
         analyzed: &AnalyzedFile,
         module_name: Option<&str>,
+    ) -> CompileResult<CompiledModel> {
+        self.generate_module_inner(analyzed, module_name, SmolStr::default())
+    }
+
+    /// Generate compiled model for one module with a stable source digest.
+    ///
+    /// Use this when the resulting model may be paired with a canonical IR
+    /// artifact for native JIT compilation. The digest must identify the same
+    /// preprocessed source text used to produce the canonical artifact.
+    pub fn generate_module_with_source_digest(
+        &self,
+        analyzed: &AnalyzedFile,
+        module_name: Option<&str>,
+        source_digest: impl Into<SmolStr>,
+    ) -> CompileResult<CompiledModel> {
+        self.generate_module_inner(analyzed, module_name, source_digest.into())
+    }
+
+    fn generate_module_inner(
+        &self,
+        analyzed: &AnalyzedFile,
+        module_name: Option<&str>,
+        source_digest: SmolStr,
     ) -> CompileResult<CompiledModel> {
         let module = Self::select_module(analyzed, module_name)?;
         let timings = compile_timings_enabled();
@@ -87,7 +123,8 @@ impl CodeGenerator {
 
         // Generate code from IR
         let phase_start = std::time::Instant::now();
-        let model = self.generate_from_ir(&ir)?;
+        let mut model = self.generate_from_ir(&ir)?;
+        model.source_digest = source_digest;
         if timings {
             eprintln!(
                 "timing codegen.bytecode module={} elapsed={:.3}s assignment_steps={} stamp_programs={} variables={}",
@@ -195,6 +232,7 @@ impl CodeGenerator {
 
         let mut model = CompiledModel {
             name: ir.name.clone(),
+            source_digest: SmolStr::default(),
             num_terminals: ir.terminals.len(),
             terminal_names: ir.terminals.iter().map(|t| t.name.clone()).collect(),
             parameters,

@@ -264,7 +264,12 @@ impl VerilogACompiler {
         let analyzed = self.analyze_preprocessed("<input>", source)?;
 
         // Phase 4 & 5: IR generation and code generation
-        let model = CodeGenerator::new().generate_module(&analyzed, module_name)?;
+        let source_digest = canonical_ir::StableDigest::from_text(source).as_hex();
+        let model = CodeGenerator::new().generate_module_with_source_digest(
+            &analyzed,
+            module_name,
+            source_digest,
+        )?;
 
         Ok(model)
     }
@@ -500,7 +505,12 @@ impl VerilogACompiler {
 
         let source_package = source_package_path.display().to_string();
         let analyzed = self.analyze_preprocessed(&source_package, &preprocessed)?;
-        let model = CodeGenerator::new().generate_module(&analyzed, module_name)?;
+        let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
+        let model = CodeGenerator::new().generate_module_with_source_digest(
+            &analyzed,
+            module_name,
+            source_digest,
+        )?;
         let canonical_ir = self.build_canonical_ir_artifact(
             &source_package,
             &preprocessed,

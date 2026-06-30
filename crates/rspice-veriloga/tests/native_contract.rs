@@ -26,12 +26,13 @@ fn canonical_device_from_sources(
     canonical_source: &str,
 ) -> VerilogADevice {
     let compiler = VerilogACompiler::new(CompilerOptions::default());
-    let model = compiler
+    let mut model = compiler
         .compile(model_source)
         .expect("bytecode-equivalent Verilog-A source must compile");
     let artifact = compiler
         .compile_canonical_ir(canonical_source)
         .expect("canonical Verilog-A source must compile");
+    model.source_digest = artifact.metadata.source_digest.clone();
     let mut device = VerilogADevice::try_new_with_canonical_ir(instance, model, &artifact, &[1, 0])
         .expect("canonical native device must compile without fallback");
     assert!(device.is_using_native());
