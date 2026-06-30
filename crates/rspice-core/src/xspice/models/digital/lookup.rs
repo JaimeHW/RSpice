@@ -128,11 +128,8 @@ fn d_genlut_delay_param_value(ctx: &CmContext, name: &str, index: usize, default
     d_lookup_delay(d_genlut_param_value(ctx, name, index, default))
 }
 
-fn d_genlut_sized_inputs(ctx: &CmContext, width: usize) -> Vec<DigitalValue> {
-    let mut inputs = ctx.input_digital_vector("in");
-    inputs.resize(width, DigitalValue::default());
-    inputs.truncate(width);
-    inputs
+fn d_genlut_input_at(inputs: &[DigitalValue], bit: usize) -> DigitalValue {
+    inputs.get(bit).copied().unwrap_or_default()
 }
 
 fn d_genlut_output_delay(
@@ -359,13 +356,16 @@ impl CodeModel for DigitalGenericLookupTable {
         let table = ctx
             .string_param("table_values")
             .ok_or_else(|| CmError::MissingParameter("table_values".to_string()))?;
-        let inputs = d_genlut_sized_inputs(ctx, input_width);
+        let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
         let input_start = d_genlut_previous_input_start(input_width, output_width);
         let state_start = d_genlut_previous_state_start(input_width, output_width);
         let strength_start = d_genlut_previous_strength_start(input_width, output_width);
 
         let mut max_input_delay = 0.0;
-        for (bit, input) in inputs.iter().copied().enumerate() {
+        let mut input_codes = Vec::with_capacity(input_width);
+        let mut input_index = Some(0usize);
+        for bit in 0..input_width {
+            let input = d_genlut_input_at(inputs, bit);
             let input_code = d_lut_state_code(input.state);
             if input_code != ctx.int_state(input_start + bit) {
                 max_input_delay = f64::max(
@@ -373,10 +373,20 @@ impl CodeModel for DigitalGenericLookupTable {
                     d_genlut_param_value(ctx, "input_delay", bit, 0.0),
                 );
             }
+            match (input_index, input.state.logic_level()) {
+                (Some(index), Some(true)) => {
+                    input_index = Some(index | (1usize << bit));
+                }
+                (Some(index), Some(false)) => {
+                    input_index = Some(index);
+                }
+                _ => input_index = None,
+            }
+            input_codes.push(input_code);
         }
 
         let entry_len = 1usize << input_width;
-        let outputs = match d_lut_index(&inputs)? {
+        let outputs = match input_index {
             Some(index) => (0..output_width)
                 .map(|output| d_genlut_lookup_value(table, index + output * entry_len))
                 .collect::<Vec<_>>(),
@@ -414,8 +424,8 @@ impl CodeModel for DigitalGenericLookupTable {
             d_lookup_set_int_state(ctx, strength_start + output_index, strength_code);
         }
 
-        for (bit, input) in inputs.iter().copied().enumerate() {
-            d_lookup_set_int_state(ctx, input_start + bit, d_lut_state_code(input.state));
+        for (bit, input_code) in input_codes.into_iter().enumerate() {
+            d_lookup_set_int_state(ctx, input_start + bit, input_code);
         }
 
         Ok(())
