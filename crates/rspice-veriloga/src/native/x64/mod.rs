@@ -41,8 +41,7 @@ fn compile_model_inner(
     let base_limits = NativeLoweringLimits::for_model(model);
 
     let mut image = Vec::new();
-    let assignment = CodeOffset::new(image.len());
-    append_assignment_entry(model, &mut image)?;
+    let (assignment, assignment_dependencies) = append_assignment_entry(model, &mut image)?;
 
     let mut parameter_defaults = Vec::with_capacity(model.parameters.len());
     for parameter in &model.parameters {
@@ -61,17 +60,33 @@ fn compile_model_inner(
     }
 
     let mut static_conditions = Vec::with_capacity(model.stamp_programs.len());
+    let mut static_condition_branch_unknown_dependencies =
+        Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_values = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_prior_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
+    let mut stamp_value_branch_unknown_dependencies =
+        Vec::with_capacity(model.stamp_programs.len());
     let mut jacobians = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
+    let mut jacobian_prior_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
+    let mut jacobian_branch_unknown_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut reactive_jacobians = Vec::with_capacity(model.stamp_programs.len());
     let mut reactive_jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
+    let mut reactive_jacobian_prior_current_dependencies =
+        Vec::with_capacity(model.stamp_programs.len());
+    let mut reactive_jacobian_branch_unknown_dependencies =
+        Vec::with_capacity(model.stamp_programs.len());
     let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
     let mut noise_psd_current_dependencies = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_psd_prior_current_dependencies = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_psd_branch_unknown_dependencies = Vec::with_capacity(model.noise_sources.len());
     let mut noise_exponents = Vec::with_capacity(model.noise_sources.len());
     let mut noise_exponent_current_dependencies = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_exponent_prior_current_dependencies =
+        Vec::with_capacity(model.noise_sources.len());
+    let mut noise_exponent_branch_unknown_dependencies =
+        Vec::with_capacity(model.noise_sources.len());
     let mut available_current_pairs = Vec::new();
 
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
@@ -82,8 +97,11 @@ fn compile_model_inner(
                 condition,
                 base_limits,
             )?;
+            static_condition_branch_unknown_dependencies
+                .push(program.branch_unknown_dependencies().to_vec());
             Some(append_value_entry(&mut image, &program)?)
         } else {
+            static_condition_branch_unknown_dependencies.push(Vec::new());
             None
         };
         static_conditions.push(static_condition);
@@ -98,6 +116,8 @@ fn compile_model_inner(
         )?;
         stamp_value_current_dependencies.push(program.current_pair_dependencies().to_vec());
         stamp_value_prior_current_dependencies.push(program.prior_current_dependencies().to_vec());
+        stamp_value_branch_unknown_dependencies
+            .push(program.branch_unknown_dependencies().to_vec());
         stamp_values.push(append_value_entry(&mut image, &program)?);
 
         let mut jacobian_current_pairs = available_current_pairs.clone();
@@ -115,6 +135,10 @@ fn compile_model_inner(
         let mut stamp_jacobians = Vec::with_capacity(stamp.jacobian_programs.len());
         let mut stamp_jacobian_current_dependencies =
             Vec::with_capacity(stamp.jacobian_programs.len());
+        let mut stamp_jacobian_prior_current_dependencies =
+            Vec::with_capacity(stamp.jacobian_programs.len());
+        let mut stamp_jacobian_branch_unknown_dependencies =
+            Vec::with_capacity(stamp.jacobian_programs.len());
         for jacobian in &stamp.jacobian_programs {
             let program = NativeProgram::from_bytecode(
                 model.name.clone(),
@@ -123,13 +147,23 @@ fn compile_model_inner(
                 jacobian_limits,
             )?;
             stamp_jacobian_current_dependencies.push(program.current_pair_dependencies().to_vec());
+            stamp_jacobian_prior_current_dependencies
+                .push(program.prior_current_dependencies().to_vec());
+            stamp_jacobian_branch_unknown_dependencies
+                .push(program.branch_unknown_dependencies().to_vec());
             stamp_jacobians.push(append_value_entry(&mut image, &program)?);
         }
         jacobians.push(stamp_jacobians);
         jacobian_current_dependencies.push(stamp_jacobian_current_dependencies);
+        jacobian_prior_current_dependencies.push(stamp_jacobian_prior_current_dependencies);
+        jacobian_branch_unknown_dependencies.push(stamp_jacobian_branch_unknown_dependencies);
 
         let mut stamp_reactive_jacobians = Vec::with_capacity(stamp.reactive_jacobians.len());
         let mut stamp_reactive_jacobian_current_dependencies =
+            Vec::with_capacity(stamp.reactive_jacobians.len());
+        let mut stamp_reactive_jacobian_prior_current_dependencies =
+            Vec::with_capacity(stamp.reactive_jacobians.len());
+        let mut stamp_reactive_jacobian_branch_unknown_dependencies =
             Vec::with_capacity(stamp.reactive_jacobians.len());
         for reactive_jacobian in &stamp.reactive_jacobians {
             let program = NativeProgram::from_bytecode(
@@ -140,10 +174,18 @@ fn compile_model_inner(
             )?;
             stamp_reactive_jacobian_current_dependencies
                 .push(program.current_pair_dependencies().to_vec());
+            stamp_reactive_jacobian_prior_current_dependencies
+                .push(program.prior_current_dependencies().to_vec());
+            stamp_reactive_jacobian_branch_unknown_dependencies
+                .push(program.branch_unknown_dependencies().to_vec());
             stamp_reactive_jacobians.push(append_value_entry(&mut image, &program)?);
         }
         reactive_jacobians.push(stamp_reactive_jacobians);
         reactive_jacobian_current_dependencies.push(stamp_reactive_jacobian_current_dependencies);
+        reactive_jacobian_prior_current_dependencies
+            .push(stamp_reactive_jacobian_prior_current_dependencies);
+        reactive_jacobian_branch_unknown_dependencies
+            .push(stamp_reactive_jacobian_branch_unknown_dependencies);
 
         if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
             push_current_pair_indices(
@@ -165,6 +207,10 @@ fn compile_model_inner(
             noise_limits,
         )?;
         noise_psd_current_dependencies.push(psd_program.current_pair_dependencies().to_vec());
+        noise_psd_prior_current_dependencies
+            .push(psd_program.prior_current_dependencies().to_vec());
+        noise_psd_branch_unknown_dependencies
+            .push(psd_program.branch_unknown_dependencies().to_vec());
         noise_psd.push(append_value_entry(&mut image, &psd_program)?);
 
         let exponent_entry = if let Some(program) = &source.exponent_program {
@@ -176,9 +222,15 @@ fn compile_model_inner(
             )?;
             noise_exponent_current_dependencies
                 .push(exponent_program.current_pair_dependencies().to_vec());
+            noise_exponent_prior_current_dependencies
+                .push(exponent_program.prior_current_dependencies().to_vec());
+            noise_exponent_branch_unknown_dependencies
+                .push(exponent_program.branch_unknown_dependencies().to_vec());
             Some(append_value_entry(&mut image, &exponent_program)?)
         } else {
             noise_exponent_current_dependencies.push(Vec::new());
+            noise_exponent_prior_current_dependencies.push(Vec::new());
+            noise_exponent_branch_unknown_dependencies.push(Vec::new());
             None
         };
         noise_exponents.push(exponent_entry);
@@ -202,12 +254,25 @@ fn compile_model_inner(
             noise_exponents,
         },
         NativeCurrentDependencies {
+            assignment_current_pairs: assignment_dependencies.current_pairs,
+            assignment_prior_currents: assignment_dependencies.prior_currents,
+            assignment_branch_unknowns: assignment_dependencies.branch_unknowns,
+            static_condition_branch_unknowns: static_condition_branch_unknown_dependencies,
             stamp_values: stamp_value_current_dependencies,
             stamp_value_prior_currents: stamp_value_prior_current_dependencies,
+            stamp_value_branch_unknowns: stamp_value_branch_unknown_dependencies,
             jacobians: jacobian_current_dependencies,
+            jacobian_prior_currents: jacobian_prior_current_dependencies,
+            jacobian_branch_unknowns: jacobian_branch_unknown_dependencies,
             reactive_jacobians: reactive_jacobian_current_dependencies,
+            reactive_jacobian_prior_currents: reactive_jacobian_prior_current_dependencies,
+            reactive_jacobian_branch_unknowns: reactive_jacobian_branch_unknown_dependencies,
             noise_psd: noise_psd_current_dependencies,
+            noise_psd_prior_currents: noise_psd_prior_current_dependencies,
+            noise_psd_branch_unknowns: noise_psd_branch_unknown_dependencies,
             noise_exponents: noise_exponent_current_dependencies,
+            noise_exponent_prior_currents: noise_exponent_prior_current_dependencies,
+            noise_exponent_branch_unknowns: noise_exponent_branch_unknown_dependencies,
         },
         NativeRequiredStorage::for_model(model),
     )
@@ -246,6 +311,37 @@ fn validate_canonical_artifact_for_model(
                 "canonical equation count {} does not match stamp program count {}",
                 artifact.mir.equations.len(),
                 model.stamp_programs.len()
+            )
+            .into(),
+        });
+    }
+
+    validate_canonical_source_digest_for_model(model, artifact)?;
+
+    Ok(())
+}
+
+fn validate_canonical_source_digest_for_model(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<()> {
+    if model.source_digest.is_empty() {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: concat!(
+                "compiled model is missing source digest for canonical native compilation; ",
+                "rebuild it with a digest-aware compiler/codegen path"
+            )
+            .into(),
+        });
+    }
+
+    if model.source_digest != artifact.metadata.source_digest {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical source digest '{}' does not match compiled model source digest '{}'",
+                artifact.metadata.source_digest, model.source_digest
             )
             .into(),
         });
@@ -377,12 +473,25 @@ fn lower_stamp_value_program(
     )
 }
 
-fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitResult<()> {
+#[derive(Debug, Default)]
+struct AssignmentDependencies {
+    current_pairs: Vec<usize>,
+    prior_currents: Vec<usize>,
+    branch_unknowns: Vec<usize>,
+}
+
+fn append_assignment_entry(
+    model: &CompiledModel,
+    image: &mut Vec<u8>,
+) -> JitResult<(CodeOffset, AssignmentDependencies)> {
+    let offset = CodeOffset::new(image.len());
     let assignments = model
         .assignment_steps
         .iter()
         .map(|step| lower_assignment_step(model, step))
         .collect::<JitResult<Vec<_>>>()?;
+    let mut dependencies = AssignmentDependencies::default();
+    collect_assignment_dependencies(&assignments, &mut dependencies);
 
     let bytes = if assignments.is_empty() {
         vec![0xC3]
@@ -390,7 +499,54 @@ fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitRes
         codegen::compile_assignment_pass_function(&assignments)?
     };
     image.extend_from_slice(&bytes);
-    Ok(())
+    Ok((offset, dependencies))
+}
+
+fn collect_assignment_dependencies(
+    assignments: &[NativeAssignment],
+    dependencies: &mut AssignmentDependencies,
+) {
+    for assignment in assignments {
+        match assignment {
+            NativeAssignment::Direct { program, .. } => {
+                collect_assignment_program_dependencies(program, dependencies);
+            }
+            NativeAssignment::Indexed { index, value, .. } => {
+                collect_assignment_program_dependencies(index, dependencies);
+                collect_assignment_program_dependencies(value, dependencies);
+            }
+            NativeAssignment::Loop { condition, body } => {
+                collect_assignment_program_dependencies(condition, dependencies);
+                collect_assignment_dependencies(body, dependencies);
+            }
+        }
+    }
+}
+
+fn collect_assignment_program_dependencies(
+    program: &NativeProgram,
+    dependencies: &mut AssignmentDependencies,
+) {
+    push_unique_indices(
+        &mut dependencies.current_pairs,
+        program.current_pair_dependencies(),
+    );
+    push_unique_indices(
+        &mut dependencies.prior_currents,
+        program.prior_current_dependencies(),
+    );
+    push_unique_indices(
+        &mut dependencies.branch_unknowns,
+        program.branch_unknown_dependencies(),
+    );
+}
+
+fn push_unique_indices(target: &mut Vec<usize>, source: &[usize]) {
+    for index in source {
+        if !target.contains(index) {
+            target.push(*index);
+        }
+    }
 }
 
 fn lower_assignment_step(
@@ -400,6 +556,7 @@ fn lower_assignment_step(
     let limits = NativeLoweringLimits::for_model(model);
     match step {
         AssignmentStep::Assign(assignment) => {
+            validate_assignment_target(model, assignment.var_index)?;
             let program = NativeProgram::from_bytecode(
                 model.name.clone(),
                 EntryKind::Assignment,
@@ -431,6 +588,7 @@ fn lower_assignment_step(
                 limits,
             )?;
             if let Some(var_index) = constant_indexed_assignment_slot(&index, *base, *len, *lower) {
+                validate_assignment_target(model, var_index)?;
                 return Ok(NativeAssignment::Direct {
                     var_index,
                     program: value,
@@ -458,6 +616,21 @@ fn lower_assignment_step(
             Ok(NativeAssignment::Loop { condition, body })
         }
     }
+}
+
+fn validate_assignment_target(model: &CompiledModel, var_index: usize) -> JitResult<()> {
+    if var_index >= model.num_variables {
+        return Err(JitError::InternalCompilerError {
+            model: model.name.clone(),
+            detail: format!(
+                "native assignment target variable {var_index} outside variable storage length {}",
+                model.num_variables
+            )
+            .into(),
+        });
+    }
+
+    Ok(())
 }
 
 fn constant_indexed_assignment_slot(
@@ -622,6 +795,84 @@ endmodule
     }
 
     #[test]
+    fn compile_model_with_canonical_ir_rejects_source_digest_mismatch() {
+        let model_source = r#"
+module native_canonical_digest_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  real g;
+  analog begin
+    g = 1.0;
+    I(p, n) <+ g * V(p, n);
+  end
+endmodule
+"#;
+        let artifact_source = r#"
+module native_canonical_digest_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  real g;
+  analog begin
+    g = 2.0;
+    I(p, n) <+ g * V(p, n);
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(model_source)
+            .expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(artifact_source)
+            .expect("compile canonical IR");
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("mismatched canonical source must hard-fail");
+        let message = error.to_string();
+        assert!(
+            message.contains("canonical source digest"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical digest mismatch must preserve hard-JIT contract: {message}"
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_rejects_missing_model_source_digest() {
+        let source = r#"
+module native_canonical_missing_digest_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ V(p, n);
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        model.source_digest = SmolStr::default();
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("digest-less compiled model must hard-fail");
+        let message = error.to_string();
+        assert!(
+            message.contains("missing source digest"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("digest-aware compiler/codegen path"),
+            "missing-digest error must name the required rebuild path: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "missing-digest error must preserve hard-JIT contract: {message}"
+        );
+    }
+
+    #[test]
     #[ignore = "release-only source-level native x64 throughput probe; run with --release --features native -- --ignored --nocapture"]
     fn native_x64_model_microbench_reports_entrypoint_throughput() {
         assert!(
@@ -761,6 +1012,29 @@ endmodule
             }
             other => panic!("expected direct assignment, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lower_assignment_step_rejects_direct_target_outside_variable_storage() {
+        let model = compiled_model_with_variables(1);
+        let step = AssignmentStep::Assign(crate::codegen::AssignmentProgram {
+            var_index: 1,
+            program: crate::codegen::BytecodeProgram {
+                instructions: vec![crate::codegen::Instruction::PushConst(11.0)],
+            },
+        });
+
+        let error = lower_assignment_step(&model, &step)
+            .expect_err("native assignment target must stay inside variable storage");
+        let message = error.to_string();
+        assert!(
+            message.contains("assignment target variable 1"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "native assignment target error must preserve hard-JIT contract: {message}"
+        );
     }
 
     #[test]
@@ -912,6 +1186,7 @@ endmodule
     fn compiled_model_with_variables(num_variables: usize) -> CompiledModel {
         CompiledModel {
             name: SmolStr::new("native_x64_assignment_test"),
+            source_digest: SmolStr::default(),
             num_terminals: 0,
             terminal_names: Vec::new(),
             parameters: Vec::new(),

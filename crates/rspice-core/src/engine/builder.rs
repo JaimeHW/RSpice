@@ -443,10 +443,8 @@ impl Engine {
         // One shared Arc per model: instances share the (megabyte-scale)
         // program and a single JIT compilation
         #[cfg(feature = "veriloga")]
-        let mut veriloga_models: HashMap<
-            String,
-            std::sync::Arc<rspice_veriloga::CompiledModel>,
-        > = HashMap::new();
+        let mut veriloga_models: HashMap<String, veriloga_cache::CachedVerilogAModel> =
+            HashMap::new();
 
         // One shared BSIM3v3.3 card + temperature block per .model name,
         // with the (W, L) size knots memoized across instances.
@@ -460,23 +458,23 @@ impl Engine {
         {
             for include in &netlist.veriloga_includes {
                 let entry = resolve_cached_or_compile_veriloga(&include.file_path)?;
-                let model = entry.model;
+                let model = std::sync::Arc::clone(&entry.model);
 
                 let model_key = normalize_model_key(model.name.as_str());
                 veriloga_models
                     .entry(model_key)
-                    .or_insert_with(|| std::sync::Arc::clone(&model));
+                    .or_insert_with(|| entry.clone());
 
                 if let Some(alias) = include.model_name.as_deref() {
                     veriloga_models
                         .entry(normalize_model_key(alias))
-                        .or_insert_with(|| std::sync::Arc::clone(&model));
+                        .or_insert_with(|| entry.clone());
                 }
 
                 if let Some(stem) = include.file_path.file_stem().and_then(|s| s.to_str()) {
                     veriloga_models
                         .entry(normalize_model_key(stem))
-                        .or_insert_with(|| std::sync::Arc::clone(&model));
+                        .or_insert_with(|| entry.clone());
                 }
 
                 log::info!(
@@ -2112,8 +2110,9 @@ impl Engine {
 
                     #[cfg(feature = "veriloga")]
                     {
-                        if let Some(model) = veriloga_models.get(&normalize_model_key(subckt_name))
+                        if let Some(entry) = veriloga_models.get(&normalize_model_key(subckt_name))
                         {
+                            let model = &entry.model;
                             if element.nodes.len() > model.num_terminals {
                                 return Err(SimulationError::Circuit(format!(
                                     "Verilog-A instance '{}' expects at most {} terminals for model '{}', found {}",
@@ -2133,6 +2132,29 @@ impl Engine {
                                 });
                             }
 
+                            #[cfg(feature = "veriloga-native")]
+                            let mut device = {
+                                let canonical_ir = entry.canonical_ir.as_deref().ok_or_else(|| {
+                                    SimulationError::Circuit(format!(
+                                        "Verilog-A device '{}' native JIT requires canonical IR for model '{}' (no interpreter fallback)",
+                                        element.name, model.name
+                                    ))
+                                })?;
+                                crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir(
+                                    element.name.clone(),
+                                    std::sync::Arc::clone(model),
+                                    canonical_ir,
+                                    &node_ids,
+                                )
+                            }
+                            .map_err(|err| {
+                                SimulationError::Circuit(format!(
+                                    "Verilog-A device '{}' parameter default resolution failed: {}",
+                                    element.name, err
+                                ))
+                            })?;
+
+                            #[cfg(not(feature = "veriloga-native"))]
                             let mut device = crate::device::veriloga::VerilogADevice::try_new(
                                 element.name.clone(),
                                 std::sync::Arc::clone(model),

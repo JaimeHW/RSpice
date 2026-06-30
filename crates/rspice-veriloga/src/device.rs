@@ -846,6 +846,13 @@ impl VerilogADevice {
     }
 
     #[cfg(feature = "native")]
+    fn missing_native_branch_current_unknown(index: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT missing branch-current unknown {index}; only {available} branch-current unknown(s) available; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
     fn missing_native_parameter_storage(required: usize, available: usize) -> VmError {
         VmError::NativeJit(format!(
             "native JIT parameter storage has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
@@ -1420,11 +1427,35 @@ impl VerilogADevice {
         };
         let prior_currents = match entry {
             NativeValueEntry::StampValue(index) => native.stamp_value_prior_currents(index),
+            NativeValueEntry::Jacobian { stamp, entry } => {
+                native.jacobian_prior_currents(stamp, entry)
+            }
+            NativeValueEntry::ReactiveJacobian { stamp, entry } => {
+                native.reactive_jacobian_prior_currents(stamp, entry)
+            }
+            NativeValueEntry::NoisePsd(index) => native.noise_psd_prior_currents(index),
+            NativeValueEntry::NoiseExponent(index) => native.noise_exponent_prior_currents(index),
+            _ => &[],
+        };
+        let branch_unknowns = match entry {
+            NativeValueEntry::StaticCondition(index) => {
+                native.static_condition_branch_unknowns(index)
+            }
+            NativeValueEntry::StampValue(index) => native.stamp_value_branch_unknowns(index),
+            NativeValueEntry::Jacobian { stamp, entry } => {
+                native.jacobian_branch_unknowns(stamp, entry)
+            }
+            NativeValueEntry::ReactiveJacobian { stamp, entry } => {
+                native.reactive_jacobian_branch_unknowns(stamp, entry)
+            }
+            NativeValueEntry::NoisePsd(index) => native.noise_psd_branch_unknowns(index),
+            NativeValueEntry::NoiseExponent(index) => native.noise_exponent_branch_unknowns(index),
             _ => &[],
         };
         Self::validate_native_storage(vm.context, native)?;
         Self::validate_native_current_pairs(vm.context, current_pairs)?;
         Self::validate_native_prior_currents(vm.context, prior_currents)?;
+        Self::validate_native_branch_unknowns(vm.context, branch_unknowns)?;
 
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_ptr();
@@ -1645,6 +1676,23 @@ impl VerilogADevice {
         Ok(())
     }
 
+    #[cfg(feature = "native")]
+    fn validate_native_branch_unknowns(
+        context: &VmContext,
+        branch_unknowns: &[usize],
+    ) -> Result<(), VmError> {
+        for index in branch_unknowns {
+            if *index >= context.branch_current_values.len() {
+                return Err(Self::missing_native_branch_current_unknown(
+                    *index,
+                    context.branch_current_values.len(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Run one value-returning bytecode program.
     #[cfg(not(feature = "native"))]
     fn run_value_program(
@@ -1665,6 +1713,9 @@ impl VerilogADevice {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
         Self::validate_native_storage(vm.context, native)?;
+        Self::validate_native_current_pairs(vm.context, native.assignment_current_pairs())?;
+        Self::validate_native_prior_currents(vm.context, native.assignment_prior_currents())?;
+        Self::validate_native_branch_unknowns(vm.context, native.assignment_branch_unknowns())?;
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_mut_ptr();
         clear_native_runtime_error();
@@ -2755,6 +2806,51 @@ endmodule
             .expect_err("missing terminal-pair storage must hard-fail in native mode");
 
         assert_native_hard_fail(err, "terminal-pair current slot 0");
+    }
+
+    #[test]
+    fn native_branch_unknown_preflight_errors_use_hard_fail_contract() {
+        let context = VmContext::with_internal_nodes(0, 0);
+        let err = VerilogADevice::validate_native_branch_unknowns(&context, &[0])
+            .expect_err("missing branch-current storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "branch-current unknown 0");
+    }
+
+    #[test]
+    fn native_assignment_branch_unknown_preflights_before_dispatch() {
+        let source = r#"
+`include "disciplines.vams"
+module assignment_branch_unknown_preflight(p, n);
+    inout p, n;
+    electrical p, n;
+    real sensed;
+    analog begin
+        sensed = I(p, n);
+        V(p, n) <+ sensed;
+    end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile assignment model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile assignment canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("ABRANCH1", model, &artifact, &[1, 0])
+                .expect("assignment branch-current model uses native JIT");
+        assert_eq!(
+            device.context.branch_current_values.len(),
+            1,
+            "fixture must allocate one branch-current unknown"
+        );
+
+        device.context.branch_current_values.clear();
+        let err = device
+            .try_evaluate()
+            .expect_err("assignment branch-current load must preflight before native dispatch");
+
+        assert_native_hard_fail(err, "branch-current unknown 0");
     }
 
     #[test]

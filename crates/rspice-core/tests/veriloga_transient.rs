@@ -11,6 +11,8 @@ use rspice_core::register_precompiled_veriloga_model;
 #[cfg(feature = "veriloga-native")]
 use rspice_core::register_precompiled_veriloga_runtime_with_dependencies;
 use rspice_core::{Engine, Netlist};
+#[cfg(feature = "veriloga-native")]
+use rspice_veriloga::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
 use rspice_veriloga::codegen::{BytecodeProgram, Instruction};
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::io::Write;
@@ -27,6 +29,30 @@ fn write_model(name: &str, source: &str) -> PathBuf {
 /// Netlist-safe path text (the deck parser treats backslashes as escapes)
 fn deck_path(path: &std::path::Path) -> String {
     path.display().to_string().replace('\\', "/")
+}
+
+#[cfg(all(feature = "veriloga-native", target_arch = "x86_64"))]
+fn canonical_artifact_with_unsupported_root(
+    compiler: &VerilogACompiler,
+    source: &str,
+) -> CanonicalIrArtifact {
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let metadata = artifact.metadata.clone();
+    let mut hir = artifact.hir.clone();
+    let mut mir = artifact.mir.clone();
+    let root = usize::from(mir.equations[0].expression.id);
+    let unsupported = HirExprKind::StringLiteral {
+        value: "unsupported-native-expression".into(),
+    };
+    hir.expressions[root].kind = unsupported.clone();
+    mir.expressions[root].kind = unsupported;
+    hir.contributions[0].expression.kind = "string".into();
+    mir.equations[0].expression.kind = "string".into();
+    let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
+    CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect("synthetic canonical artifact has refreshed digests")
 }
 
 fn node_series<'a>(names: &[String], voltages: &'a [Vec<f64>], want: &str) -> &'a [f64] {
@@ -227,21 +253,25 @@ endmodule
 #[test]
 #[cfg(all(feature = "veriloga-native", target_arch = "x86_64"))]
 fn veriloga_native_builder_uses_canonical_ir_without_bytecode_fallback() {
-    let model = write_model(
-        "canonical_required",
-        r#"
+    let source = r#"
 `include "disciplines.vams"
 module va_canonical_required(p, n);
     inout p, n;
     electrical p, n;
-    real g;
-    analog begin
-        g = 1.0e-3;
-        I(p, n) <+ g * V(p, n);
-    end
+    analog I(p, n) <+ V(p, n);
 endmodule
-"#,
-    );
+"#;
+    let model = write_model("canonical_required", source);
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let compiled = compiler.compile(source).expect("compile bytecode model");
+    let canonical_ir = canonical_artifact_with_unsupported_root(&compiler, source);
+    register_precompiled_veriloga_runtime_with_dependencies(
+        &model,
+        std::slice::from_ref(&model),
+        compiled,
+        canonical_ir,
+    )
+    .expect("register unsupported canonical sentinel");
 
     let deck = format!(
         "* native canonical IR path diagnostic\n\
@@ -262,7 +292,7 @@ endmodule
 
     assert!(
         text.contains("native JIT")
-            && text.contains("expression identifier g")
+            && text.contains("expression kind string")
             && text.contains("no interpreter fallback"),
         "diagnostic should prove the canonical native path hard-failed, got: {text}"
     );

@@ -29,12 +29,25 @@ pub(crate) struct NativeEntryOffsets {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct NativeCurrentDependencies {
+    pub assignment_current_pairs: Vec<usize>,
+    pub assignment_prior_currents: Vec<usize>,
+    pub assignment_branch_unknowns: Vec<usize>,
+    pub static_condition_branch_unknowns: Vec<Vec<usize>>,
     pub stamp_values: Vec<Vec<usize>>,
     pub stamp_value_prior_currents: Vec<Vec<usize>>,
+    pub stamp_value_branch_unknowns: Vec<Vec<usize>>,
     pub jacobians: Vec<Vec<Vec<usize>>>,
+    pub jacobian_prior_currents: Vec<Vec<Vec<usize>>>,
+    pub jacobian_branch_unknowns: Vec<Vec<Vec<usize>>>,
     pub reactive_jacobians: Vec<Vec<Vec<usize>>>,
+    pub reactive_jacobian_prior_currents: Vec<Vec<Vec<usize>>>,
+    pub reactive_jacobian_branch_unknowns: Vec<Vec<Vec<usize>>>,
     pub noise_psd: Vec<Vec<usize>>,
+    pub noise_psd_prior_currents: Vec<Vec<usize>>,
+    pub noise_psd_branch_unknowns: Vec<Vec<usize>>,
     pub noise_exponents: Vec<Vec<usize>>,
+    pub noise_exponent_prior_currents: Vec<Vec<usize>>,
+    pub noise_exponent_branch_unknowns: Vec<Vec<usize>>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -363,9 +376,24 @@ impl NativeModel {
 
     fn empty_current_dependencies(entries: &NativeEntryOffsets) -> NativeCurrentDependencies {
         NativeCurrentDependencies {
+            assignment_current_pairs: Vec::new(),
+            assignment_prior_currents: Vec::new(),
+            assignment_branch_unknowns: Vec::new(),
+            static_condition_branch_unknowns: vec![Vec::new(); entries.static_conditions.len()],
             stamp_values: vec![Vec::new(); entries.stamp_values.len()],
             stamp_value_prior_currents: vec![Vec::new(); entries.stamp_values.len()],
+            stamp_value_branch_unknowns: vec![Vec::new(); entries.stamp_values.len()],
             jacobians: entries
+                .jacobians
+                .iter()
+                .map(|entries| vec![Vec::new(); entries.len()])
+                .collect(),
+            jacobian_prior_currents: entries
+                .jacobians
+                .iter()
+                .map(|entries| vec![Vec::new(); entries.len()])
+                .collect(),
+            jacobian_branch_unknowns: entries
                 .jacobians
                 .iter()
                 .map(|entries| vec![Vec::new(); entries.len()])
@@ -375,8 +403,22 @@ impl NativeModel {
                 .iter()
                 .map(|entries| vec![Vec::new(); entries.len()])
                 .collect(),
+            reactive_jacobian_prior_currents: entries
+                .reactive_jacobians
+                .iter()
+                .map(|entries| vec![Vec::new(); entries.len()])
+                .collect(),
+            reactive_jacobian_branch_unknowns: entries
+                .reactive_jacobians
+                .iter()
+                .map(|entries| vec![Vec::new(); entries.len()])
+                .collect(),
             noise_psd: vec![Vec::new(); entries.noise_psd.len()],
+            noise_psd_prior_currents: vec![Vec::new(); entries.noise_psd.len()],
+            noise_psd_branch_unknowns: vec![Vec::new(); entries.noise_psd.len()],
             noise_exponents: vec![Vec::new(); entries.noise_exponents.len()],
+            noise_exponent_prior_currents: vec![Vec::new(); entries.noise_exponents.len()],
+            noise_exponent_branch_unknowns: vec![Vec::new(); entries.noise_exponents.len()],
         }
     }
 
@@ -384,12 +426,30 @@ impl NativeModel {
         entries: &NativeEntryOffsets,
         dependencies: &NativeCurrentDependencies,
     ) -> JitResult<()> {
-        if dependencies.stamp_values.len() != entries.stamp_values.len()
+        if dependencies.static_condition_branch_unknowns.len() != entries.static_conditions.len()
+            || dependencies.stamp_values.len() != entries.stamp_values.len()
             || dependencies.stamp_value_prior_currents.len() != entries.stamp_values.len()
+            || dependencies.stamp_value_branch_unknowns.len() != entries.stamp_values.len()
             || dependencies.jacobians.len() != entries.jacobians.len()
+            || dependencies.jacobian_prior_currents.len() != entries.jacobians.len()
+            || dependencies.jacobian_branch_unknowns.len() != entries.jacobians.len()
             || dependencies.reactive_jacobians.len() != entries.reactive_jacobians.len()
+            || dependencies.reactive_jacobian_prior_currents.len()
+                != entries.reactive_jacobians.len()
+            || dependencies.reactive_jacobian_branch_unknowns.len()
+                != entries.reactive_jacobians.len()
             || dependencies
                 .jacobians
+                .iter()
+                .zip(&entries.jacobians)
+                .any(|(dependencies, entries)| dependencies.len() != entries.len())
+            || dependencies
+                .jacobian_prior_currents
+                .iter()
+                .zip(&entries.jacobians)
+                .any(|(dependencies, entries)| dependencies.len() != entries.len())
+            || dependencies
+                .jacobian_branch_unknowns
                 .iter()
                 .zip(&entries.jacobians)
                 .any(|(dependencies, entries)| dependencies.len() != entries.len())
@@ -398,8 +458,22 @@ impl NativeModel {
                 .iter()
                 .zip(&entries.reactive_jacobians)
                 .any(|(dependencies, entries)| dependencies.len() != entries.len())
+            || dependencies
+                .reactive_jacobian_prior_currents
+                .iter()
+                .zip(&entries.reactive_jacobians)
+                .any(|(dependencies, entries)| dependencies.len() != entries.len())
+            || dependencies
+                .reactive_jacobian_branch_unknowns
+                .iter()
+                .zip(&entries.reactive_jacobians)
+                .any(|(dependencies, entries)| dependencies.len() != entries.len())
             || dependencies.noise_psd.len() != entries.noise_psd.len()
+            || dependencies.noise_psd_prior_currents.len() != entries.noise_psd.len()
+            || dependencies.noise_psd_branch_unknowns.len() != entries.noise_psd.len()
             || dependencies.noise_exponents.len() != entries.noise_exponents.len()
+            || dependencies.noise_exponent_prior_currents.len() != entries.noise_exponents.len()
+            || dependencies.noise_exponent_branch_unknowns.len() != entries.noise_exponents.len()
         {
             return Err(JitError::InternalCompilerError {
                 model: "native-model".into(),
@@ -424,6 +498,18 @@ impl NativeModel {
             unsafe { std::mem::transmute(self.entry_ptr(self.entries.assignment)) };
         // Safety: callers provide pointers matching the native assignment ABI.
         unsafe { entry(ctx as *const EvalContext, vars) };
+    }
+
+    pub(crate) fn assignment_current_pairs(&self) -> &[usize] {
+        &self.current_dependencies.assignment_current_pairs
+    }
+
+    pub(crate) fn assignment_prior_currents(&self) -> &[usize] {
+        &self.current_dependencies.assignment_prior_currents
+    }
+
+    pub(crate) fn assignment_branch_unknowns(&self) -> &[usize] {
+        &self.current_dependencies.assignment_branch_unknowns
     }
 
     pub(crate) fn run_parameter_default(
@@ -462,6 +548,14 @@ impl NativeModel {
         &self.current_dependencies.stamp_value_prior_currents[index]
     }
 
+    pub(crate) fn static_condition_branch_unknowns(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.static_condition_branch_unknowns[index]
+    }
+
+    pub(crate) fn stamp_value_branch_unknowns(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.stamp_value_branch_unknowns[index]
+    }
+
     pub(crate) fn run_jacobian(
         &self,
         stamp: usize,
@@ -474,6 +568,14 @@ impl NativeModel {
 
     pub(crate) fn jacobian_current_pairs(&self, stamp: usize, entry: usize) -> &[usize] {
         &self.current_dependencies.jacobians[stamp][entry]
+    }
+
+    pub(crate) fn jacobian_prior_currents(&self, stamp: usize, entry: usize) -> &[usize] {
+        &self.current_dependencies.jacobian_prior_currents[stamp][entry]
+    }
+
+    pub(crate) fn jacobian_branch_unknowns(&self, stamp: usize, entry: usize) -> &[usize] {
+        &self.current_dependencies.jacobian_branch_unknowns[stamp][entry]
     }
 
     pub(crate) fn run_reactive_jacobian(
@@ -490,12 +592,28 @@ impl NativeModel {
         &self.current_dependencies.reactive_jacobians[stamp][entry]
     }
 
+    pub(crate) fn reactive_jacobian_prior_currents(&self, stamp: usize, entry: usize) -> &[usize] {
+        &self.current_dependencies.reactive_jacobian_prior_currents[stamp][entry]
+    }
+
+    pub(crate) fn reactive_jacobian_branch_unknowns(&self, stamp: usize, entry: usize) -> &[usize] {
+        &self.current_dependencies.reactive_jacobian_branch_unknowns[stamp][entry]
+    }
+
     pub(crate) fn run_noise_psd(&self, index: usize, ctx: &EvalContext, vars: *const f64) -> f64 {
         self.run_value_entry(self.entries.noise_psd[index], ctx, vars)
     }
 
     pub(crate) fn noise_psd_current_pairs(&self, index: usize) -> &[usize] {
         &self.current_dependencies.noise_psd[index]
+    }
+
+    pub(crate) fn noise_psd_prior_currents(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.noise_psd_prior_currents[index]
+    }
+
+    pub(crate) fn noise_psd_branch_unknowns(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.noise_psd_branch_unknowns[index]
     }
 
     pub(crate) fn run_noise_exponent(
@@ -519,6 +637,14 @@ impl NativeModel {
 
     pub(crate) fn noise_exponent_current_pairs(&self, index: usize) -> &[usize] {
         &self.current_dependencies.noise_exponents[index]
+    }
+
+    pub(crate) fn noise_exponent_prior_currents(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.noise_exponent_prior_currents[index]
+    }
+
+    pub(crate) fn noise_exponent_branch_unknowns(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.noise_exponent_branch_unknowns[index]
     }
 
     pub(crate) fn required_storage(&self) -> NativeRequiredStorage {

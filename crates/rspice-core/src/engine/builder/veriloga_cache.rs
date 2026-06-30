@@ -1,7 +1,7 @@
 use super::*;
 
 #[cfg(feature = "veriloga")]
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 11;
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 12;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

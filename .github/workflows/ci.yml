@@ -69,6 +69,8 @@ jobs:
         run: cargo test -p rspice-cli -p rspice-veriloga -p rspice-bench
       - name: Test Verilog-A native JIT units (Linux x64)
         run: cargo test -p rspice-veriloga --features native native:: -- --test-threads=1
+      - name: Test Verilog-A native core builder route (Linux x64)
+        run: cargo test -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_uses_canonical_ir_without_bytecode_fallback -- --test-threads=1
       - name: Test Verilog-A native JIT contracts (Linux x64)
         run: cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
       - name: Test Verilog-A native multiplicity contracts (Linux x64)

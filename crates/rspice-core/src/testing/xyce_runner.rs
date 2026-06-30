@@ -1466,14 +1466,11 @@ impl XyceTestRunner {
                 continue;
             }
             let directive = trimmed.split_whitespace().next().unwrap_or_default();
-            match directive {
-                ".step" => {
-                    return Err(
-                        "deck uses .STEP; Xyce parameter-sweep output comparison is not implemented yet"
-                            .to_string(),
-                    );
-                }
-                _ => {}
+            if directive == ".step" {
+                return Err(
+                    "deck uses .STEP; Xyce parameter-sweep output comparison is not implemented yet"
+                        .to_string(),
+                );
             }
         }
         Ok(())
