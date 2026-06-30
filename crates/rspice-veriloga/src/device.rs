@@ -31,7 +31,9 @@ use crate::vm::{CURRENT_PAIR_GROUND, Vm, VmContext, VmError};
 use smol_str::SmolStr;
 
 #[cfg(feature = "native")]
-use crate::native::{NativeModel, clear_native_runtime_error, take_native_runtime_error};
+use crate::native::{
+    NativeModel, NativeRequiredStorage, clear_native_runtime_error, take_native_runtime_error,
+};
 
 #[cfg(feature = "native")]
 #[derive(Clone, Copy)]
@@ -310,9 +312,18 @@ impl VerilogADevice {
             }
         }
 
+        for parameter in &model.parameters {
+            if let Some(program) = &parameter.default_program {
+                scan_program(program);
+            }
+        }
+
         scan_steps(&model.assignment_steps, &mut scan_program);
 
         for stamp in &model.stamp_programs {
+            if let Some(condition) = &stamp.static_condition {
+                scan_program(condition);
+            }
             scan_program(&stamp.value_program);
             for jac in &stamp.jacobian_programs {
                 scan_program(&jac.program);
@@ -831,6 +842,55 @@ impl VerilogADevice {
     fn missing_native_terminal_pair_current_slot(pair_index: usize) -> VmError {
         VmError::NativeJit(format!(
             "native JIT missing terminal-pair current slot {pair_index}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_parameter_storage(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT parameter storage has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_param_given_storage(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT parameter-given storage has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_variable_storage(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT variable storage has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_voltage_storage(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT voltage storage has {available} terminal slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_internal_voltage_storage(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT internal-voltage storage has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_port_connected_storage(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT port-connected storage has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_runtime_storage(label: &str, required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT {label} has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
         ))
     }
 
@@ -1362,6 +1422,7 @@ impl VerilogADevice {
             NativeValueEntry::StampValue(index) => native.stamp_value_prior_currents(index),
             _ => &[],
         };
+        Self::validate_native_storage(vm.context, native)?;
         Self::validate_native_current_pairs(vm.context, current_pairs)?;
         Self::validate_native_prior_currents(vm.context, prior_currents)?;
 
@@ -1420,6 +1481,154 @@ impl VerilogADevice {
     }
 
     #[cfg(feature = "native")]
+    fn validate_native_storage(context: &VmContext, native: &NativeModel) -> Result<(), VmError> {
+        Self::validate_native_voltage_storage(
+            context,
+            native.num_terminals,
+            native.num_internal_nodes,
+        )?;
+        Self::validate_native_parameter_storage(context, native.num_parameters)?;
+        Self::validate_native_variable_storage(context, native.num_variables)?;
+        Self::validate_native_runtime_storage(context, native.required_storage())
+    }
+
+    #[cfg(feature = "native")]
+    fn validate_native_voltage_storage(
+        context: &VmContext,
+        required_terminals: usize,
+        required_internal_nodes: usize,
+    ) -> Result<(), VmError> {
+        if context.voltages.len() < required_terminals {
+            return Err(Self::missing_native_voltage_storage(
+                required_terminals,
+                context.voltages.len(),
+            ));
+        }
+        if context.internal_voltages.len() < required_internal_nodes {
+            return Err(Self::missing_native_internal_voltage_storage(
+                required_internal_nodes,
+                context.internal_voltages.len(),
+            ));
+        }
+        if context.port_connected.len() < required_terminals {
+            return Err(Self::missing_native_port_connected_storage(
+                required_terminals,
+                context.port_connected.len(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "native")]
+    fn validate_native_parameter_storage(
+        context: &VmContext,
+        required: usize,
+    ) -> Result<(), VmError> {
+        if context.parameters.len() < required {
+            return Err(Self::missing_native_parameter_storage(
+                required,
+                context.parameters.len(),
+            ));
+        }
+        if context.param_given.len() < required {
+            return Err(Self::missing_native_param_given_storage(
+                required,
+                context.param_given.len(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "native")]
+    fn validate_native_variable_storage(
+        context: &VmContext,
+        required: usize,
+    ) -> Result<(), VmError> {
+        if context.variables.len() < required {
+            return Err(Self::missing_native_variable_storage(
+                required,
+                context.variables.len(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "native")]
+    fn validate_native_runtime_storage(
+        context: &VmContext,
+        required: NativeRequiredStorage,
+    ) -> Result<(), VmError> {
+        Self::validate_native_runtime_storage_len(
+            "state-value storage",
+            required.state_values,
+            context.state_values.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "prior state-value storage",
+            required.state_values_prev,
+            context.state_values_prev.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "state-initialization flag storage",
+            required.state_initialized,
+            context.state_initialized.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "lookup-table storage",
+            required.lookup_tables,
+            context.lookup_tables.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "Laplace filter storage",
+            required.laplace_filters,
+            context.laplace_filters.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "zi filter storage",
+            required.zi_filters,
+            context.zi_filters.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "transition filter storage",
+            required.transition_filters,
+            context.transition_filters.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "slew filter storage",
+            required.slew_filters,
+            context.slew_filters.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "delay-buffer storage",
+            required.delay_buffers,
+            context.delay_buffers.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "cross-detector storage",
+            required.cross_detectors,
+            context.cross_detectors.len(),
+        )
+    }
+
+    #[cfg(feature = "native")]
+    fn validate_native_runtime_storage_len(
+        label: &str,
+        required: usize,
+        available: usize,
+    ) -> Result<(), VmError> {
+        if available < required {
+            return Err(Self::missing_native_runtime_storage(
+                label, required, available,
+            ));
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "native")]
     fn validate_native_prior_currents(
         context: &VmContext,
         prior_currents: &[usize],
@@ -1455,6 +1664,7 @@ impl VerilogADevice {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
+        Self::validate_native_storage(vm.context, native)?;
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_mut_ptr();
         clear_native_runtime_error();
@@ -2381,19 +2591,26 @@ mod tests {
     }
 
     #[test]
-    fn preallocates_runtime_state_from_reactive_jacobians_and_noise_programs() {
+    fn preallocates_runtime_state_from_all_native_entry_surfaces() {
         let mut model = compile(
             r#"
 `include "disciplines.vams"
 module prealloc_reactive_noise(p, n);
     inout p, n;
     electrical p, n;
+    parameter real gain = 1.0;
     analog I(p, n) <+ V(p, n) * 0.0;
 endmodule
 "#,
         );
         assert_eq!(model.stamp_programs.len(), 1);
 
+        model.parameters[0].default_program = Some(BytecodeProgram {
+            instructions: vec![Instruction::LimitState(8)],
+        });
+        model.stamp_programs[0].static_condition = Some(BytecodeProgram {
+            instructions: vec![Instruction::AbsDelayState(6)],
+        });
         model.stamp_programs[0]
             .reactive_jacobians
             .push(JacobianEntry {
@@ -2428,9 +2645,10 @@ endmodule
         let mut context = VmContext::with_internal_nodes(model.num_terminals, model.internal_nodes);
         VerilogADevice::preallocate_vm_runtime_state(&mut context, &model);
 
-        assert_eq!(context.state_values.len(), 7);
-        assert_eq!(context.state_values_prev.len(), 7);
-        assert_eq!(context.delay_buffers.len(), 3);
+        assert_eq!(context.state_values.len(), 9);
+        assert_eq!(context.state_values_prev.len(), 9);
+        assert_eq!(context.state_initialized.len(), 9);
+        assert_eq!(context.delay_buffers.len(), 7);
         assert_eq!(context.transition_filters.len(), 2);
         assert_eq!(context.slew_filters.len(), 5);
         assert_eq!(context.cross_detectors.len(), 6);
@@ -2464,6 +2682,70 @@ endmodule
             .expect_err("native helper metadata error must hard-fail");
 
         assert_native_hard_fail(err, "Laplace");
+    }
+
+    #[test]
+    fn native_state_storage_preflights_before_dispatch() {
+        let source = r#"
+`include "disciplines.vams"
+module state_storage_preflight(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ ddt(V(p, n));
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile state model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile state canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("STATEPRE1", model, &artifact, &[1, 0])
+                .expect("state model uses native JIT");
+        assert_eq!(
+            device.context.state_values.len(),
+            1,
+            "fixture must allocate one state slot"
+        );
+
+        device.context.state_values.clear();
+        let err = device
+            .try_evaluate()
+            .expect_err("missing state storage must preflight before native dispatch");
+
+        assert_native_hard_fail(err, "state-value storage");
+    }
+
+    #[test]
+    fn native_transition_storage_preflights_before_dispatch() {
+        let source = r#"
+`include "disciplines.vams"
+module transition_storage_preflight(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ transition(V(p, n), 0.0, 1.0e-9, 1.0e-9);
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile transition model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile transition canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("TRANPRE1", model, &artifact, &[1, 0])
+                .expect("transition model uses native JIT");
+        assert_eq!(
+            device.context.transition_filters.len(),
+            1,
+            "fixture must allocate one transition filter"
+        );
+
+        device.context.transition_filters.clear();
+        let err = device
+            .try_evaluate()
+            .expect_err("missing transition filter storage must preflight before native dispatch");
+
+        assert_native_hard_fail(err, "transition filter storage");
     }
 
     #[test]

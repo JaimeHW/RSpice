@@ -11,7 +11,9 @@ use super::expr::{
     canonical_transition_slots_for_equation, canonical_zi_slots_for_equation,
     constant_dynamic_variable_slot,
 };
-use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel};
+use super::model::{
+    CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel, NativeRequiredStorage,
+};
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
 use crate::canonical_ir::{CanonicalIrArtifact, EquationId, MirModel};
@@ -184,6 +186,8 @@ fn compile_model_inner(
 
     let executable = ExecutableMemory::allocate(&image)?;
     NativeModel::from_executable_image_with_dependencies(
+        model.num_terminals,
+        model.internal_nodes,
         model.num_variables,
         model.parameters.len(),
         executable,
@@ -205,6 +209,7 @@ fn compile_model_inner(
             noise_psd: noise_psd_current_dependencies,
             noise_exponents: noise_exponent_current_dependencies,
         },
+        NativeRequiredStorage::for_model(model),
     )
 }
 
