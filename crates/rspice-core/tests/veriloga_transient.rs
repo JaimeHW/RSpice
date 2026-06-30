@@ -226,7 +226,7 @@ endmodule
 
 #[test]
 #[cfg(all(feature = "veriloga-native", target_arch = "x86_64"))]
-fn veriloga_native_builder_uses_canonical_ir_without_bytecode_fallback() {
+fn veriloga_native_builder_runs_assignment_fed_canonical_ir_without_bytecode_fallback() {
     let model = write_model(
         "canonical_required",
         r#"
@@ -244,27 +244,32 @@ endmodule
     );
 
     let deck = format!(
-        "* native canonical IR path diagnostic\n\
+        "* native canonical IR path assignment-fed variable\n\
          V1 in 0 DC 1\n\
-         X1 in 0 va_canonical_required\n\
+         R1 in out 1k\n\
+         X1 out 0 va_canonical_required\n\
          .VERILOGA \"{}\" va_canonical_required\n\
          .end\n",
         deck_path(&model)
     );
 
     let netlist = Netlist::parse(&deck).expect("parse");
-    let err = Engine::default()
-        .build_circuit(&netlist)
-        .expect_err("native builder must use canonical IR instead of bytecode-native fallback");
-    let text = err.to_string();
+    let result = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("native builder must use canonical IR and solve assignment-fed model");
 
     let _ = std::fs::remove_file(model);
 
+    let out_idx = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .unwrap_or_else(|| panic!("node out not found in {:?}", result.node_names));
+    let vout = result.node_voltages[out_idx];
+    let expected = 0.5;
     assert!(
-        text.contains("native JIT")
-            && text.contains("expression identifier g")
-            && text.contains("no interpreter fallback"),
-        "diagnostic should prove the canonical native path hard-failed, got: {text}"
+        (vout - expected).abs() < 1.0e-9,
+        "canonical native assignment-fed conductance divider: got {vout}, want {expected}"
     );
 }
 
