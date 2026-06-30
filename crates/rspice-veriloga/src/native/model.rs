@@ -381,6 +381,13 @@ impl NativeModel {
             .and_then(|offset| offset.map(|offset| self.run_value_entry(offset, ctx, vars)))
     }
 
+    pub(crate) fn has_noise_exponent_entry(&self, index: usize) -> bool {
+        self.entries
+            .noise_exponents
+            .get(index)
+            .is_some_and(Option::is_some)
+    }
+
     pub(crate) fn noise_exponent_current_pairs(&self, index: usize) -> &[usize] {
         &self.current_dependencies.noise_exponents[index]
     }

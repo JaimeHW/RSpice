@@ -1316,6 +1316,12 @@ impl VerilogADevice {
         native: &NativeModel,
         entry: NativeValueEntry,
     ) -> Result<f64, VmError> {
+        if let NativeValueEntry::NoiseExponent(index) = entry
+            && !native.has_noise_exponent_entry(index)
+        {
+            return Err(Self::missing_native_noise_exponent_entry(index));
+        }
+
         let current_pairs = match entry {
             NativeValueEntry::ParameterDefault(_) => &[],
             NativeValueEntry::StaticCondition(_) => &[],
@@ -2449,6 +2455,26 @@ endmodule
     #[test]
     fn native_missing_noise_exponent_entry_uses_hard_fail_contract() {
         let err = VerilogADevice::missing_native_noise_exponent_entry(2);
+
+        assert_native_hard_fail(err, "noise exponent entry");
+    }
+
+    #[test]
+    fn native_noise_exponent_missing_entry_preflights_before_dependency_tables() {
+        let native = NativeModel::new_for_test(0, 0, vec![], vec![]);
+        let mut context = VmContext::with_internal_nodes(0, 0);
+        let mut vm = Vm::new(&mut context);
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushConst(1.0)],
+        };
+
+        let err = VerilogADevice::run_value_program(
+            &mut vm,
+            &program,
+            &native,
+            NativeValueEntry::NoiseExponent(0),
+        )
+        .expect_err("missing optional native noise exponent entry must not index dependencies");
 
         assert_native_hard_fail(err, "noise exponent entry");
     }
