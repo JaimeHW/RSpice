@@ -2270,6 +2270,24 @@ impl NativeProgram {
         expr_id: ExprId,
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
+        Self::from_mir_expression_for_equation(
+            model,
+            entry_kind,
+            mir,
+            EquationId::new(0),
+            expr_id,
+            limits,
+        )
+    }
+
+    pub(crate) fn from_mir_expression_for_equation(
+        model: impl Into<SmolStr>,
+        entry_kind: EntryKind,
+        mir: &MirModel,
+        equation_id: EquationId,
+        expr_id: ExprId,
+        limits: NativeLoweringLimits<'_>,
+    ) -> JitResult<Self> {
         let model = model.into();
         mir.validate()
             .map_err(|diagnostics| JitError::InvalidCanonicalIr {
@@ -2282,7 +2300,7 @@ impl NativeProgram {
             })?;
 
         let mut lowerer =
-            MirEquationLowerer::new(model.clone(), entry_kind, mir, EquationId::new(0), limits);
+            MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
         lowerer.lower(expr_id)?;
 
         if lowerer.depth != 1 {

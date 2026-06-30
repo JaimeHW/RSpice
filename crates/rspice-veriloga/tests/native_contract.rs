@@ -4505,6 +4505,44 @@ endmodule
     assert!((sources[0].psd - 2.4e-2).abs() < 1.0e-15);
 }
 
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_noise_analysis_evaluates_named_branch_current_probe_psd_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_noise_named_current_probe(p, n);
+    inout p, n;
+    electrical p, n, sense_node;
+    branch (sense_node) sense;
+    analog begin
+        I(sense) <+ V(p, n) * 2.0e-3;
+        I(p, n) <+ white_noise(abs(I(sense)) * 4.0, "shot");
+    end
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    assert_eq!(model.internal_nodes, 1);
+    assert_eq!(model.noise_sources.len(), 1);
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("NOISENAMEDCP1", model, &artifact, &[1, 0])
+            .expect("canonical named-branch current-probe noise model uses native JIT");
+    assert!(device.is_using_native());
+    device.set_internal_node_indices(&[2]);
+    device.set_analysis_type(3);
+
+    let sources = device
+        .try_noise_sources(&[3.0, 0.0])
+        .expect("native named-branch current-probe noise evaluation succeeds");
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].name, "shot");
+    assert!((sources[0].psd - 2.4e-2).abs() < 1.0e-15);
+}
+
 #[test]
 fn native_compile_accepts_reactive_ddt_jacobians_without_fallback() {
     let model = reactive_model();

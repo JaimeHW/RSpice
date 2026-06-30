@@ -1005,6 +1005,7 @@ impl CanonicalNoiseKind {
 
 #[derive(Debug, Clone)]
 struct CanonicalNoiseEntry {
+    equation_id: EquationId,
     kind: CanonicalNoiseKind,
     name: Option<SmolStr>,
     psd_expr: ExprId,
@@ -1042,10 +1043,11 @@ fn lower_noise_psd_program(
     if let Some(plan) = canonical_noise_plan {
         let entry = plan.entry(model, source_index)?;
         validate_canonical_noise_entry_matches_source(model, source_index, source, entry)?;
-        return NativeProgram::from_mir_expression(
+        return NativeProgram::from_mir_expression_for_equation(
             model.name.clone(),
             EntryKind::StampValue,
             &plan.mir,
+            entry.equation_id,
             entry.psd_expr,
             limits,
         );
@@ -1079,10 +1081,11 @@ fn lower_noise_exponent_program(
                 )
                 .into(),
             })?;
-        return NativeProgram::from_mir_expression(
+        return NativeProgram::from_mir_expression_for_equation(
             model.name.clone(),
             EntryKind::StampValue,
             &plan.mir,
+            entry.equation_id,
             expr,
             limits,
         );
@@ -1271,6 +1274,7 @@ fn extract_canonical_noise_expr(
                 }
             };
             out.push(CanonicalNoiseEntry {
+                equation_id: canonical_equation_id(model, equation_index)?,
                 kind,
                 name,
                 psd_expr,
@@ -1345,6 +1349,7 @@ fn extract_canonical_noise_expr(
                 }
             };
             out.push(CanonicalNoiseEntry {
+                equation_id: canonical_equation_id(model, equation_index)?,
                 kind,
                 name,
                 psd_expr,
