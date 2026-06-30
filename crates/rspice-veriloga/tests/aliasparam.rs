@@ -25,6 +25,43 @@ fn compile(source: &str) -> rspice_veriloga::CompiledModel {
         .expect("compilation failed")
 }
 
+#[cfg(feature = "native")]
+struct DeviceFixture {
+    model: rspice_veriloga::CompiledModel,
+    artifact: rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+}
+
+#[cfg(feature = "native")]
+fn compile_device_fixture(source: &str) -> DeviceFixture {
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    DeviceFixture {
+        model: compiler.compile(source).expect("compilation failed"),
+        artifact: compiler
+            .compile_canonical_ir(source)
+            .expect("canonical IR compilation failed"),
+    }
+}
+
+#[cfg(not(feature = "native"))]
+fn compile_device_fixture(source: &str) -> rspice_veriloga::CompiledModel {
+    compile(source)
+}
+
+#[cfg(feature = "native")]
+fn new_device(name: &str, fixture: &DeviceFixture, nodes: &[usize]) -> VerilogADevice {
+    VerilogADevice::try_new_with_canonical_ir(name, fixture.model.clone(), &fixture.artifact, nodes)
+        .expect("native device construction failed")
+}
+
+#[cfg(not(feature = "native"))]
+fn new_device(
+    name: &str,
+    model: &rspice_veriloga::CompiledModel,
+    nodes: &[usize],
+) -> VerilogADevice {
+    VerilogADevice::new(name, model.clone(), nodes)
+}
+
 #[test]
 fn alias_is_not_a_parameter_but_resolves_to_its_target() {
     let model = compile(ALIASED_RESISTOR);
@@ -38,22 +75,22 @@ fn alias_is_not_a_parameter_but_resolves_to_its_target() {
 
 #[test]
 fn setting_the_alias_behaves_identically_to_setting_the_target() {
-    let model = compile(ALIASED_RESISTOR);
+    let fixture = compile_device_fixture(ALIASED_RESISTOR);
 
     // Baseline: default r=1 conducts I = V/1
-    let mut device = VerilogADevice::new("A0", model.clone(), &[1, 0]);
+    let mut device = new_device("A0", &fixture, &[1, 0]);
     device.update_voltages(&[2.0]);
     assert!((device.evaluate()[0] - 2.0).abs() < 1e-12);
 
     // Setting the target directly: r=5 => I = V/5
-    let mut direct = VerilogADevice::new("A1", model.clone(), &[1, 0]);
+    let mut direct = new_device("A1", &fixture, &[1, 0]);
     assert!(direct.set_parameter("r", 5.0));
     direct.resolve_parameter_defaults();
     direct.update_voltages(&[2.0]);
     let via_target = direct.evaluate()[0];
 
     // Setting the alias: res=5 must write r and produce the same current
-    let mut aliased = VerilogADevice::new("A2", model, &[1, 0]);
+    let mut aliased = new_device("A2", &fixture, &[1, 0]);
     assert!(aliased.set_parameter("res", 5.0));
     aliased.resolve_parameter_defaults();
     aliased.update_voltages(&[2.0]);
@@ -66,7 +103,7 @@ fn setting_the_alias_behaves_identically_to_setting_the_target() {
 #[test]
 fn alias_marks_the_target_as_given() {
     // $param_given(r) must observe an override applied through the alias
-    let model = compile(
+    let fixture = compile_device_fixture(
         r#"
 `include "disciplines.vams"
 module pgalias(p, n);
@@ -86,7 +123,7 @@ endmodule
 "#,
     );
 
-    let mut device = VerilogADevice::new("G1", model, &[1, 0]);
+    let mut device = new_device("G1", &fixture, &[1, 0]);
     assert!(device.set_parameter("knob", 1.0));
     device.update_voltages(&[2.0]);
     assert!((device.evaluate()[0] - 2.0).abs() < 1e-12);
@@ -95,8 +132,8 @@ endmodule
 #[test]
 fn alias_resolves_case_insensitively_like_parameters() {
     // SPICE decks are case-insensitive; aliases follow the same rule
-    let model = compile(ALIASED_RESISTOR);
-    let mut device = VerilogADevice::new("C1", model, &[1, 0]);
+    let fixture = compile_device_fixture(ALIASED_RESISTOR);
+    let mut device = new_device("C1", &fixture, &[1, 0]);
     assert!(device.set_parameter("RES", 4.0));
     device.resolve_parameter_defaults();
     device.update_voltages(&[2.0]);

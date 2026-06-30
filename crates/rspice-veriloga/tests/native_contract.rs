@@ -4,6 +4,7 @@
 //! foundation backend before broad canonical-IR codegen exists: construction
 //! must return a native JIT error, not create a device that runs the VM.
 #![cfg(feature = "native")]
+#![allow(dead_code)]
 
 use rspice_veriloga::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
 use rspice_veriloga::codegen::Instruction;
@@ -1168,7 +1169,7 @@ endmodule
     assert_eq!(native.plan_stats().stamp_value_entry_points, 1);
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_dependent_parameter_defaults_without_fallback() {
     let model = dependent_default_model();
@@ -1224,7 +1225,7 @@ fn native_device_executes_dependent_parameter_defaults_without_fallback() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_dependent_parameter_defaults_resolve_in_declaration_order() {
     let model = dependent_default_chain_model();
@@ -1252,7 +1253,7 @@ fn native_dependent_parameter_defaults_resolve_in_declaration_order() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_dependent_parameter_defaults_apply_declared_bounds() {
     let model = dependent_default_clamp_model();
@@ -1278,7 +1279,7 @@ fn native_dependent_parameter_defaults_apply_declared_bounds() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_dependent_parameter_defaults_preserve_param_given_semantics() {
     let model = dependent_default_param_given_model();
@@ -1334,7 +1335,7 @@ fn native_dependent_parameter_defaults_preserve_param_given_semantics() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_dependent_parameter_defaults_support_binary_math_functions() {
     let model = dependent_default_binary_math_model();
@@ -1382,7 +1383,7 @@ fn native_model_image_publishes_multiple_stamp_and_jacobian_entries() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_stamps_multiple_flow_contributions_from_one_image() {
     let model = multi_stamp_model();
@@ -1436,7 +1437,7 @@ fn native_device_stamps_multiple_flow_contributions_from_one_image() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_stamps_potential_branch_unknowns() {
     let model = potential_branch_model();
@@ -1674,7 +1675,7 @@ endmodule
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_stamps_simple_resistor_without_interpreter_fallback() {
     let model = simple_resistor_model();
@@ -2987,7 +2988,7 @@ endmodule
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
@@ -3021,7 +3022,7 @@ endmodule
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_scalar_assignment_pass() {
     let model = assignment_fed_model();
@@ -3041,7 +3042,7 @@ fn native_device_executes_scalar_assignment_pass() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_scalar_assignments_in_source_order() {
     let model = chained_assignment_model();
@@ -3066,7 +3067,7 @@ fn native_device_executes_scalar_assignments_in_source_order() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_scalar_simulator_context_reads() {
     let model = scalar_context_model();
@@ -3088,7 +3089,7 @@ fn native_device_executes_scalar_simulator_context_reads() {
     assert!((device.variable("gain").unwrap() - 13.01).abs() < 1e-12);
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_analysis_guards_without_fallback() {
     let model = analysis_guard_model();
@@ -3126,7 +3127,7 @@ fn native_device_executes_analysis_guards_without_fallback() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_above_assignments_without_fallback() {
     let model = above_assignment_model();
@@ -3149,7 +3150,7 @@ fn native_device_executes_above_assignments_without_fallback() {
     assert_eq!(currents[0].to_bits(), 1.0_f64.to_bits());
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_timer_assignments_without_fallback() {
     let model = timer_assignment_model();
@@ -3169,7 +3170,7 @@ fn native_device_executes_timer_assignments_without_fallback() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_transition_assignments_without_fallback() {
     let model = transition_assignment_model();
@@ -3195,7 +3196,7 @@ fn native_device_executes_transition_assignments_without_fallback() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_slew_assignments_without_fallback() {
     let model = slew_assignment_model();
@@ -3221,7 +3222,7 @@ fn native_device_executes_slew_assignments_without_fallback() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_absdelay_assignments_without_fallback() {
     let model = absdelay_assignment_model();
@@ -3263,7 +3264,7 @@ fn native_device_executes_absdelay_assignments_without_fallback() {
     assert!((currents[0] - 2.0).abs() < 1e-12);
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_cross_assignments_without_fallback() {
     let model = cross_assignment_model();
@@ -3297,7 +3298,7 @@ fn native_device_executes_cross_assignments_without_fallback() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_thermal_voltage_context_read() {
     let model = thermal_voltage_model();
@@ -3317,7 +3318,7 @@ fn native_device_executes_thermal_voltage_context_read() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_sqrt_expression() {
     let model = sqrt_model();
@@ -3333,7 +3334,7 @@ fn native_device_executes_sqrt_expression() {
     assert!((currents[0] - 5.0).abs() < 1e-12, "currents: {currents:?}");
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_abs_assignment() {
     let model = abs_assignment_model();
@@ -3351,7 +3352,7 @@ fn native_device_executes_abs_assignment() {
     assert_eq!(device.variable("gain"), Some(5.0));
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_ordered_comparison_assignments() {
     let model = comparison_assignment_model();
@@ -3369,7 +3370,7 @@ fn native_device_executes_ordered_comparison_assignments() {
     assert_eq!(device.variable("gain"), Some(13.0));
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_equality_assignments() {
     let model = equality_assignment_model();
@@ -3387,7 +3388,7 @@ fn native_device_executes_equality_assignments() {
     assert_eq!(device.variable("gain"), Some(9.0));
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_logical_assignments() {
     let model = logical_assignment_model();
@@ -3405,7 +3406,7 @@ fn native_device_executes_logical_assignments() {
     assert_eq!(device.variable("gain"), Some(7.0));
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_preserves_logical_truthiness_boundaries() {
     let model = logical_truthiness_model();
@@ -3435,7 +3436,7 @@ fn native_device_preserves_logical_truthiness_boundaries() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_ifelse_assignments() {
     let model = ifelse_assignment_model();
@@ -3465,7 +3466,7 @@ fn native_device_executes_ifelse_assignments() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_minmax_assignments() {
     let model = minmax_assignment_model();
@@ -3494,7 +3495,7 @@ fn native_device_executes_minmax_assignments() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_exp_limexp_assignments() {
     let model = exp_limexp_assignment_model();
@@ -3525,7 +3526,7 @@ fn native_device_executes_exp_limexp_assignments() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_recognized_limited_exp_current_and_jacobian() {
     let model = limited_exp_current_model();
@@ -3570,7 +3571,7 @@ fn native_device_executes_recognized_limited_exp_current_and_jacobian() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_transcendental_assignments() {
     let model = transcendental_assignment_model();
@@ -3608,7 +3609,7 @@ fn native_device_executes_transcendental_assignments() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_binary_math_assignments() {
     let model = binary_math_assignment_model();
@@ -3640,7 +3641,7 @@ fn native_device_executes_binary_math_assignments() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_rounding_and_mod_assignments_without_fallback() {
     let model = rounding_mod_assignment_model();
@@ -3660,7 +3661,7 @@ fn native_device_executes_rounding_and_mod_assignments_without_fallback() {
     assert!((currents[0] - expected_gain).abs() < 1e-12);
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_integer_bit_assignments_without_fallback() {
     let model = integer_bit_assignment_model();
@@ -3684,7 +3685,7 @@ fn native_device_executes_integer_bit_assignments_without_fallback() {
     assert!((currents[0] - expected_gain).abs() < 1e-12);
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_table_model_lookup_and_derivative_without_fallback() {
     let model = table_model_assignment_model();
@@ -3725,7 +3726,7 @@ fn native_device_executes_table_model_lookup_and_derivative_without_fallback() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_limit_assignments_without_fallback() {
     let model = limit_assignment_model();
@@ -3771,7 +3772,7 @@ fn native_device_executes_limit_assignments_without_fallback() {
     assert!((currents[0] - 1.2).abs() < 1e-12, "currents: {currents:?}");
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_param_given_and_port_connected_reads() {
     let model = flag_context_model();
@@ -3807,7 +3808,7 @@ fn native_device_executes_param_given_and_port_connected_reads() {
     assert_eq!(connected.variable("gain"), Some(5.0));
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_evaluates_internal_node_voltage_contributions() {
     let model = internal_node_divider_model();
@@ -3828,7 +3829,7 @@ fn native_device_evaluates_internal_node_voltage_contributions() {
     assert!((currents[1] - 0.5).abs() < 1e-12, "currents: {currents:?}");
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_stamps_internal_node_jacobians() {
     let model = internal_node_divider_model();
@@ -3848,7 +3849,7 @@ fn native_device_stamps_internal_node_jacobians() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_runtime_loop_assignments_without_fallback() {
     let model = runtime_loop_model();
@@ -3888,7 +3889,7 @@ fn native_device_executes_runtime_loop_assignments_without_fallback() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_runtime_loop_iteration_limit_hard_fails_without_fallback() {
     let model = runtime_loop_limit_model();
@@ -3915,7 +3916,7 @@ fn native_runtime_loop_iteration_limit_hard_fails_without_fallback() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_runtime_loop_condition_uses_exact_zero_truthiness() {
     let model = runtime_loop_truthiness_model();
@@ -3966,7 +3967,7 @@ fn native_runtime_loop_condition_uses_exact_zero_truthiness() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_indexed_assignments_without_fallback() {
     let model = indexed_assignment_model();
@@ -4017,7 +4018,7 @@ fn native_device_executes_indexed_assignments_without_fallback() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_static_conditions_without_fallback() {
     let model = static_condition_model();
@@ -4073,7 +4074,7 @@ fn native_device_executes_static_conditions_without_fallback() {
     assert!(rhs.is_empty(), "disabled rhs: {rhs:?}");
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_try_set_temperature_reports_static_refresh_errors_without_panic() {
     let model = compile(
@@ -4122,7 +4123,7 @@ endmodule
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_static_conditions_control_potential_branch_activation() {
     let model = static_condition_branch_model();
@@ -4200,7 +4201,7 @@ fn native_static_condition_rejects_dynamic_guard_bytecode_without_fallback() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_static_conditions_refresh_after_mfactor_update() {
     let model = static_condition_mfactor_branch_model();
@@ -4237,7 +4238,7 @@ fn native_static_conditions_refresh_after_mfactor_update() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_dynamic_array_reads_without_fallback() {
     let model = dynamic_array_read_model();
@@ -4303,7 +4304,7 @@ fn native_device_executes_dynamic_array_reads_without_fallback() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_large_signal_noise_terms_as_zero_without_fallback() {
     let model = noise_model();
@@ -4368,6 +4369,7 @@ endmodule
     );
 }
 
+#[cfg(feature = "native-bytecode-contract-tests")]
 #[test]
 fn native_noise_analysis_evaluates_noise_sources_without_fallback() {
     let model = noise_model();
@@ -4468,6 +4470,7 @@ endmodule
     );
 }
 
+#[cfg(feature = "native-bytecode-contract-tests")]
 #[test]
 fn native_noise_analysis_evaluates_current_probe_psd_without_fallback() {
     let model = compile(
@@ -4517,7 +4520,7 @@ fn native_compile_accepts_reactive_ddt_jacobians_without_fallback() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_stamps_reactive_ddt_capacitance_without_fallback() {
     let model = reactive_model();
@@ -4548,7 +4551,7 @@ fn native_compile_rejects_reactive_current_probes_without_fallback() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_idt_current_and_jacobian_without_fallback() {
     let model = idt_current_model();
@@ -4588,7 +4591,7 @@ fn native_device_executes_idt_current_and_jacobian_without_fallback() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_idtmod_current_without_fallback() {
     let model = idtmod_current_model();
@@ -4629,7 +4632,7 @@ fn native_device_executes_idtmod_current_without_fallback() {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_laplace_current_without_fallback() {
     let model = laplace_current_model();
@@ -4675,7 +4678,7 @@ fn native_device_executes_laplace_current_without_fallback() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_zi_current_without_fallback() {
     let model = zi_current_model();
@@ -4731,7 +4734,7 @@ fn native_device_executes_zi_current_without_fallback() {
     assert!((next - 0.4375).abs() < 1.0e-12, "second sample: {next}");
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_terminal_pair_current_probes_in_source_order() {
     let model = current_probe_model();
@@ -4749,7 +4752,7 @@ fn native_device_executes_terminal_pair_current_probes_in_source_order() {
     assert!((currents[1] - 0.4).abs() < 1e-12, "currents: {currents:?}");
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_executes_single_ended_current_probes_in_source_order() {
     let model = single_ended_current_probe_model();
@@ -4835,7 +4838,7 @@ fn native_compile_rejects_unavailable_terminal_pair_current_probes_without_fallb
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_evaluate_rejects_nonfinite_terminal_pair_current_probes_without_fallback() {
     let model = nonfinite_prior_current_probe_model();

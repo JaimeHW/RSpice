@@ -4,13 +4,14 @@
 //! stay per-copy; series voltage noise averages (PSD / m).
 
 use rspice_veriloga::device::VerilogADevice;
-use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::HashMap;
 
-fn compile(source: &str) -> rspice_veriloga::CompiledModel {
-    VerilogACompiler::new(CompilerOptions::default())
-        .compile(source)
-        .expect("compilation failed")
+mod support;
+
+use support::DeviceFixture;
+
+fn compile(source: &str) -> DeviceFixture {
+    DeviceFixture::compile(source)
 }
 
 fn collect_stamps(
@@ -40,7 +41,7 @@ endmodule
 #[test]
 fn linear_resistor_scales_conductance_by_m() {
     let model = compile(RESISTOR);
-    let mut device = VerilogADevice::new("R1", model, &[1, 0]);
+    let mut device = model.device("R1", &[1, 0]);
     device.set_multiplicity(4.0);
 
     let (matrix, rhs) = collect_stamps(&mut device, &[2.0]);
@@ -63,7 +64,7 @@ endmodule
 #[test]
 fn nonlinear_companion_scales_consistently() {
     let model = compile(SQUARE_LAW);
-    let mut device = VerilogADevice::new("Q1", model, &[1, 0]);
+    let mut device = model.device("Q1", &[1, 0]);
     device.set_multiplicity(3.0);
 
     let v = 0.5;
@@ -88,7 +89,7 @@ endmodule
 #[test]
 fn potential_row_stays_per_copy_with_scaled_kcl_coupling() {
     let model = compile(VSOURCE);
-    let mut device = VerilogADevice::new("V1", model, &[1, 2]);
+    let mut device = model.device("V1", &[1, 2]);
     device.set_branch_current_indices(&[3]);
     device.set_multiplicity(5.0);
 
@@ -119,7 +120,7 @@ endmodule
 #[test]
 fn dollar_mfactor_reads_the_instance_multiplicity() {
     let model = compile(MFACTOR_READ);
-    let mut device = VerilogADevice::new("M1", model, &[1, 0]);
+    let mut device = model.device("M1", &[1, 0]);
     device.set_multiplicity(7.0);
     let _ = collect_stamps(&mut device, &[1.0]);
     assert_eq!(device.variable("seen"), Some(7.0));
@@ -137,7 +138,7 @@ endmodule
 #[test]
 fn current_noise_power_scales_by_m() {
     let model = compile(NOISY);
-    let mut device = VerilogADevice::new("N1", model, &[1, 0]);
+    let mut device = model.device("N1", &[1, 0]);
     device.set_multiplicity(4.0);
     let sources = device.noise_sources(&[0.3]);
     assert_eq!(sources.len(), 1);
@@ -156,7 +157,7 @@ endmodule
 #[test]
 fn series_voltage_noise_power_divides_by_m() {
     let model = compile(VNOISY);
-    let mut device = VerilogADevice::new("N2", model, &[1, 2]);
+    let mut device = model.device("N2", &[1, 2]);
     device.set_branch_current_indices(&[3]);
     device.set_multiplicity(4.0);
     let sources = device.noise_sources(&[0.0, 0.0, 0.0]);
