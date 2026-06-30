@@ -4039,6 +4039,59 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn generated_value_leaf_preserves_win64_callee_saved_xmm_stack_slots() {
+        let prefix = variable_prefix(0, XMM_STACK.len());
+        let mut instructions = prefix.clone();
+        instructions.extend(add_reductions(prefix.len() - 1));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
+        assert_eq!(program.max_stack_depth(), XMM_STACK.len());
+
+        let bytes = compile_value_function(&program).expect("compile full-depth value function");
+        let callee_saved_count = super::callee_saved_xmm_count_for_depth(XMM_STACK.len());
+        let frame_bytes =
+            super::align_local_frame(super::callee_saved_xmm_frame_bytes(callee_saved_count));
+        assert!(
+            contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
+            "full-depth Win64 value leaf should reserve callee-saved XMM spill space"
+        );
+        assert!(
+            contains_bytes(&bytes, &add_rsp_bytes(frame_bytes)),
+            "full-depth Win64 value leaf should release callee-saved XMM spill space"
+        );
+
+        for index in 0..callee_saved_count {
+            let register = super::callee_saved_xmm_register(index);
+            let disp = frame_bytes - super::callee_saved_xmm_frame_bytes(callee_saved_count)
+                + (index as i32 * super::CALLEE_SAVED_XMM_BYTES);
+            assert_eq!(
+                count_bytes(&bytes, &callee_saved_xmm_store_bytes(register, disp)),
+                1,
+                "{register:?} should be saved exactly once in the prologue"
+            );
+            assert_eq!(
+                count_bytes(&bytes, &callee_saved_xmm_load_bytes(register, disp)),
+                1,
+                "{register:?} should be restored exactly once in the epilogue"
+            );
+        }
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate full-depth value leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[], &[], &[]);
+        let vars = (0..prefix.len())
+            .map(|index| (index + 1) as f64)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            f(&ctx, vars.as_ptr()).to_bits(),
+            constant_prefix_sum(prefix.len()).to_bits()
+        );
+    }
+
     #[test]
     fn generated_value_leaf_uses_register_zero_for_positive_zero_constant() {
         let program = native_program(EntryKind::StampValue, vec![Instruction::PushConst(0.0)], 0);
@@ -9979,6 +10032,18 @@ mod tests {
     fn call_frame_load_bytes(register: Xmm, index: usize) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.movsd_xmm_m64_base_disp32(register, Gpr::R11, super::call_spill_disp(index));
+        encoder.into_bytes()
+    }
+
+    fn callee_saved_xmm_store_bytes(register: Xmm, disp: i32) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.movdqu_m128_base_disp32_xmm(Gpr::Rsp, disp, register);
+        encoder.into_bytes()
+    }
+
+    fn callee_saved_xmm_load_bytes(register: Xmm, disp: i32) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.movdqu_xmm_m128_base_disp32(register, Gpr::Rsp, disp);
         encoder.into_bytes()
     }
 
