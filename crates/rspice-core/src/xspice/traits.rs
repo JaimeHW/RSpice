@@ -102,8 +102,10 @@ pub enum PortType {
     Hybrid,
     /// Differential hybrid/resistance terminal pair (hd)
     DifferentialHybrid,
-    /// Analog current (i)
+    /// Single-ended analog current (i)
     Current,
+    /// Differential analog current pair (id)
+    DifferentialCurrent,
     /// Voltage source name for current sensing (vnam)
     VoltageName,
     /// Digital signal (d) - 12-state logic
@@ -128,6 +130,7 @@ impl PortType {
                 | PortType::Hybrid
                 | PortType::DifferentialHybrid
                 | PortType::Current
+                | PortType::DifferentialCurrent
         )
     }
 

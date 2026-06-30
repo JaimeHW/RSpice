@@ -323,7 +323,7 @@ fn explicit_xspice_port_type(
         XspicePort::Current(_) => Some(PortType::Current),
         XspicePort::VoltageName(_) => Some(PortType::VoltageName),
         XspicePort::DifferentialVoltage { .. } => Some(PortType::DifferentialVoltage),
-        XspicePort::DifferentialCurrent { .. } => Some(PortType::Current),
+        XspicePort::DifferentialCurrent { .. } => Some(PortType::DifferentialCurrent),
         XspicePort::DifferentialConductance { .. } => Some(PortType::DifferentialConductance),
         XspicePort::Hybrid(_) => Some(PortType::Hybrid),
         XspicePort::DifferentialHybrid { .. } => Some(PortType::DifferentialHybrid),
@@ -674,6 +674,43 @@ mod tests {
     }
 
     #[test]
+    fn explicit_scalar_current_does_not_satisfy_differential_current_port() {
+        let mut circuit = CircuitData::new();
+        let port = PortSpec::input("in", PortType::DifferentialCurrent);
+        let parsed = XspicePort::Current("vmon".to_string());
+
+        let err = coerce_xspice_connection(&mut circuit, &port, &parsed)
+            .expect_err("explicit scalar current must not satisfy an id-only port");
+
+        assert!(
+            err.to_string().contains("does not allow explicit"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn explicit_differential_current_satisfies_differential_current_port() {
+        let mut circuit = CircuitData::new();
+        let port = PortSpec::input("in", PortType::DifferentialCurrent);
+        let parsed = XspicePort::DifferentialCurrent {
+            pos: "sense".to_string(),
+            neg: "0".to_string(),
+        };
+
+        let connection = coerce_xspice_connection(&mut circuit, &port, &parsed)
+            .expect("explicit differential current should satisfy an id port");
+
+        assert!(matches!(
+            connection,
+            PortConnection::CurrentProbe {
+                pos,
+                neg: 0,
+                branch_ordinal
+            } if pos > 0 && branch_ordinal > 0
+        ));
+    }
+
+    #[test]
     fn nullable_vector_port_accepts_null_connection() {
         let mut circuit = CircuitData::new();
         let ports = vec![PortSpec::vector_input("dir", PortType::Digital).nullable()];
@@ -716,7 +753,10 @@ mod tests {
     #[test]
     fn bracketed_typed_current_entries_group_into_typed_vector_connection() {
         let mut circuit = CircuitData::new();
-        let ports = vec![PortSpec::vector_input("sense", PortType::Current)];
+        let ports = vec![PortSpec::vector_input(
+            "sense",
+            PortType::DifferentialCurrent,
+        )];
         let parsed_ports = vec![
             XspicePort::DifferentialCurrent {
                 pos: "VDD".to_string(),

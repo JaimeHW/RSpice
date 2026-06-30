@@ -37,6 +37,7 @@ fn digital_oscillator_ports() -> &'static [PortSpec] {
                     PortType::Voltage,
                     PortType::DifferentialVoltage,
                     PortType::Current,
+                    PortType::DifferentialCurrent,
                 ],
                 is_vector: false,
                 null_allowed: false,

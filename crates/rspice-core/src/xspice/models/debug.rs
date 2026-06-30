@@ -27,6 +27,7 @@ impl CodeModel for PrintParamTypes {
                     PortType::Voltage,
                     PortType::DifferentialVoltage,
                     PortType::Current,
+                    PortType::DifferentialCurrent,
                     PortType::VoltageName,
                 ],
                 is_vector: true,

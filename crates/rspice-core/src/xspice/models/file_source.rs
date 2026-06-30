@@ -498,6 +498,7 @@ fn filesource_ports() -> &'static [PortSpec] {
                 PortType::Voltage,
                 PortType::DifferentialVoltage,
                 PortType::Current,
+                PortType::DifferentialCurrent,
             ],
             is_vector: true,
             null_allowed: false,

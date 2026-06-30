@@ -108,6 +108,7 @@ fn real_to_v_ports() -> &'static [PortSpec] {
                     PortType::Voltage,
                     PortType::DifferentialVoltage,
                     PortType::Current,
+                    PortType::DifferentialCurrent,
                 ],
                 is_vector: false,
                 null_allowed: false,

@@ -1003,7 +1003,8 @@ impl CmContext {
             | PortType::DifferentialConductance
             | PortType::Hybrid
             | PortType::DifferentialHybrid
-            | PortType::Current => {
+            | PortType::Current
+            | PortType::DifferentialCurrent => {
                 self.outputs.insert(name.to_string(), OutputValue::analog());
             }
             PortType::Digital => {
@@ -1026,7 +1027,8 @@ impl CmContext {
             | PortType::DifferentialConductance
             | PortType::Hybrid
             | PortType::DifferentialHybrid
-            | PortType::Current => {
+            | PortType::Current
+            | PortType::DifferentialCurrent => {
                 self.outputs
                     .insert(name.to_string(), OutputValue::analog_vector(width));
             }

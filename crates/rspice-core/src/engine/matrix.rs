@@ -1091,6 +1091,7 @@ impl Engine {
                         _ => {}
                     },
                     crate::xspice::PortType::Current
+                    | crate::xspice::PortType::DifferentialCurrent
                     | crate::xspice::PortType::Conductance
                     | crate::xspice::PortType::DifferentialConductance => {
                         let (pos, neg) = match connection {

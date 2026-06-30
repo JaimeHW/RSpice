@@ -32,7 +32,7 @@ fn ports() -> &'static [PortSpec] {
                 default_type: PortType::DifferentialVoltage,
                 allowed_types: vec![
                     PortType::DifferentialVoltage,
-                    PortType::Current,
+                    PortType::DifferentialCurrent,
                     PortType::VoltageName,
                 ],
                 is_vector: true,
@@ -45,7 +45,7 @@ fn ports() -> &'static [PortSpec] {
                 name: "out".to_string(),
                 direction: PortDirection::Out,
                 default_type: PortType::DifferentialVoltage,
-                allowed_types: vec![PortType::DifferentialVoltage, PortType::Current],
+                allowed_types: vec![PortType::DifferentialVoltage, PortType::DifferentialCurrent],
                 is_vector: false,
                 null_allowed: false,
                 vector_min_len: None,

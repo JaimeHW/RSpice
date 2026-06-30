@@ -547,12 +547,24 @@ fn xspice_multi_input_pwl_accepts_official_differential_current_ports() {
         .expect("multi_input_pwl is registered");
     let ports = model.ports();
     assert!(
-        ports[0].allowed_types.contains(&PortType::Current),
+        ports[0]
+            .allowed_types
+            .contains(&PortType::DifferentialCurrent),
         "multi_input_pwl input must advertise official [vd,id] allowed types"
     );
     assert!(
-        ports[1].allowed_types.contains(&PortType::Current),
+        ports[1]
+            .allowed_types
+            .contains(&PortType::DifferentialCurrent),
         "multi_input_pwl output must advertise official [vd,id] allowed types"
+    );
+    assert!(
+        !ports[0].allowed_types.contains(&PortType::Current),
+        "multi_input_pwl input must not accept scalar %i"
+    );
+    assert!(
+        !ports[1].allowed_types.contains(&PortType::Current),
+        "multi_input_pwl output must not accept scalar %i"
     );
 
     XspiceInstance::new(
@@ -584,6 +596,29 @@ fn xspice_multi_input_pwl_accepts_official_differential_current_ports() {
     .unwrap_or_else(|err| {
         panic!("multi_input_pwl must accept official %id input and output ports: {err}")
     });
+}
+
+#[test]
+fn xspice_multi_input_pwl_rejects_scalar_current_ports() {
+    let deck = "\
+* XSPICE multi_input_pwl scalar current rejection
+vmon1 in1 0 dc 0
+vmon2 in2 0 dc 0
+abad [%i(vmon1) %i(vmon2)] %vd(out 0) lut
+.model lut multi_input_pwl (x=[0 1] y=[0 1] model=\"and\")
+.end
+";
+
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let err = Engine::default()
+        .build_circuit(&netlist)
+        .expect_err("multi_input_pwl must reject scalar %i because official types are [vd,id]")
+        .to_string();
+
+    assert!(
+        err.contains("does not allow explicit Current"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
@@ -3380,9 +3415,9 @@ rload out 0 1meg
 }
 
 #[test]
-fn spice2poly_scalar_i_input_reads_existing_voltage_source_current() {
+fn spice2poly_rejects_scalar_i_input_like_ngspice_46() {
     let deck = "\
-* XSPICE spice2poly scalar current input
+* XSPICE spice2poly scalar current rejection
 iin 0 sense dc 2m
 vmon sense 0 dc 0
 apoly %i vmon out poly
@@ -3392,10 +3427,15 @@ rload out 0 1meg
 .end
 ";
 
-    let out = op_voltage(deck, "out");
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let err = Engine::default()
+        .build_circuit(&netlist)
+        .expect_err("ngspice 46 spice2poly input allows [vd,id,vnam], not scalar %i")
+        .to_string();
+
     assert!(
-        (out - 2.0).abs() < 1.0e-9,
-        "spice2poly %i input should read the named voltage-source branch current, got {out}"
+        err.contains("does not allow explicit Current"),
+        "unexpected error: {err}"
     );
 }
 

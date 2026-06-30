@@ -131,8 +131,26 @@ fn differential_analog_connection_allowed(port: &PortSpec) -> bool {
     port_declares_type(port, |port_type| {
         matches!(
             port_type,
-            PortType::DifferentialVoltage | PortType::DifferentialConductance | PortType::Current
+            PortType::DifferentialVoltage | PortType::DifferentialConductance
         )
+    })
+}
+
+fn current_probe_connection_allowed(port: &PortSpec) -> bool {
+    port_declares_type(port, |port_type| {
+        matches!(port_type, PortType::DifferentialCurrent)
+    })
+}
+
+fn branch_current_connection_allowed(port: &PortSpec) -> bool {
+    port_declares_type(port, |port_type| {
+        matches!(port_type, PortType::Current | PortType::VoltageName)
+    })
+}
+
+fn current_output_connection_allowed(port: &PortSpec) -> bool {
+    port_declares_type(port, |port_type| {
+        matches!(port_type, PortType::Current | PortType::DifferentialCurrent)
     })
 }
 
@@ -153,12 +171,12 @@ fn typed_analog_vector_connection_allowed(
     elements.iter().all(|element| match element {
         AnalogInputConnection::Node(_) => scalar_analog_connection_allowed(port),
         AnalogInputConnection::Differential(_, _) => differential_analog_connection_allowed(port),
-        AnalogInputConnection::CurrentProbe { .. }
-        | AnalogInputConnection::BranchCurrent { .. }
+        AnalogInputConnection::CurrentProbe { .. } => current_probe_connection_allowed(port),
+        AnalogInputConnection::BranchCurrent { .. }
         | AnalogInputConnection::NamedBranchCurrent { .. } => {
-            scalar_analog_connection_allowed(port)
+            branch_current_connection_allowed(port)
         }
-        AnalogInputConnection::CurrentOutput { .. } => differential_analog_connection_allowed(port),
+        AnalogInputConnection::CurrentOutput { .. } => current_output_connection_allowed(port),
         AnalogInputConnection::Hybrid { .. } => hybrid_connection_allowed(port),
     })
 }
@@ -276,10 +294,11 @@ fn validate_port_connection(
     let category_allowed = match connection {
         PortConnection::Analog(_) => scalar_analog_connection_allowed(port),
         PortConnection::Differential(_, _) => differential_analog_connection_allowed(port),
-        PortConnection::CurrentProbe { .. }
-        | PortConnection::BranchCurrent { .. }
-        | PortConnection::NamedBranchCurrent { .. } => scalar_analog_connection_allowed(port),
-        PortConnection::CurrentOutput { .. } => differential_analog_connection_allowed(port),
+        PortConnection::CurrentProbe { .. } => current_probe_connection_allowed(port),
+        PortConnection::BranchCurrent { .. } | PortConnection::NamedBranchCurrent { .. } => {
+            branch_current_connection_allowed(port)
+        }
+        PortConnection::CurrentOutput { .. } => current_output_connection_allowed(port),
         PortConnection::Hybrid { .. } => hybrid_connection_allowed(port),
         PortConnection::AnalogVector(_) => analog_connection_allowed(port),
         PortConnection::TypedAnalogVector(elements) => {
@@ -1442,7 +1461,7 @@ impl XspiceInstance {
                         rhs_add(*node - 1, output_value);
                     }
                 }
-                PortType::Current => {
+                PortType::Current | PortType::DifferentialCurrent => {
                     // Current source output
                     if let PortConnection::Analog(node) = &self.connections[i]
                         && *node > 0
@@ -2600,7 +2619,10 @@ mod tests {
 
     #[test]
     fn instance_rejects_zero_branch_ordinal_connections() {
-        let model = model_with_ports(vec![PortSpec::input("sense", PortType::Current)]);
+        let model = model_with_ports(vec![PortSpec::input(
+            "sense",
+            PortType::DifferentialCurrent,
+        )]);
         let err = XspiceInstance::new(
             "Aport",
             Arc::new(model),

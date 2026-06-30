@@ -341,8 +341,7 @@ impl Engine {
                         }
                     }
                     crate::xspice::AnalogInputConnection::CurrentProbe {
-                        branch_ordinal,
-                        ..
+                        branch_ordinal, ..
                     }
                     | crate::xspice::AnalogInputConnection::BranchCurrent { branch_ordinal }
                     | crate::xspice::AnalogInputConnection::Hybrid { branch_ordinal, .. } => {
@@ -400,13 +399,7 @@ impl Engine {
         for instance in &circuit.xspice_instances {
             let ports = instance.ports();
             for (pos, neg, branch_ordinal) in instance.current_probe_branches() {
-                Self::stamp_xspice_ac_current_probe(
-                    circuit,
-                    ac_matrix,
-                    pos,
-                    neg,
-                    branch_ordinal,
-                );
+                Self::stamp_xspice_ac_current_probe(circuit, ac_matrix, pos, neg, branch_ordinal);
             }
             for (port_idx, connection) in instance.connections().iter().enumerate() {
                 let Some(port) = ports.get(port_idx) else {
@@ -551,6 +544,7 @@ impl Engine {
                         }
                     }
                     crate::xspice::PortType::Current
+                    | crate::xspice::PortType::DifferentialCurrent
                     | crate::xspice::PortType::Conductance
                     | crate::xspice::PortType::DifferentialConductance => {
                         for (control_port, partial) in
