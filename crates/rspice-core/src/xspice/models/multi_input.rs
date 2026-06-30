@@ -32,6 +32,12 @@ struct TablePoint {
     y: Value,
 }
 
+#[derive(Debug, Clone)]
+struct TableData {
+    points: Vec<TablePoint>,
+    strictly_increasing_x: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct TableSignature {
     x_values: Vec<Value>,
@@ -41,7 +47,7 @@ struct TableSignature {
 #[derive(Debug, Clone)]
 struct TableResource {
     signature: TableSignature,
-    points: CmResult<Arc<Vec<TablePoint>>>,
+    data: CmResult<Arc<TableData>>,
 }
 
 fn invalid_param(name: &str, message: impl Into<String>) -> CmError {
@@ -119,7 +125,7 @@ fn table_signature(ctx: &CmContext) -> TableSignature {
     }
 }
 
-fn table_uncached(ctx: &CmContext) -> CmResult<Vec<TablePoint>> {
+fn table_uncached(ctx: &CmContext) -> CmResult<TableData> {
     let x = ctx
         .real_vector_param("x")
         .ok_or_else(|| CmError::MissingParameter("x".to_string()))?;
@@ -156,34 +162,42 @@ fn table_uncached(ctx: &CmContext) -> CmResult<Vec<TablePoint>> {
         });
     }
 
-    Ok(points)
+    Ok(table_data(points))
 }
 
-fn cache_table(ctx: &mut CmContext) -> CmResult<Arc<Vec<TablePoint>>> {
+fn table_data(points: Vec<TablePoint>) -> TableData {
+    let strictly_increasing_x = points.windows(2).all(|window| window[0].x < window[1].x);
+    TableData {
+        points,
+        strictly_increasing_x,
+    }
+}
+
+fn cache_table(ctx: &mut CmContext) -> CmResult<Arc<TableData>> {
     let signature = table_signature(ctx);
     if let Some(resource) = ctx.resource::<TableResource>(TABLE_RESOURCE)
         && resource.signature == signature
     {
-        return resource.points.clone();
+        return resource.data.clone();
     }
 
-    let points = table_uncached(ctx).map(Arc::new);
+    let data = table_uncached(ctx).map(Arc::new);
     ctx.set_resource(
         TABLE_RESOURCE,
         Arc::new(TableResource {
             signature,
-            points: points.clone(),
+            data: data.clone(),
         }),
     );
-    points
+    data
 }
 
-fn table(ctx: &CmContext) -> CmResult<Arc<Vec<TablePoint>>> {
+fn table(ctx: &CmContext) -> CmResult<Arc<TableData>> {
     let signature = table_signature(ctx);
     if let Some(resource) = ctx.resource::<TableResource>(TABLE_RESOURCE)
         && resource.signature == signature
     {
-        return resource.points.clone();
+        return resource.data.clone();
     }
 
     table_uncached(ctx).map(Arc::new)
@@ -235,6 +249,30 @@ fn forward_output(table: &[TablePoint], input: Value) -> TableEval {
     }
 }
 
+fn forward_output_increasing(table: &[TablePoint], input: Value) -> TableEval {
+    let last = table.len() - 1;
+    if input <= table[0].x {
+        return TableEval {
+            value: table[0].y,
+            slope: 0.0,
+        };
+    }
+    if input >= table[last].x {
+        return TableEval {
+            value: table[last].y,
+            slope: 0.0,
+        };
+    }
+
+    let upper = table.partition_point(|point| point.x < input);
+    let lower = upper - 1;
+    let slope = (table[upper].y - table[lower].y) / (table[upper].x - table[lower].x);
+    TableEval {
+        value: table[upper].y + slope * (input - table[upper].x),
+        slope,
+    }
+}
+
 fn reverse_output(table: &[TablePoint], input: Value) -> TableEval {
     let last = table.len() - 1;
     if input <= table[0].x {
@@ -265,9 +303,31 @@ fn reverse_output(table: &[TablePoint], input: Value) -> TableEval {
     }
 }
 
+fn reverse_output_increasing(table: &[TablePoint], input: Value) -> TableEval {
+    let last = table.len() - 1;
+    if input <= table[0].x {
+        return TableEval {
+            value: table[last].y,
+            slope: 0.0,
+        };
+    }
+    if input >= table[last].x {
+        return TableEval {
+            value: table[0].y,
+            slope: 0.0,
+        };
+    }
+
+    let upper = table.partition_point(|point| point.x < input);
+    TableEval {
+        value: table[last - upper].y,
+        slope: 0.0,
+    }
+}
+
 fn evaluate_multi_input_with_table(
     ctx: &CmContext,
-    table: &[TablePoint],
+    table: &TableData,
 ) -> CmResult<Option<(usize, TableEval)>> {
     let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if inputs.len() < 2 {
@@ -282,10 +342,19 @@ fn evaluate_multi_input_with_table(
         return Ok(None);
     };
 
-    let result = match mode {
-        MultiInputPwlMode::And | MultiInputPwlMode::Or => forward_output(table, controlling_input),
-        MultiInputPwlMode::Nand | MultiInputPwlMode::Nor => {
-            reverse_output(table, controlling_input)
+    let points = table.points.as_slice();
+    let result = match (mode, table.strictly_increasing_x) {
+        (MultiInputPwlMode::And | MultiInputPwlMode::Or, true) => {
+            forward_output_increasing(points, controlling_input)
+        }
+        (MultiInputPwlMode::And | MultiInputPwlMode::Or, false) => {
+            forward_output(points, controlling_input)
+        }
+        (MultiInputPwlMode::Nand | MultiInputPwlMode::Nor, true) => {
+            reverse_output_increasing(points, controlling_input)
+        }
+        (MultiInputPwlMode::Nand | MultiInputPwlMode::Nor, false) => {
+            reverse_output(points, controlling_input)
         }
     };
 
@@ -368,7 +437,7 @@ mod tests {
             Arc::ptr_eq(&first, &second),
             "unchanged multi_input_pwl table parameters should reuse the parsed table"
         );
-        assert_eq!(first[2].y, 20.0);
+        assert_eq!(first.points[2].y, 20.0);
 
         ctx.set_real_vector_param("y", vec![0.0, 10.0, 30.0]);
         let updated = cache_table(&mut ctx).expect("updated table caches");
@@ -376,6 +445,39 @@ mod tests {
             !Arc::ptr_eq(&first, &updated),
             "changed multi_input_pwl table parameters must refresh the parsed table"
         );
-        assert_eq!(updated[2].y, 30.0);
+        assert_eq!(updated.points[2].y, 30.0);
+    }
+
+    #[test]
+    fn multi_input_uses_binary_lookup_for_strictly_increasing_tables() {
+        let data = table_data(vec![
+            TablePoint { x: 0.0, y: 0.0 },
+            TablePoint { x: 1.0, y: 10.0 },
+            TablePoint { x: 2.0, y: 30.0 },
+        ]);
+
+        assert!(data.strictly_increasing_x);
+
+        let forward = forward_output_increasing(&data.points, 1.5);
+        assert_eq!(forward.value, 20.0);
+        assert_eq!(forward.slope, 20.0);
+
+        let reverse = reverse_output_increasing(&data.points, 0.5);
+        assert_eq!(reverse.value, 10.0);
+        assert_eq!(reverse.slope, 0.0);
+    }
+
+    #[test]
+    fn multi_input_preserves_linear_scan_for_descending_tables() {
+        let data = table_data(vec![
+            TablePoint { x: 1.0, y: 10.0 },
+            TablePoint { x: 0.0, y: 20.0 },
+        ]);
+
+        assert!(!data.strictly_increasing_x);
+        assert_eq!(forward_output(&data.points, 0.0).value, 10.0);
+        assert_eq!(forward_output(&data.points, 2.0).value, 20.0);
+        assert_eq!(reverse_output(&data.points, 0.0).value, 20.0);
+        assert_eq!(reverse_output(&data.points, 2.0).value, 10.0);
     }
 }
