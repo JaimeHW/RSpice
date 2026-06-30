@@ -129,3 +129,60 @@ r1 a 0 1k
         .expect("temp outer sweep solves");
     assert_eq!(results.len(), 4, "2 inner x 2 outer points");
 }
+
+#[test]
+fn current_source_as_outer_sweep_runs_full_grid() {
+    let deck = "\
+* current source outer sweep
+v1 in 0 dc 0
+i1 out 0 0
+r1 in out 1k
+r2 out 0 1k
+.dc v1 0 2 1 i1 -1m 1m 1m
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let sweep2 = netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::Dc { sweep2, .. } => sweep2.clone(),
+            _ => None,
+        })
+        .expect("second sweep present");
+
+    let results = engine
+        .run_dc_sweep2_with_abort(
+            &netlist,
+            "v1",
+            0.0,
+            2.0,
+            1.0,
+            Some(&sweep2),
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect("current-source outer sweep solves");
+
+    let inner = [0.0, 1.0, 2.0];
+    let outer = [-1.0e-3, 0.0, 1.0e-3];
+    assert_eq!(results.len(), inner.len() * outer.len());
+
+    for (o, &i1) in outer.iter().enumerate() {
+        for (i, &v1) in inner.iter().enumerate() {
+            let (sweep_value, point) = &results[o * inner.len() + i];
+            assert!(
+                (sweep_value - v1).abs() < 1e-12,
+                "point {o},{i}: sweep column must carry the inner value"
+            );
+            let actual = point
+                .try_voltage_named("out")
+                .expect("out node voltage is present");
+            let expected = (v1 - i1 * 1000.0) / 2.0;
+            assert!(
+                (actual - expected).abs() < 1e-9,
+                "V(out) at v1={v1}, i1={i1}: expected {expected}, got {actual}"
+            );
+        }
+    }
+}

@@ -8,8 +8,9 @@
 //! executed.
 
 use crate::abort_signal::AbortSignal;
-use crate::engine::{ConvergenceConfig, SimulationConfig, SimulationError};
-use crate::netlist::{AnalysisCommand, ElementKind, Netlist};
+use crate::analysis::DcSweep;
+use crate::engine::{ConvergenceConfig, SimulationConfig, SimulationError, extract_dc_value};
+use crate::netlist::{AnalysisCommand, DcSecondSweep, ElementKind, Netlist};
 use crate::{Engine, Value};
 use std::collections::BTreeSet;
 use std::fs;
@@ -161,6 +162,19 @@ struct XyceDcSweep {
     start: Value,
     stop: Value,
     step: Value,
+    sweep2: Option<DcSecondSweep>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct XyceDcSweepPoint {
+    primary: Value,
+    secondary: Option<Value>,
+}
+
+#[derive(Debug, Clone)]
+enum XyceReferenceColumn {
+    PrimarySweep { name: String },
+    Probe { name: String },
 }
 
 #[derive(Debug, Clone)]
@@ -456,7 +470,7 @@ impl XyceTestRunner {
         let netlist = Netlist::parse_with_path(&source, &deck.path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let dc = Self::single_dc_sweep(&netlist)?;
-        Self::validate_linear_resistive_dc_contract(&netlist, &dc, &print)?;
+        Self::validate_static_dc_contract(&netlist, &dc, &print)?;
 
         Ok(XyceExecutionPlan {
             deck_path: deck.path.clone(),
@@ -501,12 +515,13 @@ impl XyceTestRunner {
 
         let engine = self.create_dc_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let results = match engine.run_dc_sweep_with_abort(
+        let results = match engine.run_dc_sweep2_with_abort(
             &netlist,
             &plan.dc.source,
             plan.dc.start,
             plan.dc.stop,
             plan.dc.step,
+            plan.dc.sweep2.as_ref(),
             &abort,
         ) {
             Ok(results) => results,
@@ -522,6 +537,14 @@ impl XyceTestRunner {
                     Vec::new(),
                 );
             }
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!("RSpice runtime does not yet support this deck: {err}"),
+                );
+            }
             Err(err) => {
                 return self.failure_result(
                     deck,
@@ -533,19 +556,24 @@ impl XyceTestRunner {
             }
         };
 
-        let mismatches =
-            match self.compare_dc_prn_reference(&reference, &plan.print, &netlist, &results) {
-                Ok(mismatches) => mismatches,
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        "static_prn_dc",
-                        format!("reference comparison error: {err}"),
-                        Vec::new(),
-                    );
-                }
-            };
+        let mismatches = match self.compare_dc_prn_reference(
+            &reference,
+            &plan.print,
+            &netlist,
+            &plan.dc,
+            &results,
+        ) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    "static_prn_dc",
+                    format!("reference comparison error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
 
         if mismatches.is_empty() {
             self.passed_result(deck, start, "static_prn_dc")
@@ -576,6 +604,7 @@ impl XyceTestRunner {
         reference: &XycePrnTable,
         print: &XycePrintRequest,
         netlist: &Netlist,
+        dc: &XyceDcSweep,
         results: &[(Value, crate::SimulationResult)],
     ) -> Result<Vec<XyceValueMismatch>, String> {
         if reference.columns.is_empty() {
@@ -587,13 +616,6 @@ impl XyceTestRunner {
                 reference.columns[0]
             ));
         }
-        if reference.columns.len() != print.probes.len() + 1 {
-            return Err(format!(
-                "reference column count ({}) does not match .PRINT DC probe count ({}) plus Index",
-                reference.columns.len(),
-                print.probes.len()
-            ));
-        }
         if reference.rows.len() != results.len() {
             return Err(format!(
                 "reference row count ({}) does not match simulation point count ({})",
@@ -602,7 +624,17 @@ impl XyceTestRunner {
             ));
         }
 
-        let column_to_probe = self.reference_columns_to_probes(reference, print)?;
+        let data_columns = self.reference_data_columns(reference, print)?;
+        let primary_points = DcSweep::new(dc.source.clone(), dc.start, dc.stop, dc.step).points();
+        if primary_points.is_empty() {
+            return Err("primary DC sweep has no points".to_string());
+        }
+        let secondary_points = dc.sweep2.as_ref().map(|sweep| {
+            DcSweep::new(sweep.source.clone(), sweep.start, sweep.stop, sweep.step).points()
+        });
+        if secondary_points.as_ref().is_some_and(Vec::is_empty) {
+            return Err("secondary DC sweep has no points".to_string());
+        }
         let mut mismatches = Vec::new();
         for (row_index, row) in reference.rows.iter().enumerate() {
             if row.len() != reference.columns.len() {
@@ -627,13 +659,41 @@ impl XyceTestRunner {
                 }
             }
 
-            for (column_index, probe) in column_to_probe.iter().enumerate() {
+            let sweep_point = XyceDcSweepPoint {
+                primary: results[row_index].0,
+                secondary: if let Some(points) = secondary_points.as_ref() {
+                    let outer_index = row_index / primary_points.len();
+                    Some(*points.get(outer_index).ok_or_else(|| {
+                        format!(
+                            "row {row_index} maps outside secondary DC sweep point count ({})",
+                            points.len()
+                        )
+                    })?)
+                } else {
+                    None
+                },
+            };
+            for (column_index, column) in data_columns.iter().enumerate() {
                 let expected = row[column_index + 1];
-                let actual = Self::evaluate_dc_probe(probe, netlist, &results[row_index].1)?;
+                let (probe, actual) = match column {
+                    XyceReferenceColumn::PrimarySweep { name } => {
+                        (name.as_str(), sweep_point.primary)
+                    }
+                    XyceReferenceColumn::Probe { name } => (
+                        name.as_str(),
+                        Self::evaluate_dc_probe(
+                            name,
+                            netlist,
+                            dc,
+                            sweep_point,
+                            &results[row_index].1,
+                        )?,
+                    ),
+                };
                 if let Some(relative_error) = self.value_mismatch(expected, actual) {
                     mismatches.push(XyceValueMismatch {
                         row: row_index,
-                        probe: probe.clone(),
+                        probe: probe.to_string(),
                         expected,
                         actual,
                         relative_error,
@@ -648,22 +708,61 @@ impl XyceTestRunner {
         Ok(mismatches)
     }
 
-    fn reference_columns_to_probes(
+    fn reference_data_columns(
         &self,
         reference: &XycePrnTable,
         print: &XycePrintRequest,
-    ) -> Result<Vec<String>, String> {
-        let mut probes = Vec::with_capacity(print.probes.len());
-        for (column, probe) in reference.columns.iter().skip(1).zip(print.probes.iter()) {
-            if Self::normalize_probe(column) != Self::normalize_probe(probe) {
+    ) -> Result<Vec<XyceReferenceColumn>, String> {
+        let mut data_columns = Vec::with_capacity(reference.columns.len().saturating_sub(1));
+        let mut probe_index = 0usize;
+        for column in reference.columns.iter().skip(1) {
+            if Self::is_primary_dc_sweep_reference_column(column) {
+                data_columns.push(XyceReferenceColumn::PrimarySweep {
+                    name: column.clone(),
+                });
+                continue;
+            }
+
+            let Some(probe) = print.probes.get(probe_index) else {
+                return Err(format!(
+                    "reference column '{}' has no matching .PRINT DC probe",
+                    column
+                ));
+            };
+            if !Self::reference_column_matches_probe(column, probe) {
                 return Err(format!(
                     "reference column '{}' does not match .PRINT probe '{}'",
                     column, probe
                 ));
             }
-            probes.push(probe.clone());
+            data_columns.push(XyceReferenceColumn::Probe {
+                name: probe.clone(),
+            });
+            probe_index += 1;
         }
-        Ok(probes)
+        if probe_index != print.probes.len() {
+            return Err(format!(
+                "reference table matched {} .PRINT DC probe(s), but deck requested {}",
+                probe_index,
+                print.probes.len()
+            ));
+        }
+        Ok(data_columns)
+    }
+
+    fn is_primary_dc_sweep_reference_column(column: &str) -> bool {
+        Self::normalize_probe(column) == "v-sweep"
+    }
+
+    fn reference_column_matches_probe(column: &str, probe: &str) -> bool {
+        let normalized_column = Self::normalize_probe(column);
+        if normalized_column == Self::normalize_probe(probe) {
+            return true;
+        }
+        if let Some(source_name) = Self::parse_current_probe(probe) {
+            return normalized_column == format!("{source_name}_branch");
+        }
+        false
     }
 
     fn value_mismatch(&self, expected: f64, actual: f64) -> Option<f64> {
@@ -682,63 +781,14 @@ impl XyceTestRunner {
         (relative_error > self.config.relative_tolerance).then_some(relative_error)
     }
 
-    fn validate_linear_resistive_dc_contract(
+    fn validate_static_dc_contract(
         netlist: &Netlist,
         dc: &XyceDcSweep,
         print: &XycePrintRequest,
     ) -> Result<(), String> {
-        if !Self::source_is_voltage_source(netlist, &dc.source)
-            && !dc.source.eq_ignore_ascii_case("TEMP")
-            && !dc.source.eq_ignore_ascii_case("TEMPER")
-        {
-            return Err(format!(
-                "DC sweep source '{}' is not a supported top-level voltage source or TEMP sweep",
-                dc.source
-            ));
-        }
-
-        if !netlist.models.is_empty() {
-            return Err("deck contains model cards; first Xyce adapter supports direct linear R/V/I DC decks only".to_string());
-        }
-        if !netlist.subcircuits.is_empty() {
-            return Err("deck contains subcircuits; first Xyce adapter supports direct linear R/V/I DC decks only".to_string());
-        }
-
-        for element in &netlist.elements {
-            match &element.kind {
-                ElementKind::Resistor {
-                    value,
-                    value_expr,
-                    model,
-                    ..
-                } => {
-                    if value_expr.is_some() || model.is_some() {
-                        return Err(format!(
-                            "resistor '{}' uses deferred/model semantics not implemented in the first Xyce adapter",
-                            element.name
-                        ));
-                    }
-                    if !value.is_finite() || *value <= 0.0 {
-                        return Err(format!(
-                            "resistor '{}' has non-positive resistance ({value:.3e}); negative and short-resistor semantics are not implemented in the first Xyce adapter",
-                            element.name
-                        ));
-                    }
-                    if value.abs() < MIN_DIRECT_RESISTOR_ABS_OHMS {
-                        return Err(format!(
-                            "resistor '{}' has zero/near-zero resistance ({value:.3e}); short-resistor semantics are not implemented in the first Xyce adapter",
-                            element.name
-                        ));
-                    }
-                }
-                ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_) => {}
-                _ => {
-                    return Err(format!(
-                        "element '{}' is outside the first Xyce adapter's linear R/V/I DC contract",
-                        element.name
-                    ));
-                }
-            }
+        Self::validate_dc_sweep_source(netlist, &dc.source)?;
+        if let Some(sweep2) = &dc.sweep2 {
+            Self::validate_dc_sweep_source(netlist, &sweep2.source)?;
         }
 
         for probe in &print.probes {
@@ -746,6 +796,34 @@ impl XyceTestRunner {
         }
 
         Ok(())
+    }
+
+    fn is_expected_unsupported_runtime_error(err: &SimulationError) -> bool {
+        let (SimulationError::Circuit(message) | SimulationError::Netlist(message)) = err else {
+            return false;
+        };
+        let normalized = message.to_ascii_lowercase();
+        normalized.contains("unsupported")
+            || normalized.contains("not implemented")
+            || normalized.contains("no native implementation")
+            || normalized.contains("no generated verilog-a builtin")
+            || normalized.contains("no generated builtin")
+            || normalized.contains("not yet")
+            || normalized.contains("refusing")
+            || normalized.contains("must not run through")
+    }
+
+    fn validate_dc_sweep_source(netlist: &Netlist, source: &str) -> Result<(), String> {
+        if Self::source_is_independent_source(netlist, source)
+            || source.eq_ignore_ascii_case("TEMP")
+            || source.eq_ignore_ascii_case("TEMPER")
+        {
+            return Ok(());
+        }
+        Err(format!(
+            "DC sweep source '{}' is not a supported top-level independent source or TEMP sweep",
+            source
+        ))
     }
 
     fn reject_unsupported_source_directives(source: &str) -> Result<(), String> {
@@ -782,15 +860,38 @@ impl XyceTestRunner {
                 return Ok(());
             }
         }
+        if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(&normalized) {
+            match parameter.as_str() {
+                "dcv0" if Self::source_is_independent_source(netlist, &element_name) => {
+                    return Ok(());
+                }
+                "r" => {
+                    if let Some(resistance) = Self::direct_resistor_value(netlist, &element_name) {
+                        if resistance.is_finite()
+                            && resistance.abs() >= MIN_DIRECT_RESISTOR_ABS_OHMS
+                        {
+                            return Ok(());
+                        }
+                    }
+                }
+                _ => {}
+            }
+            return Err(format!(
+                "device parameter probe '{}' targets an unsupported parameter",
+                probe
+            ));
+        }
+        if let Some(parameter_name) = Self::parse_scalar_parameter_probe(&normalized)
+            && Self::scalar_parameter_probe_is_supported(netlist, &parameter_name)
+        {
+            return Ok(());
+        }
         if let Some(element_name) = Self::parse_current_probe(&normalized) {
             if Self::source_is_voltage_source(netlist, &element_name) {
                 return Ok(());
             }
             if let Some(resistance) = Self::direct_resistor_value(netlist, &element_name) {
-                if resistance.is_finite()
-                    && resistance > 0.0
-                    && resistance.abs() >= MIN_DIRECT_RESISTOR_ABS_OHMS
-                {
+                if resistance.is_finite() && resistance.abs() >= MIN_DIRECT_RESISTOR_ABS_OHMS {
                     return Ok(());
                 }
                 return Err(format!(
@@ -809,6 +910,8 @@ impl XyceTestRunner {
     fn evaluate_dc_probe(
         probe: &str,
         netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
         result: &crate::SimulationResult,
     ) -> Result<f64, String> {
         let normalized = Self::normalize_probe(probe);
@@ -825,6 +928,25 @@ impl XyceTestRunner {
             return Ok(pos - neg);
         }
 
+        if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(&normalized) {
+            return Self::evaluate_device_parameter_probe(
+                netlist,
+                dc,
+                sweep_point,
+                &element_name,
+                &parameter,
+            );
+        }
+
+        if let Some(parameter_name) = Self::parse_scalar_parameter_probe(&normalized) {
+            return Self::evaluate_scalar_parameter_probe(
+                netlist,
+                dc,
+                sweep_point,
+                &parameter_name,
+            );
+        }
+
         if let Some(element_name) = Self::parse_current_probe(&normalized) {
             if let Some(current) = result.branch_current_named(&element_name) {
                 return Ok(current);
@@ -835,6 +957,79 @@ impl XyceTestRunner {
         }
 
         Err(format!("unsupported DC probe '{}'", probe))
+    }
+
+    fn evaluate_device_parameter_probe(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        element_name: &str,
+        parameter: &str,
+    ) -> Result<f64, String> {
+        match parameter {
+            "dcv0" => {
+                if element_name.eq_ignore_ascii_case(&dc.source) {
+                    return Ok(sweep_point.primary);
+                }
+                if let Some(sweep2) = &dc.sweep2 {
+                    if element_name.eq_ignore_ascii_case(&sweep2.source) {
+                        return sweep_point.secondary.ok_or_else(|| {
+                            format!(
+                                "secondary sweep value for '{}' is unavailable",
+                                element_name
+                            )
+                        });
+                    }
+                }
+                Self::independent_source_dc_value(netlist, element_name).ok_or_else(|| {
+                    format!(
+                        "source parameter probe '{}:DCV0' targets an unknown independent source",
+                        element_name
+                    )
+                })
+            }
+            "r" => Self::direct_resistor_value(netlist, element_name).ok_or_else(|| {
+                format!(
+                    "resistor parameter probe '{}:R' targets an unknown direct resistor",
+                    element_name
+                )
+            }),
+            _ => Err(format!(
+                "device parameter probe '{}:{}' is not supported",
+                element_name, parameter
+            )),
+        }
+    }
+
+    fn evaluate_scalar_parameter_probe(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        parameter_name: &str,
+    ) -> Result<f64, String> {
+        if parameter_name.eq_ignore_ascii_case("TEMP")
+            || parameter_name.eq_ignore_ascii_case("TEMPER")
+        {
+            if dc.source.eq_ignore_ascii_case(parameter_name) {
+                return Ok(sweep_point.primary);
+            }
+            if let Some(sweep2) = &dc.sweep2
+                && sweep2.source.eq_ignore_ascii_case(parameter_name)
+            {
+                return sweep_point.secondary.ok_or_else(|| {
+                    format!(
+                        "secondary sweep value for '{}' is unavailable",
+                        parameter_name
+                    )
+                });
+            }
+            return Ok(netlist.options.temp.unwrap_or(27.0));
+        }
+
+        netlist
+            .params
+            .get(parameter_name)
+            .ok_or_else(|| format!("scalar parameter probe '{}' is not defined", parameter_name))
     }
 
     fn evaluate_resistor_current(
@@ -874,8 +1069,37 @@ impl XyceTestRunner {
     fn source_is_voltage_source(netlist: &Netlist, source: &str) -> bool {
         netlist.elements.iter().any(|element| {
             element.name.eq_ignore_ascii_case(source)
-                && matches!(element.kind, ElementKind::VoltageSource(_))
+                && matches!(&element.kind, ElementKind::VoltageSource(_))
         })
+    }
+
+    fn source_is_independent_source(netlist: &Netlist, source: &str) -> bool {
+        netlist.elements.iter().any(|element| {
+            element.name.eq_ignore_ascii_case(source)
+                && matches!(
+                    &element.kind,
+                    ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_)
+                )
+        })
+    }
+
+    fn independent_source_dc_value(netlist: &Netlist, source: &str) -> Option<Value> {
+        netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(source))
+            .and_then(|element| match &element.kind {
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                    Some(extract_dc_value(spec))
+                }
+                _ => None,
+            })
+    }
+
+    fn scalar_parameter_probe_is_supported(netlist: &Netlist, parameter_name: &str) -> bool {
+        parameter_name.eq_ignore_ascii_case("TEMP")
+            || parameter_name.eq_ignore_ascii_case("TEMPER")
+            || netlist.params.get(parameter_name).is_some()
     }
 
     fn direct_resistor_value(netlist: &Netlist, name: &str) -> Option<Value> {
@@ -886,12 +1110,40 @@ impl XyceTestRunner {
             .and_then(|element| match &element.kind {
                 ElementKind::Resistor {
                     value,
-                    value_expr: None,
+                    value_expr,
                     model: None,
+                    instance_params,
+                    deferred_params,
                     ..
-                } => Some(*value),
+                } if instance_params.is_empty() && deferred_params.is_empty() => {
+                    Self::resolve_direct_resistor_value(
+                        netlist,
+                        &element.name,
+                        *value,
+                        value_expr.as_deref(),
+                    )
+                    .ok()
+                }
                 _ => None,
             })
+    }
+
+    fn resolve_direct_resistor_value(
+        netlist: &Netlist,
+        element_name: &str,
+        value: Value,
+        value_expr: Option<&str>,
+    ) -> Result<Value, String> {
+        if let Some(expression) = value_expr {
+            crate::netlist::expr::eval_expression(expression, &netlist.params).map_err(|err| {
+                format!(
+                    "resistor '{}' parameter expression '{}' is not supported by the first Xyce adapter: {err}",
+                    element_name, expression
+                )
+            })
+        } else {
+            Ok(value)
+        }
     }
 
     fn single_dc_sweep(netlist: &Netlist) -> Result<XyceDcSweep, String> {
@@ -918,11 +1170,17 @@ impl XyceTestRunner {
         if dc_commands.next().is_some() {
             return Err("deck has multiple .DC analyses; multi-analysis Xyce comparison is not implemented yet".to_string());
         }
-        if sweep2.is_some() {
-            return Err("deck uses a two-dimensional .DC sweep; first Xyce adapter supports one-dimensional DC sweeps only".to_string());
-        }
         if !start.is_finite() || !stop.is_finite() || !step.is_finite() || *step == 0.0 {
             return Err("deck has invalid .DC sweep bounds".to_string());
+        }
+        if let Some(sweep2) = sweep2 {
+            if !sweep2.start.is_finite()
+                || !sweep2.stop.is_finite()
+                || !sweep2.step.is_finite()
+                || sweep2.step == 0.0
+            {
+                return Err("deck has invalid secondary .DC sweep bounds".to_string());
+            }
         }
 
         Ok(XyceDcSweep {
@@ -930,6 +1188,7 @@ impl XyceTestRunner {
             start: *start,
             stop: *stop,
             step: *step,
+            sweep2: sweep2.clone(),
         })
     }
 
@@ -951,7 +1210,22 @@ impl XyceTestRunner {
                 return Err(".PRINT statement has no analysis type".to_string());
             };
             if analysis.eq_ignore_ascii_case("DC") {
-                let probes = parts.map(str::to_string).collect::<Vec<_>>();
+                let mut writes_named_file = false;
+                let mut probes = Vec::new();
+                for part in parts {
+                    let normalized = part.to_ascii_lowercase();
+                    if normalized.starts_with("file=") {
+                        writes_named_file = true;
+                        continue;
+                    }
+                    if Self::is_print_option_token(&normalized) {
+                        continue;
+                    }
+                    probes.push(part.to_string());
+                }
+                if writes_named_file {
+                    continue;
+                }
                 if probes.is_empty() {
                     return Err(".PRINT DC statement has no probes".to_string());
                 }
@@ -966,6 +1240,15 @@ impl XyceTestRunner {
         }
     }
 
+    fn is_print_option_token(token: &str) -> bool {
+        token.starts_with("format=")
+            || token.starts_with("width=")
+            || token.starts_with("precision=")
+            || token.starts_with("delimiter=")
+            || token.starts_with("noindex")
+            || token.starts_with("index=")
+    }
+
     fn parse_prn_file(path: &Path) -> Result<XycePrnTable, String> {
         let content =
             fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
@@ -973,16 +1256,23 @@ impl XyceTestRunner {
     }
 
     fn parse_prn_table(content: &str) -> Result<XycePrnTable, String> {
-        let mut lines = content
+        let nonempty_lines = content
             .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty());
-        let header = lines
-            .next()
-            .ok_or_else(|| "empty Xyce .prn table".to_string())?;
-        if header.to_ascii_lowercase().starts_with("end of xyce") {
-            return Err("Xyce .prn table has no header".to_string());
+            .enumerate()
+            .map(|(line_number, line)| (line_number + 1, line.trim()))
+            .filter(|(_, line)| !line.is_empty())
+            .collect::<Vec<_>>();
+        if nonempty_lines.is_empty() {
+            return Err("empty Xyce .prn table".to_string());
         }
+
+        let Some((header_index, (_header_line_number, header))) = nonempty_lines
+            .iter()
+            .enumerate()
+            .find(|(_, (_, line))| Self::is_prn_header_line(line))
+        else {
+            return Err("Xyce .prn table has no header".to_string());
+        };
         let columns = header
             .split_whitespace()
             .map(str::to_string)
@@ -992,9 +1282,25 @@ impl XyceTestRunner {
         }
 
         let mut rows = Vec::new();
-        for (line_index, line) in lines.enumerate() {
+        for (line_number, line) in nonempty_lines.iter().skip(header_index + 1).copied() {
             if line.to_ascii_lowercase().starts_with("end of xyce") {
                 break;
+            }
+            if !rows.is_empty() && Self::is_prn_footer_line(line) {
+                break;
+            }
+            if Self::is_prn_separator_line(line) {
+                continue;
+            }
+            if Self::is_prn_header_line(line) {
+                let repeated_columns = Self::parse_prn_columns(line);
+                if Self::same_prn_columns(&columns, &repeated_columns) {
+                    continue;
+                }
+                return Err(format!(
+                    "Xyce .prn table changes columns at line {}; multi-table .prn output is not supported",
+                    line_number
+                ));
             }
             let values = line
                 .split_whitespace()
@@ -1002,8 +1308,7 @@ impl XyceTestRunner {
                     token.parse::<f64>().map_err(|err| {
                         format!(
                             "invalid numeric token '{}' on data line {}: {err}",
-                            token,
-                            line_index + 2
+                            token, line_number
                         )
                     })
                 })
@@ -1011,7 +1316,7 @@ impl XyceTestRunner {
             if values.len() != columns.len() {
                 return Err(format!(
                     "data line {} has {} values, expected {}",
-                    line_index + 2,
+                    line_number,
                     values.len(),
                     columns.len()
                 ));
@@ -1024,6 +1329,37 @@ impl XyceTestRunner {
         }
 
         Ok(XycePrnTable { columns, rows })
+    }
+
+    fn parse_prn_columns(line: &str) -> Vec<String> {
+        line.split_whitespace().map(str::to_string).collect()
+    }
+
+    fn is_prn_header_line(line: &str) -> bool {
+        line.split_whitespace()
+            .next()
+            .is_some_and(|token| token.eq_ignore_ascii_case("index"))
+    }
+
+    fn same_prn_columns(left: &[String], right: &[String]) -> bool {
+        left.len() == right.len()
+            && left
+                .iter()
+                .zip(right.iter())
+                .all(|(left, right)| left.eq_ignore_ascii_case(right))
+    }
+
+    fn is_prn_separator_line(line: &str) -> bool {
+        line.chars()
+            .all(|ch| ch == '-' || ch == '=' || ch.is_whitespace())
+    }
+
+    fn is_prn_footer_line(line: &str) -> bool {
+        let normalized = line.to_ascii_lowercase();
+        normalized.starts_with("cpu time")
+            || normalized.starts_with("total cpu time")
+            || normalized.starts_with("current dynamic memory usage")
+            || normalized.starts_with("dynamic memory limit")
     }
 
     fn static_prn_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
@@ -1189,5 +1525,115 @@ impl XyceTestRunner {
         }
         let inner = &normalized[2..normalized.len() - 1];
         (!inner.is_empty()).then(|| inner.to_string())
+    }
+
+    fn parse_device_parameter_probe(probe: &str) -> Option<(String, String)> {
+        let normalized = Self::normalize_probe(probe);
+        let unwrapped = normalized
+            .strip_prefix('{')
+            .and_then(|value| value.strip_suffix('}'))
+            .unwrap_or(&normalized);
+        let (element, parameter) = unwrapped.split_once(':')?;
+        if element.is_empty() || parameter.is_empty() {
+            return None;
+        }
+        Some((element.to_string(), parameter.to_string()))
+    }
+
+    fn parse_scalar_parameter_probe(probe: &str) -> Option<String> {
+        let normalized = Self::normalize_probe(probe);
+        let unwrapped = normalized
+            .strip_prefix('{')
+            .and_then(|value| value.strip_suffix('}'))
+            .unwrap_or(&normalized);
+        if unwrapped.is_empty()
+            || unwrapped.contains(':')
+            || unwrapped.contains('(')
+            || unwrapped.contains(')')
+            || unwrapped
+                .chars()
+                .any(|ch| matches!(ch, '+' | '-' | '*' | '/' | '^' | ','))
+        {
+            return None;
+        }
+        let mut chars = unwrapped.chars();
+        let first = chars.next()?;
+        if !(first.is_ascii_alphabetic() || first == '_') {
+            return None;
+        }
+        if chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.') {
+            Some(unwrapped.to_string())
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prn_parser_accepts_preamble_and_repeated_page_headers() {
+        let table = XyceTestRunner::parse_prn_table(
+            r#"Circuit: metadata line
+Date: metadata line
+
+--------------------------------------------------------------------------------
+Index   v-sweep         v(2)            v(1)
+--------------------------------------------------------------------------------
+0       0.000000e+00    0.000000e+00    2.000000e-01
+1       2.000000e-02    2.000000e-02    2.000000e-01
+
+Index   v-sweep         v(2)            v(1)
+--------------------------------------------------------------------------------
+2       4.000000e-02    4.000000e-02    2.000000e-01
+CPU time since last call: 0.110 seconds.
+Total CPU time: 0.110 seconds.
+"#,
+        )
+        .expect("parser accepts Xyce page headers");
+
+        assert_eq!(
+            table.columns,
+            ["Index", "v-sweep", "v(2)", "v(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(table.rows.len(), 3);
+        assert_eq!(table.rows[2], vec![2.0, 0.04, 0.04, 0.2]);
+    }
+
+    #[test]
+    fn reference_columns_accept_primary_sweep_and_branch_labels() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let reference = XycePrnTable {
+            columns: ["Index", "v-sweep", "v(2)", "vds_branch"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: Vec::new(),
+        };
+        let print = XycePrintRequest {
+            probes: ["v(2)", "i(vds)"].into_iter().map(str::to_string).collect(),
+        };
+
+        let columns = runner
+            .reference_data_columns(&reference, &print)
+            .expect("reference columns map to Xyce DC probes");
+
+        assert!(matches!(
+            &columns[0],
+            XyceReferenceColumn::PrimarySweep { name } if name == "v-sweep"
+        ));
+        assert!(matches!(
+            &columns[1],
+            XyceReferenceColumn::Probe { name } if name == "v(2)"
+        ));
+        assert!(matches!(
+            &columns[2],
+            XyceReferenceColumn::Probe { name } if name == "i(vds)"
+        ));
     }
 }

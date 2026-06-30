@@ -232,11 +232,16 @@ fn test_xyce_wrapper_manifest_covers_trimmed_sidecar_contracts() {
 }
 
 #[test]
-fn test_xyce_resistor_static_prn_cases_run() {
+fn test_xyce_static_prn_cases_run() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for relative in ["Netlists/RESISTOR/resistor.cir"] {
+    for relative in [
+        "Netlists/RESISTOR/resistor.cir",
+        "Netlists/RESISTOR/resistor_neg.cir",
+        "Netlists/ABM_EXPLN/exp_const.cir",
+        "Netlists/BJT_PSPICE_NK/bjt_test_nk.cir",
+    ] {
         let result = runner.run_test(root.join(relative));
         assert!(
             result.passed && !result.expected_unsupported,
@@ -254,7 +259,7 @@ fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    let result = runner.run_test(root.join("Netlists/RESISTOR/resistor_neg.cir"));
+    let result = runner.run_test(root.join("Netlists/B4SOI/test1.cir"));
 
     assert!(
         result.passed && result.expected_unsupported,
@@ -264,7 +269,7 @@ fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
         result
             .error
             .as_deref()
-            .is_some_and(|error| error.contains("non-positive resistance")),
+            .is_some_and(|error| error.contains(".STEP")),
         "unsupported reason should name the missing feature, got {result:?}"
     );
 }

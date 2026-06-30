@@ -540,8 +540,11 @@ impl<'a> ExprParser<'a> {
 
             Ok(Expr::FnCall { name, args })
         } else {
-            // Parameter reference
-            Ok(Expr::Param(name))
+            match name.as_str() {
+                "PI" => Ok(Expr::Number(std::f64::consts::PI)),
+                "EXP" => Ok(Expr::Number(std::f64::consts::E)),
+                _ => Ok(Expr::Param(name)),
+            }
         }
     }
 }

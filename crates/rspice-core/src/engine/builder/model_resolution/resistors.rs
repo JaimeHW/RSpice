@@ -294,7 +294,7 @@ fn apply_resistor_instance_scaling(
         return Ok(resistance);
     }
 
-    if !resistance.is_finite() || resistance <= 0.0 {
+    if !resistance.is_finite() || resistance == 0.0 {
         return Err(SimulationError::Circuit(format!(
             "Resistor '{}' resolved to invalid {} {}",
             element_name, quantity_label, resistance
@@ -363,7 +363,7 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         )?)
     } else {
         let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
-        if resistance.is_none() && value.is_finite() && value > 0.0 {
+        if resistance.is_none() && value.is_finite() && value != 0.0 {
             resistance = Some(value);
         }
         if resistance.is_none()
@@ -532,7 +532,7 @@ pub(in crate::engine::builder) fn resolve_resistor_small_signal_value(
             if dc_resistance.is_infinite() && dc_resistance.is_sign_positive() {
                 return Ok(dc_resistance);
             }
-            if !dc_resistance.is_finite() || dc_resistance <= 0.0 {
+            if !dc_resistance.is_finite() || dc_resistance == 0.0 {
                 return Err(SimulationError::Circuit(format!(
                     "Resistor '{}' resolved to invalid small-signal resistance {}",
                     element_name, dc_resistance
@@ -627,6 +627,63 @@ R3 4 0 rmodel1 L=11u W=2u ac=2.5k
         assert_eq!(
             circuit.resistors.small_signal_conductance(resistor_idx),
             1.0 / 2_500.0
+        );
+    }
+
+    #[test]
+    fn direct_negative_resistance_is_valid_spice() {
+        let (dc, ac) = resolve_resistor_from_source(
+            r#"negative resistor
+R1 a 0 -100
+.end
+"#,
+            "R1",
+        );
+
+        assert_eq!(dc, -100.0);
+        assert_eq!(ac, None);
+    }
+
+    #[test]
+    fn direct_zero_resistance_remains_invalid() {
+        let netlist = crate::netlist::Netlist::parse(
+            r#"zero resistor
+R1 a 0 0
+.end
+"#,
+        )
+        .expect("test netlist parses");
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("R1"))
+            .expect("test resistor exists");
+        let crate::netlist::ElementKind::Resistor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            panic!("test element is not a resistor");
+        };
+
+        let error = resolve_resistor_instance_value(
+            &netlist,
+            &element.name,
+            *value,
+            value_expr.as_deref(),
+            model.as_deref(),
+            instance_params,
+            crate::constants::TEMP_REFERENCE,
+        )
+        .expect_err("zero-ohm resistor should be rejected before stamping");
+
+        assert!(
+            error.to_string().contains("no valid resistance value")
+                || error.to_string().contains("invalid resistance"),
+            "unexpected error: {error}"
         );
     }
 }

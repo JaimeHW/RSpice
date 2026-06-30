@@ -14,7 +14,10 @@ pub struct Resistor {
 
 impl Resistor {
     pub fn new(name: String, node_pos: NodeId, node_neg: NodeId, resistance: Value) -> Self {
-        assert!(resistance > 0.0, "Resistance must be positive");
+        assert!(
+            resistance.is_finite() && resistance != 0.0,
+            "Resistance must be finite and nonzero"
+        );
         Self {
             name,
             node_pos,

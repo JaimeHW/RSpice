@@ -13,6 +13,53 @@ use crate::{CircuitData, Netlist, Value};
 
 const DC_SWEEP_CONTINUATION_MAX_SUBDIVISIONS: usize = 128;
 
+enum DcSweepSource {
+    Voltage {
+        index: usize,
+        original_value: Value,
+        original_source_spec: Option<crate::netlist::SourceSpec>,
+    },
+    Current {
+        index: usize,
+        original_value: Value,
+        original_source_spec: Option<crate::netlist::SourceSpec>,
+    },
+}
+
+impl DcSweepSource {
+    fn set_value(&self, circuit: &mut CircuitData, value: Value) {
+        match self {
+            Self::Voltage { index, .. } => {
+                circuit.voltage_sources.dc_values[*index] = value;
+            }
+            Self::Current { index, .. } => {
+                circuit.current_sources.dc_values[*index] = value;
+            }
+        }
+    }
+
+    fn restore(self, circuit: &mut CircuitData) {
+        match self {
+            Self::Voltage {
+                index,
+                original_value,
+                original_source_spec,
+            } => {
+                circuit.voltage_sources.dc_values[index] = original_value;
+                circuit.voltage_sources.source_specs[index] = original_source_spec;
+            }
+            Self::Current {
+                index,
+                original_value,
+                original_source_spec,
+            } => {
+                circuit.current_sources.dc_values[index] = original_value;
+                circuit.current_sources.source_specs[index] = original_source_spec;
+            }
+        }
+    }
+}
+
 impl Engine {
     fn build_empty_dc_result() -> SimulationResult {
         let mut result = SimulationResult::new(0, 0);
@@ -24,7 +71,7 @@ impl Engine {
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-        vsrc_idx: usize,
+        sweep_source: &DcSweepSource,
         from_value: Value,
         to_value: Value,
         seed: &[Value],
@@ -33,7 +80,7 @@ impl Engine {
     ) -> Result<(Vec<Value>, usize), SimulationError> {
         let span = to_value - from_value;
         if !span.is_finite() || span == 0.0 {
-            circuit.voltage_sources.dc_values[vsrc_idx] = to_value;
+            sweep_source.set_value(circuit, to_value);
             return self
                 .solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(seed), abort)
                 .map(|solution| (solution, 1));
@@ -49,7 +96,7 @@ impl Engine {
             }
 
             circuit.restore_nonlinear_state(start_state.clone());
-            circuit.voltage_sources.dc_values[vsrc_idx] = from_value;
+            sweep_source.set_value(circuit, from_value);
             let mut solution = seed.to_vec();
             let mut accepted = true;
 
@@ -58,7 +105,7 @@ impl Engine {
                     return Err(SimulationError::Aborted);
                 }
                 let alpha = step_idx as Value / subdivisions as Value;
-                circuit.voltage_sources.dc_values[vsrc_idx] = from_value + alpha * span;
+                sweep_source.set_value(circuit, from_value + alpha * span);
                 match self.solve_nonlinear_with_guess_and_abort(
                     circuit,
                     matrix,
@@ -84,7 +131,7 @@ impl Engine {
         }
 
         circuit.restore_nonlinear_state(start_state);
-        circuit.voltage_sources.dc_values[vsrc_idx] = from_value;
+        sweep_source.set_value(circuit, from_value);
         Err(last_error.unwrap_or(SimulationError::ConvergenceFailed(
             self.config.max_iterations,
         )))
@@ -175,7 +222,7 @@ impl Engine {
     /// inner sweeps concatenated in outer order, each point tagged with the
     /// inner sweep value. With no second sweep this is a plain DC sweep.
     ///
-    /// The outer source must be a top-level voltage source (or `TEMP`).
+    /// The outer source must be a top-level independent source (or `TEMP`).
     pub fn run_dc_sweep2_with_abort(
         &self,
         netlist: &Netlist,
@@ -218,7 +265,7 @@ impl Engine {
                 swept.params.set("TEMP", outer_value);
                 swept.params.set("TEMPER", outer_value);
             } else {
-                Self::override_source_dc(&mut swept, &sweep2.source, outer_value)?;
+                Self::override_independent_source_dc(&mut swept, &sweep2.source, outer_value)?;
             }
             let inner =
                 self.run_dc_sweep_with_abort(&swept, source_name, start, stop, step, abort)?;
@@ -227,8 +274,8 @@ impl Engine {
         Ok(results)
     }
 
-    /// Set the DC operating value of a named top-level voltage source.
-    fn override_source_dc(
+    /// Set the DC operating value of a named top-level independent source.
+    fn override_independent_source_dc(
         netlist: &mut Netlist,
         source_name: &str,
         value: Value,
@@ -237,12 +284,12 @@ impl Engine {
         for element in &mut netlist.elements {
             if element.name.eq_ignore_ascii_case(source_name) {
                 return match &mut element.kind {
-                    ElementKind::VoltageSource(spec) => {
+                    ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
                         *spec = spec.clone().with_dc_value(value);
                         Ok(())
                     }
                     _ => Err(SimulationError::Circuit(format!(
-                        "Second DC sweep source '{}' must be a voltage source",
+                        "Second DC sweep source '{}' must be an independent source",
                         source_name
                     ))),
                 };
@@ -302,18 +349,35 @@ impl Engine {
 
         // Find source index (case-insensitive comparison - SPICE standard)
         let source_name_upper = source_name.to_uppercase();
-        let vsrc_idx = circuit
+        let sweep_source = if let Some(index) = circuit
             .voltage_sources
             .names
             .iter()
             .position(|n| n.to_uppercase() == source_name_upper)
-            .ok_or_else(|| {
-                SimulationError::Circuit(format!("Source not found: {}", source_name))
-            })?;
-
-        // Store original source state so the sweep is reversible even if a point fails.
-        let original_value = circuit.voltage_sources.dc_values[vsrc_idx];
-        let original_source_spec = circuit.voltage_sources.source_specs[vsrc_idx].take();
+        {
+            // Store original source state so the sweep is reversible even if a point fails.
+            DcSweepSource::Voltage {
+                index,
+                original_value: circuit.voltage_sources.dc_values[index],
+                original_source_spec: circuit.voltage_sources.source_specs[index].take(),
+            }
+        } else if let Some(index) = circuit
+            .current_sources
+            .names
+            .iter()
+            .position(|n| n.to_uppercase() == source_name_upper)
+        {
+            DcSweepSource::Current {
+                index,
+                original_value: circuit.current_sources.dc_values[index],
+                original_source_spec: circuit.current_sources.source_specs[index].take(),
+            }
+        } else {
+            return Err(SimulationError::Circuit(format!(
+                "Source not found: {}",
+                source_name
+            )));
+        };
 
         // Build matrix structure (done once)
         let matrix = engine.build_matrix(&circuit)?;
@@ -338,88 +402,87 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                // Update source value
-                circuit.voltage_sources.dc_values[vsrc_idx] = sweep_value;
+                // Update source value.
+                sweep_source.set_value(&mut circuit, sweep_value);
 
                 // Solve DC at this point
                 // Key optimization: use previous solution as initial guess for faster convergence
-                let solution = if circuit.has_nonlinear_devices()
-                    || !circuit.generic_switches.is_empty()
-                {
-                    if let Some(seed) = prev_solution.as_deref() {
-                        let previous_value = prev_sweep_value.unwrap_or(sweep_value);
-                        let start_state = circuit.nonlinear_state_snapshot();
-                        match engine.solve_nonlinear_with_guess_and_abort(
-                            &mut circuit,
-                            &mut matrix,
-                            Some(seed),
-                            abort,
-                        ) {
-                            Ok(solution) => {
-                                dc_sweep_subdivisions = 2;
-                                solution
-                            }
-                            Err(_) => {
-                                circuit.restore_nonlinear_state(start_state.clone());
-                                circuit.voltage_sources.dc_values[vsrc_idx] = sweep_value;
-                                let fresh_attempt = if node_hints.is_empty() {
-                                    engine.solve_nonlinear_with_node_hints_and_abort(
-                                        &mut circuit,
-                                        &mut matrix,
-                                        &[],
-                                        abort,
-                                    )
-                                } else {
-                                    engine.solve_nonlinear_with_node_hints_and_abort(
-                                        &mut circuit,
-                                        &mut matrix,
-                                        &node_hints,
-                                        abort,
-                                    )
-                                };
-                                if let Ok(solution) = fresh_attempt {
+                let solution =
+                    if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
+                        if let Some(seed) = prev_solution.as_deref() {
+                            let previous_value = prev_sweep_value.unwrap_or(sweep_value);
+                            let start_state = circuit.nonlinear_state_snapshot();
+                            match engine.solve_nonlinear_with_guess_and_abort(
+                                &mut circuit,
+                                &mut matrix,
+                                Some(seed),
+                                abort,
+                            ) {
+                                Ok(solution) => {
                                     dc_sweep_subdivisions = 2;
                                     solution
-                                } else {
-                                    circuit.restore_nonlinear_state(start_state);
-                                    circuit.voltage_sources.dc_values[vsrc_idx] = previous_value;
-                                    let (solution, subdivisions) = engine
-                                        .solve_nonlinear_dc_sweep_target_with_substeps(
+                                }
+                                Err(_) => {
+                                    circuit.restore_nonlinear_state(start_state.clone());
+                                    sweep_source.set_value(&mut circuit, sweep_value);
+                                    let fresh_attempt = if node_hints.is_empty() {
+                                        engine.solve_nonlinear_with_node_hints_and_abort(
                                             &mut circuit,
                                             &mut matrix,
-                                            vsrc_idx,
-                                            previous_value,
-                                            sweep_value,
-                                            seed,
-                                            dc_sweep_subdivisions,
+                                            &[],
                                             abort,
-                                        )?;
-                                    dc_sweep_subdivisions = subdivisions;
-                                    solution
+                                        )
+                                    } else {
+                                        engine.solve_nonlinear_with_node_hints_and_abort(
+                                            &mut circuit,
+                                            &mut matrix,
+                                            &node_hints,
+                                            abort,
+                                        )
+                                    };
+                                    if let Ok(solution) = fresh_attempt {
+                                        dc_sweep_subdivisions = 2;
+                                        solution
+                                    } else {
+                                        circuit.restore_nonlinear_state(start_state);
+                                        sweep_source.set_value(&mut circuit, previous_value);
+                                        let (solution, subdivisions) = engine
+                                            .solve_nonlinear_dc_sweep_target_with_substeps(
+                                                &mut circuit,
+                                                &mut matrix,
+                                                &sweep_source,
+                                                previous_value,
+                                                sweep_value,
+                                                seed,
+                                                dc_sweep_subdivisions,
+                                                abort,
+                                            )?;
+                                        dc_sweep_subdivisions = subdivisions;
+                                        solution
+                                    }
                                 }
                             }
+                        } else if node_hints.is_empty() {
+                            engine.solve_nonlinear_with_node_hints_and_abort(
+                                &mut circuit,
+                                &mut matrix,
+                                &[],
+                                abort,
+                            )?
+                        } else {
+                            engine.solve_nonlinear_with_node_hints_and_abort(
+                                &mut circuit,
+                                &mut matrix,
+                                &node_hints,
+                                abort,
+                            )?
                         }
-                    } else if node_hints.is_empty() {
-                        engine.solve_nonlinear_with_node_hints_and_abort(
-                            &mut circuit,
-                            &mut matrix,
-                            &[],
-                            abort,
-                        )?
                     } else {
-                        engine.solve_nonlinear_with_node_hints_and_abort(
-                            &mut circuit,
-                            &mut matrix,
-                            &node_hints,
-                            abort,
-                        )?
-                    }
-                } else {
-                    if abort.is_aborted() {
-                        return Err(SimulationError::Aborted);
-                    }
-                    engine.solve_linear(&circuit, &mut matrix)?
-                };
+                        if abort.is_aborted() {
+                            return Err(SimulationError::Aborted);
+                        }
+                        engine.solve_linear(&circuit, &mut matrix)?
+                    };
                 if let Some(message) = circuit.take_xspice_evaluation_error() {
                     return Err(SimulationError::Circuit(format!(
                         "XSPICE evaluation failed: {message}"
@@ -448,8 +511,7 @@ impl Engine {
             Ok(results)
         })();
 
-        circuit.voltage_sources.dc_values[vsrc_idx] = original_value;
-        circuit.voltage_sources.source_specs[vsrc_idx] = original_source_spec;
+        sweep_source.restore(&mut circuit);
 
         sweep_result
     }
@@ -520,6 +582,68 @@ Rload out 0 1k
             (result.node_voltages[out_idx] - 5.0).abs() < 1e-9,
             "expected integrator out_ic=5 to drive V(out), got {}",
             result.node_voltages[out_idx]
+        );
+    }
+
+    #[test]
+    fn dc_sweep_supports_independent_current_sources() {
+        let deck = "\
+current source dc sweep
+I1 in 0 0
+R1 in 0 1k
+.dc I1 -1m 1m 1m
+.print dc V(in)
+.end
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let results = Engine::default()
+            .run_dc_sweep(&netlist, "I1", -1.0e-3, 1.0e-3, 1.0e-3)
+            .expect("current-source DC sweep solves");
+
+        assert_eq!(results.len(), 3);
+        for ((actual_sweep, result), (expected_sweep, expected_voltage)) in
+            results
+                .iter()
+                .zip([(-1.0e-3, 1.0), (0.0, 0.0), (1.0e-3, -1.0)])
+        {
+            assert!(
+                (actual_sweep - expected_sweep).abs() < 1.0e-15,
+                "unexpected sweep point {actual_sweep}, expected {expected_sweep}"
+            );
+            let actual_voltage = result
+                .try_voltage_named("in")
+                .expect("swept node voltage is present");
+            assert!(
+                (actual_voltage - expected_voltage).abs() < 1.0e-9,
+                "unexpected V(in) at I1={actual_sweep}: {actual_voltage}, expected {expected_voltage}"
+            );
+        }
+    }
+
+    #[test]
+    fn dc_sweep_supports_nonlinear_independent_current_sources() {
+        let deck = "\
+current source nonlinear dc sweep
+I1 in 0 0
+D1 0 in DMOD
+.model DMOD D(IS=1e-14 N=1)
+.dc I1 1n 1u 4.995e-7
+.print dc V(in)
+.end
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let results = Engine::default()
+            .run_dc_sweep(&netlist, "I1", 1.0e-9, 1.0e-6, 4.995e-7)
+            .expect("current-source nonlinear DC sweep solves");
+
+        assert_eq!(results.len(), 3);
+        let voltages = results
+            .iter()
+            .map(|(_, result)| result.try_voltage_named("in").expect("node is present"))
+            .collect::<Vec<_>>();
+        assert!(
+            voltages.windows(2).all(|pair| pair[0] > pair[1]),
+            "diode voltage should become more negative as source current increases: {voltages:?}"
         );
     }
 }

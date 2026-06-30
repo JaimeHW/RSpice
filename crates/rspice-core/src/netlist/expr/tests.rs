@@ -10,6 +10,15 @@ fn eval_with(ctx: &ParamContext, input: &str) -> Value {
     eval_expression(input, ctx).unwrap_or_else(|e| panic!("eval `{input}` failed: {e}"))
 }
 
+#[test]
+fn bare_named_constants_parse_as_numbers() {
+    let ctx = ParamContext::new();
+    assert!((eval_with(&ctx, "pi") - std::f64::consts::PI).abs() < 1.0e-15);
+    assert!((eval_with(&ctx, "exp") - std::f64::consts::E).abs() < 1.0e-15);
+    assert!((eval_with(&ctx, "2*exp") - 2.0 * std::f64::consts::E).abs() < 1.0e-15);
+    assert!((eval_with(&ctx, "exp(1)") - std::f64::consts::E).abs() < 1.0e-15);
+}
+
 //=============================================================================
 // RandomState: determinism and distribution
 //=============================================================================
