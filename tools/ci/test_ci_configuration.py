@@ -72,22 +72,22 @@ class CiConfigurationTests(unittest.TestCase):
         )
         self.assertIn("Test Verilog-A native JIT contracts (Linux x64)", workflow)
         self.assertIn(
-            "cargo test -p rspice-veriloga --features native --test native_contract -- --test-threads=1",
+            "cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1",
             workflow,
         )
         self.assertIn("Test Verilog-A native multiplicity contracts (Linux x64)", workflow)
         self.assertIn(
-            "cargo test -p rspice-veriloga --features native --test mfactor -- --test-threads=1",
+            "cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1",
             workflow,
         )
         self.assertIn("Test Verilog-A native contract (Linux x64 release)", workflow)
         self.assertIn(
-            "cargo test -p rspice-veriloga --release --features native --test native_contract -- --test-threads=1",
+            "cargo test -p rspice-veriloga --release --features native-bytecode-contract-tests --test native_contract -- --test-threads=1",
             workflow,
         )
         self.assertIn("Smoke Verilog-A native JIT benchmark gate (Linux x64)", workflow)
         self.assertIn(
-            "cargo run -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 0.1",
+            "cargo run -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 1.10",
             workflow,
         )
         self.assertIn("Test UI library (Linux)", workflow)
@@ -130,15 +130,15 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            "cargo test -p rspice-veriloga --features native --test native_contract -- --test-threads=1",
+            "cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1",
             workflow,
         )
         self.assertIn(
-            "cargo test -p rspice-veriloga --features native --test mfactor -- --test-threads=1",
+            "cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1",
             workflow,
         )
         self.assertIn(
-            "cargo run -p rspice-bench -- native-jit --iterations 1000 --samples 2 --min-speedup 0.1",
+            "cargo run -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 1.10",
             workflow,
         )
 
