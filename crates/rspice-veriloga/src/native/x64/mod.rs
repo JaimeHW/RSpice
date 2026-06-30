@@ -14,12 +14,17 @@ use super::expr::{
 use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel};
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
-use crate::canonical_ir::{CanonicalIrArtifact, EquationId, MirEquationKind, MirModel, NodeId};
+use crate::canonical_ir::{
+    CanonicalIrArtifact, EquationId, ExprId, HirAnalogOperator, HirExprKind, HirExpression,
+    HirLaplaceKind, HirZiKind, MirEquationKind, MirModel, NodeId, SourceSpanRef,
+};
 use crate::codegen::{
-    AssignmentStep, BytecodeProgram, CompiledModel, Instruction, StampIndex, StampProgram,
+    AssignmentStep, BytecodeProgram, CompiledModel, CompiledNoiseSource, Instruction, StampIndex,
+    StampProgram,
 };
 use crate::native::x64::codegen::NativeAssignment;
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
+use smol_str::SmolStr;
 
 const ENTRY_ALIGNMENT: usize = 16;
 const X64_NOP: u8 = 0x90;
@@ -47,6 +52,10 @@ fn compile_model_inner(
     };
     let base_limits = NativeLoweringLimits::for_model(model)
         .with_canonical_branch_unknown_map(&canonical_branch_unknown_map);
+    let canonical_noise_plan = match canonical_mir {
+        Some(mir) => Some(build_canonical_noise_plan(model, mir)?),
+        None => None,
+    };
 
     let mut image = Vec::new();
     let assignment = append_assignment_entry(model, &mut image)
@@ -226,10 +235,12 @@ fn compile_model_inner(
     let noise_limits = base_limits
         .with_available_current_pairs(&available_current_pairs)
         .with_prior_current_probes(&prior_current_probes);
-    for source in &model.noise_sources {
-        let psd_program = NativeProgram::from_bytecode(
-            model.name.clone(),
-            EntryKind::StampValue,
+    for (source_index, source) in model.noise_sources.iter().enumerate() {
+        let psd_program = lower_noise_psd_program(
+            model,
+            canonical_noise_plan.as_ref(),
+            source_index,
+            source,
             &source.psd_program,
             noise_limits,
         )
@@ -240,9 +251,11 @@ fn compile_model_inner(
         noise_psd.push(append_value_entry(&mut image, &psd_program)?);
 
         let exponent_entry = if let Some(program) = &source.exponent_program {
-            let exponent_program = NativeProgram::from_bytecode(
-                model.name.clone(),
-                EntryKind::StampValue,
+            let exponent_program = lower_noise_exponent_program(
+                model,
+                canonical_noise_plan.as_ref(),
+                source_index,
+                source,
                 program,
                 noise_limits,
             )
@@ -294,6 +307,1043 @@ fn compile_model_inner(
         entries,
         current_dependencies,
     )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CanonicalNoiseKind {
+    White,
+    Flicker,
+    Table,
+}
+
+impl CanonicalNoiseKind {
+    fn from_canonical_name(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "white" => Some(Self::White),
+            "flicker" => Some(Self::Flicker),
+            "table" => Some(Self::Table),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::White => "white",
+            Self::Flicker => "flicker",
+            Self::Table => "table",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CanonicalNoiseEntry {
+    kind: CanonicalNoiseKind,
+    name: Option<SmolStr>,
+    psd_expr: ExprId,
+    exponent_expr: Option<ExprId>,
+    table_points: Option<Vec<(f64, f64)>>,
+}
+
+struct CanonicalNoiseLoweringPlan {
+    mir: MirModel,
+    entries: Vec<CanonicalNoiseEntry>,
+}
+
+impl CanonicalNoiseLoweringPlan {
+    fn entry(&self, model: &CompiledModel, source_index: usize) -> JitResult<&CanonicalNoiseEntry> {
+        self.entries
+            .get(source_index)
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical noise plan is missing compiled noise source {source_index}"
+                )
+                .into(),
+            })
+    }
+}
+
+fn lower_noise_psd_program(
+    model: &CompiledModel,
+    canonical_noise_plan: Option<&CanonicalNoiseLoweringPlan>,
+    source_index: usize,
+    source: &CompiledNoiseSource,
+    bytecode_program: &BytecodeProgram,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<NativeProgram> {
+    if let Some(plan) = canonical_noise_plan {
+        let entry = plan.entry(model, source_index)?;
+        validate_canonical_noise_entry_matches_source(model, source_index, source, entry)?;
+        return NativeProgram::from_mir_expression(
+            model.name.clone(),
+            EntryKind::StampValue,
+            &plan.mir,
+            entry.psd_expr,
+            limits,
+        );
+    }
+
+    NativeProgram::from_bytecode(
+        model.name.clone(),
+        EntryKind::StampValue,
+        bytecode_program,
+        limits,
+    )
+}
+
+fn lower_noise_exponent_program(
+    model: &CompiledModel,
+    canonical_noise_plan: Option<&CanonicalNoiseLoweringPlan>,
+    source_index: usize,
+    source: &CompiledNoiseSource,
+    bytecode_program: &BytecodeProgram,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<NativeProgram> {
+    if let Some(plan) = canonical_noise_plan {
+        let entry = plan.entry(model, source_index)?;
+        validate_canonical_noise_entry_matches_source(model, source_index, source, entry)?;
+        let expr = entry
+            .exponent_expr
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical noise source {source_index} is missing flicker exponent expression"
+                )
+                .into(),
+            })?;
+        return NativeProgram::from_mir_expression(
+            model.name.clone(),
+            EntryKind::StampValue,
+            &plan.mir,
+            expr,
+            limits,
+        );
+    }
+
+    NativeProgram::from_bytecode(
+        model.name.clone(),
+        EntryKind::StampValue,
+        bytecode_program,
+        limits,
+    )
+}
+
+fn build_canonical_noise_plan(
+    model: &CompiledModel,
+    canonical_mir: &MirModel,
+) -> JitResult<CanonicalNoiseLoweringPlan> {
+    let mut mir = canonical_mir.clone();
+    let mut canonical_by_equation = Vec::with_capacity(model.stamp_programs.len());
+
+    for equation_index in 0..model.stamp_programs.len() {
+        let expected_count = model
+            .noise_sources
+            .iter()
+            .filter(|source| source.program_idx == equation_index)
+            .count();
+        if expected_count == 0 {
+            canonical_by_equation.push(Vec::new());
+            continue;
+        }
+
+        let root = mir
+            .equations
+            .get(equation_index)
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!("canonical equation {equation_index} is outside equation table")
+                    .into(),
+            })?
+            .expression
+            .id;
+        let entries = extract_canonical_noise_entries(model, &mut mir, equation_index, root)?;
+        if entries.len() != expected_count {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical equation {equation_index} has {} noise sources but compiled model has {expected_count}",
+                    entries.len()
+                )
+                .into(),
+            });
+        }
+        canonical_by_equation.push(entries);
+    }
+
+    let mut next_by_equation = vec![0_usize; model.stamp_programs.len()];
+    let mut entries = Vec::with_capacity(model.noise_sources.len());
+    for (source_index, source) in model.noise_sources.iter().enumerate() {
+        let Some(next) = next_by_equation.get_mut(source.program_idx) else {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "compiled noise source {source_index} references stamp {} outside canonical equation table",
+                    source.program_idx
+                )
+                .into(),
+            });
+        };
+        let entry = canonical_by_equation[source.program_idx]
+            .get(*next)
+            .cloned()
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical equation {} is missing noise source ordinal {}",
+                    source.program_idx, *next
+                )
+                .into(),
+            })?;
+        *next += 1;
+        validate_canonical_noise_entry_matches_source(model, source_index, source, &entry)?;
+        entries.push(entry);
+    }
+
+    Ok(CanonicalNoiseLoweringPlan { mir, entries })
+}
+
+fn extract_canonical_noise_entries(
+    model: &CompiledModel,
+    mir: &mut MirModel,
+    equation_index: usize,
+    root: ExprId,
+) -> JitResult<Vec<CanonicalNoiseEntry>> {
+    let span = mir
+        .equations
+        .get(equation_index)
+        .map(|equation| equation.span)
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!("canonical equation {equation_index} is outside equation table").into(),
+        })?;
+    let amplitude = append_canonical_number(mir, 1.0, "1.0", span);
+    let mut entries = Vec::new();
+    extract_canonical_noise_expr(model, mir, equation_index, root, amplitude, &mut entries)?;
+    Ok(entries)
+}
+
+fn extract_canonical_noise_expr(
+    model: &CompiledModel,
+    mir: &mut MirModel,
+    equation_index: usize,
+    expr_id: ExprId,
+    amplitude: ExprId,
+    out: &mut Vec<CanonicalNoiseEntry>,
+) -> JitResult<()> {
+    if !canonical_expr_contains_noise(model, mir, expr_id)? {
+        return Ok(());
+    }
+
+    let expression = canonical_expression(model, mir, expr_id)?.clone();
+    match expression.kind {
+        HirExprKind::NoiseSource {
+            source,
+            operands,
+            name,
+        } => {
+            if canonical_expr_list_contains_noise(model, mir, &operands)? {
+                return Err(unsupported_canonical_noise_position(
+                    model,
+                    equation_index,
+                    "noise-source operand",
+                ));
+            }
+            let kind =
+                CanonicalNoiseKind::from_canonical_name(source.as_str()).ok_or_else(|| {
+                    JitError::InvalidCanonicalIr {
+                        model: model.name.clone(),
+                        detail: format!(
+                            "canonical equation {equation_index} has unsupported noise source '{}'",
+                            source
+                        )
+                        .into(),
+                    }
+                })?;
+            let amplitude_square =
+                append_canonical_binary(mir, "Mul", amplitude, amplitude, expression.span);
+            let (psd_expr, exponent_expr, table_points) = match kind {
+                CanonicalNoiseKind::White => {
+                    require_canonical_noise_operand_count(
+                        model,
+                        equation_index,
+                        kind,
+                        &operands,
+                        1,
+                    )?;
+                    let psd = append_canonical_binary(
+                        mir,
+                        "Mul",
+                        amplitude_square,
+                        operands[0],
+                        expression.span,
+                    );
+                    (psd, None, None)
+                }
+                CanonicalNoiseKind::Flicker => {
+                    require_canonical_noise_operand_count(
+                        model,
+                        equation_index,
+                        kind,
+                        &operands,
+                        2,
+                    )?;
+                    let psd = append_canonical_binary(
+                        mir,
+                        "Mul",
+                        amplitude_square,
+                        operands[0],
+                        expression.span,
+                    );
+                    (psd, Some(operands[1]), None)
+                }
+                CanonicalNoiseKind::Table => {
+                    let table_points =
+                        canonical_table_points(model, mir, equation_index, &operands)?;
+                    (amplitude_square, None, Some(table_points))
+                }
+            };
+            out.push(CanonicalNoiseEntry {
+                kind,
+                name,
+                psd_expr,
+                exponent_expr,
+                table_points,
+            });
+            Ok(())
+        }
+        HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
+            let Some(kind) = canonical_noise_intrinsic_kind(name.as_str()) else {
+                return Err(unsupported_canonical_noise_position(
+                    model,
+                    equation_index,
+                    "function call",
+                ));
+            };
+            let name = canonical_optional_noise_name(model, mir, equation_index, &args, kind)?;
+            let amplitude_square =
+                append_canonical_binary(mir, "Mul", amplitude, amplitude, expression.span);
+            let (psd_expr, exponent_expr, table_points) = match kind {
+                CanonicalNoiseKind::White => {
+                    require_canonical_noise_arg_range(
+                        model,
+                        equation_index,
+                        kind,
+                        args.len(),
+                        1,
+                        2,
+                    )?;
+                    reject_nested_canonical_noise(model, mir, equation_index, &args[..1])?;
+                    let psd = append_canonical_binary(
+                        mir,
+                        "Mul",
+                        amplitude_square,
+                        args[0],
+                        expression.span,
+                    );
+                    (psd, None, None)
+                }
+                CanonicalNoiseKind::Flicker => {
+                    require_canonical_noise_arg_range(
+                        model,
+                        equation_index,
+                        kind,
+                        args.len(),
+                        2,
+                        3,
+                    )?;
+                    reject_nested_canonical_noise(model, mir, equation_index, &args[..2])?;
+                    let psd = append_canonical_binary(
+                        mir,
+                        "Mul",
+                        amplitude_square,
+                        args[0],
+                        expression.span,
+                    );
+                    (psd, Some(args[1]), None)
+                }
+                CanonicalNoiseKind::Table => {
+                    require_canonical_noise_arg_range(
+                        model,
+                        equation_index,
+                        kind,
+                        args.len(),
+                        1,
+                        2,
+                    )?;
+                    reject_nested_canonical_noise(model, mir, equation_index, &args[..1])?;
+                    let table_points =
+                        canonical_table_points_from_expr(model, mir, equation_index, args[0])?;
+                    (amplitude_square, None, Some(table_points))
+                }
+            };
+            out.push(CanonicalNoiseEntry {
+                kind,
+                name,
+                psd_expr,
+                exponent_expr,
+                table_points,
+            });
+            Ok(())
+        }
+        HirExprKind::Binary { op, left, right } => match op.as_str() {
+            "Add" | "Sub" => {
+                extract_canonical_noise_expr(model, mir, equation_index, left, amplitude, out)?;
+                extract_canonical_noise_expr(model, mir, equation_index, right, amplitude, out)
+            }
+            "Mul" => {
+                let left_has_noise = canonical_expr_contains_noise(model, mir, left)?;
+                let right_has_noise = canonical_expr_contains_noise(model, mir, right)?;
+                match (left_has_noise, right_has_noise) {
+                    (true, true) => Err(unsupported_canonical_noise_position(
+                        model,
+                        equation_index,
+                        "product of noise terms",
+                    )),
+                    (true, false) => {
+                        let scaled_amplitude =
+                            append_canonical_binary(mir, "Mul", amplitude, right, expression.span);
+                        extract_canonical_noise_expr(
+                            model,
+                            mir,
+                            equation_index,
+                            left,
+                            scaled_amplitude,
+                            out,
+                        )
+                    }
+                    (false, true) => {
+                        let scaled_amplitude =
+                            append_canonical_binary(mir, "Mul", amplitude, left, expression.span);
+                        extract_canonical_noise_expr(
+                            model,
+                            mir,
+                            equation_index,
+                            right,
+                            scaled_amplitude,
+                            out,
+                        )
+                    }
+                    (false, false) => Ok(()),
+                }
+            }
+            "Div" => {
+                if canonical_expr_contains_noise(model, mir, right)? {
+                    return Err(unsupported_canonical_noise_position(
+                        model,
+                        equation_index,
+                        "divisor",
+                    ));
+                }
+                let scaled_amplitude =
+                    append_canonical_binary(mir, "Div", amplitude, right, expression.span);
+                extract_canonical_noise_expr(
+                    model,
+                    mir,
+                    equation_index,
+                    left,
+                    scaled_amplitude,
+                    out,
+                )
+            }
+            _ => Err(unsupported_canonical_noise_position(
+                model,
+                equation_index,
+                "nonlinear binary expression",
+            )),
+        },
+        HirExprKind::Unary { op, operand } => match op.as_str() {
+            "Neg" | "Pos" => {
+                extract_canonical_noise_expr(model, mir, equation_index, operand, amplitude, out)
+            }
+            _ => Err(unsupported_canonical_noise_position(
+                model,
+                equation_index,
+                "nonlinear unary expression",
+            )),
+        },
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            if canonical_expr_contains_noise(model, mir, condition)? {
+                return Err(unsupported_canonical_noise_position(
+                    model,
+                    equation_index,
+                    "conditional guard",
+                ));
+            }
+            if canonical_expr_contains_noise(model, mir, then_expr)? {
+                let one = append_canonical_number(mir, 1.0, "1.0", expression.span);
+                let zero = append_canonical_number(mir, 0.0, "0.0", expression.span);
+                let gate = append_canonical_expr(
+                    mir,
+                    HirExprKind::Conditional {
+                        condition,
+                        then_expr: one,
+                        else_expr: zero,
+                    },
+                    expression.span,
+                );
+                let gated_amplitude =
+                    append_canonical_binary(mir, "Mul", amplitude, gate, expression.span);
+                extract_canonical_noise_expr(
+                    model,
+                    mir,
+                    equation_index,
+                    then_expr,
+                    gated_amplitude,
+                    out,
+                )?;
+            }
+            if canonical_expr_contains_noise(model, mir, else_expr)? {
+                let one = append_canonical_number(mir, 1.0, "1.0", expression.span);
+                let zero = append_canonical_number(mir, 0.0, "0.0", expression.span);
+                let gate = append_canonical_expr(
+                    mir,
+                    HirExprKind::Conditional {
+                        condition,
+                        then_expr: zero,
+                        else_expr: one,
+                    },
+                    expression.span,
+                );
+                let gated_amplitude =
+                    append_canonical_binary(mir, "Mul", amplitude, gate, expression.span);
+                extract_canonical_noise_expr(
+                    model,
+                    mir,
+                    equation_index,
+                    else_expr,
+                    gated_amplitude,
+                    out,
+                )?;
+            }
+            Ok(())
+        }
+        _ => Err(unsupported_canonical_noise_position(
+            model,
+            equation_index,
+            "nonlinear or dynamic position",
+        )),
+    }
+}
+
+fn canonical_expr_contains_noise(
+    model: &CompiledModel,
+    mir: &MirModel,
+    expr_id: ExprId,
+) -> JitResult<bool> {
+    let expression = canonical_expression(model, mir, expr_id)?;
+    match &expression.kind {
+        HirExprKind::NoiseSource { .. } => Ok(true),
+        HirExprKind::SystemFunction { name, .. } | HirExprKind::Call { name, .. }
+            if canonical_noise_intrinsic_kind(name.as_str()).is_some() =>
+        {
+            Ok(true)
+        }
+        HirExprKind::Number { .. }
+        | HirExprKind::StringLiteral { .. }
+        | HirExprKind::Identifier { .. }
+        | HirExprKind::BranchAccess { .. }
+        | HirExprKind::NamedBranchAccess { .. } => Ok(false),
+        HirExprKind::SystemFunction { args, .. }
+        | HirExprKind::Call { args, .. }
+        | HirExprKind::ArrayLiteral { elements: args } => {
+            canonical_expr_list_contains_noise(model, mir, args)
+        }
+        HirExprKind::Unary { operand, .. } | HirExprKind::ArrayAccess { index: operand, .. } => {
+            canonical_expr_contains_noise(model, mir, *operand)
+        }
+        HirExprKind::Binary { left, right, .. } => {
+            Ok(canonical_expr_contains_noise(model, mir, *left)?
+                || canonical_expr_contains_noise(model, mir, *right)?)
+        }
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => Ok(canonical_expr_contains_noise(model, mir, *condition)?
+            || canonical_expr_contains_noise(model, mir, *then_expr)?
+            || canonical_expr_contains_noise(model, mir, *else_expr)?),
+        HirExprKind::AnalogOperator { op } => {
+            canonical_analog_operator_contains_noise(model, mir, op)
+        }
+        HirExprKind::Laplace { expr, kind } => {
+            Ok(canonical_expr_contains_noise(model, mir, *expr)?
+                || canonical_laplace_kind_contains_noise(model, mir, kind)?)
+        }
+        HirExprKind::Zi { expr, kind } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
+            || canonical_zi_kind_contains_noise(model, mir, kind)?),
+    }
+}
+
+fn canonical_analog_operator_contains_noise(
+    model: &CompiledModel,
+    mir: &MirModel,
+    op: &HirAnalogOperator,
+) -> JitResult<bool> {
+    match op {
+        HirAnalogOperator::Ddt { expr, abstol } => {
+            Ok(canonical_expr_contains_noise(model, mir, *expr)?
+                || canonical_optional_expr_contains_noise(model, mir, *abstol)?)
+        }
+        HirAnalogOperator::Idt {
+            expr,
+            ic,
+            assert,
+            abstol,
+        } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
+            || canonical_optional_expr_contains_noise(model, mir, *ic)?
+            || canonical_optional_expr_contains_noise(model, mir, *assert)?
+            || canonical_optional_expr_contains_noise(model, mir, *abstol)?),
+        HirAnalogOperator::IdtMod {
+            expr,
+            ic,
+            modulus,
+            offset,
+            abstol,
+        } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
+            || canonical_optional_expr_contains_noise(model, mir, *ic)?
+            || canonical_optional_expr_contains_noise(model, mir, *modulus)?
+            || canonical_optional_expr_contains_noise(model, mir, *offset)?
+            || canonical_optional_expr_contains_noise(model, mir, *abstol)?),
+        HirAnalogOperator::Ddx { expr, probe } => {
+            Ok(canonical_expr_contains_noise(model, mir, *expr)?
+                || canonical_expr_contains_noise(model, mir, *probe)?)
+        }
+        HirAnalogOperator::Limexp { expr } | HirAnalogOperator::LastCrossing { expr, .. } => {
+            canonical_expr_contains_noise(model, mir, *expr)
+        }
+        HirAnalogOperator::Absdelay {
+            expr,
+            delay,
+            max_delay,
+        } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
+            || canonical_expr_contains_noise(model, mir, *delay)?
+            || canonical_optional_expr_contains_noise(model, mir, *max_delay)?),
+        HirAnalogOperator::Transition {
+            expr,
+            delay,
+            rise,
+            fall,
+            tolerance,
+        } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
+            || canonical_optional_expr_contains_noise(model, mir, *delay)?
+            || canonical_optional_expr_contains_noise(model, mir, *rise)?
+            || canonical_optional_expr_contains_noise(model, mir, *fall)?
+            || canonical_optional_expr_contains_noise(model, mir, *tolerance)?),
+        HirAnalogOperator::Slew {
+            expr,
+            max_rise,
+            max_fall,
+        } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
+            || canonical_optional_expr_contains_noise(model, mir, *max_rise)?
+            || canonical_optional_expr_contains_noise(model, mir, *max_fall)?),
+    }
+}
+
+fn canonical_laplace_kind_contains_noise(
+    model: &CompiledModel,
+    mir: &MirModel,
+    kind: &HirLaplaceKind,
+) -> JitResult<bool> {
+    match kind {
+        HirLaplaceKind::ZeroPole { zeros, poles } => {
+            Ok(canonical_expr_list_contains_noise(model, mir, zeros)?
+                || canonical_expr_list_contains_noise(model, mir, poles)?)
+        }
+        HirLaplaceKind::ZeroDenominator { zeros, denominator } => {
+            Ok(canonical_expr_list_contains_noise(model, mir, zeros)?
+                || canonical_expr_list_contains_noise(model, mir, denominator)?)
+        }
+        HirLaplaceKind::NumeratorPole { numerator, poles } => {
+            Ok(canonical_expr_list_contains_noise(model, mir, numerator)?
+                || canonical_expr_list_contains_noise(model, mir, poles)?)
+        }
+        HirLaplaceKind::NumeratorDenominator {
+            numerator,
+            denominator,
+        } => Ok(canonical_expr_list_contains_noise(model, mir, numerator)?
+            || canonical_expr_list_contains_noise(model, mir, denominator)?),
+    }
+}
+
+fn canonical_zi_kind_contains_noise(
+    model: &CompiledModel,
+    mir: &MirModel,
+    kind: &HirZiKind,
+) -> JitResult<bool> {
+    match kind {
+        HirZiKind::ZeroPole { zeros, poles } => {
+            Ok(canonical_expr_list_contains_noise(model, mir, zeros)?
+                || canonical_expr_list_contains_noise(model, mir, poles)?)
+        }
+        HirZiKind::ZeroDenominator { zeros, denominator } => {
+            Ok(canonical_expr_list_contains_noise(model, mir, zeros)?
+                || canonical_expr_list_contains_noise(model, mir, denominator)?)
+        }
+        HirZiKind::NumeratorPole { numerator, poles } => {
+            Ok(canonical_expr_list_contains_noise(model, mir, numerator)?
+                || canonical_expr_list_contains_noise(model, mir, poles)?)
+        }
+        HirZiKind::NumeratorDenominator {
+            numerator,
+            denominator,
+        } => Ok(canonical_expr_list_contains_noise(model, mir, numerator)?
+            || canonical_expr_list_contains_noise(model, mir, denominator)?),
+    }
+}
+
+fn canonical_expr_list_contains_noise(
+    model: &CompiledModel,
+    mir: &MirModel,
+    exprs: &[ExprId],
+) -> JitResult<bool> {
+    for expr in exprs {
+        if canonical_expr_contains_noise(model, mir, *expr)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn reject_nested_canonical_noise(
+    model: &CompiledModel,
+    mir: &MirModel,
+    equation_index: usize,
+    exprs: &[ExprId],
+) -> JitResult<()> {
+    if canonical_expr_list_contains_noise(model, mir, exprs)? {
+        return Err(unsupported_canonical_noise_position(
+            model,
+            equation_index,
+            "noise-source operand",
+        ));
+    }
+    Ok(())
+}
+
+fn canonical_optional_expr_contains_noise(
+    model: &CompiledModel,
+    mir: &MirModel,
+    expr: Option<ExprId>,
+) -> JitResult<bool> {
+    match expr {
+        Some(expr) => canonical_expr_contains_noise(model, mir, expr),
+        None => Ok(false),
+    }
+}
+
+fn canonical_table_points(
+    model: &CompiledModel,
+    mir: &MirModel,
+    equation_index: usize,
+    operands: &[ExprId],
+) -> JitResult<Vec<(f64, f64)>> {
+    if operands.len() % 2 != 0 {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical equation {equation_index} table noise has odd operand count {}",
+                operands.len()
+            )
+            .into(),
+        });
+    }
+
+    let mut points = Vec::with_capacity(operands.len() / 2);
+    for pair in operands.chunks_exact(2) {
+        points.push((
+            canonical_number_value(model, mir, pair[0])?,
+            canonical_number_value(model, mir, pair[1])?,
+        ));
+    }
+    Ok(points)
+}
+
+fn canonical_table_points_from_expr(
+    model: &CompiledModel,
+    mir: &MirModel,
+    equation_index: usize,
+    expr_id: ExprId,
+) -> JitResult<Vec<(f64, f64)>> {
+    match &canonical_expression(model, mir, expr_id)?.kind {
+        HirExprKind::ArrayLiteral { elements } => {
+            canonical_table_points(model, mir, equation_index, elements)
+        }
+        other => Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical equation {equation_index} table noise data is {}, expected array literal",
+                canonical_expr_kind_name(other)
+            )
+            .into(),
+        }),
+    }
+}
+
+fn canonical_number_value(
+    model: &CompiledModel,
+    mir: &MirModel,
+    expr_id: ExprId,
+) -> JitResult<f64> {
+    match &canonical_expression(model, mir, expr_id)?.kind {
+        HirExprKind::Number { value, .. } => Ok(*value),
+        other => Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical table noise point expression {expr_id} is {}, expected number",
+                canonical_expr_kind_name(other)
+            )
+            .into(),
+        }),
+    }
+}
+
+fn canonical_noise_intrinsic_kind(name: &str) -> Option<CanonicalNoiseKind> {
+    let normalized = name.trim_start_matches('$').to_ascii_lowercase();
+    match normalized.as_str() {
+        "white_noise" => Some(CanonicalNoiseKind::White),
+        "flicker_noise" => Some(CanonicalNoiseKind::Flicker),
+        "noise_table" | "noise_table_log" => Some(CanonicalNoiseKind::Table),
+        _ => None,
+    }
+}
+
+fn canonical_optional_noise_name(
+    model: &CompiledModel,
+    mir: &MirModel,
+    equation_index: usize,
+    args: &[ExprId],
+    kind: CanonicalNoiseKind,
+) -> JitResult<Option<SmolStr>> {
+    let name_index = match kind {
+        CanonicalNoiseKind::White | CanonicalNoiseKind::Table => 1,
+        CanonicalNoiseKind::Flicker => 2,
+    };
+    let Some(expr_id) = args.get(name_index).copied() else {
+        return Ok(None);
+    };
+    match &canonical_expression(model, mir, expr_id)?.kind {
+        HirExprKind::StringLiteral { value } => Ok(Some(value.clone())),
+        other => Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical equation {equation_index} {} noise name argument is {}, expected string",
+                kind.as_str(),
+                canonical_expr_kind_name(other)
+            )
+            .into(),
+        }),
+    }
+}
+
+fn validate_canonical_noise_entry_matches_source(
+    model: &CompiledModel,
+    source_index: usize,
+    source: &CompiledNoiseSource,
+    entry: &CanonicalNoiseEntry,
+) -> JitResult<()> {
+    let compiled_kind = compiled_noise_kind(source);
+    if entry.kind != compiled_kind {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical noise source {source_index} kind '{}' does not match compiled kind '{}'",
+                entry.kind.as_str(),
+                compiled_kind.as_str()
+            )
+            .into(),
+        });
+    }
+    if entry.name != source.name {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical noise source {source_index} name {:?} does not match compiled name {:?}",
+                entry.name, source.name
+            )
+            .into(),
+        });
+    }
+    if entry.exponent_expr.is_some() != source.exponent_program.is_some() {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical noise source {source_index} exponent presence does not match compiled model"
+            )
+            .into(),
+        });
+    }
+    if let Some((compiled_points, _)) = &source.table {
+        let Some(canonical_points) = &entry.table_points else {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical noise source {source_index} is missing table point metadata"
+                )
+                .into(),
+            });
+        };
+        if !noise_table_points_match(canonical_points, compiled_points) {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical noise source {source_index} table points do not match compiled model"
+                )
+                .into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn compiled_noise_kind(source: &CompiledNoiseSource) -> CanonicalNoiseKind {
+    if source.table.is_some() {
+        CanonicalNoiseKind::Table
+    } else if source.exponent_program.is_some() {
+        CanonicalNoiseKind::Flicker
+    } else {
+        CanonicalNoiseKind::White
+    }
+}
+
+fn noise_table_points_match(canonical: &[(f64, f64)], compiled: &[(f64, f64)]) -> bool {
+    canonical.len() == compiled.len()
+        && canonical.iter().zip(compiled).all(|((cf, cp), (bf, bp))| {
+            cf.to_bits() == bf.to_bits() && cp.to_bits() == bp.to_bits()
+        })
+}
+
+fn require_canonical_noise_operand_count(
+    model: &CompiledModel,
+    equation_index: usize,
+    kind: CanonicalNoiseKind,
+    operands: &[ExprId],
+    expected: usize,
+) -> JitResult<()> {
+    if operands.len() == expected {
+        return Ok(());
+    }
+    Err(JitError::InvalidCanonicalIr {
+        model: model.name.clone(),
+        detail: format!(
+            "canonical equation {equation_index} {} noise source has {} operands, expected {expected}",
+            kind.as_str(),
+            operands.len()
+        )
+        .into(),
+    })
+}
+
+fn require_canonical_noise_arg_range(
+    model: &CompiledModel,
+    equation_index: usize,
+    kind: CanonicalNoiseKind,
+    actual: usize,
+    min: usize,
+    max: usize,
+) -> JitResult<()> {
+    if (min..=max).contains(&actual) {
+        return Ok(());
+    }
+    Err(JitError::InvalidCanonicalIr {
+        model: model.name.clone(),
+        detail: format!(
+            "canonical equation {equation_index} {} noise source has {actual} arguments, expected {min}..={max}",
+            kind.as_str()
+        )
+        .into(),
+    })
+}
+
+fn canonical_expression<'a>(
+    model: &CompiledModel,
+    mir: &'a MirModel,
+    expr_id: ExprId,
+) -> JitResult<&'a HirExpression> {
+    mir.expressions
+        .get(usize::from(expr_id))
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!("canonical expression {expr_id} is outside MIR expression arena")
+                .into(),
+        })
+}
+
+fn append_canonical_number(
+    mir: &mut MirModel,
+    value: f64,
+    raw: &'static str,
+    span: SourceSpanRef,
+) -> ExprId {
+    append_canonical_expr(
+        mir,
+        HirExprKind::Number {
+            value,
+            raw: raw.into(),
+        },
+        span,
+    )
+}
+
+fn append_canonical_binary(
+    mir: &mut MirModel,
+    op: &'static str,
+    left: ExprId,
+    right: ExprId,
+    span: SourceSpanRef,
+) -> ExprId {
+    append_canonical_expr(
+        mir,
+        HirExprKind::Binary {
+            op: op.into(),
+            left,
+            right,
+        },
+        span,
+    )
+}
+
+fn append_canonical_expr(mir: &mut MirModel, kind: HirExprKind, span: SourceSpanRef) -> ExprId {
+    let id = ExprId::from(mir.expressions.len());
+    mir.expressions.push(HirExpression { id, kind, span });
+    id
+}
+
+fn unsupported_canonical_noise_position(
+    model: &CompiledModel,
+    equation_index: usize,
+    position: &str,
+) -> JitError {
+    JitError::InvalidCanonicalIr {
+        model: model.name.clone(),
+        detail: format!(
+            "canonical equation {equation_index} places noise source in a {position}, which cannot be lowered as a native noise-analysis entry"
+        )
+        .into(),
+    }
+}
+
+fn canonical_expr_kind_name(kind: &HirExprKind) -> &'static str {
+    match kind {
+        HirExprKind::Number { .. } => "number",
+        HirExprKind::StringLiteral { .. } => "string",
+        HirExprKind::Identifier { .. } => "identifier",
+        HirExprKind::SystemFunction { .. } => "system_function",
+        HirExprKind::Binary { .. } => "binary",
+        HirExprKind::Unary { .. } => "unary",
+        HirExprKind::Conditional { .. } => "conditional",
+        HirExprKind::Call { .. } => "call",
+        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
+        HirExprKind::ArrayAccess { .. } => "array_access",
+        HirExprKind::ArrayLiteral { .. } => "array_literal",
+        HirExprKind::AnalogOperator { .. } => "analog_operator",
+        HirExprKind::Laplace { .. } => "laplace",
+        HirExprKind::Zi { .. } => "zi",
+        HirExprKind::NoiseSource { .. } => "noise_source",
+    }
 }
 
 fn lower_parameter_default_program(
@@ -1763,6 +2813,109 @@ endmodule
         assert!(
             message.contains("no interpreter fallback"),
             "canonical parameter mismatch must keep hard-JIT contract: {message}"
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_noise_entries_from_mir() {
+        let source = r#"
+module native_canonical_noise_guard(p, n, ctrl);
+  inout p, n, ctrl;
+  electrical p, n, ctrl;
+  parameter real scale = 2.0;
+  analog begin
+    I(p, n) <+ (scale + V(ctrl, n)) * white_noise(3.0, "thermal");
+    I(p, n) <+ (scale - V(p, n)) * flicker_noise(4.0, 1.25, "flicker");
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert_eq!(model.noise_sources.len(), 2);
+        assert!(
+            model.noise_sources[1].exponent_program.is_some(),
+            "fixture must include a flicker exponent"
+        );
+
+        model.noise_sources[0].psd_program = BytecodeProgram {
+            instructions: vec![Instruction::PushConst(99.0)],
+        };
+        model.noise_sources[1].psd_program = BytecodeProgram {
+            instructions: vec![Instruction::PushConst(88.0)],
+        };
+        model.noise_sources[1].exponent_program = Some(BytecodeProgram {
+            instructions: vec![Instruction::PushConst(77.0)],
+        });
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical noise entries compile to native x64");
+        let mut context = native_model_benchmark_context(&model, "canonical_noise_guard");
+        context.voltages[0] = 0.5;
+        context.voltages[1] = 0.0;
+        context.voltages[2] = 0.25;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+
+        let white_psd = native.run_noise_psd(0, &ctx, context.variables.as_ptr());
+        let flicker_psd = native.run_noise_psd(1, &ctx, context.variables.as_ptr());
+        let flicker_exponent = native
+            .run_noise_exponent(1, &ctx, context.variables.as_ptr())
+            .expect("flicker source has native exponent entry");
+
+        assert_finite_close(
+            "canonical_noise_guard",
+            "white noise psd",
+            (2.0_f64 + 0.25).powi(2) * 3.0,
+            white_psd,
+        )
+        .expect("white PSD must come from canonical MIR, not poisoned bytecode");
+        assert_finite_close(
+            "canonical_noise_guard",
+            "flicker noise psd",
+            (2.0_f64 - 0.5).powi(2) * 4.0,
+            flicker_psd,
+        )
+        .expect("flicker PSD must come from canonical MIR, not poisoned bytecode");
+        assert_eq!(flicker_exponent.to_bits(), 1.25_f64.to_bits());
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_rejects_mismatched_noise_kind() {
+        let model_source = r#"
+module native_canonical_noise_kind_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ white_noise(3.0, "thermal");
+endmodule
+"#;
+        let artifact_source = r#"
+module native_canonical_noise_kind_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ flicker_noise(3.0, 1.0, "thermal");
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(model_source)
+            .expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(artifact_source)
+            .expect("compile mismatched canonical IR");
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("canonical/compiled noise kind drift must fail native compile");
+        let message = error.to_string();
+        assert!(
+            message.contains("canonical noise source 0 kind"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical noise mismatch must keep hard-JIT contract: {message}"
         );
     }
 
