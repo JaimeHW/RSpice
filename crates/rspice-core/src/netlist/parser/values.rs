@@ -157,7 +157,7 @@ pub(super) fn parse_model_params(
     let opened_paren = stream.consume(&TokenKind::LParen);
     let allow_missing_close = opened_paren
         && model_type
-            .map(|kind| crate::xspice::CodeModelRegistry::with_builtins().contains(kind))
+            .map(crate::xspice::CodeModelRegistry::is_builtin_model_name)
             .unwrap_or(false);
 
     loop {

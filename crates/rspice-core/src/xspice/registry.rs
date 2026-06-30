@@ -21,6 +21,95 @@ pub struct CodeModelRegistry {
     models: HashMap<String, Arc<dyn CodeModel>>,
 }
 
+const BUILTIN_MODEL_NAMES: &[&str] = &[
+    "adc_bridge",
+    "astate",
+    "aswitch",
+    "bidi_bridge",
+    "capacitoric",
+    "climit",
+    "cmeter",
+    "core",
+    "cpline",
+    "cpmlin",
+    "d_and",
+    "d_buffer",
+    "d_cosim",
+    "d_dff",
+    "d_dlatch",
+    "d_dt",
+    "d_fdiv",
+    "d_genlut",
+    "d_inverter",
+    "d_jkff",
+    "d_lut",
+    "d_nand",
+    "d_nor",
+    "d_open_c",
+    "d_open_e",
+    "d_or",
+    "d_osc",
+    "d_process",
+    "d_pulldown",
+    "d_pullup",
+    "d_pwm",
+    "d_ram",
+    "d_source",
+    "d_srff",
+    "d_srlatch",
+    "d_state",
+    "d_tff",
+    "d_to_real",
+    "d_tristate",
+    "d_xnor",
+    "d_xor",
+    "dac_bridge",
+    "delay",
+    "differentiator",
+    "divide",
+    "divider",
+    "file_source",
+    "filesource",
+    "gain",
+    "hyst",
+    "icm_spice2poly",
+    "ilimit",
+    "inductoric",
+    "int",
+    "integrator",
+    "lcouple",
+    "limit",
+    "lmeter",
+    "memristor",
+    "mlin",
+    "msopen",
+    "mult",
+    "multi_input_pwl",
+    "oneshot",
+    "potentiometer",
+    "pswitch",
+    "pwl",
+    "pwlts",
+    "real_delay",
+    "real_gain",
+    "real_to_v",
+    "s_h",
+    "s_xfer",
+    "seegen",
+    "sidiode",
+    "sine",
+    "slew",
+    "spice2poly",
+    "square",
+    "summer",
+    "table2d",
+    "table3d",
+    "tline",
+    "triangle",
+    "xfer",
+    "zener",
+];
+
 impl CodeModelRegistry {
     /// Create a new empty registry
     pub fn new() -> Self {
@@ -32,6 +121,18 @@ impl CodeModelRegistry {
         let mut registry = Self::new();
         registry.register_builtins();
         registry
+    }
+
+    /// Get all built-in model names without constructing model instances.
+    pub fn builtin_model_names() -> &'static [&'static str] {
+        BUILTIN_MODEL_NAMES
+    }
+
+    /// Check whether a name belongs to a built-in code model.
+    pub fn is_builtin_model_name(name: &str) -> bool {
+        BUILTIN_MODEL_NAMES
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(name))
     }
 
     /// Register a code model
@@ -301,6 +402,20 @@ mod tests {
 
     fn has_builtin_or_native_lowering(registry: &CodeModelRegistry, name: &str) -> bool {
         registry.contains(name)
+    }
+
+    #[test]
+    fn static_builtin_catalog_matches_registered_model_names() {
+        let registry = CodeModelRegistry::with_builtins();
+        let mut registered = registry.model_names();
+        registered.sort_unstable();
+
+        let mut catalog = CodeModelRegistry::builtin_model_names().to_vec();
+        catalog.sort_unstable();
+
+        assert_eq!(registered, catalog);
+        assert!(CodeModelRegistry::is_builtin_model_name("DAC_BRIDGE"));
+        assert!(!CodeModelRegistry::is_builtin_model_name("d_rom"));
     }
 
     #[test]
