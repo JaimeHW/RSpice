@@ -2367,6 +2367,19 @@ impl CodeModel for AnalogSwitch {
         ctx.set_output("out", eval.output_current);
         Ok(())
     }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if !output_port.eq_ignore_ascii_case("out") {
+            return Vec::new();
+        }
+        let Ok(eval) = aswitch_eval(ctx) else {
+            return Vec::new();
+        };
+        vec![
+            ("out".to_string(), eval.output_conductance),
+            ("cntl_in".to_string(), eval.control_partial),
+        ]
+    }
 }
 
 impl CodeModel for Pswitch {
