@@ -35,6 +35,7 @@ fn d_cosim_error(message: impl Into<String>) -> CmError {
 struct DigitalCosimInputScratch {
     inputs: Vec<DigitalValue>,
     inouts: Vec<DigitalValue>,
+    input_events: Vec<DigitalCosimInputEvent>,
 }
 
 fn official_cosim_delay(ctx: &CmContext) -> Value {
@@ -124,9 +125,9 @@ fn collect_input_events(
     inputs: &[DigitalValue],
     inouts: &[DigitalValue],
     input_event_limit: Option<usize>,
-) -> Vec<DigitalCosimInputEvent> {
-    let mut events = Vec::new();
-
+    events: &mut Vec<DigitalCosimInputEvent>,
+) {
+    events.clear();
     for (index, value) in inputs.iter().copied().enumerate() {
         if !input_event_allowed(input_event_limit, index) {
             continue;
@@ -171,7 +172,6 @@ fn collect_input_events(
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.index.cmp(&b.index))
     });
-    events
 }
 
 fn effective_output_delay(ctx: &CmContext, vtime: Value) -> Value {
@@ -350,8 +350,13 @@ impl CodeModel for DigitalCosim {
         let mut input_scratch = input_scratch
             .lock()
             .map_err(|_| d_cosim_error("input scratch lock is poisoned"))?;
-        fill_sized_digital_vector(ctx, "d_in", input_width, &mut input_scratch.inputs);
-        fill_sized_digital_vector(ctx, "d_inout", inout_width, &mut input_scratch.inouts);
+        let DigitalCosimInputScratch {
+            inputs,
+            inouts,
+            input_events,
+        } = &mut *input_scratch;
+        fill_sized_digital_vector(ctx, "d_in", input_width, inputs);
+        fill_sized_digital_vector(ctx, "d_inout", inout_width, inouts);
 
         let runtime = ctx
             .resource::<DigitalCosimRuntimeResource>(RESOURCE_RUNTIME)
@@ -362,12 +367,7 @@ impl CodeModel for DigitalCosim {
                 .map_err(|_| d_cosim_error("runtime lock is poisoned"))?;
             runtime.input_event_limit()
         };
-        let input_events = collect_input_events(
-            ctx,
-            &input_scratch.inputs,
-            &input_scratch.inouts,
-            input_event_limit,
-        );
+        collect_input_events(ctx, inputs, inouts, input_event_limit, input_events);
 
         let mut runtime = runtime
             .lock()
@@ -382,44 +382,35 @@ impl CodeModel for DigitalCosim {
             for index in 0..(input_width + inout_width) {
                 ctx.set_state(index, 0.0);
             }
-            for (index, value) in input_scratch.inputs.iter().copied().enumerate() {
+            for (index, value) in inputs.iter().copied().enumerate() {
                 ctx.set_int_state(STATE_PREV_INPUT_START + index, digital_value_code(value));
             }
-            for (index, value) in input_scratch.inouts.iter().copied().enumerate() {
+            for (index, value) in inouts.iter().copied().enumerate() {
                 ctx.set_int_state(
                     STATE_PREV_INPUT_START + input_width + index,
                     digital_value_code(value),
                 );
             }
-            results.push(runtime.initialize(
-                ctx.time,
-                &input_scratch.inputs,
-                &input_scratch.inouts,
-            )?);
+            results.push(runtime.initialize(ctx.time, inputs, inouts)?);
         } else {
             if ctx.int_state(STATE_TIME_ZERO_INITIALIZED) == COSIM_INPUTS_INITIALIZED {
                 results.push(runtime.startup_step(0.0)?);
                 ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, COSIM_STARTUP_STEP_DONE);
             }
-            results.push(runtime.step(
-                ctx.time,
-                &input_scratch.inputs,
-                &input_scratch.inouts,
-                &input_events,
-            )?);
+            results.push(runtime.step(ctx.time, inputs, inouts, input_events)?);
         }
         drop(runtime);
-        drop(input_scratch);
-
-        for result in results {
-            apply_cosim_step(ctx, result)?;
-        }
-        for event in input_events {
+        for event in input_events.iter() {
             ctx.set_state(event.index, event.time);
             ctx.set_int_state(
                 STATE_PREV_INPUT_START + event.index,
                 digital_value_code(event.value),
             );
+        }
+        drop(input_scratch);
+
+        for result in results {
+            apply_cosim_step(ctx, result)?;
         }
         Ok(())
     }
@@ -490,7 +481,8 @@ mod tests {
 
         let inputs = [DigitalValue::one(), DigitalValue::zero()];
         let inouts = [DigitalValue::unknown()];
-        let events = collect_input_events(&ctx, &inputs, &inouts, None);
+        let mut events = Vec::new();
+        collect_input_events(&ctx, &inputs, &inouts, None, &mut events);
 
         assert_eq!(events.len(), 3);
         assert_eq!(
@@ -505,10 +497,14 @@ mod tests {
                 DigitalValue::one()
             ]
         );
+        let first_ptr = events.as_ptr();
+        let first_capacity = events.capacity();
 
-        let clipped = collect_input_events(&ctx, &inputs, &inouts, Some(2));
+        collect_input_events(&ctx, &inputs, &inouts, Some(2), &mut events);
+        assert_eq!(events.as_ptr(), first_ptr);
+        assert_eq!(events.capacity(), first_capacity);
         assert_eq!(
-            clipped.iter().map(|event| event.index).collect::<Vec<_>>(),
+            events.iter().map(|event| event.index).collect::<Vec<_>>(),
             vec![1, 0]
         );
     }
