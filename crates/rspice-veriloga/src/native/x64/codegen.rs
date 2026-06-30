@@ -2900,8 +2900,18 @@ impl FunctionCompiler {
 
     fn finish_with_literals(self) -> JitResult<Vec<u8>> {
         let mut bytes = self.encoder.into_bytes();
+        let mut literal_offsets: Vec<(u64, usize)> = Vec::new();
         for literal in &self.literals {
-            let literal_offset = bytes.len();
+            let bits = literal.value.to_bits();
+            let literal_offset = literal_offsets
+                .iter()
+                .find_map(|(candidate, offset)| (*candidate == bits).then_some(*offset))
+                .unwrap_or_else(|| {
+                    let offset = bytes.len();
+                    bytes.extend_from_slice(&bits.to_le_bytes());
+                    literal_offsets.push((bits, offset));
+                    offset
+                });
             let next_instruction_offset = literal.displacement_offset + std::mem::size_of::<i32>();
             let displacement = i32::try_from(
                 literal_offset as isize - next_instruction_offset as isize,
@@ -2913,7 +2923,6 @@ impl FunctionCompiler {
 
             bytes[literal.displacement_offset..literal.displacement_offset + 4]
                 .copy_from_slice(&displacement.to_le_bytes());
-            bytes.extend_from_slice(&literal.value.to_le_bytes());
         }
 
         Ok(bytes)
@@ -3463,6 +3472,29 @@ mod tests {
     };
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
     use crate::zfilter::ZiFilter;
+
+    #[test]
+    fn literal_pool_reuses_identical_bit_patterns() {
+        let mut compiler = FunctionCompiler::new(false, false, 0, None, None, 0);
+        compiler.emit_literal_load(Xmm::Xmm0, 2.0);
+        compiler.emit_literal_load(Xmm::Xmm1, 2.0);
+        compiler.emit_literal_load(Xmm::Xmm2, 3.0);
+
+        let bytes = compiler
+            .finish_with_literals()
+            .expect("literal pool relocation succeeds");
+
+        assert_eq!(
+            count_bytes(&bytes, &2.0_f64.to_le_bytes()),
+            1,
+            "duplicate exact literals should share one pool slot"
+        );
+        assert_eq!(
+            count_bytes(&bytes, &3.0_f64.to_le_bytes()),
+            1,
+            "distinct literals should keep distinct pool slots"
+        );
+    }
 
     #[test]
     fn generated_value_leaf_evaluates_native_expression() {
