@@ -2461,6 +2461,16 @@ impl CodeModel for Sidiode {
 
         Ok(())
     }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if !output_port.eq_ignore_ascii_case("ds") {
+            return Vec::new();
+        }
+        let Ok(eval) = sidiode_eval(ctx) else {
+            return Vec::new();
+        };
+        vec![("ds".to_string(), eval.derivative)]
+    }
 }
 
 impl CodeModel for Zener {
@@ -2500,6 +2510,16 @@ impl CodeModel for Zener {
         ctx.set_output("z", eval.current);
 
         Ok(())
+    }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if !output_port.eq_ignore_ascii_case("z") {
+            return Vec::new();
+        }
+        let Ok(eval) = zener_eval_for_voltage(ctx, ctx.input("z")) else {
+            return Vec::new();
+        };
+        vec![("z".to_string(), eval.derivative)]
     }
 }
 
