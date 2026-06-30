@@ -2553,7 +2553,8 @@ fn rust_backend_compacts_generated_scratch_storage_field_names() {
     );
     assert!(stamp.contains("s.v["), "{stamp}");
     assert!(!stamp.contains("scratch."), "{stamp}");
-    assert!(stamp.contains("type A = GenericAdValue"), "{stamp}");
+    assert!(stamp.contains("type Scratch = GenericScratch"), "{stamp}");
+    assert!(!stamp.contains("GenericAdValue"), "{stamp}");
     assert!(stamp.contains("s.store_voltage("), "{stamp}");
     assert!(!stamp.contains("AdValue::"), "{stamp}");
     assert!(!stamp.contains("s.values["), "{stamp}");
