@@ -162,10 +162,6 @@ fn collect_input_events(
     events
 }
 
-fn zero_vector(width: usize) -> Vec<DigitalValue> {
-    vec![DigitalValue::zero(); width]
-}
-
 fn effective_output_delay(ctx: &CmContext, vtime: Value) -> Value {
     let delay = official_cosim_delay(ctx) - (ctx.time - vtime);
     if delay <= 0.0 || !delay.is_finite() {
@@ -179,38 +175,30 @@ fn set_initial_outputs(ctx: &mut CmContext, delay: Value) {
     let output_width = ctx.port_width("d_out");
     let inout_width = ctx.port_width("d_inout");
     if output_width > 0 {
-        ctx.set_output_digital_vector("d_out", zero_vector(output_width), delay);
+        ctx.set_output_digital_vector_from_context_fn("d_out", output_width, delay, |_, _| {
+            DigitalValue::zero()
+        });
     }
     if inout_width > 0 {
-        ctx.set_output_digital_vector("d_inout", zero_vector(inout_width), delay);
+        ctx.set_output_digital_vector_from_context_fn("d_inout", inout_width, delay, |_, _| {
+            DigitalValue::zero()
+        });
     }
 }
 
-fn normalize_runtime_outputs(
-    ctx: &CmContext,
-    port_name: &str,
-    values: &[DigitalValue],
-    width: usize,
-) -> Vec<DigitalValue> {
-    let mut normalized = ctx.output_digital_vector(port_name);
-    normalized.resize(width, DigitalValue::zero());
-    for (index, value) in values.iter().copied().take(width).enumerate() {
-        normalized[index] = value;
-    }
-    normalized
-}
-
-fn schedule_changed_outputs(
+fn schedule_normalized_runtime_outputs(
     ctx: &mut CmContext,
     port_name: &str,
-    values: &[DigitalValue],
+    runtime_values: &[DigitalValue],
+    width: usize,
     delay: Value,
 ) {
-    let mut previous = ctx.output_digital_vector(port_name);
-    previous.resize(values.len(), DigitalValue::zero());
-
-    for (index, value) in values.iter().copied().enumerate() {
-        if previous[index] != value {
+    for index in 0..width {
+        let previous = ctx
+            .output_digital_vector_value(port_name, index)
+            .unwrap_or_else(DigitalValue::zero);
+        let value = runtime_values.get(index).copied().unwrap_or(previous);
+        if previous != value {
             ctx.set_output_digital_vector_element(port_name, index, value, delay);
         }
     }
@@ -222,12 +210,10 @@ fn apply_cosim_step(ctx: &mut CmContext, result: DigitalCosimStep) -> CmResult<(
     let delay = effective_output_delay(ctx, result.vtime);
 
     if output_width > 0 {
-        let outputs = normalize_runtime_outputs(ctx, "d_out", &result.outputs, output_width);
-        schedule_changed_outputs(ctx, "d_out", &outputs, delay);
+        schedule_normalized_runtime_outputs(ctx, "d_out", &result.outputs, output_width, delay);
     }
     if inout_width > 0 {
-        let inouts = normalize_runtime_outputs(ctx, "d_inout", &result.inouts, inout_width);
-        schedule_changed_outputs(ctx, "d_inout", &inouts, delay);
+        schedule_normalized_runtime_outputs(ctx, "d_inout", &result.inouts, inout_width, delay);
     }
     Ok(())
 }
@@ -403,5 +389,55 @@ impl CodeModel for DigitalCosim {
             );
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn d_cosim_initial_outputs_are_streamed_vectors() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("d_out", 2);
+        ctx.set_port_width("d_inout", 1);
+
+        set_initial_outputs(&mut ctx, 3.0e-9);
+
+        let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].port_name, "d_out");
+        assert_eq!(events[0].values, vec![DigitalValue::zero(); 2]);
+        assert_eq!(events[0].delay, 3.0e-9);
+        assert_eq!(events[1].port_name, "d_inout");
+        assert_eq!(events[1].values, vec![DigitalValue::zero()]);
+        assert_eq!(events[1].delay, 3.0e-9);
+    }
+
+    #[test]
+    fn d_cosim_partial_runtime_outputs_preserve_previous_values() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("d_out", 3);
+        ctx.set_port_width("d_inout", 2);
+        set_initial_outputs(&mut ctx, 0.0);
+        ctx.take_pending_events();
+
+        ctx.time = 1.0e-9;
+        let vtime = ctx.time;
+        apply_cosim_step(
+            &mut ctx,
+            DigitalCosimStep {
+                vtime,
+                outputs: vec![DigitalValue::one()],
+                inouts: Vec::new(),
+            },
+        )
+        .expect("partial cosim step applies");
+
+        let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].port_name, "d_out");
+        assert_eq!(events[0].start_index, 0);
+        assert_eq!(events[0].values, vec![DigitalValue::one()]);
     }
 }

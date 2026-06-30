@@ -56,6 +56,12 @@ fn unknown_high_z() -> DigitalValue {
     DigitalValue::new(DigitalState::Unknown, DigitalStrength::HighZ)
 }
 
+fn set_unknown_outputs(ctx: &mut CmContext, output_width: usize) {
+    ctx.set_output_digital_vector_from_context_fn("out", output_width, 0.0, |_, _| {
+        unknown_high_z()
+    });
+}
+
 fn validate_shape(input_width: usize, output_width: usize) -> CmResult<()> {
     if input_width > u8::MAX as usize {
         return Err(d_process_error(format!(
@@ -199,7 +205,7 @@ impl CodeModel for DigitalProcess {
         let runtime = start_digital_process_runtime(&spec)?;
         let runtime: Arc<DigitalProcessRuntimeResource> = Arc::new(Mutex::new(runtime));
         ctx.set_resource(RESOURCE_RUNTIME, runtime);
-        ctx.set_output_digital_vector("out", vec![unknown_high_z(); output_width], 0.0);
+        set_unknown_outputs(ctx, output_width);
         Ok(())
     }
 
@@ -216,7 +222,7 @@ impl CodeModel for DigitalProcess {
             for index in 0..output_width {
                 ctx.set_int_state(STATE_DOUT_START + index, STATE_UNKNOWN);
             }
-            ctx.set_output_digital_vector("out", vec![unknown_high_z(); output_width], 0.0);
+            set_unknown_outputs(ctx, output_width);
             return Ok(());
         }
 
@@ -305,5 +311,29 @@ mod tests {
             ctx.take_pending_events().is_empty(),
             "time-zero rollbackable probe must not schedule reset output events"
         );
+    }
+
+    #[test]
+    fn d_process_time_zero_direct_evaluation_streams_unknown_outputs() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.time = 0.0;
+        ctx.set_port_width("in", 0);
+        ctx.set_port_width("out", 2);
+        ctx.allocate_int_states(STATE_DOUT_START + 2);
+        ctx.set_int_state(STATE_DOUT_START, STATE_ONE);
+        ctx.set_int_state(STATE_DOUT_START + 1, STATE_ZERO);
+
+        DigitalProcess
+            .evaluate(&mut ctx)
+            .expect("time-zero direct evaluation resets outputs");
+
+        assert_eq!(ctx.int_state(STATE_DOUT_START), STATE_UNKNOWN);
+        assert_eq!(ctx.int_state(STATE_DOUT_START + 1), STATE_UNKNOWN);
+        let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].port_name, "out");
+        assert_eq!(events[0].delay, 0.0);
+        assert_eq!(events[0].values, vec![unknown_high_z(), unknown_high_z()]);
     }
 }

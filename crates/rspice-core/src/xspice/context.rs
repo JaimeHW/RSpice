@@ -789,6 +789,15 @@ impl CmContext {
             .unwrap_or_default()
     }
 
+    /// Get one digital vector output element without cloning the full vector.
+    pub fn output_digital_vector_value(&self, name: &str, index: usize) -> Option<DigitalValue> {
+        match self.outputs.get(name) {
+            Some(OutputValue::DigitalVector(values)) => values.get(index).copied(),
+            Some(OutputValue::Digital(value)) if index == 0 => Some(*value),
+            _ => None,
+        }
+    }
+
     /// Get analog output partial derivative
     pub fn partial(&self, name: &str) -> Value {
         self.outputs
@@ -1779,6 +1788,28 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].values, values);
         assert_eq!(events[0].delay, 8.0e-9);
+    }
+
+    #[test]
+    fn digital_vector_scalar_output_accessor_avoids_full_clone() {
+        let mut ctx = CmContext::new();
+        ctx.set_output_digital_vector("out", vec![DigitalValue::zero(), DigitalValue::one()], 0.0);
+        ctx.set_output_digital("scalar", DigitalValue::unknown(), 0.0);
+
+        assert_eq!(
+            ctx.output_digital_vector_value("out", 0),
+            Some(DigitalValue::zero())
+        );
+        assert_eq!(
+            ctx.output_digital_vector_value("out", 1),
+            Some(DigitalValue::one())
+        );
+        assert_eq!(ctx.output_digital_vector_value("out", 2), None);
+        assert_eq!(
+            ctx.output_digital_vector_value("scalar", 0),
+            Some(DigitalValue::unknown())
+        );
+        assert_eq!(ctx.output_digital_vector_value("scalar", 1), None);
     }
 
     #[test]
