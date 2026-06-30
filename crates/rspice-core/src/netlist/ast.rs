@@ -1438,6 +1438,12 @@ pub struct SimulationOptions {
     /// approximation ignores nearly the entire BSIM parameter set, so this
     /// is opt-in; results will not match the named model.
     pub allow_simplified_mos: Option<bool>,
+    /// Xyce `.options topology supernode=...`: collapse nodes connected by
+    /// explicit zero/near-zero resistors before device construction.
+    pub topology_supernode: Option<bool>,
+    /// Xyce `.options device zeroresistancetol=...`: resistance threshold
+    /// used by topology supernode reduction.
+    pub device_zero_resistance_tol: Option<Value>,
 }
 
 impl SimulationOptions {
@@ -1504,6 +1510,12 @@ impl SimulationOptions {
         }
         if other.allow_simplified_mos.is_some() {
             self.allow_simplified_mos = other.allow_simplified_mos;
+        }
+        if other.topology_supernode.is_some() {
+            self.topology_supernode = other.topology_supernode;
+        }
+        if other.device_zero_resistance_tol.is_some() {
+            self.device_zero_resistance_tol = other.device_zero_resistance_tol;
         }
     }
 }

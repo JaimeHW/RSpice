@@ -531,6 +531,8 @@ pub(super) fn parse_options_command(
     unknown_warned: &mut std::collections::HashSet<String>,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Result<(), ParseError> {
+    let mut option_package: Option<String> = None;
+
     while !stream.is_eof() {
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -541,24 +543,63 @@ pub(super) fn parse_options_command(
         let key_upper = key.to_uppercase();
         let has_equals = stream.consume(&TokenKind::Equals);
 
-        match key_upper.as_str() {
-            "RELTOL" => {
+        if !has_equals && matches!(key_upper.as_str(), "TOPOLOGY" | "DEVICE") {
+            option_package = Some(key_upper);
+            continue;
+        }
+
+        let scoped_key = option_package
+            .as_deref()
+            .map(|package| format!("{package}.{key_upper}"));
+
+        match (option_package.as_deref(), key_upper.as_str()) {
+            (Some("TOPOLOGY"), "SUPERNODE") => {
+                options.topology_supernode =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (Some("DEVICE"), "ZERORESISTANCETOL" | "ZERO_RESISTANCE_TOL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.device_zero_resistance_tol = Some(parse_non_negative_real_option(
+                    "DEVICE.ZERORESISTANCETOL",
+                    value,
+                    line_num,
+                )?);
+            }
+            (None, "TOPOLOGY_SUPERNODE" | "TOPOLOGYSUPERNODE") => {
+                options.topology_supernode =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (
+                None,
+                "DEVICE_ZERORESISTANCETOL"
+                | "DEVICEZERORESISTANCETOL"
+                | "ZERORESISTANCETOL"
+                | "ZERO_RESISTANCE_TOL",
+            ) => {
+                let value = expect_value(stream, line_num, params)?;
+                options.device_zero_resistance_tol = Some(parse_non_negative_real_option(
+                    "ZERORESISTANCETOL",
+                    value,
+                    line_num,
+                )?);
+            }
+            (_, "RELTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.reltol = Some(parse_positive_real_option("RELTOL", value, line_num)?);
             }
-            "ABSTOL" => {
+            (_, "ABSTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.abstol = Some(parse_positive_real_option("ABSTOL", value, line_num)?);
             }
-            "VNTOL" => {
+            (_, "VNTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.vntol = Some(parse_positive_real_option("VNTOL", value, line_num)?);
             }
-            "IABSTOL" => {
+            (_, "IABSTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.iabstol = Some(parse_positive_real_option("IABSTOL", value, line_num)?);
             }
-            "RESIDUAL_RELTOL" | "RESRELTOL" => {
+            (_, "RESIDUAL_RELTOL" | "RESRELTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.residual_reltol = Some(parse_positive_real_option(
                     "RESIDUAL_RELTOL",
@@ -566,36 +607,36 @@ pub(super) fn parse_options_command(
                     line_num,
                 )?);
             }
-            "GMIN" => {
+            (_, "GMIN") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.gmin = Some(parse_non_negative_real_option("GMIN", value, line_num)?);
             }
-            "TRTOL" => {
+            (_, "TRTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.trtol = Some(parse_positive_real_option("TRTOL", value, line_num)?);
             }
-            "RAMPTIME" => {
+            (_, "RAMPTIME") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.ramptime =
                     Some(parse_non_negative_real_option("RAMPTIME", value, line_num)?);
             }
-            "CHGTOL" => {
+            (_, "CHGTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.chgtol = Some(parse_positive_real_option("CHGTOL", value, line_num)?);
             }
-            "PIVTOL" => {
+            (_, "PIVTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.pivtol = Some(parse_positive_real_option("PIVTOL", value, line_num)?);
             }
-            "TEMP" => {
+            (_, "TEMP") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.temp = Some(parse_celsius_option("TEMP", value, line_num)?);
             }
-            "TNOM" => {
+            (_, "TNOM") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.tnom = Some(parse_celsius_option("TNOM", value, line_num)?);
             }
-            "SEED" | "RNDSEED" => {
+            (_, "SEED" | "RNDSEED") => {
                 // The parse pre-scan applies the seed before any parameter
                 // evaluation; this arm validates and records it for
                 // downstream drivers (e.g. per-run Monte-Carlo streams).
@@ -613,27 +654,27 @@ pub(super) fn parse_options_command(
                 let value = expect_value(stream, line_num, params)?;
                 options.seed = Some(parse_seed_option(value, line_num)?);
             }
-            "ITL1" => {
+            (_, "ITL1") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.itl1 = Some(parse_usize_option("ITL1", value, line_num)?);
             }
-            "ITL2" => {
+            (_, "ITL2") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.itl2 = Some(parse_usize_option("ITL2", value, line_num)?);
             }
-            "ITL4" => {
+            (_, "ITL4") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.itl4 = Some(parse_usize_option("ITL4", value, line_num)?);
             }
-            "ITL6" => {
+            (_, "ITL6") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.itl6 = Some(parse_usize_option("ITL6", value, line_num)?);
             }
-            "METHOD" => {
+            (_, "METHOD") => {
                 let method = expect_ident(stream, line_num)?;
                 options.method = Some(method.to_uppercase());
             }
-            "ALLOW_SIMPLIFIED_MOS" | "ALLOWSIMPLIFIEDMOS" => {
+            (_, "ALLOW_SIMPLIFIED_MOS" | "ALLOWSIMPLIFIEDMOS") => {
                 // Bare flag enables; an explicit value of 0 disables.
                 let enabled = if has_equals {
                     expect_value(stream, line_num, params)? != 0.0
@@ -647,7 +688,8 @@ pub(super) fn parse_options_command(
                 // explicitly assigned. Silently swallowing tolerance or
                 // compatibility knobs misleads users into thinking they took
                 // effect, so say so once per key.
-                if unknown_warned.insert(format!(".options {key_upper}")) {
+                let warning_key = scoped_key.unwrap_or_else(|| key_upper.clone());
+                if unknown_warned.insert(format!(".options {warning_key}")) {
                     let message = format!("unknown .options key '{key}' ignored");
                     log::warn!("line {line_num}: {message}");
                     diagnostics.push(ParseDiagnostic::warning(
@@ -667,6 +709,31 @@ pub(super) fn parse_options_command(
     }
 
     Ok(())
+}
+
+fn parse_boolean_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    has_equals: bool,
+) -> Result<bool, ParseError> {
+    if !has_equals {
+        return Ok(true);
+    }
+
+    if let TokenKind::Ident(word) = &stream.peek().kind {
+        let enabled = match word.to_ascii_lowercase().as_str() {
+            "true" | "yes" | "on" => Some(true),
+            "false" | "no" | "off" => Some(false),
+            _ => None,
+        };
+        if let Some(enabled) = enabled {
+            stream.advance();
+            return Ok(enabled);
+        }
+    }
+
+    Ok(expect_value(stream, line_num, params)? != 0.0)
 }
 
 pub(super) fn parse_global_command(

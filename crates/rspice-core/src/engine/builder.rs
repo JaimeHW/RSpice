@@ -7,7 +7,10 @@
 use super::{Engine, JfetLevel2Model, SimulationError, SpiceDialect, extract_dc_value};
 use crate::device::{JfetChannelModel, MosBodyJunctionModel};
 use crate::netlist::expr::prepare_behavioral_expression;
-use crate::netlist::{Element, ElementKind, SourceSpec, XspicePort, flatten_netlist_with_models};
+use crate::netlist::{
+    Element, ElementKind, SourceSpec, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, XspicePort,
+    flatten_netlist_with_models, reduce_supernode_topology,
+};
 use crate::{CircuitData, Netlist};
 #[cfg(feature = "veriloga")]
 use serde::{Deserialize, Serialize};
@@ -409,7 +412,17 @@ impl Engine {
             effective_netlist.models.extend(flattened.scoped_models);
             &effective_netlist
         };
-        let flat_elements = flattened.elements;
+        let mut flat_elements = flattened.elements;
+        if netlist.options.topology_supernode.unwrap_or(false) {
+            let reduction = reduce_supernode_topology(
+                flat_elements,
+                netlist
+                    .options
+                    .device_zero_resistance_tol
+                    .unwrap_or(XYCE_DEFAULT_ZERO_RESISTANCE_TOL),
+            );
+            flat_elements = reduction.elements;
+        }
 
         // Debug: log all elements
         log::info!("Building circuit with {} elements:", flat_elements.len());

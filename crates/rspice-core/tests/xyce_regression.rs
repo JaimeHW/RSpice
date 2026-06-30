@@ -263,6 +263,10 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/SUBCKT/subckt_i2.cir",
         "Netlists/SUBCKT/subckt_i3.cir",
         "Netlists/SUBCKT/subckt_i3_hs.cir",
+        "Netlists/SUPERNODE/supernode2.cir",
+        "Netlists/SUPERNODE/supernode3.cir",
+        "Netlists/SUPERNODE/supernode4.cir",
+        "Netlists/SUPERNODE/supernode5.cir",
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(

@@ -23,6 +23,7 @@ pub mod param_scope;
 mod parser;
 pub mod source_map;
 pub mod spef;
+mod topology;
 mod xspice_parser;
 
 pub use ast::*;
@@ -36,6 +37,9 @@ pub use include::{IncludeProcessor, parse_include_directive, parse_lib_directive
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
+pub use topology::{
+    TopologyReduction, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, reduce_supernode_topology,
+};
 pub(crate) use xspice_parser::{
     parse_xspice_string_vector_literal, xspice_model_param_accepts_bare_string,
     xspice_param_prefers_string_vector, xspice_param_preserves_numeric_string,
