@@ -37,7 +37,7 @@ fn apply_xspice_events_at_or_before(
     }
 
     let mut changed = false;
-    for event in event_queue.pop_events_at(time) {
+    event_queue.drain_events_at(time, |event| {
         let driver_key = (event.node_id, event.instance, event.port_name);
         match event.value {
             crate::xspice::EventValue::Digital(value) => {
@@ -57,7 +57,7 @@ fn apply_xspice_events_at_or_before(
                 changed |= previous_value != Some(resolved) || previous_time != Some(event.time);
             }
         }
-    }
+    });
     changed
 }
 

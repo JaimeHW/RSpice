@@ -196,18 +196,26 @@ impl EventQueue {
     /// Pop all events at or before the given time
     pub fn pop_events_at(&mut self, time: Value) -> Vec<Event> {
         let mut events = Vec::new();
+        self.drain_events_at(time, |event| events.push(event));
+        events
+    }
+
+    /// Drain all events at or before the given time into a caller-provided sink.
+    pub fn drain_events_at<F>(&mut self, time: Value, mut sink: F)
+    where
+        F: FnMut(Event),
+    {
         while let Some(event) = self.events.peek() {
             if event.time <= time {
                 if let Some(e) = self.events.pop() {
-                    events.push(e);
                     self.events_processed += 1;
                     self.last_event_time = time;
+                    sink(e);
                 }
             } else {
                 break;
             }
         }
-        events
     }
 
     /// Pop events at exactly the given time
@@ -364,6 +372,34 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].node_id, 1);
         assert_eq!(events[0].instance, "a_left");
+    }
+
+    #[test]
+    fn event_queue_drains_due_events_into_caller_sink() {
+        let mut queue = EventQueue::new();
+
+        queue.schedule(Event::new(
+            0.5e-9,
+            1,
+            "out",
+            "a_driver",
+            EventValue::Digital(DigitalValue::zero()),
+        ));
+        queue.schedule(Event::new(
+            2.0e-9,
+            2,
+            "out",
+            "a_driver",
+            EventValue::Real(1.25),
+        ));
+
+        let mut drained = Vec::new();
+        queue.drain_events_at(1.0e-9, |event| drained.push(event.value));
+
+        assert_eq!(drained, vec![EventValue::Digital(DigitalValue::zero())]);
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.stats().processed, 1);
+        assert_eq!(queue.next_event_time(), Some(2.0e-9));
     }
 }
 
