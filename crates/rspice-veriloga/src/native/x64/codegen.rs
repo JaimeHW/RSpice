@@ -2619,10 +2619,10 @@ impl FunctionCompiler {
 
         let left = XMM_STACK[self.depth - 2];
         let right = XMM_STACK[self.depth - 1];
-        self.encoder.movq_r64_xmm(Gpr::Rax, left);
+        self.encoder.movq_r64_xmm(Gpr::R8, left);
         self.encoder.ucomisd_xmm_xmm(left, left);
         self.encoder.setcc_r8(ConditionCode::NotParity, Gpr::R10);
-        self.emit_abs_zero_to_gpr(left, Gpr::R8);
+        self.emit_abs_zero_from_bits_to_gpr(Gpr::R8, Gpr::R9);
         match op {
             ExtremumOp::Min => self.encoder.minsd_xmm_xmm(left, right),
             ExtremumOp::Max => self.encoder.maxsd_xmm_xmm(left, right),
@@ -2641,10 +2641,10 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        self.encoder.movq_r64_xmm(Gpr::Rax, target);
+        self.encoder.movq_r64_xmm(Gpr::R8, target);
         self.encoder.ucomisd_xmm_xmm(target, target);
         self.encoder.setcc_r8(ConditionCode::NotParity, Gpr::R10);
-        self.emit_abs_zero_to_gpr(target, Gpr::R8);
+        self.emit_abs_zero_from_bits_to_gpr(Gpr::R8, Gpr::R9);
         self.emit_literal_extremum_op(target, value, op);
         self.emit_extremum_select_left_fixup_from_result(target);
         Ok(())
@@ -2664,17 +2664,27 @@ impl FunctionCompiler {
 
     fn emit_extremum_select_left_fixup_after_right_check(&mut self, result: Xmm) {
         self.encoder.and_r8_r8(Gpr::R10, Gpr::R11);
-        self.emit_abs_zero_to_gpr(result, Gpr::R9);
-        self.encoder.and_r8_r8(Gpr::R8, Gpr::R9);
-        self.encoder.or_r8_r8(Gpr::R10, Gpr::R8);
+        self.emit_abs_zero_to_gpr(result, Gpr::R11);
+        self.encoder.and_r8_r8(Gpr::R9, Gpr::R11);
+        self.encoder.or_r8_r8(Gpr::R10, Gpr::R9);
         self.encoder.movq_r64_xmm(Gpr::R11, result);
         self.encoder.test_r8_r8(Gpr::R10, Gpr::R10);
-        self.encoder.cmovne_r64_r64(Gpr::R11, Gpr::Rax);
+        self.encoder.cmovne_r64_r64(Gpr::R11, Gpr::R8);
         self.encoder.movq_xmm_r64(result, Gpr::R11);
     }
 
     fn emit_abs_zero_to_gpr(&mut self, value: Xmm, dst: Gpr) {
         self.encoder.movq_r64_xmm(dst, value);
+        self.emit_abs_zero_bits_in_place(dst);
+    }
+
+    fn emit_abs_zero_from_bits_to_gpr(&mut self, bits: Gpr, dst: Gpr) {
+        debug_assert_ne!(bits, dst);
+        self.encoder.mov_r64_r64(dst, bits);
+        self.emit_abs_zero_bits_in_place(dst);
+    }
+
+    fn emit_abs_zero_bits_in_place(&mut self, dst: Gpr) {
         self.encoder.btr_r64_imm8(dst, 63);
         self.encoder.test_r64_r64(dst, dst);
         self.encoder.setcc_r8(ConditionCode::Equal, dst);
@@ -3381,6 +3391,8 @@ fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
             | NativeOp::Logical(_)
             | NativeOp::LogicalConst(_, _)
             | NativeOp::IfElse
+            | NativeOp::Extremum(_)
+            | NativeOp::ExtremumConst(_, _)
             | NativeOp::UnaryMath(UnaryMathOp::Floor | UnaryMathOp::Ceil)
             | NativeOp::IntegerBinary(
                 IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor,
@@ -3650,8 +3662,8 @@ mod tests {
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
     use crate::native::expr::{
-        CompareOp, EntryKind, IntegerBinaryOp, LogicalOp, NativeLoweringLimits, NativeOp,
-        NativeProgram, UnaryMathOp,
+        CompareOp, EntryKind, ExtremumOp, IntegerBinaryOp, LogicalOp, NativeLoweringLimits,
+        NativeOp, NativeProgram, UnaryMathOp,
     };
     use crate::native::runtime::ExecutableMemory;
     use crate::native::{
@@ -3919,9 +3931,10 @@ mod tests {
                 NativeOp::Abs,
                 NativeOp::UnaryMath(UnaryMathOp::Floor),
                 NativeOp::LoadParam(1),
-                NativeOp::Add,
+                NativeOp::Extremum(ExtremumOp::Max),
                 NativeOp::LoadParam(2),
                 NativeOp::IntegerBinary(IntegerBinaryOp::BitAnd),
+                NativeOp::ExtremumConst(ExtremumOp::Max, 2.0),
                 NativeOp::LoadParam(3),
                 NativeOp::Add,
             ],
