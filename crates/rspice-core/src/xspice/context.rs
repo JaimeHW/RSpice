@@ -6,6 +6,7 @@
 use super::{DigitalValue, PortType};
 use crate::Value;
 use std::any::Any;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
@@ -467,6 +468,15 @@ impl CmContext {
     #[inline]
     fn canonical_param_key(name: &str) -> String {
         name.to_ascii_lowercase()
+    }
+
+    #[inline]
+    fn canonical_param_lookup_key(name: &str) -> Cow<'_, str> {
+        if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            Cow::Owned(Self::canonical_param_key(name))
+        } else {
+            Cow::Borrowed(name)
+        }
     }
 
     /// Create a new empty context
@@ -1137,52 +1147,50 @@ impl CmContext {
 
     /// Get parameter value
     pub fn param(&self, name: &str) -> Value {
-        self.params
-            .get(&Self::canonical_param_key(name))
-            .copied()
-            .unwrap_or(0.0)
+        let key = Self::canonical_param_lookup_key(name);
+        self.params.get(key.as_ref()).copied().unwrap_or(0.0)
     }
 
     /// Get parameter with default
     pub fn param_or(&self, name: &str, default: Value) -> Value {
-        self.params
-            .get(&Self::canonical_param_key(name))
-            .copied()
-            .unwrap_or(default)
+        let key = Self::canonical_param_lookup_key(name);
+        self.params.get(key.as_ref()).copied().unwrap_or(default)
     }
 
     /// Get string parameter
     pub fn string_param(&self, name: &str) -> Option<&str> {
-        self.string_params
-            .get(&Self::canonical_param_key(name))
-            .map(|s| s.as_str())
+        let key = Self::canonical_param_lookup_key(name);
+        self.string_params.get(key.as_ref()).map(|s| s.as_str())
     }
 
     /// Get string-vector parameter
     pub fn string_vector_param(&self, name: &str) -> Option<&[String]> {
+        let key = Self::canonical_param_lookup_key(name);
         self.string_vector_params
-            .get(&Self::canonical_param_key(name))
+            .get(key.as_ref())
             .map(|values| values.as_slice())
     }
 
     /// Get real-vector parameter
     pub fn real_vector_param(&self, name: &str) -> Option<&[Value]> {
+        let key = Self::canonical_param_lookup_key(name);
         self.real_vector_params
-            .get(&Self::canonical_param_key(name))
+            .get(key.as_ref())
             .map(|values| values.as_slice())
     }
 
     /// Get integer-vector parameter
     pub fn integer_vector_param(&self, name: &str) -> Option<&[i64]> {
+        let key = Self::canonical_param_lookup_key(name);
         self.integer_vector_params
-            .get(&Self::canonical_param_key(name))
+            .get(key.as_ref())
             .map(|values| values.as_slice())
     }
 
     /// Return true when a parameter was explicitly supplied instead of coming from a default.
     pub fn param_was_provided(&self, name: &str) -> bool {
-        self.provided_params
-            .contains(&Self::canonical_param_key(name))
+        let key = Self::canonical_param_lookup_key(name);
+        self.provided_params.contains(key.as_ref())
     }
 
     /// Mark a parameter as explicitly supplied by the instance or model card.
@@ -1483,6 +1491,30 @@ mod tests {
 
         let real = InputValue::Real(2.5);
         assert_eq!(real.try_real(), Some(2.5));
+    }
+
+    #[test]
+    fn parameter_lookup_remains_case_insensitive_for_all_channels() {
+        let mut ctx = CmContext::new();
+        ctx.set_param("Gain", 2.5);
+        ctx.set_string_param("File", "table.dat");
+        ctx.set_string_vector_param("Labels", vec!["a".to_string(), "b".to_string()]);
+        ctx.set_real_vector_param("Points", vec![1.0, 2.0]);
+        ctx.set_integer_vector_param("Bits", vec![1, 0]);
+        ctx.mark_param_provided("Gain");
+
+        assert_eq!(ctx.param("gain"), 2.5);
+        assert_eq!(ctx.param("GAIN"), 2.5);
+        assert_eq!(ctx.param_or("missing", 7.0), 7.0);
+        assert_eq!(ctx.string_param("file"), Some("table.dat"));
+        assert_eq!(
+            ctx.string_vector_param("LABELS"),
+            Some(["a".to_string(), "b".to_string()].as_slice())
+        );
+        assert_eq!(ctx.real_vector_param("points"), Some([1.0, 2.0].as_slice()));
+        assert_eq!(ctx.integer_vector_param("BITS"), Some([1, 0].as_slice()));
+        assert!(ctx.param_was_provided("gain"));
+        assert!(ctx.param_was_provided("GAIN"));
     }
 
     #[test]
