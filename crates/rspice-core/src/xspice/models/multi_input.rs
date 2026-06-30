@@ -125,6 +125,11 @@ fn table_signature(ctx: &CmContext) -> TableSignature {
     }
 }
 
+fn table_signature_matches(ctx: &CmContext, signature: &TableSignature) -> bool {
+    ctx.real_vector_param("x").unwrap_or(&[]) == signature.x_values.as_slice()
+        && ctx.real_vector_param("y").unwrap_or(&[]) == signature.y_values.as_slice()
+}
+
 fn table_uncached(ctx: &CmContext) -> CmResult<TableData> {
     let x = ctx
         .real_vector_param("x")
@@ -174,13 +179,13 @@ fn table_data(points: Vec<TablePoint>) -> TableData {
 }
 
 fn cache_table(ctx: &mut CmContext) -> CmResult<Arc<TableData>> {
-    let signature = table_signature(ctx);
     if let Some(resource) = ctx.resource::<TableResource>(TABLE_RESOURCE)
-        && resource.signature == signature
+        && table_signature_matches(ctx, &resource.signature)
     {
         return resource.data.clone();
     }
 
+    let signature = table_signature(ctx);
     let data = table_uncached(ctx).map(Arc::new);
     ctx.set_resource(
         TABLE_RESOURCE,
@@ -193,9 +198,8 @@ fn cache_table(ctx: &mut CmContext) -> CmResult<Arc<TableData>> {
 }
 
 fn table(ctx: &CmContext) -> CmResult<Arc<TableData>> {
-    let signature = table_signature(ctx);
     if let Some(resource) = ctx.resource::<TableResource>(TABLE_RESOURCE)
-        && resource.signature == signature
+        && table_signature_matches(ctx, &resource.signature)
     {
         return resource.data.clone();
     }
