@@ -9825,6 +9825,34 @@ fn generated_ddt_current_rust_compiles_with_runtime_stub() {
 }
 
 #[test]
+fn generated_ddt_current_prunes_unused_root_stamp_support_aliases() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(capacitor_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile capacitor");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("eval_ddt"), "{stamp}");
+    assert!(!stamp.contains("GenericAdValue"), "{stamp}");
+    assert!(!stamp.contains("GenericScratch"), "{stamp}");
+    assert!(!stamp.contains("GenericReactiveScratch"), "{stamp}");
+    assert!(!stamp.contains("type A ="), "{stamp}");
+    assert!(!stamp.contains("type Scratch ="), "{stamp}");
+    assert!(!stamp.contains("type ReactiveScratch ="), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn generated_ddt_followed_by_parameter_use_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(ddt_then_parameter_source())

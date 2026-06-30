@@ -489,7 +489,112 @@ fn compact_stamp_files(mut files: StampFiles) -> StampFiles {
             &mut helper.contents,
         ));
     }
+    files.stamp = prune_unused_root_stamp_support_aliases(files.stamp, &files.helpers);
     files
+}
+
+fn prune_unused_root_stamp_support_aliases(
+    source: String,
+    helpers: &[GeneratedRustFile],
+) -> String {
+    let body_without_support = source
+        .lines()
+        .filter(|line| !is_root_stamp_support_import_or_alias(line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let uses_ad_value = block_uses_associated_path_alias(&body_without_support, "A")
+        || block_uses_associated_path_alias(&body_without_support, "AdValue")
+        || helpers_import_super_alias(helpers, "A");
+    let uses_scratch = block_uses_associated_path_alias(&body_without_support, "Scratch")
+        || helpers_import_super_alias(helpers, "Scratch");
+    let uses_reactive_scratch =
+        block_uses_associated_path_alias(&body_without_support, "ReactiveScratch")
+            || helpers_import_super_alias(helpers, "ReactiveScratch");
+
+    let mut rewritten = String::with_capacity(source.len());
+    for line in source.lines() {
+        if is_root_stamp_support_import(line) {
+            let mut imports = Vec::new();
+            if uses_ad_value {
+                imports.push("AdValue as GenericAdValue");
+            }
+            if uses_reactive_scratch {
+                imports.push("ReactiveScratch as GenericReactiveScratch");
+            }
+            if uses_scratch {
+                imports.push("Scratch as GenericScratch");
+            }
+            if !imports.is_empty() {
+                let prefix = line
+                    .split_once('{')
+                    .map(|(prefix, _)| prefix)
+                    .unwrap_or(line);
+                rewritten.push_str(prefix);
+                rewritten.push('{');
+                rewritten.push_str(&imports.join(", "));
+                rewritten.push_str("};\n");
+            }
+            continue;
+        }
+        if (is_ad_value_alias(line) && !uses_ad_value)
+            || (is_scratch_alias(line) && !uses_scratch)
+            || (is_reactive_scratch_alias(line) && !uses_reactive_scratch)
+        {
+            continue;
+        }
+        push_pruned_root_stamp_line(&mut rewritten, line);
+    }
+    rewritten
+}
+
+fn push_pruned_root_stamp_line(rewritten: &mut String, line: &str) {
+    if line.is_empty() && rewritten.ends_with("\n\n") {
+        return;
+    }
+    rewritten.push_str(line);
+    rewritten.push('\n');
+}
+
+fn helpers_import_super_alias(helpers: &[GeneratedRustFile], alias: &str) -> bool {
+    helpers.iter().any(|helper| {
+        helper
+            .contents
+            .lines()
+            .any(|line| super_import_line_imports_alias(line, alias))
+    })
+}
+
+fn super_import_line_imports_alias(line: &str, alias: &str) -> bool {
+    let Some(imports) = line
+        .strip_prefix("use super::{")
+        .and_then(|line| line.split_once("};").map(|(imports, _)| imports))
+    else {
+        return false;
+    };
+    imports.split(',').any(|import| import.trim() == alias)
+}
+
+fn is_root_stamp_support_import_or_alias(line: &str) -> bool {
+    is_root_stamp_support_import(line)
+        || is_ad_value_alias(line)
+        || is_scratch_alias(line)
+        || is_reactive_scratch_alias(line)
+}
+
+fn is_root_stamp_support_import(line: &str) -> bool {
+    line.starts_with("use ") && line.contains("::support::{")
+}
+
+fn is_ad_value_alias(line: &str) -> bool {
+    line.starts_with("type A = GenericAdValue") || line.starts_with("type AdValue = GenericAdValue")
+}
+
+fn is_scratch_alias(line: &str) -> bool {
+    line.starts_with("type Scratch = GenericScratch")
+}
+
+fn is_reactive_scratch_alias(line: &str) -> bool {
+    line.starts_with("type ReactiveScratch = GenericReactiveScratch")
 }
 
 fn compact_generated_stamp_helper_surface(mut source: String) -> String {
@@ -28231,6 +28336,25 @@ fn block_uses_path_alias(block: &str, alias: &str) -> bool {
         if let Some(start) = token_start.take()
             && &block[start..index] == alias
             && block[index..].starts_with('.')
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn block_uses_associated_path_alias(block: &str, alias: &str) -> bool {
+    let mut token_start = None;
+    for (index, ch) in block.char_indices() {
+        if is_rust_identifier_char(ch) {
+            if token_start.is_none() {
+                token_start = Some(index);
+            }
+            continue;
+        }
+        if let Some(start) = token_start.take()
+            && &block[start..index] == alias
+            && block[index..].starts_with("::")
         {
             return true;
         }
