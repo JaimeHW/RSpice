@@ -364,31 +364,27 @@ impl CodeModel for DigitalGenericLookupTable {
 
         let mut max_input_delay = 0.0;
         let mut input_index = Some(0usize);
-        let mut input_codes = Vec::with_capacity(input_width);
-        {
-            let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
-            for bit in 0..input_width {
-                let input = inputs.get(bit).copied().unwrap_or_default();
-                let input_code = d_lut_state_code(input.state);
-                input_codes.push(input_code);
-                if input_code != ctx.int_state(input_start + bit) {
-                    max_input_delay = f64::max(
-                        max_input_delay,
-                        d_genlut_param_value(ctx, "input_delay", bit, 0.0),
-                    );
-                }
-                match (input_index, input.state.logic_level()) {
-                    (Some(index), Some(true)) => {
-                        input_index = Some(index | (1usize << bit));
-                    }
-                    (Some(index), Some(false)) => {
-                        input_index = Some(index);
-                    }
-                    _ => input_index = None,
-                }
+        for bit in 0..input_width {
+            let input = {
+                let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
+                inputs.get(bit).copied().unwrap_or_default()
+            };
+            let input_code = d_lut_state_code(input.state);
+            if input_code != ctx.int_state(input_start + bit) {
+                max_input_delay = f64::max(
+                    max_input_delay,
+                    d_genlut_param_value(ctx, "input_delay", bit, 0.0),
+                );
             }
-        }
-        for (bit, input_code) in input_codes.into_iter().enumerate() {
+            match (input_index, input.state.logic_level()) {
+                (Some(index), Some(true)) => {
+                    input_index = Some(index | (1usize << bit));
+                }
+                (Some(index), Some(false)) => {
+                    input_index = Some(index);
+                }
+                _ => input_index = None,
+            }
             d_lookup_set_int_state(ctx, input_start + bit, input_code);
         }
 
