@@ -1517,6 +1517,11 @@ impl CmContext {
         std::mem::take(&mut self.requested_breakpoints)
     }
 
+    /// Drain pending breakpoint requests while preserving the queue allocation.
+    pub(crate) fn drain_requested_breakpoints(&mut self) -> Drain<'_, Value> {
+        self.requested_breakpoints.drain(..)
+    }
+
     //-------------------------------------------------------------------------
     // Parameter Access
     //-------------------------------------------------------------------------
@@ -2247,6 +2252,20 @@ mod tests {
 
         assert_eq!(ctx.take_requested_breakpoints(), vec![2.0e-9, 1.0e-9]);
         assert!(ctx.take_requested_breakpoints().is_empty());
+    }
+
+    #[test]
+    fn requested_breakpoint_drains_preserve_queue_capacity() {
+        let mut ctx = CmContext::new();
+
+        ctx.request_breakpoint(1.0e-9);
+        ctx.request_breakpoint(2.0e-9);
+        let capacity = ctx.requested_breakpoints.capacity();
+        let breakpoints = ctx.drain_requested_breakpoints().collect::<Vec<_>>();
+
+        assert_eq!(breakpoints, vec![1.0e-9, 2.0e-9]);
+        assert!(ctx.requested_breakpoints.is_empty());
+        assert_eq!(ctx.requested_breakpoints.capacity(), capacity);
     }
 
     #[test]

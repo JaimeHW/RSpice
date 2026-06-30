@@ -337,12 +337,23 @@ impl CircuitData {
     }
 
     /// Drain absolute transient breakpoint requests emitted by XSPICE models.
+    #[cfg(test)]
     pub(crate) fn take_xspice_requested_breakpoints(&mut self) -> Vec<Value> {
         let mut breakpoints = Vec::new();
-        for instance in &mut self.xspice_instances {
-            breakpoints.extend(instance.take_requested_breakpoints());
-        }
+        self.drain_xspice_requested_breakpoints(|time| breakpoints.push(time));
         breakpoints
+    }
+
+    /// Drain XSPICE breakpoint requests directly into a caller-provided sink.
+    pub(crate) fn drain_xspice_requested_breakpoints<F>(&mut self, mut sink: F)
+    where
+        F: FnMut(Value),
+    {
+        for instance in &mut self.xspice_instances {
+            for time in instance.drain_requested_breakpoints() {
+                sink(time);
+            }
+        }
     }
 
     /// Evaluate and stamp XSPICE for a transient solver trial without committing

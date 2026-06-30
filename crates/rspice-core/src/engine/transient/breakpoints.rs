@@ -59,9 +59,9 @@ impl Engine {
         if let Some(event_time) = circuit.next_xspice_event_time() {
             Self::add_breakpoint_if_in_range(breakpoints, event_time, tstop);
         }
-        for time in circuit.take_xspice_requested_breakpoints() {
+        circuit.drain_xspice_requested_breakpoints(|time| {
             Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
-        }
+        });
     }
 
     pub(super) fn add_source_spec_breakpoints(

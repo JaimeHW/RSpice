@@ -1497,9 +1497,9 @@ impl XspiceInstance {
         self.context.take_pending_real_events()
     }
 
-    /// Drain absolute transient breakpoint requests emitted by this instance.
-    pub(crate) fn take_requested_breakpoints(&mut self) -> Vec<Value> {
-        self.context.take_requested_breakpoints()
+    /// Drain transient breakpoint requests while preserving context storage.
+    pub(crate) fn drain_requested_breakpoints(&mut self) -> impl Iterator<Item = Value> + '_ {
+        self.context.drain_requested_breakpoints()
     }
 
     /// Process digital events scheduled by this instance
