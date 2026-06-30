@@ -51,6 +51,35 @@ fn op_error(deck: &str) -> String {
         .to_string()
 }
 
+#[test]
+fn print_param_types_accepts_official_parameter_channels() {
+    let deck = "\
+* ngspice print_param_types example contract
+v1 in 0 dc 1
+vmeas sense 0 dc 0
+a_dbg [in %vd(in 0) %i(vmeas) %vnam(vmeas)] dbg
+.model dbg print_param_types (
++ integer=7
++ real=2.5
++ complex=<4.0 5.0>
++ string=\"hello\"
++ integer_array=[1 2 3]
++ real_array=[1.25 2.5]
++ complex_array=[<11.0 12.0> <13.0 14.0>]
++ string_array=[alpha beta])
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let circuit = Engine::default()
+        .build_circuit(&netlist)
+        .expect("print_param_types builds through XSPICE");
+
+    assert!(
+        circuit.has_xspice_devices(),
+        "print_param_types instance should be registered and instantiated"
+    );
+}
+
 fn transient_node_series<'a>(result: &'a TransientResult, node: &str) -> &'a [f64] {
     let idx = result
         .node_names

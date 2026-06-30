@@ -88,6 +88,7 @@ const BUILTIN_MODEL_NAMES: &[&str] = &[
     "nco",
     "oneshot",
     "potentiometer",
+    "print_param_types",
     "pswitch",
     "pwl",
     "pwlts",
@@ -222,6 +223,9 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::GenericTransmissionLine));
         self.register(Arc::new(super::models::MicrostripLine));
         self.register(Arc::new(super::models::MicrostripOpenEnd));
+
+        // Debug/example models
+        self.register(Arc::new(super::models::PrintParamTypes));
 
         // A/D and D/A bridges
         self.register(Arc::new(super::models::AdcBridge));
@@ -380,6 +384,7 @@ mod tests {
         "multi_input_pwl",
         "oneshot",
         "potentiometer",
+        "print_param_types",
         "pswitch",
         "pwl",
         "pwlts",

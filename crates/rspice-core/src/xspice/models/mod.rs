@@ -82,6 +82,10 @@
 //! - **real_gain** - Real-valued event gain
 //! - **real_delay** - Clocked real-valued event delay
 //! - **real_to_v** - Real-valued event to analog converter
+//!
+//! # Debug/Example Models
+//!
+//! - **print_param_types** - ngspice example parameter-channel model
 
 // Analog behavioral blocks
 mod analog;
@@ -118,6 +122,9 @@ mod xtraevt;
 
 // XSPICE transmission-line models
 mod tlines;
+
+// XSPICE debug/example models
+mod debug;
 
 // Digital primitives
 mod digital;
@@ -166,3 +173,5 @@ pub use xtradev::{
 };
 
 pub use xtraevt::{DigitalToReal, RealDelay, RealGain, RealToVoltage};
+
+pub use debug::PrintParamTypes;
