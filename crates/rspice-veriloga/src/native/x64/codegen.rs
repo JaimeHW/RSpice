@@ -3454,12 +3454,13 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        BRANCH_CURRENTS_OFFSET, DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64,
-        I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, PARAMS_OFFSET,
-        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, VOLTAGES_OFFSET,
-        WORD_BYTES, X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
-        compile_assignment_function, compile_assignment_pass_function, compile_value_function,
-        entry_ctx_arg_reg, entry_vars_arg_reg, rspice_exp,
+        BRANCH_CURRENTS_OFFSET, DYNAMIC_READ_FRAME_BYTES, FunctionCompiler, Gpr,
+        I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
+        NativeAssignment, PARAMS_OFFSET, Q_ELECTRON, ROUND_TEMP_FRAME_BYTES,
+        STATEFUL_SCRATCH_FRAME_BYTES, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
+        assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
+        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
+        entry_vars_arg_reg, rspice_exp,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -3475,7 +3476,7 @@ mod tests {
 
     #[test]
     fn literal_pool_reuses_identical_bit_patterns() {
-        let mut compiler = FunctionCompiler::new(false, false, 0, None, None, 0);
+        let mut compiler = FunctionCompiler::new(false, false, 0, None, None);
         compiler.emit_literal_load(Xmm::Xmm0, 2.0);
         compiler.emit_literal_load(Xmm::Xmm1, 2.0);
         compiler.emit_literal_load(Xmm::Xmm2, 3.0);
