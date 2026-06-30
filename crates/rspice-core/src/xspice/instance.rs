@@ -581,6 +581,8 @@ pub struct XspiceInstance {
     output_vector_branches: HashMap<(usize, usize), usize>,
     /// Node-voltage count for the most recently supplied MNA solution.
     solution_num_nodes: usize,
+    /// Node-voltage count used to build the current context port bindings.
+    port_context_solution_num_nodes: Option<usize>,
     /// Has been initialized
     initialized: bool,
 }
@@ -891,6 +893,7 @@ impl XspiceInstance {
             output_branches: vec![None; port_count],
             output_vector_branches: HashMap::new(),
             solution_num_nodes: 0,
+            port_context_solution_num_nodes: None,
             initialized: false,
         })
     }
@@ -989,7 +992,10 @@ impl XspiceInstance {
         real_values: &HashMap<usize, Value>,
         real_event_times: &HashMap<usize, Value>,
     ) {
-        self.solution_num_nodes = num_nodes;
+        if self.solution_num_nodes != num_nodes {
+            self.port_context_solution_num_nodes = None;
+            self.solution_num_nodes = num_nodes;
+        }
 
         fn node_voltage(solution: &[Value], node: usize) -> Value {
             if node == 0 {
@@ -1154,6 +1160,37 @@ impl XspiceInstance {
         phase: EvaluationPhase,
     ) -> CmResult<()> {
         self.context.clear_stamps();
+        self.refresh_port_context_bindings();
+        self.context.time = time;
+        self.context.timestep = timestep;
+        self.context.analysis = analysis;
+        self.context.set_evaluation_phase(phase);
+        self.context.call_type = match analysis {
+            AnalysisType::DcOp | AnalysisType::DcSweep => CallType::DcAnalysis,
+            AnalysisType::Ac => CallType::AcAnalysis,
+            AnalysisType::Transient => CallType::TransientAnalysis,
+            _ => CallType::DcAnalysis,
+        };
+
+        let context_before_evaluate = self.context.clone();
+        match catch_unwind(AssertUnwindSafe(|| self.model.evaluate(&mut self.context))) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => {
+                self.port_context_solution_num_nodes = None;
+                Err(err)
+            }
+            Err(payload) => {
+                self.context = context_before_evaluate;
+                Err(self.model_panic_error("evaluation", payload))
+            }
+        }
+    }
+
+    fn refresh_port_context_bindings(&mut self) {
+        if self.port_context_solution_num_nodes == Some(self.solution_num_nodes) {
+            return;
+        }
+
         self.context.clear_port_nodes();
         for (port, connection) in self.ports.iter().zip(self.connections.iter()) {
             match connection {
@@ -1229,25 +1266,7 @@ impl XspiceInstance {
             }
         }
 
-        self.context.time = time;
-        self.context.timestep = timestep;
-        self.context.analysis = analysis;
-        self.context.set_evaluation_phase(phase);
-        self.context.call_type = match analysis {
-            AnalysisType::DcOp | AnalysisType::DcSweep => CallType::DcAnalysis,
-            AnalysisType::Ac => CallType::AcAnalysis,
-            AnalysisType::Transient => CallType::TransientAnalysis,
-            _ => CallType::DcAnalysis,
-        };
-
-        let context_before_evaluate = self.context.clone();
-        match catch_unwind(AssertUnwindSafe(|| self.model.evaluate(&mut self.context))) {
-            Ok(result) => result,
-            Err(payload) => {
-                self.context = context_before_evaluate;
-                Err(self.model_panic_error("evaluation", payload))
-            }
-        }
+        self.port_context_solution_num_nodes = Some(self.solution_num_nodes);
     }
 
     /// Get output value for stamping
@@ -1999,6 +2018,7 @@ mod tests {
     use super::*;
     use crate::xspice::{DigitalState, DigitalStrength, EventValue, ParamSpec, PortDirection};
     use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     struct PanicModel {
@@ -2014,6 +2034,92 @@ mod tests {
         initial_ports: Vec<PortSpec>,
         expanded_ports: Vec<PortSpec>,
         params: Vec<ParamSpec>,
+    }
+
+    struct ControlColumnModel {
+        observed_columns: Arc<Mutex<Vec<Option<usize>>>>,
+        ports: Vec<PortSpec>,
+    }
+
+    struct ErrorAfterPortMutationModel {
+        observed_columns: Arc<Mutex<Vec<Option<usize>>>>,
+        fail_next: AtomicBool,
+        ports: Vec<PortSpec>,
+    }
+
+    impl ControlColumnModel {
+        fn new(observed_columns: Arc<Mutex<Vec<Option<usize>>>>) -> Self {
+            Self {
+                observed_columns,
+                ports: vec![PortSpec::input("sense", PortType::DifferentialCurrent)],
+            }
+        }
+    }
+
+    impl CodeModel for ControlColumnModel {
+        fn name(&self) -> &str {
+            "control_column_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            &self.ports
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &[]
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+            self.observed_columns
+                .lock()
+                .expect("observed column lock should not be poisoned")
+                .push(ctx.port_control_column("sense"));
+            Ok(())
+        }
+    }
+
+    impl ErrorAfterPortMutationModel {
+        fn new(observed_columns: Arc<Mutex<Vec<Option<usize>>>>) -> Self {
+            Self {
+                observed_columns,
+                fail_next: AtomicBool::new(true),
+                ports: vec![PortSpec::input("sense", PortType::DifferentialCurrent)],
+            }
+        }
+    }
+
+    impl CodeModel for ErrorAfterPortMutationModel {
+        fn name(&self) -> &str {
+            "error_after_port_mutation_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            &self.ports
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &[]
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+            self.observed_columns
+                .lock()
+                .expect("observed column lock should not be poisoned")
+                .push(ctx.port_control_column("sense"));
+            if self.fail_next.swap(false, Ordering::SeqCst) {
+                ctx.set_port_control_column("sense", 999);
+                return Err(CmError::EvaluationError("synthetic failure".to_string()));
+            }
+            Ok(())
+        }
     }
 
     impl MutablePortsModel {
@@ -2722,6 +2828,127 @@ mod tests {
 
         assert!(matches!(err, CmError::InvalidPortConnection(_)));
         assert!(err.to_string().contains("branch ordinal 0"));
+    }
+
+    #[test]
+    fn cached_port_context_updates_control_columns_when_node_count_changes() {
+        let observed_columns = Arc::new(Mutex::new(Vec::new()));
+        let model = ControlColumnModel::new(Arc::clone(&observed_columns));
+        let mut instance = XspiceInstance::new(
+            "Acolumn",
+            Arc::new(model),
+            vec![PortConnection::CurrentProbe {
+                pos: 1,
+                neg: 0,
+                branch_ordinal: 2,
+            }],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("current-probe instance should construct");
+
+        instance.update_inputs(
+            &[0.0; 8],
+            5,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        instance
+            .evaluate(
+                0.0,
+                1e-9,
+                AnalysisType::Transient,
+                EvaluationPhase::DirectEvaluation,
+            )
+            .expect("first evaluation should succeed");
+        instance
+            .evaluate(
+                1e-9,
+                1e-9,
+                AnalysisType::Transient,
+                EvaluationPhase::DirectEvaluation,
+            )
+            .expect("cached-port evaluation should succeed");
+        instance.update_inputs(
+            &[0.0; 10],
+            7,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        instance
+            .evaluate(
+                2e-9,
+                1e-9,
+                AnalysisType::Transient,
+                EvaluationPhase::DirectEvaluation,
+            )
+            .expect("evaluation after node-count change should succeed");
+
+        let observed_columns = observed_columns
+            .lock()
+            .expect("observed column lock should not be poisoned");
+        assert_eq!(&*observed_columns, &[Some(6), Some(6), Some(8)]);
+        assert_eq!(instance.port_context_solution_num_nodes, Some(7));
+    }
+
+    #[test]
+    fn model_error_invalidates_cached_port_context_bindings() {
+        let observed_columns = Arc::new(Mutex::new(Vec::new()));
+        let model = ErrorAfterPortMutationModel::new(Arc::clone(&observed_columns));
+        let mut instance = XspiceInstance::new(
+            "Acolumn",
+            Arc::new(model),
+            vec![PortConnection::CurrentProbe {
+                pos: 1,
+                neg: 0,
+                branch_ordinal: 2,
+            }],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("current-probe instance should construct");
+
+        instance.update_inputs(
+            &[0.0; 8],
+            5,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        let err = instance
+            .evaluate(
+                0.0,
+                1e-9,
+                AnalysisType::Transient,
+                EvaluationPhase::DirectEvaluation,
+            )
+            .expect_err("first evaluation should fail");
+        assert!(err.to_string().contains("synthetic failure"));
+        assert_eq!(instance.port_context_solution_num_nodes, None);
+
+        instance
+            .evaluate(
+                1e-9,
+                1e-9,
+                AnalysisType::Transient,
+                EvaluationPhase::DirectEvaluation,
+            )
+            .expect("second evaluation should rebuild cached port context");
+
+        let observed_columns = observed_columns
+            .lock()
+            .expect("observed column lock should not be poisoned");
+        assert_eq!(&*observed_columns, &[Some(6), Some(6)]);
+        assert_eq!(instance.port_context_solution_num_nodes, Some(5));
     }
 
     fn assert_evaluation_error(result: CmResult<()>, expected: &str) {
