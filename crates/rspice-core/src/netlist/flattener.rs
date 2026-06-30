@@ -447,7 +447,7 @@ impl<'a> Flattener<'a> {
                 format!("{}.{}", new_prefix, sub_element.name)
             };
             let mut substituted =
-                self.substitute_params(sub_element, &param_scope, &element_path)?;
+                self.substitute_params(sub_element, &param_scope, &element_path, &new_prefix)?;
             if multiplicity != 1.0 {
                 apply_element_multiplicity(&mut substituted, multiplicity);
             }
@@ -764,6 +764,7 @@ impl<'a> Flattener<'a> {
         element: &Element,
         scope: &ParamContext,
         element_path: &str,
+        model_scope_path: &str,
     ) -> Result<Element, ParseError> {
         let new_kind = match &element.kind {
             // Passive components
@@ -776,7 +777,12 @@ impl<'a> Flattener<'a> {
             } => ElementKind::Resistor {
                 value: self.resolve_optional_value_expr(*value, value_expr, scope)?,
                 value_expr: None,
-                model: model.clone(),
+                model: self.resolve_optional_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
@@ -795,7 +801,12 @@ impl<'a> Flattener<'a> {
                 value: self.resolve_optional_value_expr(*value, value_expr, scope)?,
                 value_expr: None,
                 initial_voltage: *initial_voltage,
-                model: model.clone(),
+                model: self.resolve_optional_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
@@ -814,13 +825,32 @@ impl<'a> Flattener<'a> {
                 value: self.resolve_optional_value_expr(*value, value_expr, scope)?,
                 value_expr: None,
                 initial_current: *initial_current,
-                model: model.clone(),
+                model: self.resolve_optional_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
                     scope,
                 )?,
                 deferred_params: Vec::new(),
+            },
+            ElementKind::JilesAthertonInductor {
+                value,
+                model,
+                initial_current,
+            } => ElementKind::JilesAthertonInductor {
+                value: *value,
+                model: self.resolve_native_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
+                initial_current: *initial_current,
             },
 
             // Semiconductor devices: instance parameters captured as
@@ -833,7 +863,12 @@ impl<'a> Flattener<'a> {
                 instance_params,
                 deferred_params,
             } => ElementKind::Diode {
-                model: model.clone(),
+                model: self.resolve_native_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
@@ -847,7 +882,12 @@ impl<'a> Flattener<'a> {
                 instance_params,
                 deferred_params,
             } => ElementKind::Bjt {
-                model: model.clone(),
+                model: self.resolve_native_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
                 bjt_type: *bjt_type,
                 instance_params: self.merge_deferred_params(
                     instance_params,
@@ -863,7 +903,12 @@ impl<'a> Flattener<'a> {
                 instance_params,
                 deferred_params,
             } => ElementKind::Mosfet {
-                model: model.clone(),
+                model: self.resolve_native_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
                 mos_type: *mos_type,
                 compact_syntax: *compact_syntax,
                 instance_params: self.merge_deferred_params(
@@ -879,7 +924,12 @@ impl<'a> Flattener<'a> {
                 instance_params,
                 deferred_params,
             } => ElementKind::Jfet {
-                model: model.clone(),
+                model: self.resolve_native_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
                 jfet_type: *jfet_type,
                 instance_params: self.merge_deferred_params(
                     instance_params,
@@ -894,7 +944,12 @@ impl<'a> Flattener<'a> {
                 instance_params,
                 deferred_params,
             } => ElementKind::Mesfet {
-                model: model.clone(),
+                model: self.resolve_native_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
                 mesfet_type: *mesfet_type,
                 instance_params: self.merge_deferred_params(
                     instance_params,
@@ -941,7 +996,12 @@ impl<'a> Flattener<'a> {
                 real_vector_params,
                 real_vector_expr_params,
             } => ElementKind::Xspice {
-                model: self.resolve_scoped_xspice_model(model, scope, element_path)?,
+                model: self.resolve_xspice_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
                 ports: ports.clone(),
                 params: self.merge_deferred_params(params, expr_params, scope)?,
                 expr_params: Vec::new(),
@@ -1029,6 +1089,68 @@ impl<'a> Flattener<'a> {
             } => ElementKind::Ccvs {
                 transresistance: *transresistance,
                 control_element: control_element.clone(),
+            },
+            ElementKind::VSwitch {
+                control_pos,
+                control_neg,
+                model,
+                initial_state,
+            } => ElementKind::VSwitch {
+                control_pos: control_pos.clone(),
+                control_neg: control_neg.clone(),
+                model: self.resolve_native_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
+                initial_state: *initial_state,
+            },
+            ElementKind::ISwitch {
+                control_element,
+                model,
+                initial_state,
+            } => ElementKind::ISwitch {
+                control_element: control_element.clone(),
+                model: self.resolve_native_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
+                initial_state: *initial_state,
+            },
+            ElementKind::GenericSwitch {
+                model,
+                control_expression,
+                initial_state,
+            } => ElementKind::GenericSwitch {
+                model: self.resolve_native_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
+                control_expression: control_expression.clone(),
+                initial_state: *initial_state,
+            },
+            ElementKind::TransmissionLine {
+                z0,
+                td,
+                freq,
+                nl,
+                model,
+            } => ElementKind::TransmissionLine {
+                z0: *z0,
+                td: *td,
+                freq: *freq,
+                nl: *nl,
+                model: self.resolve_optional_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
             },
 
             // All other element types - clone as-is
@@ -1254,11 +1376,48 @@ impl<'a> Flattener<'a> {
         Ok(element)
     }
 
-    fn resolve_scoped_xspice_model(
+    fn resolve_optional_scoped_model(
+        &mut self,
+        model_name: &Option<String>,
+        scope: &ParamContext,
+        element_path: &str,
+        model_scope_path: &str,
+    ) -> Result<Option<String>, ParseError> {
+        model_name
+            .as_deref()
+            .map(|model| {
+                self.resolve_native_scoped_model(model, scope, element_path, model_scope_path)
+            })
+            .transpose()
+    }
+
+    fn resolve_native_scoped_model(
         &mut self,
         model_name: &str,
         scope: &ParamContext,
         element_path: &str,
+        model_scope_path: &str,
+    ) -> Result<String, ParseError> {
+        self.resolve_scoped_model(model_name, scope, element_path, model_scope_path, false)
+    }
+
+    fn resolve_xspice_scoped_model(
+        &mut self,
+        model_name: &str,
+        scope: &ParamContext,
+        element_path: &str,
+        model_scope_path: &str,
+    ) -> Result<String, ParseError> {
+        self.resolve_scoped_model(model_name, scope, element_path, model_scope_path, true)
+    }
+
+    fn resolve_scoped_model(
+        &mut self,
+        model_name: &str,
+        scope: &ParamContext,
+        element_path: &str,
+        model_scope_path: &str,
+        preserve_unresolved: bool,
     ) -> Result<String, ParseError> {
         let Some(model_def) = self
             .models
@@ -1272,7 +1431,15 @@ impl<'a> Flattener<'a> {
             return Ok(model_name.to_string());
         }
 
-        let scoped_name = scoped_model_name(model_name, element_path);
+        let scoped_name = scoped_model_name(model_name, model_scope_path);
+        if self
+            .scoped_models
+            .iter()
+            .any(|model| model.name.eq_ignore_ascii_case(&scoped_name))
+        {
+            return Ok(scoped_name);
+        }
+
         let mut scoped_model = model_def.clone();
         scoped_model.name = scoped_name.clone();
         scoped_model.expr_params.clear();
@@ -1296,11 +1463,26 @@ impl<'a> Flattener<'a> {
                 }
                 Ok(value) => {
                     return Err(ParseError::InvalidValue(format!(
-                        "XSPICE model parameter '{}' for scoped model '{}' resolved to non-finite value {}",
+                        "model parameter '{}' for scoped model '{}' resolved to non-finite value {}",
                         name, model_name, value
                     )));
                 }
-                Err(_) => scoped_model.expr_params.push((name.clone(), expr.clone())),
+                Err(err) if preserve_unresolved => {
+                    scoped_model.expr_params.push((name.clone(), expr.clone()));
+                    log::debug!(
+                        "Preserved unresolved expression parameter '{}'='{}' for scoped model '{}': {}",
+                        name,
+                        expr,
+                        model_name,
+                        err
+                    );
+                }
+                Err(err) => {
+                    return Err(ParseError::InvalidValue(format!(
+                        "model parameter '{}' for scoped model '{}' could not be resolved against subcircuit instance '{}': {}",
+                        name, model_name, element_path, err
+                    )));
+                }
             }
         }
 

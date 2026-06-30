@@ -258,6 +258,20 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/PARAMS2/Params_B4.cir",
         "Netlists/PARAMS2/Params_B7.cir",
         "Netlists/PARAMS2/Params_B7_hs.cir",
+        "Netlists/PARAMS2/Params_C2.cir",
+        "Netlists/PARAMS2/Params_C3.cir",
+        "Netlists/PARAMS2/Params_C3_hs.cir",
+        "Netlists/PARAMS2/Params_C4.cir",
+        "Netlists/PARAMS2/Params_C4_hs.cir",
+        "Netlists/PARAMS2/Params_C5.cir",
+        "Netlists/PARAMS2/Params_C5_hs.cir",
+        "Netlists/PARAMS2/Params_D2.cir",
+        "Netlists/PARAMS2/Params_D3.cir",
+        "Netlists/PARAMS2/Params_D3_hs.cir",
+        "Netlists/PARAMS2/Params_D4.cir",
+        "Netlists/PARAMS2/Params_D4_hs.cir",
+        "Netlists/PARAMS2/Params_D5.cir",
+        "Netlists/PARAMS2/Params_D5_hs.cir",
         "Netlists/POLY/poly.cir",
         "Netlists/POLY/twoVarThirdOrd.cir",
         "Netlists/SUBCKT/subckt_h0.cir",
@@ -270,6 +284,7 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/SUPERNODE/supernode4.cir",
         "Netlists/SUPERNODE/supernode5.cir",
         "Netlists/UNARYOPS/unary_funcs.cir",
+        "Netlists/VDMOS_DC/mtb60p06v.cir",
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(

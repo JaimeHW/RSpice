@@ -581,6 +581,16 @@ mod tests {
             .expect("diode exists")
     }
 
+    fn scoped_model_param(models: &[ModelDef], model_name: &str, param_name: &str) -> Option<f64> {
+        models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case(model_name))?
+            .params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(param_name))
+            .map(|(_, value)| *value)
+    }
+
     fn first_bjt(netlist: &Netlist) -> &ElementKind {
         netlist
             .elements
@@ -4136,6 +4146,97 @@ mod tests {
 
         assert_eq!(x1_expression, "((1*V(1))*V(1))");
         assert_eq!(x2_expression, "((2*V(1))*V(1))");
+    }
+
+    #[test]
+    fn subckt_local_diode_model_expression_resolves_per_instance_when_flattened() {
+        let netlist = Netlist::parse(
+            "subckt local diode model scope\n\
+             X1 1 0 DCell is0=100f\n\
+             X2 2 0 DCell is0=200f\n\
+             .subckt DCell a b is0=1f\n\
+             .model DM D (IS={is0})\n\
+             D1 a b DM\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("subcircuit local diode model deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("subcircuit local diode model flattens");
+        let diode_model = |element_name: &str| -> &str {
+            flattened
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    ElementKind::Diode { model, .. } if element.name == element_name => {
+                        Some(model.as_str())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("flattened diode {element_name} exists"))
+        };
+
+        let x1_model = diode_model("X1.D1");
+        let x2_model = diode_model("X2.D1");
+        assert_ne!(x1_model, "DCell::DM");
+        assert_ne!(x1_model, x2_model);
+        assert_eq!(
+            scoped_model_param(&flattened.scoped_models, x1_model, "IS"),
+            Some(100e-15)
+        );
+        assert_eq!(
+            scoped_model_param(&flattened.scoped_models, x2_model, "IS"),
+            Some(200e-15)
+        );
+        assert!(
+            flattened
+                .scoped_models
+                .iter()
+                .all(|model| model.expr_params.is_empty()),
+            "native scoped model expressions must be fully resolved"
+        );
+    }
+
+    #[test]
+    fn subckt_local_model_expression_resolves_caller_scope_functions_when_flattened() {
+        let netlist = Netlist::parse(
+            "subckt local model caller function scope\n\
+             .param base_is=100f\n\
+             .func twice(x) {x*2}\n\
+             X1 1 0 DCell PARAMS: is0={base_is}\n\
+             X2 2 0 DCell PARAMS: is0={twice(base_is)}\n\
+             .subckt DCell a b PARAMS: is0=1f\n\
+             .model DM D (IS={is0})\n\
+             D1 a b DM\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("subcircuit local model function deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("subcircuit local model function deck flattens");
+        let model_for = |element_name: &str| -> &str {
+            flattened
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    ElementKind::Diode { model, .. } if element.name == element_name => {
+                        Some(model.as_str())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("flattened diode {element_name} exists"))
+        };
+
+        assert_eq!(
+            scoped_model_param(&flattened.scoped_models, model_for("X1.D1"), "IS"),
+            Some(100e-15)
+        );
+        assert_eq!(
+            scoped_model_param(&flattened.scoped_models, model_for("X2.D1"), "IS"),
+            Some(200e-15)
+        );
     }
 
     #[test]
