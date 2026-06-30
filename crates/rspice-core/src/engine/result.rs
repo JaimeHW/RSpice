@@ -1,8 +1,9 @@
 //! Public time-domain result types.
 
-use crate::Value;
 use crate::analysis::waveform::TransientResultCompressed;
 use crate::xspice::DigitalValue;
+use crate::{NodeId, Value};
+use std::collections::HashMap;
 
 /// One accepted digital event sample for a named XSPICE digital node.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -47,40 +48,45 @@ impl TransientResult {
     pub(crate) fn record_digital_snapshot(
         &mut self,
         time: Value,
-        snapshot: &[(String, DigitalValue)],
+        snapshot: &[(NodeId, DigitalValue)],
+        trace_indices: &mut HashMap<NodeId, usize>,
     ) {
-        for (node_name, value) in snapshot {
-            let trace_idx = self
-                .digital_traces
-                .iter()
-                .position(|trace| trace.node_name.eq_ignore_ascii_case(node_name))
-                .unwrap_or_else(|| {
+        for &(node_id, value) in snapshot {
+            let Some(node_name) = node_id
+                .checked_sub(1)
+                .and_then(|index| self.node_names.get(index))
+            else {
+                continue;
+            };
+            let trace_idx = match trace_indices.get(&node_id).copied() {
+                Some(index) => index,
+                None => {
+                    let index = self.digital_traces.len();
                     self.digital_traces.push(DigitalTrace {
                         node_name: node_name.clone(),
                         points: Vec::new(),
                     });
-                    self.digital_traces.len() - 1
-                });
+                    trace_indices.insert(node_id, index);
+                    index
+                }
+            };
 
             let trace = &mut self.digital_traces[trace_idx];
             if trace
                 .points
                 .last()
-                .is_some_and(|point| point.time == time && point.value == *value)
+                .is_some_and(|point| point.time == time && point.value == value)
             {
                 continue;
             }
             if trace
                 .points
                 .last()
-                .is_some_and(|point| point.value == *value)
+                .is_some_and(|point| point.value == value)
             {
                 continue;
             }
-            trace.points.push(DigitalTracePoint {
-                time,
-                value: *value,
-            });
+            trace.points.push(DigitalTracePoint { time, value });
         }
     }
 

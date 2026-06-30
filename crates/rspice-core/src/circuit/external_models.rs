@@ -334,25 +334,18 @@ impl CircuitData {
         self.xspice_evaluation_error.take()
     }
 
-    /// Snapshot committed XSPICE digital node values with stable netlist names.
-    pub(crate) fn xspice_digital_snapshot(&self) -> Vec<(String, crate::xspice::DigitalValue)> {
-        let mut node_names: Vec<(NodeId, String)> = self
-            .node_map
-            .iter()
-            .filter_map(|(name, &id)| (id > 0).then_some((id, name.clone())))
-            .collect();
-        node_names.sort_by_key(|(id, _)| *id);
-        node_names.dedup_by_key(|(id, _)| *id);
-
-        node_names
-            .into_iter()
-            .filter_map(|(node_id, name)| {
-                self.xspice_digital_values
-                    .get(&node_id)
-                    .copied()
-                    .map(|value| (name, value))
-            })
-            .collect()
+    /// Fill a reusable snapshot of committed XSPICE digital node values.
+    pub(crate) fn fill_xspice_digital_snapshot(
+        &self,
+        snapshot: &mut Vec<(NodeId, crate::xspice::DigitalValue)>,
+    ) {
+        snapshot.clear();
+        snapshot.extend(
+            self.xspice_digital_values
+                .iter()
+                .filter_map(|(&node_id, &value)| (node_id > 0).then_some((node_id, value))),
+        );
+        snapshot.sort_unstable_by_key(|(node_id, _)| *node_id);
     }
 
     /// Time of the next pending XSPICE digital event, if any.
@@ -1875,6 +1868,25 @@ mod tests {
             PortConnection::Digital(2),
         ));
         assert!(circuit.has_xspice_event_driven_devices());
+    }
+
+    #[test]
+    fn fill_xspice_digital_snapshot_reuses_buffer_and_sorts_nodes() {
+        let mut circuit = CircuitData::new();
+        circuit.xspice_digital_values.insert(3, DigitalValue::one());
+        circuit
+            .xspice_digital_values
+            .insert(1, DigitalValue::zero());
+
+        let mut snapshot = Vec::with_capacity(8);
+        let capacity = snapshot.capacity();
+        circuit.fill_xspice_digital_snapshot(&mut snapshot);
+
+        assert_eq!(
+            snapshot,
+            vec![(1, DigitalValue::zero()), (3, DigitalValue::one())]
+        );
+        assert_eq!(snapshot.capacity(), capacity);
     }
 
     #[test]

@@ -20,6 +20,7 @@ use crate::device::semiconductor::{
 };
 use crate::netlist::AnalysisCommand;
 use crate::{Netlist, Value};
+use std::collections::HashMap;
 
 /// Per-iteration Newton merit tracing (`RSPICE_NEWTON_DEBUG=1`), the
 /// transient-Newton sibling of `RSPICE_LTE_DEBUG`.
@@ -513,7 +514,10 @@ impl Engine {
             branch_names,
             digital_traces: Vec::new(),
         };
-        result.record_digital_snapshot(resume_time, &circuit.xspice_digital_snapshot());
+        let mut digital_snapshot = Vec::new();
+        let mut digital_trace_indices = HashMap::new();
+        circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
+        result.record_digital_snapshot(resume_time, &digital_snapshot, &mut digital_trace_indices);
         let mut t = resume_time;
         let voltage_lte_excluded_nodes = circuit.xspice_transient_voltage_lte_excluded_nodes();
 
@@ -1892,7 +1896,12 @@ impl Engine {
                     for (i, currents) in result.branch_currents.iter_mut().enumerate() {
                         currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
                     }
-                    result.record_digital_snapshot(t, &circuit.xspice_digital_snapshot());
+                    circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
+                    result.record_digital_snapshot(
+                        t,
+                        &digital_snapshot,
+                        &mut digital_trace_indices,
+                    );
 
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
@@ -2669,7 +2678,12 @@ impl Engine {
                     for (i, currents) in result.branch_currents.iter_mut().enumerate() {
                         currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
                     }
-                    result.record_digital_snapshot(t, &circuit.xspice_digital_snapshot());
+                    circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
+                    result.record_digital_snapshot(
+                        t,
+                        &digital_snapshot,
+                        &mut digital_trace_indices,
+                    );
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
                         timestep.preferred_min_dt(),
@@ -2878,7 +2892,8 @@ impl Engine {
             for (i, currents) in result.branch_currents.iter_mut().enumerate() {
                 currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
             }
-            result.record_digital_snapshot(t, &circuit.xspice_digital_snapshot());
+            circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
+            result.record_digital_snapshot(t, &digital_snapshot, &mut digital_trace_indices);
             if first_accepted_transient_step {
                 timestep.force_step(dt);
             } else {
