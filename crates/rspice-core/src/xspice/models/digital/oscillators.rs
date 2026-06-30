@@ -1,0 +1,585 @@
+use super::*;
+use crate::Value;
+use crate::xspice::{CmError, EvaluationPhase, PortDirection};
+use std::sync::OnceLock;
+
+#[derive(Debug, Default)]
+pub struct DigitalOscillator;
+
+#[derive(Debug, Default)]
+pub struct DigitalPwmOscillator;
+
+const MIN_FREQUENCY: Value = 1.0e-16;
+const FACTOR1: Value = 0.75;
+const FACTOR2: Value = 0.8;
+const TIME_EPSILON: Value = 1.0e-18;
+
+const OSC_LAST_TIME: usize = 0;
+const OSC_LAST_STATE: usize = 0;
+const OSC_INITIALIZED: usize = 1;
+
+fn digital_oscillator_ports() -> &'static [PortSpec] {
+    static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+    PORTS.get_or_init(|| {
+        vec![
+            PortSpec {
+                name: "cntl_in".to_string(),
+                direction: PortDirection::In,
+                default_type: PortType::Voltage,
+                allowed_types: vec![
+                    PortType::Voltage,
+                    PortType::DifferentialVoltage,
+                    PortType::Current,
+                ],
+                is_vector: false,
+                null_allowed: false,
+                vector_min_len: None,
+                vector_max_len: None,
+                description: "Control input".to_string(),
+            },
+            PortSpec::output("out", PortType::Digital).with_description("Digital output"),
+        ]
+    })
+}
+
+fn d_osc_params() -> &'static [ParamSpec] {
+    static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+    PARAMS.get_or_init(|| {
+        vec![
+            ParamSpec::real_vector("cntl_array", vec![0.0, 1.0])
+                .with_vector_min_len(2)
+                .with_description("Control-input lookup points"),
+            ParamSpec::real_vector("freq_array", vec![1.0e6, 2.0e6])
+                .with_vector_min_len(2)
+                .with_description("Frequency lookup points"),
+            ParamSpec::real("duty_cycle", 0.5)
+                .with_description("Fraction of each cycle spent high, clamped to official limits"),
+            ParamSpec::real("init_phase", 0.0)
+                .with_description("Initial output phase in degrees, clamped to official limits"),
+            ParamSpec::real("rise_delay", 1.0e-9)
+                .with_description("Unused compatibility delay, accepted outside official limits"),
+            ParamSpec::real("fall_delay", 1.0e-9)
+                .with_description("Unused compatibility delay, accepted outside official limits"),
+        ]
+    })
+}
+
+fn d_pwm_params() -> &'static [ParamSpec] {
+    static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+    PARAMS.get_or_init(|| {
+        vec![
+            ParamSpec::real_vector("cntl_array", vec![-1.0, 1.0])
+                .with_vector_min_len(2)
+                .with_description("Control-input lookup points"),
+            ParamSpec::real_vector("dc_array", vec![0.0, 1.0])
+                .with_vector_min_len(2)
+                .with_description("Duty-cycle lookup points"),
+            ParamSpec::real("frequency", 1.0e6)
+                .with_description("Oscillator frequency, clamped to official lower limit"),
+            ParamSpec::real("init_phase", 0.0)
+                .with_description("Initial output phase in degrees, clamped to official limits"),
+            ParamSpec::real("rise_delay", 1.0e-9)
+                .with_description("Unused compatibility delay, accepted outside official limits"),
+            ParamSpec::real("fall_delay", 1.0e-9)
+                .with_description("Unused compatibility delay, accepted outside official limits"),
+        ]
+    })
+}
+
+fn oscillator_error(model: &str, message: impl Into<String>) -> CmError {
+    CmError::EvaluationError(format!("{model}: {}", message.into()))
+}
+
+fn validate_table<'a>(
+    ctx: &'a CmContext,
+    model: &str,
+    control_name: &str,
+    value_name: &str,
+) -> CmResult<(&'a [Value], &'a [Value])> {
+    validate_table_optional(ctx, model, control_name, value_name)?.ok_or_else(|| {
+        oscillator_error(
+            model,
+            format!("badly-formed control table {control_name}/{value_name}"),
+        )
+    })
+}
+
+fn validate_table_optional<'a>(
+    ctx: &'a CmContext,
+    model: &str,
+    control_name: &str,
+    value_name: &str,
+) -> CmResult<Option<(&'a [Value], &'a [Value])>> {
+    let controls = ctx
+        .real_vector_param(control_name)
+        .ok_or_else(|| CmError::MissingParameter(control_name.to_string()))?;
+    let values = ctx
+        .real_vector_param(value_name)
+        .ok_or_else(|| CmError::MissingParameter(value_name.to_string()))?;
+
+    if controls.len() < 2 || values.len() < 2 {
+        return Err(oscillator_error(
+            model,
+            format!(
+                "{control_name}/{value_name} require at least 2 points, got {}/{}",
+                controls.len(),
+                values.len()
+            ),
+        ));
+    }
+    if controls.len() != values.len() {
+        return Ok(None);
+    }
+
+    for (index, (&control, &value)) in controls.iter().zip(values).enumerate() {
+        if !control.is_finite() {
+            return Err(oscillator_error(
+                model,
+                format!("{control_name}[{index}] must be finite, got {control}"),
+            ));
+        }
+        if !value.is_finite() {
+            return Err(oscillator_error(
+                model,
+                format!("{value_name}[{index}] must be finite, got {value}"),
+            ));
+        }
+        if index > 0 && control <= controls[index - 1] {
+            return Ok(None);
+        }
+    }
+
+    Ok(Some((controls, values)))
+}
+
+fn interpolate_table(
+    controls: &[Value],
+    values: &[Value],
+    control: Value,
+    sanitize_value: impl Fn(Value) -> Value,
+) -> Value {
+    let right_index = controls
+        .iter()
+        .position(|&point| point > control)
+        .unwrap_or(controls.len());
+    let left = if right_index == 0 {
+        0
+    } else if right_index == controls.len() {
+        controls.len() - 2
+    } else {
+        right_index - 1
+    };
+    let right = left + 1;
+    let left_control = controls[left];
+    let right_control = controls[right];
+    let left_value = sanitize_value(values[left]);
+    let right_value = sanitize_value(values[right]);
+    let span = right_control - left_control;
+    if span.abs() <= Value::EPSILON {
+        return left_value;
+    }
+    left_value + (control - left_control) * ((right_value - left_value) / span)
+}
+
+fn d_osc_period(ctx: &CmContext) -> CmResult<Value> {
+    let (controls, frequencies) = validate_table(ctx, "d_osc", "cntl_array", "freq_array")?;
+    let frequency = interpolate_table(controls, frequencies, ctx.input("cntl_in"), |frequency| {
+        if frequency <= 0.0 {
+            MIN_FREQUENCY
+        } else {
+            frequency
+        }
+    });
+    Ok(1.0 / frequency)
+}
+
+fn d_pwm_duty_cycle(ctx: &CmContext) -> CmResult<Value> {
+    let (controls, duties) = validate_table(ctx, "d_pwm", "cntl_array", "dc_array")?;
+    let duty = interpolate_table(controls, duties, ctx.input("cntl_in"), |duty| {
+        duty.clamp(0.01, 0.99)
+    });
+    Ok(duty.clamp(0.01, 0.99))
+}
+
+fn d_osc_duty_cycle(ctx: &CmContext) -> CmResult<Value> {
+    let duty = ctx.param("duty_cycle");
+    if !duty.is_finite() {
+        return Err(oscillator_error(
+            "d_osc",
+            format!("duty_cycle must be finite, got {duty}"),
+        ));
+    }
+    Ok(duty.clamp(1.0e-6, 0.999_999))
+}
+
+fn d_pwm_frequency(ctx: &CmContext) -> CmResult<Value> {
+    let frequency = ctx.param("frequency");
+    if !frequency.is_finite() {
+        return Err(oscillator_error(
+            "d_pwm",
+            format!("frequency must be finite, got {frequency}"),
+        ));
+    }
+    Ok(frequency.max(1.0e-6))
+}
+
+fn scalar_param_in_range(
+    ctx: &CmContext,
+    model: &str,
+    name: &str,
+    min: Value,
+    max: Value,
+) -> CmResult<Value> {
+    let value = ctx.param(name);
+    if !value.is_finite() || value < min || value > max {
+        return Err(oscillator_error(
+            model,
+            format!("{name} must be in [{min}, {max}], got {value}"),
+        ));
+    }
+    Ok(value)
+}
+
+fn scalar_finite_param(ctx: &CmContext, model: &str, name: &str) -> CmResult<Value> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(oscillator_error(
+            model,
+            format!("{name} must be finite, got {value}"),
+        ));
+    }
+    Ok(value)
+}
+
+fn oscillator_set_state(ctx: &mut CmContext, index: usize, value: Value) {
+    if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+        ctx.set_state(index, value);
+    }
+}
+
+fn oscillator_set_int_state(ctx: &mut CmContext, index: usize, value: i64) {
+    if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+        ctx.set_int_state(index, value);
+    }
+}
+
+fn initialize_timing_state(ctx: &mut CmContext, period: Value, duty_cycle: Value) -> (Value, i64) {
+    let mut phase = ctx.param("init_phase").clamp(-180.0, 360.0) / 360.0;
+    if phase < 0.0 {
+        phase += 1.0;
+    }
+
+    let last_time = period * (1.0 - duty_cycle - phase);
+    let (last_time, last_state) = if last_time < 0.0 {
+        (last_time, 1)
+    } else {
+        (-period * phase, 0)
+    };
+    oscillator_set_state(ctx, OSC_LAST_TIME, last_time);
+    oscillator_set_int_state(ctx, OSC_LAST_STATE, last_state);
+    oscillator_set_int_state(ctx, OSC_INITIALIZED, 1);
+    (last_time, last_state)
+}
+
+fn state_to_value(state: i64) -> DigitalValue {
+    if state == 0 {
+        DigitalValue::zero()
+    } else {
+        DigitalValue::one()
+    }
+}
+
+fn request_future_breakpoint(ctx: &mut CmContext, time: Value) {
+    if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
+        return;
+    }
+    if time.is_finite() && time > ctx.time + TIME_EPSILON {
+        ctx.request_breakpoint(time);
+    }
+}
+
+fn evaluate_digital_oscillator(
+    ctx: &mut CmContext,
+    period: Value,
+    duty_cycle: Value,
+) -> CmResult<()> {
+    if !ctx.is_transient() {
+        return Ok(());
+    }
+
+    let initialized = if ctx.time == 0.0 || ctx.int_state(OSC_INITIALIZED) == 0 {
+        let timing_state = initialize_timing_state(ctx, period, duty_cycle);
+        ctx.set_output_digital("out", state_to_value(timing_state.1), 0.0);
+        Some(timing_state)
+    } else {
+        None
+    };
+
+    let last_time = initialized
+        .map(|(last_time, _)| last_time)
+        .unwrap_or_else(|| ctx.state(OSC_LAST_TIME));
+    if ctx.time + TIME_EPSILON < last_time {
+        request_future_breakpoint(ctx, last_time);
+        return Ok(());
+    }
+
+    let last_state = initialized
+        .map(|(_, last_state)| last_state)
+        .unwrap_or_else(|| ctx.int_state(OSC_LAST_STATE));
+    let interval = if last_state == 0 {
+        period * (1.0 - duty_cycle)
+    } else {
+        period * duty_cycle
+    };
+    if !interval.is_finite() || interval == 0.0 {
+        return Err(oscillator_error(
+            "digital oscillator",
+            format!("computed transition interval must be finite and non-zero, got {interval}"),
+        ));
+    }
+
+    let threshold = last_time + FACTOR1 * interval;
+    if ctx.time + TIME_EPSILON < threshold {
+        request_future_breakpoint(ctx, last_time + FACTOR2 * interval);
+        return Ok(());
+    }
+
+    let mut transition_time = last_time + interval;
+    if transition_time < ctx.time {
+        transition_time = ctx.time;
+    }
+
+    let next_state = 1 - last_state;
+    oscillator_set_state(ctx, OSC_LAST_TIME, transition_time);
+    oscillator_set_int_state(ctx, OSC_LAST_STATE, next_state);
+    ctx.set_output_digital(
+        "out",
+        state_to_value(next_state),
+        (transition_time - ctx.time).max(0.0),
+    );
+
+    let next_interval = if next_state == 0 {
+        period * (1.0 - duty_cycle)
+    } else {
+        period * duty_cycle
+    };
+    request_future_breakpoint(ctx, transition_time + FACTOR2 * next_interval);
+    Ok(())
+}
+
+impl CodeModel for DigitalOscillator {
+    fn name(&self) -> &str {
+        "d_osc"
+    }
+
+    fn description(&self) -> &str {
+        "Controlled digital oscillator"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        digital_oscillator_ports()
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        d_osc_params()
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let has_table =
+            validate_table_optional(ctx, "d_osc", "cntl_array", "freq_array")?.is_some();
+        d_osc_duty_cycle(ctx)?;
+        scalar_finite_param(ctx, "d_osc", "init_phase")?;
+        scalar_finite_param(ctx, "d_osc", "rise_delay")?;
+        scalar_finite_param(ctx, "d_osc", "fall_delay")?;
+        if has_table {
+            ctx.allocate_states(1);
+            ctx.allocate_int_states(2);
+            ctx.set_initial_state(OSC_LAST_TIME, 0.0);
+            ctx.set_int_state(OSC_LAST_STATE, 0);
+            ctx.set_int_state(OSC_INITIALIZED, 0);
+        }
+        Ok(())
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        if validate_table_optional(ctx, "d_osc", "cntl_array", "freq_array")?.is_none() {
+            return Ok(());
+        }
+        let period = d_osc_period(ctx)?;
+        let duty_cycle = d_osc_duty_cycle(ctx)?;
+        evaluate_digital_oscillator(ctx, period, duty_cycle)
+    }
+}
+
+impl CodeModel for DigitalPwmOscillator {
+    fn name(&self) -> &str {
+        "d_pwm"
+    }
+
+    fn description(&self) -> &str {
+        "Duty-cycle controlled digital oscillator"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        digital_oscillator_ports()
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        d_pwm_params()
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let has_table = validate_table_optional(ctx, "d_pwm", "cntl_array", "dc_array")?.is_some();
+        d_pwm_frequency(ctx)?;
+        scalar_finite_param(ctx, "d_pwm", "init_phase")?;
+        scalar_finite_param(ctx, "d_pwm", "rise_delay")?;
+        scalar_finite_param(ctx, "d_pwm", "fall_delay")?;
+        if has_table {
+            ctx.allocate_states(1);
+            ctx.allocate_int_states(2);
+            ctx.set_initial_state(OSC_LAST_TIME, 0.0);
+            ctx.set_int_state(OSC_LAST_STATE, 0);
+            ctx.set_int_state(OSC_INITIALIZED, 0);
+        }
+        Ok(())
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        if validate_table_optional(ctx, "d_pwm", "cntl_array", "dc_array")?.is_none() {
+            return Ok(());
+        }
+        let frequency = d_pwm_frequency(ctx)?;
+        let duty_cycle = d_pwm_duty_cycle(ctx)?;
+        evaluate_digital_oscillator(ctx, 1.0 / frequency, duty_cycle)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::xspice::AnalysisType;
+
+    #[test]
+    fn digital_oscillators_ignore_bad_control_tables_like_ngspice() {
+        let mut osc = CmContext::new();
+        osc.analysis = AnalysisType::Transient;
+        osc.set_real_vector_param("cntl_array", vec![0.0, 1.0]);
+        osc.set_real_vector_param("freq_array", vec![1.0e6, 2.0e6, 3.0e6]);
+        osc.init_output("out", PortType::Digital);
+        DigitalOscillator
+            .init(&mut osc)
+            .expect("ngspice d_osc reports malformed control tables but does not fail init");
+        DigitalOscillator
+            .evaluate(&mut osc)
+            .expect("ngspice d_osc returns without fatal error when the table is unavailable");
+
+        let mut pwm = CmContext::new();
+        pwm.analysis = AnalysisType::Transient;
+        pwm.set_real_vector_param("cntl_array", vec![1.0, 0.0]);
+        pwm.set_real_vector_param("dc_array", vec![0.25, 0.75]);
+        pwm.set_param("frequency", 1.0e6);
+        pwm.init_output("out", PortType::Digital);
+        DigitalPwmOscillator
+            .init(&mut pwm)
+            .expect("ngspice d_pwm reports malformed control tables but does not fail init");
+        DigitalPwmOscillator
+            .evaluate(&mut pwm)
+            .expect("ngspice d_pwm returns without fatal error when the table is unavailable");
+    }
+
+    #[test]
+    fn d_pwm_table_clamps_entries_before_interpolation_and_result_afterwards() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("cntl_array", vec![-1.0, 1.0]);
+        ctx.set_real_vector_param("dc_array", vec![0.0, 1.0]);
+        ctx.set_input_analog("cntl_in", 0.0);
+
+        assert!((d_pwm_duty_cycle(&ctx).unwrap() - 0.5).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn d_osc_frequency_table_clamps_entries_before_interpolation_without_clamping_result() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("cntl_array", vec![0.0, 1.0]);
+        ctx.set_real_vector_param("freq_array", vec![1.0e9, 1.0e-16]);
+        ctx.set_input_analog("cntl_in", 2.0);
+
+        let period = d_osc_period(&ctx).expect("negative high-side extrapolation is finite");
+
+        assert!(
+            (period + 1.0e-9).abs() < 1.0e-18,
+            "ngspice clamps d_osc frequency table entries before interpolation but preserves the negative extrapolated result; got period {period:e}"
+        );
+    }
+
+    #[test]
+    fn digital_oscillator_accepts_negative_transition_intervals_like_ngspice() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.set_param("init_phase", 0.0);
+        ctx.allocate_states(1);
+        ctx.allocate_int_states(2);
+
+        evaluate_digital_oscillator(&mut ctx, -1.0e-9, 0.25)
+            .expect("ngspice digital oscillator event path does not reject negative intervals");
+    }
+
+    #[test]
+    fn initial_phase_selects_same_initial_state_as_official_model() {
+        let mut ctx = CmContext::new();
+        ctx.set_param("init_phase", 90.0);
+        ctx.allocate_states(1);
+        ctx.allocate_int_states(2);
+
+        initialize_timing_state(&mut ctx, 1.0e-9, 0.25);
+
+        assert_eq!(ctx.int_state(OSC_LAST_STATE), 0);
+        assert!((ctx.state(OSC_LAST_TIME) + 0.25e-9).abs() < 1.0e-18);
+    }
+
+    #[test]
+    fn digital_oscillator_rollbackable_probe_does_not_commit_phase_state() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.set_param("init_phase", 0.0);
+        ctx.allocate_states(1);
+        ctx.allocate_int_states(2);
+
+        evaluate_digital_oscillator(&mut ctx, 1.0e-6, 0.5).expect("initial oscillator evaluation");
+        let _ = ctx.take_pending_events();
+        let _ = ctx.take_requested_breakpoints();
+        assert_eq!(ctx.int_state(OSC_LAST_STATE), 0);
+        assert_eq!(ctx.state(OSC_LAST_TIME), 0.0);
+
+        ctx.time = 0.5e-6;
+        ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+        evaluate_digital_oscillator(&mut ctx, 1.0e-6, 0.5).expect("rollback oscillator transition");
+        let events = ctx.take_pending_events();
+        assert!(
+            events
+                .iter()
+                .any(|event| event.delay == 0.0 && event.values == vec![DigitalValue::one()]),
+            "rollbackable oscillator probe should expose the trial transition, got {events:?}"
+        );
+        assert!(
+            ctx.take_requested_breakpoints().is_empty(),
+            "rollbackable oscillator probes must not leave future transition breakpoints behind"
+        );
+        assert_eq!(
+            ctx.int_state(OSC_LAST_STATE),
+            0,
+            "rollbackable oscillator probe must not commit last state"
+        );
+        assert_eq!(
+            ctx.state(OSC_LAST_TIME),
+            0.0,
+            "rollbackable oscillator probe must not commit last transition time"
+        );
+
+        ctx.set_evaluation_phase(EvaluationPhase::DirectEvaluation);
+        evaluate_digital_oscillator(&mut ctx, 1.0e-6, 0.5)
+            .expect("direct oscillator transition after probe");
+        assert_eq!(ctx.int_state(OSC_LAST_STATE), 1);
+        assert!((ctx.state(OSC_LAST_TIME) - 0.5e-6).abs() < 1.0e-18);
+    }
+}
