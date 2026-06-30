@@ -430,7 +430,7 @@ fn node_key(name: &str) -> String {
 }
 
 fn is_ground_name(name: &str) -> bool {
-    name == "0" || name.eq_ignore_ascii_case("gnd")
+    crate::compat::ground::is_spice_ground_name(name)
 }
 
 fn should_replace_representative(current: &str, candidate: &str) -> bool {

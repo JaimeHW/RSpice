@@ -103,6 +103,7 @@ pub enum Function {
     Lt0,   // lt0(x) = 1 if x < 0 else 0
     Ge0,   // ge0(x) = 1 if x >= 0 else 0
     Le0,   // le0(x) = 1 if x <= 0 else 0
+    Pow,   // pow(x, y) = x^y
     Table, // table(x, x1,y1, x2,y2, ...)
     Pwl,   // pwl(x, x1,y1, x2,y2, ...) alias for table
     Mod,   // mod(x, y) = x % y - modulo

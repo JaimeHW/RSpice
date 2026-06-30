@@ -140,7 +140,12 @@ fn eval_function(name: &str, args: &[Expr], ctx: &ParamContext) -> Result<Value,
         "ROUND" => Ok(get_arg(0)?.round()),
         "MIN" => Ok(get_arg(0)?.min(get_arg(1)?)),
         "MAX" => Ok(get_arg(0)?.max(get_arg(1)?)),
-        "POW" | "PWR" => Ok(get_arg(0)?.powf(get_arg(1)?)),
+        "POW" => Ok(get_arg(0)?.powf(get_arg(1)?)),
+        "PWR" => Ok(get_arg(0)?.abs().powf(get_arg(1)?)),
+        "PWRS" => {
+            let base = get_arg(0)?;
+            Ok(base.signum() * base.abs().powf(get_arg(1)?))
+        }
         "LIMIT" => match args.len() {
             // LIMIT(nom, avar): worst-case two-point draw, nom ± avar with a
             // random sign (ngspice/HSPICE .param semantics).

@@ -345,9 +345,7 @@ impl HierarchyPath {
     /// Global nodes are never prefixed with hierarchy path.
     pub fn is_global_node(node: &str) -> bool {
         // Standard ground representations
-        node == "0"
-            || node.eq_ignore_ascii_case("gnd")
-            || node.eq_ignore_ascii_case("ground")
+        crate::compat::ground::is_spice_ground_name(node)
             || node.eq_ignore_ascii_case("vss")
             // Common global supply names
             || node.eq_ignore_ascii_case("vdd")
@@ -362,7 +360,7 @@ impl HierarchyPath {
     pub fn qualify_node(&self, node: &str) -> String {
         if Self::is_global_node(node) || self.is_root() {
             // Ground is never renamed, global power rails preserved
-            if node == "0" || node.eq_ignore_ascii_case("gnd") {
+            if crate::compat::ground::is_spice_ground_name(node) {
                 "0".to_string()
             } else {
                 node.to_string()

@@ -119,6 +119,7 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 Function::Lt0 => Instruction::Lt0,
                 Function::Ge0 => Instruction::Ge0,
                 Function::Le0 => Instruction::Le0,
+                Function::Pow => Instruction::Pow,
                 Function::Table => Instruction::Table(args.len()),
                 Function::Pwl => Instruction::Pwl(args.len()),
                 Function::Mod => Instruction::Mod,

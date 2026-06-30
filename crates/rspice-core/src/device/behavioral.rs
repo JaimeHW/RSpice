@@ -86,7 +86,7 @@ impl BehavioralVoltageSource {
     {
         self.node_bindings = vec![None; self.program.node_map.len()];
         for (name, &local_idx) in &self.program.node_map {
-            let resolved = if name.eq_ignore_ascii_case("0") || name.eq_ignore_ascii_case("gnd") {
+            let resolved = if crate::compat::ground::is_spice_ground_name(name) {
                 Some(0usize)
             } else {
                 resolve_node(name)
@@ -389,7 +389,7 @@ impl BehavioralCurrentSource {
     {
         self.node_bindings = vec![None; self.program.node_map.len()];
         for (name, &local_idx) in &self.program.node_map {
-            let resolved = if name.eq_ignore_ascii_case("0") || name.eq_ignore_ascii_case("gnd") {
+            let resolved = if crate::compat::ground::is_spice_ground_name(name) {
                 Some(0usize)
             } else {
                 resolve_node(name)

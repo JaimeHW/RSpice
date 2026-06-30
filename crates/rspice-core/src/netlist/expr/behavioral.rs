@@ -269,7 +269,7 @@ fn is_simple_probe_reference(raw: &str) -> bool {
             c.is_ascii_alphanumeric()
                 || matches!(
                     c,
-                    '_' | '.' | '#' | ':' | '$' | '@' | '/' | '\\' | '|' | '+' | '-'
+                    '_' | '.' | '#' | ':' | '$' | '@' | '/' | '\\' | '|' | '+' | '-' | '!'
                 )
         })
 }

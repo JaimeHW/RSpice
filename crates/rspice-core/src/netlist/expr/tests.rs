@@ -20,6 +20,15 @@ fn bare_named_constants_parse_as_numbers() {
 }
 
 #[test]
+fn parameter_expression_pow_pwr_and_pwrs_keep_distinct_spice_sign_semantics() {
+    let ctx = ParamContext::new();
+    assert_eq!(eval_with(&ctx, "pow(-2,2)"), 4.0);
+    assert_eq!(eval_with(&ctx, "pow(-2,3)"), -8.0);
+    assert_eq!(eval_with(&ctx, "pwr(-2,3)"), 8.0);
+    assert_eq!(eval_with(&ctx, "pwrs(-2,3)"), -8.0);
+}
+
+#[test]
 fn behavioral_preparation_expands_functions_without_substituting_probe_names() {
     let mut ctx = ParamContext::new();
     ctx.set("scale", 2.0);
@@ -55,6 +64,121 @@ fn behavioral_preparation_expands_xyce_ordered_poly_expression() {
     assert!(prepared.contains("V(2)"));
     assert!(prepared.contains("3"));
     assert!(prepared.contains("2"));
+}
+
+#[test]
+fn behavioral_preparation_evaluates_xyce_ordered_poly1_coefficients_by_degree() {
+    let mut ctx = ParamContext::new();
+    for (name, value) in [
+        ("C0", 3.0),
+        ("C1", 2.0),
+        ("C2", 1.0),
+        ("C3", 3.0),
+        ("C4", 4.0),
+    ] {
+        ctx.set(name, value);
+    }
+    ctx.define_function(
+        "polyVersion",
+        vec!["X1".to_string()],
+        "POLY(1) X1 C0 C1 C2 C3 C4",
+    );
+
+    for (input, expected) in [(-2.0, 43.0), (-1.5, 12.375), (-1.0, 3.0), (2.0, 99.0)] {
+        let expression = format!("polyVersion({input})");
+        let prepared =
+            prepare_behavioral_expression(&expression, &ctx).expect("POLY function prepares");
+        let actual = eval_expression(&prepared, &ParamContext::new())
+            .unwrap_or_else(|err| panic!("prepared POLY expression `{prepared}` evaluates: {err}"));
+        assert!(
+            (actual - expected).abs() < 1.0e-12,
+            "POLY(1) at {input} prepared as `{prepared}` produced {actual}, expected {expected}"
+        );
+    }
+}
+
+#[test]
+fn behavioral_preparation_compiles_xyce_ordered_poly1_with_voltage_probe_argument() {
+    let mut ctx = ParamContext::new();
+    for (name, value) in [
+        ("C0", 3.0),
+        ("C1", 2.0),
+        ("C2", 1.0),
+        ("C3", 3.0),
+        ("C4", 4.0),
+    ] {
+        ctx.set(name, value);
+    }
+    ctx.define_function(
+        "polyVersion",
+        vec!["X1".to_string()],
+        "POLY(1) X1 C0 C1 C2 C3 C4",
+    );
+
+    let prepared = prepare_behavioral_expression("3.0*(polyVersion(V(2)))", &ctx)
+        .expect("POLY function with voltage probe prepares");
+    let ast = crate::expr::parse_expression_strict(&prepared)
+        .unwrap_or_else(|err| panic!("prepared expression `{prepared}` parses: {err}"));
+    let program = crate::expr::compile(&ast);
+    let node_index = *program
+        .node_map
+        .get("2")
+        .expect("compiled expression references V(2)");
+    let mut vm = crate::expr::Vm::new();
+
+    for (input, expected) in [(-2.0, 129.0), (-1.5, 37.125), (-1.0, 9.0), (2.0, 297.0)] {
+        let mut voltages = vec![0.0; program.node_map.len()];
+        voltages[node_index] = input;
+        let actual = vm.execute(&program, &crate::expr::Context::dc(&voltages, &[]));
+        assert!(
+            (actual - expected).abs() < 1.0e-12,
+            "prepared expression `{prepared}` at V(2)={input} produced {actual}, expected {expected}"
+        );
+    }
+}
+
+#[test]
+fn parsed_xyce_poly1_function_body_prepares_with_voltage_probe_argument() {
+    let deck = r#"
+.param C0=3.0
+.param C1=2.0
+.param C2=1.0
+.param C3=3.0
+.param C4=4.0
+.func polyVersion(x1) {POLY(1) x1 C0 C1 C2 C3 C4}
+B 3 0 V ={3.0*(polyVersion(V(2)))}
+.op
+.end
+"#;
+    let netlist = crate::netlist::Netlist::parse(deck).expect("deck parses");
+    let expression = netlist
+        .elements
+        .iter()
+        .find_map(|element| match &element.kind {
+            crate::netlist::ElementKind::BehavioralVoltage { expression, .. } => {
+                Some(expression.as_str())
+            }
+            _ => None,
+        })
+        .expect("behavioral voltage source parsed");
+    let prepared = prepare_behavioral_expression(expression, &netlist.params)
+        .expect("parsed POLY function with voltage probe prepares");
+    let ast = crate::expr::parse_expression_strict(&prepared)
+        .unwrap_or_else(|err| panic!("prepared expression `{prepared}` parses: {err}"));
+    let program = crate::expr::compile(&ast);
+    let node_index = *program
+        .node_map
+        .get("2")
+        .expect("compiled expression references V(2)");
+    let mut voltages = vec![0.0; program.node_map.len()];
+    voltages[node_index] = -2.0;
+    let mut vm = crate::expr::Vm::new();
+    let actual = vm.execute(&program, &crate::expr::Context::dc(&voltages, &[]));
+
+    assert!(
+        (actual - 129.0).abs() < 1.0e-12,
+        "parsed expression `{expression}` prepared as `{prepared}` produced {actual}"
+    );
 }
 
 #[test]

@@ -166,7 +166,19 @@ impl<'a> Lexer<'a> {
     fn read_ident(&mut self) -> String {
         let mut s = String::new();
         while let Some(&c) = self.chars.peek() {
-            if c.is_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':' {
+            let is_bang_name_char = c == '!'
+                && {
+                    let mut probe = self.chars.clone();
+                    probe.next();
+                    probe.peek() != Some(&'=')
+                };
+            if c.is_alphanumeric()
+                || c == '_'
+                || c == '.'
+                || c == '#'
+                || c == ':'
+                || is_bang_name_char
+            {
                 s.push(self.chars.next().unwrap());
             } else {
                 break;
@@ -633,7 +645,8 @@ impl<'a> Parser<'a> {
                 "SQR" => Some(Function::Sqr),
                 "MIN" => Some(Function::Min),
                 "MAX" => Some(Function::Max),
-                "POW" | "PWR" => Some(Function::Pwr),
+                "POW" => Some(Function::Pow),
+                "PWR" => Some(Function::Pwr),
                 "PWRS" => Some(Function::Pwrs),
                 "LIMIT" => Some(Function::Limit),
                 "SIGN" | "SGN" => Some(Function::Sign),
@@ -736,6 +749,14 @@ mod tests {
     }
 
     #[test]
+    fn pow_pwr_and_pwrs_keep_distinct_spice_sign_semantics() {
+        assert_eq!(eval_const("pow(-2,2)"), 4.0);
+        assert_eq!(eval_const("pow(-2,3)"), -8.0);
+        assert_eq!(eval_const("pwr(-2,3)"), 8.0);
+        assert_eq!(eval_const("pwrs(-2,3)"), -8.0);
+    }
+
+    #[test]
     fn xyce_unary_step_and_sign_zero_semantics() {
         assert_eq!(eval_const("stp(-1)"), 0.0);
         assert_eq!(eval_const("stp(-1e-15)"), 0.0);
@@ -763,6 +784,17 @@ mod tests {
                 Expr::NodeVoltage("2e3".to_string()),
                 Expr::NodeVoltage("0".to_string())
             )
+        );
+        assert_eq!(
+            parse_expression_strict("V(2D,gnd!)").expect("global-ground probe parses"),
+            Expr::sub(
+                Expr::NodeVoltage("2D".to_string()),
+                Expr::NodeVoltage("gnd!".to_string())
+            )
+        );
+        assert!(
+            parse_expression_strict("1!=0").is_ok(),
+            "allowing bang in node names must not consume the != operator"
         );
     }
 
