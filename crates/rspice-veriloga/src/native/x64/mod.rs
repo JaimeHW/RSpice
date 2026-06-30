@@ -14,7 +14,7 @@ use super::expr::{
 use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel};
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
-use crate::canonical_ir::{CanonicalIrArtifact, EquationId, MirModel, NodeId};
+use crate::canonical_ir::{CanonicalIrArtifact, EquationId, MirEquationKind, MirModel, NodeId};
 use crate::codegen::{
     AssignmentStep, BytecodeProgram, CompiledModel, Instruction, StampIndex, StampProgram,
 };
@@ -637,7 +637,99 @@ fn validate_canonical_artifact_for_model(
         });
     }
 
+    for (index, (equation, stamp)) in artifact
+        .mir
+        .equations
+        .iter()
+        .zip(&model.stamp_programs)
+        .enumerate()
+    {
+        validate_canonical_equation_matches_stamp(model, &artifact.mir, index, equation, stamp)?;
+    }
+
     Ok(())
+}
+
+fn validate_canonical_equation_matches_stamp(
+    model: &CompiledModel,
+    mir: &MirModel,
+    index: usize,
+    equation: &crate::canonical_ir::MirEquation,
+    stamp: &StampProgram,
+) -> JitResult<()> {
+    let expected_kind = compiled_equation_kind(stamp);
+    if equation.kind != expected_kind {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical equation {index} kind {:?} does not match compiled stamp kind {:?}",
+                equation.kind, expected_kind
+            )
+            .into(),
+        });
+    }
+
+    let canonical_pos = canonical_branch_endpoint(model, mir, equation.branch.pos_node)?;
+    let canonical_neg = canonical_branch_endpoint(model, mir, equation.branch.neg_node)?;
+    let compiled_pair = match expected_kind {
+        MirEquationKind::Current => infer_current_unified_pair(model, stamp),
+        MirEquationKind::Potential | MirEquationKind::Indirect => {
+            Some(compiled_branch_pair_for_stamp(model, stamp, index)?)
+        }
+    };
+
+    if let Some((compiled_pos, compiled_neg)) = compiled_pair
+        && (canonical_pos, canonical_neg) != (compiled_pos, compiled_neg)
+    {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical equation {index} branch {} does not match compiled stamp branch {}",
+                format_current_pair(canonical_pos, canonical_neg),
+                format_current_pair(compiled_pos, compiled_neg)
+            )
+            .into(),
+        });
+    }
+
+    Ok(())
+}
+
+fn compiled_equation_kind(stamp: &StampProgram) -> MirEquationKind {
+    if stamp.indirect {
+        MirEquationKind::Indirect
+    } else if stamp.branch_ordinal.is_some() {
+        MirEquationKind::Potential
+    } else {
+        MirEquationKind::Current
+    }
+}
+
+fn compiled_branch_pair_for_stamp(
+    model: &CompiledModel,
+    stamp: &StampProgram,
+    stamp_index: usize,
+) -> JitResult<(usize, usize)> {
+    let ordinal = stamp
+        .branch_ordinal
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!("compiled stamp {stamp_index} has no branch source ordinal").into(),
+        })?;
+    let source = model
+        .branch_sources
+        .get(ordinal)
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "compiled stamp {stamp_index} branch ordinal {ordinal} is outside branch source table"
+            )
+            .into(),
+        })?;
+    Ok((
+        compiled_branch_endpoint(model, &source.pos)?,
+        compiled_branch_endpoint(model, &source.neg)?,
+    ))
 }
 
 fn canonical_branch_unknown_runtime_map(
@@ -1427,6 +1519,80 @@ endmodule
         assert_eq!(
             native.run_stamp_value(0, &ctx, std::ptr::null()),
             (voltages[0] - voltages[1]) / params[0]
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_rejects_mismatched_stamp_branch() {
+        let model_source = r#"
+module native_canonical_shape_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ V(p, n);
+endmodule
+"#;
+        let artifact_source = r#"
+module native_canonical_shape_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(n, p) <+ V(n, p);
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(model_source)
+            .expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(artifact_source)
+            .expect("compile mismatched canonical IR");
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("same-name reversed canonical branch must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("canonical equation 0 branch"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical mismatch must keep hard-JIT contract: {message}"
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_rejects_mismatched_stamp_kind() {
+        let model_source = r#"
+module native_canonical_kind_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ V(p, n);
+endmodule
+"#;
+        let artifact_source = r#"
+module native_canonical_kind_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  analog V(p, n) <+ 1.0;
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(model_source)
+            .expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(artifact_source)
+            .expect("compile wrong-kind canonical IR");
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("same-name wrong-kind canonical equation must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("canonical equation 0 kind"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical kind mismatch must keep hard-JIT contract: {message}"
         );
     }
 
