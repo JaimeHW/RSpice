@@ -928,15 +928,10 @@ impl FunctionCompiler {
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(target, Xmm::Xmm0);
         }
-        let mut frame_base_ready = false;
         for (index, register) in XMM_STACK.iter().copied().take(restore_depth).enumerate() {
             if register != target && should_restore(index, register) {
-                if !frame_base_ready {
-                    self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-                    frame_base_ready = true;
-                }
                 self.encoder
-                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
+                    .movsd_xmm_m64_base_disp32(register, Gpr::Rsp, call_spill_disp(index));
             }
         }
     }
@@ -946,15 +941,10 @@ impl FunctionCompiler {
         spill_depth: usize,
         mut should_spill: impl FnMut(usize, Xmm) -> bool,
     ) {
-        let mut frame_base_ready = false;
         for (index, register) in XMM_STACK.iter().copied().take(spill_depth).enumerate() {
             if should_spill(index, register) {
-                if !frame_base_ready {
-                    self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
-                    frame_base_ready = true;
-                }
                 self.encoder
-                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
+                    .movsd_m64_base_disp32_xmm(Gpr::Rsp, call_spill_disp(index), register);
             }
         }
     }
@@ -3890,8 +3880,16 @@ mod tests {
         );
         assert_eq!(
             count_bytes(&bytes, &mov_r11_rsp_bytes()),
-            2,
-            "helper calls with a live preserved XMM value should materialize the call-frame base once for spill and once for restore"
+            0,
+            "helper calls should address spills directly from rsp instead of materializing a call-frame base"
+        );
+        assert!(
+            contains_bytes(&bytes, &call_frame_spill_bytes(0, Xmm::Xmm0)),
+            "live prefix should spill directly to the call frame"
+        );
+        assert!(
+            contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm0, 0)),
+            "live prefix should reload directly from the call frame"
         );
 
         let mut old_result_store = X64Encoder::new();
@@ -9383,13 +9381,13 @@ mod tests {
 
     fn call_frame_spill_bytes(index: usize, register: Xmm) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
-        encoder.movsd_m64_base_disp32_xmm(Gpr::R11, super::call_spill_disp(index), register);
+        encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, super::call_spill_disp(index), register);
         encoder.into_bytes()
     }
 
     fn call_frame_load_bytes(register: Xmm, index: usize) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
-        encoder.movsd_xmm_m64_base_disp32(register, Gpr::R11, super::call_spill_disp(index));
+        encoder.movsd_xmm_m64_base_disp32(register, Gpr::Rsp, super::call_spill_disp(index));
         encoder.into_bytes()
     }
 
