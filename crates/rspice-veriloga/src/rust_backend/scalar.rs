@@ -7,7 +7,7 @@ use crate::canonical_ir::{
     OptBinaryOp, OptOp, OptUnaryOp, OptValue, OptValueKind, OptValueType, ValueId,
 };
 
-use super::expr::{DdtSlots, LoweredVariable, parameter_field_names};
+use super::expr::{DdtSlots, LoweredVariable, analysis_predicate_expr, parameter_field_names};
 use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames};
 use super::{RustTranspileOptions, device};
 
@@ -1896,6 +1896,12 @@ fn emit_value_expr(
         OptValueKind::ThermalVoltage => context.thermal_voltage_expr.clone(),
         OptValueKind::Multiplicity => "multiplicity".to_string(),
         OptValueKind::Time => "self.time".to_string(),
+        OptValueKind::Analysis { query } => {
+            format!(
+                "if {} {{ 1.0 }} else {{ 0.0 }}",
+                analysis_predicate_expr(query.as_str())
+            )
+        }
         OptValueKind::NodePotential { node } => {
             format!("ctx.node_voltage(nodes[{}])", node.index())
         }
@@ -2231,6 +2237,12 @@ fn value_ref(
             OptValueKind::ThermalVoltage => return Ok(context.thermal_voltage_expr.clone()),
             OptValueKind::Multiplicity => return Ok("multiplicity".to_string()),
             OptValueKind::Time => return Ok("self.time".to_string()),
+            OptValueKind::Analysis { ref query } => {
+                return Ok(format!(
+                    "if {} {{ 1.0 }} else {{ 0.0 }}",
+                    analysis_predicate_expr(query.as_str())
+                ));
+            }
             _ => {}
         }
     }
@@ -2592,6 +2604,7 @@ fn mark_stamp_live_value(
         | OptValueKind::ThermalVoltage
         | OptValueKind::Multiplicity
         | OptValueKind::Time
+        | OptValueKind::Analysis { .. }
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => {}
@@ -2662,7 +2675,8 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
             | OptValueKind::Temperature
             | OptValueKind::ThermalVoltage
             | OptValueKind::Multiplicity
-            | OptValueKind::Time => {}
+            | OptValueKind::Time
+            | OptValueKind::Analysis { .. } => {}
             OptValueKind::EquationValue { .. } => {
                 return Err(unsupported(
                     artifact,

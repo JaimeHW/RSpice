@@ -160,6 +160,7 @@ fn evaluate_value(
         OptValueKind::ThermalVoltage => Ok(OptEvalValue::Real(300.15 * THERMAL_VOLTAGE_PER_K)),
         OptValueKind::Multiplicity => Ok(OptEvalValue::Real(1.0)),
         OptValueKind::Time => Ok(OptEvalValue::Real(0.0)),
+        OptValueKind::Analysis { .. } => Ok(OptEvalValue::Real(0.0)),
         OptValueKind::NodePotential { node } => Ok(OptEvalValue::Real(input_at(
             "node_potential",
             &inputs.node_potentials,

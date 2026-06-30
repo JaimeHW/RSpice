@@ -1441,14 +1441,11 @@ fn rust_backend_auto_keeps_hybrid_local_storage_when_residual_needs_scratch() {
     );
     assert!(
         stamp.contains("let s = match &mut self.scratch"),
-        "the analysis-gated nonlinear residual should still allocate scratch AD:\n{stamp}"
+        "the floor-gated nonlinear residual should still allocate scratch AD:\n{stamp}"
     );
     assert!(
-        stamp.contains("let mut var_drive: f64 = 0.0;")
-            && stamp.contains("let mut var_shaped: f64 = 0.0;")
-            && stamp.contains("var_drive_dn0")
-            && stamp.contains("var_shaped_dn0"),
-        "scratch-required residual equations must not force scratch-free residual assignments out of local scalar storage:\n{stamp}"
+        stamp.matches("stamper.stamp_current_node2_local(").count() >= 2,
+        "scratch-required residual equations must not force scratch-free residual equations out of local scalar stamps:\n{stamp}"
     );
     assert!(
         !stamp.contains("let mut var_legacy"),
@@ -13382,6 +13379,32 @@ fn rust_backend_lowers_analysis_call() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_analysis_call() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(analysis_call_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile analysis call through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("ctx.analysis_dc()"), "{stamp}");
+    assert!(stamp.contains("ctx.analysis_smallsig()"), "{stamp}");
+    assert!(stamp.contains("stamp_current_node2_local"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn generated_analysis_call_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(analysis_call_source())
@@ -18306,8 +18329,8 @@ module hybrid_local_storage_scratch_residual(p, n);
             + tanh(V(p, n))
             + atan(V(p, n));
         I(p, n) <+ ddt(c * V(p, n));
-        I(p, n) <+ analysis("dc") ? shaped : (drive * 0.5);
-        I(p, n) <+ analysis("tran") ? (
+        I(p, n) <+ shaped + (drive * 0.5);
+        I(p, n) <+ floor(
             legacy
             + sqrt(abs(V(p, n)) + 1.0)
             + exp(V(p, n) * 0.01)
@@ -18317,7 +18340,7 @@ module hybrid_local_storage_scratch_residual(p, n);
             + tanh(V(p, n))
             + atan(V(p, n))
             + pow(abs(V(p, n)) + 1.0, alpha)
-        ) : 0.0;
+        );
     end
 endmodule
 "#
@@ -18356,7 +18379,7 @@ fn wide_hybrid_local_storage_guard_source(node_count: usize, variable_count: usi
         }
     }
     source.push_str(&format!(
-        "        I(p0, p1) <+ analysis(\"dc\") ? x{} : 0.0;\n",
+        "        I(p0, p1) <+ floor(x{});\n",
         variable_count - 1
     ));
     source.push_str("    end\nendmodule\n");

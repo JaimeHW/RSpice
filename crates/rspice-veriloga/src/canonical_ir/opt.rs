@@ -111,6 +111,9 @@ pub enum OptValueKind {
     ThermalVoltage,
     Multiplicity,
     Time,
+    Analysis {
+        query: SmolStr,
+    },
     NodePotential {
         node: NodeId,
     },
@@ -302,6 +305,7 @@ enum OptValueKey {
     ThermalVoltage,
     Multiplicity,
     Time,
+    Analysis(SmolStr),
     NodePotential(NodeId),
     BranchFlow(BranchId),
     Unary {
@@ -332,6 +336,7 @@ impl OptValueKey {
             OptValueKind::ThermalVoltage => Self::ThermalVoltage,
             OptValueKind::Multiplicity => Self::Multiplicity,
             OptValueKind::Time => Self::Time,
+            OptValueKind::Analysis { query } => Self::Analysis(query.clone()),
             OptValueKind::NodePotential { node } => Self::NodePotential(*node),
             OptValueKind::BranchFlow { branch } => Self::BranchFlow(*branch),
             OptValueKind::Unary { op, input } => Self::Unary {
@@ -452,6 +457,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::ThermalVoltage
             | OptValueKind::Multiplicity
             | OptValueKind::Time
+            | OptValueKind::Analysis { .. }
             | OptValueKind::NodePotential { .. }
             | OptValueKind::BranchFlow { .. }
             | OptValueKind::EquationValue { .. } => {}
@@ -1240,6 +1246,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::ThermalVoltage
             | OptValueKind::Multiplicity
             | OptValueKind::Time
+            | OptValueKind::Analysis { .. }
             | OptValueKind::EquationValue { .. } => BTreeMap::new(),
             OptValueKind::NodePotential { node } => {
                 let derivative =
@@ -1948,6 +1955,9 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_call(&mut self, name: &SmolStr, args: &[ExprId]) -> Option<ValueId> {
+        if name.eq_ignore_ascii_case("analysis") {
+            return self.lower_analysis_call(args);
+        }
         if args.len() == 2 {
             return self.lower_binary_intrinsic_call(name, args[0], args[1]);
         }
@@ -1972,6 +1982,14 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
 
         None
+    }
+
+    fn lower_analysis_call(&mut self, args: &[ExprId]) -> Option<ValueId> {
+        let [query] = args else {
+            return None;
+        };
+        let query = self.analysis_query(*query)?;
+        Some(self.push_value(OptValueType::Real, OptValueKind::Analysis { query }))
     }
 
     fn lower_binary_intrinsic_call(
@@ -2069,6 +2087,27 @@ impl<'a> ScalarGraphBuilder<'a> {
             _ => None,
         }
     }
+
+    fn analysis_query(&self, expr: ExprId) -> Option<SmolStr> {
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let HirExprKind::StringLiteral { value } = &expression.kind else {
+            return None;
+        };
+        normalize_analysis_query(value.as_str()).map(SmolStr::new)
+    }
+}
+
+fn normalize_analysis_query(name: &str) -> Option<&'static str> {
+    match name.to_ascii_lowercase().as_str() {
+        "dc" | "op" => Some("dc"),
+        "ac" => Some("ac"),
+        "tran" | "transient" => Some("tran"),
+        "noise" => Some("noise"),
+        "ic" => Some("ic"),
+        "static" => Some("static"),
+        "smallsig" | "smallsignal" | "small_signal" => Some("smallsig"),
+        _ => None,
+    }
 }
 
 fn binary_op(op: &str) -> Option<OptBinaryOp> {
@@ -2150,6 +2189,9 @@ fn remap_value_kind(kind: &OptValueKind, remap: &[Option<ValueId>]) -> OptValueK
         OptValueKind::ThermalVoltage => OptValueKind::ThermalVoltage,
         OptValueKind::Multiplicity => OptValueKind::Multiplicity,
         OptValueKind::Time => OptValueKind::Time,
+        OptValueKind::Analysis { query } => OptValueKind::Analysis {
+            query: query.clone(),
+        },
         OptValueKind::NodePotential { node } => OptValueKind::NodePotential { node: *node },
         OptValueKind::BranchFlow { branch } => OptValueKind::BranchFlow { branch: *branch },
         OptValueKind::Unary { op, input } => OptValueKind::Unary {
@@ -2200,7 +2242,8 @@ fn validate_value_kind(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel, valu
         OptValueKind::Temperature
         | OptValueKind::ThermalVoltage
         | OptValueKind::Multiplicity
-        | OptValueKind::Time => {}
+        | OptValueKind::Time
+        | OptValueKind::Analysis { .. } => {}
         OptValueKind::NodePotential { node } => {
             if node.index() >= opt.node_count {
                 diagnostics.push(IrDiagnostic::global_error(
@@ -2451,7 +2494,9 @@ fn value_invalidation(
         OptValueKind::Temperature | OptValueKind::ThermalVoltage => {
             InvalidationClass::TemperatureStatic
         }
-        OptValueKind::Multiplicity | OptValueKind::Time => InvalidationClass::NewtonIteration,
+        OptValueKind::Multiplicity | OptValueKind::Time | OptValueKind::Analysis { .. } => {
+            InvalidationClass::NewtonIteration
+        }
         OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => InvalidationClass::NewtonIteration,
@@ -2494,6 +2539,7 @@ fn value_depends_on_parameter(
         | OptValueKind::ThermalVoltage
         | OptValueKind::Multiplicity
         | OptValueKind::Time
+        | OptValueKind::Analysis { .. }
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => false,
@@ -2534,6 +2580,7 @@ fn value_depends_on_temperature(
         | OptValueKind::ParamGiven { .. }
         | OptValueKind::Multiplicity
         | OptValueKind::Time
+        | OptValueKind::Analysis { .. }
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => false,
