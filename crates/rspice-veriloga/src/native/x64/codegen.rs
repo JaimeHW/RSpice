@@ -6422,12 +6422,12 @@ mod tests {
         );
         let bytes = compile_value_function(&program).expect("compile limit state leaf");
         assert!(
-            !contains_bytes(&bytes, &sub_rsp_bytes(WORD_BYTES as i32)),
-            "limit state with a spare XMM register should not spill the positive step"
+            !contains_bytes(&bytes, &stack_spill_store_bytes(Xmm::Xmm1)),
+            "limit state with a spare XMM register should not spill the positive step to the stack"
         );
         assert!(
-            !contains_bytes(&bytes, &add_rsp_bytes(WORD_BYTES as i32)),
-            "limit state with a spare XMM register should not restore a positive-step spill frame"
+            !contains_bytes(&bytes, &stack_spill_minsd_bytes(Xmm::Xmm0)),
+            "limit state with a spare XMM register should clamp from the XMM scratch copy"
         );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate limit state leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -6571,6 +6571,14 @@ mod tests {
         assert!(
             contains_bytes(&bytes, &add_rsp_bytes(WORD_BYTES as i32)),
             "full-stack limit state must restore the positive-step spill fallback"
+        );
+        assert!(
+            contains_bytes(&bytes, &stack_spill_store_bytes(Xmm::Xmm5)),
+            "full-stack limit state must spill the positive step to the stack"
+        );
+        assert!(
+            contains_bytes(&bytes, &stack_spill_minsd_bytes(Xmm::Xmm4)),
+            "full-stack limit state must clamp from the spilled positive step"
         );
 
         let memory =
@@ -9191,6 +9199,18 @@ mod tests {
     fn add_rsp_bytes(value: i32) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.add_rsp_imm32(value);
+        encoder.into_bytes()
+    }
+
+    fn stack_spill_store_bytes(register: Xmm) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, register);
+        encoder.into_bytes()
+    }
+
+    fn stack_spill_minsd_bytes(register: Xmm) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.minsd_xmm_m64_base_disp32(register, Gpr::Rsp, 0);
         encoder.into_bytes()
     }
 
