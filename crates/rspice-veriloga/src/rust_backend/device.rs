@@ -24720,6 +24720,7 @@ fn emit_stamp_body(
                                 &format!("{prefix}_reactive"),
                                 &lowered.reactive_derivatives,
                                 &lowered.reactive_branch_derivatives,
+                                true,
                             );
                             out.push_str("        stamper.stamp_current_reactive_dense(\n");
                             out.push_str(&format!(
@@ -24734,7 +24735,10 @@ fn emit_stamp_body(
                             out.push_str(&format!("            {},\n", derivative_refs.node_ref));
                             out.push_str("            &self.branches,\n");
                             out.push_str(&format!("            {},\n", derivative_refs.branch_ref));
-                            out.push_str("            self.multiplicity,\n");
+                            out.push_str(&format!(
+                                "            {},\n",
+                                scaled_stamp_factor("self.multiplicity", &derivative_refs.scale)
+                            ));
                             out.push_str("        );\n");
                         } else {
                             let emitted_fixed = emit_fixed_sparse_reactive_current_stamp(
@@ -24802,6 +24806,7 @@ fn emit_stamp_body(
                                 &format!("{prefix}_reactive"),
                                 &lowered.reactive_derivatives,
                                 &lowered.reactive_branch_derivatives,
+                                false,
                             );
                             out.push_str("        stamper.stamp_potential_reactive_dense(\n");
                             out.push_str(&format!("            self.branches[{slot}],\n"));
@@ -24961,6 +24966,7 @@ fn emit_stamp_body(
                         &prefix,
                         &node_derivatives,
                         &branch_derivatives,
+                        true,
                     );
                     out.push_str("        stamper.stamp_current_dense_local(\n");
                     out.push_str(&format!(
@@ -24974,7 +24980,10 @@ fn emit_stamp_body(
                     out.push_str(&format!("            self.multiplicity * ({value}),\n"));
                     out.push_str(&format!("            {},\n", derivative_refs.node_ref));
                     out.push_str(&format!("            {},\n", derivative_refs.branch_ref));
-                    out.push_str("            self.multiplicity,\n");
+                    out.push_str(&format!(
+                        "            {},\n",
+                        scaled_stamp_factor("self.multiplicity", &derivative_refs.scale)
+                    ));
                     out.push_str("        );\n");
                 } else {
                     let value_expr = format!("self.multiplicity * ({value})");
@@ -25067,6 +25076,7 @@ fn emit_stamp_body(
                         &prefix,
                         &node_derivatives,
                         &branch_derivatives,
+                        false,
                     );
                     out.push_str("        stamper.stamp_potential_dense_local(\n");
                     out.push_str(&format!("            {slot},\n"));
@@ -25978,6 +25988,7 @@ fn emit_compact_equation_stamp(
 struct DenseDerivativeRefs {
     node_ref: String,
     branch_ref: String,
+    scale: String,
 }
 
 fn emit_dense_derivative_refs(
@@ -25985,7 +25996,14 @@ fn emit_dense_derivative_refs(
     prefix: &str,
     node_derivatives: &[String],
     branch_derivatives: &[String],
+    allow_uniform_scale: bool,
 ) -> DenseDerivativeRefs {
+    if allow_uniform_scale
+        && let Some(refs) = scaled_dense_derivative_refs(node_derivatives, branch_derivatives)
+    {
+        return refs;
+    }
+
     let node_ref = if node_derivatives.is_empty() {
         "&[]".to_string()
     } else if let Some(row) =
@@ -26019,7 +26037,79 @@ fn emit_dense_derivative_refs(
     DenseDerivativeRefs {
         node_ref,
         branch_ref,
+        scale: "1.0".to_string(),
     }
+}
+
+fn scaled_dense_derivative_refs(
+    node_derivatives: &[String],
+    branch_derivatives: &[String],
+) -> Option<DenseDerivativeRefs> {
+    let node = if node_derivatives.is_empty() {
+        None
+    } else {
+        Some(scaled_scratch_derivative_row(
+            node_derivatives,
+            ScratchDerivativeKind::Node,
+        )?)
+    };
+    let branch = if branch_derivatives.is_empty() {
+        None
+    } else {
+        Some(scaled_scratch_derivative_row(
+            branch_derivatives,
+            ScratchDerivativeKind::Branch,
+        )?)
+    };
+
+    let scale = match (&node, &branch) {
+        (Some(node), Some(branch)) if node.scale == branch.scale => node.scale.clone(),
+        (Some(_), Some(_)) => return None,
+        (Some(node), None) => node.scale.clone(),
+        (None, Some(branch)) => branch.scale.clone(),
+        (None, None) => "1.0".to_string(),
+    };
+
+    Some(DenseDerivativeRefs {
+        node_ref: node
+            .map(|row| row.row.reference())
+            .unwrap_or_else(|| "&[]".to_string()),
+        branch_ref: branch
+            .map(|row| row.row.reference())
+            .unwrap_or_else(|| "&[]".to_string()),
+        scale,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ScaledScratchDerivativeRow {
+    row: ScratchDerivativeRow,
+    scale: String,
+}
+
+fn scaled_scratch_derivative_row(
+    derivatives: &[String],
+    kind: ScratchDerivativeKind,
+) -> Option<ScaledScratchDerivativeRow> {
+    let mut row = None;
+    let mut scale = None;
+    for (axis, derivative) in derivatives.iter().enumerate() {
+        let next = parse_scaled_scratch_derivative_axis(derivative, kind, axis)?;
+        match row {
+            Some(row) if row != next.row => return None,
+            Some(_) => {}
+            None => row = Some(next.row),
+        }
+        match &scale {
+            Some(scale) if scale != &next.scale => return None,
+            Some(_) => {}
+            None => scale = Some(next.scale),
+        }
+    }
+    Some(ScaledScratchDerivativeRow {
+        row: row?,
+        scale: scale.unwrap_or_else(|| "1.0".to_string()),
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -26109,6 +26199,101 @@ fn parse_scratch_derivative_axis(
         }
     }
     None
+}
+
+fn parse_scaled_scratch_derivative_axis(
+    derivative: &str,
+    kind: ScratchDerivativeKind,
+    expected_axis: usize,
+) -> Option<ScaledScratchDerivativeRow> {
+    let derivative = trim_enclosing_parentheses(derivative.trim());
+
+    if let Some(row) = parse_scratch_derivative_axis(derivative, kind, expected_axis) {
+        return Some(ScaledScratchDerivativeRow {
+            row,
+            scale: "1.0".to_string(),
+        });
+    }
+
+    if let Some(rest) = derivative.strip_prefix('-') {
+        let rest = trim_enclosing_parentheses(rest.trim());
+        if let Some(row) = parse_scratch_derivative_axis(rest, kind, expected_axis) {
+            return Some(ScaledScratchDerivativeRow {
+                row,
+                scale: "-1.0".to_string(),
+            });
+        }
+    }
+
+    let (left, right) = split_top_level_multiplication(derivative)?;
+    let left = trim_enclosing_parentheses(left.trim());
+    let right = trim_enclosing_parentheses(right.trim());
+    if let Some(row) = parse_scratch_derivative_axis(left, kind, expected_axis) {
+        return Some(ScaledScratchDerivativeRow {
+            row,
+            scale: normalize_scale_expr(right),
+        });
+    }
+    if let Some(row) = parse_scratch_derivative_axis(right, kind, expected_axis) {
+        return Some(ScaledScratchDerivativeRow {
+            row,
+            scale: normalize_scale_expr(left),
+        });
+    }
+    None
+}
+
+fn split_top_level_multiplication(expr: &str) -> Option<(&str, &str)> {
+    let mut depth = 0usize;
+    for (index, ch) in expr.char_indices() {
+        match ch {
+            '(' => depth = depth.saturating_add(1),
+            ')' => depth = depth.saturating_sub(1),
+            '*' if depth == 0 => return Some((&expr[..index], &expr[index + 1..])),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn trim_enclosing_parentheses(mut expr: &str) -> &str {
+    loop {
+        let trimmed = expr.trim();
+        if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
+            return trimmed;
+        }
+        let mut depth = 0usize;
+        let mut encloses_all = true;
+        for (index, ch) in trimmed.char_indices() {
+            match ch {
+                '(' => depth = depth.saturating_add(1),
+                ')' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 && index + ch.len_utf8() < trimmed.len() {
+                        encloses_all = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !encloses_all || depth != 0 {
+            return trimmed;
+        }
+        expr = &trimmed[1..trimmed.len() - 1];
+    }
+}
+
+fn normalize_scale_expr(expr: &str) -> String {
+    trim_enclosing_parentheses(expr.trim()).to_string()
+}
+
+fn scaled_stamp_factor(base: &str, scale: &str) -> String {
+    match scale.trim() {
+        "1.0" => base.to_string(),
+        "-1.0" => format!("-({base})"),
+        scale => format!("({base}) * ({scale})"),
+    }
 }
 
 fn emit_indexed_dense_derivative_arrays(
@@ -42948,6 +43133,7 @@ fn is_inline_derivative_expr(derivative: &str) -> bool {
         || derivative == "-1.0"
         || is_generated_scratch_derivative_access(derivative)
         || is_dynamic_operator_scaled_inline_derivative_expr(derivative)
+        || is_scaled_generated_scratch_derivative_access(derivative)
         || is_simple_inline_operand(derivative)
         || is_negated_simple_inline_operand(derivative)
         || is_rust_identifier(derivative)
@@ -43028,6 +43214,25 @@ fn is_simple_numeric_literal(value: &str) -> bool {
         && value.parse::<f64>().is_ok()
 }
 
+fn is_scaled_generated_scratch_derivative_access(value: &str) -> bool {
+    let value = trim_enclosing_parentheses(value.trim());
+    let Some((left, right)) = split_top_level_multiplication(value) else {
+        return false;
+    };
+    let left = trim_enclosing_parentheses(left.trim());
+    let right = trim_enclosing_parentheses(right.trim());
+    (is_generated_scratch_derivative_access(left) && is_simple_scaled_derivative_factor(right))
+        || (is_simple_scaled_derivative_factor(left)
+            && is_generated_scratch_derivative_access(right))
+}
+
+fn is_simple_scaled_derivative_factor(value: &str) -> bool {
+    let value = value.trim();
+    is_rust_identifier(value)
+        || is_simple_generated_access(value)
+        || is_simple_numeric_literal(value)
+}
+
 fn is_rust_identifier(value: &str) -> bool {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
@@ -43058,7 +43263,7 @@ fn branch_derivative_axis_count(
 mod dense_derivative_ref_tests {
     use super::{
         ScratchDerivativeKind, ScratchDerivativeRow, direct_scratch_derivative_row,
-        emit_dense_derivative_refs,
+        emit_dense_derivative_refs, is_inline_derivative_expr,
     };
 
     fn strings(values: &[&str]) -> Vec<String> {
@@ -43075,12 +43280,18 @@ mod dense_derivative_ref_tests {
         let branch_derivatives = strings(&["scratch.branch_derivatives[4][0]"]);
         let mut out = String::new();
 
-        let refs =
-            emit_dense_derivative_refs(&mut out, "eq0", &node_derivatives, &branch_derivatives);
+        let refs = emit_dense_derivative_refs(
+            &mut out,
+            "eq0",
+            &node_derivatives,
+            &branch_derivatives,
+            true,
+        );
 
         assert!(out.is_empty());
         assert_eq!(refs.node_ref, "&scratch.node_derivatives[17]");
         assert_eq!(refs.branch_ref, "&scratch.branch_derivatives[4]");
+        assert_eq!(refs.scale, "1.0");
     }
 
     #[test]
@@ -43109,12 +43320,94 @@ mod dense_derivative_ref_tests {
         let branch_derivatives = strings(&["scratch.branch_derivatives[4][0] + 1.0"]);
         let mut out = String::new();
 
-        let refs =
-            emit_dense_derivative_refs(&mut out, "eq1", &node_derivatives, &branch_derivatives);
+        let refs = emit_dense_derivative_refs(
+            &mut out,
+            "eq1",
+            &node_derivatives,
+            &branch_derivatives,
+            true,
+        );
 
         assert!(out.contains("let eq1_node_derivatives: [f64; 2]"));
         assert!(out.contains("let eq1_branch_derivatives: [f64; 1]"));
         assert_eq!(refs.node_ref, "&eq1_node_derivatives");
         assert_eq!(refs.branch_ref, "&eq1_branch_derivatives");
+        assert_eq!(refs.scale, "1.0");
+    }
+
+    #[test]
+    fn dense_derivative_refs_fold_uniform_scratch_row_scale() {
+        let node_derivatives = strings(&[
+            "(s.dn[12][0] * ddt_scale)",
+            "(s.dn[12][1] * ddt_scale)",
+            "(s.dn[12][2] * ddt_scale)",
+        ]);
+        let branch_derivatives = strings(&["(s.db[4][0] * ddt_scale)", "(s.db[4][1] * ddt_scale)"]);
+        let mut out = String::new();
+
+        let refs = emit_dense_derivative_refs(
+            &mut out,
+            "eq_scaled",
+            &node_derivatives,
+            &branch_derivatives,
+            true,
+        );
+
+        assert!(out.is_empty());
+        assert_eq!(refs.node_ref, "&s.dn[12]");
+        assert_eq!(refs.branch_ref, "&s.db[4]");
+        assert_eq!(refs.scale, "ddt_scale");
+    }
+
+    #[test]
+    fn dense_derivative_refs_support_left_scaled_scratch_rows() {
+        let node_derivatives = strings(&["(p.p32 * s.dn[15][0])", "(p.p32 * s.dn[15][1])"]);
+        let branch_derivatives: Vec<String> = Vec::new();
+        let mut out = String::new();
+
+        let refs = emit_dense_derivative_refs(
+            &mut out,
+            "eq_left_scaled",
+            &node_derivatives,
+            &branch_derivatives,
+            true,
+        );
+
+        assert!(out.is_empty());
+        assert_eq!(refs.node_ref, "&s.dn[15]");
+        assert_eq!(refs.branch_ref, "&[]");
+        assert_eq!(refs.scale, "p.p32");
+    }
+
+    #[test]
+    fn inline_derivative_expr_preserves_scaled_scratch_rows() {
+        assert!(is_inline_derivative_expr(
+            "(scratch.node_derivatives[12][0] * ddt_scale)"
+        ));
+        assert!(is_inline_derivative_expr(
+            "(params.p32 * scratch.branch_derivatives[4][1])"
+        ));
+        assert!(!is_inline_derivative_expr(
+            "(scratch.node_derivatives[12][0] * expensive_scale())"
+        ));
+    }
+
+    #[test]
+    fn dense_derivative_refs_keep_scaled_rows_disabled_for_potentials() {
+        let node_derivatives = strings(&["(s.dn[12][0] * ddt_scale)"]);
+        let branch_derivatives: Vec<String> = Vec::new();
+        let mut out = String::new();
+
+        let refs = emit_dense_derivative_refs(
+            &mut out,
+            "eq_potential",
+            &node_derivatives,
+            &branch_derivatives,
+            false,
+        );
+
+        assert!(out.contains("let eq_potential_node_derivatives: [f64; 1]"));
+        assert_eq!(refs.node_ref, "&eq_potential_node_derivatives");
+        assert_eq!(refs.scale, "1.0");
     }
 }

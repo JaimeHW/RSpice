@@ -2702,6 +2702,7 @@ fn is_inline_derivative_expr(derivative: &str) -> bool {
         || is_negative_one_derivative(derivative)
         || is_generated_scratch_derivative_access(derivative)
         || is_dynamic_operator_scaled_inline_derivative_expr(derivative)
+        || is_scaled_generated_scratch_derivative_access(derivative)
         || is_simple_inline_operand(derivative)
         || is_negated_simple_inline_operand(derivative)
         || is_rust_identifier(derivative)
@@ -2775,6 +2776,88 @@ fn is_simple_numeric_literal(value: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'.' | b'e' | b'E' | b'+' | b'-'))
         && value.parse::<f64>().is_ok()
+}
+
+fn is_scaled_generated_scratch_derivative_access(value: &str) -> bool {
+    let value = trim_enclosing_parentheses(value.trim());
+    let Some((left, right)) = split_top_level_multiplication(value) else {
+        return false;
+    };
+    let left = trim_enclosing_parentheses(left.trim());
+    let right = trim_enclosing_parentheses(right.trim());
+    (is_generated_scratch_derivative_access(left) && is_simple_scaled_derivative_factor(right))
+        || (is_simple_scaled_derivative_factor(left)
+            && is_generated_scratch_derivative_access(right))
+}
+
+fn split_top_level_multiplication(expr: &str) -> Option<(&str, &str)> {
+    let mut depth = 0usize;
+    for (index, ch) in expr.char_indices() {
+        match ch {
+            '(' => depth = depth.saturating_add(1),
+            ')' => depth = depth.saturating_sub(1),
+            '*' if depth == 0 => return Some((&expr[..index], &expr[index + 1..])),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn trim_enclosing_parentheses(mut expr: &str) -> &str {
+    loop {
+        let trimmed = expr.trim();
+        if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
+            return trimmed;
+        }
+        let mut depth = 0usize;
+        let mut encloses_all = true;
+        for (index, ch) in trimmed.char_indices() {
+            match ch {
+                '(' => depth = depth.saturating_add(1),
+                ')' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 && index + ch.len_utf8() < trimmed.len() {
+                        encloses_all = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !encloses_all || depth != 0 {
+            return trimmed;
+        }
+        expr = &trimmed[1..trimmed.len() - 1];
+    }
+}
+
+fn is_simple_scaled_derivative_factor(value: &str) -> bool {
+    let value = value.trim();
+    is_rust_identifier(value)
+        || is_simple_generated_access(value)
+        || is_simple_numeric_literal(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_inline_derivative_expr;
+
+    #[test]
+    fn inline_derivative_expr_accepts_scaled_scratch_rows() {
+        assert!(is_inline_derivative_expr(
+            "(scratch.node_derivatives[12][0] * ddt_scale)"
+        ));
+        assert!(is_inline_derivative_expr(
+            "(params.p32 * scratch.branch_derivatives[4][1])"
+        ));
+    }
+
+    #[test]
+    fn inline_derivative_expr_rejects_expensive_scaled_scratch_rows() {
+        assert!(!is_inline_derivative_expr(
+            "(scratch.node_derivatives[12][0] * expensive_scale())"
+        ));
+    }
 }
 
 fn scaled_derivative_expr(derivative: &str, scale: &str) -> String {
