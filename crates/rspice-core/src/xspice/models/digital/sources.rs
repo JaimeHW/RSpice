@@ -305,9 +305,9 @@ fn d_source_row_indices(rows: &[DSourceRow], time: Value) -> (Option<usize>, Opt
     (active, None)
 }
 
-fn d_source_set_output(ctx: &mut CmContext, values: Vec<DigitalValue>, delay: Value) {
+fn d_source_set_output(ctx: &mut CmContext, values: &[DigitalValue], delay: Value) {
     if !values.is_empty() {
-        ctx.set_output_digital_vector("out", values, delay);
+        ctx.set_output_digital_vector_from_slice("out", values, delay);
     }
 }
 
@@ -319,7 +319,7 @@ fn d_source_set_row_state(ctx: &mut CmContext, index: usize, value: i64) {
 
 fn d_source_set_unknown_output(ctx: &mut CmContext, width: usize) {
     let value = DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined);
-    d_source_set_output(ctx, vec![value; width], 0.0);
+    ctx.set_output_digital_vector("out", vec![value; width], 0.0);
 }
 
 impl CodeModel for DigitalSource {
@@ -386,7 +386,7 @@ impl CodeModel for DigitalSource {
         if let Some(idx) = active_idx {
             if emitted_row != idx as i64 {
                 let row = &rows[idx];
-                d_source_set_output(ctx, row.values.clone(), row.time - ctx.time);
+                d_source_set_output(ctx, &row.values, row.time - ctx.time);
                 d_source_set_row_state(ctx, D_SOURCE_EMITTED_ROW, idx as i64);
             }
         } else if emitted_row != D_SOURCE_BEFORE_FIRST_ROW {
@@ -397,7 +397,7 @@ impl CodeModel for DigitalSource {
         if let Some(idx) = next_idx {
             if scheduled_row != idx as i64 {
                 let row = &rows[idx];
-                d_source_set_output(ctx, row.values.clone(), row.time - ctx.time);
+                d_source_set_output(ctx, &row.values, row.time - ctx.time);
                 d_source_set_row_state(ctx, D_SOURCE_SCHEDULED_ROW, idx as i64);
             }
         } else if scheduled_row != D_SOURCE_NO_ROW {
@@ -798,9 +798,12 @@ fn d_state_contiguous_range(table: &DStateTable, state: i64) -> Option<(usize, u
     }
 }
 
-fn d_state_outputs(table: &DStateTable, state: i64) -> Option<Vec<DigitalValue>> {
+fn d_state_outputs(table: &DStateTable, state: i64) -> Option<&[DigitalValue]> {
     let (start, _) = d_state_contiguous_range(table, state)?;
-    table.transitions.get(start).map(|row| row.outputs.clone())
+    table
+        .transitions
+        .get(start)
+        .map(|row| row.outputs.as_slice())
 }
 
 fn d_state_next(table: &DStateTable, state: i64, inputs: &[DigitalValue]) -> Option<i64> {
@@ -896,7 +899,7 @@ impl CodeModel for DigitalStateMachine {
             let Some(outputs) = d_state_outputs(&table, reset_state) else {
                 return Ok(());
             };
-            ctx.set_output_digital_vector("out", outputs, 0.0);
+            ctx.set_output_digital_vector_from_slice("out", outputs, 0.0);
             return Ok(());
         }
 
@@ -912,7 +915,7 @@ impl CodeModel for DigitalStateMachine {
             if reset_state_code == 1 {
                 current_state = reset_state;
                 if let Some(outputs) = d_state_outputs(&table, current_state) {
-                    ctx.set_output_digital_vector("out", outputs, reset_delay);
+                    ctx.set_output_digital_vector_from_slice("out", outputs, reset_delay);
                 } else {
                     d_state_set_int_state(ctx, 1, current_state);
                     d_state_set_int_state(ctx, 2, clk_state);
@@ -925,7 +928,7 @@ impl CodeModel for DigitalStateMachine {
             if let Some(next_state) = d_state_next(&table, current_state, inputs) {
                 current_state = next_state;
                 if let Some(outputs) = d_state_outputs(&table, current_state) {
-                    ctx.set_output_digital_vector("out", outputs, clk_delay);
+                    ctx.set_output_digital_vector_from_slice("out", outputs, clk_delay);
                 } else {
                     d_state_set_int_state(ctx, 1, current_state);
                     d_state_set_int_state(ctx, 2, clk_state);
@@ -1281,7 +1284,10 @@ mod tests {
             None,
             "non-contiguous active state rows must not participate in transition matching"
         );
-        assert_eq!(d_state_outputs(&table, 1), Some(vec![DigitalValue::zero()]));
+        assert_eq!(
+            d_state_outputs(&table, 1),
+            Some(&[DigitalValue::zero()][..])
+        );
 
         unregister_test_data_file(state_file);
     }
@@ -1296,7 +1302,7 @@ mod tests {
 
         let table = parse_d_state_file(state_file, 1, 1).expect("state table parses");
 
-        assert_eq!(d_state_outputs(&table, 1), Some(vec![DigitalValue::one()]));
+        assert_eq!(d_state_outputs(&table, 1), Some(&[DigitalValue::one()][..]));
         assert_eq!(d_state_next(&table, 1, &[DigitalValue::zero()]), Some(2));
 
         unregister_test_data_file(state_file);
@@ -1325,7 +1331,7 @@ mod tests {
         );
         assert_eq!(
             d_state_outputs(&table, 2),
-            Some(vec![DigitalValue::one()]),
+            Some(&[DigitalValue::one()][..]),
             "missing states keep ngspice's first-row fallback"
         );
 

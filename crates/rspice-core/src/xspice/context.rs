@@ -1048,6 +1048,38 @@ impl CmContext {
         });
     }
 
+    /// Set digital vector output from borrowed values.
+    pub fn set_output_digital_vector_from_slice(
+        &mut self,
+        name: &str,
+        values: &[DigitalValue],
+        delay: Value,
+    ) {
+        if values.is_empty() {
+            return;
+        }
+
+        let event_values = values.to_vec();
+        match self.outputs.get_mut(name) {
+            Some(OutputValue::DigitalVector(existing)) => {
+                existing.clear();
+                existing.extend_from_slice(values);
+            }
+            _ => {
+                self.outputs.insert(
+                    name.to_string(),
+                    OutputValue::DigitalVector(event_values.clone()),
+                );
+            }
+        }
+        self.pending_events.push(PendingDigitalEvent {
+            port_name: name.to_string(),
+            start_index: 0,
+            values: event_values,
+            delay,
+        });
+    }
+
     /// Set real vector output value (schedules one event per connected element).
     pub fn set_output_real_vector(&mut self, name: &str, values: Vec<Value>, delay: Value) {
         self.outputs
@@ -1640,6 +1672,22 @@ mod tests {
         assert_eq!(ctx.output_vector("out"), vec![0.0, 9.0, 0.0]);
         assert_eq!(ctx.output_vector_prev("out"), vec![4.0, 5.0, 0.0]);
         assert_eq!(ctx.partial_vector("out"), vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn digital_vector_slice_setter_reuses_output_and_schedules_event() {
+        let mut ctx = CmContext::new();
+        ctx.set_output_digital_vector("out", vec![DigitalValue::zero(), DigitalValue::one()], 0.0);
+        ctx.take_pending_events();
+
+        let values = [DigitalValue::one(), DigitalValue::unknown()];
+        ctx.set_output_digital_vector_from_slice("out", &values, 2.0e-9);
+
+        assert_eq!(ctx.output_digital_vector("out"), values);
+        let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].values, values);
+        assert_eq!(events[0].delay, 2.0e-9);
     }
 
     #[test]
