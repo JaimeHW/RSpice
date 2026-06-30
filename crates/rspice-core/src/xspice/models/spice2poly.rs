@@ -220,6 +220,17 @@ fn poly_plan_signature(ctx: &CmContext, input_count: usize) -> CmResult<PolyPlan
     })
 }
 
+fn poly_plan_signature_matches(
+    ctx: &CmContext,
+    signature: &PolyPlanSignature,
+    input_count: usize,
+) -> bool {
+    signature.input_count == input_count
+        && ctx
+            .real_vector_param("coef")
+            .is_some_and(|coef| coef == signature.coef.as_slice())
+}
+
 fn build_poly_plan(input_count: usize, coef: &[Value]) -> CmResult<Arc<PolyPlan>> {
     validate_coef(coef)?;
 
@@ -240,13 +251,13 @@ fn build_poly_plan(input_count: usize, coef: &[Value]) -> CmResult<Arc<PolyPlan>
 }
 
 fn cache_poly_plan(ctx: &mut CmContext, input_count: usize) -> CmResult<Arc<PolyPlan>> {
-    let signature = poly_plan_signature(ctx, input_count)?;
     if let Some(resource) = ctx.resource::<PolyPlanResource>(POLY_PLAN_RESOURCE)
-        && resource.signature == signature
+        && poly_plan_signature_matches(ctx, &resource.signature, input_count)
     {
         return resource.plan.clone();
     }
 
+    let signature = poly_plan_signature(ctx, input_count)?;
     let plan = build_poly_plan(input_count, &signature.coef);
     ctx.set_resource(
         POLY_PLAN_RESOURCE,
@@ -259,13 +270,13 @@ fn cache_poly_plan(ctx: &mut CmContext, input_count: usize) -> CmResult<Arc<Poly
 }
 
 fn poly_plan(ctx: &CmContext, input_count: usize) -> CmResult<Arc<PolyPlan>> {
-    let signature = poly_plan_signature(ctx, input_count)?;
     if let Some(resource) = ctx.resource::<PolyPlanResource>(POLY_PLAN_RESOURCE)
-        && resource.signature == signature
+        && poly_plan_signature_matches(ctx, &resource.signature, input_count)
     {
         return resource.plan.clone();
     }
 
+    let signature = poly_plan_signature(ctx, input_count)?;
     build_poly_plan(input_count, &signature.coef)
 }
 
