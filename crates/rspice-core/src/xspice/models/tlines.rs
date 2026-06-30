@@ -1004,7 +1004,7 @@ fn tline_has_delayed_sample(ctx: &CmContext) -> bool {
     };
     ctx.time > delay
         && ctx
-            .transient_history_at_or_after("tline", ctx.time - delay)
+            .transient_history_values_at_or_after("tline", ctx.time - delay)
             .is_some()
 }
 
@@ -1025,7 +1025,7 @@ fn tline_delayed_outputs(
 ) -> Option<(Value, Value)> {
     let i1 = ctx.input("in");
     let i2 = ctx.input("out");
-    if let Some(values) = ctx.transient_history_at_or_after("tline", ctx.time - delay)
+    if let Some(values) = ctx.transient_history_values_at_or_after("tline", ctx.time - delay)
         && values.len() >= 4
     {
         let delayed_v1 = values[0];
@@ -1145,7 +1145,7 @@ fn mlin_has_delayed_sample(ctx: &CmContext) -> bool {
     };
     ctx.time > delay
         && ctx
-            .transient_history_at_or_after("mlin", ctx.time - delay)
+            .transient_history_values_at_or_after("mlin", ctx.time - delay)
             .is_some()
 }
 
@@ -1162,7 +1162,7 @@ fn mlin_instant_outputs(ctx: &CmContext, impedance: Value) -> (Value, Value) {
 fn mlin_delayed_outputs(ctx: &CmContext, impedance: Value, delay: Value) -> Option<(Value, Value)> {
     let i1 = ctx.input("port1");
     let i2 = ctx.input("port2");
-    if let Some(values) = ctx.transient_history_at_or_after("mlin", ctx.time - delay)
+    if let Some(values) = ctx.transient_history_values_at_or_after("mlin", ctx.time - delay)
         && values.len() >= 4
     {
         let delayed_v1 = values[0];
@@ -1356,7 +1356,7 @@ fn cpline_has_delayed_sample(ctx: &CmContext) -> bool {
     };
     ctx.time > delay
         && ctx
-            .transient_history_at_or_after("cpline", ctx.time - delay)
+            .transient_history_values_at_or_after("cpline", ctx.time - delay)
             .is_some()
 }
 
@@ -1384,7 +1384,7 @@ fn cpline_instant_outputs(ctx: &CmContext, impedance: Value) -> [Value; 4] {
 }
 
 fn cpline_delayed_outputs(ctx: &CmContext, delay: Value) -> Option<[Value; 4]> {
-    let values = ctx.transient_history_at_or_after("cpline", ctx.time - delay)?;
+    let values = ctx.transient_history_values_at_or_after("cpline", ctx.time - delay)?;
     if values.len() < 8 {
         return None;
     }
@@ -1492,12 +1492,12 @@ fn cpmlin_has_delayed_sample(ctx: &CmContext) -> bool {
     };
     ctx.time > delay
         && ctx
-            .transient_history_at_or_after("cpmlin", ctx.time - delay)
+            .transient_history_values_at_or_after("cpmlin", ctx.time - delay)
             .is_some()
 }
 
 fn cpmlin_delayed_outputs(ctx: &CmContext, delay: Value) -> Option<[Value; 4]> {
-    let values = ctx.transient_history_at_or_after("cpmlin", ctx.time - delay)?;
+    let values = ctx.transient_history_values_at_or_after("cpmlin", ctx.time - delay)?;
     if values.len() < 8 {
         return None;
     }

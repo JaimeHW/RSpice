@@ -1335,17 +1335,23 @@ impl CmContext {
         prune_transient_history(history, time, retention_window);
     }
 
-    /// Return the first recorded sample at or after `time`.
-    pub fn transient_history_at_or_after(&self, key: &str, time: Value) -> Option<Vec<Value>> {
+    /// Return the first recorded sample values at or after `time`.
+    pub fn transient_history_values_at_or_after(&self, key: &str, time: Value) -> Option<&[Value]> {
         if !time.is_finite() {
             return None;
         }
         self.transient_histories.get(key).and_then(|history| {
-            history
-                .iter()
-                .find(|sample| sample.time > time || same_transient_time(sample.time, time))
-                .map(|sample| sample.values.clone())
+            let index = history.partition_point(|sample| {
+                sample.time < time && !same_transient_time(sample.time, time)
+            });
+            history.get(index).map(|sample| sample.values.as_slice())
         })
+    }
+
+    /// Return the first recorded sample at or after `time`.
+    pub fn transient_history_at_or_after(&self, key: &str, time: Value) -> Option<Vec<Value>> {
+        self.transient_history_values_at_or_after(key, time)
+            .map(<[Value]>::to_vec)
     }
 
     /// Advance state for new timestep
@@ -1534,6 +1540,10 @@ mod tests {
         assert_eq!(
             ctx.transient_history_at_or_after("line", 2.0),
             Some(vec![2.5])
+        );
+        assert_eq!(
+            ctx.transient_history_values_at_or_after("line", 2.0),
+            Some([2.5].as_slice())
         );
     }
 }
