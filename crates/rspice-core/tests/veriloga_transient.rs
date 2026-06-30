@@ -195,7 +195,7 @@ endmodule
     #[cfg(feature = "veriloga-native")]
     register_precompiled_veriloga_runtime_with_dependencies(
         &model_path,
-        &[model_path.clone()],
+        std::slice::from_ref(&model_path),
         compiled,
         canonical_ir,
     )

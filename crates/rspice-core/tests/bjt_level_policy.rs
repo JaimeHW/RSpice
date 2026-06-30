@@ -277,29 +277,27 @@ fn cmc_bjt_levels_fail_closed_as_veriloga_codegen_targets() {
 
 #[test]
 fn unsupported_advanced_bjt_level_is_rejected() {
-    for level in [235] {
-        let deck = op_deck(&format!(
-            ".model qmod NPN (LEVEL={level} VERSION=2.34 IS=1e-16 BF=100)"
-        ));
-        let message =
-            run(&deck).expect_err(&format!("unsupported LEVEL={level} must not run as VBIC"));
-        assert!(
-            message.contains("BJT"),
-            "error identifies the device family: {message}"
-        );
-        assert!(
-            message.contains(&format!("LEVEL={level}")),
-            "error names the unsupported level: {message}"
-        );
-        assert!(
-            message.contains("unsupported") || message.contains("no native implementation"),
-            "error explains the unsupported routing: {message}"
-        );
-        assert!(
-            message.contains("generated from Verilog-A") || message.contains("no native"),
-            "error should point to future generated support instead of fallback routing: {message}"
-        );
-    }
+    let level = 235;
+    let deck = op_deck(&format!(
+        ".model qmod NPN (LEVEL={level} VERSION=2.34 IS=1e-16 BF=100)"
+    ));
+    let message = run(&deck).expect_err(&format!("unsupported LEVEL={level} must not run as VBIC"));
+    assert!(
+        message.contains("BJT"),
+        "error identifies the device family: {message}"
+    );
+    assert!(
+        message.contains(&format!("LEVEL={level}")),
+        "error names the unsupported level: {message}"
+    );
+    assert!(
+        message.contains("unsupported") || message.contains("no native implementation"),
+        "error explains the unsupported routing: {message}"
+    );
+    assert!(
+        message.contains("generated from Verilog-A") || message.contains("no native"),
+        "error should point to future generated support instead of fallback routing: {message}"
+    );
 }
 
 #[test]

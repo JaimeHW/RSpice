@@ -3241,7 +3241,7 @@ fn hir_lowering_preserves_typed_analog_operator_slots() {
                     span,
                 })),
                 ic: None,
-                modulus: Some(Box::new(number(6.28, "6.28"))),
+                modulus: Some(Box::new(number(std::f64::consts::TAU, "6.28"))),
                 offset: None,
                 abstol: Some(Box::new(number(1e-9, "1e-9"))),
                 span,

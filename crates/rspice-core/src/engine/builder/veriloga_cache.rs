@@ -569,7 +569,8 @@ pub(super) fn persist_model_to_disk(
     // No disk in the browser build: the in-memory cache is the cache.
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (source_path, entry);
+        let _ = source_path;
+        let _ = entry.canonical_ir.as_ref();
         return Ok(());
     }
     #[cfg(not(target_arch = "wasm32"))]

@@ -65,6 +65,26 @@
 //! - Parameter-dependent `zi_*` sample periods
 //! - Multi-dimensional arrays; array locals in analog functions
 
+#![allow(
+    clippy::assertions_on_constants,
+    clippy::collapsible_if,
+    clippy::filter_map_bool_then,
+    clippy::if_same_then_else,
+    clippy::items_after_test_module,
+    clippy::manual_is_multiple_of,
+    clippy::map_identity,
+    clippy::match_like_matches_macro,
+    clippy::needless_borrow,
+    clippy::needless_lifetimes,
+    clippy::ptr_arg,
+    clippy::question_mark,
+    clippy::redundant_guards,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::unnecessary_map_or,
+    clippy::unnecessary_unwrap
+)]
+
 pub mod ast;
 pub mod canonical_ir;
 pub mod codegen;

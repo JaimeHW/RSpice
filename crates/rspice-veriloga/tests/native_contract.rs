@@ -3793,9 +3793,8 @@ fn native_static_conditions_control_potential_branch_activation() {
 fn native_static_condition_rejects_dynamic_guard_bytecode_without_fallback() {
     let mut model = static_condition_model();
     for program in &mut model.stamp_programs {
-        if program.static_condition.is_some() {
-            program.static_condition.as_mut().unwrap().instructions =
-                vec![Instruction::PushVoltage(0, 1)];
+        if let Some(static_condition) = program.static_condition.as_mut() {
+            static_condition.instructions = vec![Instruction::PushVoltage(0, 1)];
         }
     }
 

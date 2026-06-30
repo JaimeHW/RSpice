@@ -410,31 +410,30 @@ fn unsupported_mos_levels_reject_even_with_simplified_mos_opt_in() {
 
 #[test]
 fn unsupported_ekv3_cards_ignore_simplified_mos_escape_hatch() {
-    for (level, family) in [(301, "EKV3")] {
-        let deck = op_deck(
-            &format!(".model nmod NMOS (LEVEL={level} VTH0=0.5 TOXE=1.4n NDEP=3e18)"),
-            ".options allow_simplified_mos=1",
-        );
-        let message = match run(&deck) {
-            Ok(()) => panic!("{family} LEVEL={level} unsupported card must remain fail-closed"),
-            Err(message) => message,
-        };
+    let (level, family) = (301, "EKV3");
+    let deck = op_deck(
+        &format!(".model nmod NMOS (LEVEL={level} VTH0=0.5 TOXE=1.4n NDEP=3e18)"),
+        ".options allow_simplified_mos=1",
+    );
+    let message = match run(&deck) {
+        Ok(()) => panic!("{family} LEVEL={level} unsupported card must remain fail-closed"),
+        Err(message) => message,
+    };
 
-        assert!(
-            message.contains(&format!("LEVEL={level}")) || message.contains(family),
-            "{family} error should identify the known advanced level: {message}"
-        );
-        assert!(
-            message.contains("unsupported EKV3")
-                || message.contains("does not support model parameter")
-                || message.contains("remain fail-closed"),
-            "{family} error should describe unsupported native slice coverage: {message}"
-        );
-        assert!(
-            !message.contains("allow_simplified_mos"),
-            "{family} must not suggest or use the simplified MOS escape hatch: {message}"
-        );
-    }
+    assert!(
+        message.contains(&format!("LEVEL={level}")) || message.contains(family),
+        "{family} error should identify the known advanced level: {message}"
+    );
+    assert!(
+        message.contains("unsupported EKV3")
+            || message.contains("does not support model parameter")
+            || message.contains("remain fail-closed"),
+        "{family} error should describe unsupported native slice coverage: {message}"
+    );
+    assert!(
+        !message.contains("allow_simplified_mos"),
+        "{family} must not suggest or use the simplified MOS escape hatch: {message}"
+    );
 }
 
 #[test]

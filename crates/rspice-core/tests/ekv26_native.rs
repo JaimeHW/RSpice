@@ -419,10 +419,12 @@ R1 1 0 1MEG
     ];
 
     let netlist = Netlist::parse(deck).expect("EKV26 inverter transient deck parses");
-    let mut config = SimulationConfig::default();
-    config.locked_time_grid = Some(Arc::new(
-        reference.iter().skip(1).map(|row| row.0).collect(),
-    ));
+    let config = SimulationConfig {
+        locked_time_grid: Some(Arc::new(
+            reference.iter().skip(1).map(|row| row.0).collect(),
+        )),
+        ..SimulationConfig::default()
+    };
     let result = Engine::new(config)
         .run_tran(&netlist, 5.0e-6, 10.0e-9)
         .expect("native EKV26 inverter transient solves");
@@ -468,10 +470,12 @@ fn ekv26_level260_gate_displacement_current_matches_xyce26_charge_oracle() {
          .end\n"
     );
     let netlist = Netlist::parse(&deck).expect("EKV26 gate-current transient deck parses");
-    let mut config = SimulationConfig::default();
-    config.locked_time_grid = Some(Arc::new(
-        (1..=400).map(|idx| idx as f64 * 0.05e-9).collect(),
-    ));
+    let config = SimulationConfig {
+        locked_time_grid: Some(Arc::new(
+            (1..=400).map(|idx| idx as f64 * 0.05e-9).collect(),
+        )),
+        ..SimulationConfig::default()
+    };
     let result = Engine::new(config)
         .run_tran(&netlist, 20.0e-9, 0.05e-9)
         .expect("native EKV26 gate-current transient solves");

@@ -1334,31 +1334,30 @@ fn inverter_ac_response_with_cvchargemod2_matches_ngspice_nonzero_path() {
 
 #[test]
 fn cvchargemod_outside_supported_integer_set_is_rejected_for_ac() {
-    for selector in ["2.5"] {
-        let models = models45().replace(
-            ".model n45 nmos level=54 version=4.8",
-            &format!(".model n45 nmos level=54 version=4.8 cvchargemod={selector}"),
-        );
-        let deck = format!(
-            "* bsim4 unsupported cvchargemod ac\n\
-             vdd vdd 0 dc 1.1\n\
-             vin in 0 dc 0.45 ac 1\n\
-             {}\
-             cl out 0 10f\n\
-             {models}\n\
-             .end\n",
-            inverter_pair("1", "in", "out"),
-        );
-        let netlist = Netlist::parse(&deck).expect("deck parses");
-        let err = engine()
-            .run_ac(&netlist, &[1.0e6])
-            .expect_err("unsupported CVCHARGEMOD should reject AC");
-        let message = err.to_string();
-        assert!(
-            message.contains("CVCHARGEMOD"),
-            "CVCHARGEMOD={selector}: unexpected error: {message}"
-        );
-    }
+    let selector = "2.5";
+    let models = models45().replace(
+        ".model n45 nmos level=54 version=4.8",
+        &format!(".model n45 nmos level=54 version=4.8 cvchargemod={selector}"),
+    );
+    let deck = format!(
+        "* bsim4 unsupported cvchargemod ac\n\
+         vdd vdd 0 dc 1.1\n\
+         vin in 0 dc 0.45 ac 1\n\
+         {}\
+         cl out 0 10f\n\
+         {models}\n\
+         .end\n",
+        inverter_pair("1", "in", "out"),
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let err = engine()
+        .run_ac(&netlist, &[1.0e6])
+        .expect_err("unsupported CVCHARGEMOD should reject AC");
+    let message = err.to_string();
+    assert!(
+        message.contains("CVCHARGEMOD"),
+        "CVCHARGEMOD={selector}: unexpected error: {message}"
+    );
 }
 
 #[test]

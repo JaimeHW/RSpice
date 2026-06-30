@@ -485,10 +485,10 @@ mod tests {
     #[test]
     fn expected_unsupported_contract_accepts_named_unsupported_feature() {
         let (root, deck_path) = expected_unsupported_fixture(
-            "xspice/digital/d_source.cir",
-            "digital source deck
-a_source [a1] d_source1
-.model d_source1 d_source (input_file=\"stimulus.txt\")
+            "xspice/digital/d_rom.cir",
+            "digital rom deck
+a_rom [a1 a2] sel [o1 o2] d_rom1
+.model d_rom1 d_rom (input_file=\"rom.txt\")
 .end
 ",
         );

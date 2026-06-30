@@ -151,6 +151,7 @@ rmon mon 0 1meg
 }
 
 #[test]
+#[allow(clippy::approx_constant)]
 fn seegen_clamps_particle_angle_to_official_limits_like_ngspice() {
     let deck = "\
 * XSPICE seegen angle clamp oracle

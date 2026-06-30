@@ -376,7 +376,7 @@ fn hfet2_level6_eta2_density_branch_matches_ngspice46() {
         result
             .branch_current_named("vds")
             .expect("Vds branch current"),
-        -9.094_865_075_118_599e-5,
+        -9.094_865_075_118_6e-5,
         1.0e-5,
         1.0e-11,
     );

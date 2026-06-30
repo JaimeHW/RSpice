@@ -316,7 +316,7 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n");
-    out.push_str("\n");
+    out.push('\n');
     out.push_str(
         "    pub fn stamp(&mut self, ctx: &super::GeneratedEvalContext<'_>, stamper: &mut super::GeneratedStamper<'_>) {\n",
     );
@@ -336,7 +336,7 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n");
-    out.push_str("\n");
+    out.push('\n');
     out.push_str(
         "    pub fn set_timepoint(&mut self, time: crate::Value, timestep: crate::Value, ddt_coefficients: super::GeneratedDdtCoefficients) {\n",
     );
@@ -353,7 +353,7 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n");
-    out.push_str("\n");
+    out.push('\n');
     out.push_str("    pub fn accept_timestep(&mut self) {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");
@@ -368,7 +368,7 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n");
-    out.push_str("\n");
+    out.push('\n');
     out.push_str(
         "    pub fn stamp_reactive(&mut self, ctx: &super::GeneratedEvalContext<'_>, stamper: &mut super::GeneratedReactiveStamper<'_>) {\n",
     );
@@ -398,7 +398,7 @@ fn write_registry(
     out.push_str("pub fn builtin_names() -> &'static [&'static str] {\n");
     out.push_str("    BUILTIN_NAMES\n");
     out.push_str("}\n");
-    out.push_str("\n");
+    out.push('\n');
     out.push_str("pub fn node_count(model_name: &str) -> Option<usize> {\n");
     out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
     for (device, registry_name) in devices.iter().zip(&registry_model_names) {
