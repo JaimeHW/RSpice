@@ -12,6 +12,7 @@ use std::sync::{Arc, OnceLock};
 
 const XFER_TABLE_RESOURCE: &str = "xspice.xfer.table";
 const SXFER_COEFFICIENT_RESOURCE: &str = "xspice.s_xfer.coefficients";
+const SXFER_TRANSIENT_SYSTEM_RESOURCE: &str = "xspice.s_xfer.transient_system";
 
 #[derive(Debug, Clone)]
 struct XferPoint {
@@ -60,6 +61,33 @@ struct SXferCoefficientSignature {
 struct SXferCoefficientResource {
     signature: SXferCoefficientSignature,
     coefficients: Option<Arc<SXferCoefficients>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct SXferTransientSystemSignature {
+    timestep: Value,
+    numerator: Vec<Value>,
+    denominator: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct LinearFactorization {
+    lu: Vec<Vec<Value>>,
+    pivots: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+struct SXferTransientSystem {
+    feedthrough: Value,
+    remainder: Vec<Value>,
+    factorization: LinearFactorization,
+    sensitivity: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct SXferTransientSystemResource {
+    signature: SXferTransientSystemSignature,
+    system: CmResult<Arc<SXferTransientSystem>>,
 }
 
 fn transfer_ports() -> &'static [PortSpec] {
@@ -688,8 +716,9 @@ fn s_xfer_feedthrough_and_remainder(coefficients: &SXferCoefficients) -> (Value,
     (feedthrough, remainder)
 }
 
-fn solve_linear_system(mut matrix: Vec<Vec<Value>>, mut rhs: Vec<Value>) -> Option<Vec<Value>> {
-    let n = rhs.len();
+fn factor_linear_system(mut matrix: Vec<Vec<Value>>) -> Option<LinearFactorization> {
+    let n = matrix.len();
+    let mut pivots = Vec::with_capacity(n);
     for pivot_col in 0..n {
         let mut pivot_row = pivot_col;
         let mut pivot_abs = matrix[pivot_col][pivot_col].abs();
@@ -705,31 +734,63 @@ fn solve_linear_system(mut matrix: Vec<Vec<Value>>, mut rhs: Vec<Value>) -> Opti
         }
         if pivot_row != pivot_col {
             matrix.swap(pivot_row, pivot_col);
-            rhs.swap(pivot_row, pivot_col);
         }
+        pivots.push(pivot_row);
 
         let pivot = matrix[pivot_col][pivot_col];
         let pivot_values = matrix[pivot_col].clone();
-        let pivot_rhs = rhs[pivot_col];
         for row_index in (pivot_col + 1)..n {
             let factor = matrix[row_index][pivot_col] / pivot;
-            matrix[row_index][pivot_col] = 0.0;
+            matrix[row_index][pivot_col] = factor;
             for (col, pivot_value) in pivot_values.iter().enumerate().skip(pivot_col + 1) {
                 matrix[row_index][col] -= factor * pivot_value;
             }
-            rhs[row_index] -= factor * pivot_rhs;
         }
+    }
+
+    Some(LinearFactorization { lu: matrix, pivots })
+}
+
+fn solve_factorized_system(
+    factorization: &LinearFactorization,
+    mut rhs: Vec<Value>,
+) -> Option<Vec<Value>> {
+    let n = rhs.len();
+    if factorization.lu.len() != n || factorization.pivots.len() != n {
+        return None;
+    }
+
+    for (pivot_col, pivot_row) in factorization.pivots.iter().copied().enumerate() {
+        if pivot_row >= n {
+            return None;
+        }
+        if pivot_row != pivot_col {
+            rhs.swap(pivot_col, pivot_row);
+        }
+    }
+
+    for row_index in 0..n {
+        if factorization.lu[row_index].len() != n {
+            return None;
+        }
+        let lower_sum: Value = factorization.lu[row_index]
+            .iter()
+            .enumerate()
+            .take(row_index)
+            .map(|(col, value)| value * rhs[col])
+            .sum();
+        rhs[row_index] -= lower_sum;
     }
 
     let mut solution = vec![0.0; n];
     for row_index in (0..n).rev() {
-        let tail: Value = matrix[row_index]
+        let tail: Value = factorization.lu[row_index]
             .iter()
             .enumerate()
             .skip(row_index + 1)
             .map(|(col, value)| value * solution[col])
             .sum();
-        let pivot = matrix[row_index][row_index];
+        let pivot = factorization.lu[row_index][row_index];
         if pivot.abs() <= 1.0e-30 {
             return None;
         }
@@ -753,8 +814,68 @@ fn s_xfer_backward_euler_matrix(coefficients: &SXferCoefficients, dt: Value) -> 
     matrix
 }
 
+fn s_xfer_transient_system_signature(
+    coefficients: &SXferCoefficients,
+    timestep: Value,
+) -> SXferTransientSystemSignature {
+    SXferTransientSystemSignature {
+        timestep,
+        numerator: coefficients.numerator.clone(),
+        denominator: coefficients.denominator.clone(),
+    }
+}
+
+fn build_s_xfer_transient_system(
+    coefficients: &SXferCoefficients,
+    timestep: Value,
+) -> CmResult<Arc<SXferTransientSystem>> {
+    let matrix = s_xfer_backward_euler_matrix(coefficients, timestep);
+    let factorization = factor_linear_system(matrix).ok_or_else(|| {
+        CmError::EvaluationError("s_xfer transient state solve is singular".to_string())
+    })?;
+
+    let order = coefficients.denominator.len() - 1;
+    let mut sensitivity_rhs = vec![0.0; order];
+    sensitivity_rhs[order - 1] = timestep;
+    let sensitivity =
+        solve_factorized_system(&factorization, sensitivity_rhs).ok_or_else(|| {
+            CmError::EvaluationError("s_xfer transient sensitivity solve is singular".to_string())
+        })?;
+    let (feedthrough, remainder) = s_xfer_feedthrough_and_remainder(coefficients);
+
+    Ok(Arc::new(SXferTransientSystem {
+        feedthrough,
+        remainder,
+        factorization,
+        sensitivity,
+    }))
+}
+
+fn s_xfer_transient_system_for_context(
+    ctx: &mut CmContext,
+    coefficients: &SXferCoefficients,
+) -> CmResult<Arc<SXferTransientSystem>> {
+    let signature = s_xfer_transient_system_signature(coefficients, ctx.timestep);
+    if let Some(resource) =
+        ctx.resource::<SXferTransientSystemResource>(SXFER_TRANSIENT_SYSTEM_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.system.clone();
+    }
+
+    let system = build_s_xfer_transient_system(coefficients, ctx.timestep);
+    ctx.set_resource(
+        SXFER_TRANSIENT_SYSTEM_RESOURCE,
+        Arc::new(SXferTransientSystemResource {
+            signature,
+            system: system.clone(),
+        }),
+    );
+    system
+}
+
 fn s_xfer_transient_eval(
-    ctx: &CmContext,
+    ctx: &mut CmContext,
     coefficients: &SXferCoefficients,
 ) -> CmResult<(Vec<Value>, Value, Value)> {
     let order = coefficients.denominator.len() - 1;
@@ -778,31 +899,27 @@ fn s_xfer_transient_eval(
         return Ok((state, output, feedthrough * coefficients.gain));
     }
 
-    let matrix = s_xfer_backward_euler_matrix(coefficients, dt);
+    let system = s_xfer_transient_system_for_context(ctx, coefficients)?;
     let mut rhs: Vec<Value> = (0..order).map(|index| ctx.state_prev(index)).collect();
     rhs[order - 1] += dt * u;
-    let state = solve_linear_system(matrix.clone(), rhs).ok_or_else(|| {
+    let state = solve_factorized_system(&system.factorization, rhs).ok_or_else(|| {
         CmError::EvaluationError("s_xfer transient state solve is singular".to_string())
     })?;
 
-    let mut sensitivity_rhs = vec![0.0; order];
-    sensitivity_rhs[order - 1] = dt;
-    let sensitivity = solve_linear_system(matrix, sensitivity_rhs).ok_or_else(|| {
-        CmError::EvaluationError("s_xfer transient sensitivity solve is singular".to_string())
-    })?;
-
-    let output = remainder
+    let output = system
+        .remainder
         .iter()
         .zip(state.iter())
         .map(|(coefficient, value)| coefficient * value)
         .sum::<Value>()
-        + feedthrough * u;
-    let dy_du = remainder
+        + system.feedthrough * u;
+    let dy_du = system
+        .remainder
         .iter()
-        .zip(sensitivity.iter())
+        .zip(system.sensitivity.iter())
         .map(|(coefficient, value)| coefficient * value)
         .sum::<Value>()
-        + feedthrough;
+        + system.feedthrough;
     Ok((state, output, dy_du * coefficients.gain))
 }
 
@@ -1005,6 +1122,29 @@ mod tests {
             ctx.state(0) > 0.0,
             "accepted s_xfer evaluation should commit filter state"
         );
+    }
+
+    #[test]
+    fn s_xfer_transient_system_cache_reloads_when_timestep_or_coefficients_change() {
+        let mut ctx = first_order_lowpass_context();
+        let coefficients = s_xfer_coefficients(&ctx).expect("s_xfer coefficients");
+
+        let first =
+            s_xfer_transient_system_for_context(&mut ctx, &coefficients).expect("transient system");
+        let second = s_xfer_transient_system_for_context(&mut ctx, &coefficients)
+            .expect("cached transient system");
+        assert!(Arc::ptr_eq(&first, &second));
+
+        ctx.timestep = 0.5;
+        let larger_step = s_xfer_transient_system_for_context(&mut ctx, &coefficients)
+            .expect("retimed transient system");
+        assert!(!Arc::ptr_eq(&first, &larger_step));
+
+        ctx.set_real_vector_param("den_coeff", vec![2.0, 1.0]);
+        let changed_coefficients = s_xfer_coefficients(&ctx).expect("changed s_xfer coefficients");
+        let changed = s_xfer_transient_system_for_context(&mut ctx, &changed_coefficients)
+            .expect("coefficient-specific transient system");
+        assert!(!Arc::ptr_eq(&larger_step, &changed));
     }
 
     #[test]
