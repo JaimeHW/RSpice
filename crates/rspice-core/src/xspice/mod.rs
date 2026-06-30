@@ -56,7 +56,7 @@ mod traits;
 pub mod models;
 
 // Re-export primary types
-pub use context::{AnalysisType, CallType, CmContext, EvaluationPhase};
+pub use context::{AnalogValue, AnalysisType, CallType, CmContext, EvaluationPhase};
 pub use data_file::{clear_registered_data_files, register_data_file, unregister_data_file};
 pub use digital::{DigitalState, DigitalStrength, DigitalValue};
 pub use event::{Event, EventQueue, EventValue};

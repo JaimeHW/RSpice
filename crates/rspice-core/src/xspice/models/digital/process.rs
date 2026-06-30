@@ -83,11 +83,13 @@ fn next_unknown_input_bit(ctx: &mut CmContext) -> bool {
 }
 
 fn pack_input_bits(ctx: &mut CmContext, input_width: usize) -> Vec<u8> {
-    let inputs = ctx.input_digital_vector("in");
     let mut bytes = vec![0u8; packed_byte_len(input_width)];
 
     for bit_index in 0..input_width {
-        let value = inputs.get(bit_index).copied().unwrap_or_default();
+        let value = ctx
+            .input_digital_vector_values("in")
+            .and_then(|inputs| inputs.get(bit_index).copied())
+            .unwrap_or_default();
         let bit = match digital_state_code(value) {
             STATE_ZERO => false,
             STATE_ONE => true,

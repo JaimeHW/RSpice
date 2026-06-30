@@ -344,7 +344,7 @@ fn nco_param_min(ctx: &CmContext, name: &str, default: Value, min: Value) -> CmR
 }
 
 fn nco_note_index(ctx: &CmContext) -> usize {
-    let inputs = ctx.input_digital_vector("in");
+    let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
     let mut index = 0usize;
     let mut scale_factor = 64usize;
     for bit in 0..7 {
