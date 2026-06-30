@@ -145,6 +145,9 @@ pub struct Bsim4v8Op {
     pub von: Value,
     /// Saturation voltage (`BSIM4vdsat`).
     pub vdsat: Value,
+    /// BSIM4 `Vdsat` output slot as stored by Xyce/ngspice. This stays
+    /// separate from the internal I-V `vdsat` used by the drain-current path.
+    pub output_vdsat: Value,
     /// `Vdseff` (`BSIM4Vdseff`).
     pub vdseff: Value,
     /// `Vgsteff` of the DC path (`BSIM4Vgsteff`).
@@ -1219,6 +1222,7 @@ pub fn eval(
         dvdsat_dvd = (dt1_dvd - (t1 * dt1_dvd - t0 * dt2_dvd) / t3) / t0;
     }
     op.vdsat = vdsat;
+    op.output_vdsat = vdsat;
 
     // --- Calculate Vdseff (1716-1797) ---
     let t1 = vdsat - vds_c - p.delta;
@@ -2314,6 +2318,7 @@ pub fn eval(
     if model.tnoi_mod == 0 {
         let abulk_n = abulk0_q * p.abulk_cv_factor;
         let vdsat_n = vgsteff / abulk_n;
+        op.output_vdsat = vdsat_n;
         let t0 = vdsat_n - vds_c - DELTA_4;
         let t1 = (t0 * t0 + 4.0 * DELTA_4 * vdsat_n).sqrt();
         let mut vdseff_n;
@@ -2417,6 +2422,7 @@ pub fn eval(
             let dvdsat_dvg = 1.0 / abulk_cv;
             let vdsat = vgst_cv * dvdsat_dvg;
             let dvdsat_dvb = -(vdsat * dabulk_cv_dvb + dvth_cv_dvb) * dvdsat_dvg;
+            op.output_vdsat = vdsat;
 
             if model.xpart > 0.5 {
                 // 0/100 partition.

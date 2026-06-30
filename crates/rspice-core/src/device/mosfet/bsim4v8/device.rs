@@ -443,6 +443,7 @@ impl Bsim4v8Device {
         Value,
         Value,
         Value,
+        Value,
         &'static str,
     ) {
         let op = &self.op;
@@ -467,6 +468,7 @@ impl Bsim4v8Device {
             bias.vbs,
             op.von,
             op.vdsat,
+            op.output_vdsat,
             op.gm * self.multiplier,
             op.gds * self.multiplier,
             op.gmbs * self.multiplier,
