@@ -158,6 +158,7 @@ pub(crate) struct NativeProgram {
     max_stack_depth: usize,
     current_pair_dependencies: Vec<usize>,
     prior_current_dependencies: Vec<usize>,
+    branch_unknown_dependencies: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1541,11 +1542,13 @@ impl NativeProgram {
         current_pair_dependencies: Vec<usize>,
         prior_current_dependencies: Vec<usize>,
     ) -> Self {
+        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&ops);
         Self {
             ops,
             max_stack_depth,
             current_pair_dependencies,
             prior_current_dependencies,
+            branch_unknown_dependencies,
         }
     }
 
@@ -2204,12 +2207,14 @@ impl NativeProgram {
         let optimized_max_stack_depth =
             compute_native_max_stack_depth(model.clone(), entry_kind, &ops)?;
         debug_assert!(optimized_max_stack_depth <= max_stack_depth);
+        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&ops);
 
         Ok(Self {
             ops,
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies,
             prior_current_dependencies,
+            branch_unknown_dependencies,
         })
     }
 
@@ -2254,12 +2259,14 @@ impl NativeProgram {
         let optimized_max_stack_depth =
             compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
         debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
+        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
 
         Ok(Self {
             ops: lowerer.ops,
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies: lowerer.current_pair_dependencies,
             prior_current_dependencies: lowerer.prior_current_dependencies,
+            branch_unknown_dependencies,
         })
     }
 
@@ -2313,12 +2320,14 @@ impl NativeProgram {
         let optimized_max_stack_depth =
             compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
         debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
+        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
 
         Ok(Self {
             ops: lowerer.ops,
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies: lowerer.current_pair_dependencies,
             prior_current_dependencies: lowerer.prior_current_dependencies,
+            branch_unknown_dependencies,
         })
     }
 
@@ -2364,12 +2373,14 @@ impl NativeProgram {
         let optimized_max_stack_depth =
             compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
         debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
+        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
 
         Ok(Self {
             ops: lowerer.ops,
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies: lowerer.current_pair_dependencies,
             prior_current_dependencies: lowerer.prior_current_dependencies,
+            branch_unknown_dependencies,
         })
     }
 
@@ -2389,6 +2400,10 @@ impl NativeProgram {
         &self.prior_current_dependencies
     }
 
+    pub(crate) fn branch_unknown_dependencies(&self) -> &[usize] {
+        &self.branch_unknown_dependencies
+    }
+
     pub(crate) fn validate_dependency_metadata(&self) -> JitResult<()> {
         let current_pair_dependencies = collect_current_pair_dependencies(&self.ops);
         validate_dependency_list(
@@ -2402,6 +2417,13 @@ impl NativeProgram {
             "prior-current",
             &self.prior_current_dependencies,
             &prior_current_dependencies,
+        )?;
+
+        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&self.ops);
+        validate_dependency_list(
+            "branch-unknown",
+            &self.branch_unknown_dependencies,
+            &branch_unknown_dependencies,
         )
     }
 }
@@ -2420,6 +2442,16 @@ fn collect_prior_current_dependencies(ops: &[NativeOp]) -> Vec<usize> {
     let mut dependencies = Vec::new();
     for op in ops {
         if let NativeOp::LoadPriorCurrent(index) = *op {
+            push_unique_dependency(&mut dependencies, index);
+        }
+    }
+    dependencies
+}
+
+fn collect_branch_unknown_dependencies(ops: &[NativeOp]) -> Vec<usize> {
+    let mut dependencies = Vec::new();
+    for op in ops {
+        if let NativeOp::LoadBranchUnknown(index) = *op {
             push_unique_dependency(&mut dependencies, index);
         }
     }
@@ -7373,10 +7405,13 @@ mod tests {
                 NativeOp::LoadPriorCurrent(1),
                 NativeOp::LoadPriorCurrent(2),
                 NativeOp::LoadPriorCurrent(1),
+                NativeOp::LoadBranchUnknown(3),
+                NativeOp::LoadBranchUnknown(3),
             ],
             max_stack_depth: 5,
             current_pair_dependencies: vec![4],
             prior_current_dependencies: vec![1, 2],
+            branch_unknown_dependencies: vec![3],
         };
 
         program
@@ -7391,6 +7426,7 @@ mod tests {
             max_stack_depth: 1,
             current_pair_dependencies: Vec::new(),
             prior_current_dependencies: Vec::new(),
+            branch_unknown_dependencies: Vec::new(),
         };
 
         let err = program
@@ -7410,6 +7446,7 @@ mod tests {
             max_stack_depth: 1,
             current_pair_dependencies: Vec::new(),
             prior_current_dependencies: vec![0],
+            branch_unknown_dependencies: Vec::new(),
         };
 
         let err = program
@@ -7419,6 +7456,26 @@ mod tests {
         assert!(msg.contains("prior-current dependency metadata mismatch"));
         assert!(msg.contains("recorded [0]"));
         assert!(msg.contains("op stream requires []"));
+        assert!(msg.contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn native_program_dependency_metadata_rejects_missing_branch_unknown_load() {
+        let program = NativeProgram {
+            ops: vec![NativeOp::LoadBranchUnknown(2)],
+            max_stack_depth: 1,
+            current_pair_dependencies: Vec::new(),
+            prior_current_dependencies: Vec::new(),
+            branch_unknown_dependencies: Vec::new(),
+        };
+
+        let err = program
+            .validate_dependency_metadata()
+            .expect_err("missing branch-unknown dependency must fail native compile");
+        let msg = err.to_string();
+        assert!(msg.contains("branch-unknown dependency metadata mismatch"));
+        assert!(msg.contains("recorded []"));
+        assert!(msg.contains("op stream requires [2]"));
         assert!(msg.contains("no interpreter fallback"));
     }
 

@@ -33,16 +33,22 @@ pub(crate) struct NativeEntryOffsets {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct NativeCurrentDependencies {
+    pub static_condition_branch_unknowns: Vec<Vec<usize>>,
     pub stamp_values: Vec<Vec<usize>>,
     pub stamp_value_prior_currents: Vec<Vec<usize>>,
+    pub stamp_value_branch_unknowns: Vec<Vec<usize>>,
     pub jacobians: Vec<Vec<Vec<usize>>>,
     pub jacobian_prior_currents: Vec<Vec<Vec<usize>>>,
+    pub jacobian_branch_unknowns: Vec<Vec<Vec<usize>>>,
     pub reactive_jacobians: Vec<Vec<Vec<usize>>>,
     pub reactive_jacobian_prior_currents: Vec<Vec<Vec<usize>>>,
+    pub reactive_jacobian_branch_unknowns: Vec<Vec<Vec<usize>>>,
     pub noise_psd: Vec<Vec<usize>>,
     pub noise_psd_prior_currents: Vec<Vec<usize>>,
+    pub noise_psd_branch_unknowns: Vec<Vec<usize>>,
     pub noise_exponents: Vec<Vec<usize>>,
     pub noise_exponent_prior_currents: Vec<Vec<usize>>,
+    pub noise_exponent_branch_unknowns: Vec<Vec<usize>>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -265,14 +271,21 @@ impl NativeModel {
 
     fn empty_current_dependencies(entries: &NativeEntryOffsets) -> NativeCurrentDependencies {
         NativeCurrentDependencies {
+            static_condition_branch_unknowns: vec![Vec::new(); entries.static_conditions.len()],
             stamp_values: vec![Vec::new(); entries.stamp_values.len()],
             stamp_value_prior_currents: vec![Vec::new(); entries.stamp_values.len()],
+            stamp_value_branch_unknowns: vec![Vec::new(); entries.stamp_values.len()],
             jacobians: entries
                 .jacobians
                 .iter()
                 .map(|entries| vec![Vec::new(); entries.len()])
                 .collect(),
             jacobian_prior_currents: entries
+                .jacobians
+                .iter()
+                .map(|entries| vec![Vec::new(); entries.len()])
+                .collect(),
+            jacobian_branch_unknowns: entries
                 .jacobians
                 .iter()
                 .map(|entries| vec![Vec::new(); entries.len()])
@@ -287,10 +300,17 @@ impl NativeModel {
                 .iter()
                 .map(|entries| vec![Vec::new(); entries.len()])
                 .collect(),
+            reactive_jacobian_branch_unknowns: entries
+                .reactive_jacobians
+                .iter()
+                .map(|entries| vec![Vec::new(); entries.len()])
+                .collect(),
             noise_psd: vec![Vec::new(); entries.noise_psd.len()],
             noise_psd_prior_currents: vec![Vec::new(); entries.noise_psd.len()],
+            noise_psd_branch_unknowns: vec![Vec::new(); entries.noise_psd.len()],
             noise_exponents: vec![Vec::new(); entries.noise_exponents.len()],
             noise_exponent_prior_currents: vec![Vec::new(); entries.noise_exponents.len()],
+            noise_exponent_branch_unknowns: vec![Vec::new(); entries.noise_exponents.len()],
         }
     }
 
@@ -298,12 +318,17 @@ impl NativeModel {
         entries: &NativeEntryOffsets,
         dependencies: &NativeCurrentDependencies,
     ) -> JitResult<()> {
-        if dependencies.stamp_values.len() != entries.stamp_values.len()
+        if dependencies.static_condition_branch_unknowns.len() != entries.static_conditions.len()
+            || dependencies.stamp_values.len() != entries.stamp_values.len()
             || dependencies.stamp_value_prior_currents.len() != entries.stamp_values.len()
+            || dependencies.stamp_value_branch_unknowns.len() != entries.stamp_values.len()
             || dependencies.jacobians.len() != entries.jacobians.len()
             || dependencies.jacobian_prior_currents.len() != entries.jacobians.len()
+            || dependencies.jacobian_branch_unknowns.len() != entries.jacobians.len()
             || dependencies.reactive_jacobians.len() != entries.reactive_jacobians.len()
             || dependencies.reactive_jacobian_prior_currents.len()
+                != entries.reactive_jacobians.len()
+            || dependencies.reactive_jacobian_branch_unknowns.len()
                 != entries.reactive_jacobians.len()
             || dependencies
                 .jacobians
@@ -312,6 +337,11 @@ impl NativeModel {
                 .any(|(dependencies, entries)| dependencies.len() != entries.len())
             || dependencies
                 .jacobian_prior_currents
+                .iter()
+                .zip(&entries.jacobians)
+                .any(|(dependencies, entries)| dependencies.len() != entries.len())
+            || dependencies
+                .jacobian_branch_unknowns
                 .iter()
                 .zip(&entries.jacobians)
                 .any(|(dependencies, entries)| dependencies.len() != entries.len())
@@ -325,10 +355,17 @@ impl NativeModel {
                 .iter()
                 .zip(&entries.reactive_jacobians)
                 .any(|(dependencies, entries)| dependencies.len() != entries.len())
+            || dependencies
+                .reactive_jacobian_branch_unknowns
+                .iter()
+                .zip(&entries.reactive_jacobians)
+                .any(|(dependencies, entries)| dependencies.len() != entries.len())
             || dependencies.noise_psd.len() != entries.noise_psd.len()
             || dependencies.noise_psd_prior_currents.len() != entries.noise_psd.len()
+            || dependencies.noise_psd_branch_unknowns.len() != entries.noise_psd.len()
             || dependencies.noise_exponents.len() != entries.noise_exponents.len()
             || dependencies.noise_exponent_prior_currents.len() != entries.noise_exponents.len()
+            || dependencies.noise_exponent_branch_unknowns.len() != entries.noise_exponents.len()
         {
             return Err(JitError::InternalCompilerError {
                 model: "native-model".into(),
@@ -391,6 +428,14 @@ impl NativeModel {
         &self.current_dependencies.stamp_value_prior_currents[index]
     }
 
+    pub(crate) fn static_condition_branch_unknowns(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.static_condition_branch_unknowns[index]
+    }
+
+    pub(crate) fn stamp_value_branch_unknowns(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.stamp_value_branch_unknowns[index]
+    }
+
     pub(crate) fn run_jacobian(
         &self,
         stamp: usize,
@@ -407,6 +452,10 @@ impl NativeModel {
 
     pub(crate) fn jacobian_prior_currents(&self, stamp: usize, entry: usize) -> &[usize] {
         &self.current_dependencies.jacobian_prior_currents[stamp][entry]
+    }
+
+    pub(crate) fn jacobian_branch_unknowns(&self, stamp: usize, entry: usize) -> &[usize] {
+        &self.current_dependencies.jacobian_branch_unknowns[stamp][entry]
     }
 
     pub(crate) fn run_reactive_jacobian(
@@ -427,6 +476,10 @@ impl NativeModel {
         &self.current_dependencies.reactive_jacobian_prior_currents[stamp][entry]
     }
 
+    pub(crate) fn reactive_jacobian_branch_unknowns(&self, stamp: usize, entry: usize) -> &[usize] {
+        &self.current_dependencies.reactive_jacobian_branch_unknowns[stamp][entry]
+    }
+
     pub(crate) fn run_noise_psd(&self, index: usize, ctx: &EvalContext, vars: *const f64) -> f64 {
         self.run_value_entry(self.entries.noise_psd[index], ctx, vars)
     }
@@ -437,6 +490,10 @@ impl NativeModel {
 
     pub(crate) fn noise_psd_prior_currents(&self, index: usize) -> &[usize] {
         &self.current_dependencies.noise_psd_prior_currents[index]
+    }
+
+    pub(crate) fn noise_psd_branch_unknowns(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.noise_psd_branch_unknowns[index]
     }
 
     pub(crate) fn run_noise_exponent(
@@ -464,6 +521,10 @@ impl NativeModel {
 
     pub(crate) fn noise_exponent_prior_currents(&self, index: usize) -> &[usize] {
         &self.current_dependencies.noise_exponent_prior_currents[index]
+    }
+
+    pub(crate) fn noise_exponent_branch_unknowns(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.noise_exponent_branch_unknowns[index]
     }
 
     fn run_value_entry(&self, offset: CodeOffset, ctx: &EvalContext, vars: *const f64) -> f64 {

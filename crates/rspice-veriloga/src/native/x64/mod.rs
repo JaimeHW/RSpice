@@ -83,22 +83,32 @@ fn compile_model_inner(
     }
 
     let mut static_conditions = Vec::with_capacity(model.stamp_programs.len());
+    let mut static_condition_branch_unknown_dependencies =
+        Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_values = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_prior_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
+    let mut stamp_value_branch_unknown_dependencies =
+        Vec::with_capacity(model.stamp_programs.len());
     let mut jacobians = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobian_prior_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
+    let mut jacobian_branch_unknown_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut reactive_jacobians = Vec::with_capacity(model.stamp_programs.len());
     let mut reactive_jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut reactive_jacobian_prior_current_dependencies =
         Vec::with_capacity(model.stamp_programs.len());
+    let mut reactive_jacobian_branch_unknown_dependencies =
+        Vec::with_capacity(model.stamp_programs.len());
     let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
     let mut noise_psd_current_dependencies = Vec::with_capacity(model.noise_sources.len());
     let mut noise_psd_prior_current_dependencies = Vec::with_capacity(model.noise_sources.len());
+    let mut noise_psd_branch_unknown_dependencies = Vec::with_capacity(model.noise_sources.len());
     let mut noise_exponents = Vec::with_capacity(model.noise_sources.len());
     let mut noise_exponent_current_dependencies = Vec::with_capacity(model.noise_sources.len());
     let mut noise_exponent_prior_current_dependencies =
+        Vec::with_capacity(model.noise_sources.len());
+    let mut noise_exponent_branch_unknown_dependencies =
         Vec::with_capacity(model.noise_sources.len());
     let mut available_current_pairs = Vec::new();
     let mut prior_current_probes = Vec::new();
@@ -113,8 +123,11 @@ fn compile_model_inner(
                 base_limits,
             )
             .map_err(|error| context_jit_error(error, format!("static condition {stamp_index}")))?;
+            static_condition_branch_unknown_dependencies
+                .push(program.branch_unknown_dependencies().to_vec());
             Some(append_value_entry(&mut image, &program)?)
         } else {
+            static_condition_branch_unknown_dependencies.push(Vec::new());
             None
         };
         static_conditions.push(static_condition);
@@ -132,6 +145,8 @@ fn compile_model_inner(
         .map_err(|error| context_jit_error(error, format!("stamp value {stamp_index}")))?;
         stamp_value_current_dependencies.push(program.current_pair_dependencies().to_vec());
         stamp_value_prior_current_dependencies.push(program.prior_current_dependencies().to_vec());
+        stamp_value_branch_unknown_dependencies
+            .push(program.branch_unknown_dependencies().to_vec());
         stamp_values.push(append_value_entry(&mut image, &program)?);
 
         let mut jacobian_current_pairs = available_current_pairs.clone();
@@ -164,6 +179,8 @@ fn compile_model_inner(
             Vec::with_capacity(stamp.jacobian_programs.len());
         let mut stamp_jacobian_prior_current_dependencies =
             Vec::with_capacity(stamp.jacobian_programs.len());
+        let mut stamp_jacobian_branch_unknown_dependencies =
+            Vec::with_capacity(stamp.jacobian_programs.len());
         for jacobian in &stamp.jacobian_programs {
             let program = lower_jacobian_program(
                 model,
@@ -182,16 +199,21 @@ fn compile_model_inner(
             stamp_jacobian_current_dependencies.push(program.current_pair_dependencies().to_vec());
             stamp_jacobian_prior_current_dependencies
                 .push(program.prior_current_dependencies().to_vec());
+            stamp_jacobian_branch_unknown_dependencies
+                .push(program.branch_unknown_dependencies().to_vec());
             stamp_jacobians.push(append_value_entry(&mut image, &program)?);
         }
         jacobians.push(stamp_jacobians);
         jacobian_current_dependencies.push(stamp_jacobian_current_dependencies);
         jacobian_prior_current_dependencies.push(stamp_jacobian_prior_current_dependencies);
+        jacobian_branch_unknown_dependencies.push(stamp_jacobian_branch_unknown_dependencies);
 
         let mut stamp_reactive_jacobians = Vec::with_capacity(stamp.reactive_jacobians.len());
         let mut stamp_reactive_jacobian_current_dependencies =
             Vec::with_capacity(stamp.reactive_jacobians.len());
         let mut stamp_reactive_jacobian_prior_current_dependencies =
+            Vec::with_capacity(stamp.reactive_jacobians.len());
+        let mut stamp_reactive_jacobian_branch_unknown_dependencies =
             Vec::with_capacity(stamp.reactive_jacobians.len());
         for reactive_jacobian in &stamp.reactive_jacobians {
             let program = lower_reactive_jacobian_program(
@@ -214,12 +236,16 @@ fn compile_model_inner(
                 .push(program.current_pair_dependencies().to_vec());
             stamp_reactive_jacobian_prior_current_dependencies
                 .push(program.prior_current_dependencies().to_vec());
+            stamp_reactive_jacobian_branch_unknown_dependencies
+                .push(program.branch_unknown_dependencies().to_vec());
             stamp_reactive_jacobians.push(append_value_entry(&mut image, &program)?);
         }
         reactive_jacobians.push(stamp_reactive_jacobians);
         reactive_jacobian_current_dependencies.push(stamp_reactive_jacobian_current_dependencies);
         reactive_jacobian_prior_current_dependencies
             .push(stamp_reactive_jacobian_prior_current_dependencies);
+        reactive_jacobian_branch_unknown_dependencies
+            .push(stamp_reactive_jacobian_branch_unknown_dependencies);
 
         if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
             push_current_pair_indices(
@@ -253,6 +279,8 @@ fn compile_model_inner(
         noise_psd_current_dependencies.push(psd_program.current_pair_dependencies().to_vec());
         noise_psd_prior_current_dependencies
             .push(psd_program.prior_current_dependencies().to_vec());
+        noise_psd_branch_unknown_dependencies
+            .push(psd_program.branch_unknown_dependencies().to_vec());
         noise_psd.push(append_value_entry(&mut image, &psd_program)?);
 
         let exponent_entry = if let Some(program) = &source.exponent_program {
@@ -271,10 +299,13 @@ fn compile_model_inner(
                 .push(exponent_program.current_pair_dependencies().to_vec());
             noise_exponent_prior_current_dependencies
                 .push(exponent_program.prior_current_dependencies().to_vec());
+            noise_exponent_branch_unknown_dependencies
+                .push(exponent_program.branch_unknown_dependencies().to_vec());
             Some(append_value_entry(&mut image, &exponent_program)?)
         } else {
             noise_exponent_current_dependencies.push(Vec::new());
             noise_exponent_prior_current_dependencies.push(Vec::new());
+            noise_exponent_branch_unknown_dependencies.push(Vec::new());
             None
         };
         noise_exponents.push(exponent_entry);
@@ -291,16 +322,22 @@ fn compile_model_inner(
         noise_exponents,
     };
     let current_dependencies = NativeCurrentDependencies {
+        static_condition_branch_unknowns: static_condition_branch_unknown_dependencies,
         stamp_values: stamp_value_current_dependencies,
         stamp_value_prior_currents: stamp_value_prior_current_dependencies,
+        stamp_value_branch_unknowns: stamp_value_branch_unknown_dependencies,
         jacobians: jacobian_current_dependencies,
         jacobian_prior_currents: jacobian_prior_current_dependencies,
+        jacobian_branch_unknowns: jacobian_branch_unknown_dependencies,
         reactive_jacobians: reactive_jacobian_current_dependencies,
         reactive_jacobian_prior_currents: reactive_jacobian_prior_current_dependencies,
+        reactive_jacobian_branch_unknowns: reactive_jacobian_branch_unknown_dependencies,
         noise_psd: noise_psd_current_dependencies,
         noise_psd_prior_currents: noise_psd_prior_current_dependencies,
+        noise_psd_branch_unknowns: noise_psd_branch_unknown_dependencies,
         noise_exponents: noise_exponent_current_dependencies,
         noise_exponent_prior_currents: noise_exponent_prior_current_dependencies,
+        noise_exponent_branch_unknowns: noise_exponent_branch_unknown_dependencies,
     };
     validate_compiled_entry_shape(model, &entries, &current_dependencies)?;
 
@@ -2176,6 +2213,12 @@ fn validate_current_dependency_shape(
 ) -> JitResult<()> {
     validate_compiled_entry_count(
         model,
+        "static-condition branch-unknown dependency",
+        dependencies.static_condition_branch_unknowns.len(),
+        entries.static_conditions.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
         "stamp-value current dependency",
         dependencies.stamp_values.len(),
         entries.stamp_values.len(),
@@ -2184,6 +2227,12 @@ fn validate_current_dependency_shape(
         model,
         "stamp-value prior-current dependency",
         dependencies.stamp_value_prior_currents.len(),
+        entries.stamp_values.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "stamp-value branch-unknown dependency",
+        dependencies.stamp_value_branch_unknowns.len(),
         entries.stamp_values.len(),
     )?;
     validate_compiled_entry_count(
@@ -2200,6 +2249,12 @@ fn validate_current_dependency_shape(
     )?;
     validate_compiled_entry_count(
         model,
+        "jacobian branch-unknown dependency stamp",
+        dependencies.jacobian_branch_unknowns.len(),
+        entries.jacobians.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
         "reactive-jacobian current dependency stamp",
         dependencies.reactive_jacobians.len(),
         entries.reactive_jacobians.len(),
@@ -2208,6 +2263,12 @@ fn validate_current_dependency_shape(
         model,
         "reactive-jacobian prior-current dependency stamp",
         dependencies.reactive_jacobian_prior_currents.len(),
+        entries.reactive_jacobians.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "reactive-jacobian branch-unknown dependency stamp",
+        dependencies.reactive_jacobian_branch_unknowns.len(),
         entries.reactive_jacobians.len(),
     )?;
     validate_compiled_entry_count(
@@ -2224,6 +2285,12 @@ fn validate_current_dependency_shape(
     )?;
     validate_compiled_entry_count(
         model,
+        "noise PSD branch-unknown dependency",
+        dependencies.noise_psd_branch_unknowns.len(),
+        entries.noise_psd.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
         "noise exponent current dependency",
         dependencies.noise_exponents.len(),
         entries.noise_exponents.len(),
@@ -2232,6 +2299,12 @@ fn validate_current_dependency_shape(
         model,
         "noise exponent prior-current dependency",
         dependencies.noise_exponent_prior_currents.len(),
+        entries.noise_exponents.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "noise exponent branch-unknown dependency",
+        dependencies.noise_exponent_branch_unknowns.len(),
         entries.noise_exponents.len(),
     )?;
 
@@ -2262,6 +2335,19 @@ fn validate_current_dependency_shape(
         )?;
     }
     for (stamp_index, (dependency_entries, entry_offsets)) in dependencies
+        .jacobian_branch_unknowns
+        .iter()
+        .zip(&entries.jacobians)
+        .enumerate()
+    {
+        validate_compiled_entry_count(
+            model,
+            format!("jacobian branch-unknown dependency {stamp_index}"),
+            dependency_entries.len(),
+            entry_offsets.len(),
+        )?;
+    }
+    for (stamp_index, (dependency_entries, entry_offsets)) in dependencies
         .reactive_jacobians
         .iter()
         .zip(&entries.reactive_jacobians)
@@ -2283,6 +2369,19 @@ fn validate_current_dependency_shape(
         validate_compiled_entry_count(
             model,
             format!("reactive-jacobian prior-current dependency {stamp_index}"),
+            dependency_entries.len(),
+            entry_offsets.len(),
+        )?;
+    }
+    for (stamp_index, (dependency_entries, entry_offsets)) in dependencies
+        .reactive_jacobian_branch_unknowns
+        .iter()
+        .zip(&entries.reactive_jacobians)
+        .enumerate()
+    {
+        validate_compiled_entry_count(
+            model,
+            format!("reactive-jacobian branch-unknown dependency {stamp_index}"),
             dependency_entries.len(),
             entry_offsets.len(),
         )?;
@@ -5108,18 +5207,26 @@ endmodule
                 .collect(),
         };
         let dependencies = NativeCurrentDependencies {
+            static_condition_branch_unknowns: vec![Vec::new(); entries.static_conditions.len()],
             stamp_values: vec![Vec::new(); entries.stamp_values.len()],
             stamp_value_prior_currents: vec![Vec::new(); entries.stamp_values.len()],
+            stamp_value_branch_unknowns: vec![Vec::new(); entries.stamp_values.len()],
             jacobians: empty_nested_dependencies(&entries.jacobians),
             jacobian_prior_currents: empty_nested_dependencies(&entries.jacobians),
+            jacobian_branch_unknowns: empty_nested_dependencies(&entries.jacobians),
             reactive_jacobians: empty_nested_dependencies(&entries.reactive_jacobians),
             reactive_jacobian_prior_currents: empty_nested_dependencies(
                 &entries.reactive_jacobians,
             ),
+            reactive_jacobian_branch_unknowns: empty_nested_dependencies(
+                &entries.reactive_jacobians,
+            ),
             noise_psd: vec![Vec::new(); entries.noise_psd.len()],
             noise_psd_prior_currents: vec![Vec::new(); entries.noise_psd.len()],
+            noise_psd_branch_unknowns: vec![Vec::new(); entries.noise_psd.len()],
             noise_exponents: vec![Vec::new(); entries.noise_exponents.len()],
             noise_exponent_prior_currents: vec![Vec::new(); entries.noise_exponents.len()],
+            noise_exponent_branch_unknowns: vec![Vec::new(); entries.noise_exponents.len()],
         };
         (entries, dependencies)
     }
