@@ -8325,6 +8325,7 @@ fn is_parameter_default_instruction(instruction: &Instruction) -> bool {
             | Instruction::Cosh
             | Instruction::Tanh
             | Instruction::Limexp
+            | Instruction::LimitedExp
             | Instruction::Asin
             | Instruction::Acos
             | Instruction::Atan
@@ -8371,6 +8372,7 @@ fn is_static_condition_instruction(instruction: &Instruction) -> bool {
             | Instruction::Min
             | Instruction::Max
             | Instruction::Limexp
+            | Instruction::LimitedExp
             | Instruction::Asin
             | Instruction::Acos
             | Instruction::Atan
@@ -12603,6 +12605,7 @@ endmodule
             (Instruction::Cosh, UnaryMathOp::Cosh),
             (Instruction::Tanh, UnaryMathOp::Tanh),
             (Instruction::Limexp, UnaryMathOp::Limexp),
+            (Instruction::LimitedExp, UnaryMathOp::LimitedExp),
             (Instruction::Asin, UnaryMathOp::Asin),
             (Instruction::Acos, UnaryMathOp::Acos),
             (Instruction::Atan, UnaryMathOp::Atan),
@@ -12624,6 +12627,46 @@ endmodule
                 &[NativeOp::LoadTemperature, NativeOp::UnaryMath(expected)]
             );
             assert_eq!(lowered.max_stack_depth(), 1);
+        }
+    }
+
+    #[test]
+    fn restricted_entries_accept_supported_limited_exp_without_fallback() {
+        let cases = [
+            (
+                "parameter-default",
+                EntryKind::ParameterDefault,
+                vec![Instruction::PushParam(0), Instruction::LimitedExp],
+                NativeLoweringLimits::new(0, 0, 1, 0, 0),
+                vec![
+                    NativeOp::LoadParam(0),
+                    NativeOp::UnaryMath(UnaryMathOp::LimitedExp),
+                ],
+            ),
+            (
+                "static-condition",
+                EntryKind::StaticCondition,
+                vec![Instruction::PushTemperature, Instruction::LimitedExp],
+                limits(0, 0),
+                vec![
+                    NativeOp::LoadTemperature,
+                    NativeOp::UnaryMath(UnaryMathOp::LimitedExp),
+                ],
+            ),
+        ];
+
+        for (case, entry_kind, instructions, limits, expected_ops) in cases {
+            let program = BytecodeProgram { instructions };
+            let lowered = NativeProgram::from_bytecode(
+                format!("limited-exp-{case}"),
+                entry_kind,
+                &program,
+                limits,
+            )
+            .expect("limited_exp is supported by restricted native entries");
+
+            assert_eq!(lowered.ops(), expected_ops.as_slice(), "{case}");
+            assert_eq!(lowered.max_stack_depth(), 1, "{case}");
         }
     }
 
