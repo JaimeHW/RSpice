@@ -365,6 +365,7 @@ impl FunctionCompiler {
                 NativeOp::LoadMfactor => {
                     self.emit_context_f64_load(MFACTOR_OFFSET)?;
                 }
+                NativeOp::Swap => self.emit_swap()?,
                 NativeOp::Add => self.emit_binary_op(BinaryOp::Add)?,
                 NativeOp::Sub => self.emit_binary_op(BinaryOp::Sub)?,
                 NativeOp::Mul => self.emit_binary_op(BinaryOp::Mul)?,
@@ -396,6 +397,7 @@ impl FunctionCompiler {
                 NativeOp::Logical(op) => self.emit_logical(op)?,
                 NativeOp::LogicalConst(op, value) => self.emit_logical_const(op, value)?,
                 NativeOp::IfElse => self.emit_ifelse()?,
+                NativeOp::IfElseCondLast => self.emit_ifelse_cond_last()?,
                 NativeOp::Extremum(op) => self.emit_extremum(op)?,
                 NativeOp::ExtremumConst(op, value) => self.emit_extremum_const(op, value)?,
                 NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
@@ -734,6 +736,31 @@ impl FunctionCompiler {
             BinaryOp::Div => self.encoder.divsd_xmm_xmm(left, right),
         }
         self.depth -= 1;
+        Ok(())
+    }
+
+    fn emit_swap(&mut self) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("swap requires stack depth 2, found {}", self.depth).into(),
+            });
+        }
+
+        let left = XMM_STACK[self.depth - 2];
+        let right = XMM_STACK[self.depth - 1];
+        if self.depth < XMM_STACK.len() {
+            let scratch = self.scratch_register()?;
+            self.encoder.movsd_xmm_xmm(scratch, left);
+            self.encoder.movsd_xmm_xmm(left, right);
+            self.encoder.movsd_xmm_xmm(right, scratch);
+        } else {
+            self.encoder.sub_rsp_imm32(ROUND_TEMP_FRAME_BYTES);
+            self.encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, left);
+            self.encoder.movsd_xmm_xmm(left, right);
+            self.encoder.movsd_xmm_m64_base_disp32(right, Gpr::Rsp, 0);
+            self.encoder.add_rsp_imm32(ROUND_TEMP_FRAME_BYTES);
+        }
         Ok(())
     }
 
@@ -2637,6 +2664,27 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_ifelse_cond_last(&mut self) -> JitResult<()> {
+        if self.depth < 3 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("ifelse requires stack depth 3, found {}", self.depth).into(),
+            });
+        }
+
+        let then_value = XMM_STACK[self.depth - 3];
+        let else_value = XMM_STACK[self.depth - 2];
+        let cond = XMM_STACK[self.depth - 1];
+        self.emit_truthy_to_gpr(cond, Gpr::R10);
+        self.encoder.movq_r64_xmm(Gpr::R8, else_value);
+        self.encoder.movq_r64_xmm(Gpr::R11, then_value);
+        self.encoder.test_r8_r8(Gpr::R10, Gpr::R10);
+        self.encoder.cmovne_r64_r64(Gpr::R8, Gpr::R11);
+        self.encoder.movq_xmm_r64(then_value, Gpr::R8);
+        self.depth -= 2;
+        Ok(())
+    }
+
     fn emit_extremum(&mut self, op: ExtremumOp) -> JitResult<()> {
         if self.depth < 2 {
             return Err(JitError::Encoding {
@@ -3363,12 +3411,19 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
 fn value_program_needs_saved_entry_args(program: &NativeProgram) -> bool {
     let mut helper_seen = false;
     for op in program.ops() {
+        if native_op_needs_saved_entry_args_for_internal_helper_continuation(*op) {
+            return true;
+        }
         if helper_seen && native_op_reads_entry_args(*op) {
             return true;
         }
         helper_seen |= native_op_uses_helper_call(op);
     }
     false
+}
+
+fn native_op_needs_saved_entry_args_for_internal_helper_continuation(op: NativeOp) -> bool {
+    matches!(op, NativeOp::IdtModState(_))
 }
 
 fn native_op_uses_helper_call(op: &NativeOp) -> bool {
@@ -3397,6 +3452,7 @@ fn native_op_reads_entry_args(op: NativeOp) -> bool {
     !matches!(
         op,
         NativeOp::Const(_)
+            | NativeOp::Swap
             | NativeOp::Add
             | NativeOp::Sub
             | NativeOp::Mul
@@ -3416,6 +3472,7 @@ fn native_op_reads_entry_args(op: NativeOp) -> bool {
             | NativeOp::Logical(_)
             | NativeOp::LogicalConst(_, _)
             | NativeOp::IfElse
+            | NativeOp::IfElseCondLast
             | NativeOp::Extremum(_)
             | NativeOp::ExtremumConst(_, _)
             | NativeOp::UnaryMath(_)
@@ -3444,6 +3501,7 @@ fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
                 | NativeOp::LoadTime
                 | NativeOp::Analysis(_)
                 | NativeOp::LoadMfactor
+                | NativeOp::Swap
                 | NativeOp::LoadCurrent(_)
                 | NativeOp::LoadPriorCurrent(_)
                 | NativeOp::LoadInternalVoltage(_)
@@ -3468,6 +3526,7 @@ fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
                 | NativeOp::Logical(_)
                 | NativeOp::LogicalConst(_, _)
                 | NativeOp::IfElse
+                | NativeOp::IfElseCondLast
                 | NativeOp::Extremum(_)
                 | NativeOp::ExtremumConst(_, _)
                 | NativeOp::UnaryMath(UnaryMathOp::Floor | UnaryMathOp::Ceil)
@@ -4277,6 +4336,50 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_terminal_idtmod_preserves_entry_args() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushVariable(0),
+                Instruction::PushConst(0.5),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(0.25),
+                Instruction::IdtModState(1),
+            ],
+            0,
+        );
+
+        let bytes =
+            compile_value_function(&program).expect("compile terminal idtmod value function");
+
+        assert!(
+            bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "terminal idtmod must preserve context and vars pointers across its internal helper call"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate terminal idtmod leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let vars = [2.0_f64];
+        let previous_state = [0.0_f64, 0.9_f64];
+        let mut state_values = [0.0_f64, 0.0_f64];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.timestep = 0.25;
+        ctx.state_prev = previous_state.as_ptr();
+        ctx.state_prev_len = previous_state.len();
+        ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = state_values.len();
+
+        let value = f(&ctx, vars.as_ptr());
+        assert!((value - 0.4).abs() < 1.0e-12, "value: {value}");
+        assert!(
+            (state_values[1] - 0.4).abs() < 1.0e-12,
+            "state: {state_values:?}"
+        );
+    }
+
+    #[test]
     fn generated_value_leaf_helper_before_context_load_preserves_entry_args() {
         let program = native_program(
             EntryKind::StampValue,
@@ -4323,7 +4426,6 @@ mod tests {
             ("slew", NativeOp::SlewState(0)),
             ("absdelay", NativeOp::AbsDelayState(0)),
             ("cross", NativeOp::CrossState(0)),
-            ("idtmod", NativeOp::IdtModState(0)),
             (
                 "dynamic-variable-slow-path",
                 NativeOp::LoadVariableDyn {
@@ -4358,6 +4460,21 @@ mod tests {
                 "{name} must preserve entry args when a later op reads EvalContext"
             );
         }
+    }
+
+    #[test]
+    fn helper_call_metadata_preserves_entry_args_for_terminal_idtmod_state() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![NativeOp::IdtModState(0)],
+            4,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        assert!(
+            value_program_needs_saved_entry_args(&program),
+            "terminal idtmod must preserve EvalContext because it stores state after its helper call"
+        );
     }
 
     #[test]

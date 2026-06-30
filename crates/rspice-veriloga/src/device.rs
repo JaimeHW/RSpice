@@ -219,6 +219,8 @@ impl VerilogADevice {
         #[cfg(not(feature = "native"))]
         let _ = canonical_artifact;
 
+        let name = name.into();
+        Self::native_device_construction_trace(&model, &name, "start");
         let num_terminals = model.num_terminals;
         let supplied_terminals = nodes.len().min(num_terminals);
 
@@ -249,11 +251,18 @@ impl VerilogADevice {
         context.lookup_tables = model.lookup_tables.clone();
         context.laplace_filters = model.laplace_filters.clone();
         context.zi_filters = model.zi_filters.clone();
+        Self::native_device_construction_trace(&model, &name, "preallocate-runtime:start");
         Self::preallocate_vm_runtime_state(&mut context, &model)?;
+        Self::native_device_construction_trace(&model, &name, "preallocate-runtime:done");
 
         #[cfg(feature = "native")]
         let native_model = match canonical_artifact {
-            Some(artifact) => Self::try_native_compile_with_canonical_ir(&model, artifact)?,
+            Some(artifact) => {
+                Self::native_device_construction_trace(&model, &name, "native-compile:start");
+                let native_model = Self::try_native_compile_with_canonical_ir(&model, artifact)?;
+                Self::native_device_construction_trace(&model, &name, "native-compile:done");
+                native_model
+            }
             #[cfg(feature = "native-bytecode-contract-tests")]
             None => Self::try_native_compile(&model)?,
             #[cfg(not(feature = "native-bytecode-contract-tests"))]
@@ -264,8 +273,9 @@ impl VerilogADevice {
 
         let num_branch_unknowns = model.branch_sources.len();
         let num_stamp_programs = model.stamp_programs.len();
+        Self::native_device_construction_trace(&model, &name, "device-struct:start");
         let mut device = Self {
-            name: name.into(),
+            name,
             model,
             context,
             node_mapping,
@@ -281,8 +291,27 @@ impl VerilogADevice {
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
         device.rebuild_matrix_indices();
+        Self::native_device_construction_trace(
+            &device.model,
+            &device.name,
+            "resolve-defaults:start",
+        );
         device.try_resolve_parameter_defaults()?;
+        Self::native_device_construction_trace(
+            &device.model,
+            &device.name,
+            "resolve-defaults:done",
+        );
         Ok(device)
+    }
+
+    fn native_device_construction_trace(model: &CompiledModel, name: &str, stage: &str) {
+        if std::env::var_os("RSPICE_NATIVE_DEVICE_TRACE").is_some() {
+            eprintln!(
+                "native-device-construction model={} instance={} stage={stage}",
+                model.name, name
+            );
+        }
     }
 
     /// Preallocate interpreter runtime state vectors from bytecode instruction IDs.
