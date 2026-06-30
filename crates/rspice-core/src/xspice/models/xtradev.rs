@@ -2979,7 +2979,7 @@ impl CodeModel for SeeGenerator {
             return Ok(());
         }
         if !ctx.is_transient() {
-            ctx.set_output_vector("out", vec![0.0; width]);
+            ctx.set_output_vector_from_fn("out", width, |_| 0.0);
             ctx.set_output("mon", 0.0);
             return Ok(());
         }
@@ -3035,9 +3035,10 @@ impl CodeModel for SeeGenerator {
         }
 
         if assign_outputs && (1..=width as i64).contains(&pulse_number) {
-            let mut outputs = vec![0.0; width];
-            outputs[pulse_number as usize - 1] = current;
-            ctx.set_output_vector("out", outputs);
+            let active_index = pulse_number as usize - 1;
+            ctx.set_output_vector_from_fn("out", width, |index| {
+                if index == active_index { current } else { 0.0 }
+            });
             if seegen_mon_connected(ctx) {
                 ctx.set_output("mon", current);
             } else {

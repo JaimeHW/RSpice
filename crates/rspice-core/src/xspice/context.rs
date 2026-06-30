@@ -846,8 +846,38 @@ impl CmContext {
 
     /// Set analog vector output values with zero direct partials.
     pub fn set_output_vector(&mut self, name: &str, values: Vec<Value>) {
-        let partials = vec![0.0; values.len()];
-        self.set_output_vector_with_partials(name, values, partials);
+        let value_count = values.len();
+        self.set_output_vector_from_fn(name, value_count, |index| {
+            values.get(index).copied().unwrap_or(0.0)
+        });
+    }
+
+    /// Set analog vector output values from a callback with zero direct partials.
+    pub fn set_output_vector_from_fn<F>(&mut self, name: &str, value_count: usize, mut value_at: F)
+    where
+        F: FnMut(usize) -> Value,
+    {
+        let width = self.port_width(name).max(value_count);
+        let out = self
+            .outputs
+            .entry(name.to_string())
+            .or_insert_with(|| OutputValue::analog_vector(width));
+        match out {
+            OutputValue::AnalogVector(existing) => {
+                existing.resize(width, AnalogValue::default());
+                for (index, analog) in existing.iter_mut().enumerate() {
+                    analog.prev_value = analog.value;
+                    analog.value = value_at(index);
+                    analog.partial = 0.0;
+                }
+            }
+            OutputValue::Analog(existing) if width == 1 => {
+                existing.prev_value = existing.value;
+                existing.value = value_at(0);
+                existing.partial = 0.0;
+            }
+            _ => {}
+        }
     }
 
     /// Set analog vector output values and per-element direct partials.
@@ -1591,6 +1621,25 @@ mod tests {
         assert_eq!(ctx.output_vector("out"), vec![1.5, 3.0]);
         assert_eq!(ctx.output_vector_prev("out"), vec![1.0, 2.0]);
         assert_eq!(ctx.partial_vector("out"), vec![0.0, 4.0]);
+    }
+
+    #[test]
+    fn analog_vector_function_setter_preserves_prev_values_once() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("out", 3);
+        ctx.set_output_vector("out", vec![1.0, 2.0, 3.0]);
+        ctx.set_output_vector_with_partials("out", vec![4.0, 5.0], vec![0.25, 0.5]);
+
+        let mut calls = 0;
+        ctx.set_output_vector_from_fn("out", 3, |index| {
+            calls += 1;
+            if index == 1 { 9.0 } else { 0.0 }
+        });
+
+        assert_eq!(calls, 3);
+        assert_eq!(ctx.output_vector("out"), vec![0.0, 9.0, 0.0]);
+        assert_eq!(ctx.output_vector_prev("out"), vec![4.0, 5.0, 0.0]);
+        assert_eq!(ctx.partial_vector("out"), vec![0.0, 0.0, 0.0]);
     }
 
     #[test]
