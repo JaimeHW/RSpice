@@ -1,6 +1,7 @@
 //! Token, value, expression, and model-parameter helpers.
 
 use super::*;
+use crate::netlist::lexer::Token;
 
 pub(super) fn split_spice_fields(line: &str) -> Vec<String> {
     let mut fields = Vec::new();
@@ -80,11 +81,17 @@ pub(super) fn parse_parametric_field_value(
     raw_value: &str,
     params: &ParamContext,
 ) -> ParametricValue {
+    if let Some(value) = strip_wrapping_string_literal(raw_value) {
+        return ParametricValue::String(value.to_string());
+    }
     let expr = strip_wrapping_expression_delimiters(raw_value);
     if !looks_like_expression(expr)
         && let Ok(value) = crate::netlist::lexer::parse_spice_value(expr)
     {
         return ParametricValue::Resolved(value);
+    }
+    if params.get_string(expr).is_some() {
+        return ParametricValue::StringExpression(expr.to_string());
     }
     if params.get(expr).is_some() || expr.chars().any(|ch| "+-*/()".contains(ch)) {
         return ParametricValue::Expression(expr.to_string());
@@ -116,18 +123,34 @@ pub(super) struct ParsedModelParams {
     pub(super) numeric: Vec<(String, Value)>,
     pub(super) expr: Vec<(String, String)>,
     pub(super) string: Vec<(String, String)>,
+    pub(super) string_vector: Vec<(String, Vec<String>)>,
     pub(super) real_vector: Vec<(String, Vec<Value>)>,
     pub(super) integer_vector: Vec<(String, Vec<i64>)>,
+}
+
+pub(super) fn strip_wrapping_string_literal(raw: &str) -> Option<&str> {
+    let trimmed = raw.trim();
+    if trimmed.len() >= 2 {
+        let first = trimmed.as_bytes()[0] as char;
+        let last = trimmed.as_bytes()[trimmed.len() - 1] as char;
+        if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+            return Some(&trimmed[1..trimmed.len() - 1]);
+        }
+    }
+    None
 }
 
 pub(super) fn parse_model_params(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
+    defer_expression_params: bool,
+    model_type: Option<&str>,
 ) -> Result<ParsedModelParams, ParseError> {
     let mut numeric_params = Vec::new();
     let mut expr_params = Vec::new();
     let mut string_params = Vec::new();
+    let mut string_vector_params = Vec::new();
     let mut real_vector_params = Vec::new();
     let integer_vector_params = Vec::new();
 
@@ -143,6 +166,7 @@ pub(super) fn parse_model_params(
                     numeric: numeric_params,
                     expr: expr_params,
                     string: string_params,
+                    string_vector: string_vector_params,
                     real_vector: real_vector_params,
                     integer_vector: integer_vector_params,
                 });
@@ -181,18 +205,109 @@ pub(super) fn parse_model_params(
                         stream.advance();
                         string_params.push((name, value));
                     }
+                    TokenKind::Number(_)
+                        if crate::netlist::xspice_param_preserves_numeric_string(&name)
+                            || model_param_accepts_bare_string(&name, model_type) =>
+                    {
+                        let value = parse_model_bare_string_value(stream, line_num, &name)?;
+                        push_model_string_value(
+                            &mut string_params,
+                            &mut string_vector_params,
+                            &mut real_vector_params,
+                            line_num,
+                            &name,
+                            &value,
+                        )?;
+                    }
+                    TokenKind::Ident(value) => {
+                        let value = value.clone();
+                        if let Some(value) = bare_model_ident_string_value(
+                            &name,
+                            &value,
+                            params,
+                            defer_expression_params,
+                            model_type,
+                        ) {
+                            stream.advance();
+                            match value {
+                                BareModelIdentString::Literal(value) => push_model_string_value(
+                                    &mut string_params,
+                                    &mut string_vector_params,
+                                    &mut real_vector_params,
+                                    line_num,
+                                    &name,
+                                    &value,
+                                )?,
+                                BareModelIdentString::Deferred(expr) => {
+                                    expr_params.push((name, expr));
+                                }
+                            }
+                        } else if model_param_accepts_bare_string(&name, model_type) {
+                            let value = parse_model_bare_string_value(stream, line_num, &name)?;
+                            push_model_string_value(
+                                &mut string_params,
+                                &mut string_vector_params,
+                                &mut real_vector_params,
+                                line_num,
+                                &name,
+                                &value,
+                            )?;
+                        } else if let Some(value) = try_signed_model_value(stream, params) {
+                            numeric_params.push((name, value));
+                        } else {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "Expected value for model parameter '{}', found {}",
+                                    name,
+                                    stream.peek().kind
+                                ),
+                            });
+                        }
+                    }
                     TokenKind::Expression(expr) => {
                         let expr = expr.clone();
                         stream.advance();
-                        if let Ok(value) = eval_expression(&expr, params) {
+                        if defer_expression_params {
+                            expr_params.push((name, expr));
+                        } else if let Ok(value) = eval_expression(&expr, params) {
                             numeric_params.push((name, value));
+                        } else if let Some(value) = params.get_string(&expr) {
+                            push_model_string_value(
+                                &mut string_params,
+                                &mut string_vector_params,
+                                &mut real_vector_params,
+                                line_num,
+                                &name,
+                                value,
+                            )?;
                         } else {
                             expr_params.push((name, expr));
                         }
                     }
                     TokenKind::LBracket => {
-                        let values = parse_model_real_vector(stream, line_num, &name, params)?;
-                        real_vector_params.push((name, values));
+                        if crate::netlist::xspice_param_prefers_string_vector(&name)
+                            || model_vector_starts_with_string(stream, params)
+                        {
+                            let values = parse_model_string_vector(stream, line_num, &name)?;
+                            string_vector_params.push((name, values));
+                        } else {
+                            let values = parse_model_real_vector(stream, line_num, &name, params)?;
+                            real_vector_params.push((name, values));
+                        }
+                    }
+                    kind if model_param_accepts_bare_string(&name, model_type)
+                        && model_bare_string_token_can_start(kind) =>
+                    {
+                        let value = parse_model_bare_string_value(stream, line_num, &name)?;
+                        push_model_string_value(
+                            &mut string_params,
+                            &mut string_vector_params,
+                            &mut real_vector_params,
+                            line_num,
+                            &name,
+                            &value,
+                        )?;
                     }
                     _ => {
                         if stream.consume(&TokenKind::LParen) {
@@ -239,9 +354,358 @@ pub(super) fn parse_model_params(
         numeric: numeric_params,
         expr: expr_params,
         string: string_params,
+        string_vector: string_vector_params,
         real_vector: real_vector_params,
         integer_vector: integer_vector_params,
     })
+}
+
+enum BareModelIdentString {
+    Literal(String),
+    Deferred(String),
+}
+
+fn bare_model_ident_string_value(
+    name: &str,
+    value: &str,
+    params: &ParamContext,
+    defer_expression_params: bool,
+    model_type: Option<&str>,
+) -> Option<BareModelIdentString> {
+    if model_param_accepts_bare_string(name, model_type) {
+        if defer_expression_params && params.get_string(value).is_some() {
+            return Some(BareModelIdentString::Deferred(value.to_string()));
+        }
+        if let Some(value) = params.get_string(value) {
+            return Some(BareModelIdentString::Literal(value.to_string()));
+        }
+        return None;
+    }
+
+    if params.get(value).is_some()
+        || parse_boolean_literal(value).is_some()
+        || crate::netlist::lexer::parse_spice_value(value).is_ok()
+    {
+        return None;
+    }
+
+    if defer_expression_params && params.get_string(value).is_some() {
+        return Some(BareModelIdentString::Deferred(value.to_string()));
+    }
+
+    if let Some(value) = params.get_string(value) {
+        return Some(BareModelIdentString::Literal(value.to_string()));
+    }
+
+    None
+}
+
+fn parse_model_bare_string_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    name: &str,
+) -> Result<String, ParseError> {
+    let mut value = String::new();
+    let mut previous_end = None;
+
+    loop {
+        let token = stream.peek().clone();
+        match token.kind {
+            TokenKind::Comma
+            | TokenKind::RParen
+            | TokenKind::RBracket
+            | TokenKind::Newline
+            | TokenKind::Eof => break,
+            TokenKind::StringLit(_) if value.is_empty() => break,
+            _ => {}
+        }
+
+        if let Some(end) = previous_end
+            && token.span.start != end
+        {
+            break;
+        }
+
+        let Some(piece) = model_bare_string_piece_from_token(&token) else {
+            break;
+        };
+        if piece.is_empty() {
+            break;
+        }
+
+        previous_end = Some(token.span.end);
+        value.push_str(&piece);
+        stream.advance();
+    }
+
+    if value.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected string value for model parameter '{}', found {}",
+                name,
+                stream.peek().kind
+            ),
+        });
+    }
+
+    Ok(value)
+}
+
+fn model_bare_string_token_can_start(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Ident(_)
+            | TokenKind::Number(_)
+            | TokenKind::Equals
+            | TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::Star
+            | TokenKind::Slash
+            | TokenKind::AtSign
+            | TokenKind::Tilde
+            | TokenKind::Other(_)
+    )
+}
+
+fn model_bare_string_piece_from_token(token: &Token) -> Option<String> {
+    match &token.kind {
+        TokenKind::Ident(_)
+        | TokenKind::Number(_)
+        | TokenKind::Equals
+        | TokenKind::Plus
+        | TokenKind::Minus
+        | TokenKind::Star
+        | TokenKind::Slash
+        | TokenKind::AtSign
+        | TokenKind::Tilde
+        | TokenKind::Other(_) => Some(if token.lexeme.is_empty() {
+            token.kind.to_string()
+        } else {
+            token.lexeme.clone()
+        }),
+        _ => None,
+    }
+}
+
+fn model_param_accepts_bare_string(name: &str, model_type: Option<&str>) -> bool {
+    crate::netlist::xspice_model_param_accepts_bare_string(name)
+        || model_param_accepts_contextual_bare_string(name, model_type)
+}
+
+fn model_param_accepts_contextual_bare_string(name: &str, model_type: Option<&str>) -> bool {
+    let Some(model_type) = model_type else {
+        return false;
+    };
+    name.eq_ignore_ascii_case("model") && model_type.eq_ignore_ascii_case("multi_input_pwl")
+}
+
+fn push_model_string_value(
+    string_params: &mut Vec<(String, String)>,
+    string_vector_params: &mut Vec<(String, Vec<String>)>,
+    real_vector_params: &mut Vec<(String, Vec<Value>)>,
+    line_num: usize,
+    name: &str,
+    value: &str,
+) -> Result<(), ParseError> {
+    if value.trim_start().starts_with('[') {
+        match parse_model_vector_string_literal(value, line_num, name)? {
+            ModelVectorLiteral::Real(values) => real_vector_params.push((name.to_string(), values)),
+            ModelVectorLiteral::String(values) => {
+                string_vector_params.push((name.to_string(), values))
+            }
+        }
+    } else {
+        string_params.push((name.to_string(), value.to_string()));
+    }
+    Ok(())
+}
+
+pub(super) enum ModelVectorLiteral {
+    Real(Vec<Value>),
+    String(Vec<String>),
+}
+
+pub(super) fn parse_model_vector_string_literal(
+    value: &str,
+    line_num: usize,
+    name: &str,
+) -> Result<ModelVectorLiteral, ParseError> {
+    let trimmed = value.trim();
+    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Model parameter vector '{}' from string parameter must be enclosed in '[' and ']'",
+                name
+            ),
+        });
+    }
+    let inner = &trimmed[1..trimmed.len() - 1];
+    let fields = split_spice_fields(inner);
+    if fields.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Model parameter vector '{}' cannot be empty", name),
+        });
+    }
+
+    let mut real_values = Vec::with_capacity(fields.len());
+    let mut all_numeric = true;
+    for field in &fields {
+        match crate::netlist::lexer::parse_spice_value(field) {
+            Ok(value) if value.is_finite() => real_values.push(value),
+            _ => {
+                all_numeric = false;
+                break;
+            }
+        }
+    }
+
+    if all_numeric {
+        return Ok(ModelVectorLiteral::Real(real_values));
+    }
+
+    Ok(ModelVectorLiteral::String(
+        fields
+            .into_iter()
+            .map(|field| {
+                strip_wrapping_string_literal(&field)
+                    .unwrap_or(field.as_str())
+                    .to_string()
+            })
+            .collect(),
+    ))
+}
+
+fn model_vector_starts_with_string(stream: &TokenStream, params: &ParamContext) -> bool {
+    let mut offset = 1usize;
+    loop {
+        match &stream.peek_n(offset).kind {
+            TokenKind::Comma => offset += 1,
+            TokenKind::StringLit(_) => return true,
+            TokenKind::Ident(_) => {
+                return !token_can_start_model_real_vector_value(
+                    &stream.peek_n(offset).kind,
+                    params,
+                );
+            }
+            TokenKind::Plus | TokenKind::Minus => {
+                return !token_can_start_model_real_vector_value(
+                    &stream.peek_n(offset + 1).kind,
+                    params,
+                );
+            }
+            _ => return false,
+        }
+    }
+}
+
+fn token_can_start_model_real_vector_value(kind: &TokenKind, params: &ParamContext) -> bool {
+    match kind {
+        TokenKind::Number(_) | TokenKind::Expression(_) => true,
+        TokenKind::Ident(s) => {
+            params.get(s).is_some() || crate::netlist::lexer::parse_spice_value(s).is_ok()
+        }
+        _ => false,
+    }
+}
+
+fn parse_model_string_vector(
+    stream: &mut TokenStream,
+    line_num: usize,
+    name: &str,
+) -> Result<Vec<String>, ParseError> {
+    if !stream.consume(&TokenKind::LBracket) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Expected '[' for model parameter vector '{}'", name),
+        });
+    }
+
+    let mut values = Vec::new();
+    loop {
+        skip_commas(stream);
+
+        match &stream.peek().kind {
+            TokenKind::RBracket => {
+                stream.advance();
+                if values.is_empty() {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Model parameter vector '{}' cannot be empty", name),
+                    });
+                }
+                return Ok(values);
+            }
+            TokenKind::StringLit(value) => {
+                let value = value.clone();
+                stream.advance();
+                values.push(value);
+            }
+            TokenKind::RParen | TokenKind::Newline | TokenKind::Eof => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Model parameter vector '{}' is missing ']'", name),
+                });
+            }
+            _ => {
+                values.push(parse_model_string_vector_bare_value(
+                    stream, line_num, name,
+                )?);
+            }
+        }
+    }
+}
+
+fn parse_model_string_vector_bare_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    name: &str,
+) -> Result<String, ParseError> {
+    let mut value = String::new();
+    let mut previous_end = None;
+
+    loop {
+        let token = stream.peek().clone();
+        match token.kind {
+            TokenKind::Comma | TokenKind::RBracket | TokenKind::Newline | TokenKind::Eof => break,
+            TokenKind::StringLit(_) if value.is_empty() => break,
+            _ => {}
+        }
+
+        if let Some(end) = previous_end
+            && token.span.start != end
+        {
+            break;
+        }
+
+        let piece = if token.lexeme.is_empty() {
+            token.kind.to_string()
+        } else {
+            token.lexeme
+        };
+        if piece.is_empty() {
+            break;
+        }
+
+        previous_end = Some(token.span.end);
+        value.push_str(&piece);
+        stream.advance();
+    }
+
+    if value.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected string value in model parameter vector '{}', found {}",
+                name,
+                stream.peek().kind
+            ),
+        });
+    }
+
+    Ok(value)
 }
 
 fn parse_model_real_vector(

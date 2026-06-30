@@ -7,7 +7,7 @@
 use super::behavioral_expr::prepare_behavioral_expression;
 use super::{Engine, JfetLevel2Model, SimulationError, SpiceDialect, extract_dc_value};
 use crate::device::JfetChannelModel;
-use crate::netlist::{ElementKind, flatten_netlist};
+use crate::netlist::{Element, ElementKind, SourceSpec, XspicePort, flatten_netlist_with_models};
 use crate::{CircuitData, Netlist};
 #[cfg(feature = "veriloga")]
 use serde::{Deserialize, Serialize};
@@ -37,17 +37,14 @@ use xspice_ports::*;
 #[cfg(feature = "veriloga")]
 mod veriloga_cache;
 #[cfg(feature = "veriloga")]
-use veriloga_cache::{
-    CachedVerilogAModel, normalize_model_key, resolve_cached_or_compile_veriloga,
-};
-#[cfg(feature = "veriloga")]
 pub use veriloga_cache::{
     VerilogACacheEntry, VerilogACachePruneReport, VerilogACacheStats, clear_veriloga_cache,
     prune_veriloga_cache, register_precompiled_veriloga_model,
-    register_precompiled_veriloga_model_with_dependencies,
-    register_precompiled_veriloga_runtime_with_dependencies, veriloga_cache_entries,
+    register_precompiled_veriloga_model_with_dependencies, veriloga_cache_entries,
     veriloga_cache_stats,
 };
+#[cfg(feature = "veriloga")]
+use veriloga_cache::{normalize_model_key, resolve_cached_or_compile_veriloga};
 
 mod model_policy;
 use model_policy::*;
@@ -90,14 +87,328 @@ fn validate_source_file_inputs(
     }
 }
 
+fn xtradev_scalar_terminal_node(port: &XspicePort) -> Option<&str> {
+    match port {
+        XspicePort::Analog(name) | XspicePort::Conductance(name) => Some(name),
+        _ => None,
+    }
+}
+
+fn xtradev_two_terminal_nodes(
+    element_name: &str,
+    model_name: &str,
+    model_type: &str,
+    ports: &[XspicePort],
+) -> Result<(String, String), SimulationError> {
+    match ports {
+        [XspicePort::DifferentialVoltage { pos, neg }]
+        | [XspicePort::DifferentialCurrent { pos, neg }]
+        | [XspicePort::DifferentialConductance { pos, neg }] => Ok((pos.clone(), neg.clone())),
+        [first, second] => {
+            let pos = xtradev_scalar_terminal_node(first);
+            let neg = xtradev_scalar_terminal_node(second);
+            match (pos, neg) {
+                (Some(pos), Some(neg)) => Ok((pos.to_string(), neg.to_string())),
+                _ => Err(SimulationError::Circuit(format!(
+                    "XSPICE xtradev {model_type} instance '{element_name}' model '{model_name}' \
+                     expects one differential terminal pair or two bare analog nodes"
+                ))),
+            }
+        }
+        _ => Err(SimulationError::Circuit(format!(
+            "XSPICE xtradev {model_type} instance '{element_name}' model '{model_name}' \
+             expects one differential terminal pair or two bare analog nodes"
+        ))),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XspiceMeterKind {
+    Capacitance,
+    Inductance,
+}
+
+fn xspice_meter_kind(model_name: &str) -> Option<XspiceMeterKind> {
+    if model_name.eq_ignore_ascii_case("cmeter") {
+        Some(XspiceMeterKind::Capacitance)
+    } else if model_name.eq_ignore_ascii_case("lmeter") {
+        Some(XspiceMeterKind::Inductance)
+    } else {
+        None
+    }
+}
+
+fn xspice_meter_input_node<'a>(
+    element_name: &str,
+    model_name: &str,
+    ports: &'a [XspicePort],
+) -> Result<&'a str, SimulationError> {
+    match ports.first() {
+        Some(XspicePort::Analog(node)) => Ok(node),
+        Some(XspicePort::DifferentialVoltage { pos, .. }) => Ok(pos),
+        Some(other) => Err(SimulationError::Circuit(format!(
+            "XSPICE xtradev meter instance '{element_name}' model '{model_name}' expects first \
+             port to be voltage or differential voltage input, got {other:?}"
+        ))),
+        None => Err(SimulationError::Circuit(format!(
+            "XSPICE xtradev meter instance '{element_name}' model '{model_name}' requires an input port"
+        ))),
+    }
+}
+
+fn xspice_meter_node_incident(nodes: &[String], target: &str) -> bool {
+    nodes.iter().any(|node| node.eq_ignore_ascii_case(target))
+}
+
+fn xspice_meter_element_incident(element: &Element, target: &str) -> Result<bool, SimulationError> {
+    if xspice_meter_node_incident(&element.nodes, target) {
+        return Ok(true);
+    }
+
+    let ElementKind::Xspice { model, ports, .. } = &element.kind else {
+        return Ok(false);
+    };
+    let (pos, neg) = xtradev_two_terminal_nodes(&element.name, model, "reactive", ports)?;
+    Ok(pos.eq_ignore_ascii_case(target) || neg.eq_ignore_ascii_case(target))
+}
+
+fn xspice_meter_zero_dc_voltage_source(spec: &SourceSpec) -> bool {
+    match spec {
+        SourceSpec::Dc(value) => *value == 0.0,
+        SourceSpec::DcAc { dc_value, .. } => *dc_value == 0.0,
+        _ => false,
+    }
+}
+
+fn xspice_meter_zero_source_other_node<'a>(element: &'a Element, target: &str) -> Option<&'a str> {
+    let ElementKind::VoltageSource(spec) = &element.kind else {
+        return None;
+    };
+    if !xspice_meter_zero_dc_voltage_source(spec) || element.nodes.len() < 2 {
+        return None;
+    }
+    if element.nodes[0].eq_ignore_ascii_case(target) {
+        Some(&element.nodes[1])
+    } else if element.nodes[1].eq_ignore_ascii_case(target) {
+        Some(&element.nodes[0])
+    } else {
+        None
+    }
+}
+
+fn xspice_meter_resolved_capacitance(
+    netlist: &Netlist,
+    element: &Element,
+    temperature: f64,
+) -> Result<Option<f64>, SimulationError> {
+    match &element.kind {
+        ElementKind::Capacitor {
+            value,
+            model,
+            instance_params,
+            ..
+        } => Ok(Some(resolve_capacitor_instance_value(
+            netlist,
+            &element.name,
+            *value,
+            model.as_deref(),
+            instance_params,
+            temperature,
+        )?)),
+        ElementKind::Xspice {
+            model,
+            params,
+            expr_params,
+            string_params,
+            string_expr_params,
+            string_vector_params,
+            string_vector_expr_params,
+            real_vector_params,
+            real_vector_expr_params,
+            ..
+        } => {
+            match resolve_native_xtradev_reactive_model(
+                netlist,
+                model,
+                &element.name,
+                params,
+                expr_params,
+                string_params,
+                string_expr_params,
+                string_vector_params,
+                string_vector_expr_params,
+                real_vector_params,
+                real_vector_expr_params,
+            )? {
+                Some(NativeXtradevReactiveModel::Capacitor { capacitance, .. }) => {
+                    Ok(Some(capacitance))
+                }
+                _ => Ok(None),
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+fn xspice_meter_resolved_inductance(
+    netlist: &Netlist,
+    element: &Element,
+    temperature: f64,
+) -> Result<Option<f64>, SimulationError> {
+    match &element.kind {
+        ElementKind::Inductor {
+            value,
+            model,
+            instance_params,
+            ..
+        } => Ok(Some(resolve_inductor_instance_value(
+            netlist,
+            &element.name,
+            *value,
+            model.as_deref(),
+            instance_params,
+            temperature,
+        )?)),
+        ElementKind::Xspice {
+            model,
+            params,
+            expr_params,
+            string_params,
+            string_expr_params,
+            string_vector_params,
+            string_vector_expr_params,
+            real_vector_params,
+            real_vector_expr_params,
+            ..
+        } => {
+            match resolve_native_xtradev_reactive_model(
+                netlist,
+                model,
+                &element.name,
+                params,
+                expr_params,
+                string_params,
+                string_expr_params,
+                string_vector_params,
+                string_vector_expr_params,
+                real_vector_params,
+                real_vector_expr_params,
+            )? {
+                Some(NativeXtradevReactiveModel::Inductor { inductance, .. }) => {
+                    Ok(Some(inductance))
+                }
+                _ => Ok(None),
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+fn xspice_meter_parallel_inductance(existing: f64, next: f64) -> f64 {
+    1.0 / (1.0 / existing + 1.0 / next)
+}
+
+fn xspice_meter_equivalent_capacitance(
+    netlist: &Netlist,
+    flat_elements: &[Element],
+    input_node: &str,
+    temperature: f64,
+) -> Result<f64, SimulationError> {
+    let mut capacitance = 0.0;
+
+    for element in flat_elements {
+        if let Some(value) = xspice_meter_resolved_capacitance(netlist, element, temperature)?
+            && xspice_meter_element_incident(element, input_node)?
+        {
+            capacitance += value;
+        }
+    }
+
+    for zero_source_node in flat_elements
+        .iter()
+        .filter_map(|element| xspice_meter_zero_source_other_node(element, input_node))
+    {
+        for element in flat_elements {
+            if let Some(value) = xspice_meter_resolved_capacitance(netlist, element, temperature)?
+                && xspice_meter_element_incident(element, zero_source_node)?
+            {
+                capacitance += value;
+            }
+        }
+    }
+
+    Ok(capacitance)
+}
+
+fn xspice_meter_equivalent_inductance(
+    netlist: &Netlist,
+    flat_elements: &[Element],
+    input_node: &str,
+    temperature: f64,
+) -> Result<f64, SimulationError> {
+    let mut inductance = 1.0e12;
+
+    for element in flat_elements {
+        if let Some(value) = xspice_meter_resolved_inductance(netlist, element, temperature)?
+            && xspice_meter_element_incident(element, input_node)?
+        {
+            inductance = xspice_meter_parallel_inductance(inductance, value);
+        }
+    }
+
+    for zero_source_node in flat_elements
+        .iter()
+        .filter_map(|element| xspice_meter_zero_source_other_node(element, input_node))
+    {
+        for element in flat_elements {
+            if let Some(value) = xspice_meter_resolved_inductance(netlist, element, temperature)?
+                && xspice_meter_element_incident(element, zero_source_node)?
+            {
+                inductance = xspice_meter_parallel_inductance(inductance, value);
+            }
+        }
+    }
+
+    Ok(inductance)
+}
+
+fn xspice_meter_measured_value(
+    netlist: &Netlist,
+    flat_elements: &[Element],
+    element_name: &str,
+    model_name: &str,
+    ports: &[XspicePort],
+    kind: XspiceMeterKind,
+    temperature: f64,
+) -> Result<f64, SimulationError> {
+    let input_node = xspice_meter_input_node(element_name, model_name, ports)?;
+    match kind {
+        XspiceMeterKind::Capacitance => {
+            xspice_meter_equivalent_capacitance(netlist, flat_elements, input_node, temperature)
+        }
+        XspiceMeterKind::Inductance => {
+            xspice_meter_equivalent_inductance(netlist, flat_elements, input_node, temperature)
+        }
+    }
+}
+
 impl Engine {
     /// Build circuit from netlist (flattens subcircuits first)
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
         let mut circuit = CircuitData::new();
 
         // Flatten subcircuit instances into top-level elements
-        let flat_elements = flatten_netlist(netlist)
+        let flattened = flatten_netlist_with_models(netlist)
             .map_err(|e| SimulationError::Netlist(format!("Flattening error: {}", e)))?;
+        let mut effective_netlist;
+        let netlist = if flattened.scoped_models.is_empty() {
+            netlist
+        } else {
+            effective_netlist = netlist.clone();
+            effective_netlist.models.extend(flattened.scoped_models);
+            &effective_netlist
+        };
+        let flat_elements = flattened.elements;
 
         // Debug: log all elements
         log::info!("Building circuit with {} elements:", flat_elements.len());
@@ -113,7 +424,10 @@ impl Engine {
         // One shared Arc per model: instances share the (megabyte-scale)
         // program and a single JIT compilation
         #[cfg(feature = "veriloga")]
-        let mut veriloga_models: HashMap<String, CachedVerilogAModel> = HashMap::new();
+        let mut veriloga_models: HashMap<
+            String,
+            std::sync::Arc<rspice_veriloga::CompiledModel>,
+        > = HashMap::new();
 
         // One shared BSIM3v3.3 card + temperature block per .model name,
         // with the (W, L) size knots memoized across instances.
@@ -126,28 +440,29 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         {
             for include in &netlist.veriloga_includes {
-                let runtime = resolve_cached_or_compile_veriloga(&include.file_path)?;
+                let model =
+                    std::sync::Arc::new(resolve_cached_or_compile_veriloga(&include.file_path)?);
 
-                let model_key = normalize_model_key(runtime.model.name.as_str());
+                let model_key = normalize_model_key(model.name.as_str());
                 veriloga_models
                     .entry(model_key)
-                    .or_insert_with(|| runtime.clone());
+                    .or_insert_with(|| std::sync::Arc::clone(&model));
 
                 if let Some(alias) = include.model_name.as_deref() {
                     veriloga_models
                         .entry(normalize_model_key(alias))
-                        .or_insert_with(|| runtime.clone());
+                        .or_insert_with(|| std::sync::Arc::clone(&model));
                 }
 
                 if let Some(stem) = include.file_path.file_stem().and_then(|s| s.to_str()) {
                     veriloga_models
                         .entry(normalize_model_key(stem))
-                        .or_insert_with(|| runtime.clone());
+                        .or_insert_with(|| std::sync::Arc::clone(&model));
                 }
 
                 log::info!(
                     "Loaded Verilog-A model '{}' from {}",
-                    runtime.model.name,
+                    model.name,
                     include.file_path.display()
                 );
             }
@@ -164,6 +479,9 @@ impl Engine {
                     instance_params,
                     deferred_params,
                 } => {
+                    #[cfg(not(feature = "veriloga-builtins"))]
+                    let _ = deferred_params;
+
                     if let Some(expression) = value_expr.as_deref()
                         && model.is_none()
                         && expression_references_circuit_state(expression)
@@ -423,6 +741,9 @@ impl Engine {
                     instance_params,
                     deferred_params,
                 } => {
+                    #[cfg(not(feature = "veriloga-builtins"))]
+                    let _ = deferred_params;
+
                     #[cfg(feature = "veriloga-builtins")]
                     if try_route_generated_diode_model(
                         &mut circuit,
@@ -556,6 +877,9 @@ impl Engine {
                     instance_params,
                     deferred_params,
                 } => {
+                    #[cfg(not(feature = "veriloga-builtins"))]
+                    let _ = deferred_params;
+
                     let collector = circuit.get_or_create_node(&element.nodes[0]);
                     let base = circuit.get_or_create_node(&element.nodes[1]);
                     let emitter = circuit.get_or_create_node(&element.nodes[2]);
@@ -668,75 +992,62 @@ impl Engine {
                     );
                     bjt.set_substrate_node(substrate);
 
-                    // VBIC instances solve their internal states as MNA
-                    // unknowns (ngspice vbicsetup.c topology); allocate the
-                    // non-collapsed internal nodes now so the matrix builder
-                    // reserves the coupled block.
-                    if bjt.uses_vbic_dynamic_charges() {
-                        bjt.assign_vbic_internal_nodes(|suffix| {
-                            circuit.get_or_create_node(&format!(
-                                "{}.__{}.internal",
-                                element.name, suffix
-                            ))
-                        });
-                    } else {
-                        // Legacy GP: externalize the constant collector,
-                        // emitter, and base resistances onto real internal
-                        // nodes (the diode/JFET/MOSFET pattern), so their
-                        // thermal noise rides the resistor walk and junction
-                        // noise injects at the true internal terminals.
-                        // Values are taken after model, instance, and
-                        // temperature application, and the zeroed device
-                        // fields collapse the matching internal states, so
-                        // the solved system is identical. Only the
-                        // bias-dependent base part (qb-modulated, ngspice
-                        // BJTgx, nonzero when RBM < RB) stays folded.
-                        if bjt.rcx.is_finite() && bjt.rcx > 0.0 {
-                            let cint_name = format!("{}.__cint", element.name);
-                            let cint = circuit.get_or_create_node(&cint_name);
-                            let rc_name = format!("{}.__rc", element.name);
-                            circuit.resistors.add(rc_name, collector, cint, bjt.rcx);
-                            bjt.node_collector = cint;
-                            bjt.clear_collector_series_resistance();
-                            if bjt.noise_temperature_offset != 0.0 {
-                                circuit.resistors.set_last_noise_temperature_offset(
-                                    bjt.noise_temperature_offset,
-                                );
-                            }
+                    // Legacy GP: externalize the constant collector,
+                    // emitter, and base resistances onto real internal
+                    // nodes (the diode/JFET/MOSFET pattern), so their
+                    // thermal noise rides the resistor walk and junction
+                    // noise injects at the true internal terminals.
+                    // Values are taken after model, instance, and
+                    // temperature application, and the zeroed device
+                    // fields collapse the matching internal states, so
+                    // the solved system is identical. Only the
+                    // bias-dependent base part (qb-modulated, ngspice
+                    // BJTgx, nonzero when RBM < RB) stays folded.
+                    if bjt.rcx.is_finite() && bjt.rcx > 0.0 {
+                        let cint_name = format!("{}.__cint", element.name);
+                        let cint = circuit.get_or_create_node(&cint_name);
+                        let rc_name = format!("{}.__rc", element.name);
+                        circuit.resistors.add(rc_name, collector, cint, bjt.rcx);
+                        bjt.node_collector = cint;
+                        bjt.clear_collector_series_resistance();
+                        if bjt.noise_temperature_offset != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(bjt.noise_temperature_offset);
                         }
-                        if bjt.re.is_finite() && bjt.re > 0.0 {
-                            let eint_name = format!("{}.__eint", element.name);
-                            let eint = circuit.get_or_create_node(&eint_name);
-                            let re_name = format!("{}.__re", element.name);
-                            circuit.resistors.add(re_name, emitter, eint, bjt.re);
-                            bjt.node_emitter = eint;
-                            bjt.clear_emitter_series_resistance();
-                            if bjt.noise_temperature_offset != 0.0 {
-                                circuit.resistors.set_last_noise_temperature_offset(
-                                    bjt.noise_temperature_offset,
-                                );
-                            }
+                    }
+                    if bjt.re.is_finite() && bjt.re > 0.0 {
+                        let eint_name = format!("{}.__eint", element.name);
+                        let eint = circuit.get_or_create_node(&eint_name);
+                        let re_name = format!("{}.__re", element.name);
+                        circuit.resistors.add(re_name, emitter, eint, bjt.re);
+                        bjt.node_emitter = eint;
+                        bjt.clear_emitter_series_resistance();
+                        if bjt.noise_temperature_offset != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(bjt.noise_temperature_offset);
                         }
-                        // The constant base part is RBM, which ngspice
-                        // defaults to RB (bjttemp.c) so the folded remainder
-                        // is zero for common cards. Junction limiting moves
-                        // with the topology: the device update applies
-                        // pnjlim to its junction state against the previous
-                        // iterate (bjtload.c's discipline at the prime
-                        // nodes), and the engine-side external scale clamp
-                        // skips GP devices.
-                        if bjt.rbx.is_finite() && bjt.rbx > 0.0 {
-                            let bint_name = format!("{}.__bint", element.name);
-                            let bint = circuit.get_or_create_node(&bint_name);
-                            let rb_name = format!("{}.__rb", element.name);
-                            circuit.resistors.add(rb_name, base, bint, bjt.rbx);
-                            bjt.node_base = bint;
-                            bjt.clear_base_constant_resistance();
-                            if bjt.noise_temperature_offset != 0.0 {
-                                circuit.resistors.set_last_noise_temperature_offset(
-                                    bjt.noise_temperature_offset,
-                                );
-                            }
+                    }
+                    // The constant base part is RBM, which ngspice
+                    // defaults to RB (bjttemp.c) so the folded remainder
+                    // is zero for common cards. Junction limiting moves
+                    // with the topology: the device update applies
+                    // pnjlim to its junction state against the previous
+                    // iterate (bjtload.c's discipline at the prime
+                    // nodes), and the engine-side external scale clamp
+                    // skips GP devices.
+                    if bjt.rbx.is_finite() && bjt.rbx > 0.0 {
+                        let bint_name = format!("{}.__bint", element.name);
+                        let bint = circuit.get_or_create_node(&bint_name);
+                        let rb_name = format!("{}.__rb", element.name);
+                        circuit.resistors.add(rb_name, base, bint, bjt.rbx);
+                        bjt.node_base = bint;
+                        bjt.clear_base_constant_resistance();
+                        if bjt.noise_temperature_offset != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(bjt.noise_temperature_offset);
                         }
                     }
 
@@ -994,42 +1305,6 @@ impl Engine {
                         continue;
                     }
 
-                    // EKV 2.6 LEVEL=260. This is a native Xyce-compatible
-                    // four-terminal DC slice; unsupported EKV card options fail
-                    // closed rather than falling through to Berkeley MOS.
-                    if native_ekv26_level(level)
-                        && let Some(params_map) = params_map.as_ref()
-                    {
-                        let device_model =
-                            model_def.expect("native EKV26 params map derives from model card");
-                        let model_key = device_model.name.clone();
-                        reject_deferred_native_mos_model_params(
-                            &element.name,
-                            &model_key,
-                            "EKV26",
-                            params_map,
-                            &device_model.expr_params,
-                            &device_model.string_params,
-                        )?;
-                        validate_ekv26_native_params(
-                            &element.name,
-                            &model_key,
-                            params_map,
-                            instance_params,
-                            deferred_params,
-                        )?;
-                        Self::build_ekv26(
-                            &mut circuit,
-                            element,
-                            resolved_mos_type,
-                            &model_key,
-                            params_map,
-                            instance_params,
-                            self.config.temperature,
-                        )?;
-                        continue;
-                    }
-
                     // EKV3 LEVEL=301. The native support is deliberately
                     // narrow: VA-Models NMOS150 ekv3_rf DC plus the Xyce
                     // VANOISE regression slice. Unsupported EKV3 surfaces fail
@@ -1098,11 +1373,12 @@ impl Engine {
                         let descriptor = mos_level_descriptor(level);
                         if known_advanced_mos_level_without_native(level) {
                             return Err(SimulationError::Circuit(format!(
-                                "MOSFET '{}': model '{}' requests {} which has no native \
-                                 implementation yet. Known advanced CMC/HiSIM model families must \
-                                 not run through the simplified MOS approximation; CMC models are \
-                                 future Verilog-A-to-Rust codegen targets and require \
-                                 reference-backed validation before running this card.",
+                                "MOSFET '{}': model '{}' requests {}, but no generated Verilog-A \
+                                 builtin for that exact advanced compact-model family is available \
+                                 in this build. Advanced CMC/HiSIM model families must not run \
+                                 through the simplified MOS approximation; add or enable the exact \
+                                 generated builtin with reference-backed validation before running \
+                                 this card.",
                                 element.name, model, descriptor
                             )));
                         }
@@ -1110,21 +1386,16 @@ impl Engine {
                             "MOSFET '{}': model '{}' requests {} which has no native \
                              implementation. Supported levels: 1, 2, 3, 6 (Berkeley \
                             MOS1/MOS2/MOS3/MOS6), 4/5 (legacy BSIM1/BSIM2), \
-                            9 (ngspice MOS9), 8/49 plus Xyce-style 9 \
-                            (BSIM3v3.3), 14/54 (BSIM4 v4.8), 10 (Xyce BSIMSOI3), \
-                            55-57 (BSIM3-SOI FD/DD/PD), 18 (native VDMOS), \
-                            260 (EKV 2.6), and 301 (EKV3). \
+                             9 (ngspice MOS9), 8/49 plus Xyce-style 9 \
+                             (BSIM3v3.3), 14/54 (BSIM4 v4.8), 10/55/56/57 \
+                             (native BSIMSOI), 18 (native VDMOS), and 301 (EKV3). \
                             Unsupported MOS levels must fail closed until native support \
                             and reference-backed validation are added.",
                             element.name, model, descriptor
                         )));
                     }
 
-                    let bulk_node_name = if is_bsimsoi_level(level) && element.nodes.len() > 4 {
-                        &element.nodes[4]
-                    } else {
-                        &element.nodes[3]
-                    };
+                    let bulk_node_name = &element.nodes[3];
 
                     let drain_external = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
@@ -1727,10 +1998,8 @@ impl Engine {
 
                     #[cfg(feature = "veriloga")]
                     {
-                        if let Some(runtime) =
-                            veriloga_models.get(&normalize_model_key(subckt_name))
+                        if let Some(model) = veriloga_models.get(&normalize_model_key(subckt_name))
                         {
-                            let model = &runtime.model;
                             if element.nodes.len() > model.num_terminals {
                                 return Err(SimulationError::Circuit(format!(
                                     "Verilog-A instance '{}' expects at most {} terminals for model '{}', found {}",
@@ -1750,32 +2019,14 @@ impl Engine {
                                 });
                             }
 
-                            #[cfg(feature = "veriloga-native")]
-                            let device = {
-                                let canonical_ir = runtime.canonical_ir.as_ref().ok_or_else(|| {
-                                    SimulationError::Circuit(format!(
-                                        "Verilog-A device '{}' missing canonical IR for native JIT; no interpreter fallback",
-                                        element.name
-                                    ))
-                                })?;
-                                crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir(
-                                    element.name.clone(),
-                                    std::sync::Arc::clone(model),
-                                    canonical_ir.as_ref(),
-                                    &node_ids,
-                                )
-                            };
-
-                            #[cfg(not(feature = "veriloga-native"))]
-                            let device = crate::device::veriloga::VerilogADevice::try_new(
+                            let mut device = crate::device::veriloga::VerilogADevice::try_new(
                                 element.name.clone(),
                                 std::sync::Arc::clone(model),
                                 &node_ids,
-                            );
-
-                            let mut device = device.map_err(|err| {
+                            )
+                            .map_err(|err| {
                                 SimulationError::Circuit(format!(
-                                    "Verilog-A device '{}' construction failed: {}",
+                                    "Verilog-A device '{}' parameter default resolution failed: {}",
                                     element.name, err
                                 ))
                             })?;
@@ -1817,6 +2068,13 @@ impl Engine {
                                                 name, e
                                             ))
                                         })?
+                                    }
+                                    crate::netlist::ParametricValue::String(_)
+                                    | crate::netlist::ParametricValue::StringExpression(_) => {
+                                        return Err(SimulationError::Circuit(format!(
+                                            "Verilog-A parameter '{}' expects a numeric value, got string value",
+                                            name
+                                        )));
                                     }
                                 };
                                 // `m=` on an instance whose model does not
@@ -2283,12 +2541,88 @@ impl Engine {
                     model,
                     ports,
                     params,
+                    expr_params,
+                    string_params,
+                    string_expr_params,
+                    string_vector_params,
+                    string_vector_expr_params,
+                    real_vector_params,
+                    real_vector_expr_params,
                 } => {
+                    let xspice_ramp_active =
+                        self.config.ramptime.is_finite() && self.config.ramptime > 0.0;
+                    if !xspice_ramp_active
+                        && let Some(native_model) = resolve_native_xtradev_reactive_model(
+                            netlist,
+                            model,
+                            &element.name,
+                            params,
+                            expr_params,
+                            string_params,
+                            string_expr_params,
+                            string_vector_params,
+                            string_vector_expr_params,
+                            real_vector_params,
+                            real_vector_expr_params,
+                        )?
+                    {
+                        let lowered_to_native = match native_model {
+                            NativeXtradevReactiveModel::Capacitor {
+                                capacitance,
+                                initial_voltage,
+                            } => {
+                                let (pos, neg) = xtradev_two_terminal_nodes(
+                                    &element.name,
+                                    model,
+                                    "capacitoric",
+                                    ports,
+                                )?;
+                                let np = circuit.get_or_create_node(&pos);
+                                let nn = circuit.get_or_create_node(&neg);
+                                if let Some(ic) = initial_voltage {
+                                    circuit.capacitors.add_with_ic(
+                                        element.name.clone(),
+                                        np,
+                                        nn,
+                                        capacitance,
+                                        ic,
+                                    );
+                                } else {
+                                    circuit.capacitors.add(
+                                        element.name.clone(),
+                                        np,
+                                        nn,
+                                        capacitance,
+                                    );
+                                }
+                                true
+                            }
+                            // ngspice inductoric is an XSPICE gd current-output
+                            // model at DC/AC, not a native SPICE inductor.
+                            NativeXtradevReactiveModel::Inductor { .. } => false,
+                        };
+                        if lowered_to_native {
+                            log::debug!(
+                                "Lowered XSPICE xtradev instance {} model={} to native reactive device",
+                                element.name,
+                                model
+                            );
+                            continue;
+                        }
+                    }
+
                     let resolved_model = resolve_xspice_model_instance(
                         netlist,
                         &circuit.xspice_registry,
                         model,
                         params,
+                        expr_params,
+                        string_params,
+                        string_expr_params,
+                        string_vector_params,
+                        string_vector_expr_params,
+                        real_vector_params,
+                        real_vector_expr_params,
                     )
                     .map_err(|e| {
                         SimulationError::Circuit(format!(
@@ -2297,29 +2631,39 @@ impl Engine {
                         ))
                     })?;
 
-                    let ports_spec = resolved_model.code_model.ports().to_vec();
-                    let mut connections: Vec<crate::xspice::PortConnection> =
-                        Vec::with_capacity(ports.len());
-                    for (port_idx, port) in ports.iter().enumerate() {
-                        let port_spec = ports_spec.get(port_idx).ok_or_else(|| {
-                            SimulationError::Circuit(format!(
-                                "XSPICE element '{}' provides more connections ({}) than model '{}' ports ({})",
-                                element.name,
-                                ports.len(),
-                                resolved_model.code_model.name(),
-                                ports_spec.len()
-                            ))
-                        })?;
-                        let connection = coerce_xspice_connection(&mut circuit, port_spec, port)?;
-                        connections.push(connection);
+                    let mut numeric_params = resolved_model.numeric_params.clone();
+                    if let Some(kind) = xspice_meter_kind(resolved_model.code_model.name()) {
+                        let measured = xspice_meter_measured_value(
+                            netlist,
+                            &flat_elements,
+                            &element.name,
+                            model,
+                            ports,
+                            kind,
+                            self.config.temperature,
+                        )?;
+                        numeric_params.push((
+                            crate::xspice::models::XTRADEV_METER_MEASURED_VALUE_PARAM.to_string(),
+                            measured,
+                        ));
                     }
 
-                    let mut instance = crate::xspice::XspiceInstance::new(
+                    let ports_spec = resolved_model.code_model.ports().to_vec();
+                    let connections = coerce_xspice_connections(
+                        &mut circuit,
+                        &ports_spec,
+                        ports,
+                        &element.name,
+                        resolved_model.code_model.name(),
+                    )?;
+
+                    let mut instance = crate::xspice::XspiceInstance::new_with_string_vectors(
                         element.name.clone(),
                         resolved_model.code_model.clone(),
                         connections,
-                        &resolved_model.numeric_params,
+                        &numeric_params,
                         &resolved_model.string_params,
+                        &resolved_model.string_vector_params,
                         &resolved_model.real_vector_params,
                         &resolved_model.integer_vector_params,
                     )
@@ -2329,6 +2673,9 @@ impl Engine {
                             element.name, e
                         ))
                     })?;
+
+                    instance.set_temperature(self.config.temperature);
+                    instance.set_ramptime(self.config.ramptime);
 
                     // Allocate MNA branch variables for voltage-driven XSPICE outputs.
                     // This allows stamping exact branch equations (like independent/controlled V sources)
@@ -2346,26 +2693,79 @@ impl Engine {
                             continue;
                         }
 
-                        let connection = instance.connection_at(port_idx);
-                        let is_connected_analog = matches!(
-                            connection,
+                        let connection = instance.connection_at(port_idx).cloned();
+                        match connection {
                             Some(crate::xspice::PortConnection::Analog(_))
-                                | Some(crate::xspice::PortConnection::Differential(_, _))
-                        );
-                        if !is_connected_analog {
-                            continue;
+                            | Some(crate::xspice::PortConnection::Differential(_, _)) => {
+                                let branch_name = format!("{}#{}", element.name, port_spec.name);
+                                let branch_ordinal = circuit.allocate_branch_named(&branch_name);
+                                instance
+                                    .set_output_branch(port_idx, branch_ordinal)
+                                    .map_err(|e| {
+                                        SimulationError::Circuit(format!(
+                                            "Failed to assign branch for XSPICE instance '{}' port '{}': {}",
+                                            element.name, port_spec.name, e
+                                        ))
+                                    })?;
+                            }
+                            Some(crate::xspice::PortConnection::AnalogVector(nodes)) => {
+                                for element_idx in 0..nodes.len() {
+                                    let branch_name = format!(
+                                        "{}#{}[{}]",
+                                        element.name, port_spec.name, element_idx
+                                    );
+                                    let branch_ordinal =
+                                        circuit.allocate_branch_named(&branch_name);
+                                    instance
+                                        .set_output_vector_branch(
+                                            port_idx,
+                                            element_idx,
+                                            branch_ordinal,
+                                        )
+                                        .map_err(|e| {
+                                            SimulationError::Circuit(format!(
+                                                "Failed to assign branch for XSPICE instance '{}' port '{}[{}]': {}",
+                                                element.name, port_spec.name, element_idx, e
+                                            ))
+                                        })?;
+                                }
+                            }
+                            Some(crate::xspice::PortConnection::TypedAnalogVector(elements)) => {
+                                for (element_idx, element_connection) in elements.iter().enumerate()
+                                {
+                                    let needs_voltage_branch = matches!(
+                                        element_connection,
+                                        crate::xspice::AnalogInputConnection::Node(_)
+                                            | crate::xspice::AnalogInputConnection::Differential(
+                                                _,
+                                                _
+                                            )
+                                    );
+                                    if !needs_voltage_branch {
+                                        continue;
+                                    }
+                                    let branch_name = format!(
+                                        "{}#{}[{}]",
+                                        element.name, port_spec.name, element_idx
+                                    );
+                                    let branch_ordinal =
+                                        circuit.allocate_branch_named(&branch_name);
+                                    instance
+                                        .set_output_vector_branch(
+                                            port_idx,
+                                            element_idx,
+                                            branch_ordinal,
+                                        )
+                                        .map_err(|e| {
+                                            SimulationError::Circuit(format!(
+                                                "Failed to assign branch for XSPICE instance '{}' port '{}[{}]': {}",
+                                                element.name, port_spec.name, element_idx, e
+                                            ))
+                                        })?;
+                                }
+                            }
+                            _ => {}
                         }
-
-                        let branch_name = format!("{}#{}", element.name, port_spec.name);
-                        let branch_ordinal = circuit.allocate_branch_named(&branch_name);
-                        instance
-                            .set_output_branch(port_idx, branch_ordinal)
-                            .map_err(|e| {
-                                SimulationError::Circuit(format!(
-                                    "Failed to assign branch for XSPICE instance '{}' port '{}': {}",
-                                    element.name, port_spec.name, e
-                                ))
-                            })?;
                     }
 
                     instance.init().map_err(|e| {
@@ -2400,6 +2800,9 @@ impl Engine {
         // is established (required for current-controlled switch branch indexing).
         circuit
             .resolve_control_elements()
+            .map_err(|e| SimulationError::Circuit(e.to_string()))?;
+        circuit
+            .resolve_xspice_branch_references()
             .map_err(|e| SimulationError::Circuit(e.to_string()))?;
 
         // Resolve K couplings into mutual-coupling overlays now that every

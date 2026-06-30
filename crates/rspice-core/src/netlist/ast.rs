@@ -32,6 +32,10 @@ pub enum ParametricValue {
     Resolved(Value),
     /// An expression string to be evaluated with a parameter context
     Expression(String),
+    /// A resolved string value.
+    String(String),
+    /// A string parameter reference to be evaluated with a parameter context.
+    StringExpression(String),
 }
 
 impl ParametricValue {
@@ -49,7 +53,9 @@ impl ParametricValue {
     pub fn as_value(&self) -> Option<Value> {
         match self {
             ParametricValue::Resolved(v) => Some(*v),
-            ParametricValue::Expression(_) => None,
+            ParametricValue::Expression(_)
+            | ParametricValue::String(_)
+            | ParametricValue::StringExpression(_) => None,
         }
     }
 
@@ -77,6 +83,14 @@ impl ParametricValue {
                 }
                 Err(format!("Unable to resolve expression: {}", expr))
             }
+            ParametricValue::String(value) => Err(format!(
+                "Unable to resolve string value '{}' as a numeric expression",
+                value
+            )),
+            ParametricValue::StringExpression(expr) => Err(format!(
+                "Unable to resolve string expression '{}' as a numeric expression",
+                expr
+            )),
         }
     }
 }
@@ -403,6 +417,25 @@ pub enum ElementKind {
         ports: Vec<XspicePort>,
         /// Instance parameter overrides
         params: Vec<(String, Value)>,
+        /// Instance parameter overrides captured as expressions inside
+        /// subcircuit bodies; resolved against the instance scope during
+        /// flattening and merged over `params`.
+        expr_params: Vec<(String, String)>,
+        /// String instance parameter overrides.
+        string_params: Vec<(String, String)>,
+        /// String instance parameter overrides captured as string parameter
+        /// references inside subcircuit bodies.
+        string_expr_params: Vec<(String, String)>,
+        /// String-vector instance parameter overrides.
+        string_vector_params: Vec<(String, Vec<String>)>,
+        /// String-vector instance parameter overrides captured as string
+        /// parameter references inside subcircuit bodies.
+        string_vector_expr_params: Vec<(String, String)>,
+        /// Real-vector instance parameter overrides.
+        real_vector_params: Vec<(String, Vec<Value>)>,
+        /// Real-vector instance parameter overrides captured as expressions
+        /// inside subcircuit bodies.
+        real_vector_expr_params: Vec<(String, Vec<String>)>,
     },
 }
 
@@ -592,8 +625,29 @@ fn pattern_selects(pattern: &str, text: &str) -> bool {
 /// A2 [clk] [d] [q] d_dff      ; [clk], [d], [q] are digital ports
 /// A3 [a b c] [y] d_and        ; [a b c] is a digital vector
 /// A4 %vd[n+ n-] out gain      ; differential voltage input
-/// A5 null out d_source        ; null = unconnected
+/// A5 %g out model             ; single-ended conductance terminal
+/// A6 %gd[n+ n-] out model     ; differential conductance terminal
+/// A7 %vnam vsrc out model     ; named voltage-source branch-current input
+/// A8 %i out model             ; single-ended current terminal
+/// A9 %h[winding] model        ; single-ended hybrid terminal
+/// A10 %hd[core+ core-] model  ; differential hybrid terminal
+/// A11 null out d_source       ; null = unconnected
 /// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XspiceDigitalNode {
+    pub name: String,
+    pub inverted: bool,
+}
+
+impl XspiceDigitalNode {
+    pub fn new(name: impl Into<String>, inverted: bool) -> Self {
+        Self {
+            name: name.into(),
+            inverted,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum XspicePort {
     /// Single analog node (voltage or current)
@@ -604,6 +658,10 @@ pub enum XspicePort {
     /// Syntax: `[nodename]`
     Digital(String),
 
+    /// Single inverted digital node
+    /// Syntax: `[~nodename]`
+    DigitalInverted(String),
+
     /// Vector of analog nodes
     /// Syntax: `(n1 n2 n3)` (uncommon)
     AnalogVector(Vec<String>),
@@ -612,6 +670,26 @@ pub enum XspicePort {
     /// Syntax: `[n1 n2 n3]`
     DigitalVector(Vec<String>),
 
+    /// Vector of digital nodes with one or more inverted entries.
+    /// Syntax: `[n1 ~n2 n3]`
+    DigitalVectorMixed(Vec<XspiceDigitalNode>),
+
+    /// Single-ended conductance terminal
+    /// Syntax: `%g node` or `%g(node)`
+    Conductance(String),
+
+    /// Single-ended current terminal.
+    ///
+    /// On input ports, ngspice interprets `%i name` as a named branch current.
+    /// On output ports, it interprets `name` as a node with ground as the
+    /// reference terminal.
+    /// Syntax: `%i name` or `%i(name)`
+    Current(String),
+
+    /// Named voltage-source current input
+    /// Syntax: `%vnam vsource_name`
+    VoltageName(String),
+
     /// Differential voltage input/output
     /// Syntax: `%vd[n+ n-]` or `%vd(n+ n-)`
     DifferentialVoltage { pos: String, neg: String },
@@ -619,6 +697,18 @@ pub enum XspicePort {
     /// Differential current input/output
     /// Syntax: `%id[n+ n-]` or `%id(n+ n-)`
     DifferentialCurrent { pos: String, neg: String },
+
+    /// Differential conductance terminal pair
+    /// Syntax: `%gd[n+ n-]`, `%gd(n+ n-)`, or `%gd n+ n-`
+    DifferentialConductance { pos: String, neg: String },
+
+    /// Single-ended hybrid terminal.
+    /// Syntax: `%h node` or `%h(node)`
+    Hybrid(String),
+
+    /// Differential hybrid terminal pair.
+    /// Syntax: `%hd[n+ n-]`, `%hd(n+ n-)`, or `%hd n+ n-`
+    DifferentialHybrid { pos: String, neg: String },
 
     /// Null connection (unconnected port)
     /// Syntax: `null` or `[]`
@@ -636,9 +726,19 @@ impl XspicePort {
         XspicePort::Digital(node.into())
     }
 
+    /// Create a single inverted digital port
+    pub fn digital_inverted(node: impl Into<String>) -> Self {
+        XspicePort::DigitalInverted(node.into())
+    }
+
     /// Create a digital vector from node names
     pub fn digital_vector(nodes: Vec<String>) -> Self {
         XspicePort::DigitalVector(nodes)
+    }
+
+    /// Create a digital vector with explicit per-node inversion flags
+    pub fn digital_vector_mixed(nodes: Vec<XspiceDigitalNode>) -> Self {
+        XspicePort::DigitalVectorMixed(nodes)
     }
 
     /// Create a differential voltage port
@@ -655,14 +755,26 @@ impl XspicePort {
             self,
             XspicePort::Analog(_)
                 | XspicePort::AnalogVector(_)
+                | XspicePort::Conductance(_)
+                | XspicePort::Current(_)
+                | XspicePort::VoltageName(_)
                 | XspicePort::DifferentialVoltage { .. }
                 | XspicePort::DifferentialCurrent { .. }
+                | XspicePort::DifferentialConductance { .. }
+                | XspicePort::Hybrid(_)
+                | XspicePort::DifferentialHybrid { .. }
         )
     }
 
     /// Check if this is a digital port
     pub fn is_digital(&self) -> bool {
-        matches!(self, XspicePort::Digital(_) | XspicePort::DigitalVector(_))
+        matches!(
+            self,
+            XspicePort::Digital(_)
+                | XspicePort::DigitalInverted(_)
+                | XspicePort::DigitalVector(_)
+                | XspicePort::DigitalVectorMixed(_)
+        )
     }
 
     /// Check if this is a null connection
@@ -673,12 +785,21 @@ impl XspicePort {
     /// Get all node names referenced by this port
     pub fn node_names(&self) -> Vec<&str> {
         match self {
-            XspicePort::Analog(n) | XspicePort::Digital(n) => vec![n.as_str()],
+            XspicePort::Analog(n)
+            | XspicePort::Digital(n)
+            | XspicePort::DigitalInverted(n)
+            | XspicePort::Conductance(n)
+            | XspicePort::Current(n)
+            | XspicePort::Hybrid(n) => vec![n.as_str()],
+            XspicePort::VoltageName(_) => vec![],
             XspicePort::AnalogVector(v) | XspicePort::DigitalVector(v) => {
                 v.iter().map(|s| s.as_str()).collect()
             }
+            XspicePort::DigitalVectorMixed(v) => v.iter().map(|node| node.name.as_str()).collect(),
             XspicePort::DifferentialVoltage { pos, neg }
-            | XspicePort::DifferentialCurrent { pos, neg } => {
+            | XspicePort::DifferentialCurrent { pos, neg }
+            | XspicePort::DifferentialConductance { pos, neg }
+            | XspicePort::DifferentialHybrid { pos, neg } => {
                 vec![pos.as_str(), neg.as_str()]
             }
             XspicePort::Null => vec![],
@@ -1276,6 +1397,8 @@ pub struct SimulationOptions {
     pub method: Option<String>,
     /// Transient error tolerance factor (default: 7.0)
     pub trtol: Option<Value>,
+    /// Transient source/code-model ramping time in seconds (default: disabled)
+    pub ramptime: Option<Value>,
     /// Maximum Newton-Raphson iterations (default: 150)
     pub itl1: Option<usize>,
     /// DC transfer curve iterations (default: 50)
@@ -1337,6 +1460,9 @@ impl SimulationOptions {
         if other.trtol.is_some() {
             self.trtol = other.trtol;
         }
+        if other.ramptime.is_some() {
+            self.ramptime = other.ramptime;
+        }
         if other.itl1.is_some() {
             self.itl1 = other.itl1;
         }
@@ -1382,6 +1508,7 @@ pub struct ModelDef {
     pub params: Vec<(String, Value)>,
     pub expr_params: Vec<(String, String)>,
     pub string_params: Vec<(String, String)>,
+    pub string_vector_params: Vec<(String, Vec<String>)>,
     pub real_vector_params: Vec<(String, Vec<Value>)>,
     pub integer_vector_params: Vec<(String, Vec<i64>)>,
 }
@@ -1400,6 +1527,8 @@ pub struct SubcircuitDef {
     pub elements: Vec<Element>,
     /// Default parameter values (can be overridden at instance)
     pub params: Vec<(String, Value)>,
+    /// Default string parameter values (can be overridden at instance)
+    pub string_params: Vec<(String, String)>,
     /// Local simulation options scoped to this subcircuit
     /// (temp, scale, reltol, etc.)
     pub local_options: std::collections::HashMap<String, Value>,

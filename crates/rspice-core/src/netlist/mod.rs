@@ -27,12 +27,19 @@ mod xspice_parser;
 
 pub use ast::*;
 pub use expr::{ParamContext, RandomState};
-pub use flattener::{Flattener, FlattenerConfig, InstanceMetadata, flatten_netlist};
+pub use flattener::{
+    FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, flatten_netlist,
+    flatten_netlist_with_models,
+};
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::{IncludeProcessor, parse_include_directive, parse_lib_directive};
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
+pub(crate) use xspice_parser::{
+    parse_xspice_string_vector_literal, xspice_model_param_accepts_bare_string,
+    xspice_param_prefers_string_vector, xspice_param_preserves_numeric_string,
+};
 
 use thiserror::Error;
 
@@ -63,7 +70,7 @@ pub enum ParseError {
 
 use crate::analysis::MeasureStatement;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Represents a parsed netlist ready for circuit construction
 #[derive(Debug, Clone)]
@@ -352,26 +359,9 @@ impl Netlist {
 
         for model in &mut self.models {
             for (name, value) in &mut model.string_params {
-                if !Self::model_string_param_is_path(name) {
-                    continue;
-                }
-
-                let candidate = std::path::Path::new(value);
-                if candidate.is_absolute() {
-                    continue;
-                }
-
-                let resolved = base_dir.join(candidate);
-                *value = resolved.to_string_lossy().into_owned();
+                *value = normalize_model_string_path_value(name, value, Some(base_dir));
             }
         }
-    }
-
-    fn model_string_param_is_path(name: &str) -> bool {
-        let normalized = name.trim().to_ascii_lowercase();
-        normalized.ends_with("file")
-            || normalized.ends_with("_file")
-            || normalized.ends_with("path")
     }
 
     /// Add a global node
@@ -382,6 +372,65 @@ impl Netlist {
     /// Check if a node is global
     pub fn is_global(&self, node: &str) -> bool {
         self.global_nodes.contains(&node.to_uppercase())
+    }
+}
+
+pub(crate) fn normalize_model_string_path_value(
+    name: &str,
+    value: &str,
+    source_base_dir: Option<&Path>,
+) -> String {
+    let Some(base_dir) = source_base_dir else {
+        return value.to_string();
+    };
+    if !model_string_param_resolves_relative(name, value) {
+        return value.to_string();
+    }
+
+    let (path_value, suffix) = split_process_file_suffix(name, value);
+    if path_value.trim().is_empty() || path_value.contains("://") {
+        return value.to_string();
+    }
+
+    let candidate = Path::new(path_value);
+    if candidate.is_absolute() {
+        return value.to_string();
+    }
+
+    let mut resolved = base_dir.join(candidate).to_string_lossy().into_owned();
+    resolved.push_str(suffix);
+    resolved
+}
+
+fn model_string_param_resolves_relative(name: &str, value: &str) -> bool {
+    let normalized = name.trim().to_ascii_lowercase();
+    if normalized == "simulation" {
+        return model_string_value_looks_path_like(value);
+    }
+    normalized.ends_with("file") || normalized.ends_with("_file") || normalized.ends_with("path")
+}
+
+fn model_string_value_looks_path_like(value: &str) -> bool {
+    let trimmed = value.trim();
+    let lowered = trimmed.to_ascii_lowercase();
+    trimmed.starts_with('.')
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || lowered.ends_with(".dll")
+        || lowered.ends_with(".so")
+        || lowered.ends_with(".dylib")
+}
+
+fn split_process_file_suffix<'a>(name: &str, value: &'a str) -> (&'a str, &'a str) {
+    if !name.eq_ignore_ascii_case("process_file") {
+        return (value, "");
+    }
+    if let Some(base) = value.strip_suffix("||") {
+        (base, "||")
+    } else if let Some(base) = value.strip_suffix('|') {
+        (base, "|")
+    } else {
+        (value, "")
     }
 }
 
@@ -752,6 +801,231 @@ mod tests {
     }
 
     #[test]
+    fn model_vector_params_accept_suffix_and_param_as_first_numeric_elements() {
+        let netlist = Netlist::parse(
+            "xspice vector model params starting with numeric-like idents\n\
+             .param scale=0.5\n\
+             .model os oneshot (pw_array=[1n 2n] cntl_array=[scale 1])\n\
+             .end\n",
+        )
+        .expect("numeric-like leading vector elements parse as real vectors");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("os"))
+            .expect("model exists");
+        let pw_array = model
+            .real_vector_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("pw_array"))
+            .map(|(_, values)| values.as_slice())
+            .expect("pw_array exists");
+        let cntl_array = model
+            .real_vector_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("cntl_array"))
+            .map(|(_, values)| values.as_slice())
+            .expect("cntl_array exists");
+
+        assert_eq!(pw_array, &[1.0e-9, 2.0e-9]);
+        assert_eq!(cntl_array, &[0.5, 1.0]);
+    }
+
+    #[test]
+    fn xspice_string_vector_params_preserve_unquoted_argv_tokens() {
+        let netlist = Netlist::parse(
+            "xspice string-vector argv model params\n\
+             .model co d_cosim simulation=\"ivlng\" sim_args=[1e3 deck --payload -gTarget=4500 +define=1 ./dut]\n\
+             .end\n",
+        )
+        .expect("bare d_cosim string-vector parameters parse");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("co"))
+            .expect("model exists");
+        let sim_args = model
+            .string_vector_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("sim_args"))
+            .map(|(_, values)| values.as_slice())
+            .expect("sim_args exists");
+
+        assert_eq!(
+            sim_args,
+            &[
+                "1e3",
+                "deck",
+                "--payload",
+                "-gTarget=4500",
+                "+define=1",
+                "./dut"
+            ]
+        );
+    }
+
+    #[test]
+    fn xspice_model_params_accept_known_bare_string_literals() {
+        let netlist = Netlist::parse(
+            "xspice bare string model params\n\
+             .model lut d_lut (table_values=0001 family=ttl)\n\
+             .end\n",
+        )
+        .expect("known bare XSPICE string model params parse as strings");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("lut"))
+            .expect("model exists");
+        let table_values = model
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("table_values"))
+            .map(|(_, value)| value.as_str())
+            .expect("table_values exists");
+        let family = model
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("family"))
+            .map(|(_, value)| value.as_str())
+            .expect("family exists");
+
+        assert_eq!(table_values, "0001");
+        assert_eq!(family, "ttl");
+        assert!(
+            model.params.iter().all(|(name, _)| {
+                !name.eq_ignore_ascii_case("table_values") && !name.eq_ignore_ascii_case("family")
+            }),
+            "bare string params must not also be numeric params"
+        );
+    }
+
+    #[test]
+    fn xspice_model_string_params_preserve_unquoted_path_tokens() {
+        let netlist = Netlist::parse(
+            "xspice unquoted scalar string model params\n\
+             .model co d_cosim simulation=./pwm\n\
+             .model proc d_process (process_file=worker|)\n\
+             .model table table2d (file=table-2d.tbl)\n\
+             .end\n",
+        )
+        .expect("unquoted XSPICE string params with punctuation parse as strings");
+
+        let co = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("co"))
+            .expect("d_cosim model exists");
+        let simulation = co
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("simulation"))
+            .map(|(_, value)| value.as_str())
+            .expect("simulation string exists");
+        assert_eq!(simulation, "./pwm");
+
+        let proc_model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("proc"))
+            .expect("d_process model exists");
+        let process_file = proc_model
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("process_file"))
+            .map(|(_, value)| value.as_str())
+            .expect("process_file string exists");
+        assert_eq!(process_file, "worker|");
+
+        let table = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("table"))
+            .expect("table model exists");
+        let file = table
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("file"))
+            .map(|(_, value)| value.as_str())
+            .expect("file string exists");
+        assert_eq!(file, "table-2d.tbl");
+    }
+
+    #[test]
+    fn xspice_contextual_model_params_accept_bare_string_selectors() {
+        let netlist = Netlist::parse(
+            "xspice contextual model string params\n\
+             .model gate multi_input_pwl (x=[0 1] y=[0 1] model=or)\n\
+             .model line mlin (l=1 model=1)\n\
+             .end\n",
+        )
+        .expect("contextual XSPICE model selector params parse");
+
+        let gate = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("gate"))
+            .expect("multi_input_pwl model exists");
+        let gate_selector = gate
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("model"))
+            .map(|(_, value)| value.as_str())
+            .expect("multi_input_pwl model selector exists");
+        assert_eq!(gate_selector, "or");
+
+        let line = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("line"))
+            .expect("mlin model exists");
+        assert!(
+            line.string_params
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("model")),
+            "tline model selector must not be reclassified as a string"
+        );
+        assert!(line.params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("model") && (*value - 1.0).abs() < f64::EPSILON
+        }));
+    }
+
+    #[test]
+    fn xspice_ako_contextual_model_params_accept_bare_string_selectors() {
+        let netlist = Netlist::parse(
+            "xspice AKO contextual model string params\n\
+             .model base multi_input_pwl (x=[0 1] y=[0 1] model=and)\n\
+             .model derived ako:base (model=or)\n\
+             .end\n",
+        )
+        .expect("AKO contextual XSPICE model selector params parse");
+
+        let derived = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("derived"))
+            .expect("derived AKO model exists");
+        let selector = derived
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("model"))
+            .map(|(_, value)| value.as_str())
+            .expect("derived model selector exists");
+
+        assert_eq!(selector, "or");
+        assert!(
+            derived
+                .params
+                .iter()
+                .all(|(name, _)| { !name.eq_ignore_ascii_case("model") }),
+            "AKO string model override must not also be numeric"
+        );
+    }
+
+    #[test]
     fn model_params_accept_spice_boolean_literals() {
         let netlist = Netlist::parse(
             "xspice boolean model params\n\
@@ -952,17 +1226,33 @@ mod tests {
     }
 
     #[test]
+    fn non_xspice_other_punctuation_still_fails_closed() {
+        let err = Netlist::parse(
+            "resistor malformed punctuation\n\
+             R1 in out 1k!\n\
+             .end\n",
+        )
+        .expect_err("ordinary element punctuation must not parse as valid syntax");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("Unexpected trailing token in resistor specification: !"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
     fn unsupported_xspice_instance_token_is_rejected() {
         let err = Netlist::parse(
             "xspice malformed\n\
-             A1 = in out gain gain=2\n\
+             A1 ] in out gain gain=2\n\
              .end\n",
         )
         .expect_err("unsupported XSPICE instance token must fail");
 
         let message = err.to_string();
         assert!(
-            message.contains("Unsupported XSPICE instance token '='"),
+            message.contains("Unsupported XSPICE instance token ']'"),
             "unexpected error: {message}"
         );
     }
@@ -971,42 +1261,977 @@ mod tests {
     fn unsupported_xspice_bracket_token_is_rejected() {
         let err = Netlist::parse(
             "xspice malformed bracket\n\
-             A1 [in = out] gain gain=2\n\
+             A1 [in < out] gain gain=2\n\
              .end\n",
         )
         .expect_err("unsupported XSPICE bracket token must fail");
 
         let message = err.to_string();
         assert!(
-            message.contains("Unsupported XSPICE digital port token '='"),
+            message.contains("XSPICE digital port requires a node name, found '<'"),
             "unexpected error: {message}"
         );
     }
 
     #[test]
-    fn xspice_accepts_commas_as_loose_port_separators() {
-        let netlist = Netlist::parse(
-            "xspice comma separators\n\
-             A1 [in, out], out, gain gain=2\n\
+    fn xspice_angle_delimiters_are_not_node_name_punctuation() {
+        let err = Netlist::parse(
+            "xspice malformed angle delimiter\n\
+             A1 net<0> out model\n\
              .end\n",
         )
-        .expect("commas are accepted as XSPICE port separators");
+        .expect_err("ngspice MIF tokenization splits '<' from node identifiers");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("XSPICE port requires a node name, found '<'"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn xspice_accepts_commas_and_equals_as_loose_port_separators() {
+        let netlist = Netlist::parse(
+            "xspice comma separators\n\
+             A1 = [in, out = mid], out, gain gain=2\n\
+             .end\n",
+        )
+        .expect("commas and equals are accepted as XSPICE port separators");
 
         match &netlist.elements[0].kind {
             ElementKind::Xspice {
                 model,
                 ports,
                 params,
+                ..
             } => {
                 assert_eq!(model, "GAIN");
                 assert_eq!(
                     ports,
                     &vec![
-                        XspicePort::DigitalVector(vec!["IN".to_string(), "OUT".to_string()]),
+                        XspicePort::DigitalVector(vec![
+                            "IN".to_string(),
+                            "OUT".to_string(),
+                            "MID".to_string(),
+                        ]),
                         XspicePort::Analog("OUT".to_string()),
                     ]
                 );
                 assert_eq!(params, &vec![("GAIN".to_string(), 2.0)]);
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_accepts_parentheses_as_loose_mif_token_separators() {
+        let netlist = Netlist::parse(
+            "xspice parenthesis separators\n\
+             A1 (in) ([din dout]) (%v out) gain\n\
+             .end\n",
+        )
+        .expect("ngspice MIF tokenization treats parentheses as XSPICE separators");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "GAIN");
+                assert_eq!(
+                    ports,
+                    &vec![
+                        XspicePort::Analog("IN".to_string()),
+                        XspicePort::DigitalVector(vec!["DIN".to_string(), "DOUT".to_string()]),
+                        XspicePort::Analog("OUT".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_quoted_mif_string_tokens_parse_as_ports_and_model() {
+        let netlist = Netlist::parse(
+            "xspice quoted string tokens\n\
+             A1 \"in node\" [\"dig a\" ~\"dig b\"] %vd(\"sig p\" \"sig n\") out \"gain\"\n\
+             .end\n",
+        )
+        .expect("ngspice MIF tokenization strips quotes from XSPICE string tokens");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "GAIN");
+                assert_eq!(ports[0], XspicePort::Analog("IN NODE".to_string()));
+                assert_eq!(
+                    ports[1],
+                    XspicePort::DigitalVectorMixed(vec![
+                        XspiceDigitalNode::new("DIG A", false),
+                        XspiceDigitalNode::new("DIG B", true),
+                    ])
+                );
+                assert!(matches!(
+                    &ports[2],
+                    XspicePort::DifferentialVoltage { pos, neg }
+                        if pos == "SIG P" && neg == "SIG N"
+                ));
+                assert_eq!(ports[3], XspicePort::Analog("OUT".to_string()));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_quoted_mif_tokens_do_not_concatenate_with_adjacent_tokens() {
+        let netlist = Netlist::parse(
+            "xspice adjacent quoted token\n\
+             A1 \"in\"out gain\n\
+             .end\n",
+        )
+        .expect("ngspice MIF tokenization treats quoted strings as complete tokens");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "GAIN");
+                assert_eq!(
+                    ports,
+                    &vec![
+                        XspicePort::Analog("IN".to_string()),
+                        XspicePort::Analog("OUT".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_typed_null_connections_parse_like_ngspice_mif_null_tokens() {
+        let netlist = Netlist::parse(
+            "xspice typed null tokens\n\
+             A1 %v null %gd(null) out model\n\
+             .end\n",
+        )
+        .expect("ngspice MIF port parsing treats typed null as a null connection");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "MODEL");
+                assert_eq!(
+                    ports,
+                    &vec![
+                        XspicePort::Null,
+                        XspicePort::Null,
+                        XspicePort::Analog("OUT".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_quoted_null_mif_token_parses_as_null_connection() {
+        let netlist = Netlist::parse(
+            "xspice quoted null token\n\
+             A1 \"null\" out model\n\
+             .end\n",
+        )
+        .expect("ngspice MIF tokenization treats quoted null as a null token");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "MODEL");
+                assert_eq!(
+                    ports,
+                    &vec![XspicePort::Null, XspicePort::Analog("OUT".to_string()),]
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_bracketed_null_entry_is_rejected_like_ngspice_array_null() {
+        let err = Netlist::parse(
+            "xspice bracketed null token\n\
+             A1 [in null] out model\n\
+             .end\n",
+        )
+        .expect_err("ngspice rejects null entries inside XSPICE arrays");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("NULL connection found where not allowed in XSPICE array"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn xspice_compact_typed_vector_null_entry_is_rejected_like_ngspice_array_null() {
+        let err = Netlist::parse(
+            "xspice compact vector null token\n\
+             A1 %v([in null]) out model\n\
+             .end\n",
+        )
+        .expect_err("ngspice rejects null entries inside compact typed XSPICE vectors");
+
+        let message = err.to_string();
+        assert!(
+            message
+                .contains("NULL connection found where not allowed in compact XSPICE port vector"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn xspice_digital_vector_ports_parse_ngspice_inverted_node_syntax() {
+        let netlist = Netlist::parse(
+            "xspice inverted digital vector\n\
+             A1 [o1 ~o2 o3] out d_and\n\
+             .end\n",
+        )
+        .expect("ngspice inverted digital vector syntax should parse");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "D_AND");
+                assert_eq!(
+                    ports,
+                    &vec![
+                        XspicePort::DigitalVectorMixed(vec![
+                            XspiceDigitalNode::new("O1", false),
+                            XspiceDigitalNode::new("O2", true),
+                            XspiceDigitalNode::new("O3", false),
+                        ]),
+                        XspicePort::Analog("OUT".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_top_level_inverted_digital_ports_parse_like_ngspice_mif_ports() {
+        let netlist = Netlist::parse(
+            "xspice bare inverted digital ports\n\
+             A1 a ~b ~\"c node\" out d_and\n\
+             .end\n",
+        )
+        .expect("ngspice allows leading tilde on digital/user-defined XSPICE ports");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "D_AND");
+                assert_eq!(
+                    ports,
+                    &vec![
+                        XspicePort::Analog("A".to_string()),
+                        XspicePort::DigitalInverted("B".to_string()),
+                        XspicePort::DigitalInverted("C NODE".to_string()),
+                        XspicePort::Analog("OUT".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_numeric_like_port_names_preserve_lexeme_text() {
+        let netlist = Netlist::parse(
+            "xspice numeric-looking node names\n\
+             A1 1e3 [03 ~2e3] %vd([4e-6 0 5e2 0]) out model\n\
+             .end\n",
+        )
+        .expect("numeric-looking XSPICE port names parse");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "MODEL");
+                assert_eq!(ports[0], XspicePort::Analog("1e3".to_string()));
+                assert_eq!(
+                    ports[1],
+                    XspicePort::DigitalVectorMixed(vec![
+                        XspiceDigitalNode::new("03", false),
+                        XspiceDigitalNode::new("2e3", true),
+                    ])
+                );
+                assert!(matches!(
+                    &ports[2],
+                    XspicePort::DifferentialVoltage { pos, neg }
+                        if pos == "4e-6" && neg == "0"
+                ));
+                assert!(matches!(
+                    &ports[3],
+                    XspicePort::DifferentialVoltage { pos, neg }
+                        if pos == "5e2" && neg == "0"
+                ));
+                assert_eq!(ports[4], XspicePort::Analog("OUT".to_string()));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_signed_net_names_parse_like_ngspice_net_tokens() {
+        let netlist = Netlist::parse(
+            "xspice signed net names\n\
+             A1 +vcc -vee [in- ~+rst -clk] %vd(+in -in) %gd[+gate -gate] out model\n\
+             .end\n",
+        )
+        .expect("ngspice-style signed XSPICE net names parse");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "MODEL");
+                assert_eq!(ports[0], XspicePort::Analog("+VCC".to_string()));
+                assert_eq!(ports[1], XspicePort::Analog("-VEE".to_string()));
+                assert_eq!(
+                    ports[2],
+                    XspicePort::DigitalVectorMixed(vec![
+                        XspiceDigitalNode::new("IN-", false),
+                        XspiceDigitalNode::new("+RST", true),
+                        XspiceDigitalNode::new("-CLK", false),
+                    ])
+                );
+                assert!(matches!(
+                    &ports[3],
+                    XspicePort::DifferentialVoltage { pos, neg }
+                        if pos == "+IN" && neg == "-IN"
+                ));
+                assert!(matches!(
+                    &ports[4],
+                    XspicePort::DifferentialConductance { pos, neg }
+                        if pos == "+GATE" && neg == "-GATE"
+                ));
+                assert_eq!(ports[5], XspicePort::Analog("OUT".to_string()));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_complex_net_names_parse_like_ngspice_net_tokens() {
+        let netlist = Netlist::parse(
+            "xspice complex net names\n\
+             A1 net/a bus*1 @sense [sig/a ~+rst data-7] %vd(path/in path/out) %gd[gate*1 return/path] out model\n\
+             .end\n",
+        )
+        .expect("complex XSPICE net names parse");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "MODEL");
+                assert_eq!(ports[0], XspicePort::Analog("NET/A".to_string()));
+                assert_eq!(ports[1], XspicePort::Analog("BUS*1".to_string()));
+                assert_eq!(ports[2], XspicePort::Analog("@SENSE".to_string()));
+                assert_eq!(
+                    ports[3],
+                    XspicePort::DigitalVectorMixed(vec![
+                        XspiceDigitalNode::new("SIG/A", false),
+                        XspiceDigitalNode::new("+RST", true),
+                        XspiceDigitalNode::new("DATA-7", false),
+                    ])
+                );
+                assert!(matches!(
+                    &ports[4],
+                    XspicePort::DifferentialVoltage { pos, neg }
+                        if pos == "PATH/IN" && neg == "PATH/OUT"
+                ));
+                assert!(matches!(
+                    &ports[5],
+                    XspicePort::DifferentialConductance { pos, neg }
+                        if pos == "GATE*1" && neg == "RETURN/PATH"
+                ));
+                assert_eq!(ports[6], XspicePort::Analog("OUT".to_string()));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_other_punctuation_net_names_parse_like_ngspice_net_tokens() {
+        let netlist = Netlist::parse(
+            "xspice punctuation net names\n\
+             A1 !bias^1 bus|2 [ctrl?0 ~!rst] %vd(sig!p sig^n) %v(net|out) out model\n\
+             .end\n",
+        )
+        .expect("ngspice-style punctuation XSPICE net names parse");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "MODEL");
+                assert_eq!(ports[0], XspicePort::Analog("!BIAS^1".to_string()));
+                assert_eq!(ports[1], XspicePort::Analog("BUS|2".to_string()));
+                assert_eq!(
+                    ports[2],
+                    XspicePort::DigitalVectorMixed(vec![
+                        XspiceDigitalNode::new("CTRL?0", false),
+                        XspiceDigitalNode::new("!RST", true),
+                    ])
+                );
+                assert!(matches!(
+                    &ports[3],
+                    XspicePort::DifferentialVoltage { pos, neg }
+                        if pos == "SIG!P" && neg == "SIG^N"
+                ));
+                assert_eq!(ports[4], XspicePort::Analog("NET|OUT".to_string()));
+                assert_eq!(ports[5], XspicePort::Analog("OUT".to_string()));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_instance_params_accept_spice_unit_suffixes() {
+        let netlist = Netlist::parse(
+            "xspice instance parameter suffixes\n\
+             A1 in out gain gain=2 rise_delay=10n cap=1u limit=1meg\n\
+             .end\n",
+        )
+        .expect("XSPICE instance params accept SPICE suffixes");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { params, .. } => {
+                assert_eq!(params.len(), 4);
+                assert!((params[0].1 - 2.0).abs() < f64::EPSILON);
+                assert!((params[1].1 - 10.0e-9).abs() < 1.0e-21);
+                assert!((params[2].1 - 1.0e-6).abs() < 1.0e-18);
+                assert!((params[3].1 - 1.0e6).abs() < f64::EPSILON);
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_instance_params_accept_sign_separated_decimal_values() {
+        let netlist = Netlist::parse(
+            "xspice instance signed decimals\n\
+             A1 in out gain gain=-.5 offset=+.25 tiny=-1p\n\
+             .end\n",
+        )
+        .expect("XSPICE instance params accept sign-separated decimal values");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { params, .. } => {
+                assert_eq!(params.len(), 3);
+                assert!((params[0].1 + 0.5).abs() < f64::EPSILON);
+                assert!((params[1].1 - 0.25).abs() < f64::EPSILON);
+                assert!((params[2].1 + 1.0e-12).abs() < 1.0e-24);
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_instance_params_accept_top_level_brace_expressions() {
+        let netlist = Netlist::parse(
+            "xspice instance expression params\n\
+             .param g=3\n\
+             A1 in out gain gain={g*2} offset=-{g}\n\
+             .end\n",
+        )
+        .expect("XSPICE instance params accept brace expressions");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                params,
+                expr_params,
+                ..
+            } => {
+                assert!(expr_params.is_empty());
+                assert_eq!(params.len(), 2);
+                assert!((params[0].1 - 6.0).abs() < f64::EPSILON);
+                assert!((params[1].1 + 3.0).abs() < f64::EPSILON);
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_instance_params_accept_string_literals() {
+        let netlist = Netlist::parse(
+            "xspice instance string params\n\
+             A1 in out file_probe file=\"custom.tbl\" family=ttl\n\
+             .end\n",
+        )
+        .expect("XSPICE instance params accept string literals");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                string_params,
+                string_expr_params,
+                ..
+            } => {
+                assert!(string_expr_params.is_empty());
+                assert_eq!(
+                    string_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("file"))
+                        .map(|(_, value)| value.as_str()),
+                    Some("custom.tbl")
+                );
+                assert_eq!(
+                    string_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("family"))
+                        .map(|(_, value)| value.as_str()),
+                    Some("ttl")
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_instance_string_params_preserve_unquoted_path_tokens() {
+        let netlist = Netlist::parse(
+            "xspice instance unquoted scalar string params\n\
+             A1 in out file_probe file=table-2d.tbl simulation=./pwm process_file=worker| table_values=0001\n\
+             .end\n",
+        )
+        .expect("XSPICE instance string params with punctuation parse");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                params,
+                string_params,
+                string_expr_params,
+                ..
+            } => {
+                assert!(string_expr_params.is_empty());
+                for (name, expected) in [
+                    ("file", "table-2d.tbl"),
+                    ("simulation", "./pwm"),
+                    ("process_file", "worker|"),
+                    ("table_values", "0001"),
+                ] {
+                    assert_eq!(
+                        string_params
+                            .iter()
+                            .find(|(param, _)| param.eq_ignore_ascii_case(name))
+                            .map(|(_, value)| value.as_str()),
+                        Some(expected),
+                        "unexpected value for {name}"
+                    );
+                    assert!(
+                        params
+                            .iter()
+                            .all(|(param, _)| !param.eq_ignore_ascii_case(name)),
+                        "{name} must not also be parsed as a numeric parameter"
+                    );
+                }
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_instance_contextual_model_param_keeps_numeric_selectors_numeric() {
+        let netlist = Netlist::parse(
+            "xspice instance contextual model param\n\
+             A1 in out mlin model=1\n\
+             A2 in out multi_input_pwl model=or\n\
+             .end\n",
+        )
+        .expect("XSPICE instance model params parse by value shape");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                params,
+                string_params,
+                ..
+            } => {
+                assert!(
+                    string_params
+                        .iter()
+                        .all(|(name, _)| !name.eq_ignore_ascii_case("model")),
+                    "numeric model selector must not be reclassified as a string"
+                );
+                assert!(params.iter().any(|(name, value)| {
+                    name.eq_ignore_ascii_case("model") && (*value - 1.0).abs() < f64::EPSILON
+                }));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+
+        match &netlist.elements[1].kind {
+            ElementKind::Xspice { string_params, .. } => {
+                assert_eq!(
+                    string_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("model"))
+                        .map(|(_, value)| value.as_str()),
+                    Some("or")
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_instance_params_accept_vector_literals() {
+        let netlist = Netlist::parse(
+            "xspice instance vector params\n\
+             A1 in out vector_probe table=[0 1.5 2k] process_params=[\"--mode\" \"fast\"]\n\
+             .end\n",
+        )
+        .expect("XSPICE instance params accept vector literals");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                real_vector_params,
+                real_vector_expr_params,
+                string_vector_params,
+                string_vector_expr_params,
+                ..
+            } => {
+                assert!(real_vector_expr_params.is_empty());
+                assert!(string_vector_expr_params.is_empty());
+                assert_eq!(
+                    real_vector_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("table"))
+                        .map(|(_, values)| values.as_slice()),
+                    Some(&[0.0, 1.5, 2000.0][..])
+                );
+                assert_eq!(
+                    string_vector_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("process_params"))
+                        .map(|(_, values)| values.as_slice()),
+                    Some(&["--mode".to_string(), "fast".to_string()][..])
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_instance_string_vector_scalar_params_preserve_unquoted_argv_tokens() {
+        let netlist = Netlist::parse(
+            "xspice instance scalar string-vector params\n\
+             A1 in out process_probe process_params=--payload lib_args=+define=1 sim_args=\"-O2\"\n\
+             .end\n",
+        )
+        .expect("XSPICE scalar string-vector argv params parse");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                string_vector_params,
+                string_vector_expr_params,
+                ..
+            } => {
+                assert!(string_vector_expr_params.is_empty());
+                for (name, expected) in [
+                    ("process_params", "--payload"),
+                    ("lib_args", "+define=1"),
+                    ("sim_args", "-O2"),
+                ] {
+                    assert_eq!(
+                        string_vector_params
+                            .iter()
+                            .find(|(param, _)| param.eq_ignore_ascii_case(name))
+                            .map(|(_, values)| values.as_slice()),
+                        Some(&[expected.to_string()][..]),
+                        "unexpected vector value for {name}"
+                    );
+                }
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_instance_string_vector_params_preserve_unquoted_argv_tokens() {
+        let netlist = Netlist::parse(
+            "xspice instance string-vector argv params\n\
+             A1 in out process_probe process_params=[1e3 deck --payload -gTarget=4500 +define=1 ./dut]\n\
+             .end\n",
+        )
+        .expect("XSPICE instance string-vector argv params parse");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                string_vector_params,
+                string_vector_expr_params,
+                ..
+            } => {
+                assert!(string_vector_expr_params.is_empty());
+                assert_eq!(
+                    string_vector_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("process_params"))
+                        .map(|(_, values)| values.as_slice()),
+                    Some(
+                        &[
+                            "1e3".to_string(),
+                            "deck".to_string(),
+                            "--payload".to_string(),
+                            "-gTarget=4500".to_string(),
+                            "+define=1".to_string(),
+                            "./dut".to_string(),
+                        ][..]
+                    )
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_subckt_instance_params_resolve_brace_expressions_during_flattening() {
+        let netlist = Netlist::parse(
+            "xspice subckt instance expression params\n\
+             .subckt xgain in out g=2\n\
+             A1 in out gain gain={g} offset=-{g}\n\
+             .ends xgain\n\
+             XU a b xgain g=5\n\
+             .end\n",
+        )
+        .expect("XSPICE subcircuit expression-param deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("XSPICE subcircuit expression-param deck flattens");
+        let element = flattened
+            .elements
+            .iter()
+            .find(|element| element.name == "XU.A1")
+            .expect("flattened XSPICE element exists");
+
+        match &element.kind {
+            ElementKind::Xspice {
+                params,
+                expr_params,
+                ..
+            } => {
+                assert!(expr_params.is_empty());
+                assert_eq!(params.len(), 2);
+                assert_eq!(
+                    params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("gain"))
+                        .map(|(_, value)| *value),
+                    Some(5.0)
+                );
+                assert_eq!(
+                    params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("offset"))
+                        .map(|(_, value)| *value),
+                    Some(-5.0)
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_subckt_deferred_scalar_params_override_case_insensitively() {
+        let mut netlist = Netlist::default();
+        netlist.subcircuits.push(SubcircuitDef {
+            name: "xgain".to_string(),
+            ports: vec!["in".to_string(), "out".to_string()],
+            elements: vec![Element {
+                name: "A1".to_string(),
+                kind: ElementKind::Xspice {
+                    model: "gain".to_string(),
+                    ports: vec![
+                        XspicePort::Analog("in".to_string()),
+                        XspicePort::Analog("out".to_string()),
+                    ],
+                    params: vec![("Gain".to_string(), 1.0)],
+                    expr_params: vec![("gain".to_string(), "g".to_string())],
+                    string_params: Vec::new(),
+                    string_expr_params: Vec::new(),
+                    string_vector_params: Vec::new(),
+                    string_vector_expr_params: Vec::new(),
+                    real_vector_params: Vec::new(),
+                    real_vector_expr_params: Vec::new(),
+                },
+                nodes: Vec::new(),
+            }],
+            params: vec![("g".to_string(), 2.0)],
+            string_params: Vec::new(),
+            local_options: std::collections::HashMap::new(),
+            library_ref: None,
+            nested_subcircuits: Vec::new(),
+        });
+        netlist.elements.push(Element {
+            name: "XU".to_string(),
+            kind: ElementKind::Subcircuit {
+                subckt_name: "xgain".to_string(),
+                params: vec![("g".to_string(), ParametricValue::Resolved(5.0))],
+            },
+            nodes: vec!["a".to_string(), "b".to_string()],
+        });
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("programmatic XSPICE subcircuit AST flattens");
+        let element = flattened
+            .elements
+            .iter()
+            .find(|element| element.name == "XU.A1")
+            .expect("flattened XSPICE element exists");
+
+        match &element.kind {
+            ElementKind::Xspice {
+                params,
+                expr_params,
+                ..
+            } => {
+                assert!(expr_params.is_empty());
+                assert_eq!(
+                    params
+                        .iter()
+                        .filter(|(name, _)| name.eq_ignore_ascii_case("gain"))
+                        .count(),
+                    1
+                );
+                assert_eq!(
+                    params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("gain"))
+                        .map(|(_, value)| *value),
+                    Some(5.0)
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_subckt_instance_string_params_resolve_during_flattening() {
+        let netlist = Netlist::parse(
+            "xspice subckt instance string params\n\
+             .param actual_file=\"actual.tbl\"\n\
+             .subckt xsrc out fname=\"default.tbl\"\n\
+             A1 %v(out) filesrc file={fname}\n\
+             .ends xsrc\n\
+             XU out xsrc fname={actual_file}\n\
+             .end\n",
+        )
+        .expect("XSPICE subcircuit string-param deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("XSPICE subcircuit string-param deck flattens");
+        let element = flattened
+            .elements
+            .iter()
+            .find(|element| element.name == "XU.A1")
+            .expect("flattened XSPICE element exists");
+
+        match &element.kind {
+            ElementKind::Xspice {
+                string_params,
+                string_expr_params,
+                ..
+            } => {
+                assert!(string_expr_params.is_empty());
+                assert_eq!(
+                    string_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("file"))
+                        .map(|(_, value)| value.as_str()),
+                    Some("actual.tbl")
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_subckt_instance_vector_params_resolve_during_flattening() {
+        let netlist = Netlist::parse(
+            "xspice subckt instance vector params\n\
+             .param actual_args=\"[1e3 --mode -gTarget=4500]\"\n\
+             .subckt xvec in out scale=2 args=\"[--default]\"\n\
+             A1 in out vector_probe table=[0 {scale} {scale*2}] process_params={args}\n\
+             .ends xvec\n\
+             XU a b xvec scale=3 args={actual_args}\n\
+             .end\n",
+        )
+        .expect("XSPICE subcircuit vector-param deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("XSPICE subcircuit vector-param deck flattens");
+        let element = flattened
+            .elements
+            .iter()
+            .find(|element| element.name == "XU.A1")
+            .expect("flattened XSPICE element exists");
+
+        match &element.kind {
+            ElementKind::Xspice {
+                real_vector_params,
+                real_vector_expr_params,
+                string_vector_params,
+                string_vector_expr_params,
+                ..
+            } => {
+                assert!(real_vector_expr_params.is_empty());
+                assert!(string_vector_expr_params.is_empty());
+                assert_eq!(
+                    real_vector_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("table"))
+                        .map(|(_, values)| values.as_slice()),
+                    Some(&[0.0, 3.0, 6.0][..])
+                );
+                assert_eq!(
+                    string_vector_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("process_params"))
+                        .map(|(_, values)| values.as_slice()),
+                    Some(
+                        &[
+                            "1e3".to_string(),
+                            "--mode".to_string(),
+                            "-gTarget=4500".to_string(),
+                        ][..]
+                    )
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_subckt_instance_vector_params_accept_leading_bare_param_refs() {
+        let netlist = Netlist::parse(
+            "xspice subckt instance vector leading bare params\n\
+             .subckt xvec in out start=2 step=3\n\
+             A1 in out vector_probe table=[start {start+step}]\n\
+             .ends xvec\n\
+             XU a b xvec start=4 step=5\n\
+             .end\n",
+        )
+        .expect("XSPICE subcircuit vector-param deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("XSPICE subcircuit vector-param deck flattens");
+        let element = flattened
+            .elements
+            .iter()
+            .find(|element| element.name == "XU.A1")
+            .expect("flattened XSPICE element exists");
+
+        match &element.kind {
+            ElementKind::Xspice {
+                real_vector_params,
+                real_vector_expr_params,
+                string_vector_params,
+                ..
+            } => {
+                assert!(real_vector_expr_params.is_empty());
+                assert!(string_vector_params.is_empty());
+                assert_eq!(
+                    real_vector_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("table"))
+                        .map(|(_, values)| values.as_slice()),
+                    Some(&[4.0, 9.0][..])
+                );
             }
             other => panic!("expected XSPICE element, got {other:?}"),
         }
@@ -1029,6 +2254,603 @@ mod tests {
                         if pos == "N+" && neg == "N-"
                 ));
                 assert_eq!(ports[1], XspicePort::Analog("OUT".to_string()));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_bracketed_typed_vector_ports_parse_ngspice_array_syntax() {
+        let netlist = Netlist::parse(
+            "xspice typed vector array\n\
+             A1 ct mon [%id(vdd vbiasp) %id(vdd vop)] seemod2\n\
+             .end\n",
+        )
+        .expect("ngspice bracketed typed vector syntax should parse");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "SEEMOD2");
+                assert_eq!(ports.len(), 4);
+                assert_eq!(ports[0], XspicePort::Analog("CT".to_string()));
+                assert_eq!(ports[1], XspicePort::Analog("MON".to_string()));
+                assert!(matches!(
+                    &ports[2],
+                    XspicePort::DifferentialCurrent { pos, neg }
+                        if pos == "VDD" && neg == "VBIASP"
+                ));
+                assert!(matches!(
+                    &ports[3],
+                    XspicePort::DifferentialCurrent { pos, neg }
+                        if pos == "VDD" && neg == "VOP"
+                ));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_voltage_current_ports_parse_official_spaced_percent_syntax() {
+        let netlist = Netlist::parse(
+            "xspice spaced voltage/current ports\n\
+             A1 %vd in 0 %id sense 0 out gain\n\
+             .end\n",
+        )
+        .expect("ngspice accepts spaced %vd/%id analog port syntax");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { ports, .. } => {
+                assert_eq!(ports.len(), 3);
+                assert!(matches!(
+                    &ports[0],
+                    XspicePort::DifferentialVoltage { pos, neg }
+                        if pos == "IN" && neg == "0"
+                ));
+                assert!(matches!(
+                    &ports[1],
+                    XspicePort::DifferentialCurrent { pos, neg }
+                        if pos == "SENSE" && neg == "0"
+                ));
+                assert_eq!(ports[2], XspicePort::Analog("OUT".to_string()));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_split_percent_port_type_tokens_parse_like_ngspice_mif_tokens() {
+        let netlist = Netlist::parse(
+            "xspice split percent tokens\n\
+             A1 % v in % vd p n % \"g\" gate % hd hp hn [ % id(src 0) % v(out)] model\n\
+             .end\n",
+        )
+        .expect("ngspice MIF tokenizer accepts '%' as a separate port-type token");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "MODEL");
+                assert_eq!(ports[0], XspicePort::Analog("IN".to_string()));
+                assert!(matches!(
+                    &ports[1],
+                    XspicePort::DifferentialVoltage { pos, neg }
+                        if pos == "P" && neg == "N"
+                ));
+                assert_eq!(ports[2], XspicePort::Conductance("GATE".to_string()));
+                assert!(matches!(
+                    &ports[3],
+                    XspicePort::DifferentialHybrid { pos, neg }
+                        if pos == "HP" && neg == "HN"
+                ));
+                assert!(matches!(
+                    &ports[4],
+                    XspicePort::DifferentialCurrent { pos, neg }
+                        if pos == "SRC" && neg == "0"
+                ));
+                assert_eq!(ports[5], XspicePort::Analog("OUT".to_string()));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_scalar_voltage_current_ports_parse_official_percent_syntax() {
+        let netlist = Netlist::parse(
+            "xspice scalar voltage/current ports\n\
+             A1 %v in %i vsen out gain\n\
+             .end\n",
+        )
+        .expect("ngspice accepts scalar %v/%i analog port syntax");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { ports, .. } => {
+                assert_eq!(ports.len(), 3);
+                assert_eq!(ports[0], XspicePort::Analog("IN".to_string()));
+                assert_eq!(ports[1], XspicePort::Current("VSEN".to_string()));
+                assert_eq!(ports[2], XspicePort::Analog("OUT".to_string()));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_compact_differential_vector_ports_parse_ngspice_filesource_syntax() {
+        let netlist = Netlist::parse(
+            "xspice compact differential vector\n\
+             A1 %vd([out1 0 out2 0]) filesrc\n\
+             .end\n",
+        )
+        .expect("ngspice accepts compact %vd([p n ...]) vector syntax");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "FILESRC");
+                assert_eq!(ports.len(), 2);
+                assert!(matches!(
+                    &ports[0],
+                    XspicePort::DifferentialVoltage { pos, neg }
+                        if pos == "OUT1" && neg == "0"
+                ));
+                assert!(matches!(
+                    &ports[1],
+                    XspicePort::DifferentialVoltage { pos, neg }
+                        if pos == "OUT2" && neg == "0"
+                ));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_compact_scalar_vector_ports_parse_ngspice_filesource_syntax() {
+        let netlist = Netlist::parse(
+            "xspice compact scalar vector\n\
+             A1 %v([out6 out7]) filesrc\n\
+             .end\n",
+        )
+        .expect("ngspice accepts compact %v([n ...]) vector syntax");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "FILESRC");
+                assert_eq!(
+                    ports,
+                    &vec![
+                        XspicePort::Analog("OUT6".to_string()),
+                        XspicePort::Analog("OUT7".to_string())
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_subckt_vector_param_override_creates_scoped_model() {
+        let netlist = Netlist::parse(
+            "xspice subckt vector param\n\
+             .param default_vec=\"[1e-12 2e-12]\"\n\
+             .subckt testcir in0 in1 outlut testpar = {default_vec}\n\
+             A_genlut [in0 in1] [outlut] genlut\n\
+             .model genlut d_genlut (\n\
+             + input_delay = {testpar}\n\
+             + table_values = \"0001\")\n\
+             .ends testcir\n\
+             .param actual_vec=\"[1.3e-3 2e-3]\"\n\
+             X_subckt no1 dss node3 testcir testpar={actual_vec}\n\
+             .end\n",
+        )
+        .expect("ngspice vector-valued subckt parameter deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("vector-valued subckt parameter flattens");
+        let model_name = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Xspice { model, .. } => Some(model.as_str()),
+                _ => None,
+            })
+            .expect("flattened XSPICE element exists");
+        assert_ne!(model_name, "testcir::genlut");
+
+        let scoped_model = flattened
+            .scoped_models
+            .iter()
+            .find(|model| model.name == model_name)
+            .expect("flattening creates a private scoped model");
+        assert!(scoped_model.model_type.eq_ignore_ascii_case("d_genlut"));
+        assert!(
+            scoped_model.expr_params.is_empty(),
+            "scoped XSPICE model expressions should resolve during flattening"
+        );
+        assert_eq!(
+            scoped_model
+                .real_vector_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("input_delay"))
+                .map(|(_, values)| values.as_slice()),
+            Some(&[1.3e-3, 2.0e-3][..])
+        );
+        assert_eq!(
+            scoped_model
+                .string_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("table_values"))
+                .map(|(_, value)| value.as_str()),
+            Some("0001")
+        );
+    }
+
+    #[test]
+    fn xspice_subckt_flattening_remaps_xspice_port_ast_nodes() {
+        let netlist = Netlist::parse(
+            "xspice subckt ports remap\n\
+             .subckt xcell rin din pin nin out\n\
+             vsen sense 0 0\n\
+             areal rin mid rg\n\
+             adig [din ~din_int] [dout] dg\n\
+             atyp %vd(pin nin) %v(out) %i(vsen) %vnam(vsen) out2 typ\n\
+             .model rg real_gain\n\
+             .model dg d_and\n\
+             .model typ gain\n\
+             .ends xcell\n\
+             X1 top_r top_d top_p top_n top_out xcell\n\
+             .end\n",
+        )
+        .expect("XSPICE subcircuit deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("XSPICE subcircuit deck flattens");
+        let ports_for = |name: &str| -> &[XspicePort] {
+            flattened
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    ElementKind::Xspice { ports, .. } if element.name == name => {
+                        Some(ports.as_slice())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("flattened XSPICE element {name} exists"))
+        };
+
+        assert_eq!(
+            ports_for("X1.AREAL"),
+            &[
+                XspicePort::Analog("TOP_R".to_string()),
+                XspicePort::Analog("X1.MID".to_string())
+            ]
+        );
+        assert_eq!(
+            ports_for("X1.ADIG"),
+            &[
+                XspicePort::DigitalVectorMixed(vec![
+                    XspiceDigitalNode::new("TOP_D", false),
+                    XspiceDigitalNode::new("X1.DIN_INT", true),
+                ]),
+                XspicePort::Digital("X1.DOUT".to_string())
+            ]
+        );
+        assert_eq!(
+            ports_for("X1.ATYP"),
+            &[
+                XspicePort::DifferentialVoltage {
+                    pos: "TOP_P".to_string(),
+                    neg: "TOP_N".to_string()
+                },
+                XspicePort::Analog("TOP_OUT".to_string()),
+                XspicePort::Current("X1.VSEN".to_string()),
+                XspicePort::VoltageName("X1.VSEN".to_string()),
+                XspicePort::Analog("X1.OUT2".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn xspice_scoped_file_param_resolves_relative_to_deck_path() {
+        let deck_path = std::env::temp_dir()
+            .join("rspice-xspice-scoped-file-param")
+            .join("deck.cir");
+        let deck_dir = deck_path.parent().expect("temp deck has parent");
+        std::fs::create_dir_all(deck_dir).expect("create temp deck dir");
+        let netlist = Netlist::parse_with_path(
+            "xspice scoped file param\n\
+             .subckt source out stim = \"stim.stim\"\n\
+             A_src [out] src_model\n\
+             .model src_model d_source (input_file={stim})\n\
+             .ends source\n\
+             X1 out source\n\
+             .end\n",
+            &deck_path,
+        )
+        .expect("deck parses with path");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("scoped XSPICE file parameter deck flattens");
+        let scoped_model = flattened
+            .scoped_models
+            .iter()
+            .find(|model| model.model_type.eq_ignore_ascii_case("d_source"))
+            .expect("scoped d_source model exists");
+        let input_file = scoped_model
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("input_file"))
+            .map(|(_, value)| value.as_str())
+            .expect("input_file string param resolved");
+
+        assert_eq!(
+            std::path::Path::new(input_file),
+            deck_dir.join("stim.stim").as_path()
+        );
+    }
+
+    #[test]
+    fn xspice_top_level_external_paths_resolve_relative_without_rewriting_provider_ids() {
+        let deck_path = std::env::temp_dir()
+            .join("rspice-xspice-top-level-external-paths")
+            .join("deck.cir");
+        let deck_dir = deck_path.parent().expect("temp deck has parent");
+        std::fs::create_dir_all(deck_dir).expect("create temp deck dir");
+        let netlist = Netlist::parse_with_path(
+            "xspice top-level external path params\n\
+             .model cosim_path d_cosim (simulation=\"./pwm\")\n\
+             .model cosim_provider d_cosim (simulation=\"ivlng\")\n\
+             .model proc d_process (process_file=\"worker|\")\n\
+             .model src d_source (input_file=\"virtual://xspice/stim\")\n\
+             .end\n",
+            &deck_path,
+        )
+        .expect("deck parses with path");
+
+        let string_param = |model_name: &str, param_name: &str| -> &str {
+            netlist
+                .models
+                .iter()
+                .find(|model| model.name.eq_ignore_ascii_case(model_name))
+                .and_then(|model| {
+                    model
+                        .string_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(param_name))
+                })
+                .map(|(_, value)| value.as_str())
+                .expect("string model param exists")
+        };
+
+        assert_eq!(
+            std::path::Path::new(string_param("cosim_path", "simulation")),
+            deck_dir.join("pwm").as_path()
+        );
+        assert_eq!(string_param("cosim_provider", "simulation"), "ivlng");
+        assert_eq!(
+            string_param("proc", "process_file"),
+            format!("{}|", deck_dir.join("worker").to_string_lossy())
+        );
+        assert_eq!(string_param("src", "input_file"), "virtual://xspice/stim");
+    }
+
+    #[test]
+    fn xspice_instance_external_paths_resolve_relative_during_flattening() {
+        let deck_path = std::env::temp_dir()
+            .join("rspice-xspice-instance-external-paths")
+            .join("deck.cir");
+        let deck_dir = deck_path.parent().expect("temp deck has parent");
+        std::fs::create_dir_all(deck_dir).expect("create temp deck dir");
+        let netlist = Netlist::parse_with_path(
+            "xspice instance external path params\n\
+             Apath [d] src input_file=stim-dir/source.txt\n\
+             Aco_path [din] [dout] null co_path simulation=./pwm\n\
+             Aco_provider [din] [dout] null co_provider simulation=ivlng\n\
+             Aproc [din] [dout] proc process_file=worker|\n\
+             Avirt [d] virt input_file=virtual://xspice/stim\n\
+             .end\n",
+            &deck_path,
+        )
+        .expect("deck parses with path");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("XSPICE instance path deck flattens");
+        let string_param = |model_name: &str, param_name: &str| -> &str {
+            flattened
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    ElementKind::Xspice {
+                        model,
+                        string_params,
+                        ..
+                    } if model.eq_ignore_ascii_case(model_name) => string_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(param_name))
+                        .map(|(_, value)| value.as_str()),
+                    _ => None,
+                })
+                .expect("string instance param exists")
+        };
+
+        assert_eq!(
+            std::path::Path::new(string_param("src", "input_file")),
+            deck_dir.join("stim-dir").join("source.txt").as_path()
+        );
+        assert_eq!(
+            std::path::Path::new(string_param("co_path", "simulation")),
+            deck_dir.join("pwm").as_path()
+        );
+        assert_eq!(string_param("co_provider", "simulation"), "ivlng");
+        assert_eq!(
+            string_param("proc", "process_file"),
+            format!("{}|", deck_dir.join("worker").to_string_lossy())
+        );
+        assert_eq!(string_param("virt", "input_file"), "virtual://xspice/stim");
+    }
+
+    #[test]
+    fn xspice_scoped_simulation_path_resolves_relative_but_provider_name_stays_symbolic() {
+        let deck_path = std::env::temp_dir()
+            .join("rspice-xspice-scoped-simulation-paths")
+            .join("deck.cir");
+        let deck_dir = deck_path.parent().expect("temp deck has parent");
+        std::fs::create_dir_all(deck_dir).expect("create temp deck dir");
+        let netlist = Netlist::parse_with_path(
+            "xspice scoped d_cosim simulation params\n\
+             .subckt cosim din dout sim=\"./pwm\"\n\
+             Aco [din] [dout] null co\n\
+             .model co d_cosim (simulation={sim})\n\
+             .ends cosim\n\
+             Xpath in1 out1 cosim sim=\"./pwm\"\n\
+             Xprovider in2 out2 cosim sim=\"ivlng\"\n\
+             .end\n",
+            &deck_path,
+        )
+        .expect("deck parses with path");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("scoped d_cosim deck flattens");
+        let simulations = flattened
+            .scoped_models
+            .iter()
+            .filter(|model| model.model_type.eq_ignore_ascii_case("d_cosim"))
+            .filter_map(|model| {
+                model
+                    .string_params
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("simulation"))
+                    .map(|(_, value)| value.as_str())
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(simulations.len(), 2, "expected two scoped d_cosim models");
+        assert!(
+            simulations
+                .iter()
+                .any(|value| std::path::Path::new(value) == deck_dir.join("pwm").as_path()),
+            "path-like simulation should resolve relative to deck dir: {simulations:?}"
+        );
+        assert!(
+            simulations.iter().any(|value| *value == "ivlng"),
+            "provider-style simulation id should remain symbolic: {simulations:?}"
+        );
+    }
+
+    #[test]
+    fn xspice_bare_file_param_identifier_defers_to_subckt_string_override() {
+        let deck_path = std::env::temp_dir()
+            .join("rspice-xspice-bare-file-param")
+            .join("deck.cir");
+        let deck_dir = deck_path.parent().expect("temp deck has parent");
+        std::fs::create_dir_all(deck_dir).expect("create temp deck dir");
+        let netlist = Netlist::parse_with_path(
+            "xspice bare file param\n\
+             .subckt subtest in1 in2 infile=\"whatever\"\n\
+             Afs %vd([in1 0 in2 0]) filesrc\n\
+             .model filesrc filesource (file=infile amploffset=[0 0] amplscale=[1 1]\n\
+             + timeoffset=0 timescale=1 timerelative=false amplstep=false)\n\
+             .ends subtest\n\
+             X1 in1 in2 subtest infile=\"my-source.txt\"\n\
+             .end\n",
+            &deck_path,
+        )
+        .expect("ngspice bare file=infile subckt deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("bare file identifier subckt deck flattens");
+        let scoped_model = flattened
+            .scoped_models
+            .iter()
+            .find(|model| model.model_type.eq_ignore_ascii_case("filesource"))
+            .expect("scoped filesource model exists");
+        let file = scoped_model
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("file"))
+            .map(|(_, value)| value.as_str())
+            .expect("file string param resolved");
+
+        assert_eq!(
+            std::path::Path::new(file),
+            deck_dir.join("my-source.txt").as_path()
+        );
+    }
+
+    #[test]
+    fn xspice_rejects_unknown_percent_port_type_suffixes_like_ngspice() {
+        let err = Netlist::parse(
+            "xspice invalid percent port type\n\
+             A1 %vdc in 0 out gain\n\
+             .end\n",
+        )
+        .expect_err("ngspice rejects unknown typed port %vdc");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("Unknown differential port type"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn xspice_conductance_ports_parse_official_percent_gd_syntax() {
+        let netlist = Netlist::parse(
+            "xspice differential conductance\n\
+             A1 %gd[p n] out model\n\
+             .end\n",
+        )
+        .expect("official XSPICE %gd conductance port syntax parses");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { ports, .. } => {
+                assert!(matches!(
+                    &ports[0],
+                    XspicePort::DifferentialConductance { pos, neg }
+                        if pos == "P" && neg == "N"
+                ));
+                assert_eq!(ports[1], XspicePort::Analog("OUT".to_string()));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_conductance_ports_parse_official_percent_g_syntax() {
+        let netlist = Netlist::parse(
+            "xspice scalar conductance\n\
+             A1 %g in out model\n\
+             .end\n",
+        )
+        .expect("official XSPICE %g conductance port syntax parses");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { ports, .. } => {
+                assert_eq!(ports[0], XspicePort::Conductance("IN".to_string()));
+                assert_eq!(ports[1], XspicePort::Analog("OUT".to_string()));
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_conductance_ports_parse_official_spaced_percent_gd_syntax() {
+        let netlist = Netlist::parse(
+            "xspice spaced differential conductance\n\
+             A1 %gd in 0 %gd out 0 model\n\
+             .end\n",
+        )
+        .expect("official XSPICE spaced %gd conductance port syntax parses");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { ports, .. } => {
+                assert_eq!(ports.len(), 2);
+                assert!(matches!(
+                    &ports[0],
+                    XspicePort::DifferentialConductance { pos, neg }
+                        if pos == "IN" && neg == "0"
+                ));
+                assert!(matches!(
+                    &ports[1],
+                    XspicePort::DifferentialConductance { pos, neg }
+                        if pos == "OUT" && neg == "0"
+                ));
             }
             other => panic!("expected XSPICE element, got {other:?}"),
         }

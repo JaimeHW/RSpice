@@ -192,6 +192,15 @@ pub(super) fn resolve_supported_model_params_upper_map(
         }
     }
 
+    for (name, values) in &model_def.string_vector_params {
+        if let Some(param) = canonical_supported_model_param(name, supported) {
+            return Err(SimulationError::Circuit(format!(
+                "{} '{}' model '{}' uses non-numeric switch parameter {}={:?}; switch parameters must be finite numeric values",
+                element_kind, element_name, model_name, param, values
+            )));
+        }
+    }
+
     for (name, expr) in &model_def.expr_params {
         if let Some(param) = canonical_supported_model_param(name, supported) {
             let value = crate::netlist::expr::eval_expression(expr, &ctx).map_err(|err| {

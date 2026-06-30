@@ -202,10 +202,6 @@ pub(super) fn approx_any(value: f64, candidates: &[f64]) -> bool {
         .any(|candidate| (value - candidate).abs() <= 1.0e-12)
 }
 
-pub(super) fn native_ekv26_level(level: i32) -> bool {
-    level == 260
-}
-
 pub(super) fn native_ekv3_level(level: i32) -> bool {
     level == 301
 }
@@ -227,6 +223,7 @@ pub(super) fn known_advanced_mos_level_without_native(level: i32) -> bool {
             | 109
             | 110
             | 111
+            | 260
             | 1000
             | 1031
             | 2000
@@ -242,17 +239,17 @@ pub(super) fn bjt_level_matches(level: f64, expected: f64) -> bool {
     level.is_finite() && level == expected
 }
 
-pub(super) fn is_native_vbic_bjt_level(level: f64) -> bool {
-    bjt_level_matches(level, 4.0)
+pub(super) fn known_unsupported_bjt_family(level: f64) -> Option<(&'static str, &'static str)> {
+    if bjt_level_matches(level, 23.0) {
+        return Some(("Xyce HBT_X", "Q level 23"));
+    }
+    if bjt_level_matches(level, 4.0)
         || bjt_level_matches(level, 9.0)
         || bjt_level_matches(level, 11.0)
         || bjt_level_matches(level, 12.0)
         || bjt_level_matches(level, 13.0)
-}
-
-pub(super) fn known_unsupported_bjt_family(level: f64) -> Option<(&'static str, &'static str)> {
-    if bjt_level_matches(level, 23.0) {
-        return Some(("Xyce HBT_X", "Q level 23"));
+    {
+        return Some(("VBIC", "Q level 4/9/11/12/13"));
     }
     if bjt_level_matches(level, 8.0) {
         return Some(("ngspice HICUM/L2", "Q level 8"));
@@ -274,7 +271,7 @@ pub(super) fn supported_diode_level(level: f64) -> bool {
 }
 
 pub(super) fn supported_bjt_level(level: f64) -> bool {
-    legacy_gummel_poon_bjt_level(level) || is_native_vbic_bjt_level(level)
+    legacy_gummel_poon_bjt_level(level)
 }
 
 pub(super) fn legacy_gummel_poon_bjt_level(level: f64) -> bool {
@@ -322,26 +319,7 @@ pub(super) fn validate_bjt_model_level(
         }
     }
 
-    let native_vbic_level = level.is_some_and(is_native_vbic_bjt_level);
-    reject_unsupported_vbic13_params(
-        element_name,
-        model,
-        params,
-        expr_params,
-        string_params,
-        native_vbic_level,
-    )?;
-
-    if native_vbic_level {
-        reject_deferred_native_bjt_model_params(
-            element_name,
-            model,
-            "VBIC",
-            params,
-            expr_params,
-            string_params,
-        )?;
-    }
+    reject_unsupported_vbic13_params(element_name, model, params, expr_params, string_params)?;
 
     let Some(level) = level else {
         return Ok(());
@@ -352,9 +330,9 @@ pub(super) fn validate_bjt_model_level(
             let descriptor = bjt_level_descriptor(level);
             return Err(SimulationError::Circuit(format!(
                 "BJT '{element_name}': model '{model}' requests {family} {descriptor} ({selector}), \
-                 which has no native implementation. Advanced CMC BJT families are future \
-                 Verilog-A-to-Rust codegen targets and must not fall back to any other BJT model \
-                 family or runtime Verilog-A."
+                 which has no native implementation. Use the generated Verilog-A builtins for \
+                 commercial compact-model families; they must not fall back to any other native \
+                 BJT model family or runtime Verilog-A."
             )));
         }
 
@@ -362,41 +340,9 @@ pub(super) fn validate_bjt_model_level(
         return Err(SimulationError::Circuit(format!(
             "BJT '{element_name}': model '{model}' requests {descriptor}, which has no native \
              implementation. Supported BJT model levels: legacy Gummel-Poon (no LEVEL or \
-             LEVEL=1/2), and LEVEL=4/9/11/12/13 (VBIC). \
-             Advanced CMC BJT models will be generated from Verilog-A rather than hand-written here."
+             LEVEL=1/2). Advanced CMC BJT models are generated from Verilog-A rather than \
+             hand-written here."
         )));
-    }
-
-    Ok(())
-}
-
-pub(super) fn reject_deferred_native_bjt_model_params(
-    element_name: &str,
-    model: &str,
-    family: &str,
-    params: &HashMap<String, f64>,
-    expr_params: &[(String, String)],
-    string_params: &[(String, String)],
-) -> Result<(), SimulationError> {
-    for (name, expr) in expr_params {
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': native {family} model '{model}' uses unresolved model parameter {name}={expr}; \
-             native {family} model parameters must be finite numeric literals"
-        )));
-    }
-    for (name, value) in string_params {
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': native {family} model '{model}' uses non-numeric model parameter {name}=\"{value}\"; \
-             native {family} model parameters must be finite numeric literals"
-        )));
-    }
-    for (name, value) in params {
-        if !value.is_finite() {
-            return Err(SimulationError::Circuit(format!(
-                "BJT '{element_name}': native {family} model '{model}' uses non-finite model parameter {name}={value}; \
-                 native {family} model parameters must be finite numeric literals"
-            )));
-        }
     }
 
     Ok(())
@@ -424,7 +370,6 @@ pub(super) fn reject_unsupported_vbic13_params(
     params: &HashMap<String, f64>,
     expr_params: &[(String, String)],
     string_params: &[(String, String)],
-    native_vbic_level: bool,
 ) -> Result<(), SimulationError> {
     let mut present: Vec<&'static str> = Vec::new();
     for param in VBIC13_PARAMS
@@ -449,102 +394,11 @@ pub(super) fn reject_unsupported_vbic13_params(
     }
 
     let present_list = present.join(", ");
-    if !native_vbic_level {
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' uses VBIC13 parameter(s) {present_list}; \
-             these are unsupported on legacy GP routing, accepted only on native VBIC \
-             LEVEL=4, LEVEL=9, LEVEL=11, LEVEL=12, or LEVEL=13 cards, and must not be silently ignored"
-        )));
-    }
-
-    for (name, expr) in expr_params {
-        let Some(param) = canonical_vbic13_param(name) else {
-            continue;
-        };
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' uses unresolved VBIC13 parameter {param}={expr}; \
-             accepted VBIC13 compatibility parameters must be finite numeric literals"
-        )));
-    }
-    for (name, value) in string_params {
-        let Some(param) = canonical_vbic13_param(name) else {
-            continue;
-        };
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' uses non-numeric VBIC13 parameter {param}=\"{value}\"; \
-             accepted VBIC13 compatibility parameters must be finite numeric literals"
-        )));
-    }
-
-    for param in &present {
-        if !params.contains_key(*param) {
-            continue;
-        }
-        let value = params
-            .get(*param)
-            .copied()
-            .expect("present VBIC13 parameter has a value");
-        if !value.is_finite() {
-            return Err(SimulationError::Circuit(format!(
-                "BJT '{element_name}': model '{model}' uses non-finite VBIC13 parameter {param}={value}; \
-                 accepted VBIC13 parameters must be finite numeric literals"
-            )));
-        }
-    }
-
-    let vbbe = params.get("VBBE").copied().unwrap_or(0.0);
-    if vbbe < 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' uses VBIC13 parameter VBBE={vbbe}; \
-             VBBE must be nonnegative for native VBIC13 reverse B-E breakdown"
-        )));
-    }
-
-    let nbbe = params.get("NBBE").copied().unwrap_or(1.0);
-    if nbbe <= 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' uses VBIC13 parameter NBBE={nbbe}; \
-             NBBE must be positive for native VBIC13 reverse B-E breakdown"
-        )));
-    }
-
-    let ibbe = params.get("IBBE").copied().unwrap_or(1e-6);
-    if ibbe <= 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' uses VBIC13 parameter IBBE={ibbe}; \
-             IBBE must be positive for native VBIC13 reverse B-E breakdown"
-        )));
-    }
-
-    if vbbe > 0.0 {
-        for (name, expr) in expr_params {
-            if name.eq_ignore_ascii_case("WBE") {
-                return Err(SimulationError::Circuit(format!(
-                    "BJT '{element_name}': model '{model}' uses unresolved WBE={expr} with \
-                     active VBIC13 reverse B-E breakdown; WBE must be a finite numeric literal \
-                     for the native split path"
-                )));
-            }
-        }
-        for (name, value) in string_params {
-            if name.eq_ignore_ascii_case("WBE") {
-                return Err(SimulationError::Circuit(format!(
-                    "BJT '{element_name}': model '{model}' uses non-numeric WBE=\"{value}\" with \
-                     active VBIC13 reverse B-E breakdown; WBE must be a finite numeric literal \
-                     for the native split path"
-                )));
-            }
-        }
-        let wbe = params.get("WBE").copied().unwrap_or(1.0);
-        if !wbe.is_finite() {
-            return Err(SimulationError::Circuit(format!(
-                "BJT '{element_name}': model '{model}' uses active VBIC13 reverse B-E breakdown \
-                 with WBE={wbe}; WBE must be finite for the native split path"
-            )));
-        }
-    }
-
-    Ok(())
+    Err(SimulationError::Circuit(format!(
+        "BJT '{element_name}': model '{model}' uses VBIC13 parameter(s) {present_list}; \
+         generated Verilog-A VBIC builtins own VBIC13 behavior, and these parameters must not \
+         be silently applied to legacy Gummel-Poon native routing"
+    )))
 }
 
 pub(super) fn validate_diode_model_level(
@@ -592,102 +446,10 @@ pub(super) fn validate_diode_model_level(
     Ok(())
 }
 
-pub(super) const EKV26_MODEL_PARAMS: &[&str] = &[
-    "LEVEL",
-    "TYPE",
-    "NOISE",
-    "TRISE",
-    "TEMP",
-    "TNOM",
-    "L",
-    "W",
-    "M",
-    "MULT",
-    "NS",
-    "AS",
-    "AD",
-    "PS",
-    "PD",
-    "COX",
-    "XJ",
-    "VTO",
-    "TCV",
-    "GAMMA",
-    "PHI",
-    "KP",
-    "BEX",
-    "THETA",
-    "E0",
-    "UCRIT",
-    "UCEX",
-    "LAMBDA",
-    "DL",
-    "DW",
-    "WETA",
-    "LETA",
-    "Q0",
-    "LK",
-    "IBA",
-    "IBB",
-    "IBBT",
-    "IBN",
-    "RSH",
-    "HDIF",
-    "AVTO",
-    "AKP",
-    "AGAMMA",
-    "AF",
-    "KF",
-    "XD_N",
-    "XD_JS",
-    "XD_JSW",
-    "XD_JSWG",
-    "XD_MJ",
-    "XD_MJSW",
-    "XD_MJSWG",
-    "XD_PB",
-    "XD_PBSW",
-    "XD_PBSWG",
-    "XD_CJ",
-    "XD_CJSW",
-    "XD_CJSWG",
-    "XD_GMIN",
-    "XD_XJBV",
-    "XD_BV",
-    "XD_NJTS",
-    "XD_NJTSSW",
-    "XD_NJTSSWG",
-    "XD_VTS",
-    "XD_VTSSW",
-    "XD_VTSSWG",
-    "TP_XTI",
-    "TP_CJ",
-    "TP_CJSW",
-    "TP_CJSWG",
-    "TP_PB",
-    "TP_PBSW",
-    "TP_PBSWG",
-    "TP_NJTS",
-    "TP_NJTSSW",
-    "TP_NJTSSWG",
-];
-
-pub(super) const EKV26_INSTANCE_PARAMS: &[&str] = &[
-    "L", "LENGTH", "W", "WIDTH", "M", "MULT", "NS", "AS", "AD", "PS", "PD", "TEMP", "DTEMP",
-];
-pub(super) const EKV26_ZERO_INERT_MODEL_PARAMS: &[&str] =
-    &["FNOIMOD", "NOIA", "CGSO", "CGDO", "CGBO"];
-
 pub(super) const VSWITCH_MODEL_PARAMS: &[&str] = &["VT", "VH", "RON", "ROFF", "SMOOTH"];
 pub(super) const ISWITCH_MODEL_PARAMS: &[&str] = &["IT", "IH", "RON", "ROFF", "SMOOTH"];
 pub(super) const GENERIC_SWITCH_MODEL_PARAMS: &[&str] =
     &["ON", "OFF", "ONH", "OFFH", "RON", "ROFF"];
-
-pub(super) fn known_param(name: &str, supported: &[&str]) -> bool {
-    supported
-        .iter()
-        .any(|supported_name| supported_name.eq_ignore_ascii_case(name))
-}
 
 pub(super) fn native_mos_instance_multiplier(
     element_name: &str,
@@ -843,56 +605,7 @@ pub(super) fn native_b3soi_debug_mod(
             debug_mod = Some(*raw as i32);
         }
     }
-
     Ok(debug_mod)
-}
-
-pub(super) fn validate_ekv26_native_params(
-    element_name: &str,
-    model: &str,
-    model_params: &HashMap<String, f64>,
-    instance_params: &[(String, f64)],
-    deferred_params: &[(String, String)],
-) -> Result<(), SimulationError> {
-    for (name, value) in model_params {
-        let zero_inert_model_param =
-            *value == 0.0 && known_param(name, EKV26_ZERO_INERT_MODEL_PARAMS);
-        if !known_param(name, EKV26_MODEL_PARAMS) && !zero_inert_model_param {
-            return Err(SimulationError::Circuit(format!(
-                "MOSFET '{element_name}': native EKV26 model '{model}' does not support model \
-                 parameter {name}; unsupported EKV parameters must not be silently ignored"
-            )));
-        }
-    }
-
-    for (name, value) in instance_params {
-        if !known_param(name, EKV26_INSTANCE_PARAMS) {
-            return Err(SimulationError::Circuit(format!(
-                "MOSFET '{element_name}': native EKV26 instance does not support parameter \
-                 {name}={value}; unsupported EKV parameters must not be silently ignored"
-            )));
-        }
-        if !value.is_finite() {
-            return Err(SimulationError::Circuit(format!(
-                "MOSFET '{element_name}': native EKV26 instance parameter {name}={value} must be finite"
-            )));
-        }
-    }
-
-    for (name, expr) in deferred_params {
-        if known_param(name, EKV26_INSTANCE_PARAMS) {
-            return Err(SimulationError::Circuit(format!(
-                "MOSFET '{element_name}': native EKV26 instance uses unresolved parameter \
-                 {name}={expr}; EKV26 instance parameters must be finite numeric literals"
-            )));
-        }
-        return Err(SimulationError::Circuit(format!(
-            "MOSFET '{element_name}': native EKV26 instance does not support unresolved parameter \
-             {name}={expr}; unsupported EKV parameters must not be silently ignored"
-        )));
-    }
-
-    Ok(())
 }
 
 pub(super) fn checked_integer_model_level(

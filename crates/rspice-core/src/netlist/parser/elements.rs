@@ -2317,14 +2317,20 @@ pub(super) fn behavioral_expr_token_fragment(token: &TokenKind) -> Option<String
         TokenKind::Star => Some("*".to_string()),
         TokenKind::Slash => Some("/".to_string()),
         TokenKind::AtSign => Some("@".to_string()),
+        TokenKind::Tilde => Some("~".to_string()),
         TokenKind::LBracket => Some("[".to_string()),
         TokenKind::RBracket => Some("]".to_string()),
+        TokenKind::Other(c) => Some(c.to_string()),
         TokenKind::Newline | TokenKind::Eof => None,
     }
 }
 
 /// Parse subcircuit definition: .SUBCKT name ports [PARAMS: p1=v1 p2=v2] or .SUBCKT name ports p1=v1
-pub(super) fn parse_subckt_def(line: &str, line_num: usize) -> Result<SubcircuitDef, ParseError> {
+pub(super) fn parse_subckt_def(
+    line: &str,
+    line_num: usize,
+    params_ctx: &ParamContext,
+) -> Result<SubcircuitDef, ParseError> {
     let fields = split_spice_fields(line);
     if fields.len() < 2 {
         return Err(ParseError::Syntax {
@@ -2335,7 +2341,6 @@ pub(super) fn parse_subckt_def(line: &str, line_num: usize) -> Result<Subcircuit
 
     let name = fields[1].clone();
     let mut ports = Vec::new();
-    let params_ctx = ParamContext::new();
 
     let mut idx = 2usize;
     while idx < fields.len() {
@@ -2344,7 +2349,7 @@ pub(super) fn parse_subckt_def(line: &str, line_num: usize) -> Result<Subcircuit
             idx += 1;
             break;
         }
-        if field.contains('=') {
+        if field.contains('=') || matches!(fields.get(idx + 1).map(String::as_str), Some("=")) {
             break;
         }
         ports.push(field.to_ascii_uppercase());
@@ -2353,6 +2358,7 @@ pub(super) fn parse_subckt_def(line: &str, line_num: usize) -> Result<Subcircuit
 
     // Parse default parameters: NAME=VALUE pairs
     let mut params = Vec::new();
+    let mut string_params = Vec::new();
     while idx < fields.len() {
         let field = &fields[idx];
         if field.eq_ignore_ascii_case("PARAMS") || field.eq_ignore_ascii_case("PARAMS:") {
@@ -2360,12 +2366,39 @@ pub(super) fn parse_subckt_def(line: &str, line_num: usize) -> Result<Subcircuit
             continue;
         }
 
-        if let Some((param_name, raw_value)) = field.split_once('=') {
-            let value = parse_numeric_field_value(raw_value, &params_ctx, line_num)?;
-            params.push((param_name.to_string(), value));
-        }
+        let assignment = if let Some((param_name, raw_value)) = field.split_once('=') {
+            idx += 1;
+            Some((param_name.to_string(), raw_value.to_string()))
+        } else if matches!(fields.get(idx + 1).map(String::as_str), Some("=")) {
+            let Some(raw_value) = fields.get(idx + 2) else {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Expected value after subcircuit parameter '{}='", field),
+                });
+            };
+            let assignment = Some((field.clone(), raw_value.clone()));
+            idx += 3;
+            assignment
+        } else {
+            idx += 1;
+            None
+        };
 
-        idx += 1;
+        if let Some((param_name, raw_value)) = assignment {
+            if param_name.is_empty() {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected parameter name before '=' in .SUBCKT".to_string(),
+                });
+            }
+            if let Some(value) = parse_string_field_value(&raw_value, params_ctx) {
+                string_params.push((param_name, value));
+            } else {
+                let value = parse_numeric_field_value(&raw_value, params_ctx, line_num)?;
+                params.push((param_name, value));
+            }
+            continue;
+        }
     }
 
     Ok(SubcircuitDef {
@@ -2373,8 +2406,17 @@ pub(super) fn parse_subckt_def(line: &str, line_num: usize) -> Result<Subcircuit
         ports,
         elements: Vec::new(),
         params,
+        string_params,
         local_options: std::collections::HashMap::new(),
         library_ref: None,
         nested_subcircuits: Vec::new(),
     })
+}
+
+fn parse_string_field_value(raw_value: &str, params_ctx: &ParamContext) -> Option<String> {
+    if let Some(value) = strip_wrapping_string_literal(raw_value) {
+        return Some(value.to_string());
+    }
+    let expr = strip_wrapping_expression_delimiters(raw_value);
+    params_ctx.get_string(expr).map(ToString::to_string)
 }

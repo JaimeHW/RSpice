@@ -30,6 +30,20 @@ pub(super) fn parse_source_spec(
     loop {
         skip_commas(stream);
         let keyword = match &stream.peek().kind {
+            TokenKind::Ident(s)
+                if dc_value.is_none()
+                    && ac_terms.is_none()
+                    && transient.is_none()
+                    && !is_source_level_keyword(s)
+                    && crate::netlist::lexer::parse_spice_value(s).is_ok() =>
+            {
+                let v = try_value(stream, params).expect("numeric-looking source value parses");
+                if !v.is_finite() {
+                    return Err(non_finite_source_value_error(line_num, "DC", "value", v));
+                }
+                dc_value = Some(v);
+                continue;
+            }
             TokenKind::Ident(s) => s.to_uppercase(),
             _ => {
                 // A bare leading value is the DC level.
