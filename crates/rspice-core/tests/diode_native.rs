@@ -1,6 +1,6 @@
 //! Native SPICE diode validation against ngspice 46.
 
-use rspice_core::engine::Engine;
+use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 use rspice_core::solver::SimulationResult;
 
@@ -21,7 +21,11 @@ fn op_branch_current(model_tail: &str, voltage: f64) -> f64 {
          .end\n"
     );
     let netlist = Netlist::parse(&deck).expect("diode deck parses");
-    let result = Engine::default()
+    let mut config = SimulationConfig::default();
+    // Isolate the model-card high-injection knee from RSpice's internal
+    // nodal conditioning floor; the deck already sets junction GMIN to zero.
+    config.convergence_config.gmin_target = 0.0;
+    let result = Engine::new(config)
         .run_dc_op(&netlist)
         .expect("diode op converges");
     branch_current(&result, "v1")
