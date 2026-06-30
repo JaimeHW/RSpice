@@ -641,11 +641,14 @@ impl DeviceIR {
         // operating-point reporting variables above all — keeps its
         // primal value but never costs shadow slots or updates.
         let mut shadow_roots: HashSet<SmolStr> = HashSet::new();
+        let mut second_shadow_roots: HashSet<SmolStr> = HashSet::new();
         for contrib in &module.contributions {
             let expr = converter.convert(&contrib.expression)?;
             autodiff::collect_var_names(&expr, &mut shadow_roots);
+            autodiff::collect_ddx_operand_names_in_expr(&expr, &mut second_shadow_roots);
         }
-        autodiff::collect_ddx_operand_names(&ir.assignments, &mut shadow_roots);
+        autodiff::collect_ddx_operand_names(&ir.assignments, &mut second_shadow_roots);
+        shadow_roots.extend(second_shadow_roots.iter().cloned());
 
         // Forward-mode AD over the assignment sequence: build shadow
         // assignments holding each variable's partial derivative w.r.t.
@@ -653,8 +656,13 @@ impl DeviceIR {
         // Jacobians chain through intermediate variables. Shadow updates
         // recurse into loop bodies so loop-carried dependencies
         // differentiate correctly.
-        let shadows =
-            autodiff::build_shadow_assignments(&mut ir, num_nodes, num_branches, &shadow_roots);
+        let shadows = autodiff::build_shadow_assignments(
+            &mut ir,
+            num_nodes,
+            num_branches,
+            &shadow_roots,
+            &second_shadow_roots,
+        );
 
         // Resolve ddx() operators now that the shadow context exists
         autodiff::resolve_ddx_in_items(&mut ir.assignments, &shadows);
@@ -1480,23 +1488,26 @@ pub mod autodiff {
 
     /// Collect variable names appearing inside ddx() operands across an
     /// assignment tree (their derivative resolution reads shadows)
+    pub(crate) fn collect_ddx_operand_names_in_expr(expr: &IrExpr, out: &mut HashSet<SmolStr>) {
+        map_expr(expr, &mut |e| {
+            if let IrExpr::Ddx { expr, .. } = e {
+                collect_var_names(expr, out);
+            }
+            None
+        });
+    }
+
     pub(crate) fn collect_ddx_operand_names(
         items: &[IrAssignmentItem],
         out: &mut HashSet<SmolStr>,
     ) {
-        fn scan(expr: &IrExpr, out: &mut HashSet<SmolStr>) {
-            map_expr(expr, &mut |e| {
-                if let IrExpr::Ddx { expr, .. } = e {
-                    collect_var_names(expr, out);
-                }
-                None
-            });
-        }
         for item in items {
             match item {
-                IrAssignmentItem::Assign(assign) => scan(&assign.expr, out),
+                IrAssignmentItem::Assign(assign) => {
+                    collect_ddx_operand_names_in_expr(&assign.expr, out)
+                }
                 IrAssignmentItem::Loop { condition, body } => {
-                    scan(condition, out);
+                    collect_ddx_operand_names_in_expr(condition, out);
                     collect_ddx_operand_names(body, out);
                 }
             }
@@ -1686,6 +1697,40 @@ pub mod autodiff {
         }
     }
 
+    fn shadow_liveness(
+        items: &[IrAssignmentItem],
+        variables: &[VarDef],
+        arrays: &[ArrayDef],
+        roots: &HashSet<SmolStr>,
+    ) -> HashSet<SmolStr> {
+        let mut live = roots.clone();
+        loop {
+            let mut changed = false;
+            propagate_liveness(items, variables, &mut live, &mut changed);
+            // Array families share their mask; share liveness the same
+            // way (one live element keeps the whole family).
+            for array in arrays {
+                let family_live = live.contains(&array.name)
+                    || (array.lower..array.lower + array.len as i64)
+                        .any(|k| live.contains(format!("{}[{k}]", array.name).as_str()));
+                if family_live && live.insert(array.name.clone()) {
+                    changed = true;
+                }
+                if family_live {
+                    for k in array.lower..array.lower + array.len as i64 {
+                        if live.insert(format!("{}[{k}]", array.name).into()) {
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        live
+    }
+
     /// Interleave shadow derivative updates before each original
     /// assignment, recursing into loop bodies so loop-carried voltage
     /// dependencies accumulate their derivatives per iteration
@@ -1694,6 +1739,7 @@ pub mod autodiff {
         variables: &[VarDef],
         shadow_index: &HashMap<SmolStr, usize>,
         ctx: &ShadowContext,
+        second_deps: &HashMap<SmolStr, AxisMask>,
         num_nodes: usize,
         num_branches: usize,
     ) -> Vec<IrAssignmentItem> {
@@ -1705,6 +1751,43 @@ pub mod autodiff {
                         // Indexed write: the shadow run receives an indexed
                         // write of the value's derivative at the same slot,
                         // along the array's live axes only
+                        let second_mask = second_deps.get(&target.array).copied().unwrap_or(0);
+                        if second_mask != 0 {
+                            for first in axes(num_nodes, num_branches) {
+                                if second_mask & axis_bit(&first, num_nodes) == 0 {
+                                    continue;
+                                }
+                                let first_deriv =
+                                    simplify(differentiate_with_shadows(&assign.expr, &first, ctx));
+                                let first_shadow_array =
+                                    ShadowContext::shadow_name(&target.array, &first);
+                                for second in axes(num_nodes, num_branches) {
+                                    if second_mask & axis_bit(&second, num_nodes) == 0 {
+                                        continue;
+                                    }
+                                    let second_deriv = simplify(differentiate_with_shadows(
+                                        &first_deriv,
+                                        &second,
+                                        ctx,
+                                    ));
+                                    let second_shadow_array =
+                                        ShadowContext::shadow_name(&first_shadow_array, &second);
+                                    let shadow_base = ctx
+                                        .array_shadow_base(&first_shadow_array, &second)
+                                        .expect("second-order shadowed array has a shadow run");
+                                    rewritten.push(IrAssignmentItem::Assign(VarAssignment {
+                                        var_index: shadow_base,
+                                        index: Some(IndexedTarget {
+                                            array: second_shadow_array,
+                                            len: target.len,
+                                            lower: target.lower,
+                                            index: target.index.clone(),
+                                        }),
+                                        expr: second_deriv,
+                                    }));
+                                }
+                            }
+                        }
                         let mask = ctx.axes_of(&target.array);
                         if mask != 0 {
                             for wrt in axes(num_nodes, num_branches) {
@@ -1733,6 +1816,34 @@ pub mod autodiff {
                         continue;
                     }
                     let target = variables[assign.var_index].name.clone();
+                    let second_mask = second_deps.get(&target).copied().unwrap_or(0);
+                    if second_mask != 0 {
+                        for first in axes(num_nodes, num_branches) {
+                            if second_mask & axis_bit(&first, num_nodes) == 0 {
+                                continue;
+                            }
+                            let first_deriv =
+                                simplify(differentiate_with_shadows(&assign.expr, &first, ctx));
+                            let first_shadow = ShadowContext::shadow_name(&target, &first);
+                            for second in axes(num_nodes, num_branches) {
+                                if second_mask & axis_bit(&second, num_nodes) == 0 {
+                                    continue;
+                                }
+                                let second_deriv = simplify(differentiate_with_shadows(
+                                    &first_deriv,
+                                    &second,
+                                    ctx,
+                                ));
+                                let second_shadow =
+                                    ShadowContext::shadow_name(&first_shadow, &second);
+                                rewritten.push(IrAssignmentItem::Assign(VarAssignment {
+                                    var_index: shadow_index[&second_shadow],
+                                    index: None,
+                                    expr: second_deriv,
+                                }));
+                            }
+                        }
+                    }
                     let mask = ctx.axes_of(&target);
                     if mask != 0 {
                         for wrt in axes(num_nodes, num_branches) {
@@ -1757,6 +1868,7 @@ pub mod autodiff {
                         variables,
                         shadow_index,
                         ctx,
+                        second_deps,
                         num_nodes,
                         num_branches,
                     );
@@ -1779,6 +1891,7 @@ pub mod autodiff {
         num_nodes: usize,
         num_branches: usize,
         shadow_roots: &HashSet<SmolStr>,
+        second_shadow_roots: &HashSet<SmolStr>,
     ) -> ShadowContext {
         // Fixpoint: a variable depends on an axis if any assignment to it
         // reads a probe of that axis or another variable depending on it.
@@ -1803,32 +1916,19 @@ pub mod autodiff {
         // ddx operand) directly, or feeds an assignment to a live
         // variable. Dead shadows (operating-point reporting chains) are
         // dropped before any slot is allocated.
-        let mut live: HashSet<SmolStr> = shadow_roots.clone();
-        loop {
-            let mut changed = false;
-            propagate_liveness(&ir.assignments, &ir.variables, &mut live, &mut changed);
-            // Array families share their mask; share liveness the same
-            // way (one live element keeps the whole family)
-            for array in &ir.arrays {
-                let family_live = live.contains(&array.name)
-                    || (array.lower..array.lower + array.len as i64)
-                        .any(|k| live.contains(format!("{}[{k}]", array.name).as_str()));
-                if family_live && live.insert(array.name.clone()) {
-                    changed = true;
-                }
-                if family_live {
-                    for k in array.lower..array.lower + array.len as i64 {
-                        if live.insert(format!("{}[{k}]", array.name).into()) {
-                            changed = true;
-                        }
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-        deps.retain(|name, _| live.contains(name));
+        let live = shadow_liveness(&ir.assignments, &ir.variables, &ir.arrays, shadow_roots);
+        let second_live = shadow_liveness(
+            &ir.assignments,
+            &ir.variables,
+            &ir.arrays,
+            second_shadow_roots,
+        );
+        deps.retain(|name, _| live.contains(name) || second_live.contains(name));
+        let second_deps: HashMap<SmolStr, AxisMask> = deps
+            .iter()
+            .filter(|(name, _)| second_live.contains(*name))
+            .map(|(name, mask)| (name.clone(), *mask))
+            .collect();
 
         if deps.is_empty() {
             return ShadowContext::default();
@@ -1870,6 +1970,28 @@ pub mod autodiff {
                 });
             }
         }
+        for (name, mask) in &second_deps {
+            if array_member.contains(name) {
+                continue;
+            }
+            for first in axes(num_nodes, num_branches) {
+                if mask & axis_bit(&first, num_nodes) == 0 {
+                    continue;
+                }
+                let first_shadow = ShadowContext::shadow_name(name, &first);
+                for second in axes(num_nodes, num_branches) {
+                    if mask & axis_bit(&second, num_nodes) == 0 {
+                        continue;
+                    }
+                    let second_shadow = ShadowContext::shadow_name(&first_shadow, &second);
+                    shadow_index.insert(second_shadow.clone(), ir.variables.len());
+                    ir.variables.push(VarDef {
+                        name: second_shadow,
+                        is_state: false,
+                    });
+                }
+            }
+        }
 
         // Contiguous shadow runs per (array, live axis)
         let mut array_shadow_base: HashMap<SmolStr, usize> = HashMap::new();
@@ -1896,10 +2018,74 @@ pub mod autodiff {
                 }
             }
         }
+        for array in ir.arrays.iter() {
+            let mask = second_deps.get(&array.name).copied().unwrap_or(0);
+            if mask == 0 {
+                continue;
+            }
+            for first in axes(num_nodes, num_branches) {
+                if mask & axis_bit(&first, num_nodes) == 0 {
+                    continue;
+                }
+                let first_shadow_array = ShadowContext::shadow_name(&array.name, &first);
+                for second in axes(num_nodes, num_branches) {
+                    if mask & axis_bit(&second, num_nodes) == 0 {
+                        continue;
+                    }
+                    let second_shadow_array =
+                        ShadowContext::shadow_name(&first_shadow_array, &second);
+                    let run_base = ir.variables.len() + shadow_runs.len();
+                    array_shadow_base.insert(second_shadow_array, run_base);
+                    for k in array.lower..array.lower + array.len as i64 {
+                        let element = format!("{}[{k}]", array.name);
+                        let first_shadow_element = ShadowContext::shadow_name(&element, &first);
+                        let second_shadow_element =
+                            ShadowContext::shadow_name(&first_shadow_element, &second);
+                        shadow_index.insert(
+                            second_shadow_element.clone(),
+                            run_base + (k - array.lower) as usize,
+                        );
+                        shadow_runs.push(VarDef {
+                            name: second_shadow_element,
+                            is_state: false,
+                        });
+                    }
+                }
+            }
+        }
         ir.variables.extend(shadow_runs);
 
+        let mut shadowed = deps;
+        for (name, mask) in &second_deps {
+            if array_member.contains(name) {
+                continue;
+            }
+            for first in axes(num_nodes, num_branches) {
+                if mask & axis_bit(&first, num_nodes) == 0 {
+                    continue;
+                }
+                shadowed.insert(ShadowContext::shadow_name(name, &first), *mask);
+            }
+        }
+        for array in ir.arrays.iter() {
+            let mask = second_deps.get(&array.name).copied().unwrap_or(0);
+            if mask == 0 {
+                continue;
+            }
+            for first in axes(num_nodes, num_branches) {
+                if mask & axis_bit(&first, num_nodes) == 0 {
+                    continue;
+                }
+                shadowed.insert(ShadowContext::shadow_name(&array.name, &first), mask);
+                for k in array.lower..array.lower + array.len as i64 {
+                    let element = format!("{}[{k}]", array.name);
+                    shadowed.insert(ShadowContext::shadow_name(&element, &first), mask);
+                }
+            }
+        }
+
         let ctx = ShadowContext {
-            shadowed: deps,
+            shadowed,
             array_shadow_base,
             num_nodes,
         };
@@ -1913,6 +2099,7 @@ pub mod autodiff {
             &ir.variables,
             &shadow_index,
             &ctx,
+            &second_deps,
             num_nodes,
             num_branches,
         );

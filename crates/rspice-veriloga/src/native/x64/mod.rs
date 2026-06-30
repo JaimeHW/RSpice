@@ -3702,6 +3702,147 @@ endmodule
     }
 
     #[test]
+    fn compile_model_with_canonical_ir_lowers_assignment_fed_ddx_jacobians_from_mir() {
+        let source = r#"
+module native_canonical_assignment_ddx_jacobian(p, n);
+  inout p, n;
+  electrical p, n;
+  real x;
+  analog begin
+    x = V(p, n) * V(p, n);
+    I(p, n) <+ ddx(x, V(p, n));
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(
+            model
+                .variable_names
+                .iter()
+                .any(|name| name.as_str() == "x@d0@d0"),
+            "fixture must include scalar second-order derivative shadow"
+        );
+        poison_jacobian_bytecode(&mut model, 99.0);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical assignment-fed ddx Jacobians compile to native x64");
+        let mut context =
+            native_model_benchmark_context(&model, "canonical_assignment_ddx_jacobian");
+        context.voltages[0] = 3.0;
+        context.voltages[1] = 0.0;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+        native.run_assignments(&ctx, context.variables.as_mut_ptr());
+        if let Some(error) = take_native_runtime_error() {
+            panic!("native assignment failed before assignment-fed ddx Jacobian: {error}");
+        }
+        let ctx = eval_context_from_vm_context(&mut context);
+
+        assert_finite_close(
+            "canonical assignment-fed ddx current",
+            "stamp value",
+            6.0,
+            native.run_stamp_value(0, &ctx, context.variables.as_ptr()),
+        )
+        .expect("assignment-fed ddx current matches expected value");
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(0)),
+            2.0,
+            "canonical_assignment_ddx_jacobian d/dp",
+        );
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(1)),
+            -2.0,
+            "canonical_assignment_ddx_jacobian d/dn",
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_array_fed_ddx_jacobians_from_mir() {
+        let source = r#"
+module native_canonical_array_ddx_jacobian(p, n);
+  inout p, n;
+  electrical p, n;
+  real q[0:1];
+  integer idx;
+  analog begin
+    idx = 1;
+    q[idx] = V(p, n) * V(p, n);
+    I(p, n) <+ ddx(q[idx], V(p, n));
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(
+            model
+                .variable_names
+                .iter()
+                .any(|name| name.as_str() == "q[1]@d0@d0"),
+            "fixture must include contiguous array second-order derivative shadow"
+        );
+        poison_jacobian_bytecode(&mut model, 99.0);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical array-fed ddx Jacobians compile to native x64");
+        let mut context = native_model_benchmark_context(&model, "canonical_array_ddx_jacobian");
+        context.voltages[0] = 3.0;
+        context.voltages[1] = 0.0;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+        native.run_assignments(&ctx, context.variables.as_mut_ptr());
+        if let Some(error) = take_native_runtime_error() {
+            panic!("native assignment failed before array-fed ddx Jacobian: {error}");
+        }
+        let ctx = eval_context_from_vm_context(&mut context);
+
+        assert_finite_close(
+            "canonical array-fed ddx current",
+            "stamp value",
+            6.0,
+            native.run_stamp_value(0, &ctx, context.variables.as_ptr()),
+        )
+        .expect("array-fed ddx current matches expected value");
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(0)),
+            2.0,
+            "canonical_array_ddx_jacobian d/dp",
+        );
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(1)),
+            -2.0,
+            "canonical_array_ddx_jacobian d/dn",
+        );
+    }
+
+    #[test]
     fn native_x64_generated_model_plan_publishes_dense_entrypoint_surface() {
         let source = r#"
 `include "disciplines.vams"

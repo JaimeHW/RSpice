@@ -2802,8 +2802,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 first,
                 second,
             ),
-            HirExprKind::ArrayAccess { array, .. } => {
-                Err(self.unsupported(format!("second derivative of array access {array}")))
+            HirExprKind::ArrayAccess { array, index } => {
+                self.lower_array_access_second_derivative(array.as_str(), *index, first, second)
             }
             HirExprKind::AnalogOperator { op } => {
                 self.lower_analog_operator_second_derivative(op, first, second)
@@ -5539,6 +5539,34 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
+    fn lower_array_access_second_derivative(
+        &mut self,
+        array: &str,
+        index: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let Some((base, len, lower)) =
+            self.resolve_array_second_derivative_variable_range(array, first, second)?
+        else {
+            return Err(self.unsupported(format!("second derivative of array access {array}")));
+        };
+        validate_range(
+            self.model.clone(),
+            "canonical array second-derivative variable range",
+            base,
+            len,
+            self.limits.variable_count,
+        )?;
+        self.lower(index)?;
+        if lower_constant_dynamic_variable_read(&mut self.ops, base, len, lower) {
+            return Ok(());
+        }
+        self.ops
+            .push(NativeOp::LoadVariableDyn { base, len, lower });
+        Ok(())
+    }
+
     fn resolve_array_variable_range(&self, array: &str) -> JitResult<Option<(usize, usize, i64)>> {
         let prefix = format!("{array}[");
         self.resolve_variable_range_with_affixes(array, &prefix, "]")
@@ -5551,6 +5579,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<Option<(usize, usize, i64)>> {
         let prefix = format!("{array}[");
         let suffix = format!("]@{}", wrt.shadow_suffix());
+        self.resolve_variable_range_with_affixes(array, &prefix, &suffix)
+    }
+
+    fn resolve_array_second_derivative_variable_range(
+        &self,
+        array: &str,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<Option<(usize, usize, i64)>> {
+        let prefix = format!("{array}[");
+        let suffix = format!("]@{}@{}", first.shadow_suffix(), second.shadow_suffix());
         self.resolve_variable_range_with_affixes(array, &prefix, &suffix)
     }
 
