@@ -41,6 +41,7 @@ use laplace_synthesis::*;
 use line::*;
 use scoping::*;
 use source_specs::parse_source_spec;
+pub(in crate::netlist) use source_specs::parse_source_spec_text;
 use state::*;
 use tlines::*;
 use values::*;

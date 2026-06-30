@@ -144,6 +144,16 @@ pub(super) fn parse_source_spec(
     })
 }
 
+pub(in crate::netlist) fn parse_source_spec_text(
+    raw: &str,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    let tokens = tokenize(raw).map_err(|err| lex_to_parse_error(err, line_num))?;
+    let mut stream = TokenStream::new(tokens);
+    parse_source_spec(&mut stream, line_num, params)
+}
+
 fn consume_distortion_source_annotation(
     stream: &mut TokenStream,
     line_num: usize,

@@ -393,8 +393,20 @@ pub(super) fn parse_line(
             params,
             defer_simple_param_refs,
         ),
-        'V' => parse_voltage_source(&mut stream, line_num, elements, params),
-        'I' => parse_current_source(&mut stream, line_num, elements, params),
+        'V' => parse_voltage_source(
+            &mut stream,
+            line_num,
+            elements,
+            params,
+            defer_simple_param_refs,
+        ),
+        'I' => parse_current_source(
+            &mut stream,
+            line_num,
+            elements,
+            params,
+            defer_simple_param_refs,
+        ),
         'D' => parse_diode(
             &mut stream,
             line_num,

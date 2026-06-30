@@ -737,6 +737,12 @@ impl Engine {
                         transient_spec,
                     );
                 }
+                ElementKind::VoltageSourceDeferred(_) | ElementKind::CurrentSourceDeferred(_) => {
+                    return Err(SimulationError::Circuit(format!(
+                        "Source '{}' still has unresolved subcircuit parameter scope after flattening",
+                        element.name
+                    )));
+                }
                 ElementKind::Diode {
                     model,
                     instance_params,

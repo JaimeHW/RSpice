@@ -209,8 +209,16 @@ pub enum ElementKind {
     /// Voltage source
     VoltageSource(SourceSpec),
 
+    /// Voltage source captured inside a subcircuit body before instance
+    /// parameter scope is known.
+    VoltageSourceDeferred(String),
+
     /// Current source
     CurrentSource(SourceSpec),
+
+    /// Current source captured inside a subcircuit body before instance
+    /// parameter scope is known.
+    CurrentSourceDeferred(String),
 
     //-------------------------------------------------------------------------
     // Semiconductor Devices

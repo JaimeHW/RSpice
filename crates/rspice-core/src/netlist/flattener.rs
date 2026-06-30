@@ -18,6 +18,7 @@
 use super::expr::prepare_behavioral_expression;
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
+use super::parser::parse_source_spec_text;
 use super::{
     Element, ElementKind, ModelDef, Netlist, ParamContext, ParametricValue, ParseError,
     RandomState, SourceSpec, SubcircuitDef,
@@ -966,6 +967,13 @@ impl<'a> Flattener<'a> {
                 real_vector_expr_params: Vec::new(),
             },
 
+            ElementKind::VoltageSourceDeferred(raw_spec) => ElementKind::VoltageSource(
+                self.resolve_deferred_source_spec(raw_spec, scope, element_path)?,
+            ),
+            ElementKind::CurrentSourceDeferred(raw_spec) => ElementKind::CurrentSource(
+                self.resolve_deferred_source_spec(raw_spec, scope, element_path)?,
+            ),
+
             ElementKind::BehavioralVoltage {
                 expression,
                 tc1,
@@ -1079,6 +1087,20 @@ impl<'a> Flattener<'a> {
             }
         }
         Ok(merged)
+    }
+
+    fn resolve_deferred_source_spec(
+        &self,
+        raw_spec: &str,
+        scope: &ParamContext,
+        element_path: &str,
+    ) -> Result<SourceSpec, ParseError> {
+        parse_source_spec_text(raw_spec, 0, scope).map_err(|err| {
+            ParseError::InvalidValue(format!(
+                "source specification for element '{}' could not be resolved: {}",
+                element_path, err
+            ))
+        })
     }
 
     fn prepare_scoped_behavioral_expression(

@@ -4116,6 +4116,65 @@ mod tests {
     }
 
     #[test]
+    fn subckt_source_value_resolves_against_instance_scope_when_flattened() {
+        let netlist = Netlist::parse(
+            "subckt source parameter scope\n\
+             .param top_current=15\n\
+             Xtest 1 0 testsub PARAMS: CURRENT={top_current}\n\
+             .subckt testsub a b PARAMS: CURRENT=1\n\
+             I1 a b {CURRENT}\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("subcircuit source parameter deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("subcircuit source parameter flattens");
+        let current = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::CurrentSource(SourceSpec::Dc(value)) if element.name == "Xtest.I1" => {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .expect("flattened current source exists");
+
+        assert_eq!(current, 15.0);
+    }
+
+    #[test]
+    fn subckt_transient_source_values_resolve_against_instance_scope_when_flattened() {
+        let netlist = Netlist::parse(
+            "subckt transient source parameter scope\n\
+             Xtest 1 0 testsub PARAMS: AMP=3\n\
+             .subckt testsub a b PARAMS: AMP=1\n\
+             V1 a b PULSE(0 {AMP} 0 1n 1n 1u 2u)\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("subcircuit transient source parameter deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("subcircuit transient source flattens");
+        let pulse_high = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::VoltageSource(SourceSpec::Pulse { v2, .. })
+                    if element.name == "Xtest.V1" =>
+                {
+                    Some(*v2)
+                }
+                _ => None,
+            })
+            .expect("flattened pulse source exists");
+
+        assert_eq!(pulse_high, 3.0);
+    }
+
+    #[test]
     fn passive_unit_words_after_numeric_values_are_consumed() {
         let netlist = Netlist::parse(
             "passive unit words\n\

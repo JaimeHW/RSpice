@@ -258,6 +258,8 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/PARAMS2/Params_B4.cir",
         "Netlists/PARAMS2/Params_B7.cir",
         "Netlists/PARAMS2/Params_B7_hs.cir",
+        "Netlists/SUBCKT/subckt_h0.cir",
+        "Netlists/SUBCKT/subckt_h0_hs.cir",
         "Netlists/SUBCKT/subckt_i2.cir",
         "Netlists/SUBCKT/subckt_i3.cir",
         "Netlists/SUBCKT/subckt_i3_hs.cir",

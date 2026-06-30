@@ -612,10 +612,25 @@ pub(super) fn parse_voltage_source(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_source_spec: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
+
+    if defer_source_spec {
+        let raw_spec = collect_deferred_source_spec(stream);
+        elements.push(Element {
+            name,
+            kind: if raw_spec.trim().is_empty() {
+                ElementKind::VoltageSource(SourceSpec::Dc(0.0))
+            } else {
+                ElementKind::VoltageSourceDeferred(raw_spec)
+            },
+            nodes: vec![node_pos, node_neg],
+        });
+        return Ok(());
+    }
 
     let source_spec = parse_source_spec(stream, line_num, params)?;
 
@@ -633,10 +648,25 @@ pub(super) fn parse_current_source(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_source_spec: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
+
+    if defer_source_spec {
+        let raw_spec = collect_deferred_source_spec(stream);
+        elements.push(Element {
+            name,
+            kind: if raw_spec.trim().is_empty() {
+                ElementKind::CurrentSource(SourceSpec::Dc(0.0))
+            } else {
+                ElementKind::CurrentSourceDeferred(raw_spec)
+            },
+            nodes: vec![node_pos, node_neg],
+        });
+        return Ok(());
+    }
 
     let source_spec = parse_source_spec(stream, line_num, params)?;
 
@@ -647,6 +677,15 @@ pub(super) fn parse_current_source(
     });
 
     Ok(())
+}
+
+fn collect_deferred_source_spec(stream: &mut TokenStream) -> String {
+    stream
+        .collect_line()
+        .into_iter()
+        .filter_map(|token| (!token.lexeme.is_empty()).then_some(token.lexeme))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub(super) fn parse_diode(
