@@ -144,14 +144,16 @@ fn path_relative_to(root: &Path, path: &Path) -> PathBuf {
 
 fn package_name_from_relative_path(path: &Path) -> Option<String> {
     let parts: Vec<String> = path
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
         .components()
         .filter_map(component_to_string)
         .take(2)
         .collect();
-    if parts.len() >= 2 {
-        Some(format!("{}/{}", parts[0], parts[1]))
-    } else {
-        None
+    match parts.as_slice() {
+        [only] => Some(only.clone()),
+        [first, second, ..] => Some(format!("{first}/{second}")),
+        [] => None,
     }
 }
 

@@ -337,7 +337,15 @@ pub(crate) fn read_to_string(path: &str) -> Result<Arc<str>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn virtual_registry_test_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     fn poison_virtual_files_lock() {
         let result = std::panic::catch_unwind(|| {
@@ -349,6 +357,7 @@ mod tests {
 
     #[test]
     fn virtual_data_file_registry_recovers_after_poison() {
+        let _guard = virtual_registry_test_lock();
         poison_virtual_files_lock();
 
         register_data_file("virtual://poison/recovered", "0 1\n")
@@ -362,6 +371,7 @@ mod tests {
 
     #[test]
     fn registering_identical_virtual_data_file_is_idempotent() {
+        let _guard = virtual_registry_test_lock();
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock after epoch")
