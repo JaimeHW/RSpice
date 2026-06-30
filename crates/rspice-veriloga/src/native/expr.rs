@@ -2652,6 +2652,29 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
+    fn lower_ddx_projection_derivative(
+        &mut self,
+        expr: ExprId,
+        probe: ExprId,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let (pos, neg) = self.ddx_probe_nodes(probe)?;
+        if let Some(pos) = pos {
+            self.lower_second_derivative(expr, CanonicalDerivativeAxis::Node(pos), wrt)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+
+        if let Some(neg) = neg {
+            self.lower_second_derivative(expr, CanonicalDerivativeAxis::Node(neg), wrt)?;
+            self.append_arithmetic("Sub")?;
+            self.push(NativeOp::Const(0.5))?;
+            self.append_arithmetic("Mul")?;
+        }
+
+        Ok(())
+    }
+
     fn ddx_probe_nodes(&self, probe: ExprId) -> JitResult<(Option<NodeId>, Option<NodeId>)> {
         let expression = self.expression(probe)?;
         match &expression.kind {
@@ -2731,6 +2754,71 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
+    fn lower_second_derivative(
+        &mut self,
+        expr_id: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let expression = self.expression(expr_id)?;
+        match &expression.kind {
+            HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::ArrayLiteral { .. }
+            | HirExprKind::NoiseSource { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => self.push(NativeOp::Const(0.0)),
+            HirExprKind::Identifier { name } => {
+                self.lower_identifier_second_derivative(name.as_str(), first, second)
+            }
+            HirExprKind::Unary { op, operand } => {
+                self.lower_unary_second_derivative(op.as_str(), *operand, first, second)
+            }
+            HirExprKind::Binary { op, left, right } => {
+                self.lower_binary_second_derivative(op.as_str(), *left, *right, first, second)
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                self.lower(*condition)?;
+                self.lower_second_derivative(*then_expr, first, second)?;
+                self.lower_second_derivative(*else_expr, first, second)?;
+                self.append_ifelse()
+            }
+            HirExprKind::SystemFunction { name, args } => self
+                .lower_system_function_second_derivative(
+                    expression.id,
+                    name.as_str(),
+                    args.as_slice(),
+                    first,
+                    second,
+                ),
+            HirExprKind::Call { name, args } => self.lower_call_second_derivative(
+                expression.id,
+                name.as_str(),
+                args.as_slice(),
+                first,
+                second,
+            ),
+            HirExprKind::ArrayAccess { array, .. } => {
+                Err(self.unsupported(format!("second derivative of array access {array}")))
+            }
+            HirExprKind::AnalogOperator { op } => {
+                self.lower_analog_operator_second_derivative(op, first, second)
+            }
+            HirExprKind::Laplace { expr, kind } => {
+                let gain = self.laplace_kind_dc_gain(kind)?;
+                self.lower_scaled_second_derivative(*expr, first, second, gain)
+            }
+            HirExprKind::Zi { expr, kind } => {
+                let gain = self.zi_kind_dc_gain(kind)?;
+                self.lower_scaled_second_derivative(*expr, first, second, gain)
+            }
+        }
+    }
+
     fn lower_identifier_derivative(
         &mut self,
         name: &str,
@@ -2768,6 +2856,49 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             return self.push(NativeOp::Const(0.0));
         }
         Err(self.unsupported(format!("ddx derivative of identifier {name}")))
+    }
+
+    fn lower_identifier_second_derivative(
+        &mut self,
+        name: &str,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        if self
+            .mir
+            .parameters
+            .iter()
+            .any(|parameter| parameter.name.as_str() == name)
+        {
+            return self.push(NativeOp::Const(0.0));
+        }
+        if self
+            .limits
+            .variable_names
+            .iter()
+            .any(|variable| variable.as_str() == name)
+        {
+            let first_shadow = format!("{name}@{}", first.shadow_suffix());
+            let second_shadow = format!("{first_shadow}@{}", second.shadow_suffix());
+            if let Some(shadow_index) = self
+                .limits
+                .variable_names
+                .iter()
+                .position(|variable| variable.as_str() == second_shadow)
+            {
+                validate_index(
+                    self.model.clone(),
+                    "canonical variable second-derivative shadow",
+                    shadow_index,
+                    self.limits.variable_count,
+                )?;
+                return self.push(NativeOp::LoadVariable(shadow_index));
+            }
+            return Err(self.unsupported(format!(
+                "second derivative of assignment-fed identifier {name}"
+            )));
+        }
+        Err(self.unsupported(format!("second derivative of identifier {name}")))
     }
 
     fn lower_branch_access_derivative(
@@ -2874,6 +3005,24 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
+    fn lower_unary_second_derivative(
+        &mut self,
+        op: &str,
+        operand: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        match op {
+            "Pos" => self.lower_second_derivative(operand, first, second),
+            "Neg" => {
+                self.lower_second_derivative(operand, first, second)?;
+                self.append_unary(NativeOp::Neg)
+            }
+            "Not" | "BitNot" => self.push(NativeOp::Const(0.0)),
+            _ => Err(self.unsupported(format!("second derivative of unary operator {op}"))),
+        }
+    }
+
     fn lower_binary_derivative(
         &mut self,
         op: &str,
@@ -2916,6 +3065,122 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
+    fn lower_binary_second_derivative(
+        &mut self,
+        op: &str,
+        left: ExprId,
+        right: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        match op {
+            "Add" | "Sub" => {
+                self.lower_second_derivative(left, first, second)?;
+                self.lower_second_derivative(right, first, second)?;
+                self.append_arithmetic(op)
+            }
+            "Mul" => {
+                self.lower_second_derivative(left, first, second)?;
+                self.lower(right)?;
+                self.append_arithmetic("Mul")?;
+                self.lower_derivative(left, first)?;
+                self.lower_derivative(right, second)?;
+                self.append_arithmetic("Mul")?;
+                self.append_arithmetic("Add")?;
+                self.lower_derivative(left, second)?;
+                self.lower_derivative(right, first)?;
+                self.append_arithmetic("Mul")?;
+                self.append_arithmetic("Add")?;
+                self.lower(left)?;
+                self.lower_second_derivative(right, first, second)?;
+                self.append_arithmetic("Mul")?;
+                self.append_arithmetic("Add")
+            }
+            "Div" => self.lower_div_second_derivative(left, right, first, second),
+            "Pow" => self.lower_pow_second_derivative(left, right, first, second),
+            "Mod" | "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
+            | "BitXor" | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
+            _ => Err(self.unsupported(format!("second derivative of binary operator {op}"))),
+        }
+    }
+
+    fn lower_div_second_derivative(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        // d2(u/v) = u_ab/v - (u_a v_b + u_b v_a + u v_ab)/v^2 + 2u v_a v_b/v^3.
+        self.lower_second_derivative(left, first, second)?;
+        self.lower(right)?;
+        self.append_arithmetic("Div")?;
+
+        self.lower_derivative(left, first)?;
+        self.lower_derivative(right, second)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_derivative(left, second)?;
+        self.lower_derivative(right, first)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+        self.lower(left)?;
+        self.lower_second_derivative(right, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+        self.lower_arg_square(right)?;
+        self.append_arithmetic("Div")?;
+        self.append_arithmetic("Sub")?;
+
+        self.push(NativeOp::Const(2.0))?;
+        self.lower(left)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_derivative(right, first)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_derivative(right, second)?;
+        self.append_arithmetic("Mul")?;
+        self.lower(right)?;
+        self.lower(right)?;
+        self.append_arithmetic("Mul")?;
+        self.lower(right)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Div")?;
+        self.append_arithmetic("Add")
+    }
+
+    fn lower_pow_second_derivative(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let exponent = self
+            .constant_number(right)
+            .ok_or_else(|| self.unsupported("second derivative of non-constant power exponent"))?;
+        if exponent.to_bits() == 0.0_f64.to_bits() {
+            return self.push(NativeOp::Const(0.0));
+        }
+
+        self.push(NativeOp::Const(exponent * (exponent - 1.0)))?;
+        self.lower(left)?;
+        self.push(NativeOp::Const(exponent - 2.0))?;
+        self.append_binary_math("Pow")?;
+        self.append_arithmetic("Mul")?;
+        self.lower_derivative(left, first)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_derivative(left, second)?;
+        self.append_arithmetic("Mul")?;
+
+        self.push(NativeOp::Const(exponent))?;
+        self.lower(left)?;
+        self.push(NativeOp::Const(exponent - 1.0))?;
+        self.append_binary_math("Pow")?;
+        self.append_arithmetic("Mul")?;
+        self.lower_second_derivative(left, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")
+    }
+
     fn lower_pow_derivative(
         &mut self,
         left: ExprId,
@@ -2928,7 +3193,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.push(NativeOp::Const(exponent))?;
         self.lower(left)?;
         self.push(NativeOp::Const(exponent - 1.0))?;
-        self.append_binary_math_op(BinaryMathOp::Pow)?;
+        self.append_binary_math("Pow")?;
         self.append_arithmetic("Mul")?;
         self.lower_derivative(left, wrt)?;
         self.append_arithmetic("Mul")
@@ -2961,7 +3226,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<()> {
         let normalized = normalize_intrinsic_name(name);
         match normalized.as_str() {
-            "ddx" => Err(self.unsupported("nested ddx derivative")),
+            "ddx" => {
+                let [expr, probe] = args else {
+                    return Err(self.unsupported(format!(
+                        "analog operator ddx expects two operands, found {}",
+                        args.len()
+                    )));
+                };
+                self.lower_ddx_projection_derivative(*expr, *probe, wrt)
+            }
             "ddt" => self.lower_ddt_derivative(name, args, wrt),
             "idt" => self.lower_idt_derivative(name, args, wrt),
             "idtmod" => self.lower_idtmod_derivative(name, args, wrt),
@@ -3061,6 +3334,692 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | "flicker_noise" | "noise_table" => self.push(NativeOp::Const(0.0)),
             _ => Err(self.unsupported(format!("ddx derivative of intrinsic function '{name}'"))),
         }
+    }
+
+    fn lower_system_function_second_derivative(
+        &mut self,
+        expr_id: ExprId,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        match normalize_intrinsic_name(name).as_str() {
+            "limit" => {
+                self.require_intrinsic_arity_range(name, args, 1, 2)?;
+                self.lower_second_derivative(args[0], first, second)
+            }
+            "table_model" => Err(self.unsupported(format!(
+                "second derivative of system function '{name}' at expression {expr_id}"
+            ))),
+            "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
+            | "simparam" | "param_given" | "port_connected" | "analysis" => {
+                self.push(NativeOp::Const(0.0))
+            }
+            _ => Err(self.unsupported(format!("second derivative of system function '{name}'"))),
+        }
+    }
+
+    fn lower_call_second_derivative(
+        &mut self,
+        expr_id: ExprId,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let normalized = normalize_intrinsic_name(name);
+        match normalized.as_str() {
+            "ddx" => Err(self.unsupported("third derivative of ddx")),
+            "abs" | "fabs" => Err(self.unsupported("second derivative of abs")),
+            "sqrt" => self.lower_unary_function_second_derivative(
+                name,
+                args,
+                first,
+                second,
+                |lowerer, arg| {
+                    lowerer.push(NativeOp::Const(0.5))?;
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::Sqrt)?;
+                    lowerer.append_arithmetic("Div")
+                },
+                |lowerer, arg| {
+                    lowerer.push(NativeOp::Const(-0.25))?;
+                    lowerer.lower(arg)?;
+                    lowerer.push(NativeOp::Const(-1.5))?;
+                    lowerer.append_binary_math("Pow")?;
+                    lowerer.append_arithmetic("Mul")
+                },
+            ),
+            "exp" => self.lower_unary_function_second_derivative(
+                name,
+                args,
+                first,
+                second,
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))
+                },
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))
+                },
+            ),
+            "ln" | "log" => self.lower_unary_function_second_derivative(
+                name,
+                args,
+                first,
+                second,
+                |lowerer, arg| {
+                    lowerer.push(NativeOp::Const(1.0))?;
+                    lowerer.lower(arg)?;
+                    lowerer.append_arithmetic("Div")
+                },
+                |lowerer, arg| {
+                    lowerer.push(NativeOp::Const(-1.0))?;
+                    lowerer.lower_arg_square(arg)?;
+                    lowerer.append_arithmetic("Div")
+                },
+            ),
+            "log10" => self.lower_unary_function_second_derivative(
+                name,
+                args,
+                first,
+                second,
+                |lowerer, arg| {
+                    lowerer.push(NativeOp::Const(1.0))?;
+                    lowerer.push(NativeOp::Const(std::f64::consts::LN_10))?;
+                    lowerer.lower(arg)?;
+                    lowerer.append_arithmetic("Mul")?;
+                    lowerer.append_arithmetic("Div")
+                },
+                |lowerer, arg| {
+                    lowerer.push(NativeOp::Const(-1.0))?;
+                    lowerer.push(NativeOp::Const(std::f64::consts::LN_10))?;
+                    lowerer.lower_arg_square(arg)?;
+                    lowerer.append_arithmetic("Mul")?;
+                    lowerer.append_arithmetic("Div")
+                },
+            ),
+            "sin" => self.lower_unary_function_second_derivative(
+                name,
+                args,
+                first,
+                second,
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cos))
+                },
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Sin))?;
+                    lowerer.append_unary(NativeOp::Neg)
+                },
+            ),
+            "cos" => self.lower_unary_function_second_derivative(
+                name,
+                args,
+                first,
+                second,
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Sin))?;
+                    lowerer.append_unary(NativeOp::Neg)
+                },
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cos))?;
+                    lowerer.append_unary(NativeOp::Neg)
+                },
+            ),
+            "tan" => self.lower_tan_second_derivative(name, args, first, second),
+            "sinh" => self.lower_unary_function_second_derivative(
+                name,
+                args,
+                first,
+                second,
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cosh))
+                },
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Sinh))
+                },
+            ),
+            "cosh" => self.lower_unary_function_second_derivative(
+                name,
+                args,
+                first,
+                second,
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Sinh))
+                },
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cosh))
+                },
+            ),
+            "tanh" => self.lower_tanh_second_derivative(name, args, first, second),
+            "asinh" => self.lower_asinh_second_derivative(name, args, first, second),
+            "acosh" => self.lower_acosh_second_derivative(name, args, first, second),
+            "atanh" => self.lower_atanh_second_derivative(name, args, first, second),
+            "asin" => self.lower_asin_second_derivative(name, args, first, second),
+            "acos" => self.lower_acos_second_derivative(name, args, first, second),
+            "atan" => self.lower_atan_second_derivative(name, args, first, second),
+            "atan2" => self.lower_atan2_second_derivative(name, args, first, second),
+            "hypot" => self.lower_hypot_second_derivative(name, args, first, second),
+            "pow" => {
+                self.require_intrinsic_arity(name, args, 2)?;
+                self.lower_pow_second_derivative(args[0], args[1], first, second)
+            }
+            "min" | "max" => {
+                self.require_intrinsic_arity(name, args, 2)?;
+                self.lower(args[0])?;
+                self.lower(args[1])?;
+                self.append_compare(if normalized == "min" { "Le" } else { "Ge" })?;
+                self.lower_second_derivative(args[0], first, second)?;
+                self.lower_second_derivative(args[1], first, second)?;
+                self.append_ifelse()
+            }
+            "floor" | "ceil" | "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime"
+            | "mfactor" | "simparam" | "param_given" | "port_connected" | "analysis"
+            | "white_noise" | "flicker_noise" | "noise_table" => self.push(NativeOp::Const(0.0)),
+            "ddt" | "idt" | "idtmod" => Err(self.unsupported(format!(
+                "second derivative of stateful intrinsic at expression {expr_id}"
+            ))),
+            _ => Err(self.unsupported(format!("second derivative of intrinsic function '{name}'"))),
+        }
+    }
+
+    fn lower_unary_function_second_derivative<F, G>(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        lower_first_factor: F,
+        lower_second_factor: G,
+    ) -> JitResult<()>
+    where
+        F: FnOnce(&mut Self, ExprId) -> JitResult<()>,
+        G: FnOnce(&mut Self, ExprId) -> JitResult<()>,
+    {
+        self.require_intrinsic_arity(name, args, 1)?;
+        let arg = args[0];
+
+        lower_second_factor(self, arg)?;
+        self.lower_derivative(arg, first)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_derivative(arg, second)?;
+        self.append_arithmetic("Mul")?;
+
+        lower_first_factor(self, arg)?;
+        self.lower_second_derivative(arg, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")
+    }
+
+    fn lower_tan_second_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_unary_function_second_derivative(
+            name,
+            args,
+            first,
+            second,
+            |lowerer, arg| lowerer.lower_sec_square(arg),
+            |lowerer, arg| {
+                lowerer.push(NativeOp::Const(2.0))?;
+                lowerer.lower(arg)?;
+                lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Tan))?;
+                lowerer.append_arithmetic("Mul")?;
+                lowerer.lower_sec_square(arg)?;
+                lowerer.append_arithmetic("Mul")
+            },
+        )
+    }
+
+    fn lower_tanh_second_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_unary_function_second_derivative(
+            name,
+            args,
+            first,
+            second,
+            |lowerer, arg| lowerer.lower_one_minus_tanh_square(arg),
+            |lowerer, arg| {
+                lowerer.push(NativeOp::Const(-2.0))?;
+                lowerer.lower(arg)?;
+                lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Tanh))?;
+                lowerer.append_arithmetic("Mul")?;
+                lowerer.lower_one_minus_tanh_square(arg)?;
+                lowerer.append_arithmetic("Mul")
+            },
+        )
+    }
+
+    fn lower_asinh_second_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_unary_function_second_derivative(
+            name,
+            args,
+            first,
+            second,
+            |lowerer, arg| {
+                lowerer.push(NativeOp::Const(1.0))?;
+                lowerer.lower_arg_square_plus_const(arg, 1.0)?;
+                lowerer.append_unary(NativeOp::Sqrt)?;
+                lowerer.append_arithmetic("Div")
+            },
+            |lowerer, arg| {
+                lowerer.lower(arg)?;
+                lowerer.append_unary(NativeOp::Neg)?;
+                lowerer.lower_arg_square_plus_const(arg, 1.0)?;
+                lowerer.push(NativeOp::Const(1.5))?;
+                lowerer.append_binary_math("Pow")?;
+                lowerer.append_arithmetic("Div")
+            },
+        )
+    }
+
+    fn lower_acosh_second_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_unary_function_second_derivative(
+            name,
+            args,
+            first,
+            second,
+            |lowerer, arg| {
+                lowerer.push(NativeOp::Const(1.0))?;
+                lowerer.lower_arg_square_plus_const(arg, -1.0)?;
+                lowerer.append_unary(NativeOp::Sqrt)?;
+                lowerer.append_arithmetic("Div")
+            },
+            |lowerer, arg| {
+                lowerer.lower(arg)?;
+                lowerer.append_unary(NativeOp::Neg)?;
+                lowerer.lower_arg_square_plus_const(arg, -1.0)?;
+                lowerer.push(NativeOp::Const(1.5))?;
+                lowerer.append_binary_math("Pow")?;
+                lowerer.append_arithmetic("Div")
+            },
+        )
+    }
+
+    fn lower_atanh_second_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_unary_function_second_derivative(
+            name,
+            args,
+            first,
+            second,
+            |lowerer, arg| {
+                lowerer.push(NativeOp::Const(1.0))?;
+                lowerer.lower_one_minus_arg_square(arg)?;
+                lowerer.append_arithmetic("Div")
+            },
+            |lowerer, arg| {
+                lowerer.push(NativeOp::Const(2.0))?;
+                lowerer.lower(arg)?;
+                lowerer.append_arithmetic("Mul")?;
+                lowerer.lower_one_minus_arg_square(arg)?;
+                lowerer.lower_one_minus_arg_square(arg)?;
+                lowerer.append_arithmetic("Mul")?;
+                lowerer.append_arithmetic("Div")
+            },
+        )
+    }
+
+    fn lower_asin_second_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_unary_function_second_derivative(
+            name,
+            args,
+            first,
+            second,
+            |lowerer, arg| {
+                lowerer.push(NativeOp::Const(1.0))?;
+                lowerer.lower_one_minus_arg_square(arg)?;
+                lowerer.append_unary(NativeOp::Sqrt)?;
+                lowerer.append_arithmetic("Div")
+            },
+            |lowerer, arg| {
+                lowerer.lower(arg)?;
+                lowerer.lower_one_minus_arg_square(arg)?;
+                lowerer.push(NativeOp::Const(1.5))?;
+                lowerer.append_binary_math("Pow")?;
+                lowerer.append_arithmetic("Div")
+            },
+        )
+    }
+
+    fn lower_acos_second_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_unary_function_second_derivative(
+            name,
+            args,
+            first,
+            second,
+            |lowerer, arg| {
+                lowerer.push(NativeOp::Const(-1.0))?;
+                lowerer.lower_one_minus_arg_square(arg)?;
+                lowerer.append_unary(NativeOp::Sqrt)?;
+                lowerer.append_arithmetic("Div")
+            },
+            |lowerer, arg| {
+                lowerer.lower(arg)?;
+                lowerer.append_unary(NativeOp::Neg)?;
+                lowerer.lower_one_minus_arg_square(arg)?;
+                lowerer.push(NativeOp::Const(1.5))?;
+                lowerer.append_binary_math("Pow")?;
+                lowerer.append_arithmetic("Div")
+            },
+        )
+    }
+
+    fn lower_atan_second_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_unary_function_second_derivative(
+            name,
+            args,
+            first,
+            second,
+            |lowerer, arg| {
+                lowerer.push(NativeOp::Const(1.0))?;
+                lowerer.lower_arg_square_plus_const(arg, 1.0)?;
+                lowerer.append_arithmetic("Div")
+            },
+            |lowerer, arg| {
+                lowerer.push(NativeOp::Const(-2.0))?;
+                lowerer.lower(arg)?;
+                lowerer.append_arithmetic("Mul")?;
+                lowerer.lower_arg_square_plus_const(arg, 1.0)?;
+                lowerer.lower_arg_square_plus_const(arg, 1.0)?;
+                lowerer.append_arithmetic("Mul")?;
+                lowerer.append_arithmetic("Div")
+            },
+        )
+    }
+
+    fn lower_atan2_second_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 2)?;
+        let y = args[0];
+        let x = args[1];
+
+        self.lower_atan2_numerator_derivative(y, x, first, second)?;
+        self.lower_arg_square_sum(x, y)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_atan2_numerator(y, x, first)?;
+        self.lower_arg_square_sum_derivative(x, y, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")?;
+        self.lower_arg_square_sum(x, y)?;
+        self.lower_arg_square_sum(x, y)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_hypot_second_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 2)?;
+        let left = args[0];
+        let right = args[1];
+
+        self.lower_hypot_numerator_derivative(left, right, first, second)?;
+        self.lower_hypot_value(left, right)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_hypot_numerator(left, right, first)?;
+        self.lower_hypot_numerator(left, right, second)?;
+        self.lower_hypot_value(left, right)?;
+        self.append_arithmetic("Div")?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")?;
+        self.lower_arg_square_sum(left, right)?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_scaled_second_derivative(
+        &mut self,
+        expr: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        gain: f64,
+    ) -> JitResult<()> {
+        if gain == 0.0 {
+            return self.push(NativeOp::Const(0.0));
+        }
+        self.lower_second_derivative(expr, first, second)?;
+        if gain == 1.0 {
+            Ok(())
+        } else {
+            self.push(NativeOp::Const(gain))?;
+            self.append_arithmetic("Mul")
+        }
+    }
+
+    fn lower_analog_operator_second_derivative(
+        &mut self,
+        op: &HirAnalogOperator,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        match op {
+            HirAnalogOperator::Limexp { expr } => self.lower_unary_function_second_derivative(
+                "limexp",
+                &[*expr],
+                first,
+                second,
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Limexp))
+                },
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Limexp))
+                },
+            ),
+            HirAnalogOperator::Absdelay { expr, .. }
+            | HirAnalogOperator::Transition { expr, .. }
+            | HirAnalogOperator::Slew { expr, .. } => {
+                self.lower_second_derivative(*expr, first, second)
+            }
+            HirAnalogOperator::LastCrossing { .. } => self.push(NativeOp::Const(0.0)),
+            HirAnalogOperator::Ddx { .. } => Err(self.unsupported("third derivative of ddx")),
+            HirAnalogOperator::Ddt { .. }
+            | HirAnalogOperator::Idt { .. }
+            | HirAnalogOperator::IdtMod { .. } => Err(self.unsupported(format!(
+                "second derivative of stateful analog operator {}",
+                analog_operator_name(op)
+            ))),
+        }
+    }
+
+    fn lower_sec_square(&mut self, arg: ExprId) -> JitResult<()> {
+        self.push(NativeOp::Const(1.0))?;
+        self.lower(arg)?;
+        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cos))?;
+        self.lower(arg)?;
+        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cos))?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_one_minus_tanh_square(&mut self, arg: ExprId) -> JitResult<()> {
+        self.push(NativeOp::Const(1.0))?;
+        self.lower(arg)?;
+        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Tanh))?;
+        self.lower(arg)?;
+        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Tanh))?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")
+    }
+
+    fn lower_one_minus_arg_square(&mut self, arg: ExprId) -> JitResult<()> {
+        self.push(NativeOp::Const(1.0))?;
+        self.lower_arg_square(arg)?;
+        self.append_arithmetic("Sub")
+    }
+
+    fn lower_arg_square_sum(&mut self, left: ExprId, right: ExprId) -> JitResult<()> {
+        self.lower_arg_square(left)?;
+        self.lower_arg_square(right)?;
+        self.append_arithmetic("Add")
+    }
+
+    fn lower_arg_square_sum_derivative(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.push(NativeOp::Const(2.0))?;
+        self.lower(left)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_derivative(left, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.push(NativeOp::Const(2.0))?;
+        self.lower(right)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_derivative(right, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")
+    }
+
+    fn lower_atan2_numerator(
+        &mut self,
+        y: ExprId,
+        x: ExprId,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower(x)?;
+        self.lower_derivative(y, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.lower(y)?;
+        self.lower_derivative(x, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")
+    }
+
+    fn lower_atan2_numerator_derivative(
+        &mut self,
+        y: ExprId,
+        x: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_derivative(x, second)?;
+        self.lower_derivative(y, first)?;
+        self.append_arithmetic("Mul")?;
+        self.lower(x)?;
+        self.lower_second_derivative(y, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+        self.lower_derivative(y, second)?;
+        self.lower_derivative(x, first)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")?;
+        self.lower(y)?;
+        self.lower_second_derivative(x, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")
+    }
+
+    fn lower_hypot_value(&mut self, left: ExprId, right: ExprId) -> JitResult<()> {
+        self.lower(left)?;
+        self.lower(right)?;
+        self.pop_binary("canonical hypot value")?;
+        self.append_binary_math_op(BinaryMathOp::Hypot)
+    }
+
+    fn lower_hypot_numerator(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower(left)?;
+        self.lower_derivative(left, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.lower(right)?;
+        self.lower_derivative(right, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")
+    }
+
+    fn lower_hypot_numerator_derivative(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_derivative(left, second)?;
+        self.lower_derivative(left, first)?;
+        self.append_arithmetic("Mul")?;
+        self.lower(left)?;
+        self.lower_second_derivative(left, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+        self.lower_derivative(right, second)?;
+        self.lower_derivative(right, first)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+        self.lower(right)?;
+        self.lower_second_derivative(right, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")
     }
 
     fn lower_unary_chain_derivative(
@@ -3430,7 +4389,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | HirAnalogOperator::Transition { expr, .. }
             | HirAnalogOperator::Slew { expr, .. } => self.lower_derivative(*expr, wrt),
             HirAnalogOperator::LastCrossing { .. } => self.push(NativeOp::Const(0.0)),
-            HirAnalogOperator::Ddx { .. } => Err(self.unsupported("nested ddx derivative")),
+            HirAnalogOperator::Ddx { expr, probe } => {
+                self.lower_ddx_projection_derivative(*expr, *probe, wrt)
+            }
         }
     }
 

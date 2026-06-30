@@ -3561,6 +3561,147 @@ endmodule
     }
 
     #[test]
+    fn compile_model_with_canonical_ir_lowers_ddx_jacobians_from_mir() {
+        let source = r#"
+module native_canonical_ddx_jacobian(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ ddx(V(p, n) * V(p, n), V(p, n));
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(!model.stamp_programs[0].jacobian_programs.is_empty());
+        poison_jacobian_bytecode(&mut model, 99.0);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical ddx Jacobians compile to native x64");
+        let mut context = native_model_benchmark_context(&model, "canonical_ddx_jacobian");
+        context.voltages[0] = 3.0;
+        context.voltages[1] = 0.0;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(0)),
+            2.0,
+            "canonical_ddx_jacobian d/dp",
+        );
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(1)),
+            -2.0,
+            "canonical_ddx_jacobian d/dn",
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_math_ddx_jacobians_from_mir() {
+        let source = r#"
+module native_canonical_math_ddx_jacobian(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ ddx(
+      sqrt(V(p, n) + 4.0)
+    + exp(0.1 * V(p, n))
+    + log(V(p, n) + 3.0)
+    + log10(V(p, n) + 3.0)
+    + sin(0.2 * V(p, n))
+    + cos(0.15 * V(p, n))
+    + tan(0.1 * V(p, n))
+    + sinh(0.2 * V(p, n))
+    + cosh(0.15 * V(p, n))
+    + tanh(0.3 * V(p, n))
+    + asinh(0.4 * V(p, n))
+    + acosh(V(p, n) + 2.0)
+    + atanh(0.1 * V(p, n))
+    + asin(0.07 * V(p, n))
+    + acos(0.05 * V(p, n))
+    + atan(0.2 * V(p, n))
+    + atan2(V(p, n), V(p, n) + 1.0)
+    + hypot(2.0 * V(p, n), V(p, n) + 3.0)
+    + pow(V(p, n) + 2.0, 2.5),
+    V(p, n));
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(!model.stamp_programs[0].jacobian_programs.is_empty());
+        poison_jacobian_bytecode(&mut model, 99.0);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical math ddx Jacobians compile to native x64");
+        let x = 0.4_f64;
+        let expected = central_second_derivative(
+            |x| {
+                (x + 4.0).sqrt()
+                    + (0.1 * x).exp()
+                    + (x + 3.0).ln()
+                    + (x + 3.0).log10()
+                    + (0.2 * x).sin()
+                    + (0.15 * x).cos()
+                    + (0.1 * x).tan()
+                    + (0.2 * x).sinh()
+                    + (0.15 * x).cosh()
+                    + (0.3 * x).tanh()
+                    + (0.4 * x).asinh()
+                    + (x + 2.0).acosh()
+                    + (0.1 * x).atanh()
+                    + (0.07 * x).asin()
+                    + (0.05 * x).acos()
+                    + (0.2 * x).atan()
+                    + x.atan2(x + 1.0)
+                    + (2.0 * x).hypot(x + 3.0)
+                    + (x + 2.0).powf(2.5)
+            },
+            x,
+        );
+        let mut context = native_model_benchmark_context(&model, "canonical_math_ddx_jacobian");
+        context.voltages[0] = x;
+        context.voltages[1] = 0.0;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+
+        assert_jacobian_axis_approx(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(0)),
+            expected,
+            1.0e-5,
+            "canonical_math_ddx_jacobian d/dp",
+        );
+        assert_jacobian_axis_approx(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(1)),
+            -expected,
+            1.0e-5,
+            "canonical_math_ddx_jacobian d/dn",
+        );
+    }
+
+    #[test]
     fn native_x64_generated_model_plan_publishes_dense_entrypoint_surface() {
         let source = r#"
 `include "disciplines.vams"
@@ -4914,6 +5055,41 @@ endmodule
         if let Err(error) = assert_finite_close("canonical Jacobian", &label, expected, actual) {
             panic!("{error}");
         }
+    }
+
+    fn assert_jacobian_axis_approx(
+        model: &CompiledModel,
+        native: &NativeModel,
+        ctx: &EvalContext,
+        variables: *const f64,
+        stamp_index: usize,
+        matches_axis: impl Fn(&ColumnAxis) -> bool,
+        expected: f64,
+        relative_tolerance: f64,
+        label: impl std::fmt::Display,
+    ) {
+        let label = label.to_string();
+        let entry_index = model.stamp_programs[stamp_index]
+            .jacobian_programs
+            .iter()
+            .position(|jacobian| matches_axis(&jacobian.col_axis))
+            .unwrap_or_else(|| panic!("{label}: missing matching Jacobian axis"));
+        let actual = native.run_jacobian(stamp_index, entry_index, ctx, variables);
+        assert!(
+            actual.is_finite(),
+            "{label}: native Jacobian is non-finite: {actual}"
+        );
+        let tolerance = relative_tolerance * expected.abs().max(actual.abs()).max(1.0);
+        let delta = (actual - expected).abs();
+        assert!(
+            delta <= tolerance,
+            "{label}: canonical Jacobian mismatch: expected={expected:.17e} actual={actual:.17e} delta={delta:.17e} tolerance={tolerance:.17e}"
+        );
+    }
+
+    fn central_second_derivative(f: impl Fn(f64) -> f64, x: f64) -> f64 {
+        let h = 1.0e-4_f64;
+        (f(x + h) - 2.0 * f(x) + f(x - h)) / (h * h)
     }
 
     fn native_model_benchmark_context(model: &CompiledModel, name: &str) -> VmContext {
