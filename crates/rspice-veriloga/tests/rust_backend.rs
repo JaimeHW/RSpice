@@ -1,4 +1,3 @@
-use rspice_veriloga::VerilogACompiler;
 use rspice_veriloga::rust_backend::{
     GeneratedBuiltinManifest, GeneratedRustDevice, GeneratedRustFile, RustBackendError,
     RustDeviceNames, RustTranspileOptions, RustTranspiler, VERILOGA_DISCOVERY_SKIP_MARKER,
@@ -7,6 +6,7 @@ use rspice_veriloga::rust_backend::{
     render_runtime_support_module, resolve_generated_registry_model_names, write_generated_device,
     write_text_file_if_changed,
 };
+use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1615,6 +1615,52 @@ fn rust_backend_auto_uses_bounded_local_storage_subset_for_wide_mixed_residuals(
         "scratch-free residual equations should stay on scalar local stamps:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_transpiles_shipped_asmhemt_with_mixed_local_storage() {
+    let model_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("models")
+        .join("veriloga");
+    let path = model_root
+        .join("cmc")
+        .join("ASM-HEMT101.6.0_05132026")
+        .join("vacode")
+        .join("asmhemt.va");
+    assert!(
+        path.exists(),
+        "missing ASM-HEMT fixture: {}",
+        path.display()
+    );
+
+    let mut options = CompilerOptions::default();
+    options.include_paths.push(model_root);
+    let compiled = VerilogACompiler::new(options)
+        .compile_file_canonical_ir_with_metadata(&path, Some("asmhemt"))
+        .expect("compile shipped ASM-HEMT canonical IR");
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&compiled.artifact)
+    .expect("transpile shipped ASM-HEMT through auto Rust backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("let s = match &mut self.scratch"),
+        "ASM-HEMT should still keep scratch AD for unsupported regions:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("let mut var_"),
+        "ASM-HEMT should retain native local variables for selected scalar regions:\n{stamp}"
+    );
 }
 
 #[test]
@@ -18691,6 +18737,7 @@ fn wide_mixed_hybrid_local_storage_source(node_count: usize, variable_count: usi
             ));
         }
     }
+    source.push_str("        I(p0, p1) <+ sqrt(abs(shaped) + 1.0);\n");
     source.push_str(&format!(
         "        I(p0, p1) <+ floor(x{} + legacy\n",
         variable_count - 1

@@ -24778,6 +24778,7 @@ fn emit_stamp_body(
             } else if let Some(selection) = select_bounded_transient_local_variable_subset(
                 artifact,
                 &residual_usage.scratch_free_equations,
+                transient_liveness,
                 reactive_liveness,
                 branch_axis_count,
                 scalar_hybrid_plan.is_some(),
@@ -27031,6 +27032,7 @@ struct SelectedReactiveLocalVariables {
 fn select_bounded_transient_local_variable_subset(
     artifact: &CanonicalIrArtifact,
     candidate_equations: &HashSet<EquationId>,
+    full_transient_liveness: &TransientLiveness,
     reactive_liveness: &ReactiveLiveness,
     branch_axis_count: usize,
     aggressive_straight_line_locals: bool,
@@ -27038,6 +27040,7 @@ fn select_bounded_transient_local_variable_subset(
     if let Some(selection) = transient_local_variable_selection_for_equations(
         artifact,
         candidate_equations,
+        full_transient_liveness,
         reactive_liveness,
         branch_axis_count,
         aggressive_straight_line_locals,
@@ -27055,6 +27058,7 @@ fn select_bounded_transient_local_variable_subset(
         if let Some(selection) = transient_local_variable_selection_for_equations(
             artifact,
             &selected_equations,
+            full_transient_liveness,
             reactive_liveness,
             branch_axis_count,
             aggressive_straight_line_locals,
@@ -27070,6 +27074,7 @@ fn select_bounded_transient_local_variable_subset(
 fn transient_local_variable_selection_for_equations(
     artifact: &CanonicalIrArtifact,
     equations: &HashSet<EquationId>,
+    full_transient_liveness: &TransientLiveness,
     reactive_liveness: &ReactiveLiveness,
     branch_axis_count: usize,
     aggressive_straight_line_locals: bool,
@@ -27077,8 +27082,23 @@ fn transient_local_variable_selection_for_equations(
     if equations.is_empty() {
         return Ok(None);
     }
-    let liveness = collect_transient_liveness_including(artifact, equations)?;
-    let derivative_variables = collect_live_local_derivative_variables(artifact, &liveness);
+    let mut liveness = collect_transient_liveness_including(artifact, equations)?;
+    let initially_selected_variables = artifact
+        .hir
+        .variables
+        .iter()
+        .filter(|variable| {
+            liveness.is_value_live(variable.name.as_str())
+                || liveness.is_derivative_live(variable.name.as_str())
+        })
+        .map(|variable| variable.name.to_string())
+        .collect::<HashSet<_>>();
+    for name in &initially_selected_variables {
+        if full_transient_liveness.is_derivative_live(name.as_str()) {
+            liveness.derivatives.insert(name.clone());
+        }
+    }
+    let derivative_variables = collect_local_derivative_variables(artifact, &liveness)?;
     let variables = artifact
         .hir
         .variables
@@ -27107,22 +27127,6 @@ fn transient_local_variable_selection_for_equations(
         derivative_variables,
         variables,
     }))
-}
-
-fn collect_live_local_derivative_variables(
-    artifact: &CanonicalIrArtifact,
-    transient_liveness: &TransientLiveness,
-) -> HashSet<String> {
-    artifact
-        .hir
-        .variables
-        .iter()
-        .filter(|variable| {
-            variable.value_type == CanonicalValueType::Real
-                && transient_liveness.is_derivative_live(variable.name.as_str())
-        })
-        .map(|variable| variable.name.to_string())
-        .collect()
 }
 
 fn select_bounded_reactive_local_variable_subset(
