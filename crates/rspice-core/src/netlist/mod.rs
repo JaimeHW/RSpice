@@ -905,6 +905,30 @@ mod tests {
     }
 
     #[test]
+    fn xspice_model_params_accept_missing_close_at_line_end() {
+        let netlist = Netlist::parse(
+            "xspice missing model close\n\
+             .model dac1 dac_bridge(out_low = -1 out_high = 1 out_undef = 0\n\
+             + input_load = 5.0e-12\n\
+             .end\n",
+        )
+        .expect("ngspice accepts unterminated parenthesized XSPICE model params");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("dac1"))
+            .expect("model exists");
+
+        assert!(model.params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("out_high") && (*value - 1.0).abs() < f64::EPSILON
+        }));
+        assert!(model.params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("input_load") && (*value - 5.0e-12).abs() < 1.0e-24
+        }));
+    }
+
+    #[test]
     fn xspice_string_vector_params_preserve_unquoted_argv_tokens() {
         let netlist = Netlist::parse(
             "xspice string-vector argv model params\n\

@@ -155,6 +155,10 @@ pub(super) fn parse_model_params(
     let integer_vector_params = Vec::new();
 
     let opened_paren = stream.consume(&TokenKind::LParen);
+    let allow_missing_close = opened_paren
+        && model_type
+            .map(|kind| crate::xspice::CodeModelRegistry::with_builtins().contains(kind))
+            .unwrap_or(false);
 
     loop {
         skip_commas(stream);
@@ -198,6 +202,22 @@ pub(super) fn parse_model_params(
                 });
             }
             TokenKind::Newline | TokenKind::Eof if opened_paren => {
+                let has_params = !numeric_params.is_empty()
+                    || !expr_params.is_empty()
+                    || !string_params.is_empty()
+                    || !string_vector_params.is_empty()
+                    || !real_vector_params.is_empty()
+                    || !integer_vector_params.is_empty();
+                if allow_missing_close && has_params {
+                    return Ok(ParsedModelParams {
+                        numeric: numeric_params,
+                        expr: expr_params,
+                        string: string_params,
+                        string_vector: string_vector_params,
+                        real_vector: real_vector_params,
+                        integer_vector: integer_vector_params,
+                    });
+                }
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: "Parenthesized .MODEL parameter list is missing ')'".to_string(),
