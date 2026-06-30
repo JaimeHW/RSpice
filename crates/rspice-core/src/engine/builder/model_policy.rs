@@ -837,6 +837,55 @@ pub(super) fn reject_deferred_native_mos_model_params(
     Ok(())
 }
 
+pub(super) fn native_bsim3_model_params_upper_map(
+    element_name: &str,
+    model: &str,
+    params: &HashMap<String, f64>,
+    expr_params: &[(String, String)],
+    string_params: &[(String, String)],
+) -> Result<HashMap<String, f64>, SimulationError> {
+    let mut resolved = params.clone();
+
+    for (name, expr) in expr_params {
+        let param = name.to_ascii_uppercase();
+        return Err(SimulationError::Circuit(format!(
+            "MOSFET '{element_name}': native BSIM3 model '{model}' uses unresolved model parameter {param}={expr}; \
+             native BSIM3 model parameters must be finite numeric literals, except dotted VERSION metadata"
+        )));
+    }
+
+    for (name, value) in string_params {
+        let param = name.to_ascii_uppercase();
+        if param == "VERSION" {
+            let version = parse_dotted_version_metadata(value).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "MOSFET '{element_name}': native BSIM3 model '{model}' has invalid VERSION=\"{value}\"; \
+                     VERSION metadata must be a dotted numeric version such as 3.3.0"
+                ))
+            })?;
+            resolved.insert(param, version);
+            continue;
+        }
+
+        return Err(SimulationError::Circuit(format!(
+            "MOSFET '{element_name}': native BSIM3 model '{model}' uses non-numeric model parameter {param}=\"{value}\"; \
+             native BSIM3 model parameters must be finite numeric literals, except dotted VERSION metadata"
+        )));
+    }
+
+    for (name, value) in &resolved {
+        if !value.is_finite() {
+            let param = name.to_ascii_uppercase();
+            return Err(SimulationError::Circuit(format!(
+                "MOSFET '{element_name}': native BSIM3 model '{model}' uses non-finite model parameter {param}={value}; \
+                 native BSIM3 model parameters must be finite numeric literals"
+            )));
+        }
+    }
+
+    Ok(resolved)
+}
+
 pub(super) fn native_bsim4_model_params_upper_map(
     element_name: &str,
     model: &str,
@@ -857,7 +906,7 @@ pub(super) fn native_bsim4_model_params_upper_map(
     for (name, value) in string_params {
         let param = name.to_ascii_uppercase();
         if param == "VERSION" {
-            let version = parse_bsim4_version_metadata(value).ok_or_else(|| {
+            let version = parse_dotted_version_metadata(value).ok_or_else(|| {
                 SimulationError::Circuit(format!(
                     "MOSFET '{element_name}': native BSIM4 model '{model}' has invalid VERSION=\"{value}\"; \
                      VERSION metadata must be a dotted numeric version such as 4.6.1"
@@ -886,7 +935,7 @@ pub(super) fn native_bsim4_model_params_upper_map(
     Ok(resolved)
 }
 
-fn parse_bsim4_version_metadata(value: &str) -> Option<f64> {
+fn parse_dotted_version_metadata(value: &str) -> Option<f64> {
     let normalized = value.trim().trim_matches('"').trim_matches('\'').trim();
     if normalized.is_empty() {
         return None;

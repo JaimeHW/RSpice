@@ -243,15 +243,18 @@ fn level9_deferred_bsim3_signature_fails_closed_instead_of_mos9() {
 }
 
 #[test]
-fn level9_string_bsim3_signature_fails_closed_instead_of_mos9() {
+fn level9_string_bsim3_version_routes_to_bsim3_not_mos9() {
     let deck = op_deck(".model nmod NMOS (LEVEL=9 VERSION=\"3.2.2\")", "");
-    let message =
-        run(&deck).expect_err("string BSIM3-shaped LEVEL=9 card must not fall through to MOS9");
-    assert!(
-        message.contains("native BSIM3")
-            && message.contains("VERSION=\"3.2.2\"")
-            && message.contains("finite numeric literals"),
-        "string VERSION should fail closed through the BSIM3 selector path: {message}"
+    let report = run_report(&deck)
+        .expect("string BSIM3 VERSION metadata should route to native BSIM3");
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+        .expect("m1 OP entry");
+    assert_eq!(
+        entry.device_kind, "BSIM3",
+        "LEVEL=9 VERSION=\"3.2.2\" must not silently fall through to MOS9"
     );
 }
 

@@ -1267,10 +1267,9 @@ impl Engine {
                     {
                         let device_model =
                             model_def.expect("native BSIM3 params map derives from model card");
-                        reject_deferred_native_mos_model_params(
+                        let bsim3_params = native_bsim3_model_params_upper_map(
                             &element.name,
                             model,
-                            "BSIM3",
                             params_map,
                             &device_model.expr_params,
                             &device_model.string_params,
@@ -1284,7 +1283,7 @@ impl Engine {
                             element,
                             resolved_mos_type,
                             &model_key,
-                            params_map,
+                            &bsim3_params,
                             instance_params,
                             deferred_params,
                             self.config.temperature,
