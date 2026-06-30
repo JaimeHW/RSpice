@@ -269,8 +269,8 @@ impl CodeModel for DigitalLookupTable {
         let table = ctx
             .string_param("table_values")
             .ok_or_else(|| CmError::MissingParameter("table_values".to_string()))?;
-        let inputs = ctx.input_digital_vector("in");
-        let output_state = match d_lut_index(&inputs)? {
+        let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
+        let output_state = match d_lut_index(inputs)? {
             Some(index) => d_lut_table_state(table, index),
             None => DigitalState::Unknown,
         };

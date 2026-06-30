@@ -483,10 +483,10 @@ macro_rules! define_gate {
             fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
                 let rise = official_digital_delay(ctx, "rise_delay");
                 let fall = official_digital_delay(ctx, "fall_delay");
-                let inputs = ctx.input_digital_vector("in");
+                let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
                 let prev = ctx.int_state(0);
 
-                let result: DigitalState = $op(&inputs);
+                let result: DigitalState = $op(inputs);
                 let new_state = if result.is_high() {
                     1
                 } else if result.is_low() {
@@ -573,10 +573,10 @@ impl CodeModel for DigitalNand {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let rise = official_digital_delay(ctx, "rise_delay");
         let fall = official_digital_delay(ctx, "fall_delay");
-        let inputs = ctx.input_digital_vector("in");
+        let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
         let prev = ctx.int_state(0);
 
-        let result = and_op(&inputs).invert();
+        let result = and_op(inputs).invert();
         let new_state = if result.is_high() {
             1
         } else if result.is_low() {
@@ -629,9 +629,9 @@ impl CodeModel for DigitalNor {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let rise = official_digital_delay(ctx, "rise_delay");
         let fall = official_digital_delay(ctx, "fall_delay");
-        let inputs = ctx.input_digital_vector("in");
+        let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
         let prev = ctx.int_state(0);
-        let result = or_op(&inputs).invert();
+        let result = or_op(inputs).invert();
         let new_state = if result.is_high() {
             1
         } else if result.is_low() {
@@ -681,9 +681,9 @@ impl CodeModel for DigitalXnor {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let rise = official_digital_delay(ctx, "rise_delay");
         let fall = official_digital_delay(ctx, "fall_delay");
-        let inputs = ctx.input_digital_vector("in");
+        let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
         let prev = ctx.int_state(0);
-        let result = xor_op(&inputs).invert();
+        let result = xor_op(inputs).invert();
         let new_state = if result.is_high() {
             1
         } else if result.is_low() {
