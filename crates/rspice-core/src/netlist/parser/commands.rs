@@ -587,10 +587,7 @@ pub(super) fn parse_options_command(
                     line_num,
                 )?);
             }
-            (
-                None,
-                "B3SOIGMINSCALING" | "B3SOI_GMIN_SCALING" | "DEVICE_B3SOIGMINSCALING",
-            ) => {
+            (None, "B3SOIGMINSCALING" | "B3SOI_GMIN_SCALING" | "DEVICE_B3SOIGMINSCALING") => {
                 options.b3soi_gmin_scaling =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }

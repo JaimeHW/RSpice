@@ -805,15 +805,15 @@ impl XyceTestRunner {
                     }
                     Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
                         return self.expected_unsupported_result(
-                            deck,
-                            start,
-                            "subckt_family_wrapper",
-                            &format!(
-                                "SUBCKT family '{}' member {} is not supported by RSpice yet: {err}",
-                                contract.family,
-                                self.display_path(&target_path)
-                            ),
-                        );
+                        deck,
+                        start,
+                        "subckt_family_wrapper",
+                        &format!(
+                            "SUBCKT family '{}' member {} is not supported by RSpice yet: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                    );
                     }
                     Err(err) => {
                         return self.failure_result(

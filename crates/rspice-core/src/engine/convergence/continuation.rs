@@ -318,16 +318,16 @@ impl Engine {
                     Err(_) => break,
                 };
 
-                    let mut new_solution = self.apply_damping_strategy_with_junction_ownership(
-                        &solution,
-                        &raw_solution,
-                        &mut damping_state,
-                        Self::junction_limiting_owns_newton_steps(circuit)
-                            || self.b3soi_limiter_owns_global_damping(circuit),
-                        |trial| {
-                            self.nonlinear_merit_with_pseudo_transient(
-                                circuit,
-                                matrix,
+                let mut new_solution = self.apply_damping_strategy_with_junction_ownership(
+                    &solution,
+                    &raw_solution,
+                    &mut damping_state,
+                    Self::junction_limiting_owns_newton_steps(circuit)
+                        || self.b3soi_limiter_owns_global_damping(circuit),
+                    |trial| {
+                        self.nonlinear_merit_with_pseudo_transient(
+                            circuit,
+                            matrix,
                             trial,
                             &anchor_solution,
                             pseudo_conductance,

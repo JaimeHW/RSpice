@@ -909,12 +909,7 @@ impl B3SoiPd {
     /// drain/source when fixed series resistance is present; otherwise they
     /// coincide with the external terminals. `bNode` is the body node (internal
     /// floating or external tie), and `tempNode` is absent.
-    fn stamp_op(
-        &self,
-        op: &B3SoiPdOp,
-        bias: B3SoiPdBias,
-        matrix: &mut impl MatrixStamper,
-    ) {
+    fn stamp_op(&self, op: &B3SoiPdOp, bias: B3SoiPdBias, matrix: &mut impl MatrixStamper) {
         let (dp, g, sp, e, b) = (
             self.node_drain,
             self.node_gate,

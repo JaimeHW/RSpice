@@ -210,9 +210,7 @@ fn temp_setup_uses_rhalo_body_resistance_scaling() {
     params.insert("RHALO".into(), 1.0e15);
     let model = B3SoiPdModel::from_params(&params, false, 300.15);
     let sized = B3SoiPdSized::new(&model, &geom, 300.15).expect("sized");
-    let expected = 3200.0 * 1.0e15 / (2.0 * 3200.0 + 1.0e15 * sized.leff)
-        * sized.weff
-        / geom.nseg;
+    let expected = 3200.0 * 1.0e15 / (2.0 * 3200.0 + 1.0e15 * sized.leff) * sized.weff / geom.nseg;
     assert!(
         (sized.rbody - expected).abs() <= expected.abs() * 1.0e-12,
         "rbody={} expected={expected}",
