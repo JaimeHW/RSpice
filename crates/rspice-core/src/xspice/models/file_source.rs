@@ -33,6 +33,32 @@ struct FileSourceRow {
     values: Vec<Value>,
 }
 
+#[derive(Debug, Clone)]
+struct FileSourceRowsData {
+    rows: Vec<FileSourceRow>,
+    strictly_increasing_time: bool,
+}
+
+impl FileSourceRowsData {
+    fn new(rows: Vec<FileSourceRow>) -> Self {
+        let strictly_increasing_time = rows
+            .windows(2)
+            .all(|window| window[0].time < window[1].time);
+        Self {
+            rows,
+            strictly_increasing_time,
+        }
+    }
+}
+
+impl std::ops::Deref for FileSourceRowsData {
+    type Target = [FileSourceRow];
+
+    fn deref(&self) -> &Self::Target {
+        self.rows.as_slice()
+    }
+}
+
 const FILESOURCE_ROW_CURSOR_STATE: usize = 0;
 const FILESOURCE_ROWS_RESOURCE: &str = "xspice.filesource.rows";
 const FILESOURCE_TRANSFORMED_ROWS_RESOURCE: &str = "xspice.filesource.transformed_rows";
@@ -70,7 +96,7 @@ struct FileSourceTransformedRowsSignature {
 #[derive(Debug, Clone)]
 struct FileSourceTransformedRowsResource {
     signature: FileSourceTransformedRowsSignature,
-    rows: CmResult<Arc<Vec<FileSourceRow>>>,
+    rows: CmResult<Arc<FileSourceRowsData>>,
 }
 
 #[derive(Debug, Default)]
@@ -356,7 +382,7 @@ fn transformed_rows_for_context(
     ctx: &mut CmContext,
     file: &str,
     width: usize,
-) -> CmResult<Arc<Vec<FileSourceRow>>> {
+) -> CmResult<Arc<FileSourceRowsData>> {
     let (raw_fields, virtual_stamp) = load_filesource_for_context(ctx, file, width)?;
     let signature = transformed_rows_signature(ctx, file, width, virtual_stamp);
     if let Some(resource) =
@@ -381,7 +407,7 @@ fn transformed_rows_from_context(
     ctx: &CmContext,
     file: &str,
     width: usize,
-) -> CmResult<Arc<Vec<FileSourceRow>>> {
+) -> CmResult<Arc<FileSourceRowsData>> {
     let (raw_fields, virtual_stamp) = load_filesource_from_context(ctx, file, width)?;
     let signature = transformed_rows_signature(ctx, file, width, virtual_stamp);
     if let Some(resource) =
@@ -426,7 +452,7 @@ fn transform_rows(
     ctx: &CmContext,
     raw_fields: &[RawFileSourceField],
     width: usize,
-) -> CmResult<Vec<FileSourceRow>> {
+) -> CmResult<FileSourceRowsData> {
     let timeoffset = finite_param(ctx, "timeoffset")?;
     let timescale = finite_param(ctx, "timescale")?;
     let timerelative = bool_param(ctx, "timerelative");
@@ -479,27 +505,34 @@ fn transform_rows(
         ));
     }
 
-    Ok(rows)
+    Ok(FileSourceRowsData::new(rows))
 }
 
-fn schedule_next_breakpoint(ctx: &mut CmContext, rows: &[FileSourceRow]) {
+fn schedule_next_breakpoint(ctx: &mut CmContext, data: &FileSourceRowsData) {
     if ctx.analysis != AnalysisType::Transient {
         return;
     }
     if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
         return;
     }
-    if let Some(row) = rows
-        .iter()
-        .filter(|row| row.time > ctx.time)
-        .min_by(|left, right| {
-            left.time
-                .partial_cmp(&right.time)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-    {
-        ctx.request_breakpoint(row.time);
+
+    if data.strictly_increasing_time {
+        let index = data.rows.partition_point(|row| row.time <= ctx.time);
+        if let Some(row) = data.rows.get(index) {
+            ctx.request_breakpoint(row.time);
+        }
+        return;
     }
+
+    if let Some(time) = next_nonmonotonic_breakpoint(data.rows.as_slice(), ctx.time) {
+        ctx.request_breakpoint(time);
+    }
+}
+
+fn next_nonmonotonic_breakpoint(rows: &[FileSourceRow], time: Value) -> Option<Value> {
+    rows.iter()
+        .filter_map(|row| (row.time > time).then_some(row.time))
+        .min_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal))
 }
 
 fn filesource_cursor(ctx: &CmContext, rows: &[FileSourceRow]) -> usize {
@@ -532,8 +565,9 @@ fn locate_filesource_interval(ctx: &mut CmContext, rows: &[FileSourceRow]) -> us
     lower
 }
 
-fn evaluate_rows(ctx: &mut CmContext, rows: &[FileSourceRow]) -> Vec<Value> {
-    schedule_next_breakpoint(ctx, rows);
+fn evaluate_rows(ctx: &mut CmContext, data: &FileSourceRowsData) -> Vec<Value> {
+    schedule_next_breakpoint(ctx, data);
+    let rows = data.rows.as_slice();
 
     let first = &rows[0];
     if ctx.time < first.time {
@@ -752,7 +786,7 @@ mod tests {
 
     #[test]
     fn filesource_interval_cursor_advances_and_rolls_back_like_ngspice_pointer() {
-        let rows = vec![row(0.0, 0.0), row(1.0e-9, 1.0), row(2.0e-9, 2.0)];
+        let rows = FileSourceRowsData::new(vec![row(0.0, 0.0), row(1.0e-9, 1.0), row(2.0e-9, 2.0)]);
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
         ctx.allocate_int_states(1);
@@ -770,7 +804,7 @@ mod tests {
 
     #[test]
     fn filesource_interval_cursor_does_not_commit_rollbackable_probe() {
-        let rows = vec![row(0.0, 0.0), row(1.0e-9, 1.0), row(2.0e-9, 2.0)];
+        let rows = FileSourceRowsData::new(vec![row(0.0, 0.0), row(1.0e-9, 1.0), row(2.0e-9, 2.0)]);
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
         ctx.allocate_int_states(1);
@@ -784,6 +818,35 @@ mod tests {
             ctx.take_requested_breakpoints().is_empty(),
             "rollbackable filesource probes must not leave transient breakpoints behind"
         );
+    }
+
+    #[test]
+    fn filesource_breakpoint_lookup_uses_monotonic_row_index() {
+        let rows = FileSourceRowsData::new(vec![row(0.0, 0.0), row(1.0e-9, 1.0), row(2.0e-9, 2.0)]);
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.time = 0.5e-9;
+
+        assert!(rows.strictly_increasing_time);
+        schedule_next_breakpoint(&mut ctx, &rows);
+        assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
+    }
+
+    #[test]
+    fn filesource_breakpoint_lookup_preserves_nonmonotonic_min_future_time() {
+        let rows = FileSourceRowsData::new(vec![
+            row(0.0, 0.0),
+            row(2.0e-9, 2.0),
+            row(1.0e-9, 1.0),
+            row(3.0e-9, 3.0),
+        ]);
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.time = 0.5e-9;
+
+        assert!(!rows.strictly_increasing_time);
+        schedule_next_breakpoint(&mut ctx, &rows);
+        assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
     }
 
     #[test]
