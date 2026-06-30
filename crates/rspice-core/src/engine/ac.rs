@@ -388,6 +388,72 @@ impl Engine {
                     continue;
                 }
 
+                if let crate::xspice::PortConnection::CurrentOutput { pos, neg } = connection {
+                    for (control_port, partial) in
+                        instance.output_input_ac_partials(&port.name, frequency_hz)
+                    {
+                        if !Self::is_nonzero_finite_complex(partial) {
+                            continue;
+                        }
+                        let Some(control_connection) = instance.connection(&control_port) else {
+                            continue;
+                        };
+                        if *pos > 0 {
+                            Self::stamp_xspice_ac_control_partial(
+                                ac_matrix,
+                                *pos - 1,
+                                control_connection,
+                                partial,
+                                1.0,
+                                num_nodes,
+                            );
+                        }
+                        if *neg > 0 {
+                            Self::stamp_xspice_ac_control_partial(
+                                ac_matrix,
+                                *neg - 1,
+                                control_connection,
+                                partial,
+                                -1.0,
+                                num_nodes,
+                            );
+                        }
+                    }
+                    for (control_port, index, partial) in
+                        instance.output_input_vector_ac_partials(&port.name, frequency_hz)
+                    {
+                        if !Self::is_nonzero_finite_complex(partial) {
+                            continue;
+                        }
+                        let Some(control_connection) = instance.connection(&control_port) else {
+                            continue;
+                        };
+                        if *pos > 0 {
+                            Self::stamp_xspice_ac_vector_control_partial(
+                                ac_matrix,
+                                *pos - 1,
+                                control_connection,
+                                index,
+                                partial,
+                                1.0,
+                                num_nodes,
+                            );
+                        }
+                        if *neg > 0 {
+                            Self::stamp_xspice_ac_vector_control_partial(
+                                ac_matrix,
+                                *neg - 1,
+                                control_connection,
+                                index,
+                                partial,
+                                -1.0,
+                                num_nodes,
+                            );
+                        }
+                    }
+                    continue;
+                }
+
                 match port.default_type {
                     crate::xspice::PortType::Voltage
                     | crate::xspice::PortType::DifferentialVoltage => {

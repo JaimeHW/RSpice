@@ -801,6 +801,25 @@ impl Engine {
             }
         }
 
+        fn push_current_probe_topology(
+            triplets: &mut Vec<(usize, usize, Value)>,
+            circuit: &CircuitData,
+            pos: usize,
+            neg: usize,
+            branch_ordinal: usize,
+        ) {
+            let branch = circuit.get_branch_matrix_index(branch_ordinal);
+            let branch_idx = branch - 1;
+            if pos > 0 {
+                triplets.push((branch_idx, pos - 1, 0.0));
+                triplets.push((pos - 1, branch_idx, 0.0));
+            }
+            if neg > 0 {
+                triplets.push((branch_idx, neg - 1, 0.0));
+                triplets.push((neg - 1, branch_idx, 0.0));
+            }
+        }
+
         fn push_voltage_output_control_topology(
             triplets: &mut Vec<(usize, usize, Value)>,
             circuit: &CircuitData,
@@ -908,6 +927,9 @@ impl Engine {
         for instance in &circuit.xspice_instances {
             let ports = instance.ports();
             let mut inout_analog_nodes: Vec<usize> = Vec::new();
+            for (pos, neg, branch_ordinal) in instance.current_probe_branches() {
+                push_current_probe_topology(&mut triplets, circuit, pos, neg, branch_ordinal);
+            }
             for (port_idx, connection) in instance.connections().iter().enumerate() {
                 let Some(port) = ports.get(port_idx) else {
                     continue;
@@ -933,6 +955,19 @@ impl Engine {
                     continue;
                 }
                 if port.direction != crate::xspice::PortDirection::Out {
+                    continue;
+                }
+
+                if let crate::xspice::PortConnection::CurrentOutput { pos, neg } = connection {
+                    push_current_output_terminal_topology(&mut triplets, *pos, *neg);
+                    push_current_output_controls(
+                        &mut triplets,
+                        circuit,
+                        instance,
+                        ports,
+                        *pos,
+                        *neg,
+                    );
                     continue;
                 }
 
