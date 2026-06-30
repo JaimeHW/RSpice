@@ -43,7 +43,7 @@ impl Instance {
         }
 
         s.b[437] = (s.v[136] < 200.0);
-        s.v[437] = if s.b[437] { 1.0 } else { 0.0 };
+        s.store_scalar(437, if s.b[437] { 1.0 } else { 0.0 });
 
         if ((s.b[433] && s.b[434]) && s.b[437]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -60,7 +60,7 @@ impl Instance {
         }
 
         s.b[438] = ((((s.v[100] - s.v[222])) as f64).abs() > 1e-19);
-        s.v[438] = if s.b[438] { 1.0 } else { 0.0 };
+        s.store_scalar(438, if s.b[438] { 1.0 } else { 0.0 });
 
         if ((s.b[433] && s.b[434]) && s.b[438]) {
             s.store_sub(101, 222, 100);
@@ -218,7 +218,7 @@ impl Instance {
         }
 
         s.b[439] = (s.v[136] < 200.0);
-        s.v[439] = if s.b[439] { 1.0 } else { 0.0 };
+        s.store_scalar(439, if s.b[439] { 1.0 } else { 0.0 });
 
         if ((s.b[433] && s.b[434]) && s.b[439]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -235,7 +235,7 @@ impl Instance {
         }
 
         s.b[440] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
-        s.v[440] = if s.b[440] { 1.0 } else { 0.0 };
+        s.store_scalar(440, if s.b[440] { 1.0 } else { 0.0 });
 
         if ((s.b[433] && s.b[434]) && s.b[440]) {
             s.store_sub(101, 130, 100);
@@ -400,7 +400,7 @@ impl Instance {
         }
 
         s.b[441] = (s.v[48] < 0.0);
-        s.v[441] = if s.b[441] { 1.0 } else { 0.0 };
+        s.store_scalar(441, if s.b[441] { 1.0 } else { 0.0 });
 
         if ((s.b[433] && s.b[434]) && s.b[441]) {
             s.store_sub_scaled_inputs(229, 228, (-1.0), 229, 1.0);
@@ -412,10 +412,10 @@ impl Instance {
         }
 
         s.b[442] = (p.p150 != 0.0);
-        s.v[442] = if s.b[442] { 1.0 } else { 0.0 };
+        s.store_scalar(442, if s.b[442] { 1.0 } else { 0.0 });
 
         s.b[443] = (p.p150 == 1.0);
-        s.v[443] = if s.b[443] { 1.0 } else { 0.0 };
+        s.store_scalar(443, if s.b[443] { 1.0 } else { 0.0 });
 
         if (((!s.b[433]) && s.b[442]) && s.b[443]) {
             s.store_voltage(50, ctx, nodes, Some(9), Some(7));
@@ -454,7 +454,7 @@ impl Instance {
         }
 
         s.b[444] = (s.v[136] < 200.0);
-        s.v[444] = if s.b[444] { 1.0 } else { 0.0 };
+        s.store_scalar(444, if s.b[444] { 1.0 } else { 0.0 });
 
         if (((!s.b[433]) && s.b[442]) && s.b[444]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -471,7 +471,7 @@ impl Instance {
         }
 
         s.b[445] = ((((s.v[100] - s.v[222])) as f64).abs() > 1e-19);
-        s.v[445] = if s.b[445] { 1.0 } else { 0.0 };
+        s.store_scalar(445, if s.b[445] { 1.0 } else { 0.0 });
 
         if (((!s.b[433]) && s.b[442]) && s.b[445]) {
             s.store_sub(101, 222, 100);
@@ -638,7 +638,7 @@ impl Instance {
         }
 
         s.b[446] = (s.v[136] < 200.0);
-        s.v[446] = if s.b[446] { 1.0 } else { 0.0 };
+        s.store_scalar(446, if s.b[446] { 1.0 } else { 0.0 });
 
         if (((!s.b[433]) && s.b[442]) && s.b[446]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -655,7 +655,7 @@ impl Instance {
         }
 
         s.b[447] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
-        s.v[447] = if s.b[447] { 1.0 } else { 0.0 };
+        s.store_scalar(447, if s.b[447] { 1.0 } else { 0.0 });
 
         if (((!s.b[433]) && s.b[442]) && s.b[447]) {
             s.store_sub(101, 130, 100);
@@ -806,17 +806,17 @@ impl Instance {
         }
 
         s.b[448] = (p.p149 == 0.0);
-        s.v[448] = if s.b[448] { 1.0 } else { 0.0 };
+        s.store_scalar(448, if s.b[448] { 1.0 } else { 0.0 });
 
         s.b[449] = (p.p151 != 0.0);
-        s.v[449] = if s.b[449] { 1.0 } else { 0.0 };
+        s.store_scalar(449, if s.b[449] { 1.0 } else { 0.0 });
 
         if (s.b[448] && s.b[449]) {
             s.store_voltage(53, ctx, nodes, Some(8), Some(19));
         }
 
         s.b[450] = (p.p151 == 1.0);
-        s.v[450] = if s.b[450] { 1.0 } else { 0.0 };
+        s.store_scalar(450, if s.b[450] { 1.0 } else { 0.0 });
 
         if ((s.b[448] && s.b[449]) && s.b[450]) {
             s.store_voltage(54, ctx, nodes, Some(9), Some(19));
@@ -833,7 +833,7 @@ impl Instance {
         }
 
         s.b[451] = (s.v[53] < 0.0);
-        s.v[451] = if s.b[451] { 1.0 } else { 0.0 };
+        s.store_scalar(451, if s.b[451] { 1.0 } else { 0.0 });
 
         if ((s.b[448] && s.b[449]) && s.b[451]) {
             s.store_scalar(52, (-1.0));
@@ -884,7 +884,7 @@ impl Instance {
         }
 
         s.b[452] = (s.v[136] < 200.0);
-        s.v[452] = if s.b[452] { 1.0 } else { 0.0 };
+        s.store_scalar(452, if s.b[452] { 1.0 } else { 0.0 });
 
         if ((s.b[448] && s.b[449]) && s.b[452]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -901,7 +901,7 @@ impl Instance {
         }
 
         s.b[453] = ((((s.v[100] - s.v[234])) as f64).abs() > 1e-19);
-        s.v[453] = if s.b[453] { 1.0 } else { 0.0 };
+        s.store_scalar(453, if s.b[453] { 1.0 } else { 0.0 });
 
         if ((s.b[448] && s.b[449]) && s.b[453]) {
             s.store_sub(101, 234, 100);
@@ -1059,7 +1059,7 @@ impl Instance {
         }
 
         s.b[454] = (s.v[136] < 200.0);
-        s.v[454] = if s.b[454] { 1.0 } else { 0.0 };
+        s.store_scalar(454, if s.b[454] { 1.0 } else { 0.0 });
 
         if ((s.b[448] && s.b[449]) && s.b[454]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -1076,7 +1076,7 @@ impl Instance {
         }
 
         s.b[455] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
-        s.v[455] = if s.b[455] { 1.0 } else { 0.0 };
+        s.store_scalar(455, if s.b[455] { 1.0 } else { 0.0 });
 
         if ((s.b[448] && s.b[449]) && s.b[455]) {
             s.store_sub(101, 130, 100);
@@ -1241,7 +1241,7 @@ impl Instance {
         }
 
         s.b[456] = (s.v[52] < 0.0);
-        s.v[456] = if s.b[456] { 1.0 } else { 0.0 };
+        s.store_scalar(456, if s.b[456] { 1.0 } else { 0.0 });
 
         if ((s.b[448] && s.b[449]) && s.b[456]) {
             s.store_sub_scaled_inputs(241, 240, (-1.0), 241, 1.0);
@@ -1253,10 +1253,10 @@ impl Instance {
         }
 
         s.b[457] = (p.p151 != 0.0);
-        s.v[457] = if s.b[457] { 1.0 } else { 0.0 };
+        s.store_scalar(457, if s.b[457] { 1.0 } else { 0.0 });
 
         s.b[458] = (p.p151 == 1.0);
-        s.v[458] = if s.b[458] { 1.0 } else { 0.0 };
+        s.store_scalar(458, if s.b[458] { 1.0 } else { 0.0 });
 
         if (((!s.b[448]) && s.b[457]) && s.b[458]) {
             s.store_voltage(54, ctx, nodes, Some(9), Some(8));
@@ -1295,7 +1295,7 @@ impl Instance {
         }
 
         s.b[459] = (s.v[136] < 200.0);
-        s.v[459] = if s.b[459] { 1.0 } else { 0.0 };
+        s.store_scalar(459, if s.b[459] { 1.0 } else { 0.0 });
 
         if (((!s.b[448]) && s.b[457]) && s.b[459]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -1312,7 +1312,7 @@ impl Instance {
         }
 
         s.b[460] = ((((s.v[100] - s.v[234])) as f64).abs() > 1e-19);
-        s.v[460] = if s.b[460] { 1.0 } else { 0.0 };
+        s.store_scalar(460, if s.b[460] { 1.0 } else { 0.0 });
 
         if (((!s.b[448]) && s.b[457]) && s.b[460]) {
             s.store_sub(101, 234, 100);
@@ -1479,7 +1479,7 @@ impl Instance {
         }
 
         s.b[461] = (s.v[136] < 200.0);
-        s.v[461] = if s.b[461] { 1.0 } else { 0.0 };
+        s.store_scalar(461, if s.b[461] { 1.0 } else { 0.0 });
 
         if (((!s.b[448]) && s.b[457]) && s.b[461]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -1496,7 +1496,7 @@ impl Instance {
         }
 
         s.b[462] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
-        s.v[462] = if s.b[462] { 1.0 } else { 0.0 };
+        s.store_scalar(462, if s.b[462] { 1.0 } else { 0.0 });
 
         if (((!s.b[448]) && s.b[457]) && s.b[462]) {
             s.store_sub(101, 130, 100);
@@ -1647,17 +1647,17 @@ impl Instance {
         }
 
         s.b[463] = (p.p149 == 0.0);
-        s.v[463] = if s.b[463] { 1.0 } else { 0.0 };
+        s.store_scalar(463, if s.b[463] { 1.0 } else { 0.0 });
 
         s.b[464] = (p.p152 != 0.0);
-        s.v[464] = if s.b[464] { 1.0 } else { 0.0 };
+        s.store_scalar(464, if s.b[464] { 1.0 } else { 0.0 });
 
         if (s.b[463] && s.b[464]) {
             s.store_voltage(57, ctx, nodes, Some(16), Some(15));
         }
 
         s.b[465] = (p.p152 == 1.0);
-        s.v[465] = if s.b[465] { 1.0 } else { 0.0 };
+        s.store_scalar(465, if s.b[465] { 1.0 } else { 0.0 });
 
         if ((s.b[463] && s.b[464]) && s.b[465]) {
             s.store_voltage(58, ctx, nodes, Some(9), Some(15));
@@ -1674,7 +1674,7 @@ impl Instance {
         }
 
         s.b[466] = (s.v[57] < 0.0);
-        s.v[466] = if s.b[466] { 1.0 } else { 0.0 };
+        s.store_scalar(466, if s.b[466] { 1.0 } else { 0.0 });
 
         if ((s.b[463] && s.b[464]) && s.b[466]) {
             s.store_scalar(56, (-1.0));
@@ -1725,7 +1725,7 @@ impl Instance {
         }
 
         s.b[467] = (s.v[136] < 200.0);
-        s.v[467] = if s.b[467] { 1.0 } else { 0.0 };
+        s.store_scalar(467, if s.b[467] { 1.0 } else { 0.0 });
 
         if ((s.b[463] && s.b[464]) && s.b[467]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -1742,7 +1742,7 @@ impl Instance {
         }
 
         s.b[468] = ((((s.v[100] - s.v[246])) as f64).abs() > 1e-19);
-        s.v[468] = if s.b[468] { 1.0 } else { 0.0 };
+        s.store_scalar(468, if s.b[468] { 1.0 } else { 0.0 });
 
         if ((s.b[463] && s.b[464]) && s.b[468]) {
             s.store_sub(101, 246, 100);
@@ -1900,7 +1900,7 @@ impl Instance {
         }
 
         s.b[469] = (s.v[136] < 200.0);
-        s.v[469] = if s.b[469] { 1.0 } else { 0.0 };
+        s.store_scalar(469, if s.b[469] { 1.0 } else { 0.0 });
 
         if ((s.b[463] && s.b[464]) && s.b[469]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -1917,7 +1917,7 @@ impl Instance {
         }
 
         s.b[470] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
-        s.v[470] = if s.b[470] { 1.0 } else { 0.0 };
+        s.store_scalar(470, if s.b[470] { 1.0 } else { 0.0 });
 
         if ((s.b[463] && s.b[464]) && s.b[470]) {
             s.store_sub(101, 130, 100);
@@ -2082,7 +2082,7 @@ impl Instance {
         }
 
         s.b[471] = (s.v[56] < 0.0);
-        s.v[471] = if s.b[471] { 1.0 } else { 0.0 };
+        s.store_scalar(471, if s.b[471] { 1.0 } else { 0.0 });
 
         if ((s.b[463] && s.b[464]) && s.b[471]) {
             s.store_sub_scaled_inputs(253, 252, (-1.0), 253, 1.0);
@@ -2094,10 +2094,10 @@ impl Instance {
         }
 
         s.b[472] = (p.p152 != 0.0);
-        s.v[472] = if s.b[472] { 1.0 } else { 0.0 };
+        s.store_scalar(472, if s.b[472] { 1.0 } else { 0.0 });
 
         s.b[473] = (p.p152 == 1.0);
-        s.v[473] = if s.b[473] { 1.0 } else { 0.0 };
+        s.store_scalar(473, if s.b[473] { 1.0 } else { 0.0 });
 
         if (((!s.b[463]) && s.b[472]) && s.b[473]) {
             s.store_voltage(58, ctx, nodes, Some(9), Some(7));
@@ -2136,7 +2136,7 @@ impl Instance {
         }
 
         s.b[474] = (s.v[136] < 200.0);
-        s.v[474] = if s.b[474] { 1.0 } else { 0.0 };
+        s.store_scalar(474, if s.b[474] { 1.0 } else { 0.0 });
 
         if (((!s.b[463]) && s.b[472]) && s.b[474]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -2153,7 +2153,7 @@ impl Instance {
         }
 
         s.b[475] = ((((s.v[100] - s.v[246])) as f64).abs() > 1e-19);
-        s.v[475] = if s.b[475] { 1.0 } else { 0.0 };
+        s.store_scalar(475, if s.b[475] { 1.0 } else { 0.0 });
 
         if (((!s.b[463]) && s.b[472]) && s.b[475]) {
             s.store_sub(101, 246, 100);
@@ -2320,7 +2320,7 @@ impl Instance {
         }
 
         s.b[476] = (s.v[136] < 200.0);
-        s.v[476] = if s.b[476] { 1.0 } else { 0.0 };
+        s.store_scalar(476, if s.b[476] { 1.0 } else { 0.0 });
 
         if (((!s.b[463]) && s.b[472]) && s.b[476]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -2337,7 +2337,7 @@ impl Instance {
         }
 
         s.b[477] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
-        s.v[477] = if s.b[477] { 1.0 } else { 0.0 };
+        s.store_scalar(477, if s.b[477] { 1.0 } else { 0.0 });
 
         if (((!s.b[463]) && s.b[472]) && s.b[477]) {
             s.store_sub(101, 130, 100);
@@ -2488,17 +2488,17 @@ impl Instance {
         }
 
         s.b[478] = (p.p149 == 0.0);
-        s.v[478] = if s.b[478] { 1.0 } else { 0.0 };
+        s.store_scalar(478, if s.b[478] { 1.0 } else { 0.0 });
 
         s.b[479] = (p.p153 != 0.0);
-        s.v[479] = if s.b[479] { 1.0 } else { 0.0 };
+        s.store_scalar(479, if s.b[479] { 1.0 } else { 0.0 });
 
         if (s.b[478] && s.b[479]) {
             s.store_voltage(61, ctx, nodes, Some(19), Some(20));
         }
 
         s.b[480] = (p.p153 == 1.0);
-        s.v[480] = if s.b[480] { 1.0 } else { 0.0 };
+        s.store_scalar(480, if s.b[480] { 1.0 } else { 0.0 });
 
         if ((s.b[478] && s.b[479]) && s.b[480]) {
             s.store_voltage(62, ctx, nodes, Some(9), Some(20));
@@ -2515,7 +2515,7 @@ impl Instance {
         }
 
         s.b[481] = (s.v[61] < 0.0);
-        s.v[481] = if s.b[481] { 1.0 } else { 0.0 };
+        s.store_scalar(481, if s.b[481] { 1.0 } else { 0.0 });
 
         if ((s.b[478] && s.b[479]) && s.b[481]) {
             s.store_scalar(60, (-1.0));
@@ -2566,7 +2566,7 @@ impl Instance {
         }
 
         s.b[482] = (s.v[136] < 200.0);
-        s.v[482] = if s.b[482] { 1.0 } else { 0.0 };
+        s.store_scalar(482, if s.b[482] { 1.0 } else { 0.0 });
 
         if ((s.b[478] && s.b[479]) && s.b[482]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -2583,7 +2583,7 @@ impl Instance {
         }
 
         s.b[483] = ((((s.v[100] - s.v[258])) as f64).abs() > 1e-19);
-        s.v[483] = if s.b[483] { 1.0 } else { 0.0 };
+        s.store_scalar(483, if s.b[483] { 1.0 } else { 0.0 });
 
         if ((s.b[478] && s.b[479]) && s.b[483]) {
             s.store_sub(101, 258, 100);
@@ -2741,7 +2741,7 @@ impl Instance {
         }
 
         s.b[484] = (s.v[136] < 200.0);
-        s.v[484] = if s.b[484] { 1.0 } else { 0.0 };
+        s.store_scalar(484, if s.b[484] { 1.0 } else { 0.0 });
 
         if ((s.b[478] && s.b[479]) && s.b[484]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -2758,7 +2758,7 @@ impl Instance {
         }
 
         s.b[485] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
-        s.v[485] = if s.b[485] { 1.0 } else { 0.0 };
+        s.store_scalar(485, if s.b[485] { 1.0 } else { 0.0 });
 
         if ((s.b[478] && s.b[479]) && s.b[485]) {
             s.store_sub(101, 130, 100);
@@ -2923,7 +2923,7 @@ impl Instance {
         }
 
         s.b[486] = (s.v[60] < 0.0);
-        s.v[486] = if s.b[486] { 1.0 } else { 0.0 };
+        s.store_scalar(486, if s.b[486] { 1.0 } else { 0.0 });
 
         if ((s.b[478] && s.b[479]) && s.b[486]) {
             s.store_sub_scaled_inputs(265, 264, (-1.0), 265, 1.0);
@@ -2935,10 +2935,10 @@ impl Instance {
         }
 
         s.b[487] = (p.p153 != 0.0);
-        s.v[487] = if s.b[487] { 1.0 } else { 0.0 };
+        s.store_scalar(487, if s.b[487] { 1.0 } else { 0.0 });
 
         s.b[488] = (p.p153 == 1.0);
-        s.v[488] = if s.b[488] { 1.0 } else { 0.0 };
+        s.store_scalar(488, if s.b[488] { 1.0 } else { 0.0 });
 
         if (((!s.b[478]) && s.b[487]) && s.b[488]) {
             s.store_voltage(62, ctx, nodes, Some(9), Some(8));
@@ -2977,7 +2977,7 @@ impl Instance {
         }
 
         s.b[489] = (s.v[136] < 200.0);
-        s.v[489] = if s.b[489] { 1.0 } else { 0.0 };
+        s.store_scalar(489, if s.b[489] { 1.0 } else { 0.0 });
 
         if (((!s.b[478]) && s.b[487]) && s.b[489]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -2994,7 +2994,7 @@ impl Instance {
         }
 
         s.b[490] = ((((s.v[100] - s.v[258])) as f64).abs() > 1e-19);
-        s.v[490] = if s.b[490] { 1.0 } else { 0.0 };
+        s.store_scalar(490, if s.b[490] { 1.0 } else { 0.0 });
 
         if (((!s.b[478]) && s.b[487]) && s.b[490]) {
             s.store_sub(101, 258, 100);
@@ -3161,7 +3161,7 @@ impl Instance {
         }
 
         s.b[491] = (s.v[136] < 200.0);
-        s.v[491] = if s.b[491] { 1.0 } else { 0.0 };
+        s.store_scalar(491, if s.b[491] { 1.0 } else { 0.0 });
 
         if (((!s.b[478]) && s.b[487]) && s.b[491]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -3178,7 +3178,7 @@ impl Instance {
         }
 
         s.b[492] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
-        s.v[492] = if s.b[492] { 1.0 } else { 0.0 };
+        s.store_scalar(492, if s.b[492] { 1.0 } else { 0.0 });
 
         if (((!s.b[478]) && s.b[487]) && s.b[492]) {
             s.store_sub(101, 130, 100);
@@ -3329,17 +3329,17 @@ impl Instance {
         }
 
         s.b[493] = (p.p149 == 0.0);
-        s.v[493] = if s.b[493] { 1.0 } else { 0.0 };
+        s.store_scalar(493, if s.b[493] { 1.0 } else { 0.0 });
 
         s.b[494] = (p.p154 != 0.0);
-        s.v[494] = if s.b[494] { 1.0 } else { 0.0 };
+        s.store_scalar(494, if s.b[494] { 1.0 } else { 0.0 });
 
         if (s.b[493] && s.b[494]) {
             s.store_voltage(65, ctx, nodes, Some(17), Some(16));
         }
 
         s.b[495] = (p.p154 == 1.0);
-        s.v[495] = if s.b[495] { 1.0 } else { 0.0 };
+        s.store_scalar(495, if s.b[495] { 1.0 } else { 0.0 });
 
         if ((s.b[493] && s.b[494]) && s.b[495]) {
             s.store_voltage(66, ctx, nodes, Some(9), Some(16));
@@ -3356,7 +3356,7 @@ impl Instance {
         }
 
         s.b[496] = (s.v[65] < 0.0);
-        s.v[496] = if s.b[496] { 1.0 } else { 0.0 };
+        s.store_scalar(496, if s.b[496] { 1.0 } else { 0.0 });
 
         if ((s.b[493] && s.b[494]) && s.b[496]) {
             s.store_scalar(64, (-1.0));
@@ -3407,7 +3407,7 @@ impl Instance {
         }
 
         s.b[497] = (s.v[136] < 200.0);
-        s.v[497] = if s.b[497] { 1.0 } else { 0.0 };
+        s.store_scalar(497, if s.b[497] { 1.0 } else { 0.0 });
 
         if ((s.b[493] && s.b[494]) && s.b[497]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -3424,7 +3424,7 @@ impl Instance {
         }
 
         s.b[498] = ((((s.v[100] - s.v[270])) as f64).abs() > 1e-19);
-        s.v[498] = if s.b[498] { 1.0 } else { 0.0 };
+        s.store_scalar(498, if s.b[498] { 1.0 } else { 0.0 });
 
         if ((s.b[493] && s.b[494]) && s.b[498]) {
             s.store_sub(101, 270, 100);
@@ -3582,7 +3582,7 @@ impl Instance {
         }
 
         s.b[499] = (s.v[136] < 200.0);
-        s.v[499] = if s.b[499] { 1.0 } else { 0.0 };
+        s.store_scalar(499, if s.b[499] { 1.0 } else { 0.0 });
 
         if ((s.b[493] && s.b[494]) && s.b[499]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -3599,7 +3599,7 @@ impl Instance {
         }
 
         s.b[500] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
-        s.v[500] = if s.b[500] { 1.0 } else { 0.0 };
+        s.store_scalar(500, if s.b[500] { 1.0 } else { 0.0 });
 
         if ((s.b[493] && s.b[494]) && s.b[500]) {
             s.store_sub(101, 130, 100);
@@ -3764,7 +3764,7 @@ impl Instance {
         }
 
         s.b[501] = (s.v[64] < 0.0);
-        s.v[501] = if s.b[501] { 1.0 } else { 0.0 };
+        s.store_scalar(501, if s.b[501] { 1.0 } else { 0.0 });
 
         if ((s.b[493] && s.b[494]) && s.b[501]) {
             s.store_sub_scaled_inputs(277, 276, (-1.0), 277, 1.0);
@@ -3776,10 +3776,10 @@ impl Instance {
         }
 
         s.b[502] = (p.p154 != 0.0);
-        s.v[502] = if s.b[502] { 1.0 } else { 0.0 };
+        s.store_scalar(502, if s.b[502] { 1.0 } else { 0.0 });
 
         s.b[503] = (p.p154 == 1.0);
-        s.v[503] = if s.b[503] { 1.0 } else { 0.0 };
+        s.store_scalar(503, if s.b[503] { 1.0 } else { 0.0 });
 
         if (((!s.b[493]) && s.b[502]) && s.b[503]) {
             s.store_voltage(66, ctx, nodes, Some(9), Some(7));
@@ -3818,7 +3818,7 @@ impl Instance {
         }
 
         s.b[504] = (s.v[136] < 200.0);
-        s.v[504] = if s.b[504] { 1.0 } else { 0.0 };
+        s.store_scalar(504, if s.b[504] { 1.0 } else { 0.0 });
 
         if (((!s.b[493]) && s.b[502]) && s.b[504]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -3835,7 +3835,7 @@ impl Instance {
         }
 
         s.b[505] = ((((s.v[100] - s.v[270])) as f64).abs() > 1e-19);
-        s.v[505] = if s.b[505] { 1.0 } else { 0.0 };
+        s.store_scalar(505, if s.b[505] { 1.0 } else { 0.0 });
 
         if (((!s.b[493]) && s.b[502]) && s.b[505]) {
             s.store_sub(101, 270, 100);
@@ -4002,7 +4002,7 @@ impl Instance {
         }
 
         s.b[506] = (s.v[136] < 200.0);
-        s.v[506] = if s.b[506] { 1.0 } else { 0.0 };
+        s.store_scalar(506, if s.b[506] { 1.0 } else { 0.0 });
 
         if (((!s.b[493]) && s.b[502]) && s.b[506]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -4019,7 +4019,7 @@ impl Instance {
         }
 
         s.b[507] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
-        s.v[507] = if s.b[507] { 1.0 } else { 0.0 };
+        s.store_scalar(507, if s.b[507] { 1.0 } else { 0.0 });
 
         if (((!s.b[493]) && s.b[502]) && s.b[507]) {
             s.store_sub(101, 130, 100);
@@ -4170,17 +4170,17 @@ impl Instance {
         }
 
         s.b[508] = (p.p149 == 0.0);
-        s.v[508] = if s.b[508] { 1.0 } else { 0.0 };
+        s.store_scalar(508, if s.b[508] { 1.0 } else { 0.0 });
 
         s.b[509] = (p.p155 != 0.0);
-        s.v[509] = if s.b[509] { 1.0 } else { 0.0 };
+        s.store_scalar(509, if s.b[509] { 1.0 } else { 0.0 });
 
         if (s.b[508] && s.b[509]) {
             s.store_voltage(69, ctx, nodes, Some(20), Some(21));
         }
 
         s.b[510] = (p.p155 == 1.0);
-        s.v[510] = if s.b[510] { 1.0 } else { 0.0 };
+        s.store_scalar(510, if s.b[510] { 1.0 } else { 0.0 });
 
         if ((s.b[508] && s.b[509]) && s.b[510]) {
             s.store_voltage(70, ctx, nodes, Some(9), Some(21));
@@ -4197,7 +4197,7 @@ impl Instance {
         }
 
         s.b[511] = (s.v[69] < 0.0);
-        s.v[511] = if s.b[511] { 1.0 } else { 0.0 };
+        s.store_scalar(511, if s.b[511] { 1.0 } else { 0.0 });
 
         if ((s.b[508] && s.b[509]) && s.b[511]) {
             s.store_scalar(68, (-1.0));
@@ -4248,7 +4248,7 @@ impl Instance {
         }
 
         s.b[512] = (s.v[136] < 200.0);
-        s.v[512] = if s.b[512] { 1.0 } else { 0.0 };
+        s.store_scalar(512, if s.b[512] { 1.0 } else { 0.0 });
 
         if ((s.b[508] && s.b[509]) && s.b[512]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -4265,7 +4265,7 @@ impl Instance {
         }
 
         s.b[513] = ((((s.v[100] - s.v[282])) as f64).abs() > 1e-19);
-        s.v[513] = if s.b[513] { 1.0 } else { 0.0 };
+        s.store_scalar(513, if s.b[513] { 1.0 } else { 0.0 });
 
         if ((s.b[508] && s.b[509]) && s.b[513]) {
             s.store_sub(101, 282, 100);
@@ -4423,7 +4423,7 @@ impl Instance {
         }
 
         s.b[514] = (s.v[136] < 200.0);
-        s.v[514] = if s.b[514] { 1.0 } else { 0.0 };
+        s.store_scalar(514, if s.b[514] { 1.0 } else { 0.0 });
 
         if ((s.b[508] && s.b[509]) && s.b[514]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
@@ -4440,7 +4440,7 @@ impl Instance {
         }
 
         s.b[515] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
-        s.v[515] = if s.b[515] { 1.0 } else { 0.0 };
+        s.store_scalar(515, if s.b[515] { 1.0 } else { 0.0 });
 
         if ((s.b[508] && s.b[509]) && s.b[515]) {
             s.store_sub(101, 130, 100);

@@ -1868,7 +1868,7 @@ impl Instance {
         };
 
         s.b[148] = (p.p35 != 0.0);
-        s.v[148] = if s.b[148] { 1.0 } else { 0.0 };
+        s.store_scalar(148, if s.b[148] { 1.0 } else { 0.0 });
 
         let (eq4_e64, eq4_e64_d_n4, eq4_e64_q,) = {
     if s.b[148] {

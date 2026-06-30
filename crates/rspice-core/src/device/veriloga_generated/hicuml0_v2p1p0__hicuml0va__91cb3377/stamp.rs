@@ -15225,7 +15225,7 @@ impl Instance {
         };
 
         s.b[359] = ((p.p103 == 0.0) || (p.p107 == 0.0));
-        s.v[359] = if s.b[359] { 1.0 } else { 0.0 };
+        s.store_scalar(359, if s.b[359] { 1.0 } else { 0.0 });
 
         let (assign7580_e7665, assign7580_e7665_d_n0, assign7580_e7665_d_n1, assign7580_e7665_d_n2, assign7580_e7665_d_n3, assign7580_e7665_d_n4, assign7580_e7665_d_n5, assign7580_e7665_d_n6, assign7580_e7665_d_n7, assign7580_e7665_d_n8, assign7580_e7665_d_n9, assign7580_e7665_d_b0, assign7580_e7665_d_b1, assign7580_e7665_d_b2, assign7580_e7665_d_b3,) = {
     if s.b[359] {
@@ -15235,6 +15235,7 @@ impl Instance {
     }
 };
         s.v[167] = assign7580_e7665;
+        s.mark_derivatives_dirty(167);
         s.dn[167][0] = assign7580_e7665_d_n0;
         s.dn[167][1] = assign7580_e7665_d_n1;
         s.dn[167][2] = assign7580_e7665_d_n2;
@@ -15261,6 +15262,7 @@ impl Instance {
     }
 };
         s.v[167] = assign7590_e7673;
+        s.mark_derivatives_dirty(167);
         s.dn[167][0] = assign7590_e7673_d_n0;
         s.dn[167][1] = assign7590_e7673_d_n1;
         s.dn[167][2] = assign7590_e7673_d_n2;
@@ -15279,7 +15281,7 @@ impl Instance {
         s.rdn[167][4] = assign7590_e7673_q_d_n4;
 
         s.b[360] = ((p.p103 == 0.0) || (p.p104 < p.p111));
-        s.v[360] = if s.b[360] { 1.0 } else { 0.0 };
+        s.store_scalar(360, if s.b[360] { 1.0 } else { 0.0 });
 
         Self::stamp_reactive_equations_block_0(stamper, s, nodes, multiplicity);
     }

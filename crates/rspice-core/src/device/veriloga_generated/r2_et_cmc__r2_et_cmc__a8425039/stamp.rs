@@ -209,7 +209,7 @@ impl Instance {
         };
 
         s.b[51] = param_given[10];
-        s.v[51] = if s.b[51] { 1.0 } else { 0.0 };
+        s.store_scalar(51, if s.b[51] { 1.0 } else { 0.0 });
 
         if s.b[51] {
             s.store_scalar(13, p.p10);
@@ -220,7 +220,7 @@ impl Instance {
         }
 
         s.b[52] = param_given[11];
-        s.v[52] = if s.b[52] { 1.0 } else { 0.0 };
+        s.store_scalar(52, if s.b[52] { 1.0 } else { 0.0 });
 
         if s.b[52] {
             s.store_scalar(14, (1.0 - (0.01 * p.p11)));
@@ -233,14 +233,14 @@ impl Instance {
         s.store_scaled_mul(18, 14, 13, 1000000.0);
 
         s.b[56] = ((p.p3 != 0.0) && (p.p4 != 0.0));
-        s.v[56] = if s.b[56] { 1.0 } else { 0.0 };
+        s.store_scalar(56, if s.b[56] { 1.0 } else { 0.0 });
 
         if s.b[56] {
             s.store_scalar(17, p.p23);
         }
 
         s.b[57] = ((p.p3 != 0.0) || (p.p4 != 0.0));
-        s.v[57] = if s.b[57] { 1.0 } else { 0.0 };
+        s.store_scalar(57, if s.b[57] { 1.0 } else { 0.0 });
 
         if ((!s.b[56]) && s.b[57]) {
             s.store_scalar(17, (p.p23 * 0.5));
@@ -251,10 +251,10 @@ impl Instance {
         }
 
         s.b[58] = ((param_given[1] && param_given[2]) && (!param_given[0]));
-        s.v[58] = if s.b[58] { 1.0 } else { 0.0 };
+        s.store_scalar(58, if s.b[58] { 1.0 } else { 0.0 });
 
         s.b[59] = ((p.p2 == 0.0) || (p.p1 == 0.0));
-        s.v[59] = if s.b[59] { 1.0 } else { 0.0 };
+        s.store_scalar(59, if s.b[59] { 1.0 } else { 0.0 });
 
         if (s.b[58] && s.b[59]) {
             s.store_scalar(19, 0.0);
@@ -269,7 +269,7 @@ impl Instance {
         }
 
         s.b[61] = (s.v[3] > 0.0);
-        s.v[61] = if s.b[61] { 1.0 } else { 0.0 };
+        s.store_scalar(61, if s.b[61] { 1.0 } else { 0.0 });
 
         if ((s.b[58] && (!s.b[59])) && s.b[61]) {
             s.store_scale(4, 3, (p.p17 / p.p2));
@@ -282,10 +282,10 @@ impl Instance {
         }
 
         s.b[63] = (param_given[2] && (!param_given[1]));
-        s.v[63] = if s.b[63] { 1.0 } else { 0.0 };
+        s.store_scalar(63, if s.b[63] { 1.0 } else { 0.0 });
 
         s.b[64] = (p.p2 == 0.0);
-        s.v[64] = if s.b[64] { 1.0 } else { 0.0 };
+        s.store_scalar(64, if s.b[64] { 1.0 } else { 0.0 });
 
         if (((!s.b[58]) && s.b[63]) && s.b[64]) {
             s.store_scalar(19, 0.0);
@@ -295,7 +295,7 @@ impl Instance {
         }
 
         s.b[65] = (p.p0 == 0.0);
-        s.v[65] = if s.b[65] { 1.0 } else { 0.0 };
+        s.store_scalar(65, if s.b[65] { 1.0 } else { 0.0 });
 
         if ((((!s.b[58]) && s.b[63]) && (!s.b[64])) && s.b[65]) {
             s.store_scalar(20, 0.0);
@@ -310,7 +310,7 @@ impl Instance {
         }
 
         s.b[67] = (s.v[4] > 0.0);
-        s.v[67] = if s.b[67] { 1.0 } else { 0.0 };
+        s.store_scalar(67, if s.b[67] { 1.0 } else { 0.0 });
 
         if (((((!s.b[58]) && s.b[63]) && (!s.b[64])) && (!s.b[65])) && s.b[67]) {
             s.store_scale(3, 4, (p.p2 / p.p17));
@@ -323,7 +323,7 @@ impl Instance {
         }
 
         s.b[69] = (p.p0 == 0.0);
-        s.v[69] = if s.b[69] { 1.0 } else { 0.0 };
+        s.store_scalar(69, if s.b[69] { 1.0 } else { 0.0 });
 
         if (((!s.b[58]) && (!s.b[63])) && s.b[69]) {
             s.store_scalar(20, 0.0);
@@ -333,7 +333,7 @@ impl Instance {
         }
 
         s.b[70] = (p.p1 == 0.0);
-        s.v[70] = if s.b[70] { 1.0 } else { 0.0 };
+        s.store_scalar(70, if s.b[70] { 1.0 } else { 0.0 });
 
         if ((((!s.b[58]) && (!s.b[63])) && (!s.b[69])) && s.b[70]) {
             s.store_scalar(19, 0.0);
@@ -350,14 +350,14 @@ impl Instance {
         }
 
         s.b[85] = ((p.p3 != 0.0) && (p.p4 != 0.0));
-        s.v[85] = if s.b[85] { 1.0 } else { 0.0 };
+        s.store_scalar(85, if s.b[85] { 1.0 } else { 0.0 });
 
         if s.b[85] {
             s.store_scaled_add(46, 19, 20, 2.0);
         }
 
         s.b[86] = ((p.p3 != 0.0) || (p.p4 != 0.0));
-        s.v[86] = if s.b[86] { 1.0 } else { 0.0 };
+        s.store_scalar(86, if s.b[86] { 1.0 } else { 0.0 });
 
         if ((!s.b[85]) && s.b[86]) {
             s.store_add_scaled_inputs(46, 19, 2.0, 20, 1.0);

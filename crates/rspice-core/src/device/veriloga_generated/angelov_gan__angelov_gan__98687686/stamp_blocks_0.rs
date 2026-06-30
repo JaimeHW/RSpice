@@ -22015,22 +22015,22 @@ impl Instance {
 
         s.store_voltage(18, ctx, nodes, Some(16), None);
 
-        s.v[98] = 0.0;
+        s.store_scalar(98, 0.0);
 
-        s.v[27] = 0.0;
+        s.store_scalar(27, 0.0);
 
-        s.v[26] = 0.0;
+        s.store_scalar(26, 0.0);
 
-        s.v[29] = 0.0;
+        s.store_scalar(29, 0.0);
 
-        s.v[28] = 0.0;
+        s.store_scalar(28, 0.0);
 
-        s.v[25] = 0.0;
+        s.store_scalar(25, 0.0);
 
-        s.v[24] = 0.0;
+        s.store_scalar(24, 0.0);
 
         s.b[101] = param_given[3];
-        s.v[101] = if s.b[101] { 1.0 } else { 0.0 };
+        s.store_scalar(101, if s.b[101] { 1.0 } else { 0.0 });
 
         if s.b[101] {
             s.store_scalar(15, (p.p3 + 273.15));
@@ -22041,7 +22041,7 @@ impl Instance {
         }
 
         s.b[102] = param_given[100];
-        s.v[102] = if s.b[102] { 1.0 } else { 0.0 };
+        s.store_scalar(102, if s.b[102] { 1.0 } else { 0.0 });
 
         if s.b[102] {
             s.store_scalar(14, (p.p100 + 273.15));
@@ -22060,7 +22060,7 @@ impl Instance {
         s.store_abs_ad(16, A::sub(s.ad_value(15), s.ad_value(14)));
 
         s.b[103] = ((s.v[16] > 0.0) || (p.p66 > 0.0));
-        s.v[103] = if s.b[103] { 1.0 } else { 0.0 };
+        s.store_scalar(103, if s.b[103] { 1.0 } else { 0.0 });
 
         if s.b[103] {
             s.store_offset_scaled_ad(39, A::abs(s.ad_value(16)), ((p.p68) * (p.p8)), p.p8);
@@ -22076,7 +22076,7 @@ impl Instance {
         }
 
         s.b[104] = (((p.p4 == 1.0) || (p.p4 == 4.0)) && (p.p6 == 4.0));
-        s.v[104] = if s.b[104] { 1.0 } else { 0.0 };
+        s.store_scalar(104, if s.b[104] { 1.0 } else { 0.0 });
 
         if (s.b[103] && s.b[104]) {
             s.store_offset_scaled_ad(51, A::square(s.ad_value(16)), ((p.p75) * (p.p63)), p.p63);
@@ -22101,7 +22101,7 @@ impl Instance {
         }
 
         s.b[105] = ((!param_given[43]) && param_given[44]);
-        s.v[105] = if s.b[105] { 1.0 } else { 0.0 };
+        s.store_scalar(105, if s.b[105] { 1.0 } else { 0.0 });
 
         if s.b[105] {
             s.store_div_from_scalar(19, (0.5 / p.p44), 13);
@@ -22121,6 +22121,7 @@ impl Instance {
         let assign600_e924: f64 = (1.0 + assign600_e923);
         let assign600_e925: f64 = (p.p11 * assign600_e924);
         s.v[59] = assign600_e925;
+        s.mark_derivatives_dirty(59);
         s.dn[59][0] = (p.p11 * (-((p.p18 * ((s.dn[63][0] * s.v[63]) + (s.v[63] * s.dn[63][0]))) / (assign600_e922 * assign600_e922))));
         s.dn[59][1] = (p.p11 * (-((p.p18 * ((s.dn[63][1] * s.v[63]) + (s.v[63] * s.dn[63][1]))) / (assign600_e922 * assign600_e922))));
         s.dn[59][2] = (p.p11 * (-((p.p18 * ((s.dn[63][2] * s.v[63]) + (s.v[63] * s.dn[63][2]))) / (assign600_e922 * assign600_e922))));
@@ -22166,6 +22167,7 @@ impl Instance {
         let assign610_e932: f64 = (1.0 + assign610_e931);
         let assign610_e933: f64 = (s.v[59] * assign610_e932);
         s.v[60] = assign610_e933;
+        s.mark_derivatives_dirty(60);
         s.dn[60][0] = ((s.dn[59][0] * assign610_e932) + (s.v[59] * (p.p69 * if s.v[16] >= 0.0 { s.dn[16][0] } else { (-s.dn[16][0]) })));
         s.dn[60][1] = ((s.dn[59][1] * assign610_e932) + (s.v[59] * (p.p69 * if s.v[16] >= 0.0 { s.dn[16][1] } else { (-s.dn[16][1]) })));
         s.dn[60][2] = ((s.dn[59][2] * assign610_e932) + (s.v[59] * (p.p69 * if s.v[16] >= 0.0 { s.dn[16][2] } else { (-s.dn[16][2]) })));
@@ -22216,6 +22218,7 @@ impl Instance {
 
         let assign660_e977: f64 = (s.v[64] * s.v[64]);
         s.v[65] = assign660_e977;
+        s.mark_derivatives_dirty(65);
         s.dn[65][0] = ((s.dn[64][0] * s.v[64]) + (s.v[64] * s.dn[64][0]));
         s.dn[65][1] = ((s.dn[64][1] * s.v[64]) + (s.v[64] * s.dn[64][1]));
         s.dn[65][2] = ((s.dn[64][2] * s.v[64]) + (s.v[64] * s.dn[64][2]));
@@ -22263,6 +22266,7 @@ impl Instance {
         let assign670_e989: f64 = (assign670_e987 * s.v[65]);
         let assign670_e990: f64 = (assign670_e984 + assign670_e989);
         s.v[17] = assign670_e990;
+        s.mark_derivatives_dirty(17);
         s.dn[17][0] = ((((s.dn[60][0] * s.v[64]) + (s.v[60] * s.dn[64][0])) + (p.p12 * s.dn[65][0])) + ((((s.dn[61][0] * s.v[64]) + (s.v[61] * s.dn[64][0])) * s.v[65]) + (assign670_e987 * s.dn[65][0])));
         s.dn[17][1] = ((((s.dn[60][1] * s.v[64]) + (s.v[60] * s.dn[64][1])) + (p.p12 * s.dn[65][1])) + ((((s.dn[61][1] * s.v[64]) + (s.v[61] * s.dn[64][1])) * s.v[65]) + (assign670_e987 * s.dn[65][1])));
         s.dn[17][2] = ((((s.dn[60][2] * s.v[64]) + (s.v[60] * s.dn[64][2])) + (p.p12 * s.dn[65][2])) + ((((s.dn[61][2] * s.v[64]) + (s.v[61] * s.dn[64][2])) * s.v[65]) + (assign670_e987 * s.dn[65][2])));
@@ -22306,6 +22310,7 @@ impl Instance {
         let assign680_e993: f64 = (s.v[17]).tanh();
         let assign680_e994: f64 = (1.0 + assign680_e993);
         s.v[75] = assign680_e994;
+        s.mark_derivatives_dirty(75);
         s.dn[75][0] = (s.dn[17][0] / ((s.v[17]).cosh() * (s.v[17]).cosh()));
         s.dn[75][1] = (s.dn[17][1] / ((s.v[17]).cosh() * (s.v[17]).cosh()));
         s.dn[75][2] = (s.dn[17][2] / ((s.v[17]).cosh() * (s.v[17]).cosh()));
@@ -22354,6 +22359,7 @@ impl Instance {
         let assign690_e1004: f64 = (assign690_e1003).tanh();
         let assign690_e1005: f64 = (1.0 + assign690_e1004);
         s.v[76] = assign690_e1005;
+        s.mark_derivatives_dirty(76);
         s.dn[76][0] = ((0.5 * (({ let limexp_arg = s.v[17]; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX } } * s.dn[17][0]) - ({ let limexp_arg = assign690_e1000; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX } } * (-s.dn[17][0])))) / ((assign690_e1003).cosh() * (assign690_e1003).cosh()));
         s.dn[76][1] = ((0.5 * (({ let limexp_arg = s.v[17]; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX } } * s.dn[17][1]) - ({ let limexp_arg = assign690_e1000; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX } } * (-s.dn[17][1])))) / ((assign690_e1003).cosh() * (assign690_e1003).cosh()));
         s.dn[76][2] = ((0.5 * (({ let limexp_arg = s.v[17]; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX } } * s.dn[17][2]) - ({ let limexp_arg = assign690_e1000; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX } } * (-s.dn[17][2])))) / ((assign690_e1003).cosh() * (assign690_e1003).cosh()));
@@ -22397,6 +22403,7 @@ impl Instance {
         let assign700_e1009: f64 = (p.p15 * s.v[75]);
         let assign700_e1010: f64 = (p.p14 + assign700_e1009);
         s.v[0] = assign700_e1010;
+        s.mark_derivatives_dirty(0);
         s.dn[0][0] = (p.p15 * s.dn[75][0]);
         s.dn[0][1] = (p.p15 * s.dn[75][1]);
         s.dn[0][2] = (p.p15 * s.dn[75][2]);
@@ -22446,6 +22453,7 @@ impl Instance {
         let assign710_e1013: f64 = (s.v[0] * s.v[5]);
         let assign710_e1014: f64 = (assign710_e1013).tanh();
         s.v[79] = assign710_e1014;
+        s.mark_derivatives_dirty(79);
         s.dn[79][0] = (((s.dn[0][0] * s.v[5]) + (s.v[0] * s.dn[5][0])) / ((assign710_e1013).cosh() * (assign710_e1013).cosh()));
         s.dn[79][1] = (((s.dn[0][1] * s.v[5]) + (s.v[0] * s.dn[5][1])) / ((assign710_e1013).cosh() * (assign710_e1013).cosh()));
         s.dn[79][2] = (((s.dn[0][2] * s.v[5]) + (s.v[0] * s.dn[5][2])) / ((assign710_e1013).cosh() * (assign710_e1013).cosh()));
@@ -22487,19 +22495,19 @@ impl Instance {
         s.rv[79] = 0.0;
 
         s.b[106] = (p.p4 == 0.0);
-        s.v[106] = if s.b[106] { 1.0 } else { 0.0 };
+        s.store_scalar(106, if s.b[106] { 1.0 } else { 0.0 });
 
         s.b[107] = (p.p4 == 1.0);
-        s.v[107] = if s.b[107] { 1.0 } else { 0.0 };
+        s.store_scalar(107, if s.b[107] { 1.0 } else { 0.0 });
 
         s.b[108] = (p.p4 == 2.0);
-        s.v[108] = if s.b[108] { 1.0 } else { 0.0 };
+        s.store_scalar(108, if s.b[108] { 1.0 } else { 0.0 });
 
         s.b[109] = (p.p4 == 3.0);
-        s.v[109] = if s.b[109] { 1.0 } else { 0.0 };
+        s.store_scalar(109, if s.b[109] { 1.0 } else { 0.0 });
 
         s.b[110] = (p.p4 == 4.0);
-        s.v[110] = if s.b[110] { 1.0 } else { 0.0 };
+        s.store_scalar(110, if s.b[110] { 1.0 } else { 0.0 });
 
         let (assign770_e1050, assign770_e1050_d_n0, assign770_e1050_d_n1, assign770_e1050_d_n2, assign770_e1050_d_n3, assign770_e1050_d_n4, assign770_e1050_d_n5, assign770_e1050_d_n6, assign770_e1050_d_n7, assign770_e1050_d_n8, assign770_e1050_d_n9, assign770_e1050_d_n10, assign770_e1050_d_n11, assign770_e1050_d_n12, assign770_e1050_d_n13, assign770_e1050_d_n14, assign770_e1050_d_n15, assign770_e1050_d_n16, assign770_e1050_d_n17, assign770_e1050_d_n18, assign770_e1050_d_b0, assign770_e1050_d_b1, assign770_e1050_d_b2, assign770_e1050_d_b3, assign770_e1050_d_b4, assign770_e1050_d_b5, assign770_e1050_d_b6, assign770_e1050_d_b7, assign770_e1050_d_b8, assign770_e1050_d_b9, assign770_e1050_d_b10, assign770_e1050_d_b11, assign770_e1050_d_b12, assign770_e1050_d_b13, assign770_e1050_d_b14, assign770_e1050_d_b15, assign770_e1050_d_b16, assign770_e1050_d_b17, assign770_e1050_d_b18,) = {
     if s.b[106] {
@@ -22518,6 +22526,7 @@ impl Instance {
     }
 };
         s.v[98] = assign770_e1050;
+        s.mark_derivatives_dirty(98);
         s.dn[98][0] = assign770_e1050_d_n0;
         s.dn[98][1] = assign770_e1050_d_n1;
         s.dn[98][2] = assign770_e1050_d_n2;
@@ -22567,6 +22576,7 @@ impl Instance {
     }
 };
         s.v[63] = assign780_e1059;
+        s.mark_derivatives_dirty(63);
         s.dn[63][0] = assign780_e1059_d_n0;
         s.dn[63][1] = assign780_e1059_d_n1;
         s.dn[63][2] = assign780_e1059_d_n2;
@@ -22616,6 +22626,7 @@ impl Instance {
     }
 };
         s.v[64] = assign790_e1068;
+        s.mark_derivatives_dirty(64);
         s.dn[64][0] = assign790_e1068_d_n0;
         s.dn[64][1] = assign790_e1068_d_n1;
         s.dn[64][2] = assign790_e1068_d_n2;
@@ -22665,6 +22676,7 @@ impl Instance {
     }
 };
         s.v[65] = assign800_e1077;
+        s.mark_derivatives_dirty(65);
         s.dn[65][0] = assign800_e1077_d_n0;
         s.dn[65][1] = assign800_e1077_d_n1;
         s.dn[65][2] = assign800_e1077_d_n2;
@@ -22718,6 +22730,7 @@ impl Instance {
     }
 };
         s.v[71] = assign810_e1094;
+        s.mark_derivatives_dirty(71);
         s.dn[71][0] = assign810_e1094_d_n0;
         s.dn[71][1] = assign810_e1094_d_n1;
         s.dn[71][2] = assign810_e1094_d_n2;
@@ -22768,6 +22781,7 @@ impl Instance {
     }
 };
         s.v[77] = assign820_e1104;
+        s.mark_derivatives_dirty(77);
         s.dn[77][0] = assign820_e1104_d_n0;
         s.dn[77][1] = assign820_e1104_d_n1;
         s.dn[77][2] = assign820_e1104_d_n2;
@@ -22818,6 +22832,7 @@ impl Instance {
     }
 };
         s.v[72] = assign830_e1115;
+        s.mark_derivatives_dirty(72);
         s.dn[72][0] = assign830_e1115_d_n0;
         s.dn[72][1] = assign830_e1115_d_n1;
         s.dn[72][2] = assign830_e1115_d_n2;
@@ -22868,6 +22883,7 @@ impl Instance {
     }
 };
         s.v[69] = assign840_e1126;
+        s.mark_derivatives_dirty(69);
         s.dn[69][0] = assign840_e1126_d_n0;
         s.dn[69][1] = assign840_e1126_d_n1;
         s.dn[69][2] = assign840_e1126_d_n2;
@@ -22933,6 +22949,7 @@ impl Instance {
     }
 };
         s.v[73] = assign850_e1154;
+        s.mark_derivatives_dirty(73);
         s.dn[73][0] = assign850_e1154_d_n0;
         s.dn[73][1] = assign850_e1154_d_n1;
         s.dn[73][2] = assign850_e1154_d_n2;
@@ -22983,6 +23000,7 @@ impl Instance {
     }
 };
         s.v[67] = assign860_e1165;
+        s.mark_derivatives_dirty(67);
         s.dn[67][0] = assign860_e1165_d_n0;
         s.dn[67][1] = assign860_e1165_d_n1;
         s.dn[67][2] = assign860_e1165_d_n2;
@@ -23033,6 +23051,7 @@ impl Instance {
     }
 };
         s.v[80] = assign870_e1175;
+        s.mark_derivatives_dirty(80);
         s.dn[80][0] = assign870_e1175_d_n0;
         s.dn[80][1] = assign870_e1175_d_n1;
         s.dn[80][2] = assign870_e1175_d_n2;
@@ -23087,6 +23106,7 @@ impl Instance {
     }
 };
         s.v[74] = assign880_e1194;
+        s.mark_derivatives_dirty(74);
         s.dn[74][0] = assign880_e1194_d_n0;
         s.dn[74][1] = assign880_e1194_d_n1;
         s.dn[74][2] = assign880_e1194_d_n2;
@@ -23137,6 +23157,7 @@ impl Instance {
     }
 };
         s.v[98] = assign890_e1205;
+        s.mark_derivatives_dirty(98);
         s.dn[98][0] = assign890_e1205_d_n0;
         s.dn[98][1] = assign890_e1205_d_n1;
         s.dn[98][2] = assign890_e1205_d_n2;
@@ -23186,6 +23207,7 @@ impl Instance {
     }
 };
         s.v[63] = assign900_e1216;
+        s.mark_derivatives_dirty(63);
         s.dn[63][0] = assign900_e1216_d_n0;
         s.dn[63][1] = assign900_e1216_d_n1;
         s.dn[63][2] = assign900_e1216_d_n2;
@@ -23235,6 +23257,7 @@ impl Instance {
     }
 };
         s.v[64] = assign910_e1227;
+        s.mark_derivatives_dirty(64);
         s.dn[64][0] = assign910_e1227_d_n0;
         s.dn[64][1] = assign910_e1227_d_n1;
         s.dn[64][2] = assign910_e1227_d_n2;
@@ -23289,6 +23312,7 @@ impl Instance {
     }
 };
         s.v[17] = assign920_e1248;
+        s.mark_derivatives_dirty(17);
         s.dn[17][0] = assign920_e1248_d_n0;
         s.dn[17][1] = assign920_e1248_d_n1;
         s.dn[17][2] = assign920_e1248_d_n2;
@@ -23344,6 +23368,7 @@ impl Instance {
     }
 };
         s.v[76] = assign930_e1267;
+        s.mark_derivatives_dirty(76);
         s.dn[76][0] = assign930_e1267_d_n0;
         s.dn[76][1] = assign930_e1267_d_n1;
         s.dn[76][2] = assign930_e1267_d_n2;

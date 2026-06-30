@@ -19,6 +19,7 @@ impl Instance {
     }
 };
         s.v[1] = assign940_e1280;
+        s.mark_derivatives_dirty(1);
         s.dn[1][0] = assign940_e1280_d_n0;
         s.dn[1][1] = assign940_e1280_d_n1;
         s.dn[1][2] = assign940_e1280_d_n2;
@@ -69,6 +70,7 @@ impl Instance {
     }
 };
         s.v[81] = assign950_e1292;
+        s.mark_derivatives_dirty(81);
         s.dn[81][0] = assign950_e1292_d_n0;
         s.dn[81][1] = assign950_e1292_d_n1;
         s.dn[81][2] = assign950_e1292_d_n2;
@@ -119,6 +121,7 @@ impl Instance {
     }
 };
         s.v[69] = assign960_e1305;
+        s.mark_derivatives_dirty(69);
         s.dn[69][0] = assign960_e1305_d_n0;
         s.dn[69][1] = assign960_e1305_d_n1;
         s.dn[69][2] = assign960_e1305_d_n2;
@@ -177,6 +180,7 @@ impl Instance {
     }
 };
         s.v[98] = assign970_e1333;
+        s.mark_derivatives_dirty(98);
         s.dn[98][0] = assign970_e1333_d_n0;
         s.dn[98][1] = assign970_e1333_d_n1;
         s.dn[98][2] = assign970_e1333_d_n2;
@@ -226,6 +230,7 @@ impl Instance {
     }
 };
         s.v[63] = assign980_e1346;
+        s.mark_derivatives_dirty(63);
         s.dn[63][0] = assign980_e1346_d_n0;
         s.dn[63][1] = assign980_e1346_d_n1;
         s.dn[63][2] = assign980_e1346_d_n2;
@@ -275,6 +280,7 @@ impl Instance {
     }
 };
         s.v[64] = assign990_e1359;
+        s.mark_derivatives_dirty(64);
         s.dn[64][0] = assign990_e1359_d_n0;
         s.dn[64][1] = assign990_e1359_d_n1;
         s.dn[64][2] = assign990_e1359_d_n2;
@@ -329,6 +335,7 @@ impl Instance {
     }
 };
         s.v[17] = assign1000_e1382;
+        s.mark_derivatives_dirty(17);
         s.dn[17][0] = assign1000_e1382_d_n0;
         s.dn[17][1] = assign1000_e1382_d_n1;
         s.dn[17][2] = assign1000_e1382_d_n2;
@@ -378,6 +385,7 @@ impl Instance {
     }
 };
         s.v[65] = assign1010_e1395;
+        s.mark_derivatives_dirty(65);
         s.dn[65][0] = assign1010_e1395_d_n0;
         s.dn[65][1] = assign1010_e1395_d_n1;
         s.dn[65][2] = assign1010_e1395_d_n2;
@@ -427,6 +435,7 @@ impl Instance {
     }
 };
         s.v[66] = assign1020_e1408;
+        s.mark_derivatives_dirty(66);
         s.dn[66][0] = assign1020_e1408_d_n0;
         s.dn[66][1] = assign1020_e1408_d_n1;
         s.dn[66][2] = assign1020_e1408_d_n2;
@@ -467,6 +476,12 @@ impl Instance {
         s.db[66][18] = assign1020_e1408_d_b18;
         s.rv[66] = 0.0;
 
+    }
+
+    pub(super) fn stamp_reactive_block_4(
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+    ) {
         let (assign1030_e1431, assign1030_e1431_d_n0, assign1030_e1431_d_n1, assign1030_e1431_d_n2, assign1030_e1431_d_n3, assign1030_e1431_d_n4, assign1030_e1431_d_n5, assign1030_e1431_d_n6, assign1030_e1431_d_n7, assign1030_e1431_d_n8, assign1030_e1431_d_n9, assign1030_e1431_d_n10, assign1030_e1431_d_n11, assign1030_e1431_d_n12, assign1030_e1431_d_n13, assign1030_e1431_d_n14, assign1030_e1431_d_n15, assign1030_e1431_d_n16, assign1030_e1431_d_n17, assign1030_e1431_d_n18, assign1030_e1431_d_b0, assign1030_e1431_d_b1, assign1030_e1431_d_b2, assign1030_e1431_d_b3, assign1030_e1431_d_b4, assign1030_e1431_d_b5, assign1030_e1431_d_b6, assign1030_e1431_d_b7, assign1030_e1431_d_b8, assign1030_e1431_d_b9, assign1030_e1431_d_b10, assign1030_e1431_d_b11, assign1030_e1431_d_b12, assign1030_e1431_d_b13, assign1030_e1431_d_b14, assign1030_e1431_d_b15, assign1030_e1431_d_b16, assign1030_e1431_d_b17, assign1030_e1431_d_b18,) = {
     if (s.b[109] && (!((s.b[106] || s.b[107]) || s.b[108]))) {
         let assign1030_e1421: f64 = (p.p12 * s.v[66]);
@@ -481,6 +496,7 @@ impl Instance {
     }
 };
         s.v[71] = assign1030_e1431;
+        s.mark_derivatives_dirty(71);
         s.dn[71][0] = assign1030_e1431_d_n0;
         s.dn[71][1] = assign1030_e1431_d_n1;
         s.dn[71][2] = assign1030_e1431_d_n2;
@@ -521,12 +537,6 @@ impl Instance {
         s.db[71][18] = assign1030_e1431_d_b18;
         s.rv[71] = 0.0;
 
-    }
-
-    pub(super) fn stamp_reactive_block_4(
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-    ) {
         let (assign1040_e1452, assign1040_e1452_d_n0, assign1040_e1452_d_n1, assign1040_e1452_d_n2, assign1040_e1452_d_n3, assign1040_e1452_d_n4, assign1040_e1452_d_n5, assign1040_e1452_d_n6, assign1040_e1452_d_n7, assign1040_e1452_d_n8, assign1040_e1452_d_n9, assign1040_e1452_d_n10, assign1040_e1452_d_n11, assign1040_e1452_d_n12, assign1040_e1452_d_n13, assign1040_e1452_d_n14, assign1040_e1452_d_n15, assign1040_e1452_d_n16, assign1040_e1452_d_n17, assign1040_e1452_d_n18, assign1040_e1452_d_b0, assign1040_e1452_d_b1, assign1040_e1452_d_b2, assign1040_e1452_d_b3, assign1040_e1452_d_b4, assign1040_e1452_d_b5, assign1040_e1452_d_b6, assign1040_e1452_d_b7, assign1040_e1452_d_b8, assign1040_e1452_d_b9, assign1040_e1452_d_b10, assign1040_e1452_d_b11, assign1040_e1452_d_b12, assign1040_e1452_d_b13, assign1040_e1452_d_b14, assign1040_e1452_d_b15, assign1040_e1452_d_b16, assign1040_e1452_d_b17, assign1040_e1452_d_b18,) = {
     if (s.b[109] && (!((s.b[106] || s.b[107]) || s.b[108]))) {
         let assign1040_e1443: f64 = { let limexp_arg = s.v[17]; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
@@ -542,6 +552,7 @@ impl Instance {
     }
 };
         s.v[76] = assign1040_e1452;
+        s.mark_derivatives_dirty(76);
         s.dn[76][0] = assign1040_e1452_d_n0;
         s.dn[76][1] = assign1040_e1452_d_n1;
         s.dn[76][2] = assign1040_e1452_d_n2;
@@ -597,6 +608,7 @@ impl Instance {
     }
 };
         s.v[78] = assign1050_e1473;
+        s.mark_derivatives_dirty(78);
         s.dn[78][0] = assign1050_e1473_d_n0;
         s.dn[78][1] = assign1050_e1473_d_n1;
         s.dn[78][2] = assign1050_e1473_d_n2;
@@ -647,6 +659,7 @@ impl Instance {
     }
 };
         s.v[1] = assign1060_e1488;
+        s.mark_derivatives_dirty(1);
         s.dn[1][0] = assign1060_e1488_d_n0;
         s.dn[1][1] = assign1060_e1488_d_n1;
         s.dn[1][2] = assign1060_e1488_d_n2;
@@ -697,6 +710,7 @@ impl Instance {
     }
 };
         s.v[2] = assign1070_e1503;
+        s.mark_derivatives_dirty(2);
         s.dn[2][0] = assign1070_e1503_d_n0;
         s.dn[2][1] = assign1070_e1503_d_n1;
         s.dn[2][2] = assign1070_e1503_d_n2;
@@ -747,6 +761,7 @@ impl Instance {
     }
 };
         s.v[81] = assign1080_e1517;
+        s.mark_derivatives_dirty(81);
         s.dn[81][0] = assign1080_e1517_d_n0;
         s.dn[81][1] = assign1080_e1517_d_n1;
         s.dn[81][2] = assign1080_e1517_d_n2;
@@ -797,6 +812,7 @@ impl Instance {
     }
 };
         s.v[82] = assign1090_e1531;
+        s.mark_derivatives_dirty(82);
         s.dn[82][0] = assign1090_e1531_d_n0;
         s.dn[82][1] = assign1090_e1531_d_n1;
         s.dn[82][2] = assign1090_e1531_d_n2;
@@ -847,6 +863,7 @@ impl Instance {
     }
 };
         s.v[68] = assign1100_e1546;
+        s.mark_derivatives_dirty(68);
         s.dn[68][0] = assign1100_e1546_d_n0;
         s.dn[68][1] = assign1100_e1546_d_n1;
         s.dn[68][2] = assign1100_e1546_d_n2;
@@ -897,6 +914,7 @@ impl Instance {
     }
 };
         s.v[70] = assign1110_e1561;
+        s.mark_derivatives_dirty(70);
         s.dn[70][0] = assign1110_e1561_d_n0;
         s.dn[70][1] = assign1110_e1561_d_n1;
         s.dn[70][2] = assign1110_e1561_d_n2;
@@ -937,6 +955,12 @@ impl Instance {
         s.db[70][18] = assign1110_e1561_d_b18;
         s.rv[70] = 0.0;
 
+    }
+
+    pub(super) fn stamp_reactive_block_5(
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+    ) {
         let (assign1120_e1593, assign1120_e1593_d_n0, assign1120_e1593_d_n1, assign1120_e1593_d_n2, assign1120_e1593_d_n3, assign1120_e1593_d_n4, assign1120_e1593_d_n5, assign1120_e1593_d_n6, assign1120_e1593_d_n7, assign1120_e1593_d_n8, assign1120_e1593_d_n9, assign1120_e1593_d_n10, assign1120_e1593_d_n11, assign1120_e1593_d_n12, assign1120_e1593_d_n13, assign1120_e1593_d_n14, assign1120_e1593_d_n15, assign1120_e1593_d_n16, assign1120_e1593_d_n17, assign1120_e1593_d_n18, assign1120_e1593_d_b0, assign1120_e1593_d_b1, assign1120_e1593_d_b2, assign1120_e1593_d_b3, assign1120_e1593_d_b4, assign1120_e1593_d_b5, assign1120_e1593_d_b6, assign1120_e1593_d_b7, assign1120_e1593_d_b8, assign1120_e1593_d_b9, assign1120_e1593_d_b10, assign1120_e1593_d_b11, assign1120_e1593_d_b12, assign1120_e1593_d_b13, assign1120_e1593_d_b14, assign1120_e1593_d_b15, assign1120_e1593_d_b16, assign1120_e1593_d_b17, assign1120_e1593_d_b18,) = {
     if (s.b[109] && (!((s.b[106] || s.b[107]) || s.b[108]))) {
         let assign1120_e1572: f64 = (s.v[39] * s.v[76]);
@@ -956,6 +980,7 @@ impl Instance {
     }
 };
         s.v[73] = assign1120_e1593;
+        s.mark_derivatives_dirty(73);
         s.dn[73][0] = assign1120_e1593_d_n0;
         s.dn[73][1] = assign1120_e1593_d_n1;
         s.dn[73][2] = assign1120_e1593_d_n2;
@@ -996,12 +1021,6 @@ impl Instance {
         s.db[73][18] = assign1120_e1593_d_b18;
         s.rv[73] = 0.0;
 
-    }
-
-    pub(super) fn stamp_reactive_block_5(
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-    ) {
         let (assign1130_e1616, assign1130_e1616_d_n0, assign1130_e1616_d_n1, assign1130_e1616_d_n2, assign1130_e1616_d_n3, assign1130_e1616_d_n4, assign1130_e1616_d_n5, assign1130_e1616_d_n6, assign1130_e1616_d_n7, assign1130_e1616_d_n8, assign1130_e1616_d_n9, assign1130_e1616_d_n10, assign1130_e1616_d_n11, assign1130_e1616_d_n12, assign1130_e1616_d_n13, assign1130_e1616_d_n14, assign1130_e1616_d_n15, assign1130_e1616_d_n16, assign1130_e1616_d_n17, assign1130_e1616_d_n18, assign1130_e1616_d_b0, assign1130_e1616_d_b1, assign1130_e1616_d_b2, assign1130_e1616_d_b3, assign1130_e1616_d_b4, assign1130_e1616_d_b5, assign1130_e1616_d_b6, assign1130_e1616_d_b7, assign1130_e1616_d_b8, assign1130_e1616_d_b9, assign1130_e1616_d_b10, assign1130_e1616_d_b11, assign1130_e1616_d_b12, assign1130_e1616_d_b13, assign1130_e1616_d_b14, assign1130_e1616_d_b15, assign1130_e1616_d_b16, assign1130_e1616_d_b17, assign1130_e1616_d_b18,) = {
     if (s.b[109] && (!((s.b[106] || s.b[107]) || s.b[108]))) {
         let assign1130_e1604: f64 = (s.v[39] * s.v[78]);
@@ -1016,6 +1035,7 @@ impl Instance {
     }
 };
         s.v[74] = assign1130_e1616;
+        s.mark_derivatives_dirty(74);
         s.dn[74][0] = assign1130_e1616_d_n0;
         s.dn[74][1] = assign1130_e1616_d_n1;
         s.dn[74][2] = assign1130_e1616_d_n2;
@@ -1066,6 +1086,7 @@ impl Instance {
     }
 };
         s.v[98] = assign1140_e1631;
+        s.mark_derivatives_dirty(98);
         s.dn[98][0] = assign1140_e1631_d_n0;
         s.dn[98][1] = assign1140_e1631_d_n1;
         s.dn[98][2] = assign1140_e1631_d_n2;
@@ -1116,6 +1137,7 @@ impl Instance {
     }
 };
         s.v[69] = assign1150_e1648;
+        s.mark_derivatives_dirty(69);
         s.dn[69][0] = assign1150_e1648_d_n0;
         s.dn[69][1] = assign1150_e1648_d_n1;
         s.dn[69][2] = assign1150_e1648_d_n2;
@@ -1166,6 +1188,7 @@ impl Instance {
     }
 };
         s.v[1] = assign1160_e1665;
+        s.mark_derivatives_dirty(1);
         s.dn[1][0] = assign1160_e1665_d_n0;
         s.dn[1][1] = assign1160_e1665_d_n1;
         s.dn[1][2] = assign1160_e1665_d_n2;
@@ -1216,6 +1239,7 @@ impl Instance {
     }
 };
         s.v[81] = assign1170_e1681;
+        s.mark_derivatives_dirty(81);
         s.dn[81][0] = assign1170_e1681_d_n0;
         s.dn[81][1] = assign1170_e1681_d_n1;
         s.dn[81][2] = assign1170_e1681_d_n2;
@@ -1266,6 +1290,7 @@ impl Instance {
     }
 };
         s.v[83] = assign1180_e1697;
+        s.mark_derivatives_dirty(83);
         s.dn[83][0] = assign1180_e1697_d_n0;
         s.dn[83][1] = assign1180_e1697_d_n1;
         s.dn[83][2] = assign1180_e1697_d_n2;
@@ -1328,6 +1353,7 @@ impl Instance {
     }
 };
         s.v[98] = assign1190_e1737;
+        s.mark_derivatives_dirty(98);
         s.dn[98][0] = assign1190_e1737_d_n0;
         s.dn[98][1] = assign1190_e1737_d_n1;
         s.dn[98][2] = assign1190_e1737_d_n2;
@@ -1369,7 +1395,7 @@ impl Instance {
         s.rv[98] = 0.0;
 
         s.b[111] = (((p.p4 == 0.0) || (p.p4 == 1.0)) || (p.p4 == 4.0));
-        s.v[111] = if s.b[111] { 1.0 } else { 0.0 };
+        s.store_scalar(111, if s.b[111] { 1.0 } else { 0.0 });
 
         let (assign1210_e1758, assign1210_e1758_d_n0, assign1210_e1758_d_n1, assign1210_e1758_d_n2, assign1210_e1758_d_n3, assign1210_e1758_d_n4, assign1210_e1758_d_n5, assign1210_e1758_d_n6, assign1210_e1758_d_n7, assign1210_e1758_d_n8, assign1210_e1758_d_n9, assign1210_e1758_d_n10, assign1210_e1758_d_n11, assign1210_e1758_d_n12, assign1210_e1758_d_n13, assign1210_e1758_d_n14, assign1210_e1758_d_n15, assign1210_e1758_d_n16, assign1210_e1758_d_n17, assign1210_e1758_d_n18, assign1210_e1758_d_b0, assign1210_e1758_d_b1, assign1210_e1758_d_b2, assign1210_e1758_d_b3, assign1210_e1758_d_b4, assign1210_e1758_d_b5, assign1210_e1758_d_b6, assign1210_e1758_d_b7, assign1210_e1758_d_b8, assign1210_e1758_d_b9, assign1210_e1758_d_b10, assign1210_e1758_d_b11, assign1210_e1758_d_b12, assign1210_e1758_d_b13, assign1210_e1758_d_b14, assign1210_e1758_d_b15, assign1210_e1758_d_b16, assign1210_e1758_d_b17, assign1210_e1758_d_b18,) = {
     if s.b[111] {
@@ -1382,6 +1408,7 @@ impl Instance {
     }
 };
         s.v[40] = assign1210_e1758;
+        s.mark_derivatives_dirty(40);
         s.dn[40][0] = assign1210_e1758_d_n0;
         s.dn[40][1] = assign1210_e1758_d_n1;
         s.dn[40][2] = assign1210_e1758_d_n2;
@@ -1422,6 +1449,12 @@ impl Instance {
         s.db[40][18] = assign1210_e1758_d_b18;
         s.rv[40] = 0.0;
 
+    }
+
+    pub(super) fn stamp_reactive_block_6(
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+    ) {
         let (assign1220_e1766, assign1220_e1766_d_n0, assign1220_e1766_d_n1, assign1220_e1766_d_n2, assign1220_e1766_d_n3, assign1220_e1766_d_n4, assign1220_e1766_d_n5, assign1220_e1766_d_n6, assign1220_e1766_d_n7, assign1220_e1766_d_n8, assign1220_e1766_d_n9, assign1220_e1766_d_n10, assign1220_e1766_d_n11, assign1220_e1766_d_n12, assign1220_e1766_d_n13, assign1220_e1766_d_n14, assign1220_e1766_d_n15, assign1220_e1766_d_n16, assign1220_e1766_d_n17, assign1220_e1766_d_n18, assign1220_e1766_d_b0, assign1220_e1766_d_b1, assign1220_e1766_d_b2, assign1220_e1766_d_b3, assign1220_e1766_d_b4, assign1220_e1766_d_b5, assign1220_e1766_d_b6, assign1220_e1766_d_b7, assign1220_e1766_d_b8, assign1220_e1766_d_b9, assign1220_e1766_d_b10, assign1220_e1766_d_b11, assign1220_e1766_d_b12, assign1220_e1766_d_b13, assign1220_e1766_d_b14, assign1220_e1766_d_b15, assign1220_e1766_d_b16, assign1220_e1766_d_b17, assign1220_e1766_d_b18,) = {
     if s.b[111] {
         let assign1220_e1763: f64 = (p.p48 * s.v[75]);
@@ -1432,6 +1465,7 @@ impl Instance {
     }
 };
         s.v[41] = assign1220_e1766;
+        s.mark_derivatives_dirty(41);
         s.dn[41][0] = assign1220_e1766_d_n0;
         s.dn[41][1] = assign1220_e1766_d_n1;
         s.dn[41][2] = assign1220_e1766_d_n2;
@@ -1472,12 +1506,6 @@ impl Instance {
         s.db[41][18] = assign1220_e1766_d_b18;
         s.rv[41] = 0.0;
 
-    }
-
-    pub(super) fn stamp_reactive_block_6(
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-    ) {
         let (assign1230_e1774, assign1230_e1774_d_n0, assign1230_e1774_d_n1, assign1230_e1774_d_n2, assign1230_e1774_d_n3, assign1230_e1774_d_n4, assign1230_e1774_d_n5, assign1230_e1774_d_n6, assign1230_e1774_d_n7, assign1230_e1774_d_n8, assign1230_e1774_d_n9, assign1230_e1774_d_n10, assign1230_e1774_d_n11, assign1230_e1774_d_n12, assign1230_e1774_d_n13, assign1230_e1774_d_n14, assign1230_e1774_d_n15, assign1230_e1774_d_n16, assign1230_e1774_d_n17, assign1230_e1774_d_n18, assign1230_e1774_d_b0, assign1230_e1774_d_b1, assign1230_e1774_d_b2, assign1230_e1774_d_b3, assign1230_e1774_d_b4, assign1230_e1774_d_b5, assign1230_e1774_d_b6, assign1230_e1774_d_b7, assign1230_e1774_d_b8, assign1230_e1774_d_b9, assign1230_e1774_d_b10, assign1230_e1774_d_b11, assign1230_e1774_d_b12, assign1230_e1774_d_b13, assign1230_e1774_d_b14, assign1230_e1774_d_b15, assign1230_e1774_d_b16, assign1230_e1774_d_b17, assign1230_e1774_d_b18,) = {
     if s.b[111] {
         let assign1230_e1771: f64 = (p.p48 * s.v[75]);
@@ -1488,6 +1516,7 @@ impl Instance {
     }
 };
         s.v[42] = assign1230_e1774;
+        s.mark_derivatives_dirty(42);
         s.dn[42][0] = assign1230_e1774_d_n0;
         s.dn[42][1] = assign1230_e1774_d_n1;
         s.dn[42][2] = assign1230_e1774_d_n2;
@@ -1539,6 +1568,7 @@ impl Instance {
     }
 };
         s.v[40] = assign1240_e1785;
+        s.mark_derivatives_dirty(40);
         s.dn[40][0] = assign1240_e1785_d_n0;
         s.dn[40][1] = assign1240_e1785_d_n1;
         s.dn[40][2] = assign1240_e1785_d_n2;
@@ -1589,6 +1619,7 @@ impl Instance {
     }
 };
         s.v[41] = assign1250_e1794;
+        s.mark_derivatives_dirty(41);
         s.dn[41][0] = assign1250_e1794_d_n0;
         s.dn[41][1] = assign1250_e1794_d_n1;
         s.dn[41][2] = assign1250_e1794_d_n2;
@@ -1639,6 +1670,7 @@ impl Instance {
     }
 };
         s.v[42] = assign1260_e1803;
+        s.mark_derivatives_dirty(42);
         s.dn[42][0] = assign1260_e1803_d_n0;
         s.dn[42][1] = assign1260_e1803_d_n1;
         s.dn[42][2] = assign1260_e1803_d_n2;
@@ -1684,6 +1716,7 @@ impl Instance {
         let assign1270_e1810: f64 = (1.0 + assign1270_e1809);
         let assign1270_e1811: f64 = (s.v[42] * assign1270_e1810);
         s.v[50] = assign1270_e1811;
+        s.mark_derivatives_dirty(50);
         s.dn[50][0] = ((s.dn[42][0] * assign1270_e1810) + (s.v[42] * (p.p76 * if s.v[16] >= 0.0 { s.dn[16][0] } else { (-s.dn[16][0]) })));
         s.dn[50][1] = ((s.dn[42][1] * assign1270_e1810) + (s.v[42] * (p.p76 * if s.v[16] >= 0.0 { s.dn[16][1] } else { (-s.dn[16][1]) })));
         s.dn[50][2] = ((s.dn[42][2] * assign1270_e1810) + (s.v[42] * (p.p76 * if s.v[16] >= 0.0 { s.dn[16][2] } else { (-s.dn[16][2]) })));
@@ -1729,6 +1762,7 @@ impl Instance {
         let assign1280_e1818: f64 = (1.0 + assign1280_e1817);
         let assign1280_e1819: f64 = (s.v[41] * assign1280_e1818);
         s.v[49] = assign1280_e1819;
+        s.mark_derivatives_dirty(49);
         s.dn[49][0] = ((s.dn[41][0] * assign1280_e1818) + (s.v[41] * (p.p76 * if s.v[16] >= 0.0 { s.dn[16][0] } else { (-s.dn[16][0]) })));
         s.dn[49][1] = ((s.dn[41][1] * assign1280_e1818) + (s.v[41] * (p.p76 * if s.v[16] >= 0.0 { s.dn[16][1] } else { (-s.dn[16][1]) })));
         s.dn[49][2] = ((s.dn[41][2] * assign1280_e1818) + (s.v[41] * (p.p76 * if s.v[16] >= 0.0 { s.dn[16][2] } else { (-s.dn[16][2]) })));
@@ -1770,7 +1804,7 @@ impl Instance {
         s.rv[49] = 0.0;
 
         s.b[112] = (p.p5 == 0.0);
-        s.v[112] = if s.b[112] { 1.0 } else { 0.0 };
+        s.store_scalar(112, if s.b[112] { 1.0 } else { 0.0 });
 
         let (assign1310_e1841, assign1310_e1841_d_n0, assign1310_e1841_d_n1, assign1310_e1841_d_n2, assign1310_e1841_d_n3, assign1310_e1841_d_n4, assign1310_e1841_d_n5, assign1310_e1841_d_n6, assign1310_e1841_d_n7, assign1310_e1841_d_n8, assign1310_e1841_d_n9, assign1310_e1841_d_n10, assign1310_e1841_d_n11, assign1310_e1841_d_n12, assign1310_e1841_d_n13, assign1310_e1841_d_n14, assign1310_e1841_d_n15, assign1310_e1841_d_n16, assign1310_e1841_d_n17, assign1310_e1841_d_n18, assign1310_e1841_d_b0, assign1310_e1841_d_b1, assign1310_e1841_d_b2, assign1310_e1841_d_b3, assign1310_e1841_d_b4, assign1310_e1841_d_b5, assign1310_e1841_d_b6, assign1310_e1841_d_b7, assign1310_e1841_d_b8, assign1310_e1841_d_b9, assign1310_e1841_d_b10, assign1310_e1841_d_b11, assign1310_e1841_d_b12, assign1310_e1841_d_b13, assign1310_e1841_d_b14, assign1310_e1841_d_b15, assign1310_e1841_d_b16, assign1310_e1841_d_b17, assign1310_e1841_d_b18,) = {
     if s.b[112] {
@@ -1785,6 +1819,7 @@ impl Instance {
     }
 };
         s.v[63] = assign1310_e1841;
+        s.mark_derivatives_dirty(63);
         s.dn[63][0] = assign1310_e1841_d_n0;
         s.dn[63][1] = assign1310_e1841_d_n1;
         s.dn[63][2] = assign1310_e1841_d_n2;
@@ -1843,6 +1878,7 @@ impl Instance {
     }
 };
         s.v[63] = assign1360_e1880;
+        s.mark_derivatives_dirty(63);
         s.dn[63][0] = assign1360_e1880_d_n0;
         s.dn[63][1] = assign1360_e1880_d_n1;
         s.dn[63][2] = assign1360_e1880_d_n2;
@@ -1892,7 +1928,7 @@ impl Instance {
         }
 
         s.b[113] = (p.p5 == 1.0);
-        s.v[113] = if s.b[113] { 1.0 } else { 0.0 };
+        s.store_scalar(113, if s.b[113] { 1.0 } else { 0.0 });
 
         if ((!s.b[112]) && s.b[113]) {
             s.store_tanh_ad(20, A::sub(s.ad_value(96), s.ad_value(57)));
@@ -1911,6 +1947,15 @@ impl Instance {
 
         s.store_sub_ad_lhs(8, A::limexp_scaled_input(s.ad_value(21), p.p85), 24);
 
+    }
+
+    pub(super) fn stamp_reactive_block_7(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+        branches: &[usize; Instance::BRANCH_COUNT],
+    ) {
+        let bi1 = ctx.branch_current(branches[1]);
         let assign1470_e1967: f64 = (s.v[19] * s.v[20]);
         let assign1470_e1968: f64 = { let limexp_arg = assign1470_e1967; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
         let assign1470_e1971: f64 = (0.001 * p.p82);
@@ -1919,6 +1964,7 @@ impl Instance {
         let assign1470_e1976: f64 = (assign1470_e1974 - s.v[63]);
         let assign1470_e1977: f64 = (p.p42 * assign1470_e1976);
         s.v[7] = assign1470_e1977;
+        s.mark_derivatives_dirty(7);
         s.dn[7][0] = (p.p42 * ((({ let limexp_arg = assign1470_e1967; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX } } * ((s.dn[19][0] * s.v[20]) + (s.v[19] * s.dn[20][0]))) - (assign1470_e1971 * s.dn[8][0])) - s.dn[63][0]));
         s.dn[7][1] = (p.p42 * ((({ let limexp_arg = assign1470_e1967; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX } } * ((s.dn[19][1] * s.v[20]) + (s.v[19] * s.dn[20][1]))) - (assign1470_e1971 * s.dn[8][1])) - s.dn[63][1]));
         s.dn[7][2] = (p.p42 * ((({ let limexp_arg = assign1470_e1967; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX } } * ((s.dn[19][2] * s.v[20]) + (s.v[19] * s.dn[20][2]))) - (assign1470_e1971 * s.dn[8][2])) - s.dn[63][2]));
@@ -1961,15 +2007,6 @@ impl Instance {
 
         s.store_sub_ad_lhs(10, A::limexp_scaled_input(s.ad_value(23), p.p85), 25);
 
-    }
-
-    pub(super) fn stamp_reactive_block_7(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-        branches: &[usize; Instance::BRANCH_COUNT],
-    ) {
-        let bi1 = ctx.branch_current(branches[1]);
         let assign1490_e1987: f64 = (s.v[19] * s.v[22]);
         let assign1490_e1988: f64 = { let limexp_arg = assign1490_e1987; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
         let assign1490_e1991: f64 = (0.001 * p.p82);
@@ -1978,6 +2015,7 @@ impl Instance {
         let assign1490_e1996: f64 = (assign1490_e1994 - s.v[63]);
         let assign1490_e1997: f64 = (p.p42 * assign1490_e1996);
         s.v[9] = assign1490_e1997;
+        s.mark_derivatives_dirty(9);
         s.dn[9][0] = (p.p42 * ((({ let limexp_arg = assign1490_e1987; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX } } * ((s.dn[19][0] * s.v[22]) + (s.v[19] * s.dn[22][0]))) - (assign1490_e1991 * s.dn[10][0])) - s.dn[63][0]));
         s.dn[9][1] = (p.p42 * ((({ let limexp_arg = assign1490_e1987; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX } } * ((s.dn[19][1] * s.v[22]) + (s.v[19] * s.dn[22][1]))) - (assign1490_e1991 * s.dn[10][1])) - s.dn[63][1]));
         s.dn[9][2] = (p.p42 * ((({ let limexp_arg = assign1490_e1987; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX } } * ((s.dn[19][2] * s.v[22]) + (s.v[19] * s.dn[22][2]))) - (assign1490_e1991 * s.dn[10][2])) - s.dn[63][2]));
@@ -2035,19 +2073,19 @@ impl Instance {
         s.store_offset_tanh_ad(87, s.ad_value(38), 1.0);
 
         s.b[114] = (p.p6 == 0.0);
-        s.v[114] = if s.b[114] { 1.0 } else { 0.0 };
+        s.store_scalar(114, if s.b[114] { 1.0 } else { 0.0 });
 
         s.b[115] = (p.p6 == 1.0);
-        s.v[115] = if s.b[115] { 1.0 } else { 0.0 };
+        s.store_scalar(115, if s.b[115] { 1.0 } else { 0.0 });
 
         s.b[116] = (p.p6 == 2.0);
-        s.v[116] = if s.b[116] { 1.0 } else { 0.0 };
+        s.store_scalar(116, if s.b[116] { 1.0 } else { 0.0 });
 
         s.b[117] = (p.p6 == 3.0);
-        s.v[117] = if s.b[117] { 1.0 } else { 0.0 };
+        s.store_scalar(117, if s.b[117] { 1.0 } else { 0.0 });
 
         s.b[118] = (p.p6 == 4.0);
-        s.v[118] = if s.b[118] { 1.0 } else { 0.0 };
+        s.store_scalar(118, if s.b[118] { 1.0 } else { 0.0 });
 
         if s.b[114] {
             s.store_scalar(28, p.p25);
@@ -2110,42 +2148,43 @@ impl Instance {
         }
 
         s.b[119] = ((p.p6 == 2.0) || (p.p6 == 4.0));
-        s.v[119] = if s.b[119] { 1.0 } else { 0.0 };
+        s.store_scalar(119, if s.b[119] { 1.0 } else { 0.0 });
 
         let assign2090_e2833: f64 = (p.p55 * bi1);
         let assign2090_e2834_q: f64 = assign2090_e2833;
         s.v[63] = assign2090_e2833;
+        s.mark_derivatives_dirty(63);
         s.db[63][1] = p.p55;
         s.rv[63] = assign2090_e2834_q;
         s.rdb[63][1] = p.p55;
 
         s.b[120] = (p.p58 > 0.0);
-        s.v[120] = if s.b[120] { 1.0 } else { 0.0 };
+        s.store_scalar(120, if s.b[120] { 1.0 } else { 0.0 });
 
         s.b[121] = ((p.p63 > 0.0) || (p.p62 > 0.0));
-        s.v[121] = if s.b[121] { 1.0 } else { 0.0 };
+        s.store_scalar(121, if s.b[121] { 1.0 } else { 0.0 });
 
         s.b[126] = (p.p50 > 0.0);
-        s.v[126] = if s.b[126] { 1.0 } else { 0.0 };
+        s.store_scalar(126, if s.b[126] { 1.0 } else { 0.0 });
 
         s.b[127] = ((p.p47 > 0.0) || (p.p48 > 0.0));
-        s.v[127] = if s.b[127] { 1.0 } else { 0.0 };
+        s.store_scalar(127, if s.b[127] { 1.0 } else { 0.0 });
 
         let assign2180_e2869: f64 = s.dn[98][12];
-        s.v[99] = assign2180_e2869;
+        s.store_scalar(99, assign2180_e2869);
         s.rv[99] = 0.0;
 
         let assign2190_e2874: f64 = (s.v[99] * p.p50);
         let assign2190_e2875: f64 = (1.0 + assign2190_e2874);
         let assign2190_e2876: f64 = (s.v[99] / assign2190_e2875);
-        s.v[99] = assign2190_e2876;
+        s.store_scalar(99, assign2190_e2876);
         s.rv[99] = 0.0;
 
         s.b[128] = (p.p7 == 0.0);
-        s.v[128] = if s.b[128] { 1.0 } else { 0.0 };
+        s.store_scalar(128, if s.b[128] { 1.0 } else { 0.0 });
 
         s.b[129] = (p.p7 == 1.0);
-        s.v[129] = if s.b[129] { 1.0 } else { 0.0 };
+        s.store_scalar(129, if s.b[129] { 1.0 } else { 0.0 });
 
         let (assign2240_e2896, assign2240_e2896_d_n0, assign2240_e2896_d_n1, assign2240_e2896_d_n2, assign2240_e2896_d_n3, assign2240_e2896_d_n4, assign2240_e2896_d_n5, assign2240_e2896_d_n6, assign2240_e2896_d_n7, assign2240_e2896_d_n8, assign2240_e2896_d_n9, assign2240_e2896_d_n10, assign2240_e2896_d_n11, assign2240_e2896_d_n12, assign2240_e2896_d_n13, assign2240_e2896_d_n14, assign2240_e2896_d_n15, assign2240_e2896_d_n16, assign2240_e2896_d_n17, assign2240_e2896_d_n18, assign2240_e2896_d_b0, assign2240_e2896_d_b1, assign2240_e2896_d_b2, assign2240_e2896_d_b3, assign2240_e2896_d_b4, assign2240_e2896_d_b5, assign2240_e2896_d_b6, assign2240_e2896_d_b7, assign2240_e2896_d_b8, assign2240_e2896_d_b9, assign2240_e2896_d_b10, assign2240_e2896_d_b11, assign2240_e2896_d_b12, assign2240_e2896_d_b13, assign2240_e2896_d_b14, assign2240_e2896_d_b15, assign2240_e2896_d_b16, assign2240_e2896_d_b17, assign2240_e2896_d_b18,) = {
     if s.b[128] {
@@ -2158,6 +2197,7 @@ impl Instance {
     }
 };
         s.v[132] = assign2240_e2896;
+        s.mark_derivatives_dirty(132);
         s.dn[132][0] = assign2240_e2896_d_n0;
         s.dn[132][1] = assign2240_e2896_d_n1;
         s.dn[132][2] = assign2240_e2896_d_n2;
@@ -2215,6 +2255,7 @@ impl Instance {
     }
 };
         s.v[133] = assign2250_e2917;
+        s.mark_derivatives_dirty(133);
         s.dn[133][0] = assign2250_e2917_d_n0;
         s.dn[133][1] = assign2250_e2917_d_n1;
         s.dn[133][2] = assign2250_e2917_d_n2;
@@ -2255,6 +2296,12 @@ impl Instance {
         s.db[133][18] = assign2250_e2917_d_b18;
         s.rv[133] = 0.0;
 
+    }
+
+    pub(super) fn stamp_reactive_block_8(
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+    ) {
         let (assign2260_e2941, assign2260_e2941_d_n0, assign2260_e2941_d_n1, assign2260_e2941_d_n2, assign2260_e2941_d_n3, assign2260_e2941_d_n4, assign2260_e2941_d_n5, assign2260_e2941_d_n6, assign2260_e2941_d_n7, assign2260_e2941_d_n8, assign2260_e2941_d_n9, assign2260_e2941_d_n10, assign2260_e2941_d_n11, assign2260_e2941_d_n12, assign2260_e2941_d_n13, assign2260_e2941_d_n14, assign2260_e2941_d_n15, assign2260_e2941_d_n16, assign2260_e2941_d_n17, assign2260_e2941_d_n18, assign2260_e2941_d_b0, assign2260_e2941_d_b1, assign2260_e2941_d_b2, assign2260_e2941_d_b3, assign2260_e2941_d_b4, assign2260_e2941_d_b5, assign2260_e2941_d_b6, assign2260_e2941_d_b7, assign2260_e2941_d_b8, assign2260_e2941_d_b9, assign2260_e2941_d_b10, assign2260_e2941_d_b11, assign2260_e2941_d_b12, assign2260_e2941_d_b13, assign2260_e2941_d_b14, assign2260_e2941_d_b15, assign2260_e2941_d_b16, assign2260_e2941_d_b17, assign2260_e2941_d_b18,) = {
     if s.b[128] {
         let assign2260_e2921: f64 = (p.p99 * 4.0);
@@ -2274,6 +2321,7 @@ impl Instance {
     }
 };
         s.v[131] = assign2260_e2941;
+        s.mark_derivatives_dirty(131);
         s.dn[131][0] = assign2260_e2941_d_n0;
         s.dn[131][1] = assign2260_e2941_d_n1;
         s.dn[131][2] = assign2260_e2941_d_n2;
@@ -2314,12 +2362,6 @@ impl Instance {
         s.db[131][18] = assign2260_e2941_d_b18;
         s.rv[131] = 0.0;
 
-    }
-
-    pub(super) fn stamp_reactive_block_8(
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-    ) {
         let (assign2270_e2958, assign2270_e2958_d_n0, assign2270_e2958_d_n1, assign2270_e2958_d_n2, assign2270_e2958_d_n3, assign2270_e2958_d_n4, assign2270_e2958_d_n5, assign2270_e2958_d_n6, assign2270_e2958_d_n7, assign2270_e2958_d_n8, assign2270_e2958_d_n9, assign2270_e2958_d_n10, assign2270_e2958_d_n11, assign2270_e2958_d_n12, assign2270_e2958_d_n13, assign2270_e2958_d_n14, assign2270_e2958_d_n15, assign2270_e2958_d_n16, assign2270_e2958_d_n17, assign2270_e2958_d_n18, assign2270_e2958_d_b0, assign2270_e2958_d_b1, assign2270_e2958_d_b2, assign2270_e2958_d_b3, assign2270_e2958_d_b4, assign2270_e2958_d_b5, assign2270_e2958_d_b6, assign2270_e2958_d_b7, assign2270_e2958_d_b8, assign2270_e2958_d_b9, assign2270_e2958_d_b10, assign2270_e2958_d_b11, assign2270_e2958_d_b12, assign2270_e2958_d_b13, assign2270_e2958_d_b14, assign2270_e2958_d_b15, assign2270_e2958_d_b16, assign2270_e2958_d_b17, assign2270_e2958_d_b18,) = {
     if ((s.b[129] && (!s.b[128])) && (p.p0 != 0.0)) {
         let assign2270_e2950: f64 = (4.0 * 1.3806503e-23);
@@ -2332,6 +2374,7 @@ impl Instance {
     }
 };
         s.v[134] = assign2270_e2958;
+        s.mark_derivatives_dirty(134);
         s.dn[134][0] = assign2270_e2958_d_n0;
         s.dn[134][1] = assign2270_e2958_d_n1;
         s.dn[134][2] = assign2270_e2958_d_n2;
@@ -2373,7 +2416,7 @@ impl Instance {
         s.rv[134] = 0.0;
 
         let assign2280_e2961: f64 = if s.v[99] > 0.0 { 1.0 } else { 0.0 };
-        s.v[136] = assign2280_e2961;
+        s.store_scalar(136, assign2280_e2961);
         s.rv[136] = 0.0;
 
         let (assign2290_e2984, assign2290_e2984_d_n0, assign2290_e2984_d_n1, assign2290_e2984_d_n2, assign2290_e2984_d_n3, assign2290_e2984_d_n4, assign2290_e2984_d_n5, assign2290_e2984_d_n6, assign2290_e2984_d_n7, assign2290_e2984_d_n8, assign2290_e2984_d_n9, assign2290_e2984_d_n10, assign2290_e2984_d_n11, assign2290_e2984_d_n12, assign2290_e2984_d_n13, assign2290_e2984_d_n14, assign2290_e2984_d_n15, assign2290_e2984_d_n16, assign2290_e2984_d_n17, assign2290_e2984_d_n18, assign2290_e2984_d_b0, assign2290_e2984_d_b1, assign2290_e2984_d_b2, assign2290_e2984_d_b3, assign2290_e2984_d_b4, assign2290_e2984_d_b5, assign2290_e2984_d_b6, assign2290_e2984_d_b7, assign2290_e2984_d_b8, assign2290_e2984_d_b9, assign2290_e2984_d_b10, assign2290_e2984_d_b11, assign2290_e2984_d_b12, assign2290_e2984_d_b13, assign2290_e2984_d_b14, assign2290_e2984_d_b15, assign2290_e2984_d_b16, assign2290_e2984_d_b17, assign2290_e2984_d_b18,) = {
@@ -2390,6 +2433,7 @@ impl Instance {
     }
 };
         s.v[135] = assign2290_e2984;
+        s.mark_derivatives_dirty(135);
         s.dn[135][0] = assign2290_e2984_d_n0;
         s.dn[135][1] = assign2290_e2984_d_n1;
         s.dn[135][2] = assign2290_e2984_d_n2;
@@ -2438,6 +2482,7 @@ impl Instance {
     }
 };
         s.v[135] = assign2300_e2996;
+        s.mark_derivatives_dirty(135);
         s.dn[135][0] = assign2300_e2996_d_n0;
         s.dn[135][1] = assign2300_e2996_d_n1;
         s.dn[135][2] = assign2300_e2996_d_n2;
@@ -2496,6 +2541,7 @@ impl Instance {
     }
 };
         s.v[141] = assign2350_e3074;
+        s.mark_derivatives_dirty(141);
         s.dn[141][0] = assign2350_e3074_d_n0;
         s.dn[141][1] = assign2350_e3074_d_n1;
         s.dn[141][2] = assign2350_e3074_d_n2;
@@ -2537,10 +2583,10 @@ impl Instance {
         s.rv[141] = 0.0;
 
         s.b[143] = (p.p90 > 0.0);
-        s.v[143] = if s.b[143] { 1.0 } else { 0.0 };
+        s.store_scalar(143, if s.b[143] { 1.0 } else { 0.0 });
 
         s.b[144] = (p.p1 == 1.0);
-        s.v[144] = if s.b[144] { 1.0 } else { 0.0 };
+        s.store_scalar(144, if s.b[144] { 1.0 } else { 0.0 });
 
     }
 

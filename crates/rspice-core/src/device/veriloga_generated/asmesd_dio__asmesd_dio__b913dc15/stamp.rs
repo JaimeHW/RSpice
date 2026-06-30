@@ -967,9 +967,9 @@ impl Instance {
             }
         }
 
-        s.v[3] = (p.p43 * p.p42);
+        s.store_scalar(3, (p.p43 * p.p42));
 
-        s.v[11] = (p.p25 + 273.15);
+        s.store_scalar(11, (p.p25 + 273.15));
 
         s.store_scale(15, 10, 8.6170869e-5);
 
@@ -991,9 +991,9 @@ impl Instance {
 
         s.store_offset_scaled(21, 13, ((p.p10) * (p.p9)), (((((((-1.0)) * (p.p10))) + (1.0))) * (p.p9)));
 
-        s.v[22] = p.p16;
+        s.store_scalar(22, p.p16);
 
-        s.v[43] = (s.v[11] / 300.15);
+        s.store_scalar(43, (s.v[11] / 300.15));
 
         s.store_scale(44, 10, 0.003331667499583542);
 
@@ -1015,12 +1015,12 @@ impl Instance {
 
         s.store_mul_offset_ad_rhs(17, 51, A::sub_scaled_inputs(A::scaled_offset(s.ad_value(10), (-300.15), 0.0004), p.p18, s.ad_value(50), p.p18), 1.0);
 
-        s.v[9] = p.p29;
+        s.store_scalar(9, p.p29);
 
         s.store_scaled_voltage(40, ctx, nodes, Some(3), Some(4), s.v[9]);
 
         s.b[63] = (s.v[16] > 0.0);
-        s.v[63] = if s.b[63] { 1.0 } else { 0.0 };
+        s.store_scalar(63, if s.b[63] { 1.0 } else { 0.0 });
 
         if s.b[63] {
             s.store_div_scaled_inputs_indices(0, 40, 1.0, 15, p.p1);
@@ -1029,7 +1029,7 @@ impl Instance {
         }
 
         s.b[64] = (s.v[0] > 80.0);
-        s.v[64] = if s.b[64] { 1.0 } else { 0.0 };
+        s.store_scalar(64, if s.b[64] { 1.0 } else { 0.0 });
 
         if (s.b[63] && s.b[64]) {
             s.store_offset(1, 0, (((-80.0)) + (1.0)));
@@ -1093,7 +1093,7 @@ impl Instance {
         }
 
         s.b[65] = (s.v[55] > 0.0);
-        s.v[65] = if s.b[65] { 1.0 } else { 0.0 };
+        s.store_scalar(65, if s.b[65] { 1.0 } else { 0.0 });
 
         if s.b[65] {
             s.store_max_with_scalar_ad(60, A::sub_from_scalar(p.p4, s.ad_value(40)), 0.001);
@@ -1101,7 +1101,7 @@ impl Instance {
         }
 
         s.b[66] = (s.v[0] > 80.0);
-        s.v[66] = if s.b[66] { 1.0 } else { 0.0 };
+        s.store_scalar(66, if s.b[66] { 1.0 } else { 0.0 });
 
         if (s.b[65] && s.b[66]) {
             s.store_offset(1, 0, (((-80.0)) + (1.0)));
@@ -1127,14 +1127,14 @@ impl Instance {
         s.store_mul(32, 31, 25);
 
         s.b[68] = (p.p32 == 1.0);
-        s.v[68] = if s.b[68] { 1.0 } else { 0.0 };
+        s.store_scalar(68, if s.b[68] { 1.0 } else { 0.0 });
 
         s.store_scale(4, 18, (-p.p24));
 
         s.store_add(5, 40, 4);
 
         s.b[69] = (s.v[5] > 0.0);
-        s.v[69] = if s.b[69] { 1.0 } else { 0.0 };
+        s.store_scalar(69, if s.b[69] { 1.0 } else { 0.0 });
 
         if s.b[69] {
             s.store_scalar(6, (((((-1.0) - p.p18) * (((1.0 - p.p24)) as f64).ln())) as f64).exp());
@@ -1150,10 +1150,10 @@ impl Instance {
         s.store_mul_add_rhs(33, 17, 7, 8);
 
         s.b[70] = ((p.p30 == 1.0) && (p.p33 > 0.0));
-        s.v[70] = if s.b[70] { 1.0 } else { 0.0 };
+        s.store_scalar(70, if s.b[70] { 1.0 } else { 0.0 });
 
         s.b[71] = (((p.p30 == 2.0) && (p.p33 > 0.0)) && (p.p35 > 0.0));
-        s.v[71] = if s.b[71] { 1.0 } else { 0.0 };
+        s.store_scalar(71, if s.b[71] { 1.0 } else { 0.0 });
 
         Self::stamp_reactive_equations_block_0(ctx, stamper, s, p, nodes, branches, multiplicity);
     }
