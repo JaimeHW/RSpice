@@ -755,6 +755,20 @@ impl ComplexMatrix {
         self.factorization_valid = false;
     }
 
+    /// Direct real add using a precomputed CSC index.
+    #[inline]
+    pub fn stamp_direct_real(&mut self, idx: CscIndex, value: Value) {
+        self.values[idx.0] += Complex64::new(value, 0.0);
+        self.factorization_valid = false;
+    }
+
+    /// Direct imaginary add using a precomputed CSC index.
+    #[inline]
+    pub fn stamp_direct_imag(&mut self, idx: CscIndex, value: Value) {
+        self.values[idx.0] += Complex64::new(0.0, value);
+        self.factorization_valid = false;
+    }
+
     /// Checked real add for callers that want an immediate structural error.
     #[inline]
     pub fn try_add_real(

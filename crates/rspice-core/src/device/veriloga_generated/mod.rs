@@ -306,7 +306,14 @@ impl BuiltinVerilogAInstance {
             num_nodes,
             GeneratedAnalysisKind::Ac,
         );
-        let mut stamper = GeneratedReactiveStamper::new(matrix, num_nodes, omega);
+        self.static_stamp_cache
+            .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
+        let mut stamper = GeneratedReactiveStamper::new_with_static_cache(
+            matrix,
+            num_nodes,
+            omega,
+            &self.static_stamp_cache,
+        );
         self.kind.stamp_reactive(&ctx, &mut stamper);
     }
 }
@@ -2571,26 +2578,32 @@ impl<'a> GeneratedStamper<'a> {
         let Some(col) = cache.axis_matrix_index(col_axis) else {
             return;
         };
+        let slot = if slots_ready {
+            debug_assert!(row_axis < width);
+            debug_assert!(col_axis < width);
+            cache
+                .slots
+                .get(row_axis * width + col_axis)
+                .copied()
+                .flatten()
+        } else {
+            None
+        };
         match &mut self.matrix {
             GeneratedMatrixTarget::Static { matrix } => {
-                let slot = if slots_ready {
-                    debug_assert!(row_axis < width);
-                    debug_assert!(col_axis < width);
-                    cache
-                        .slots
-                        .get(row_axis * width + col_axis)
-                        .copied()
-                        .flatten()
-                } else {
-                    None
-                };
                 if let Some(index) = slot {
                     matrix.stamp_direct(index, value);
                 } else {
                     matrix.add(row, col, value);
                 }
             }
-            GeneratedMatrixTarget::AcReal { matrix } => matrix.add_real(row, col, value),
+            GeneratedMatrixTarget::AcReal { matrix } => {
+                if let Some(index) = slot {
+                    matrix.stamp_direct_real(index, value);
+                } else {
+                    matrix.add_real(row, col, value);
+                }
+            }
         }
     }
 
@@ -2603,6 +2616,20 @@ impl<'a> GeneratedStamper<'a> {
         derivative: Value,
     ) {
         if derivative == 0.0 {
+            return;
+        }
+        if let Some(cache) = self.cache {
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            self.add_current_derivative_axis_pair_cached(
+                cache,
+                slots_ready,
+                width,
+                pos_axis,
+                neg_axis,
+                col_axis,
+                derivative,
+            );
             return;
         }
         if let Some(row_axis) = pos_axis {
@@ -2620,6 +2647,10 @@ impl<'a> GeneratedStamper<'a> {
         neg_axis: Option<usize>,
         equivalent: Value,
     ) {
+        if let Some(cache) = self.cache {
+            self.add_current_rhs_axis_pair_cached(cache, pos_axis, neg_axis, equivalent);
+            return;
+        }
         let pos_row = pos_axis.and_then(|axis| self.axis_matrix_index_local(axis));
         let neg_row = neg_axis.and_then(|axis| self.axis_matrix_index_local(axis));
         self.add_current_rhs_pair(pos_row, neg_row, equivalent);
@@ -2674,6 +2705,7 @@ impl<'a> GeneratedStamper<'a> {
 
 pub struct GeneratedReactiveStamper<'a> {
     matrix: &'a mut ComplexMatrix,
+    cache: Option<&'a GeneratedStaticStampCache>,
     num_nodes: usize,
     omega: Value,
 }
@@ -2683,6 +2715,22 @@ impl<'a> GeneratedReactiveStamper<'a> {
     pub fn new(matrix: &'a mut ComplexMatrix, num_nodes: usize, omega: Value) -> Self {
         Self {
             matrix,
+            cache: None,
+            num_nodes,
+            omega,
+        }
+    }
+
+    #[inline]
+    pub fn new_with_static_cache(
+        matrix: &'a mut ComplexMatrix,
+        num_nodes: usize,
+        omega: Value,
+        cache: &'a GeneratedStaticStampCache,
+    ) -> Self {
+        Self {
+            matrix,
+            cache: Some(cache),
             num_nodes,
             omega,
         }
@@ -2998,10 +3046,25 @@ impl<'a> GeneratedReactiveStamper<'a> {
             return;
         }
         if let Some(row) = pos_row {
-            self.matrix.add_imag(row, col, derivative);
+            self.add_imag(row, col, derivative);
         }
         if let Some(row) = neg_row {
-            self.matrix.add_imag(row, col, -derivative);
+            self.add_imag(row, col, -derivative);
+        }
+    }
+
+    #[inline]
+    fn add_imag(&mut self, row: usize, col: usize, value: Value) {
+        if value == 0.0 {
+            return;
+        }
+        if let Some(index) = self
+            .cache
+            .and_then(|cache| cache.slot_for_matrix_indices(row, col))
+        {
+            self.matrix.stamp_direct_imag(index, value);
+        } else {
+            self.matrix.add_imag(row, col, value);
         }
     }
 
@@ -3016,7 +3079,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
             return;
         };
         if let Some(col) = Self::node_matrix_index(node0) {
-            self.matrix.add_imag(row, col, -self.omega * derivative0);
+            self.add_imag(row, col, -self.omega * derivative0);
         }
     }
 
@@ -3033,10 +3096,10 @@ impl<'a> GeneratedReactiveStamper<'a> {
             return;
         };
         if let Some(col) = Self::node_matrix_index(node0) {
-            self.matrix.add_imag(row, col, -self.omega * derivative0);
+            self.add_imag(row, col, -self.omega * derivative0);
         }
         if let Some(col) = Self::node_matrix_index(node1) {
-            self.matrix.add_imag(row, col, -self.omega * derivative1);
+            self.add_imag(row, col, -self.omega * derivative1);
         }
     }
 
@@ -3051,7 +3114,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
             return;
         };
         if let Some(col) = self.branch_matrix_index(branch0) {
-            self.matrix.add_imag(row, col, -self.omega * derivative0);
+            self.add_imag(row, col, -self.omega * derivative0);
         }
     }
 
@@ -3068,10 +3131,10 @@ impl<'a> GeneratedReactiveStamper<'a> {
             return;
         };
         if let Some(col) = self.branch_matrix_index(branch0) {
-            self.matrix.add_imag(row, col, -self.omega * derivative0);
+            self.add_imag(row, col, -self.omega * derivative0);
         }
         if let Some(col) = self.branch_matrix_index(branch1) {
-            self.matrix.add_imag(row, col, -self.omega * derivative1);
+            self.add_imag(row, col, -self.omega * derivative1);
         }
     }
 
@@ -3088,10 +3151,10 @@ impl<'a> GeneratedReactiveStamper<'a> {
             return;
         };
         if let Some(col) = Self::node_matrix_index(node0) {
-            self.matrix.add_imag(row, col, -self.omega * derivative0);
+            self.add_imag(row, col, -self.omega * derivative0);
         }
         if let Some(col) = self.branch_matrix_index(branch0) {
-            self.matrix.add_imag(row, col, -self.omega * derivative1);
+            self.add_imag(row, col, -self.omega * derivative1);
         }
     }
 
@@ -3110,13 +3173,13 @@ impl<'a> GeneratedReactiveStamper<'a> {
             return;
         };
         if let Some(col) = Self::node_matrix_index(node0) {
-            self.matrix.add_imag(row, col, -self.omega * derivative0);
+            self.add_imag(row, col, -self.omega * derivative0);
         }
         if let Some(col) = Self::node_matrix_index(node1) {
-            self.matrix.add_imag(row, col, -self.omega * derivative1);
+            self.add_imag(row, col, -self.omega * derivative1);
         }
         if let Some(col) = self.branch_matrix_index(branch0) {
-            self.matrix.add_imag(row, col, -self.omega * derivative2);
+            self.add_imag(row, col, -self.omega * derivative2);
         }
     }
 
@@ -3131,8 +3194,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
         };
         for derivative in derivatives {
             if let Some(col) = self.axis_matrix_index(derivative.axis) {
-                self.matrix
-                    .add_imag(row, col, -self.omega * derivative.value);
+                self.add_imag(row, col, -self.omega * derivative.value);
             }
         }
     }
@@ -3154,7 +3216,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
                 continue;
             }
             if let Some(col) = self.axis_matrix_index(GeneratedDerivativeAxis::Node(node)) {
-                self.matrix.add_imag(row, col, -self.omega * derivative);
+                self.add_imag(row, col, -self.omega * derivative);
             }
         }
         for (branch, derivative) in branches
@@ -3166,7 +3228,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
                 continue;
             }
             if let Some(col) = self.axis_matrix_index(GeneratedDerivativeAxis::Branch(branch)) {
-                self.matrix.add_imag(row, col, -self.omega * derivative);
+                self.add_imag(row, col, -self.omega * derivative);
             }
         }
     }
