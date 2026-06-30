@@ -232,6 +232,49 @@ fn breakpoint_domain(
     input_domain * lower.min(upper)
 }
 
+fn smoothing_bounds(
+    points: &[LookupPoint],
+    index: usize,
+    input_domain: Value,
+    fraction: bool,
+) -> (Value, Value, Value) {
+    let domain = breakpoint_domain(points, index, input_domain, fraction);
+    (points[index].x - domain, points[index].x + domain, domain)
+}
+
+fn first_smoothing_index(
+    points: &[LookupPoint],
+    x: Value,
+    input_domain: Value,
+    fraction: bool,
+) -> Option<usize> {
+    if points.len() <= 2 {
+        return None;
+    }
+
+    let internal_count = points.len() - 2;
+    let mut low = 0;
+    let mut high = internal_count;
+    while low < high {
+        let offset = low + (high - low) / 2;
+        let index = offset + 1;
+        let (_, right, domain) = smoothing_bounds(points, index, input_domain, fraction);
+        if domain <= 0.0 || right < x {
+            low = offset + 1;
+        } else {
+            high = offset;
+        }
+    }
+    let offset = low;
+    if offset == internal_count {
+        return None;
+    }
+
+    let index = offset + 1;
+    let (left, right, domain) = smoothing_bounds(points, index, input_domain, fraction);
+    (domain > 0.0 && x >= left && x <= right).then_some(index)
+}
+
 fn linear_value(point: LookupPoint, slope: Value, x: Value) -> LookupResult {
     LookupResult {
         value: point.y + slope * (x - point.x),
@@ -307,18 +350,16 @@ fn evaluate_lookup(
         );
     }
 
-    for index in 1..points.len() - 1 {
+    if let Some(index) = first_smoothing_index(points, x, input_domain, fraction) {
         let domain = breakpoint_domain(points, index, input_domain, fraction);
-        if domain > 0.0 && x >= points[index].x - domain && x <= points[index].x + domain {
-            return smooth_corner(
-                x,
-                points[index].x,
-                points[index].y,
-                segment_slope(points[index - 1], points[index]),
-                segment_slope(points[index], points[index + 1]),
-                domain,
-            );
-        }
+        return smooth_corner(
+            x,
+            points[index].x,
+            points[index].y,
+            segment_slope(points[index - 1], points[index]),
+            segment_slope(points[index], points[index + 1]),
+            domain,
+        );
     }
 
     let upper = points
@@ -438,5 +479,55 @@ impl CodeModel for PiecewiseLinearTimeSeries {
 
     fn ac_gain(&self, _ctx: &CmContext) -> Vec<Value> {
         vec![0.0]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_near(actual: Value, expected: Value) {
+        assert!(
+            (actual - expected).abs() <= 1.0e-12,
+            "expected {expected:e}, got {actual:e}"
+        );
+    }
+
+    #[test]
+    fn lookup_smoothing_index_preserves_first_overlapping_breakpoint() {
+        let points = validate_lookup_table(&[0.0, 0.5, 1.0, 1.5], &[0.0, 10.0, 30.0, 60.0])
+            .expect("strictly increasing lookup table");
+        let x = 0.7;
+
+        assert_eq!(
+            first_smoothing_index(&points, x, 0.4, false),
+            Some(1),
+            "overlapping absolute smoothing domains should keep the first matching breakpoint"
+        );
+
+        let result = evaluate_lookup(&points, x, 0.4, false, false);
+        let first_breakpoint_result = smooth_corner(
+            x,
+            points[1].x,
+            points[1].y,
+            segment_slope(points[0], points[1]),
+            segment_slope(points[1], points[2]),
+            0.4,
+        );
+        let second_breakpoint_result = smooth_corner(
+            x,
+            points[2].x,
+            points[2].y,
+            segment_slope(points[1], points[2]),
+            segment_slope(points[2], points[3]),
+            0.4,
+        );
+
+        assert_near(result.value, first_breakpoint_result.value);
+        assert_near(result.slope, first_breakpoint_result.slope);
+        assert!(
+            (result.value - second_breakpoint_result.value).abs() > 1.0e-6,
+            "test fixture should distinguish the overlapping breakpoint choices"
+        );
     }
 }
