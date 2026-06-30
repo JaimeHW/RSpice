@@ -189,6 +189,11 @@ impl Engine {
             .devices
             .iter()
             .any(|bjt| bjt.uses_legacy_gummel_poon())
+            || circuit
+                .vdmoses
+                .devices
+                .iter()
+                .any(|vdmos| vdmos.xyce_level18)
     }
 
     pub(in crate::engine::convergence) fn apply_damping_strategy_with_junction_ownership<F>(

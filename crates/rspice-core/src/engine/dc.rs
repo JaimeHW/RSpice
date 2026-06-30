@@ -424,41 +424,50 @@ impl Engine {
                                 }
                                 Err(_) => {
                                     circuit.restore_nonlinear_state(start_state.clone());
-                                    sweep_source.set_value(&mut circuit, sweep_value);
-                                    let fresh_attempt = if node_hints.is_empty() {
-                                        engine.solve_nonlinear_with_node_hints_and_abort(
-                                            &mut circuit,
-                                            &mut matrix,
-                                            &[],
-                                            abort,
-                                        )
-                                    } else {
-                                        engine.solve_nonlinear_with_node_hints_and_abort(
-                                            &mut circuit,
-                                            &mut matrix,
-                                            &node_hints,
-                                            abort,
-                                        )
-                                    };
-                                    if let Ok(solution) = fresh_attempt {
-                                        dc_sweep_subdivisions = 2;
-                                        solution
-                                    } else {
-                                        circuit.restore_nonlinear_state(start_state);
-                                        sweep_source.set_value(&mut circuit, previous_value);
-                                        let (solution, subdivisions) = engine
-                                            .solve_nonlinear_dc_sweep_target_with_substeps(
-                                                &mut circuit,
-                                                &mut matrix,
-                                                &sweep_source,
-                                                previous_value,
-                                                sweep_value,
-                                                seed,
-                                                dc_sweep_subdivisions,
-                                                abort,
-                                            )?;
-                                        dc_sweep_subdivisions = subdivisions;
-                                        solution
+                                    sweep_source.set_value(&mut circuit, previous_value);
+                                    match engine.solve_nonlinear_dc_sweep_target_with_substeps(
+                                        &mut circuit,
+                                        &mut matrix,
+                                        &sweep_source,
+                                        previous_value,
+                                        sweep_value,
+                                        seed,
+                                        dc_sweep_subdivisions,
+                                        abort,
+                                    ) {
+                                        Ok((solution, subdivisions)) => {
+                                            dc_sweep_subdivisions = subdivisions;
+                                            solution
+                                        }
+                                        Err(substep_error) => {
+                                            if abort.is_aborted() {
+                                                return Err(substep_error);
+                                            }
+
+                                            circuit.restore_nonlinear_state(start_state);
+                                            sweep_source.set_value(&mut circuit, sweep_value);
+                                            let fresh_attempt = if node_hints.is_empty() {
+                                                engine.solve_nonlinear_with_node_hints_and_abort(
+                                                    &mut circuit,
+                                                    &mut matrix,
+                                                    &[],
+                                                    abort,
+                                                )
+                                            } else {
+                                                engine.solve_nonlinear_with_node_hints_and_abort(
+                                                    &mut circuit,
+                                                    &mut matrix,
+                                                    &node_hints,
+                                                    abort,
+                                                )
+                                            };
+                                            if let Ok(solution) = fresh_attempt {
+                                                dc_sweep_subdivisions = 2;
+                                                solution
+                                            } else {
+                                                return Err(substep_error);
+                                            }
+                                        }
                                     }
                                 }
                             }

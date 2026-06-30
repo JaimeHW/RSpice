@@ -28,6 +28,15 @@ pub struct VdmosIndices {
     pub rhs_si: Option<usize>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct VdmosLinearization {
+    id: Value,
+    region: VdmosRegion,
+    gm: Value,
+    gds: Value,
+    gmb: Value,
+}
+
 //=============================================================================
 // VDMOS Device
 //=============================================================================
@@ -925,8 +934,179 @@ impl Vdmos {
     }
 
     #[inline]
-    fn limited_branch_voltages_for_eval(&self, vgs: Value, vds: Value) -> (Value, Value, bool) {
-        (vgs, vds, false)
+    fn dev_limvds(vnew: Value, vold: Value) -> Value {
+        if vold >= 3.5 {
+            if vnew > vold {
+                vnew.min(3.0 * vold + 2.0)
+            } else if vnew < 3.5 {
+                vnew.max(2.0)
+            } else {
+                vnew
+            }
+        } else if vnew > vold {
+            vnew.min(4.0)
+        } else {
+            vnew.max(-0.5)
+        }
+    }
+
+    #[inline]
+    fn dev_fetlim(vnew: Value, vold: Value, vto: Value) -> Value {
+        let vtsthi = (2.0 * (vold - vto)).abs() + 2.0;
+        let vtstlo = (vold - vto).abs() + 1.0;
+        let vtox = vto + 3.5;
+        let delv = vnew - vold;
+
+        if vold >= vto {
+            if vold >= vtox {
+                if delv <= 0.0 {
+                    if vnew >= vtox {
+                        if -delv > vtstlo { vold - vtstlo } else { vnew }
+                    } else {
+                        vnew.max(vto + 2.0)
+                    }
+                } else if delv >= vtsthi {
+                    vold + vtsthi
+                } else {
+                    vnew
+                }
+            } else if delv <= 0.0 {
+                vnew.max(vto - 0.5)
+            } else {
+                vnew.min(vto + 4.0)
+            }
+        } else if delv <= 0.0 {
+            if -delv > vtsthi { vold - vtsthi } else { vnew }
+        } else {
+            let vtemp = vto + 0.5;
+            if vnew <= vtemp {
+                if delv > vtstlo { vold + vtstlo } else { vnew }
+            } else {
+                vtemp
+            }
+        }
+    }
+
+    #[inline]
+    fn dev_pnjlim(vnew: Value, vold: Value, vt: Value, vcrit: Value) -> (Value, bool) {
+        if vnew > vcrit && (vnew - vold).abs() > 2.0 * vt {
+            let limited = if vold > 0.0 {
+                let arg = (vnew - vold) / vt;
+                if arg > 0.0 {
+                    vold + vt * (2.0 + (arg - 2.0).ln())
+                } else {
+                    vold - vt * (2.0 + (2.0 - arg).ln())
+                }
+            } else {
+                vt * (vnew / vt).max(1.0).ln()
+            };
+            (limited, true)
+        } else if vnew < 0.0 {
+            let arg = if vold > 0.0 {
+                -vold - 1.0
+            } else {
+                2.0 * vold - 1.0
+            };
+            (vnew.max(arg), vnew < arg)
+        } else {
+            (vnew, false)
+        }
+    }
+
+    #[inline]
+    fn body_junction_thermal_voltage(&self) -> Value {
+        const K_OVER_Q: Value = 1.380_622_6e-23 / 1.602_191_8e-19;
+        K_OVER_Q * self.d1_temperature_kelvin.max(1.0e-12)
+    }
+
+    #[inline]
+    fn body_junction_vcrit(&self, isat: Value) -> Value {
+        let vt = self.body_junction_thermal_voltage();
+        if !isat.is_finite() || isat <= 0.0 {
+            return vt * 40.0;
+        }
+
+        let arg = (vt / ((2.0_f64).sqrt() * isat)).max(1.0);
+        vt * arg.ln()
+    }
+
+    #[inline]
+    fn source_body_vcrit(&self) -> Value {
+        self.body_junction_vcrit(self.is.max(0.0))
+    }
+
+    #[inline]
+    fn drain_body_vcrit(&self) -> Value {
+        self.body_junction_vcrit(self.is.max(0.0))
+    }
+
+    #[inline]
+    fn limited_branch_voltages_for_eval(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+    ) -> (Value, Value, Value, bool) {
+        if !self.xyce_level18
+            || !self.has_branch_history
+            || !self.eval_vgs_prev.is_finite()
+            || !self.eval_vds_prev.is_finite()
+            || !self.eval_vbs_prev.is_finite()
+        {
+            return (vgs, vds, vbs, false);
+        }
+
+        let p = self.polarity();
+        let mut vgs_m = p * vgs;
+        let mut vds_m = p * vds;
+        let mut vbs_m = p * vbs;
+        let old_vgs_m = p * self.eval_vgs_prev;
+        let old_vds_m = p * self.eval_vds_prev;
+        let old_vbs_m = p * self.eval_vbs_prev;
+        let mut vbd_m = vbs_m - vds_m;
+        let vgd_initial_m = vgs_m - vds_m;
+        let old_vgd_m = old_vgs_m - old_vds_m;
+        let von_m = if self.xyce_level18 {
+            self.xyce_level18_von(old_vbs_m)
+        } else {
+            self.vth
+        };
+
+        if old_vds_m >= 0.0 {
+            vgs_m = Self::dev_fetlim(vgs_m, old_vgs_m, von_m);
+            vds_m = vgs_m - vgd_initial_m;
+            vds_m = Self::dev_limvds(vds_m, old_vds_m);
+        } else {
+            let vgd_m = Self::dev_fetlim(vgd_initial_m, old_vgd_m, von_m);
+            vds_m = vgs_m - vgd_m;
+            vds_m = -Self::dev_limvds(-vds_m, -old_vds_m);
+            vgs_m = vgd_m + vds_m;
+        }
+
+        let vt = self.body_junction_thermal_voltage();
+        let pnjlim_limited;
+        if vds_m >= 0.0 {
+            let limited;
+            (limited, pnjlim_limited) =
+                Self::dev_pnjlim(vbs_m, old_vbs_m, vt, self.source_body_vcrit());
+            vbs_m = limited;
+        } else {
+            let old_vbd_m = old_vbs_m - old_vds_m;
+            let limited;
+            (limited, pnjlim_limited) =
+                Self::dev_pnjlim(vbd_m, old_vbd_m, vt, self.drain_body_vcrit());
+            vbd_m = limited;
+            vbs_m = vbd_m + vds_m;
+        }
+
+        let eval_vgs = p * vgs_m;
+        let eval_vds = p * vds_m;
+        let eval_vbs = p * vbs_m;
+        let limited = pnjlim_limited
+            || (eval_vgs - vgs).abs() > 1.0e-12
+            || (eval_vds - vds).abs() > 1.0e-12
+            || (eval_vbs - vbs).abs() > 1.0e-12;
+        (eval_vgs, eval_vds, eval_vbs, limited)
     }
 
     fn xyce_derived_gammas0_from_nsub(nsub_cm3: Value, oxide_thickness: Value) -> Option<Value> {
@@ -993,6 +1173,21 @@ impl Vdmos {
         vds: Value,
         vbs: Value,
     ) -> (Value, VdmosRegion, Value, Value, Value, Value) {
+        if let Some(linearization) = self.xyce_level18_linearization(vgs, vds, vbs) {
+            let id_eq = linearization.id
+                - linearization.gm * vgs
+                - linearization.gds * vds
+                - linearization.gmb * vbs;
+            return (
+                linearization.id,
+                linearization.region,
+                linearization.gm,
+                linearization.gds,
+                linearization.gmb,
+                id_eq,
+            );
+        }
+
         let (id, region) = self.calculate_id_with_body(vgs, vds, vbs);
         let gm = self.gm(vgs, vds, vbs);
         let gds = self.gds(vgs, vds, vbs);
@@ -1001,16 +1196,241 @@ impl Vdmos {
         (id, region, gm, gds, gmb, id_eq)
     }
 
-    fn xyce_level18_von(&self, vbs_eff: Value) -> Value {
-        let phi = self.xyce_phi.max(1.0e-12);
-        let phi_min_vbs = phi - vbs_eff;
-        let sarg = if phi_min_vbs > 0.0 {
-            phi_min_vbs.sqrt()
+    fn xyce_level18_linearization(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+    ) -> Option<VdmosLinearization> {
+        if !self.xyce_level18 {
+            return None;
+        }
+
+        if self.xyce_drift_enabled() && !self.uses_topological_drift() {
+            return None;
+        }
+
+        let p = self.polarity();
+        let vgs_eff = p * vgs;
+        let vds_eff = p * vds;
+        let vbs_eff = p * vbs;
+
+        if vds_eff >= 0.0 {
+            let forward = self.xyce_level18_forward_linearization(vgs_eff, vds_eff, vbs_eff);
+            Some(VdmosLinearization {
+                id: p * forward.id,
+                region: forward.region,
+                gm: forward.gm,
+                gds: forward.gds,
+                gmb: forward.gmb,
+            })
+        } else {
+            let forward = self.xyce_level18_forward_linearization(
+                vgs_eff - vds_eff,
+                -vds_eff,
+                vbs_eff - vds_eff,
+            );
+            Some(VdmosLinearization {
+                id: -p * forward.id,
+                region: forward.region,
+                gm: -forward.gm,
+                gds: forward.gm + forward.gds + forward.gmb,
+                gmb: -forward.gmb,
+            })
+        }
+    }
+
+    fn xyce_level18_forward_linearization(
+        &self,
+        xvgs: Value,
+        xvdds: Value,
+        xvbs: Value,
+    ) -> VdmosLinearization {
+        const CONST_Q: Value = 1.602_191_8e-19;
+        const CONST_BOLTZ: Value = 1.380_622_6e-23;
+        const CONST_REF_TEMP: Value = 300.15;
+        const CONST_EPS_OX: Value = 3.453_133e-11;
+        const EXP_LIMIT: Value = 150.0;
+
+        let zero = VdmosLinearization {
+            id: 0.0,
+            region: VdmosRegion::Cutoff,
+            gm: 0.0,
+            gds: 0.0,
+            gmb: 0.0,
+        };
+
+        let vt = (CONST_BOLTZ / CONST_Q) * CONST_REF_TEMP;
+        let eta = self.xyce_eta.max(1.0e-12);
+        let etavt = eta * vt;
+        let tox = self.xyce_oxide_thickness.max(1.0e-12);
+        let length = self.xyce_length.max(1.0e-12);
+        let width = self.xyce_width.max(0.0);
+        let surface_mobility = self.xyce_surface_mobility.max(1.0e-12);
+        let vsigma = self.xyce_vsigma.max(1.0e-12);
+        if width <= 0.0 {
+            return zero;
+        }
+
+        let (von, dvonvbs) = self.xyce_level18_von_and_derivative(xvbs);
+        let vgt0 = xvgs - von;
+        let raw_dibl_exp = (vgt0 - self.xyce_vsigmat) / vsigma;
+        let dibl_exp = raw_dibl_exp.clamp(-EXP_LIMIT, EXP_LIMIT);
+        let a = dibl_exp.exp();
+        let da_dvgt0 = if raw_dibl_exp.abs() <= EXP_LIMIT {
+            a / vsigma
         } else {
             0.0
         };
+        let one_plus_a = 1.0 + a;
+        let sigma = self.xyce_sigma0 / one_plus_a;
+        let vgt = vgt0 + sigma * xvdds;
+        let b = 0.5 * vgt / vt - 1.0;
+        let q = (self.xyce_delta * self.xyce_delta + b * b).sqrt();
+        let vgte = vt * (2.0 + b + q);
+        let u_raw = 1.0 + self.xyce_theta * (vgte + 2.0 * von) / tox;
+        let u = u_raw.max(1.0e-12);
+        let mobility = surface_mobility / u;
+
+        let x = vgt / etavt;
+        let n0 = CONST_EPS_OX * eta * vt / (2.0 * CONST_Q * tox);
+        let ns = if x > 50.0 {
+            n0 * 2.0 * x
+        } else if x < -30.0 {
+            n0 * x.exp()
+        } else {
+            2.0 * n0 * (1.0 + 0.5 * x.exp()).ln()
+        };
+
+        if ns < 1.0e-38 {
+            return zero;
+        }
+
+        let gchi0 = CONST_Q * width / length;
+        let gchi = gchi0 * mobility * ns;
+        let rt = (self.rs + self.rd).max(0.0);
+        let gch_denom = 1.0 + gchi * rt;
+        if gch_denom <= 0.0 {
+            return zero;
+        }
+        let gch = gchi / gch_denom;
+        if gch <= 1.0e-30 {
+            return zero;
+        }
+
+        let vl = self.xyce_max_drift_velocity.max(1.0e-12) * length / surface_mobility;
+        let vl2 = vl * vl;
+        let source_resistance = self.rs.max(0.0);
+        let d = (1.0 + 2.0 * gchi * source_resistance + vgte * vgte / vl2).sqrt();
+        let h = 1.0 + gchi * source_resistance + d;
+        let isat = gchi * vgte / h;
+        let vsate = isat / gch;
+        if isat <= 1.0e-30 || vsate <= 1.0e-30 {
+            return zero;
+        }
+
+        let y = xvdds / vsate;
+        let tanh_y = if y.abs() > EXP_LIMIT {
+            y.signum()
+        } else {
+            y.tanh()
+        };
+        let z = if y.abs() > EXP_LIMIT {
+            0.0
+        } else {
+            let cosh_y = y.cosh();
+            1.0 / (cosh_y * cosh_y)
+        };
+        let lambda_factor = 1.0 + self.lambda * xvdds;
+        let id = isat * lambda_factor * tanh_y;
+
+        let dvgtedvgt = if q > 1.0e-30 {
+            0.5 * (1.0 + b / q)
+        } else {
+            0.5
+        };
+        let dnsdvgt = if x > 50.0 {
+            2.0 * n0 / etavt
+        } else if x < -30.0 {
+            n0 * x.exp() / etavt
+        } else {
+            n0 / (etavt * ((-x).exp() + 0.5))
+        };
+        let dmudvgte = if u_raw > 1.0e-12 {
+            -surface_mobility * self.xyce_theta / (tox * u * u)
+        } else {
+            0.0
+        };
+
+        let d_sigma_dvgt0 = -self.xyce_sigma0 * da_dvgt0 / (one_plus_a * one_plus_a);
+        let dvgtdvds = sigma;
+        let dvgtdvgs = 1.0 + xvdds * d_sigma_dvgt0;
+        let dvgtdvbs = -dvonvbs * dvgtdvgs;
+
+        let dnsdvds = dnsdvgt * dvgtdvds;
+        let dnsdvgs = dnsdvgt * dvgtdvgs;
+        let dnsdvbs = dnsdvgt * dvgtdvbs;
+        let dmudvds = dmudvgte * dvgtedvgt * dvgtdvds;
+        let dmudvgs = dmudvgte * dvgtedvgt * dvgtdvgs;
+        let dmudvbs = dmudvgte * dvgtedvgt * dvgtdvbs + 2.0 * dmudvgte * dvonvbs;
+
+        let dgchidvds = gchi0 * (mobility * dnsdvds + ns * dmudvds);
+        let dgchidvgs = gchi0 * (mobility * dnsdvgs + ns * dmudvgs);
+        let dgchidvbs = gchi0 * (mobility * dnsdvbs + ns * dmudvbs);
+
+        let disatvgte = gchi / h - gchi * vgte * vgte / vl2 / (d * h * h);
+        let disatgchi = vgte / h - gchi * vgte * source_resistance * (1.0 + 1.0 / d) / (h * h);
+
+        let disatdvds = disatvgte * dvgtedvgt * dvgtdvds + disatgchi * dgchidvds;
+        let disatdvgs = disatvgte * dvgtedvgt * dvgtdvgs + disatgchi * dgchidvgs;
+        let disatdvbs = disatvgte * dvgtedvgt * dvgtdvbs + disatgchi * dgchidvbs;
+
+        let dichoodgch = lambda_factor * xvdds * z;
+        let dichooisat = lambda_factor * (tanh_y - gch * xvdds * z / isat);
+        let delgchgchi = 1.0 / (gch_denom * gch_denom);
+
+        let gds = dichooisat * disatdvds
+            + (dichoodgch * delgchgchi) * dgchidvds
+            + isat * self.lambda * tanh_y
+            + lambda_factor * gch * z;
+        let gm = dichooisat * disatdvgs + (dichoodgch * delgchgchi) * dgchidvgs;
+        let gmb = dichooisat * disatdvbs + (dichoodgch * delgchgchi) * dgchidvbs;
+
+        let region = if vgt0 <= 0.0 {
+            VdmosRegion::Cutoff
+        } else if xvdds < vsate {
+            VdmosRegion::Triode
+        } else {
+            VdmosRegion::Saturation
+        };
+
+        VdmosLinearization {
+            id,
+            region,
+            gm,
+            gds: gds.max(1.0e-12),
+            gmb,
+        }
+    }
+
+    fn xyce_level18_von(&self, vbs_eff: Value) -> Value {
+        self.xyce_level18_von_and_derivative(vbs_eff).0
+    }
+
+    fn xyce_level18_von_and_derivative(&self, vbs_eff: Value) -> (Value, Value) {
+        let phi = self.xyce_phi.max(1.0e-12);
+        let phi_min_vbs = phi - vbs_eff;
+        let (sarg, dsarg_dvbs) = if phi_min_vbs > 0.0 {
+            let root = phi_min_vbs.sqrt();
+            (root, -0.5 / root)
+        } else {
+            (0.0, 0.0)
+        };
         let vtoo = self.vth + self.xyce_gammal * phi - self.xyce_gammas * phi.sqrt();
-        vtoo + self.xyce_gammas * sarg - self.xyce_gammal * phi_min_vbs
+        (
+            vtoo + self.xyce_gammas * sarg - self.xyce_gammal * phi_min_vbs,
+            self.xyce_gammas * dsarg_dvbs + self.xyce_gammal,
+        )
     }
 
     fn calculate_id_xyce_level18(
@@ -1243,6 +1663,10 @@ impl Vdmos {
 
     /// Calculate transconductance gm = dId/dVgs
     pub fn gm(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
+        if let Some(linearization) = self.xyce_level18_linearization(vgs, vds, vbs) {
+            return linearization.gm;
+        }
+
         let delta = 1e-6;
         let (id_plus, _) = self.calculate_id_with_body(vgs + delta, vds, vbs);
         let (id_minus, _) = self.calculate_id_with_body(vgs - delta, vds, vbs);
@@ -1251,6 +1675,10 @@ impl Vdmos {
 
     /// Calculate output conductance gds = dId/dVds
     pub fn gds(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
+        if let Some(linearization) = self.xyce_level18_linearization(vgs, vds, vbs) {
+            return linearization.gds;
+        }
+
         let delta = 1e-6;
         let (id_plus, _) = self.calculate_id_with_body(vgs, vds + delta, vbs);
         let (id_minus, _) = self.calculate_id_with_body(vgs, vds - delta, vbs);
@@ -1258,6 +1686,10 @@ impl Vdmos {
     }
 
     pub fn gmb(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
+        if let Some(linearization) = self.xyce_level18_linearization(vgs, vds, vbs) {
+            return linearization.gmb;
+        }
+
         let delta = 1e-6;
         let (id_plus, _) = self.calculate_id_with_body(vgs, vds, vbs + delta);
         let (id_minus, _) = self.calculate_id_with_body(vgs, vds, vbs - delta);
@@ -2105,8 +2537,8 @@ impl NonlinearDevice for Vdmos {
         let vgs = vg - vsi;
         let vds = vdi - vsi;
         let vbs = vb - vsi;
-        let (eval_vgs, eval_vds, limited) = self.limited_branch_voltages_for_eval(vgs, vds);
-        let eval_vbs = vbs;
+        let (eval_vgs, eval_vds, eval_vbs, limited) =
+            self.limited_branch_voltages_for_eval(vgs, vds, vbs);
 
         self.prev_vgs = vgs;
         self.prev_vds = vds;
@@ -2162,12 +2594,17 @@ impl NonlinearDevice for Vdmos {
         let vds_int = vdi - vsi;
         let vbs = vb - vsi;
 
-        let (eval_vgs, eval_vds, _) = if self.prev_vgs == vgs && self.prev_vds == vds_int {
-            (self.eval_vgs, self.eval_vds, self.limiter_applied)
-        } else {
-            self.limited_branch_voltages_for_eval(vgs, vds_int)
-        };
-        let eval_vbs = vbs;
+        let (eval_vgs, eval_vds, eval_vbs, _) =
+            if self.prev_vgs == vgs && self.prev_vds == vds_int && self.prev_vbs == vbs {
+                (
+                    self.eval_vgs,
+                    self.eval_vds,
+                    self.eval_vbs,
+                    self.limiter_applied,
+                )
+            } else {
+                self.limited_branch_voltages_for_eval(vgs, vds_int, vbs)
+            };
         let (gm, gds, gmb, ieq) = if self.prev_vgs == vgs
             && self.prev_vds == vds_int
             && self.prev_vbs == vbs
@@ -2304,6 +2741,96 @@ impl NonlinearDevice for Vdmos {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    fn xyce_level18_test_device(vdmos_type: VdmosType) -> Vdmos {
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 18.0);
+        params.insert("VTO".to_string(), 3.5);
+        params.insert("RS".to_string(), 0.005);
+        params.insert("RD".to_string(), 0.0);
+        params.insert("LAMBDA".to_string(), 0.0);
+        params.insert("SIGMA0".to_string(), 0.0);
+        params.insert("UO".to_string(), 230.0);
+        params.insert("VMAX".to_string(), 4.0e4);
+        params.insert("DELTA".to_string(), 5.0);
+        params.insert("TOX".to_string(), 50.0e-9);
+
+        let instance_params = vec![
+            ("W".to_string(), 0.386),
+            ("L".to_string(), 2.5e-6),
+            ("M".to_string(), 3.0),
+        ];
+
+        let mut vdmos = Vdmos::new("m1".to_string(), vdmos_type, 1, 2, 3)
+            .with_params(&params)
+            .with_instance_params(&params, &instance_params);
+        vdmos.set_drain_drift_node(4);
+        vdmos
+    }
+
+    fn assert_close_derivative(label: &str, actual: Value, expected: Value) {
+        let tolerance = 2.0e-5 * expected.abs().max(actual.abs()).max(1.0);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{label}: analytic={actual:.12e} finite_difference={expected:.12e} diff={:.3e} tol={tolerance:.3e}",
+            (actual - expected).abs()
+        );
+    }
+
+    fn finite_derivatives(
+        vdmos: &Vdmos,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+    ) -> (Value, Value, Value) {
+        let delta = 1.0e-6;
+        let current = |vg: Value, vd: Value, vb: Value| vdmos.calculate_id_with_body(vg, vd, vb).0;
+        (
+            (current(vgs + delta, vds, vbs) - current(vgs - delta, vds, vbs)) / (2.0 * delta),
+            (current(vgs, vds + delta, vbs) - current(vgs, vds - delta, vbs)) / (2.0 * delta),
+            (current(vgs, vds, vbs + delta) - current(vgs, vds, vbs - delta)) / (2.0 * delta),
+        )
+    }
+
+    #[test]
+    fn xyce_level18_forward_linearization_matches_finite_difference() {
+        let vdmos = xyce_level18_test_device(VdmosType::NVdmos);
+        let linearization = vdmos
+            .xyce_level18_linearization(10.0, 5.0, -0.1)
+            .expect("topological Xyce LEVEL=18 linearization is available");
+        let (gm, gds, gmb) = finite_derivatives(&vdmos, 10.0, 5.0, -0.1);
+
+        assert_close_derivative("gm", linearization.gm, gm);
+        assert_close_derivative("gds", linearization.gds, gds);
+        assert_close_derivative("gmb", linearization.gmb, gmb);
+    }
+
+    #[test]
+    fn xyce_level18_reverse_linearization_matches_finite_difference() {
+        let vdmos = xyce_level18_test_device(VdmosType::NVdmos);
+        let linearization = vdmos
+            .xyce_level18_linearization(10.0, -2.0, 0.0)
+            .expect("topological Xyce LEVEL=18 linearization is available");
+        let (gm, gds, gmb) = finite_derivatives(&vdmos, 10.0, -2.0, 0.0);
+
+        assert_close_derivative("reverse gm", linearization.gm, gm);
+        assert_close_derivative("reverse gds", linearization.gds, gds);
+        assert_close_derivative("reverse gmb", linearization.gmb, gmb);
+    }
+
+    #[test]
+    fn xyce_level18_pmos_linearization_matches_finite_difference() {
+        let vdmos = xyce_level18_test_device(VdmosType::PVdmos);
+        let linearization = vdmos
+            .xyce_level18_linearization(-10.0, -5.0, 0.1)
+            .expect("topological Xyce LEVEL=18 linearization is available");
+        let (gm, gds, gmb) = finite_derivatives(&vdmos, -10.0, -5.0, 0.1);
+
+        assert_close_derivative("pmos gm", linearization.gm, gm);
+        assert_close_derivative("pmos gds", linearization.gds, gds);
+        assert_close_derivative("pmos gmb", linearization.gmb, gmb);
+    }
 
     #[test]
     fn d1_charge_branch_voltage_uses_external_nodes_not_channel_internal_nodes() {
