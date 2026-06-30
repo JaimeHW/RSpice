@@ -1,8 +1,9 @@
 //! In-process native Verilog-A JIT benchmark gate.
 //!
 //! This subcommand complements the process-level `run` benchmark. It measures
-//! the generated native entrypoint path directly against the bytecode VM on a
-//! dense synthetic model and can fail on median speedup or native p95 budgets.
+//! generated native entrypoint and public device-evaluation paths directly
+//! against bytecode VM references on a dense synthetic model and can fail on
+//! median speedup or native p95 budgets.
 
 use crate::error::BenchError;
 use clap::Args;

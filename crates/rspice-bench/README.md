@@ -68,9 +68,10 @@ deck health even when timings are not being compared.
 
 This is an in-process native Verilog-A JIT benchmark gate, not a full-circuit
 macro benchmark. It compiles a dense synthetic Verilog-A model, runs generated
-native entrypoint sweeps against the bytecode VM reference path, and gates on
-median native speedup. It also records p95 so a single lucky fastest sample
-cannot hide a regression.
+native entrypoint sweeps plus public `VerilogADevice::try_evaluate` sweeps
+against bytecode VM reference paths, and gates each case on median native
+speedup. It also records p95 so a single lucky fastest sample cannot hide a
+regression.
 
 | Flag | Default | Meaning |
 | :--- | :--- | :--- |

@@ -9,6 +9,7 @@ use super::{
     compile_native_with_canonical_ir, take_native_runtime_error,
 };
 use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
+use crate::device::VerilogADevice;
 use crate::vm::{Vm, VmContext, VmError};
 use crate::{CompilerOptions, VerilogACompiler};
 use serde::Serialize;
@@ -17,6 +18,8 @@ use std::time::Instant;
 const DEFAULT_ITERATIONS: usize = 200_000;
 const DEFAULT_SAMPLES: usize = 7;
 const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
+const DEVICE_NODE_MAPPING: &[usize] = &[1, 0, 2];
+const DEVICE_CIRCUIT_VOLTAGES: &[f64] = &[0.8, 0.2];
 const DENSE_MODEL_SOURCE: &str = r#"
 `include "disciplines.vams"
 module native_jit_dense_perf_guard(p, n, ctrl);
@@ -137,8 +140,10 @@ pub fn run_native_x64_benchmarks(config: NativeBenchConfig) -> Result<NativeBenc
     let target = super::TargetSpec::host()
         .map(|target| target.display_name())
         .unwrap_or_else(|| "unsupported".to_string());
-    let case = run_dense_entrypoint_case(config)?;
-    let cases = vec![case];
+    let cases = vec![
+        run_dense_entrypoint_case(config)?,
+        run_device_evaluate_case(config)?,
+    ];
     let passed = cases.iter().all(|case| case.passed);
     Ok(NativeBenchReport {
         generated_with: "rspice-veriloga-native-bench",
@@ -235,6 +240,99 @@ fn run_dense_entrypoint_case(config: NativeBenchConfig) -> Result<NativeBenchCas
     Ok(NativeBenchCaseReport {
         name: "dense_entrypoint_sweep",
         plan_stats: native.plan_stats(),
+        model_shape: shape,
+        native_ns_per_sweep: native_stats,
+        bytecode_ns_per_sweep: bytecode_stats,
+        speedup_median,
+        checksum_native: std::hint::black_box(native_checksum),
+        checksum_bytecode: std::hint::black_box(bytecode_checksum),
+        passed: failures.is_empty(),
+        failure: (!failures.is_empty()).then(|| failures.join("; ")),
+    })
+}
+
+fn run_device_evaluate_case(config: NativeBenchConfig) -> Result<NativeBenchCaseReport, String> {
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler
+        .compile(DENSE_MODEL_SOURCE)
+        .map_err(|error| format!("compile device native benchmark model: {error}"))?;
+    let artifact = compiler
+        .compile_canonical_ir(DENSE_MODEL_SOURCE)
+        .map_err(|error| format!("compile device native benchmark canonical IR: {error}"))?;
+    let shape = model_shape(&model);
+    let mut native_device = VerilogADevice::try_new_with_canonical_ir(
+        "native-jit-device-bench",
+        model.clone(),
+        &artifact,
+        DEVICE_NODE_MAPPING,
+    )
+    .map_err(|error| format!("construct native device benchmark model: {error}"))?;
+    let plan_stats = native_device.native_plan_stats();
+    validate_shape(&shape, &plan_stats)?;
+
+    let mut bytecode_context = benchmark_context(&model);
+    resolve_bytecode_defaults(&model, &mut bytecode_context)?;
+
+    let checksum_native = run_native_device_evaluate_sweep(&mut native_device)?;
+    let checksum_bytecode = run_bytecode_evaluate_sweep(&model, &mut bytecode_context)?;
+    assert_close(
+        "device native benchmark checksum",
+        checksum_bytecode,
+        checksum_native,
+    )?;
+
+    std::hint::black_box(run_native_device_evaluate_sample(
+        &mut native_device,
+        (config.iterations / 10).max(1),
+    )?);
+    let mut bytecode_warmup = bytecode_context.clone();
+    std::hint::black_box(run_bytecode_evaluate_sample(
+        &model,
+        &mut bytecode_warmup,
+        (config.iterations / 10).max(1),
+    )?);
+
+    let mut native_samples = Vec::with_capacity(config.samples);
+    let mut bytecode_samples = Vec::with_capacity(config.samples);
+    let mut native_checksum = 0.0;
+    let mut bytecode_checksum = 0.0;
+    for _ in 0..config.samples {
+        let start = Instant::now();
+        native_checksum +=
+            run_native_device_evaluate_sample(&mut native_device, config.iterations)?;
+        native_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+
+        let mut context = bytecode_context.clone();
+        let start = Instant::now();
+        bytecode_checksum += run_bytecode_evaluate_sample(&model, &mut context, config.iterations)?;
+        bytecode_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+    }
+
+    let native_stats = timing_stats(native_samples);
+    let bytecode_stats = timing_stats(bytecode_samples);
+    let speedup_median = bytecode_stats.median / native_stats.median.max(f64::MIN_POSITIVE);
+    let mut failures = Vec::new();
+    if speedup_median < config.min_speedup {
+        failures.push(format!(
+            "median speedup {:.3}x is below required {:.3}x",
+            speedup_median, config.min_speedup
+        ));
+    }
+    if let Some(max_native_p95) = config.max_native_p95_ns_per_sweep
+        && native_stats.p95 > max_native_p95
+    {
+        failures.push(format!(
+            "native p95 {:.3} ns/sweep exceeds {:.3} ns/sweep",
+            native_stats.p95, max_native_p95
+        ));
+    }
+    if !native_checksum.is_finite() || !bytecode_checksum.is_finite() {
+        failures.push("benchmark checksum became non-finite".into());
+    }
+
+    Ok(NativeBenchCaseReport {
+        name: "device_evaluate_sweep",
+        plan_stats,
         model_shape: shape,
         native_ns_per_sweep: native_stats,
         bytecode_ns_per_sweep: bytecode_stats,
@@ -378,6 +476,39 @@ fn run_bytecode_sample(
     Ok(std::hint::black_box(checksum))
 }
 
+fn run_native_device_evaluate_sample(
+    device: &mut VerilogADevice,
+    iterations: usize,
+) -> Result<f64, String> {
+    let mut checksum = 0.0;
+    for _ in 0..iterations {
+        checksum += std::hint::black_box(run_native_device_evaluate_sweep(device)?);
+    }
+    Ok(std::hint::black_box(checksum))
+}
+
+fn run_bytecode_evaluate_sample(
+    model: &CompiledModel,
+    context: &mut VmContext,
+    iterations: usize,
+) -> Result<f64, String> {
+    let mut checksum = 0.0;
+    for _ in 0..iterations {
+        checksum += std::hint::black_box(run_bytecode_evaluate_sweep(model, context)?);
+    }
+    Ok(std::hint::black_box(checksum))
+}
+
+fn run_native_device_evaluate_sweep(device: &mut VerilogADevice) -> Result<f64, String> {
+    device
+        .try_update_voltages(DEVICE_CIRCUIT_VOLTAGES)
+        .map_err(|error| format!("native device voltage update: {error}"))?;
+    let currents = device
+        .try_evaluate()
+        .map_err(|error| format!("native device evaluate: {error}"))?;
+    Ok(currents.into_iter().sum())
+}
+
 fn run_native_sweep(
     model: &CompiledModel,
     native: &NativeModel,
@@ -433,6 +564,48 @@ fn run_native_sweep(
     }
 
     take_native_error("sweep")?;
+    Ok(checksum)
+}
+
+fn run_bytecode_evaluate_sweep(
+    model: &CompiledModel,
+    context: &mut VmContext,
+) -> Result<f64, String> {
+    context.clear_currents();
+    context.currents.resize(model.stamp_programs.len(), 0.0);
+
+    {
+        let mut vm = Vm::new(context);
+        execute_assignment_steps(&mut vm, &model.assignment_steps)
+            .map_err(|error| format!("bytecode evaluate assignments: {error}"))?;
+    }
+
+    let mut checksum = 0.0;
+    for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+        let active = if let Some(condition) = &stamp.static_condition {
+            let mut vm = Vm::new(context);
+            vm.execute(condition)
+                .map_err(|error| {
+                    format!("bytecode evaluate static condition {stamp_index}: {error}")
+                })?
+                .abs()
+                > 1.0e-15
+        } else {
+            true
+        };
+        if !active {
+            continue;
+        }
+
+        let value = {
+            let mut vm = Vm::new(context);
+            vm.execute(&stamp.value_program)
+                .map_err(|error| format!("bytecode evaluate stamp {stamp_index}: {error}"))?
+        };
+        checksum += value;
+        context.currents[stamp_index] = value;
+    }
+
     Ok(checksum)
 }
 
