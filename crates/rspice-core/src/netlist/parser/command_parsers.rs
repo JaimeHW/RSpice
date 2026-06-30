@@ -227,7 +227,7 @@ pub(super) fn parse_disto_command(
     })
 }
 
-/// Parse .NOISE command: .NOISE V(out[,ref]) Vsource DEC|LIN|OCT np fstart fstop
+/// Parse .NOISE command: .NOISE V(out[,ref]) Vsource DEC|LIN|OCT np fstart fstop [pts_per_summary]
 pub(super) fn parse_noise_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -255,6 +255,7 @@ pub(super) fn parse_noise_command(
     let points = expect_value(stream, line_num, params)? as usize;
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
+    let _summary_interval = try_value(stream, params);
 
     Ok(AnalysisCommand::Noise {
         output_node,
