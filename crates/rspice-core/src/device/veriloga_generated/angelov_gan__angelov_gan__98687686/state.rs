@@ -436,8 +436,8 @@ pub struct Instance {
     pub(crate) scalar_v486: f64,
     pub(crate) scalar_v487: bool,
     pub(crate) scalar_v490: f64,
-    pub(crate) scalar_v493: f64,
-    pub(crate) scalar_v494: f64,
+    pub(crate) scalar_v491: f64,
+    pub(crate) scalar_v492: f64,
     pub(crate) scalar_v495: f64,
     pub(crate) scalar_v496: f64,
     pub(crate) scalar_v507: bool,
@@ -657,8 +657,8 @@ impl Clone for Instance {
             scalar_v486: self.scalar_v486,
             scalar_v487: self.scalar_v487,
             scalar_v490: self.scalar_v490,
-            scalar_v493: self.scalar_v493,
-            scalar_v494: self.scalar_v494,
+            scalar_v491: self.scalar_v491,
+            scalar_v492: self.scalar_v492,
             scalar_v495: self.scalar_v495,
             scalar_v496: self.scalar_v496,
             scalar_v507: self.scalar_v507,
@@ -895,8 +895,8 @@ impl Instance {
             scalar_v486: 0.0,
             scalar_v487: false,
             scalar_v490: 0.0,
-            scalar_v493: 0.0,
-            scalar_v494: 0.0,
+            scalar_v491: 0.0,
+            scalar_v492: 0.0,
             scalar_v495: 0.0,
             scalar_v496: 0.0,
             scalar_v507: false,
@@ -1120,8 +1120,8 @@ impl Instance {
             scalar_v486,
             scalar_v487,
             scalar_v490,
-            scalar_v493,
-            scalar_v494,
+            scalar_v491,
+            scalar_v492,
             scalar_v495,
             scalar_v496,
             scalar_v507,
@@ -1337,8 +1337,8 @@ impl Instance {
             scalar_v486,
             scalar_v487,
             scalar_v490,
-            scalar_v493,
-            scalar_v494,
+            scalar_v491,
+            scalar_v492,
             scalar_v495,
             scalar_v496,
             scalar_v507,
@@ -1860,12 +1860,12 @@ impl Instance {
         self.scalar_v486 = v486;
         let v487: bool = (v485 && (p.p0 != 0.0));
         self.scalar_v487 = v487;
-        let v490: f64 = p.p88;
+        let v490: f64 = p.p87;
         self.scalar_v490 = v490;
-        let v493: f64 = p.p87;
-        self.scalar_v493 = v493;
-        let v494: f64 = p.p86;
-        self.scalar_v494 = v494;
+        let v491: f64 = p.p86;
+        self.scalar_v491 = v491;
+        let v492: f64 = p.p88;
+        self.scalar_v492 = v492;
         let v495: f64 = (p.p87 * p.p86);
         self.scalar_v495 = v495;
         let v496: f64 = ((v495) as f64).sqrt();
