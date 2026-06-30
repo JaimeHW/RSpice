@@ -2410,6 +2410,20 @@ impl CodeModel for Pswitch {
 
         Ok(())
     }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        let Ok(eval) = pswitch_eval(ctx) else {
+            return Vec::new();
+        };
+        match output_port.to_ascii_lowercase().as_str() {
+            "out" => vec![
+                ("out".to_string(), eval.output_conductance),
+                ("cntl_in".to_string(), eval.control_partial),
+            ],
+            "cntl_in" => vec![("cntl_in".to_string(), eval.control_conductance)],
+            _ => Vec::new(),
+        }
+    }
 }
 
 impl CodeModel for Sidiode {
