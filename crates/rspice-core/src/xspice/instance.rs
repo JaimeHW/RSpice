@@ -1988,12 +1988,10 @@ impl XspiceInstance {
             })
             .all(|port| {
                 if port.is_vector {
-                    let curr = self.context.output_vector(&port.name);
-                    let prev = self.context.output_vector_prev(&port.name);
                     let width = self.context.port_width(&port.name);
                     return (0..width).all(|index| {
-                        let curr = curr.get(index).copied().unwrap_or(0.0);
-                        let prev = prev.get(index).copied().unwrap_or(0.0);
+                        let curr = self.context.output_vector_value(&port.name, index);
+                        let prev = self.context.output_vector_prev_value(&port.name, index);
                         (curr - prev).abs() <= tol + tol * curr.abs().max(prev.abs())
                     });
                 }
@@ -2659,6 +2657,30 @@ mod tests {
                 .expect("vector contributions should still be available"),
             vec![(0.25, 1.5), (0.5, 2.5)]
         );
+    }
+
+    #[test]
+    fn vector_output_convergence_uses_element_accessors() {
+        let model = model_with_ports(vec![PortSpec::vector_output("out", PortType::Voltage)]);
+        let mut instance = XspiceInstance::new(
+            "Avecout",
+            Arc::new(model),
+            vec![PortConnection::AnalogVector(vec![1, 2])],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("analog vector output should construct");
+
+        instance.context.set_output_vector("out", vec![1.0, 2.0]);
+        instance
+            .context
+            .set_output_vector("out", vec![1.0 + 1.0e-13, 2.0 - 1.0e-13]);
+        assert!(instance.is_converged(1.0e-12));
+
+        instance.context.set_output_vector("out", vec![1.1, 2.0]);
+        assert!(!instance.is_converged(1.0e-12));
     }
 
     #[test]

@@ -954,6 +954,18 @@ impl CmContext {
             .unwrap_or_default()
     }
 
+    /// Get one previous analog vector output value without cloning the full vector.
+    pub fn output_vector_prev_value(&self, name: &str, index: usize) -> Value {
+        match self.outputs.get(name) {
+            Some(OutputValue::AnalogVector(values)) => values
+                .get(index)
+                .map(|value| value.prev_value)
+                .unwrap_or(0.0),
+            Some(OutputValue::Analog(value)) if index == 0 => value.prev_value,
+            _ => 0.0,
+        }
+    }
+
     /// Get real output value, if this output is a real-valued event port.
     pub fn output_real(&self, name: &str) -> Option<Value> {
         self.outputs.get(name).and_then(|v| match v {
@@ -2253,18 +2265,25 @@ mod tests {
     fn analog_vector_scalar_output_accessors_avoid_full_clones() {
         let mut ctx = CmContext::new();
         ctx.set_port_width("out", 2);
+        ctx.set_output_vector("out", vec![1.0, 2.0]);
         ctx.set_output_vector_with_partials("out", vec![1.5, 2.5], vec![0.25, 0.5]);
+        ctx.set_output_with_partial("scalar", 2.5, 0.25);
         ctx.set_output_with_partial("scalar", 3.5, 0.75);
 
         assert_eq!(ctx.output_vector_value("out", 0), 1.5);
         assert_eq!(ctx.output_vector_value("out", 1), 2.5);
         assert_eq!(ctx.output_vector_value("out", 2), 0.0);
+        assert_eq!(ctx.output_vector_prev_value("out", 0), 1.0);
+        assert_eq!(ctx.output_vector_prev_value("out", 1), 2.0);
+        assert_eq!(ctx.output_vector_prev_value("out", 2), 0.0);
         assert_eq!(ctx.partial_vector_value("out", 0), 0.25);
         assert_eq!(ctx.partial_vector_value("out", 1), 0.5);
         assert_eq!(ctx.partial_vector_value("out", 2), 0.0);
 
         assert_eq!(ctx.output_vector_value("scalar", 0), 3.5);
         assert_eq!(ctx.output_vector_value("scalar", 1), 0.0);
+        assert_eq!(ctx.output_vector_prev_value("scalar", 0), 2.5);
+        assert_eq!(ctx.output_vector_prev_value("scalar", 1), 0.0);
         assert_eq!(ctx.partial_vector_value("scalar", 0), 0.75);
         assert_eq!(ctx.partial_vector_value("scalar", 1), 0.0);
     }
