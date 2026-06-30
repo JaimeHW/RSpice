@@ -116,13 +116,14 @@ class CiConfigurationTests(unittest.TestCase):
     def test_python_workflow_runs_when_examples_change(self) -> None:
         workflow = read_text(".github/workflows/python.yml")
 
-        self.assertIn('- "examples/python/**"', workflow)
+        self.assertIn('- "crates/rspice-python/examples/**"', workflow)
         self.assertEqual(
-            workflow.count('- "examples/python/**"'),
+            workflow.count('- "crates/rspice-python/examples/**"'),
             2,
-            "python workflow must include examples/python/** for push and pull_request filters",
+            "python workflow must include the rspice-python examples path for push and pull_request filters",
         )
-        self.assertIn("working-directory: examples/python", workflow)
+        self.assertIn("working-directory: crates/rspice-python", workflow)
+        self.assertIn("python -m pytest examples/analog_ci -v --tb=short", workflow)
 
     def test_platform_support_matrix_documents_evidence_and_mobile_limits(self) -> None:
         matrix = read_text("docs/platform-support.md")

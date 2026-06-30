@@ -5,14 +5,14 @@ on:
     branches: [main]
     paths:
       - "crates/**"
-      - "examples/python/**"
+      - "crates/rspice-python/examples/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/python.yml"
   pull_request:
     paths:
       - "crates/**"
-      - "examples/python/**"
+      - "crates/rspice-python/examples/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/python.yml"
@@ -63,8 +63,8 @@ jobs:
         working-directory: crates/rspice-python
         run: python -m pytest tests/ -v --tb=short
       - name: Run example verification suite
-        working-directory: examples/python
-        run: python -m pytest -v --tb=short
+        working-directory: crates/rspice-python
+        run: python -m pytest examples/analog_ci -v --tb=short
       - name: Validate type stubs against runtime
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
         working-directory: crates/rspice-python
