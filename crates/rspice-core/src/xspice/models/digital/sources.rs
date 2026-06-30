@@ -314,17 +314,9 @@ fn d_source_row_indices(
     emitted_row: i64,
 ) -> (Option<usize>, Option<usize>) {
     let start = d_source_scan_start(rows, time, emitted_row);
-    let mut active = start.checked_sub(1);
-
-    for (idx, row) in rows.iter().enumerate().skip(start) {
-        if row.time <= time + D_SOURCE_TIME_EPSILON {
-            active = Some(idx);
-        } else {
-            return (active, Some(idx));
-        }
-    }
-
-    (active, None)
+    let upper = rows[start..].partition_point(|row| row.time <= time + D_SOURCE_TIME_EPSILON);
+    let next = start + upper;
+    (next.checked_sub(1), (next < rows.len()).then_some(next))
 }
 
 fn d_source_set_output(ctx: &mut CmContext, values: &[DigitalValue], delay: Value) {
@@ -1239,6 +1231,7 @@ mod tests {
         assert_eq!(d_source_scan_start(&rows, 2.5e-9, 1), 2);
         assert_eq!(d_source_row_indices(&rows, 2.5e-9, 1), (Some(2), Some(3)));
         assert_eq!(d_source_row_indices(&rows, 4.0e-9, 3), (Some(3), None));
+        assert_eq!(d_source_row_indices(&rows, 3.5e-9, 0), (Some(3), None));
 
         assert_eq!(d_source_scan_start(&rows, 0.5e-9, 2), 0);
         assert_eq!(d_source_row_indices(&rows, 0.5e-9, 2), (Some(0), Some(1)));
