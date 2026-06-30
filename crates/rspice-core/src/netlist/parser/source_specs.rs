@@ -92,6 +92,9 @@ pub(super) fn parse_source_spec(
                         .to_radians();
                 ac_terms = Some((ac_magnitude, ac_phase));
             }
+            _ if is_source_port_annotation_keyword(&keyword) => {
+                consume_source_port_annotation(stream, line_num, params)?;
+            }
             _ if transient.is_none() => {
                 match parse_transient_source_spec_keyword(stream, line_num, params)? {
                     Some(spec) => transient = Some(spec),
@@ -209,7 +212,25 @@ fn is_source_level_keyword(keyword: &str) -> bool {
             | "TRNOISE"
             | "DISTOF1"
             | "DISTOF2"
+            | "PORTNUM"
+            | "Z0"
     )
+}
+
+fn is_source_port_annotation_keyword(keyword: &str) -> bool {
+    matches!(keyword.to_ascii_uppercase().as_str(), "PORTNUM" | "Z0")
+}
+
+fn consume_source_port_annotation(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<(), ParseError> {
+    let keyword = expect_ident(stream, line_num)?;
+    skip_commas(stream);
+    stream.consume(&TokenKind::Equals);
+    expect_finite_source_value(stream, line_num, params, &keyword, "value")?;
+    Ok(())
 }
 
 fn optional_ac_value_or_default(
@@ -794,7 +815,8 @@ fn source_args_end(stream: &TokenStream, has_paren: bool) -> bool {
             if !has_paren
                 && (keyword.eq_ignore_ascii_case("AC")
                     || keyword.eq_ignore_ascii_case("DISTOF1")
-                    || keyword.eq_ignore_ascii_case("DISTOF2")) =>
+                    || keyword.eq_ignore_ascii_case("DISTOF2")
+                    || is_source_port_annotation_keyword(keyword)) =>
         {
             true
         }
@@ -813,7 +835,8 @@ fn source_numeric_args_end(stream: &TokenStream, has_paren: bool) -> bool {
                 && (keyword.eq_ignore_ascii_case("AC")
                     || keyword.eq_ignore_ascii_case("DC")
                     || keyword.eq_ignore_ascii_case("DISTOF1")
-                    || keyword.eq_ignore_ascii_case("DISTOF2")) =>
+                    || keyword.eq_ignore_ascii_case("DISTOF2")
+                    || is_source_port_annotation_keyword(keyword)) =>
         {
             true
         }

@@ -3774,6 +3774,27 @@ mod tests {
     }
 
     #[test]
+    fn source_ac_terms_accept_rf_port_annotations() {
+        let netlist = Netlist::parse(
+            "source rf port annotations\n\
+             V1 p1 0 dc 0 ac 1 portnum 1 z0 50\n\
+             R1 p1 0 50\n\
+             .ac lin 1 1Meg 1Meg\n\
+             .end\n",
+        )
+        .expect("ngspice source port annotations should parse after AC terms");
+
+        assert!(matches!(
+            first_source_spec(&netlist),
+            SourceSpec::DcAc {
+                dc_value,
+                ac_magnitude,
+                ac_phase,
+            } if *dc_value == 0.0 && *ac_magnitude == 1.0 && *ac_phase == 0.0
+        ));
+    }
+
+    #[test]
     fn source_ac_dc_equals_after_unparenthesized_transient_parse() {
         let netlist = Netlist::parse(
             "source transient trailing equals\n\
