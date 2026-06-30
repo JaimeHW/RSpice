@@ -13584,6 +13584,7 @@ fn generate_scratch_struct() -> String {
         "    bool_values: [bool; Instance::VARIABLE_COUNT],",
         "    node_derivatives: [[f64; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
         "    branch_derivatives: [[f64; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
+        "    derivatives_dirty: [bool; Instance::VARIABLE_COUNT],",
         "}",
         "",
         "impl Scratch {",
@@ -13605,6 +13606,7 @@ fn generate_scratch_struct() -> String {
         "            bool_values: [false; Instance::VARIABLE_COUNT],",
         "            node_derivatives: [[0.0; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
         "            branch_derivatives: [[0.0; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
+        "            derivatives_dirty: [false; Instance::VARIABLE_COUNT],",
         "        }",
         "    }",
         "",
@@ -13625,13 +13627,26 @@ fn generate_scratch_struct() -> String {
         "        self.values[target] = self.values[source];",
         "        self.node_derivatives[target] = self.node_derivatives[source];",
         "        self.branch_derivatives[target] = self.branch_derivatives[source];",
+        "        self.derivatives_dirty[target] = self.derivatives_dirty[source];",
         "    }",
         "",
         "    #[inline]",
         "    fn store_scalar(&mut self, index: usize, value: f64) {",
         "        self.values[index] = value;",
-        "        self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
-        "        self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "        self.clear_derivatives_if_dirty(index);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn mark_derivatives_dirty(&mut self, index: usize) {",
+        "        self.derivatives_dirty[index] = true;",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn clear_derivatives_if_dirty(&mut self, index: usize) {",
+        "        if std::mem::replace(&mut self.derivatives_dirty[index], false) {",
+        "            self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "            self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "        }",
         "    }",
     ]
     .join("\n");
@@ -13645,6 +13660,7 @@ fn generate_scratch_struct() -> String {
         "    bool_values: [bool; Instance::VARIABLE_COUNT],",
         "    node_derivatives: [[f64; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
         "    branch_derivatives: [[f64; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
+        "    derivatives_dirty: [bool; Instance::VARIABLE_COUNT],",
         "    reactive_values: [f64; Instance::VARIABLE_COUNT],",
         "    reactive_node_derivatives: [[f64; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
         "    reactive_branch_derivatives: [[f64; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
@@ -13669,6 +13685,7 @@ fn generate_scratch_struct() -> String {
         "            bool_values: [false; Instance::VARIABLE_COUNT],",
         "            node_derivatives: [[0.0; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
         "            branch_derivatives: [[0.0; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
+        "            derivatives_dirty: [false; Instance::VARIABLE_COUNT],",
         "            reactive_values: [0.0; Instance::VARIABLE_COUNT],",
         "            reactive_node_derivatives: [[0.0; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
         "            reactive_branch_derivatives: [[0.0; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
@@ -13692,20 +13709,33 @@ fn generate_scratch_struct() -> String {
         "        self.values[target] = self.values[source];",
         "        self.node_derivatives[target] = self.node_derivatives[source];",
         "        self.branch_derivatives[target] = self.branch_derivatives[source];",
+        "        self.derivatives_dirty[target] = self.derivatives_dirty[source];",
         "    }",
         "",
         "    #[inline]",
         "    fn store_scalar(&mut self, index: usize, value: f64) {",
         "        self.values[index] = value;",
-        "        self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
-        "        self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "        self.clear_derivatives_if_dirty(index);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn mark_derivatives_dirty(&mut self, index: usize) {",
+        "        self.derivatives_dirty[index] = true;",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn clear_derivatives_if_dirty(&mut self, index: usize) {",
+        "        if std::mem::replace(&mut self.derivatives_dirty[index], false) {",
+        "            self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "            self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "        }",
         "    }",
     ]
     .join("\n"));
     out.push('\n');
     out.push_str(&generate_scratch_operation_helpers());
     out.push_str("\n}\n\n");
-    out
+    mark_generated_scratch_derivative_stores(out)
 }
 
 fn generate_scratch_operation_helpers() -> String {
@@ -22734,6 +22764,57 @@ fn generate_index_or_mixed_div_scaled_product3_helper(mask: &str) -> String {
     )
 }
 
+fn mark_generated_scratch_derivative_stores(source: String) -> String {
+    let mut out = String::with_capacity(source.len() + 4096);
+    let lines: Vec<&str> = source.lines().collect();
+    let mut line_index = 0;
+    while line_index < lines.len() {
+        let line = lines[line_index];
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("fn store_")
+            && trimmed.contains("&mut self")
+            && trimmed.contains("index: usize")
+            && !trimmed.starts_with("fn store_scalar")
+        {
+            let block_start = line_index;
+            let mut block_end = line_index;
+            let mut brace_depth = brace_delta(line);
+            while brace_depth > 0 && block_end + 1 < lines.len() {
+                block_end += 1;
+                brace_depth += brace_delta(lines[block_end]);
+            }
+
+            let writes_derivatives = lines[block_start + 1..=block_end].iter().any(|body_line| {
+                body_line.contains("self.node_derivatives[index]")
+                    || body_line.contains("self.branch_derivatives[index]")
+            });
+            for (offset, block_line) in lines[block_start..=block_end].iter().enumerate() {
+                out.push_str(block_line);
+                out.push('\n');
+                if offset == 0 && writes_derivatives {
+                    let indent = &line[..line.len() - trimmed.len()];
+                    out.push_str(indent);
+                    out.push_str("    self.mark_derivatives_dirty(index);\n");
+                }
+            }
+            line_index = block_end + 1;
+        } else {
+            out.push_str(line);
+            out.push('\n');
+            line_index += 1;
+        }
+    }
+    out
+}
+
+fn brace_delta(line: &str) -> i32 {
+    line.bytes().fold(0, |depth, byte| match byte {
+        b'{' => depth + 1,
+        b'}' => depth - 1,
+        _ => depth,
+    })
+}
+
 fn generate_ad_value_struct() -> String {
     [
         "#[derive(Clone, Copy)]",
@@ -25068,6 +25149,18 @@ struct SparseDerivativeTerm<'a> {
     derivative: &'a str,
 }
 
+#[derive(Debug, Clone, Default)]
+struct CompactDerivativeAxes {
+    nodes: BTreeSet<usize>,
+    branches: BTreeSet<usize>,
+}
+
+impl CompactDerivativeAxes {
+    fn should_emit_indexed(&self, node_count: usize, branch_count: usize) -> bool {
+        self.nodes.len() + self.branches.len() < node_count + branch_count
+    }
+}
+
 fn sparse_derivative_terms(derivatives: &[String]) -> Vec<SparseDerivativeTerm<'_>> {
     derivatives
         .iter()
@@ -25556,6 +25649,200 @@ fn should_emit_compact_equation_stamp(
         >= COMPACT_EQUATION_EXPR_NODE_THRESHOLD)
 }
 
+fn compact_ad_active_axes(
+    artifact: &CanonicalIrArtifact,
+    expr: ExprId,
+    variables: &HashMap<String, LoweredVariable>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
+) -> Result<Option<CompactDerivativeAxes>, RustBackendError> {
+    let mut axes = CompactDerivativeAxes::default();
+    let mut visited = HashSet::new();
+    if collect_compact_ad_active_axes(
+        artifact,
+        expr,
+        variables,
+        branch_current_unknowns,
+        &mut axes,
+        &mut visited,
+    )? {
+        Ok(Some(axes))
+    } else {
+        Ok(None)
+    }
+}
+
+fn collect_compact_ad_active_axes(
+    artifact: &CanonicalIrArtifact,
+    expr: ExprId,
+    variables: &HashMap<String, LoweredVariable>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
+    axes: &mut CompactDerivativeAxes,
+    visited: &mut HashSet<ExprId>,
+) -> Result<bool, RustBackendError> {
+    if !visited.insert(expr) {
+        return Ok(true);
+    }
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(expr))
+        .ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("expression {expr} is outside MIR arena"),
+            )
+        })?;
+
+    match &expression.kind {
+        HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => Ok(true),
+        HirExprKind::Identifier { name } => {
+            if variables
+                .get(name.as_str())
+                .is_some_and(|variable| !lowered_variable_has_zero_derivatives(variable))
+            {
+                return Ok(false);
+            }
+            Ok(true)
+        }
+        HirExprKind::BranchAccess { access, pos, neg } if access == "I" => {
+            let pos = compact_axis_node_index(artifact, pos.as_str())?;
+            let neg = neg
+                .as_deref()
+                .map(|node| compact_axis_node_index(artifact, node))
+                .transpose()?
+                .flatten();
+            if let Some(slot) = branch_current_unknowns.get(&branch_pair_key(pos, neg)) {
+                axes.branches.insert(slot.slot);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        HirExprKind::BranchAccess { access, pos, neg } => {
+            if access != "V" && access != "Temp" {
+                return Ok(false);
+            }
+            compact_insert_node_axis(artifact, axes, pos.as_str())?;
+            if let Some(neg) = neg.as_deref() {
+                compact_insert_node_axis(artifact, axes, neg)?;
+            }
+            Ok(true)
+        }
+        HirExprKind::NamedBranchAccess { access, name } if access == "I" => {
+            if let Some(slot) = branch_current_unknowns.get(name.as_str()) {
+                axes.branches.insert(slot.slot);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        HirExprKind::NamedBranchAccess { access, name } => {
+            if access != "V" && access != "Temp" {
+                return Ok(false);
+            }
+            let Some(branch) = artifact
+                .mir
+                .branches
+                .iter()
+                .find(|branch| branch.name.as_str() == name)
+            else {
+                return Ok(false);
+            };
+            if let Some(node) = branch.pos_node {
+                axes.nodes.insert(usize::from(node));
+            }
+            if let Some(node) = branch.neg_node {
+                axes.nodes.insert(usize::from(node));
+            }
+            Ok(true)
+        }
+        other => {
+            for child in expression_children(other) {
+                if !collect_compact_ad_active_axes(
+                    artifact,
+                    child,
+                    variables,
+                    branch_current_unknowns,
+                    axes,
+                    visited,
+                )? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+    }
+}
+
+fn compact_axis_node_index(
+    artifact: &CanonicalIrArtifact,
+    name: &str,
+) -> Result<Option<usize>, RustBackendError> {
+    if name == "0"
+        || artifact
+            .mir
+            .ground_nodes
+            .iter()
+            .any(|ground| ground.as_str() == name)
+    {
+        return Ok(None);
+    }
+    artifact
+        .mir
+        .nodes
+        .iter()
+        .find(|node| node.name.as_str() == name)
+        .map(|node| Some(usize::from(node.id)))
+        .ok_or_else(|| {
+            RustBackendError::unsupported(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("unknown branch access node '{name}'"),
+            )
+        })
+}
+
+fn compact_insert_node_axis(
+    artifact: &CanonicalIrArtifact,
+    axes: &mut CompactDerivativeAxes,
+    name: &str,
+) -> Result<(), RustBackendError> {
+    if let Some(index) = compact_axis_node_index(artifact, name)? {
+        axes.nodes.insert(index);
+    }
+    Ok(())
+}
+
+fn emit_compact_ad_derivative_indices(
+    out: &mut String,
+    prefix: &str,
+    axes: &CompactDerivativeAxes,
+) {
+    let node_indices = axes
+        .nodes
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let branch_indices = axes
+        .branches
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    out.push_str(&format!(
+        "        let {prefix}_node_derivative_indices: [usize; {}] = [{}];\n",
+        axes.nodes.len(),
+        node_indices
+    ));
+    out.push_str(&format!(
+        "        let {prefix}_branch_derivative_indices: [usize; {}] = [{}];\n",
+        axes.branches.len(),
+        branch_indices
+    ));
+}
+
 #[allow(clippy::too_many_arguments)]
 fn emit_compact_equation_stamp(
     artifact: &CanonicalIrArtifact,
@@ -25591,24 +25878,60 @@ fn emit_compact_equation_stamp(
 
     let ad_value = format!("{prefix}_ad");
     out.push_str(&format!("        let {ad_value}: AdValue = {lowered};\n"));
+    let active_axes = compact_ad_active_axes(
+        artifact,
+        equation.expression.id,
+        variables,
+        potential_branch_slots.current_slots(),
+    )?;
+    let indexed_axes = active_axes.as_ref().filter(|axes| {
+        axes.should_emit_indexed(
+            artifact.mir.nodes.len(),
+            potential_branch_slots.branches().len(),
+        )
+    });
     match equation.kind {
         MirEquationKind::Current => {
-            out.push_str("        stamper.stamp_current_dense_local(\n");
-            out.push_str(&format!(
-                "            {},\n",
-                optional_node_local_expr(equation.branch.pos_node)
-            ));
-            out.push_str(&format!(
-                "            {},\n",
-                optional_node_local_expr(equation.branch.neg_node)
-            ));
-            out.push_str(&format!(
-                "            self.multiplicity * {ad_value}.value,\n"
-            ));
-            out.push_str(&format!("            &{ad_value}.node_derivatives,\n"));
-            out.push_str(&format!("            &{ad_value}.branch_derivatives,\n"));
-            out.push_str("            self.multiplicity,\n");
-            out.push_str("        );\n");
+            if let Some(axes) = indexed_axes {
+                emit_compact_ad_derivative_indices(out, prefix, axes);
+                out.push_str("        stamper.stamp_current_indexed_ad_local(\n");
+                out.push_str(&format!(
+                    "            {},\n",
+                    optional_node_local_expr(equation.branch.pos_node)
+                ));
+                out.push_str(&format!(
+                    "            {},\n",
+                    optional_node_local_expr(equation.branch.neg_node)
+                ));
+                out.push_str(&format!(
+                    "            self.multiplicity * {ad_value}.value,\n"
+                ));
+                out.push_str(&format!("            &{prefix}_node_derivative_indices,\n"));
+                out.push_str(&format!("            &{ad_value}.node_derivatives,\n"));
+                out.push_str(&format!(
+                    "            &{prefix}_branch_derivative_indices,\n"
+                ));
+                out.push_str(&format!("            &{ad_value}.branch_derivatives,\n"));
+                out.push_str("            self.multiplicity,\n");
+                out.push_str("        );\n");
+            } else {
+                out.push_str("        stamper.stamp_current_dense_local(\n");
+                out.push_str(&format!(
+                    "            {},\n",
+                    optional_node_local_expr(equation.branch.pos_node)
+                ));
+                out.push_str(&format!(
+                    "            {},\n",
+                    optional_node_local_expr(equation.branch.neg_node)
+                ));
+                out.push_str(&format!(
+                    "            self.multiplicity * {ad_value}.value,\n"
+                ));
+                out.push_str(&format!("            &{ad_value}.node_derivatives,\n"));
+                out.push_str(&format!("            &{ad_value}.branch_derivatives,\n"));
+                out.push_str("            self.multiplicity,\n");
+                out.push_str("        );\n");
+            }
         }
         MirEquationKind::Potential => {
             let slot = potential_branch_slots
@@ -25623,12 +25946,26 @@ fn emit_compact_equation_stamp(
                         ),
                     )
                 })?;
-            out.push_str("        stamper.stamp_potential_dense_local(\n");
-            out.push_str(&format!("            {slot},\n"));
-            out.push_str(&format!("            {ad_value}.value,\n"));
-            out.push_str(&format!("            &{ad_value}.node_derivatives,\n"));
-            out.push_str(&format!("            &{ad_value}.branch_derivatives,\n"));
-            out.push_str("        );\n");
+            if let Some(axes) = indexed_axes {
+                emit_compact_ad_derivative_indices(out, prefix, axes);
+                out.push_str("        stamper.stamp_potential_indexed_ad_local(\n");
+                out.push_str(&format!("            {slot},\n"));
+                out.push_str(&format!("            {ad_value}.value,\n"));
+                out.push_str(&format!("            &{prefix}_node_derivative_indices,\n"));
+                out.push_str(&format!("            &{ad_value}.node_derivatives,\n"));
+                out.push_str(&format!(
+                    "            &{prefix}_branch_derivative_indices,\n"
+                ));
+                out.push_str(&format!("            &{ad_value}.branch_derivatives,\n"));
+                out.push_str("        );\n");
+            } else {
+                out.push_str("        stamper.stamp_potential_dense_local(\n");
+                out.push_str(&format!("            {slot},\n"));
+                out.push_str(&format!("            {ad_value}.value,\n"));
+                out.push_str(&format!("            &{ad_value}.node_derivatives,\n"));
+                out.push_str(&format!("            &{ad_value}.branch_derivatives,\n"));
+                out.push_str("        );\n");
+            }
         }
         MirEquationKind::Indirect => {
             return Err(unsupported(artifact, "indirect contributions"));
@@ -27836,7 +28173,25 @@ fn emit_assignment_statement(
 
     let target_index = usize::from(target.id);
     let target_local = format!("scratch.values[{target_index}]");
-    out.push_str(&format!("{indent}{target_local} = {};\n", lowered.value));
+    let normal_derivatives_are_zero = lowered
+        .derivatives
+        .iter()
+        .all(|value| is_zero_derivative(value))
+        && lowered
+            .branch_derivatives
+            .iter()
+            .all(|value| is_zero_derivative(value));
+    if normal_derivatives_are_zero {
+        out.push_str(&format!(
+            "{indent}scratch.store_scalar({target_index}, {});\n",
+            lowered.value
+        ));
+    } else {
+        out.push_str(&format!("{indent}{target_local} = {};\n", lowered.value));
+        out.push_str(&format!(
+            "{indent}scratch.mark_derivatives_dirty({target_index});\n"
+        ));
+    }
     let mut derivative_locals = Vec::with_capacity(lowered.derivatives.len());
     for (node_index, derivative) in lowered.derivatives.iter().enumerate() {
         if is_zero_derivative(derivative) {
@@ -28122,9 +28477,12 @@ fn emit_compact_assignment_statement(
         out.push_str(&format!(
             "{indent}scratch.bool_values[{target_index}] = {condition};\n"
         ));
-        out.push_str(&format!(
-            "{indent}scratch.values[{target_index}] = if scratch.bool_values[{target_index}] {{ 1.0 }} else {{ 0.0 }};\n"
-        ));
+        push_compact_scalar_store(
+            out,
+            indent,
+            target_index,
+            &format!("if scratch.bool_values[{target_index}] {{ 1.0 }} else {{ 0.0 }}"),
+        );
         variables.insert(
             target.name.to_string(),
             boolean_scratch_variable(artifact, target_index, branch_axis_count),
@@ -28133,9 +28491,7 @@ fn emit_compact_assignment_statement(
     }
 
     if let Some(value) = emitter.zero_derivative_value_expr(assignment.expr.id)? {
-        out.push_str(&format!(
-            "{indent}scratch.values[{target_index}] = {value};\n"
-        ));
+        push_compact_scalar_store(out, indent, target_index, &value);
         variables.insert(
             target.name.to_string(),
             zero_derivative_scratch_variable(artifact, target_index, branch_axis_count),

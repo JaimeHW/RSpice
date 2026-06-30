@@ -2103,7 +2103,7 @@ fn rust_backend_collapses_zero_conditional_derivatives() {
     assert!(!stamp.contains("{ 0.0 } else { 0.0 }"), "{stamp}");
     assert!(!stamp.contains("_d_n0: f64 = if"), "{stamp}");
     assert!(!stamp.contains("_d_n1: f64 = if"), "{stamp}");
-    assert!(stamp.contains("s.v[0] = (if"), "{stamp}");
+    assert!(stamp.contains("s.store_scalar(0, (if"), "{stamp}");
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
 }
 
@@ -8066,7 +8066,10 @@ fn rust_backend_folds_compact_scalar_only_arithmetic_to_scratch_value() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("s.v[0] = (0.5 * p.p0);"), "{stamp}");
+    assert!(
+        stamp.contains("s.store_scalar(0, (0.5 * p.p0));"),
+        "{stamp}"
+    );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
     assert!(
         !stamp.contains("A::scale(A::constant(p.p0), 0.5)"),
@@ -8095,7 +8098,7 @@ fn rust_backend_folds_compact_scalar_comparisons_without_ad_wrappers() {
 
     assert!(stamp.contains("s.b[0] = (p.p0 <= 0.0);"), "{stamp}");
     assert!(
-        stamp.contains("s.v[0] = if s.b[0] { 1.0 } else { 0.0 };"),
+        stamp.contains("s.store_scalar(0, if s.b[0] { 1.0 } else { 0.0 });"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
@@ -8126,7 +8129,7 @@ fn rust_backend_stores_zero_derivative_compact_comparison_assignments_as_values(
 
     assert!(stamp.contains("s.b[0] = ((nv0 - nv1) > p.p0);"), "{stamp}");
     assert!(
-        stamp.contains("s.v[0] = if s.b[0] { 1.0 } else { 0.0 };"),
+        stamp.contains("s.store_scalar(0, if s.b[0] { 1.0 } else { 0.0 });"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
@@ -8156,7 +8159,7 @@ fn rust_backend_caches_compact_boolean_assignments_for_later_conditions() {
 
     assert!(stamp.contains("s.b[0] = ((nv0 - nv1) > p.p0);"), "{stamp}");
     assert!(
-        stamp.contains("s.v[0] = if s.b[0] { 1.0 } else { 0.0 };"),
+        stamp.contains("s.store_scalar(0, if s.b[0] { 1.0 } else { 0.0 });"),
         "{stamp}"
     );
     assert!(stamp.contains("if s.b[0] {"), "{stamp}");
@@ -8185,7 +8188,7 @@ fn rust_backend_caches_compact_boolean_literal_conditionals_for_later_conditions
 
     assert!(stamp.contains("s.b[0] = (!(p.p0 > 0.0));"), "{stamp}");
     assert!(
-        stamp.contains("s.v[0] = if s.b[0] { 1.0 } else { 0.0 };"),
+        stamp.contains("s.store_scalar(0, if s.b[0] { 1.0 } else { 0.0 });"),
         "{stamp}"
     );
     assert!(stamp.contains("if s.b[0] {"), "{stamp}");
@@ -8235,7 +8238,7 @@ fn rust_backend_lowers_compact_comparison_conditional_operands_as_values() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("s.v[0] = if"), "{stamp}");
+    assert!(stamp.contains("s.store_scalar(0, if"), "{stamp}");
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
     assert!(!stamp.contains("A::constant(if"), "{stamp}");
     assert!(!stamp.contains(".value) { 1.0 } else { 0.0 }"), "{stamp}");
@@ -8262,7 +8265,7 @@ fn rust_backend_lowers_compact_mixed_scalar_comparisons_without_scalar_ad_wrappe
 
     assert!(stamp.contains("s.b[0] = ((nv0 - nv1) > 0.0);"), "{stamp}");
     assert!(
-        stamp.contains("s.v[0] = if s.b[0] { 1.0 } else { 0.0 };"),
+        stamp.contains("s.store_scalar(0, if s.b[0] { 1.0 } else { 0.0 });"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
@@ -8389,7 +8392,10 @@ fn rust_backend_folds_nested_compact_scalar_only_arithmetic_to_scratch_value() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("s.v[0] = ((4.0 * p.p0) * p.p0);"), "{stamp}");
+    assert!(
+        stamp.contains("s.store_scalar(0, ((4.0 * p.p0) * p.p0));"),
+        "{stamp}"
+    );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
     assert!(
         !stamp.contains("A::scale(A::constant((4.0 * p.p0)), p.p0)"),
@@ -9954,7 +9960,7 @@ fn rust_backend_keeps_guard_only_assignments_value_only() {
         .join("\n");
 
     assert!(
-        stamp.contains("s.v[0] = (nv0 - nv1);"),
+        stamp.contains("s.store_scalar(0, (nv0 - nv1));"),
         "the guard probe should keep only its scalar voltage value:\n{stamp}"
     );
     assert!(
@@ -11070,8 +11076,50 @@ fn rust_backend_uses_compact_ad_for_large_dense_equations() {
         "large dense equations should stamp directly from compact AD branch derivatives:\n{stamp}"
     );
     assert!(
+        !stamp.contains("stamp_current_indexed_ad_local"),
+        "fully dense compact AD equations should not carry derivative index arrays:\n{stamp}"
+    );
+    assert!(
         !stamp.contains("let eq0_d_n"),
         "large dense equations should not scalarize every node derivative:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_indexed_compact_ad_for_large_static_zero_derivatives() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(large_static_zero_derivative_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile large static-zero derivative equation");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("let eq0_ad: A ="), "{stamp}");
+    assert!(
+        stamp.contains("stamp_current_indexed_ad_local"),
+        "large compact AD equations with static zero lanes should use indexed AD stamping:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("let eq0_node_derivative_indices: [usize; 6] = [0, 1, 2, 3, 4, 5];"),
+        "indexed compact AD stamp should carry only active node lanes:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("&eq0_ad.dn"),
+        "indexed compact AD stamp should read selected lanes from the AD derivative row:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("stamp_current_dense_local"),
+        "large static-zero compact AD equation should not walk the full dense derivative row:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -11764,6 +11812,31 @@ pub mod runtime {{
                         + branch_derivatives.iter().copied().sum::<f64>());
         }}
 
+        pub fn stamp_current_indexed_ad_local(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            node_derivative_indices: &[usize],
+            node_derivatives: &[f64],
+            branch_derivative_indices: &[usize],
+            branch_derivatives: &[f64],
+            derivative_scale: f64,
+        ) {{
+            *self.touched += value
+                + derivative_scale
+                    * (node_derivative_indices
+                        .iter()
+                        .copied()
+                        .map(|index| node_derivatives[index])
+                        .sum::<f64>()
+                        + branch_derivative_indices
+                            .iter()
+                            .copied()
+                            .map(|index| branch_derivatives[index])
+                            .sum::<f64>());
+        }}
+
         pub fn stamp_potential_branch_local(
             &mut self,
             _pos: Option<usize>,
@@ -11899,6 +11972,28 @@ pub mod runtime {{
                 + node_derivatives.iter().copied().sum::<f64>()
                 + branch_derivative_indices.iter().copied().map(|index| index as f64).sum::<f64>()
                 + branch_derivatives.iter().copied().sum::<f64>();
+        }}
+
+        pub fn stamp_potential_indexed_ad_local(
+            &mut self,
+            _branch: usize,
+            value: f64,
+            node_derivative_indices: &[usize],
+            node_derivatives: &[f64],
+            branch_derivative_indices: &[usize],
+            branch_derivatives: &[f64],
+        ) {{
+            *self.touched += value
+                + node_derivative_indices
+                    .iter()
+                    .copied()
+                    .map(|index| node_derivatives[index])
+                    .sum::<f64>()
+                + branch_derivative_indices
+                    .iter()
+                    .copied()
+                    .map(|index| branch_derivatives[index])
+                    .sum::<f64>();
         }}
     }}
 
@@ -17648,6 +17743,27 @@ module large_dense_equation(p0, p1, p2, p3, p4, p5, p6, p7);
             exp(V(p0, p2) * 0.01) + ln(1.0 + V(p3, p5) * V(p3, p5))
         ) + (
             tanh(V(p1, p4)) + atan(V(p7, p0))
+        );
+    end
+endmodule
+"#
+}
+
+fn large_static_zero_derivative_source() -> &'static str {
+    r#"
+module large_static_zero_derivative(p0, p1, p2, p3, p4, p5, p6, p7);
+    inout p0, p1, p2, p3, p4, p5, p6, p7;
+    electrical p0, p1, p2, p3, p4, p5, p6, p7;
+    parameter real g0 = 1.1;
+    parameter real g1 = 0.7;
+    analog begin
+        I(p0, p1) <+ (
+            (g0 * V(p0, p1) + sin(V(p2, p3)) + cos(V(p4, p5))) *
+            (g1 + V(p0, p2) * V(p0, p2))
+        ) + (
+            exp(V(p1, p3) * 0.01) + ln(1.0 + V(p3, p5) * V(p3, p5))
+        ) + (
+            tanh(V(p1, p4)) + atan(V(p5, p0))
         );
     end
 endmodule
