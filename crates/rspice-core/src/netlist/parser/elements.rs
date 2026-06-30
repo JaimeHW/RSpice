@@ -1797,6 +1797,48 @@ fn collect_expression_argument(
     Ok(expression)
 }
 
+fn try_controlled_source_behavioral_assignment(
+    stream: &mut TokenStream,
+    line_num: usize,
+    is_voltage_output: bool,
+) -> Result<Option<String>, ParseError> {
+    let TokenKind::Ident(raw) = &stream.peek().kind else {
+        return Ok(None);
+    };
+    let (designator, inline_expr) = if let Some((lhs, rhs)) = raw.split_once('=') {
+        (lhs.trim().to_ascii_uppercase(), rhs.trim().to_string())
+    } else {
+        if !matches!(stream.peek_n(1).kind, TokenKind::Equals) {
+            return Ok(None);
+        }
+        (raw.trim().to_ascii_uppercase(), String::new())
+    };
+
+    let is_supported = match designator.as_str() {
+        "VALUE" => true,
+        "V" | "VOL" | "VOLTAGE" => is_voltage_output,
+        "I" | "CUR" | "CURRENT" => !is_voltage_output,
+        _ => false,
+    };
+    if !is_supported {
+        return Ok(None);
+    }
+
+    stream.advance();
+    let expression = if inline_expr.is_empty() {
+        stream.consume(&TokenKind::Equals);
+        collect_expression_argument(stream, line_num, None)?
+    } else {
+        let tail = collect_expression_argument(stream, line_num, None).unwrap_or_default();
+        if tail.is_empty() {
+            inline_expr
+        } else {
+            format!("{inline_expr} {tail}")
+        }
+    };
+    Ok(Some(expression))
+}
+
 /// Build the polynomial expression for SPICE2-style `POLY(n)` sources.
 ///
 /// Monomials follow the graded ordering every PSpice-derived deck assumes:
@@ -1971,6 +2013,17 @@ fn parse_voltage_controlled_source(
             }
         }
     };
+
+    if let Some(expression) =
+        try_controlled_source_behavioral_assignment(stream, line_num, is_voltage_output)?
+    {
+        elements.push(Element {
+            name,
+            kind: lower_behavioral(expression),
+            nodes: vec![node_pos, node_neg],
+        });
+        return Ok(());
+    }
 
     match try_controlled_source_form(stream, line_num)? {
         Some(ControlledSourceForm::Poly(dims)) => {

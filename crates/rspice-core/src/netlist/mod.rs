@@ -2995,6 +2995,28 @@ mod tests {
     }
 
     #[test]
+    fn controlled_sources_accept_behavioral_output_assignments() {
+        let netlist = Netlist::parse(
+            "controlled behavioral aliases\n\
+             Gtop vtop vout cur='loadcur*v(u1)'\n\
+             Etop vout 0 vol='2*v(in)'\n\
+             .end\n",
+        )
+        .expect("G cur= and E vol= behavioral aliases should parse");
+
+        assert!(matches!(
+            &netlist.elements[0].kind,
+            ElementKind::BehavioralCurrent { expression, .. }
+                if expression == "loadcur*v(u1)"
+        ));
+        assert!(matches!(
+            &netlist.elements[1].kind,
+            ElementKind::BehavioralVoltage { expression, .. }
+                if expression == "2*v(in)"
+        ));
+    }
+
+    #[test]
     fn linear_controlled_sources_reject_unconsumed_trailing_tokens() {
         for line in [
             "E1 out 0 in 0 2 garbage",
