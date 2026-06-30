@@ -1,6 +1,7 @@
 use super::runtime::ExecutableMemory;
 use super::{EvalContext, JitError, JitResult};
 use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
+use crate::vm::terminal_pair_current_endpoints;
 
 type AssignmentEntry = unsafe extern "C" fn(*const EvalContext, *mut f64);
 type ValueEntry = unsafe extern "C" fn(*const EvalContext, *const f64) -> f64;
@@ -242,7 +243,12 @@ impl NativeModel {
         required_storage: NativeRequiredStorage,
     ) -> JitResult<Self> {
         Self::validate_entry_offsets(&entries, image.len(), num_parameters)?;
-        Self::validate_current_dependencies(&entries, &current_dependencies, num_branch_unknowns)?;
+        Self::validate_current_dependencies(
+            &entries,
+            &current_dependencies,
+            num_terminals,
+            num_branch_unknowns,
+        )?;
 
         let jacobian_entry_points = entries.jacobians.iter().map(Vec::len).sum();
         let reactive_jacobian_entry_points = entries.reactive_jacobians.iter().map(Vec::len).sum();
@@ -452,6 +458,7 @@ impl NativeModel {
     fn validate_current_dependencies(
         entries: &NativeEntryOffsets,
         dependencies: &NativeCurrentDependencies,
+        num_terminals: usize,
         num_branch_unknowns: usize,
     ) -> JitResult<()> {
         if dependencies.static_condition_branch_unknowns.len() != entries.static_conditions.len()
@@ -509,6 +516,37 @@ impl NativeModel {
             });
         }
 
+        Self::validate_current_pair_dependency_list(
+            "assignment",
+            &dependencies.assignment_current_pairs,
+            num_terminals,
+        )?;
+        Self::validate_current_pair_dependency_table(
+            "stamp value",
+            &dependencies.stamp_values,
+            num_terminals,
+        )?;
+        Self::validate_current_pair_dependency_nested_table(
+            "jacobian",
+            &dependencies.jacobians,
+            num_terminals,
+        )?;
+        Self::validate_current_pair_dependency_nested_table(
+            "reactive jacobian",
+            &dependencies.reactive_jacobians,
+            num_terminals,
+        )?;
+        Self::validate_current_pair_dependency_table(
+            "noise psd",
+            &dependencies.noise_psd,
+            num_terminals,
+        )?;
+        Self::validate_current_pair_dependency_table(
+            "noise exponent",
+            &dependencies.noise_exponents,
+            num_terminals,
+        )?;
+
         Self::validate_branch_unknown_dependency_list(
             "assignment",
             &dependencies.assignment_branch_unknowns,
@@ -544,6 +582,60 @@ impl NativeModel {
             &dependencies.noise_exponent_branch_unknowns,
             num_branch_unknowns,
         )?;
+
+        Ok(())
+    }
+
+    fn validate_current_pair_dependency_table(
+        table_name: &str,
+        dependencies: &[Vec<usize>],
+        num_terminals: usize,
+    ) -> JitResult<()> {
+        for (entry_index, entry_dependencies) in dependencies.iter().enumerate() {
+            Self::validate_current_pair_dependency_list(
+                &format!("{table_name} {entry_index}"),
+                entry_dependencies,
+                num_terminals,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_current_pair_dependency_nested_table(
+        table_name: &str,
+        dependencies: &[Vec<Vec<usize>>],
+        num_terminals: usize,
+    ) -> JitResult<()> {
+        for (outer_index, outer_dependencies) in dependencies.iter().enumerate() {
+            for (inner_index, entry_dependencies) in outer_dependencies.iter().enumerate() {
+                Self::validate_current_pair_dependency_list(
+                    &format!("{table_name} {outer_index}.{inner_index}"),
+                    entry_dependencies,
+                    num_terminals,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_current_pair_dependency_list(
+        dependency_name: &str,
+        dependencies: &[usize],
+        num_terminals: usize,
+    ) -> JitResult<()> {
+        for index in dependencies {
+            if terminal_pair_current_endpoints(*index, num_terminals).is_none() {
+                return Err(JitError::InternalCompilerError {
+                    model: "native-model".into(),
+                    detail: format!(
+                        "{dependency_name} terminal-pair current dependency {index} invalid for compiled terminal count {num_terminals}"
+                    )
+                    .into(),
+                });
+            }
+        }
 
         Ok(())
     }
@@ -1004,6 +1096,46 @@ mod tests {
 
         assert!(error.to_string().contains("reactive-jacobian entry shape"));
         assert!(error.to_string().contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn native_model_rejects_current_pair_dependency_invalid_for_terminal_count() {
+        let mut bytes = vec![0xC3]; // assignment: ret
+        let stamp_entry = append_test_value_stub(&mut bytes, 1);
+        let image = ExecutableMemory::allocate(&bytes).expect("allocate native test image");
+        let entries = NativeEntryOffsets {
+            assignment: CodeOffset::new(0),
+            parameter_defaults: vec![],
+            static_conditions: vec![None],
+            stamp_values: vec![stamp_entry],
+            jacobians: vec![vec![]],
+            reactive_jacobians: vec![vec![]],
+            noise_psd: vec![],
+            noise_exponents: vec![],
+        };
+        let mut dependencies = NativeModel::empty_current_dependencies(&entries);
+        dependencies.stamp_values[0].push(3);
+
+        let error = NativeModel::from_executable_image_with_dependencies(
+            1,
+            0,
+            0,
+            0,
+            0,
+            image,
+            entries,
+            dependencies,
+            NativeRequiredStorage::default(),
+        )
+        .expect_err("invalid terminal-pair current dependency must be rejected");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("stamp value 0 terminal-pair current dependency 3"),
+            "{message}"
+        );
+        assert!(message.contains("compiled terminal count 1"), "{message}");
+        assert!(message.contains("no interpreter fallback"), "{message}");
     }
 
     #[test]
