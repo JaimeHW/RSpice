@@ -40,6 +40,23 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("abi3-py38", features)
         self.assertIn("generate-import-lib", features)
 
+    def test_native_jit_has_no_cranelift_dependency_or_source_references(self) -> None:
+        active_paths = [ROOT / "Cargo.toml", ROOT / "Cargo.lock"]
+        active_paths.extend((ROOT / "crates").rglob("Cargo.toml"))
+        active_paths.extend((ROOT / "crates").rglob("*.rs"))
+
+        offenders = []
+        for path in active_paths:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if re.search(r"cranelift", text, flags=re.IGNORECASE):
+                offenders.append(path.relative_to(ROOT).as_posix())
+
+        self.assertEqual(
+            [],
+            offenders,
+            "native JIT must not reintroduce Cranelift in active manifests or Rust source",
+        )
+
     def test_linux_fast_ci_reduces_test_artifact_pressure(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
 
