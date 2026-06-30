@@ -254,7 +254,14 @@ fn generate_stamp_file(
     if ddt_slots.len() > 0 {
         out.push_str("        let ddt_state_current = self.ddt_state_current.as_mut();\n");
         out.push_str("        let ddt_state_previous = self.ddt_state_previous.as_mut();\n");
+        out.push_str("        let ddt_state_older = self.ddt_state_older.as_mut();\n");
         out.push_str("        let ddt_state_initialized = self.ddt_state_initialized.as_mut();\n");
+        out.push_str(
+            "        let ddt_derivative_current = self.ddt_derivative_current.as_mut();\n",
+        );
+        out.push_str(
+            "        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();\n",
+        );
     }
     if has_idt_slots {
         out.push_str("        let idt_state_current = self.idt_state_current.as_mut();\n");
@@ -262,10 +269,19 @@ fn generate_stamp_file(
         out.push_str("        let idt_state_initialized = self.idt_state_initialized.as_mut();\n");
     }
     if ddt_slots.len() > 0 || has_idt_slots {
-        out.push_str("        let ddt_active = timestep.abs() > Instance::DDT_EPSILON;\n");
+        out.push_str("        let ddt_active = self.ddt_coefficients.active;\n");
     }
     if ddt_slots.len() > 0 {
-        out.push_str("        let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };\n");
+        out.push_str("        let ddt_scale = self.ddt_coefficients.derivative_scale;\n");
+        out.push_str(
+            "        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;\n",
+        );
+        out.push_str(
+            "        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;\n",
+        );
+        out.push_str(
+            "        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;\n",
+        );
     }
     if has_idt_slots {
         out.push_str("        let idt_scale = if ddt_active { timestep } else { 0.0 };\n");
@@ -352,9 +368,15 @@ fn emit_transient_state_helpers(ddt_slots: &DdtSlots, out: &mut String) {
         out.push_str("fn eval_ddt<const STATE_COUNT: usize>(\n");
         out.push_str("    current: &mut [f64; STATE_COUNT],\n");
         out.push_str("    previous: &mut [f64; STATE_COUNT],\n");
+        out.push_str("    older: &mut [f64; STATE_COUNT],\n");
         out.push_str("    initialized: &mut [bool; STATE_COUNT],\n");
+        out.push_str("    derivative_current: &mut [f64; STATE_COUNT],\n");
+        out.push_str("    derivative_previous: &mut [f64; STATE_COUNT],\n");
         out.push_str("    ddt_active: bool,\n");
         out.push_str("    ddt_scale: f64,\n");
+        out.push_str("    ddt_previous_value_scale: f64,\n");
+        out.push_str("    ddt_older_value_scale: f64,\n");
+        out.push_str("    ddt_previous_derivative_scale: f64,\n");
         out.push_str("    slot: usize,\n");
         out.push_str("    value: f64,\n");
         out.push_str(") -> f64 {\n");
@@ -364,11 +386,23 @@ fn emit_transient_state_helpers(ddt_slots: &DdtSlots, out: &mut String) {
         out.push_str(
             "    let previous_value = if initialized[slot] { previous[slot] } else { value };\n",
         );
+        out.push_str(
+            "    let older_value = if initialized[slot] { older[slot] } else { value };\n",
+        );
         out.push_str("    current[slot] = value;\n");
         out.push_str("    if ddt_active {\n");
-        out.push_str("        (value - previous_value) * ddt_scale\n");
+        out.push_str("        let result = value * ddt_scale\n");
+        out.push_str("            - previous_value * ddt_previous_value_scale\n");
+        out.push_str("            - older_value * ddt_older_value_scale\n");
+        out.push_str("            - derivative_previous[slot] * ddt_previous_derivative_scale;\n");
+        out.push_str("        derivative_current[slot] = result;\n");
+        out.push_str("        result\n");
         out.push_str("    } else {\n");
+        out.push_str("        current[slot] = value;\n");
         out.push_str("        previous[slot] = value;\n");
+        out.push_str("        older[slot] = value;\n");
+        out.push_str("        derivative_current[slot] = 0.0;\n");
+        out.push_str("        derivative_previous[slot] = 0.0;\n");
         out.push_str("        initialized[slot] = true;\n");
         out.push_str("        0.0\n");
         out.push_str("    }\n");
@@ -1002,7 +1036,7 @@ fn emit_transient_operator_root(
             })?;
             let ddt_value = format!("{}_ddt", value_name(root));
             out.push_str(&format!(
-                "        let {ddt_value}: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, {slot}, {root_expr});\n"
+                "        let {ddt_value}: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, {slot}, {root_expr});\n"
             ));
             Ok((ddt_value, "ddt_scale".to_string()))
         }

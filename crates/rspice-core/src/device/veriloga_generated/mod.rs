@@ -13,6 +13,63 @@ pub mod builtins {
     include!("registry.rs");
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct GeneratedDdtCoefficients {
+    pub active: bool,
+    pub derivative_scale: Value,
+    pub previous_value_scale: Value,
+    pub older_value_scale: Value,
+    pub previous_derivative_scale: Value,
+}
+
+impl GeneratedDdtCoefficients {
+    #[inline]
+    pub const fn inactive() -> Self {
+        Self {
+            active: false,
+            derivative_scale: 0.0,
+            previous_value_scale: 0.0,
+            older_value_scale: 0.0,
+            previous_derivative_scale: 0.0,
+        }
+    }
+
+    #[inline]
+    pub fn from_companion(
+        coefficients: &crate::analysis::CompanionCoefficients,
+        timestep: Value,
+    ) -> Self {
+        const DDT_EPSILON: Value = 1.0e-20;
+        if !timestep.is_finite() || timestep.abs() <= DDT_EPSILON {
+            return Self::inactive();
+        }
+
+        let inverse_timestep = 1.0 / timestep;
+        Self {
+            active: true,
+            derivative_scale: coefficients.coeff_g * inverse_timestep,
+            previous_value_scale: coefficients.coeff_v_n * inverse_timestep,
+            older_value_scale: if coefficients.needs_two_history {
+                coefficients.coeff_v_n_minus_1 * inverse_timestep
+            } else {
+                0.0
+            },
+            previous_derivative_scale: if coefficients.needs_current_history {
+                1.0
+            } else {
+                0.0
+            },
+        }
+    }
+}
+
+impl Default for GeneratedDdtCoefficients {
+    #[inline]
+    fn default() -> Self {
+        Self::inactive()
+    }
+}
+
 #[derive(Clone)]
 pub struct BuiltinVerilogAInstance {
     pub model_name: &'static str,
@@ -107,9 +164,14 @@ impl BuiltinVerilogADevices {
     }
 
     #[inline]
-    pub fn set_timepoint(&mut self, time: Value, timestep: Value) {
+    pub fn set_timepoint(
+        &mut self,
+        time: Value,
+        timestep: Value,
+        ddt_coefficients: GeneratedDdtCoefficients,
+    ) {
         for device in &mut self.devices {
-            device.set_timepoint(time, timestep);
+            device.set_timepoint(time, timestep, ddt_coefficients);
         }
     }
 
@@ -192,8 +254,13 @@ impl BuiltinVerilogAInstance {
     }
 
     #[inline]
-    pub fn set_timepoint(&mut self, time: Value, timestep: Value) {
-        self.kind.set_timepoint(time, timestep);
+    pub fn set_timepoint(
+        &mut self,
+        time: Value,
+        timestep: Value,
+        ddt_coefficients: GeneratedDdtCoefficients,
+    ) {
+        self.kind.set_timepoint(time, timestep, ddt_coefficients);
     }
 
     #[inline]
@@ -304,6 +371,12 @@ pub fn instantiate_builtin(
                         name, error
                     ))
                 })?
+            }
+            crate::netlist::ParametricValue::String(_)
+            | crate::netlist::ParametricValue::StringExpression(_) => {
+                return Err(crate::engine::SimulationError::Circuit(format!(
+                    "Generated Verilog-A parameter '{name}' requires a numeric value"
+                )));
             }
         };
         resolved.push((name.clone(), value));

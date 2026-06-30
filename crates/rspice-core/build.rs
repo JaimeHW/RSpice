@@ -338,16 +338,16 @@ fn write_registry(
     out.push_str("    }\n");
     out.push_str("\n");
     out.push_str(
-        "    pub fn set_timepoint(&mut self, time: crate::Value, timestep: crate::Value) {\n",
+        "    pub fn set_timepoint(&mut self, time: crate::Value, timestep: crate::Value, ddt_coefficients: super::GeneratedDdtCoefficients) {\n",
     );
     if devices.is_empty() {
-        out.push_str("        let _ = (self, time, timestep);\n");
+        out.push_str("        let _ = (self, time, timestep, ddt_coefficients);\n");
     } else {
         out.push_str("        match self {\n");
         for (index, _device) in devices.iter().enumerate() {
             writeln!(
                 out,
-                "            Self::Device{index}(device) => device.set_timepoint(time, timestep),"
+                "            Self::Device{index}(device) => device.set_timepoint(time, timestep, ddt_coefficients),"
             )?;
         }
         out.push_str("        }\n");

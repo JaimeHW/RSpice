@@ -9107,11 +9107,17 @@ fn rust_backend_hoists_dynamic_operator_scales_across_helper_blocks() {
         .as_str();
 
     assert!(
-        stamp.contains("let ddt_active = timestep.abs() > Instance::DDT_EPSILON;"),
+        stamp.contains("let ddt_active = self.ddt_coefficients.active;"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };"),
+        stamp.contains("let ddt_scale = self.ddt_coefficients.derivative_scale;"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains(
+            "let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;"
+        ),
         "{stamp}"
     );
     assert!(
@@ -9120,7 +9126,7 @@ fn rust_backend_hoists_dynamic_operator_scales_across_helper_blocks() {
     );
     assert!(
         stamp.contains(
-            "Self::stamp_transient_equations_block_0(stamper, s, multiplicity, ddt_active, ddt_scale, ddt_state_current"
+            "Self::stamp_transient_equations_block_0(stamper, s, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current"
         ),
         "{stamp}"
     );
@@ -9169,7 +9175,7 @@ fn rust_backend_hoists_dynamic_operator_scales_across_helper_blocks() {
     );
     assert!(
         helper.contains(
-            "eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale"
+            "eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale"
         ),
         "{helper}"
     );
@@ -9237,12 +9243,12 @@ fn rust_backend_omits_dynamic_operator_state_from_algebraic_helpers_in_dynamic_m
         .as_str();
 
     assert!(
-        stamp.contains("let ddt_active = timestep.abs() > Instance::DDT_EPSILON;"),
+        stamp.contains("let ddt_active = self.ddt_coefficients.active;"),
         "{stamp}"
     );
     assert!(
         stamp.contains(
-            "eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale"
+            "eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale"
         ),
         "{stamp}"
     );
@@ -9579,11 +9585,11 @@ fn rust_backend_uses_single_ddt_derivative_scale_per_stamp_body() {
         .as_str();
 
     assert!(
-        stamp.contains("let ddt_active = timestep.abs() > Instance::DDT_EPSILON;"),
+        stamp.contains("let ddt_active = self.ddt_coefficients.active;"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };"),
+        stamp.contains("let ddt_scale = self.ddt_coefficients.derivative_scale;"),
         "{stamp}"
     );
     assert!(!stamp.contains("ddt_jacobian(timestep, 0.0)"), "{stamp}");
@@ -11600,6 +11606,27 @@ pub mod runtime {{
 {}
     }}
 
+    #[derive(Clone, Copy)]
+    pub struct GeneratedDdtCoefficients {{
+        pub active: bool,
+        pub derivative_scale: f64,
+        pub previous_value_scale: f64,
+        pub older_value_scale: f64,
+        pub previous_derivative_scale: f64,
+    }}
+
+    impl GeneratedDdtCoefficients {{
+        pub const fn inactive() -> Self {{
+            Self {{
+                active: false,
+                derivative_scale: 0.0,
+                previous_value_scale: 0.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 0.0,
+            }}
+        }}
+    }}
+
     pub struct GeneratedEvalContext<'a> {{
         voltages: &'a [f64],
     }}
@@ -12280,6 +12307,27 @@ pub mod runtime {{
 
     pub mod support {{
 {}
+    }}
+
+    #[derive(Clone, Copy)]
+    pub struct GeneratedDdtCoefficients {{
+        pub active: bool,
+        pub derivative_scale: f64,
+        pub previous_value_scale: f64,
+        pub older_value_scale: f64,
+        pub previous_derivative_scale: f64,
+    }}
+
+    impl GeneratedDdtCoefficients {{
+        pub const fn inactive() -> Self {{
+            Self {{
+                active: false,
+                derivative_scale: 0.0,
+                previous_value_scale: 0.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 0.0,
+            }}
+        }}
     }}
 
     pub struct GeneratedEvalContext<'a> {{

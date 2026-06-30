@@ -202,6 +202,9 @@ fn stamp_helper_base_call_args(
     }
     if operator_usage.ddt {
         args.push("ddt_scale".to_string());
+        args.push("ddt_previous_value_scale".to_string());
+        args.push("ddt_older_value_scale".to_string());
+        args.push("ddt_previous_derivative_scale".to_string());
     }
     if operator_usage.idt {
         args.push("idt_scale".to_string());
@@ -209,7 +212,10 @@ fn stamp_helper_base_call_args(
     if operator_usage.ddt {
         args.push("ddt_state_current".to_string());
         args.push("ddt_state_previous".to_string());
+        args.push("ddt_state_older".to_string());
         args.push("ddt_state_initialized".to_string());
+        args.push("ddt_derivative_current".to_string());
+        args.push("ddt_derivative_previous".to_string());
     }
     if operator_usage.idt {
         args.push("idt_state_current".to_string());
@@ -310,13 +316,16 @@ fn stamp_helper_operator_params(operator_usage: StampOperatorUsage) -> String {
     }
     if operator_usage.ddt {
         params.push_str("        ddt_scale: f64,\n");
+        params.push_str("        ddt_previous_value_scale: f64,\n");
+        params.push_str("        ddt_older_value_scale: f64,\n");
+        params.push_str("        ddt_previous_derivative_scale: f64,\n");
     }
     if operator_usage.idt {
         params.push_str("        idt_scale: f64,\n");
     }
     if operator_usage.ddt {
         params.push_str(
-            "        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],\n        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],\n        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],\n",
+            "        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],\n        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],\n        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],\n        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],\n        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],\n        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],\n",
         );
     }
     if operator_usage.idt {
@@ -3983,13 +3992,13 @@ fn stamp() {
     fn rewrites_ddt_ad_rvalue_stores_as_direct_stores() {
         let source = r#"
 fn stamp() {
-    let assign10_ad_e20: AdValue = AdValue::ddt(scratch.ad_value(102), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, scratch.ad_value(102).value));
+    let assign10_ad_e20: AdValue = AdValue::ddt(scratch.ad_value(102), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, scratch.ad_value(102).value));
     scratch.store_ad_value(200, assign10_ad_e20);
-    let assign11_ad_e21: AdValue = AdValue::ddt(AdValue::scale(AdValue::voltage(ctx, &self.nodes, Some(4), None), params.scale), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, AdValue::scale(AdValue::voltage(ctx, &self.nodes, Some(4), None), params.scale).value));
+    let assign11_ad_e21: AdValue = AdValue::ddt(AdValue::scale(AdValue::voltage(ctx, &self.nodes, Some(4), None), params.scale), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 1, AdValue::scale(AdValue::voltage(ctx, &self.nodes, Some(4), None), params.scale).value));
     scratch.store_ad_value(201, assign11_ad_e21);
-    let assign12_ad_e22: AdValue = AdValue::ddt(AdValue::scale(AdValue::branch_current(ctx, &self.branches, 1), params.branch_scale), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, AdValue::scale(AdValue::branch_current(ctx, &self.branches, 1), params.branch_scale).value));
+    let assign12_ad_e22: AdValue = AdValue::ddt(AdValue::scale(AdValue::branch_current(ctx, &self.branches, 1), params.branch_scale), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 2, AdValue::scale(AdValue::branch_current(ctx, &self.branches, 1), params.branch_scale).value));
     scratch.store_ad_value(202, assign12_ad_e22);
-    let assign13_ad_e23: AdValue = AdValue::ddt(AdValue::scale(AdValue::voltage(ctx, &self.nodes, Some(5), None), params.input_scale), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 3, AdValue::scale(AdValue::voltage(ctx, &self.nodes, Some(5), None), params.input_scale).value));
+    let assign13_ad_e23: AdValue = AdValue::ddt(AdValue::scale(AdValue::voltage(ctx, &self.nodes, Some(5), None), params.input_scale), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 3, AdValue::scale(AdValue::voltage(ctx, &self.nodes, Some(5), None), params.input_scale).value));
     scratch.store_scale_ad(203, assign13_ad_e23, params.output_scale);
 }
 "#;
@@ -4004,19 +4013,19 @@ fn stamp() {
             "{support}"
         );
         assert!(
-            compact.contains("s.store_ddt_source(200, 102, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, s.v[102]));"),
+            compact.contains("s.store_ddt_source(200, 102, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, s.v[102]));"),
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_ddt_scaled_voltage(201, Some(4), None, p.scale, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, ((ctx.node_voltage(nodes[4])) * (p.scale))));"),
+            compact.contains("s.store_ddt_scaled_voltage(201, Some(4), None, p.scale, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 1, ((ctx.node_voltage(nodes[4])) * (p.scale))));"),
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_ddt_scaled_branch_current(202, 1, p.branch_scale, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, ((ctx.branch_current(branches[1])) * (p.branch_scale))));"),
+            compact.contains("s.store_ddt_scaled_branch_current(202, 1, p.branch_scale, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 2, ((ctx.branch_current(branches[1])) * (p.branch_scale))));"),
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_ddt_scaled_voltage(203, Some(5), None, ((p.input_scale) * (p.output_scale)), ddt_scale, ((eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 3, ((ctx.node_voltage(nodes[5])) * (p.input_scale)))) * (p.output_scale)));"),
+            compact.contains("s.store_ddt_scaled_voltage(203, Some(5), None, ((p.input_scale) * (p.output_scale)), ddt_scale, ((eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 3, ((ctx.node_voltage(nodes[5])) * (p.input_scale)))) * (p.output_scale)));"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
@@ -12582,6 +12591,10 @@ pub(super) fn generate_state_file_with_extensions(
     let mut out = String::new();
     out.push_str("#![allow(dead_code, unused_parens, unused_variables)]\n\n");
     out.push_str(&format!(
+        "use {}::GeneratedDdtCoefficients;\n",
+        options.runtime_path
+    ));
+    out.push_str(&format!(
         "use {}::support::{{ReactiveScratch as GenericReactiveScratch, Scratch as GenericScratch}};\n\n",
         options.runtime_path
     ));
@@ -12691,7 +12704,16 @@ pub(super) fn generate_state_file_with_extensions(
         "    pub(crate) ddt_state_previous: Box<[f64; {ddt_state_count}]>,\n"
     ));
     out.push_str(&format!(
+        "    pub(crate) ddt_state_older: Box<[f64; {ddt_state_count}]>,\n"
+    ));
+    out.push_str(&format!(
         "    pub(crate) ddt_state_initialized: Box<[bool; {ddt_state_count}]>,\n"
+    ));
+    out.push_str(&format!(
+        "    pub(crate) ddt_derivative_current: Box<[f64; {ddt_state_count}]>,\n"
+    ));
+    out.push_str(&format!(
+        "    pub(crate) ddt_derivative_previous: Box<[f64; {ddt_state_count}]>,\n"
     ));
     out.push_str(&format!(
         "    pub(crate) idt_state_current: Box<[f64; {idt_state_count}]>,\n"
@@ -12704,6 +12726,7 @@ pub(super) fn generate_state_file_with_extensions(
     ));
     out.push_str("    pub(crate) time: f64,\n");
     out.push_str("    pub(crate) timestep: f64,\n");
+    out.push_str("    pub(crate) ddt_coefficients: GeneratedDdtCoefficients,\n");
     out.push_str(&extensions.instance_fields);
     out.push_str(&format!(
         "    pub(crate) scratch: Option<Box<GenericScratch<{variable_count}, {node_count}, {branch_count}>>>,\n"
@@ -12723,12 +12746,16 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            multiplicity: self.multiplicity,\n");
     out.push_str("            ddt_state_current: self.ddt_state_current.clone(),\n");
     out.push_str("            ddt_state_previous: self.ddt_state_previous.clone(),\n");
+    out.push_str("            ddt_state_older: self.ddt_state_older.clone(),\n");
     out.push_str("            ddt_state_initialized: self.ddt_state_initialized.clone(),\n");
+    out.push_str("            ddt_derivative_current: self.ddt_derivative_current.clone(),\n");
+    out.push_str("            ddt_derivative_previous: self.ddt_derivative_previous.clone(),\n");
     out.push_str("            idt_state_current: self.idt_state_current.clone(),\n");
     out.push_str("            idt_state_previous: self.idt_state_previous.clone(),\n");
     out.push_str("            idt_state_initialized: self.idt_state_initialized.clone(),\n");
     out.push_str("            time: self.time,\n");
     out.push_str("            timestep: self.timestep,\n");
+    out.push_str("            ddt_coefficients: self.ddt_coefficients,\n");
     out.push_str(&extensions.clone_fields);
     out.push_str("            scratch: None,\n");
     out.push_str("            reactive_scratch: None,\n");
@@ -12794,7 +12821,16 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(
         "            ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
     );
+    out.push_str(
+        "            ddt_state_older: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
+    );
     out.push_str("            ddt_state_initialized: boxed_zero_bool_array::<{ Self::DDT_STATE_COUNT }>(),\n");
+    out.push_str(
+        "            ddt_derivative_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
+    );
+    out.push_str(
+        "            ddt_derivative_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
+    );
     out.push_str(
         "            idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),\n",
     );
@@ -12804,6 +12840,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),\n");
     out.push_str("            time: 0.0,\n");
     out.push_str("            timestep: 0.0,\n");
+    out.push_str("            ddt_coefficients: GeneratedDdtCoefficients::inactive(),\n");
     out.push_str(&extensions.new_initializers);
     out.push_str("            scratch: Some(GenericScratch::new_box()),\n");
     out.push_str("            reactive_scratch: None,\n");
@@ -12827,12 +12864,16 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            multiplicity,\n");
     out.push_str("            ddt_state_current,\n");
     out.push_str("            ddt_state_previous,\n");
+    out.push_str("            ddt_state_older,\n");
     out.push_str("            ddt_state_initialized,\n");
+    out.push_str("            ddt_derivative_current,\n");
+    out.push_str("            ddt_derivative_previous,\n");
     out.push_str("            idt_state_current,\n");
     out.push_str("            idt_state_previous,\n");
     out.push_str("            idt_state_initialized,\n");
     out.push_str("            time,\n");
     out.push_str("            timestep,\n");
+    out.push_str("            ddt_coefficients,\n");
     out.push_str(&extensions.restore_destructure_fields);
     out.push_str("            scratch: _,\n");
     out.push_str("            reactive_scratch: _,\n");
@@ -12845,12 +12886,16 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            multiplicity,\n");
     out.push_str("            ddt_state_current,\n");
     out.push_str("            ddt_state_previous,\n");
+    out.push_str("            ddt_state_older,\n");
     out.push_str("            ddt_state_initialized,\n");
+    out.push_str("            ddt_derivative_current,\n");
+    out.push_str("            ddt_derivative_previous,\n");
     out.push_str("            idt_state_current,\n");
     out.push_str("            idt_state_previous,\n");
     out.push_str("            idt_state_initialized,\n");
     out.push_str("            time,\n");
     out.push_str("            timestep,\n");
+    out.push_str("            ddt_coefficients,\n");
     out.push_str(&extensions.restore_initializers);
     out.push_str("            scratch,\n");
     out.push_str("            reactive_scratch,\n");
@@ -12902,15 +12947,22 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        }\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
-    out.push_str("    pub fn set_timepoint(&mut self, time: f64, timestep: f64) {\n");
+    out.push_str(
+        "    pub fn set_timepoint(&mut self, time: f64, timestep: f64, ddt_coefficients: GeneratedDdtCoefficients) {\n",
+    );
     out.push_str("        self.time = time;\n");
     out.push_str("        self.timestep = timestep;\n");
+    out.push_str("        self.ddt_coefficients = ddt_coefficients;\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
     out.push_str("    pub fn accept_timestep(&mut self) {\n");
     out.push_str("        let mut index = 0usize;\n");
     out.push_str("        while index < Self::DDT_STATE_COUNT {\n");
+    out.push_str("            self.ddt_state_older[index] = self.ddt_state_previous[index];\n");
     out.push_str("            self.ddt_state_previous[index] = self.ddt_state_current[index];\n");
+    out.push_str(
+        "            self.ddt_derivative_previous[index] = self.ddt_derivative_current[index];\n",
+    );
     out.push_str("            self.ddt_state_initialized[index] = true;\n");
     out.push_str("            index += 1;\n");
     out.push_str("        }\n");
@@ -12930,19 +12982,33 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("        } else {\n");
         out.push_str("            value\n");
         out.push_str("        };\n");
-        out.push_str("        self.ddt_state_current[slot] = value;\n");
-        out.push_str("        if self.timestep.abs() > Self::DDT_EPSILON {\n");
-        out.push_str("            (value - previous) / self.timestep\n");
+        out.push_str("        let older = if self.ddt_state_initialized[slot] {\n");
+        out.push_str("            self.ddt_state_older[slot]\n");
         out.push_str("        } else {\n");
+        out.push_str("            value\n");
+        out.push_str("        };\n");
+        out.push_str("        self.ddt_state_current[slot] = value;\n");
+        out.push_str("        if self.ddt_coefficients.active {\n");
+        out.push_str("            let result = value * self.ddt_coefficients.derivative_scale\n");
+        out.push_str("                - previous * self.ddt_coefficients.previous_value_scale\n");
+        out.push_str("                - older * self.ddt_coefficients.older_value_scale\n");
+        out.push_str("                - self.ddt_derivative_previous[slot] * self.ddt_coefficients.previous_derivative_scale;\n");
+        out.push_str("            self.ddt_derivative_current[slot] = result;\n");
+        out.push_str("            result\n");
+        out.push_str("        } else {\n");
+        out.push_str("            self.ddt_state_current[slot] = value;\n");
         out.push_str("            self.ddt_state_previous[slot] = value;\n");
+        out.push_str("            self.ddt_state_older[slot] = value;\n");
+        out.push_str("            self.ddt_derivative_current[slot] = 0.0;\n");
+        out.push_str("            self.ddt_derivative_previous[slot] = 0.0;\n");
         out.push_str("            self.ddt_state_initialized[slot] = true;\n");
         out.push_str("            0.0\n");
         out.push_str("        }\n");
         out.push_str("    }\n\n");
         out.push_str("    #[inline]\n");
         out.push_str("    pub(crate) fn ddt_jacobian(&self, derivative: f64) -> f64 {\n");
-        out.push_str("        if self.timestep.abs() > Self::DDT_EPSILON {\n");
-        out.push_str("            derivative / self.timestep\n");
+        out.push_str("        if self.ddt_coefficients.active {\n");
+        out.push_str("            derivative * self.ddt_coefficients.derivative_scale\n");
         out.push_str("        } else {\n");
         out.push_str("            0.0\n");
         out.push_str("        }\n");
@@ -13411,9 +13477,15 @@ fn generate_stamp_file(
     out.push_str("fn eval_ddt<const STATE_COUNT: usize>(\n");
     out.push_str("    current: &mut [f64; STATE_COUNT],\n");
     out.push_str("    previous: &mut [f64; STATE_COUNT],\n");
+    out.push_str("    older: &mut [f64; STATE_COUNT],\n");
     out.push_str("    initialized: &mut [bool; STATE_COUNT],\n");
+    out.push_str("    derivative_current: &mut [f64; STATE_COUNT],\n");
+    out.push_str("    derivative_previous: &mut [f64; STATE_COUNT],\n");
     out.push_str("    ddt_active: bool,\n");
     out.push_str("    ddt_scale: f64,\n");
+    out.push_str("    ddt_previous_value_scale: f64,\n");
+    out.push_str("    ddt_older_value_scale: f64,\n");
+    out.push_str("    ddt_previous_derivative_scale: f64,\n");
     out.push_str("    slot: usize,\n");
     out.push_str("    value: f64,\n");
     out.push_str(") -> f64 {\n");
@@ -13423,19 +13495,29 @@ fn generate_stamp_file(
     out.push_str(
         "    let previous_value = if initialized[slot] { previous[slot] } else { value };\n",
     );
+    out.push_str("    let older_value = if initialized[slot] { older[slot] } else { value };\n");
     out.push_str("    current[slot] = value;\n");
     out.push_str("    if ddt_active {\n");
-    out.push_str("        (value - previous_value) * ddt_scale\n");
+    out.push_str("        let result = value * ddt_scale\n");
+    out.push_str("            - previous_value * ddt_previous_value_scale\n");
+    out.push_str("            - older_value * ddt_older_value_scale\n");
+    out.push_str("            - derivative_previous[slot] * ddt_previous_derivative_scale;\n");
+    out.push_str("        derivative_current[slot] = result;\n");
+    out.push_str("        result\n");
     out.push_str("    } else {\n");
+    out.push_str("        current[slot] = value;\n");
     out.push_str("        previous[slot] = value;\n");
+    out.push_str("        older[slot] = value;\n");
+    out.push_str("        derivative_current[slot] = 0.0;\n");
+    out.push_str("        derivative_previous[slot] = 0.0;\n");
     out.push_str("        initialized[slot] = true;\n");
     out.push_str("        0.0\n");
     out.push_str("    }\n");
     out.push_str("}\n\n");
     out.push_str("#[inline]\n");
-    out.push_str("fn ddt_jacobian(timestep: f64, derivative: f64) -> f64 {\n");
-    out.push_str("    if timestep.abs() > Instance::DDT_EPSILON {\n");
-    out.push_str("        derivative / timestep\n");
+    out.push_str("fn ddt_jacobian(ddt_active: bool, ddt_scale: f64, derivative: f64) -> f64 {\n");
+    out.push_str("    if ddt_active {\n");
+    out.push_str("        derivative * ddt_scale\n");
     out.push_str("    } else {\n");
     out.push_str("        0.0\n");
     out.push_str("    }\n");
@@ -24368,7 +24450,14 @@ fn emit_stamp_body(
     if operator_usage.ddt {
         out.push_str("        let ddt_state_current = self.ddt_state_current.as_mut();\n");
         out.push_str("        let ddt_state_previous = self.ddt_state_previous.as_mut();\n");
+        out.push_str("        let ddt_state_older = self.ddt_state_older.as_mut();\n");
         out.push_str("        let ddt_state_initialized = self.ddt_state_initialized.as_mut();\n");
+        out.push_str(
+            "        let ddt_derivative_current = self.ddt_derivative_current.as_mut();\n",
+        );
+        out.push_str(
+            "        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();\n",
+        );
     }
     if operator_usage.idt {
         out.push_str("        let idt_state_current = self.idt_state_current.as_mut();\n");
@@ -24376,10 +24465,19 @@ fn emit_stamp_body(
         out.push_str("        let idt_state_initialized = self.idt_state_initialized.as_mut();\n");
     }
     if operator_usage.has_any() {
-        out.push_str("        let ddt_active = timestep.abs() > Instance::DDT_EPSILON;\n");
+        out.push_str("        let ddt_active = self.ddt_coefficients.active;\n");
     }
     if operator_usage.ddt {
-        out.push_str("        let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };\n");
+        out.push_str("        let ddt_scale = self.ddt_coefficients.derivative_scale;\n");
+        out.push_str(
+            "        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;\n",
+        );
+        out.push_str(
+            "        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;\n",
+        );
+        out.push_str(
+            "        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;\n",
+        );
     }
     if operator_usage.idt {
         out.push_str("        let idt_scale = if ddt_active { timestep } else { 0.0 };\n");
@@ -30619,10 +30717,10 @@ fn compact_ddt_store_helper_call_scaled(
     let operand = args[0].trim();
     let derivative_scale = args[1].trim();
     let eval_args = compact_function_call_args(args[2], "eval_ddt")?;
-    if eval_args.len() != 7 {
+    if eval_args.len() != 13 {
         return None;
     }
-    let eval_operand = eval_args[6].trim().strip_suffix(".value")?.trim();
+    let eval_operand = eval_args[12].trim().strip_suffix(".value")?.trim();
     if eval_operand != operand {
         return None;
     }
@@ -30687,7 +30785,7 @@ fn compact_ddt_store_helper_call_scaled(
 }
 
 fn compact_eval_ddt_call(eval_args: &[&str], value: &str) -> String {
-    let mut args = eval_args[..6].join(", ");
+    let mut args = eval_args[..12].join(", ");
     args.push_str(", ");
     args.push_str(value);
     format!("eval_ddt({args})")
@@ -41992,7 +42090,7 @@ impl CompactAdEmitter<'_> {
         })?;
         let derivative_scale = self.ddt_scale_expr();
         Ok(format!(
-            "AdValue::ddt({operand}, {derivative_scale}, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, {slot}, {operand}.value))"
+            "AdValue::ddt({operand}, {derivative_scale}, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, {slot}, {operand}.value))"
         ))
     }
 
