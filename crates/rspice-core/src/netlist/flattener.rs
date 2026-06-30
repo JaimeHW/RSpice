@@ -219,18 +219,8 @@ impl<'a> Flattener<'a> {
         // Continue the netlist's statistical draw sequence (seeded at parse
         // time) so flatten-time draws are distinct per instance.
         self.random = netlist.params.random().clone();
-        let global_params: HashMap<String, Value> = netlist
-            .params
-            .all_params()
-            .into_iter()
-            .map(|(name, value)| (canonical_param_name(&name), value))
-            .collect();
-        let global_string_params: HashMap<String, String> = netlist
-            .params
-            .all_string_params()
-            .into_iter()
-            .map(|(name, value)| (canonical_param_name(&name), value))
-            .collect();
+        let mut global_scope = netlist.params.clone();
+        global_scope.adopt_random(&self.random);
 
         // Set global parameters from netlist
         for (name, value) in netlist.params.all_params() {
@@ -242,8 +232,7 @@ impl<'a> Flattener<'a> {
                 element,
                 "",
                 &HashMap::new(),
-                &global_params,
-                &global_string_params,
+                &global_scope,
                 0,
                 &mut flat_elements,
             )?;
@@ -258,8 +247,7 @@ impl<'a> Flattener<'a> {
         element: &Element,
         prefix: &str,
         node_map: &HashMap<String, String>,
-        scope_params: &HashMap<String, Value>,
-        scope_string_params: &HashMap<String, String>,
+        scope: &ParamContext,
         depth: usize,
         output: &mut Vec<Element>,
     ) -> Result<(), ParseError> {
@@ -285,8 +273,7 @@ impl<'a> Flattener<'a> {
                         params,
                         prefix,
                         node_map,
-                        scope_params,
-                        scope_string_params,
+                        scope,
                         depth,
                         output,
                     )?;
@@ -294,7 +281,7 @@ impl<'a> Flattener<'a> {
                     // Preserve external instance (e.g. Verilog-A model) as a leaf.
                     let new_element = self.resolve_external_subcircuit_params(
                         self.remap_element(element, prefix, node_map),
-                        scope_params,
+                        scope,
                     )?;
                     output.push(new_element);
                 } else {
@@ -345,8 +332,7 @@ impl<'a> Flattener<'a> {
         instance_params: &[(String, ParametricValue)],
         prefix: &str,
         parent_node_map: &HashMap<String, String>,
-        caller_scope_params: &HashMap<String, Value>,
-        caller_scope_string_params: &HashMap<String, String>,
+        caller_scope: &ParamContext,
         depth: usize,
         output: &mut Vec<Element>,
     ) -> Result<(), ParseError> {
@@ -418,13 +404,8 @@ impl<'a> Flattener<'a> {
             }
         }
 
-        let (param_map, string_param_map) = build_subcircuit_param_scope(
-            subckt,
-            caller_scope_params,
-            caller_scope_string_params,
-            instance_params,
-            &self.random,
-        )?;
+        let param_scope =
+            build_subcircuit_param_scope(subckt, caller_scope, instance_params, &self.random)?;
 
         // X-line multiplicity: `M=` on a subcircuit instance multiplies the
         // parallel multiplicity of every device it expands to (HSPICE/ngspice
@@ -439,8 +420,7 @@ impl<'a> Flattener<'a> {
         if !formal_declares_m {
             for (name, value) in instance_params {
                 if name.eq_ignore_ascii_case("M") {
-                    let resolved =
-                        resolve_parametric_value(value, caller_scope_params, &self.random)?;
+                    let resolved = resolve_parametric_value(value, caller_scope, &self.random)?;
                     if !resolved.is_finite() || resolved <= 0.0 {
                         return Err(ParseError::Syntax {
                             line: 0,
@@ -465,7 +445,7 @@ impl<'a> Flattener<'a> {
                 format!("{}.{}", new_prefix, sub_element.name)
             };
             let mut substituted =
-                self.substitute_params(sub_element, &param_map, &string_param_map, &element_path)?;
+                self.substitute_params(sub_element, &param_scope, &element_path)?;
             if multiplicity != 1.0 {
                 apply_element_multiplicity(&mut substituted, multiplicity);
             }
@@ -473,8 +453,7 @@ impl<'a> Flattener<'a> {
                 &substituted,
                 &new_prefix,
                 &node_map,
-                &param_map,
-                &string_param_map,
+                &param_scope,
                 depth + 1,
                 output,
             )?;
@@ -781,8 +760,7 @@ impl<'a> Flattener<'a> {
     fn substitute_params(
         &mut self,
         element: &Element,
-        param_map: &HashMap<String, Value>,
-        string_param_map: &HashMap<String, String>,
+        scope: &ParamContext,
         element_path: &str,
     ) -> Result<Element, ParseError> {
         let new_kind = match &element.kind {
@@ -794,13 +772,13 @@ impl<'a> Flattener<'a> {
                 instance_params,
                 deferred_params,
             } => ElementKind::Resistor {
-                value: self.resolve_optional_value_expr(*value, value_expr, param_map)?,
+                value: self.resolve_optional_value_expr(*value, value_expr, scope)?,
                 value_expr: None,
                 model: model.clone(),
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
-                    param_map,
+                    scope,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -812,14 +790,14 @@ impl<'a> Flattener<'a> {
                 instance_params,
                 deferred_params,
             } => ElementKind::Capacitor {
-                value: self.resolve_optional_value_expr(*value, value_expr, param_map)?,
+                value: self.resolve_optional_value_expr(*value, value_expr, scope)?,
                 value_expr: None,
                 initial_voltage: *initial_voltage,
                 model: model.clone(),
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
-                    param_map,
+                    scope,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -831,14 +809,14 @@ impl<'a> Flattener<'a> {
                 instance_params,
                 deferred_params,
             } => ElementKind::Inductor {
-                value: self.resolve_optional_value_expr(*value, value_expr, param_map)?,
+                value: self.resolve_optional_value_expr(*value, value_expr, scope)?,
                 value_expr: None,
                 initial_current: *initial_current,
                 model: model.clone(),
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
-                    param_map,
+                    scope,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -857,7 +835,7 @@ impl<'a> Flattener<'a> {
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
-                    param_map,
+                    scope,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -872,7 +850,7 @@ impl<'a> Flattener<'a> {
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
-                    param_map,
+                    scope,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -889,7 +867,7 @@ impl<'a> Flattener<'a> {
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
-                    param_map,
+                    scope,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -904,7 +882,7 @@ impl<'a> Flattener<'a> {
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
-                    param_map,
+                    scope,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -919,7 +897,7 @@ impl<'a> Flattener<'a> {
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
-                    param_map,
+                    scope,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -932,16 +910,11 @@ impl<'a> Flattener<'a> {
                 let mut merged_params = Vec::with_capacity(instance_params.len());
                 for (name, value) in instance_params {
                     let resolved = if parametric_value_is_string(value) {
-                        ParametricValue::String(resolve_string_parametric_value(
-                            value,
-                            param_map,
-                            string_param_map,
-                            &self.random,
-                        )?)
+                        ParametricValue::String(resolve_string_parametric_value(value, scope)?)
                     } else {
                         ParametricValue::Resolved(resolve_parametric_value(
                             value,
-                            param_map,
+                            scope,
                             &self.random,
                         )?)
                     };
@@ -966,33 +939,28 @@ impl<'a> Flattener<'a> {
                 real_vector_params,
                 real_vector_expr_params,
             } => ElementKind::Xspice {
-                model: self.resolve_scoped_xspice_model(
-                    model,
-                    param_map,
-                    string_param_map,
-                    element_path,
-                )?,
+                model: self.resolve_scoped_xspice_model(model, scope, element_path)?,
                 ports: ports.clone(),
-                params: self.merge_deferred_params(params, expr_params, param_map)?,
+                params: self.merge_deferred_params(params, expr_params, scope)?,
                 expr_params: Vec::new(),
                 string_params: self.merge_deferred_string_params(
                     string_params,
                     string_expr_params,
-                    string_param_map,
+                    scope,
                     element_path,
                 )?,
                 string_expr_params: Vec::new(),
                 string_vector_params: self.merge_deferred_string_vector_params(
                     string_vector_params,
                     string_vector_expr_params,
-                    string_param_map,
+                    scope,
                     element_path,
                 )?,
                 string_vector_expr_params: Vec::new(),
                 real_vector_params: self.merge_deferred_real_vector_params(
                     real_vector_params,
                     real_vector_expr_params,
-                    param_map,
+                    scope,
                 )?,
                 real_vector_expr_params: Vec::new(),
             },
@@ -1043,12 +1011,12 @@ impl<'a> Flattener<'a> {
         &self,
         value: Value,
         value_expr: &Option<String>,
-        param_map: &HashMap<String, Value>,
+        scope: &ParamContext,
     ) -> Result<Value, ParseError> {
         match value_expr {
             Some(expr) => resolve_parametric_value(
                 &ParametricValue::Expression(expr.clone()),
-                param_map,
+                scope,
                 &self.random,
             ),
             None => Ok(value),
@@ -1062,7 +1030,7 @@ impl<'a> Flattener<'a> {
         &self,
         instance_params: &[(String, Value)],
         deferred_params: &[(String, String)],
-        param_map: &HashMap<String, Value>,
+        scope: &ParamContext,
     ) -> Result<Vec<(String, Value)>, ParseError> {
         if deferred_params.is_empty() {
             return Ok(instance_params.to_vec());
@@ -1071,7 +1039,7 @@ impl<'a> Flattener<'a> {
         for (name, expr) in deferred_params {
             let value = resolve_parametric_value(
                 &ParametricValue::Expression(expr.clone()),
-                param_map,
+                scope,
                 &self.random,
             )?;
             match merged
@@ -1089,7 +1057,7 @@ impl<'a> Flattener<'a> {
         &self,
         instance_params: &[(String, String)],
         deferred_params: &[(String, String)],
-        string_param_map: &HashMap<String, String>,
+        scope: &ParamContext,
         element_path: &str,
     ) -> Result<Vec<(String, String)>, ParseError> {
         let mut merged: Vec<(String, String)> = instance_params
@@ -1110,9 +1078,9 @@ impl<'a> Flattener<'a> {
         }
 
         for (name, expr) in deferred_params {
-            let raw_value = string_param_map
-                .get(&canonical_param_name(expr))
-                .cloned()
+            let raw_value = scope
+                .get_string(expr)
+                .map(ToString::to_string)
                 .ok_or_else(|| {
                     ParseError::InvalidValue(format!(
                         "XSPICE instance string parameter '{}' for element '{}' could not resolve string parameter '{}'",
@@ -1139,7 +1107,7 @@ impl<'a> Flattener<'a> {
         &self,
         instance_params: &[(String, Vec<Value>)],
         deferred_params: &[(String, Vec<String>)],
-        param_map: &HashMap<String, Value>,
+        scope: &ParamContext,
     ) -> Result<Vec<(String, Vec<Value>)>, ParseError> {
         if deferred_params.is_empty() {
             return Ok(instance_params.to_vec());
@@ -1152,7 +1120,7 @@ impl<'a> Flattener<'a> {
                 .map(|expr| {
                     resolve_parametric_value(
                         &ParametricValue::Expression(expr.clone()),
-                        param_map,
+                        scope,
                         &self.random,
                     )
                 })
@@ -1172,7 +1140,7 @@ impl<'a> Flattener<'a> {
         &self,
         instance_params: &[(String, Vec<String>)],
         deferred_params: &[(String, String)],
-        string_param_map: &HashMap<String, String>,
+        scope: &ParamContext,
         element_path: &str,
     ) -> Result<Vec<(String, Vec<String>)>, ParseError> {
         if deferred_params.is_empty() {
@@ -1181,9 +1149,9 @@ impl<'a> Flattener<'a> {
 
         let mut merged = instance_params.to_vec();
         for (name, expr) in deferred_params {
-            let value = string_param_map
-                .get(&canonical_param_name(expr))
-                .cloned()
+            let value = scope
+                .get_string(expr)
+                .map(ToString::to_string)
                 .ok_or_else(|| {
                     ParseError::InvalidValue(format!(
                         "XSPICE instance string-vector parameter '{}' for element '{}' could not resolve string parameter '{}'",
@@ -1211,11 +1179,11 @@ impl<'a> Flattener<'a> {
     fn resolve_external_subcircuit_params(
         &self,
         mut element: Element,
-        scope_params: &HashMap<String, Value>,
+        scope: &ParamContext,
     ) -> Result<Element, ParseError> {
         if let ElementKind::Subcircuit { params, .. } = &mut element.kind {
             for (_, value) in params.iter_mut() {
-                let resolved = resolve_parametric_value(value, scope_params, &self.random)?;
+                let resolved = resolve_parametric_value(value, scope, &self.random)?;
                 *value = ParametricValue::Resolved(resolved);
             }
         }
@@ -1225,8 +1193,7 @@ impl<'a> Flattener<'a> {
     fn resolve_scoped_xspice_model(
         &mut self,
         model_name: &str,
-        param_map: &HashMap<String, Value>,
-        string_param_map: &HashMap<String, String>,
+        scope: &ParamContext,
         element_path: &str,
     ) -> Result<String, ParseError> {
         let Some(model_def) = self
@@ -1247,7 +1214,7 @@ impl<'a> Flattener<'a> {
         scoped_model.expr_params.clear();
 
         for (name, expr) in &model_def.expr_params {
-            if let Some(value) = string_param_map.get(&canonical_param_name(expr)) {
+            if let Some(value) = scope.get_string(expr) {
                 push_scoped_model_string_value(
                     &mut scoped_model,
                     name,
@@ -1258,12 +1225,7 @@ impl<'a> Flattener<'a> {
                 continue;
             }
 
-            let mut ctx = ParamContext::new();
-            for (param_name, value) in param_map {
-                ctx.set(param_name, *value);
-            }
-            ctx.adopt_random(&self.random);
-            match super::expr::eval_expression(expr, &ctx) {
+            match super::expr::eval_expression(expr, scope) {
                 Ok(value) if value.is_finite() => {
                     replace_model_param(&mut scoped_model, name);
                     scoped_model.params.push((name.clone(), value));
@@ -1292,16 +1254,13 @@ fn parametric_value_is_string(value: &ParametricValue) -> bool {
 
 fn resolve_parametric_value(
     value: &ParametricValue,
-    param_map: &HashMap<String, Value>,
+    scope: &ParamContext,
     random: &RandomState,
 ) -> Result<Value, ParseError> {
     match value {
         ParametricValue::Resolved(v) => Ok(*v),
         ParametricValue::Expression(expr) => {
-            let mut ctx = ParamContext::new();
-            for (name, value) in param_map {
-                ctx.set(name, *value);
-            }
+            let mut ctx = scope.clone();
             // Join the netlist-wide stream: each instance expression that
             // calls gauss/agauss/unif/aunif/limit advances one shared,
             // reproducible sequence instead of replaying the same draws.
@@ -1322,82 +1281,66 @@ fn resolve_parametric_value(
 
 fn resolve_string_parametric_value(
     value: &ParametricValue,
-    param_map: &HashMap<String, Value>,
-    string_param_map: &HashMap<String, String>,
-    random: &RandomState,
+    scope: &ParamContext,
 ) -> Result<String, ParseError> {
     match value {
         ParametricValue::String(value) => Ok(value.clone()),
-        ParametricValue::StringExpression(expr) | ParametricValue::Expression(expr) => {
-            string_param_map
-                .get(&canonical_param_name(expr))
-                .cloned()
-                .ok_or_else(|| {
-                    ParseError::InvalidValue(format!(
-                        "string parameter expression '{}' could not be resolved",
-                        expr
-                    ))
-                })
-        }
-        ParametricValue::Resolved(_) => {
-            let value = resolve_parametric_value(value, param_map, random)?;
-            Err(ParseError::InvalidValue(format!(
-                "numeric parameter value {} cannot be used as a string value",
-                value
-            )))
-        }
+        ParametricValue::StringExpression(expr) | ParametricValue::Expression(expr) => scope
+            .get_string(expr)
+            .map(ToString::to_string)
+            .ok_or_else(|| {
+                ParseError::InvalidValue(format!(
+                    "string parameter expression '{}' could not be resolved",
+                    expr
+                ))
+            }),
+        ParametricValue::Resolved(_) => Err(ParseError::InvalidValue(format!(
+            "numeric parameter value cannot be used as a string value"
+        ))),
     }
-}
-
-fn canonical_param_name(name: &str) -> String {
-    name.to_ascii_uppercase()
 }
 
 fn build_subcircuit_param_scope(
     subckt: &SubcircuitDef,
-    caller_scope_params: &HashMap<String, Value>,
-    caller_scope_string_params: &HashMap<String, String>,
+    caller_scope: &ParamContext,
     instance_params: &[(String, ParametricValue)],
     random: &RandomState,
-) -> Result<(HashMap<String, Value>, HashMap<String, String>), ParseError> {
-    let mut param_map: HashMap<String, Value> = caller_scope_params
-        .iter()
-        .map(|(name, value)| (canonical_param_name(name), *value))
-        .collect();
-    let mut string_param_map: HashMap<String, String> = caller_scope_string_params
-        .iter()
-        .map(|(name, value)| (canonical_param_name(name), value.clone()))
-        .collect();
+) -> Result<ParamContext, ParseError> {
+    let mut scope = caller_scope.clone();
+    scope.adopt_random(random);
 
     for (name, value) in &subckt.params {
-        param_map.insert(canonical_param_name(name), *value);
+        scope.set(name, *value);
     }
     for (name, value) in &subckt.string_params {
-        string_param_map.insert(canonical_param_name(name), value.clone());
+        scope.set_string(name, value.clone());
+    }
+    for (name, value) in &subckt.body_params {
+        scope.set(name, *value);
+    }
+    for (name, value) in &subckt.body_string_params {
+        scope.set_string(name, value.clone());
+    }
+    for function in &subckt.body_functions {
+        scope.import_function(function.clone());
     }
 
     for (name, value) in instance_params {
-        let key = canonical_param_name(name);
         if subckt
             .string_params
             .iter()
             .any(|(formal, _)| formal.eq_ignore_ascii_case(name))
             || parametric_value_is_string(value)
         {
-            let resolved = resolve_string_parametric_value(
-                value,
-                caller_scope_params,
-                caller_scope_string_params,
-                random,
-            )?;
-            string_param_map.insert(key, resolved);
+            let resolved = resolve_string_parametric_value(value, caller_scope)?;
+            scope.set_string(name, resolved);
         } else {
-            let resolved = resolve_parametric_value(value, caller_scope_params, random)?;
-            param_map.insert(key, resolved);
+            let resolved = resolve_parametric_value(value, caller_scope, random)?;
+            scope.set(name, resolved);
         }
     }
 
-    Ok((param_map, string_param_map))
+    Ok(scope)
 }
 
 fn replace_model_param(model: &mut ModelDef, name: &str) {

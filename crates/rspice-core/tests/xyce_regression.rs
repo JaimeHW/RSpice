@@ -248,6 +248,13 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/NMESFET/nmesfet.cir",
         "Netlists/NMOS1_DC/nmos1.cir",
         "Netlists/NPN_DC/npn1.cir",
+        "Netlists/PARAMS2/Params_A3.cir",
+        "Netlists/PARAMS2/Params_A4.cir",
+        "Netlists/PARAMS2/Params_A8.cir",
+        "Netlists/PARAMS2/Params_A8_hs.cir",
+        "Netlists/PARAMS2/Params_B4.cir",
+        "Netlists/PARAMS2/Params_B7.cir",
+        "Netlists/PARAMS2/Params_B7_hs.cir",
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(

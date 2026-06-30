@@ -2248,6 +2248,9 @@ mod tests {
             }],
             params: vec![("g".to_string(), 2.0)],
             string_params: Vec::new(),
+            body_params: Vec::new(),
+            body_string_params: Vec::new(),
+            body_functions: Vec::new(),
             local_options: std::collections::HashMap::new(),
             library_ref: None,
             nested_subcircuits: Vec::new(),
@@ -4010,6 +4013,63 @@ mod tests {
             "M instance parameter should be retained: {:?}",
             resistor.2
         );
+    }
+
+    #[test]
+    fn subckt_body_param_shadows_top_level_param_when_flattened() {
+        let netlist = Netlist::parse(
+            "subckt body param scope\n\
+             .param RES=5k\n\
+             XR1 1 0 ResSub\n\
+             .subckt ResSub 1 2\n\
+             .param RES=10k\n\
+             R1 1 2 {RES}\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("subcircuit body parameter deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("subcircuit body parameter flattens");
+        let resistance = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor { value, .. } => Some(*value),
+                _ => None,
+            })
+            .expect("flattened resistor exists");
+
+        assert_eq!(resistance, 10_000.0);
+    }
+
+    #[test]
+    fn subckt_body_function_shadows_top_level_function_when_flattened() {
+        let netlist = Netlist::parse(
+            "subckt body function scope\n\
+             .param TheRes=2k\n\
+             .func frobnitz(X) {10*X}\n\
+             XR1 1 0 ResSub PARAMS: RES={TheRes}\n\
+             .subckt ResSub 1 2 PARAMS: RES=5k\n\
+             .func frobnitz(x) {5*x}\n\
+             R1 1 2 {frobnitz(RES)}\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("subcircuit body function deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("subcircuit body function flattens");
+        let resistance = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor { value, .. } => Some(*value),
+                _ => None,
+            })
+            .expect("flattened resistor exists");
+
+        assert_eq!(resistance, 10_000.0);
     }
 
     #[test]

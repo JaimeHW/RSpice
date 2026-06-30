@@ -1,6 +1,6 @@
 use super::*;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 //=============================================================================
 // Expression Evaluator
@@ -206,6 +206,11 @@ impl ParamContext {
             .collect()
     }
 
+    /// Get all user-defined functions as owned definitions.
+    pub fn all_functions(&self) -> Vec<FunctionDef> {
+        self.functions.values().cloned().collect()
+    }
+
     /// Define a user function
     ///
     /// # Example
@@ -215,6 +220,11 @@ impl ParamContext {
     /// ```
     pub fn define_function(&mut self, name: &str, args: Vec<String>, body: &str) {
         let func = FunctionDef::new(name, args, body);
+        self.functions.insert(func.name.clone(), func);
+    }
+
+    /// Import an already parsed user-defined function.
+    pub fn import_function(&mut self, func: FunctionDef) {
         self.functions.insert(func.name.clone(), func);
     }
 

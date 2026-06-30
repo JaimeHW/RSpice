@@ -9,6 +9,8 @@
 
 use crate::Value;
 
+use super::expr::FunctionDef;
+
 //=============================================================================
 // Parametric Values
 //=============================================================================
@@ -1531,6 +1533,12 @@ pub struct SubcircuitDef {
     pub params: Vec<(String, Value)>,
     /// Default string parameter values (can be overridden at instance)
     pub string_params: Vec<(String, String)>,
+    /// Parameter definitions declared inside the subcircuit body with `.PARAM`.
+    pub body_params: Vec<(String, Value)>,
+    /// String parameter definitions declared inside the subcircuit body.
+    pub body_string_params: Vec<(String, String)>,
+    /// User-defined functions declared inside the subcircuit body with `.FUNC`.
+    pub body_functions: Vec<FunctionDef>,
     /// Local simulation options scoped to this subcircuit
     /// (temp, scale, reltol, etc.)
     pub local_options: std::collections::HashMap<String, Value>,

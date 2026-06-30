@@ -279,6 +279,7 @@ pub(super) fn process_line(
                     spef_includes,
                 },
             )?;
+            capture_subckt_body_scope(line, &mut frame.def, &frame.local_params);
             frame.def.elements.extend(subckt_elements);
         }
         return Ok(());
@@ -462,6 +463,85 @@ pub(super) fn parse_line(
             line: line_num,
             message: format!("Unknown element type: {}", first_char),
         }),
+    }
+}
+
+fn capture_subckt_body_scope(line: &str, def: &mut SubcircuitDef, params: &ParamContext) {
+    let fields = split_spice_fields(line);
+    let Some(command) = fields.first() else {
+        return;
+    };
+
+    if command.eq_ignore_ascii_case(".PARAM") || command.eq_ignore_ascii_case(".CSPARAM") {
+        for name in subckt_body_param_names(&fields) {
+            if let Some(value) = params.get(&name) {
+                upsert_case_insensitive(&mut def.body_params, name.clone(), value);
+                def.body_string_params
+                    .retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
+            } else if let Some(value) = params.get_string(&name) {
+                upsert_case_insensitive(
+                    &mut def.body_string_params,
+                    name.clone(),
+                    value.to_string(),
+                );
+                def.body_params
+                    .retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
+            }
+        }
+        return;
+    }
+
+    if command.eq_ignore_ascii_case(".FUNC")
+        && let Some(name) = fields.get(1).map(|field| function_name_from_field(field))
+        && let Some(function) = params.get_function(name).cloned()
+    {
+        def.body_functions
+            .retain(|existing| !existing.name.eq_ignore_ascii_case(name));
+        def.body_functions.push(function);
+    }
+}
+
+fn function_name_from_field(field: &str) -> &str {
+    field.split_once('(').map_or(field, |(name, _)| name)
+}
+
+fn subckt_body_param_names(fields: &[String]) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut idx = 1usize;
+    while idx < fields.len() {
+        let field = &fields[idx];
+        if field.eq_ignore_ascii_case("PARAMS") || field.eq_ignore_ascii_case("PARAMS:") {
+            idx += 1;
+            continue;
+        }
+
+        if let Some((name, _)) = field.split_once('=') {
+            if !name.is_empty() {
+                names.push(name.to_string());
+            }
+            idx += 1;
+            continue;
+        }
+
+        if matches!(fields.get(idx + 1).map(String::as_str), Some("=")) {
+            names.push(field.clone());
+            idx += 3;
+            continue;
+        }
+
+        idx += 1;
+    }
+    names
+}
+
+fn upsert_case_insensitive<T>(items: &mut Vec<(String, T)>, name: String, value: T) {
+    if let Some((_, existing_value)) = items
+        .iter_mut()
+        .find(|(existing, _)| existing.eq_ignore_ascii_case(&name))
+    {
+        *existing_value = value;
+    } else {
+        items.push((name, value));
     }
 }
 
