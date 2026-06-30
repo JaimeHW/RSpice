@@ -374,12 +374,19 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-    pub(crate) scalar_v9: f64,
-    pub(crate) scalar_v11: f64,
-    pub(crate) scalar_v13: f64,
-    pub(crate) scalar_v19: f64,
-    pub(crate) scalar_v20: f64,
-    pub(crate) scalar_v21: f64,
+    pub(crate) scalar_v3: f64,
+    pub(crate) scalar_v6: f64,
+    pub(crate) scalar_v7: bool,
+    pub(crate) scalar_v12: f64,
+    pub(crate) scalar_v13: bool,
+    pub(crate) scalar_v16: f64,
+    pub(crate) scalar_v18: bool,
+    pub(crate) scalar_v30: f64,
+    pub(crate) scalar_v32: f64,
+    pub(crate) scalar_v34: f64,
+    pub(crate) scalar_v39: f64,
+    pub(crate) scalar_v40: f64,
+    pub(crate) scalar_v41: f64,
     pub(crate) scratch: Option<Box<GenericScratch<359, 14, 0>>>,
     pub(crate) reactive_scratch: Option<Box<GenericReactiveScratch<359, 14, 0>>>,
 }
@@ -405,12 +412,19 @@ impl Clone for Instance {
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
-            scalar_v9: self.scalar_v9,
-            scalar_v11: self.scalar_v11,
+            scalar_v3: self.scalar_v3,
+            scalar_v6: self.scalar_v6,
+            scalar_v7: self.scalar_v7,
+            scalar_v12: self.scalar_v12,
             scalar_v13: self.scalar_v13,
-            scalar_v19: self.scalar_v19,
-            scalar_v20: self.scalar_v20,
-            scalar_v21: self.scalar_v21,
+            scalar_v16: self.scalar_v16,
+            scalar_v18: self.scalar_v18,
+            scalar_v30: self.scalar_v30,
+            scalar_v32: self.scalar_v32,
+            scalar_v34: self.scalar_v34,
+            scalar_v39: self.scalar_v39,
+            scalar_v40: self.scalar_v40,
+            scalar_v41: self.scalar_v41,
             scratch: None,
             reactive_scratch: None,
         }
@@ -453,12 +467,19 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
-            scalar_v9: 0.0,
-            scalar_v11: 0.0,
-            scalar_v13: 0.0,
-            scalar_v19: 0.0,
-            scalar_v20: 0.0,
-            scalar_v21: 0.0,
+            scalar_v3: 0.0,
+            scalar_v6: 0.0,
+            scalar_v7: false,
+            scalar_v12: 0.0,
+            scalar_v13: false,
+            scalar_v16: 0.0,
+            scalar_v18: false,
+            scalar_v30: 0.0,
+            scalar_v32: 0.0,
+            scalar_v34: 0.0,
+            scalar_v39: 0.0,
+            scalar_v40: 0.0,
+            scalar_v41: 0.0,
             scratch: Some(GenericScratch::new_box()),
             reactive_scratch: None,
         };
@@ -488,12 +509,19 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
-            scalar_v9,
-            scalar_v11,
+            scalar_v3,
+            scalar_v6,
+            scalar_v7,
+            scalar_v12,
             scalar_v13,
-            scalar_v19,
-            scalar_v20,
-            scalar_v21,
+            scalar_v16,
+            scalar_v18,
+            scalar_v30,
+            scalar_v32,
+            scalar_v34,
+            scalar_v39,
+            scalar_v40,
+            scalar_v41,
             scratch: _,
             reactive_scratch: _,
         } = snapshot;
@@ -515,12 +543,19 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
-            scalar_v9,
-            scalar_v11,
+            scalar_v3,
+            scalar_v6,
+            scalar_v7,
+            scalar_v12,
             scalar_v13,
-            scalar_v19,
-            scalar_v20,
-            scalar_v21,
+            scalar_v16,
+            scalar_v18,
+            scalar_v30,
+            scalar_v32,
+            scalar_v34,
+            scalar_v39,
+            scalar_v40,
+            scalar_v41,
             scratch,
             reactive_scratch,
         };
@@ -756,17 +791,32 @@ impl Instance {
     #[inline]
     fn recompute_instance_static(&mut self) {
         let p = &(*self.params);
-        let v9: f64 = p.p35;
-        self.scalar_v9 = v9;
-        let v11: f64 = p.p40;
-        self.scalar_v11 = v11;
-        let v13: f64 = p.p82;
+        let param_given = self.param_given.as_ref();
+        let v3: f64 = if param_given[3] { 1.0 } else { 0.0 };
+        self.scalar_v3 = v3;
+        let v6: f64 = if param_given[4] { 1.0 } else { 0.0 };
+        self.scalar_v6 = v6;
+        let v7: bool = (!(if param_given[3] { 1.0 } else { 0.0 } != 0.0));
+        self.scalar_v7 = v7;
+        let v12: f64 = if param_given[5] { 1.0 } else { 0.0 };
+        self.scalar_v12 = v12;
+        let v13: bool = (!(if param_given[4] { 1.0 } else { 0.0 } != 0.0));
         self.scalar_v13 = v13;
-        let v19: f64 = (-p.p35);
-        self.scalar_v19 = v19;
-        let v20: f64 = (-p.p40);
-        self.scalar_v20 = v20;
-        let v21: f64 = (p.p82 * 0.3333333333333333);
-        self.scalar_v21 = v21;
+        let v16: f64 = p.p5;
+        self.scalar_v16 = v16;
+        let v18: bool = (!(if param_given[5] { 1.0 } else { 0.0 } != 0.0));
+        self.scalar_v18 = v18;
+        let v30: f64 = p.p35;
+        self.scalar_v30 = v30;
+        let v32: f64 = p.p40;
+        self.scalar_v32 = v32;
+        let v34: f64 = p.p82;
+        self.scalar_v34 = v34;
+        let v39: f64 = (-p.p35);
+        self.scalar_v39 = v39;
+        let v40: f64 = (-p.p40);
+        self.scalar_v40 = v40;
+        let v41: f64 = (p.p82 * 0.3333333333333333);
+        self.scalar_v41 = v41;
     }
 }

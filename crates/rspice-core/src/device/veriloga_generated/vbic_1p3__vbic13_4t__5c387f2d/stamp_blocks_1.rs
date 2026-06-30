@@ -10521,21 +10521,6 @@ impl Instance {
         var_ith_dn7: f64,
         var_ith_dn8: f64,
         var_ith_dn9: f64,
-        var_itxf: f64,
-        var_itxf_dn0: f64,
-        var_itxf_dn1: f64,
-        var_itxf_dn10: f64,
-        var_itxf_dn11: f64,
-        var_itxf_dn12: f64,
-        var_itxf_dn13: f64,
-        var_itxf_dn2: f64,
-        var_itxf_dn3: f64,
-        var_itxf_dn4: f64,
-        var_itxf_dn5: f64,
-        var_itxf_dn6: f64,
-        var_itxf_dn7: f64,
-        var_itxf_dn8: f64,
-        var_itxf_dn9: f64,
         var_itzr: f64,
         var_itzr_dn0: f64,
         var_itzr_dn1: f64,
@@ -10689,16 +10674,6 @@ impl Instance {
             Some(9),
             multiplicity * (eq1_value),
             &eq1_node_derivatives,
-            &[],
-            multiplicity,
-        );
-        let eq2_value: f64 = var_itxf;
-        let eq2_node_derivatives: [f64; 14] = [var_itxf_dn0, var_itxf_dn1, var_itxf_dn2, var_itxf_dn3, var_itxf_dn4, var_itxf_dn5, var_itxf_dn6, var_itxf_dn7, var_itxf_dn8, var_itxf_dn9, var_itxf_dn10, var_itxf_dn11, var_itxf_dn12, var_itxf_dn13];
-        stamper.stamp_current_dense_local(
-            Some(6),
-            Some(9),
-            multiplicity * (eq2_value),
-            &eq2_node_derivatives,
             &[],
             multiplicity,
         );
