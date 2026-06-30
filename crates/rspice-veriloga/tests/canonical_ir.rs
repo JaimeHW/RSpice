@@ -371,6 +371,20 @@ endmodule
 "#
 }
 
+fn ddx_current_source() -> &'static str {
+    r#"
+module ddx_current(p, n);
+    inout p, n;
+    electrical p, n;
+    real cap;
+    analog begin
+        cap = ddx(V(p, n) * V(p, n), V(p, n));
+        I(p, n) <+ cap * V(p, n);
+    end
+endmodule
+"#
+}
+
 fn atan_current_source() -> &'static str {
     r#"
 module atan_i(p, n);
@@ -989,6 +1003,51 @@ fn opt_lowering_resolves_straight_line_scalar_assignment() {
             .iter()
             .all(|value| !matches!(value.kind, OptValueKind::EquationValue { .. })),
         "assignment-fed scalar graph should not fall back to legacy equation values: {:?}",
+        opt.values
+    );
+}
+
+#[test]
+fn opt_lowering_scalarizes_ddx_projection_current() {
+    let (_, _, _, opt) = lower_fixture_parts(ddx_current_source(), "ddx_current");
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
+        panic!("ddx current should have a scalar root: {newton:?}");
+    };
+
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: Vec::new(),
+            node_potentials: vec![5.0, 2.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate ddx scalar graph");
+
+    assert_eq!(snapshot.real(*root), Some(18.0));
+    assert_eq!(
+        snapshot.derivative(*root, DerivativeLane::node(NodeId::new(0))),
+        Some(6.0)
+    );
+    assert_eq!(
+        snapshot.derivative(*root, DerivativeLane::node(NodeId::new(1))),
+        Some(-6.0)
+    );
+    assert!(
+        opt.values
+            .iter()
+            .any(|value| matches!(value.kind, OptValueKind::Ddx { .. })),
+        "ddx projection should stay in scalar OptIR: {:?}",
+        opt.values
+    );
+    assert!(
+        opt.values
+            .iter()
+            .all(|value| !matches!(value.kind, OptValueKind::EquationValue { .. })),
+        "ddx current should not fall back to legacy equation values: {:?}",
         opt.values
     );
 }

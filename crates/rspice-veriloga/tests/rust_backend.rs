@@ -9722,6 +9722,32 @@ fn generated_ddx_assignment_rust_compiles_with_runtime_stub() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_ddx_current_without_scratch() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(ddx_current_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile ddx-fed current contribution through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("stamp_current_node2_local"), "{stamp}");
+    assert!(stamp.contains("0.5 *"), "{stamp}");
+    assert!(!stamp.contains("ddx_projection"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_lowers_ddx_feeding_current_as_projected_constant() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(ddx_current_source())

@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::canonical_ir::opt::LIMEXP_MAX;
 use crate::canonical_ir::{
-    BranchId, CanonicalIrArtifact, CanonicalValueType, DerivativeLaneKind, EquationId, ExprId,
-    HirAnalogOperator, HirExprKind, HirStatement, InvalidationClass, MirEquation, MirEquationKind,
-    OptBinaryOp, OptOp, OptUnaryOp, OptValue, OptValueKind, OptValueType, ValueId,
+    BranchId, CanonicalIrArtifact, CanonicalValueType, DerivativeLane, DerivativeLaneKind,
+    EquationId, ExprId, HirAnalogOperator, HirExprKind, HirStatement, InvalidationClass,
+    MirEquation, MirEquationKind, NodeId, OptBinaryOp, OptOp, OptUnaryOp, OptValue, OptValueKind,
+    OptValueType, ValueId,
 };
 
 use super::expr::{DdtSlots, LoweredVariable, analysis_predicate_expr, parameter_field_names};
@@ -295,21 +296,14 @@ fn generate_stamp_file(
         temperature_expr: "ctx.temperature()".to_string(),
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
     };
-    for value in &artifact.opt.values {
-        if !stamp_live.contains(&value.id) {
-            continue;
-        }
-        let expr = emit_value_expr(artifact, parameter_fields, value, &stamp_context)?;
-        out.push_str(&format!(
-            "        let {}: {} = {};\n",
-            value_name(value.id),
-            rust_type(value.value_type),
-            expr
-        ));
-    }
-    if !artifact.opt.values.is_empty() {
-        out.push('\n');
-    }
+    emit_live_values(
+        artifact,
+        parameter_fields,
+        &stamp_live,
+        static_cache,
+        &stamp_context,
+        &mut out,
+    )?;
 
     emit_current_stamps(
         artifact,
@@ -340,21 +334,14 @@ fn generate_stamp_file(
         }
         out.push_str("        let p = &(*self.params);\n");
         out.push_str("        let multiplicity = self.multiplicity;\n");
-        for value in &artifact.opt.values {
-            if !reactive_live.contains(&value.id) {
-                continue;
-            }
-            let expr = emit_value_expr(artifact, parameter_fields, value, &stamp_context)?;
-            out.push_str(&format!(
-                "        let {}: {} = {};\n",
-                value_name(value.id),
-                rust_type(value.value_type),
-                expr
-            ));
-        }
-        if !reactive_live.is_empty() {
-            out.push('\n');
-        }
+        emit_live_values(
+            artifact,
+            parameter_fields,
+            &reactive_live,
+            static_cache,
+            &stamp_context,
+            &mut out,
+        )?;
         emit_current_reactive_stamps(artifact, &reactive_roots, static_cache, &mut out)?;
         out.push_str("    }\n");
     }
@@ -753,11 +740,33 @@ pub(super) fn emit_static_current_values(
         temperature_expr: "ctx.temperature()".to_string(),
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
     };
-    for value in &artifact.opt.values {
-        if !stamp_live.contains(&value.id) {
-            continue;
-        }
-        let expr = emit_value_expr(artifact, parameter_fields, value, &stamp_context)?;
+    emit_live_values(
+        artifact,
+        parameter_fields,
+        &stamp_live,
+        static_cache,
+        &stamp_context,
+        out,
+    )?;
+    Ok(())
+}
+
+fn emit_live_values(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    live: &HashSet<ValueId>,
+    static_cache: &ScalarStaticCache,
+    context: &ValueEmitContext<'_>,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let values = ordered_live_values(artifact, live, static_cache)?;
+    for value_id in values {
+        let value = artifact
+            .opt
+            .values
+            .get(usize::from(value_id))
+            .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
+        let expr = emit_value_expr(artifact, parameter_fields, value, context)?;
         out.push_str(&format!(
             "        let {}: {} = {};\n",
             value_name(value.id),
@@ -765,7 +774,7 @@ pub(super) fn emit_static_current_values(
             expr
         ));
     }
-    if !stamp_live.is_empty() {
+    if !live.is_empty() {
         out.push('\n');
     }
     Ok(())
@@ -1902,6 +1911,18 @@ fn emit_value_expr(
                 analysis_predicate_expr(query.as_str())
             )
         }
+        OptValueKind::Ddx {
+            value,
+            pos_node,
+            neg_node,
+        } => emit_ddx_projection_expr(
+            artifact,
+            parameter_fields,
+            *value,
+            *pos_node,
+            *neg_node,
+            context,
+        )?,
         OptValueKind::NodePotential { node } => {
             format!("ctx.node_voltage(nodes[{}])", node.index())
         }
@@ -1950,6 +1971,40 @@ fn emit_value_expr(
         }
     };
     Ok(expr)
+}
+
+fn emit_ddx_projection_expr(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    value: ValueId,
+    pos_node: Option<NodeId>,
+    neg_node: Option<NodeId>,
+    context: &ValueEmitContext<'_>,
+) -> Result<String, RustBackendError> {
+    let pos = ddx_derivative_expr(artifact, parameter_fields, value, pos_node, context)?;
+    if let Some(neg_node) = neg_node {
+        let neg = ddx_derivative_expr(artifact, parameter_fields, value, Some(neg_node), context)?;
+        Ok(format!("(0.5 * ({pos} - {neg}))"))
+    } else {
+        Ok(pos)
+    }
+}
+
+fn ddx_derivative_expr(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    value: ValueId,
+    node: Option<NodeId>,
+    context: &ValueEmitContext<'_>,
+) -> Result<String, RustBackendError> {
+    let Some(node) = node else {
+        return Ok("0.0".to_string());
+    };
+    let Some(derivative) = derivative_value_for_lane(artifact, value, DerivativeLane::node(node))?
+    else {
+        return Ok("0.0".to_string());
+    };
+    value_ref(artifact, parameter_fields, derivative, context)
 }
 
 fn emit_idt_ic_expr(
@@ -2608,6 +2663,17 @@ fn mark_stamp_live_value(
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => {}
+        OptValueKind::Ddx {
+            value: input,
+            pos_node,
+            neg_node,
+        } => {
+            mark_stamp_live_value(artifact, input, static_cache, live)?;
+            for derivative in projected_ddx_derivative_values(artifact, input, pos_node, neg_node)?
+            {
+                mark_stamp_live_value(artifact, derivative, static_cache, live)?;
+            }
+        }
         OptValueKind::Unary { input, .. } => {
             mark_stamp_live_value(artifact, input, static_cache, live)?;
         }
@@ -2626,6 +2692,151 @@ fn mark_stamp_live_value(
         }
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ValueVisitState {
+    Unvisited,
+    Visiting,
+    Done,
+}
+
+fn ordered_live_values(
+    artifact: &CanonicalIrArtifact,
+    live: &HashSet<ValueId>,
+    static_cache: &ScalarStaticCache,
+) -> Result<Vec<ValueId>, RustBackendError> {
+    let mut state = vec![ValueVisitState::Unvisited; artifact.opt.values.len()];
+    let mut ordered = Vec::with_capacity(live.len());
+
+    for value in &artifact.opt.values {
+        if live.contains(&value.id) && !static_cache.contains(value.id) {
+            visit_live_value(
+                artifact,
+                value.id,
+                live,
+                static_cache,
+                &mut state,
+                &mut ordered,
+            )?;
+        }
+    }
+
+    Ok(ordered)
+}
+
+fn visit_live_value(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+    live: &HashSet<ValueId>,
+    static_cache: &ScalarStaticCache,
+    state: &mut [ValueVisitState],
+    ordered: &mut Vec<ValueId>,
+) -> Result<(), RustBackendError> {
+    if static_cache.contains(value) || !live.contains(&value) {
+        return Ok(());
+    }
+
+    let index = usize::from(value);
+    match state
+        .get(index)
+        .copied()
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?
+    {
+        ValueVisitState::Done => return Ok(()),
+        ValueVisitState::Visiting => {
+            return Err(unsupported(
+                artifact,
+                format!("cyclic scalar value dependency at {value}"),
+            ));
+        }
+        ValueVisitState::Unvisited => {}
+    }
+
+    state[index] = ValueVisitState::Visiting;
+    let value_slot = artifact
+        .opt
+        .values
+        .get(index)
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
+    match value_slot.kind {
+        OptValueKind::RealConstant(_)
+        | OptValueKind::BooleanConstant(_)
+        | OptValueKind::Parameter { .. }
+        | OptValueKind::ParamGiven { .. }
+        | OptValueKind::Temperature
+        | OptValueKind::ThermalVoltage
+        | OptValueKind::Multiplicity
+        | OptValueKind::Time
+        | OptValueKind::Analysis { .. }
+        | OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::EquationValue { .. } => {}
+        OptValueKind::Ddx {
+            value: input,
+            pos_node,
+            neg_node,
+        } => {
+            visit_live_value(artifact, input, live, static_cache, state, ordered)?;
+            for derivative in projected_ddx_derivative_values(artifact, input, pos_node, neg_node)?
+            {
+                visit_live_value(artifact, derivative, live, static_cache, state, ordered)?;
+            }
+        }
+        OptValueKind::Unary { input, .. } => {
+            visit_live_value(artifact, input, live, static_cache, state, ordered)?;
+        }
+        OptValueKind::Binary { left, right, .. } => {
+            visit_live_value(artifact, left, live, static_cache, state, ordered)?;
+            visit_live_value(artifact, right, live, static_cache, state, ordered)?;
+        }
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => {
+            visit_live_value(artifact, condition, live, static_cache, state, ordered)?;
+            visit_live_value(artifact, then_value, live, static_cache, state, ordered)?;
+            visit_live_value(artifact, else_value, live, static_cache, state, ordered)?;
+        }
+    }
+    state[index] = ValueVisitState::Done;
+    ordered.push(value);
+    Ok(())
+}
+
+fn projected_ddx_derivative_values(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+    pos_node: Option<NodeId>,
+    neg_node: Option<NodeId>,
+) -> Result<Vec<ValueId>, RustBackendError> {
+    let mut derivatives = Vec::new();
+    for node in [pos_node, neg_node].into_iter().flatten() {
+        if let Some(derivative) =
+            derivative_value_for_lane(artifact, value, DerivativeLane::node(node))?
+        {
+            derivatives.push(derivative);
+        }
+    }
+    Ok(derivatives)
+}
+
+fn derivative_value_for_lane(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+    lane: DerivativeLane,
+) -> Result<Option<ValueId>, RustBackendError> {
+    let value_slot = artifact
+        .opt
+        .values
+        .get(usize::from(value))
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
+    Ok(value_slot
+        .derivatives
+        .iter()
+        .find(|derivative| derivative.lane == lane)
+        .map(|derivative| derivative.value))
 }
 
 fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(), RustBackendError> {
@@ -2676,7 +2887,8 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
             | OptValueKind::ThermalVoltage
             | OptValueKind::Multiplicity
             | OptValueKind::Time
-            | OptValueKind::Analysis { .. } => {}
+            | OptValueKind::Analysis { .. }
+            | OptValueKind::Ddx { .. } => {}
             OptValueKind::EquationValue { .. } => {
                 return Err(unsupported(
                     artifact,

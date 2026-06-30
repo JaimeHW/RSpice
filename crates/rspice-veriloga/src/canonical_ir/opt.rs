@@ -114,6 +114,11 @@ pub enum OptValueKind {
     Analysis {
         query: SmolStr,
     },
+    Ddx {
+        value: ValueId,
+        pos_node: Option<NodeId>,
+        neg_node: Option<NodeId>,
+    },
     NodePotential {
         node: NodeId,
     },
@@ -306,6 +311,11 @@ enum OptValueKey {
     Multiplicity,
     Time,
     Analysis(SmolStr),
+    Ddx {
+        value: ValueId,
+        pos_node: Option<NodeId>,
+        neg_node: Option<NodeId>,
+    },
     NodePotential(NodeId),
     BranchFlow(BranchId),
     Unary {
@@ -337,6 +347,15 @@ impl OptValueKey {
             OptValueKind::Multiplicity => Self::Multiplicity,
             OptValueKind::Time => Self::Time,
             OptValueKind::Analysis { query } => Self::Analysis(query.clone()),
+            OptValueKind::Ddx {
+                value,
+                pos_node,
+                neg_node,
+            } => Self::Ddx {
+                value: *value,
+                pos_node: *pos_node,
+                neg_node: *neg_node,
+            },
             OptValueKind::NodePotential { node } => Self::NodePotential(*node),
             OptValueKind::BranchFlow { branch } => Self::BranchFlow(*branch),
             OptValueKind::Unary { op, input } => Self::Unary {
@@ -394,6 +413,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                 self.mark_live_value(derivative.value, &mut live);
             }
         }
+        observable_roots.extend(self.ddx_derivative_observable_roots(&live));
 
         if live.iter().all(|is_live| *is_live) {
             return;
@@ -461,6 +481,14 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::NodePotential { .. }
             | OptValueKind::BranchFlow { .. }
             | OptValueKind::EquationValue { .. } => {}
+            OptValueKind::Ddx {
+                value,
+                pos_node,
+                neg_node,
+            } => {
+                self.mark_live_value(value, live);
+                self.mark_ddx_projection_values(value, pos_node, neg_node, live);
+            }
             OptValueKind::Unary { input, .. } => self.mark_live_value(input, live),
             OptValueKind::Binary { left, right, .. } => {
                 self.mark_live_value(left, live);
@@ -476,6 +504,31 @@ impl<'a> ScalarGraphBuilder<'a> {
                 self.mark_live_value(else_value, live);
             }
         }
+    }
+
+    fn mark_ddx_projection_values(
+        &self,
+        value: ValueId,
+        pos_node: Option<NodeId>,
+        neg_node: Option<NodeId>,
+        live: &mut [bool],
+    ) {
+        for node in [pos_node, neg_node].into_iter().flatten() {
+            if let Some(derivative) = self.derivative_value(value, DerivativeLane::node(node)) {
+                self.mark_live_value(derivative, live);
+            }
+        }
+    }
+
+    fn ddx_derivative_observable_roots(&self, live: &[bool]) -> HashSet<ValueId> {
+        self.values
+            .iter()
+            .filter(|value| live.get(usize::from(value.id)).copied().unwrap_or(false))
+            .filter_map(|value| match value.kind {
+                OptValueKind::Ddx { value, .. } => Some(value),
+                _ => None,
+            })
+            .collect()
     }
 
     fn lower_statements(&mut self, statements: &[HirStatement]) {
@@ -863,6 +916,9 @@ impl<'a> ScalarGraphBuilder<'a> {
             } => self.lower_conditional(*condition, *then_expr, *else_expr),
             HirExprKind::Call { name, args } => self.lower_call(name, args),
             HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Ddx { expr, probe },
+            } => self.lower_ddx_expression(*expr, *probe),
+            HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Limexp { expr },
             } => self.lower_intrinsic_unary(OptUnaryOp::LimExp, *expr),
             _ => None,
@@ -1247,6 +1303,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::Multiplicity
             | OptValueKind::Time
             | OptValueKind::Analysis { .. }
+            | OptValueKind::Ddx { .. }
             | OptValueKind::EquationValue { .. } => BTreeMap::new(),
             OptValueKind::NodePotential { node } => {
                 let derivative =
@@ -1672,6 +1729,15 @@ impl<'a> ScalarGraphBuilder<'a> {
             .collect()
     }
 
+    fn derivative_value(&self, value: ValueId, lane: DerivativeLane) -> Option<ValueId> {
+        self.values
+            .get(usize::from(value))?
+            .derivatives
+            .iter()
+            .find(|derivative| derivative.lane == lane)
+            .map(|derivative| derivative.value)
+    }
+
     fn push_binary_value(&mut self, op: OptBinaryOp, left: ValueId, right: ValueId) -> ValueId {
         self.push_value(OptValueType::Real, OptValueKind::Binary { op, left, right })
     }
@@ -1958,6 +2024,9 @@ impl<'a> ScalarGraphBuilder<'a> {
         if name.eq_ignore_ascii_case("analysis") {
             return self.lower_analysis_call(args);
         }
+        if name.eq_ignore_ascii_case("ddx") {
+            return self.lower_ddx_call(args);
+        }
         if args.len() == 2 {
             return self.lower_binary_intrinsic_call(name, args[0], args[1]);
         }
@@ -1990,6 +2059,47 @@ impl<'a> ScalarGraphBuilder<'a> {
         };
         let query = self.analysis_query(*query)?;
         Some(self.push_value(OptValueType::Real, OptValueKind::Analysis { query }))
+    }
+
+    fn lower_ddx_call(&mut self, args: &[ExprId]) -> Option<ValueId> {
+        let [expr, probe] = args else {
+            return None;
+        };
+        self.lower_ddx_expression(*expr, *probe)
+    }
+
+    fn lower_ddx_expression(&mut self, expr: ExprId, probe: ExprId) -> Option<ValueId> {
+        let value = self.lower_expression(expr)?;
+        let (pos_node, neg_node) = self.ddx_probe_nodes(probe)?;
+        Some(self.push_value(
+            OptValueType::Real,
+            OptValueKind::Ddx {
+                value,
+                pos_node,
+                neg_node,
+            },
+        ))
+    }
+
+    fn ddx_probe_nodes(&self, probe: ExprId) -> Option<(Option<NodeId>, Option<NodeId>)> {
+        let expression = self.mir.expressions.get(usize::from(probe))?;
+        match &expression.kind {
+            HirExprKind::BranchAccess { access, pos, neg } if access.as_str() != "I" => {
+                let pos = self.resolve_endpoint(pos)?;
+                let neg = match neg {
+                    Some(neg) => self.resolve_endpoint(neg)?,
+                    None => None,
+                };
+                Some((pos, neg))
+            }
+            HirExprKind::NamedBranchAccess { access, name } if access.as_str() != "I" => self
+                .mir
+                .branches
+                .iter()
+                .find(|branch| branch.name.as_str() == name.as_str())
+                .map(|branch| (branch.pos_node, branch.neg_node)),
+            _ => None,
+        }
     }
 
     fn lower_binary_intrinsic_call(
@@ -2192,6 +2302,15 @@ fn remap_value_kind(kind: &OptValueKind, remap: &[Option<ValueId>]) -> OptValueK
         OptValueKind::Analysis { query } => OptValueKind::Analysis {
             query: query.clone(),
         },
+        OptValueKind::Ddx {
+            value,
+            pos_node,
+            neg_node,
+        } => OptValueKind::Ddx {
+            value: remap_value_id(*value, remap),
+            pos_node: *pos_node,
+            neg_node: *neg_node,
+        },
         OptValueKind::NodePotential { node } => OptValueKind::NodePotential { node: *node },
         OptValueKind::BranchFlow { branch } => OptValueKind::BranchFlow { branch: *branch },
         OptValueKind::Unary { op, input } => OptValueKind::Unary {
@@ -2244,6 +2363,30 @@ fn validate_value_kind(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel, valu
         | OptValueKind::Multiplicity
         | OptValueKind::Time
         | OptValueKind::Analysis { .. } => {}
+        OptValueKind::Ddx {
+            value: input,
+            pos_node,
+            neg_node,
+        } => {
+            validate_value_operand(
+                diagnostics,
+                opt.values.len(),
+                value.id,
+                *input,
+                "ddx operand",
+            );
+            for node in [*pos_node, *neg_node].into_iter().flatten() {
+                if node.index() >= opt.node_count {
+                    diagnostics.push(IrDiagnostic::global_error(
+                        CompilerPhase::OptValidation,
+                        format!(
+                            "OptIR value {} ddx node {} is out of range for {} nodes",
+                            value.id, node, opt.node_count
+                        ),
+                    ));
+                }
+            }
+        }
         OptValueKind::NodePotential { node } => {
             if node.index() >= opt.node_count {
                 diagnostics.push(IrDiagnostic::global_error(
@@ -2494,9 +2637,10 @@ fn value_invalidation(
         OptValueKind::Temperature | OptValueKind::ThermalVoltage => {
             InvalidationClass::TemperatureStatic
         }
-        OptValueKind::Multiplicity | OptValueKind::Time | OptValueKind::Analysis { .. } => {
-            InvalidationClass::NewtonIteration
-        }
+        OptValueKind::Multiplicity
+        | OptValueKind::Time
+        | OptValueKind::Analysis { .. }
+        | OptValueKind::Ddx { .. } => InvalidationClass::NewtonIteration,
         OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => InvalidationClass::NewtonIteration,
@@ -2540,6 +2684,7 @@ fn value_depends_on_parameter(
         | OptValueKind::Multiplicity
         | OptValueKind::Time
         | OptValueKind::Analysis { .. }
+        | OptValueKind::Ddx { .. }
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => false,
@@ -2581,6 +2726,7 @@ fn value_depends_on_temperature(
         | OptValueKind::Multiplicity
         | OptValueKind::Time
         | OptValueKind::Analysis { .. }
+        | OptValueKind::Ddx { .. }
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => false,
