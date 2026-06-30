@@ -1170,6 +1170,7 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
         max_timestep: args.max_step,
         integration_method,
         transient_trtol: args.trtol,
+        ramptime: None,
         convergence_preset,
         reltol: args.reltol,
         abstol: args.abstol,

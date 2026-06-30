@@ -40,7 +40,8 @@ mod veriloga_cache;
 pub use veriloga_cache::{
     VerilogACacheEntry, VerilogACachePruneReport, VerilogACacheStats, clear_veriloga_cache,
     prune_veriloga_cache, register_precompiled_veriloga_model,
-    register_precompiled_veriloga_model_with_dependencies, veriloga_cache_entries,
+    register_precompiled_veriloga_model_with_dependencies,
+    register_precompiled_veriloga_runtime_with_dependencies, veriloga_cache_entries,
     veriloga_cache_stats,
 };
 #[cfg(feature = "veriloga")]
@@ -440,8 +441,8 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         {
             for include in &netlist.veriloga_includes {
-                let model =
-                    std::sync::Arc::new(resolve_cached_or_compile_veriloga(&include.file_path)?);
+                let entry = resolve_cached_or_compile_veriloga(&include.file_path)?;
+                let model = entry.model;
 
                 let model_key = normalize_model_key(model.name.as_str());
                 veriloga_models
