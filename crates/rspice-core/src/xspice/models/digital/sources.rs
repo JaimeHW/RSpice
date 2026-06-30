@@ -443,6 +443,13 @@ struct DStateTransition {
 #[derive(Debug, Clone)]
 struct DStateTable {
     transitions: Vec<DStateTransition>,
+    state_ranges: HashMap<i64, DStateRange>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DStateRange {
+    Contiguous { start: usize, end: usize },
+    NonContiguous,
 }
 
 #[derive(Debug, Default)]
@@ -675,7 +682,37 @@ fn parse_d_state_contents(
         return Err(d_state_file_error(state_file, "contains no state rows"));
     }
 
-    Ok(DStateTable { transitions })
+    Ok(DStateTable {
+        state_ranges: d_state_range_index(&transitions),
+        transitions,
+    })
+}
+
+fn d_state_range_index(transitions: &[DStateTransition]) -> HashMap<i64, DStateRange> {
+    let mut ranges = HashMap::new();
+
+    for (idx, row) in transitions.iter().enumerate() {
+        match ranges.get_mut(&row.state) {
+            Some(DStateRange::Contiguous { end, .. }) if idx == *end + 1 => {
+                *end = idx;
+            }
+            Some(DStateRange::Contiguous { .. }) => {
+                ranges.insert(row.state, DStateRange::NonContiguous);
+            }
+            Some(DStateRange::NonContiguous) => {}
+            None => {
+                ranges.insert(
+                    row.state,
+                    DStateRange::Contiguous {
+                        start: idx,
+                        end: idx,
+                    },
+                );
+            }
+        }
+    }
+
+    ranges
 }
 
 fn load_d_state_table(
@@ -754,28 +791,11 @@ fn d_state_state_code(value: DigitalValue) -> i64 {
 }
 
 fn d_state_contiguous_range(table: &DStateTable, state: i64) -> Option<(usize, usize)> {
-    let mut range = None;
-    let mut last_match = None;
-
-    for (idx, row) in table.transitions.iter().enumerate() {
-        if row.state != state {
-            continue;
-        }
-
-        if let Some(previous) = last_match {
-            if idx > previous + 1 {
-                return None;
-            }
-            if let Some((start, _)) = range {
-                range = Some((start, idx));
-            }
-        } else {
-            range = Some((idx, idx));
-        }
-        last_match = Some(idx);
+    match table.state_ranges.get(&state) {
+        Some(DStateRange::Contiguous { start, end }) => Some((*start, *end)),
+        Some(DStateRange::NonContiguous) => None,
+        None => (!table.transitions.is_empty()).then_some((0, 0)),
     }
-
-    range.or_else(|| (!table.transitions.is_empty()).then_some((0, 0)))
 }
 
 fn d_state_outputs(table: &DStateTable, state: i64) -> Option<Vec<DigitalValue>> {
@@ -1278,6 +1298,36 @@ mod tests {
 
         assert_eq!(d_state_outputs(&table, 1), Some(vec![DigitalValue::one()]));
         assert_eq!(d_state_next(&table, 1, &[DigitalValue::zero()]), Some(2));
+
+        unregister_test_data_file(state_file);
+    }
+
+    #[test]
+    fn d_state_table_indexes_contiguous_and_noncontiguous_state_ranges() {
+        let _guard = data_file_test_guard();
+        let state_file = "virtual://d_state/indexed-ranges";
+        unregister_test_data_file(state_file);
+        data_file::register_data_file(
+            state_file,
+            "0 1s 0 -> 0\n1 -> 0\n1 0s 0 -> 1\n0 0s 1 -> 0\n",
+        )
+        .expect("register virtual d_state table");
+
+        let table = parse_d_state_file(state_file, 1, 1).expect("state table parses");
+
+        assert_eq!(
+            table.state_ranges.get(&0),
+            Some(&DStateRange::NonContiguous)
+        );
+        assert_eq!(
+            table.state_ranges.get(&1),
+            Some(&DStateRange::Contiguous { start: 2, end: 2 })
+        );
+        assert_eq!(
+            d_state_outputs(&table, 2),
+            Some(vec![DigitalValue::one()]),
+            "missing states keep ngspice's first-row fallback"
+        );
 
         unregister_test_data_file(state_file);
     }
