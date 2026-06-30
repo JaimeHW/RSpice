@@ -33,6 +33,10 @@ mod nonlinear;
 /// Node identifier (0 = ground, always)
 pub type NodeId = usize;
 
+type XspiceDriverId = (String, String);
+type XspiceDigitalDrivers = HashMap<NodeId, HashMap<XspiceDriverId, DigitalValue>>;
+type XspiceRealDrivers = HashMap<NodeId, HashMap<XspiceDriverId, Value>>;
+
 #[inline]
 fn solution_node_voltage(solution: &[Value], node: NodeId) -> Option<Value> {
     if node == 0 {
@@ -356,13 +360,13 @@ pub struct CircuitData {
     /// Circuit-level digital node values driven by XSPICE events.
     pub(crate) xspice_digital_values: HashMap<NodeId, DigitalValue>,
     /// Per-output digital driver values, resolved onto digital nodes.
-    pub(crate) xspice_digital_drivers: HashMap<(NodeId, String, String), DigitalValue>,
+    pub(crate) xspice_digital_drivers: XspiceDigitalDrivers,
     /// Last event time per XSPICE digital node.
     pub(crate) xspice_digital_event_times: HashMap<NodeId, Value>,
     /// Circuit-level real-valued event node values driven by XSPICE events.
     pub(crate) xspice_real_values: HashMap<NodeId, Value>,
     /// Per-output real-valued event drivers, summed onto real nodes.
-    pub(crate) xspice_real_drivers: HashMap<(NodeId, String, String), Value>,
+    pub(crate) xspice_real_drivers: XspiceRealDrivers,
     /// Last event time per XSPICE real-valued event node.
     pub(crate) xspice_real_event_times: HashMap<NodeId, Value>,
     /// Circuit-level XSPICE digital event queue.
@@ -371,10 +375,6 @@ pub struct CircuitData {
     pub(crate) xspice_touched_digital_nodes: Vec<NodeId>,
     /// Scratch nodes touched while applying a batch of XSPICE real-valued events.
     pub(crate) xspice_touched_real_nodes: Vec<NodeId>,
-    /// Scratch resolved values for XSPICE digital nodes touched by a batch.
-    pub(crate) xspice_resolved_digital_nodes: HashMap<NodeId, DigitalValue>,
-    /// Scratch resolved values for XSPICE real nodes touched by a batch.
-    pub(crate) xspice_resolved_real_nodes: HashMap<NodeId, Value>,
     /// XSPICE code model registry (shared across instances)
     pub(crate) xspice_registry: Arc<CodeModelRegistry>,
     /// First XSPICE evaluation failure seen during the current analysis.

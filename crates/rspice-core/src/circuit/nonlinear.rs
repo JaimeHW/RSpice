@@ -20,10 +20,10 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     behavioral_sources: BehavioralSources,
     xspice_instances: Vec<XspiceInstance>,
     xspice_digital_values: HashMap<NodeId, DigitalValue>,
-    xspice_digital_drivers: HashMap<(NodeId, String, String), DigitalValue>,
+    xspice_digital_drivers: XspiceDigitalDrivers,
     xspice_digital_event_times: HashMap<NodeId, Value>,
     xspice_real_values: HashMap<NodeId, Value>,
-    xspice_real_drivers: HashMap<(NodeId, String, String), Value>,
+    xspice_real_drivers: XspiceRealDrivers,
     xspice_real_event_times: HashMap<NodeId, Value>,
     xspice_event_queue: EventQueue,
     #[cfg(feature = "veriloga")]
