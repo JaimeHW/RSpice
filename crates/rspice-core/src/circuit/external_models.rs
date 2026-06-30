@@ -331,27 +331,6 @@ impl CircuitData {
             .collect()
     }
 
-    /// Snapshot committed XSPICE real-valued node values with stable netlist names.
-    pub(crate) fn xspice_real_snapshot(&self) -> Vec<(String, Value)> {
-        let mut node_names: Vec<(NodeId, String)> = self
-            .node_map
-            .iter()
-            .filter_map(|(name, &id)| (id > 0).then_some((id, name.clone())))
-            .collect();
-        node_names.sort_by_key(|(id, _)| *id);
-        node_names.dedup_by_key(|(id, _)| *id);
-
-        node_names
-            .into_iter()
-            .filter_map(|(node_id, name)| {
-                self.xspice_real_values
-                    .get(&node_id)
-                    .copied()
-                    .map(|value| (name, value))
-            })
-            .collect()
-    }
-
     /// Time of the next pending XSPICE digital event, if any.
     pub(crate) fn next_xspice_event_time(&self) -> Option<Value> {
         self.xspice_event_queue.next_event_time()
