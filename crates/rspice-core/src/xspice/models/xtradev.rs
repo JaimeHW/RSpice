@@ -6,7 +6,9 @@ use crate::xspice::{
     PortType,
 };
 use crate::{Complex64, Value};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+const CORE_TABLE_RESOURCE: &str = "xspice.xtradev.core.table";
 
 #[derive(Debug, Default)]
 pub struct Potentiometer;
@@ -107,6 +109,25 @@ struct MemristorEval {
 struct CorePoint {
     h: Value,
     b: Value,
+}
+
+#[derive(Debug, Clone)]
+struct CoreTable {
+    points: Vec<CorePoint>,
+    midpoints: Vec<Value>,
+    strictly_increasing_h: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct CoreTableSignature {
+    h_values: Vec<Value>,
+    b_values: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct CoreTableResource {
+    signature: CoreTableSignature,
+    data: CmResult<Arc<CoreTable>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1262,7 +1283,27 @@ fn core_length(ctx: &CmContext) -> CmResult<Value> {
     Ok(length)
 }
 
-fn core_points(ctx: &CmContext) -> CmResult<Vec<CorePoint>> {
+fn core_table_signature(ctx: &CmContext) -> CoreTableSignature {
+    CoreTableSignature {
+        h_values: ctx.real_vector_param("h_array").unwrap_or(&[]).to_vec(),
+        b_values: ctx.real_vector_param("b_array").unwrap_or(&[]).to_vec(),
+    }
+}
+
+fn core_table_from_points(points: Vec<CorePoint>) -> CoreTable {
+    let midpoints = points
+        .windows(2)
+        .map(|window| (window[0].h + window[1].h) * 0.5)
+        .collect();
+    let strictly_increasing_h = points.windows(2).all(|window| window[0].h < window[1].h);
+    CoreTable {
+        points,
+        midpoints,
+        strictly_increasing_h,
+    }
+}
+
+fn core_table_uncached(ctx: &CmContext) -> CmResult<CoreTable> {
     let h_values = ctx
         .real_vector_param("h_array")
         .ok_or_else(|| CmError::MissingParameter("h_array".to_string()))?;
@@ -1307,24 +1348,43 @@ fn core_points(ctx: &CmContext) -> CmResult<Vec<CorePoint>> {
         points.push(CorePoint { h, b });
     }
 
-    Ok(points)
+    Ok(core_table_from_points(points))
 }
 
-fn core_validate_common(ctx: &CmContext) -> CmResult<()> {
+fn cache_core_table(ctx: &mut CmContext) -> CmResult<Arc<CoreTable>> {
+    let signature = core_table_signature(ctx);
+    if let Some(resource) = ctx.resource::<CoreTableResource>(CORE_TABLE_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.data.clone();
+    }
+
+    let data = core_table_uncached(ctx).map(Arc::new);
+    ctx.set_resource(
+        CORE_TABLE_RESOURCE,
+        Arc::new(CoreTableResource {
+            signature,
+            data: data.clone(),
+        }),
+    );
+    data
+}
+
+fn core_validate_common(ctx: &mut CmContext) -> CmResult<()> {
     core_mode(ctx)?;
-    core_points(ctx)?;
+    cache_core_table(ctx)?;
     core_area(ctx)?;
     core_length(ctx)?;
     core_input_domain(ctx)?;
     Ok(())
 }
 
-fn core_pwl_smoothing_allowed(points: &[CorePoint], input_domain: Value, fraction: bool) -> bool {
+fn core_pwl_smoothing_allowed(table: &CoreTable, input_domain: Value, fraction: bool) -> bool {
     if fraction {
         return true;
     }
 
-    for window in points.windows(2) {
+    for window in table.points.windows(2) {
         let spacing = window[1].h - window[0].h;
         if spacing < 2.0 * input_domain {
             return false;
@@ -1342,30 +1402,36 @@ fn core_linear_value(point: CorePoint, slope: Value, h_input: Value) -> (Value, 
 }
 
 fn core_pwl_flux_density(
-    points: &[CorePoint],
+    table: &CoreTable,
     h_input: Value,
     input_domain: Value,
     fraction: bool,
 ) -> (Value, Value) {
+    let points = table.points.as_slice();
     let last_index = points.len() - 1;
-    let lower_midpoint = (points[0].h + points[1].h) * 0.5;
+    let lower_midpoint = table.midpoints[0];
     if h_input <= lower_midpoint {
         let slope = core_segment_slope(points[0], points[1]);
         return core_linear_value(points[0], slope, h_input);
     }
 
-    let upper_midpoint = (points[last_index - 1].h + points[last_index].h) * 0.5;
+    let upper_midpoint = table.midpoints[last_index - 1];
     if h_input >= upper_midpoint {
         let slope = core_segment_slope(points[last_index - 1], points[last_index]);
         return core_linear_value(points[last_index], slope, h_input);
     }
 
-    for index in 1..last_index {
-        let midpoint = (points[index].h + points[index + 1].h) * 0.5;
-        if h_input >= midpoint {
-            continue;
+    let index = if table.strictly_increasing_h {
+        table.midpoints[1..last_index].partition_point(|midpoint| h_input >= *midpoint) + 1
+    } else {
+        let mut index = 1;
+        while index < last_index && h_input >= table.midpoints[index] {
+            index += 1;
         }
+        index
+    };
 
+    if index < last_index {
         let lower_seg = points[index].h - points[index - 1].h;
         let upper_seg = points[index + 1].h - points[index].h;
         let domain = if fraction {
@@ -1399,11 +1465,11 @@ fn core_pwl_flux_density(
     core_linear_value(points[last_index], slope, h_input)
 }
 
-fn core_pwl_eval(ctx: &CmContext) -> CmResult<CoreEval> {
-    let points = core_points(ctx)?;
+fn core_pwl_eval(ctx: &mut CmContext) -> CmResult<CoreEval> {
+    let table = cache_core_table(ctx)?;
     let input_domain = core_input_domain(ctx)?;
     let fraction = ctx.param_or("fraction", 1.0) > 0.5;
-    if !core_pwl_smoothing_allowed(&points, input_domain, fraction) {
+    if !core_pwl_smoothing_allowed(&table, input_domain, fraction) {
         return Ok(CoreEval {
             current: 0.0,
             derivative: 0.0,
@@ -1414,7 +1480,7 @@ fn core_pwl_eval(ctx: &CmContext) -> CmResult<CoreEval> {
     let length = core_length(ctx)?;
     let h_input = ctx.input("mc") / length;
     let (flux_density, dflux_density_dh) =
-        core_pwl_flux_density(&points, h_input, input_domain, fraction);
+        core_pwl_flux_density(&table, h_input, input_domain, fraction);
 
     Ok(CoreEval {
         current: flux_density * area,
@@ -3417,6 +3483,45 @@ mod tests {
                 && (out[2] - expected).abs() <= 1.0e-12,
             "ngspice computes one delayed pulse tail and assigns it after one channel advance; expected out[2]={expected:e}, got {out:?}"
         );
+    }
+
+    #[test]
+    fn core_table_cache_reloads_when_h_or_b_vectors_change() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("h_array", vec![0.0, 1.0, 2.0]);
+        ctx.set_real_vector_param("b_array", vec![0.0, 1.0, 4.0]);
+
+        let first = cache_core_table(&mut ctx).expect("core table caches");
+        let second = cache_core_table(&mut ctx).expect("core table reuses cache");
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(first.strictly_increasing_h);
+        assert_eq!(first.midpoints, vec![0.5, 1.5]);
+
+        ctx.set_real_vector_param("b_array", vec![0.0, 2.0, 8.0]);
+        let updated = cache_core_table(&mut ctx).expect("updated core table caches");
+        assert!(!Arc::ptr_eq(&first, &updated));
+        assert_eq!(updated.points[1].b, 2.0);
+    }
+
+    #[test]
+    fn core_pwl_binary_midpoint_lookup_matches_legacy_scan_path() {
+        let table = core_table_from_points(vec![
+            CorePoint { h: 0.0, b: 0.0 },
+            CorePoint { h: 1.0, b: 1.0 },
+            CorePoint { h: 2.0, b: 4.0 },
+            CorePoint { h: 3.0, b: 9.0 },
+            CorePoint { h: 4.0, b: 16.0 },
+        ]);
+        assert!(table.strictly_increasing_h);
+
+        let mut legacy = table.clone();
+        legacy.strictly_increasing_h = false;
+
+        for h_input in [0.25, 0.5, 1.25, 1.5, 1.9, 2.5, 3.6] {
+            let fast = core_pwl_flux_density(&table, h_input, 0.2, false);
+            let scanned = core_pwl_flux_density(&legacy, h_input, 0.2, false);
+            assert_eq!(fast, scanned, "h_input={h_input}");
+        }
     }
 
     #[test]
