@@ -11627,13 +11627,41 @@ pub mod runtime {{
         }}
     }}
 
+    #[derive(Debug, Clone, Copy)]
+    pub enum GeneratedAnalysisKind {{
+        Dc,
+        Ac,
+        Tran,
+        Noise,
+        Ic,
+    }}
+
+    impl GeneratedAnalysisKind {{
+        pub fn matches_query(self, query: &str) -> bool {{
+            match query {{
+                "dc" | "op" => matches!(self, Self::Dc),
+                "ac" => matches!(self, Self::Ac),
+                "tran" => matches!(self, Self::Tran),
+                "noise" => matches!(self, Self::Noise),
+                "ic" => matches!(self, Self::Ic),
+                "static" => matches!(self, Self::Dc | Self::Ic),
+                "smallsig" => matches!(self, Self::Ac | Self::Noise),
+                _ => false,
+            }}
+        }}
+    }}
+
     pub struct GeneratedEvalContext<'a> {{
         voltages: &'a [f64],
+        analysis: GeneratedAnalysisKind,
     }}
 
     impl<'a> GeneratedEvalContext<'a> {{
         pub fn new(voltages: &'a [f64]) -> Self {{
-            Self {{ voltages }}
+            Self {{
+                voltages,
+                analysis: GeneratedAnalysisKind::Dc,
+            }}
         }}
 
         pub fn node_voltage(&self, node: usize) -> f64 {{
@@ -11653,7 +11681,7 @@ pub mod runtime {{
         }}
 
         pub fn analysis(&self, query: &str) -> bool {{
-            matches!(query, "dc" | "static")
+            self.analysis.matches_query(query)
         }}
 
         pub fn analysis_dc(&self) -> bool {{
@@ -12330,13 +12358,41 @@ pub mod runtime {{
         }}
     }}
 
+    #[derive(Debug, Clone, Copy)]
+    pub enum GeneratedAnalysisKind {{
+        Dc,
+        Ac,
+        Tran,
+        Noise,
+        Ic,
+    }}
+
+    impl GeneratedAnalysisKind {{
+        pub fn matches_query(self, query: &str) -> bool {{
+            match query {{
+                "dc" | "op" => matches!(self, Self::Dc),
+                "ac" => matches!(self, Self::Ac),
+                "tran" => matches!(self, Self::Tran),
+                "noise" => matches!(self, Self::Noise),
+                "ic" => matches!(self, Self::Ic),
+                "static" => matches!(self, Self::Dc | Self::Ic),
+                "smallsig" => matches!(self, Self::Ac | Self::Noise),
+                _ => false,
+            }}
+        }}
+    }}
+
     pub struct GeneratedEvalContext<'a> {{
         voltages: &'a [f64],
+        analysis: GeneratedAnalysisKind,
     }}
 
     impl<'a> GeneratedEvalContext<'a> {{
         pub fn new(voltages: &'a [f64]) -> Self {{
-            Self {{ voltages }}
+            Self {{
+                voltages,
+                analysis: GeneratedAnalysisKind::Dc,
+            }}
         }}
 
         pub fn node_voltage(&self, node: usize) -> f64 {{
@@ -12356,7 +12412,7 @@ pub mod runtime {{
         }}
 
         pub fn analysis(&self, query: &str) -> bool {{
-            matches!(query, "dc" | "static")
+            self.analysis.matches_query(query)
         }}
 
         pub fn analysis_dc(&self) -> bool {{
