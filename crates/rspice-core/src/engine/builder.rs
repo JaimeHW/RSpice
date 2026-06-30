@@ -1837,7 +1837,14 @@ impl Engine {
                                     element.name, err
                                 ))
                             })?;
-                            device.set_temperature(self.config.temperature);
+                            device
+                                .try_set_temperature(self.config.temperature)
+                                .map_err(|err| {
+                                    SimulationError::Circuit(format!(
+                                        "Verilog-A device '{}' temperature update failed: {}",
+                                        element.name, err
+                                    ))
+                                })?;
                             circuit.add_veriloga_device(device);
                             continue;
                         }

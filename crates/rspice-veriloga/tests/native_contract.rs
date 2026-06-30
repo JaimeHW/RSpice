@@ -4075,6 +4075,55 @@ fn native_device_executes_static_conditions_without_fallback() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_try_set_temperature_reports_static_refresh_errors_without_panic() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+module native_temperature_static_refresh_error(p, n);
+    inout p, n;
+    electrical p, n;
+    real w[1:2];
+    integer idx;
+    real guard;
+    analog begin
+        idx = ($temperature > 305.0) ? 3 : 1;
+        w[1] = 1.0;
+        w[2] = 2.0;
+        guard = w[idx];
+        if (guard > 0.5)
+            I(p, n) <+ V(p, n) * 1.0e-3;
+    end
+endmodule
+"#,
+    );
+    assert!(
+        model
+            .stamp_programs
+            .iter()
+            .any(|program| program.static_condition.is_some()),
+        "fixture must contain a static condition program"
+    );
+
+    let mut device =
+        VerilogADevice::try_new("TEMPSTATIC1", model, &[1, 0]).expect("model uses native JIT");
+    assert!(device.is_using_native());
+    device
+        .try_set_temperature(300.0)
+        .expect("in-range temperature refresh succeeds");
+
+    let err = device
+        .try_set_temperature(310.0)
+        .expect_err("checked temperature setter must report native refresh errors");
+    let msg = err.to_string();
+    assert_native_hard_fail_message(&msg);
+    assert!(
+        msg.contains("array index 3 outside declared bounds [1:2]"),
+        "error must preserve native array bounds diagnostic, got: {msg}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_static_conditions_control_potential_branch_activation() {
     let model = static_condition_branch_model();
     assert!(
