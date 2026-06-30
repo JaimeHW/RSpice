@@ -1220,9 +1220,7 @@ impl CodeModel for Table3D {
 
     fn ac_gain(&self, ctx: &CmContext) -> Vec<Value> {
         match scaled_table3d_eval(ctx) {
-            // ngspice 46's table3D AC path writes the z derivative into `iny`
-            // and leaves `inz` unset. Preserve that compatibility quirk here.
-            Ok(eval) => vec![eval.dx, eval.dz, 0.0],
+            Ok(eval) => vec![eval.dx, eval.dy, eval.dz],
             Err(_) => vec![0.0, 0.0, 0.0],
         }
     }
@@ -1251,11 +1249,10 @@ impl CodeModel for Table3D {
             return Vec::new();
         }
         match scaled_table3d_eval(ctx) {
-            // ngspice 46's table3D AC path writes the z derivative into `iny`
-            // and leaves `inz` unset. DC/Newton partials above stay physical.
             Ok(eval) => vec![
                 ("inx".to_string(), Complex64::new(eval.dx, 0.0)),
-                ("iny".to_string(), Complex64::new(eval.dz, 0.0)),
+                ("iny".to_string(), Complex64::new(eval.dy, 0.0)),
+                ("inz".to_string(), Complex64::new(eval.dz, 0.0)),
             ],
             Err(_) => Vec::new(),
         }
