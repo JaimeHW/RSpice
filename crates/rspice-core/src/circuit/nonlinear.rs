@@ -490,13 +490,13 @@ impl CircuitData {
         rhs: &mut [Value],
         solution: &[Value],
         time: Value,
-        analysis: crate::xspice::AnalysisType,
+        _analysis: crate::xspice::AnalysisType,
     ) {
         self.behavioral_sources
             .stamp_all(matrix, rhs, solution, self.num_nodes, time);
         #[cfg(feature = "veriloga-builtins")]
         {
-            let generated_analysis = match analysis {
+            let generated_analysis = match _analysis {
                 crate::xspice::AnalysisType::Ac => {
                     crate::device::veriloga_generated::GeneratedAnalysisKind::Ac
                 }
