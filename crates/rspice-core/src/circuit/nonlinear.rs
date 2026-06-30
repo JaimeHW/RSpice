@@ -142,7 +142,10 @@ impl CircuitData {
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
-            || self.has_xspice_devices()
+            || self
+                .xspice_instances
+                .iter()
+                .any(|instance| instance.requires_conservative_newton_damping())
             || {
                 #[cfg(feature = "veriloga-builtins")]
                 {
@@ -187,7 +190,10 @@ impl CircuitData {
             || !self.vdmoses.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
-            || self.has_xspice_devices()
+            || self
+                .xspice_instances
+                .iter()
+                .any(|instance| instance.requires_conservative_newton_damping())
         {
             return true;
         }
