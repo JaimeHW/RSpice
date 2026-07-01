@@ -137,7 +137,7 @@ impl Engine {
         Ok(())
     }
 
-    pub(in crate::engine::advanced) fn create_perturbed_netlist(
+    pub(crate) fn create_perturbed_netlist(
         netlist: &Netlist,
         param_name: &str,
         param_value: Value,
@@ -148,7 +148,7 @@ impl Engine {
         )
     }
 
-    pub(in crate::engine::advanced) fn create_perturbed_netlist_multi(
+    pub(crate) fn create_perturbed_netlist_multi(
         netlist: &Netlist,
         overrides: &[(String, Value)],
     ) -> Result<(Netlist, usize), SimulationError> {
@@ -175,10 +175,13 @@ impl Engine {
             .count();
         let overridden_source = Self::build_overridden_source_multi(source, &ordered_overrides);
 
+        let parse_options = crate::netlist::NetlistParseOptions {
+            statistical_mode: netlist.params.statistical_mode(),
+        };
         let mut reparsed = if let Some(source_path) = netlist.source_path.as_deref() {
-            Netlist::parse_with_path(&overridden_source, source_path)
+            Netlist::parse_with_path_and_options(&overridden_source, source_path, parse_options)
         } else {
-            crate::netlist::parse_netlist(&overridden_source)
+            Netlist::parse_with_options(&overridden_source, parse_options)
         }
         .map_err(|e| {
             SimulationError::Netlist(format!(
