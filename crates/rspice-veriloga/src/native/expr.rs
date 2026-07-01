@@ -69,6 +69,7 @@ pub(crate) enum NativeOp {
     ExtremumConstLhs(ExtremumOp, f64),
     UnaryMath(UnaryMathOp),
     BinaryMath(BinaryMathOp),
+    IntegerCast,
     IntegerBinary(IntegerBinaryOp),
     IntegerShiftConst(IntegerBinaryOp, u8),
     IntegerBinaryConst(IntegerBinaryOp, i64),
@@ -7124,6 +7125,7 @@ fn is_parameter_default_op(op: &NativeOp) -> bool {
             | NativeOp::ExtremumConstLhs(_, _)
             | NativeOp::UnaryMath(_)
             | NativeOp::BinaryMath(_)
+            | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)
             | NativeOp::IntegerShiftConst(_, _)
             | NativeOp::IntegerBinaryConst(_, _)
@@ -7186,6 +7188,7 @@ fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::ExtremumConstLhs(_, _) => "ExtremumConstLhs",
         NativeOp::UnaryMath(_) => "UnaryMath",
         NativeOp::BinaryMath(_) => "BinaryMath",
+        NativeOp::IntegerCast => "IntegerCast",
         NativeOp::IntegerBinary(_) => "IntegerBinary",
         NativeOp::IntegerShiftConst(_, _) => "IntegerShiftConst",
         NativeOp::IntegerBinaryConst(_, _) => "IntegerBinaryConst",
@@ -7478,9 +7481,15 @@ fn lower_constant_rhs_integer_bitwise(ops: &mut Vec<NativeOp>, op: IntegerBinary
     let Some(NativeOp::Const(value)) = ops.last().copied() else {
         return false;
     };
+    let rhs = value as i64;
 
     ops.pop();
-    ops.push(NativeOp::IntegerBinaryConst(op, value as i64));
+    match (op, rhs) {
+        (IntegerBinaryOp::BitAnd, -1)
+        | (IntegerBinaryOp::BitOr, 0)
+        | (IntegerBinaryOp::BitXor, 0) => ops.push(NativeOp::IntegerCast),
+        _ => ops.push(NativeOp::IntegerBinaryConst(op, rhs)),
+    }
     true
 }
 
@@ -8103,6 +8112,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::ExtremumConst(_, _)
         | NativeOp::ExtremumConstLhs(_, _)
         | NativeOp::LogicalConst(_, _)
+        | NativeOp::IntegerCast
         | NativeOp::IntegerShiftConst(_, _)
         | NativeOp::IntegerBinaryConst(_, _)
         | NativeOp::Neg
@@ -12220,11 +12230,11 @@ endmodule
                 -1,
             ),
             (
-                "bitxor-nan",
+                "bitxor-nonzero",
                 Instruction::BitXor,
                 IntegerBinaryOp::BitXor,
-                f64::NAN,
-                0,
+                7.0,
+                7,
             ),
             (
                 "bitand-saturating",
@@ -12259,6 +12269,44 @@ endmodule
                     NativeOp::IntegerBinaryConst(expected_op, expected_rhs),
                 ],
                 "{case}"
+            );
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{case} should not allocate an RHS XMM stack slot"
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_constant_rhs_bitwise_identities_as_integer_cast() {
+        let cases = [
+            ("bitand-all-ones", Instruction::BitAnd, -1.0),
+            ("bitor-zero", Instruction::BitOr, 0.0),
+            ("bitxor-zero", Instruction::BitXor, -0.0),
+        ];
+
+        for (case, instruction, literal) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(literal),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "bits-const-rhs-identity",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant RHS bitwise identity should lower to integer conversion");
+
+            assert_eq!(
+                lowered.ops(),
+                &[NativeOp::LoadTemperature, NativeOp::IntegerCast],
+                "{case} should still integerize the left operand"
             );
             assert_eq!(
                 lowered.max_stack_depth(),

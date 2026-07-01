@@ -402,6 +402,7 @@ impl FunctionCompiler {
                 NativeOp::ExtremumConstLhs(op, value) => self.emit_extremum_const_lhs(op, value)?,
                 NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
                 NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
+                NativeOp::IntegerCast => self.emit_integer_cast()?,
                 NativeOp::IntegerBinary(op) => self.emit_integer_binary(op)?,
                 NativeOp::IntegerShiftConst(op, count) => {
                     self.emit_integer_shift_const(op, count)?
@@ -1399,6 +1400,20 @@ impl FunctionCompiler {
             }
         }
         self.depth -= 1;
+        Ok(())
+    }
+
+    fn emit_integer_cast(&mut self) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "integer cast requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.emit_rust_f64_to_i64(target, Gpr::R10)?;
+        self.encoder.cvtsi2sd_xmm_r64(target, Gpr::R10);
         Ok(())
     }
 
@@ -3503,6 +3518,7 @@ fn native_op_reads_entry_args(op: NativeOp) -> bool {
             | NativeOp::ExtremumConstLhs(_, _)
             | NativeOp::UnaryMath(_)
             | NativeOp::BinaryMath(_)
+            | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)
             | NativeOp::IntegerShiftConst(_, _)
             | NativeOp::IntegerBinaryConst(_, _)
@@ -3556,6 +3572,7 @@ fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
                 | NativeOp::ExtremumConst(_, _)
                 | NativeOp::ExtremumConstLhs(_, _)
                 | NativeOp::UnaryMath(UnaryMathOp::Floor | UnaryMathOp::Ceil)
+                | NativeOp::IntegerCast
                 | NativeOp::IntegerBinary(_)
                 | NativeOp::IntegerShiftConst(_, _)
                 | NativeOp::IntegerBinaryConst(_, _)
@@ -8986,13 +9003,13 @@ mod tests {
                 runtime_bitor(-16.0, -1.0),
             ),
             (
-                "bitxor-nan-imm",
+                "bitxor-nonzero-imm",
                 Instruction::BitXor,
                 IntegerBinaryOp::BitXor,
                 f64::NAN,
-                f64::NAN,
-                0,
-                runtime_bitxor(f64::NAN, f64::NAN),
+                7.0,
+                7,
+                runtime_bitxor(f64::NAN, 7.0),
             ),
         ];
 
@@ -9078,6 +9095,96 @@ mod tests {
             f(&ctx, std::ptr::null()).to_bits(),
             runtime_bitand(13.75, f64::INFINITY).to_bits()
         );
+    }
+
+    #[test]
+    fn generated_value_leaf_integerizes_constant_rhs_bitwise_identities() {
+        let cases = [
+            (
+                "bitor-zero-fraction",
+                Instruction::BitOr,
+                IntegerBinaryOp::BitOr,
+                13.75,
+                0.0,
+                runtime_bitor(13.75, 0.0),
+            ),
+            (
+                "bitxor-negative-zero-fraction",
+                Instruction::BitXor,
+                IntegerBinaryOp::BitXor,
+                -16.75,
+                -0.0,
+                runtime_bitxor(-16.75, -0.0),
+            ),
+            (
+                "bitand-all-ones-nan",
+                Instruction::BitAnd,
+                IntegerBinaryOp::BitAnd,
+                f64::NAN,
+                -1.0,
+                runtime_bitand(f64::NAN, -1.0),
+            ),
+            (
+                "bitand-all-ones-positive-infinity",
+                Instruction::BitAnd,
+                IntegerBinaryOp::BitAnd,
+                f64::INFINITY,
+                -1.0,
+                runtime_bitand(f64::INFINITY, -1.0),
+            ),
+        ];
+
+        for (name, instruction, elided_op, left, right, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushParam(0),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+                0,
+            );
+            assert_eq!(
+                program.ops(),
+                &[NativeOp::LoadParam(0), NativeOp::IntegerCast],
+                "{name}: identity bitwise op should lower to integer conversion"
+            );
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{name}: identity bitwise op should not allocate an RHS stack slot"
+            );
+
+            let bytes = compile_value_function(&program).expect("compile integer-cast leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "{name}: integer cast should not pay helper-call prologue"
+            );
+            assert!(
+                !contains_bytes(
+                    &bytes,
+                    &bitwise_imm32_bytes(elided_op, Gpr::R10, right as i64 as i32)
+                ),
+                "{name}: generated code should elide the no-op bitwise immediate"
+            );
+            assert!(
+                !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::R11, right as i64 as u64)),
+                "{name}: generated code should not materialize the RHS"
+            );
+
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate integer-cast leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let params = [left];
+            let ctx = eval_context(&params, &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
+        }
     }
 
     #[test]
