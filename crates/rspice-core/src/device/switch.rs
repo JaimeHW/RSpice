@@ -403,6 +403,10 @@ pub struct CurrentSwitch {
     pub roff: Value,
     /// Smoothness factor
     pub smooth: Value,
+    /// Xyce-style full-on current control value from ION/ON.
+    pub on_current: Option<Value>,
+    /// Xyce-style full-off current control value from IOFF/OFF.
+    pub off_current: Option<Value>,
 
     // State
     state: SwitchState,
@@ -426,6 +430,8 @@ impl CurrentSwitch {
             ron: 1.0,
             roff: 1e6,
             smooth: 0.001, // 1mA smooth region
+            on_current: None,
+            off_current: None,
             state: SwitchState::Off,
             prev_state: SwitchState::Off,
             in_hysteresis_band: false,
@@ -455,6 +461,26 @@ impl CurrentSwitch {
         }
         if let Some(&v) = params.get("SMOOTH") {
             self.smooth = v.max(1e-9);
+        }
+        if params.contains_key("ION")
+            || params.contains_key("IOFF")
+            || params.contains_key("ON")
+            || params.contains_key("OFF")
+        {
+            self.on_current = Some(
+                params
+                    .get("ON")
+                    .or_else(|| params.get("ION"))
+                    .copied()
+                    .unwrap_or(1.0e-3),
+            );
+            self.off_current = Some(
+                params
+                    .get("OFF")
+                    .or_else(|| params.get("IOFF"))
+                    .copied()
+                    .unwrap_or(0.0),
+            );
         }
         self.current_resistance = match self.state {
             SwitchState::On => self.ron,
@@ -518,6 +544,17 @@ impl CurrentSwitch {
     }
 
     #[inline]
+    fn safe_delta(delta: Value) -> Value {
+        if delta.abs() >= 1.0e-12 {
+            delta
+        } else if delta.is_sign_negative() {
+            -1.0e-12
+        } else {
+            1.0e-12
+        }
+    }
+
+    #[inline]
     fn effective_threshold(&self) -> Value {
         if self.ih < 0.0 {
             match self.state {
@@ -538,6 +575,10 @@ impl CurrentSwitch {
     ///
     /// Returns `(g, dg/dictrl)` for the current hysteresis state.
     fn control_sensitivity(&self, ictrl: Value) -> (Value, Value) {
+        if let (Some(on), Some(off)) = (self.on_current, self.off_current) {
+            return self.on_off_current_sensitivity(ictrl, on, off);
+        }
+
         let it_eff = self.effective_threshold();
         let smooth = self.smooth.max(1e-9);
         let x = (ictrl - it_eff) / smooth;
@@ -558,8 +599,40 @@ impl CurrentSwitch {
         (g, dg_dictrl)
     }
 
+    fn on_off_current_sensitivity(&self, ictrl: Value, on: Value, off: Value) -> (Value, Value) {
+        let delta = Self::safe_delta(on - off);
+        let state = (ictrl - off) / delta;
+
+        if state <= 0.0 {
+            return (1.0 / self.roff, 0.0);
+        }
+        if state >= 1.0 {
+            return (1.0 / self.ron, 0.0);
+        }
+
+        let x = 2.0 * state - 1.0;
+        let lm = (self.ron * self.roff).sqrt().ln();
+        let lr = (self.ron / self.roff).ln();
+        let g = (-lm - 0.75 * lr * x + 0.25 * lr * x * x * x).exp();
+        let dg_dstate = g * 1.5 * lr * (x * x - 1.0);
+        (g, dg_dstate / delta)
+    }
+
     /// Update state with hysteresis
     fn update_state(&mut self, ictrl: Value) {
+        if let (Some(on), Some(off)) = (self.on_current, self.off_current) {
+            let state = (ictrl - off) / Self::safe_delta(on - off);
+            self.in_hysteresis_band = false;
+            self.state = if state >= 1.0 {
+                SwitchState::On
+            } else if state <= 0.0 {
+                SwitchState::Off
+            } else {
+                SwitchState::Transitioning
+            };
+            return;
+        }
+
         if self.ih < 0.0 {
             let lower = self.it + self.ih;
             let upper = self.it - self.ih;

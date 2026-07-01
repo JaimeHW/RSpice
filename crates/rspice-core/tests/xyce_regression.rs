@@ -582,6 +582,28 @@ fn test_xyce_lead_current_probe_cases_run() {
 }
 
 #[test]
+fn test_xyce_current_source_probe_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/ISWITCH/iswitch.cir",
+        "Netlists/ISWITCH/iswitch_spice.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a numeric Xyce current-source probe comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
@@ -616,6 +638,24 @@ fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
                 .as_deref()
                 .is_some_and(|error| error.contains("EKV3 LEVEL=301")),
             "unsupported reason should name the EKV3 capability boundary, got {result:?}"
+        );
+    }
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_1775/HBT_IV.cir",
+        "Netlists/VBIC13/HBT_IV.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && result.expected_unsupported,
+            "{relative} should stay named unsupported until native VBIC nested-sweep current-source branch probes are production-ready, got {result:?}"
+        );
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("native VBIC nested DC sweep")),
+            "unsupported reason should name the native VBIC nested-sweep capability boundary, got {result:?}"
         );
     }
 }

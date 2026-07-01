@@ -1594,6 +1594,35 @@ impl XyceTestRunner {
         }
 
         Self::reject_unsupported_static_dc_model_observables(netlist, print)?;
+        Self::reject_unsupported_vbic_nested_current_source_sweeps(netlist, dc, print)?;
+
+        Ok(())
+    }
+
+    fn reject_unsupported_vbic_nested_current_source_sweeps(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        print: &XycePrintRequest,
+    ) -> Result<(), String> {
+        let Some(sweep2) = &dc.sweep2 else {
+            return Ok(());
+        };
+        if !Self::netlist_uses_native_vbic_bjt(netlist) {
+            return Ok(());
+        }
+
+        let bias_points = dc.primary_spec().points().len() * sweep2.spec().points().len();
+        if bias_points <= 1000 {
+            return Ok(());
+        }
+
+        for probe in &print.probes {
+            if Self::dc_probe_references_current_source_current(probe, netlist)? {
+                return Err(format!(
+                    "native VBIC nested DC sweep with {bias_points} bias points and current-source branch-current probes exceeds the current Xyce harness execution envelope; keep this named unsupported until VBIC nested-sweep continuation/performance is production-ready"
+                ));
+            }
+        }
 
         Ok(())
     }
@@ -1649,6 +1678,20 @@ impl XyceTestRunner {
         })
     }
 
+    fn netlist_uses_native_vbic_bjt(netlist: &Netlist) -> bool {
+        if Self::elements_use_native_vbic_bjt(&netlist.elements, &netlist.models, &[]) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            Self::elements_use_native_vbic_bjt(
+                &flattened.elements,
+                &netlist.models,
+                &flattened.scoped_models,
+            )
+        })
+    }
+
     fn elements_use_ekv3_level301_mosfet(
         elements: &[crate::netlist::Element],
         models: &[crate::netlist::ModelDef],
@@ -1661,6 +1704,21 @@ impl XyceTestRunner {
             Self::find_model(scoped_models, model)
                 .or_else(|| Self::find_model(models, model))
                 .is_some_and(Self::model_is_ekv3_level301)
+        })
+    }
+
+    fn elements_use_native_vbic_bjt(
+        elements: &[crate::netlist::Element],
+        models: &[crate::netlist::ModelDef],
+        scoped_models: &[crate::netlist::ModelDef],
+    ) -> bool {
+        elements.iter().any(|element| {
+            let ElementKind::Bjt { model, .. } = &element.kind else {
+                return false;
+            };
+            Self::find_model(scoped_models, model)
+                .or_else(|| Self::find_model(models, model))
+                .is_some_and(Self::model_is_native_vbic_bjt)
         })
     }
 
@@ -1683,6 +1741,22 @@ impl XyceTestRunner {
             .rev()
             .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
             .is_some_and(|(_, value)| (*value - 301.0).abs() <= 1.0e-9)
+    }
+
+    fn model_is_native_vbic_bjt(model: &crate::netlist::ModelDef) -> bool {
+        matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NPN" | "PNP"
+        ) && model
+            .params
+            .iter()
+            .rev()
+            .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+            .is_some_and(|(_, value)| {
+                [4.0, 9.0, 11.0, 12.0, 13.0]
+                    .iter()
+                    .any(|level| (*value - *level).abs() <= 1.0e-9)
+            })
     }
 
     fn dc_probe_references_voltage_source_current(
@@ -1711,6 +1785,34 @@ impl XyceTestRunner {
             Ok(0.0)
         })?;
         Ok(references_voltage_source_current)
+    }
+
+    fn dc_probe_references_current_source_current(
+        probe: &str,
+        netlist: &Netlist,
+    ) -> Result<bool, String> {
+        let normalized = Self::normalize_probe(probe);
+        if let Some(source_name) = Self::parse_current_probe(&normalized) {
+            return Ok(Self::source_is_current_source(netlist, &source_name));
+        }
+
+        let Some(expression) = Self::print_expression_inner(&normalized) else {
+            return Ok(false);
+        };
+        if !Self::print_expression_contains_probe_call(expression) {
+            return Ok(false);
+        }
+
+        let mut references_current_source_current = false;
+        Self::rewrite_print_expression_calls(expression, netlist.params.clone(), |call| {
+            if let Some(source_name) = Self::parse_current_probe(call)
+                && Self::source_is_current_source(netlist, &source_name)
+            {
+                references_current_source_current = true;
+            }
+            Ok(0.0)
+        })?;
+        Ok(references_current_source_current)
     }
 
     fn validate_dc_sweep_source(netlist: &Netlist, source: &str) -> Result<(), String> {
@@ -1828,6 +1930,9 @@ impl XyceTestRunner {
         }
         if let Some(element_name) = Self::parse_current_probe(normalized) {
             if Self::source_is_voltage_source(netlist, &element_name) {
+                return Ok(());
+            }
+            if Self::source_is_current_source(netlist, &element_name) {
                 return Ok(());
             }
             if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name) {
@@ -1957,6 +2062,11 @@ impl XyceTestRunner {
 
         if let Some(element_name) = Self::parse_current_probe(normalized) {
             if let Some(current) = result.branch_current_named(&element_name) {
+                return Ok(current);
+            }
+            if let Some(current) =
+                Self::evaluate_current_source_current(netlist, dc, sweep_point, &element_name)
+            {
                 return Ok(current);
             }
             if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name) {
@@ -2769,6 +2879,13 @@ impl XyceTestRunner {
         })
     }
 
+    fn source_is_current_source(netlist: &Netlist, source: &str) -> bool {
+        netlist.elements.iter().any(|element| {
+            element.name.eq_ignore_ascii_case(source)
+                && matches!(&element.kind, ElementKind::CurrentSource(_))
+        })
+    }
+
     fn source_is_independent_source(netlist: &Netlist, source: &str) -> bool {
         netlist.elements.iter().any(|element| {
             element.name.eq_ignore_ascii_case(source)
@@ -2790,6 +2907,32 @@ impl XyceTestRunner {
                 }
                 _ => None,
             })
+    }
+
+    fn evaluate_current_source_current(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        source: &str,
+    ) -> Option<Value> {
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(source))?;
+        let ElementKind::CurrentSource(spec) = &element.kind else {
+            return None;
+        };
+
+        if source.eq_ignore_ascii_case(&dc.source) {
+            return Some(sweep_point.primary);
+        }
+        if let Some(sweep2) = &dc.sweep2
+            && source.eq_ignore_ascii_case(&sweep2.source)
+        {
+            return sweep_point.secondary;
+        }
+
+        Some(extract_dc_value(spec))
     }
 
     fn scalar_parameter_probe_is_supported(netlist: &Netlist, parameter_name: &str) -> bool {

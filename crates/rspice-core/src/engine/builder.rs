@@ -91,6 +91,19 @@ fn validate_source_file_inputs(
     }
 }
 
+fn parse_direct_branch_current_control(expression: &str) -> Option<String> {
+    let normalized: String = expression
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect();
+    if !normalized.starts_with("i(") || !normalized.ends_with(')') {
+        return None;
+    }
+    let inner = &normalized[2..normalized.len() - 1];
+    (!inner.is_empty()).then(|| inner.to_string())
+}
+
 fn xtradev_scalar_terminal_node(port: &XspicePort) -> Option<&str> {
     match port {
         XspicePort::Analog(name) | XspicePort::Conductance(name) => Some(name),
@@ -2430,6 +2443,44 @@ impl Engine {
                             element.name, model
                         ))
                     })?;
+                    if model_def.model_type.eq_ignore_ascii_case("ISWITCH")
+                        || model_def.model_type.eq_ignore_ascii_case("ISW")
+                        || model_def.model_type.eq_ignore_ascii_case("CSW")
+                    {
+                        let control_element =
+                            parse_direct_branch_current_control(control_expression).ok_or_else(
+                                || {
+                                    SimulationError::Circuit(format!(
+                                        "Generic switch '{}' does not yet support ISWITCH CONTROL expression '{}'; native ISWITCH mapping currently requires a direct branch-current control I(source)",
+                                        element.name, control_expression
+                                    ))
+                                },
+                            )?;
+                        let params_map = resolve_supported_model_params_upper_map(
+                            netlist,
+                            model_def,
+                            "Generic current-controlled switch",
+                            &element.name,
+                            model,
+                            ISWITCH_MODEL_PARAMS,
+                            self.config.temperature,
+                        )?;
+
+                        let mut sw = crate::device::CurrentSwitch::new(
+                            element.name.clone(),
+                            np,
+                            nn,
+                            control_element.clone(),
+                        )
+                        .with_params(&params_map);
+                        if let Some(state) = initial_state {
+                            sw = sw.with_initial_state(map_switch_state(*state));
+                        }
+                        let iswitch_idx = circuit.iswitches.len();
+                        circuit.iswitches.push(sw);
+                        circuit.add_iswitch_pending(iswitch_idx, control_element);
+                        continue;
+                    }
                     ensure_model_type(
                         "Generic switch",
                         &element.name,
