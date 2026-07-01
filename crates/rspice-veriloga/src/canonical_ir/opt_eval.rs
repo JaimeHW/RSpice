@@ -215,6 +215,7 @@ impl<'a> OptEvaluator<'a> {
             } => Ok(OptEvalValue::Real(
                 self.evaluate_ddx_projection(*value, *pos_node, *neg_node)?,
             )),
+            OptValueKind::Ddt { .. } | OptValueKind::DdtScale => Ok(OptEvalValue::Real(0.0)),
             OptValueKind::NodePotential { node } => Ok(OptEvalValue::Real(input_at(
                 "node_potential",
                 &self.inputs.node_potentials,

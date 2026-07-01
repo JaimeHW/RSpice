@@ -103,6 +103,14 @@ struct ValueEmitContext<'a> {
     limexp_max_expr: String,
     temperature_expr: String,
     thermal_voltage_expr: String,
+    ddt_slots: Option<&'a DdtSlots>,
+    ddt_mode: DdtEmitMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DdtEmitMode {
+    Transient,
+    ReactiveLinearized,
 }
 
 struct ScalarDerivatives {
@@ -297,6 +305,8 @@ fn generate_stamp_file(
         limexp_max_expr: "LIMEXP_MAX".to_string(),
         temperature_expr: "ctx.temperature()".to_string(),
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
+        ddt_slots: Some(ddt_slots),
+        ddt_mode: DdtEmitMode::Transient,
     };
     emit_live_values(
         artifact,
@@ -317,7 +327,7 @@ fn generate_stamp_file(
     )?;
 
     out.push_str("    }\n\n");
-    let reactive_roots = ddt_equation_roots(artifact, &roots);
+    let reactive_roots = reactive_equation_roots(artifact, &roots)?;
     if reactive_roots.is_empty() {
         out.push_str(
             "    pub fn stamp_reactive(&mut self, _ctx: &GeneratedEvalContext<'_>, _stamper: &mut GeneratedReactiveStamper<'_>) {\n",
@@ -337,12 +347,22 @@ fn generate_stamp_file(
         }
         out.push_str("        let p = &(*self.params);\n");
         out.push_str("        let multiplicity = self.multiplicity;\n");
+        let reactive_context = ValueEmitContext {
+            cached_values: &static_cache.set,
+            use_cached_fields: true,
+            inline_uncached_constants: false,
+            limexp_max_expr: "LIMEXP_MAX".to_string(),
+            temperature_expr: "ctx.temperature()".to_string(),
+            thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
+            ddt_slots: Some(ddt_slots),
+            ddt_mode: DdtEmitMode::ReactiveLinearized,
+        };
         emit_live_values(
             artifact,
             parameter_fields,
             &reactive_live,
             static_cache,
-            &stamp_context,
+            &reactive_context,
             &mut out,
         )?;
         emit_current_reactive_stamps(artifact, &reactive_roots, static_cache, &mut out)?;
@@ -462,6 +482,8 @@ pub(super) fn scalar_state_extensions(
         limexp_max_expr: format_f64(LIMEXP_MAX),
         temperature_expr: "temperature".to_string(),
         thermal_voltage_expr: "thermal_voltage".to_string(),
+        ddt_slots: None,
+        ddt_mode: DdtEmitMode::Transient,
     };
     let temperature_context = ValueEmitContext {
         cached_values: &static_cache.set,
@@ -470,6 +492,8 @@ pub(super) fn scalar_state_extensions(
         limexp_max_expr: format_f64(LIMEXP_MAX),
         temperature_expr: "temperature".to_string(),
         thermal_voltage_expr: "thermal_voltage".to_string(),
+        ddt_slots: None,
+        ddt_mode: DdtEmitMode::Transient,
     };
     let mut methods = String::new();
 
@@ -745,6 +769,8 @@ pub(super) fn emit_static_current_values(
         limexp_max_expr: "LIMEXP_MAX".to_string(),
         temperature_expr: "ctx.temperature()".to_string(),
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
+        ddt_slots: None,
+        ddt_mode: DdtEmitMode::Transient,
     };
     emit_live_values(
         artifact,
@@ -2127,6 +2153,13 @@ fn emit_value_expr(
             *neg_node,
             context,
         )?,
+        OptValueKind::Ddt { operator, input } => {
+            emit_ddt_value_expr(artifact, parameter_fields, *operator, *input, context)?
+        }
+        OptValueKind::DdtScale => match context.ddt_mode {
+            DdtEmitMode::Transient => "ddt_scale".to_string(),
+            DdtEmitMode::ReactiveLinearized => "1.0".to_string(),
+        },
         OptValueKind::NodePotential { node } => {
             format!("ctx.node_voltage(nodes[{}])", node.index())
         }
@@ -2175,6 +2208,33 @@ fn emit_value_expr(
         }
     };
     Ok(expr)
+}
+
+fn emit_ddt_value_expr(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    operator: ExprId,
+    input: ValueId,
+    context: &ValueEmitContext<'_>,
+) -> Result<String, RustBackendError> {
+    match context.ddt_mode {
+        DdtEmitMode::Transient => {
+            let slots = context
+                .ddt_slots
+                .ok_or_else(|| unsupported(artifact, "ddt scalar value context"))?;
+            let slot = slots.slot_for(operator).ok_or_else(|| {
+                internal(
+                    artifact,
+                    format!("ddt expression {operator} has no generated state slot"),
+                )
+            })?;
+            let input = value_ref(artifact, parameter_fields, input, context)?;
+            Ok(format!(
+                "eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, {slot}, {input})"
+            ))
+        }
+        DdtEmitMode::ReactiveLinearized => Ok("0.0".to_string()),
+    }
 }
 
 fn emit_ddx_projection_expr(
@@ -2617,6 +2677,72 @@ fn ddt_equation_roots(
         .collect()
 }
 
+fn reactive_equation_roots(
+    artifact: &CanonicalIrArtifact,
+    roots: &HashMap<EquationId, ValueId>,
+) -> Result<HashMap<EquationId, ValueId>, RustBackendError> {
+    let mut reactive_roots = ddt_equation_roots(artifact, roots);
+    for equation in &artifact.mir.equations {
+        let Some(root) = roots.get(&equation.id).copied() else {
+            continue;
+        };
+        if reactive_roots.contains_key(&equation.id) {
+            continue;
+        }
+        if value_graph_contains_ddt(artifact, root, &mut HashSet::new())? {
+            reactive_roots.insert(equation.id, root);
+        }
+    }
+    Ok(reactive_roots)
+}
+
+fn value_graph_contains_ddt(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+    visited: &mut HashSet<ValueId>,
+) -> Result<bool, RustBackendError> {
+    if !visited.insert(value) {
+        return Ok(false);
+    }
+    let value_slot = artifact
+        .opt
+        .values
+        .get(usize::from(value))
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
+    match value_slot.kind {
+        OptValueKind::Ddt { .. } => Ok(true),
+        OptValueKind::Ddx { value: input, .. } | OptValueKind::Unary { input, .. } => {
+            value_graph_contains_ddt(artifact, input, visited)
+        }
+        OptValueKind::Binary { left, right, .. } => Ok(
+            value_graph_contains_ddt(artifact, left, visited)?
+                || value_graph_contains_ddt(artifact, right, visited)?,
+        ),
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => Ok(
+            value_graph_contains_ddt(artifact, condition, visited)?
+                || value_graph_contains_ddt(artifact, then_value, visited)?
+                || value_graph_contains_ddt(artifact, else_value, visited)?,
+        ),
+        OptValueKind::RealConstant(_)
+        | OptValueKind::BooleanConstant(_)
+        | OptValueKind::Parameter { .. }
+        | OptValueKind::ParamGiven { .. }
+        | OptValueKind::Temperature
+        | OptValueKind::ThermalVoltage
+        | OptValueKind::Multiplicity
+        | OptValueKind::Time
+        | OptValueKind::Analysis { .. }
+        | OptValueKind::DdtScale
+        | OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::EquationValue { .. } => Ok(false),
+    }
+}
+
 fn equation_transient_operator(
     artifact: &CanonicalIrArtifact,
     equation: &MirEquation,
@@ -2886,6 +3012,10 @@ fn mark_stamp_live_value(
                 mark_stamp_live_value(artifact, derivative, static_cache, live)?;
             }
         }
+        OptValueKind::Ddt { input, .. } => {
+            mark_stamp_live_value(artifact, input, static_cache, live)?;
+        }
+        OptValueKind::DdtScale => {}
         OptValueKind::Unary { input, .. } => {
             mark_stamp_live_value(artifact, input, static_cache, live)?;
         }
@@ -2995,6 +3125,10 @@ fn visit_live_value(
                 visit_live_value(artifact, derivative, live, static_cache, state, ordered)?;
             }
         }
+        OptValueKind::Ddt { input, .. } => {
+            visit_live_value(artifact, input, live, static_cache, state, ordered)?;
+        }
+        OptValueKind::DdtScale => {}
         OptValueKind::Unary { input, .. } => {
             visit_live_value(artifact, input, live, static_cache, state, ordered)?;
         }
@@ -3100,7 +3234,9 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
             | OptValueKind::Multiplicity
             | OptValueKind::Time
             | OptValueKind::Analysis { .. }
-            | OptValueKind::Ddx { .. } => {}
+            | OptValueKind::Ddx { .. }
+            | OptValueKind::Ddt { .. }
+            | OptValueKind::DdtScale => {}
             OptValueKind::EquationValue { .. } => {
                 return Err(unsupported(
                     artifact,

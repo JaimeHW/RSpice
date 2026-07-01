@@ -123,6 +123,11 @@ pub enum OptValueKind {
         pos_node: Option<NodeId>,
         neg_node: Option<NodeId>,
     },
+    Ddt {
+        operator: ExprId,
+        input: ValueId,
+    },
+    DdtScale,
     NodePotential {
         node: NodeId,
     },
@@ -320,6 +325,11 @@ enum OptValueKey {
         pos_node: Option<NodeId>,
         neg_node: Option<NodeId>,
     },
+    Ddt {
+        operator: ExprId,
+        input: ValueId,
+    },
+    DdtScale,
     NodePotential(NodeId),
     BranchFlow(BranchId),
     Unary {
@@ -360,6 +370,11 @@ impl OptValueKey {
                 pos_node: *pos_node,
                 neg_node: *neg_node,
             },
+            OptValueKind::Ddt { operator, input } => Self::Ddt {
+                operator: *operator,
+                input: *input,
+            },
+            OptValueKind::DdtScale => Self::DdtScale,
             OptValueKind::NodePotential { node } => Self::NodePotential(*node),
             OptValueKind::BranchFlow { branch } => Self::BranchFlow(*branch),
             OptValueKind::Unary { op, input } => Self::Unary {
@@ -493,6 +508,8 @@ impl<'a> ScalarGraphBuilder<'a> {
                 self.mark_live_value(value, live);
                 self.mark_ddx_projection_values(value, pos_node, neg_node, live);
             }
+            OptValueKind::Ddt { input, .. } => self.mark_live_value(input, live),
+            OptValueKind::DdtScale => {}
             OptValueKind::Unary { input, .. } => self.mark_live_value(input, live),
             OptValueKind::Binary { left, right, .. } => {
                 self.mark_live_value(left, live);
@@ -893,12 +910,12 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
     }
 
-    fn lower_expression(&mut self, expr: ExprId) -> Option<ValueId> {
-        if let Some(value) = self.expression_values.get(&expr) {
+    fn lower_expression(&mut self, expr_id: ExprId) -> Option<ValueId> {
+        if let Some(value) = self.expression_values.get(&expr_id) {
             return *value;
         }
 
-        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let expression = self.mir.expressions.get(usize::from(expr_id))?;
         let lowered = match &expression.kind {
             HirExprKind::Number { value, .. } => {
                 Some(self.push_value(OptValueType::Real, OptValueKind::RealConstant(*value)))
@@ -918,8 +935,11 @@ impl<'a> ScalarGraphBuilder<'a> {
                 then_expr,
                 else_expr,
             } => self.lower_conditional(*condition, *then_expr, *else_expr),
-            HirExprKind::Call { name, args } => self.lower_call(name, args),
+            HirExprKind::Call { name, args } => self.lower_call(expr_id, name, args),
             HirExprKind::NoiseSource { .. } => Some(self.zero_real()),
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Ddt { expr, abstol: None },
+            } => self.lower_ddt_expression(*expr, expr_id),
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Ddx { expr, probe },
             } => self.lower_ddx_expression(*expr, *probe),
@@ -929,7 +949,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             _ => None,
         };
 
-        self.expression_values.insert(expr, lowered);
+        self.expression_values.insert(expr_id, lowered);
         lowered
     }
 
@@ -1313,7 +1333,9 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::Time
             | OptValueKind::Analysis { .. }
             | OptValueKind::Ddx { .. }
+            | OptValueKind::DdtScale
             | OptValueKind::EquationValue { .. } => BTreeMap::new(),
+            OptValueKind::Ddt { input, .. } => self.lower_ddt_derivatives(input),
             OptValueKind::NodePotential { node } => {
                 let derivative =
                     self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
@@ -1625,6 +1647,20 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
 
         derivatives
+    }
+
+    fn lower_ddt_derivatives(&mut self, input: ValueId) -> BTreeMap<DerivativeLane, ValueId> {
+        let input_derivatives = self.derivative_map(input);
+        let scale = self.ddt_scale();
+        input_derivatives
+            .into_iter()
+            .map(|(lane, derivative)| {
+                (
+                    lane,
+                    self.push_binary_value(OptBinaryOp::Mul, derivative, scale),
+                )
+            })
+            .collect()
     }
 
     fn pow_base_derivative(
@@ -2040,9 +2076,15 @@ impl<'a> ScalarGraphBuilder<'a> {
         ))
     }
 
-    fn lower_call(&mut self, name: &SmolStr, args: &[ExprId]) -> Option<ValueId> {
+    fn lower_call(&mut self, operator: ExprId, name: &SmolStr, args: &[ExprId]) -> Option<ValueId> {
         if is_noise_name(name.as_str()) {
             return Some(self.zero_real());
+        }
+        if name.eq_ignore_ascii_case("ddt") {
+            let [expr] = args else {
+                return None;
+            };
+            return self.lower_ddt_expression(*expr, operator);
         }
         if name.eq_ignore_ascii_case("analysis") {
             return self.lower_analysis_call(args);
@@ -2083,6 +2125,10 @@ impl<'a> ScalarGraphBuilder<'a> {
         self.push_value(OptValueType::Real, OptValueKind::RealConstant(0.0))
     }
 
+    fn ddt_scale(&mut self) -> ValueId {
+        self.push_value(OptValueType::Real, OptValueKind::DdtScale)
+    }
+
     fn lower_analysis_call(&mut self, args: &[ExprId]) -> Option<ValueId> {
         let [query] = args else {
             return None;
@@ -2109,6 +2155,11 @@ impl<'a> ScalarGraphBuilder<'a> {
                 neg_node,
             },
         ))
+    }
+
+    fn lower_ddt_expression(&mut self, expr: ExprId, operator: ExprId) -> Option<ValueId> {
+        let input = self.lower_expression(expr)?;
+        Some(self.push_value(OptValueType::Real, OptValueKind::Ddt { operator, input }))
     }
 
     fn ddx_probe_nodes(&self, probe: ExprId) -> Option<(Option<NodeId>, Option<NodeId>)> {
@@ -2377,6 +2428,11 @@ fn remap_value_kind(kind: &OptValueKind, remap: &[Option<ValueId>]) -> OptValueK
             pos_node: *pos_node,
             neg_node: *neg_node,
         },
+        OptValueKind::Ddt { operator, input } => OptValueKind::Ddt {
+            operator: *operator,
+            input: remap_value_id(*input, remap),
+        },
+        OptValueKind::DdtScale => OptValueKind::DdtScale,
         OptValueKind::NodePotential { node } => OptValueKind::NodePotential { node: *node },
         OptValueKind::BranchFlow { branch } => OptValueKind::BranchFlow { branch: *branch },
         OptValueKind::Unary { op, input } => OptValueKind::Unary {
@@ -2453,6 +2509,16 @@ fn validate_value_kind(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel, valu
                 }
             }
         }
+        OptValueKind::Ddt { input, .. } => {
+            validate_value_operand(
+                diagnostics,
+                opt.values.len(),
+                value.id,
+                *input,
+                "ddt operand",
+            );
+        }
+        OptValueKind::DdtScale => {}
         OptValueKind::NodePotential { node } => {
             if node.index() >= opt.node_count {
                 diagnostics.push(IrDiagnostic::global_error(
@@ -2706,7 +2772,9 @@ fn value_invalidation(
         OptValueKind::Multiplicity
         | OptValueKind::Time
         | OptValueKind::Analysis { .. }
-        | OptValueKind::Ddx { .. } => InvalidationClass::NewtonIteration,
+        | OptValueKind::Ddx { .. }
+        | OptValueKind::Ddt { .. }
+        | OptValueKind::DdtScale => InvalidationClass::NewtonIteration,
         OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => InvalidationClass::NewtonIteration,
@@ -2751,6 +2819,8 @@ fn value_depends_on_parameter(
         | OptValueKind::Time
         | OptValueKind::Analysis { .. }
         | OptValueKind::Ddx { .. }
+        | OptValueKind::Ddt { .. }
+        | OptValueKind::DdtScale
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => false,
@@ -2793,6 +2863,8 @@ fn value_depends_on_temperature(
         | OptValueKind::Time
         | OptValueKind::Analysis { .. }
         | OptValueKind::Ddx { .. }
+        | OptValueKind::Ddt { .. }
+        | OptValueKind::DdtScale
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => false,
