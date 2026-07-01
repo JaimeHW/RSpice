@@ -10,38 +10,22 @@ impl Instance {
         multiplicity: f64,
         var_guard115: f64,
         var_i_cth: f64,
-        var_i_cth_db0: f64,
-        var_i_cth_db1: f64,
-        var_i_cth_db2: f64,
-        var_i_cth_db3: f64,
-        var_i_cth_dn0: f64,
-        var_i_cth_dn1: f64,
-        var_i_cth_dn2: f64,
-        var_i_cth_dn3: f64,
         var_i_cth_dn4: f64,
-        var_i_cth_dn5: f64,
-        var_i_cth_dn6: f64,
-        var_i_cth_dn7: f64,
-        var_i_cth_dn8: f64,
-        var_i_cth_dn9: f64,
     ) {
-        let (eq21_e210, eq21_e210_d_n0, eq21_e210_d_n1, eq21_e210_d_n2, eq21_e210_d_n3, eq21_e210_d_n4, eq21_e210_d_n5, eq21_e210_d_n6, eq21_e210_d_n7, eq21_e210_d_n8, eq21_e210_d_n9, eq21_e210_d_b0, eq21_e210_d_b1, eq21_e210_d_b2, eq21_e210_d_b3,) = {
+        let (eq21_e210, eq21_e210_d_n4,) = {
     if (var_guard115 == 0.0) {
-        (var_i_cth, var_i_cth_dn0, var_i_cth_dn1, var_i_cth_dn2, var_i_cth_dn3, var_i_cth_dn4, var_i_cth_dn5, var_i_cth_dn6, var_i_cth_dn7, var_i_cth_dn8, var_i_cth_dn9, var_i_cth_db0, var_i_cth_db1, var_i_cth_db2, var_i_cth_db3,)
+        (var_i_cth, var_i_cth_dn4,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0,)
     }
 };
         let eq21_value: f64 = eq21_e210;
-        let eq21_node_derivatives: [f64; 10] = [eq21_e210_d_n0, eq21_e210_d_n1, eq21_e210_d_n2, eq21_e210_d_n3, eq21_e210_d_n4, eq21_e210_d_n5, eq21_e210_d_n6, eq21_e210_d_n7, eq21_e210_d_n8, eq21_e210_d_n9];
-        let eq21_branch_derivatives: [f64; 4] = [eq21_e210_d_b0, eq21_e210_d_b1, eq21_e210_d_b2, eq21_e210_d_b3];
-        stamper.stamp_current_dense_local(
+        stamper.stamp_current_node1_local(
             Some(4),
             None,
             multiplicity * (eq21_value),
-            &eq21_node_derivatives,
-            &eq21_branch_derivatives,
-            multiplicity,
+            4,
+            multiplicity * (eq21_e210_d_n4),
         );
     }
 

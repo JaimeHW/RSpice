@@ -8909,78 +8909,39 @@ impl Instance {
             multiplicity,
         );
         let mut var_i_cth: f64 = 0.0;
-        let mut var_i_cth_dn0: f64 = 0.0;
-        let mut var_i_cth_dn1: f64 = 0.0;
-        let mut var_i_cth_dn2: f64 = 0.0;
-        let mut var_i_cth_dn3: f64 = 0.0;
         let mut var_i_cth_dn4: f64 = 0.0;
-        let mut var_i_cth_dn5: f64 = 0.0;
-        let mut var_i_cth_dn6: f64 = 0.0;
-        let mut var_i_cth_dn7: f64 = 0.0;
-        let mut var_i_cth_dn8: f64 = 0.0;
-        let mut var_i_cth_dn9: f64 = 0.0;
-        let mut var_i_cth_db0: f64 = 0.0;
-        let mut var_i_cth_db1: f64 = 0.0;
-        let mut var_i_cth_db2: f64 = 0.0;
-        let mut var_i_cth_db3: f64 = 0.0;
         let mut var_guard114: f64 = 0.0;
         let mut var_guard115: f64 = 0.0;
 
         let assign7570_e7661: f64 = if ((p.p103 == 0.0) || (p.p107 == 0.0)) { 1.0 } else { 0.0 };
         var_guard114 = assign7570_e7661;
 
-        let (assign7580_e7665, assign7580_e7665_d_n0, assign7580_e7665_d_n1, assign7580_e7665_d_n2, assign7580_e7665_d_n3, assign7580_e7665_d_n4, assign7580_e7665_d_n5, assign7580_e7665_d_n6, assign7580_e7665_d_n7, assign7580_e7665_d_n8, assign7580_e7665_d_n9, assign7580_e7665_d_b0, assign7580_e7665_d_b1, assign7580_e7665_d_b2, assign7580_e7665_d_b3,) = {
+        let (assign7580_e7665, assign7580_e7665_d_n4,) = {
     if (var_guard114 != 0.0) {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0,)
     } else {
-        (var_i_cth, var_i_cth_dn0, var_i_cth_dn1, var_i_cth_dn2, var_i_cth_dn3, var_i_cth_dn4, var_i_cth_dn5, var_i_cth_dn6, var_i_cth_dn7, var_i_cth_dn8, var_i_cth_dn9, var_i_cth_db0, var_i_cth_db1, var_i_cth_db2, var_i_cth_db3,)
+        (var_i_cth, var_i_cth_dn4,)
     }
 };
         var_i_cth = assign7580_e7665;
-        var_i_cth_dn0 = assign7580_e7665_d_n0;
-        var_i_cth_dn1 = assign7580_e7665_d_n1;
-        var_i_cth_dn2 = assign7580_e7665_d_n2;
-        var_i_cth_dn3 = assign7580_e7665_d_n3;
         var_i_cth_dn4 = assign7580_e7665_d_n4;
-        var_i_cth_dn5 = assign7580_e7665_d_n5;
-        var_i_cth_dn6 = assign7580_e7665_d_n6;
-        var_i_cth_dn7 = assign7580_e7665_d_n7;
-        var_i_cth_dn8 = assign7580_e7665_d_n8;
-        var_i_cth_dn9 = assign7580_e7665_d_n9;
-        var_i_cth_db0 = assign7580_e7665_d_b0;
-        var_i_cth_db1 = assign7580_e7665_d_b1;
-        var_i_cth_db2 = assign7580_e7665_d_b2;
-        var_i_cth_db3 = assign7580_e7665_d_b3;
 
-        let (assign7590_e7673, assign7590_e7673_d_n0, assign7590_e7673_d_n1, assign7590_e7673_d_n2, assign7590_e7673_d_n3, assign7590_e7673_d_n4, assign7590_e7673_d_n5, assign7590_e7673_d_n6, assign7590_e7673_d_n7, assign7590_e7673_d_n8, assign7590_e7673_d_n9, assign7590_e7673_d_b0, assign7590_e7673_d_b1, assign7590_e7673_d_b2, assign7590_e7673_d_b3,) = {
+        let (assign7590_e7673, assign7590_e7673_d_n4,) = {
     if (var_guard114 == 0.0) {
         let assign7590_e7670: f64 = (p.p107 * (nv4 - 0.0));
         let assign7590_e7671: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, assign7590_e7670);
-        (assign7590_e7671, 0.0, 0.0, 0.0, 0.0, (p.p107 * ddt_scale), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (assign7590_e7671, (p.p107 * ddt_scale),)
     } else {
-        (var_i_cth, var_i_cth_dn0, var_i_cth_dn1, var_i_cth_dn2, var_i_cth_dn3, var_i_cth_dn4, var_i_cth_dn5, var_i_cth_dn6, var_i_cth_dn7, var_i_cth_dn8, var_i_cth_dn9, var_i_cth_db0, var_i_cth_db1, var_i_cth_db2, var_i_cth_db3,)
+        (var_i_cth, var_i_cth_dn4,)
     }
 };
         var_i_cth = assign7590_e7673;
-        var_i_cth_dn0 = assign7590_e7673_d_n0;
-        var_i_cth_dn1 = assign7590_e7673_d_n1;
-        var_i_cth_dn2 = assign7590_e7673_d_n2;
-        var_i_cth_dn3 = assign7590_e7673_d_n3;
         var_i_cth_dn4 = assign7590_e7673_d_n4;
-        var_i_cth_dn5 = assign7590_e7673_d_n5;
-        var_i_cth_dn6 = assign7590_e7673_d_n6;
-        var_i_cth_dn7 = assign7590_e7673_d_n7;
-        var_i_cth_dn8 = assign7590_e7673_d_n8;
-        var_i_cth_dn9 = assign7590_e7673_d_n9;
-        var_i_cth_db0 = assign7590_e7673_d_b0;
-        var_i_cth_db1 = assign7590_e7673_d_b1;
-        var_i_cth_db2 = assign7590_e7673_d_b2;
-        var_i_cth_db3 = assign7590_e7673_d_b3;
 
         let assign7600_e7680: f64 = if ((p.p103 == 0.0) || (p.p104 < p.p111)) { 1.0 } else { 0.0 };
         var_guard115 = assign7600_e7680;
 
-        Self::stamp_transient_equations_block_0(stamper, multiplicity, var_guard115, var_i_cth, var_i_cth_db0, var_i_cth_db1, var_i_cth_db2, var_i_cth_db3, var_i_cth_dn0, var_i_cth_dn1, var_i_cth_dn2, var_i_cth_dn3, var_i_cth_dn4, var_i_cth_dn5, var_i_cth_dn6, var_i_cth_dn7, var_i_cth_dn8, var_i_cth_dn9);
+        Self::stamp_transient_equations_block_0(stamper, multiplicity, var_guard115, var_i_cth, var_i_cth_dn4);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

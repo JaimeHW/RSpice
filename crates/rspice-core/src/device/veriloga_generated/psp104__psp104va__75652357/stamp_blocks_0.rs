@@ -15,6 +15,9 @@ impl Instance {
         var_cjorgat2nd_slot: &mut f64,
         var_cjorgatd_i_slot: &mut f64,
         var_cjorstid_i_slot: &mut f64,
+        var_csrhbotd_i_slot: &mut f64,
+        var_csrhgatd_i_slot: &mut f64,
+        var_csrhstid_i_slot: &mut f64,
         var_deltaphigr_slot: &mut f64,
         var_epssi_slot: &mut f64,
         var_fstopbot_slot: &mut f64,
@@ -54,25 +57,10 @@ impl Instance {
         var_pstid_i_slot: &mut f64,
         var_slopebot_slot: &mut f64,
         var_slopegat_slot: &mut f64,
-        var_slopegat_db0_slot: &mut f64,
-        var_slopegat_db1_slot: &mut f64,
-        var_slopegat_db2_slot: &mut f64,
-        var_slopegat_db3_slot: &mut f64,
-        var_slopegat_db4_slot: &mut f64,
-        var_slopegat_db5_slot: &mut f64,
-        var_slopegat_db6_slot: &mut f64,
-        var_slopegat_dn0_slot: &mut f64,
-        var_slopegat_dn1_slot: &mut f64,
-        var_slopegat_dn10_slot: &mut f64,
-        var_slopegat_dn11_slot: &mut f64,
-        var_slopegat_dn2_slot: &mut f64,
-        var_slopegat_dn3_slot: &mut f64,
-        var_slopegat_dn4_slot: &mut f64,
         var_slopegat_dn5_slot: &mut f64,
         var_slopegat_dn6_slot: &mut f64,
         var_slopegat_dn7_slot: &mut f64,
         var_slopegat_dn8_slot: &mut f64,
-        var_slopegat_dn9_slot: &mut f64,
         var_slopesti_slot: &mut f64,
         var_swgat2nd_slot: &mut f64,
         var_swjunexp_i_slot: &mut f64,
@@ -87,25 +75,10 @@ impl Instance {
         var_vbirstiinv_slot: &mut f64,
         var_vbrinvbot_slot: &mut f64,
         var_vbrinvgat_slot: &mut f64,
-        var_vbrinvgat_db0_slot: &mut f64,
-        var_vbrinvgat_db1_slot: &mut f64,
-        var_vbrinvgat_db2_slot: &mut f64,
-        var_vbrinvgat_db3_slot: &mut f64,
-        var_vbrinvgat_db4_slot: &mut f64,
-        var_vbrinvgat_db5_slot: &mut f64,
-        var_vbrinvgat_db6_slot: &mut f64,
-        var_vbrinvgat_dn0_slot: &mut f64,
-        var_vbrinvgat_dn1_slot: &mut f64,
-        var_vbrinvgat_dn10_slot: &mut f64,
-        var_vbrinvgat_dn11_slot: &mut f64,
-        var_vbrinvgat_dn2_slot: &mut f64,
-        var_vbrinvgat_dn3_slot: &mut f64,
-        var_vbrinvgat_dn4_slot: &mut f64,
         var_vbrinvgat_dn5_slot: &mut f64,
         var_vbrinvgat_dn6_slot: &mut f64,
         var_vbrinvgat_dn7_slot: &mut f64,
         var_vbrinvgat_dn8_slot: &mut f64,
-        var_vbrinvgat_dn9_slot: &mut f64,
         var_vbrinvsti_slot: &mut f64,
         var_wdepnulrbot_slot: &mut f64,
         var_wdepnulrgat_slot: &mut f64,
@@ -122,6 +95,9 @@ impl Instance {
         let mut var_cjorgat2nd: f64 = *var_cjorgat2nd_slot;
         let mut var_cjorgatd_i: f64 = *var_cjorgatd_i_slot;
         let mut var_cjorstid_i: f64 = *var_cjorstid_i_slot;
+        let mut var_csrhbotd_i: f64 = *var_csrhbotd_i_slot;
+        let mut var_csrhgatd_i: f64 = *var_csrhgatd_i_slot;
+        let mut var_csrhstid_i: f64 = *var_csrhstid_i_slot;
         let mut var_deltaphigr: f64 = *var_deltaphigr_slot;
         let mut var_epssi: f64 = *var_epssi_slot;
         let mut var_fstopbot: f64 = *var_fstopbot_slot;
@@ -161,25 +137,10 @@ impl Instance {
         let mut var_pstid_i: f64 = *var_pstid_i_slot;
         let mut var_slopebot: f64 = *var_slopebot_slot;
         let mut var_slopegat: f64 = *var_slopegat_slot;
-        let mut var_slopegat_db0: f64 = *var_slopegat_db0_slot;
-        let mut var_slopegat_db1: f64 = *var_slopegat_db1_slot;
-        let mut var_slopegat_db2: f64 = *var_slopegat_db2_slot;
-        let mut var_slopegat_db3: f64 = *var_slopegat_db3_slot;
-        let mut var_slopegat_db4: f64 = *var_slopegat_db4_slot;
-        let mut var_slopegat_db5: f64 = *var_slopegat_db5_slot;
-        let mut var_slopegat_db6: f64 = *var_slopegat_db6_slot;
-        let mut var_slopegat_dn0: f64 = *var_slopegat_dn0_slot;
-        let mut var_slopegat_dn1: f64 = *var_slopegat_dn1_slot;
-        let mut var_slopegat_dn10: f64 = *var_slopegat_dn10_slot;
-        let mut var_slopegat_dn11: f64 = *var_slopegat_dn11_slot;
-        let mut var_slopegat_dn2: f64 = *var_slopegat_dn2_slot;
-        let mut var_slopegat_dn3: f64 = *var_slopegat_dn3_slot;
-        let mut var_slopegat_dn4: f64 = *var_slopegat_dn4_slot;
         let mut var_slopegat_dn5: f64 = *var_slopegat_dn5_slot;
         let mut var_slopegat_dn6: f64 = *var_slopegat_dn6_slot;
         let mut var_slopegat_dn7: f64 = *var_slopegat_dn7_slot;
         let mut var_slopegat_dn8: f64 = *var_slopegat_dn8_slot;
-        let mut var_slopegat_dn9: f64 = *var_slopegat_dn9_slot;
         let mut var_slopesti: f64 = *var_slopesti_slot;
         let mut var_swgat2nd: f64 = *var_swgat2nd_slot;
         let mut var_swjunexp_i: f64 = *var_swjunexp_i_slot;
@@ -194,25 +155,10 @@ impl Instance {
         let mut var_vbirstiinv: f64 = *var_vbirstiinv_slot;
         let mut var_vbrinvbot: f64 = *var_vbrinvbot_slot;
         let mut var_vbrinvgat: f64 = *var_vbrinvgat_slot;
-        let mut var_vbrinvgat_db0: f64 = *var_vbrinvgat_db0_slot;
-        let mut var_vbrinvgat_db1: f64 = *var_vbrinvgat_db1_slot;
-        let mut var_vbrinvgat_db2: f64 = *var_vbrinvgat_db2_slot;
-        let mut var_vbrinvgat_db3: f64 = *var_vbrinvgat_db3_slot;
-        let mut var_vbrinvgat_db4: f64 = *var_vbrinvgat_db4_slot;
-        let mut var_vbrinvgat_db5: f64 = *var_vbrinvgat_db5_slot;
-        let mut var_vbrinvgat_db6: f64 = *var_vbrinvgat_db6_slot;
-        let mut var_vbrinvgat_dn0: f64 = *var_vbrinvgat_dn0_slot;
-        let mut var_vbrinvgat_dn1: f64 = *var_vbrinvgat_dn1_slot;
-        let mut var_vbrinvgat_dn10: f64 = *var_vbrinvgat_dn10_slot;
-        let mut var_vbrinvgat_dn11: f64 = *var_vbrinvgat_dn11_slot;
-        let mut var_vbrinvgat_dn2: f64 = *var_vbrinvgat_dn2_slot;
-        let mut var_vbrinvgat_dn3: f64 = *var_vbrinvgat_dn3_slot;
-        let mut var_vbrinvgat_dn4: f64 = *var_vbrinvgat_dn4_slot;
         let mut var_vbrinvgat_dn5: f64 = *var_vbrinvgat_dn5_slot;
         let mut var_vbrinvgat_dn6: f64 = *var_vbrinvgat_dn6_slot;
         let mut var_vbrinvgat_dn7: f64 = *var_vbrinvgat_dn7_slot;
         let mut var_vbrinvgat_dn8: f64 = *var_vbrinvgat_dn8_slot;
-        let mut var_vbrinvgat_dn9: f64 = *var_vbrinvgat_dn9_slot;
         let mut var_vbrinvsti: f64 = *var_vbrinvsti_slot;
         let mut var_wdepnulrbot: f64 = *var_wdepnulrbot_slot;
         let mut var_wdepnulrgat: f64 = *var_wdepnulrgat_slot;
@@ -391,25 +337,10 @@ impl Instance {
 
         let assign410_e1611: f64 = (1.0 / p.p855);
         var_vbrinvgat = assign410_e1611;
-        var_vbrinvgat_dn0 = 0.0;
-        var_vbrinvgat_dn1 = 0.0;
-        var_vbrinvgat_dn2 = 0.0;
-        var_vbrinvgat_dn3 = 0.0;
-        var_vbrinvgat_dn4 = 0.0;
         var_vbrinvgat_dn5 = 0.0;
         var_vbrinvgat_dn6 = 0.0;
         var_vbrinvgat_dn7 = 0.0;
         var_vbrinvgat_dn8 = 0.0;
-        var_vbrinvgat_dn9 = 0.0;
-        var_vbrinvgat_dn10 = 0.0;
-        var_vbrinvgat_dn11 = 0.0;
-        var_vbrinvgat_db0 = 0.0;
-        var_vbrinvgat_db1 = 0.0;
-        var_vbrinvgat_db2 = 0.0;
-        var_vbrinvgat_db3 = 0.0;
-        var_vbrinvgat_db4 = 0.0;
-        var_vbrinvgat_db5 = 0.0;
-        var_vbrinvgat_db6 = 0.0;
 
         let assign420_e1614: f64 = (var_fstopbot * var_fstopbot);
         let assign420_e1618: f64 = (p.p856 - 1.0);
@@ -437,25 +368,10 @@ impl Instance {
         let assign440_e1651: f64 = (assign440_e1649 * p.p858);
         let assign440_e1653: f64 = (assign440_e1651 * var_vbrinvgat);
         var_slopegat = assign440_e1653;
-        var_slopegat_dn0 = (assign440_e1651 * var_vbrinvgat_dn0);
-        var_slopegat_dn1 = (assign440_e1651 * var_vbrinvgat_dn1);
-        var_slopegat_dn2 = (assign440_e1651 * var_vbrinvgat_dn2);
-        var_slopegat_dn3 = (assign440_e1651 * var_vbrinvgat_dn3);
-        var_slopegat_dn4 = (assign440_e1651 * var_vbrinvgat_dn4);
         var_slopegat_dn5 = (assign440_e1651 * var_vbrinvgat_dn5);
         var_slopegat_dn6 = (assign440_e1651 * var_vbrinvgat_dn6);
         var_slopegat_dn7 = (assign440_e1651 * var_vbrinvgat_dn7);
         var_slopegat_dn8 = (assign440_e1651 * var_vbrinvgat_dn8);
-        var_slopegat_dn9 = (assign440_e1651 * var_vbrinvgat_dn9);
-        var_slopegat_dn10 = (assign440_e1651 * var_vbrinvgat_dn10);
-        var_slopegat_dn11 = (assign440_e1651 * var_vbrinvgat_dn11);
-        var_slopegat_db0 = (assign440_e1651 * var_vbrinvgat_db0);
-        var_slopegat_db1 = (assign440_e1651 * var_vbrinvgat_db1);
-        var_slopegat_db2 = (assign440_e1651 * var_vbrinvgat_db2);
-        var_slopegat_db3 = (assign440_e1651 * var_vbrinvgat_db3);
-        var_slopegat_db4 = (assign440_e1651 * var_vbrinvgat_db4);
-        var_slopegat_db5 = (assign440_e1651 * var_vbrinvgat_db5);
-        var_slopegat_db6 = (assign440_e1651 * var_vbrinvgat_db6);
 
         let assign450_e1668: f64 = if ((((p.p859 != 1.0) || (p.p860 != 1.0)) || (p.p861 != 1.0)) || (p.p862 != 1.0)) { 1.0 } else { 0.0 };
         var_guard3 = assign450_e1668;
@@ -729,6 +645,33 @@ impl Instance {
 };
         var_idsatrgatd_i = assign710_e1820;
 
+        let (assign720_e1824,) = {
+    if (var_guard5 != 0.0) {
+        (p.p833,)
+    } else {
+        (var_csrhbotd_i,)
+    }
+};
+        var_csrhbotd_i = assign720_e1824;
+
+        let (assign730_e1828,) = {
+    if (var_guard5 != 0.0) {
+        (p.p834,)
+    } else {
+        (var_csrhstid_i,)
+    }
+};
+        var_csrhstid_i = assign730_e1828;
+
+        let (assign740_e1832,) = {
+    if (var_guard5 != 0.0) {
+        (p.p835,)
+    } else {
+        (var_csrhgatd_i,)
+    }
+};
+        var_csrhgatd_i = assign740_e1832;
+
         *var_alphaav_slot = var_alphaav;
         *var_berfc_slot = var_berfc;
         *var_cerfc_slot = var_cerfc;
@@ -737,6 +680,9 @@ impl Instance {
         *var_cjorgat2nd_slot = var_cjorgat2nd;
         *var_cjorgatd_i_slot = var_cjorgatd_i;
         *var_cjorstid_i_slot = var_cjorstid_i;
+        *var_csrhbotd_i_slot = var_csrhbotd_i;
+        *var_csrhgatd_i_slot = var_csrhgatd_i;
+        *var_csrhstid_i_slot = var_csrhstid_i;
         *var_deltaphigr_slot = var_deltaphigr;
         *var_epssi_slot = var_epssi;
         *var_fstopbot_slot = var_fstopbot;
@@ -776,25 +722,10 @@ impl Instance {
         *var_pstid_i_slot = var_pstid_i;
         *var_slopebot_slot = var_slopebot;
         *var_slopegat_slot = var_slopegat;
-        *var_slopegat_db0_slot = var_slopegat_db0;
-        *var_slopegat_db1_slot = var_slopegat_db1;
-        *var_slopegat_db2_slot = var_slopegat_db2;
-        *var_slopegat_db3_slot = var_slopegat_db3;
-        *var_slopegat_db4_slot = var_slopegat_db4;
-        *var_slopegat_db5_slot = var_slopegat_db5;
-        *var_slopegat_db6_slot = var_slopegat_db6;
-        *var_slopegat_dn0_slot = var_slopegat_dn0;
-        *var_slopegat_dn1_slot = var_slopegat_dn1;
-        *var_slopegat_dn10_slot = var_slopegat_dn10;
-        *var_slopegat_dn11_slot = var_slopegat_dn11;
-        *var_slopegat_dn2_slot = var_slopegat_dn2;
-        *var_slopegat_dn3_slot = var_slopegat_dn3;
-        *var_slopegat_dn4_slot = var_slopegat_dn4;
         *var_slopegat_dn5_slot = var_slopegat_dn5;
         *var_slopegat_dn6_slot = var_slopegat_dn6;
         *var_slopegat_dn7_slot = var_slopegat_dn7;
         *var_slopegat_dn8_slot = var_slopegat_dn8;
-        *var_slopegat_dn9_slot = var_slopegat_dn9;
         *var_slopesti_slot = var_slopesti;
         *var_swgat2nd_slot = var_swgat2nd;
         *var_swjunexp_i_slot = var_swjunexp_i;
@@ -809,25 +740,10 @@ impl Instance {
         *var_vbirstiinv_slot = var_vbirstiinv;
         *var_vbrinvbot_slot = var_vbrinvbot;
         *var_vbrinvgat_slot = var_vbrinvgat;
-        *var_vbrinvgat_db0_slot = var_vbrinvgat_db0;
-        *var_vbrinvgat_db1_slot = var_vbrinvgat_db1;
-        *var_vbrinvgat_db2_slot = var_vbrinvgat_db2;
-        *var_vbrinvgat_db3_slot = var_vbrinvgat_db3;
-        *var_vbrinvgat_db4_slot = var_vbrinvgat_db4;
-        *var_vbrinvgat_db5_slot = var_vbrinvgat_db5;
-        *var_vbrinvgat_db6_slot = var_vbrinvgat_db6;
-        *var_vbrinvgat_dn0_slot = var_vbrinvgat_dn0;
-        *var_vbrinvgat_dn1_slot = var_vbrinvgat_dn1;
-        *var_vbrinvgat_dn10_slot = var_vbrinvgat_dn10;
-        *var_vbrinvgat_dn11_slot = var_vbrinvgat_dn11;
-        *var_vbrinvgat_dn2_slot = var_vbrinvgat_dn2;
-        *var_vbrinvgat_dn3_slot = var_vbrinvgat_dn3;
-        *var_vbrinvgat_dn4_slot = var_vbrinvgat_dn4;
         *var_vbrinvgat_dn5_slot = var_vbrinvgat_dn5;
         *var_vbrinvgat_dn6_slot = var_vbrinvgat_dn6;
         *var_vbrinvgat_dn7_slot = var_vbrinvgat_dn7;
         *var_vbrinvgat_dn8_slot = var_vbrinvgat_dn8;
-        *var_vbrinvgat_dn9_slot = var_vbrinvgat_dn9;
         *var_vbrinvsti_slot = var_vbrinvsti;
         *var_wdepnulrbot_slot = var_wdepnulrbot;
         *var_wdepnulrgat_slot = var_wdepnulrgat;
@@ -947,33 +863,6 @@ impl Instance {
         let mut var_vtrgatd_i: f64 = *var_vtrgatd_i_slot;
         let mut var_xjungatd_i: f64 = *var_xjungatd_i_slot;
         let mut var_xjunstid_i: f64 = *var_xjunstid_i_slot;
-
-        let (assign720_e1824,) = {
-    if (var_guard5 != 0.0) {
-        (p.p833,)
-    } else {
-        (var_csrhbotd_i,)
-    }
-};
-        var_csrhbotd_i = assign720_e1824;
-
-        let (assign730_e1828,) = {
-    if (var_guard5 != 0.0) {
-        (p.p834,)
-    } else {
-        (var_csrhstid_i,)
-    }
-};
-        var_csrhstid_i = assign730_e1828;
-
-        let (assign740_e1832,) = {
-    if (var_guard5 != 0.0) {
-        (p.p835,)
-    } else {
-        (var_csrhgatd_i,)
-    }
-};
-        var_csrhgatd_i = assign740_e1832;
 
         let (assign750_e1836,) = {
     if (var_guard5 != 0.0) {
@@ -1452,6 +1341,33 @@ impl Instance {
 };
         var_csrhgatd_i = assign1270_e2062;
 
+        let (assign1280_e2067,) = {
+    if (var_guard5 == 0.0) {
+        (p.p887,)
+    } else {
+        (var_xjunstid_i,)
+    }
+};
+        var_xjunstid_i = assign1280_e2067;
+
+        let (assign1290_e2072,) = {
+    if (var_guard5 == 0.0) {
+        (p.p888,)
+    } else {
+        (var_xjungatd_i,)
+    }
+};
+        var_xjungatd_i = assign1290_e2072;
+
+        let (assign1300_e2077,) = {
+    if (var_guard5 == 0.0) {
+        (p.p889,)
+    } else {
+        (var_ctatbotd_i,)
+    }
+};
+        var_ctatbotd_i = assign1300_e2077;
+
         *var_adbbtgatd_i_slot = var_adbbtgatd_i;
         *var_advbrgatd_i_slot = var_advbrgatd_i;
         *var_anugatd_i_slot = var_anugatd_i;
@@ -1525,6 +1441,8 @@ impl Instance {
         var_vbirbotd_i: f64,
         var_vbirgatd_i: f64,
         var_vbirstid_i: f64,
+        var_xjungatd_i: f64,
+        var_xjunstid_i: f64,
         var_adbbtgatd_i_slot: &mut f64,
         var_advbrgatd_i_slot: &mut f64,
         var_anugatd_i_slot: &mut f64,
@@ -1534,7 +1452,6 @@ impl Instance {
         var_cbbtgatd_i_slot: &mut f64,
         var_cbbtstid_i_slot: &mut f64,
         var_cjorgat2nd_d_slot: &mut f64,
-        var_ctatbotd_i_slot: &mut f64,
         var_ctatgatd_i_slot: &mut f64,
         var_ctatstid_i_slot: &mut f64,
         var_fbbtrbotd_i_slot: &mut f64,
@@ -1562,61 +1479,34 @@ impl Instance {
         var_pbrbotd_i_slot: &mut f64,
         var_pbrgatd_i_slot: &mut f64,
         var_pbrstid_i_slot: &mut f64,
+        var_pgat2nd_d_slot: &mut f64,
+        var_phiggat2nd_d_slot: &mut f64,
         var_phigrbot_d_slot: &mut f64,
         var_phigrgat_d_slot: &mut f64,
         var_phigrsti_d_slot: &mut f64,
         var_slopebot_d_slot: &mut f64,
         var_slopegat_d_slot: &mut f64,
-        var_slopegat_d_db0_slot: &mut f64,
-        var_slopegat_d_db1_slot: &mut f64,
-        var_slopegat_d_db2_slot: &mut f64,
-        var_slopegat_d_db3_slot: &mut f64,
-        var_slopegat_d_db4_slot: &mut f64,
-        var_slopegat_d_db5_slot: &mut f64,
-        var_slopegat_d_db6_slot: &mut f64,
-        var_slopegat_d_dn0_slot: &mut f64,
-        var_slopegat_d_dn1_slot: &mut f64,
-        var_slopegat_d_dn10_slot: &mut f64,
-        var_slopegat_d_dn11_slot: &mut f64,
-        var_slopegat_d_dn2_slot: &mut f64,
-        var_slopegat_d_dn3_slot: &mut f64,
-        var_slopegat_d_dn4_slot: &mut f64,
         var_slopegat_d_dn5_slot: &mut f64,
         var_slopegat_d_dn6_slot: &mut f64,
         var_slopegat_d_dn7_slot: &mut f64,
         var_slopegat_d_dn8_slot: &mut f64,
-        var_slopegat_d_dn9_slot: &mut f64,
         var_slopesti_d_slot: &mut f64,
         var_stfbbtbotd_i_slot: &mut f64,
         var_stfbbtgatd_i_slot: &mut f64,
         var_stfbbtstid_i_slot: &mut f64,
         var_swgat2nd_d_slot: &mut f64,
         var_vbirbotinv_d_slot: &mut f64,
+        var_vbirgat2nd_d_slot: &mut f64,
         var_vbirgatinv_d_slot: &mut f64,
         var_vbirstiinv_d_slot: &mut f64,
         var_vbrbotd_i_slot: &mut f64,
         var_vbrgatd_i_slot: &mut f64,
         var_vbrinvbot_d_slot: &mut f64,
         var_vbrinvgat_d_slot: &mut f64,
-        var_vbrinvgat_d_db0_slot: &mut f64,
-        var_vbrinvgat_d_db1_slot: &mut f64,
-        var_vbrinvgat_d_db2_slot: &mut f64,
-        var_vbrinvgat_d_db3_slot: &mut f64,
-        var_vbrinvgat_d_db4_slot: &mut f64,
-        var_vbrinvgat_d_db5_slot: &mut f64,
-        var_vbrinvgat_d_db6_slot: &mut f64,
-        var_vbrinvgat_d_dn0_slot: &mut f64,
-        var_vbrinvgat_d_dn1_slot: &mut f64,
-        var_vbrinvgat_d_dn10_slot: &mut f64,
-        var_vbrinvgat_d_dn11_slot: &mut f64,
-        var_vbrinvgat_d_dn2_slot: &mut f64,
-        var_vbrinvgat_d_dn3_slot: &mut f64,
-        var_vbrinvgat_d_dn4_slot: &mut f64,
         var_vbrinvgat_d_dn5_slot: &mut f64,
         var_vbrinvgat_d_dn6_slot: &mut f64,
         var_vbrinvgat_d_dn7_slot: &mut f64,
         var_vbrinvgat_d_dn8_slot: &mut f64,
-        var_vbrinvgat_d_dn9_slot: &mut f64,
         var_vbrinvsti_d_slot: &mut f64,
         var_vbrstid_i_slot: &mut f64,
         var_vjunrefd_i_slot: &mut f64,
@@ -1627,8 +1517,6 @@ impl Instance {
         var_wdepnulrinvgat_d_slot: &mut f64,
         var_wdepnulrinvsti_d_slot: &mut f64,
         var_wdepnulrsti_d_slot: &mut f64,
-        var_xjungatd_i_slot: &mut f64,
-        var_xjunstid_i_slot: &mut f64,
     ) {
         let mut var_adbbtgatd_i: f64 = *var_adbbtgatd_i_slot;
         let mut var_advbrgatd_i: f64 = *var_advbrgatd_i_slot;
@@ -1639,7 +1527,6 @@ impl Instance {
         let mut var_cbbtgatd_i: f64 = *var_cbbtgatd_i_slot;
         let mut var_cbbtstid_i: f64 = *var_cbbtstid_i_slot;
         let mut var_cjorgat2nd_d: f64 = *var_cjorgat2nd_d_slot;
-        let mut var_ctatbotd_i: f64 = *var_ctatbotd_i_slot;
         let mut var_ctatgatd_i: f64 = *var_ctatgatd_i_slot;
         let mut var_ctatstid_i: f64 = *var_ctatstid_i_slot;
         let mut var_fbbtrbotd_i: f64 = *var_fbbtrbotd_i_slot;
@@ -1667,61 +1554,34 @@ impl Instance {
         let mut var_pbrbotd_i: f64 = *var_pbrbotd_i_slot;
         let mut var_pbrgatd_i: f64 = *var_pbrgatd_i_slot;
         let mut var_pbrstid_i: f64 = *var_pbrstid_i_slot;
+        let mut var_pgat2nd_d: f64 = *var_pgat2nd_d_slot;
+        let mut var_phiggat2nd_d: f64 = *var_phiggat2nd_d_slot;
         let mut var_phigrbot_d: f64 = *var_phigrbot_d_slot;
         let mut var_phigrgat_d: f64 = *var_phigrgat_d_slot;
         let mut var_phigrsti_d: f64 = *var_phigrsti_d_slot;
         let mut var_slopebot_d: f64 = *var_slopebot_d_slot;
         let mut var_slopegat_d: f64 = *var_slopegat_d_slot;
-        let mut var_slopegat_d_db0: f64 = *var_slopegat_d_db0_slot;
-        let mut var_slopegat_d_db1: f64 = *var_slopegat_d_db1_slot;
-        let mut var_slopegat_d_db2: f64 = *var_slopegat_d_db2_slot;
-        let mut var_slopegat_d_db3: f64 = *var_slopegat_d_db3_slot;
-        let mut var_slopegat_d_db4: f64 = *var_slopegat_d_db4_slot;
-        let mut var_slopegat_d_db5: f64 = *var_slopegat_d_db5_slot;
-        let mut var_slopegat_d_db6: f64 = *var_slopegat_d_db6_slot;
-        let mut var_slopegat_d_dn0: f64 = *var_slopegat_d_dn0_slot;
-        let mut var_slopegat_d_dn1: f64 = *var_slopegat_d_dn1_slot;
-        let mut var_slopegat_d_dn10: f64 = *var_slopegat_d_dn10_slot;
-        let mut var_slopegat_d_dn11: f64 = *var_slopegat_d_dn11_slot;
-        let mut var_slopegat_d_dn2: f64 = *var_slopegat_d_dn2_slot;
-        let mut var_slopegat_d_dn3: f64 = *var_slopegat_d_dn3_slot;
-        let mut var_slopegat_d_dn4: f64 = *var_slopegat_d_dn4_slot;
         let mut var_slopegat_d_dn5: f64 = *var_slopegat_d_dn5_slot;
         let mut var_slopegat_d_dn6: f64 = *var_slopegat_d_dn6_slot;
         let mut var_slopegat_d_dn7: f64 = *var_slopegat_d_dn7_slot;
         let mut var_slopegat_d_dn8: f64 = *var_slopegat_d_dn8_slot;
-        let mut var_slopegat_d_dn9: f64 = *var_slopegat_d_dn9_slot;
         let mut var_slopesti_d: f64 = *var_slopesti_d_slot;
         let mut var_stfbbtbotd_i: f64 = *var_stfbbtbotd_i_slot;
         let mut var_stfbbtgatd_i: f64 = *var_stfbbtgatd_i_slot;
         let mut var_stfbbtstid_i: f64 = *var_stfbbtstid_i_slot;
         let mut var_swgat2nd_d: f64 = *var_swgat2nd_d_slot;
         let mut var_vbirbotinv_d: f64 = *var_vbirbotinv_d_slot;
+        let mut var_vbirgat2nd_d: f64 = *var_vbirgat2nd_d_slot;
         let mut var_vbirgatinv_d: f64 = *var_vbirgatinv_d_slot;
         let mut var_vbirstiinv_d: f64 = *var_vbirstiinv_d_slot;
         let mut var_vbrbotd_i: f64 = *var_vbrbotd_i_slot;
         let mut var_vbrgatd_i: f64 = *var_vbrgatd_i_slot;
         let mut var_vbrinvbot_d: f64 = *var_vbrinvbot_d_slot;
         let mut var_vbrinvgat_d: f64 = *var_vbrinvgat_d_slot;
-        let mut var_vbrinvgat_d_db0: f64 = *var_vbrinvgat_d_db0_slot;
-        let mut var_vbrinvgat_d_db1: f64 = *var_vbrinvgat_d_db1_slot;
-        let mut var_vbrinvgat_d_db2: f64 = *var_vbrinvgat_d_db2_slot;
-        let mut var_vbrinvgat_d_db3: f64 = *var_vbrinvgat_d_db3_slot;
-        let mut var_vbrinvgat_d_db4: f64 = *var_vbrinvgat_d_db4_slot;
-        let mut var_vbrinvgat_d_db5: f64 = *var_vbrinvgat_d_db5_slot;
-        let mut var_vbrinvgat_d_db6: f64 = *var_vbrinvgat_d_db6_slot;
-        let mut var_vbrinvgat_d_dn0: f64 = *var_vbrinvgat_d_dn0_slot;
-        let mut var_vbrinvgat_d_dn1: f64 = *var_vbrinvgat_d_dn1_slot;
-        let mut var_vbrinvgat_d_dn10: f64 = *var_vbrinvgat_d_dn10_slot;
-        let mut var_vbrinvgat_d_dn11: f64 = *var_vbrinvgat_d_dn11_slot;
-        let mut var_vbrinvgat_d_dn2: f64 = *var_vbrinvgat_d_dn2_slot;
-        let mut var_vbrinvgat_d_dn3: f64 = *var_vbrinvgat_d_dn3_slot;
-        let mut var_vbrinvgat_d_dn4: f64 = *var_vbrinvgat_d_dn4_slot;
         let mut var_vbrinvgat_d_dn5: f64 = *var_vbrinvgat_d_dn5_slot;
         let mut var_vbrinvgat_d_dn6: f64 = *var_vbrinvgat_d_dn6_slot;
         let mut var_vbrinvgat_d_dn7: f64 = *var_vbrinvgat_d_dn7_slot;
         let mut var_vbrinvgat_d_dn8: f64 = *var_vbrinvgat_d_dn8_slot;
-        let mut var_vbrinvgat_d_dn9: f64 = *var_vbrinvgat_d_dn9_slot;
         let mut var_vbrinvsti_d: f64 = *var_vbrinvsti_d_slot;
         let mut var_vbrstid_i: f64 = *var_vbrstid_i_slot;
         let mut var_vjunrefd_i: f64 = *var_vjunrefd_i_slot;
@@ -1732,35 +1592,6 @@ impl Instance {
         let mut var_wdepnulrinvgat_d: f64 = *var_wdepnulrinvgat_d_slot;
         let mut var_wdepnulrinvsti_d: f64 = *var_wdepnulrinvsti_d_slot;
         let mut var_wdepnulrsti_d: f64 = *var_wdepnulrsti_d_slot;
-        let mut var_xjungatd_i: f64 = *var_xjungatd_i_slot;
-        let mut var_xjunstid_i: f64 = *var_xjunstid_i_slot;
-
-        let (assign1280_e2067,) = {
-    if (var_guard5 == 0.0) {
-        (p.p887,)
-    } else {
-        (var_xjunstid_i,)
-    }
-};
-        var_xjunstid_i = assign1280_e2067;
-
-        let (assign1290_e2072,) = {
-    if (var_guard5 == 0.0) {
-        (p.p888,)
-    } else {
-        (var_xjungatd_i,)
-    }
-};
-        var_xjungatd_i = assign1290_e2072;
-
-        let (assign1300_e2077,) = {
-    if (var_guard5 == 0.0) {
-        (p.p889,)
-    } else {
-        (var_ctatbotd_i,)
-    }
-};
-        var_ctatbotd_i = assign1300_e2077;
 
         let (assign1310_e2082,) = {
     if (var_guard5 == 0.0) {
@@ -2129,25 +1960,10 @@ impl Instance {
 
         let assign1860_e2325: f64 = (1.0 / var_vbrgatd_i);
         var_vbrinvgat_d = assign1860_e2325;
-        var_vbrinvgat_d_dn0 = 0.0;
-        var_vbrinvgat_d_dn1 = 0.0;
-        var_vbrinvgat_d_dn2 = 0.0;
-        var_vbrinvgat_d_dn3 = 0.0;
-        var_vbrinvgat_d_dn4 = 0.0;
         var_vbrinvgat_d_dn5 = 0.0;
         var_vbrinvgat_d_dn6 = 0.0;
         var_vbrinvgat_d_dn7 = 0.0;
         var_vbrinvgat_d_dn8 = 0.0;
-        var_vbrinvgat_d_dn9 = 0.0;
-        var_vbrinvgat_d_dn10 = 0.0;
-        var_vbrinvgat_d_dn11 = 0.0;
-        var_vbrinvgat_d_db0 = 0.0;
-        var_vbrinvgat_d_db1 = 0.0;
-        var_vbrinvgat_d_db2 = 0.0;
-        var_vbrinvgat_d_db3 = 0.0;
-        var_vbrinvgat_d_db4 = 0.0;
-        var_vbrinvgat_d_db5 = 0.0;
-        var_vbrinvgat_d_db6 = 0.0;
 
         let assign1870_e2328: f64 = (var_fstopbot_d * var_fstopbot_d);
         let assign1870_e2332: f64 = (var_pbrbotd_i - 1.0);
@@ -2175,25 +1991,10 @@ impl Instance {
         let assign1890_e2365: f64 = (assign1890_e2363 * var_pbrgatd_i);
         let assign1890_e2367: f64 = (assign1890_e2365 * var_vbrinvgat_d);
         var_slopegat_d = assign1890_e2367;
-        var_slopegat_d_dn0 = (assign1890_e2365 * var_vbrinvgat_d_dn0);
-        var_slopegat_d_dn1 = (assign1890_e2365 * var_vbrinvgat_d_dn1);
-        var_slopegat_d_dn2 = (assign1890_e2365 * var_vbrinvgat_d_dn2);
-        var_slopegat_d_dn3 = (assign1890_e2365 * var_vbrinvgat_d_dn3);
-        var_slopegat_d_dn4 = (assign1890_e2365 * var_vbrinvgat_d_dn4);
         var_slopegat_d_dn5 = (assign1890_e2365 * var_vbrinvgat_d_dn5);
         var_slopegat_d_dn6 = (assign1890_e2365 * var_vbrinvgat_d_dn6);
         var_slopegat_d_dn7 = (assign1890_e2365 * var_vbrinvgat_d_dn7);
         var_slopegat_d_dn8 = (assign1890_e2365 * var_vbrinvgat_d_dn8);
-        var_slopegat_d_dn9 = (assign1890_e2365 * var_vbrinvgat_d_dn9);
-        var_slopegat_d_dn10 = (assign1890_e2365 * var_vbrinvgat_d_dn10);
-        var_slopegat_d_dn11 = (assign1890_e2365 * var_vbrinvgat_d_dn11);
-        var_slopegat_d_db0 = (assign1890_e2365 * var_vbrinvgat_d_db0);
-        var_slopegat_d_db1 = (assign1890_e2365 * var_vbrinvgat_d_db1);
-        var_slopegat_d_db2 = (assign1890_e2365 * var_vbrinvgat_d_db2);
-        var_slopegat_d_db3 = (assign1890_e2365 * var_vbrinvgat_d_db3);
-        var_slopegat_d_db4 = (assign1890_e2365 * var_vbrinvgat_d_db4);
-        var_slopegat_d_db5 = (assign1890_e2365 * var_vbrinvgat_d_db5);
-        var_slopegat_d_db6 = (assign1890_e2365 * var_vbrinvgat_d_db6);
 
         let assign1900_e2382: f64 = if ((((var_fcjorgat2d_i != 1.0) || (var_fvbirgat2d_i != 1.0)) || (var_fpgat2d_i != 1.0)) || (var_fphiggat2d_i != 1.0)) { 1.0 } else { 0.0 };
         var_guard6 = assign1900_e2382;
@@ -2236,316 +2037,6 @@ impl Instance {
     }
 };
         var_cjorgat2nd_d = assign1940_e2407;
-
-        *var_adbbtgatd_i_slot = var_adbbtgatd_i;
-        *var_advbrgatd_i_slot = var_advbrgatd_i;
-        *var_anugatd_i_slot = var_anugatd_i;
-        *var_bdbbtgatd_i_slot = var_bdbbtgatd_i;
-        *var_bdvbrgatd_i_slot = var_bdvbrgatd_i;
-        *var_cbbtbotd_i_slot = var_cbbtbotd_i;
-        *var_cbbtgatd_i_slot = var_cbbtgatd_i;
-        *var_cbbtstid_i_slot = var_cbbtstid_i;
-        *var_cjorgat2nd_d_slot = var_cjorgat2nd_d;
-        *var_ctatbotd_i_slot = var_ctatbotd_i;
-        *var_ctatgatd_i_slot = var_ctatgatd_i;
-        *var_ctatstid_i_slot = var_ctatstid_i;
-        *var_fbbtrbotd_i_slot = var_fbbtrbotd_i;
-        *var_fbbtrgatd_i_slot = var_fbbtrgatd_i;
-        *var_fbbtrstid_i_slot = var_fbbtrstid_i;
-        *var_fcjorgat2d_i_slot = var_fcjorgat2d_i;
-        *var_fjunqd_i_slot = var_fjunqd_i;
-        *var_fpgat2d_i_slot = var_fpgat2d_i;
-        *var_fphiggat2d_i_slot = var_fphiggat2d_i;
-        *var_fstopbot_d_slot = var_fstopbot_d;
-        *var_fstopgat_d_slot = var_fstopgat_d;
-        *var_fstopsti_d_slot = var_fstopsti_d;
-        *var_fvbirgat2d_i_slot = var_fvbirgat2d_i;
-        *var_guard6_slot = var_guard6;
-        *var_guard7_slot = var_guard7;
-        *var_mefftatbotd_i_slot = var_mefftatbotd_i;
-        *var_mefftatgatd_i_slot = var_mefftatgatd_i;
-        *var_mefftatstid_i_slot = var_mefftatstid_i;
-        *var_one_minus_pbot_d_slot = var_one_minus_pbot_d;
-        *var_one_minus_pgat_d_slot = var_one_minus_pgat_d;
-        *var_one_minus_psti_d_slot = var_one_minus_psti_d;
-        *var_one_over_one_minus_pbot_d_slot = var_one_over_one_minus_pbot_d;
-        *var_one_over_one_minus_pgat_d_slot = var_one_over_one_minus_pgat_d;
-        *var_one_over_one_minus_psti_d_slot = var_one_over_one_minus_psti_d;
-        *var_pbrbotd_i_slot = var_pbrbotd_i;
-        *var_pbrgatd_i_slot = var_pbrgatd_i;
-        *var_pbrstid_i_slot = var_pbrstid_i;
-        *var_phigrbot_d_slot = var_phigrbot_d;
-        *var_phigrgat_d_slot = var_phigrgat_d;
-        *var_phigrsti_d_slot = var_phigrsti_d;
-        *var_slopebot_d_slot = var_slopebot_d;
-        *var_slopegat_d_slot = var_slopegat_d;
-        *var_slopegat_d_db0_slot = var_slopegat_d_db0;
-        *var_slopegat_d_db1_slot = var_slopegat_d_db1;
-        *var_slopegat_d_db2_slot = var_slopegat_d_db2;
-        *var_slopegat_d_db3_slot = var_slopegat_d_db3;
-        *var_slopegat_d_db4_slot = var_slopegat_d_db4;
-        *var_slopegat_d_db5_slot = var_slopegat_d_db5;
-        *var_slopegat_d_db6_slot = var_slopegat_d_db6;
-        *var_slopegat_d_dn0_slot = var_slopegat_d_dn0;
-        *var_slopegat_d_dn1_slot = var_slopegat_d_dn1;
-        *var_slopegat_d_dn10_slot = var_slopegat_d_dn10;
-        *var_slopegat_d_dn11_slot = var_slopegat_d_dn11;
-        *var_slopegat_d_dn2_slot = var_slopegat_d_dn2;
-        *var_slopegat_d_dn3_slot = var_slopegat_d_dn3;
-        *var_slopegat_d_dn4_slot = var_slopegat_d_dn4;
-        *var_slopegat_d_dn5_slot = var_slopegat_d_dn5;
-        *var_slopegat_d_dn6_slot = var_slopegat_d_dn6;
-        *var_slopegat_d_dn7_slot = var_slopegat_d_dn7;
-        *var_slopegat_d_dn8_slot = var_slopegat_d_dn8;
-        *var_slopegat_d_dn9_slot = var_slopegat_d_dn9;
-        *var_slopesti_d_slot = var_slopesti_d;
-        *var_stfbbtbotd_i_slot = var_stfbbtbotd_i;
-        *var_stfbbtgatd_i_slot = var_stfbbtgatd_i;
-        *var_stfbbtstid_i_slot = var_stfbbtstid_i;
-        *var_swgat2nd_d_slot = var_swgat2nd_d;
-        *var_vbirbotinv_d_slot = var_vbirbotinv_d;
-        *var_vbirgatinv_d_slot = var_vbirgatinv_d;
-        *var_vbirstiinv_d_slot = var_vbirstiinv_d;
-        *var_vbrbotd_i_slot = var_vbrbotd_i;
-        *var_vbrgatd_i_slot = var_vbrgatd_i;
-        *var_vbrinvbot_d_slot = var_vbrinvbot_d;
-        *var_vbrinvgat_d_slot = var_vbrinvgat_d;
-        *var_vbrinvgat_d_db0_slot = var_vbrinvgat_d_db0;
-        *var_vbrinvgat_d_db1_slot = var_vbrinvgat_d_db1;
-        *var_vbrinvgat_d_db2_slot = var_vbrinvgat_d_db2;
-        *var_vbrinvgat_d_db3_slot = var_vbrinvgat_d_db3;
-        *var_vbrinvgat_d_db4_slot = var_vbrinvgat_d_db4;
-        *var_vbrinvgat_d_db5_slot = var_vbrinvgat_d_db5;
-        *var_vbrinvgat_d_db6_slot = var_vbrinvgat_d_db6;
-        *var_vbrinvgat_d_dn0_slot = var_vbrinvgat_d_dn0;
-        *var_vbrinvgat_d_dn1_slot = var_vbrinvgat_d_dn1;
-        *var_vbrinvgat_d_dn10_slot = var_vbrinvgat_d_dn10;
-        *var_vbrinvgat_d_dn11_slot = var_vbrinvgat_d_dn11;
-        *var_vbrinvgat_d_dn2_slot = var_vbrinvgat_d_dn2;
-        *var_vbrinvgat_d_dn3_slot = var_vbrinvgat_d_dn3;
-        *var_vbrinvgat_d_dn4_slot = var_vbrinvgat_d_dn4;
-        *var_vbrinvgat_d_dn5_slot = var_vbrinvgat_d_dn5;
-        *var_vbrinvgat_d_dn6_slot = var_vbrinvgat_d_dn6;
-        *var_vbrinvgat_d_dn7_slot = var_vbrinvgat_d_dn7;
-        *var_vbrinvgat_d_dn8_slot = var_vbrinvgat_d_dn8;
-        *var_vbrinvgat_d_dn9_slot = var_vbrinvgat_d_dn9;
-        *var_vbrinvsti_d_slot = var_vbrinvsti_d;
-        *var_vbrstid_i_slot = var_vbrstid_i;
-        *var_vjunrefd_i_slot = var_vjunrefd_i;
-        *var_vtrgatd_i_slot = var_vtrgatd_i;
-        *var_wdepnulrbot_d_slot = var_wdepnulrbot_d;
-        *var_wdepnulrgat_d_slot = var_wdepnulrgat_d;
-        *var_wdepnulrinvbot_d_slot = var_wdepnulrinvbot_d;
-        *var_wdepnulrinvgat_d_slot = var_wdepnulrinvgat_d;
-        *var_wdepnulrinvsti_d_slot = var_wdepnulrinvsti_d;
-        *var_wdepnulrsti_d_slot = var_wdepnulrsti_d;
-        *var_xjungatd_i_slot = var_xjungatd_i;
-        *var_xjunstid_i_slot = var_xjunstid_i;
-    }
-
-    pub(super) fn stamp_transient_block_3(
-        ctx: &GeneratedEvalContext<'_>,
-        p: &Parameters,
-        var_deltaphigr: f64,
-        var_fpgat2d_i: f64,
-        var_fphiggat2d_i: f64,
-        var_fvbirgat2d_i: f64,
-        var_guard7: f64,
-        var_kbol_over_qele: f64,
-        var_one_over_one_minus_pbot: f64,
-        var_one_over_one_minus_pgat: f64,
-        var_one_over_one_minus_psti: f64,
-        var_pgatd_i: f64,
-        var_phiggat2nd: f64,
-        var_phiggatd_i: f64,
-        var_phigrbot: f64,
-        var_phigrgat: f64,
-        var_phigrgat2nd: f64,
-        var_phigrsti: f64,
-        var_phitrinv: f64,
-        var_swgat2nd: f64,
-        var_tkr: f64,
-        var_tkr_1: f64,
-        var_vbirgat2nd: f64,
-        var_vbirgatd_i: f64,
-        var_atatbot_slot: &mut f64,
-        var_atatgat_slot: &mut f64,
-        var_atatsti_slot: &mut f64,
-        var_auxt_slot: &mut f64,
-        var_btatpartbot_slot: &mut f64,
-        var_btatpartgat_slot: &mut f64,
-        var_btatpartsti_slot: &mut f64,
-        var_cjobot_slot: &mut f64,
-        var_cjogat_slot: &mut f64,
-        var_cjosti_slot: &mut f64,
-        var_delt_slot: &mut f64,
-        var_delta_slot: &mut f64,
-        var_deltaebot_slot: &mut f64,
-        var_deltaegat_slot: &mut f64,
-        var_deltaesti_slot: &mut f64,
-        var_deltaphigd_slot: &mut f64,
-        var_eg_slot: &mut f64,
-        var_fbbtbot_slot: &mut f64,
-        var_fbbtgat_slot: &mut f64,
-        var_fbbtgat_db0_slot: &mut f64,
-        var_fbbtgat_db1_slot: &mut f64,
-        var_fbbtgat_db2_slot: &mut f64,
-        var_fbbtgat_db3_slot: &mut f64,
-        var_fbbtgat_db4_slot: &mut f64,
-        var_fbbtgat_db5_slot: &mut f64,
-        var_fbbtgat_db6_slot: &mut f64,
-        var_fbbtgat_dn0_slot: &mut f64,
-        var_fbbtgat_dn1_slot: &mut f64,
-        var_fbbtgat_dn10_slot: &mut f64,
-        var_fbbtgat_dn11_slot: &mut f64,
-        var_fbbtgat_dn2_slot: &mut f64,
-        var_fbbtgat_dn3_slot: &mut f64,
-        var_fbbtgat_dn4_slot: &mut f64,
-        var_fbbtgat_dn5_slot: &mut f64,
-        var_fbbtgat_dn6_slot: &mut f64,
-        var_fbbtgat_dn7_slot: &mut f64,
-        var_fbbtgat_dn8_slot: &mut f64,
-        var_fbbtgat_dn9_slot: &mut f64,
-        var_fbbtsti_slot: &mut f64,
-        var_ftdbot_slot: &mut f64,
-        var_ftdgat_slot: &mut f64,
-        var_ftdgat2nd_slot: &mut f64,
-        var_ftdsti_slot: &mut f64,
-        var_guard27_slot: &mut f64,
-        var_idsatbot_slot: &mut f64,
-        var_idsatgat_slot: &mut f64,
-        var_idsatsti_slot: &mut f64,
-        var_inv_phit_slot: &mut f64,
-        var_inv_phita_slot: &mut f64,
-        var_ln_rtn_slot: &mut f64,
-        var_nt0_slot: &mut f64,
-        var_one_minus_pgat2nd_d_slot: &mut f64,
-        var_one_over_one_minus_pgat2nd_d_slot: &mut f64,
-        var_pgat2nd_d_slot: &mut f64,
-        var_phibfac_slot: &mut f64,
-        var_phigdbot_slot: &mut f64,
-        var_phigdgat_slot: &mut f64,
-        var_phigdgat2nd_slot: &mut f64,
-        var_phigdsti_slot: &mut f64,
-        var_phiggat2nd_d_slot: &mut f64,
-        var_phigrgat2nd_d_slot: &mut f64,
-        var_phit_slot: &mut f64,
-        var_phita_slot: &mut f64,
-        var_phitd_slot: &mut f64,
-        var_phitdinv_slot: &mut f64,
-        var_qpref2bot_slot: &mut f64,
-        var_qpref2gat_slot: &mut f64,
-        var_qpref2sti_slot: &mut f64,
-        var_qprefbot_slot: &mut f64,
-        var_qprefgat_slot: &mut f64,
-        var_qprefsti_slot: &mut f64,
-        var_rta_slot: &mut f64,
-        var_rtn_slot: &mut f64,
-        var_tka_slot: &mut f64,
-        var_tkd_slot: &mut f64,
-        var_tkd_1_slot: &mut f64,
-        var_tkd_sq_slot: &mut f64,
-        var_ubibot_slot: &mut f64,
-        var_ubigat_slot: &mut f64,
-        var_ubigat2nd_slot: &mut f64,
-        var_ubisti_slot: &mut f64,
-        var_vbibot_slot: &mut f64,
-        var_vbigat_slot: &mut f64,
-        var_vbiinvbot_slot: &mut f64,
-        var_vbiinvgat_slot: &mut f64,
-        var_vbiinvsti_slot: &mut f64,
-        var_vbirgat2nd_d_slot: &mut f64,
-        var_vbisti_slot: &mut f64,
-    ) {
-        let ctx_temp = ctx.temperature();
-        let mut var_atatbot: f64 = *var_atatbot_slot;
-        let mut var_atatgat: f64 = *var_atatgat_slot;
-        let mut var_atatsti: f64 = *var_atatsti_slot;
-        let mut var_auxt: f64 = *var_auxt_slot;
-        let mut var_btatpartbot: f64 = *var_btatpartbot_slot;
-        let mut var_btatpartgat: f64 = *var_btatpartgat_slot;
-        let mut var_btatpartsti: f64 = *var_btatpartsti_slot;
-        let mut var_cjobot: f64 = *var_cjobot_slot;
-        let mut var_cjogat: f64 = *var_cjogat_slot;
-        let mut var_cjosti: f64 = *var_cjosti_slot;
-        let mut var_delt: f64 = *var_delt_slot;
-        let mut var_delta: f64 = *var_delta_slot;
-        let mut var_deltaebot: f64 = *var_deltaebot_slot;
-        let mut var_deltaegat: f64 = *var_deltaegat_slot;
-        let mut var_deltaesti: f64 = *var_deltaesti_slot;
-        let mut var_deltaphigd: f64 = *var_deltaphigd_slot;
-        let mut var_eg: f64 = *var_eg_slot;
-        let mut var_fbbtbot: f64 = *var_fbbtbot_slot;
-        let mut var_fbbtgat: f64 = *var_fbbtgat_slot;
-        let mut var_fbbtgat_db0: f64 = *var_fbbtgat_db0_slot;
-        let mut var_fbbtgat_db1: f64 = *var_fbbtgat_db1_slot;
-        let mut var_fbbtgat_db2: f64 = *var_fbbtgat_db2_slot;
-        let mut var_fbbtgat_db3: f64 = *var_fbbtgat_db3_slot;
-        let mut var_fbbtgat_db4: f64 = *var_fbbtgat_db4_slot;
-        let mut var_fbbtgat_db5: f64 = *var_fbbtgat_db5_slot;
-        let mut var_fbbtgat_db6: f64 = *var_fbbtgat_db6_slot;
-        let mut var_fbbtgat_dn0: f64 = *var_fbbtgat_dn0_slot;
-        let mut var_fbbtgat_dn1: f64 = *var_fbbtgat_dn1_slot;
-        let mut var_fbbtgat_dn10: f64 = *var_fbbtgat_dn10_slot;
-        let mut var_fbbtgat_dn11: f64 = *var_fbbtgat_dn11_slot;
-        let mut var_fbbtgat_dn2: f64 = *var_fbbtgat_dn2_slot;
-        let mut var_fbbtgat_dn3: f64 = *var_fbbtgat_dn3_slot;
-        let mut var_fbbtgat_dn4: f64 = *var_fbbtgat_dn4_slot;
-        let mut var_fbbtgat_dn5: f64 = *var_fbbtgat_dn5_slot;
-        let mut var_fbbtgat_dn6: f64 = *var_fbbtgat_dn6_slot;
-        let mut var_fbbtgat_dn7: f64 = *var_fbbtgat_dn7_slot;
-        let mut var_fbbtgat_dn8: f64 = *var_fbbtgat_dn8_slot;
-        let mut var_fbbtgat_dn9: f64 = *var_fbbtgat_dn9_slot;
-        let mut var_fbbtsti: f64 = *var_fbbtsti_slot;
-        let mut var_ftdbot: f64 = *var_ftdbot_slot;
-        let mut var_ftdgat: f64 = *var_ftdgat_slot;
-        let mut var_ftdgat2nd: f64 = *var_ftdgat2nd_slot;
-        let mut var_ftdsti: f64 = *var_ftdsti_slot;
-        let mut var_guard27: f64 = *var_guard27_slot;
-        let mut var_idsatbot: f64 = *var_idsatbot_slot;
-        let mut var_idsatgat: f64 = *var_idsatgat_slot;
-        let mut var_idsatsti: f64 = *var_idsatsti_slot;
-        let mut var_inv_phit: f64 = *var_inv_phit_slot;
-        let mut var_inv_phita: f64 = *var_inv_phita_slot;
-        let mut var_ln_rtn: f64 = *var_ln_rtn_slot;
-        let mut var_nt0: f64 = *var_nt0_slot;
-        let mut var_one_minus_pgat2nd_d: f64 = *var_one_minus_pgat2nd_d_slot;
-        let mut var_one_over_one_minus_pgat2nd_d: f64 = *var_one_over_one_minus_pgat2nd_d_slot;
-        let mut var_pgat2nd_d: f64 = *var_pgat2nd_d_slot;
-        let mut var_phibfac: f64 = *var_phibfac_slot;
-        let mut var_phigdbot: f64 = *var_phigdbot_slot;
-        let mut var_phigdgat: f64 = *var_phigdgat_slot;
-        let mut var_phigdgat2nd: f64 = *var_phigdgat2nd_slot;
-        let mut var_phigdsti: f64 = *var_phigdsti_slot;
-        let mut var_phiggat2nd_d: f64 = *var_phiggat2nd_d_slot;
-        let mut var_phigrgat2nd_d: f64 = *var_phigrgat2nd_d_slot;
-        let mut var_phit: f64 = *var_phit_slot;
-        let mut var_phita: f64 = *var_phita_slot;
-        let mut var_phitd: f64 = *var_phitd_slot;
-        let mut var_phitdinv: f64 = *var_phitdinv_slot;
-        let mut var_qpref2bot: f64 = *var_qpref2bot_slot;
-        let mut var_qpref2gat: f64 = *var_qpref2gat_slot;
-        let mut var_qpref2sti: f64 = *var_qpref2sti_slot;
-        let mut var_qprefbot: f64 = *var_qprefbot_slot;
-        let mut var_qprefgat: f64 = *var_qprefgat_slot;
-        let mut var_qprefsti: f64 = *var_qprefsti_slot;
-        let mut var_rta: f64 = *var_rta_slot;
-        let mut var_rtn: f64 = *var_rtn_slot;
-        let mut var_tka: f64 = *var_tka_slot;
-        let mut var_tkd: f64 = *var_tkd_slot;
-        let mut var_tkd_1: f64 = *var_tkd_1_slot;
-        let mut var_tkd_sq: f64 = *var_tkd_sq_slot;
-        let mut var_ubibot: f64 = *var_ubibot_slot;
-        let mut var_ubigat: f64 = *var_ubigat_slot;
-        let mut var_ubigat2nd: f64 = *var_ubigat2nd_slot;
-        let mut var_ubisti: f64 = *var_ubisti_slot;
-        let mut var_vbibot: f64 = *var_vbibot_slot;
-        let mut var_vbigat: f64 = *var_vbigat_slot;
-        let mut var_vbiinvbot: f64 = *var_vbiinvbot_slot;
-        let mut var_vbiinvgat: f64 = *var_vbiinvgat_slot;
-        let mut var_vbiinvsti: f64 = *var_vbiinvsti_slot;
-        let mut var_vbirgat2nd_d: f64 = *var_vbirgat2nd_d_slot;
-        let mut var_vbisti: f64 = *var_vbisti_slot;
 
         let (assign1950_e2420,) = {
     if (var_guard7 != 0.0) {
@@ -2608,6 +2099,277 @@ impl Instance {
     }
 };
         var_phiggat2nd_d = assign1970_e2453;
+
+        *var_adbbtgatd_i_slot = var_adbbtgatd_i;
+        *var_advbrgatd_i_slot = var_advbrgatd_i;
+        *var_anugatd_i_slot = var_anugatd_i;
+        *var_bdbbtgatd_i_slot = var_bdbbtgatd_i;
+        *var_bdvbrgatd_i_slot = var_bdvbrgatd_i;
+        *var_cbbtbotd_i_slot = var_cbbtbotd_i;
+        *var_cbbtgatd_i_slot = var_cbbtgatd_i;
+        *var_cbbtstid_i_slot = var_cbbtstid_i;
+        *var_cjorgat2nd_d_slot = var_cjorgat2nd_d;
+        *var_ctatgatd_i_slot = var_ctatgatd_i;
+        *var_ctatstid_i_slot = var_ctatstid_i;
+        *var_fbbtrbotd_i_slot = var_fbbtrbotd_i;
+        *var_fbbtrgatd_i_slot = var_fbbtrgatd_i;
+        *var_fbbtrstid_i_slot = var_fbbtrstid_i;
+        *var_fcjorgat2d_i_slot = var_fcjorgat2d_i;
+        *var_fjunqd_i_slot = var_fjunqd_i;
+        *var_fpgat2d_i_slot = var_fpgat2d_i;
+        *var_fphiggat2d_i_slot = var_fphiggat2d_i;
+        *var_fstopbot_d_slot = var_fstopbot_d;
+        *var_fstopgat_d_slot = var_fstopgat_d;
+        *var_fstopsti_d_slot = var_fstopsti_d;
+        *var_fvbirgat2d_i_slot = var_fvbirgat2d_i;
+        *var_guard6_slot = var_guard6;
+        *var_guard7_slot = var_guard7;
+        *var_mefftatbotd_i_slot = var_mefftatbotd_i;
+        *var_mefftatgatd_i_slot = var_mefftatgatd_i;
+        *var_mefftatstid_i_slot = var_mefftatstid_i;
+        *var_one_minus_pbot_d_slot = var_one_minus_pbot_d;
+        *var_one_minus_pgat_d_slot = var_one_minus_pgat_d;
+        *var_one_minus_psti_d_slot = var_one_minus_psti_d;
+        *var_one_over_one_minus_pbot_d_slot = var_one_over_one_minus_pbot_d;
+        *var_one_over_one_minus_pgat_d_slot = var_one_over_one_minus_pgat_d;
+        *var_one_over_one_minus_psti_d_slot = var_one_over_one_minus_psti_d;
+        *var_pbrbotd_i_slot = var_pbrbotd_i;
+        *var_pbrgatd_i_slot = var_pbrgatd_i;
+        *var_pbrstid_i_slot = var_pbrstid_i;
+        *var_pgat2nd_d_slot = var_pgat2nd_d;
+        *var_phiggat2nd_d_slot = var_phiggat2nd_d;
+        *var_phigrbot_d_slot = var_phigrbot_d;
+        *var_phigrgat_d_slot = var_phigrgat_d;
+        *var_phigrsti_d_slot = var_phigrsti_d;
+        *var_slopebot_d_slot = var_slopebot_d;
+        *var_slopegat_d_slot = var_slopegat_d;
+        *var_slopegat_d_dn5_slot = var_slopegat_d_dn5;
+        *var_slopegat_d_dn6_slot = var_slopegat_d_dn6;
+        *var_slopegat_d_dn7_slot = var_slopegat_d_dn7;
+        *var_slopegat_d_dn8_slot = var_slopegat_d_dn8;
+        *var_slopesti_d_slot = var_slopesti_d;
+        *var_stfbbtbotd_i_slot = var_stfbbtbotd_i;
+        *var_stfbbtgatd_i_slot = var_stfbbtgatd_i;
+        *var_stfbbtstid_i_slot = var_stfbbtstid_i;
+        *var_swgat2nd_d_slot = var_swgat2nd_d;
+        *var_vbirbotinv_d_slot = var_vbirbotinv_d;
+        *var_vbirgat2nd_d_slot = var_vbirgat2nd_d;
+        *var_vbirgatinv_d_slot = var_vbirgatinv_d;
+        *var_vbirstiinv_d_slot = var_vbirstiinv_d;
+        *var_vbrbotd_i_slot = var_vbrbotd_i;
+        *var_vbrgatd_i_slot = var_vbrgatd_i;
+        *var_vbrinvbot_d_slot = var_vbrinvbot_d;
+        *var_vbrinvgat_d_slot = var_vbrinvgat_d;
+        *var_vbrinvgat_d_dn5_slot = var_vbrinvgat_d_dn5;
+        *var_vbrinvgat_d_dn6_slot = var_vbrinvgat_d_dn6;
+        *var_vbrinvgat_d_dn7_slot = var_vbrinvgat_d_dn7;
+        *var_vbrinvgat_d_dn8_slot = var_vbrinvgat_d_dn8;
+        *var_vbrinvsti_d_slot = var_vbrinvsti_d;
+        *var_vbrstid_i_slot = var_vbrstid_i;
+        *var_vjunrefd_i_slot = var_vjunrefd_i;
+        *var_vtrgatd_i_slot = var_vtrgatd_i;
+        *var_wdepnulrbot_d_slot = var_wdepnulrbot_d;
+        *var_wdepnulrgat_d_slot = var_wdepnulrgat_d;
+        *var_wdepnulrinvbot_d_slot = var_wdepnulrinvbot_d;
+        *var_wdepnulrinvgat_d_slot = var_wdepnulrinvgat_d;
+        *var_wdepnulrinvsti_d_slot = var_wdepnulrinvsti_d;
+        *var_wdepnulrsti_d_slot = var_wdepnulrsti_d;
+    }
+
+    pub(super) fn stamp_transient_block_3(
+        ctx: &GeneratedEvalContext<'_>,
+        p: &Parameters,
+        var_cjorgat2nd: f64,
+        var_deltaphigr: f64,
+        var_guard7: f64,
+        var_kbol_over_qele: f64,
+        var_one_over_one_minus_pbot: f64,
+        var_one_over_one_minus_pgat: f64,
+        var_one_over_one_minus_pgat2nd: f64,
+        var_one_over_one_minus_psti: f64,
+        var_pgat2nd: f64,
+        var_pgat2nd_d: f64,
+        var_phigbotd_i: f64,
+        var_phiggat2nd: f64,
+        var_phiggat2nd_d: f64,
+        var_phiggatd_i: f64,
+        var_phigrbot: f64,
+        var_phigrbot_d: f64,
+        var_phigrgat: f64,
+        var_phigrgat2nd: f64,
+        var_phigrgat_d: f64,
+        var_phigrsti: f64,
+        var_phigrsti_d: f64,
+        var_phigstid_i: f64,
+        var_phitrinv: f64,
+        var_swgat2nd: f64,
+        var_tkr: f64,
+        var_tkr_1: f64,
+        var_vbirgat2nd: f64,
+        var_atatbot_slot: &mut f64,
+        var_atatgat_slot: &mut f64,
+        var_atatsti_slot: &mut f64,
+        var_auxt_slot: &mut f64,
+        var_btatpartbot_slot: &mut f64,
+        var_btatpartgat_slot: &mut f64,
+        var_btatpartsti_slot: &mut f64,
+        var_cjobot_slot: &mut f64,
+        var_cjogat_slot: &mut f64,
+        var_cjogat2nd_slot: &mut f64,
+        var_cjosti_slot: &mut f64,
+        var_delt_slot: &mut f64,
+        var_delta_slot: &mut f64,
+        var_deltaebot_slot: &mut f64,
+        var_deltaegat_slot: &mut f64,
+        var_deltaesti_slot: &mut f64,
+        var_deltaphigd_slot: &mut f64,
+        var_eg_slot: &mut f64,
+        var_fbbtbot_slot: &mut f64,
+        var_fbbtgat_slot: &mut f64,
+        var_fbbtgat_dn5_slot: &mut f64,
+        var_fbbtgat_dn6_slot: &mut f64,
+        var_fbbtgat_dn7_slot: &mut f64,
+        var_fbbtgat_dn8_slot: &mut f64,
+        var_fbbtsti_slot: &mut f64,
+        var_ftdbot_slot: &mut f64,
+        var_ftdbot_d_slot: &mut f64,
+        var_ftdgat_slot: &mut f64,
+        var_ftdgat2nd_slot: &mut f64,
+        var_ftdgat_d_slot: &mut f64,
+        var_ftdsti_slot: &mut f64,
+        var_ftdsti_d_slot: &mut f64,
+        var_guard27_slot: &mut f64,
+        var_idsatbot_slot: &mut f64,
+        var_idsatgat_slot: &mut f64,
+        var_idsatsti_slot: &mut f64,
+        var_inv_phit_slot: &mut f64,
+        var_inv_phita_slot: &mut f64,
+        var_ln_rtn_slot: &mut f64,
+        var_nt0_slot: &mut f64,
+        var_one_minus_pgat2nd_d_slot: &mut f64,
+        var_one_over_one_minus_pgat2nd_d_slot: &mut f64,
+        var_phibfac_slot: &mut f64,
+        var_phigdbot_slot: &mut f64,
+        var_phigdbot_d_slot: &mut f64,
+        var_phigdgat_slot: &mut f64,
+        var_phigdgat2nd_slot: &mut f64,
+        var_phigdgat_d_slot: &mut f64,
+        var_phigdsti_slot: &mut f64,
+        var_phigdsti_d_slot: &mut f64,
+        var_phigrgat2nd_d_slot: &mut f64,
+        var_phit_slot: &mut f64,
+        var_phita_slot: &mut f64,
+        var_phitd_slot: &mut f64,
+        var_phitdinv_slot: &mut f64,
+        var_qpref2bot_slot: &mut f64,
+        var_qpref2gat_slot: &mut f64,
+        var_qpref2gat2nd_slot: &mut f64,
+        var_qpref2sti_slot: &mut f64,
+        var_qprefbot_slot: &mut f64,
+        var_qprefgat_slot: &mut f64,
+        var_qprefgat2nd_slot: &mut f64,
+        var_qprefsti_slot: &mut f64,
+        var_rta_slot: &mut f64,
+        var_rtn_slot: &mut f64,
+        var_tka_slot: &mut f64,
+        var_tkd_slot: &mut f64,
+        var_tkd_1_slot: &mut f64,
+        var_tkd_sq_slot: &mut f64,
+        var_ubibot_slot: &mut f64,
+        var_ubigat_slot: &mut f64,
+        var_ubigat2nd_slot: &mut f64,
+        var_ubisti_slot: &mut f64,
+        var_vbibot_slot: &mut f64,
+        var_vbigat_slot: &mut f64,
+        var_vbigat2nd_slot: &mut f64,
+        var_vbiinvbot_slot: &mut f64,
+        var_vbiinvgat_slot: &mut f64,
+        var_vbiinvgat2nd_slot: &mut f64,
+        var_vbiinvsti_slot: &mut f64,
+        var_vbisti_slot: &mut f64,
+    ) {
+        let ctx_temp = ctx.temperature();
+        let mut var_atatbot: f64 = *var_atatbot_slot;
+        let mut var_atatgat: f64 = *var_atatgat_slot;
+        let mut var_atatsti: f64 = *var_atatsti_slot;
+        let mut var_auxt: f64 = *var_auxt_slot;
+        let mut var_btatpartbot: f64 = *var_btatpartbot_slot;
+        let mut var_btatpartgat: f64 = *var_btatpartgat_slot;
+        let mut var_btatpartsti: f64 = *var_btatpartsti_slot;
+        let mut var_cjobot: f64 = *var_cjobot_slot;
+        let mut var_cjogat: f64 = *var_cjogat_slot;
+        let mut var_cjogat2nd: f64 = *var_cjogat2nd_slot;
+        let mut var_cjosti: f64 = *var_cjosti_slot;
+        let mut var_delt: f64 = *var_delt_slot;
+        let mut var_delta: f64 = *var_delta_slot;
+        let mut var_deltaebot: f64 = *var_deltaebot_slot;
+        let mut var_deltaegat: f64 = *var_deltaegat_slot;
+        let mut var_deltaesti: f64 = *var_deltaesti_slot;
+        let mut var_deltaphigd: f64 = *var_deltaphigd_slot;
+        let mut var_eg: f64 = *var_eg_slot;
+        let mut var_fbbtbot: f64 = *var_fbbtbot_slot;
+        let mut var_fbbtgat: f64 = *var_fbbtgat_slot;
+        let mut var_fbbtgat_dn5: f64 = *var_fbbtgat_dn5_slot;
+        let mut var_fbbtgat_dn6: f64 = *var_fbbtgat_dn6_slot;
+        let mut var_fbbtgat_dn7: f64 = *var_fbbtgat_dn7_slot;
+        let mut var_fbbtgat_dn8: f64 = *var_fbbtgat_dn8_slot;
+        let mut var_fbbtsti: f64 = *var_fbbtsti_slot;
+        let mut var_ftdbot: f64 = *var_ftdbot_slot;
+        let mut var_ftdbot_d: f64 = *var_ftdbot_d_slot;
+        let mut var_ftdgat: f64 = *var_ftdgat_slot;
+        let mut var_ftdgat2nd: f64 = *var_ftdgat2nd_slot;
+        let mut var_ftdgat_d: f64 = *var_ftdgat_d_slot;
+        let mut var_ftdsti: f64 = *var_ftdsti_slot;
+        let mut var_ftdsti_d: f64 = *var_ftdsti_d_slot;
+        let mut var_guard27: f64 = *var_guard27_slot;
+        let mut var_idsatbot: f64 = *var_idsatbot_slot;
+        let mut var_idsatgat: f64 = *var_idsatgat_slot;
+        let mut var_idsatsti: f64 = *var_idsatsti_slot;
+        let mut var_inv_phit: f64 = *var_inv_phit_slot;
+        let mut var_inv_phita: f64 = *var_inv_phita_slot;
+        let mut var_ln_rtn: f64 = *var_ln_rtn_slot;
+        let mut var_nt0: f64 = *var_nt0_slot;
+        let mut var_one_minus_pgat2nd_d: f64 = *var_one_minus_pgat2nd_d_slot;
+        let mut var_one_over_one_minus_pgat2nd_d: f64 = *var_one_over_one_minus_pgat2nd_d_slot;
+        let mut var_phibfac: f64 = *var_phibfac_slot;
+        let mut var_phigdbot: f64 = *var_phigdbot_slot;
+        let mut var_phigdbot_d: f64 = *var_phigdbot_d_slot;
+        let mut var_phigdgat: f64 = *var_phigdgat_slot;
+        let mut var_phigdgat2nd: f64 = *var_phigdgat2nd_slot;
+        let mut var_phigdgat_d: f64 = *var_phigdgat_d_slot;
+        let mut var_phigdsti: f64 = *var_phigdsti_slot;
+        let mut var_phigdsti_d: f64 = *var_phigdsti_d_slot;
+        let mut var_phigrgat2nd_d: f64 = *var_phigrgat2nd_d_slot;
+        let mut var_phit: f64 = *var_phit_slot;
+        let mut var_phita: f64 = *var_phita_slot;
+        let mut var_phitd: f64 = *var_phitd_slot;
+        let mut var_phitdinv: f64 = *var_phitdinv_slot;
+        let mut var_qpref2bot: f64 = *var_qpref2bot_slot;
+        let mut var_qpref2gat: f64 = *var_qpref2gat_slot;
+        let mut var_qpref2gat2nd: f64 = *var_qpref2gat2nd_slot;
+        let mut var_qpref2sti: f64 = *var_qpref2sti_slot;
+        let mut var_qprefbot: f64 = *var_qprefbot_slot;
+        let mut var_qprefgat: f64 = *var_qprefgat_slot;
+        let mut var_qprefgat2nd: f64 = *var_qprefgat2nd_slot;
+        let mut var_qprefsti: f64 = *var_qprefsti_slot;
+        let mut var_rta: f64 = *var_rta_slot;
+        let mut var_rtn: f64 = *var_rtn_slot;
+        let mut var_tka: f64 = *var_tka_slot;
+        let mut var_tkd: f64 = *var_tkd_slot;
+        let mut var_tkd_1: f64 = *var_tkd_1_slot;
+        let mut var_tkd_sq: f64 = *var_tkd_sq_slot;
+        let mut var_ubibot: f64 = *var_ubibot_slot;
+        let mut var_ubigat: f64 = *var_ubigat_slot;
+        let mut var_ubigat2nd: f64 = *var_ubigat2nd_slot;
+        let mut var_ubisti: f64 = *var_ubisti_slot;
+        let mut var_vbibot: f64 = *var_vbibot_slot;
+        let mut var_vbigat: f64 = *var_vbigat_slot;
+        let mut var_vbigat2nd: f64 = *var_vbigat2nd_slot;
+        let mut var_vbiinvbot: f64 = *var_vbiinvbot_slot;
+        let mut var_vbiinvgat: f64 = *var_vbiinvgat_slot;
+        let mut var_vbiinvgat2nd: f64 = *var_vbiinvgat2nd_slot;
+        let mut var_vbiinvsti: f64 = *var_vbiinvsti_slot;
+        let mut var_vbisti: f64 = *var_vbisti_slot;
 
         let (assign1980_e2459,) = {
     if (var_guard7 != 0.0) {
@@ -2944,25 +2706,10 @@ impl Instance {
         let assign2640_e2892: f64 = (1.0 + assign2640_e2891);
         let assign2640_e2893: f64 = (p.p849 * assign2640_e2892);
         var_fbbtgat = assign2640_e2893;
-        var_fbbtgat_dn0 = 0.0;
-        var_fbbtgat_dn1 = 0.0;
-        var_fbbtgat_dn2 = 0.0;
-        var_fbbtgat_dn3 = 0.0;
-        var_fbbtgat_dn4 = 0.0;
         var_fbbtgat_dn5 = 0.0;
         var_fbbtgat_dn6 = 0.0;
         var_fbbtgat_dn7 = 0.0;
         var_fbbtgat_dn8 = 0.0;
-        var_fbbtgat_dn9 = 0.0;
-        var_fbbtgat_dn10 = 0.0;
-        var_fbbtgat_dn11 = 0.0;
-        var_fbbtgat_db0 = 0.0;
-        var_fbbtgat_db1 = 0.0;
-        var_fbbtgat_db2 = 0.0;
-        var_fbbtgat_db3 = 0.0;
-        var_fbbtgat_db4 = 0.0;
-        var_fbbtgat_db5 = 0.0;
-        var_fbbtgat_db6 = 0.0;
 
         let (assign2650_e2899,) = {
     if (var_fbbtbot > 0.0) {
@@ -2982,33 +2729,18 @@ impl Instance {
 };
         var_fbbtsti = assign2660_e2905;
 
-        let (assign2670_e2911, assign2670_e2911_d_n0, assign2670_e2911_d_n1, assign2670_e2911_d_n2, assign2670_e2911_d_n3, assign2670_e2911_d_n4, assign2670_e2911_d_n5, assign2670_e2911_d_n6, assign2670_e2911_d_n7, assign2670_e2911_d_n8, assign2670_e2911_d_n9, assign2670_e2911_d_n10, assign2670_e2911_d_n11, assign2670_e2911_d_b0, assign2670_e2911_d_b1, assign2670_e2911_d_b2, assign2670_e2911_d_b3, assign2670_e2911_d_b4, assign2670_e2911_d_b5, assign2670_e2911_d_b6,) = {
+        let (assign2670_e2911, assign2670_e2911_d_n5, assign2670_e2911_d_n6, assign2670_e2911_d_n7, assign2670_e2911_d_n8,) = {
     if (var_fbbtgat > 0.0) {
-        (var_fbbtgat, var_fbbtgat_dn0, var_fbbtgat_dn1, var_fbbtgat_dn2, var_fbbtgat_dn3, var_fbbtgat_dn4, var_fbbtgat_dn5, var_fbbtgat_dn6, var_fbbtgat_dn7, var_fbbtgat_dn8, var_fbbtgat_dn9, var_fbbtgat_dn10, var_fbbtgat_dn11, var_fbbtgat_db0, var_fbbtgat_db1, var_fbbtgat_db2, var_fbbtgat_db3, var_fbbtgat_db4, var_fbbtgat_db5, var_fbbtgat_db6,)
+        (var_fbbtgat, var_fbbtgat_dn5, var_fbbtgat_dn6, var_fbbtgat_dn7, var_fbbtgat_dn8,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
         var_fbbtgat = assign2670_e2911;
-        var_fbbtgat_dn0 = assign2670_e2911_d_n0;
-        var_fbbtgat_dn1 = assign2670_e2911_d_n1;
-        var_fbbtgat_dn2 = assign2670_e2911_d_n2;
-        var_fbbtgat_dn3 = assign2670_e2911_d_n3;
-        var_fbbtgat_dn4 = assign2670_e2911_d_n4;
         var_fbbtgat_dn5 = assign2670_e2911_d_n5;
         var_fbbtgat_dn6 = assign2670_e2911_d_n6;
         var_fbbtgat_dn7 = assign2670_e2911_d_n7;
         var_fbbtgat_dn8 = assign2670_e2911_d_n8;
-        var_fbbtgat_dn9 = assign2670_e2911_d_n9;
-        var_fbbtgat_dn10 = assign2670_e2911_d_n10;
-        var_fbbtgat_dn11 = assign2670_e2911_d_n11;
-        var_fbbtgat_db0 = assign2670_e2911_d_b0;
-        var_fbbtgat_db1 = assign2670_e2911_d_b1;
-        var_fbbtgat_db2 = assign2670_e2911_d_b2;
-        var_fbbtgat_db3 = assign2670_e2911_d_b3;
-        var_fbbtgat_db4 = assign2670_e2911_d_b4;
-        var_fbbtgat_db5 = assign2670_e2911_d_b5;
-        var_fbbtgat_db6 = assign2670_e2911_d_b6;
 
         let assign2680_e2914: f64 = if var_swgat2nd == 1.0 { 1.0 } else { 0.0 };
         var_guard27 = assign2680_e2914;
@@ -3052,340 +2784,6 @@ impl Instance {
     }
 };
         var_ubigat2nd = assign2710_e2950;
-
-        *var_atatbot_slot = var_atatbot;
-        *var_atatgat_slot = var_atatgat;
-        *var_atatsti_slot = var_atatsti;
-        *var_auxt_slot = var_auxt;
-        *var_btatpartbot_slot = var_btatpartbot;
-        *var_btatpartgat_slot = var_btatpartgat;
-        *var_btatpartsti_slot = var_btatpartsti;
-        *var_cjobot_slot = var_cjobot;
-        *var_cjogat_slot = var_cjogat;
-        *var_cjosti_slot = var_cjosti;
-        *var_delt_slot = var_delt;
-        *var_delta_slot = var_delta;
-        *var_deltaebot_slot = var_deltaebot;
-        *var_deltaegat_slot = var_deltaegat;
-        *var_deltaesti_slot = var_deltaesti;
-        *var_deltaphigd_slot = var_deltaphigd;
-        *var_eg_slot = var_eg;
-        *var_fbbtbot_slot = var_fbbtbot;
-        *var_fbbtgat_slot = var_fbbtgat;
-        *var_fbbtgat_db0_slot = var_fbbtgat_db0;
-        *var_fbbtgat_db1_slot = var_fbbtgat_db1;
-        *var_fbbtgat_db2_slot = var_fbbtgat_db2;
-        *var_fbbtgat_db3_slot = var_fbbtgat_db3;
-        *var_fbbtgat_db4_slot = var_fbbtgat_db4;
-        *var_fbbtgat_db5_slot = var_fbbtgat_db5;
-        *var_fbbtgat_db6_slot = var_fbbtgat_db6;
-        *var_fbbtgat_dn0_slot = var_fbbtgat_dn0;
-        *var_fbbtgat_dn1_slot = var_fbbtgat_dn1;
-        *var_fbbtgat_dn10_slot = var_fbbtgat_dn10;
-        *var_fbbtgat_dn11_slot = var_fbbtgat_dn11;
-        *var_fbbtgat_dn2_slot = var_fbbtgat_dn2;
-        *var_fbbtgat_dn3_slot = var_fbbtgat_dn3;
-        *var_fbbtgat_dn4_slot = var_fbbtgat_dn4;
-        *var_fbbtgat_dn5_slot = var_fbbtgat_dn5;
-        *var_fbbtgat_dn6_slot = var_fbbtgat_dn6;
-        *var_fbbtgat_dn7_slot = var_fbbtgat_dn7;
-        *var_fbbtgat_dn8_slot = var_fbbtgat_dn8;
-        *var_fbbtgat_dn9_slot = var_fbbtgat_dn9;
-        *var_fbbtsti_slot = var_fbbtsti;
-        *var_ftdbot_slot = var_ftdbot;
-        *var_ftdgat_slot = var_ftdgat;
-        *var_ftdgat2nd_slot = var_ftdgat2nd;
-        *var_ftdsti_slot = var_ftdsti;
-        *var_guard27_slot = var_guard27;
-        *var_idsatbot_slot = var_idsatbot;
-        *var_idsatgat_slot = var_idsatgat;
-        *var_idsatsti_slot = var_idsatsti;
-        *var_inv_phit_slot = var_inv_phit;
-        *var_inv_phita_slot = var_inv_phita;
-        *var_ln_rtn_slot = var_ln_rtn;
-        *var_nt0_slot = var_nt0;
-        *var_one_minus_pgat2nd_d_slot = var_one_minus_pgat2nd_d;
-        *var_one_over_one_minus_pgat2nd_d_slot = var_one_over_one_minus_pgat2nd_d;
-        *var_pgat2nd_d_slot = var_pgat2nd_d;
-        *var_phibfac_slot = var_phibfac;
-        *var_phigdbot_slot = var_phigdbot;
-        *var_phigdgat_slot = var_phigdgat;
-        *var_phigdgat2nd_slot = var_phigdgat2nd;
-        *var_phigdsti_slot = var_phigdsti;
-        *var_phiggat2nd_d_slot = var_phiggat2nd_d;
-        *var_phigrgat2nd_d_slot = var_phigrgat2nd_d;
-        *var_phit_slot = var_phit;
-        *var_phita_slot = var_phita;
-        *var_phitd_slot = var_phitd;
-        *var_phitdinv_slot = var_phitdinv;
-        *var_qpref2bot_slot = var_qpref2bot;
-        *var_qpref2gat_slot = var_qpref2gat;
-        *var_qpref2sti_slot = var_qpref2sti;
-        *var_qprefbot_slot = var_qprefbot;
-        *var_qprefgat_slot = var_qprefgat;
-        *var_qprefsti_slot = var_qprefsti;
-        *var_rta_slot = var_rta;
-        *var_rtn_slot = var_rtn;
-        *var_tka_slot = var_tka;
-        *var_tkd_slot = var_tkd;
-        *var_tkd_1_slot = var_tkd_1;
-        *var_tkd_sq_slot = var_tkd_sq;
-        *var_ubibot_slot = var_ubibot;
-        *var_ubigat_slot = var_ubigat;
-        *var_ubigat2nd_slot = var_ubigat2nd;
-        *var_ubisti_slot = var_ubisti;
-        *var_vbibot_slot = var_vbibot;
-        *var_vbigat_slot = var_vbigat;
-        *var_vbiinvbot_slot = var_vbiinvbot;
-        *var_vbiinvgat_slot = var_vbiinvgat;
-        *var_vbiinvsti_slot = var_vbiinvsti;
-        *var_vbirgat2nd_d_slot = var_vbirgat2nd_d;
-        *var_vbisti_slot = var_vbisti;
-    }
-
-    pub(super) fn stamp_transient_block_4(
-        p: &Parameters,
-        var_auxt: f64,
-        var_cjorbotd_i: f64,
-        var_cjorgat2nd: f64,
-        var_cjorgat2nd_d: f64,
-        var_cjorgatd_i: f64,
-        var_cjorstid_i: f64,
-        var_deltaphigd: f64,
-        var_fbbtrbotd_i: f64,
-        var_fbbtrgatd_i: f64,
-        var_fbbtrstid_i: f64,
-        var_guard27: f64,
-        var_idsatrbotd_i: f64,
-        var_idsatrgatd_i: f64,
-        var_idsatrstid_i: f64,
-        var_mefftatbotd_i: f64,
-        var_mefftatgatd_i: f64,
-        var_mefftatstid_i: f64,
-        var_one_over_one_minus_pbot_d: f64,
-        var_one_over_one_minus_pgat2nd: f64,
-        var_one_over_one_minus_pgat2nd_d: f64,
-        var_one_over_one_minus_pgat_d: f64,
-        var_one_over_one_minus_psti_d: f64,
-        var_pbotd_i: f64,
-        var_pgat2nd: f64,
-        var_pgat2nd_d: f64,
-        var_pgatd_i: f64,
-        var_phigbotd_i: f64,
-        var_phiggat2nd_d: f64,
-        var_phiggatd_i: f64,
-        var_phigrbot_d: f64,
-        var_phigrgat2nd_d: f64,
-        var_phigrgat_d: f64,
-        var_phigrsti_d: f64,
-        var_phigstid_i: f64,
-        var_phitd: f64,
-        var_phitdinv: f64,
-        var_phitrinv: f64,
-        var_pstid_i: f64,
-        var_stfbbtbotd_i: f64,
-        var_stfbbtgatd_i: f64,
-        var_stfbbtstid_i: f64,
-        var_swgat2nd_d: f64,
-        var_tkd_1: f64,
-        var_tkr_1: f64,
-        var_ubigat2nd: f64,
-        var_vbirbotd_i: f64,
-        var_vbirgat2nd: f64,
-        var_vbirgat2nd_d: f64,
-        var_vbirgatd_i: f64,
-        var_vbirstid_i: f64,
-        var_abdrain_i_slot: &mut f64,
-        var_absource_i_slot: &mut f64,
-        var_ad_i_slot: &mut f64,
-        var_as_i_slot: &mut f64,
-        var_atatbot_d_slot: &mut f64,
-        var_atatgat_d_slot: &mut f64,
-        var_atatsti_d_slot: &mut f64,
-        var_btatpartbot_d_slot: &mut f64,
-        var_btatpartgat_d_slot: &mut f64,
-        var_btatpartsti_d_slot: &mut f64,
-        var_cjobot_d_slot: &mut f64,
-        var_cjogat2nd_slot: &mut f64,
-        var_cjogat2nd_d_slot: &mut f64,
-        var_cjogat_d_slot: &mut f64,
-        var_cjosti_d_slot: &mut f64,
-        var_deltaebot_d_slot: &mut f64,
-        var_deltaegat_d_slot: &mut f64,
-        var_deltaesti_d_slot: &mut f64,
-        var_fbbtbot_d_slot: &mut f64,
-        var_fbbtgat_d_slot: &mut f64,
-        var_fbbtgat_d_db0_slot: &mut f64,
-        var_fbbtgat_d_db1_slot: &mut f64,
-        var_fbbtgat_d_db2_slot: &mut f64,
-        var_fbbtgat_d_db3_slot: &mut f64,
-        var_fbbtgat_d_db4_slot: &mut f64,
-        var_fbbtgat_d_db5_slot: &mut f64,
-        var_fbbtgat_d_db6_slot: &mut f64,
-        var_fbbtgat_d_dn0_slot: &mut f64,
-        var_fbbtgat_d_dn1_slot: &mut f64,
-        var_fbbtgat_d_dn10_slot: &mut f64,
-        var_fbbtgat_d_dn11_slot: &mut f64,
-        var_fbbtgat_d_dn2_slot: &mut f64,
-        var_fbbtgat_d_dn3_slot: &mut f64,
-        var_fbbtgat_d_dn4_slot: &mut f64,
-        var_fbbtgat_d_dn5_slot: &mut f64,
-        var_fbbtgat_d_dn6_slot: &mut f64,
-        var_fbbtgat_d_dn7_slot: &mut f64,
-        var_fbbtgat_d_dn8_slot: &mut f64,
-        var_fbbtgat_d_dn9_slot: &mut f64,
-        var_fbbtsti_d_slot: &mut f64,
-        var_ftdbot_d_slot: &mut f64,
-        var_ftdgat2nd_d_slot: &mut f64,
-        var_ftdgat_d_slot: &mut f64,
-        var_ftdsti_d_slot: &mut f64,
-        var_guard28_slot: &mut f64,
-        var_guard29_slot: &mut f64,
-        var_idsatbot_d_slot: &mut f64,
-        var_idsatgat_d_slot: &mut f64,
-        var_idsatsti_d_slot: &mut f64,
-        var_invnf_slot: &mut f64,
-        var_jw_i_slot: &mut f64,
-        var_l_i_slot: &mut f64,
-        var_le_slot: &mut f64,
-        var_lgdrain_i_slot: &mut f64,
-        var_lgsource_i_slot: &mut f64,
-        var_lsdrain_i_slot: &mut f64,
-        var_lssource_i_slot: &mut f64,
-        var_nf_i_slot: &mut f64,
-        var_pd_i_slot: &mut f64,
-        var_phigdbot_d_slot: &mut f64,
-        var_phigdgat2nd_d_slot: &mut f64,
-        var_phigdgat_d_slot: &mut f64,
-        var_phigdsti_d_slot: &mut f64,
-        var_ps_i_slot: &mut f64,
-        var_qpref2bot_d_slot: &mut f64,
-        var_qpref2gat2nd_slot: &mut f64,
-        var_qpref2gat2nd_d_slot: &mut f64,
-        var_qpref2gat_d_slot: &mut f64,
-        var_qpref2sti_d_slot: &mut f64,
-        var_qprefbot_d_slot: &mut f64,
-        var_qprefgat2nd_slot: &mut f64,
-        var_qprefgat2nd_d_slot: &mut f64,
-        var_qprefgat_d_slot: &mut f64,
-        var_qprefsti_d_slot: &mut f64,
-        var_sa_i_slot: &mut f64,
-        var_sb_i_slot: &mut f64,
-        var_sc_i_slot: &mut f64,
-        var_sd_i_slot: &mut f64,
-        var_ubibot_d_slot: &mut f64,
-        var_ubigat2nd_d_slot: &mut f64,
-        var_ubigat_d_slot: &mut f64,
-        var_ubisti_d_slot: &mut f64,
-        var_vbibot_d_slot: &mut f64,
-        var_vbigat2nd_slot: &mut f64,
-        var_vbigat2nd_d_slot: &mut f64,
-        var_vbigat_d_slot: &mut f64,
-        var_vbiinvbot_d_slot: &mut f64,
-        var_vbiinvgat2nd_slot: &mut f64,
-        var_vbiinvgat2nd_d_slot: &mut f64,
-        var_vbiinvgat_d_slot: &mut f64,
-        var_vbiinvsti_d_slot: &mut f64,
-        var_vbisti_d_slot: &mut f64,
-        var_w_i_slot: &mut f64,
-        var_we_slot: &mut f64,
-        var_xgw_i_slot: &mut f64,
-    ) {
-        let mut var_abdrain_i: f64 = *var_abdrain_i_slot;
-        let mut var_absource_i: f64 = *var_absource_i_slot;
-        let mut var_ad_i: f64 = *var_ad_i_slot;
-        let mut var_as_i: f64 = *var_as_i_slot;
-        let mut var_atatbot_d: f64 = *var_atatbot_d_slot;
-        let mut var_atatgat_d: f64 = *var_atatgat_d_slot;
-        let mut var_atatsti_d: f64 = *var_atatsti_d_slot;
-        let mut var_btatpartbot_d: f64 = *var_btatpartbot_d_slot;
-        let mut var_btatpartgat_d: f64 = *var_btatpartgat_d_slot;
-        let mut var_btatpartsti_d: f64 = *var_btatpartsti_d_slot;
-        let mut var_cjobot_d: f64 = *var_cjobot_d_slot;
-        let mut var_cjogat2nd: f64 = *var_cjogat2nd_slot;
-        let mut var_cjogat2nd_d: f64 = *var_cjogat2nd_d_slot;
-        let mut var_cjogat_d: f64 = *var_cjogat_d_slot;
-        let mut var_cjosti_d: f64 = *var_cjosti_d_slot;
-        let mut var_deltaebot_d: f64 = *var_deltaebot_d_slot;
-        let mut var_deltaegat_d: f64 = *var_deltaegat_d_slot;
-        let mut var_deltaesti_d: f64 = *var_deltaesti_d_slot;
-        let mut var_fbbtbot_d: f64 = *var_fbbtbot_d_slot;
-        let mut var_fbbtgat_d: f64 = *var_fbbtgat_d_slot;
-        let mut var_fbbtgat_d_db0: f64 = *var_fbbtgat_d_db0_slot;
-        let mut var_fbbtgat_d_db1: f64 = *var_fbbtgat_d_db1_slot;
-        let mut var_fbbtgat_d_db2: f64 = *var_fbbtgat_d_db2_slot;
-        let mut var_fbbtgat_d_db3: f64 = *var_fbbtgat_d_db3_slot;
-        let mut var_fbbtgat_d_db4: f64 = *var_fbbtgat_d_db4_slot;
-        let mut var_fbbtgat_d_db5: f64 = *var_fbbtgat_d_db5_slot;
-        let mut var_fbbtgat_d_db6: f64 = *var_fbbtgat_d_db6_slot;
-        let mut var_fbbtgat_d_dn0: f64 = *var_fbbtgat_d_dn0_slot;
-        let mut var_fbbtgat_d_dn1: f64 = *var_fbbtgat_d_dn1_slot;
-        let mut var_fbbtgat_d_dn10: f64 = *var_fbbtgat_d_dn10_slot;
-        let mut var_fbbtgat_d_dn11: f64 = *var_fbbtgat_d_dn11_slot;
-        let mut var_fbbtgat_d_dn2: f64 = *var_fbbtgat_d_dn2_slot;
-        let mut var_fbbtgat_d_dn3: f64 = *var_fbbtgat_d_dn3_slot;
-        let mut var_fbbtgat_d_dn4: f64 = *var_fbbtgat_d_dn4_slot;
-        let mut var_fbbtgat_d_dn5: f64 = *var_fbbtgat_d_dn5_slot;
-        let mut var_fbbtgat_d_dn6: f64 = *var_fbbtgat_d_dn6_slot;
-        let mut var_fbbtgat_d_dn7: f64 = *var_fbbtgat_d_dn7_slot;
-        let mut var_fbbtgat_d_dn8: f64 = *var_fbbtgat_d_dn8_slot;
-        let mut var_fbbtgat_d_dn9: f64 = *var_fbbtgat_d_dn9_slot;
-        let mut var_fbbtsti_d: f64 = *var_fbbtsti_d_slot;
-        let mut var_ftdbot_d: f64 = *var_ftdbot_d_slot;
-        let mut var_ftdgat2nd_d: f64 = *var_ftdgat2nd_d_slot;
-        let mut var_ftdgat_d: f64 = *var_ftdgat_d_slot;
-        let mut var_ftdsti_d: f64 = *var_ftdsti_d_slot;
-        let mut var_guard28: f64 = *var_guard28_slot;
-        let mut var_guard29: f64 = *var_guard29_slot;
-        let mut var_idsatbot_d: f64 = *var_idsatbot_d_slot;
-        let mut var_idsatgat_d: f64 = *var_idsatgat_d_slot;
-        let mut var_idsatsti_d: f64 = *var_idsatsti_d_slot;
-        let mut var_invnf: f64 = *var_invnf_slot;
-        let mut var_jw_i: f64 = *var_jw_i_slot;
-        let mut var_l_i: f64 = *var_l_i_slot;
-        let mut var_le: f64 = *var_le_slot;
-        let mut var_lgdrain_i: f64 = *var_lgdrain_i_slot;
-        let mut var_lgsource_i: f64 = *var_lgsource_i_slot;
-        let mut var_lsdrain_i: f64 = *var_lsdrain_i_slot;
-        let mut var_lssource_i: f64 = *var_lssource_i_slot;
-        let mut var_nf_i: f64 = *var_nf_i_slot;
-        let mut var_pd_i: f64 = *var_pd_i_slot;
-        let mut var_phigdbot_d: f64 = *var_phigdbot_d_slot;
-        let mut var_phigdgat2nd_d: f64 = *var_phigdgat2nd_d_slot;
-        let mut var_phigdgat_d: f64 = *var_phigdgat_d_slot;
-        let mut var_phigdsti_d: f64 = *var_phigdsti_d_slot;
-        let mut var_ps_i: f64 = *var_ps_i_slot;
-        let mut var_qpref2bot_d: f64 = *var_qpref2bot_d_slot;
-        let mut var_qpref2gat2nd: f64 = *var_qpref2gat2nd_slot;
-        let mut var_qpref2gat2nd_d: f64 = *var_qpref2gat2nd_d_slot;
-        let mut var_qpref2gat_d: f64 = *var_qpref2gat_d_slot;
-        let mut var_qpref2sti_d: f64 = *var_qpref2sti_d_slot;
-        let mut var_qprefbot_d: f64 = *var_qprefbot_d_slot;
-        let mut var_qprefgat2nd: f64 = *var_qprefgat2nd_slot;
-        let mut var_qprefgat2nd_d: f64 = *var_qprefgat2nd_d_slot;
-        let mut var_qprefgat_d: f64 = *var_qprefgat_d_slot;
-        let mut var_qprefsti_d: f64 = *var_qprefsti_d_slot;
-        let mut var_sa_i: f64 = *var_sa_i_slot;
-        let mut var_sb_i: f64 = *var_sb_i_slot;
-        let mut var_sc_i: f64 = *var_sc_i_slot;
-        let mut var_sd_i: f64 = *var_sd_i_slot;
-        let mut var_ubibot_d: f64 = *var_ubibot_d_slot;
-        let mut var_ubigat2nd_d: f64 = *var_ubigat2nd_d_slot;
-        let mut var_ubigat_d: f64 = *var_ubigat_d_slot;
-        let mut var_ubisti_d: f64 = *var_ubisti_d_slot;
-        let mut var_vbibot_d: f64 = *var_vbibot_d_slot;
-        let mut var_vbigat2nd: f64 = *var_vbigat2nd_slot;
-        let mut var_vbigat2nd_d: f64 = *var_vbigat2nd_d_slot;
-        let mut var_vbigat_d: f64 = *var_vbigat_d_slot;
-        let mut var_vbiinvbot_d: f64 = *var_vbiinvbot_d_slot;
-        let mut var_vbiinvgat2nd: f64 = *var_vbiinvgat2nd_slot;
-        let mut var_vbiinvgat2nd_d: f64 = *var_vbiinvgat2nd_d_slot;
-        let mut var_vbiinvgat_d: f64 = *var_vbiinvgat_d_slot;
-        let mut var_vbiinvsti_d: f64 = *var_vbiinvsti_d_slot;
-        let mut var_vbisti_d: f64 = *var_vbisti_d_slot;
-        let mut var_w_i: f64 = *var_w_i_slot;
-        let mut var_we: f64 = *var_we_slot;
-        let mut var_xgw_i: f64 = *var_xgw_i_slot;
 
         let (assign2720_e2966,) = {
     if (var_guard27 != 0.0) {
@@ -3481,6 +2879,305 @@ impl Instance {
         let assign2820_e3046: f64 = (assign2820_e3045).exp();
         let assign2820_e3047: f64 = (assign2820_e3036 * assign2820_e3046);
         var_ftdgat_d = assign2820_e3047;
+
+        *var_atatbot_slot = var_atatbot;
+        *var_atatgat_slot = var_atatgat;
+        *var_atatsti_slot = var_atatsti;
+        *var_auxt_slot = var_auxt;
+        *var_btatpartbot_slot = var_btatpartbot;
+        *var_btatpartgat_slot = var_btatpartgat;
+        *var_btatpartsti_slot = var_btatpartsti;
+        *var_cjobot_slot = var_cjobot;
+        *var_cjogat_slot = var_cjogat;
+        *var_cjogat2nd_slot = var_cjogat2nd;
+        *var_cjosti_slot = var_cjosti;
+        *var_delt_slot = var_delt;
+        *var_delta_slot = var_delta;
+        *var_deltaebot_slot = var_deltaebot;
+        *var_deltaegat_slot = var_deltaegat;
+        *var_deltaesti_slot = var_deltaesti;
+        *var_deltaphigd_slot = var_deltaphigd;
+        *var_eg_slot = var_eg;
+        *var_fbbtbot_slot = var_fbbtbot;
+        *var_fbbtgat_slot = var_fbbtgat;
+        *var_fbbtgat_dn5_slot = var_fbbtgat_dn5;
+        *var_fbbtgat_dn6_slot = var_fbbtgat_dn6;
+        *var_fbbtgat_dn7_slot = var_fbbtgat_dn7;
+        *var_fbbtgat_dn8_slot = var_fbbtgat_dn8;
+        *var_fbbtsti_slot = var_fbbtsti;
+        *var_ftdbot_slot = var_ftdbot;
+        *var_ftdbot_d_slot = var_ftdbot_d;
+        *var_ftdgat_slot = var_ftdgat;
+        *var_ftdgat2nd_slot = var_ftdgat2nd;
+        *var_ftdgat_d_slot = var_ftdgat_d;
+        *var_ftdsti_slot = var_ftdsti;
+        *var_ftdsti_d_slot = var_ftdsti_d;
+        *var_guard27_slot = var_guard27;
+        *var_idsatbot_slot = var_idsatbot;
+        *var_idsatgat_slot = var_idsatgat;
+        *var_idsatsti_slot = var_idsatsti;
+        *var_inv_phit_slot = var_inv_phit;
+        *var_inv_phita_slot = var_inv_phita;
+        *var_ln_rtn_slot = var_ln_rtn;
+        *var_nt0_slot = var_nt0;
+        *var_one_minus_pgat2nd_d_slot = var_one_minus_pgat2nd_d;
+        *var_one_over_one_minus_pgat2nd_d_slot = var_one_over_one_minus_pgat2nd_d;
+        *var_phibfac_slot = var_phibfac;
+        *var_phigdbot_slot = var_phigdbot;
+        *var_phigdbot_d_slot = var_phigdbot_d;
+        *var_phigdgat_slot = var_phigdgat;
+        *var_phigdgat2nd_slot = var_phigdgat2nd;
+        *var_phigdgat_d_slot = var_phigdgat_d;
+        *var_phigdsti_slot = var_phigdsti;
+        *var_phigdsti_d_slot = var_phigdsti_d;
+        *var_phigrgat2nd_d_slot = var_phigrgat2nd_d;
+        *var_phit_slot = var_phit;
+        *var_phita_slot = var_phita;
+        *var_phitd_slot = var_phitd;
+        *var_phitdinv_slot = var_phitdinv;
+        *var_qpref2bot_slot = var_qpref2bot;
+        *var_qpref2gat_slot = var_qpref2gat;
+        *var_qpref2gat2nd_slot = var_qpref2gat2nd;
+        *var_qpref2sti_slot = var_qpref2sti;
+        *var_qprefbot_slot = var_qprefbot;
+        *var_qprefgat_slot = var_qprefgat;
+        *var_qprefgat2nd_slot = var_qprefgat2nd;
+        *var_qprefsti_slot = var_qprefsti;
+        *var_rta_slot = var_rta;
+        *var_rtn_slot = var_rtn;
+        *var_tka_slot = var_tka;
+        *var_tkd_slot = var_tkd;
+        *var_tkd_1_slot = var_tkd_1;
+        *var_tkd_sq_slot = var_tkd_sq;
+        *var_ubibot_slot = var_ubibot;
+        *var_ubigat_slot = var_ubigat;
+        *var_ubigat2nd_slot = var_ubigat2nd;
+        *var_ubisti_slot = var_ubisti;
+        *var_vbibot_slot = var_vbibot;
+        *var_vbigat_slot = var_vbigat;
+        *var_vbigat2nd_slot = var_vbigat2nd;
+        *var_vbiinvbot_slot = var_vbiinvbot;
+        *var_vbiinvgat_slot = var_vbiinvgat;
+        *var_vbiinvgat2nd_slot = var_vbiinvgat2nd;
+        *var_vbiinvsti_slot = var_vbiinvsti;
+        *var_vbisti_slot = var_vbisti;
+    }
+
+    pub(super) fn stamp_transient_block_4(
+        p: &Parameters,
+        var_auxt: f64,
+        var_cjorbotd_i: f64,
+        var_cjorgat2nd_d: f64,
+        var_cjorgatd_i: f64,
+        var_cjorstid_i: f64,
+        var_deltaphigd: f64,
+        var_fbbtrbotd_i: f64,
+        var_fbbtrgatd_i: f64,
+        var_fbbtrstid_i: f64,
+        var_ftdbot_d: f64,
+        var_ftdgat_d: f64,
+        var_ftdsti_d: f64,
+        var_idsatrbotd_i: f64,
+        var_idsatrgatd_i: f64,
+        var_idsatrstid_i: f64,
+        var_mefftatbotd_i: f64,
+        var_mefftatgatd_i: f64,
+        var_mefftatstid_i: f64,
+        var_one_over_one_minus_pbot_d: f64,
+        var_one_over_one_minus_pgat2nd_d: f64,
+        var_one_over_one_minus_pgat_d: f64,
+        var_one_over_one_minus_psti_d: f64,
+        var_pbotd_i: f64,
+        var_pgat2nd_d: f64,
+        var_pgatd_i: f64,
+        var_phigdbot_d: f64,
+        var_phigdgat_d: f64,
+        var_phigdsti_d: f64,
+        var_phiggat2nd_d: f64,
+        var_phigrgat2nd_d: f64,
+        var_phitd: f64,
+        var_phitdinv: f64,
+        var_phitrinv: f64,
+        var_pstid_i: f64,
+        var_stfbbtbotd_i: f64,
+        var_stfbbtgatd_i: f64,
+        var_stfbbtstid_i: f64,
+        var_swgat2nd_d: f64,
+        var_tkd_1: f64,
+        var_tkr_1: f64,
+        var_vbirbotd_i: f64,
+        var_vbirgat2nd_d: f64,
+        var_vbirgatd_i: f64,
+        var_vbirstid_i: f64,
+        var_abdrain_i_slot: &mut f64,
+        var_absource_i_slot: &mut f64,
+        var_ad_i_slot: &mut f64,
+        var_as_i_slot: &mut f64,
+        var_atatbot_d_slot: &mut f64,
+        var_atatgat_d_slot: &mut f64,
+        var_atatsti_d_slot: &mut f64,
+        var_btatpartbot_d_slot: &mut f64,
+        var_btatpartgat_d_slot: &mut f64,
+        var_btatpartsti_d_slot: &mut f64,
+        var_cjobot_d_slot: &mut f64,
+        var_cjogat2nd_d_slot: &mut f64,
+        var_cjogat_d_slot: &mut f64,
+        var_cjosti_d_slot: &mut f64,
+        var_dellps_slot: &mut f64,
+        var_deltaebot_d_slot: &mut f64,
+        var_deltaegat_d_slot: &mut f64,
+        var_deltaesti_d_slot: &mut f64,
+        var_delwod_slot: &mut f64,
+        var_fbbtbot_d_slot: &mut f64,
+        var_fbbtgat_d_slot: &mut f64,
+        var_fbbtgat_d_dn5_slot: &mut f64,
+        var_fbbtgat_d_dn6_slot: &mut f64,
+        var_fbbtgat_d_dn7_slot: &mut f64,
+        var_fbbtgat_d_dn8_slot: &mut f64,
+        var_fbbtsti_d_slot: &mut f64,
+        var_ftdgat2nd_d_slot: &mut f64,
+        var_guard28_slot: &mut f64,
+        var_guard29_slot: &mut f64,
+        var_iae_slot: &mut f64,
+        var_idsatbot_d_slot: &mut f64,
+        var_idsatgat_d_slot: &mut f64,
+        var_idsatsti_d_slot: &mut f64,
+        var_iiae_slot: &mut f64,
+        var_iiwe_slot: &mut f64,
+        var_il_slot: &mut f64,
+        var_ile_slot: &mut f64,
+        var_ile2_slot: &mut f64,
+        var_invnf_slot: &mut f64,
+        var_iw_slot: &mut f64,
+        var_iwe_slot: &mut f64,
+        var_jw_i_slot: &mut f64,
+        var_l_i_slot: &mut f64,
+        var_le_slot: &mut f64,
+        var_lecv_slot: &mut f64,
+        var_lgdrain_i_slot: &mut f64,
+        var_lgsource_i_slot: &mut f64,
+        var_lsdrain_i_slot: &mut f64,
+        var_lssource_i_slot: &mut f64,
+        var_nf_i_slot: &mut f64,
+        var_ngcon_i_slot: &mut f64,
+        var_pd_i_slot: &mut f64,
+        var_phigdgat2nd_d_slot: &mut f64,
+        var_ps_i_slot: &mut f64,
+        var_qpref2bot_d_slot: &mut f64,
+        var_qpref2gat2nd_d_slot: &mut f64,
+        var_qpref2gat_d_slot: &mut f64,
+        var_qpref2sti_d_slot: &mut f64,
+        var_qprefbot_d_slot: &mut f64,
+        var_qprefgat2nd_d_slot: &mut f64,
+        var_qprefgat_d_slot: &mut f64,
+        var_qprefsti_d_slot: &mut f64,
+        var_sa_i_slot: &mut f64,
+        var_sb_i_slot: &mut f64,
+        var_sc_i_slot: &mut f64,
+        var_sca_i_slot: &mut f64,
+        var_scb_i_slot: &mut f64,
+        var_scc_i_slot: &mut f64,
+        var_sd_i_slot: &mut f64,
+        var_ubibot_d_slot: &mut f64,
+        var_ubigat2nd_d_slot: &mut f64,
+        var_ubigat_d_slot: &mut f64,
+        var_ubisti_d_slot: &mut f64,
+        var_vbibot_d_slot: &mut f64,
+        var_vbigat2nd_d_slot: &mut f64,
+        var_vbigat_d_slot: &mut f64,
+        var_vbiinvbot_d_slot: &mut f64,
+        var_vbiinvgat2nd_d_slot: &mut f64,
+        var_vbiinvgat_d_slot: &mut f64,
+        var_vbiinvsti_d_slot: &mut f64,
+        var_vbisti_d_slot: &mut f64,
+        var_w_i_slot: &mut f64,
+        var_we_slot: &mut f64,
+        var_xgw_i_slot: &mut f64,
+    ) {
+        let mut var_abdrain_i: f64 = *var_abdrain_i_slot;
+        let mut var_absource_i: f64 = *var_absource_i_slot;
+        let mut var_ad_i: f64 = *var_ad_i_slot;
+        let mut var_as_i: f64 = *var_as_i_slot;
+        let mut var_atatbot_d: f64 = *var_atatbot_d_slot;
+        let mut var_atatgat_d: f64 = *var_atatgat_d_slot;
+        let mut var_atatsti_d: f64 = *var_atatsti_d_slot;
+        let mut var_btatpartbot_d: f64 = *var_btatpartbot_d_slot;
+        let mut var_btatpartgat_d: f64 = *var_btatpartgat_d_slot;
+        let mut var_btatpartsti_d: f64 = *var_btatpartsti_d_slot;
+        let mut var_cjobot_d: f64 = *var_cjobot_d_slot;
+        let mut var_cjogat2nd_d: f64 = *var_cjogat2nd_d_slot;
+        let mut var_cjogat_d: f64 = *var_cjogat_d_slot;
+        let mut var_cjosti_d: f64 = *var_cjosti_d_slot;
+        let mut var_dellps: f64 = *var_dellps_slot;
+        let mut var_deltaebot_d: f64 = *var_deltaebot_d_slot;
+        let mut var_deltaegat_d: f64 = *var_deltaegat_d_slot;
+        let mut var_deltaesti_d: f64 = *var_deltaesti_d_slot;
+        let mut var_delwod: f64 = *var_delwod_slot;
+        let mut var_fbbtbot_d: f64 = *var_fbbtbot_d_slot;
+        let mut var_fbbtgat_d: f64 = *var_fbbtgat_d_slot;
+        let mut var_fbbtgat_d_dn5: f64 = *var_fbbtgat_d_dn5_slot;
+        let mut var_fbbtgat_d_dn6: f64 = *var_fbbtgat_d_dn6_slot;
+        let mut var_fbbtgat_d_dn7: f64 = *var_fbbtgat_d_dn7_slot;
+        let mut var_fbbtgat_d_dn8: f64 = *var_fbbtgat_d_dn8_slot;
+        let mut var_fbbtsti_d: f64 = *var_fbbtsti_d_slot;
+        let mut var_ftdgat2nd_d: f64 = *var_ftdgat2nd_d_slot;
+        let mut var_guard28: f64 = *var_guard28_slot;
+        let mut var_guard29: f64 = *var_guard29_slot;
+        let mut var_iae: f64 = *var_iae_slot;
+        let mut var_idsatbot_d: f64 = *var_idsatbot_d_slot;
+        let mut var_idsatgat_d: f64 = *var_idsatgat_d_slot;
+        let mut var_idsatsti_d: f64 = *var_idsatsti_d_slot;
+        let mut var_iiae: f64 = *var_iiae_slot;
+        let mut var_iiwe: f64 = *var_iiwe_slot;
+        let mut var_il: f64 = *var_il_slot;
+        let mut var_ile: f64 = *var_ile_slot;
+        let mut var_ile2: f64 = *var_ile2_slot;
+        let mut var_invnf: f64 = *var_invnf_slot;
+        let mut var_iw: f64 = *var_iw_slot;
+        let mut var_iwe: f64 = *var_iwe_slot;
+        let mut var_jw_i: f64 = *var_jw_i_slot;
+        let mut var_l_i: f64 = *var_l_i_slot;
+        let mut var_le: f64 = *var_le_slot;
+        let mut var_lecv: f64 = *var_lecv_slot;
+        let mut var_lgdrain_i: f64 = *var_lgdrain_i_slot;
+        let mut var_lgsource_i: f64 = *var_lgsource_i_slot;
+        let mut var_lsdrain_i: f64 = *var_lsdrain_i_slot;
+        let mut var_lssource_i: f64 = *var_lssource_i_slot;
+        let mut var_nf_i: f64 = *var_nf_i_slot;
+        let mut var_ngcon_i: f64 = *var_ngcon_i_slot;
+        let mut var_pd_i: f64 = *var_pd_i_slot;
+        let mut var_phigdgat2nd_d: f64 = *var_phigdgat2nd_d_slot;
+        let mut var_ps_i: f64 = *var_ps_i_slot;
+        let mut var_qpref2bot_d: f64 = *var_qpref2bot_d_slot;
+        let mut var_qpref2gat2nd_d: f64 = *var_qpref2gat2nd_d_slot;
+        let mut var_qpref2gat_d: f64 = *var_qpref2gat_d_slot;
+        let mut var_qpref2sti_d: f64 = *var_qpref2sti_d_slot;
+        let mut var_qprefbot_d: f64 = *var_qprefbot_d_slot;
+        let mut var_qprefgat2nd_d: f64 = *var_qprefgat2nd_d_slot;
+        let mut var_qprefgat_d: f64 = *var_qprefgat_d_slot;
+        let mut var_qprefsti_d: f64 = *var_qprefsti_d_slot;
+        let mut var_sa_i: f64 = *var_sa_i_slot;
+        let mut var_sb_i: f64 = *var_sb_i_slot;
+        let mut var_sc_i: f64 = *var_sc_i_slot;
+        let mut var_sca_i: f64 = *var_sca_i_slot;
+        let mut var_scb_i: f64 = *var_scb_i_slot;
+        let mut var_scc_i: f64 = *var_scc_i_slot;
+        let mut var_sd_i: f64 = *var_sd_i_slot;
+        let mut var_ubibot_d: f64 = *var_ubibot_d_slot;
+        let mut var_ubigat2nd_d: f64 = *var_ubigat2nd_d_slot;
+        let mut var_ubigat_d: f64 = *var_ubigat_d_slot;
+        let mut var_ubisti_d: f64 = *var_ubisti_d_slot;
+        let mut var_vbibot_d: f64 = *var_vbibot_d_slot;
+        let mut var_vbigat2nd_d: f64 = *var_vbigat2nd_d_slot;
+        let mut var_vbigat_d: f64 = *var_vbigat_d_slot;
+        let mut var_vbiinvbot_d: f64 = *var_vbiinvbot_d_slot;
+        let mut var_vbiinvgat2nd_d: f64 = *var_vbiinvgat2nd_d_slot;
+        let mut var_vbiinvgat_d: f64 = *var_vbiinvgat_d_slot;
+        let mut var_vbiinvsti_d: f64 = *var_vbiinvsti_d_slot;
+        let mut var_vbisti_d: f64 = *var_vbisti_d_slot;
+        let mut var_w_i: f64 = *var_w_i_slot;
+        let mut var_we: f64 = *var_we_slot;
+        let mut var_xgw_i: f64 = *var_xgw_i_slot;
 
         let assign2830_e3050: f64 = (var_idsatrbotd_i * var_ftdbot_d);
         let assign2830_e3052: f64 = (assign2830_e3050 * var_ftdbot_d);
@@ -3658,25 +3355,10 @@ impl Instance {
         let assign3150_e3289: f64 = (1.0 + assign3150_e3288);
         let assign3150_e3290: f64 = (var_fbbtrgatd_i * assign3150_e3289);
         var_fbbtgat_d = assign3150_e3290;
-        var_fbbtgat_d_dn0 = 0.0;
-        var_fbbtgat_d_dn1 = 0.0;
-        var_fbbtgat_d_dn2 = 0.0;
-        var_fbbtgat_d_dn3 = 0.0;
-        var_fbbtgat_d_dn4 = 0.0;
         var_fbbtgat_d_dn5 = 0.0;
         var_fbbtgat_d_dn6 = 0.0;
         var_fbbtgat_d_dn7 = 0.0;
         var_fbbtgat_d_dn8 = 0.0;
-        var_fbbtgat_d_dn9 = 0.0;
-        var_fbbtgat_d_dn10 = 0.0;
-        var_fbbtgat_d_dn11 = 0.0;
-        var_fbbtgat_d_db0 = 0.0;
-        var_fbbtgat_d_db1 = 0.0;
-        var_fbbtgat_d_db2 = 0.0;
-        var_fbbtgat_d_db3 = 0.0;
-        var_fbbtgat_d_db4 = 0.0;
-        var_fbbtgat_d_db5 = 0.0;
-        var_fbbtgat_d_db6 = 0.0;
 
         let (assign3160_e3296,) = {
     if (var_fbbtbot_d > 0.0) {
@@ -3696,33 +3378,18 @@ impl Instance {
 };
         var_fbbtsti_d = assign3170_e3302;
 
-        let (assign3180_e3308, assign3180_e3308_d_n0, assign3180_e3308_d_n1, assign3180_e3308_d_n2, assign3180_e3308_d_n3, assign3180_e3308_d_n4, assign3180_e3308_d_n5, assign3180_e3308_d_n6, assign3180_e3308_d_n7, assign3180_e3308_d_n8, assign3180_e3308_d_n9, assign3180_e3308_d_n10, assign3180_e3308_d_n11, assign3180_e3308_d_b0, assign3180_e3308_d_b1, assign3180_e3308_d_b2, assign3180_e3308_d_b3, assign3180_e3308_d_b4, assign3180_e3308_d_b5, assign3180_e3308_d_b6,) = {
+        let (assign3180_e3308, assign3180_e3308_d_n5, assign3180_e3308_d_n6, assign3180_e3308_d_n7, assign3180_e3308_d_n8,) = {
     if (var_fbbtgat_d > 0.0) {
-        (var_fbbtgat_d, var_fbbtgat_d_dn0, var_fbbtgat_d_dn1, var_fbbtgat_d_dn2, var_fbbtgat_d_dn3, var_fbbtgat_d_dn4, var_fbbtgat_d_dn5, var_fbbtgat_d_dn6, var_fbbtgat_d_dn7, var_fbbtgat_d_dn8, var_fbbtgat_d_dn9, var_fbbtgat_d_dn10, var_fbbtgat_d_dn11, var_fbbtgat_d_db0, var_fbbtgat_d_db1, var_fbbtgat_d_db2, var_fbbtgat_d_db3, var_fbbtgat_d_db4, var_fbbtgat_d_db5, var_fbbtgat_d_db6,)
+        (var_fbbtgat_d, var_fbbtgat_d_dn5, var_fbbtgat_d_dn6, var_fbbtgat_d_dn7, var_fbbtgat_d_dn8,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
         var_fbbtgat_d = assign3180_e3308;
-        var_fbbtgat_d_dn0 = assign3180_e3308_d_n0;
-        var_fbbtgat_d_dn1 = assign3180_e3308_d_n1;
-        var_fbbtgat_d_dn2 = assign3180_e3308_d_n2;
-        var_fbbtgat_d_dn3 = assign3180_e3308_d_n3;
-        var_fbbtgat_d_dn4 = assign3180_e3308_d_n4;
         var_fbbtgat_d_dn5 = assign3180_e3308_d_n5;
         var_fbbtgat_d_dn6 = assign3180_e3308_d_n6;
         var_fbbtgat_d_dn7 = assign3180_e3308_d_n7;
         var_fbbtgat_d_dn8 = assign3180_e3308_d_n8;
-        var_fbbtgat_d_dn9 = assign3180_e3308_d_n9;
-        var_fbbtgat_d_dn10 = assign3180_e3308_d_n10;
-        var_fbbtgat_d_dn11 = assign3180_e3308_d_n11;
-        var_fbbtgat_d_db0 = assign3180_e3308_d_b0;
-        var_fbbtgat_d_db1 = assign3180_e3308_d_b1;
-        var_fbbtgat_d_db2 = assign3180_e3308_d_b2;
-        var_fbbtgat_d_db3 = assign3180_e3308_d_b3;
-        var_fbbtgat_d_db4 = assign3180_e3308_d_b4;
-        var_fbbtgat_d_db5 = assign3180_e3308_d_b5;
-        var_fbbtgat_d_db6 = assign3180_e3308_d_b6;
 
         let assign3190_e3311: f64 = if var_swgat2nd_d == 1.0 { 1.0 } else { 0.0 };
         var_guard28 = assign3190_e3311;
@@ -3889,385 +3556,6 @@ impl Instance {
 };
         var_nf_i = assign3510_e3427;
 
-        *var_abdrain_i_slot = var_abdrain_i;
-        *var_absource_i_slot = var_absource_i;
-        *var_ad_i_slot = var_ad_i;
-        *var_as_i_slot = var_as_i;
-        *var_atatbot_d_slot = var_atatbot_d;
-        *var_atatgat_d_slot = var_atatgat_d;
-        *var_atatsti_d_slot = var_atatsti_d;
-        *var_btatpartbot_d_slot = var_btatpartbot_d;
-        *var_btatpartgat_d_slot = var_btatpartgat_d;
-        *var_btatpartsti_d_slot = var_btatpartsti_d;
-        *var_cjobot_d_slot = var_cjobot_d;
-        *var_cjogat2nd_slot = var_cjogat2nd;
-        *var_cjogat2nd_d_slot = var_cjogat2nd_d;
-        *var_cjogat_d_slot = var_cjogat_d;
-        *var_cjosti_d_slot = var_cjosti_d;
-        *var_deltaebot_d_slot = var_deltaebot_d;
-        *var_deltaegat_d_slot = var_deltaegat_d;
-        *var_deltaesti_d_slot = var_deltaesti_d;
-        *var_fbbtbot_d_slot = var_fbbtbot_d;
-        *var_fbbtgat_d_slot = var_fbbtgat_d;
-        *var_fbbtgat_d_db0_slot = var_fbbtgat_d_db0;
-        *var_fbbtgat_d_db1_slot = var_fbbtgat_d_db1;
-        *var_fbbtgat_d_db2_slot = var_fbbtgat_d_db2;
-        *var_fbbtgat_d_db3_slot = var_fbbtgat_d_db3;
-        *var_fbbtgat_d_db4_slot = var_fbbtgat_d_db4;
-        *var_fbbtgat_d_db5_slot = var_fbbtgat_d_db5;
-        *var_fbbtgat_d_db6_slot = var_fbbtgat_d_db6;
-        *var_fbbtgat_d_dn0_slot = var_fbbtgat_d_dn0;
-        *var_fbbtgat_d_dn1_slot = var_fbbtgat_d_dn1;
-        *var_fbbtgat_d_dn10_slot = var_fbbtgat_d_dn10;
-        *var_fbbtgat_d_dn11_slot = var_fbbtgat_d_dn11;
-        *var_fbbtgat_d_dn2_slot = var_fbbtgat_d_dn2;
-        *var_fbbtgat_d_dn3_slot = var_fbbtgat_d_dn3;
-        *var_fbbtgat_d_dn4_slot = var_fbbtgat_d_dn4;
-        *var_fbbtgat_d_dn5_slot = var_fbbtgat_d_dn5;
-        *var_fbbtgat_d_dn6_slot = var_fbbtgat_d_dn6;
-        *var_fbbtgat_d_dn7_slot = var_fbbtgat_d_dn7;
-        *var_fbbtgat_d_dn8_slot = var_fbbtgat_d_dn8;
-        *var_fbbtgat_d_dn9_slot = var_fbbtgat_d_dn9;
-        *var_fbbtsti_d_slot = var_fbbtsti_d;
-        *var_ftdbot_d_slot = var_ftdbot_d;
-        *var_ftdgat2nd_d_slot = var_ftdgat2nd_d;
-        *var_ftdgat_d_slot = var_ftdgat_d;
-        *var_ftdsti_d_slot = var_ftdsti_d;
-        *var_guard28_slot = var_guard28;
-        *var_guard29_slot = var_guard29;
-        *var_idsatbot_d_slot = var_idsatbot_d;
-        *var_idsatgat_d_slot = var_idsatgat_d;
-        *var_idsatsti_d_slot = var_idsatsti_d;
-        *var_invnf_slot = var_invnf;
-        *var_jw_i_slot = var_jw_i;
-        *var_l_i_slot = var_l_i;
-        *var_le_slot = var_le;
-        *var_lgdrain_i_slot = var_lgdrain_i;
-        *var_lgsource_i_slot = var_lgsource_i;
-        *var_lsdrain_i_slot = var_lsdrain_i;
-        *var_lssource_i_slot = var_lssource_i;
-        *var_nf_i_slot = var_nf_i;
-        *var_pd_i_slot = var_pd_i;
-        *var_phigdbot_d_slot = var_phigdbot_d;
-        *var_phigdgat2nd_d_slot = var_phigdgat2nd_d;
-        *var_phigdgat_d_slot = var_phigdgat_d;
-        *var_phigdsti_d_slot = var_phigdsti_d;
-        *var_ps_i_slot = var_ps_i;
-        *var_qpref2bot_d_slot = var_qpref2bot_d;
-        *var_qpref2gat2nd_slot = var_qpref2gat2nd;
-        *var_qpref2gat2nd_d_slot = var_qpref2gat2nd_d;
-        *var_qpref2gat_d_slot = var_qpref2gat_d;
-        *var_qpref2sti_d_slot = var_qpref2sti_d;
-        *var_qprefbot_d_slot = var_qprefbot_d;
-        *var_qprefgat2nd_slot = var_qprefgat2nd;
-        *var_qprefgat2nd_d_slot = var_qprefgat2nd_d;
-        *var_qprefgat_d_slot = var_qprefgat_d;
-        *var_qprefsti_d_slot = var_qprefsti_d;
-        *var_sa_i_slot = var_sa_i;
-        *var_sb_i_slot = var_sb_i;
-        *var_sc_i_slot = var_sc_i;
-        *var_sd_i_slot = var_sd_i;
-        *var_ubibot_d_slot = var_ubibot_d;
-        *var_ubigat2nd_d_slot = var_ubigat2nd_d;
-        *var_ubigat_d_slot = var_ubigat_d;
-        *var_ubisti_d_slot = var_ubisti_d;
-        *var_vbibot_d_slot = var_vbibot_d;
-        *var_vbigat2nd_slot = var_vbigat2nd;
-        *var_vbigat2nd_d_slot = var_vbigat2nd_d;
-        *var_vbigat_d_slot = var_vbigat_d;
-        *var_vbiinvbot_d_slot = var_vbiinvbot_d;
-        *var_vbiinvgat2nd_slot = var_vbiinvgat2nd;
-        *var_vbiinvgat2nd_d_slot = var_vbiinvgat2nd_d;
-        *var_vbiinvgat_d_slot = var_vbiinvgat_d;
-        *var_vbiinvsti_d_slot = var_vbiinvsti_d;
-        *var_vbisti_d_slot = var_vbisti_d;
-        *var_w_i_slot = var_w_i;
-        *var_we_slot = var_we;
-        *var_xgw_i_slot = var_xgw_i;
-    }
-
-    pub(super) fn stamp_transient_block_5(
-        p: &Parameters,
-        param_given: &[bool; Instance::PARAMETER_COUNT],
-        var_guard29: f64,
-        var_l_i: f64,
-        var_xgw_i: f64,
-        var_a1_p_slot: &mut f64,
-        var_a2_p_slot: &mut f64,
-        var_a3_p_slot: &mut f64,
-        var_a4_p_slot: &mut f64,
-        var_agidl_p_slot: &mut f64,
-        var_agidld_p_slot: &mut f64,
-        var_alp1_p_slot: &mut f64,
-        var_alp1ac_p_slot: &mut f64,
-        var_alp2_p_slot: &mut f64,
-        var_alp_p_slot: &mut f64,
-        var_alpac_p_slot: &mut f64,
-        var_ax_p_slot: &mut f64,
-        var_axac_p_slot: &mut f64,
-        var_axinr_p_slot: &mut f64,
-        var_betn_p_slot: &mut f64,
-        var_bgidl_p_slot: &mut f64,
-        var_bgidld_p_slot: &mut f64,
-        var_cf_p_slot: &mut f64,
-        var_cfb_p_slot: &mut f64,
-        var_cfd_p_slot: &mut f64,
-        var_cfr_p_slot: &mut f64,
-        var_cfrd_p_slot: &mut f64,
-        var_cgbov_p_slot: &mut f64,
-        var_cgidl_p_slot: &mut f64,
-        var_cgidld_p_slot: &mut f64,
-        var_cgov_p_slot: &mut f64,
-        var_cgovaccg_p_slot: &mut f64,
-        var_cgovd_p_slot: &mut f64,
-        var_chib_p_slot: &mut f64,
-        var_cinr_p_slot: &mut f64,
-        var_cinrd_p_slot: &mut f64,
-        var_cox_p_slot: &mut f64,
-        var_cs_p_slot: &mut f64,
-        var_ct_p_slot: &mut f64,
-        var_ctb_p_slot: &mut f64,
-        var_ctg_p_slot: &mut f64,
-        var_dellps_slot: &mut f64,
-        var_delvtac_p_slot: &mut f64,
-        var_delwod_slot: &mut f64,
-        var_dphib_p_slot: &mut f64,
-        var_dvfbinr_p_slot: &mut f64,
-        var_dvsbnud_p_slot: &mut f64,
-        var_epsrox_p_slot: &mut f64,
-        var_facneffac_p_slot: &mut f64,
-        var_fcgovacc_p_slot: &mut f64,
-        var_fcgovaccd_p_slot: &mut f64,
-        var_fcinracc_p_slot: &mut f64,
-        var_fcinrdep_p_slot: &mut f64,
-        var_feta_p_slot: &mut f64,
-        var_fnt_p_slot: &mut f64,
-        var_fntexc_p_slot: &mut f64,
-        var_gc2_p_slot: &mut f64,
-        var_gc2ov_p_slot: &mut f64,
-        var_gc2ovd_p_slot: &mut f64,
-        var_gc3_p_slot: &mut f64,
-        var_gc3ov_p_slot: &mut f64,
-        var_gc3ovd_p_slot: &mut f64,
-        var_gco_p_slot: &mut f64,
-        var_gfacnud_p_slot: &mut f64,
-        var_guard30_slot: &mut f64,
-        var_guard31_slot: &mut f64,
-        var_guard32_slot: &mut f64,
-        var_guard33_slot: &mut f64,
-        var_guard34_slot: &mut f64,
-        var_guard35_slot: &mut f64,
-        var_iae_slot: &mut f64,
-        var_iginv_p_slot: &mut f64,
-        var_igov_p_slot: &mut f64,
-        var_igovd_p_slot: &mut f64,
-        var_iiae_slot: &mut f64,
-        var_iilcv_slot: &mut f64,
-        var_iiwcv_slot: &mut f64,
-        var_iiwe_slot: &mut f64,
-        var_iiwecv_slot: &mut f64,
-        var_il_slot: &mut f64,
-        var_ile_slot: &mut f64,
-        var_ile2_slot: &mut f64,
-        var_imaxii_p_slot: &mut f64,
-        var_invnf_slot: &mut f64,
-        var_iw_slot: &mut f64,
-        var_iwe_slot: &mut f64,
-        var_l_f_slot: &mut f64,
-        var_l_slif_slot: &mut f64,
-        var_lcv_slot: &mut f64,
-        var_le_slot: &mut f64,
-        var_lecv_slot: &mut f64,
-        var_mue_p_slot: &mut f64,
-        var_neff_p_slot: &mut f64,
-        var_nf_i_slot: &mut f64,
-        var_ngcon_i_slot: &mut f64,
-        var_nov_p_slot: &mut f64,
-        var_novd_p_slot: &mut f64,
-        var_np_p_slot: &mut f64,
-        var_psce_p_slot: &mut f64,
-        var_psceb_p_slot: &mut f64,
-        var_psced_p_slot: &mut f64,
-        var_rs_p_slot: &mut f64,
-        var_rsb_p_slot: &mut f64,
-        var_rsg_p_slot: &mut f64,
-        var_sca_i_slot: &mut f64,
-        var_scb_i_slot: &mut f64,
-        var_scc_i_slot: &mut f64,
-        var_st2vfb_p_slot: &mut f64,
-        var_sta2_p_slot: &mut f64,
-        var_stbet_p_slot: &mut f64,
-        var_stbgidl_p_slot: &mut f64,
-        var_stbgidld_p_slot: &mut f64,
-        var_stcs_p_slot: &mut f64,
-        var_stct_p_slot: &mut f64,
-        var_stig_p_slot: &mut f64,
-        var_stmue_p_slot: &mut f64,
-        var_strs_p_slot: &mut f64,
-        var_stthecs_p_slot: &mut f64,
-        var_stthemu_p_slot: &mut f64,
-        var_stthesat_p_slot: &mut f64,
-        var_stvfb_p_slot: &mut f64,
-        var_stxcor_p_slot: &mut f64,
-        var_thecs_p_slot: &mut f64,
-        var_themu_p_slot: &mut f64,
-        var_thesat_p_slot: &mut f64,
-        var_thesatac_p_slot: &mut f64,
-        var_thesatb_p_slot: &mut f64,
-        var_thesatg_p_slot: &mut f64,
-        var_thesatt_p_slot: &mut f64,
-        var_tox_p_slot: &mut f64,
-        var_toxov_p_slot: &mut f64,
-        var_toxovd_p_slot: &mut f64,
-        var_vfb_p_slot: &mut f64,
-        var_vp_p_slot: &mut f64,
-        var_vsbnud_p_slot: &mut f64,
-        var_w_f_slot: &mut f64,
-        var_w_i_slot: &mut f64,
-        var_wcv_slot: &mut f64,
-        var_we_slot: &mut f64,
-        var_wecv_slot: &mut f64,
-        var_xcor_p_slot: &mut f64,
-        var_xgwe_slot: &mut f64,
-    ) {
-        let mut var_a1_p: f64 = *var_a1_p_slot;
-        let mut var_a2_p: f64 = *var_a2_p_slot;
-        let mut var_a3_p: f64 = *var_a3_p_slot;
-        let mut var_a4_p: f64 = *var_a4_p_slot;
-        let mut var_agidl_p: f64 = *var_agidl_p_slot;
-        let mut var_agidld_p: f64 = *var_agidld_p_slot;
-        let mut var_alp1_p: f64 = *var_alp1_p_slot;
-        let mut var_alp1ac_p: f64 = *var_alp1ac_p_slot;
-        let mut var_alp2_p: f64 = *var_alp2_p_slot;
-        let mut var_alp_p: f64 = *var_alp_p_slot;
-        let mut var_alpac_p: f64 = *var_alpac_p_slot;
-        let mut var_ax_p: f64 = *var_ax_p_slot;
-        let mut var_axac_p: f64 = *var_axac_p_slot;
-        let mut var_axinr_p: f64 = *var_axinr_p_slot;
-        let mut var_betn_p: f64 = *var_betn_p_slot;
-        let mut var_bgidl_p: f64 = *var_bgidl_p_slot;
-        let mut var_bgidld_p: f64 = *var_bgidld_p_slot;
-        let mut var_cf_p: f64 = *var_cf_p_slot;
-        let mut var_cfb_p: f64 = *var_cfb_p_slot;
-        let mut var_cfd_p: f64 = *var_cfd_p_slot;
-        let mut var_cfr_p: f64 = *var_cfr_p_slot;
-        let mut var_cfrd_p: f64 = *var_cfrd_p_slot;
-        let mut var_cgbov_p: f64 = *var_cgbov_p_slot;
-        let mut var_cgidl_p: f64 = *var_cgidl_p_slot;
-        let mut var_cgidld_p: f64 = *var_cgidld_p_slot;
-        let mut var_cgov_p: f64 = *var_cgov_p_slot;
-        let mut var_cgovaccg_p: f64 = *var_cgovaccg_p_slot;
-        let mut var_cgovd_p: f64 = *var_cgovd_p_slot;
-        let mut var_chib_p: f64 = *var_chib_p_slot;
-        let mut var_cinr_p: f64 = *var_cinr_p_slot;
-        let mut var_cinrd_p: f64 = *var_cinrd_p_slot;
-        let mut var_cox_p: f64 = *var_cox_p_slot;
-        let mut var_cs_p: f64 = *var_cs_p_slot;
-        let mut var_ct_p: f64 = *var_ct_p_slot;
-        let mut var_ctb_p: f64 = *var_ctb_p_slot;
-        let mut var_ctg_p: f64 = *var_ctg_p_slot;
-        let mut var_dellps: f64 = *var_dellps_slot;
-        let mut var_delvtac_p: f64 = *var_delvtac_p_slot;
-        let mut var_delwod: f64 = *var_delwod_slot;
-        let mut var_dphib_p: f64 = *var_dphib_p_slot;
-        let mut var_dvfbinr_p: f64 = *var_dvfbinr_p_slot;
-        let mut var_dvsbnud_p: f64 = *var_dvsbnud_p_slot;
-        let mut var_epsrox_p: f64 = *var_epsrox_p_slot;
-        let mut var_facneffac_p: f64 = *var_facneffac_p_slot;
-        let mut var_fcgovacc_p: f64 = *var_fcgovacc_p_slot;
-        let mut var_fcgovaccd_p: f64 = *var_fcgovaccd_p_slot;
-        let mut var_fcinracc_p: f64 = *var_fcinracc_p_slot;
-        let mut var_fcinrdep_p: f64 = *var_fcinrdep_p_slot;
-        let mut var_feta_p: f64 = *var_feta_p_slot;
-        let mut var_fnt_p: f64 = *var_fnt_p_slot;
-        let mut var_fntexc_p: f64 = *var_fntexc_p_slot;
-        let mut var_gc2_p: f64 = *var_gc2_p_slot;
-        let mut var_gc2ov_p: f64 = *var_gc2ov_p_slot;
-        let mut var_gc2ovd_p: f64 = *var_gc2ovd_p_slot;
-        let mut var_gc3_p: f64 = *var_gc3_p_slot;
-        let mut var_gc3ov_p: f64 = *var_gc3ov_p_slot;
-        let mut var_gc3ovd_p: f64 = *var_gc3ovd_p_slot;
-        let mut var_gco_p: f64 = *var_gco_p_slot;
-        let mut var_gfacnud_p: f64 = *var_gfacnud_p_slot;
-        let mut var_guard30: f64 = *var_guard30_slot;
-        let mut var_guard31: f64 = *var_guard31_slot;
-        let mut var_guard32: f64 = *var_guard32_slot;
-        let mut var_guard33: f64 = *var_guard33_slot;
-        let mut var_guard34: f64 = *var_guard34_slot;
-        let mut var_guard35: f64 = *var_guard35_slot;
-        let mut var_iae: f64 = *var_iae_slot;
-        let mut var_iginv_p: f64 = *var_iginv_p_slot;
-        let mut var_igov_p: f64 = *var_igov_p_slot;
-        let mut var_igovd_p: f64 = *var_igovd_p_slot;
-        let mut var_iiae: f64 = *var_iiae_slot;
-        let mut var_iilcv: f64 = *var_iilcv_slot;
-        let mut var_iiwcv: f64 = *var_iiwcv_slot;
-        let mut var_iiwe: f64 = *var_iiwe_slot;
-        let mut var_iiwecv: f64 = *var_iiwecv_slot;
-        let mut var_il: f64 = *var_il_slot;
-        let mut var_ile: f64 = *var_ile_slot;
-        let mut var_ile2: f64 = *var_ile2_slot;
-        let mut var_imaxii_p: f64 = *var_imaxii_p_slot;
-        let mut var_invnf: f64 = *var_invnf_slot;
-        let mut var_iw: f64 = *var_iw_slot;
-        let mut var_iwe: f64 = *var_iwe_slot;
-        let mut var_l_f: f64 = *var_l_f_slot;
-        let mut var_l_slif: f64 = *var_l_slif_slot;
-        let mut var_lcv: f64 = *var_lcv_slot;
-        let mut var_le: f64 = *var_le_slot;
-        let mut var_lecv: f64 = *var_lecv_slot;
-        let mut var_mue_p: f64 = *var_mue_p_slot;
-        let mut var_neff_p: f64 = *var_neff_p_slot;
-        let mut var_nf_i: f64 = *var_nf_i_slot;
-        let mut var_ngcon_i: f64 = *var_ngcon_i_slot;
-        let mut var_nov_p: f64 = *var_nov_p_slot;
-        let mut var_novd_p: f64 = *var_novd_p_slot;
-        let mut var_np_p: f64 = *var_np_p_slot;
-        let mut var_psce_p: f64 = *var_psce_p_slot;
-        let mut var_psceb_p: f64 = *var_psceb_p_slot;
-        let mut var_psced_p: f64 = *var_psced_p_slot;
-        let mut var_rs_p: f64 = *var_rs_p_slot;
-        let mut var_rsb_p: f64 = *var_rsb_p_slot;
-        let mut var_rsg_p: f64 = *var_rsg_p_slot;
-        let mut var_sca_i: f64 = *var_sca_i_slot;
-        let mut var_scb_i: f64 = *var_scb_i_slot;
-        let mut var_scc_i: f64 = *var_scc_i_slot;
-        let mut var_st2vfb_p: f64 = *var_st2vfb_p_slot;
-        let mut var_sta2_p: f64 = *var_sta2_p_slot;
-        let mut var_stbet_p: f64 = *var_stbet_p_slot;
-        let mut var_stbgidl_p: f64 = *var_stbgidl_p_slot;
-        let mut var_stbgidld_p: f64 = *var_stbgidld_p_slot;
-        let mut var_stcs_p: f64 = *var_stcs_p_slot;
-        let mut var_stct_p: f64 = *var_stct_p_slot;
-        let mut var_stig_p: f64 = *var_stig_p_slot;
-        let mut var_stmue_p: f64 = *var_stmue_p_slot;
-        let mut var_strs_p: f64 = *var_strs_p_slot;
-        let mut var_stthecs_p: f64 = *var_stthecs_p_slot;
-        let mut var_stthemu_p: f64 = *var_stthemu_p_slot;
-        let mut var_stthesat_p: f64 = *var_stthesat_p_slot;
-        let mut var_stvfb_p: f64 = *var_stvfb_p_slot;
-        let mut var_stxcor_p: f64 = *var_stxcor_p_slot;
-        let mut var_thecs_p: f64 = *var_thecs_p_slot;
-        let mut var_themu_p: f64 = *var_themu_p_slot;
-        let mut var_thesat_p: f64 = *var_thesat_p_slot;
-        let mut var_thesatac_p: f64 = *var_thesatac_p_slot;
-        let mut var_thesatb_p: f64 = *var_thesatb_p_slot;
-        let mut var_thesatg_p: f64 = *var_thesatg_p_slot;
-        let mut var_thesatt_p: f64 = *var_thesatt_p_slot;
-        let mut var_tox_p: f64 = *var_tox_p_slot;
-        let mut var_toxov_p: f64 = *var_toxov_p_slot;
-        let mut var_toxovd_p: f64 = *var_toxovd_p_slot;
-        let mut var_vfb_p: f64 = *var_vfb_p_slot;
-        let mut var_vp_p: f64 = *var_vp_p_slot;
-        let mut var_vsbnud_p: f64 = *var_vsbnud_p_slot;
-        let mut var_w_f: f64 = *var_w_f_slot;
-        let mut var_w_i: f64 = *var_w_i_slot;
-        let mut var_wcv: f64 = *var_wcv_slot;
-        let mut var_we: f64 = *var_we_slot;
-        let mut var_wecv: f64 = *var_wecv_slot;
-        let mut var_xcor_p: f64 = *var_xcor_p_slot;
-        let mut var_xgwe: f64 = *var_xgwe_slot;
-
         let (assign3520_e3434,) = {
     if (var_guard29 != 0.0) {
         let assign3520_e3431: f64 = (var_nf_i + 0.5);
@@ -4401,6 +3689,384 @@ impl Instance {
     }
 };
         var_lecv = assign3710_e3567;
+
+        *var_abdrain_i_slot = var_abdrain_i;
+        *var_absource_i_slot = var_absource_i;
+        *var_ad_i_slot = var_ad_i;
+        *var_as_i_slot = var_as_i;
+        *var_atatbot_d_slot = var_atatbot_d;
+        *var_atatgat_d_slot = var_atatgat_d;
+        *var_atatsti_d_slot = var_atatsti_d;
+        *var_btatpartbot_d_slot = var_btatpartbot_d;
+        *var_btatpartgat_d_slot = var_btatpartgat_d;
+        *var_btatpartsti_d_slot = var_btatpartsti_d;
+        *var_cjobot_d_slot = var_cjobot_d;
+        *var_cjogat2nd_d_slot = var_cjogat2nd_d;
+        *var_cjogat_d_slot = var_cjogat_d;
+        *var_cjosti_d_slot = var_cjosti_d;
+        *var_dellps_slot = var_dellps;
+        *var_deltaebot_d_slot = var_deltaebot_d;
+        *var_deltaegat_d_slot = var_deltaegat_d;
+        *var_deltaesti_d_slot = var_deltaesti_d;
+        *var_delwod_slot = var_delwod;
+        *var_fbbtbot_d_slot = var_fbbtbot_d;
+        *var_fbbtgat_d_slot = var_fbbtgat_d;
+        *var_fbbtgat_d_dn5_slot = var_fbbtgat_d_dn5;
+        *var_fbbtgat_d_dn6_slot = var_fbbtgat_d_dn6;
+        *var_fbbtgat_d_dn7_slot = var_fbbtgat_d_dn7;
+        *var_fbbtgat_d_dn8_slot = var_fbbtgat_d_dn8;
+        *var_fbbtsti_d_slot = var_fbbtsti_d;
+        *var_ftdgat2nd_d_slot = var_ftdgat2nd_d;
+        *var_guard28_slot = var_guard28;
+        *var_guard29_slot = var_guard29;
+        *var_iae_slot = var_iae;
+        *var_idsatbot_d_slot = var_idsatbot_d;
+        *var_idsatgat_d_slot = var_idsatgat_d;
+        *var_idsatsti_d_slot = var_idsatsti_d;
+        *var_iiae_slot = var_iiae;
+        *var_iiwe_slot = var_iiwe;
+        *var_il_slot = var_il;
+        *var_ile_slot = var_ile;
+        *var_ile2_slot = var_ile2;
+        *var_invnf_slot = var_invnf;
+        *var_iw_slot = var_iw;
+        *var_iwe_slot = var_iwe;
+        *var_jw_i_slot = var_jw_i;
+        *var_l_i_slot = var_l_i;
+        *var_le_slot = var_le;
+        *var_lecv_slot = var_lecv;
+        *var_lgdrain_i_slot = var_lgdrain_i;
+        *var_lgsource_i_slot = var_lgsource_i;
+        *var_lsdrain_i_slot = var_lsdrain_i;
+        *var_lssource_i_slot = var_lssource_i;
+        *var_nf_i_slot = var_nf_i;
+        *var_ngcon_i_slot = var_ngcon_i;
+        *var_pd_i_slot = var_pd_i;
+        *var_phigdgat2nd_d_slot = var_phigdgat2nd_d;
+        *var_ps_i_slot = var_ps_i;
+        *var_qpref2bot_d_slot = var_qpref2bot_d;
+        *var_qpref2gat2nd_d_slot = var_qpref2gat2nd_d;
+        *var_qpref2gat_d_slot = var_qpref2gat_d;
+        *var_qpref2sti_d_slot = var_qpref2sti_d;
+        *var_qprefbot_d_slot = var_qprefbot_d;
+        *var_qprefgat2nd_d_slot = var_qprefgat2nd_d;
+        *var_qprefgat_d_slot = var_qprefgat_d;
+        *var_qprefsti_d_slot = var_qprefsti_d;
+        *var_sa_i_slot = var_sa_i;
+        *var_sb_i_slot = var_sb_i;
+        *var_sc_i_slot = var_sc_i;
+        *var_sca_i_slot = var_sca_i;
+        *var_scb_i_slot = var_scb_i;
+        *var_scc_i_slot = var_scc_i;
+        *var_sd_i_slot = var_sd_i;
+        *var_ubibot_d_slot = var_ubibot_d;
+        *var_ubigat2nd_d_slot = var_ubigat2nd_d;
+        *var_ubigat_d_slot = var_ubigat_d;
+        *var_ubisti_d_slot = var_ubisti_d;
+        *var_vbibot_d_slot = var_vbibot_d;
+        *var_vbigat2nd_d_slot = var_vbigat2nd_d;
+        *var_vbigat_d_slot = var_vbigat_d;
+        *var_vbiinvbot_d_slot = var_vbiinvbot_d;
+        *var_vbiinvgat2nd_d_slot = var_vbiinvgat2nd_d;
+        *var_vbiinvgat_d_slot = var_vbiinvgat_d;
+        *var_vbiinvsti_d_slot = var_vbiinvsti_d;
+        *var_vbisti_d_slot = var_vbisti_d;
+        *var_w_i_slot = var_w_i;
+        *var_we_slot = var_we;
+        *var_xgw_i_slot = var_xgw_i;
+    }
+
+    pub(super) fn stamp_transient_block_5(
+        p: &Parameters,
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+        var_dellps: f64,
+        var_delwod: f64,
+        var_iae: f64,
+        var_ile: f64,
+        var_iwe: f64,
+        var_l_i: f64,
+        var_w_i: f64,
+        var_we: f64,
+        var_xgw_i: f64,
+        var_a1_p_slot: &mut f64,
+        var_a2_p_slot: &mut f64,
+        var_a3_p_slot: &mut f64,
+        var_a4_p_slot: &mut f64,
+        var_agidl_p_slot: &mut f64,
+        var_agidld_p_slot: &mut f64,
+        var_alp1_p_slot: &mut f64,
+        var_alp1ac_p_slot: &mut f64,
+        var_alp2_p_slot: &mut f64,
+        var_alp_p_slot: &mut f64,
+        var_alpac_p_slot: &mut f64,
+        var_ax_p_slot: &mut f64,
+        var_axac_p_slot: &mut f64,
+        var_axinr_p_slot: &mut f64,
+        var_betn_p_slot: &mut f64,
+        var_betnedge_p_slot: &mut f64,
+        var_bgidl_p_slot: &mut f64,
+        var_bgidld_p_slot: &mut f64,
+        var_cf_p_slot: &mut f64,
+        var_cfb_p_slot: &mut f64,
+        var_cfbedge_p_slot: &mut f64,
+        var_cfd_p_slot: &mut f64,
+        var_cfdedge_p_slot: &mut f64,
+        var_cfedge_p_slot: &mut f64,
+        var_cfr_p_slot: &mut f64,
+        var_cfrd_p_slot: &mut f64,
+        var_cgbov_p_slot: &mut f64,
+        var_cgidl_p_slot: &mut f64,
+        var_cgidld_p_slot: &mut f64,
+        var_cgov_p_slot: &mut f64,
+        var_cgovaccg_p_slot: &mut f64,
+        var_cgovd_p_slot: &mut f64,
+        var_chib_p_slot: &mut f64,
+        var_cinr_p_slot: &mut f64,
+        var_cinrd_p_slot: &mut f64,
+        var_cox_p_slot: &mut f64,
+        var_cs_p_slot: &mut f64,
+        var_ct_p_slot: &mut f64,
+        var_ctb_p_slot: &mut f64,
+        var_ctedge_p_slot: &mut f64,
+        var_ctg_p_slot: &mut f64,
+        var_delvtac_p_slot: &mut f64,
+        var_dphib_p_slot: &mut f64,
+        var_dphibedge_p_slot: &mut f64,
+        var_dvfbinr_p_slot: &mut f64,
+        var_dvsbnud_p_slot: &mut f64,
+        var_epsrox_p_slot: &mut f64,
+        var_facneffac_p_slot: &mut f64,
+        var_fcgovacc_p_slot: &mut f64,
+        var_fcgovaccd_p_slot: &mut f64,
+        var_fcinracc_p_slot: &mut f64,
+        var_fcinrdep_p_slot: &mut f64,
+        var_feta_p_slot: &mut f64,
+        var_fnt_p_slot: &mut f64,
+        var_fntexc_p_slot: &mut f64,
+        var_gc2_p_slot: &mut f64,
+        var_gc2ov_p_slot: &mut f64,
+        var_gc2ovd_p_slot: &mut f64,
+        var_gc3_p_slot: &mut f64,
+        var_gc3ov_p_slot: &mut f64,
+        var_gc3ovd_p_slot: &mut f64,
+        var_gco_p_slot: &mut f64,
+        var_gfacnud_p_slot: &mut f64,
+        var_guard30_slot: &mut f64,
+        var_guard31_slot: &mut f64,
+        var_guard32_slot: &mut f64,
+        var_guard33_slot: &mut f64,
+        var_guard34_slot: &mut f64,
+        var_guard35_slot: &mut f64,
+        var_guard36_slot: &mut f64,
+        var_iginv_p_slot: &mut f64,
+        var_igov_p_slot: &mut f64,
+        var_igovd_p_slot: &mut f64,
+        var_iilcv_slot: &mut f64,
+        var_iiwcv_slot: &mut f64,
+        var_iiwecv_slot: &mut f64,
+        var_imaxii_p_slot: &mut f64,
+        var_l_f_slot: &mut f64,
+        var_l_slif_slot: &mut f64,
+        var_lcv_slot: &mut f64,
+        var_mue_p_slot: &mut f64,
+        var_neff_p_slot: &mut f64,
+        var_neffedge_p_slot: &mut f64,
+        var_nov_p_slot: &mut f64,
+        var_novd_p_slot: &mut f64,
+        var_np_p_slot: &mut f64,
+        var_nsub0e_slot: &mut f64,
+        var_psce_p_slot: &mut f64,
+        var_psceb_p_slot: &mut f64,
+        var_pscebedge_p_slot: &mut f64,
+        var_psced_p_slot: &mut f64,
+        var_pscededge_p_slot: &mut f64,
+        var_psceedge_p_slot: &mut f64,
+        var_rbulk_p_slot: &mut f64,
+        var_rde_p_slot: &mut f64,
+        var_rg_p_slot: &mut f64,
+        var_rjund_p_slot: &mut f64,
+        var_rjuns_p_slot: &mut f64,
+        var_rs_p_slot: &mut f64,
+        var_rsb_p_slot: &mut f64,
+        var_rse_p_slot: &mut f64,
+        var_rsg_p_slot: &mut f64,
+        var_rwell_p_slot: &mut f64,
+        var_st2vfb_p_slot: &mut f64,
+        var_sta2_p_slot: &mut f64,
+        var_stbet_p_slot: &mut f64,
+        var_stbetedge_p_slot: &mut f64,
+        var_stbgidl_p_slot: &mut f64,
+        var_stbgidld_p_slot: &mut f64,
+        var_stcs_p_slot: &mut f64,
+        var_stct_p_slot: &mut f64,
+        var_stig_p_slot: &mut f64,
+        var_stmue_p_slot: &mut f64,
+        var_strs_p_slot: &mut f64,
+        var_stthecs_p_slot: &mut f64,
+        var_stthemu_p_slot: &mut f64,
+        var_stthesat_p_slot: &mut f64,
+        var_stvfb_p_slot: &mut f64,
+        var_stvfbedge_p_slot: &mut f64,
+        var_stxcor_p_slot: &mut f64,
+        var_thecs_p_slot: &mut f64,
+        var_themu_p_slot: &mut f64,
+        var_thesat_p_slot: &mut f64,
+        var_thesatac_p_slot: &mut f64,
+        var_thesatb_p_slot: &mut f64,
+        var_thesatg_p_slot: &mut f64,
+        var_thesatt_p_slot: &mut f64,
+        var_tox_p_slot: &mut f64,
+        var_toxov_p_slot: &mut f64,
+        var_toxovd_p_slot: &mut f64,
+        var_vfb_p_slot: &mut f64,
+        var_vfbedge_p_slot: &mut f64,
+        var_vp_p_slot: &mut f64,
+        var_vsbnud_p_slot: &mut f64,
+        var_w_f_slot: &mut f64,
+        var_wcv_slot: &mut f64,
+        var_wecv_slot: &mut f64,
+        var_xcor_p_slot: &mut f64,
+        var_xgwe_slot: &mut f64,
+    ) {
+        let mut var_a1_p: f64 = *var_a1_p_slot;
+        let mut var_a2_p: f64 = *var_a2_p_slot;
+        let mut var_a3_p: f64 = *var_a3_p_slot;
+        let mut var_a4_p: f64 = *var_a4_p_slot;
+        let mut var_agidl_p: f64 = *var_agidl_p_slot;
+        let mut var_agidld_p: f64 = *var_agidld_p_slot;
+        let mut var_alp1_p: f64 = *var_alp1_p_slot;
+        let mut var_alp1ac_p: f64 = *var_alp1ac_p_slot;
+        let mut var_alp2_p: f64 = *var_alp2_p_slot;
+        let mut var_alp_p: f64 = *var_alp_p_slot;
+        let mut var_alpac_p: f64 = *var_alpac_p_slot;
+        let mut var_ax_p: f64 = *var_ax_p_slot;
+        let mut var_axac_p: f64 = *var_axac_p_slot;
+        let mut var_axinr_p: f64 = *var_axinr_p_slot;
+        let mut var_betn_p: f64 = *var_betn_p_slot;
+        let mut var_betnedge_p: f64 = *var_betnedge_p_slot;
+        let mut var_bgidl_p: f64 = *var_bgidl_p_slot;
+        let mut var_bgidld_p: f64 = *var_bgidld_p_slot;
+        let mut var_cf_p: f64 = *var_cf_p_slot;
+        let mut var_cfb_p: f64 = *var_cfb_p_slot;
+        let mut var_cfbedge_p: f64 = *var_cfbedge_p_slot;
+        let mut var_cfd_p: f64 = *var_cfd_p_slot;
+        let mut var_cfdedge_p: f64 = *var_cfdedge_p_slot;
+        let mut var_cfedge_p: f64 = *var_cfedge_p_slot;
+        let mut var_cfr_p: f64 = *var_cfr_p_slot;
+        let mut var_cfrd_p: f64 = *var_cfrd_p_slot;
+        let mut var_cgbov_p: f64 = *var_cgbov_p_slot;
+        let mut var_cgidl_p: f64 = *var_cgidl_p_slot;
+        let mut var_cgidld_p: f64 = *var_cgidld_p_slot;
+        let mut var_cgov_p: f64 = *var_cgov_p_slot;
+        let mut var_cgovaccg_p: f64 = *var_cgovaccg_p_slot;
+        let mut var_cgovd_p: f64 = *var_cgovd_p_slot;
+        let mut var_chib_p: f64 = *var_chib_p_slot;
+        let mut var_cinr_p: f64 = *var_cinr_p_slot;
+        let mut var_cinrd_p: f64 = *var_cinrd_p_slot;
+        let mut var_cox_p: f64 = *var_cox_p_slot;
+        let mut var_cs_p: f64 = *var_cs_p_slot;
+        let mut var_ct_p: f64 = *var_ct_p_slot;
+        let mut var_ctb_p: f64 = *var_ctb_p_slot;
+        let mut var_ctedge_p: f64 = *var_ctedge_p_slot;
+        let mut var_ctg_p: f64 = *var_ctg_p_slot;
+        let mut var_delvtac_p: f64 = *var_delvtac_p_slot;
+        let mut var_dphib_p: f64 = *var_dphib_p_slot;
+        let mut var_dphibedge_p: f64 = *var_dphibedge_p_slot;
+        let mut var_dvfbinr_p: f64 = *var_dvfbinr_p_slot;
+        let mut var_dvsbnud_p: f64 = *var_dvsbnud_p_slot;
+        let mut var_epsrox_p: f64 = *var_epsrox_p_slot;
+        let mut var_facneffac_p: f64 = *var_facneffac_p_slot;
+        let mut var_fcgovacc_p: f64 = *var_fcgovacc_p_slot;
+        let mut var_fcgovaccd_p: f64 = *var_fcgovaccd_p_slot;
+        let mut var_fcinracc_p: f64 = *var_fcinracc_p_slot;
+        let mut var_fcinrdep_p: f64 = *var_fcinrdep_p_slot;
+        let mut var_feta_p: f64 = *var_feta_p_slot;
+        let mut var_fnt_p: f64 = *var_fnt_p_slot;
+        let mut var_fntexc_p: f64 = *var_fntexc_p_slot;
+        let mut var_gc2_p: f64 = *var_gc2_p_slot;
+        let mut var_gc2ov_p: f64 = *var_gc2ov_p_slot;
+        let mut var_gc2ovd_p: f64 = *var_gc2ovd_p_slot;
+        let mut var_gc3_p: f64 = *var_gc3_p_slot;
+        let mut var_gc3ov_p: f64 = *var_gc3ov_p_slot;
+        let mut var_gc3ovd_p: f64 = *var_gc3ovd_p_slot;
+        let mut var_gco_p: f64 = *var_gco_p_slot;
+        let mut var_gfacnud_p: f64 = *var_gfacnud_p_slot;
+        let mut var_guard30: f64 = *var_guard30_slot;
+        let mut var_guard31: f64 = *var_guard31_slot;
+        let mut var_guard32: f64 = *var_guard32_slot;
+        let mut var_guard33: f64 = *var_guard33_slot;
+        let mut var_guard34: f64 = *var_guard34_slot;
+        let mut var_guard35: f64 = *var_guard35_slot;
+        let mut var_guard36: f64 = *var_guard36_slot;
+        let mut var_iginv_p: f64 = *var_iginv_p_slot;
+        let mut var_igov_p: f64 = *var_igov_p_slot;
+        let mut var_igovd_p: f64 = *var_igovd_p_slot;
+        let mut var_iilcv: f64 = *var_iilcv_slot;
+        let mut var_iiwcv: f64 = *var_iiwcv_slot;
+        let mut var_iiwecv: f64 = *var_iiwecv_slot;
+        let mut var_imaxii_p: f64 = *var_imaxii_p_slot;
+        let mut var_l_f: f64 = *var_l_f_slot;
+        let mut var_l_slif: f64 = *var_l_slif_slot;
+        let mut var_lcv: f64 = *var_lcv_slot;
+        let mut var_mue_p: f64 = *var_mue_p_slot;
+        let mut var_neff_p: f64 = *var_neff_p_slot;
+        let mut var_neffedge_p: f64 = *var_neffedge_p_slot;
+        let mut var_nov_p: f64 = *var_nov_p_slot;
+        let mut var_novd_p: f64 = *var_novd_p_slot;
+        let mut var_np_p: f64 = *var_np_p_slot;
+        let mut var_nsub0e: f64 = *var_nsub0e_slot;
+        let mut var_psce_p: f64 = *var_psce_p_slot;
+        let mut var_psceb_p: f64 = *var_psceb_p_slot;
+        let mut var_pscebedge_p: f64 = *var_pscebedge_p_slot;
+        let mut var_psced_p: f64 = *var_psced_p_slot;
+        let mut var_pscededge_p: f64 = *var_pscededge_p_slot;
+        let mut var_psceedge_p: f64 = *var_psceedge_p_slot;
+        let mut var_rbulk_p: f64 = *var_rbulk_p_slot;
+        let mut var_rde_p: f64 = *var_rde_p_slot;
+        let mut var_rg_p: f64 = *var_rg_p_slot;
+        let mut var_rjund_p: f64 = *var_rjund_p_slot;
+        let mut var_rjuns_p: f64 = *var_rjuns_p_slot;
+        let mut var_rs_p: f64 = *var_rs_p_slot;
+        let mut var_rsb_p: f64 = *var_rsb_p_slot;
+        let mut var_rse_p: f64 = *var_rse_p_slot;
+        let mut var_rsg_p: f64 = *var_rsg_p_slot;
+        let mut var_rwell_p: f64 = *var_rwell_p_slot;
+        let mut var_st2vfb_p: f64 = *var_st2vfb_p_slot;
+        let mut var_sta2_p: f64 = *var_sta2_p_slot;
+        let mut var_stbet_p: f64 = *var_stbet_p_slot;
+        let mut var_stbetedge_p: f64 = *var_stbetedge_p_slot;
+        let mut var_stbgidl_p: f64 = *var_stbgidl_p_slot;
+        let mut var_stbgidld_p: f64 = *var_stbgidld_p_slot;
+        let mut var_stcs_p: f64 = *var_stcs_p_slot;
+        let mut var_stct_p: f64 = *var_stct_p_slot;
+        let mut var_stig_p: f64 = *var_stig_p_slot;
+        let mut var_stmue_p: f64 = *var_stmue_p_slot;
+        let mut var_strs_p: f64 = *var_strs_p_slot;
+        let mut var_stthecs_p: f64 = *var_stthecs_p_slot;
+        let mut var_stthemu_p: f64 = *var_stthemu_p_slot;
+        let mut var_stthesat_p: f64 = *var_stthesat_p_slot;
+        let mut var_stvfb_p: f64 = *var_stvfb_p_slot;
+        let mut var_stvfbedge_p: f64 = *var_stvfbedge_p_slot;
+        let mut var_stxcor_p: f64 = *var_stxcor_p_slot;
+        let mut var_thecs_p: f64 = *var_thecs_p_slot;
+        let mut var_themu_p: f64 = *var_themu_p_slot;
+        let mut var_thesat_p: f64 = *var_thesat_p_slot;
+        let mut var_thesatac_p: f64 = *var_thesatac_p_slot;
+        let mut var_thesatb_p: f64 = *var_thesatb_p_slot;
+        let mut var_thesatg_p: f64 = *var_thesatg_p_slot;
+        let mut var_thesatt_p: f64 = *var_thesatt_p_slot;
+        let mut var_tox_p: f64 = *var_tox_p_slot;
+        let mut var_toxov_p: f64 = *var_toxov_p_slot;
+        let mut var_toxovd_p: f64 = *var_toxovd_p_slot;
+        let mut var_vfb_p: f64 = *var_vfb_p_slot;
+        let mut var_vfbedge_p: f64 = *var_vfbedge_p_slot;
+        let mut var_vp_p: f64 = *var_vp_p_slot;
+        let mut var_vsbnud_p: f64 = *var_vsbnud_p_slot;
+        let mut var_w_f: f64 = *var_w_f_slot;
+        let mut var_wcv: f64 = *var_wcv_slot;
+        let mut var_wecv: f64 = *var_wecv_slot;
+        let mut var_xcor_p: f64 = *var_xcor_p_slot;
+        let mut var_xgwe: f64 = *var_xgwe_slot;
 
         let assign3720_e3570: f64 = (var_w_i + var_delwod);
         let assign3720_e3573: f64 = (2.0 * p.p193);
@@ -4780,263 +4446,6 @@ impl Instance {
 
         var_fntexc_p = p.p156;
 
-        *var_a1_p_slot = var_a1_p;
-        *var_a2_p_slot = var_a2_p;
-        *var_a3_p_slot = var_a3_p;
-        *var_a4_p_slot = var_a4_p;
-        *var_agidl_p_slot = var_agidl_p;
-        *var_agidld_p_slot = var_agidld_p;
-        *var_alp1_p_slot = var_alp1_p;
-        *var_alp1ac_p_slot = var_alp1ac_p;
-        *var_alp2_p_slot = var_alp2_p;
-        *var_alp_p_slot = var_alp_p;
-        *var_alpac_p_slot = var_alpac_p;
-        *var_ax_p_slot = var_ax_p;
-        *var_axac_p_slot = var_axac_p;
-        *var_axinr_p_slot = var_axinr_p;
-        *var_betn_p_slot = var_betn_p;
-        *var_bgidl_p_slot = var_bgidl_p;
-        *var_bgidld_p_slot = var_bgidld_p;
-        *var_cf_p_slot = var_cf_p;
-        *var_cfb_p_slot = var_cfb_p;
-        *var_cfd_p_slot = var_cfd_p;
-        *var_cfr_p_slot = var_cfr_p;
-        *var_cfrd_p_slot = var_cfrd_p;
-        *var_cgbov_p_slot = var_cgbov_p;
-        *var_cgidl_p_slot = var_cgidl_p;
-        *var_cgidld_p_slot = var_cgidld_p;
-        *var_cgov_p_slot = var_cgov_p;
-        *var_cgovaccg_p_slot = var_cgovaccg_p;
-        *var_cgovd_p_slot = var_cgovd_p;
-        *var_chib_p_slot = var_chib_p;
-        *var_cinr_p_slot = var_cinr_p;
-        *var_cinrd_p_slot = var_cinrd_p;
-        *var_cox_p_slot = var_cox_p;
-        *var_cs_p_slot = var_cs_p;
-        *var_ct_p_slot = var_ct_p;
-        *var_ctb_p_slot = var_ctb_p;
-        *var_ctg_p_slot = var_ctg_p;
-        *var_dellps_slot = var_dellps;
-        *var_delvtac_p_slot = var_delvtac_p;
-        *var_delwod_slot = var_delwod;
-        *var_dphib_p_slot = var_dphib_p;
-        *var_dvfbinr_p_slot = var_dvfbinr_p;
-        *var_dvsbnud_p_slot = var_dvsbnud_p;
-        *var_epsrox_p_slot = var_epsrox_p;
-        *var_facneffac_p_slot = var_facneffac_p;
-        *var_fcgovacc_p_slot = var_fcgovacc_p;
-        *var_fcgovaccd_p_slot = var_fcgovaccd_p;
-        *var_fcinracc_p_slot = var_fcinracc_p;
-        *var_fcinrdep_p_slot = var_fcinrdep_p;
-        *var_feta_p_slot = var_feta_p;
-        *var_fnt_p_slot = var_fnt_p;
-        *var_fntexc_p_slot = var_fntexc_p;
-        *var_gc2_p_slot = var_gc2_p;
-        *var_gc2ov_p_slot = var_gc2ov_p;
-        *var_gc2ovd_p_slot = var_gc2ovd_p;
-        *var_gc3_p_slot = var_gc3_p;
-        *var_gc3ov_p_slot = var_gc3ov_p;
-        *var_gc3ovd_p_slot = var_gc3ovd_p;
-        *var_gco_p_slot = var_gco_p;
-        *var_gfacnud_p_slot = var_gfacnud_p;
-        *var_guard30_slot = var_guard30;
-        *var_guard31_slot = var_guard31;
-        *var_guard32_slot = var_guard32;
-        *var_guard33_slot = var_guard33;
-        *var_guard34_slot = var_guard34;
-        *var_guard35_slot = var_guard35;
-        *var_iae_slot = var_iae;
-        *var_iginv_p_slot = var_iginv_p;
-        *var_igov_p_slot = var_igov_p;
-        *var_igovd_p_slot = var_igovd_p;
-        *var_iiae_slot = var_iiae;
-        *var_iilcv_slot = var_iilcv;
-        *var_iiwcv_slot = var_iiwcv;
-        *var_iiwe_slot = var_iiwe;
-        *var_iiwecv_slot = var_iiwecv;
-        *var_il_slot = var_il;
-        *var_ile_slot = var_ile;
-        *var_ile2_slot = var_ile2;
-        *var_imaxii_p_slot = var_imaxii_p;
-        *var_invnf_slot = var_invnf;
-        *var_iw_slot = var_iw;
-        *var_iwe_slot = var_iwe;
-        *var_l_f_slot = var_l_f;
-        *var_l_slif_slot = var_l_slif;
-        *var_lcv_slot = var_lcv;
-        *var_le_slot = var_le;
-        *var_lecv_slot = var_lecv;
-        *var_mue_p_slot = var_mue_p;
-        *var_neff_p_slot = var_neff_p;
-        *var_nf_i_slot = var_nf_i;
-        *var_ngcon_i_slot = var_ngcon_i;
-        *var_nov_p_slot = var_nov_p;
-        *var_novd_p_slot = var_novd_p;
-        *var_np_p_slot = var_np_p;
-        *var_psce_p_slot = var_psce_p;
-        *var_psceb_p_slot = var_psceb_p;
-        *var_psced_p_slot = var_psced_p;
-        *var_rs_p_slot = var_rs_p;
-        *var_rsb_p_slot = var_rsb_p;
-        *var_rsg_p_slot = var_rsg_p;
-        *var_sca_i_slot = var_sca_i;
-        *var_scb_i_slot = var_scb_i;
-        *var_scc_i_slot = var_scc_i;
-        *var_st2vfb_p_slot = var_st2vfb_p;
-        *var_sta2_p_slot = var_sta2_p;
-        *var_stbet_p_slot = var_stbet_p;
-        *var_stbgidl_p_slot = var_stbgidl_p;
-        *var_stbgidld_p_slot = var_stbgidld_p;
-        *var_stcs_p_slot = var_stcs_p;
-        *var_stct_p_slot = var_stct_p;
-        *var_stig_p_slot = var_stig_p;
-        *var_stmue_p_slot = var_stmue_p;
-        *var_strs_p_slot = var_strs_p;
-        *var_stthecs_p_slot = var_stthecs_p;
-        *var_stthemu_p_slot = var_stthemu_p;
-        *var_stthesat_p_slot = var_stthesat_p;
-        *var_stvfb_p_slot = var_stvfb_p;
-        *var_stxcor_p_slot = var_stxcor_p;
-        *var_thecs_p_slot = var_thecs_p;
-        *var_themu_p_slot = var_themu_p;
-        *var_thesat_p_slot = var_thesat_p;
-        *var_thesatac_p_slot = var_thesatac_p;
-        *var_thesatb_p_slot = var_thesatb_p;
-        *var_thesatg_p_slot = var_thesatg_p;
-        *var_thesatt_p_slot = var_thesatt_p;
-        *var_tox_p_slot = var_tox_p;
-        *var_toxov_p_slot = var_toxov_p;
-        *var_toxovd_p_slot = var_toxovd_p;
-        *var_vfb_p_slot = var_vfb_p;
-        *var_vp_p_slot = var_vp_p;
-        *var_vsbnud_p_slot = var_vsbnud_p;
-        *var_w_f_slot = var_w_f;
-        *var_w_i_slot = var_w_i;
-        *var_wcv_slot = var_wcv;
-        *var_we_slot = var_we;
-        *var_wecv_slot = var_wecv;
-        *var_xcor_p_slot = var_xcor_p;
-        *var_xgwe_slot = var_xgwe;
-    }
-
-    pub(super) fn stamp_transient_block_6(
-        p: &Parameters,
-        var_iae: f64,
-        var_ile: f64,
-        var_ile2: f64,
-        var_iwe: f64,
-        var_le: f64,
-        var_we: f64,
-        var_aa_slot: &mut f64,
-        var_bb_slot: &mut f64,
-        var_betnedge_p_slot: &mut f64,
-        var_cf_p_slot: &mut f64,
-        var_cfb_p_slot: &mut f64,
-        var_cfbedge_p_slot: &mut f64,
-        var_cfd_p_slot: &mut f64,
-        var_cfdedge_p_slot: &mut f64,
-        var_cfedge_p_slot: &mut f64,
-        var_ct_p_slot: &mut f64,
-        var_ctb_p_slot: &mut f64,
-        var_ctedge_p_slot: &mut f64,
-        var_ctg_p_slot: &mut f64,
-        var_dphib_p_slot: &mut f64,
-        var_dphibedge_p_slot: &mut f64,
-        var_dvsbnud_p_slot: &mut f64,
-        var_epsrox_p_slot: &mut f64,
-        var_gfacnud_p_slot: &mut f64,
-        var_guard36_slot: &mut f64,
-        var_guard37_slot: &mut f64,
-        var_guard38_slot: &mut f64,
-        var_lpcke_slot: &mut f64,
-        var_neff_p_slot: &mut f64,
-        var_neffedge_p_slot: &mut f64,
-        var_nov_p_slot: &mut f64,
-        var_novd_p_slot: &mut f64,
-        var_np_p_slot: &mut f64,
-        var_npcke_slot: &mut f64,
-        var_nsub_slot: &mut f64,
-        var_nsub0e_slot: &mut f64,
-        var_psce_p_slot: &mut f64,
-        var_psceb_p_slot: &mut f64,
-        var_pscebedge_p_slot: &mut f64,
-        var_psced_p_slot: &mut f64,
-        var_pscededge_p_slot: &mut f64,
-        var_psceedge_p_slot: &mut f64,
-        var_rbulk_p_slot: &mut f64,
-        var_rde_p_slot: &mut f64,
-        var_rg_p_slot: &mut f64,
-        var_rjund_p_slot: &mut f64,
-        var_rjuns_p_slot: &mut f64,
-        var_rse_p_slot: &mut f64,
-        var_rwell_p_slot: &mut f64,
-        var_st2vfb_p_slot: &mut f64,
-        var_stbetedge_p_slot: &mut f64,
-        var_stct_p_slot: &mut f64,
-        var_stvfb_p_slot: &mut f64,
-        var_stvfbedge_p_slot: &mut f64,
-        var_tox_p_slot: &mut f64,
-        var_toxov_p_slot: &mut f64,
-        var_toxovd_p_slot: &mut f64,
-        var_vfb_p_slot: &mut f64,
-        var_vfbedge_p_slot: &mut f64,
-        var_vsbnud_p_slot: &mut f64,
-    ) {
-        let mut var_aa: f64 = *var_aa_slot;
-        let mut var_bb: f64 = *var_bb_slot;
-        let mut var_betnedge_p: f64 = *var_betnedge_p_slot;
-        let mut var_cf_p: f64 = *var_cf_p_slot;
-        let mut var_cfb_p: f64 = *var_cfb_p_slot;
-        let mut var_cfbedge_p: f64 = *var_cfbedge_p_slot;
-        let mut var_cfd_p: f64 = *var_cfd_p_slot;
-        let mut var_cfdedge_p: f64 = *var_cfdedge_p_slot;
-        let mut var_cfedge_p: f64 = *var_cfedge_p_slot;
-        let mut var_ct_p: f64 = *var_ct_p_slot;
-        let mut var_ctb_p: f64 = *var_ctb_p_slot;
-        let mut var_ctedge_p: f64 = *var_ctedge_p_slot;
-        let mut var_ctg_p: f64 = *var_ctg_p_slot;
-        let mut var_dphib_p: f64 = *var_dphib_p_slot;
-        let mut var_dphibedge_p: f64 = *var_dphibedge_p_slot;
-        let mut var_dvsbnud_p: f64 = *var_dvsbnud_p_slot;
-        let mut var_epsrox_p: f64 = *var_epsrox_p_slot;
-        let mut var_gfacnud_p: f64 = *var_gfacnud_p_slot;
-        let mut var_guard36: f64 = *var_guard36_slot;
-        let mut var_guard37: f64 = *var_guard37_slot;
-        let mut var_guard38: f64 = *var_guard38_slot;
-        let mut var_lpcke: f64 = *var_lpcke_slot;
-        let mut var_neff_p: f64 = *var_neff_p_slot;
-        let mut var_neffedge_p: f64 = *var_neffedge_p_slot;
-        let mut var_nov_p: f64 = *var_nov_p_slot;
-        let mut var_novd_p: f64 = *var_novd_p_slot;
-        let mut var_np_p: f64 = *var_np_p_slot;
-        let mut var_npcke: f64 = *var_npcke_slot;
-        let mut var_nsub: f64 = *var_nsub_slot;
-        let mut var_nsub0e: f64 = *var_nsub0e_slot;
-        let mut var_psce_p: f64 = *var_psce_p_slot;
-        let mut var_psceb_p: f64 = *var_psceb_p_slot;
-        let mut var_pscebedge_p: f64 = *var_pscebedge_p_slot;
-        let mut var_psced_p: f64 = *var_psced_p_slot;
-        let mut var_pscededge_p: f64 = *var_pscededge_p_slot;
-        let mut var_psceedge_p: f64 = *var_psceedge_p_slot;
-        let mut var_rbulk_p: f64 = *var_rbulk_p_slot;
-        let mut var_rde_p: f64 = *var_rde_p_slot;
-        let mut var_rg_p: f64 = *var_rg_p_slot;
-        let mut var_rjund_p: f64 = *var_rjund_p_slot;
-        let mut var_rjuns_p: f64 = *var_rjuns_p_slot;
-        let mut var_rse_p: f64 = *var_rse_p_slot;
-        let mut var_rwell_p: f64 = *var_rwell_p_slot;
-        let mut var_st2vfb_p: f64 = *var_st2vfb_p_slot;
-        let mut var_stbetedge_p: f64 = *var_stbetedge_p_slot;
-        let mut var_stct_p: f64 = *var_stct_p_slot;
-        let mut var_stvfb_p: f64 = *var_stvfb_p_slot;
-        let mut var_stvfbedge_p: f64 = *var_stvfbedge_p_slot;
-        let mut var_tox_p: f64 = *var_tox_p_slot;
-        let mut var_toxov_p: f64 = *var_toxov_p_slot;
-        let mut var_toxovd_p: f64 = *var_toxovd_p_slot;
-        let mut var_vfb_p: f64 = *var_vfb_p_slot;
-        let mut var_vfbedge_p: f64 = *var_vfbedge_p_slot;
-        let mut var_vsbnud_p: f64 = *var_vsbnud_p_slot;
-
         var_vfbedge_p = p.p161;
 
         var_stvfbedge_p = p.p162;
@@ -5166,6 +4575,227 @@ impl Instance {
     }
 };
         var_nsub0e = assign5300_e3930;
+
+        *var_a1_p_slot = var_a1_p;
+        *var_a2_p_slot = var_a2_p;
+        *var_a3_p_slot = var_a3_p;
+        *var_a4_p_slot = var_a4_p;
+        *var_agidl_p_slot = var_agidl_p;
+        *var_agidld_p_slot = var_agidld_p;
+        *var_alp1_p_slot = var_alp1_p;
+        *var_alp1ac_p_slot = var_alp1ac_p;
+        *var_alp2_p_slot = var_alp2_p;
+        *var_alp_p_slot = var_alp_p;
+        *var_alpac_p_slot = var_alpac_p;
+        *var_ax_p_slot = var_ax_p;
+        *var_axac_p_slot = var_axac_p;
+        *var_axinr_p_slot = var_axinr_p;
+        *var_betn_p_slot = var_betn_p;
+        *var_betnedge_p_slot = var_betnedge_p;
+        *var_bgidl_p_slot = var_bgidl_p;
+        *var_bgidld_p_slot = var_bgidld_p;
+        *var_cf_p_slot = var_cf_p;
+        *var_cfb_p_slot = var_cfb_p;
+        *var_cfbedge_p_slot = var_cfbedge_p;
+        *var_cfd_p_slot = var_cfd_p;
+        *var_cfdedge_p_slot = var_cfdedge_p;
+        *var_cfedge_p_slot = var_cfedge_p;
+        *var_cfr_p_slot = var_cfr_p;
+        *var_cfrd_p_slot = var_cfrd_p;
+        *var_cgbov_p_slot = var_cgbov_p;
+        *var_cgidl_p_slot = var_cgidl_p;
+        *var_cgidld_p_slot = var_cgidld_p;
+        *var_cgov_p_slot = var_cgov_p;
+        *var_cgovaccg_p_slot = var_cgovaccg_p;
+        *var_cgovd_p_slot = var_cgovd_p;
+        *var_chib_p_slot = var_chib_p;
+        *var_cinr_p_slot = var_cinr_p;
+        *var_cinrd_p_slot = var_cinrd_p;
+        *var_cox_p_slot = var_cox_p;
+        *var_cs_p_slot = var_cs_p;
+        *var_ct_p_slot = var_ct_p;
+        *var_ctb_p_slot = var_ctb_p;
+        *var_ctedge_p_slot = var_ctedge_p;
+        *var_ctg_p_slot = var_ctg_p;
+        *var_delvtac_p_slot = var_delvtac_p;
+        *var_dphib_p_slot = var_dphib_p;
+        *var_dphibedge_p_slot = var_dphibedge_p;
+        *var_dvfbinr_p_slot = var_dvfbinr_p;
+        *var_dvsbnud_p_slot = var_dvsbnud_p;
+        *var_epsrox_p_slot = var_epsrox_p;
+        *var_facneffac_p_slot = var_facneffac_p;
+        *var_fcgovacc_p_slot = var_fcgovacc_p;
+        *var_fcgovaccd_p_slot = var_fcgovaccd_p;
+        *var_fcinracc_p_slot = var_fcinracc_p;
+        *var_fcinrdep_p_slot = var_fcinrdep_p;
+        *var_feta_p_slot = var_feta_p;
+        *var_fnt_p_slot = var_fnt_p;
+        *var_fntexc_p_slot = var_fntexc_p;
+        *var_gc2_p_slot = var_gc2_p;
+        *var_gc2ov_p_slot = var_gc2ov_p;
+        *var_gc2ovd_p_slot = var_gc2ovd_p;
+        *var_gc3_p_slot = var_gc3_p;
+        *var_gc3ov_p_slot = var_gc3ov_p;
+        *var_gc3ovd_p_slot = var_gc3ovd_p;
+        *var_gco_p_slot = var_gco_p;
+        *var_gfacnud_p_slot = var_gfacnud_p;
+        *var_guard30_slot = var_guard30;
+        *var_guard31_slot = var_guard31;
+        *var_guard32_slot = var_guard32;
+        *var_guard33_slot = var_guard33;
+        *var_guard34_slot = var_guard34;
+        *var_guard35_slot = var_guard35;
+        *var_guard36_slot = var_guard36;
+        *var_iginv_p_slot = var_iginv_p;
+        *var_igov_p_slot = var_igov_p;
+        *var_igovd_p_slot = var_igovd_p;
+        *var_iilcv_slot = var_iilcv;
+        *var_iiwcv_slot = var_iiwcv;
+        *var_iiwecv_slot = var_iiwecv;
+        *var_imaxii_p_slot = var_imaxii_p;
+        *var_l_f_slot = var_l_f;
+        *var_l_slif_slot = var_l_slif;
+        *var_lcv_slot = var_lcv;
+        *var_mue_p_slot = var_mue_p;
+        *var_neff_p_slot = var_neff_p;
+        *var_neffedge_p_slot = var_neffedge_p;
+        *var_nov_p_slot = var_nov_p;
+        *var_novd_p_slot = var_novd_p;
+        *var_np_p_slot = var_np_p;
+        *var_nsub0e_slot = var_nsub0e;
+        *var_psce_p_slot = var_psce_p;
+        *var_psceb_p_slot = var_psceb_p;
+        *var_pscebedge_p_slot = var_pscebedge_p;
+        *var_psced_p_slot = var_psced_p;
+        *var_pscededge_p_slot = var_pscededge_p;
+        *var_psceedge_p_slot = var_psceedge_p;
+        *var_rbulk_p_slot = var_rbulk_p;
+        *var_rde_p_slot = var_rde_p;
+        *var_rg_p_slot = var_rg_p;
+        *var_rjund_p_slot = var_rjund_p;
+        *var_rjuns_p_slot = var_rjuns_p;
+        *var_rs_p_slot = var_rs_p;
+        *var_rsb_p_slot = var_rsb_p;
+        *var_rse_p_slot = var_rse_p;
+        *var_rsg_p_slot = var_rsg_p;
+        *var_rwell_p_slot = var_rwell_p;
+        *var_st2vfb_p_slot = var_st2vfb_p;
+        *var_sta2_p_slot = var_sta2_p;
+        *var_stbet_p_slot = var_stbet_p;
+        *var_stbetedge_p_slot = var_stbetedge_p;
+        *var_stbgidl_p_slot = var_stbgidl_p;
+        *var_stbgidld_p_slot = var_stbgidld_p;
+        *var_stcs_p_slot = var_stcs_p;
+        *var_stct_p_slot = var_stct_p;
+        *var_stig_p_slot = var_stig_p;
+        *var_stmue_p_slot = var_stmue_p;
+        *var_strs_p_slot = var_strs_p;
+        *var_stthecs_p_slot = var_stthecs_p;
+        *var_stthemu_p_slot = var_stthemu_p;
+        *var_stthesat_p_slot = var_stthesat_p;
+        *var_stvfb_p_slot = var_stvfb_p;
+        *var_stvfbedge_p_slot = var_stvfbedge_p;
+        *var_stxcor_p_slot = var_stxcor_p;
+        *var_thecs_p_slot = var_thecs_p;
+        *var_themu_p_slot = var_themu_p;
+        *var_thesat_p_slot = var_thesat_p;
+        *var_thesatac_p_slot = var_thesatac_p;
+        *var_thesatb_p_slot = var_thesatb_p;
+        *var_thesatg_p_slot = var_thesatg_p;
+        *var_thesatt_p_slot = var_thesatt_p;
+        *var_tox_p_slot = var_tox_p;
+        *var_toxov_p_slot = var_toxov_p;
+        *var_toxovd_p_slot = var_toxovd_p;
+        *var_vfb_p_slot = var_vfb_p;
+        *var_vfbedge_p_slot = var_vfbedge_p;
+        *var_vp_p_slot = var_vp_p;
+        *var_vsbnud_p_slot = var_vsbnud_p;
+        *var_w_f_slot = var_w_f;
+        *var_wcv_slot = var_wcv;
+        *var_wecv_slot = var_wecv;
+        *var_xcor_p_slot = var_xcor_p;
+        *var_xgwe_slot = var_xgwe;
+    }
+
+    pub(super) fn stamp_transient_block_6(
+        p: &Parameters,
+        var_guard36: f64,
+        var_iae: f64,
+        var_ile: f64,
+        var_ile2: f64,
+        var_iwe: f64,
+        var_le: f64,
+        var_nsub0e: f64,
+        var_we: f64,
+        var_aa_slot: &mut f64,
+        var_bb_slot: &mut f64,
+        var_betn_p_slot: &mut f64,
+        var_cf_p_slot: &mut f64,
+        var_cfb_p_slot: &mut f64,
+        var_cfd_p_slot: &mut f64,
+        var_ct_p_slot: &mut f64,
+        var_ctb_p_slot: &mut f64,
+        var_ctg_p_slot: &mut f64,
+        var_dphib_p_slot: &mut f64,
+        var_dvsbnud_p_slot: &mut f64,
+        var_fbet1e_slot: &mut f64,
+        var_gfacnud_p_slot: &mut f64,
+        var_gpe_slot: &mut f64,
+        var_guard37_slot: &mut f64,
+        var_guard38_slot: &mut f64,
+        var_gwe_slot: &mut f64,
+        var_lp1e_slot: &mut f64,
+        var_lpcke_slot: &mut f64,
+        var_mue_p_slot: &mut f64,
+        var_neff_p_slot: &mut f64,
+        var_nov_p_slot: &mut f64,
+        var_novd_p_slot: &mut f64,
+        var_np_p_slot: &mut f64,
+        var_npcke_slot: &mut f64,
+        var_nsub_slot: &mut f64,
+        var_psce_p_slot: &mut f64,
+        var_psceb_p_slot: &mut f64,
+        var_psced_p_slot: &mut f64,
+        var_stbet_p_slot: &mut f64,
+        var_stct_p_slot: &mut f64,
+        var_toxov_p_slot: &mut f64,
+        var_toxovd_p_slot: &mut f64,
+        var_vsbnud_p_slot: &mut f64,
+    ) {
+        let mut var_aa: f64 = *var_aa_slot;
+        let mut var_bb: f64 = *var_bb_slot;
+        let mut var_betn_p: f64 = *var_betn_p_slot;
+        let mut var_cf_p: f64 = *var_cf_p_slot;
+        let mut var_cfb_p: f64 = *var_cfb_p_slot;
+        let mut var_cfd_p: f64 = *var_cfd_p_slot;
+        let mut var_ct_p: f64 = *var_ct_p_slot;
+        let mut var_ctb_p: f64 = *var_ctb_p_slot;
+        let mut var_ctg_p: f64 = *var_ctg_p_slot;
+        let mut var_dphib_p: f64 = *var_dphib_p_slot;
+        let mut var_dvsbnud_p: f64 = *var_dvsbnud_p_slot;
+        let mut var_fbet1e: f64 = *var_fbet1e_slot;
+        let mut var_gfacnud_p: f64 = *var_gfacnud_p_slot;
+        let mut var_gpe: f64 = *var_gpe_slot;
+        let mut var_guard37: f64 = *var_guard37_slot;
+        let mut var_guard38: f64 = *var_guard38_slot;
+        let mut var_gwe: f64 = *var_gwe_slot;
+        let mut var_lp1e: f64 = *var_lp1e_slot;
+        let mut var_lpcke: f64 = *var_lpcke_slot;
+        let mut var_mue_p: f64 = *var_mue_p_slot;
+        let mut var_neff_p: f64 = *var_neff_p_slot;
+        let mut var_nov_p: f64 = *var_nov_p_slot;
+        let mut var_novd_p: f64 = *var_novd_p_slot;
+        let mut var_np_p: f64 = *var_np_p_slot;
+        let mut var_npcke: f64 = *var_npcke_slot;
+        let mut var_nsub: f64 = *var_nsub_slot;
+        let mut var_psce_p: f64 = *var_psce_p_slot;
+        let mut var_psceb_p: f64 = *var_psceb_p_slot;
+        let mut var_psced_p: f64 = *var_psced_p_slot;
+        let mut var_stbet_p: f64 = *var_stbet_p_slot;
+        let mut var_stct_p: f64 = *var_stct_p_slot;
+        let mut var_toxov_p: f64 = *var_toxov_p_slot;
+        let mut var_toxovd_p: f64 = *var_toxovd_p_slot;
+        let mut var_vsbnud_p: f64 = *var_vsbnud_p_slot;
 
         let (assign5310_e3963,) = {
     if (var_guard36 != 0.0) {
@@ -5540,150 +5170,6 @@ impl Instance {
 };
         var_psceb_p = assign5600_e4261;
 
-        *var_aa_slot = var_aa;
-        *var_bb_slot = var_bb;
-        *var_betnedge_p_slot = var_betnedge_p;
-        *var_cf_p_slot = var_cf_p;
-        *var_cfb_p_slot = var_cfb_p;
-        *var_cfbedge_p_slot = var_cfbedge_p;
-        *var_cfd_p_slot = var_cfd_p;
-        *var_cfdedge_p_slot = var_cfdedge_p;
-        *var_cfedge_p_slot = var_cfedge_p;
-        *var_ct_p_slot = var_ct_p;
-        *var_ctb_p_slot = var_ctb_p;
-        *var_ctedge_p_slot = var_ctedge_p;
-        *var_ctg_p_slot = var_ctg_p;
-        *var_dphib_p_slot = var_dphib_p;
-        *var_dphibedge_p_slot = var_dphibedge_p;
-        *var_dvsbnud_p_slot = var_dvsbnud_p;
-        *var_epsrox_p_slot = var_epsrox_p;
-        *var_gfacnud_p_slot = var_gfacnud_p;
-        *var_guard36_slot = var_guard36;
-        *var_guard37_slot = var_guard37;
-        *var_guard38_slot = var_guard38;
-        *var_lpcke_slot = var_lpcke;
-        *var_neff_p_slot = var_neff_p;
-        *var_neffedge_p_slot = var_neffedge_p;
-        *var_nov_p_slot = var_nov_p;
-        *var_novd_p_slot = var_novd_p;
-        *var_np_p_slot = var_np_p;
-        *var_npcke_slot = var_npcke;
-        *var_nsub_slot = var_nsub;
-        *var_nsub0e_slot = var_nsub0e;
-        *var_psce_p_slot = var_psce_p;
-        *var_psceb_p_slot = var_psceb_p;
-        *var_pscebedge_p_slot = var_pscebedge_p;
-        *var_psced_p_slot = var_psced_p;
-        *var_pscededge_p_slot = var_pscededge_p;
-        *var_psceedge_p_slot = var_psceedge_p;
-        *var_rbulk_p_slot = var_rbulk_p;
-        *var_rde_p_slot = var_rde_p;
-        *var_rg_p_slot = var_rg_p;
-        *var_rjund_p_slot = var_rjund_p;
-        *var_rjuns_p_slot = var_rjuns_p;
-        *var_rse_p_slot = var_rse_p;
-        *var_rwell_p_slot = var_rwell_p;
-        *var_st2vfb_p_slot = var_st2vfb_p;
-        *var_stbetedge_p_slot = var_stbetedge_p;
-        *var_stct_p_slot = var_stct_p;
-        *var_stvfb_p_slot = var_stvfb_p;
-        *var_stvfbedge_p_slot = var_stvfbedge_p;
-        *var_tox_p_slot = var_tox_p;
-        *var_toxov_p_slot = var_toxov_p;
-        *var_toxovd_p_slot = var_toxovd_p;
-        *var_vfb_p_slot = var_vfb_p;
-        *var_vfbedge_p_slot = var_vfbedge_p;
-        *var_vsbnud_p_slot = var_vsbnud_p;
-    }
-
-    pub(super) fn stamp_transient_block_7(
-        p: &Parameters,
-        var_guard36: f64,
-        var_iae: f64,
-        var_ile: f64,
-        var_iwe: f64,
-        var_le: f64,
-        var_we: f64,
-        var_a1_p_slot: &mut f64,
-        var_a2_p_slot: &mut f64,
-        var_a3_p_slot: &mut f64,
-        var_a4_p_slot: &mut f64,
-        var_alp1_p_slot: &mut f64,
-        var_alp2_p_slot: &mut f64,
-        var_alp_p_slot: &mut f64,
-        var_ax_p_slot: &mut f64,
-        var_betn_p_slot: &mut f64,
-        var_cs_p_slot: &mut f64,
-        var_fbet1e_slot: &mut f64,
-        var_feta_p_slot: &mut f64,
-        var_gco_p_slot: &mut f64,
-        var_gpe_slot: &mut f64,
-        var_gwe_slot: &mut f64,
-        var_imaxii_p_slot: &mut f64,
-        var_lp1e_slot: &mut f64,
-        var_mue_p_slot: &mut f64,
-        var_rs_p_slot: &mut f64,
-        var_rsb_p_slot: &mut f64,
-        var_rsg_p_slot: &mut f64,
-        var_sta2_p_slot: &mut f64,
-        var_stbet_p_slot: &mut f64,
-        var_stcs_p_slot: &mut f64,
-        var_stmue_p_slot: &mut f64,
-        var_strs_p_slot: &mut f64,
-        var_stthecs_p_slot: &mut f64,
-        var_stthemu_p_slot: &mut f64,
-        var_stthesat_p_slot: &mut f64,
-        var_stxcor_p_slot: &mut f64,
-        var_thecs_p_slot: &mut f64,
-        var_themu_p_slot: &mut f64,
-        var_thesat_p_slot: &mut f64,
-        var_thesatb_p_slot: &mut f64,
-        var_thesatg_p_slot: &mut f64,
-        var_thesatt_p_slot: &mut f64,
-        var_tmpx_slot: &mut f64,
-        var_vp_p_slot: &mut f64,
-        var_xcor_p_slot: &mut f64,
-    ) {
-        let mut var_a1_p: f64 = *var_a1_p_slot;
-        let mut var_a2_p: f64 = *var_a2_p_slot;
-        let mut var_a3_p: f64 = *var_a3_p_slot;
-        let mut var_a4_p: f64 = *var_a4_p_slot;
-        let mut var_alp1_p: f64 = *var_alp1_p_slot;
-        let mut var_alp2_p: f64 = *var_alp2_p_slot;
-        let mut var_alp_p: f64 = *var_alp_p_slot;
-        let mut var_ax_p: f64 = *var_ax_p_slot;
-        let mut var_betn_p: f64 = *var_betn_p_slot;
-        let mut var_cs_p: f64 = *var_cs_p_slot;
-        let mut var_fbet1e: f64 = *var_fbet1e_slot;
-        let mut var_feta_p: f64 = *var_feta_p_slot;
-        let mut var_gco_p: f64 = *var_gco_p_slot;
-        let mut var_gpe: f64 = *var_gpe_slot;
-        let mut var_gwe: f64 = *var_gwe_slot;
-        let mut var_imaxii_p: f64 = *var_imaxii_p_slot;
-        let mut var_lp1e: f64 = *var_lp1e_slot;
-        let mut var_mue_p: f64 = *var_mue_p_slot;
-        let mut var_rs_p: f64 = *var_rs_p_slot;
-        let mut var_rsb_p: f64 = *var_rsb_p_slot;
-        let mut var_rsg_p: f64 = *var_rsg_p_slot;
-        let mut var_sta2_p: f64 = *var_sta2_p_slot;
-        let mut var_stbet_p: f64 = *var_stbet_p_slot;
-        let mut var_stcs_p: f64 = *var_stcs_p_slot;
-        let mut var_stmue_p: f64 = *var_stmue_p_slot;
-        let mut var_strs_p: f64 = *var_strs_p_slot;
-        let mut var_stthecs_p: f64 = *var_stthecs_p_slot;
-        let mut var_stthemu_p: f64 = *var_stthemu_p_slot;
-        let mut var_stthesat_p: f64 = *var_stthesat_p_slot;
-        let mut var_stxcor_p: f64 = *var_stxcor_p_slot;
-        let mut var_thecs_p: f64 = *var_thecs_p_slot;
-        let mut var_themu_p: f64 = *var_themu_p_slot;
-        let mut var_thesat_p: f64 = *var_thesat_p_slot;
-        let mut var_thesatb_p: f64 = *var_thesatb_p_slot;
-        let mut var_thesatg_p: f64 = *var_thesatg_p_slot;
-        let mut var_thesatt_p: f64 = *var_thesatt_p_slot;
-        let mut var_tmpx: f64 = *var_tmpx_slot;
-        let mut var_vp_p: f64 = *var_vp_p_slot;
-        let mut var_xcor_p: f64 = *var_xcor_p_slot;
-
         let (assign5610_e4271,) = {
     if (var_guard36 != 0.0) {
         let assign5610_e4267: f64 = (p.p258 * var_iwe);
@@ -5814,6 +5300,141 @@ impl Instance {
     }
 };
         var_mue_p = assign5680_e4388;
+
+        *var_aa_slot = var_aa;
+        *var_bb_slot = var_bb;
+        *var_betn_p_slot = var_betn_p;
+        *var_cf_p_slot = var_cf_p;
+        *var_cfb_p_slot = var_cfb_p;
+        *var_cfd_p_slot = var_cfd_p;
+        *var_ct_p_slot = var_ct_p;
+        *var_ctb_p_slot = var_ctb_p;
+        *var_ctg_p_slot = var_ctg_p;
+        *var_dphib_p_slot = var_dphib_p;
+        *var_dvsbnud_p_slot = var_dvsbnud_p;
+        *var_fbet1e_slot = var_fbet1e;
+        *var_gfacnud_p_slot = var_gfacnud_p;
+        *var_gpe_slot = var_gpe;
+        *var_guard37_slot = var_guard37;
+        *var_guard38_slot = var_guard38;
+        *var_gwe_slot = var_gwe;
+        *var_lp1e_slot = var_lp1e;
+        *var_lpcke_slot = var_lpcke;
+        *var_mue_p_slot = var_mue_p;
+        *var_neff_p_slot = var_neff_p;
+        *var_nov_p_slot = var_nov_p;
+        *var_novd_p_slot = var_novd_p;
+        *var_np_p_slot = var_np_p;
+        *var_npcke_slot = var_npcke;
+        *var_nsub_slot = var_nsub;
+        *var_psce_p_slot = var_psce_p;
+        *var_psceb_p_slot = var_psceb_p;
+        *var_psced_p_slot = var_psced_p;
+        *var_stbet_p_slot = var_stbet_p;
+        *var_stct_p_slot = var_stct_p;
+        *var_toxov_p_slot = var_toxov_p;
+        *var_toxovd_p_slot = var_toxovd_p;
+        *var_vsbnud_p_slot = var_vsbnud_p;
+    }
+
+    pub(super) fn stamp_transient_block_7(
+        p: &Parameters,
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+        var_gpe: f64,
+        var_guard36: f64,
+        var_gwe: f64,
+        var_iae: f64,
+        var_ile: f64,
+        var_iwe: f64,
+        var_a1_p_slot: &mut f64,
+        var_a2_p_slot: &mut f64,
+        var_a3_p_slot: &mut f64,
+        var_a4_p_slot: &mut f64,
+        var_alp1_p_slot: &mut f64,
+        var_alp2_p_slot: &mut f64,
+        var_alp_p_slot: &mut f64,
+        var_ax_p_slot: &mut f64,
+        var_cs_p_slot: &mut f64,
+        var_feta_p_slot: &mut f64,
+        var_gc2_p_slot: &mut f64,
+        var_gc2ov_p_slot: &mut f64,
+        var_gc2ovd_p_slot: &mut f64,
+        var_gc3_p_slot: &mut f64,
+        var_gc3ov_p_slot: &mut f64,
+        var_gco_p_slot: &mut f64,
+        var_guard39_slot: &mut f64,
+        var_guard40_slot: &mut f64,
+        var_guard41_slot: &mut f64,
+        var_iginv_p_slot: &mut f64,
+        var_igov_p_slot: &mut f64,
+        var_igovd_p_slot: &mut f64,
+        var_imaxii_p_slot: &mut f64,
+        var_rs_p_slot: &mut f64,
+        var_rsb_p_slot: &mut f64,
+        var_rsg_p_slot: &mut f64,
+        var_sta2_p_slot: &mut f64,
+        var_stcs_p_slot: &mut f64,
+        var_stig_p_slot: &mut f64,
+        var_stmue_p_slot: &mut f64,
+        var_strs_p_slot: &mut f64,
+        var_stthecs_p_slot: &mut f64,
+        var_stthemu_p_slot: &mut f64,
+        var_stthesat_p_slot: &mut f64,
+        var_stxcor_p_slot: &mut f64,
+        var_thecs_p_slot: &mut f64,
+        var_themu_p_slot: &mut f64,
+        var_thesat_p_slot: &mut f64,
+        var_thesatb_p_slot: &mut f64,
+        var_thesatg_p_slot: &mut f64,
+        var_thesatt_p_slot: &mut f64,
+        var_tmpx_slot: &mut f64,
+        var_vp_p_slot: &mut f64,
+        var_xcor_p_slot: &mut f64,
+    ) {
+        let mut var_a1_p: f64 = *var_a1_p_slot;
+        let mut var_a2_p: f64 = *var_a2_p_slot;
+        let mut var_a3_p: f64 = *var_a3_p_slot;
+        let mut var_a4_p: f64 = *var_a4_p_slot;
+        let mut var_alp1_p: f64 = *var_alp1_p_slot;
+        let mut var_alp2_p: f64 = *var_alp2_p_slot;
+        let mut var_alp_p: f64 = *var_alp_p_slot;
+        let mut var_ax_p: f64 = *var_ax_p_slot;
+        let mut var_cs_p: f64 = *var_cs_p_slot;
+        let mut var_feta_p: f64 = *var_feta_p_slot;
+        let mut var_gc2_p: f64 = *var_gc2_p_slot;
+        let mut var_gc2ov_p: f64 = *var_gc2ov_p_slot;
+        let mut var_gc2ovd_p: f64 = *var_gc2ovd_p_slot;
+        let mut var_gc3_p: f64 = *var_gc3_p_slot;
+        let mut var_gc3ov_p: f64 = *var_gc3ov_p_slot;
+        let mut var_gco_p: f64 = *var_gco_p_slot;
+        let mut var_guard39: f64 = *var_guard39_slot;
+        let mut var_guard40: f64 = *var_guard40_slot;
+        let mut var_guard41: f64 = *var_guard41_slot;
+        let mut var_iginv_p: f64 = *var_iginv_p_slot;
+        let mut var_igov_p: f64 = *var_igov_p_slot;
+        let mut var_igovd_p: f64 = *var_igovd_p_slot;
+        let mut var_imaxii_p: f64 = *var_imaxii_p_slot;
+        let mut var_rs_p: f64 = *var_rs_p_slot;
+        let mut var_rsb_p: f64 = *var_rsb_p_slot;
+        let mut var_rsg_p: f64 = *var_rsg_p_slot;
+        let mut var_sta2_p: f64 = *var_sta2_p_slot;
+        let mut var_stcs_p: f64 = *var_stcs_p_slot;
+        let mut var_stig_p: f64 = *var_stig_p_slot;
+        let mut var_stmue_p: f64 = *var_stmue_p_slot;
+        let mut var_strs_p: f64 = *var_strs_p_slot;
+        let mut var_stthecs_p: f64 = *var_stthecs_p_slot;
+        let mut var_stthemu_p: f64 = *var_stthemu_p_slot;
+        let mut var_stthesat_p: f64 = *var_stthesat_p_slot;
+        let mut var_stxcor_p: f64 = *var_stxcor_p_slot;
+        let mut var_thecs_p: f64 = *var_thecs_p_slot;
+        let mut var_themu_p: f64 = *var_themu_p_slot;
+        let mut var_thesat_p: f64 = *var_thesat_p_slot;
+        let mut var_thesatb_p: f64 = *var_thesatb_p_slot;
+        let mut var_thesatg_p: f64 = *var_thesatg_p_slot;
+        let mut var_thesatt_p: f64 = *var_thesatt_p_slot;
+        let mut var_tmpx: f64 = *var_tmpx_slot;
+        let mut var_vp_p: f64 = *var_vp_p_slot;
+        let mut var_xcor_p: f64 = *var_xcor_p_slot;
 
         let (assign5690_e4392,) = {
     if (var_guard36 != 0.0) {
@@ -6195,150 +5816,6 @@ impl Instance {
 };
         var_gco_p = assign6010_e4686;
 
-        *var_a1_p_slot = var_a1_p;
-        *var_a2_p_slot = var_a2_p;
-        *var_a3_p_slot = var_a3_p;
-        *var_a4_p_slot = var_a4_p;
-        *var_alp1_p_slot = var_alp1_p;
-        *var_alp2_p_slot = var_alp2_p;
-        *var_alp_p_slot = var_alp_p;
-        *var_ax_p_slot = var_ax_p;
-        *var_betn_p_slot = var_betn_p;
-        *var_cs_p_slot = var_cs_p;
-        *var_fbet1e_slot = var_fbet1e;
-        *var_feta_p_slot = var_feta_p;
-        *var_gco_p_slot = var_gco_p;
-        *var_gpe_slot = var_gpe;
-        *var_gwe_slot = var_gwe;
-        *var_imaxii_p_slot = var_imaxii_p;
-        *var_lp1e_slot = var_lp1e;
-        *var_mue_p_slot = var_mue_p;
-        *var_rs_p_slot = var_rs_p;
-        *var_rsb_p_slot = var_rsb_p;
-        *var_rsg_p_slot = var_rsg_p;
-        *var_sta2_p_slot = var_sta2_p;
-        *var_stbet_p_slot = var_stbet_p;
-        *var_stcs_p_slot = var_stcs_p;
-        *var_stmue_p_slot = var_stmue_p;
-        *var_strs_p_slot = var_strs_p;
-        *var_stthecs_p_slot = var_stthecs_p;
-        *var_stthemu_p_slot = var_stthemu_p;
-        *var_stthesat_p_slot = var_stthesat_p;
-        *var_stxcor_p_slot = var_stxcor_p;
-        *var_thecs_p_slot = var_thecs_p;
-        *var_themu_p_slot = var_themu_p;
-        *var_thesat_p_slot = var_thesat_p;
-        *var_thesatb_p_slot = var_thesatb_p;
-        *var_thesatg_p_slot = var_thesatg_p;
-        *var_thesatt_p_slot = var_thesatt_p;
-        *var_tmpx_slot = var_tmpx;
-        *var_vp_p_slot = var_vp_p;
-        *var_xcor_p_slot = var_xcor_p;
-    }
-
-    pub(super) fn stamp_transient_block_8(
-        p: &Parameters,
-        param_given: &[bool; Instance::PARAMETER_COUNT],
-        var_gpe: f64,
-        var_guard36: f64,
-        var_gwe: f64,
-        var_iae: f64,
-        var_ile: f64,
-        var_iwe: f64,
-        var_lecv: f64,
-        var_wecv: f64,
-        var_agidl_p_slot: &mut f64,
-        var_agidld_p_slot: &mut f64,
-        var_alpac_p_slot: &mut f64,
-        var_axac_p_slot: &mut f64,
-        var_axacl_i_slot: &mut f64,
-        var_axaco_i_slot: &mut f64,
-        var_bgidl_p_slot: &mut f64,
-        var_bgidld_p_slot: &mut f64,
-        var_cgidl_p_slot: &mut f64,
-        var_cgidld_p_slot: &mut f64,
-        var_cgov_p_slot: &mut f64,
-        var_cgovd_p_slot: &mut f64,
-        var_chib_p_slot: &mut f64,
-        var_cox_p_slot: &mut f64,
-        var_delvtac_p_slot: &mut f64,
-        var_facneffac_p_slot: &mut f64,
-        var_gc2_p_slot: &mut f64,
-        var_gc2ov_p_slot: &mut f64,
-        var_gc2ovd_p_slot: &mut f64,
-        var_gc3_p_slot: &mut f64,
-        var_gc3ov_p_slot: &mut f64,
-        var_gc3ovd_p_slot: &mut f64,
-        var_guard39_slot: &mut f64,
-        var_guard40_slot: &mut f64,
-        var_guard41_slot: &mut f64,
-        var_guard42_slot: &mut f64,
-        var_guard43_slot: &mut f64,
-        var_guard44_slot: &mut f64,
-        var_guard45_slot: &mut f64,
-        var_guard46_slot: &mut f64,
-        var_guard47_slot: &mut f64,
-        var_guard48_slot: &mut f64,
-        var_guard49_slot: &mut f64,
-        var_iginv_p_slot: &mut f64,
-        var_igov_p_slot: &mut f64,
-        var_igovd_p_slot: &mut f64,
-        var_stbgidl_p_slot: &mut f64,
-        var_stbgidld_p_slot: &mut f64,
-        var_stig_p_slot: &mut f64,
-        var_thesatac_p_slot: &mut f64,
-        var_thesatacl_i_slot: &mut f64,
-        var_thesataclexp_i_slot: &mut f64,
-        var_thesataclw_i_slot: &mut f64,
-        var_thesataco_i_slot: &mut f64,
-        var_thesatacw_i_slot: &mut f64,
-    ) {
-        let mut var_agidl_p: f64 = *var_agidl_p_slot;
-        let mut var_agidld_p: f64 = *var_agidld_p_slot;
-        let mut var_alpac_p: f64 = *var_alpac_p_slot;
-        let mut var_axac_p: f64 = *var_axac_p_slot;
-        let mut var_axacl_i: f64 = *var_axacl_i_slot;
-        let mut var_axaco_i: f64 = *var_axaco_i_slot;
-        let mut var_bgidl_p: f64 = *var_bgidl_p_slot;
-        let mut var_bgidld_p: f64 = *var_bgidld_p_slot;
-        let mut var_cgidl_p: f64 = *var_cgidl_p_slot;
-        let mut var_cgidld_p: f64 = *var_cgidld_p_slot;
-        let mut var_cgov_p: f64 = *var_cgov_p_slot;
-        let mut var_cgovd_p: f64 = *var_cgovd_p_slot;
-        let mut var_chib_p: f64 = *var_chib_p_slot;
-        let mut var_cox_p: f64 = *var_cox_p_slot;
-        let mut var_delvtac_p: f64 = *var_delvtac_p_slot;
-        let mut var_facneffac_p: f64 = *var_facneffac_p_slot;
-        let mut var_gc2_p: f64 = *var_gc2_p_slot;
-        let mut var_gc2ov_p: f64 = *var_gc2ov_p_slot;
-        let mut var_gc2ovd_p: f64 = *var_gc2ovd_p_slot;
-        let mut var_gc3_p: f64 = *var_gc3_p_slot;
-        let mut var_gc3ov_p: f64 = *var_gc3ov_p_slot;
-        let mut var_gc3ovd_p: f64 = *var_gc3ovd_p_slot;
-        let mut var_guard39: f64 = *var_guard39_slot;
-        let mut var_guard40: f64 = *var_guard40_slot;
-        let mut var_guard41: f64 = *var_guard41_slot;
-        let mut var_guard42: f64 = *var_guard42_slot;
-        let mut var_guard43: f64 = *var_guard43_slot;
-        let mut var_guard44: f64 = *var_guard44_slot;
-        let mut var_guard45: f64 = *var_guard45_slot;
-        let mut var_guard46: f64 = *var_guard46_slot;
-        let mut var_guard47: f64 = *var_guard47_slot;
-        let mut var_guard48: f64 = *var_guard48_slot;
-        let mut var_guard49: f64 = *var_guard49_slot;
-        let mut var_iginv_p: f64 = *var_iginv_p_slot;
-        let mut var_igov_p: f64 = *var_igov_p_slot;
-        let mut var_igovd_p: f64 = *var_igovd_p_slot;
-        let mut var_stbgidl_p: f64 = *var_stbgidl_p_slot;
-        let mut var_stbgidld_p: f64 = *var_stbgidld_p_slot;
-        let mut var_stig_p: f64 = *var_stig_p_slot;
-        let mut var_thesatac_p: f64 = *var_thesatac_p_slot;
-        let mut var_thesatacl_i: f64 = *var_thesatacl_i_slot;
-        let mut var_thesataclexp_i: f64 = *var_thesataclexp_i_slot;
-        let mut var_thesataclw_i: f64 = *var_thesataclw_i_slot;
-        let mut var_thesataco_i: f64 = *var_thesataco_i_slot;
-        let mut var_thesatacw_i: f64 = *var_thesatacw_i_slot;
-
         let (assign6020_e4692,) = {
     if (var_guard36 != 0.0) {
         let assign6020_e4690: f64 = (p.p333 / var_iae);
@@ -6465,6 +5942,161 @@ impl Instance {
     }
 };
         var_gc2ovd_p = assign6160_e4766;
+
+        *var_a1_p_slot = var_a1_p;
+        *var_a2_p_slot = var_a2_p;
+        *var_a3_p_slot = var_a3_p;
+        *var_a4_p_slot = var_a4_p;
+        *var_alp1_p_slot = var_alp1_p;
+        *var_alp2_p_slot = var_alp2_p;
+        *var_alp_p_slot = var_alp_p;
+        *var_ax_p_slot = var_ax_p;
+        *var_cs_p_slot = var_cs_p;
+        *var_feta_p_slot = var_feta_p;
+        *var_gc2_p_slot = var_gc2_p;
+        *var_gc2ov_p_slot = var_gc2ov_p;
+        *var_gc2ovd_p_slot = var_gc2ovd_p;
+        *var_gc3_p_slot = var_gc3_p;
+        *var_gc3ov_p_slot = var_gc3ov_p;
+        *var_gco_p_slot = var_gco_p;
+        *var_guard39_slot = var_guard39;
+        *var_guard40_slot = var_guard40;
+        *var_guard41_slot = var_guard41;
+        *var_iginv_p_slot = var_iginv_p;
+        *var_igov_p_slot = var_igov_p;
+        *var_igovd_p_slot = var_igovd_p;
+        *var_imaxii_p_slot = var_imaxii_p;
+        *var_rs_p_slot = var_rs_p;
+        *var_rsb_p_slot = var_rsb_p;
+        *var_rsg_p_slot = var_rsg_p;
+        *var_sta2_p_slot = var_sta2_p;
+        *var_stcs_p_slot = var_stcs_p;
+        *var_stig_p_slot = var_stig_p;
+        *var_stmue_p_slot = var_stmue_p;
+        *var_strs_p_slot = var_strs_p;
+        *var_stthecs_p_slot = var_stthecs_p;
+        *var_stthemu_p_slot = var_stthemu_p;
+        *var_stthesat_p_slot = var_stthesat_p;
+        *var_stxcor_p_slot = var_stxcor_p;
+        *var_thecs_p_slot = var_thecs_p;
+        *var_themu_p_slot = var_themu_p;
+        *var_thesat_p_slot = var_thesat_p;
+        *var_thesatb_p_slot = var_thesatb_p;
+        *var_thesatg_p_slot = var_thesatg_p;
+        *var_thesatt_p_slot = var_thesatt_p;
+        *var_tmpx_slot = var_tmpx;
+        *var_vp_p_slot = var_vp_p;
+        *var_xcor_p_slot = var_xcor_p;
+    }
+
+    pub(super) fn stamp_transient_block_8(
+        p: &Parameters,
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+        var_gc3ov_p: f64,
+        var_gpe: f64,
+        var_guard36: f64,
+        var_gwe: f64,
+        var_iae: f64,
+        var_iilcv: f64,
+        var_iiwcv: f64,
+        var_iiwecv: f64,
+        var_ile: f64,
+        var_iwe: f64,
+        var_lecv: f64,
+        var_wecv: f64,
+        var_agidl_p_slot: &mut f64,
+        var_agidld_p_slot: &mut f64,
+        var_alp1ac_p_slot: &mut f64,
+        var_alpac_p_slot: &mut f64,
+        var_axac_p_slot: &mut f64,
+        var_axacl_i_slot: &mut f64,
+        var_axaco_i_slot: &mut f64,
+        var_axinr_p_slot: &mut f64,
+        var_bgidl_p_slot: &mut f64,
+        var_bgidld_p_slot: &mut f64,
+        var_cfr_p_slot: &mut f64,
+        var_cgbov_p_slot: &mut f64,
+        var_cgidl_p_slot: &mut f64,
+        var_cgidld_p_slot: &mut f64,
+        var_cgov_p_slot: &mut f64,
+        var_cgovaccg_p_slot: &mut f64,
+        var_cgovd_p_slot: &mut f64,
+        var_chib_p_slot: &mut f64,
+        var_cinr_p_slot: &mut f64,
+        var_cinrd_p_slot: &mut f64,
+        var_cox_p_slot: &mut f64,
+        var_delvtac_p_slot: &mut f64,
+        var_dvfbinr_p_slot: &mut f64,
+        var_facneffac_p_slot: &mut f64,
+        var_fcgovacc_p_slot: &mut f64,
+        var_fcgovaccd_p_slot: &mut f64,
+        var_fcinracc_p_slot: &mut f64,
+        var_fcinrdep_p_slot: &mut f64,
+        var_gc3ovd_p_slot: &mut f64,
+        var_guard42_slot: &mut f64,
+        var_guard43_slot: &mut f64,
+        var_guard44_slot: &mut f64,
+        var_guard45_slot: &mut f64,
+        var_guard46_slot: &mut f64,
+        var_guard47_slot: &mut f64,
+        var_guard48_slot: &mut f64,
+        var_guard49_slot: &mut f64,
+        var_stbgidl_p_slot: &mut f64,
+        var_stbgidld_p_slot: &mut f64,
+        var_thesatac_p_slot: &mut f64,
+        var_thesatacl_i_slot: &mut f64,
+        var_thesataclexp_i_slot: &mut f64,
+        var_thesataclw_i_slot: &mut f64,
+        var_thesataco_i_slot: &mut f64,
+        var_thesatacw_i_slot: &mut f64,
+        var_tmpx_slot: &mut f64,
+    ) {
+        let mut var_agidl_p: f64 = *var_agidl_p_slot;
+        let mut var_agidld_p: f64 = *var_agidld_p_slot;
+        let mut var_alp1ac_p: f64 = *var_alp1ac_p_slot;
+        let mut var_alpac_p: f64 = *var_alpac_p_slot;
+        let mut var_axac_p: f64 = *var_axac_p_slot;
+        let mut var_axacl_i: f64 = *var_axacl_i_slot;
+        let mut var_axaco_i: f64 = *var_axaco_i_slot;
+        let mut var_axinr_p: f64 = *var_axinr_p_slot;
+        let mut var_bgidl_p: f64 = *var_bgidl_p_slot;
+        let mut var_bgidld_p: f64 = *var_bgidld_p_slot;
+        let mut var_cfr_p: f64 = *var_cfr_p_slot;
+        let mut var_cgbov_p: f64 = *var_cgbov_p_slot;
+        let mut var_cgidl_p: f64 = *var_cgidl_p_slot;
+        let mut var_cgidld_p: f64 = *var_cgidld_p_slot;
+        let mut var_cgov_p: f64 = *var_cgov_p_slot;
+        let mut var_cgovaccg_p: f64 = *var_cgovaccg_p_slot;
+        let mut var_cgovd_p: f64 = *var_cgovd_p_slot;
+        let mut var_chib_p: f64 = *var_chib_p_slot;
+        let mut var_cinr_p: f64 = *var_cinr_p_slot;
+        let mut var_cinrd_p: f64 = *var_cinrd_p_slot;
+        let mut var_cox_p: f64 = *var_cox_p_slot;
+        let mut var_delvtac_p: f64 = *var_delvtac_p_slot;
+        let mut var_dvfbinr_p: f64 = *var_dvfbinr_p_slot;
+        let mut var_facneffac_p: f64 = *var_facneffac_p_slot;
+        let mut var_fcgovacc_p: f64 = *var_fcgovacc_p_slot;
+        let mut var_fcgovaccd_p: f64 = *var_fcgovaccd_p_slot;
+        let mut var_fcinracc_p: f64 = *var_fcinracc_p_slot;
+        let mut var_fcinrdep_p: f64 = *var_fcinrdep_p_slot;
+        let mut var_gc3ovd_p: f64 = *var_gc3ovd_p_slot;
+        let mut var_guard42: f64 = *var_guard42_slot;
+        let mut var_guard43: f64 = *var_guard43_slot;
+        let mut var_guard44: f64 = *var_guard44_slot;
+        let mut var_guard45: f64 = *var_guard45_slot;
+        let mut var_guard46: f64 = *var_guard46_slot;
+        let mut var_guard47: f64 = *var_guard47_slot;
+        let mut var_guard48: f64 = *var_guard48_slot;
+        let mut var_guard49: f64 = *var_guard49_slot;
+        let mut var_stbgidl_p: f64 = *var_stbgidl_p_slot;
+        let mut var_stbgidld_p: f64 = *var_stbgidld_p_slot;
+        let mut var_thesatac_p: f64 = *var_thesatac_p_slot;
+        let mut var_thesatacl_i: f64 = *var_thesatacl_i_slot;
+        let mut var_thesataclexp_i: f64 = *var_thesataclexp_i_slot;
+        let mut var_thesataclw_i: f64 = *var_thesataclw_i_slot;
+        let mut var_thesataco_i: f64 = *var_thesataco_i_slot;
+        let mut var_thesatacw_i: f64 = *var_thesatacw_i_slot;
+        let mut var_tmpx: f64 = *var_tmpx_slot;
 
         let (assign6170_e4770,) = {
     if (var_guard36 != 0.0) {
@@ -6845,155 +6477,6 @@ impl Instance {
 };
         var_alpac_p = assign6570_e5046;
 
-        *var_agidl_p_slot = var_agidl_p;
-        *var_agidld_p_slot = var_agidld_p;
-        *var_alpac_p_slot = var_alpac_p;
-        *var_axac_p_slot = var_axac_p;
-        *var_axacl_i_slot = var_axacl_i;
-        *var_axaco_i_slot = var_axaco_i;
-        *var_bgidl_p_slot = var_bgidl_p;
-        *var_bgidld_p_slot = var_bgidld_p;
-        *var_cgidl_p_slot = var_cgidl_p;
-        *var_cgidld_p_slot = var_cgidld_p;
-        *var_cgov_p_slot = var_cgov_p;
-        *var_cgovd_p_slot = var_cgovd_p;
-        *var_chib_p_slot = var_chib_p;
-        *var_cox_p_slot = var_cox_p;
-        *var_delvtac_p_slot = var_delvtac_p;
-        *var_facneffac_p_slot = var_facneffac_p;
-        *var_gc2_p_slot = var_gc2_p;
-        *var_gc2ov_p_slot = var_gc2ov_p;
-        *var_gc2ovd_p_slot = var_gc2ovd_p;
-        *var_gc3_p_slot = var_gc3_p;
-        *var_gc3ov_p_slot = var_gc3ov_p;
-        *var_gc3ovd_p_slot = var_gc3ovd_p;
-        *var_guard39_slot = var_guard39;
-        *var_guard40_slot = var_guard40;
-        *var_guard41_slot = var_guard41;
-        *var_guard42_slot = var_guard42;
-        *var_guard43_slot = var_guard43;
-        *var_guard44_slot = var_guard44;
-        *var_guard45_slot = var_guard45;
-        *var_guard46_slot = var_guard46;
-        *var_guard47_slot = var_guard47;
-        *var_guard48_slot = var_guard48;
-        *var_guard49_slot = var_guard49;
-        *var_iginv_p_slot = var_iginv_p;
-        *var_igov_p_slot = var_igov_p;
-        *var_igovd_p_slot = var_igovd_p;
-        *var_stbgidl_p_slot = var_stbgidl_p;
-        *var_stbgidld_p_slot = var_stbgidld_p;
-        *var_stig_p_slot = var_stig_p;
-        *var_thesatac_p_slot = var_thesatac_p;
-        *var_thesatacl_i_slot = var_thesatacl_i;
-        *var_thesataclexp_i_slot = var_thesataclexp_i;
-        *var_thesataclw_i_slot = var_thesataclw_i;
-        *var_thesataco_i_slot = var_thesataco_i;
-        *var_thesatacw_i_slot = var_thesatacw_i;
-    }
-
-    pub(super) fn stamp_transient_block_9(
-        p: &Parameters,
-        var_betn_p: f64,
-        var_guard36: f64,
-        var_iae: f64,
-        var_iilcv: f64,
-        var_iiwcv: f64,
-        var_iiwecv: f64,
-        var_ile: f64,
-        var_iwe: f64,
-        var_l_f: f64,
-        var_l_slif: f64,
-        var_le: f64,
-        var_nf_i: f64,
-        var_ngcon_i: f64,
-        var_w_f: f64,
-        var_we: f64,
-        var_xgwe: f64,
-        var_alp1ac_p_slot: &mut f64,
-        var_axinr_p_slot: &mut f64,
-        var_betnedge_p_slot: &mut f64,
-        var_cfbedge_p_slot: &mut f64,
-        var_cfdedge_p_slot: &mut f64,
-        var_cfedge_p_slot: &mut f64,
-        var_cfr_p_slot: &mut f64,
-        var_cfrd_p_slot: &mut f64,
-        var_cgbov_p_slot: &mut f64,
-        var_cgovaccg_p_slot: &mut f64,
-        var_cinr_p_slot: &mut f64,
-        var_cinrd_p_slot: &mut f64,
-        var_ctedge_p_slot: &mut f64,
-        var_dphibedge_p_slot: &mut f64,
-        var_dvfbinr_p_slot: &mut f64,
-        var_fcgovacc_p_slot: &mut f64,
-        var_fcgovaccd_p_slot: &mut f64,
-        var_fcinracc_p_slot: &mut f64,
-        var_fcinrdep_p_slot: &mut f64,
-        var_fnt_p_slot: &mut f64,
-        var_fntexc_p_slot: &mut f64,
-        var_gpe_edge_slot: &mut f64,
-        var_guard50_slot: &mut f64,
-        var_kuowe_slot: &mut f64,
-        var_kvthowe_slot: &mut f64,
-        var_neffedge_p_slot: &mut f64,
-        var_pscebedge_p_slot: &mut f64,
-        var_pscededge_p_slot: &mut f64,
-        var_psceedge_p_slot: &mut f64,
-        var_rde_p_slot: &mut f64,
-        var_rg_p_slot: &mut f64,
-        var_rse_p_slot: &mut f64,
-        var_rsh_i_slot: &mut f64,
-        var_rshd_i_slot: &mut f64,
-        var_rwell_p_slot: &mut f64,
-        var_stbetedge_p_slot: &mut f64,
-        var_stvfbedge_p_slot: &mut f64,
-        var_temp0_slot: &mut f64,
-        var_tmpx_slot: &mut f64,
-        var_vfbedge_p_slot: &mut f64,
-        var_we_edge_slot: &mut f64,
-    ) {
-        let mut var_alp1ac_p: f64 = *var_alp1ac_p_slot;
-        let mut var_axinr_p: f64 = *var_axinr_p_slot;
-        let mut var_betnedge_p: f64 = *var_betnedge_p_slot;
-        let mut var_cfbedge_p: f64 = *var_cfbedge_p_slot;
-        let mut var_cfdedge_p: f64 = *var_cfdedge_p_slot;
-        let mut var_cfedge_p: f64 = *var_cfedge_p_slot;
-        let mut var_cfr_p: f64 = *var_cfr_p_slot;
-        let mut var_cfrd_p: f64 = *var_cfrd_p_slot;
-        let mut var_cgbov_p: f64 = *var_cgbov_p_slot;
-        let mut var_cgovaccg_p: f64 = *var_cgovaccg_p_slot;
-        let mut var_cinr_p: f64 = *var_cinr_p_slot;
-        let mut var_cinrd_p: f64 = *var_cinrd_p_slot;
-        let mut var_ctedge_p: f64 = *var_ctedge_p_slot;
-        let mut var_dphibedge_p: f64 = *var_dphibedge_p_slot;
-        let mut var_dvfbinr_p: f64 = *var_dvfbinr_p_slot;
-        let mut var_fcgovacc_p: f64 = *var_fcgovacc_p_slot;
-        let mut var_fcgovaccd_p: f64 = *var_fcgovaccd_p_slot;
-        let mut var_fcinracc_p: f64 = *var_fcinracc_p_slot;
-        let mut var_fcinrdep_p: f64 = *var_fcinrdep_p_slot;
-        let mut var_fnt_p: f64 = *var_fnt_p_slot;
-        let mut var_fntexc_p: f64 = *var_fntexc_p_slot;
-        let mut var_gpe_edge: f64 = *var_gpe_edge_slot;
-        let mut var_guard50: f64 = *var_guard50_slot;
-        let mut var_kuowe: f64 = *var_kuowe_slot;
-        let mut var_kvthowe: f64 = *var_kvthowe_slot;
-        let mut var_neffedge_p: f64 = *var_neffedge_p_slot;
-        let mut var_pscebedge_p: f64 = *var_pscebedge_p_slot;
-        let mut var_pscededge_p: f64 = *var_pscededge_p_slot;
-        let mut var_psceedge_p: f64 = *var_psceedge_p_slot;
-        let mut var_rde_p: f64 = *var_rde_p_slot;
-        let mut var_rg_p: f64 = *var_rg_p_slot;
-        let mut var_rse_p: f64 = *var_rse_p_slot;
-        let mut var_rsh_i: f64 = *var_rsh_i_slot;
-        let mut var_rshd_i: f64 = *var_rshd_i_slot;
-        let mut var_rwell_p: f64 = *var_rwell_p_slot;
-        let mut var_stbetedge_p: f64 = *var_stbetedge_p_slot;
-        let mut var_stvfbedge_p: f64 = *var_stvfbedge_p_slot;
-        let mut var_temp0: f64 = *var_temp0_slot;
-        let mut var_tmpx: f64 = *var_tmpx_slot;
-        let mut var_vfbedge_p: f64 = *var_vfbedge_p_slot;
-        let mut var_we_edge: f64 = *var_we_edge_slot;
-
         let (assign6580_e5052,) = {
     if (var_guard36 != 0.0) {
         let assign6580_e5050: f64 = (var_ile).powf(p.p372);
@@ -7123,6 +6606,157 @@ impl Instance {
     }
 };
         var_cfr_p = assign6700_e5124;
+
+        *var_agidl_p_slot = var_agidl_p;
+        *var_agidld_p_slot = var_agidld_p;
+        *var_alp1ac_p_slot = var_alp1ac_p;
+        *var_alpac_p_slot = var_alpac_p;
+        *var_axac_p_slot = var_axac_p;
+        *var_axacl_i_slot = var_axacl_i;
+        *var_axaco_i_slot = var_axaco_i;
+        *var_axinr_p_slot = var_axinr_p;
+        *var_bgidl_p_slot = var_bgidl_p;
+        *var_bgidld_p_slot = var_bgidld_p;
+        *var_cfr_p_slot = var_cfr_p;
+        *var_cgbov_p_slot = var_cgbov_p;
+        *var_cgidl_p_slot = var_cgidl_p;
+        *var_cgidld_p_slot = var_cgidld_p;
+        *var_cgov_p_slot = var_cgov_p;
+        *var_cgovaccg_p_slot = var_cgovaccg_p;
+        *var_cgovd_p_slot = var_cgovd_p;
+        *var_chib_p_slot = var_chib_p;
+        *var_cinr_p_slot = var_cinr_p;
+        *var_cinrd_p_slot = var_cinrd_p;
+        *var_cox_p_slot = var_cox_p;
+        *var_delvtac_p_slot = var_delvtac_p;
+        *var_dvfbinr_p_slot = var_dvfbinr_p;
+        *var_facneffac_p_slot = var_facneffac_p;
+        *var_fcgovacc_p_slot = var_fcgovacc_p;
+        *var_fcgovaccd_p_slot = var_fcgovaccd_p;
+        *var_fcinracc_p_slot = var_fcinracc_p;
+        *var_fcinrdep_p_slot = var_fcinrdep_p;
+        *var_gc3ovd_p_slot = var_gc3ovd_p;
+        *var_guard42_slot = var_guard42;
+        *var_guard43_slot = var_guard43;
+        *var_guard44_slot = var_guard44;
+        *var_guard45_slot = var_guard45;
+        *var_guard46_slot = var_guard46;
+        *var_guard47_slot = var_guard47;
+        *var_guard48_slot = var_guard48;
+        *var_guard49_slot = var_guard49;
+        *var_stbgidl_p_slot = var_stbgidl_p;
+        *var_stbgidld_p_slot = var_stbgidld_p;
+        *var_thesatac_p_slot = var_thesatac_p;
+        *var_thesatacl_i_slot = var_thesatacl_i;
+        *var_thesataclexp_i_slot = var_thesataclexp_i;
+        *var_thesataclw_i_slot = var_thesataclw_i;
+        *var_thesataco_i_slot = var_thesataco_i;
+        *var_thesatacw_i_slot = var_thesatacw_i;
+        *var_tmpx_slot = var_tmpx;
+    }
+
+    pub(super) fn stamp_transient_block_9(
+        p: &Parameters,
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+        var_betn_p: f64,
+        var_guard36: f64,
+        var_iae: f64,
+        var_iiwcv: f64,
+        var_ile: f64,
+        var_iwe: f64,
+        var_l_f: f64,
+        var_l_slif: f64,
+        var_le: f64,
+        var_nf_i: f64,
+        var_ngcon_i: f64,
+        var_w_f: f64,
+        var_we: f64,
+        var_xgwe: f64,
+        var_betnedge_p_slot: &mut f64,
+        var_cfbedge_p_slot: &mut f64,
+        var_cfdedge_p_slot: &mut f64,
+        var_cfedge_p_slot: &mut f64,
+        var_cfrd_p_slot: &mut f64,
+        var_ctedge_p_slot: &mut f64,
+        var_dphibedge_p_slot: &mut f64,
+        var_fnt_p_slot: &mut f64,
+        var_fntexc_p_slot: &mut f64,
+        var_gfacnud_p_slot: &mut f64,
+        var_gpe_edge_slot: &mut f64,
+        var_guard50_slot: &mut f64,
+        var_guard51_slot: &mut f64,
+        var_guard52_slot: &mut f64,
+        var_guard53_slot: &mut f64,
+        var_guard54_slot: &mut f64,
+        var_guard55_slot: &mut f64,
+        var_guard56_slot: &mut f64,
+        var_kuowe_slot: &mut f64,
+        var_kvthowe_slot: &mut f64,
+        var_neff_p_slot: &mut f64,
+        var_neffedge_p_slot: &mut f64,
+        var_pscebedge_p_slot: &mut f64,
+        var_pscededge_p_slot: &mut f64,
+        var_psceedge_p_slot: &mut f64,
+        var_rbulk_p_slot: &mut f64,
+        var_rde_p_slot: &mut f64,
+        var_rg_p_slot: &mut f64,
+        var_rjund_p_slot: &mut f64,
+        var_rjuns_p_slot: &mut f64,
+        var_rse_p_slot: &mut f64,
+        var_rsh_i_slot: &mut f64,
+        var_rshd_i_slot: &mut f64,
+        var_rwell_p_slot: &mut f64,
+        var_stbetedge_p_slot: &mut f64,
+        var_stvfb_p_slot: &mut f64,
+        var_stvfbedge_p_slot: &mut f64,
+        var_temp0_slot: &mut f64,
+        var_vfb_p_slot: &mut f64,
+        var_vfbedge_p_slot: &mut f64,
+        var_vsbnud_p_slot: &mut f64,
+        var_we_edge_slot: &mut f64,
+    ) {
+        let mut var_betnedge_p: f64 = *var_betnedge_p_slot;
+        let mut var_cfbedge_p: f64 = *var_cfbedge_p_slot;
+        let mut var_cfdedge_p: f64 = *var_cfdedge_p_slot;
+        let mut var_cfedge_p: f64 = *var_cfedge_p_slot;
+        let mut var_cfrd_p: f64 = *var_cfrd_p_slot;
+        let mut var_ctedge_p: f64 = *var_ctedge_p_slot;
+        let mut var_dphibedge_p: f64 = *var_dphibedge_p_slot;
+        let mut var_fnt_p: f64 = *var_fnt_p_slot;
+        let mut var_fntexc_p: f64 = *var_fntexc_p_slot;
+        let mut var_gfacnud_p: f64 = *var_gfacnud_p_slot;
+        let mut var_gpe_edge: f64 = *var_gpe_edge_slot;
+        let mut var_guard50: f64 = *var_guard50_slot;
+        let mut var_guard51: f64 = *var_guard51_slot;
+        let mut var_guard52: f64 = *var_guard52_slot;
+        let mut var_guard53: f64 = *var_guard53_slot;
+        let mut var_guard54: f64 = *var_guard54_slot;
+        let mut var_guard55: f64 = *var_guard55_slot;
+        let mut var_guard56: f64 = *var_guard56_slot;
+        let mut var_kuowe: f64 = *var_kuowe_slot;
+        let mut var_kvthowe: f64 = *var_kvthowe_slot;
+        let mut var_neff_p: f64 = *var_neff_p_slot;
+        let mut var_neffedge_p: f64 = *var_neffedge_p_slot;
+        let mut var_pscebedge_p: f64 = *var_pscebedge_p_slot;
+        let mut var_pscededge_p: f64 = *var_pscededge_p_slot;
+        let mut var_psceedge_p: f64 = *var_psceedge_p_slot;
+        let mut var_rbulk_p: f64 = *var_rbulk_p_slot;
+        let mut var_rde_p: f64 = *var_rde_p_slot;
+        let mut var_rg_p: f64 = *var_rg_p_slot;
+        let mut var_rjund_p: f64 = *var_rjund_p_slot;
+        let mut var_rjuns_p: f64 = *var_rjuns_p_slot;
+        let mut var_rse_p: f64 = *var_rse_p_slot;
+        let mut var_rsh_i: f64 = *var_rsh_i_slot;
+        let mut var_rshd_i: f64 = *var_rshd_i_slot;
+        let mut var_rwell_p: f64 = *var_rwell_p_slot;
+        let mut var_stbetedge_p: f64 = *var_stbetedge_p_slot;
+        let mut var_stvfb_p: f64 = *var_stvfb_p_slot;
+        let mut var_stvfbedge_p: f64 = *var_stvfbedge_p_slot;
+        let mut var_temp0: f64 = *var_temp0_slot;
+        let mut var_vfb_p: f64 = *var_vfb_p_slot;
+        let mut var_vfbedge_p: f64 = *var_vfbedge_p_slot;
+        let mut var_vsbnud_p: f64 = *var_vsbnud_p_slot;
+        let mut var_we_edge: f64 = *var_we_edge_slot;
 
         let (assign6710_e5130,) = {
     if (var_guard36 != 0.0) {
@@ -7505,174 +7139,6 @@ impl Instance {
 };
         var_rwell_p = assign7130_e5533;
 
-        *var_alp1ac_p_slot = var_alp1ac_p;
-        *var_axinr_p_slot = var_axinr_p;
-        *var_betnedge_p_slot = var_betnedge_p;
-        *var_cfbedge_p_slot = var_cfbedge_p;
-        *var_cfdedge_p_slot = var_cfdedge_p;
-        *var_cfedge_p_slot = var_cfedge_p;
-        *var_cfr_p_slot = var_cfr_p;
-        *var_cfrd_p_slot = var_cfrd_p;
-        *var_cgbov_p_slot = var_cgbov_p;
-        *var_cgovaccg_p_slot = var_cgovaccg_p;
-        *var_cinr_p_slot = var_cinr_p;
-        *var_cinrd_p_slot = var_cinrd_p;
-        *var_ctedge_p_slot = var_ctedge_p;
-        *var_dphibedge_p_slot = var_dphibedge_p;
-        *var_dvfbinr_p_slot = var_dvfbinr_p;
-        *var_fcgovacc_p_slot = var_fcgovacc_p;
-        *var_fcgovaccd_p_slot = var_fcgovaccd_p;
-        *var_fcinracc_p_slot = var_fcinracc_p;
-        *var_fcinrdep_p_slot = var_fcinrdep_p;
-        *var_fnt_p_slot = var_fnt_p;
-        *var_fntexc_p_slot = var_fntexc_p;
-        *var_gpe_edge_slot = var_gpe_edge;
-        *var_guard50_slot = var_guard50;
-        *var_kuowe_slot = var_kuowe;
-        *var_kvthowe_slot = var_kvthowe;
-        *var_neffedge_p_slot = var_neffedge_p;
-        *var_pscebedge_p_slot = var_pscebedge_p;
-        *var_pscededge_p_slot = var_pscededge_p;
-        *var_psceedge_p_slot = var_psceedge_p;
-        *var_rde_p_slot = var_rde_p;
-        *var_rg_p_slot = var_rg_p;
-        *var_rse_p_slot = var_rse_p;
-        *var_rsh_i_slot = var_rsh_i;
-        *var_rshd_i_slot = var_rshd_i;
-        *var_rwell_p_slot = var_rwell_p;
-        *var_stbetedge_p_slot = var_stbetedge_p;
-        *var_stvfbedge_p_slot = var_stvfbedge_p;
-        *var_temp0_slot = var_temp0;
-        *var_tmpx_slot = var_tmpx;
-        *var_vfbedge_p_slot = var_vfbedge_p;
-        *var_we_edge_slot = var_we_edge;
-    }
-
-    pub(super) fn stamp_transient_block_10(
-        p: &Parameters,
-        param_given: &[bool; Instance::PARAMETER_COUNT],
-        var_guard36: f64,
-        var_iae: f64,
-        var_ile: f64,
-        var_ile2: f64,
-        var_iwe: f64,
-        var_le: f64,
-        var_nf_i: f64,
-        var_we: f64,
-        var_betn_p_slot: &mut f64,
-        var_cf_p_slot: &mut f64,
-        var_cfb_p_slot: &mut f64,
-        var_cfd_p_slot: &mut f64,
-        var_cs_p_slot: &mut f64,
-        var_ct_p_slot: &mut f64,
-        var_ctb_p_slot: &mut f64,
-        var_ctg_p_slot: &mut f64,
-        var_dphib_p_slot: &mut f64,
-        var_gfacnud_p_slot: &mut f64,
-        var_guard51_slot: &mut f64,
-        var_guard52_slot: &mut f64,
-        var_guard53_slot: &mut f64,
-        var_guard54_slot: &mut f64,
-        var_guard55_slot: &mut f64,
-        var_guard56_slot: &mut f64,
-        var_guard57_slot: &mut f64,
-        var_guard58_slot: &mut f64,
-        var_guard59_slot: &mut f64,
-        var_guard60_slot: &mut f64,
-        var_guard61_slot: &mut f64,
-        var_guard62_slot: &mut f64,
-        var_guard63_slot: &mut f64,
-        var_guard64_slot: &mut f64,
-        var_guard65_slot: &mut f64,
-        var_guard66_slot: &mut f64,
-        var_guard67_slot: &mut f64,
-        var_guard68_slot: &mut f64,
-        var_guard69_slot: &mut f64,
-        var_guard70_slot: &mut f64,
-        var_guard71_slot: &mut f64,
-        var_guard72_slot: &mut f64,
-        var_guard73_slot: &mut f64,
-        var_guard74_slot: &mut f64,
-        var_guard75_slot: &mut f64,
-        var_guard76_slot: &mut f64,
-        var_guard77_slot: &mut f64,
-        var_mue_p_slot: &mut f64,
-        var_neff_p_slot: &mut f64,
-        var_nov_p_slot: &mut f64,
-        var_novd_p_slot: &mut f64,
-        var_np_p_slot: &mut f64,
-        var_psce_p_slot: &mut f64,
-        var_psceb_p_slot: &mut f64,
-        var_psced_p_slot: &mut f64,
-        var_rbulk_p_slot: &mut f64,
-        var_rjund_p_slot: &mut f64,
-        var_rjuns_p_slot: &mut f64,
-        var_stbet_p_slot: &mut f64,
-        var_stct_p_slot: &mut f64,
-        var_stvfb_p_slot: &mut f64,
-        var_thecs_p_slot: &mut f64,
-        var_themu_p_slot: &mut f64,
-        var_vfb_p_slot: &mut f64,
-        var_vsbnud_p_slot: &mut f64,
-        var_xcor_p_slot: &mut f64,
-    ) {
-        let mut var_betn_p: f64 = *var_betn_p_slot;
-        let mut var_cf_p: f64 = *var_cf_p_slot;
-        let mut var_cfb_p: f64 = *var_cfb_p_slot;
-        let mut var_cfd_p: f64 = *var_cfd_p_slot;
-        let mut var_cs_p: f64 = *var_cs_p_slot;
-        let mut var_ct_p: f64 = *var_ct_p_slot;
-        let mut var_ctb_p: f64 = *var_ctb_p_slot;
-        let mut var_ctg_p: f64 = *var_ctg_p_slot;
-        let mut var_dphib_p: f64 = *var_dphib_p_slot;
-        let mut var_gfacnud_p: f64 = *var_gfacnud_p_slot;
-        let mut var_guard51: f64 = *var_guard51_slot;
-        let mut var_guard52: f64 = *var_guard52_slot;
-        let mut var_guard53: f64 = *var_guard53_slot;
-        let mut var_guard54: f64 = *var_guard54_slot;
-        let mut var_guard55: f64 = *var_guard55_slot;
-        let mut var_guard56: f64 = *var_guard56_slot;
-        let mut var_guard57: f64 = *var_guard57_slot;
-        let mut var_guard58: f64 = *var_guard58_slot;
-        let mut var_guard59: f64 = *var_guard59_slot;
-        let mut var_guard60: f64 = *var_guard60_slot;
-        let mut var_guard61: f64 = *var_guard61_slot;
-        let mut var_guard62: f64 = *var_guard62_slot;
-        let mut var_guard63: f64 = *var_guard63_slot;
-        let mut var_guard64: f64 = *var_guard64_slot;
-        let mut var_guard65: f64 = *var_guard65_slot;
-        let mut var_guard66: f64 = *var_guard66_slot;
-        let mut var_guard67: f64 = *var_guard67_slot;
-        let mut var_guard68: f64 = *var_guard68_slot;
-        let mut var_guard69: f64 = *var_guard69_slot;
-        let mut var_guard70: f64 = *var_guard70_slot;
-        let mut var_guard71: f64 = *var_guard71_slot;
-        let mut var_guard72: f64 = *var_guard72_slot;
-        let mut var_guard73: f64 = *var_guard73_slot;
-        let mut var_guard74: f64 = *var_guard74_slot;
-        let mut var_guard75: f64 = *var_guard75_slot;
-        let mut var_guard76: f64 = *var_guard76_slot;
-        let mut var_guard77: f64 = *var_guard77_slot;
-        let mut var_mue_p: f64 = *var_mue_p_slot;
-        let mut var_neff_p: f64 = *var_neff_p_slot;
-        let mut var_nov_p: f64 = *var_nov_p_slot;
-        let mut var_novd_p: f64 = *var_novd_p_slot;
-        let mut var_np_p: f64 = *var_np_p_slot;
-        let mut var_psce_p: f64 = *var_psce_p_slot;
-        let mut var_psceb_p: f64 = *var_psceb_p_slot;
-        let mut var_psced_p: f64 = *var_psced_p_slot;
-        let mut var_rbulk_p: f64 = *var_rbulk_p_slot;
-        let mut var_rjund_p: f64 = *var_rjund_p_slot;
-        let mut var_rjuns_p: f64 = *var_rjuns_p_slot;
-        let mut var_stbet_p: f64 = *var_stbet_p_slot;
-        let mut var_stct_p: f64 = *var_stct_p_slot;
-        let mut var_stvfb_p: f64 = *var_stvfb_p_slot;
-        let mut var_thecs_p: f64 = *var_thecs_p_slot;
-        let mut var_themu_p: f64 = *var_themu_p_slot;
-        let mut var_vfb_p: f64 = *var_vfb_p_slot;
-        let mut var_vsbnud_p: f64 = *var_vsbnud_p_slot;
-        let mut var_xcor_p: f64 = *var_xcor_p_slot;
-
         let (assign7140_e5539,) = {
     if (var_guard36 != 0.0) {
         let assign7140_e5537: f64 = (var_nf_i * p.p444);
@@ -7795,6 +7261,175 @@ impl Instance {
 
         let assign7270_e5755: f64 = if (((param_given[468] || param_given[469]) || param_given[470]) || param_given[471]) { 1.0 } else { 0.0 };
         var_guard56 = assign7270_e5755;
+
+        *var_betnedge_p_slot = var_betnedge_p;
+        *var_cfbedge_p_slot = var_cfbedge_p;
+        *var_cfdedge_p_slot = var_cfdedge_p;
+        *var_cfedge_p_slot = var_cfedge_p;
+        *var_cfrd_p_slot = var_cfrd_p;
+        *var_ctedge_p_slot = var_ctedge_p;
+        *var_dphibedge_p_slot = var_dphibedge_p;
+        *var_fnt_p_slot = var_fnt_p;
+        *var_fntexc_p_slot = var_fntexc_p;
+        *var_gfacnud_p_slot = var_gfacnud_p;
+        *var_gpe_edge_slot = var_gpe_edge;
+        *var_guard50_slot = var_guard50;
+        *var_guard51_slot = var_guard51;
+        *var_guard52_slot = var_guard52;
+        *var_guard53_slot = var_guard53;
+        *var_guard54_slot = var_guard54;
+        *var_guard55_slot = var_guard55;
+        *var_guard56_slot = var_guard56;
+        *var_kuowe_slot = var_kuowe;
+        *var_kvthowe_slot = var_kvthowe;
+        *var_neff_p_slot = var_neff_p;
+        *var_neffedge_p_slot = var_neffedge_p;
+        *var_pscebedge_p_slot = var_pscebedge_p;
+        *var_pscededge_p_slot = var_pscededge_p;
+        *var_psceedge_p_slot = var_psceedge_p;
+        *var_rbulk_p_slot = var_rbulk_p;
+        *var_rde_p_slot = var_rde_p;
+        *var_rg_p_slot = var_rg_p;
+        *var_rjund_p_slot = var_rjund_p;
+        *var_rjuns_p_slot = var_rjuns_p;
+        *var_rse_p_slot = var_rse_p;
+        *var_rsh_i_slot = var_rsh_i;
+        *var_rshd_i_slot = var_rshd_i;
+        *var_rwell_p_slot = var_rwell_p;
+        *var_stbetedge_p_slot = var_stbetedge_p;
+        *var_stvfb_p_slot = var_stvfb_p;
+        *var_stvfbedge_p_slot = var_stvfbedge_p;
+        *var_temp0_slot = var_temp0;
+        *var_vfb_p_slot = var_vfb_p;
+        *var_vfbedge_p_slot = var_vfbedge_p;
+        *var_vsbnud_p_slot = var_vsbnud_p;
+        *var_we_edge_slot = var_we_edge;
+    }
+
+    pub(super) fn stamp_transient_block_10(
+        p: &Parameters,
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+        var_guard36: f64,
+        var_guard56: f64,
+        var_iae: f64,
+        var_ile: f64,
+        var_ile2: f64,
+        var_iwe: f64,
+        var_le: f64,
+        var_we: f64,
+        var_betn_p_slot: &mut f64,
+        var_cf_p_slot: &mut f64,
+        var_cfb_p_slot: &mut f64,
+        var_cfd_p_slot: &mut f64,
+        var_cs_p_slot: &mut f64,
+        var_ct_p_slot: &mut f64,
+        var_ctb_p_slot: &mut f64,
+        var_ctg_p_slot: &mut f64,
+        var_dphib_p_slot: &mut f64,
+        var_guard57_slot: &mut f64,
+        var_guard58_slot: &mut f64,
+        var_guard59_slot: &mut f64,
+        var_guard60_slot: &mut f64,
+        var_guard61_slot: &mut f64,
+        var_guard62_slot: &mut f64,
+        var_guard63_slot: &mut f64,
+        var_guard64_slot: &mut f64,
+        var_guard65_slot: &mut f64,
+        var_guard66_slot: &mut f64,
+        var_guard67_slot: &mut f64,
+        var_guard68_slot: &mut f64,
+        var_guard69_slot: &mut f64,
+        var_guard70_slot: &mut f64,
+        var_guard71_slot: &mut f64,
+        var_guard72_slot: &mut f64,
+        var_guard73_slot: &mut f64,
+        var_guard74_slot: &mut f64,
+        var_guard75_slot: &mut f64,
+        var_guard76_slot: &mut f64,
+        var_guard77_slot: &mut f64,
+        var_guard78_slot: &mut f64,
+        var_guard79_slot: &mut f64,
+        var_guard80_slot: &mut f64,
+        var_guard81_slot: &mut f64,
+        var_guard82_slot: &mut f64,
+        var_guard83_slot: &mut f64,
+        var_guard84_slot: &mut f64,
+        var_mue_p_slot: &mut f64,
+        var_nov_p_slot: &mut f64,
+        var_novd_p_slot: &mut f64,
+        var_np_p_slot: &mut f64,
+        var_psce_p_slot: &mut f64,
+        var_psceb_p_slot: &mut f64,
+        var_psced_p_slot: &mut f64,
+        var_rs_p_slot: &mut f64,
+        var_rsb_p_slot: &mut f64,
+        var_rsg_p_slot: &mut f64,
+        var_stbet_p_slot: &mut f64,
+        var_stct_p_slot: &mut f64,
+        var_strs_p_slot: &mut f64,
+        var_stthesat_p_slot: &mut f64,
+        var_thecs_p_slot: &mut f64,
+        var_themu_p_slot: &mut f64,
+        var_thesat_p_slot: &mut f64,
+        var_thesatb_p_slot: &mut f64,
+        var_xcor_p_slot: &mut f64,
+    ) {
+        let mut var_betn_p: f64 = *var_betn_p_slot;
+        let mut var_cf_p: f64 = *var_cf_p_slot;
+        let mut var_cfb_p: f64 = *var_cfb_p_slot;
+        let mut var_cfd_p: f64 = *var_cfd_p_slot;
+        let mut var_cs_p: f64 = *var_cs_p_slot;
+        let mut var_ct_p: f64 = *var_ct_p_slot;
+        let mut var_ctb_p: f64 = *var_ctb_p_slot;
+        let mut var_ctg_p: f64 = *var_ctg_p_slot;
+        let mut var_dphib_p: f64 = *var_dphib_p_slot;
+        let mut var_guard57: f64 = *var_guard57_slot;
+        let mut var_guard58: f64 = *var_guard58_slot;
+        let mut var_guard59: f64 = *var_guard59_slot;
+        let mut var_guard60: f64 = *var_guard60_slot;
+        let mut var_guard61: f64 = *var_guard61_slot;
+        let mut var_guard62: f64 = *var_guard62_slot;
+        let mut var_guard63: f64 = *var_guard63_slot;
+        let mut var_guard64: f64 = *var_guard64_slot;
+        let mut var_guard65: f64 = *var_guard65_slot;
+        let mut var_guard66: f64 = *var_guard66_slot;
+        let mut var_guard67: f64 = *var_guard67_slot;
+        let mut var_guard68: f64 = *var_guard68_slot;
+        let mut var_guard69: f64 = *var_guard69_slot;
+        let mut var_guard70: f64 = *var_guard70_slot;
+        let mut var_guard71: f64 = *var_guard71_slot;
+        let mut var_guard72: f64 = *var_guard72_slot;
+        let mut var_guard73: f64 = *var_guard73_slot;
+        let mut var_guard74: f64 = *var_guard74_slot;
+        let mut var_guard75: f64 = *var_guard75_slot;
+        let mut var_guard76: f64 = *var_guard76_slot;
+        let mut var_guard77: f64 = *var_guard77_slot;
+        let mut var_guard78: f64 = *var_guard78_slot;
+        let mut var_guard79: f64 = *var_guard79_slot;
+        let mut var_guard80: f64 = *var_guard80_slot;
+        let mut var_guard81: f64 = *var_guard81_slot;
+        let mut var_guard82: f64 = *var_guard82_slot;
+        let mut var_guard83: f64 = *var_guard83_slot;
+        let mut var_guard84: f64 = *var_guard84_slot;
+        let mut var_mue_p: f64 = *var_mue_p_slot;
+        let mut var_nov_p: f64 = *var_nov_p_slot;
+        let mut var_novd_p: f64 = *var_novd_p_slot;
+        let mut var_np_p: f64 = *var_np_p_slot;
+        let mut var_psce_p: f64 = *var_psce_p_slot;
+        let mut var_psceb_p: f64 = *var_psceb_p_slot;
+        let mut var_psced_p: f64 = *var_psced_p_slot;
+        let mut var_rs_p: f64 = *var_rs_p_slot;
+        let mut var_rsb_p: f64 = *var_rsb_p_slot;
+        let mut var_rsg_p: f64 = *var_rsg_p_slot;
+        let mut var_stbet_p: f64 = *var_stbet_p_slot;
+        let mut var_stct_p: f64 = *var_stct_p_slot;
+        let mut var_strs_p: f64 = *var_strs_p_slot;
+        let mut var_stthesat_p: f64 = *var_stthesat_p_slot;
+        let mut var_thecs_p: f64 = *var_thecs_p_slot;
+        let mut var_themu_p: f64 = *var_themu_p_slot;
+        let mut var_thesat_p: f64 = *var_thesat_p_slot;
+        let mut var_thesatb_p: f64 = *var_thesatb_p_slot;
+        let mut var_xcor_p: f64 = *var_xcor_p_slot;
 
         let (assign7280_e5773,) = {
     if ((var_guard36 != 0.0) && (var_guard56 != 0.0)) {
@@ -8178,190 +7813,6 @@ impl Instance {
         let assign7690_e6540: f64 = if (((param_given[552] || param_given[553]) || param_given[554]) || param_given[555]) { 1.0 } else { 0.0 };
         var_guard77 = assign7690_e6540;
 
-        *var_betn_p_slot = var_betn_p;
-        *var_cf_p_slot = var_cf_p;
-        *var_cfb_p_slot = var_cfb_p;
-        *var_cfd_p_slot = var_cfd_p;
-        *var_cs_p_slot = var_cs_p;
-        *var_ct_p_slot = var_ct_p;
-        *var_ctb_p_slot = var_ctb_p;
-        *var_ctg_p_slot = var_ctg_p;
-        *var_dphib_p_slot = var_dphib_p;
-        *var_gfacnud_p_slot = var_gfacnud_p;
-        *var_guard51_slot = var_guard51;
-        *var_guard52_slot = var_guard52;
-        *var_guard53_slot = var_guard53;
-        *var_guard54_slot = var_guard54;
-        *var_guard55_slot = var_guard55;
-        *var_guard56_slot = var_guard56;
-        *var_guard57_slot = var_guard57;
-        *var_guard58_slot = var_guard58;
-        *var_guard59_slot = var_guard59;
-        *var_guard60_slot = var_guard60;
-        *var_guard61_slot = var_guard61;
-        *var_guard62_slot = var_guard62;
-        *var_guard63_slot = var_guard63;
-        *var_guard64_slot = var_guard64;
-        *var_guard65_slot = var_guard65;
-        *var_guard66_slot = var_guard66;
-        *var_guard67_slot = var_guard67;
-        *var_guard68_slot = var_guard68;
-        *var_guard69_slot = var_guard69;
-        *var_guard70_slot = var_guard70;
-        *var_guard71_slot = var_guard71;
-        *var_guard72_slot = var_guard72;
-        *var_guard73_slot = var_guard73;
-        *var_guard74_slot = var_guard74;
-        *var_guard75_slot = var_guard75;
-        *var_guard76_slot = var_guard76;
-        *var_guard77_slot = var_guard77;
-        *var_mue_p_slot = var_mue_p;
-        *var_neff_p_slot = var_neff_p;
-        *var_nov_p_slot = var_nov_p;
-        *var_novd_p_slot = var_novd_p;
-        *var_np_p_slot = var_np_p;
-        *var_psce_p_slot = var_psce_p;
-        *var_psceb_p_slot = var_psceb_p;
-        *var_psced_p_slot = var_psced_p;
-        *var_rbulk_p_slot = var_rbulk_p;
-        *var_rjund_p_slot = var_rjund_p;
-        *var_rjuns_p_slot = var_rjuns_p;
-        *var_stbet_p_slot = var_stbet_p;
-        *var_stct_p_slot = var_stct_p;
-        *var_stvfb_p_slot = var_stvfb_p;
-        *var_thecs_p_slot = var_thecs_p;
-        *var_themu_p_slot = var_themu_p;
-        *var_vfb_p_slot = var_vfb_p;
-        *var_vsbnud_p_slot = var_vsbnud_p;
-        *var_xcor_p_slot = var_xcor_p;
-    }
-
-    pub(super) fn stamp_transient_block_11(
-        p: &Parameters,
-        param_given: &[bool; Instance::PARAMETER_COUNT],
-        var_guard36: f64,
-        var_guard77: f64,
-        var_iae: f64,
-        var_iiae: f64,
-        var_iiwe: f64,
-        var_iiwecv: f64,
-        var_ile: f64,
-        var_iwe: f64,
-        var_lecv: f64,
-        var_a1_p_slot: &mut f64,
-        var_a3_p_slot: &mut f64,
-        var_a4_p_slot: &mut f64,
-        var_agidl_p_slot: &mut f64,
-        var_agidld_p_slot: &mut f64,
-        var_alp1_p_slot: &mut f64,
-        var_alp2_p_slot: &mut f64,
-        var_alp_p_slot: &mut f64,
-        var_ax_p_slot: &mut f64,
-        var_cox_p_slot: &mut f64,
-        var_delvtac_p_slot: &mut f64,
-        var_facneffac_p_slot: &mut f64,
-        var_guard100_slot: &mut f64,
-        var_guard101_slot: &mut f64,
-        var_guard102_slot: &mut f64,
-        var_guard103_slot: &mut f64,
-        var_guard104_slot: &mut f64,
-        var_guard105_slot: &mut f64,
-        var_guard78_slot: &mut f64,
-        var_guard79_slot: &mut f64,
-        var_guard80_slot: &mut f64,
-        var_guard81_slot: &mut f64,
-        var_guard82_slot: &mut f64,
-        var_guard83_slot: &mut f64,
-        var_guard84_slot: &mut f64,
-        var_guard85_slot: &mut f64,
-        var_guard86_slot: &mut f64,
-        var_guard87_slot: &mut f64,
-        var_guard88_slot: &mut f64,
-        var_guard89_slot: &mut f64,
-        var_guard90_slot: &mut f64,
-        var_guard91_slot: &mut f64,
-        var_guard92_slot: &mut f64,
-        var_guard93_slot: &mut f64,
-        var_guard94_slot: &mut f64,
-        var_guard95_slot: &mut f64,
-        var_guard96_slot: &mut f64,
-        var_guard97_slot: &mut f64,
-        var_guard98_slot: &mut f64,
-        var_guard99_slot: &mut f64,
-        var_iginv_p_slot: &mut f64,
-        var_igov_p_slot: &mut f64,
-        var_igovd_p_slot: &mut f64,
-        var_poparam_i_slot: &mut f64,
-        var_rs_p_slot: &mut f64,
-        var_rsb_p_slot: &mut f64,
-        var_rsg_p_slot: &mut f64,
-        var_sta2_p_slot: &mut f64,
-        var_stbgidl_p_slot: &mut f64,
-        var_stbgidld_p_slot: &mut f64,
-        var_stig_p_slot: &mut f64,
-        var_strs_p_slot: &mut f64,
-        var_stthesat_p_slot: &mut f64,
-        var_thesat_p_slot: &mut f64,
-        var_thesatb_p_slot: &mut f64,
-        var_thesatg_p_slot: &mut f64,
-    ) {
-        let mut var_a1_p: f64 = *var_a1_p_slot;
-        let mut var_a3_p: f64 = *var_a3_p_slot;
-        let mut var_a4_p: f64 = *var_a4_p_slot;
-        let mut var_agidl_p: f64 = *var_agidl_p_slot;
-        let mut var_agidld_p: f64 = *var_agidld_p_slot;
-        let mut var_alp1_p: f64 = *var_alp1_p_slot;
-        let mut var_alp2_p: f64 = *var_alp2_p_slot;
-        let mut var_alp_p: f64 = *var_alp_p_slot;
-        let mut var_ax_p: f64 = *var_ax_p_slot;
-        let mut var_cox_p: f64 = *var_cox_p_slot;
-        let mut var_delvtac_p: f64 = *var_delvtac_p_slot;
-        let mut var_facneffac_p: f64 = *var_facneffac_p_slot;
-        let mut var_guard100: f64 = *var_guard100_slot;
-        let mut var_guard101: f64 = *var_guard101_slot;
-        let mut var_guard102: f64 = *var_guard102_slot;
-        let mut var_guard103: f64 = *var_guard103_slot;
-        let mut var_guard104: f64 = *var_guard104_slot;
-        let mut var_guard105: f64 = *var_guard105_slot;
-        let mut var_guard78: f64 = *var_guard78_slot;
-        let mut var_guard79: f64 = *var_guard79_slot;
-        let mut var_guard80: f64 = *var_guard80_slot;
-        let mut var_guard81: f64 = *var_guard81_slot;
-        let mut var_guard82: f64 = *var_guard82_slot;
-        let mut var_guard83: f64 = *var_guard83_slot;
-        let mut var_guard84: f64 = *var_guard84_slot;
-        let mut var_guard85: f64 = *var_guard85_slot;
-        let mut var_guard86: f64 = *var_guard86_slot;
-        let mut var_guard87: f64 = *var_guard87_slot;
-        let mut var_guard88: f64 = *var_guard88_slot;
-        let mut var_guard89: f64 = *var_guard89_slot;
-        let mut var_guard90: f64 = *var_guard90_slot;
-        let mut var_guard91: f64 = *var_guard91_slot;
-        let mut var_guard92: f64 = *var_guard92_slot;
-        let mut var_guard93: f64 = *var_guard93_slot;
-        let mut var_guard94: f64 = *var_guard94_slot;
-        let mut var_guard95: f64 = *var_guard95_slot;
-        let mut var_guard96: f64 = *var_guard96_slot;
-        let mut var_guard97: f64 = *var_guard97_slot;
-        let mut var_guard98: f64 = *var_guard98_slot;
-        let mut var_guard99: f64 = *var_guard99_slot;
-        let mut var_iginv_p: f64 = *var_iginv_p_slot;
-        let mut var_igov_p: f64 = *var_igov_p_slot;
-        let mut var_igovd_p: f64 = *var_igovd_p_slot;
-        let mut var_poparam_i: f64 = *var_poparam_i_slot;
-        let mut var_rs_p: f64 = *var_rs_p_slot;
-        let mut var_rsb_p: f64 = *var_rsb_p_slot;
-        let mut var_rsg_p: f64 = *var_rsg_p_slot;
-        let mut var_sta2_p: f64 = *var_sta2_p_slot;
-        let mut var_stbgidl_p: f64 = *var_stbgidl_p_slot;
-        let mut var_stbgidld_p: f64 = *var_stbgidld_p_slot;
-        let mut var_stig_p: f64 = *var_stig_p_slot;
-        let mut var_strs_p: f64 = *var_strs_p_slot;
-        let mut var_stthesat_p: f64 = *var_stthesat_p_slot;
-        let mut var_thesat_p: f64 = *var_thesat_p_slot;
-        let mut var_thesatb_p: f64 = *var_thesatb_p_slot;
-        let mut var_thesatg_p: f64 = *var_thesatg_p_slot;
-
         let (assign7700_e6560,) = {
     if ((var_guard36 != 0.0) && (var_guard77 != 0.0)) {
         let assign7700_e6548: f64 = (p.p553 * var_ile);
@@ -8489,6 +7940,182 @@ impl Instance {
 
         let assign7830_e6803: f64 = if (((param_given[580] || param_given[581]) || param_given[582]) || param_given[583]) { 1.0 } else { 0.0 };
         var_guard84 = assign7830_e6803;
+
+        *var_betn_p_slot = var_betn_p;
+        *var_cf_p_slot = var_cf_p;
+        *var_cfb_p_slot = var_cfb_p;
+        *var_cfd_p_slot = var_cfd_p;
+        *var_cs_p_slot = var_cs_p;
+        *var_ct_p_slot = var_ct_p;
+        *var_ctb_p_slot = var_ctb_p;
+        *var_ctg_p_slot = var_ctg_p;
+        *var_dphib_p_slot = var_dphib_p;
+        *var_guard57_slot = var_guard57;
+        *var_guard58_slot = var_guard58;
+        *var_guard59_slot = var_guard59;
+        *var_guard60_slot = var_guard60;
+        *var_guard61_slot = var_guard61;
+        *var_guard62_slot = var_guard62;
+        *var_guard63_slot = var_guard63;
+        *var_guard64_slot = var_guard64;
+        *var_guard65_slot = var_guard65;
+        *var_guard66_slot = var_guard66;
+        *var_guard67_slot = var_guard67;
+        *var_guard68_slot = var_guard68;
+        *var_guard69_slot = var_guard69;
+        *var_guard70_slot = var_guard70;
+        *var_guard71_slot = var_guard71;
+        *var_guard72_slot = var_guard72;
+        *var_guard73_slot = var_guard73;
+        *var_guard74_slot = var_guard74;
+        *var_guard75_slot = var_guard75;
+        *var_guard76_slot = var_guard76;
+        *var_guard77_slot = var_guard77;
+        *var_guard78_slot = var_guard78;
+        *var_guard79_slot = var_guard79;
+        *var_guard80_slot = var_guard80;
+        *var_guard81_slot = var_guard81;
+        *var_guard82_slot = var_guard82;
+        *var_guard83_slot = var_guard83;
+        *var_guard84_slot = var_guard84;
+        *var_mue_p_slot = var_mue_p;
+        *var_nov_p_slot = var_nov_p;
+        *var_novd_p_slot = var_novd_p;
+        *var_np_p_slot = var_np_p;
+        *var_psce_p_slot = var_psce_p;
+        *var_psceb_p_slot = var_psceb_p;
+        *var_psced_p_slot = var_psced_p;
+        *var_rs_p_slot = var_rs_p;
+        *var_rsb_p_slot = var_rsb_p;
+        *var_rsg_p_slot = var_rsg_p;
+        *var_stbet_p_slot = var_stbet_p;
+        *var_stct_p_slot = var_stct_p;
+        *var_strs_p_slot = var_strs_p;
+        *var_stthesat_p_slot = var_stthesat_p;
+        *var_thecs_p_slot = var_thecs_p;
+        *var_themu_p_slot = var_themu_p;
+        *var_thesat_p_slot = var_thesat_p;
+        *var_thesatb_p_slot = var_thesatb_p;
+        *var_xcor_p_slot = var_xcor_p;
+    }
+
+    pub(super) fn stamp_transient_block_11(
+        p: &Parameters,
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+        var_guard36: f64,
+        var_guard84: f64,
+        var_iae: f64,
+        var_iiae: f64,
+        var_iiwe: f64,
+        var_iiwecv: f64,
+        var_ile: f64,
+        var_iwe: f64,
+        var_lecv: f64,
+        var_a1_p_slot: &mut f64,
+        var_a3_p_slot: &mut f64,
+        var_a4_p_slot: &mut f64,
+        var_agidl_p_slot: &mut f64,
+        var_agidld_p_slot: &mut f64,
+        var_alp1_p_slot: &mut f64,
+        var_alp2_p_slot: &mut f64,
+        var_alp_p_slot: &mut f64,
+        var_ax_p_slot: &mut f64,
+        var_cox_p_slot: &mut f64,
+        var_delvtac_p_slot: &mut f64,
+        var_facneffac_p_slot: &mut f64,
+        var_guard100_slot: &mut f64,
+        var_guard101_slot: &mut f64,
+        var_guard102_slot: &mut f64,
+        var_guard103_slot: &mut f64,
+        var_guard104_slot: &mut f64,
+        var_guard105_slot: &mut f64,
+        var_guard106_slot: &mut f64,
+        var_guard107_slot: &mut f64,
+        var_guard108_slot: &mut f64,
+        var_guard109_slot: &mut f64,
+        var_guard110_slot: &mut f64,
+        var_guard111_slot: &mut f64,
+        var_guard85_slot: &mut f64,
+        var_guard86_slot: &mut f64,
+        var_guard87_slot: &mut f64,
+        var_guard88_slot: &mut f64,
+        var_guard89_slot: &mut f64,
+        var_guard90_slot: &mut f64,
+        var_guard91_slot: &mut f64,
+        var_guard92_slot: &mut f64,
+        var_guard93_slot: &mut f64,
+        var_guard94_slot: &mut f64,
+        var_guard95_slot: &mut f64,
+        var_guard96_slot: &mut f64,
+        var_guard97_slot: &mut f64,
+        var_guard98_slot: &mut f64,
+        var_guard99_slot: &mut f64,
+        var_iginv_p_slot: &mut f64,
+        var_igov_p_slot: &mut f64,
+        var_igovd_p_slot: &mut f64,
+        var_plparam_i_slot: &mut f64,
+        var_plwparam_i_slot: &mut f64,
+        var_poparam_i_slot: &mut f64,
+        var_pwparam_i_slot: &mut f64,
+        var_sta2_p_slot: &mut f64,
+        var_stbgidl_p_slot: &mut f64,
+        var_stbgidld_p_slot: &mut f64,
+        var_stig_p_slot: &mut f64,
+        var_thesatac_p_slot: &mut f64,
+        var_thesatg_p_slot: &mut f64,
+    ) {
+        let mut var_a1_p: f64 = *var_a1_p_slot;
+        let mut var_a3_p: f64 = *var_a3_p_slot;
+        let mut var_a4_p: f64 = *var_a4_p_slot;
+        let mut var_agidl_p: f64 = *var_agidl_p_slot;
+        let mut var_agidld_p: f64 = *var_agidld_p_slot;
+        let mut var_alp1_p: f64 = *var_alp1_p_slot;
+        let mut var_alp2_p: f64 = *var_alp2_p_slot;
+        let mut var_alp_p: f64 = *var_alp_p_slot;
+        let mut var_ax_p: f64 = *var_ax_p_slot;
+        let mut var_cox_p: f64 = *var_cox_p_slot;
+        let mut var_delvtac_p: f64 = *var_delvtac_p_slot;
+        let mut var_facneffac_p: f64 = *var_facneffac_p_slot;
+        let mut var_guard100: f64 = *var_guard100_slot;
+        let mut var_guard101: f64 = *var_guard101_slot;
+        let mut var_guard102: f64 = *var_guard102_slot;
+        let mut var_guard103: f64 = *var_guard103_slot;
+        let mut var_guard104: f64 = *var_guard104_slot;
+        let mut var_guard105: f64 = *var_guard105_slot;
+        let mut var_guard106: f64 = *var_guard106_slot;
+        let mut var_guard107: f64 = *var_guard107_slot;
+        let mut var_guard108: f64 = *var_guard108_slot;
+        let mut var_guard109: f64 = *var_guard109_slot;
+        let mut var_guard110: f64 = *var_guard110_slot;
+        let mut var_guard111: f64 = *var_guard111_slot;
+        let mut var_guard85: f64 = *var_guard85_slot;
+        let mut var_guard86: f64 = *var_guard86_slot;
+        let mut var_guard87: f64 = *var_guard87_slot;
+        let mut var_guard88: f64 = *var_guard88_slot;
+        let mut var_guard89: f64 = *var_guard89_slot;
+        let mut var_guard90: f64 = *var_guard90_slot;
+        let mut var_guard91: f64 = *var_guard91_slot;
+        let mut var_guard92: f64 = *var_guard92_slot;
+        let mut var_guard93: f64 = *var_guard93_slot;
+        let mut var_guard94: f64 = *var_guard94_slot;
+        let mut var_guard95: f64 = *var_guard95_slot;
+        let mut var_guard96: f64 = *var_guard96_slot;
+        let mut var_guard97: f64 = *var_guard97_slot;
+        let mut var_guard98: f64 = *var_guard98_slot;
+        let mut var_guard99: f64 = *var_guard99_slot;
+        let mut var_iginv_p: f64 = *var_iginv_p_slot;
+        let mut var_igov_p: f64 = *var_igov_p_slot;
+        let mut var_igovd_p: f64 = *var_igovd_p_slot;
+        let mut var_plparam_i: f64 = *var_plparam_i_slot;
+        let mut var_plwparam_i: f64 = *var_plwparam_i_slot;
+        let mut var_poparam_i: f64 = *var_poparam_i_slot;
+        let mut var_pwparam_i: f64 = *var_pwparam_i_slot;
+        let mut var_sta2_p: f64 = *var_sta2_p_slot;
+        let mut var_stbgidl_p: f64 = *var_stbgidl_p_slot;
+        let mut var_stbgidld_p: f64 = *var_stbgidld_p_slot;
+        let mut var_stig_p: f64 = *var_stig_p_slot;
+        let mut var_thesatac_p: f64 = *var_thesatac_p_slot;
+        let mut var_thesatg_p: f64 = *var_thesatg_p_slot;
 
         let (assign7840_e6821,) = {
     if ((var_guard36 != 0.0) && (var_guard84 != 0.0)) {
@@ -8872,175 +8499,6 @@ impl Instance {
         let assign8250_e7591: f64 = if assign8250_e7589 == 1.0 { 1.0 } else { 0.0 };
         var_guard105 = assign8250_e7591;
 
-        *var_a1_p_slot = var_a1_p;
-        *var_a3_p_slot = var_a3_p;
-        *var_a4_p_slot = var_a4_p;
-        *var_agidl_p_slot = var_agidl_p;
-        *var_agidld_p_slot = var_agidld_p;
-        *var_alp1_p_slot = var_alp1_p;
-        *var_alp2_p_slot = var_alp2_p;
-        *var_alp_p_slot = var_alp_p;
-        *var_ax_p_slot = var_ax_p;
-        *var_cox_p_slot = var_cox_p;
-        *var_delvtac_p_slot = var_delvtac_p;
-        *var_facneffac_p_slot = var_facneffac_p;
-        *var_guard100_slot = var_guard100;
-        *var_guard101_slot = var_guard101;
-        *var_guard102_slot = var_guard102;
-        *var_guard103_slot = var_guard103;
-        *var_guard104_slot = var_guard104;
-        *var_guard105_slot = var_guard105;
-        *var_guard78_slot = var_guard78;
-        *var_guard79_slot = var_guard79;
-        *var_guard80_slot = var_guard80;
-        *var_guard81_slot = var_guard81;
-        *var_guard82_slot = var_guard82;
-        *var_guard83_slot = var_guard83;
-        *var_guard84_slot = var_guard84;
-        *var_guard85_slot = var_guard85;
-        *var_guard86_slot = var_guard86;
-        *var_guard87_slot = var_guard87;
-        *var_guard88_slot = var_guard88;
-        *var_guard89_slot = var_guard89;
-        *var_guard90_slot = var_guard90;
-        *var_guard91_slot = var_guard91;
-        *var_guard92_slot = var_guard92;
-        *var_guard93_slot = var_guard93;
-        *var_guard94_slot = var_guard94;
-        *var_guard95_slot = var_guard95;
-        *var_guard96_slot = var_guard96;
-        *var_guard97_slot = var_guard97;
-        *var_guard98_slot = var_guard98;
-        *var_guard99_slot = var_guard99;
-        *var_iginv_p_slot = var_iginv_p;
-        *var_igov_p_slot = var_igov_p;
-        *var_igovd_p_slot = var_igovd_p;
-        *var_poparam_i_slot = var_poparam_i;
-        *var_rs_p_slot = var_rs_p;
-        *var_rsb_p_slot = var_rsb_p;
-        *var_rsg_p_slot = var_rsg_p;
-        *var_sta2_p_slot = var_sta2_p;
-        *var_stbgidl_p_slot = var_stbgidl_p;
-        *var_stbgidld_p_slot = var_stbgidld_p;
-        *var_stig_p_slot = var_stig_p;
-        *var_strs_p_slot = var_strs_p;
-        *var_stthesat_p_slot = var_stthesat_p;
-        *var_thesat_p_slot = var_thesat_p;
-        *var_thesatb_p_slot = var_thesatb_p;
-        *var_thesatg_p_slot = var_thesatg_p;
-    }
-
-    pub(super) fn stamp_transient_block_12(
-        p: &Parameters,
-        param_given: &[bool; Instance::PARAMETER_COUNT],
-        var_guard104: f64,
-        var_guard105: f64,
-        var_guard36: f64,
-        var_iae: f64,
-        var_iilcv: f64,
-        var_iiwcv: f64,
-        var_iiwecv: f64,
-        var_ile: f64,
-        var_ile2: f64,
-        var_iwe: f64,
-        var_le: f64,
-        var_we_edge: f64,
-        var_alp1ac_p_slot: &mut f64,
-        var_alpac_p_slot: &mut f64,
-        var_axac_p_slot: &mut f64,
-        var_betnedge_p_slot: &mut f64,
-        var_cfr_p_slot: &mut f64,
-        var_cfrd_p_slot: &mut f64,
-        var_cgbov_p_slot: &mut f64,
-        var_cgov_p_slot: &mut f64,
-        var_cgovd_p_slot: &mut f64,
-        var_cinr_p_slot: &mut f64,
-        var_cinrd_p_slot: &mut f64,
-        var_ctedge_p_slot: &mut f64,
-        var_dphibedge_p_slot: &mut f64,
-        var_fntexc_p_slot: &mut f64,
-        var_guard106_slot: &mut f64,
-        var_guard107_slot: &mut f64,
-        var_guard108_slot: &mut f64,
-        var_guard109_slot: &mut f64,
-        var_guard110_slot: &mut f64,
-        var_guard111_slot: &mut f64,
-        var_guard112_slot: &mut f64,
-        var_guard113_slot: &mut f64,
-        var_guard114_slot: &mut f64,
-        var_guard115_slot: &mut f64,
-        var_guard116_slot: &mut f64,
-        var_guard117_slot: &mut f64,
-        var_guard118_slot: &mut f64,
-        var_guard119_slot: &mut f64,
-        var_guard120_slot: &mut f64,
-        var_guard121_slot: &mut f64,
-        var_guard122_slot: &mut f64,
-        var_guard123_slot: &mut f64,
-        var_guard127_slot: &mut f64,
-        var_guard128_slot: &mut f64,
-        var_guard129_slot: &mut f64,
-        var_guard130_slot: &mut f64,
-        var_guard131_slot: &mut f64,
-        var_guard132_slot: &mut f64,
-        var_guard133_slot: &mut f64,
-        var_neffedge_p_slot: &mut f64,
-        var_plparam_i_slot: &mut f64,
-        var_plwparam_i_slot: &mut f64,
-        var_poparam_i_slot: &mut f64,
-        var_pwparam_i_slot: &mut f64,
-        var_stvfbedge_p_slot: &mut f64,
-        var_thesatac_p_slot: &mut f64,
-        var_vfbedge_p_slot: &mut f64,
-    ) {
-        let mut var_alp1ac_p: f64 = *var_alp1ac_p_slot;
-        let mut var_alpac_p: f64 = *var_alpac_p_slot;
-        let mut var_axac_p: f64 = *var_axac_p_slot;
-        let mut var_betnedge_p: f64 = *var_betnedge_p_slot;
-        let mut var_cfr_p: f64 = *var_cfr_p_slot;
-        let mut var_cfrd_p: f64 = *var_cfrd_p_slot;
-        let mut var_cgbov_p: f64 = *var_cgbov_p_slot;
-        let mut var_cgov_p: f64 = *var_cgov_p_slot;
-        let mut var_cgovd_p: f64 = *var_cgovd_p_slot;
-        let mut var_cinr_p: f64 = *var_cinr_p_slot;
-        let mut var_cinrd_p: f64 = *var_cinrd_p_slot;
-        let mut var_ctedge_p: f64 = *var_ctedge_p_slot;
-        let mut var_dphibedge_p: f64 = *var_dphibedge_p_slot;
-        let mut var_fntexc_p: f64 = *var_fntexc_p_slot;
-        let mut var_guard106: f64 = *var_guard106_slot;
-        let mut var_guard107: f64 = *var_guard107_slot;
-        let mut var_guard108: f64 = *var_guard108_slot;
-        let mut var_guard109: f64 = *var_guard109_slot;
-        let mut var_guard110: f64 = *var_guard110_slot;
-        let mut var_guard111: f64 = *var_guard111_slot;
-        let mut var_guard112: f64 = *var_guard112_slot;
-        let mut var_guard113: f64 = *var_guard113_slot;
-        let mut var_guard114: f64 = *var_guard114_slot;
-        let mut var_guard115: f64 = *var_guard115_slot;
-        let mut var_guard116: f64 = *var_guard116_slot;
-        let mut var_guard117: f64 = *var_guard117_slot;
-        let mut var_guard118: f64 = *var_guard118_slot;
-        let mut var_guard119: f64 = *var_guard119_slot;
-        let mut var_guard120: f64 = *var_guard120_slot;
-        let mut var_guard121: f64 = *var_guard121_slot;
-        let mut var_guard122: f64 = *var_guard122_slot;
-        let mut var_guard123: f64 = *var_guard123_slot;
-        let mut var_guard127: f64 = *var_guard127_slot;
-        let mut var_guard128: f64 = *var_guard128_slot;
-        let mut var_guard129: f64 = *var_guard129_slot;
-        let mut var_guard130: f64 = *var_guard130_slot;
-        let mut var_guard131: f64 = *var_guard131_slot;
-        let mut var_guard132: f64 = *var_guard132_slot;
-        let mut var_guard133: f64 = *var_guard133_slot;
-        let mut var_neffedge_p: f64 = *var_neffedge_p_slot;
-        let mut var_plparam_i: f64 = *var_plparam_i_slot;
-        let mut var_plwparam_i: f64 = *var_plwparam_i_slot;
-        let mut var_poparam_i: f64 = *var_poparam_i_slot;
-        let mut var_pwparam_i: f64 = *var_pwparam_i_slot;
-        let mut var_stvfbedge_p: f64 = *var_stvfbedge_p_slot;
-        let mut var_thesatac_p: f64 = *var_thesatac_p_slot;
-        let mut var_vfbedge_p: f64 = *var_vfbedge_p_slot;
-
         let (assign8260_e7599,) = {
     if (((var_guard36 != 0.0) && (var_guard104 != 0.0)) && (var_guard105 != 0.0)) {
         (p.p660,)
@@ -9169,6 +8627,184 @@ impl Instance {
         let assign8420_e7738: f64 = if param_given[665] { 1.0 } else { 0.0 };
         let assign8420_e7740: f64 = if assign8420_e7738 == 1.0 { 1.0 } else { 0.0 };
         var_guard111 = assign8420_e7740;
+
+        *var_a1_p_slot = var_a1_p;
+        *var_a3_p_slot = var_a3_p;
+        *var_a4_p_slot = var_a4_p;
+        *var_agidl_p_slot = var_agidl_p;
+        *var_agidld_p_slot = var_agidld_p;
+        *var_alp1_p_slot = var_alp1_p;
+        *var_alp2_p_slot = var_alp2_p;
+        *var_alp_p_slot = var_alp_p;
+        *var_ax_p_slot = var_ax_p;
+        *var_cox_p_slot = var_cox_p;
+        *var_delvtac_p_slot = var_delvtac_p;
+        *var_facneffac_p_slot = var_facneffac_p;
+        *var_guard100_slot = var_guard100;
+        *var_guard101_slot = var_guard101;
+        *var_guard102_slot = var_guard102;
+        *var_guard103_slot = var_guard103;
+        *var_guard104_slot = var_guard104;
+        *var_guard105_slot = var_guard105;
+        *var_guard106_slot = var_guard106;
+        *var_guard107_slot = var_guard107;
+        *var_guard108_slot = var_guard108;
+        *var_guard109_slot = var_guard109;
+        *var_guard110_slot = var_guard110;
+        *var_guard111_slot = var_guard111;
+        *var_guard85_slot = var_guard85;
+        *var_guard86_slot = var_guard86;
+        *var_guard87_slot = var_guard87;
+        *var_guard88_slot = var_guard88;
+        *var_guard89_slot = var_guard89;
+        *var_guard90_slot = var_guard90;
+        *var_guard91_slot = var_guard91;
+        *var_guard92_slot = var_guard92;
+        *var_guard93_slot = var_guard93;
+        *var_guard94_slot = var_guard94;
+        *var_guard95_slot = var_guard95;
+        *var_guard96_slot = var_guard96;
+        *var_guard97_slot = var_guard97;
+        *var_guard98_slot = var_guard98;
+        *var_guard99_slot = var_guard99;
+        *var_iginv_p_slot = var_iginv_p;
+        *var_igov_p_slot = var_igov_p;
+        *var_igovd_p_slot = var_igovd_p;
+        *var_plparam_i_slot = var_plparam_i;
+        *var_plwparam_i_slot = var_plwparam_i;
+        *var_poparam_i_slot = var_poparam_i;
+        *var_pwparam_i_slot = var_pwparam_i;
+        *var_sta2_p_slot = var_sta2_p;
+        *var_stbgidl_p_slot = var_stbgidl_p;
+        *var_stbgidld_p_slot = var_stbgidld_p;
+        *var_stig_p_slot = var_stig_p;
+        *var_thesatac_p_slot = var_thesatac_p;
+        *var_thesatg_p_slot = var_thesatg_p;
+    }
+
+    pub(super) fn stamp_transient_block_12(
+        p: &Parameters,
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+        var_guard109: f64,
+        var_guard111: f64,
+        var_guard36: f64,
+        var_iae: f64,
+        var_iilcv: f64,
+        var_iiwcv: f64,
+        var_iiwecv: f64,
+        var_ile: f64,
+        var_ile2: f64,
+        var_iwe: f64,
+        var_le: f64,
+        var_poparam_i: f64,
+        var_we_edge: f64,
+        var_alp1ac_p_slot: &mut f64,
+        var_alpac_p_slot: &mut f64,
+        var_axac_p_slot: &mut f64,
+        var_betnedge_p_slot: &mut f64,
+        var_cfbedge_p_slot: &mut f64,
+        var_cfdedge_p_slot: &mut f64,
+        var_cfedge_p_slot: &mut f64,
+        var_cfr_p_slot: &mut f64,
+        var_cfrd_p_slot: &mut f64,
+        var_cgbov_p_slot: &mut f64,
+        var_cgov_p_slot: &mut f64,
+        var_cgovd_p_slot: &mut f64,
+        var_cinr_p_slot: &mut f64,
+        var_cinrd_p_slot: &mut f64,
+        var_ctedge_p_slot: &mut f64,
+        var_dphibedge_p_slot: &mut f64,
+        var_fntexc_p_slot: &mut f64,
+        var_guard112_slot: &mut f64,
+        var_guard113_slot: &mut f64,
+        var_guard114_slot: &mut f64,
+        var_guard115_slot: &mut f64,
+        var_guard116_slot: &mut f64,
+        var_guard117_slot: &mut f64,
+        var_guard118_slot: &mut f64,
+        var_guard119_slot: &mut f64,
+        var_guard120_slot: &mut f64,
+        var_guard121_slot: &mut f64,
+        var_guard122_slot: &mut f64,
+        var_guard123_slot: &mut f64,
+        var_guard127_slot: &mut f64,
+        var_guard128_slot: &mut f64,
+        var_guard129_slot: &mut f64,
+        var_guard130_slot: &mut f64,
+        var_guard131_slot: &mut f64,
+        var_guard132_slot: &mut f64,
+        var_guard133_slot: &mut f64,
+        var_guard134_slot: &mut f64,
+        var_guard135_slot: &mut f64,
+        var_guard136_slot: &mut f64,
+        var_guard137_slot: &mut f64,
+        var_guard138_slot: &mut f64,
+        var_guard139_slot: &mut f64,
+        var_neffedge_p_slot: &mut f64,
+        var_plparam_i_slot: &mut f64,
+        var_plwparam_i_slot: &mut f64,
+        var_pscebedge_p_slot: &mut f64,
+        var_pscededge_p_slot: &mut f64,
+        var_psceedge_p_slot: &mut f64,
+        var_pwparam_i_slot: &mut f64,
+        var_stbetedge_p_slot: &mut f64,
+        var_stvfbedge_p_slot: &mut f64,
+        var_tmpa_slot: &mut f64,
+        var_vfbedge_p_slot: &mut f64,
+    ) {
+        let mut var_alp1ac_p: f64 = *var_alp1ac_p_slot;
+        let mut var_alpac_p: f64 = *var_alpac_p_slot;
+        let mut var_axac_p: f64 = *var_axac_p_slot;
+        let mut var_betnedge_p: f64 = *var_betnedge_p_slot;
+        let mut var_cfbedge_p: f64 = *var_cfbedge_p_slot;
+        let mut var_cfdedge_p: f64 = *var_cfdedge_p_slot;
+        let mut var_cfedge_p: f64 = *var_cfedge_p_slot;
+        let mut var_cfr_p: f64 = *var_cfr_p_slot;
+        let mut var_cfrd_p: f64 = *var_cfrd_p_slot;
+        let mut var_cgbov_p: f64 = *var_cgbov_p_slot;
+        let mut var_cgov_p: f64 = *var_cgov_p_slot;
+        let mut var_cgovd_p: f64 = *var_cgovd_p_slot;
+        let mut var_cinr_p: f64 = *var_cinr_p_slot;
+        let mut var_cinrd_p: f64 = *var_cinrd_p_slot;
+        let mut var_ctedge_p: f64 = *var_ctedge_p_slot;
+        let mut var_dphibedge_p: f64 = *var_dphibedge_p_slot;
+        let mut var_fntexc_p: f64 = *var_fntexc_p_slot;
+        let mut var_guard112: f64 = *var_guard112_slot;
+        let mut var_guard113: f64 = *var_guard113_slot;
+        let mut var_guard114: f64 = *var_guard114_slot;
+        let mut var_guard115: f64 = *var_guard115_slot;
+        let mut var_guard116: f64 = *var_guard116_slot;
+        let mut var_guard117: f64 = *var_guard117_slot;
+        let mut var_guard118: f64 = *var_guard118_slot;
+        let mut var_guard119: f64 = *var_guard119_slot;
+        let mut var_guard120: f64 = *var_guard120_slot;
+        let mut var_guard121: f64 = *var_guard121_slot;
+        let mut var_guard122: f64 = *var_guard122_slot;
+        let mut var_guard123: f64 = *var_guard123_slot;
+        let mut var_guard127: f64 = *var_guard127_slot;
+        let mut var_guard128: f64 = *var_guard128_slot;
+        let mut var_guard129: f64 = *var_guard129_slot;
+        let mut var_guard130: f64 = *var_guard130_slot;
+        let mut var_guard131: f64 = *var_guard131_slot;
+        let mut var_guard132: f64 = *var_guard132_slot;
+        let mut var_guard133: f64 = *var_guard133_slot;
+        let mut var_guard134: f64 = *var_guard134_slot;
+        let mut var_guard135: f64 = *var_guard135_slot;
+        let mut var_guard136: f64 = *var_guard136_slot;
+        let mut var_guard137: f64 = *var_guard137_slot;
+        let mut var_guard138: f64 = *var_guard138_slot;
+        let mut var_guard139: f64 = *var_guard139_slot;
+        let mut var_neffedge_p: f64 = *var_neffedge_p_slot;
+        let mut var_plparam_i: f64 = *var_plparam_i_slot;
+        let mut var_plwparam_i: f64 = *var_plwparam_i_slot;
+        let mut var_pscebedge_p: f64 = *var_pscebedge_p_slot;
+        let mut var_pscededge_p: f64 = *var_pscededge_p_slot;
+        let mut var_psceedge_p: f64 = *var_psceedge_p_slot;
+        let mut var_pwparam_i: f64 = *var_pwparam_i_slot;
+        let mut var_stbetedge_p: f64 = *var_stbetedge_p_slot;
+        let mut var_stvfbedge_p: f64 = *var_stvfbedge_p_slot;
+        let mut var_tmpa: f64 = *var_tmpa_slot;
+        let mut var_vfbedge_p: f64 = *var_vfbedge_p_slot;
 
         let (assign8430_e7748,) = {
     if (((var_guard36 != 0.0) && (var_guard109 != 0.0)) && (var_guard111 != 0.0)) {
@@ -9542,152 +9178,6 @@ impl Instance {
         let assign8890_e8556: f64 = if (((param_given[744] || param_given[745]) || param_given[746]) || param_given[747]) { 1.0 } else { 0.0 };
         var_guard133 = assign8890_e8556;
 
-        *var_alp1ac_p_slot = var_alp1ac_p;
-        *var_alpac_p_slot = var_alpac_p;
-        *var_axac_p_slot = var_axac_p;
-        *var_betnedge_p_slot = var_betnedge_p;
-        *var_cfr_p_slot = var_cfr_p;
-        *var_cfrd_p_slot = var_cfrd_p;
-        *var_cgbov_p_slot = var_cgbov_p;
-        *var_cgov_p_slot = var_cgov_p;
-        *var_cgovd_p_slot = var_cgovd_p;
-        *var_cinr_p_slot = var_cinr_p;
-        *var_cinrd_p_slot = var_cinrd_p;
-        *var_ctedge_p_slot = var_ctedge_p;
-        *var_dphibedge_p_slot = var_dphibedge_p;
-        *var_fntexc_p_slot = var_fntexc_p;
-        *var_guard106_slot = var_guard106;
-        *var_guard107_slot = var_guard107;
-        *var_guard108_slot = var_guard108;
-        *var_guard109_slot = var_guard109;
-        *var_guard110_slot = var_guard110;
-        *var_guard111_slot = var_guard111;
-        *var_guard112_slot = var_guard112;
-        *var_guard113_slot = var_guard113;
-        *var_guard114_slot = var_guard114;
-        *var_guard115_slot = var_guard115;
-        *var_guard116_slot = var_guard116;
-        *var_guard117_slot = var_guard117;
-        *var_guard118_slot = var_guard118;
-        *var_guard119_slot = var_guard119;
-        *var_guard120_slot = var_guard120;
-        *var_guard121_slot = var_guard121;
-        *var_guard122_slot = var_guard122;
-        *var_guard123_slot = var_guard123;
-        *var_guard127_slot = var_guard127;
-        *var_guard128_slot = var_guard128;
-        *var_guard129_slot = var_guard129;
-        *var_guard130_slot = var_guard130;
-        *var_guard131_slot = var_guard131;
-        *var_guard132_slot = var_guard132;
-        *var_guard133_slot = var_guard133;
-        *var_neffedge_p_slot = var_neffedge_p;
-        *var_plparam_i_slot = var_plparam_i;
-        *var_plwparam_i_slot = var_plwparam_i;
-        *var_poparam_i_slot = var_poparam_i;
-        *var_pwparam_i_slot = var_pwparam_i;
-        *var_stvfbedge_p_slot = var_stvfbedge_p;
-        *var_thesatac_p_slot = var_thesatac_p;
-        *var_vfbedge_p_slot = var_vfbedge_p;
-    }
-
-    pub(super) fn stamp_transient_block_13(
-        p: &Parameters,
-        param_given: &[bool; Instance::PARAMETER_COUNT],
-        var_dellps: f64,
-        var_delwod: f64,
-        var_guard133: f64,
-        var_guard36: f64,
-        var_iae: f64,
-        var_ile: f64,
-        var_ile2: f64,
-        var_invnf: f64,
-        var_iwe: f64,
-        var_l_i: f64,
-        var_nf_i: f64,
-        var_rta: f64,
-        var_sa_i: f64,
-        var_sb_i: f64,
-        var_sd_i: f64,
-        var_w_i: f64,
-        var_betn_p_slot: &mut f64,
-        var_betnedge_p_slot: &mut f64,
-        var_cfbedge_p_slot: &mut f64,
-        var_cfdedge_p_slot: &mut f64,
-        var_cfedge_p_slot: &mut f64,
-        var_guard134_slot: &mut f64,
-        var_guard135_slot: &mut f64,
-        var_guard136_slot: &mut f64,
-        var_guard137_slot: &mut f64,
-        var_guard138_slot: &mut f64,
-        var_guard139_slot: &mut f64,
-        var_guard143_slot: &mut f64,
-        var_guard144_slot: &mut f64,
-        var_invsa_slot: &mut f64,
-        var_invsaref_slot: &mut f64,
-        var_invsb_slot: &mut f64,
-        var_invsbref_slot: &mut f64,
-        var_kstressu0_slot: &mut f64,
-        var_kstressvth0_slot: &mut f64,
-        var_kvsatac_i_slot: &mut f64,
-        var_loop__slot: &mut f64,
-        var_lx_slot: &mut f64,
-        var_pscebedge_p_slot: &mut f64,
-        var_pscededge_p_slot: &mut f64,
-        var_psceedge_p_slot: &mut f64,
-        var_rhobeta_slot: &mut f64,
-        var_rhobetaref_slot: &mut f64,
-        var_stbetedge_p_slot: &mut f64,
-        var_temp0_slot: &mut f64,
-        var_temp00_slot: &mut f64,
-        var_templ_slot: &mut f64,
-        var_tempw_slot: &mut f64,
-        var_thesat_p_slot: &mut f64,
-        var_thesatac_p_slot: &mut f64,
-        var_tmpa_slot: &mut f64,
-        var_tmpb_slot: &mut f64,
-        var_vfb_p_slot: &mut f64,
-        var_wx_slot: &mut f64,
-    ) {
-        let mut var_betn_p: f64 = *var_betn_p_slot;
-        let mut var_betnedge_p: f64 = *var_betnedge_p_slot;
-        let mut var_cfbedge_p: f64 = *var_cfbedge_p_slot;
-        let mut var_cfdedge_p: f64 = *var_cfdedge_p_slot;
-        let mut var_cfedge_p: f64 = *var_cfedge_p_slot;
-        let mut var_guard134: f64 = *var_guard134_slot;
-        let mut var_guard135: f64 = *var_guard135_slot;
-        let mut var_guard136: f64 = *var_guard136_slot;
-        let mut var_guard137: f64 = *var_guard137_slot;
-        let mut var_guard138: f64 = *var_guard138_slot;
-        let mut var_guard139: f64 = *var_guard139_slot;
-        let mut var_guard143: f64 = *var_guard143_slot;
-        let mut var_guard144: f64 = *var_guard144_slot;
-        let mut var_invsa: f64 = *var_invsa_slot;
-        let mut var_invsaref: f64 = *var_invsaref_slot;
-        let mut var_invsb: f64 = *var_invsb_slot;
-        let mut var_invsbref: f64 = *var_invsbref_slot;
-        let mut var_kstressu0: f64 = *var_kstressu0_slot;
-        let mut var_kstressvth0: f64 = *var_kstressvth0_slot;
-        let mut var_kvsatac_i: f64 = *var_kvsatac_i_slot;
-        let mut var_loop_: f64 = *var_loop__slot;
-        let mut var_lx: f64 = *var_lx_slot;
-        let mut var_pscebedge_p: f64 = *var_pscebedge_p_slot;
-        let mut var_pscededge_p: f64 = *var_pscededge_p_slot;
-        let mut var_psceedge_p: f64 = *var_psceedge_p_slot;
-        let mut var_rhobeta: f64 = *var_rhobeta_slot;
-        let mut var_rhobetaref: f64 = *var_rhobetaref_slot;
-        let mut var_stbetedge_p: f64 = *var_stbetedge_p_slot;
-        let mut var_temp0: f64 = *var_temp0_slot;
-        let mut var_temp00: f64 = *var_temp00_slot;
-        let mut var_templ: f64 = *var_templ_slot;
-        let mut var_tempw: f64 = *var_tempw_slot;
-        let mut var_thesat_p: f64 = *var_thesat_p_slot;
-        let mut var_thesatac_p: f64 = *var_thesatac_p_slot;
-        let mut var_tmpa: f64 = *var_tmpa_slot;
-        let mut var_tmpb: f64 = *var_tmpb_slot;
-        let mut var_vfb_p: f64 = *var_vfb_p_slot;
-        let mut var_wx: f64 = *var_wx_slot;
-
         let (assign8900_e8574,) = {
     if ((var_guard36 != 0.0) && (var_guard133 != 0.0)) {
         let assign8900_e8563: f64 = (p.p745 * var_ile);
@@ -9821,6 +9311,144 @@ impl Instance {
     }
 };
         var_tmpa = assign9090_e8921;
+
+        *var_alp1ac_p_slot = var_alp1ac_p;
+        *var_alpac_p_slot = var_alpac_p;
+        *var_axac_p_slot = var_axac_p;
+        *var_betnedge_p_slot = var_betnedge_p;
+        *var_cfbedge_p_slot = var_cfbedge_p;
+        *var_cfdedge_p_slot = var_cfdedge_p;
+        *var_cfedge_p_slot = var_cfedge_p;
+        *var_cfr_p_slot = var_cfr_p;
+        *var_cfrd_p_slot = var_cfrd_p;
+        *var_cgbov_p_slot = var_cgbov_p;
+        *var_cgov_p_slot = var_cgov_p;
+        *var_cgovd_p_slot = var_cgovd_p;
+        *var_cinr_p_slot = var_cinr_p;
+        *var_cinrd_p_slot = var_cinrd_p;
+        *var_ctedge_p_slot = var_ctedge_p;
+        *var_dphibedge_p_slot = var_dphibedge_p;
+        *var_fntexc_p_slot = var_fntexc_p;
+        *var_guard112_slot = var_guard112;
+        *var_guard113_slot = var_guard113;
+        *var_guard114_slot = var_guard114;
+        *var_guard115_slot = var_guard115;
+        *var_guard116_slot = var_guard116;
+        *var_guard117_slot = var_guard117;
+        *var_guard118_slot = var_guard118;
+        *var_guard119_slot = var_guard119;
+        *var_guard120_slot = var_guard120;
+        *var_guard121_slot = var_guard121;
+        *var_guard122_slot = var_guard122;
+        *var_guard123_slot = var_guard123;
+        *var_guard127_slot = var_guard127;
+        *var_guard128_slot = var_guard128;
+        *var_guard129_slot = var_guard129;
+        *var_guard130_slot = var_guard130;
+        *var_guard131_slot = var_guard131;
+        *var_guard132_slot = var_guard132;
+        *var_guard133_slot = var_guard133;
+        *var_guard134_slot = var_guard134;
+        *var_guard135_slot = var_guard135;
+        *var_guard136_slot = var_guard136;
+        *var_guard137_slot = var_guard137;
+        *var_guard138_slot = var_guard138;
+        *var_guard139_slot = var_guard139;
+        *var_neffedge_p_slot = var_neffedge_p;
+        *var_plparam_i_slot = var_plparam_i;
+        *var_plwparam_i_slot = var_plwparam_i;
+        *var_pscebedge_p_slot = var_pscebedge_p;
+        *var_pscededge_p_slot = var_pscededge_p;
+        *var_psceedge_p_slot = var_psceedge_p;
+        *var_pwparam_i_slot = var_pwparam_i;
+        *var_stbetedge_p_slot = var_stbetedge_p;
+        *var_stvfbedge_p_slot = var_stvfbedge_p;
+        *var_tmpa_slot = var_tmpa;
+        *var_vfbedge_p_slot = var_vfbedge_p;
+    }
+
+    pub(super) fn stamp_transient_block_13(
+        p: &Parameters,
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+        var_dellps: f64,
+        var_delwod: f64,
+        var_guard36: f64,
+        var_invnf: f64,
+        var_l_i: f64,
+        var_nf_i: f64,
+        var_rta: f64,
+        var_sa_i: f64,
+        var_sb_i: f64,
+        var_sc_i: f64,
+        var_sd_i: f64,
+        var_w_i: f64,
+        var_betn_p_slot: &mut f64,
+        var_betnedge_p_slot: &mut f64,
+        var_cf_p_slot: &mut f64,
+        var_cfedge_p_slot: &mut f64,
+        var_guard143_slot: &mut f64,
+        var_guard144_slot: &mut f64,
+        var_guard145_slot: &mut f64,
+        var_guard146_slot: &mut f64,
+        var_invsa_slot: &mut f64,
+        var_invsaref_slot: &mut f64,
+        var_invsb_slot: &mut f64,
+        var_invsbref_slot: &mut f64,
+        var_kstressu0_slot: &mut f64,
+        var_kstressvth0_slot: &mut f64,
+        var_kvsatac_i_slot: &mut f64,
+        var_loop__slot: &mut f64,
+        var_lx_slot: &mut f64,
+        var_rhobeta_slot: &mut f64,
+        var_rhobetaref_slot: &mut f64,
+        var_sca_i_slot: &mut f64,
+        var_scb_i_slot: &mut f64,
+        var_scc_i_slot: &mut f64,
+        var_temp0_slot: &mut f64,
+        var_temp00_slot: &mut f64,
+        var_templ_slot: &mut f64,
+        var_tempw_slot: &mut f64,
+        var_thesat_p_slot: &mut f64,
+        var_thesatac_p_slot: &mut f64,
+        var_tmpa_slot: &mut f64,
+        var_tmpb_slot: &mut f64,
+        var_vfb_p_slot: &mut f64,
+        var_vfbedge_p_slot: &mut f64,
+        var_wx_slot: &mut f64,
+    ) {
+        let mut var_betn_p: f64 = *var_betn_p_slot;
+        let mut var_betnedge_p: f64 = *var_betnedge_p_slot;
+        let mut var_cf_p: f64 = *var_cf_p_slot;
+        let mut var_cfedge_p: f64 = *var_cfedge_p_slot;
+        let mut var_guard143: f64 = *var_guard143_slot;
+        let mut var_guard144: f64 = *var_guard144_slot;
+        let mut var_guard145: f64 = *var_guard145_slot;
+        let mut var_guard146: f64 = *var_guard146_slot;
+        let mut var_invsa: f64 = *var_invsa_slot;
+        let mut var_invsaref: f64 = *var_invsaref_slot;
+        let mut var_invsb: f64 = *var_invsb_slot;
+        let mut var_invsbref: f64 = *var_invsbref_slot;
+        let mut var_kstressu0: f64 = *var_kstressu0_slot;
+        let mut var_kstressvth0: f64 = *var_kstressvth0_slot;
+        let mut var_kvsatac_i: f64 = *var_kvsatac_i_slot;
+        let mut var_loop_: f64 = *var_loop__slot;
+        let mut var_lx: f64 = *var_lx_slot;
+        let mut var_rhobeta: f64 = *var_rhobeta_slot;
+        let mut var_rhobetaref: f64 = *var_rhobetaref_slot;
+        let mut var_sca_i: f64 = *var_sca_i_slot;
+        let mut var_scb_i: f64 = *var_scb_i_slot;
+        let mut var_scc_i: f64 = *var_scc_i_slot;
+        let mut var_temp0: f64 = *var_temp0_slot;
+        let mut var_temp00: f64 = *var_temp00_slot;
+        let mut var_templ: f64 = *var_templ_slot;
+        let mut var_tempw: f64 = *var_tempw_slot;
+        let mut var_thesat_p: f64 = *var_thesat_p_slot;
+        let mut var_thesatac_p: f64 = *var_thesatac_p_slot;
+        let mut var_tmpa: f64 = *var_tmpa_slot;
+        let mut var_tmpb: f64 = *var_tmpb_slot;
+        let mut var_vfb_p: f64 = *var_vfb_p_slot;
+        let mut var_vfbedge_p: f64 = *var_vfbedge_p_slot;
+        let mut var_wx: f64 = *var_wx_slot;
 
         let (assign9100_e8925,) = {
     if (var_guard36 != 0.0) {
@@ -10197,206 +9825,6 @@ impl Instance {
 };
         var_vfb_p = assign9380_e9303;
 
-        *var_betn_p_slot = var_betn_p;
-        *var_betnedge_p_slot = var_betnedge_p;
-        *var_cfbedge_p_slot = var_cfbedge_p;
-        *var_cfdedge_p_slot = var_cfdedge_p;
-        *var_cfedge_p_slot = var_cfedge_p;
-        *var_guard134_slot = var_guard134;
-        *var_guard135_slot = var_guard135;
-        *var_guard136_slot = var_guard136;
-        *var_guard137_slot = var_guard137;
-        *var_guard138_slot = var_guard138;
-        *var_guard139_slot = var_guard139;
-        *var_guard143_slot = var_guard143;
-        *var_guard144_slot = var_guard144;
-        *var_invsa_slot = var_invsa;
-        *var_invsaref_slot = var_invsaref;
-        *var_invsb_slot = var_invsb;
-        *var_invsbref_slot = var_invsbref;
-        *var_kstressu0_slot = var_kstressu0;
-        *var_kstressvth0_slot = var_kstressvth0;
-        *var_kvsatac_i_slot = var_kvsatac_i;
-        *var_loop__slot = var_loop_;
-        *var_lx_slot = var_lx;
-        *var_pscebedge_p_slot = var_pscebedge_p;
-        *var_pscededge_p_slot = var_pscededge_p;
-        *var_psceedge_p_slot = var_psceedge_p;
-        *var_rhobeta_slot = var_rhobeta;
-        *var_rhobetaref_slot = var_rhobetaref;
-        *var_stbetedge_p_slot = var_stbetedge_p;
-        *var_temp0_slot = var_temp0;
-        *var_temp00_slot = var_temp00;
-        *var_templ_slot = var_templ;
-        *var_tempw_slot = var_tempw;
-        *var_thesat_p_slot = var_thesat_p;
-        *var_thesatac_p_slot = var_thesatac_p;
-        *var_tmpa_slot = var_tmpa;
-        *var_tmpb_slot = var_tmpb;
-        *var_vfb_p_slot = var_vfb_p;
-        *var_wx_slot = var_wx;
-    }
-
-    pub(super) fn stamp_transient_block_14(
-        p: &Parameters,
-        var_cfb_p: f64,
-        var_cfd_p: f64,
-        var_cs_p: f64,
-        var_ct_p: f64,
-        var_ctb_p: f64,
-        var_ctg_p: f64,
-        var_dphib_p: f64,
-        var_dvsbnud_p: f64,
-        var_epsrox_p: f64,
-        var_feta_p: f64,
-        var_gfacnud_p: f64,
-        var_guard144: f64,
-        var_guard36: f64,
-        var_kstressvth0: f64,
-        var_kuowe: f64,
-        var_kvthowe: f64,
-        var_mue_p: f64,
-        var_neff_p: f64,
-        var_nov_p: f64,
-        var_novd_p: f64,
-        var_np_p: f64,
-        var_psce_p: f64,
-        var_psceb_p: f64,
-        var_psced_p: f64,
-        var_rs_p: f64,
-        var_rsb_p: f64,
-        var_rsg_p: f64,
-        var_sc_i: f64,
-        var_st2vfb_p: f64,
-        var_stbet_p: f64,
-        var_stcs_p: f64,
-        var_stct_p: f64,
-        var_stmue_p: f64,
-        var_strs_p: f64,
-        var_stthecs_p: f64,
-        var_stthemu_p: f64,
-        var_stvfb_p: f64,
-        var_stxcor_p: f64,
-        var_thecs_p: f64,
-        var_themu_p: f64,
-        var_tox_p: f64,
-        var_toxov_p: f64,
-        var_toxovd_p: f64,
-        var_vsbnud_p: f64,
-        var_w_i: f64,
-        var_xcor_p: f64,
-        var_betn_i_slot: &mut f64,
-        var_betn_p_slot: &mut f64,
-        var_betnedge_p_slot: &mut f64,
-        var_cf_i_slot: &mut f64,
-        var_cf_p_slot: &mut f64,
-        var_cfb_i_slot: &mut f64,
-        var_cfd_i_slot: &mut f64,
-        var_cfedge_p_slot: &mut f64,
-        var_cs_i_slot: &mut f64,
-        var_ct_i_slot: &mut f64,
-        var_ctb_i_slot: &mut f64,
-        var_ctg_i_slot: &mut f64,
-        var_dphib_i_slot: &mut f64,
-        var_dvsbnud_i_slot: &mut f64,
-        var_epsrox_i_slot: &mut f64,
-        var_feta_i_slot: &mut f64,
-        var_gfacnud_i_slot: &mut f64,
-        var_guard145_slot: &mut f64,
-        var_guard146_slot: &mut f64,
-        var_mue_i_slot: &mut f64,
-        var_neff_i_slot: &mut f64,
-        var_nov_i_slot: &mut f64,
-        var_novd_i_slot: &mut f64,
-        var_np_i_slot: &mut f64,
-        var_psce_i_slot: &mut f64,
-        var_psceb_i_slot: &mut f64,
-        var_psced_i_slot: &mut f64,
-        var_rs_i_slot: &mut f64,
-        var_rsb_i_slot: &mut f64,
-        var_rsg_i_slot: &mut f64,
-        var_sca_i_slot: &mut f64,
-        var_scb_i_slot: &mut f64,
-        var_scc_i_slot: &mut f64,
-        var_st2vfb_i_slot: &mut f64,
-        var_stbet_i_slot: &mut f64,
-        var_stcs_i_slot: &mut f64,
-        var_stct_i_slot: &mut f64,
-        var_stmue_i_slot: &mut f64,
-        var_strs_i_slot: &mut f64,
-        var_stthecs_i_slot: &mut f64,
-        var_stthemu_i_slot: &mut f64,
-        var_stvfb_i_slot: &mut f64,
-        var_stxcor_i_slot: &mut f64,
-        var_temp0_slot: &mut f64,
-        var_temp00_slot: &mut f64,
-        var_thecs_i_slot: &mut f64,
-        var_themu_i_slot: &mut f64,
-        var_tox_i_slot: &mut f64,
-        var_toxov_i_slot: &mut f64,
-        var_toxovd_i_slot: &mut f64,
-        var_vfb_i_slot: &mut f64,
-        var_vfb_p_slot: &mut f64,
-        var_vfbedge_p_slot: &mut f64,
-        var_vsbnud_i_slot: &mut f64,
-        var_xcor_i_slot: &mut f64,
-    ) {
-        let mut var_betn_i: f64 = *var_betn_i_slot;
-        let mut var_betn_p: f64 = *var_betn_p_slot;
-        let mut var_betnedge_p: f64 = *var_betnedge_p_slot;
-        let mut var_cf_i: f64 = *var_cf_i_slot;
-        let mut var_cf_p: f64 = *var_cf_p_slot;
-        let mut var_cfb_i: f64 = *var_cfb_i_slot;
-        let mut var_cfd_i: f64 = *var_cfd_i_slot;
-        let mut var_cfedge_p: f64 = *var_cfedge_p_slot;
-        let mut var_cs_i: f64 = *var_cs_i_slot;
-        let mut var_ct_i: f64 = *var_ct_i_slot;
-        let mut var_ctb_i: f64 = *var_ctb_i_slot;
-        let mut var_ctg_i: f64 = *var_ctg_i_slot;
-        let mut var_dphib_i: f64 = *var_dphib_i_slot;
-        let mut var_dvsbnud_i: f64 = *var_dvsbnud_i_slot;
-        let mut var_epsrox_i: f64 = *var_epsrox_i_slot;
-        let mut var_feta_i: f64 = *var_feta_i_slot;
-        let mut var_gfacnud_i: f64 = *var_gfacnud_i_slot;
-        let mut var_guard145: f64 = *var_guard145_slot;
-        let mut var_guard146: f64 = *var_guard146_slot;
-        let mut var_mue_i: f64 = *var_mue_i_slot;
-        let mut var_neff_i: f64 = *var_neff_i_slot;
-        let mut var_nov_i: f64 = *var_nov_i_slot;
-        let mut var_novd_i: f64 = *var_novd_i_slot;
-        let mut var_np_i: f64 = *var_np_i_slot;
-        let mut var_psce_i: f64 = *var_psce_i_slot;
-        let mut var_psceb_i: f64 = *var_psceb_i_slot;
-        let mut var_psced_i: f64 = *var_psced_i_slot;
-        let mut var_rs_i: f64 = *var_rs_i_slot;
-        let mut var_rsb_i: f64 = *var_rsb_i_slot;
-        let mut var_rsg_i: f64 = *var_rsg_i_slot;
-        let mut var_sca_i: f64 = *var_sca_i_slot;
-        let mut var_scb_i: f64 = *var_scb_i_slot;
-        let mut var_scc_i: f64 = *var_scc_i_slot;
-        let mut var_st2vfb_i: f64 = *var_st2vfb_i_slot;
-        let mut var_stbet_i: f64 = *var_stbet_i_slot;
-        let mut var_stcs_i: f64 = *var_stcs_i_slot;
-        let mut var_stct_i: f64 = *var_stct_i_slot;
-        let mut var_stmue_i: f64 = *var_stmue_i_slot;
-        let mut var_strs_i: f64 = *var_strs_i_slot;
-        let mut var_stthecs_i: f64 = *var_stthecs_i_slot;
-        let mut var_stthemu_i: f64 = *var_stthemu_i_slot;
-        let mut var_stvfb_i: f64 = *var_stvfb_i_slot;
-        let mut var_stxcor_i: f64 = *var_stxcor_i_slot;
-        let mut var_temp0: f64 = *var_temp0_slot;
-        let mut var_temp00: f64 = *var_temp00_slot;
-        let mut var_thecs_i: f64 = *var_thecs_i_slot;
-        let mut var_themu_i: f64 = *var_themu_i_slot;
-        let mut var_tox_i: f64 = *var_tox_i_slot;
-        let mut var_toxov_i: f64 = *var_toxov_i_slot;
-        let mut var_toxovd_i: f64 = *var_toxovd_i_slot;
-        let mut var_vfb_i: f64 = *var_vfb_i_slot;
-        let mut var_vfb_p: f64 = *var_vfb_p_slot;
-        let mut var_vfbedge_p: f64 = *var_vfbedge_p_slot;
-        let mut var_vsbnud_i: f64 = *var_vsbnud_i_slot;
-        let mut var_xcor_i: f64 = *var_xcor_i_slot;
-
         let (assign9390_e9311,) = {
     if ((var_guard36 != 0.0) && (var_guard144 != 0.0)) {
         let assign9390_e9309: f64 = (var_vfbedge_p + var_temp00);
@@ -10530,6 +9958,240 @@ impl Instance {
     }
 };
         var_scc_i = assign9490_e9479;
+
+        *var_betn_p_slot = var_betn_p;
+        *var_betnedge_p_slot = var_betnedge_p;
+        *var_cf_p_slot = var_cf_p;
+        *var_cfedge_p_slot = var_cfedge_p;
+        *var_guard143_slot = var_guard143;
+        *var_guard144_slot = var_guard144;
+        *var_guard145_slot = var_guard145;
+        *var_guard146_slot = var_guard146;
+        *var_invsa_slot = var_invsa;
+        *var_invsaref_slot = var_invsaref;
+        *var_invsb_slot = var_invsb;
+        *var_invsbref_slot = var_invsbref;
+        *var_kstressu0_slot = var_kstressu0;
+        *var_kstressvth0_slot = var_kstressvth0;
+        *var_kvsatac_i_slot = var_kvsatac_i;
+        *var_loop__slot = var_loop_;
+        *var_lx_slot = var_lx;
+        *var_rhobeta_slot = var_rhobeta;
+        *var_rhobetaref_slot = var_rhobetaref;
+        *var_sca_i_slot = var_sca_i;
+        *var_scb_i_slot = var_scb_i;
+        *var_scc_i_slot = var_scc_i;
+        *var_temp0_slot = var_temp0;
+        *var_temp00_slot = var_temp00;
+        *var_templ_slot = var_templ;
+        *var_tempw_slot = var_tempw;
+        *var_thesat_p_slot = var_thesat_p;
+        *var_thesatac_p_slot = var_thesatac_p;
+        *var_tmpa_slot = var_tmpa;
+        *var_tmpb_slot = var_tmpb;
+        *var_vfb_p_slot = var_vfb_p;
+        *var_vfbedge_p_slot = var_vfbedge_p;
+        *var_wx_slot = var_wx;
+    }
+
+    pub(super) fn stamp_transient_block_14(
+        p: &Parameters,
+        var_a1_p: f64,
+        var_a2_p: f64,
+        var_a3_p: f64,
+        var_a4_p: f64,
+        var_alp1_p: f64,
+        var_alp2_p: f64,
+        var_alp_p: f64,
+        var_ax_p: f64,
+        var_cf_p: f64,
+        var_cfb_p: f64,
+        var_cfd_p: f64,
+        var_cs_p: f64,
+        var_ct_p: f64,
+        var_ctb_p: f64,
+        var_ctg_p: f64,
+        var_dphib_p: f64,
+        var_dvsbnud_p: f64,
+        var_epsrox_p: f64,
+        var_feta_p: f64,
+        var_gco_p: f64,
+        var_gfacnud_p: f64,
+        var_guard145: f64,
+        var_guard36: f64,
+        var_iginv_p: f64,
+        var_imaxii_p: f64,
+        var_kuowe: f64,
+        var_kvthowe: f64,
+        var_mue_p: f64,
+        var_neff_p: f64,
+        var_nov_p: f64,
+        var_novd_p: f64,
+        var_np_p: f64,
+        var_psce_p: f64,
+        var_psceb_p: f64,
+        var_psced_p: f64,
+        var_rs_p: f64,
+        var_rsb_p: f64,
+        var_rsg_p: f64,
+        var_sca_i: f64,
+        var_scb_i: f64,
+        var_scc_i: f64,
+        var_st2vfb_p: f64,
+        var_sta2_p: f64,
+        var_stbet_p: f64,
+        var_stcs_p: f64,
+        var_stct_p: f64,
+        var_stmue_p: f64,
+        var_strs_p: f64,
+        var_stthecs_p: f64,
+        var_stthemu_p: f64,
+        var_stthesat_p: f64,
+        var_stvfb_p: f64,
+        var_stxcor_p: f64,
+        var_thecs_p: f64,
+        var_themu_p: f64,
+        var_thesat_p: f64,
+        var_thesatb_p: f64,
+        var_thesatg_p: f64,
+        var_thesatt_p: f64,
+        var_tox_p: f64,
+        var_toxov_p: f64,
+        var_toxovd_p: f64,
+        var_vp_p: f64,
+        var_vsbnud_p: f64,
+        var_xcor_p: f64,
+        var_a1_i_slot: &mut f64,
+        var_a2_i_slot: &mut f64,
+        var_a3_i_slot: &mut f64,
+        var_a4_i_slot: &mut f64,
+        var_alp1_i_slot: &mut f64,
+        var_alp2_i_slot: &mut f64,
+        var_alp_i_slot: &mut f64,
+        var_ax_i_slot: &mut f64,
+        var_betn_i_slot: &mut f64,
+        var_betn_p_slot: &mut f64,
+        var_betnedge_p_slot: &mut f64,
+        var_cf_i_slot: &mut f64,
+        var_cfb_i_slot: &mut f64,
+        var_cfd_i_slot: &mut f64,
+        var_cs_i_slot: &mut f64,
+        var_ct_i_slot: &mut f64,
+        var_ctb_i_slot: &mut f64,
+        var_ctg_i_slot: &mut f64,
+        var_dphib_i_slot: &mut f64,
+        var_dvsbnud_i_slot: &mut f64,
+        var_epsrox_i_slot: &mut f64,
+        var_feta_i_slot: &mut f64,
+        var_gco_i_slot: &mut f64,
+        var_gfacnud_i_slot: &mut f64,
+        var_iginv_i_slot: &mut f64,
+        var_imaxii_i_slot: &mut f64,
+        var_mue_i_slot: &mut f64,
+        var_neff_i_slot: &mut f64,
+        var_nov_i_slot: &mut f64,
+        var_novd_i_slot: &mut f64,
+        var_np_i_slot: &mut f64,
+        var_psce_i_slot: &mut f64,
+        var_psceb_i_slot: &mut f64,
+        var_psced_i_slot: &mut f64,
+        var_rs_i_slot: &mut f64,
+        var_rsb_i_slot: &mut f64,
+        var_rsg_i_slot: &mut f64,
+        var_st2vfb_i_slot: &mut f64,
+        var_sta2_i_slot: &mut f64,
+        var_stbet_i_slot: &mut f64,
+        var_stcs_i_slot: &mut f64,
+        var_stct_i_slot: &mut f64,
+        var_stmue_i_slot: &mut f64,
+        var_strs_i_slot: &mut f64,
+        var_stthecs_i_slot: &mut f64,
+        var_stthemu_i_slot: &mut f64,
+        var_stthesat_i_slot: &mut f64,
+        var_stvfb_i_slot: &mut f64,
+        var_stxcor_i_slot: &mut f64,
+        var_temp0_slot: &mut f64,
+        var_thecs_i_slot: &mut f64,
+        var_themu_i_slot: &mut f64,
+        var_thesat_i_slot: &mut f64,
+        var_thesatb_i_slot: &mut f64,
+        var_thesatg_i_slot: &mut f64,
+        var_thesatt_i_slot: &mut f64,
+        var_tox_i_slot: &mut f64,
+        var_toxov_i_slot: &mut f64,
+        var_toxovd_i_slot: &mut f64,
+        var_vfb_i_slot: &mut f64,
+        var_vfb_p_slot: &mut f64,
+        var_vfbedge_p_slot: &mut f64,
+        var_vp_i_slot: &mut f64,
+        var_vsbnud_i_slot: &mut f64,
+        var_xcor_i_slot: &mut f64,
+    ) {
+        let mut var_a1_i: f64 = *var_a1_i_slot;
+        let mut var_a2_i: f64 = *var_a2_i_slot;
+        let mut var_a3_i: f64 = *var_a3_i_slot;
+        let mut var_a4_i: f64 = *var_a4_i_slot;
+        let mut var_alp1_i: f64 = *var_alp1_i_slot;
+        let mut var_alp2_i: f64 = *var_alp2_i_slot;
+        let mut var_alp_i: f64 = *var_alp_i_slot;
+        let mut var_ax_i: f64 = *var_ax_i_slot;
+        let mut var_betn_i: f64 = *var_betn_i_slot;
+        let mut var_betn_p: f64 = *var_betn_p_slot;
+        let mut var_betnedge_p: f64 = *var_betnedge_p_slot;
+        let mut var_cf_i: f64 = *var_cf_i_slot;
+        let mut var_cfb_i: f64 = *var_cfb_i_slot;
+        let mut var_cfd_i: f64 = *var_cfd_i_slot;
+        let mut var_cs_i: f64 = *var_cs_i_slot;
+        let mut var_ct_i: f64 = *var_ct_i_slot;
+        let mut var_ctb_i: f64 = *var_ctb_i_slot;
+        let mut var_ctg_i: f64 = *var_ctg_i_slot;
+        let mut var_dphib_i: f64 = *var_dphib_i_slot;
+        let mut var_dvsbnud_i: f64 = *var_dvsbnud_i_slot;
+        let mut var_epsrox_i: f64 = *var_epsrox_i_slot;
+        let mut var_feta_i: f64 = *var_feta_i_slot;
+        let mut var_gco_i: f64 = *var_gco_i_slot;
+        let mut var_gfacnud_i: f64 = *var_gfacnud_i_slot;
+        let mut var_iginv_i: f64 = *var_iginv_i_slot;
+        let mut var_imaxii_i: f64 = *var_imaxii_i_slot;
+        let mut var_mue_i: f64 = *var_mue_i_slot;
+        let mut var_neff_i: f64 = *var_neff_i_slot;
+        let mut var_nov_i: f64 = *var_nov_i_slot;
+        let mut var_novd_i: f64 = *var_novd_i_slot;
+        let mut var_np_i: f64 = *var_np_i_slot;
+        let mut var_psce_i: f64 = *var_psce_i_slot;
+        let mut var_psceb_i: f64 = *var_psceb_i_slot;
+        let mut var_psced_i: f64 = *var_psced_i_slot;
+        let mut var_rs_i: f64 = *var_rs_i_slot;
+        let mut var_rsb_i: f64 = *var_rsb_i_slot;
+        let mut var_rsg_i: f64 = *var_rsg_i_slot;
+        let mut var_st2vfb_i: f64 = *var_st2vfb_i_slot;
+        let mut var_sta2_i: f64 = *var_sta2_i_slot;
+        let mut var_stbet_i: f64 = *var_stbet_i_slot;
+        let mut var_stcs_i: f64 = *var_stcs_i_slot;
+        let mut var_stct_i: f64 = *var_stct_i_slot;
+        let mut var_stmue_i: f64 = *var_stmue_i_slot;
+        let mut var_strs_i: f64 = *var_strs_i_slot;
+        let mut var_stthecs_i: f64 = *var_stthecs_i_slot;
+        let mut var_stthemu_i: f64 = *var_stthemu_i_slot;
+        let mut var_stthesat_i: f64 = *var_stthesat_i_slot;
+        let mut var_stvfb_i: f64 = *var_stvfb_i_slot;
+        let mut var_stxcor_i: f64 = *var_stxcor_i_slot;
+        let mut var_temp0: f64 = *var_temp0_slot;
+        let mut var_thecs_i: f64 = *var_thecs_i_slot;
+        let mut var_themu_i: f64 = *var_themu_i_slot;
+        let mut var_thesat_i: f64 = *var_thesat_i_slot;
+        let mut var_thesatb_i: f64 = *var_thesatb_i_slot;
+        let mut var_thesatg_i: f64 = *var_thesatg_i_slot;
+        let mut var_thesatt_i: f64 = *var_thesatt_i_slot;
+        let mut var_tox_i: f64 = *var_tox_i_slot;
+        let mut var_toxov_i: f64 = *var_toxov_i_slot;
+        let mut var_toxovd_i: f64 = *var_toxovd_i_slot;
+        let mut var_vfb_i: f64 = *var_vfb_i_slot;
+        let mut var_vfb_p: f64 = *var_vfb_p_slot;
+        let mut var_vfbedge_p: f64 = *var_vfbedge_p_slot;
+        let mut var_vp_i: f64 = *var_vp_i_slot;
+        let mut var_vsbnud_i: f64 = *var_vsbnud_i_slot;
+        let mut var_xcor_i: f64 = *var_xcor_i_slot;
 
         let (assign9500_e9493,) = {
     if ((var_guard36 != 0.0) && (var_guard145 != 0.0)) {
@@ -10902,323 +10564,6 @@ impl Instance {
 };
         var_rsg_i = assign9960_e9743;
 
-        *var_betn_i_slot = var_betn_i;
-        *var_betn_p_slot = var_betn_p;
-        *var_betnedge_p_slot = var_betnedge_p;
-        *var_cf_i_slot = var_cf_i;
-        *var_cf_p_slot = var_cf_p;
-        *var_cfb_i_slot = var_cfb_i;
-        *var_cfd_i_slot = var_cfd_i;
-        *var_cfedge_p_slot = var_cfedge_p;
-        *var_cs_i_slot = var_cs_i;
-        *var_ct_i_slot = var_ct_i;
-        *var_ctb_i_slot = var_ctb_i;
-        *var_ctg_i_slot = var_ctg_i;
-        *var_dphib_i_slot = var_dphib_i;
-        *var_dvsbnud_i_slot = var_dvsbnud_i;
-        *var_epsrox_i_slot = var_epsrox_i;
-        *var_feta_i_slot = var_feta_i;
-        *var_gfacnud_i_slot = var_gfacnud_i;
-        *var_guard145_slot = var_guard145;
-        *var_guard146_slot = var_guard146;
-        *var_mue_i_slot = var_mue_i;
-        *var_neff_i_slot = var_neff_i;
-        *var_nov_i_slot = var_nov_i;
-        *var_novd_i_slot = var_novd_i;
-        *var_np_i_slot = var_np_i;
-        *var_psce_i_slot = var_psce_i;
-        *var_psceb_i_slot = var_psceb_i;
-        *var_psced_i_slot = var_psced_i;
-        *var_rs_i_slot = var_rs_i;
-        *var_rsb_i_slot = var_rsb_i;
-        *var_rsg_i_slot = var_rsg_i;
-        *var_sca_i_slot = var_sca_i;
-        *var_scb_i_slot = var_scb_i;
-        *var_scc_i_slot = var_scc_i;
-        *var_st2vfb_i_slot = var_st2vfb_i;
-        *var_stbet_i_slot = var_stbet_i;
-        *var_stcs_i_slot = var_stcs_i;
-        *var_stct_i_slot = var_stct_i;
-        *var_stmue_i_slot = var_stmue_i;
-        *var_strs_i_slot = var_strs_i;
-        *var_stthecs_i_slot = var_stthecs_i;
-        *var_stthemu_i_slot = var_stthemu_i;
-        *var_stvfb_i_slot = var_stvfb_i;
-        *var_stxcor_i_slot = var_stxcor_i;
-        *var_temp0_slot = var_temp0;
-        *var_temp00_slot = var_temp00;
-        *var_thecs_i_slot = var_thecs_i;
-        *var_themu_i_slot = var_themu_i;
-        *var_tox_i_slot = var_tox_i;
-        *var_toxov_i_slot = var_toxov_i;
-        *var_toxovd_i_slot = var_toxovd_i;
-        *var_vfb_i_slot = var_vfb_i;
-        *var_vfb_p_slot = var_vfb_p;
-        *var_vfbedge_p_slot = var_vfbedge_p;
-        *var_vsbnud_i_slot = var_vsbnud_i;
-        *var_xcor_i_slot = var_xcor_i;
-    }
-
-    pub(super) fn stamp_transient_block_15(
-        p: &Parameters,
-        var_a1_p: f64,
-        var_a2_p: f64,
-        var_a3_p: f64,
-        var_a4_p: f64,
-        var_agidl_p: f64,
-        var_agidld_p: f64,
-        var_alp1_p: f64,
-        var_alp1ac_p: f64,
-        var_alp2_p: f64,
-        var_alp_p: f64,
-        var_alpac_p: f64,
-        var_ax_p: f64,
-        var_axac_p: f64,
-        var_axinr_p: f64,
-        var_betnedge_p: f64,
-        var_bgidl_p: f64,
-        var_bgidld_p: f64,
-        var_cfbedge_p: f64,
-        var_cfdedge_p: f64,
-        var_cfedge_p: f64,
-        var_cfr_p: f64,
-        var_cfrd_p: f64,
-        var_cgbov_p: f64,
-        var_cgidl_p: f64,
-        var_cgidld_p: f64,
-        var_cgov_p: f64,
-        var_cgovaccg_p: f64,
-        var_cgovd_p: f64,
-        var_chib_p: f64,
-        var_cinr_p: f64,
-        var_cinrd_p: f64,
-        var_cox_p: f64,
-        var_ctedge_p: f64,
-        var_delvtac_p: f64,
-        var_dphibedge_p: f64,
-        var_dvfbinr_p: f64,
-        var_facneffac_p: f64,
-        var_fcgovacc_p: f64,
-        var_fcgovaccd_p: f64,
-        var_fcinracc_p: f64,
-        var_fcinrdep_p: f64,
-        var_fnt_p: f64,
-        var_fntexc_p: f64,
-        var_gc2_p: f64,
-        var_gc2ov_p: f64,
-        var_gc2ovd_p: f64,
-        var_gc3_p: f64,
-        var_gc3ov_p: f64,
-        var_gc3ovd_p: f64,
-        var_gco_p: f64,
-        var_iginv_p: f64,
-        var_igov_p: f64,
-        var_igovd_p: f64,
-        var_imaxii_p: f64,
-        var_neffedge_p: f64,
-        var_nf_i: f64,
-        var_nov_i: f64,
-        var_pscebedge_p: f64,
-        var_pscededge_p: f64,
-        var_psceedge_p: f64,
-        var_rbulk_p: f64,
-        var_rde_p: f64,
-        var_rg_p: f64,
-        var_rjund_p: f64,
-        var_rjuns_p: f64,
-        var_rse_p: f64,
-        var_rwell_p: f64,
-        var_sta2_p: f64,
-        var_stbetedge_p: f64,
-        var_stbgidl_p: f64,
-        var_stbgidld_p: f64,
-        var_stig_p: f64,
-        var_stthesat_p: f64,
-        var_stvfbedge_p: f64,
-        var_thesat_p: f64,
-        var_thesatac_p: f64,
-        var_thesatb_p: f64,
-        var_thesatg_p: f64,
-        var_thesatt_p: f64,
-        var_toxov_i: f64,
-        var_vfbedge_p: f64,
-        var_vp_p: f64,
-        var_a1_i_slot: &mut f64,
-        var_a2_i_slot: &mut f64,
-        var_a3_i_slot: &mut f64,
-        var_a4_i_slot: &mut f64,
-        var_agidl_i_slot: &mut f64,
-        var_agidld_i_slot: &mut f64,
-        var_alp1_i_slot: &mut f64,
-        var_alp1ac_i_slot: &mut f64,
-        var_alp2_i_slot: &mut f64,
-        var_alp_i_slot: &mut f64,
-        var_alpac_i_slot: &mut f64,
-        var_ax_i_slot: &mut f64,
-        var_axac_i_slot: &mut f64,
-        var_axinr_i_slot: &mut f64,
-        var_betnedge_i_slot: &mut f64,
-        var_bgidl_i_slot: &mut f64,
-        var_bgidld_i_slot: &mut f64,
-        var_cfbedge_i_slot: &mut f64,
-        var_cfdedge_i_slot: &mut f64,
-        var_cfedge_i_slot: &mut f64,
-        var_cfr_i_slot: &mut f64,
-        var_cfrd_i_slot: &mut f64,
-        var_cgbov_i_slot: &mut f64,
-        var_cgidl_i_slot: &mut f64,
-        var_cgidld_i_slot: &mut f64,
-        var_cgov_i_slot: &mut f64,
-        var_cgovaccg_i_slot: &mut f64,
-        var_cgovd_i_slot: &mut f64,
-        var_chib_i_slot: &mut f64,
-        var_cinr_i_slot: &mut f64,
-        var_cinrd_i_slot: &mut f64,
-        var_cox_i_slot: &mut f64,
-        var_ctedge_i_slot: &mut f64,
-        var_delvtac_i_slot: &mut f64,
-        var_delvto_i_slot: &mut f64,
-        var_delvtoedge_i_slot: &mut f64,
-        var_dphibedge_i_slot: &mut f64,
-        var_dvfbinr_i_slot: &mut f64,
-        var_facneffac_i_slot: &mut f64,
-        var_factuo_i_slot: &mut f64,
-        var_factuoedge_i_slot: &mut f64,
-        var_fcgovacc_i_slot: &mut f64,
-        var_fcgovaccd_i_slot: &mut f64,
-        var_fcinracc_i_slot: &mut f64,
-        var_fcinrdep_i_slot: &mut f64,
-        var_fnt_i_slot: &mut f64,
-        var_fntexc_i_slot: &mut f64,
-        var_gc2_i_slot: &mut f64,
-        var_gc2ov_i_slot: &mut f64,
-        var_gc2ovd_i_slot: &mut f64,
-        var_gc3_i_slot: &mut f64,
-        var_gc3ov_i_slot: &mut f64,
-        var_gc3ovd_i_slot: &mut f64,
-        var_gco_i_slot: &mut f64,
-        var_guard147_slot: &mut f64,
-        var_iginv_i_slot: &mut f64,
-        var_igov_i_slot: &mut f64,
-        var_igovd_i_slot: &mut f64,
-        var_imaxii_i_slot: &mut f64,
-        var_mult_inst_slot: &mut f64,
-        var_neffedge_i_slot: &mut f64,
-        var_novd_i_slot: &mut f64,
-        var_pscebedge_i_slot: &mut f64,
-        var_pscededge_i_slot: &mut f64,
-        var_psceedge_i_slot: &mut f64,
-        var_rbulk_i_slot: &mut f64,
-        var_rde_i_slot: &mut f64,
-        var_rg_i_slot: &mut f64,
-        var_rjund_i_slot: &mut f64,
-        var_rjuns_i_slot: &mut f64,
-        var_rse_i_slot: &mut f64,
-        var_rwell_i_slot: &mut f64,
-        var_sta2_i_slot: &mut f64,
-        var_stbetedge_i_slot: &mut f64,
-        var_stbgidl_i_slot: &mut f64,
-        var_stbgidld_i_slot: &mut f64,
-        var_stig_i_slot: &mut f64,
-        var_stthesat_i_slot: &mut f64,
-        var_stvfbedge_i_slot: &mut f64,
-        var_thesat_i_slot: &mut f64,
-        var_thesatac_i_slot: &mut f64,
-        var_thesatb_i_slot: &mut f64,
-        var_thesatg_i_slot: &mut f64,
-        var_thesatt_i_slot: &mut f64,
-        var_toxovd_i_slot: &mut f64,
-        var_vfbedge_i_slot: &mut f64,
-        var_vp_i_slot: &mut f64,
-    ) {
-        let mut var_a1_i: f64 = *var_a1_i_slot;
-        let mut var_a2_i: f64 = *var_a2_i_slot;
-        let mut var_a3_i: f64 = *var_a3_i_slot;
-        let mut var_a4_i: f64 = *var_a4_i_slot;
-        let mut var_agidl_i: f64 = *var_agidl_i_slot;
-        let mut var_agidld_i: f64 = *var_agidld_i_slot;
-        let mut var_alp1_i: f64 = *var_alp1_i_slot;
-        let mut var_alp1ac_i: f64 = *var_alp1ac_i_slot;
-        let mut var_alp2_i: f64 = *var_alp2_i_slot;
-        let mut var_alp_i: f64 = *var_alp_i_slot;
-        let mut var_alpac_i: f64 = *var_alpac_i_slot;
-        let mut var_ax_i: f64 = *var_ax_i_slot;
-        let mut var_axac_i: f64 = *var_axac_i_slot;
-        let mut var_axinr_i: f64 = *var_axinr_i_slot;
-        let mut var_betnedge_i: f64 = *var_betnedge_i_slot;
-        let mut var_bgidl_i: f64 = *var_bgidl_i_slot;
-        let mut var_bgidld_i: f64 = *var_bgidld_i_slot;
-        let mut var_cfbedge_i: f64 = *var_cfbedge_i_slot;
-        let mut var_cfdedge_i: f64 = *var_cfdedge_i_slot;
-        let mut var_cfedge_i: f64 = *var_cfedge_i_slot;
-        let mut var_cfr_i: f64 = *var_cfr_i_slot;
-        let mut var_cfrd_i: f64 = *var_cfrd_i_slot;
-        let mut var_cgbov_i: f64 = *var_cgbov_i_slot;
-        let mut var_cgidl_i: f64 = *var_cgidl_i_slot;
-        let mut var_cgidld_i: f64 = *var_cgidld_i_slot;
-        let mut var_cgov_i: f64 = *var_cgov_i_slot;
-        let mut var_cgovaccg_i: f64 = *var_cgovaccg_i_slot;
-        let mut var_cgovd_i: f64 = *var_cgovd_i_slot;
-        let mut var_chib_i: f64 = *var_chib_i_slot;
-        let mut var_cinr_i: f64 = *var_cinr_i_slot;
-        let mut var_cinrd_i: f64 = *var_cinrd_i_slot;
-        let mut var_cox_i: f64 = *var_cox_i_slot;
-        let mut var_ctedge_i: f64 = *var_ctedge_i_slot;
-        let mut var_delvtac_i: f64 = *var_delvtac_i_slot;
-        let mut var_delvto_i: f64 = *var_delvto_i_slot;
-        let mut var_delvtoedge_i: f64 = *var_delvtoedge_i_slot;
-        let mut var_dphibedge_i: f64 = *var_dphibedge_i_slot;
-        let mut var_dvfbinr_i: f64 = *var_dvfbinr_i_slot;
-        let mut var_facneffac_i: f64 = *var_facneffac_i_slot;
-        let mut var_factuo_i: f64 = *var_factuo_i_slot;
-        let mut var_factuoedge_i: f64 = *var_factuoedge_i_slot;
-        let mut var_fcgovacc_i: f64 = *var_fcgovacc_i_slot;
-        let mut var_fcgovaccd_i: f64 = *var_fcgovaccd_i_slot;
-        let mut var_fcinracc_i: f64 = *var_fcinracc_i_slot;
-        let mut var_fcinrdep_i: f64 = *var_fcinrdep_i_slot;
-        let mut var_fnt_i: f64 = *var_fnt_i_slot;
-        let mut var_fntexc_i: f64 = *var_fntexc_i_slot;
-        let mut var_gc2_i: f64 = *var_gc2_i_slot;
-        let mut var_gc2ov_i: f64 = *var_gc2ov_i_slot;
-        let mut var_gc2ovd_i: f64 = *var_gc2ovd_i_slot;
-        let mut var_gc3_i: f64 = *var_gc3_i_slot;
-        let mut var_gc3ov_i: f64 = *var_gc3ov_i_slot;
-        let mut var_gc3ovd_i: f64 = *var_gc3ovd_i_slot;
-        let mut var_gco_i: f64 = *var_gco_i_slot;
-        let mut var_guard147: f64 = *var_guard147_slot;
-        let mut var_iginv_i: f64 = *var_iginv_i_slot;
-        let mut var_igov_i: f64 = *var_igov_i_slot;
-        let mut var_igovd_i: f64 = *var_igovd_i_slot;
-        let mut var_imaxii_i: f64 = *var_imaxii_i_slot;
-        let mut var_mult_inst: f64 = *var_mult_inst_slot;
-        let mut var_neffedge_i: f64 = *var_neffedge_i_slot;
-        let mut var_novd_i: f64 = *var_novd_i_slot;
-        let mut var_pscebedge_i: f64 = *var_pscebedge_i_slot;
-        let mut var_pscededge_i: f64 = *var_pscededge_i_slot;
-        let mut var_psceedge_i: f64 = *var_psceedge_i_slot;
-        let mut var_rbulk_i: f64 = *var_rbulk_i_slot;
-        let mut var_rde_i: f64 = *var_rde_i_slot;
-        let mut var_rg_i: f64 = *var_rg_i_slot;
-        let mut var_rjund_i: f64 = *var_rjund_i_slot;
-        let mut var_rjuns_i: f64 = *var_rjuns_i_slot;
-        let mut var_rse_i: f64 = *var_rse_i_slot;
-        let mut var_rwell_i: f64 = *var_rwell_i_slot;
-        let mut var_sta2_i: f64 = *var_sta2_i_slot;
-        let mut var_stbetedge_i: f64 = *var_stbetedge_i_slot;
-        let mut var_stbgidl_i: f64 = *var_stbgidl_i_slot;
-        let mut var_stbgidld_i: f64 = *var_stbgidld_i_slot;
-        let mut var_stig_i: f64 = *var_stig_i_slot;
-        let mut var_stthesat_i: f64 = *var_stthesat_i_slot;
-        let mut var_stvfbedge_i: f64 = *var_stvfbedge_i_slot;
-        let mut var_thesat_i: f64 = *var_thesat_i_slot;
-        let mut var_thesatac_i: f64 = *var_thesatac_i_slot;
-        let mut var_thesatb_i: f64 = *var_thesatb_i_slot;
-        let mut var_thesatg_i: f64 = *var_thesatg_i_slot;
-        let mut var_thesatt_i: f64 = *var_thesatt_i_slot;
-        let mut var_toxovd_i: f64 = *var_toxovd_i_slot;
-        let mut var_vfbedge_i: f64 = *var_vfbedge_i_slot;
-        let mut var_vp_i: f64 = *var_vp_i_slot;
-
         let (assign9970_e9749,) = {
     if (var_thesat_p > 0.0) {
         (var_thesat_p,)
@@ -11356,6 +10701,296 @@ impl Instance {
     }
 };
         var_iginv_i = assign10140_e9835;
+
+        *var_a1_i_slot = var_a1_i;
+        *var_a2_i_slot = var_a2_i;
+        *var_a3_i_slot = var_a3_i;
+        *var_a4_i_slot = var_a4_i;
+        *var_alp1_i_slot = var_alp1_i;
+        *var_alp2_i_slot = var_alp2_i;
+        *var_alp_i_slot = var_alp_i;
+        *var_ax_i_slot = var_ax_i;
+        *var_betn_i_slot = var_betn_i;
+        *var_betn_p_slot = var_betn_p;
+        *var_betnedge_p_slot = var_betnedge_p;
+        *var_cf_i_slot = var_cf_i;
+        *var_cfb_i_slot = var_cfb_i;
+        *var_cfd_i_slot = var_cfd_i;
+        *var_cs_i_slot = var_cs_i;
+        *var_ct_i_slot = var_ct_i;
+        *var_ctb_i_slot = var_ctb_i;
+        *var_ctg_i_slot = var_ctg_i;
+        *var_dphib_i_slot = var_dphib_i;
+        *var_dvsbnud_i_slot = var_dvsbnud_i;
+        *var_epsrox_i_slot = var_epsrox_i;
+        *var_feta_i_slot = var_feta_i;
+        *var_gco_i_slot = var_gco_i;
+        *var_gfacnud_i_slot = var_gfacnud_i;
+        *var_iginv_i_slot = var_iginv_i;
+        *var_imaxii_i_slot = var_imaxii_i;
+        *var_mue_i_slot = var_mue_i;
+        *var_neff_i_slot = var_neff_i;
+        *var_nov_i_slot = var_nov_i;
+        *var_novd_i_slot = var_novd_i;
+        *var_np_i_slot = var_np_i;
+        *var_psce_i_slot = var_psce_i;
+        *var_psceb_i_slot = var_psceb_i;
+        *var_psced_i_slot = var_psced_i;
+        *var_rs_i_slot = var_rs_i;
+        *var_rsb_i_slot = var_rsb_i;
+        *var_rsg_i_slot = var_rsg_i;
+        *var_st2vfb_i_slot = var_st2vfb_i;
+        *var_sta2_i_slot = var_sta2_i;
+        *var_stbet_i_slot = var_stbet_i;
+        *var_stcs_i_slot = var_stcs_i;
+        *var_stct_i_slot = var_stct_i;
+        *var_stmue_i_slot = var_stmue_i;
+        *var_strs_i_slot = var_strs_i;
+        *var_stthecs_i_slot = var_stthecs_i;
+        *var_stthemu_i_slot = var_stthemu_i;
+        *var_stthesat_i_slot = var_stthesat_i;
+        *var_stvfb_i_slot = var_stvfb_i;
+        *var_stxcor_i_slot = var_stxcor_i;
+        *var_temp0_slot = var_temp0;
+        *var_thecs_i_slot = var_thecs_i;
+        *var_themu_i_slot = var_themu_i;
+        *var_thesat_i_slot = var_thesat_i;
+        *var_thesatb_i_slot = var_thesatb_i;
+        *var_thesatg_i_slot = var_thesatg_i;
+        *var_thesatt_i_slot = var_thesatt_i;
+        *var_tox_i_slot = var_tox_i;
+        *var_toxov_i_slot = var_toxov_i;
+        *var_toxovd_i_slot = var_toxovd_i;
+        *var_vfb_i_slot = var_vfb_i;
+        *var_vfb_p_slot = var_vfb_p;
+        *var_vfbedge_p_slot = var_vfbedge_p;
+        *var_vp_i_slot = var_vp_i;
+        *var_vsbnud_i_slot = var_vsbnud_i;
+        *var_xcor_i_slot = var_xcor_i;
+    }
+
+    pub(super) fn stamp_transient_block_15(
+        p: &Parameters,
+        var_agidl_p: f64,
+        var_agidld_p: f64,
+        var_alp1ac_p: f64,
+        var_alpac_p: f64,
+        var_axac_p: f64,
+        var_axinr_p: f64,
+        var_betnedge_p: f64,
+        var_bgidl_p: f64,
+        var_bgidld_p: f64,
+        var_cfbedge_p: f64,
+        var_cfdedge_p: f64,
+        var_cfedge_p: f64,
+        var_cfr_p: f64,
+        var_cfrd_p: f64,
+        var_cgbov_p: f64,
+        var_cgidl_p: f64,
+        var_cgidld_p: f64,
+        var_cgov_p: f64,
+        var_cgovaccg_p: f64,
+        var_cgovd_p: f64,
+        var_chib_p: f64,
+        var_cinr_p: f64,
+        var_cinrd_p: f64,
+        var_cox_p: f64,
+        var_ctedge_p: f64,
+        var_delvtac_p: f64,
+        var_dphibedge_p: f64,
+        var_dvfbinr_p: f64,
+        var_epsrox_i: f64,
+        var_facneffac_p: f64,
+        var_fcgovacc_p: f64,
+        var_fcgovaccd_p: f64,
+        var_fcinracc_p: f64,
+        var_fcinrdep_p: f64,
+        var_fnt_p: f64,
+        var_fntexc_p: f64,
+        var_gc2_p: f64,
+        var_gc2ov_p: f64,
+        var_gc2ovd_p: f64,
+        var_gc3_p: f64,
+        var_gc3ov_p: f64,
+        var_gc3ovd_p: f64,
+        var_igov_p: f64,
+        var_igovd_p: f64,
+        var_neff_i: f64,
+        var_neffedge_p: f64,
+        var_nf_i: f64,
+        var_nov_i: f64,
+        var_pscebedge_p: f64,
+        var_pscededge_p: f64,
+        var_psceedge_p: f64,
+        var_rbulk_p: f64,
+        var_rde_p: f64,
+        var_rg_p: f64,
+        var_rjund_p: f64,
+        var_rjuns_p: f64,
+        var_rse_p: f64,
+        var_rwell_p: f64,
+        var_stbetedge_p: f64,
+        var_stbgidl_p: f64,
+        var_stbgidld_p: f64,
+        var_stig_p: f64,
+        var_stvfbedge_p: f64,
+        var_thesatac_p: f64,
+        var_tox_i: f64,
+        var_toxov_i: f64,
+        var_vfbedge_p: f64,
+        var_agidl_i_slot: &mut f64,
+        var_agidld_i_slot: &mut f64,
+        var_alp1ac_i_slot: &mut f64,
+        var_alpac_i_slot: &mut f64,
+        var_axac_i_slot: &mut f64,
+        var_axinr_i_slot: &mut f64,
+        var_betnedge_i_slot: &mut f64,
+        var_bgidl_i_slot: &mut f64,
+        var_bgidld_i_slot: &mut f64,
+        var_cfbedge_i_slot: &mut f64,
+        var_cfdedge_i_slot: &mut f64,
+        var_cfedge_i_slot: &mut f64,
+        var_cfr_i_slot: &mut f64,
+        var_cfrd_i_slot: &mut f64,
+        var_cgbov_i_slot: &mut f64,
+        var_cgidl_i_slot: &mut f64,
+        var_cgidld_i_slot: &mut f64,
+        var_cgov_i_slot: &mut f64,
+        var_cgovaccg_i_slot: &mut f64,
+        var_cgovd_i_slot: &mut f64,
+        var_chib_i_slot: &mut f64,
+        var_cinr_i_slot: &mut f64,
+        var_cinrd_i_slot: &mut f64,
+        var_cox_i_slot: &mut f64,
+        var_cox_over_q_slot: &mut f64,
+        var_coxprime_slot: &mut f64,
+        var_ctedge_i_slot: &mut f64,
+        var_delvtac_i_slot: &mut f64,
+        var_delvto_i_slot: &mut f64,
+        var_delvtoedge_i_slot: &mut f64,
+        var_dphibedge_i_slot: &mut f64,
+        var_dvfbinr_i_slot: &mut f64,
+        var_epsox_slot: &mut f64,
+        var_facneffac_i_slot: &mut f64,
+        var_factuo_i_slot: &mut f64,
+        var_factuoedge_i_slot: &mut f64,
+        var_fcgovacc_i_slot: &mut f64,
+        var_fcgovaccd_i_slot: &mut f64,
+        var_fcinracc_i_slot: &mut f64,
+        var_fcinrdep_i_slot: &mut f64,
+        var_fnt_i_slot: &mut f64,
+        var_fntexc_i_slot: &mut f64,
+        var_gc2_i_slot: &mut f64,
+        var_gc2ov_i_slot: &mut f64,
+        var_gc2ovd_i_slot: &mut f64,
+        var_gc3_i_slot: &mut f64,
+        var_gc3ov_i_slot: &mut f64,
+        var_gc3ovd_i_slot: &mut f64,
+        var_guard147_slot: &mut f64,
+        var_guard148_slot: &mut f64,
+        var_igov_i_slot: &mut f64,
+        var_igovd_i_slot: &mut f64,
+        var_mult_inst_slot: &mut f64,
+        var_neffac_i_slot: &mut f64,
+        var_neffedge_i_slot: &mut f64,
+        var_novd_i_slot: &mut f64,
+        var_pscebedge_i_slot: &mut f64,
+        var_pscededge_i_slot: &mut f64,
+        var_psceedge_i_slot: &mut f64,
+        var_qq_slot: &mut f64,
+        var_rbulk_i_slot: &mut f64,
+        var_rde_i_slot: &mut f64,
+        var_rg_i_slot: &mut f64,
+        var_rjund_i_slot: &mut f64,
+        var_rjuns_i_slot: &mut f64,
+        var_rse_i_slot: &mut f64,
+        var_rwell_i_slot: &mut f64,
+        var_stbetedge_i_slot: &mut f64,
+        var_stbgidl_i_slot: &mut f64,
+        var_stbgidld_i_slot: &mut f64,
+        var_stig_i_slot: &mut f64,
+        var_stvfbedge_i_slot: &mut f64,
+        var_thesatac_i_slot: &mut f64,
+        var_tox_sq_slot: &mut f64,
+        var_toxovd_i_slot: &mut f64,
+        var_vfbedge_i_slot: &mut f64,
+    ) {
+        let mut var_agidl_i: f64 = *var_agidl_i_slot;
+        let mut var_agidld_i: f64 = *var_agidld_i_slot;
+        let mut var_alp1ac_i: f64 = *var_alp1ac_i_slot;
+        let mut var_alpac_i: f64 = *var_alpac_i_slot;
+        let mut var_axac_i: f64 = *var_axac_i_slot;
+        let mut var_axinr_i: f64 = *var_axinr_i_slot;
+        let mut var_betnedge_i: f64 = *var_betnedge_i_slot;
+        let mut var_bgidl_i: f64 = *var_bgidl_i_slot;
+        let mut var_bgidld_i: f64 = *var_bgidld_i_slot;
+        let mut var_cfbedge_i: f64 = *var_cfbedge_i_slot;
+        let mut var_cfdedge_i: f64 = *var_cfdedge_i_slot;
+        let mut var_cfedge_i: f64 = *var_cfedge_i_slot;
+        let mut var_cfr_i: f64 = *var_cfr_i_slot;
+        let mut var_cfrd_i: f64 = *var_cfrd_i_slot;
+        let mut var_cgbov_i: f64 = *var_cgbov_i_slot;
+        let mut var_cgidl_i: f64 = *var_cgidl_i_slot;
+        let mut var_cgidld_i: f64 = *var_cgidld_i_slot;
+        let mut var_cgov_i: f64 = *var_cgov_i_slot;
+        let mut var_cgovaccg_i: f64 = *var_cgovaccg_i_slot;
+        let mut var_cgovd_i: f64 = *var_cgovd_i_slot;
+        let mut var_chib_i: f64 = *var_chib_i_slot;
+        let mut var_cinr_i: f64 = *var_cinr_i_slot;
+        let mut var_cinrd_i: f64 = *var_cinrd_i_slot;
+        let mut var_cox_i: f64 = *var_cox_i_slot;
+        let mut var_cox_over_q: f64 = *var_cox_over_q_slot;
+        let mut var_coxprime: f64 = *var_coxprime_slot;
+        let mut var_ctedge_i: f64 = *var_ctedge_i_slot;
+        let mut var_delvtac_i: f64 = *var_delvtac_i_slot;
+        let mut var_delvto_i: f64 = *var_delvto_i_slot;
+        let mut var_delvtoedge_i: f64 = *var_delvtoedge_i_slot;
+        let mut var_dphibedge_i: f64 = *var_dphibedge_i_slot;
+        let mut var_dvfbinr_i: f64 = *var_dvfbinr_i_slot;
+        let mut var_epsox: f64 = *var_epsox_slot;
+        let mut var_facneffac_i: f64 = *var_facneffac_i_slot;
+        let mut var_factuo_i: f64 = *var_factuo_i_slot;
+        let mut var_factuoedge_i: f64 = *var_factuoedge_i_slot;
+        let mut var_fcgovacc_i: f64 = *var_fcgovacc_i_slot;
+        let mut var_fcgovaccd_i: f64 = *var_fcgovaccd_i_slot;
+        let mut var_fcinracc_i: f64 = *var_fcinracc_i_slot;
+        let mut var_fcinrdep_i: f64 = *var_fcinrdep_i_slot;
+        let mut var_fnt_i: f64 = *var_fnt_i_slot;
+        let mut var_fntexc_i: f64 = *var_fntexc_i_slot;
+        let mut var_gc2_i: f64 = *var_gc2_i_slot;
+        let mut var_gc2ov_i: f64 = *var_gc2ov_i_slot;
+        let mut var_gc2ovd_i: f64 = *var_gc2ovd_i_slot;
+        let mut var_gc3_i: f64 = *var_gc3_i_slot;
+        let mut var_gc3ov_i: f64 = *var_gc3ov_i_slot;
+        let mut var_gc3ovd_i: f64 = *var_gc3ovd_i_slot;
+        let mut var_guard147: f64 = *var_guard147_slot;
+        let mut var_guard148: f64 = *var_guard148_slot;
+        let mut var_igov_i: f64 = *var_igov_i_slot;
+        let mut var_igovd_i: f64 = *var_igovd_i_slot;
+        let mut var_mult_inst: f64 = *var_mult_inst_slot;
+        let mut var_neffac_i: f64 = *var_neffac_i_slot;
+        let mut var_neffedge_i: f64 = *var_neffedge_i_slot;
+        let mut var_novd_i: f64 = *var_novd_i_slot;
+        let mut var_pscebedge_i: f64 = *var_pscebedge_i_slot;
+        let mut var_pscededge_i: f64 = *var_pscededge_i_slot;
+        let mut var_psceedge_i: f64 = *var_psceedge_i_slot;
+        let mut var_qq: f64 = *var_qq_slot;
+        let mut var_rbulk_i: f64 = *var_rbulk_i_slot;
+        let mut var_rde_i: f64 = *var_rde_i_slot;
+        let mut var_rg_i: f64 = *var_rg_i_slot;
+        let mut var_rjund_i: f64 = *var_rjund_i_slot;
+        let mut var_rjuns_i: f64 = *var_rjuns_i_slot;
+        let mut var_rse_i: f64 = *var_rse_i_slot;
+        let mut var_rwell_i: f64 = *var_rwell_i_slot;
+        let mut var_stbetedge_i: f64 = *var_stbetedge_i_slot;
+        let mut var_stbgidl_i: f64 = *var_stbgidl_i_slot;
+        let mut var_stbgidld_i: f64 = *var_stbgidld_i_slot;
+        let mut var_stig_i: f64 = *var_stig_i_slot;
+        let mut var_stvfbedge_i: f64 = *var_stvfbedge_i_slot;
+        let mut var_thesatac_i: f64 = *var_thesatac_i_slot;
+        let mut var_tox_sq: f64 = *var_tox_sq_slot;
+        let mut var_toxovd_i: f64 = *var_toxovd_i_slot;
+        let mut var_vfbedge_i: f64 = *var_vfbedge_i_slot;
 
         let (assign10150_e9841,) = {
     if (var_igov_p > 0.0) {
@@ -11729,18 +11364,145 @@ impl Instance {
 };
         var_novd_i = assign10920_e10110;
 
-        *var_a1_i_slot = var_a1_i;
-        *var_a2_i_slot = var_a2_i;
-        *var_a3_i_slot = var_a3_i;
-        *var_a4_i_slot = var_a4_i;
+        let (assign10930_e10114,) = {
+    if (var_guard147 != 0.0) {
+        (var_agidl_i,)
+    } else {
+        (var_agidld_i,)
+    }
+};
+        var_agidld_i = assign10930_e10114;
+
+        let (assign10940_e10118,) = {
+    if (var_guard147 != 0.0) {
+        (var_bgidl_i,)
+    } else {
+        (var_bgidld_i,)
+    }
+};
+        var_bgidld_i = assign10940_e10118;
+
+        let (assign10950_e10122,) = {
+    if (var_guard147 != 0.0) {
+        (var_stbgidl_i,)
+    } else {
+        (var_stbgidld_i,)
+    }
+};
+        var_stbgidld_i = assign10950_e10122;
+
+        let (assign10960_e10126,) = {
+    if (var_guard147 != 0.0) {
+        (var_cgidl_i,)
+    } else {
+        (var_cgidld_i,)
+    }
+};
+        var_cgidld_i = assign10960_e10126;
+
+        let (assign10970_e10130,) = {
+    if (var_guard147 != 0.0) {
+        (var_igov_i,)
+    } else {
+        (var_igovd_i,)
+    }
+};
+        var_igovd_i = assign10970_e10130;
+
+        let (assign10980_e10134,) = {
+    if (var_guard147 != 0.0) {
+        (var_gc2ov_i,)
+    } else {
+        (var_gc2ovd_i,)
+    }
+};
+        var_gc2ovd_i = assign10980_e10134;
+
+        let (assign10990_e10138,) = {
+    if (var_guard147 != 0.0) {
+        (var_gc3ov_i,)
+    } else {
+        (var_gc3ovd_i,)
+    }
+};
+        var_gc3ovd_i = assign10990_e10138;
+
+        let (assign11000_e10142,) = {
+    if (var_guard147 != 0.0) {
+        (var_cgov_i,)
+    } else {
+        (var_cgovd_i,)
+    }
+};
+        var_cgovd_i = assign11000_e10142;
+
+        let (assign11010_e10146,) = {
+    if (var_guard147 != 0.0) {
+        (var_fcgovacc_i,)
+    } else {
+        (var_fcgovaccd_i,)
+    }
+};
+        var_fcgovaccd_i = assign11010_e10146;
+
+        let (assign11020_e10150,) = {
+    if (var_guard147 != 0.0) {
+        (var_cinr_i,)
+    } else {
+        (var_cinrd_i,)
+    }
+};
+        var_cinrd_i = assign11020_e10150;
+
+        let (assign11030_e10154,) = {
+    if (var_guard147 != 0.0) {
+        (var_cfr_i,)
+    } else {
+        (var_cfrd_i,)
+    }
+};
+        var_cfrd_i = assign11030_e10154;
+
+        let assign11040_e10157: f64 = (8.8541878176e-12 * var_epsrox_i);
+        var_epsox = assign11040_e10157;
+
+        let assign11050_e10160: f64 = (var_epsox / var_tox_i);
+        var_coxprime = assign11050_e10160;
+
+        let assign11060_e10163: f64 = (var_tox_i * var_tox_i);
+        var_tox_sq = assign11060_e10163;
+
+        let assign11070_e10166: f64 = (var_coxprime / 1.6021918e-19);
+        var_cox_over_q = assign11070_e10166;
+
+        let assign11080_e10169: f64 = (var_facneffac_i * var_neff_i);
+        var_neffac_i = assign11080_e10169;
+
+        let (assign11090_e10180,) = {
+    if (var_neffac_i > 1e20) {
+        let (assign11090_e10178,) = {
+            if (var_neffac_i < 1e26) {
+                (var_neffac_i,)
+            } else {
+                (1e26,)
+            }
+        };
+        (assign11090_e10178,)
+    } else {
+        (1e20,)
+    }
+};
+        var_neffac_i = assign11090_e10180;
+
+        var_qq = 0.0;
+
+        let assign11110_e10184: f64 = if p.p51 > 0.0 { 1.0 } else { 0.0 };
+        var_guard148 = assign11110_e10184;
+
         *var_agidl_i_slot = var_agidl_i;
         *var_agidld_i_slot = var_agidld_i;
-        *var_alp1_i_slot = var_alp1_i;
         *var_alp1ac_i_slot = var_alp1ac_i;
-        *var_alp2_i_slot = var_alp2_i;
-        *var_alp_i_slot = var_alp_i;
         *var_alpac_i_slot = var_alpac_i;
-        *var_ax_i_slot = var_ax_i;
         *var_axac_i_slot = var_axac_i;
         *var_axinr_i_slot = var_axinr_i;
         *var_betnedge_i_slot = var_betnedge_i;
@@ -11761,12 +11523,15 @@ impl Instance {
         *var_cinr_i_slot = var_cinr_i;
         *var_cinrd_i_slot = var_cinrd_i;
         *var_cox_i_slot = var_cox_i;
+        *var_cox_over_q_slot = var_cox_over_q;
+        *var_coxprime_slot = var_coxprime;
         *var_ctedge_i_slot = var_ctedge_i;
         *var_delvtac_i_slot = var_delvtac_i;
         *var_delvto_i_slot = var_delvto_i;
         *var_delvtoedge_i_slot = var_delvtoedge_i;
         *var_dphibedge_i_slot = var_dphibedge_i;
         *var_dvfbinr_i_slot = var_dvfbinr_i;
+        *var_epsox_slot = var_epsox;
         *var_facneffac_i_slot = var_facneffac_i;
         *var_factuo_i_slot = var_factuo_i;
         *var_factuoedge_i_slot = var_factuoedge_i;
@@ -11782,18 +11547,18 @@ impl Instance {
         *var_gc3_i_slot = var_gc3_i;
         *var_gc3ov_i_slot = var_gc3ov_i;
         *var_gc3ovd_i_slot = var_gc3ovd_i;
-        *var_gco_i_slot = var_gco_i;
         *var_guard147_slot = var_guard147;
-        *var_iginv_i_slot = var_iginv_i;
+        *var_guard148_slot = var_guard148;
         *var_igov_i_slot = var_igov_i;
         *var_igovd_i_slot = var_igovd_i;
-        *var_imaxii_i_slot = var_imaxii_i;
         *var_mult_inst_slot = var_mult_inst;
+        *var_neffac_i_slot = var_neffac_i;
         *var_neffedge_i_slot = var_neffedge_i;
         *var_novd_i_slot = var_novd_i;
         *var_pscebedge_i_slot = var_pscebedge_i;
         *var_pscededge_i_slot = var_pscededge_i;
         *var_psceedge_i_slot = var_psceedge_i;
+        *var_qq_slot = var_qq;
         *var_rbulk_i_slot = var_rbulk_i;
         *var_rde_i_slot = var_rde_i;
         *var_rg_i_slot = var_rg_i;
@@ -11801,20 +11566,14 @@ impl Instance {
         *var_rjuns_i_slot = var_rjuns_i;
         *var_rse_i_slot = var_rse_i;
         *var_rwell_i_slot = var_rwell_i;
-        *var_sta2_i_slot = var_sta2_i;
         *var_stbetedge_i_slot = var_stbetedge_i;
         *var_stbgidl_i_slot = var_stbgidl_i;
         *var_stbgidld_i_slot = var_stbgidld_i;
         *var_stig_i_slot = var_stig_i;
-        *var_stthesat_i_slot = var_stthesat_i;
         *var_stvfbedge_i_slot = var_stvfbedge_i;
-        *var_thesat_i_slot = var_thesat_i;
         *var_thesatac_i_slot = var_thesatac_i;
-        *var_thesatb_i_slot = var_thesatb_i;
-        *var_thesatg_i_slot = var_thesatg_i;
-        *var_thesatt_i_slot = var_thesatt_i;
+        *var_tox_sq_slot = var_tox_sq;
         *var_toxovd_i_slot = var_toxovd_i;
         *var_vfbedge_i_slot = var_vfbedge_i;
-        *var_vp_i_slot = var_vp_i;
     }
 }
