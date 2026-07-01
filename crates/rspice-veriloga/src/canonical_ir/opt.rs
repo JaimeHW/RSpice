@@ -919,6 +919,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                 else_expr,
             } => self.lower_conditional(*condition, *then_expr, *else_expr),
             HirExprKind::Call { name, args } => self.lower_call(name, args),
+            HirExprKind::NoiseSource { .. } => Some(self.zero_real()),
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Ddx { expr, probe },
             } => self.lower_ddx_expression(*expr, *probe),
@@ -2040,6 +2041,9 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_call(&mut self, name: &SmolStr, args: &[ExprId]) -> Option<ValueId> {
+        if is_noise_name(name.as_str()) {
+            return Some(self.zero_real());
+        }
         if name.eq_ignore_ascii_case("analysis") {
             return self.lower_analysis_call(args);
         }
@@ -2073,6 +2077,10 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
 
         None
+    }
+
+    fn zero_real(&mut self) -> ValueId {
+        self.push_value(OptValueType::Real, OptValueKind::RealConstant(0.0))
     }
 
     fn lower_analysis_call(&mut self, args: &[ExprId]) -> Option<ValueId> {
@@ -2326,6 +2334,13 @@ fn supported_assignment_value_type(value_type: CanonicalValueType) -> bool {
             | CanonicalValueType::Integer
             | CanonicalValueType::Boolean
             | CanonicalValueType::NatureAccess
+    )
+}
+
+fn is_noise_name(name: &str) -> bool {
+    matches!(
+        name.trim_start_matches('$'),
+        "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log"
     )
 }
 

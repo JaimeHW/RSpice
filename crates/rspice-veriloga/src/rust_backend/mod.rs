@@ -235,4 +235,30 @@ endmodule
             "{error}"
         );
     }
+
+    #[test]
+    fn scalar_backend_lowers_noise_sources_as_zero_stamps() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module noisy_res(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    analog begin
+        I(p, n) <+ V(p, n) / r;
+        I(p, n) <+ white_noise(4.0e-21, "thermal");
+        I(p, n) <+ flicker_noise(1.0e-18, 1.0, "flicker");
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("noise-only contributions should lower to scalar zero stamps");
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+    }
 }
