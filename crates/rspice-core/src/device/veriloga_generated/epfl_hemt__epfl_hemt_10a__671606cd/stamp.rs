@@ -572,7 +572,13 @@ impl Instance {
         let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
         let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
         let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
-        let v0: f64 = 0.0;
+        let v1: f64 = 0.0;
+        let v2: f64 = nv4;
+        let v5: f64 = (v2 / self.scalar_v3);
+        let v6: f64 = (if self.scalar_v4 { v5 } else { v1 });
+        let v8: f64 = 1000000000.0;
+        let v9: f64 = (v2 * v8);
+        let v10: f64 = (if self.scalar_v7 { v9 } else { v1 });
 
         stamper.stamp_potential_branch_local(
             Some(3),
@@ -582,7 +588,23 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             2,
-            v0,
+            v1,
+        );
+        let d6_dn4: f64 = self.scalar_v12;
+        stamper.stamp_current_node1_local(
+            Some(4),
+            None,
+            multiplicity * (v6),
+            4,
+            multiplicity * (d6_dn4),
+        );
+        let d10_dn4: f64 = self.scalar_v13;
+        stamper.stamp_current_node1_local(
+            Some(4),
+            None,
+            multiplicity * (v10),
+            4,
+            multiplicity * (d10_dn4),
         );
         let mut locals = StampLocals::default();
 
@@ -669,39 +691,6 @@ impl Instance {
             [],
             [],
             1.0,
-        );
-        let (eq6_e74, eq6_e74_d_n4,) = {
-    if (locals.var_guard6 != 0.0) {
-        let eq6_e72: f64 = ((nv4 - 0.0) / p.p35);
-        let eq6_e72_d_n4: f64 = (1.0 / p.p35);
-        (eq6_e72, eq6_e72_d_n4,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq6_value: f64 = eq6_e74;
-        stamper.stamp_current_node1_local(
-            Some(4),
-            None,
-            multiplicity * (eq6_value),
-            4,
-            multiplicity * (eq6_e74_d_n4),
-        );
-        let (eq7_e81, eq7_e81_d_n4,) = {
-    if (locals.var_guard6 == 0.0) {
-        let eq7_e79: f64 = ((nv4 - 0.0) * 1000000000.0);
-        (eq7_e79, 1000000000.0,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq7_value: f64 = eq7_e81;
-        stamper.stamp_current_node1_local(
-            Some(4),
-            None,
-            multiplicity * (eq7_value),
-            4,
-            multiplicity * (eq7_e81_d_n4),
         );
     }
 

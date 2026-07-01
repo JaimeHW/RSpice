@@ -188,7 +188,7 @@ fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {
 pub struct Instance {
     pub nodes: [usize; 12],
     pub branches: [usize; 3],
-    pub params: Box<Parameters>,
+    pub(crate) params: Box<Parameters>,
     pub(crate) param_given: Box<[bool; 48]>,
     pub(crate) multiplicity: f64,
     pub(crate) ddt_state_current: Box<[f64; 1]>,
@@ -203,6 +203,12 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
+    pub(crate) scalar_v3: f64,
+    pub(crate) scalar_v4: bool,
+    pub(crate) scalar_v7: bool,
+    pub(crate) scalar_v11: f64,
+    pub(crate) scalar_v12: f64,
+    pub(crate) scalar_v13: f64,
 }
 
 impl Clone for Instance {
@@ -226,6 +232,12 @@ impl Clone for Instance {
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
+            scalar_v3: self.scalar_v3,
+            scalar_v4: self.scalar_v4,
+            scalar_v7: self.scalar_v7,
+            scalar_v11: self.scalar_v11,
+            scalar_v12: self.scalar_v12,
+            scalar_v13: self.scalar_v13,
         }
     }
 }
@@ -248,7 +260,7 @@ impl Instance {
         assert_eq!(nodes.len(), Self::NODE_COUNT, "generated Verilog-A node count mismatch");
         let mut mapped = [0usize; Self::NODE_COUNT];
         mapped.copy_from_slice(nodes);
-        Self {
+        let mut instance = Self {
             nodes: mapped,
             branches: [0usize; Self::BRANCH_COUNT],
             params: Parameters::new_box(),
@@ -266,7 +278,15 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
-        }
+            scalar_v3: 0.0,
+            scalar_v4: false,
+            scalar_v7: false,
+            scalar_v11: 0.0,
+            scalar_v12: 0.0,
+            scalar_v13: 0.0,
+        };
+        instance.recompute_instance_static();
+        instance
     }
 
     #[inline]
@@ -289,6 +309,12 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
+            scalar_v3,
+            scalar_v4,
+            scalar_v7,
+            scalar_v11,
+            scalar_v12,
+            scalar_v13,
         } = snapshot;
         *self = Self {
             nodes,
@@ -308,6 +334,12 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
+            scalar_v3,
+            scalar_v4,
+            scalar_v7,
+            scalar_v11,
+            scalar_v12,
+            scalar_v13,
         };
     }
 
@@ -319,54 +351,54 @@ impl Instance {
 
     pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {
         match name.to_ascii_lowercase().as_str() {
-            "l" => { validate_parameter("L", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p0 = value; self.mark_param_given(0); Ok(()) }
-            "lard" => { validate_parameter("Lard", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p1 = value; self.mark_param_given(1); Ok(()) }
-            "lars" => { validate_parameter("Lars", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p2 = value; self.mark_param_given(2); Ok(()) }
-            "w" => { validate_parameter("W", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p3 = value; self.mark_param_given(3); Ok(()) }
-            "nf" => { validate_parameter("NF", value, Some((1.0, "1.0")), false, None, true, &[])?; self.params.p4 = value; self.mark_param_given(4); Ok(()) }
-            "x1" => { validate_parameter("x1", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p5 = value; self.mark_param_given(5); Ok(()) }
-            "tnom" => { validate_parameter("TNOM", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p6 = value; self.mark_param_given(6); Ok(()) }
-            "va" => { validate_finite_parameter("VA", value)?; self.params.p7 = value; self.mark_param_given(7); Ok(()) }
-            "eta0" => { validate_finite_parameter("ETA0", value)?; self.params.p8 = value; self.mark_param_given(8); Ok(()) }
-            "etab" => { validate_finite_parameter("ETAB", value)?; self.params.p9 = value; self.mark_param_given(9); Ok(()) }
-            "phin" => { validate_finite_parameter("PHIN", value)?; self.params.p10 = value; self.mark_param_given(10); Ok(()) }
-            "ndep" => { validate_parameter("NDEP", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p11 = value; self.mark_param_given(11); Ok(()) }
-            "xx" => { validate_parameter("xx", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p12 = value; self.mark_param_given(12); Ok(()) }
-            "gg" => { validate_parameter("gg", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p13 = value; self.mark_param_given(13); Ok(()) }
-            "e0" => { validate_parameter("E0", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p14 = value; self.mark_param_given(14); Ok(()) }
-            "ucrit" => { validate_finite_parameter("UCRIT", value)?; self.params.p15 = value; self.mark_param_given(15); Ok(()) }
-            "aclm" => { validate_parameter("ACLM", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p16 = value; self.mark_param_given(16); Ok(()) }
-            "delta" => { validate_parameter("DELTA", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p17 = value; self.mark_param_given(17); Ok(()) }
-            "cit" => { validate_parameter("CIT", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p18 = value; self.mark_param_given(18); Ok(()) }
-            "nfactor" => { validate_parameter("NFACTOR", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p19 = value; self.mark_param_given(19); Ok(()) }
-            "cdscd" => { validate_parameter("CDSCD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p20 = value; self.mark_param_given(20); Ok(()) }
-            "cdscb" => { validate_parameter("CDSCB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p21 = value; self.mark_param_given(21); Ok(()) }
-            "u0" => { validate_parameter("U0", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p22 = value; self.mark_param_given(22); Ok(()) }
-            "ua" => { validate_parameter("UA", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p23 = value; self.mark_param_given(23); Ok(()) }
-            "uc" => { validate_parameter("UC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p24 = value; self.mark_param_given(24); Ok(()) }
-            "ud" => { validate_parameter("UD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p25 = value; self.mark_param_given(25); Ok(()) }
-            "eu" => { validate_parameter("EU", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p26 = value; self.mark_param_given(26); Ok(()) }
-            "bex" => { validate_finite_parameter("BEX", value)?; self.params.p27 = value; self.mark_param_given(27); Ok(()) }
-            "ucex" => { validate_finite_parameter("UCEX", value)?; self.params.p28 = value; self.mark_param_given(28); Ok(()) }
-            "etavsat" => { validate_finite_parameter("ETAVSAT", value)?; self.params.p29 = value; self.mark_param_given(29); Ok(()) }
-            "usc" => { validate_parameter("USC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p30 = value; self.mark_param_given(30); Ok(()) }
-            "avdsx" => { validate_parameter("AVDSX", value, Some((5.0, "5.0")), false, Some((100.0, "100.0")), false, &[])?; self.params.p31 = value; self.mark_param_given(31); Ok(()) }
-            "lc" => { validate_parameter("LC", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p32 = value; self.mark_param_given(32); Ok(()) }
-            "lambda" => { validate_parameter("LAMBDA", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p33 = value; self.mark_param_given(33); Ok(()) }
-            "type" => { validate_parameter("TYPE", value, Some((-1.0, "-1.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p34 = value; self.mark_param_given(34); Ok(()) }
-            "rth" => { validate_parameter("rth", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p35 = value; self.mark_param_given(35); Ok(()) }
-            "cth" => { validate_parameter("cth", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p36 = value; self.mark_param_given(36); Ok(()) }
-            "ns0" => { validate_parameter("ns0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p37 = value; self.mark_param_given(37); Ok(()) }
-            "mu0acc" => { validate_parameter("mu0acc", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p38 = value; self.mark_param_given(38); Ok(()) }
-            "vsat0acc" => { validate_parameter("vsat0acc", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p39 = value; self.mark_param_given(39); Ok(()) }
-            "rcs" => { validate_parameter("Rcs", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p40 = value; self.mark_param_given(40); Ok(()) }
-            "ktrs" => { validate_parameter("ktrs", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p41 = value; self.mark_param_given(41); Ok(()) }
-            "ktrd" => { validate_parameter("ktrd", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p42 = value; self.mark_param_given(42); Ok(()) }
-            "rcd" => { validate_parameter("Rcd", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p43 = value; self.mark_param_given(43); Ok(()) }
-            "kth1" => { validate_parameter("kth1", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p44 = value; self.mark_param_given(44); Ok(()) }
-            "kth2" => { validate_parameter("kth2", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p45 = value; self.mark_param_given(45); Ok(()) }
-            "kth3" => { validate_finite_parameter("kth3", value)?; self.params.p46 = value; self.mark_param_given(46); Ok(()) }
-            "gsar" => { validate_parameter("gsar", value, None, true, None, true, &[(0.0, "0.0")])?; self.params.p47 = value; self.mark_param_given(47); Ok(()) }
+            "l" => { validate_parameter("L", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p0 = value; self.mark_param_given(0); self.recompute_instance_static(); Ok(()) }
+            "lard" => { validate_parameter("Lard", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p1 = value; self.mark_param_given(1); self.recompute_instance_static(); Ok(()) }
+            "lars" => { validate_parameter("Lars", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p2 = value; self.mark_param_given(2); self.recompute_instance_static(); Ok(()) }
+            "w" => { validate_parameter("W", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p3 = value; self.mark_param_given(3); self.recompute_instance_static(); Ok(()) }
+            "nf" => { validate_parameter("NF", value, Some((1.0, "1.0")), false, None, true, &[])?; self.params.p4 = value; self.mark_param_given(4); self.recompute_instance_static(); Ok(()) }
+            "x1" => { validate_parameter("x1", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p5 = value; self.mark_param_given(5); self.recompute_instance_static(); Ok(()) }
+            "tnom" => { validate_parameter("TNOM", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p6 = value; self.mark_param_given(6); self.recompute_instance_static(); Ok(()) }
+            "va" => { validate_finite_parameter("VA", value)?; self.params.p7 = value; self.mark_param_given(7); self.recompute_instance_static(); Ok(()) }
+            "eta0" => { validate_finite_parameter("ETA0", value)?; self.params.p8 = value; self.mark_param_given(8); self.recompute_instance_static(); Ok(()) }
+            "etab" => { validate_finite_parameter("ETAB", value)?; self.params.p9 = value; self.mark_param_given(9); self.recompute_instance_static(); Ok(()) }
+            "phin" => { validate_finite_parameter("PHIN", value)?; self.params.p10 = value; self.mark_param_given(10); self.recompute_instance_static(); Ok(()) }
+            "ndep" => { validate_parameter("NDEP", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p11 = value; self.mark_param_given(11); self.recompute_instance_static(); Ok(()) }
+            "xx" => { validate_parameter("xx", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p12 = value; self.mark_param_given(12); self.recompute_instance_static(); Ok(()) }
+            "gg" => { validate_parameter("gg", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p13 = value; self.mark_param_given(13); self.recompute_instance_static(); Ok(()) }
+            "e0" => { validate_parameter("E0", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p14 = value; self.mark_param_given(14); self.recompute_instance_static(); Ok(()) }
+            "ucrit" => { validate_finite_parameter("UCRIT", value)?; self.params.p15 = value; self.mark_param_given(15); self.recompute_instance_static(); Ok(()) }
+            "aclm" => { validate_parameter("ACLM", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p16 = value; self.mark_param_given(16); self.recompute_instance_static(); Ok(()) }
+            "delta" => { validate_parameter("DELTA", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p17 = value; self.mark_param_given(17); self.recompute_instance_static(); Ok(()) }
+            "cit" => { validate_parameter("CIT", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p18 = value; self.mark_param_given(18); self.recompute_instance_static(); Ok(()) }
+            "nfactor" => { validate_parameter("NFACTOR", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p19 = value; self.mark_param_given(19); self.recompute_instance_static(); Ok(()) }
+            "cdscd" => { validate_parameter("CDSCD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p20 = value; self.mark_param_given(20); self.recompute_instance_static(); Ok(()) }
+            "cdscb" => { validate_parameter("CDSCB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p21 = value; self.mark_param_given(21); self.recompute_instance_static(); Ok(()) }
+            "u0" => { validate_parameter("U0", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p22 = value; self.mark_param_given(22); self.recompute_instance_static(); Ok(()) }
+            "ua" => { validate_parameter("UA", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p23 = value; self.mark_param_given(23); self.recompute_instance_static(); Ok(()) }
+            "uc" => { validate_parameter("UC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p24 = value; self.mark_param_given(24); self.recompute_instance_static(); Ok(()) }
+            "ud" => { validate_parameter("UD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p25 = value; self.mark_param_given(25); self.recompute_instance_static(); Ok(()) }
+            "eu" => { validate_parameter("EU", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p26 = value; self.mark_param_given(26); self.recompute_instance_static(); Ok(()) }
+            "bex" => { validate_finite_parameter("BEX", value)?; self.params.p27 = value; self.mark_param_given(27); self.recompute_instance_static(); Ok(()) }
+            "ucex" => { validate_finite_parameter("UCEX", value)?; self.params.p28 = value; self.mark_param_given(28); self.recompute_instance_static(); Ok(()) }
+            "etavsat" => { validate_finite_parameter("ETAVSAT", value)?; self.params.p29 = value; self.mark_param_given(29); self.recompute_instance_static(); Ok(()) }
+            "usc" => { validate_parameter("USC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p30 = value; self.mark_param_given(30); self.recompute_instance_static(); Ok(()) }
+            "avdsx" => { validate_parameter("AVDSX", value, Some((5.0, "5.0")), false, Some((100.0, "100.0")), false, &[])?; self.params.p31 = value; self.mark_param_given(31); self.recompute_instance_static(); Ok(()) }
+            "lc" => { validate_parameter("LC", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p32 = value; self.mark_param_given(32); self.recompute_instance_static(); Ok(()) }
+            "lambda" => { validate_parameter("LAMBDA", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p33 = value; self.mark_param_given(33); self.recompute_instance_static(); Ok(()) }
+            "type" => { validate_parameter("TYPE", value, Some((-1.0, "-1.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p34 = value; self.mark_param_given(34); self.recompute_instance_static(); Ok(()) }
+            "rth" => { validate_parameter("rth", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p35 = value; self.mark_param_given(35); self.recompute_instance_static(); Ok(()) }
+            "cth" => { validate_parameter("cth", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p36 = value; self.mark_param_given(36); self.recompute_instance_static(); Ok(()) }
+            "ns0" => { validate_parameter("ns0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p37 = value; self.mark_param_given(37); self.recompute_instance_static(); Ok(()) }
+            "mu0acc" => { validate_parameter("mu0acc", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p38 = value; self.mark_param_given(38); self.recompute_instance_static(); Ok(()) }
+            "vsat0acc" => { validate_parameter("vsat0acc", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p39 = value; self.mark_param_given(39); self.recompute_instance_static(); Ok(()) }
+            "rcs" => { validate_parameter("Rcs", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p40 = value; self.mark_param_given(40); self.recompute_instance_static(); Ok(()) }
+            "ktrs" => { validate_parameter("ktrs", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p41 = value; self.mark_param_given(41); self.recompute_instance_static(); Ok(()) }
+            "ktrd" => { validate_parameter("ktrd", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p42 = value; self.mark_param_given(42); self.recompute_instance_static(); Ok(()) }
+            "rcd" => { validate_parameter("Rcd", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p43 = value; self.mark_param_given(43); self.recompute_instance_static(); Ok(()) }
+            "kth1" => { validate_parameter("kth1", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p44 = value; self.mark_param_given(44); self.recompute_instance_static(); Ok(()) }
+            "kth2" => { validate_parameter("kth2", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p45 = value; self.mark_param_given(45); self.recompute_instance_static(); Ok(()) }
+            "kth3" => { validate_finite_parameter("kth3", value)?; self.params.p46 = value; self.mark_param_given(46); self.recompute_instance_static(); Ok(()) }
+            "gsar" => { validate_parameter("gsar", value, None, true, None, true, &[(0.0, "0.0")])?; self.params.p47 = value; self.mark_param_given(47); self.recompute_instance_static(); Ok(()) }
             _ => Err(format!("unknown parameter '{}' for generated Verilog-A model 'EPFL_HEMT_10a'", name)),
         }
     }
@@ -448,5 +480,22 @@ impl Instance {
         } else {
             0.0
         }
+    }
+
+    #[inline]
+    fn recompute_instance_static(&mut self) {
+        let p = &(*self.params);
+        let v3: f64 = p.p35;
+        self.scalar_v3 = v3;
+        let v4: bool = (0.0 != p.p35);
+        self.scalar_v4 = v4;
+        let v7: bool = (!v4);
+        self.scalar_v7 = v7;
+        let v11: f64 = (1.0 / p.p35);
+        self.scalar_v11 = v11;
+        let v12: f64 = (if v4 { v11 } else { 0.0 });
+        self.scalar_v12 = v12;
+        let v13: f64 = (if v7 { 1000000000.0 } else { 0.0 });
+        self.scalar_v13 = v13;
     }
 }

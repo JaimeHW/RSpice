@@ -66,30 +66,6 @@ impl Instance {
             &eq14_reactive_branch_derivatives,
             multiplicity,
         );
-        let eq15_e882_q: f64 = locals.var_qfgs_parasitic;
-        let eq15_reactive_node_derivatives: [f64; 9] = [0.0, 0.0, 0.0, locals.var_qfgs_parasitic_dn3, locals.var_qfgs_parasitic_dn4, locals.var_qfgs_parasitic_dn5, locals.var_qfgs_parasitic_dn6, locals.var_qfgs_parasitic_dn7, locals.var_qfgs_parasitic_dn8];
-        let eq15_reactive_branch_derivatives: [f64; 5] = [0.0, 0.0, 0.0, 0.0, 0.0];
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[7]),
-            Some(nodes[6]),
-            nodes,
-            &eq15_reactive_node_derivatives,
-            branches,
-            &eq15_reactive_branch_derivatives,
-            multiplicity,
-        );
-        let eq16_e884_q: f64 = locals.var_qfgd_parasitic;
-        let eq16_reactive_node_derivatives: [f64; 9] = [0.0, 0.0, 0.0, locals.var_qfgd_parasitic_dn3, locals.var_qfgd_parasitic_dn4, locals.var_qfgd_parasitic_dn5, locals.var_qfgd_parasitic_dn6, locals.var_qfgd_parasitic_dn7, locals.var_qfgd_parasitic_dn8];
-        let eq16_reactive_branch_derivatives: [f64; 5] = [0.0, 0.0, 0.0, 0.0, 0.0];
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[7]),
-            Some(nodes[5]),
-            nodes,
-            &eq16_reactive_node_derivatives,
-            branches,
-            &eq16_reactive_branch_derivatives,
-            multiplicity,
-        );
         let eq17_e887_q: f64 = locals.var_qsbg;
         let eq17_e888: f64 = (locals.var_devsign * locals.var_qsbg);
         let eq17_e888_d_n3: f64 = (locals.var_devsign * locals.var_qsbg_dn3);

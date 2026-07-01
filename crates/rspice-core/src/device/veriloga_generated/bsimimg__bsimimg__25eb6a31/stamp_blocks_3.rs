@@ -7046,6 +7046,8 @@ impl Instance {
         let nv2 = ctx.node_voltage(nodes[2]);
         let nv5 = ctx.node_voltage(nodes[5]);
         let nv6 = ctx.node_voltage(nodes[6]);
+        let nv7 = ctx.node_voltage(nodes[7]);
+        let nv8 = ctx.node_voltage(nodes[8]);
         let (eq0_e787, eq0_e787_d_n3, eq0_e787_d_n4, eq0_e787_d_n5, eq0_e787_d_n6, eq0_e787_d_n7, eq0_e787_d_n8,) = {
     if (locals.var_guard138 != 0.0) {
         let eq0_e779: f64 = (locals.var_devsign * locals.var_ids);
@@ -7434,30 +7436,6 @@ impl Instance {
             [],
             1.0,
         );
-        let eq15_e882: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 3, locals.var_qfgs_parasitic);
-        let eq15_value: f64 = eq15_e882;
-        stamper.stamp_current_sparse_local::<6, 0>(
-            Some(7),
-            Some(6),
-            multiplicity * (eq15_value),
-            [3, 4, 5, 6, 7, 8],
-            [multiplicity * ((locals.var_qfgs_parasitic_dn3 * ddt_scale)), multiplicity * ((locals.var_qfgs_parasitic_dn4 * ddt_scale)), multiplicity * ((locals.var_qfgs_parasitic_dn5 * ddt_scale)), multiplicity * ((locals.var_qfgs_parasitic_dn6 * ddt_scale)), multiplicity * ((locals.var_qfgs_parasitic_dn7 * ddt_scale)), multiplicity * ((locals.var_qfgs_parasitic_dn8 * ddt_scale))],
-            [],
-            [],
-            1.0,
-        );
-        let eq16_e884: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 4, locals.var_qfgd_parasitic);
-        let eq16_value: f64 = eq16_e884;
-        stamper.stamp_current_sparse_local::<6, 0>(
-            Some(7),
-            Some(5),
-            multiplicity * (eq16_value),
-            [3, 4, 5, 6, 7, 8],
-            [multiplicity * ((locals.var_qfgd_parasitic_dn3 * ddt_scale)), multiplicity * ((locals.var_qfgd_parasitic_dn4 * ddt_scale)), multiplicity * ((locals.var_qfgd_parasitic_dn5 * ddt_scale)), multiplicity * ((locals.var_qfgd_parasitic_dn6 * ddt_scale)), multiplicity * ((locals.var_qfgd_parasitic_dn7 * ddt_scale)), multiplicity * ((locals.var_qfgd_parasitic_dn8 * ddt_scale))],
-            [],
-            [],
-            1.0,
-        );
         let eq17_e887: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 5, locals.var_qsbg);
         let eq17_e888: f64 = (locals.var_devsign * eq17_e887);
         let eq17_e888_d_n3: f64 = (locals.var_devsign * (locals.var_qsbg_dn3 * ddt_scale));
@@ -7546,33 +7524,6 @@ impl Instance {
             [],
             1.0,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_1(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_previous_value_scale: f64,
-        ddt_older_value_scale: f64,
-        ddt_previous_derivative_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        locals: &mut StampLocals,
-    ) {
-        let nv0 = ctx.node_voltage(nodes[0]);
-        let nv2 = ctx.node_voltage(nodes[2]);
-        let nv4 = ctx.node_voltage(nodes[4]);
-        let nv5 = ctx.node_voltage(nodes[5]);
-        let nv6 = ctx.node_voltage(nodes[6]);
-        let nv7 = ctx.node_voltage(nodes[7]);
-        let nv8 = ctx.node_voltage(nodes[8]);
         let (eq25_e938, eq25_e938_d_n3, eq25_e938_d_n4, eq25_e938_d_n5, eq25_e938_d_n6, eq25_e938_d_n7, eq25_e938_d_n8,) = {
     if (locals.var_guard140 != 0.0) {
         let eq25_e936: f64 = ((nv7 - nv8) * locals.var_gcrg);
@@ -7598,6 +7549,31 @@ impl Instance {
             [],
             1.0,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_1(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_previous_value_scale: f64,
+        ddt_older_value_scale: f64,
+        ddt_previous_derivative_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        locals: &mut StampLocals,
+    ) {
+        let nv0 = ctx.node_voltage(nodes[0]);
+        let nv2 = ctx.node_voltage(nodes[2]);
+        let nv4 = ctx.node_voltage(nodes[4]);
+        let nv5 = ctx.node_voltage(nodes[5]);
+        let nv6 = ctx.node_voltage(nodes[6]);
         let (eq38_e1079, eq38_e1079_d_n0, eq38_e1079_d_n2, eq38_e1079_d_n3, eq38_e1079_d_n4, eq38_e1079_d_n5, eq38_e1079_d_n6, eq38_e1079_d_n7, eq38_e1079_d_n8,) = {
     if ((locals.var_guard147 != 0.0) && (locals.var_guard148 != 0.0)) {
         let eq38_e1060: f64 = (locals.var_devsign * locals.var_sigvds);
@@ -7691,22 +7667,6 @@ impl Instance {
             [],
             [],
             1.0,
-        );
-        let (eq40_e1099, eq40_e1099_d_n4,) = {
-    if (locals.var_guard147 != 0.0) {
-        let eq40_e1097: f64 = ((nv4 - 0.0) * locals.var_gth);
-        (eq40_e1097, locals.var_gth,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq40_value: f64 = eq40_e1099;
-        stamper.stamp_current_node1_local(
-            Some(4),
-            None,
-            multiplicity * (eq40_value),
-            4,
-            multiplicity * (eq40_e1099_d_n4),
         );
         let (eq41_e1106, eq41_e1106_d_n4,) = {
     if (locals.var_guard147 != 0.0) {

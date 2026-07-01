@@ -2329,42 +2329,6 @@ impl Instance {
             &eq109_branch_derivatives,
             multiplicity,
         );
-        let (eq110_e2897, eq110_e2897_d_n0, eq110_e2897_d_n2, eq110_e2897_d_n3, eq110_e2897_d_n4, eq110_e2897_d_n5, eq110_e2897_d_n6, eq110_e2897_d_n7, eq110_e2897_d_n8, eq110_e2897_d_n9, eq110_e2897_d_n10, eq110_e2897_d_n11, eq110_e2897_d_n13, eq110_e2897_d_n14,) = {
-    if (locals.var_guard682 != 0.0) {
-        let eq110_e2895: f64 = ((nv4 - 0.0) * locals.var_gth);
-        let eq110_e2895_d_n0: f64 = ((nv4 - 0.0) * locals.var_gth_dn0);
-        let eq110_e2895_d_n2: f64 = ((nv4 - 0.0) * locals.var_gth_dn2);
-        let eq110_e2895_d_n3: f64 = ((nv4 - 0.0) * locals.var_gth_dn3);
-        let eq110_e2895_d_n4: f64 = (locals.var_gth + ((nv4 - 0.0) * locals.var_gth_dn4));
-        let eq110_e2895_d_n5: f64 = ((nv4 - 0.0) * locals.var_gth_dn5);
-        let eq110_e2895_d_n6: f64 = ((nv4 - 0.0) * locals.var_gth_dn6);
-        let eq110_e2895_d_n7: f64 = ((nv4 - 0.0) * locals.var_gth_dn7);
-        let eq110_e2895_d_n8: f64 = ((nv4 - 0.0) * locals.var_gth_dn8);
-        let eq110_e2895_d_n9: f64 = ((nv4 - 0.0) * locals.var_gth_dn9);
-        let eq110_e2895_d_n10: f64 = ((nv4 - 0.0) * locals.var_gth_dn10);
-        let eq110_e2895_d_n11: f64 = ((nv4 - 0.0) * locals.var_gth_dn11);
-        let eq110_e2895_d_n13: f64 = ((nv4 - 0.0) * locals.var_gth_dn13);
-        let eq110_e2895_d_n14: f64 = ((nv4 - 0.0) * locals.var_gth_dn14);
-        (eq110_e2895, eq110_e2895_d_n0, eq110_e2895_d_n2, eq110_e2895_d_n3, eq110_e2895_d_n4, eq110_e2895_d_n5, eq110_e2895_d_n6, eq110_e2895_d_n7, eq110_e2895_d_n8, eq110_e2895_d_n9, eq110_e2895_d_n10, eq110_e2895_d_n11, eq110_e2895_d_n13, eq110_e2895_d_n14,)
-    } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
-    }
-};
-        let eq110_value: f64 = eq110_e2897;
-        let eq110_node_derivative_indices: [usize; 13] = [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14];
-        let eq110_node_derivatives: [f64; 13] = [eq110_e2897_d_n0, eq110_e2897_d_n2, eq110_e2897_d_n3, eq110_e2897_d_n4, eq110_e2897_d_n5, eq110_e2897_d_n6, eq110_e2897_d_n7, eq110_e2897_d_n8, eq110_e2897_d_n9, eq110_e2897_d_n10, eq110_e2897_d_n11, eq110_e2897_d_n13, eq110_e2897_d_n14];
-        let eq110_branch_derivative_indices: [usize; 0] = [];
-        let eq110_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
-            Some(4),
-            None,
-            multiplicity * (eq110_value),
-            &eq110_node_derivative_indices,
-            &eq110_node_derivatives,
-            &eq110_branch_derivative_indices,
-            &eq110_branch_derivatives,
-            multiplicity,
-        );
         let (eq111_e2904, eq111_e2904_d_n0, eq111_e2904_d_n2, eq111_e2904_d_n3, eq111_e2904_d_n4, eq111_e2904_d_n5, eq111_e2904_d_n6, eq111_e2904_d_n7, eq111_e2904_d_n8, eq111_e2904_d_n9, eq111_e2904_d_n10, eq111_e2904_d_n11, eq111_e2904_d_n13, eq111_e2904_d_n14,) = {
     if (locals.var_guard682 != 0.0) {
         let eq111_e2901: f64 = ((nv4 - 0.0) * locals.var_cth);

@@ -144,17 +144,6 @@ impl Instance {
             [],
             1.0,
         );
-        let eq10_value: f64 = locals.var_ithrce;
-        stamper.stamp_current_sparse_local::<5, 0>(
-            Some(4),
-            None,
-            multiplicity * (eq10_value),
-            [4, 6, 7, 8, 9],
-            [multiplicity * (locals.var_ithrce_dn4), multiplicity * (locals.var_ithrce_dn6), multiplicity * (locals.var_ithrce_dn7), multiplicity * (locals.var_ithrce_dn8), multiplicity * (locals.var_ithrce_dn9)],
-            [],
-            [],
-            1.0,
-        );
         let eq23_e642: f64 = (locals.var_qg_wo_mult + locals.var_qb_wo_mult);
         let eq23_e642_d_n4: f64 = (locals.var_qg_wo_mult_dn4 + locals.var_qb_wo_mult_dn4);
         let eq23_e642_d_n6: f64 = (locals.var_qg_wo_mult_dn6 + locals.var_qb_wo_mult_dn6);
@@ -500,18 +489,6 @@ impl Instance {
             multiplicity * (eq37_value),
             [4, 6, 7, 8, 9, 12, 13],
             [multiplicity * (eq37_e751_d_n4), multiplicity * (eq37_e751_d_n6), multiplicity * (eq37_e751_d_n7), multiplicity * (eq37_e751_d_n8), multiplicity * (eq37_e751_d_n9), multiplicity * (eq37_e751_d_n12), multiplicity * (eq37_e751_d_n13)],
-            [],
-            [],
-            1.0,
-        );
-        let eq38_e753: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 20, locals.var_qth);
-        let eq38_value: f64 = eq38_e753;
-        stamper.stamp_current_sparse_local::<5, 0>(
-            Some(4),
-            None,
-            multiplicity * (eq38_value),
-            [4, 6, 7, 8, 9],
-            [multiplicity * ((locals.var_qth_dn4 * ddt_scale)), multiplicity * ((locals.var_qth_dn6 * ddt_scale)), multiplicity * ((locals.var_qth_dn7 * ddt_scale)), multiplicity * ((locals.var_qth_dn8 * ddt_scale)), multiplicity * ((locals.var_qth_dn9 * ddt_scale))],
             [],
             [],
             1.0,
@@ -958,18 +935,6 @@ impl Instance {
             multiplicity * (eq37_e751_q_d_n6),
             nodes[7],
             multiplicity * (eq37_e751_q_d_n7),
-        );
-        let eq38_e753_q: f64 = locals.var_qth;
-        let eq38_reactive_node_derivatives: [f64; 14] = [0.0, 0.0, 0.0, 0.0, locals.var_qth_dn4, 0.0, locals.var_qth_dn6, locals.var_qth_dn7, locals.var_qth_dn8, locals.var_qth_dn9, 0.0, 0.0, 0.0, 0.0];
-        let eq38_reactive_branch_derivatives: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[4]),
-            None,
-            nodes,
-            &eq38_reactive_node_derivatives,
-            branches,
-            &eq38_reactive_branch_derivatives,
-            multiplicity,
         );
         let eq41_e762: f64 = (locals.var_cgeff * (nv5 - 0.0));
         let eq41_e762_d_n4: f64 = (locals.var_cgeff_dn4 * (nv5 - 0.0));
