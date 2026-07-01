@@ -719,6 +719,50 @@ mod tests {
     }
 
     #[test]
+    fn param_statements_preserve_naked_if_comparison_operators() {
+        let netlist = Netlist::parse(
+            "naked Xyce IF parameter expressions\n\
+             .param A = 1.0\n\
+             .param B = 2.0\n\
+             .param C = 3.0\n\
+             .param D = 4.0\n\
+             .param eq = if(A==B,C,D)\n\
+             .param ge = if(A>=B,C,D)\n\
+             .param le = if(A<=B,C,D)\n\
+             .param ne = if(A!=B,C,D)\n\
+             .end\n",
+        )
+        .expect("naked IF comparison operators should parse");
+
+        assert_eq!(netlist.params.get("eq"), Some(4.0));
+        assert_eq!(netlist.params.get("ge"), Some(4.0));
+        assert_eq!(netlist.params.get("le"), Some(3.0));
+        assert_eq!(netlist.params.get("ne"), Some(3.0));
+    }
+
+    #[test]
+    fn param_statements_preserve_naked_ternary_operators() {
+        let netlist = Netlist::parse(
+            "naked Xyce ternary parameter expressions\n\
+             .param A = 4.0\n\
+             .param B = 3.0\n\
+             .param C = 2.0\n\
+             .param D = 1.0\n\
+             .param gt = (A>B)?(C):D\n\
+             .param ge = (A>=B)?(C):D\n\
+             .param le = (A<=B)?(C):D\n\
+             .param ne = (A!=B)?(C):D\n\
+             .end\n",
+        )
+        .expect("naked ternary comparison operators should parse");
+
+        assert_eq!(netlist.params.get("gt"), Some(2.0));
+        assert_eq!(netlist.params.get("ge"), Some(2.0));
+        assert_eq!(netlist.params.get("le"), Some(1.0));
+        assert_eq!(netlist.params.get("ne"), Some(2.0));
+    }
+
+    #[test]
     fn model_param_rhs_identifier_is_not_reinterpreted_as_bare_flag() {
         let err = Netlist::parse(
             "bad model rhs\n\

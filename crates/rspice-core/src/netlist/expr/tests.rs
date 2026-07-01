@@ -20,6 +20,19 @@ fn bare_named_constants_parse_as_numbers() {
 }
 
 #[test]
+fn function_arguments_accept_comparison_and_ternary_expressions() {
+    let mut ctx = ParamContext::new();
+    ctx.set("A", 1.0);
+    ctx.set("B", 2.0);
+    ctx.set("C", 3.0);
+    ctx.set("D", 4.0);
+
+    assert_eq!(eval_with(&ctx, "if(A==B,C,D)"), 4.0);
+    assert_eq!(eval_with(&ctx, "if(A<=B,C,D)"), 3.0);
+    assert_eq!(eval_with(&ctx, "if(A!=B,(A>B)?C:D,D)"), 4.0);
+}
+
+#[test]
 fn parameter_expression_pow_pwr_and_pwrs_keep_distinct_spice_sign_semantics() {
     let ctx = ParamContext::new();
     assert_eq!(eval_with(&ctx, "pow(-2,2)"), 4.0);

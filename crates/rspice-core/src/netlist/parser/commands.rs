@@ -1536,6 +1536,8 @@ fn param_rhs_continues(stream: &TokenStream) -> bool {
             {
                 return true;
             }
+            TokenKind::Equals if saw_token => return true,
+            TokenKind::Other(ch) if saw_token && param_rhs_operator_char(*ch) => return true,
             TokenKind::Expression(_) if saw_token => return true,
             _ => {}
         }
@@ -1550,14 +1552,14 @@ fn collect_param_rhs_expression(
     line_num: usize,
     name: &str,
 ) -> Result<String, ParseError> {
-    let mut fragments = Vec::new();
+    let mut expression = String::new();
     let mut depth = 0usize;
 
     loop {
         match &stream.peek().kind {
             TokenKind::Newline | TokenKind::Eof => break,
             TokenKind::Comma if depth == 0 => break,
-            TokenKind::Ident(_) if !fragments.is_empty() && depth == 0 => {
+            TokenKind::Ident(_) if !expression.is_empty() && depth == 0 => {
                 if looks_like_param_entry_at(stream, 0) {
                     break;
                 }
@@ -1572,18 +1574,18 @@ fn collect_param_rhs_expression(
             _ => {}
         }
 
-        fragments.push(param_rhs_token_fragment(&token.kind, &token.lexeme));
+        append_param_rhs_token(&mut expression, &token.kind, &token.lexeme);
         stream.advance();
     }
 
-    if fragments.is_empty() {
+    if expression.is_empty() {
         return Err(ParseError::Syntax {
             line: line_num,
             message: format!("Expected value for parameter '{}'", name),
         });
     }
 
-    Ok(fragments.join(" "))
+    Ok(expression)
 }
 
 fn looks_like_param_entry_at(stream: &TokenStream, offset: usize) -> bool {
@@ -1622,6 +1624,33 @@ fn param_rhs_token_fragment(kind: &TokenKind, lexeme: &str) -> String {
         TokenKind::Expression(expr) => format!("({expr})"),
         _ => lexeme.to_string(),
     }
+}
+
+fn append_param_rhs_token(expression: &mut String, kind: &TokenKind, lexeme: &str) {
+    let fragment = param_rhs_token_fragment(kind, lexeme);
+    if param_rhs_needs_space(expression, &fragment) {
+        expression.push(' ');
+    }
+    expression.push_str(&fragment);
+}
+
+fn param_rhs_needs_space(expression: &str, fragment: &str) -> bool {
+    let Some(prev) = expression.chars().rev().find(|ch| !ch.is_whitespace()) else {
+        return false;
+    };
+    let Some(next) = fragment.chars().find(|ch| !ch.is_whitespace()) else {
+        return false;
+    };
+
+    param_rhs_atom_char(prev) && param_rhs_atom_char(next)
+}
+
+fn param_rhs_atom_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '#' | '%')
+}
+
+fn param_rhs_operator_char(ch: char) -> bool {
+    matches!(ch, '>' | '<' | '!' | '?' | ':' | '&' | '|' | '^')
 }
 
 /// Parse .FUNC statement: .FUNC name(arg1, arg2, ...) = expression

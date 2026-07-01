@@ -520,13 +520,13 @@ impl<'a> ExprParser<'a> {
 
             self.skip_ws();
             if !self.check(')') {
-                args.push(self.parse_additive()?);
+                args.push(self.parse_ternary()?);
 
                 loop {
                     self.skip_ws();
                     if self.consume(',') {
                         self.skip_ws();
-                        args.push(self.parse_additive()?);
+                        args.push(self.parse_ternary()?);
                     } else {
                         break;
                     }
