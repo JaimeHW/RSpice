@@ -2386,7 +2386,7 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn native_device_with_canonical_ir_rejects_assignment_fed_ddx_without_fallback() {
+fn native_device_with_canonical_ir_executes_assignment_fed_ddx_without_fallback() {
     let source = r#"
 `include "disciplines.vams"
 module native_canonical_ddx_assignment_fed(p, n);
@@ -2404,14 +2404,16 @@ endmodule
     let artifact = compiler
         .compile_canonical_ir(source)
         .expect("compile canonical IR");
-    let err = VerilogADevice::try_new_with_canonical_ir("DDXVARCANON1", model, &artifact, &[1, 0])
-        .expect_err("assignment-fed ddx must fail closed until native derivative shadows exist");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("ddx derivative through variable x")
-            && msg.contains("no interpreter fallback"),
-        "unexpected error: {msg}"
-    );
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("DDXVARCANON1", model, &artifact, &[1, 0])
+            .expect("assignment-fed ddx uses native derivative shadows");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[3.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("assignment-fed canonical ddx evaluates");
+    assert_eq!(currents[0].to_bits(), 6.0_f64.to_bits());
 }
 
 #[cfg(target_arch = "x86_64")]
