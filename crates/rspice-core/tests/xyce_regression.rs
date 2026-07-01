@@ -793,6 +793,39 @@ fn test_xyce_output_dc_default_prn_wrapper_cases_run_natively() {
 }
 
 #[test]
+fn test_xyce_hspice_math_wrapper_case_runs_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/PARSER/hspiceMath.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain its removed upstream HSPICE-extension wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native HSPICE math .prn comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "wrapper_hspice_math_prn_dc",
+        "{relative} should report the native HSPICE math wrapper contract"
+    );
+
+    let invalid_cli_wrapper = "Netlists/PARSER/bad-hspice-ext.cir";
+    let result = runner.run_test(root.join(invalid_cli_wrapper));
+    assert!(
+        result.passed && result.expected_unsupported,
+        "{invalid_cli_wrapper} should stay named unsupported until RSpice has an equivalent Xyce command-line diagnostic contract, got {result:?}"
+    );
+}
+
+#[test]
 fn test_xyce_bsim_gm_device_operating_point_probes_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

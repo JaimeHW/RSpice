@@ -181,6 +181,7 @@ struct XyceSubcktFamilyContract {
 enum XyceStaticDcContract {
     PlainStaticPrn,
     WrapperDefaultPrn,
+    WrapperHspiceMathPrn,
 }
 
 impl XyceStaticDcContract {
@@ -190,6 +191,8 @@ impl XyceStaticDcContract {
             (Self::PlainStaticPrn, true) => "static_prn_step_dc",
             (Self::WrapperDefaultPrn, false) => "wrapper_static_prn_dc",
             (Self::WrapperDefaultPrn, true) => "wrapper_static_prn_step_dc",
+            (Self::WrapperHspiceMathPrn, false) => "wrapper_hspice_math_prn_dc",
+            (Self::WrapperHspiceMathPrn, true) => "wrapper_hspice_math_prn_step_dc",
         }
     }
 
@@ -618,11 +621,6 @@ impl XyceTestRunner {
 
     fn execution_plan(&self, deck: &XyceDeck) -> Result<XyceExecutionPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
-        if requires_wrapper
-            && !Self::is_native_default_prn_wrapper_candidate_path(&deck.relative_path)
-        {
-            return Err(Self::upstream_wrapper_required_reason().to_string());
-        }
 
         let reference_path = self
             .static_prn_reference_path(&deck.path)
@@ -634,16 +632,25 @@ impl XyceTestRunner {
             ));
         }
 
-        if requires_wrapper {
+        let wrapper_contract = if requires_wrapper {
             let source = fs::read_to_string(&deck.path)
                 .map_err(|err| format!("failed to read deck: {err}"))?;
-            Self::validate_default_prn_wrapper_source(&source)?;
-        }
+            Some(Self::native_static_prn_wrapper_contract(
+                &deck.relative_path,
+                &source,
+            )?)
+        } else {
+            None
+        };
 
         let static_plan = self.static_dc_plan_for_path(&deck.path)?;
-        let contract = if requires_wrapper {
-            self.validate_native_wrapper_default_prn_contract(&static_plan, &reference_path)?;
-            XyceStaticDcContract::WrapperDefaultPrn
+        let contract = if let Some(contract) = wrapper_contract {
+            self.validate_native_static_prn_wrapper_contract(
+                contract,
+                &static_plan,
+                &reference_path,
+            )?;
+            contract
         } else {
             XyceStaticDcContract::PlainStaticPrn
         };
@@ -686,12 +693,13 @@ impl XyceTestRunner {
         })
     }
 
-    fn validate_native_wrapper_default_prn_contract(
+    fn validate_native_static_prn_wrapper_contract(
         &self,
+        contract: XyceStaticDcContract,
         plan: &XyceStaticDcPlan,
         reference_path: &Path,
     ) -> Result<(), String> {
-        if plan.step.is_some() {
+        if contract.requires_step_res_reference() && plan.step.is_some() {
             let res_reference_path = reference_path.with_extension("res");
             if !res_reference_path.is_file() {
                 return Err(format!(
@@ -704,12 +712,57 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    fn native_static_prn_wrapper_contract(
+        relative_path: &str,
+        source: &str,
+    ) -> Result<XyceStaticDcContract, String> {
+        if Self::is_native_default_prn_wrapper_candidate_path(relative_path) {
+            Self::validate_default_prn_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperDefaultPrn);
+        }
+
+        if Self::is_native_hspice_math_wrapper_candidate(relative_path, source) {
+            Self::validate_hspice_math_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperHspiceMathPrn);
+        }
+
+        Err(Self::upstream_wrapper_required_reason().to_string())
+    }
+
     fn is_native_default_prn_wrapper_candidate_path(relative_path: &str) -> bool {
         Self::normalize_manifest_key(relative_path).starts_with("netlists/output/dc/")
     }
 
+    fn is_native_hspice_math_wrapper_candidate(relative_path: &str, source: &str) -> bool {
+        let relative_path = Self::normalize_manifest_key(relative_path);
+        let normalized_source = source.to_ascii_lowercase();
+        relative_path.starts_with("netlists/parser/")
+            && normalized_source.contains("-hspice-ext math")
+            && normalized_source.contains("-hspice-ext all")
+    }
+
     fn upstream_wrapper_required_reason() -> &'static str {
         "upstream wrapper semantics are required; RSPICE-HARNESS-MANIFEST.tsv records the removed .cir.sh sidecar contract"
+    }
+
+    fn validate_hspice_math_wrapper_source(source: &str) -> Result<(), String> {
+        Self::validate_default_prn_wrapper_source(source)?;
+        let checks = [
+            ("**", "HSPICE exponentiation operator '**'"),
+            ("^", "HSPICE exponentiation operator '^'"),
+            ("&&", "HSPICE logical AND operator '&&'"),
+            ("||", "HSPICE logical OR operator '||'"),
+            ("?", "ternary conditional operator '?'"),
+            (":", "ternary conditional separator ':'"),
+        ];
+        for (needle, label) in checks {
+            if !source.contains(needle) {
+                return Err(format!(
+                    "wrapper-origin HSPICE math contract requires {label}"
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn validate_default_prn_wrapper_source(source: &str) -> Result<(), String> {
