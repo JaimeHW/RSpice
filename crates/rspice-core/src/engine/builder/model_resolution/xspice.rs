@@ -851,75 +851,79 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
     instance_real_vector_params: &[(String, Vec<f64>)],
     instance_real_vector_expr_params: &[(String, Vec<String>)],
 ) -> Result<ResolvedXspiceModel, SimulationError> {
-    if let Some(code_model) = registry.get(model_name) {
-        reject_scalar_params_for_vector_specs(code_model.as_ref(), instance_params)?;
-        reject_param_names_for_vector_specs(
-            code_model.as_ref(),
-            instance_string_params
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .chain(
-                    instance_string_expr_params
-                        .iter()
-                        .map(|(name, _)| name.as_str()),
-                ),
-            "string",
-        )?;
-        let resolved_instance_real_vector_expr_params =
-            resolve_instance_real_vector_expression_params(
+    let model_def = find_model_def(netlist, model_name);
+
+    if model_def.is_none() {
+        if let Some(code_model) = registry.get(model_name) {
+            reject_scalar_params_for_vector_specs(code_model.as_ref(), instance_params)?;
+            reject_param_names_for_vector_specs(
+                code_model.as_ref(),
+                instance_string_params
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .chain(
+                        instance_string_expr_params
+                            .iter()
+                            .map(|(name, _)| name.as_str()),
+                    ),
+                "string",
+            )?;
+            let resolved_instance_real_vector_expr_params =
+                resolve_instance_real_vector_expression_params(
+                    netlist,
+                    None,
+                    model_name,
+                    instance_params,
+                    instance_real_vector_expr_params,
+                )?;
+            let resolved_instance_string_vector_expr_params =
+                resolve_instance_string_vector_expression_params(
+                    netlist,
+                    model_name,
+                    instance_string_vector_expr_params,
+                )?;
+            let instance_real_vector_params = merge_vector_params(
+                instance_real_vector_params,
+                &resolved_instance_real_vector_expr_params,
+            );
+            let instance_string_vector_params = merge_vector_params(
+                instance_string_vector_params,
+                &resolved_instance_string_vector_expr_params,
+            );
+            let (real_vector_params, integer_vector_params) =
+                resolve_vector_params(code_model.as_ref(), &instance_real_vector_params)?;
+            let string_vector_params =
+                resolve_string_vector_params(code_model.as_ref(), &instance_string_vector_params)?;
+            let instance_expr_params = resolve_scalar_instance_expression_params(
                 netlist,
                 None,
+                code_model.as_ref(),
                 model_name,
                 instance_params,
-                instance_real_vector_expr_params,
+                instance_expr_params,
             )?;
-        let resolved_instance_string_vector_expr_params =
-            resolve_instance_string_vector_expression_params(
+            let numeric_params = merge_numeric_params(instance_params, &instance_expr_params);
+            let resolved_instance_string_expr_params = resolve_instance_string_expression_params(
                 netlist,
                 model_name,
-                instance_string_vector_expr_params,
+                instance_string_expr_params,
             )?;
-        let instance_real_vector_params = merge_vector_params(
-            instance_real_vector_params,
-            &resolved_instance_real_vector_expr_params,
-        );
-        let instance_string_vector_params = merge_vector_params(
-            instance_string_vector_params,
-            &resolved_instance_string_vector_expr_params,
-        );
-        let (real_vector_params, integer_vector_params) =
-            resolve_vector_params(code_model.as_ref(), &instance_real_vector_params)?;
-        let string_vector_params =
-            resolve_string_vector_params(code_model.as_ref(), &instance_string_vector_params)?;
-        let instance_expr_params = resolve_scalar_instance_expression_params(
-            netlist,
-            None,
-            code_model.as_ref(),
-            model_name,
-            instance_params,
-            instance_expr_params,
-        )?;
-        let numeric_params = merge_numeric_params(instance_params, &instance_expr_params);
-        let resolved_instance_string_expr_params = resolve_instance_string_expression_params(
-            netlist,
-            model_name,
-            instance_string_expr_params,
-        )?;
-        let string_params = merge_string_params(
-            instance_string_params,
-            &resolved_instance_string_expr_params,
-        );
-        return Ok(ResolvedXspiceModel {
-            code_model,
-            numeric_params,
-            string_params,
-            string_vector_params,
-            real_vector_params,
-            integer_vector_params,
-        });
+            let string_params = merge_string_params(
+                instance_string_params,
+                &resolved_instance_string_expr_params,
+            );
+            return Ok(ResolvedXspiceModel {
+                code_model,
+                numeric_params,
+                string_params,
+                string_vector_params,
+                real_vector_params,
+                integer_vector_params,
+            });
+        }
     }
 
-    let model_def = find_model_def(netlist, model_name).ok_or_else(|| {
+    let model_def = model_def.ok_or_else(|| {
         SimulationError::Circuit(format!("Unknown XSPICE model '{}'", model_name))
     })?;
 
@@ -1062,6 +1066,50 @@ mod tests {
         fn evaluate(&self, _ctx: &mut CmContext) -> CmResult<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn xspice_resolver_prefers_model_card_alias_over_registered_code_model_name() {
+        let netlist = Netlist::parse(
+            "xspice alias collision\n\
+             .model divider d_fdiv (div_factor=4)\n\
+             .end\n",
+        )
+        .expect("netlist parses");
+        let mut registry = crate::xspice::CodeModelRegistry::new();
+        registry.register(Arc::new(ParamOnlyModel::new(
+            "divider",
+            vec![ParamSpec::real("scale", 1.0)],
+        )));
+        registry.register(Arc::new(ParamOnlyModel::new(
+            "d_fdiv",
+            vec![ParamSpec::integer("div_factor", 2)],
+        )));
+
+        let resolved = resolve_xspice_model_instance(
+            &netlist,
+            &registry,
+            "divider",
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("xspice alias resolves before direct model name");
+
+        assert_eq!(resolved.code_model.name(), "d_fdiv");
+        assert_eq!(
+            resolved
+                .numeric_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("div_factor"))
+                .map(|(_, value)| *value),
+            Some(4.0)
+        );
     }
 
     #[test]
