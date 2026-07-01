@@ -1124,9 +1124,11 @@ impl CodeModel for DigitalStateMachine {
         }
 
         let clk = ctx.input_digital("clk").unwrap_or_default();
-        let reset = ctx.input_digital("reset").unwrap_or_default();
+        let reset_state_code = ctx
+            .input_digital("reset")
+            .map(d_state_state_code)
+            .unwrap_or(0);
         let clk_state = d_state_state_code(clk);
-        let reset_state_code = d_state_state_code(reset);
         let prev_clk = ctx.int_state(2);
         let prev_reset = ctx.int_state(3);
         let mut current_state = ctx.int_state(1);
