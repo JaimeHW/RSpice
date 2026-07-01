@@ -40,6 +40,20 @@ pub struct GeneratedRustDevice {
     pub source_digest: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RustBackendSelection {
+    ScalarOptIr,
+    ScalarHybrid,
+    LegacyNativeLocalFallback,
+    LegacyDevice,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedRustDeviceReport {
+    pub device: GeneratedRustDevice,
+    pub backend: RustBackendSelection,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustTranspileOptions {
     pub runtime_path: String,
@@ -101,15 +115,35 @@ impl RustTranspiler {
         &self,
         artifact: &CanonicalIrArtifact,
     ) -> Result<GeneratedRustDevice, RustBackendError> {
+        self.transpile_with_report(artifact)
+            .map(|report| report.device)
+    }
+
+    pub fn transpile_with_report(
+        &self,
+        artifact: &CanonicalIrArtifact,
+    ) -> Result<GeneratedRustDeviceReport, RustBackendError> {
         match self.backend {
             RustBackendKind::Auto => match scalar::generate_device(artifact, &self.options) {
-                Ok(device) => Ok(device),
+                Ok(device) => Ok(GeneratedRustDeviceReport {
+                    device,
+                    backend: RustBackendSelection::ScalarOptIr,
+                }),
                 Err(scalar_error) if scalar_error.is_unsupported() => {
                     match device::generate_hybrid_device(artifact, &self.options) {
-                        Ok(device) => Ok(device),
+                        Ok(device) => Ok(GeneratedRustDeviceReport {
+                            device,
+                            backend: RustBackendSelection::ScalarHybrid,
+                        }),
                         Err(hybrid_error) if hybrid_error.is_unsupported() => {
                             match device::generate_auto_device(artifact, &self.options) {
-                                Ok(device) => reject_legacy_ad_device(artifact, device),
+                                Ok(device) => {
+                                    let device = reject_legacy_ad_device(artifact, device)?;
+                                    Ok(GeneratedRustDeviceReport {
+                                        device,
+                                        backend: RustBackendSelection::LegacyNativeLocalFallback,
+                                    })
+                                }
                                 Err(legacy_error) if legacy_error.is_unsupported() => {
                                     Err(auto_backend_unsupported(
                                         artifact,
@@ -125,8 +159,14 @@ impl RustTranspiler {
                 }
                 Err(error) => Err(error),
             },
-            RustBackendKind::Legacy => device::generate_device(artifact, &self.options),
-            RustBackendKind::ScalarOptIr => scalar::generate_device(artifact, &self.options),
+            RustBackendKind::Legacy => Ok(GeneratedRustDeviceReport {
+                device: device::generate_device(artifact, &self.options)?,
+                backend: RustBackendSelection::LegacyDevice,
+            }),
+            RustBackendKind::ScalarOptIr => Ok(GeneratedRustDeviceReport {
+                device: scalar::generate_device(artifact, &self.options)?,
+                backend: RustBackendSelection::ScalarOptIr,
+            }),
         }
     }
 }
@@ -213,6 +253,29 @@ mod tests {
         );
 
         assert_eq!(generated_legacy_ad_marker(&device), None);
+    }
+
+    #[test]
+    fn transpile_with_report_records_selected_backend() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module tiny_res(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1.0;
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_auto(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("transpile tiny resistor");
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert_eq!(report.device.public_model_name, "tiny_res");
     }
 
     fn generated_device(stamp: &str) -> GeneratedRustDevice {

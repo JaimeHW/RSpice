@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use rspice_veriloga::canonical_ir::StableDigest;
 use rspice_veriloga::rust_backend::{
-    GeneratedBuiltinManifest, GeneratedRustDevice, RustTranspiler, VERILOGA_DISCOVERY_SKIP_MARKER,
-    cleanup_stale_generated_device_folders, discover_veriloga_sources,
-    parse_generated_builtin_manifest, render_generated_builtin_manifest,
+    GeneratedBuiltinManifest, GeneratedRustDevice, RustBackendSelection, RustTranspiler,
+    VERILOGA_DISCOVERY_SKIP_MARKER, cleanup_stale_generated_device_folders,
+    discover_veriloga_sources, parse_generated_builtin_manifest, render_generated_builtin_manifest,
     resolve_generated_registry_model_names, write_generated_device, write_text_file_if_changed,
 };
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
@@ -302,6 +302,7 @@ fn generate_devices(
     let compiler = VerilogACompiler::new(options);
     let transpiler = RustTranspiler::new_auto(Default::default());
     let mut devices = Vec::new();
+    let mut backend_counts = BackendSelectionCounts::default();
 
     for candidate in candidates {
         println!("cargo:rerun-if-changed={}", candidate.path.display());
@@ -311,10 +312,12 @@ fn generate_devices(
             for dependency in &compiled.dependencies {
                 println!("cargo:rerun-if-changed={}", dependency.display());
             }
-            let device = transpiler.transpile(&compiled.artifact)?;
-            devices.push(device);
+            let report = transpiler.transpile_with_report(&compiled.artifact)?;
+            backend_counts.record(report.backend);
+            devices.push(report.device);
         }
     }
+    backend_counts.emit_cargo_warning();
 
     devices.sort_by(|left, right| {
         left.public_model_name
@@ -329,6 +332,34 @@ fn generate_devices(
         write_generated_device(devices_root, device)?;
     }
     Ok(devices)
+}
+
+#[derive(Debug, Default)]
+struct BackendSelectionCounts {
+    scalar: usize,
+    hybrid: usize,
+    legacy_native_local_fallback: usize,
+    legacy_device: usize,
+}
+
+impl BackendSelectionCounts {
+    fn record(&mut self, selection: RustBackendSelection) {
+        match selection {
+            RustBackendSelection::ScalarOptIr => self.scalar += 1,
+            RustBackendSelection::ScalarHybrid => self.hybrid += 1,
+            RustBackendSelection::LegacyNativeLocalFallback => {
+                self.legacy_native_local_fallback += 1
+            }
+            RustBackendSelection::LegacyDevice => self.legacy_device += 1,
+        }
+    }
+
+    fn emit_cargo_warning(&self) {
+        println!(
+            "cargo:warning=generated Verilog-A backend selection: scalar={}, scalar-hybrid={}, legacy-native-local-fallback={}, legacy-device={}",
+            self.scalar, self.hybrid, self.legacy_native_local_fallback, self.legacy_device
+        );
+    }
 }
 
 fn generate_devices_with_stack(

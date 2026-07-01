@@ -1,8 +1,8 @@
 use rspice_veriloga::rust_backend::{
-    GeneratedBuiltinManifest, GeneratedRustDevice, GeneratedRustFile, RustBackendError,
-    RustDeviceNames, RustTranspileOptions, RustTranspiler, VERILOGA_DISCOVERY_SKIP_MARKER,
-    cleanup_stale_generated_device_folders, discover_veriloga_sources,
-    parse_generated_builtin_manifest, render_generated_builtin_manifest,
+    GeneratedBuiltinManifest, GeneratedRustDevice, GeneratedRustDeviceReport, GeneratedRustFile,
+    RustBackendError, RustBackendSelection, RustDeviceNames, RustTranspileOptions, RustTranspiler,
+    VERILOGA_DISCOVERY_SKIP_MARKER, cleanup_stale_generated_device_folders,
+    discover_veriloga_sources, parse_generated_builtin_manifest, render_generated_builtin_manifest,
     render_runtime_support_module, resolve_generated_registry_model_names, write_generated_device,
     write_text_file_if_changed,
 };
@@ -17,6 +17,7 @@ fn rust_backend_public_api_exists() {
     let _ = RustTranspiler::new_auto(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     });
+    let _ = RustBackendSelection::ScalarOptIr;
     let diagnostic = RustBackendError::unsupported("fixture.va", "tiny_res", "arrays");
 
     assert!(diagnostic.to_string().contains("fixture.va"));
@@ -36,6 +37,23 @@ fn generated_device_records_multiple_files() {
 
     assert_eq!(device.module_name, "tiny_res");
     assert!(device.files.is_empty());
+}
+
+#[test]
+fn generated_device_report_records_backend_selection() {
+    let report = GeneratedRustDeviceReport {
+        backend: RustBackendSelection::ScalarOptIr,
+        device: GeneratedRustDevice {
+            module_name: "tiny_res".to_string(),
+            public_model_name: "tiny_res".to_string(),
+            folder_name: "tiny_res__tiny_res__00000000".to_string(),
+            files: Vec::new(),
+            source_digest: "0000000000000000".to_string(),
+        },
+    };
+
+    assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+    assert_eq!(report.device.public_model_name, "tiny_res");
 }
 
 #[test]
