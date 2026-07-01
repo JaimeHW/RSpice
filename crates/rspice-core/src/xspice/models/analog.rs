@@ -9,6 +9,7 @@ use crate::xspice::{
 use crate::{Complex64, Value};
 use std::sync::Arc;
 
+const MULT_TRANSFER_RESOURCE: &str = "xspice.analog.mult.transfer";
 const DIVIDE_TRANSFER_RESOURCE: &str = "xspice.analog.divide.transfer";
 const CLIMIT_TRANSFER_RESOURCE: &str = "xspice.analog.climit.transfer";
 
@@ -456,9 +457,9 @@ impl CodeModel for Multiplier {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let output = mult_output_from_context(ctx)?;
+        let transfer = cache_mult_transfer(ctx)?;
 
-        ctx.set_output("out", output);
+        ctx.set_output("out", mult_output_from_transfer(&transfer));
         Ok(())
     }
 
@@ -471,22 +472,55 @@ impl CodeModel for Multiplier {
             return Vec::new();
         }
 
-        let Ok(partials) = mult_partials_from_context(ctx) else {
+        let Ok(transfer) = mult_transfer_for_context(ctx) else {
             return Vec::new();
         };
-        partials
+        mult_partials_from_transfer(&transfer)
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct MultTransfer {
-    input_width: usize,
-    accumulate_in: Value,
-    transfer_gain: Value,
+#[derive(Debug, Clone, PartialEq)]
+struct MultTransferSignature {
+    inputs: Vec<Value>,
+    in_gain_revision: Option<u64>,
+    in_offset_revision: Option<u64>,
+    out_gain: Value,
     out_offset: Value,
 }
 
-fn mult_transfer_from_context(ctx: &CmContext) -> CmResult<MultTransfer> {
+#[derive(Debug, Clone, PartialEq)]
+struct MultTransfer {
+    accumulate_in: Value,
+    transfer_gain: Value,
+    out_offset: Value,
+    shifted_inputs: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct MultTransferResource {
+    signature: MultTransferSignature,
+    transfer: MultTransfer,
+}
+
+fn mult_transfer_signature(ctx: &CmContext) -> MultTransferSignature {
+    let inputs = ctx
+        .input_analog_vector_values("in")
+        .unwrap_or(&[])
+        .iter()
+        .map(|input| input.value)
+        .collect();
+    MultTransferSignature {
+        inputs,
+        in_gain_revision: ctx.real_vector_param_revision("in_gain"),
+        in_offset_revision: ctx.real_vector_param_revision("in_offset"),
+        out_gain: ctx.param("out_gain"),
+        out_offset: ctx.param("out_offset"),
+    }
+}
+
+fn mult_transfer_from_context_with_signature(
+    ctx: &CmContext,
+) -> CmResult<(MultTransferSignature, MultTransfer)> {
     let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if inputs.len() < 2 {
         return Err(CmError::EvaluationError(format!(
@@ -502,35 +536,76 @@ fn mult_transfer_from_context(ctx: &CmContext) -> CmResult<MultTransfer> {
 
     let mut accumulate_gain = 1.0;
     let mut accumulate_in = 1.0;
+    let mut signature_inputs = Vec::with_capacity(inputs.len());
+    let mut shifted_inputs = Vec::with_capacity(inputs.len());
     for (index, input) in inputs.iter().enumerate() {
         let gain = analog_vector_param_at(in_gain, index, 1.0);
         let offset = analog_vector_param_at(in_offset, index, 0.0);
+        let shifted = input.value + offset;
+        signature_inputs.push(input.value);
         accumulate_gain *= gain;
-        accumulate_in *= input.value + offset;
+        accumulate_in *= shifted;
+        shifted_inputs.push(shifted);
     }
 
     let transfer_gain = accumulate_gain * out_gain;
-    Ok(MultTransfer {
-        input_width: inputs.len(),
-        accumulate_in,
-        transfer_gain,
-        out_offset,
-    })
+    Ok((
+        MultTransferSignature {
+            inputs: signature_inputs,
+            in_gain_revision: ctx.real_vector_param_revision("in_gain"),
+            in_offset_revision: ctx.real_vector_param_revision("in_offset"),
+            out_gain,
+            out_offset,
+        },
+        MultTransfer {
+            accumulate_in,
+            transfer_gain,
+            out_offset,
+            shifted_inputs,
+        },
+    ))
+}
+
+fn mult_transfer_from_context(ctx: &CmContext) -> CmResult<MultTransfer> {
+    let (_, transfer) = mult_transfer_from_context_with_signature(ctx)?;
+    Ok(transfer)
+}
+
+fn mult_transfer_for_context(ctx: &CmContext) -> CmResult<MultTransfer> {
+    let signature = mult_transfer_signature(ctx);
+    if let Some(resource) = ctx.resource::<MultTransferResource>(MULT_TRANSFER_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.transfer.clone());
+    }
+
+    mult_transfer_from_context(ctx)
+}
+
+fn cache_mult_transfer(ctx: &mut CmContext) -> CmResult<MultTransfer> {
+    let (signature, transfer) = mult_transfer_from_context_with_signature(ctx)?;
+    ctx.set_resource(
+        MULT_TRANSFER_RESOURCE,
+        Arc::new(MultTransferResource {
+            signature,
+            transfer: transfer.clone(),
+        }),
+    );
+    Ok(transfer)
+}
+
+fn mult_output_from_transfer(transfer: &MultTransfer) -> Value {
+    transfer.accumulate_in * transfer.transfer_gain + transfer.out_offset
 }
 
 fn mult_output_from_context(ctx: &CmContext) -> CmResult<Value> {
-    let transfer = mult_transfer_from_context(ctx)?;
-    Ok(transfer.accumulate_in * transfer.transfer_gain + transfer.out_offset)
+    let transfer = mult_transfer_for_context(ctx)?;
+    Ok(mult_output_from_transfer(&transfer))
 }
 
-fn mult_partials_from_context(ctx: &CmContext) -> CmResult<Vec<(String, usize, Value)>> {
-    let transfer = mult_transfer_from_context(ctx)?;
-    let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
-    let in_offset = analog_vector_param_values(ctx, "in_offset", transfer.input_width, "mult")?;
-
-    let mut partials = Vec::with_capacity(transfer.input_width);
-    for (index, input) in inputs.iter().enumerate() {
-        let shifted = input.value + analog_vector_param_at(in_offset, index, 0.0);
+fn mult_partials_from_transfer(transfer: &MultTransfer) -> Vec<(String, usize, Value)> {
+    let mut partials = Vec::with_capacity(transfer.shifted_inputs.len());
+    for (index, shifted) in transfer.shifted_inputs.iter().copied().enumerate() {
         let partial = if transfer.accumulate_in != 0.0
             && transfer.accumulate_in.is_finite()
             && transfer.transfer_gain.is_finite()
@@ -542,7 +617,12 @@ fn mult_partials_from_context(ctx: &CmContext) -> CmResult<Vec<(String, usize, V
         };
         partials.push(("in".to_string(), index, partial));
     }
-    Ok(partials)
+    partials
+}
+
+fn mult_partials_from_context(ctx: &CmContext) -> CmResult<Vec<(String, usize, Value)>> {
+    let transfer = mult_transfer_for_context(ctx)?;
+    Ok(mult_partials_from_transfer(&transfer))
 }
 
 //=============================================================================
@@ -2548,6 +2628,64 @@ mod tests {
                 ("in".to_string(), 1, 216.0),
                 ("in".to_string(), 2, 72.0),
             ]
+        );
+    }
+
+    #[test]
+    fn mult_transfer_cache_reuses_evaluated_transfer_until_inputs_change() {
+        let mut ctx = CmContext::new();
+        ctx.set_input_analog_vector_from_fn("in", 3, |index| {
+            AnalogValue::new([1.0, 2.0, 3.0][index])
+        });
+        ctx.set_real_vector_param("in_gain", vec![2.0, 3.0, 4.0]);
+        ctx.set_real_vector_param("in_offset", vec![0.5, -1.0, 0.0]);
+        ctx.set_param("out_gain", 2.0);
+        ctx.set_param("out_offset", 1.0);
+
+        let first = cache_mult_transfer(&mut ctx).expect("mult transfer caches");
+        assert_eq!(
+            mult_transfer_for_context(&ctx).expect("cached mult transfer"),
+            first
+        );
+
+        ctx.set_param("unrelated", 42.0);
+        assert_eq!(
+            mult_transfer_for_context(&ctx).expect("unrelated param preserves mult cache"),
+            first,
+            "unrelated context changes should not invalidate the mult transfer cache"
+        );
+
+        let signature = mult_transfer_signature(&ctx);
+        let sentinel = MultTransfer {
+            accumulate_in: -2.0,
+            transfer_gain: -3.0,
+            out_offset: -4.0,
+            shifted_inputs: vec![-5.0, -6.0, -7.0],
+        };
+        ctx.set_resource(
+            MULT_TRANSFER_RESOURCE,
+            Arc::new(MultTransferResource {
+                signature,
+                transfer: sentinel.clone(),
+            }),
+        );
+        assert_eq!(
+            mult_transfer_for_context(&ctx).expect("matching signature reuses mult cache"),
+            sentinel,
+            "matching signatures should reuse the cached mult transfer"
+        );
+
+        ctx.set_input_analog_vector_from_fn("in", 3, |index| {
+            AnalogValue::new([1.0, 4.0, 3.0][index])
+        });
+        let updated = mult_transfer_for_context(&ctx).expect("changed input recomputes transfer");
+        assert_ne!(
+            updated, sentinel,
+            "changed mult inputs must invalidate the cached transfer"
+        );
+        assert_eq!(
+            updated,
+            mult_transfer_from_context(&ctx).expect("direct mult transfer")
         );
     }
 
