@@ -156,7 +156,7 @@ struct XyceExecutionPlan {
     source: String,
     print: XycePrintRequest,
     dc: XyceDcSweep,
-    step: Option<StepCommand>,
+    steps: Vec<StepCommand>,
     contract: XyceStaticDcContract,
 }
 
@@ -166,7 +166,7 @@ struct XyceStaticDcPlan {
     source: String,
     print: XycePrintRequest,
     dc: XyceDcSweep,
-    step: Option<StepCommand>,
+    steps: Vec<StepCommand>,
     diagnostics: Vec<crate::netlist::ParseDiagnostic>,
 }
 
@@ -398,6 +398,12 @@ struct XyceDcSweepPoint {
 struct XyceDcResultBatch {
     netlist: Netlist,
     results: Vec<DcSweepPointResult>,
+}
+
+#[derive(Debug, Clone)]
+struct XyceStepRun {
+    step_values: Vec<Value>,
+    netlist: Netlist,
 }
 
 #[derive(Debug, Clone)]
@@ -791,7 +797,7 @@ impl XyceTestRunner {
             source: static_plan.source,
             print: static_plan.print,
             dc: static_plan.dc,
-            step: static_plan.step,
+            steps: static_plan.steps,
             contract,
         })
     }
@@ -812,7 +818,7 @@ impl XyceTestRunner {
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let diagnostics = netlist.diagnostics.clone();
         let dc = Self::single_dc_sweep(&netlist)?;
-        let step = Self::single_step_command(&netlist)?;
+        let steps = Self::step_commands(&netlist)?;
         Self::validate_static_dc_contract(&netlist, &dc, &print)?;
 
         Ok(XyceStaticDcPlan {
@@ -820,7 +826,7 @@ impl XyceTestRunner {
             source,
             print,
             dc,
-            step,
+            steps,
             diagnostics,
         })
     }
@@ -942,9 +948,7 @@ impl XyceTestRunner {
     }
 
     fn is_native_gnuplot_splot_wrapper_candidate(source: &str) -> bool {
-        if Self::wrapper_source_has_extra_output_analysis(source)
-            || Self::source_has_step_command(source)
-        {
+        if Self::wrapper_source_has_extra_output_analysis(source) {
             return false;
         }
         let Ok((primary, side)) = Self::gnuplot_splot_print_pair(source) else {
@@ -1100,7 +1104,7 @@ impl XyceTestRunner {
     fn dc_print_format_is_prn_compatible(format: &str) -> bool {
         matches!(
             format.to_ascii_lowercase().as_str(),
-            "std" | "tecplot" | "touchstone" | "touchstone2"
+            "std" | "tecplot" | "touchstone" | "touchstone2" | "noindex" | "gnuplot" | "splot"
         )
     }
 
@@ -1152,15 +1156,6 @@ impl XyceTestRunner {
         })
     }
 
-    fn source_has_step_command(source: &str) -> bool {
-        Self::logical_netlist_lines(source).into_iter().any(|line| {
-            Self::strip_netlist_comment(&line)
-                .split_whitespace()
-                .next()
-                .is_some_and(|command| command.eq_ignore_ascii_case(".step"))
-        })
-    }
-
     fn run_static_prn_dc_plan(
         &self,
         deck: &XyceDeck,
@@ -1204,7 +1199,7 @@ impl XyceTestRunner {
             }
         };
 
-        if plan.step.is_some() {
+        if !plan.steps.is_empty() {
             return self.run_static_prn_step_dc_plan(deck, plan, netlist, reference, start);
         }
 
@@ -1303,7 +1298,9 @@ impl XyceTestRunner {
             }
         }
 
-        if mismatches.is_empty() {
+        if mismatches.is_empty()
+            && !matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplotPrn)
+        {
             let batches = [XyceDcResultBatch {
                 netlist: netlist.clone(),
                 results: results.clone(),
@@ -1483,34 +1480,8 @@ impl XyceTestRunner {
     ) -> XyceTestResult {
         let contract = plan.contract.result_contract(true);
         let engine = self.create_dc_engine();
-        let step = plan
-            .step
-            .as_ref()
-            .expect("step plan checked before stepped execution");
-        let step_values = step.sweep.values();
-        if plan.contract.compares_step_res_reference() {
-            if let Some(res_reference_path) =
-                Self::step_res_reference_path(&plan.deck_path, &plan.reference_path)
-            {
-                if let Err(err) = self.compare_step_res_reference(
-                    &res_reference_path,
-                    &netlist,
-                    step,
-                    &step_values,
-                ) {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!("Xyce .STEP result summary comparison error: {err}"),
-                        Vec::new(),
-                    );
-                }
-            }
-        }
-        let stepped_netlists = match engine.step_netlists_for_command(&netlist, step, &step_values)
-        {
-            Ok(stepped) => stepped,
+        let step_runs = match Self::nested_step_runs_for_commands(&engine, &netlist, &plan.steps) {
+            Ok(runs) => runs,
             Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
                 return self.expected_unsupported_result(
                     deck,
@@ -1530,11 +1501,32 @@ impl XyceTestRunner {
             }
         };
 
+        if plan.contract.compares_step_res_reference() {
+            if let Some(res_reference_path) =
+                Self::step_res_reference_path(&plan.deck_path, &plan.reference_path)
+            {
+                if let Err(err) = self.compare_step_res_reference(
+                    &res_reference_path,
+                    &netlist,
+                    &plan.steps,
+                    &step_runs,
+                ) {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("Xyce .STEP result summary comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            }
+        }
+
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let mut batches = Vec::with_capacity(stepped_netlists.len());
-        for (_, stepped_netlist) in stepped_netlists {
+        let mut batches = Vec::with_capacity(step_runs.len());
+        for run in step_runs {
             let results = match engine.run_dc_sweep2_spec_with_report_and_abort(
-                &stepped_netlist,
+                &run.netlist,
                 &plan.dc.source,
                 &plan.dc.primary_spec(),
                 plan.dc.sweep2.as_ref(),
@@ -1572,7 +1564,7 @@ impl XyceTestRunner {
                 }
             };
             batches.push(XyceDcResultBatch {
-                netlist: stepped_netlist,
+                netlist: run.netlist,
                 results,
             });
         }
@@ -1596,16 +1588,18 @@ impl XyceTestRunner {
             }
         };
 
-        if mismatches.is_empty() {
+        if mismatches.is_empty()
+            && matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplotPrn)
+        {
             let side_mismatches =
-                match self.compare_prn_compatible_side_output_batches(&plan, &batches) {
+                match self.compare_gnuplot_splot_side_output_batches(&plan, &batches) {
                     Ok(mismatches) => mismatches,
                     Err(err) => {
                         return self.failure_result(
                             deck,
                             start,
                             contract,
-                            format!("PRN-compatible side-output comparison error: {err}"),
+                            format!("GNUPLOT/SPLOT side-output comparison error: {err}"),
                             Vec::new(),
                         );
                     }
@@ -1616,22 +1610,109 @@ impl XyceTestRunner {
                     start,
                     contract,
                     format!(
-                        "{} Xyce PRN-compatible side-output mismatch(es)",
+                        "{} Xyce GNUPLOT/SPLOT side-output mismatch(es)",
                         side_mismatches.len()
                     ),
                     side_mismatches,
                 );
             }
-            self.passed_result(deck, start, contract)
-        } else {
-            self.failure_result(
-                deck,
-                start,
-                contract,
-                format!("{} Xyce reference mismatch(es)", mismatches.len()),
-                mismatches,
-            )
         }
+
+        if mismatches.is_empty() {
+            if !matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplotPrn) {
+                let side_mismatches =
+                    match self.compare_prn_compatible_side_output_batches(&plan, &batches) {
+                        Ok(mismatches) => mismatches,
+                        Err(err) => {
+                            return self.failure_result(
+                                deck,
+                                start,
+                                contract,
+                                format!("PRN-compatible side-output comparison error: {err}"),
+                                Vec::new(),
+                            );
+                        }
+                    };
+                if !side_mismatches.is_empty() {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "{} Xyce PRN-compatible side-output mismatch(es)",
+                            side_mismatches.len()
+                        ),
+                        side_mismatches,
+                    );
+                }
+            }
+            return self.passed_result(deck, start, contract);
+        }
+
+        self.failure_result(
+            deck,
+            start,
+            contract,
+            format!("{} Xyce reference mismatch(es)", mismatches.len()),
+            mismatches,
+        )
+    }
+
+    fn nested_step_runs_for_commands(
+        engine: &Engine,
+        netlist: &Netlist,
+        steps: &[StepCommand],
+    ) -> Result<Vec<XyceStepRun>, SimulationError> {
+        let mut runs = vec![XyceStepRun {
+            step_values: Vec::new(),
+            netlist: netlist.clone(),
+        }];
+
+        for step in steps {
+            let values = step.sweep.values();
+            let mut expanded_by_run = Vec::with_capacity(runs.len());
+            let mut expected_step_len = None;
+
+            for run in &runs {
+                let expanded = engine.step_netlists_for_command(&run.netlist, step, &values)?;
+                match expected_step_len {
+                    Some(expected) if expected != expanded.len() => {
+                        return Err(SimulationError::Circuit(format!(
+                            ".STEP expansion for {} produced {} value(s), expected {}",
+                            Self::step_res_variable_name(step),
+                            expanded.len(),
+                            expected
+                        )));
+                    }
+                    None => expected_step_len = Some(expanded.len()),
+                    _ => {}
+                }
+                expanded_by_run.push(expanded);
+            }
+
+            let step_len = expected_step_len.unwrap_or(0);
+            if step_len == 0 {
+                return Err(SimulationError::Circuit(
+                    ".STEP produced no sweep values".to_string(),
+                ));
+            }
+
+            let mut next_runs = Vec::with_capacity(runs.len() * step_len);
+            for value_index in 0..step_len {
+                for (run_index, run) in runs.iter().enumerate() {
+                    let (value, stepped_netlist) = expanded_by_run[run_index][value_index].clone();
+                    let mut step_values = run.step_values.clone();
+                    step_values.push(value);
+                    next_runs.push(XyceStepRun {
+                        step_values,
+                        netlist: stepped_netlist,
+                    });
+                }
+            }
+            runs = next_runs;
+        }
+
+        Ok(runs)
     }
 
     fn run_baseline_family_contract(
@@ -1902,7 +1983,7 @@ impl XyceTestRunner {
         plan: &XyceStaticDcPlan,
         start: Instant,
     ) -> Result<(Netlist, Vec<DcSweepPointResult>), SimulationError> {
-        if plan.step.is_some() {
+        if !plan.steps.is_empty() {
             return Err(SimulationError::Netlist(
                 ".STEP static DC execution requires the stepped .prn contract".to_string(),
             ));
@@ -1927,7 +2008,7 @@ impl XyceTestRunner {
         netlist: &Netlist,
         results: &[DcSweepPointResult],
     ) -> Result<XycePrnTable, String> {
-        if plan.step.is_some() {
+        if !plan.steps.is_empty() {
             return Err(".STEP static DC results require the stepped .prn contract".to_string());
         }
         let mut columns = Vec::with_capacity(plan.print.probes.len() + 1);
@@ -2017,10 +2098,16 @@ impl XyceTestRunner {
         if reference.columns.is_empty() {
             return Err("reference table has no columns".to_string());
         }
-        let has_index_column = reference.columns[0].eq_ignore_ascii_case("Index");
-        if !has_index_column && !Self::reference_columns_are_compact_probe_table(reference) {
+        let has_stepnum_column = reference.columns[0].eq_ignore_ascii_case("STEPNUM");
+        let index_column = usize::from(has_stepnum_column);
+        let has_index_column = reference
+            .columns
+            .get(index_column)
+            .is_some_and(|column| column.eq_ignore_ascii_case("Index"));
+        let data_column_offset = usize::from(has_stepnum_column) + usize::from(has_index_column);
+        if data_column_offset == 0 && !Self::reference_columns_are_compact_probe_table(reference) {
             return Err(format!(
-                "expected first Xyce .prn column to be Index or a compact probe label, got '{}'",
+                "expected first Xyce .prn column to be Index, STEPNUM, or a compact probe label, got '{}'",
                 reference.columns[0]
             ));
         }
@@ -2040,8 +2127,13 @@ impl XyceTestRunner {
             .first()
             .map(|batch| &batch.netlist)
             .ok_or_else(|| "DC comparison has no result batches".to_string())?;
-        let data_columns =
-            self.reference_data_columns(reference, print, mapping_netlist, has_index_column)?;
+        let data_columns = self.reference_data_columns(
+            reference,
+            print,
+            mapping_netlist,
+            data_column_offset,
+            has_index_column,
+        )?;
         let comp_tolerances = self.comp_tolerances(source, &data_columns)?;
         let primary_points = dc.primary_spec().points();
         if primary_points.is_empty() {
@@ -2053,7 +2145,7 @@ impl XyceTestRunner {
         }
         let mut mismatches = Vec::new();
         let mut global_row_index = 0usize;
-        for batch in batches {
+        for (batch_index, batch) in batches.iter().enumerate() {
             for (local_row_index, point) in batch.results.iter().enumerate() {
                 let row = reference.rows.get(global_row_index).ok_or_else(|| {
                     format!("missing reference row for simulation row {global_row_index}")
@@ -2066,8 +2158,24 @@ impl XyceTestRunner {
                         reference.columns.len()
                     ));
                 }
-                let value_offset = if has_index_column {
-                    let expected_index = row[0];
+                if has_stepnum_column {
+                    let expected_stepnum = row[0];
+                    let actual_stepnum = batch_index as f64;
+                    if (expected_stepnum - actual_stepnum).abs() > self.config.absolute_tolerance {
+                        mismatches.push(XyceValueMismatch {
+                            row: global_row_index,
+                            probe: "STEPNUM".to_string(),
+                            expected: expected_stepnum,
+                            actual: actual_stepnum,
+                            relative_error: 1.0,
+                        });
+                        if mismatches.len() >= self.config.max_mismatches {
+                            return Ok(mismatches);
+                        }
+                    }
+                }
+                if has_index_column {
+                    let expected_index = row[index_column];
                     let actual_index = local_row_index as f64;
                     if (expected_index - actual_index).abs() > self.config.absolute_tolerance {
                         mismatches.push(XyceValueMismatch {
@@ -2081,10 +2189,8 @@ impl XyceTestRunner {
                             return Ok(mismatches);
                         }
                     }
-                    1
-                } else {
-                    0
-                };
+                }
+                let value_offset = data_column_offset;
 
                 let sweep_point = XyceDcSweepPoint {
                     primary: point.sweep_value,
@@ -2149,8 +2255,8 @@ impl XyceTestRunner {
         &self,
         path: &Path,
         netlist: &Netlist,
-        step: &StepCommand,
-        expected_values: &[Value],
+        steps: &[StepCommand],
+        step_runs: &[XyceStepRun],
     ) -> Result<(), String> {
         let content = fs::read_to_string(path)
             .map_err(|err| format!("{}: {err}", self.display_path(path)))?;
@@ -2173,7 +2279,7 @@ impl XyceTestRunner {
                 self.display_path(path)
             ));
         }
-        let expected_columns = Self::step_res_expected_columns(netlist, step, expected_values)?;
+        let expected_columns = Self::step_res_expected_columns(netlist, steps, step_runs)?;
         if header_fields.len() != expected_columns.len() + 1 {
             return Err(format!(
                 "{} line {header_line} has {} columns; expected STEP plus {} .STEP variable column(s)",
@@ -2289,47 +2395,84 @@ impl XyceTestRunner {
 
     fn step_res_expected_columns(
         netlist: &Netlist,
-        step: &StepCommand,
-        expected_values: &[Value],
+        steps: &[StepCommand],
+        step_runs: &[XyceStepRun],
     ) -> Result<Vec<(String, Vec<Value>)>, String> {
-        if let StepSweep::Data { table_name } = &step.sweep {
-            let table = netlist
-                .data_tables
+        let mut columns = Vec::new();
+        for (step_index, step) in steps.iter().enumerate() {
+            if step_runs
                 .iter()
-                .find(|table| table.name.eq_ignore_ascii_case(table_name))
-                .ok_or_else(|| format!(".STEP DATA table '{table_name}' not found"))?;
-            if table.params.is_empty() {
-                return Err(format!(".STEP DATA table '{}' has no columns", table.name));
+                .any(|run| run.step_values.len() <= step_index)
+            {
+                return Err(format!(
+                    ".STEP run metadata is missing value {} for {}",
+                    step_index,
+                    Self::step_res_variable_name(step)
+                ));
             }
-            if table.rows.is_empty() {
-                return Err(format!(".STEP DATA table '{}' has no rows", table.name));
-            }
-            let mut columns = table
-                .params
-                .iter()
-                .map(|param| (param.clone(), Vec::with_capacity(table.rows.len())))
-                .collect::<Vec<_>>();
-            for (row_index, row) in table.rows.iter().enumerate() {
-                if row.len() != columns.len() {
-                    return Err(format!(
-                        ".STEP DATA table '{}' row {} has {} value(s), expected {}",
-                        table.name,
-                        row_index,
-                        row.len(),
-                        columns.len()
-                    ));
+
+            if let StepSweep::Data { table_name } = &step.sweep {
+                let table = netlist
+                    .data_tables
+                    .iter()
+                    .find(|table| table.name.eq_ignore_ascii_case(table_name))
+                    .ok_or_else(|| format!(".STEP DATA table '{table_name}' not found"))?;
+                if table.params.is_empty() {
+                    return Err(format!(".STEP DATA table '{}' has no columns", table.name));
                 }
-                for (column_index, value) in row.iter().copied().enumerate() {
-                    columns[column_index].1.push(value);
+                if table.rows.is_empty() {
+                    return Err(format!(".STEP DATA table '{}' has no rows", table.name));
                 }
+                let first_new_column = columns.len();
+                columns.extend(
+                    table
+                        .params
+                        .iter()
+                        .map(|param| (param.clone(), Vec::with_capacity(step_runs.len()))),
+                );
+                for run in step_runs {
+                    let row_index = run.step_values[step_index];
+                    if row_index.fract() != 0.0 || row_index < 0.0 {
+                        return Err(format!(
+                            ".STEP DATA table '{}' row selector {} is not a non-negative integer",
+                            table.name, row_index
+                        ));
+                    }
+                    let row_index = row_index as usize;
+                    let row = table.rows.get(row_index).ok_or_else(|| {
+                        format!(
+                            ".STEP DATA table '{}' row selector {} is outside {} row(s)",
+                            table.name,
+                            row_index,
+                            table.rows.len()
+                        )
+                    })?;
+                    if row.len() != table.params.len() {
+                        return Err(format!(
+                            ".STEP DATA table '{}' row {} has {} value(s), expected {}",
+                            table.name,
+                            row_index,
+                            row.len(),
+                            table.params.len()
+                        ));
+                    }
+                    for (column_index, value) in row.iter().copied().enumerate() {
+                        columns[first_new_column + column_index].1.push(value);
+                    }
+                }
+                continue;
             }
-            return Ok(columns);
+
+            columns.push((
+                Self::step_res_variable_name(step),
+                step_runs
+                    .iter()
+                    .map(|run| run.step_values[step_index])
+                    .collect(),
+            ));
         }
 
-        Ok(vec![(
-            Self::step_res_variable_name(step),
-            expected_values.to_vec(),
-        )])
+        Ok(columns)
     }
 
     fn step_res_variable_name(step: &StepCommand) -> String {
@@ -2354,17 +2497,13 @@ impl XyceTestRunner {
         reference: &XycePrnTable,
         print: &XycePrintRequest,
         netlist: &Netlist,
-        has_index_column: bool,
+        first_data_column: usize,
+        ordered_print_columns: bool,
     ) -> Result<Vec<XyceReferenceColumn>, String> {
-        let mut data_columns = Vec::with_capacity(
-            reference
-                .columns
-                .len()
-                .saturating_sub(usize::from(has_index_column)),
-        );
+        let mut data_columns =
+            Vec::with_capacity(reference.columns.len().saturating_sub(first_data_column));
         let mut probe_index = 0usize;
         let mut used_probe_indices = BTreeSet::new();
-        let first_data_column = usize::from(has_index_column);
         for column in reference.columns.iter().skip(first_data_column) {
             if Self::is_primary_dc_sweep_reference_column(column) {
                 data_columns.push(XyceReferenceColumn::PrimarySweep {
@@ -2373,7 +2512,7 @@ impl XyceTestRunner {
                 continue;
             }
 
-            let (matched_index, probe) = if has_index_column {
+            let (matched_index, probe) = if ordered_print_columns {
                 let mut skipped_omitted_probes = false;
                 let probe = loop {
                     let Some(probe) = print.probes.get(probe_index) else {
@@ -2425,11 +2564,11 @@ impl XyceTestRunner {
             data_columns.push(XyceReferenceColumn::Probe {
                 name: probe.clone(),
             });
-            if has_index_column {
+            if ordered_print_columns {
                 probe_index += 1;
             }
         }
-        if has_index_column {
+        if ordered_print_columns {
             while let Some(probe) = print.probes.get(probe_index) {
                 if !Self::dc_probe_is_omitted_empty_wildcard(probe, netlist) {
                     break;
@@ -2437,7 +2576,7 @@ impl XyceTestRunner {
                 probe_index += 1;
             }
         }
-        if has_index_column && probe_index != print.probes.len() {
+        if ordered_print_columns && probe_index != print.probes.len() {
             return Err(format!(
                 "reference table matched {} .PRINT DC probe(s), but deck requested {}",
                 probe_index,
@@ -4907,57 +5046,51 @@ impl XyceTestRunner {
         }
     }
 
-    fn single_step_command(netlist: &Netlist) -> Result<Option<StepCommand>, String> {
-        let mut step_commands = netlist
+    fn step_commands(netlist: &Netlist) -> Result<Vec<StepCommand>, String> {
+        let step_commands = netlist
             .analyses
             .iter()
             .filter_map(|analysis| match analysis {
                 AnalysisCommand::Step(step) => Some(step),
                 _ => None,
-            });
+            })
+            .cloned()
+            .collect::<Vec<_>>();
 
-        let Some(step) = step_commands.next() else {
-            return Ok(None);
-        };
-        if step_commands.next().is_some() {
-            return Err(
-                "deck has multiple .STEP analyses; nested Xyce parameter-sweep comparison is not implemented yet"
-                    .to_string(),
-            );
-        }
-
-        match &step.sweep {
-            StepSweep::Data { table_name } => {
-                let table = netlist
-                    .data_tables
-                    .iter()
-                    .find(|table| table.name.eq_ignore_ascii_case(table_name))
-                    .ok_or_else(|| format!(".STEP DATA table '{table_name}' not found"))?;
-                if table.params.is_empty() {
-                    return Err(format!(".STEP DATA table '{}' has no columns", table.name));
-                }
-                if table.rows.is_empty() {
-                    return Err(format!(".STEP DATA table '{}' has no rows", table.name));
-                }
-                for (row_index, row) in table.rows.iter().enumerate() {
-                    if row.len() != table.params.len() {
-                        return Err(format!(
-                            ".STEP DATA table '{}' row {} has {} value(s), expected {}",
-                            table.name,
-                            row_index,
-                            row.len(),
-                            table.params.len()
-                        ));
+        for step in &step_commands {
+            match &step.sweep {
+                StepSweep::Data { table_name } => {
+                    let table = netlist
+                        .data_tables
+                        .iter()
+                        .find(|table| table.name.eq_ignore_ascii_case(table_name))
+                        .ok_or_else(|| format!(".STEP DATA table '{table_name}' not found"))?;
+                    if table.params.is_empty() {
+                        return Err(format!(".STEP DATA table '{}' has no columns", table.name));
+                    }
+                    if table.rows.is_empty() {
+                        return Err(format!(".STEP DATA table '{}' has no rows", table.name));
+                    }
+                    for (row_index, row) in table.rows.iter().enumerate() {
+                        if row.len() != table.params.len() {
+                            return Err(format!(
+                                ".STEP DATA table '{}' row {} has {} value(s), expected {}",
+                                table.name,
+                                row_index,
+                                row.len(),
+                                table.params.len()
+                            ));
+                        }
                     }
                 }
+                _ if step.sweep.values().is_empty() => {
+                    return Err("deck has invalid .STEP sweep bounds".to_string());
+                }
+                _ => {}
             }
-            _ if step.sweep.values().is_empty() => {
-                return Err("deck has invalid .STEP sweep bounds".to_string());
-            }
-            _ => {}
         }
 
-        Ok(Some(step.clone()))
+        Ok(step_commands)
     }
 
     fn single_dc_sweep(netlist: &Netlist) -> Result<XyceDcSweep, String> {
@@ -5301,14 +5434,14 @@ impl XyceTestRunner {
         if line
             .split(',')
             .next()
-            .is_some_and(|token| token.trim().eq_ignore_ascii_case("index"))
+            .is_some_and(|token| Self::is_prn_metadata_header_token(token.trim()))
         {
             return Some(XycePrnDelimiter::Comma);
         }
         if line
             .split_whitespace()
             .next()
-            .is_some_and(|token| token.eq_ignore_ascii_case("index"))
+            .is_some_and(Self::is_prn_metadata_header_token)
         {
             return Some(XycePrnDelimiter::Whitespace);
         }
@@ -5329,6 +5462,10 @@ impl XyceTestRunner {
             return Some(XycePrnDelimiter::Whitespace);
         }
         None
+    }
+
+    fn is_prn_metadata_header_token(token: &str) -> bool {
+        token.eq_ignore_ascii_case("index") || token.eq_ignore_ascii_case("stepnum")
     }
 
     fn reference_columns_are_compact_probe_table(reference: &XycePrnTable) -> bool {
@@ -5891,7 +6028,7 @@ End of Xyce(TM) Simulation
         };
 
         let columns = runner
-            .reference_data_columns(&reference, &print, &netlist, true)
+            .reference_data_columns(&reference, &print, &netlist, 1, true)
             .expect("reference columns map to Xyce DC probes");
 
         assert!(matches!(
@@ -5928,7 +6065,7 @@ End of Xyce(TM) Simulation
         };
 
         let columns = runner
-            .reference_data_columns(&reference, &print, &netlist, true)
+            .reference_data_columns(&reference, &print, &netlist, 1, true)
             .expect("empty Xyce wildcard lead-current probes are omitted from PRN output");
 
         assert_eq!(columns.len(), 1);

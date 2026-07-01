@@ -878,6 +878,10 @@ fn test_xyce_output_dc_default_prn_wrapper_cases_run_natively() {
             "wrapper_static_prn_step_dc",
         ),
         (
+            "Netlists/Output/DC/dc-stepnum-col.cir",
+            "wrapper_static_prn_step_dc",
+        ),
+        (
             "Netlists/Output/DC/dc-touchstone-defaults-to-prn.cir",
             "wrapper_static_prn_dc",
         ),
@@ -915,25 +919,35 @@ fn test_xyce_output_dc_gnuplot_splot_wrapper_case_runs_natively() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    let relative = "Netlists/Output/DC/dc-gnuplot.cir";
 
-    assert!(
-        runner.requires_upstream_wrapper(relative),
-        "{relative} should retain its removed upstream wrapper provenance"
-    );
-    let result = runner.run_test(root.join(relative));
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a native GNUPLOT/SPLOT .prn comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .prn oracle"
-    );
-    assert_eq!(
-        result.contract, "wrapper_gnuplot_splot_prn_dc",
-        "{relative} should report the native GNUPLOT/SPLOT wrapper contract"
-    );
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Output/DC/dc-gnuplot.cir",
+            "wrapper_gnuplot_splot_prn_dc",
+        ),
+        (
+            "Netlists/Output/DC/dc-step-gnuplot.cir",
+            "wrapper_gnuplot_splot_prn_step_dc",
+        ),
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed upstream wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native GNUPLOT/SPLOT .prn comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, expected_contract,
+            "{relative} should report the native GNUPLOT/SPLOT wrapper contract"
+        );
+    }
 }
 
 #[test]
