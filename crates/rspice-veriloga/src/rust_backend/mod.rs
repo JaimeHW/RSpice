@@ -712,6 +712,88 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_emits_runtime_loop_for_large_guarded_while() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module large_guarded_runtime_while(p, n);
+    inout p, n;
+    electrical p, n;
+    integer iter;
+    real x, prev, delta;
+    real t0, t1, t2, t3, t4, t5, t6, t7, t8, t9;
+    real t10, t11, t12, t13, t14, t15, t16, t17, t18, t19;
+    real t20, t21, t22, t23, t24;
+    analog begin
+        iter = 0;
+        x = 1.0;
+        delta = 1.0;
+        while ((delta > 1.0e-12) && (iter <= 100)) begin
+            prev = x;
+            t0 = x + V(p, n);
+            t1 = 0.5 * (t0 + x);
+            t2 = 0.5 * (t1 + x);
+            t3 = 0.5 * (t2 + x);
+            t4 = 0.5 * (t3 + x);
+            t5 = 0.5 * (t4 + x);
+            t6 = 0.5 * (t5 + x);
+            t7 = 0.5 * (t6 + x);
+            t8 = 0.5 * (t7 + x);
+            t9 = 0.5 * (t8 + x);
+            t10 = 0.5 * (t9 + x);
+            t11 = 0.5 * (t10 + x);
+            t12 = 0.5 * (t11 + x);
+            t13 = 0.5 * (t12 + x);
+            t14 = 0.5 * (t13 + x);
+            t15 = 0.5 * (t14 + x);
+            t16 = 0.5 * (t15 + x);
+            t17 = 0.5 * (t16 + x);
+            t18 = 0.5 * (t17 + x);
+            t19 = 0.5 * (t18 + x);
+            t20 = 0.5 * (t19 + x);
+            t21 = 0.5 * (t20 + x);
+            t22 = 0.5 * (t21 + x);
+            t23 = 0.5 * (t22 + x);
+            t24 = 0.5 * (t23 + x);
+            x = t24;
+            delta = abs(x - prev);
+            iter = iter + 1;
+        end
+        I(p, n) <+ x;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("large guarded while should lower to scalar runtime loop");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+        let value_locals = stamp
+            .lines()
+            .filter(|line| line.trim_start().starts_with("let v"))
+            .count();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("runtime_loop_"), "{stamp}");
+        assert!(stamp.contains("while {"), "{stamp}");
+        assert!(
+            value_locals < 400,
+            "runtime loop should not unroll into thousands of scalar locals, saw {value_locals}"
+        );
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_lowers_counter_dependent_accumulator_loop() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(

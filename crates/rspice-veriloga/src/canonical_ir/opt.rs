@@ -149,6 +149,24 @@ pub enum OptValueKind {
         initial: ValueId,
         term: ValueId,
     },
+    RuntimeLoopVariable {
+        loop_id: u32,
+        slot: u32,
+    },
+    RuntimeLoopVariableDerivative {
+        loop_id: u32,
+        slot: u32,
+        lane: DerivativeLane,
+    },
+    RuntimeLoopResult {
+        loop_id: u32,
+        slot: u32,
+    },
+    RuntimeLoopResultDerivative {
+        loop_id: u32,
+        slot: u32,
+        lane: DerivativeLane,
+    },
     Unary {
         op: OptUnaryOp,
         input: ValueId,
@@ -182,6 +200,29 @@ pub struct OptValue {
     pub derivatives: Vec<OptDerivative>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OptRuntimeLoop {
+    pub loop_id: u32,
+    pub variables: Vec<OptRuntimeLoopVariable>,
+    pub condition: ValueId,
+    pub assignments: Vec<OptRuntimeLoopAssignment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OptRuntimeLoopVariable {
+    pub source: VariableId,
+    pub value_type: OptValueType,
+    pub initial: ValueId,
+    pub variable: ValueId,
+    pub result: ValueId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OptRuntimeLoopAssignment {
+    pub slot: u32,
+    pub value: ValueId,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OptOp {
     ComputeValue { value: ValueId },
@@ -204,6 +245,7 @@ pub struct OptModel {
     pub branch_unknown_count: u32,
     pub equation_count: u32,
     pub values: Vec<OptValue>,
+    pub runtime_loops: Vec<OptRuntimeLoop>,
     pub schedules: Vec<OptSchedule>,
 }
 
@@ -236,7 +278,7 @@ impl OptModel {
             equation_values.push(value);
         }
         builder.add_sparse_derivatives();
-        let values = builder.finish(&mut equation_values);
+        let (values, runtime_loops) = builder.finish(&mut equation_values);
 
         let mut schedules = Vec::new();
         for invalidation in [
@@ -280,6 +322,7 @@ impl OptModel {
             equation_count: u32::try_from(mir.equations.len())
                 .expect("MIR equation count exceeds u32::MAX"),
             values,
+            runtime_loops,
             schedules,
         };
 
@@ -298,6 +341,7 @@ impl OptModel {
 
         validate_dense_value_ids(&mut diagnostics, &self.values);
         validate_values(&mut diagnostics, self);
+        validate_runtime_loops(&mut diagnostics, self);
         validate_dense_schedule_ids(&mut diagnostics, &self.schedules);
         validate_schedules(
             &mut diagnostics,
@@ -330,6 +374,7 @@ struct ScalarGraphBuilder<'a> {
     branch_current_values: HashMap<String, ValueId>,
     branch_flow_context: Option<BranchUnknownId>,
     conditional_path_stack: Vec<ConditionalPathPredicate>,
+    runtime_loops: Vec<OptRuntimeLoop>,
     next_loop_id: u32,
 }
 
@@ -375,6 +420,24 @@ enum OptValueKey {
         count: ValueId,
         initial: ValueId,
         term: ValueId,
+    },
+    RuntimeLoopVariable {
+        loop_id: u32,
+        slot: u32,
+    },
+    RuntimeLoopVariableDerivative {
+        loop_id: u32,
+        slot: u32,
+        lane: DerivativeLane,
+    },
+    RuntimeLoopResult {
+        loop_id: u32,
+        slot: u32,
+    },
+    RuntimeLoopResultDerivative {
+        loop_id: u32,
+        slot: u32,
+        lane: DerivativeLane,
     },
     Unary {
         op: OptUnaryOp,
@@ -436,6 +499,32 @@ impl OptValueKey {
                 initial: *initial,
                 term: *term,
             },
+            OptValueKind::RuntimeLoopVariable { loop_id, slot } => Self::RuntimeLoopVariable {
+                loop_id: *loop_id,
+                slot: *slot,
+            },
+            OptValueKind::RuntimeLoopVariableDerivative {
+                loop_id,
+                slot,
+                lane,
+            } => Self::RuntimeLoopVariableDerivative {
+                loop_id: *loop_id,
+                slot: *slot,
+                lane: *lane,
+            },
+            OptValueKind::RuntimeLoopResult { loop_id, slot } => Self::RuntimeLoopResult {
+                loop_id: *loop_id,
+                slot: *slot,
+            },
+            OptValueKind::RuntimeLoopResultDerivative {
+                loop_id,
+                slot,
+                lane,
+            } => Self::RuntimeLoopResultDerivative {
+                loop_id: *loop_id,
+                slot: *slot,
+                lane: *lane,
+            },
             OptValueKind::Unary { op, input } => Self::Unary {
                 op: *op,
                 input: *input,
@@ -477,13 +566,17 @@ impl<'a> ScalarGraphBuilder<'a> {
             branch_current_values: HashMap::new(),
             branch_flow_context: None,
             conditional_path_stack: Vec::new(),
+            runtime_loops: Vec::new(),
             next_loop_id: 0,
         }
     }
 
-    fn finish(mut self, equation_values: &mut [Option<ValueId>]) -> Vec<OptValue> {
+    fn finish(
+        mut self,
+        equation_values: &mut [Option<ValueId>],
+    ) -> (Vec<OptValue>, Vec<OptRuntimeLoop>) {
         self.eliminate_dead_values(equation_values);
-        self.values
+        (self.values, self.runtime_loops)
     }
 
     fn eliminate_dead_values(&mut self, equation_values: &mut [Option<ValueId>]) {
@@ -543,6 +636,23 @@ impl<'a> ScalarGraphBuilder<'a> {
             *root = remap_value_id(*root, &remap);
         }
 
+        let live_runtime_loops: HashSet<_> = self
+            .values
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| live[*index])
+            .filter_map(|(_, value)| match value.kind {
+                OptValueKind::RuntimeLoopResult { loop_id, .. }
+                | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => Some(loop_id),
+                _ => None,
+            })
+            .collect();
+        self.runtime_loops = self
+            .runtime_loops
+            .iter()
+            .filter(|runtime_loop| live_runtime_loops.contains(&runtime_loop.loop_id))
+            .map(|runtime_loop| remap_runtime_loop(runtime_loop, &remap))
+            .collect();
         self.values = compacted;
     }
 
@@ -569,7 +679,12 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::BranchFlow { .. }
             | OptValueKind::BranchUnknownFlow { .. }
             | OptValueKind::LoopIndex { .. }
+            | OptValueKind::RuntimeLoopVariable { .. }
+            | OptValueKind::RuntimeLoopVariableDerivative { .. }
             | OptValueKind::EquationValue { .. } => {}
+            OptValueKind::RuntimeLoopResult { loop_id, .. } => {
+                self.mark_runtime_loop_live(loop_id, live);
+            }
             OptValueKind::CountedSum {
                 count,
                 initial,
@@ -579,6 +694,9 @@ impl<'a> ScalarGraphBuilder<'a> {
                 self.mark_live_value(count, live);
                 self.mark_live_value(initial, live);
                 self.mark_live_value(term, live);
+            }
+            OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => {
+                self.mark_runtime_loop_live(loop_id, live);
             }
             OptValueKind::Ddx {
                 value,
@@ -603,6 +721,28 @@ impl<'a> ScalarGraphBuilder<'a> {
                 self.mark_live_value(condition, live);
                 self.mark_live_value(then_value, live);
                 self.mark_live_value(else_value, live);
+            }
+        }
+    }
+
+    fn mark_runtime_loop_live(&self, loop_id: u32, live: &mut [bool]) {
+        let Some(runtime_loop) = self
+            .runtime_loops
+            .iter()
+            .find(|runtime_loop| runtime_loop.loop_id == loop_id)
+        else {
+            return;
+        };
+        for variable in &runtime_loop.variables {
+            self.mark_live_value(variable.initial, live);
+            self.mark_live_value(variable.variable, live);
+            self.mark_live_value(variable.result, live);
+        }
+        self.mark_live_value(runtime_loop.condition, live);
+        for assignment in &runtime_loop.assignments {
+            self.mark_live_value(assignment.value, live);
+            for derivative in &self.values[usize::from(assignment.value)].derivatives {
+                self.mark_live_value(derivative.value, live);
             }
         }
     }
@@ -677,6 +817,9 @@ impl<'a> ScalarGraphBuilder<'a> {
         if self.lower_bounded_guarded_loop(loop_statement) {
             return;
         }
+        if self.lower_runtime_bounded_guarded_loop(loop_statement) {
+            return;
+        }
 
         let mut iterations = 0;
         loop {
@@ -732,6 +875,160 @@ impl<'a> ScalarGraphBuilder<'a> {
             self.conditional_path_stack = original_conditional_path_stack;
             false
         }
+    }
+
+    fn lower_runtime_bounded_guarded_loop(&mut self, loop_statement: &HirLoop) -> bool {
+        let original_values = self.values.clone();
+        let original_value_keys = self.value_keys.clone();
+        let original_expression_values = self.expression_values.clone();
+        let original_variable_values = self.variable_values.clone();
+        let original_variable_assignment_exprs = self.variable_assignment_exprs.clone();
+        let original_variable_assignment_history = self.variable_assignment_history.clone();
+        let original_guarded_path_assignment_exprs = self.guarded_path_assignment_exprs.clone();
+        let original_conditional_path_stack = self.conditional_path_stack.clone();
+        let original_runtime_loops = self.runtime_loops.clone();
+        let original_next_loop_id = self.next_loop_id;
+
+        let matched = self.try_lower_runtime_bounded_guarded_loop(loop_statement);
+        if matched {
+            self.expression_values.clear();
+            true
+        } else {
+            self.values = original_values;
+            self.value_keys = original_value_keys;
+            self.expression_values = original_expression_values;
+            self.variable_values = original_variable_values;
+            self.variable_assignment_exprs = original_variable_assignment_exprs;
+            self.variable_assignment_history = original_variable_assignment_history;
+            self.guarded_path_assignment_exprs = original_guarded_path_assignment_exprs;
+            self.conditional_path_stack = original_conditional_path_stack;
+            self.runtime_loops = original_runtime_loops;
+            self.next_loop_id = original_next_loop_id;
+            false
+        }
+    }
+
+    fn try_lower_runtime_bounded_guarded_loop(&mut self, loop_statement: &HirLoop) -> bool {
+        let Some((counter, _iteration_count)) =
+            self.bounded_guarded_loop_iteration_count(loop_statement.condition.id)
+        else {
+            return false;
+        };
+        if loop_statement
+            .body
+            .iter()
+            .any(|statement| !matches!(statement, HirStatement::Assignment(_)))
+        {
+            return false;
+        }
+        if !loop_statement.body.iter().any(|statement| {
+            matches!(
+                statement,
+                HirStatement::Assignment(assignment)
+                    if self.is_counter_increment_assignment(assignment, counter)
+            )
+        }) {
+            return false;
+        }
+
+        let Some(assigned_variables) = self.ordered_loop_assignment_targets(&loop_statement.body)
+        else {
+            return false;
+        };
+        let Some(loop_id) = self.allocate_loop_id() else {
+            return false;
+        };
+
+        let mut slot_by_variable = HashMap::new();
+        let mut variables = Vec::with_capacity(assigned_variables.len());
+        for variable in &assigned_variables {
+            let Some(initial) = self.current_variable_value(*variable) else {
+                return false;
+            };
+            let Some(value_type) = self.variable_opt_value_type(*variable) else {
+                return false;
+            };
+            let slot = u32::try_from(variables.len()).ok();
+            let Some(slot) = slot else {
+                return false;
+            };
+            let variable_value = self.push_value(
+                value_type,
+                OptValueKind::RuntimeLoopVariable { loop_id, slot },
+            );
+            slot_by_variable.insert(*variable, slot);
+            self.variable_values.insert(*variable, Some(variable_value));
+            variables.push(OptRuntimeLoopVariable {
+                source: *variable,
+                value_type,
+                initial,
+                variable: variable_value,
+                result: ValueId::from(0),
+            });
+        }
+
+        self.expression_values.clear();
+        let Some(condition) = self.lower_expression(loop_statement.condition.id) else {
+            return false;
+        };
+
+        let mut assignments = Vec::new();
+        for statement in &loop_statement.body {
+            let HirStatement::Assignment(assignment) = statement else {
+                return false;
+            };
+            if assignment.index.is_some() || !supported_assignment_value_type(assignment.expr_type)
+            {
+                return false;
+            }
+            let Some(slot) = slot_by_variable.get(&assignment.target).copied() else {
+                return false;
+            };
+            self.variable_assignment_exprs
+                .insert(assignment.target, assignment.expr.id);
+            self.variable_assignment_history
+                .entry(assignment.target)
+                .or_default()
+                .push(assignment.expr.id);
+            self.expression_values.clear();
+            let Some(value) = self.lower_expression(assignment.expr.id) else {
+                return false;
+            };
+            self.variable_values.insert(assignment.target, Some(value));
+            assignments.push(OptRuntimeLoopAssignment { slot, value });
+        }
+
+        for (slot, variable) in variables.iter_mut().enumerate() {
+            let slot = u32::try_from(slot).expect("runtime loop slot exceeds u32::MAX");
+            variable.result = self.push_value(
+                variable.value_type,
+                OptValueKind::RuntimeLoopResult { loop_id, slot },
+            );
+        }
+        self.runtime_loops.push(OptRuntimeLoop {
+            loop_id,
+            variables,
+            condition,
+            assignments,
+        });
+        for runtime_variable in self
+            .runtime_loops
+            .last()
+            .expect("runtime loop was just pushed")
+            .variables
+            .iter()
+        {
+            self.variable_values
+                .insert(runtime_variable.source, Some(runtime_variable.result));
+            self.variable_assignment_exprs
+                .remove(&runtime_variable.source);
+            self.variable_assignment_history
+                .remove(&runtime_variable.source);
+            self.guarded_path_assignment_exprs
+                .remove(&runtime_variable.source);
+        }
+        self.expression_values.clear();
+        true
     }
 
     fn try_lower_bounded_guarded_loop(&mut self, loop_statement: &HirLoop) -> bool {
@@ -1108,6 +1405,27 @@ impl<'a> ScalarGraphBuilder<'a> {
         Some(targets)
     }
 
+    fn ordered_loop_assignment_targets(
+        &self,
+        statements: &[HirStatement],
+    ) -> Option<Vec<VariableId>> {
+        let mut seen = HashSet::new();
+        let mut targets = Vec::new();
+        for statement in statements {
+            let HirStatement::Assignment(assignment) = statement else {
+                return None;
+            };
+            if assignment.index.is_some() || !supported_assignment_value_type(assignment.expr_type)
+            {
+                return None;
+            }
+            if seen.insert(assignment.target) {
+                targets.push(assignment.target);
+            }
+        }
+        Some(targets)
+    }
+
     fn is_counter_increment_assignment(
         &self,
         assignment: &HirAssignment,
@@ -1204,6 +1522,19 @@ impl<'a> ScalarGraphBuilder<'a> {
             .variables
             .get(usize::from(variable))
             .map(|variable| variable.value_type)
+    }
+
+    fn variable_opt_value_type(&self, variable: VariableId) -> Option<OptValueType> {
+        match self.variable_value_type(variable)? {
+            CanonicalValueType::Boolean => Some(OptValueType::Boolean),
+            CanonicalValueType::Real
+            | CanonicalValueType::Integer
+            | CanonicalValueType::NatureAccess => Some(OptValueType::Real),
+            CanonicalValueType::String
+            | CanonicalValueType::Void
+            | CanonicalValueType::Unknown
+            | CanonicalValueType::Error => None,
+        }
     }
 
     fn variable_identifier(&self, expr: ExprId) -> Option<VariableId> {
@@ -1758,7 +2089,43 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::Ddx { .. }
             | OptValueKind::DdtScale
             | OptValueKind::LoopIndex { .. }
+            | OptValueKind::RuntimeLoopVariableDerivative { .. }
+            | OptValueKind::RuntimeLoopResultDerivative { .. }
             | OptValueKind::EquationValue { .. } => BTreeMap::new(),
+            OptValueKind::RuntimeLoopVariable { loop_id, slot } => self
+                .all_derivative_lanes()
+                .into_iter()
+                .map(|lane| {
+                    (
+                        lane,
+                        self.push_value(
+                            OptValueType::Real,
+                            OptValueKind::RuntimeLoopVariableDerivative {
+                                loop_id,
+                                slot,
+                                lane,
+                            },
+                        ),
+                    )
+                })
+                .collect(),
+            OptValueKind::RuntimeLoopResult { loop_id, slot } => self
+                .all_derivative_lanes()
+                .into_iter()
+                .map(|lane| {
+                    (
+                        lane,
+                        self.push_value(
+                            OptValueType::Real,
+                            OptValueKind::RuntimeLoopResultDerivative {
+                                loop_id,
+                                slot,
+                                lane,
+                            },
+                        ),
+                    )
+                })
+                .collect(),
             OptValueKind::CountedSum {
                 loop_id,
                 count,
@@ -1795,6 +2162,23 @@ impl<'a> ScalarGraphBuilder<'a> {
                 else_value,
             } => self.lower_select_derivatives(condition, then_value, else_value),
         }
+    }
+
+    fn all_derivative_lanes(&self) -> Vec<DerivativeLane> {
+        let mut lanes = Vec::with_capacity(
+            self.mir
+                .nodes
+                .len()
+                .saturating_add(self.mir.branch_unknowns.len()),
+        );
+        lanes.extend(
+            (0..self.mir.nodes.len()).map(|index| DerivativeLane::node(NodeId::from(index))),
+        );
+        lanes.extend(
+            (0..self.mir.branch_unknowns.len())
+                .map(|index| DerivativeLane::branch_unknown(BranchUnknownId::from(index))),
+        );
+        lanes
     }
 
     fn lower_unary_derivatives(
@@ -3499,6 +3883,32 @@ fn remap_value_kind(kind: &OptValueKind, remap: &[Option<ValueId>]) -> OptValueK
             initial: remap_value_id(*initial, remap),
             term: remap_value_id(*term, remap),
         },
+        OptValueKind::RuntimeLoopVariable { loop_id, slot } => OptValueKind::RuntimeLoopVariable {
+            loop_id: *loop_id,
+            slot: *slot,
+        },
+        OptValueKind::RuntimeLoopVariableDerivative {
+            loop_id,
+            slot,
+            lane,
+        } => OptValueKind::RuntimeLoopVariableDerivative {
+            loop_id: *loop_id,
+            slot: *slot,
+            lane: *lane,
+        },
+        OptValueKind::RuntimeLoopResult { loop_id, slot } => OptValueKind::RuntimeLoopResult {
+            loop_id: *loop_id,
+            slot: *slot,
+        },
+        OptValueKind::RuntimeLoopResultDerivative {
+            loop_id,
+            slot,
+            lane,
+        } => OptValueKind::RuntimeLoopResultDerivative {
+            loop_id: *loop_id,
+            slot: *slot,
+            lane: *lane,
+        },
         OptValueKind::Unary { op, input } => OptValueKind::Unary {
             op: *op,
             input: remap_value_id(*input, remap),
@@ -3520,6 +3930,32 @@ fn remap_value_kind(kind: &OptValueKind, remap: &[Option<ValueId>]) -> OptValueK
         OptValueKind::EquationValue { equation } => OptValueKind::EquationValue {
             equation: *equation,
         },
+    }
+}
+
+fn remap_runtime_loop(runtime_loop: &OptRuntimeLoop, remap: &[Option<ValueId>]) -> OptRuntimeLoop {
+    OptRuntimeLoop {
+        loop_id: runtime_loop.loop_id,
+        variables: runtime_loop
+            .variables
+            .iter()
+            .map(|variable| OptRuntimeLoopVariable {
+                source: variable.source,
+                value_type: variable.value_type,
+                initial: remap_value_id(variable.initial, remap),
+                variable: remap_value_id(variable.variable, remap),
+                result: remap_value_id(variable.result, remap),
+            })
+            .collect(),
+        condition: remap_value_id(runtime_loop.condition, remap),
+        assignments: runtime_loop
+            .assignments
+            .iter()
+            .map(|assignment| OptRuntimeLoopAssignment {
+                slot: assignment.slot,
+                value: remap_value_id(assignment.value, remap),
+            })
+            .collect(),
     }
 }
 
@@ -3549,7 +3985,11 @@ fn validate_value_kind(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel, valu
         | OptValueKind::Multiplicity
         | OptValueKind::Time
         | OptValueKind::Analysis { .. }
-        | OptValueKind::LoopIndex { .. } => {}
+        | OptValueKind::LoopIndex { .. }
+        | OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
+        | OptValueKind::RuntimeLoopResult { .. }
+        | OptValueKind::RuntimeLoopResultDerivative { .. } => {}
         OptValueKind::Ddx {
             value: input,
             pos_node,
@@ -3702,6 +4142,148 @@ fn validate_value_kind(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel, valu
                 ));
             }
         }
+    }
+}
+
+fn validate_runtime_loops(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel) {
+    let mut loop_ids = HashSet::new();
+    for runtime_loop in &opt.runtime_loops {
+        if !loop_ids.insert(runtime_loop.loop_id) {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::OptValidation,
+                format!("OptIR duplicate runtime loop id {}", runtime_loop.loop_id),
+            ));
+        }
+        if runtime_loop.variables.is_empty() {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::OptValidation,
+                format!(
+                    "OptIR runtime loop {} must have at least one variable",
+                    runtime_loop.loop_id
+                ),
+            ));
+        }
+        validate_runtime_loop_value_reference(
+            diagnostics,
+            opt.values.len(),
+            runtime_loop.loop_id,
+            runtime_loop.condition,
+            "condition",
+        );
+        for (slot, variable) in runtime_loop.variables.iter().enumerate() {
+            let expected_slot =
+                u32::try_from(slot).expect("OptIR runtime loop slot exceeds u32::MAX");
+            validate_runtime_loop_value_reference(
+                diagnostics,
+                opt.values.len(),
+                runtime_loop.loop_id,
+                variable.initial,
+                "initial",
+            );
+            validate_runtime_loop_value_reference(
+                diagnostics,
+                opt.values.len(),
+                runtime_loop.loop_id,
+                variable.variable,
+                "variable",
+            );
+            validate_runtime_loop_value_reference(
+                diagnostics,
+                opt.values.len(),
+                runtime_loop.loop_id,
+                variable.result,
+                "result",
+            );
+            validate_runtime_loop_slot_value(
+                diagnostics,
+                opt,
+                runtime_loop.loop_id,
+                expected_slot,
+                variable.variable,
+                "variable",
+            );
+            validate_runtime_loop_slot_value(
+                diagnostics,
+                opt,
+                runtime_loop.loop_id,
+                expected_slot,
+                variable.result,
+                "result",
+            );
+        }
+        for assignment in &runtime_loop.assignments {
+            if usize::try_from(assignment.slot)
+                .ok()
+                .is_none_or(|slot| slot >= runtime_loop.variables.len())
+            {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::OptValidation,
+                    format!(
+                        "OptIR runtime loop {} assignment slot {} is out of range for {} variables",
+                        runtime_loop.loop_id,
+                        assignment.slot,
+                        runtime_loop.variables.len()
+                    ),
+                ));
+            }
+            validate_runtime_loop_value_reference(
+                diagnostics,
+                opt.values.len(),
+                runtime_loop.loop_id,
+                assignment.value,
+                "assignment value",
+            );
+        }
+    }
+}
+
+fn validate_runtime_loop_value_reference(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    value_count: usize,
+    loop_id: u32,
+    value: ValueId,
+    label: &str,
+) {
+    if usize::from(value) >= value_count {
+        diagnostics.push(IrDiagnostic::global_error(
+            CompilerPhase::OptValidation,
+            format!(
+                "OptIR runtime loop {loop_id} {label} value {value} is out of range for {value_count} values"
+            ),
+        ));
+    }
+}
+
+fn validate_runtime_loop_slot_value(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    opt: &OptModel,
+    loop_id: u32,
+    expected_slot: u32,
+    value: ValueId,
+    label: &str,
+) {
+    let Some(value) = opt.values.get(usize::from(value)) else {
+        return;
+    };
+    let valid = match value.kind {
+        OptValueKind::RuntimeLoopVariable {
+            loop_id: actual_loop,
+            slot,
+        }
+        | OptValueKind::RuntimeLoopResult {
+            loop_id: actual_loop,
+            slot,
+        } => actual_loop == loop_id && slot == expected_slot,
+        _ => false,
+    };
+    if !valid {
+        diagnostics.push(IrDiagnostic::global_error(
+            CompilerPhase::OptValidation,
+            format!(
+                "OptIR runtime loop {loop_id} {label} value {} must reference slot {expected_slot}",
+                value.id
+            ),
+        ));
     }
 }
 
@@ -3885,7 +4467,11 @@ fn value_invalidation(
         | OptValueKind::Analysis { .. }
         | OptValueKind::Ddx { .. }
         | OptValueKind::Ddt { .. }
-        | OptValueKind::DdtScale => InvalidationClass::NewtonIteration,
+        | OptValueKind::DdtScale
+        | OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
+        | OptValueKind::RuntimeLoopResult { .. }
+        | OptValueKind::RuntimeLoopResultDerivative { .. } => InvalidationClass::NewtonIteration,
         OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
@@ -3949,6 +4535,10 @@ fn value_depends_on_parameter(
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::LoopIndex { .. }
+        | OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
+        | OptValueKind::RuntimeLoopResult { .. }
+        | OptValueKind::RuntimeLoopResultDerivative { .. }
         | OptValueKind::EquationValue { .. } => false,
         OptValueKind::Unary { input, .. } => value_depends_on_parameter(values, input, memo),
         OptValueKind::Binary { left, right, .. } => {
@@ -4005,6 +4595,10 @@ fn value_depends_on_temperature(
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::LoopIndex { .. }
+        | OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
+        | OptValueKind::RuntimeLoopResult { .. }
+        | OptValueKind::RuntimeLoopResultDerivative { .. }
         | OptValueKind::EquationValue { .. } => false,
         OptValueKind::Unary { input, .. } => value_depends_on_temperature(values, input, memo),
         OptValueKind::Binary { left, right, .. } => {
@@ -4046,7 +4640,9 @@ fn value_depends_on_loop_index(
     }
 
     let depends = match values[index].kind {
-        OptValueKind::LoopIndex { .. } => true,
+        OptValueKind::LoopIndex { .. }
+        | OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. } => true,
         OptValueKind::RealConstant(_)
         | OptValueKind::BooleanConstant(_)
         | OptValueKind::Parameter { .. }
@@ -4062,6 +4658,8 @@ fn value_depends_on_loop_index(
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
+        | OptValueKind::RuntimeLoopResult { .. }
+        | OptValueKind::RuntimeLoopResultDerivative { .. }
         | OptValueKind::EquationValue { .. } => false,
         OptValueKind::Unary { input, .. } => value_depends_on_loop_index(values, input, memo),
         OptValueKind::Binary { left, right, .. } => {

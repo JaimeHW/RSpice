@@ -109,6 +109,8 @@ struct ValueEmitContext<'a> {
     ddt_slots: Option<&'a DdtSlots>,
     ddt_mode: DdtEmitMode,
     loop_index_exprs: HashMap<u32, String>,
+    runtime_loop_values: HashMap<(u32, u32), String>,
+    runtime_loop_derivatives: HashMap<(u32, u32, DerivativeLane), String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,6 +330,8 @@ fn generate_stamp_file(
         ddt_slots: Some(ddt_slots),
         ddt_mode: DdtEmitMode::Transient,
         loop_index_exprs: HashMap::new(),
+        runtime_loop_values: HashMap::new(),
+        runtime_loop_derivatives: HashMap::new(),
     };
     emit_live_values(
         artifact,
@@ -388,6 +392,8 @@ fn generate_stamp_file(
             ddt_slots: Some(ddt_slots),
             ddt_mode: DdtEmitMode::ReactiveLinearized,
             loop_index_exprs: HashMap::new(),
+            runtime_loop_values: HashMap::new(),
+            runtime_loop_derivatives: HashMap::new(),
         };
         emit_live_values(
             artifact,
@@ -519,6 +525,8 @@ pub(super) fn scalar_state_extensions(
         ddt_slots: None,
         ddt_mode: DdtEmitMode::Transient,
         loop_index_exprs: HashMap::new(),
+        runtime_loop_values: HashMap::new(),
+        runtime_loop_derivatives: HashMap::new(),
     };
     let temperature_context = ValueEmitContext {
         cached_values: &static_cache.set,
@@ -531,6 +539,8 @@ pub(super) fn scalar_state_extensions(
         ddt_slots: None,
         ddt_mode: DdtEmitMode::Transient,
         loop_index_exprs: HashMap::new(),
+        runtime_loop_values: HashMap::new(),
+        runtime_loop_derivatives: HashMap::new(),
     };
     let mut methods = String::new();
 
@@ -817,6 +827,8 @@ pub(super) fn emit_static_current_values(
         ddt_slots: None,
         ddt_mode: DdtEmitMode::Transient,
         loop_index_exprs: HashMap::new(),
+        runtime_loop_values: HashMap::new(),
+        runtime_loop_derivatives: HashMap::new(),
     };
     emit_live_values(
         artifact,
@@ -838,6 +850,7 @@ fn emit_live_values(
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     let values = ordered_live_values(artifact, live, static_cache)?;
+    let mut emitted_runtime_loops = HashSet::new();
     for value_id in values {
         if context.inline_values.contains(&value_id) {
             continue;
@@ -847,6 +860,19 @@ fn emit_live_values(
             .values
             .get(usize::from(value_id))
             .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
+        if let Some(loop_id) = runtime_loop_result_id(&value.kind) {
+            if emitted_runtime_loops.insert(loop_id) {
+                emit_runtime_loop(artifact, parameter_fields, loop_id, live, context, out)?;
+            }
+            continue;
+        }
+        if matches!(
+            value.kind,
+            OptValueKind::RuntimeLoopVariable { .. }
+                | OptValueKind::RuntimeLoopVariableDerivative { .. }
+        ) {
+            continue;
+        }
         let expr = emit_value_expr(artifact, parameter_fields, value, context)?;
         out.push_str(&format!(
             "        let {}: {} = {};\n",
@@ -2245,6 +2271,12 @@ fn emit_value_expr(
             *term,
             context,
         )?,
+        OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
+        | OptValueKind::RuntimeLoopResult { .. }
+        | OptValueKind::RuntimeLoopResultDerivative { .. } => {
+            value_ref(artifact, parameter_fields, value.id, context)?
+        }
         OptValueKind::Unary { op, input } => emit_unary_expr(
             *op,
             value_ref(artifact, parameter_fields, *input, context)?,
@@ -2316,6 +2348,8 @@ fn emit_counted_sum_expr(
         ddt_slots: context.ddt_slots,
         ddt_mode: context.ddt_mode,
         loop_index_exprs: context.loop_index_exprs.clone(),
+        runtime_loop_values: context.runtime_loop_values.clone(),
+        runtime_loop_derivatives: context.runtime_loop_derivatives.clone(),
     };
     loop_context
         .loop_index_exprs
@@ -2366,6 +2400,249 @@ fn emit_counted_sum_expr(
     expr.push_str(&format!("            {accumulator_name}\n"));
     expr.push_str("        }");
     Ok(expr)
+}
+
+fn emit_runtime_loop(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    loop_id: u32,
+    live: &HashSet<ValueId>,
+    context: &ValueEmitContext<'_>,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let runtime_loop = artifact
+        .opt
+        .runtime_loops
+        .iter()
+        .find(|runtime_loop| runtime_loop.loop_id == loop_id)
+        .ok_or_else(|| unsupported(artifact, format!("missing runtime loop {loop_id}")))?;
+    let derivative_lanes = runtime_loop_live_derivative_lanes(artifact, loop_id, live);
+
+    let mut loop_context = ValueEmitContext {
+        cached_values: context.cached_values,
+        inline_values: context.inline_values,
+        use_cached_fields: context.use_cached_fields,
+        inline_uncached_constants: context.inline_uncached_constants,
+        limexp_max_expr: context.limexp_max_expr.clone(),
+        temperature_expr: context.temperature_expr.clone(),
+        thermal_voltage_expr: context.thermal_voltage_expr.clone(),
+        ddt_slots: context.ddt_slots,
+        ddt_mode: context.ddt_mode,
+        loop_index_exprs: context.loop_index_exprs.clone(),
+        runtime_loop_values: context.runtime_loop_values.clone(),
+        runtime_loop_derivatives: context.runtime_loop_derivatives.clone(),
+    };
+
+    out.push_str("        {\n");
+    for (slot, variable) in runtime_loop.variables.iter().enumerate() {
+        let slot = u32::try_from(slot).expect("runtime loop slot exceeds u32::MAX");
+        let local = runtime_loop_value_name(loop_id, slot);
+        let initial = value_ref(artifact, parameter_fields, variable.initial, context)?;
+        out.push_str(&format!(
+            "            let mut {local}: {} = {initial};\n",
+            rust_type(variable.value_type)
+        ));
+        loop_context
+            .runtime_loop_values
+            .insert((loop_id, slot), local);
+        for lane in &derivative_lanes {
+            let derivative_local = runtime_loop_derivative_name(loop_id, slot, *lane);
+            let initial_derivative = if let Some(value) =
+                derivative_value_for_lane(artifact, variable.initial, *lane)?
+            {
+                value_ref(artifact, parameter_fields, value, context)?
+            } else {
+                "0.0".to_string()
+            };
+            out.push_str(&format!(
+                "            let mut {derivative_local}: f64 = {initial_derivative};\n"
+            ));
+            loop_context
+                .runtime_loop_derivatives
+                .insert((loop_id, slot, *lane), derivative_local);
+        }
+    }
+    out.push_str(&format!(
+        "            let mut runtime_loop_{loop_id}_guard: usize = 0;\n"
+    ));
+
+    let mut condition_live = HashSet::new();
+    mark_counted_sum_term_live(
+        artifact,
+        runtime_loop.condition,
+        context.cached_values,
+        &mut condition_live,
+    )?;
+    let condition_values =
+        ordered_counted_sum_values(artifact, &condition_live, context.cached_values)?;
+    out.push_str("            while {\n");
+    for value_id in condition_values {
+        emit_runtime_loop_inner_value(
+            artifact,
+            parameter_fields,
+            value_id,
+            &loop_context,
+            "                ",
+            out,
+        )?;
+    }
+    let condition = value_ref(
+        artifact,
+        parameter_fields,
+        runtime_loop.condition,
+        &loop_context,
+    )?;
+    let condition_type = value_type(artifact, runtime_loop.condition)?;
+    out.push_str(&format!(
+        "                {}\n",
+        truth_expr(condition, condition_type)
+    ));
+    out.push_str("            } {\n");
+    out.push_str(&format!(
+        "                runtime_loop_{loop_id}_guard += 1;\n"
+    ));
+    out.push_str(&format!(
+        "                assert!(runtime_loop_{loop_id}_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, \"generated Verilog-A scalar runtime loop exceeded iteration guard\");\n"
+    ));
+
+    let mut body_live = HashSet::new();
+    for assignment in &runtime_loop.assignments {
+        mark_counted_sum_term_live(
+            artifact,
+            assignment.value,
+            context.cached_values,
+            &mut body_live,
+        )?;
+        for lane in &derivative_lanes {
+            if let Some(value) = derivative_value_for_lane(artifact, assignment.value, *lane)? {
+                mark_counted_sum_term_live(artifact, value, context.cached_values, &mut body_live)?;
+            }
+        }
+    }
+    let body_values = ordered_counted_sum_values(artifact, &body_live, context.cached_values)?;
+    for value_id in body_values {
+        emit_runtime_loop_inner_value(
+            artifact,
+            parameter_fields,
+            value_id,
+            &loop_context,
+            "                ",
+            out,
+        )?;
+    }
+    for assignment in &runtime_loop.assignments {
+        let target = runtime_loop_value_name(loop_id, assignment.slot);
+        let value = value_ref(artifact, parameter_fields, assignment.value, &loop_context)?;
+        out.push_str(&format!("                {target} = {value};\n"));
+        for lane in &derivative_lanes {
+            let target = runtime_loop_derivative_name(loop_id, assignment.slot, *lane);
+            let value = if let Some(value) =
+                derivative_value_for_lane(artifact, assignment.value, *lane)?
+            {
+                value_ref(artifact, parameter_fields, value, &loop_context)?
+            } else {
+                "0.0".to_string()
+            };
+            out.push_str(&format!("                {target} = {value};\n"));
+        }
+    }
+    out.push_str("            }\n");
+
+    for (slot, variable) in runtime_loop.variables.iter().enumerate() {
+        if live.contains(&variable.result) {
+            let slot = u32::try_from(slot).expect("runtime loop slot exceeds u32::MAX");
+            let local = runtime_loop_value_name(loop_id, slot);
+            out.push_str(&format!(
+                "            let {}: {} = {local};\n",
+                value_name(variable.result),
+                rust_type(variable.value_type)
+            ));
+        }
+    }
+    for value in &artifact.opt.values {
+        if !live.contains(&value.id) {
+            continue;
+        }
+        if let OptValueKind::RuntimeLoopResultDerivative {
+            loop_id: value_loop_id,
+            slot,
+            lane,
+        } = value.kind
+            && value_loop_id == loop_id
+        {
+            let local = runtime_loop_derivative_name(loop_id, slot, lane);
+            out.push_str(&format!(
+                "            let {}: f64 = {local};\n",
+                value_name(value.id)
+            ));
+        }
+    }
+    out.push_str("        }\n\n");
+    Ok(())
+}
+
+fn emit_runtime_loop_inner_value(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    value_id: ValueId,
+    context: &ValueEmitContext<'_>,
+    indent: &str,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let value = artifact
+        .opt
+        .values
+        .get(usize::from(value_id))
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
+    if matches!(
+        value.kind,
+        OptValueKind::RuntimeLoopVariable { .. }
+            | OptValueKind::RuntimeLoopVariableDerivative { .. }
+            | OptValueKind::RuntimeLoopResult { .. }
+            | OptValueKind::RuntimeLoopResultDerivative { .. }
+    ) {
+        return Ok(());
+    }
+    let expr = emit_value_expr(artifact, parameter_fields, value, context)?;
+    out.push_str(&format!(
+        "{indent}let {}: {} = {};\n",
+        value_name(value.id),
+        rust_type(value.value_type),
+        expr
+    ));
+    Ok(())
+}
+
+fn runtime_loop_live_derivative_lanes(
+    artifact: &CanonicalIrArtifact,
+    loop_id: u32,
+    live: &HashSet<ValueId>,
+) -> Vec<DerivativeLane> {
+    let mut lanes: Vec<_> = artifact
+        .opt
+        .values
+        .iter()
+        .filter(|value| live.contains(&value.id))
+        .filter_map(|value| match value.kind {
+            OptValueKind::RuntimeLoopResultDerivative {
+                loop_id: value_loop_id,
+                lane,
+                ..
+            } if value_loop_id == loop_id => Some(lane),
+            _ => None,
+        })
+        .collect();
+    lanes.sort();
+    lanes.dedup();
+    lanes
+}
+
+fn runtime_loop_result_id(kind: &OptValueKind) -> Option<u32> {
+    match kind {
+        OptValueKind::RuntimeLoopResult { loop_id, .. }
+        | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => Some(*loop_id),
+        _ => None,
+    }
 }
 
 fn emit_ddt_value_expr(
@@ -2706,6 +2983,51 @@ fn value_ref(
             });
     }
 
+    if let Some(kind) = artifact
+        .opt
+        .values
+        .get(usize::from(value))
+        .map(|value| &value.kind)
+    {
+        match *kind {
+            OptValueKind::RuntimeLoopVariable { loop_id, slot } => {
+                return context
+                    .runtime_loop_values
+                    .get(&(loop_id, slot))
+                    .cloned()
+                    .ok_or_else(|| {
+                        unsupported(
+                            artifact,
+                            format!("runtime loop variable {loop_id}:{slot} outside loop"),
+                        )
+                    });
+            }
+            OptValueKind::RuntimeLoopVariableDerivative {
+                loop_id,
+                slot,
+                lane,
+            } => {
+                return context
+                    .runtime_loop_derivatives
+                    .get(&(loop_id, slot, lane))
+                    .cloned()
+                    .ok_or_else(|| {
+                        unsupported(
+                            artifact,
+                            format!(
+                                "runtime loop derivative variable {loop_id}:{slot}:{lane:?} outside loop"
+                            ),
+                        )
+                    });
+            }
+            OptValueKind::RuntimeLoopResult { .. }
+            | OptValueKind::RuntimeLoopResultDerivative { .. } => {
+                return Ok(value_name(value));
+            }
+            _ => {}
+        }
+    }
+
     if context.use_cached_fields && context.cached_values.contains(&value) {
         return Ok(format!("self.{}", cache_field_name(value)));
     }
@@ -2918,6 +3240,10 @@ fn value_graph_contains_ddt(
         } => Ok(value_graph_contains_ddt(artifact, count, visited)?
             || value_graph_contains_ddt(artifact, initial, visited)?
             || value_graph_contains_ddt(artifact, term, visited)?),
+        OptValueKind::RuntimeLoopResult { loop_id, .. }
+        | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => {
+            runtime_loop_graph_contains_ddt(artifact, loop_id, visited)
+        }
         OptValueKind::RealConstant(_)
         | OptValueKind::BooleanConstant(_)
         | OptValueKind::Parameter { .. }
@@ -2932,8 +3258,37 @@ fn value_graph_contains_ddt(
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::LoopIndex { .. }
+        | OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
         | OptValueKind::EquationValue { .. } => Ok(false),
     }
+}
+
+fn runtime_loop_graph_contains_ddt(
+    artifact: &CanonicalIrArtifact,
+    loop_id: u32,
+    visited: &mut HashSet<ValueId>,
+) -> Result<bool, RustBackendError> {
+    let runtime_loop = artifact
+        .opt
+        .runtime_loops
+        .iter()
+        .find(|runtime_loop| runtime_loop.loop_id == loop_id)
+        .ok_or_else(|| unsupported(artifact, format!("missing runtime loop {loop_id}")))?;
+    for variable in &runtime_loop.variables {
+        if value_graph_contains_ddt(artifact, variable.initial, visited)? {
+            return Ok(true);
+        }
+    }
+    if value_graph_contains_ddt(artifact, runtime_loop.condition, visited)? {
+        return Ok(true);
+    }
+    for assignment in &runtime_loop.assignments {
+        if value_graph_contains_ddt(artifact, assignment.value, visited)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn equation_transient_operator(
@@ -3310,6 +3665,10 @@ fn scalar_value_dependencies(
         } => projected_ddx_derivative_values(artifact, value, pos_node, neg_node)?,
         OptValueKind::Ddt { input, .. } => vec![input],
         OptValueKind::CountedSum { count, initial, .. } => vec![count, initial],
+        OptValueKind::RuntimeLoopResult { loop_id, .. }
+        | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => {
+            runtime_loop_initial_values(artifact, loop_id)?
+        }
         OptValueKind::Unary { input, .. } => vec![input],
         OptValueKind::Binary { left, right, .. } => vec![left, right],
         OptValueKind::Select {
@@ -3331,9 +3690,28 @@ fn scalar_value_dependencies(
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::LoopIndex { .. }
+        | OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
         | OptValueKind::EquationValue { .. } => Vec::new(),
     };
     Ok(dependencies)
+}
+
+fn runtime_loop_initial_values(
+    artifact: &CanonicalIrArtifact,
+    loop_id: u32,
+) -> Result<Vec<ValueId>, RustBackendError> {
+    let runtime_loop = artifact
+        .opt
+        .runtime_loops
+        .iter()
+        .find(|runtime_loop| runtime_loop.loop_id == loop_id)
+        .ok_or_else(|| unsupported(artifact, format!("missing runtime loop {loop_id}")))?;
+    Ok(runtime_loop
+        .variables
+        .iter()
+        .map(|variable| variable.initial)
+        .collect())
 }
 
 fn scalar_value_can_inline(kind: &OptValueKind) -> bool {
@@ -3388,7 +3766,15 @@ fn mark_stamp_live_value(
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::LoopIndex { .. }
+        | OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
         | OptValueKind::EquationValue { .. } => {}
+        OptValueKind::RuntimeLoopResult { loop_id, .. }
+        | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => {
+            for initial in runtime_loop_initial_values(artifact, loop_id)? {
+                mark_stamp_live_value(artifact, initial, static_cache, live)?;
+            }
+        }
         OptValueKind::CountedSum { count, initial, .. } => {
             mark_stamp_live_value(artifact, count, static_cache, live)?;
             mark_stamp_live_value(artifact, initial, static_cache, live)?;
@@ -3457,6 +3843,10 @@ fn mark_counted_sum_term_live(
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::LoopIndex { .. }
+        | OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
+        | OptValueKind::RuntimeLoopResult { .. }
+        | OptValueKind::RuntimeLoopResultDerivative { .. }
         | OptValueKind::EquationValue { .. } => {}
         OptValueKind::Ddx {
             value: input,
@@ -3606,7 +3996,15 @@ fn visit_live_value(
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::LoopIndex { .. }
+        | OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
         | OptValueKind::EquationValue { .. } => {}
+        OptValueKind::RuntimeLoopResult { loop_id, .. }
+        | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => {
+            for initial in runtime_loop_initial_values(artifact, loop_id)? {
+                visit_live_value(artifact, initial, live, static_cache, state, ordered)?;
+            }
+        }
         OptValueKind::CountedSum { count, initial, .. } => {
             visit_live_value(artifact, count, live, static_cache, state, ordered)?;
             visit_live_value(artifact, initial, live, static_cache, state, ordered)?;
@@ -3696,6 +4094,10 @@ fn visit_counted_sum_value(
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::LoopIndex { .. }
+        | OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
+        | OptValueKind::RuntimeLoopResult { .. }
+        | OptValueKind::RuntimeLoopResultDerivative { .. }
         | OptValueKind::EquationValue { .. } => {}
         OptValueKind::Ddx {
             value: input,
@@ -3900,6 +4302,19 @@ fn default_value(value_type: OptValueType) -> &'static str {
 
 fn value_name(value: ValueId) -> String {
     format!("v{}", value.index())
+}
+
+fn runtime_loop_value_name(loop_id: u32, slot: u32) -> String {
+    format!("runtime_loop_{loop_id}_slot_{slot}")
+}
+
+fn runtime_loop_derivative_name(loop_id: u32, slot: u32, lane: DerivativeLane) -> String {
+    match lane.kind {
+        DerivativeLaneKind::Node => format!("runtime_loop_{loop_id}_slot_{slot}_dn{}", lane.index),
+        DerivativeLaneKind::BranchUnknown => {
+            format!("runtime_loop_{loop_id}_slot_{slot}_db{}", lane.index)
+        }
+    }
 }
 
 fn cache_field_name(value: ValueId) -> String {

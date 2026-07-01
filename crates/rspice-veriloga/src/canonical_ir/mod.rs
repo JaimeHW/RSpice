@@ -36,7 +36,8 @@ pub use mir::{
 };
 pub use opt::{
     DerivativeLane, DerivativeLaneKind, InvalidationClass, OptBinaryOp, OptDerivative, OptModel,
-    OptOp, OptSchedule, OptUnaryOp, OptValue, OptValueKind, OptValueType,
+    OptOp, OptRuntimeLoop, OptRuntimeLoopAssignment, OptRuntimeLoopVariable, OptSchedule,
+    OptUnaryOp, OptValue, OptValueKind, OptValueType,
 };
 pub use opt_eval::{
     OptEvalError, OptEvalInputs, OptEvalSnapshot, OptEvalValue, OptEvaluatedDerivative,

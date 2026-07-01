@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
@@ -99,6 +99,10 @@ pub enum OptEvalError {
     },
     #[error("OptIR equation value {equation} is not evaluable by the scalar reference evaluator")]
     UnsupportedEquationValue { equation: EquationId },
+    #[error("OptIR runtime loop {loop_id} is missing")]
+    MissingRuntimeLoop { loop_id: u32 },
+    #[error("OptIR runtime loop {loop_id} exceeded iteration limit")]
+    RuntimeLoopLimit { loop_id: u32 },
     #[error("OptIR value {value} has a cyclic scalar evaluation dependency")]
     CyclicValue { value: ValueId },
 }
@@ -155,6 +159,8 @@ struct OptEvaluator<'a> {
     values: Vec<Option<OptEvalValue>>,
     visiting: Vec<bool>,
     loop_indices: HashMap<u32, f64>,
+    runtime_loop_values: HashMap<(u32, u32), OptEvalValue>,
+    runtime_loop_derivatives: HashMap<(u32, u32, DerivativeLane), f64>,
 }
 
 impl<'a> OptEvaluator<'a> {
@@ -165,6 +171,8 @@ impl<'a> OptEvaluator<'a> {
             values: vec![None; model.values.len()],
             visiting: vec![false; model.values.len()],
             loop_indices: HashMap::new(),
+            runtime_loop_values: HashMap::new(),
+            runtime_loop_derivatives: HashMap::new(),
         }
     }
 
@@ -244,6 +252,27 @@ impl<'a> OptEvaluator<'a> {
                 initial,
                 term,
             } => self.evaluate_counted_sum(*loop_id, *count, *initial, *term),
+            OptValueKind::RuntimeLoopVariable { loop_id, slot } => self
+                .runtime_loop_values
+                .get(&(*loop_id, *slot))
+                .copied()
+                .ok_or(OptEvalError::MissingRuntimeLoop { loop_id: *loop_id }),
+            OptValueKind::RuntimeLoopVariableDerivative {
+                loop_id,
+                slot,
+                lane,
+            } => Ok(OptEvalValue::Real(
+                self.runtime_loop_derivatives
+                    .get(&(*loop_id, *slot, *lane))
+                    .copied()
+                    .unwrap_or(0.0),
+            )),
+            OptValueKind::RuntimeLoopResult { loop_id, .. }
+            | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => {
+                self.evaluate_runtime_loop(*loop_id)?;
+                self.values[usize::from(value)]
+                    .ok_or(OptEvalError::MissingRuntimeLoop { loop_id: *loop_id })
+            }
             OptValueKind::Unary { op, input } => self.evaluate_unary(value, *op, *input),
             OptValueKind::Binary { op, left, right } => {
                 self.evaluate_binary(value, *op, *left, *right)
@@ -297,6 +326,137 @@ impl<'a> OptEvaluator<'a> {
         Ok(OptEvalValue::Real(accumulator))
     }
 
+    fn evaluate_runtime_loop(&mut self, loop_id: u32) -> Result<(), OptEvalError> {
+        let runtime_loop = self
+            .model
+            .runtime_loops
+            .iter()
+            .find(|runtime_loop| runtime_loop.loop_id == loop_id)
+            .cloned()
+            .ok_or(OptEvalError::MissingRuntimeLoop { loop_id })?;
+        if runtime_loop
+            .variables
+            .iter()
+            .all(|variable| self.values[usize::from(variable.result)].is_some())
+        {
+            return Ok(());
+        }
+
+        let previous_values = self.runtime_loop_values.clone();
+        let previous_derivatives = self.runtime_loop_derivatives.clone();
+        let derivative_lanes = self.runtime_loop_derivative_lanes(loop_id);
+
+        let mut values = Vec::with_capacity(runtime_loop.variables.len());
+        let mut derivatives = Vec::with_capacity(runtime_loop.variables.len());
+        for variable in &runtime_loop.variables {
+            values.push(self.value_at(variable.initial)?);
+            let mut derivative_values = HashMap::new();
+            for lane in &derivative_lanes {
+                derivative_values
+                    .insert(*lane, self.derivative_real_value(variable.initial, *lane)?);
+            }
+            derivatives.push(derivative_values);
+        }
+        self.install_runtime_loop_state(loop_id, &values, &derivatives);
+
+        let mut guard = 0usize;
+        while self.truth_value(runtime_loop.condition)? {
+            guard += 1;
+            if guard > 1_000_000 {
+                self.runtime_loop_values = previous_values;
+                self.runtime_loop_derivatives = previous_derivatives;
+                return Err(OptEvalError::RuntimeLoopLimit { loop_id });
+            }
+
+            let mut next_values = Vec::with_capacity(runtime_loop.assignments.len());
+            let mut next_derivatives = Vec::with_capacity(runtime_loop.assignments.len());
+            for assignment in &runtime_loop.assignments {
+                self.clear_loop_dependent_values();
+                let value = self.value_at(assignment.value)?;
+                let mut derivative_values = HashMap::new();
+                for lane in &derivative_lanes {
+                    derivative_values
+                        .insert(*lane, self.derivative_real_value(assignment.value, *lane)?);
+                }
+                next_values.push((assignment.slot, value));
+                next_derivatives.push((assignment.slot, derivative_values));
+            }
+
+            for (slot, value) in next_values {
+                if let Some(target) = values.get_mut(slot as usize) {
+                    *target = value;
+                }
+            }
+            for (slot, derivative_values) in next_derivatives {
+                if let Some(target) = derivatives.get_mut(slot as usize) {
+                    *target = derivative_values;
+                }
+            }
+            self.install_runtime_loop_state(loop_id, &values, &derivatives);
+            self.clear_loop_dependent_values();
+        }
+
+        for (slot, variable) in runtime_loop.variables.iter().enumerate() {
+            self.values[usize::from(variable.result)] = values.get(slot).copied();
+        }
+        for value in &self.model.values {
+            if let OptValueKind::RuntimeLoopResultDerivative {
+                loop_id: derivative_loop,
+                slot,
+                lane,
+            } = value.kind
+                && derivative_loop == loop_id
+            {
+                let derivative = derivatives
+                    .get(slot as usize)
+                    .and_then(|values| values.get(&lane))
+                    .copied()
+                    .unwrap_or(0.0);
+                self.values[usize::from(value.id)] = Some(OptEvalValue::Real(derivative));
+            }
+        }
+
+        self.runtime_loop_values = previous_values;
+        self.runtime_loop_derivatives = previous_derivatives;
+        self.clear_loop_dependent_values();
+        Ok(())
+    }
+
+    fn runtime_loop_derivative_lanes(&self, loop_id: u32) -> Vec<DerivativeLane> {
+        let mut lanes = HashSet::new();
+        for value in &self.model.values {
+            if let OptValueKind::RuntimeLoopResultDerivative {
+                loop_id: derivative_loop,
+                lane,
+                ..
+            } = value.kind
+                && derivative_loop == loop_id
+            {
+                lanes.insert(lane);
+            }
+        }
+        lanes.into_iter().collect()
+    }
+
+    fn install_runtime_loop_state(
+        &mut self,
+        loop_id: u32,
+        values: &[OptEvalValue],
+        derivatives: &[HashMap<DerivativeLane, f64>],
+    ) {
+        for (slot, value) in values.iter().copied().enumerate() {
+            let slot = u32::try_from(slot).expect("runtime loop slot exceeds u32::MAX");
+            self.runtime_loop_values.insert((loop_id, slot), value);
+        }
+        for (slot, derivative_values) in derivatives.iter().enumerate() {
+            let slot = u32::try_from(slot).expect("runtime loop slot exceeds u32::MAX");
+            for (lane, value) in derivative_values {
+                self.runtime_loop_derivatives
+                    .insert((loop_id, slot, *lane), *value);
+            }
+        }
+    }
+
     fn clear_loop_dependent_values(&mut self) {
         let mut memo = vec![None; self.model.values.len()];
         for value in &self.model.values {
@@ -312,7 +472,9 @@ impl<'a> OptEvaluator<'a> {
             return depends;
         }
         let depends = match self.model.values[index].kind {
-            OptValueKind::LoopIndex { .. } => true,
+            OptValueKind::LoopIndex { .. }
+            | OptValueKind::RuntimeLoopVariable { .. }
+            | OptValueKind::RuntimeLoopVariableDerivative { .. } => true,
             OptValueKind::Unary { input, .. } => self.value_depends_on_loop_index(input, memo),
             OptValueKind::Binary { left, right, .. } => {
                 self.value_depends_on_loop_index(left, memo)
@@ -353,6 +515,8 @@ impl<'a> OptEvaluator<'a> {
             | OptValueKind::NodePotential { .. }
             | OptValueKind::BranchFlow { .. }
             | OptValueKind::BranchUnknownFlow { .. }
+            | OptValueKind::RuntimeLoopResult { .. }
+            | OptValueKind::RuntimeLoopResultDerivative { .. }
             | OptValueKind::EquationValue { .. } => false,
         };
         memo[index] = Some(depends);
