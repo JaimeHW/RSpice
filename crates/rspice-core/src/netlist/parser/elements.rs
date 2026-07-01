@@ -967,6 +967,8 @@ fn parse_pspice_u_dlatch(
     let prebar = pspice_u_active_low_control_port(&pins[0], elements);
     let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
     let enable = pspice_u_required_digital_port(&pins[2], "enable", fields, line_num, elements)?;
+    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
+        .map(|timing_model| PspiceUTiming { timing_model });
     let d_offset = 3;
     let q_offset = d_offset + count;
     let qb_offset = q_offset + count;
@@ -983,7 +985,13 @@ fn parse_pspice_u_dlatch(
         let qb = pspice_u_nullable_output_port(&pins[qb_offset + index]);
         let instance_name = pspice_u_lowered_instance_name(name, count, index);
         let ports = vec![data, enable.clone(), prebar.clone(), clrbar.clone(), q, qb];
-        push_pspice_u_xspice_element(elements, instance_name, "d_dlatch", ports);
+        push_pspice_u_xspice_element_with_timing(
+            elements,
+            instance_name,
+            "d_dlatch",
+            ports,
+            pspice_u_timing.clone(),
+        );
     }
 
     Ok(())
@@ -1021,6 +1029,8 @@ fn parse_pspice_u_srlatch(
     let prebar = pspice_u_active_low_control_port(&pins[0], elements);
     let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
     let enable = pspice_u_required_digital_port(&pins[2], "enable", fields, line_num, elements)?;
+    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
+        .map(|timing_model| PspiceUTiming { timing_model });
     let s_offset = 3;
     let r_offset = s_offset + count;
     let q_offset = r_offset + count;
@@ -1053,7 +1063,13 @@ fn parse_pspice_u_srlatch(
             q,
             qb,
         ];
-        push_pspice_u_xspice_element(elements, instance_name, "d_srlatch", ports);
+        push_pspice_u_xspice_element_with_timing(
+            elements,
+            instance_name,
+            "d_srlatch",
+            ports,
+            pspice_u_timing.clone(),
+        );
     }
 
     Ok(())

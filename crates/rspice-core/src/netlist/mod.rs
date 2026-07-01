@@ -5085,6 +5085,64 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_dltch_ugff_timing_creates_xspice_model_alias() {
+        let netlist = Netlist::parse(
+            "pspice u dltch timing\n\
+             U7 DLTCH(1) $G_DPWR $G_DGND preset clear enable d q qb dly\n\
+             .model DLY UGFF (TPDQLHTY=5n TPDQHLTY=8n TPGQLHTY=3n TPPCQLHTY=2n)\n\
+             .end\n",
+        )
+        .expect("PSpice UGFF timing should create a d_dlatch model alias");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U7")
+            .expect("U7 exists");
+
+        let alias_name = match &element.kind {
+            ElementKind::Xspice {
+                model,
+                pspice_u_timing,
+                ..
+            } => {
+                assert!(pspice_u_timing.is_none());
+                model.as_str()
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        };
+
+        let alias = netlist
+            .models
+            .iter()
+            .find(|model| model.name == alias_name)
+            .expect("generated timing alias exists");
+        assert_eq!(alias.model_type, "d_dlatch");
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "data_delay" && (*value - 8.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias.params.iter().any(|(name, value)| {
+                name == "enable_delay" && (*value - 3.0e-9).abs() < 1.0e-21
+            })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "set_delay" && (*value - 2.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias.params.iter().any(|(name, value)| {
+                name == "reset_delay" && (*value - 2.0e-9).abs() < 1.0e-21
+            })
+        );
+    }
+
+    #[test]
     fn pspice_u_srff_lowers_to_srlatch_ports() {
         let netlist = Netlist::parse(
             "pspice u srff\n\
@@ -5117,6 +5175,64 @@ mod tests {
             }
             other => panic!("expected XSPICE lowering, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn pspice_u_srff_ugff_timing_creates_xspice_model_alias() {
+        let netlist = Netlist::parse(
+            "pspice u srff timing\n\
+             U8 SRFF(1) $G_DPWR $G_DGND preset clear enable s r q qb dly\n\
+             .model DLY UGFF (TPDQLHTY=6n TPGQHLTY=4n TPPCQHLTY=9n)\n\
+             .end\n",
+        )
+        .expect("PSpice UGFF timing should create a d_srlatch model alias");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U8")
+            .expect("U8 exists");
+
+        let alias_name = match &element.kind {
+            ElementKind::Xspice {
+                model,
+                pspice_u_timing,
+                ..
+            } => {
+                assert!(pspice_u_timing.is_none());
+                model.as_str()
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        };
+
+        let alias = netlist
+            .models
+            .iter()
+            .find(|model| model.name == alias_name)
+            .expect("generated timing alias exists");
+        assert_eq!(alias.model_type, "d_srlatch");
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "sr_delay" && (*value - 6.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias.params.iter().any(|(name, value)| {
+                name == "enable_delay" && (*value - 4.0e-9).abs() < 1.0e-21
+            })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "set_delay" && (*value - 9.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias.params.iter().any(|(name, value)| {
+                name == "reset_delay" && (*value - 9.0e-9).abs() < 1.0e-21
+            })
+        );
     }
 
     #[test]
