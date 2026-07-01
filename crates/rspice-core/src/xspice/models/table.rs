@@ -11,6 +11,8 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 const BOUNDARY_DERIVATIVE_RAMP_FRACTION: Value = 0.125;
 const TABLE2D_RESOURCE: &str = "xspice.table2d.data";
 const TABLE3D_RESOURCE: &str = "xspice.table3d.data";
+const TABLE2D_EVAL_RESOURCE: &str = "xspice.table2d.eval";
+const TABLE3D_EVAL_RESOURCE: &str = "xspice.table3d.eval";
 const TABLE_EVAL_SCRATCH_RESOURCE: &str = "xspice.table.eval_scratch";
 
 #[derive(Debug, Default)]
@@ -230,14 +232,14 @@ struct AxisEval {
     local_diff: Value,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct TableEval2D {
     value: Value,
     dx: Value,
     dy: Value,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct TableEval3D {
     value: Value,
     dx: Value,
@@ -266,6 +268,41 @@ struct Table3DResource {
     file: String,
     virtual_stamp: Option<data_file::DataFileStamp>,
     table: Arc<Table3DData>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Table2DEvalSignature {
+    file: String,
+    table_id: usize,
+    order: usize,
+    offset: Value,
+    gain: Value,
+    inx: Value,
+    iny: Value,
+}
+
+#[derive(Debug, Clone)]
+struct Table2DEvalResource {
+    signature: Table2DEvalSignature,
+    result: TableEval2D,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Table3DEvalSignature {
+    file: String,
+    table_id: usize,
+    order: usize,
+    offset: Value,
+    gain: Value,
+    inx: Value,
+    iny: Value,
+    inz: Value,
+}
+
+#[derive(Debug, Clone)]
+struct Table3DEvalResource {
+    signature: Table3DEvalSignature,
+    result: TableEval3D,
 }
 
 #[derive(Debug, Default)]
@@ -1249,6 +1286,69 @@ fn table_file_param<'a>(ctx: &'a CmContext, kind: TableKind) -> &'a str {
         .unwrap_or_else(|| kind.default_file())
 }
 
+fn table_arc_id<T>(table: &Arc<T>) -> usize {
+    Arc::as_ptr(table) as usize
+}
+
+fn table2d_eval_signature(
+    ctx: &CmContext,
+    file: &str,
+    table: &Arc<Table2DData>,
+    order: usize,
+    inx: Value,
+    iny: Value,
+) -> Table2DEvalSignature {
+    Table2DEvalSignature {
+        file: file.to_string(),
+        table_id: table_arc_id(table),
+        order,
+        offset: ctx.param("offset"),
+        gain: ctx.param("gain"),
+        inx,
+        iny,
+    }
+}
+
+fn table3d_eval_signature(
+    ctx: &CmContext,
+    file: &str,
+    table: &Arc<Table3DData>,
+    order: usize,
+    inx: Value,
+    iny: Value,
+    inz: Value,
+) -> Table3DEvalSignature {
+    Table3DEvalSignature {
+        file: file.to_string(),
+        table_id: table_arc_id(table),
+        order,
+        offset: ctx.param("offset"),
+        gain: ctx.param("gain"),
+        inx,
+        iny,
+        inz,
+    }
+}
+
+fn scaled_table2d_eval_from_parts(
+    ctx: &CmContext,
+    table: &Table2DData,
+    order: usize,
+    inx: Value,
+    iny: Value,
+) -> TableEval2D {
+    let raw = with_table_eval_scratch(ctx, |scratch| {
+        evaluate_table2d_data_with_scratch(table, order, inx, iny, scratch)
+    })
+    .unwrap_or_else(|| evaluate_table2d_data(table, order, inx, iny));
+    let gain = ctx.param("gain");
+    TableEval2D {
+        value: ctx.param("offset") + gain * raw.value,
+        dx: gain * raw.dx,
+        dy: gain * raw.dy,
+    }
+}
+
 fn scaled_table2d_eval(ctx: &CmContext) -> CmResult<TableEval2D> {
     let file = table_file_param(ctx, TableKind::Table2D);
     let table = load_table2d_from_context(ctx, file)?;
@@ -1256,16 +1356,61 @@ fn scaled_table2d_eval(ctx: &CmContext) -> CmResult<TableEval2D> {
     validate_table2d_order(&table, order)?;
     let inx = ctx.input("inx");
     let iny = ctx.input("iny");
+    let signature = table2d_eval_signature(ctx, file, &table, order, inx, iny);
+    if let Some(resource) = ctx.resource::<Table2DEvalResource>(TABLE2D_EVAL_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.result);
+    }
+    Ok(scaled_table2d_eval_from_parts(
+        ctx,
+        table.as_ref(),
+        order,
+        inx,
+        iny,
+    ))
+}
+
+fn scaled_table2d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval2D> {
+    let file = table_file_param(ctx, TableKind::Table2D).to_string();
+    let table = load_table2d_for_context(ctx, &file)?;
+    let order = table_order(ctx)?;
+    validate_table2d_order(&table, order)?;
+    let inx = ctx.input("inx");
+    let iny = ctx.input("iny");
+    let signature = table2d_eval_signature(ctx, &file, &table, order, inx, iny);
+    if let Some(resource) = ctx.resource::<Table2DEvalResource>(TABLE2D_EVAL_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.result);
+    }
+    let result = scaled_table2d_eval_from_parts(ctx, table.as_ref(), order, inx, iny);
+    ctx.set_resource(
+        TABLE2D_EVAL_RESOURCE,
+        Arc::new(Table2DEvalResource { signature, result }),
+    );
+    Ok(result)
+}
+
+fn scaled_table3d_eval_from_parts(
+    ctx: &CmContext,
+    table: &Table3DData,
+    order: usize,
+    inx: Value,
+    iny: Value,
+    inz: Value,
+) -> TableEval3D {
     let raw = with_table_eval_scratch(ctx, |scratch| {
-        evaluate_table2d_data_with_scratch(&table, order, inx, iny, scratch)
+        evaluate_table3d_data_with_scratch(table, order, inx, iny, inz, scratch)
     })
-    .unwrap_or_else(|| evaluate_table2d_data(&table, order, inx, iny));
+    .unwrap_or_else(|| evaluate_table3d_data(table, order, inx, iny, inz));
     let gain = ctx.param("gain");
-    Ok(TableEval2D {
+    TableEval3D {
         value: ctx.param("offset") + gain * raw.value,
         dx: gain * raw.dx,
         dy: gain * raw.dy,
-    })
+        dz: gain * raw.dz,
+    }
 }
 
 fn scaled_table3d_eval(ctx: &CmContext) -> CmResult<TableEval3D> {
@@ -1276,17 +1421,42 @@ fn scaled_table3d_eval(ctx: &CmContext) -> CmResult<TableEval3D> {
     let inx = ctx.input("inx");
     let iny = ctx.input("iny");
     let inz = ctx.input("inz");
-    let raw = with_table_eval_scratch(ctx, |scratch| {
-        evaluate_table3d_data_with_scratch(&table, order, inx, iny, inz, scratch)
-    })
-    .unwrap_or_else(|| evaluate_table3d_data(&table, order, inx, iny, inz));
-    let gain = ctx.param("gain");
-    Ok(TableEval3D {
-        value: ctx.param("offset") + gain * raw.value,
-        dx: gain * raw.dx,
-        dy: gain * raw.dy,
-        dz: gain * raw.dz,
-    })
+    let signature = table3d_eval_signature(ctx, file, &table, order, inx, iny, inz);
+    if let Some(resource) = ctx.resource::<Table3DEvalResource>(TABLE3D_EVAL_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.result);
+    }
+    Ok(scaled_table3d_eval_from_parts(
+        ctx,
+        table.as_ref(),
+        order,
+        inx,
+        iny,
+        inz,
+    ))
+}
+
+fn scaled_table3d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval3D> {
+    let file = table_file_param(ctx, TableKind::Table3D).to_string();
+    let table = load_table3d_for_context(ctx, &file)?;
+    let order = table_order(ctx)?;
+    validate_table3d_order(&table, order)?;
+    let inx = ctx.input("inx");
+    let iny = ctx.input("iny");
+    let inz = ctx.input("inz");
+    let signature = table3d_eval_signature(ctx, &file, &table, order, inx, iny, inz);
+    if let Some(resource) = ctx.resource::<Table3DEvalResource>(TABLE3D_EVAL_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.result);
+    }
+    let result = scaled_table3d_eval_from_parts(ctx, table.as_ref(), order, inx, iny, inz);
+    ctx.set_resource(
+        TABLE3D_EVAL_RESOURCE,
+        Arc::new(Table3DEvalResource { signature, result }),
+    );
+    Ok(result)
 }
 
 fn table_input_port(name: &str) -> PortSpec {
@@ -1381,7 +1551,7 @@ impl CodeModel for Table2D {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let eval = scaled_table2d_eval(ctx)?;
+        let eval = scaled_table2d_eval_cached(ctx)?;
         ctx.set_output_with_partial("out", eval.value, 0.0);
         Ok(())
     }
@@ -1437,7 +1607,7 @@ impl CodeModel for Table3D {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let eval = scaled_table3d_eval(ctx)?;
+        let eval = scaled_table3d_eval_cached(ctx)?;
         ctx.set_output_with_partial("out", eval.value, 0.0);
         Ok(())
     }
@@ -1772,6 +1942,154 @@ mod tests {
         assert_eq!(fast.dx, expected.dx);
         assert_eq!(fast.dy, expected.dy);
         assert_eq!(fast.dz, expected.dz);
+    }
+
+    #[test]
+    fn table2d_eval_cache_reuses_current_result_until_signature_changes() {
+        let _guard = data_file_test_guard();
+        let file = "virtual://table2d/eval-cache";
+        let _ = data_file::unregister_data_file(file);
+        data_file::register_data_file(
+            file,
+            "\
+2
+2
+0 1
+0 1
+1 2
+3 4
+",
+        )
+        .expect("register virtual table2d data");
+
+        let mut ctx = CmContext::new();
+        ctx.set_string_param("file", file);
+        ctx.set_param("order", 2.0);
+        ctx.set_param("offset", 0.0);
+        ctx.set_param("gain", 1.0);
+        ctx.set_input_analog("inx", 0.25);
+        ctx.set_input_analog("iny", 0.5);
+        ctx.init_output("out", PortType::Current);
+
+        Table2D.init(&mut ctx).expect("table2d init");
+        let initial = scaled_table2d_eval_cached(&mut ctx).expect("table2d eval caches");
+        assert!(initial.value.is_finite());
+
+        let cached = ctx
+            .resource::<Table2DEvalResource>(TABLE2D_EVAL_RESOURCE)
+            .expect("table2d cached eval")
+            .clone();
+        let sentinel = TableEval2D {
+            value: 123.0,
+            dx: 7.0,
+            dy: 11.0,
+        };
+        ctx.set_resource(
+            TABLE2D_EVAL_RESOURCE,
+            Arc::new(Table2DEvalResource {
+                signature: cached.signature.clone(),
+                result: sentinel,
+            }),
+        );
+
+        assert_eq!(
+            scaled_table2d_eval(&ctx).expect("read-only table2d eval reuses cache"),
+            sentinel
+        );
+        assert_eq!(Table2D.ac_gain(&ctx), vec![7.0, 11.0]);
+        assert_eq!(
+            Table2D.output_input_partials(&ctx, "out"),
+            vec![("inx".to_string(), 7.0), ("iny".to_string(), 11.0)]
+        );
+
+        ctx.set_input_analog("inx", 0.75);
+        let changed_input = scaled_table2d_eval(&ctx).expect("changed input invalidates cache");
+        assert_ne!(changed_input, sentinel);
+
+        let _ = data_file::unregister_data_file(file);
+    }
+
+    #[test]
+    fn table3d_eval_cache_reuses_current_result_until_signature_changes() {
+        let _guard = data_file_test_guard();
+        let file = "virtual://table3d/eval-cache";
+        let _ = data_file::unregister_data_file(file);
+        data_file::register_data_file(
+            file,
+            "\
+2
+2
+2
+0 1
+0 1
+0 1
+1 2
+3 4
+5 6
+7 8
+",
+        )
+        .expect("register virtual table3d data");
+
+        let mut ctx = CmContext::new();
+        ctx.set_string_param("file", file);
+        ctx.set_param("order", 2.0);
+        ctx.set_param("offset", 0.0);
+        ctx.set_param("gain", 1.0);
+        ctx.set_input_analog("inx", 0.25);
+        ctx.set_input_analog("iny", 0.5);
+        ctx.set_input_analog("inz", 0.75);
+        ctx.init_output("out", PortType::Current);
+
+        Table3D.init(&mut ctx).expect("table3d init");
+        let initial = scaled_table3d_eval_cached(&mut ctx).expect("table3d eval caches");
+        assert!(initial.value.is_finite());
+
+        let cached = ctx
+            .resource::<Table3DEvalResource>(TABLE3D_EVAL_RESOURCE)
+            .expect("table3d cached eval")
+            .clone();
+        let sentinel = TableEval3D {
+            value: 456.0,
+            dx: 13.0,
+            dy: 17.0,
+            dz: 19.0,
+        };
+        ctx.set_resource(
+            TABLE3D_EVAL_RESOURCE,
+            Arc::new(Table3DEvalResource {
+                signature: cached.signature.clone(),
+                result: sentinel,
+            }),
+        );
+
+        assert_eq!(
+            scaled_table3d_eval(&ctx).expect("read-only table3d eval reuses cache"),
+            sentinel
+        );
+        assert_eq!(Table3D.ac_gain(&ctx), vec![13.0, 17.0, 19.0]);
+        assert_eq!(
+            Table3D.output_input_partials(&ctx, "out"),
+            vec![
+                ("inx".to_string(), 13.0),
+                ("iny".to_string(), 17.0),
+                ("inz".to_string(), 19.0)
+            ]
+        );
+        assert_eq!(
+            Table3D.output_input_ac_partials(&ctx, "out", 1.0e3),
+            vec![
+                ("inx".to_string(), Complex64::new(13.0, 0.0)),
+                ("iny".to_string(), Complex64::new(17.0, 0.0)),
+                ("inz".to_string(), Complex64::new(19.0, 0.0))
+            ]
+        );
+
+        ctx.set_param("gain", 2.0);
+        let changed_gain = scaled_table3d_eval(&ctx).expect("changed gain invalidates cache");
+        assert_ne!(changed_gain, sentinel);
+
+        let _ = data_file::unregister_data_file(file);
     }
 
     #[test]
