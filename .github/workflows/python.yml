@@ -16,8 +16,15 @@ on:
       - ".github/workflows/python.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  MATURIN_VERSION: "1.14.1"
+  PYTEST_VERSION: "9.1.1"
+  RUST_TOOLCHAIN: "1.94.0"
 
 jobs:
   test:
@@ -27,14 +34,15 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.9", "3.13"]
+        python: ["3.10", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.94.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: python-${{ matrix.os }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ matrix.python }}
       - name: Create and select virtualenv
@@ -55,18 +63,18 @@ jobs:
       - name: Install binding (release) and test deps
         working-directory: crates/rspice-python
         run: |
-          pip install maturin numpy pytest
-          maturin develop --release
+          pip install -c ci-constraints.txt "maturin==${{ env.MATURIN_VERSION }}" "pytest==${{ env.PYTEST_VERSION }}"
+          maturin develop --release --locked
       - name: Run binding test suite
         working-directory: crates/rspice-python
         run: python -m pytest tests/ -v --tb=short
       - name: Validate type stubs against runtime
-        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.14'
         working-directory: crates/rspice-python
         run: |
           # Pinned: stubtest's checks change across mypy majors (2.1 began
           # comparing runtime __new__ signatures). Bump deliberately.
-          pip install "mypy==2.1.0"
+          pip install -c ci-constraints.txt "mypy==2.1.0"
           python -m mypy.stubtest rspice --ignore-missing-stub --allowlist stubtest-allowlist.txt
 
   wheels:
@@ -77,21 +85,35 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.94.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: wheels-${{ matrix.os }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - name: Build abi3 wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          working-directory: crates/rspice-python
-          command: build
-          args: --release --out dist
-      - uses: actions/upload-artifact@v4
+        working-directory: crates/rspice-python
+        run: |
+          pip install -c ci-constraints.txt "maturin==${{ env.MATURIN_VERSION }}" "pytest==${{ env.PYTEST_VERSION }}"
+          maturin build --release --locked --out dist
+      - name: Install wheel and run smoke test
+        shell: bash
+        working-directory: crates/rspice-python
+        run: |
+          python -m pip install --force-reinstall -c ci-constraints.txt dist/*.whl
+          python - <<'PY'
+          import rspice
+
+          netlist = rspice.Netlist.parse("V1 in 0 1\nR1 in 0 1k\n.op\n.end\n")
+          result = rspice.Engine().run_dc_op(netlist)
+          assert abs(result.voltage("in") - 1.0) < 1e-9
+          print(f"rspice {rspice.__version__} wheel smoke passed")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wheels-${{ matrix.os }}
           path: crates/rspice-python/dist/*.whl
+          if-no-files-found: error
