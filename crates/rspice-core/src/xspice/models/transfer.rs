@@ -8,12 +8,17 @@ use crate::{
     },
 };
 use std::f64::consts::PI;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{
+    Arc, Mutex, OnceLock,
+    atomic::{AtomicUsize, Ordering},
+};
 
 const XFER_TABLE_RESOURCE: &str = "xspice.xfer.table";
 const SXFER_COEFFICIENT_RESOURCE: &str = "xspice.s_xfer.coefficients";
 const SXFER_TRANSIENT_SYSTEM_RESOURCE: &str = "xspice.s_xfer.transient_system";
 const SXFER_TRANSIENT_SCRATCH_RESOURCE: &str = "xspice.s_xfer.transient_scratch";
+const XFER_UNSET_UPPER_INDEX: usize = usize::MAX;
+const XFER_CURSOR_LINEAR_STEPS: usize = 8;
 
 #[derive(Debug, Clone)]
 struct XferPoint {
@@ -21,10 +26,11 @@ struct XferPoint {
     gain: Complex64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct XferTableData {
     points: Vec<XferPoint>,
     strictly_increasing_frequency: bool,
+    last_upper_index: AtomicUsize,
 }
 
 #[derive(Debug, Clone)]
@@ -457,6 +463,7 @@ fn xfer_table_data(points: Vec<XferPoint>) -> XferTableData {
     XferTableData {
         points,
         strictly_increasing_frequency,
+        last_upper_index: AtomicUsize::new(XFER_UNSET_UPPER_INDEX),
     }
 }
 
@@ -564,6 +571,57 @@ fn xfer_interpolated_gain(lower: &XferPoint, upper: &XferPoint, frequency: Value
     lower.gain + (upper.gain - lower.gain) * factor
 }
 
+fn xfer_interval_contains(points: &[XferPoint], upper_index: usize, frequency: Value) -> bool {
+    debug_assert!(upper_index > 0);
+    debug_assert!(upper_index < points.len());
+    points[upper_index - 1].frequency <= frequency && frequency <= points[upper_index].frequency
+}
+
+fn xfer_upper_index_binary(points: &[XferPoint], frequency: Value) -> usize {
+    points.partition_point(|point| point.frequency < frequency)
+}
+
+fn xfer_upper_index_with_cursor(table: &XferTableData, frequency: Value) -> usize {
+    let points = table.points.as_slice();
+    let point_count = points.len();
+    let mut upper_index = table.last_upper_index.load(Ordering::Relaxed);
+
+    if upper_index == XFER_UNSET_UPPER_INDEX || upper_index == 0 || upper_index >= point_count {
+        upper_index = xfer_upper_index_binary(points, frequency);
+        table.last_upper_index.store(upper_index, Ordering::Relaxed);
+        return upper_index;
+    }
+
+    if xfer_interval_contains(points, upper_index, frequency) {
+        return upper_index;
+    }
+
+    let mut steps = 0;
+    if frequency > points[upper_index].frequency {
+        while upper_index + 1 < point_count
+            && frequency > points[upper_index].frequency
+            && steps < XFER_CURSOR_LINEAR_STEPS
+        {
+            upper_index += 1;
+            steps += 1;
+        }
+    } else {
+        while upper_index > 1
+            && frequency < points[upper_index - 1].frequency
+            && steps < XFER_CURSOR_LINEAR_STEPS
+        {
+            upper_index -= 1;
+            steps += 1;
+        }
+    }
+
+    if !xfer_interval_contains(points, upper_index, frequency) {
+        upper_index = xfer_upper_index_binary(points, frequency);
+    }
+    table.last_upper_index.store(upper_index, Ordering::Relaxed);
+    upper_index
+}
+
 fn xfer_gain_at(table: &XferTableData, frequency: Value) -> Complex64 {
     let points = table.points.as_slice();
     if !table.strictly_increasing_frequency {
@@ -584,7 +642,7 @@ fn xfer_gain_at(table: &XferTableData, frequency: Value) -> Complex64 {
         return last.gain;
     }
 
-    let upper_index = points.partition_point(|point| point.frequency < frequency);
+    let upper_index = xfer_upper_index_with_cursor(table, frequency);
     xfer_interpolated_gain(&points[upper_index - 1], &points[upper_index], frequency)
 }
 
@@ -1516,14 +1574,38 @@ mod tests {
 
         assert!(table.strictly_increasing_frequency);
         assert_eq!(
+            table.last_upper_index.load(Ordering::Relaxed),
+            XFER_UNSET_UPPER_INDEX
+        );
+        assert_eq!(
             xfer_gain_at(&table, 2.0),
             Complex64::new(20.0, 0.0),
             "exact table frequencies should return the matching row"
         );
+        assert_eq!(table.last_upper_index.load(Ordering::Relaxed), 1);
         assert_eq!(
             xfer_gain_at(&table, 3.0),
             Complex64::new(30.0, 0.0),
             "monotonic tables should interpolate between the binary-search bracket"
+        );
+        assert_eq!(table.last_upper_index.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn xfer_gain_cursor_falls_back_for_large_frequency_jumps() {
+        let table = xfer_table_data(
+            (1..=24)
+                .map(|frequency| xfer_point(frequency as Value, frequency as Value))
+                .collect(),
+        );
+
+        assert_eq!(xfer_gain_at(&table, 2.5), Complex64::new(2.5, 0.0));
+        assert_eq!(table.last_upper_index.load(Ordering::Relaxed), 2);
+        assert_eq!(xfer_gain_at(&table, 22.5), Complex64::new(22.5, 0.0));
+        assert_eq!(
+            table.last_upper_index.load(Ordering::Relaxed),
+            22,
+            "large non-local jumps should land on the binary-search bracket"
         );
     }
 
