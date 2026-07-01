@@ -819,8 +819,15 @@ impl MeasureEngine {
                 ctx.set(&result.name, value);
             }
         }
-        match crate::netlist::expr::eval_expression(expression, &ctx) {
-            Ok(value) => MeasureResult::success(name, value),
+        match crate::netlist::expr::eval_expression_complex(expression, &ctx) {
+            Ok(value) if value.im == 0.0 => MeasureResult::success(name, value.re),
+            Ok(value) => MeasureResult::failed(
+                name,
+                &format!(
+                    "PARAM expression produced non-finite/non-real value {} + {}j",
+                    value.re, value.im
+                ),
+            ),
             Err(err) => MeasureResult::failed(name, &format!("PARAM expression failed: {err}")),
         }
     }

@@ -444,10 +444,7 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         )?)
     } else {
         let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
-        if resistance.is_none() && uses_xyce_default {
-            resistance = Some(1000.0);
-        }
-        if resistance.is_none() && value.is_finite() {
+        if resistance.is_none() && !uses_xyce_default && value.is_finite() {
             resistance = Some(value);
         }
         if resistance.is_none()
@@ -485,6 +482,8 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         if resistor_level != Some(2) {
             resistance = resistance.map(|value| value * resistance_multiplier);
         }
+    } else if resistance.is_none() && uses_xyce_default {
+        resistance = Some(1000.0);
     }
 
     let mut resolved = resistance.ok_or_else(|| {

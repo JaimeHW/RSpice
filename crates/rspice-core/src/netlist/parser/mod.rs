@@ -256,6 +256,14 @@ pub fn parse_netlist_with_options(
                     line: line_num,
                     message: ".DATA cannot be nested inside another .DATA block".to_string(),
                 });
+            } else if head.starts_with('.') {
+                return Err(ParseError::Syntax {
+                    line: table.opened_at_line,
+                    message: format!(
+                        ".DATA {} reached {head} before a matching .ENDDATA",
+                        table.name
+                    ),
+                });
             } else {
                 table.push_line(line_num, trimmed, &state.params)?;
             }
@@ -330,7 +338,65 @@ pub fn parse_netlist_with_options(
         });
     }
 
+    validate_resistor_model_references(&state)?;
+
     state.into_netlist(title, input, line_num)
+}
+
+fn validate_resistor_model_references(state: &ParseState) -> Result<(), ParseError> {
+    let models = state
+        .models
+        .iter()
+        .map(|model| model.name.to_ascii_uppercase())
+        .collect::<HashSet<_>>();
+    validate_resistor_model_references_in_elements(&state.elements, &models)?;
+    for subckt in &state.subcircuits {
+        validate_resistor_model_references_in_subckt(subckt, &models)?;
+    }
+    Ok(())
+}
+
+fn validate_resistor_model_references_in_subckt(
+    subckt: &SubcircuitDef,
+    models: &HashSet<String>,
+) -> Result<(), ParseError> {
+    validate_resistor_model_references_in_elements(&subckt.elements, models)?;
+    for nested in &subckt.nested_subcircuits {
+        validate_resistor_model_references_in_subckt(nested, models)?;
+    }
+    Ok(())
+}
+
+fn validate_resistor_model_references_in_elements(
+    elements: &[Element],
+    models: &HashSet<String>,
+) -> Result<(), ParseError> {
+    for element in elements {
+        let ElementKind::Resistor {
+            model: Some(model),
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            continue;
+        };
+        if instance_params.iter().any(|(param, _)| {
+            param.eq_ignore_ascii_case(crate::netlist::XYCE_DEFAULT_RESISTOR_VALUE_MARKER)
+        }) {
+            continue;
+        }
+        let key = model.to_ascii_uppercase();
+        if !models.contains(&key) {
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "Resistor '{}' references unknown model '{}'",
+                    element.name, model
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn prescan_temperature_options(lines: &[&str], state: &mut ParseState) -> Result<(), ParseError> {
