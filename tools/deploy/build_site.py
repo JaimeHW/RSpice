@@ -322,13 +322,26 @@ setTimeout(() => {
     return smoke
 
 
+def chrome_headless_args(chrome, url, width=1280, height=900):
+    return [
+        chrome,
+        "--headless=new",
+        "--no-sandbox",
+        "--enable-unsafe-webgpu",
+        "--ignore-gpu-blocklist",
+        "--enable-features=Vulkan",
+        "--use-vulkan=swiftshader",
+        "--window-size=%d,%d" % (width, height),
+        "--virtual-time-budget=20000",
+        "--dump-dom",
+        url,
+    ]
+
+
 def dump_chrome_dom(chrome, url, width=1280, height=900):
     try:
         return subprocess.run(
-            [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
-             "--enable-unsafe-webgpu", "--ignore-gpu-blocklist",
-             "--window-size=%d,%d" % (width, height),
-             "--virtual-time-budget=20000", "--dump-dom", url],
+            chrome_headless_args(chrome, url, width, height),
             capture_output=True, text=True, timeout=90).stdout
     except subprocess.TimeoutExpired as e:
         return e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")

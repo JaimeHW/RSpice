@@ -20,6 +20,16 @@ def assert_gate_fails(testcase: unittest.TestCase, func, *args) -> None:
 
 
 class BuildSiteGateTests(unittest.TestCase):
+    def test_headless_chrome_args_keep_webgpu_available(self) -> None:
+        args = build_site.chrome_headless_args("chrome", "http://127.0.0.1:8000/ide/")
+
+        self.assertNotIn("--disable-gpu", args)
+        self.assertIn("--enable-unsafe-webgpu", args)
+        self.assertIn("--ignore-gpu-blocklist", args)
+        self.assertIn("--enable-features=Vulkan", args)
+        self.assertIn("--use-vulkan=swiftshader", args)
+        self.assertIn("--dump-dom", args)
+
     def test_ide_gate_requires_startup_error_lifecycle_hooks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
