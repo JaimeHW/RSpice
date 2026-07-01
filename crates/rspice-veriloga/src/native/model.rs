@@ -1,6 +1,7 @@
 use super::runtime::ExecutableMemory;
 use super::{EvalContext, JitError, JitResult};
 use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
+use crate::vm::terminal_pair_current_endpoints;
 
 type AssignmentEntry = unsafe extern "C" fn(*const EvalContext, *mut f64);
 type ValueEntry = unsafe extern "C" fn(*const EvalContext, *const f64) -> f64;
@@ -259,6 +260,7 @@ impl NativeModel {
             0,
             num_variables,
             num_parameters,
+            0,
             image,
             entries,
             entry_starts,
@@ -272,6 +274,7 @@ impl NativeModel {
         num_internal_nodes: usize,
         num_variables: usize,
         num_parameters: usize,
+        num_branch_unknowns: usize,
         image: ExecutableMemory,
         entries: NativeEntryOffsets,
         entry_starts: NativeEntryStarts,
@@ -279,7 +282,12 @@ impl NativeModel {
         required_storage: NativeRequiredStorage,
     ) -> JitResult<Self> {
         Self::validate_entry_offsets(&entries, &entry_starts, image.len(), num_parameters)?;
-        Self::validate_current_dependencies(&entries, &current_dependencies)?;
+        Self::validate_current_dependencies(
+            &entries,
+            &current_dependencies,
+            num_terminals,
+            num_branch_unknowns,
+        )?;
 
         let jacobian_entry_points = entries.jacobians.iter().map(Vec::len).sum();
         let reactive_jacobian_entry_points = entries.reactive_jacobians.iter().map(Vec::len).sum();
@@ -322,6 +330,16 @@ impl NativeModel {
         let jacobian_entry = append_test_value_stub(&mut bytes, 2);
         let reactive_jacobian_entry = append_test_value_stub(&mut bytes, 3);
         let image = ExecutableMemory::allocate(&bytes).expect("allocate native test image");
+        assert_eq!(
+            jacobian_entry_points.len(),
+            stamp_value_entry_points,
+            "test native model must provide one Jacobian row per stamp"
+        );
+        assert_eq!(
+            reactive_jacobian_entry_points.len(),
+            stamp_value_entry_points,
+            "test native model must provide one reactive-Jacobian row per stamp"
+        );
         let entries = NativeEntryOffsets {
             assignment: CodeOffset::new(0),
             parameter_defaults: vec![],
@@ -365,6 +383,18 @@ impl NativeModel {
             return Err(JitError::InternalCompilerError {
                 model: "native-model".into(),
                 detail: "static-condition entry shape does not match stamp entry shape".into(),
+            });
+        }
+        if entries.jacobians.len() != entries.stamp_values.len() {
+            return Err(JitError::InternalCompilerError {
+                model: "native-model".into(),
+                detail: "jacobian entry shape does not match stamp entry shape".into(),
+            });
+        }
+        if entries.reactive_jacobians.len() != entries.stamp_values.len() {
+            return Err(JitError::InternalCompilerError {
+                model: "native-model".into(),
+                detail: "reactive-jacobian entry shape does not match stamp entry shape".into(),
             });
         }
         if entries.noise_exponents.len() != entries.noise_psd.len() {
@@ -492,6 +522,8 @@ impl NativeModel {
     fn validate_current_dependencies(
         entries: &NativeEntryOffsets,
         dependencies: &NativeCurrentDependencies,
+        num_terminals: usize,
+        num_branch_unknowns: usize,
     ) -> JitResult<()> {
         if dependencies.static_condition_branch_unknowns.len() != entries.static_conditions.len()
             || dependencies.stamp_values.len() != entries.stamp_values.len()
@@ -548,6 +580,257 @@ impl NativeModel {
             });
         }
 
+        Self::validate_current_pair_dependency_list(
+            "assignment",
+            &dependencies.assignment_current_pairs,
+            num_terminals,
+        )?;
+        Self::validate_current_pair_dependency_table(
+            "stamp value",
+            &dependencies.stamp_values,
+            num_terminals,
+        )?;
+        Self::validate_current_pair_dependency_nested_table(
+            "jacobian",
+            &dependencies.jacobians,
+            num_terminals,
+        )?;
+        Self::validate_current_pair_dependency_nested_table(
+            "reactive jacobian",
+            &dependencies.reactive_jacobians,
+            num_terminals,
+        )?;
+        Self::validate_current_pair_dependency_table(
+            "noise psd",
+            &dependencies.noise_psd,
+            num_terminals,
+        )?;
+        Self::validate_current_pair_dependency_table(
+            "noise exponent",
+            &dependencies.noise_exponents,
+            num_terminals,
+        )?;
+
+        Self::validate_prior_current_dependency_list(
+            "assignment",
+            &dependencies.assignment_prior_currents,
+            entries.stamp_values.len(),
+        )?;
+        Self::validate_prior_current_dependency_table(
+            "stamp value",
+            &dependencies.stamp_value_prior_currents,
+            entries.stamp_values.len(),
+        )?;
+        Self::validate_prior_current_dependency_nested_table(
+            "jacobian",
+            &dependencies.jacobian_prior_currents,
+            entries.stamp_values.len(),
+        )?;
+        Self::validate_prior_current_dependency_nested_table(
+            "reactive jacobian",
+            &dependencies.reactive_jacobian_prior_currents,
+            entries.stamp_values.len(),
+        )?;
+        Self::validate_prior_current_dependency_table(
+            "noise psd",
+            &dependencies.noise_psd_prior_currents,
+            entries.stamp_values.len(),
+        )?;
+        Self::validate_prior_current_dependency_table(
+            "noise exponent",
+            &dependencies.noise_exponent_prior_currents,
+            entries.stamp_values.len(),
+        )?;
+
+        Self::validate_branch_unknown_dependency_list(
+            "assignment",
+            &dependencies.assignment_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_table(
+            "static condition",
+            &dependencies.static_condition_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_table(
+            "stamp value",
+            &dependencies.stamp_value_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_nested_table(
+            "jacobian",
+            &dependencies.jacobian_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_nested_table(
+            "reactive jacobian",
+            &dependencies.reactive_jacobian_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_table(
+            "noise psd",
+            &dependencies.noise_psd_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_table(
+            "noise exponent",
+            &dependencies.noise_exponent_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+
+        Ok(())
+    }
+
+    fn validate_prior_current_dependency_table(
+        table_name: &str,
+        dependencies: &[Vec<usize>],
+        contribution_current_count: usize,
+    ) -> JitResult<()> {
+        for (entry_index, entry_dependencies) in dependencies.iter().enumerate() {
+            Self::validate_prior_current_dependency_list(
+                &format!("{table_name} {entry_index}"),
+                entry_dependencies,
+                contribution_current_count,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_prior_current_dependency_nested_table(
+        table_name: &str,
+        dependencies: &[Vec<Vec<usize>>],
+        contribution_current_count: usize,
+    ) -> JitResult<()> {
+        for (outer_index, outer_dependencies) in dependencies.iter().enumerate() {
+            for (inner_index, entry_dependencies) in outer_dependencies.iter().enumerate() {
+                Self::validate_prior_current_dependency_list(
+                    &format!("{table_name} {outer_index}.{inner_index}"),
+                    entry_dependencies,
+                    contribution_current_count,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_prior_current_dependency_list(
+        dependency_name: &str,
+        dependencies: &[usize],
+        contribution_current_count: usize,
+    ) -> JitResult<()> {
+        for index in dependencies {
+            if *index >= contribution_current_count {
+                return Err(JitError::InternalCompilerError {
+                    model: "native-model".into(),
+                    detail: format!(
+                        "{dependency_name} prior contribution current dependency {index} outside compiled contribution current count {contribution_current_count}"
+                    )
+                    .into(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_current_pair_dependency_table(
+        table_name: &str,
+        dependencies: &[Vec<usize>],
+        num_terminals: usize,
+    ) -> JitResult<()> {
+        for (entry_index, entry_dependencies) in dependencies.iter().enumerate() {
+            Self::validate_current_pair_dependency_list(
+                &format!("{table_name} {entry_index}"),
+                entry_dependencies,
+                num_terminals,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_current_pair_dependency_nested_table(
+        table_name: &str,
+        dependencies: &[Vec<Vec<usize>>],
+        num_terminals: usize,
+    ) -> JitResult<()> {
+        for (outer_index, outer_dependencies) in dependencies.iter().enumerate() {
+            for (inner_index, entry_dependencies) in outer_dependencies.iter().enumerate() {
+                Self::validate_current_pair_dependency_list(
+                    &format!("{table_name} {outer_index}.{inner_index}"),
+                    entry_dependencies,
+                    num_terminals,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_current_pair_dependency_list(
+        dependency_name: &str,
+        dependencies: &[usize],
+        num_terminals: usize,
+    ) -> JitResult<()> {
+        for index in dependencies {
+            if terminal_pair_current_endpoints(*index, num_terminals).is_none() {
+                return Err(JitError::InternalCompilerError {
+                    model: "native-model".into(),
+                    detail: format!(
+                        "{dependency_name} terminal-pair current dependency {index} invalid for compiled terminal count {num_terminals}"
+                    )
+                    .into(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_branch_unknown_dependency_table(
+        table_name: &str,
+        dependencies: &[Vec<usize>],
+        num_branch_unknowns: usize,
+    ) -> JitResult<()> {
+        for (entry_index, entry_dependencies) in dependencies.iter().enumerate() {
+            Self::validate_branch_unknown_dependency_list(
+                &format!("{table_name} {entry_index}"),
+                entry_dependencies,
+                num_branch_unknowns,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_branch_unknown_dependency_nested_table(
+        table_name: &str,
+        dependencies: &[Vec<Vec<usize>>],
+        num_branch_unknowns: usize,
+    ) -> JitResult<()> {
+        for (outer_index, outer_dependencies) in dependencies.iter().enumerate() {
+            for (inner_index, entry_dependencies) in outer_dependencies.iter().enumerate() {
+                Self::validate_branch_unknown_dependency_list(
+                    &format!("{table_name} {outer_index}.{inner_index}"),
+                    entry_dependencies,
+                    num_branch_unknowns,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_branch_unknown_dependency_list(
+        dependency_name: &str,
+        dependencies: &[usize],
+        num_branch_unknowns: usize,
+    ) -> JitResult<()> {
+        for index in dependencies {
+            if *index >= num_branch_unknowns {
+                return Err(JitError::InternalCompilerError {
+                    model: "native-model".into(),
+                    detail: format!(
+                        "{dependency_name} branch-current unknown dependency {index} outside compiled branch-current unknown count {num_branch_unknowns}"
+                    )
+                    .into(),
+                });
+            }
+        }
         Ok(())
     }
 
@@ -841,13 +1124,13 @@ fn append_test_value_stub(bytes: &mut Vec<u8>, value: u32) -> CodeOffset {
 mod tests {
     use super::super::runtime::ExecutableMemory;
     use super::{
-        CodeOffset, EvalContext, NativeEntryOffsets, NativeEntryStarts, NativeModel,
-        NativeRequiredStorage, append_test_value_stub,
+        CodeOffset, EvalContext, JitResult, NativeCurrentDependencies, NativeEntryOffsets,
+        NativeEntryStarts, NativeModel, NativeRequiredStorage, append_test_value_stub,
     };
 
     #[test]
     fn native_model_entry_points_are_not_optional() {
-        let model = NativeModel::new_for_test(2, 1, vec![1], vec![]);
+        let model = NativeModel::new_for_test(2, 1, vec![1], vec![0]);
         assert_eq!(model.chunk_count(), 1);
         assert_eq!(model.plan_stats().parameter_default_entry_points, 0);
         assert_eq!(model.plan_stats().static_condition_entry_points, 1);
@@ -1017,6 +1300,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             image,
             entries,
             NativeEntryStarts::new(vec![CodeOffset::new(0)]),
@@ -1055,6 +1339,131 @@ mod tests {
 
         assert!(error.to_string().contains("parameter-default entry shape"));
         assert!(error.to_string().contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn native_model_rejects_jacobian_stamp_shape_mismatch() {
+        let mut entries = one_stamp_entries();
+        entries.jacobians.clear();
+
+        let error = publish_test_model(0, 0, entries)
+            .expect_err("missing jacobian row must fail at native model boundary");
+
+        assert!(error.to_string().contains("jacobian entry shape"));
+        assert!(error.to_string().contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn native_model_rejects_reactive_jacobian_stamp_shape_mismatch() {
+        let mut entries = one_stamp_entries();
+        entries.reactive_jacobians.clear();
+
+        let error = publish_test_model(0, 0, entries)
+            .expect_err("missing reactive jacobian row must fail at native model boundary");
+
+        assert!(error.to_string().contains("reactive-jacobian entry shape"));
+        assert!(error.to_string().contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn native_model_rejects_terminal_pair_dependency_outside_compiled_terminals() {
+        let entries = one_stamp_entries();
+        let mut dependencies = NativeModel::empty_current_dependencies(&entries);
+        dependencies.stamp_values[0].push(0);
+
+        let error = publish_test_model_with_dependencies(0, 0, entries, dependencies)
+            .expect_err("invalid terminal-pair dependency must fail before dispatch");
+
+        assert!(
+            error
+                .to_string()
+                .contains("terminal-pair current dependency 0")
+        );
+        assert!(error.to_string().contains("compiled terminal count 0"));
+    }
+
+    #[test]
+    fn native_model_rejects_prior_current_dependency_outside_compiled_stamps() {
+        let entries = one_stamp_entries();
+        let mut dependencies = NativeModel::empty_current_dependencies(&entries);
+        dependencies.stamp_value_prior_currents[0].push(1);
+
+        let error = publish_test_model_with_dependencies(0, 0, entries, dependencies)
+            .expect_err("invalid prior current dependency must fail before dispatch");
+
+        let message = error.to_string();
+        assert!(message.contains("prior contribution current dependency 1"));
+        assert!(message.contains("compiled contribution current count 1"));
+    }
+
+    #[test]
+    fn native_model_rejects_branch_unknown_dependency_outside_compiled_unknowns() {
+        let entries = one_stamp_entries();
+        let mut dependencies = NativeModel::empty_current_dependencies(&entries);
+        dependencies.stamp_value_branch_unknowns[0].push(0);
+
+        let error = publish_test_model_with_dependencies(0, 0, entries, dependencies)
+            .expect_err("invalid branch-current dependency must fail before dispatch");
+
+        assert!(
+            error
+                .to_string()
+                .contains("branch-current unknown dependency 0")
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("compiled branch-current unknown count 0")
+        );
+    }
+
+    fn one_stamp_entries() -> NativeEntryOffsets {
+        NativeEntryOffsets {
+            assignment: CodeOffset::new(0),
+            parameter_defaults: vec![],
+            static_conditions: vec![None],
+            stamp_values: vec![CodeOffset::new(0)],
+            jacobians: vec![vec![]],
+            reactive_jacobians: vec![vec![]],
+            noise_psd: vec![],
+            noise_exponents: vec![],
+        }
+    }
+
+    fn publish_test_model(
+        num_terminals: usize,
+        num_branch_unknowns: usize,
+        entries: NativeEntryOffsets,
+    ) -> JitResult<NativeModel> {
+        let dependencies = NativeModel::empty_current_dependencies(&entries);
+        publish_test_model_with_dependencies(
+            num_terminals,
+            num_branch_unknowns,
+            entries,
+            dependencies,
+        )
+    }
+
+    fn publish_test_model_with_dependencies(
+        num_terminals: usize,
+        num_branch_unknowns: usize,
+        entries: NativeEntryOffsets,
+        dependencies: NativeCurrentDependencies,
+    ) -> JitResult<NativeModel> {
+        let image = ExecutableMemory::allocate(&[0xC3]).expect("allocate native test image");
+        let entry_starts = NativeEntryStarts::from_entries(&entries);
+        NativeModel::from_executable_image_with_dependencies(
+            num_terminals,
+            0,
+            0,
+            0,
+            num_branch_unknowns,
+            image,
+            entries,
+            entry_starts,
+            dependencies,
+            NativeRequiredStorage::default(),
+        )
     }
 
     fn empty_eval_context() -> EvalContext {
