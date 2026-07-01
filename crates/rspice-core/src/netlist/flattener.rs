@@ -127,7 +127,7 @@ pub struct FlattenedNetlist {
 /// - Local options propagation
 pub struct Flattener<'a> {
     /// Subcircuit definitions indexed by name
-    subcircuits: HashMap<&'a str, &'a SubcircuitDef>,
+    subcircuits: HashMap<String, &'a SubcircuitDef>,
     /// Original model definitions, used to clone parameterized local models
     /// when subcircuits are expanded with instance-specific parameter scopes.
     models: &'a [ModelDef],
@@ -172,8 +172,10 @@ impl<'a> Flattener<'a> {
         models: &'a [ModelDef],
         config: FlattenerConfig,
     ) -> Self {
-        let subcircuit_map: HashMap<&str, &SubcircuitDef> =
-            subcircuits.iter().map(|s| (s.name.as_str(), s)).collect();
+        let subcircuit_map: HashMap<String, &SubcircuitDef> = subcircuits
+            .iter()
+            .map(|s| (s.name.to_ascii_uppercase(), s))
+            .collect();
 
         // Initialize param resolver with subcircuit defaults
         let mut param_resolver = ParamResolver::new();
@@ -268,7 +270,7 @@ impl<'a> Flattener<'a> {
                 subckt_name,
                 params,
             } => {
-                if self.subcircuits.contains_key(subckt_name.as_str()) {
+                if self.find_subcircuit(subckt_name).is_some() {
                     self.expand_subcircuit(
                         element,
                         subckt_name,
@@ -326,6 +328,10 @@ impl<'a> Flattener<'a> {
         self.external_subckts.contains(&name.to_ascii_uppercase())
     }
 
+    fn find_subcircuit(&self, name: &str) -> Option<&'a SubcircuitDef> {
+        self.subcircuits.get(&name.to_ascii_uppercase()).copied()
+    }
+
     /// Expand a subcircuit instance into its constituent elements
     fn expand_subcircuit(
         &mut self,
@@ -340,8 +346,7 @@ impl<'a> Flattener<'a> {
     ) -> Result<(), ParseError> {
         // Look up subcircuit definition
         let subckt = self
-            .subcircuits
-            .get(subckt_name)
+            .find_subcircuit(subckt_name)
             .ok_or_else(|| ParseError::Syntax {
                 line: 0,
                 message: format!("Undefined subcircuit: {}", subckt_name),
@@ -374,11 +379,15 @@ impl<'a> Flattener<'a> {
         // A definition that is still being expanded cannot be instantiated
         // again below itself; report the cycle by name instead of expanding
         // until max_depth trips ~100 levels later.
-        if self.expansion_stack.iter().any(|name| name == subckt_name) {
+        if self
+            .expansion_stack
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(subckt_name))
+        {
             let start = self
                 .expansion_stack
                 .iter()
-                .position(|name| name == subckt_name)
+                .position(|name| name.eq_ignore_ascii_case(subckt_name))
                 .unwrap_or(0);
             let mut chain: Vec<&str> = self.expansion_stack[start..]
                 .iter()

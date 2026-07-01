@@ -4163,6 +4163,27 @@ mod tests {
     }
 
     #[test]
+    fn subckt_lookup_is_case_insensitive_when_flattening() {
+        let netlist = Netlist::parse(
+            "case insensitive subckt lookup\n\
+             X1 1 0 RSUB\n\
+             .subckt Rsub p n\n\
+             R1 p n 1k\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("mixed-case subcircuit deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("mixed-case subcircuit flattens");
+
+        assert!(flattened.elements.iter().any(|element| {
+            element.name.eq_ignore_ascii_case("X1.R1")
+                && matches!(element.kind, ElementKind::Resistor { .. })
+        }));
+    }
+
+    #[test]
     fn subckt_body_param_shadows_top_level_param_when_flattened() {
         let netlist = Netlist::parse(
             "subckt body param scope\n\

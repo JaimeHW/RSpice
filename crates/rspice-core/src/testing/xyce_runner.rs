@@ -1916,6 +1916,9 @@ impl XyceTestRunner {
                 lead_current.terminal.function_name()
             ));
         }
+        if Self::bare_device_parameter_probe_is_supported(netlist, normalized) {
+            return Ok(());
+        }
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
             match parameter.as_str() {
                 "dcv0" if Self::source_is_independent_source(netlist, &element_name) => {
@@ -1923,6 +1926,16 @@ impl XyceTestRunner {
                 }
                 "r" => {
                     if Self::find_resistor_element(netlist, &element_name).is_some() {
+                        return Ok(());
+                    }
+                }
+                "c" => {
+                    if Self::find_capacitor_element(netlist, &element_name).is_some() {
+                        return Ok(());
+                    }
+                }
+                "l" => {
+                    if Self::find_inductor_element(netlist, &element_name).is_some() {
                         return Ok(());
                     }
                 }
@@ -2050,6 +2063,17 @@ impl XyceTestRunner {
 
         if let Some(lead_current) = Self::parse_lead_current_probe(normalized) {
             return Self::evaluate_lead_current_probe(op_report, &lead_current);
+        }
+
+        if let Some(value) = Self::evaluate_bare_device_parameter_probe(
+            netlist,
+            dc,
+            sweep_point,
+            result,
+            op_report,
+            normalized,
+        ) {
+            return value;
         }
 
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
@@ -2435,6 +2459,7 @@ impl XyceTestRunner {
 
     fn braced_expression_is_atomic_probe(normalized_expression: &str) -> bool {
         Self::parse_device_parameter_probe(normalized_expression).is_some()
+            || Self::parse_bare_device_parameter_probe(normalized_expression).is_some()
             || Self::parse_device_operating_point_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
             || Self::parse_lead_current_probe(normalized_expression)
@@ -2547,6 +2572,12 @@ impl XyceTestRunner {
                 op_report,
                 element_name,
             ),
+            "c" => {
+                Self::evaluate_capacitor_parameter_c_value(netlist, dc, sweep_point, element_name)
+            }
+            "l" => {
+                Self::evaluate_inductor_parameter_l_value(netlist, dc, sweep_point, element_name)
+            }
             "temp" => Self::resistor_temperature_value(netlist, element_name).ok_or_else(|| {
                 format!(
                     "resistor parameter probe '{}:TEMP' targets an unknown resistor",
@@ -2558,6 +2589,187 @@ impl XyceTestRunner {
                 element_name, parameter
             )),
         }
+    }
+
+    fn bare_device_parameter_probe_is_supported(netlist: &Netlist, probe: &str) -> bool {
+        Self::find_bare_device_parameter_element(netlist, probe).is_some()
+    }
+
+    fn evaluate_bare_device_parameter_probe(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        result: &crate::SimulationResult,
+        op_report: &crate::circuit::DeviceOpReport,
+        probe: &str,
+    ) -> Option<Result<f64, String>> {
+        let probe_name = Self::parse_bare_device_parameter_probe(probe)?;
+        let element = Self::find_bare_device_parameter_element(netlist, &probe_name)?;
+        Some(match &element.kind {
+            ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => Ok(
+                Self::source_dc_parameter_value(dc, sweep_point, &element.name, spec),
+            ),
+            ElementKind::Resistor { .. } => Self::evaluate_resistor_parameter_r_value(
+                netlist,
+                dc,
+                sweep_point,
+                result,
+                op_report,
+                &probe_name,
+            ),
+            ElementKind::Capacitor {
+                value,
+                value_expr,
+                instance_params,
+                ..
+            } => Self::evaluate_static_passive_parameter_value(
+                netlist,
+                dc,
+                sweep_point,
+                "capacitor",
+                &probe_name,
+                "C",
+                *value,
+                value_expr.as_deref(),
+                instance_params,
+            ),
+            ElementKind::Inductor {
+                value,
+                value_expr,
+                instance_params,
+                ..
+            } => Self::evaluate_static_passive_parameter_value(
+                netlist,
+                dc,
+                sweep_point,
+                "inductor",
+                &probe_name,
+                "L",
+                *value,
+                value_expr.as_deref(),
+                instance_params,
+            ),
+            _ => Err(format!(
+                "bare device parameter probe '{}' targets an unsupported element kind",
+                probe_name
+            )),
+        })
+    }
+
+    fn source_dc_parameter_value(
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        element_name: &str,
+        spec: &crate::netlist::SourceSpec,
+    ) -> Value {
+        if Self::device_instance_names_match(element_name, &dc.source) {
+            return sweep_point.primary;
+        }
+        if let Some(sweep2) = &dc.sweep2
+            && Self::device_instance_names_match(element_name, &sweep2.source)
+            && let Some(value) = sweep_point.secondary
+        {
+            return value;
+        }
+        extract_dc_value(spec)
+    }
+
+    fn evaluate_static_passive_parameter_value(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        device_kind: &str,
+        element_name: &str,
+        parameter_name: &str,
+        value: Value,
+        value_expr: Option<&str>,
+        instance_params: &[(String, Value)],
+    ) -> Result<Value, String> {
+        if let Some(instance_value) =
+            Self::instance_param(instance_params, &[parameter_name, "VALUE"])
+        {
+            return Ok(instance_value);
+        }
+        if value.is_finite() {
+            return Ok(value);
+        }
+        if let Some(expression) = value_expr {
+            let context = Self::print_eval_context(netlist, Some(dc), Some(sweep_point));
+            return crate::netlist::expr::eval_expression(expression, &context).map_err(|err| {
+                format!(
+                    "failed to evaluate {device_kind} parameter probe '{element_name}:{parameter_name}': {err}"
+                )
+            });
+        }
+        Err(format!(
+            "{device_kind} parameter probe '{element_name}:{parameter_name}' could not resolve a value"
+        ))
+    }
+
+    fn evaluate_capacitor_parameter_c_value(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        name: &str,
+    ) -> Result<Value, String> {
+        let element = Self::find_capacitor_element(netlist, name).ok_or_else(|| {
+            format!("capacitor parameter probe '{name}:C' targets an unknown capacitor")
+        })?;
+        let ElementKind::Capacitor {
+            value,
+            value_expr,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            return Err(format!(
+                "capacitor parameter probe '{name}:C' targets a non-capacitor element"
+            ));
+        };
+        Self::evaluate_static_passive_parameter_value(
+            netlist,
+            dc,
+            sweep_point,
+            "capacitor",
+            name,
+            "C",
+            *value,
+            value_expr.as_deref(),
+            instance_params,
+        )
+    }
+
+    fn evaluate_inductor_parameter_l_value(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        name: &str,
+    ) -> Result<Value, String> {
+        let element = Self::find_inductor_element(netlist, name).ok_or_else(|| {
+            format!("inductor parameter probe '{name}:L' targets an unknown inductor")
+        })?;
+        let ElementKind::Inductor {
+            value,
+            value_expr,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            return Err(format!(
+                "inductor parameter probe '{name}:L' targets a non-inductor element"
+            ));
+        };
+        Self::evaluate_static_passive_parameter_value(
+            netlist,
+            dc,
+            sweep_point,
+            "inductor",
+            name,
+            "L",
+            *value,
+            value_expr.as_deref(),
+            instance_params,
+        )
     }
 
     fn evaluate_device_operating_point_probe(
@@ -3109,6 +3321,75 @@ impl XyceTestRunner {
                 Self::device_instance_names_match(&element.name, name)
                     && matches!(&element.kind, ElementKind::Resistor { .. })
             })
+    }
+
+    fn find_capacitor_element(netlist: &Netlist, name: &str) -> Option<crate::netlist::Element> {
+        if let Some(element) = netlist.elements.iter().find(|element| {
+            Self::device_instance_names_match(&element.name, name)
+                && matches!(&element.kind, ElementKind::Capacitor { .. })
+        }) {
+            return Some(element.clone());
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist)
+            .ok()?
+            .elements
+            .into_iter()
+            .find(|element| {
+                Self::device_instance_names_match(&element.name, name)
+                    && matches!(&element.kind, ElementKind::Capacitor { .. })
+            })
+    }
+
+    fn find_inductor_element(netlist: &Netlist, name: &str) -> Option<crate::netlist::Element> {
+        if let Some(element) = netlist.elements.iter().find(|element| {
+            Self::device_instance_names_match(&element.name, name)
+                && matches!(&element.kind, ElementKind::Inductor { .. })
+        }) {
+            return Some(element.clone());
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist)
+            .ok()?
+            .elements
+            .into_iter()
+            .find(|element| {
+                Self::device_instance_names_match(&element.name, name)
+                    && matches!(&element.kind, ElementKind::Inductor { .. })
+            })
+    }
+
+    fn find_bare_device_parameter_element(
+        netlist: &Netlist,
+        probe: &str,
+    ) -> Option<crate::netlist::Element> {
+        let probe_name = Self::parse_bare_device_parameter_probe(probe)?;
+        if let Some(element) = netlist.elements.iter().find(|element| {
+            Self::device_instance_names_match(&element.name, &probe_name)
+                && Self::element_has_bare_device_parameter(&element.kind)
+        }) {
+            return Some(element.clone());
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist)
+            .ok()?
+            .elements
+            .into_iter()
+            .find(|element| {
+                Self::device_instance_names_match(&element.name, &probe_name)
+                    && Self::element_has_bare_device_parameter(&element.kind)
+            })
+    }
+
+    fn element_has_bare_device_parameter(kind: &ElementKind) -> bool {
+        matches!(
+            kind,
+            ElementKind::VoltageSource(_)
+                | ElementKind::CurrentSource(_)
+                | ElementKind::Resistor { .. }
+                | ElementKind::Capacitor { .. }
+                | ElementKind::Inductor { .. }
+        )
     }
 
     fn instance_param(params: &[(String, Value)], names: &[&str]) -> Option<Value> {
@@ -3770,6 +4051,29 @@ impl XyceTestRunner {
             return None;
         }
         Some((element.to_string(), parameter.to_string()))
+    }
+
+    fn parse_bare_device_parameter_probe(probe: &str) -> Option<String> {
+        let normalized = Self::normalize_probe(probe);
+        let unwrapped = normalized
+            .strip_prefix('{')
+            .and_then(|value| value.strip_suffix('}'))
+            .unwrap_or(&normalized);
+        if unwrapped.is_empty()
+            || unwrapped.starts_with(':')
+            || unwrapped.ends_with(':')
+            || unwrapped.contains("::")
+            || unwrapped
+                .chars()
+                .any(|ch| matches!(ch, '(' | ')' | '+' | '-' | '*' | '/' | '^' | ',' | '='))
+        {
+            return None;
+        }
+        let first = unwrapped.chars().next()?;
+        if !(first.is_ascii_alphabetic() || first == '_') {
+            return None;
+        }
+        Some(unwrapped.to_string())
     }
 
     fn parse_scalar_parameter_probe(probe: &str) -> Option<String> {
