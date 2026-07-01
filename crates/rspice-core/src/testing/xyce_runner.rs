@@ -971,7 +971,6 @@ impl XyceTestRunner {
                 | ".measure"
                 | ".meas"
                 | ".noise"
-                | ".op"
                 | ".probe"
                 | ".save"
                 | ".sens"
@@ -4399,10 +4398,14 @@ impl XyceTestRunner {
         }
 
         if dimensions.is_empty() {
-            return Err(
-                "deck has no .DC analysis; first Xyce adapter supports static .PRINT DC only"
-                    .to_string(),
-            );
+            if netlist
+                .analyses
+                .iter()
+                .any(|analysis| matches!(analysis, AnalysisCommand::Op))
+            {
+                return Self::synthetic_op_dc_sweep(netlist);
+            }
+            return Err("deck has no .DC or .OP analysis for static .PRINT DC output".to_string());
         }
         if dimensions.len() > 2 {
             return Err(format!(
@@ -4432,6 +4435,33 @@ impl XyceTestRunner {
             mode: primary.mode,
             sweep2,
         })
+    }
+
+    fn synthetic_op_dc_sweep(netlist: &Netlist) -> Result<XyceDcSweep, String> {
+        for element in &netlist.elements {
+            let dc_value = match &element.kind {
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                    extract_dc_value(spec)
+                }
+                _ => continue,
+            };
+            if !dc_value.is_finite() {
+                return Err(format!(
+                    ".OP source '{}' has non-finite DC value {}",
+                    element.name, dc_value
+                ));
+            }
+            return Ok(XyceDcSweep {
+                source: element.name.clone(),
+                start: dc_value,
+                stop: dc_value,
+                step: 1.0,
+                mode: crate::netlist::DcSweepMode::Linear,
+                sweep2: None,
+            });
+        }
+
+        Err(".OP static .PRINT DC output requires at least one independent source for the native one-point adapter".to_string())
     }
 
     fn single_dc_print_request(source: &str) -> Result<XycePrintRequest, String> {

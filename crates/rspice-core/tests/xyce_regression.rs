@@ -832,6 +832,11 @@ fn test_xyce_output_dc_default_prn_wrapper_cases_run_natively() {
 
     for (relative, expected_contract) in [
         ("Netlists/Output/DC/dc-prn.cir", "wrapper_static_prn_dc"),
+        ("Netlists/Output/DC/op-prn.cir", "wrapper_static_prn_dc"),
+        (
+            "Netlists/Output/DC/op-prn-nodc.cir",
+            "wrapper_static_prn_dc",
+        ),
         (
             "Netlists/Output/DC/dc-step-prn.cir",
             "wrapper_static_prn_step_dc",
@@ -859,7 +864,6 @@ fn test_xyce_output_dc_default_prn_wrapper_cases_run_natively() {
     for relative in [
         "Netlists/Output/DC/dc-gnuplot.cir",
         "Netlists/Output/DC/dc-raw-override.cir",
-        "Netlists/Output/DC/op-prn.cir",
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
