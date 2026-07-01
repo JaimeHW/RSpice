@@ -710,7 +710,8 @@ pub(super) fn parse_pspice_u_device(
     line_num: usize,
     elements: &mut Vec<Element>,
 ) -> Result<(), ParseError> {
-    let fields = split_spice_fields(line);
+    let mut fields = split_spice_fields(line);
+    join_split_pspice_u_type_dimensions(&mut fields);
     if fields.len() < 5 {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -757,6 +758,46 @@ pub(super) fn parse_pspice_u_device(
             parse_pspice_u_tristate(&name, &fields, count.unwrap_or(1), true, line_num, elements)
         }
         "JKFF" => parse_pspice_u_jkff(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "ANDA" => parse_pspice_u_vector_gate_array(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            "d_and",
+            line_num,
+            elements,
+        ),
+        "NANDA" => parse_pspice_u_vector_gate_array(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            "d_nand",
+            line_num,
+            elements,
+        ),
+        "NORA" => parse_pspice_u_vector_gate_array(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            "d_nor",
+            line_num,
+            elements,
+        ),
+        "NXORA" => parse_pspice_u_vector_gate_array(
+            &name,
+            &fields,
+            count.map(|gate_count| (2, gate_count)),
+            "d_xnor",
+            line_num,
+            elements,
+        ),
+        "ORA" => parse_pspice_u_vector_gate_array(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            "d_or",
+            line_num,
+            elements,
+        ),
         "PULLDN" | "PULLDOWN" => parse_pspice_u_pull(
             &name,
             &fields,
@@ -774,13 +815,47 @@ pub(super) fn parse_pspice_u_device(
             elements,
         ),
         "SRFF" => parse_pspice_u_srlatch(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "XORA" => parse_pspice_u_vector_gate_array(
+            &name,
+            &fields,
+            count.map(|gate_count| (2, gate_count)),
+            "d_xor",
+            line_num,
+            elements,
+        ),
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, PULLUP, PULLDN, SRFF, BUFA, INVA, BUF3A, and INV3A",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3A, and INV3A",
                 fields[1]
             ),
         }),
+    }
+}
+
+fn join_split_pspice_u_type_dimensions(fields: &mut Vec<String>) {
+    if fields.len() <= 2 || !fields[1].contains('(') || fields[1].contains(')') {
+        return;
+    }
+
+    let mut joined = fields[1].clone();
+    let mut consumed = 0usize;
+    for field in fields.iter().skip(2) {
+        joined.push(',');
+        joined.push_str(field);
+        consumed += 1;
+        if field.contains(')') {
+            break;
+        }
+    }
+
+    if !joined.contains(')') {
+        return;
+    }
+
+    fields[1] = joined;
+    for _ in 0..consumed {
+        fields.remove(2);
     }
 }
 
@@ -890,6 +965,89 @@ fn parse_pspice_u_dff(
             instance_name,
             "d_dff",
             ports,
+            pspice_u_timing.clone(),
+        );
+    }
+
+    Ok(())
+}
+
+fn parse_pspice_u_vector_gate_array(
+    name: &str,
+    fields: &[String],
+    shape: Option<(usize, usize)>,
+    model: &str,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let Some((input_count, gate_count)) = shape else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice vector gate array '{}' requires valid type dimensions",
+                name
+            ),
+        });
+    };
+    if input_count < 2 || gate_count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice vector gate array '{}' requires at least two inputs and one gate",
+                name
+            ),
+        });
+    }
+
+    let input_total = input_count
+        .checked_mul(gate_count)
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!("PSpice vector gate array '{}' is too large", name),
+        })?;
+    let required = input_total
+        .checked_add(gate_count)
+        .and_then(|count| count.checked_add(1))
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!("PSpice vector gate array '{}' is too large", name),
+        })?;
+
+    let pins = &fields[4..];
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice vector gate array '{}' requires {} input pin(s), {} output pin(s), and a timing model",
+                name, input_total, gate_count
+            ),
+        });
+    }
+
+    let output_offset = input_total;
+    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
+        .map(|timing_model| PspiceUTiming { timing_model });
+    for gate_index in 0..gate_count {
+        let input_start = gate_index * input_count;
+        let inputs = pins[input_start..input_start + input_count]
+            .iter()
+            .map(|pin| {
+                pspice_u_required_digital_node(pin, "gate input", fields, line_num, elements)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let output = pspice_u_required_digital_port(
+            &pins[output_offset + gate_index],
+            "gate output",
+            fields,
+            line_num,
+            elements,
+        )?;
+        let instance_name = pspice_u_lowered_instance_name(name, gate_count, gate_index);
+        push_pspice_u_xspice_element_with_timing(
+            elements,
+            instance_name,
+            model,
+            vec![XspicePort::DigitalVector(inputs), output],
             pspice_u_timing.clone(),
         );
     }
@@ -1362,6 +1520,18 @@ fn pspice_u_required_digital_port(
     line_num: usize,
     elements: &mut Vec<Element>,
 ) -> Result<XspicePort, ParseError> {
+    Ok(XspicePort::Digital(pspice_u_required_digital_node(
+        raw, role, fields, line_num, elements,
+    )?))
+}
+
+fn pspice_u_required_digital_node(
+    raw: &str,
+    role: &str,
+    fields: &[String],
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<String, ParseError> {
     if pspice_u_is_no_connect(raw) {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -1373,7 +1543,7 @@ fn pspice_u_required_digital_port(
     }
 
     ensure_pspice_u_constant_driver(raw, elements);
-    Ok(XspicePort::Digital(normalize_pspice_u_node(raw)))
+    Ok(normalize_pspice_u_node(raw))
 }
 
 fn pspice_u_required_inverted_digital_port(
@@ -1383,18 +1553,9 @@ fn pspice_u_required_inverted_digital_port(
     line_num: usize,
     elements: &mut Vec<Element>,
 ) -> Result<XspicePort, ParseError> {
-    if pspice_u_is_no_connect(raw) {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: format!(
-                "PSpice U-device '{}' type '{}' cannot use {} as a required {}",
-                fields[0], fields[1], raw, role
-            ),
-        });
-    }
-
-    ensure_pspice_u_constant_driver(raw, elements);
-    Ok(XspicePort::DigitalInverted(normalize_pspice_u_node(raw)))
+    Ok(XspicePort::DigitalInverted(pspice_u_required_digital_node(
+        raw, role, fields, line_num, elements,
+    )?))
 }
 
 fn pspice_u_active_low_control_port(raw: &str, elements: &mut Vec<Element>) -> XspicePort {
@@ -1464,6 +1625,18 @@ fn parse_pspice_u_kind_and_count(raw: &str) -> (String, Option<usize>) {
         );
     }
     (trimmed.to_ascii_uppercase(), None)
+}
+
+fn pspice_u_count_pair(raw: &str) -> Option<(usize, usize)> {
+    let (_, tail) = raw.trim().split_once('(')?;
+    let counts = tail.strip_suffix(')')?;
+    let mut parts = counts.split(',');
+    let first = parts.next()?.trim().parse::<usize>().ok()?;
+    let second = parts.next()?.trim().parse::<usize>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((first, second))
 }
 
 fn normalize_pspice_u_node(raw: &str) -> String {

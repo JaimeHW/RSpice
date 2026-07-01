@@ -5069,6 +5069,102 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_anda_array_lowers_to_vector_gate_instances_with_timing() {
+        let netlist = Netlist::parse(
+            "pspice u anda array\n\
+             U14 ANDA(3,2) $G_DPWR $G_DGND a1 b1 c1 a2 b2 c2 y1 y2 dly\n\
+             .model DLY UGATE (TPLHTY=4n TPHLTY=6n)\n\
+             .end\n",
+        )
+        .expect("PSpice ANDA array should lower to d_and vector gate instances");
+
+        assert_eq!(netlist.elements.len(), 2);
+        assert_eq!(netlist.elements[0].name, "U14_0");
+        assert_eq!(netlist.elements[1].name, "U14_1");
+
+        let alias_name = match &netlist.elements[1].kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                pspice_u_timing,
+                ..
+            } => {
+                assert!(pspice_u_timing.is_none());
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::DigitalVector(vec![
+                            "A2".to_string(),
+                            "B2".to_string(),
+                            "C2".to_string()
+                        ]),
+                        XspicePort::Digital("Y2".to_string())
+                    ]
+                );
+                model.as_str()
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        };
+
+        let alias = netlist
+            .models
+            .iter()
+            .find(|alias| alias.name == alias_name)
+            .expect("generated timing alias exists");
+        assert_eq!(alias.model_type, "d_and");
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "rise_delay" && (*value - 4.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "fall_delay" && (*value - 6.0e-9).abs() < 1.0e-21 })
+        );
+    }
+
+    #[test]
+    fn pspice_u_xora_array_lowers_to_two_input_xor_instances() {
+        let netlist = Netlist::parse(
+            "pspice u xora array\n\
+             U15 XORA(2) $G_DPWR $G_DGND a1 b1 a2 b2 y1 y2 dly\n\
+             .end\n",
+        )
+        .expect("PSpice XORA array should lower to d_xor instances");
+
+        assert_eq!(netlist.elements.len(), 2);
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_xor");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::DigitalVector(vec!["A1".to_string(), "B1".to_string()]),
+                        XspicePort::Digital("Y1".to_string())
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+        match &netlist.elements[1].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_xor");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::DigitalVector(vec!["A2".to_string(), "B2".to_string()]),
+                        XspicePort::Digital("Y2".to_string())
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn pspice_u_inverter_lowers_to_scalar_xspice_ports() {
         let netlist = Netlist::parse(
             "pspice u inverter\n\
