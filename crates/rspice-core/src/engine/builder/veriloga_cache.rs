@@ -1,7 +1,7 @@
 use super::*;
 
 #[cfg(feature = "veriloga")]
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 12;
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 13;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -248,7 +248,7 @@ pub(super) fn cache_record_path_with_root(source_path: &Path, cache_root: &Path)
     let mut hasher = blake3::Hasher::new();
     hasher.update(canonical.to_string_lossy().as_bytes());
     let key = hasher.finalize().to_hex().to_string();
-    cache_root.join(format!("{key}.bin"))
+    cache_root.join(format!("{key}.json"))
 }
 
 #[cfg(feature = "veriloga")]
@@ -385,7 +385,10 @@ pub(super) fn list_cache_files(cache_root: &Path) -> Result<Vec<VerilogACacheFil
     for entry in dir_iter {
         let entry = entry.map_err(|e| format!("failed to read cache directory entry: {}", e))?;
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("bin") {
+        if !matches!(
+            path.extension().and_then(|e| e.to_str()),
+            Some("json" | "bin")
+        ) {
             continue;
         }
         let metadata = entry.metadata().map_err(|e| {
@@ -426,13 +429,19 @@ pub(super) fn cache_stats_from_files(
 pub(super) fn read_cache_record(path: &Path) -> Result<VerilogADiskCacheRecord, String> {
     let bytes = std::fs::read(path)
         .map_err(|e| format!("failed to read cache record '{}': {}", path.display(), e))?;
-    bincode::deserialize::<VerilogADiskCacheRecord>(&bytes).map_err(|e| {
+    serde_json::from_slice::<VerilogADiskCacheRecord>(&bytes).map_err(|e| {
         format!(
             "failed to deserialize cache record '{}': {}",
             path.display(),
             e
         )
     })
+}
+
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+pub(super) fn encode_cache_record(record: &VerilogADiskCacheRecord) -> Result<Vec<u8>, String> {
+    serde_json::to_vec(record)
+        .map_err(|e| format!("failed to serialize Verilog-A cache record: {}", e))
 }
 
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -454,8 +463,7 @@ pub(super) fn persist_model_to_disk_locked(
         model: entry.model.as_ref().clone(),
         canonical_ir: entry.canonical_ir.as_ref().map(|ir| ir.as_ref().clone()),
     };
-    let encoded = bincode::serialize(&record)
-        .map_err(|e| format!("failed to serialize Verilog-A cache record: {}", e))?;
+    let encoded = encode_cache_record(&record)?;
 
     let tmp_path = cache_path.with_extension(format!("tmp.{}", std::process::id()));
     std::fs::write(&tmp_path, encoded)

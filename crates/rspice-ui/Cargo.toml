@@ -39,7 +39,6 @@ rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-bincode = "1"
 
 # Logging
 log = "0.4"
@@ -81,7 +80,7 @@ rfd = "0.15"
 # Cross-platform config directories
 dirs = "5.0"
 
-# License-key signature verification (internal license-key spec) — pure
+# License-key signature verification (internal license-key spec) - pure
 # Rust, works on wasm32; key generation lives in the license_tool example
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "rand_core"] }
 
