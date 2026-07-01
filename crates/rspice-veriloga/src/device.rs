@@ -676,11 +676,7 @@ impl VerilogADevice {
         }
 
         // Topology guards depend on final parameter values.
-        #[cfg(feature = "native")]
         self.try_refresh_static_conditions()?;
-
-        #[cfg(not(feature = "native"))]
-        self.refresh_static_conditions();
 
         Ok(())
     }
@@ -721,11 +717,7 @@ impl VerilogADevice {
     pub fn try_set_temperature(&mut self, temp_k: f64) -> Result<(), VmError> {
         self.context.temperature = temp_k;
         // Static guards may reference $temperature
-        #[cfg(feature = "native")]
         self.try_refresh_static_conditions()?;
-
-        #[cfg(not(feature = "native"))]
-        self.refresh_static_conditions();
 
         Ok(())
     }
@@ -759,11 +751,7 @@ impl VerilogADevice {
 
         self.context.analysis_type = analysis;
 
-        #[cfg(feature = "native")]
         self.try_refresh_static_conditions()?;
-
-        #[cfg(not(feature = "native"))]
-        self.refresh_static_conditions();
 
         Ok(())
     }
@@ -999,6 +987,16 @@ impl VerilogADevice {
 
     #[cfg(not(feature = "native"))]
     fn refresh_static_conditions(&mut self) {
+        self.try_refresh_static_conditions().unwrap_or_else(|err| {
+            panic!(
+                "Verilog-A device '{}' model '{}' static-condition evaluation failed: {}",
+                self.name, self.model.name, err
+            )
+        });
+    }
+
+    #[cfg(not(feature = "native"))]
+    fn try_refresh_static_conditions(&mut self) -> Result<(), VmError> {
         let model = &self.model;
         let mut program_active = vec![true; model.stamp_programs.len()];
         let mut branch_active = vec![false; model.branch_sources.len()];
@@ -1010,23 +1008,10 @@ impl VerilogADevice {
             // BSIM4rdsMod derived from the rdsmod parameter); run the
             // evaluation stream once so those variables hold their values.
             // Node voltages are irrelevant to instance-static expressions.
-            Self::execute_assignment_programs(&mut bytecode_vm, model).unwrap_or_else(|err| {
-                panic!(
-                    "Verilog-A device '{}' model '{}' static-condition evaluation failed: {}",
-                    self.name, model.name, err
-                )
-            });
+            Self::execute_assignment_programs(&mut bytecode_vm, model)?;
             for (idx, program) in model.stamp_programs.iter().enumerate() {
                 let active = match &program.static_condition {
-                    Some(condition) => bytecode_vm
-                        .execute(condition)
-                        .map(|v| v != 0.0)
-                        .unwrap_or_else(|err| {
-                            panic!(
-                                "Verilog-A device '{}' model '{}' static condition failed: {}",
-                                self.name, model.name, err
-                            )
-                        }),
+                    Some(condition) => bytecode_vm.execute(condition)? != 0.0,
                     None => true,
                 };
                 program_active[idx] = active;
@@ -1041,6 +1026,7 @@ impl VerilogADevice {
 
         self.program_active = program_active;
         self.branch_active = branch_active;
+        Ok(())
     }
 
     /// Get the circuit node index for an internal node

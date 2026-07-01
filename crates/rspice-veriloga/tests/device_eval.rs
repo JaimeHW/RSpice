@@ -737,10 +737,10 @@ endmodule
     );
 
     let mut device = model.device("X1", &[1, 0]);
-    device.set_analysis_type(3);
     let err = device
-        .try_noise_sources(&[1.0])
-        .expect_err("checked noise evaluation must report runtime array bounds errors");
+        .try_set_analysis_type(3)
+        .and_then(|()| device.try_noise_sources(&[1.0]).map(|_| ()))
+        .expect_err("checked noise setup/evaluation must report runtime array bounds errors");
     let text = err.to_string();
     assert!(
         text.contains("Array index 5") || text.contains("[1:4]"),
