@@ -1169,7 +1169,7 @@ impl CodeModel for DigitalStateMachine {
 mod tests {
     use super::*;
     use crate::xspice::context::InputValue;
-    use crate::xspice::{DigitalState, DigitalStrength, EvaluationPhase};
+    use crate::xspice::{DigitalState, DigitalStrength, EvaluationPhase, ParamType, PortDirection};
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     fn data_file_test_guard() -> MutexGuard<'static, ()> {
@@ -1198,6 +1198,93 @@ mod tests {
             panic!("poison d_state cache lock for recovery test");
         });
         assert!(result.is_err(), "recovery test must poison the mutex");
+    }
+
+    #[test]
+    fn d_source_metadata_matches_ngspice46_interface() {
+        let ports = DigitalSource.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["out"]
+        );
+        assert_eq!(ports[0].direction, PortDirection::Out);
+        assert_eq!(ports[0].default_type, PortType::Digital);
+        assert_eq!(ports[0].allowed_types, vec![PortType::Digital]);
+        assert!(ports[0].is_vector);
+        assert!(!ports[0].null_allowed);
+        assert_eq!(ports[0].vector_min_len, None);
+
+        let params = DigitalSource.parameters();
+        assert_eq!(
+            params
+                .iter()
+                .map(|param| (
+                    param.name.as_str(),
+                    &param.param_type,
+                    param.default,
+                    param.string_default.as_deref()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("input_file", &ParamType::String, 0.0, Some("source.txt")),
+                ("input_load", &ParamType::Real, 1.0e-12, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn d_state_metadata_matches_ngspice46_interface() {
+        let ports = DigitalStateMachine.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["in", "clk", "reset", "out"]
+        );
+        assert_eq!(ports[0].direction, PortDirection::In);
+        assert_eq!(ports[0].default_type, PortType::Digital);
+        assert!(ports[0].is_vector);
+        assert!(ports[0].null_allowed);
+        assert_eq!(ports[0].vector_min_len, None);
+        assert_eq!(ports[1].direction, PortDirection::In);
+        assert_eq!(ports[1].default_type, PortType::Digital);
+        assert!(!ports[1].is_vector);
+        assert!(!ports[1].null_allowed);
+        assert_eq!(ports[2].direction, PortDirection::In);
+        assert_eq!(ports[2].default_type, PortType::Digital);
+        assert!(!ports[2].is_vector);
+        assert!(ports[2].null_allowed);
+        assert_eq!(ports[3].direction, PortDirection::Out);
+        assert_eq!(ports[3].default_type, PortType::Digital);
+        assert!(ports[3].is_vector);
+        assert!(!ports[3].null_allowed);
+        assert_eq!(ports[3].vector_min_len, Some(1));
+
+        let params = DigitalStateMachine.parameters();
+        assert_eq!(
+            params
+                .iter()
+                .map(|param| (
+                    param.name.as_str(),
+                    &param.param_type,
+                    param.default,
+                    param.string_default.as_deref()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("clk_delay", &ParamType::Real, 1.0e-9, None),
+                ("reset_delay", &ParamType::Real, 1.0e-9, None),
+                ("state_file", &ParamType::String, 0.0, Some("state.txt")),
+                ("reset_state", &ParamType::Integer, 0.0, None),
+                ("input_load", &ParamType::Real, 1.0e-12, None),
+                ("clk_load", &ParamType::Real, 1.0e-12, None),
+                ("reset_load", &ParamType::Real, 1.0e-12, None),
+            ]
+        );
     }
 
     #[test]
