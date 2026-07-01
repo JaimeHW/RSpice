@@ -161,6 +161,11 @@ pub(super) fn parse_resistor(
                     // model name. This covers both model-only instances and
                     // SPICE-compatible value-plus-model form.
                     model = Some(raw_name);
+                } else if let Ok(param_value) = crate::netlist::lexer::parse_spice_value(&raw_name)
+                {
+                    value = Some(param_value);
+                    value_expr = None;
+                    continue;
                 } else {
                     return Err(ParseError::Syntax {
                         line: line_num,
