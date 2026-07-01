@@ -57,6 +57,17 @@ pub(super) fn run_step(
                 .engine
                 .run_step_command(ctx.netlist, step_cmd, &values)
                 .map_err(|e| CliError::simulation_error_in(e.to_string(), "Step"))?;
+            if sweep_results.len() != values.len() {
+                return Err(CliError::simulation_error_in(
+                    format!(
+                        ".STEP sweep on {} converged {} / {} requested points; refusing to report a truncated sweep as success",
+                        target_desc,
+                        sweep_results.len(),
+                        values.len()
+                    ),
+                    "Step",
+                ));
+            }
 
             for (_, point) in &sweep_results {
                 super::shared::ensure_finite_series(

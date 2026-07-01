@@ -294,16 +294,17 @@ impl Engine {
             let element = stepped.elements.get_mut(device_idx).ok_or_else(|| {
                 SimulationError::Circuit("Internal step device index error".to_string())
             })?;
-            Self::apply_device_step_value(&mut element.kind, param_name, value)?;
+            let target = format!(
+                "{}{}",
+                device_name,
+                param_name.map(|p| format!(".{}", p)).unwrap_or_default()
+            );
+            Self::apply_device_step_value(&mut element.kind, param_name, value)
+                .map_err(|e| step_point_error("DEVICE", &target, value, e))?;
 
             match self.run_dc_op(&stepped) {
                 Ok(result) => results.push((value, result)),
                 Err(e) => {
-                    let target = format!(
-                        "{}{}",
-                        device_name,
-                        param_name.map(|p| format!(".{}", p)).unwrap_or_default()
-                    );
                     return Err(step_point_error("DEVICE", &target, value, e));
                 }
             }

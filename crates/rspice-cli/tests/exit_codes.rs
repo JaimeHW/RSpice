@@ -411,11 +411,10 @@ fn failed_step_point_exits_one_without_truncated_success() {
     std::fs::write(
         &deck,
         "* bad .STEP point\n\
-         V1 in 0 10\n\
-         R1 in out {rval}\n\
-         R2 out 0 1k\n\
-         .param rval=1k\n\
-         .step param rval list 1k 0\n\
+         V1 in 0 1\n\
+         D1 in 0 dmod\n\
+         .model dmod D\n\
+         .step D1 list 1 2\n\
          .end\n",
     )
     .expect("write deck");
@@ -432,7 +431,7 @@ fn failed_step_point_exits_one_without_truncated_success() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stderr_upper = stderr.to_ascii_uppercase();
     assert!(
-        stderr_upper.contains(".STEP PARAM RVAL = 0"),
+        stderr_upper.contains(".STEP DEVICE D1 = 1"),
         "stderr should identify the failed step point: {stderr}"
     );
 
