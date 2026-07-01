@@ -1389,6 +1389,31 @@ fn delay_ring_index(oldest: usize, offset: usize, buffer_size: usize) -> usize {
     (oldest + offset) % buffer_size
 }
 
+fn delay_bracketing_indices(
+    ctx: &CmContext,
+    buffer_size: usize,
+    oldest: usize,
+    count: usize,
+    target_time: Value,
+) -> (usize, usize) {
+    let mut low = 1;
+    let mut high = count - 1;
+    while low < high {
+        let mid = low + (high - low) / 2;
+        let current = delay_ring_index(oldest, mid, buffer_size);
+        if target_time <= ctx.state(delay_time_slot(current)) {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+
+    (
+        delay_ring_index(oldest, low - 1, buffer_size),
+        delay_ring_index(oldest, low, buffer_size),
+    )
+}
+
 fn append_delay_sample(ctx: &mut CmContext, buffer_size: usize, value: Value) {
     if ctx.int_state(DELAY_INITIALIZED) == 0 {
         ctx.set_state(delay_time_slot(0), ctx.time);
@@ -1435,26 +1460,21 @@ fn interpolate_delay_history(ctx: &CmContext, buffer_size: usize, target_time: V
     if target_time >= newest_time {
         return newest_value;
     }
-
-    let mut prev = first;
-    for offset in 1..count {
-        let current = delay_ring_index(oldest, offset, buffer_size);
-        let prev_time = ctx.state(delay_time_slot(prev));
-        let current_time = ctx.state(delay_time_slot(current));
-        if target_time <= current_time {
-            let prev_value = ctx.state(delay_value_slot(buffer_size, prev));
-            let current_value = ctx.state(delay_value_slot(buffer_size, current));
-            let span = current_time - prev_time;
-            if span.abs() <= Value::EPSILON {
-                return current_value;
-            }
-            let alpha = (target_time - prev_time) / span;
-            return prev_value + alpha * (current_value - prev_value);
-        }
-        prev = current;
+    if !target_time.is_finite() {
+        return newest_value;
     }
 
-    newest_value
+    let (prev, current) = delay_bracketing_indices(ctx, buffer_size, oldest, count, target_time);
+    let prev_time = ctx.state(delay_time_slot(prev));
+    let current_time = ctx.state(delay_time_slot(current));
+    let prev_value = ctx.state(delay_value_slot(buffer_size, prev));
+    let current_value = ctx.state(delay_value_slot(buffer_size, current));
+    let span = current_time - prev_time;
+    if span.abs() <= Value::EPSILON {
+        return current_value;
+    }
+    let alpha = (target_time - prev_time) / span;
+    prev_value + alpha * (current_value - prev_value)
 }
 
 fn effective_delay(ctx: &CmContext) -> Value {
@@ -2382,6 +2402,29 @@ mod tests {
         assert!(
             (recorded_value - 1.0).abs() <= 1.0e-12,
             "rollbackable probe poisoned delay history slot with value {recorded_value}"
+        );
+    }
+
+    #[test]
+    fn delay_binary_history_lookup_interpolates_wrapped_ring_buffers() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.set_param("buffer_size", 4.0);
+
+        AnalogDelayLine.init(&mut ctx).expect("delay init");
+        for index in 0..5 {
+            ctx.time = index as Value;
+            append_delay_sample(&mut ctx, 4, 10.0 * index as Value);
+        }
+
+        assert_eq!(ctx.int_state(DELAY_WRITE_INDEX), 1);
+        assert_eq!(ctx.int_state(DELAY_COUNT), 4);
+        assert_eq!(oldest_delay_index(1, 4, 4), 1);
+
+        let output = interpolate_delay_history(&ctx, 4, 2.5);
+        assert!(
+            (output - 25.0).abs() <= 1.0e-12,
+            "wrapped delay history should interpolate between ring slots 2 and 3, got {output}"
         );
     }
 
