@@ -13,6 +13,7 @@ use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDevice
 use super::{RustTranspileOptions, device};
 
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
+const MAX_SCALAR_STAMP_LIVE_VALUES: usize = 240_000;
 
 pub(super) struct ScalarStaticCache {
     instance_values: Vec<ValueId>,
@@ -212,6 +213,16 @@ fn generate_stamp_file(
 ) -> Result<String, RustBackendError> {
     let roots = scalar_equation_roots(artifact)?;
     let stamp_live = collect_stamp_live_values(artifact, &roots, static_cache)?;
+    if stamp_live.len() > MAX_SCALAR_STAMP_LIVE_VALUES {
+        return Err(unsupported(
+            artifact,
+            format!(
+                "scalar OptIR stamp graph has {} live values; current scalar emitter limit is {}",
+                stamp_live.len(),
+                MAX_SCALAR_STAMP_LIVE_VALUES
+            ),
+        ));
+    }
     let has_idt_slots = ddt_slots.idt_len() > 0;
     let stamp_needs_params = has_idt_slots
         || artifact.opt.values.iter().any(|value| {
@@ -3163,11 +3174,7 @@ fn mark_stamp_live_value(
         | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::LoopIndex { .. }
         | OptValueKind::EquationValue { .. } => {}
-        OptValueKind::CountedSum {
-            count,
-            initial,
-            ..
-        } => {
+        OptValueKind::CountedSum { count, initial, .. } => {
             mark_stamp_live_value(artifact, count, static_cache, live)?;
             mark_stamp_live_value(artifact, initial, static_cache, live)?;
         }
@@ -3385,11 +3392,7 @@ fn visit_live_value(
         | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::LoopIndex { .. }
         | OptValueKind::EquationValue { .. } => {}
-        OptValueKind::CountedSum {
-            count,
-            initial,
-            ..
-        } => {
+        OptValueKind::CountedSum { count, initial, .. } => {
             visit_live_value(artifact, count, live, static_cache, state, ordered)?;
             visit_live_value(artifact, initial, live, static_cache, state, ordered)?;
         }
