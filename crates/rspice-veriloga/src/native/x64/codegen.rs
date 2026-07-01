@@ -1454,11 +1454,13 @@ impl FunctionCompiler {
 
         let target = XMM_STACK[self.depth - 1];
         self.emit_rust_f64_to_i64(target, Gpr::R11)?;
-        match op {
-            IntegerBinaryOp::Shl => self.encoder.shl_r64_imm8(Gpr::R11, count),
-            IntegerBinaryOp::Shr => self.encoder.sar_r64_imm8(Gpr::R11, count),
-            IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
-                unreachable!("constant integer shifts only accept shl/shr")
+        if count != 0 {
+            match op {
+                IntegerBinaryOp::Shl => self.encoder.shl_r64_imm8(Gpr::R11, count),
+                IntegerBinaryOp::Shr => self.encoder.sar_r64_imm8(Gpr::R11, count),
+                IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
+                    unreachable!("constant integer shifts only accept shl/shr")
+                }
             }
         }
         self.encoder.cvtsi2sd_xmm_r64(target, Gpr::R11);
@@ -8695,6 +8697,74 @@ mod tests {
                 f(&ctx, std::ptr::null()).to_bits(),
                 integer_expected.to_bits(),
                 "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_elides_zero_count_constant_shift_opcode() {
+        let cases = [
+            (
+                "shl-zero-fractional",
+                Instruction::Shl,
+                IntegerBinaryOp::Shl,
+                13.75,
+                runtime_shl(13.75, 0.0),
+            ),
+            (
+                "shr-zero-nan",
+                Instruction::Shr,
+                IntegerBinaryOp::Shr,
+                f64::NAN,
+                runtime_shr(f64::NAN, 0.0),
+            ),
+        ];
+
+        for (name, instruction, expected_op, left, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushParam(0),
+                    Instruction::PushConst(0.0),
+                    instruction,
+                ],
+                0,
+            );
+            assert_eq!(
+                program.ops(),
+                &[
+                    NativeOp::LoadParam(0),
+                    NativeOp::IntegerShiftConst(expected_op, 0)
+                ],
+                "{name}: zero count should still lower to the integer-conversion shift op"
+            );
+
+            let bytes = compile_value_function(&program).expect("compile zero-count shift leaf");
+            assert!(
+                !contains_bytes(&bytes, &shift_imm_bytes(expected_op, Gpr::R11, 0)),
+                "{name}: zero-count constant shifts should skip the redundant shift instruction"
+            );
+            assert!(
+                !contains_bytes(&bytes, &cmp_r64_imm32_bytes(Gpr::Rcx, 64)),
+                "{name}: constant zero-count shifts should not emit runtime count bounds checks"
+            );
+            assert!(
+                !contains_bytes(&bytes, &xor_r64_bytes(Gpr::Rcx, Gpr::Rcx)),
+                "{name}: constant zero-count shifts should not convert an RHS count through RCX"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate zero-count shift leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let params = [left];
+            let ctx = eval_context(&params, &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}: zero-count shift must still perform Rust-style f64-to-i64 conversion"
             );
         }
     }
