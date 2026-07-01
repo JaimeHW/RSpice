@@ -143,6 +143,12 @@ const BREAKPOINT_EQUALIZATION_FACTOR: Value = 1.9;
 pub struct BreakpointManager {
     /// Sorted list of breakpoint times
     breakpoints: Vec<Value>,
+    /// Runtime XSPICE breakpoints/events for the next transient advance.
+    ///
+    /// Code-model event requests are re-issued from accepted model state. They
+    /// should therefore replace the prior runtime schedule instead of
+    /// accumulating with source/permanent breakpoints.
+    runtime_breakpoints: Vec<Value>,
     /// Index of next unprocessed breakpoint (for efficiency)
     current_index: usize,
     /// Flag indicating we just passed a breakpoint
@@ -167,6 +173,7 @@ impl BreakpointManager {
     pub fn new_with_tolerance(tolerance: Value) -> Self {
         Self {
             breakpoints: Vec::new(),
+            runtime_breakpoints: Vec::new(),
             current_index: 0,
             just_passed_breakpoint: false,
             saved_delta_before_breakpoint: None,
@@ -198,6 +205,38 @@ impl BreakpointManager {
         true
     }
 
+    /// Replace the dynamic runtime breakpoint schedule.
+    ///
+    /// XSPICE runtime requests mirror ngspice's event/temp-breakpoint machinery:
+    /// they are valid for the next accepted model state, not permanent source
+    /// breakpoints. Keeping them separate prevents stale predicted event times
+    /// from forcing later transient steps.
+    pub fn replace_runtime_breakpoints<I>(&mut self, times: I)
+    where
+        I: IntoIterator<Item = Value>,
+    {
+        self.runtime_breakpoints.clear();
+        for time in times {
+            if !time.is_finite() || time < 0.0 {
+                continue;
+            }
+            if self
+                .breakpoints
+                .iter()
+                .skip(self.current_index)
+                .chain(self.runtime_breakpoints.iter())
+                .any(|&existing| (existing - time).abs() < self.tolerance)
+            {
+                continue;
+            }
+            let pos = self.runtime_breakpoints.iter().position(|&t| t > time);
+            match pos {
+                Some(i) => self.runtime_breakpoints.insert(i, time),
+                None => self.runtime_breakpoints.push(time),
+            }
+        }
+    }
+
     /// Add breakpoints from a periodic source (pulse edges, clock, etc.)
     pub fn add_periodic(&mut self, start: Value, period: Value, end: Value) {
         let mut t = start;
@@ -209,11 +248,23 @@ impl BreakpointManager {
 
     /// Get next breakpoint after given time
     pub fn next_after(&self, time: Value) -> Option<Value> {
-        self.breakpoints
+        let permanent = self
+            .breakpoints
             .iter()
             .skip(self.current_index)
             .copied()
-            .find(|&t| t > time + self.tolerance)
+            .find(|&t| t > time + self.tolerance);
+        let runtime = self
+            .runtime_breakpoints
+            .iter()
+            .copied()
+            .find(|&t| t > time + self.tolerance);
+        match (permanent, runtime) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        }
     }
 
     /// Treat breakpoints at or before `time` as already handled.
@@ -223,6 +274,8 @@ impl BreakpointManager {
         {
             self.current_index += 1;
         }
+        self.runtime_breakpoints
+            .retain(|&bp| bp > time + self.tolerance);
     }
 
     /// Check if current time is exactly at a breakpoint
@@ -230,6 +283,7 @@ impl BreakpointManager {
         self.breakpoints
             .iter()
             .skip(self.current_index)
+            .chain(self.runtime_breakpoints.iter())
             .any(|&bp| (time - bp).abs() < self.tolerance)
     }
 
@@ -240,6 +294,7 @@ impl BreakpointManager {
         self.breakpoints
             .iter()
             .skip(self.current_index)
+            .chain(self.runtime_breakpoints.iter())
             .find(|&&bp| (time - bp).abs() < self.tolerance)
             .copied()
             .unwrap_or(time)
@@ -285,6 +340,8 @@ impl BreakpointManager {
         {
             self.current_index += 1;
         }
+        self.runtime_breakpoints
+            .retain(|&bp| bp > time + self.tolerance);
         self.just_passed_breakpoint = true;
         let next_gap = self
             .next_after(time)
@@ -315,17 +372,18 @@ impl BreakpointManager {
     /// Reset the manager for a new simulation
     pub fn reset(&mut self) {
         self.current_index = 0;
+        self.runtime_breakpoints.clear();
         self.just_passed_breakpoint = false;
     }
 
     /// Get total number of breakpoints
     pub fn len(&self) -> usize {
-        self.breakpoints.len()
+        self.breakpoints.len() + self.runtime_breakpoints.len()
     }
 
     /// Check if empty
     pub fn is_empty(&self) -> bool {
-        self.breakpoints.is_empty()
+        self.breakpoints.is_empty() && self.runtime_breakpoints.is_empty()
     }
 
     /// Borrow the sorted breakpoint schedule.

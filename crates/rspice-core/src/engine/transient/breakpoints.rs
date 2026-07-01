@@ -56,12 +56,18 @@ impl Engine {
         breakpoints: &mut BreakpointManager,
         tstop: Value,
     ) {
+        let mut runtime_breakpoints = Vec::new();
         if let Some(event_time) = circuit.next_xspice_event_time() {
-            Self::add_breakpoint_if_in_range(breakpoints, event_time, tstop);
+            if event_time.is_finite() && event_time >= 0.0 && event_time <= tstop {
+                runtime_breakpoints.push(event_time);
+            }
         }
         circuit.drain_xspice_requested_breakpoints(|time| {
-            Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+            if time.is_finite() && time >= 0.0 && time <= tstop {
+                runtime_breakpoints.push(time);
+            }
         });
+        breakpoints.replace_runtime_breakpoints(runtime_breakpoints);
     }
 
     pub(super) fn add_source_spec_breakpoints(
