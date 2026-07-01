@@ -12,7 +12,8 @@ use super::expr::{
     constant_dynamic_variable_slot,
 };
 use super::model::{
-    CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel, NativeRequiredStorage,
+    CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeEntryStarts, NativeModel,
+    NativeRequiredStorage,
 };
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
@@ -44,7 +45,9 @@ fn compile_model_inner(
     let base_limits = NativeLoweringLimits::for_model(model);
 
     let mut image = Vec::new();
-    let (assignment, assignment_dependencies) = append_assignment_entry(model, &mut image)?;
+    let mut entry_starts = Vec::new();
+    let (assignment, assignment_dependencies) =
+        append_assignment_entry(model, &mut image, &mut entry_starts)?;
 
     let mut parameter_defaults = Vec::with_capacity(model.parameters.len());
     for parameter in &model.parameters {
@@ -55,7 +58,7 @@ fn compile_model_inner(
                 program,
                 base_limits,
             )?;
-            Some(append_value_entry(&mut image, &program)?)
+            Some(append_value_entry(&mut image, &mut entry_starts, &program)?)
         } else {
             None
         };
@@ -102,7 +105,7 @@ fn compile_model_inner(
             )?;
             static_condition_branch_unknown_dependencies
                 .push(program.branch_unknown_dependencies().to_vec());
-            Some(append_value_entry(&mut image, &program)?)
+            Some(append_value_entry(&mut image, &mut entry_starts, &program)?)
         } else {
             static_condition_branch_unknown_dependencies.push(Vec::new());
             None
@@ -121,7 +124,7 @@ fn compile_model_inner(
         stamp_value_prior_current_dependencies.push(program.prior_current_dependencies().to_vec());
         stamp_value_branch_unknown_dependencies
             .push(program.branch_unknown_dependencies().to_vec());
-        stamp_values.push(append_value_entry(&mut image, &program)?);
+        stamp_values.push(append_value_entry(&mut image, &mut entry_starts, &program)?);
 
         let mut jacobian_current_pairs = available_current_pairs.clone();
         if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
@@ -154,7 +157,7 @@ fn compile_model_inner(
                 .push(program.prior_current_dependencies().to_vec());
             stamp_jacobian_branch_unknown_dependencies
                 .push(program.branch_unknown_dependencies().to_vec());
-            stamp_jacobians.push(append_value_entry(&mut image, &program)?);
+            stamp_jacobians.push(append_value_entry(&mut image, &mut entry_starts, &program)?);
         }
         jacobians.push(stamp_jacobians);
         jacobian_current_dependencies.push(stamp_jacobian_current_dependencies);
@@ -181,7 +184,11 @@ fn compile_model_inner(
                 .push(program.prior_current_dependencies().to_vec());
             stamp_reactive_jacobian_branch_unknown_dependencies
                 .push(program.branch_unknown_dependencies().to_vec());
-            stamp_reactive_jacobians.push(append_value_entry(&mut image, &program)?);
+            stamp_reactive_jacobians.push(append_value_entry(
+                &mut image,
+                &mut entry_starts,
+                &program,
+            )?);
         }
         reactive_jacobians.push(stamp_reactive_jacobians);
         reactive_jacobian_current_dependencies.push(stamp_reactive_jacobian_current_dependencies);
@@ -214,7 +221,11 @@ fn compile_model_inner(
             .push(psd_program.prior_current_dependencies().to_vec());
         noise_psd_branch_unknown_dependencies
             .push(psd_program.branch_unknown_dependencies().to_vec());
-        noise_psd.push(append_value_entry(&mut image, &psd_program)?);
+        noise_psd.push(append_value_entry(
+            &mut image,
+            &mut entry_starts,
+            &psd_program,
+        )?);
 
         let exponent_entry = if let Some(program) = &source.exponent_program {
             let exponent_program = NativeProgram::from_bytecode(
@@ -229,7 +240,11 @@ fn compile_model_inner(
                 .push(exponent_program.prior_current_dependencies().to_vec());
             noise_exponent_branch_unknown_dependencies
                 .push(exponent_program.branch_unknown_dependencies().to_vec());
-            Some(append_value_entry(&mut image, &exponent_program)?)
+            Some(append_value_entry(
+                &mut image,
+                &mut entry_starts,
+                &exponent_program,
+            )?)
         } else {
             noise_exponent_current_dependencies.push(Vec::new());
             noise_exponent_prior_current_dependencies.push(Vec::new());
@@ -280,6 +295,7 @@ fn compile_model_inner(
         model.parameters.len(),
         executable,
         entries,
+        NativeEntryStarts::new(entry_starts),
         current_dependencies,
         NativeRequiredStorage::for_model(model),
     )
@@ -748,6 +764,7 @@ struct AssignmentDependencies {
 fn append_assignment_entry(
     model: &CompiledModel,
     image: &mut Vec<u8>,
+    entry_starts: &mut Vec<CodeOffset>,
 ) -> JitResult<(CodeOffset, AssignmentDependencies)> {
     let assignments = model
         .assignment_steps
@@ -762,7 +779,7 @@ fn append_assignment_entry(
     } else {
         codegen::compile_assignment_pass_function(&assignments)?
     };
-    let offset = align_image_for_entry(image);
+    let offset = align_image_for_entry(image, entry_starts);
     image.extend_from_slice(&bytes);
     Ok((offset, dependencies))
 }
@@ -912,17 +929,23 @@ fn constant_indexed_assignment_slot(
     }
 }
 
-fn append_value_entry(image: &mut Vec<u8>, program: &NativeProgram) -> JitResult<CodeOffset> {
+fn append_value_entry(
+    image: &mut Vec<u8>,
+    entry_starts: &mut Vec<CodeOffset>,
+    program: &NativeProgram,
+) -> JitResult<CodeOffset> {
     let bytes = codegen::compile_value_function(program)?;
-    let offset = align_image_for_entry(image);
+    let offset = align_image_for_entry(image, entry_starts);
     image.extend_from_slice(&bytes);
     Ok(offset)
 }
 
-fn align_image_for_entry(image: &mut Vec<u8>) -> CodeOffset {
+fn align_image_for_entry(image: &mut Vec<u8>, entry_starts: &mut Vec<CodeOffset>) -> CodeOffset {
     let padding = (ENTRY_ALIGNMENT - (image.len() % ENTRY_ALIGNMENT)) % ENTRY_ALIGNMENT;
     image.resize(image.len() + padding, X64_NOP);
-    CodeOffset::new(image.len())
+    let offset = CodeOffset::new(image.len());
+    entry_starts.push(offset);
+    offset
 }
 
 fn infer_current_terminal_pair(program: &StampProgram) -> Option<(usize, usize)> {
@@ -1056,11 +1079,13 @@ mod tests {
         )
         .expect("variable ifelse lowers to native program");
         let mut image = vec![0xC3];
+        let mut entry_starts = Vec::new();
 
-        let offset =
-            super::append_value_entry(&mut image, &program).expect("append aligned value entry");
+        let offset = super::append_value_entry(&mut image, &mut entry_starts, &program)
+            .expect("append aligned value entry");
 
         assert_eq!(offset.as_usize(), super::ENTRY_ALIGNMENT);
+        assert!(entry_starts.contains(&offset));
         assert_eq!(offset.as_usize() % super::ENTRY_ALIGNMENT, 0);
         assert!(
             image[1..offset.as_usize()]
