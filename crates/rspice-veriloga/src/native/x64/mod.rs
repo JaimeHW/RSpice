@@ -17,7 +17,7 @@ use super::model::{
 };
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
-use crate::canonical_ir::{CanonicalIrArtifact, EquationId, MirModel, NodeId};
+use crate::canonical_ir::{CanonicalIrArtifact, EquationId, MirEquationKind, MirModel, NodeId};
 use crate::codegen::{AssignmentStep, CompiledModel, StampIndex, StampProgram};
 use crate::native::x64::codegen::NativeAssignment;
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
@@ -628,7 +628,115 @@ fn validate_canonical_artifact_for_model(
 
     validate_canonical_source_digest_for_model(model, artifact)?;
 
+    for (index, (equation, stamp)) in artifact
+        .mir
+        .equations
+        .iter()
+        .zip(&model.stamp_programs)
+        .enumerate()
+    {
+        validate_canonical_equation_matches_stamp(model, &artifact.mir, index, equation, stamp)?;
+    }
+
     Ok(())
+}
+
+fn validate_canonical_equation_matches_stamp(
+    model: &CompiledModel,
+    mir: &MirModel,
+    index: usize,
+    equation: &crate::canonical_ir::MirEquation,
+    stamp: &StampProgram,
+) -> JitResult<()> {
+    let expected_kind = compiled_equation_kind(stamp);
+    if equation.kind != expected_kind {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical equation {index} kind {:?} does not match compiled stamp kind {:?}",
+                equation.kind, expected_kind
+            )
+            .into(),
+        });
+    }
+
+    let canonical_pos = canonical_branch_endpoint(model, mir, equation.branch.pos_node)?;
+    let canonical_neg = canonical_branch_endpoint(model, mir, equation.branch.neg_node)?;
+    let compiled_pair = match expected_kind {
+        MirEquationKind::Current => infer_current_unified_pair(model, stamp),
+        MirEquationKind::Potential | MirEquationKind::Indirect => {
+            Some(compiled_branch_pair_for_stamp(model, stamp, index)?)
+        }
+    };
+
+    let Some((compiled_pos, compiled_neg)) = compiled_pair else {
+        return Ok(());
+    };
+    let branch_matches = match expected_kind {
+        MirEquationKind::Current => (canonical_pos, canonical_neg) == (compiled_pos, compiled_neg),
+        MirEquationKind::Potential | MirEquationKind::Indirect => {
+            same_unordered_current_pair(canonical_pos, canonical_neg, compiled_pos, compiled_neg)
+        }
+    };
+    if !branch_matches {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical equation {index} branch {} does not match compiled stamp branch {}",
+                format_current_pair(canonical_pos, canonical_neg),
+                format_current_pair(compiled_pos, compiled_neg)
+            )
+            .into(),
+        });
+    }
+
+    Ok(())
+}
+
+fn compiled_equation_kind(stamp: &StampProgram) -> MirEquationKind {
+    if stamp.indirect {
+        MirEquationKind::Indirect
+    } else if stamp.branch_ordinal.is_some() {
+        MirEquationKind::Potential
+    } else {
+        MirEquationKind::Current
+    }
+}
+
+fn compiled_branch_pair_for_stamp(
+    model: &CompiledModel,
+    stamp: &StampProgram,
+    stamp_index: usize,
+) -> JitResult<(usize, usize)> {
+    let ordinal = stamp
+        .branch_ordinal
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!("compiled stamp {stamp_index} has no branch source ordinal").into(),
+        })?;
+    let source = model
+        .branch_sources
+        .get(ordinal)
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "compiled stamp {stamp_index} branch ordinal {ordinal} is outside branch source table"
+            )
+            .into(),
+        })?;
+    Ok((
+        compiled_branch_endpoint(model, &source.pos)?,
+        compiled_branch_endpoint(model, &source.neg)?,
+    ))
+}
+
+fn same_unordered_current_pair(
+    lhs_pos: usize,
+    lhs_neg: usize,
+    rhs_pos: usize,
+    rhs_neg: usize,
+) -> bool {
+    (lhs_pos, lhs_neg) == (rhs_pos, rhs_neg) || (lhs_pos, lhs_neg) == (rhs_neg, rhs_pos)
 }
 
 fn validate_canonical_source_digest_for_model(
@@ -1290,7 +1398,10 @@ mod tests {
         NativeModel, compile_model_with_canonical_ir, lower_assignment_step,
         validate_compiled_entry_shape,
     };
-    use crate::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
+    use crate::canonical_ir::{
+        BranchUnknownId, CanonicalIrArtifact, HirContributionKind, HirExprKind, MirBranchUnknown,
+        MirEquationKind, NodeId, OptModel,
+    };
     use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
     use crate::native::EvalContext;
     use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeOp, NativeProgram};
@@ -1318,6 +1429,15 @@ mod tests {
         mir.expressions[root].kind = unsupported;
         hir.contributions[0].expression.kind = "string".into();
         mir.equations[0].expression.kind = "string".into();
+        let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
+        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+            .expect("synthetic canonical artifact has refreshed digests")
+    }
+
+    fn rebuild_canonical_artifact(artifact: CanonicalIrArtifact) -> CanonicalIrArtifact {
+        let CanonicalIrArtifact {
+            metadata, hir, mir, ..
+        } = artifact;
         let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
         CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
             .expect("synthetic canonical artifact has refreshed digests")
@@ -1397,6 +1517,82 @@ endmodule
                 .run_stamp_value(0, &ctx, std::ptr::null())
                 .expect("stamp value entry"),
             (voltages[0] - voltages[1]) / params[0]
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_rejects_mismatched_stamp_branch() {
+        let source = r#"
+module native_canonical_shape_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ V(p, n);
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let mut artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        artifact.hir.contributions[0].branch = "n,p".into();
+        artifact.hir.contributions[0].declared_branch = None;
+        artifact.mir.equations[0].branch.label = "n,p".into();
+        artifact.mir.equations[0].branch.declared_name = None;
+        artifact.mir.equations[0].branch.pos_node = Some(NodeId::new(1));
+        artifact.mir.equations[0].branch.neg_node = Some(NodeId::new(0));
+        let artifact = rebuild_canonical_artifact(artifact);
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("same-source reversed canonical branch must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("canonical equation 0 branch"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical mismatch must keep hard-JIT contract: {message}"
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_rejects_mismatched_stamp_kind() {
+        let source = r#"
+module native_canonical_kind_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ V(p, n);
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let mut artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        artifact.hir.contributions[0].kind = HirContributionKind::Potential;
+        artifact.mir.equations[0].kind = MirEquationKind::Potential;
+        let equation = artifact.mir.equations[0].clone();
+        artifact.mir.branch_unknowns = vec![MirBranchUnknown {
+            id: BranchUnknownId::new(0),
+            equation: equation.id,
+            declared_name: equation.branch.declared_name,
+            pos_node: equation.branch.pos_node,
+            neg_node: equation.branch.neg_node,
+        }];
+        let artifact = rebuild_canonical_artifact(artifact);
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("same-source wrong-kind canonical equation must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("canonical equation 0 kind"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical kind mismatch must keep hard-JIT contract: {message}"
         );
     }
 
