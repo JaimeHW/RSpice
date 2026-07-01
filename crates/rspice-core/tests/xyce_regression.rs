@@ -939,6 +939,32 @@ fn test_xyce_hspice_math_wrapper_case_runs_natively() {
 }
 
 #[test]
+fn test_xyce_voltage_accessor_wrapper_case_runs_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_407_SON/bug_407_dc.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain its removed upstream wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native Xyce voltage-accessor comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "wrapper_voltage_accessor_prn_dc",
+        "{relative} should report the native voltage-accessor wrapper contract"
+    );
+}
+
+#[test]
 fn test_xyce_bsim_gm_device_operating_point_probes_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

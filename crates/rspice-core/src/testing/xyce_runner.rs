@@ -218,6 +218,7 @@ enum XyceStaticDcContract {
     WrapperDefaultPrn,
     WrapperHspiceMathPrn,
     WrapperResistorDefaultPrn,
+    WrapperVoltageAccessorPrn,
 }
 
 impl XyceStaticDcContract {
@@ -231,6 +232,8 @@ impl XyceStaticDcContract {
             (Self::WrapperHspiceMathPrn, true) => "wrapper_hspice_math_prn_step_dc",
             (Self::WrapperResistorDefaultPrn, false) => "wrapper_resistor_default_prn_dc",
             (Self::WrapperResistorDefaultPrn, true) => "wrapper_resistor_default_prn_step_dc",
+            (Self::WrapperVoltageAccessorPrn, false) => "wrapper_voltage_accessor_prn_dc",
+            (Self::WrapperVoltageAccessorPrn, true) => "wrapper_voltage_accessor_prn_step_dc",
         }
     }
 
@@ -242,6 +245,48 @@ impl XyceStaticDcContract {
 #[derive(Debug, Clone)]
 struct XycePrintRequest {
     probes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceVoltageProbe {
+    accessor: XyceVoltageAccessor,
+    node_pos: String,
+    node_neg: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceVoltageAccessor {
+    Value,
+    Real,
+    Imaginary,
+    Magnitude,
+    Phase,
+}
+
+impl XyceVoltageAccessor {
+    fn from_function_name(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "v" => Some(Self::Value),
+            "vr" => Some(Self::Real),
+            "vi" => Some(Self::Imaginary),
+            "vm" => Some(Self::Magnitude),
+            "vp" => Some(Self::Phase),
+            _ => None,
+        }
+    }
+
+    fn uses_voltage_tolerance(self) -> bool {
+        !matches!(self, Self::Phase)
+    }
+
+    fn evaluate_dc(self, real: Value) -> Value {
+        match self {
+            Self::Value | Self::Real => real,
+            Self::Imaginary => 0.0,
+            Self::Magnitude => real.abs(),
+            Self::Phase => 0.0_f64.atan2(real).to_degrees(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -837,6 +882,11 @@ impl XyceTestRunner {
             return Ok(XyceStaticDcContract::WrapperDefaultPrn);
         }
 
+        if Self::is_native_voltage_accessor_wrapper_candidate(source) {
+            Self::validate_default_prn_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperVoltageAccessorPrn);
+        }
+
         Err(Self::upstream_wrapper_required_reason().to_string())
     }
 
@@ -903,6 +953,23 @@ impl XyceTestRunner {
         wildcard_probes
             .iter()
             .all(|probe| Self::lead_current_probe_is_omitted_empty_wildcard(&netlist, probe))
+    }
+
+    fn is_native_voltage_accessor_wrapper_candidate(source: &str) -> bool {
+        if Self::validate_default_prn_wrapper_source(source).is_err() {
+            return false;
+        }
+        let Ok(print) = Self::single_dc_print_request(source) else {
+            return false;
+        };
+
+        print.probes.iter().any(|probe| {
+            let expression = Self::print_expression_inner(probe).unwrap_or(probe);
+            let normalized = Self::normalize_probe(expression);
+            Self::parse_voltage_probe(&normalized)
+                .is_some_and(|probe| probe.accessor != XyceVoltageAccessor::Value)
+                || Self::print_expression_contains_voltage_accessor_call(expression)
+        })
     }
 
     fn upstream_wrapper_required_reason() -> &'static str {
@@ -2191,7 +2258,9 @@ impl XyceTestRunner {
     }
 
     fn probe_uses_voltage_tolerance(normalized_probe: &str) -> bool {
-        normalized_probe == "v-sweep" || Self::parse_voltage_probe(normalized_probe).is_some()
+        normalized_probe == "v-sweep"
+            || Self::parse_voltage_probe(normalized_probe)
+                .is_some_and(|probe| probe.accessor.uses_voltage_tolerance())
     }
 
     fn split_comp_directive(rest: &str) -> Option<(String, String)> {
@@ -2673,8 +2742,13 @@ impl XyceTestRunner {
         original: &str,
         netlist: &Netlist,
     ) -> Result<(), String> {
-        if let Some((node_pos, node_neg)) = Self::parse_voltage_probe(normalized) {
-            if !node_pos.is_empty() && node_neg.as_deref().is_none_or(|node| !node.is_empty()) {
+        if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
+            if !voltage_probe.node_pos.is_empty()
+                && voltage_probe
+                    .node_neg
+                    .as_deref()
+                    .is_none_or(|node| !node.is_empty())
+            {
                 return Ok(());
             }
         }
@@ -2847,15 +2921,17 @@ impl XyceTestRunner {
         result: &crate::SimulationResult,
         op_report: &crate::circuit::DeviceOpReport,
     ) -> Result<f64, String> {
-        if let Some((node_pos, node_neg)) = Self::parse_voltage_probe(normalized) {
-            let pos = Self::result_voltage_named(result, &node_pos)
-                .ok_or_else(|| format!("node '{}' not found in DC result", node_pos))?;
-            let neg = match node_neg {
+        if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
+            let pos =
+                Self::result_voltage_named(result, &voltage_probe.node_pos).ok_or_else(|| {
+                    format!("node '{}' not found in DC result", voltage_probe.node_pos)
+                })?;
+            let neg = match voltage_probe.node_neg {
                 Some(node) => Self::result_voltage_named(result, &node)
                     .ok_or_else(|| format!("node '{}' not found in DC result", node))?,
                 None => 0.0,
             };
-            return Ok(pos - neg);
+            return Ok(voltage_probe.accessor.evaluate_dc(pos - neg));
         }
 
         if let Some((element_name, parameter)) =
@@ -3193,7 +3269,7 @@ impl XyceTestRunner {
 
         if placeholder_index == 0 {
             return Err(format!(
-                ".PRINT DC expression '{{{expression}}}' does not contain a supported V(), I(), or N() probe"
+                ".PRINT DC expression '{{{expression}}}' does not contain a supported voltage, current, or device probe"
             ));
         }
 
@@ -3264,6 +3340,26 @@ impl XyceTestRunner {
         false
     }
 
+    fn print_expression_contains_voltage_accessor_call(expression: &str) -> bool {
+        let mut index = 0usize;
+        while index < expression.len() {
+            if let Some(open_index) = Self::print_probe_call_open_index(expression, index) {
+                let call = &expression[index..open_index];
+                if XyceVoltageAccessor::from_function_name(call)
+                    .is_some_and(|accessor| accessor != XyceVoltageAccessor::Value)
+                {
+                    return true;
+                }
+            }
+            let ch = expression[index..]
+                .chars()
+                .next()
+                .expect("valid char boundary");
+            index += ch.len_utf8();
+        }
+        false
+    }
+
     fn braced_expression_is_atomic_probe(normalized_expression: &str) -> bool {
         Self::parse_device_parameter_probe(normalized_expression).is_some()
             || Self::parse_bare_device_parameter_probe(normalized_expression).is_some()
@@ -3278,10 +3374,13 @@ impl XyceTestRunner {
     }
 
     fn probe_call_covers_entire_expression(expression: &str) -> bool {
-        if expression.len() < 3 || !expression.is_char_boundary(1) {
+        let Some(open_index) = expression.find('(') else {
+            return false;
+        };
+        if open_index == 0 || !expression.is_char_boundary(open_index) {
             return false;
         }
-        Self::matching_parenthesis_index(expression, 1)
+        Self::matching_parenthesis_index(expression, open_index)
             .is_ok_and(|close_index| close_index + 1 == expression.len())
     }
 
@@ -3295,7 +3394,9 @@ impl XyceTestRunner {
         }
 
         let rest = &expression[index..];
-        for prefix in ["id", "ig", "is", "ib", "v", "i", "n"] {
+        for prefix in [
+            "id", "ig", "is", "ib", "ic", "ie", "vr", "vi", "vm", "vp", "v", "i", "n",
+        ] {
             let next_index = index + prefix.len();
             if rest.len() <= prefix.len()
                 || !expression.is_char_boundary(next_index)
@@ -5238,20 +5339,27 @@ impl XyceTestRunner {
             .to_ascii_lowercase()
     }
 
-    fn parse_voltage_probe(probe: &str) -> Option<(String, Option<String>)> {
+    fn parse_voltage_probe(probe: &str) -> Option<XyceVoltageProbe> {
         let normalized = Self::normalize_probe(probe);
-        if !normalized.starts_with("v(") || !normalized.ends_with(')') {
+        let open_index = normalized.find('(')?;
+        if !normalized.ends_with(')') {
             return None;
         }
-        let inner = &normalized[2..normalized.len() - 1];
+        let accessor = XyceVoltageAccessor::from_function_name(&normalized[..open_index])?;
+        let inner = &normalized[open_index + 1..normalized.len() - 1];
         if inner.is_empty() {
             return None;
         }
-        if let Some((a, b)) = inner.split_once(',') {
-            Some((a.to_string(), Some(b.to_string())))
+        let (node_pos, node_neg) = if let Some((a, b)) = inner.split_once(',') {
+            (a.to_string(), Some(b.to_string()))
         } else {
-            Some((inner.to_string(), None))
-        }
+            (inner.to_string(), None)
+        };
+        Some(XyceVoltageProbe {
+            accessor,
+            node_pos,
+            node_neg,
+        })
     }
 
     fn parse_current_probe(probe: &str) -> Option<String> {
@@ -5541,9 +5649,13 @@ End of Xyce(TM) Simulation
     fn default_tolerances_are_unit_aware() {
         let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
         let voltage_tolerance = runner.default_comparison_tolerance("v(1)");
+        let magnitude_tolerance = runner.default_comparison_tolerance("vm(1)");
+        let phase_tolerance = runner.default_comparison_tolerance("vp(1)");
         let current_tolerance = runner.default_comparison_tolerance("i(v1)");
 
         assert_eq!(voltage_tolerance.absolute, crate::constants::VNTOL);
+        assert_eq!(magnitude_tolerance.absolute, crate::constants::VNTOL);
+        assert_eq!(phase_tolerance.absolute, 1.0e-12);
         assert_eq!(current_tolerance.absolute, 1.0e-12);
         assert!(
             runner
@@ -5557,6 +5669,33 @@ End of Xyce(TM) Simulation
                 .is_some(),
             "current differences keep the stricter ITOL-scale default"
         );
+    }
+
+    #[test]
+    fn voltage_probe_parses_xyce_dc_accessors() {
+        assert_eq!(
+            XyceTestRunner::parse_voltage_probe("VR(A,B)"),
+            Some(XyceVoltageProbe {
+                accessor: XyceVoltageAccessor::Real,
+                node_pos: "a".to_string(),
+                node_neg: Some("b".to_string()),
+            })
+        );
+        assert_eq!(
+            XyceTestRunner::parse_voltage_probe(" vm( OUT ) "),
+            Some(XyceVoltageProbe {
+                accessor: XyceVoltageAccessor::Magnitude,
+                node_pos: "out".to_string(),
+                node_neg: None,
+            })
+        );
+        assert_eq!(
+            XyceTestRunner::parse_voltage_probe("VP(n1,n2)")
+                .expect("phase probe parses")
+                .accessor,
+            XyceVoltageAccessor::Phase
+        );
+        assert!(XyceTestRunner::parse_voltage_probe("VX(A)").is_none());
     }
 
     #[test]
@@ -5607,6 +5746,27 @@ End of Xyce(TM) Simulation
         .expect("lead-current probe expression evaluates");
 
         assert_eq!(value, 11.0);
+    }
+
+    #[test]
+    fn print_expression_evaluates_xyce_voltage_accessor_probe_calls() {
+        let context = crate::netlist::ParamContext::new();
+        let mut call_value = |call: &str| match XyceTestRunner::normalize_probe(call).as_str() {
+            "vr(a)" => Ok(2.0),
+            "vi(a)" => Ok(0.25),
+            "vm(a)" => Ok(2.0),
+            "vp(a)" => Ok(180.0),
+            other => Err(format!("unexpected probe {other}")),
+        };
+
+        let value = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+            "VR(A) + VI(A) + VM(A) + VP(A)",
+            context,
+            &mut call_value,
+        )
+        .expect("voltage-accessor probe expression evaluates");
+
+        assert_eq!(value, 184.25);
     }
 
     #[test]
