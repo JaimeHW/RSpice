@@ -819,8 +819,108 @@ impl CodeModel for DigitalPwmOscillator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::xspice::AnalysisType;
     use crate::xspice::context::{InputValue, PendingDigitalEvent};
+    use crate::xspice::{AnalysisType, ParamType};
+
+    fn param_summary(model: &dyn CodeModel) -> Vec<(&str, ParamType, Value, Option<&[Value]>)> {
+        model
+            .parameters()
+            .iter()
+            .map(|param| {
+                (
+                    param.name.as_str(),
+                    param.param_type,
+                    param.default,
+                    param.real_vector_default.as_deref(),
+                )
+            })
+            .collect()
+    }
+
+    fn assert_digital_oscillator_ports(model: &dyn CodeModel) {
+        let ports = model.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["cntl_in", "out"]
+        );
+        assert_eq!(ports[0].direction, PortDirection::In);
+        assert_eq!(ports[0].default_type, PortType::Voltage);
+        assert_eq!(
+            ports[0].allowed_types,
+            vec![
+                PortType::Voltage,
+                PortType::DifferentialVoltage,
+                PortType::Current,
+                PortType::DifferentialCurrent,
+            ]
+        );
+        assert!(!ports[0].is_vector);
+        assert!(!ports[0].null_allowed);
+        assert_eq!(ports[1].direction, PortDirection::Out);
+        assert_eq!(ports[1].default_type, PortType::Digital);
+        assert_eq!(ports[1].allowed_types, vec![PortType::Digital]);
+        assert!(!ports[1].is_vector);
+        assert!(!ports[1].null_allowed);
+    }
+
+    #[test]
+    fn d_osc_metadata_matches_ngspice46_interface() {
+        assert_digital_oscillator_ports(&DigitalOscillator);
+        assert_eq!(
+            param_summary(&DigitalOscillator),
+            vec![
+                (
+                    "cntl_array",
+                    ParamType::RealVector,
+                    0.0,
+                    Some([0.0, 1.0].as_slice()),
+                ),
+                (
+                    "freq_array",
+                    ParamType::RealVector,
+                    0.0,
+                    Some([1.0e6, 2.0e6].as_slice()),
+                ),
+                ("duty_cycle", ParamType::Real, 0.5, None),
+                ("init_phase", ParamType::Real, 0.0, None),
+                ("rise_delay", ParamType::Real, 1.0e-9, None),
+                ("fall_delay", ParamType::Real, 1.0e-9, None),
+            ]
+        );
+        assert_eq!(DigitalOscillator.parameters()[0].vector_min_len, Some(2));
+        assert_eq!(DigitalOscillator.parameters()[1].vector_min_len, Some(2));
+    }
+
+    #[test]
+    fn d_pwm_metadata_matches_ngspice46_interface() {
+        assert_digital_oscillator_ports(&DigitalPwmOscillator);
+        assert_eq!(
+            param_summary(&DigitalPwmOscillator),
+            vec![
+                (
+                    "cntl_array",
+                    ParamType::RealVector,
+                    0.0,
+                    Some([-1.0, 1.0].as_slice()),
+                ),
+                (
+                    "dc_array",
+                    ParamType::RealVector,
+                    0.0,
+                    Some([0.0, 1.0].as_slice()),
+                ),
+                ("frequency", ParamType::Real, 1.0e6, None),
+                ("init_phase", ParamType::Real, 0.0, None),
+                ("rise_delay", ParamType::Real, 1.0e-9, None),
+                ("fall_delay", ParamType::Real, 1.0e-9, None),
+            ]
+        );
+        assert_eq!(DigitalPwmOscillator.parameters()[0].vector_min_len, Some(2));
+        assert_eq!(DigitalPwmOscillator.parameters()[1].vector_min_len, Some(2));
+    }
 
     #[test]
     fn digital_oscillators_ignore_bad_control_tables_like_ngspice() {
