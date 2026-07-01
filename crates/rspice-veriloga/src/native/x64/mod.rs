@@ -2,12 +2,13 @@ pub(crate) mod codegen;
 pub mod encoder;
 
 use super::expr::{
-    BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, EntryKind, NativeLoweringLimits,
-    NativeOp, NativeProgram, PriorCurrentProbe, canonical_above_slots_for_equation,
-    canonical_absdelay_slots_for_equation, canonical_cross_slots_for_equation,
-    canonical_ddt_slots_for_equation, canonical_idt_slots_for_equation,
-    canonical_idtmod_slots_for_equation, canonical_laplace_slots_for_equation,
-    canonical_limit_slots_for_equation, canonical_slew_slots_for_equation,
+    BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, CanonicalStateOperator, EntryKind,
+    NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
+    canonical_above_slots_for_equation, canonical_absdelay_slots_for_equation,
+    canonical_cross_slots_for_equation, canonical_ddt_slots_for_equation,
+    canonical_idt_slots_for_equation, canonical_idtmod_slots_for_equation,
+    canonical_laplace_slots_for_equation, canonical_limit_slots_for_equation,
+    canonical_slew_slots_for_equation, canonical_state_slots_for_expression,
     canonical_table_lookup_slots_for_equation, canonical_timer_slots_for_equation,
     canonical_transition_slots_for_equation, canonical_zi_slots_for_equation,
     constant_dynamic_variable_slot, native_op_stack_effect,
@@ -3280,21 +3281,31 @@ fn lower_canonical_assignment(
     }
 
     let var_index = validate_canonical_scalar_assignment_target(model, assignment)?;
+    let bytecode_program = find_scalar_assignment_program(&model.assignment_steps, var_index);
     let mut assignments = canonical_scalar_shadow_assignments(
         model,
         mir,
         assignment.target_name.as_str(),
         assignment.expr.id,
+        bytecode_program,
         live,
         shadow_index,
         limits,
     )?;
     if live.get(var_index).copied().unwrap_or(false) {
-        let program = NativeProgram::from_mir_expression(
-            model.name.clone(),
-            EntryKind::Assignment,
+        let bytecode_program = bytecode_program.ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical assignment '{}' has no matching compiled assignment program",
+                assignment.target_name
+            )
+            .into(),
+        })?;
+        let program = lower_canonical_assignment_expression_program(
+            model,
             mir,
             assignment.expr.id,
+            bytecode_program,
             limits,
         )?;
         trace_assignment_program_stack(model, assignment.target_name.as_str(), &program);
@@ -3330,18 +3341,29 @@ fn lower_canonical_indexed_assignment(
     if !assignment_range_live(base, len, live) {
         return Ok(assignments);
     }
-    let index = NativeProgram::from_mir_expression(
-        model.name.clone(),
-        EntryKind::Assignment,
+    let (index_program, value_program) =
+        find_indexed_assignment_programs(&model.assignment_steps, base, len, lower).ok_or_else(
+            || JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical indexed assignment '{}' has no matching compiled assignment program",
+                    assignment.target_name
+                )
+                .into(),
+            },
+        )?;
+    let index = lower_canonical_assignment_expression_program(
+        model,
         mir,
         index_expr,
+        index_program,
         limits,
     )?;
-    let value = NativeProgram::from_mir_expression(
-        model.name.clone(),
-        EntryKind::Assignment,
+    let value = lower_canonical_assignment_expression_program(
+        model,
         mir,
         assignment.expr.id,
+        value_program,
         limits,
     )?;
     trace_assignment_program_stack(model, assignment.target_name.as_str(), &value);
@@ -3399,6 +3421,7 @@ fn canonical_scalar_shadow_assignments(
     mir: &MirModel,
     target_name: &str,
     expr_id: ExprId,
+    bytecode_program: Option<&BytecodeProgram>,
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
     limits: NativeLoweringLimits<'_>,
@@ -3409,7 +3432,22 @@ fn canonical_scalar_shadow_assignments(
             continue;
         }
         validate_assignment_target(model, shadow.var_index)?;
-        let program = lower_canonical_shadow_program(model, mir, expr_id, &shadow.axes, limits)?;
+        let bytecode_program = bytecode_program.ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical assignment '{target_name}' derivative shadow '{}' has no matching compiled assignment program",
+                shadow.name
+            )
+            .into(),
+        })?;
+        let program = lower_canonical_shadow_program(
+            model,
+            mir,
+            expr_id,
+            bytecode_program,
+            &shadow.axes,
+            limits,
+        )?;
         trace_assignment_program_stack(model, shadow.name.as_str(), &program);
         assignments.push(NativeAssignment::Direct {
             var_index: shadow.var_index,
@@ -3485,14 +3523,31 @@ fn canonical_array_shadow_assignments(
         if !assignment_range_live(shadow.base, shadow.len, live) {
             continue;
         }
-        let index = NativeProgram::from_mir_expression(
-            model.name.clone(),
-            EntryKind::Assignment,
+        let (index_program, value_program) =
+            find_indexed_assignment_programs(&model.assignment_steps, source_base, source_len, source_lower)
+                .ok_or_else(|| JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: format!(
+                        "canonical indexed assignment '{array_name}' derivative shadow '{}' has no matching compiled assignment program",
+                        shadow.suffix
+                    )
+                    .into(),
+                })?;
+        let index = lower_canonical_assignment_expression_program(
+            model,
             mir,
             index_expr,
+            index_program,
             limits,
         )?;
-        let value = lower_canonical_shadow_program(model, mir, value_expr, &shadow.axes, limits)?;
+        let value = lower_canonical_shadow_program(
+            model,
+            mir,
+            value_expr,
+            value_program,
+            &shadow.axes,
+            limits,
+        )?;
         trace_assignment_program_stack(model, &format!("{array_name}{}", shadow.suffix), &value);
         if let Some(var_index) =
             constant_indexed_assignment_slot(&index, shadow.base, shadow.len, shadow.lower)
@@ -3513,6 +3568,139 @@ fn canonical_array_shadow_assignments(
         }
     }
     Ok(assignments)
+}
+
+fn lower_canonical_assignment_expression_program(
+    model: &CompiledModel,
+    mir: &MirModel,
+    expr_id: ExprId,
+    bytecode_program: &BytecodeProgram,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<NativeProgram> {
+    let slots =
+        CanonicalExpressionStateSlots::for_expression(model, mir, expr_id, bytecode_program)?;
+    NativeProgram::from_mir_expression(
+        model.name.clone(),
+        EntryKind::Assignment,
+        mir,
+        expr_id,
+        slots.apply(limits),
+    )
+}
+
+struct CanonicalExpressionStateSlots {
+    ddt: Vec<(ExprId, usize)>,
+    idt: Vec<(ExprId, usize)>,
+    idtmod: Vec<(ExprId, usize)>,
+    transition: Vec<(ExprId, usize)>,
+    slew: Vec<(ExprId, usize)>,
+    absdelay: Vec<(ExprId, usize)>,
+    laplace: Vec<(ExprId, usize)>,
+    zi: Vec<(ExprId, usize)>,
+    cross: Vec<(ExprId, usize)>,
+    above: Vec<(ExprId, usize)>,
+    timer: Vec<(ExprId, usize)>,
+    limit: Vec<(ExprId, usize)>,
+    table_lookup: Vec<(ExprId, usize)>,
+}
+
+impl CanonicalExpressionStateSlots {
+    fn for_expression(
+        model: &CompiledModel,
+        mir: &MirModel,
+        expr_id: ExprId,
+        bytecode_program: &BytecodeProgram,
+    ) -> JitResult<Self> {
+        let collect = |operator| {
+            canonical_state_slots_for_expression(
+                model.name.clone(),
+                mir,
+                expr_id,
+                bytecode_program,
+                operator,
+            )
+        };
+        Ok(Self {
+            ddt: collect(CanonicalStateOperator::Ddt)?,
+            idt: collect(CanonicalStateOperator::Idt)?,
+            idtmod: collect(CanonicalStateOperator::IdtMod)?,
+            transition: collect(CanonicalStateOperator::Transition)?,
+            slew: collect(CanonicalStateOperator::Slew)?,
+            absdelay: collect(CanonicalStateOperator::Absdelay)?,
+            laplace: collect(CanonicalStateOperator::Laplace)?,
+            zi: collect(CanonicalStateOperator::Zi)?,
+            cross: collect(CanonicalStateOperator::Cross)?,
+            above: collect(CanonicalStateOperator::Above)?,
+            timer: collect(CanonicalStateOperator::Timer)?,
+            limit: collect(CanonicalStateOperator::Limit)?,
+            table_lookup: collect(CanonicalStateOperator::TableLookup)?,
+        })
+    }
+
+    fn apply<'a>(&'a self, limits: NativeLoweringLimits<'a>) -> NativeLoweringLimits<'a> {
+        limits
+            .with_canonical_ddt_slots(&self.ddt)
+            .with_canonical_idt_slots(&self.idt)
+            .with_canonical_idtmod_slots(&self.idtmod)
+            .with_canonical_transition_slots(&self.transition)
+            .with_canonical_slew_slots(&self.slew)
+            .with_canonical_absdelay_slots(&self.absdelay)
+            .with_canonical_laplace_slots(&self.laplace)
+            .with_canonical_zi_slots(&self.zi)
+            .with_canonical_cross_slots(&self.cross)
+            .with_canonical_above_slots(&self.above)
+            .with_canonical_timer_slots(&self.timer)
+            .with_canonical_limit_slots(&self.limit)
+            .with_canonical_table_lookup_slots(&self.table_lookup)
+    }
+}
+
+fn find_scalar_assignment_program(
+    steps: &[AssignmentStep],
+    var_index: usize,
+) -> Option<&BytecodeProgram> {
+    for step in steps {
+        match step {
+            AssignmentStep::Assign(assignment) if assignment.var_index == var_index => {
+                return Some(&assignment.program);
+            }
+            AssignmentStep::Loop { body, .. } => {
+                if let Some(program) = find_scalar_assignment_program(body, var_index) {
+                    return Some(program);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn find_indexed_assignment_programs(
+    steps: &[AssignmentStep],
+    base: usize,
+    len: usize,
+    lower: i64,
+) -> Option<(&BytecodeProgram, &BytecodeProgram)> {
+    for step in steps {
+        match step {
+            AssignmentStep::AssignIndexed {
+                base: step_base,
+                len: step_len,
+                lower: step_lower,
+                index,
+                value,
+            } if *step_base == base && *step_len == len && *step_lower == lower => {
+                return Some((index, value));
+            }
+            AssignmentStep::Loop { body, .. } => {
+                if let Some(programs) = find_indexed_assignment_programs(body, base, len, lower) {
+                    return Some(programs);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn trace_assignment_program_stack(model: &CompiledModel, label: &str, program: &NativeProgram) {
@@ -3547,9 +3735,13 @@ fn lower_canonical_shadow_program(
     model: &CompiledModel,
     mir: &MirModel,
     expr_id: ExprId,
+    bytecode_program: &BytecodeProgram,
     axes: &[CanonicalDerivativeAxis],
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<NativeProgram> {
+    let slots =
+        CanonicalExpressionStateSlots::for_expression(model, mir, expr_id, bytecode_program)?;
+    let limits = slots.apply(limits);
     match axes {
         [axis] => NativeProgram::from_mir_expression_derivative(
             model.name.clone(),
@@ -5669,6 +5861,37 @@ endmodule
             .expect("static condition has native entry");
 
         assert_eq!(active.to_bits(), 1.0_f64.to_bits());
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_maps_guarded_indirect_branch_unknown() {
+        let source = r#"
+`include "disciplines.vams"
+module native_canonical_guarded_indirect(p);
+  inout p;
+  electrical p;
+  parameter integer en = 1;
+  analog begin
+    if (en)
+      V(p): V(p) == 3.0;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        assert_eq!(model.branch_sources.len(), 1);
+        assert_eq!(artifact.mir.branch_unknowns.len(), 1);
+        assert_eq!(
+            artifact.mir.branch_unknowns[0].equation,
+            artifact.mir.equations[0].id
+        );
+
+        let _native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("guarded indirect branch unknown maps to the compiled branch source");
     }
 
     #[test]

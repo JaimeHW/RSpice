@@ -242,12 +242,25 @@ endmodule
     let _ = std::fs::remove_file(model_path);
 
     let result = result.expect("dependent default runtime errors must not panic");
-    let err = result.expect_err("dependent default runtime error must be reported");
-    let text = err.to_string();
-    assert!(
-        text.contains("Verilog-A") && text.contains("parameter"),
-        "diagnostic should identify the Verilog-A parameter default failure, got: {text}"
-    );
+    #[cfg(feature = "veriloga-native")]
+    {
+        let op = result.expect("native canonical defaults must ignore stale bytecode defaults");
+        assert_eq!(op.branch_currents.len(), 1);
+        assert!(
+            (op.branch_currents[0] + 0.1).abs() < 1.0e-12,
+            "canonical r = 10/w default should set source current to -0.1 A, got {:?}",
+            op.branch_currents
+        );
+    }
+    #[cfg(not(feature = "veriloga-native"))]
+    {
+        let err = result.expect_err("dependent default runtime error must be reported");
+        let text = err.to_string();
+        assert!(
+            text.contains("Verilog-A") && text.contains("parameter"),
+            "diagnostic should identify the Verilog-A parameter default failure, got: {text}"
+        );
+    }
 }
 
 #[test]

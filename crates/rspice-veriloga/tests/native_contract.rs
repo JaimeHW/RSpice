@@ -5,7 +5,9 @@
 //! must return a native JIT error, not create a device that runs the VM.
 #![cfg(feature = "native")]
 
-use rspice_veriloga::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
+use rspice_veriloga::canonical_ir::CanonicalIrArtifact;
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
+use rspice_veriloga::canonical_ir::{HirExprKind, OptModel};
 #[cfg(feature = "native-bytecode-contract-tests")]
 use rspice_veriloga::codegen::Instruction;
 use rspice_veriloga::device::VerilogADevice;
@@ -14,11 +16,65 @@ use rspice_veriloga::native::compile_native;
 use rspice_veriloga::native::compile_native_with_canonical_ir;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 fn compile(source: &str) -> rspice_veriloga::CompiledModel {
-    VerilogACompiler::new(CompilerOptions::default())
+    let model = VerilogACompiler::new(CompilerOptions::default())
         .compile(source)
-        .expect("Verilog-A source must compile")
+        .expect("Verilog-A source must compile");
+    register_compiled_source(&model, source);
+    model
+}
+
+fn source_registry() -> &'static Mutex<HashMap<String, String>> {
+    static SOURCES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    SOURCES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn source_key(model: &rspice_veriloga::CompiledModel) -> String {
+    if model.source_digest.is_empty() {
+        model.name.to_string()
+    } else {
+        model.source_digest.to_string()
+    }
+}
+
+fn register_compiled_source(model: &rspice_veriloga::CompiledModel, source: &str) {
+    source_registry()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .insert(source_key(model), source.to_string());
+}
+
+fn canonical_artifact_for_model(model: &rspice_veriloga::CompiledModel) -> CanonicalIrArtifact {
+    let source = source_registry()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .get(&source_key(model))
+        .cloned()
+        .unwrap_or_else(|| panic!("no registered source for compiled model '{}'", model.name));
+    VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&source)
+        .expect("registered Verilog-A source must compile to canonical IR")
+}
+
+fn native_contract_try_new(
+    name: &str,
+    model: impl Into<std::sync::Arc<rspice_veriloga::CompiledModel>>,
+    nodes: &[usize],
+) -> Result<VerilogADevice, rspice_veriloga::vm::VmError> {
+    let model = model.into();
+
+    #[cfg(feature = "native-bytecode-contract-tests")]
+    {
+        VerilogADevice::try_new(name, model, nodes)
+    }
+
+    #[cfg(not(feature = "native-bytecode-contract-tests"))]
+    {
+        let artifact = canonical_artifact_for_model(model.as_ref());
+        VerilogADevice::try_new_with_canonical_ir(name, model, &artifact, nodes)
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -37,6 +93,7 @@ fn canonical_device_from_source(instance: &str, source: &str) -> VerilogADevice 
     device
 }
 
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 fn canonical_artifact_with_unsupported_root(
     compiler: &VerilogACompiler,
     source: &str,
@@ -1182,7 +1239,7 @@ fn native_device_executes_dependent_parameter_defaults_without_fallback() {
         "fixture must contain a dependent parameter default program"
     );
 
-    let mut default_base = VerilogADevice::try_new("DEPDEFAULT1", model.clone(), &[1, 0])
+    let mut default_base = native_contract_try_new("DEPDEFAULT1", model.clone(), &[1, 0])
         .expect("dependent default model uses native JIT");
     assert!(default_base.is_using_native());
     default_base.update_voltages(&[2.0]);
@@ -1194,7 +1251,7 @@ fn native_device_executes_dependent_parameter_defaults_without_fallback() {
         "currents: {currents:?}"
     );
 
-    let mut overridden_base = VerilogADevice::try_new("DEPDEFAULT2", model.clone(), &[1, 0])
+    let mut overridden_base = native_contract_try_new("DEPDEFAULT2", model.clone(), &[1, 0])
         .expect("dependent default model uses native JIT");
     assert!(overridden_base.set_parameter("base", 4.0));
     overridden_base
@@ -1209,7 +1266,7 @@ fn native_device_executes_dependent_parameter_defaults_without_fallback() {
         "currents: {currents:?}"
     );
 
-    let mut overridden_derived = VerilogADevice::try_new("DEPDEFAULT3", model, &[1, 0])
+    let mut overridden_derived = native_contract_try_new("DEPDEFAULT3", model, &[1, 0])
         .expect("dependent default model uses native JIT");
     assert!(overridden_derived.set_parameter("base", 4.0));
     assert!(overridden_derived.set_parameter("derived", 9.0));
@@ -1240,7 +1297,7 @@ fn native_dependent_parameter_defaults_resolve_in_declaration_order() {
         "fixture must contain a dependent default chain"
     );
 
-    let mut device = VerilogADevice::try_new("DEPCHAIN1", model, &[1, 0])
+    let mut device = native_contract_try_new("DEPCHAIN1", model, &[1, 0])
         .expect("dependent default chain model uses native JIT");
     assert!(device.is_using_native());
     device.update_voltages(&[2.0]);
@@ -1266,7 +1323,7 @@ fn native_dependent_parameter_defaults_apply_declared_bounds() {
         "fixture must contain a bounded dependent default"
     );
 
-    let mut device = VerilogADevice::try_new("DEPCLAMP1", model, &[1, 0])
+    let mut device = native_contract_try_new("DEPCLAMP1", model, &[1, 0])
         .expect("bounded dependent default model uses native JIT");
     assert!(device.is_using_native());
     device.update_voltages(&[2.0]);
@@ -1294,7 +1351,7 @@ fn native_dependent_parameter_defaults_preserve_param_given_semantics() {
         "fixture must contain param-given dependent defaults"
     );
 
-    let mut defaults = VerilogADevice::try_new("DEPGIVEN1", model.clone(), &[1, 0])
+    let mut defaults = native_contract_try_new("DEPGIVEN1", model.clone(), &[1, 0])
         .expect("param-given dependent default model uses native JIT");
     defaults.update_voltages(&[2.0]);
     let currents = defaults
@@ -1305,7 +1362,7 @@ fn native_dependent_parameter_defaults_preserve_param_given_semantics() {
         "currents: {currents:?}"
     );
 
-    let mut base_given = VerilogADevice::try_new("DEPGIVEN2", model.clone(), &[1, 0])
+    let mut base_given = native_contract_try_new("DEPGIVEN2", model.clone(), &[1, 0])
         .expect("param-given dependent default model uses native JIT");
     assert!(base_given.set_parameter("base", 4.0));
     base_given
@@ -1320,7 +1377,7 @@ fn native_dependent_parameter_defaults_preserve_param_given_semantics() {
         "currents: {currents:?}"
     );
 
-    let mut scale_given = VerilogADevice::try_new("DEPGIVEN3", model, &[1, 0])
+    let mut scale_given = native_contract_try_new("DEPGIVEN3", model, &[1, 0])
         .expect("param-given dependent default model uses native JIT");
     assert!(scale_given.set_parameter("scale", 11.0));
     scale_given
@@ -1350,7 +1407,7 @@ fn native_dependent_parameter_defaults_support_binary_math_functions() {
         "fixture must contain binary-math dependent defaults"
     );
 
-    let mut device = VerilogADevice::try_new("DEPBINMATH1", model, &[1, 0])
+    let mut device = native_contract_try_new("DEPBINMATH1", model, &[1, 0])
         .expect("binary-math dependent default model uses native JIT");
     assert!(device.is_using_native());
     device.update_voltages(&[2.0]);
@@ -1389,7 +1446,7 @@ fn native_model_image_publishes_multiple_stamp_and_jacobian_entries() {
 fn native_device_stamps_multiple_flow_contributions_from_one_image() {
     let model = multi_stamp_model();
     let mut device =
-        VerilogADevice::try_new("MS1", model, &[1, 0]).expect("multi-stamp model uses native JIT");
+        native_contract_try_new("MS1", model, &[1, 0]).expect("multi-stamp model uses native JIT");
 
     let currents = {
         device.update_voltages(&[4.0]);
@@ -1445,7 +1502,7 @@ fn native_device_stamps_potential_branch_unknowns() {
     assert_eq!(model.branch_sources.len(), 1);
 
     let mut device =
-        VerilogADevice::try_new("Z1", model, &[1, 2]).expect("potential branch uses native JIT");
+        native_contract_try_new("Z1", model, &[1, 2]).expect("potential branch uses native JIT");
     device.set_branch_current_indices(&[3]);
 
     let (matrix, rhs) = stamp_device(&mut device, &[1.0, 0.5, 1.0e-3]);
@@ -1681,7 +1738,7 @@ endmodule
 fn native_device_stamps_simple_resistor_without_interpreter_fallback() {
     let model = simple_resistor_model();
     let mut device =
-        VerilogADevice::try_new("RN1", model, &[1, 0]).expect("simple resistor uses native JIT");
+        native_contract_try_new("RN1", model, &[1, 0]).expect("simple resistor uses native JIT");
     assert!(device.is_using_native());
 
     let (matrix, rhs) = stamp_device(&mut device, &[4.0]);
@@ -3003,7 +3060,7 @@ endmodule
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
@@ -3041,7 +3098,7 @@ endmodule
 #[test]
 fn native_device_executes_scalar_assignment_pass() {
     let model = assignment_fed_model();
-    let mut device = VerilogADevice::try_new("AN1", model, &[1, 0])
+    let mut device = native_contract_try_new("AN1", model, &[1, 0])
         .expect("assignment-fed model uses native JIT");
     assert!(device.is_using_native());
 
@@ -3065,7 +3122,7 @@ fn native_device_executes_scalar_assignments_in_source_order() {
         model.assignment_steps.len() >= 2,
         "fixture must contain multiple scalar assignment steps"
     );
-    let mut device = VerilogADevice::try_new("ACHAIN1", model, &[1, 0])
+    let mut device = native_contract_try_new("ACHAIN1", model, &[1, 0])
         .expect("assignment-chain model uses native JIT");
     assert!(device.is_using_native());
     assert_eq!(device.native_plan_stats().assignment_entry_points, 1);
@@ -3086,7 +3143,7 @@ fn native_device_executes_scalar_assignments_in_source_order() {
 #[test]
 fn native_device_executes_scalar_simulator_context_reads() {
     let model = scalar_context_model();
-    let mut device = VerilogADevice::try_new("CTX1", model, &[1, 0])
+    let mut device = native_contract_try_new("CTX1", model, &[1, 0])
         .expect("context scalar model uses native JIT");
     device.set_temperature(310.0);
     device.set_time(2.0);
@@ -3109,7 +3166,7 @@ fn native_device_executes_scalar_simulator_context_reads() {
 fn native_device_executes_analysis_guards_without_fallback() {
     let model = analysis_guard_model();
     let mut device =
-        VerilogADevice::try_new("ANG1", model, &[1, 0]).expect("analysis model uses native JIT");
+        native_contract_try_new("ANG1", model, &[1, 0]).expect("analysis model uses native JIT");
     assert!(device.is_using_native());
 
     device.update_voltages(&[2.0]);
@@ -3147,7 +3204,7 @@ fn native_device_executes_analysis_guards_without_fallback() {
 fn native_device_executes_above_assignments_without_fallback() {
     let model = above_assignment_model();
     let mut device =
-        VerilogADevice::try_new("ABV1", model, &[1, 0]).expect("above model uses native JIT");
+        native_contract_try_new("ABV1", model, &[1, 0]).expect("above model uses native JIT");
     assert!(device.is_using_native());
 
     device.update_voltages(&[1.0]);
@@ -3170,7 +3227,7 @@ fn native_device_executes_above_assignments_without_fallback() {
 fn native_device_executes_timer_assignments_without_fallback() {
     let model = timer_assignment_model();
     let mut device =
-        VerilogADevice::try_new("TMR1", model, &[1, 0]).expect("timer model uses native JIT");
+        native_contract_try_new("TMR1", model, &[1, 0]).expect("timer model uses native JIT");
     assert!(device.is_using_native());
     device.set_analysis_type(2);
     device.set_timestep(0.01);
@@ -3190,7 +3247,7 @@ fn native_device_executes_timer_assignments_without_fallback() {
 fn native_device_executes_transition_assignments_without_fallback() {
     let model = transition_assignment_model();
     let mut device =
-        VerilogADevice::try_new("TRN1", model, &[1, 0]).expect("transition model uses native JIT");
+        native_contract_try_new("TRN1", model, &[1, 0]).expect("transition model uses native JIT");
     assert!(device.is_using_native());
     device.set_analysis_type(2);
 
@@ -3216,7 +3273,7 @@ fn native_device_executes_transition_assignments_without_fallback() {
 fn native_device_executes_slew_assignments_without_fallback() {
     let model = slew_assignment_model();
     let mut device =
-        VerilogADevice::try_new("SLW1", model, &[1, 0]).expect("slew model uses native JIT");
+        native_contract_try_new("SLW1", model, &[1, 0]).expect("slew model uses native JIT");
     assert!(device.is_using_native());
     device.set_analysis_type(2);
     device.update_voltages(&[10.0]);
@@ -3242,7 +3299,7 @@ fn native_device_executes_slew_assignments_without_fallback() {
 fn native_device_executes_absdelay_assignments_without_fallback() {
     let model = absdelay_assignment_model();
     let mut device =
-        VerilogADevice::try_new("DLY1", model, &[1, 0]).expect("absdelay model uses native JIT");
+        native_contract_try_new("DLY1", model, &[1, 0]).expect("absdelay model uses native JIT");
     assert!(device.is_using_native());
 
     device.set_analysis_type(0);
@@ -3284,7 +3341,7 @@ fn native_device_executes_absdelay_assignments_without_fallback() {
 fn native_device_executes_cross_assignments_without_fallback() {
     let model = cross_assignment_model();
     let mut device =
-        VerilogADevice::try_new("XNG1", model, &[1, 0]).expect("cross model uses native JIT");
+        native_contract_try_new("XNG1", model, &[1, 0]).expect("cross model uses native JIT");
     assert!(device.is_using_native());
 
     device.set_analysis_type(0);
@@ -3317,7 +3374,7 @@ fn native_device_executes_cross_assignments_without_fallback() {
 #[test]
 fn native_device_executes_thermal_voltage_context_read() {
     let model = thermal_voltage_model();
-    let mut device = VerilogADevice::try_new("VT1", model, &[1, 0])
+    let mut device = native_contract_try_new("VT1", model, &[1, 0])
         .expect("thermal voltage model uses native JIT");
     assert!(device.is_using_native());
     device.set_temperature(315.0);
@@ -3338,7 +3395,7 @@ fn native_device_executes_thermal_voltage_context_read() {
 fn native_device_executes_sqrt_expression() {
     let model = sqrt_model();
     let mut device =
-        VerilogADevice::try_new("SQ1", model, &[1, 0]).expect("sqrt model uses native JIT");
+        native_contract_try_new("SQ1", model, &[1, 0]).expect("sqrt model uses native JIT");
     assert!(device.is_using_native());
     device.update_voltages(&[4.0]);
 
@@ -3353,7 +3410,7 @@ fn native_device_executes_sqrt_expression() {
 #[test]
 fn native_device_executes_abs_assignment() {
     let model = abs_assignment_model();
-    let mut device = VerilogADevice::try_new("ABS1", model, &[1, 0])
+    let mut device = native_contract_try_new("ABS1", model, &[1, 0])
         .expect("abs assignment model uses native JIT");
     assert!(device.is_using_native());
     device.set_temperature(315.0);
@@ -3371,7 +3428,7 @@ fn native_device_executes_abs_assignment() {
 #[test]
 fn native_device_executes_ordered_comparison_assignments() {
     let model = comparison_assignment_model();
-    let mut device = VerilogADevice::try_new("CMP1", model, &[1, 0])
+    let mut device = native_contract_try_new("CMP1", model, &[1, 0])
         .expect("comparison assignment model uses native JIT");
     assert!(device.is_using_native());
     device.set_temperature(315.0);
@@ -3389,7 +3446,7 @@ fn native_device_executes_ordered_comparison_assignments() {
 #[test]
 fn native_device_executes_equality_assignments() {
     let model = equality_assignment_model();
-    let mut device = VerilogADevice::try_new("EQ1", model, &[1, 0])
+    let mut device = native_contract_try_new("EQ1", model, &[1, 0])
         .expect("equality assignment model uses native JIT");
     assert!(device.is_using_native());
     device.set_temperature(315.0);
@@ -3407,7 +3464,7 @@ fn native_device_executes_equality_assignments() {
 #[test]
 fn native_device_executes_logical_assignments() {
     let model = logical_assignment_model();
-    let mut device = VerilogADevice::try_new("LOG1", model, &[1, 0])
+    let mut device = native_contract_try_new("LOG1", model, &[1, 0])
         .expect("logical assignment model uses native JIT");
     assert!(device.is_using_native());
     device.set_temperature(315.0);
@@ -3433,7 +3490,7 @@ fn native_device_preserves_logical_truthiness_boundaries() {
     ];
 
     for (name, time, expected_gain) in cases {
-        let mut device = VerilogADevice::try_new("LOGT1", model.clone(), &[1, 0])
+        let mut device = native_contract_try_new("LOGT1", model.clone(), &[1, 0])
             .expect("logical truthiness model uses native JIT");
         assert!(device.is_using_native());
         device.set_time(time);
@@ -3463,7 +3520,7 @@ fn native_device_executes_ifelse_assignments() {
     ];
 
     for (name, time, expected_gain) in cases {
-        let mut device = VerilogADevice::try_new("IFELSE1", model.clone(), &[1, 0])
+        let mut device = native_contract_try_new("IFELSE1", model.clone(), &[1, 0])
             .expect("ifelse assignment model uses native JIT");
         assert!(device.is_using_native());
         device.set_time(time);
@@ -3492,7 +3549,7 @@ fn native_device_executes_minmax_assignments() {
     ];
 
     for (name, temperature, expected_gain) in cases {
-        let mut device = VerilogADevice::try_new("MINMAX1", model.clone(), &[1, 0])
+        let mut device = native_contract_try_new("MINMAX1", model.clone(), &[1, 0])
             .expect("min/max assignment model uses native JIT");
         assert!(device.is_using_native());
         device.set_temperature(temperature);
@@ -3521,7 +3578,7 @@ fn native_device_executes_exp_limexp_assignments() {
     ];
 
     for (name, time, temperature) in cases {
-        let mut device = VerilogADevice::try_new("EXPLIM1", model.clone(), &[1, 0])
+        let mut device = native_contract_try_new("EXPLIM1", model.clone(), &[1, 0])
             .expect("exp/limexp assignment model uses native JIT");
         assert!(device.is_using_native());
         device.set_time(time);
@@ -3552,7 +3609,7 @@ fn native_device_executes_recognized_limited_exp_current_and_jacobian() {
     ];
 
     for (name, voltage) in cases {
-        let mut device = VerilogADevice::try_new("LIMEXP1", model.clone(), &[1, 0])
+        let mut device = native_contract_try_new("LIMEXP1", model.clone(), &[1, 0])
             .expect("recognized limited-exp model uses native JIT");
         assert!(device.is_using_native());
         device.update_voltages(&[voltage]);
@@ -3593,7 +3650,7 @@ fn native_device_executes_transcendental_assignments() {
     let cases = [("dc-ish", 0.0), ("mid", 0.5), ("large", 1.0)];
 
     for (name, time) in cases {
-        let mut device = VerilogADevice::try_new("TRIG1", model.clone(), &[1, 0])
+        let mut device = native_contract_try_new("TRIG1", model.clone(), &[1, 0])
             .expect("transcendental assignment model uses native JIT");
         assert!(device.is_using_native());
         device.set_time(time);
@@ -3631,7 +3688,7 @@ fn native_device_executes_binary_math_assignments() {
     let cases = [("dc-ish", 0.0), ("mid", 0.5), ("large", 1.0)];
 
     for (name, time) in cases {
-        let mut device = VerilogADevice::try_new("BINMATH1", model.clone(), &[1, 0])
+        let mut device = native_contract_try_new("BINMATH1", model.clone(), &[1, 0])
             .expect("binary math assignment model uses native JIT");
         assert!(device.is_using_native());
         device.set_time(time);
@@ -3660,7 +3717,7 @@ fn native_device_executes_binary_math_assignments() {
 #[test]
 fn native_device_executes_rounding_and_mod_assignments_without_fallback() {
     let model = rounding_mod_assignment_model();
-    let mut device = VerilogADevice::try_new("RNDMOD1", model, &[1, 0])
+    let mut device = native_contract_try_new("RNDMOD1", model, &[1, 0])
         .expect("rounding/mod assignment model uses native JIT");
     assert!(device.is_using_native());
     device.update_voltages(&[5.0]);
@@ -3680,7 +3737,7 @@ fn native_device_executes_rounding_and_mod_assignments_without_fallback() {
 #[test]
 fn native_device_executes_integer_bit_assignments_without_fallback() {
     let model = integer_bit_assignment_model();
-    let mut device = VerilogADevice::try_new("BITOPS1", model, &[1, 0])
+    let mut device = native_contract_try_new("BITOPS1", model, &[1, 0])
         .expect("integer bit assignment model uses native JIT");
     assert!(device.is_using_native());
     device.update_voltages(&[4.0]);
@@ -3704,7 +3761,7 @@ fn native_device_executes_integer_bit_assignments_without_fallback() {
 #[test]
 fn native_device_executes_table_model_lookup_and_derivative_without_fallback() {
     let model = table_model_assignment_model();
-    let mut device = VerilogADevice::try_new("TABLE1", model, &[1, 0])
+    let mut device = native_contract_try_new("TABLE1", model, &[1, 0])
         .expect("table model assignment uses native JIT");
     assert!(device.is_using_native());
     device.update_voltages(&[1.5]);
@@ -3745,7 +3802,7 @@ fn native_device_executes_table_model_lookup_and_derivative_without_fallback() {
 #[test]
 fn native_device_executes_limit_assignments_without_fallback() {
     let model = limit_assignment_model();
-    let mut device = VerilogADevice::try_new("LIM1", model, &[1, 0])
+    let mut device = native_contract_try_new("LIM1", model, &[1, 0])
         .expect("limit assignment model uses native JIT");
     assert!(device.is_using_native());
 
@@ -3792,13 +3849,13 @@ fn native_device_executes_limit_assignments_without_fallback() {
 fn native_device_executes_param_given_and_port_connected_reads() {
     let model = flag_context_model();
 
-    let mut omitted = VerilogADevice::try_new("FLG1", model.clone(), &[1, 0])
+    let mut omitted = native_contract_try_new("FLG1", model.clone(), &[1, 0])
         .expect("flag model uses native JIT");
     omitted.update_voltages(&[2.0]);
     assert_eq!(omitted.try_evaluate().unwrap()[0], 0.0);
     assert_eq!(omitted.variable("gain"), Some(0.0));
 
-    let mut param_only = VerilogADevice::try_new("FLG2", model.clone(), &[1, 0])
+    let mut param_only = native_contract_try_new("FLG2", model.clone(), &[1, 0])
         .expect("flag model uses native JIT");
     assert!(param_only.set_parameter("rknob", 2.0));
     param_only.update_voltages(&[2.0]);
@@ -3806,7 +3863,7 @@ fn native_device_executes_param_given_and_port_connected_reads() {
     assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
     assert_eq!(param_only.variable("gain"), Some(2.0));
 
-    let mut port_only = VerilogADevice::try_new("FLG3", model.clone(), &[1, 0, 0])
+    let mut port_only = native_contract_try_new("FLG3", model.clone(), &[1, 0, 0])
         .expect("flag model uses native JIT");
     port_only.update_voltages(&[2.0]);
     let currents = port_only.try_evaluate().unwrap();
@@ -3814,7 +3871,7 @@ fn native_device_executes_param_given_and_port_connected_reads() {
     assert_eq!(port_only.variable("gain"), Some(3.0));
 
     let mut connected =
-        VerilogADevice::try_new("FLG4", model, &[1, 0, 0]).expect("flag model uses native JIT");
+        native_contract_try_new("FLG4", model, &[1, 0, 0]).expect("flag model uses native JIT");
     assert!(connected.set_parameter("rknob", 2.0));
     connected.update_voltages(&[2.0]);
 
@@ -3831,7 +3888,7 @@ fn native_device_evaluates_internal_node_voltage_contributions() {
     assert_eq!(model.stamp_programs.len(), 2);
 
     let mut device =
-        VerilogADevice::try_new("DIV1", model, &[1, 0]).expect("divider uses native JIT");
+        native_contract_try_new("DIV1", model, &[1, 0]).expect("divider uses native JIT");
     assert!(device.is_using_native());
     device.set_internal_node_indices(&[2]);
     device.update_all_voltages(&[2.0, 0.5]);
@@ -3864,7 +3921,7 @@ endmodule
     assert_eq!(model.stamp_programs.len(), 2);
 
     let mut device =
-        VerilogADevice::try_new("ICPA1", model, &[1, 0]).expect("current probe alias uses native");
+        native_contract_try_new("ICPA1", model, &[1, 0]).expect("current probe alias uses native");
     assert!(device.is_using_native());
     device.set_internal_node_indices(&[2]);
     device.update_all_voltages(&[2.0, 0.5]);
@@ -3901,7 +3958,7 @@ endmodule
     assert_eq!(model.stamp_programs.len(), 2);
 
     let mut device =
-        VerilogADevice::try_new("ICPJ1", model, &[1, 0]).expect("jacobian alias uses native");
+        native_contract_try_new("ICPJ1", model, &[1, 0]).expect("jacobian alias uses native");
     assert!(device.is_using_native());
     device.set_internal_node_indices(&[2]);
 
@@ -3934,7 +3991,7 @@ endmodule
 fn native_device_stamps_internal_node_jacobians() {
     let model = internal_node_divider_model();
     let mut device =
-        VerilogADevice::try_new("DIV2", model, &[1, 0]).expect("divider uses native JIT");
+        native_contract_try_new("DIV2", model, &[1, 0]).expect("divider uses native JIT");
     device.set_internal_node_indices(&[2]);
 
     let (matrix, rhs) = stamp_device(&mut device, &[2.0, 0.5]);
@@ -3961,7 +4018,7 @@ fn native_device_executes_runtime_loop_assignments_without_fallback() {
         "fixture must contain a runtime assignment loop"
     );
 
-    let mut default_segments = VerilogADevice::try_new("LOOP1", model.clone(), &[1, 0])
+    let mut default_segments = native_contract_try_new("LOOP1", model.clone(), &[1, 0])
         .expect("runtime loop model uses native JIT");
     assert!(default_segments.is_using_native());
     default_segments.update_voltages(&[3.0]);
@@ -3973,7 +4030,7 @@ fn native_device_executes_runtime_loop_assignments_without_fallback() {
         "currents: {currents:?}"
     );
 
-    let mut four_segments = VerilogADevice::try_new("LOOP2", model, &[1, 0])
+    let mut four_segments = native_contract_try_new("LOOP2", model, &[1, 0])
         .expect("runtime loop model uses native JIT");
     assert!(four_segments.set_parameter("nseg", 4.0));
     four_segments
@@ -4002,7 +4059,7 @@ fn native_runtime_loop_iteration_limit_hard_fails_without_fallback() {
     );
 
     let mut device =
-        VerilogADevice::try_new("LOOPLIMIT1", model, &[1, 0]).expect("loop model uses native JIT");
+        native_contract_try_new("LOOPLIMIT1", model, &[1, 0]).expect("loop model uses native JIT");
     device.update_voltages(&[1.0]);
     let err = device
         .try_evaluate()
@@ -4028,7 +4085,7 @@ fn native_runtime_loop_condition_uses_exact_zero_truthiness() {
         "fixture must contain a runtime assignment loop"
     );
 
-    let mut negative_zero = VerilogADevice::try_new("LOOPTRUTH1", model.clone(), &[1, 0])
+    let mut negative_zero = native_contract_try_new("LOOPTRUTH1", model.clone(), &[1, 0])
         .expect("loop truthiness model uses native JIT");
     assert!(negative_zero.is_using_native());
     negative_zero.update_voltages(&[1.0]);
@@ -4037,7 +4094,7 @@ fn native_runtime_loop_condition_uses_exact_zero_truthiness() {
         .expect("native loop exits on -0.0 condition");
     assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
 
-    let mut positive_zero = VerilogADevice::try_new("LOOPTRUTH2", model.clone(), &[1, 0])
+    let mut positive_zero = native_contract_try_new("LOOPTRUTH2", model.clone(), &[1, 0])
         .expect("loop truthiness model uses native JIT");
     assert!(positive_zero.set_parameter("gate", 0.0));
     positive_zero
@@ -4049,7 +4106,7 @@ fn native_runtime_loop_condition_uses_exact_zero_truthiness() {
         .expect("native loop exits on +0.0 condition");
     assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
 
-    let mut nan = VerilogADevice::try_new("LOOPTRUTH3", model, &[1, 0])
+    let mut nan = native_contract_try_new("LOOPTRUTH3", model, &[1, 0])
         .expect("loop truthiness model uses native JIT");
     assert!(nan.set_parameter("gate", f64::NAN));
     nan.try_resolve_parameter_defaults()
@@ -4079,7 +4136,7 @@ fn native_device_executes_indexed_assignments_without_fallback() {
         "fixture must contain an indexed assignment"
     );
 
-    let mut first = VerilogADevice::try_new("IDXASSIGN1", model.clone(), &[1, 0])
+    let mut first = native_contract_try_new("IDXASSIGN1", model.clone(), &[1, 0])
         .expect("indexed assignment model uses native JIT");
     assert!(first.is_using_native());
     first.update_voltages(&[1.0]);
@@ -4091,7 +4148,7 @@ fn native_device_executes_indexed_assignments_without_fallback() {
         "currents: {currents:?}"
     );
 
-    let mut second = VerilogADevice::try_new("IDXASSIGN2", model.clone(), &[1, 0])
+    let mut second = native_contract_try_new("IDXASSIGN2", model.clone(), &[1, 0])
         .expect("indexed assignment model uses native JIT");
     assert!(second.set_parameter("idx", 2.0));
     second.update_voltages(&[1.0]);
@@ -4103,7 +4160,7 @@ fn native_device_executes_indexed_assignments_without_fallback() {
         "currents: {currents:?}"
     );
 
-    let mut out_of_range = VerilogADevice::try_new("IDXASSIGN3", model, &[1, 0])
+    let mut out_of_range = native_contract_try_new("IDXASSIGN3", model, &[1, 0])
         .expect("indexed assignment model uses native JIT");
     assert!(out_of_range.set_parameter("idx", 3.0));
     out_of_range.update_voltages(&[1.0]);
@@ -4134,7 +4191,7 @@ fn native_device_executes_static_conditions_without_fallback() {
         "fixture must route the condition through native assignment state"
     );
 
-    let mut enabled = VerilogADevice::try_new("STATIC1", model.clone(), &[1, 0])
+    let mut enabled = native_contract_try_new("STATIC1", model.clone(), &[1, 0])
         .expect("static-condition model uses native JIT");
     assert!(enabled.is_using_native());
     enabled.update_voltages(&[2.0]);
@@ -4155,7 +4212,7 @@ fn native_device_executes_static_conditions_without_fallback() {
         "rhs: {rhs:?}"
     );
 
-    let mut disabled = VerilogADevice::try_new("STATIC2", model, &[1, 0])
+    let mut disabled = native_contract_try_new("STATIC2", model, &[1, 0])
         .expect("static-condition model uses native JIT");
     assert!(disabled.set_parameter("enabled", 0.0));
     disabled
@@ -4206,7 +4263,7 @@ endmodule
     );
 
     let mut device =
-        VerilogADevice::try_new("TEMPSTATIC1", model, &[1, 0]).expect("model uses native JIT");
+        native_contract_try_new("TEMPSTATIC1", model, &[1, 0]).expect("model uses native JIT");
     assert!(device.is_using_native());
     device
         .try_set_temperature(300.0)
@@ -4240,7 +4297,7 @@ fn native_static_conditions_control_potential_branch_activation() {
         "fixture must allocate one branch-current unknown"
     );
 
-    let mut disabled = VerilogADevice::try_new("STATICBR1", model.clone(), &[1, 2])
+    let mut disabled = native_contract_try_new("STATICBR1", model.clone(), &[1, 2])
         .expect("static branch model uses native JIT");
     disabled.set_branch_current_indices(&[3]);
     let (matrix, rhs) = stamp_device(&mut disabled, &[1.0, 0.0, 0.0]);
@@ -4254,7 +4311,7 @@ fn native_static_conditions_control_potential_branch_activation() {
     );
     assert!(rhs.is_empty(), "disabled rhs: {rhs:?}");
 
-    let mut enabled = VerilogADevice::try_new("STATICBR2", model, &[1, 2])
+    let mut enabled = native_contract_try_new("STATICBR2", model, &[1, 2])
         .expect("static branch model uses native JIT");
     enabled.set_branch_current_indices(&[3]);
     assert!(enabled.set_parameter("shorted", 1.0));
@@ -4312,7 +4369,7 @@ fn native_static_conditions_refresh_after_mfactor_update() {
         "fixture must contain a static condition program"
     );
 
-    let mut device = VerilogADevice::try_new("STATICM1", model, &[1, 2])
+    let mut device = native_contract_try_new("STATICM1", model, &[1, 2])
         .expect("mfactor static branch model uses native JIT");
     device.set_branch_current_indices(&[3]);
     let (matrix, _) = stamp_device(&mut device, &[1.0, 0.0, 0.0]);
@@ -4364,7 +4421,7 @@ fn native_device_executes_dynamic_array_reads_without_fallback() {
         "fixture must contain a dynamic array read in a stamp expression"
     );
 
-    let mut default_sel = VerilogADevice::try_new("DYNARR1", model.clone(), &[1, 0])
+    let mut default_sel = native_contract_try_new("DYNARR1", model.clone(), &[1, 0])
         .expect("dynamic array read model uses native JIT");
     assert!(default_sel.is_using_native());
     default_sel.update_voltages(&[2.0]);
@@ -4376,7 +4433,7 @@ fn native_device_executes_dynamic_array_reads_without_fallback() {
         "currents: {currents:?}"
     );
 
-    let mut third = VerilogADevice::try_new("DYNARR2", model.clone(), &[1, 0])
+    let mut third = native_contract_try_new("DYNARR2", model.clone(), &[1, 0])
         .expect("dynamic array read model uses native JIT");
     assert!(third.set_parameter("sel", 3.0));
     third.update_voltages(&[2.0]);
@@ -4388,7 +4445,7 @@ fn native_device_executes_dynamic_array_reads_without_fallback() {
         "currents: {currents:?}"
     );
 
-    let mut out_of_range = VerilogADevice::try_new("DYNARR3", model, &[1, 0])
+    let mut out_of_range = native_contract_try_new("DYNARR3", model, &[1, 0])
         .expect("dynamic array read model uses native JIT");
     assert!(out_of_range.set_parameter("sel", 4.0));
     out_of_range.update_voltages(&[2.0]);
@@ -4413,7 +4470,7 @@ fn native_device_executes_large_signal_noise_terms_as_zero_without_fallback() {
     );
 
     let mut device =
-        VerilogADevice::try_new("NOISE1", model, &[1, 0]).expect("noise model uses native JIT");
+        native_contract_try_new("NOISE1", model, &[1, 0]).expect("noise model uses native JIT");
     assert!(device.is_using_native());
     device.update_voltages(&[4.0]);
 
@@ -4477,7 +4534,7 @@ fn native_noise_analysis_evaluates_noise_sources_without_fallback() {
     );
 
     let mut device =
-        VerilogADevice::try_new("NOISE2", model, &[1, 0]).expect("noise model uses native JIT");
+        native_contract_try_new("NOISE2", model, &[1, 0]).expect("noise model uses native JIT");
     assert_eq!(device.native_plan_stats().noise_source_entry_points, 3);
     let mut sources = device
         .try_noise_sources(&[4.0])
@@ -4677,7 +4734,7 @@ fn native_compile_accepts_reactive_ddt_jacobians_without_fallback() {
 fn native_device_stamps_reactive_ddt_capacitance_without_fallback() {
     let model = reactive_model();
     let mut device =
-        VerilogADevice::try_new("C1", model, &[1, 0]).expect("capacitor model uses native JIT");
+        native_contract_try_new("C1", model, &[1, 0]).expect("capacitor model uses native JIT");
     assert!(device.is_using_native());
 
     let matrix = stamp_reactive_device(&mut device, &[2.0]);
@@ -4708,7 +4765,7 @@ fn native_compile_rejects_reactive_current_probes_without_fallback() {
 fn native_device_executes_idt_current_and_jacobian_without_fallback() {
     let model = idt_current_model();
     let mut device =
-        VerilogADevice::try_new("IDT1", model, &[1, 0]).expect("idt model uses native JIT");
+        native_contract_try_new("IDT1", model, &[1, 0]).expect("idt model uses native JIT");
     assert!(device.is_using_native());
 
     device.update_voltages(&[2.0]);
@@ -4748,7 +4805,7 @@ fn native_device_executes_idt_current_and_jacobian_without_fallback() {
 fn native_device_executes_idtmod_current_without_fallback() {
     let model = idtmod_current_model();
     let mut device =
-        VerilogADevice::try_new("IMOD1", model, &[1, 0]).expect("idtmod model uses native JIT");
+        native_contract_try_new("IMOD1", model, &[1, 0]).expect("idtmod model uses native JIT");
     assert!(device.is_using_native());
 
     device.update_voltages(&[0.0]);
@@ -4795,7 +4852,7 @@ fn native_device_executes_laplace_current_without_fallback() {
     );
 
     let mut device =
-        VerilogADevice::try_new("LAP1", model, &[1, 0]).expect("laplace model uses native JIT");
+        native_contract_try_new("LAP1", model, &[1, 0]).expect("laplace model uses native JIT");
     assert!(device.is_using_native());
 
     device.update_voltages(&[4.0]);
@@ -4841,7 +4898,7 @@ fn native_device_executes_zi_current_without_fallback() {
     );
 
     let mut device =
-        VerilogADevice::try_new("ZI1", model, &[1, 0]).expect("zi model uses native JIT");
+        native_contract_try_new("ZI1", model, &[1, 0]).expect("zi model uses native JIT");
     assert!(device.is_using_native());
 
     device.set_analysis_type(0);
@@ -4890,7 +4947,7 @@ fn native_device_executes_zi_current_without_fallback() {
 #[test]
 fn native_device_executes_terminal_pair_current_probes_in_source_order() {
     let model = current_probe_model();
-    let mut device = VerilogADevice::try_new("CP1", model, &[1, 0])
+    let mut device = native_contract_try_new("CP1", model, &[1, 0])
         .expect("current probe model uses native JIT");
     assert!(device.is_using_native());
     device.update_voltages(&[4.0]);
@@ -4908,7 +4965,7 @@ fn native_device_executes_terminal_pair_current_probes_in_source_order() {
 #[test]
 fn native_device_executes_single_ended_current_probes_in_source_order() {
     let model = single_ended_current_probe_model();
-    let mut device = VerilogADevice::try_new("CG1", model, &[1])
+    let mut device = native_contract_try_new("CG1", model, &[1])
         .expect("single-ended current probe model uses native JIT");
     assert!(device.is_using_native());
     device.update_voltages(&[4.0]);
@@ -4994,7 +5051,7 @@ fn native_compile_rejects_unavailable_terminal_pair_current_probes_without_fallb
 #[test]
 fn native_evaluate_rejects_nonfinite_terminal_pair_current_probes_without_fallback() {
     let model = nonfinite_prior_current_probe_model();
-    let mut device = VerilogADevice::try_new("CPINF1", model, &[1, 0])
+    let mut device = native_contract_try_new("CPINF1", model, &[1, 0])
         .expect("structurally available current probe compiles native");
     device.update_voltages(&[4.0]);
 

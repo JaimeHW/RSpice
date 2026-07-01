@@ -2,7 +2,8 @@
 
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
-    EquationId, ExprId, HirAnalogOperator, HirExprKind, HirLaplaceKind, HirZiKind, MirModel, NodeId,
+    EquationId, ExprId, HirAnalogOperator, HirExprKind, HirLaplaceKind, HirZiKind, MirEquationKind,
+    MirModel, NodeId,
 };
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
@@ -986,7 +987,7 @@ impl<'a> NativeLoweringLimits<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum CanonicalStateOperator {
+pub(crate) enum CanonicalStateOperator {
     Ddt,
     Idt,
     IdtMod,
@@ -1289,14 +1290,24 @@ fn canonical_state_slots_for_equation(
         }
     })?;
 
-    let mut canonical_exprs = Vec::new();
-    collect_canonical_state_exprs(
-        &model,
+    canonical_state_slots_for_expression(
+        model,
         mir,
         equation.expression.id,
+        bytecode_program,
         operator,
-        &mut canonical_exprs,
-    )?;
+    )
+}
+
+pub(crate) fn canonical_state_slots_for_expression(
+    model: SmolStr,
+    mir: &MirModel,
+    expr_id: ExprId,
+    bytecode_program: &BytecodeProgram,
+    operator: CanonicalStateOperator,
+) -> JitResult<Vec<(ExprId, usize)>> {
+    let mut canonical_exprs = Vec::new();
+    collect_canonical_state_exprs(&model, mir, expr_id, operator, &mut canonical_exprs)?;
 
     let bytecode_slots = bytecode_program
         .instructions
@@ -1308,7 +1319,7 @@ fn canonical_state_slots_for_equation(
         return Err(JitError::InvalidCanonicalIr {
             model,
             detail: format!(
-                "canonical equation {equation_id} has {} {} operators but bytecode stamp has {} {}State slots",
+                "canonical expression {expr_id} has {} {} operators but bytecode program has {} {}State slots",
                 canonical_exprs.len(),
                 operator.name(),
                 bytecode_slots.len(),
@@ -3215,12 +3226,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         if is_flow_access(access) {
             return match wrt {
                 CanonicalDerivativeAxis::Branch(runtime_branch) => {
-                    let nonzero = if let Some((branch_unknown, _)) =
-                        self.resolve_current_branch_unknown(pos, neg)?
+                    let nonzero = if let Some(mapping) =
+                        self.resolve_current_branch_runtime_mapping(pos, neg)?
                     {
-                        self.map_canonical_branch_unknown(branch_unknown)?
-                            .runtime_index
-                            == runtime_branch
+                        mapping.runtime_index == runtime_branch
                     } else {
                         false
                     };
@@ -3540,16 +3549,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         if is_flow_access(access) {
             let derivative = match wrt {
                 CanonicalDerivativeAxis::Branch(runtime_branch) => {
-                    if let Some((branch_unknown, reversed)) =
-                        self.resolve_current_branch_unknown(pos, neg)?
-                    {
-                        let mapping = self.map_canonical_branch_unknown(branch_unknown)?;
+                    if let Some(mapping) = self.resolve_current_branch_runtime_mapping(pos, neg)? {
                         if mapping.runtime_index == runtime_branch {
-                            if reversed ^ mapping.inverted {
-                                -1.0
-                            } else {
-                                1.0
-                            }
+                            if mapping.inverted { -1.0 } else { 1.0 }
                         } else {
                             0.0
                         }
@@ -6510,10 +6512,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             return self.push(NativeOp::LoadVoltage { pos, neg });
         }
 
-        if let Some((branch_unknown, reversed)) = self.resolve_current_branch_unknown(pos, neg)? {
-            let mapping = self.map_canonical_branch_unknown(branch_unknown)?;
+        if let Some(mapping) = self.resolve_current_branch_runtime_mapping(pos, neg)? {
             self.push(NativeOp::LoadBranchUnknown(mapping.runtime_index))?;
-            if reversed ^ mapping.inverted {
+            if mapping.inverted {
                 return self.append_unary(NativeOp::Neg);
             }
             return Ok(());
@@ -6608,6 +6609,77 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.limits.branch_unknown_count,
         )?;
         Ok(mapping)
+    }
+
+    fn resolve_current_branch_runtime_mapping(
+        &self,
+        pos: &str,
+        neg: Option<&str>,
+    ) -> JitResult<Option<BranchUnknownRuntimeMapping>> {
+        if let Some((branch_unknown, reversed)) = self.resolve_current_branch_unknown(pos, neg)? {
+            let mapping = self.map_canonical_branch_unknown(branch_unknown)?;
+            return Ok(Some(BranchUnknownRuntimeMapping {
+                runtime_index: mapping.runtime_index,
+                inverted: mapping.inverted ^ reversed,
+            }));
+        }
+
+        self.resolve_implicit_equation_branch_runtime_mapping(pos, neg)
+    }
+
+    fn resolve_implicit_equation_branch_runtime_mapping(
+        &self,
+        pos: &str,
+        neg: Option<&str>,
+    ) -> JitResult<Option<BranchUnknownRuntimeMapping>> {
+        if !self.limits.canonical_branch_unknown_map.is_empty() {
+            return Ok(None);
+        }
+
+        let pos = self.branch_endpoint(pos)?;
+        let neg = neg
+            .map(|node| self.branch_endpoint(node))
+            .transpose()?
+            .flatten();
+        let equation_index = usize::from(self.equation_id);
+        let Some(equation) = self.mir.equations.get(equation_index) else {
+            return Ok(None);
+        };
+        if !matches!(
+            equation.kind,
+            MirEquationKind::Potential | MirEquationKind::Indirect
+        ) {
+            return Ok(None);
+        }
+
+        let same_direction = equation.branch.pos_node == pos && equation.branch.neg_node == neg;
+        let opposite_direction = equation.branch.pos_node == neg && equation.branch.neg_node == pos;
+        if !same_direction && !opposite_direction {
+            return Ok(None);
+        }
+
+        let runtime_index = self
+            .mir
+            .equations
+            .iter()
+            .take(equation_index)
+            .filter(|equation| {
+                matches!(
+                    equation.kind,
+                    MirEquationKind::Potential | MirEquationKind::Indirect
+                )
+            })
+            .count();
+        validate_index(
+            self.model.clone(),
+            "implicit canonical branch unknown runtime slot",
+            runtime_index,
+            self.limits.branch_unknown_count,
+        )?;
+        Ok(Some(BranchUnknownRuntimeMapping {
+            runtime_index,
+            inverted: opposite_direction,
+        }))
     }
 
     fn resolve_current_branch_unknown(
@@ -6953,7 +7025,37 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         if self.is_ground_node(name) {
             return Ok(CURRENT_PAIR_GROUND);
         }
-        self.lower_terminal_node(name)
+        let node = self.node(name)?;
+        let node_index = usize::from(node.id);
+        if node.is_external {
+            validate_index(
+                self.model.clone(),
+                "canonical current terminal",
+                node_index,
+                self.limits.terminal_count,
+            )?;
+            return Ok(node_index);
+        }
+
+        let external_count = self.external_node_count();
+        let internal_index =
+            node_index
+                .checked_sub(external_count)
+                .ok_or_else(|| JitError::InvalidCanonicalIr {
+                    model: self.model.clone(),
+                    detail: format!(
+                        "canonical internal current node {} appears before external nodes",
+                        node.name
+                    )
+                    .into(),
+                })?;
+        validate_index(
+            self.model.clone(),
+            "canonical current internal node",
+            internal_index,
+            self.limits.internal_node_count,
+        )?;
+        Ok(self.limits.terminal_count + internal_index)
     }
 
     fn node(&self, name: &str) -> JitResult<&'a crate::canonical_ir::MirNode> {
