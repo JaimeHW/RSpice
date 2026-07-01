@@ -7,8 +7,6 @@
 use crate::Value;
 use crate::solver::{ComplexMatrix, CscIndex, StaticMatrix};
 
-pub(crate) mod support;
-
 pub mod builtins {
     include!("registry.rs");
 }

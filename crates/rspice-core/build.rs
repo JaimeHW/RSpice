@@ -8,8 +8,7 @@ use rspice_veriloga::rust_backend::{
     GeneratedBuiltinManifest, GeneratedRustDevice, RustTranspiler, VERILOGA_DISCOVERY_SKIP_MARKER,
     cleanup_stale_generated_device_folders, discover_veriloga_sources,
     parse_generated_builtin_manifest, render_generated_builtin_manifest,
-    render_runtime_support_module, resolve_generated_registry_model_names, write_generated_device,
-    write_text_file_if_changed,
+    resolve_generated_registry_model_names, write_generated_device, write_text_file_if_changed,
 };
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
@@ -90,9 +89,13 @@ fn main() {
             model_root.display()
         );
     }
+    reject_legacy_support_imports(&devices).unwrap_or_else(|error| {
+        panic!("generated Verilog-A built-ins require legacy support: {error}")
+    });
 
     println!("cargo:rustc-cfg=rspice_veriloga_builtins_generated");
-    write_support(&generated_root).expect("write generated Verilog-A support runtime");
+    remove_stale_support(&generated_root)
+        .expect("remove stale generated Verilog-A support runtime");
     write_registry(&generated_root, &devices).expect("write generated Verilog-A registry");
     write_generated_manifest(
         &generated_root,
@@ -181,9 +184,6 @@ fn read_generated_manifest(
     if !generated_root.join("registry.rs").is_file() {
         return None;
     }
-    if !generated_root.join("support.rs").is_file() {
-        return None;
-    }
     let manifest_path = generated_root.join(MANIFEST_FILE_NAME);
     let manifest = parse_generated_builtin_manifest(&fs::read_to_string(manifest_path).ok()?)?;
     (manifest.source_tree_digest == source_tree_digest
@@ -192,12 +192,28 @@ fn read_generated_manifest(
         .then_some(manifest)
 }
 
-fn write_support(generated_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    std::fs::create_dir_all(generated_root)?;
-    write_text_file_if_changed(
-        generated_root.join("support.rs"),
-        &render_runtime_support_module(),
-    )?;
+fn reject_legacy_support_imports(
+    devices: &[GeneratedRustDevice],
+) -> Result<(), Box<dyn std::error::Error>> {
+    for device in devices {
+        for file in &device.files {
+            if file.contents.contains("::support::") {
+                return Err(format!(
+                    "{}:{} imports the legacy Verilog-A support runtime",
+                    device.folder_name, file.relative_path
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn remove_stale_support(generated_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let support = generated_root.join("support.rs");
+    if support.is_file() {
+        fs::remove_file(support)?;
+    }
     Ok(())
 }
 
