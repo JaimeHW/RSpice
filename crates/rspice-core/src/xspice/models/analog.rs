@@ -9,6 +9,9 @@ use crate::xspice::{
 use crate::{Complex64, Value};
 use std::sync::Arc;
 
+const DIVIDE_TRANSFER_RESOURCE: &str = "xspice.analog.divide.transfer";
+const CLIMIT_TRANSFER_RESOURCE: &str = "xspice.analog.climit.transfer";
+
 fn scalar_analog_port(
     name: &str,
     direction: PortDirection,
@@ -661,8 +664,8 @@ impl CodeModel for Divider {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let (v_out, _, _) = divide_transfer_from_context(ctx);
-        ctx.set_output("out", v_out);
+        let transfer = cache_divide_transfer(ctx);
+        ctx.set_output("out", transfer.output);
         Ok(())
     }
 
@@ -671,36 +674,108 @@ impl CodeModel for Divider {
             return Vec::new();
         }
 
-        let (_, num_partial, den_partial) = divide_transfer_from_context(ctx);
-        if !num_partial.is_finite() || !den_partial.is_finite() {
+        let transfer = divide_transfer_for_context(ctx);
+        if !transfer.num_partial.is_finite() || !transfer.den_partial.is_finite() {
             return Vec::new();
         }
 
         vec![
-            ("num".to_string(), num_partial),
-            ("den".to_string(), den_partial),
+            ("num".to_string(), transfer.num_partial),
+            ("den".to_string(), transfer.den_partial),
         ]
     }
 }
 
-fn divide_transfer_from_context(ctx: &CmContext) -> (Value, Value, Value) {
-    let mut den_domain = ctx.param("den_domain");
-    let den_lower_limit = ctx.param("den_lower_limit").max(1.0e-10);
-    if ctx.param("fraction") > 0.5 {
-        den_domain *= den_lower_limit;
-    }
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DivideTransferSignature {
+    num: Value,
+    den: Value,
+    num_offset: Value,
+    num_gain: Value,
+    den_offset: Value,
+    den_gain: Value,
+    den_lower_limit: Value,
+    den_domain: Value,
+    fraction: bool,
+    out_gain: Value,
+    out_offset: Value,
+}
 
-    let numerator = (ctx.input("num") + ctx.param("num_offset")) * ctx.param("num_gain");
-    let denominator = (ctx.input("den") + ctx.param("den_offset")) * ctx.param("den_gain");
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DivideTransfer {
+    output: Value,
+    num_partial: Value,
+    den_partial: Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DivideTransferResource {
+    signature: DivideTransferSignature,
+    transfer: DivideTransfer,
+}
+
+fn divide_transfer_signature(ctx: &CmContext) -> DivideTransferSignature {
+    DivideTransferSignature {
+        num: ctx.input("num"),
+        den: ctx.input("den"),
+        num_offset: ctx.param("num_offset"),
+        num_gain: ctx.param("num_gain"),
+        den_offset: ctx.param("den_offset"),
+        den_gain: ctx.param("den_gain"),
+        den_lower_limit: ctx.param("den_lower_limit"),
+        den_domain: ctx.param("den_domain"),
+        fraction: ctx.param("fraction") > 0.5,
+        out_gain: ctx.param("out_gain"),
+        out_offset: ctx.param("out_offset"),
+    }
+}
+
+fn divide_transfer_from_signature(signature: DivideTransferSignature) -> DivideTransfer {
+    let den_lower_limit = signature.den_lower_limit.max(1.0e-10);
+    let den_domain = if signature.fraction {
+        signature.den_domain * den_lower_limit
+    } else {
+        signature.den_domain
+    };
+
+    let numerator = (signature.num + signature.num_offset) * signature.num_gain;
+    let denominator = (signature.den + signature.den_offset) * signature.den_gain;
     let (limited_den, den_partial) =
         divide_limited_denominator(denominator, den_lower_limit, den_domain);
 
-    let out_gain = ctx.param("out_gain");
-    let output = ctx.param("out_offset") + out_gain * numerator / limited_den;
-    let num_partial = out_gain * ctx.param("num_gain") / limited_den;
-    let den_partial =
-        -out_gain * numerator * ctx.param("den_gain") * den_partial / (limited_den * limited_den);
-    (output, num_partial, den_partial)
+    let output = signature.out_offset + signature.out_gain * numerator / limited_den;
+    let num_partial = signature.out_gain * signature.num_gain / limited_den;
+    let den_partial = -signature.out_gain * numerator * signature.den_gain * den_partial
+        / (limited_den * limited_den);
+    DivideTransfer {
+        output,
+        num_partial,
+        den_partial,
+    }
+}
+
+fn divide_transfer_for_context(ctx: &CmContext) -> DivideTransfer {
+    let signature = divide_transfer_signature(ctx);
+    if let Some(resource) = ctx.resource::<DivideTransferResource>(DIVIDE_TRANSFER_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.transfer;
+    }
+
+    divide_transfer_from_signature(signature)
+}
+
+fn cache_divide_transfer(ctx: &mut CmContext) -> DivideTransfer {
+    let signature = divide_transfer_signature(ctx);
+    let transfer = divide_transfer_from_signature(signature);
+    ctx.set_resource(
+        DIVIDE_TRANSFER_RESOURCE,
+        Arc::new(DivideTransferResource {
+            signature,
+            transfer,
+        }),
+    );
+    transfer
 }
 
 fn divide_limited_denominator(
@@ -961,21 +1036,19 @@ impl CodeModel for ControlledLimiter {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let (out, pout_pin, _pout_pcntl_lower, _pout_pcntl_upper) =
-            climit_transfer_from_context(ctx);
+        let transfer = cache_climit_transfer(ctx);
 
-        ctx.set_output_with_partial("out", out, pout_pin);
+        ctx.set_output_with_partial("out", transfer.output, transfer.in_partial);
         Ok(())
     }
 
     fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
         if output_port.eq_ignore_ascii_case("out") {
-            let (_out, pout_pin, pout_pcntl_lower, pout_pcntl_upper) =
-                climit_transfer_from_context(ctx);
+            let transfer = climit_transfer_for_context(ctx);
             vec![
-                ("in".to_string(), pout_pin),
-                ("cntl_lower".to_string(), pout_pcntl_lower),
-                ("cntl_upper".to_string(), pout_pcntl_upper),
+                ("in".to_string(), transfer.in_partial),
+                ("cntl_lower".to_string(), transfer.lower_partial),
+                ("cntl_upper".to_string(), transfer.upper_partial),
             ]
         } else {
             Vec::new()
@@ -2479,6 +2552,117 @@ mod tests {
     }
 
     #[test]
+    fn divide_transfer_cache_reuses_evaluated_transfer_until_inputs_change() {
+        let mut ctx = CmContext::new();
+        ctx.set_input_analog("num", 3.0);
+        ctx.set_input_analog("den", 1.0);
+        ctx.set_param("num_offset", 1.0);
+        ctx.set_param("num_gain", 2.0);
+        ctx.set_param("den_offset", 1.0);
+        ctx.set_param("den_gain", 4.0);
+        ctx.set_param("den_lower_limit", 1.0e-10);
+        ctx.set_param("den_domain", 0.0);
+        ctx.set_param("fraction", 0.0);
+        ctx.set_param("out_gain", 3.0);
+        ctx.set_param("out_offset", 5.0);
+
+        let first = cache_divide_transfer(&mut ctx);
+        assert_eq!(divide_transfer_for_context(&ctx), first);
+
+        ctx.set_param("unrelated", 42.0);
+        assert_eq!(
+            divide_transfer_for_context(&ctx),
+            first,
+            "unrelated context changes should not invalidate the divide transfer cache"
+        );
+
+        let signature = divide_transfer_signature(&ctx);
+        let sentinel = DivideTransfer {
+            output: -123.0,
+            num_partial: -456.0,
+            den_partial: -789.0,
+        };
+        ctx.set_resource(
+            DIVIDE_TRANSFER_RESOURCE,
+            Arc::new(DivideTransferResource {
+                signature,
+                transfer: sentinel,
+            }),
+        );
+        assert_eq!(
+            divide_transfer_for_context(&ctx),
+            sentinel,
+            "matching signatures should reuse the cached divide transfer"
+        );
+
+        ctx.set_input_analog("den", 2.0);
+        let updated = divide_transfer_for_context(&ctx);
+        assert_ne!(
+            updated, sentinel,
+            "changed divide inputs must invalidate the cached transfer"
+        );
+        assert_eq!(
+            updated,
+            divide_transfer_from_signature(divide_transfer_signature(&ctx))
+        );
+    }
+
+    #[test]
+    fn climit_transfer_cache_reuses_evaluated_transfer_until_control_changes() {
+        let mut ctx = CmContext::new();
+        ctx.set_input_analog("in", 1.85);
+        ctx.set_input_analog("cntl_lower", 0.0);
+        ctx.set_input_analog("cntl_upper", 2.0);
+        ctx.set_param("in_offset", 0.0);
+        ctx.set_param("lower_delta", 0.0);
+        ctx.set_param("upper_delta", 0.0);
+        ctx.set_param("limit_range", 0.5);
+        ctx.set_param("gain", 1.0);
+        ctx.set_param("fraction", 0.0);
+
+        let first = cache_climit_transfer(&mut ctx);
+        assert_eq!(climit_transfer_for_context(&ctx), first);
+
+        ctx.set_param("unrelated", 42.0);
+        assert_eq!(
+            climit_transfer_for_context(&ctx),
+            first,
+            "unrelated context changes should not invalidate the climit transfer cache"
+        );
+
+        let signature = climit_transfer_signature(&ctx);
+        let sentinel = ClimitTransfer {
+            output: -123.0,
+            in_partial: -456.0,
+            lower_partial: -789.0,
+            upper_partial: -1011.0,
+        };
+        ctx.set_resource(
+            CLIMIT_TRANSFER_RESOURCE,
+            Arc::new(ClimitTransferResource {
+                signature,
+                transfer: sentinel,
+            }),
+        );
+        assert_eq!(
+            climit_transfer_for_context(&ctx),
+            sentinel,
+            "matching signatures should reuse the cached climit transfer"
+        );
+
+        ctx.set_input_analog("cntl_upper", 3.0);
+        let updated = climit_transfer_for_context(&ctx);
+        assert_ne!(
+            updated, sentinel,
+            "changed climit controls must invalidate the cached transfer"
+        );
+        assert_eq!(
+            updated,
+            climit_transfer_from_signature(climit_transfer_signature(&ctx))
+        );
+    }
+
+    #[test]
     fn delay_negative_controlled_delmax_collapses_min_bound_like_ngspice() {
         let mut ctx = CmContext::new();
         ctx.analysis = crate::xspice::AnalysisType::Transient;
@@ -2765,18 +2949,89 @@ pub(super) fn climit_transfer(
     }
 }
 
-fn climit_transfer_from_context(ctx: &CmContext) -> (Value, Value, Value, Value) {
-    climit_transfer(
-        ctx.input("in"),
-        ctx.param("in_offset"),
-        ctx.input("cntl_upper"),
-        ctx.input("cntl_lower"),
-        ctx.param("lower_delta"),
-        ctx.param("upper_delta"),
-        ctx.param("limit_range"),
-        ctx.param("gain"),
-        ctx.param("fraction") > 0.5,
-    )
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ClimitTransferSignature {
+    input: Value,
+    in_offset: Value,
+    cntl_upper: Value,
+    cntl_lower: Value,
+    lower_delta: Value,
+    upper_delta: Value,
+    limit_range: Value,
+    gain: Value,
+    fraction: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ClimitTransfer {
+    output: Value,
+    in_partial: Value,
+    lower_partial: Value,
+    upper_partial: Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ClimitTransferResource {
+    signature: ClimitTransferSignature,
+    transfer: ClimitTransfer,
+}
+
+fn climit_transfer_signature(ctx: &CmContext) -> ClimitTransferSignature {
+    ClimitTransferSignature {
+        input: ctx.input("in"),
+        in_offset: ctx.param("in_offset"),
+        cntl_upper: ctx.input("cntl_upper"),
+        cntl_lower: ctx.input("cntl_lower"),
+        lower_delta: ctx.param("lower_delta"),
+        upper_delta: ctx.param("upper_delta"),
+        limit_range: ctx.param("limit_range"),
+        gain: ctx.param("gain"),
+        fraction: ctx.param("fraction") > 0.5,
+    }
+}
+
+fn climit_transfer_from_signature(signature: ClimitTransferSignature) -> ClimitTransfer {
+    let (output, in_partial, lower_partial, upper_partial) = climit_transfer(
+        signature.input,
+        signature.in_offset,
+        signature.cntl_upper,
+        signature.cntl_lower,
+        signature.lower_delta,
+        signature.upper_delta,
+        signature.limit_range,
+        signature.gain,
+        signature.fraction,
+    );
+    ClimitTransfer {
+        output,
+        in_partial,
+        lower_partial,
+        upper_partial,
+    }
+}
+
+fn climit_transfer_for_context(ctx: &CmContext) -> ClimitTransfer {
+    let signature = climit_transfer_signature(ctx);
+    if let Some(resource) = ctx.resource::<ClimitTransferResource>(CLIMIT_TRANSFER_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.transfer;
+    }
+
+    climit_transfer_from_signature(signature)
+}
+
+fn cache_climit_transfer(ctx: &mut CmContext) -> ClimitTransfer {
+    let signature = climit_transfer_signature(ctx);
+    let transfer = climit_transfer_from_signature(signature);
+    ctx.set_resource(
+        CLIMIT_TRANSFER_RESOURCE,
+        Arc::new(ClimitTransferResource {
+            signature,
+            transfer,
+        }),
+    );
+    transfer
 }
 
 pub(super) fn smooth_corner(
