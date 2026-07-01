@@ -38,7 +38,7 @@ struct FileSourceRowsData {
     values: Vec<Value>,
     width: usize,
     strictly_increasing_time: bool,
-    nonmonotonic_breakpoints: Option<Vec<Value>>,
+    transient_breakpoints: Vec<Value>,
 }
 
 impl FileSourceRowsData {
@@ -46,22 +46,19 @@ impl FileSourceRowsData {
         let strictly_increasing_time = rows
             .windows(2)
             .all(|window| window[0].time < window[1].time);
-        let nonmonotonic_breakpoints = if strictly_increasing_time {
-            None
-        } else {
-            let mut times: Vec<Value> = rows.iter().map(|row| row.time).collect();
-            times.sort_by(|left, right| {
+        let mut transient_breakpoints: Vec<Value> = rows.iter().map(|row| row.time).collect();
+        if !strictly_increasing_time {
+            transient_breakpoints.sort_by(|left, right| {
                 left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
             });
-            times.dedup_by(|left, right| *left == *right);
-            Some(times)
-        };
+            transient_breakpoints.dedup_by(|left, right| *left == *right);
+        }
         Self {
             rows,
             values,
             width,
             strictly_increasing_time,
-            nonmonotonic_breakpoints,
+            transient_breakpoints,
         }
     }
 
@@ -76,7 +73,10 @@ impl FileSourceRowsData {
     }
 
     fn next_nonmonotonic_breakpoint(&self, time: Value) -> Option<Value> {
-        let breakpoints = self.nonmonotonic_breakpoints.as_deref()?;
+        if self.strictly_increasing_time {
+            return None;
+        }
+        let breakpoints = self.transient_breakpoints.as_slice();
         let index = breakpoints.partition_point(|breakpoint| *breakpoint <= time);
         breakpoints.get(index).copied()
     }
@@ -779,7 +779,7 @@ impl CodeModel for FileSource {
         let width = ctx.port_width("out");
         let file = ctx.string_param("file").unwrap_or("filesource.txt");
         let rows = transformed_rows_from_context(ctx, file, width)?;
-        Ok(rows.iter().map(|row| row.time).collect())
+        Ok(rows.transient_breakpoints.clone())
     }
 }
 
@@ -941,6 +941,11 @@ mod tests {
         ctx.time = 0.5e-9;
 
         assert!(rows.strictly_increasing_time);
+        assert_eq!(
+            rows.transient_breakpoints.as_slice(),
+            &[0.0, 1.0e-9, 2.0e-9],
+            "monotonic filesource data should precompute row transient breakpoint times"
+        );
         schedule_next_breakpoint(&mut ctx, &rows);
         assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
     }
@@ -960,9 +965,9 @@ mod tests {
 
         assert!(!rows.strictly_increasing_time);
         assert_eq!(
-            rows.nonmonotonic_breakpoints.as_deref(),
-            Some(&[0.0, 1.0e-9, 2.0e-9, 3.0e-9][..]),
-            "nonmonotonic filesource data should precompute sorted unique breakpoint times"
+            rows.transient_breakpoints.as_slice(),
+            &[0.0, 1.0e-9, 2.0e-9, 3.0e-9],
+            "nonmonotonic filesource data should precompute sorted unique transient breakpoint times"
         );
         schedule_next_breakpoint(&mut ctx, &rows);
         assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
