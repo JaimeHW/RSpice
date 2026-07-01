@@ -2294,6 +2294,24 @@ impl NativeProgram {
         expr_id: ExprId,
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
+        Self::from_mir_expression_for_equation(
+            model,
+            entry_kind,
+            mir,
+            EquationId::new(0),
+            expr_id,
+            limits,
+        )
+    }
+
+    pub(crate) fn from_mir_expression_for_equation(
+        model: impl Into<SmolStr>,
+        entry_kind: EntryKind,
+        mir: &MirModel,
+        equation_id: EquationId,
+        expr_id: ExprId,
+        limits: NativeLoweringLimits<'_>,
+    ) -> JitResult<Self> {
         let model = model.into();
         mir.validate()
             .map_err(|diagnostics| JitError::InvalidCanonicalIr {
@@ -2306,7 +2324,7 @@ impl NativeProgram {
             })?;
 
         let mut lowerer =
-            MirEquationLowerer::new(model.clone(), entry_kind, mir, EquationId::new(0), limits);
+            MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
         lowerer.lower(expr_id)?;
 
         if lowerer.depth != 1 {
@@ -2587,9 +2605,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         operands.len()
                     )));
                 }
-                self.lower(operands[0])?;
-                self.ops.push(NativeOp::WhiteNoise);
-                Ok(())
+                self.push(NativeOp::Const(0.0))
             }
             "flicker" => {
                 if operands.len() != 2 {
@@ -2598,11 +2614,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         operands.len()
                     )));
                 }
-                self.lower(operands[0])?;
-                self.lower(operands[1])?;
-                self.pop_binary("canonical flicker noise source")?;
-                self.ops.push(NativeOp::FlickerNoise);
-                Ok(())
+                self.push(NativeOp::Const(0.0))
             }
             "table" => self.push(NativeOp::Const(0.0)),
             _ => Err(self.unsupported(format!("noise source {source}"))),
@@ -3985,7 +3997,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "hypot" => self.lower_hypot_derivative(name, args, wrt),
             "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
             | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
-            | "flicker_noise" | "noise_table" => self.push(NativeOp::Const(0.0)),
+            | "flicker_noise" | "noise_table" | "noise_table_log" => {
+                self.push(NativeOp::Const(0.0))
+            }
             _ => Err(self.unsupported(format!("ddx derivative of intrinsic function '{name}'"))),
         }
     }
@@ -4232,7 +4246,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             "floor" | "ceil" | "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime"
             | "mfactor" | "simparam" | "param_given" | "port_connected" | "analysis"
-            | "white_noise" | "flicker_noise" | "noise_table" => self.push(NativeOp::Const(0.0)),
+            | "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" => {
+                self.push(NativeOp::Const(0.0))
+            }
             "atan2" => self.lower_atan2_second_derivative(name, args, first, second),
             "hypot" => self.lower_hypot_second_derivative(name, args, first, second),
             _ => Err(self.unsupported(format!("second derivative of intrinsic function '{name}'"))),
@@ -6036,6 +6052,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "analysis" => self.lower_analysis_intrinsic(name, args),
             "white_noise" => self.lower_white_noise_intrinsic(name, args),
             "flicker_noise" => self.lower_flicker_noise_intrinsic(name, args),
+            "noise_table" | "noise_table_log" => self.lower_noise_table_intrinsic(name, args),
             _ => Err(self.unsupported(format!("intrinsic function '{name}'"))),
         }
     }
@@ -6120,18 +6137,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_white_noise_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
         self.require_intrinsic_arity_range(name, args, 1, 2)?;
-        self.lower(args[0])?;
-        self.ops.push(NativeOp::WhiteNoise);
-        Ok(())
+        self.push(NativeOp::Const(0.0))
     }
 
     fn lower_flicker_noise_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
         self.require_intrinsic_arity_range(name, args, 2, 3)?;
-        self.lower(args[0])?;
-        self.lower(args[1])?;
-        self.pop_binary("canonical flicker noise")?;
-        self.ops.push(NativeOp::FlickerNoise);
-        Ok(())
+        self.push(NativeOp::Const(0.0))
+    }
+
+    fn lower_noise_table_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
+        self.require_intrinsic_arity_range(name, args, 1, 2)?;
+        self.push(NativeOp::Const(0.0))
     }
 
     fn lower_unary_math_intrinsic(
@@ -9249,7 +9265,9 @@ module mir_noise_sources(p, n);
   inout p, n;
   electrical p, n;
   analog begin
-    I(p, n) <+ white_noise($temperature, "thermal") + flicker_noise(2.0, 1.0, "flicker");
+    I(p, n) <+ white_noise($temperature, "thermal")
+      + flicker_noise(2.0, 1.0, "flicker")
+      + noise_table_log('{1.0, 2.0e-18, 10.0, 4.0e-18}, "table");
   end
 endmodule
 "#;
@@ -9266,18 +9284,8 @@ endmodule
         )
         .expect("lower canonical noise sources to native large-signal zero ops");
 
-        assert_eq!(
-            program.ops(),
-            &[
-                NativeOp::LoadTemperature,
-                NativeOp::WhiteNoise,
-                NativeOp::Const(2.0),
-                NativeOp::Const(1.0),
-                NativeOp::FlickerNoise,
-                NativeOp::Add,
-            ]
-        );
-        assert_eq!(program.max_stack_depth(), 3);
+        assert_eq!(program.ops(), &[NativeOp::Const(0.0)]);
+        assert_eq!(program.max_stack_depth(), 1);
     }
 
     #[test]
@@ -9293,19 +9301,8 @@ endmodule
         )
         .expect("lower explicit canonical noise source nodes to native large-signal zero ops");
 
-        assert_eq!(
-            program.ops(),
-            &[
-                NativeOp::Const(1.0),
-                NativeOp::WhiteNoise,
-                NativeOp::Const(2.0),
-                NativeOp::Const(1.0),
-                NativeOp::FlickerNoise,
-                NativeOp::Add,
-                NativeOp::AddConst(0.0),
-            ]
-        );
-        assert_eq!(program.max_stack_depth(), 3);
+        assert_eq!(program.ops(), &[NativeOp::Const(0.0)]);
+        assert_eq!(program.max_stack_depth(), 1);
     }
 
     #[test]

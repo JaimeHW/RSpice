@@ -10,10 +10,12 @@ use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::HashMap;
 
-fn compile(source: &str) -> rspice_veriloga::CompiledModel {
-    VerilogACompiler::new(CompilerOptions::default())
-        .compile(source)
-        .expect("compilation failed")
+mod support;
+
+use support::DeviceFixture;
+
+fn compile(source: &str) -> DeviceFixture {
+    DeviceFixture::compile(source)
 }
 
 fn compile_err(source: &str) -> String {
@@ -76,7 +78,7 @@ module polysum(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("A1", model, &[1, 0]);
+    let mut device = model.device("A1", &[1, 0]);
     let (matrix, rhs) = collect_stamps(&mut device, &[2.0]);
 
     assert!((matrix[&(0, 0)] - 10.0e-3).abs() < 1e-15);
@@ -101,7 +103,7 @@ module cinit(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("A1", model, &[1, 0]);
+    let mut device = model.device("A1", &[1, 0]);
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 4.0e-3).abs() < 1e-15);
     assert_eq!(device.variable("c[1]"), Some(1.5e-3));
@@ -132,7 +134,7 @@ endmodule
 "#;
     let model = compile(source);
 
-    let mut device = VerilogADevice::new("A1", model.clone(), &[1, 0]);
+    let mut device = model.device("A1", &[1, 0]);
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 10.0e-3).abs() < 1e-12);
     assert_eq!(device.variable("w[3]"), Some(0.003));
@@ -140,7 +142,7 @@ endmodule
     assert_eq!(device.variable("w[7]"), Some(0.0));
 
     // Per-instance override exercises the runtime bound: n=6 -> 21 mS
-    let mut device = VerilogADevice::new("A2", model, &[1, 0]);
+    let mut device = model.device("A2", &[1, 0]);
     assert!(device.set_parameter("nseg", 6.0));
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 21.0e-3).abs() < 1e-12);
@@ -171,7 +173,7 @@ module varr(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("A1", model, &[1, 0]);
+    let mut device = model.device("A1", &[1, 0]);
 
     let v = 0.5;
     let (matrix, rhs) = collect_stamps(&mut device, &[v]);
@@ -216,11 +218,11 @@ endmodule
 "#;
     let model = compile(source);
 
-    let mut device = VerilogADevice::new("A1", model.clone(), &[1, 0]);
+    let mut device = model.device("A1", &[1, 0]);
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 2.0e-3).abs() < 1e-15);
 
-    let mut device = VerilogADevice::new("A2", model, &[1, 0]);
+    let mut device = model.device("A2", &[1, 0]);
     assert!(device.set_parameter("sel", 1.0));
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 5.0e-3).abs() < 1e-15);
@@ -255,13 +257,13 @@ endmodule
 "#;
     let model = compile(source);
 
-    let mut device = VerilogADevice::new("A1", model.clone(), &[1, 0]);
+    let mut device = model.device("A1", &[1, 0]);
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 8.0e-3).abs() < 1e-12);
     assert_eq!(device.variable("w[2]"), Some(0.0));
 
     // skip=5 lies past the loop bound: every written element survives
-    let mut device = VerilogADevice::new("A2", model, &[1, 0]);
+    let mut device = model.device("A2", &[1, 0]);
     assert!(device.set_parameter("skip", 5.0));
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 10.0e-3).abs() < 1e-12);
@@ -284,7 +286,7 @@ module lpsize(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("A1", model, &[1, 0]);
+    let mut device = model.device("A1", &[1, 0]);
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 2.0e-3).abs() < 1e-15);
 }
@@ -376,7 +378,7 @@ module desc(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("A1", model, &[1, 0]);
+    let mut device = model.device("A1", &[1, 0]);
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 4.0e-3).abs() < 1e-15);
 }

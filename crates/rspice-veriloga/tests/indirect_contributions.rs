@@ -6,14 +6,15 @@
 //! holds the constraint residual f = lhs - rhs = 0 — there is no
 //! structural V(p) - V(n) relation on that row.
 
-use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::HashMap;
 
-fn compile(source: &str) -> rspice_veriloga::CompiledModel {
-    VerilogACompiler::new(CompilerOptions::default())
-        .compile(source)
-        .expect("compilation failed")
+mod support;
+
+use support::DeviceFixture;
+
+fn compile(source: &str) -> DeviceFixture {
+    DeviceFixture::compile(source)
 }
 
 fn compile_err(source: &str) -> String {
@@ -57,7 +58,7 @@ module opamp(out, inp, inn);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("A1", model, &[1, 2, 3, 0]);
+    let mut device = model.device("A1", &[1, 2, 3, 0]);
     device.set_branch_current_indices(&[4]);
 
     let mut matrix: HashMap<(usize, usize), f64> = HashMap::new();

@@ -4,15 +4,17 @@
 //! the engine solves A*V = z, so a device must stamp G into all rows of its
 //! KCL pair and -/+ Ieq = -/+(I - G*V) into the RHS.
 
+#[cfg(not(feature = "native"))]
 use rspice_veriloga::codegen::{BytecodeProgram, Instruction};
 use rspice_veriloga::device::VerilogADevice;
-use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::HashMap;
 
-fn compile(source: &str) -> rspice_veriloga::CompiledModel {
-    VerilogACompiler::new(CompilerOptions::default())
-        .compile(source)
-        .expect("compilation failed")
+mod support;
+
+use support::DeviceFixture;
+
+fn compile(source: &str) -> DeviceFixture {
+    DeviceFixture::compile(source)
 }
 
 /// Collect matrix and RHS stamps into maps for inspection
@@ -44,7 +46,7 @@ endmodule
 fn resistor_stamps_companion_form() {
     let model = compile(RESISTOR);
     // p -> circuit node 1, n -> ground
-    let mut device = VerilogADevice::new("R1", model, &[1, 0]);
+    let mut device = model.device("R1", &[1, 0]);
 
     // Node 1 at 4 V
     let (matrix, rhs) = collect_stamps(&mut device, &[4.0]);
@@ -62,7 +64,7 @@ fn resistor_stamps_companion_form() {
 fn floating_resistor_stamps_all_four_positions() {
     let model = compile(RESISTOR);
     // Both terminals on non-ground circuit nodes 1 and 2
-    let mut device = VerilogADevice::new("R1", model, &[1, 2]);
+    let mut device = model.device("R1", &[1, 2]);
 
     let (matrix, _rhs) = collect_stamps(&mut device, &[3.0, 1.0]);
 
@@ -91,7 +93,7 @@ module sqlaw(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("Q1", model, &[1, 0]);
+    let mut device = model.device("Q1", &[1, 0]);
 
     let v = 3.0;
     let (matrix, rhs) = collect_stamps(&mut device, &[v]);
@@ -125,13 +127,13 @@ endmodule
 "#,
     );
 
-    let mut device = VerilogADevice::new("X1", model.clone(), &[1, 0]);
+    let mut device = model.device("X1", &[1, 0]);
     device.update_voltages(&[3.0]);
     let currents = device.evaluate();
     let total: f64 = currents.iter().sum();
     assert!((total - 6.0).abs() < 1e-12, "V=3 selects the 2*V branch");
 
-    let mut device = VerilogADevice::new("X2", model, &[1, 0]);
+    let mut device = model.device("X2", &[1, 0]);
     device.update_voltages(&[0.5]);
     let currents = device.evaluate();
     let total: f64 = currents.iter().sum();
@@ -157,7 +159,7 @@ endmodule
     );
     assert_eq!(model.internal_nodes, 1);
 
-    let mut device = VerilogADevice::new("D1", model, &[1, 0]);
+    let mut device = model.device("D1", &[1, 0]);
     // Internal node mapped to circuit node 2
     device.set_internal_node_indices(&[2]);
     // node1 = 2 V, node2 (internal mid) = 0.5 V
@@ -184,7 +186,7 @@ endmodule
 "#,
     );
     // a -> node1, b -> node2
-    let mut device = VerilogADevice::new("G1", model, &[1, 2]);
+    let mut device = model.device("G1", &[1, 2]);
     device.update_voltages(&[5.0, 1.25]);
     let currents = device.evaluate();
     assert!(
@@ -207,7 +209,7 @@ module br_res(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("B1", model, &[1, 0]);
+    let mut device = model.device("B1", &[1, 0]);
     device.update_voltages(&[2.0]);
     let currents = device.evaluate();
     assert!((currents[0] - 0.5).abs() < 1e-12);
@@ -226,7 +228,7 @@ module cap(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("C1", model, &[1, 0]);
+    let mut device = model.device("C1", &[1, 0]);
 
     // DC: charge recorded, current is zero
     device.update_voltages(&[1.0]);
@@ -271,7 +273,7 @@ module ddxm(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("DX1", model, &[1, 0]);
+    let mut device = model.device("DX1", &[1, 0]);
     // V(p) = 3 => ddx(V(p)^2, V(p)) = 2*V(p) = 6; I = 6 * 3 = 18
     device.update_voltages(&[3.0]);
     let currents = device.evaluate();
@@ -296,7 +298,7 @@ module ddxbr(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("DXB1", model, &[1, 0]);
+    let mut device = model.device("DXB1", &[1, 0]);
     device.update_voltages(&[3.0]);
     let currents = device.evaluate();
 
@@ -321,7 +323,7 @@ endmodule
     assert_eq!(model.branch_sources.len(), 1, "one branch unknown");
 
     // p -> node1 (row 0), n -> node2 (row 1), branch unknown -> node3 (row 2)
-    let mut device = VerilogADevice::new("V1", model, &[1, 2]);
+    let mut device = model.device("V1", &[1, 2]);
     device.set_branch_current_indices(&[3]);
 
     let (matrix, rhs) = collect_stamps(&mut device, &[0.0, 0.0, 0.0]);
@@ -354,7 +356,7 @@ endmodule
     );
     assert_eq!(model.branch_sources.len(), 1);
 
-    let mut device = VerilogADevice::new("Z1", model, &[1, 2]);
+    let mut device = model.device("Z1", &[1, 2]);
     device.set_branch_current_indices(&[3]);
 
     // Branch current solution value 1 mA
@@ -382,7 +384,7 @@ endmodule
 "#,
     );
 
-    let mut device = VerilogADevice::new("Z1", model, &[1, 2]);
+    let mut device = model.device("Z1", &[1, 2]);
     device.set_branch_current_indices(&[3]);
 
     let err = device
@@ -417,14 +419,14 @@ endmodule
     assert_eq!(model.branch_sources.len(), 1);
 
     // Disabled (default): branch row pinned to zero current, no coupling
-    let mut device = VerilogADevice::new("M1", model.clone(), &[1, 2]);
+    let mut device = model.device("M1", &[1, 2]);
     device.set_branch_current_indices(&[3]);
     let (matrix, _) = collect_stamps(&mut device, &[1.0, 0.0, 0.0]);
     assert!((matrix[&(2, 2)] - 1.0).abs() < 1e-12, "identity pin");
     assert!(!matrix.contains_key(&(0, 2)), "no KCL coupling when open");
 
     // Enabled: structural short V(p)-V(n)=0
-    let mut device = VerilogADevice::new("M2", model, &[1, 2]);
+    let mut device = model.device("M2", &[1, 2]);
     device.set_branch_current_indices(&[3]);
     device.set_parameter("shorted", 1.0);
     device.resolve_parameter_defaults();
@@ -454,7 +456,7 @@ module fres(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("F1", model, &[1, 0]);
+    let mut device = model.device("F1", &[1, 0]);
     device.update_voltages(&[2.0]);
     assert!((device.evaluate()[0] - 4.0).abs() < 1e-12);
     device.update_voltages(&[-1.0]);
@@ -477,19 +479,19 @@ endmodule
     );
 
     // Default w=1 => rs defaults to 10; I = V/10
-    let mut device = VerilogADevice::new("W1", model.clone(), &[1, 0]);
+    let mut device = model.device("W1", &[1, 0]);
     device.update_voltages(&[5.0]);
     assert!((device.evaluate()[0] - 0.5).abs() < 1e-12);
 
     // Override w=2 => rs default must recompute to 5; I = V/5
-    let mut device = VerilogADevice::new("W2", model.clone(), &[1, 0]);
+    let mut device = model.device("W2", &[1, 0]);
     device.set_parameter("w", 2.0);
     device.resolve_parameter_defaults();
     device.update_voltages(&[5.0]);
     assert!((device.evaluate()[0] - 1.0).abs() < 1e-12);
 
     // Explicit rs wins over its default regardless of w
-    let mut device = VerilogADevice::new("W3", model, &[1, 0]);
+    let mut device = model.device("W3", &[1, 0]);
     device.set_parameter("w", 2.0);
     device.set_parameter("rs", 50.0);
     device.resolve_parameter_defaults();
@@ -498,6 +500,7 @@ endmodule
 }
 
 #[test]
+#[cfg(not(feature = "native"))]
 fn try_new_reports_dependent_parameter_default_runtime_errors() {
     let mut model = compile(
         r#"
@@ -515,7 +518,8 @@ endmodule
         instructions: vec![Instruction::PushParam(99)],
     });
 
-    let err = VerilogADevice::try_new("BD1", model, &[1, 0])
+    let err = model
+        .try_device("BD1", &[1, 0])
         .expect_err("checked construction must report invalid dependent parameter defaults");
     let text = err.to_string();
     assert!(
@@ -546,12 +550,12 @@ endmodule
     );
 
     // Not given: the model's fallback conductance applies
-    let mut device = VerilogADevice::new("P1", model.clone(), &[1, 0]);
+    let mut device = model.device("P1", &[1, 0]);
     device.update_voltages(&[2.0]);
     assert!((device.evaluate()[0] - 0.5).abs() < 1e-12);
 
     // Given: the explicit value applies even though it equals the default
-    let mut device = VerilogADevice::new("P2", model, &[1, 0]);
+    let mut device = model.device("P2", &[1, 0]);
     device.set_parameter("rknob", 1.0);
     device.update_voltages(&[2.0]);
     assert!((device.evaluate()[0] - 2.0).abs() < 1e-12);
@@ -571,11 +575,11 @@ endmodule
 "#,
     );
 
-    let mut omitted = VerilogADevice::new("X1", model.clone(), &[1, 0]);
+    let mut omitted = model.device("X1", &[1, 0]);
     omitted.update_voltages(&[2.0]);
     assert!((omitted.evaluate()[0] - 2.0).abs() < 1e-12);
 
-    let mut grounded = VerilogADevice::new("X2", model, &[1, 0, 0]);
+    let mut grounded = model.device("X2", &[1, 0, 0]);
     grounded.update_voltages(&[2.0]);
     assert!((grounded.evaluate()[0] - 20.0).abs() < 1e-12);
 }
@@ -606,7 +610,7 @@ endmodule
     );
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+        let mut device = model.device("X1", &[1, 0]);
         device.update_voltages(&[1.0]);
         let _ = device.evaluate();
     }));
@@ -637,7 +641,7 @@ endmodule
 "#,
     );
 
-    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    let mut device = model.device("X1", &[1, 0]);
     let err = device
         .try_stamp(&[1.0], |_, _, _| {}, |_, _| {})
         .expect_err("checked stamping must report runtime array bounds errors");
@@ -668,7 +672,7 @@ endmodule
 "#,
     );
 
-    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    let mut device = model.device("X1", &[1, 0]);
     device.update_voltages(&[1.0]);
     let err = device
         .try_compute_jacobian()
@@ -700,7 +704,7 @@ endmodule
 "#,
     );
 
-    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    let mut device = model.device("X1", &[1, 0]);
     device.set_analysis_type(1);
     let err = device
         .try_stamp_reactive(&[1.0], |_, _, _| {})
@@ -732,7 +736,7 @@ endmodule
 "#,
     );
 
-    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    let mut device = model.device("X1", &[1, 0]);
     device.set_analysis_type(3);
     let err = device
         .try_noise_sources(&[1.0])
@@ -761,7 +765,7 @@ endmodule
 "#,
     );
 
-    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    let mut device = model.device("X1", &[1, 0]);
     for (analysis_type, expected) in [(0, 1.0), (1, 14.0), (2, 0.0), (3, 14.0), (4, 0.0)] {
         device.set_analysis_type(analysis_type);
         device.update_voltages(&[0.0]);
@@ -793,7 +797,7 @@ endmodule
 "#,
     );
 
-    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    let mut device = model.device("X1", &[1, 0]);
     device.set_analysis_type(3);
     let sources = device
         .try_noise_sources(&[0.0])
@@ -838,7 +842,7 @@ endmodule
 "#,
     );
 
-    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    let mut device = model.device("X1", &[1, 0]);
     device.set_analysis_type(3);
     let sources = device
         .try_noise_sources(&[3.0])
@@ -871,7 +875,7 @@ module phase(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("PH1", model, &[1, 0]);
+    let mut device = model.device("PH1", &[1, 0]);
     device.update_voltages(&[0.0]);
 
     // DC: integral sits at its initial condition
@@ -913,13 +917,13 @@ endmodule
     let bias = 0.6;
     let delta = 1e-7;
 
-    let mut device = VerilogADevice::new("D1", model.clone(), &[1, 0]);
+    let mut device = model.device("D1", &[1, 0]);
     device.update_voltages(&[bias]);
     let i0 = device.evaluate()[0];
     let (matrix, _) = collect_stamps(&mut device, &[bias]);
     let g_analytic = matrix[&(0, 0)];
 
-    let mut device2 = VerilogADevice::new("D2", model, &[1, 0]);
+    let mut device2 = model.device("D2", &[1, 0]);
     device2.update_voltages(&[bias + delta]);
     let i1 = device2.evaluate()[0];
 

@@ -5,8 +5,11 @@
 //! parameter itself (no entry in the parameter table, no default) and its
 //! name must not collide with any other declaration.
 
-use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
+
+mod support;
+
+use support::DeviceFixture;
 
 const ALIASED_RESISTOR: &str = r#"
 `include "disciplines.vams"
@@ -19,10 +22,8 @@ module ares(p, n);
 endmodule
 "#;
 
-fn compile(source: &str) -> rspice_veriloga::CompiledModel {
-    VerilogACompiler::new(CompilerOptions::default())
-        .compile(source)
-        .expect("compilation failed")
+fn compile(source: &str) -> DeviceFixture {
+    DeviceFixture::compile(source)
 }
 
 #[test]
@@ -41,19 +42,19 @@ fn setting_the_alias_behaves_identically_to_setting_the_target() {
     let model = compile(ALIASED_RESISTOR);
 
     // Baseline: default r=1 conducts I = V/1
-    let mut device = VerilogADevice::new("A0", model.clone(), &[1, 0]);
+    let mut device = model.device("A0", &[1, 0]);
     device.update_voltages(&[2.0]);
     assert!((device.evaluate()[0] - 2.0).abs() < 1e-12);
 
     // Setting the target directly: r=5 => I = V/5
-    let mut direct = VerilogADevice::new("A1", model.clone(), &[1, 0]);
+    let mut direct = model.device("A1", &[1, 0]);
     assert!(direct.set_parameter("r", 5.0));
     direct.resolve_parameter_defaults();
     direct.update_voltages(&[2.0]);
     let via_target = direct.evaluate()[0];
 
     // Setting the alias: res=5 must write r and produce the same current
-    let mut aliased = VerilogADevice::new("A2", model, &[1, 0]);
+    let mut aliased = model.device("A2", &[1, 0]);
     assert!(aliased.set_parameter("res", 5.0));
     aliased.resolve_parameter_defaults();
     aliased.update_voltages(&[2.0]);
@@ -86,7 +87,7 @@ endmodule
 "#,
     );
 
-    let mut device = VerilogADevice::new("G1", model, &[1, 0]);
+    let mut device = model.device("G1", &[1, 0]);
     assert!(device.set_parameter("knob", 1.0));
     device.update_voltages(&[2.0]);
     assert!((device.evaluate()[0] - 2.0).abs() < 1e-12);
@@ -96,7 +97,7 @@ endmodule
 fn alias_resolves_case_insensitively_like_parameters() {
     // SPICE decks are case-insensitive; aliases follow the same rule
     let model = compile(ALIASED_RESISTOR);
-    let mut device = VerilogADevice::new("C1", model, &[1, 0]);
+    let mut device = model.device("C1", &[1, 0]);
     assert!(device.set_parameter("RES", 4.0));
     device.resolve_parameter_defaults();
     device.update_voltages(&[2.0]);
