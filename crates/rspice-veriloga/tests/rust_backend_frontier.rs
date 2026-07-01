@@ -6,6 +6,7 @@
 //! To focus on one package, file, or module:
 //! `RSPICE_RUST_BACKEND_FRONTIER_FILTER=asmhemt cargo test -p rspice-veriloga --test rust_backend_frontier shipped_rust_backend_frontier -- --ignored --nocapture`
 
+use rspice_veriloga::canonical_ir::{CanonicalIrArtifact, InvalidationClass, OptOp};
 use rspice_veriloga::rust_backend::{
     RustBackendSelection, RustTranspileOptions, RustTranspiler, discover_veriloga_sources,
 };
@@ -15,10 +16,21 @@ use std::path::Path;
 
 const FILTER_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_FILTER";
 const REQUIRE_NO_LEGACY_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_REQUIRE_NO_LEGACY";
+const TRACE_SCALAR_ERRORS_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_TRACE_SCALAR_ERRORS";
 
 #[test]
 #[ignore = "full shipped Rust-backend frontier audit; run explicitly while scalar coverage is still moving"]
 fn shipped_rust_backend_frontier() {
+    std::thread::Builder::new()
+        .name("rspice-rust-backend-frontier".to_string())
+        .stack_size(256 * 1024 * 1024)
+        .spawn(run_shipped_rust_backend_frontier)
+        .expect("spawn Rust backend frontier worker")
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+}
+
+fn run_shipped_rust_backend_frontier() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
@@ -70,6 +82,33 @@ fn shipped_rust_backend_frontier() {
             match transpiler.transpile_with_report(&compiled.artifact) {
                 Ok(report) => {
                     counts.record(report.backend);
+                    if report.backend == RustBackendSelection::LegacyNativeLocalFallback
+                        && env::var_os(TRACE_SCALAR_ERRORS_ENV).is_some()
+                    {
+                        match RustTranspiler::new_scalar(RustTranspileOptions::default())
+                            .transpile(&compiled.artifact)
+                        {
+                            Ok(_) => eprintln!(
+                                "scalar diagnostic unexpectedly succeeded for {} :: {}",
+                                source
+                                    .path
+                                    .strip_prefix(&root)
+                                    .unwrap_or(&source.path)
+                                    .display(),
+                                module
+                            ),
+                            Err(error) => eprintln!(
+                                "scalar diagnostic for {} :: {}: {error}",
+                                source
+                                    .path
+                                    .strip_prefix(&root)
+                                    .unwrap_or(&source.path)
+                                    .display(),
+                                module
+                            ),
+                        }
+                        trace_scalar_gap(&compiled.artifact);
+                    }
                     eprintln!(
                         "{:?} :: {} :: {}",
                         report.backend,
@@ -109,6 +148,33 @@ fn shipped_rust_backend_frontier() {
             counts.legacy_native_local_fallback + counts.legacy_device,
             0,
             "legacy backend selections remain in the shipped frontier"
+        );
+    }
+}
+
+fn trace_scalar_gap(artifact: &CanonicalIrArtifact) {
+    for equation in &artifact.mir.equations {
+        let expression = artifact
+            .mir
+            .expressions
+            .get(usize::from(equation.expression.id))
+            .map(|expression| &expression.kind);
+        let opt_root = artifact
+            .opt
+            .schedules
+            .iter()
+            .filter(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+            .flat_map(|schedule| schedule.ops.windows(2))
+            .find_map(|ops| match ops {
+                [
+                    OptOp::ComputeValue { value },
+                    OptOp::EvaluateEquation { equation: op_eq },
+                ] if *op_eq == equation.id => Some(*value),
+                _ => None,
+            });
+        eprintln!(
+            "  equation {:?}: kind={:?}, branch={}, expr={:?}, opt_root={:?}",
+            equation.id, equation.kind, equation.branch.label, expression, opt_root
         );
     }
 }
