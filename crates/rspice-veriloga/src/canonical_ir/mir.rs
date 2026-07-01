@@ -283,7 +283,12 @@ fn default_active_domains() -> Vec<MirAnalysisDomain> {
 fn collect_branch_unknowns(equations: &[MirEquation]) -> Vec<MirBranchUnknown> {
     equations
         .iter()
-        .filter(|equation| equation.kind == MirEquationKind::Potential)
+        .filter(|equation| {
+            matches!(
+                equation.kind,
+                MirEquationKind::Potential | MirEquationKind::Indirect
+            )
+        })
         .enumerate()
         .map(|(index, equation)| MirBranchUnknown {
             id: BranchUnknownId::from(index),
@@ -621,11 +626,14 @@ fn validate_branch_unknowns(
                 ),
             ));
         }
-        if equation.kind != MirEquationKind::Potential {
+        if !matches!(
+            equation.kind,
+            MirEquationKind::Potential | MirEquationKind::Indirect
+        ) {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::MirValidation,
                 format!(
-                    "MIR branch unknown {} must reference a potential equation, found {:?}",
+                    "MIR branch unknown {} must reference a potential or indirect equation, found {:?}",
                     unknown.id, equation.kind
                 ),
             ));

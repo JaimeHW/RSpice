@@ -2811,7 +2811,7 @@ fn mir_validation_rejects_branch_unknown_for_non_potential_equation() {
 
     assert_mir_validation_message(
         &mir,
-        "branch unknown BranchUnknownId(0) must reference a potential equation",
+        "branch unknown BranchUnknownId(0) must reference a potential or indirect equation",
     );
 }
 
