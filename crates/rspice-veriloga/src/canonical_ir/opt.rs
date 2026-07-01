@@ -10,7 +10,8 @@ use super::{
 };
 
 const MAX_SCALAR_LOOP_UNROLL_ITERATIONS: usize = 1024;
-const MAX_SCALAR_BOUNDED_LOOP_UNROLL_ITERATIONS: usize = 64;
+const MAX_SCALAR_BOUNDED_LOOP_UNROLL_ITERATIONS: usize = 128;
+const MAX_SCALAR_BOUNDED_LOOP_ASSIGNMENT_EXPANSIONS: usize = 2048;
 const MAX_SCALAR_GUARD_HISTORY_RECONSTRUCTION_ENTRIES: usize = 16;
 pub(crate) const LIMEXP_MAX: f64 = 5.54062238439351e34;
 pub(crate) const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
@@ -740,6 +741,11 @@ impl<'a> ScalarGraphBuilder<'a> {
             return false;
         };
         if iteration_count > MAX_SCALAR_BOUNDED_LOOP_UNROLL_ITERATIONS {
+            return false;
+        }
+        if iteration_count.saturating_mul(loop_statement.body.len())
+            > MAX_SCALAR_BOUNDED_LOOP_ASSIGNMENT_EXPANSIONS
+        {
             return false;
         }
         if !loop_statement.body.iter().any(|statement| {

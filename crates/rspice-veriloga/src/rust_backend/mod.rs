@@ -615,6 +615,50 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_lowers_hundred_step_guarded_runtime_while() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module hundred_step_runtime_while(p, n);
+    inout p, n;
+    electrical p, n;
+    integer iter;
+    real x, prev, delta;
+    analog begin
+        iter = 0;
+        x = 1.0;
+        delta = 1.0;
+        while ((delta > 1.0e-12) && (iter <= 100)) begin
+            prev = x;
+            x = 0.5 * (x + V(p, n));
+            delta = abs(x - prev);
+            iter = iter + 1;
+        end
+        I(p, n) <+ x;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("hundred-step guarded while should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_lowers_counter_dependent_accumulator_loop() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
