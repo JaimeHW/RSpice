@@ -2229,15 +2229,15 @@ fn interpolate_oneshot_pulse_width_linear_scan(table: &[OneShotPoint], control: 
     } else if control >= last.control {
         interpolate_oneshot_segment(table[table.len() - 2], last, control)
     } else {
-        table
-            .windows(2)
-            .find_map(|window| {
-                let left = window[0];
-                let right = window[1];
-                (control >= left.control && control < right.control)
-                    .then(|| interpolate_oneshot_segment(left, right, control))
-            })
-            .unwrap_or(last.pulse_width)
+        let mut pulse_width = None;
+        for window in table.windows(2) {
+            let left = window[0];
+            let right = window[1];
+            if control >= left.control && control < right.control {
+                pulse_width = Some(interpolate_oneshot_segment(left, right, control));
+            }
+        }
+        pulse_width.unwrap_or(last.pulse_width)
     };
 
     raw.max(0.0)
@@ -2607,6 +2607,24 @@ mod tests {
             interpolate_oneshot_pulse_width(&table, 1.0),
             3.0e-9,
             "exact interior controls should return the matching row"
+        );
+    }
+
+    #[test]
+    fn oneshot_interpolation_uses_last_matching_segment_like_ngspice() {
+        let table = oneshot_table_data(vec![
+            oneshot_point(0.0, 0.0),
+            oneshot_point(1.0, 100.0e-9),
+            oneshot_point(0.5, 50.0e-9),
+            oneshot_point(2.0, 300.0e-9),
+        ]);
+
+        assert!(!table.strictly_increasing_control);
+        let pulse_width = interpolate_oneshot_pulse_width(&table, 0.75);
+
+        assert!(
+            (pulse_width - 91.666_666_666_666_66e-9).abs() < 1.0e-21,
+            "ngspice scans every matching oneshot segment and keeps the later pulse width, got {pulse_width}"
         );
     }
 
