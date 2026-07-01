@@ -385,6 +385,7 @@ pub enum IrFunction {
     Abs,
     Sqrt,
     Exp,
+    LimitedExp,
     Log,
     Log10,
     Sin,
@@ -2338,6 +2339,7 @@ pub mod autodiff {
                         Box::new(IrExpr::Const(-1.0)),
                     ),
                     IrFunction::Exp => IrExpr::Call(IrFunction::Exp, vec![inner.clone()]),
+                    IrFunction::LimitedExp => limited_exp_derivative_scale(inner.clone()),
                     IrFunction::Log => IrExpr::Binary(
                         BinaryOp::Div,
                         Box::new(IrExpr::Const(1.0)),
@@ -2622,6 +2624,30 @@ pub mod autodiff {
             // probes are treated as constants in the DC Jacobian
             _ => IrExpr::Const(0.0),
         }
+    }
+
+    fn limited_exp_derivative_scale(inner: IrExpr) -> IrExpr {
+        const LIMIT: f64 = 80.0;
+        let high = IrExpr::Binary(
+            BinaryOp::Gt,
+            Box::new(inner.clone()),
+            Box::new(IrExpr::Const(LIMIT)),
+        );
+        let low = IrExpr::Binary(
+            BinaryOp::Lt,
+            Box::new(inner.clone()),
+            Box::new(IrExpr::Const(-LIMIT)),
+        );
+
+        IrExpr::Conditional(
+            Box::new(high),
+            Box::new(IrExpr::Const(LIMIT.exp())),
+            Box::new(IrExpr::Conditional(
+                Box::new(low),
+                Box::new(IrExpr::Const(0.0)),
+                Box::new(IrExpr::Call(IrFunction::Exp, vec![inner])),
+            )),
+        )
     }
 
     /// Simplify an IR expression (constant folding, identity removal)

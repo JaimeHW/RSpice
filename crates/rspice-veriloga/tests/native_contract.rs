@@ -511,6 +511,33 @@ endmodule
     )
 }
 
+fn limited_exp_current_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_limited_exp_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog function real lexp;
+        input x;
+        begin
+            if (x > 80.0) begin
+                lexp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                lexp = 1.804851387e-35;
+            end else begin
+                lexp = exp(x);
+            end
+        end
+    endfunction
+    analog begin
+        I(p, n) <+ lexp(V(p, n));
+    end
+endmodule
+"#,
+    )
+}
+
 fn transcendental_assignment_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -3234,6 +3261,51 @@ fn native_device_executes_exp_limexp_assignments() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_executes_recognized_limited_exp_current_and_jacobian() {
+    let model = limited_exp_current_model();
+    let cases = [
+        ("middle", 0.5),
+        ("high-linear", 85.0),
+        ("low-clamped", -85.0),
+    ];
+
+    for (name, voltage) in cases {
+        let mut device = VerilogADevice::try_new("LIMEXP1", model.clone(), &[1, 0])
+            .expect("recognized limited-exp model uses native JIT");
+        assert!(device.is_using_native());
+        device.update_voltages(&[voltage]);
+
+        let expected_current = limited_exp(voltage);
+        let currents = device
+            .try_evaluate()
+            .expect("native limited-exp current evaluation succeeds");
+        assert_relative_close(currents[0], expected_current, name, "current");
+
+        let expected_scale = limited_exp_derivative_scale(voltage);
+        let jacobians = device
+            .try_compute_jacobian()
+            .expect("native limited-exp jacobian evaluation succeeds");
+        let expected = [
+            (0, 0, expected_scale),
+            (0, 1, -expected_scale),
+            (0, 2, -expected_scale),
+            (0, 3, expected_scale),
+        ];
+        assert_eq!(
+            jacobians.len(),
+            expected.len(),
+            "{name}: jacobians: {jacobians:?}"
+        );
+        for (actual, expected) in jacobians.iter().zip(expected) {
+            assert_eq!(actual.program_idx, expected.0, "{name}: {jacobians:?}");
+            assert_eq!(actual.jacobian_idx, expected.1, "{name}: {jacobians:?}");
+            assert_relative_close(actual.value, expected.2, name, "jacobian");
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_executes_transcendental_assignments() {
     let model = transcendental_assignment_model();
     let cases = [("dc-ish", 0.0), ("mid", 0.5), ("large", 1.0)];
@@ -4427,4 +4499,35 @@ fn limexp(value: f64) -> f64 {
     } else {
         value.exp()
     }
+}
+
+fn limited_exp(value: f64) -> f64 {
+    const LIMIT: f64 = 80.0;
+    const LOW_VALUE: f64 = 1.804851387e-35;
+    if value > LIMIT {
+        LIMIT.exp() * (1.0 + value - LIMIT)
+    } else if value < -LIMIT {
+        LOW_VALUE
+    } else {
+        value.exp()
+    }
+}
+
+fn limited_exp_derivative_scale(value: f64) -> f64 {
+    const LIMIT: f64 = 80.0;
+    if value > LIMIT {
+        LIMIT.exp()
+    } else if value < -LIMIT {
+        0.0
+    } else {
+        value.exp()
+    }
+}
+
+fn assert_relative_close(actual: f64, expected: f64, case: &str, value_name: &str) {
+    let tolerance = expected.abs().max(1.0) * 1.0e-12;
+    assert!(
+        (actual - expected).abs() <= tolerance,
+        "{case} {value_name}: actual={actual:.17e} expected={expected:.17e} tolerance={tolerance:.17e}"
+    );
 }

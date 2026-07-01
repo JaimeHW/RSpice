@@ -319,6 +319,8 @@ pub enum Instruction {
     Max,
     /// Limited exponential (for convergence)
     Limexp,
+    /// CMC-style limited exponential with low-side clamp.
+    LimitedExp,
     /// Inverse trigonometric functions
     Asin,
     Acos,

@@ -1,6 +1,9 @@
 use thiserror::Error;
 
-use super::opt::{THERMAL_VOLTAGE_PER_K, limexp_derivative, limexp_value, real_truth_value};
+use super::opt::{
+    THERMAL_VOLTAGE_PER_K, limexp_derivative, limexp_value, limited_exp_derivative,
+    limited_exp_value, real_truth_value,
+};
 use super::{
     DerivativeLane, EquationId, IrDiagnostic, OptBinaryOp, OptModel, OptUnaryOp, OptValueKind,
     ValueId,
@@ -259,6 +262,12 @@ impl<'a> OptEvaluator<'a> {
             OptUnaryOp::Exp => Ok(OptEvalValue::Real(self.real_value(input)?.exp())),
             OptUnaryOp::LimExp => Ok(OptEvalValue::Real(limexp_value(self.real_value(input)?))),
             OptUnaryOp::LimExpDerivative => Ok(OptEvalValue::Real(limexp_derivative(
+                self.real_value(input)?,
+            ))),
+            OptUnaryOp::LimitedExp => Ok(OptEvalValue::Real(limited_exp_value(
+                self.real_value(input)?,
+            ))),
+            OptUnaryOp::LimitedExpDerivative => Ok(OptEvalValue::Real(limited_exp_derivative(
                 self.real_value(input)?,
             ))),
             OptUnaryOp::Ln => Ok(OptEvalValue::Real(self.real_value(input)?.ln())),

@@ -750,6 +750,7 @@ impl<'a> ExprConverter<'a> {
             "abs" => IrFunction::Abs,
             "sqrt" => IrFunction::Sqrt,
             "exp" => IrFunction::Exp,
+            "__rspice_limited_exp" => IrFunction::LimitedExp,
             "ln" => IrFunction::Log,
             "log" => IrFunction::Log,
             "log10" => IrFunction::Log10,

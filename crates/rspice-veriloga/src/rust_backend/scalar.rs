@@ -433,7 +433,10 @@ fn scalar_model_uses_limexp(artifact: &CanonicalIrArtifact) -> bool {
         matches!(
             &value.kind,
             OptValueKind::Unary {
-                op: OptUnaryOp::LimExp | OptUnaryOp::LimExpDerivative,
+                op: OptUnaryOp::LimExp
+                    | OptUnaryOp::LimExpDerivative
+                    | OptUnaryOp::LimitedExp
+                    | OptUnaryOp::LimitedExpDerivative,
                 ..
             }
         )
@@ -2333,6 +2336,12 @@ fn emit_unary_expr(
         ),
         OptUnaryOp::LimExpDerivative => format!(
             "{{ let limexp_arg = {input}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {limexp_max} }} }}"
+        ),
+        OptUnaryOp::LimitedExp => format!(
+            "{{ let limited_exp_arg = {input}; if limited_exp_arg > 80.0 {{ {limexp_max} * (1.0 + limited_exp_arg - 80.0) }} else if limited_exp_arg < -80.0 {{ 1.804851387e-35 }} else {{ limited_exp_arg.exp() }} }}"
+        ),
+        OptUnaryOp::LimitedExpDerivative => format!(
+            "{{ let limited_exp_arg = {input}; if limited_exp_arg > 80.0 {{ {limexp_max} }} else if limited_exp_arg < -80.0 {{ 0.0 }} else {{ limited_exp_arg.exp() }} }}"
         ),
         OptUnaryOp::Ln => format!("{}.ln()", f64_method_receiver(&input)),
         OptUnaryOp::Sqrt => format!("{}.sqrt()", f64_method_receiver(&input)),

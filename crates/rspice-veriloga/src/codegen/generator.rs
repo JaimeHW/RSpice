@@ -756,6 +756,7 @@ impl CodeGenerator {
                     IrFunction::Tanh => Instruction::Tanh,
                     IrFunction::Min => Instruction::Min,
                     IrFunction::Max => Instruction::Max,
+                    IrFunction::LimitedExp => Instruction::LimitedExp,
                     // Inverse trig
                     IrFunction::Asin => Instruction::Asin,
                     IrFunction::Acos => Instruction::Acos,

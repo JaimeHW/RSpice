@@ -4,17 +4,17 @@ use crate::native::abi::{
     rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos, rspice_cosh,
     rspice_cross_state_native, rspice_dynamic_variable_load_native,
     rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
-    rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10,
-    rspice_mod, rspice_native_current_probe_error, rspice_native_integer_shift_count_error,
-    rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
-    rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
-    rspice_native_loop_limit_error, rspice_native_param_given_error,
-    rspice_native_port_connected_error, rspice_native_prior_current_error,
-    rspice_native_state_prev_bounds_error, rspice_native_state_values_bounds_error,
-    rspice_native_state_values_error, rspice_pow, rspice_sin, rspice_sinh,
-    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
-    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
-    rspice_zi_step_native,
+    rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_limited_exp, rspice_log,
+    rspice_log10, rspice_mod, rspice_native_current_probe_error,
+    rspice_native_integer_shift_count_error, rspice_native_limit_state_bounds_error,
+    rspice_native_limit_state_initialized_error, rspice_native_limit_state_values_bounds_error,
+    rspice_native_limit_state_values_error, rspice_native_loop_limit_error,
+    rspice_native_param_given_error, rspice_native_port_connected_error,
+    rspice_native_prior_current_error, rspice_native_state_prev_bounds_error,
+    rspice_native_state_values_bounds_error, rspice_native_state_values_error, rspice_pow,
+    rspice_sin, rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
+    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
+    rspice_transition_state_native, rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{
@@ -820,6 +820,7 @@ impl FunctionCompiler {
             UnaryMathOp::Floor => self.emit_floor_or_ceil(target, RoundDirection::Floor),
             UnaryMathOp::Ceil => self.emit_floor_or_ceil(target, RoundDirection::Ceil),
             UnaryMathOp::Limexp => self.emit_limexp(target),
+            UnaryMathOp::LimitedExp => self.emit_limited_exp(target),
             _ => {
                 self.emit_unary_helper_call(target, unary_math_helper(op));
                 Ok(())
@@ -847,6 +848,32 @@ impl FunctionCompiler {
         self.emit_literal_binary_op(target, 1.0, BinaryOp::Add);
         self.emit_literal_binary_op(target, 40.0, BinaryOp::Sub);
         self.emit_literal_binary_op(target, 40.0_f64.exp(), BinaryOp::Mul);
+
+        self.patch_rel32_to_current(exp_done)?;
+        self.patch_rel32_to_current(low_done)?;
+        Ok(())
+    }
+
+    fn emit_limited_exp(&mut self, target: Xmm) -> JitResult<()> {
+        self.emit_literal_compare(target, 80.0);
+        let high_jump = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
+
+        self.emit_literal_compare(target, -80.0);
+        let exp_jump = self.encoder.jcc_rel32_placeholder(ConditionCode::Parity);
+        let low_jump = self.encoder.jcc_rel32_placeholder(ConditionCode::Below);
+
+        self.patch_rel32_to_current(exp_jump)?;
+        self.emit_unary_helper_call(target, rspice_exp);
+        let exp_done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(low_jump)?;
+        self.emit_literal_load(target, 1.804851387e-35);
+        let low_done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(high_jump)?;
+        self.emit_literal_binary_op(target, 1.0, BinaryOp::Add);
+        self.emit_literal_binary_op(target, 80.0, BinaryOp::Sub);
+        self.emit_literal_binary_op(target, 80.0_f64.exp(), BinaryOp::Mul);
 
         self.patch_rel32_to_current(exp_done)?;
         self.patch_rel32_to_current(low_done)?;
@@ -3105,6 +3132,7 @@ fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
         UnaryMathOp::Acosh => rspice_acosh,
         UnaryMathOp::Atanh => rspice_atanh,
         UnaryMathOp::Limexp => rspice_limexp,
+        UnaryMathOp::LimitedExp => rspice_limited_exp,
         UnaryMathOp::Asin => rspice_asin,
         UnaryMathOp::Acos => rspice_acos,
         UnaryMathOp::Atan => rspice_atan,
@@ -3509,7 +3537,8 @@ mod tests {
     };
     use crate::native::runtime::ExecutableMemory;
     use crate::native::{
-        EvalContext, clear_native_runtime_error, rspice_limexp, take_native_runtime_error,
+        EvalContext, clear_native_runtime_error, rspice_limexp, rspice_limited_exp,
+        take_native_runtime_error,
     };
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
     use crate::zfilter::ZiFilter;
@@ -8388,6 +8417,18 @@ mod tests {
                 -50.0,
                 runtime_limexp(-50.0),
             ),
+            (
+                "limited-exp-linear",
+                Instruction::LimitedExp,
+                85.0,
+                runtime_limited_exp(85.0),
+            ),
+            (
+                "limited-exp-negative",
+                Instruction::LimitedExp,
+                -85.0,
+                runtime_limited_exp(-85.0),
+            ),
             ("asin", Instruction::Asin, 0.25, runtime_asin(0.25)),
             ("acos", Instruction::Acos, 0.25, runtime_acos(0.25)),
             ("atan", Instruction::Atan, 0.25, runtime_atan(0.25)),
@@ -8586,6 +8627,51 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_inlines_limited_exp_clamped_regions() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![Instruction::PushParam(0), Instruction::LimitedExp],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile inline limited-exp leaf");
+        assert!(
+            !contains_bytes(
+                &bytes,
+                &(rspice_limited_exp as *const () as usize as u64).to_le_bytes()
+            ),
+            "inline limited exp should not call the limited-exp helper"
+        );
+        assert!(
+            contains_bytes(
+                &bytes,
+                &(rspice_exp as *const () as usize as u64).to_le_bytes()
+            ),
+            "inline limited exp should only call exp for the middle region"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate inline limited-exp leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        for (name, input) in [
+            ("middle", 0.5),
+            ("upper-threshold", 80.0),
+            ("lower-threshold", -80.0),
+            ("high-linear", 85.0),
+            ("low-clamped", -85.0),
+            ("nan", f64::NAN),
+        ] {
+            let params = [input];
+            let ctx = eval_context(&params, &[], &[], &[]);
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                runtime_limited_exp(input).to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_folds_constant_unary_math_to_literals() {
         let cases = [
             ("exp", Instruction::Exp, 0.5, runtime_exp(0.5)),
@@ -8608,6 +8694,18 @@ mod tests {
                 Instruction::Limexp,
                 -50.0,
                 runtime_limexp(-50.0),
+            ),
+            (
+                "limited-exp-linear",
+                Instruction::LimitedExp,
+                85.0,
+                runtime_limited_exp(85.0),
+            ),
+            (
+                "limited-exp-negative",
+                Instruction::LimitedExp,
+                -85.0,
+                runtime_limited_exp(-85.0),
             ),
             ("asin", Instruction::Asin, 0.25, runtime_asin(0.25)),
             ("asin-domain-nan", Instruction::Asin, 2.0, runtime_asin(2.0)),
@@ -9716,6 +9814,19 @@ mod tests {
             exp_limit * (1.0 + value - LIMIT)
         } else if value < -LIMIT {
             (-LIMIT).exp()
+        } else {
+            value.exp()
+        }
+    }
+
+    fn runtime_limited_exp(value: f64) -> f64 {
+        const LIMIT: f64 = 80.0;
+        const LOW_VALUE: f64 = 1.804851387e-35;
+        let value = std::hint::black_box(value);
+        if value > LIMIT {
+            LIMIT.exp() * (1.0 + value - LIMIT)
+        } else if value < -LIMIT {
+            LOW_VALUE
         } else {
             value.exp()
         }

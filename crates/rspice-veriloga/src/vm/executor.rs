@@ -1,6 +1,18 @@
 use super::{VmContext, VmError};
 use crate::codegen::{BytecodeProgram, Instruction};
 
+fn limited_exp(value: f64) -> f64 {
+    const LIMIT: f64 = 80.0;
+    const LOW_VALUE: f64 = 1.804851387e-35;
+    if value > LIMIT {
+        LIMIT.exp() * (1.0 + value - LIMIT)
+    } else if value < -LIMIT {
+        LOW_VALUE
+    } else {
+        value.exp()
+    }
+}
+
 /// Stack-based virtual machine for bytecode execution.
 pub struct Vm<'a> {
     /// Execution context
@@ -199,6 +211,7 @@ impl<'a> Vm<'a> {
                     a.exp()
                 }
             })?,
+            Instruction::LimitedExp => self.unary_op(limited_exp)?,
 
             // Inverse trigonometric functions
             Instruction::Asin => self.unary_op(|a| a.asin())?,
