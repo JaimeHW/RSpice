@@ -6,10 +6,15 @@ use crate::xspice::{
     PortType,
 };
 use crate::{Complex64, Value};
-use std::sync::{Arc, OnceLock};
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicUsize, Ordering},
+};
 
 const CORE_TABLE_RESOURCE: &str = "xspice.xtradev.core.table";
 const ILIMIT_EVAL_RESOURCE: &str = "xspice.xtradev.ilimit.eval";
+const CORE_TABLE_UNSET_MIDPOINT_INDEX: usize = usize::MAX;
+const CORE_TABLE_CURSOR_LINEAR_STEPS: usize = 8;
 
 #[derive(Debug, Default)]
 pub struct Potentiometer;
@@ -112,11 +117,23 @@ struct CorePoint {
     b: Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct CoreTable {
     points: Vec<CorePoint>,
     midpoints: Vec<Value>,
     strictly_increasing_h: bool,
+    last_midpoint_index: AtomicUsize,
+}
+
+impl Clone for CoreTable {
+    fn clone(&self) -> Self {
+        Self {
+            points: self.points.clone(),
+            midpoints: self.midpoints.clone(),
+            strictly_increasing_h: self.strictly_increasing_h,
+            last_midpoint_index: AtomicUsize::new(CORE_TABLE_UNSET_MIDPOINT_INDEX),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1395,6 +1412,7 @@ fn core_table_from_points(points: Vec<CorePoint>) -> CoreTable {
         points,
         midpoints,
         strictly_increasing_h,
+        last_midpoint_index: AtomicUsize::new(CORE_TABLE_UNSET_MIDPOINT_INDEX),
     }
 }
 
@@ -1496,6 +1514,58 @@ fn core_linear_value(point: CorePoint, slope: Value, h_input: Value) -> (Value, 
     (point.b + (h_input - point.h) * slope, slope)
 }
 
+fn core_midpoint_index_contains(table: &CoreTable, index: usize, h_input: Value) -> bool {
+    let last_index = table.points.len() - 1;
+    debug_assert!(index > 0);
+    debug_assert!(index < last_index);
+    table.midpoints[index - 1] <= h_input && h_input < table.midpoints[index]
+}
+
+fn core_midpoint_index_binary(table: &CoreTable, h_input: Value) -> usize {
+    let last_index = table.points.len() - 1;
+    table.midpoints[1..last_index].partition_point(|midpoint| h_input >= *midpoint) + 1
+}
+
+fn core_midpoint_index_with_cursor(table: &CoreTable, h_input: Value) -> usize {
+    let last_index = table.points.len() - 1;
+    let mut index = table.last_midpoint_index.load(Ordering::Relaxed);
+
+    if index == CORE_TABLE_UNSET_MIDPOINT_INDEX || index == 0 || index >= last_index {
+        index = core_midpoint_index_binary(table, h_input);
+        table.last_midpoint_index.store(index, Ordering::Relaxed);
+        return index;
+    }
+
+    if core_midpoint_index_contains(table, index, h_input) {
+        return index;
+    }
+
+    let mut steps = 0;
+    if h_input >= table.midpoints[index] {
+        while index + 1 < last_index
+            && h_input >= table.midpoints[index]
+            && steps < CORE_TABLE_CURSOR_LINEAR_STEPS
+        {
+            index += 1;
+            steps += 1;
+        }
+    } else {
+        while index > 1
+            && h_input < table.midpoints[index - 1]
+            && steps < CORE_TABLE_CURSOR_LINEAR_STEPS
+        {
+            index -= 1;
+            steps += 1;
+        }
+    }
+
+    if !core_midpoint_index_contains(table, index, h_input) {
+        index = core_midpoint_index_binary(table, h_input);
+    }
+    table.last_midpoint_index.store(index, Ordering::Relaxed);
+    index
+}
+
 fn core_pwl_flux_density(
     table: &CoreTable,
     h_input: Value,
@@ -1517,7 +1587,7 @@ fn core_pwl_flux_density(
     }
 
     let index = if table.strictly_increasing_h {
-        table.midpoints[1..last_index].partition_point(|midpoint| h_input >= *midpoint) + 1
+        core_midpoint_index_with_cursor(table, h_input)
     } else {
         let mut index = 1;
         while index < last_index && h_input >= table.midpoints[index] {
@@ -3841,6 +3911,10 @@ mod tests {
         assert!(Arc::ptr_eq(&first, &second));
         assert!(first.strictly_increasing_h);
         assert_eq!(first.midpoints, vec![0.5, 1.5]);
+        assert_eq!(
+            first.last_midpoint_index.load(Ordering::Relaxed),
+            CORE_TABLE_UNSET_MIDPOINT_INDEX
+        );
 
         ctx.set_real_vector_param("unrelated", vec![9.0, 10.0]);
         let after_unrelated =
@@ -3872,6 +3946,34 @@ mod tests {
             let scanned = core_pwl_flux_density(&legacy, h_input, 0.2, false);
             assert_eq!(fast, scanned, "h_input={h_input}");
         }
+    }
+
+    #[test]
+    fn core_pwl_midpoint_cursor_falls_back_for_large_h_jumps() {
+        let table = core_table_from_points(
+            (0..=24)
+                .map(|h| CorePoint {
+                    h: h as Value,
+                    b: (h * h) as Value,
+                })
+                .collect(),
+        );
+        assert!(table.strictly_increasing_h);
+
+        let mut legacy = table.clone();
+        legacy.strictly_increasing_h = false;
+
+        let low = core_pwl_flux_density(&table, 2.25, 0.2, false);
+        assert_eq!(low, core_pwl_flux_density(&legacy, 2.25, 0.2, false));
+        assert_eq!(table.last_midpoint_index.load(Ordering::Relaxed), 2);
+
+        let high = core_pwl_flux_density(&table, 22.25, 0.2, false);
+        assert_eq!(high, core_pwl_flux_density(&legacy, 22.25, 0.2, false));
+        assert_eq!(
+            table.last_midpoint_index.load(Ordering::Relaxed),
+            22,
+            "large non-local h jumps should land on the binary-search midpoint index"
+        );
     }
 
     #[test]

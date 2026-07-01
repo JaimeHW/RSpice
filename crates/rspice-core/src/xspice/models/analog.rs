@@ -8,7 +8,10 @@ use crate::xspice::{
     PortType,
 };
 use crate::{Complex64, Value};
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 const MULT_TRANSFER_RESOURCE: &str = "xspice.analog.mult.transfer";
 const DIVIDE_TRANSFER_RESOURCE: &str = "xspice.analog.divide.transfer";
@@ -2036,6 +2039,8 @@ const ONESHOT_TRAN_INIT: usize = 9;
 const ONESHOT_STATE_COUNT: usize = 10;
 const ONESHOT_MIN_EDGE_TIME: Value = 1.0e-12;
 const ONESHOT_TABLE_RESOURCE: &str = "xspice.oneshot.table";
+const ONESHOT_TABLE_UNSET_UPPER_INDEX: usize = usize::MAX;
+const ONESHOT_TABLE_CURSOR_LINEAR_STEPS: usize = 8;
 
 #[derive(Debug, Clone, Copy)]
 struct OneShotPoint {
@@ -2043,10 +2048,11 @@ struct OneShotPoint {
     pulse_width: Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct OneShotTableData {
     points: Vec<OneShotPoint>,
     strictly_increasing_control: bool,
+    last_upper_index: AtomicUsize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2198,6 +2204,7 @@ fn oneshot_table_data(points: Vec<OneShotPoint>) -> OneShotTableData {
     OneShotTableData {
         points,
         strictly_increasing_control,
+        last_upper_index: AtomicUsize::new(ONESHOT_TABLE_UNSET_UPPER_INDEX),
     }
 }
 
@@ -2241,6 +2248,60 @@ fn interpolate_oneshot_pulse_width_linear_scan(table: &[OneShotPoint], control: 
     }
 }
 
+fn oneshot_interval_contains(points: &[OneShotPoint], upper_index: usize, control: Value) -> bool {
+    debug_assert!(upper_index > 0);
+    debug_assert!(upper_index < points.len());
+    points[upper_index - 1].control <= control && control <= points[upper_index].control
+}
+
+fn oneshot_upper_index_binary(points: &[OneShotPoint], control: Value) -> usize {
+    points.partition_point(|point| point.control <= control)
+}
+
+fn oneshot_upper_index_with_cursor(table: &OneShotTableData, control: Value) -> usize {
+    let points = table.points.as_slice();
+    let point_count = points.len();
+    let mut upper_index = table.last_upper_index.load(Ordering::Relaxed);
+
+    if upper_index == ONESHOT_TABLE_UNSET_UPPER_INDEX
+        || upper_index == 0
+        || upper_index >= point_count
+    {
+        upper_index = oneshot_upper_index_binary(points, control);
+        table.last_upper_index.store(upper_index, Ordering::Relaxed);
+        return upper_index;
+    }
+
+    if oneshot_interval_contains(points, upper_index, control) {
+        return upper_index;
+    }
+
+    let mut steps = 0;
+    if control > points[upper_index].control {
+        while upper_index + 1 < point_count
+            && control > points[upper_index].control
+            && steps < ONESHOT_TABLE_CURSOR_LINEAR_STEPS
+        {
+            upper_index += 1;
+            steps += 1;
+        }
+    } else {
+        while upper_index > 1
+            && control < points[upper_index - 1].control
+            && steps < ONESHOT_TABLE_CURSOR_LINEAR_STEPS
+        {
+            upper_index -= 1;
+            steps += 1;
+        }
+    }
+
+    if !oneshot_interval_contains(points, upper_index, control) {
+        upper_index = oneshot_upper_index_binary(points, control);
+    }
+    table.last_upper_index.store(upper_index, Ordering::Relaxed);
+    upper_index
+}
+
 fn interpolate_oneshot_pulse_width(table: &OneShotTableData, control: Value) -> Value {
     let points = table.points.as_slice();
     if !table.strictly_increasing_control {
@@ -2254,7 +2315,7 @@ fn interpolate_oneshot_pulse_width(table: &OneShotTableData, control: Value) -> 
     } else if control >= last.control {
         interpolate_oneshot_segment(points[points.len() - 2], last, control)
     } else {
-        let upper = points.partition_point(|point| point.control <= control);
+        let upper = oneshot_upper_index_with_cursor(table, control);
         interpolate_oneshot_segment(points[upper - 1], points[upper], control)
     }
 }
@@ -2595,14 +2656,42 @@ mod tests {
         ]);
 
         assert!(table.strictly_increasing_control);
+        assert_eq!(
+            table.last_upper_index.load(Ordering::Relaxed),
+            ONESHOT_TABLE_UNSET_UPPER_INDEX
+        );
         assert!(
             (interpolate_oneshot_pulse_width(&table, 2.0) - 5.0e-9).abs() < 1.0e-21,
             "strictly increasing oneshot controls should interpolate from the binary-search bracket"
         );
+        assert_eq!(table.last_upper_index.load(Ordering::Relaxed), 2);
         assert_eq!(
             interpolate_oneshot_pulse_width(&table, 1.0),
             3.0e-9,
             "exact interior controls should return the matching row"
+        );
+        assert_eq!(
+            table.last_upper_index.load(Ordering::Relaxed),
+            2,
+            "exact controls may reuse the current bracket when the value is unchanged"
+        );
+    }
+
+    #[test]
+    fn oneshot_control_table_cursor_falls_back_for_large_jumps() {
+        let table = oneshot_table_data(
+            (1..=24)
+                .map(|control| oneshot_point(control as Value, control as Value * 1.0e-9))
+                .collect(),
+        );
+
+        assert!((interpolate_oneshot_pulse_width(&table, 2.5) - 2.5e-9).abs() < 1.0e-21);
+        assert_eq!(table.last_upper_index.load(Ordering::Relaxed), 2);
+        assert!((interpolate_oneshot_pulse_width(&table, 22.5) - 22.5e-9).abs() < 1.0e-21);
+        assert_eq!(
+            table.last_upper_index.load(Ordering::Relaxed),
+            22,
+            "large non-local control jumps should land on the binary-search bracket"
         );
     }
 
