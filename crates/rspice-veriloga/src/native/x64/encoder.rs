@@ -580,6 +580,10 @@ impl X64Encoder {
         self.emit_sse_reg_reg(0xF2, 0x5F, dst, src);
     }
 
+    pub(crate) fn maxsd_xmm_m64_base_disp32(&mut self, dst: Xmm, base: Gpr, disp: i32) {
+        self.emit_sse_reg_base_disp32(0xF2, 0x5F, dst, base, disp);
+    }
+
     pub(crate) fn maxsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
         self.emit_sse_reg_rip_disp32(0xF2, 0x5F, dst, disp)
     }
@@ -1161,6 +1165,7 @@ mod tests {
         encoder.patch_i32(branch, 0);
         encoder.subsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rax, 24);
         encoder.minsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rsp, 0);
+        encoder.maxsd_xmm_m64_base_disp32(Xmm::Xmm2, Gpr::Rsp, 8);
         encoder.addsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rax, 24);
 
         assert_eq!(
@@ -1168,7 +1173,7 @@ mod tests {
             [
                 0x41, 0xC6, 0x42, 16, 1, 0x49, 0x0F, 0xBA, 0xFB, 63, 0x49, 0x83, 0xFB, 1, 0x0F,
                 0x86, 0, 0, 0, 0, 0xF2, 0x0F, 0x5C, 0x48, 24, 0xF2, 0x0F, 0x5D, 0x0C, 0x24, 0xF2,
-                0x0F, 0x58, 0x48, 24,
+                0x0F, 0x5F, 0x54, 0x24, 8, 0xF2, 0x0F, 0x58, 0x48, 24,
             ]
         );
     }
