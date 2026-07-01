@@ -863,7 +863,6 @@ fn eno1d_eval_with_scratch(
         |degree: usize| -> usize { degree * window_len - degree.saturating_sub(1) * degree / 2 };
 
     let total_len = order * window_len - order.saturating_sub(1) * order / 2;
-    scratch.clear();
     scratch.resize(total_len, 0.0);
     scratch[..window_len].copy_from_slice(&samples[start_lo..window_end]);
     for degree in 1..order {
@@ -1516,6 +1515,25 @@ mod tests {
         assert_eq!(scratch.capacity(), capacity);
         assert_eq!(again.value, expected_again.value);
         assert_eq!(again.derivative, expected_again.derivative);
+    }
+
+    #[test]
+    fn eno1d_eval_overwrites_dirty_reused_scratch() {
+        let samples: Vec<Value> = (0..16)
+            .map(|index| {
+                let x = index as Value;
+                x * x + 0.5 * x
+            })
+            .collect();
+        let mut scratch = vec![Value::NAN; 128];
+
+        let fast = eno1d_eval_with_scratch(&samples, 4, 7, 0.25, &mut scratch);
+        let expected = eno1d_eval(&samples, 4, 7, 0.25);
+
+        assert!(fast.value.is_finite());
+        assert!(fast.derivative.is_finite());
+        assert_eq!(fast.value, expected.value);
+        assert_eq!(fast.derivative, expected.derivative);
     }
 
     #[test]
