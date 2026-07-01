@@ -181,8 +181,35 @@ fn tristate_direct_revert(
     *output_delay = delay;
 }
 
+struct TristatePendingEvents {
+    items: [Option<(Value, DigitalValue)>; 2],
+    len: usize,
+}
+
+impl Default for TristatePendingEvents {
+    fn default() -> Self {
+        Self {
+            items: [None; 2],
+            len: 0,
+        }
+    }
+}
+
+impl TristatePendingEvents {
+    fn push(&mut self, delay: Value, value: DigitalValue) {
+        debug_assert!(
+            self.len < self.items.len(),
+            "d_tristate can queue at most two intermediate events"
+        );
+        if let Some(slot) = self.items.get_mut(self.len) {
+            *slot = Some((delay, value));
+            self.len += 1;
+        }
+    }
+}
+
 fn tristate_push_revert(
-    events: &mut Vec<(Value, DigitalValue)>,
+    events: &mut TristatePendingEvents,
     d_first: bool,
     delay: Value,
     state_prev: i64,
@@ -195,7 +222,7 @@ fn tristate_push_revert(
     } else {
         (state_prev, out_strength)
     };
-    events.push((delay, tristate_value_from_codes(state, strength)));
+    events.push(delay, tristate_value_from_codes(state, strength));
 }
 
 fn set_tristate_output(
@@ -230,7 +257,7 @@ fn set_tristate_output(
         (strength_when, state_when, false)
     };
     let mut output_delay = delay;
-    let mut events = Vec::new();
+    let mut events = TristatePendingEvents::default();
 
     let state_control = if state_when <= time {
         if state == out_state {
@@ -311,7 +338,7 @@ fn set_tristate_output(
                     state = state_prev;
                     tristate_value_from_codes(state_prev, out_strength)
                 };
-                events.push(((second_time - time) / 2.0, reversion));
+                events.push((second_time - time) / 2.0, reversion);
             }
             TristateInertialControl::Both => {
                 tristate_push_revert(
@@ -365,10 +392,10 @@ fn set_tristate_output(
                 );
             }
             TristateInertialControl::Same => {
-                events.push((
+                events.push(
                     (first_time - time) / 2.0,
                     tristate_value_from_codes(state_prev, strength_prev),
-                ));
+                );
                 output_delay = second_time - time;
             }
             TristateInertialControl::Revert => {
@@ -378,7 +405,7 @@ fn set_tristate_output(
             }
             TristateInertialControl::Both => {
                 let reversion = tristate_value_from_codes(state_prev, strength_prev);
-                events.push(((first_time - time) / 2.0, reversion));
+                events.push((first_time - time) / 2.0, reversion);
                 if d_first {
                     state = state_prev;
                 } else {
@@ -401,19 +428,19 @@ fn set_tristate_output(
         TristateInertialControl::Both => match second_control {
             TristateInertialControl::Same => {
                 let reversion = tristate_value_from_codes(state_prev, strength_prev);
-                events.push(((first_time - time) / 2.0, reversion));
+                events.push((first_time - time) / 2.0, reversion);
                 let restoration = if d_first {
                     tristate_value_from_codes(state_prev, out_strength)
                 } else {
                     tristate_value_from_codes(out_state, strength_prev)
                 };
-                events.push((second_time - time, restoration));
+                events.push(second_time - time, restoration);
             }
             TristateInertialControl::Revert | TristateInertialControl::Both => {
-                events.push((
+                events.push(
                     (first_time - time) / 2.0,
                     tristate_value_from_codes(state_prev, strength_prev),
-                ));
+                );
             }
             _ => {
                 d_first = !d_first;
@@ -434,8 +461,10 @@ fn set_tristate_output(
     gate_set_state(ctx, 1, strength_when);
     gate_set_int_state(ctx, 2, state_prev);
     gate_set_int_state(ctx, 3, strength_prev);
-    for (event_delay, event_value) in events {
-        ctx.set_output_digital("out", event_value, event_delay);
+    for index in 0..events.len {
+        if let Some((event_delay, event_value)) = events.items[index] {
+            ctx.set_output_digital("out", event_value, event_delay);
+        }
     }
     ctx.set_output_digital(
         "out",
