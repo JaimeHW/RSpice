@@ -558,7 +558,77 @@ impl CodeModel for DigitalRam {
 mod tests {
     use super::*;
     use crate::xspice::context::InputValue;
-    use crate::xspice::{AnalysisType, EvaluationPhase};
+    use crate::xspice::{AnalysisType, EvaluationPhase, ParamType, PortDirection};
+
+    fn param_summary(model: &dyn CodeModel) -> Vec<(&str, ParamType, Value)> {
+        model
+            .parameters()
+            .iter()
+            .map(|param| (param.name.as_str(), param.param_type, param.default))
+            .collect()
+    }
+
+    fn assert_digital_ports(
+        model: &dyn CodeModel,
+        expected: &[(&str, PortDirection, bool, Option<usize>, Option<usize>)],
+    ) {
+        let ports = model.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|(name, _, _, _, _)| *name)
+                .collect::<Vec<_>>()
+        );
+        for (port, (_, direction, is_vector, min_len, max_len)) in ports.iter().zip(expected) {
+            assert_eq!(port.direction, *direction, "{} direction", port.name);
+            assert_eq!(
+                port.default_type,
+                PortType::Digital,
+                "{} default type",
+                port.name
+            );
+            assert_eq!(
+                port.allowed_types,
+                vec![PortType::Digital],
+                "{} allowed types",
+                port.name
+            );
+            assert_eq!(port.is_vector, *is_vector, "{} vector flag", port.name);
+            assert!(!port.null_allowed, "{} nullability", port.name);
+            assert_eq!(port.vector_min_len, *min_len, "{} min length", port.name);
+            assert_eq!(port.vector_max_len, *max_len, "{} max length", port.name);
+        }
+    }
+
+    #[test]
+    fn d_ram_metadata_matches_ngspice46_interface() {
+        assert_digital_ports(
+            &DigitalRam,
+            &[
+                ("data_in", PortDirection::In, true, Some(1), None),
+                ("data_out", PortDirection::Out, true, Some(1), None),
+                ("address", PortDirection::In, true, Some(1), None),
+                ("write_en", PortDirection::In, false, None, None),
+                ("select", PortDirection::In, true, Some(1), Some(16)),
+            ],
+        );
+        assert_eq!(
+            param_summary(&DigitalRam),
+            vec![
+                ("select_value", ParamType::Integer, 1.0),
+                ("ic", ParamType::Integer, 2.0),
+                ("read_delay", ParamType::Real, 100.0e-9),
+                ("data_load", ParamType::Real, 1.0e-12),
+                ("address_load", ParamType::Real, 1.0e-12),
+                ("select_load", ParamType::Real, 1.0e-12),
+                ("enable_load", ParamType::Real, 1.0e-12),
+            ]
+        );
+    }
 
     fn ram_context() -> CmContext {
         let mut ctx = CmContext::new();
