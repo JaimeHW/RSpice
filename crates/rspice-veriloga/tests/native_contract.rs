@@ -6,9 +6,12 @@
 #![cfg(feature = "native")]
 
 use rspice_veriloga::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
+#[cfg(feature = "native-bytecode-contract-tests")]
 use rspice_veriloga::codegen::Instruction;
 use rspice_veriloga::device::VerilogADevice;
-use rspice_veriloga::native::{compile_native, compile_native_with_canonical_ir};
+#[cfg(feature = "native-bytecode-contract-tests")]
+use rspice_veriloga::native::compile_native;
+use rspice_veriloga::native::compile_native_with_canonical_ir;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::HashMap;
 
@@ -954,6 +957,7 @@ endmodule
     )
 }
 
+#[cfg(feature = "native-bytecode-contract-tests")]
 fn reactive_current_probe_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1087,6 +1091,7 @@ endmodule
     )
 }
 
+#[cfg(feature = "native-bytecode-contract-tests")]
 fn dead_assignment_current_probe_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1104,6 +1109,7 @@ endmodule
     )
 }
 
+#[cfg(feature = "native-bytecode-contract-tests")]
 fn live_assignment_current_probe_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1121,7 +1127,7 @@ endmodule
     )
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_compile_accepts_simple_resistor_subset() {
     let model = simple_resistor_model();
@@ -1358,7 +1364,7 @@ fn native_dependent_parameter_defaults_support_binary_math_functions() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_model_image_publishes_multiple_stamp_and_jacobian_entries() {
     let model = multi_stamp_model();
@@ -4270,7 +4276,7 @@ fn native_static_conditions_control_potential_branch_activation() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_static_condition_rejects_dynamic_guard_bytecode_without_fallback() {
     let mut model = static_condition_model();
@@ -4646,6 +4652,7 @@ endmodule
     assert!((sources[0].psd - 2.4e-2).abs() < 1.0e-15);
 }
 
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_compile_accepts_reactive_ddt_jacobians_without_fallback() {
     let model = reactive_model();
@@ -4681,7 +4688,7 @@ fn native_device_stamps_reactive_ddt_capacitance_without_fallback() {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_compile_rejects_reactive_current_probes_without_fallback() {
     let model = reactive_current_probe_model();
@@ -4915,7 +4922,7 @@ fn native_device_executes_single_ended_current_probes_in_source_order() {
     assert!((currents[1] - 0.4).abs() < 1e-12, "currents: {currents:?}");
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_rejects_observable_assignment_current_probe_without_fallback() {
     for (name, model) in [
@@ -4968,7 +4975,7 @@ endmodule
     assert!((currents[1] - 0.4).abs() < 1e-12, "currents: {currents:?}");
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
 fn native_compile_rejects_unavailable_terminal_pair_current_probes_without_fallback() {
     let model = unavailable_current_probe_model();

@@ -57,6 +57,21 @@ class CiConfigurationTests(unittest.TestCase):
             "native JIT must not reintroduce Cranelift in active manifests or Rust source",
         )
 
+    def test_bytecode_native_compiler_surface_is_contract_test_only(self) -> None:
+        native_mod = read_text("crates/rspice-veriloga/src/native/mod.rs")
+        x64_mod = read_text("crates/rspice-veriloga/src/native/x64/mod.rs")
+
+        self.assertRegex(
+            native_mod,
+            r'#\[cfg\(feature = "native-bytecode-contract-tests"\)\]\s+pub fn compile_native\(',
+            "bytecode-native compiler entry must stay out of production native builds",
+        )
+        self.assertRegex(
+            x64_mod,
+            r'#\[cfg\(feature = "native-bytecode-contract-tests"\)\]\s+pub\(crate\) fn compile_model\(',
+            "x64 bytecode-native lowering must stay contract-test only",
+        )
+
     def test_linux_fast_ci_reduces_test_artifact_pressure(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
 

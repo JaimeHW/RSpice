@@ -26,6 +26,7 @@ pub use target::{Architecture, TargetSpec};
 use crate::canonical_ir::CanonicalIrArtifact;
 use crate::codegen::{AssignmentStep, CompiledModel};
 
+#[cfg(feature = "native-bytecode-contract-tests")]
 pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
     validate_native_coverage(model)?;
 

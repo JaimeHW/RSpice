@@ -35,6 +35,7 @@ use std::collections::HashMap;
 const ENTRY_ALIGNMENT: usize = 16;
 const X64_NOP: u8 = 0x90;
 
+#[cfg(feature = "native-bytecode-contract-tests")]
 pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
     compile_model_inner(model, None)
 }
