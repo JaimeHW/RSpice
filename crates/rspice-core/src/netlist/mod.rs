@@ -4753,6 +4753,124 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_dff_ueff_timing_creates_xspice_model_alias() {
+        let netlist = Netlist::parse(
+            "pspice u dff timing\n\
+             U1 DFF(1) $G_DPWR $G_DGND $D_HI clear clk data q $D_NC dly\n\
+             .model DLY UEFF (TPCLKQLHTY=8n TPCLKQHLTY=9n TPPCQLHTY=2n TPPCQHLTY=3n)\n\
+             .end\n",
+        )
+        .expect("PSpice UEFF timing should create a d_dff model alias");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U1")
+            .expect("U1 exists");
+
+        let alias_name = match &element.kind {
+            ElementKind::Xspice {
+                model,
+                pspice_u_timing,
+                ..
+            } => {
+                assert!(pspice_u_timing.is_none());
+                model.as_str()
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        };
+
+        let alias = netlist
+            .models
+            .iter()
+            .find(|model| model.name == alias_name)
+            .expect("generated timing alias exists");
+        assert_eq!(alias.model_type, "d_dff");
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "clk_delay" && (*value - 9.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "set_delay" && (*value - 2.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias.params.iter().any(|(name, value)| {
+                name == "reset_delay" && (*value - 3.0e-9).abs() < 1.0e-21
+            })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "rise_delay" && (*value - 1.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "fall_delay" && (*value - 1.0e-9).abs() < 1.0e-21 })
+        );
+    }
+
+    #[test]
+    fn pspice_u_jkff_ueff_timing_creates_xspice_model_alias() {
+        let netlist = Netlist::parse(
+            "pspice u jkff timing\n\
+             U3 JKFF(1) $G_DPWR $G_DGND preset clear clk j k q qb dly\n\
+             .model DLY UEFF (TPCLKQLHTY=4n TPPCQLHTY=7n)\n\
+             .end\n",
+        )
+        .expect("PSpice UEFF timing should create a d_jkff model alias");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U3")
+            .expect("U3 exists");
+
+        let alias_name = match &element.kind {
+            ElementKind::Xspice {
+                model,
+                pspice_u_timing,
+                ..
+            } => {
+                assert!(pspice_u_timing.is_none());
+                model.as_str()
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        };
+
+        let alias = netlist
+            .models
+            .iter()
+            .find(|model| model.name == alias_name)
+            .expect("generated timing alias exists");
+        assert_eq!(alias.model_type, "d_jkff");
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "clk_delay" && (*value - 4.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "set_delay" && (*value - 7.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias.params.iter().any(|(name, value)| {
+                name == "reset_delay" && (*value - 7.0e-9).abs() < 1.0e-21
+            })
+        );
+    }
+
+    #[test]
     fn pspice_u_inverter_lowers_to_scalar_xspice_ports() {
         let netlist = Netlist::parse(
             "pspice u inverter\n\

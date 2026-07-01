@@ -834,6 +834,8 @@ fn parse_pspice_u_dff(
     let prebar = pspice_u_active_low_control_port(&pins[0], elements);
     let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
     let clk = pspice_u_required_digital_port(&pins[2], "clock", fields, line_num, elements)?;
+    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
+        .map(|timing_model| PspiceUTiming { timing_model });
     let d_offset = 3;
     let q_offset = d_offset + count;
     let qb_offset = q_offset + count;
@@ -850,7 +852,13 @@ fn parse_pspice_u_dff(
         let qb = pspice_u_nullable_output_port(&pins[qb_offset + index]);
         let instance_name = pspice_u_lowered_instance_name(name, count, index);
         let ports = vec![data, clk.clone(), prebar.clone(), clrbar.clone(), q, qb];
-        push_pspice_u_xspice_element(elements, instance_name, "d_dff", ports);
+        push_pspice_u_xspice_element_with_timing(
+            elements,
+            instance_name,
+            "d_dff",
+            ports,
+            pspice_u_timing.clone(),
+        );
     }
 
     Ok(())
@@ -889,6 +897,8 @@ fn parse_pspice_u_jkff(
     let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
     let clkbar =
         pspice_u_required_inverted_digital_port(&pins[2], "clock", fields, line_num, elements)?;
+    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
+        .map(|timing_model| PspiceUTiming { timing_model });
     let j_offset = 3;
     let k_offset = j_offset + count;
     let q_offset = k_offset + count;
@@ -913,7 +923,13 @@ fn parse_pspice_u_jkff(
         let qb = pspice_u_nullable_output_port(&pins[qb_offset + index]);
         let instance_name = pspice_u_lowered_instance_name(name, count, index);
         let ports = vec![j, k, clkbar.clone(), prebar.clone(), clrbar.clone(), q, qb];
-        push_pspice_u_xspice_element(elements, instance_name, "d_jkff", ports);
+        push_pspice_u_xspice_element_with_timing(
+            elements,
+            instance_name,
+            "d_jkff",
+            ports,
+            pspice_u_timing.clone(),
+        );
     }
 
     Ok(())

@@ -418,17 +418,51 @@ fn normalize_pspice_u_timing_in_elements(
         else {
             continue;
         };
-        if !timing_model.model_type.eq_ignore_ascii_case("UGATE")
-            || !pspice_u_gate_model_accepts_ugate_timing(model)
-        {
+        if !pspice_u_timing_model_supported(model, timing_model) {
             continue;
         }
-
         let alias_name = unique_pspice_u_timing_model_name(scope, &element.name, existing_names);
-        let alias = pspice_ugate_alias_model(&alias_name, model, timing_model);
+        let alias = pspice_u_timing_alias_model(&alias_name, model, timing_model)
+            .expect("supported PSpice U timing model should create an alias");
+
         *model = alias_name;
         generated_models.push(alias);
     }
+}
+
+fn pspice_u_timing_model_supported(code_model: &str, timing_model: &ModelDef) -> bool {
+    (timing_model.model_type.eq_ignore_ascii_case("UGATE")
+        && pspice_u_gate_model_accepts_ugate_timing(code_model))
+        || (timing_model.model_type.eq_ignore_ascii_case("UEFF")
+            && pspice_u_edge_ff_model_accepts_ueff_timing(code_model))
+}
+
+fn pspice_u_timing_alias_model(
+    alias_name: &str,
+    code_model: &str,
+    timing_model: &ModelDef,
+) -> Option<ModelDef> {
+    if timing_model.model_type.eq_ignore_ascii_case("UGATE")
+        && pspice_u_gate_model_accepts_ugate_timing(code_model)
+    {
+        return Some(pspice_ugate_alias_model(
+            alias_name,
+            code_model,
+            timing_model,
+        ));
+    }
+
+    if timing_model.model_type.eq_ignore_ascii_case("UEFF")
+        && pspice_u_edge_ff_model_accepts_ueff_timing(code_model)
+    {
+        return Some(pspice_ueff_alias_model(
+            alias_name,
+            code_model,
+            timing_model,
+        ));
+    }
+
+    None
 }
 
 fn pspice_u_gate_model_accepts_ugate_timing(model: &str) -> bool {
@@ -436,6 +470,10 @@ fn pspice_u_gate_model_accepts_ugate_timing(model: &str) -> bool {
         model.to_ascii_lowercase().as_str(),
         "d_and" | "d_buffer" | "d_inverter" | "d_nand" | "d_nor" | "d_or" | "d_xnor" | "d_xor"
     )
+}
+
+fn pspice_u_edge_ff_model_accepts_ueff_timing(model: &str) -> bool {
+    matches!(model.to_ascii_lowercase().as_str(), "d_dff" | "d_jkff")
 }
 
 fn pspice_ugate_alias_model(
@@ -463,6 +501,53 @@ fn pspice_ugate_alias_model(
         &mut params,
         &mut expr_params,
     );
+
+    ModelDef {
+        name: alias_name.to_string(),
+        model_type: code_model.to_string(),
+        params,
+        expr_params,
+        string_params: Vec::new(),
+        string_vector_params: Vec::new(),
+        real_vector_params: Vec::new(),
+        integer_vector_params: Vec::new(),
+    }
+}
+
+fn pspice_ueff_alias_model(
+    alias_name: &str,
+    code_model: &str,
+    timing_model: &ModelDef,
+) -> ModelDef {
+    let mut params = vec![
+        ("rise_delay".to_string(), 1.0e-9),
+        ("fall_delay".to_string(), 1.0e-9),
+    ];
+    let mut expr_params = Vec::new();
+
+    let clk_rise =
+        pspice_timing_delay_estimate(timing_model, &["TPCLKQLHTY", "TPCLKQLHMN", "TPCLKQLHMX"]);
+    let clk_fall =
+        pspice_timing_delay_estimate(timing_model, &["TPCLKQHLTY", "TPCLKQHLMN", "TPCLKQHLMX"]);
+    if let Some(delay) = pspice_select_longer_delay(clk_rise, clk_fall) {
+        push_pspice_timing_delay("clk_delay", delay, &mut params, &mut expr_params);
+    }
+
+    let set_delay =
+        pspice_timing_delay_estimate(timing_model, &["TPPCQLHTY", "TPPCQLHMN", "TPPCQLHMX"]);
+    let reset_delay =
+        pspice_timing_delay_estimate(timing_model, &["TPPCQHLTY", "TPPCQHLMN", "TPPCQHLMX"]);
+    match (set_delay, reset_delay) {
+        (Some(set), Some(reset)) => {
+            push_pspice_timing_delay("set_delay", set, &mut params, &mut expr_params);
+            push_pspice_timing_delay("reset_delay", reset, &mut params, &mut expr_params);
+        }
+        (Some(delay), None) | (None, Some(delay)) => {
+            push_pspice_timing_delay("set_delay", delay.clone(), &mut params, &mut expr_params);
+            push_pspice_timing_delay("reset_delay", delay, &mut params, &mut expr_params);
+        }
+        (None, None) => {}
+    }
 
     ModelDef {
         name: alias_name.to_string(),
@@ -505,6 +590,63 @@ fn push_pspice_timing_delay_param(
     }
 
     params.push((target_name.to_string(), default_value));
+}
+
+#[derive(Clone)]
+enum PspiceTimingDelay {
+    Numeric(Value),
+    Expr(String),
+}
+
+fn pspice_timing_delay_estimate(
+    timing_model: &ModelDef,
+    source_names: &[&str],
+) -> Option<PspiceTimingDelay> {
+    for source_name in source_names {
+        if let Some((_, value)) = timing_model
+            .params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(source_name))
+        {
+            return Some(PspiceTimingDelay::Numeric(*value));
+        }
+
+        if let Some((_, expr)) = timing_model
+            .expr_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(source_name))
+        {
+            return Some(PspiceTimingDelay::Expr(expr.clone()));
+        }
+    }
+
+    None
+}
+
+fn pspice_select_longer_delay(
+    first: Option<PspiceTimingDelay>,
+    second: Option<PspiceTimingDelay>,
+) -> Option<PspiceTimingDelay> {
+    match (first, second) {
+        (Some(PspiceTimingDelay::Numeric(lhs)), Some(PspiceTimingDelay::Numeric(rhs))) => {
+            Some(PspiceTimingDelay::Numeric(lhs.max(rhs)))
+        }
+        (Some(delay), None) | (None, Some(delay)) => Some(delay),
+        (Some(delay), Some(_)) => Some(delay),
+        (None, None) => None,
+    }
+}
+
+fn push_pspice_timing_delay(
+    target_name: &str,
+    delay: PspiceTimingDelay,
+    params: &mut Vec<(String, Value)>,
+    expr_params: &mut Vec<(String, String)>,
+) {
+    match delay {
+        PspiceTimingDelay::Numeric(value) => params.push((target_name.to_string(), value)),
+        PspiceTimingDelay::Expr(expr) => expr_params.push((target_name.to_string(), expr)),
+    }
 }
 
 fn unique_pspice_u_timing_model_name(
