@@ -233,5 +233,15 @@ pub(super) fn rewrite_scoped_references(
         {
             *model_name = qualified.clone();
         }
+
+        if let ElementKind::Xspice {
+            pspice_u_timing: Some(timing),
+            ..
+        } = &mut element.kind
+            && let Some(qualified) =
+                visible_model_aliases.get(&timing.timing_model.to_ascii_uppercase())
+        {
+            timing.timing_model = qualified.clone();
+        }
     }
 }

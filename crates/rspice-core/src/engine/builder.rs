@@ -2807,6 +2807,7 @@ impl Engine {
                 // XSPICE code model instances
                 ElementKind::Xspice {
                     model,
+                    pspice_u_timing: _,
                     ports,
                     params,
                     expr_params,

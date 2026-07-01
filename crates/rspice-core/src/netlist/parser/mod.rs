@@ -13,9 +13,9 @@ use super::{
     AnalysisCommand, BjtType, DataTable, Element, ElementKind, FreqVariation, InitialCondition,
     JfetType, MesfetType, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist,
     NodeSet, ParamContext, ParametricValue, ParseDiagnostic, ParseError, PoleZeroAnalysisType,
-    PoleZeroTransferType, SaveSet, SaveSignal, SensitivityAcSweep, SimulationOptions, SourceSpec,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
-    VerilogAInclude,
+    PoleZeroTransferType, PspiceUTiming, SaveSet, SaveSignal, SensitivityAcSweep,
+    SimulationOptions, SourceSpec, StatisticalParamMode, StepCommand, StepSweep, StepTarget,
+    SubcircuitDef, SwitchState, VerilogAInclude,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
@@ -335,9 +335,210 @@ pub fn parse_netlist_with_options(
         });
     }
 
+    normalize_pspice_u_timing_aliases(&mut state);
     validate_resistor_model_references(&state)?;
 
     state.into_netlist(title, input, line_num)
+}
+
+fn normalize_pspice_u_timing_aliases(state: &mut ParseState) {
+    let source_models = state.models.clone();
+    let mut existing_names: HashSet<String> = state
+        .models
+        .iter()
+        .map(|model| model.name.to_ascii_uppercase())
+        .collect();
+    let mut generated_models = Vec::new();
+
+    normalize_pspice_u_timing_in_elements(
+        &mut state.elements,
+        "TOP",
+        &source_models,
+        &mut existing_names,
+        &mut generated_models,
+    );
+    for subckt in &mut state.subcircuits {
+        normalize_pspice_u_timing_in_subckt(
+            subckt,
+            &source_models,
+            &mut existing_names,
+            &mut generated_models,
+        );
+    }
+
+    state.models.extend(generated_models);
+}
+
+fn normalize_pspice_u_timing_in_subckt(
+    subckt: &mut SubcircuitDef,
+    source_models: &[ModelDef],
+    existing_names: &mut HashSet<String>,
+    generated_models: &mut Vec<ModelDef>,
+) {
+    normalize_pspice_u_timing_in_elements(
+        &mut subckt.elements,
+        &subckt.name,
+        source_models,
+        existing_names,
+        generated_models,
+    );
+    for nested in &mut subckt.nested_subcircuits {
+        normalize_pspice_u_timing_in_subckt(
+            nested,
+            source_models,
+            existing_names,
+            generated_models,
+        );
+    }
+}
+
+fn normalize_pspice_u_timing_in_elements(
+    elements: &mut [Element],
+    scope: &str,
+    source_models: &[ModelDef],
+    existing_names: &mut HashSet<String>,
+    generated_models: &mut Vec<ModelDef>,
+) {
+    for element in elements {
+        let ElementKind::Xspice {
+            model,
+            pspice_u_timing,
+            ..
+        } = &mut element.kind
+        else {
+            continue;
+        };
+
+        let Some(timing) = pspice_u_timing.take() else {
+            continue;
+        };
+        let Some(timing_model) = source_models
+            .iter()
+            .find(|candidate| candidate.name.eq_ignore_ascii_case(&timing.timing_model))
+        else {
+            continue;
+        };
+        if !timing_model.model_type.eq_ignore_ascii_case("UGATE")
+            || !pspice_u_gate_model_accepts_ugate_timing(model)
+        {
+            continue;
+        }
+
+        let alias_name = unique_pspice_u_timing_model_name(scope, &element.name, existing_names);
+        let alias = pspice_ugate_alias_model(&alias_name, model, timing_model);
+        *model = alias_name;
+        generated_models.push(alias);
+    }
+}
+
+fn pspice_u_gate_model_accepts_ugate_timing(model: &str) -> bool {
+    matches!(
+        model.to_ascii_lowercase().as_str(),
+        "d_and" | "d_buffer" | "d_inverter" | "d_nand" | "d_nor" | "d_or" | "d_xnor" | "d_xor"
+    )
+}
+
+fn pspice_ugate_alias_model(
+    alias_name: &str,
+    code_model: &str,
+    timing_model: &ModelDef,
+) -> ModelDef {
+    const PSPICE_U_DEFAULT_DELAY: Value = 1.0e-12;
+
+    let mut params = vec![("inertial_delay".to_string(), 1.0)];
+    let mut expr_params = Vec::new();
+    push_pspice_timing_delay_param(
+        timing_model,
+        &["TPLHTY", "TPLHMN", "TPLHMX"],
+        "rise_delay",
+        PSPICE_U_DEFAULT_DELAY,
+        &mut params,
+        &mut expr_params,
+    );
+    push_pspice_timing_delay_param(
+        timing_model,
+        &["TPHLTY", "TPHLMN", "TPHLMX"],
+        "fall_delay",
+        PSPICE_U_DEFAULT_DELAY,
+        &mut params,
+        &mut expr_params,
+    );
+
+    ModelDef {
+        name: alias_name.to_string(),
+        model_type: code_model.to_string(),
+        params,
+        expr_params,
+        string_params: Vec::new(),
+        string_vector_params: Vec::new(),
+        real_vector_params: Vec::new(),
+        integer_vector_params: Vec::new(),
+    }
+}
+
+fn push_pspice_timing_delay_param(
+    timing_model: &ModelDef,
+    source_names: &[&str],
+    target_name: &str,
+    default_value: Value,
+    params: &mut Vec<(String, Value)>,
+    expr_params: &mut Vec<(String, String)>,
+) {
+    if let Some((_, value)) = source_names.iter().find_map(|source_name| {
+        timing_model
+            .params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(source_name))
+    }) {
+        params.push((target_name.to_string(), *value));
+        return;
+    }
+
+    if let Some((_, expr)) = source_names.iter().find_map(|source_name| {
+        timing_model
+            .expr_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(source_name))
+    }) {
+        expr_params.push((target_name.to_string(), expr.clone()));
+        return;
+    }
+
+    params.push((target_name.to_string(), default_value));
+}
+
+fn unique_pspice_u_timing_model_name(
+    scope: &str,
+    element_name: &str,
+    existing_names: &mut HashSet<String>,
+) -> String {
+    let base = sanitize_pspice_u_generated_model_name(&format!(
+        "__RSPICE_PSPICE_U_{scope}_{element_name}"
+    ));
+    if existing_names.insert(base.to_ascii_uppercase()) {
+        return base;
+    }
+
+    let mut suffix = 1usize;
+    loop {
+        let candidate = format!("{base}_{suffix}");
+        if existing_names.insert(candidate.to_ascii_uppercase()) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn sanitize_pspice_u_generated_model_name(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch.to_ascii_uppercase());
+        } else {
+            out.push('_');
+        }
+    }
+    out
 }
 
 fn validate_resistor_model_references(state: &ParseState) -> Result<(), ParseError> {

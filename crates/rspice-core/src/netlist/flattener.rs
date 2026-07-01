@@ -613,6 +613,7 @@ impl<'a> Flattener<'a> {
             },
             ElementKind::Xspice {
                 model,
+                pspice_u_timing,
                 ports,
                 params,
                 expr_params,
@@ -624,6 +625,7 @@ impl<'a> Flattener<'a> {
                 real_vector_expr_params,
             } => ElementKind::Xspice {
                 model: model.clone(),
+                pspice_u_timing: pspice_u_timing.clone(),
                 ports: ports
                     .iter()
                     .map(|port| self.remap_xspice_port(port, prefix, node_map))
@@ -1045,6 +1047,7 @@ impl<'a> Flattener<'a> {
 
             ElementKind::Xspice {
                 model,
+                pspice_u_timing,
                 ports,
                 params,
                 expr_params,
@@ -1061,6 +1064,7 @@ impl<'a> Flattener<'a> {
                     element_path,
                     model_scope_path,
                 )?,
+                pspice_u_timing: pspice_u_timing.clone(),
                 ports: ports.clone(),
                 params: self.merge_deferred_params(params, expr_params, scope)?,
                 expr_params: Vec::new(),

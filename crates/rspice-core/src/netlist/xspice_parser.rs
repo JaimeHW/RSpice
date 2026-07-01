@@ -213,6 +213,7 @@ pub fn parse_xspice(
         name,
         kind: ElementKind::Xspice {
             model,
+            pspice_u_timing: None,
             ports,
             params,
             expr_params,

@@ -787,7 +787,17 @@ fn parse_pspice_simple_u_gate_instance(
         ]
     };
 
-    push_pspice_u_xspice_element(elements, name.to_string(), gate.xspice_model, ports);
+    let pspice_u_timing = pins
+        .get(gate.input_count + 1)
+        .and_then(|token| pspice_u_timing_model_token(token))
+        .map(|timing_model| PspiceUTiming { timing_model });
+    push_pspice_u_xspice_element_with_timing(
+        elements,
+        name.to_string(),
+        gate.xspice_model,
+        ports,
+        pspice_u_timing,
+    );
 
     Ok(())
 }
@@ -1106,10 +1116,21 @@ fn push_pspice_u_xspice_element(
     model: &str,
     ports: Vec<XspicePort>,
 ) {
+    push_pspice_u_xspice_element_with_timing(elements, name, model, ports, None);
+}
+
+fn push_pspice_u_xspice_element_with_timing(
+    elements: &mut Vec<Element>,
+    name: String,
+    model: &str,
+    ports: Vec<XspicePort>,
+    pspice_u_timing: Option<PspiceUTiming>,
+) {
     elements.push(Element {
         name,
         kind: ElementKind::Xspice {
             model: model.to_string(),
+            pspice_u_timing,
             ports,
             params: Vec::new(),
             expr_params: Vec::new(),
@@ -1245,6 +1266,14 @@ fn parse_pspice_u_kind_and_count(raw: &str) -> (String, Option<usize>) {
 
 fn normalize_pspice_u_node(raw: &str) -> String {
     raw.trim().to_ascii_uppercase()
+}
+
+fn pspice_u_timing_model_token(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.contains('=') {
+        return None;
+    }
+    Some(trimmed.to_ascii_uppercase())
 }
 
 fn pspice_u_is_no_connect(raw: &str) -> bool {

@@ -299,6 +299,7 @@ impl NodeUnion {
             },
             ElementKind::Xspice {
                 model,
+                pspice_u_timing,
                 ports,
                 params,
                 expr_params,
@@ -310,6 +311,7 @@ impl NodeUnion {
                 real_vector_expr_params,
             } => ElementKind::Xspice {
                 model,
+                pspice_u_timing,
                 ports: ports
                     .into_iter()
                     .map(|port| self.remap_xspice_port(port))

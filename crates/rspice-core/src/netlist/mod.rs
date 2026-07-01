@@ -2534,6 +2534,7 @@ mod tests {
                 name: "A1".to_string(),
                 kind: ElementKind::Xspice {
                     model: "gain".to_string(),
+                    pspice_u_timing: None,
                     ports: vec![
                         XspicePort::Analog("in".to_string()),
                         XspicePort::Analog("out".to_string()),
@@ -4651,6 +4652,104 @@ mod tests {
             }
             other => panic!("expected XSPICE lowering, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn pspice_u_gate_ugate_timing_creates_xspice_model_alias() {
+        let netlist = Netlist::parse(
+            "pspice u gate timing\n\
+             U1 NAND(2) $G_DPWR $G_DGND a b y DLY IO_LEVEL=0\n\
+             .model DLY UGATE (TPLHTY=10n TPHLTY=20n)\n\
+             .end\n",
+        )
+        .expect("PSpice UGATE timing should create a d_nand model alias");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U1")
+            .expect("U1 exists");
+
+        let alias_name = match &element.kind {
+            ElementKind::Xspice {
+                model,
+                pspice_u_timing,
+                ..
+            } => {
+                assert!(pspice_u_timing.is_none());
+                model.as_str()
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        };
+
+        let alias = netlist
+            .models
+            .iter()
+            .find(|model| model.name == alias_name)
+            .expect("generated timing alias exists");
+        assert_eq!(alias.model_type, "d_nand");
+        assert!(
+            alias.params.iter().any(|(name, value)| {
+                name == "rise_delay" && (*value - 10.0e-9).abs() < 1.0e-21
+            })
+        );
+        assert!(
+            alias.params.iter().any(|(name, value)| {
+                name == "fall_delay" && (*value - 20.0e-9).abs() < 1.0e-21
+            })
+        );
+        assert!(alias.params.iter().any(|(name, value)| {
+            name == "inertial_delay" && (*value - 1.0).abs() < f64::EPSILON
+        }));
+    }
+
+    #[test]
+    fn pspice_u_gate_ugate_timing_resolves_scoped_model_alias() {
+        let netlist = Netlist::parse(
+            "pspice scoped u timing\n\
+             .subckt gate a b y\n\
+             U1 NAND(2) DPWR DGND a b y DLY\n\
+             .model DLY UGATE (TPLHTY=3n TPHLTY=4n)\n\
+             .ends gate\n\
+             X1 in1 in2 out gate\n\
+             .end\n",
+        )
+        .expect("PSpice UGATE timing inside subckt should create a scoped alias");
+
+        let subckt = netlist
+            .subcircuits
+            .iter()
+            .find(|subckt| subckt.name.eq_ignore_ascii_case("gate"))
+            .expect("subckt exists");
+        let alias_name = match &subckt.elements[0].kind {
+            ElementKind::Xspice {
+                model,
+                pspice_u_timing,
+                ..
+            } => {
+                assert!(pspice_u_timing.is_none());
+                model.as_str()
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        };
+        let alias = netlist
+            .models
+            .iter()
+            .find(|model| model.name == alias_name)
+            .expect("generated scoped timing alias exists");
+        assert_eq!(alias.model_type, "d_nand");
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "rise_delay" && (*value - 3.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "fall_delay" && (*value - 4.0e-9).abs() < 1.0e-21 })
+        );
     }
 
     #[test]

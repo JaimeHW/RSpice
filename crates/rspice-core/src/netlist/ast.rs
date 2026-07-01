@@ -428,6 +428,9 @@ pub enum ElementKind {
     Xspice {
         /// Code model type name (e.g., "gain", "d_and", "adc_bridge")
         model: String,
+        /// Internal metadata for PSpice U-device frontend lowering. This is
+        /// consumed by parser normalization before simulation.
+        pspice_u_timing: Option<PspiceUTiming>,
         /// Port connections with type information
         ports: Vec<XspicePort>,
         /// Instance parameter overrides
@@ -452,6 +455,12 @@ pub enum ElementKind {
         /// inside subcircuit bodies.
         real_vector_expr_params: Vec<(String, Vec<String>)>,
     },
+}
+
+/// Internal metadata attached to XSPICE elements lowered from PSpice U devices.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PspiceUTiming {
+    pub timing_model: String,
 }
 
 /// Switch initial state
