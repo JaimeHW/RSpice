@@ -1,7 +1,7 @@
 //! XSPICE transmission-line code models.
 
 use crate::{Complex64, Value};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
@@ -30,6 +30,9 @@ const MSOPEN_ALEXOPOULOS: i64 = 2;
 
 const TRAN_DC: i64 = 0;
 const TRAN_FULL: i64 = 1;
+const MICROSTRIP_PROPAGATION_RESOURCE: &str = "xspice.tlines.microstrip_propagation";
+const COUPLED_MICROSTRIP_PROPAGATION_RESOURCE: &str =
+    "xspice.tlines.coupled_microstrip_propagation";
 
 /// Official XSPICE `msopen` microstrip open-end model.
 pub struct MicrostripOpenEnd;
@@ -83,6 +86,47 @@ struct CoupledMicrostripPropagation {
     alpha_odd: Value,
     beta_even: Value,
     beta_odd: Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MicrostripPropagationSignature {
+    frequency: Value,
+    w: Value,
+    h: Value,
+    t: Value,
+    er: Value,
+    tan_delta: Value,
+    rho: Value,
+    roughness: Value,
+    substrate_model: i64,
+    dispersion_model: i64,
+}
+
+#[derive(Debug, Clone)]
+struct MicrostripPropagationResource {
+    signature: MicrostripPropagationSignature,
+    result: CmResult<Arc<MicrostripPropagation>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CoupledMicrostripPropagationSignature {
+    frequency: Value,
+    w: Value,
+    s: Value,
+    h: Value,
+    t: Value,
+    er: Value,
+    tan_delta: Value,
+    rho: Value,
+    roughness: Value,
+    substrate_model: i64,
+    dispersion_model: i64,
+}
+
+#[derive(Debug, Clone)]
+struct CoupledMicrostripPropagationResource {
+    signature: CoupledMicrostripPropagationSignature,
+    result: CmResult<Arc<CoupledMicrostripPropagation>>,
 }
 
 #[inline]
@@ -189,6 +233,59 @@ fn finite_param(ctx: &CmContext, name: &str, default: Value) -> CmResult<Value> 
 
 fn integer_param(ctx: &CmContext, name: &str, default: i64) -> i64 {
     ctx.param_or(name, default as Value).round() as i64
+}
+
+fn microstrip_propagation_signature(
+    ctx: &CmContext,
+    frequency: Value,
+) -> MicrostripPropagationSignature {
+    MicrostripPropagationSignature {
+        frequency,
+        w: ctx.param_or("w", 1.0e-3),
+        h: ctx.param_or("h", 1.0e-3),
+        t: ctx.param_or("t", 35.0e-6),
+        er: ctx.param_or("er", 9.8),
+        tan_delta: ctx.param_or("tand", 2.0e-4),
+        rho: ctx.param_or("rho", 0.022e-6),
+        roughness: ctx.param_or("d", 0.15e-6),
+        substrate_model: integer_param(ctx, "model", HAMMERSTAD),
+        dispersion_model: integer_param(ctx, "disp", DISP_KIRSCHING),
+    }
+}
+
+fn microstrip_propagation_signature_matches(
+    ctx: &CmContext,
+    signature: &MicrostripPropagationSignature,
+    frequency: Value,
+) -> bool {
+    microstrip_propagation_signature(ctx, frequency) == *signature
+}
+
+fn coupled_microstrip_propagation_signature(
+    ctx: &CmContext,
+    frequency: Value,
+) -> CoupledMicrostripPropagationSignature {
+    CoupledMicrostripPropagationSignature {
+        frequency,
+        w: ctx.param_or("w", 1.0e-3),
+        s: ctx.param_or("s", 1.0e-3),
+        h: ctx.param_or("h", 1.0e-3),
+        t: ctx.param_or("t", 35.0e-6),
+        er: ctx.param_or("er", 9.8),
+        tan_delta: ctx.param_or("tand", 2.0e-4),
+        rho: ctx.param_or("rho", 0.022e-6),
+        roughness: ctx.param_or("d", 0.15e-6),
+        substrate_model: integer_param(ctx, "model", HAMMERSTAD),
+        dispersion_model: integer_param(ctx, "disp", DISP_KIRSCHING),
+    }
+}
+
+fn coupled_microstrip_propagation_signature_matches(
+    ctx: &CmContext,
+    signature: &CoupledMicrostripPropagationSignature,
+    frequency: Value,
+) -> bool {
+    coupled_microstrip_propagation_signature(ctx, frequency) == *signature
 }
 
 fn hammerstad_ab(u: Value, er: Value) -> (Value, Value) {
@@ -486,7 +583,10 @@ fn analyse_microstrip_loss(
     (conductor_loss, dielectric_loss)
 }
 
-fn microstrip_propagation(ctx: &CmContext, frequency: Value) -> CmResult<MicrostripPropagation> {
+fn microstrip_propagation_uncached(
+    ctx: &CmContext,
+    frequency: Value,
+) -> CmResult<MicrostripPropagation> {
     let w = positive_param(ctx, "w", 1.0e-3)?;
     let h = positive_param(ctx, "h", 1.0e-3)?;
     let t = nonnegative_param(ctx, "t", 35.0e-6)?;
@@ -527,6 +627,43 @@ fn microstrip_propagation(ctx: &CmContext, frequency: Value) -> CmResult<Microst
         beta: dispersion.er_eff_freq.sqrt() * std::f64::consts::TAU * frequency / C0,
         er_eff: dispersion.er_eff_freq,
     })
+}
+
+fn cache_microstrip_propagation(
+    ctx: &mut CmContext,
+    frequency: Value,
+) -> CmResult<Arc<MicrostripPropagation>> {
+    if let Some(resource) =
+        ctx.resource::<MicrostripPropagationResource>(MICROSTRIP_PROPAGATION_RESOURCE)
+        && microstrip_propagation_signature_matches(ctx, &resource.signature, frequency)
+    {
+        return resource.result.clone();
+    }
+
+    let signature = microstrip_propagation_signature(ctx, frequency);
+    let result = microstrip_propagation_uncached(ctx, frequency).map(Arc::new);
+    ctx.set_resource(
+        MICROSTRIP_PROPAGATION_RESOURCE,
+        Arc::new(MicrostripPropagationResource {
+            signature,
+            result: result.clone(),
+        }),
+    );
+    result
+}
+
+fn microstrip_propagation(
+    ctx: &CmContext,
+    frequency: Value,
+) -> CmResult<Arc<MicrostripPropagation>> {
+    if let Some(resource) =
+        ctx.resource::<MicrostripPropagationResource>(MICROSTRIP_PROPAGATION_RESOURCE)
+        && microstrip_propagation_signature_matches(ctx, &resource.signature, frequency)
+    {
+        return resource.result.clone();
+    }
+
+    microstrip_propagation_uncached(ctx, frequency).map(Arc::new)
 }
 
 fn cpmsline_analyse_quasi_static(
@@ -796,7 +933,7 @@ fn cpmsline_analyse_dispersion(
     }
 }
 
-fn coupled_microstrip_propagation(
+fn coupled_microstrip_propagation_uncached(
     ctx: &CmContext,
     frequency: Value,
 ) -> CmResult<CoupledMicrostripPropagation> {
@@ -850,6 +987,43 @@ fn coupled_microstrip_propagation(
         beta_even: dispersion.er_even.sqrt() * wave_number,
         beta_odd: dispersion.er_odd.sqrt() * wave_number,
     })
+}
+
+fn cache_coupled_microstrip_propagation(
+    ctx: &mut CmContext,
+    frequency: Value,
+) -> CmResult<Arc<CoupledMicrostripPropagation>> {
+    if let Some(resource) = ctx
+        .resource::<CoupledMicrostripPropagationResource>(COUPLED_MICROSTRIP_PROPAGATION_RESOURCE)
+        && coupled_microstrip_propagation_signature_matches(ctx, &resource.signature, frequency)
+    {
+        return resource.result.clone();
+    }
+
+    let signature = coupled_microstrip_propagation_signature(ctx, frequency);
+    let result = coupled_microstrip_propagation_uncached(ctx, frequency).map(Arc::new);
+    ctx.set_resource(
+        COUPLED_MICROSTRIP_PROPAGATION_RESOURCE,
+        Arc::new(CoupledMicrostripPropagationResource {
+            signature,
+            result: result.clone(),
+        }),
+    );
+    result
+}
+
+fn coupled_microstrip_propagation(
+    ctx: &CmContext,
+    frequency: Value,
+) -> CmResult<Arc<CoupledMicrostripPropagation>> {
+    if let Some(resource) = ctx
+        .resource::<CoupledMicrostripPropagationResource>(COUPLED_MICROSTRIP_PROPAGATION_RESOURCE)
+        && coupled_microstrip_propagation_signature_matches(ctx, &resource.signature, frequency)
+    {
+        return resource.result.clone();
+    }
+
+    coupled_microstrip_propagation_uncached(ctx, frequency).map(Arc::new)
 }
 
 fn calc_cend(
@@ -1741,12 +1915,12 @@ impl CodeModel for MicrostripLine {
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         mlin_length(ctx)?;
         mlin_tran_model(ctx)?;
-        microstrip_propagation(ctx, 0.0)?;
+        cache_microstrip_propagation(ctx, 0.0)?;
         Ok(())
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let propagation = microstrip_propagation(ctx, 0.0)?;
+        let propagation = cache_microstrip_propagation(ctx, 0.0)?;
         let impedance = propagation.zl;
         let (port1_output, port2_output) =
             if ctx.is_transient() && mlin_tran_model(ctx)? == TRAN_FULL {
@@ -1993,12 +2167,12 @@ impl CodeModel for CoupledMicrostripLine {
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         cpmlin_length(ctx)?;
         cpmlin_tran_model(ctx)?;
-        coupled_microstrip_propagation(ctx, 0.0)?;
+        cache_coupled_microstrip_propagation(ctx, 0.0)?;
         Ok(())
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let propagation = coupled_microstrip_propagation(ctx, 0.0)?;
+        let propagation = cache_coupled_microstrip_propagation(ctx, 0.0)?;
         let reference_impedance = (propagation.ze * propagation.zo).sqrt();
         let outputs = if ctx.is_transient() && cpmlin_tran_model(ctx)? == TRAN_FULL {
             let delay = cpmlin_delay(ctx)?;
@@ -2165,5 +2339,114 @@ impl CodeModel for MicrostripOpenEnd {
             Ok(admittance) => vec![("p1".to_string(), admittance)],
             Err(_) => Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn microstrip_cache_context() -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.set_param("w", 1.2e-3);
+        ctx.set_param("h", 0.8e-3);
+        ctx.set_param("t", 35.0e-6);
+        ctx.set_param("er", 4.2);
+        ctx.set_param("tand", 1.0e-3);
+        ctx.set_param("rho", 0.022e-6);
+        ctx.set_param("d", 0.12e-6);
+        ctx.set_param("model", HAMMERSTAD as Value);
+        ctx.set_param("disp", DISP_KIRSCHING as Value);
+        ctx
+    }
+
+    fn coupled_microstrip_cache_context() -> CmContext {
+        let mut ctx = microstrip_cache_context();
+        ctx.set_param("s", 0.45e-3);
+        ctx
+    }
+
+    #[test]
+    fn microstrip_propagation_cache_reuses_until_signature_changes() {
+        let mut ctx = microstrip_cache_context();
+        let first = cache_microstrip_propagation(&mut ctx, 0.0).expect("cache propagation");
+        let second =
+            cache_microstrip_propagation(&mut ctx, 0.0).expect("matching mutable propagation");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "unchanged mlin parameters should reuse the context propagation resource"
+        );
+
+        let readonly = microstrip_propagation(&ctx, 0.0).expect("read-only propagation");
+        assert!(
+            Arc::ptr_eq(&first, &readonly),
+            "read-only mlin partial paths should reuse a matching mutable resource"
+        );
+
+        ctx.set_param("unrelated", 99.0);
+        let after_unrelated =
+            cache_microstrip_propagation(&mut ctx, 0.0).expect("unrelated param preserves cache");
+        assert!(Arc::ptr_eq(&first, &after_unrelated));
+
+        let ac =
+            cache_microstrip_propagation(&mut ctx, 1.0e9).expect("frequency-specific propagation");
+        assert!(
+            !Arc::ptr_eq(&first, &ac),
+            "frequency is part of the mlin propagation signature"
+        );
+        let ac_readonly =
+            microstrip_propagation(&ctx, 1.0e9).expect("read-only frequency-specific propagation");
+        assert!(Arc::ptr_eq(&ac, &ac_readonly));
+
+        ctx.set_param("w", 1.5e-3);
+        let changed =
+            cache_microstrip_propagation(&mut ctx, 1.0e9).expect("changed width reloads cache");
+        assert!(
+            !Arc::ptr_eq(&ac, &changed),
+            "changed mlin physical parameters must refresh derived propagation"
+        );
+    }
+
+    #[test]
+    fn coupled_microstrip_propagation_cache_reuses_until_signature_changes() {
+        let mut ctx = coupled_microstrip_cache_context();
+        let first =
+            cache_coupled_microstrip_propagation(&mut ctx, 0.0).expect("cache coupled propagation");
+        let second = cache_coupled_microstrip_propagation(&mut ctx, 0.0)
+            .expect("matching mutable coupled propagation");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "unchanged cpmlin parameters should reuse the context propagation resource"
+        );
+
+        let readonly =
+            coupled_microstrip_propagation(&ctx, 0.0).expect("read-only coupled propagation");
+        assert!(
+            Arc::ptr_eq(&first, &readonly),
+            "read-only cpmlin partial paths should reuse a matching mutable resource"
+        );
+
+        ctx.set_param("unrelated", 99.0);
+        let after_unrelated = cache_coupled_microstrip_propagation(&mut ctx, 0.0)
+            .expect("unrelated param preserves coupled cache");
+        assert!(Arc::ptr_eq(&first, &after_unrelated));
+
+        let ac = cache_coupled_microstrip_propagation(&mut ctx, 1.0e9)
+            .expect("frequency-specific coupled propagation");
+        assert!(
+            !Arc::ptr_eq(&first, &ac),
+            "frequency is part of the cpmlin propagation signature"
+        );
+        let ac_readonly = coupled_microstrip_propagation(&ctx, 1.0e9)
+            .expect("read-only frequency-specific coupled propagation");
+        assert!(Arc::ptr_eq(&ac, &ac_readonly));
+
+        ctx.set_param("s", 0.6e-3);
+        let changed = cache_coupled_microstrip_propagation(&mut ctx, 1.0e9)
+            .expect("changed spacing reloads coupled cache");
+        assert!(
+            !Arc::ptr_eq(&ac, &changed),
+            "changed cpmlin physical parameters must refresh derived propagation"
+        );
     }
 }
