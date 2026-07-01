@@ -99,6 +99,498 @@ fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct StampLocals {
+    pub(crate) var_ab_i: f64,
+    pub(crate) var_ab_i_rv: f64,
+    pub(crate) var_auxt: f64,
+    pub(crate) var_auxt_rv: f64,
+    pub(crate) var_da: f64,
+    pub(crate) var_da_rv: f64,
+    pub(crate) var_deltaphigd: f64,
+    pub(crate) var_deltaphigd_rv: f64,
+    pub(crate) var_deltaphigr: f64,
+    pub(crate) var_deltaphigr_rv: f64,
+    pub(crate) var_dfn_sl: f64,
+    pub(crate) var_dfn_sl_dn0: f64,
+    pub(crate) var_dfn_sl_dn2: f64,
+    pub(crate) var_dfn_sl_rv: f64,
+    pub(crate) var_dfn_su: f64,
+    pub(crate) var_dfn_su_dn0: f64,
+    pub(crate) var_dfn_su_dn2: f64,
+    pub(crate) var_dfn_su_rv: f64,
+    pub(crate) var_dn: f64,
+    pub(crate) var_dn_rv: f64,
+    pub(crate) var_dnj1_dv: f64,
+    pub(crate) var_dnj1_dv_dn0: f64,
+    pub(crate) var_dnj1_dv_dn2: f64,
+    pub(crate) var_dnj1_dv_rv: f64,
+    pub(crate) var_dp: f64,
+    pub(crate) var_dp_rv: f64,
+    pub(crate) var_dvmax_over_phitd_dv: f64,
+    pub(crate) var_dvmax_over_phitd_dv_dn0: f64,
+    pub(crate) var_dvmax_over_phitd_dv_dn2: f64,
+    pub(crate) var_dvmax_over_phitd_dv_rv: f64,
+    pub(crate) var_epssi: f64,
+    pub(crate) var_epssi_rv: f64,
+    pub(crate) var_exp_a: f64,
+    pub(crate) var_exp_a2: f64,
+    pub(crate) var_exp_a2_dn0: f64,
+    pub(crate) var_exp_a2_dn2: f64,
+    pub(crate) var_exp_a2_rv: f64,
+    pub(crate) var_exp_a_dn0: f64,
+    pub(crate) var_exp_a_dn2: f64,
+    pub(crate) var_exp_a_rv: f64,
+    pub(crate) var_exp_k: f64,
+    pub(crate) var_exp_k2: f64,
+    pub(crate) var_exp_k2_dn0: f64,
+    pub(crate) var_exp_k2_dn2: f64,
+    pub(crate) var_exp_k2_rv: f64,
+    pub(crate) var_exp_k_dn0: f64,
+    pub(crate) var_exp_k_dn2: f64,
+    pub(crate) var_exp_k_rv: f64,
+    pub(crate) var_exp_vmax_over_phitd_bot: f64,
+    pub(crate) var_exp_vmax_over_phitd_bot_dn0: f64,
+    pub(crate) var_exp_vmax_over_phitd_bot_dn2: f64,
+    pub(crate) var_exp_vmax_over_phitd_bot_rv: f64,
+    pub(crate) var_fraci: f64,
+    pub(crate) var_fraci_rv: f64,
+    pub(crate) var_fracna: f64,
+    pub(crate) var_fracna_rv: f64,
+    pub(crate) var_fracnb: f64,
+    pub(crate) var_fracnb_rv: f64,
+    pub(crate) var_ftdbot2: f64,
+    pub(crate) var_ftdbot2_rv: f64,
+    pub(crate) var_ftdgat2: f64,
+    pub(crate) var_ftdgat2_rv: f64,
+    pub(crate) var_ftdsti2: f64,
+    pub(crate) var_ftdsti2_rv: f64,
+    pub(crate) var_guard1: f64,
+    pub(crate) var_guard153: f64,
+    pub(crate) var_guard153_rv: f64,
+    pub(crate) var_guard154: f64,
+    pub(crate) var_guard154_rv: f64,
+    pub(crate) var_guard157: f64,
+    pub(crate) var_guard157_rv: f64,
+    pub(crate) var_guard158: f64,
+    pub(crate) var_guard158_rv: f64,
+    pub(crate) var_guard159: f64,
+    pub(crate) var_guard159_rv: f64,
+    pub(crate) var_guard160: f64,
+    pub(crate) var_guard160_rv: f64,
+    pub(crate) var_guard163: f64,
+    pub(crate) var_guard163_rv: f64,
+    pub(crate) var_guard166: f64,
+    pub(crate) var_guard166_rv: f64,
+    pub(crate) var_guard167: f64,
+    pub(crate) var_guard167_rv: f64,
+    pub(crate) var_guard168: f64,
+    pub(crate) var_guard168_rv: f64,
+    pub(crate) var_guard169: f64,
+    pub(crate) var_guard169_rv: f64,
+    pub(crate) var_guard172: f64,
+    pub(crate) var_guard172_rv: f64,
+    pub(crate) var_guard1_rv: f64,
+    pub(crate) var_guard2: f64,
+    pub(crate) var_guard230: f64,
+    pub(crate) var_guard230_rv: f64,
+    pub(crate) var_guard231: f64,
+    pub(crate) var_guard231_rv: f64,
+    pub(crate) var_guard234: f64,
+    pub(crate) var_guard234_rv: f64,
+    pub(crate) var_guard235: f64,
+    pub(crate) var_guard235_rv: f64,
+    pub(crate) var_guard236: f64,
+    pub(crate) var_guard236_rv: f64,
+    pub(crate) var_guard237: f64,
+    pub(crate) var_guard237_rv: f64,
+    pub(crate) var_guard240: f64,
+    pub(crate) var_guard240_rv: f64,
+    pub(crate) var_guard243: f64,
+    pub(crate) var_guard243_rv: f64,
+    pub(crate) var_guard244: f64,
+    pub(crate) var_guard244_rv: f64,
+    pub(crate) var_guard245: f64,
+    pub(crate) var_guard245_rv: f64,
+    pub(crate) var_guard246: f64,
+    pub(crate) var_guard246_rv: f64,
+    pub(crate) var_guard249: f64,
+    pub(crate) var_guard249_rv: f64,
+    pub(crate) var_guard26: f64,
+    pub(crate) var_guard26_rv: f64,
+    pub(crate) var_guard27: f64,
+    pub(crate) var_guard27_rv: f64,
+    pub(crate) var_guard2_rv: f64,
+    pub(crate) var_guard307: f64,
+    pub(crate) var_guard307_rv: f64,
+    pub(crate) var_guard308: f64,
+    pub(crate) var_guard308_rv: f64,
+    pub(crate) var_guard31: f64,
+    pub(crate) var_guard311: f64,
+    pub(crate) var_guard311_rv: f64,
+    pub(crate) var_guard312: f64,
+    pub(crate) var_guard312_rv: f64,
+    pub(crate) var_guard313: f64,
+    pub(crate) var_guard313_rv: f64,
+    pub(crate) var_guard314: f64,
+    pub(crate) var_guard314_rv: f64,
+    pub(crate) var_guard317: f64,
+    pub(crate) var_guard317_rv: f64,
+    pub(crate) var_guard31_rv: f64,
+    pub(crate) var_guard320: f64,
+    pub(crate) var_guard320_rv: f64,
+    pub(crate) var_guard321: f64,
+    pub(crate) var_guard321_rv: f64,
+    pub(crate) var_guard322: f64,
+    pub(crate) var_guard322_rv: f64,
+    pub(crate) var_guard323: f64,
+    pub(crate) var_guard323_rv: f64,
+    pub(crate) var_guard326: f64,
+    pub(crate) var_guard326_rv: f64,
+    pub(crate) var_guard384: f64,
+    pub(crate) var_guard384_rv: f64,
+    pub(crate) var_guard385: f64,
+    pub(crate) var_guard385_rv: f64,
+    pub(crate) var_guard388: f64,
+    pub(crate) var_guard388_rv: f64,
+    pub(crate) var_guard389: f64,
+    pub(crate) var_guard389_rv: f64,
+    pub(crate) var_guard390: f64,
+    pub(crate) var_guard390_rv: f64,
+    pub(crate) var_guard391: f64,
+    pub(crate) var_guard391_rv: f64,
+    pub(crate) var_guard394: f64,
+    pub(crate) var_guard394_rv: f64,
+    pub(crate) var_guard397: f64,
+    pub(crate) var_guard397_rv: f64,
+    pub(crate) var_guard398: f64,
+    pub(crate) var_guard398_rv: f64,
+    pub(crate) var_guard399: f64,
+    pub(crate) var_guard399_rv: f64,
+    pub(crate) var_guard400: f64,
+    pub(crate) var_guard400_rv: f64,
+    pub(crate) var_guard403: f64,
+    pub(crate) var_guard403_rv: f64,
+    pub(crate) var_guard471: f64,
+    pub(crate) var_guard471_rv: f64,
+    pub(crate) var_guard479: f64,
+    pub(crate) var_guard479_rv: f64,
+    pub(crate) var_guard480: f64,
+    pub(crate) var_guard480_rv: f64,
+    pub(crate) var_guard483: f64,
+    pub(crate) var_guard483_rv: f64,
+    pub(crate) var_guard484: f64,
+    pub(crate) var_guard484_rv: f64,
+    pub(crate) var_guard485: f64,
+    pub(crate) var_guard485_rv: f64,
+    pub(crate) var_guard486: f64,
+    pub(crate) var_guard486_rv: f64,
+    pub(crate) var_guard489: f64,
+    pub(crate) var_guard489_rv: f64,
+    pub(crate) var_guard492: f64,
+    pub(crate) var_guard492_rv: f64,
+    pub(crate) var_guard493: f64,
+    pub(crate) var_guard493_rv: f64,
+    pub(crate) var_guard494: f64,
+    pub(crate) var_guard494_rv: f64,
+    pub(crate) var_guard495: f64,
+    pub(crate) var_guard495_rv: f64,
+    pub(crate) var_guard498: f64,
+    pub(crate) var_guard498_rv: f64,
+    pub(crate) var_guard558: f64,
+    pub(crate) var_guard558_rv: f64,
+    pub(crate) var_guard559: f64,
+    pub(crate) var_guard559_rv: f64,
+    pub(crate) var_guard560: f64,
+    pub(crate) var_guard560_rv: f64,
+    pub(crate) var_guard561: f64,
+    pub(crate) var_guard561_rv: f64,
+    pub(crate) var_guard562: f64,
+    pub(crate) var_guard562_rv: f64,
+    pub(crate) var_guard563: f64,
+    pub(crate) var_guard563_rv: f64,
+    pub(crate) var_guard564: f64,
+    pub(crate) var_guard564_rv: f64,
+    pub(crate) var_guard565: f64,
+    pub(crate) var_guard565_rv: f64,
+    pub(crate) var_guard566: f64,
+    pub(crate) var_guard566_rv: f64,
+    pub(crate) var_guard567: f64,
+    pub(crate) var_guard567_rv: f64,
+    pub(crate) var_guard568: f64,
+    pub(crate) var_guard568_rv: f64,
+    pub(crate) var_guard571: f64,
+    pub(crate) var_guard571_rv: f64,
+    pub(crate) var_guard572: f64,
+    pub(crate) var_guard572_rv: f64,
+    pub(crate) var_guard6: f64,
+    pub(crate) var_guard6_rv: f64,
+    pub(crate) var_guard7: f64,
+    pub(crate) var_guard76: f64,
+    pub(crate) var_guard76_rv: f64,
+    pub(crate) var_guard77: f64,
+    pub(crate) var_guard77_rv: f64,
+    pub(crate) var_guard7_rv: f64,
+    pub(crate) var_guard8: f64,
+    pub(crate) var_guard80: f64,
+    pub(crate) var_guard80_rv: f64,
+    pub(crate) var_guard81: f64,
+    pub(crate) var_guard81_rv: f64,
+    pub(crate) var_guard82: f64,
+    pub(crate) var_guard82_rv: f64,
+    pub(crate) var_guard83: f64,
+    pub(crate) var_guard83_rv: f64,
+    pub(crate) var_guard86: f64,
+    pub(crate) var_guard86_rv: f64,
+    pub(crate) var_guard89: f64,
+    pub(crate) var_guard89_rv: f64,
+    pub(crate) var_guard8_rv: f64,
+    pub(crate) var_guard90: f64,
+    pub(crate) var_guard90_rv: f64,
+    pub(crate) var_guard91: f64,
+    pub(crate) var_guard91_rv: f64,
+    pub(crate) var_guard92: f64,
+    pub(crate) var_guard92_rv: f64,
+    pub(crate) var_guard95: f64,
+    pub(crate) var_guard95_rv: f64,
+    pub(crate) var_idmultbot: f64,
+    pub(crate) var_idmultbot_dn0: f64,
+    pub(crate) var_idmultbot_dn2: f64,
+    pub(crate) var_idmultbot_rv: f64,
+    pub(crate) var_idsatbot: f64,
+    pub(crate) var_idsatbot_rv: f64,
+    pub(crate) var_idsatgat: f64,
+    pub(crate) var_idsatgat_rv: f64,
+    pub(crate) var_idsatrbot_i: f64,
+    pub(crate) var_idsatrbot_i_rv: f64,
+    pub(crate) var_idsatrgat_i: f64,
+    pub(crate) var_idsatrgat_i_rv: f64,
+    pub(crate) var_idsatrsti_i: f64,
+    pub(crate) var_idsatrsti_i_rv: f64,
+    pub(crate) var_idsatsti: f64,
+    pub(crate) var_idsatsti_rv: f64,
+    pub(crate) var_imax_i: f64,
+    pub(crate) var_imax_i_rv: f64,
+    pub(crate) var_inqs0_a: f64,
+    pub(crate) var_inqs0_a_dn0: f64,
+    pub(crate) var_inqs0_a_dn2: f64,
+    pub(crate) var_inqs0_a_dn3: f64,
+    pub(crate) var_inqs0_a_rv: f64,
+    pub(crate) var_inqs0_k: f64,
+    pub(crate) var_inqs0_k_dn0: f64,
+    pub(crate) var_inqs0_k_dn2: f64,
+    pub(crate) var_inqs0_k_dn4: f64,
+    pub(crate) var_inqs0_k_rv: f64,
+    pub(crate) var_iwnqs0_a: f64,
+    pub(crate) var_iwnqs0_a_dn0: f64,
+    pub(crate) var_iwnqs0_a_dn2: f64,
+    pub(crate) var_iwnqs0_a_dn5: f64,
+    pub(crate) var_iwnqs0_a_rv: f64,
+    pub(crate) var_juncdlt: f64,
+    pub(crate) var_juncdlt_rv: f64,
+    pub(crate) var_kbol_over_qele: f64,
+    pub(crate) var_kbol_over_qele_rv: f64,
+    pub(crate) var_la: f64,
+    pub(crate) var_la_rv: f64,
+    pub(crate) var_lg_i: f64,
+    pub(crate) var_lg_i_rv: f64,
+    pub(crate) var_ls_i: f64,
+    pub(crate) var_ls_i_rv: f64,
+    pub(crate) var_muen_i: f64,
+    pub(crate) var_muen_i_rv: f64,
+    pub(crate) var_muep_i: f64,
+    pub(crate) var_muep_i_rv: f64,
+    pub(crate) var_ndi_i: f64,
+    pub(crate) var_ndi_i_rv: f64,
+    pub(crate) var_ndibot_i: f64,
+    pub(crate) var_ndibot_i_rv: f64,
+    pub(crate) var_ndigat_i: f64,
+    pub(crate) var_ndigat_i_rv: f64,
+    pub(crate) var_ndisti_i: f64,
+    pub(crate) var_ndisti_i_rv: f64,
+    pub(crate) var_nfabot_i: f64,
+    pub(crate) var_nfabot_i_rv: f64,
+    pub(crate) var_nfagat_i: f64,
+    pub(crate) var_nfagat_i_rv: f64,
+    pub(crate) var_nfasti_i: f64,
+    pub(crate) var_nfasti_i_rv: f64,
+    pub(crate) var_nin: f64,
+    pub(crate) var_nin_rv: f64,
+    pub(crate) var_nj0: f64,
+    pub(crate) var_nj0_dn0: f64,
+    pub(crate) var_nj0_dn2: f64,
+    pub(crate) var_nj0_rv: f64,
+    pub(crate) var_nj1: f64,
+    pub(crate) var_nj1_dn0: f64,
+    pub(crate) var_nj1_dn2: f64,
+    pub(crate) var_nj1_rv: f64,
+    pub(crate) var_nj_k: f64,
+    pub(crate) var_nj_k0: f64,
+    pub(crate) var_nj_k0_dn0: f64,
+    pub(crate) var_nj_k0_dn2: f64,
+    pub(crate) var_nj_k0_rv: f64,
+    pub(crate) var_nj_k1: f64,
+    pub(crate) var_nj_k1_dn0: f64,
+    pub(crate) var_nj_k1_dn2: f64,
+    pub(crate) var_nj_k1_rv: f64,
+    pub(crate) var_nj_k_dn0: f64,
+    pub(crate) var_nj_k_dn2: f64,
+    pub(crate) var_nj_k_rv: f64,
+    pub(crate) var_nja10: f64,
+    pub(crate) var_nja10_dn0: f64,
+    pub(crate) var_nja10_dn2: f64,
+    pub(crate) var_nja10_rv: f64,
+    pub(crate) var_nja11: f64,
+    pub(crate) var_nja11_dn0: f64,
+    pub(crate) var_nja11_dn2: f64,
+    pub(crate) var_nja11_rv: f64,
+    pub(crate) var_njl: f64,
+    pub(crate) var_njl_rv: f64,
+    pub(crate) var_p_na: f64,
+    pub(crate) var_p_na_dn0: f64,
+    pub(crate) var_p_na_dn2: f64,
+    pub(crate) var_p_na_rv: f64,
+    pub(crate) var_p_nk: f64,
+    pub(crate) var_p_nk_dn0: f64,
+    pub(crate) var_p_nk_dn2: f64,
+    pub(crate) var_p_nk_rv: f64,
+    pub(crate) var_pb: f64,
+    pub(crate) var_pb_rv: f64,
+    pub(crate) var_phigbot_i: f64,
+    pub(crate) var_phigbot_i_rv: f64,
+    pub(crate) var_phigdbot: f64,
+    pub(crate) var_phigdbot_rv: f64,
+    pub(crate) var_phigdgat: f64,
+    pub(crate) var_phigdgat_rv: f64,
+    pub(crate) var_phigdsti: f64,
+    pub(crate) var_phigdsti_rv: f64,
+    pub(crate) var_phiggat_i: f64,
+    pub(crate) var_phiggat_i_rv: f64,
+    pub(crate) var_phigrbot: f64,
+    pub(crate) var_phigrbot_rv: f64,
+    pub(crate) var_phigrgat: f64,
+    pub(crate) var_phigrgat_rv: f64,
+    pub(crate) var_phigrsti: f64,
+    pub(crate) var_phigrsti_rv: f64,
+    pub(crate) var_phigsti_i: f64,
+    pub(crate) var_phigsti_i_rv: f64,
+    pub(crate) var_phitd: f64,
+    pub(crate) var_phitd_rv: f64,
+    pub(crate) var_phitdinv: f64,
+    pub(crate) var_phitdinv_rv: f64,
+    pub(crate) var_phitr: f64,
+    pub(crate) var_phitr_rv: f64,
+    pub(crate) var_phitrinv: f64,
+    pub(crate) var_phitrinv_rv: f64,
+    pub(crate) var_pn0: f64,
+    pub(crate) var_pn0_rv: f64,
+    pub(crate) var_pnn0: f64,
+    pub(crate) var_pnn0_rv: f64,
+    pub(crate) var_q_nqs_a: f64,
+    pub(crate) var_q_nqs_a_dn3: f64,
+    pub(crate) var_q_nqs_a_rv: f64,
+    pub(crate) var_q_nqs_k: f64,
+    pub(crate) var_q_nqs_k_dn4: f64,
+    pub(crate) var_q_nqs_k_rv: f64,
+    pub(crate) var_q_pex0: f64,
+    pub(crate) var_q_pex0_rv: f64,
+    pub(crate) var_q_pexa: f64,
+    pub(crate) var_q_pexa_dn0: f64,
+    pub(crate) var_q_pexa_dn2: f64,
+    pub(crate) var_q_pexa_rv: f64,
+    pub(crate) var_q_pexk: f64,
+    pub(crate) var_q_pexk_dn0: f64,
+    pub(crate) var_q_pexk_dn2: f64,
+    pub(crate) var_q_pexk_rv: f64,
+    pub(crate) var_q_qs_a: f64,
+    pub(crate) var_q_qs_a_dn0: f64,
+    pub(crate) var_q_qs_a_dn2: f64,
+    pub(crate) var_q_qs_a_rv: f64,
+    pub(crate) var_q_qs_k: f64,
+    pub(crate) var_q_qs_k_dn0: f64,
+    pub(crate) var_q_qs_k_dn2: f64,
+    pub(crate) var_q_qs_k_rv: f64,
+    pub(crate) var_scale_i: f64,
+    pub(crate) var_scale_i_rv: f64,
+    pub(crate) var_shrink_i: f64,
+    pub(crate) var_shrink_i_rv: f64,
+    pub(crate) var_shrinkl: f64,
+    pub(crate) var_shrinkl_rv: f64,
+    pub(crate) var_swjunexp_i: f64,
+    pub(crate) var_swjunexp_i_rv: f64,
+    pub(crate) var_t1: f64,
+    pub(crate) var_t1_rv: f64,
+    pub(crate) var_t2: f64,
+    pub(crate) var_t2_rv: f64,
+    pub(crate) var_tau_hl: f64,
+    pub(crate) var_tau_hl_rv: f64,
+    pub(crate) var_tkd: f64,
+    pub(crate) var_tkd_rv: f64,
+    pub(crate) var_tkr: f64,
+    pub(crate) var_tkr_rv: f64,
+    pub(crate) var_tmf1: f64,
+    pub(crate) var_tmf1_dn0: f64,
+    pub(crate) var_tmf1_dn2: f64,
+    pub(crate) var_tmf1_rv: f64,
+    pub(crate) var_tmf2: f64,
+    pub(crate) var_tmf2_dn0: f64,
+    pub(crate) var_tmf2_dn2: f64,
+    pub(crate) var_tmf2_rv: f64,
+    pub(crate) var_trj_i: f64,
+    pub(crate) var_trj_i_rv: f64,
+    pub(crate) var_v1: f64,
+    pub(crate) var_v1_rv: f64,
+    pub(crate) var_v2: f64,
+    pub(crate) var_v2_rv: f64,
+    pub(crate) var_v3: f64,
+    pub(crate) var_v3_rv: f64,
+    pub(crate) var_v4: f64,
+    pub(crate) var_v4_rv: f64,
+    pub(crate) var_v5: f64,
+    pub(crate) var_v5_rv: f64,
+    pub(crate) var_v_ha: f64,
+    pub(crate) var_v_ha_rv: f64,
+    pub(crate) var_v_hk: f64,
+    pub(crate) var_v_hk_rv: f64,
+    pub(crate) var_vak: f64,
+    pub(crate) var_vak_dn0: f64,
+    pub(crate) var_vak_dn2: f64,
+    pub(crate) var_vak_rv: f64,
+    pub(crate) var_vha1: f64,
+    pub(crate) var_vha1_rv: f64,
+    pub(crate) var_vjunc_a: f64,
+    pub(crate) var_vjunc_a_dn0: f64,
+    pub(crate) var_vjunc_a_dn2: f64,
+    pub(crate) var_vjunc_a_rv: f64,
+    pub(crate) var_vjunref_i: f64,
+    pub(crate) var_vjunref_i_rv: f64,
+    pub(crate) var_vmax: f64,
+    pub(crate) var_vmax_rv: f64,
+    pub(crate) var_vmaxbot: f64,
+    pub(crate) var_vmaxbot_rv: f64,
+    pub(crate) var_vmaxgat: f64,
+    pub(crate) var_vmaxgat_rv: f64,
+    pub(crate) var_vmaxsti: f64,
+    pub(crate) var_vmaxsti_rv: f64,
+    pub(crate) var_w_depa: f64,
+    pub(crate) var_w_depa0: f64,
+    pub(crate) var_w_depa0_dn0: f64,
+    pub(crate) var_w_depa0_dn2: f64,
+    pub(crate) var_w_depa0_rv: f64,
+    pub(crate) var_w_depa_dn0: f64,
+    pub(crate) var_w_depa_dn2: f64,
+    pub(crate) var_w_depa_rv: f64,
+    pub(crate) var_w_nqs_a: f64,
+    pub(crate) var_w_nqs_a_dn5: f64,
+    pub(crate) var_w_nqs_a_rv: f64,
+    pub(crate) var_w_qs_a: f64,
+    pub(crate) var_w_qs_a_dn0: f64,
+    pub(crate) var_w_qs_a_dn2: f64,
+    pub(crate) var_w_qs_a_rv: f64,
+    pub(crate) var_xti_i: f64,
+    pub(crate) var_xti_i_rv: f64,
+}
+
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let scalar_temperature_static_temperature = (ctx).temperature();
@@ -6212,325 +6704,46 @@ impl Instance {
             2,
             multiplicity * (((d11543_dn2) * ddt_scale)),
         );
-        let mut var_epssi: f64 = 0.0;
-        let mut var_trj_i: f64 = 0.0;
-        let mut var_imax_i: f64 = 0.0;
-        let mut var_phigbot_i: f64 = 0.0;
-        let mut var_phigsti_i: f64 = 0.0;
-        let mut var_phiggat_i: f64 = 0.0;
-        let mut var_idsatrbot_i: f64 = 0.0;
-        let mut var_idsatrsti_i: f64 = 0.0;
-        let mut var_idsatrgat_i: f64 = 0.0;
-        let mut var_swjunexp_i: f64 = 0.0;
-        let mut var_vjunref_i: f64 = 0.0;
-        let mut var_nfabot_i: f64 = 0.0;
-        let mut var_nfagat_i: f64 = 0.0;
-        let mut var_nfasti_i: f64 = 0.0;
-        let mut var_xti_i: f64 = 0.0;
-        let mut var_scale_i: f64 = 0.0;
-        let mut var_shrink_i: f64 = 0.0;
-        let mut var_tkr: f64 = 0.0;
-        let mut var_tkd: f64 = 0.0;
-        let mut var_auxt: f64 = 0.0;
-        let mut var_kbol_over_qele: f64 = 0.0;
-        let mut var_phitr: f64 = 0.0;
-        let mut var_phitrinv: f64 = 0.0;
-        let mut var_phitd: f64 = 0.0;
-        let mut var_phitdinv: f64 = 0.0;
-        let mut var_deltaphigr: f64 = 0.0;
-        let mut var_deltaphigd: f64 = 0.0;
-        let mut var_phigrbot: f64 = 0.0;
-        let mut var_phigrsti: f64 = 0.0;
-        let mut var_phigrgat: f64 = 0.0;
-        let mut var_phigdbot: f64 = 0.0;
-        let mut var_phigdsti: f64 = 0.0;
-        let mut var_phigdgat: f64 = 0.0;
-        let mut var_idsatbot: f64 = 0.0;
-        let mut var_idsatsti: f64 = 0.0;
-        let mut var_idsatgat: f64 = 0.0;
-        let mut var_vmaxbot: f64 = 0.0;
-        let mut var_vmaxsti: f64 = 0.0;
-        let mut var_vmaxgat: f64 = 0.0;
-        let mut var_ftdbot2: f64 = 0.0;
-        let mut var_ftdsti2: f64 = 0.0;
-        let mut var_ftdgat2: f64 = 0.0;
-        let mut var_shrinkl: f64 = 0.0;
-        let mut var_v1: f64 = 0.0;
-        let mut var_v2: f64 = 0.0;
-        let mut var_v3: f64 = 0.0;
-        let mut var_v4: f64 = 0.0;
-        let mut var_v5: f64 = 0.0;
-        let mut var_fracna: f64 = 0.0;
-        let mut var_fracnb: f64 = 0.0;
-        let mut var_fraci: f64 = 0.0;
-        let mut var_ab_i: f64 = 0.0;
-        let mut var_ls_i: f64 = 0.0;
-        let mut var_lg_i: f64 = 0.0;
-        let mut var_vmax: f64 = 0.0;
-        let mut var_vak: f64 = 0.0;
-        let mut var_vak_dn0: f64 = 0.0;
-        let mut var_vak_dn2: f64 = 0.0;
-        let mut var_exp_vmax_over_phitd_bot: f64 = 0.0;
-        let mut var_exp_vmax_over_phitd_bot_dn0: f64 = 0.0;
-        let mut var_exp_vmax_over_phitd_bot_dn2: f64 = 0.0;
-        let mut var_ndi_i: f64 = 0.0;
-        let mut var_ndibot_i: f64 = 0.0;
-        let mut var_ndigat_i: f64 = 0.0;
-        let mut var_ndisti_i: f64 = 0.0;
-        let mut var_muen_i: f64 = 0.0;
-        let mut var_muep_i: f64 = 0.0;
-        let mut var_njl: f64 = 0.0;
-        let mut var_tmf1: f64 = 0.0;
-        let mut var_tmf1_dn0: f64 = 0.0;
-        let mut var_tmf1_dn2: f64 = 0.0;
-        let mut var_tmf2: f64 = 0.0;
-        let mut var_tmf2_dn0: f64 = 0.0;
-        let mut var_tmf2_dn2: f64 = 0.0;
-        let mut var_t1: f64 = 0.0;
-        let mut var_t2: f64 = 0.0;
-        let mut var_nin: f64 = 0.0;
-        let mut var_pn0: f64 = 0.0;
-        let mut var_dn: f64 = 0.0;
-        let mut var_dp: f64 = 0.0;
-        let mut var_da: f64 = 0.0;
-        let mut var_la: f64 = 0.0;
-        let mut var_tau_hl: f64 = 0.0;
-        let mut var_vjunc_a: f64 = 0.0;
-        let mut var_vjunc_a_dn0: f64 = 0.0;
-        let mut var_vjunc_a_dn2: f64 = 0.0;
-        let mut var_w_depa: f64 = 0.0;
-        let mut var_w_depa_dn0: f64 = 0.0;
-        let mut var_w_depa_dn2: f64 = 0.0;
-        let mut var_q_pexa: f64 = 0.0;
-        let mut var_q_pexa_dn0: f64 = 0.0;
-        let mut var_q_pexa_dn2: f64 = 0.0;
-        let mut var_q_pexk: f64 = 0.0;
-        let mut var_q_pexk_dn0: f64 = 0.0;
-        let mut var_q_pexk_dn2: f64 = 0.0;
-        let mut var_q_pex0: f64 = 0.0;
-        let mut var_q_qs_a: f64 = 0.0;
-        let mut var_q_qs_a_dn0: f64 = 0.0;
-        let mut var_q_qs_a_dn2: f64 = 0.0;
-        let mut var_q_qs_k: f64 = 0.0;
-        let mut var_q_qs_k_dn0: f64 = 0.0;
-        let mut var_q_qs_k_dn2: f64 = 0.0;
-        let mut var_q_nqs_a: f64 = 0.0;
-        let mut var_q_nqs_a_dn3: f64 = 0.0;
-        let mut var_q_nqs_k: f64 = 0.0;
-        let mut var_q_nqs_k_dn4: f64 = 0.0;
-        let mut var_inqs0_a: f64 = 0.0;
-        let mut var_inqs0_a_dn0: f64 = 0.0;
-        let mut var_inqs0_a_dn2: f64 = 0.0;
-        let mut var_inqs0_a_dn3: f64 = 0.0;
-        let mut var_inqs0_k: f64 = 0.0;
-        let mut var_inqs0_k_dn0: f64 = 0.0;
-        let mut var_inqs0_k_dn2: f64 = 0.0;
-        let mut var_inqs0_k_dn4: f64 = 0.0;
-        let mut var_w_qs_a: f64 = 0.0;
-        let mut var_w_qs_a_dn0: f64 = 0.0;
-        let mut var_w_qs_a_dn2: f64 = 0.0;
-        let mut var_w_depa0: f64 = 0.0;
-        let mut var_w_depa0_dn0: f64 = 0.0;
-        let mut var_w_depa0_dn2: f64 = 0.0;
-        let mut var_w_nqs_a: f64 = 0.0;
-        let mut var_w_nqs_a_dn5: f64 = 0.0;
-        let mut var_iwnqs0_a: f64 = 0.0;
-        let mut var_iwnqs0_a_dn0: f64 = 0.0;
-        let mut var_iwnqs0_a_dn2: f64 = 0.0;
-        let mut var_iwnqs0_a_dn5: f64 = 0.0;
-        let mut var_v_ha: f64 = 0.0;
-        let mut var_v_hk: f64 = 0.0;
-        let mut var_nj_k0: f64 = 0.0;
-        let mut var_nj_k0_dn0: f64 = 0.0;
-        let mut var_nj_k0_dn2: f64 = 0.0;
-        let mut var_nj0: f64 = 0.0;
-        let mut var_nj0_dn0: f64 = 0.0;
-        let mut var_nj0_dn2: f64 = 0.0;
-        let mut var_nj_k1: f64 = 0.0;
-        let mut var_nj_k1_dn0: f64 = 0.0;
-        let mut var_nj_k1_dn2: f64 = 0.0;
-        let mut var_nj_k: f64 = 0.0;
-        let mut var_nj_k_dn0: f64 = 0.0;
-        let mut var_nj_k_dn2: f64 = 0.0;
-        let mut var_exp_a: f64 = 0.0;
-        let mut var_exp_a_dn0: f64 = 0.0;
-        let mut var_exp_a_dn2: f64 = 0.0;
-        let mut var_exp_k: f64 = 0.0;
-        let mut var_exp_k_dn0: f64 = 0.0;
-        let mut var_exp_k_dn2: f64 = 0.0;
-        let mut var_p_na: f64 = 0.0;
-        let mut var_p_na_dn0: f64 = 0.0;
-        let mut var_p_na_dn2: f64 = 0.0;
-        let mut var_p_nk: f64 = 0.0;
-        let mut var_p_nk_dn0: f64 = 0.0;
-        let mut var_p_nk_dn2: f64 = 0.0;
-        let mut var_exp_a2: f64 = 0.0;
-        let mut var_exp_a2_dn0: f64 = 0.0;
-        let mut var_exp_a2_dn2: f64 = 0.0;
-        let mut var_exp_k2: f64 = 0.0;
-        let mut var_exp_k2_dn0: f64 = 0.0;
-        let mut var_exp_k2_dn2: f64 = 0.0;
-        let mut var_nj1: f64 = 0.0;
-        let mut var_nj1_dn0: f64 = 0.0;
-        let mut var_nj1_dn2: f64 = 0.0;
-        let mut var_nja10: f64 = 0.0;
-        let mut var_nja10_dn0: f64 = 0.0;
-        let mut var_nja10_dn2: f64 = 0.0;
-        let mut var_nja11: f64 = 0.0;
-        let mut var_nja11_dn0: f64 = 0.0;
-        let mut var_nja11_dn2: f64 = 0.0;
-        let mut var_vha1: f64 = 0.0;
-        let mut var_pnn0: f64 = 0.0;
-        let mut var_dfn_su: f64 = 0.0;
-        let mut var_dfn_su_dn0: f64 = 0.0;
-        let mut var_dfn_su_dn2: f64 = 0.0;
-        let mut var_dfn_sl: f64 = 0.0;
-        let mut var_dfn_sl_dn0: f64 = 0.0;
-        let mut var_dfn_sl_dn2: f64 = 0.0;
-        let mut var_dnj1_dv: f64 = 0.0;
-        let mut var_dnj1_dv_dn0: f64 = 0.0;
-        let mut var_dnj1_dv_dn2: f64 = 0.0;
-        let mut var_dvmax_over_phitd_dv: f64 = 0.0;
-        let mut var_dvmax_over_phitd_dv_dn0: f64 = 0.0;
-        let mut var_dvmax_over_phitd_dv_dn2: f64 = 0.0;
-        let mut var_pb: f64 = 0.0;
-        let mut var_juncdlt: f64 = 0.0;
-        let mut var_idmultbot: f64 = 0.0;
-        let mut var_idmultbot_dn0: f64 = 0.0;
-        let mut var_idmultbot_dn2: f64 = 0.0;
-        let mut var_guard1: f64 = 0.0;
-        let mut var_guard2: f64 = 0.0;
-        let mut var_guard6: f64 = 0.0;
-        let mut var_guard7: f64 = 0.0;
-        let mut var_guard8: f64 = 0.0;
-        let mut var_guard26: f64 = 0.0;
-        let mut var_guard27: f64 = 0.0;
-        let mut var_guard31: f64 = 0.0;
-        let mut var_guard76: f64 = 0.0;
-        let mut var_guard77: f64 = 0.0;
-        let mut var_guard80: f64 = 0.0;
-        let mut var_guard81: f64 = 0.0;
-        let mut var_guard82: f64 = 0.0;
-        let mut var_guard83: f64 = 0.0;
-        let mut var_guard86: f64 = 0.0;
-        let mut var_guard89: f64 = 0.0;
-        let mut var_guard90: f64 = 0.0;
-        let mut var_guard91: f64 = 0.0;
-        let mut var_guard92: f64 = 0.0;
-        let mut var_guard95: f64 = 0.0;
-        let mut var_guard153: f64 = 0.0;
-        let mut var_guard154: f64 = 0.0;
-        let mut var_guard157: f64 = 0.0;
-        let mut var_guard158: f64 = 0.0;
-        let mut var_guard159: f64 = 0.0;
-        let mut var_guard160: f64 = 0.0;
-        let mut var_guard163: f64 = 0.0;
-        let mut var_guard166: f64 = 0.0;
-        let mut var_guard167: f64 = 0.0;
-        let mut var_guard168: f64 = 0.0;
-        let mut var_guard169: f64 = 0.0;
-        let mut var_guard172: f64 = 0.0;
-        let mut var_guard230: f64 = 0.0;
-        let mut var_guard231: f64 = 0.0;
-        let mut var_guard234: f64 = 0.0;
-        let mut var_guard235: f64 = 0.0;
-        let mut var_guard236: f64 = 0.0;
-        let mut var_guard237: f64 = 0.0;
-        let mut var_guard240: f64 = 0.0;
-        let mut var_guard243: f64 = 0.0;
-        let mut var_guard244: f64 = 0.0;
-        let mut var_guard245: f64 = 0.0;
-        let mut var_guard246: f64 = 0.0;
-        let mut var_guard249: f64 = 0.0;
-        let mut var_guard307: f64 = 0.0;
-        let mut var_guard308: f64 = 0.0;
-        let mut var_guard311: f64 = 0.0;
-        let mut var_guard312: f64 = 0.0;
-        let mut var_guard313: f64 = 0.0;
-        let mut var_guard314: f64 = 0.0;
-        let mut var_guard317: f64 = 0.0;
-        let mut var_guard320: f64 = 0.0;
-        let mut var_guard321: f64 = 0.0;
-        let mut var_guard322: f64 = 0.0;
-        let mut var_guard323: f64 = 0.0;
-        let mut var_guard326: f64 = 0.0;
-        let mut var_guard384: f64 = 0.0;
-        let mut var_guard385: f64 = 0.0;
-        let mut var_guard388: f64 = 0.0;
-        let mut var_guard389: f64 = 0.0;
-        let mut var_guard390: f64 = 0.0;
-        let mut var_guard391: f64 = 0.0;
-        let mut var_guard394: f64 = 0.0;
-        let mut var_guard397: f64 = 0.0;
-        let mut var_guard398: f64 = 0.0;
-        let mut var_guard399: f64 = 0.0;
-        let mut var_guard400: f64 = 0.0;
-        let mut var_guard403: f64 = 0.0;
-        let mut var_guard471: f64 = 0.0;
-        let mut var_guard479: f64 = 0.0;
-        let mut var_guard480: f64 = 0.0;
-        let mut var_guard483: f64 = 0.0;
-        let mut var_guard484: f64 = 0.0;
-        let mut var_guard485: f64 = 0.0;
-        let mut var_guard486: f64 = 0.0;
-        let mut var_guard489: f64 = 0.0;
-        let mut var_guard492: f64 = 0.0;
-        let mut var_guard493: f64 = 0.0;
-        let mut var_guard494: f64 = 0.0;
-        let mut var_guard495: f64 = 0.0;
-        let mut var_guard498: f64 = 0.0;
-        let mut var_guard558: f64 = 0.0;
-        let mut var_guard559: f64 = 0.0;
-        let mut var_guard560: f64 = 0.0;
-        let mut var_guard561: f64 = 0.0;
-        let mut var_guard562: f64 = 0.0;
-        let mut var_guard563: f64 = 0.0;
-        let mut var_guard564: f64 = 0.0;
-        let mut var_guard565: f64 = 0.0;
-        let mut var_guard566: f64 = 0.0;
-        let mut var_guard567: f64 = 0.0;
-        let mut var_guard568: f64 = 0.0;
-        let mut var_guard571: f64 = 0.0;
-        let mut var_guard572: f64 = 0.0;
+        let mut locals = StampLocals::default();
 
-        Self::stamp_transient_block_0(ctx, p, param_given, &mut var_ab_i, &mut var_auxt, &mut var_da, &mut var_deltaphigd, &mut var_deltaphigr, &mut var_dn, &mut var_dp, &mut var_epssi, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_ftdbot2, &mut var_ftdgat2, &mut var_ftdsti2, &mut var_guard1, &mut var_guard2, &mut var_guard6, &mut var_guard7, &mut var_guard8, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idsatbot, &mut var_idsatgat, &mut var_idsatrbot_i, &mut var_idsatrgat_i, &mut var_idsatrsti_i, &mut var_idsatsti, &mut var_imax_i, &mut var_inqs0_a, &mut var_inqs0_a_dn0, &mut var_inqs0_a_dn2, &mut var_inqs0_a_dn3, &mut var_inqs0_k, &mut var_inqs0_k_dn0, &mut var_inqs0_k_dn2, &mut var_inqs0_k_dn4, &mut var_iwnqs0_a, &mut var_iwnqs0_a_dn0, &mut var_iwnqs0_a_dn2, &mut var_iwnqs0_a_dn5, &mut var_juncdlt, &mut var_kbol_over_qele, &mut var_la, &mut var_lg_i, &mut var_ls_i, &mut var_muen_i, &mut var_muep_i, &mut var_ndi_i, &mut var_ndibot_i, &mut var_ndigat_i, &mut var_ndisti_i, &mut var_nfabot_i, &mut var_nfagat_i, &mut var_nfasti_i, &mut var_nin, &mut var_njl, &mut var_pb, &mut var_phigbot_i, &mut var_phigdbot, &mut var_phigdgat, &mut var_phigdsti, &mut var_phiggat_i, &mut var_phigrbot, &mut var_phigrgat, &mut var_phigrsti, &mut var_phigsti_i, &mut var_phitd, &mut var_phitdinv, &mut var_phitr, &mut var_phitrinv, &mut var_pn0, &mut var_q_nqs_a, &mut var_q_nqs_a_dn3, &mut var_q_nqs_k, &mut var_q_nqs_k_dn4, &mut var_q_pex0, &mut var_scale_i, &mut var_shrink_i, &mut var_shrinkl, &mut var_swjunexp_i, &mut var_t1, &mut var_t2, &mut var_tau_hl, &mut var_tkd, &mut var_tkr, &mut var_trj_i, &mut var_v_ha, &mut var_v_hk, &mut var_vjunref_i, &mut var_vmax, &mut var_vmaxbot, &mut var_vmaxgat, &mut var_vmaxsti, &mut var_w_nqs_a, &mut var_w_nqs_a_dn5, &mut var_xti_i);
-        Self::stamp_transient_block_1(p, var_ab_i, var_epssi, var_lg_i, var_ls_i, var_ndi_i, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vjunref_i, var_vmax, &mut var_fraci, &mut var_fracna, &mut var_fracnb, &mut var_guard26, &mut var_guard27, &mut var_guard31, &mut var_guard76, &mut var_guard77, &mut var_guard80, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_swjunexp_i, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_v1, &mut var_v2, &mut var_v3, &mut var_v4, &mut var_v5, &mut var_vak, &mut var_vak_dn0, &mut var_vak_dn2, &mut var_vha1, &mut var_w_depa0, &mut var_w_depa0_dn0, &mut var_w_depa0_dn2);
-        Self::stamp_transient_block_2(p, var_guard31, var_guard76, var_guard77, var_guard80, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_v1, &mut var_guard81, &mut var_guard82, &mut var_guard83, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_3(p, var_guard31, var_guard76, var_guard77, var_guard83, var_ndibot_i, var_ndigat_i, var_nfabot_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_v1, var_vmax, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_guard86, &mut var_guard89, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_4(p, var_dfn_su, var_dfn_su_dn0, var_dfn_su_dn2, var_guard31, var_guard76, var_guard77, var_guard89, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_v1, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_guard90, &mut var_guard91, &mut var_guard92, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_5(p, var_guard31, var_guard76, var_guard77, var_guard92, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_guard95, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_6(p, var_ab_i, var_guard31, var_guard76, var_guard77, var_guard95, var_lg_i, var_ls_i, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_v2, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_guard153, &mut var_guard154, &mut var_guard157, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_7(p, var_guard153, var_guard154, var_guard157, var_guard31, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_v2, &mut var_guard158, &mut var_guard159, &mut var_guard160, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_8(p, var_guard153, var_guard154, var_guard160, var_guard31, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_v2, &mut var_guard163, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_9(p, var_guard153, var_guard154, var_guard163, var_guard31, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_guard166, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_10(p, var_dnj1_dv, var_dnj1_dv_dn0, var_dnj1_dv_dn2, var_guard153, var_guard154, var_guard31, var_ndisti_i, var_nfasti_i, var_nin, var_phitdinv, var_v2, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_guard167, &mut var_guard168, &mut var_guard169, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_11(p, var_guard153, var_guard154, var_guard169, var_guard31, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_guard172, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_12(p, var_ab_i, var_guard153, var_guard154, var_guard172, var_guard31, var_lg_i, var_ls_i, var_ndibot_i, var_nfabot_i, var_nin, var_phitdinv, var_v3, var_vmax, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_guard230, &mut var_guard231, &mut var_guard234, &mut var_guard235, &mut var_guard236, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_13(p, var_guard230, var_guard231, var_guard235, var_guard236, var_guard31, var_ndigat_i, var_ndisti_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_v3, &mut var_guard237, &mut var_guard240, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_14(p, var_guard230, var_guard231, var_guard240, var_guard31, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_guard243, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_15(p, var_dfn_su, var_dfn_su_dn0, var_dfn_su_dn2, var_guard230, var_guard231, var_guard243, var_guard31, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_v3, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_guard244, &mut var_guard245, &mut var_guard246, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_16(p, var_guard230, var_guard231, var_guard246, var_guard31, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_guard249, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_17(p, var_ab_i, var_dfn_su, var_dfn_su_dn0, var_dfn_su_dn2, var_guard230, var_guard231, var_guard249, var_guard31, var_lg_i, var_ls_i, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_v4, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_guard307, &mut var_guard308, &mut var_guard311, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_18(p, var_guard307, var_guard308, var_guard31, var_guard311, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_v4, &mut var_guard312, &mut var_guard313, &mut var_guard314, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_19(p, var_guard307, var_guard308, var_guard31, var_guard314, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_v4, &mut var_guard317, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_20(p, var_guard307, var_guard308, var_guard31, var_guard317, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_guard320, &mut var_guard321, &mut var_guard322, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_21(p, var_guard307, var_guard308, var_guard31, var_guard321, var_guard322, var_ndisti_i, var_nfasti_i, var_nin, var_phitdinv, var_v4, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_guard323, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_22(p, var_guard307, var_guard308, var_guard31, var_guard323, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_guard326, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_23(p, var_ab_i, var_guard307, var_guard31, var_lg_i, var_ls_i, var_ndibot_i, var_nfabot_i, var_nin, var_phitdinv, var_v5, var_vmax, &mut var_guard384, &mut var_guard385, &mut var_guard388, &mut var_guard389, &mut var_guard390, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_24(p, var_guard31, var_guard384, var_guard385, var_guard389, var_guard390, var_ndigat_i, var_ndisti_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_v5, &mut var_guard391, &mut var_guard394, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_25(p, var_guard31, var_guard384, var_guard385, var_guard394, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_guard397, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_26(p, var_dfn_sl, var_dfn_sl_dn0, var_dfn_sl_dn2, var_guard31, var_guard384, var_guard385, var_guard397, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_v5, var_vmax, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_guard398, &mut var_guard399, &mut var_guard400, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_27(p, var_guard31, var_guard384, var_guard385, var_guard400, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_guard403, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_28(ctx, p, nodes, var_ab_i, var_dfn_sl, var_dfn_sl_dn0, var_dfn_sl_dn2, var_dfn_su, var_dfn_su_dn0, var_dfn_su_dn2, var_guard31, var_guard384, var_guard385, var_guard403, var_lg_i, var_ls_i, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_swjunexp_i, var_vmax, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_guard471, &mut var_guard479, &mut var_guard480, &mut var_guard483, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vak, &mut var_vak_dn0, &mut var_vak_dn2, &mut var_vha1);
-        Self::stamp_transient_block_29(p, var_guard471, var_guard479, var_guard480, var_guard483, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_vak, var_vak_dn0, var_vak_dn2, &mut var_guard484, &mut var_guard485, &mut var_guard486, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_30(p, var_guard471, var_guard479, var_guard480, var_guard486, var_ndibot_i, var_ndigat_i, var_nfabot_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vak, var_vak_dn0, var_vak_dn2, var_vmax, &mut var_guard489, &mut var_guard492, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_31(p, var_guard471, var_guard479, var_guard480, var_guard492, var_nfabot_i, var_nja10, var_nja10_dn0, var_nja10_dn2, var_phitdinv, var_vha1, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_guard493, &mut var_guard494, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2);
-        Self::stamp_transient_block_32(p, var_exp_vmax_over_phitd_bot, var_exp_vmax_over_phitd_bot_dn0, var_exp_vmax_over_phitd_bot_dn2, var_guard471, var_guard479, var_guard480, var_ndigat_i, var_ndisti_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vak, var_vak_dn0, var_vak_dn2, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_guard495, &mut var_guard498, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_pnn0, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vha1);
-        Self::stamp_transient_block_33(p, var_guard471, var_guard479, var_guard480, var_guard498, var_nfagat_i, var_njl, var_phitdinv, var_v_hk, var_vak, var_vak_dn0, var_vak_dn2, var_vha1, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_guard558, &mut var_guard559, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj_k0, &mut var_nj_k0_dn0, &mut var_nj_k0_dn2, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2);
-        Self::stamp_transient_block_34(p, var_guard558, var_guard559, var_idmultbot, var_idmultbot_dn0, var_idmultbot_dn2, var_njl, var_phitdinv, var_tkd, var_tkr, var_v_ha, var_v_hk, var_vak, var_vak_dn0, var_vak_dn2, &mut var_exp_a, &mut var_exp_a2, &mut var_exp_a2_dn0, &mut var_exp_a2_dn2, &mut var_exp_a_dn0, &mut var_exp_a_dn2, &mut var_exp_k, &mut var_exp_k_dn0, &mut var_exp_k_dn2, &mut var_guard560, &mut var_guard561, &mut var_guard562, &mut var_guard563, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj_k, &mut var_nj_k1, &mut var_nj_k1_dn0, &mut var_nj_k1_dn2, &mut var_nj_k_dn0, &mut var_nj_k_dn2, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2);
-        Self::stamp_transient_block_35(ctx, p, nodes, var_ab_i, var_epssi, var_exp_k, var_exp_k_dn0, var_exp_k_dn2, var_guard558, var_juncdlt, var_ndi_i, var_pb, var_pn0, var_q_pex0, var_tkd, var_tkr, var_v_hk, var_vak, var_vak_dn0, var_vak_dn2, var_w_depa0, var_w_depa0_dn0, var_w_depa0_dn2, &mut var_exp_a2, &mut var_exp_a2_dn0, &mut var_exp_a2_dn2, &mut var_exp_k2, &mut var_exp_k2_dn0, &mut var_exp_k2_dn2, &mut var_guard564, &mut var_guard565, &mut var_guard566, &mut var_guard567, &mut var_guard568, &mut var_guard571, &mut var_guard572, &mut var_inqs0_a, &mut var_inqs0_a_dn0, &mut var_inqs0_a_dn2, &mut var_inqs0_a_dn3, &mut var_inqs0_k, &mut var_inqs0_k_dn0, &mut var_inqs0_k_dn2, &mut var_inqs0_k_dn4, &mut var_iwnqs0_a, &mut var_iwnqs0_a_dn0, &mut var_iwnqs0_a_dn2, &mut var_iwnqs0_a_dn5, &mut var_p_na, &mut var_p_na_dn0, &mut var_p_na_dn2, &mut var_p_nk, &mut var_p_nk_dn0, &mut var_p_nk_dn2, &mut var_q_nqs_a, &mut var_q_nqs_a_dn3, &mut var_q_nqs_k, &mut var_q_nqs_k_dn4, &mut var_q_pexa, &mut var_q_pexa_dn0, &mut var_q_pexa_dn2, &mut var_q_pexk, &mut var_q_pexk_dn0, &mut var_q_pexk_dn2, &mut var_q_qs_a, &mut var_q_qs_a_dn0, &mut var_q_qs_a_dn2, &mut var_q_qs_k, &mut var_q_qs_k_dn0, &mut var_q_qs_k_dn2, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_vjunc_a, &mut var_vjunc_a_dn0, &mut var_vjunc_a_dn2, &mut var_w_depa, &mut var_w_depa_dn0, &mut var_w_depa_dn2, &mut var_w_nqs_a, &mut var_w_nqs_a_dn5, &mut var_w_qs_a, &mut var_w_qs_a_dn0, &mut var_w_qs_a_dn2);
+        Self::stamp_transient_block_0(ctx, p, param_given, &mut locals);
+        Self::stamp_transient_block_1(p, &mut locals);
+        Self::stamp_transient_block_2(p, &mut locals);
+        Self::stamp_transient_block_3(p, &mut locals);
+        Self::stamp_transient_block_4(p, &mut locals);
+        Self::stamp_transient_block_5(p, &mut locals);
+        Self::stamp_transient_block_6(p, &mut locals);
+        Self::stamp_transient_block_7(p, &mut locals);
+        Self::stamp_transient_block_8(p, &mut locals);
+        Self::stamp_transient_block_9(p, &mut locals);
+        Self::stamp_transient_block_10(p, &mut locals);
+        Self::stamp_transient_block_11(p, &mut locals);
+        Self::stamp_transient_block_12(p, &mut locals);
+        Self::stamp_transient_block_13(p, &mut locals);
+        Self::stamp_transient_block_14(p, &mut locals);
+        Self::stamp_transient_block_15(p, &mut locals);
+        Self::stamp_transient_block_16(p, &mut locals);
+        Self::stamp_transient_block_17(p, &mut locals);
+        Self::stamp_transient_block_18(p, &mut locals);
+        Self::stamp_transient_block_19(p, &mut locals);
+        Self::stamp_transient_block_20(p, &mut locals);
+        Self::stamp_transient_block_21(p, &mut locals);
+        Self::stamp_transient_block_22(p, &mut locals);
+        Self::stamp_transient_block_23(p, &mut locals);
+        Self::stamp_transient_block_24(p, &mut locals);
+        Self::stamp_transient_block_25(p, &mut locals);
+        Self::stamp_transient_block_26(p, &mut locals);
+        Self::stamp_transient_block_27(p, &mut locals);
+        Self::stamp_transient_block_28(ctx, p, nodes, &mut locals);
+        Self::stamp_transient_block_29(p, &mut locals);
+        Self::stamp_transient_block_30(p, &mut locals);
+        Self::stamp_transient_block_31(p, &mut locals);
+        Self::stamp_transient_block_32(p, &mut locals);
+        Self::stamp_transient_block_33(p, &mut locals);
+        Self::stamp_transient_block_34(p, &mut locals);
+        Self::stamp_transient_block_35(ctx, p, nodes, &mut locals);
 
-        Self::stamp_transient_equations_block_0(stamper, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, var_guard571, var_guard572, var_inqs0_a, var_inqs0_a_dn0, var_inqs0_a_dn2, var_inqs0_a_dn3, var_inqs0_k, var_inqs0_k_dn0, var_inqs0_k_dn2, var_inqs0_k_dn4, var_iwnqs0_a, var_iwnqs0_a_dn0, var_iwnqs0_a_dn2, var_iwnqs0_a_dn5, var_q_nqs_a, var_q_nqs_a_dn3, var_q_nqs_k, var_q_nqs_k_dn4, var_w_nqs_a, var_w_nqs_a_dn5);
+        Self::stamp_transient_equations_block_0(stamper, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
@@ -12551,535 +12764,48 @@ impl Instance {
             nodes[2],
             multiplicity * (d11543_dn2),
         );
-        let mut var_epssi: f64 = 0.0;
-        let mut var_epssi_rv: f64 = 0.0;
-        let mut var_trj_i: f64 = 0.0;
-        let mut var_trj_i_rv: f64 = 0.0;
-        let mut var_imax_i: f64 = 0.0;
-        let mut var_imax_i_rv: f64 = 0.0;
-        let mut var_phigbot_i: f64 = 0.0;
-        let mut var_phigbot_i_rv: f64 = 0.0;
-        let mut var_phigsti_i: f64 = 0.0;
-        let mut var_phigsti_i_rv: f64 = 0.0;
-        let mut var_phiggat_i: f64 = 0.0;
-        let mut var_phiggat_i_rv: f64 = 0.0;
-        let mut var_idsatrbot_i: f64 = 0.0;
-        let mut var_idsatrbot_i_rv: f64 = 0.0;
-        let mut var_idsatrsti_i: f64 = 0.0;
-        let mut var_idsatrsti_i_rv: f64 = 0.0;
-        let mut var_idsatrgat_i: f64 = 0.0;
-        let mut var_idsatrgat_i_rv: f64 = 0.0;
-        let mut var_swjunexp_i: f64 = 0.0;
-        let mut var_swjunexp_i_rv: f64 = 0.0;
-        let mut var_vjunref_i: f64 = 0.0;
-        let mut var_vjunref_i_rv: f64 = 0.0;
-        let mut var_nfabot_i: f64 = 0.0;
-        let mut var_nfabot_i_rv: f64 = 0.0;
-        let mut var_nfagat_i: f64 = 0.0;
-        let mut var_nfagat_i_rv: f64 = 0.0;
-        let mut var_nfasti_i: f64 = 0.0;
-        let mut var_nfasti_i_rv: f64 = 0.0;
-        let mut var_xti_i: f64 = 0.0;
-        let mut var_xti_i_rv: f64 = 0.0;
-        let mut var_scale_i: f64 = 0.0;
-        let mut var_scale_i_rv: f64 = 0.0;
-        let mut var_shrink_i: f64 = 0.0;
-        let mut var_shrink_i_rv: f64 = 0.0;
-        let mut var_tkr: f64 = 0.0;
-        let mut var_tkr_rv: f64 = 0.0;
-        let mut var_tkd: f64 = 0.0;
-        let mut var_tkd_rv: f64 = 0.0;
-        let mut var_auxt: f64 = 0.0;
-        let mut var_auxt_rv: f64 = 0.0;
-        let mut var_kbol_over_qele: f64 = 0.0;
-        let mut var_kbol_over_qele_rv: f64 = 0.0;
-        let mut var_phitr: f64 = 0.0;
-        let mut var_phitr_rv: f64 = 0.0;
-        let mut var_phitrinv: f64 = 0.0;
-        let mut var_phitrinv_rv: f64 = 0.0;
-        let mut var_phitd: f64 = 0.0;
-        let mut var_phitd_rv: f64 = 0.0;
-        let mut var_phitdinv: f64 = 0.0;
-        let mut var_phitdinv_rv: f64 = 0.0;
-        let mut var_deltaphigr: f64 = 0.0;
-        let mut var_deltaphigr_rv: f64 = 0.0;
-        let mut var_deltaphigd: f64 = 0.0;
-        let mut var_deltaphigd_rv: f64 = 0.0;
-        let mut var_phigrbot: f64 = 0.0;
-        let mut var_phigrbot_rv: f64 = 0.0;
-        let mut var_phigrsti: f64 = 0.0;
-        let mut var_phigrsti_rv: f64 = 0.0;
-        let mut var_phigrgat: f64 = 0.0;
-        let mut var_phigrgat_rv: f64 = 0.0;
-        let mut var_phigdbot: f64 = 0.0;
-        let mut var_phigdbot_rv: f64 = 0.0;
-        let mut var_phigdsti: f64 = 0.0;
-        let mut var_phigdsti_rv: f64 = 0.0;
-        let mut var_phigdgat: f64 = 0.0;
-        let mut var_phigdgat_rv: f64 = 0.0;
-        let mut var_idsatbot: f64 = 0.0;
-        let mut var_idsatbot_rv: f64 = 0.0;
-        let mut var_idsatsti: f64 = 0.0;
-        let mut var_idsatsti_rv: f64 = 0.0;
-        let mut var_idsatgat: f64 = 0.0;
-        let mut var_idsatgat_rv: f64 = 0.0;
-        let mut var_vmaxbot: f64 = 0.0;
-        let mut var_vmaxbot_rv: f64 = 0.0;
-        let mut var_vmaxsti: f64 = 0.0;
-        let mut var_vmaxsti_rv: f64 = 0.0;
-        let mut var_vmaxgat: f64 = 0.0;
-        let mut var_vmaxgat_rv: f64 = 0.0;
-        let mut var_ftdbot2: f64 = 0.0;
-        let mut var_ftdbot2_rv: f64 = 0.0;
-        let mut var_ftdsti2: f64 = 0.0;
-        let mut var_ftdsti2_rv: f64 = 0.0;
-        let mut var_ftdgat2: f64 = 0.0;
-        let mut var_ftdgat2_rv: f64 = 0.0;
-        let mut var_shrinkl: f64 = 0.0;
-        let mut var_shrinkl_rv: f64 = 0.0;
-        let mut var_v1: f64 = 0.0;
-        let mut var_v1_rv: f64 = 0.0;
-        let mut var_v2: f64 = 0.0;
-        let mut var_v2_rv: f64 = 0.0;
-        let mut var_v3: f64 = 0.0;
-        let mut var_v3_rv: f64 = 0.0;
-        let mut var_v4: f64 = 0.0;
-        let mut var_v4_rv: f64 = 0.0;
-        let mut var_v5: f64 = 0.0;
-        let mut var_v5_rv: f64 = 0.0;
-        let mut var_fracna: f64 = 0.0;
-        let mut var_fracna_rv: f64 = 0.0;
-        let mut var_fracnb: f64 = 0.0;
-        let mut var_fracnb_rv: f64 = 0.0;
-        let mut var_fraci: f64 = 0.0;
-        let mut var_fraci_rv: f64 = 0.0;
-        let mut var_ab_i: f64 = 0.0;
-        let mut var_ab_i_rv: f64 = 0.0;
-        let mut var_ls_i: f64 = 0.0;
-        let mut var_ls_i_rv: f64 = 0.0;
-        let mut var_lg_i: f64 = 0.0;
-        let mut var_lg_i_rv: f64 = 0.0;
-        let mut var_vmax: f64 = 0.0;
-        let mut var_vmax_rv: f64 = 0.0;
-        let mut var_vak: f64 = 0.0;
-        let mut var_vak_rv: f64 = 0.0;
-        let mut var_vak_dn0: f64 = 0.0;
-        let mut var_vak_dn2: f64 = 0.0;
-        let mut var_exp_vmax_over_phitd_bot: f64 = 0.0;
-        let mut var_exp_vmax_over_phitd_bot_rv: f64 = 0.0;
-        let mut var_exp_vmax_over_phitd_bot_dn0: f64 = 0.0;
-        let mut var_exp_vmax_over_phitd_bot_dn2: f64 = 0.0;
-        let mut var_ndi_i: f64 = 0.0;
-        let mut var_ndi_i_rv: f64 = 0.0;
-        let mut var_ndibot_i: f64 = 0.0;
-        let mut var_ndibot_i_rv: f64 = 0.0;
-        let mut var_ndigat_i: f64 = 0.0;
-        let mut var_ndigat_i_rv: f64 = 0.0;
-        let mut var_ndisti_i: f64 = 0.0;
-        let mut var_ndisti_i_rv: f64 = 0.0;
-        let mut var_muen_i: f64 = 0.0;
-        let mut var_muen_i_rv: f64 = 0.0;
-        let mut var_muep_i: f64 = 0.0;
-        let mut var_muep_i_rv: f64 = 0.0;
-        let mut var_njl: f64 = 0.0;
-        let mut var_njl_rv: f64 = 0.0;
-        let mut var_tmf1: f64 = 0.0;
-        let mut var_tmf1_rv: f64 = 0.0;
-        let mut var_tmf1_dn0: f64 = 0.0;
-        let mut var_tmf1_dn2: f64 = 0.0;
-        let mut var_tmf2: f64 = 0.0;
-        let mut var_tmf2_rv: f64 = 0.0;
-        let mut var_tmf2_dn0: f64 = 0.0;
-        let mut var_tmf2_dn2: f64 = 0.0;
-        let mut var_t1: f64 = 0.0;
-        let mut var_t1_rv: f64 = 0.0;
-        let mut var_t2: f64 = 0.0;
-        let mut var_t2_rv: f64 = 0.0;
-        let mut var_nin: f64 = 0.0;
-        let mut var_nin_rv: f64 = 0.0;
-        let mut var_pn0: f64 = 0.0;
-        let mut var_pn0_rv: f64 = 0.0;
-        let mut var_dn: f64 = 0.0;
-        let mut var_dn_rv: f64 = 0.0;
-        let mut var_dp: f64 = 0.0;
-        let mut var_dp_rv: f64 = 0.0;
-        let mut var_da: f64 = 0.0;
-        let mut var_da_rv: f64 = 0.0;
-        let mut var_la: f64 = 0.0;
-        let mut var_la_rv: f64 = 0.0;
-        let mut var_tau_hl: f64 = 0.0;
-        let mut var_tau_hl_rv: f64 = 0.0;
-        let mut var_vjunc_a: f64 = 0.0;
-        let mut var_vjunc_a_rv: f64 = 0.0;
-        let mut var_vjunc_a_dn0: f64 = 0.0;
-        let mut var_vjunc_a_dn2: f64 = 0.0;
-        let mut var_w_depa: f64 = 0.0;
-        let mut var_w_depa_rv: f64 = 0.0;
-        let mut var_w_depa_dn0: f64 = 0.0;
-        let mut var_w_depa_dn2: f64 = 0.0;
-        let mut var_q_pexa: f64 = 0.0;
-        let mut var_q_pexa_rv: f64 = 0.0;
-        let mut var_q_pexa_dn0: f64 = 0.0;
-        let mut var_q_pexa_dn2: f64 = 0.0;
-        let mut var_q_pexk: f64 = 0.0;
-        let mut var_q_pexk_rv: f64 = 0.0;
-        let mut var_q_pexk_dn0: f64 = 0.0;
-        let mut var_q_pexk_dn2: f64 = 0.0;
-        let mut var_q_pex0: f64 = 0.0;
-        let mut var_q_pex0_rv: f64 = 0.0;
-        let mut var_q_qs_a: f64 = 0.0;
-        let mut var_q_qs_a_rv: f64 = 0.0;
-        let mut var_q_qs_a_dn0: f64 = 0.0;
-        let mut var_q_qs_a_dn2: f64 = 0.0;
-        let mut var_q_qs_k: f64 = 0.0;
-        let mut var_q_qs_k_rv: f64 = 0.0;
-        let mut var_q_qs_k_dn0: f64 = 0.0;
-        let mut var_q_qs_k_dn2: f64 = 0.0;
-        let mut var_q_nqs_a: f64 = 0.0;
-        let mut var_q_nqs_a_rv: f64 = 0.0;
-        let mut var_q_nqs_a_dn3: f64 = 0.0;
-        let mut var_q_nqs_k: f64 = 0.0;
-        let mut var_q_nqs_k_rv: f64 = 0.0;
-        let mut var_q_nqs_k_dn4: f64 = 0.0;
-        let mut var_inqs0_a: f64 = 0.0;
-        let mut var_inqs0_a_rv: f64 = 0.0;
-        let mut var_inqs0_a_dn0: f64 = 0.0;
-        let mut var_inqs0_a_dn2: f64 = 0.0;
-        let mut var_inqs0_a_dn3: f64 = 0.0;
-        let mut var_inqs0_k: f64 = 0.0;
-        let mut var_inqs0_k_rv: f64 = 0.0;
-        let mut var_inqs0_k_dn0: f64 = 0.0;
-        let mut var_inqs0_k_dn2: f64 = 0.0;
-        let mut var_inqs0_k_dn4: f64 = 0.0;
-        let mut var_w_qs_a: f64 = 0.0;
-        let mut var_w_qs_a_rv: f64 = 0.0;
-        let mut var_w_qs_a_dn0: f64 = 0.0;
-        let mut var_w_qs_a_dn2: f64 = 0.0;
-        let mut var_w_depa0: f64 = 0.0;
-        let mut var_w_depa0_rv: f64 = 0.0;
-        let mut var_w_depa0_dn0: f64 = 0.0;
-        let mut var_w_depa0_dn2: f64 = 0.0;
-        let mut var_w_nqs_a: f64 = 0.0;
-        let mut var_w_nqs_a_rv: f64 = 0.0;
-        let mut var_w_nqs_a_dn5: f64 = 0.0;
-        let mut var_iwnqs0_a: f64 = 0.0;
-        let mut var_iwnqs0_a_rv: f64 = 0.0;
-        let mut var_iwnqs0_a_dn0: f64 = 0.0;
-        let mut var_iwnqs0_a_dn2: f64 = 0.0;
-        let mut var_iwnqs0_a_dn5: f64 = 0.0;
-        let mut var_v_ha: f64 = 0.0;
-        let mut var_v_ha_rv: f64 = 0.0;
-        let mut var_v_hk: f64 = 0.0;
-        let mut var_v_hk_rv: f64 = 0.0;
-        let mut var_nj_k0: f64 = 0.0;
-        let mut var_nj_k0_rv: f64 = 0.0;
-        let mut var_nj_k0_dn0: f64 = 0.0;
-        let mut var_nj_k0_dn2: f64 = 0.0;
-        let mut var_nj0: f64 = 0.0;
-        let mut var_nj0_rv: f64 = 0.0;
-        let mut var_nj0_dn0: f64 = 0.0;
-        let mut var_nj0_dn2: f64 = 0.0;
-        let mut var_nj_k1: f64 = 0.0;
-        let mut var_nj_k1_rv: f64 = 0.0;
-        let mut var_nj_k1_dn0: f64 = 0.0;
-        let mut var_nj_k1_dn2: f64 = 0.0;
-        let mut var_nj_k: f64 = 0.0;
-        let mut var_nj_k_rv: f64 = 0.0;
-        let mut var_nj_k_dn0: f64 = 0.0;
-        let mut var_nj_k_dn2: f64 = 0.0;
-        let mut var_exp_a: f64 = 0.0;
-        let mut var_exp_a_rv: f64 = 0.0;
-        let mut var_exp_a_dn0: f64 = 0.0;
-        let mut var_exp_a_dn2: f64 = 0.0;
-        let mut var_exp_k: f64 = 0.0;
-        let mut var_exp_k_rv: f64 = 0.0;
-        let mut var_exp_k_dn0: f64 = 0.0;
-        let mut var_exp_k_dn2: f64 = 0.0;
-        let mut var_p_na: f64 = 0.0;
-        let mut var_p_na_rv: f64 = 0.0;
-        let mut var_p_na_dn0: f64 = 0.0;
-        let mut var_p_na_dn2: f64 = 0.0;
-        let mut var_p_nk: f64 = 0.0;
-        let mut var_p_nk_rv: f64 = 0.0;
-        let mut var_p_nk_dn0: f64 = 0.0;
-        let mut var_p_nk_dn2: f64 = 0.0;
-        let mut var_exp_a2: f64 = 0.0;
-        let mut var_exp_a2_rv: f64 = 0.0;
-        let mut var_exp_a2_dn0: f64 = 0.0;
-        let mut var_exp_a2_dn2: f64 = 0.0;
-        let mut var_exp_k2: f64 = 0.0;
-        let mut var_exp_k2_rv: f64 = 0.0;
-        let mut var_exp_k2_dn0: f64 = 0.0;
-        let mut var_exp_k2_dn2: f64 = 0.0;
-        let mut var_nj1: f64 = 0.0;
-        let mut var_nj1_rv: f64 = 0.0;
-        let mut var_nj1_dn0: f64 = 0.0;
-        let mut var_nj1_dn2: f64 = 0.0;
-        let mut var_nja10: f64 = 0.0;
-        let mut var_nja10_rv: f64 = 0.0;
-        let mut var_nja10_dn0: f64 = 0.0;
-        let mut var_nja10_dn2: f64 = 0.0;
-        let mut var_nja11: f64 = 0.0;
-        let mut var_nja11_rv: f64 = 0.0;
-        let mut var_nja11_dn0: f64 = 0.0;
-        let mut var_nja11_dn2: f64 = 0.0;
-        let mut var_vha1: f64 = 0.0;
-        let mut var_vha1_rv: f64 = 0.0;
-        let mut var_pnn0: f64 = 0.0;
-        let mut var_pnn0_rv: f64 = 0.0;
-        let mut var_dfn_su: f64 = 0.0;
-        let mut var_dfn_su_rv: f64 = 0.0;
-        let mut var_dfn_su_dn0: f64 = 0.0;
-        let mut var_dfn_su_dn2: f64 = 0.0;
-        let mut var_dfn_sl: f64 = 0.0;
-        let mut var_dfn_sl_rv: f64 = 0.0;
-        let mut var_dfn_sl_dn0: f64 = 0.0;
-        let mut var_dfn_sl_dn2: f64 = 0.0;
-        let mut var_dnj1_dv: f64 = 0.0;
-        let mut var_dnj1_dv_rv: f64 = 0.0;
-        let mut var_dnj1_dv_dn0: f64 = 0.0;
-        let mut var_dnj1_dv_dn2: f64 = 0.0;
-        let mut var_dvmax_over_phitd_dv: f64 = 0.0;
-        let mut var_dvmax_over_phitd_dv_rv: f64 = 0.0;
-        let mut var_dvmax_over_phitd_dv_dn0: f64 = 0.0;
-        let mut var_dvmax_over_phitd_dv_dn2: f64 = 0.0;
-        let mut var_pb: f64 = 0.0;
-        let mut var_pb_rv: f64 = 0.0;
-        let mut var_juncdlt: f64 = 0.0;
-        let mut var_juncdlt_rv: f64 = 0.0;
-        let mut var_idmultbot: f64 = 0.0;
-        let mut var_idmultbot_rv: f64 = 0.0;
-        let mut var_idmultbot_dn0: f64 = 0.0;
-        let mut var_idmultbot_dn2: f64 = 0.0;
-        let mut var_guard1: f64 = 0.0;
-        let mut var_guard1_rv: f64 = 0.0;
-        let mut var_guard2: f64 = 0.0;
-        let mut var_guard2_rv: f64 = 0.0;
-        let mut var_guard6: f64 = 0.0;
-        let mut var_guard6_rv: f64 = 0.0;
-        let mut var_guard7: f64 = 0.0;
-        let mut var_guard7_rv: f64 = 0.0;
-        let mut var_guard8: f64 = 0.0;
-        let mut var_guard8_rv: f64 = 0.0;
-        let mut var_guard26: f64 = 0.0;
-        let mut var_guard26_rv: f64 = 0.0;
-        let mut var_guard27: f64 = 0.0;
-        let mut var_guard27_rv: f64 = 0.0;
-        let mut var_guard31: f64 = 0.0;
-        let mut var_guard31_rv: f64 = 0.0;
-        let mut var_guard76: f64 = 0.0;
-        let mut var_guard76_rv: f64 = 0.0;
-        let mut var_guard77: f64 = 0.0;
-        let mut var_guard77_rv: f64 = 0.0;
-        let mut var_guard80: f64 = 0.0;
-        let mut var_guard80_rv: f64 = 0.0;
-        let mut var_guard81: f64 = 0.0;
-        let mut var_guard81_rv: f64 = 0.0;
-        let mut var_guard82: f64 = 0.0;
-        let mut var_guard82_rv: f64 = 0.0;
-        let mut var_guard83: f64 = 0.0;
-        let mut var_guard83_rv: f64 = 0.0;
-        let mut var_guard86: f64 = 0.0;
-        let mut var_guard86_rv: f64 = 0.0;
-        let mut var_guard89: f64 = 0.0;
-        let mut var_guard89_rv: f64 = 0.0;
-        let mut var_guard90: f64 = 0.0;
-        let mut var_guard90_rv: f64 = 0.0;
-        let mut var_guard91: f64 = 0.0;
-        let mut var_guard91_rv: f64 = 0.0;
-        let mut var_guard92: f64 = 0.0;
-        let mut var_guard92_rv: f64 = 0.0;
-        let mut var_guard95: f64 = 0.0;
-        let mut var_guard95_rv: f64 = 0.0;
-        let mut var_guard153: f64 = 0.0;
-        let mut var_guard153_rv: f64 = 0.0;
-        let mut var_guard154: f64 = 0.0;
-        let mut var_guard154_rv: f64 = 0.0;
-        let mut var_guard157: f64 = 0.0;
-        let mut var_guard157_rv: f64 = 0.0;
-        let mut var_guard158: f64 = 0.0;
-        let mut var_guard158_rv: f64 = 0.0;
-        let mut var_guard159: f64 = 0.0;
-        let mut var_guard159_rv: f64 = 0.0;
-        let mut var_guard160: f64 = 0.0;
-        let mut var_guard160_rv: f64 = 0.0;
-        let mut var_guard163: f64 = 0.0;
-        let mut var_guard163_rv: f64 = 0.0;
-        let mut var_guard166: f64 = 0.0;
-        let mut var_guard166_rv: f64 = 0.0;
-        let mut var_guard167: f64 = 0.0;
-        let mut var_guard167_rv: f64 = 0.0;
-        let mut var_guard168: f64 = 0.0;
-        let mut var_guard168_rv: f64 = 0.0;
-        let mut var_guard169: f64 = 0.0;
-        let mut var_guard169_rv: f64 = 0.0;
-        let mut var_guard172: f64 = 0.0;
-        let mut var_guard172_rv: f64 = 0.0;
-        let mut var_guard230: f64 = 0.0;
-        let mut var_guard230_rv: f64 = 0.0;
-        let mut var_guard231: f64 = 0.0;
-        let mut var_guard231_rv: f64 = 0.0;
-        let mut var_guard234: f64 = 0.0;
-        let mut var_guard234_rv: f64 = 0.0;
-        let mut var_guard235: f64 = 0.0;
-        let mut var_guard235_rv: f64 = 0.0;
-        let mut var_guard236: f64 = 0.0;
-        let mut var_guard236_rv: f64 = 0.0;
-        let mut var_guard237: f64 = 0.0;
-        let mut var_guard237_rv: f64 = 0.0;
-        let mut var_guard240: f64 = 0.0;
-        let mut var_guard240_rv: f64 = 0.0;
-        let mut var_guard243: f64 = 0.0;
-        let mut var_guard243_rv: f64 = 0.0;
-        let mut var_guard244: f64 = 0.0;
-        let mut var_guard244_rv: f64 = 0.0;
-        let mut var_guard245: f64 = 0.0;
-        let mut var_guard245_rv: f64 = 0.0;
-        let mut var_guard246: f64 = 0.0;
-        let mut var_guard246_rv: f64 = 0.0;
-        let mut var_guard249: f64 = 0.0;
-        let mut var_guard249_rv: f64 = 0.0;
-        let mut var_guard307: f64 = 0.0;
-        let mut var_guard307_rv: f64 = 0.0;
-        let mut var_guard308: f64 = 0.0;
-        let mut var_guard308_rv: f64 = 0.0;
-        let mut var_guard311: f64 = 0.0;
-        let mut var_guard311_rv: f64 = 0.0;
-        let mut var_guard312: f64 = 0.0;
-        let mut var_guard312_rv: f64 = 0.0;
-        let mut var_guard313: f64 = 0.0;
-        let mut var_guard313_rv: f64 = 0.0;
-        let mut var_guard314: f64 = 0.0;
-        let mut var_guard314_rv: f64 = 0.0;
-        let mut var_guard317: f64 = 0.0;
-        let mut var_guard317_rv: f64 = 0.0;
-        let mut var_guard320: f64 = 0.0;
-        let mut var_guard320_rv: f64 = 0.0;
-        let mut var_guard321: f64 = 0.0;
-        let mut var_guard321_rv: f64 = 0.0;
-        let mut var_guard322: f64 = 0.0;
-        let mut var_guard322_rv: f64 = 0.0;
-        let mut var_guard323: f64 = 0.0;
-        let mut var_guard323_rv: f64 = 0.0;
-        let mut var_guard326: f64 = 0.0;
-        let mut var_guard326_rv: f64 = 0.0;
-        let mut var_guard384: f64 = 0.0;
-        let mut var_guard384_rv: f64 = 0.0;
-        let mut var_guard385: f64 = 0.0;
-        let mut var_guard385_rv: f64 = 0.0;
-        let mut var_guard388: f64 = 0.0;
-        let mut var_guard388_rv: f64 = 0.0;
-        let mut var_guard389: f64 = 0.0;
-        let mut var_guard389_rv: f64 = 0.0;
-        let mut var_guard390: f64 = 0.0;
-        let mut var_guard390_rv: f64 = 0.0;
-        let mut var_guard391: f64 = 0.0;
-        let mut var_guard391_rv: f64 = 0.0;
-        let mut var_guard394: f64 = 0.0;
-        let mut var_guard394_rv: f64 = 0.0;
-        let mut var_guard397: f64 = 0.0;
-        let mut var_guard397_rv: f64 = 0.0;
-        let mut var_guard398: f64 = 0.0;
-        let mut var_guard398_rv: f64 = 0.0;
-        let mut var_guard399: f64 = 0.0;
-        let mut var_guard399_rv: f64 = 0.0;
-        let mut var_guard400: f64 = 0.0;
-        let mut var_guard400_rv: f64 = 0.0;
-        let mut var_guard403: f64 = 0.0;
-        let mut var_guard403_rv: f64 = 0.0;
-        let mut var_guard471: f64 = 0.0;
-        let mut var_guard471_rv: f64 = 0.0;
-        let mut var_guard479: f64 = 0.0;
-        let mut var_guard479_rv: f64 = 0.0;
-        let mut var_guard480: f64 = 0.0;
-        let mut var_guard480_rv: f64 = 0.0;
-        let mut var_guard483: f64 = 0.0;
-        let mut var_guard483_rv: f64 = 0.0;
-        let mut var_guard484: f64 = 0.0;
-        let mut var_guard484_rv: f64 = 0.0;
-        let mut var_guard485: f64 = 0.0;
-        let mut var_guard485_rv: f64 = 0.0;
-        let mut var_guard486: f64 = 0.0;
-        let mut var_guard486_rv: f64 = 0.0;
-        let mut var_guard489: f64 = 0.0;
-        let mut var_guard489_rv: f64 = 0.0;
-        let mut var_guard492: f64 = 0.0;
-        let mut var_guard492_rv: f64 = 0.0;
-        let mut var_guard493: f64 = 0.0;
-        let mut var_guard493_rv: f64 = 0.0;
-        let mut var_guard494: f64 = 0.0;
-        let mut var_guard494_rv: f64 = 0.0;
-        let mut var_guard495: f64 = 0.0;
-        let mut var_guard495_rv: f64 = 0.0;
-        let mut var_guard498: f64 = 0.0;
-        let mut var_guard498_rv: f64 = 0.0;
-        let mut var_guard558: f64 = 0.0;
-        let mut var_guard558_rv: f64 = 0.0;
-        let mut var_guard559: f64 = 0.0;
-        let mut var_guard559_rv: f64 = 0.0;
-        let mut var_guard560: f64 = 0.0;
-        let mut var_guard560_rv: f64 = 0.0;
-        let mut var_guard561: f64 = 0.0;
-        let mut var_guard561_rv: f64 = 0.0;
-        let mut var_guard562: f64 = 0.0;
-        let mut var_guard562_rv: f64 = 0.0;
-        let mut var_guard563: f64 = 0.0;
-        let mut var_guard563_rv: f64 = 0.0;
-        let mut var_guard564: f64 = 0.0;
-        let mut var_guard564_rv: f64 = 0.0;
-        let mut var_guard565: f64 = 0.0;
-        let mut var_guard565_rv: f64 = 0.0;
-        let mut var_guard566: f64 = 0.0;
-        let mut var_guard566_rv: f64 = 0.0;
-        let mut var_guard567: f64 = 0.0;
-        let mut var_guard567_rv: f64 = 0.0;
-        let mut var_guard568: f64 = 0.0;
-        let mut var_guard568_rv: f64 = 0.0;
-        let mut var_guard571: f64 = 0.0;
-        let mut var_guard571_rv: f64 = 0.0;
-        let mut var_guard572: f64 = 0.0;
-        let mut var_guard572_rv: f64 = 0.0;
+        let mut locals = StampLocals::default();
 
-        Self::stamp_reactive_block_0(ctx, p, param_given, &mut var_ab_i, &mut var_ab_i_rv, &mut var_auxt, &mut var_auxt_rv, &mut var_da, &mut var_da_rv, &mut var_deltaphigd, &mut var_deltaphigd_rv, &mut var_deltaphigr, &mut var_deltaphigr_rv, &mut var_dn, &mut var_dn_rv, &mut var_dp, &mut var_dp_rv, &mut var_epssi, &mut var_epssi_rv, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_exp_vmax_over_phitd_bot_rv, &mut var_ftdbot2, &mut var_ftdbot2_rv, &mut var_ftdgat2, &mut var_ftdgat2_rv, &mut var_ftdsti2, &mut var_ftdsti2_rv, &mut var_guard1, &mut var_guard1_rv, &mut var_guard2, &mut var_guard2_rv, &mut var_guard6, &mut var_guard6_rv, &mut var_guard7, &mut var_guard7_rv, &mut var_idsatbot, &mut var_idsatbot_rv, &mut var_idsatgat, &mut var_idsatgat_rv, &mut var_idsatrbot_i, &mut var_idsatrbot_i_rv, &mut var_idsatrgat_i, &mut var_idsatrgat_i_rv, &mut var_idsatrsti_i, &mut var_idsatrsti_i_rv, &mut var_idsatsti, &mut var_idsatsti_rv, &mut var_imax_i, &mut var_imax_i_rv, &mut var_juncdlt, &mut var_juncdlt_rv, &mut var_kbol_over_qele, &mut var_kbol_over_qele_rv, &mut var_la, &mut var_la_rv, &mut var_lg_i, &mut var_lg_i_rv, &mut var_ls_i, &mut var_ls_i_rv, &mut var_muen_i, &mut var_muen_i_rv, &mut var_muep_i, &mut var_muep_i_rv, &mut var_ndi_i, &mut var_ndi_i_rv, &mut var_ndibot_i, &mut var_ndibot_i_rv, &mut var_ndigat_i, &mut var_ndigat_i_rv, &mut var_ndisti_i, &mut var_ndisti_i_rv, &mut var_nfabot_i, &mut var_nfabot_i_rv, &mut var_nfagat_i, &mut var_nfagat_i_rv, &mut var_nfasti_i, &mut var_nfasti_i_rv, &mut var_nin, &mut var_nin_rv, &mut var_njl, &mut var_njl_rv, &mut var_pb, &mut var_pb_rv, &mut var_phigbot_i, &mut var_phigbot_i_rv, &mut var_phigdbot, &mut var_phigdbot_rv, &mut var_phigdgat, &mut var_phigdgat_rv, &mut var_phigdsti, &mut var_phigdsti_rv, &mut var_phiggat_i, &mut var_phiggat_i_rv, &mut var_phigrbot, &mut var_phigrbot_rv, &mut var_phigrgat, &mut var_phigrgat_rv, &mut var_phigrsti, &mut var_phigrsti_rv, &mut var_phigsti_i, &mut var_phigsti_i_rv, &mut var_phitd, &mut var_phitd_rv, &mut var_phitdinv, &mut var_phitdinv_rv, &mut var_phitr, &mut var_phitr_rv, &mut var_phitrinv, &mut var_phitrinv_rv, &mut var_pn0, &mut var_pn0_rv, &mut var_scale_i, &mut var_scale_i_rv, &mut var_shrink_i, &mut var_shrink_i_rv, &mut var_shrinkl, &mut var_shrinkl_rv, &mut var_swjunexp_i, &mut var_swjunexp_i_rv, &mut var_t1, &mut var_t1_rv, &mut var_t2, &mut var_t2_rv, &mut var_tau_hl, &mut var_tau_hl_rv, &mut var_tkd, &mut var_tkd_rv, &mut var_tkr, &mut var_tkr_rv, &mut var_trj_i, &mut var_trj_i_rv, &mut var_v_ha, &mut var_v_ha_rv, &mut var_v_hk, &mut var_v_hk_rv, &mut var_vjunref_i, &mut var_vjunref_i_rv, &mut var_vmaxbot, &mut var_vmaxbot_rv, &mut var_vmaxsti, &mut var_vmaxsti_rv, &mut var_xti_i, &mut var_xti_i_rv);
-        Self::stamp_reactive_block_1(p, var_ab_i, var_epssi, var_guard7, var_idsatgat, var_imax_i, var_lg_i, var_ls_i, var_ndi_i, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitd, var_phitdinv, var_vjunref_i, var_vmaxbot, &mut var_fraci, &mut var_fraci_rv, &mut var_fracna, &mut var_fracna_rv, &mut var_fracnb, &mut var_fracnb_rv, &mut var_guard26, &mut var_guard26_rv, &mut var_guard27, &mut var_guard27_rv, &mut var_guard31, &mut var_guard31_rv, &mut var_guard76, &mut var_guard76_rv, &mut var_guard77, &mut var_guard77_rv, &mut var_guard8, &mut var_guard80, &mut var_guard80_rv, &mut var_guard8_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_inqs0_a, &mut var_inqs0_a_dn0, &mut var_inqs0_a_dn2, &mut var_inqs0_a_dn3, &mut var_inqs0_a_rv, &mut var_inqs0_k, &mut var_inqs0_k_dn0, &mut var_inqs0_k_dn2, &mut var_inqs0_k_dn4, &mut var_inqs0_k_rv, &mut var_iwnqs0_a, &mut var_iwnqs0_a_dn0, &mut var_iwnqs0_a_dn2, &mut var_iwnqs0_a_dn5, &mut var_iwnqs0_a_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_q_nqs_a, &mut var_q_nqs_a_dn3, &mut var_q_nqs_a_rv, &mut var_q_nqs_k, &mut var_q_nqs_k_dn4, &mut var_q_nqs_k_rv, &mut var_q_pex0, &mut var_q_pex0_rv, &mut var_swjunexp_i, &mut var_swjunexp_i_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_v1, &mut var_v1_rv, &mut var_v2, &mut var_v2_rv, &mut var_v3, &mut var_v3_rv, &mut var_v4, &mut var_v4_rv, &mut var_v5, &mut var_v5_rv, &mut var_vak, &mut var_vak_dn0, &mut var_vak_dn2, &mut var_vak_rv, &mut var_vha1, &mut var_vha1_rv, &mut var_vmax, &mut var_vmax_rv, &mut var_vmaxgat, &mut var_vmaxgat_rv, &mut var_vmaxsti, &mut var_vmaxsti_rv, &mut var_w_depa0, &mut var_w_depa0_dn0, &mut var_w_depa0_dn2, &mut var_w_depa0_rv, &mut var_w_nqs_a, &mut var_w_nqs_a_dn5, &mut var_w_nqs_a_rv);
-        Self::stamp_reactive_block_2(p, var_guard31, var_guard76, var_guard77, var_guard80, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_v1, &mut var_guard81, &mut var_guard81_rv, &mut var_guard82, &mut var_guard82_rv, &mut var_guard83, &mut var_guard83_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_3(p, var_guard31, var_guard76, var_guard77, var_guard83, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_v1, &mut var_guard86, &mut var_guard86_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_4(p, var_guard31, var_guard76, var_guard77, var_guard86, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_guard89, &mut var_guard89_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_5(p, var_guard31, var_guard76, var_guard77, var_guard89, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_v1, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_exp_vmax_over_phitd_bot_rv, &mut var_guard90, &mut var_guard90_rv, &mut var_guard91, &mut var_guard91_rv, &mut var_guard92, &mut var_guard92_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_6(p, var_guard31, var_guard76, var_guard77, var_guard92, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_guard95, &mut var_guard95_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_7(p, var_ab_i, var_dfn_sl, var_dfn_sl_dn0, var_dfn_sl_dn2, var_dfn_su, var_dfn_su_dn0, var_dfn_su_dn2, var_guard31, var_guard76, var_guard77, var_guard95, var_lg_i, var_ls_i, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_v2, var_vmax, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_guard153, &mut var_guard153_rv, &mut var_guard154, &mut var_guard154_rv, &mut var_guard157, &mut var_guard157_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_8(p, var_guard153, var_guard154, var_guard157, var_guard31, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_v2, &mut var_guard158, &mut var_guard158_rv, &mut var_guard159, &mut var_guard159_rv, &mut var_guard160, &mut var_guard160_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_9(p, var_guard153, var_guard154, var_guard160, var_guard31, var_ndibot_i, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_v2, &mut var_guard163, &mut var_guard163_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_10(p, var_guard153, var_guard154, var_guard31, var_ndibot_i, var_nfabot_i, var_phitdinv, var_pnn0, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_exp_vmax_over_phitd_bot_rv, &mut var_guard166, &mut var_guard166_rv, &mut var_guard167, &mut var_guard167_rv, &mut var_guard168, &mut var_guard168_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_11(p, var_dnj1_dv, var_dnj1_dv_dn0, var_dnj1_dv_dn2, var_guard153, var_guard154, var_guard167, var_guard168, var_guard31, var_ndisti_i, var_nfasti_i, var_nin, var_phitdinv, var_v2, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_exp_vmax_over_phitd_bot_rv, &mut var_guard169, &mut var_guard169_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_12(p, var_guard153, var_guard154, var_guard169, var_guard31, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_guard172, &mut var_guard172_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_13(p, var_ab_i, var_dfn_sl, var_dfn_sl_dn0, var_dfn_sl_dn2, var_dfn_su, var_dfn_su_dn0, var_dfn_su_dn2, var_guard153, var_guard154, var_guard172, var_guard31, var_lg_i, var_ls_i, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_v3, var_vmax, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_guard230, &mut var_guard230_rv, &mut var_guard231, &mut var_guard231_rv, &mut var_guard234, &mut var_guard234_rv, &mut var_guard235, &mut var_guard235_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_14(p, var_guard230, var_guard231, var_guard235, var_guard31, var_ndisti_i, var_nfasti_i, var_nin, var_phitdinv, var_v3, &mut var_guard236, &mut var_guard236_rv, &mut var_guard237, &mut var_guard237_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_15(p, var_guard230, var_guard231, var_guard237, var_guard31, var_ndibot_i, var_ndigat_i, var_nfabot_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_v3, var_vmax, &mut var_guard240, &mut var_guard240_rv, &mut var_guard243, &mut var_guard243_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_16(p, var_guard230, var_guard231, var_guard243, var_guard31, var_nfabot_i, var_phitdinv, var_vha1, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_exp_vmax_over_phitd_bot_rv, &mut var_guard244, &mut var_guard244_rv, &mut var_guard245, &mut var_guard245_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv);
-        Self::stamp_reactive_block_17(p, var_exp_vmax_over_phitd_bot, var_exp_vmax_over_phitd_bot_dn0, var_exp_vmax_over_phitd_bot_dn2, var_guard230, var_guard231, var_guard31, var_ndisti_i, var_nfasti_i, var_nin, var_phitdinv, var_v3, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_guard246, &mut var_guard246_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_18(p, var_ab_i, var_guard230, var_guard231, var_guard31, var_lg_i, var_ls_i, var_ndigat_i, var_nfagat_i, var_nin, var_phitdinv, var_v4, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_guard249, &mut var_guard249_rv, &mut var_guard307, &mut var_guard307_rv, &mut var_guard308, &mut var_guard308_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_19(p, var_guard307, var_guard308, var_guard31, var_ndibot_i, var_nfabot_i, var_nin, var_phitdinv, var_v4, &mut var_guard311, &mut var_guard311_rv, &mut var_guard312, &mut var_guard312_rv, &mut var_guard313, &mut var_guard313_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_20(p, var_guard307, var_guard308, var_guard31, var_guard312, var_guard313, var_ndigat_i, var_ndisti_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_v4, &mut var_guard314, &mut var_guard314_rv, &mut var_guard317, &mut var_guard317_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_21(p, var_guard307, var_guard308, var_guard31, var_guard317, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_guard320, &mut var_guard320_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_22(p, var_dfn_su, var_dfn_su_dn0, var_dfn_su_dn2, var_guard307, var_guard308, var_guard31, var_guard320, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_v4, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_exp_vmax_over_phitd_bot_rv, &mut var_guard321, &mut var_guard321_rv, &mut var_guard322, &mut var_guard322_rv, &mut var_guard323, &mut var_guard323_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_23(p, var_guard307, var_guard308, var_guard31, var_guard323, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_guard326, &mut var_guard326_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_24(p, var_ab_i, var_guard307, var_guard308, var_guard31, var_guard326, var_lg_i, var_ls_i, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_v5, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_guard384, &mut var_guard384_rv, &mut var_guard385, &mut var_guard385_rv, &mut var_guard388, &mut var_guard388_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_25(p, var_guard31, var_guard384, var_guard385, var_guard388, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_v5, &mut var_guard389, &mut var_guard389_rv, &mut var_guard390, &mut var_guard390_rv, &mut var_guard391, &mut var_guard391_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_26(p, var_guard31, var_guard384, var_guard385, var_guard391, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_v5, &mut var_guard394, &mut var_guard394_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_27(p, var_guard31, var_guard384, var_guard385, var_guard394, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_guard397, &mut var_guard397_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_28(p, var_dfn_sl, var_dfn_sl_dn0, var_dfn_sl_dn2, var_guard31, var_guard384, var_guard385, var_guard397, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_v5, var_vmax, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_exp_vmax_over_phitd_bot_rv, &mut var_guard398, &mut var_guard398_rv, &mut var_guard399, &mut var_guard399_rv, &mut var_guard400, &mut var_guard400_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_29(p, var_guard31, var_guard384, var_guard385, var_guard400, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_guard403, &mut var_guard403_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_30(ctx, p, nodes, var_ab_i, var_dfn_su, var_dfn_su_dn0, var_dfn_su_dn2, var_guard31, var_guard384, var_guard385, var_guard403, var_lg_i, var_ls_i, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_swjunexp_i, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_guard471, &mut var_guard471_rv, &mut var_guard479, &mut var_guard479_rv, &mut var_guard480, &mut var_guard480_rv, &mut var_guard483, &mut var_guard483_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vak, &mut var_vak_dn0, &mut var_vak_dn2, &mut var_vak_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_31(p, var_guard471, var_guard479, var_guard480, var_guard483, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_vak, var_vak_dn0, var_vak_dn2, &mut var_guard484, &mut var_guard484_rv, &mut var_guard485, &mut var_guard485_rv, &mut var_guard486, &mut var_guard486_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_32(p, var_guard471, var_guard479, var_guard480, var_guard486, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vak, var_vak_dn0, var_vak_dn2, &mut var_guard489, &mut var_guard489_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_33(p, var_guard471, var_guard479, var_guard480, var_guard489, var_ndibot_i, var_nfabot_i, var_nfagat_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_guard492, &mut var_guard492_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_34(p, var_guard471, var_guard479, var_guard480, var_guard492, var_ndisti_i, var_nfabot_i, var_nfasti_i, var_nin, var_phitdinv, var_vak, var_vak_dn0, var_vak_dn2, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_exp_vmax_over_phitd_bot, &mut var_exp_vmax_over_phitd_bot_dn0, &mut var_exp_vmax_over_phitd_bot_dn2, &mut var_exp_vmax_over_phitd_bot_rv, &mut var_guard493, &mut var_guard493_rv, &mut var_guard494, &mut var_guard494_rv, &mut var_guard495, &mut var_guard495_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_35(p, var_guard471, var_guard479, var_guard480, var_guard495, var_ndigat_i, var_nfagat_i, var_nfasti_i, var_nin, var_phitdinv, var_vmax, &mut var_dfn_sl, &mut var_dfn_sl_dn0, &mut var_dfn_sl_dn2, &mut var_dfn_sl_rv, &mut var_dfn_su, &mut var_dfn_su_dn0, &mut var_dfn_su_dn2, &mut var_dfn_su_rv, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_guard498, &mut var_guard498_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nja10, &mut var_nja10_dn0, &mut var_nja10_dn2, &mut var_nja10_rv, &mut var_nja11, &mut var_nja11_dn0, &mut var_nja11_dn2, &mut var_nja11_rv, &mut var_pnn0, &mut var_pnn0_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vha1, &mut var_vha1_rv);
-        Self::stamp_reactive_block_36(p, var_dfn_sl, var_dfn_sl_dn0, var_dfn_sl_dn2, var_dfn_su, var_dfn_su_dn0, var_dfn_su_dn2, var_guard471, var_guard479, var_guard480, var_guard498, var_nfagat_i, var_njl, var_phitdinv, var_v_hk, var_vak, var_vak_dn0, var_vak_dn2, var_vha1, var_vmax, &mut var_dnj1_dv, &mut var_dnj1_dv_dn0, &mut var_dnj1_dv_dn2, &mut var_dnj1_dv_rv, &mut var_dvmax_over_phitd_dv, &mut var_dvmax_over_phitd_dv_dn0, &mut var_dvmax_over_phitd_dv_dn2, &mut var_dvmax_over_phitd_dv_rv, &mut var_guard558, &mut var_guard558_rv, &mut var_guard559, &mut var_guard559_rv, &mut var_idmultbot, &mut var_idmultbot_dn0, &mut var_idmultbot_dn2, &mut var_idmultbot_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj1, &mut var_nj1_dn0, &mut var_nj1_dn2, &mut var_nj1_rv, &mut var_nj_k, &mut var_nj_k0, &mut var_nj_k0_dn0, &mut var_nj_k0_dn2, &mut var_nj_k0_rv, &mut var_nj_k1, &mut var_nj_k1_dn0, &mut var_nj_k1_dn2, &mut var_nj_k1_rv, &mut var_nj_k_dn0, &mut var_nj_k_dn2, &mut var_nj_k_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv);
-        Self::stamp_reactive_block_37(ctx, p, nodes, var_ab_i, var_guard558, var_guard559, var_idmultbot, var_idmultbot_dn0, var_idmultbot_dn2, var_njl, var_phitdinv, var_pn0, var_q_pex0, var_tkd, var_tkr, var_v_ha, var_v_hk, var_vak, var_vak_dn0, var_vak_dn2, &mut var_exp_a, &mut var_exp_a2, &mut var_exp_a2_dn0, &mut var_exp_a2_dn2, &mut var_exp_a2_rv, &mut var_exp_a_dn0, &mut var_exp_a_dn2, &mut var_exp_a_rv, &mut var_exp_k, &mut var_exp_k2, &mut var_exp_k2_dn0, &mut var_exp_k2_dn2, &mut var_exp_k2_rv, &mut var_exp_k_dn0, &mut var_exp_k_dn2, &mut var_exp_k_rv, &mut var_guard560, &mut var_guard560_rv, &mut var_guard561, &mut var_guard561_rv, &mut var_guard562, &mut var_guard562_rv, &mut var_guard563, &mut var_guard563_rv, &mut var_guard564, &mut var_guard564_rv, &mut var_guard565, &mut var_guard565_rv, &mut var_inqs0_a, &mut var_inqs0_a_dn0, &mut var_inqs0_a_dn2, &mut var_inqs0_a_dn3, &mut var_inqs0_a_rv, &mut var_nj0, &mut var_nj0_dn0, &mut var_nj0_dn2, &mut var_nj0_rv, &mut var_nj_k, &mut var_nj_k_dn0, &mut var_nj_k_dn2, &mut var_nj_k_rv, &mut var_p_na, &mut var_p_na_dn0, &mut var_p_na_dn2, &mut var_p_na_rv, &mut var_q_nqs_a, &mut var_q_nqs_a_dn3, &mut var_q_nqs_a_rv, &mut var_q_pexa, &mut var_q_pexa_dn0, &mut var_q_pexa_dn2, &mut var_q_pexa_rv, &mut var_q_qs_a, &mut var_q_qs_a_dn0, &mut var_q_qs_a_dn2, &mut var_q_qs_a_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv);
-        Self::stamp_reactive_block_38(ctx, p, nodes, var_ab_i, var_epssi, var_exp_k2, var_exp_k2_dn0, var_exp_k2_dn2, var_guard558, var_juncdlt, var_ndi_i, var_pb, var_pn0, var_q_pex0, var_vak, var_vak_dn0, var_vak_dn2, var_w_depa0, var_w_depa0_dn0, var_w_depa0_dn2, &mut var_guard566, &mut var_guard566_rv, &mut var_guard567, &mut var_guard567_rv, &mut var_guard568, &mut var_guard568_rv, &mut var_guard571, &mut var_guard571_rv, &mut var_guard572, &mut var_guard572_rv, &mut var_inqs0_k, &mut var_inqs0_k_dn0, &mut var_inqs0_k_dn2, &mut var_inqs0_k_dn4, &mut var_inqs0_k_rv, &mut var_iwnqs0_a, &mut var_iwnqs0_a_dn0, &mut var_iwnqs0_a_dn2, &mut var_iwnqs0_a_dn5, &mut var_iwnqs0_a_rv, &mut var_p_nk, &mut var_p_nk_dn0, &mut var_p_nk_dn2, &mut var_p_nk_rv, &mut var_q_nqs_k, &mut var_q_nqs_k_dn4, &mut var_q_nqs_k_rv, &mut var_q_pexk, &mut var_q_pexk_dn0, &mut var_q_pexk_dn2, &mut var_q_pexk_rv, &mut var_q_qs_k, &mut var_q_qs_k_dn0, &mut var_q_qs_k_dn2, &mut var_q_qs_k_rv, &mut var_tmf1, &mut var_tmf1_dn0, &mut var_tmf1_dn2, &mut var_tmf1_rv, &mut var_tmf2, &mut var_tmf2_dn0, &mut var_tmf2_dn2, &mut var_tmf2_rv, &mut var_vjunc_a, &mut var_vjunc_a_dn0, &mut var_vjunc_a_dn2, &mut var_vjunc_a_rv, &mut var_w_depa, &mut var_w_depa_dn0, &mut var_w_depa_dn2, &mut var_w_depa_rv, &mut var_w_nqs_a, &mut var_w_nqs_a_dn5, &mut var_w_nqs_a_rv, &mut var_w_qs_a, &mut var_w_qs_a_dn0, &mut var_w_qs_a_dn2, &mut var_w_qs_a_rv);
+        Self::stamp_reactive_block_0(ctx, p, param_given, &mut locals);
+        Self::stamp_reactive_block_1(p, &mut locals);
+        Self::stamp_reactive_block_2(p, &mut locals);
+        Self::stamp_reactive_block_3(p, &mut locals);
+        Self::stamp_reactive_block_4(p, &mut locals);
+        Self::stamp_reactive_block_5(p, &mut locals);
+        Self::stamp_reactive_block_6(p, &mut locals);
+        Self::stamp_reactive_block_7(p, &mut locals);
+        Self::stamp_reactive_block_8(p, &mut locals);
+        Self::stamp_reactive_block_9(p, &mut locals);
+        Self::stamp_reactive_block_10(p, &mut locals);
+        Self::stamp_reactive_block_11(p, &mut locals);
+        Self::stamp_reactive_block_12(p, &mut locals);
+        Self::stamp_reactive_block_13(p, &mut locals);
+        Self::stamp_reactive_block_14(p, &mut locals);
+        Self::stamp_reactive_block_15(p, &mut locals);
+        Self::stamp_reactive_block_16(p, &mut locals);
+        Self::stamp_reactive_block_17(p, &mut locals);
+        Self::stamp_reactive_block_18(p, &mut locals);
+        Self::stamp_reactive_block_19(p, &mut locals);
+        Self::stamp_reactive_block_20(p, &mut locals);
+        Self::stamp_reactive_block_21(p, &mut locals);
+        Self::stamp_reactive_block_22(p, &mut locals);
+        Self::stamp_reactive_block_23(p, &mut locals);
+        Self::stamp_reactive_block_24(p, &mut locals);
+        Self::stamp_reactive_block_25(p, &mut locals);
+        Self::stamp_reactive_block_26(p, &mut locals);
+        Self::stamp_reactive_block_27(p, &mut locals);
+        Self::stamp_reactive_block_28(p, &mut locals);
+        Self::stamp_reactive_block_29(p, &mut locals);
+        Self::stamp_reactive_block_30(ctx, p, nodes, &mut locals);
+        Self::stamp_reactive_block_31(p, &mut locals);
+        Self::stamp_reactive_block_32(p, &mut locals);
+        Self::stamp_reactive_block_33(p, &mut locals);
+        Self::stamp_reactive_block_34(p, &mut locals);
+        Self::stamp_reactive_block_35(p, &mut locals);
+        Self::stamp_reactive_block_36(p, &mut locals);
+        Self::stamp_reactive_block_37(ctx, p, nodes, &mut locals);
+        Self::stamp_reactive_block_38(ctx, p, nodes, &mut locals);
 
-        Self::stamp_reactive_equations_block_0(stamper, nodes, multiplicity, var_guard571, var_guard572, var_inqs0_a, var_inqs0_a_dn0, var_inqs0_a_dn2, var_inqs0_a_dn3, var_inqs0_k, var_inqs0_k_dn0, var_inqs0_k_dn2, var_inqs0_k_dn4, var_iwnqs0_a, var_iwnqs0_a_dn0, var_iwnqs0_a_dn2, var_iwnqs0_a_dn5, var_q_nqs_a, var_q_nqs_a_dn3, var_q_nqs_k, var_q_nqs_k_dn4, var_w_nqs_a, var_w_nqs_a_dn5);
+        Self::stamp_reactive_equations_block_0(stamper, nodes, multiplicity, &mut locals);
     }
 }

@@ -91,6 +91,928 @@ fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct StampLocals {
+    pub(crate) var_ad_i: f64,
+    pub(crate) var_ad_i_rv: f64,
+    pub(crate) var_as_i: f64,
+    pub(crate) var_as_i_rv: f64,
+    pub(crate) var_awl: f64,
+    pub(crate) var_awl_rv: f64,
+    pub(crate) var_beta: f64,
+    pub(crate) var_beta_dn0: f64,
+    pub(crate) var_beta_dn1: f64,
+    pub(crate) var_beta_dn2: f64,
+    pub(crate) var_beta_dn3: f64,
+    pub(crate) var_beta_rv: f64,
+    pub(crate) var_big_sqrt_vp: f64,
+    pub(crate) var_big_sqrt_vp0: f64,
+    pub(crate) var_big_sqrt_vp0_dn0: f64,
+    pub(crate) var_big_sqrt_vp0_dn1: f64,
+    pub(crate) var_big_sqrt_vp0_dn2: f64,
+    pub(crate) var_big_sqrt_vp0_dn3: f64,
+    pub(crate) var_big_sqrt_vp0_rv: f64,
+    pub(crate) var_big_sqrt_vp_dn0: f64,
+    pub(crate) var_big_sqrt_vp_dn1: f64,
+    pub(crate) var_big_sqrt_vp_dn2: f64,
+    pub(crate) var_big_sqrt_vp_dn3: f64,
+    pub(crate) var_big_sqrt_vp_rv: f64,
+    pub(crate) var_cj_t: f64,
+    pub(crate) var_cj_t_rv: f64,
+    pub(crate) var_cjsw_t: f64,
+    pub(crate) var_cjsw_t_rv: f64,
+    pub(crate) var_cjswg_t: f64,
+    pub(crate) var_cjswg_t_rv: f64,
+    pub(crate) var_csb_d: f64,
+    pub(crate) var_csb_d_dn0: f64,
+    pub(crate) var_csb_d_dn3: f64,
+    pub(crate) var_csb_d_rv: f64,
+    pub(crate) var_csb_s: f64,
+    pub(crate) var_csb_s_dn2: f64,
+    pub(crate) var_csb_s_dn3: f64,
+    pub(crate) var_csb_s_rv: f64,
+    pub(crate) var_cssw_d: f64,
+    pub(crate) var_cssw_d_dn0: f64,
+    pub(crate) var_cssw_d_dn3: f64,
+    pub(crate) var_cssw_d_rv: f64,
+    pub(crate) var_cssw_s: f64,
+    pub(crate) var_cssw_s_dn2: f64,
+    pub(crate) var_cssw_s_dn3: f64,
+    pub(crate) var_cssw_s_rv: f64,
+    pub(crate) var_csswg_d: f64,
+    pub(crate) var_csswg_d_dn0: f64,
+    pub(crate) var_csswg_d_dn3: f64,
+    pub(crate) var_csswg_d_rv: f64,
+    pub(crate) var_csswg_s: f64,
+    pub(crate) var_csswg_s_dn2: f64,
+    pub(crate) var_csswg_s_dn3: f64,
+    pub(crate) var_csswg_s_rv: f64,
+    pub(crate) var_dbeta_dvd: f64,
+    pub(crate) var_dbeta_dvd_dn0: f64,
+    pub(crate) var_dbeta_dvd_dn1: f64,
+    pub(crate) var_dbeta_dvd_dn2: f64,
+    pub(crate) var_dbeta_dvd_dn3: f64,
+    pub(crate) var_dbeta_dvd_rv: f64,
+    pub(crate) var_dbeta_dvs: f64,
+    pub(crate) var_dbeta_dvs_dn0: f64,
+    pub(crate) var_dbeta_dvs_dn1: f64,
+    pub(crate) var_dbeta_dvs_dn2: f64,
+    pub(crate) var_dbeta_dvs_dn3: f64,
+    pub(crate) var_dbeta_dvs_rv: f64,
+    pub(crate) var_ddeltal_dvd: f64,
+    pub(crate) var_ddeltal_dvd_dn0: f64,
+    pub(crate) var_ddeltal_dvd_dn1: f64,
+    pub(crate) var_ddeltal_dvd_dn2: f64,
+    pub(crate) var_ddeltal_dvd_dn3: f64,
+    pub(crate) var_ddeltal_dvd_rv: f64,
+    pub(crate) var_ddeltal_dvs: f64,
+    pub(crate) var_ddeltal_dvs_dn0: f64,
+    pub(crate) var_ddeltal_dvs_dn1: f64,
+    pub(crate) var_ddeltal_dvs_dn2: f64,
+    pub(crate) var_ddeltal_dvs_dn3: f64,
+    pub(crate) var_ddeltal_dvs_rv: f64,
+    pub(crate) var_ddeltav_dvd: f64,
+    pub(crate) var_ddeltav_dvd_dn0: f64,
+    pub(crate) var_ddeltav_dvd_dn1: f64,
+    pub(crate) var_ddeltav_dvd_dn2: f64,
+    pub(crate) var_ddeltav_dvd_dn3: f64,
+    pub(crate) var_ddeltav_dvd_rv: f64,
+    pub(crate) var_ddeltav_dvs: f64,
+    pub(crate) var_ddeltav_dvs_dn0: f64,
+    pub(crate) var_ddeltav_dvs_dn1: f64,
+    pub(crate) var_ddeltav_dvs_dn2: f64,
+    pub(crate) var_ddeltav_dvs_dn3: f64,
+    pub(crate) var_ddeltav_dvs_rv: f64,
+    pub(crate) var_ddt_qd: f64,
+    pub(crate) var_ddt_qd_dn0: f64,
+    pub(crate) var_ddt_qd_dn1: f64,
+    pub(crate) var_ddt_qd_dn2: f64,
+    pub(crate) var_ddt_qd_dn3: f64,
+    pub(crate) var_ddt_qd_rdn0: f64,
+    pub(crate) var_ddt_qd_rdn1: f64,
+    pub(crate) var_ddt_qd_rdn2: f64,
+    pub(crate) var_ddt_qd_rdn3: f64,
+    pub(crate) var_ddt_qd_rv: f64,
+    pub(crate) var_ddt_qs: f64,
+    pub(crate) var_ddt_qs_dn0: f64,
+    pub(crate) var_ddt_qs_dn1: f64,
+    pub(crate) var_ddt_qs_dn2: f64,
+    pub(crate) var_ddt_qs_dn3: f64,
+    pub(crate) var_ddt_qs_rdn0: f64,
+    pub(crate) var_ddt_qs_rdn1: f64,
+    pub(crate) var_ddt_qs_rdn2: f64,
+    pub(crate) var_ddt_qs_rdn3: f64,
+    pub(crate) var_ddt_qs_rv: f64,
+    pub(crate) var_deltal: f64,
+    pub(crate) var_deltal_dn0: f64,
+    pub(crate) var_deltal_dn1: f64,
+    pub(crate) var_deltal_dn2: f64,
+    pub(crate) var_deltal_dn3: f64,
+    pub(crate) var_deltal_rv: f64,
+    pub(crate) var_deltat: f64,
+    pub(crate) var_deltat_rv: f64,
+    pub(crate) var_deltav_2: f64,
+    pub(crate) var_deltav_2_dn0: f64,
+    pub(crate) var_deltav_2_dn1: f64,
+    pub(crate) var_deltav_2_dn2: f64,
+    pub(crate) var_deltav_2_dn3: f64,
+    pub(crate) var_deltav_2_rv: f64,
+    pub(crate) var_deltavfb: f64,
+    pub(crate) var_deltavfb_rv: f64,
+    pub(crate) var_dgammaprime_dvd: f64,
+    pub(crate) var_dgammaprime_dvd_dn0: f64,
+    pub(crate) var_dgammaprime_dvd_dn1: f64,
+    pub(crate) var_dgammaprime_dvd_dn2: f64,
+    pub(crate) var_dgammaprime_dvd_dn3: f64,
+    pub(crate) var_dgammaprime_dvd_rv: f64,
+    pub(crate) var_dgammaprime_dvs: f64,
+    pub(crate) var_dgammaprime_dvs_dn0: f64,
+    pub(crate) var_dgammaprime_dvs_dn1: f64,
+    pub(crate) var_dgammaprime_dvs_dn2: f64,
+    pub(crate) var_dgammaprime_dvs_dn3: f64,
+    pub(crate) var_dgammaprime_dvs_rv: f64,
+    pub(crate) var_dif_dv: f64,
+    pub(crate) var_dif_dv_dn0: f64,
+    pub(crate) var_dif_dv_dn1: f64,
+    pub(crate) var_dif_dv_dn2: f64,
+    pub(crate) var_dif_dv_dn3: f64,
+    pub(crate) var_dif_dv_rv: f64,
+    pub(crate) var_dif_dvd: f64,
+    pub(crate) var_dif_dvd_dn0: f64,
+    pub(crate) var_dif_dvd_dn1: f64,
+    pub(crate) var_dif_dvd_dn2: f64,
+    pub(crate) var_dif_dvd_dn3: f64,
+    pub(crate) var_dif_dvd_rv: f64,
+    pub(crate) var_dif_dvs: f64,
+    pub(crate) var_dif_dvs_dn0: f64,
+    pub(crate) var_dif_dvs_dn1: f64,
+    pub(crate) var_dif_dvs_dn2: f64,
+    pub(crate) var_dif_dvs_dn3: f64,
+    pub(crate) var_dif_dvs_rv: f64,
+    pub(crate) var_dir_dv: f64,
+    pub(crate) var_dir_dv_dn0: f64,
+    pub(crate) var_dir_dv_dn1: f64,
+    pub(crate) var_dir_dv_dn2: f64,
+    pub(crate) var_dir_dv_dn3: f64,
+    pub(crate) var_dir_dv_rv: f64,
+    pub(crate) var_dir_dvd: f64,
+    pub(crate) var_dir_dvd_dn0: f64,
+    pub(crate) var_dir_dvd_dn1: f64,
+    pub(crate) var_dir_dvd_dn2: f64,
+    pub(crate) var_dir_dvd_dn3: f64,
+    pub(crate) var_dir_dvd_rv: f64,
+    pub(crate) var_dir_dvs: f64,
+    pub(crate) var_dir_dvs_dn0: f64,
+    pub(crate) var_dir_dvs_dn1: f64,
+    pub(crate) var_dir_dvs_dn2: f64,
+    pub(crate) var_dir_dvs_dn3: f64,
+    pub(crate) var_dir_dvs_rv: f64,
+    pub(crate) var_dirprime_dv: f64,
+    pub(crate) var_dirprime_dv_dn0: f64,
+    pub(crate) var_dirprime_dv_dn1: f64,
+    pub(crate) var_dirprime_dv_dn2: f64,
+    pub(crate) var_dirprime_dv_dn3: f64,
+    pub(crate) var_dirprime_dv_rv: f64,
+    pub(crate) var_dirprime_dvd: f64,
+    pub(crate) var_dirprime_dvd_dn0: f64,
+    pub(crate) var_dirprime_dvd_dn1: f64,
+    pub(crate) var_dirprime_dvd_dn2: f64,
+    pub(crate) var_dirprime_dvd_dn3: f64,
+    pub(crate) var_dirprime_dvd_rv: f64,
+    pub(crate) var_dirprime_dvs: f64,
+    pub(crate) var_dirprime_dvs_dn0: f64,
+    pub(crate) var_dirprime_dvs_dn1: f64,
+    pub(crate) var_dirprime_dvs_dn2: f64,
+    pub(crate) var_dirprime_dvs_dn3: f64,
+    pub(crate) var_dirprime_dvs_rv: f64,
+    pub(crate) var_dleq_dvd: f64,
+    pub(crate) var_dleq_dvd_dn0: f64,
+    pub(crate) var_dleq_dvd_dn1: f64,
+    pub(crate) var_dleq_dvd_dn2: f64,
+    pub(crate) var_dleq_dvd_dn3: f64,
+    pub(crate) var_dleq_dvd_rv: f64,
+    pub(crate) var_dleq_dvs: f64,
+    pub(crate) var_dleq_dvs_dn0: f64,
+    pub(crate) var_dleq_dvs_dn1: f64,
+    pub(crate) var_dleq_dvs_dn2: f64,
+    pub(crate) var_dleq_dvs_dn3: f64,
+    pub(crate) var_dleq_dvs_rv: f64,
+    pub(crate) var_dn_dvd: f64,
+    pub(crate) var_dn_dvd_dn0: f64,
+    pub(crate) var_dn_dvd_dn1: f64,
+    pub(crate) var_dn_dvd_dn2: f64,
+    pub(crate) var_dn_dvd_dn3: f64,
+    pub(crate) var_dn_dvd_rv: f64,
+    pub(crate) var_dn_dvs: f64,
+    pub(crate) var_dn_dvs_dn0: f64,
+    pub(crate) var_dn_dvs_dn1: f64,
+    pub(crate) var_dn_dvs_dn2: f64,
+    pub(crate) var_dn_dvs_dn3: f64,
+    pub(crate) var_dn_dvs_rv: f64,
+    pub(crate) var_dqb_dvd: f64,
+    pub(crate) var_dqb_dvd_dn0: f64,
+    pub(crate) var_dqb_dvd_dn1: f64,
+    pub(crate) var_dqb_dvd_dn2: f64,
+    pub(crate) var_dqb_dvd_dn3: f64,
+    pub(crate) var_dqb_dvd_rv: f64,
+    pub(crate) var_dqb_dvs: f64,
+    pub(crate) var_dqb_dvs_dn0: f64,
+    pub(crate) var_dqb_dvs_dn1: f64,
+    pub(crate) var_dqb_dvs_dn2: f64,
+    pub(crate) var_dqb_dvs_dn3: f64,
+    pub(crate) var_dqb_dvs_rv: f64,
+    pub(crate) var_dqi_dvd: f64,
+    pub(crate) var_dqi_dvd_dn0: f64,
+    pub(crate) var_dqi_dvd_dn1: f64,
+    pub(crate) var_dqi_dvd_dn2: f64,
+    pub(crate) var_dqi_dvd_dn3: f64,
+    pub(crate) var_dqi_dvd_rv: f64,
+    pub(crate) var_dqi_dvs: f64,
+    pub(crate) var_dqi_dvs_dn0: f64,
+    pub(crate) var_dqi_dvs_dn1: f64,
+    pub(crate) var_dqi_dvs_dn2: f64,
+    pub(crate) var_dqi_dvs_dn3: f64,
+    pub(crate) var_dqi_dvs_rv: f64,
+    pub(crate) var_dvdss_dvd: f64,
+    pub(crate) var_dvdss_dvd_dn0: f64,
+    pub(crate) var_dvdss_dvd_dn1: f64,
+    pub(crate) var_dvdss_dvd_dn2: f64,
+    pub(crate) var_dvdss_dvd_dn3: f64,
+    pub(crate) var_dvdss_dvd_rv: f64,
+    pub(crate) var_dvdss_dvs: f64,
+    pub(crate) var_dvdss_dvs_dn0: f64,
+    pub(crate) var_dvdss_dvs_dn1: f64,
+    pub(crate) var_dvdss_dvs_dn2: f64,
+    pub(crate) var_dvdss_dvs_dn3: f64,
+    pub(crate) var_dvdss_dvs_rv: f64,
+    pub(crate) var_dvdssprime_dvd: f64,
+    pub(crate) var_dvdssprime_dvd_dn0: f64,
+    pub(crate) var_dvdssprime_dvd_dn1: f64,
+    pub(crate) var_dvdssprime_dvd_dn2: f64,
+    pub(crate) var_dvdssprime_dvd_dn3: f64,
+    pub(crate) var_dvdssprime_dvd_rv: f64,
+    pub(crate) var_dvdssprime_dvs: f64,
+    pub(crate) var_dvdssprime_dvs_dn0: f64,
+    pub(crate) var_dvdssprime_dvs_dn1: f64,
+    pub(crate) var_dvdssprime_dvs_dn2: f64,
+    pub(crate) var_dvdssprime_dvs_dn3: f64,
+    pub(crate) var_dvdssprime_dvs_rv: f64,
+    pub(crate) var_dvip_dvd: f64,
+    pub(crate) var_dvip_dvd_dn0: f64,
+    pub(crate) var_dvip_dvd_dn1: f64,
+    pub(crate) var_dvip_dvd_dn2: f64,
+    pub(crate) var_dvip_dvd_dn3: f64,
+    pub(crate) var_dvip_dvd_rv: f64,
+    pub(crate) var_dvip_dvs: f64,
+    pub(crate) var_dvip_dvs_dn0: f64,
+    pub(crate) var_dvip_dvs_dn1: f64,
+    pub(crate) var_dvip_dvs_dn2: f64,
+    pub(crate) var_dvip_dvs_dn3: f64,
+    pub(crate) var_dvip_dvs_rv: f64,
+    pub(crate) var_dvp_dvd: f64,
+    pub(crate) var_dvp_dvd_dn0: f64,
+    pub(crate) var_dvp_dvd_dn1: f64,
+    pub(crate) var_dvp_dvd_dn2: f64,
+    pub(crate) var_dvp_dvd_dn3: f64,
+    pub(crate) var_dvp_dvd_rv: f64,
+    pub(crate) var_dvp_dvs: f64,
+    pub(crate) var_dvp_dvs_dn0: f64,
+    pub(crate) var_dvp_dvs_dn1: f64,
+    pub(crate) var_dvp_dvs_dn2: f64,
+    pub(crate) var_dvp_dvs_dn3: f64,
+    pub(crate) var_dvp_dvs_rv: f64,
+    pub(crate) var_dvpprime_dvd: f64,
+    pub(crate) var_dvpprime_dvd_dn0: f64,
+    pub(crate) var_dvpprime_dvd_dn1: f64,
+    pub(crate) var_dvpprime_dvd_dn2: f64,
+    pub(crate) var_dvpprime_dvd_dn3: f64,
+    pub(crate) var_dvpprime_dvd_rv: f64,
+    pub(crate) var_dvpprime_dvs: f64,
+    pub(crate) var_dvpprime_dvs_dn0: f64,
+    pub(crate) var_dvpprime_dvs_dn1: f64,
+    pub(crate) var_dvpprime_dvs_dn2: f64,
+    pub(crate) var_dvpprime_dvs_dn3: f64,
+    pub(crate) var_dvpprime_dvs_rv: f64,
+    pub(crate) var_e0_q_1: f64,
+    pub(crate) var_e0_q_1_dn0: f64,
+    pub(crate) var_e0_q_1_dn1: f64,
+    pub(crate) var_e0_q_1_dn2: f64,
+    pub(crate) var_e0_q_1_dn3: f64,
+    pub(crate) var_e0_q_1_rv: f64,
+    pub(crate) var_eg: f64,
+    pub(crate) var_eg_rv: f64,
+    pub(crate) var_eps_cox: f64,
+    pub(crate) var_eps_cox_l: f64,
+    pub(crate) var_eps_cox_l_rv: f64,
+    pub(crate) var_eps_cox_rv: f64,
+    pub(crate) var_eps_cox_w: f64,
+    pub(crate) var_eps_cox_w_rv: f64,
+    pub(crate) var_epssil: f64,
+    pub(crate) var_epssil_rv: f64,
+    pub(crate) var_eta_qi: f64,
+    pub(crate) var_eta_qi_rv: f64,
+    pub(crate) var_gamma_s: f64,
+    pub(crate) var_gamma_s_rv: f64,
+    pub(crate) var_gamma_sqrt_phi: f64,
+    pub(crate) var_gamma_sqrt_phi_dn0: f64,
+    pub(crate) var_gamma_sqrt_phi_dn1: f64,
+    pub(crate) var_gamma_sqrt_phi_dn2: f64,
+    pub(crate) var_gamma_sqrt_phi_dn3: f64,
+    pub(crate) var_gamma_sqrt_phi_rv: f64,
+    pub(crate) var_gammaprime: f64,
+    pub(crate) var_gammaprime_dn0: f64,
+    pub(crate) var_gammaprime_dn1: f64,
+    pub(crate) var_gammaprime_dn2: f64,
+    pub(crate) var_gammaprime_dn3: f64,
+    pub(crate) var_gammaprime_rv: f64,
+    pub(crate) var_gammastar: f64,
+    pub(crate) var_gammastar_dn0: f64,
+    pub(crate) var_gammastar_dn1: f64,
+    pub(crate) var_gammastar_dn2: f64,
+    pub(crate) var_gammastar_dn3: f64,
+    pub(crate) var_gammastar_rv: f64,
+    pub(crate) var_gds: f64,
+    pub(crate) var_gds_dn0: f64,
+    pub(crate) var_gds_dn1: f64,
+    pub(crate) var_gds_dn2: f64,
+    pub(crate) var_gds_dn3: f64,
+    pub(crate) var_gds_rv: f64,
+    pub(crate) var_gms: f64,
+    pub(crate) var_gms_dn0: f64,
+    pub(crate) var_gms_dn1: f64,
+    pub(crate) var_gms_dn2: f64,
+    pub(crate) var_gms_dn3: f64,
+    pub(crate) var_gms_rv: f64,
+    pub(crate) var_guard1: f64,
+    pub(crate) var_guard10: f64,
+    pub(crate) var_guard10_rv: f64,
+    pub(crate) var_guard11: f64,
+    pub(crate) var_guard11_rv: f64,
+    pub(crate) var_guard12: f64,
+    pub(crate) var_guard12_rv: f64,
+    pub(crate) var_guard13: f64,
+    pub(crate) var_guard13_rv: f64,
+    pub(crate) var_guard14: f64,
+    pub(crate) var_guard14_rv: f64,
+    pub(crate) var_guard15: f64,
+    pub(crate) var_guard15_rv: f64,
+    pub(crate) var_guard16: f64,
+    pub(crate) var_guard16_rv: f64,
+    pub(crate) var_guard17: f64,
+    pub(crate) var_guard17_rv: f64,
+    pub(crate) var_guard18: f64,
+    pub(crate) var_guard18_rv: f64,
+    pub(crate) var_guard1_rv: f64,
+    pub(crate) var_guard2: f64,
+    pub(crate) var_guard21: f64,
+    pub(crate) var_guard21_rv: f64,
+    pub(crate) var_guard24: f64,
+    pub(crate) var_guard24_rv: f64,
+    pub(crate) var_guard25: f64,
+    pub(crate) var_guard25_rv: f64,
+    pub(crate) var_guard26: f64,
+    pub(crate) var_guard26_rv: f64,
+    pub(crate) var_guard27: f64,
+    pub(crate) var_guard27_rv: f64,
+    pub(crate) var_guard2_rv: f64,
+    pub(crate) var_guard3: f64,
+    pub(crate) var_guard32: f64,
+    pub(crate) var_guard32_rv: f64,
+    pub(crate) var_guard33: f64,
+    pub(crate) var_guard33_rv: f64,
+    pub(crate) var_guard3_rv: f64,
+    pub(crate) var_guard4: f64,
+    pub(crate) var_guard4_rv: f64,
+    pub(crate) var_guard6: f64,
+    pub(crate) var_guard6_rv: f64,
+    pub(crate) var_guard7: f64,
+    pub(crate) var_guard7_rv: f64,
+    pub(crate) var_guard8: f64,
+    pub(crate) var_guard8_rv: f64,
+    pub(crate) var_guard9: f64,
+    pub(crate) var_guard9_rv: f64,
+    pub(crate) var_if_: f64,
+    pub(crate) var_if__dn0: f64,
+    pub(crate) var_if__dn1: f64,
+    pub(crate) var_if__dn2: f64,
+    pub(crate) var_if__dn3: f64,
+    pub(crate) var_if__rv: f64,
+    pub(crate) var_if_ir: f64,
+    pub(crate) var_if_ir_dn0: f64,
+    pub(crate) var_if_ir_dn1: f64,
+    pub(crate) var_if_ir_dn2: f64,
+    pub(crate) var_if_ir_dn3: f64,
+    pub(crate) var_if_ir_rv: f64,
+    pub(crate) var_inv_ucrit: f64,
+    pub(crate) var_inv_ucrit_rv: f64,
+    pub(crate) var_inv_vt: f64,
+    pub(crate) var_inv_vt_rv: f64,
+    pub(crate) var_ir: f64,
+    pub(crate) var_ir_dn0: f64,
+    pub(crate) var_ir_dn1: f64,
+    pub(crate) var_ir_dn2: f64,
+    pub(crate) var_ir_dn3: f64,
+    pub(crate) var_ir_rv: f64,
+    pub(crate) var_irprime: f64,
+    pub(crate) var_irprime_dn0: f64,
+    pub(crate) var_irprime_dn1: f64,
+    pub(crate) var_irprime_dn2: f64,
+    pub(crate) var_irprime_dn3: f64,
+    pub(crate) var_irprime_rv: f64,
+    pub(crate) var_ispec: f64,
+    pub(crate) var_ispec_dn0: f64,
+    pub(crate) var_ispec_dn1: f64,
+    pub(crate) var_ispec_dn2: f64,
+    pub(crate) var_ispec_dn3: f64,
+    pub(crate) var_ispec_rv: f64,
+    pub(crate) var_kp_t: f64,
+    pub(crate) var_kp_t_rv: f64,
+    pub(crate) var_kp_weff: f64,
+    pub(crate) var_kp_weff_rv: f64,
+    pub(crate) var_lc: f64,
+    pub(crate) var_lc_lambda: f64,
+    pub(crate) var_lc_lambda_rv: f64,
+    pub(crate) var_lc_rv: f64,
+    pub(crate) var_lc_ucrit: f64,
+    pub(crate) var_lc_ucrit_rv: f64,
+    pub(crate) var_leff: f64,
+    pub(crate) var_leff_rv: f64,
+    pub(crate) var_leq: f64,
+    pub(crate) var_leq_dn0: f64,
+    pub(crate) var_leq_dn1: f64,
+    pub(crate) var_leq_dn2: f64,
+    pub(crate) var_leq_dn3: f64,
+    pub(crate) var_leq_rv: f64,
+    pub(crate) var_leta_l: f64,
+    pub(crate) var_leta_l_rv: f64,
+    pub(crate) var_lmin: f64,
+    pub(crate) var_lmin_rv: f64,
+    pub(crate) var_log_vc_vt: f64,
+    pub(crate) var_log_vc_vt_rv: f64,
+    pub(crate) var_lprime: f64,
+    pub(crate) var_lprime_dn0: f64,
+    pub(crate) var_lprime_dn1: f64,
+    pub(crate) var_lprime_dn2: f64,
+    pub(crate) var_lprime_dn3: f64,
+    pub(crate) var_lprime_rv: f64,
+    pub(crate) var_mode: f64,
+    pub(crate) var_mode_rv: f64,
+    pub(crate) var_n: f64,
+    pub(crate) var_n_1: f64,
+    pub(crate) var_n_1_dn0: f64,
+    pub(crate) var_n_1_dn1: f64,
+    pub(crate) var_n_1_dn2: f64,
+    pub(crate) var_n_1_dn3: f64,
+    pub(crate) var_n_1_n: f64,
+    pub(crate) var_n_1_n_dn0: f64,
+    pub(crate) var_n_1_n_dn1: f64,
+    pub(crate) var_n_1_n_dn2: f64,
+    pub(crate) var_n_1_n_dn3: f64,
+    pub(crate) var_n_1_n_rv: f64,
+    pub(crate) var_n_1_rv: f64,
+    pub(crate) var_n_dn0: f64,
+    pub(crate) var_n_dn1: f64,
+    pub(crate) var_n_dn2: f64,
+    pub(crate) var_n_dn3: f64,
+    pub(crate) var_n_rv: f64,
+    pub(crate) var_n_vt_cox: f64,
+    pub(crate) var_n_vt_cox_dn0: f64,
+    pub(crate) var_n_vt_cox_dn1: f64,
+    pub(crate) var_n_vt_cox_dn2: f64,
+    pub(crate) var_n_vt_cox_dn3: f64,
+    pub(crate) var_n_vt_cox_rv: f64,
+    pub(crate) var_pb_t: f64,
+    pub(crate) var_pb_t_rv: f64,
+    pub(crate) var_pbsw_t: f64,
+    pub(crate) var_pbsw_t_rv: f64,
+    pub(crate) var_pbswg_t: f64,
+    pub(crate) var_pbswg_t_rv: f64,
+    pub(crate) var_pd_i: f64,
+    pub(crate) var_pd_i_rv: f64,
+    pub(crate) var_phi_t: f64,
+    pub(crate) var_phi_t_dn0: f64,
+    pub(crate) var_phi_t_dn1: f64,
+    pub(crate) var_phi_t_dn2: f64,
+    pub(crate) var_phi_t_dn3: f64,
+    pub(crate) var_phi_t_rv: f64,
+    pub(crate) var_phi_vd: f64,
+    pub(crate) var_phi_vd_dn0: f64,
+    pub(crate) var_phi_vd_dn1: f64,
+    pub(crate) var_phi_vd_dn2: f64,
+    pub(crate) var_phi_vd_dn3: f64,
+    pub(crate) var_phi_vd_rv: f64,
+    pub(crate) var_phi_vs: f64,
+    pub(crate) var_phi_vs_dn0: f64,
+    pub(crate) var_phi_vs_dn1: f64,
+    pub(crate) var_phi_vs_dn2: f64,
+    pub(crate) var_phi_vs_dn3: f64,
+    pub(crate) var_phi_vs_rv: f64,
+    pub(crate) var_ps_i: f64,
+    pub(crate) var_ps_i_rv: f64,
+    pub(crate) var_qb: f64,
+    pub(crate) var_qb_1: f64,
+    pub(crate) var_qb_1_dn0: f64,
+    pub(crate) var_qb_1_dn1: f64,
+    pub(crate) var_qb_1_dn2: f64,
+    pub(crate) var_qb_1_dn3: f64,
+    pub(crate) var_qb_1_rv: f64,
+    pub(crate) var_qb_dn0: f64,
+    pub(crate) var_qb_dn1: f64,
+    pub(crate) var_qb_dn2: f64,
+    pub(crate) var_qb_dn3: f64,
+    pub(crate) var_qb_rv: f64,
+    pub(crate) var_qd: f64,
+    pub(crate) var_qd_dn0: f64,
+    pub(crate) var_qd_dn1: f64,
+    pub(crate) var_qd_dn2: f64,
+    pub(crate) var_qd_dn3: f64,
+    pub(crate) var_qd_rv: f64,
+    pub(crate) var_qg: f64,
+    pub(crate) var_qg_dn0: f64,
+    pub(crate) var_qg_dn1: f64,
+    pub(crate) var_qg_dn2: f64,
+    pub(crate) var_qg_dn3: f64,
+    pub(crate) var_qg_rv: f64,
+    pub(crate) var_qi: f64,
+    pub(crate) var_qi_1: f64,
+    pub(crate) var_qi_1_dn0: f64,
+    pub(crate) var_qi_1_dn1: f64,
+    pub(crate) var_qi_1_dn2: f64,
+    pub(crate) var_qi_1_dn3: f64,
+    pub(crate) var_qi_1_rv: f64,
+    pub(crate) var_qi_dn0: f64,
+    pub(crate) var_qi_dn1: f64,
+    pub(crate) var_qi_dn2: f64,
+    pub(crate) var_qi_dn3: f64,
+    pub(crate) var_qi_rv: f64,
+    pub(crate) var_qjd: f64,
+    pub(crate) var_qjd_dn0: f64,
+    pub(crate) var_qjd_dn3: f64,
+    pub(crate) var_qjd_rv: f64,
+    pub(crate) var_qjs: f64,
+    pub(crate) var_qjs_dn2: f64,
+    pub(crate) var_qjs_dn3: f64,
+    pub(crate) var_qjs_rv: f64,
+    pub(crate) var_qs: f64,
+    pub(crate) var_qs_dn0: f64,
+    pub(crate) var_qs_dn1: f64,
+    pub(crate) var_qs_dn2: f64,
+    pub(crate) var_qs_dn3: f64,
+    pub(crate) var_qs_rv: f64,
+    pub(crate) var_ratiot: f64,
+    pub(crate) var_ratiot_rv: f64,
+    pub(crate) var_rdeff: f64,
+    pub(crate) var_rdeff_rv: f64,
+    pub(crate) var_refeg: f64,
+    pub(crate) var_refeg_rv: f64,
+    pub(crate) var_rseff: f64,
+    pub(crate) var_rseff_rv: f64,
+    pub(crate) var_sif: f64,
+    pub(crate) var_sif2: f64,
+    pub(crate) var_sif2_dn0: f64,
+    pub(crate) var_sif2_dn1: f64,
+    pub(crate) var_sif2_dn2: f64,
+    pub(crate) var_sif2_dn3: f64,
+    pub(crate) var_sif2_rv: f64,
+    pub(crate) var_sif3: f64,
+    pub(crate) var_sif3_dn0: f64,
+    pub(crate) var_sif3_dn1: f64,
+    pub(crate) var_sif3_dn2: f64,
+    pub(crate) var_sif3_dn3: f64,
+    pub(crate) var_sif3_rv: f64,
+    pub(crate) var_sif_dn0: f64,
+    pub(crate) var_sif_dn1: f64,
+    pub(crate) var_sif_dn2: f64,
+    pub(crate) var_sif_dn3: f64,
+    pub(crate) var_sif_rv: f64,
+    pub(crate) var_sif_sir_2: f64,
+    pub(crate) var_sif_sir_2_dn0: f64,
+    pub(crate) var_sif_sir_2_dn1: f64,
+    pub(crate) var_sif_sir_2_dn2: f64,
+    pub(crate) var_sif_sir_2_dn3: f64,
+    pub(crate) var_sif_sir_2_rv: f64,
+    pub(crate) var_sir: f64,
+    pub(crate) var_sir2: f64,
+    pub(crate) var_sir2_dn0: f64,
+    pub(crate) var_sir2_dn1: f64,
+    pub(crate) var_sir2_dn2: f64,
+    pub(crate) var_sir2_dn3: f64,
+    pub(crate) var_sir2_rv: f64,
+    pub(crate) var_sir3: f64,
+    pub(crate) var_sir3_dn0: f64,
+    pub(crate) var_sir3_dn1: f64,
+    pub(crate) var_sir3_dn2: f64,
+    pub(crate) var_sir3_dn3: f64,
+    pub(crate) var_sir3_rv: f64,
+    pub(crate) var_sir_dn0: f64,
+    pub(crate) var_sir_dn1: f64,
+    pub(crate) var_sir_dn2: f64,
+    pub(crate) var_sir_dn3: f64,
+    pub(crate) var_sir_rv: f64,
+    pub(crate) var_sqrt_gammastar: f64,
+    pub(crate) var_sqrt_gammastar_dn0: f64,
+    pub(crate) var_sqrt_gammastar_dn1: f64,
+    pub(crate) var_sqrt_gammastar_dn2: f64,
+    pub(crate) var_sqrt_gammastar_dn3: f64,
+    pub(crate) var_sqrt_gammastar_rv: f64,
+    pub(crate) var_sqrt_if: f64,
+    pub(crate) var_sqrt_if_dn0: f64,
+    pub(crate) var_sqrt_if_dn1: f64,
+    pub(crate) var_sqrt_if_dn2: f64,
+    pub(crate) var_sqrt_if_dn3: f64,
+    pub(crate) var_sqrt_if_rv: f64,
+    pub(crate) var_sqrt_lprime_lmin: f64,
+    pub(crate) var_sqrt_lprime_lmin_dn0: f64,
+    pub(crate) var_sqrt_lprime_lmin_dn1: f64,
+    pub(crate) var_sqrt_lprime_lmin_dn2: f64,
+    pub(crate) var_sqrt_lprime_lmin_dn3: f64,
+    pub(crate) var_sqrt_lprime_lmin_rv: f64,
+    pub(crate) var_sqrt_phi: f64,
+    pub(crate) var_sqrt_phi_dn0: f64,
+    pub(crate) var_sqrt_phi_dn1: f64,
+    pub(crate) var_sqrt_phi_dn2: f64,
+    pub(crate) var_sqrt_phi_dn3: f64,
+    pub(crate) var_sqrt_phi_rv: f64,
+    pub(crate) var_sqrt_phi_vd: f64,
+    pub(crate) var_sqrt_phi_vd_dn0: f64,
+    pub(crate) var_sqrt_phi_vd_dn1: f64,
+    pub(crate) var_sqrt_phi_vd_dn2: f64,
+    pub(crate) var_sqrt_phi_vd_dn3: f64,
+    pub(crate) var_sqrt_phi_vd_rv: f64,
+    pub(crate) var_sqrt_phi_vd_vt: f64,
+    pub(crate) var_sqrt_phi_vd_vt_dn0: f64,
+    pub(crate) var_sqrt_phi_vd_vt_dn1: f64,
+    pub(crate) var_sqrt_phi_vd_vt_dn2: f64,
+    pub(crate) var_sqrt_phi_vd_vt_dn3: f64,
+    pub(crate) var_sqrt_phi_vd_vt_rv: f64,
+    pub(crate) var_sqrt_phi_vp: f64,
+    pub(crate) var_sqrt_phi_vp0: f64,
+    pub(crate) var_sqrt_phi_vp0_dn0: f64,
+    pub(crate) var_sqrt_phi_vp0_dn1: f64,
+    pub(crate) var_sqrt_phi_vp0_dn2: f64,
+    pub(crate) var_sqrt_phi_vp0_dn3: f64,
+    pub(crate) var_sqrt_phi_vp0_rv: f64,
+    pub(crate) var_sqrt_phi_vp2_2: f64,
+    pub(crate) var_sqrt_phi_vp2_2_dn0: f64,
+    pub(crate) var_sqrt_phi_vp2_2_dn1: f64,
+    pub(crate) var_sqrt_phi_vp2_2_dn2: f64,
+    pub(crate) var_sqrt_phi_vp2_2_dn3: f64,
+    pub(crate) var_sqrt_phi_vp2_2_rv: f64,
+    pub(crate) var_sqrt_phi_vp_2: f64,
+    pub(crate) var_sqrt_phi_vp_2_dn0: f64,
+    pub(crate) var_sqrt_phi_vp_2_dn1: f64,
+    pub(crate) var_sqrt_phi_vp_2_dn2: f64,
+    pub(crate) var_sqrt_phi_vp_2_dn3: f64,
+    pub(crate) var_sqrt_phi_vp_2_rv: f64,
+    pub(crate) var_sqrt_phi_vp_dn0: f64,
+    pub(crate) var_sqrt_phi_vp_dn1: f64,
+    pub(crate) var_sqrt_phi_vp_dn2: f64,
+    pub(crate) var_sqrt_phi_vp_dn3: f64,
+    pub(crate) var_sqrt_phi_vp_rv: f64,
+    pub(crate) var_sqrt_phi_vs: f64,
+    pub(crate) var_sqrt_phi_vs_dn0: f64,
+    pub(crate) var_sqrt_phi_vs_dn1: f64,
+    pub(crate) var_sqrt_phi_vs_dn2: f64,
+    pub(crate) var_sqrt_phi_vs_dn3: f64,
+    pub(crate) var_sqrt_phi_vs_rv: f64,
+    pub(crate) var_sqrt_phi_vs_vt: f64,
+    pub(crate) var_sqrt_phi_vs_vt_dn0: f64,
+    pub(crate) var_sqrt_phi_vs_vt_dn1: f64,
+    pub(crate) var_sqrt_phi_vs_vt_dn2: f64,
+    pub(crate) var_sqrt_phi_vs_vt_dn3: f64,
+    pub(crate) var_sqrt_phi_vs_vt_rv: f64,
+    pub(crate) var_sqrt_vds_vdss_deltav: f64,
+    pub(crate) var_sqrt_vds_vdss_deltav_dn0: f64,
+    pub(crate) var_sqrt_vds_vdss_deltav_dn1: f64,
+    pub(crate) var_sqrt_vds_vdss_deltav_dn2: f64,
+    pub(crate) var_sqrt_vds_vdss_deltav_dn3: f64,
+    pub(crate) var_sqrt_vds_vdss_deltav_rv: f64,
+    pub(crate) var_sqrt_vds_vdssprime_deltav: f64,
+    pub(crate) var_sqrt_vds_vdssprime_deltav_dn0: f64,
+    pub(crate) var_sqrt_vds_vdssprime_deltav_dn1: f64,
+    pub(crate) var_sqrt_vds_vdssprime_deltav_dn2: f64,
+    pub(crate) var_sqrt_vds_vdssprime_deltav_dn3: f64,
+    pub(crate) var_sqrt_vds_vdssprime_deltav_rv: f64,
+    pub(crate) var_sqrt_vdss_deltav: f64,
+    pub(crate) var_sqrt_vdss_deltav_dn0: f64,
+    pub(crate) var_sqrt_vdss_deltav_dn1: f64,
+    pub(crate) var_sqrt_vdss_deltav_dn2: f64,
+    pub(crate) var_sqrt_vdss_deltav_dn3: f64,
+    pub(crate) var_sqrt_vdss_deltav_rv: f64,
+    pub(crate) var_sqrt_vdssprime_deltav: f64,
+    pub(crate) var_sqrt_vdssprime_deltav_dn0: f64,
+    pub(crate) var_sqrt_vdssprime_deltav_dn1: f64,
+    pub(crate) var_sqrt_vdssprime_deltav_dn2: f64,
+    pub(crate) var_sqrt_vdssprime_deltav_dn3: f64,
+    pub(crate) var_sqrt_vdssprime_deltav_rv: f64,
+    pub(crate) var_sqrt_vgstar: f64,
+    pub(crate) var_sqrt_vgstar_dn0: f64,
+    pub(crate) var_sqrt_vgstar_dn1: f64,
+    pub(crate) var_sqrt_vgstar_dn2: f64,
+    pub(crate) var_sqrt_vgstar_dn3: f64,
+    pub(crate) var_sqrt_vgstar_rv: f64,
+    pub(crate) var_sqrt_vp_vt: f64,
+    pub(crate) var_sqrt_vp_vt_dn0: f64,
+    pub(crate) var_sqrt_vp_vt_dn1: f64,
+    pub(crate) var_sqrt_vp_vt_dn2: f64,
+    pub(crate) var_sqrt_vp_vt_dn3: f64,
+    pub(crate) var_sqrt_vp_vt_rv: f64,
+    pub(crate) var_sqv: f64,
+    pub(crate) var_sqv_rv: f64,
+    pub(crate) var_t: f64,
+    pub(crate) var_t0: f64,
+    pub(crate) var_t0_gamma_1: f64,
+    pub(crate) var_t0_gamma_1_dn0: f64,
+    pub(crate) var_t0_gamma_1_dn1: f64,
+    pub(crate) var_t0_gamma_1_dn2: f64,
+    pub(crate) var_t0_gamma_1_dn3: f64,
+    pub(crate) var_t0_gamma_1_rv: f64,
+    pub(crate) var_t0_rv: f64,
+    pub(crate) var_t1: f64,
+    pub(crate) var_t1_dn0: f64,
+    pub(crate) var_t1_dn2: f64,
+    pub(crate) var_t1_dn3: f64,
+    pub(crate) var_t1_rv: f64,
+    pub(crate) var_t_rv: f64,
+    pub(crate) var_theta_vp_1: f64,
+    pub(crate) var_theta_vp_1_dn0: f64,
+    pub(crate) var_theta_vp_1_dn1: f64,
+    pub(crate) var_theta_vp_1_dn2: f64,
+    pub(crate) var_theta_vp_1_dn3: f64,
+    pub(crate) var_theta_vp_1_rv: f64,
+    pub(crate) var_tmp1: f64,
+    pub(crate) var_tmp1_dn0: f64,
+    pub(crate) var_tmp1_dn1: f64,
+    pub(crate) var_tmp1_dn2: f64,
+    pub(crate) var_tmp1_dn3: f64,
+    pub(crate) var_tmp1_rv: f64,
+    pub(crate) var_tmp2: f64,
+    pub(crate) var_tmp2_dn0: f64,
+    pub(crate) var_tmp2_dn1: f64,
+    pub(crate) var_tmp2_dn2: f64,
+    pub(crate) var_tmp2_dn3: f64,
+    pub(crate) var_tmp2_rv: f64,
+    pub(crate) var_tmp3: f64,
+    pub(crate) var_tmp3_dn0: f64,
+    pub(crate) var_tmp3_dn1: f64,
+    pub(crate) var_tmp3_dn2: f64,
+    pub(crate) var_tmp3_dn3: f64,
+    pub(crate) var_tmp3_rv: f64,
+    pub(crate) var_tnom: f64,
+    pub(crate) var_tnom_rv: f64,
+    pub(crate) var_ucrit_t: f64,
+    pub(crate) var_ucrit_t_rv: f64,
+    pub(crate) var_v0: f64,
+    pub(crate) var_v0_rv: f64,
+    pub(crate) var_v_di_b: f64,
+    pub(crate) var_v_di_b_dn0: f64,
+    pub(crate) var_v_di_b_dn3: f64,
+    pub(crate) var_v_di_b_rv: f64,
+    pub(crate) var_v_si_b: f64,
+    pub(crate) var_v_si_b_dn2: f64,
+    pub(crate) var_v_si_b_dn3: f64,
+    pub(crate) var_v_si_b_rv: f64,
+    pub(crate) var_vc: f64,
+    pub(crate) var_vc_rv: f64,
+    pub(crate) var_vd: f64,
+    pub(crate) var_vd_dn0: f64,
+    pub(crate) var_vd_dn2: f64,
+    pub(crate) var_vd_dn3: f64,
+    pub(crate) var_vd_rv: f64,
+    pub(crate) var_vds: f64,
+    pub(crate) var_vds_dn0: f64,
+    pub(crate) var_vds_dn2: f64,
+    pub(crate) var_vds_dn3: f64,
+    pub(crate) var_vds_rv: f64,
+    pub(crate) var_vdsprime: f64,
+    pub(crate) var_vdsprime_dn0: f64,
+    pub(crate) var_vdsprime_dn1: f64,
+    pub(crate) var_vdsprime_dn2: f64,
+    pub(crate) var_vdsprime_dn3: f64,
+    pub(crate) var_vdsprime_rv: f64,
+    pub(crate) var_vdss: f64,
+    pub(crate) var_vdss_dn0: f64,
+    pub(crate) var_vdss_dn1: f64,
+    pub(crate) var_vdss_dn2: f64,
+    pub(crate) var_vdss_dn3: f64,
+    pub(crate) var_vdss_rv: f64,
+    pub(crate) var_vdss_sqrt: f64,
+    pub(crate) var_vdss_sqrt_dn0: f64,
+    pub(crate) var_vdss_sqrt_dn1: f64,
+    pub(crate) var_vdss_sqrt_dn2: f64,
+    pub(crate) var_vdss_sqrt_dn3: f64,
+    pub(crate) var_vdss_sqrt_rv: f64,
+    pub(crate) var_vdssprime: f64,
+    pub(crate) var_vdssprime_dn0: f64,
+    pub(crate) var_vdssprime_dn1: f64,
+    pub(crate) var_vdssprime_dn2: f64,
+    pub(crate) var_vdssprime_dn3: f64,
+    pub(crate) var_vdssprime_rv: f64,
+    pub(crate) var_vdssprime_sqrt: f64,
+    pub(crate) var_vdssprime_sqrt_dn0: f64,
+    pub(crate) var_vdssprime_sqrt_dn1: f64,
+    pub(crate) var_vdssprime_sqrt_dn2: f64,
+    pub(crate) var_vdssprime_sqrt_dn3: f64,
+    pub(crate) var_vdssprime_sqrt_rv: f64,
+    pub(crate) var_vg: f64,
+    pub(crate) var_vg_dn1: f64,
+    pub(crate) var_vg_dn3: f64,
+    pub(crate) var_vg_rv: f64,
+    pub(crate) var_vgprime: f64,
+    pub(crate) var_vgprime_dn0: f64,
+    pub(crate) var_vgprime_dn1: f64,
+    pub(crate) var_vgprime_dn2: f64,
+    pub(crate) var_vgprime_dn3: f64,
+    pub(crate) var_vgprime_rv: f64,
+    pub(crate) var_vgstar: f64,
+    pub(crate) var_vgstar_dn0: f64,
+    pub(crate) var_vgstar_dn1: f64,
+    pub(crate) var_vgstar_dn2: f64,
+    pub(crate) var_vgstar_dn3: f64,
+    pub(crate) var_vgstar_rv: f64,
+    pub(crate) var_vip: f64,
+    pub(crate) var_vip_dn0: f64,
+    pub(crate) var_vip_dn1: f64,
+    pub(crate) var_vip_dn2: f64,
+    pub(crate) var_vip_dn3: f64,
+    pub(crate) var_vip_rv: f64,
+    pub(crate) var_vl: f64,
+    pub(crate) var_vl_rv: f64,
+    pub(crate) var_vp: f64,
+    pub(crate) var_vp0: f64,
+    pub(crate) var_vp0_dn0: f64,
+    pub(crate) var_vp0_dn1: f64,
+    pub(crate) var_vp0_dn2: f64,
+    pub(crate) var_vp0_dn3: f64,
+    pub(crate) var_vp0_rv: f64,
+    pub(crate) var_vp_dn0: f64,
+    pub(crate) var_vp_dn1: f64,
+    pub(crate) var_vp_dn2: f64,
+    pub(crate) var_vp_dn3: f64,
+    pub(crate) var_vp_phi_eps: f64,
+    pub(crate) var_vp_phi_eps_dn0: f64,
+    pub(crate) var_vp_phi_eps_dn1: f64,
+    pub(crate) var_vp_phi_eps_dn2: f64,
+    pub(crate) var_vp_phi_eps_dn3: f64,
+    pub(crate) var_vp_phi_eps_rv: f64,
+    pub(crate) var_vp_rv: f64,
+    pub(crate) var_vpprime: f64,
+    pub(crate) var_vpprime_dn0: f64,
+    pub(crate) var_vpprime_dn1: f64,
+    pub(crate) var_vpprime_dn2: f64,
+    pub(crate) var_vpprime_dn3: f64,
+    pub(crate) var_vpprime_rv: f64,
+    pub(crate) var_vs: f64,
+    pub(crate) var_vs_dn0: f64,
+    pub(crate) var_vs_dn2: f64,
+    pub(crate) var_vs_dn3: f64,
+    pub(crate) var_vs_rv: f64,
+    pub(crate) var_vt: f64,
+    pub(crate) var_vt_01: f64,
+    pub(crate) var_vt_01_rv: f64,
+    pub(crate) var_vt_2: f64,
+    pub(crate) var_vt_2_rv: f64,
+    pub(crate) var_vt_4: f64,
+    pub(crate) var_vt_4_rv: f64,
+    pub(crate) var_vt_rv: f64,
+    pub(crate) var_vt_vc: f64,
+    pub(crate) var_vt_vc_rv: f64,
+    pub(crate) var_vt_vt: f64,
+    pub(crate) var_vt_vt_16: f64,
+    pub(crate) var_vt_vt_16_rv: f64,
+    pub(crate) var_vt_vt_2: f64,
+    pub(crate) var_vt_vt_2_rv: f64,
+    pub(crate) var_vt_vt_rv: f64,
+    pub(crate) var_vto_s: f64,
+    pub(crate) var_vto_s_rv: f64,
+    pub(crate) var_vto_t: f64,
+    pub(crate) var_vto_t_rv: f64,
+    pub(crate) var_weff: f64,
+    pub(crate) var_weff_rv: f64,
+    pub(crate) var_weta_w: f64,
+    pub(crate) var_weta_w_rv: f64,
+    pub(crate) var_wlcox: f64,
+    pub(crate) var_wlcox_rv: f64,
+    pub(crate) var_yk: f64,
+    pub(crate) var_yk_dn0: f64,
+    pub(crate) var_yk_dn1: f64,
+    pub(crate) var_yk_dn2: f64,
+    pub(crate) var_yk_dn3: f64,
+    pub(crate) var_yk_rv: f64,
+    pub(crate) var_z0: f64,
+    pub(crate) var_z0_dn0: f64,
+    pub(crate) var_z0_dn1: f64,
+    pub(crate) var_z0_dn2: f64,
+    pub(crate) var_z0_dn3: f64,
+    pub(crate) var_z0_rv: f64,
+    pub(crate) var_zk: f64,
+    pub(crate) var_zk_dn0: f64,
+    pub(crate) var_zk_dn1: f64,
+    pub(crate) var_zk_dn2: f64,
+    pub(crate) var_zk_dn3: f64,
+    pub(crate) var_zk_rv: f64,
+}
+
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let scalar_temperature_static_temperature = (ctx).temperature();
@@ -3745,715 +4667,16 @@ impl Instance {
             3,
             multiplicity * (d974_dn3),
         );
-        let mut var_tmp1: f64 = 0.0;
-        let mut var_tmp1_dn0: f64 = 0.0;
-        let mut var_tmp1_dn1: f64 = 0.0;
-        let mut var_tmp1_dn2: f64 = 0.0;
-        let mut var_tmp1_dn3: f64 = 0.0;
-        let mut var_tmp2: f64 = 0.0;
-        let mut var_tmp2_dn0: f64 = 0.0;
-        let mut var_tmp2_dn1: f64 = 0.0;
-        let mut var_tmp2_dn2: f64 = 0.0;
-        let mut var_tmp2_dn3: f64 = 0.0;
-        let mut var_tmp3: f64 = 0.0;
-        let mut var_tmp3_dn0: f64 = 0.0;
-        let mut var_tmp3_dn1: f64 = 0.0;
-        let mut var_tmp3_dn2: f64 = 0.0;
-        let mut var_tmp3_dn3: f64 = 0.0;
-        let mut var_vgprime: f64 = 0.0;
-        let mut var_vgprime_dn0: f64 = 0.0;
-        let mut var_vgprime_dn1: f64 = 0.0;
-        let mut var_vgprime_dn2: f64 = 0.0;
-        let mut var_vgprime_dn3: f64 = 0.0;
-        let mut var_gammaprime: f64 = 0.0;
-        let mut var_gammaprime_dn0: f64 = 0.0;
-        let mut var_gammaprime_dn1: f64 = 0.0;
-        let mut var_gammaprime_dn2: f64 = 0.0;
-        let mut var_gammaprime_dn3: f64 = 0.0;
-        let mut var_vp: f64 = 0.0;
-        let mut var_vp_dn0: f64 = 0.0;
-        let mut var_vp_dn1: f64 = 0.0;
-        let mut var_vp_dn2: f64 = 0.0;
-        let mut var_vp_dn3: f64 = 0.0;
-        let mut var_vpprime: f64 = 0.0;
-        let mut var_vpprime_dn0: f64 = 0.0;
-        let mut var_vpprime_dn1: f64 = 0.0;
-        let mut var_vpprime_dn2: f64 = 0.0;
-        let mut var_vpprime_dn3: f64 = 0.0;
-        let mut var_if_: f64 = 0.0;
-        let mut var_if__dn0: f64 = 0.0;
-        let mut var_if__dn1: f64 = 0.0;
-        let mut var_if__dn2: f64 = 0.0;
-        let mut var_if__dn3: f64 = 0.0;
-        let mut var_ir: f64 = 0.0;
-        let mut var_ir_dn0: f64 = 0.0;
-        let mut var_ir_dn1: f64 = 0.0;
-        let mut var_ir_dn2: f64 = 0.0;
-        let mut var_ir_dn3: f64 = 0.0;
-        let mut var_irprime: f64 = 0.0;
-        let mut var_irprime_dn0: f64 = 0.0;
-        let mut var_irprime_dn1: f64 = 0.0;
-        let mut var_irprime_dn2: f64 = 0.0;
-        let mut var_irprime_dn3: f64 = 0.0;
-        let mut var_vdss: f64 = 0.0;
-        let mut var_vdss_dn0: f64 = 0.0;
-        let mut var_vdss_dn1: f64 = 0.0;
-        let mut var_vdss_dn2: f64 = 0.0;
-        let mut var_vdss_dn3: f64 = 0.0;
-        let mut var_vdssprime: f64 = 0.0;
-        let mut var_vdssprime_dn0: f64 = 0.0;
-        let mut var_vdssprime_dn1: f64 = 0.0;
-        let mut var_vdssprime_dn2: f64 = 0.0;
-        let mut var_vdssprime_dn3: f64 = 0.0;
-        let mut var_deltal: f64 = 0.0;
-        let mut var_deltal_dn0: f64 = 0.0;
-        let mut var_deltal_dn1: f64 = 0.0;
-        let mut var_deltal_dn2: f64 = 0.0;
-        let mut var_deltal_dn3: f64 = 0.0;
-        let mut var_leq: f64 = 0.0;
-        let mut var_leq_dn0: f64 = 0.0;
-        let mut var_leq_dn1: f64 = 0.0;
-        let mut var_leq_dn2: f64 = 0.0;
-        let mut var_leq_dn3: f64 = 0.0;
-        let mut var_beta: f64 = 0.0;
-        let mut var_beta_dn0: f64 = 0.0;
-        let mut var_beta_dn1: f64 = 0.0;
-        let mut var_beta_dn2: f64 = 0.0;
-        let mut var_beta_dn3: f64 = 0.0;
-        let mut var_n: f64 = 0.0;
-        let mut var_n_dn0: f64 = 0.0;
-        let mut var_n_dn1: f64 = 0.0;
-        let mut var_n_dn2: f64 = 0.0;
-        let mut var_n_dn3: f64 = 0.0;
-        let mut var_ispec: f64 = 0.0;
-        let mut var_ispec_dn0: f64 = 0.0;
-        let mut var_ispec_dn1: f64 = 0.0;
-        let mut var_ispec_dn2: f64 = 0.0;
-        let mut var_ispec_dn3: f64 = 0.0;
-        let mut var_vt: f64 = 0.0;
-        let mut var_gms: f64 = 0.0;
-        let mut var_gms_dn0: f64 = 0.0;
-        let mut var_gms_dn1: f64 = 0.0;
-        let mut var_gms_dn2: f64 = 0.0;
-        let mut var_gms_dn3: f64 = 0.0;
-        let mut var_gds: f64 = 0.0;
-        let mut var_gds_dn0: f64 = 0.0;
-        let mut var_gds_dn1: f64 = 0.0;
-        let mut var_gds_dn2: f64 = 0.0;
-        let mut var_gds_dn3: f64 = 0.0;
-        let mut var_inv_vt: f64 = 0.0;
-        let mut var_vt_01: f64 = 0.0;
-        let mut var_vt_2: f64 = 0.0;
-        let mut var_vt_4: f64 = 0.0;
-        let mut var_vt_vt: f64 = 0.0;
-        let mut var_vt_vt_2: f64 = 0.0;
-        let mut var_vt_vt_16: f64 = 0.0;
-        let mut var_eps_cox: f64 = 0.0;
-        let mut var_eps_cox_w: f64 = 0.0;
-        let mut var_eps_cox_l: f64 = 0.0;
-        let mut var_lc: f64 = 0.0;
-        let mut var_lc_lambda: f64 = 0.0;
-        let mut var_t0: f64 = 0.0;
-        let mut var_t1: f64 = 0.0;
-        let mut var_t1_dn0: f64 = 0.0;
-        let mut var_t1_dn2: f64 = 0.0;
-        let mut var_t1_dn3: f64 = 0.0;
-        let mut var_eta_qi: f64 = 0.0;
-        let mut var_inv_ucrit: f64 = 0.0;
-        let mut var_lc_ucrit: f64 = 0.0;
-        let mut var_mode: f64 = 0.0;
-        let mut var_weta_w: f64 = 0.0;
-        let mut var_leta_l: f64 = 0.0;
-        let mut var_e0_q_1: f64 = 0.0;
-        let mut var_e0_q_1_dn0: f64 = 0.0;
-        let mut var_e0_q_1_dn1: f64 = 0.0;
-        let mut var_e0_q_1_dn2: f64 = 0.0;
-        let mut var_e0_q_1_dn3: f64 = 0.0;
-        let mut var_awl: f64 = 0.0;
-        let mut var_t: f64 = 0.0;
-        let mut var_kp_weff: f64 = 0.0;
-        let mut var_eg: f64 = 0.0;
-        let mut var_refeg: f64 = 0.0;
-        let mut var_deltat: f64 = 0.0;
-        let mut var_ratiot: f64 = 0.0;
-        let mut var_tnom: f64 = 0.0;
-        let mut var_vto_t: f64 = 0.0;
-        let mut var_vto_s: f64 = 0.0;
-        let mut var_kp_t: f64 = 0.0;
-        let mut var_ucrit_t: f64 = 0.0;
-        let mut var_phi_t: f64 = 0.0;
-        let mut var_phi_t_dn0: f64 = 0.0;
-        let mut var_phi_t_dn1: f64 = 0.0;
-        let mut var_phi_t_dn2: f64 = 0.0;
-        let mut var_phi_t_dn3: f64 = 0.0;
-        let mut var_gamma_s: f64 = 0.0;
-        let mut var_sqrt_lprime_lmin: f64 = 0.0;
-        let mut var_sqrt_lprime_lmin_dn0: f64 = 0.0;
-        let mut var_sqrt_lprime_lmin_dn1: f64 = 0.0;
-        let mut var_sqrt_lprime_lmin_dn2: f64 = 0.0;
-        let mut var_sqrt_lprime_lmin_dn3: f64 = 0.0;
-        let mut var_gammastar: f64 = 0.0;
-        let mut var_gammastar_dn0: f64 = 0.0;
-        let mut var_gammastar_dn1: f64 = 0.0;
-        let mut var_gammastar_dn2: f64 = 0.0;
-        let mut var_gammastar_dn3: f64 = 0.0;
-        let mut var_sqrt_gammastar: f64 = 0.0;
-        let mut var_sqrt_gammastar_dn0: f64 = 0.0;
-        let mut var_sqrt_gammastar_dn1: f64 = 0.0;
-        let mut var_sqrt_gammastar_dn2: f64 = 0.0;
-        let mut var_sqrt_gammastar_dn3: f64 = 0.0;
-        let mut var_big_sqrt_vp: f64 = 0.0;
-        let mut var_big_sqrt_vp_dn0: f64 = 0.0;
-        let mut var_big_sqrt_vp_dn1: f64 = 0.0;
-        let mut var_big_sqrt_vp_dn2: f64 = 0.0;
-        let mut var_big_sqrt_vp_dn3: f64 = 0.0;
-        let mut var_big_sqrt_vp0: f64 = 0.0;
-        let mut var_big_sqrt_vp0_dn0: f64 = 0.0;
-        let mut var_big_sqrt_vp0_dn1: f64 = 0.0;
-        let mut var_big_sqrt_vp0_dn2: f64 = 0.0;
-        let mut var_big_sqrt_vp0_dn3: f64 = 0.0;
-        let mut var_vp0: f64 = 0.0;
-        let mut var_vp0_dn0: f64 = 0.0;
-        let mut var_vp0_dn1: f64 = 0.0;
-        let mut var_vp0_dn2: f64 = 0.0;
-        let mut var_vp0_dn3: f64 = 0.0;
-        let mut var_phi_vd: f64 = 0.0;
-        let mut var_phi_vd_dn0: f64 = 0.0;
-        let mut var_phi_vd_dn1: f64 = 0.0;
-        let mut var_phi_vd_dn2: f64 = 0.0;
-        let mut var_phi_vd_dn3: f64 = 0.0;
-        let mut var_phi_vs: f64 = 0.0;
-        let mut var_phi_vs_dn0: f64 = 0.0;
-        let mut var_phi_vs_dn1: f64 = 0.0;
-        let mut var_phi_vs_dn2: f64 = 0.0;
-        let mut var_phi_vs_dn3: f64 = 0.0;
-        let mut var_sqrt_phi: f64 = 0.0;
-        let mut var_sqrt_phi_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vp: f64 = 0.0;
-        let mut var_sqrt_phi_vp_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vp_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vp_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vp_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vd: f64 = 0.0;
-        let mut var_sqrt_phi_vd_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vd_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vd_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vd_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vs: f64 = 0.0;
-        let mut var_sqrt_phi_vs_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vs_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vs_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vs_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vd_vt: f64 = 0.0;
-        let mut var_sqrt_phi_vd_vt_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vd_vt_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vd_vt_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vd_vt_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vs_vt: f64 = 0.0;
-        let mut var_sqrt_phi_vs_vt_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vs_vt_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vs_vt_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vs_vt_dn3: f64 = 0.0;
-        let mut var_vds: f64 = 0.0;
-        let mut var_vds_dn0: f64 = 0.0;
-        let mut var_vds_dn2: f64 = 0.0;
-        let mut var_vds_dn3: f64 = 0.0;
-        let mut var_deltav_2: f64 = 0.0;
-        let mut var_deltav_2_dn0: f64 = 0.0;
-        let mut var_deltav_2_dn1: f64 = 0.0;
-        let mut var_deltav_2_dn2: f64 = 0.0;
-        let mut var_deltav_2_dn3: f64 = 0.0;
-        let mut var_vip: f64 = 0.0;
-        let mut var_vip_dn0: f64 = 0.0;
-        let mut var_vip_dn1: f64 = 0.0;
-        let mut var_vip_dn2: f64 = 0.0;
-        let mut var_vip_dn3: f64 = 0.0;
-        let mut var_vdss_sqrt: f64 = 0.0;
-        let mut var_vdss_sqrt_dn0: f64 = 0.0;
-        let mut var_vdss_sqrt_dn1: f64 = 0.0;
-        let mut var_vdss_sqrt_dn2: f64 = 0.0;
-        let mut var_vdss_sqrt_dn3: f64 = 0.0;
-        let mut var_sqrt_vdss_deltav: f64 = 0.0;
-        let mut var_sqrt_vdss_deltav_dn0: f64 = 0.0;
-        let mut var_sqrt_vdss_deltav_dn1: f64 = 0.0;
-        let mut var_sqrt_vdss_deltav_dn2: f64 = 0.0;
-        let mut var_sqrt_vdss_deltav_dn3: f64 = 0.0;
-        let mut var_sqrt_vds_vdss_deltav: f64 = 0.0;
-        let mut var_sqrt_vds_vdss_deltav_dn0: f64 = 0.0;
-        let mut var_sqrt_vds_vdss_deltav_dn1: f64 = 0.0;
-        let mut var_sqrt_vds_vdss_deltav_dn2: f64 = 0.0;
-        let mut var_sqrt_vds_vdss_deltav_dn3: f64 = 0.0;
-        let mut var_vdssprime_sqrt: f64 = 0.0;
-        let mut var_vdssprime_sqrt_dn0: f64 = 0.0;
-        let mut var_vdssprime_sqrt_dn1: f64 = 0.0;
-        let mut var_vdssprime_sqrt_dn2: f64 = 0.0;
-        let mut var_vdssprime_sqrt_dn3: f64 = 0.0;
-        let mut var_sqrt_vdssprime_deltav: f64 = 0.0;
-        let mut var_sqrt_vdssprime_deltav_dn0: f64 = 0.0;
-        let mut var_sqrt_vdssprime_deltav_dn1: f64 = 0.0;
-        let mut var_sqrt_vdssprime_deltav_dn2: f64 = 0.0;
-        let mut var_sqrt_vdssprime_deltav_dn3: f64 = 0.0;
-        let mut var_sqrt_vds_vdssprime_deltav: f64 = 0.0;
-        let mut var_sqrt_vds_vdssprime_deltav_dn0: f64 = 0.0;
-        let mut var_sqrt_vds_vdssprime_deltav_dn1: f64 = 0.0;
-        let mut var_sqrt_vds_vdssprime_deltav_dn2: f64 = 0.0;
-        let mut var_sqrt_vds_vdssprime_deltav_dn3: f64 = 0.0;
-        let mut var_if_ir: f64 = 0.0;
-        let mut var_if_ir_dn0: f64 = 0.0;
-        let mut var_if_ir_dn1: f64 = 0.0;
-        let mut var_if_ir_dn2: f64 = 0.0;
-        let mut var_if_ir_dn3: f64 = 0.0;
-        let mut var_sqrt_if: f64 = 0.0;
-        let mut var_sqrt_if_dn0: f64 = 0.0;
-        let mut var_sqrt_if_dn1: f64 = 0.0;
-        let mut var_sqrt_if_dn2: f64 = 0.0;
-        let mut var_sqrt_if_dn3: f64 = 0.0;
-        let mut var_dif_dv: f64 = 0.0;
-        let mut var_dif_dv_dn0: f64 = 0.0;
-        let mut var_dif_dv_dn1: f64 = 0.0;
-        let mut var_dif_dv_dn2: f64 = 0.0;
-        let mut var_dif_dv_dn3: f64 = 0.0;
-        let mut var_dir_dv: f64 = 0.0;
-        let mut var_dir_dv_dn0: f64 = 0.0;
-        let mut var_dir_dv_dn1: f64 = 0.0;
-        let mut var_dir_dv_dn2: f64 = 0.0;
-        let mut var_dir_dv_dn3: f64 = 0.0;
-        let mut var_dirprime_dv: f64 = 0.0;
-        let mut var_dirprime_dv_dn0: f64 = 0.0;
-        let mut var_dirprime_dv_dn1: f64 = 0.0;
-        let mut var_dirprime_dv_dn2: f64 = 0.0;
-        let mut var_dirprime_dv_dn3: f64 = 0.0;
-        let mut var_sif: f64 = 0.0;
-        let mut var_sif_dn0: f64 = 0.0;
-        let mut var_sif_dn1: f64 = 0.0;
-        let mut var_sif_dn2: f64 = 0.0;
-        let mut var_sif_dn3: f64 = 0.0;
-        let mut var_sir: f64 = 0.0;
-        let mut var_sir_dn0: f64 = 0.0;
-        let mut var_sir_dn1: f64 = 0.0;
-        let mut var_sir_dn2: f64 = 0.0;
-        let mut var_sir_dn3: f64 = 0.0;
-        let mut var_sif2: f64 = 0.0;
-        let mut var_sif2_dn0: f64 = 0.0;
-        let mut var_sif2_dn1: f64 = 0.0;
-        let mut var_sif2_dn2: f64 = 0.0;
-        let mut var_sif2_dn3: f64 = 0.0;
-        let mut var_sir2: f64 = 0.0;
-        let mut var_sir2_dn0: f64 = 0.0;
-        let mut var_sir2_dn1: f64 = 0.0;
-        let mut var_sir2_dn2: f64 = 0.0;
-        let mut var_sir2_dn3: f64 = 0.0;
-        let mut var_sif3: f64 = 0.0;
-        let mut var_sif3_dn0: f64 = 0.0;
-        let mut var_sif3_dn1: f64 = 0.0;
-        let mut var_sif3_dn2: f64 = 0.0;
-        let mut var_sif3_dn3: f64 = 0.0;
-        let mut var_sir3: f64 = 0.0;
-        let mut var_sir3_dn0: f64 = 0.0;
-        let mut var_sir3_dn1: f64 = 0.0;
-        let mut var_sir3_dn2: f64 = 0.0;
-        let mut var_sir3_dn3: f64 = 0.0;
-        let mut var_sif_sir_2: f64 = 0.0;
-        let mut var_sif_sir_2_dn0: f64 = 0.0;
-        let mut var_sif_sir_2_dn1: f64 = 0.0;
-        let mut var_sif_sir_2_dn2: f64 = 0.0;
-        let mut var_sif_sir_2_dn3: f64 = 0.0;
-        let mut var_qi: f64 = 0.0;
-        let mut var_qi_dn0: f64 = 0.0;
-        let mut var_qi_dn1: f64 = 0.0;
-        let mut var_qi_dn2: f64 = 0.0;
-        let mut var_qi_dn3: f64 = 0.0;
-        let mut var_qb: f64 = 0.0;
-        let mut var_qb_dn0: f64 = 0.0;
-        let mut var_qb_dn1: f64 = 0.0;
-        let mut var_qb_dn2: f64 = 0.0;
-        let mut var_qb_dn3: f64 = 0.0;
-        let mut var_qd: f64 = 0.0;
-        let mut var_qd_dn0: f64 = 0.0;
-        let mut var_qd_dn1: f64 = 0.0;
-        let mut var_qd_dn2: f64 = 0.0;
-        let mut var_qd_dn3: f64 = 0.0;
-        let mut var_qs: f64 = 0.0;
-        let mut var_qs_dn0: f64 = 0.0;
-        let mut var_qs_dn1: f64 = 0.0;
-        let mut var_qs_dn2: f64 = 0.0;
-        let mut var_qs_dn3: f64 = 0.0;
-        let mut var_qi_1: f64 = 0.0;
-        let mut var_qi_1_dn0: f64 = 0.0;
-        let mut var_qi_1_dn1: f64 = 0.0;
-        let mut var_qi_1_dn2: f64 = 0.0;
-        let mut var_qi_1_dn3: f64 = 0.0;
-        let mut var_qb_1: f64 = 0.0;
-        let mut var_qb_1_dn0: f64 = 0.0;
-        let mut var_qb_1_dn1: f64 = 0.0;
-        let mut var_qb_1_dn2: f64 = 0.0;
-        let mut var_qb_1_dn3: f64 = 0.0;
-        let mut var_qg: f64 = 0.0;
-        let mut var_qg_dn0: f64 = 0.0;
-        let mut var_qg_dn1: f64 = 0.0;
-        let mut var_qg_dn2: f64 = 0.0;
-        let mut var_qg_dn3: f64 = 0.0;
-        let mut var_vp_phi_eps: f64 = 0.0;
-        let mut var_vp_phi_eps_dn0: f64 = 0.0;
-        let mut var_vp_phi_eps_dn1: f64 = 0.0;
-        let mut var_vp_phi_eps_dn2: f64 = 0.0;
-        let mut var_vp_phi_eps_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vp_2: f64 = 0.0;
-        let mut var_sqrt_phi_vp_2_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vp_2_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vp_2_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vp_2_dn3: f64 = 0.0;
-        let mut var_wlcox: f64 = 0.0;
-        let mut var_n_vt_cox: f64 = 0.0;
-        let mut var_n_vt_cox_dn0: f64 = 0.0;
-        let mut var_n_vt_cox_dn1: f64 = 0.0;
-        let mut var_n_vt_cox_dn2: f64 = 0.0;
-        let mut var_n_vt_cox_dn3: f64 = 0.0;
-        let mut var_n_1: f64 = 0.0;
-        let mut var_n_1_dn0: f64 = 0.0;
-        let mut var_n_1_dn1: f64 = 0.0;
-        let mut var_n_1_dn2: f64 = 0.0;
-        let mut var_n_1_dn3: f64 = 0.0;
-        let mut var_n_1_n: f64 = 0.0;
-        let mut var_n_1_n_dn0: f64 = 0.0;
-        let mut var_n_1_n_dn1: f64 = 0.0;
-        let mut var_n_1_n_dn2: f64 = 0.0;
-        let mut var_n_1_n_dn3: f64 = 0.0;
-        let mut var_dvp_dvd: f64 = 0.0;
-        let mut var_dvp_dvd_dn0: f64 = 0.0;
-        let mut var_dvp_dvd_dn1: f64 = 0.0;
-        let mut var_dvp_dvd_dn2: f64 = 0.0;
-        let mut var_dvp_dvd_dn3: f64 = 0.0;
-        let mut var_dvp_dvs: f64 = 0.0;
-        let mut var_dvp_dvs_dn0: f64 = 0.0;
-        let mut var_dvp_dvs_dn1: f64 = 0.0;
-        let mut var_dvp_dvs_dn2: f64 = 0.0;
-        let mut var_dvp_dvs_dn3: f64 = 0.0;
-        let mut var_dif_dvd: f64 = 0.0;
-        let mut var_dif_dvd_dn0: f64 = 0.0;
-        let mut var_dif_dvd_dn1: f64 = 0.0;
-        let mut var_dif_dvd_dn2: f64 = 0.0;
-        let mut var_dif_dvd_dn3: f64 = 0.0;
-        let mut var_dif_dvs: f64 = 0.0;
-        let mut var_dif_dvs_dn0: f64 = 0.0;
-        let mut var_dif_dvs_dn1: f64 = 0.0;
-        let mut var_dif_dvs_dn2: f64 = 0.0;
-        let mut var_dif_dvs_dn3: f64 = 0.0;
-        let mut var_dir_dvd: f64 = 0.0;
-        let mut var_dir_dvd_dn0: f64 = 0.0;
-        let mut var_dir_dvd_dn1: f64 = 0.0;
-        let mut var_dir_dvd_dn2: f64 = 0.0;
-        let mut var_dir_dvd_dn3: f64 = 0.0;
-        let mut var_dir_dvs: f64 = 0.0;
-        let mut var_dir_dvs_dn0: f64 = 0.0;
-        let mut var_dir_dvs_dn1: f64 = 0.0;
-        let mut var_dir_dvs_dn2: f64 = 0.0;
-        let mut var_dir_dvs_dn3: f64 = 0.0;
-        let mut var_dvdss_dvd: f64 = 0.0;
-        let mut var_dvdss_dvd_dn0: f64 = 0.0;
-        let mut var_dvdss_dvd_dn1: f64 = 0.0;
-        let mut var_dvdss_dvd_dn2: f64 = 0.0;
-        let mut var_dvdss_dvd_dn3: f64 = 0.0;
-        let mut var_dvdss_dvs: f64 = 0.0;
-        let mut var_dvdss_dvs_dn0: f64 = 0.0;
-        let mut var_dvdss_dvs_dn1: f64 = 0.0;
-        let mut var_dvdss_dvs_dn2: f64 = 0.0;
-        let mut var_dvdss_dvs_dn3: f64 = 0.0;
-        let mut var_ddeltav_dvd: f64 = 0.0;
-        let mut var_ddeltav_dvd_dn0: f64 = 0.0;
-        let mut var_ddeltav_dvd_dn1: f64 = 0.0;
-        let mut var_ddeltav_dvd_dn2: f64 = 0.0;
-        let mut var_ddeltav_dvd_dn3: f64 = 0.0;
-        let mut var_ddeltav_dvs: f64 = 0.0;
-        let mut var_ddeltav_dvs_dn0: f64 = 0.0;
-        let mut var_ddeltav_dvs_dn1: f64 = 0.0;
-        let mut var_ddeltav_dvs_dn2: f64 = 0.0;
-        let mut var_ddeltav_dvs_dn3: f64 = 0.0;
-        let mut var_dvip_dvd: f64 = 0.0;
-        let mut var_dvip_dvd_dn0: f64 = 0.0;
-        let mut var_dvip_dvd_dn1: f64 = 0.0;
-        let mut var_dvip_dvd_dn2: f64 = 0.0;
-        let mut var_dvip_dvd_dn3: f64 = 0.0;
-        let mut var_dvip_dvs: f64 = 0.0;
-        let mut var_dvip_dvs_dn0: f64 = 0.0;
-        let mut var_dvip_dvs_dn1: f64 = 0.0;
-        let mut var_dvip_dvs_dn2: f64 = 0.0;
-        let mut var_dvip_dvs_dn3: f64 = 0.0;
-        let mut var_dvdssprime_dvd: f64 = 0.0;
-        let mut var_dvdssprime_dvd_dn0: f64 = 0.0;
-        let mut var_dvdssprime_dvd_dn1: f64 = 0.0;
-        let mut var_dvdssprime_dvd_dn2: f64 = 0.0;
-        let mut var_dvdssprime_dvd_dn3: f64 = 0.0;
-        let mut var_dvdssprime_dvs: f64 = 0.0;
-        let mut var_dvdssprime_dvs_dn0: f64 = 0.0;
-        let mut var_dvdssprime_dvs_dn1: f64 = 0.0;
-        let mut var_dvdssprime_dvs_dn2: f64 = 0.0;
-        let mut var_dvdssprime_dvs_dn3: f64 = 0.0;
-        let mut var_dirprime_dvd: f64 = 0.0;
-        let mut var_dirprime_dvd_dn0: f64 = 0.0;
-        let mut var_dirprime_dvd_dn1: f64 = 0.0;
-        let mut var_dirprime_dvd_dn2: f64 = 0.0;
-        let mut var_dirprime_dvd_dn3: f64 = 0.0;
-        let mut var_dirprime_dvs: f64 = 0.0;
-        let mut var_dirprime_dvs_dn0: f64 = 0.0;
-        let mut var_dirprime_dvs_dn1: f64 = 0.0;
-        let mut var_dirprime_dvs_dn2: f64 = 0.0;
-        let mut var_dirprime_dvs_dn3: f64 = 0.0;
-        let mut var_dleq_dvd: f64 = 0.0;
-        let mut var_dleq_dvd_dn0: f64 = 0.0;
-        let mut var_dleq_dvd_dn1: f64 = 0.0;
-        let mut var_dleq_dvd_dn2: f64 = 0.0;
-        let mut var_dleq_dvd_dn3: f64 = 0.0;
-        let mut var_dleq_dvs: f64 = 0.0;
-        let mut var_dleq_dvs_dn0: f64 = 0.0;
-        let mut var_dleq_dvs_dn1: f64 = 0.0;
-        let mut var_dleq_dvs_dn2: f64 = 0.0;
-        let mut var_dleq_dvs_dn3: f64 = 0.0;
-        let mut var_dbeta_dvd: f64 = 0.0;
-        let mut var_dbeta_dvd_dn0: f64 = 0.0;
-        let mut var_dbeta_dvd_dn1: f64 = 0.0;
-        let mut var_dbeta_dvd_dn2: f64 = 0.0;
-        let mut var_dbeta_dvd_dn3: f64 = 0.0;
-        let mut var_dbeta_dvs: f64 = 0.0;
-        let mut var_dbeta_dvs_dn0: f64 = 0.0;
-        let mut var_dbeta_dvs_dn1: f64 = 0.0;
-        let mut var_dbeta_dvs_dn2: f64 = 0.0;
-        let mut var_dbeta_dvs_dn3: f64 = 0.0;
-        let mut var_vgstar: f64 = 0.0;
-        let mut var_vgstar_dn0: f64 = 0.0;
-        let mut var_vgstar_dn1: f64 = 0.0;
-        let mut var_vgstar_dn2: f64 = 0.0;
-        let mut var_vgstar_dn3: f64 = 0.0;
-        let mut var_sqrt_vgstar: f64 = 0.0;
-        let mut var_sqrt_vgstar_dn0: f64 = 0.0;
-        let mut var_sqrt_vgstar_dn1: f64 = 0.0;
-        let mut var_sqrt_vgstar_dn2: f64 = 0.0;
-        let mut var_sqrt_vgstar_dn3: f64 = 0.0;
-        let mut var_vg: f64 = 0.0;
-        let mut var_vg_dn1: f64 = 0.0;
-        let mut var_vg_dn3: f64 = 0.0;
-        let mut var_vd: f64 = 0.0;
-        let mut var_vd_dn0: f64 = 0.0;
-        let mut var_vd_dn2: f64 = 0.0;
-        let mut var_vd_dn3: f64 = 0.0;
-        let mut var_vs: f64 = 0.0;
-        let mut var_vs_dn0: f64 = 0.0;
-        let mut var_vs_dn2: f64 = 0.0;
-        let mut var_vs_dn3: f64 = 0.0;
-        let mut var_gamma_sqrt_phi: f64 = 0.0;
-        let mut var_gamma_sqrt_phi_dn0: f64 = 0.0;
-        let mut var_gamma_sqrt_phi_dn1: f64 = 0.0;
-        let mut var_gamma_sqrt_phi_dn2: f64 = 0.0;
-        let mut var_gamma_sqrt_phi_dn3: f64 = 0.0;
-        let mut var_lmin: f64 = 0.0;
-        let mut var_lprime: f64 = 0.0;
-        let mut var_lprime_dn0: f64 = 0.0;
-        let mut var_lprime_dn1: f64 = 0.0;
-        let mut var_lprime_dn2: f64 = 0.0;
-        let mut var_lprime_dn3: f64 = 0.0;
-        let mut var_t0_gamma_1: f64 = 0.0;
-        let mut var_t0_gamma_1_dn0: f64 = 0.0;
-        let mut var_t0_gamma_1_dn1: f64 = 0.0;
-        let mut var_t0_gamma_1_dn2: f64 = 0.0;
-        let mut var_t0_gamma_1_dn3: f64 = 0.0;
-        let mut var_theta_vp_1: f64 = 0.0;
-        let mut var_theta_vp_1_dn0: f64 = 0.0;
-        let mut var_theta_vp_1_dn1: f64 = 0.0;
-        let mut var_theta_vp_1_dn2: f64 = 0.0;
-        let mut var_theta_vp_1_dn3: f64 = 0.0;
-        let mut var_vc: f64 = 0.0;
-        let mut var_vdsprime: f64 = 0.0;
-        let mut var_vdsprime_dn0: f64 = 0.0;
-        let mut var_vdsprime_dn1: f64 = 0.0;
-        let mut var_vdsprime_dn2: f64 = 0.0;
-        let mut var_vdsprime_dn3: f64 = 0.0;
-        let mut var_vt_vc: f64 = 0.0;
-        let mut var_dgammaprime_dvd: f64 = 0.0;
-        let mut var_dgammaprime_dvd_dn0: f64 = 0.0;
-        let mut var_dgammaprime_dvd_dn1: f64 = 0.0;
-        let mut var_dgammaprime_dvd_dn2: f64 = 0.0;
-        let mut var_dgammaprime_dvd_dn3: f64 = 0.0;
-        let mut var_dgammaprime_dvs: f64 = 0.0;
-        let mut var_dgammaprime_dvs_dn0: f64 = 0.0;
-        let mut var_dgammaprime_dvs_dn1: f64 = 0.0;
-        let mut var_dgammaprime_dvs_dn2: f64 = 0.0;
-        let mut var_dgammaprime_dvs_dn3: f64 = 0.0;
-        let mut var_dvpprime_dvd: f64 = 0.0;
-        let mut var_dvpprime_dvd_dn0: f64 = 0.0;
-        let mut var_dvpprime_dvd_dn1: f64 = 0.0;
-        let mut var_dvpprime_dvd_dn2: f64 = 0.0;
-        let mut var_dvpprime_dvd_dn3: f64 = 0.0;
-        let mut var_dvpprime_dvs: f64 = 0.0;
-        let mut var_dvpprime_dvs_dn0: f64 = 0.0;
-        let mut var_dvpprime_dvs_dn1: f64 = 0.0;
-        let mut var_dvpprime_dvs_dn2: f64 = 0.0;
-        let mut var_dvpprime_dvs_dn3: f64 = 0.0;
-        let mut var_ddeltal_dvd: f64 = 0.0;
-        let mut var_ddeltal_dvd_dn0: f64 = 0.0;
-        let mut var_ddeltal_dvd_dn1: f64 = 0.0;
-        let mut var_ddeltal_dvd_dn2: f64 = 0.0;
-        let mut var_ddeltal_dvd_dn3: f64 = 0.0;
-        let mut var_ddeltal_dvs: f64 = 0.0;
-        let mut var_ddeltal_dvs_dn0: f64 = 0.0;
-        let mut var_ddeltal_dvs_dn1: f64 = 0.0;
-        let mut var_ddeltal_dvs_dn2: f64 = 0.0;
-        let mut var_ddeltal_dvs_dn3: f64 = 0.0;
-        let mut var_dn_dvd: f64 = 0.0;
-        let mut var_dn_dvd_dn0: f64 = 0.0;
-        let mut var_dn_dvd_dn1: f64 = 0.0;
-        let mut var_dn_dvd_dn2: f64 = 0.0;
-        let mut var_dn_dvd_dn3: f64 = 0.0;
-        let mut var_dn_dvs: f64 = 0.0;
-        let mut var_dn_dvs_dn0: f64 = 0.0;
-        let mut var_dn_dvs_dn1: f64 = 0.0;
-        let mut var_dn_dvs_dn2: f64 = 0.0;
-        let mut var_dn_dvs_dn3: f64 = 0.0;
-        let mut var_log_vc_vt: f64 = 0.0;
-        let mut var_sqrt_phi_vp0: f64 = 0.0;
-        let mut var_sqrt_phi_vp0_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vp0_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vp0_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vp0_dn3: f64 = 0.0;
-        let mut var_sqrt_vp_vt: f64 = 0.0;
-        let mut var_sqrt_vp_vt_dn0: f64 = 0.0;
-        let mut var_sqrt_vp_vt_dn1: f64 = 0.0;
-        let mut var_sqrt_vp_vt_dn2: f64 = 0.0;
-        let mut var_sqrt_vp_vt_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vp2_2: f64 = 0.0;
-        let mut var_sqrt_phi_vp2_2_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vp2_2_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vp2_2_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vp2_2_dn3: f64 = 0.0;
-        let mut var_v0: f64 = 0.0;
-        let mut var_deltavfb: f64 = 0.0;
-        let mut var_vl: f64 = 0.0;
-        let mut var_dqi_dvd: f64 = 0.0;
-        let mut var_dqi_dvd_dn0: f64 = 0.0;
-        let mut var_dqi_dvd_dn1: f64 = 0.0;
-        let mut var_dqi_dvd_dn2: f64 = 0.0;
-        let mut var_dqi_dvd_dn3: f64 = 0.0;
-        let mut var_dqi_dvs: f64 = 0.0;
-        let mut var_dqi_dvs_dn0: f64 = 0.0;
-        let mut var_dqi_dvs_dn1: f64 = 0.0;
-        let mut var_dqi_dvs_dn2: f64 = 0.0;
-        let mut var_dqi_dvs_dn3: f64 = 0.0;
-        let mut var_dqb_dvd: f64 = 0.0;
-        let mut var_dqb_dvd_dn0: f64 = 0.0;
-        let mut var_dqb_dvd_dn1: f64 = 0.0;
-        let mut var_dqb_dvd_dn2: f64 = 0.0;
-        let mut var_dqb_dvd_dn3: f64 = 0.0;
-        let mut var_dqb_dvs: f64 = 0.0;
-        let mut var_dqb_dvs_dn0: f64 = 0.0;
-        let mut var_dqb_dvs_dn1: f64 = 0.0;
-        let mut var_dqb_dvs_dn2: f64 = 0.0;
-        let mut var_dqb_dvs_dn3: f64 = 0.0;
-        let mut var_leff: f64 = 0.0;
-        let mut var_weff: f64 = 0.0;
-        let mut var_rseff: f64 = 0.0;
-        let mut var_rdeff: f64 = 0.0;
-        let mut var_yk: f64 = 0.0;
-        let mut var_yk_dn0: f64 = 0.0;
-        let mut var_yk_dn1: f64 = 0.0;
-        let mut var_yk_dn2: f64 = 0.0;
-        let mut var_yk_dn3: f64 = 0.0;
-        let mut var_z0: f64 = 0.0;
-        let mut var_z0_dn0: f64 = 0.0;
-        let mut var_z0_dn1: f64 = 0.0;
-        let mut var_z0_dn2: f64 = 0.0;
-        let mut var_z0_dn3: f64 = 0.0;
-        let mut var_zk: f64 = 0.0;
-        let mut var_zk_dn0: f64 = 0.0;
-        let mut var_zk_dn1: f64 = 0.0;
-        let mut var_zk_dn2: f64 = 0.0;
-        let mut var_zk_dn3: f64 = 0.0;
-        let mut var_epssil: f64 = 0.0;
-        let mut var_ddt_qd: f64 = 0.0;
-        let mut var_ddt_qd_dn0: f64 = 0.0;
-        let mut var_ddt_qd_dn1: f64 = 0.0;
-        let mut var_ddt_qd_dn2: f64 = 0.0;
-        let mut var_ddt_qd_dn3: f64 = 0.0;
-        let mut var_ddt_qs: f64 = 0.0;
-        let mut var_ddt_qs_dn0: f64 = 0.0;
-        let mut var_ddt_qs_dn1: f64 = 0.0;
-        let mut var_ddt_qs_dn2: f64 = 0.0;
-        let mut var_ddt_qs_dn3: f64 = 0.0;
-        let mut var_as_i: f64 = 0.0;
-        let mut var_ad_i: f64 = 0.0;
-        let mut var_ps_i: f64 = 0.0;
-        let mut var_pd_i: f64 = 0.0;
-        let mut var_v_di_b: f64 = 0.0;
-        let mut var_v_di_b_dn0: f64 = 0.0;
-        let mut var_v_di_b_dn3: f64 = 0.0;
-        let mut var_v_si_b: f64 = 0.0;
-        let mut var_v_si_b_dn2: f64 = 0.0;
-        let mut var_v_si_b_dn3: f64 = 0.0;
-        let mut var_pb_t: f64 = 0.0;
-        let mut var_pbsw_t: f64 = 0.0;
-        let mut var_pbswg_t: f64 = 0.0;
-        let mut var_cj_t: f64 = 0.0;
-        let mut var_cjsw_t: f64 = 0.0;
-        let mut var_cjswg_t: f64 = 0.0;
-        let mut var_csb_d: f64 = 0.0;
-        let mut var_csb_d_dn0: f64 = 0.0;
-        let mut var_csb_d_dn3: f64 = 0.0;
-        let mut var_cssw_d: f64 = 0.0;
-        let mut var_cssw_d_dn0: f64 = 0.0;
-        let mut var_cssw_d_dn3: f64 = 0.0;
-        let mut var_csswg_d: f64 = 0.0;
-        let mut var_csswg_d_dn0: f64 = 0.0;
-        let mut var_csswg_d_dn3: f64 = 0.0;
-        let mut var_csb_s: f64 = 0.0;
-        let mut var_csb_s_dn2: f64 = 0.0;
-        let mut var_csb_s_dn3: f64 = 0.0;
-        let mut var_cssw_s: f64 = 0.0;
-        let mut var_cssw_s_dn2: f64 = 0.0;
-        let mut var_cssw_s_dn3: f64 = 0.0;
-        let mut var_csswg_s: f64 = 0.0;
-        let mut var_csswg_s_dn2: f64 = 0.0;
-        let mut var_csswg_s_dn3: f64 = 0.0;
-        let mut var_qjd: f64 = 0.0;
-        let mut var_qjd_dn0: f64 = 0.0;
-        let mut var_qjd_dn3: f64 = 0.0;
-        let mut var_qjs: f64 = 0.0;
-        let mut var_qjs_dn2: f64 = 0.0;
-        let mut var_qjs_dn3: f64 = 0.0;
-        let mut var_guard1: f64 = 0.0;
-        let mut var_guard2: f64 = 0.0;
-        let mut var_guard3: f64 = 0.0;
-        let mut var_guard4: f64 = 0.0;
-        let mut var_sqv: f64 = 0.0;
-        let mut var_guard6: f64 = 0.0;
-        let mut var_guard7: f64 = 0.0;
-        let mut var_guard8: f64 = 0.0;
-        let mut var_guard9: f64 = 0.0;
-        let mut var_guard10: f64 = 0.0;
-        let mut var_guard11: f64 = 0.0;
-        let mut var_guard12: f64 = 0.0;
-        let mut var_guard13: f64 = 0.0;
-        let mut var_guard14: f64 = 0.0;
-        let mut var_guard15: f64 = 0.0;
-        let mut var_guard16: f64 = 0.0;
-        let mut var_guard17: f64 = 0.0;
-        let mut var_guard18: f64 = 0.0;
-        let mut var_guard21: f64 = 0.0;
-        let mut var_guard24: f64 = 0.0;
-        let mut var_guard25: f64 = 0.0;
-        let mut var_guard26: f64 = 0.0;
-        let mut var_guard27: f64 = 0.0;
-        let mut var_guard32: f64 = 0.0;
-        let mut var_guard33: f64 = 0.0;
+        let mut locals = StampLocals::default();
 
-        Self::stamp_transient_block_0(ctx, p, nodes, &mut var_awl, &mut var_deltat, &mut var_deltavfb, &mut var_eg, &mut var_eps_cox, &mut var_eps_cox_l, &mut var_eps_cox_w, &mut var_epssil, &mut var_eta_qi, &mut var_gamma_s, &mut var_gamma_sqrt_phi, &mut var_gamma_sqrt_phi_dn0, &mut var_gamma_sqrt_phi_dn1, &mut var_gamma_sqrt_phi_dn2, &mut var_gamma_sqrt_phi_dn3, &mut var_guard1, &mut var_guard2, &mut var_guard3, &mut var_guard4, &mut var_guard6, &mut var_inv_ucrit, &mut var_inv_vt, &mut var_kp_t, &mut var_kp_weff, &mut var_lc, &mut var_lc_lambda, &mut var_lc_ucrit, &mut var_leff, &mut var_log_vc_vt, &mut var_mode, &mut var_phi_t, &mut var_phi_t_dn0, &mut var_phi_t_dn1, &mut var_phi_t_dn2, &mut var_phi_t_dn3, &mut var_phi_vd, &mut var_phi_vd_dn0, &mut var_phi_vd_dn1, &mut var_phi_vd_dn2, &mut var_phi_vd_dn3, &mut var_phi_vs, &mut var_phi_vs_dn0, &mut var_phi_vs_dn1, &mut var_phi_vs_dn2, &mut var_phi_vs_dn3, &mut var_ratiot, &mut var_refeg, &mut var_sqrt_phi, &mut var_sqrt_phi_dn0, &mut var_sqrt_phi_dn1, &mut var_sqrt_phi_dn2, &mut var_sqrt_phi_dn3, &mut var_sqrt_phi_vd_vt, &mut var_sqrt_phi_vd_vt_dn0, &mut var_sqrt_phi_vd_vt_dn1, &mut var_sqrt_phi_vd_vt_dn2, &mut var_sqrt_phi_vd_vt_dn3, &mut var_sqrt_phi_vs, &mut var_sqrt_phi_vs_dn0, &mut var_sqrt_phi_vs_dn1, &mut var_sqrt_phi_vs_dn2, &mut var_sqrt_phi_vs_dn3, &mut var_sqrt_phi_vs_vt, &mut var_sqrt_phi_vs_vt_dn0, &mut var_sqrt_phi_vs_vt_dn1, &mut var_sqrt_phi_vs_vt_dn2, &mut var_sqrt_phi_vs_vt_dn3, &mut var_sqrt_vgstar, &mut var_sqrt_vgstar_dn0, &mut var_sqrt_vgstar_dn1, &mut var_sqrt_vgstar_dn2, &mut var_sqrt_vgstar_dn3, &mut var_sqrt_vp_vt, &mut var_sqrt_vp_vt_dn0, &mut var_sqrt_vp_vt_dn1, &mut var_sqrt_vp_vt_dn2, &mut var_sqrt_vp_vt_dn3, &mut var_sqv, &mut var_t, &mut var_t0, &mut var_t1, &mut var_t1_dn0, &mut var_t1_dn2, &mut var_t1_dn3, &mut var_theta_vp_1, &mut var_theta_vp_1_dn0, &mut var_theta_vp_1_dn1, &mut var_theta_vp_1_dn2, &mut var_theta_vp_1_dn3, &mut var_tmp1, &mut var_tmp1_dn0, &mut var_tmp1_dn1, &mut var_tmp1_dn2, &mut var_tmp1_dn3, &mut var_tmp2, &mut var_tmp2_dn0, &mut var_tmp2_dn1, &mut var_tmp2_dn2, &mut var_tmp2_dn3, &mut var_tnom, &mut var_ucrit_t, &mut var_v0, &mut var_vc, &mut var_vd, &mut var_vd_dn0, &mut var_vd_dn2, &mut var_vd_dn3, &mut var_vg, &mut var_vg_dn1, &mut var_vg_dn3, &mut var_vgprime, &mut var_vgprime_dn0, &mut var_vgprime_dn1, &mut var_vgprime_dn2, &mut var_vgprime_dn3, &mut var_vgstar, &mut var_vgstar_dn0, &mut var_vgstar_dn1, &mut var_vgstar_dn2, &mut var_vgstar_dn3, &mut var_vl, &mut var_vpprime, &mut var_vpprime_dn0, &mut var_vpprime_dn1, &mut var_vpprime_dn2, &mut var_vpprime_dn3, &mut var_vs, &mut var_vs_dn0, &mut var_vs_dn2, &mut var_vs_dn3, &mut var_vt, &mut var_vt_01, &mut var_vt_2, &mut var_vt_4, &mut var_vt_vt, &mut var_vt_vt_16, &mut var_vt_vt_2, &mut var_vto_s, &mut var_vto_t, &mut var_weff);
-        Self::stamp_transient_block_1(p, var_eps_cox_l, var_eps_cox_w, var_gamma_s, var_inv_vt, var_leff, var_log_vc_vt, var_phi_t, var_phi_t_dn0, var_phi_t_dn1, var_phi_t_dn2, var_phi_t_dn3, var_phi_vd, var_phi_vd_dn0, var_phi_vd_dn1, var_phi_vd_dn2, var_phi_vd_dn3, var_sqrt_phi_vd_vt, var_sqrt_phi_vd_vt_dn0, var_sqrt_phi_vd_vt_dn1, var_sqrt_phi_vd_vt_dn2, var_sqrt_phi_vd_vt_dn3, var_sqrt_phi_vs, var_sqrt_phi_vs_dn0, var_sqrt_phi_vs_dn1, var_sqrt_phi_vs_dn2, var_sqrt_phi_vs_dn3, var_vc, var_vd, var_vd_dn0, var_vd_dn2, var_vd_dn3, var_vgprime, var_vgprime_dn0, var_vgprime_dn1, var_vgprime_dn2, var_vgprime_dn3, var_vs, var_vs_dn0, var_vs_dn2, var_vs_dn3, var_vt, var_vt_01, var_vt_vt_16, var_weff, &mut var_big_sqrt_vp, &mut var_big_sqrt_vp0, &mut var_big_sqrt_vp0_dn0, &mut var_big_sqrt_vp0_dn1, &mut var_big_sqrt_vp0_dn2, &mut var_big_sqrt_vp0_dn3, &mut var_big_sqrt_vp_dn0, &mut var_big_sqrt_vp_dn1, &mut var_big_sqrt_vp_dn2, &mut var_big_sqrt_vp_dn3, &mut var_deltav_2, &mut var_deltav_2_dn0, &mut var_deltav_2_dn1, &mut var_deltav_2_dn2, &mut var_deltav_2_dn3, &mut var_dif_dv, &mut var_dif_dv_dn0, &mut var_dif_dv_dn1, &mut var_dif_dv_dn2, &mut var_dif_dv_dn3, &mut var_gammaprime, &mut var_gammaprime_dn0, &mut var_gammaprime_dn1, &mut var_gammaprime_dn2, &mut var_gammaprime_dn3, &mut var_gammastar, &mut var_gammastar_dn0, &mut var_gammastar_dn1, &mut var_gammastar_dn2, &mut var_gammastar_dn3, &mut var_guard10, &mut var_guard11, &mut var_guard7, &mut var_guard8, &mut var_guard9, &mut var_if_, &mut var_if__dn0, &mut var_if__dn1, &mut var_if__dn2, &mut var_if__dn3, &mut var_leta_l, &mut var_sqrt_gammastar, &mut var_sqrt_gammastar_dn0, &mut var_sqrt_gammastar_dn1, &mut var_sqrt_gammastar_dn2, &mut var_sqrt_gammastar_dn3, &mut var_sqrt_if, &mut var_sqrt_if_dn0, &mut var_sqrt_if_dn1, &mut var_sqrt_if_dn2, &mut var_sqrt_if_dn3, &mut var_sqrt_phi_vd, &mut var_sqrt_phi_vd_dn0, &mut var_sqrt_phi_vd_dn1, &mut var_sqrt_phi_vd_dn2, &mut var_sqrt_phi_vd_dn3, &mut var_sqrt_phi_vp0, &mut var_sqrt_phi_vp0_dn0, &mut var_sqrt_phi_vp0_dn1, &mut var_sqrt_phi_vp0_dn2, &mut var_sqrt_phi_vp0_dn3, &mut var_sqrt_vds_vdss_deltav, &mut var_sqrt_vds_vdss_deltav_dn0, &mut var_sqrt_vds_vdss_deltav_dn1, &mut var_sqrt_vds_vdss_deltav_dn2, &mut var_sqrt_vds_vdss_deltav_dn3, &mut var_sqrt_vds_vdssprime_deltav, &mut var_sqrt_vds_vdssprime_deltav_dn0, &mut var_sqrt_vds_vdssprime_deltav_dn1, &mut var_sqrt_vds_vdssprime_deltav_dn2, &mut var_sqrt_vds_vdssprime_deltav_dn3, &mut var_sqrt_vdss_deltav, &mut var_sqrt_vdss_deltav_dn0, &mut var_sqrt_vdss_deltav_dn1, &mut var_sqrt_vdss_deltav_dn2, &mut var_sqrt_vdss_deltav_dn3, &mut var_sqrt_vdssprime_deltav, &mut var_sqrt_vdssprime_deltav_dn0, &mut var_sqrt_vdssprime_deltav_dn1, &mut var_sqrt_vdssprime_deltav_dn2, &mut var_sqrt_vdssprime_deltav_dn3, &mut var_tmp1, &mut var_tmp1_dn0, &mut var_tmp1_dn1, &mut var_tmp1_dn2, &mut var_tmp1_dn3, &mut var_vds, &mut var_vds_dn0, &mut var_vds_dn2, &mut var_vds_dn3, &mut var_vdsprime, &mut var_vdsprime_dn0, &mut var_vdsprime_dn1, &mut var_vdsprime_dn2, &mut var_vdsprime_dn3, &mut var_vdss, &mut var_vdss_dn0, &mut var_vdss_dn1, &mut var_vdss_dn2, &mut var_vdss_dn3, &mut var_vdss_sqrt, &mut var_vdss_sqrt_dn0, &mut var_vdss_sqrt_dn1, &mut var_vdss_sqrt_dn2, &mut var_vdss_sqrt_dn3, &mut var_vdssprime, &mut var_vdssprime_dn0, &mut var_vdssprime_dn1, &mut var_vdssprime_dn2, &mut var_vdssprime_dn3, &mut var_vdssprime_sqrt, &mut var_vdssprime_sqrt_dn0, &mut var_vdssprime_sqrt_dn1, &mut var_vdssprime_sqrt_dn2, &mut var_vdssprime_sqrt_dn3, &mut var_vip, &mut var_vip_dn0, &mut var_vip_dn1, &mut var_vip_dn2, &mut var_vip_dn3, &mut var_vp, &mut var_vp0, &mut var_vp0_dn0, &mut var_vp0_dn1, &mut var_vp0_dn2, &mut var_vp0_dn3, &mut var_vp_dn0, &mut var_vp_dn1, &mut var_vp_dn2, &mut var_vp_dn3, &mut var_vt_vc, &mut var_weta_w, &mut var_yk, &mut var_yk_dn0, &mut var_yk_dn1, &mut var_yk_dn2, &mut var_yk_dn3, &mut var_z0, &mut var_z0_dn0, &mut var_z0_dn1, &mut var_z0_dn2, &mut var_z0_dn3, &mut var_zk, &mut var_zk_dn0, &mut var_zk_dn1, &mut var_zk_dn2, &mut var_zk_dn3);
-        Self::stamp_transient_block_2(p, var_eta_qi, var_gamma_s, var_gamma_sqrt_phi, var_gamma_sqrt_phi_dn0, var_gamma_sqrt_phi_dn1, var_gamma_sqrt_phi_dn2, var_gamma_sqrt_phi_dn3, var_guard10, var_guard11, var_if_, var_if__dn0, var_if__dn1, var_if__dn2, var_if__dn3, var_inv_ucrit, var_inv_vt, var_kp_weff, var_lc_lambda, var_lc_ucrit, var_leff, var_phi_t, var_phi_t_dn0, var_phi_t_dn1, var_phi_t_dn2, var_phi_t_dn3, var_t0, var_vd, var_vd_dn0, var_vd_dn2, var_vd_dn3, var_vds, var_vds_dn0, var_vds_dn2, var_vds_dn3, var_vip, var_vip_dn0, var_vip_dn1, var_vip_dn2, var_vip_dn3, var_vp, var_vp_dn0, var_vp_dn1, var_vp_dn2, var_vp_dn3, var_vt, var_vt_4, var_vt_vt_2, &mut var_beta, &mut var_beta_dn0, &mut var_beta_dn1, &mut var_beta_dn2, &mut var_beta_dn3, &mut var_deltal, &mut var_deltal_dn0, &mut var_deltal_dn1, &mut var_deltal_dn2, &mut var_deltal_dn3, &mut var_dir_dv, &mut var_dir_dv_dn0, &mut var_dir_dv_dn1, &mut var_dir_dv_dn2, &mut var_dir_dv_dn3, &mut var_dirprime_dv, &mut var_dirprime_dv_dn0, &mut var_dirprime_dv_dn1, &mut var_dirprime_dv_dn2, &mut var_dirprime_dv_dn3, &mut var_e0_q_1, &mut var_e0_q_1_dn0, &mut var_e0_q_1_dn1, &mut var_e0_q_1_dn2, &mut var_e0_q_1_dn3, &mut var_guard12, &mut var_guard13, &mut var_guard14, &mut var_guard15, &mut var_guard16, &mut var_guard17, &mut var_ir, &mut var_ir_dn0, &mut var_ir_dn1, &mut var_ir_dn2, &mut var_ir_dn3, &mut var_irprime, &mut var_irprime_dn0, &mut var_irprime_dn1, &mut var_irprime_dn2, &mut var_irprime_dn3, &mut var_leq, &mut var_leq_dn0, &mut var_leq_dn1, &mut var_leq_dn2, &mut var_leq_dn3, &mut var_lmin, &mut var_lprime, &mut var_lprime_dn0, &mut var_lprime_dn1, &mut var_lprime_dn2, &mut var_lprime_dn3, &mut var_n_1, &mut var_n_1_dn0, &mut var_n_1_dn1, &mut var_n_1_dn2, &mut var_n_1_dn3, &mut var_n_1_n, &mut var_n_1_n_dn0, &mut var_n_1_n_dn1, &mut var_n_1_n_dn2, &mut var_n_1_n_dn3, &mut var_qb, &mut var_qb_dn0, &mut var_qb_dn1, &mut var_qb_dn2, &mut var_qb_dn3, &mut var_qi, &mut var_qi_dn0, &mut var_qi_dn1, &mut var_qi_dn2, &mut var_qi_dn3, &mut var_sif, &mut var_sif2, &mut var_sif2_dn0, &mut var_sif2_dn1, &mut var_sif2_dn2, &mut var_sif2_dn3, &mut var_sif_dn0, &mut var_sif_dn1, &mut var_sif_dn2, &mut var_sif_dn3, &mut var_sif_sir_2, &mut var_sif_sir_2_dn0, &mut var_sif_sir_2_dn1, &mut var_sif_sir_2_dn2, &mut var_sif_sir_2_dn3, &mut var_sir, &mut var_sir2, &mut var_sir2_dn0, &mut var_sir2_dn1, &mut var_sir2_dn2, &mut var_sir2_dn3, &mut var_sir_dn0, &mut var_sir_dn1, &mut var_sir_dn2, &mut var_sir_dn3, &mut var_sqrt_lprime_lmin, &mut var_sqrt_lprime_lmin_dn0, &mut var_sqrt_lprime_lmin_dn1, &mut var_sqrt_lprime_lmin_dn2, &mut var_sqrt_lprime_lmin_dn3, &mut var_sqrt_phi_vp, &mut var_sqrt_phi_vp_2, &mut var_sqrt_phi_vp_2_dn0, &mut var_sqrt_phi_vp_2_dn1, &mut var_sqrt_phi_vp_2_dn2, &mut var_sqrt_phi_vp_2_dn3, &mut var_sqrt_phi_vp_dn0, &mut var_sqrt_phi_vp_dn1, &mut var_sqrt_phi_vp_dn2, &mut var_sqrt_phi_vp_dn3, &mut var_sqrt_vp_vt, &mut var_sqrt_vp_vt_dn0, &mut var_sqrt_vp_vt_dn1, &mut var_sqrt_vp_vt_dn2, &mut var_sqrt_vp_vt_dn3, &mut var_t0_gamma_1, &mut var_t0_gamma_1_dn0, &mut var_t0_gamma_1_dn1, &mut var_t0_gamma_1_dn2, &mut var_t0_gamma_1_dn3, &mut var_theta_vp_1, &mut var_theta_vp_1_dn0, &mut var_theta_vp_1_dn1, &mut var_theta_vp_1_dn2, &mut var_theta_vp_1_dn3, &mut var_tmp1, &mut var_tmp1_dn0, &mut var_tmp1_dn1, &mut var_tmp1_dn2, &mut var_tmp1_dn3, &mut var_vp_phi_eps, &mut var_vp_phi_eps_dn0, &mut var_vp_phi_eps_dn1, &mut var_vp_phi_eps_dn2, &mut var_vp_phi_eps_dn3, &mut var_vpprime, &mut var_vpprime_dn0, &mut var_vpprime_dn1, &mut var_vpprime_dn2, &mut var_vpprime_dn3, &mut var_yk, &mut var_yk_dn0, &mut var_yk_dn1, &mut var_yk_dn2, &mut var_yk_dn3, &mut var_z0, &mut var_z0_dn0, &mut var_z0_dn1, &mut var_z0_dn2, &mut var_z0_dn3, &mut var_zk, &mut var_zk_dn0, &mut var_zk_dn1, &mut var_zk_dn2, &mut var_zk_dn3);
-        Self::stamp_transient_block_3(p, var_beta, var_beta_dn0, var_beta_dn1, var_beta_dn2, var_beta_dn3, var_big_sqrt_vp, var_big_sqrt_vp_dn0, var_big_sqrt_vp_dn1, var_big_sqrt_vp_dn2, var_big_sqrt_vp_dn3, var_dif_dv, var_dif_dv_dn0, var_dif_dv_dn1, var_dif_dv_dn2, var_dif_dv_dn3, var_dir_dv, var_dir_dv_dn0, var_dir_dv_dn1, var_dir_dv_dn2, var_dir_dv_dn3, var_dirprime_dv, var_dirprime_dv_dn0, var_dirprime_dv_dn1, var_dirprime_dv_dn2, var_dirprime_dv_dn3, var_gamma_s, var_gammaprime, var_gammaprime_dn0, var_gammaprime_dn1, var_gammaprime_dn2, var_gammaprime_dn3, var_if_, var_if__dn0, var_if__dn1, var_if__dn2, var_if__dn3, var_inv_ucrit, var_inv_vt, var_irprime, var_irprime_dn0, var_irprime_dn1, var_irprime_dn2, var_irprime_dn3, var_lc_lambda, var_lc_ucrit, var_leta_l, var_n_1, var_n_1_dn0, var_n_1_dn1, var_n_1_dn2, var_n_1_dn3, var_n_1_n, var_n_1_n_dn0, var_n_1_n_dn1, var_n_1_n_dn2, var_n_1_n_dn3, var_phi_t, var_phi_t_dn0, var_phi_t_dn1, var_phi_t_dn2, var_phi_t_dn3, var_qi, var_qi_dn0, var_qi_dn1, var_qi_dn2, var_qi_dn3, var_sif, var_sif_dn0, var_sif_dn1, var_sif_dn2, var_sif_dn3, var_sif_sir_2, var_sif_sir_2_dn0, var_sif_sir_2_dn1, var_sif_sir_2_dn2, var_sif_sir_2_dn3, var_sir, var_sir_dn0, var_sir_dn1, var_sir_dn2, var_sir_dn3, var_sqrt_gammastar, var_sqrt_gammastar_dn0, var_sqrt_gammastar_dn1, var_sqrt_gammastar_dn2, var_sqrt_gammastar_dn3, var_sqrt_if, var_sqrt_if_dn0, var_sqrt_if_dn1, var_sqrt_if_dn2, var_sqrt_if_dn3, var_sqrt_lprime_lmin, var_sqrt_lprime_lmin_dn0, var_sqrt_lprime_lmin_dn1, var_sqrt_lprime_lmin_dn2, var_sqrt_lprime_lmin_dn3, var_sqrt_phi_vd, var_sqrt_phi_vd_dn0, var_sqrt_phi_vd_dn1, var_sqrt_phi_vd_dn2, var_sqrt_phi_vd_dn3, var_sqrt_phi_vd_vt, var_sqrt_phi_vd_vt_dn0, var_sqrt_phi_vd_vt_dn1, var_sqrt_phi_vd_vt_dn2, var_sqrt_phi_vd_vt_dn3, var_sqrt_phi_vp, var_sqrt_phi_vp_dn0, var_sqrt_phi_vp_dn1, var_sqrt_phi_vp_dn2, var_sqrt_phi_vp_dn3, var_sqrt_phi_vs, var_sqrt_phi_vs_dn0, var_sqrt_phi_vs_dn1, var_sqrt_phi_vs_dn2, var_sqrt_phi_vs_dn3, var_sqrt_phi_vs_vt, var_sqrt_phi_vs_vt_dn0, var_sqrt_phi_vs_vt_dn1, var_sqrt_phi_vs_vt_dn2, var_sqrt_phi_vs_vt_dn3, var_sqrt_vds_vdss_deltav, var_sqrt_vds_vdss_deltav_dn0, var_sqrt_vds_vdss_deltav_dn1, var_sqrt_vds_vdss_deltav_dn2, var_sqrt_vds_vdss_deltav_dn3, var_sqrt_vds_vdssprime_deltav, var_sqrt_vds_vdssprime_deltav_dn0, var_sqrt_vds_vdssprime_deltav_dn1, var_sqrt_vds_vdssprime_deltav_dn2, var_sqrt_vds_vdssprime_deltav_dn3, var_sqrt_vdss_deltav, var_sqrt_vdss_deltav_dn0, var_sqrt_vdss_deltav_dn1, var_sqrt_vdss_deltav_dn2, var_sqrt_vdss_deltav_dn3, var_sqrt_vdssprime_deltav, var_sqrt_vdssprime_deltav_dn0, var_sqrt_vdssprime_deltav_dn1, var_sqrt_vdssprime_deltav_dn2, var_sqrt_vdssprime_deltav_dn3, var_sqrt_vgstar, var_sqrt_vgstar_dn0, var_sqrt_vgstar_dn1, var_sqrt_vgstar_dn2, var_sqrt_vgstar_dn3, var_sqrt_vp_vt, var_sqrt_vp_vt_dn0, var_sqrt_vp_vt_dn1, var_sqrt_vp_vt_dn2, var_sqrt_vp_vt_dn3, var_theta_vp_1, var_theta_vp_1_dn0, var_theta_vp_1_dn1, var_theta_vp_1_dn2, var_theta_vp_1_dn3, var_vds, var_vds_dn0, var_vds_dn2, var_vds_dn3, var_vdsprime, var_vdsprime_dn0, var_vdsprime_dn1, var_vdsprime_dn2, var_vdsprime_dn3, var_vdss, var_vdss_dn0, var_vdss_dn1, var_vdss_dn2, var_vdss_dn3, var_vdss_sqrt, var_vdss_sqrt_dn0, var_vdss_sqrt_dn1, var_vdss_sqrt_dn2, var_vdss_sqrt_dn3, var_vdssprime, var_vdssprime_dn0, var_vdssprime_dn1, var_vdssprime_dn2, var_vdssprime_dn3, var_vdssprime_sqrt, var_vdssprime_sqrt_dn0, var_vdssprime_sqrt_dn1, var_vdssprime_sqrt_dn2, var_vdssprime_sqrt_dn3, var_vgprime, var_vgprime_dn0, var_vgprime_dn1, var_vgprime_dn2, var_vgprime_dn3, var_vip, var_vip_dn0, var_vip_dn1, var_vip_dn2, var_vip_dn3, var_vp, var_vp_dn0, var_vp_dn1, var_vp_dn2, var_vp_dn3, var_vp_phi_eps, var_vp_phi_eps_dn0, var_vp_phi_eps_dn1, var_vp_phi_eps_dn2, var_vp_phi_eps_dn3, var_vpprime, var_vpprime_dn0, var_vpprime_dn1, var_vpprime_dn2, var_vpprime_dn3, var_vt, var_vt_4, var_vt_vt_2, &mut var_ddeltal_dvd, &mut var_ddeltal_dvd_dn0, &mut var_ddeltal_dvd_dn1, &mut var_ddeltal_dvd_dn2, &mut var_ddeltal_dvd_dn3, &mut var_ddeltal_dvs, &mut var_ddeltal_dvs_dn0, &mut var_ddeltal_dvs_dn1, &mut var_ddeltal_dvs_dn2, &mut var_ddeltal_dvs_dn3, &mut var_ddeltav_dvd, &mut var_ddeltav_dvd_dn0, &mut var_ddeltav_dvd_dn1, &mut var_ddeltav_dvd_dn2, &mut var_ddeltav_dvd_dn3, &mut var_ddeltav_dvs, &mut var_ddeltav_dvs_dn0, &mut var_ddeltav_dvs_dn1, &mut var_ddeltav_dvs_dn2, &mut var_ddeltav_dvs_dn3, &mut var_dgammaprime_dvd, &mut var_dgammaprime_dvd_dn0, &mut var_dgammaprime_dvd_dn1, &mut var_dgammaprime_dvd_dn2, &mut var_dgammaprime_dvd_dn3, &mut var_dgammaprime_dvs, &mut var_dgammaprime_dvs_dn0, &mut var_dgammaprime_dvs_dn1, &mut var_dgammaprime_dvs_dn2, &mut var_dgammaprime_dvs_dn3, &mut var_dif_dvd, &mut var_dif_dvd_dn0, &mut var_dif_dvd_dn1, &mut var_dif_dvd_dn2, &mut var_dif_dvd_dn3, &mut var_dif_dvs, &mut var_dif_dvs_dn0, &mut var_dif_dvs_dn1, &mut var_dif_dvs_dn2, &mut var_dif_dvs_dn3, &mut var_dir_dvd, &mut var_dir_dvd_dn0, &mut var_dir_dvd_dn1, &mut var_dir_dvd_dn2, &mut var_dir_dvd_dn3, &mut var_dir_dvs, &mut var_dir_dvs_dn0, &mut var_dir_dvs_dn1, &mut var_dir_dvs_dn2, &mut var_dir_dvs_dn3, &mut var_dirprime_dvd, &mut var_dirprime_dvd_dn0, &mut var_dirprime_dvd_dn1, &mut var_dirprime_dvd_dn2, &mut var_dirprime_dvd_dn3, &mut var_dirprime_dvs, &mut var_dirprime_dvs_dn0, &mut var_dirprime_dvs_dn1, &mut var_dirprime_dvs_dn2, &mut var_dirprime_dvs_dn3, &mut var_dleq_dvd, &mut var_dleq_dvd_dn0, &mut var_dleq_dvd_dn1, &mut var_dleq_dvd_dn2, &mut var_dleq_dvd_dn3, &mut var_dleq_dvs, &mut var_dleq_dvs_dn0, &mut var_dleq_dvs_dn1, &mut var_dleq_dvs_dn2, &mut var_dleq_dvs_dn3, &mut var_dqb_dvd, &mut var_dqb_dvd_dn0, &mut var_dqb_dvd_dn1, &mut var_dqb_dvd_dn2, &mut var_dqb_dvd_dn3, &mut var_dqb_dvs, &mut var_dqb_dvs_dn0, &mut var_dqb_dvs_dn1, &mut var_dqb_dvs_dn2, &mut var_dqb_dvs_dn3, &mut var_dqi_dvd, &mut var_dqi_dvd_dn0, &mut var_dqi_dvd_dn1, &mut var_dqi_dvd_dn2, &mut var_dqi_dvd_dn3, &mut var_dqi_dvs, &mut var_dqi_dvs_dn0, &mut var_dqi_dvs_dn1, &mut var_dqi_dvs_dn2, &mut var_dqi_dvs_dn3, &mut var_dvdss_dvd, &mut var_dvdss_dvd_dn0, &mut var_dvdss_dvd_dn1, &mut var_dvdss_dvd_dn2, &mut var_dvdss_dvd_dn3, &mut var_dvdss_dvs, &mut var_dvdss_dvs_dn0, &mut var_dvdss_dvs_dn1, &mut var_dvdss_dvs_dn2, &mut var_dvdss_dvs_dn3, &mut var_dvdssprime_dvd, &mut var_dvdssprime_dvd_dn0, &mut var_dvdssprime_dvd_dn1, &mut var_dvdssprime_dvd_dn2, &mut var_dvdssprime_dvd_dn3, &mut var_dvdssprime_dvs, &mut var_dvdssprime_dvs_dn0, &mut var_dvdssprime_dvs_dn1, &mut var_dvdssprime_dvs_dn2, &mut var_dvdssprime_dvs_dn3, &mut var_dvip_dvd, &mut var_dvip_dvd_dn0, &mut var_dvip_dvd_dn1, &mut var_dvip_dvd_dn2, &mut var_dvip_dvd_dn3, &mut var_dvip_dvs, &mut var_dvip_dvs_dn0, &mut var_dvip_dvs_dn1, &mut var_dvip_dvs_dn2, &mut var_dvip_dvs_dn3, &mut var_dvp_dvd, &mut var_dvp_dvd_dn0, &mut var_dvp_dvd_dn1, &mut var_dvp_dvd_dn2, &mut var_dvp_dvd_dn3, &mut var_dvp_dvs, &mut var_dvp_dvs_dn0, &mut var_dvp_dvs_dn1, &mut var_dvp_dvs_dn2, &mut var_dvp_dvs_dn3, &mut var_dvpprime_dvd, &mut var_dvpprime_dvd_dn0, &mut var_dvpprime_dvd_dn1, &mut var_dvpprime_dvd_dn2, &mut var_dvpprime_dvd_dn3, &mut var_guard18, &mut var_if_ir, &mut var_if_ir_dn0, &mut var_if_ir_dn1, &mut var_if_ir_dn2, &mut var_if_ir_dn3, &mut var_ispec, &mut var_ispec_dn0, &mut var_ispec_dn1, &mut var_ispec_dn2, &mut var_ispec_dn3, &mut var_n, &mut var_n_dn0, &mut var_n_dn1, &mut var_n_dn2, &mut var_n_dn3, &mut var_tmp1, &mut var_tmp1_dn0, &mut var_tmp1_dn1, &mut var_tmp1_dn2, &mut var_tmp1_dn3, &mut var_tmp2, &mut var_tmp2_dn0, &mut var_tmp2_dn1, &mut var_tmp2_dn2, &mut var_tmp2_dn3, &mut var_tmp3, &mut var_tmp3_dn0, &mut var_tmp3_dn1, &mut var_tmp3_dn2, &mut var_tmp3_dn3);
-        Self::stamp_transient_block_4(ctx, p, nodes, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, var_deltat, var_dif_dvd, var_dif_dvd_dn0, var_dif_dvd_dn1, var_dif_dvd_dn2, var_dif_dvd_dn3, var_dif_dvs, var_dif_dvs_dn0, var_dif_dvs_dn1, var_dif_dvs_dn2, var_dif_dvs_dn3, var_dirprime_dvd, var_dirprime_dvd_dn0, var_dirprime_dvd_dn1, var_dirprime_dvd_dn2, var_dirprime_dvd_dn3, var_dirprime_dvs, var_dirprime_dvs_dn0, var_dirprime_dvs_dn1, var_dirprime_dvs_dn2, var_dirprime_dvs_dn3, var_dleq_dvd, var_dleq_dvd_dn0, var_dleq_dvd_dn1, var_dleq_dvd_dn2, var_dleq_dvd_dn3, var_dleq_dvs, var_dleq_dvs_dn0, var_dleq_dvs_dn1, var_dleq_dvs_dn2, var_dleq_dvs_dn3, var_dqb_dvd, var_dqb_dvd_dn0, var_dqb_dvd_dn1, var_dqb_dvd_dn2, var_dqb_dvd_dn3, var_dqb_dvs, var_dqb_dvs_dn0, var_dqb_dvs_dn1, var_dqb_dvs_dn2, var_dqb_dvs_dn3, var_dqi_dvd, var_dqi_dvd_dn0, var_dqi_dvd_dn1, var_dqi_dvd_dn2, var_dqi_dvd_dn3, var_dqi_dvs, var_dqi_dvs_dn0, var_dqi_dvs_dn1, var_dqi_dvs_dn2, var_dqi_dvs_dn3, var_dvp_dvd, var_dvp_dvd_dn0, var_dvp_dvd_dn1, var_dvp_dvd_dn2, var_dvp_dvd_dn3, var_dvp_dvs, var_dvp_dvs_dn0, var_dvp_dvs_dn1, var_dvp_dvs_dn2, var_dvp_dvs_dn3, var_dvpprime_dvd, var_dvpprime_dvd_dn0, var_dvpprime_dvd_dn1, var_dvpprime_dvd_dn2, var_dvpprime_dvd_dn3, var_e0_q_1, var_e0_q_1_dn0, var_e0_q_1_dn1, var_e0_q_1_dn2, var_e0_q_1_dn3, var_eta_qi, var_gamma_s, var_gammaprime, var_gammaprime_dn0, var_gammaprime_dn1, var_gammaprime_dn2, var_gammaprime_dn3, var_guard18, var_if_ir, var_if_ir_dn0, var_if_ir_dn1, var_if_ir_dn2, var_if_ir_dn3, var_ispec, var_ispec_dn0, var_ispec_dn1, var_ispec_dn2, var_ispec_dn3, var_leff, var_mode, var_n, var_n_dn0, var_n_dn1, var_n_dn2, var_n_dn3, var_phi_t, var_phi_t_dn0, var_phi_t_dn1, var_phi_t_dn2, var_phi_t_dn3, var_sif, var_sif2, var_sif2_dn0, var_sif2_dn1, var_sif2_dn2, var_sif2_dn3, var_sif_dn0, var_sif_dn1, var_sif_dn2, var_sif_dn3, var_sif_sir_2, var_sif_sir_2_dn0, var_sif_sir_2_dn1, var_sif_sir_2_dn2, var_sif_sir_2_dn3, var_sir, var_sir2, var_sir2_dn0, var_sir2_dn1, var_sir2_dn2, var_sir2_dn3, var_sir_dn0, var_sir_dn1, var_sir_dn2, var_sir_dn3, var_sqrt_phi_vp, var_sqrt_phi_vp_2, var_sqrt_phi_vp_2_dn0, var_sqrt_phi_vp_2_dn1, var_sqrt_phi_vp_2_dn2, var_sqrt_phi_vp_2_dn3, var_sqrt_phi_vp_dn0, var_sqrt_phi_vp_dn1, var_sqrt_phi_vp_dn2, var_sqrt_phi_vp_dn3, var_t0, var_vgprime, var_vgprime_dn0, var_vgprime_dn1, var_vgprime_dn2, var_vgprime_dn3, var_vgstar, var_vgstar_dn0, var_vgstar_dn1, var_vgstar_dn2, var_vgstar_dn3, var_vp, var_vp_dn0, var_vp_dn1, var_vp_dn2, var_vp_dn3, var_vt, var_vt_4, var_weff, &mut var_ad_i, &mut var_as_i, &mut var_cj_t, &mut var_cjsw_t, &mut var_cjswg_t, &mut var_csb_d, &mut var_csb_d_dn0, &mut var_csb_d_dn3, &mut var_cssw_d, &mut var_cssw_d_dn0, &mut var_cssw_d_dn3, &mut var_csswg_d, &mut var_csswg_d_dn0, &mut var_csswg_d_dn3, &mut var_dbeta_dvd, &mut var_dbeta_dvd_dn0, &mut var_dbeta_dvd_dn1, &mut var_dbeta_dvd_dn2, &mut var_dbeta_dvd_dn3, &mut var_dbeta_dvs, &mut var_dbeta_dvs_dn0, &mut var_dbeta_dvs_dn1, &mut var_dbeta_dvs_dn2, &mut var_dbeta_dvs_dn3, &mut var_ddt_qd, &mut var_ddt_qd_dn0, &mut var_ddt_qd_dn1, &mut var_ddt_qd_dn2, &mut var_ddt_qd_dn3, &mut var_ddt_qs, &mut var_ddt_qs_dn0, &mut var_ddt_qs_dn1, &mut var_ddt_qs_dn2, &mut var_ddt_qs_dn3, &mut var_dn_dvd, &mut var_dn_dvd_dn0, &mut var_dn_dvd_dn1, &mut var_dn_dvd_dn2, &mut var_dn_dvd_dn3, &mut var_dn_dvs, &mut var_dn_dvs_dn0, &mut var_dn_dvs_dn1, &mut var_dn_dvs_dn2, &mut var_dn_dvs_dn3, &mut var_dvpprime_dvs, &mut var_dvpprime_dvs_dn0, &mut var_dvpprime_dvs_dn1, &mut var_dvpprime_dvs_dn2, &mut var_dvpprime_dvs_dn3, &mut var_gds, &mut var_gds_dn0, &mut var_gds_dn1, &mut var_gds_dn2, &mut var_gds_dn3, &mut var_gms, &mut var_gms_dn0, &mut var_gms_dn1, &mut var_gms_dn2, &mut var_gms_dn3, &mut var_guard21, &mut var_guard24, &mut var_guard25, &mut var_guard26, &mut var_guard27, &mut var_guard32, &mut var_n_vt_cox, &mut var_n_vt_cox_dn0, &mut var_n_vt_cox_dn1, &mut var_n_vt_cox_dn2, &mut var_n_vt_cox_dn3, &mut var_pb_t, &mut var_pbsw_t, &mut var_pbswg_t, &mut var_pd_i, &mut var_ps_i, &mut var_qb_1, &mut var_qb_1_dn0, &mut var_qb_1_dn1, &mut var_qb_1_dn2, &mut var_qb_1_dn3, &mut var_qd, &mut var_qd_dn0, &mut var_qd_dn1, &mut var_qd_dn2, &mut var_qd_dn3, &mut var_qg, &mut var_qg_dn0, &mut var_qg_dn1, &mut var_qg_dn2, &mut var_qg_dn3, &mut var_qi_1, &mut var_qi_1_dn0, &mut var_qi_1_dn1, &mut var_qi_1_dn2, &mut var_qi_1_dn3, &mut var_qs, &mut var_qs_dn0, &mut var_qs_dn1, &mut var_qs_dn2, &mut var_qs_dn3, &mut var_rdeff, &mut var_rseff, &mut var_sif3, &mut var_sif3_dn0, &mut var_sif3_dn1, &mut var_sif3_dn2, &mut var_sif3_dn3, &mut var_sir3, &mut var_sir3_dn0, &mut var_sir3_dn1, &mut var_sir3_dn2, &mut var_sir3_dn3, &mut var_sqrt_phi_vp2_2, &mut var_sqrt_phi_vp2_2_dn0, &mut var_sqrt_phi_vp2_2_dn1, &mut var_sqrt_phi_vp2_2_dn2, &mut var_sqrt_phi_vp2_2_dn3, &mut var_tmp1, &mut var_tmp1_dn0, &mut var_tmp1_dn1, &mut var_tmp1_dn2, &mut var_tmp1_dn3, &mut var_v_di_b, &mut var_v_di_b_dn0, &mut var_v_di_b_dn3, &mut var_v_si_b, &mut var_v_si_b_dn2, &mut var_v_si_b_dn3, &mut var_wlcox);
-        Self::stamp_transient_block_5(p, var_as_i, var_cj_t, var_cjsw_t, var_cjswg_t, var_csb_d, var_csb_d_dn0, var_csb_d_dn3, var_guard32, var_pb_t, var_pbsw_t, var_pbswg_t, var_pd_i, var_ps_i, var_v_di_b, var_v_di_b_dn0, var_v_di_b_dn3, var_v_si_b, var_v_si_b_dn2, var_v_si_b_dn3, var_weff, &mut var_csb_s, &mut var_csb_s_dn2, &mut var_csb_s_dn3, &mut var_cssw_d, &mut var_cssw_d_dn0, &mut var_cssw_d_dn3, &mut var_cssw_s, &mut var_cssw_s_dn2, &mut var_cssw_s_dn3, &mut var_csswg_d, &mut var_csswg_d_dn0, &mut var_csswg_d_dn3, &mut var_csswg_s, &mut var_csswg_s_dn2, &mut var_csswg_s_dn3, &mut var_guard33, &mut var_qjd, &mut var_qjd_dn0, &mut var_qjd_dn3, &mut var_qjs, &mut var_qjs_dn2, &mut var_qjs_dn3);
+        Self::stamp_transient_block_0(ctx, p, nodes, &mut locals);
+        Self::stamp_transient_block_1(p, &mut locals);
+        Self::stamp_transient_block_2(p, &mut locals);
+        Self::stamp_transient_block_3(p, &mut locals);
+        Self::stamp_transient_block_4(ctx, p, nodes, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
+        Self::stamp_transient_block_5(p, &mut locals);
 
-        Self::stamp_transient_equations_block_0(stamper, p, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, var_ddt_qd, var_ddt_qd_dn0, var_ddt_qd_dn1, var_ddt_qd_dn2, var_ddt_qd_dn3, var_ddt_qs, var_ddt_qs_dn0, var_ddt_qs_dn1, var_ddt_qs_dn2, var_ddt_qs_dn3, var_guard21, var_qg, var_qg_dn0, var_qg_dn1, var_qg_dn2, var_qg_dn3, var_qjd, var_qjd_dn0, var_qjd_dn3, var_qjs, var_qjs_dn2, var_qjs_dn3);
+        Self::stamp_transient_equations_block_0(stamper, p, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
@@ -4464,932 +4687,15 @@ impl Instance {
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
         let multiplicity = (*self).multiplicity;
-        let mut var_tmp1: f64 = 0.0;
-        let mut var_tmp1_rv: f64 = 0.0;
-        let mut var_tmp1_dn0: f64 = 0.0;
-        let mut var_tmp1_dn1: f64 = 0.0;
-        let mut var_tmp1_dn2: f64 = 0.0;
-        let mut var_tmp1_dn3: f64 = 0.0;
-        let mut var_tmp2: f64 = 0.0;
-        let mut var_tmp2_rv: f64 = 0.0;
-        let mut var_tmp2_dn0: f64 = 0.0;
-        let mut var_tmp2_dn1: f64 = 0.0;
-        let mut var_tmp2_dn2: f64 = 0.0;
-        let mut var_tmp2_dn3: f64 = 0.0;
-        let mut var_tmp3: f64 = 0.0;
-        let mut var_tmp3_rv: f64 = 0.0;
-        let mut var_tmp3_dn0: f64 = 0.0;
-        let mut var_tmp3_dn1: f64 = 0.0;
-        let mut var_tmp3_dn2: f64 = 0.0;
-        let mut var_tmp3_dn3: f64 = 0.0;
-        let mut var_vgprime: f64 = 0.0;
-        let mut var_vgprime_rv: f64 = 0.0;
-        let mut var_vgprime_dn0: f64 = 0.0;
-        let mut var_vgprime_dn1: f64 = 0.0;
-        let mut var_vgprime_dn2: f64 = 0.0;
-        let mut var_vgprime_dn3: f64 = 0.0;
-        let mut var_gammaprime: f64 = 0.0;
-        let mut var_gammaprime_rv: f64 = 0.0;
-        let mut var_gammaprime_dn0: f64 = 0.0;
-        let mut var_gammaprime_dn1: f64 = 0.0;
-        let mut var_gammaprime_dn2: f64 = 0.0;
-        let mut var_gammaprime_dn3: f64 = 0.0;
-        let mut var_vp: f64 = 0.0;
-        let mut var_vp_rv: f64 = 0.0;
-        let mut var_vp_dn0: f64 = 0.0;
-        let mut var_vp_dn1: f64 = 0.0;
-        let mut var_vp_dn2: f64 = 0.0;
-        let mut var_vp_dn3: f64 = 0.0;
-        let mut var_vpprime: f64 = 0.0;
-        let mut var_vpprime_rv: f64 = 0.0;
-        let mut var_vpprime_dn0: f64 = 0.0;
-        let mut var_vpprime_dn1: f64 = 0.0;
-        let mut var_vpprime_dn2: f64 = 0.0;
-        let mut var_vpprime_dn3: f64 = 0.0;
-        let mut var_if_: f64 = 0.0;
-        let mut var_if__rv: f64 = 0.0;
-        let mut var_if__dn0: f64 = 0.0;
-        let mut var_if__dn1: f64 = 0.0;
-        let mut var_if__dn2: f64 = 0.0;
-        let mut var_if__dn3: f64 = 0.0;
-        let mut var_ir: f64 = 0.0;
-        let mut var_ir_rv: f64 = 0.0;
-        let mut var_ir_dn0: f64 = 0.0;
-        let mut var_ir_dn1: f64 = 0.0;
-        let mut var_ir_dn2: f64 = 0.0;
-        let mut var_ir_dn3: f64 = 0.0;
-        let mut var_irprime: f64 = 0.0;
-        let mut var_irprime_rv: f64 = 0.0;
-        let mut var_irprime_dn0: f64 = 0.0;
-        let mut var_irprime_dn1: f64 = 0.0;
-        let mut var_irprime_dn2: f64 = 0.0;
-        let mut var_irprime_dn3: f64 = 0.0;
-        let mut var_vdss: f64 = 0.0;
-        let mut var_vdss_rv: f64 = 0.0;
-        let mut var_vdss_dn0: f64 = 0.0;
-        let mut var_vdss_dn1: f64 = 0.0;
-        let mut var_vdss_dn2: f64 = 0.0;
-        let mut var_vdss_dn3: f64 = 0.0;
-        let mut var_vdssprime: f64 = 0.0;
-        let mut var_vdssprime_rv: f64 = 0.0;
-        let mut var_vdssprime_dn0: f64 = 0.0;
-        let mut var_vdssprime_dn1: f64 = 0.0;
-        let mut var_vdssprime_dn2: f64 = 0.0;
-        let mut var_vdssprime_dn3: f64 = 0.0;
-        let mut var_deltal: f64 = 0.0;
-        let mut var_deltal_rv: f64 = 0.0;
-        let mut var_deltal_dn0: f64 = 0.0;
-        let mut var_deltal_dn1: f64 = 0.0;
-        let mut var_deltal_dn2: f64 = 0.0;
-        let mut var_deltal_dn3: f64 = 0.0;
-        let mut var_leq: f64 = 0.0;
-        let mut var_leq_rv: f64 = 0.0;
-        let mut var_leq_dn0: f64 = 0.0;
-        let mut var_leq_dn1: f64 = 0.0;
-        let mut var_leq_dn2: f64 = 0.0;
-        let mut var_leq_dn3: f64 = 0.0;
-        let mut var_beta: f64 = 0.0;
-        let mut var_beta_rv: f64 = 0.0;
-        let mut var_beta_dn0: f64 = 0.0;
-        let mut var_beta_dn1: f64 = 0.0;
-        let mut var_beta_dn2: f64 = 0.0;
-        let mut var_beta_dn3: f64 = 0.0;
-        let mut var_n: f64 = 0.0;
-        let mut var_n_rv: f64 = 0.0;
-        let mut var_n_dn0: f64 = 0.0;
-        let mut var_n_dn1: f64 = 0.0;
-        let mut var_n_dn2: f64 = 0.0;
-        let mut var_n_dn3: f64 = 0.0;
-        let mut var_ispec: f64 = 0.0;
-        let mut var_ispec_rv: f64 = 0.0;
-        let mut var_ispec_dn0: f64 = 0.0;
-        let mut var_ispec_dn1: f64 = 0.0;
-        let mut var_ispec_dn2: f64 = 0.0;
-        let mut var_ispec_dn3: f64 = 0.0;
-        let mut var_vt: f64 = 0.0;
-        let mut var_vt_rv: f64 = 0.0;
-        let mut var_gms: f64 = 0.0;
-        let mut var_gms_rv: f64 = 0.0;
-        let mut var_gms_dn0: f64 = 0.0;
-        let mut var_gms_dn1: f64 = 0.0;
-        let mut var_gms_dn2: f64 = 0.0;
-        let mut var_gms_dn3: f64 = 0.0;
-        let mut var_gds: f64 = 0.0;
-        let mut var_gds_rv: f64 = 0.0;
-        let mut var_gds_dn0: f64 = 0.0;
-        let mut var_gds_dn1: f64 = 0.0;
-        let mut var_gds_dn2: f64 = 0.0;
-        let mut var_gds_dn3: f64 = 0.0;
-        let mut var_inv_vt: f64 = 0.0;
-        let mut var_inv_vt_rv: f64 = 0.0;
-        let mut var_vt_01: f64 = 0.0;
-        let mut var_vt_01_rv: f64 = 0.0;
-        let mut var_vt_2: f64 = 0.0;
-        let mut var_vt_2_rv: f64 = 0.0;
-        let mut var_vt_4: f64 = 0.0;
-        let mut var_vt_4_rv: f64 = 0.0;
-        let mut var_vt_vt: f64 = 0.0;
-        let mut var_vt_vt_rv: f64 = 0.0;
-        let mut var_vt_vt_2: f64 = 0.0;
-        let mut var_vt_vt_2_rv: f64 = 0.0;
-        let mut var_vt_vt_16: f64 = 0.0;
-        let mut var_vt_vt_16_rv: f64 = 0.0;
-        let mut var_eps_cox: f64 = 0.0;
-        let mut var_eps_cox_rv: f64 = 0.0;
-        let mut var_eps_cox_w: f64 = 0.0;
-        let mut var_eps_cox_w_rv: f64 = 0.0;
-        let mut var_eps_cox_l: f64 = 0.0;
-        let mut var_eps_cox_l_rv: f64 = 0.0;
-        let mut var_lc: f64 = 0.0;
-        let mut var_lc_rv: f64 = 0.0;
-        let mut var_lc_lambda: f64 = 0.0;
-        let mut var_lc_lambda_rv: f64 = 0.0;
-        let mut var_t0: f64 = 0.0;
-        let mut var_t0_rv: f64 = 0.0;
-        let mut var_t1: f64 = 0.0;
-        let mut var_t1_rv: f64 = 0.0;
-        let mut var_t1_dn0: f64 = 0.0;
-        let mut var_t1_dn2: f64 = 0.0;
-        let mut var_t1_dn3: f64 = 0.0;
-        let mut var_eta_qi: f64 = 0.0;
-        let mut var_eta_qi_rv: f64 = 0.0;
-        let mut var_inv_ucrit: f64 = 0.0;
-        let mut var_inv_ucrit_rv: f64 = 0.0;
-        let mut var_lc_ucrit: f64 = 0.0;
-        let mut var_lc_ucrit_rv: f64 = 0.0;
-        let mut var_mode: f64 = 0.0;
-        let mut var_mode_rv: f64 = 0.0;
-        let mut var_weta_w: f64 = 0.0;
-        let mut var_weta_w_rv: f64 = 0.0;
-        let mut var_leta_l: f64 = 0.0;
-        let mut var_leta_l_rv: f64 = 0.0;
-        let mut var_e0_q_1: f64 = 0.0;
-        let mut var_e0_q_1_rv: f64 = 0.0;
-        let mut var_e0_q_1_dn0: f64 = 0.0;
-        let mut var_e0_q_1_dn1: f64 = 0.0;
-        let mut var_e0_q_1_dn2: f64 = 0.0;
-        let mut var_e0_q_1_dn3: f64 = 0.0;
-        let mut var_awl: f64 = 0.0;
-        let mut var_awl_rv: f64 = 0.0;
-        let mut var_t: f64 = 0.0;
-        let mut var_t_rv: f64 = 0.0;
-        let mut var_kp_weff: f64 = 0.0;
-        let mut var_kp_weff_rv: f64 = 0.0;
-        let mut var_eg: f64 = 0.0;
-        let mut var_eg_rv: f64 = 0.0;
-        let mut var_refeg: f64 = 0.0;
-        let mut var_refeg_rv: f64 = 0.0;
-        let mut var_deltat: f64 = 0.0;
-        let mut var_deltat_rv: f64 = 0.0;
-        let mut var_ratiot: f64 = 0.0;
-        let mut var_ratiot_rv: f64 = 0.0;
-        let mut var_tnom: f64 = 0.0;
-        let mut var_tnom_rv: f64 = 0.0;
-        let mut var_vto_t: f64 = 0.0;
-        let mut var_vto_t_rv: f64 = 0.0;
-        let mut var_vto_s: f64 = 0.0;
-        let mut var_vto_s_rv: f64 = 0.0;
-        let mut var_kp_t: f64 = 0.0;
-        let mut var_kp_t_rv: f64 = 0.0;
-        let mut var_ucrit_t: f64 = 0.0;
-        let mut var_ucrit_t_rv: f64 = 0.0;
-        let mut var_phi_t: f64 = 0.0;
-        let mut var_phi_t_rv: f64 = 0.0;
-        let mut var_phi_t_dn0: f64 = 0.0;
-        let mut var_phi_t_dn1: f64 = 0.0;
-        let mut var_phi_t_dn2: f64 = 0.0;
-        let mut var_phi_t_dn3: f64 = 0.0;
-        let mut var_gamma_s: f64 = 0.0;
-        let mut var_gamma_s_rv: f64 = 0.0;
-        let mut var_sqrt_lprime_lmin: f64 = 0.0;
-        let mut var_sqrt_lprime_lmin_rv: f64 = 0.0;
-        let mut var_sqrt_lprime_lmin_dn0: f64 = 0.0;
-        let mut var_sqrt_lprime_lmin_dn1: f64 = 0.0;
-        let mut var_sqrt_lprime_lmin_dn2: f64 = 0.0;
-        let mut var_sqrt_lprime_lmin_dn3: f64 = 0.0;
-        let mut var_gammastar: f64 = 0.0;
-        let mut var_gammastar_rv: f64 = 0.0;
-        let mut var_gammastar_dn0: f64 = 0.0;
-        let mut var_gammastar_dn1: f64 = 0.0;
-        let mut var_gammastar_dn2: f64 = 0.0;
-        let mut var_gammastar_dn3: f64 = 0.0;
-        let mut var_sqrt_gammastar: f64 = 0.0;
-        let mut var_sqrt_gammastar_rv: f64 = 0.0;
-        let mut var_sqrt_gammastar_dn0: f64 = 0.0;
-        let mut var_sqrt_gammastar_dn1: f64 = 0.0;
-        let mut var_sqrt_gammastar_dn2: f64 = 0.0;
-        let mut var_sqrt_gammastar_dn3: f64 = 0.0;
-        let mut var_big_sqrt_vp: f64 = 0.0;
-        let mut var_big_sqrt_vp_rv: f64 = 0.0;
-        let mut var_big_sqrt_vp_dn0: f64 = 0.0;
-        let mut var_big_sqrt_vp_dn1: f64 = 0.0;
-        let mut var_big_sqrt_vp_dn2: f64 = 0.0;
-        let mut var_big_sqrt_vp_dn3: f64 = 0.0;
-        let mut var_big_sqrt_vp0: f64 = 0.0;
-        let mut var_big_sqrt_vp0_rv: f64 = 0.0;
-        let mut var_big_sqrt_vp0_dn0: f64 = 0.0;
-        let mut var_big_sqrt_vp0_dn1: f64 = 0.0;
-        let mut var_big_sqrt_vp0_dn2: f64 = 0.0;
-        let mut var_big_sqrt_vp0_dn3: f64 = 0.0;
-        let mut var_vp0: f64 = 0.0;
-        let mut var_vp0_rv: f64 = 0.0;
-        let mut var_vp0_dn0: f64 = 0.0;
-        let mut var_vp0_dn1: f64 = 0.0;
-        let mut var_vp0_dn2: f64 = 0.0;
-        let mut var_vp0_dn3: f64 = 0.0;
-        let mut var_phi_vd: f64 = 0.0;
-        let mut var_phi_vd_rv: f64 = 0.0;
-        let mut var_phi_vd_dn0: f64 = 0.0;
-        let mut var_phi_vd_dn1: f64 = 0.0;
-        let mut var_phi_vd_dn2: f64 = 0.0;
-        let mut var_phi_vd_dn3: f64 = 0.0;
-        let mut var_phi_vs: f64 = 0.0;
-        let mut var_phi_vs_rv: f64 = 0.0;
-        let mut var_phi_vs_dn0: f64 = 0.0;
-        let mut var_phi_vs_dn1: f64 = 0.0;
-        let mut var_phi_vs_dn2: f64 = 0.0;
-        let mut var_phi_vs_dn3: f64 = 0.0;
-        let mut var_sqrt_phi: f64 = 0.0;
-        let mut var_sqrt_phi_rv: f64 = 0.0;
-        let mut var_sqrt_phi_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vp: f64 = 0.0;
-        let mut var_sqrt_phi_vp_rv: f64 = 0.0;
-        let mut var_sqrt_phi_vp_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vp_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vp_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vp_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vd: f64 = 0.0;
-        let mut var_sqrt_phi_vd_rv: f64 = 0.0;
-        let mut var_sqrt_phi_vd_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vd_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vd_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vd_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vs: f64 = 0.0;
-        let mut var_sqrt_phi_vs_rv: f64 = 0.0;
-        let mut var_sqrt_phi_vs_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vs_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vs_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vs_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vd_vt: f64 = 0.0;
-        let mut var_sqrt_phi_vd_vt_rv: f64 = 0.0;
-        let mut var_sqrt_phi_vd_vt_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vd_vt_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vd_vt_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vd_vt_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vs_vt: f64 = 0.0;
-        let mut var_sqrt_phi_vs_vt_rv: f64 = 0.0;
-        let mut var_sqrt_phi_vs_vt_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vs_vt_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vs_vt_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vs_vt_dn3: f64 = 0.0;
-        let mut var_vds: f64 = 0.0;
-        let mut var_vds_rv: f64 = 0.0;
-        let mut var_vds_dn0: f64 = 0.0;
-        let mut var_vds_dn2: f64 = 0.0;
-        let mut var_vds_dn3: f64 = 0.0;
-        let mut var_deltav_2: f64 = 0.0;
-        let mut var_deltav_2_rv: f64 = 0.0;
-        let mut var_deltav_2_dn0: f64 = 0.0;
-        let mut var_deltav_2_dn1: f64 = 0.0;
-        let mut var_deltav_2_dn2: f64 = 0.0;
-        let mut var_deltav_2_dn3: f64 = 0.0;
-        let mut var_vip: f64 = 0.0;
-        let mut var_vip_rv: f64 = 0.0;
-        let mut var_vip_dn0: f64 = 0.0;
-        let mut var_vip_dn1: f64 = 0.0;
-        let mut var_vip_dn2: f64 = 0.0;
-        let mut var_vip_dn3: f64 = 0.0;
-        let mut var_vdss_sqrt: f64 = 0.0;
-        let mut var_vdss_sqrt_rv: f64 = 0.0;
-        let mut var_vdss_sqrt_dn0: f64 = 0.0;
-        let mut var_vdss_sqrt_dn1: f64 = 0.0;
-        let mut var_vdss_sqrt_dn2: f64 = 0.0;
-        let mut var_vdss_sqrt_dn3: f64 = 0.0;
-        let mut var_sqrt_vdss_deltav: f64 = 0.0;
-        let mut var_sqrt_vdss_deltav_rv: f64 = 0.0;
-        let mut var_sqrt_vdss_deltav_dn0: f64 = 0.0;
-        let mut var_sqrt_vdss_deltav_dn1: f64 = 0.0;
-        let mut var_sqrt_vdss_deltav_dn2: f64 = 0.0;
-        let mut var_sqrt_vdss_deltav_dn3: f64 = 0.0;
-        let mut var_sqrt_vds_vdss_deltav: f64 = 0.0;
-        let mut var_sqrt_vds_vdss_deltav_rv: f64 = 0.0;
-        let mut var_sqrt_vds_vdss_deltav_dn0: f64 = 0.0;
-        let mut var_sqrt_vds_vdss_deltav_dn1: f64 = 0.0;
-        let mut var_sqrt_vds_vdss_deltav_dn2: f64 = 0.0;
-        let mut var_sqrt_vds_vdss_deltav_dn3: f64 = 0.0;
-        let mut var_vdssprime_sqrt: f64 = 0.0;
-        let mut var_vdssprime_sqrt_rv: f64 = 0.0;
-        let mut var_vdssprime_sqrt_dn0: f64 = 0.0;
-        let mut var_vdssprime_sqrt_dn1: f64 = 0.0;
-        let mut var_vdssprime_sqrt_dn2: f64 = 0.0;
-        let mut var_vdssprime_sqrt_dn3: f64 = 0.0;
-        let mut var_sqrt_vdssprime_deltav: f64 = 0.0;
-        let mut var_sqrt_vdssprime_deltav_rv: f64 = 0.0;
-        let mut var_sqrt_vdssprime_deltav_dn0: f64 = 0.0;
-        let mut var_sqrt_vdssprime_deltav_dn1: f64 = 0.0;
-        let mut var_sqrt_vdssprime_deltav_dn2: f64 = 0.0;
-        let mut var_sqrt_vdssprime_deltav_dn3: f64 = 0.0;
-        let mut var_sqrt_vds_vdssprime_deltav: f64 = 0.0;
-        let mut var_sqrt_vds_vdssprime_deltav_rv: f64 = 0.0;
-        let mut var_sqrt_vds_vdssprime_deltav_dn0: f64 = 0.0;
-        let mut var_sqrt_vds_vdssprime_deltav_dn1: f64 = 0.0;
-        let mut var_sqrt_vds_vdssprime_deltav_dn2: f64 = 0.0;
-        let mut var_sqrt_vds_vdssprime_deltav_dn3: f64 = 0.0;
-        let mut var_if_ir: f64 = 0.0;
-        let mut var_if_ir_rv: f64 = 0.0;
-        let mut var_if_ir_dn0: f64 = 0.0;
-        let mut var_if_ir_dn1: f64 = 0.0;
-        let mut var_if_ir_dn2: f64 = 0.0;
-        let mut var_if_ir_dn3: f64 = 0.0;
-        let mut var_sqrt_if: f64 = 0.0;
-        let mut var_sqrt_if_rv: f64 = 0.0;
-        let mut var_sqrt_if_dn0: f64 = 0.0;
-        let mut var_sqrt_if_dn1: f64 = 0.0;
-        let mut var_sqrt_if_dn2: f64 = 0.0;
-        let mut var_sqrt_if_dn3: f64 = 0.0;
-        let mut var_dif_dv: f64 = 0.0;
-        let mut var_dif_dv_rv: f64 = 0.0;
-        let mut var_dif_dv_dn0: f64 = 0.0;
-        let mut var_dif_dv_dn1: f64 = 0.0;
-        let mut var_dif_dv_dn2: f64 = 0.0;
-        let mut var_dif_dv_dn3: f64 = 0.0;
-        let mut var_dir_dv: f64 = 0.0;
-        let mut var_dir_dv_rv: f64 = 0.0;
-        let mut var_dir_dv_dn0: f64 = 0.0;
-        let mut var_dir_dv_dn1: f64 = 0.0;
-        let mut var_dir_dv_dn2: f64 = 0.0;
-        let mut var_dir_dv_dn3: f64 = 0.0;
-        let mut var_dirprime_dv: f64 = 0.0;
-        let mut var_dirprime_dv_rv: f64 = 0.0;
-        let mut var_dirprime_dv_dn0: f64 = 0.0;
-        let mut var_dirprime_dv_dn1: f64 = 0.0;
-        let mut var_dirprime_dv_dn2: f64 = 0.0;
-        let mut var_dirprime_dv_dn3: f64 = 0.0;
-        let mut var_sif: f64 = 0.0;
-        let mut var_sif_rv: f64 = 0.0;
-        let mut var_sif_dn0: f64 = 0.0;
-        let mut var_sif_dn1: f64 = 0.0;
-        let mut var_sif_dn2: f64 = 0.0;
-        let mut var_sif_dn3: f64 = 0.0;
-        let mut var_sir: f64 = 0.0;
-        let mut var_sir_rv: f64 = 0.0;
-        let mut var_sir_dn0: f64 = 0.0;
-        let mut var_sir_dn1: f64 = 0.0;
-        let mut var_sir_dn2: f64 = 0.0;
-        let mut var_sir_dn3: f64 = 0.0;
-        let mut var_sif2: f64 = 0.0;
-        let mut var_sif2_rv: f64 = 0.0;
-        let mut var_sif2_dn0: f64 = 0.0;
-        let mut var_sif2_dn1: f64 = 0.0;
-        let mut var_sif2_dn2: f64 = 0.0;
-        let mut var_sif2_dn3: f64 = 0.0;
-        let mut var_sir2: f64 = 0.0;
-        let mut var_sir2_rv: f64 = 0.0;
-        let mut var_sir2_dn0: f64 = 0.0;
-        let mut var_sir2_dn1: f64 = 0.0;
-        let mut var_sir2_dn2: f64 = 0.0;
-        let mut var_sir2_dn3: f64 = 0.0;
-        let mut var_sif3: f64 = 0.0;
-        let mut var_sif3_rv: f64 = 0.0;
-        let mut var_sif3_dn0: f64 = 0.0;
-        let mut var_sif3_dn1: f64 = 0.0;
-        let mut var_sif3_dn2: f64 = 0.0;
-        let mut var_sif3_dn3: f64 = 0.0;
-        let mut var_sir3: f64 = 0.0;
-        let mut var_sir3_rv: f64 = 0.0;
-        let mut var_sir3_dn0: f64 = 0.0;
-        let mut var_sir3_dn1: f64 = 0.0;
-        let mut var_sir3_dn2: f64 = 0.0;
-        let mut var_sir3_dn3: f64 = 0.0;
-        let mut var_sif_sir_2: f64 = 0.0;
-        let mut var_sif_sir_2_rv: f64 = 0.0;
-        let mut var_sif_sir_2_dn0: f64 = 0.0;
-        let mut var_sif_sir_2_dn1: f64 = 0.0;
-        let mut var_sif_sir_2_dn2: f64 = 0.0;
-        let mut var_sif_sir_2_dn3: f64 = 0.0;
-        let mut var_qi: f64 = 0.0;
-        let mut var_qi_rv: f64 = 0.0;
-        let mut var_qi_dn0: f64 = 0.0;
-        let mut var_qi_dn1: f64 = 0.0;
-        let mut var_qi_dn2: f64 = 0.0;
-        let mut var_qi_dn3: f64 = 0.0;
-        let mut var_qb: f64 = 0.0;
-        let mut var_qb_rv: f64 = 0.0;
-        let mut var_qb_dn0: f64 = 0.0;
-        let mut var_qb_dn1: f64 = 0.0;
-        let mut var_qb_dn2: f64 = 0.0;
-        let mut var_qb_dn3: f64 = 0.0;
-        let mut var_qd: f64 = 0.0;
-        let mut var_qd_rv: f64 = 0.0;
-        let mut var_qd_dn0: f64 = 0.0;
-        let mut var_qd_dn1: f64 = 0.0;
-        let mut var_qd_dn2: f64 = 0.0;
-        let mut var_qd_dn3: f64 = 0.0;
-        let mut var_qs: f64 = 0.0;
-        let mut var_qs_rv: f64 = 0.0;
-        let mut var_qs_dn0: f64 = 0.0;
-        let mut var_qs_dn1: f64 = 0.0;
-        let mut var_qs_dn2: f64 = 0.0;
-        let mut var_qs_dn3: f64 = 0.0;
-        let mut var_qi_1: f64 = 0.0;
-        let mut var_qi_1_rv: f64 = 0.0;
-        let mut var_qi_1_dn0: f64 = 0.0;
-        let mut var_qi_1_dn1: f64 = 0.0;
-        let mut var_qi_1_dn2: f64 = 0.0;
-        let mut var_qi_1_dn3: f64 = 0.0;
-        let mut var_qb_1: f64 = 0.0;
-        let mut var_qb_1_rv: f64 = 0.0;
-        let mut var_qb_1_dn0: f64 = 0.0;
-        let mut var_qb_1_dn1: f64 = 0.0;
-        let mut var_qb_1_dn2: f64 = 0.0;
-        let mut var_qb_1_dn3: f64 = 0.0;
-        let mut var_qg: f64 = 0.0;
-        let mut var_qg_rv: f64 = 0.0;
-        let mut var_qg_dn0: f64 = 0.0;
-        let mut var_qg_dn1: f64 = 0.0;
-        let mut var_qg_dn2: f64 = 0.0;
-        let mut var_qg_dn3: f64 = 0.0;
-        let mut var_vp_phi_eps: f64 = 0.0;
-        let mut var_vp_phi_eps_rv: f64 = 0.0;
-        let mut var_vp_phi_eps_dn0: f64 = 0.0;
-        let mut var_vp_phi_eps_dn1: f64 = 0.0;
-        let mut var_vp_phi_eps_dn2: f64 = 0.0;
-        let mut var_vp_phi_eps_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vp_2: f64 = 0.0;
-        let mut var_sqrt_phi_vp_2_rv: f64 = 0.0;
-        let mut var_sqrt_phi_vp_2_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vp_2_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vp_2_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vp_2_dn3: f64 = 0.0;
-        let mut var_wlcox: f64 = 0.0;
-        let mut var_wlcox_rv: f64 = 0.0;
-        let mut var_n_vt_cox: f64 = 0.0;
-        let mut var_n_vt_cox_rv: f64 = 0.0;
-        let mut var_n_vt_cox_dn0: f64 = 0.0;
-        let mut var_n_vt_cox_dn1: f64 = 0.0;
-        let mut var_n_vt_cox_dn2: f64 = 0.0;
-        let mut var_n_vt_cox_dn3: f64 = 0.0;
-        let mut var_n_1: f64 = 0.0;
-        let mut var_n_1_rv: f64 = 0.0;
-        let mut var_n_1_dn0: f64 = 0.0;
-        let mut var_n_1_dn1: f64 = 0.0;
-        let mut var_n_1_dn2: f64 = 0.0;
-        let mut var_n_1_dn3: f64 = 0.0;
-        let mut var_n_1_n: f64 = 0.0;
-        let mut var_n_1_n_rv: f64 = 0.0;
-        let mut var_n_1_n_dn0: f64 = 0.0;
-        let mut var_n_1_n_dn1: f64 = 0.0;
-        let mut var_n_1_n_dn2: f64 = 0.0;
-        let mut var_n_1_n_dn3: f64 = 0.0;
-        let mut var_dvp_dvd: f64 = 0.0;
-        let mut var_dvp_dvd_rv: f64 = 0.0;
-        let mut var_dvp_dvd_dn0: f64 = 0.0;
-        let mut var_dvp_dvd_dn1: f64 = 0.0;
-        let mut var_dvp_dvd_dn2: f64 = 0.0;
-        let mut var_dvp_dvd_dn3: f64 = 0.0;
-        let mut var_dvp_dvs: f64 = 0.0;
-        let mut var_dvp_dvs_rv: f64 = 0.0;
-        let mut var_dvp_dvs_dn0: f64 = 0.0;
-        let mut var_dvp_dvs_dn1: f64 = 0.0;
-        let mut var_dvp_dvs_dn2: f64 = 0.0;
-        let mut var_dvp_dvs_dn3: f64 = 0.0;
-        let mut var_dif_dvd: f64 = 0.0;
-        let mut var_dif_dvd_rv: f64 = 0.0;
-        let mut var_dif_dvd_dn0: f64 = 0.0;
-        let mut var_dif_dvd_dn1: f64 = 0.0;
-        let mut var_dif_dvd_dn2: f64 = 0.0;
-        let mut var_dif_dvd_dn3: f64 = 0.0;
-        let mut var_dif_dvs: f64 = 0.0;
-        let mut var_dif_dvs_rv: f64 = 0.0;
-        let mut var_dif_dvs_dn0: f64 = 0.0;
-        let mut var_dif_dvs_dn1: f64 = 0.0;
-        let mut var_dif_dvs_dn2: f64 = 0.0;
-        let mut var_dif_dvs_dn3: f64 = 0.0;
-        let mut var_dir_dvd: f64 = 0.0;
-        let mut var_dir_dvd_rv: f64 = 0.0;
-        let mut var_dir_dvd_dn0: f64 = 0.0;
-        let mut var_dir_dvd_dn1: f64 = 0.0;
-        let mut var_dir_dvd_dn2: f64 = 0.0;
-        let mut var_dir_dvd_dn3: f64 = 0.0;
-        let mut var_dir_dvs: f64 = 0.0;
-        let mut var_dir_dvs_rv: f64 = 0.0;
-        let mut var_dir_dvs_dn0: f64 = 0.0;
-        let mut var_dir_dvs_dn1: f64 = 0.0;
-        let mut var_dir_dvs_dn2: f64 = 0.0;
-        let mut var_dir_dvs_dn3: f64 = 0.0;
-        let mut var_dvdss_dvd: f64 = 0.0;
-        let mut var_dvdss_dvd_rv: f64 = 0.0;
-        let mut var_dvdss_dvd_dn0: f64 = 0.0;
-        let mut var_dvdss_dvd_dn1: f64 = 0.0;
-        let mut var_dvdss_dvd_dn2: f64 = 0.0;
-        let mut var_dvdss_dvd_dn3: f64 = 0.0;
-        let mut var_dvdss_dvs: f64 = 0.0;
-        let mut var_dvdss_dvs_rv: f64 = 0.0;
-        let mut var_dvdss_dvs_dn0: f64 = 0.0;
-        let mut var_dvdss_dvs_dn1: f64 = 0.0;
-        let mut var_dvdss_dvs_dn2: f64 = 0.0;
-        let mut var_dvdss_dvs_dn3: f64 = 0.0;
-        let mut var_ddeltav_dvd: f64 = 0.0;
-        let mut var_ddeltav_dvd_rv: f64 = 0.0;
-        let mut var_ddeltav_dvd_dn0: f64 = 0.0;
-        let mut var_ddeltav_dvd_dn1: f64 = 0.0;
-        let mut var_ddeltav_dvd_dn2: f64 = 0.0;
-        let mut var_ddeltav_dvd_dn3: f64 = 0.0;
-        let mut var_ddeltav_dvs: f64 = 0.0;
-        let mut var_ddeltav_dvs_rv: f64 = 0.0;
-        let mut var_ddeltav_dvs_dn0: f64 = 0.0;
-        let mut var_ddeltav_dvs_dn1: f64 = 0.0;
-        let mut var_ddeltav_dvs_dn2: f64 = 0.0;
-        let mut var_ddeltav_dvs_dn3: f64 = 0.0;
-        let mut var_dvip_dvd: f64 = 0.0;
-        let mut var_dvip_dvd_rv: f64 = 0.0;
-        let mut var_dvip_dvd_dn0: f64 = 0.0;
-        let mut var_dvip_dvd_dn1: f64 = 0.0;
-        let mut var_dvip_dvd_dn2: f64 = 0.0;
-        let mut var_dvip_dvd_dn3: f64 = 0.0;
-        let mut var_dvip_dvs: f64 = 0.0;
-        let mut var_dvip_dvs_rv: f64 = 0.0;
-        let mut var_dvip_dvs_dn0: f64 = 0.0;
-        let mut var_dvip_dvs_dn1: f64 = 0.0;
-        let mut var_dvip_dvs_dn2: f64 = 0.0;
-        let mut var_dvip_dvs_dn3: f64 = 0.0;
-        let mut var_dvdssprime_dvd: f64 = 0.0;
-        let mut var_dvdssprime_dvd_rv: f64 = 0.0;
-        let mut var_dvdssprime_dvd_dn0: f64 = 0.0;
-        let mut var_dvdssprime_dvd_dn1: f64 = 0.0;
-        let mut var_dvdssprime_dvd_dn2: f64 = 0.0;
-        let mut var_dvdssprime_dvd_dn3: f64 = 0.0;
-        let mut var_dvdssprime_dvs: f64 = 0.0;
-        let mut var_dvdssprime_dvs_rv: f64 = 0.0;
-        let mut var_dvdssprime_dvs_dn0: f64 = 0.0;
-        let mut var_dvdssprime_dvs_dn1: f64 = 0.0;
-        let mut var_dvdssprime_dvs_dn2: f64 = 0.0;
-        let mut var_dvdssprime_dvs_dn3: f64 = 0.0;
-        let mut var_dirprime_dvd: f64 = 0.0;
-        let mut var_dirprime_dvd_rv: f64 = 0.0;
-        let mut var_dirprime_dvd_dn0: f64 = 0.0;
-        let mut var_dirprime_dvd_dn1: f64 = 0.0;
-        let mut var_dirprime_dvd_dn2: f64 = 0.0;
-        let mut var_dirprime_dvd_dn3: f64 = 0.0;
-        let mut var_dirprime_dvs: f64 = 0.0;
-        let mut var_dirprime_dvs_rv: f64 = 0.0;
-        let mut var_dirprime_dvs_dn0: f64 = 0.0;
-        let mut var_dirprime_dvs_dn1: f64 = 0.0;
-        let mut var_dirprime_dvs_dn2: f64 = 0.0;
-        let mut var_dirprime_dvs_dn3: f64 = 0.0;
-        let mut var_dleq_dvd: f64 = 0.0;
-        let mut var_dleq_dvd_rv: f64 = 0.0;
-        let mut var_dleq_dvd_dn0: f64 = 0.0;
-        let mut var_dleq_dvd_dn1: f64 = 0.0;
-        let mut var_dleq_dvd_dn2: f64 = 0.0;
-        let mut var_dleq_dvd_dn3: f64 = 0.0;
-        let mut var_dleq_dvs: f64 = 0.0;
-        let mut var_dleq_dvs_rv: f64 = 0.0;
-        let mut var_dleq_dvs_dn0: f64 = 0.0;
-        let mut var_dleq_dvs_dn1: f64 = 0.0;
-        let mut var_dleq_dvs_dn2: f64 = 0.0;
-        let mut var_dleq_dvs_dn3: f64 = 0.0;
-        let mut var_dbeta_dvd: f64 = 0.0;
-        let mut var_dbeta_dvd_rv: f64 = 0.0;
-        let mut var_dbeta_dvd_dn0: f64 = 0.0;
-        let mut var_dbeta_dvd_dn1: f64 = 0.0;
-        let mut var_dbeta_dvd_dn2: f64 = 0.0;
-        let mut var_dbeta_dvd_dn3: f64 = 0.0;
-        let mut var_dbeta_dvs: f64 = 0.0;
-        let mut var_dbeta_dvs_rv: f64 = 0.0;
-        let mut var_dbeta_dvs_dn0: f64 = 0.0;
-        let mut var_dbeta_dvs_dn1: f64 = 0.0;
-        let mut var_dbeta_dvs_dn2: f64 = 0.0;
-        let mut var_dbeta_dvs_dn3: f64 = 0.0;
-        let mut var_vgstar: f64 = 0.0;
-        let mut var_vgstar_rv: f64 = 0.0;
-        let mut var_vgstar_dn0: f64 = 0.0;
-        let mut var_vgstar_dn1: f64 = 0.0;
-        let mut var_vgstar_dn2: f64 = 0.0;
-        let mut var_vgstar_dn3: f64 = 0.0;
-        let mut var_sqrt_vgstar: f64 = 0.0;
-        let mut var_sqrt_vgstar_rv: f64 = 0.0;
-        let mut var_sqrt_vgstar_dn0: f64 = 0.0;
-        let mut var_sqrt_vgstar_dn1: f64 = 0.0;
-        let mut var_sqrt_vgstar_dn2: f64 = 0.0;
-        let mut var_sqrt_vgstar_dn3: f64 = 0.0;
-        let mut var_vg: f64 = 0.0;
-        let mut var_vg_rv: f64 = 0.0;
-        let mut var_vg_dn1: f64 = 0.0;
-        let mut var_vg_dn3: f64 = 0.0;
-        let mut var_vd: f64 = 0.0;
-        let mut var_vd_rv: f64 = 0.0;
-        let mut var_vd_dn0: f64 = 0.0;
-        let mut var_vd_dn2: f64 = 0.0;
-        let mut var_vd_dn3: f64 = 0.0;
-        let mut var_vs: f64 = 0.0;
-        let mut var_vs_rv: f64 = 0.0;
-        let mut var_vs_dn0: f64 = 0.0;
-        let mut var_vs_dn2: f64 = 0.0;
-        let mut var_vs_dn3: f64 = 0.0;
-        let mut var_gamma_sqrt_phi: f64 = 0.0;
-        let mut var_gamma_sqrt_phi_rv: f64 = 0.0;
-        let mut var_gamma_sqrt_phi_dn0: f64 = 0.0;
-        let mut var_gamma_sqrt_phi_dn1: f64 = 0.0;
-        let mut var_gamma_sqrt_phi_dn2: f64 = 0.0;
-        let mut var_gamma_sqrt_phi_dn3: f64 = 0.0;
-        let mut var_lmin: f64 = 0.0;
-        let mut var_lmin_rv: f64 = 0.0;
-        let mut var_lprime: f64 = 0.0;
-        let mut var_lprime_rv: f64 = 0.0;
-        let mut var_lprime_dn0: f64 = 0.0;
-        let mut var_lprime_dn1: f64 = 0.0;
-        let mut var_lprime_dn2: f64 = 0.0;
-        let mut var_lprime_dn3: f64 = 0.0;
-        let mut var_t0_gamma_1: f64 = 0.0;
-        let mut var_t0_gamma_1_rv: f64 = 0.0;
-        let mut var_t0_gamma_1_dn0: f64 = 0.0;
-        let mut var_t0_gamma_1_dn1: f64 = 0.0;
-        let mut var_t0_gamma_1_dn2: f64 = 0.0;
-        let mut var_t0_gamma_1_dn3: f64 = 0.0;
-        let mut var_theta_vp_1: f64 = 0.0;
-        let mut var_theta_vp_1_rv: f64 = 0.0;
-        let mut var_theta_vp_1_dn0: f64 = 0.0;
-        let mut var_theta_vp_1_dn1: f64 = 0.0;
-        let mut var_theta_vp_1_dn2: f64 = 0.0;
-        let mut var_theta_vp_1_dn3: f64 = 0.0;
-        let mut var_vc: f64 = 0.0;
-        let mut var_vc_rv: f64 = 0.0;
-        let mut var_vdsprime: f64 = 0.0;
-        let mut var_vdsprime_rv: f64 = 0.0;
-        let mut var_vdsprime_dn0: f64 = 0.0;
-        let mut var_vdsprime_dn1: f64 = 0.0;
-        let mut var_vdsprime_dn2: f64 = 0.0;
-        let mut var_vdsprime_dn3: f64 = 0.0;
-        let mut var_vt_vc: f64 = 0.0;
-        let mut var_vt_vc_rv: f64 = 0.0;
-        let mut var_dgammaprime_dvd: f64 = 0.0;
-        let mut var_dgammaprime_dvd_rv: f64 = 0.0;
-        let mut var_dgammaprime_dvd_dn0: f64 = 0.0;
-        let mut var_dgammaprime_dvd_dn1: f64 = 0.0;
-        let mut var_dgammaprime_dvd_dn2: f64 = 0.0;
-        let mut var_dgammaprime_dvd_dn3: f64 = 0.0;
-        let mut var_dgammaprime_dvs: f64 = 0.0;
-        let mut var_dgammaprime_dvs_rv: f64 = 0.0;
-        let mut var_dgammaprime_dvs_dn0: f64 = 0.0;
-        let mut var_dgammaprime_dvs_dn1: f64 = 0.0;
-        let mut var_dgammaprime_dvs_dn2: f64 = 0.0;
-        let mut var_dgammaprime_dvs_dn3: f64 = 0.0;
-        let mut var_dvpprime_dvd: f64 = 0.0;
-        let mut var_dvpprime_dvd_rv: f64 = 0.0;
-        let mut var_dvpprime_dvd_dn0: f64 = 0.0;
-        let mut var_dvpprime_dvd_dn1: f64 = 0.0;
-        let mut var_dvpprime_dvd_dn2: f64 = 0.0;
-        let mut var_dvpprime_dvd_dn3: f64 = 0.0;
-        let mut var_dvpprime_dvs: f64 = 0.0;
-        let mut var_dvpprime_dvs_rv: f64 = 0.0;
-        let mut var_dvpprime_dvs_dn0: f64 = 0.0;
-        let mut var_dvpprime_dvs_dn1: f64 = 0.0;
-        let mut var_dvpprime_dvs_dn2: f64 = 0.0;
-        let mut var_dvpprime_dvs_dn3: f64 = 0.0;
-        let mut var_ddeltal_dvd: f64 = 0.0;
-        let mut var_ddeltal_dvd_rv: f64 = 0.0;
-        let mut var_ddeltal_dvd_dn0: f64 = 0.0;
-        let mut var_ddeltal_dvd_dn1: f64 = 0.0;
-        let mut var_ddeltal_dvd_dn2: f64 = 0.0;
-        let mut var_ddeltal_dvd_dn3: f64 = 0.0;
-        let mut var_ddeltal_dvs: f64 = 0.0;
-        let mut var_ddeltal_dvs_rv: f64 = 0.0;
-        let mut var_ddeltal_dvs_dn0: f64 = 0.0;
-        let mut var_ddeltal_dvs_dn1: f64 = 0.0;
-        let mut var_ddeltal_dvs_dn2: f64 = 0.0;
-        let mut var_ddeltal_dvs_dn3: f64 = 0.0;
-        let mut var_dn_dvd: f64 = 0.0;
-        let mut var_dn_dvd_rv: f64 = 0.0;
-        let mut var_dn_dvd_dn0: f64 = 0.0;
-        let mut var_dn_dvd_dn1: f64 = 0.0;
-        let mut var_dn_dvd_dn2: f64 = 0.0;
-        let mut var_dn_dvd_dn3: f64 = 0.0;
-        let mut var_dn_dvs: f64 = 0.0;
-        let mut var_dn_dvs_rv: f64 = 0.0;
-        let mut var_dn_dvs_dn0: f64 = 0.0;
-        let mut var_dn_dvs_dn1: f64 = 0.0;
-        let mut var_dn_dvs_dn2: f64 = 0.0;
-        let mut var_dn_dvs_dn3: f64 = 0.0;
-        let mut var_log_vc_vt: f64 = 0.0;
-        let mut var_log_vc_vt_rv: f64 = 0.0;
-        let mut var_sqrt_phi_vp0: f64 = 0.0;
-        let mut var_sqrt_phi_vp0_rv: f64 = 0.0;
-        let mut var_sqrt_phi_vp0_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vp0_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vp0_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vp0_dn3: f64 = 0.0;
-        let mut var_sqrt_vp_vt: f64 = 0.0;
-        let mut var_sqrt_vp_vt_rv: f64 = 0.0;
-        let mut var_sqrt_vp_vt_dn0: f64 = 0.0;
-        let mut var_sqrt_vp_vt_dn1: f64 = 0.0;
-        let mut var_sqrt_vp_vt_dn2: f64 = 0.0;
-        let mut var_sqrt_vp_vt_dn3: f64 = 0.0;
-        let mut var_sqrt_phi_vp2_2: f64 = 0.0;
-        let mut var_sqrt_phi_vp2_2_rv: f64 = 0.0;
-        let mut var_sqrt_phi_vp2_2_dn0: f64 = 0.0;
-        let mut var_sqrt_phi_vp2_2_dn1: f64 = 0.0;
-        let mut var_sqrt_phi_vp2_2_dn2: f64 = 0.0;
-        let mut var_sqrt_phi_vp2_2_dn3: f64 = 0.0;
-        let mut var_v0: f64 = 0.0;
-        let mut var_v0_rv: f64 = 0.0;
-        let mut var_deltavfb: f64 = 0.0;
-        let mut var_deltavfb_rv: f64 = 0.0;
-        let mut var_vl: f64 = 0.0;
-        let mut var_vl_rv: f64 = 0.0;
-        let mut var_dqi_dvd: f64 = 0.0;
-        let mut var_dqi_dvd_rv: f64 = 0.0;
-        let mut var_dqi_dvd_dn0: f64 = 0.0;
-        let mut var_dqi_dvd_dn1: f64 = 0.0;
-        let mut var_dqi_dvd_dn2: f64 = 0.0;
-        let mut var_dqi_dvd_dn3: f64 = 0.0;
-        let mut var_dqi_dvs: f64 = 0.0;
-        let mut var_dqi_dvs_rv: f64 = 0.0;
-        let mut var_dqi_dvs_dn0: f64 = 0.0;
-        let mut var_dqi_dvs_dn1: f64 = 0.0;
-        let mut var_dqi_dvs_dn2: f64 = 0.0;
-        let mut var_dqi_dvs_dn3: f64 = 0.0;
-        let mut var_dqb_dvd: f64 = 0.0;
-        let mut var_dqb_dvd_rv: f64 = 0.0;
-        let mut var_dqb_dvd_dn0: f64 = 0.0;
-        let mut var_dqb_dvd_dn1: f64 = 0.0;
-        let mut var_dqb_dvd_dn2: f64 = 0.0;
-        let mut var_dqb_dvd_dn3: f64 = 0.0;
-        let mut var_dqb_dvs: f64 = 0.0;
-        let mut var_dqb_dvs_rv: f64 = 0.0;
-        let mut var_dqb_dvs_dn0: f64 = 0.0;
-        let mut var_dqb_dvs_dn1: f64 = 0.0;
-        let mut var_dqb_dvs_dn2: f64 = 0.0;
-        let mut var_dqb_dvs_dn3: f64 = 0.0;
-        let mut var_leff: f64 = 0.0;
-        let mut var_leff_rv: f64 = 0.0;
-        let mut var_weff: f64 = 0.0;
-        let mut var_weff_rv: f64 = 0.0;
-        let mut var_rseff: f64 = 0.0;
-        let mut var_rseff_rv: f64 = 0.0;
-        let mut var_rdeff: f64 = 0.0;
-        let mut var_rdeff_rv: f64 = 0.0;
-        let mut var_yk: f64 = 0.0;
-        let mut var_yk_rv: f64 = 0.0;
-        let mut var_yk_dn0: f64 = 0.0;
-        let mut var_yk_dn1: f64 = 0.0;
-        let mut var_yk_dn2: f64 = 0.0;
-        let mut var_yk_dn3: f64 = 0.0;
-        let mut var_z0: f64 = 0.0;
-        let mut var_z0_rv: f64 = 0.0;
-        let mut var_z0_dn0: f64 = 0.0;
-        let mut var_z0_dn1: f64 = 0.0;
-        let mut var_z0_dn2: f64 = 0.0;
-        let mut var_z0_dn3: f64 = 0.0;
-        let mut var_zk: f64 = 0.0;
-        let mut var_zk_rv: f64 = 0.0;
-        let mut var_zk_dn0: f64 = 0.0;
-        let mut var_zk_dn1: f64 = 0.0;
-        let mut var_zk_dn2: f64 = 0.0;
-        let mut var_zk_dn3: f64 = 0.0;
-        let mut var_epssil: f64 = 0.0;
-        let mut var_epssil_rv: f64 = 0.0;
-        let mut var_ddt_qd: f64 = 0.0;
-        let mut var_ddt_qd_rv: f64 = 0.0;
-        let mut var_ddt_qd_dn0: f64 = 0.0;
-        let mut var_ddt_qd_rdn0: f64 = 0.0;
-        let mut var_ddt_qd_dn1: f64 = 0.0;
-        let mut var_ddt_qd_rdn1: f64 = 0.0;
-        let mut var_ddt_qd_dn2: f64 = 0.0;
-        let mut var_ddt_qd_rdn2: f64 = 0.0;
-        let mut var_ddt_qd_dn3: f64 = 0.0;
-        let mut var_ddt_qd_rdn3: f64 = 0.0;
-        let mut var_ddt_qs: f64 = 0.0;
-        let mut var_ddt_qs_rv: f64 = 0.0;
-        let mut var_ddt_qs_dn0: f64 = 0.0;
-        let mut var_ddt_qs_rdn0: f64 = 0.0;
-        let mut var_ddt_qs_dn1: f64 = 0.0;
-        let mut var_ddt_qs_rdn1: f64 = 0.0;
-        let mut var_ddt_qs_dn2: f64 = 0.0;
-        let mut var_ddt_qs_rdn2: f64 = 0.0;
-        let mut var_ddt_qs_dn3: f64 = 0.0;
-        let mut var_ddt_qs_rdn3: f64 = 0.0;
-        let mut var_as_i: f64 = 0.0;
-        let mut var_as_i_rv: f64 = 0.0;
-        let mut var_ad_i: f64 = 0.0;
-        let mut var_ad_i_rv: f64 = 0.0;
-        let mut var_ps_i: f64 = 0.0;
-        let mut var_ps_i_rv: f64 = 0.0;
-        let mut var_pd_i: f64 = 0.0;
-        let mut var_pd_i_rv: f64 = 0.0;
-        let mut var_v_di_b: f64 = 0.0;
-        let mut var_v_di_b_rv: f64 = 0.0;
-        let mut var_v_di_b_dn0: f64 = 0.0;
-        let mut var_v_di_b_dn3: f64 = 0.0;
-        let mut var_v_si_b: f64 = 0.0;
-        let mut var_v_si_b_rv: f64 = 0.0;
-        let mut var_v_si_b_dn2: f64 = 0.0;
-        let mut var_v_si_b_dn3: f64 = 0.0;
-        let mut var_pb_t: f64 = 0.0;
-        let mut var_pb_t_rv: f64 = 0.0;
-        let mut var_pbsw_t: f64 = 0.0;
-        let mut var_pbsw_t_rv: f64 = 0.0;
-        let mut var_pbswg_t: f64 = 0.0;
-        let mut var_pbswg_t_rv: f64 = 0.0;
-        let mut var_cj_t: f64 = 0.0;
-        let mut var_cj_t_rv: f64 = 0.0;
-        let mut var_cjsw_t: f64 = 0.0;
-        let mut var_cjsw_t_rv: f64 = 0.0;
-        let mut var_cjswg_t: f64 = 0.0;
-        let mut var_cjswg_t_rv: f64 = 0.0;
-        let mut var_csb_d: f64 = 0.0;
-        let mut var_csb_d_rv: f64 = 0.0;
-        let mut var_csb_d_dn0: f64 = 0.0;
-        let mut var_csb_d_dn3: f64 = 0.0;
-        let mut var_cssw_d: f64 = 0.0;
-        let mut var_cssw_d_rv: f64 = 0.0;
-        let mut var_cssw_d_dn0: f64 = 0.0;
-        let mut var_cssw_d_dn3: f64 = 0.0;
-        let mut var_csswg_d: f64 = 0.0;
-        let mut var_csswg_d_rv: f64 = 0.0;
-        let mut var_csswg_d_dn0: f64 = 0.0;
-        let mut var_csswg_d_dn3: f64 = 0.0;
-        let mut var_csb_s: f64 = 0.0;
-        let mut var_csb_s_rv: f64 = 0.0;
-        let mut var_csb_s_dn2: f64 = 0.0;
-        let mut var_csb_s_dn3: f64 = 0.0;
-        let mut var_cssw_s: f64 = 0.0;
-        let mut var_cssw_s_rv: f64 = 0.0;
-        let mut var_cssw_s_dn2: f64 = 0.0;
-        let mut var_cssw_s_dn3: f64 = 0.0;
-        let mut var_csswg_s: f64 = 0.0;
-        let mut var_csswg_s_rv: f64 = 0.0;
-        let mut var_csswg_s_dn2: f64 = 0.0;
-        let mut var_csswg_s_dn3: f64 = 0.0;
-        let mut var_qjd: f64 = 0.0;
-        let mut var_qjd_rv: f64 = 0.0;
-        let mut var_qjd_dn0: f64 = 0.0;
-        let mut var_qjd_dn3: f64 = 0.0;
-        let mut var_qjs: f64 = 0.0;
-        let mut var_qjs_rv: f64 = 0.0;
-        let mut var_qjs_dn2: f64 = 0.0;
-        let mut var_qjs_dn3: f64 = 0.0;
-        let mut var_guard1: f64 = 0.0;
-        let mut var_guard1_rv: f64 = 0.0;
-        let mut var_guard2: f64 = 0.0;
-        let mut var_guard2_rv: f64 = 0.0;
-        let mut var_guard3: f64 = 0.0;
-        let mut var_guard3_rv: f64 = 0.0;
-        let mut var_guard4: f64 = 0.0;
-        let mut var_guard4_rv: f64 = 0.0;
-        let mut var_sqv: f64 = 0.0;
-        let mut var_sqv_rv: f64 = 0.0;
-        let mut var_guard6: f64 = 0.0;
-        let mut var_guard6_rv: f64 = 0.0;
-        let mut var_guard7: f64 = 0.0;
-        let mut var_guard7_rv: f64 = 0.0;
-        let mut var_guard8: f64 = 0.0;
-        let mut var_guard8_rv: f64 = 0.0;
-        let mut var_guard9: f64 = 0.0;
-        let mut var_guard9_rv: f64 = 0.0;
-        let mut var_guard10: f64 = 0.0;
-        let mut var_guard10_rv: f64 = 0.0;
-        let mut var_guard11: f64 = 0.0;
-        let mut var_guard11_rv: f64 = 0.0;
-        let mut var_guard12: f64 = 0.0;
-        let mut var_guard12_rv: f64 = 0.0;
-        let mut var_guard13: f64 = 0.0;
-        let mut var_guard13_rv: f64 = 0.0;
-        let mut var_guard14: f64 = 0.0;
-        let mut var_guard14_rv: f64 = 0.0;
-        let mut var_guard15: f64 = 0.0;
-        let mut var_guard15_rv: f64 = 0.0;
-        let mut var_guard16: f64 = 0.0;
-        let mut var_guard16_rv: f64 = 0.0;
-        let mut var_guard17: f64 = 0.0;
-        let mut var_guard17_rv: f64 = 0.0;
-        let mut var_guard18: f64 = 0.0;
-        let mut var_guard18_rv: f64 = 0.0;
-        let mut var_guard21: f64 = 0.0;
-        let mut var_guard21_rv: f64 = 0.0;
-        let mut var_guard24: f64 = 0.0;
-        let mut var_guard24_rv: f64 = 0.0;
-        let mut var_guard25: f64 = 0.0;
-        let mut var_guard25_rv: f64 = 0.0;
-        let mut var_guard26: f64 = 0.0;
-        let mut var_guard26_rv: f64 = 0.0;
-        let mut var_guard27: f64 = 0.0;
-        let mut var_guard27_rv: f64 = 0.0;
-        let mut var_guard32: f64 = 0.0;
-        let mut var_guard32_rv: f64 = 0.0;
-        let mut var_guard33: f64 = 0.0;
-        let mut var_guard33_rv: f64 = 0.0;
+        let mut locals = StampLocals::default();
 
-        Self::stamp_reactive_block_0(ctx, p, nodes, &mut var_awl, &mut var_awl_rv, &mut var_deltat, &mut var_deltat_rv, &mut var_deltavfb, &mut var_deltavfb_rv, &mut var_eg, &mut var_eg_rv, &mut var_eps_cox, &mut var_eps_cox_l, &mut var_eps_cox_l_rv, &mut var_eps_cox_rv, &mut var_eps_cox_w, &mut var_eps_cox_w_rv, &mut var_epssil, &mut var_epssil_rv, &mut var_eta_qi, &mut var_eta_qi_rv, &mut var_gamma_s, &mut var_gamma_s_rv, &mut var_gamma_sqrt_phi, &mut var_gamma_sqrt_phi_dn0, &mut var_gamma_sqrt_phi_dn1, &mut var_gamma_sqrt_phi_dn2, &mut var_gamma_sqrt_phi_dn3, &mut var_gamma_sqrt_phi_rv, &mut var_guard1, &mut var_guard1_rv, &mut var_guard2, &mut var_guard2_rv, &mut var_guard3, &mut var_guard3_rv, &mut var_guard4, &mut var_guard4_rv, &mut var_guard6, &mut var_guard6_rv, &mut var_inv_ucrit, &mut var_inv_ucrit_rv, &mut var_inv_vt, &mut var_inv_vt_rv, &mut var_kp_t, &mut var_kp_t_rv, &mut var_kp_weff, &mut var_kp_weff_rv, &mut var_lc, &mut var_lc_lambda, &mut var_lc_lambda_rv, &mut var_lc_rv, &mut var_lc_ucrit, &mut var_lc_ucrit_rv, &mut var_leff, &mut var_leff_rv, &mut var_log_vc_vt, &mut var_log_vc_vt_rv, &mut var_mode, &mut var_mode_rv, &mut var_phi_t, &mut var_phi_t_dn0, &mut var_phi_t_dn1, &mut var_phi_t_dn2, &mut var_phi_t_dn3, &mut var_phi_t_rv, &mut var_ratiot, &mut var_ratiot_rv, &mut var_refeg, &mut var_refeg_rv, &mut var_sqrt_phi, &mut var_sqrt_phi_dn0, &mut var_sqrt_phi_dn1, &mut var_sqrt_phi_dn2, &mut var_sqrt_phi_dn3, &mut var_sqrt_phi_rv, &mut var_sqrt_vp_vt, &mut var_sqrt_vp_vt_dn0, &mut var_sqrt_vp_vt_dn1, &mut var_sqrt_vp_vt_dn2, &mut var_sqrt_vp_vt_dn3, &mut var_sqrt_vp_vt_rv, &mut var_sqv, &mut var_sqv_rv, &mut var_t, &mut var_t0, &mut var_t0_rv, &mut var_t1, &mut var_t1_dn0, &mut var_t1_dn2, &mut var_t1_dn3, &mut var_t1_rv, &mut var_t_rv, &mut var_theta_vp_1, &mut var_theta_vp_1_dn0, &mut var_theta_vp_1_dn1, &mut var_theta_vp_1_dn2, &mut var_theta_vp_1_dn3, &mut var_theta_vp_1_rv, &mut var_tmp1, &mut var_tmp1_dn0, &mut var_tmp1_dn1, &mut var_tmp1_dn2, &mut var_tmp1_dn3, &mut var_tmp1_rv, &mut var_tmp2, &mut var_tmp2_dn0, &mut var_tmp2_dn1, &mut var_tmp2_dn2, &mut var_tmp2_dn3, &mut var_tmp2_rv, &mut var_tnom, &mut var_tnom_rv, &mut var_ucrit_t, &mut var_ucrit_t_rv, &mut var_v0, &mut var_v0_rv, &mut var_vc, &mut var_vc_rv, &mut var_vd, &mut var_vd_dn0, &mut var_vd_dn2, &mut var_vd_dn3, &mut var_vd_rv, &mut var_vg, &mut var_vg_dn1, &mut var_vg_dn3, &mut var_vg_rv, &mut var_vl, &mut var_vl_rv, &mut var_vpprime, &mut var_vpprime_dn0, &mut var_vpprime_dn1, &mut var_vpprime_dn2, &mut var_vpprime_dn3, &mut var_vpprime_rv, &mut var_vs, &mut var_vs_dn0, &mut var_vs_dn2, &mut var_vs_dn3, &mut var_vs_rv, &mut var_vt, &mut var_vt_01, &mut var_vt_01_rv, &mut var_vt_2, &mut var_vt_2_rv, &mut var_vt_4, &mut var_vt_4_rv, &mut var_vt_rv, &mut var_vt_vt, &mut var_vt_vt_16, &mut var_vt_vt_16_rv, &mut var_vt_vt_2, &mut var_vt_vt_2_rv, &mut var_vt_vt_rv, &mut var_vto_s, &mut var_vto_s_rv, &mut var_vto_t, &mut var_vto_t_rv, &mut var_weff, &mut var_weff_rv);
-        Self::stamp_reactive_block_1(p, var_deltavfb, var_eps_cox_l, var_eps_cox_w, var_gamma_s, var_gamma_sqrt_phi, var_gamma_sqrt_phi_dn0, var_gamma_sqrt_phi_dn1, var_gamma_sqrt_phi_dn2, var_gamma_sqrt_phi_dn3, var_inv_vt, var_leff, var_log_vc_vt, var_phi_t, var_phi_t_dn0, var_phi_t_dn1, var_phi_t_dn2, var_phi_t_dn3, var_vc, var_vd, var_vd_dn0, var_vd_dn2, var_vd_dn3, var_vg, var_vg_dn1, var_vg_dn3, var_vs, var_vs_dn0, var_vs_dn2, var_vs_dn3, var_vt, var_vt_01, var_vt_vt_16, var_vto_s, var_weff, &mut var_big_sqrt_vp, &mut var_big_sqrt_vp0, &mut var_big_sqrt_vp0_dn0, &mut var_big_sqrt_vp0_dn1, &mut var_big_sqrt_vp0_dn2, &mut var_big_sqrt_vp0_dn3, &mut var_big_sqrt_vp0_rv, &mut var_big_sqrt_vp_dn0, &mut var_big_sqrt_vp_dn1, &mut var_big_sqrt_vp_dn2, &mut var_big_sqrt_vp_dn3, &mut var_big_sqrt_vp_rv, &mut var_deltav_2, &mut var_deltav_2_dn0, &mut var_deltav_2_dn1, &mut var_deltav_2_dn2, &mut var_deltav_2_dn3, &mut var_deltav_2_rv, &mut var_dif_dv, &mut var_dif_dv_dn0, &mut var_dif_dv_dn1, &mut var_dif_dv_dn2, &mut var_dif_dv_dn3, &mut var_dif_dv_rv, &mut var_gammaprime, &mut var_gammaprime_dn0, &mut var_gammaprime_dn1, &mut var_gammaprime_dn2, &mut var_gammaprime_dn3, &mut var_gammaprime_rv, &mut var_gammastar, &mut var_gammastar_dn0, &mut var_gammastar_dn1, &mut var_gammastar_dn2, &mut var_gammastar_dn3, &mut var_gammastar_rv, &mut var_guard7, &mut var_guard7_rv, &mut var_guard8, &mut var_guard8_rv, &mut var_guard9, &mut var_guard9_rv, &mut var_if_, &mut var_if__dn0, &mut var_if__dn1, &mut var_if__dn2, &mut var_if__dn3, &mut var_if__rv, &mut var_leta_l, &mut var_leta_l_rv, &mut var_phi_vd, &mut var_phi_vd_dn0, &mut var_phi_vd_dn1, &mut var_phi_vd_dn2, &mut var_phi_vd_dn3, &mut var_phi_vd_rv, &mut var_phi_vs, &mut var_phi_vs_dn0, &mut var_phi_vs_dn1, &mut var_phi_vs_dn2, &mut var_phi_vs_dn3, &mut var_phi_vs_rv, &mut var_sqrt_gammastar, &mut var_sqrt_gammastar_dn0, &mut var_sqrt_gammastar_dn1, &mut var_sqrt_gammastar_dn2, &mut var_sqrt_gammastar_dn3, &mut var_sqrt_gammastar_rv, &mut var_sqrt_if, &mut var_sqrt_if_dn0, &mut var_sqrt_if_dn1, &mut var_sqrt_if_dn2, &mut var_sqrt_if_dn3, &mut var_sqrt_if_rv, &mut var_sqrt_phi_vd, &mut var_sqrt_phi_vd_dn0, &mut var_sqrt_phi_vd_dn1, &mut var_sqrt_phi_vd_dn2, &mut var_sqrt_phi_vd_dn3, &mut var_sqrt_phi_vd_rv, &mut var_sqrt_phi_vd_vt, &mut var_sqrt_phi_vd_vt_dn0, &mut var_sqrt_phi_vd_vt_dn1, &mut var_sqrt_phi_vd_vt_dn2, &mut var_sqrt_phi_vd_vt_dn3, &mut var_sqrt_phi_vd_vt_rv, &mut var_sqrt_phi_vp0, &mut var_sqrt_phi_vp0_dn0, &mut var_sqrt_phi_vp0_dn1, &mut var_sqrt_phi_vp0_dn2, &mut var_sqrt_phi_vp0_dn3, &mut var_sqrt_phi_vp0_rv, &mut var_sqrt_phi_vs, &mut var_sqrt_phi_vs_dn0, &mut var_sqrt_phi_vs_dn1, &mut var_sqrt_phi_vs_dn2, &mut var_sqrt_phi_vs_dn3, &mut var_sqrt_phi_vs_rv, &mut var_sqrt_phi_vs_vt, &mut var_sqrt_phi_vs_vt_dn0, &mut var_sqrt_phi_vs_vt_dn1, &mut var_sqrt_phi_vs_vt_dn2, &mut var_sqrt_phi_vs_vt_dn3, &mut var_sqrt_phi_vs_vt_rv, &mut var_sqrt_vds_vdss_deltav, &mut var_sqrt_vds_vdss_deltav_dn0, &mut var_sqrt_vds_vdss_deltav_dn1, &mut var_sqrt_vds_vdss_deltav_dn2, &mut var_sqrt_vds_vdss_deltav_dn3, &mut var_sqrt_vds_vdss_deltav_rv, &mut var_sqrt_vds_vdssprime_deltav, &mut var_sqrt_vds_vdssprime_deltav_dn0, &mut var_sqrt_vds_vdssprime_deltav_dn1, &mut var_sqrt_vds_vdssprime_deltav_dn2, &mut var_sqrt_vds_vdssprime_deltav_dn3, &mut var_sqrt_vds_vdssprime_deltav_rv, &mut var_sqrt_vdss_deltav, &mut var_sqrt_vdss_deltav_dn0, &mut var_sqrt_vdss_deltav_dn1, &mut var_sqrt_vdss_deltav_dn2, &mut var_sqrt_vdss_deltav_dn3, &mut var_sqrt_vdss_deltav_rv, &mut var_sqrt_vdssprime_deltav, &mut var_sqrt_vdssprime_deltav_dn0, &mut var_sqrt_vdssprime_deltav_dn1, &mut var_sqrt_vdssprime_deltav_dn2, &mut var_sqrt_vdssprime_deltav_dn3, &mut var_sqrt_vdssprime_deltav_rv, &mut var_sqrt_vgstar, &mut var_sqrt_vgstar_dn0, &mut var_sqrt_vgstar_dn1, &mut var_sqrt_vgstar_dn2, &mut var_sqrt_vgstar_dn3, &mut var_sqrt_vgstar_rv, &mut var_tmp1, &mut var_tmp1_dn0, &mut var_tmp1_dn1, &mut var_tmp1_dn2, &mut var_tmp1_dn3, &mut var_tmp1_rv, &mut var_vds, &mut var_vds_dn0, &mut var_vds_dn2, &mut var_vds_dn3, &mut var_vds_rv, &mut var_vdsprime, &mut var_vdsprime_dn0, &mut var_vdsprime_dn1, &mut var_vdsprime_dn2, &mut var_vdsprime_dn3, &mut var_vdsprime_rv, &mut var_vdss, &mut var_vdss_dn0, &mut var_vdss_dn1, &mut var_vdss_dn2, &mut var_vdss_dn3, &mut var_vdss_rv, &mut var_vdss_sqrt, &mut var_vdss_sqrt_dn0, &mut var_vdss_sqrt_dn1, &mut var_vdss_sqrt_dn2, &mut var_vdss_sqrt_dn3, &mut var_vdss_sqrt_rv, &mut var_vdssprime, &mut var_vdssprime_dn0, &mut var_vdssprime_dn1, &mut var_vdssprime_dn2, &mut var_vdssprime_dn3, &mut var_vdssprime_rv, &mut var_vdssprime_sqrt, &mut var_vdssprime_sqrt_dn0, &mut var_vdssprime_sqrt_dn1, &mut var_vdssprime_sqrt_dn2, &mut var_vdssprime_sqrt_dn3, &mut var_vdssprime_sqrt_rv, &mut var_vgprime, &mut var_vgprime_dn0, &mut var_vgprime_dn1, &mut var_vgprime_dn2, &mut var_vgprime_dn3, &mut var_vgprime_rv, &mut var_vgstar, &mut var_vgstar_dn0, &mut var_vgstar_dn1, &mut var_vgstar_dn2, &mut var_vgstar_dn3, &mut var_vgstar_rv, &mut var_vip, &mut var_vip_dn0, &mut var_vip_dn1, &mut var_vip_dn2, &mut var_vip_dn3, &mut var_vip_rv, &mut var_vp, &mut var_vp0, &mut var_vp0_dn0, &mut var_vp0_dn1, &mut var_vp0_dn2, &mut var_vp0_dn3, &mut var_vp0_rv, &mut var_vp_dn0, &mut var_vp_dn1, &mut var_vp_dn2, &mut var_vp_dn3, &mut var_vp_rv, &mut var_vt_vc, &mut var_vt_vc_rv, &mut var_weta_w, &mut var_weta_w_rv, &mut var_yk, &mut var_yk_dn0, &mut var_yk_dn1, &mut var_yk_dn2, &mut var_yk_dn3, &mut var_yk_rv, &mut var_z0, &mut var_z0_dn0, &mut var_z0_dn1, &mut var_z0_dn2, &mut var_z0_dn3, &mut var_z0_rv, &mut var_zk, &mut var_zk_dn0, &mut var_zk_dn1, &mut var_zk_dn2, &mut var_zk_dn3, &mut var_zk_rv);
-        Self::stamp_reactive_block_2(var_gamma_s, var_if_, var_if__dn0, var_if__dn1, var_if__dn2, var_if__dn3, var_inv_ucrit, var_inv_vt, var_lc_lambda, var_lc_ucrit, var_leff, var_phi_t, var_phi_t_dn0, var_phi_t_dn1, var_phi_t_dn2, var_phi_t_dn3, var_sqrt_vds_vdssprime_deltav, var_sqrt_vds_vdssprime_deltav_dn0, var_sqrt_vds_vdssprime_deltav_dn1, var_sqrt_vds_vdssprime_deltav_dn2, var_sqrt_vds_vdssprime_deltav_dn3, var_sqrt_vdssprime_deltav, var_sqrt_vdssprime_deltav_dn0, var_sqrt_vdssprime_deltav_dn1, var_sqrt_vdssprime_deltav_dn2, var_sqrt_vdssprime_deltav_dn3, var_vd, var_vd_dn0, var_vd_dn2, var_vd_dn3, var_vds, var_vds_dn0, var_vds_dn2, var_vds_dn3, var_vip, var_vip_dn0, var_vip_dn1, var_vip_dn2, var_vip_dn3, var_vp, var_vp_dn0, var_vp_dn1, var_vp_dn2, var_vp_dn3, var_vs, var_vs_dn0, var_vs_dn2, var_vs_dn3, &mut var_deltal, &mut var_deltal_dn0, &mut var_deltal_dn1, &mut var_deltal_dn2, &mut var_deltal_dn3, &mut var_deltal_rv, &mut var_dir_dv, &mut var_dir_dv_dn0, &mut var_dir_dv_dn1, &mut var_dir_dv_dn2, &mut var_dir_dv_dn3, &mut var_dir_dv_rv, &mut var_dirprime_dv, &mut var_dirprime_dv_dn0, &mut var_dirprime_dv_dn1, &mut var_dirprime_dv_dn2, &mut var_dirprime_dv_dn3, &mut var_dirprime_dv_rv, &mut var_guard10, &mut var_guard10_rv, &mut var_guard11, &mut var_guard11_rv, &mut var_guard12, &mut var_guard12_rv, &mut var_guard13, &mut var_guard13_rv, &mut var_guard14, &mut var_guard14_rv, &mut var_guard15, &mut var_guard15_rv, &mut var_ir, &mut var_ir_dn0, &mut var_ir_dn1, &mut var_ir_dn2, &mut var_ir_dn3, &mut var_ir_rv, &mut var_irprime, &mut var_irprime_dn0, &mut var_irprime_dn1, &mut var_irprime_dn2, &mut var_irprime_dn3, &mut var_irprime_rv, &mut var_leq, &mut var_leq_dn0, &mut var_leq_dn1, &mut var_leq_dn2, &mut var_leq_dn3, &mut var_leq_rv, &mut var_lmin, &mut var_lmin_rv, &mut var_lprime, &mut var_lprime_dn0, &mut var_lprime_dn1, &mut var_lprime_dn2, &mut var_lprime_dn3, &mut var_lprime_rv, &mut var_n_1, &mut var_n_1_dn0, &mut var_n_1_dn1, &mut var_n_1_dn2, &mut var_n_1_dn3, &mut var_n_1_n, &mut var_n_1_n_dn0, &mut var_n_1_n_dn1, &mut var_n_1_n_dn2, &mut var_n_1_n_dn3, &mut var_n_1_n_rv, &mut var_n_1_rv, &mut var_sif, &mut var_sif2, &mut var_sif2_dn0, &mut var_sif2_dn1, &mut var_sif2_dn2, &mut var_sif2_dn3, &mut var_sif2_rv, &mut var_sif_dn0, &mut var_sif_dn1, &mut var_sif_dn2, &mut var_sif_dn3, &mut var_sif_rv, &mut var_sif_sir_2, &mut var_sif_sir_2_dn0, &mut var_sif_sir_2_dn1, &mut var_sif_sir_2_dn2, &mut var_sif_sir_2_dn3, &mut var_sif_sir_2_rv, &mut var_sir, &mut var_sir2, &mut var_sir2_dn0, &mut var_sir2_dn1, &mut var_sir2_dn2, &mut var_sir2_dn3, &mut var_sir2_rv, &mut var_sir_dn0, &mut var_sir_dn1, &mut var_sir_dn2, &mut var_sir_dn3, &mut var_sir_rv, &mut var_sqrt_lprime_lmin, &mut var_sqrt_lprime_lmin_dn0, &mut var_sqrt_lprime_lmin_dn1, &mut var_sqrt_lprime_lmin_dn2, &mut var_sqrt_lprime_lmin_dn3, &mut var_sqrt_lprime_lmin_rv, &mut var_sqrt_phi_vp_2, &mut var_sqrt_phi_vp_2_dn0, &mut var_sqrt_phi_vp_2_dn1, &mut var_sqrt_phi_vp_2_dn2, &mut var_sqrt_phi_vp_2_dn3, &mut var_sqrt_phi_vp_2_rv, &mut var_tmp1, &mut var_tmp1_dn0, &mut var_tmp1_dn1, &mut var_tmp1_dn2, &mut var_tmp1_dn3, &mut var_tmp1_rv, &mut var_vp_phi_eps, &mut var_vp_phi_eps_dn0, &mut var_vp_phi_eps_dn1, &mut var_vp_phi_eps_dn2, &mut var_vp_phi_eps_dn3, &mut var_vp_phi_eps_rv, &mut var_yk, &mut var_yk_dn0, &mut var_yk_dn1, &mut var_yk_dn2, &mut var_yk_dn3, &mut var_yk_rv, &mut var_z0, &mut var_z0_dn0, &mut var_z0_dn1, &mut var_z0_dn2, &mut var_z0_dn3, &mut var_z0_rv, &mut var_zk, &mut var_zk_dn0, &mut var_zk_dn1, &mut var_zk_dn2, &mut var_zk_dn3, &mut var_zk_rv);
-        Self::stamp_reactive_block_3(p, var_big_sqrt_vp, var_big_sqrt_vp_dn0, var_big_sqrt_vp_dn1, var_big_sqrt_vp_dn2, var_big_sqrt_vp_dn3, var_dif_dv, var_dif_dv_dn0, var_dif_dv_dn1, var_dif_dv_dn2, var_dif_dv_dn3, var_dirprime_dv, var_dirprime_dv_dn0, var_dirprime_dv_dn1, var_dirprime_dv_dn2, var_dirprime_dv_dn3, var_eta_qi, var_gamma_s, var_gamma_sqrt_phi, var_gamma_sqrt_phi_dn0, var_gamma_sqrt_phi_dn1, var_gamma_sqrt_phi_dn2, var_gamma_sqrt_phi_dn3, var_gammaprime, var_gammaprime_dn0, var_gammaprime_dn1, var_gammaprime_dn2, var_gammaprime_dn3, var_if_, var_if__dn0, var_if__dn1, var_if__dn2, var_if__dn3, var_inv_vt, var_irprime, var_irprime_dn0, var_irprime_dn1, var_irprime_dn2, var_irprime_dn3, var_kp_weff, var_leq, var_leq_dn0, var_leq_dn1, var_leq_dn2, var_leq_dn3, var_leta_l, var_n_1, var_n_1_dn0, var_n_1_dn1, var_n_1_dn2, var_n_1_dn3, var_n_1_n, var_n_1_n_dn0, var_n_1_n_dn1, var_n_1_n_dn2, var_n_1_n_dn3, var_phi_t, var_phi_t_dn0, var_phi_t_dn1, var_phi_t_dn2, var_phi_t_dn3, var_sif, var_sif2, var_sif2_dn0, var_sif2_dn1, var_sif2_dn2, var_sif2_dn3, var_sif_dn0, var_sif_dn1, var_sif_dn2, var_sif_dn3, var_sir, var_sir2, var_sir2_dn0, var_sir2_dn1, var_sir2_dn2, var_sir2_dn3, var_sir_dn0, var_sir_dn1, var_sir_dn2, var_sir_dn3, var_sqrt_gammastar, var_sqrt_gammastar_dn0, var_sqrt_gammastar_dn1, var_sqrt_gammastar_dn2, var_sqrt_gammastar_dn3, var_sqrt_if, var_sqrt_if_dn0, var_sqrt_if_dn1, var_sqrt_if_dn2, var_sqrt_if_dn3, var_sqrt_phi_vd, var_sqrt_phi_vd_dn0, var_sqrt_phi_vd_dn1, var_sqrt_phi_vd_dn2, var_sqrt_phi_vd_dn3, var_sqrt_phi_vd_vt, var_sqrt_phi_vd_vt_dn0, var_sqrt_phi_vd_vt_dn1, var_sqrt_phi_vd_vt_dn2, var_sqrt_phi_vd_vt_dn3, var_sqrt_phi_vp_2, var_sqrt_phi_vp_2_dn0, var_sqrt_phi_vp_2_dn1, var_sqrt_phi_vp_2_dn2, var_sqrt_phi_vp_2_dn3, var_sqrt_phi_vs, var_sqrt_phi_vs_dn0, var_sqrt_phi_vs_dn1, var_sqrt_phi_vs_dn2, var_sqrt_phi_vs_dn3, var_sqrt_phi_vs_vt, var_sqrt_phi_vs_vt_dn0, var_sqrt_phi_vs_vt_dn1, var_sqrt_phi_vs_vt_dn2, var_sqrt_phi_vs_vt_dn3, var_sqrt_vds_vdss_deltav, var_sqrt_vds_vdss_deltav_dn0, var_sqrt_vds_vdss_deltav_dn1, var_sqrt_vds_vdss_deltav_dn2, var_sqrt_vds_vdss_deltav_dn3, var_sqrt_vds_vdssprime_deltav, var_sqrt_vds_vdssprime_deltav_dn0, var_sqrt_vds_vdssprime_deltav_dn1, var_sqrt_vds_vdssprime_deltav_dn2, var_sqrt_vds_vdssprime_deltav_dn3, var_sqrt_vdss_deltav, var_sqrt_vdss_deltav_dn0, var_sqrt_vdss_deltav_dn1, var_sqrt_vdss_deltav_dn2, var_sqrt_vdss_deltav_dn3, var_sqrt_vdssprime_deltav, var_sqrt_vdssprime_deltav_dn0, var_sqrt_vdssprime_deltav_dn1, var_sqrt_vdssprime_deltav_dn2, var_sqrt_vdssprime_deltav_dn3, var_sqrt_vgstar, var_sqrt_vgstar_dn0, var_sqrt_vgstar_dn1, var_sqrt_vgstar_dn2, var_sqrt_vgstar_dn3, var_t0, var_vds, var_vds_dn0, var_vds_dn2, var_vds_dn3, var_vdsprime, var_vdsprime_dn0, var_vdsprime_dn1, var_vdsprime_dn2, var_vdsprime_dn3, var_vdss, var_vdss_dn0, var_vdss_dn1, var_vdss_dn2, var_vdss_dn3, var_vdss_sqrt, var_vdss_sqrt_dn0, var_vdss_sqrt_dn1, var_vdss_sqrt_dn2, var_vdss_sqrt_dn3, var_vdssprime, var_vdssprime_dn0, var_vdssprime_dn1, var_vdssprime_dn2, var_vdssprime_dn3, var_vdssprime_sqrt, var_vdssprime_sqrt_dn0, var_vdssprime_sqrt_dn1, var_vdssprime_sqrt_dn2, var_vdssprime_sqrt_dn3, var_vgprime, var_vgprime_dn0, var_vgprime_dn1, var_vgprime_dn2, var_vgprime_dn3, var_vp, var_vp_dn0, var_vp_dn1, var_vp_dn2, var_vp_dn3, var_vt, var_vt_4, var_vt_vt_2, &mut var_beta, &mut var_beta_dn0, &mut var_beta_dn1, &mut var_beta_dn2, &mut var_beta_dn3, &mut var_beta_rv, &mut var_ddeltav_dvd, &mut var_ddeltav_dvd_dn0, &mut var_ddeltav_dvd_dn1, &mut var_ddeltav_dvd_dn2, &mut var_ddeltav_dvd_dn3, &mut var_ddeltav_dvd_rv, &mut var_ddeltav_dvs, &mut var_ddeltav_dvs_dn0, &mut var_ddeltav_dvs_dn1, &mut var_ddeltav_dvs_dn2, &mut var_ddeltav_dvs_dn3, &mut var_ddeltav_dvs_rv, &mut var_dgammaprime_dvd, &mut var_dgammaprime_dvd_dn0, &mut var_dgammaprime_dvd_dn1, &mut var_dgammaprime_dvd_dn2, &mut var_dgammaprime_dvd_dn3, &mut var_dgammaprime_dvd_rv, &mut var_dgammaprime_dvs, &mut var_dgammaprime_dvs_dn0, &mut var_dgammaprime_dvs_dn1, &mut var_dgammaprime_dvs_dn2, &mut var_dgammaprime_dvs_dn3, &mut var_dgammaprime_dvs_rv, &mut var_dif_dvd, &mut var_dif_dvd_dn0, &mut var_dif_dvd_dn1, &mut var_dif_dvd_dn2, &mut var_dif_dvd_dn3, &mut var_dif_dvd_rv, &mut var_dif_dvs, &mut var_dif_dvs_dn0, &mut var_dif_dvs_dn1, &mut var_dif_dvs_dn2, &mut var_dif_dvs_dn3, &mut var_dif_dvs_rv, &mut var_dirprime_dvd, &mut var_dirprime_dvd_dn0, &mut var_dirprime_dvd_dn1, &mut var_dirprime_dvd_dn2, &mut var_dirprime_dvd_dn3, &mut var_dirprime_dvd_rv, &mut var_dirprime_dvs, &mut var_dirprime_dvs_dn0, &mut var_dirprime_dvs_dn1, &mut var_dirprime_dvs_dn2, &mut var_dirprime_dvs_dn3, &mut var_dirprime_dvs_rv, &mut var_dvdss_dvd, &mut var_dvdss_dvd_dn0, &mut var_dvdss_dvd_dn1, &mut var_dvdss_dvd_dn2, &mut var_dvdss_dvd_dn3, &mut var_dvdss_dvd_rv, &mut var_dvdss_dvs, &mut var_dvdss_dvs_dn0, &mut var_dvdss_dvs_dn1, &mut var_dvdss_dvs_dn2, &mut var_dvdss_dvs_dn3, &mut var_dvdss_dvs_rv, &mut var_dvdssprime_dvd, &mut var_dvdssprime_dvd_dn0, &mut var_dvdssprime_dvd_dn1, &mut var_dvdssprime_dvd_dn2, &mut var_dvdssprime_dvd_dn3, &mut var_dvdssprime_dvd_rv, &mut var_dvdssprime_dvs, &mut var_dvdssprime_dvs_dn0, &mut var_dvdssprime_dvs_dn1, &mut var_dvdssprime_dvs_dn2, &mut var_dvdssprime_dvs_dn3, &mut var_dvdssprime_dvs_rv, &mut var_dvip_dvd, &mut var_dvip_dvd_dn0, &mut var_dvip_dvd_dn1, &mut var_dvip_dvd_dn2, &mut var_dvip_dvd_dn3, &mut var_dvip_dvd_rv, &mut var_dvip_dvs, &mut var_dvip_dvs_dn0, &mut var_dvip_dvs_dn1, &mut var_dvip_dvs_dn2, &mut var_dvip_dvs_dn3, &mut var_dvip_dvs_rv, &mut var_dvp_dvd, &mut var_dvp_dvd_dn0, &mut var_dvp_dvd_dn1, &mut var_dvp_dvd_dn2, &mut var_dvp_dvd_dn3, &mut var_dvp_dvd_rv, &mut var_dvp_dvs, &mut var_dvp_dvs_dn0, &mut var_dvp_dvs_dn1, &mut var_dvp_dvs_dn2, &mut var_dvp_dvs_dn3, &mut var_dvp_dvs_rv, &mut var_e0_q_1, &mut var_e0_q_1_dn0, &mut var_e0_q_1_dn1, &mut var_e0_q_1_dn2, &mut var_e0_q_1_dn3, &mut var_e0_q_1_rv, &mut var_guard16, &mut var_guard16_rv, &mut var_guard17, &mut var_guard17_rv, &mut var_if_ir, &mut var_if_ir_dn0, &mut var_if_ir_dn1, &mut var_if_ir_dn2, &mut var_if_ir_dn3, &mut var_if_ir_rv, &mut var_ispec, &mut var_ispec_dn0, &mut var_ispec_dn1, &mut var_ispec_dn2, &mut var_ispec_dn3, &mut var_ispec_rv, &mut var_n, &mut var_n_dn0, &mut var_n_dn1, &mut var_n_dn2, &mut var_n_dn3, &mut var_n_rv, &mut var_qb, &mut var_qb_dn0, &mut var_qb_dn1, &mut var_qb_dn2, &mut var_qb_dn3, &mut var_qb_rv, &mut var_qi, &mut var_qi_dn0, &mut var_qi_dn1, &mut var_qi_dn2, &mut var_qi_dn3, &mut var_qi_rv, &mut var_sqrt_phi_vp, &mut var_sqrt_phi_vp_dn0, &mut var_sqrt_phi_vp_dn1, &mut var_sqrt_phi_vp_dn2, &mut var_sqrt_phi_vp_dn3, &mut var_sqrt_phi_vp_rv, &mut var_sqrt_vp_vt, &mut var_sqrt_vp_vt_dn0, &mut var_sqrt_vp_vt_dn1, &mut var_sqrt_vp_vt_dn2, &mut var_sqrt_vp_vt_dn3, &mut var_sqrt_vp_vt_rv, &mut var_t0_gamma_1, &mut var_t0_gamma_1_dn0, &mut var_t0_gamma_1_dn1, &mut var_t0_gamma_1_dn2, &mut var_t0_gamma_1_dn3, &mut var_t0_gamma_1_rv, &mut var_theta_vp_1, &mut var_theta_vp_1_dn0, &mut var_theta_vp_1_dn1, &mut var_theta_vp_1_dn2, &mut var_theta_vp_1_dn3, &mut var_theta_vp_1_rv, &mut var_tmp1, &mut var_tmp1_dn0, &mut var_tmp1_dn1, &mut var_tmp1_dn2, &mut var_tmp1_dn3, &mut var_tmp1_rv, &mut var_tmp2, &mut var_tmp2_dn0, &mut var_tmp2_dn1, &mut var_tmp2_dn2, &mut var_tmp2_dn3, &mut var_tmp2_rv, &mut var_tmp3, &mut var_tmp3_dn0, &mut var_tmp3_dn1, &mut var_tmp3_dn2, &mut var_tmp3_dn3, &mut var_tmp3_rv, &mut var_vpprime, &mut var_vpprime_dn0, &mut var_vpprime_dn1, &mut var_vpprime_dn2, &mut var_vpprime_dn3, &mut var_vpprime_rv);
-        Self::stamp_reactive_block_4(p, var_dif_dvd, var_dif_dvd_dn0, var_dif_dvd_dn1, var_dif_dvd_dn2, var_dif_dvd_dn3, var_dif_dvs, var_dif_dvs_dn0, var_dif_dvs_dn1, var_dif_dvs_dn2, var_dif_dvs_dn3, var_dir_dv, var_dir_dv_dn0, var_dir_dv_dn1, var_dir_dv_dn2, var_dir_dv_dn3, var_dirprime_dvd, var_dirprime_dvd_dn0, var_dirprime_dvd_dn1, var_dirprime_dvd_dn2, var_dirprime_dvd_dn3, var_dirprime_dvs, var_dirprime_dvs_dn0, var_dirprime_dvs_dn1, var_dirprime_dvs_dn2, var_dirprime_dvs_dn3, var_dvip_dvd, var_dvip_dvd_dn0, var_dvip_dvd_dn1, var_dvip_dvd_dn2, var_dvip_dvd_dn3, var_dvip_dvs, var_dvip_dvs_dn0, var_dvip_dvs_dn1, var_dvip_dvs_dn2, var_dvip_dvs_dn3, var_dvp_dvd, var_dvp_dvd_dn0, var_dvp_dvd_dn1, var_dvp_dvd_dn2, var_dvp_dvd_dn3, var_dvp_dvs, var_dvp_dvs_dn0, var_dvp_dvs_dn1, var_dvp_dvs_dn2, var_dvp_dvs_dn3, var_e0_q_1, var_e0_q_1_dn0, var_e0_q_1_dn1, var_e0_q_1_dn2, var_e0_q_1_dn3, var_eta_qi, var_gamma_s, var_gammaprime, var_gammaprime_dn0, var_gammaprime_dn1, var_gammaprime_dn2, var_gammaprime_dn3, var_if_ir, var_if_ir_dn0, var_if_ir_dn1, var_if_ir_dn2, var_if_ir_dn3, var_inv_ucrit, var_inv_vt, var_ispec, var_ispec_dn0, var_ispec_dn1, var_ispec_dn2, var_ispec_dn3, var_lc_lambda, var_lc_ucrit, var_leff, var_n, var_n_1, var_n_1_dn0, var_n_1_dn1, var_n_1_dn2, var_n_1_dn3, var_n_1_n, var_n_1_n_dn0, var_n_1_n_dn1, var_n_1_n_dn2, var_n_1_n_dn3, var_n_dn0, var_n_dn1, var_n_dn2, var_n_dn3, var_phi_t, var_phi_t_dn0, var_phi_t_dn1, var_phi_t_dn2, var_phi_t_dn3, var_qi, var_qi_dn0, var_qi_dn1, var_qi_dn2, var_qi_dn3, var_sif, var_sif2, var_sif2_dn0, var_sif2_dn1, var_sif2_dn2, var_sif2_dn3, var_sif_dn0, var_sif_dn1, var_sif_dn2, var_sif_dn3, var_sif_sir_2, var_sif_sir_2_dn0, var_sif_sir_2_dn1, var_sif_sir_2_dn2, var_sif_sir_2_dn3, var_sir, var_sir2, var_sir2_dn0, var_sir2_dn1, var_sir2_dn2, var_sir2_dn3, var_sir_dn0, var_sir_dn1, var_sir_dn2, var_sir_dn3, var_sqrt_lprime_lmin, var_sqrt_lprime_lmin_dn0, var_sqrt_lprime_lmin_dn1, var_sqrt_lprime_lmin_dn2, var_sqrt_lprime_lmin_dn3, var_sqrt_phi_vp, var_sqrt_phi_vp_dn0, var_sqrt_phi_vp_dn1, var_sqrt_phi_vp_dn2, var_sqrt_phi_vp_dn3, var_sqrt_vp_vt, var_sqrt_vp_vt_dn0, var_sqrt_vp_vt_dn1, var_sqrt_vp_vt_dn2, var_sqrt_vp_vt_dn3, var_t0, var_theta_vp_1, var_theta_vp_1_dn0, var_theta_vp_1_dn1, var_theta_vp_1_dn2, var_theta_vp_1_dn3, var_vds, var_vds_dn0, var_vds_dn2, var_vds_dn3, var_vip, var_vip_dn0, var_vip_dn1, var_vip_dn2, var_vip_dn3, var_vp, var_vp_dn0, var_vp_dn1, var_vp_dn2, var_vp_dn3, var_vp_phi_eps, var_vp_phi_eps_dn0, var_vp_phi_eps_dn1, var_vp_phi_eps_dn2, var_vp_phi_eps_dn3, var_vpprime, var_vpprime_dn0, var_vpprime_dn1, var_vpprime_dn2, var_vpprime_dn3, var_vt, var_vt_4, var_weff, &mut var_dbeta_dvd, &mut var_dbeta_dvd_dn0, &mut var_dbeta_dvd_dn1, &mut var_dbeta_dvd_dn2, &mut var_dbeta_dvd_dn3, &mut var_dbeta_dvd_rv, &mut var_dbeta_dvs, &mut var_dbeta_dvs_dn0, &mut var_dbeta_dvs_dn1, &mut var_dbeta_dvs_dn2, &mut var_dbeta_dvs_dn3, &mut var_dbeta_dvs_rv, &mut var_ddeltal_dvd, &mut var_ddeltal_dvd_dn0, &mut var_ddeltal_dvd_dn1, &mut var_ddeltal_dvd_dn2, &mut var_ddeltal_dvd_dn3, &mut var_ddeltal_dvd_rv, &mut var_ddeltal_dvs, &mut var_ddeltal_dvs_dn0, &mut var_ddeltal_dvs_dn1, &mut var_ddeltal_dvs_dn2, &mut var_ddeltal_dvs_dn3, &mut var_ddeltal_dvs_rv, &mut var_dir_dvd, &mut var_dir_dvd_dn0, &mut var_dir_dvd_dn1, &mut var_dir_dvd_dn2, &mut var_dir_dvd_dn3, &mut var_dir_dvd_rv, &mut var_dir_dvs, &mut var_dir_dvs_dn0, &mut var_dir_dvs_dn1, &mut var_dir_dvs_dn2, &mut var_dir_dvs_dn3, &mut var_dir_dvs_rv, &mut var_dleq_dvd, &mut var_dleq_dvd_dn0, &mut var_dleq_dvd_dn1, &mut var_dleq_dvd_dn2, &mut var_dleq_dvd_dn3, &mut var_dleq_dvd_rv, &mut var_dleq_dvs, &mut var_dleq_dvs_dn0, &mut var_dleq_dvs_dn1, &mut var_dleq_dvs_dn2, &mut var_dleq_dvs_dn3, &mut var_dleq_dvs_rv, &mut var_dn_dvd, &mut var_dn_dvd_dn0, &mut var_dn_dvd_dn1, &mut var_dn_dvd_dn2, &mut var_dn_dvd_dn3, &mut var_dn_dvd_rv, &mut var_dn_dvs, &mut var_dn_dvs_dn0, &mut var_dn_dvs_dn1, &mut var_dn_dvs_dn2, &mut var_dn_dvs_dn3, &mut var_dn_dvs_rv, &mut var_dqb_dvd, &mut var_dqb_dvd_dn0, &mut var_dqb_dvd_dn1, &mut var_dqb_dvd_dn2, &mut var_dqb_dvd_dn3, &mut var_dqb_dvd_rv, &mut var_dqb_dvs, &mut var_dqb_dvs_dn0, &mut var_dqb_dvs_dn1, &mut var_dqb_dvs_dn2, &mut var_dqb_dvs_dn3, &mut var_dqb_dvs_rv, &mut var_dqi_dvd, &mut var_dqi_dvd_dn0, &mut var_dqi_dvd_dn1, &mut var_dqi_dvd_dn2, &mut var_dqi_dvd_dn3, &mut var_dqi_dvd_rv, &mut var_dqi_dvs, &mut var_dqi_dvs_dn0, &mut var_dqi_dvs_dn1, &mut var_dqi_dvs_dn2, &mut var_dqi_dvs_dn3, &mut var_dqi_dvs_rv, &mut var_dvpprime_dvd, &mut var_dvpprime_dvd_dn0, &mut var_dvpprime_dvd_dn1, &mut var_dvpprime_dvd_dn2, &mut var_dvpprime_dvd_dn3, &mut var_dvpprime_dvd_rv, &mut var_dvpprime_dvs, &mut var_dvpprime_dvs_dn0, &mut var_dvpprime_dvs_dn1, &mut var_dvpprime_dvs_dn2, &mut var_dvpprime_dvs_dn3, &mut var_dvpprime_dvs_rv, &mut var_gds, &mut var_gds_dn0, &mut var_gds_dn1, &mut var_gds_dn2, &mut var_gds_dn3, &mut var_gds_rv, &mut var_gms, &mut var_gms_dn0, &mut var_gms_dn1, &mut var_gms_dn2, &mut var_gms_dn3, &mut var_gms_rv, &mut var_guard18, &mut var_guard18_rv, &mut var_n_vt_cox, &mut var_n_vt_cox_dn0, &mut var_n_vt_cox_dn1, &mut var_n_vt_cox_dn2, &mut var_n_vt_cox_dn3, &mut var_n_vt_cox_rv, &mut var_qd, &mut var_qd_dn0, &mut var_qd_dn1, &mut var_qd_dn2, &mut var_qd_dn3, &mut var_qd_rv, &mut var_qi_1, &mut var_qi_1_dn0, &mut var_qi_1_dn1, &mut var_qi_1_dn2, &mut var_qi_1_dn3, &mut var_qi_1_rv, &mut var_qs, &mut var_qs_dn0, &mut var_qs_dn1, &mut var_qs_dn2, &mut var_qs_dn3, &mut var_qs_rv, &mut var_rdeff, &mut var_rdeff_rv, &mut var_rseff, &mut var_rseff_rv, &mut var_sif3, &mut var_sif3_dn0, &mut var_sif3_dn1, &mut var_sif3_dn2, &mut var_sif3_dn3, &mut var_sif3_rv, &mut var_sir3, &mut var_sir3_dn0, &mut var_sir3_dn1, &mut var_sir3_dn2, &mut var_sir3_dn3, &mut var_sir3_rv, &mut var_sqrt_phi_vp2_2, &mut var_sqrt_phi_vp2_2_dn0, &mut var_sqrt_phi_vp2_2_dn1, &mut var_sqrt_phi_vp2_2_dn2, &mut var_sqrt_phi_vp2_2_dn3, &mut var_sqrt_phi_vp2_2_rv, &mut var_tmp1, &mut var_tmp1_dn0, &mut var_tmp1_dn1, &mut var_tmp1_dn2, &mut var_tmp1_dn3, &mut var_tmp1_rv, &mut var_tmp2, &mut var_tmp2_dn0, &mut var_tmp2_dn1, &mut var_tmp2_dn2, &mut var_tmp2_dn3, &mut var_tmp2_rv, &mut var_tmp3, &mut var_tmp3_dn0, &mut var_tmp3_dn1, &mut var_tmp3_dn2, &mut var_tmp3_dn3, &mut var_tmp3_rv, &mut var_wlcox, &mut var_wlcox_rv);
-        Self::stamp_reactive_block_5(ctx, p, nodes, var_deltat, var_gammaprime, var_gammaprime_dn0, var_gammaprime_dn1, var_gammaprime_dn2, var_gammaprime_dn3, var_mode, var_qd, var_qd_dn0, var_qd_dn1, var_qd_dn2, var_qd_dn3, var_qi_1, var_qi_1_dn0, var_qi_1_dn1, var_qi_1_dn2, var_qi_1_dn3, var_qs, var_qs_dn0, var_qs_dn1, var_qs_dn2, var_qs_dn3, var_sqrt_phi_vp2_2, var_sqrt_phi_vp2_2_dn0, var_sqrt_phi_vp2_2_dn1, var_sqrt_phi_vp2_2_dn2, var_sqrt_phi_vp2_2_dn3, var_sqrt_phi_vp_2, var_sqrt_phi_vp_2_dn0, var_sqrt_phi_vp_2_dn1, var_sqrt_phi_vp_2_dn2, var_sqrt_phi_vp_2_dn3, var_vgprime, var_vgprime_dn0, var_vgprime_dn1, var_vgprime_dn2, var_vgprime_dn3, var_vgstar, var_vgstar_dn0, var_vgstar_dn1, var_vgstar_dn2, var_vgstar_dn3, var_weff, var_wlcox, &mut var_ad_i, &mut var_ad_i_rv, &mut var_as_i, &mut var_as_i_rv, &mut var_cj_t, &mut var_cj_t_rv, &mut var_cjsw_t, &mut var_cjsw_t_rv, &mut var_cjswg_t, &mut var_cjswg_t_rv, &mut var_csb_d, &mut var_csb_d_dn0, &mut var_csb_d_dn3, &mut var_csb_d_rv, &mut var_csb_s, &mut var_csb_s_dn2, &mut var_csb_s_dn3, &mut var_csb_s_rv, &mut var_cssw_d, &mut var_cssw_d_dn0, &mut var_cssw_d_dn3, &mut var_cssw_d_rv, &mut var_cssw_s, &mut var_cssw_s_dn2, &mut var_cssw_s_dn3, &mut var_cssw_s_rv, &mut var_csswg_d, &mut var_csswg_d_dn0, &mut var_csswg_d_dn3, &mut var_csswg_d_rv, &mut var_csswg_s, &mut var_csswg_s_dn2, &mut var_csswg_s_dn3, &mut var_csswg_s_rv, &mut var_ddt_qd, &mut var_ddt_qd_dn0, &mut var_ddt_qd_dn1, &mut var_ddt_qd_dn2, &mut var_ddt_qd_dn3, &mut var_ddt_qd_rdn0, &mut var_ddt_qd_rdn1, &mut var_ddt_qd_rdn2, &mut var_ddt_qd_rdn3, &mut var_ddt_qd_rv, &mut var_ddt_qs, &mut var_ddt_qs_dn0, &mut var_ddt_qs_dn1, &mut var_ddt_qs_dn2, &mut var_ddt_qs_dn3, &mut var_ddt_qs_rdn0, &mut var_ddt_qs_rdn1, &mut var_ddt_qs_rdn2, &mut var_ddt_qs_rdn3, &mut var_ddt_qs_rv, &mut var_guard21, &mut var_guard21_rv, &mut var_guard24, &mut var_guard24_rv, &mut var_guard25, &mut var_guard25_rv, &mut var_guard26, &mut var_guard26_rv, &mut var_guard27, &mut var_guard27_rv, &mut var_guard32, &mut var_guard32_rv, &mut var_guard33, &mut var_guard33_rv, &mut var_pb_t, &mut var_pb_t_rv, &mut var_pbsw_t, &mut var_pbsw_t_rv, &mut var_pbswg_t, &mut var_pbswg_t_rv, &mut var_pd_i, &mut var_pd_i_rv, &mut var_ps_i, &mut var_ps_i_rv, &mut var_qb_1, &mut var_qb_1_dn0, &mut var_qb_1_dn1, &mut var_qb_1_dn2, &mut var_qb_1_dn3, &mut var_qb_1_rv, &mut var_qg, &mut var_qg_dn0, &mut var_qg_dn1, &mut var_qg_dn2, &mut var_qg_dn3, &mut var_qg_rv, &mut var_qjd, &mut var_qjd_dn0, &mut var_qjd_dn3, &mut var_qjd_rv, &mut var_qjs, &mut var_qjs_dn2, &mut var_qjs_dn3, &mut var_qjs_rv, &mut var_v_di_b, &mut var_v_di_b_dn0, &mut var_v_di_b_dn3, &mut var_v_di_b_rv, &mut var_v_si_b, &mut var_v_si_b_dn2, &mut var_v_si_b_dn3, &mut var_v_si_b_rv);
+        Self::stamp_reactive_block_0(ctx, p, nodes, &mut locals);
+        Self::stamp_reactive_block_1(p, &mut locals);
+        Self::stamp_reactive_block_2(&mut locals);
+        Self::stamp_reactive_block_3(p, &mut locals);
+        Self::stamp_reactive_block_4(p, &mut locals);
+        Self::stamp_reactive_block_5(ctx, p, nodes, &mut locals);
 
-        Self::stamp_reactive_equations_block_0(stamper, p, nodes, multiplicity, var_ddt_qd, var_ddt_qd_dn0, var_ddt_qd_dn1, var_ddt_qd_dn2, var_ddt_qd_dn3, var_ddt_qd_rdn0, var_ddt_qd_rdn1, var_ddt_qd_rdn2, var_ddt_qd_rdn3, var_ddt_qd_rv, var_ddt_qs, var_ddt_qs_dn0, var_ddt_qs_dn1, var_ddt_qs_dn2, var_ddt_qs_dn3, var_ddt_qs_rdn0, var_ddt_qs_rdn1, var_ddt_qs_rdn2, var_ddt_qs_rdn3, var_ddt_qs_rv, var_guard21, var_qg, var_qg_dn0, var_qg_dn1, var_qg_dn2, var_qg_dn3, var_qjd, var_qjd_dn0, var_qjd_dn3, var_qjs, var_qjs_dn2, var_qjs_dn3);
+        Self::stamp_reactive_equations_block_0(stamper, p, nodes, multiplicity, &mut locals);
     }
 }

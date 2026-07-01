@@ -91,6 +91,292 @@ fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct StampLocals {
+    pub(crate) var_cgd: f64,
+    pub(crate) var_cgd0_t: f64,
+    pub(crate) var_cgd0_t_dn11: f64,
+    pub(crate) var_cgd0_t_rv: f64,
+    pub(crate) var_cgd_dn11: f64,
+    pub(crate) var_cgd_dn3: f64,
+    pub(crate) var_cgd_dn5: f64,
+    pub(crate) var_cgd_dn7: f64,
+    pub(crate) var_cgd_dn8: f64,
+    pub(crate) var_cgd_rv: f64,
+    pub(crate) var_cgs: f64,
+    pub(crate) var_cgs0_t: f64,
+    pub(crate) var_cgs0_t_dn11: f64,
+    pub(crate) var_cgs0_t_rv: f64,
+    pub(crate) var_cgs_dn11: f64,
+    pub(crate) var_cgs_dn3: f64,
+    pub(crate) var_cgs_dn5: f64,
+    pub(crate) var_cgs_dn7: f64,
+    pub(crate) var_cgs_dn8: f64,
+    pub(crate) var_cgs_rv: f64,
+    pub(crate) var_ci: f64,
+    pub(crate) var_ci_dn11: f64,
+    pub(crate) var_ci_rv: f64,
+    pub(crate) var_cosh0: f64,
+    pub(crate) var_cosh0_dn11: f64,
+    pub(crate) var_cosh0_dn3: f64,
+    pub(crate) var_cosh0_dn5: f64,
+    pub(crate) var_cosh0_rv: f64,
+    pub(crate) var_cosh1: f64,
+    pub(crate) var_cosh1_dn11: f64,
+    pub(crate) var_cosh1_dn3: f64,
+    pub(crate) var_cosh1_dn5: f64,
+    pub(crate) var_cosh1_dn7: f64,
+    pub(crate) var_cosh1_dn8: f64,
+    pub(crate) var_cosh1_rv: f64,
+    pub(crate) var_delta_t: f64,
+    pub(crate) var_delta_t_dn11: f64,
+    pub(crate) var_delta_t_rv: f64,
+    pub(crate) var_guard1: f64,
+    pub(crate) var_guard10: f64,
+    pub(crate) var_guard11: f64,
+    pub(crate) var_guard13: f64,
+    pub(crate) var_guard13_rv: f64,
+    pub(crate) var_guard14: f64,
+    pub(crate) var_guard14_rv: f64,
+    pub(crate) var_guard15: f64,
+    pub(crate) var_guard15_rv: f64,
+    pub(crate) var_guard16: f64,
+    pub(crate) var_guard16_rv: f64,
+    pub(crate) var_guard1_rv: f64,
+    pub(crate) var_guard2: f64,
+    pub(crate) var_guard21: f64,
+    pub(crate) var_guard21_rv: f64,
+    pub(crate) var_guard22: f64,
+    pub(crate) var_guard22_rv: f64,
+    pub(crate) var_guard23: f64,
+    pub(crate) var_guard24: f64,
+    pub(crate) var_guard24_rv: f64,
+    pub(crate) var_guard25: f64,
+    pub(crate) var_guard25_rv: f64,
+    pub(crate) var_guard26: f64,
+    pub(crate) var_guard26_rv: f64,
+    pub(crate) var_guard27: f64,
+    pub(crate) var_guard27_rv: f64,
+    pub(crate) var_guard2_rv: f64,
+    pub(crate) var_guard3: f64,
+    pub(crate) var_guard3_rv: f64,
+    pub(crate) var_guard4: f64,
+    pub(crate) var_guard43: f64,
+    pub(crate) var_guard43_rv: f64,
+    pub(crate) var_guard5: f64,
+    pub(crate) var_guard6: f64,
+    pub(crate) var_guard7: f64,
+    pub(crate) var_guard8: f64,
+    pub(crate) var_guard9: f64,
+    pub(crate) var_k: f64,
+    pub(crate) var_k_dn11: f64,
+    pub(crate) var_k_rv: f64,
+    pub(crate) var_lc1: f64,
+    pub(crate) var_lc10: f64,
+    pub(crate) var_lc10_dn11: f64,
+    pub(crate) var_lc10_dn3: f64,
+    pub(crate) var_lc10_dn5: f64,
+    pub(crate) var_lc10_rv: f64,
+    pub(crate) var_lc1_dn11: f64,
+    pub(crate) var_lc1_dn3: f64,
+    pub(crate) var_lc1_dn5: f64,
+    pub(crate) var_lc1_dn7: f64,
+    pub(crate) var_lc1_dn8: f64,
+    pub(crate) var_lc1_rv: f64,
+    pub(crate) var_lc4: f64,
+    pub(crate) var_lc40: f64,
+    pub(crate) var_lc40_dn11: f64,
+    pub(crate) var_lc40_dn3: f64,
+    pub(crate) var_lc40_dn5: f64,
+    pub(crate) var_lc40_rv: f64,
+    pub(crate) var_lc4_dn11: f64,
+    pub(crate) var_lc4_dn3: f64,
+    pub(crate) var_lc4_dn5: f64,
+    pub(crate) var_lc4_dn7: f64,
+    pub(crate) var_lc4_dn8: f64,
+    pub(crate) var_lc4_rv: f64,
+    pub(crate) var_p10_t: f64,
+    pub(crate) var_p10_t_dn11: f64,
+    pub(crate) var_p10_t_rv: f64,
+    pub(crate) var_p1_t: f64,
+    pub(crate) var_p1_t_dn11: f64,
+    pub(crate) var_p1m: f64,
+    pub(crate) var_p1m_dn11: f64,
+    pub(crate) var_p1m_dn3: f64,
+    pub(crate) var_p1m_dn4: f64,
+    pub(crate) var_p1m_dn5: f64,
+    pub(crate) var_p1m_dn8: f64,
+    pub(crate) var_p40_t: f64,
+    pub(crate) var_p40_t_dn11: f64,
+    pub(crate) var_p40_t_rv: f64,
+    pub(crate) var_pg_param: f64,
+    pub(crate) var_pg_param_dn11: f64,
+    pub(crate) var_psi: f64,
+    pub(crate) var_psi_1: f64,
+    pub(crate) var_psi_1_dn11: f64,
+    pub(crate) var_psi_1_dn3: f64,
+    pub(crate) var_psi_1_dn5: f64,
+    pub(crate) var_psi_1_dn8: f64,
+    pub(crate) var_psi_1_rv: f64,
+    pub(crate) var_psi_2: f64,
+    pub(crate) var_psi_2_dn3: f64,
+    pub(crate) var_psi_2_dn5: f64,
+    pub(crate) var_psi_2_rv: f64,
+    pub(crate) var_psi_3: f64,
+    pub(crate) var_psi_3_dn3: f64,
+    pub(crate) var_psi_3_dn5: f64,
+    pub(crate) var_psi_3_rv: f64,
+    pub(crate) var_psi_4: f64,
+    pub(crate) var_psi_4_dn11: f64,
+    pub(crate) var_psi_4_dn3: f64,
+    pub(crate) var_psi_4_dn5: f64,
+    pub(crate) var_psi_4_dn7: f64,
+    pub(crate) var_psi_4_rv: f64,
+    pub(crate) var_psi_dn11: f64,
+    pub(crate) var_psi_dn3: f64,
+    pub(crate) var_psi_dn4: f64,
+    pub(crate) var_psi_dn5: f64,
+    pub(crate) var_psi_dn8: f64,
+    pub(crate) var_qgd: f64,
+    pub(crate) var_qgd0: f64,
+    pub(crate) var_qgd0_dn11: f64,
+    pub(crate) var_qgd0_dn3: f64,
+    pub(crate) var_qgd0_dn5: f64,
+    pub(crate) var_qgd0_rv: f64,
+    pub(crate) var_qgd_dn11: f64,
+    pub(crate) var_qgd_dn3: f64,
+    pub(crate) var_qgd_dn5: f64,
+    pub(crate) var_qgd_dn7: f64,
+    pub(crate) var_qgd_dn8: f64,
+    pub(crate) var_qgd_rv: f64,
+    pub(crate) var_qgs: f64,
+    pub(crate) var_qgs0: f64,
+    pub(crate) var_qgs0_dn11: f64,
+    pub(crate) var_qgs0_dn3: f64,
+    pub(crate) var_qgs0_dn5: f64,
+    pub(crate) var_qgs0_rv: f64,
+    pub(crate) var_qgs_dn11: f64,
+    pub(crate) var_qgs_dn3: f64,
+    pub(crate) var_qgs_dn5: f64,
+    pub(crate) var_qgs_dn7: f64,
+    pub(crate) var_qgs_dn8: f64,
+    pub(crate) var_qgs_rv: f64,
+    pub(crate) var_rd1: f64,
+    pub(crate) var_rd1_dn11: f64,
+    pub(crate) var_rd1_dn3: f64,
+    pub(crate) var_rd1_dn4: f64,
+    pub(crate) var_rd1_dn5: f64,
+    pub(crate) var_rd1_dn8: f64,
+    pub(crate) var_rd1_t: f64,
+    pub(crate) var_rd1_t_dn11: f64,
+    pub(crate) var_rd1_t_dn3: f64,
+    pub(crate) var_rd1_t_dn4: f64,
+    pub(crate) var_rd1_t_dn5: f64,
+    pub(crate) var_rd1_t_dn8: f64,
+    pub(crate) var_rs1: f64,
+    pub(crate) var_rs1_dn11: f64,
+    pub(crate) var_rs1_dn3: f64,
+    pub(crate) var_rs1_dn4: f64,
+    pub(crate) var_rs1_dn5: f64,
+    pub(crate) var_rs1_dn8: f64,
+    pub(crate) var_rs_t: f64,
+    pub(crate) var_rs_t_dn11: f64,
+    pub(crate) var_rs_t_dn3: f64,
+    pub(crate) var_rs_t_dn4: f64,
+    pub(crate) var_rs_t_dn5: f64,
+    pub(crate) var_rs_t_dn8: f64,
+    pub(crate) var_t: f64,
+    pub(crate) var_t0: f64,
+    pub(crate) var_t0_dn11: f64,
+    pub(crate) var_t0_dn3: f64,
+    pub(crate) var_t0_dn4: f64,
+    pub(crate) var_t0_dn5: f64,
+    pub(crate) var_t0_dn8: f64,
+    pub(crate) var_t1: f64,
+    pub(crate) var_t1_dn11: f64,
+    pub(crate) var_t1_dn3: f64,
+    pub(crate) var_t1_dn4: f64,
+    pub(crate) var_t1_dn5: f64,
+    pub(crate) var_t1_dn8: f64,
+    pub(crate) var_t2: f64,
+    pub(crate) var_t2_dn11: f64,
+    pub(crate) var_t2_dn3: f64,
+    pub(crate) var_t2_dn4: f64,
+    pub(crate) var_t2_dn5: f64,
+    pub(crate) var_t2_dn8: f64,
+    pub(crate) var_t_dn11: f64,
+    pub(crate) var_t_nom: f64,
+    pub(crate) var_t_nom_rv: f64,
+    pub(crate) var_t_rv: f64,
+    pub(crate) var_tanh1: f64,
+    pub(crate) var_tanh1_dn11: f64,
+    pub(crate) var_tanh1_dn3: f64,
+    pub(crate) var_tanh1_dn5: f64,
+    pub(crate) var_tanh1_dn8: f64,
+    pub(crate) var_tanh1_rv: f64,
+    pub(crate) var_tanh2: f64,
+    pub(crate) var_tanh2_dn3: f64,
+    pub(crate) var_tanh2_dn5: f64,
+    pub(crate) var_tanh2_rv: f64,
+    pub(crate) var_tanh3: f64,
+    pub(crate) var_tanh3_dn3: f64,
+    pub(crate) var_tanh3_dn5: f64,
+    pub(crate) var_tanh3_rv: f64,
+    pub(crate) var_tanh4: f64,
+    pub(crate) var_tanh4_dn11: f64,
+    pub(crate) var_tanh4_dn3: f64,
+    pub(crate) var_tanh4_dn5: f64,
+    pub(crate) var_tanh4_dn7: f64,
+    pub(crate) var_tanh4_rv: f64,
+    pub(crate) var_tanh_psi: f64,
+    pub(crate) var_tanh_psi1: f64,
+    pub(crate) var_tanh_psi1_dn11: f64,
+    pub(crate) var_tanh_psi1_dn3: f64,
+    pub(crate) var_tanh_psi1_dn4: f64,
+    pub(crate) var_tanh_psi1_dn5: f64,
+    pub(crate) var_tanh_psi1_dn8: f64,
+    pub(crate) var_tanh_psi_dn11: f64,
+    pub(crate) var_tanh_psi_dn3: f64,
+    pub(crate) var_tanh_psi_dn4: f64,
+    pub(crate) var_tanh_psi_dn5: f64,
+    pub(crate) var_tanh_psi_dn8: f64,
+    pub(crate) var_vdg: f64,
+    pub(crate) var_vdg_dn3: f64,
+    pub(crate) var_vdg_dn4: f64,
+    pub(crate) var_vds: f64,
+    pub(crate) var_vds_dn3: f64,
+    pub(crate) var_vds_dn5: f64,
+    pub(crate) var_vds_rv: f64,
+    pub(crate) var_vgd: f64,
+    pub(crate) var_vgd_dn3: f64,
+    pub(crate) var_vgd_dn4: f64,
+    pub(crate) var_vgdc: f64,
+    pub(crate) var_vgdc_dn3: f64,
+    pub(crate) var_vgdc_dn7: f64,
+    pub(crate) var_vgdc_rv: f64,
+    pub(crate) var_vgs: f64,
+    pub(crate) var_vgs_dn5: f64,
+    pub(crate) var_vgs_dn8: f64,
+    pub(crate) var_vgs_rv: f64,
+    pub(crate) var_vgsc: f64,
+    pub(crate) var_vgsc_dn5: f64,
+    pub(crate) var_vgsc_dn8: f64,
+    pub(crate) var_vgsc_rv: f64,
+    pub(crate) var_vjg_t: f64,
+    pub(crate) var_vjg_t_dn11: f64,
+    pub(crate) var_vpkm: f64,
+    pub(crate) var_vpkm_dn11: f64,
+    pub(crate) var_vpkm_dn3: f64,
+    pub(crate) var_vpkm_dn4: f64,
+    pub(crate) var_vpkm_dn5: f64,
+    pub(crate) var_vpks_t: f64,
+    pub(crate) var_vpks_t_dn11: f64,
+    pub(crate) var_vth: f64,
+    pub(crate) var_vth_dn11: f64,
+    pub(crate) var_vtr_t: f64,
+    pub(crate) var_vtr_t_dn11: f64,
+}
+
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let scalar_temperature_static_temperature = (ctx).temperature();
@@ -1762,245 +2048,11 @@ impl Instance {
             9,
             multiplicity * (((d453_dn9) * ddt_scale)),
         );
-        let mut var_vgd: f64 = 0.0;
-        let mut var_vgd_dn3: f64 = 0.0;
-        let mut var_vgd_dn4: f64 = 0.0;
-        let mut var_vgs: f64 = 0.0;
-        let mut var_vgs_dn5: f64 = 0.0;
-        let mut var_vgs_dn8: f64 = 0.0;
-        let mut var_vds: f64 = 0.0;
-        let mut var_vds_dn3: f64 = 0.0;
-        let mut var_vds_dn5: f64 = 0.0;
-        let mut var_vdg: f64 = 0.0;
-        let mut var_vdg_dn3: f64 = 0.0;
-        let mut var_vdg_dn4: f64 = 0.0;
-        let mut var_vth: f64 = 0.0;
-        let mut var_vth_dn11: f64 = 0.0;
-        let mut var_t_nom: f64 = 0.0;
-        let mut var_t: f64 = 0.0;
-        let mut var_t_dn11: f64 = 0.0;
-        let mut var_delta_t: f64 = 0.0;
-        let mut var_delta_t_dn11: f64 = 0.0;
-        let mut var_psi: f64 = 0.0;
-        let mut var_psi_dn3: f64 = 0.0;
-        let mut var_psi_dn4: f64 = 0.0;
-        let mut var_psi_dn5: f64 = 0.0;
-        let mut var_psi_dn8: f64 = 0.0;
-        let mut var_psi_dn11: f64 = 0.0;
-        let mut var_pg_param: f64 = 0.0;
-        let mut var_pg_param_dn11: f64 = 0.0;
-        let mut var_cgs: f64 = 0.0;
-        let mut var_cgs_dn3: f64 = 0.0;
-        let mut var_cgs_dn5: f64 = 0.0;
-        let mut var_cgs_dn7: f64 = 0.0;
-        let mut var_cgs_dn8: f64 = 0.0;
-        let mut var_cgs_dn11: f64 = 0.0;
-        let mut var_cgd: f64 = 0.0;
-        let mut var_cgd_dn3: f64 = 0.0;
-        let mut var_cgd_dn5: f64 = 0.0;
-        let mut var_cgd_dn7: f64 = 0.0;
-        let mut var_cgd_dn8: f64 = 0.0;
-        let mut var_cgd_dn11: f64 = 0.0;
-        let mut var_qgs: f64 = 0.0;
-        let mut var_qgs_dn3: f64 = 0.0;
-        let mut var_qgs_dn5: f64 = 0.0;
-        let mut var_qgs_dn7: f64 = 0.0;
-        let mut var_qgs_dn8: f64 = 0.0;
-        let mut var_qgs_dn11: f64 = 0.0;
-        let mut var_qgd: f64 = 0.0;
-        let mut var_qgd_dn3: f64 = 0.0;
-        let mut var_qgd_dn5: f64 = 0.0;
-        let mut var_qgd_dn7: f64 = 0.0;
-        let mut var_qgd_dn8: f64 = 0.0;
-        let mut var_qgd_dn11: f64 = 0.0;
-        let mut var_psi_1: f64 = 0.0;
-        let mut var_psi_1_dn3: f64 = 0.0;
-        let mut var_psi_1_dn5: f64 = 0.0;
-        let mut var_psi_1_dn8: f64 = 0.0;
-        let mut var_psi_1_dn11: f64 = 0.0;
-        let mut var_psi_2: f64 = 0.0;
-        let mut var_psi_2_dn3: f64 = 0.0;
-        let mut var_psi_2_dn5: f64 = 0.0;
-        let mut var_psi_3: f64 = 0.0;
-        let mut var_psi_3_dn3: f64 = 0.0;
-        let mut var_psi_3_dn5: f64 = 0.0;
-        let mut var_psi_4: f64 = 0.0;
-        let mut var_psi_4_dn3: f64 = 0.0;
-        let mut var_psi_4_dn5: f64 = 0.0;
-        let mut var_psi_4_dn7: f64 = 0.0;
-        let mut var_psi_4_dn11: f64 = 0.0;
-        let mut var_rd1: f64 = 0.0;
-        let mut var_rd1_dn3: f64 = 0.0;
-        let mut var_rd1_dn4: f64 = 0.0;
-        let mut var_rd1_dn5: f64 = 0.0;
-        let mut var_rd1_dn8: f64 = 0.0;
-        let mut var_rd1_dn11: f64 = 0.0;
-        let mut var_rs1: f64 = 0.0;
-        let mut var_rs1_dn3: f64 = 0.0;
-        let mut var_rs1_dn4: f64 = 0.0;
-        let mut var_rs1_dn5: f64 = 0.0;
-        let mut var_rs1_dn8: f64 = 0.0;
-        let mut var_rs1_dn11: f64 = 0.0;
-        let mut var_cgs0_t: f64 = 0.0;
-        let mut var_cgs0_t_dn11: f64 = 0.0;
-        let mut var_cgd0_t: f64 = 0.0;
-        let mut var_cgd0_t_dn11: f64 = 0.0;
-        let mut var_rd1_t: f64 = 0.0;
-        let mut var_rd1_t_dn3: f64 = 0.0;
-        let mut var_rd1_t_dn4: f64 = 0.0;
-        let mut var_rd1_t_dn5: f64 = 0.0;
-        let mut var_rd1_t_dn8: f64 = 0.0;
-        let mut var_rd1_t_dn11: f64 = 0.0;
-        let mut var_rs_t: f64 = 0.0;
-        let mut var_rs_t_dn3: f64 = 0.0;
-        let mut var_rs_t_dn4: f64 = 0.0;
-        let mut var_rs_t_dn5: f64 = 0.0;
-        let mut var_rs_t_dn8: f64 = 0.0;
-        let mut var_rs_t_dn11: f64 = 0.0;
-        let mut var_vtr_t: f64 = 0.0;
-        let mut var_vtr_t_dn11: f64 = 0.0;
-        let mut var_vpks_t: f64 = 0.0;
-        let mut var_vpks_t_dn11: f64 = 0.0;
-        let mut var_p10_t: f64 = 0.0;
-        let mut var_p10_t_dn11: f64 = 0.0;
-        let mut var_p40_t: f64 = 0.0;
-        let mut var_p40_t_dn11: f64 = 0.0;
-        let mut var_vjg_t: f64 = 0.0;
-        let mut var_vjg_t_dn11: f64 = 0.0;
-        let mut var_p1m: f64 = 0.0;
-        let mut var_p1m_dn3: f64 = 0.0;
-        let mut var_p1m_dn4: f64 = 0.0;
-        let mut var_p1m_dn5: f64 = 0.0;
-        let mut var_p1m_dn8: f64 = 0.0;
-        let mut var_p1m_dn11: f64 = 0.0;
-        let mut var_p1_t: f64 = 0.0;
-        let mut var_p1_t_dn11: f64 = 0.0;
-        let mut var_vpkm: f64 = 0.0;
-        let mut var_vpkm_dn3: f64 = 0.0;
-        let mut var_vpkm_dn4: f64 = 0.0;
-        let mut var_vpkm_dn5: f64 = 0.0;
-        let mut var_vpkm_dn11: f64 = 0.0;
-        let mut var_t0: f64 = 0.0;
-        let mut var_t0_dn3: f64 = 0.0;
-        let mut var_t0_dn4: f64 = 0.0;
-        let mut var_t0_dn5: f64 = 0.0;
-        let mut var_t0_dn8: f64 = 0.0;
-        let mut var_t0_dn11: f64 = 0.0;
-        let mut var_t1: f64 = 0.0;
-        let mut var_t1_dn3: f64 = 0.0;
-        let mut var_t1_dn4: f64 = 0.0;
-        let mut var_t1_dn5: f64 = 0.0;
-        let mut var_t1_dn8: f64 = 0.0;
-        let mut var_t1_dn11: f64 = 0.0;
-        let mut var_t2: f64 = 0.0;
-        let mut var_t2_dn3: f64 = 0.0;
-        let mut var_t2_dn4: f64 = 0.0;
-        let mut var_t2_dn5: f64 = 0.0;
-        let mut var_t2_dn8: f64 = 0.0;
-        let mut var_t2_dn11: f64 = 0.0;
-        let mut var_tanh_psi: f64 = 0.0;
-        let mut var_tanh_psi_dn3: f64 = 0.0;
-        let mut var_tanh_psi_dn4: f64 = 0.0;
-        let mut var_tanh_psi_dn5: f64 = 0.0;
-        let mut var_tanh_psi_dn8: f64 = 0.0;
-        let mut var_tanh_psi_dn11: f64 = 0.0;
-        let mut var_tanh_psi1: f64 = 0.0;
-        let mut var_tanh_psi1_dn3: f64 = 0.0;
-        let mut var_tanh_psi1_dn4: f64 = 0.0;
-        let mut var_tanh_psi1_dn5: f64 = 0.0;
-        let mut var_tanh_psi1_dn8: f64 = 0.0;
-        let mut var_tanh_psi1_dn11: f64 = 0.0;
-        let mut var_tanh1: f64 = 0.0;
-        let mut var_tanh1_dn3: f64 = 0.0;
-        let mut var_tanh1_dn5: f64 = 0.0;
-        let mut var_tanh1_dn8: f64 = 0.0;
-        let mut var_tanh1_dn11: f64 = 0.0;
-        let mut var_tanh2: f64 = 0.0;
-        let mut var_tanh2_dn3: f64 = 0.0;
-        let mut var_tanh2_dn5: f64 = 0.0;
-        let mut var_tanh3: f64 = 0.0;
-        let mut var_tanh3_dn3: f64 = 0.0;
-        let mut var_tanh3_dn5: f64 = 0.0;
-        let mut var_tanh4: f64 = 0.0;
-        let mut var_tanh4_dn3: f64 = 0.0;
-        let mut var_tanh4_dn5: f64 = 0.0;
-        let mut var_tanh4_dn7: f64 = 0.0;
-        let mut var_tanh4_dn11: f64 = 0.0;
-        let mut var_cosh0: f64 = 0.0;
-        let mut var_cosh0_dn3: f64 = 0.0;
-        let mut var_cosh0_dn5: f64 = 0.0;
-        let mut var_cosh0_dn11: f64 = 0.0;
-        let mut var_cosh1: f64 = 0.0;
-        let mut var_cosh1_dn3: f64 = 0.0;
-        let mut var_cosh1_dn5: f64 = 0.0;
-        let mut var_cosh1_dn7: f64 = 0.0;
-        let mut var_cosh1_dn8: f64 = 0.0;
-        let mut var_cosh1_dn11: f64 = 0.0;
-        let mut var_lc1: f64 = 0.0;
-        let mut var_lc1_dn3: f64 = 0.0;
-        let mut var_lc1_dn5: f64 = 0.0;
-        let mut var_lc1_dn7: f64 = 0.0;
-        let mut var_lc1_dn8: f64 = 0.0;
-        let mut var_lc1_dn11: f64 = 0.0;
-        let mut var_lc10: f64 = 0.0;
-        let mut var_lc10_dn3: f64 = 0.0;
-        let mut var_lc10_dn5: f64 = 0.0;
-        let mut var_lc10_dn11: f64 = 0.0;
-        let mut var_lc4: f64 = 0.0;
-        let mut var_lc4_dn3: f64 = 0.0;
-        let mut var_lc4_dn5: f64 = 0.0;
-        let mut var_lc4_dn7: f64 = 0.0;
-        let mut var_lc4_dn8: f64 = 0.0;
-        let mut var_lc4_dn11: f64 = 0.0;
-        let mut var_lc40: f64 = 0.0;
-        let mut var_lc40_dn3: f64 = 0.0;
-        let mut var_lc40_dn5: f64 = 0.0;
-        let mut var_lc40_dn11: f64 = 0.0;
-        let mut var_qgs0: f64 = 0.0;
-        let mut var_qgs0_dn3: f64 = 0.0;
-        let mut var_qgs0_dn5: f64 = 0.0;
-        let mut var_qgs0_dn11: f64 = 0.0;
-        let mut var_qgd0: f64 = 0.0;
-        let mut var_qgd0_dn3: f64 = 0.0;
-        let mut var_qgd0_dn5: f64 = 0.0;
-        let mut var_qgd0_dn11: f64 = 0.0;
-        let mut var_vgsc: f64 = 0.0;
-        let mut var_vgsc_dn5: f64 = 0.0;
-        let mut var_vgsc_dn8: f64 = 0.0;
-        let mut var_vgdc: f64 = 0.0;
-        let mut var_vgdc_dn3: f64 = 0.0;
-        let mut var_vgdc_dn7: f64 = 0.0;
-        let mut var_guard1: f64 = 0.0;
-        let mut var_guard2: f64 = 0.0;
-        let mut var_guard3: f64 = 0.0;
-        let mut var_guard4: f64 = 0.0;
-        let mut var_guard5: f64 = 0.0;
-        let mut var_guard6: f64 = 0.0;
-        let mut var_guard7: f64 = 0.0;
-        let mut var_guard8: f64 = 0.0;
-        let mut var_guard9: f64 = 0.0;
-        let mut var_guard10: f64 = 0.0;
-        let mut var_guard11: f64 = 0.0;
-        let mut var_guard13: f64 = 0.0;
-        let mut var_guard14: f64 = 0.0;
-        let mut var_guard15: f64 = 0.0;
-        let mut var_guard16: f64 = 0.0;
-        let mut var_guard21: f64 = 0.0;
-        let mut var_guard22: f64 = 0.0;
-        let mut var_guard23: f64 = 0.0;
-        let mut var_guard24: f64 = 0.0;
-        let mut var_guard25: f64 = 0.0;
-        let mut var_guard26: f64 = 0.0;
-        let mut var_guard27: f64 = 0.0;
-        let mut var_ci: f64 = 0.0;
-        let mut var_ci_dn11: f64 = 0.0;
-        let mut var_k: f64 = 0.0;
-        let mut var_k_dn11: f64 = 0.0;
-        let mut var_guard43: f64 = 0.0;
+        let mut locals = StampLocals::default();
 
-        Self::stamp_transient_block_0(ctx, p, nodes, param_given, &mut var_cgd, &mut var_cgd0_t, &mut var_cgd0_t_dn11, &mut var_cgd_dn11, &mut var_cgd_dn3, &mut var_cgd_dn5, &mut var_cgd_dn7, &mut var_cgd_dn8, &mut var_cgs, &mut var_cgs0_t, &mut var_cgs0_t_dn11, &mut var_cgs_dn11, &mut var_cgs_dn3, &mut var_cgs_dn5, &mut var_cgs_dn7, &mut var_cgs_dn8, &mut var_delta_t, &mut var_delta_t_dn11, &mut var_guard1, &mut var_guard2, &mut var_guard3, &mut var_guard4, &mut var_guard5, &mut var_guard6, &mut var_guard7, &mut var_guard8, &mut var_p10_t, &mut var_p10_t_dn11, &mut var_p1_t, &mut var_p1_t_dn11, &mut var_p1m, &mut var_p1m_dn11, &mut var_p1m_dn3, &mut var_p1m_dn4, &mut var_p1m_dn5, &mut var_p1m_dn8, &mut var_p40_t, &mut var_p40_t_dn11, &mut var_pg_param, &mut var_pg_param_dn11, &mut var_psi, &mut var_psi_dn11, &mut var_psi_dn3, &mut var_psi_dn4, &mut var_psi_dn5, &mut var_psi_dn8, &mut var_qgd, &mut var_qgd_dn11, &mut var_qgd_dn3, &mut var_qgd_dn5, &mut var_qgd_dn7, &mut var_qgd_dn8, &mut var_qgs, &mut var_qgs_dn11, &mut var_qgs_dn3, &mut var_qgs_dn5, &mut var_qgs_dn7, &mut var_qgs_dn8, &mut var_t, &mut var_t0, &mut var_t0_dn11, &mut var_t0_dn3, &mut var_t0_dn4, &mut var_t0_dn5, &mut var_t0_dn8, &mut var_t1, &mut var_t1_dn11, &mut var_t1_dn3, &mut var_t1_dn4, &mut var_t1_dn5, &mut var_t1_dn8, &mut var_t2, &mut var_t2_dn11, &mut var_t2_dn3, &mut var_t2_dn4, &mut var_t2_dn5, &mut var_t2_dn8, &mut var_t_dn11, &mut var_t_nom, &mut var_tanh_psi, &mut var_tanh_psi1, &mut var_tanh_psi1_dn11, &mut var_tanh_psi1_dn3, &mut var_tanh_psi1_dn4, &mut var_tanh_psi1_dn5, &mut var_tanh_psi1_dn8, &mut var_tanh_psi_dn11, &mut var_tanh_psi_dn3, &mut var_tanh_psi_dn4, &mut var_tanh_psi_dn5, &mut var_tanh_psi_dn8, &mut var_vdg, &mut var_vdg_dn3, &mut var_vdg_dn4, &mut var_vds, &mut var_vds_dn3, &mut var_vds_dn5, &mut var_vgd, &mut var_vgd_dn3, &mut var_vgd_dn4, &mut var_vgdc, &mut var_vgdc_dn3, &mut var_vgdc_dn7, &mut var_vgs, &mut var_vgs_dn5, &mut var_vgs_dn8, &mut var_vgsc, &mut var_vgsc_dn5, &mut var_vgsc_dn8, &mut var_vjg_t, &mut var_vjg_t_dn11, &mut var_vpkm, &mut var_vpkm_dn11, &mut var_vpkm_dn3, &mut var_vpkm_dn4, &mut var_vpkm_dn5, &mut var_vpks_t, &mut var_vpks_t_dn11, &mut var_vth, &mut var_vth_dn11, &mut var_vtr_t, &mut var_vtr_t_dn11);
-        Self::stamp_transient_block_1(p, var_cgd0_t, var_cgd0_t_dn11, var_cgs0_t, var_cgs0_t_dn11, var_delta_t, var_delta_t_dn11, var_guard5, var_guard6, var_guard7, var_guard8, var_p10_t, var_p10_t_dn11, var_p1m, var_p1m_dn11, var_p1m_dn3, var_p1m_dn4, var_p1m_dn5, var_p1m_dn8, var_p40_t, var_p40_t_dn11, var_pg_param, var_pg_param_dn11, var_tanh_psi, var_tanh_psi_dn11, var_tanh_psi_dn3, var_tanh_psi_dn4, var_tanh_psi_dn5, var_tanh_psi_dn8, var_vds, var_vds_dn3, var_vds_dn5, var_vgd, var_vgd_dn3, var_vgd_dn4, var_vgdc, var_vgdc_dn3, var_vgdc_dn7, var_vgs, var_vgs_dn5, var_vgs_dn8, var_vgsc, var_vgsc_dn5, var_vgsc_dn8, var_vjg_t, var_vjg_t_dn11, var_vpkm, var_vpkm_dn11, var_vpkm_dn3, var_vpkm_dn4, var_vpkm_dn5, &mut var_cgd, &mut var_cgd_dn11, &mut var_cgd_dn3, &mut var_cgd_dn5, &mut var_cgd_dn7, &mut var_cgd_dn8, &mut var_cgs, &mut var_cgs_dn11, &mut var_cgs_dn3, &mut var_cgs_dn5, &mut var_cgs_dn7, &mut var_cgs_dn8, &mut var_cosh0, &mut var_cosh0_dn11, &mut var_cosh0_dn3, &mut var_cosh0_dn5, &mut var_cosh1, &mut var_cosh1_dn11, &mut var_cosh1_dn3, &mut var_cosh1_dn5, &mut var_cosh1_dn7, &mut var_cosh1_dn8, &mut var_guard10, &mut var_guard11, &mut var_guard13, &mut var_guard14, &mut var_guard15, &mut var_guard9, &mut var_lc1, &mut var_lc10, &mut var_lc10_dn11, &mut var_lc10_dn3, &mut var_lc10_dn5, &mut var_lc1_dn11, &mut var_lc1_dn3, &mut var_lc1_dn5, &mut var_lc1_dn7, &mut var_lc1_dn8, &mut var_psi, &mut var_psi_1, &mut var_psi_1_dn11, &mut var_psi_1_dn3, &mut var_psi_1_dn5, &mut var_psi_1_dn8, &mut var_psi_2, &mut var_psi_2_dn3, &mut var_psi_2_dn5, &mut var_psi_3, &mut var_psi_3_dn3, &mut var_psi_3_dn5, &mut var_psi_4, &mut var_psi_4_dn11, &mut var_psi_4_dn3, &mut var_psi_4_dn5, &mut var_psi_4_dn7, &mut var_psi_dn11, &mut var_psi_dn3, &mut var_psi_dn4, &mut var_psi_dn5, &mut var_psi_dn8, &mut var_rd1, &mut var_rd1_dn11, &mut var_rd1_dn3, &mut var_rd1_dn4, &mut var_rd1_dn5, &mut var_rd1_dn8, &mut var_rd1_t, &mut var_rd1_t_dn11, &mut var_rd1_t_dn3, &mut var_rd1_t_dn4, &mut var_rd1_t_dn5, &mut var_rd1_t_dn8, &mut var_rs1, &mut var_rs1_dn11, &mut var_rs1_dn3, &mut var_rs1_dn4, &mut var_rs1_dn5, &mut var_rs1_dn8, &mut var_rs_t, &mut var_rs_t_dn11, &mut var_rs_t_dn3, &mut var_rs_t_dn4, &mut var_rs_t_dn5, &mut var_rs_t_dn8, &mut var_t0, &mut var_t0_dn11, &mut var_t0_dn3, &mut var_t0_dn4, &mut var_t0_dn5, &mut var_t0_dn8, &mut var_t1, &mut var_t1_dn11, &mut var_t1_dn3, &mut var_t1_dn4, &mut var_t1_dn5, &mut var_t1_dn8, &mut var_t2, &mut var_t2_dn11, &mut var_t2_dn3, &mut var_t2_dn4, &mut var_t2_dn5, &mut var_t2_dn8, &mut var_tanh1, &mut var_tanh1_dn11, &mut var_tanh1_dn3, &mut var_tanh1_dn5, &mut var_tanh1_dn8, &mut var_tanh2, &mut var_tanh2_dn3, &mut var_tanh2_dn5, &mut var_tanh3, &mut var_tanh3_dn3, &mut var_tanh3_dn5, &mut var_tanh4, &mut var_tanh4_dn11, &mut var_tanh4_dn3, &mut var_tanh4_dn5, &mut var_tanh4_dn7, &mut var_tanh_psi1, &mut var_tanh_psi1_dn11, &mut var_tanh_psi1_dn3, &mut var_tanh_psi1_dn4, &mut var_tanh_psi1_dn5, &mut var_tanh_psi1_dn8);
-        Self::stamp_transient_block_2(p, var_cgd0_t, var_cgd0_t_dn11, var_cgs0_t, var_cgs0_t_dn11, var_guard13, var_guard14, var_guard15, var_lc1, var_lc10, var_lc10_dn11, var_lc10_dn3, var_lc10_dn5, var_lc1_dn11, var_lc1_dn3, var_lc1_dn5, var_lc1_dn7, var_lc1_dn8, var_p10_t, var_p10_t_dn11, var_p40_t, var_p40_t_dn11, var_psi_1, var_psi_1_dn11, var_psi_1_dn3, var_psi_1_dn5, var_psi_1_dn8, var_psi_4, var_psi_4_dn11, var_psi_4_dn3, var_psi_4_dn5, var_psi_4_dn7, var_t, var_t_dn11, var_tanh2, var_tanh2_dn3, var_tanh2_dn5, var_tanh3, var_tanh3_dn3, var_tanh3_dn5, var_vds, var_vds_dn3, var_vds_dn5, var_vgdc, var_vgdc_dn3, var_vgdc_dn7, var_vgsc, var_vgsc_dn5, var_vgsc_dn8, &mut var_cgd, &mut var_cgd_dn11, &mut var_cgd_dn3, &mut var_cgd_dn5, &mut var_cgd_dn7, &mut var_cgd_dn8, &mut var_cgs, &mut var_cgs_dn11, &mut var_cgs_dn3, &mut var_cgs_dn5, &mut var_cgs_dn7, &mut var_cgs_dn8, &mut var_ci, &mut var_ci_dn11, &mut var_cosh0, &mut var_cosh0_dn11, &mut var_cosh0_dn3, &mut var_cosh0_dn5, &mut var_cosh1, &mut var_cosh1_dn11, &mut var_cosh1_dn3, &mut var_cosh1_dn5, &mut var_cosh1_dn7, &mut var_cosh1_dn8, &mut var_guard16, &mut var_guard21, &mut var_guard22, &mut var_guard23, &mut var_guard24, &mut var_guard25, &mut var_guard26, &mut var_guard27, &mut var_guard43, &mut var_k, &mut var_k_dn11, &mut var_lc4, &mut var_lc40, &mut var_lc40_dn11, &mut var_lc40_dn3, &mut var_lc40_dn5, &mut var_lc4_dn11, &mut var_lc4_dn3, &mut var_lc4_dn5, &mut var_lc4_dn7, &mut var_lc4_dn8, &mut var_qgd, &mut var_qgd0, &mut var_qgd0_dn11, &mut var_qgd0_dn3, &mut var_qgd0_dn5, &mut var_qgd_dn11, &mut var_qgd_dn3, &mut var_qgd_dn5, &mut var_qgd_dn7, &mut var_qgd_dn8, &mut var_qgs, &mut var_qgs0, &mut var_qgs0_dn11, &mut var_qgs0_dn3, &mut var_qgs0_dn5, &mut var_qgs_dn11, &mut var_qgs_dn3, &mut var_qgs_dn5, &mut var_qgs_dn7, &mut var_qgs_dn8);
+        Self::stamp_transient_block_0(ctx, p, nodes, param_given, &mut locals);
+        Self::stamp_transient_block_1(p, &mut locals);
+        Self::stamp_transient_block_2(p, &mut locals);
 
         stamper.stamp_potential_branch_local(
             Some(12),
@@ -2075,7 +2127,7 @@ impl Instance {
             multiplicity,
         );
 
-        Self::stamp_transient_equations_block_0(ctx, stamper, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, var_cgd, var_cgd_dn11, var_cgd_dn3, var_cgd_dn5, var_cgd_dn7, var_cgd_dn8, var_cgs, var_cgs_dn11, var_cgs_dn3, var_cgs_dn5, var_cgs_dn7, var_cgs_dn8, var_ci, var_ci_dn11, var_guard16, var_guard21, var_guard22, var_guard23, var_guard24, var_guard25, var_guard26, var_guard27, var_guard43, var_qgd, var_qgd_dn11, var_qgd_dn3, var_qgd_dn5, var_qgd_dn7, var_qgd_dn8, var_qgs, var_qgs_dn11, var_qgs_dn3, var_qgs_dn5, var_qgs_dn7, var_qgs_dn8, var_rd1_t, var_rd1_t_dn11, var_rd1_t_dn3, var_rd1_t_dn4, var_rd1_t_dn5, var_rd1_t_dn8, var_rs_t, var_rs_t_dn11, var_rs_t_dn3, var_rs_t_dn4, var_rs_t_dn5, var_rs_t_dn8, var_vgdc, var_vgdc_dn3, var_vgdc_dn7, var_vgsc, var_vgsc_dn5, var_vgsc_dn8);
+        Self::stamp_transient_equations_block_0(ctx, stamper, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
@@ -2176,194 +2228,11 @@ impl Instance {
             nodes[9],
             multiplicity * (d453_dn9),
         );
-        let mut var_vgs: f64 = 0.0;
-        let mut var_vgs_rv: f64 = 0.0;
-        let mut var_vgs_dn5: f64 = 0.0;
-        let mut var_vgs_dn8: f64 = 0.0;
-        let mut var_vds: f64 = 0.0;
-        let mut var_vds_rv: f64 = 0.0;
-        let mut var_vds_dn3: f64 = 0.0;
-        let mut var_vds_dn5: f64 = 0.0;
-        let mut var_t_nom: f64 = 0.0;
-        let mut var_t_nom_rv: f64 = 0.0;
-        let mut var_t: f64 = 0.0;
-        let mut var_t_rv: f64 = 0.0;
-        let mut var_t_dn11: f64 = 0.0;
-        let mut var_delta_t: f64 = 0.0;
-        let mut var_delta_t_rv: f64 = 0.0;
-        let mut var_delta_t_dn11: f64 = 0.0;
-        let mut var_cgs: f64 = 0.0;
-        let mut var_cgs_rv: f64 = 0.0;
-        let mut var_cgs_dn3: f64 = 0.0;
-        let mut var_cgs_dn5: f64 = 0.0;
-        let mut var_cgs_dn7: f64 = 0.0;
-        let mut var_cgs_dn8: f64 = 0.0;
-        let mut var_cgs_dn11: f64 = 0.0;
-        let mut var_cgd: f64 = 0.0;
-        let mut var_cgd_rv: f64 = 0.0;
-        let mut var_cgd_dn3: f64 = 0.0;
-        let mut var_cgd_dn5: f64 = 0.0;
-        let mut var_cgd_dn7: f64 = 0.0;
-        let mut var_cgd_dn8: f64 = 0.0;
-        let mut var_cgd_dn11: f64 = 0.0;
-        let mut var_qgs: f64 = 0.0;
-        let mut var_qgs_rv: f64 = 0.0;
-        let mut var_qgs_dn3: f64 = 0.0;
-        let mut var_qgs_dn5: f64 = 0.0;
-        let mut var_qgs_dn7: f64 = 0.0;
-        let mut var_qgs_dn8: f64 = 0.0;
-        let mut var_qgs_dn11: f64 = 0.0;
-        let mut var_qgd: f64 = 0.0;
-        let mut var_qgd_rv: f64 = 0.0;
-        let mut var_qgd_dn3: f64 = 0.0;
-        let mut var_qgd_dn5: f64 = 0.0;
-        let mut var_qgd_dn7: f64 = 0.0;
-        let mut var_qgd_dn8: f64 = 0.0;
-        let mut var_qgd_dn11: f64 = 0.0;
-        let mut var_psi_1: f64 = 0.0;
-        let mut var_psi_1_rv: f64 = 0.0;
-        let mut var_psi_1_dn3: f64 = 0.0;
-        let mut var_psi_1_dn5: f64 = 0.0;
-        let mut var_psi_1_dn8: f64 = 0.0;
-        let mut var_psi_1_dn11: f64 = 0.0;
-        let mut var_psi_2: f64 = 0.0;
-        let mut var_psi_2_rv: f64 = 0.0;
-        let mut var_psi_2_dn3: f64 = 0.0;
-        let mut var_psi_2_dn5: f64 = 0.0;
-        let mut var_psi_3: f64 = 0.0;
-        let mut var_psi_3_rv: f64 = 0.0;
-        let mut var_psi_3_dn3: f64 = 0.0;
-        let mut var_psi_3_dn5: f64 = 0.0;
-        let mut var_psi_4: f64 = 0.0;
-        let mut var_psi_4_rv: f64 = 0.0;
-        let mut var_psi_4_dn3: f64 = 0.0;
-        let mut var_psi_4_dn5: f64 = 0.0;
-        let mut var_psi_4_dn7: f64 = 0.0;
-        let mut var_psi_4_dn11: f64 = 0.0;
-        let mut var_cgs0_t: f64 = 0.0;
-        let mut var_cgs0_t_rv: f64 = 0.0;
-        let mut var_cgs0_t_dn11: f64 = 0.0;
-        let mut var_cgd0_t: f64 = 0.0;
-        let mut var_cgd0_t_rv: f64 = 0.0;
-        let mut var_cgd0_t_dn11: f64 = 0.0;
-        let mut var_p10_t: f64 = 0.0;
-        let mut var_p10_t_rv: f64 = 0.0;
-        let mut var_p10_t_dn11: f64 = 0.0;
-        let mut var_p40_t: f64 = 0.0;
-        let mut var_p40_t_rv: f64 = 0.0;
-        let mut var_p40_t_dn11: f64 = 0.0;
-        let mut var_tanh1: f64 = 0.0;
-        let mut var_tanh1_rv: f64 = 0.0;
-        let mut var_tanh1_dn3: f64 = 0.0;
-        let mut var_tanh1_dn5: f64 = 0.0;
-        let mut var_tanh1_dn8: f64 = 0.0;
-        let mut var_tanh1_dn11: f64 = 0.0;
-        let mut var_tanh2: f64 = 0.0;
-        let mut var_tanh2_rv: f64 = 0.0;
-        let mut var_tanh2_dn3: f64 = 0.0;
-        let mut var_tanh2_dn5: f64 = 0.0;
-        let mut var_tanh3: f64 = 0.0;
-        let mut var_tanh3_rv: f64 = 0.0;
-        let mut var_tanh3_dn3: f64 = 0.0;
-        let mut var_tanh3_dn5: f64 = 0.0;
-        let mut var_tanh4: f64 = 0.0;
-        let mut var_tanh4_rv: f64 = 0.0;
-        let mut var_tanh4_dn3: f64 = 0.0;
-        let mut var_tanh4_dn5: f64 = 0.0;
-        let mut var_tanh4_dn7: f64 = 0.0;
-        let mut var_tanh4_dn11: f64 = 0.0;
-        let mut var_cosh0: f64 = 0.0;
-        let mut var_cosh0_rv: f64 = 0.0;
-        let mut var_cosh0_dn3: f64 = 0.0;
-        let mut var_cosh0_dn5: f64 = 0.0;
-        let mut var_cosh0_dn11: f64 = 0.0;
-        let mut var_cosh1: f64 = 0.0;
-        let mut var_cosh1_rv: f64 = 0.0;
-        let mut var_cosh1_dn3: f64 = 0.0;
-        let mut var_cosh1_dn5: f64 = 0.0;
-        let mut var_cosh1_dn7: f64 = 0.0;
-        let mut var_cosh1_dn8: f64 = 0.0;
-        let mut var_cosh1_dn11: f64 = 0.0;
-        let mut var_lc1: f64 = 0.0;
-        let mut var_lc1_rv: f64 = 0.0;
-        let mut var_lc1_dn3: f64 = 0.0;
-        let mut var_lc1_dn5: f64 = 0.0;
-        let mut var_lc1_dn7: f64 = 0.0;
-        let mut var_lc1_dn8: f64 = 0.0;
-        let mut var_lc1_dn11: f64 = 0.0;
-        let mut var_lc10: f64 = 0.0;
-        let mut var_lc10_rv: f64 = 0.0;
-        let mut var_lc10_dn3: f64 = 0.0;
-        let mut var_lc10_dn5: f64 = 0.0;
-        let mut var_lc10_dn11: f64 = 0.0;
-        let mut var_lc4: f64 = 0.0;
-        let mut var_lc4_rv: f64 = 0.0;
-        let mut var_lc4_dn3: f64 = 0.0;
-        let mut var_lc4_dn5: f64 = 0.0;
-        let mut var_lc4_dn7: f64 = 0.0;
-        let mut var_lc4_dn8: f64 = 0.0;
-        let mut var_lc4_dn11: f64 = 0.0;
-        let mut var_lc40: f64 = 0.0;
-        let mut var_lc40_rv: f64 = 0.0;
-        let mut var_lc40_dn3: f64 = 0.0;
-        let mut var_lc40_dn5: f64 = 0.0;
-        let mut var_lc40_dn11: f64 = 0.0;
-        let mut var_qgs0: f64 = 0.0;
-        let mut var_qgs0_rv: f64 = 0.0;
-        let mut var_qgs0_dn3: f64 = 0.0;
-        let mut var_qgs0_dn5: f64 = 0.0;
-        let mut var_qgs0_dn11: f64 = 0.0;
-        let mut var_qgd0: f64 = 0.0;
-        let mut var_qgd0_rv: f64 = 0.0;
-        let mut var_qgd0_dn3: f64 = 0.0;
-        let mut var_qgd0_dn5: f64 = 0.0;
-        let mut var_qgd0_dn11: f64 = 0.0;
-        let mut var_vgsc: f64 = 0.0;
-        let mut var_vgsc_rv: f64 = 0.0;
-        let mut var_vgsc_dn5: f64 = 0.0;
-        let mut var_vgsc_dn8: f64 = 0.0;
-        let mut var_vgdc: f64 = 0.0;
-        let mut var_vgdc_rv: f64 = 0.0;
-        let mut var_vgdc_dn3: f64 = 0.0;
-        let mut var_vgdc_dn7: f64 = 0.0;
-        let mut var_guard1: f64 = 0.0;
-        let mut var_guard1_rv: f64 = 0.0;
-        let mut var_guard2: f64 = 0.0;
-        let mut var_guard2_rv: f64 = 0.0;
-        let mut var_guard3: f64 = 0.0;
-        let mut var_guard3_rv: f64 = 0.0;
-        let mut var_guard13: f64 = 0.0;
-        let mut var_guard13_rv: f64 = 0.0;
-        let mut var_guard14: f64 = 0.0;
-        let mut var_guard14_rv: f64 = 0.0;
-        let mut var_guard15: f64 = 0.0;
-        let mut var_guard15_rv: f64 = 0.0;
-        let mut var_guard16: f64 = 0.0;
-        let mut var_guard16_rv: f64 = 0.0;
-        let mut var_guard21: f64 = 0.0;
-        let mut var_guard21_rv: f64 = 0.0;
-        let mut var_guard22: f64 = 0.0;
-        let mut var_guard22_rv: f64 = 0.0;
-        let mut var_guard24: f64 = 0.0;
-        let mut var_guard24_rv: f64 = 0.0;
-        let mut var_guard25: f64 = 0.0;
-        let mut var_guard25_rv: f64 = 0.0;
-        let mut var_guard26: f64 = 0.0;
-        let mut var_guard26_rv: f64 = 0.0;
-        let mut var_guard27: f64 = 0.0;
-        let mut var_guard27_rv: f64 = 0.0;
-        let mut var_ci: f64 = 0.0;
-        let mut var_ci_rv: f64 = 0.0;
-        let mut var_ci_dn11: f64 = 0.0;
-        let mut var_k: f64 = 0.0;
-        let mut var_k_rv: f64 = 0.0;
-        let mut var_k_dn11: f64 = 0.0;
-        let mut var_guard43: f64 = 0.0;
-        let mut var_guard43_rv: f64 = 0.0;
+        let mut locals = StampLocals::default();
 
-        Self::stamp_reactive_block_0(ctx, p, nodes, param_given, &mut var_cgd, &mut var_cgd0_t, &mut var_cgd0_t_dn11, &mut var_cgd0_t_rv, &mut var_cgd_dn11, &mut var_cgd_dn3, &mut var_cgd_dn5, &mut var_cgd_dn7, &mut var_cgd_dn8, &mut var_cgd_rv, &mut var_cgs, &mut var_cgs0_t, &mut var_cgs0_t_dn11, &mut var_cgs0_t_rv, &mut var_cgs_dn11, &mut var_cgs_dn3, &mut var_cgs_dn5, &mut var_cgs_dn7, &mut var_cgs_dn8, &mut var_cgs_rv, &mut var_cosh0, &mut var_cosh0_dn11, &mut var_cosh0_dn3, &mut var_cosh0_dn5, &mut var_cosh0_rv, &mut var_cosh1, &mut var_cosh1_dn11, &mut var_cosh1_dn3, &mut var_cosh1_dn5, &mut var_cosh1_dn7, &mut var_cosh1_dn8, &mut var_cosh1_rv, &mut var_delta_t, &mut var_delta_t_dn11, &mut var_delta_t_rv, &mut var_guard1, &mut var_guard13, &mut var_guard13_rv, &mut var_guard14, &mut var_guard14_rv, &mut var_guard15, &mut var_guard15_rv, &mut var_guard1_rv, &mut var_guard2, &mut var_guard2_rv, &mut var_guard3, &mut var_guard3_rv, &mut var_lc1, &mut var_lc10, &mut var_lc10_dn11, &mut var_lc10_dn3, &mut var_lc10_dn5, &mut var_lc10_rv, &mut var_lc1_dn11, &mut var_lc1_dn3, &mut var_lc1_dn5, &mut var_lc1_dn7, &mut var_lc1_dn8, &mut var_lc1_rv, &mut var_p10_t, &mut var_p10_t_dn11, &mut var_p10_t_rv, &mut var_p40_t, &mut var_p40_t_dn11, &mut var_p40_t_rv, &mut var_psi_1, &mut var_psi_1_dn11, &mut var_psi_1_dn3, &mut var_psi_1_dn5, &mut var_psi_1_dn8, &mut var_psi_1_rv, &mut var_psi_2, &mut var_psi_2_dn3, &mut var_psi_2_dn5, &mut var_psi_2_rv, &mut var_psi_3, &mut var_psi_3_dn3, &mut var_psi_3_dn5, &mut var_psi_3_rv, &mut var_psi_4, &mut var_psi_4_dn11, &mut var_psi_4_dn3, &mut var_psi_4_dn5, &mut var_psi_4_dn7, &mut var_psi_4_rv, &mut var_qgd, &mut var_qgd_dn11, &mut var_qgd_dn3, &mut var_qgd_dn5, &mut var_qgd_dn7, &mut var_qgd_dn8, &mut var_qgd_rv, &mut var_qgs, &mut var_qgs0, &mut var_qgs0_dn11, &mut var_qgs0_dn3, &mut var_qgs0_dn5, &mut var_qgs0_rv, &mut var_qgs_dn11, &mut var_qgs_dn3, &mut var_qgs_dn5, &mut var_qgs_dn7, &mut var_qgs_dn8, &mut var_qgs_rv, &mut var_t, &mut var_t_dn11, &mut var_t_nom, &mut var_t_nom_rv, &mut var_t_rv, &mut var_tanh1, &mut var_tanh1_dn11, &mut var_tanh1_dn3, &mut var_tanh1_dn5, &mut var_tanh1_dn8, &mut var_tanh1_rv, &mut var_tanh2, &mut var_tanh2_dn3, &mut var_tanh2_dn5, &mut var_tanh2_rv, &mut var_tanh3, &mut var_tanh3_dn3, &mut var_tanh3_dn5, &mut var_tanh3_rv, &mut var_tanh4, &mut var_tanh4_dn11, &mut var_tanh4_dn3, &mut var_tanh4_dn5, &mut var_tanh4_dn7, &mut var_tanh4_rv, &mut var_vds, &mut var_vds_dn3, &mut var_vds_dn5, &mut var_vds_rv, &mut var_vgdc, &mut var_vgdc_dn3, &mut var_vgdc_dn7, &mut var_vgdc_rv, &mut var_vgs, &mut var_vgs_dn5, &mut var_vgs_dn8, &mut var_vgs_rv, &mut var_vgsc, &mut var_vgsc_dn5, &mut var_vgsc_dn8, &mut var_vgsc_rv);
-        Self::stamp_reactive_block_1(p, var_cgd0_t, var_cgd0_t_dn11, var_cgs0_t, var_cgs0_t_dn11, var_cosh0, var_cosh0_dn11, var_cosh0_dn3, var_cosh0_dn5, var_guard13, var_guard14, var_guard15, var_p40_t, var_p40_t_dn11, var_psi_4, var_psi_4_dn11, var_psi_4_dn3, var_psi_4_dn5, var_psi_4_dn7, var_qgs_dn8, var_t, var_t_dn11, var_tanh3, var_tanh3_dn3, var_tanh3_dn5, var_vds, var_vds_dn3, var_vds_dn5, var_vgdc, var_vgdc_dn3, var_vgdc_dn7, &mut var_cgd, &mut var_cgd_dn11, &mut var_cgd_dn3, &mut var_cgd_dn5, &mut var_cgd_dn7, &mut var_cgd_dn8, &mut var_cgd_rv, &mut var_cgs, &mut var_cgs_dn11, &mut var_cgs_dn3, &mut var_cgs_dn5, &mut var_cgs_dn7, &mut var_cgs_dn8, &mut var_cgs_rv, &mut var_ci, &mut var_ci_dn11, &mut var_ci_rv, &mut var_cosh1, &mut var_cosh1_dn11, &mut var_cosh1_dn3, &mut var_cosh1_dn5, &mut var_cosh1_dn7, &mut var_cosh1_dn8, &mut var_cosh1_rv, &mut var_guard16, &mut var_guard16_rv, &mut var_guard21, &mut var_guard21_rv, &mut var_guard22, &mut var_guard22_rv, &mut var_guard24, &mut var_guard24_rv, &mut var_guard25, &mut var_guard25_rv, &mut var_guard26, &mut var_guard26_rv, &mut var_guard27, &mut var_guard27_rv, &mut var_guard43, &mut var_guard43_rv, &mut var_k, &mut var_k_dn11, &mut var_k_rv, &mut var_lc4, &mut var_lc40, &mut var_lc40_dn11, &mut var_lc40_dn3, &mut var_lc40_dn5, &mut var_lc40_rv, &mut var_lc4_dn11, &mut var_lc4_dn3, &mut var_lc4_dn5, &mut var_lc4_dn7, &mut var_lc4_dn8, &mut var_lc4_rv, &mut var_qgd, &mut var_qgd0, &mut var_qgd0_dn11, &mut var_qgd0_dn3, &mut var_qgd0_dn5, &mut var_qgd0_rv, &mut var_qgd_dn11, &mut var_qgd_dn3, &mut var_qgd_dn5, &mut var_qgd_dn7, &mut var_qgd_dn8, &mut var_qgd_rv);
+        Self::stamp_reactive_block_0(ctx, p, nodes, param_given, &mut locals);
+        Self::stamp_reactive_block_1(p, &mut locals);
 
-        Self::stamp_reactive_equations_block_0(ctx, stamper, p, nodes, branches, multiplicity, var_cgd, var_cgd_dn11, var_cgd_dn3, var_cgd_dn5, var_cgd_dn7, var_cgd_dn8, var_cgs, var_cgs_dn11, var_cgs_dn3, var_cgs_dn5, var_cgs_dn7, var_cgs_dn8, var_ci, var_ci_dn11, var_guard16, var_guard21, var_guard22, var_guard24, var_guard25, var_guard26, var_guard27, var_guard43, var_qgd, var_qgd_dn11, var_qgd_dn3, var_qgd_dn5, var_qgd_dn7, var_qgd_dn8, var_qgs, var_qgs_dn11, var_qgs_dn3, var_qgs_dn5, var_qgs_dn7, var_qgs_dn8, var_vgdc, var_vgdc_dn3, var_vgdc_dn7, var_vgsc, var_vgsc_dn5, var_vgsc_dn8);
+        Self::stamp_reactive_equations_block_0(ctx, stamper, p, nodes, branches, multiplicity, &mut locals);
     }
 }

@@ -91,6 +91,18 @@ fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct StampLocals {
+    pub(crate) var_guard114: f64,
+    pub(crate) var_guard114_rv: f64,
+    pub(crate) var_guard115: f64,
+    pub(crate) var_guard115_rv: f64,
+    pub(crate) var_i_cth: f64,
+    pub(crate) var_i_cth_dn4: f64,
+    pub(crate) var_i_cth_rdn4: f64,
+    pub(crate) var_i_cth_rv: f64,
+}
+
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let scalar_temperature_static_temperature = (ctx).temperature();
@@ -8908,40 +8920,37 @@ impl Instance {
             [],
             multiplicity,
         );
-        let mut var_i_cth: f64 = 0.0;
-        let mut var_i_cth_dn4: f64 = 0.0;
-        let mut var_guard114: f64 = 0.0;
-        let mut var_guard115: f64 = 0.0;
+        let mut locals = StampLocals::default();
 
         let assign7570_e7661: f64 = if ((p.p103 == 0.0) || (p.p107 == 0.0)) { 1.0 } else { 0.0 };
-        var_guard114 = assign7570_e7661;
+        locals.var_guard114 = assign7570_e7661;
 
         let (assign7580_e7665, assign7580_e7665_d_n4,) = {
-    if (var_guard114 != 0.0) {
+    if (locals.var_guard114 != 0.0) {
         (0.0, 0.0,)
     } else {
-        (var_i_cth, var_i_cth_dn4,)
+        (locals.var_i_cth, locals.var_i_cth_dn4,)
     }
 };
-        var_i_cth = assign7580_e7665;
-        var_i_cth_dn4 = assign7580_e7665_d_n4;
+        locals.var_i_cth = assign7580_e7665;
+        locals.var_i_cth_dn4 = assign7580_e7665_d_n4;
 
         let (assign7590_e7673, assign7590_e7673_d_n4,) = {
-    if (var_guard114 == 0.0) {
+    if (locals.var_guard114 == 0.0) {
         let assign7590_e7670: f64 = (p.p107 * (nv4 - 0.0));
         let assign7590_e7671: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, assign7590_e7670);
         (assign7590_e7671, (p.p107 * ddt_scale),)
     } else {
-        (var_i_cth, var_i_cth_dn4,)
+        (locals.var_i_cth, locals.var_i_cth_dn4,)
     }
 };
-        var_i_cth = assign7590_e7673;
-        var_i_cth_dn4 = assign7590_e7673_d_n4;
+        locals.var_i_cth = assign7590_e7673;
+        locals.var_i_cth_dn4 = assign7590_e7673_d_n4;
 
         let assign7600_e7680: f64 = if ((p.p103 == 0.0) || (p.p104 < p.p111)) { 1.0 } else { 0.0 };
-        var_guard115 = assign7600_e7680;
+        locals.var_guard115 = assign7600_e7680;
 
-        Self::stamp_transient_equations_block_0(stamper, multiplicity, var_guard115, var_i_cth, var_i_cth_dn4);
+        Self::stamp_transient_equations_block_0(stamper, multiplicity, &mut locals);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
@@ -15196,49 +15205,42 @@ impl Instance {
             &[],
             multiplicity,
         );
-        let mut var_i_cth: f64 = 0.0;
-        let mut var_i_cth_rv: f64 = 0.0;
-        let mut var_i_cth_dn4: f64 = 0.0;
-        let mut var_i_cth_rdn4: f64 = 0.0;
-        let mut var_guard114: f64 = 0.0;
-        let mut var_guard114_rv: f64 = 0.0;
-        let mut var_guard115: f64 = 0.0;
-        let mut var_guard115_rv: f64 = 0.0;
+        let mut locals = StampLocals::default();
 
         let assign7570_e7661: f64 = if ((p.p103 == 0.0) || (p.p107 == 0.0)) { 1.0 } else { 0.0 };
-        var_guard114 = assign7570_e7661;
-        var_guard114_rv = 0.0;
+        locals.var_guard114 = assign7570_e7661;
+        locals.var_guard114_rv = 0.0;
 
         let (assign7580_e7665, assign7580_e7665_d_n4,) = {
-    if (var_guard114 != 0.0) {
+    if (locals.var_guard114 != 0.0) {
         (0.0, 0.0,)
     } else {
-        (var_i_cth, var_i_cth_dn4,)
+        (locals.var_i_cth, locals.var_i_cth_dn4,)
     }
 };
-        var_i_cth = assign7580_e7665;
-        var_i_cth_dn4 = assign7580_e7665_d_n4;
-        var_i_cth_rv = 0.0;
-        var_i_cth_rdn4 = 0.0;
+        locals.var_i_cth = assign7580_e7665;
+        locals.var_i_cth_dn4 = assign7580_e7665_d_n4;
+        locals.var_i_cth_rv = 0.0;
+        locals.var_i_cth_rdn4 = 0.0;
 
         let (assign7590_e7673, assign7590_e7673_d_n4, assign7590_e7673_q, assign7590_e7673_q_d_n4,) = {
-    if (var_guard114 == 0.0) {
+    if (locals.var_guard114 == 0.0) {
         let assign7590_e7670: f64 = (p.p107 * (nv4 - 0.0));
         let assign7590_e7671_q: f64 = assign7590_e7670;
         (assign7590_e7670, p.p107, assign7590_e7671_q, p.p107,)
     } else {
-        (var_i_cth, var_i_cth_dn4, 0.0, 0.0,)
+        (locals.var_i_cth, locals.var_i_cth_dn4, 0.0, 0.0,)
     }
 };
-        var_i_cth = assign7590_e7673;
-        var_i_cth_dn4 = assign7590_e7673_d_n4;
-        var_i_cth_rv = assign7590_e7673_q;
-        var_i_cth_rdn4 = assign7590_e7673_q_d_n4;
+        locals.var_i_cth = assign7590_e7673;
+        locals.var_i_cth_dn4 = assign7590_e7673_d_n4;
+        locals.var_i_cth_rv = assign7590_e7673_q;
+        locals.var_i_cth_rdn4 = assign7590_e7673_q_d_n4;
 
         let assign7600_e7680: f64 = if ((p.p103 == 0.0) || (p.p104 < p.p111)) { 1.0 } else { 0.0 };
-        var_guard115 = assign7600_e7680;
-        var_guard115_rv = 0.0;
+        locals.var_guard115 = assign7600_e7680;
+        locals.var_guard115_rv = 0.0;
 
-        Self::stamp_reactive_equations_block_0(stamper, nodes, multiplicity, var_guard115, var_i_cth, var_i_cth_dn4, var_i_cth_rdn4, var_i_cth_rv);
+        Self::stamp_reactive_equations_block_0(stamper, nodes, multiplicity, &mut locals);
     }
 }
