@@ -1,6 +1,7 @@
 //! Device and subcircuit element parsers.
 
 use super::*;
+use crate::netlist::XspicePort;
 
 pub(super) fn parse_resistor(
     stream: &mut TokenStream,
@@ -702,6 +703,135 @@ fn collect_deferred_source_spec(stream: &mut TokenStream) -> String {
         .filter_map(|token| (!token.lexeme.is_empty()).then_some(token.lexeme))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+pub(super) fn parse_pspice_u_device(
+    line: &str,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let fields = split_spice_fields(line);
+    if fields.len() < 5 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "PSpice U-device requires name, type, power pins, and logic pins".to_string(),
+        });
+    }
+
+    let name = fields[0].to_ascii_uppercase();
+    let Some(gate) = parse_pspice_simple_u_gate(&fields[1]) else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Unsupported PSpice U-device type '{}'; supported simple gates are AND, NAND, OR, NOR, XOR, XNOR, BUF, and INV",
+                fields[1]
+            ),
+        });
+    };
+
+    let pins = &fields[4..]; // fields[2] and fields[3] are DPWR/DGND pins.
+    if pins.len() < gate.input_count + 1 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice U-device '{}' type '{}' requires {} input pin(s) and one output pin",
+                name, fields[1], gate.input_count
+            ),
+        });
+    }
+
+    let output = normalize_pspice_u_node(&pins[gate.input_count]);
+    let ports = if gate.input_count == 1 {
+        vec![
+            XspicePort::Digital(normalize_pspice_u_node(&pins[0])),
+            XspicePort::Digital(output),
+        ]
+    } else {
+        vec![
+            XspicePort::DigitalVector(
+                pins[..gate.input_count]
+                    .iter()
+                    .map(|pin| normalize_pspice_u_node(pin))
+                    .collect(),
+            ),
+            XspicePort::Digital(output),
+        ]
+    };
+
+    elements.push(Element {
+        name,
+        kind: ElementKind::Xspice {
+            model: gate.xspice_model.to_string(),
+            ports,
+            params: Vec::new(),
+            expr_params: Vec::new(),
+            string_params: Vec::new(),
+            string_expr_params: Vec::new(),
+            string_vector_params: Vec::new(),
+            string_vector_expr_params: Vec::new(),
+            real_vector_params: Vec::new(),
+            real_vector_expr_params: Vec::new(),
+        },
+        nodes: Vec::new(),
+    });
+
+    Ok(())
+}
+
+struct PspiceSimpleUGate {
+    xspice_model: &'static str,
+    input_count: usize,
+}
+
+fn parse_pspice_simple_u_gate(raw: &str) -> Option<PspiceSimpleUGate> {
+    let (kind, count) = parse_pspice_u_kind_and_count(raw);
+    let kind = kind.as_str();
+    let default_count = match kind {
+        "BUF" | "INV" => 1,
+        "AND" | "NAND" | "OR" | "NOR" | "XOR" | "XNOR" | "NXOR" => 2,
+        _ => return None,
+    };
+    let input_count = count.unwrap_or(default_count);
+    if input_count == 0 {
+        return None;
+    }
+    if matches!(kind, "BUF" | "INV") && input_count != 1 {
+        return None;
+    }
+
+    let xspice_model = match kind {
+        "AND" => "d_and",
+        "NAND" => "d_nand",
+        "OR" => "d_or",
+        "NOR" => "d_nor",
+        "XOR" => "d_xor",
+        "XNOR" | "NXOR" => "d_xnor",
+        "BUF" => "d_buffer",
+        "INV" => "d_inverter",
+        _ => return None,
+    };
+
+    Some(PspiceSimpleUGate {
+        xspice_model,
+        input_count,
+    })
+}
+
+fn parse_pspice_u_kind_and_count(raw: &str) -> (String, Option<usize>) {
+    let trimmed = raw.trim();
+    if let Some((kind, tail)) = trimmed.split_once('(')
+        && let Some(count) = tail.strip_suffix(')')
+    {
+        return (
+            kind.to_ascii_uppercase(),
+            count.trim().parse::<usize>().ok(),
+        );
+    }
+    (trimmed.to_ascii_uppercase(), None)
+}
+
+fn normalize_pspice_u_node(raw: &str) -> String {
+    raw.trim().to_ascii_uppercase()
 }
 
 pub(super) fn parse_diode(

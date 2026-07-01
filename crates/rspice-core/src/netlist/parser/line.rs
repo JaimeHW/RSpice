@@ -26,8 +26,13 @@ pub(super) fn strip_inline_semicolon_comment(line: &str) -> &str {
             '"' if !in_single_quote => {
                 in_double_quote = !in_double_quote;
             }
-            ';' | '$' if !in_single_quote && !in_double_quote => {
+            ';' if !in_single_quote && !in_double_quote => {
                 return &line[..idx];
+            }
+            '$' if !in_single_quote && !in_double_quote => {
+                if chars.peek().is_none_or(|(_, next)| next.is_whitespace()) {
+                    return &line[..idx];
+                }
             }
             '/' if !in_single_quote && !in_double_quote => {
                 if matches!(chars.peek(), Some((_, '/')))
@@ -520,6 +525,7 @@ pub(super) fn parse_line(
                 defer_simple_param_refs,
             )
         }
+        'U' => parse_pspice_u_device(line, line_num, elements),
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!("Unknown element type: {}", first_char),
@@ -630,6 +636,18 @@ mod tests {
             )
             .trim_end(),
             "A1 m file=\"https://example.test/model // not a comment\""
+        );
+    }
+
+    #[test]
+    fn dollar_global_nodes_do_not_start_inline_comments() {
+        assert_eq!(
+            strip_inline_semicolon_comment("U1 NAND(2) $G_DPWR $G_DGND a b y").trim_end(),
+            "U1 NAND(2) $G_DPWR $G_DGND a b y"
+        );
+        assert_eq!(
+            strip_inline_semicolon_comment("R1 a b 1k $ comment").trim_end(),
+            "R1 a b 1k"
         );
     }
 }

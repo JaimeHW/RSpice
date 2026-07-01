@@ -4620,6 +4620,85 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_simple_gate_lowers_to_xspice_digital_gate() {
+        let netlist = Netlist::parse(
+            "pspice u gate\n\
+             U1 NAND(3) $G_DPWR $G_DGND a b c y DLY IO_LEVEL=0\n\
+             .end\n",
+        )
+        .expect("simple PSpice U gate should parse through XSPICE lowering");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U1")
+            .expect("U1 exists");
+
+        match &element.kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_nand");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::DigitalVector(vec![
+                            "A".to_string(),
+                            "B".to_string(),
+                            "C".to_string()
+                        ]),
+                        XspicePort::Digital("Y".to_string())
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_inverter_lowers_to_scalar_xspice_ports() {
+        let netlist = Netlist::parse(
+            "pspice u inverter\n\
+             UINV INV $G_DPWR $G_DGND in out\n\
+             .end\n",
+        )
+        .expect("simple PSpice U inverter should parse through XSPICE lowering");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "UINV")
+            .expect("UINV exists");
+
+        match &element.kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_inverter");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("IN".to_string()),
+                        XspicePort::Digital("OUT".to_string())
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_unsupported_frontend_families_fail_closed() {
+        let err = Netlist::parse(
+            "pspice u dff unsupported slice\n\
+             U1 DFF(1) $G_DPWR $G_DGND pre clr clk d q qb dly\n\
+             .end\n",
+        )
+        .expect_err("sequential U-device lowering is not implemented in this slice");
+
+        assert!(
+            err.to_string().contains("Unsupported PSpice U-device type"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn subckt_lookup_is_case_insensitive_when_flattening() {
         let netlist = Netlist::parse(
             "case insensitive subckt lookup\n\
