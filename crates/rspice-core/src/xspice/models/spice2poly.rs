@@ -67,7 +67,7 @@ struct PolyEvalBaseSignature {
 #[derive(Debug, Clone)]
 struct PolyEvalResource {
     signature: PolyEvalSignature,
-    result: PolyEval,
+    result: Arc<PolyEval>,
 }
 
 fn ports() -> &'static [PortSpec] {
@@ -394,41 +394,45 @@ fn evaluate_poly(inputs: &[Value], plan: &PolyPlan, multiplier: Value) -> PolyEv
     PolyEval { value, partials }
 }
 
-fn evaluate_context(ctx: &CmContext) -> CmResult<PolyEval> {
+fn evaluate_context(ctx: &CmContext) -> CmResult<Arc<PolyEval>> {
     let inputs = checked_inputs(ctx)?;
     let base = poly_eval_base_signature(ctx, inputs.len())?;
     if let Some(resource) = ctx.resource::<PolyEvalResource>(POLY_EVAL_RESOURCE)
         && poly_eval_resource_matches(&resource, base, inputs)
     {
-        return Ok(resource.result.clone());
+        return Ok(Arc::clone(&resource.result));
     }
 
     let signature = poly_eval_signature_from_inputs(base, inputs);
     let plan = poly_plan(ctx, signature.inputs.len())?;
-    Ok(evaluate_poly(
+    Ok(Arc::new(evaluate_poly(
         &signature.inputs,
         &plan,
         signature.multiplier,
-    ))
+    )))
 }
 
-fn evaluate_context_cached(ctx: &mut CmContext) -> CmResult<PolyEval> {
+fn evaluate_context_cached(ctx: &mut CmContext) -> CmResult<Arc<PolyEval>> {
     let inputs = checked_inputs(ctx)?;
     let base = poly_eval_base_signature(ctx, inputs.len())?;
     if let Some(resource) = ctx.resource::<PolyEvalResource>(POLY_EVAL_RESOURCE)
         && poly_eval_resource_matches(&resource, base, inputs)
     {
-        return Ok(resource.result.clone());
+        return Ok(Arc::clone(&resource.result));
     }
 
     let signature = poly_eval_signature_from_inputs(base, inputs);
     let plan = cache_poly_plan(ctx, signature.inputs.len())?;
-    let result = evaluate_poly(&signature.inputs, &plan, signature.multiplier);
+    let result = Arc::new(evaluate_poly(
+        &signature.inputs,
+        &plan,
+        signature.multiplier,
+    ));
     ctx.set_resource(
         POLY_EVAL_RESOURCE,
         Arc::new(PolyEvalResource {
             signature,
-            result: result.clone(),
+            result: Arc::clone(&result),
         }),
     );
     Ok(result)
@@ -478,7 +482,8 @@ impl CodeModel for Spice2Poly {
         match evaluate_context(ctx) {
             Ok(result) => result
                 .partials
-                .into_iter()
+                .iter()
+                .copied()
                 .enumerate()
                 .filter_map(|(index, partial)| {
                     (partial.is_finite() && partial != 0.0).then_some((
@@ -688,29 +693,48 @@ mod tests {
 
         let initial = evaluate_context_cached(&mut ctx).expect("evaluation caches");
         assert_eq!(
-            initial,
-            PolyEval {
+            initial.as_ref(),
+            &PolyEval {
                 value: 228.0,
                 partials: vec![66.0, 98.0],
             }
         );
 
+        let cached_initial = evaluate_context(&ctx).expect("read-only initial cache");
+        assert!(
+            Arc::ptr_eq(&initial, &cached_initial),
+            "read-only spice2poly eval should reuse the cached Arc"
+        );
+        let mutable_cached_initial =
+            evaluate_context_cached(&mut ctx).expect("mutable initial cache");
+        assert!(
+            Arc::ptr_eq(&initial, &mutable_cached_initial),
+            "mutable spice2poly eval should reuse the cached Arc"
+        );
+
         let signature = poly_eval_signature(&ctx).expect("current eval signature");
-        let sentinel = PolyEval {
+        let sentinel = Arc::new(PolyEval {
             value: 123.0,
             partials: vec![7.0, 11.0],
-        };
+        });
         ctx.set_resource(
             POLY_EVAL_RESOURCE,
             Arc::new(PolyEvalResource {
                 signature,
-                result: sentinel.clone(),
+                result: Arc::clone(&sentinel),
             }),
         );
 
-        assert_eq!(
-            evaluate_context(&ctx).expect("read-only path reuses cache"),
-            sentinel
+        let cached_sentinel = evaluate_context(&ctx).expect("read-only path reuses cache");
+        assert!(
+            Arc::ptr_eq(&cached_sentinel, &sentinel),
+            "matching read-only spice2poly eval signatures should reuse the cached Arc"
+        );
+        let mutable_cached_sentinel =
+            evaluate_context_cached(&mut ctx).expect("mutable path reuses cache");
+        assert!(
+            Arc::ptr_eq(&mutable_cached_sentinel, &sentinel),
+            "matching mutable spice2poly eval signatures should reuse the cached Arc"
         );
         assert_eq!(
             Spice2Poly.output_input_vector_partials(&ctx, "out"),
@@ -719,10 +743,12 @@ mod tests {
 
         set_inputs(&mut ctx, &[2.0, 4.0]);
         let updated = evaluate_context(&ctx).expect("changed inputs invalidate cache");
-        assert_ne!(updated, sentinel);
+        assert_ne!(updated.as_ref(), sentinel.as_ref());
         assert_eq!(
-            updated,
-            evaluate_context_cached(&mut ctx).expect("direct updated eval")
+            updated.as_ref(),
+            evaluate_context_cached(&mut ctx)
+                .expect("direct updated eval")
+                .as_ref()
         );
     }
 
@@ -738,10 +764,10 @@ mod tests {
         let base = poly_eval_base_signature(&ctx, inputs.len()).expect("current base signature");
         let resource = PolyEvalResource {
             signature,
-            result: PolyEval {
+            result: Arc::new(PolyEval {
                 value: 123.0,
                 partials: vec![7.0, 11.0],
-            },
+            }),
         };
 
         assert!(
@@ -765,38 +791,39 @@ mod tests {
         set_inputs(&mut ctx, &[2.0, 3.0]);
 
         let signature = poly_eval_signature(&ctx).expect("current eval signature");
-        let sentinel = PolyEval {
+        let sentinel = Arc::new(PolyEval {
             value: 99.0,
             partials: vec![5.0, 6.0],
-        };
+        });
         ctx.set_resource(
             POLY_EVAL_RESOURCE,
             Arc::new(PolyEvalResource {
                 signature,
-                result: sentinel.clone(),
+                result: Arc::clone(&sentinel),
             }),
         );
 
-        assert_eq!(
-            evaluate_context(&ctx).expect("matching eval reuses cache"),
-            sentinel
+        let cached_sentinel = evaluate_context(&ctx).expect("matching eval reuses cache");
+        assert!(
+            Arc::ptr_eq(&cached_sentinel, &sentinel),
+            "matching spice2poly eval should reuse the cached Arc"
         );
 
         ctx.set_param("m", 3.0);
         let changed_multiplier =
             evaluate_context(&ctx).expect("changed multiplier invalidates cache");
-        assert_ne!(changed_multiplier, sentinel);
+        assert_ne!(changed_multiplier.as_ref(), sentinel.as_ref());
 
         let signature = poly_eval_signature(&ctx).expect("multiplier signature");
         ctx.set_resource(
             POLY_EVAL_RESOURCE,
             Arc::new(PolyEvalResource {
                 signature,
-                result: sentinel.clone(),
+                result: Arc::clone(&sentinel),
             }),
         );
         ctx.set_real_vector_param("coef", vec![1.0, 2.0, 4.0]);
         let changed_coef = evaluate_context(&ctx).expect("changed coefficients invalidate cache");
-        assert_ne!(changed_coef, sentinel);
+        assert_ne!(changed_coef.as_ref(), sentinel.as_ref());
     }
 }
