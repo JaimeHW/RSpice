@@ -3200,14 +3200,21 @@ mod tests {
         BranchUnknownId, CanonicalIrArtifact, HirContributionKind, HirExprKind, MirBranchUnknown,
         MirEquationKind, NodeId, OptModel,
     };
-    use crate::codegen::{AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, Instruction};
-    use crate::native::EvalContext;
-    use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeOp, NativeProgram};
+    use crate::codegen::{
+        AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, Instruction, StampProgram,
+    };
+    use crate::device::VerilogADevice;
+    use crate::native::expr::{
+        EntryKind, NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
+    };
     use crate::native::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets};
     use crate::native::runtime::ExecutableMemory;
     use crate::native::x64::codegen::NativeAssignment;
+    use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
+    use crate::vm::{Vm, VmContext};
     use crate::{CompilerOptions, VerilogACompiler};
     use smol_str::SmolStr;
+    use std::path::{Path, PathBuf};
 
     fn canonical_artifact_with_unsupported_root(
         compiler: &VerilogACompiler,
@@ -4275,6 +4282,327 @@ endmodule
     }
 
     #[test]
+    #[ignore = "release-only shipped-model native x64 throughput probe; run with --release --features native -- --ignored --nocapture"]
+    fn native_x64_shipped_model_microbench_reports_sweep_throughput() {
+        assert!(
+            !cfg!(debug_assertions),
+            "native x64 shipped-model microbench is release-only; rerun with --release"
+        );
+
+        let cases = [
+            (
+                "juncap200",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "juncap200.va"]),
+                None,
+            ),
+            (
+                "r3_cmc",
+                shipped_cmc_model_path(&["r3_cmc_release1.1.2_2023Jun16", "r3_cmc.va"]),
+                None,
+            ),
+            (
+                "diode_cmc",
+                shipped_cmc_model_path(&["diode_cmc_3.0_20250714", "vacode", "diode_cmc.va"]),
+                Some("DIODE_CMC"),
+            ),
+            (
+                "vbic13_4t",
+                shipped_veriloga_model_path(&["vbic_1.3", "vacode", "vbic_1p3.va"]),
+                Some("vbic13_4t"),
+            ),
+            (
+                "bsimbulk",
+                shipped_cmc_model_path(&["BSIM-BULK107.2.1_02112025", "code", "bsimbulk.va"]),
+                Some("bsimbulk"),
+            ),
+            (
+                "bsimcmg",
+                shipped_cmc_model_path(&["BSIM-CMG_112.1.0_04282026", "code", "bsimcmg.va"]),
+                Some("bsimcmg_va"),
+            ),
+            (
+                "psp104",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "psp104.va"]),
+                Some("PSP104VA"),
+            ),
+            (
+                "psp104_nqs",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "psp104_nqs.va"]),
+                Some("PSPNQS104VA"),
+            ),
+            (
+                "hicuml0",
+                shipped_cmc_model_path(&["hicumL0_v2p1p0_files", "hicumL0_v2p1p0.va"]),
+                Some("hicumL0va"),
+            ),
+            (
+                "hicuml2",
+                shipped_cmc_model_path(&["hicumL2_v320_files", "hicumL2_v320.va"]),
+                Some("hicumL2va"),
+            ),
+            (
+                "bsimimg",
+                shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
+                Some("bsimimg"),
+            ),
+            (
+                "bsimsoi461",
+                shipped_veriloga_model_path(&["bsimsoi_4.6.1", "vacode", "bsimsoi.va"]),
+                Some("bsimsoi_va"),
+            ),
+            (
+                "bsimsoi47",
+                shipped_cmc_model_path(&["BSIM-SOI_4.7.0_05192025", "code", "bsimsoi.va"]),
+                Some("bsimsoi"),
+            ),
+            (
+                "bsimsoi100",
+                shipped_cmc_model_path(&["BSIM_SOI_100.1.1_09152025", "code", "bsimsoi.va"]),
+                Some("bsimsoi"),
+            ),
+            (
+                "l_utsoi102",
+                shipped_cmc_model_path(&[
+                    "L_UTSOI_102.9.0_code_package",
+                    "vacode",
+                    "L_UTSOI_102.va",
+                ]),
+                Some("l_utsoi"),
+            ),
+            (
+                "hisimhv",
+                shipped_cmc_model_path(&[
+                    "HiSIM_HV_2.5.1_Release_20230209",
+                    "HiSIM_HV_2.5.1_VA-Code",
+                    "hisimhv_va",
+                    "hisimhv.va",
+                ]),
+                Some("hisimhv_va"),
+            ),
+            (
+                "hisimsoi",
+                shipped_cmc_model_path(&[
+                    "HiSIM_SOI_1.5.0_Release_20211008",
+                    "HiSIM_SOI_1.5.0_VA-Code",
+                    "hisimsoi_va",
+                    "hisimsoi.va",
+                ]),
+                Some("hisimsoi_va"),
+            ),
+            (
+                "asmhemt",
+                shipped_cmc_model_path(&["ASM-HEMT101.6.0_05132026", "vacode", "asmhemt.va"]),
+                Some("asmhemt"),
+            ),
+        ];
+        let iterations = shipped_model_microbench_iterations();
+        let samples = shipped_model_microbench_samples();
+        eprintln!("native-x64-shipped-microbench iterations={iterations} samples={samples}");
+
+        for (name, path, module) in cases {
+            run_shipped_model_microbench_case(name, &path, module, iterations, samples);
+        }
+    }
+
+    #[test]
+    #[ignore = "release-only shipped-model native x64 finite oracle; run with --release --features native -- --ignored --nocapture"]
+    fn native_x64_shipped_model_finite_entries_match_bytecode_reference() {
+        assert!(
+            !cfg!(debug_assertions),
+            "native x64 shipped-model finite oracle is release-only; rerun with --release"
+        );
+
+        let cases = [
+            (
+                "juncap200",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "juncap200.va"]),
+                None,
+            ),
+            (
+                "bsimcmg",
+                shipped_cmc_model_path(&["BSIM-CMG_112.1.0_04282026", "code", "bsimcmg.va"]),
+                Some("bsimcmg_va"),
+            ),
+            (
+                "r3_cmc",
+                shipped_cmc_model_path(&["r3_cmc_release1.1.2_2023Jun16", "r3_cmc.va"]),
+                None,
+            ),
+            (
+                "diode_cmc",
+                shipped_cmc_model_path(&["diode_cmc_3.0_20250714", "vacode", "diode_cmc.va"]),
+                Some("DIODE_CMC"),
+            ),
+            (
+                "vbic13_4t",
+                shipped_veriloga_model_path(&["vbic_1.3", "vacode", "vbic_1p3.va"]),
+                Some("vbic13_4t"),
+            ),
+            (
+                "bsimbulk",
+                shipped_cmc_model_path(&["BSIM-BULK107.2.1_02112025", "code", "bsimbulk.va"]),
+                Some("bsimbulk"),
+            ),
+            (
+                "psp104",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "psp104.va"]),
+                Some("PSP104VA"),
+            ),
+            (
+                "bsimimg",
+                shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
+                Some("bsimimg"),
+            ),
+            (
+                "psp104_nqs",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "psp104_nqs.va"]),
+                Some("PSPNQS104VA"),
+            ),
+            (
+                "hicuml0",
+                shipped_cmc_model_path(&["hicumL0_v2p1p0_files", "hicumL0_v2p1p0.va"]),
+                Some("hicumL0va"),
+            ),
+            (
+                "hicuml2",
+                shipped_cmc_model_path(&["hicumL2_v320_files", "hicumL2_v320.va"]),
+                Some("hicumL2va"),
+            ),
+            (
+                "bsimsoi47",
+                shipped_cmc_model_path(&["BSIM-SOI_4.7.0_05192025", "code", "bsimsoi.va"]),
+                Some("bsimsoi"),
+            ),
+            (
+                "bsimsoi100",
+                shipped_cmc_model_path(&["BSIM_SOI_100.1.1_09152025", "code", "bsimsoi.va"]),
+                Some("bsimsoi"),
+            ),
+            (
+                "hisimsoi",
+                shipped_cmc_model_path(&[
+                    "HiSIM_SOI_1.5.0_Release_20211008",
+                    "HiSIM_SOI_1.5.0_VA-Code",
+                    "hisimsoi_va",
+                    "hisimsoi.va",
+                ]),
+                Some("hisimsoi_va"),
+            ),
+            (
+                "asmhemt",
+                shipped_cmc_model_path(&["ASM-HEMT101.6.0_05132026", "vacode", "asmhemt.va"]),
+                Some("asmhemt"),
+            ),
+        ];
+
+        for (name, path, module) in cases {
+            if !shipped_model_filter_allows(name) {
+                continue;
+            }
+            assert_shipped_model_finite_entries_match_bytecode(name, &path, module);
+        }
+    }
+
+    #[test]
+    #[ignore = "release-only shipped-model VerilogADevice native x64 probe; run with --release --features native -- --ignored --nocapture"]
+    fn native_x64_shipped_model_devices_run_without_interpreter_fallback() {
+        assert!(
+            !cfg!(debug_assertions),
+            "native x64 shipped-model device probe is release-only; rerun with --release"
+        );
+
+        let cases = [
+            (
+                "juncap200",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "juncap200.va"]),
+                None,
+            ),
+            (
+                "bsimcmg",
+                shipped_cmc_model_path(&["BSIM-CMG_112.1.0_04282026", "code", "bsimcmg.va"]),
+                Some("bsimcmg_va"),
+            ),
+            (
+                "r3_cmc",
+                shipped_cmc_model_path(&["r3_cmc_release1.1.2_2023Jun16", "r3_cmc.va"]),
+                None,
+            ),
+            (
+                "diode_cmc",
+                shipped_cmc_model_path(&["diode_cmc_3.0_20250714", "vacode", "diode_cmc.va"]),
+                Some("DIODE_CMC"),
+            ),
+            (
+                "vbic13_4t",
+                shipped_veriloga_model_path(&["vbic_1.3", "vacode", "vbic_1p3.va"]),
+                Some("vbic13_4t"),
+            ),
+            (
+                "bsimbulk",
+                shipped_cmc_model_path(&["BSIM-BULK107.2.1_02112025", "code", "bsimbulk.va"]),
+                Some("bsimbulk"),
+            ),
+            (
+                "psp104",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "psp104.va"]),
+                Some("PSP104VA"),
+            ),
+            (
+                "bsimimg",
+                shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
+                Some("bsimimg"),
+            ),
+            (
+                "psp104_nqs",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "psp104_nqs.va"]),
+                Some("PSPNQS104VA"),
+            ),
+            (
+                "hicuml0",
+                shipped_cmc_model_path(&["hicumL0_v2p1p0_files", "hicumL0_v2p1p0.va"]),
+                Some("hicumL0va"),
+            ),
+            (
+                "hicuml2",
+                shipped_cmc_model_path(&["hicumL2_v320_files", "hicumL2_v320.va"]),
+                Some("hicumL2va"),
+            ),
+            (
+                "bsimsoi47",
+                shipped_cmc_model_path(&["BSIM-SOI_4.7.0_05192025", "code", "bsimsoi.va"]),
+                Some("bsimsoi"),
+            ),
+            (
+                "bsimsoi100",
+                shipped_cmc_model_path(&["BSIM_SOI_100.1.1_09152025", "code", "bsimsoi.va"]),
+                Some("bsimsoi"),
+            ),
+            (
+                "hisimsoi",
+                shipped_cmc_model_path(&[
+                    "HiSIM_SOI_1.5.0_Release_20211008",
+                    "HiSIM_SOI_1.5.0_VA-Code",
+                    "hisimsoi_va",
+                    "hisimsoi.va",
+                ]),
+                Some("hisimsoi_va"),
+            ),
+            (
+                "asmhemt",
+                shipped_cmc_model_path(&["ASM-HEMT101.6.0_05132026", "vacode", "asmhemt.va"]),
+                Some("asmhemt"),
+            ),
+        ];
+
+        for (name, path, module) in cases {
+            if !shipped_model_filter_allows(name) {
+                continue;
+            }
+            run_shipped_model_device_probe(name, &path, module);
+        }
+    }
+
+    #[test]
     fn compile_model_with_canonical_ir_rejects_unsupported_mir_stamp() {
         let source = r#"
 `include "disciplines.vams"
@@ -4493,6 +4821,1175 @@ endmodule
         let native = compile_model_with_canonical_ir(&model, &artifact)
             .expect("source-level canonical model compiles to native x64");
         (model, native)
+    }
+
+    fn run_shipped_model_microbench_case(
+        name: &str,
+        path: &Path,
+        module: Option<&str>,
+        iterations: usize,
+        samples: usize,
+    ) {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let compile_start = std::time::Instant::now();
+        let runtime = compiler
+            .compile_file_runtime_with_metadata(path, module)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "compile shipped Verilog-A model {name} at {}: {error}",
+                    path.display()
+                )
+            });
+        let compile_elapsed = compile_start.elapsed();
+        let native_start = std::time::Instant::now();
+        let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
+            .unwrap_or_else(|error| panic!("native x64 compile shipped model {name}: {error}"));
+        let native_compile_elapsed = native_start.elapsed();
+        let mut context = native_model_benchmark_context(&runtime.model, name);
+        resolve_native_parameter_defaults(&runtime.model, &native, &mut context);
+        let nonfinite_reference =
+            collect_bytecode_nonfinite_reference(&runtime.model, context.clone())
+                .unwrap_or_else(|error| panic!("{name}: bytecode non-finite reference: {error}"));
+        if !nonfinite_reference.is_empty() {
+            eprintln!(
+                "native-x64-shipped-microbench model={name} bytecode_nonfinite_reference stamps={} jacobians={} reactive_jacobians={}",
+                nonfinite_reference.stamps.len(),
+                nonfinite_reference.jacobians.len(),
+                nonfinite_reference.reactive_jacobians.len(),
+            );
+        }
+        let mut sanity_checksum = run_native_model_sweep_once(
+            &runtime.model,
+            &native,
+            &mut context,
+            name,
+            &nonfinite_reference,
+        );
+        assert!(
+            sanity_checksum.is_finite(),
+            "{name}: shipped-model sanity sweep checksum must stay finite"
+        );
+
+        let warmup_iterations = (iterations / 10).max(1);
+        sanity_checksum += run_native_model_sweep_sample(
+            &runtime.model,
+            &native,
+            &mut context,
+            name,
+            warmup_iterations,
+            &nonfinite_reference,
+        );
+        assert!(
+            sanity_checksum.is_finite(),
+            "{name}: shipped-model warmup checksum must stay finite"
+        );
+
+        let mut sample_ns_per_sweep = Vec::with_capacity(samples);
+        let mut checksum = 0.0_f64;
+        for _ in 0..samples {
+            let start = std::time::Instant::now();
+            checksum += run_native_model_sweep_sample(
+                &runtime.model,
+                &native,
+                &mut context,
+                name,
+                iterations,
+                &nonfinite_reference,
+            );
+            let elapsed = start.elapsed();
+            sample_ns_per_sweep.push(elapsed.as_nanos() as f64 / iterations as f64);
+        }
+        sample_ns_per_sweep.sort_by(|left, right| left.total_cmp(right));
+        let min_ns_per_sweep = sample_ns_per_sweep[0];
+        let median_ns_per_sweep = sample_ns_per_sweep[sample_ns_per_sweep.len() / 2];
+        let checksum = std::hint::black_box(checksum);
+        assert!(
+            checksum.is_finite(),
+            "{name}: shipped-model benchmark checksum must stay finite"
+        );
+        let stats = native.plan_stats();
+        eprintln!(
+            "native-x64-shipped-microbench model={name} compile_ms={:.3} native_compile_ms={:.3} dependencies={} params={} vars={} assignments={} stamps={} jacobians={} reactive_jacobians={} min_ns_per_sweep={min_ns_per_sweep:.3} median_ns_per_sweep={median_ns_per_sweep:.3} checksum={checksum:.17e}",
+            compile_elapsed.as_secs_f64() * 1000.0,
+            native_compile_elapsed.as_secs_f64() * 1000.0,
+            runtime.dependencies.len(),
+            runtime.model.parameters.len(),
+            runtime.model.num_variables,
+            count_assignment_steps(&runtime.model.assignment_steps),
+            stats.stamp_value_entry_points,
+            stats.jacobian_entry_points,
+            stats.reactive_jacobian_entry_points,
+        );
+    }
+
+    fn assert_shipped_model_finite_entries_match_bytecode(
+        name: &str,
+        path: &Path,
+        module: Option<&str>,
+    ) {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let runtime = compiler
+            .compile_file_runtime_with_metadata(path, module)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "compile shipped Verilog-A oracle model {name} at {}: {error}",
+                    path.display()
+                )
+            });
+        let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
+            .unwrap_or_else(|error| panic!("native x64 compile oracle model {name}: {error}"));
+        let mut context = native_model_benchmark_context(&runtime.model, name);
+        resolve_native_parameter_defaults(&runtime.model, &native, &mut context);
+
+        let stats =
+            assert_native_matches_bytecode_finite_entries(&runtime.model, &native, context, name)
+                .unwrap_or_else(|error| panic!("{name}: finite native oracle failed: {error}"));
+        eprintln!(
+            "native-x64-shipped-oracle model={name} variables={} stamps={} jacobians={} reactive_jacobians={} skipped_nonfinite={}",
+            stats.variables,
+            stats.stamps,
+            stats.jacobians,
+            stats.reactive_jacobians,
+            stats.skipped_nonfinite,
+        );
+    }
+
+    fn run_shipped_model_device_probe(name: &str, path: &Path, module: Option<&str>) {
+        shipped_probe_trace(name, "compile-runtime:start");
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let runtime = compiler
+            .compile_file_runtime_with_metadata(path, module)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "compile shipped Verilog-A device probe model {name} at {}: {error}",
+                    path.display()
+                )
+            });
+        shipped_probe_trace(name, "native-device:start");
+        let model = std::sync::Arc::new(runtime.model.clone());
+        let nodes = (1..=model.num_terminals).collect::<Vec<_>>();
+        let mut device = VerilogADevice::try_new_with_canonical_ir(
+            format!("{name}_device"),
+            std::sync::Arc::clone(&model),
+            &runtime.canonical_ir,
+            &nodes,
+        )
+        .unwrap_or_else(|error| {
+            panic!("{name}: shipped device native construction failed: {error}")
+        });
+        assert!(
+            device.is_using_native(),
+            "{name}: shipped device must use native code"
+        );
+        shipped_probe_trace(name, "native-device:ready");
+
+        let terminal_count = model.num_terminals;
+        let internal_indices = ((terminal_count + 1)
+            ..(terminal_count + 1 + device.num_internal_nodes()))
+            .collect::<Vec<_>>();
+        shipped_probe_trace(name, "set-indices:start");
+        device.set_internal_node_indices(&internal_indices);
+        let branch_start = terminal_count + 1 + device.num_internal_nodes();
+        let branch_indices =
+            (branch_start..(branch_start + device.num_branch_unknowns())).collect::<Vec<_>>();
+        device.set_branch_current_indices(&branch_indices);
+
+        let solution_len =
+            terminal_count + device.num_internal_nodes() + device.num_branch_unknowns();
+        let mut solution = vec![0.0; solution_len.max(1)];
+        for (terminal, node) in nodes.iter().copied().enumerate() {
+            solution[node - 1] = shipped_device_terminal_bias(name, terminal);
+        }
+
+        device
+            .try_update_all_voltages(&solution)
+            .unwrap_or_else(|error| {
+                panic!("{name}: shipped device voltage update failed: {error}")
+            });
+        shipped_probe_trace(name, "evaluate:start");
+        let currents = device.try_evaluate().unwrap_or_else(|error| {
+            panic!("{name}: shipped device native evaluate failed: {error}")
+        });
+        shipped_probe_trace(name, "evaluate:done");
+        assert_eq!(
+            currents.len(),
+            model.stamp_programs.len(),
+            "{name}: device evaluate must return one current per stamp"
+        );
+        let finite_currents = currents.iter().filter(|value| value.is_finite()).count();
+        assert!(
+            finite_currents > 0,
+            "{name}: shipped device native evaluate must produce finite currents"
+        );
+
+        let mut matrix_entries = 0usize;
+        let mut rhs_entries = 0usize;
+        let mut matrix_l1 = 0.0_f64;
+        let mut rhs_l1 = 0.0_f64;
+        shipped_probe_trace(name, "stamp:start");
+        device
+            .try_stamp(
+                &solution,
+                |row, col, value| {
+                    assert!(
+                        value.is_finite(),
+                        "{name}: non-finite matrix stamp ({row},{col})={value}"
+                    );
+                    matrix_entries += 1;
+                    matrix_l1 += value.abs();
+                },
+                |row, value| {
+                    assert!(
+                        value.is_finite(),
+                        "{name}: non-finite rhs stamp ({row})={value}"
+                    );
+                    rhs_entries += 1;
+                    rhs_l1 += value.abs();
+                },
+            )
+            .unwrap_or_else(|error| panic!("{name}: shipped device native stamp failed: {error}"));
+        shipped_probe_trace(name, "stamp:done");
+        assert!(
+            matrix_entries > 0,
+            "{name}: shipped device native stamp must produce matrix entries"
+        );
+        assert!(
+            rhs_entries > 0,
+            "{name}: shipped device native stamp must produce RHS entries"
+        );
+
+        let mut reactive_entries = 0usize;
+        let mut reactive_l1 = 0.0_f64;
+        shipped_probe_trace(name, "reactive:start");
+        device
+            .try_stamp_reactive(&solution, |row, col, value| {
+                assert!(
+                    value.is_finite(),
+                    "{name}: non-finite reactive stamp ({row},{col})={value}"
+                );
+                reactive_entries += 1;
+                reactive_l1 += value.abs();
+            })
+            .unwrap_or_else(|error| {
+                panic!("{name}: shipped device native reactive stamp failed: {error}")
+            });
+        shipped_probe_trace(name, "reactive:done");
+        assert!(
+            reactive_entries > 0,
+            "{name}: shipped device native reactive stamp must produce entries"
+        );
+
+        eprintln!(
+            "native-x64-shipped-device model={name} native_chunks={} finite_currents={} matrix_entries={} rhs_entries={} reactive_entries={} matrix_l1={matrix_l1:.17e} rhs_l1={rhs_l1:.17e} reactive_l1={reactive_l1:.17e}",
+            device.native_chunk_count(),
+            finite_currents,
+            matrix_entries,
+            rhs_entries,
+            reactive_entries,
+        );
+    }
+
+    fn shipped_probe_trace(name: &str, stage: &str) {
+        if std::env::var_os("RSPICE_NATIVE_SHIPPED_PROBE_TRACE").is_some() {
+            eprintln!("native-x64-shipped-probe model={name} stage={stage}");
+        }
+    }
+
+    fn shipped_model_filter_allows(name: &str) -> bool {
+        let Ok(filter) = std::env::var("RSPICE_NATIVE_SHIPPED_MODEL_FILTER") else {
+            return true;
+        };
+        filter
+            .split(',')
+            .map(str::trim)
+            .any(|candidate| candidate.eq_ignore_ascii_case(name))
+    }
+
+    fn shipped_device_terminal_bias(name: &str, terminal: usize) -> f64 {
+        match name {
+            "juncap200" => [0.2, 0.0].get(terminal).copied().unwrap_or(0.0),
+            "bsimcmg" => [0.05, 0.7, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "bsimbulk" => [0.05, 0.7, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "psp104" => [0.05, 0.7, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
+            "r3_cmc" => [0.1, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
+            "diode_cmc" => [0.7, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
+            "vbic13_4t" => [0.2, 0.75, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
+            "bsimimg" | "hisimsoi" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "bsimsoi47" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "bsimsoi100" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "psp104_nqs" => [0.05, 0.7, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "hicuml0" => [0.2, 0.8, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
+            "hicuml2" => [0.2, 0.8, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "asmhemt" => [0.1, 0.3, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            _ => 0.0,
+        }
+    }
+
+    #[derive(Default)]
+    struct FiniteOracleStats {
+        variables: usize,
+        stamps: usize,
+        jacobians: usize,
+        reactive_jacobians: usize,
+        skipped_nonfinite: usize,
+    }
+
+    fn assert_native_matches_bytecode_finite_entries(
+        model: &CompiledModel,
+        native: &NativeModel,
+        base_context: VmContext,
+        name: &str,
+    ) -> Result<FiniteOracleStats, String> {
+        let mut bytecode_context = base_context.clone();
+        bytecode_context.clear_currents();
+        bytecode_context
+            .currents
+            .resize(model.stamp_programs.len(), 0.0);
+        let mut vm = Vm::new(&mut bytecode_context);
+        execute_bytecode_assignment_steps(&mut vm, &model.assignment_steps)
+            .map_err(|error| error.to_string())?;
+
+        let mut native_context = base_context;
+        native_context.clear_currents();
+        native_context
+            .currents
+            .resize(model.stamp_programs.len(), 0.0);
+        clear_native_runtime_error();
+        let mut ctx = eval_context_from_vm_context(&mut native_context);
+        native.run_assignments(&ctx, native_context.variables.as_mut_ptr());
+        if let Some(error) = take_native_runtime_error() {
+            return Err(format!("native runtime error during assignments: {error}"));
+        }
+
+        let mut stats = FiniteOracleStats::default();
+        for index in 0..model.num_variables {
+            assert_close_or_skip_nonfinite(
+                name,
+                format!("variable {index}"),
+                vm.context.variables[index],
+                native_context.variables[index],
+                &mut stats.variables,
+                &mut stats.skipped_nonfinite,
+            )?;
+        }
+
+        let mut prior_current_probes = Vec::new();
+        for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+            let bytecode_active = if let Some(condition) = &stamp.static_condition {
+                let reference = vm.execute(condition).map_err(|error| error.to_string())?;
+                ctx = eval_context_from_vm_context(&mut native_context);
+                let actual = native
+                    .run_static_condition(stamp_index, &ctx, native_context.variables.as_ptr())
+                    .ok_or_else(|| format!("missing native static condition {stamp_index}"))?;
+                assert_finite_close(
+                    name,
+                    format!("static_condition {stamp_index}"),
+                    reference,
+                    actual,
+                )?;
+                reference.abs() > 1.0e-15
+            } else {
+                true
+            };
+
+            let native_active = if stamp.static_condition.is_some() {
+                ctx = eval_context_from_vm_context(&mut native_context);
+                native
+                    .run_static_condition(stamp_index, &ctx, native_context.variables.as_ptr())
+                    .ok_or_else(|| format!("missing native static condition {stamp_index}"))?
+                    .abs()
+                    > 1.0e-15
+            } else {
+                true
+            };
+            if bytecode_active != native_active {
+                return Err(format!(
+                    "static condition {stamp_index} active mismatch: bytecode={bytecode_active} native={native_active}"
+                ));
+            }
+            if !bytecode_active {
+                push_prior_current_probe_aliases_for_stamp(
+                    model,
+                    &mut prior_current_probes,
+                    stamp_index,
+                    stamp,
+                );
+                continue;
+            }
+
+            let reference = execute_bytecode_value_program_with_prior_current_probes(
+                &mut vm,
+                &stamp.value_program,
+                &prior_current_probes,
+            )
+            .map_err(|error| error.to_string())?;
+            ctx = eval_context_from_vm_context(&mut native_context);
+            let actual = native
+                .run_stamp_value(stamp_index, &ctx, native_context.variables.as_ptr())
+                .ok_or_else(|| format!("missing native stamp-value entry {stamp_index}"))?;
+            assert_close_or_skip_nonfinite(
+                name,
+                format!("stamp {stamp_index}"),
+                reference,
+                actual,
+                &mut stats.stamps,
+                &mut stats.skipped_nonfinite,
+            )?;
+            vm.context.currents[stamp_index] = reference;
+            native_context.currents[stamp_index] = actual;
+            if stamp.branch_ordinal.is_none()
+                && let Some((pos, neg)) = super::infer_current_terminal_pair(stamp)
+            {
+                vm.context.set_branch_current(pos, neg, reference);
+                native_context.set_branch_current(pos, neg, actual);
+            }
+
+            let mut jacobian_prior_current_probes = prior_current_probes.clone();
+            push_prior_current_probe_aliases_for_stamp(
+                model,
+                &mut jacobian_prior_current_probes,
+                stamp_index,
+                stamp,
+            );
+            for entry_index in 0..stamp.jacobian_programs.len() {
+                let reference = execute_bytecode_value_program_with_prior_current_probes(
+                    &mut vm,
+                    &stamp.jacobian_programs[entry_index].program,
+                    &jacobian_prior_current_probes,
+                )
+                .map_err(|error| error.to_string())?;
+                ctx = eval_context_from_vm_context(&mut native_context);
+                let actual = native
+                    .run_jacobian(
+                        stamp_index,
+                        entry_index,
+                        &ctx,
+                        native_context.variables.as_ptr(),
+                    )
+                    .ok_or_else(|| {
+                        format!("missing native Jacobian entry {stamp_index}.{entry_index}")
+                    })?;
+                assert_close_or_skip_nonfinite(
+                    name,
+                    format!("jacobian {stamp_index}.{entry_index}"),
+                    reference,
+                    actual,
+                    &mut stats.jacobians,
+                    &mut stats.skipped_nonfinite,
+                )?;
+            }
+
+            for entry_index in 0..stamp.reactive_jacobians.len() {
+                let reference = vm
+                    .execute(&stamp.reactive_jacobians[entry_index].program)
+                    .map_err(|error| error.to_string())?;
+                ctx = eval_context_from_vm_context(&mut native_context);
+                let actual = native
+                    .run_reactive_jacobian(
+                        stamp_index,
+                        entry_index,
+                        &ctx,
+                        native_context.variables.as_ptr(),
+                    )
+                    .ok_or_else(|| {
+                        format!(
+                            "missing native reactive-Jacobian entry {stamp_index}.{entry_index}"
+                        )
+                    })?;
+                assert_close_or_skip_nonfinite(
+                    name,
+                    format!("reactive_jacobian {stamp_index}.{entry_index}"),
+                    reference,
+                    actual,
+                    &mut stats.reactive_jacobians,
+                    &mut stats.skipped_nonfinite,
+                )?;
+            }
+
+            push_prior_current_probe_aliases_for_stamp(
+                model,
+                &mut prior_current_probes,
+                stamp_index,
+                stamp,
+            );
+        }
+
+        if let Some(error) = take_native_runtime_error() {
+            return Err(format!(
+                "native runtime error during finite oracle: {error}"
+            ));
+        }
+        Ok(stats)
+    }
+
+    fn assert_close_or_skip_nonfinite(
+        name: &str,
+        entry: impl std::fmt::Display,
+        reference: f64,
+        actual: f64,
+        matched_count: &mut usize,
+        skipped_nonfinite: &mut usize,
+    ) -> Result<(), String> {
+        if !reference.is_finite() {
+            *skipped_nonfinite += 1;
+            return Ok(());
+        }
+        assert_finite_close(name, entry, reference, actual)?;
+        *matched_count += 1;
+        Ok(())
+    }
+
+    fn assert_finite_close(
+        name: &str,
+        entry: impl std::fmt::Display,
+        reference: f64,
+        actual: f64,
+    ) -> Result<(), String> {
+        let entry = entry.to_string();
+        if !reference.is_finite() {
+            return Err(format!(
+                "{entry}: bytecode reference is non-finite: {reference}"
+            ));
+        }
+        if !actual.is_finite() {
+            return Err(format!(
+                "{entry}: native value is non-finite while bytecode is finite: bytecode={reference} native={actual}"
+            ));
+        }
+        if reference == actual {
+            return Ok(());
+        }
+        let scale = reference.abs().max(actual.abs()).max(1.0);
+        let tolerance = 1.0e-8 * scale;
+        let delta = (reference - actual).abs();
+        if delta <= tolerance {
+            return Ok(());
+        }
+        Err(format!(
+            "{entry}: {name} native/reference mismatch: bytecode={reference:.17e} native={actual:.17e} delta={delta:.17e} tolerance={tolerance:.17e}"
+        ))
+    }
+
+    fn native_model_benchmark_context(model: &CompiledModel, name: &str) -> VmContext {
+        let mut context = VmContext::with_internal_nodes(model.num_terminals, model.internal_nodes);
+        context.voltages.fill(0.0);
+        context.internal_voltages.fill(0.0);
+        if name == "bsimcmg" && context.voltages.len() >= 5 {
+            context.voltages[0] = 0.05;
+            context.voltages[1] = 0.7;
+            context.voltages[2] = 0.0;
+            context.voltages[3] = 0.0;
+            context.voltages[4] = 0.0;
+        }
+        context.parameters = model
+            .parameters
+            .iter()
+            .map(|parameter| parameter.default)
+            .collect();
+        context.param_given = vec![false; model.parameters.len()];
+        context.variables = vec![0.0; model.num_variables.max(1)];
+        context.currents = vec![0.0; model.stamp_programs.len()];
+        context.branch_current_values = vec![0.0; model.branch_sources.len()];
+        context.lookup_tables = model.lookup_tables.clone();
+        context.laplace_filters = model.laplace_filters.clone();
+        context.zi_filters = model.zi_filters.clone();
+        context.time = 1.0e-9;
+        context.timestep = 1.0e-12;
+        preallocate_native_benchmark_context(&mut context, model);
+        context
+    }
+
+    fn resolve_native_parameter_defaults(
+        model: &CompiledModel,
+        native: &NativeModel,
+        context: &mut VmContext,
+    ) {
+        for index in 0..model.parameters.len() {
+            let ctx = eval_context_from_vm_context(context);
+            if let Some(value) =
+                native.run_parameter_default(index, &ctx, context.variables.as_ptr())
+            {
+                context.parameters[index] = value;
+            }
+        }
+    }
+
+    fn run_native_model_sweep_sample(
+        model: &CompiledModel,
+        native: &NativeModel,
+        context: &mut VmContext,
+        name: &str,
+        iterations: usize,
+        nonfinite_reference: &NonFiniteReference,
+    ) -> f64 {
+        let mut checksum = 0.0_f64;
+        for _ in 0..iterations {
+            checksum += std::hint::black_box(run_native_model_sweep_once(
+                model,
+                native,
+                context,
+                name,
+                nonfinite_reference,
+            ));
+        }
+        std::hint::black_box(checksum)
+    }
+
+    fn run_native_model_sweep_once(
+        model: &CompiledModel,
+        native: &NativeModel,
+        context: &mut VmContext,
+        name: &str,
+        nonfinite_reference: &NonFiniteReference,
+    ) -> f64 {
+        clear_native_runtime_error();
+        context.clear_currents();
+        context.currents.resize(model.stamp_programs.len(), 0.0);
+
+        let mut ctx = eval_context_from_vm_context(context);
+        native.run_assignments(&ctx, context.variables.as_mut_ptr());
+
+        let mut checksum = 0.0_f64;
+        for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+            ctx = eval_context_from_vm_context(context);
+            if let Some(active) =
+                native.run_static_condition(stamp_index, &ctx, context.variables.as_ptr())
+                && active.abs() <= 1.0e-15
+            {
+                continue;
+            }
+
+            ctx = eval_context_from_vm_context(context);
+            let value = native
+                .run_stamp_value(stamp_index, &ctx, context.variables.as_ptr())
+                .unwrap_or_else(|| {
+                    panic!("{name}: missing native stamp-value entry {stamp_index}")
+                });
+            if !value.is_finite() {
+                assert!(
+                    nonfinite_reference.stamps.contains(&stamp_index),
+                    "{name}: non-finite stamp {stamp_index} value {value}"
+                );
+            } else {
+                checksum += value;
+            }
+            context.currents[stamp_index] = value;
+            if stamp.branch_ordinal.is_none()
+                && let Some((pos, neg)) = super::infer_current_terminal_pair(stamp)
+            {
+                context.set_branch_current(pos, neg, value);
+            }
+
+            for entry_index in 0..stamp.jacobian_programs.len() {
+                ctx = eval_context_from_vm_context(context);
+                let value = native
+                    .run_jacobian(stamp_index, entry_index, &ctx, context.variables.as_ptr())
+                    .unwrap_or_else(|| {
+                        panic!("{name}: missing native Jacobian entry {stamp_index}.{entry_index}")
+                    });
+                if !value.is_finite() {
+                    assert!(
+                        nonfinite_reference
+                            .jacobians
+                            .contains(&(stamp_index, entry_index)),
+                        "{name}: non-finite jacobian {stamp_index}.{entry_index} value {value}"
+                    );
+                    continue;
+                }
+                checksum += value;
+            }
+
+            for entry_index in 0..stamp.reactive_jacobians.len() {
+                ctx = eval_context_from_vm_context(context);
+                let value = native
+                    .run_reactive_jacobian(
+                        stamp_index,
+                        entry_index,
+                        &ctx,
+                        context.variables.as_ptr(),
+                    )
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{name}: missing native reactive-Jacobian entry {stamp_index}.{entry_index}"
+                        )
+                    });
+                if !value.is_finite() {
+                    assert!(
+                        nonfinite_reference
+                            .reactive_jacobians
+                            .contains(&(stamp_index, entry_index)),
+                        "{name}: non-finite reactive jacobian {stamp_index}.{entry_index} value {value}"
+                    );
+                    continue;
+                }
+                checksum += value;
+            }
+        }
+
+        if let Some(error) = take_native_runtime_error() {
+            panic!("{name}: native runtime error during shipped-model sweep: {error}");
+        }
+        checksum
+    }
+
+    #[derive(Default)]
+    struct NonFiniteReference {
+        stamps: Vec<usize>,
+        jacobians: Vec<(usize, usize)>,
+        reactive_jacobians: Vec<(usize, usize)>,
+    }
+
+    impl NonFiniteReference {
+        fn is_empty(&self) -> bool {
+            self.stamps.is_empty()
+                && self.jacobians.is_empty()
+                && self.reactive_jacobians.is_empty()
+        }
+    }
+
+    fn collect_bytecode_nonfinite_reference(
+        model: &CompiledModel,
+        mut context: VmContext,
+    ) -> Result<NonFiniteReference, String> {
+        let mut reference = NonFiniteReference::default();
+        context.clear_currents();
+        context.currents.resize(model.stamp_programs.len(), 0.0);
+        let mut vm = Vm::new(&mut context);
+        execute_bytecode_assignment_steps(&mut vm, &model.assignment_steps)
+            .map_err(|error| error.to_string())?;
+
+        let mut prior_current_probes = Vec::new();
+        for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+            if let Some(condition) = &stamp.static_condition
+                && vm
+                    .execute(condition)
+                    .map_err(|error| error.to_string())?
+                    .abs()
+                    <= 1.0e-15
+            {
+                push_prior_current_probe_aliases_for_stamp(
+                    model,
+                    &mut prior_current_probes,
+                    stamp_index,
+                    stamp,
+                );
+                continue;
+            }
+
+            let value = execute_bytecode_value_program_with_prior_current_probes(
+                &mut vm,
+                &stamp.value_program,
+                &prior_current_probes,
+            )
+            .map_err(|error| error.to_string())?;
+            if !value.is_finite() {
+                reference.stamps.push(stamp_index);
+            }
+            vm.context.currents[stamp_index] = value;
+            if stamp.branch_ordinal.is_none()
+                && let Some((pos, neg)) = super::infer_current_terminal_pair(stamp)
+            {
+                vm.context.set_branch_current(pos, neg, value);
+            }
+
+            let mut jacobian_prior_current_probes = prior_current_probes.clone();
+            push_prior_current_probe_aliases_for_stamp(
+                model,
+                &mut jacobian_prior_current_probes,
+                stamp_index,
+                stamp,
+            );
+            for entry_index in 0..stamp.jacobian_programs.len() {
+                let value = execute_bytecode_value_program_with_prior_current_probes(
+                    &mut vm,
+                    &stamp.jacobian_programs[entry_index].program,
+                    &jacobian_prior_current_probes,
+                )
+                .map_err(|error| error.to_string())?;
+                if !value.is_finite() {
+                    reference.jacobians.push((stamp_index, entry_index));
+                }
+            }
+
+            for entry_index in 0..stamp.reactive_jacobians.len() {
+                let value = vm
+                    .execute(&stamp.reactive_jacobians[entry_index].program)
+                    .map_err(|error| error.to_string())?;
+                if !value.is_finite() {
+                    reference
+                        .reactive_jacobians
+                        .push((stamp_index, entry_index));
+                }
+            }
+
+            push_prior_current_probe_aliases_for_stamp(
+                model,
+                &mut prior_current_probes,
+                stamp_index,
+                stamp,
+            );
+        }
+
+        Ok(reference)
+    }
+
+    fn execute_bytecode_value_program_with_prior_current_probes(
+        vm: &mut Vm<'_>,
+        program: &crate::codegen::BytecodeProgram,
+        prior_current_probes: &[PriorCurrentProbe],
+    ) -> Result<f64, crate::vm::VmError> {
+        let mut rewritten = None;
+        for (index, instruction) in program.instructions.iter().enumerate() {
+            let Instruction::PushCurrent(pos, neg) = *instruction else {
+                continue;
+            };
+            if vm.context.try_current(pos, neg).is_ok() {
+                continue;
+            }
+            let Some(value) =
+                prior_current_probe_value(vm.context, prior_current_probes, pos, neg)?
+            else {
+                continue;
+            };
+            let rewritten = rewritten.get_or_insert_with(|| program.clone());
+            rewritten.instructions[index] = Instruction::PushConst(value);
+        }
+
+        if let Some(rewritten) = rewritten {
+            vm.execute(&rewritten)
+        } else {
+            vm.execute(program)
+        }
+    }
+
+    fn prior_current_probe_value(
+        context: &VmContext,
+        probes: &[PriorCurrentProbe],
+        pos: usize,
+        neg: usize,
+    ) -> Result<Option<f64>, crate::vm::VmError> {
+        let mut value = None;
+        for probe in probes
+            .iter()
+            .filter(|probe| probe.pos == pos && probe.neg == neg)
+        {
+            let current = context.currents.get(probe.current_index).copied().ok_or(
+                crate::vm::VmError::InvalidInstruction("missing prior contribution current slot"),
+            )?;
+            let current = if probe.inverted { -current } else { current };
+            value = Some(value.unwrap_or(0.0) + current);
+        }
+        Ok(value)
+    }
+
+    fn push_prior_current_probe_aliases_for_stamp(
+        model: &CompiledModel,
+        probes: &mut Vec<PriorCurrentProbe>,
+        stamp_index: usize,
+        stamp: &StampProgram,
+    ) {
+        if stamp.branch_ordinal.is_none()
+            && let Some((pos, neg)) = super::infer_current_unified_pair(model, stamp)
+        {
+            super::push_prior_current_probe_aliases(probes, stamp_index, pos, neg);
+        }
+    }
+
+    fn execute_bytecode_assignment_steps(
+        vm: &mut Vm<'_>,
+        steps: &[AssignmentStep],
+    ) -> Result<(), crate::vm::VmError> {
+        for step in steps {
+            match step {
+                AssignmentStep::Assign(assignment) => {
+                    let value = vm.execute(&assignment.program)?;
+                    vm.context.variables[assignment.var_index] = value;
+                }
+                AssignmentStep::AssignIndexed {
+                    base,
+                    len,
+                    lower,
+                    index,
+                    value,
+                } => {
+                    let raw_index = vm.execute(index)?;
+                    let slot = Vm::array_slot(raw_index, *base, *len, *lower)?;
+                    let value = vm.execute(value)?;
+                    vm.context.variables[slot] = value;
+                }
+                AssignmentStep::Loop { condition, body } => {
+                    let mut iterations = 0usize;
+                    while vm.execute(condition)?.abs() > 1.0e-15 {
+                        execute_bytecode_assignment_steps(vm, body)?;
+                        iterations += 1;
+                        assert!(
+                            iterations < 100_000,
+                            "bytecode reference loop exceeded shipped benchmark iteration guard"
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn preallocate_native_benchmark_context(context: &mut VmContext, model: &CompiledModel) {
+        let mut max_state = None;
+        let mut max_delay_buffer = None;
+        let mut max_transition_filter = None;
+        let mut max_slew_filter = None;
+        let mut max_cross_detector = None;
+
+        let mut scan_program = |program: &BytecodeProgram| {
+            for instruction in &program.instructions {
+                match instruction {
+                    Instruction::DdtState(idx)
+                    | Instruction::IdtState(idx)
+                    | Instruction::IdtModState(idx)
+                    | Instruction::LimitState(idx) => {
+                        update_max_slot(&mut max_state, *idx);
+                    }
+                    Instruction::AbsDelayState(idx) => {
+                        update_max_slot(&mut max_delay_buffer, *idx);
+                    }
+                    Instruction::TransitionState(idx) => {
+                        update_max_slot(&mut max_transition_filter, *idx);
+                    }
+                    Instruction::SlewState(idx) => {
+                        update_max_slot(&mut max_slew_filter, *idx);
+                    }
+                    Instruction::CrossState(idx) => {
+                        update_max_slot(&mut max_cross_detector, *idx);
+                    }
+                    _ => {}
+                }
+            }
+        };
+
+        for parameter in &model.parameters {
+            if let Some(program) = &parameter.default_program {
+                scan_program(program);
+            }
+        }
+        scan_assignment_steps(&model.assignment_steps, &mut scan_program);
+        for stamp in &model.stamp_programs {
+            if let Some(condition) = &stamp.static_condition {
+                scan_program(condition);
+            }
+            scan_program(&stamp.value_program);
+            for jacobian in &stamp.jacobian_programs {
+                scan_program(&jacobian.program);
+            }
+            for jacobian in &stamp.reactive_jacobians {
+                scan_program(&jacobian.program);
+            }
+        }
+        for source in &model.noise_sources {
+            scan_program(&source.psd_program);
+            if let Some(program) = &source.exponent_program {
+                scan_program(program);
+            }
+        }
+
+        if let Some(max_idx) = max_state {
+            context.allocate_states(max_idx + 1);
+        }
+        if let Some(max_idx) = max_delay_buffer {
+            context.allocate_delay_buffers(max_idx + 1);
+        }
+        if let Some(max_idx) = max_transition_filter {
+            context.allocate_transition_filters(max_idx + 1);
+        }
+        if let Some(max_idx) = max_slew_filter {
+            context.allocate_slew_filters(max_idx + 1);
+        }
+        if let Some(max_idx) = max_cross_detector {
+            context.allocate_cross_detectors(max_idx + 1);
+        }
+    }
+
+    fn scan_assignment_steps(
+        steps: &[AssignmentStep],
+        scan_program: &mut impl FnMut(&BytecodeProgram),
+    ) {
+        for step in steps {
+            match step {
+                AssignmentStep::Assign(assignment) => {
+                    scan_program(&assignment.program);
+                }
+                AssignmentStep::AssignIndexed { index, value, .. } => {
+                    scan_program(index);
+                    scan_program(value);
+                }
+                AssignmentStep::Loop { condition, body } => {
+                    scan_program(condition);
+                    scan_assignment_steps(body, scan_program);
+                }
+            }
+        }
+    }
+
+    fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
+        EvalContext {
+            voltages: context.voltages.as_ptr(),
+            internal_voltages: context.internal_voltages.as_ptr(),
+            params: context.parameters.as_ptr(),
+            branch_currents: context.terminal_pair_currents_ptr(),
+            branch_currents_len: context.terminal_pair_currents_len(),
+            currents: context.currents.as_ptr(),
+            currents_len: context.currents.len(),
+            num_terminals: context.terminal_count(),
+            port_connected: context.port_connected.as_ptr(),
+            port_connected_len: context.port_connected.len(),
+            temperature: context.temperature,
+            time: context.time,
+            timestep: context.timestep,
+            state_prev: if context.state_values_prev.is_empty() {
+                std::ptr::null()
+            } else {
+                context.state_values_prev.as_ptr()
+            },
+            state_values: if context.state_values.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.state_values.as_mut_ptr()
+            },
+            state_initialized: if context.state_initialized.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.state_initialized.as_mut_ptr() as *mut u8
+            },
+            state_initialized_len: context.state_initialized.len(),
+            lookup_tables: if context.lookup_tables.is_empty() {
+                std::ptr::null()
+            } else {
+                context.lookup_tables.as_ptr()
+            },
+            lookup_tables_len: context.lookup_tables.len(),
+            laplace_filters: if context.laplace_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.laplace_filters.as_mut_ptr()
+            },
+            laplace_filters_len: context.laplace_filters.len(),
+            param_given: context.param_given.as_ptr() as *const u8,
+            param_given_len: context.param_given.len(),
+            branch_unknowns: if context.branch_current_values.is_empty() {
+                std::ptr::null()
+            } else {
+                context.branch_current_values.as_ptr()
+            },
+            analysis_type: context.analysis_type,
+            multiplicity: context.multiplicity,
+            zi_filters: if context.zi_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.zi_filters.as_mut_ptr()
+            },
+            zi_filters_len: context.zi_filters.len(),
+            transition_filters: if context.transition_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.transition_filters.as_mut_ptr()
+            },
+            transition_filters_len: context.transition_filters.len(),
+            slew_filters: if context.slew_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.slew_filters.as_mut_ptr()
+            },
+            slew_filters_len: context.slew_filters.len(),
+            delay_buffers: if context.delay_buffers.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.delay_buffers.as_mut_ptr()
+            },
+            delay_buffers_len: context.delay_buffers.len(),
+            cross_detectors: if context.cross_detectors.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.cross_detectors.as_mut_ptr()
+            },
+            cross_detectors_len: context.cross_detectors.len(),
+            state_prev_len: context.state_values_prev.len(),
+            state_values_len: context.state_values.len(),
+        }
+    }
+
+    fn update_max_slot(max_slot: &mut Option<usize>, idx: usize) {
+        *max_slot = Some(max_slot.map_or(idx, |prev| prev.max(idx)));
+    }
+
+    fn count_assignment_steps(steps: &[AssignmentStep]) -> usize {
+        steps
+            .iter()
+            .map(|step| match step {
+                AssignmentStep::Assign(_) | AssignmentStep::AssignIndexed { .. } => 1,
+                AssignmentStep::Loop { body, .. } => 1 + count_assignment_steps(body),
+            })
+            .sum()
+    }
+
+    fn shipped_cmc_model_path(parts: &[&str]) -> PathBuf {
+        let mut path = shipped_veriloga_model_path(&["cmc"]);
+        for part in parts {
+            path = path.join(part);
+        }
+        assert!(
+            path.exists(),
+            "required shipped CMC model fixture missing: {}",
+            path.display()
+        );
+        path
+    }
+
+    fn shipped_veriloga_model_path(parts: &[&str]) -> PathBuf {
+        let mut path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("models")
+            .join("veriloga");
+        for part in parts {
+            path = path.join(part);
+        }
+        assert!(
+            path.exists(),
+            "required shipped Verilog-A model fixture missing: {}",
+            path.display()
+        );
+        path
+    }
+
+    fn shipped_model_microbench_iterations() -> usize {
+        2_000
+    }
+
+    fn shipped_model_microbench_samples() -> usize {
+        5
     }
 
     fn run_native_model_entry_microbench<F>(
