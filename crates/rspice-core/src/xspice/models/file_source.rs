@@ -102,8 +102,8 @@ struct FileSourceTransformedRowsSignature {
     timeoffset: Value,
     timescale: Value,
     timerelative: bool,
-    amploffset: Vec<Value>,
-    amplscale: Vec<Value>,
+    amploffset_revision: Option<u64>,
+    amplscale_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -386,8 +386,8 @@ fn transformed_rows_signature(
         timeoffset: ctx.param("timeoffset"),
         timescale: ctx.param("timescale"),
         timerelative: bool_param(ctx, "timerelative"),
-        amploffset: ctx.real_vector_param("amploffset").unwrap_or(&[]).to_vec(),
-        amplscale: ctx.real_vector_param("amplscale").unwrap_or(&[]).to_vec(),
+        amploffset_revision: ctx.real_vector_param_revision("amploffset"),
+        amplscale_revision: ctx.real_vector_param_revision("amplscale"),
     }
 }
 
@@ -404,8 +404,8 @@ fn transformed_rows_signature_matches(
         && signature.timeoffset == ctx.param("timeoffset")
         && signature.timescale == ctx.param("timescale")
         && signature.timerelative == bool_param(ctx, "timerelative")
-        && ctx.real_vector_param("amploffset").unwrap_or(&[]) == signature.amploffset.as_slice()
-        && ctx.real_vector_param("amplscale").unwrap_or(&[]) == signature.amplscale.as_slice()
+        && ctx.real_vector_param_revision("amploffset") == signature.amploffset_revision
+        && ctx.real_vector_param_revision("amplscale") == signature.amplscale_revision
 }
 
 fn transformed_rows_for_context(
@@ -1030,6 +1030,11 @@ mod tests {
         let second =
             transformed_rows_for_context(&mut ctx, file, 1).expect("reuse transformed rows");
         assert!(Arc::ptr_eq(&first, &second));
+
+        ctx.set_real_vector_param("unrelated", vec![4.0, 5.0]);
+        let after_unrelated =
+            transformed_rows_for_context(&mut ctx, file, 1).expect("reuse after unrelated vector");
+        assert!(Arc::ptr_eq(&first, &after_unrelated));
 
         ctx.set_param("timeoffset", 5.0);
         let shifted = transformed_rows_for_context(&mut ctx, file, 1).expect("reload shifted rows");
