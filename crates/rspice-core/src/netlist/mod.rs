@@ -5179,6 +5179,48 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_buf3a_utgate_timing_creates_xspice_model_aliases() {
+        let netlist = Netlist::parse(
+            "pspice u buf3a timing\n\
+             U5 BUF3A(2) $G_DPWR $G_DGND in1 in2 enable out1 out2 dly\n\
+             .model DLY UTGATE (TPLHTY=6n TPHLTY=4n)\n\
+             .end\n",
+        )
+        .expect("PSpice UTGATE timing should create d_tristate model aliases");
+
+        assert_eq!(netlist.elements.len(), 2);
+        for element in &netlist.elements {
+            let alias_name = match &element.kind {
+                ElementKind::Xspice {
+                    model,
+                    pspice_u_timing,
+                    ..
+                } => {
+                    assert!(pspice_u_timing.is_none());
+                    model.as_str()
+                }
+                other => panic!("expected XSPICE lowering, got {other:?}"),
+            };
+
+            let alias = netlist
+                .models
+                .iter()
+                .find(|model| model.name == alias_name)
+                .expect("generated timing alias exists");
+            assert_eq!(alias.model_type, "d_tristate");
+            assert!(
+                alias
+                    .params
+                    .iter()
+                    .any(|(name, value)| { name == "delay" && (*value - 6.0e-9).abs() < 1.0e-21 })
+            );
+            assert!(alias.params.iter().any(|(name, value)| {
+                name == "inertial_delay" && (*value - 1.0).abs() < f64::EPSILON
+            }));
+        }
+    }
+
+    #[test]
     fn pspice_u_inv3a_lowers_to_tristate_with_inverted_input() {
         let netlist = Netlist::parse(
             "pspice u inv3a\n\

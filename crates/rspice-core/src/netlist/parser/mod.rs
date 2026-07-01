@@ -435,6 +435,8 @@ fn pspice_u_timing_model_supported(code_model: &str, timing_model: &ModelDef) ->
         && pspice_u_gate_model_accepts_ugate_timing(code_model))
         || (timing_model.model_type.eq_ignore_ascii_case("UEFF")
             && pspice_u_edge_ff_model_accepts_ueff_timing(code_model))
+        || (timing_model.model_type.eq_ignore_ascii_case("UTGATE")
+            && pspice_u_tristate_model_accepts_utgate_timing(code_model))
 }
 
 fn pspice_u_timing_alias_model(
@@ -462,6 +464,16 @@ fn pspice_u_timing_alias_model(
         ));
     }
 
+    if timing_model.model_type.eq_ignore_ascii_case("UTGATE")
+        && pspice_u_tristate_model_accepts_utgate_timing(code_model)
+    {
+        return Some(pspice_utgate_alias_model(
+            alias_name,
+            code_model,
+            timing_model,
+        ));
+    }
+
     None
 }
 
@@ -474,6 +486,10 @@ fn pspice_u_gate_model_accepts_ugate_timing(model: &str) -> bool {
 
 fn pspice_u_edge_ff_model_accepts_ueff_timing(model: &str) -> bool {
     matches!(model.to_ascii_lowercase().as_str(), "d_dff" | "d_jkff")
+}
+
+fn pspice_u_tristate_model_accepts_utgate_timing(model: &str) -> bool {
+    model.eq_ignore_ascii_case("d_tristate")
 }
 
 fn pspice_ugate_alias_model(
@@ -501,6 +517,32 @@ fn pspice_ugate_alias_model(
         &mut params,
         &mut expr_params,
     );
+
+    ModelDef {
+        name: alias_name.to_string(),
+        model_type: code_model.to_string(),
+        params,
+        expr_params,
+        string_params: Vec::new(),
+        string_vector_params: Vec::new(),
+        real_vector_params: Vec::new(),
+        integer_vector_params: Vec::new(),
+    }
+}
+
+fn pspice_utgate_alias_model(
+    alias_name: &str,
+    code_model: &str,
+    timing_model: &ModelDef,
+) -> ModelDef {
+    let mut params = vec![("inertial_delay".to_string(), 1.0)];
+    let mut expr_params = Vec::new();
+
+    let rising = pspice_timing_delay_estimate(timing_model, &["TPLHTY", "TPLHMN", "TPLHMX"]);
+    let falling = pspice_timing_delay_estimate(timing_model, &["TPHLTY", "TPHLMN", "TPHLMX"]);
+    let delay =
+        pspice_select_longer_delay(rising, falling).unwrap_or(PspiceTimingDelay::Numeric(1.0e-12));
+    push_pspice_timing_delay("delay", delay, &mut params, &mut expr_params);
 
     ModelDef {
         name: alias_name.to_string(),

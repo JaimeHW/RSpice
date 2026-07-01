@@ -1092,6 +1092,8 @@ fn parse_pspice_u_tristate(
     let enable =
         pspice_u_required_digital_port(&pins[count], "enable", fields, line_num, elements)?;
     let output_offset = count + 1;
+    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
+        .map(|timing_model| PspiceUTiming { timing_model });
 
     for index in 0..count {
         let input = if invert_input {
@@ -1120,7 +1122,13 @@ fn parse_pspice_u_tristate(
         )?;
         let instance_name = pspice_u_lowered_instance_name(name, count, index);
         let ports = vec![input, enable.clone(), output];
-        push_pspice_u_xspice_element(elements, instance_name, "d_tristate", ports);
+        push_pspice_u_xspice_element_with_timing(
+            elements,
+            instance_name,
+            "d_tristate",
+            ports,
+            pspice_u_timing.clone(),
+        );
     }
 
     Ok(())
