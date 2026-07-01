@@ -21,16 +21,31 @@ const D_RAM_IC_MIN: i64 = 0;
 const D_RAM_IC_MAX: i64 = 2;
 const D_RAM_READ_DELAY_MIN: Value = 1.0e-12;
 const D_RAM_SCRATCH_STATE_RESOURCE: &str = "d_ram.scratch_state";
+const D_RAM_SHAPE_RESOURCE: &str = "d_ram.shape";
 
 type DRamScratchStateResource = Mutex<Vec<i64>>;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DMemoryShapeSignature {
+    address_width: usize,
+    word_width: usize,
+    output_width: usize,
+    select_width: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DMemoryShape {
     address_width: usize,
     word_width: usize,
     select_width: usize,
     memory_start: usize,
     memory_bits: usize,
+}
+
+#[derive(Debug, Clone)]
+struct DMemoryShapeResource {
+    signature: DMemoryShapeSignature,
+    shape: DMemoryShape,
 }
 
 fn d_ram_data_start(address_width: usize) -> usize {
@@ -59,54 +74,81 @@ fn d_ram_integer_param(ctx: &CmContext, name: &str, default: Value, min: i64, ma
     }
 }
 
-fn d_ram_shape(ctx: &CmContext) -> CmResult<DMemoryShape> {
-    let address_width = ctx.port_width("address");
-    let word_width = ctx.port_width("data_in");
-    let output_width = ctx.port_width("data_out");
-    let select_width = ctx.port_width("select");
+fn d_ram_shape_signature(ctx: &CmContext) -> DMemoryShapeSignature {
+    DMemoryShapeSignature {
+        address_width: ctx.port_width("address"),
+        word_width: ctx.port_width("data_in"),
+        output_width: ctx.port_width("data_out"),
+        select_width: ctx.port_width("select"),
+    }
+}
 
-    if address_width == 0 {
+fn d_ram_shape_from_signature(signature: DMemoryShapeSignature) -> CmResult<DMemoryShape> {
+    if signature.address_width == 0 {
         return Err(d_ram_error("address port must have at least one bit"));
     }
-    if word_width == 0 {
+    if signature.word_width == 0 {
         return Err(d_ram_error("data_in port must have at least one bit"));
     }
-    if output_width != word_width {
+    if signature.output_width != signature.word_width {
         return Err(d_ram_error(format!(
-            "data_out width {output_width} does not match data_in width {word_width}"
+            "data_out width {} does not match data_in width {}",
+            signature.output_width, signature.word_width
         )));
     }
-    if select_width == 0 {
+    if signature.select_width == 0 {
         return Err(d_ram_error("select port must have at least one bit"));
     }
-    if select_width > 16 {
+    if signature.select_width > 16 {
         return Err(d_ram_error(format!(
-            "select width {select_width} exceeds ngspice d_ram maximum of 16"
+            "select width {} exceeds ngspice d_ram maximum of 16",
+            signature.select_width
         )));
     }
 
-    if address_width >= usize::BITS as usize {
+    if signature.address_width >= usize::BITS as usize {
         return Err(d_ram_error(format!(
-            "address width {address_width} is too large"
+            "address width {} is too large",
+            signature.address_width
         )));
     }
 
-    let word_count = 1usize << address_width;
+    let word_count = 1usize << signature.address_width;
     let memory_bits = word_count
-        .checked_mul(word_width)
+        .checked_mul(signature.word_width)
         .ok_or_else(|| d_ram_error("memory size overflows usize"))?;
-    let memory_start = d_ram_memory_start(address_width, word_width);
+    let memory_start = d_ram_memory_start(signature.address_width, signature.word_width);
     memory_start
         .checked_add(memory_bits)
         .ok_or_else(|| d_ram_error("state size overflows usize"))?;
 
     Ok(DMemoryShape {
-        address_width,
-        word_width,
-        select_width,
+        address_width: signature.address_width,
+        word_width: signature.word_width,
+        select_width: signature.select_width,
         memory_start,
         memory_bits,
     })
+}
+
+fn d_ram_shape(ctx: &CmContext) -> CmResult<DMemoryShape> {
+    d_ram_shape_from_signature(d_ram_shape_signature(ctx))
+}
+
+fn d_ram_cached_shape(ctx: &mut CmContext) -> CmResult<DMemoryShape> {
+    let signature = d_ram_shape_signature(ctx);
+    if let Some(resource) = ctx.resource::<DMemoryShapeResource>(D_RAM_SHAPE_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.shape);
+    }
+
+    let shape = d_ram_shape_from_signature(signature)?;
+    ctx.set_resource(
+        D_RAM_SHAPE_RESOURCE,
+        Arc::new(DMemoryShapeResource { signature, shape }),
+    );
+    Ok(shape)
 }
 
 fn d_ram_state_code(value: DigitalValue) -> i64 {
@@ -180,10 +222,9 @@ fn d_ram_state_len(shape: DMemoryShape) -> usize {
 
 fn d_ram_fill_state_snapshot(ctx: &CmContext, shape: DMemoryShape, state: &mut Vec<i64>) {
     let len = d_ram_state_len(shape);
-    state.clear();
-    state.reserve(len);
-    for index in 0..len {
-        state.push(ctx.int_state(index));
+    state.resize(len, 0);
+    for (index, slot) in state.iter_mut().enumerate() {
+        *slot = ctx.int_state(index);
     }
 }
 
@@ -462,7 +503,7 @@ impl CodeModel for DigitalRam {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let shape = d_ram_shape(ctx)?;
+        let shape = d_ram_cached_shape(ctx)?;
         ctx.allocate_int_states(shape.memory_start + shape.memory_bits);
         ctx.set_int_state(D_RAM_INITIALIZED, 0);
         ctx.set_resource(
@@ -472,7 +513,7 @@ impl CodeModel for DigitalRam {
         Ok(())
     }
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let shape = d_ram_shape(ctx)?;
+        let shape = d_ram_cached_shape(ctx)?;
         let write_en = d_ram_state_code(ctx.input_digital("write_en").unwrap_or_default());
         let select = d_ram_select_code(ctx, shape);
         let address_index = d_ram_address_index(ctx, shape);
@@ -571,6 +612,39 @@ mod tests {
             .find(|event| event.port_name == "data_out")
             .expect("data_out event is scheduled");
         (event.values, event.delay)
+    }
+
+    #[test]
+    fn d_ram_shape_cache_reuses_and_refreshes_for_port_width_changes() {
+        let mut ctx = ram_context();
+
+        let first_shape = d_ram_cached_shape(&mut ctx).expect("d_ram shape caches");
+        let first_resource = ctx
+            .resource::<DMemoryShapeResource>(D_RAM_SHAPE_RESOURCE)
+            .expect("shape resource is installed");
+        let second_shape = d_ram_cached_shape(&mut ctx).expect("d_ram shape reuses cache");
+        let second_resource = ctx
+            .resource::<DMemoryShapeResource>(D_RAM_SHAPE_RESOURCE)
+            .expect("shape resource remains installed");
+
+        assert_eq!(first_shape, second_shape);
+        assert!(
+            std::sync::Arc::ptr_eq(&first_resource, &second_resource),
+            "unchanged d_ram port widths should reuse the cached memory shape"
+        );
+
+        ctx.set_port_width("address", 2);
+        let updated_shape = d_ram_cached_shape(&mut ctx).expect("d_ram shape refreshes");
+        let updated_resource = ctx
+            .resource::<DMemoryShapeResource>(D_RAM_SHAPE_RESOURCE)
+            .expect("updated shape resource is installed");
+
+        assert_eq!(updated_shape.address_width, 2);
+        assert_eq!(updated_shape.memory_bits, 4);
+        assert!(
+            !std::sync::Arc::ptr_eq(&first_resource, &updated_resource),
+            "changed d_ram port widths must refresh the cached memory shape"
+        );
     }
 
     #[test]
