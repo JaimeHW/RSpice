@@ -1,7 +1,7 @@
 //! XSPICE transmission-line code models.
 
 use crate::{Complex64, Value};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
@@ -33,6 +33,10 @@ const TRAN_FULL: i64 = 1;
 const MICROSTRIP_PROPAGATION_RESOURCE: &str = "xspice.tlines.microstrip_propagation";
 const COUPLED_MICROSTRIP_PROPAGATION_RESOURCE: &str =
     "xspice.tlines.coupled_microstrip_propagation";
+const TLINE_AC_IMPEDANCE_RESOURCE: &str = "xspice.tlines.tline_ac_impedance";
+const MLINE_AC_IMPEDANCE_RESOURCE: &str = "xspice.tlines.mline_ac_impedance";
+const CPLINE_AC_IMPEDANCE_RESOURCE: &str = "xspice.tlines.cpline_ac_impedance";
+const CPMLIN_AC_IMPEDANCE_RESOURCE: &str = "xspice.tlines.cpmlin_ac_impedance";
 
 /// Official XSPICE `msopen` microstrip open-end model.
 pub struct MicrostripOpenEnd;
@@ -128,6 +132,73 @@ struct CoupledMicrostripPropagationResource {
     signature: CoupledMicrostripPropagationSignature,
     result: CmResult<Arc<CoupledMicrostripPropagation>>,
 }
+
+type TwoPortAcImpedances = (Complex64, Complex64);
+type FourPortAcImpedances = (Complex64, Complex64, Complex64, Complex64);
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TlineAcImpedanceSignature {
+    frequency: Value,
+    length: Value,
+    impedance: Value,
+    attenuation_db: Value,
+}
+
+#[derive(Debug, Clone)]
+struct TlineAcImpedanceResource {
+    signature: TlineAcImpedanceSignature,
+    result: CmResult<TwoPortAcImpedances>,
+}
+
+type TlineAcImpedanceCache = Mutex<Option<TlineAcImpedanceResource>>;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MlineAcImpedanceSignature {
+    length: Value,
+    propagation: MicrostripPropagationSignature,
+}
+
+#[derive(Debug, Clone)]
+struct MlineAcImpedanceResource {
+    signature: MlineAcImpedanceSignature,
+    result: CmResult<TwoPortAcImpedances>,
+}
+
+type MlineAcImpedanceCache = Mutex<Option<MlineAcImpedanceResource>>;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CplineAcImpedanceSignature {
+    frequency: Value,
+    length: Value,
+    ze: Value,
+    zo: Value,
+    ere: Value,
+    ero: Value,
+    ae_db: Value,
+    ao_db: Value,
+}
+
+#[derive(Debug, Clone)]
+struct CplineAcImpedanceResource {
+    signature: CplineAcImpedanceSignature,
+    result: CmResult<FourPortAcImpedances>,
+}
+
+type CplineAcImpedanceCache = Mutex<Option<CplineAcImpedanceResource>>;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CpmlinAcImpedanceSignature {
+    length: Value,
+    propagation: CoupledMicrostripPropagationSignature,
+}
+
+#[derive(Debug, Clone)]
+struct CpmlinAcImpedanceResource {
+    signature: CpmlinAcImpedanceSignature,
+    result: CmResult<FourPortAcImpedances>,
+}
+
+type CpmlinAcImpedanceCache = Mutex<Option<CpmlinAcImpedanceResource>>;
 
 #[inline]
 fn port_eq(output_port: &str, expected: &str) -> bool {
@@ -286,6 +357,90 @@ fn coupled_microstrip_propagation_signature_matches(
     frequency: Value,
 ) -> bool {
     coupled_microstrip_propagation_signature(ctx, frequency) == *signature
+}
+
+fn tline_ac_impedance_signature(ctx: &CmContext, frequency: Value) -> TlineAcImpedanceSignature {
+    TlineAcImpedanceSignature {
+        frequency,
+        length: ctx.param_or("l", 1.0),
+        impedance: ctx.param_or("z", 50.0),
+        attenuation_db: ctx.param_or("a", 0.0),
+    }
+}
+
+fn mline_ac_impedance_signature(ctx: &CmContext, frequency: Value) -> MlineAcImpedanceSignature {
+    MlineAcImpedanceSignature {
+        length: ctx.param_or("l", 1.0e-2),
+        propagation: microstrip_propagation_signature(ctx, frequency),
+    }
+}
+
+fn cpline_ac_impedance_signature(ctx: &CmContext, frequency: Value) -> CplineAcImpedanceSignature {
+    CplineAcImpedanceSignature {
+        frequency,
+        length: ctx.param_or("l", 1.0),
+        ze: ctx.param_or("ze", 50.0),
+        zo: ctx.param_or("zo", 50.0),
+        ere: ctx.param_or("ere", 1.0),
+        ero: ctx.param_or("ero", 1.0),
+        ae_db: ctx.param_or("ae", 0.0),
+        ao_db: ctx.param_or("ao", 0.0),
+    }
+}
+
+fn cpmlin_ac_impedance_signature(ctx: &CmContext, frequency: Value) -> CpmlinAcImpedanceSignature {
+    CpmlinAcImpedanceSignature {
+        length: ctx.param_or("l", 1.0),
+        propagation: coupled_microstrip_propagation_signature(ctx, frequency),
+    }
+}
+
+fn ensure_tline_ac_impedance_cache(ctx: &mut CmContext) {
+    if ctx
+        .resource::<TlineAcImpedanceCache>(TLINE_AC_IMPEDANCE_RESOURCE)
+        .is_none()
+    {
+        ctx.set_resource(
+            TLINE_AC_IMPEDANCE_RESOURCE,
+            Arc::new(Mutex::new(None::<TlineAcImpedanceResource>)),
+        );
+    }
+}
+
+fn ensure_mline_ac_impedance_cache(ctx: &mut CmContext) {
+    if ctx
+        .resource::<MlineAcImpedanceCache>(MLINE_AC_IMPEDANCE_RESOURCE)
+        .is_none()
+    {
+        ctx.set_resource(
+            MLINE_AC_IMPEDANCE_RESOURCE,
+            Arc::new(Mutex::new(None::<MlineAcImpedanceResource>)),
+        );
+    }
+}
+
+fn ensure_cpline_ac_impedance_cache(ctx: &mut CmContext) {
+    if ctx
+        .resource::<CplineAcImpedanceCache>(CPLINE_AC_IMPEDANCE_RESOURCE)
+        .is_none()
+    {
+        ctx.set_resource(
+            CPLINE_AC_IMPEDANCE_RESOURCE,
+            Arc::new(Mutex::new(None::<CplineAcImpedanceResource>)),
+        );
+    }
+}
+
+fn ensure_cpmlin_ac_impedance_cache(ctx: &mut CmContext) {
+    if ctx
+        .resource::<CpmlinAcImpedanceCache>(CPMLIN_AC_IMPEDANCE_RESOURCE)
+        .is_none()
+    {
+        ctx.set_resource(
+            CPMLIN_AC_IMPEDANCE_RESOURCE,
+            Arc::new(Mutex::new(None::<CpmlinAcImpedanceResource>)),
+        );
+    }
 }
 
 fn hammerstad_ab(u: Value, er: Value) -> (Value, Value) {
@@ -1195,7 +1350,10 @@ fn tline_attenuation(ctx: &CmContext) -> CmResult<Value> {
     finite_param(ctx, "a", 0.0)
 }
 
-fn tline_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<(Complex64, Complex64)> {
+fn tline_ac_impedances_uncached(
+    ctx: &CmContext,
+    frequency: Value,
+) -> CmResult<TwoPortAcImpedances> {
     let length = tline_length(ctx)?;
     let impedance = tline_impedance(ctx)?;
     let attenuation_db = tline_attenuation(ctx)?;
@@ -1204,6 +1362,33 @@ fn tline_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<(Complex64
     let gamma_l = Complex64::new(alpha, beta) * length;
     let z = Complex64::new(impedance, 0.0);
     Ok((z / gamma_l.tanh(), z / gamma_l.sinh()))
+}
+
+fn tline_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<TwoPortAcImpedances> {
+    let signature = tline_ac_impedance_signature(ctx, frequency);
+    let Some(cache) = ctx.resource::<TlineAcImpedanceCache>(TLINE_AC_IMPEDANCE_RESOURCE) else {
+        return tline_ac_impedances_uncached(ctx, frequency);
+    };
+    {
+        let guard = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(resource) = guard.as_ref()
+            && resource.signature == signature
+        {
+            return resource.result.clone();
+        }
+    }
+
+    let result = tline_ac_impedances_uncached(ctx, frequency);
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = Some(TlineAcImpedanceResource {
+        signature,
+        result: result.clone(),
+    });
+    result
 }
 
 fn tline_delay(ctx: &CmContext) -> CmResult<Value> {
@@ -1338,12 +1523,39 @@ fn mlin_tran_model(ctx: &CmContext) -> CmResult<i64> {
     Ok(integer_param(ctx, "tranmodel", TRAN_DC))
 }
 
-fn mlin_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<(Complex64, Complex64)> {
+fn mlin_ac_impedances_uncached(ctx: &CmContext, frequency: Value) -> CmResult<TwoPortAcImpedances> {
     let length = mlin_length(ctx)?;
     let propagation = microstrip_propagation(ctx, frequency)?;
     let gamma_l = Complex64::new(propagation.alpha, propagation.beta) * length;
     let z = Complex64::new(propagation.zl, 0.0);
     Ok((z / gamma_l.tanh(), z / gamma_l.sinh()))
+}
+
+fn mlin_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<TwoPortAcImpedances> {
+    let signature = mline_ac_impedance_signature(ctx, frequency);
+    let Some(cache) = ctx.resource::<MlineAcImpedanceCache>(MLINE_AC_IMPEDANCE_RESOURCE) else {
+        return mlin_ac_impedances_uncached(ctx, frequency);
+    };
+    {
+        let guard = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(resource) = guard.as_ref()
+            && resource.signature == signature
+        {
+            return resource.result.clone();
+        }
+    }
+
+    let result = mlin_ac_impedances_uncached(ctx, frequency);
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = Some(MlineAcImpedanceResource {
+        signature,
+        result: result.clone(),
+    });
+    result
 }
 
 fn mlin_delay(ctx: &CmContext) -> CmResult<Value> {
@@ -1534,10 +1746,10 @@ fn cpline_reference_impedance(ctx: &CmContext) -> CmResult<Value> {
     Ok((cpline_even_impedance(ctx)? * cpline_odd_impedance(ctx)?).sqrt())
 }
 
-fn cpline_ac_impedances(
+fn cpline_ac_impedances_uncached(
     ctx: &CmContext,
     frequency: Value,
-) -> CmResult<(Complex64, Complex64, Complex64, Complex64)> {
+) -> CmResult<FourPortAcImpedances> {
     let length = cpline_length(ctx)?;
     let ze = cpline_even_impedance(ctx)?;
     let zo = cpline_odd_impedance(ctx)?;
@@ -1556,6 +1768,33 @@ fn cpline_ac_impedances(
     let z13 = ze_c / (arg_e.sinh() * 2.0) - zo_c / (arg_o.sinh() * 2.0);
     let z14 = ze_c / (arg_e.tanh() * 2.0) - zo_c / (arg_o.tanh() * 2.0);
     Ok((z11, z12, z13, z14))
+}
+
+fn cpline_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<FourPortAcImpedances> {
+    let signature = cpline_ac_impedance_signature(ctx, frequency);
+    let Some(cache) = ctx.resource::<CplineAcImpedanceCache>(CPLINE_AC_IMPEDANCE_RESOURCE) else {
+        return cpline_ac_impedances_uncached(ctx, frequency);
+    };
+    {
+        let guard = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(resource) = guard.as_ref()
+            && resource.signature == signature
+        {
+            return resource.result.clone();
+        }
+    }
+
+    let result = cpline_ac_impedances_uncached(ctx, frequency);
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = Some(CplineAcImpedanceResource {
+        signature,
+        result: result.clone(),
+    });
+    result
 }
 
 fn cpline_delay(ctx: &CmContext) -> CmResult<Value> {
@@ -1676,10 +1915,10 @@ fn cpmlin_tran_model(ctx: &CmContext) -> CmResult<i64> {
     Ok(integer_param(ctx, "tranmodel", TRAN_DC))
 }
 
-fn cpmlin_ac_impedances(
+fn cpmlin_ac_impedances_uncached(
     ctx: &CmContext,
     frequency: Value,
-) -> CmResult<(Complex64, Complex64, Complex64, Complex64)> {
+) -> CmResult<FourPortAcImpedances> {
     let length = cpmlin_length(ctx)?;
     let propagation = coupled_microstrip_propagation(ctx, frequency)?;
     let ge = Complex64::new(propagation.alpha_even, propagation.beta_even);
@@ -1692,6 +1931,33 @@ fn cpmlin_ac_impedances(
     let z13 = ze / ((ge * length).sinh() * 2.0) - zo / ((go * length).sinh() * 2.0);
     let z14 = ze / ((ge * length).tanh() * 2.0) - zo / ((go * length).tanh() * 2.0);
     Ok((z11, z12, z13, z14))
+}
+
+fn cpmlin_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<FourPortAcImpedances> {
+    let signature = cpmlin_ac_impedance_signature(ctx, frequency);
+    let Some(cache) = ctx.resource::<CpmlinAcImpedanceCache>(CPMLIN_AC_IMPEDANCE_RESOURCE) else {
+        return cpmlin_ac_impedances_uncached(ctx, frequency);
+    };
+    {
+        let guard = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(resource) = guard.as_ref()
+            && resource.signature == signature
+        {
+            return resource.result.clone();
+        }
+    }
+
+    let result = cpmlin_ac_impedances_uncached(ctx, frequency);
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = Some(CpmlinAcImpedanceResource {
+        signature,
+        result: result.clone(),
+    });
+    result
 }
 
 fn cpmlin_delay(ctx: &CmContext) -> CmResult<Value> {
@@ -1818,6 +2084,7 @@ impl CodeModel for GenericTransmissionLine {
         tline_length(ctx)?;
         tline_impedance(ctx)?;
         tline_attenuation(ctx)?;
+        ensure_tline_ac_impedance_cache(ctx);
         Ok(())
     }
 
@@ -1916,6 +2183,7 @@ impl CodeModel for MicrostripLine {
         mlin_length(ctx)?;
         mlin_tran_model(ctx)?;
         cache_microstrip_propagation(ctx, 0.0)?;
+        ensure_mline_ac_impedance_cache(ctx);
         Ok(())
     }
 
@@ -2020,6 +2288,7 @@ impl CodeModel for CoupledTransmissionLine {
         cpline_odd_permittivity(ctx)?;
         cpline_even_attenuation(ctx)?;
         cpline_odd_attenuation(ctx)?;
+        ensure_cpline_ac_impedance_cache(ctx);
         Ok(())
     }
 
@@ -2168,6 +2437,7 @@ impl CodeModel for CoupledMicrostripLine {
         cpmlin_length(ctx)?;
         cpmlin_tran_model(ctx)?;
         cache_coupled_microstrip_propagation(ctx, 0.0)?;
+        ensure_cpmlin_ac_impedance_cache(ctx);
         Ok(())
     }
 
@@ -2447,6 +2717,126 @@ mod tests {
         assert!(
             !Arc::ptr_eq(&ac, &changed),
             "changed cpmlin physical parameters must refresh derived propagation"
+        );
+    }
+
+    #[test]
+    fn two_port_ac_impedance_caches_reuse_matching_entries_and_invalidate() {
+        let frequency = 1.0e9;
+
+        let mut tline = CmContext::new();
+        tline.set_param("l", 0.25);
+        tline.set_param("z", 75.0);
+        tline.set_param("a", 2.0);
+        ensure_tline_ac_impedance_cache(&mut tline);
+        let tline_sentinel = (Complex64::new(101.0, 1.0), Complex64::new(102.0, 2.0));
+        let cache = tline
+            .resource::<TlineAcImpedanceCache>(TLINE_AC_IMPEDANCE_RESOURCE)
+            .expect("tline ac cache exists");
+        *cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(TlineAcImpedanceResource {
+            signature: tline_ac_impedance_signature(&tline, frequency),
+            result: Ok(tline_sentinel),
+        });
+        assert_eq!(
+            tline_ac_impedances(&tline, frequency).expect("matching tline cache"),
+            tline_sentinel
+        );
+        tline.set_param("z", 80.0);
+        assert_ne!(
+            tline_ac_impedances(&tline, frequency).expect("changed tline impedance recomputes"),
+            tline_sentinel
+        );
+
+        let mut mline = microstrip_cache_context();
+        mline.set_param("l", 0.02);
+        ensure_mline_ac_impedance_cache(&mut mline);
+        let mline_sentinel = (Complex64::new(201.0, 1.0), Complex64::new(202.0, 2.0));
+        let cache = mline
+            .resource::<MlineAcImpedanceCache>(MLINE_AC_IMPEDANCE_RESOURCE)
+            .expect("mline ac cache exists");
+        *cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(MlineAcImpedanceResource {
+            signature: mline_ac_impedance_signature(&mline, frequency),
+            result: Ok(mline_sentinel),
+        });
+        assert_eq!(
+            mlin_ac_impedances(&mline, frequency).expect("matching mline cache"),
+            mline_sentinel
+        );
+        mline.set_param("w", 1.5e-3);
+        assert_ne!(
+            mlin_ac_impedances(&mline, frequency).expect("changed mline width recomputes"),
+            mline_sentinel
+        );
+    }
+
+    #[test]
+    fn four_port_ac_impedance_caches_reuse_matching_entries_and_invalidate() {
+        let frequency = 1.0e9;
+
+        let mut cpline = CmContext::new();
+        cpline.set_param("l", 0.2);
+        cpline.set_param("ze", 80.0);
+        cpline.set_param("zo", 40.0);
+        cpline.set_param("ere", 2.25);
+        cpline.set_param("ero", 1.44);
+        cpline.set_param("ae", 1.5);
+        cpline.set_param("ao", 3.0);
+        ensure_cpline_ac_impedance_cache(&mut cpline);
+        let cpline_sentinel = (
+            Complex64::new(301.0, 1.0),
+            Complex64::new(302.0, 2.0),
+            Complex64::new(303.0, 3.0),
+            Complex64::new(304.0, 4.0),
+        );
+        let cache = cpline
+            .resource::<CplineAcImpedanceCache>(CPLINE_AC_IMPEDANCE_RESOURCE)
+            .expect("cpline ac cache exists");
+        *cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(CplineAcImpedanceResource {
+            signature: cpline_ac_impedance_signature(&cpline, frequency),
+            result: Ok(cpline_sentinel),
+        });
+        assert_eq!(
+            cpline_ac_impedances(&cpline, frequency).expect("matching cpline cache"),
+            cpline_sentinel
+        );
+        cpline.set_param("ze", 90.0);
+        assert_ne!(
+            cpline_ac_impedances(&cpline, frequency).expect("changed cpline ze recomputes"),
+            cpline_sentinel
+        );
+
+        let mut cpmlin = coupled_microstrip_cache_context();
+        cpmlin.set_param("l", 0.03);
+        ensure_cpmlin_ac_impedance_cache(&mut cpmlin);
+        let cpmlin_sentinel = (
+            Complex64::new(401.0, 1.0),
+            Complex64::new(402.0, 2.0),
+            Complex64::new(403.0, 3.0),
+            Complex64::new(404.0, 4.0),
+        );
+        let cache = cpmlin
+            .resource::<CpmlinAcImpedanceCache>(CPMLIN_AC_IMPEDANCE_RESOURCE)
+            .expect("cpmlin ac cache exists");
+        *cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(CpmlinAcImpedanceResource {
+            signature: cpmlin_ac_impedance_signature(&cpmlin, frequency),
+            result: Ok(cpmlin_sentinel),
+        });
+        assert_eq!(
+            cpmlin_ac_impedances(&cpmlin, frequency).expect("matching cpmlin cache"),
+            cpmlin_sentinel
+        );
+        cpmlin.set_param("s", 0.6e-3);
+        assert_ne!(
+            cpmlin_ac_impedances(&cpmlin, frequency).expect("changed cpmlin spacing recomputes"),
+            cpmlin_sentinel
         );
     }
 }
