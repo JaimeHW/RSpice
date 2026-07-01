@@ -864,7 +864,7 @@ impl Engine {
                     let voltage_converged =
                         self.node_voltage_convergence_met(&new_solution, &sol, circuit.num_nodes());
                     let linearized_residual_converged =
-                        self.residual_convergence_met(matrix, &sol, &rhs);
+                        self.residual_convergence_met(circuit, matrix, &sol, &rhs);
 
                     new_solution = sol;
 

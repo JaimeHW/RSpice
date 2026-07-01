@@ -402,13 +402,8 @@ impl Engine {
             {
                 return false;
             }
-            let residual_norm = probe
-                .scaled_residual_inf_norm(
-                    solution,
-                    rhs,
-                    self.current_abstol(),
-                    self.residual_reltol(),
-                )
+            let residual_norm = self
+                .residual_inf_norm(circuit, probe, solution, rhs)
                 .unwrap_or(Value::INFINITY);
             let residual_converged = residual_norm.is_finite() && residual_norm <= 1.0;
 

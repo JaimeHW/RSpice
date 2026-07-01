@@ -10,7 +10,7 @@ impl Engine {
         solution: &[Value],
         rhs: &[Value],
     ) -> bool {
-        if !self.residual_convergence_met(probe, solution, rhs) {
+        if !self.residual_convergence_met(circuit, probe, solution, rhs) {
             return false;
         }
 
@@ -30,20 +30,41 @@ impl Engine {
     }
 
     #[inline]
+    pub(crate) fn residual_inf_norm(
+        &self,
+        circuit: &CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+    ) -> Option<Value> {
+        let node_rows = circuit.num_nodes().min(rhs.len());
+        let current_abstol = self.current_abstol();
+        let voltage_abstol = self.voltage_abstol();
+        // MNA rows before `num_nodes` are KCL equations; branch rows are
+        // voltage constraints for current unknowns.
+        matrix
+            .scaled_residual_inf_norm_by_row(solution, rhs, self.residual_reltol(), |row| {
+                if row < node_rows {
+                    current_abstol
+                } else {
+                    voltage_abstol
+                }
+            })
+            .ok()
+            .filter(|norm| norm.is_finite())
+    }
+
+    #[inline]
     pub(crate) fn residual_convergence_met(
         &self,
+        circuit: &CircuitData,
         matrix: &mut StaticMatrix,
         solution: &[Value],
         rhs: &[Value],
     ) -> bool {
-        match matrix.scaled_residual_inf_norm(
-            solution,
-            rhs,
-            self.current_abstol(),
-            self.residual_reltol(),
-        ) {
-            Ok(norm) => norm.is_finite() && norm <= 1.0,
-            Err(_) => false,
+        match self.residual_inf_norm(circuit, matrix, solution, rhs) {
+            Some(norm) => norm <= 1.0,
+            None => false,
         }
     }
 
@@ -292,15 +313,7 @@ impl Engine {
                 return None;
             }
 
-            probe
-                .scaled_residual_inf_norm(
-                    solution,
-                    rhs,
-                    self.current_abstol(),
-                    self.residual_reltol(),
-                )
-                .ok()
-                .filter(|norm| norm.is_finite())
+            self.residual_inf_norm(circuit, probe, solution, rhs)
         });
         circuit.restore_nonlinear_state(snapshot);
         merit

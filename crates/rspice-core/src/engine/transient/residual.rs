@@ -256,7 +256,7 @@ impl Engine {
             true,
             0.0,
         );
-        self.residual_convergence_met(matrix, solution, rhs)
+        self.residual_convergence_met(circuit, matrix, solution, rhs)
     }
 
     #[inline]

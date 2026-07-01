@@ -1093,15 +1093,9 @@ impl Engine {
                 // driven by the static nonlinearity, not by stiffness).
                 let merit_phase_start = crate::time_compat::Instant::now();
                 if circuit.has_nonlinear_devices() {
-                    let current_merit = match matrix.scaled_residual_inf_norm(
-                        &new_solution,
-                        &rhs,
-                        self.current_abstol(),
-                        self.residual_reltol(),
-                    ) {
-                        Ok(norm) if norm.is_finite() => norm,
-                        _ => Value::INFINITY,
-                    };
+                    let current_merit = self
+                        .residual_inf_norm(&circuit, &mut matrix, &new_solution, &rhs)
+                        .unwrap_or(Value::INFINITY);
                     if newton_merit_debug_enabled() {
                         log::warn!(
                             "NEWTON-MERIT t={:.6e} dt={:.3e} iter={} merit={:.6e} prev={:.6e} searching={}",
@@ -1321,7 +1315,7 @@ impl Engine {
                             self.voltage_reltol(),
                         );
                         let residual_converged =
-                            self.residual_convergence_met(&mut matrix, &sol, &rhs);
+                            self.residual_convergence_met(&circuit, &mut matrix, &sol, &rhs);
                         // CRITICAL: Update new_solution BEFORE checking device convergence
                         // Otherwise, BJT vbe/vbc are based on old guess, not new solve
                         new_solution = sol;
@@ -1371,7 +1365,8 @@ impl Engine {
                         self.node_voltage_convergence_met(&solution, &new_solution, num_nodes);
                     let d_conv = !circuit.has_nonlinear_devices()
                         || circuit.nonlinear_converged(self.device_convergence_criteria());
-                    let r_conv = self.residual_convergence_met(&mut matrix, &new_solution, &rhs);
+                    let r_conv =
+                        self.residual_convergence_met(&circuit, &mut matrix, &new_solution, &rhs);
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
                     log::warn!(
                         "Newton non-converge at t={:.6e}, dt={:.3e}: voltage_conv={}, device_conv={}, residual_conv={}, max_dv={:.3e}, iter={}",

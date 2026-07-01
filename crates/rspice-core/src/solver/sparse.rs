@@ -371,6 +371,21 @@ impl StaticMatrix {
         abstol: Value,
         reltol: Value,
     ) -> Result<Value, SolverError> {
+        self.scaled_residual_inf_norm_by_row(solution, rhs, reltol, |_| abstol)
+    }
+
+    /// Compute infinity norm of the scaled residual `A*x-b` with row-specific
+    /// absolute tolerances.
+    pub fn scaled_residual_inf_norm_by_row<F>(
+        &mut self,
+        solution: &[Value],
+        rhs: &[Value],
+        reltol: Value,
+        mut row_abstol: F,
+    ) -> Result<Value, SolverError>
+    where
+        F: FnMut(usize) -> Value,
+    {
         self.check_stamping_error()?;
         if self.nrows != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
@@ -387,11 +402,6 @@ impl StaticMatrix {
             )));
         }
 
-        let safe_abstol = if abstol.is_finite() && abstol > 0.0 {
-            abstol
-        } else {
-            1e-12
-        };
         let safe_reltol = if reltol.is_finite() && reltol > 0.0 {
             reltol
         } else {
@@ -426,6 +436,12 @@ impl StaticMatrix {
                 return Ok(Value::INFINITY);
             }
             let residual = (row_ax - row_rhs).abs();
+            let abstol = row_abstol(row);
+            let safe_abstol = if abstol.is_finite() && abstol > 0.0 {
+                abstol
+            } else {
+                1e-12
+            };
             // The row scale is the NET magnitude max(|Σa_ij·x_j|, |b_i|)
             // plus an explicit floating-point cancellation floor on the
             // GROSS term magnitude Σ|a_ij·x_j|. At a converged KCL row the

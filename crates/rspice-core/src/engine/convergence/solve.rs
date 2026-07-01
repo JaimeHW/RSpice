@@ -257,7 +257,7 @@ impl Engine {
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, &new_solution, node_count);
             let linearized_residual_converged =
-                self.residual_convergence_met(matrix, &new_solution, &rhs);
+                self.residual_convergence_met(circuit, matrix, &new_solution, &rhs);
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
             self.update_device_states_for_dc(circuit, &new_solution);
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());

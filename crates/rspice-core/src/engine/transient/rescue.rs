@@ -122,13 +122,8 @@ impl Engine {
                     true,
                     extra_gmin,
                 );
-                let base_merit = matrix
-                    .scaled_residual_inf_norm(
-                        &iterate,
-                        rhs,
-                        self.current_abstol(),
-                        self.residual_reltol(),
-                    )
+                let base_merit = self
+                    .residual_inf_norm(circuit, matrix, &iterate, rhs)
                     .unwrap_or(Value::INFINITY);
 
                 let Ok(mut sol) = matrix.solve(rhs) else {
@@ -208,13 +203,8 @@ impl Engine {
                         true,
                         extra_gmin,
                     );
-                    let trial_merit = matrix
-                        .scaled_residual_inf_norm(
-                            &trial,
-                            rhs,
-                            self.current_abstol(),
-                            self.residual_reltol(),
-                        )
+                    let trial_merit = self
+                        .residual_inf_norm(circuit, matrix, &trial, rhs)
                         .unwrap_or(Value::INFINITY);
                     if trial_merit < best_merit {
                         best_merit = trial_merit;
@@ -239,8 +229,8 @@ impl Engine {
                 // The line search leaves the freshest stamp at (or near) the
                 // accepted point, so this judges the true deformed-system
                 // residual rather than the linear solve's.
-                let residual_converged =
-                    accepted_merit <= 1.0 || self.residual_convergence_met(matrix, &accepted, rhs);
+                let residual_converged = accepted_merit <= 1.0
+                    || self.residual_convergence_met(circuit, matrix, &accepted, rhs);
                 if debug && level_iter >= budget.saturating_sub(6) {
                     let max_dv = Self::max_abs_delta_prefix(&iterate, &accepted, num_nodes);
                     log::warn!(
