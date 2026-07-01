@@ -242,6 +242,9 @@ impl CircuitData {
         for idx in 0..self.ccvs.len() {
             push_pair(self.ccvs.node_pos[idx], self.ccvs.node_neg[idx]);
         }
+        for source in &self.behavioral_sources.voltage_sources {
+            push_pair(source.node_pos, source.node_neg);
+        }
         for instance in &self.xspice_instances {
             for (port_idx, port) in instance.ports().iter().enumerate() {
                 let is_voltage_output = matches!(port.direction, crate::xspice::PortDirection::Out)
@@ -322,6 +325,10 @@ impl CircuitData {
         for idx in 0..self.ccvs.len() {
             Self::mark_force_accept_protected_node(&mut mask, self.ccvs.node_pos[idx]);
             Self::mark_force_accept_protected_node(&mut mask, self.ccvs.node_neg[idx]);
+        }
+        for source in &self.behavioral_sources.voltage_sources {
+            Self::mark_force_accept_protected_node(&mut mask, source.node_pos);
+            Self::mark_force_accept_protected_node(&mut mask, source.node_neg);
         }
         for instance in &self.xspice_instances {
             for (port_idx, port) in instance.ports().iter().enumerate() {
@@ -430,7 +437,7 @@ impl CircuitData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device::Vdmos;
+    use crate::device::{BehavioralVoltageSource, Vdmos};
 
     #[test]
     fn vdmos_drain_drift_participates_in_force_accept_topology() {
@@ -451,5 +458,18 @@ mod tests {
 
         assert!(reachable[drain_drift]);
         assert!(reachable[drain_int]);
+    }
+
+    #[test]
+    fn behavioral_voltage_source_output_is_force_accept_protected() {
+        let mut circuit = CircuitData::new();
+        let out = circuit.get_or_create_node("out");
+        let source =
+            BehavioralVoltageSource::new("b1".to_string(), out, 0, 1, "1.0").expect("b source");
+        circuit.behavioral_sources.add_voltage(source);
+
+        let protected = circuit.force_accept_protected_nodes();
+
+        assert!(protected[out - 1]);
     }
 }

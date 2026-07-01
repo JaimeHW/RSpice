@@ -955,7 +955,14 @@ impl Engine {
                 &ideal_output_pairs,
             );
             for (i, value) in new_solution.iter_mut().enumerate() {
-                let magnitude_limit = if i < num_nodes {
+                let protected_ideal_output = i < num_nodes
+                    && force_accept_protected_nodes
+                        .get(i)
+                        .copied()
+                        .unwrap_or(false);
+                let magnitude_limit = if protected_ideal_output {
+                    Value::INFINITY
+                } else if i < num_nodes {
                     MAX_VOLTAGE
                 } else {
                     MAX_BRANCH_STATE_MAGNITUDE
@@ -1213,7 +1220,14 @@ impl Engine {
                         let mut logged_divergence = false;
 
                         for (i, v) in sol.iter_mut().enumerate() {
-                            let magnitude_limit = if i < num_nodes {
+                            let protected_ideal_output = i < num_nodes
+                                && force_accept_protected_nodes
+                                    .get(i)
+                                    .copied()
+                                    .unwrap_or(false);
+                            let magnitude_limit = if protected_ideal_output {
+                                Value::INFINITY
+                            } else if i < num_nodes {
                                 MAX_VOLTAGE
                             } else {
                                 MAX_BRANCH_STATE_MAGNITUDE
