@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 const MULT_TRANSFER_RESOURCE: &str = "xspice.analog.mult.transfer";
 const DIVIDE_TRANSFER_RESOURCE: &str = "xspice.analog.divide.transfer";
+const LIMIT_TRANSFER_RESOURCE: &str = "xspice.analog.limit.transfer";
 const CLIMIT_TRANSFER_RESOURCE: &str = "xspice.analog.climit.transfer";
 
 fn scalar_analog_port(
@@ -995,30 +996,95 @@ impl CodeModel for Limiter {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let (v_out, partial) = limit_transfer_from_context(ctx);
-        ctx.set_output_with_partial("out", v_out, partial);
+        let transfer = cache_limit_transfer(ctx);
+        ctx.set_output_with_partial("out", transfer.output, transfer.in_partial);
         Ok(())
     }
 
     fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
         if output_port.eq_ignore_ascii_case("out") {
-            vec![("in".to_string(), ctx.partial("out"))]
+            vec![("in".to_string(), limit_transfer_for_context(ctx).in_partial)]
         } else {
             Vec::new()
         }
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LimitTransferSignature {
+    input: Value,
+    in_offset: Value,
+    out_lower_limit: Value,
+    out_upper_limit: Value,
+    limit_range: Value,
+    gain: Value,
+    fraction: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LimitTransfer {
+    output: Value,
+    in_partial: Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LimitTransferResource {
+    signature: LimitTransferSignature,
+    transfer: LimitTransfer,
+}
+
+fn limit_transfer_signature(ctx: &CmContext) -> LimitTransferSignature {
+    LimitTransferSignature {
+        input: ctx.input("in"),
+        in_offset: ctx.param("in_offset"),
+        out_lower_limit: ctx.param("out_lower_limit"),
+        out_upper_limit: ctx.param("out_upper_limit"),
+        limit_range: ctx.param("limit_range"),
+        gain: ctx.param("gain"),
+        fraction: ctx.param("fraction") > 0.5,
+    }
+}
+
+fn limit_transfer_from_signature(signature: LimitTransferSignature) -> LimitTransfer {
+    let (output, in_partial) = limit_transfer(
+        signature.input,
+        signature.in_offset,
+        signature.out_lower_limit,
+        signature.out_upper_limit,
+        signature.limit_range,
+        signature.gain,
+        signature.fraction,
+    );
+    LimitTransfer { output, in_partial }
+}
+
 fn limit_transfer_from_context(ctx: &CmContext) -> (Value, Value) {
-    limit_transfer(
-        ctx.input("in"),
-        ctx.param("in_offset"),
-        ctx.param("out_lower_limit"),
-        ctx.param("out_upper_limit"),
-        ctx.param("limit_range"),
-        ctx.param("gain"),
-        ctx.param("fraction") > 0.5,
-    )
+    let transfer = limit_transfer_for_context(ctx);
+    (transfer.output, transfer.in_partial)
+}
+
+fn limit_transfer_for_context(ctx: &CmContext) -> LimitTransfer {
+    let signature = limit_transfer_signature(ctx);
+    if let Some(resource) = ctx.resource::<LimitTransferResource>(LIMIT_TRANSFER_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.transfer;
+    }
+
+    limit_transfer_from_signature(signature)
+}
+
+fn cache_limit_transfer(ctx: &mut CmContext) -> LimitTransfer {
+    let signature = limit_transfer_signature(ctx);
+    let transfer = limit_transfer_from_signature(signature);
+    ctx.set_resource(
+        LIMIT_TRANSFER_RESOURCE,
+        Arc::new(LimitTransferResource {
+            signature,
+            transfer,
+        }),
+    );
+    transfer
 }
 
 fn limit_transfer(
@@ -2686,6 +2752,75 @@ mod tests {
         assert_eq!(
             updated,
             mult_transfer_from_context(&ctx).expect("direct mult transfer")
+        );
+    }
+
+    #[test]
+    fn limit_partials_compute_from_context_without_prior_evaluate() {
+        let mut ctx = CmContext::new();
+        ctx.set_input_analog("in", 0.25);
+        ctx.set_param("in_offset", 0.0);
+        ctx.set_param("out_lower_limit", 0.0);
+        ctx.set_param("out_upper_limit", 10.0);
+        ctx.set_param("limit_range", 0.0);
+        ctx.set_param("gain", 2.0);
+        ctx.set_param("fraction", 0.0);
+
+        assert_eq!(
+            Limiter.output_input_partials(&ctx, "out"),
+            vec![("in".to_string(), 2.0)],
+            "limit partials should not depend on a previous evaluate call"
+        );
+    }
+
+    #[test]
+    fn limit_transfer_cache_reuses_evaluated_transfer_until_inputs_change() {
+        let mut ctx = CmContext::new();
+        ctx.set_input_analog("in", 0.5);
+        ctx.set_param("in_offset", 0.25);
+        ctx.set_param("out_lower_limit", 0.0);
+        ctx.set_param("out_upper_limit", 2.0);
+        ctx.set_param("limit_range", 0.2);
+        ctx.set_param("gain", 1.5);
+        ctx.set_param("fraction", 0.0);
+
+        let first = cache_limit_transfer(&mut ctx);
+        assert_eq!(limit_transfer_for_context(&ctx), first);
+
+        ctx.set_param("unrelated", 42.0);
+        assert_eq!(
+            limit_transfer_for_context(&ctx),
+            first,
+            "unrelated context changes should not invalidate the limit transfer cache"
+        );
+
+        let signature = limit_transfer_signature(&ctx);
+        let sentinel = LimitTransfer {
+            output: -123.0,
+            in_partial: -456.0,
+        };
+        ctx.set_resource(
+            LIMIT_TRANSFER_RESOURCE,
+            Arc::new(LimitTransferResource {
+                signature,
+                transfer: sentinel,
+            }),
+        );
+        assert_eq!(
+            limit_transfer_for_context(&ctx),
+            sentinel,
+            "matching signatures should reuse the cached limit transfer"
+        );
+
+        ctx.set_input_analog("in", 0.75);
+        let updated = limit_transfer_for_context(&ctx);
+        assert_ne!(
+            updated, sentinel,
+            "changed limit inputs must invalidate the cached transfer"
+        );
+        assert_eq!(
+            updated,
+            limit_transfer_from_signature(limit_transfer_signature(&ctx))
         );
     }
 
