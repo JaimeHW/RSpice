@@ -2,6 +2,7 @@
 //!
 //! Implements fundamental analog behavioral blocks used in mixed-signal simulation.
 
+use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortDirection, PortSpec,
     PortType,
@@ -489,6 +490,14 @@ struct MultTransferSignature {
     out_offset: Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MultTransferBaseSignature {
+    in_gain_revision: Option<u64>,
+    in_offset_revision: Option<u64>,
+    out_gain: Value,
+    out_offset: Value,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct MultTransfer {
     accumulate_in: Value,
@@ -503,20 +512,53 @@ struct MultTransferResource {
     transfer: MultTransfer,
 }
 
-fn mult_transfer_signature(ctx: &CmContext) -> MultTransferSignature {
-    let inputs = ctx
-        .input_analog_vector_values("in")
-        .unwrap_or(&[])
-        .iter()
-        .map(|input| input.value)
-        .collect();
-    MultTransferSignature {
-        inputs,
+fn mult_transfer_base_signature(ctx: &CmContext) -> MultTransferBaseSignature {
+    MultTransferBaseSignature {
         in_gain_revision: ctx.real_vector_param_revision("in_gain"),
         in_offset_revision: ctx.real_vector_param_revision("in_offset"),
         out_gain: ctx.param("out_gain"),
         out_offset: ctx.param("out_offset"),
     }
+}
+
+fn mult_transfer_signature_from_inputs(
+    base: MultTransferBaseSignature,
+    inputs: &[AnalogValue],
+) -> MultTransferSignature {
+    MultTransferSignature {
+        inputs: inputs.iter().map(|input| input.value).collect(),
+        in_gain_revision: base.in_gain_revision,
+        in_offset_revision: base.in_offset_revision,
+        out_gain: base.out_gain,
+        out_offset: base.out_offset,
+    }
+}
+
+fn mult_transfer_signature(ctx: &CmContext) -> MultTransferSignature {
+    mult_transfer_signature_from_inputs(
+        mult_transfer_base_signature(ctx),
+        ctx.input_analog_vector_values("in").unwrap_or(&[]),
+    )
+}
+
+fn mult_transfer_inputs_match(cached: &[Value], inputs: &[AnalogValue]) -> bool {
+    cached.len() == inputs.len()
+        && cached
+            .iter()
+            .zip(inputs)
+            .all(|(cached, input)| *cached == input.value)
+}
+
+fn mult_transfer_resource_matches(
+    resource: &MultTransferResource,
+    base: MultTransferBaseSignature,
+    inputs: &[AnalogValue],
+) -> bool {
+    resource.signature.in_gain_revision == base.in_gain_revision
+        && resource.signature.in_offset_revision == base.in_offset_revision
+        && resource.signature.out_gain == base.out_gain
+        && resource.signature.out_offset == base.out_offset
+        && mult_transfer_inputs_match(&resource.signature.inputs, inputs)
 }
 
 fn mult_transfer_from_context_with_signature(
@@ -573,9 +615,10 @@ fn mult_transfer_from_context(ctx: &CmContext) -> CmResult<MultTransfer> {
 }
 
 fn mult_transfer_for_context(ctx: &CmContext) -> CmResult<MultTransfer> {
-    let signature = mult_transfer_signature(ctx);
+    let base = mult_transfer_base_signature(ctx);
+    let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if let Some(resource) = ctx.resource::<MultTransferResource>(MULT_TRANSFER_RESOURCE)
-        && resource.signature == signature
+        && mult_transfer_resource_matches(&resource, base, inputs)
     {
         return Ok(resource.transfer.clone());
     }
@@ -584,9 +627,10 @@ fn mult_transfer_for_context(ctx: &CmContext) -> CmResult<MultTransfer> {
 }
 
 fn cache_mult_transfer(ctx: &mut CmContext) -> CmResult<MultTransfer> {
-    let signature = mult_transfer_signature(ctx);
+    let base = mult_transfer_base_signature(ctx);
+    let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if let Some(resource) = ctx.resource::<MultTransferResource>(MULT_TRANSFER_RESOURCE)
-        && resource.signature == signature
+        && mult_transfer_resource_matches(&resource, base, inputs)
     {
         return Ok(resource.transfer.clone());
     }
@@ -2713,6 +2757,45 @@ mod tests {
                 ("in".to_string(), 1, 216.0),
                 ("in".to_string(), 2, 72.0),
             ]
+        );
+    }
+
+    #[test]
+    fn mult_transfer_resource_match_compares_current_input_slice() {
+        let mut ctx = CmContext::new();
+        ctx.set_input_analog_vector_from_fn("in", 3, |index| {
+            AnalogValue::new([1.0, 2.0, 3.0][index])
+        });
+        ctx.set_real_vector_param("in_gain", vec![2.0, 3.0, 4.0]);
+        ctx.set_real_vector_param("in_offset", vec![0.5, -1.0, 0.0]);
+        ctx.set_param("out_gain", 2.0);
+        ctx.set_param("out_offset", 1.0);
+
+        let signature = mult_transfer_signature(&ctx);
+        let base = mult_transfer_base_signature(&ctx);
+        let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
+        let resource = MultTransferResource {
+            signature,
+            transfer: MultTransfer {
+                accumulate_in: -2.0,
+                transfer_gain: -3.0,
+                out_offset: -4.0,
+                shifted_inputs: vec![-5.0, -6.0, -7.0],
+            },
+        };
+
+        assert!(
+            mult_transfer_resource_matches(&resource, base, inputs),
+            "matching mult inputs should hit the transfer cache without rebuilding a signature"
+        );
+
+        ctx.set_input_analog_vector_from_fn("in", 3, |index| {
+            AnalogValue::new([1.0, 4.0, 3.0][index])
+        });
+        let changed_inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
+        assert!(
+            !mult_transfer_resource_matches(&resource, base, changed_inputs),
+            "changed mult inputs must invalidate the transfer cache"
         );
     }
 
