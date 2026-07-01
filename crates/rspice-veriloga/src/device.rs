@@ -2658,6 +2658,53 @@ mod tests {
     }
 
     #[test]
+    fn native_compile_cache_prunes_dropped_models_before_fresh_compile() {
+        let source = r#"
+`include "disciplines.vams"
+module native_cache_churn_guard(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 2.0 from (0:inf);
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+
+        let stale_image = {
+            let model = Arc::new(compiler.compile(source).expect("compile first model"));
+            let mut first = VerilogADevice::try_new("CACHEOLD1", Arc::clone(&model), &[1, 0])
+                .expect("first model compiles to native");
+            let second = VerilogADevice::try_new("CACHEOLD2", Arc::clone(&model), &[1, 0])
+                .expect("same model reuses native cache");
+
+            assert!(
+                Arc::ptr_eq(&first.native_model, &second.native_model),
+                "same CompiledModel Arc should share one native image"
+            );
+            first.update_voltages(&[4.0]);
+            let currents = first.try_evaluate().expect("cached native image evaluates");
+            assert_eq!(currents, vec![2.0]);
+
+            Arc::downgrade(&first.native_model)
+        };
+
+        let model = Arc::new(compiler.compile(source).expect("compile fresh model"));
+        let mut fresh = VerilogADevice::try_new("CACHEFRESH1", Arc::clone(&model), &[1, 0])
+            .expect("fresh model compiles after stale cache entry");
+        assert!(fresh.is_using_native());
+        assert!(
+            stale_image.upgrade().is_none(),
+            "fresh compile must prune native image cached only for a dropped CompiledModel"
+        );
+
+        fresh.update_voltages(&[6.0]);
+        let currents = fresh
+            .try_evaluate()
+            .expect("fresh native image evaluates after cache churn");
+        assert_eq!(currents, vec![3.0]);
+    }
+
+    #[test]
     fn preallocates_runtime_state_from_all_native_entry_surfaces() {
         let mut model = compile(
             r#"

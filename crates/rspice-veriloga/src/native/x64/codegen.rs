@@ -3738,13 +3738,14 @@ mod tests {
         VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
         assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
         compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
-        entry_vars_arg_reg, program_uses_helper_calls, rspice_exp,
+        entry_vars_arg_reg, native_op_reads_entry_args, native_op_uses_helper_call,
+        program_uses_helper_calls, rspice_exp, value_program_needs_saved_entry_args,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
     use crate::native::expr::{
-        CompareOp, EntryKind, ExtremumOp, IntegerBinaryOp, LogicalOp, NativeLoweringLimits,
-        NativeOp, NativeProgram, UnaryMathOp,
+        BinaryMathOp, CompareOp, EntryKind, ExtremumOp, IntegerBinaryOp, LogicalOp,
+        NativeLoweringLimits, NativeOp, NativeProgram, UnaryMathOp,
     };
     use crate::native::runtime::ExecutableMemory;
     use crate::native::{
@@ -4297,6 +4298,92 @@ mod tests {
             f(&ctx, std::ptr::null()).to_bits(),
             (runtime_exp(0.5) + 2.0).to_bits()
         );
+    }
+
+    #[test]
+    fn helper_call_metadata_preserves_entry_args_for_all_continuing_helpers() {
+        let helper_ops = [
+            ("unary-math", NativeOp::UnaryMath(UnaryMathOp::Exp), false),
+            (
+                "binary-math",
+                NativeOp::BinaryMath(BinaryMathOp::Pow),
+                false,
+            ),
+            ("table-lookup", NativeOp::TableLookup(0), false),
+            ("table-derivative", NativeOp::TableDerivative(0), false),
+            ("laplace", NativeOp::LaplaceState(0), false),
+            ("zi", NativeOp::ZiState(0), false),
+            ("timer", NativeOp::TimerState(0), false),
+            ("transition", NativeOp::TransitionState(0), false),
+            ("slew", NativeOp::SlewState(0), false),
+            ("absdelay", NativeOp::AbsDelayState(0), false),
+            ("cross", NativeOp::CrossState(0), false),
+            ("idtmod", NativeOp::IdtModState(0), true),
+            (
+                "dynamic-variable-slow-path",
+                NativeOp::LoadVariableDyn {
+                    base: 0,
+                    len: 1,
+                    lower: super::INLINE_DYNAMIC_LOWER_ABS_LIMIT + 1,
+                },
+                false,
+            ),
+        ];
+
+        for (name, op, terminal_needs_saved_entry_args) in helper_ops {
+            assert!(
+                native_op_uses_helper_call(&op),
+                "{name} must be classified as a continuing helper call"
+            );
+
+            let terminal_program =
+                NativeProgram::from_ops_for_test(vec![op], 1, Vec::new(), Vec::new());
+            assert_eq!(
+                value_program_needs_saved_entry_args(&terminal_program),
+                terminal_needs_saved_entry_args,
+                "{name}: terminal helper entry-arg preservation mismatch"
+            );
+
+            let later_entry_read = NativeProgram::from_ops_for_test(
+                vec![op, NativeOp::LoadParam(0)],
+                1,
+                Vec::new(),
+                Vec::new(),
+            );
+            assert!(
+                value_program_needs_saved_entry_args(&later_entry_read),
+                "{name} must preserve entry args when a later op reads EvalContext"
+            );
+        }
+    }
+
+    #[test]
+    fn helper_call_metadata_keeps_error_return_loads_out_of_helper_class() {
+        let entry_arg_loads = [
+            ("param-given", NativeOp::LoadParamGiven(0)),
+            ("port-connected", NativeOp::LoadPortConnected(0)),
+            ("current", NativeOp::LoadCurrent(0)),
+            ("prior-current", NativeOp::LoadPriorCurrent(0)),
+            (
+                "dynamic-variable-inline",
+                NativeOp::LoadVariableDyn {
+                    base: 0,
+                    len: 1,
+                    lower: 0,
+                },
+            ),
+        ];
+
+        for (name, op) in entry_arg_loads {
+            assert!(
+                !native_op_uses_helper_call(&op),
+                "{name} may hard-return on error but must not be classified as a continuing helper call"
+            );
+            assert!(
+                native_op_reads_entry_args(op),
+                "{name} must still force saved entry args after an earlier continuing helper"
+            );
+        }
     }
 
     #[test]
