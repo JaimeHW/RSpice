@@ -52,6 +52,26 @@ class TestDcSweep:
             sweep.voltage_array("out"), np.arange(0.0, 6.0) / 2, atol=1e-9
         )
 
+    def test_run_uses_netlist_dc_list_mode(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* DC list sweep
+V1 in 0 0
+R1 in out 1k
+R2 out 0 1k
+.dc V1 list 0 2 5
+.end
+"""
+        )
+
+        assert netlist.analyses == [".dc V1 list 0 2 5"]
+
+        report = engine.run(netlist)
+
+        assert report.analyses_run == ["dc"]
+        assert report.dc is not None
+        np.testing.assert_allclose(report.dc.sweep_values, [0.0, 2.0, 5.0])
+        np.testing.assert_allclose(report.dc.voltage_array("out"), [0.0, 1.0, 2.5])
+
     def test_iteration_protocol(self, engine, divider):
         sweep = engine.run_dc_sweep(divider, "V1", 0.0, 5.0, 1.0)
         pairs = [(v, sol.voltage("out")) for v, sol in sweep]

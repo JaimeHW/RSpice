@@ -16,7 +16,7 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use rspice_core::analysis::Distribution;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
-use rspice_core::netlist::{AnalysisCommand, FreqVariation};
+use rspice_core::netlist::{AnalysisCommand, DcSweepSpec, FreqVariation};
 use rspice_core::{Engine, SimulationConfigOverrides, resolve_simulation_config};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
@@ -24,7 +24,7 @@ use std::hash::{BuildHasher, Hasher};
 use crate::abort::run_interruptible;
 use crate::config::PySimulationConfig;
 use crate::measure;
-use crate::netlist::PyNetlist;
+use crate::netlist::{PyNetlist, describe_analysis};
 use crate::results::{
     NodeIdentifier, PyAcResult, PyAnalysisRecord, PyDcSweepResult, PyFourierResult,
     PyMonteCarloResult, PyNoiseResult, PyPoleZeroResult, PyRunReport, PySimulationResult,
@@ -343,29 +343,32 @@ impl PyEngine {
                     start,
                     stop,
                     step,
+                    mode,
                     sweep2,
                 } => {
                     let engine = self.engine_for_netlist(&netlist.inner);
+                    let primary = DcSweepSpec {
+                        start: *start,
+                        stop: *stop,
+                        step: *step,
+                        mode: mode.clone(),
+                    };
                     let results = run_interruptible(py, |abort| {
-                        engine.run_dc_sweep2_with_abort(
+                        engine.run_dc_sweep2_spec_with_report_and_abort(
                             &netlist.inner,
                             source,
-                            *start,
-                            *stop,
-                            *step,
+                            &primary,
                             sweep2.as_ref(),
                             abort,
                         )
                     })?;
+                    let results = results
+                        .into_iter()
+                        .map(|point| (point.sweep_value, point.result))
+                        .collect();
                     let result = PyDcSweepResult::new(results);
                     dc = Some(Py::new(py, result)?);
-                    let description = match sweep2 {
-                        Some(outer) => format!(
-                            ".dc {source} {start} {stop} {step} {} {} {} {}",
-                            outer.source, outer.start, outer.stop, outer.step
-                        ),
-                        None => format!(".dc {source} {start} {stop} {step}"),
-                    };
+                    let description = describe_analysis(analysis);
                     records.push(PyAnalysisRecord::executed("dc", description));
                 }
                 AnalysisCommand::Tran {

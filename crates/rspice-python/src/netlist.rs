@@ -17,8 +17,8 @@
 //!   other SPICE tool's treatment of `.sp`/`.cir` files.
 
 use pyo3::prelude::*;
-use rspice_core::Netlist;
-use rspice_core::netlist::AnalysisCommand;
+use rspice_core::netlist::{AnalysisCommand, DcSecondSweep, DcSweepMode};
+use rspice_core::{Netlist, Value};
 use std::borrow::Cow;
 
 /// A parsed SPICE netlist ready for simulation
@@ -72,8 +72,59 @@ fn ensure_statement_content(content: &str) -> Cow<'_, str> {
     }
 }
 
+fn describe_dc_sweep_spec(
+    source: &str,
+    start: Value,
+    stop: Value,
+    step: Value,
+    mode: &DcSweepMode,
+) -> String {
+    match mode {
+        DcSweepMode::Linear => format!("{source} {start} {stop} {step}"),
+        DcSweepMode::List(values) => {
+            let values = values
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("{source} list {values}")
+        }
+        DcSweepMode::Decade { points_per_decade } => {
+            format!("{source} dec {start} {stop} {points_per_decade}")
+        }
+        DcSweepMode::Octave { points_per_octave } => {
+            format!("{source} oct {start} {stop} {points_per_octave}")
+        }
+    }
+}
+
+fn describe_dc_analysis(
+    source: &str,
+    start: Value,
+    stop: Value,
+    step: Value,
+    mode: &DcSweepMode,
+    sweep2: Option<&DcSecondSweep>,
+) -> String {
+    let mut out = format!(
+        ".dc {}",
+        describe_dc_sweep_spec(source, start, stop, step, mode)
+    );
+    if let Some(outer) = sweep2 {
+        out.push(' ');
+        out.push_str(&describe_dc_sweep_spec(
+            &outer.source,
+            outer.start,
+            outer.stop,
+            outer.step,
+            &outer.mode,
+        ));
+    }
+    out
+}
+
 /// Render an analysis command as a short human-readable summary.
-fn describe_analysis(analysis: &AnalysisCommand) -> String {
+pub(crate) fn describe_analysis(analysis: &AnalysisCommand) -> String {
     match analysis {
         AnalysisCommand::Op => ".op".to_string(),
         AnalysisCommand::Dc {
@@ -81,14 +132,9 @@ fn describe_analysis(analysis: &AnalysisCommand) -> String {
             start,
             stop,
             step,
+            mode,
             sweep2,
-        } => match sweep2 {
-            Some(outer) => format!(
-                ".dc {source} {start} {stop} {step} {} {} {} {}",
-                outer.source, outer.start, outer.stop, outer.step
-            ),
-            None => format!(".dc {source} {start} {stop} {step}"),
-        },
+        } => describe_dc_analysis(source, *start, *stop, *step, mode, sweep2.as_ref()),
         AnalysisCommand::Ac {
             variation,
             points,
