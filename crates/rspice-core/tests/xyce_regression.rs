@@ -460,18 +460,22 @@ fn test_xyce_deep_function_parameter_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    let relative = "Netlists/Certification_Tests/BUG_1222_SON/bug_1222_son_2.cir";
 
-    let result = runner.run_test(root.join(relative));
+    for relative in [
+        "Netlists/Certification_Tests/BUG_1222_SON/bug_1222_son_1.cir",
+        "Netlists/Certification_Tests/BUG_1222_SON/bug_1222_son_2.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
 
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a numeric Xyce deep .FUNC parameter comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .prn oracle"
-    );
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a numeric Xyce deep .FUNC parameter comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+    }
 }
 
 #[test]

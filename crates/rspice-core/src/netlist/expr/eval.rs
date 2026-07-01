@@ -1,161 +1,355 @@
 use super::*;
+use std::collections::HashMap;
 
 const MAX_EVAL_FUNCTION_CALL_DEPTH: usize = 4096;
 
 /// Evaluate an expression with the given context
 pub fn evaluate(expr: &Expr, ctx: &ParamContext) -> Result<Value, ExprError> {
-    evaluate_iterative(expr, ctx)
+    ExpressionEvaluator::new(ctx).evaluate(expr)
+}
+
+#[derive(Debug, Clone)]
+struct EvalScope {
+    function_name: Option<String>,
+}
+
+impl EvalScope {
+    fn global() -> Self {
+        Self {
+            function_name: None,
+        }
+    }
+
+    fn function(function_name: String) -> Self {
+        Self {
+            function_name: Some(function_name),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct FunctionArgExpr {
+    id: u64,
+    expr: Expr,
+    scope: EvalScope,
+}
+
+#[derive(Debug, Clone)]
+enum FunctionArgBinding {
+    Expr(FunctionArgExpr),
+    Unset(u64),
+}
+
+#[derive(Debug, Default)]
+struct FunctionFrame {
+    args: HashMap<String, FunctionArgBinding>,
+}
+
+struct ExpressionEvaluator<'a> {
+    ctx: &'a ParamContext,
+    function_frames: HashMap<String, FunctionFrame>,
+    body_cache: HashMap<String, Expr>,
+    call_depth: usize,
+    next_binding_id: u64,
 }
 
 enum EvalFrame {
-    Eval(Expr, ParamContext),
+    Eval(Expr, EvalScope),
     ApplyUnary(UnaryOpKind),
     ApplyBinary(BinOpKind),
     ApplyIf {
         then_expr: Expr,
         else_expr: Expr,
-        ctx: ParamContext,
+        scope: EvalScope,
     },
     ApplyBuiltin {
         name: String,
         argc: usize,
-        ctx: ParamContext,
     },
-    ApplyUserFunction {
-        name: String,
-        argc: usize,
-        ctx: ParamContext,
+    ApplyFunctionArg {
+        function_name: String,
+        arg_name: String,
+        binding_id: u64,
+        param_name: String,
+        scope: EvalScope,
     },
-    PopUserFunction,
+    UnsetUserFunction {
+        function_name: String,
+        arg_names: Vec<String>,
+    },
 }
 
-fn evaluate_iterative(expr: &Expr, ctx: &ParamContext) -> Result<Value, ExprError> {
-    let mut frames = vec![EvalFrame::Eval(expr.clone(), ctx.clone())];
-    let mut values = Vec::<Value>::new();
-    let mut call_stack = Vec::<String>::new();
+impl<'a> ExpressionEvaluator<'a> {
+    fn new(ctx: &'a ParamContext) -> Self {
+        Self {
+            ctx,
+            function_frames: HashMap::new(),
+            body_cache: HashMap::new(),
+            call_depth: 0,
+            next_binding_id: 1,
+        }
+    }
 
-    while let Some(frame) = frames.pop() {
-        match frame {
-            EvalFrame::Eval(expr, ctx) => match expr {
-                Expr::Number(value) => values.push(value),
-                Expr::Param(name) => values.push(
-                    ctx.get(&name)
-                        .ok_or_else(|| ExprError::UndefinedParam(name.clone()))?,
-                ),
-                Expr::UnaryOp { op, operand } => {
-                    frames.push(EvalFrame::ApplyUnary(op));
-                    frames.push(EvalFrame::Eval(*operand, ctx));
+    fn evaluate(&mut self, expr: &Expr) -> Result<Value, ExprError> {
+        let mut frames = vec![EvalFrame::Eval(expr.clone(), EvalScope::global())];
+        let mut values = Vec::<Value>::new();
+
+        while let Some(frame) = frames.pop() {
+            match frame {
+                EvalFrame::Eval(expr, scope) => match expr {
+                    Expr::Number(value) => values.push(value),
+                    Expr::Param(name) => {
+                        self.push_param_eval(&mut frames, &mut values, name, scope)?
+                    }
+                    Expr::UnaryOp { op, operand } => {
+                        frames.push(EvalFrame::ApplyUnary(op));
+                        frames.push(EvalFrame::Eval(*operand, scope));
+                    }
+                    Expr::BinOp { op, left, right } => {
+                        frames.push(EvalFrame::ApplyBinary(op));
+                        frames.push(EvalFrame::Eval(*right, scope.clone()));
+                        frames.push(EvalFrame::Eval(*left, scope));
+                    }
+                    Expr::FnCall { name, args } => {
+                        self.push_function_eval(&mut frames, name, args, scope)?;
+                    }
+                },
+                EvalFrame::ApplyUnary(op) => {
+                    let value = pop_value(&mut values)?;
+                    values.push(apply_unary(op, value));
                 }
-                Expr::BinOp { op, left, right } => {
-                    frames.push(EvalFrame::ApplyBinary(op));
-                    frames.push(EvalFrame::Eval(*right, ctx.clone()));
-                    frames.push(EvalFrame::Eval(*left, ctx));
+                EvalFrame::ApplyBinary(op) => {
+                    let right = pop_value(&mut values)?;
+                    let left = pop_value(&mut values)?;
+                    values.push(apply_binary(op, left, right)?);
                 }
-                Expr::FnCall { name, args } => {
-                    let upper = name.to_ascii_uppercase();
-                    if ctx.has_function(&upper) {
-                        frames.push(EvalFrame::ApplyUserFunction {
-                            name: upper,
-                            argc: args.len(),
-                            ctx: ctx.clone(),
-                        });
-                        for arg in args.into_iter().rev() {
-                            frames.push(EvalFrame::Eval(arg, ctx.clone()));
-                        }
-                    } else if upper == "IF" {
-                        if args.len() != 3 {
-                            return Err(ExprError::WrongArgCount(upper));
-                        }
-                        let mut args = args.into_iter();
-                        let cond = args.next().expect("IF arg count checked");
-                        let then_expr = args.next().expect("IF arg count checked");
-                        let else_expr = args.next().expect("IF arg count checked");
-                        frames.push(EvalFrame::ApplyIf {
-                            then_expr,
-                            else_expr,
-                            ctx: ctx.clone(),
-                        });
-                        frames.push(EvalFrame::Eval(cond, ctx));
+                EvalFrame::ApplyIf {
+                    then_expr,
+                    else_expr,
+                    scope,
+                } => {
+                    let cond = pop_value(&mut values)?;
+                    frames.push(EvalFrame::Eval(
+                        if cond != 0.0 { then_expr } else { else_expr },
+                        scope,
+                    ));
+                }
+                EvalFrame::ApplyBuiltin { name, argc } => {
+                    let args = pop_args(&mut values, argc)?;
+                    values.push(eval_builtin_function_values(&name, &args, self.ctx)?);
+                }
+                EvalFrame::ApplyFunctionArg {
+                    function_name,
+                    arg_name,
+                    binding_id,
+                    param_name,
+                    scope,
+                } => {
+                    let value = pop_value(&mut values)?;
+                    if self
+                        .current_function_arg_binding_id(&function_name, &arg_name)
+                        .is_some_and(|current_id| current_id == binding_id)
+                    {
+                        values.push(value);
                     } else {
-                        frames.push(EvalFrame::ApplyBuiltin {
-                            name: upper,
-                            argc: args.len(),
-                            ctx: ctx.clone(),
-                        });
-                        for arg in args.into_iter().rev() {
-                            frames.push(EvalFrame::Eval(arg, ctx.clone()));
-                        }
+                        frames.push(EvalFrame::Eval(Expr::Param(param_name), scope));
                     }
                 }
-            },
-            EvalFrame::ApplyUnary(op) => {
-                let value = pop_value(&mut values)?;
-                values.push(apply_unary(op, value));
+                EvalFrame::UnsetUserFunction {
+                    function_name,
+                    arg_names,
+                } => {
+                    self.call_depth = self.call_depth.saturating_sub(1);
+                    self.unset_function_args(&function_name, &arg_names);
+                }
             }
-            EvalFrame::ApplyBinary(op) => {
-                let right = pop_value(&mut values)?;
-                let left = pop_value(&mut values)?;
-                values.push(apply_binary(op, left, right)?);
+        }
+
+        if values.len() == 1 {
+            Ok(values.pop().expect("length checked"))
+        } else {
+            Err(ExprError::InvalidArgument(format!(
+                "expression evaluation produced {} values",
+                values.len()
+            )))
+        }
+    }
+
+    fn push_param_eval(
+        &mut self,
+        frames: &mut Vec<EvalFrame>,
+        values: &mut Vec<Value>,
+        name: String,
+        scope: EvalScope,
+    ) -> Result<(), ExprError> {
+        if let Some((function_name, arg_name, binding)) = self.function_arg_binding(&name, &scope) {
+            match binding {
+                FunctionArgBinding::Expr(arg) => {
+                    frames.push(EvalFrame::ApplyFunctionArg {
+                        function_name,
+                        arg_name,
+                        binding_id: arg.id,
+                        param_name: name,
+                        scope,
+                    });
+                    frames.push(EvalFrame::Eval(arg.expr, arg.scope));
+                }
+                FunctionArgBinding::Unset(_) => values.push(0.0),
             }
-            EvalFrame::ApplyIf {
+            return Ok(());
+        }
+
+        values.push(
+            self.ctx
+                .get(&name)
+                .ok_or_else(|| ExprError::UndefinedParam(name.to_string()))?,
+        );
+        Ok(())
+    }
+
+    fn push_function_eval(
+        &mut self,
+        frames: &mut Vec<EvalFrame>,
+        name: String,
+        args: Vec<Expr>,
+        scope: EvalScope,
+    ) -> Result<(), ExprError> {
+        let upper = name.to_ascii_uppercase();
+        if self.ctx.has_function(&upper) {
+            self.push_user_function_eval(frames, &upper, &args, &scope)?;
+        } else if upper == "IF" {
+            if args.len() != 3 {
+                return Err(ExprError::WrongArgCount(upper));
+            }
+            let mut args = args.into_iter();
+            let cond = args.next().expect("IF arg count checked");
+            let then_expr = args.next().expect("IF arg count checked");
+            let else_expr = args.next().expect("IF arg count checked");
+            frames.push(EvalFrame::ApplyIf {
                 then_expr,
                 else_expr,
-                ctx,
-            } => {
-                let cond = pop_value(&mut values)?;
-                frames.push(EvalFrame::Eval(
-                    if cond != 0.0 { then_expr } else { else_expr },
-                    ctx,
-                ));
+                scope: scope.clone(),
+            });
+            frames.push(EvalFrame::Eval(cond, scope));
+        } else {
+            frames.push(EvalFrame::ApplyBuiltin {
+                name: upper,
+                argc: args.len(),
+            });
+            for arg in args.into_iter().rev() {
+                frames.push(EvalFrame::Eval(arg, scope.clone()));
             }
-            EvalFrame::ApplyBuiltin { name, argc, ctx } => {
-                let args = pop_args(&mut values, argc)?;
-                values.push(eval_builtin_function_values(&name, &args, &ctx)?);
-            }
-            EvalFrame::ApplyUserFunction { name, argc, ctx } => {
-                let arg_values = pop_args(&mut values, argc)?;
-                let func = ctx
-                    .get_function(&name)
-                    .cloned()
-                    .ok_or_else(|| ExprError::UnknownFunction(name.clone()))?;
-                if arg_values.len() != func.args.len() {
-                    return Err(ExprError::WrongArgCount(name));
-                }
-                if call_stack.iter().any(|active| active == &func.name) {
-                    return Err(ExprError::InvalidArgument(format!(
-                        "recursive user-defined function call to {}",
-                        func.name
-                    )));
-                }
-                if call_stack.len() >= MAX_EVAL_FUNCTION_CALL_DEPTH {
-                    return Err(ExprError::InvalidArgument(format!(
-                        "function nesting exceeds maximum depth of {} while calling {}",
-                        MAX_EVAL_FUNCTION_CALL_DEPTH, func.name
-                    )));
-                }
+        }
+        Ok(())
+    }
 
-                let mut body_ctx = ctx.clone();
-                for (arg_name, arg_value) in func.args.iter().zip(arg_values.iter()) {
-                    body_ctx.set(arg_name, *arg_value);
-                }
-                let body = parse_expression(&func.body)?;
-                call_stack.push(func.name);
-                frames.push(EvalFrame::PopUserFunction);
-                frames.push(EvalFrame::Eval(body, body_ctx));
+    fn push_user_function_eval(
+        &mut self,
+        frames: &mut Vec<EvalFrame>,
+        name: &str,
+        args: &[Expr],
+        caller_scope: &EvalScope,
+    ) -> Result<(), ExprError> {
+        let func = self
+            .ctx
+            .get_function(name)
+            .cloned()
+            .ok_or_else(|| ExprError::UnknownFunction(name.to_string()))?;
+        if args.len() != func.args.len() {
+            return Err(ExprError::WrongArgCount(name.to_string()));
+        }
+        if self.call_depth >= MAX_EVAL_FUNCTION_CALL_DEPTH {
+            return Err(ExprError::InvalidArgument(format!(
+                "function nesting exceeds maximum depth of {} while calling {}",
+                MAX_EVAL_FUNCTION_CALL_DEPTH, func.name
+            )));
+        }
+
+        let body = if let Some(body) = self.body_cache.get(&func.name) {
+            body.clone()
+        } else {
+            let body = parse_expression(&func.body)?;
+            self.body_cache.insert(func.name.clone(), body.clone());
+            body
+        };
+
+        let bindings = func
+            .args
+            .iter()
+            .zip(args.iter())
+            .map(|(arg_name, arg_expr)| {
+                let binding = FunctionArgBinding::Expr(FunctionArgExpr {
+                    id: self.allocate_binding_id(),
+                    expr: arg_expr.clone(),
+                    scope: caller_scope.clone(),
+                });
+                (arg_name.clone(), binding)
+            })
+            .collect::<Vec<_>>();
+
+        {
+            let frame = self.function_frames.entry(func.name.clone()).or_default();
+            for (arg_name, binding) in bindings {
+                frame.args.insert(arg_name, binding);
             }
-            EvalFrame::PopUserFunction => {
-                call_stack.pop();
+        }
+
+        self.call_depth += 1;
+        frames.push(EvalFrame::UnsetUserFunction {
+            function_name: func.name.clone(),
+            arg_names: func.args.clone(),
+        });
+        frames.push(EvalFrame::Eval(body, EvalScope::function(func.name)));
+        Ok(())
+    }
+
+    fn function_arg_binding(
+        &self,
+        name: &str,
+        scope: &EvalScope,
+    ) -> Option<(String, String, FunctionArgBinding)> {
+        let function_name = scope.function_name.as_ref()?;
+        let func = self.ctx.get_function(function_name)?;
+        let arg_name = name.to_ascii_uppercase();
+        if !func.args.iter().any(|arg| arg == &arg_name) {
+            return None;
+        }
+        let binding = self
+            .function_frames
+            .get(function_name)
+            .and_then(|frame| frame.args.get(&arg_name))
+            .cloned()
+            .unwrap_or(FunctionArgBinding::Unset(0));
+        Some((function_name.clone(), arg_name, binding))
+    }
+
+    fn unset_function_args(&mut self, function_name: &str, arg_names: &[String]) {
+        for arg_name in arg_names {
+            let binding_id = self.allocate_binding_id();
+            if let Some(frame) = self.function_frames.get_mut(function_name) {
+                frame
+                    .args
+                    .insert(arg_name.clone(), FunctionArgBinding::Unset(binding_id));
             }
         }
     }
 
-    if values.len() == 1 {
-        Ok(values.pop().expect("length checked"))
-    } else {
-        Err(ExprError::InvalidArgument(format!(
-            "expression evaluation produced {} values",
-            values.len()
-        )))
+    fn current_function_arg_binding_id(&self, function_name: &str, arg_name: &str) -> Option<u64> {
+        match self
+            .function_frames
+            .get(function_name)?
+            .args
+            .get(arg_name)?
+        {
+            FunctionArgBinding::Expr(arg) => Some(arg.id),
+            FunctionArgBinding::Unset(id) => Some(*id),
+        }
+    }
+
+    fn allocate_binding_id(&mut self) -> u64 {
+        let id = self.next_binding_id;
+        self.next_binding_id = self.next_binding_id.saturating_add(1);
+        id
     }
 }
 

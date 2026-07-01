@@ -33,6 +33,74 @@ fn function_arguments_accept_comparison_and_ternary_expressions() {
 }
 
 #[test]
+fn xyce_single_character_logical_ops_match_double_character_forms() {
+    let mut ctx = ParamContext::new();
+    ctx.set("BEDROCK", 0.033e-6);
+    ctx.set("SLAGHEAP", 0.035e-6);
+
+    assert_eq!(
+        eval_with(
+            &ctx,
+            "0.034u <= slagheap & slagheap < 0.036u & 0.032u <= bedrock & bedrock < 0.034u ? 0.001u : 0",
+        ),
+        0.001e-6
+    );
+    assert_eq!(eval_with(&ctx, "0 | 0"), 0.0);
+    assert_eq!(eval_with(&ctx, "0 | 5"), 1.0);
+    assert_eq!(eval_with(&ctx, "1 && 0 || 2"), 1.0);
+}
+
+#[test]
+fn xyce_user_functions_rebind_arguments_as_expressions() {
+    let mut ctx = ParamContext::new();
+    ctx.set("MRSLATE", 1.0);
+    ctx.set("BEDROCK", 1.0);
+    ctx.set("PEBBLES", 2.0);
+    ctx.define_function(
+        "betty",
+        vec!["bedrock".to_string(), "slagheap".to_string()],
+        "bedrock == 0 ? 0 : 7",
+    );
+    ctx.define_function(
+        "great_gazoo",
+        vec![
+            "bedrock".to_string(),
+            "pebbles".to_string(),
+            "bammbamm".to_string(),
+            "hatrock".to_string(),
+        ],
+        "mrSlate ? betty(bedrock, pebbles) : 0",
+    );
+    ctx.define_function(
+        "wilma",
+        vec![
+            "bedrock".to_string(),
+            "pebbles".to_string(),
+            "bammbamm".to_string(),
+            "slaghoople".to_string(),
+            "hatrock".to_string(),
+        ],
+        "great_gazoo(bedrock, pebbles, bammbamm, hatrock)",
+    );
+    ctx.define_function(
+        "dino",
+        vec![
+            "bedrock".to_string(),
+            "pebbles".to_string(),
+            "bammbamm".to_string(),
+            "slaghoople".to_string(),
+            "hatrock".to_string(),
+        ],
+        "wilma(bedrock + great_gazoo(bedrock, pebbles, bammbamm, hatrock), pebbles, bammbamm, slaghoople, hatrock)",
+    );
+
+    assert_eq!(eval_with(&ctx, "betty(bedrock, pebbles)"), 7.0);
+    assert_eq!(eval_with(&ctx, "great_gazoo(bedrock, pebbles, 0, 0)"), 7.0);
+    assert_eq!(eval_with(&ctx, "dino(bedrock, pebbles, 0, 0, 0)"), 0.0);
+    assert_eq!(eval_with(&ctx, "great_gazoo(bedrock, pebbles, 0, 0)"), 7.0);
+}
+
+#[test]
 fn xyce_special_character_function_names_evaluate() {
     let mut ctx = ParamContext::new();
     for name in ["#func", "@func", "`func", "$func"] {

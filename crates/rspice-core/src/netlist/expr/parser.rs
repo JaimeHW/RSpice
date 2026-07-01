@@ -90,26 +90,21 @@ impl<'a> ExprParser<'a> {
         }
     }
 
-    /// Parse boolean OR expressions (||)
+    /// Parse boolean OR expressions (`|` in Xyce, `||` in HSPICE).
     fn parse_or(&mut self) -> Result<Expr, ExprError> {
         let mut left = self.parse_and()?;
 
         loop {
             self.skip_ws();
-            let start_pos = self.pos;
             if self.consume('|') {
-                if self.consume('|') {
-                    self.skip_ws();
-                    let right = self.parse_and()?;
-                    left = Expr::BinOp {
-                        op: BinOpKind::Or,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    };
-                } else {
-                    self.pos = start_pos;
-                    break;
-                }
+                self.consume('|');
+                self.skip_ws();
+                let right = self.parse_and()?;
+                left = Expr::BinOp {
+                    op: BinOpKind::Or,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
             } else {
                 break;
             }
@@ -118,26 +113,21 @@ impl<'a> ExprParser<'a> {
         Ok(left)
     }
 
-    /// Parse boolean AND expressions (&&)
+    /// Parse boolean AND expressions (`&` in Xyce, `&&` in HSPICE).
     fn parse_and(&mut self) -> Result<Expr, ExprError> {
         let mut left = self.parse_comparison()?;
 
         loop {
             self.skip_ws();
-            let start_pos = self.pos;
             if self.consume('&') {
-                if self.consume('&') {
-                    self.skip_ws();
-                    let right = self.parse_comparison()?;
-                    left = Expr::BinOp {
-                        op: BinOpKind::And,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    };
-                } else {
-                    self.pos = start_pos;
-                    break;
-                }
+                self.consume('&');
+                self.skip_ws();
+                let right = self.parse_comparison()?;
+                left = Expr::BinOp {
+                    op: BinOpKind::And,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
             } else {
                 break;
             }
