@@ -161,6 +161,12 @@ pub(crate) struct NativeProgram {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BranchUnknownRuntimeMapping {
+    pub(crate) runtime_index: usize,
+    pub(crate) inverted: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct NativeLoweringLimits<'a> {
     terminal_count: usize,
     internal_node_count: usize,
@@ -168,6 +174,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     variable_count: usize,
     variable_names: &'a [SmolStr],
     branch_unknown_count: usize,
+    canonical_branch_unknown_map: &'a [BranchUnknownRuntimeMapping],
     lookup_table_count: usize,
     laplace_filter_count: usize,
     zi_filter_count: usize,
@@ -202,6 +209,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count,
             variable_names: &[],
             branch_unknown_count,
+            canonical_branch_unknown_map: &[],
             lookup_table_count: 0,
             laplace_filter_count: 0,
             zi_filter_count: 0,
@@ -236,6 +244,41 @@ impl<'a> NativeLoweringLimits<'a> {
         .with_zi_filter_count(model.zi_filters.len())
     }
 
+    pub(crate) fn with_canonical_branch_unknown_map<'b>(
+        self,
+        canonical_branch_unknown_map: &'b [BranchUnknownRuntimeMapping],
+    ) -> NativeLoweringLimits<'b>
+    where
+        'a: 'b,
+    {
+        NativeLoweringLimits {
+            terminal_count: self.terminal_count,
+            internal_node_count: self.internal_node_count,
+            parameter_count: self.parameter_count,
+            variable_count: self.variable_count,
+            variable_names: self.variable_names,
+            branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map,
+            lookup_table_count: self.lookup_table_count,
+            laplace_filter_count: self.laplace_filter_count,
+            zi_filter_count: self.zi_filter_count,
+            available_current_pairs: self.available_current_pairs,
+            canonical_ddt_slots: self.canonical_ddt_slots,
+            canonical_idt_slots: self.canonical_idt_slots,
+            canonical_idtmod_slots: self.canonical_idtmod_slots,
+            canonical_transition_slots: self.canonical_transition_slots,
+            canonical_slew_slots: self.canonical_slew_slots,
+            canonical_absdelay_slots: self.canonical_absdelay_slots,
+            canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
+            canonical_cross_slots: self.canonical_cross_slots,
+            canonical_above_slots: self.canonical_above_slots,
+            canonical_timer_slots: self.canonical_timer_slots,
+            canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+        }
+    }
+
     pub(crate) fn with_available_current_pairs<'b>(
         self,
         available_current_pairs: &'b [usize],
@@ -250,6 +293,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -291,6 +335,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -339,6 +384,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -373,6 +419,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -407,6 +454,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -441,6 +489,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -475,6 +524,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -509,6 +559,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -543,6 +594,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -577,6 +629,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -611,6 +664,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -645,6 +699,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -679,6 +734,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -713,6 +769,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -747,6 +804,7 @@ impl<'a> NativeLoweringLimits<'a> {
             variable_count: self.variable_count,
             variable_names: self.variable_names,
             branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
@@ -3275,14 +3333,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     fn lower_named_branch_access(&mut self, access: &str, name: &str) -> JitResult<()> {
         if is_flow_access(access) {
             if let Some(branch_unknown) = self.named_branch_unknown(name) {
-                let index = usize::from(branch_unknown.id);
-                validate_index(
-                    self.model.clone(),
-                    "canonical branch unknown",
-                    index,
-                    self.limits.branch_unknown_count,
-                )?;
-                return self.push(NativeOp::LoadBranchUnknown(index));
+                let mapping = self.map_canonical_branch_unknown(usize::from(branch_unknown.id))?;
+                self.push(NativeOp::LoadBranchUnknown(mapping.runtime_index))?;
+                if mapping.inverted {
+                    return self.append_unary(NativeOp::Neg);
+                }
+                return Ok(());
             }
             return self.lower_prior_named_branch_current(name);
         }
@@ -3721,14 +3777,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
 
         if let Some((branch_unknown, reversed)) = self.resolve_current_branch_unknown(pos, neg)? {
-            validate_index(
-                self.model.clone(),
-                "canonical branch unknown",
-                branch_unknown,
-                self.limits.branch_unknown_count,
-            )?;
-            self.push(NativeOp::LoadBranchUnknown(branch_unknown))?;
-            if reversed {
+            let mapping = self.map_canonical_branch_unknown(branch_unknown)?;
+            self.push(NativeOp::LoadBranchUnknown(mapping.runtime_index))?;
+            if reversed ^ mapping.inverted {
                 return self.append_unary(NativeOp::Neg);
             }
             return Ok(());
@@ -3754,6 +3805,45 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.current_pair_dependencies.push(pair_index);
         }
         self.push(NativeOp::LoadCurrent(pair_index))
+    }
+
+    fn map_canonical_branch_unknown(
+        &self,
+        canonical_index: usize,
+    ) -> JitResult<BranchUnknownRuntimeMapping> {
+        if self.limits.canonical_branch_unknown_map.is_empty() {
+            validate_index(
+                self.model.clone(),
+                "canonical branch unknown",
+                canonical_index,
+                self.limits.branch_unknown_count,
+            )?;
+            return Ok(BranchUnknownRuntimeMapping {
+                runtime_index: canonical_index,
+                inverted: false,
+            });
+        }
+
+        let mapping = self
+            .limits
+            .canonical_branch_unknown_map
+            .get(canonical_index)
+            .copied()
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: self.model.clone(),
+                detail: format!(
+                    "canonical branch unknown {canonical_index} is outside runtime branch map with {} entries",
+                    self.limits.canonical_branch_unknown_map.len()
+                )
+                .into(),
+            })?;
+        validate_index(
+            self.model.clone(),
+            "canonical branch unknown runtime slot",
+            mapping.runtime_index,
+            self.limits.branch_unknown_count,
+        )?;
+        Ok(mapping)
     }
 
     fn resolve_current_branch_unknown(

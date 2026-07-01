@@ -2,14 +2,14 @@ pub(crate) mod codegen;
 pub mod encoder;
 
 use super::expr::{
-    EntryKind, NativeLoweringLimits, NativeOp, NativeProgram, canonical_above_slots_for_equation,
-    canonical_absdelay_slots_for_equation, canonical_cross_slots_for_equation,
-    canonical_ddt_slots_for_equation, canonical_idt_slots_for_equation,
-    canonical_idtmod_slots_for_equation, canonical_laplace_slots_for_equation,
-    canonical_limit_slots_for_equation, canonical_slew_slots_for_equation,
-    canonical_table_lookup_slots_for_equation, canonical_timer_slots_for_equation,
-    canonical_transition_slots_for_equation, canonical_zi_slots_for_equation,
-    constant_dynamic_variable_slot,
+    BranchUnknownRuntimeMapping, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
+    canonical_above_slots_for_equation, canonical_absdelay_slots_for_equation,
+    canonical_cross_slots_for_equation, canonical_ddt_slots_for_equation,
+    canonical_idt_slots_for_equation, canonical_idtmod_slots_for_equation,
+    canonical_laplace_slots_for_equation, canonical_limit_slots_for_equation,
+    canonical_slew_slots_for_equation, canonical_table_lookup_slots_for_equation,
+    canonical_timer_slots_for_equation, canonical_transition_slots_for_equation,
+    canonical_zi_slots_for_equation, constant_dynamic_variable_slot,
 };
 use super::model::{
     CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeEntryStarts, NativeModel,
@@ -17,7 +17,7 @@ use super::model::{
 };
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
-use crate::canonical_ir::{CanonicalIrArtifact, EquationId, MirModel};
+use crate::canonical_ir::{CanonicalIrArtifact, EquationId, MirModel, NodeId};
 use crate::codegen::{AssignmentStep, CompiledModel, StampIndex, StampProgram};
 use crate::native::x64::codegen::NativeAssignment;
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
@@ -42,7 +42,12 @@ fn compile_model_inner(
     canonical_mir: Option<&MirModel>,
 ) -> JitResult<NativeModel> {
     super::validate_native_coverage(model)?;
-    let base_limits = NativeLoweringLimits::for_model(model);
+    let canonical_branch_unknown_map = match canonical_mir {
+        Some(mir) => canonical_branch_unknown_runtime_map(model, mir)?,
+        None => Vec::new(),
+    };
+    let base_limits = NativeLoweringLimits::for_model(model)
+        .with_canonical_branch_unknown_map(&canonical_branch_unknown_map);
 
     let mut image = Vec::new();
     let mut entry_starts = Vec::new();
@@ -632,6 +637,168 @@ fn validate_canonical_source_digest_for_model(
     Ok(())
 }
 
+fn canonical_branch_unknown_runtime_map(
+    model: &CompiledModel,
+    mir: &MirModel,
+) -> JitResult<Vec<BranchUnknownRuntimeMapping>> {
+    if mir.branch_unknowns.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let runtime_sources = model
+        .branch_sources
+        .iter()
+        .enumerate()
+        .map(|(index, source)| {
+            Ok((
+                index,
+                compiled_branch_endpoint(model, &source.pos)?,
+                compiled_branch_endpoint(model, &source.neg)?,
+            ))
+        })
+        .collect::<JitResult<Vec<_>>>()?;
+
+    mir.branch_unknowns
+        .iter()
+        .map(|unknown| {
+            let pos = canonical_branch_endpoint(model, mir, unknown.pos_node)?;
+            let neg = canonical_branch_endpoint(model, mir, unknown.neg_node)?;
+            let Some(mapping) =
+                runtime_sources
+                    .iter()
+                    .find_map(|(index, source_pos, source_neg)| {
+                        if *source_pos == pos && *source_neg == neg {
+                            Some(BranchUnknownRuntimeMapping {
+                                runtime_index: *index,
+                                inverted: false,
+                            })
+                        } else if *source_pos == neg && *source_neg == pos {
+                            Some(BranchUnknownRuntimeMapping {
+                                runtime_index: *index,
+                                inverted: true,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+            else {
+                return Err(JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: format!(
+                        "canonical branch unknown {} for {} has no compiled solver branch source",
+                        unknown.id,
+                        format_current_pair(pos, neg)
+                    )
+                    .into(),
+                });
+            };
+            Ok(mapping)
+        })
+        .collect()
+}
+
+fn compiled_branch_endpoint(model: &CompiledModel, index: &StampIndex) -> JitResult<usize> {
+    match index {
+        StampIndex::Terminal(term) if *term < model.num_terminals => Ok(*term),
+        StampIndex::Terminal(term) => Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "compiled branch source terminal {term} exceeds terminal count {}",
+                model.num_terminals
+            )
+            .into(),
+        }),
+        StampIndex::Internal(internal) if *internal < model.internal_nodes => {
+            Ok(model.num_terminals + *internal)
+        }
+        StampIndex::Internal(internal) => Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "compiled branch source internal node {internal} exceeds internal node count {}",
+                model.internal_nodes
+            )
+            .into(),
+        }),
+        StampIndex::Ground => Ok(CURRENT_PAIR_GROUND),
+        StampIndex::Branch(branch) => Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "compiled branch source endpoint unexpectedly references branch {branch}"
+            )
+            .into(),
+        }),
+    }
+}
+
+fn canonical_branch_endpoint(
+    model: &CompiledModel,
+    mir: &MirModel,
+    node_id: Option<NodeId>,
+) -> JitResult<usize> {
+    let Some(node_id) = node_id else {
+        return Ok(CURRENT_PAIR_GROUND);
+    };
+    let node_index = usize::from(node_id);
+    let node = mir
+        .nodes
+        .get(node_index)
+        .filter(|node| node.id == node_id)
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!("canonical branch endpoint node {node_id} is outside MIR node table")
+                .into(),
+        })?;
+
+    if node.is_external {
+        let Some(terminal_name) = model.terminal_names.get(node_index) else {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical branch endpoint terminal {node_index} exceeds compiled terminal count {}",
+                    model.num_terminals
+                )
+                .into(),
+            });
+        };
+        if terminal_name != &node.name {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical branch endpoint terminal {node_index} names '{}' but compiled terminal is '{}'",
+                    node.name, terminal_name
+                )
+                .into(),
+            });
+        }
+        return Ok(node_index);
+    }
+
+    let external_count = mir.nodes.iter().filter(|node| node.is_external).count();
+    let internal_index =
+        node_index
+            .checked_sub(external_count)
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical internal branch endpoint {} appears before external nodes",
+                    node.name
+                )
+                .into(),
+            })?;
+    if internal_index < model.internal_nodes {
+        return Ok(model.num_terminals + internal_index);
+    }
+
+    Err(JitError::InvalidCanonicalIr {
+        model: model.name.clone(),
+        detail: format!(
+            "canonical branch endpoint internal node {internal_index} exceeds compiled internal node count {}",
+            model.internal_nodes
+        )
+        .into(),
+    })
+}
+
 fn lower_stamp_value_program(
     model: &CompiledModel,
     canonical_mir: Option<&MirModel>,
@@ -1137,6 +1304,139 @@ endmodule
                 .run_stamp_value(0, &ctx, std::ptr::null())
                 .expect("stamp value entry"),
             (voltages[0] - voltages[1]) / params[0]
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_maps_duplicate_potential_branch_unknowns() {
+        let source = r#"
+module native_canonical_duplicate_vsrc(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    V(p, n) <+ 1.0;
+    V(p, n) <+ I(p, n) * 2.0;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert_eq!(
+            model.branch_sources.len(),
+            1,
+            "compiled solver allocation should merge same-branch potential contributions"
+        );
+        assert_eq!(
+            artifact.mir.branch_unknowns.len(),
+            2,
+            "canonical MIR keeps a dense branch unknown per potential equation"
+        );
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("duplicate canonical potential branch unknowns map to runtime branch slot");
+
+        let branch_unknowns = [3.0_f64];
+        let mut ctx = eval_context(&[], &[0.0, 0.0]);
+        ctx.branch_unknowns = branch_unknowns.as_ptr();
+        assert_eq!(
+            native
+                .run_stamp_value(0, &ctx, std::ptr::null())
+                .expect("first stamp value entry"),
+            1.0
+        );
+        assert_eq!(
+            native
+                .run_stamp_value(1, &ctx, std::ptr::null())
+                .expect("second stamp value entry"),
+            6.0
+        );
+        assert_eq!(
+            native.stamp_value_branch_unknowns(1),
+            Some([0_usize].as_slice())
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_maps_reversed_duplicate_branch_unknowns() {
+        let source = r#"
+module native_canonical_reversed_duplicate_vsrc(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    V(n, p) <+ 1.0;
+    V(p, n) <+ I(p, n) * 2.0;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert_eq!(
+            model.branch_sources.len(),
+            1,
+            "compiled solver allocation should merge opposite branch orientations"
+        );
+        assert_eq!(artifact.mir.branch_unknowns.len(), 2);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("reversed canonical branch unknown maps to runtime branch slot");
+
+        let branch_unknowns = [3.0_f64];
+        let mut ctx = eval_context(&[], &[0.0, 0.0]);
+        ctx.branch_unknowns = branch_unknowns.as_ptr();
+        assert_eq!(
+            native
+                .run_stamp_value(1, &ctx, std::ptr::null())
+                .expect("second stamp value entry"),
+            -6.0
+        );
+        assert_eq!(
+            native.stamp_value_branch_unknowns(1),
+            Some([0_usize].as_slice())
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_maps_named_branch_unknowns() {
+        let source = r#"
+module native_canonical_named_duplicate_vsrc(p, n);
+  inout p, n;
+  electrical p, n;
+  branch (p, n) probe;
+  analog begin
+    V(n, p) <+ 1.0;
+    V(probe) <+ I(probe) * 2.0;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert_eq!(model.branch_sources.len(), 1);
+        assert_eq!(artifact.mir.branch_unknowns.len(), 2);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("named canonical branch unknown maps to runtime branch slot");
+
+        let branch_unknowns = [3.0_f64];
+        let mut ctx = eval_context(&[], &[0.0, 0.0]);
+        ctx.branch_unknowns = branch_unknowns.as_ptr();
+        assert_eq!(
+            native
+                .run_stamp_value(1, &ctx, std::ptr::null())
+                .expect("named branch stamp value entry"),
+            -6.0
+        );
+        assert_eq!(
+            native.stamp_value_branch_unknowns(1),
+            Some([0_usize].as_slice())
         );
     }
 
