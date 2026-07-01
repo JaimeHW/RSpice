@@ -30,10 +30,10 @@ struct LookupResult {
     slope: Value,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct LookupTableSignature {
-    x_values: Vec<Value>,
-    y_values: Vec<Value>,
+    x_array_revision: Option<u64>,
+    y_array_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -106,14 +106,13 @@ fn pwl_output_port() -> PortSpec {
 
 fn lookup_table_signature(ctx: &CmContext) -> LookupTableSignature {
     LookupTableSignature {
-        x_values: ctx.real_vector_param("x_array").unwrap_or(&[]).to_vec(),
-        y_values: ctx.real_vector_param("y_array").unwrap_or(&[]).to_vec(),
+        x_array_revision: ctx.real_vector_param_revision("x_array"),
+        y_array_revision: ctx.real_vector_param_revision("y_array"),
     }
 }
 
 fn lookup_table_signature_matches(ctx: &CmContext, signature: &LookupTableSignature) -> bool {
-    ctx.real_vector_param("x_array").unwrap_or(&[]) == signature.x_values.as_slice()
-        && ctx.real_vector_param("y_array").unwrap_or(&[]) == signature.y_values.as_slice()
+    lookup_table_signature(ctx) == *signature
 }
 
 fn lookup_table_uncached(ctx: &CmContext) -> CmResult<LookupTable> {
@@ -577,11 +576,27 @@ mod tests {
         ctx.set_real_vector_param("y_array", vec![0.0, 10.0]);
         cache_lookup_table(&mut ctx);
 
+        let cached = ctx
+            .resource::<LookupTableResource>(LOOKUP_TABLE_RESOURCE)
+            .expect("cached lookup table");
         let before = evaluate_lookup_context(&ctx, 0.5).expect("initial table");
         assert_near(before.value, 5.0);
         assert_near(before.slope, 10.0);
 
+        ctx.set_real_vector_param("unrelated", vec![1.0, 2.0, 3.0]);
+        cache_lookup_table(&mut ctx);
+        let still_cached = ctx
+            .resource::<LookupTableResource>(LOOKUP_TABLE_RESOURCE)
+            .expect("lookup table after unrelated vector update");
+        assert!(Arc::ptr_eq(&cached, &still_cached));
+
         ctx.set_real_vector_param("y_array", vec![0.0, 20.0]);
+        cache_lookup_table(&mut ctx);
+        let reloaded = ctx
+            .resource::<LookupTableResource>(LOOKUP_TABLE_RESOURCE)
+            .expect("lookup table after y_array update");
+        assert!(!Arc::ptr_eq(&cached, &reloaded));
+
         let after = evaluate_lookup_context(&ctx, 0.5).expect("updated table");
         assert_near(after.value, 10.0);
         assert_near(after.slope, 20.0);
