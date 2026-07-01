@@ -388,6 +388,94 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_lowers_branch_local_reassigned_temp() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module branch_local_reassigned_temp(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mode = 1 from [0:1];
+    real tmp, out;
+    analog begin
+        tmp = $simparam("unsupported_scalar_probe");
+
+        if (mode == 1) begin
+            tmp = 2.0;
+            out = tmp * V(p, n);
+        end else begin
+            out = 3.0;
+        end
+
+        I(p, n) <+ out;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("branch-local reassigned temp should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_lowers_small_bounded_runtime_while() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module bounded_runtime_while(p, n);
+    inout p, n;
+    electrical p, n;
+    real niter, x, xprev, term, out;
+    analog begin
+        niter = 0.0;
+        x = 1.0;
+        xprev = 1.0e6;
+        while ((niter <= 4.0) && (abs(x - xprev) > 1.0e-12)) begin
+            xprev = x;
+            term = V(p, n) + niter;
+            x = 0.5 * (xprev + term);
+            niter = niter + 1.0;
+        end
+        out = x;
+        I(p, n) <+ out;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("small bounded runtime while should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_lowers_counter_dependent_accumulator_loop() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
