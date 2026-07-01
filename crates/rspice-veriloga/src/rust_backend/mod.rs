@@ -571,6 +571,59 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_inlines_single_use_pure_temporaries() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module inline_scalar_chain(p, n);
+    inout p, n;
+    electrical p, n;
+    real a, b, c, d, e;
+    analog begin
+        a = V(p, n) + 1.0;
+        b = a * 2.0;
+        c = b - 3.0;
+        d = c / 4.0;
+        e = d + 5.0;
+        I(p, n) <+ e;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("pure single-use arithmetic chain should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+        let value_locals = stamp
+            .lines()
+            .filter(|line| {
+                let line = line.trim_start();
+                line.starts_with("let v")
+                    && line
+                        .get("let v".len()..)
+                        .is_some_and(|tail| tail.starts_with(|c: char| c.is_ascii_digit()))
+            })
+            .count();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(
+            value_locals <= 3,
+            "expected scalar inlining to keep temporary locals low, saw {value_locals}\n{stamp}"
+        );
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_lowers_small_bounded_runtime_while() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(

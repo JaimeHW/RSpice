@@ -14,6 +14,7 @@ use super::{RustTranspileOptions, device};
 
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
 const MAX_SCALAR_STAMP_LIVE_VALUES: usize = 240_000;
+const MAX_SCALAR_INLINE_EXPR_COST: usize = 24;
 
 pub(super) struct ScalarStaticCache {
     instance_values: Vec<ValueId>,
@@ -99,6 +100,7 @@ fn scheduled_values(
 
 struct ValueEmitContext<'a> {
     cached_values: &'a HashSet<ValueId>,
+    inline_values: &'a HashSet<ValueId>,
     use_cached_fields: bool,
     inline_uncached_constants: bool,
     limexp_max_expr: String,
@@ -223,6 +225,7 @@ fn generate_stamp_file(
             ),
         ));
     }
+    let stamp_inline_values = scalar_inline_values(artifact, &stamp_live, static_cache, &roots)?;
     let has_idt_slots = ddt_slots.idt_len() > 0;
     let stamp_needs_params = has_idt_slots
         || artifact.opt.values.iter().any(|value| {
@@ -316,6 +319,7 @@ fn generate_stamp_file(
 
     let stamp_context = ValueEmitContext {
         cached_values: &static_cache.set,
+        inline_values: &stamp_inline_values,
         use_cached_fields: true,
         inline_uncached_constants: false,
         limexp_max_expr: "LIMEXP_MAX".to_string(),
@@ -352,6 +356,8 @@ fn generate_stamp_file(
         out.push_str("    }\n");
     } else {
         let reactive_live = collect_stamp_live_values(artifact, &reactive_roots, static_cache)?;
+        let reactive_inline_values =
+            scalar_inline_values(artifact, &reactive_live, static_cache, &reactive_roots)?;
         let reactive_needs_param_given = artifact.opt.values.iter().any(|value| {
             reactive_live.contains(&value.id)
                 && matches!(value.kind, OptValueKind::ParamGiven { .. })
@@ -373,6 +379,7 @@ fn generate_stamp_file(
         out.push_str("        let multiplicity = self.multiplicity;\n");
         let reactive_context = ValueEmitContext {
             cached_values: &static_cache.set,
+            inline_values: &reactive_inline_values,
             use_cached_fields: true,
             inline_uncached_constants: false,
             limexp_max_expr: "LIMEXP_MAX".to_string(),
@@ -500,8 +507,10 @@ pub(super) fn scalar_state_extensions(
         params_visibility: "pub(crate)",
         ..device::StateFileExtensions::default()
     };
+    let no_inline_values = HashSet::new();
     let instance_context = ValueEmitContext {
         cached_values: &static_cache.set,
+        inline_values: &no_inline_values,
         use_cached_fields: false,
         inline_uncached_constants: true,
         limexp_max_expr: format_f64(LIMEXP_MAX),
@@ -513,6 +522,7 @@ pub(super) fn scalar_state_extensions(
     };
     let temperature_context = ValueEmitContext {
         cached_values: &static_cache.set,
+        inline_values: &no_inline_values,
         use_cached_fields: true,
         inline_uncached_constants: true,
         limexp_max_expr: format_f64(LIMEXP_MAX),
@@ -795,8 +805,10 @@ pub(super) fn emit_static_current_values(
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     let stamp_live = collect_stamp_live_values(artifact, roots, static_cache)?;
+    let stamp_inline_values = scalar_inline_values(artifact, &stamp_live, static_cache, roots)?;
     let stamp_context = ValueEmitContext {
         cached_values: &static_cache.set,
+        inline_values: &stamp_inline_values,
         use_cached_fields: true,
         inline_uncached_constants: false,
         limexp_max_expr: "LIMEXP_MAX".to_string(),
@@ -827,6 +839,9 @@ fn emit_live_values(
 ) -> Result<(), RustBackendError> {
     let values = ordered_live_values(artifact, live, static_cache)?;
     for value_id in values {
+        if context.inline_values.contains(&value_id) {
+            continue;
+        }
         let value = artifact
             .opt
             .values
@@ -2292,6 +2307,7 @@ fn emit_counted_sum_expr(
 
     let mut loop_context = ValueEmitContext {
         cached_values: context.cached_values,
+        inline_values: context.inline_values,
         use_cached_fields: context.use_cached_fields,
         inline_uncached_constants: context.inline_uncached_constants,
         limexp_max_expr: context.limexp_max_expr.clone(),
@@ -2692,6 +2708,15 @@ fn value_ref(
 
     if context.use_cached_fields && context.cached_values.contains(&value) {
         return Ok(format!("self.{}", cache_field_name(value)));
+    }
+
+    if context.inline_values.contains(&value) {
+        let value_slot = artifact
+            .opt
+            .values
+            .get(usize::from(value))
+            .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
+        return emit_value_expr(artifact, parameter_fields, value_slot, context);
     }
 
     if context.inline_uncached_constants {
@@ -3142,6 +3167,196 @@ fn collect_stamp_live_values(
         }
     }
     Ok(live)
+}
+
+fn scalar_inline_values(
+    artifact: &CanonicalIrArtifact,
+    live: &HashSet<ValueId>,
+    static_cache: &ScalarStaticCache,
+    roots: &HashMap<EquationId, ValueId>,
+) -> Result<HashSet<ValueId>, RustBackendError> {
+    let mandatory = mandatory_stamp_local_values(artifact, roots)?;
+    let use_counts = scalar_value_use_counts(artifact, live, static_cache)?;
+    let candidates: HashSet<_> = live
+        .iter()
+        .copied()
+        .filter(|value| !static_cache.contains(*value))
+        .filter(|value| !mandatory.contains(value))
+        .filter(|value| {
+            use_counts
+                .get(usize::from(*value))
+                .copied()
+                .unwrap_or_default()
+                == 1
+        })
+        .filter(|value| {
+            artifact
+                .opt
+                .values
+                .get(usize::from(*value))
+                .is_some_and(|value| scalar_value_can_inline(&value.kind))
+        })
+        .collect();
+
+    let mut costs = vec![None; artifact.opt.values.len()];
+    let mut inline_values = HashSet::new();
+    for value in &candidates {
+        let cost = scalar_inline_expr_cost(artifact, *value, &candidates, &mut costs)?;
+        if cost <= MAX_SCALAR_INLINE_EXPR_COST {
+            inline_values.insert(*value);
+        }
+    }
+    Ok(inline_values)
+}
+
+fn mandatory_stamp_local_values(
+    artifact: &CanonicalIrArtifact,
+    roots: &HashMap<EquationId, ValueId>,
+) -> Result<HashSet<ValueId>, RustBackendError> {
+    let mut mandatory = HashSet::new();
+    for root in roots.values().copied() {
+        mandatory.insert(root);
+        let root_value =
+            artifact.opt.values.get(usize::from(root)).ok_or_else(|| {
+                unsupported(artifact, format!("missing root scalar value {root}"))
+            })?;
+        for derivative in &root_value.derivatives {
+            mandatory.insert(derivative.value);
+        }
+    }
+    Ok(mandatory)
+}
+
+fn scalar_value_use_counts(
+    artifact: &CanonicalIrArtifact,
+    live: &HashSet<ValueId>,
+    static_cache: &ScalarStaticCache,
+) -> Result<Vec<usize>, RustBackendError> {
+    let mut counts = vec![0usize; artifact.opt.values.len()];
+    for value in live {
+        if static_cache.contains(*value) {
+            continue;
+        }
+        for dependency in scalar_value_dependencies(artifact, *value)? {
+            if live.contains(&dependency) && !static_cache.contains(dependency) {
+                let Some(count) = counts.get_mut(usize::from(dependency)) else {
+                    return Err(unsupported(
+                        artifact,
+                        format!("missing scalar value {dependency}"),
+                    ));
+                };
+                *count = count.saturating_add(1);
+            }
+        }
+    }
+    Ok(counts)
+}
+
+fn scalar_inline_expr_cost(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+    candidates: &HashSet<ValueId>,
+    costs: &mut [Option<usize>],
+) -> Result<usize, RustBackendError> {
+    if !candidates.contains(&value) {
+        return Ok(1);
+    }
+    let index = usize::from(value);
+    if let Some(cost) = costs
+        .get(index)
+        .copied()
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?
+    {
+        return Ok(cost);
+    }
+
+    let mut cost = 1usize;
+    for dependency in scalar_value_dependencies(artifact, value)? {
+        let dependency_cost = if candidates.contains(&dependency) {
+            let cost = scalar_inline_expr_cost(artifact, dependency, candidates, costs)?;
+            if cost <= MAX_SCALAR_INLINE_EXPR_COST {
+                cost
+            } else {
+                1
+            }
+        } else {
+            1
+        };
+        cost = cost.saturating_add(dependency_cost);
+        if cost > MAX_SCALAR_INLINE_EXPR_COST {
+            break;
+        }
+    }
+    if let Some(slot) = costs.get_mut(index) {
+        *slot = Some(cost);
+    }
+    Ok(cost)
+}
+
+fn scalar_value_dependencies(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+) -> Result<Vec<ValueId>, RustBackendError> {
+    let value_slot = artifact
+        .opt
+        .values
+        .get(usize::from(value))
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
+    let dependencies = match value_slot.kind {
+        OptValueKind::Ddx {
+            value,
+            pos_node,
+            neg_node,
+        } => projected_ddx_derivative_values(artifact, value, pos_node, neg_node)?,
+        OptValueKind::Ddt { input, .. } => vec![input],
+        OptValueKind::CountedSum { count, initial, .. } => vec![count, initial],
+        OptValueKind::Unary { input, .. } => vec![input],
+        OptValueKind::Binary { left, right, .. } => vec![left, right],
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => vec![condition, then_value, else_value],
+        OptValueKind::RealConstant(_)
+        | OptValueKind::BooleanConstant(_)
+        | OptValueKind::Parameter { .. }
+        | OptValueKind::ParamGiven { .. }
+        | OptValueKind::Temperature
+        | OptValueKind::ThermalVoltage
+        | OptValueKind::Multiplicity
+        | OptValueKind::Time
+        | OptValueKind::Analysis { .. }
+        | OptValueKind::DdtScale
+        | OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. }
+        | OptValueKind::LoopIndex { .. }
+        | OptValueKind::EquationValue { .. } => Vec::new(),
+    };
+    Ok(dependencies)
+}
+
+fn scalar_value_can_inline(kind: &OptValueKind) -> bool {
+    matches!(
+        kind,
+        OptValueKind::RealConstant(_)
+            | OptValueKind::BooleanConstant(_)
+            | OptValueKind::Parameter { .. }
+            | OptValueKind::ParamGiven { .. }
+            | OptValueKind::Temperature
+            | OptValueKind::ThermalVoltage
+            | OptValueKind::Multiplicity
+            | OptValueKind::Time
+            | OptValueKind::Analysis { .. }
+            | OptValueKind::DdtScale
+            | OptValueKind::NodePotential { .. }
+            | OptValueKind::BranchFlow { .. }
+            | OptValueKind::BranchUnknownFlow { .. }
+            | OptValueKind::LoopIndex { .. }
+            | OptValueKind::Unary { .. }
+            | OptValueKind::Binary { .. }
+            | OptValueKind::Select { .. }
+    )
 }
 
 fn mark_stamp_live_value(
