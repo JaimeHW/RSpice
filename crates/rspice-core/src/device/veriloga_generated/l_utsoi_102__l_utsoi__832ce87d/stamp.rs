@@ -8636,35 +8636,35 @@ impl Instance {
         let v535: f64 = (v534 - v514);
         let v536: f64 = (self.scalar_v533 * v535);
         let v537: f64 = (if self.scalar_v479 { v536 } else { v25 });
-        let v540: f64 = nv2;
-        let v541: f64 = (v540 - v515);
-        let v542: f64 = (self.scalar_v539 * v541);
-        let v543: f64 = (if self.scalar_v484 { v542 } else { v25 });
-        let v546: f64 = nv0;
-        let v547: f64 = (v546 - v516);
-        let v548: f64 = (self.scalar_v545 * v547);
-        let v549: f64 = (if self.scalar_v489 { v548 } else { v25 });
-        let v552: f64 = nv3;
-        let v553: f64 = (v552 - v518);
-        let v554: f64 = (self.scalar_v551 * v553);
-        let v555: f64 = (if self.scalar_v494 { v554 } else { v25 });
-        let v561: f64 = (self.scalar_v560 / v504);
-        let v562: f64 = (if self.scalar_v499 { v561 } else { v25 });
-        let v563: f64 = (v562 / v506);
-        let v564: f64 = (if self.scalar_v499 { v563 } else { v25 });
-        let v565: f64 = (self.scalar_v424 * v564);
-        let v566: f64 = (v510 * v565);
-        let v567: f64 = (if self.scalar_v499 { v566 } else { v25 });
-        let v568: f64 = (self.scalar_v422 * v567);
-        let v569: f64 = (if self.scalar_v499 { v568 } else { v25 });
-        let v570: f64 = (v513 * self.scalar_v557);
-        let v571: f64 = (v501 * v569);
-        let v572: f64 = (v570 - v571);
-        let v573: f64 = (v513 * v513);
-        let v574: f64 = (v572 / v573);
-        let v575: f64 = (if self.scalar_v499 { v574 } else { v25 });
-        let v576: f64 = (if self.scalar_v521 { v31 } else { v575 });
-        let v580: f64 = (self.scalar_v86 * v576);
+        let v541: f64 = nv2;
+        let v542: f64 = (v541 - v515);
+        let v543: f64 = (self.scalar_v540 * v542);
+        let v544: f64 = (if self.scalar_v484 { v543 } else { v25 });
+        let v548: f64 = nv0;
+        let v549: f64 = (v548 - v516);
+        let v550: f64 = (self.scalar_v547 * v549);
+        let v551: f64 = (if self.scalar_v489 { v550 } else { v25 });
+        let v555: f64 = nv3;
+        let v556: f64 = (v555 - v518);
+        let v557: f64 = (self.scalar_v554 * v556);
+        let v558: f64 = (if self.scalar_v494 { v557 } else { v25 });
+        let v565: f64 = (self.scalar_v564 / v504);
+        let v566: f64 = (if self.scalar_v499 { v565 } else { v25 });
+        let v567: f64 = (v566 / v506);
+        let v568: f64 = (if self.scalar_v499 { v567 } else { v25 });
+        let v569: f64 = (self.scalar_v424 * v568);
+        let v570: f64 = (v510 * v569);
+        let v571: f64 = (if self.scalar_v499 { v570 } else { v25 });
+        let v572: f64 = (self.scalar_v422 * v571);
+        let v573: f64 = (if self.scalar_v499 { v572 } else { v25 });
+        let v574: f64 = (v513 * self.scalar_v561);
+        let v575: f64 = (v501 * v573);
+        let v576: f64 = (v574 - v575);
+        let v577: f64 = (v513 * v513);
+        let v578: f64 = (v576 / v577);
+        let v579: f64 = (if self.scalar_v499 { v578 } else { v25 });
+        let v580: f64 = (if self.scalar_v521 { v31 } else { v579 });
+        let v584: f64 = (self.scalar_v86 * v580);
 
         stamper.stamp_current_const_local(
             Some(6),
@@ -8681,7 +8681,7 @@ impl Instance {
             Some(8),
             multiplicity * (v25),
         );
-        let d532_dn6: f64 = self.scalar_v582;
+        let d532_dn6: f64 = self.scalar_v586;
         let d532_dn7: f64 = self.scalar_v531;
         stamper.stamp_current_node2_local(
             Some(7),
@@ -8692,7 +8692,7 @@ impl Instance {
             7,
             multiplicity * (d532_dn7),
         );
-        let d529_dn4: f64 = v580;
+        let d529_dn4: f64 = v584;
         stamper.stamp_current_node1_local(
             Some(4),
             None,
@@ -8700,8 +8700,8 @@ impl Instance {
             4,
             multiplicity * (d529_dn4),
         );
-        let d537_dn1: f64 = self.scalar_v584;
-        let d537_dn9: f64 = self.scalar_v585;
+        let d537_dn1: f64 = self.scalar_v588;
+        let d537_dn9: f64 = self.scalar_v589;
         stamper.stamp_current_node2_local(
             Some(1),
             Some(9),
@@ -8711,6 +8711,11 @@ impl Instance {
             9,
             multiplicity * (d537_dn9),
         );
+        stamper.stamp_current_const_local(
+            Some(1),
+            Some(9),
+            multiplicity * (self.scalar_v538),
+        );
         stamper.stamp_potential_branch_local(
             Some(1),
             Some(9),
@@ -8719,18 +8724,23 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             0,
-            self.scalar_v538,
+            self.scalar_v539,
         );
-        let d543_dn2: f64 = self.scalar_v587;
-        let d543_dn6: f64 = self.scalar_v588;
+        let d544_dn2: f64 = self.scalar_v591;
+        let d544_dn6: f64 = self.scalar_v592;
         stamper.stamp_current_node2_local(
             Some(2),
             Some(6),
-            multiplicity * (v543),
+            multiplicity * (v544),
             2,
-            multiplicity * (d543_dn2),
+            multiplicity * (d544_dn2),
             6,
-            multiplicity * (d543_dn6),
+            multiplicity * (d544_dn6),
+        );
+        stamper.stamp_current_const_local(
+            Some(2),
+            Some(6),
+            multiplicity * (self.scalar_v545),
         );
         stamper.stamp_potential_branch_local(
             Some(2),
@@ -8740,18 +8750,23 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             1,
-            self.scalar_v544,
+            self.scalar_v546,
         );
-        let d549_dn0: f64 = self.scalar_v590;
-        let d549_dn7: f64 = self.scalar_v591;
+        let d551_dn0: f64 = self.scalar_v594;
+        let d551_dn7: f64 = self.scalar_v595;
         stamper.stamp_current_node2_local(
             Some(0),
             Some(7),
-            multiplicity * (v549),
+            multiplicity * (v551),
             0,
-            multiplicity * (d549_dn0),
+            multiplicity * (d551_dn0),
             7,
-            multiplicity * (d549_dn7),
+            multiplicity * (d551_dn7),
+        );
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(7),
+            multiplicity * (self.scalar_v552),
         );
         stamper.stamp_potential_branch_local(
             Some(0),
@@ -8761,18 +8776,23 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             2,
-            self.scalar_v550,
+            self.scalar_v553,
         );
-        let d555_dn3: f64 = self.scalar_v593;
-        let d555_dn8: f64 = self.scalar_v594;
+        let d558_dn3: f64 = self.scalar_v597;
+        let d558_dn8: f64 = self.scalar_v598;
         stamper.stamp_current_node2_local(
             Some(3),
             Some(8),
-            multiplicity * (v555),
+            multiplicity * (v558),
             3,
-            multiplicity * (d555_dn3),
+            multiplicity * (d558_dn3),
             8,
-            multiplicity * (d555_dn8),
+            multiplicity * (d558_dn8),
+        );
+        stamper.stamp_current_const_local(
+            Some(3),
+            Some(8),
+            multiplicity * (self.scalar_v559),
         );
         stamper.stamp_potential_branch_local(
             Some(3),
@@ -8782,9 +8802,39 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             3,
-            self.scalar_v556,
+            self.scalar_v560,
         );
-        let d530_dn4: f64 = self.scalar_v581;
+        stamper.stamp_current_const_local(
+            Some(5),
+            None,
+            multiplicity * (v25),
+        );
+        stamper.stamp_current_const_local(
+            Some(7),
+            Some(6),
+            multiplicity * (v25),
+        );
+        stamper.stamp_current_const_local(
+            Some(7),
+            Some(6),
+            multiplicity * (v25),
+        );
+        stamper.stamp_current_const_local(
+            Some(9),
+            Some(6),
+            multiplicity * (v25),
+        );
+        stamper.stamp_current_const_local(
+            Some(9),
+            Some(7),
+            multiplicity * (v25),
+        );
+        stamper.stamp_current_const_local(
+            Some(7),
+            Some(6),
+            multiplicity * (v25),
+        );
+        let d530_dn4: f64 = self.scalar_v585;
         let v530_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 15, v530);
         stamper.stamp_current_node1_local(
             Some(4),
@@ -8921,19 +8971,29 @@ impl Instance {
         Self::stamp_transient_block_123(p, &mut locals);
         Self::stamp_transient_block_124(&mut locals);
 
-        Self::stamp_transient_equations_block_0(stamper, p, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
-        let eq30_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(5),
-            None,
-            multiplicity * (eq30_value),
-        );
-        Self::stamp_transient_equations_block_1(ctx, stamper, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
-        let eq36_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
+        Self::stamp_transient_equations_block_0(ctx, stamper, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
+        let eq36_e707: f64 = (locals.var_sigvds * locals.var_migid);
+        let eq36_e707_d_n4: f64 = (locals.var_sigvds * locals.var_migid_dn4);
+        let eq36_e707_d_n6: f64 = (locals.var_sigvds * locals.var_migid_dn6);
+        let eq36_e707_d_n7: f64 = (locals.var_sigvds * locals.var_migid_dn7);
+        let eq36_e707_d_n8: f64 = (locals.var_sigvds * locals.var_migid_dn8);
+        let eq36_e707_d_n9: f64 = (locals.var_sigvds * locals.var_migid_dn9);
+        let eq36_e709: f64 = (eq36_e707 * v25);
+        let eq36_e709_d_n4: f64 = (eq36_e707_d_n4 * v25);
+        let eq36_e709_d_n6: f64 = (eq36_e707_d_n6 * v25);
+        let eq36_e709_d_n7: f64 = (eq36_e707_d_n7 * v25);
+        let eq36_e709_d_n8: f64 = (eq36_e707_d_n8 * v25);
+        let eq36_e709_d_n9: f64 = (eq36_e707_d_n9 * v25);
+        let eq36_value: f64 = eq36_e709;
+        stamper.stamp_current_sparse_local::<5, 0>(
             Some(7),
             Some(6),
             multiplicity * (eq36_value),
+            [4, 6, 7, 8, 9],
+            [multiplicity * (eq36_e709_d_n4), multiplicity * (eq36_e709_d_n6), multiplicity * (eq36_e709_d_n7), multiplicity * (eq36_e709_d_n8), multiplicity * (eq36_e709_d_n9)],
+            [],
+            [],
+            1.0,
         );
     }
 
@@ -8955,7 +9015,7 @@ impl Instance {
         let v526: f64 = (if self.scalar_v521 { v25 } else { v525 });
         let v530: f64 = (self.scalar_v86 * v526);
 
-        let d530_dn4: f64 = self.scalar_v581;
+        let d530_dn4: f64 = self.scalar_v585;
         stamper.stamp_current_reactive_node1(
             Some(nodes[4]),
             None,

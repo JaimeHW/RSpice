@@ -1,10 +1,7 @@
-#![allow(dead_code, unused_assignments, unused_parens, unused_variables)]
+#![allow(dead_code, unused_imports, unused_parens, unused_variables)]
 
 use super::state::Instance;
 use crate::device::veriloga_generated::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
-
-const LIMEXP_MAX: f64 = 5.54062238439351e34;
-const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 
 #[inline]
 fn eval_ddt<const STATE_COUNT: usize>(
@@ -44,62 +41,12 @@ fn eval_ddt<const STATE_COUNT: usize>(
     }
 }
 
-#[inline]
-fn ddt_jacobian(ddt_active: bool, ddt_scale: f64, derivative: f64) -> f64 {
-    if ddt_active {
-        derivative * ddt_scale
-    } else {
-        0.0
-    }
-}
-
-#[inline]
-fn eval_idt<const STATE_COUNT: usize>(
-    current: &mut [f64; STATE_COUNT],
-    previous: &mut [f64; STATE_COUNT],
-    initialized: &mut [bool; STATE_COUNT],
-    ddt_active: bool,
-    idt_scale: f64,
-    slot: usize,
-    value: f64,
-    ic: f64,
-) -> f64 {
-    debug_assert!(slot < STATE_COUNT, "generated idt state slot out of range");
-    let previous_value = if initialized[slot] { previous[slot] } else { ic };
-    let current_value = if ddt_active {
-        previous_value + value * idt_scale
-    } else {
-        ic
-    };
-    current[slot] = current_value;
-    if !ddt_active {
-        previous[slot] = current_value;
-        initialized[slot] = true;
-    }
-    current_value
-}
-
-#[inline]
-fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
-    if timestep.abs() > Instance::DDT_EPSILON {
-        derivative * timestep
-    } else {
-        0.0
-    }
-}
-
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
-        let scalar_temperature_static_temperature = (ctx).temperature();
-        let scalar_temperature_static_thermal_voltage = (ctx).thermal_voltage();
-        self.ensure_temperature_static(scalar_temperature_static_temperature, scalar_temperature_static_thermal_voltage);
-        let p = Box::as_ref(&self.params);
-        let nodes = &(*self).nodes;
-        let branches = &(*self).branches;
-        let nv0 = ctx.node_voltage(nodes[0]);
-        let nv1 = ctx.node_voltage(nodes[1]);
-        let multiplicity = (*self).multiplicity;
-        let timestep = (*self).timestep;
+        let nodes = self.nodes;
+        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
+        let multiplicity = self.multiplicity;
+        let timestep = self.timestep;
         let ddt_state_current = self.ddt_state_current.as_mut();
         let ddt_state_previous = self.ddt_state_previous.as_mut();
         let ddt_state_older = self.ddt_state_older.as_mut();
@@ -129,8 +76,8 @@ impl Instance {
         let v608: f64 = 4e-12;
         let v706: f64 = 0.375;
         let v785: f64 = 0.886226925452758;
-        let v4779: f64 = nv0;
-        let v4780: f64 = nv1;
+        let v4779: f64 = ctx.node_voltage(nodes[0]);
+        let v4780: f64 = ctx.node_voltage(nodes[1]);
         let v4781: f64 = (v4779 - v4780);
         let v4782: f64 = (self.scalar_v4778 * v4781);
         let v4783: f64 = (self.scalar_v155 * v4782);
@@ -3493,18 +3440,19 @@ impl Instance {
             1,
             multiplicity * (((d5929_dn1) * ddt_scale)),
         );
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(1),
+            multiplicity * (v1),
+        );
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
-        let scalar_temperature_static_temperature = (ctx).temperature();
-        let scalar_temperature_static_thermal_voltage = (ctx).thermal_voltage();
-        self.ensure_temperature_static(scalar_temperature_static_temperature, scalar_temperature_static_thermal_voltage);
-        let p = Box::as_ref(&self.params);
-        let nodes = &(*self).nodes;
-        let branches = &(*self).branches;
-        let nv0 = ctx.node_voltage(nodes[0]);
-        let nv1 = ctx.node_voltage(nodes[1]);
-        let multiplicity = (*self).multiplicity;
+        let nodes = self.nodes;
+        let branches = self.branches;
+        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
+        let p = &(*self.params);
+        let multiplicity = self.multiplicity;
         let v1: f64 = 0.0;
         let v3: f64 = 0.5;
         let v5: f64 = 1.0;
@@ -3518,8 +3466,8 @@ impl Instance {
         let v504: f64 = -0.5;
         let v608: f64 = 4e-12;
         let v706: f64 = 0.375;
-        let v4779: f64 = nv0;
-        let v4780: f64 = nv1;
+        let v4779: f64 = ctx.node_voltage(nodes[0]);
+        let v4780: f64 = ctx.node_voltage(nodes[1]);
         let v4781: f64 = (v4779 - v4780);
         let v4782: f64 = (self.scalar_v4778 * v4781);
         let v4783: f64 = (self.scalar_v155 * v4782);

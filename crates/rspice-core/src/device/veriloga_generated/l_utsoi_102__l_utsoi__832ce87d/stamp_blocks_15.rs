@@ -7587,8 +7587,10 @@ impl Instance {
     }
 
     pub(super) fn stamp_transient_equations_block_0(
+        ctx: &GeneratedEvalContext<'_>,
         stamper: &mut GeneratedStamper<'_>,
         p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
         multiplicity: f64,
         ddt_active: bool,
         ddt_scale: f64,
@@ -7603,6 +7605,7 @@ impl Instance {
         ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         locals: &mut StampLocals,
     ) {
+        let nv5 = ctx.node_voltage(nodes[5]);
         let (eq0_e500, eq0_e500_d_n4, eq0_e500_d_n6, eq0_e500_d_n7, eq0_e500_d_n8, eq0_e500_d_n9,) = {
     if (locals.var_guard1239 != 0.0) {
         let eq0_e498: f64 = (p.p14 * locals.var_idse);
@@ -7878,6 +7881,79 @@ impl Instance {
             multiplicity * (eq28_value),
             [4, 6, 7, 8, 9],
             [multiplicity * (eq28_e679_d_n4), multiplicity * (eq28_e679_d_n6), multiplicity * (eq28_e679_d_n7), multiplicity * (eq28_e679_d_n8), multiplicity * (eq28_e679_d_n9)],
+            [],
+            [],
+            1.0,
+        );
+        let eq31_e687: f64 = (locals.var_gsig * (nv5 - 0.0));
+        let eq31_e687_d_n4: f64 = (locals.var_gsig_dn4 * (nv5 - 0.0));
+        let eq31_e687_d_n6: f64 = (locals.var_gsig_dn6 * (nv5 - 0.0));
+        let eq31_e687_d_n7: f64 = (locals.var_gsig_dn7 * (nv5 - 0.0));
+        let eq31_e687_d_n8: f64 = (locals.var_gsig_dn8 * (nv5 - 0.0));
+        let eq31_e687_d_n9: f64 = (locals.var_gsig_dn9 * (nv5 - 0.0));
+        let eq31_value: f64 = eq31_e687;
+        stamper.stamp_current_sparse_local::<6, 0>(
+            Some(5),
+            None,
+            multiplicity * (eq31_value),
+            [4, 5, 6, 7, 8, 9],
+            [multiplicity * (eq31_e687_d_n4), multiplicity * (locals.var_gsig), multiplicity * (eq31_e687_d_n6), multiplicity * (eq31_e687_d_n7), multiplicity * (eq31_e687_d_n8), multiplicity * (eq31_e687_d_n9)],
+            [],
+            [],
+            1.0,
+        );
+        let eq32_e690: f64 = (locals.var_cgeff * (nv5 - 0.0));
+        let eq32_e690_d_n4: f64 = (locals.var_cgeff_dn4 * (nv5 - 0.0));
+        let eq32_e690_d_n6: f64 = (locals.var_cgeff_dn6 * (nv5 - 0.0));
+        let eq32_e690_d_n7: f64 = (locals.var_cgeff_dn7 * (nv5 - 0.0));
+        let eq32_e690_d_n8: f64 = (locals.var_cgeff_dn8 * (nv5 - 0.0));
+        let eq32_e690_d_n9: f64 = (locals.var_cgeff_dn9 * (nv5 - 0.0));
+        let eq32_e691: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 16, eq32_e690);
+        let eq32_value: f64 = eq32_e691;
+        stamper.stamp_current_sparse_local::<6, 0>(
+            Some(5),
+            None,
+            multiplicity * (eq32_value),
+            [4, 5, 6, 7, 8, 9],
+            [multiplicity * ((eq32_e690_d_n4 * ddt_scale)), multiplicity * ((locals.var_cgeff * ddt_scale)), multiplicity * ((eq32_e690_d_n6 * ddt_scale)), multiplicity * ((eq32_e690_d_n7 * ddt_scale)), multiplicity * ((eq32_e690_d_n8 * ddt_scale)), multiplicity * ((eq32_e690_d_n9 * ddt_scale))],
+            [],
+            [],
+            1.0,
+        );
+        let eq33_e693: f64 = (-locals.var_csgeff);
+        let eq33_e695: f64 = (eq33_e693 * (nv5 - 0.0));
+        let eq33_e695_d_n4: f64 = ((-locals.var_csgeff_dn4) * (nv5 - 0.0));
+        let eq33_e695_d_n6: f64 = ((-locals.var_csgeff_dn6) * (nv5 - 0.0));
+        let eq33_e695_d_n7: f64 = ((-locals.var_csgeff_dn7) * (nv5 - 0.0));
+        let eq33_e695_d_n8: f64 = ((-locals.var_csgeff_dn8) * (nv5 - 0.0));
+        let eq33_e695_d_n9: f64 = ((-locals.var_csgeff_dn9) * (nv5 - 0.0));
+        let eq33_e696: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 17, eq33_e695);
+        let eq33_value: f64 = eq33_e696;
+        stamper.stamp_current_sparse_local::<6, 0>(
+            Some(9),
+            Some(6),
+            multiplicity * (eq33_value),
+            [4, 5, 6, 7, 8, 9],
+            [multiplicity * ((eq33_e695_d_n4 * ddt_scale)), multiplicity * ((eq33_e693 * ddt_scale)), multiplicity * ((eq33_e695_d_n6 * ddt_scale)), multiplicity * ((eq33_e695_d_n7 * ddt_scale)), multiplicity * ((eq33_e695_d_n8 * ddt_scale)), multiplicity * ((eq33_e695_d_n9 * ddt_scale))],
+            [],
+            [],
+            1.0,
+        );
+        let eq34_e698: f64 = (-locals.var_cdgeff);
+        let eq34_e700: f64 = (eq34_e698 * (nv5 - 0.0));
+        let eq34_e700_d_n4: f64 = ((-locals.var_cdgeff_dn4) * (nv5 - 0.0));
+        let eq34_e700_d_n6: f64 = ((-locals.var_cdgeff_dn6) * (nv5 - 0.0));
+        let eq34_e700_d_n7: f64 = ((-locals.var_cdgeff_dn7) * (nv5 - 0.0));
+        let eq34_e700_d_n8: f64 = ((-locals.var_cdgeff_dn8) * (nv5 - 0.0));
+        let eq34_e700_d_n9: f64 = ((-locals.var_cdgeff_dn9) * (nv5 - 0.0));
+        let eq34_e701: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 18, eq34_e700);
+        let eq34_value: f64 = eq34_e701;
+        stamper.stamp_current_sparse_local::<6, 0>(
+            Some(9),
+            Some(7),
+            multiplicity * (eq34_value),
+            [4, 5, 6, 7, 8, 9],
+            [multiplicity * ((eq34_e700_d_n4 * ddt_scale)), multiplicity * ((eq34_e698 * ddt_scale)), multiplicity * ((eq34_e700_d_n6 * ddt_scale)), multiplicity * ((eq34_e700_d_n7 * ddt_scale)), multiplicity * ((eq34_e700_d_n8 * ddt_scale)), multiplicity * ((eq34_e700_d_n9 * ddt_scale))],
             [],
             [],
             1.0,

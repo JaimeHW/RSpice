@@ -1,109 +1,17 @@
-#![allow(dead_code, unused_assignments, unused_parens, unused_variables)]
+#![allow(dead_code, unused_imports, unused_parens, unused_variables)]
 
 use super::state::Instance;
 use crate::device::veriloga_generated::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
 
-const LIMEXP_MAX: f64 = 5.54062238439351e34;
-const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
-
-#[inline]
-fn eval_ddt<const STATE_COUNT: usize>(
-    current: &mut [f64; STATE_COUNT],
-    previous: &mut [f64; STATE_COUNT],
-    older: &mut [f64; STATE_COUNT],
-    initialized: &mut [bool; STATE_COUNT],
-    derivative_current: &mut [f64; STATE_COUNT],
-    derivative_previous: &mut [f64; STATE_COUNT],
-    ddt_active: bool,
-    ddt_scale: f64,
-    ddt_previous_value_scale: f64,
-    ddt_older_value_scale: f64,
-    ddt_previous_derivative_scale: f64,
-    slot: usize,
-    value: f64,
-) -> f64 {
-    debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
-    let previous_value = if initialized[slot] { previous[slot] } else { value };
-    let older_value = if initialized[slot] { older[slot] } else { value };
-    current[slot] = value;
-    if ddt_active {
-        let result = value * ddt_scale
-            - previous_value * ddt_previous_value_scale
-            - older_value * ddt_older_value_scale
-            - derivative_previous[slot] * ddt_previous_derivative_scale;
-        derivative_current[slot] = result;
-        result
-    } else {
-        current[slot] = value;
-        previous[slot] = value;
-        older[slot] = value;
-        derivative_current[slot] = 0.0;
-        derivative_previous[slot] = 0.0;
-        initialized[slot] = true;
-        0.0
-    }
-}
-
-#[inline]
-fn ddt_jacobian(ddt_active: bool, ddt_scale: f64, derivative: f64) -> f64 {
-    if ddt_active {
-        derivative * ddt_scale
-    } else {
-        0.0
-    }
-}
-
-#[inline]
-fn eval_idt<const STATE_COUNT: usize>(
-    current: &mut [f64; STATE_COUNT],
-    previous: &mut [f64; STATE_COUNT],
-    initialized: &mut [bool; STATE_COUNT],
-    ddt_active: bool,
-    idt_scale: f64,
-    slot: usize,
-    value: f64,
-    ic: f64,
-) -> f64 {
-    debug_assert!(slot < STATE_COUNT, "generated idt state slot out of range");
-    let previous_value = if initialized[slot] { previous[slot] } else { ic };
-    let current_value = if ddt_active {
-        previous_value + value * idt_scale
-    } else {
-        ic
-    };
-    current[slot] = current_value;
-    if !ddt_active {
-        previous[slot] = current_value;
-        initialized[slot] = true;
-    }
-    current_value
-}
-
-#[inline]
-fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
-    if timestep.abs() > Instance::DDT_EPSILON {
-        derivative * timestep
-    } else {
-        0.0
-    }
-}
-
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
-        let scalar_temperature_static_temperature = (ctx).temperature();
-        let scalar_temperature_static_thermal_voltage = (ctx).thermal_voltage();
-        self.ensure_temperature_static(scalar_temperature_static_temperature, scalar_temperature_static_thermal_voltage);
-        let p = Box::as_ref(&self.params);
-        let nodes = &(*self).nodes;
-        let branches = &(*self).branches;
-        let nv0 = ctx.node_voltage(nodes[0]);
-        let nv1 = ctx.node_voltage(nodes[1]);
-        let param_given = self.param_given.as_ref();
-        let multiplicity = (*self).multiplicity;
+        let nodes = self.nodes;
+        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
+        let multiplicity = self.multiplicity;
         let v2: f64 = 0.0;
         let v5: f64 = 1.0;
-        let v241: f64 = nv0;
-        let v242: f64 = nv1;
+        let v241: f64 = ctx.node_voltage(nodes[0]);
+        let v242: f64 = ctx.node_voltage(nodes[1]);
         let v243: f64 = (v241 - v242);
         let v245: f64 = (v243 / self.scalar_v187);
         let v246: f64 = (if self.scalar_v244 { v245 } else { v2 });
@@ -168,8 +76,18 @@ impl Instance {
             1,
             multiplicity * (d274_dn1),
         );
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(1),
+            multiplicity * (v2),
+        );
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(1),
+            multiplicity * (v2),
+        );
     }
 
-    pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
+    pub fn stamp_reactive(&mut self, _ctx: &GeneratedEvalContext<'_>, _stamper: &mut GeneratedReactiveStamper<'_>) {
     }
 }

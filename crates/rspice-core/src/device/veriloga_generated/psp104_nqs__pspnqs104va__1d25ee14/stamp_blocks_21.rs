@@ -3360,8 +3360,10 @@ impl Instance {
     }
 
     pub(super) fn stamp_transient_equations_block_2(
+        ctx: &GeneratedEvalContext<'_>,
         stamper: &mut GeneratedStamper<'_>,
         p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
         multiplicity: f64,
         ddt_active: bool,
         ddt_scale: f64,
@@ -3376,6 +3378,7 @@ impl Instance {
         ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         locals: &mut StampLocals,
     ) {
+        let nv4 = ctx.node_voltage(nodes[4]);
         let eq61_e1427: f64 = (locals.var_chnl_type * locals.var_mult_inst);
         let eq61_e1429: f64 = (eq61_e1427 * p.p33);
         let eq61_e1431: f64 = (eq61_e1429 * locals.var_qgb_ov);
@@ -3408,28 +3411,6 @@ impl Instance {
             &eq61_branch_derivatives,
             multiplicity,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_3(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_previous_value_scale: f64,
-        ddt_older_value_scale: f64,
-        ddt_previous_derivative_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        locals: &mut StampLocals,
-    ) {
-        let nv4 = ctx.node_voltage(nodes[4]);
         let __rspice_inv_cse_0: f64 = 1.0 / locals.var_mig;
         let eq65_e1456: f64 = ((nv4 - 0.0) * __rspice_inv_cse_0);
         let eq65_e1456_d_n4: f64 = (1.0 * __rspice_inv_cse_0);

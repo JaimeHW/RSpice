@@ -6603,6 +6603,21 @@ impl Instance {
         let v15595: f64 = (self.scalar_v11541 * v15593);
         let v15596: f64 = -0.0;
 
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(2),
+            multiplicity * (v57),
+        );
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(2),
+            multiplicity * (v57),
+        );
+        stamper.stamp_current_const_local(
+            Some(2),
+            Some(1),
+            multiplicity * (v57),
+        );
         let d11251_dn0: f64 = v15132;
         let d11251_dn2: f64 = v15133;
         stamper.stamp_current_node2_local(

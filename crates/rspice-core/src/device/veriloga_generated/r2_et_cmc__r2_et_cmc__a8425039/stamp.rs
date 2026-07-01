@@ -359,6 +359,16 @@ impl Instance {
             2,
             multiplicity * (d302_dn2),
         );
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(1),
+            multiplicity * (v2),
+        );
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(1),
+            multiplicity * (v2),
+        );
         let mut locals = StampLocals::default();
 
         Self::stamp_transient_block_0(p, param_given, &mut locals);

@@ -2132,18 +2132,6 @@ impl Instance {
             5,
             eq25_e218_d_b5,
         );
-        let (eq26_e232,) = {
-    if ((locals.var_guard21 != 0.0) && (p.p0 != 0.0)) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq26_value: f64 = eq26_e232;
-        stamper.stamp_potential_const_local(
-            7,
-            eq26_value,
-        );
         let (eq27_e242, eq27_e242_d_b5,) = {
     if ((locals.var_guard21 == 0.0) && (locals.var_guard22 != 0.0)) {
         let eq27_e239: f64 = (p.p50 * bi5);
@@ -2181,18 +2169,6 @@ impl Instance {
             [eq29_e256_d_n3, eq29_e256_d_n4, eq29_e256_d_n5, eq29_e256_d_n8, eq29_e256_d_n11],
             [10],
             [eq29_e256_d_b10],
-        );
-        let (eq30_e270,) = {
-    if ((locals.var_guard23 != 0.0) && (p.p0 != 0.0)) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq30_value: f64 = eq30_e270;
-        stamper.stamp_potential_const_local(
-            11,
-            eq30_value,
         );
         let eq32_e278: f64 = (p.p49 * bi13);
         let eq32_e279: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 12, eq32_e278);
@@ -2240,18 +2216,6 @@ impl Instance {
             eq34_value,
             14,
             eq34_e292_d_b14,
-        );
-        let (eq35_e306,) = {
-    if ((locals.var_guard24 != 0.0) && (p.p0 != 0.0)) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq35_value: f64 = eq35_e306;
-        stamper.stamp_potential_const_local(
-            16,
-            eq35_value,
         );
         let (eq36_e316, eq36_e316_d_b14,) = {
     if ((locals.var_guard24 == 0.0) && (locals.var_guard25 != 0.0)) {
