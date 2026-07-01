@@ -515,10 +515,12 @@ fn transform_rows(
         }
         row_column += 1;
         if row_column == expected_columns {
+            let values = std::mem::take(&mut row_values);
             rows.push(FileSourceRow {
                 time: row_time,
-                values: row_values.clone(),
+                values,
             });
+            row_values.reserve(width);
             row_column = 0;
         }
     }
