@@ -1638,6 +1638,13 @@ fn rust_backend_auto_uses_bounded_local_storage_subset_for_wide_mixed_residuals(
         .expect("stamp file")
         .contents
         .as_str();
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
 
     assert!(
         !stamp.contains("let s = match &mut self.scratch")
@@ -1645,6 +1652,13 @@ fn rust_backend_auto_uses_bounded_local_storage_subset_for_wide_mixed_residuals(
             && !stamp.contains("scratch.node_derivatives")
             && !stamp.contains("s.ad_value("),
         "wide mixed residual should stay on native scalar locals"
+    );
+    assert!(
+        !state.contains("GenericScratch")
+            && !state.contains("GenericReactiveScratch")
+            && !state.contains("scratch:")
+            && !state.contains("reactive_scratch:"),
+        "wide mixed residual should not reserve legacy scratch storage in generated state"
     );
     assert!(stamp.contains("let mut var_drive: f64 = 0.0;"), "{stamp}");
     assert!(stamp.contains("let mut var_shaped: f64 = 0.0;"), "{stamp}");
@@ -1694,6 +1708,13 @@ fn rust_backend_auto_transpiles_shipped_asmhemt_with_mixed_local_storage() {
         .expect("stamp file")
         .contents
         .as_str();
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
 
     assert!(
         !stamp.contains("let s = match &mut self.scratch")
@@ -1701,6 +1722,18 @@ fn rust_backend_auto_transpiles_shipped_asmhemt_with_mixed_local_storage() {
             && !stamp.contains("scratch.node_derivatives")
             && !stamp.contains("s.ad_value("),
         "ASM-HEMT should avoid legacy scratch AD in transient stamp"
+    );
+    assert!(
+        !stamp.contains("let s = match &mut self.reactive_scratch")
+            && !stamp.contains("ReactiveScratch"),
+        "ASM-HEMT should avoid legacy reactive scratch AD"
+    );
+    assert!(
+        !state.contains("GenericScratch")
+            && !state.contains("GenericReactiveScratch")
+            && !state.contains("scratch:")
+            && !state.contains("reactive_scratch:"),
+        "ASM-HEMT should not reserve legacy scratch storage in generated state"
     );
     assert!(
         stamp.contains("let mut var_"),
@@ -11909,12 +11942,11 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
         "{state}"
     );
     assert!(
-        state.contains("pub(crate) scratch: Option<Box<GenericScratch<"),
-        "{state}"
-    );
-    assert!(
-        state.contains("pub(crate) reactive_scratch: Option<Box<GenericReactiveScratch<"),
-        "{state}"
+        !state.contains("GenericScratch")
+            && !state.contains("GenericReactiveScratch")
+            && !state.contains("scratch:")
+            && !state.contains("reactive_scratch:"),
+        "scratch-free generated state should not reserve legacy scratch storage:\n{state}"
     );
     assert!(state.contains("params: Parameters::new_box()"), "{state}");
     assert!(
@@ -11933,14 +11965,7 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
         state.contains("ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>()"),
         "{state}"
     );
-    assert!(
-        state.contains("scratch: Some(GenericScratch::new_box())"),
-        "{state}"
-    );
-    assert!(state.contains("reactive_scratch: None"), "{state}");
     assert!(state.contains("params: self.params.clone()"), "{state}");
-    assert!(state.contains("scratch: None"), "{state}");
-    assert!(state.contains("reactive_scratch: None"), "{state}");
     assert!(
         !state.contains("#[derive(Debug, Clone)]"),
         "large generated state should not synthesize Debug or field-by-field Clone impls:\n{state}"
@@ -11950,11 +11975,11 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
 #[test]
 fn rust_backend_generates_restore_that_preserves_live_scratch_buffers() {
     let artifact = VerilogACompiler::default()
-        .compile_canonical_ir(compact_parameter_state_source())
+        .compile_canonical_ir(&chunked_assignment_chain_source(320))
         .expect("canonical IR");
     let generated = RustTranspiler::default()
         .transpile(&artifact)
-        .expect("transpile compact parameter-state device");
+        .expect("transpile chunked assignment chain");
     let state = generated
         .files
         .iter()
@@ -11968,11 +11993,19 @@ fn rust_backend_generates_restore_that_preserves_live_scratch_buffers() {
         "{state}"
     );
     assert!(
+        state.contains("pub(crate) scratch: Option<Box<GenericScratch<"),
+        "fallback scratch users should reserve transient scratch storage:\n{state}"
+    );
+    assert!(
+        !state.contains("GenericReactiveScratch") && !state.contains("reactive_scratch:"),
+        "fixture should not reserve unused reactive scratch storage:\n{state}"
+    );
+    assert!(
         state.contains("let scratch = self.scratch.take();"),
         "{state}"
     );
     assert!(
-        state.contains("let reactive_scratch = self.reactive_scratch.take();"),
+        !state.contains("let reactive_scratch = self.reactive_scratch.take();"),
         "{state}"
     );
     assert!(
@@ -11980,8 +12013,8 @@ fn rust_backend_generates_restore_that_preserves_live_scratch_buffers() {
         "restore must preserve the active transient scratch allocation:\n{state}"
     );
     assert!(
-        state.contains("reactive_scratch,"),
-        "restore must preserve the active reactive scratch allocation:\n{state}"
+        !state.contains("reactive_scratch,"),
+        "restore must not carry an unused reactive scratch allocation:\n{state}"
     );
     assert!(
         !state.contains("scratch: snapshot.scratch"),
