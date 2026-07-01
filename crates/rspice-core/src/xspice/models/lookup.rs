@@ -643,11 +643,179 @@ impl CodeModel for PiecewiseLinearTimeSeries {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xspice::ParamType;
 
     fn assert_near(actual: Value, expected: Value) {
         assert!(
             (actual - expected).abs() <= 1.0e-12,
             "expected {expected:e}, got {actual:e}"
+        );
+    }
+
+    fn port_summary(
+        model: &dyn CodeModel,
+    ) -> Vec<(
+        &str,
+        PortDirection,
+        PortType,
+        Vec<PortType>,
+        bool,
+        bool,
+        Option<usize>,
+        Option<usize>,
+    )> {
+        model
+            .ports()
+            .iter()
+            .map(|port| {
+                (
+                    port.name.as_str(),
+                    port.direction,
+                    port.default_type,
+                    port.allowed_types.clone(),
+                    port.is_vector,
+                    port.null_allowed,
+                    port.vector_min_len,
+                    port.vector_max_len,
+                )
+            })
+            .collect()
+    }
+
+    fn param_summary(
+        model: &dyn CodeModel,
+    ) -> Vec<(
+        &str,
+        ParamType,
+        Value,
+        bool,
+        Option<usize>,
+        Option<usize>,
+        Option<Vec<Value>>,
+    )> {
+        model
+            .parameters()
+            .iter()
+            .map(|param| {
+                (
+                    param.name.as_str(),
+                    param.param_type,
+                    param.default,
+                    param.required,
+                    param.vector_min_len,
+                    param.vector_max_len,
+                    param.real_vector_default.clone(),
+                )
+            })
+            .collect()
+    }
+
+    fn analog_input_types() -> Vec<PortType> {
+        vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::Current,
+            PortType::DifferentialCurrent,
+            PortType::VoltageName,
+        ]
+    }
+
+    fn analog_output_types() -> Vec<PortType> {
+        vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::Current,
+            PortType::DifferentialCurrent,
+        ]
+    }
+
+    fn lookup_param_summary() -> Vec<(
+        &'static str,
+        ParamType,
+        Value,
+        bool,
+        Option<usize>,
+        Option<usize>,
+        Option<Vec<Value>>,
+    )> {
+        vec![
+            (
+                "x_array",
+                ParamType::RealVector,
+                0.0,
+                true,
+                Some(2),
+                None,
+                Some(Vec::new()),
+            ),
+            (
+                "y_array",
+                ParamType::RealVector,
+                0.0,
+                true,
+                Some(2),
+                None,
+                Some(Vec::new()),
+            ),
+            (
+                "input_domain",
+                ParamType::Real,
+                0.01,
+                false,
+                None,
+                None,
+                None,
+            ),
+            ("fraction", ParamType::Boolean, 1.0, false, None, None, None),
+            ("limit", ParamType::Boolean, 0.0, false, None, None, None),
+        ]
+    }
+
+    #[test]
+    fn lookup_metadata_matches_ngspice46_interfaces() {
+        assert_eq!(
+            port_summary(&PiecewiseLinear),
+            vec![
+                (
+                    "in",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    analog_input_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+                (
+                    "out",
+                    PortDirection::Out,
+                    PortType::Voltage,
+                    analog_output_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+            ]
+        );
+        assert_eq!(param_summary(&PiecewiseLinear), lookup_param_summary());
+
+        assert_eq!(
+            port_summary(&PiecewiseLinearTimeSeries),
+            vec![(
+                "out",
+                PortDirection::Out,
+                PortType::Voltage,
+                analog_output_types(),
+                false,
+                false,
+                None,
+                None,
+            )]
+        );
+        assert_eq!(
+            param_summary(&PiecewiseLinearTimeSeries),
+            lookup_param_summary()
         );
     }
 
