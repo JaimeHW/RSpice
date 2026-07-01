@@ -498,6 +498,12 @@ fn xfer_table_signature_matches(ctx: &CmContext, signature: &XferTableSignature)
 }
 
 fn cache_xfer_table(ctx: &mut CmContext) {
+    if let Some(resource) = ctx.resource::<XferTableResource>(XFER_TABLE_RESOURCE)
+        && xfer_table_signature_matches(ctx, &resource.signature)
+    {
+        return;
+    }
+
     let (file_virtual_stamp, result) = xfer_table_uncached(ctx);
     let signature = xfer_table_signature_with_virtual_stamp(ctx, file_virtual_stamp);
     let result = result.map(xfer_table_data).map(Arc::new);
@@ -702,6 +708,12 @@ fn s_xfer_coefficient_signature_matches(
 
 fn cache_s_xfer_coefficients(ctx: &mut CmContext) -> CmResult<Option<Arc<SXferCoefficients>>> {
     let signature = s_xfer_coefficient_signature(ctx);
+    if let Some(resource) = ctx.resource::<SXferCoefficientResource>(SXFER_COEFFICIENT_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.coefficients.clone());
+    }
+
     let coefficients = if s_xfer_improper_order(ctx) {
         None
     } else {
@@ -1450,7 +1462,15 @@ mod tests {
         let first_table = xfer_table(&ctx).expect("cached xfer table");
         assert_eq!(xfer_first_real_gain(&ctx), 10.0);
 
+        cache_xfer_table(&mut ctx);
+        let after_mutable_cache = xfer_table(&ctx).expect("xfer table after mutable cache refresh");
+        assert!(
+            Arc::ptr_eq(&first_table, &after_mutable_cache),
+            "unchanged xfer parameters should reuse the context table resource"
+        );
+
         ctx.set_real_vector_param("unrelated", vec![1.0, 2.0]);
+        cache_xfer_table(&mut ctx);
         let after_unrelated = xfer_table(&ctx).expect("xfer table after unrelated vector");
         assert!(Arc::ptr_eq(&first_table, &after_unrelated));
 
@@ -1540,7 +1560,19 @@ mod tests {
             .expect("proper s_xfer order");
         assert_eq!(s_xfer_dc_gain(&ctx), 2.0);
 
+        let after_mutable_cache = cache_s_xfer_coefficients(&mut ctx)
+            .expect("mutable coefficient cache reuses")
+            .expect("proper s_xfer order");
+        assert!(
+            Arc::ptr_eq(&first, &after_mutable_cache),
+            "unchanged s_xfer parameters should reuse the context coefficient resource"
+        );
+
         ctx.set_real_vector_param("unrelated", vec![1.0, 2.0]);
+        let after_unrelated_mutable = cache_s_xfer_coefficients(&mut ctx)
+            .expect("mutable coefficients after unrelated vector")
+            .expect("proper s_xfer order");
+        assert!(Arc::ptr_eq(&first, &after_unrelated_mutable));
         let after_unrelated = s_xfer_coefficients_for_context(&ctx)
             .expect("coefficients after unrelated vector")
             .expect("proper s_xfer order");
