@@ -4984,6 +4984,91 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_bufa_array_lowers_to_buffer_instances_with_timing() {
+        let netlist = Netlist::parse(
+            "pspice u bufa array\n\
+             U12 BUFA(2) $G_DPWR $G_DGND in1 in2 out1 out2 dly\n\
+             .model DLY UGATE (TPLHTY=2n TPHLTY=5n)\n\
+             .end\n",
+        )
+        .expect("PSpice BUFA array should lower to d_buffer instances");
+
+        assert_eq!(netlist.elements.len(), 2);
+        assert_eq!(netlist.elements[0].name, "U12_0");
+        assert_eq!(netlist.elements[1].name, "U12_1");
+
+        match &netlist.elements[1].kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                pspice_u_timing,
+                ..
+            } => {
+                assert!(pspice_u_timing.is_none());
+                assert_ne!(model, "d_buffer");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("IN2".to_string()),
+                        XspicePort::Digital("OUT2".to_string())
+                    ]
+                );
+                let alias = netlist
+                    .models
+                    .iter()
+                    .find(|alias| alias.name == *model)
+                    .expect("generated timing alias exists");
+                assert_eq!(alias.model_type, "d_buffer");
+                assert!(alias.params.iter().any(|(name, value)| {
+                    name == "rise_delay" && (*value - 2.0e-9).abs() < 1.0e-21
+                }));
+                assert!(alias.params.iter().any(|(name, value)| {
+                    name == "fall_delay" && (*value - 5.0e-9).abs() < 1.0e-21
+                }));
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_inva_array_lowers_to_inverter_instances() {
+        let netlist = Netlist::parse(
+            "pspice u inva array\n\
+             U13 INVA(2) $G_DPWR $G_DGND in1 in2 out1 out2 dly\n\
+             .end\n",
+        )
+        .expect("PSpice INVA array should lower to d_inverter instances");
+
+        assert_eq!(netlist.elements.len(), 2);
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_inverter");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("IN1".to_string()),
+                        XspicePort::Digital("OUT1".to_string())
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+        match &netlist.elements[1].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_inverter");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("IN2".to_string()),
+                        XspicePort::Digital("OUT2".to_string())
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn pspice_u_inverter_lowers_to_scalar_xspice_ports() {
         let netlist = Netlist::parse(
             "pspice u inverter\n\

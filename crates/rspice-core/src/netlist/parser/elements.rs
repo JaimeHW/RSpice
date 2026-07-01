@@ -734,9 +734,25 @@ pub(super) fn parse_pspice_u_device(
             line_num,
             elements,
         ),
+        "BUFA" => parse_pspice_u_unary_gate_array(
+            &name,
+            &fields,
+            count.unwrap_or(1),
+            "d_buffer",
+            line_num,
+            elements,
+        ),
         "DFF" => parse_pspice_u_dff(&name, &fields, count.unwrap_or(1), line_num, elements),
         "DLYLINE" => parse_pspice_u_dlyline(&name, &fields, line_num, elements),
         "DLTCH" => parse_pspice_u_dlatch(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "INVA" => parse_pspice_u_unary_gate_array(
+            &name,
+            &fields,
+            count.unwrap_or(1),
+            "d_inverter",
+            line_num,
+            elements,
+        ),
         "INV3" | "INV3A" => {
             parse_pspice_u_tristate(&name, &fields, count.unwrap_or(1), true, line_num, elements)
         }
@@ -761,7 +777,7 @@ pub(super) fn parse_pspice_u_device(
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, PULLUP, PULLDN, SRFF, BUF3A, and INV3A",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, PULLUP, PULLDN, SRFF, BUFA, INVA, BUF3A, and INV3A",
                 fields[1]
             ),
         }),
@@ -874,6 +890,62 @@ fn parse_pspice_u_dff(
             instance_name,
             "d_dff",
             ports,
+            pspice_u_timing.clone(),
+        );
+    }
+
+    Ok(())
+}
+
+fn parse_pspice_u_unary_gate_array(
+    name: &str,
+    fields: &[String],
+    count: usize,
+    model: &str,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    if count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice U-device '{}' type '{}' requires at least one unary gate",
+                name, fields[1]
+            ),
+        });
+    }
+
+    let pins = &fields[4..];
+    let required = count * 2 + 1;
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice unary gate array '{}' requires {} input pin(s), {} output pin(s), and a timing model",
+                name, count, count
+            ),
+        });
+    }
+
+    let output_offset = count;
+    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
+        .map(|timing_model| PspiceUTiming { timing_model });
+    for index in 0..count {
+        let input =
+            pspice_u_required_digital_port(&pins[index], "gate input", fields, line_num, elements)?;
+        let output = pspice_u_required_digital_port(
+            &pins[output_offset + index],
+            "gate output",
+            fields,
+            line_num,
+            elements,
+        )?;
+        let instance_name = pspice_u_lowered_instance_name(name, count, index);
+        push_pspice_u_xspice_element_with_timing(
+            elements,
+            instance_name,
+            model,
+            vec![input, output],
             pspice_u_timing.clone(),
         );
     }
