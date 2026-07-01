@@ -9,6 +9,7 @@ use crate::{Complex64, Value};
 use std::sync::{Arc, OnceLock};
 
 const CORE_TABLE_RESOURCE: &str = "xspice.xtradev.core.table";
+const ILIMIT_EVAL_RESOURCE: &str = "xspice.xtradev.ilimit.eval";
 
 #[derive(Debug, Default)]
 pub struct Potentiometer;
@@ -187,7 +188,7 @@ fn xtradev_port_key(output_port: &str) -> XtradevPortKey {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct IlimitEval {
     out_current: Value,
     out_in_partial: Value,
@@ -204,6 +205,33 @@ struct IlimitEval {
     neg_out_partial: Value,
     neg_pos_partial: Value,
     neg_neg_partial: Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct IlimitEvalSignature {
+    in_offset: Value,
+    gain: Value,
+    r_out_source: Value,
+    r_out_sink: Value,
+    i_limit_source: Value,
+    i_limit_sink: Value,
+    v_pwr_range: Value,
+    i_source_range: Value,
+    i_sink_range: Value,
+    r_out_domain: Value,
+    input: Value,
+    output: Value,
+    pos_pwr: Value,
+    neg_pwr: Value,
+    pos_pwr_connected: bool,
+    neg_pwr_connected: bool,
+    init: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct IlimitEvalResource {
+    signature: IlimitEvalSignature,
+    eval: IlimitEval,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1729,6 +1757,65 @@ fn ilimit_port_connected(ctx: &CmContext, name: &str) -> bool {
     ctx.port_width(name) > 0
 }
 
+fn ilimit_eval_signature(ctx: &CmContext) -> CmResult<IlimitEvalSignature> {
+    let pos_pwr_connected = ilimit_port_connected(ctx, "pos_pwr");
+    let neg_pwr_connected = ilimit_port_connected(ctx, "neg_pwr");
+    Ok(IlimitEvalSignature {
+        in_offset: finite_param(ctx, "in_offset", 0.0)?,
+        gain: finite_param(ctx, "gain", 1.0)?,
+        r_out_source: finite_param(ctx, "r_out_source", 1.0)?,
+        r_out_sink: finite_param(ctx, "r_out_sink", 1.0)?,
+        i_limit_source: finite_param(ctx, "i_limit_source", 10.0e-3)?,
+        i_limit_sink: finite_param(ctx, "i_limit_sink", 10.0e-3)?,
+        v_pwr_range: finite_param(ctx, "v_pwr_range", 1.0e-6)?,
+        i_source_range: finite_param(ctx, "i_source_range", 1.0e-9)?,
+        i_sink_range: finite_param(ctx, "i_sink_range", 1.0e-9)?,
+        r_out_domain: finite_param(ctx, "r_out_domain", 1.0e-9)?,
+        input: ctx.input("in"),
+        output: ctx.input("out"),
+        pos_pwr: if pos_pwr_connected {
+            ctx.input("pos_pwr")
+        } else {
+            1.0e6
+        },
+        neg_pwr: if neg_pwr_connected {
+            ctx.input("neg_pwr")
+        } else {
+            -1.0e6
+        },
+        pos_pwr_connected,
+        neg_pwr_connected,
+        init: ctx.is_init(),
+    })
+}
+
+fn ilimit_eval_for_context(ctx: &CmContext) -> CmResult<IlimitEval> {
+    let signature = ilimit_eval_signature(ctx)?;
+    if let Some(resource) = ctx.resource::<IlimitEvalResource>(ILIMIT_EVAL_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.eval);
+    }
+
+    ilimit_eval(ctx)
+}
+
+fn cache_ilimit_eval(ctx: &mut CmContext) -> CmResult<IlimitEval> {
+    let signature = ilimit_eval_signature(ctx)?;
+    if let Some(resource) = ctx.resource::<IlimitEvalResource>(ILIMIT_EVAL_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.eval);
+    }
+
+    let eval = ilimit_eval(ctx)?;
+    ctx.set_resource(
+        ILIMIT_EVAL_RESOURCE,
+        Arc::new(IlimitEvalResource { signature, eval }),
+    );
+    Ok(eval)
+}
+
 fn ilimit_eval(ctx: &CmContext) -> CmResult<IlimitEval> {
     ilimit_params(ctx)?;
 
@@ -2972,7 +3059,7 @@ impl CodeModel for Ilimit {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let eval = ilimit_eval(ctx)?;
+        let eval = cache_ilimit_eval(ctx)?;
         let out_pair = ctx.port_node_pair("out").unwrap_or((0, 0));
         stamp_ilimit_current(
             ctx,
@@ -3032,7 +3119,7 @@ impl CodeModel for Ilimit {
                 .collect()
         }
 
-        let Ok(eval) = ilimit_eval(ctx) else {
+        let Ok(eval) = ilimit_eval_for_context(ctx) else {
             return Vec::new();
         };
 
@@ -3204,6 +3291,45 @@ impl CodeModel for SeeGenerator {
 mod tests {
     use super::*;
 
+    fn ilimit_cache_context() -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.set_param("in_offset", 0.0);
+        ctx.set_param("gain", 1.0);
+        ctx.set_param("r_out_source", 1000.0);
+        ctx.set_param("r_out_sink", 1000.0);
+        ctx.set_param("i_limit_source", 1.0);
+        ctx.set_param("i_limit_sink", 1.0);
+        ctx.set_param("v_pwr_range", 1.0e-6);
+        ctx.set_param("i_source_range", 1.0e-9);
+        ctx.set_param("i_sink_range", 1.0e-9);
+        ctx.set_param("r_out_domain", 1.0e-9);
+        ctx.set_port_width("pos_pwr", 0);
+        ctx.set_port_width("neg_pwr", 0);
+        ctx.set_input_analog("in", 1.0);
+        ctx.set_input_analog("out", 0.25);
+        ctx
+    }
+
+    fn sentinel_ilimit_eval() -> IlimitEval {
+        IlimitEval {
+            out_current: 123.0,
+            out_in_partial: 3.0,
+            out_out_partial: 4.0,
+            out_pos_partial: 0.0,
+            out_neg_partial: 0.0,
+            pos_current: 0.0,
+            pos_in_partial: 0.0,
+            pos_out_partial: 0.0,
+            pos_pos_partial: 0.0,
+            pos_neg_partial: 0.0,
+            neg_current: 0.0,
+            neg_in_partial: 0.0,
+            neg_out_partial: 0.0,
+            neg_pos_partial: 0.0,
+            neg_neg_partial: 0.0,
+        }
+    }
+
     #[test]
     fn logarithmic_split_matches_official_formula() {
         let mut ctx = CmContext::new();
@@ -3232,6 +3358,76 @@ mod tests {
         let high = potentiometer_split(&ctx).expect("guarded high split");
         assert!(high.r_lower > 0.0);
         assert!(high.r_upper > 0.0);
+    }
+
+    #[test]
+    fn ilimit_eval_cache_reuses_current_result_until_inputs_change() {
+        let mut ctx = ilimit_cache_context();
+        let direct = ilimit_eval(&ctx).expect("direct ilimit eval");
+        assert_eq!(
+            cache_ilimit_eval(&mut ctx).expect("cache ilimit eval"),
+            direct
+        );
+
+        let signature = ilimit_eval_signature(&ctx).expect("current ilimit signature");
+        let sentinel = sentinel_ilimit_eval();
+        ctx.set_resource(
+            ILIMIT_EVAL_RESOURCE,
+            Arc::new(IlimitEvalResource {
+                signature,
+                eval: sentinel,
+            }),
+        );
+
+        assert_eq!(
+            cache_ilimit_eval(&mut ctx).expect("matching mutable eval reuses cache"),
+            sentinel
+        );
+        assert_eq!(
+            ilimit_eval_for_context(&ctx).expect("matching read-only eval reuses cache"),
+            sentinel
+        );
+        assert_eq!(
+            Ilimit.output_input_partials(&ctx, "out"),
+            vec![("in".to_string(), 3.0), ("out".to_string(), 4.0)]
+        );
+
+        ctx.set_input_analog("out", 0.5);
+        let updated = ilimit_eval_for_context(&ctx).expect("changed output invalidates cache");
+        assert_eq!(
+            updated,
+            ilimit_eval(&ctx).expect("direct updated ilimit eval")
+        );
+        assert_ne!(updated, sentinel);
+    }
+
+    #[test]
+    fn ilimit_eval_cache_invalidates_when_optional_power_port_connects() {
+        let mut ctx = ilimit_cache_context();
+        let signature = ilimit_eval_signature(&ctx).expect("current ilimit signature");
+        let sentinel = sentinel_ilimit_eval();
+        ctx.set_resource(
+            ILIMIT_EVAL_RESOURCE,
+            Arc::new(IlimitEvalResource {
+                signature,
+                eval: sentinel,
+            }),
+        );
+
+        assert_eq!(
+            ilimit_eval_for_context(&ctx).expect("matching null-power eval reuses cache"),
+            sentinel
+        );
+
+        ctx.set_port_width("pos_pwr", 1);
+        ctx.set_input_analog("pos_pwr", 5.0);
+        let updated =
+            ilimit_eval_for_context(&ctx).expect("connected power input invalidates cache");
+        assert_eq!(
+            updated,
+            ilimit_eval(&ctx).expect("direct power-connected eval")
+        );
+        assert_ne!(updated, sentinel);
     }
 
     #[test]
