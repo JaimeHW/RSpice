@@ -8,11 +8,12 @@ use crate::{
     },
 };
 use std::f64::consts::PI;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 const XFER_TABLE_RESOURCE: &str = "xspice.xfer.table";
 const SXFER_COEFFICIENT_RESOURCE: &str = "xspice.s_xfer.coefficients";
 const SXFER_TRANSIENT_SYSTEM_RESOURCE: &str = "xspice.s_xfer.transient_system";
+const SXFER_TRANSIENT_SCRATCH_RESOURCE: &str = "xspice.s_xfer.transient_scratch";
 
 #[derive(Debug, Clone)]
 struct XferPoint {
@@ -95,6 +96,8 @@ struct SXferTransientSystemResource {
     signature: SXferTransientSystemSignature,
     system: CmResult<Arc<SXferTransientSystem>>,
 }
+
+type SXferTransientScratchResource = Mutex<Vec<Value>>;
 
 fn transfer_ports() -> &'static [PortSpec] {
     static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
@@ -832,6 +835,14 @@ fn solve_factorized_system(
     factorization: &LinearFactorization,
     mut rhs: Vec<Value>,
 ) -> Option<Vec<Value>> {
+    solve_factorized_system_in_place(factorization, &mut rhs)?;
+    Some(rhs)
+}
+
+fn solve_factorized_system_in_place(
+    factorization: &LinearFactorization,
+    rhs: &mut [Value],
+) -> Option<()> {
     let n = rhs.len();
     if factorization.lu.len() != n || factorization.pivots.len() != n {
         return None;
@@ -872,7 +883,7 @@ fn solve_factorized_system(
         }
         rhs[row_index] = (rhs[row_index] - tail) / pivot;
     }
-    Some(rhs)
+    Some(())
 }
 
 fn s_xfer_backward_euler_matrix(coefficients: &SXferCoefficients, dt: Value) -> Vec<Vec<Value>> {
@@ -964,36 +975,65 @@ fn s_xfer_transient_system_for_context(
     system
 }
 
+fn ensure_s_xfer_transient_scratch(ctx: &mut CmContext) {
+    if ctx
+        .resource::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
+        .is_none()
+    {
+        ctx.set_resource(
+            SXFER_TRANSIENT_SCRATCH_RESOURCE,
+            Arc::new(Mutex::new(Vec::<Value>::new())),
+        );
+    }
+}
+
+fn s_xfer_transient_scratch(ctx: &mut CmContext) -> Arc<SXferTransientScratchResource> {
+    ensure_s_xfer_transient_scratch(ctx);
+    ctx.resource::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
+        .expect("s_xfer transient scratch resource was just installed")
+}
+
 fn s_xfer_transient_eval(
     ctx: &mut CmContext,
     coefficients: &SXferCoefficients,
-) -> CmResult<(Vec<Value>, Value, Value)> {
+) -> CmResult<(Value, Value)> {
     let order = coefficients.denominator.len() - 1;
     let input = ctx.input("in") + ctx.param("in_offset");
     let u = coefficients.gain * input;
 
     if order == 0 {
         let feedthrough = s_xfer_feedthrough(coefficients);
-        return Ok((Vec::new(), feedthrough * u, feedthrough * coefficients.gain));
+        return Ok((feedthrough * u, feedthrough * coefficients.gain));
     }
 
     let dt = ctx.timestep;
     if !dt.is_finite() || dt <= 0.0 {
         let (feedthrough, remainder) = s_xfer_feedthrough_and_remainder(coefficients);
-        let state: Vec<Value> = (0..order).map(|index| ctx.state_prev(index)).collect();
         let output = remainder
             .iter()
-            .zip(state.iter())
-            .map(|(coefficient, value)| coefficient * value)
+            .enumerate()
+            .map(|(index, coefficient)| coefficient * ctx.state_prev(index))
             .sum::<Value>()
             + feedthrough * u;
-        return Ok((state, output, feedthrough * coefficients.gain));
+        if transfer_commits_state(ctx) {
+            for index in 0..order {
+                ctx.set_state(index, ctx.state_prev(index));
+            }
+        }
+        return Ok((output, feedthrough * coefficients.gain));
     }
 
     let system = s_xfer_transient_system_for_context(ctx, coefficients)?;
-    let mut rhs: Vec<Value> = (0..order).map(|index| ctx.state_prev(index)).collect();
-    rhs[order - 1] += dt * u;
-    let state = solve_factorized_system(&system.factorization, rhs).ok_or_else(|| {
+    let scratch = s_xfer_transient_scratch(ctx);
+    let mut state = scratch
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    state.resize(order, 0.0);
+    for index in 0..order {
+        state[index] = ctx.state_prev(index);
+    }
+    state[order - 1] += dt * u;
+    solve_factorized_system_in_place(&system.factorization, &mut state).ok_or_else(|| {
         CmError::EvaluationError("s_xfer transient state solve is singular".to_string())
     })?;
 
@@ -1011,7 +1051,12 @@ fn s_xfer_transient_eval(
         .map(|(coefficient, value)| coefficient * value)
         .sum::<Value>()
         + system.feedthrough;
-    Ok((state, output, dy_du * coefficients.gain))
+    if transfer_commits_state(ctx) {
+        for (index, value) in state.iter().copied().enumerate() {
+            ctx.set_state(index, value);
+        }
+    }
+    Ok((output, dy_du * coefficients.gain))
 }
 
 fn transfer_commits_state(ctx: &CmContext) -> bool {
@@ -1111,6 +1156,9 @@ impl CodeModel for SXfer {
 
         let order = coefficients.denominator.len().saturating_sub(1);
         ctx.allocate_states(order);
+        if order > 0 {
+            ensure_s_xfer_transient_scratch(ctx);
+        }
         let int_ic = ctx.real_vector_param("int_ic").unwrap_or(&[]).to_vec();
         for index in 0..order {
             let value = int_ic.get(order - 1 - index).copied().unwrap_or(0.0);
@@ -1128,12 +1176,7 @@ impl CodeModel for SXfer {
             return Ok(());
         };
 
-        let (state, output, partial) = s_xfer_transient_eval(ctx, &coefficients)?;
-        if transfer_commits_state(ctx) {
-            for (index, value) in state.iter().copied().enumerate() {
-                ctx.set_state(index, value);
-            }
-        }
+        let (output, partial) = s_xfer_transient_eval(ctx, &coefficients)?;
         ctx.set_output_with_partial("out", output, partial);
         Ok(())
     }
@@ -1220,6 +1263,64 @@ mod tests {
             ctx.state(0) > 0.0,
             "accepted s_xfer evaluation should commit filter state"
         );
+    }
+
+    #[test]
+    fn s_xfer_transient_state_scratch_overwrites_and_reuses_buffer() {
+        let mut ctx = first_order_lowpass_context();
+        SXfer.init(&mut ctx).expect("s_xfer initializes");
+        let scratch = ctx
+            .resource::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
+            .expect("s_xfer installs transient scratch for dynamic systems");
+        {
+            let mut state = scratch
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.resize(16, Value::NAN);
+        }
+
+        SXfer.evaluate(&mut ctx).expect("s_xfer overwrites scratch");
+        assert!(ctx.output("out").is_finite());
+        assert!(ctx.state(0).is_finite());
+
+        let (state_ptr, state_capacity) = {
+            let state = scratch
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            assert_eq!(state.len(), 1);
+            assert!(state[0].is_finite());
+            (state.as_ptr(), state.capacity())
+        };
+
+        ctx.set_input_analog("in", 0.5);
+        SXfer.evaluate(&mut ctx).expect("s_xfer reuses scratch");
+        let state = scratch
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(state.as_ptr(), state_ptr);
+        assert_eq!(state.capacity(), state_capacity);
+        assert_eq!(state.len(), 1);
+        assert!(state[0].is_finite());
+    }
+
+    #[test]
+    fn s_xfer_nonpositive_timestep_keeps_previous_state_on_commit() {
+        let mut ctx = first_order_lowpass_context();
+        ctx.set_real_vector_param("int_ic", vec![0.5]);
+        ctx.timestep = 0.0;
+        SXfer.init(&mut ctx).expect("s_xfer initializes");
+        ctx.set_state(0, 9.0);
+
+        SXfer
+            .evaluate(&mut ctx)
+            .expect("s_xfer handles zero timestep fallback");
+
+        assert_eq!(
+            ctx.state(0),
+            0.5,
+            "accepted zero-timestep fallback should restore the previous integrator state"
+        );
+        assert!(ctx.output("out").is_finite());
     }
 
     #[test]
