@@ -476,6 +476,57 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_reconstructs_history_for_guard_alias_condition() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module history_guard_alias_condition(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer polarity = 1 from [-1:1];
+    real vdsu, sig;
+    analog begin
+        if (polarity == 1) begin
+            vdsu = V(p, n);
+        end else begin
+            vdsu = -V(p, n);
+        end
+
+        if (vdsu < 0.0) begin
+            sig = -1.0;
+        end else begin
+            sig = 1.0;
+        end
+
+        if (sig < 0.0) begin
+            I(p, n) <+ sig * V(p, n);
+        end else begin
+            I(n, p) <+ sig * V(p, n);
+        end
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("history guard alias condition should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_lowers_branch_local_reassigned_temp() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(

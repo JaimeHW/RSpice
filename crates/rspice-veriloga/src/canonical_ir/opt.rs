@@ -321,8 +321,10 @@ struct ScalarGraphBuilder<'a> {
     variable_values: HashMap<VariableId, Option<ValueId>>,
     variable_assignment_exprs: HashMap<VariableId, ExprId>,
     variable_assignment_history: HashMap<VariableId, Vec<ExprId>>,
+    variable_assignment_history_limits: HashMap<VariableId, usize>,
     guarded_path_assignment_exprs: HashMap<VariableId, GuardedPathAssignmentExpr>,
     variable_lowering_stack: HashSet<VariableId>,
+    variable_history_lowering_stack: HashSet<(VariableId, usize)>,
     branch_current_values: HashMap<String, ValueId>,
     branch_flow_context: Option<BranchUnknownId>,
     conditional_path_stack: Vec<ConditionalPathPredicate>,
@@ -466,8 +468,10 @@ impl<'a> ScalarGraphBuilder<'a> {
             variable_values: HashMap::new(),
             variable_assignment_exprs: HashMap::new(),
             variable_assignment_history: HashMap::new(),
+            variable_assignment_history_limits: HashMap::new(),
             guarded_path_assignment_exprs: HashMap::new(),
             variable_lowering_stack: HashSet::new(),
+            variable_history_lowering_stack: HashSet::new(),
             branch_current_values: HashMap::new(),
             branch_flow_context: None,
             conditional_path_stack: Vec::new(),
@@ -1294,7 +1298,8 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_expression(&mut self, expr_id: ExprId) -> Option<ValueId> {
-        let use_cache = self.conditional_path_stack.is_empty();
+        let use_cache = self.conditional_path_stack.is_empty()
+            && self.variable_assignment_history_limits.is_empty();
         if use_cache && let Some(value) = self.expression_values.get(&expr_id) {
             return *value;
         }
@@ -2284,6 +2289,13 @@ impl<'a> ScalarGraphBuilder<'a> {
             .variables
             .iter()
             .find(|variable| variable.name == *name)?;
+        if let Some(limit) = self
+            .variable_assignment_history_limits
+            .get(&variable.id)
+            .copied()
+        {
+            return Some(self.lower_assignment_history_prefix(variable.id, limit));
+        }
         if let Some(value) = self.variable_values.get(&variable.id).copied() {
             if value.is_none()
                 && let Some(contextual) =
@@ -2296,10 +2308,58 @@ impl<'a> ScalarGraphBuilder<'a> {
             {
                 return Some(Some(contextual));
             }
+            if value.is_none()
+                && let Some(historical) = self.lower_assignment_history_current_value(variable.id)
+            {
+                return Some(Some(historical));
+            }
             return Some(value);
         }
 
         Some(Some(self.default_variable_value(variable.value_type)?))
+    }
+
+    fn lower_assignment_history_current_value(&mut self, variable: VariableId) -> Option<ValueId> {
+        let limit = self.variable_assignment_history.get(&variable)?.len();
+        self.lower_assignment_history_prefix(variable, limit)
+    }
+
+    fn lower_assignment_history_prefix(
+        &mut self,
+        variable: VariableId,
+        limit: usize,
+    ) -> Option<ValueId> {
+        if limit == 0 {
+            return self.default_variable_value(self.variable_value_type(variable)?);
+        }
+        let history = self.variable_assignment_history.get(&variable)?;
+        if limit > history.len() {
+            return None;
+        }
+        if !self
+            .variable_history_lowering_stack
+            .insert((variable, limit))
+        {
+            return None;
+        }
+
+        let expr = history[limit - 1];
+        let previous_limit = self
+            .variable_assignment_history_limits
+            .insert(variable, limit - 1);
+        let lowered = self.lower_expression(expr);
+        match previous_limit {
+            Some(previous) => {
+                self.variable_assignment_history_limits
+                    .insert(variable, previous);
+            }
+            None => {
+                self.variable_assignment_history_limits.remove(&variable);
+            }
+        }
+        self.variable_history_lowering_stack
+            .remove(&(variable, limit));
+        lowered
     }
 
     fn lower_conditional_path_variable_identifier(
