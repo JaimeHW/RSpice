@@ -599,14 +599,18 @@ impl CircuitData {
     /// elements have been allocated.
     pub fn resolve_xspice_branch_references(&mut self) -> Result<(), CircuitError> {
         let branch_lookup = self.branch_names.clone();
+        let current_sources = self.current_sources.clone();
         for instance in &mut self.xspice_instances {
             instance
-                .resolve_branch_references(|name| {
-                    branch_lookup
-                        .get(name)
-                        .or_else(|| branch_lookup.get(&name.to_uppercase()))
-                        .copied()
-                })
+                .resolve_branch_references(
+                    |name| {
+                        branch_lookup
+                            .get(name)
+                            .or_else(|| branch_lookup.get(&name.to_uppercase()))
+                            .copied()
+                    },
+                    |name| current_sources.index_by_name(name),
+                )
                 .map_err(|err| CircuitError::InvalidComponent(err.to_string()))?;
         }
         Ok(())

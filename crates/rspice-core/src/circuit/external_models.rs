@@ -255,6 +255,7 @@ impl CircuitData {
         analysis: crate::xspice::AnalysisType,
         phase: crate::xspice::EvaluationPhase,
     ) -> crate::xspice::CmResult<()> {
+        let current_source_values = self.current_sources.values_at_time(time);
         let max_event_passes = if self.has_xspice_event_driven_devices() {
             self.xspice_instances.len().saturating_add(1).max(1)
         } else {
@@ -292,6 +293,7 @@ impl CircuitData {
                     digital_event_times,
                     real_values,
                     real_event_times,
+                    &current_source_values,
                 );
 
                 if let Err(e) = instance.evaluate(time, timestep, analysis, phase) {

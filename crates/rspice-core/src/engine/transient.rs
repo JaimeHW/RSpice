@@ -1600,8 +1600,9 @@ impl Engine {
                         num_nodes,
                         &force_accept_protected_nodes,
                     );
-                    let use_static_source_recovery_guards =
-                        !circuit.has_xspice_event_driven_devices();
+                    let use_static_source_recovery_guards = !circuit
+                        .has_xspice_event_driven_devices()
+                        && voltage_lte_excluded_nodes.is_empty();
                     let excessive_quiet_force_candidate = use_static_source_recovery_guards
                         && Self::is_excessive_quiet_force_candidate(
                             &solution,
@@ -2409,8 +2410,9 @@ impl Engine {
                         num_nodes,
                         &force_accept_protected_nodes,
                     );
-                    let use_static_source_recovery_guards =
-                        !circuit.has_xspice_event_driven_devices();
+                    let use_static_source_recovery_guards = !circuit
+                        .has_xspice_event_driven_devices()
+                        && voltage_lte_excluded_nodes.is_empty();
                     let excessive_quiet_force_candidate = use_static_source_recovery_guards
                         && Self::is_excessive_quiet_force_candidate(
                             &solution,

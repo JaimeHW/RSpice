@@ -173,7 +173,8 @@ fn typed_analog_vector_connection_allowed(
         AnalogInputConnection::Differential(_, _) => differential_analog_connection_allowed(port),
         AnalogInputConnection::CurrentProbe { .. } => current_probe_connection_allowed(port),
         AnalogInputConnection::BranchCurrent { .. }
-        | AnalogInputConnection::NamedBranchCurrent { .. } => {
+        | AnalogInputConnection::NamedBranchCurrent { .. }
+        | AnalogInputConnection::NamedCurrentSource { .. } => {
             branch_current_connection_allowed(port)
         }
         AnalogInputConnection::CurrentOutput { .. } => current_output_connection_allowed(port),
@@ -295,9 +296,9 @@ fn validate_port_connection(
         PortConnection::Analog(_) => scalar_analog_connection_allowed(port),
         PortConnection::Differential(_, _) => differential_analog_connection_allowed(port),
         PortConnection::CurrentProbe { .. } => current_probe_connection_allowed(port),
-        PortConnection::BranchCurrent { .. } | PortConnection::NamedBranchCurrent { .. } => {
-            branch_current_connection_allowed(port)
-        }
+        PortConnection::BranchCurrent { .. }
+        | PortConnection::NamedBranchCurrent { .. }
+        | PortConnection::NamedCurrentSource { .. } => branch_current_connection_allowed(port),
         PortConnection::CurrentOutput { .. } => current_output_connection_allowed(port),
         PortConnection::Hybrid { .. } => hybrid_connection_allowed(port),
         PortConnection::AnalogVector(_) => analog_connection_allowed(port),
@@ -358,6 +359,11 @@ pub enum AnalogInputConnection {
         source_name: String,
         branch_ordinal: Option<usize>,
     },
+    /// Current through a named independent current source.
+    NamedCurrentSource {
+        source_name: String,
+        source_index: usize,
+    },
 }
 
 impl AnalogInputConnection {
@@ -369,7 +375,8 @@ impl AnalogInputConnection {
             | AnalogInputConnection::CurrentOutput { pos, .. }
             | AnalogInputConnection::Hybrid { pos, .. } => Some(*pos),
             AnalogInputConnection::BranchCurrent { .. }
-            | AnalogInputConnection::NamedBranchCurrent { .. } => None,
+            | AnalogInputConnection::NamedBranchCurrent { .. }
+            | AnalogInputConnection::NamedCurrentSource { .. } => None,
         }
     }
 
@@ -384,11 +391,17 @@ impl AnalogInputConnection {
                 *neg = remap(*neg);
             }
             AnalogInputConnection::BranchCurrent { .. }
-            | AnalogInputConnection::NamedBranchCurrent { .. } => {}
+            | AnalogInputConnection::NamedBranchCurrent { .. }
+            | AnalogInputConnection::NamedCurrentSource { .. } => {}
         }
     }
 
-    fn value_from_solution(&self, solution: &[Value], num_nodes: usize) -> Value {
+    fn value_from_solution(
+        &self,
+        solution: &[Value],
+        num_nodes: usize,
+        current_source_values: &[Value],
+    ) -> Value {
         fn node_voltage(solution: &[Value], node: usize) -> Value {
             if node == 0 {
                 0.0
@@ -426,6 +439,10 @@ impl AnalogInputConnection {
                 branch_ordinal: None,
                 ..
             } => 0.0,
+            AnalogInputConnection::NamedCurrentSource { source_index, .. } => current_source_values
+                .get(*source_index)
+                .copied()
+                .unwrap_or(0.0),
         }
     }
 
@@ -520,6 +537,11 @@ pub enum PortConnection {
         source_name: String,
         branch_ordinal: Option<usize>,
     },
+    /// Current through a named independent current source.
+    NamedCurrentSource {
+        source_name: String,
+        source_index: usize,
+    },
     /// Null connection (unconnected)
     Null,
 }
@@ -543,9 +565,9 @@ impl PortConnection {
             PortConnection::CurrentProbe { pos, .. }
             | PortConnection::CurrentOutput { pos, .. }
             | PortConnection::Hybrid { pos, .. } => Some(*pos),
-            PortConnection::BranchCurrent { .. } | PortConnection::NamedBranchCurrent { .. } => {
-                None
-            }
+            PortConnection::BranchCurrent { .. }
+            | PortConnection::NamedBranchCurrent { .. }
+            | PortConnection::NamedCurrentSource { .. } => None,
             PortConnection::Null => None,
         }
     }
@@ -991,6 +1013,7 @@ impl XspiceInstance {
         digital_event_times: &HashMap<usize, Value>,
         real_values: &HashMap<usize, Value>,
         real_event_times: &HashMap<usize, Value>,
+        current_source_values: &[Value],
     ) {
         if self.solution_num_nodes != num_nodes {
             self.port_context_solution_num_nodes = None;
@@ -1062,6 +1085,15 @@ impl XspiceInstance {
                 } => {
                     self.context.set_input_analog(&port.name, 0.0);
                 }
+                PortConnection::NamedCurrentSource { source_index, .. } => {
+                    self.context.set_input_analog(
+                        &port.name,
+                        current_source_values
+                            .get(*source_index)
+                            .copied()
+                            .unwrap_or(0.0),
+                    );
+                }
                 PortConnection::Digital(node) => {
                     let val = digital_values.get(node).copied().unwrap_or_default();
                     self.context.set_input_digital(&port.name, val);
@@ -1099,9 +1131,11 @@ impl XspiceInstance {
                         &port.name,
                         elements.len(),
                         |index| {
-                            AnalogValue::new(
-                                elements[index].value_from_solution(solution, num_nodes),
-                            )
+                            AnalogValue::new(elements[index].value_from_solution(
+                                solution,
+                                num_nodes,
+                                current_source_values,
+                            ))
                         },
                     );
                 }
@@ -1689,30 +1723,43 @@ impl XspiceInstance {
         }
     }
 
-    /// Resolve `%vnam` branch-current inputs after all branch-bearing elements
-    /// have been allocated.
+    /// Resolve `%vnam` and `%i(name)` inputs after branch-bearing elements and
+    /// independent current sources have been allocated.
     pub fn resolve_branch_references(
         &mut self,
-        mut lookup: impl FnMut(&str) -> Option<usize>,
+        mut branch_lookup: impl FnMut(&str) -> Option<usize>,
+        mut current_source_lookup: impl FnMut(&str) -> Option<usize>,
     ) -> CmResult<()> {
         fn resolve_one(
             instance_name: &str,
             element: &mut AnalogInputConnection,
-            lookup: &mut impl FnMut(&str) -> Option<usize>,
+            branch_lookup: &mut impl FnMut(&str) -> Option<usize>,
+            current_source_lookup: &mut impl FnMut(&str) -> Option<usize>,
         ) -> CmResult<()> {
-            if let AnalogInputConnection::NamedBranchCurrent {
+            let AnalogInputConnection::NamedBranchCurrent {
                 source_name,
                 branch_ordinal,
             } = element
-                && branch_ordinal.is_none()
-            {
-                *branch_ordinal = Some(lookup(source_name).ok_or_else(|| {
-                    CmError::InvalidPortConnection(format!(
-                        "XSPICE instance '{instance_name}' references unknown voltage source '{source_name}'"
-                    ))
-                })?);
+            else {
+                return Ok(());
+            };
+            if branch_ordinal.is_some() {
+                return Ok(());
             }
-            Ok(())
+            if let Some(branch) = branch_lookup(source_name) {
+                *branch_ordinal = Some(branch);
+                return Ok(());
+            }
+            if let Some(source_index) = current_source_lookup(source_name) {
+                *element = AnalogInputConnection::NamedCurrentSource {
+                    source_name: source_name.clone(),
+                    source_index,
+                };
+                return Ok(());
+            }
+            Err(CmError::InvalidPortConnection(format!(
+                "XSPICE instance '{instance_name}' references unknown branch or current source '{source_name}'"
+            )))
         }
 
         for connection in &mut self.connections {
@@ -1721,16 +1768,28 @@ impl XspiceInstance {
                     source_name,
                     branch_ordinal,
                 } if branch_ordinal.is_none() => {
-                    *branch_ordinal = Some(lookup(source_name).ok_or_else(|| {
-                        CmError::InvalidPortConnection(format!(
-                            "XSPICE instance '{}' references unknown voltage source '{}'",
+                    if let Some(branch) = branch_lookup(source_name) {
+                        *branch_ordinal = Some(branch);
+                    } else if let Some(source_index) = current_source_lookup(source_name) {
+                        *connection = PortConnection::NamedCurrentSource {
+                            source_name: source_name.clone(),
+                            source_index,
+                        };
+                    } else {
+                        return Err(CmError::InvalidPortConnection(format!(
+                            "XSPICE instance '{}' references unknown branch or current source '{}'",
                             self.name, source_name
-                        ))
-                    })?);
+                        )));
+                    }
                 }
                 PortConnection::TypedAnalogVector(elements) => {
                     for element in elements {
-                        resolve_one(&self.name, element, &mut lookup)?;
+                        resolve_one(
+                            &self.name,
+                            element,
+                            &mut branch_lookup,
+                            &mut current_source_lookup,
+                        )?;
                     }
                 }
                 _ => {}
@@ -1777,7 +1836,8 @@ impl XspiceInstance {
                     }
                 }
                 PortConnection::BranchCurrent { .. }
-                | PortConnection::NamedBranchCurrent { .. } => {}
+                | PortConnection::NamedBranchCurrent { .. }
+                | PortConnection::NamedCurrentSource { .. } => {}
                 PortConnection::Null => {}
             }
         }

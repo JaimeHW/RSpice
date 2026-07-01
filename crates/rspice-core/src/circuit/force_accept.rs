@@ -309,6 +309,7 @@ impl CircuitData {
     /// the ideal constraint equation the solver is trying to preserve.
     pub fn force_accept_protected_nodes(&self) -> Vec<bool> {
         let mut mask = vec![false; self.num_nodes()];
+        let ground_reachable = self.force_accept_ground_reachable_nodes();
 
         for idx in 0..self.voltage_sources.len() {
             Self::mark_force_accept_protected_node(&mut mask, self.voltage_sources.node_pos[idx]);
@@ -376,6 +377,22 @@ impl CircuitData {
                         }
                     }
                     _ => {}
+                }
+            }
+        }
+
+        // A terminal that belongs only to an independent current source and is
+        // not connected to the grounded physical/transient network has a
+        // gmin-only common-mode bias. Let it jump to that meaningless bias
+        // instead of throttling every Newton iteration by the global voltage
+        // delta limiter.
+        for idx in 0..self.current_sources.len() {
+            for node in [
+                self.current_sources.node_pos[idx],
+                self.current_sources.node_neg[idx],
+            ] {
+                if node > 0 && !ground_reachable.get(node).copied().unwrap_or(false) {
+                    Self::mark_force_accept_protected_node(&mut mask, node);
                 }
             }
         }

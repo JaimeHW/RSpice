@@ -780,6 +780,33 @@ impl CurrentSources {
         if value.is_finite() { value } else { 0.0 }
     }
 
+    pub fn index_by_name(&self, name: &str) -> Option<usize> {
+        self.names
+            .iter()
+            .position(|source_name| source_name.eq_ignore_ascii_case(name))
+    }
+
+    pub fn value_at_time(&self, index: usize, time: Value) -> Value {
+        let Some(dc_value) = self.dc_values.get(index).copied() else {
+            return 0.0;
+        };
+        let dc_value = if dc_value.is_finite() { dc_value } else { 0.0 };
+        match self.source_specs.get(index).and_then(Option::as_ref) {
+            Some(spec) => VoltageSources::evaluate_source_at_time_with_context(
+                spec,
+                time,
+                self.transient_context,
+            ),
+            None => dc_value,
+        }
+    }
+
+    pub fn values_at_time(&self, time: Value) -> Vec<Value> {
+        (0..self.names.len())
+            .map(|index| self.value_at_time(index, time))
+            .collect()
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
