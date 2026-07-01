@@ -58,6 +58,12 @@ struct PolyEvalSignature {
     inputs: Vec<Value>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PolyEvalBaseSignature {
+    plan: PolyPlanSignature,
+    multiplier: Value,
+}
+
 #[derive(Debug, Clone)]
 struct PolyEvalResource {
     signature: PolyEvalSignature,
@@ -309,15 +315,51 @@ fn input_values(inputs: &[AnalogValue]) -> Vec<Value> {
     inputs.iter().map(|input| input.value).collect()
 }
 
+fn poly_eval_base_signature(
+    ctx: &CmContext,
+    input_count: usize,
+) -> CmResult<PolyEvalBaseSignature> {
+    Ok(PolyEvalBaseSignature {
+        plan: poly_plan_signature(ctx, input_count)?,
+        multiplier: checked_multiplier(ctx)?,
+    })
+}
+
+fn poly_eval_signature_from_inputs(
+    base: PolyEvalBaseSignature,
+    inputs: &[AnalogValue],
+) -> PolyEvalSignature {
+    PolyEvalSignature {
+        plan: base.plan,
+        multiplier: base.multiplier,
+        inputs: input_values(inputs),
+    }
+}
+
 fn poly_eval_signature(ctx: &CmContext) -> CmResult<PolyEvalSignature> {
     let inputs = checked_inputs(ctx)?;
-    let plan = poly_plan_signature(ctx, inputs.len())?;
-    let multiplier = checked_multiplier(ctx)?;
-    Ok(PolyEvalSignature {
-        plan,
-        multiplier,
-        inputs: input_values(inputs),
-    })
+    Ok(poly_eval_signature_from_inputs(
+        poly_eval_base_signature(ctx, inputs.len())?,
+        inputs,
+    ))
+}
+
+fn poly_eval_inputs_match(cached: &[Value], inputs: &[AnalogValue]) -> bool {
+    cached.len() == inputs.len()
+        && cached
+            .iter()
+            .zip(inputs)
+            .all(|(cached, input)| *cached == input.value)
+}
+
+fn poly_eval_resource_matches(
+    resource: &PolyEvalResource,
+    base: PolyEvalBaseSignature,
+    inputs: &[AnalogValue],
+) -> bool {
+    resource.signature.plan == base.plan
+        && resource.signature.multiplier == base.multiplier
+        && poly_eval_inputs_match(&resource.signature.inputs, inputs)
 }
 
 fn evaluate_poly(inputs: &[Value], plan: &PolyPlan, multiplier: Value) -> PolyEval {
@@ -353,13 +395,15 @@ fn evaluate_poly(inputs: &[Value], plan: &PolyPlan, multiplier: Value) -> PolyEv
 }
 
 fn evaluate_context(ctx: &CmContext) -> CmResult<PolyEval> {
-    let signature = poly_eval_signature(ctx)?;
+    let inputs = checked_inputs(ctx)?;
+    let base = poly_eval_base_signature(ctx, inputs.len())?;
     if let Some(resource) = ctx.resource::<PolyEvalResource>(POLY_EVAL_RESOURCE)
-        && resource.signature == signature
+        && poly_eval_resource_matches(&resource, base, inputs)
     {
         return Ok(resource.result.clone());
     }
 
+    let signature = poly_eval_signature_from_inputs(base, inputs);
     let plan = poly_plan(ctx, signature.inputs.len())?;
     Ok(evaluate_poly(
         &signature.inputs,
@@ -369,13 +413,15 @@ fn evaluate_context(ctx: &CmContext) -> CmResult<PolyEval> {
 }
 
 fn evaluate_context_cached(ctx: &mut CmContext) -> CmResult<PolyEval> {
-    let signature = poly_eval_signature(ctx)?;
+    let inputs = checked_inputs(ctx)?;
+    let base = poly_eval_base_signature(ctx, inputs.len())?;
     if let Some(resource) = ctx.resource::<PolyEvalResource>(POLY_EVAL_RESOURCE)
-        && resource.signature == signature
+        && poly_eval_resource_matches(&resource, base, inputs)
     {
         return Ok(resource.result.clone());
     }
 
+    let signature = poly_eval_signature_from_inputs(base, inputs);
     let plan = cache_poly_plan(ctx, signature.inputs.len())?;
     let result = evaluate_poly(&signature.inputs, &plan, signature.multiplier);
     ctx.set_resource(
@@ -677,6 +723,37 @@ mod tests {
         assert_eq!(
             updated,
             evaluate_context_cached(&mut ctx).expect("direct updated eval")
+        );
+    }
+
+    #[test]
+    fn poly_eval_resource_match_compares_current_input_slice() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("coef", vec![1.0, 2.0, 3.0, 4.0]);
+        ctx.set_param("m", 2.0);
+        set_inputs(&mut ctx, &[2.0, 3.0]);
+
+        let signature = poly_eval_signature(&ctx).expect("current eval signature");
+        let inputs = checked_inputs(&ctx).expect("current inputs");
+        let base = poly_eval_base_signature(&ctx, inputs.len()).expect("current base signature");
+        let resource = PolyEvalResource {
+            signature,
+            result: PolyEval {
+                value: 123.0,
+                partials: vec![7.0, 11.0],
+            },
+        };
+
+        assert!(
+            poly_eval_resource_matches(&resource, base, inputs),
+            "matching spice2poly inputs should hit the eval cache without rebuilding a signature"
+        );
+
+        set_inputs(&mut ctx, &[2.0, 4.0]);
+        let changed_inputs = checked_inputs(&ctx).expect("changed inputs");
+        assert!(
+            !poly_eval_resource_matches(&resource, base, changed_inputs),
+            "changed spice2poly inputs must invalidate the eval cache"
         );
     }
 
