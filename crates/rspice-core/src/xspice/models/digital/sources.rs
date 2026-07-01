@@ -487,6 +487,7 @@ struct DStateTable {
     output_width: usize,
     output_values: Vec<DigitalValue>,
     state_ranges: HashMap<i64, DStateRange>,
+    packed_match_index: Option<DStatePackedMatchIndex>,
 }
 
 impl DStateTable {
@@ -501,6 +502,42 @@ impl DStateTable {
 enum DStateRange {
     Contiguous { start: usize, end: usize },
     NonContiguous,
+}
+
+#[derive(Debug, Clone)]
+struct DStatePackedMatchIndex {
+    input_width: usize,
+    state_entries: HashMap<i64, Box<[Option<usize>]>>,
+    missing_state_entries: Box<[Option<usize>]>,
+}
+
+impl DStatePackedMatchIndex {
+    fn known_bits_index(&self, known_mask: u64, input_bits: u64) -> Option<usize> {
+        let full_mask = if self.input_width == 64 {
+            u64::MAX
+        } else if self.input_width == 0 {
+            0
+        } else {
+            (1_u64 << self.input_width) - 1
+        };
+        ((known_mask & full_mask) == full_mask).then_some((input_bits & full_mask) as usize)
+    }
+
+    fn row_for_known_inputs(
+        &self,
+        state: i64,
+        state_present: bool,
+        known_mask: u64,
+        input_bits: u64,
+    ) -> Option<Option<usize>> {
+        let bits = self.known_bits_index(known_mask, input_bits)?;
+        let entries = if state_present {
+            self.state_entries.get(&state)?
+        } else {
+            &self.missing_state_entries
+        };
+        Some(entries.get(bits).copied().flatten())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -606,6 +643,68 @@ fn d_state_input_pattern_masks(inputs: &[Option<bool>]) -> (u64, u64) {
         }
     }
     (mask, bits)
+}
+
+const D_STATE_PACKED_INDEX_MAX_WIDTH: usize = 12;
+
+fn d_state_packed_entries_len(input_width: usize) -> Option<usize> {
+    if input_width <= D_STATE_PACKED_INDEX_MAX_WIDTH {
+        Some(1_usize << input_width)
+    } else {
+        None
+    }
+}
+
+fn d_state_fill_packed_entries(
+    entries: &mut [Option<usize>],
+    input_width: usize,
+    row_index: usize,
+    row: &DStateTransition,
+) {
+    let Some(limit) = d_state_packed_entries_len(input_width) else {
+        return;
+    };
+    for bits in 0..limit {
+        if entries[bits].is_none() {
+            let bits = bits as u64;
+            if (bits & row.input_mask) == row.input_bits {
+                entries[bits as usize] = Some(row_index);
+            }
+        }
+    }
+}
+
+fn d_state_build_packed_match_index(
+    transitions: &[DStateTransition],
+    state_ranges: &HashMap<i64, DStateRange>,
+    input_width: usize,
+) -> Option<DStatePackedMatchIndex> {
+    let entry_len = d_state_packed_entries_len(input_width)?;
+    let mut state_entries = HashMap::new();
+    for (&state, range) in state_ranges {
+        let DStateRange::Contiguous { start, end } = *range else {
+            continue;
+        };
+        let mut entries = vec![None; entry_len];
+        for row_index in start..=end {
+            let Some(row) = transitions.get(row_index) else {
+                continue;
+            };
+            d_state_fill_packed_entries(&mut entries, input_width, row_index, row);
+        }
+        state_entries.insert(state, entries.into_boxed_slice());
+    }
+
+    let mut missing_state_entries = vec![None; entry_len];
+    if let Some(row) = transitions.first() {
+        d_state_fill_packed_entries(&mut missing_state_entries, input_width, 0, row);
+    }
+
+    Some(DStatePackedMatchIndex {
+        input_width,
+        state_entries,
+        missing_state_entries: missing_state_entries.into_boxed_slice(),
+    })
 }
 
 fn parse_d_state_i64(state_file: &str, line: usize, token: &str) -> CmResult<i64> {
@@ -753,8 +852,13 @@ fn parse_d_state_contents(
         return Err(d_state_file_error(state_file, "contains no state rows"));
     }
 
+    let state_ranges = d_state_range_index(&transitions);
+    let packed_match_index =
+        d_state_build_packed_match_index(&transitions, &state_ranges, input_width);
+
     Ok(DStateTable {
-        state_ranges: d_state_range_index(&transitions),
+        state_ranges,
+        packed_match_index,
         input_width,
         output_width,
         output_values,
@@ -919,6 +1023,18 @@ fn d_state_transition_matches(
 fn d_state_next(table: &DStateTable, state: i64, inputs: &[DigitalValue]) -> Option<i64> {
     let (start, end) = d_state_contiguous_range(table, state)?;
     let input_masks = d_state_input_value_masks(inputs);
+    if inputs.len() >= table.input_width
+        && let Some((known_mask, input_bits)) = input_masks
+        && let Some(index) = table.packed_match_index.as_ref()
+        && let Some(row_index) = index.row_for_known_inputs(
+            state,
+            table.state_ranges.contains_key(&state),
+            known_mask,
+            input_bits,
+        )
+    {
+        return row_index.and_then(|row| table.transitions.get(row).map(|row| row.next_state));
+    }
     table
         .transitions
         .get(start..=end)?
@@ -1582,6 +1698,54 @@ mod tests {
     }
 
     #[test]
+    fn d_state_packed_match_index_preserves_priority_and_fallbacks() {
+        let table = parse_d_state_contents(
+            "inline-packed-d-state",
+            2,
+            1,
+            "0 0s x 1 -> 5\n1 1 -> 9\n1 1s 0 0 -> 7\n",
+        )
+        .expect("packed d_state table parses");
+        let packed = table
+            .packed_match_index
+            .as_ref()
+            .expect("small packed d_state table should build a match index");
+        let state_zero = packed
+            .state_entries
+            .get(&0)
+            .expect("contiguous state 0 is indexed");
+
+        assert_eq!(
+            state_zero[0b11],
+            Some(0),
+            "earlier wildcard row must keep priority over a later exact match"
+        );
+        assert_eq!(state_zero[0b10], Some(0));
+        assert_eq!(state_zero[0b01], None);
+
+        assert_eq!(
+            d_state_next(&table, 0, &[DigitalValue::one(), DigitalValue::one()]),
+            Some(5),
+            "indexed all-known inputs must preserve first-row d_state priority"
+        );
+        assert_eq!(
+            d_state_next(&table, 0, &[DigitalValue::unknown(), DigitalValue::one()]),
+            Some(5),
+            "unknown inputs must still use wildcard-aware fallback matching"
+        );
+        assert_eq!(
+            d_state_next(&table, 99, &[DigitalValue::zero(), DigitalValue::one()]),
+            Some(5),
+            "missing states keep ngspice's first-row fallback in the packed index"
+        );
+        assert_eq!(
+            d_state_next(&table, 99, &[DigitalValue::one(), DigitalValue::zero()]),
+            None,
+            "missing-state fallback should still honor the first row's pattern"
+        );
+    }
+
+    #[test]
     fn d_state_wide_input_patterns_keep_vector_fallback() {
         let mut contents = String::from("0 0s ");
         for input in 0..65 {
@@ -1593,6 +1757,10 @@ mod tests {
             .expect("wide d_state table parses");
 
         assert_eq!(table.input_width, 65);
+        assert!(
+            table.packed_match_index.is_none(),
+            "wide d_state tables must keep the vector fallback instead of a packed index"
+        );
         assert_eq!(table.transitions[0].input_mask, 0);
         assert_eq!(table.transitions[0].input_bits, 0);
         assert!(
