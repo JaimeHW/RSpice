@@ -254,6 +254,36 @@ struct XyceDcSweep {
     sweep2: Option<DcSecondSweep>,
 }
 
+#[derive(Debug, Clone)]
+struct XyceDcSweepDimension {
+    source: String,
+    start: Value,
+    stop: Value,
+    step: Value,
+    mode: crate::netlist::DcSweepMode,
+}
+
+impl XyceDcSweepDimension {
+    fn spec(&self) -> crate::netlist::DcSweepSpec {
+        crate::netlist::DcSweepSpec {
+            start: self.start,
+            stop: self.stop,
+            step: self.step,
+            mode: self.mode.clone(),
+        }
+    }
+
+    fn into_second_sweep(self) -> DcSecondSweep {
+        DcSecondSweep {
+            source: self.source,
+            start: self.start,
+            stop: self.stop,
+            step: self.step,
+            mode: self.mode,
+        }
+    }
+}
+
 impl XyceDcSweep {
     fn primary_spec(&self) -> crate::netlist::DcSweepSpec {
         crate::netlist::DcSweepSpec {
@@ -4136,52 +4166,71 @@ impl XyceTestRunner {
     }
 
     fn single_dc_sweep(netlist: &Netlist) -> Result<XyceDcSweep, String> {
-        let mut dc_commands = netlist
-            .analyses
-            .iter()
-            .filter_map(|analysis| match analysis {
-                AnalysisCommand::Dc {
-                    source,
-                    start,
-                    stop,
-                    step,
-                    mode,
-                    sweep2,
-                } => Some((source, start, stop, step, mode, sweep2)),
-                _ => None,
-            });
+        let mut dimensions = Vec::new();
+        for analysis in &netlist.analyses {
+            let AnalysisCommand::Dc {
+                source,
+                start,
+                stop,
+                step,
+                mode,
+                sweep2,
+            } = analysis
+            else {
+                continue;
+            };
 
-        let Some((source, start, stop, step, mode, sweep2)) = dc_commands.next() else {
+            dimensions.push(XyceDcSweepDimension {
+                source: source.clone(),
+                start: *start,
+                stop: *stop,
+                step: *step,
+                mode: mode.clone(),
+            });
+            if let Some(sweep2) = sweep2 {
+                dimensions.push(XyceDcSweepDimension {
+                    source: sweep2.source.clone(),
+                    start: sweep2.start,
+                    stop: sweep2.stop,
+                    step: sweep2.step,
+                    mode: sweep2.mode.clone(),
+                });
+            }
+        }
+
+        if dimensions.is_empty() {
             return Err(
                 "deck has no .DC analysis; first Xyce adapter supports static .PRINT DC only"
                     .to_string(),
             );
-        };
-        if dc_commands.next().is_some() {
-            return Err("deck has multiple .DC analyses; multi-analysis Xyce comparison is not implemented yet".to_string());
         }
-        let primary_spec = crate::netlist::DcSweepSpec {
-            start: *start,
-            stop: *stop,
-            step: *step,
-            mode: mode.clone(),
-        };
-        if primary_spec.points().is_empty() {
-            return Err("deck has invalid .DC sweep bounds".to_string());
+        if dimensions.len() > 2 {
+            return Err(format!(
+                "deck has {} .DC sweep dimensions; native Xyce static adapter currently supports one or two",
+                dimensions.len()
+            ));
         }
-        if let Some(sweep2) = sweep2 {
-            if sweep2.spec().points().is_empty() {
+
+        for (index, dimension) in dimensions.iter().enumerate() {
+            if dimension.spec().points().is_empty() {
+                if index == 0 {
+                    return Err("deck has invalid .DC sweep bounds".to_string());
+                }
                 return Err("deck has invalid secondary .DC sweep bounds".to_string());
             }
         }
 
+        let primary = dimensions.remove(0);
+        let sweep2 = dimensions
+            .pop()
+            .map(XyceDcSweepDimension::into_second_sweep);
         Ok(XyceDcSweep {
-            source: source.clone(),
-            start: *start,
-            stop: *stop,
-            step: *step,
-            mode: mode.clone(),
-            sweep2: sweep2.clone(),
+            source: primary.source,
+            start: primary.start,
+            stop: primary.stop,
+            step: primary.step,
+            mode: primary.mode,
+            sweep2,
         })
     }
 

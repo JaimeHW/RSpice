@@ -432,6 +432,29 @@ fn test_xyce_step_static_dc_cases_run() {
 }
 
 #[test]
+fn test_xyce_repeated_dc_cards_form_one_sweep_vector() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_695/bug695.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as one Xyce DC sweep vector across repeated .DC cards, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_prn_dc",
+        "{relative} should use the standard static .prn DC comparison once the repeated .DC cards are normalized"
+    );
+}
+
+#[test]
 fn test_xyce_solution_dependent_resistor_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
