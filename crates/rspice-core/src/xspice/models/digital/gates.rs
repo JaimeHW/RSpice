@@ -519,6 +519,10 @@ macro_rules! define_gate {
                 gate_params()
             }
 
+            fn can_skip_unchanged_event_inputs(&self) -> bool {
+                true
+            }
+
             fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
                 ctx.allocate_int_states(1);
                 ctx.set_int_state(0, INITIAL_GATE_STATE);
@@ -641,6 +645,10 @@ impl CodeModel for DigitalNand {
         gate_params()
     }
 
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
         ctx.set_int_state(0, INITIAL_GATE_STATE);
@@ -697,6 +705,11 @@ impl CodeModel for DigitalNor {
     fn parameters(&self) -> &[ParamSpec] {
         DigitalNand.parameters()
     }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
         ctx.set_int_state(0, INITIAL_GATE_STATE);
@@ -749,6 +762,11 @@ impl CodeModel for DigitalXnor {
     fn parameters(&self) -> &[ParamSpec] {
         DigitalNand.parameters()
     }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
         ctx.set_int_state(0, INITIAL_GATE_STATE);
@@ -810,6 +828,11 @@ impl CodeModel for DigitalInverter {
     fn parameters(&self) -> &[ParamSpec] {
         inverter_params()
     }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
         ctx.set_int_state(0, INITIAL_GATE_STATE);
@@ -862,6 +885,11 @@ impl CodeModel for DigitalBuffer {
     fn parameters(&self) -> &[ParamSpec] {
         gate_params()
     }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
         ctx.set_int_state(0, INITIAL_GATE_STATE);
@@ -924,6 +952,11 @@ impl CodeModel for DigitalTristate {
     fn parameters(&self) -> &[ParamSpec] {
         tristate_params()
     }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_states(2);
         ctx.set_initial_state(0, -1.0);
@@ -977,6 +1010,11 @@ impl CodeModel for DigitalPullup {
     fn parameters(&self) -> &[ParamSpec] {
         digital_pull_resistor_parameters()
     }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
         Ok(())
     }
@@ -1007,6 +1045,11 @@ impl CodeModel for DigitalPulldown {
     fn parameters(&self) -> &[ParamSpec] {
         digital_pull_resistor_parameters()
     }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
         Ok(())
     }
@@ -1138,6 +1181,10 @@ impl CodeModel for DigitalOpenCollector {
         open_collector_params()
     }
 
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
         ctx.set_int_state(0, INITIAL_GATE_STATE);
@@ -1188,6 +1235,10 @@ impl CodeModel for DigitalOpenEmitter {
 
     fn parameters(&self) -> &[ParamSpec] {
         open_emitter_params()
+    }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
