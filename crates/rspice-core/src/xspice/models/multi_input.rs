@@ -38,10 +38,10 @@ struct TableData {
     strictly_increasing_x: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TableSignature {
-    x_values: Vec<Value>,
-    y_values: Vec<Value>,
+    x_revision: Option<u64>,
+    y_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -124,14 +124,13 @@ fn mode(ctx: &CmContext) -> CmResult<MultiInputPwlMode> {
 
 fn table_signature(ctx: &CmContext) -> TableSignature {
     TableSignature {
-        x_values: ctx.real_vector_param("x").unwrap_or(&[]).to_vec(),
-        y_values: ctx.real_vector_param("y").unwrap_or(&[]).to_vec(),
+        x_revision: ctx.real_vector_param_revision("x"),
+        y_revision: ctx.real_vector_param_revision("y"),
     }
 }
 
 fn table_signature_matches(ctx: &CmContext, signature: &TableSignature) -> bool {
-    ctx.real_vector_param("x").unwrap_or(&[]) == signature.x_values.as_slice()
-        && ctx.real_vector_param("y").unwrap_or(&[]) == signature.y_values.as_slice()
+    table_signature(ctx) == *signature
 }
 
 fn table_uncached(ctx: &CmContext) -> CmResult<TableData> {
@@ -446,6 +445,13 @@ mod tests {
             "unchanged multi_input_pwl table parameters should reuse the parsed table"
         );
         assert_eq!(first.points[2].y, 20.0);
+
+        ctx.set_real_vector_param("unrelated", vec![99.0]);
+        let after_unrelated = cache_table(&mut ctx).expect("unrelated vector preserves cache");
+        assert!(
+            Arc::ptr_eq(&first, &after_unrelated),
+            "unrelated vector parameters should not refresh the parsed table"
+        );
 
         ctx.set_real_vector_param("y", vec![0.0, 10.0, 30.0]);
         let updated = cache_table(&mut ctx).expect("updated table caches");
