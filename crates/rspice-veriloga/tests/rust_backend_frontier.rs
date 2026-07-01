@@ -9,7 +9,9 @@
 //! To print the scalar error for every non-scalar selection:
 //! `RSPICE_RUST_BACKEND_FRONTIER_TRACE_NON_SCALAR=1 ...`
 
-use rspice_veriloga::canonical_ir::{CanonicalIrArtifact, InvalidationClass, OptOp};
+use rspice_veriloga::canonical_ir::{
+    CanonicalIrArtifact, ExprId, HirAnalogOperator, HirExprKind, InvalidationClass, OptOp,
+};
 use rspice_veriloga::rust_backend::{
     RustBackendSelection, RustTranspileOptions, RustTranspiler, discover_veriloga_sources,
 };
@@ -159,29 +161,175 @@ fn trace_scalar_transpile_error(
 }
 
 fn trace_scalar_gap(artifact: &CanonicalIrArtifact) {
+    let roots = available_scalar_equation_roots(artifact);
+    let mut traced_missing_detail = false;
     for equation in &artifact.mir.equations {
         let expression = artifact
             .mir
             .expressions
             .get(usize::from(equation.expression.id))
             .map(|expression| &expression.kind);
-        let opt_root = artifact
-            .opt
-            .schedules
-            .iter()
-            .filter(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-            .flat_map(|schedule| schedule.ops.windows(2))
-            .find_map(|ops| match ops {
-                [
-                    OptOp::ComputeValue { value },
-                    OptOp::EvaluateEquation { equation: op_eq },
-                ] if *op_eq == equation.id => Some(*value),
-                _ => None,
-            });
+        let opt_root = roots.get(&equation.id).copied();
         eprintln!(
             "  equation {:?}: kind={:?}, branch={}, expr={:?}, opt_root={:?}",
             equation.id, equation.kind, equation.branch.label, expression, opt_root
         );
+        if opt_root.is_none() && !traced_missing_detail {
+            traced_missing_detail = true;
+            trace_expression_tree(artifact, equation.expression.id, 2, &mut Vec::new());
+        }
+    }
+}
+
+fn available_scalar_equation_roots(
+    artifact: &CanonicalIrArtifact,
+) -> std::collections::HashMap<
+    rspice_veriloga::canonical_ir::EquationId,
+    rspice_veriloga::canonical_ir::ValueId,
+> {
+    let mut roots = std::collections::HashMap::new();
+    for schedule in &artifact.opt.schedules {
+        if schedule.invalidation != InvalidationClass::NewtonIteration {
+            continue;
+        }
+
+        let mut pending_value = None;
+        for op in &schedule.ops {
+            match *op {
+                OptOp::ComputeValue { value } => pending_value = Some(value),
+                OptOp::EvaluateEquation { equation } => {
+                    if let Some(value) = pending_value.take() {
+                        roots.insert(equation, value);
+                    }
+                }
+            }
+        }
+    }
+    roots
+}
+
+fn trace_expression_tree(
+    artifact: &CanonicalIrArtifact,
+    expr: ExprId,
+    indent: usize,
+    stack: &mut Vec<ExprId>,
+) {
+    if stack.contains(&expr) {
+        eprintln!("{:indent$}expr {:?}: <cycle>", "", expr, indent = indent);
+        return;
+    }
+    let Some(expression) = artifact.mir.expressions.get(usize::from(expr)) else {
+        eprintln!("{:indent$}expr {:?}: <missing>", "", expr, indent = indent);
+        return;
+    };
+    eprintln!(
+        "{:indent$}expr {:?}: {:?}",
+        "",
+        expr,
+        expression.kind,
+        indent = indent
+    );
+
+    stack.push(expr);
+    for child in expression_children(&expression.kind) {
+        trace_expression_tree(artifact, child, indent + 2, stack);
+    }
+    stack.pop();
+}
+
+fn expression_children(kind: &HirExprKind) -> Vec<ExprId> {
+    match kind {
+        HirExprKind::Binary { left, right, .. } => vec![*left, *right],
+        HirExprKind::Unary { operand, .. } => vec![*operand],
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => vec![*condition, *then_expr, *else_expr],
+        HirExprKind::Call { args, .. }
+        | HirExprKind::SystemFunction { args, .. }
+        | HirExprKind::ArrayLiteral { elements: args } => args.clone(),
+        HirExprKind::ArrayAccess { index, .. } => vec![*index],
+        HirExprKind::AnalogOperator { op } => analog_operator_children(op),
+        HirExprKind::Laplace { expr, .. } | HirExprKind::Zi { expr, .. } => vec![*expr],
+        HirExprKind::NoiseSource { operands, .. } => operands.clone(),
+        HirExprKind::Number { .. }
+        | HirExprKind::StringLiteral { .. }
+        | HirExprKind::Identifier { .. }
+        | HirExprKind::BranchAccess { .. }
+        | HirExprKind::NamedBranchAccess { .. } => Vec::new(),
+    }
+}
+
+fn analog_operator_children(op: &HirAnalogOperator) -> Vec<ExprId> {
+    match op {
+        HirAnalogOperator::Ddt { expr, abstol } => {
+            let mut children = vec![*expr];
+            children.extend(*abstol);
+            children
+        }
+        HirAnalogOperator::Idt {
+            expr,
+            ic,
+            assert,
+            abstol,
+        } => {
+            let mut children = vec![*expr];
+            children.extend(*ic);
+            children.extend(*assert);
+            children.extend(*abstol);
+            children
+        }
+        HirAnalogOperator::IdtMod {
+            expr,
+            ic,
+            modulus,
+            offset,
+            abstol,
+        } => {
+            let mut children = vec![*expr];
+            children.extend(*ic);
+            children.extend(*modulus);
+            children.extend(*offset);
+            children.extend(*abstol);
+            children
+        }
+        HirAnalogOperator::Ddx { expr, probe } => vec![*expr, *probe],
+        HirAnalogOperator::Limexp { expr } => vec![*expr],
+        HirAnalogOperator::Absdelay {
+            expr,
+            delay,
+            max_delay,
+        } => {
+            let mut children = vec![*expr, *delay];
+            children.extend(*max_delay);
+            children
+        }
+        HirAnalogOperator::Transition {
+            expr,
+            delay,
+            rise,
+            fall,
+            tolerance,
+        } => {
+            let mut children = vec![*expr];
+            children.extend(*delay);
+            children.extend(*rise);
+            children.extend(*fall);
+            children.extend(*tolerance);
+            children
+        }
+        HirAnalogOperator::Slew {
+            expr,
+            max_rise,
+            max_fall,
+        } => {
+            let mut children = vec![*expr];
+            children.extend(*max_rise);
+            children.extend(*max_fall);
+            children
+        }
+        HirAnalogOperator::LastCrossing { expr, .. } => vec![*expr],
     }
 }
 

@@ -388,6 +388,94 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_lowers_sibling_guard_alias_temp() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module sibling_guard_alias_temp(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer enable = 1 from [0:1];
+    parameter integer mode = 1 from [0:1];
+    real tmp;
+    analog begin
+        tmp = 0.0;
+        if (enable == 1) begin
+            if (mode == 1) begin
+                tmp = V(p, n);
+            end
+        end
+        if ((enable == 1) && (mode == 1)) begin
+            I(p, n) <+ tmp;
+        end
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("sibling guard alias temp should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_lowers_inactive_guarded_assignment_fallback() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module inactive_guarded_assignment_fallback(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer enable = 1 from [0:1];
+    real tmp;
+    analog begin
+        tmp = 0.0;
+        if (enable == 1) begin
+            tmp = V(p, n);
+        end
+        if (enable != 1) begin
+            tmp = $simparam("unsupported_scalar_probe");
+        end
+        if (enable == 1) begin
+            I(p, n) <+ tmp;
+        end
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("inactive guarded assignment fallback should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_lowers_branch_local_reassigned_temp() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(

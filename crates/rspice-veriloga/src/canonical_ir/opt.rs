@@ -320,6 +320,7 @@ struct ScalarGraphBuilder<'a> {
     expression_values: HashMap<ExprId, Option<ValueId>>,
     variable_values: HashMap<VariableId, Option<ValueId>>,
     variable_assignment_exprs: HashMap<VariableId, ExprId>,
+    variable_assignment_history: HashMap<VariableId, Vec<ExprId>>,
     guarded_path_assignment_exprs: HashMap<VariableId, GuardedPathAssignmentExpr>,
     variable_lowering_stack: HashSet<VariableId>,
     branch_current_values: HashMap<String, ValueId>,
@@ -464,6 +465,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             expression_values: HashMap::new(),
             variable_values: HashMap::new(),
             variable_assignment_exprs: HashMap::new(),
+            variable_assignment_history: HashMap::new(),
             guarded_path_assignment_exprs: HashMap::new(),
             variable_lowering_stack: HashSet::new(),
             branch_current_values: HashMap::new(),
@@ -638,12 +640,18 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_assignment_statement(&mut self, assignment: &HirAssignment) {
-        self.guarded_path_assignment_exprs.remove(&assignment.target);
+        self.guarded_path_assignment_exprs
+            .remove(&assignment.target);
         if assignment.index.is_none() && supported_assignment_value_type(assignment.expr_type) {
             self.variable_assignment_exprs
                 .insert(assignment.target, assignment.expr.id);
+            self.variable_assignment_history
+                .entry(assignment.target)
+                .or_default()
+                .push(assignment.expr.id);
         } else {
             self.variable_assignment_exprs.remove(&assignment.target);
+            self.variable_assignment_history.remove(&assignment.target);
         }
         let value = if assignment.index.is_none()
             && supported_assignment_value_type(assignment.expr_type)
@@ -699,6 +707,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         let original_expression_values = self.expression_values.clone();
         let original_variable_values = self.variable_values.clone();
         let original_variable_assignment_exprs = self.variable_assignment_exprs.clone();
+        let original_variable_assignment_history = self.variable_assignment_history.clone();
         let original_guarded_path_assignment_exprs = self.guarded_path_assignment_exprs.clone();
         let original_conditional_path_stack = self.conditional_path_stack.clone();
 
@@ -712,6 +721,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             self.expression_values = original_expression_values;
             self.variable_values = original_variable_values;
             self.variable_assignment_exprs = original_variable_assignment_exprs;
+            self.variable_assignment_history = original_variable_assignment_history;
             self.guarded_path_assignment_exprs = original_guarded_path_assignment_exprs;
             self.conditional_path_stack = original_conditional_path_stack;
             false
@@ -791,6 +801,10 @@ impl<'a> ScalarGraphBuilder<'a> {
         );
         self.variable_assignment_exprs
             .insert(assignment.target, assignment.expr.id);
+        self.variable_assignment_history
+            .entry(assignment.target)
+            .or_default()
+            .push(assignment.expr.id);
         self.expression_values.clear();
         let Some(next) = self.lower_expression(assignment.expr.id) else {
             self.variable_values.insert(assignment.target, None);
@@ -873,6 +887,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         let original_expression_values = self.expression_values.clone();
         let original_variable_values = self.variable_values.clone();
         let original_variable_assignment_exprs = self.variable_assignment_exprs.clone();
+        let original_variable_assignment_history = self.variable_assignment_history.clone();
         let original_guarded_path_assignment_exprs = self.guarded_path_assignment_exprs.clone();
         let original_next_loop_id = self.next_loop_id;
 
@@ -886,6 +901,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             self.expression_values = original_expression_values;
             self.variable_values = original_variable_values;
             self.variable_assignment_exprs = original_variable_assignment_exprs;
+            self.variable_assignment_history = original_variable_assignment_history;
             self.guarded_path_assignment_exprs = original_guarded_path_assignment_exprs;
             self.next_loop_id = original_next_loop_id;
             false
@@ -989,6 +1005,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         self.variable_values = original_variable_values;
         for assigned in assigned_variables {
             self.variable_assignment_exprs.remove(&assigned);
+            self.variable_assignment_history.remove(&assigned);
             self.guarded_path_assignment_exprs.remove(&assigned);
             self.variable_values.insert(assigned, None);
         }
@@ -1265,7 +1282,9 @@ impl<'a> ScalarGraphBuilder<'a> {
                 HirStatement::Assignment(assignment) => {
                     self.variable_values.insert(assignment.target, None);
                     self.variable_assignment_exprs.remove(&assignment.target);
-                    self.guarded_path_assignment_exprs.remove(&assignment.target);
+                    self.variable_assignment_history.remove(&assignment.target);
+                    self.guarded_path_assignment_exprs
+                        .remove(&assignment.target);
                 }
                 HirStatement::Loop(loop_statement) => {
                     self.mark_statement_assignments_unknown(&loop_statement.body);
@@ -1276,9 +1295,7 @@ impl<'a> ScalarGraphBuilder<'a> {
 
     fn lower_expression(&mut self, expr_id: ExprId) -> Option<ValueId> {
         let use_cache = self.conditional_path_stack.is_empty();
-        if use_cache
-            && let Some(value) = self.expression_values.get(&expr_id)
-        {
+        if use_cache && let Some(value) = self.expression_values.get(&expr_id) {
             return *value;
         }
 
@@ -2289,20 +2306,27 @@ impl<'a> ScalarGraphBuilder<'a> {
         &mut self,
         variable: VariableId,
     ) -> Option<ValueId> {
-        if self.conditional_path_stack.is_empty()
-            || !self.variable_lowering_stack.insert(variable)
+        if self.conditional_path_stack.is_empty() || !self.variable_lowering_stack.insert(variable)
         {
             return None;
         }
         let guarded_expr = self.guarded_path_assignment_exprs.get(&variable).copied();
         let lowered = guarded_expr
             .and_then(|expr| self.lower_guarded_path_assignment_for_current_path(expr))
-            .or_else(|| {
-                let expr = self.variable_assignment_exprs.get(&variable).copied();
-                expr.and_then(|expr| self.lower_assignment_expr_for_current_path(variable, expr))
-            });
+            .or_else(|| self.lower_assignment_history_for_current_path(variable));
         self.variable_lowering_stack.remove(&variable);
         lowered
+    }
+
+    fn lower_assignment_history_for_current_path(
+        &mut self,
+        variable: VariableId,
+    ) -> Option<ValueId> {
+        let history = self.variable_assignment_history.get(&variable)?.clone();
+        history
+            .into_iter()
+            .rev()
+            .find_map(|expr| self.lower_assignment_expr_for_current_path(variable, expr))
     }
 
     fn lower_guarded_path_assignment_for_current_path(
@@ -2327,10 +2351,14 @@ impl<'a> ScalarGraphBuilder<'a> {
             else_expr,
         } = &expression.kind
         else {
-            return None;
+            return self.lower_expression(expr);
         };
         let condition_truth = self.condition_truth_in_current_path(*condition)?;
-        let selected = if condition_truth { *then_expr } else { *else_expr };
+        let selected = if condition_truth {
+            *then_expr
+        } else {
+            *else_expr
+        };
         if self.variable_identifier(selected) == Some(variable) {
             return None;
         }
@@ -2344,12 +2372,15 @@ impl<'a> ScalarGraphBuilder<'a> {
             }
         }
 
+        if let Some(alias) = self.guard_alias_expr(condition) {
+            return self.condition_truth_in_current_path(alias);
+        }
+
         let expression = self.mir.expressions.get(usize::from(condition))?;
         match &expression.kind {
-            HirExprKind::Unary { op, operand } if op.as_str() == "Not" => {
-                self.condition_truth_in_current_path(*operand)
-                    .map(|truth| !truth)
-            }
+            HirExprKind::Unary { op, operand } if op.as_str() == "Not" => self
+                .condition_truth_in_current_path(*operand)
+                .map(|truth| !truth),
             HirExprKind::Binary { op, left, right } if op.as_str() == "And" => {
                 match (
                     self.condition_truth_in_current_path(*left),
@@ -2397,6 +2428,9 @@ impl<'a> ScalarGraphBuilder<'a> {
         if self.expr_structurally_equal(container, target) {
             return true;
         }
+        if let Some(alias) = self.guard_alias_expr(container) {
+            return self.expr_conjunctively_contains(alias, target);
+        }
         let Some(expression) = self.mir.expressions.get(usize::from(container)) else {
             return false;
         };
@@ -2410,6 +2444,9 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn expr_is_logical_not(&self, expr: ExprId, inner: ExprId) -> bool {
+        if let Some(alias) = self.guard_alias_expr(expr) {
+            return self.expr_is_logical_not(alias, inner);
+        }
         let Some(expression) = self.mir.expressions.get(usize::from(expr)) else {
             return false;
         };
@@ -2421,8 +2458,24 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn expr_structurally_equal(&self, left: ExprId, right: ExprId) -> bool {
+        self.expr_structurally_equal_inner(left, right, 0)
+    }
+
+    fn expr_structurally_equal_inner(&self, left: ExprId, right: ExprId, depth: usize) -> bool {
         if left == right {
             return true;
+        }
+        if depth < 64 {
+            if let Some(alias) = self.guard_alias_expr(left)
+                && self.expr_structurally_equal_inner(alias, right, depth + 1)
+            {
+                return true;
+            }
+            if let Some(alias) = self.guard_alias_expr(right)
+                && self.expr_structurally_equal_inner(left, alias, depth + 1)
+            {
+                return true;
+            }
         }
         let Some(left) = self.mir.expressions.get(usize::from(left)) else {
             return false;
@@ -2431,10 +2484,9 @@ impl<'a> ScalarGraphBuilder<'a> {
             return false;
         };
         match (&left.kind, &right.kind) {
-            (
-                HirExprKind::Number { value: left, .. },
-                HirExprKind::Number { value: right, .. },
-            ) => left.to_bits() == right.to_bits(),
+            (HirExprKind::Number { value: left, .. }, HirExprKind::Number { value: right, .. }) => {
+                left.to_bits() == right.to_bits()
+            }
             (
                 HirExprKind::StringLiteral { value: left },
                 HirExprKind::StringLiteral { value: right },
@@ -2494,10 +2546,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                     op: right_op,
                     operand: right_operand,
                 },
-            ) => {
-                left_op == right_op
-                    && self.expr_structurally_equal(*left_operand, *right_operand)
-            }
+            ) => left_op == right_op && self.expr_structurally_equal(*left_operand, *right_operand),
             (
                 HirExprKind::Conditional {
                     condition: left_condition,
@@ -2546,8 +2595,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                     index: right_index,
                 },
             ) => {
-                left_array == right_array
-                    && self.expr_structurally_equal(*left_index, *right_index)
+                left_array == right_array && self.expr_structurally_equal(*left_index, *right_index)
             }
             (
                 HirExprKind::ArrayLiteral {
@@ -2609,6 +2657,25 @@ impl<'a> ScalarGraphBuilder<'a> {
             }
             _ => false,
         }
+    }
+
+    fn guard_alias_expr(&self, expr: ExprId) -> Option<ExprId> {
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let HirExprKind::Identifier { name } = &expression.kind else {
+            return None;
+        };
+        if !name.starts_with("__guard") {
+            return None;
+        }
+        let variable = self
+            .hir?
+            .variables
+            .iter()
+            .find(|variable| variable.name == *name)?;
+        self.variable_assignment_exprs
+            .get(&variable.id)
+            .copied()
+            .filter(|alias| *alias != expr)
     }
 
     fn lower_contextual_variable_identifier(&mut self, variable: VariableId) -> Option<ValueId> {
@@ -2925,11 +2992,10 @@ impl<'a> ScalarGraphBuilder<'a> {
     ) -> Option<ValueId> {
         let condition_expr = condition;
         let condition = self.lower_expression(condition_expr)?;
-        self.conditional_path_stack
-            .push(ConditionalPathPredicate {
-                condition: condition_expr,
-                truth: true,
-            });
+        self.conditional_path_stack.push(ConditionalPathPredicate {
+            condition: condition_expr,
+            truth: true,
+        });
         let then_value = self.lower_expression(then_expr);
         self.conditional_path_stack.pop();
         let then_value = then_value?;
