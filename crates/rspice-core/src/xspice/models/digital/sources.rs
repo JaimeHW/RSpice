@@ -135,10 +135,12 @@ fn is_digital_table_data_line(line: &str) -> bool {
             .is_empty()
 }
 
-fn tokenize_digital_table_line(line: &str) -> Vec<&str> {
-    line.split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, '=' | '(' | ')' | ','))
-        .filter(|token| !token.is_empty())
-        .collect()
+fn tokenize_digital_table_line<'line>(line: &'line str, tokens: &mut Vec<&'line str>) {
+    tokens.clear();
+    tokens.extend(
+        line.split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, '=' | '(' | ')' | ','))
+            .filter(|token| !token.is_empty()),
+    );
 }
 
 fn parse_d_source_token(input_file: &str, line: usize, token: &str) -> CmResult<DigitalValue> {
@@ -175,6 +177,7 @@ fn parse_d_source_contents(
     let mut rows = Vec::new();
     let mut values = Vec::new();
     let mut previous_time = None;
+    let mut tokens = Vec::with_capacity(width.saturating_add(1));
 
     for (line_idx, line) in contents.lines().enumerate() {
         let line_no = line_idx + 1;
@@ -182,7 +185,7 @@ fn parse_d_source_contents(
             continue;
         }
 
-        let tokens = tokenize_digital_table_line(line);
+        tokenize_digital_table_line(line, &mut tokens);
         let expected = width + 1;
         if tokens.len() != expected {
             return Err(d_source_error(
@@ -677,6 +680,7 @@ fn parse_d_state_contents(
     let mut output_values = Vec::new();
     let mut last_state = None;
     let mut stale_bit_code = 0;
+    let mut tokens = Vec::with_capacity(output_width.saturating_add(input_width).saturating_add(3));
 
     for (line_idx, line) in contents.lines().enumerate() {
         let line_no = line_idx + 1;
@@ -684,7 +688,7 @@ fn parse_d_state_contents(
             continue;
         }
 
-        let tokens = tokenize_digital_table_line(line);
+        tokenize_digital_table_line(line, &mut tokens);
         let header_len = output_width + input_width + 3;
         let continuation_len = input_width + 2;
         let (state, input_start, next_idx) = if tokens.len() == header_len {
@@ -1075,6 +1079,21 @@ mod tests {
             panic!("poison d_state cache lock for recovery test");
         });
         assert!(result.is_err(), "recovery test must poison the mutex");
+    }
+
+    #[test]
+    fn digital_table_tokenizer_reuses_buffer_for_cnvgettok_separators() {
+        let mut tokens = Vec::new();
+
+        tokenize_digital_table_line(" 1n = (1s, 0s) ", &mut tokens);
+        assert_eq!(tokens, vec!["1n", "1s", "0s"]);
+
+        tokenize_digital_table_line("2n,Uz", &mut tokens);
+        assert_eq!(
+            tokens,
+            vec!["2n", "Uz"],
+            "tokenizing a shorter row must clear stale tokens from the reusable buffer"
+        );
     }
 
     #[test]
