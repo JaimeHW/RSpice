@@ -145,8 +145,8 @@ impl CodeModel for Gain {
         static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
         PARAMS.get_or_init(|| {
             vec![
-                ParamSpec::real("gain", 1.0).with_description("Voltage gain factor"),
                 ParamSpec::real("in_offset", 0.0).with_description("Input offset voltage"),
+                ParamSpec::real("gain", 1.0).with_description("Voltage gain factor"),
                 ParamSpec::real("out_offset", 0.0).with_description("Output offset voltage"),
             ]
         })
@@ -1035,8 +1035,8 @@ impl CodeModel for Limiter {
         static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
         PARAMS.get_or_init(|| {
             vec![
-                ParamSpec::real("gain", 1.0).with_description("Gain in linear region"),
                 ParamSpec::real("in_offset", 0.0).with_description("Input offset voltage"),
+                ParamSpec::real("gain", 1.0).with_description("Gain in linear region"),
                 ParamSpec::real("out_lower_limit", -1e12)
                     .required()
                     .with_description("Lower output limit"),
@@ -2572,6 +2572,192 @@ impl CodeModel for AnalogOneShot {
 mod tests {
     use super::*;
     use crate::xspice::AnalogValue;
+    use crate::xspice::ParamType;
+
+    fn param_summary(model: &dyn CodeModel) -> Vec<(&str, ParamType, Value, bool)> {
+        model
+            .parameters()
+            .iter()
+            .map(|param| {
+                (
+                    param.name.as_str(),
+                    param.param_type,
+                    param.default,
+                    param.required,
+                )
+            })
+            .collect()
+    }
+
+    fn assert_analog_ports(
+        model: &dyn CodeModel,
+        expected: &[(&str, PortDirection, bool, Option<usize>)],
+    ) {
+        let ports = model.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|(name, _, _, _)| *name)
+                .collect::<Vec<_>>()
+        );
+        for (port, (_, direction, is_vector, min_len)) in ports.iter().zip(expected) {
+            assert_eq!(port.direction, *direction, "{} direction", port.name);
+            assert_eq!(
+                port.default_type,
+                PortType::Voltage,
+                "{} default type",
+                port.name
+            );
+            assert_eq!(port.is_vector, *is_vector, "{} vector flag", port.name);
+            assert!(!port.null_allowed, "{} nullability", port.name);
+            assert_eq!(port.vector_min_len, *min_len, "{} min length", port.name);
+            assert_eq!(port.vector_max_len, None, "{} max length", port.name);
+
+            if *direction == PortDirection::Out {
+                assert_eq!(
+                    port.allowed_types,
+                    vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                        PortType::DifferentialCurrent,
+                    ],
+                    "{} output allowed types",
+                    port.name
+                );
+            } else {
+                assert_eq!(
+                    port.allowed_types,
+                    vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                        PortType::DifferentialCurrent,
+                        PortType::VoltageName,
+                    ],
+                    "{} input allowed types",
+                    port.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gain_metadata_matches_ngspice46_interface() {
+        assert_analog_ports(
+            &Gain,
+            &[
+                ("in", PortDirection::In, false, None),
+                ("out", PortDirection::Out, false, None),
+            ],
+        );
+        assert_eq!(
+            param_summary(&Gain),
+            vec![
+                ("in_offset", ParamType::Real, 0.0, false),
+                ("gain", ParamType::Real, 1.0, false),
+                ("out_offset", ParamType::Real, 0.0, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn vector_arithmetic_metadata_matches_ngspice46_interfaces() {
+        for model in [&Summer as &dyn CodeModel, &Multiplier] {
+            assert_analog_ports(
+                model,
+                &[
+                    ("in", PortDirection::In, true, Some(2)),
+                    ("out", PortDirection::Out, false, None),
+                ],
+            );
+            assert_eq!(
+                param_summary(model),
+                vec![
+                    ("in_offset", ParamType::RealVector, 0.0, false),
+                    ("in_gain", ParamType::RealVector, 0.0, false),
+                    ("out_gain", ParamType::Real, 1.0, false),
+                    ("out_offset", ParamType::Real, 0.0, false),
+                ],
+                "{}",
+                model.name()
+            );
+        }
+    }
+
+    #[test]
+    fn divide_metadata_matches_ngspice46_interface() {
+        assert_eq!(DivideAlias.name(), "divide");
+        assert_analog_ports(
+            &DivideAlias,
+            &[
+                ("num", PortDirection::In, false, None),
+                ("den", PortDirection::In, false, None),
+                ("out", PortDirection::Out, false, None),
+            ],
+        );
+        assert_eq!(
+            param_summary(&DivideAlias),
+            vec![
+                ("num_offset", ParamType::Real, 0.0, false),
+                ("num_gain", ParamType::Real, 1.0, false),
+                ("den_offset", ParamType::Real, 0.0, false),
+                ("den_gain", ParamType::Real, 1.0, false),
+                ("den_lower_limit", ParamType::Real, 1.0e-10, false),
+                ("den_domain", ParamType::Real, 1.0e-16, false),
+                ("fraction", ParamType::Boolean, 0.0, false),
+                ("out_gain", ParamType::Real, 1.0, false),
+                ("out_offset", ParamType::Real, 0.0, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn limiter_metadata_matches_ngspice46_interfaces() {
+        assert_analog_ports(
+            &Limiter,
+            &[
+                ("in", PortDirection::In, false, None),
+                ("out", PortDirection::Out, false, None),
+            ],
+        );
+        assert_eq!(
+            param_summary(&Limiter),
+            vec![
+                ("in_offset", ParamType::Real, 0.0, false),
+                ("gain", ParamType::Real, 1.0, false),
+                ("out_lower_limit", ParamType::Real, -1.0e12, true),
+                ("out_upper_limit", ParamType::Real, 1.0e12, true),
+                ("limit_range", ParamType::Real, 1.0e-6, false),
+                ("fraction", ParamType::Boolean, 0.0, false),
+            ]
+        );
+
+        assert_analog_ports(
+            &ControlledLimiter,
+            &[
+                ("in", PortDirection::In, false, None),
+                ("cntl_upper", PortDirection::In, false, None),
+                ("cntl_lower", PortDirection::In, false, None),
+                ("out", PortDirection::Out, false, None),
+            ],
+        );
+        assert_eq!(
+            param_summary(&ControlledLimiter),
+            vec![
+                ("in_offset", ParamType::Real, 0.0, false),
+                ("gain", ParamType::Real, 1.0, false),
+                ("upper_delta", ParamType::Real, 0.0, false),
+                ("lower_delta", ParamType::Real, 0.0, false),
+                ("limit_range", ParamType::Real, 1.0e-6, false),
+                ("fraction", ParamType::Boolean, 0.0, false),
+            ]
+        );
+    }
 
     fn oneshot_point(control: Value, pulse_width: Value) -> OneShotPoint {
         OneShotPoint {
