@@ -115,41 +115,33 @@ impl TokenCursor {
         Self { lines, next: 0 }
     }
 
-    fn next_line(&mut self, file: &str, model: &str, role: &str) -> CmResult<TableLine> {
+    fn next_line(&mut self, file: &str, model: &str, role: &str) -> CmResult<&TableLine> {
         self.skip_header_ignored();
-        let line = self.lines.get(self.next).ok_or_else(|| {
-            table_file_error(
+        let index = self.next;
+        if self.lines.get(index).is_none() {
+            return Err(table_file_error(
                 model,
                 file,
                 format!("missing {role}; table file ended early"),
-            )
-        })?;
+            ));
+        }
         self.next += 1;
-        Ok(TableLine {
-            line: line.line,
-            header_ignored: line.header_ignored,
-            data_comment: line.data_comment,
-            tokens: line.tokens.clone(),
-        })
+        Ok(&self.lines[index])
     }
 
-    fn next_data_line_optional(&mut self) -> Option<TableLine> {
+    fn next_data_line_optional(&mut self) -> Option<&TableLine> {
         loop {
-            let line = self.lines.get(self.next)?;
+            let index = self.next;
+            let data_comment = self.lines.get(index)?.data_comment;
             self.next += 1;
-            if line.data_comment {
+            if data_comment {
                 continue;
             }
-            return Some(TableLine {
-                line: line.line,
-                header_ignored: line.header_ignored,
-                data_comment: line.data_comment,
-                tokens: line.tokens.clone(),
-            });
+            return Some(&self.lines[index]);
         }
     }
 
-    fn next_data_line(&mut self, file: &str, model: &str, role: &str) -> CmResult<TableLine> {
+    fn next_data_line(&mut self, file: &str, model: &str, role: &str) -> CmResult<&TableLine> {
         self.next_data_line_optional().ok_or_else(|| {
             table_file_error(
                 model,
@@ -467,8 +459,8 @@ fn parse_axis(
     }
 
     let mut axis = Vec::with_capacity(len);
-    for (index, token) in row.tokens.into_iter().enumerate() {
-        let value = parse_table_spice_value(&token);
+    for (index, token) in row.tokens.iter().enumerate() {
+        let value = parse_table_spice_value(token);
         if !value.is_finite() {
             return Err(table_line_error(
                 model,
@@ -520,8 +512,8 @@ fn parse_table2d_values(
                 format!("not enough numbers in y row no. {}", row + 1),
             ));
         }
-        for (column, token) in table_row.tokens.into_iter().enumerate() {
-            let value = parse_table_spice_value(&token);
+        for (column, token) in table_row.tokens.iter().enumerate() {
+            let value = parse_table_spice_value(token);
             if !value.is_finite() {
                 return Err(table_line_error(
                     model,
@@ -567,8 +559,8 @@ fn parse_table3d_values(
                     format!("not enough numbers in y row no. {y} of table {z}"),
                 ));
             }
-            for (x, token) in table_row.tokens.into_iter().enumerate() {
-                let value = parse_table_spice_value(&token);
+            for (x, token) in table_row.tokens.iter().enumerate() {
+                let value = parse_table_spice_value(token);
                 if !value.is_finite() {
                     return Err(table_line_error(
                         model,
@@ -1688,6 +1680,36 @@ mod tests {
 
         poison_table3d_cache_lock();
         lock_table3d_cache().clear();
+    }
+
+    #[test]
+    fn token_cursor_returns_borrowed_table_lines() {
+        let file = "inline-table";
+        let model = TableKind::Table2D.model_name();
+        let lines = tokenize_table_contents(model, file, "* header\n2\n2\n0 1\n0 1\n3 4\n")
+            .expect("tokenized table");
+        let x_tokens = lines[3].tokens.as_ptr();
+        let data_tokens = lines[5].tokens.as_ptr();
+        let mut cursor = TokenCursor::new(lines);
+
+        assert_eq!(
+            cursor.next_dimension(file, model, "x dimension").unwrap(),
+            2
+        );
+        assert_eq!(
+            cursor.next_dimension(file, model, "y dimension").unwrap(),
+            2
+        );
+        {
+            let x = cursor.next_line(file, model, "x").unwrap();
+            assert_eq!(x.tokens.as_ptr(), x_tokens);
+        }
+        {
+            let _y = cursor.next_line(file, model, "y").unwrap();
+        }
+        let row = cursor.next_data_line_optional().unwrap();
+
+        assert_eq!(row.tokens.as_ptr(), data_tokens);
     }
 
     #[test]
