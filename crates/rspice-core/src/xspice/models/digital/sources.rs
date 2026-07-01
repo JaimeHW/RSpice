@@ -1304,6 +1304,7 @@ mod tests {
 
     #[test]
     fn digital_file_backed_cache_locks_recover_after_poison() {
+        let _guard = data_file_test_guard();
         poison_d_source_cache_lock();
         lock_d_source_cache().clear();
 
