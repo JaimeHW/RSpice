@@ -59,6 +59,22 @@ fn gate_params() -> &'static [ParamSpec] {
     })
 }
 
+fn inverter_params() -> &'static [ParamSpec] {
+    use std::sync::OnceLock;
+    static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+    PARAMS.get_or_init(|| {
+        vec![
+            ParamSpec::real("rise_delay", 1e-9)
+                .with_description("Rise propagation delay, clamped to official lower limit"),
+            ParamSpec::real("fall_delay", 1e-9)
+                .with_description("Fall propagation delay, clamped to official lower limit"),
+            ParamSpec::boolean("inertial_delay", false),
+            ParamSpec::string("family", ""),
+            ParamSpec::real("input_load", 1.0e-12),
+        ]
+    })
+}
+
 fn digital_logic_code(value: DigitalValue) -> i64 {
     if value.state.is_high() {
         1
@@ -792,7 +808,7 @@ impl CodeModel for DigitalInverter {
     }
 
     fn parameters(&self) -> &[ParamSpec] {
-        DigitalNand.parameters()
+        inverter_params()
     }
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
@@ -844,7 +860,7 @@ impl CodeModel for DigitalBuffer {
         DigitalInverter.ports()
     }
     fn parameters(&self) -> &[ParamSpec] {
-        DigitalInverter.parameters()
+        gate_params()
     }
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
@@ -1209,6 +1225,198 @@ impl CodeModel for DigitalOpenEmitter {
 mod tests {
     use super::*;
     use crate::xspice::context::InputValue;
+    use crate::xspice::{ParamType, PortDirection};
+
+    fn param_summary(model: &dyn CodeModel) -> Vec<(&str, ParamType, Value, Option<&str>)> {
+        model
+            .parameters()
+            .iter()
+            .map(|param| {
+                (
+                    param.name.as_str(),
+                    param.param_type,
+                    param.default,
+                    param.string_default.as_deref(),
+                )
+            })
+            .collect()
+    }
+
+    fn assert_digital_ports(
+        model: &dyn CodeModel,
+        expected: &[(&str, PortDirection, bool, Option<usize>)],
+    ) {
+        let ports = model.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|(name, _, _, _)| *name)
+                .collect::<Vec<_>>()
+        );
+        for (port, (_, direction, is_vector, min_len)) in ports.iter().zip(expected) {
+            assert_eq!(port.direction, *direction, "{} direction", port.name);
+            assert_eq!(
+                port.default_type,
+                PortType::Digital,
+                "{} default type",
+                port.name
+            );
+            assert_eq!(
+                port.allowed_types,
+                vec![PortType::Digital],
+                "{} allowed types",
+                port.name
+            );
+            assert_eq!(port.is_vector, *is_vector, "{} vector flag", port.name);
+            assert!(!port.null_allowed, "{} nullability", port.name);
+            assert_eq!(port.vector_min_len, *min_len, "{} min length", port.name);
+            assert_eq!(port.vector_max_len, None, "{} max length", port.name);
+        }
+    }
+
+    fn official_gate_params() -> Vec<(&'static str, ParamType, Value, Option<&'static str>)> {
+        vec![
+            ("rise_delay", ParamType::Real, 1.0e-9, None),
+            ("fall_delay", ParamType::Real, 1.0e-9, None),
+            ("input_load", ParamType::Real, 1.0e-12, None),
+            ("family", ParamType::String, 0.0, Some("")),
+            ("inertial_delay", ParamType::Boolean, 0.0, None),
+        ]
+    }
+
+    #[test]
+    fn n_input_gate_metadata_matches_ngspice46_interfaces() {
+        for model in [
+            &DigitalAnd as &dyn CodeModel,
+            &DigitalNand,
+            &DigitalOr,
+            &DigitalNor,
+            &DigitalXor,
+            &DigitalXnor,
+        ] {
+            assert_digital_ports(
+                model,
+                &[
+                    ("in", PortDirection::In, true, Some(2)),
+                    ("out", PortDirection::Out, false, None),
+                ],
+            );
+            assert_eq!(
+                param_summary(model),
+                official_gate_params(),
+                "{}",
+                model.name()
+            );
+        }
+    }
+
+    #[test]
+    fn one_bit_gate_metadata_matches_ngspice46_interfaces() {
+        assert_digital_ports(
+            &DigitalInverter,
+            &[
+                ("in", PortDirection::In, false, None),
+                ("out", PortDirection::Out, false, None),
+            ],
+        );
+        assert_eq!(
+            param_summary(&DigitalInverter),
+            vec![
+                ("rise_delay", ParamType::Real, 1.0e-9, None),
+                ("fall_delay", ParamType::Real, 1.0e-9, None),
+                ("inertial_delay", ParamType::Boolean, 0.0, None),
+                ("family", ParamType::String, 0.0, Some("")),
+                ("input_load", ParamType::Real, 1.0e-12, None),
+            ]
+        );
+
+        assert_digital_ports(
+            &DigitalBuffer,
+            &[
+                ("in", PortDirection::In, false, None),
+                ("out", PortDirection::Out, false, None),
+            ],
+        );
+        assert_eq!(param_summary(&DigitalBuffer), official_gate_params());
+    }
+
+    #[test]
+    fn tristate_metadata_matches_ngspice46_interface() {
+        assert_digital_ports(
+            &DigitalTristate,
+            &[
+                ("in", PortDirection::In, false, None),
+                ("enable", PortDirection::In, false, None),
+                ("out", PortDirection::Out, false, None),
+            ],
+        );
+        assert_eq!(
+            param_summary(&DigitalTristate),
+            vec![
+                ("delay", ParamType::Real, 1.0e-9, None),
+                ("input_load", ParamType::Real, 1.0e-12, None),
+                ("enable_load", ParamType::Real, 1.0e-12, None),
+                ("inertial_delay", ParamType::Boolean, 0.0, None),
+                ("family", ParamType::String, 0.0, Some("")),
+            ]
+        );
+    }
+
+    #[test]
+    fn pull_resistor_metadata_matches_ngspice46_interfaces() {
+        for model in [&DigitalPullup as &dyn CodeModel, &DigitalPulldown] {
+            assert_digital_ports(model, &[("out", PortDirection::Out, false, None)]);
+            assert_eq!(
+                param_summary(model),
+                vec![("load", ParamType::Real, 1.0e-12, None)],
+                "{}",
+                model.name()
+            );
+        }
+    }
+
+    #[test]
+    fn open_output_metadata_matches_ngspice46_interfaces() {
+        assert_digital_ports(
+            &DigitalOpenCollector,
+            &[
+                ("in", PortDirection::In, false, None),
+                ("out", PortDirection::Out, false, None),
+            ],
+        );
+        assert_eq!(
+            param_summary(&DigitalOpenCollector),
+            vec![
+                ("open_delay", ParamType::Real, 1.0e-9, None),
+                ("fall_delay", ParamType::Real, 1.0e-9, None),
+                ("input_load", ParamType::Real, 1.0e-12, None),
+                ("family", ParamType::String, 0.0, Some("")),
+                ("inertial_delay", ParamType::Boolean, 0.0, None),
+            ]
+        );
+
+        assert_digital_ports(
+            &DigitalOpenEmitter,
+            &[
+                ("in", PortDirection::In, false, None),
+                ("out", PortDirection::Out, false, None),
+            ],
+        );
+        assert_eq!(
+            param_summary(&DigitalOpenEmitter),
+            vec![
+                ("rise_delay", ParamType::Real, 1.0e-9, None),
+                ("open_delay", ParamType::Real, 1.0e-9, None),
+                ("input_load", ParamType::Real, 1.0e-12, None),
+                ("family", ParamType::String, 0.0, Some("")),
+                ("inertial_delay", ParamType::Boolean, 0.0, None),
+            ]
+        );
+    }
 
     fn logic_values(states: &[DigitalState]) -> Vec<DigitalValue> {
         states
