@@ -20,6 +20,8 @@ const D_RAM_SELECT_VALUE_MAX: i64 = 32_767;
 const D_RAM_IC_MIN: i64 = 0;
 const D_RAM_IC_MAX: i64 = 2;
 const D_RAM_READ_DELAY_MIN: Value = 1.0e-12;
+const D_RAM_BITS_PER_PACKED_STATE: usize = 31;
+const D_RAM_CODE_MASK: u64 = 0b11;
 const D_RAM_SCRATCH_STATE_RESOURCE: &str = "d_ram.scratch_state";
 const D_RAM_SHAPE_RESOURCE: &str = "d_ram.shape";
 
@@ -40,6 +42,7 @@ struct DMemoryShape {
     select_width: usize,
     memory_start: usize,
     memory_bits: usize,
+    memory_states: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -118,8 +121,9 @@ fn d_ram_shape_from_signature(signature: DMemoryShapeSignature) -> CmResult<DMem
         .checked_mul(signature.word_width)
         .ok_or_else(|| d_ram_error("memory size overflows usize"))?;
     let memory_start = d_ram_memory_start(signature.address_width, signature.word_width);
+    let memory_states = memory_bits.div_ceil(D_RAM_BITS_PER_PACKED_STATE);
     memory_start
-        .checked_add(memory_bits)
+        .checked_add(memory_states)
         .ok_or_else(|| d_ram_error("state size overflows usize"))?;
 
     Ok(DMemoryShape {
@@ -128,6 +132,7 @@ fn d_ram_shape_from_signature(signature: DMemoryShapeSignature) -> CmResult<DMem
         select_width: signature.select_width,
         memory_start,
         memory_bits,
+        memory_states,
     })
 }
 
@@ -213,11 +218,11 @@ fn d_ram_address_index(ctx: &CmContext, shape: DMemoryShape) -> Option<usize> {
 }
 
 fn d_ram_memory_index(shape: DMemoryShape, address_index: usize, bit: usize) -> usize {
-    shape.memory_start + address_index * shape.word_width + bit
+    address_index * shape.word_width + bit
 }
 
 fn d_ram_state_len(shape: DMemoryShape) -> usize {
-    shape.memory_start + shape.memory_bits
+    shape.memory_start + shape.memory_states
 }
 
 fn d_ram_fill_state_snapshot(ctx: &CmContext, shape: DMemoryShape, state: &mut Vec<i64>) {
@@ -249,6 +254,69 @@ fn d_ram_set_state(
     }
 }
 
+fn d_ram_packed_state_index(shape: DMemoryShape, memory_bit: usize) -> usize {
+    shape.memory_start + memory_bit / D_RAM_BITS_PER_PACKED_STATE
+}
+
+fn d_ram_packed_state_shift(memory_bit: usize) -> usize {
+    (memory_bit % D_RAM_BITS_PER_PACKED_STATE) * 2
+}
+
+fn d_ram_packed_pattern(code: i64) -> i64 {
+    let code = (code as u64) & D_RAM_CODE_MASK;
+    let mut pattern = 0u64;
+    for bit in 0..D_RAM_BITS_PER_PACKED_STATE {
+        pattern |= code << (bit * 2);
+    }
+    pattern as i64
+}
+
+fn d_ram_memory_state(
+    ctx: &CmContext,
+    scratch_state: Option<&[i64]>,
+    shape: DMemoryShape,
+    address_index: usize,
+    bit: usize,
+) -> i64 {
+    let memory_bit = d_ram_memory_index(shape, address_index, bit);
+    let packed = d_ram_state(
+        ctx,
+        scratch_state,
+        d_ram_packed_state_index(shape, memory_bit),
+    ) as u64;
+    let code = ((packed >> d_ram_packed_state_shift(memory_bit)) & D_RAM_CODE_MASK) as i64;
+    code.min(2)
+}
+
+fn d_ram_set_memory_state(
+    ctx: &mut CmContext,
+    scratch_state: &mut Option<&mut [i64]>,
+    shape: DMemoryShape,
+    address_index: usize,
+    bit: usize,
+    code: i64,
+) {
+    let memory_bit = d_ram_memory_index(shape, address_index, bit);
+    let state_index = d_ram_packed_state_index(shape, memory_bit);
+    let shift = d_ram_packed_state_shift(memory_bit);
+    let packed = d_ram_state(ctx, scratch_state.as_deref(), state_index) as u64;
+    let updated =
+        (packed & !(D_RAM_CODE_MASK << shift)) | (((code as u64) & D_RAM_CODE_MASK) << shift);
+    d_ram_set_state(ctx, scratch_state, state_index, updated as i64);
+}
+
+fn d_ram_fill_memory_state(
+    ctx: &mut CmContext,
+    scratch_state: &mut Option<&mut [i64]>,
+    shape: DMemoryShape,
+    code: i64,
+) {
+    let pattern = d_ram_packed_pattern(code);
+    for index in 0..shape.memory_states {
+        d_ram_set_state(ctx, scratch_state, shape.memory_start + index, pattern);
+    }
+}
+
 fn d_ram_write_word(
     ctx: &mut CmContext,
     scratch_state: &mut Option<&mut [i64]>,
@@ -256,20 +324,13 @@ fn d_ram_write_word(
     address_index: Option<usize>,
 ) {
     let Some(address_index) = address_index else {
-        for bit in 0..shape.memory_bits {
-            d_ram_set_state(ctx, scratch_state, shape.memory_start + bit, 2);
-        }
+        d_ram_fill_memory_state(ctx, scratch_state, shape, 2);
         return;
     };
 
     for bit in 0..shape.word_width {
         let code = d_ram_input_state_code(ctx, "data_in", bit);
-        d_ram_set_state(
-            ctx,
-            scratch_state,
-            d_ram_memory_index(shape, address_index, bit),
-            code,
-        );
+        d_ram_set_memory_state(ctx, scratch_state, shape, address_index, bit, code);
     }
 }
 
@@ -288,11 +349,7 @@ fn d_ram_set_outputs(
         |source_ctx, bit| {
             let code = address_index
                 .map(|address_index| {
-                    d_ram_state(
-                        source_ctx,
-                        scratch_state,
-                        d_ram_memory_index(shape, address_index, bit),
-                    )
+                    d_ram_memory_state(source_ctx, scratch_state, shape, address_index, bit)
                 })
                 .unwrap_or(2);
             d_ram_value_from_code(code, strength)
@@ -389,9 +446,7 @@ fn d_ram_evaluate_with_state(
     mut scratch_state: Option<&mut [i64]>,
 ) -> CmResult<()> {
     if ctx.time == 0.0 || d_ram_state(ctx, scratch_state.as_deref(), D_RAM_INITIALIZED) == 0 {
-        for bit in 0..shape.memory_bits {
-            d_ram_set_state(ctx, &mut scratch_state, shape.memory_start + bit, ic);
-        }
+        d_ram_fill_memory_state(ctx, &mut scratch_state, shape, ic);
 
         if select == 1 && write_en == 0 {
             d_ram_set_uniform_outputs(ctx, shape, ic, DigitalStrength::Strong, 0.0);
@@ -505,7 +560,7 @@ impl CodeModel for DigitalRam {
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         let shape = d_ram_cached_shape(ctx)?;
-        ctx.allocate_int_states(shape.memory_start + shape.memory_bits);
+        ctx.allocate_int_states(d_ram_state_len(shape));
         ctx.set_int_state(D_RAM_INITIALIZED, 0);
         ctx.set_resource(
             D_RAM_SCRATCH_STATE_RESOURCE,
@@ -900,8 +955,7 @@ mod tests {
         assert_eq!(initial, DigitalValue::one());
 
         let shape = d_ram_shape(&ctx).expect("test RAM shape is valid");
-        let cell = d_ram_memory_index(shape, 0, 0);
-        assert_eq!(ctx.int_state(cell), 1);
+        assert_eq!(d_ram_memory_state(&ctx, None, shape, 0, 0), 1);
 
         ctx.set_input_digital("write_en", DigitalValue::one());
         ctx.set_input(
@@ -917,7 +971,7 @@ mod tests {
         assert_eq!(trial_delay, 2.0e-9);
 
         assert_eq!(
-            ctx.int_state(cell),
+            d_ram_memory_state(&ctx, None, shape, 0, 0),
             1,
             "rollbackable write probe must not alter stored RAM contents"
         );
@@ -957,8 +1011,7 @@ mod tests {
         let _ = take_data_out(&mut ctx);
 
         let shape = d_ram_shape(&ctx).expect("test RAM shape is valid");
-        let cell = d_ram_memory_index(shape, 0, 0);
-        assert_eq!(ctx.int_state(cell), 1);
+        assert_eq!(d_ram_memory_state(&ctx, None, shape, 0, 0), 1);
 
         ctx.set_input_digital("write_en", DigitalValue::one());
         ctx.set_input(
@@ -982,7 +1035,7 @@ mod tests {
         assert_eq!(guard.as_ptr(), first_ptr);
         assert_eq!(guard.capacity(), first_capacity);
         assert_eq!(
-            ctx.int_state(cell),
+            d_ram_memory_state(&ctx, None, shape, 0, 0),
             1,
             "rollbackable probes must continue to leave committed RAM untouched"
         );
