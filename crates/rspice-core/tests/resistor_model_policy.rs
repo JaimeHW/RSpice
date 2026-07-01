@@ -25,6 +25,12 @@ fn result_voltage(result: &SimulationResult, node: &str) -> f64 {
     result.node_voltages[idx]
 }
 
+fn branch_current(result: &SimulationResult, branch: &str) -> f64 {
+    result
+        .branch_current_named(branch)
+        .unwrap_or_else(|| panic!("missing branch {branch} in {:?}", result.branch_names))
+}
+
 fn step_command(netlist: &Netlist) -> &StepCommand {
     netlist
         .analyses
@@ -34,6 +40,37 @@ fn step_command(netlist: &Netlist) -> &StepCommand {
             _ => None,
         })
         .expect(".STEP command captured")
+}
+
+#[test]
+fn zero_and_xyce_near_zero_resistors_expose_solved_branch_current() {
+    for (resistance, expected_current) in [("0", 1.0e-3), ("1.0e-101", 1.0e-3)] {
+        let deck = format!(
+            "* branch-form zero resistor\n\
+             v1 a 0 dc 1\n\
+             r1 a b {resistance}\n\
+             r2 b 0 1k\n\
+             .op\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let result = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("zero/near-zero branch-form resistor OP solves");
+
+        let current = branch_current(&result, "r1");
+        assert!(
+            (current - expected_current).abs() < 1e-12,
+            "R1={resistance} should carry {expected_current} A, got {current}"
+        );
+
+        let va = result_voltage(&result, "a");
+        let vb = result_voltage(&result, "b");
+        assert!(
+            (va - vb).abs() <= 1e-12,
+            "R1={resistance} should enforce Va ~= Vb, got Va={va}, Vb={vb}"
+        );
+    }
 }
 
 #[test]

@@ -16,6 +16,7 @@ impl CircuitData {
             num_nodes: 0,
             num_branches: 0,
             resistors: Resistors::new(),
+            resistor_branches: ResistorBranches::new(),
             capacitors: Capacitors::new(),
             inductors: Inductors::new(),
             voltage_sources: VoltageSources::new(),
@@ -212,6 +213,10 @@ impl CircuitData {
         // Voltage sources
         Self::remap_node_slice(&mut self.voltage_sources.node_pos, old_node_id);
         Self::remap_node_slice(&mut self.voltage_sources.node_neg, old_node_id);
+
+        // Branch-form resistors
+        Self::remap_node_slice(&mut self.resistor_branches.node_pos, old_node_id);
+        Self::remap_node_slice(&mut self.resistor_branches.node_neg, old_node_id);
 
         // Current sources
         Self::remap_node_slice(&mut self.current_sources.node_pos, old_node_id);
@@ -438,11 +443,13 @@ impl CircuitData {
     pub fn branch_probe_names(&self) -> Vec<String> {
         let mut names = Vec::with_capacity(
             self.inductors.names.len()
+                + self.resistor_branches.names.len()
                 + self.voltage_sources.names.len()
                 + self.ccvs.len()
                 + self.behavioral_sources.voltage_sources.len(),
         );
         names.extend(self.inductors.names.iter().cloned());
+        names.extend(self.resistor_branches.names.iter().cloned());
         names.extend(self.voltage_sources.names.iter().cloned());
         names.extend(self.ccvs.names.iter().cloned());
         names.extend(

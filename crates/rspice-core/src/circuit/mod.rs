@@ -19,7 +19,8 @@ use thiserror::Error;
 mod storage;
 pub use storage::{
     B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Capacitors, CurrentSources, Diodes,
-    Ekv3Mosfets, EkvMosfets, Inductors, Mosfets, Resistors, Vdmoses, VoltageSources,
+    Ekv3Mosfets, EkvMosfets, Inductors, Mosfets, ResistorBranches, Resistors, Vdmoses,
+    VoltageSources,
 };
 mod construction;
 mod external_models;
@@ -298,6 +299,7 @@ pub struct CircuitData {
 
     // Linear device storage (SoA for cache efficiency)
     pub(crate) resistors: Resistors,
+    pub(crate) resistor_branches: ResistorBranches,
     pub(crate) capacitors: Capacitors,
     pub(crate) inductors: Inductors,
     pub(crate) voltage_sources: VoltageSources,

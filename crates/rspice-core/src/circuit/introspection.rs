@@ -332,6 +332,7 @@ impl CircuitData {
     /// Total device count (for parallel stamping threshold)
     pub fn device_count(&self) -> usize {
         let count = self.resistors.len()
+            + self.resistor_branches.len()
             + self.capacitors.len()
             + self.inductors.len()
             + self.voltage_sources.len()
@@ -376,8 +377,10 @@ impl CircuitData {
     pub fn link_indices(&mut self, matrix: &StaticMatrix) {
         // Linear devices
         self.resistors.link_indices(matrix);
-        self.capacitors.link_indices(matrix);
         let num_nodes = self.num_nodes;
+        self.resistor_branches
+            .link_indices(matrix, |br_ordinal| num_nodes + br_ordinal);
+        self.capacitors.link_indices(matrix);
         self.voltage_sources
             .link_indices(matrix, |br_ordinal| num_nodes + br_ordinal);
 

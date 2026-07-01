@@ -306,6 +306,28 @@ fn test_xyce_static_prn_cases_run() {
 }
 
 #[test]
+fn test_xyce_zero_resistance_branch_current_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/RESISTOR/resistor_lv3.cir",
+        "Netlists/RESISTOR/resistor_lv3_2.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a numeric Xyce zero-resistance branch-current comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_diode_sidewall_cd_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

@@ -1510,6 +1510,26 @@ impl Engine {
             }
         }
 
+        // Branch-form resistors for AC:
+        // V(np)-V(nn)-R_ac*I = 0.
+        for i in 0..circuit.resistor_branches.len() {
+            let np = circuit.resistor_branches.node_pos[i];
+            let nn = circuit.resistor_branches.node_neg[i];
+            let br_ordinal = circuit.resistor_branches.branch_indices[i];
+            let br = circuit.get_branch_matrix_index(br_ordinal);
+            let resistance = circuit.resistor_branches.small_signal_resistances[i];
+
+            if np > 0 {
+                ac_matrix.add_real(br - 1, np - 1, 1.0);
+                ac_matrix.add_real(np - 1, br - 1, 1.0);
+            }
+            if nn > 0 {
+                ac_matrix.add_real(br - 1, nn - 1, -1.0);
+                ac_matrix.add_real(nn - 1, br - 1, -1.0);
+            }
+            ac_matrix.add_real(br - 1, br - 1, -resistance);
+        }
+
         // Inductors for AC:
         // V(np)-V(nn)-jωL*I = 0
         for i in 0..circuit.inductors.len() {

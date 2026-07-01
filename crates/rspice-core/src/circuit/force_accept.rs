@@ -83,6 +83,13 @@ impl CircuitData {
         for stamp in &self.resistors.stamps {
             Self::add_force_accept_topology_edge(&mut graph, stamp.pp.row, stamp.nn.row);
         }
+        for idx in 0..self.resistor_branches.len() {
+            Self::add_force_accept_topology_edge(
+                &mut graph,
+                self.resistor_branches.node_pos[idx],
+                self.resistor_branches.node_neg[idx],
+            );
+        }
         for stamp in &self.capacitors.stamps {
             Self::add_force_accept_topology_edge(&mut graph, stamp.pp.row, stamp.nn.row);
         }
@@ -223,6 +230,12 @@ impl CircuitData {
                 self.voltage_sources.node_neg[idx],
             );
         }
+        for idx in 0..self.resistor_branches.len() {
+            push_pair(
+                self.resistor_branches.node_pos[idx],
+                self.resistor_branches.node_neg[idx],
+            );
+        }
         for idx in 0..self.vcvs.len() {
             push_pair(self.vcvs.node_pos[idx], self.vcvs.node_neg[idx]);
         }
@@ -298,6 +311,10 @@ impl CircuitData {
             Self::mark_force_accept_protected_node(&mut mask, self.voltage_sources.node_pos[idx]);
             Self::mark_force_accept_protected_node(&mut mask, self.voltage_sources.node_neg[idx]);
         }
+        for idx in 0..self.resistor_branches.len() {
+            Self::mark_force_accept_protected_node(&mut mask, self.resistor_branches.node_pos[idx]);
+            Self::mark_force_accept_protected_node(&mut mask, self.resistor_branches.node_neg[idx]);
+        }
         for idx in 0..self.vcvs.len() {
             Self::mark_force_accept_protected_node(&mut mask, self.vcvs.node_pos[idx]);
             Self::mark_force_accept_protected_node(&mut mask, self.vcvs.node_neg[idx]);
@@ -366,6 +383,9 @@ impl CircuitData {
         let mut changed = self
             .voltage_sources
             .enforce_voltage_constraints(solution, time);
+        changed |= self
+            .resistor_branches
+            .enforce_voltage_constraints(solution, self.num_nodes);
 
         for idx in 0..self.vcvs.len() {
             let Some(v_ctrl_pos) = solution_node_voltage(solution, self.vcvs.ctrl_pos[idx]) else {

@@ -23,5 +23,5 @@ pub use nonlinear::{
     B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Diodes, Ekv3Mosfets, EkvMosfets,
     Mosfets, Vdmoses,
 };
-pub use passive::{Capacitors, Resistors};
+pub use passive::{Capacitors, ResistorBranches, Resistors};
 pub use sources::{CurrentSources, VoltageSources};

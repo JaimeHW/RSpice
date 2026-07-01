@@ -68,6 +68,25 @@ impl Engine {
             }
         }
 
+        // Branch-form resistor stamps. These use the same MNA incidence as a
+        // voltage source plus a branch diagonal for `-R`.
+        for i in 0..circuit.resistor_branches.len() {
+            let np = circuit.resistor_branches.node_pos[i];
+            let nn = circuit.resistor_branches.node_neg[i];
+            let br_ordinal = circuit.resistor_branches.branch_indices[i];
+            let br = circuit.get_branch_matrix_index(br_ordinal);
+
+            if np > 0 {
+                triplets.push((br - 1, np - 1, 0.0));
+                triplets.push((np - 1, br - 1, 0.0));
+            }
+            if nn > 0 {
+                triplets.push((br - 1, nn - 1, 0.0));
+                triplets.push((nn - 1, br - 1, 0.0));
+            }
+            triplets.push((br - 1, br - 1, 0.0));
+        }
+
         // Behavioral voltage sources use the same MNA branch topology as independent V-sources.
         for source in &circuit.behavioral_sources.voltage_sources {
             let np = source.node_pos;

@@ -593,6 +593,29 @@ impl Engine {
                     )?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
+                    let zero_resistance_tol = netlist
+                        .options
+                        .device_zero_resistance_tol
+                        .unwrap_or(XYCE_DEFAULT_ZERO_RESISTANCE_TOL)
+                        .max(0.0);
+                    if resistance.is_finite() && resistance.abs() <= zero_resistance_tol {
+                        if !small_signal_resistance.is_finite() {
+                            return Err(SimulationError::Circuit(format!(
+                                "Resistor '{}' resolved to non-finite branch-form small-signal resistance {}",
+                                element.name, small_signal_resistance
+                            )));
+                        }
+                        let branch = circuit.allocate_branch_named(&element.name);
+                        circuit.resistor_branches.add(
+                            element.name.clone(),
+                            np,
+                            nn,
+                            branch,
+                            resistance,
+                            small_signal_resistance,
+                        );
+                        continue;
+                    }
                     circuit.resistors.add_with_small_signal(
                         element.name.clone(),
                         np,

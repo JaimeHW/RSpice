@@ -292,7 +292,7 @@ fn apply_resistor_instance_scaling(
         return Ok(resistance);
     }
 
-    if !resistance.is_finite() || resistance == 0.0 {
+    if !resistance.is_finite() {
         return Err(SimulationError::Circuit(format!(
             "Resistor '{}' resolved to invalid {} {}",
             element_name, quantity_label, resistance
@@ -426,7 +426,7 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         )?)
     } else {
         let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
-        if resistance.is_none() && value.is_finite() && value != 0.0 {
+        if resistance.is_none() && value.is_finite() {
             resistance = Some(value);
         }
         if resistance.is_none()
@@ -523,7 +523,7 @@ pub(in crate::engine::builder) fn resolve_resistor_small_signal_value(
             if dc_resistance.is_infinite() && dc_resistance.is_sign_positive() {
                 return Ok(dc_resistance);
             }
-            if !dc_resistance.is_finite() || dc_resistance == 0.0 {
+            if !dc_resistance.is_finite() {
                 return Err(SimulationError::Circuit(format!(
                     "Resistor '{}' resolved to invalid small-signal resistance {}",
                     element_name, dc_resistance
@@ -636,7 +636,7 @@ R1 a 0 -100
     }
 
     #[test]
-    fn direct_zero_resistance_remains_invalid() {
+    fn direct_zero_resistance_resolves_for_branch_form_stamping() {
         let netlist = crate::netlist::Netlist::parse(
             r#"zero resistor
 R1 a 0 0
@@ -660,7 +660,7 @@ R1 a 0 0
             panic!("test element is not a resistor");
         };
 
-        let error = resolve_resistor_instance_value(
+        let resolved = resolve_resistor_instance_value(
             &netlist,
             &element.name,
             *value,
@@ -669,12 +669,8 @@ R1 a 0 0
             instance_params,
             crate::constants::TEMP_REFERENCE,
         )
-        .expect_err("zero-ohm resistor should be rejected before stamping");
+        .expect("zero-ohm resistor resolves before branch-form stamping");
 
-        assert!(
-            error.to_string().contains("no valid resistance value")
-                || error.to_string().contains("invalid resistance"),
-            "unexpected error: {error}"
-        );
+        assert_eq!(resolved, 0.0);
     }
 }

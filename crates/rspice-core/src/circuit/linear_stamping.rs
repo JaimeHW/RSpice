@@ -469,6 +469,8 @@ impl CircuitData {
     pub fn stamp_dc_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
+        self.resistor_branches
+            .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
         self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
         self.stamp_coupled_inductors_dc_direct(matrix, rhs);
         self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
@@ -502,6 +504,8 @@ impl CircuitData {
     pub fn stamp_transient_linear_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
+        self.resistor_branches
+            .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
         self.voltage_sources
             .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
         self.current_sources.stamp_all(rhs);
@@ -546,6 +550,8 @@ impl CircuitData {
     ) {
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
+        self.resistor_branches
+            .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
         self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
         self.stamp_coupled_inductors_dc_direct(matrix, rhs);
         self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
@@ -567,6 +573,7 @@ impl CircuitData {
     pub fn stamp_dc(&self, matrix: &mut TripletMatrix, rhs: &mut [Value]) {
         let num_nodes = self.num_nodes;
         self.resistors.stamp_all(matrix);
+        self.resistor_branches.stamp_all(matrix, rhs, num_nodes);
         self.inductors.stamp_dc_short(matrix, rhs, num_nodes);
         self.stamp_coupled_inductors_dc(matrix, rhs);
         self.stamp_multi_winding_transformers_dc(matrix, rhs);

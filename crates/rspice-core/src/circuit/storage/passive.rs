@@ -122,6 +122,143 @@ impl Resistors {
     }
 }
 
+/// Resistors stored in MNA branch form:
+/// `V(node_pos)-V(node_neg)-R*I(branch)=0`.
+///
+/// This form is used for zero and Xyce-near-zero resistances where nodal
+/// conductance stamping would either be singular (`R=0`) or numerically
+/// explosive while the branch current is still an observable.
+#[derive(Debug, Default, Clone)]
+pub struct ResistorBranches {
+    pub names: Vec<String>,
+    pub node_pos: Vec<NodeId>,
+    pub node_neg: Vec<NodeId>,
+    pub branch_indices: Vec<NodeId>,
+    pub resistances: Vec<Value>,
+    pub small_signal_resistances: Vec<Value>,
+    /// Pre-baked CSC indices: [br->np, np->br, br->nn, nn->br, br->br].
+    csc_indices: Vec<[Option<CscIndex>; 5]>,
+}
+
+impl ResistorBranches {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        branch_idx: NodeId,
+        resistance: Value,
+        small_signal_resistance: Value,
+    ) {
+        self.names.push(name);
+        self.node_pos.push(node_pos);
+        self.node_neg.push(node_neg);
+        self.branch_indices.push(branch_idx);
+        self.resistances.push(resistance);
+        self.small_signal_resistances.push(small_signal_resistance);
+        self.csc_indices.push([None; 5]);
+    }
+
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+
+    pub fn link_indices(&mut self, matrix: &StaticMatrix, get_branch_idx: impl Fn(usize) -> usize) {
+        for i in 0..self.names.len() {
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            let br = get_branch_idx(self.branch_indices[i]);
+
+            if np > 0 {
+                self.csc_indices[i][0] = matrix.get_index(br - 1, np - 1);
+                self.csc_indices[i][1] = matrix.get_index(np - 1, br - 1);
+            }
+            if nn > 0 {
+                self.csc_indices[i][2] = matrix.get_index(br - 1, nn - 1);
+                self.csc_indices[i][3] = matrix.get_index(nn - 1, br - 1);
+            }
+            self.csc_indices[i][4] = matrix.get_index(br - 1, br - 1);
+        }
+    }
+
+    #[inline]
+    pub fn stamp_all_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        get_branch_idx: impl Fn(usize) -> usize,
+    ) {
+        for i in 0..self.names.len() {
+            let br = get_branch_idx(self.branch_indices[i]);
+            if let Some(idx) = self.csc_indices[i][0] {
+                matrix.stamp_direct(idx, 1.0);
+            }
+            if let Some(idx) = self.csc_indices[i][1] {
+                matrix.stamp_direct(idx, 1.0);
+            }
+            if let Some(idx) = self.csc_indices[i][2] {
+                matrix.stamp_direct(idx, -1.0);
+            }
+            if let Some(idx) = self.csc_indices[i][3] {
+                matrix.stamp_direct(idx, -1.0);
+            }
+            if let Some(idx) = self.csc_indices[i][4] {
+                matrix.stamp_direct(idx, -self.resistances[i]);
+            }
+            rhs[br - 1] = 0.0;
+        }
+    }
+
+    #[inline]
+    pub fn stamp_all(&self, matrix: &mut TripletMatrix, rhs: &mut [Value], num_nodes: usize) {
+        for i in 0..self.names.len() {
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            let br = num_nodes + self.branch_indices[i];
+
+            if np > 0 {
+                matrix.push(br - 1, np - 1, 1.0);
+                matrix.push(np - 1, br - 1, 1.0);
+            }
+            if nn > 0 {
+                matrix.push(br - 1, nn - 1, -1.0);
+                matrix.push(nn - 1, br - 1, -1.0);
+            }
+            matrix.push(br - 1, br - 1, -self.resistances[i]);
+            rhs[br - 1] = 0.0;
+        }
+    }
+
+    pub fn enforce_voltage_constraints(&self, solution: &mut [Value], num_nodes: usize) -> bool {
+        let mut changed = false;
+        for i in 0..self.names.len() {
+            let branch_idx = num_nodes + self.branch_indices[i] - 1;
+            let target_voltage = solution
+                .get(branch_idx)
+                .copied()
+                .filter(|current| current.is_finite())
+                .map(|current| self.resistances[i] * current)
+                .filter(|voltage| voltage.is_finite())
+                .unwrap_or(0.0);
+            changed |= project_two_terminal_voltage(
+                solution,
+                self.node_pos[i],
+                self.node_neg[i],
+                target_voltage,
+            );
+        }
+        changed
+    }
+}
+
 /// Capacitor storage (SoA)
 #[derive(Debug, Default, Clone)]
 pub struct Capacitors {

@@ -12,7 +12,10 @@ use crate::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
     extract_dc_value,
 };
-use crate::netlist::{AnalysisCommand, DcSecondSweep, ElementKind, Netlist, StepCommand};
+use crate::netlist::{
+    AnalysisCommand, DcSecondSweep, ElementKind, Netlist, StepCommand,
+    XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+};
 use crate::{Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -22,7 +25,6 @@ use std::time::{Duration, Instant};
 const EXPECTED_UNSUPPORTED_MARKER: &str = "EXPECTED_UNSUPPORTED:";
 const HARNESS_MANIFEST_FILE: &str = "RSPICE-HARNESS-MANIFEST.tsv";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
-const MIN_DIRECT_RESISTOR_ABS_OHMS: Value = 1.0e-30;
 
 /// Configuration for the Xyce corpus runner.
 #[derive(Debug, Clone)]
@@ -1775,12 +1777,14 @@ impl XyceTestRunner {
                 return Ok(());
             }
             if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name) {
-                if resistance.is_finite() && resistance.abs() >= MIN_DIRECT_RESISTOR_ABS_OHMS {
+                if resistance.is_finite()
+                    || (resistance.is_infinite() && resistance.is_sign_positive())
+                {
                     return Ok(());
                 }
                 return Err(format!(
-                    "current probe '{}' targets a zero/near-zero resistor not implemented by the first Xyce adapter",
-                    original
+                    "current probe '{}' targets a resistor with invalid resistance {}",
+                    original, resistance
                 ));
             }
             return Err(format!(
@@ -1789,6 +1793,18 @@ impl XyceTestRunner {
             ));
         }
         Err(format!("unsupported .PRINT DC probe '{}'", original))
+    }
+
+    fn resistor_branch_form_tolerance(netlist: &Netlist) -> Value {
+        netlist
+            .options
+            .device_zero_resistance_tol
+            .unwrap_or(XYCE_DEFAULT_ZERO_RESISTANCE_TOL)
+            .max(0.0)
+    }
+
+    fn resistor_uses_branch_form(netlist: &Netlist, resistance: Value) -> bool {
+        resistance.is_finite() && resistance.abs() <= Self::resistor_branch_form_tolerance(netlist)
     }
 
     fn evaluate_dc_probe(
@@ -2609,11 +2625,14 @@ impl XyceTestRunner {
         resistor_name: &str,
         resistance: Value,
     ) -> Result<f64, String> {
-        if resistance.abs() < MIN_DIRECT_RESISTOR_ABS_OHMS {
+        if Self::resistor_uses_branch_form(netlist, resistance) {
             return Err(format!(
-                "cannot evaluate current through zero/near-zero resistor '{}'",
+                "missing solved branch current for zero/near-zero resistor '{}'",
                 resistor_name
             ));
+        }
+        if resistance.is_infinite() && resistance.is_sign_positive() {
+            return Ok(0.0);
         }
         let element = Self::find_resistor_element(netlist, resistor_name)
             .ok_or_else(|| format!("resistor '{}' not found", resistor_name))?;
