@@ -97,25 +97,25 @@ impl TableAxis {
 }
 
 #[derive(Debug, Clone)]
-struct TableLine {
+struct TableLine<'a> {
     line: usize,
     header_ignored: bool,
     data_comment: bool,
-    tokens: Vec<String>,
+    tokens: Vec<&'a str>,
 }
 
 #[derive(Debug)]
-struct TokenCursor {
-    lines: Vec<TableLine>,
+struct TokenCursor<'a> {
+    lines: Vec<TableLine<'a>>,
     next: usize,
 }
 
-impl TokenCursor {
-    fn new(lines: Vec<TableLine>) -> Self {
+impl<'a> TokenCursor<'a> {
+    fn new(lines: Vec<TableLine<'a>>) -> Self {
         Self { lines, next: 0 }
     }
 
-    fn next_line(&mut self, file: &str, model: &str, role: &str) -> CmResult<&TableLine> {
+    fn next_line(&mut self, file: &str, model: &str, role: &str) -> CmResult<&TableLine<'a>> {
         self.skip_header_ignored();
         let index = self.next;
         if self.lines.get(index).is_none() {
@@ -129,7 +129,7 @@ impl TokenCursor {
         Ok(&self.lines[index])
     }
 
-    fn next_data_line_optional(&mut self) -> Option<&TableLine> {
+    fn next_data_line_optional(&mut self) -> Option<&TableLine<'a>> {
         loop {
             let index = self.next;
             let data_comment = self.lines.get(index)?.data_comment;
@@ -141,7 +141,7 @@ impl TokenCursor {
         }
     }
 
-    fn next_data_line(&mut self, file: &str, model: &str, role: &str) -> CmResult<&TableLine> {
+    fn next_data_line(&mut self, file: &str, model: &str, role: &str) -> CmResult<&TableLine<'a>> {
         self.next_data_line_optional().ok_or_else(|| {
             table_file_error(
                 model,
@@ -163,7 +163,7 @@ impl TokenCursor {
 
     fn next_dimension(&mut self, file: &str, model: &str, role: &str) -> CmResult<usize> {
         let line = self.next_line(file, model, role)?;
-        let token = line.tokens.first().ok_or_else(|| {
+        let token = line.tokens.first().copied().ok_or_else(|| {
             table_line_error(model, file, line.line, format!("missing {role} token"))
         })?;
         let value = parse_table_spice_value(token);
@@ -186,7 +186,7 @@ impl TokenCursor {
             .skip(self.next)
             .find(|line| !line.header_ignored)
         {
-            let token = line.tokens.first().map(String::as_str).unwrap_or("");
+            let token = line.tokens.first().copied().unwrap_or("");
             return Err(table_line_error(
                 model,
                 file,
@@ -394,7 +394,11 @@ fn table_cache_key(file: &str, stamp: data_file::DataFileStamp) -> TableCacheKey
     }
 }
 
-fn tokenize_table_contents(model: &str, file: &str, contents: &str) -> CmResult<Vec<TableLine>> {
+fn tokenize_table_contents<'a>(
+    model: &str,
+    file: &str,
+    contents: &'a str,
+) -> CmResult<Vec<TableLine<'a>>> {
     let mut lines = Vec::new();
 
     for (line_idx, line) in contents.lines().enumerate() {
@@ -409,7 +413,7 @@ fn tokenize_table_contents(model: &str, file: &str, contents: &str) -> CmResult<
                 if token.is_empty() {
                     continue;
                 }
-                tokens.push(token.to_string());
+                tokens.push(token);
             }
         }
         lines.push(TableLine {
@@ -427,14 +431,8 @@ fn tokenize_table_contents(model: &str, file: &str, contents: &str) -> CmResult<
     Ok(lines)
 }
 
-fn tokenize_table_file(model: &str, file: &str) -> CmResult<Vec<TableLine>> {
-    let contents =
-        data_file::read_to_string(file).map_err(|err| table_file_error(model, file, err))?;
-    tokenize_table_contents(model, file, &contents)
-}
-
 fn parse_axis(
-    cursor: &mut TokenCursor,
+    cursor: &mut TokenCursor<'_>,
     file: &str,
     model: &str,
     role: &str,
@@ -459,7 +457,7 @@ fn parse_axis(
     }
 
     let mut axis = Vec::with_capacity(len);
-    for (index, token) in row.tokens.iter().enumerate() {
+    for (index, token) in row.tokens.iter().copied().enumerate() {
         let value = parse_table_spice_value(token);
         if !value.is_finite() {
             return Err(table_line_error(
@@ -484,7 +482,7 @@ fn parse_axis(
 }
 
 fn parse_table2d_values(
-    cursor: &mut TokenCursor,
+    cursor: &mut TokenCursor<'_>,
     file: &str,
     model: &str,
     x_len: usize,
@@ -512,7 +510,7 @@ fn parse_table2d_values(
                 format!("not enough numbers in y row no. {}", row + 1),
             ));
         }
-        for (column, token) in table_row.tokens.iter().enumerate() {
+        for (column, token) in table_row.tokens.iter().copied().enumerate() {
             let value = parse_table_spice_value(token);
             if !value.is_finite() {
                 return Err(table_line_error(
@@ -532,7 +530,7 @@ fn parse_table2d_values(
 }
 
 fn parse_table3d_values(
-    cursor: &mut TokenCursor,
+    cursor: &mut TokenCursor<'_>,
     file: &str,
     model: &str,
     x_len: usize,
@@ -559,7 +557,7 @@ fn parse_table3d_values(
                     format!("not enough numbers in y row no. {y} of table {z}"),
                 ));
             }
-            for (x, token) in table_row.tokens.iter().enumerate() {
+            for (x, token) in table_row.tokens.iter().copied().enumerate() {
                 let value = parse_table_spice_value(token);
                 if !value.is_finite() {
                     return Err(table_line_error(
@@ -581,8 +579,9 @@ fn parse_table3d_values(
 
 fn parse_table2d_file(file: &str) -> CmResult<Table2DData> {
     let model = TableKind::Table2D.model_name();
-    let mut cursor = TokenCursor::new(tokenize_table_file(model, file)?);
-    parse_table2d_cursor(file, model, &mut cursor)
+    let contents =
+        data_file::read_to_string(file).map_err(|err| table_file_error(model, file, err))?;
+    parse_table2d_contents(file, &contents)
 }
 
 fn parse_table2d_contents(file: &str, contents: &str) -> CmResult<Table2DData> {
@@ -594,7 +593,7 @@ fn parse_table2d_contents(file: &str, contents: &str) -> CmResult<Table2DData> {
 fn parse_table2d_cursor(
     file: &str,
     model: &str,
-    cursor: &mut TokenCursor,
+    cursor: &mut TokenCursor<'_>,
 ) -> CmResult<Table2DData> {
     let x_len = cursor.next_dimension(file, model, "x dimension")?;
     let y_len = cursor.next_dimension(file, model, "y dimension")?;
@@ -607,8 +606,9 @@ fn parse_table2d_cursor(
 
 fn parse_table3d_file(file: &str) -> CmResult<Table3DData> {
     let model = TableKind::Table3D.model_name();
-    let mut cursor = TokenCursor::new(tokenize_table_file(model, file)?);
-    parse_table3d_cursor(file, model, &mut cursor)
+    let contents =
+        data_file::read_to_string(file).map_err(|err| table_file_error(model, file, err))?;
+    parse_table3d_contents(file, &contents)
 }
 
 fn parse_table3d_contents(file: &str, contents: &str) -> CmResult<Table3DData> {
@@ -620,7 +620,7 @@ fn parse_table3d_contents(file: &str, contents: &str) -> CmResult<Table3DData> {
 fn parse_table3d_cursor(
     file: &str,
     model: &str,
-    cursor: &mut TokenCursor,
+    cursor: &mut TokenCursor<'_>,
 ) -> CmResult<Table3DData> {
     let x_len = cursor.next_dimension(file, model, "x dimension")?;
     let y_len = cursor.next_dimension(file, model, "y dimension")?;
@@ -1680,6 +1680,23 @@ mod tests {
 
         poison_table3d_cache_lock();
         lock_table3d_cache().clear();
+    }
+
+    #[test]
+    fn tokenize_table_contents_borrows_input_tokens() {
+        let file = "inline-table";
+        let model = TableKind::Table2D.model_name();
+        let contents = "* header\n2\n2\n0 1\n0 1\n3 4\n";
+        let lines = tokenize_table_contents(model, file, contents).expect("tokenized table");
+        let token = lines[3].tokens[1];
+        let contents_start = contents.as_ptr() as usize;
+        let contents_end = contents_start + contents.len();
+        let token_start = token.as_ptr() as usize;
+        let token_end = token_start + token.len();
+
+        assert_eq!(token, "1");
+        assert!(token_start >= contents_start);
+        assert!(token_end <= contents_end);
     }
 
     #[test]
