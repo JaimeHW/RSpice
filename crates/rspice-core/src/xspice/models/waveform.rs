@@ -802,7 +802,7 @@ impl CodeModel for TriangleOscillator {
 mod tests {
     use super::*;
     use crate::xspice::context::{AnalogValue, InputValue};
-    use crate::xspice::{AnalysisType, CallType};
+    use crate::xspice::{AnalysisType, CallType, ParamType};
 
     fn oscillator_context() -> CmContext {
         let mut ctx = CmContext::new();
@@ -826,6 +826,186 @@ mod tests {
         ctx.set_real_vector_param("freq_array", vec![1.0e3, 2.0e3, 3.0e3]);
         ctx.init_output("out", PortType::Voltage);
         ctx
+    }
+
+    fn port_summary(
+        model: &dyn CodeModel,
+    ) -> Vec<(
+        &str,
+        PortDirection,
+        PortType,
+        Vec<PortType>,
+        bool,
+        bool,
+        Option<usize>,
+        Option<usize>,
+    )> {
+        model
+            .ports()
+            .iter()
+            .map(|port| {
+                (
+                    port.name.as_str(),
+                    port.direction,
+                    port.default_type,
+                    port.allowed_types.clone(),
+                    port.is_vector,
+                    port.null_allowed,
+                    port.vector_min_len,
+                    port.vector_max_len,
+                )
+            })
+            .collect()
+    }
+
+    fn param_summary(
+        model: &dyn CodeModel,
+    ) -> Vec<(
+        &str,
+        ParamType,
+        Value,
+        bool,
+        Option<usize>,
+        Option<usize>,
+        Option<Vec<Value>>,
+    )> {
+        model
+            .parameters()
+            .iter()
+            .map(|param| {
+                (
+                    param.name.as_str(),
+                    param.param_type,
+                    param.default,
+                    param.required,
+                    param.vector_min_len,
+                    param.vector_max_len,
+                    param.real_vector_default.clone(),
+                )
+            })
+            .collect()
+    }
+
+    fn oscillator_port_summary() -> Vec<(
+        &'static str,
+        PortDirection,
+        PortType,
+        Vec<PortType>,
+        bool,
+        bool,
+        Option<usize>,
+        Option<usize>,
+    )> {
+        vec![
+            (
+                "cntl_in",
+                PortDirection::In,
+                PortType::Voltage,
+                vec![
+                    PortType::Voltage,
+                    PortType::DifferentialVoltage,
+                    PortType::Current,
+                    PortType::DifferentialCurrent,
+                    PortType::VoltageName,
+                ],
+                false,
+                false,
+                None,
+                None,
+            ),
+            (
+                "out",
+                PortDirection::Out,
+                PortType::Voltage,
+                vec![
+                    PortType::Voltage,
+                    PortType::DifferentialVoltage,
+                    PortType::Current,
+                    PortType::DifferentialCurrent,
+                ],
+                false,
+                false,
+                None,
+                None,
+            ),
+        ]
+    }
+
+    fn base_param_summary() -> Vec<(
+        &'static str,
+        ParamType,
+        Value,
+        bool,
+        Option<usize>,
+        Option<usize>,
+        Option<Vec<Value>>,
+    )> {
+        vec![
+            (
+                "cntl_array",
+                ParamType::RealVector,
+                0.0,
+                false,
+                Some(2),
+                None,
+                Some(vec![0.0, 1.0]),
+            ),
+            (
+                "freq_array",
+                ParamType::RealVector,
+                0.0,
+                false,
+                Some(2),
+                None,
+                Some(vec![1.0e3, 2.0e3]),
+            ),
+            ("out_low", ParamType::Real, -1.0, false, None, None, None),
+            ("out_high", ParamType::Real, 1.0, false, None, None, None),
+        ]
+    }
+
+    #[test]
+    fn waveform_oscillator_metadata_matches_ngspice46_interfaces() {
+        for model in [
+            &SineOscillator as &dyn CodeModel,
+            &SquareOscillator,
+            &TriangleOscillator,
+        ] {
+            assert_eq!(
+                port_summary(model),
+                oscillator_port_summary(),
+                "{}",
+                model.name()
+            );
+        }
+
+        assert_eq!(param_summary(&SineOscillator), base_param_summary());
+
+        let mut square = base_param_summary();
+        square.push(("duty_cycle", ParamType::Real, 0.5, false, None, None, None));
+        square.push((
+            "rise_time",
+            ParamType::Real,
+            1.0e-9,
+            false,
+            None,
+            None,
+            None,
+        ));
+        square.push((
+            "fall_time",
+            ParamType::Real,
+            1.0e-9,
+            false,
+            None,
+            None,
+            None,
+        ));
+        assert_eq!(param_summary(&SquareOscillator), square);
+
+        let mut triangle = base_param_summary();
+        triangle.push(("duty_cycle", ParamType::Real, 0.5, false, None, None, None));
+        assert_eq!(param_summary(&TriangleOscillator), triangle);
     }
 
     #[test]
