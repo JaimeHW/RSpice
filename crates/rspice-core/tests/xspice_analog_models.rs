@@ -3044,7 +3044,7 @@ rload out 0 1meg
 ";
     let netlist = Netlist::parse(deck).expect("deck parses");
     let result = Engine::default()
-        .run_tran(&netlist, 3.0e-9, 0.4e-9)
+        .run_tran(&netlist, 3.0e-9, 0.1e-9)
         .expect("transient solves");
     let out = transient_node_series(&result, "out");
 

@@ -2437,6 +2437,24 @@ fn oneshot_output_below_or_at_official(value: Value, target: Value) -> bool {
     value - target < 1.0e-20
 }
 
+fn oneshot_trigger_crossing_time(
+    previous_time: Value,
+    current_time: Value,
+    previous_clock: Value,
+    current_clock: Value,
+    trigger: Value,
+) -> Value {
+    let dt = current_time - previous_time;
+    let dv = current_clock - previous_clock;
+    if dt > 0.0 && dt.is_finite() && dv.is_finite() && dv.abs() > Value::EPSILON {
+        let alpha = (trigger - previous_clock) / dv;
+        if alpha.is_finite() {
+            return previous_time + alpha.clamp(0.0, 1.0) * dt;
+        }
+    }
+    current_time
+}
+
 impl CodeModel for AnalogOneShot {
     fn name(&self) -> &str {
         "oneshot"
@@ -2531,28 +2549,43 @@ impl CodeModel for AnalogOneShot {
             let pulse_width = interpolate_oneshot_pulse_width(table.as_ref(), control);
             let positive_edge = ctx.param("pos_edge_trig") > 0.5;
             let retrigger = ctx.param("retrig") > 0.5;
+            let mut trigger_time = ctx.time;
 
             if positive_edge {
                 if !set {
-                    if clock > old_clock && clock > trigger {
+                    if old_clock <= trigger && clock > old_clock && clock > trigger {
                         state = true;
                         set = true;
+                        trigger_time = oneshot_trigger_crossing_time(
+                            ctx.time_prev,
+                            ctx.time,
+                            old_clock,
+                            clock,
+                            trigger,
+                        );
                     }
-                } else if clock < old_clock && clock < trigger {
+                } else if old_clock >= trigger && clock < old_clock && clock < trigger {
                     set = false;
                 }
             } else if !set {
-                if clock < old_clock && clock < trigger {
+                if old_clock >= trigger && clock < old_clock && clock < trigger {
                     state = true;
                     set = true;
+                    trigger_time = oneshot_trigger_crossing_time(
+                        ctx.time_prev,
+                        ctx.time,
+                        old_clock,
+                        clock,
+                        trigger,
+                    );
                 }
-            } else if clock > old_clock && clock > trigger {
+            } else if old_clock <= trigger && clock > old_clock && clock > trigger {
                 set = false;
             }
 
             if state && oneshot_output_below_or_at_official(previous_output, output_low) && !locked
             {
-                time1 = ctx.time + rise_delay;
+                time1 = trigger_time + rise_delay;
                 time2 = time1 + rise_time;
                 time3 = time2 + pulse_width + fall_delay;
                 time4 = time3 + fall_time;
@@ -2567,7 +2600,7 @@ impl CodeModel for AnalogOneShot {
                 && oneshot_output_below_or_at_official(previous_output, output_high)
                 && !locked
             {
-                time3 = ctx.time + pulse_width + rise_delay + fall_delay + rise_time;
+                time3 = trigger_time + pulse_width + rise_delay + fall_delay + rise_time;
                 time4 = time3 + fall_time;
                 if commit_state {
                     request_oneshot_breakpoints(ctx, &[time3, time4]);
