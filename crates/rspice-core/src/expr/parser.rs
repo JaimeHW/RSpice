@@ -56,6 +56,8 @@ pub enum Token {
     LParen,
     RParen,
     Comma,
+    Question,
+    Colon,
     Invalid(char),
     // End of input
     Eof,
@@ -186,6 +188,21 @@ impl<'a> Lexer<'a> {
         s
     }
 
+    fn consume_spaced_equals(&mut self) -> bool {
+        let mut probe = self.chars.clone();
+        while matches!(probe.peek(), Some(c) if c.is_whitespace()) {
+            probe.next();
+        }
+        if probe.peek() != Some(&'=') {
+            return false;
+        }
+        while matches!(self.chars.peek(), Some(c) if c.is_whitespace()) {
+            self.chars.next();
+        }
+        self.chars.next();
+        true
+    }
+
     pub fn next_token(&mut self) -> Token {
         self.skip_whitespace();
 
@@ -231,10 +248,17 @@ impl<'a> Lexer<'a> {
                     self.chars.next();
                     Token::Comma
                 }
+                '?' => {
+                    self.chars.next();
+                    Token::Question
+                }
+                ':' => {
+                    self.chars.next();
+                    Token::Colon
+                }
                 '<' => {
                     self.chars.next();
-                    if self.chars.peek() == Some(&'=') {
-                        self.chars.next();
+                    if self.consume_spaced_equals() {
                         Token::Le
                     } else {
                         Token::Lt
@@ -242,8 +266,7 @@ impl<'a> Lexer<'a> {
                 }
                 '>' => {
                     self.chars.next();
-                    if self.chars.peek() == Some(&'=') {
-                        self.chars.next();
+                    if self.consume_spaced_equals() {
                         Token::Ge
                     } else {
                         Token::Gt
@@ -260,8 +283,7 @@ impl<'a> Lexer<'a> {
                 }
                 '!' => {
                     self.chars.next();
-                    if self.chars.peek() == Some(&'=') {
-                        self.chars.next();
+                    if self.consume_spaced_equals() {
                         Token::Ne
                     } else {
                         Token::Not
@@ -327,7 +349,7 @@ impl<'a> Parser<'a> {
 
     /// Parse a complete expression
     pub fn parse(&mut self) -> Expr {
-        let expr = self.parse_or();
+        let expr = self.parse_conditional();
         while self.current != Token::Eof {
             match self.current {
                 Token::Invalid(c) => self
@@ -347,15 +369,32 @@ impl<'a> Parser<'a> {
     }
 
     // Precedence levels (lowest to highest):
-    // 1. || (or)
-    // 2. && (and)
-    // 3. ==, != (equality)
-    // 4. <, <=, >, >= (comparison)
-    // 5. +, - (additive)
-    // 6. *, / (multiplicative)
-    // 7. ^ (power)
-    // 8. unary -, !
-    // 9. function calls, atoms
+    // 1. ?: (conditional)
+    // 2. || (or)
+    // 3. && (and)
+    // 4. ==, != (equality)
+    // 5. <, <=, >, >= (comparison)
+    // 6. +, - (additive)
+    // 7. *, / (multiplicative)
+    // 8. ^ (power)
+    // 9. unary -, !
+    // 10. function calls, atoms
+
+    fn parse_conditional(&mut self) -> Expr {
+        let condition = self.parse_or();
+        if self.current != Token::Question {
+            return condition;
+        }
+
+        self.advance();
+        let then_expr = self.parse_conditional();
+        self.expect(Token::Colon);
+        let else_expr = self.parse_conditional();
+        Expr::Function {
+            func: Function::If,
+            args: vec![condition, then_expr, else_expr],
+        }
+    }
 
     fn parse_or(&mut self) -> Expr {
         let mut left = self.parse_and();
@@ -519,7 +558,7 @@ impl<'a> Parser<'a> {
             }
             Token::LParen => {
                 self.advance();
-                let expr = self.parse_or();
+                let expr = self.parse_conditional();
                 self.expect(Token::RParen);
                 expr
             }
@@ -611,10 +650,10 @@ impl<'a> Parser<'a> {
             let mut args = Vec::new();
 
             if self.current != Token::RParen {
-                args.push(self.parse_or());
+                args.push(self.parse_conditional());
                 while self.current == Token::Comma {
                     self.advance();
-                    args.push(self.parse_or());
+                    args.push(self.parse_conditional());
                 }
             }
             self.expect(Token::RParen);
