@@ -1652,26 +1652,6 @@ pub(crate) struct StampLocals {
     pub(crate) var_gammachi_dn6: f64,
     pub(crate) var_gammachi_dn8: f64,
     pub(crate) var_gammachi_rv: f64,
-    pub(crate) var_gd: f64,
-    pub(crate) var_gd__blk425: f64,
-    pub(crate) var_gd__blk425_dn0: f64,
-    pub(crate) var_gd__blk425_dn10: f64,
-    pub(crate) var_gd__blk425_dn11: f64,
-    pub(crate) var_gd__blk425_dn12: f64,
-    pub(crate) var_gd__blk425_dn2: f64,
-    pub(crate) var_gd__blk425_dn4: f64,
-    pub(crate) var_gd__blk425_dn5: f64,
-    pub(crate) var_gd__blk425_dn6: f64,
-    pub(crate) var_gd__blk425_dn8: f64,
-    pub(crate) var_gd_dn0: f64,
-    pub(crate) var_gd_dn10: f64,
-    pub(crate) var_gd_dn11: f64,
-    pub(crate) var_gd_dn12: f64,
-    pub(crate) var_gd_dn2: f64,
-    pub(crate) var_gd_dn4: f64,
-    pub(crate) var_gd_dn5: f64,
-    pub(crate) var_gd_dn6: f64,
-    pub(crate) var_gd_dn8: f64,
     pub(crate) var_gdl0: f64,
     pub(crate) var_gdl0_rv: f64,
     pub(crate) var_gds0_h2: f64,
@@ -2225,8 +2205,6 @@ pub(crate) struct StampLocals {
     pub(crate) var_guard403_rv: f64,
     pub(crate) var_guard404: f64,
     pub(crate) var_guard404_rv: f64,
-    pub(crate) var_guard405: f64,
-    pub(crate) var_guard406: f64,
     pub(crate) var_guard407: f64,
     pub(crate) var_guard407_rv: f64,
     pub(crate) var_guard40_rv: f64,
@@ -2245,8 +2223,6 @@ pub(crate) struct StampLocals {
     pub(crate) var_guard430_rv: f64,
     pub(crate) var_guard431: f64,
     pub(crate) var_guard431_rv: f64,
-    pub(crate) var_guard432: f64,
-    pub(crate) var_guard433: f64,
     pub(crate) var_guard434: f64,
     pub(crate) var_guard434_rv: f64,
     pub(crate) var_guard435: f64,
@@ -3026,26 +3002,6 @@ pub(crate) struct StampLocals {
     pub(crate) var_mu0_dn6: f64,
     pub(crate) var_mu0_dn8: f64,
     pub(crate) var_mu0_rv: f64,
-    pub(crate) var_mu__blk396: f64,
-    pub(crate) var_mu__blk396_dn0: f64,
-    pub(crate) var_mu__blk396_dn10: f64,
-    pub(crate) var_mu__blk396_dn11: f64,
-    pub(crate) var_mu__blk396_dn12: f64,
-    pub(crate) var_mu__blk396_dn2: f64,
-    pub(crate) var_mu__blk396_dn4: f64,
-    pub(crate) var_mu__blk396_dn5: f64,
-    pub(crate) var_mu__blk396_dn6: f64,
-    pub(crate) var_mu__blk396_dn8: f64,
-    pub(crate) var_mu__blk423: f64,
-    pub(crate) var_mu__blk423_dn0: f64,
-    pub(crate) var_mu__blk423_dn10: f64,
-    pub(crate) var_mu__blk423_dn11: f64,
-    pub(crate) var_mu__blk423_dn12: f64,
-    pub(crate) var_mu__blk423_dn2: f64,
-    pub(crate) var_mu__blk423_dn4: f64,
-    pub(crate) var_mu__blk423_dn5: f64,
-    pub(crate) var_mu__blk423_dn6: f64,
-    pub(crate) var_mu__blk423_dn8: f64,
     pub(crate) var_mu_ave: f64,
     pub(crate) var_mu_ave_dn0: f64,
     pub(crate) var_mu_ave_dn10: f64,
@@ -3223,8 +3179,6 @@ pub(crate) struct StampLocals {
     pub(crate) var_noithrml_dn6: f64,
     pub(crate) var_noithrml_dn8: f64,
     pub(crate) var_noithrml_rv: f64,
-    pub(crate) var_nover: f64,
-    pub(crate) var_nover__blk418: f64,
     pub(crate) var_nsti_p2: f64,
     pub(crate) var_nsti_p2_dn0: f64,
     pub(crate) var_nsti_p2_dn10: f64,
@@ -5166,26 +5120,6 @@ pub(crate) struct StampLocals {
     pub(crate) var_qy_rv: f64,
     pub(crate) var_r: f64,
     pub(crate) var_r_rv: f64,
-    pub(crate) var_rdd: f64,
-    pub(crate) var_rdd_dn0: f64,
-    pub(crate) var_rdd_dn10: f64,
-    pub(crate) var_rdd_dn11: f64,
-    pub(crate) var_rdd_dn12: f64,
-    pub(crate) var_rdd_dn2: f64,
-    pub(crate) var_rdd_dn4: f64,
-    pub(crate) var_rdd_dn5: f64,
-    pub(crate) var_rdd_dn6: f64,
-    pub(crate) var_rdd_dn8: f64,
-    pub(crate) var_rdde: f64,
-    pub(crate) var_rdde_dn0: f64,
-    pub(crate) var_rdde_dn10: f64,
-    pub(crate) var_rdde_dn11: f64,
-    pub(crate) var_rdde_dn12: f64,
-    pub(crate) var_rdde_dn2: f64,
-    pub(crate) var_rdde_dn4: f64,
-    pub(crate) var_rdde_dn5: f64,
-    pub(crate) var_rdde_dn6: f64,
-    pub(crate) var_rdde_dn8: f64,
     pub(crate) var_rdrmuele: f64,
     pub(crate) var_rdrmuele__blk408: f64,
     pub(crate) var_rdrmuele__blk408_rv: f64,
@@ -5274,28 +5208,6 @@ pub(crate) struct StampLocals {
     pub(crate) var_rsb_dn6: f64,
     pub(crate) var_rsb_dn8: f64,
     pub(crate) var_rsb_rv: f64,
-    pub(crate) var_rsd: f64,
-    pub(crate) var_rsd0: f64,
-    pub(crate) var_rsd0__blk414: f64,
-    pub(crate) var_rsd_dn0: f64,
-    pub(crate) var_rsd_dn10: f64,
-    pub(crate) var_rsd_dn11: f64,
-    pub(crate) var_rsd_dn12: f64,
-    pub(crate) var_rsd_dn2: f64,
-    pub(crate) var_rsd_dn4: f64,
-    pub(crate) var_rsd_dn5: f64,
-    pub(crate) var_rsd_dn6: f64,
-    pub(crate) var_rsd_dn8: f64,
-    pub(crate) var_rsde: f64,
-    pub(crate) var_rsde_dn0: f64,
-    pub(crate) var_rsde_dn10: f64,
-    pub(crate) var_rsde_dn11: f64,
-    pub(crate) var_rsde_dn12: f64,
-    pub(crate) var_rsde_dn2: f64,
-    pub(crate) var_rsde_dn4: f64,
-    pub(crate) var_rsde_dn5: f64,
-    pub(crate) var_rsde_dn6: f64,
-    pub(crate) var_rsde_dn8: f64,
     pub(crate) var_rth: f64,
     pub(crate) var_rth_dn0: f64,
     pub(crate) var_rth_dn10: f64,
@@ -6713,26 +6625,6 @@ pub(crate) struct StampLocals {
     pub(crate) var_weff_dn6: f64,
     pub(crate) var_weff_dn8: f64,
     pub(crate) var_weff_nf: f64,
-    pub(crate) var_weff_nf_1: f64,
-    pub(crate) var_weff_nf_1_dn0: f64,
-    pub(crate) var_weff_nf_1_dn10: f64,
-    pub(crate) var_weff_nf_1_dn11: f64,
-    pub(crate) var_weff_nf_1_dn12: f64,
-    pub(crate) var_weff_nf_1_dn2: f64,
-    pub(crate) var_weff_nf_1_dn4: f64,
-    pub(crate) var_weff_nf_1_dn5: f64,
-    pub(crate) var_weff_nf_1_dn6: f64,
-    pub(crate) var_weff_nf_1_dn8: f64,
-    pub(crate) var_weff_nf__blk426: f64,
-    pub(crate) var_weff_nf__blk426_dn0: f64,
-    pub(crate) var_weff_nf__blk426_dn10: f64,
-    pub(crate) var_weff_nf__blk426_dn11: f64,
-    pub(crate) var_weff_nf__blk426_dn12: f64,
-    pub(crate) var_weff_nf__blk426_dn2: f64,
-    pub(crate) var_weff_nf__blk426_dn4: f64,
-    pub(crate) var_weff_nf__blk426_dn5: f64,
-    pub(crate) var_weff_nf__blk426_dn6: f64,
-    pub(crate) var_weff_nf__blk426_dn8: f64,
     pub(crate) var_weff_nf_dn0: f64,
     pub(crate) var_weff_nf_dn10: f64,
     pub(crate) var_weff_nf_dn11: f64,
@@ -6876,8 +6768,6 @@ pub(crate) struct StampLocals {
     pub(crate) var_xmp_dn6: f64,
     pub(crate) var_xmp_dn8: f64,
     pub(crate) var_xmp_rv: f64,
-    pub(crate) var_xov: f64,
-    pub(crate) var_xov__blk424: f64,
     pub(crate) var_xp: f64,
     pub(crate) var_xp_dn0: f64,
     pub(crate) var_xp_dn10: f64,
@@ -6904,9 +6794,13 @@ impl Instance {
         let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
+        let nv0 = ctx.node_voltage(nodes[0]);
         let nv1 = ctx.node_voltage(nodes[1]);
+        let nv2 = ctx.node_voltage(nodes[2]);
         let nv5 = ctx.node_voltage(nodes[5]);
         let nv7 = ctx.node_voltage(nodes[7]);
+        let nv11 = ctx.node_voltage(nodes[11]);
+        let nv12 = ctx.node_voltage(nodes[12]);
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
         let timestep = (*self).timestep;
@@ -6921,15 +6815,53 @@ impl Instance {
         let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
         let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
         let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
-        let v1: f64 = 0.0;
-        let v2: f64 = 1.0;
-        let v69: f64 = nv5;
-        let v70: f64 = nv7;
-        let v71: f64 = nv1;
-        let v72: f64 = (v71 - v69);
-        let v73: f64 = (self.scalar_v68 * v72);
-        let v74: f64 = (if (self.scalar_v43 != 0.0) { v73 } else { v1 });
+        let v2: f64 = 0.0;
+        let v5: f64 = 1.0;
+        let v182: f64 = nv5;
+        let v183: f64 = nv12;
+        let v186: f64 = nv11;
+        let v187: f64 = (v186 - v183);
+        let v188: f64 = (self.scalar_v181 * v187);
+        let v190: f64 = nv2;
+        let v193: f64 = nv0;
+        let v213: bool = (v188 >= v2);
+        let v214: f64 = (if v213 { v5 } else { v2 });
+        let v219: bool = (!v213);
+        let v220: f64 = -1.0;
+        let v221: f64 = (if v219 { v220 } else { v214 });
+        let v483: f64 = -0.0;
+        let v514: bool = (v5 == v221);
+        let v588: bool = (!v514);
+        let v590: f64 = (v183 - v190);
+        let v592: f64 = (v193 - v186);
+        let v607: f64 = (if v588 { v483 } else { v2 });
+        let v620: f64 = (self.scalar_v181 * v607);
+        let v621: f64 = (v590 / v2);
+        let v622: f64 = (if (self.scalar_v589 != 0.0) { v621 } else { v2 });
+        let v623: f64 = (v592 / v2);
+        let v624: f64 = (if (self.scalar_v591 != 0.0) { v623 } else { v2 });
+        let v628: f64 = nv7;
+        let v629: f64 = nv1;
+        let v630: f64 = (v629 - v182);
+        let v631: f64 = (self.scalar_v180 * v630);
+        let v632: f64 = (if (self.scalar_v155 != 0.0) { v631 } else { v2 });
 
+        stamper.stamp_current_const_local(
+            Some(11),
+            Some(12),
+            multiplicity * (v620),
+        );
+        let d622_dn2: f64 = self.scalar_v855;
+        let d622_dn12: f64 = self.scalar_v856;
+        stamper.stamp_current_node2_local(
+            Some(12),
+            Some(2),
+            multiplicity * (v622),
+            2,
+            multiplicity * (d622_dn2),
+            12,
+            multiplicity * (d622_dn12),
+        );
         stamper.stamp_potential_branch_local(
             Some(12),
             Some(2),
@@ -6938,7 +6870,18 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             0,
-            v1,
+            v2,
+        );
+        let d624_dn0: f64 = self.scalar_v857;
+        let d624_dn11: f64 = self.scalar_v858;
+        stamper.stamp_current_node2_local(
+            Some(0),
+            Some(11),
+            multiplicity * (v624),
+            0,
+            multiplicity * (d624_dn0),
+            11,
+            multiplicity * (d624_dn11),
         );
         stamper.stamp_potential_branch_local(
             Some(0),
@@ -6948,66 +6891,66 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             1,
-            v1,
+            v2,
         );
         stamper.stamp_current_const_local(
             Some(11),
             Some(12),
-            multiplicity * (v1),
+            multiplicity * (v2),
         );
-        let d70_dn7: f64 = v2;
+        let d628_dn7: f64 = v5;
         stamper.stamp_current_node1_local(
             Some(7),
             None,
-            multiplicity * (v70),
+            multiplicity * (v628),
             7,
-            multiplicity * (d70_dn7),
+            multiplicity * (d628_dn7),
         );
         stamper.stamp_current_const_local(
             Some(7),
             None,
-            multiplicity * (v1),
+            multiplicity * (v2),
         );
         stamper.stamp_current_const_local(
             Some(11),
             Some(12),
-            multiplicity * (v1),
+            multiplicity * (v2),
         );
         stamper.stamp_current_const_local(
             Some(12),
             Some(2),
-            multiplicity * (v1),
+            multiplicity * (v2),
         );
         stamper.stamp_current_const_local(
             Some(0),
             Some(11),
-            multiplicity * (v1),
+            multiplicity * (v2),
         );
         stamper.stamp_current_const_local(
             Some(5),
             Some(11),
-            multiplicity * (v1),
+            multiplicity * (v2),
         );
         stamper.stamp_current_const_local(
             Some(5),
             Some(12),
-            multiplicity * (v1),
+            multiplicity * (v2),
         );
         stamper.stamp_current_const_local(
             Some(5),
             Some(6),
-            multiplicity * (v1),
+            multiplicity * (v2),
         );
-        let d74_dn1: f64 = self.scalar_v76;
-        let d74_dn5: f64 = self.scalar_v77;
+        let d632_dn1: f64 = self.scalar_v875;
+        let d632_dn5: f64 = self.scalar_v876;
         stamper.stamp_current_node2_local(
             Some(1),
             Some(5),
-            multiplicity * (v74),
+            multiplicity * (v632),
             1,
-            multiplicity * (d74_dn1),
+            multiplicity * (d632_dn1),
             5,
-            multiplicity * (d74_dn5),
+            multiplicity * (d632_dn5),
         );
         stamper.stamp_potential_branch_local(
             Some(1),
@@ -7017,7 +6960,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             2,
-            v1,
+            v2,
         );
         stamper.stamp_potential_branch_local(
             Some(3),
@@ -7027,7 +6970,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             3,
-            v1,
+            v2,
         );
         stamper.stamp_potential_branch_local(
             Some(4),
@@ -7037,7 +6980,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             4,
-            v1,
+            v2,
         );
         stamper.stamp_potential_branch_local(
             Some(10),
@@ -7047,7 +6990,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             5,
-            v1,
+            v2,
         );
         stamper.stamp_potential_branch_local(
             Some(8),
@@ -7057,7 +7000,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             6,
-            v1,
+            v2,
         );
         stamper.stamp_potential_branch_local(
             Some(9),
@@ -7067,7 +7010,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             7,
-            v1,
+            v2,
         );
         let mut locals = StampLocals::default();
 
@@ -7157,11 +7100,10 @@ impl Instance {
         Self::stamp_transient_block_83(p, &mut locals);
         Self::stamp_transient_block_84(p, &mut locals);
         Self::stamp_transient_block_85(ctx, p, nodes, &mut locals);
-        Self::stamp_transient_block_86(p, &mut locals);
-        Self::stamp_transient_block_87(ctx, p, nodes, &mut locals);
-        Self::stamp_transient_block_88(&mut locals);
+        Self::stamp_transient_block_86(ctx, p, nodes, &mut locals);
+        Self::stamp_transient_block_87(p, &mut locals);
+        Self::stamp_transient_block_88(p, &mut locals);
         Self::stamp_transient_block_89(p, &mut locals);
-        Self::stamp_transient_block_90(p, &mut locals);
 
         Self::stamp_transient_equations_block_0(ctx, stamper, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
     }

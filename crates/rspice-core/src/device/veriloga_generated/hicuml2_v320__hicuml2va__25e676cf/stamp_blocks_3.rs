@@ -5215,7 +5215,6 @@ impl Instance {
     ) {
         let nv3 = ctx.node_voltage(nodes[3]);
         let nv4 = ctx.node_voltage(nodes[4]);
-        let nv5 = ctx.node_voltage(nodes[5]);
         let nv6 = ctx.node_voltage(nodes[6]);
         let nv7 = ctx.node_voltage(nodes[7]);
         let nv8 = ctx.node_voltage(nodes[8]);
@@ -5294,38 +5293,6 @@ impl Instance {
             multiplicity * (eq1_value),
             [0, 1, 3, 4, 5, 6, 7, 8, 9, 12],
             [multiplicity * ((eq1_e171_d_n0 * ddt_scale)), multiplicity * ((eq1_e171_d_n1 * ddt_scale)), multiplicity * ((eq1_e171_d_n3 * ddt_scale)), multiplicity * ((eq1_e171_d_n4 * ddt_scale)), multiplicity * ((eq1_e171_d_n5 * ddt_scale)), multiplicity * ((eq1_e171_d_n6 * ddt_scale)), multiplicity * ((eq1_e171_d_n7 * ddt_scale)), multiplicity * ((eq1_e171_d_n8 * ddt_scale)), multiplicity * ((eq1_e171_d_n9 * ddt_scale)), multiplicity * ((eq1_e171_d_n12 * ddt_scale))],
-            [],
-            [],
-            1.0,
-        );
-        let eq2_e176: f64 = (locals.var_ibci - locals.var_iavl);
-        let eq2_e176_d_n4: f64 = (locals.var_ibci_dn4 - locals.var_iavl_dn4);
-        let eq2_e176_d_n5: f64 = (locals.var_ibci_dn5 - locals.var_iavl_dn5);
-        let eq2_e176_d_n6: f64 = (locals.var_ibci_dn6 - locals.var_iavl_dn6);
-        let eq2_e176_d_n7: f64 = (locals.var_ibci_dn7 - locals.var_iavl_dn7);
-        let eq2_e176_d_n8: f64 = (locals.var_ibci_dn8 - locals.var_iavl_dn8);
-        let eq2_e176_d_n9: f64 = (locals.var_ibci_dn9 - locals.var_iavl_dn9);
-        let eq2_e177: f64 = (p.p148 * eq2_e176);
-        let eq2_e177_d_n0: f64 = (p.p148 * (-locals.var_iavl_dn0));
-        let eq2_e177_d_n1: f64 = (p.p148 * (-locals.var_iavl_dn1));
-        let eq2_e177_d_n3: f64 = (p.p148 * (-locals.var_iavl_dn3));
-        let eq2_e177_d_n4: f64 = (p.p148 * eq2_e176_d_n4);
-        let eq2_e177_d_n5: f64 = (p.p148 * eq2_e176_d_n5);
-        let eq2_e177_d_n6: f64 = (p.p148 * eq2_e176_d_n6);
-        let eq2_e177_d_n7: f64 = (p.p148 * eq2_e176_d_n7);
-        let eq2_e177_d_n8: f64 = (p.p148 * eq2_e176_d_n8);
-        let eq2_e177_d_n9: f64 = (p.p148 * eq2_e176_d_n9);
-        let eq2_e180: f64 = (locals.var_gmin * (nv8 - nv5));
-        let eq2_e181: f64 = (eq2_e177 + eq2_e180);
-        let eq2_e181_d_n5: f64 = (eq2_e177_d_n5 + (-locals.var_gmin));
-        let eq2_e181_d_n8: f64 = (eq2_e177_d_n8 + locals.var_gmin);
-        let eq2_value: f64 = eq2_e181;
-        stamper.stamp_current_sparse_local::<9, 0>(
-            Some(8),
-            Some(5),
-            multiplicity * (eq2_value),
-            [0, 1, 3, 4, 5, 6, 7, 8, 9],
-            [multiplicity * (eq2_e177_d_n0), multiplicity * (eq2_e177_d_n1), multiplicity * (eq2_e177_d_n3), multiplicity * (eq2_e177_d_n4), multiplicity * (eq2_e181_d_n5), multiplicity * (eq2_e177_d_n6), multiplicity * (eq2_e177_d_n7), multiplicity * (eq2_e181_d_n8), multiplicity * (eq2_e177_d_n9)],
             [],
             [],
             1.0,
