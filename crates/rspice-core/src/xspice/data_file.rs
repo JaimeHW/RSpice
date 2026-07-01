@@ -136,31 +136,33 @@ pub(crate) fn parse_numeric_prefix(input: &str) -> Option<Value> {
 }
 
 pub(crate) fn parse_ngspice_spice_value(token: &str) -> Value {
-    let chars: Vec<char> = token.chars().take(81).collect();
-    let mut value_text = String::with_capacity(chars.len());
+    let mut value_end = 0usize;
     let mut suffix = None;
+    let mut chars = token.char_indices().take(81).enumerate();
 
-    for (index, &ch) in chars.iter().enumerate() {
+    while let Some((_, (byte_index, ch))) = chars.next() {
         if ch.is_ascii_alphabetic() && ch != 'e' && ch != 'E' {
-            suffix = Some((index, ch));
+            suffix = Some((ch, chars.next().map(|(_, (_, next))| next)));
+            value_end = byte_index;
             break;
         }
         if ch.is_ascii_whitespace() {
+            value_end = byte_index;
             break;
         }
-        value_text.push(ch);
+        value_end = byte_index + ch.len_utf8();
     }
 
     let scale = match suffix {
-        Some((_, 't' | 'T')) => 1.0e12,
-        Some((_, 'g' | 'G')) => 1.0e9,
-        Some((_, 'k' | 'K')) => 1.0e3,
-        Some((_, 'u' | 'U')) => 1.0e-6,
-        Some((_, 'n' | 'N')) => 1.0e-9,
-        Some((_, 'p' | 'P')) => 1.0e-12,
-        Some((_, 'f' | 'F')) => 1.0e-15,
-        Some((_, 'a' | 'A')) => 1.0e-18,
-        Some((index, 'm' | 'M')) => match chars.get(index + 1).copied() {
+        Some(('t' | 'T', _)) => 1.0e12,
+        Some(('g' | 'G', _)) => 1.0e9,
+        Some(('k' | 'K', _)) => 1.0e3,
+        Some(('u' | 'U', _)) => 1.0e-6,
+        Some(('n' | 'N', _)) => 1.0e-9,
+        Some(('p' | 'P', _)) => 1.0e-12,
+        Some(('f' | 'F', _)) => 1.0e-15,
+        Some(('a' | 'A', _)) => 1.0e-18,
+        Some(('m' | 'M', next)) => match next {
             Some('e' | 'E') => 1.0e6,
             Some('i' | 'I') => 25.4e-6,
             _ => 1.0e-3,
@@ -168,7 +170,7 @@ pub(crate) fn parse_ngspice_spice_value(token: &str) -> Value {
         Some(_) | None => 1.0,
     };
 
-    parse_numeric_prefix(&value_text).unwrap_or(0.0) * scale
+    parse_numeric_prefix(&token[..value_end]).unwrap_or(0.0) * scale
 }
 
 fn virtual_stamp(contents: &str) -> DataFileStamp {
@@ -466,6 +468,27 @@ mod tests {
                 "token {token:?} parsed as {actual:e}, expected {expected:e}"
             );
         }
+    }
+
+    #[test]
+    fn ngspice_spice_value_parser_preserves_legacy_81_char_limit() {
+        let suffix_inside_limit = format!("1{}K", "0".repeat(79));
+        let suffix_outside_limit = format!("1{}K", "0".repeat(80));
+
+        assert_eq!(suffix_inside_limit.chars().count(), 81);
+        assert_eq!(suffix_outside_limit.chars().count(), 82);
+
+        let inside = parse_ngspice_spice_value(&suffix_inside_limit);
+        let outside = parse_ngspice_spice_value(&suffix_outside_limit);
+
+        assert!(
+            (inside - 1.0e82).abs() <= 1.0e70,
+            "suffix at the 81-character parser boundary should still apply, got {inside:e}"
+        );
+        assert!(
+            (outside - 1.0e80).abs() <= 1.0e68,
+            "suffix after the 81-character parser boundary should be ignored, got {outside:e}"
+        );
     }
 
     #[test]
