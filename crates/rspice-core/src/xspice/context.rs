@@ -286,6 +286,27 @@ fn prune_transient_history(
     }
 }
 
+fn refill_vec_from_fn<T, F>(values: &mut Vec<T>, value_count: usize, mut value_at: F)
+where
+    F: FnMut(usize) -> T,
+{
+    if values.len() > value_count {
+        values.truncate(value_count);
+    }
+
+    let existing_len = values.len();
+    for (index, value) in values.iter_mut().enumerate() {
+        *value = value_at(index);
+    }
+
+    if existing_len < value_count {
+        values.reserve(value_count - existing_len);
+        for index in existing_len..value_count {
+            values.push(value_at(index));
+        }
+    }
+}
+
 impl OutputValue {
     /// Create analog output initialized to zero
     pub fn analog() -> Self {
@@ -733,11 +754,7 @@ impl CmContext {
     {
         match self.inputs.get_mut(name) {
             Some(InputValue::AnalogVector(values)) => {
-                values.clear();
-                values.reserve(value_count);
-                for index in 0..value_count {
-                    values.push(value_at(index));
-                }
+                refill_vec_from_fn(values, value_count, value_at);
             }
             Some(value) => {
                 let mut values = Vec::with_capacity(value_count);
@@ -768,11 +785,7 @@ impl CmContext {
     {
         match self.inputs.get_mut(name) {
             Some(InputValue::DigitalVector(values)) => {
-                values.clear();
-                values.reserve(value_count);
-                for index in 0..value_count {
-                    values.push(value_at(index));
-                }
+                refill_vec_from_fn(values, value_count, value_at);
             }
             Some(value) => {
                 let mut values = Vec::with_capacity(value_count);
@@ -803,11 +816,7 @@ impl CmContext {
     {
         match self.inputs.get_mut(name) {
             Some(InputValue::RealVector(values)) => {
-                values.clear();
-                values.reserve(value_count);
-                for index in 0..value_count {
-                    values.push(value_at(index));
-                }
+                refill_vec_from_fn(values, value_count, value_at);
             }
             Some(value) => {
                 let mut values = Vec::with_capacity(value_count);
@@ -862,11 +871,7 @@ impl CmContext {
     {
         match self.input_vector_event_times.get_mut(name) {
             Some(times) => {
-                times.clear();
-                times.reserve(value_count);
-                for index in 0..value_count {
-                    times.push(time_at(index));
-                }
+                refill_vec_from_fn(times, value_count, time_at);
             }
             None => {
                 let mut times = Vec::with_capacity(value_count);
