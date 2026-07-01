@@ -4133,6 +4133,29 @@ mod tests {
     }
 
     #[test]
+    fn resistor_model_followed_by_unit_suffix_value_parse() {
+        let netlist = Netlist::parse(
+            "modeled resistor with suffix value override\n\
+             .model rseu_d2_lvsres R( r=0.1)\n\
+             RLAT_ME N 0 rseu_d2_lvsres 500K\n\
+             .end\n",
+        )
+        .expect("resistor model followed by identifier-shaped value should parse");
+
+        let (value, model) = netlist
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor { value, model, .. } => Some((*value, model.as_deref())),
+                _ => None,
+            })
+            .expect("resistor exists");
+
+        assert_eq!(value, 500_000.0);
+        assert!(model.is_some_and(|name| name.eq_ignore_ascii_case("rseu_d2_lvsres")));
+    }
+
+    #[test]
     fn subckt_resistor_bare_r_parameter_flattens_as_value() {
         let netlist = Netlist::parse(
             "subckt bare R parameter value\n\
