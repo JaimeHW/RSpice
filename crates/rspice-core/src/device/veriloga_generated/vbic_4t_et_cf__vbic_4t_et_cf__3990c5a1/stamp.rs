@@ -5130,6 +5130,7 @@ impl Instance {
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
         let nodes = self.nodes;
+        let branches = self.branches;
         self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
         let p = &(*self.params);
         let multiplicity = self.multiplicity;
