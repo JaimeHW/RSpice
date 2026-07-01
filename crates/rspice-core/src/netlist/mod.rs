@@ -176,7 +176,9 @@ impl Netlist {
         input: &str,
         options: NetlistParseOptions,
     ) -> Result<Self, ParseError> {
-        let (sanitized, mut diagnostics) = Self::strip_control_blocks_with_diagnostics(input)?;
+        let promoted_input = Self::promote_control_analysis_commands(input);
+        let (sanitized, mut diagnostics) =
+            Self::strip_control_blocks_with_diagnostics(&promoted_input)?;
         let mut netlist = parser::parse_netlist_with_options(&sanitized, options)?;
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
@@ -316,6 +318,103 @@ impl Netlist {
         Ok(Self::strip_control_blocks_with_diagnostics(input)?.0)
     }
 
+    fn promote_control_analysis_commands(input: &str) -> String {
+        let promoted = Self::collect_control_analysis_commands(input);
+        if promoted.is_empty() {
+            return input.to_string();
+        }
+
+        let mut result = String::with_capacity(
+            input.len()
+                + promoted
+                    .iter()
+                    .map(|command| command.len() + 1)
+                    .sum::<usize>(),
+        );
+        let mut in_control = false;
+        let mut inserted = false;
+
+        for line in input.lines() {
+            let trimmed = line.trim();
+            let head = trimmed.split_whitespace().next().unwrap_or("");
+
+            if head.eq_ignore_ascii_case(".control") {
+                in_control = true;
+            } else if head.eq_ignore_ascii_case(".endc") {
+                in_control = false;
+            }
+
+            if !inserted && !in_control && head.eq_ignore_ascii_case(".end") {
+                for command in &promoted {
+                    result.push_str(command);
+                    result.push('\n');
+                }
+                inserted = true;
+            }
+
+            result.push_str(line);
+            result.push('\n');
+        }
+
+        if !inserted {
+            for command in &promoted {
+                result.push_str(command);
+                result.push('\n');
+            }
+        }
+
+        result
+    }
+
+    fn collect_control_analysis_commands(input: &str) -> Vec<String> {
+        let mut promoted = Vec::new();
+        let mut in_control = false;
+
+        for line in input.lines() {
+            let trimmed = line.trim();
+            let head = trimmed.split_whitespace().next().unwrap_or("");
+
+            if head.eq_ignore_ascii_case(".control") {
+                in_control = true;
+                continue;
+            }
+            if head.eq_ignore_ascii_case(".endc") {
+                in_control = false;
+                continue;
+            }
+            if !in_control {
+                continue;
+            }
+
+            if let Some(command) = Self::promote_control_tran_command(line) {
+                promoted.push(command);
+            }
+        }
+
+        promoted
+    }
+
+    fn promote_control_tran_command(line: &str) -> Option<String> {
+        let body = strip_control_inline_comment(line).trim();
+        if body.is_empty() || body.starts_with('*') {
+            return None;
+        }
+
+        let body = body.strip_prefix('.').unwrap_or(body);
+        let mut parts = body.split_whitespace();
+        let command = parts.next()?;
+        if !command.eq_ignore_ascii_case("tran") {
+            return None;
+        }
+
+        let mut promoted = String::from(".tran");
+        for part in parts {
+            promoted.push(' ');
+            promoted.push_str(&normalize_control_analysis_token(part));
+        }
+        Some(promoted)
+    }
+
     fn strip_control_blocks_with_diagnostics(
         input: &str,
     ) -> Result<(String, Vec<ParseDiagnostic>), ParseError> {
@@ -335,7 +434,7 @@ impl Netlist {
                 diagnostics.push(ParseDiagnostic::warning(
                     line_num,
                     "control-block-ignored",
-                    ".control block ignored; RSpice parses circuit decks and does not execute ngspice command scripts",
+                    ".control scripting ignored; simple analysis commands are promoted into the parsed deck",
                 ));
                 result.push_str("* ");
                 result.push_str(line);
@@ -453,6 +552,25 @@ fn split_process_file_suffix<'a>(name: &str, value: &'a str) -> (&'a str, &'a st
     } else {
         (value, "")
     }
+}
+
+fn strip_control_inline_comment(line: &str) -> &str {
+    line.split_once(';').map_or(line, |(body, _)| body)
+}
+
+fn normalize_control_analysis_token(token: &str) -> String {
+    token
+        .strip_prefix("$&")
+        .filter(|name| is_control_parameter_name(name))
+        .unwrap_or(token)
+        .to_string()
+}
+
+fn is_control_parameter_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.')
 }
 
 impl Default for Netlist {
@@ -693,6 +811,43 @@ mod tests {
             .expect(".TRAN exists");
 
         assert_eq!(tran, (0.1, 10.0));
+    }
+
+    #[test]
+    fn control_block_tran_is_promoted_with_uic_and_csparam_substitution() {
+        let netlist = Netlist::parse(
+            "control tran promotion\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .csparam simtime=25u\n\
+             .control\n\
+             save in\n\
+             tran 0.1n $&simtime uic\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("control-block transient analysis parses");
+
+        let tran = netlist
+            .analyses
+            .iter()
+            .find_map(|analysis| match analysis {
+                AnalysisCommand::Tran {
+                    step,
+                    stop,
+                    start,
+                    max_step,
+                    uic,
+                } => Some((*step, *stop, *start, *max_step, *uic)),
+                _ => None,
+            })
+            .expect("promoted .TRAN exists");
+
+        assert!((tran.0 - 0.1e-9).abs() <= 1.0e-21);
+        assert!((tran.1 - 25.0e-6).abs() <= 1.0e-18);
+        assert_eq!(tran.2, None);
+        assert_eq!(tran.3, None);
+        assert!(tran.4);
     }
 
     #[test]
