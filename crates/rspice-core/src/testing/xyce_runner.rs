@@ -26,6 +26,7 @@ const EXPECTED_UNSUPPORTED_MARKER: &str = "EXPECTED_UNSUPPORTED:";
 const HARNESS_MANIFEST_FILE: &str = "RSPICE-HARNESS-MANIFEST.tsv";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
 const MAX_NATIVE_TRAN_ORACLE_STEPS: f64 = 50_000.0;
+const TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD: f64 = 64.0;
 
 /// Configuration for the Xyce corpus runner.
 #[derive(Debug, Clone)]
@@ -1470,26 +1471,27 @@ impl XyceTestRunner {
             }
         };
 
-        let max_step = match Self::transient_max_step_for_reference(&plan.tran, &reference) {
-            Ok(max_step) => max_step,
-            Err(err) if err.contains("transient harness execution envelope") => {
-                return self.expected_unsupported_result(
-                    deck,
-                    start,
-                    "unsupported_xyce_contract",
-                    &err,
-                );
-            }
-            Err(err) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    format!("reference time-grid error: {err}"),
-                    Vec::new(),
-                );
-            }
-        };
+        let max_step =
+            match Self::transient_max_step_for_reference(&netlist, &plan.tran, &reference) {
+                Ok(max_step) => max_step,
+                Err(err) if err.contains("transient harness execution envelope") => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_contract",
+                        &err,
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("reference time-grid error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
 
         let engine = self.create_xyce_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
@@ -2595,6 +2597,7 @@ impl XyceTestRunner {
     }
 
     fn transient_max_step_for_reference(
+        netlist: &Netlist,
         tran: &XyceTranAnalysis,
         reference: &XycePrnTable,
     ) -> Result<Value, String> {
@@ -2602,13 +2605,14 @@ impl XyceTestRunner {
             .max_step
             .or_else(|| (tran.step > 0.0).then_some(tran.step));
         let reference_step = Self::reference_min_positive_time_step(reference)?;
+        let source_step = Self::source_frequency_transient_max_step(netlist, tran);
         let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
-        let max_step = match (requested, reference_step) {
-            (Some(requested), Some(reference_step)) => requested.min(reference_step),
-            (Some(requested), None) => requested,
-            (None, Some(reference_step)) => reference_step,
-            (None, None) => fallback,
-        };
+        let max_step = [requested, reference_step, source_step, Some(fallback)]
+            .into_iter()
+            .flatten()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .reduce(Value::min)
+            .unwrap_or(fallback);
         if !max_step.is_finite() || max_step <= 0.0 {
             return Err(format!(
                 "resolved transient maximum step must be finite and positive, got {max_step}"
@@ -2622,6 +2626,86 @@ impl XyceTestRunner {
             ));
         }
         Ok(max_step)
+    }
+
+    fn source_frequency_transient_max_step(
+        netlist: &Netlist,
+        tran: &XyceTranAnalysis,
+    ) -> Option<Value> {
+        netlist
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                    Self::source_spec_max_frequency(spec, tran.stop)
+                }
+                _ => None,
+            })
+            .filter(|frequency| frequency.is_finite() && *frequency > 0.0)
+            .map(|frequency| 1.0 / (frequency * TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD))
+            .reduce(Value::min)
+    }
+
+    fn source_spec_max_frequency(spec: &crate::netlist::SourceSpec, tstop: Value) -> Option<Value> {
+        match spec {
+            crate::netlist::SourceSpec::Dc(_)
+            | crate::netlist::SourceSpec::Ac { .. }
+            | crate::netlist::SourceSpec::DcAc { .. }
+            | crate::netlist::SourceSpec::Pwl { .. }
+            | crate::netlist::SourceSpec::PwlFile { .. }
+            | crate::netlist::SourceSpec::Pulse { .. }
+            | crate::netlist::SourceSpec::Exp { .. }
+            | crate::netlist::SourceSpec::TrNoise { .. } => None,
+            crate::netlist::SourceSpec::DcTransient { transient, .. }
+            | crate::netlist::SourceSpec::DcAcTransient { transient, .. } => {
+                Self::source_spec_max_frequency(transient, tstop)
+            }
+            crate::netlist::SourceSpec::Sin { frequency, .. } => {
+                Some(Self::resolved_sin_frequency(*frequency, tstop))
+            }
+            crate::netlist::SourceSpec::Sffm {
+                carrier_freq,
+                signal_freq,
+                ..
+            } => Some(
+                Self::resolved_modulated_frequency(*carrier_freq, 5.0, tstop).max(
+                    Self::resolved_modulated_frequency(*signal_freq, 500.0, tstop),
+                ),
+            ),
+            crate::netlist::SourceSpec::Am {
+                modulating_freq,
+                carrier_freq,
+                ..
+            } => Some(
+                Self::resolved_modulated_frequency(*carrier_freq, 500.0, tstop).max(
+                    Self::resolved_modulated_frequency(*modulating_freq, 5.0, tstop),
+                ),
+            ),
+        }
+    }
+
+    fn resolved_sin_frequency(frequency: Value, tstop: Value) -> Value {
+        if frequency.is_finite() && frequency > 0.0 {
+            frequency
+        } else if tstop.is_finite() && tstop > 0.0 {
+            1.0 / tstop
+        } else {
+            1.0e3
+        }
+    }
+
+    fn resolved_modulated_frequency(
+        frequency: Value,
+        default_cycles: Value,
+        tstop: Value,
+    ) -> Value {
+        if frequency.is_finite() && frequency > 0.0 {
+            frequency
+        } else if tstop.is_finite() && tstop > 0.0 {
+            default_cycles / tstop
+        } else {
+            default_cycles * 1.0e3
+        }
     }
 
     fn reference_min_positive_time_step(reference: &XycePrnTable) -> Result<Option<Value>, String> {
@@ -3264,9 +3348,18 @@ impl XyceTestRunner {
     fn validate_resistive_transient_contract(netlist: &Netlist) -> Result<(), String> {
         for element in &netlist.elements {
             match &element.kind {
-                ElementKind::VoltageSource(_)
-                | ElementKind::CurrentSource(_)
-                | ElementKind::Resistor { .. } => {}
+                ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_) => {}
+                ElementKind::Resistor { value_expr, .. } => {
+                    if value_expr
+                        .as_deref()
+                        .is_some_and(Self::expression_references_time_symbol)
+                    {
+                        return Err(format!(
+                            "native static .PRINT TRAN comparison does not yet support time-dependent resistor value expressions; element '{}' references TIME",
+                            element.name
+                        ));
+                    }
+                }
                 _ => {
                     return Err(format!(
                         "native static .PRINT TRAN comparison currently supports source/resistor-only transient decks; element '{}' requires a broader transient oracle contract",
@@ -3276,6 +3369,28 @@ impl XyceTestRunner {
             }
         }
         Ok(())
+    }
+
+    fn expression_references_time_symbol(expression: &str) -> bool {
+        let mut chars = expression.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if !(ch.is_ascii_alphabetic() || ch == '_') {
+                continue;
+            }
+            let mut ident = String::from(ch);
+            while let Some(next) = chars.peek().copied() {
+                if next.is_ascii_alphanumeric() || next == '_' {
+                    ident.push(next);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            if ident.eq_ignore_ascii_case("time") {
+                return true;
+            }
+        }
+        false
     }
 
     fn validate_tran_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
@@ -3305,7 +3420,7 @@ impl XyceTestRunner {
     fn validate_atomic_tran_probe(
         normalized: &str,
         original: &str,
-        _netlist: &Netlist,
+        netlist: &Netlist,
     ) -> Result<(), String> {
         if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
             if !voltage_probe.node_pos.is_empty()
@@ -3317,9 +3432,12 @@ impl XyceTestRunner {
                 return Ok(());
             }
         }
-        if Self::parse_current_probe(normalized).is_some() {
+        if let Some(element_name) = Self::parse_current_probe(normalized) {
+            if Self::netlist_has_recorded_branch_current(netlist, &element_name) {
+                return Ok(());
+            }
             return Err(format!(
-                "transient branch-current probe '{}' requires the native transient current oracle contract",
+                "transient branch-current probe '{}' targets an element without a recorded transient branch current",
                 original
             ));
         }
