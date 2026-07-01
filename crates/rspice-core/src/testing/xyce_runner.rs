@@ -258,6 +258,48 @@ enum XyceReferenceColumn {
     Probe { name: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceLeadCurrentProbe {
+    terminal: XyceLeadCurrentTerminal,
+    element_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceLeadCurrentTerminal {
+    Drain,
+    Gate,
+    Source,
+    Bulk,
+}
+
+impl XyceLeadCurrentTerminal {
+    fn from_function_name(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "id" => Some(Self::Drain),
+            "ig" => Some(Self::Gate),
+            "is" => Some(Self::Source),
+            "ib" => Some(Self::Bulk),
+            _ => None,
+        }
+    }
+
+    fn op_parameter(self) -> Option<&'static str> {
+        match self {
+            Self::Drain => Some("id"),
+            Self::Gate | Self::Source | Self::Bulk => None,
+        }
+    }
+
+    fn function_name(self) -> &'static str {
+        match self {
+            Self::Drain => "ID",
+            Self::Gate => "IG",
+            Self::Source => "IS",
+            Self::Bulk => "IB",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct XycePrnTable {
     columns: Vec<String>,
@@ -1747,6 +1789,22 @@ impl XyceTestRunner {
                 original
             ));
         }
+        if let Some(lead_current) = Self::parse_lead_current_probe(normalized) {
+            if !Self::netlist_has_device_op_instance(netlist, &lead_current.element_name) {
+                return Err(format!(
+                    "lead-current probe '{}' targets an unknown reported device",
+                    original
+                ));
+            }
+            if lead_current.terminal.op_parameter().is_some() {
+                return Ok(());
+            }
+            return Err(format!(
+                "lead-current probe '{}' targets unsupported {} terminal current",
+                original,
+                lead_current.terminal.function_name()
+            ));
+        }
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
             match parameter.as_str() {
                 "dcv0" if Self::source_is_independent_source(netlist, &element_name) => {
@@ -1874,6 +1932,10 @@ impl XyceTestRunner {
                 &element_name,
                 &parameter,
             );
+        }
+
+        if let Some(lead_current) = Self::parse_lead_current_probe(normalized) {
+            return Self::evaluate_lead_current_probe(op_report, &lead_current);
         }
 
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
@@ -2054,6 +2116,7 @@ impl XyceTestRunner {
         let variable = args[1].trim();
         if Self::parse_voltage_probe(variable).is_none()
             && Self::parse_current_probe(variable).is_none()
+            && Self::parse_lead_current_probe(variable).is_none()
             && Self::parse_device_operating_point_probe(variable).is_none()
             && Self::parse_device_parameter_probe(variable).is_none()
         {
@@ -2200,8 +2263,7 @@ impl XyceTestRunner {
         let mut placeholder_index = 0usize;
 
         while index < expression.len() {
-            if Self::print_probe_call_starts_at(expression, index) {
-                let open_index = index + 1;
+            if let Some(open_index) = Self::print_probe_call_open_index(expression, index) {
                 let close_index = Self::matching_parenthesis_index(expression, open_index)?;
                 let call = &expression[index..=close_index];
                 let placeholder = format!("__rspice_probe_{placeholder_index}");
@@ -2240,7 +2302,7 @@ impl XyceTestRunner {
     fn print_expression_contains_probe_call(expression: &str) -> bool {
         let mut index = 0usize;
         while index < expression.len() {
-            if Self::print_probe_call_starts_at(expression, index) {
+            if Self::print_probe_call_open_index(expression, index).is_some() {
                 return true;
             }
             let ch = expression[index..]
@@ -2256,6 +2318,8 @@ impl XyceTestRunner {
         Self::parse_device_parameter_probe(normalized_expression).is_some()
             || Self::parse_device_operating_point_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
+            || Self::parse_lead_current_probe(normalized_expression)
+                .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
             || Self::parse_voltage_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
             || Self::parse_current_probe(normalized_expression)
@@ -2270,20 +2334,28 @@ impl XyceTestRunner {
             .is_ok_and(|close_index| close_index + 1 == expression.len())
     }
 
-    fn print_probe_call_starts_at(expression: &str, index: usize) -> bool {
+    fn print_probe_call_open_index(expression: &str, index: usize) -> Option<usize> {
         if index >= expression.len() || !expression.is_char_boundary(index) {
-            return false;
-        }
-        let mut chars = expression[index..].chars();
-        let Some(ch @ ('v' | 'V' | 'i' | 'I' | 'n' | 'N')) = chars.next() else {
-            return false;
-        };
-        let next_index = index + ch.len_utf8();
-        if !expression[next_index..].starts_with('(') {
-            return false;
+            return None;
         }
         let previous = expression[..index].chars().next_back();
-        previous.is_none_or(|value| !Self::print_identifier_char(value))
+        if previous.is_some_and(Self::print_identifier_char) {
+            return None;
+        }
+
+        let rest = &expression[index..];
+        for prefix in ["id", "ig", "is", "ib", "v", "i", "n"] {
+            let next_index = index + prefix.len();
+            if rest.len() <= prefix.len()
+                || !expression.is_char_boundary(next_index)
+                || !rest[..prefix.len()].eq_ignore_ascii_case(prefix)
+                || !expression[next_index..].starts_with('(')
+            {
+                continue;
+            }
+            return Some(next_index);
+        }
+        None
     }
 
     fn print_identifier_char(ch: char) -> bool {
@@ -2397,6 +2469,42 @@ impl XyceTestRunner {
 
         Err(format!(
             "device operating-point probe 'N({element_name}:{parameter})' targets a device with no operating-point report"
+        ))
+    }
+
+    fn evaluate_lead_current_probe(
+        op_report: &crate::circuit::DeviceOpReport,
+        probe: &XyceLeadCurrentProbe,
+    ) -> Result<f64, String> {
+        let parameter = probe.terminal.op_parameter().ok_or_else(|| {
+            format!(
+                "lead-current probe '{}({})' targets unsupported terminal current",
+                probe.terminal.function_name(),
+                probe.element_name
+            )
+        })?;
+
+        for entry in &op_report.entries {
+            if !Self::device_instance_names_match(&entry.name, &probe.element_name) {
+                continue;
+            }
+            if let Some(value) = Self::xyce_device_operating_point_value(entry, parameter) {
+                return Ok(value);
+            }
+            return Err(format!(
+                "lead-current probe '{}({})' targets parameter '{}' that is not reported for {} '{}'",
+                probe.terminal.function_name(),
+                probe.element_name,
+                parameter,
+                entry.device_kind,
+                entry.name
+            ));
+        }
+
+        Err(format!(
+            "lead-current probe '{}({})' targets a device with no operating-point report",
+            probe.terminal.function_name(),
+            probe.element_name
         ))
     }
 
@@ -3460,6 +3568,25 @@ impl XyceTestRunner {
         (!inner.is_empty()).then(|| inner.to_string())
     }
 
+    fn parse_lead_current_probe(probe: &str) -> Option<XyceLeadCurrentProbe> {
+        let normalized = Self::normalize_probe(probe);
+        for function in ["id", "ig", "is", "ib"] {
+            let prefix = format!("{function}(");
+            if !normalized.starts_with(&prefix) || !normalized.ends_with(')') {
+                continue;
+            }
+            let inner = &normalized[prefix.len()..normalized.len() - 1];
+            if inner.is_empty() {
+                return None;
+            }
+            return Some(XyceLeadCurrentProbe {
+                terminal: XyceLeadCurrentTerminal::from_function_name(function)?,
+                element_name: inner.to_string(),
+            });
+        }
+        None
+    }
+
     fn parse_device_operating_point_probe(probe: &str) -> Option<(String, String)> {
         let normalized = Self::normalize_probe(probe);
         if !normalized.starts_with("n(") || !normalized.ends_with(')') {
@@ -3687,6 +3814,47 @@ End of Xyce(TM) Simulation
             XyceTestRunner::parse_device_parameter_probe("{Xtest:Xtest2:Rinside:R}"),
             Some(("xtest:xtest2:rinside".to_string(), "r".to_string()))
         );
+    }
+
+    #[test]
+    fn lead_current_probe_parses_xyce_terminal_accessors() {
+        assert_eq!(
+            XyceTestRunner::parse_lead_current_probe("ID(Mfoo)"),
+            Some(XyceLeadCurrentProbe {
+                terminal: XyceLeadCurrentTerminal::Drain,
+                element_name: "mfoo".to_string(),
+            })
+        );
+        assert_eq!(
+            XyceTestRunner::parse_lead_current_probe(" ib( X1:M1 ) "),
+            Some(XyceLeadCurrentProbe {
+                terminal: XyceLeadCurrentTerminal::Bulk,
+                element_name: "x1:m1".to_string(),
+            })
+        );
+        assert!(XyceTestRunner::parse_lead_current_probe("I(V1)").is_none());
+        assert_eq!(XyceLeadCurrentTerminal::Drain.op_parameter(), Some("id"));
+        assert_eq!(XyceLeadCurrentTerminal::Gate.op_parameter(), None);
+    }
+
+    #[test]
+    fn print_expression_evaluates_xyce_lead_current_probe_calls() {
+        let mut context = crate::netlist::ParamContext::new();
+        context.set("scale", 2.0);
+        let mut call_value = |call: &str| match XyceTestRunner::normalize_probe(call).as_str() {
+            "id(m1)" => Ok(3.0),
+            "i(vsense)" => Ok(5.0),
+            other => Err(format!("unexpected probe {other}")),
+        };
+
+        let value = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+            "ID(M1) * scale + I(VSENSE)",
+            context,
+            &mut call_value,
+        )
+        .expect("lead-current probe expression evaluates");
+
+        assert_eq!(value, 11.0);
     }
 
     #[test]

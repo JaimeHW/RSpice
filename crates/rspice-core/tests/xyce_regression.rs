@@ -545,6 +545,43 @@ fn test_xyce_bsimsoi3_gmin_scaling_dc_sweep_runs() {
 }
 
 #[test]
+fn test_xyce_lead_current_probe_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/EKV26/test_ekv26_nmos.cir",
+        "Netlists/EKV26/test_ekv26_pmos.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a numeric Xyce lead-current probe comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+    }
+
+    let unsupported_device_deck =
+        "Netlists/Certification_Tests/BUG_812_SON/global_accessor_interference.cir";
+    let result = runner.run_test(root.join(unsupported_device_deck));
+    assert!(
+        result.passed && result.expected_unsupported,
+        "{unsupported_device_deck} should remain named unsupported until BSIM3 VERSION=3.1 is fully implemented, got {result:?}"
+    );
+    assert!(
+        result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("BSIM3 pre-3.3 LEVEL=49 VERSION=3.1")),
+        "unsupported reason should name the BSIM3 3.1 capability boundary, got {result:?}"
+    );
+}
+
+#[test]
 fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
