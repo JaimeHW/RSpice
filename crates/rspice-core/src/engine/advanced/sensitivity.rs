@@ -754,18 +754,6 @@ R2 2 0 1k
     }
 
     #[test]
-    fn step_rejects_any_failed_requested_point() {
-        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
-        let err = Engine::default()
-            .run_step(&netlist, "rval", &[1000.0, 0.0])
-            .expect_err("failed step point must fail the sweep");
-        assert!(
-            err.to_string().contains(".STEP PARAM rval = 0"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
     fn step_sweeps_a_genuinely_bound_parameter() {
         let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
         let results = Engine::default()

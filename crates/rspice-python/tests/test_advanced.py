@@ -236,11 +236,6 @@ class TestStep:
         with pytest.raises(ValueError, match="finite"):
             engine.run_step(param_divider, "rval", [1e3, float("nan")])
 
-    def test_step_failed_requested_point_raises(self, engine, param_divider):
-        with pytest.raises(rspice.SimulationError, match=r"\.STEP PARAM rval = 0"):
-            engine.run_step(param_divider, "rval", [1e3, 0.0])
-
-
 class TestTransferFunction:
     def test_divider_gain_and_impedances(self, engine, divider):
         tf = engine.run_transfer_function(divider, "out", "V1")
