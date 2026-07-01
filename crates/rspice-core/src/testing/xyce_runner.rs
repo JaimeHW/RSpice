@@ -329,6 +329,8 @@ enum XyceLeadCurrentTerminal {
     Gate,
     Source,
     Bulk,
+    Collector,
+    Emitter,
 }
 
 impl XyceLeadCurrentTerminal {
@@ -338,6 +340,8 @@ impl XyceLeadCurrentTerminal {
             "ig" => Some(Self::Gate),
             "is" => Some(Self::Source),
             "ib" => Some(Self::Bulk),
+            "ic" => Some(Self::Collector),
+            "ie" => Some(Self::Emitter),
             _ => None,
         }
     }
@@ -346,7 +350,7 @@ impl XyceLeadCurrentTerminal {
         match self {
             Self::Drain => Some("id"),
             Self::Source => Some("is"),
-            Self::Gate | Self::Bulk => None,
+            Self::Gate | Self::Bulk | Self::Collector | Self::Emitter => None,
         }
     }
 
@@ -356,6 +360,8 @@ impl XyceLeadCurrentTerminal {
             Self::Gate => "IG",
             Self::Source => "IS",
             Self::Bulk => "IB",
+            Self::Collector => "IC",
+            Self::Emitter => "IE",
         }
     }
 }
@@ -671,6 +677,7 @@ impl XyceTestRunner {
                 .map_err(|err| format!("failed to read deck: {err}"))?;
             Some(Self::native_static_prn_wrapper_contract(
                 &deck.relative_path,
+                &deck.path,
                 &source,
             )?)
         } else {
@@ -768,6 +775,7 @@ impl XyceTestRunner {
 
     fn native_static_prn_wrapper_contract(
         relative_path: &str,
+        deck_path: &Path,
         source: &str,
     ) -> Result<XyceStaticDcContract, String> {
         if Self::is_native_default_prn_wrapper_candidate_path(relative_path) {
@@ -786,6 +794,11 @@ impl XyceTestRunner {
         }
 
         if Self::is_native_step_data_wrapper_candidate(source) {
+            Self::validate_default_prn_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperDefaultPrn);
+        }
+
+        if Self::is_native_empty_wildcard_lead_current_wrapper_candidate(deck_path, source) {
             Self::validate_default_prn_wrapper_source(source)?;
             return Ok(XyceStaticDcContract::WrapperDefaultPrn);
         }
@@ -828,6 +841,34 @@ impl XyceTestRunner {
             }
         }
         has_data_table && has_step_data
+    }
+
+    fn is_native_empty_wildcard_lead_current_wrapper_candidate(
+        deck_path: &Path,
+        source: &str,
+    ) -> bool {
+        if Self::validate_default_prn_wrapper_source(source).is_err() {
+            return false;
+        }
+        let Ok(print) = Self::single_dc_print_request(source) else {
+            return false;
+        };
+        let wildcard_probes = print
+            .probes
+            .iter()
+            .filter_map(|probe| Self::parse_lead_current_probe(probe))
+            .filter(|probe| probe.element_name == "*")
+            .collect::<Vec<_>>();
+        if wildcard_probes.is_empty() {
+            return false;
+        }
+        let Ok(netlist) = Self::parse_xyce_netlist(source, deck_path) else {
+            return false;
+        };
+
+        wildcard_probes
+            .iter()
+            .all(|probe| Self::lead_current_probe_is_omitted_empty_wildcard(&netlist, probe))
     }
 
     fn upstream_wrapper_required_reason() -> &'static str {
@@ -1564,7 +1605,12 @@ impl XyceTestRunner {
             ));
         }
 
-        let data_columns = self.reference_data_columns(reference, print, has_index_column)?;
+        let mapping_netlist = batches
+            .first()
+            .map(|batch| &batch.netlist)
+            .ok_or_else(|| "DC comparison has no result batches".to_string())?;
+        let data_columns =
+            self.reference_data_columns(reference, print, mapping_netlist, has_index_column)?;
         let comp_tolerances = self.comp_tolerances(source, &data_columns)?;
         let primary_points = dc.primary_spec().points();
         if primary_points.is_empty() {
@@ -1876,6 +1922,7 @@ impl XyceTestRunner {
         &self,
         reference: &XycePrnTable,
         print: &XycePrintRequest,
+        netlist: &Netlist,
         has_index_column: bool,
     ) -> Result<Vec<XyceReferenceColumn>, String> {
         let mut data_columns = Vec::with_capacity(
@@ -1896,16 +1943,36 @@ impl XyceTestRunner {
             }
 
             let (matched_index, probe) = if has_index_column {
-                let Some(probe) = print.probes.get(probe_index) else {
+                let mut skipped_omitted_probes = false;
+                let probe = loop {
+                    let Some(probe) = print.probes.get(probe_index) else {
+                        return Err(format!(
+                            "reference column '{}' has no matching .PRINT DC probe",
+                            column
+                        ));
+                    };
+                    if Self::reference_column_matches_probe(column, probe) {
+                        break probe;
+                    }
+                    if Self::dc_probe_is_omitted_empty_wildcard(probe, netlist) {
+                        probe_index += 1;
+                        skipped_omitted_probes = true;
+                        continue;
+                    }
+                    let prefix = if skipped_omitted_probes {
+                        "after omitted empty wildcard probe(s), "
+                    } else {
+                        ""
+                    };
+                    return Err(format!(
+                        "{prefix}reference column '{}' does not match .PRINT probe '{}'",
+                        column, probe
+                    ));
+                };
+                if probe_index >= print.probes.len() {
                     return Err(format!(
                         "reference column '{}' has no matching .PRINT DC probe",
                         column
-                    ));
-                };
-                if !Self::reference_column_matches_probe(column, probe) {
-                    return Err(format!(
-                        "reference column '{}' does not match .PRINT probe '{}'",
-                        column, probe
                     ));
                 }
                 (probe_index, probe)
@@ -1928,6 +1995,14 @@ impl XyceTestRunner {
                 name: probe.clone(),
             });
             if has_index_column {
+                probe_index += 1;
+            }
+        }
+        if has_index_column {
+            while let Some(probe) = print.probes.get(probe_index) {
+                if !Self::dc_probe_is_omitted_empty_wildcard(probe, netlist) {
+                    break;
+                }
                 probe_index += 1;
             }
         }
@@ -2525,6 +2600,15 @@ impl XyceTestRunner {
             ));
         }
         if let Some(lead_current) = Self::parse_lead_current_probe(normalized) {
+            if Self::lead_current_probe_is_omitted_empty_wildcard(netlist, &lead_current) {
+                return Ok(());
+            }
+            if lead_current.element_name == "*" {
+                return Err(format!(
+                    "lead-current wildcard probe '{}' requires terminal expansion support",
+                    original
+                ));
+            }
             if !Self::netlist_has_device_op_instance(netlist, &lead_current.element_name) {
                 return Err(format!(
                     "lead-current probe '{}' targets an unknown reported device",
@@ -3657,7 +3741,70 @@ impl XyceTestRunner {
             XyceLeadCurrentTerminal::Source => {
                 Self::netlist_device_is_native_b3soi_mosfet(netlist, &probe.element_name)
             }
-            XyceLeadCurrentTerminal::Gate | XyceLeadCurrentTerminal::Bulk => false,
+            XyceLeadCurrentTerminal::Gate
+            | XyceLeadCurrentTerminal::Bulk
+            | XyceLeadCurrentTerminal::Collector
+            | XyceLeadCurrentTerminal::Emitter => false,
+        }
+    }
+
+    fn dc_probe_is_omitted_empty_wildcard(probe: &str, netlist: &Netlist) -> bool {
+        Self::parse_lead_current_probe(probe).is_some_and(|probe| {
+            Self::lead_current_probe_is_omitted_empty_wildcard(netlist, &probe)
+        })
+    }
+
+    fn lead_current_probe_is_omitted_empty_wildcard(
+        netlist: &Netlist,
+        probe: &XyceLeadCurrentProbe,
+    ) -> bool {
+        probe.element_name == "*"
+            && !Self::netlist_has_lead_current_wildcard_match(netlist, probe.terminal)
+    }
+
+    fn netlist_has_lead_current_wildcard_match(
+        netlist: &Netlist,
+        terminal: XyceLeadCurrentTerminal,
+    ) -> bool {
+        if netlist
+            .elements
+            .iter()
+            .any(|element| Self::element_matches_lead_current_wildcard(element, terminal))
+        {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            flattened
+                .elements
+                .iter()
+                .any(|element| Self::element_matches_lead_current_wildcard(element, terminal))
+        })
+    }
+
+    fn element_matches_lead_current_wildcard(
+        element: &crate::netlist::Element,
+        terminal: XyceLeadCurrentTerminal,
+    ) -> bool {
+        match terminal {
+            XyceLeadCurrentTerminal::Drain | XyceLeadCurrentTerminal::Gate => matches!(
+                element.kind,
+                ElementKind::Mosfet { .. } | ElementKind::Jfet { .. } | ElementKind::Mesfet { .. }
+            ),
+            XyceLeadCurrentTerminal::Source => matches!(
+                element.kind,
+                ElementKind::Mosfet { .. }
+                    | ElementKind::Jfet { .. }
+                    | ElementKind::Mesfet { .. }
+                    | ElementKind::Bjt { .. }
+            ),
+            XyceLeadCurrentTerminal::Bulk => matches!(
+                element.kind,
+                ElementKind::Mosfet { .. } | ElementKind::Bjt { .. }
+            ),
+            XyceLeadCurrentTerminal::Collector | XyceLeadCurrentTerminal::Emitter => {
+                matches!(element.kind, ElementKind::Bjt { .. })
+            }
         }
     }
 
@@ -4966,7 +5113,7 @@ impl XyceTestRunner {
 
     fn parse_lead_current_probe(probe: &str) -> Option<XyceLeadCurrentProbe> {
         let normalized = Self::normalize_probe(probe);
-        for function in ["id", "ig", "is", "ib"] {
+        for function in ["id", "ig", "is", "ib", "ic", "ie"] {
             let prefix = format!("{function}(");
             if !normalized.starts_with(&prefix) || !normalized.ends_with(')') {
                 continue;
@@ -5129,6 +5276,7 @@ End of Xyce(TM) Simulation
     #[test]
     fn reference_columns_accept_primary_sweep_and_branch_labels() {
         let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let netlist = Netlist::default();
         let reference = XycePrnTable {
             columns: ["Index", "v-sweep", "v(2)", "vds_branch", "vmon1#branch"]
                 .into_iter()
@@ -5144,7 +5292,7 @@ End of Xyce(TM) Simulation
         };
 
         let columns = runner
-            .reference_data_columns(&reference, &print, true)
+            .reference_data_columns(&reference, &print, &netlist, true)
             .expect("reference columns map to Xyce DC probes");
 
         assert!(matches!(
@@ -5163,6 +5311,38 @@ End of Xyce(TM) Simulation
             &columns[3],
             XyceReferenceColumn::Probe { name } if name == "I(VMON1)"
         ));
+    }
+
+    #[test]
+    fn reference_columns_omit_empty_wildcard_lead_current_probes() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let netlist = Netlist::default();
+        let reference = XycePrnTable {
+            columns: ["Index", "V(1)"].into_iter().map(str::to_string).collect(),
+            rows: Vec::new(),
+        };
+        let print = XycePrintRequest {
+            probes: ["V(1)", "ID(*)", "IG(*)", "IS(*)", "IB(*)", "IC(*)", "IE(*)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        };
+
+        let columns = runner
+            .reference_data_columns(&reference, &print, &netlist, true)
+            .expect("empty Xyce wildcard lead-current probes are omitted from PRN output");
+
+        assert_eq!(columns.len(), 1);
+        assert!(matches!(
+            &columns[0],
+            XyceReferenceColumn::Probe { name } if name == "V(1)"
+        ));
+        for probe in &print.probes[1..] {
+            assert!(
+                XyceTestRunner::dc_probe_is_omitted_empty_wildcard(probe, &netlist),
+                "{probe} should be classified as an omitted empty wildcard"
+            );
+        }
     }
 
     #[test]
