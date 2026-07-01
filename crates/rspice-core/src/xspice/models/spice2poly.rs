@@ -29,6 +29,7 @@ struct PolyEval {
 struct PolyTerm {
     coefficient: Value,
     exponents: Vec<usize>,
+    active_exponents: Vec<(usize, usize)>,
 }
 
 #[derive(Debug, Clone)]
@@ -241,9 +242,16 @@ fn build_poly_plan(input_count: usize, coef: &[Value]) -> CmResult<Arc<PolyPlan>
         if coefficient == 0.0 {
             continue;
         }
+        let active_exponents = exponents
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, exponent)| *exponent != 0)
+            .collect();
         terms.push(PolyTerm {
             coefficient,
             exponents: exponents.clone(),
+            active_exponents,
         });
     }
 
@@ -289,24 +297,18 @@ fn evaluate_poly(inputs: &[AnalogValue], plan: &PolyPlan, multiplier: Value) -> 
 
     for term in &plan.terms {
         let mut product = 1.0;
-        for (input, exponent) in inputs.iter().zip(term.exponents.iter().copied()) {
-            product *= evterm(input.value, exponent);
+        for &(input_index, exponent) in &term.active_exponents {
+            product *= evterm(inputs[input_index].value, exponent);
         }
         value += term.coefficient * product;
 
-        for input_index in 0..inputs.len() {
-            let exponent = term.exponents[input_index];
-            if exponent == 0 {
-                continue;
-            }
-
+        for &(input_index, exponent) in &term.active_exponents {
             let mut partial_product = exponent as Value;
-            for (term_index, input) in inputs.iter().enumerate() {
-                let term_exponent = term.exponents[term_index];
+            for &(term_index, term_exponent) in &term.active_exponents {
                 partial_product *= if term_index == input_index {
-                    evterm(input.value, term_exponent - 1)
+                    evterm(inputs[term_index].value, term_exponent - 1)
                 } else {
-                    evterm(input.value, term_exponent)
+                    evterm(inputs[term_index].value, term_exponent)
                 };
             }
             partials[input_index] += term.coefficient * partial_product;
@@ -521,11 +523,36 @@ mod tests {
                 (10.0, &[0, 3][..]),
             ]
         );
+        assert_eq!(
+            plan.terms
+                .iter()
+                .map(|term| term.active_exponents.as_slice())
+                .collect::<Vec<_>>(),
+            vec![
+                &[(1, 1)][..],
+                &[(0, 1), (1, 1)][..],
+                &[(0, 3)][..],
+                &[(1, 3)][..],
+            ]
+        );
 
         let result = evaluate_poly(&inputs, &plan, 1.0);
         assert!((result.value - 366.0).abs() < 1.0e-12);
         assert!((result.partials[0] - 99.0).abs() < 1.0e-12);
         assert!((result.partials[1] - 283.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn polynomial_partials_handle_zero_sparse_inputs() {
+        let inputs = vec![AnalogValue::new(0.0), AnalogValue::new(3.0)];
+        let plan = build_poly_plan(inputs.len(), &[0.0, 0.0, 0.0, 0.0, 1.0])
+            .expect("valid sparse polynomial plan");
+        let result = evaluate_poly(&inputs, &plan, 1.0);
+
+        assert_eq!(plan.terms[0].active_exponents, vec![(0, 1), (1, 1)]);
+        assert!((result.value - 0.0).abs() < 1.0e-12);
+        assert!((result.partials[0] - 3.0).abs() < 1.0e-12);
+        assert!((result.partials[1] - 0.0).abs() < 1.0e-12);
     }
 
     #[test]
