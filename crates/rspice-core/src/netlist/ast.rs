@@ -1769,6 +1769,10 @@ pub struct SubcircuitDef {
     pub ports: Vec<String>,
     /// Internal elements
     pub elements: Vec<Element>,
+    /// Initial conditions declared inside the subcircuit body.
+    pub initial_conditions: Vec<InitialCondition>,
+    /// Nodeset hints declared inside the subcircuit body.
+    pub node_sets: Vec<NodeSet>,
     /// Default parameter values (can be overridden at instance)
     pub params: Vec<(String, Value)>,
     /// Default string parameter values (can be overridden at instance)

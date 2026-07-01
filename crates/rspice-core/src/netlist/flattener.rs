@@ -20,8 +20,8 @@ use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
 use super::parser::parse_source_spec_text;
 use super::{
-    Element, ElementKind, ModelDef, Netlist, ParamContext, ParametricValue, ParseError,
-    RandomState, SourceSpec, SubcircuitDef,
+    Element, ElementKind, InitialCondition, ModelDef, Netlist, NodeSet, ParamContext,
+    ParametricValue, ParseError, RandomState, SourceSpec, SubcircuitDef,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
@@ -112,6 +112,8 @@ pub struct InstanceMetadata {
 pub struct FlattenedNetlist {
     pub elements: Vec<Element>,
     pub scoped_models: Vec<ModelDef>,
+    pub scoped_initial_conditions: Vec<InitialCondition>,
+    pub scoped_node_sets: Vec<NodeSet>,
 }
 
 //=============================================================================
@@ -151,6 +153,9 @@ pub struct Flattener<'a> {
     random: RandomState,
     /// Model cards cloned while flattening parameterized subcircuit instances.
     scoped_models: Vec<ModelDef>,
+    /// Startup directives scoped while flattening subcircuit instances.
+    scoped_initial_conditions: Vec<InitialCondition>,
+    scoped_node_sets: Vec<NodeSet>,
     /// Directory of the parsed deck, used to resolve scoped XSPICE file params.
     source_base_dir: Option<PathBuf>,
 }
@@ -194,6 +199,8 @@ impl<'a> Flattener<'a> {
             expansion_stack: Vec::new(),
             random: RandomState::default(),
             scoped_models: Vec::new(),
+            scoped_initial_conditions: Vec::new(),
+            scoped_node_sets: Vec::new(),
             source_base_dir: None,
         }
     }
@@ -215,6 +222,8 @@ impl<'a> Flattener<'a> {
         self.global_nodes = netlist.global_nodes.clone();
         self.expansion_stack.clear();
         self.scoped_models.clear();
+        self.scoped_initial_conditions.clear();
+        self.scoped_node_sets.clear();
         self.source_base_dir = netlist
             .source_path
             .as_ref()
@@ -470,8 +479,30 @@ impl<'a> Flattener<'a> {
             )?;
         }
         self.expansion_stack.pop();
+        self.collect_scoped_startup_directives(subckt, &new_prefix, &node_map);
 
         Ok(())
+    }
+
+    fn collect_scoped_startup_directives(
+        &mut self,
+        subckt: &SubcircuitDef,
+        prefix: &str,
+        node_map: &HashMap<String, String>,
+    ) {
+        for ic in &subckt.initial_conditions {
+            self.scoped_initial_conditions.push(InitialCondition {
+                node: self.remap_node(&ic.node, prefix, node_map),
+                voltage: ic.voltage,
+            });
+        }
+
+        for nodeset in &subckt.node_sets {
+            self.scoped_node_sets.push(NodeSet {
+                node: self.remap_node(&nodeset.node, prefix, node_map),
+                voltage: nodeset.voltage,
+            });
+        }
     }
 
     /// Remap an element's nodes using the current prefix and node map
@@ -2060,6 +2091,8 @@ pub fn flatten_netlist_with_models(netlist: &Netlist) -> Result<FlattenedNetlist
     Ok(FlattenedNetlist {
         elements,
         scoped_models: flattener.scoped_models,
+        scoped_initial_conditions: flattener.scoped_initial_conditions,
+        scoped_node_sets: flattener.scoped_node_sets,
     })
 }
 

@@ -180,6 +180,31 @@ impl Default for Engine {
 }
 
 impl Engine {
+    fn scoped_startup_directives(
+        &self,
+        netlist: &Netlist,
+    ) -> (
+        Vec<crate::netlist::InitialCondition>,
+        Vec<crate::netlist::NodeSet>,
+    ) {
+        if netlist.subcircuits.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+
+        match crate::netlist::flatten_netlist_with_models(netlist) {
+            Ok(flattened) => (
+                flattened.scoped_initial_conditions,
+                flattened.scoped_node_sets,
+            ),
+            Err(error) => {
+                log::debug!(
+                    "could not collect scoped startup directives from flattened netlist: {error}"
+                );
+                (Vec::new(), Vec::new())
+            }
+        }
+    }
+
     /// Collect node-voltage hints from .NODESET and .IC directives.
     ///
     /// .IC entries override .NODESET entries for the same node.
@@ -189,8 +214,9 @@ impl Engine {
         circuit: &crate::CircuitData,
     ) -> Vec<(usize, Value)> {
         let mut by_node: Vec<Option<Value>> = vec![None; circuit.num_nodes() + 1];
+        let (scoped_initial_conditions, scoped_node_sets) = self.scoped_startup_directives(netlist);
 
-        for nodeset in &netlist.node_sets {
+        for nodeset in netlist.node_sets.iter().chain(scoped_node_sets.iter()) {
             if !nodeset.voltage.is_finite() {
                 continue;
             }
@@ -202,7 +228,11 @@ impl Engine {
             }
         }
 
-        for ic in &netlist.initial_conditions {
+        for ic in netlist
+            .initial_conditions
+            .iter()
+            .chain(scoped_initial_conditions.iter())
+        {
             if !ic.voltage.is_finite() {
                 continue;
             }
@@ -228,9 +258,11 @@ impl Engine {
         netlist: &Netlist,
         circuit: &crate::CircuitData,
     ) -> Vec<(usize, Value)> {
+        let (scoped_initial_conditions, _) = self.scoped_startup_directives(netlist);
         netlist
             .initial_conditions
             .iter()
+            .chain(scoped_initial_conditions.iter())
             .filter_map(|ic| {
                 if !ic.voltage.is_finite() {
                     return None;

@@ -288,8 +288,6 @@ pub(super) fn process_line(
             let analyses = &mut state.analyses;
             let unknown_warned = &mut state.unknown_warned;
             let models = &mut state.models;
-            let initial_conditions = &mut state.initial_conditions;
-            let node_sets = &mut state.node_sets;
             let global_nodes = &mut state.global_nodes;
             let saves = &mut state.saves;
             let options = &mut state.options;
@@ -300,6 +298,8 @@ pub(super) fn process_line(
                 .last_mut()
                 .expect("subcircuit presence already checked");
             let mut subckt_elements = Vec::new();
+            let mut subckt_initial_conditions = Vec::new();
+            let mut subckt_node_sets = Vec::new();
             // Subcircuits don't get standalone measurements parsing
             let mut dummy_measurements = Vec::new();
             parse_line(
@@ -313,8 +313,8 @@ pub(super) fn process_line(
                     analyses,
                     unknown_warned,
                     models,
-                    initial_conditions,
-                    node_sets,
+                    initial_conditions: &mut subckt_initial_conditions,
+                    node_sets: &mut subckt_node_sets,
                     global_nodes,
                     saves,
                     options,
@@ -324,6 +324,11 @@ pub(super) fn process_line(
             )?;
             capture_subckt_body_scope(line, &mut frame.def, &frame.local_params);
             frame.def.elements.extend(subckt_elements);
+            frame
+                .def
+                .initial_conditions
+                .extend(subckt_initial_conditions);
+            frame.def.node_sets.extend(subckt_node_sets);
         }
         return Ok(());
     }

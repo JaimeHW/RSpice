@@ -2501,6 +2501,8 @@ mod tests {
                 },
                 nodes: Vec::new(),
             }],
+            initial_conditions: Vec::new(),
+            node_sets: Vec::new(),
             params: vec![("g".to_string(), 2.0)],
             string_params: Vec::new(),
             body_params: Vec::new(),

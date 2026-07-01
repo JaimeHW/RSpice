@@ -2638,6 +2638,8 @@ pub(super) fn parse_subckt_def(
         name,
         ports,
         elements: Vec::new(),
+        initial_conditions: Vec::new(),
+        node_sets: Vec::new(),
         params,
         string_params,
         body_params: Vec::new(),
