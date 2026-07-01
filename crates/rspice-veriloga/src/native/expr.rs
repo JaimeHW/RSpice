@@ -167,6 +167,14 @@ pub(crate) struct BranchUnknownRuntimeMapping {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PriorCurrentProbe {
+    pub(crate) pos: usize,
+    pub(crate) neg: usize,
+    pub(crate) current_index: usize,
+    pub(crate) inverted: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct NativeLoweringLimits<'a> {
     terminal_count: usize,
     internal_node_count: usize,
@@ -179,6 +187,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     laplace_filter_count: usize,
     zi_filter_count: usize,
     available_current_pairs: &'a [usize],
+    prior_current_probes: &'a [PriorCurrentProbe],
     canonical_ddt_slots: &'a [(ExprId, usize)],
     canonical_idt_slots: &'a [(ExprId, usize)],
     canonical_idtmod_slots: &'a [(ExprId, usize)],
@@ -214,6 +223,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: 0,
             zi_filter_count: 0,
             available_current_pairs: &[],
+            prior_current_probes: &[],
             canonical_ddt_slots: &[],
             canonical_idt_slots: &[],
             canonical_idtmod_slots: &[],
@@ -263,6 +273,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -298,6 +309,43 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
+            canonical_ddt_slots: self.canonical_ddt_slots,
+            canonical_idt_slots: self.canonical_idt_slots,
+            canonical_idtmod_slots: self.canonical_idtmod_slots,
+            canonical_transition_slots: self.canonical_transition_slots,
+            canonical_slew_slots: self.canonical_slew_slots,
+            canonical_absdelay_slots: self.canonical_absdelay_slots,
+            canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
+            canonical_cross_slots: self.canonical_cross_slots,
+            canonical_above_slots: self.canonical_above_slots,
+            canonical_timer_slots: self.canonical_timer_slots,
+            canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+        }
+    }
+
+    pub(crate) fn with_prior_current_probes<'b>(
+        self,
+        prior_current_probes: &'b [PriorCurrentProbe],
+    ) -> NativeLoweringLimits<'b>
+    where
+        'a: 'b,
+    {
+        NativeLoweringLimits {
+            terminal_count: self.terminal_count,
+            internal_node_count: self.internal_node_count,
+            parameter_count: self.parameter_count,
+            variable_count: self.variable_count,
+            variable_names: self.variable_names,
+            branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
+            lookup_table_count: self.lookup_table_count,
+            laplace_filter_count: self.laplace_filter_count,
+            zi_filter_count: self.zi_filter_count,
+            available_current_pairs: self.available_current_pairs,
+            prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -340,6 +388,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: &[],
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -389,6 +438,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -424,6 +474,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -459,6 +510,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots,
@@ -494,6 +546,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -529,6 +582,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -564,6 +618,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -599,6 +654,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -634,6 +690,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -669,6 +726,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -704,6 +762,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -739,6 +798,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -774,6 +834,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -809,6 +870,7 @@ impl<'a> NativeLoweringLimits<'a> {
             laplace_filter_count: self.laplace_filter_count,
             zi_filter_count: self.zi_filter_count,
             available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
             canonical_ddt_slots: self.canonical_ddt_slots,
             canonical_idt_slots: self.canonical_idt_slots,
             canonical_idtmod_slots: self.canonical_idtmod_slots,
@@ -1482,6 +1544,7 @@ impl NativeProgram {
         let model = model.into();
         let mut ops = Vec::with_capacity(program.instructions.len());
         let mut current_pair_dependencies = Vec::new();
+        let mut prior_current_dependencies = Vec::new();
         let mut depth = 0usize;
         let mut max_stack_depth = 0usize;
 
@@ -2080,22 +2143,51 @@ impl NativeProgram {
                     ops.push(NativeOp::Compare(CompareOp::Gt));
                 }
                 Instruction::PushCurrent(pos, neg) => {
-                    let pair_index =
-                        current_pair_index(model.clone(), *pos, *neg, limits.terminal_count)?;
-                    if !limits.available_current_pairs.contains(&pair_index) {
+                    if let Some(pair_index) =
+                        current_pair_index_optional(*pos, *neg, limits.terminal_count)
+                    {
+                        if !limits.available_current_pairs.contains(&pair_index) {
+                            if lower_prior_current_probe(
+                                &mut ops,
+                                &mut depth,
+                                &mut max_stack_depth,
+                                &mut prior_current_dependencies,
+                                limits.prior_current_probes,
+                                *pos,
+                                *neg,
+                            )? {
+                                continue;
+                            }
+                            return Err(JitError::unsupported_program_op(
+                                model,
+                                format!(
+                                    "PushCurrent terminal pair {} unavailable",
+                                    format_current_pair(*pos, *neg)
+                                ),
+                            ));
+                        }
+                        if !current_pair_dependencies.contains(&pair_index) {
+                            current_pair_dependencies.push(pair_index);
+                        }
+                        ops.push(NativeOp::LoadCurrent(pair_index));
+                        push_stack(&mut depth, &mut max_stack_depth);
+                    } else if !lower_prior_current_probe(
+                        &mut ops,
+                        &mut depth,
+                        &mut max_stack_depth,
+                        &mut prior_current_dependencies,
+                        limits.prior_current_probes,
+                        *pos,
+                        *neg,
+                    )? {
                         return Err(JitError::unsupported_program_op(
                             model,
                             format!(
-                                "PushCurrent terminal pair {} unavailable",
+                                "PushCurrent terminal pair {}",
                                 format_current_pair(*pos, *neg)
                             ),
                         ));
                     }
-                    if !current_pair_dependencies.contains(&pair_index) {
-                        current_pair_dependencies.push(pair_index);
-                    }
-                    ops.push(NativeOp::LoadCurrent(pair_index));
-                    push_stack(&mut depth, &mut max_stack_depth);
                 }
             }
         }
@@ -2117,7 +2209,7 @@ impl NativeProgram {
             ops,
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies,
-            prior_current_dependencies: Vec::new(),
+            prior_current_dependencies,
             branch_unknown_dependencies,
         })
     }
@@ -3790,9 +3882,19 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             .map(|node| self.lower_current_endpoint(node))
             .transpose()?
             .unwrap_or(CURRENT_PAIR_GROUND);
-        let pair_index =
-            current_pair_index(self.model.clone(), pos, neg, self.limits.terminal_count)?;
+
+        let Some(pair_index) = current_pair_index_optional(pos, neg, self.limits.terminal_count)
+        else {
+            if self.lower_prior_current_probe(pos, neg)? {
+                return Ok(());
+            }
+            return Err(current_pair_unrepresentable(self.model.clone(), pos, neg));
+        };
+
         if !self.limits.available_current_pairs.contains(&pair_index) {
+            if self.lower_prior_current_probe(pos, neg)? {
+                return Ok(());
+            }
             return Err(JitError::unsupported_program_op(
                 self.model.clone(),
                 format!(
@@ -3805,6 +3907,26 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.current_pair_dependencies.push(pair_index);
         }
         self.push(NativeOp::LoadCurrent(pair_index))
+    }
+
+    fn lower_prior_current_probe(&mut self, pos: usize, neg: usize) -> JitResult<bool> {
+        let mut matched = 0usize;
+        for probe in self
+            .limits
+            .prior_current_probes
+            .iter()
+            .filter(|probe| probe.pos == pos && probe.neg == neg)
+        {
+            self.push_prior_current(probe.current_index)?;
+            if probe.inverted {
+                self.append_unary(NativeOp::Neg)?;
+            }
+            if matched > 0 {
+                self.append_arithmetic("Add")?;
+            }
+            matched += 1;
+        }
+        Ok(matched > 0)
     }
 
     fn map_canonical_branch_unknown(
@@ -5340,15 +5462,53 @@ fn current_pair_index(
     neg: usize,
     terminal_count: usize,
 ) -> JitResult<usize> {
-    terminal_pair_current_index(pos, neg, terminal_count).ok_or_else(|| {
-        JitError::unsupported_program_op(
-            model,
-            format!(
-                "PushCurrent terminal pair {}",
-                format_current_pair(pos, neg)
-            ),
-        )
-    })
+    current_pair_index_optional(pos, neg, terminal_count)
+        .ok_or_else(|| current_pair_unrepresentable(model, pos, neg))
+}
+
+fn current_pair_index_optional(pos: usize, neg: usize, terminal_count: usize) -> Option<usize> {
+    terminal_pair_current_index(pos, neg, terminal_count)
+}
+
+fn current_pair_unrepresentable(model: SmolStr, pos: usize, neg: usize) -> JitError {
+    JitError::unsupported_program_op(
+        model,
+        format!(
+            "PushCurrent terminal pair {}",
+            format_current_pair(pos, neg)
+        ),
+    )
+}
+
+fn lower_prior_current_probe(
+    ops: &mut Vec<NativeOp>,
+    depth: &mut usize,
+    max_stack_depth: &mut usize,
+    prior_current_dependencies: &mut Vec<usize>,
+    probes: &[PriorCurrentProbe],
+    pos: usize,
+    neg: usize,
+) -> JitResult<bool> {
+    let mut matched = 0usize;
+    for probe in probes
+        .iter()
+        .filter(|probe| probe.pos == pos && probe.neg == neg)
+    {
+        if !prior_current_dependencies.contains(&probe.current_index) {
+            prior_current_dependencies.push(probe.current_index);
+        }
+        ops.push(NativeOp::LoadPriorCurrent(probe.current_index));
+        push_stack(depth, max_stack_depth);
+        if probe.inverted {
+            ops.push(NativeOp::Neg);
+        }
+        if matched > 0 {
+            *depth -= 1;
+            ops.push(NativeOp::Add);
+        }
+        matched += 1;
+    }
+    Ok(matched > 0)
 }
 
 fn branch_voltage_derivative(pos: Option<NodeId>, neg: Option<NodeId>, wrt: NodeId) -> f64 {
@@ -9822,6 +9982,100 @@ endmodule
         assert!(msg.contains("PushCurrent terminal pair 0,2"), "got: {msg}");
         assert!(msg.contains("native JIT"));
         assert!(msg.contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn lowers_unified_current_probe_from_prior_contribution_alias() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushCurrent(2, usize::MAX)],
+        };
+        let probes = [PriorCurrentProbe {
+            pos: 2,
+            neg: usize::MAX,
+            current_index: 7,
+            inverted: false,
+        }];
+
+        let lowered = NativeProgram::from_bytecode(
+            "probe",
+            EntryKind::Jacobian,
+            &program,
+            limits(2, 1).with_prior_current_probes(&probes),
+        )
+        .expect("internal current probes with exact prior aliases are native-loadable");
+
+        assert_eq!(lowered.ops(), &[NativeOp::LoadPriorCurrent(7)]);
+        assert_eq!(lowered.max_stack_depth(), 1);
+        assert_eq!(lowered.current_pair_dependencies(), &[]);
+        assert_eq!(lowered.prior_current_dependencies(), &[7]);
+    }
+
+    #[test]
+    fn lowers_reversed_prior_current_probe_alias() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushCurrent(usize::MAX, 2)],
+        };
+        let probes = [PriorCurrentProbe {
+            pos: usize::MAX,
+            neg: 2,
+            current_index: 3,
+            inverted: true,
+        }];
+
+        let lowered = NativeProgram::from_bytecode(
+            "probe",
+            EntryKind::Jacobian,
+            &program,
+            limits(2, 1).with_prior_current_probes(&probes),
+        )
+        .expect("reverse prior current aliases are native-loadable");
+
+        assert_eq!(
+            lowered.ops(),
+            &[NativeOp::LoadPriorCurrent(3), NativeOp::Neg]
+        );
+        assert_eq!(lowered.max_stack_depth(), 1);
+        assert_eq!(lowered.prior_current_dependencies(), &[3]);
+    }
+
+    #[test]
+    fn lowers_multiple_prior_current_probe_aliases_as_sum() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushCurrent(2, usize::MAX)],
+        };
+        let probes = [
+            PriorCurrentProbe {
+                pos: 2,
+                neg: usize::MAX,
+                current_index: 1,
+                inverted: false,
+            },
+            PriorCurrentProbe {
+                pos: 2,
+                neg: usize::MAX,
+                current_index: 4,
+                inverted: false,
+            },
+        ];
+
+        let lowered = NativeProgram::from_bytecode(
+            "probe",
+            EntryKind::Jacobian,
+            &program,
+            limits(2, 1).with_prior_current_probes(&probes),
+        )
+        .expect("multiple exact prior current aliases are summed natively");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadPriorCurrent(1),
+                NativeOp::LoadPriorCurrent(4),
+                NativeOp::Add,
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 2);
+        assert_eq!(lowered.prior_current_dependencies(), &[1, 4]);
     }
 
     #[test]

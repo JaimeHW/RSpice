@@ -3564,6 +3564,91 @@ fn native_device_evaluates_internal_node_voltage_contributions() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_executes_internal_node_current_probe_alias_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_internal_current_probe_alias(p, n);
+    inout p, n;
+    electrical p, n;
+    electrical mid;
+    analog begin
+        I(p, mid) <+ V(p, mid);
+        I(n) <+ I(p, mid) * 0.25;
+    end
+endmodule
+"#;
+    let model = compile(source);
+    assert_eq!(model.internal_nodes, 1);
+    assert_eq!(model.stamp_programs.len(), 2);
+
+    let mut device =
+        VerilogADevice::try_new("ICPA1", model, &[1, 0]).expect("current probe alias uses native");
+    assert!(device.is_using_native());
+    device.set_internal_node_indices(&[2]);
+    device.update_all_voltages(&[2.0, 0.5]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native internal-node current probe alias evaluates");
+
+    assert_eq!(currents.len(), 2);
+    assert!((currents[0] - 1.5).abs() < 1e-12, "currents: {currents:?}");
+    assert!(
+        (currents[1] - 0.375).abs() < 1e-12,
+        "currents: {currents:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_stamps_internal_node_current_probe_alias_jacobian_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_internal_current_probe_alias_jacobian(p, n);
+    inout p, n;
+    electrical p, n;
+    electrical mid;
+    analog begin
+        I(p, mid) <+ V(p, mid);
+        I(p) <+ I(p, mid) * V(p);
+    end
+endmodule
+"#;
+    let model = compile(source);
+    assert_eq!(model.internal_nodes, 1);
+    assert_eq!(model.stamp_programs.len(), 2);
+
+    let mut device =
+        VerilogADevice::try_new("ICPJ1", model, &[1, 0]).expect("jacobian alias uses native");
+    assert!(device.is_using_native());
+    device.set_internal_node_indices(&[2]);
+
+    let (matrix, rhs) = stamp_device(&mut device, &[2.0, 0.5]);
+
+    assert!(
+        (matrix.get(&(0, 0)).copied().unwrap_or_default() - 2.5).abs() < 1e-12,
+        "matrix: {matrix:?}, rhs: {rhs:?}"
+    );
+    assert!(
+        (matrix.get(&(0, 1)).copied().unwrap_or_default() + 1.0).abs() < 1e-12,
+        "matrix: {matrix:?}, rhs: {rhs:?}"
+    );
+    assert!(
+        (matrix.get(&(1, 0)).copied().unwrap_or_default() + 1.0).abs() < 1e-12,
+        "matrix: {matrix:?}, rhs: {rhs:?}"
+    );
+    assert!(
+        (matrix.get(&(1, 1)).copied().unwrap_or_default() - 1.0).abs() < 1e-12,
+        "matrix: {matrix:?}, rhs: {rhs:?}"
+    );
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
+        "matrix: {matrix:?}, rhs: {rhs:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_stamps_internal_node_jacobians() {
     let model = internal_node_divider_model();
     let mut device =

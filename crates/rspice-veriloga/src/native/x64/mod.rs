@@ -3,7 +3,7 @@ pub mod encoder;
 
 use super::expr::{
     BranchUnknownRuntimeMapping, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
-    canonical_above_slots_for_equation, canonical_absdelay_slots_for_equation,
+    PriorCurrentProbe, canonical_above_slots_for_equation, canonical_absdelay_slots_for_equation,
     canonical_cross_slots_for_equation, canonical_ddt_slots_for_equation,
     canonical_idt_slots_for_equation, canonical_idtmod_slots_for_equation,
     canonical_laplace_slots_for_equation, canonical_limit_slots_for_equation,
@@ -99,6 +99,7 @@ fn compile_model_inner(
     let mut noise_exponent_branch_unknown_dependencies =
         Vec::with_capacity(model.noise_sources.len());
     let mut available_current_pairs = Vec::new();
+    let mut prior_current_probes = Vec::new();
 
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
         let static_condition = if let Some(condition) = &stamp.static_condition {
@@ -117,7 +118,9 @@ fn compile_model_inner(
         };
         static_conditions.push(static_condition);
 
-        let value_limits = base_limits.with_available_current_pairs(&available_current_pairs);
+        let value_limits = base_limits
+            .with_available_current_pairs(&available_current_pairs)
+            .with_prior_current_probes(&prior_current_probes);
         let program = lower_stamp_value_program(
             model,
             canonical_mir,
@@ -141,7 +144,20 @@ fn compile_model_inner(
                 neg,
             )?;
         }
-        let jacobian_limits = base_limits.with_available_current_pairs(&jacobian_current_pairs);
+        let mut jacobian_prior_current_probes = prior_current_probes.clone();
+        if stamp.branch_ordinal.is_none()
+            && let Some((pos, neg)) = infer_current_unified_pair(model, stamp)
+        {
+            push_prior_current_probe_aliases(
+                &mut jacobian_prior_current_probes,
+                stamp_index,
+                pos,
+                neg,
+            );
+        }
+        let jacobian_limits = base_limits
+            .with_available_current_pairs(&jacobian_current_pairs)
+            .with_prior_current_probes(&jacobian_prior_current_probes);
 
         let mut stamp_jacobians = Vec::with_capacity(stamp.jacobian_programs.len());
         let mut stamp_jacobian_current_dependencies =
@@ -211,9 +227,16 @@ fn compile_model_inner(
                 neg,
             )?;
         }
+        if stamp.branch_ordinal.is_none()
+            && let Some((pos, neg)) = infer_current_unified_pair(model, stamp)
+        {
+            push_prior_current_probe_aliases(&mut prior_current_probes, stamp_index, pos, neg);
+        }
     }
 
-    let noise_limits = base_limits.with_available_current_pairs(&available_current_pairs);
+    let noise_limits = base_limits
+        .with_available_current_pairs(&available_current_pairs)
+        .with_prior_current_probes(&prior_current_probes);
     for source in &model.noise_sources {
         let psd_program = NativeProgram::from_bytecode(
             model.name.clone(),
@@ -1139,6 +1162,76 @@ fn infer_current_terminal_pair(program: &StampProgram) -> Option<(usize, usize)>
     match (pos_endpoint, neg_endpoint) {
         (Some(pos), Some(neg)) if pos != neg => Some((pos, neg)),
         _ => None,
+    }
+}
+
+fn infer_current_unified_pair(
+    model: &CompiledModel,
+    program: &StampProgram,
+) -> Option<(usize, usize)> {
+    let mut pos_endpoint = None;
+    let mut neg_endpoint = None;
+
+    for loc in &program.stamp_locations {
+        let endpoint = stamp_row_unified_endpoint(model, &loc.row)?;
+
+        if loc.sign < 0.0 {
+            if pos_endpoint.replace(endpoint).is_some() {
+                return None;
+            }
+        } else if loc.sign > 0.0 && neg_endpoint.replace(endpoint).is_some() {
+            return None;
+        }
+    }
+
+    match (pos_endpoint, neg_endpoint) {
+        (Some(pos), Some(neg)) if pos != neg => Some((pos, neg)),
+        _ => None,
+    }
+}
+
+fn stamp_row_unified_endpoint(model: &CompiledModel, index: &StampIndex) -> Option<usize> {
+    match index {
+        StampIndex::Terminal(term) if *term < model.num_terminals => Some(*term),
+        StampIndex::Internal(internal) if *internal < model.internal_nodes => {
+            Some(model.num_terminals + *internal)
+        }
+        StampIndex::Ground => Some(CURRENT_PAIR_GROUND),
+        _ => None,
+    }
+}
+
+fn push_prior_current_probe_aliases(
+    probes: &mut Vec<PriorCurrentProbe>,
+    current_index: usize,
+    pos: usize,
+    neg: usize,
+) {
+    push_prior_current_probe_alias(
+        probes,
+        PriorCurrentProbe {
+            pos,
+            neg,
+            current_index,
+            inverted: false,
+        },
+    );
+    if pos != neg {
+        push_prior_current_probe_alias(
+            probes,
+            PriorCurrentProbe {
+                pos: neg,
+                neg: pos,
+                current_index,
+                inverted: true,
+            },
+        );
+    }
+}
+
+fn push_prior_current_probe_alias(probes: &mut Vec<PriorCurrentProbe>, probe: PriorCurrentProbe) {
+    if !probes.contains(&probe) {
+        probes.push(probe);
     }
 }
 
