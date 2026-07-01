@@ -619,6 +619,8 @@ pub struct XspiceInstance {
     port_context_solution_num_nodes: Option<usize>,
     /// Last accepted event-input signature for combinational event models.
     last_event_input_signature: Option<Vec<EventInputSignatureEntry>>,
+    /// Reusable scratch signature for transient event-input skip checks.
+    event_input_signature_scratch: Vec<EventInputSignatureEntry>,
     /// Has been initialized
     initialized: bool,
 }
@@ -931,6 +933,7 @@ impl XspiceInstance {
             solution_num_nodes: 0,
             port_context_solution_num_nodes: None,
             last_event_input_signature: None,
+            event_input_signature_scratch: Vec::new(),
             initialized: false,
         })
     }
@@ -1221,21 +1224,22 @@ impl XspiceInstance {
             _ => CallType::DcAnalysis,
         };
 
-        let event_input_signature = self.event_input_signature_for_skip(analysis);
-        if event_input_signature
-            .as_deref()
-            .is_some_and(|signature| self.last_event_input_signature.as_deref() == Some(signature))
-        {
-            return Ok(());
+        let track_event_input_signature = self.should_track_event_input_signature(analysis);
+        if track_event_input_signature {
+            self.refresh_event_input_signature();
+            if self.last_event_input_signature.as_deref()
+                == Some(self.event_input_signature_scratch.as_slice())
+            {
+                return Ok(());
+            }
         }
 
         let context_before_evaluate = self.context.clone();
         match catch_unwind(AssertUnwindSafe(|| self.model.evaluate(&mut self.context))) {
             Ok(Ok(())) => {
-                if phase != EvaluationPhase::RollbackableProbe
-                    && let Some(signature) = event_input_signature
-                {
-                    self.last_event_input_signature = Some(signature);
+                if track_event_input_signature && phase != EvaluationPhase::RollbackableProbe {
+                    self.last_event_input_signature =
+                        Some(self.event_input_signature_scratch.clone());
                 }
                 Ok(())
             }
@@ -1250,18 +1254,12 @@ impl XspiceInstance {
         }
     }
 
-    fn event_input_signature_for_skip(
-        &self,
-        analysis: AnalysisType,
-    ) -> Option<Vec<EventInputSignatureEntry>> {
-        if analysis != AnalysisType::Transient || !self.model.can_skip_unchanged_event_inputs() {
-            return None;
-        }
-        Some(self.event_input_signature())
+    fn should_track_event_input_signature(&self, analysis: AnalysisType) -> bool {
+        analysis == AnalysisType::Transient && self.model.can_skip_unchanged_event_inputs()
     }
 
-    fn event_input_signature(&self) -> Vec<EventInputSignatureEntry> {
-        let mut signature = Vec::new();
+    fn refresh_event_input_signature(&mut self) {
+        self.event_input_signature_scratch.clear();
         for (port, connection) in self.ports.iter().zip(self.connections.iter()) {
             if port.direction != super::PortDirection::In
                 && port.direction != super::PortDirection::InOut
@@ -1271,72 +1269,76 @@ impl XspiceInstance {
 
             match connection {
                 PortConnection::Digital(_) | PortConnection::DigitalInverted(_) => {
-                    signature.push(EventInputSignatureEntry {
-                        event_time: self.context.input_digital_event_time(&port.name),
-                        value: EventInputSignatureValue::Digital(
-                            self.context.input_digital(&port.name).unwrap_or_default(),
-                        ),
-                    });
+                    self.event_input_signature_scratch
+                        .push(EventInputSignatureEntry {
+                            event_time: self.context.input_digital_event_time(&port.name),
+                            value: EventInputSignatureValue::Digital(
+                                self.context.input_digital(&port.name).unwrap_or_default(),
+                            ),
+                        });
                 }
                 PortConnection::DigitalVector(nodes) => {
                     let values = self.context.input_digital_vector_values(&port.name);
                     for index in 0..nodes.len() {
-                        signature.push(EventInputSignatureEntry {
-                            event_time: self
-                                .context
-                                .input_digital_vector_event_time(&port.name, index),
-                            value: EventInputSignatureValue::Digital(
-                                values
-                                    .and_then(|values| values.get(index))
-                                    .copied()
-                                    .unwrap_or_default(),
-                            ),
-                        });
+                        self.event_input_signature_scratch
+                            .push(EventInputSignatureEntry {
+                                event_time: self
+                                    .context
+                                    .input_digital_vector_event_time(&port.name, index),
+                                value: EventInputSignatureValue::Digital(
+                                    values
+                                        .and_then(|values| values.get(index))
+                                        .copied()
+                                        .unwrap_or_default(),
+                                ),
+                            });
                     }
                 }
                 PortConnection::DigitalVectorMapped(nodes) => {
                     let values = self.context.input_digital_vector_values(&port.name);
                     for index in 0..nodes.len() {
-                        signature.push(EventInputSignatureEntry {
-                            event_time: self
-                                .context
-                                .input_digital_vector_event_time(&port.name, index),
-                            value: EventInputSignatureValue::Digital(
-                                values
-                                    .and_then(|values| values.get(index))
-                                    .copied()
-                                    .unwrap_or_default(),
-                            ),
-                        });
+                        self.event_input_signature_scratch
+                            .push(EventInputSignatureEntry {
+                                event_time: self
+                                    .context
+                                    .input_digital_vector_event_time(&port.name, index),
+                                value: EventInputSignatureValue::Digital(
+                                    values
+                                        .and_then(|values| values.get(index))
+                                        .copied()
+                                        .unwrap_or_default(),
+                                ),
+                            });
                     }
                 }
                 PortConnection::Real(_) => {
-                    signature.push(EventInputSignatureEntry {
-                        event_time: self.context.input_real_event_time(&port.name),
-                        value: EventInputSignatureValue::Real(
-                            self.context.input_real(&port.name).unwrap_or(0.0).to_bits(),
-                        ),
-                    });
+                    self.event_input_signature_scratch
+                        .push(EventInputSignatureEntry {
+                            event_time: self.context.input_real_event_time(&port.name),
+                            value: EventInputSignatureValue::Real(
+                                self.context.input_real(&port.name).unwrap_or(0.0).to_bits(),
+                            ),
+                        });
                 }
                 PortConnection::RealVector(nodes) => {
                     let values = self.context.input_real_vector_values(&port.name);
                     for index in 0..nodes.len() {
-                        signature.push(EventInputSignatureEntry {
-                            event_time: None,
-                            value: EventInputSignatureValue::Real(
-                                values
-                                    .and_then(|values| values.get(index))
-                                    .copied()
-                                    .unwrap_or(0.0)
-                                    .to_bits(),
-                            ),
-                        });
+                        self.event_input_signature_scratch
+                            .push(EventInputSignatureEntry {
+                                event_time: None,
+                                value: EventInputSignatureValue::Real(
+                                    values
+                                        .and_then(|values| values.get(index))
+                                        .copied()
+                                        .unwrap_or(0.0)
+                                        .to_bits(),
+                                ),
+                            });
                     }
                 }
                 _ => {}
             }
         }
-        signature
     }
 
     fn refresh_port_context_bindings(&mut self) {
