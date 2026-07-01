@@ -889,6 +889,11 @@ impl XyceTestRunner {
             return Ok(XyceStaticDcContract::WrapperHspiceMathPrn);
         }
 
+        if Self::is_native_hspice_random_wrapper_candidate(relative_path, source) {
+            Self::validate_default_prn_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperDefaultPrn);
+        }
+
         if Self::is_native_resistor_default_wrapper_candidate(relative_path, source) {
             Self::validate_default_prn_wrapper_source(source)?;
             return Ok(XyceStaticDcContract::WrapperResistorDefaultPrn);
@@ -926,6 +931,15 @@ impl XyceTestRunner {
         relative_path.starts_with("netlists/parser/")
             && normalized_source.contains("-hspice-ext math")
             && normalized_source.contains("-hspice-ext all")
+    }
+
+    fn is_native_hspice_random_wrapper_candidate(relative_path: &str, source: &str) -> bool {
+        let relative_path = Self::normalize_manifest_key(relative_path);
+        let normalized_source = source.to_ascii_lowercase();
+        relative_path.starts_with("netlists/parser/")
+            && ["agauss(", "gauss(", "aunif(", "unif(", "rand("]
+                .iter()
+                .any(|operator| normalized_source.contains(operator))
     }
 
     fn is_native_resistor_default_wrapper_candidate(relative_path: &str, source: &str) -> bool {

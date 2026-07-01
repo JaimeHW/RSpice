@@ -802,6 +802,26 @@ fn test_xyce_naked_random_parameter_cases_run() {
 }
 
 #[test]
+fn test_xyce_hspice_random_wrapper_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/PARSER/random.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native Xyce nominal random-operator wrapper comparison, got {result:?}"
+    );
+    assert_eq!(result.contract, "wrapper_static_prn_dc");
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+}
+
+#[test]
 fn test_xyce_subckt_wrapper_family_members_run_natively() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

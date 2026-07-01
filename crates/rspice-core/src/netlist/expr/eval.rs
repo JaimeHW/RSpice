@@ -629,10 +629,16 @@ fn eval_complex_builtin_function(
             _ => Err(ExprError::WrongArgCount("LIMIT".to_string())),
         },
         "GAUSS" | "AGAUSS" => {
-            require_arg_count(name, args, 3)?;
+            if !(2..=3).contains(&args.len()) {
+                return Err(ExprError::WrongArgCount(name.to_string()));
+            }
             let nom = checked_real_arg(name, args, 0)?;
             let var = checked_real_arg(name, args, 1)?;
-            let sigma = checked_real_arg(name, args, 2)?;
+            let sigma = if args.len() == 3 {
+                checked_real_arg(name, args, 2)?
+            } else {
+                1.0
+            };
             if sigma == 0.0 {
                 return Err(ExprError::InvalidArgument(format!(
                     "{name}: sigma must be non-zero"

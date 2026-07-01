@@ -496,6 +496,29 @@ fn gauss_matches_relative_deviation_semantics() {
 }
 
 #[test]
+fn gauss_two_arg_defaults_sigma_to_one_like_xyce() {
+    let ctx = ParamContext::new();
+    let nom = 100.0;
+    let expected_std = 5.0;
+    let mut sum = 0.0;
+    let mut sum2 = 0.0;
+    let n = 10_000;
+    for _ in 0..n {
+        let v = eval_with(&ctx, "gauss(100, 0.05)");
+        sum += v;
+        sum2 += v * v;
+    }
+    let mean = sum / n as Value;
+    let var = sum2 / n as Value - mean * mean;
+    let std = var.sqrt();
+    assert!((mean - nom).abs() < 0.1, "gauss mean {mean} != {nom}");
+    assert!(
+        (std - expected_std).abs() < 0.15,
+        "gauss std {std} != {expected_std}"
+    );
+}
+
+#[test]
 fn agauss_matches_absolute_deviation_semantics() {
     // agauss(nom, avar, sigma): std dev = avar / sigma.
     let ctx = ParamContext::new();
@@ -511,6 +534,29 @@ fn agauss_matches_absolute_deviation_semantics() {
     let std = (sum_sq / n as Value - mean * mean).sqrt();
     assert!((mean - 1.5).abs() < 0.005, "agauss mean {mean} != 1.5");
     assert!((std - 0.1).abs() < 0.005, "agauss std {std} != 0.3/3 = 0.1");
+}
+
+#[test]
+fn agauss_two_arg_defaults_sigma_to_one_like_xyce() {
+    let ctx = ParamContext::new();
+    let nom = 1.5;
+    let expected_std = 0.3;
+    let mut sum = 0.0;
+    let mut sum2 = 0.0;
+    let n = 10_000;
+    for _ in 0..n {
+        let v = eval_with(&ctx, "agauss(1.5, 0.3)");
+        sum += v;
+        sum2 += v * v;
+    }
+    let mean = sum / n as Value;
+    let var = sum2 / n as Value - mean * mean;
+    let std = var.sqrt();
+    assert!((mean - nom).abs() < 0.005, "agauss mean {mean} != {nom}");
+    assert!(
+        (std - expected_std).abs() < 0.005,
+        "agauss std {std} != {expected_std}"
+    );
 }
 
 #[test]
@@ -554,7 +600,9 @@ fn nominal_statistical_mode_matches_xyce_non_sampling_semantics() {
     ctx.set_statistical_mode(StatisticalParamMode::Nominal);
 
     assert_eq!(eval_with(&ctx, "agauss(1, 1, 1)"), 1.0);
+    assert_eq!(eval_with(&ctx, "agauss(1, 1)"), 1.0);
     assert_eq!(eval_with(&ctx, "gauss(1, 1, 1)"), 1.0);
+    assert_eq!(eval_with(&ctx, "gauss(1, 1)"), 1.0);
     assert_eq!(eval_with(&ctx, "2 * rand()"), 1.0);
     assert_eq!(eval_with(&ctx, "unif(1, 1)"), 1.0);
     assert_eq!(eval_with(&ctx, "aunif(1, 1)"), 1.0);
@@ -602,11 +650,11 @@ fn statistical_functions_validate_arguments() {
         Err(ExprError::InvalidArgument(_))
     ));
     assert!(matches!(
-        eval_expression("gauss(1, 0.1)", &ctx),
+        eval_expression("agauss(1)", &ctx),
         Err(ExprError::WrongArgCount(_))
     ));
     assert!(matches!(
-        eval_expression("agauss(1)", &ctx),
+        eval_expression("gauss(1, 0.1, 1, 2)", &ctx),
         Err(ExprError::WrongArgCount(_))
     ));
     assert!(matches!(
