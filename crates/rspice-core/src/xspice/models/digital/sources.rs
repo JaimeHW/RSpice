@@ -471,7 +471,6 @@ struct DStateTableResource {
 #[derive(Debug, Clone)]
 struct DStateTransition {
     state: i64,
-    outputs: Vec<DigitalValue>,
     inputs: Vec<Option<bool>>,
     input_mask: u64,
     input_bits: u64,
@@ -481,7 +480,17 @@ struct DStateTransition {
 #[derive(Debug, Clone)]
 struct DStateTable {
     transitions: Vec<DStateTransition>,
+    output_width: usize,
+    output_values: Vec<DigitalValue>,
     state_ranges: HashMap<i64, DStateRange>,
+}
+
+impl DStateTable {
+    fn row_outputs(&self, index: usize) -> Option<&[DigitalValue]> {
+        let start = index.checked_mul(self.output_width)?;
+        let end = start.checked_add(self.output_width)?;
+        self.output_values.get(start..end)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -665,6 +674,7 @@ fn parse_d_state_contents(
     contents: &str,
 ) -> CmResult<DStateTable> {
     let mut transitions = Vec::new();
+    let mut output_values = Vec::new();
     let mut last_state = None;
     let mut stale_bit_code = 0;
 
@@ -677,16 +687,15 @@ fn parse_d_state_contents(
         let tokens = tokenize_digital_table_line(line);
         let header_len = output_width + input_width + 3;
         let continuation_len = input_width + 2;
-        let (state, outputs, input_start, next_idx) = if tokens.len() == header_len {
+        let (state, input_start, next_idx) = if tokens.len() == header_len {
             let state = parse_d_state_i64(state_file, line_no, tokens[0])?;
-            let mut outputs = Vec::with_capacity(output_width);
             for token in &tokens[1..1 + output_width] {
                 let code = parse_d_state_output_code(state_file, line_no, token)?;
                 stale_bit_code = code;
-                outputs.push(d_state_output_from_code(code));
+                output_values.push(d_state_output_from_code(code));
             }
             last_state = Some(state);
-            (state, outputs, 1 + output_width, header_len - 1)
+            (state, 1 + output_width, header_len - 1)
         } else if tokens.len() == continuation_len {
             let state = last_state.ok_or_else(|| {
                 d_state_error(
@@ -695,8 +704,10 @@ fn parse_d_state_contents(
                     "continuation row appears before any state header",
                 )
             })?;
-            let outputs = vec![d_state_output_from_code(stale_bit_code); output_width];
-            (state, outputs, 0, continuation_len - 1)
+            output_values.extend(
+                std::iter::repeat(d_state_output_from_code(stale_bit_code)).take(output_width),
+            );
+            (state, 0, continuation_len - 1)
         } else {
             return Err(d_state_error(
                 state_file,
@@ -724,7 +735,6 @@ fn parse_d_state_contents(
         let (input_mask, input_bits) = d_state_input_pattern_masks(&inputs);
         transitions.push(DStateTransition {
             state,
-            outputs,
             inputs,
             input_mask,
             input_bits,
@@ -738,6 +748,8 @@ fn parse_d_state_contents(
 
     Ok(DStateTable {
         state_ranges: d_state_range_index(&transitions),
+        output_width,
+        output_values,
         transitions,
     })
 }
@@ -854,10 +866,7 @@ fn d_state_contiguous_range(table: &DStateTable, state: i64) -> Option<(usize, u
 
 fn d_state_outputs(table: &DStateTable, state: i64) -> Option<&[DigitalValue]> {
     let (start, _) = d_state_contiguous_range(table, state)?;
-    table
-        .transitions
-        .get(start)
-        .map(|row| row.outputs.as_slice())
+    table.row_outputs(start)
 }
 
 fn d_state_input_value_masks(inputs: &[DigitalValue]) -> Option<(u64, u64)> {
@@ -1110,14 +1119,14 @@ mod tests {
         let first = load_d_state_table_for_context(&mut ctx, state_file, 1, 1)
             .expect("load first d_state table")
             .expect("first d_state table parses");
-        assert_eq!(first.transitions[0].outputs, vec![DigitalValue::zero()]);
+        assert_eq!(first.row_outputs(0), Some(&[DigitalValue::zero()][..]));
 
         data_file::register_data_file(state_file, "0 1s 0 -> 0\n")
             .expect("replace virtual d_state table");
         let second = load_d_state_table_for_context(&mut ctx, state_file, 1, 1)
             .expect("reload replaced d_state table")
             .expect("second d_state table parses");
-        assert_eq!(second.transitions[0].outputs, vec![DigitalValue::one()]);
+        assert_eq!(second.row_outputs(0), Some(&[DigitalValue::one()][..]));
 
         unregister_test_data_file(state_file);
     }
@@ -1151,8 +1160,8 @@ mod tests {
             .expect("load first virtual d_state data")
             .expect("first virtual d_state data parses");
         assert_eq!(
-            first_state.transitions[0].outputs,
-            vec![DigitalValue::zero()]
+            first_state.row_outputs(0),
+            Some(&[DigitalValue::zero()][..])
         );
 
         data_file::register_data_file(state_file, "0 1s 0 -> 0\n")
@@ -1162,8 +1171,8 @@ mod tests {
             .expect("load replaced virtual d_state data")
             .expect("replaced virtual d_state data parses");
         assert_eq!(
-            second_state.transitions[0].outputs,
-            vec![DigitalValue::one()]
+            second_state.row_outputs(0),
+            Some(&[DigitalValue::one()][..])
         );
 
         let cached_d_source_entries = {
@@ -1387,9 +1396,10 @@ mod tests {
         let table = parse_d_state_file(state_file, 1, 1).expect("state table parses");
 
         assert_eq!(table.transitions.len(), 3);
-        assert_eq!(table.transitions[0].outputs, vec![DigitalValue::one()]);
-        assert_eq!(table.transitions[1].outputs, vec![DigitalValue::zero()]);
-        assert_eq!(table.transitions[2].outputs, vec![DigitalValue::one()]);
+        assert_eq!(table.output_values.len(), 3);
+        assert_eq!(table.row_outputs(0), Some(&[DigitalValue::one()][..]));
+        assert_eq!(table.row_outputs(1), Some(&[DigitalValue::zero()][..]));
+        assert_eq!(table.row_outputs(2), Some(&[DigitalValue::one()][..]));
 
         unregister_test_data_file(state_file);
     }
@@ -1406,12 +1416,21 @@ mod tests {
 
         assert_eq!(table.transitions.len(), 2);
         assert_eq!(
-            table.transitions[0].outputs,
-            vec![DigitalValue::zero(), DigitalValue::zero()]
+            table.output_values,
+            vec![
+                DigitalValue::zero(),
+                DigitalValue::zero(),
+                DigitalValue::one(),
+                DigitalValue::one()
+            ]
         );
         assert_eq!(
-            table.transitions[1].outputs,
-            vec![DigitalValue::one(), DigitalValue::one()]
+            table.row_outputs(0),
+            Some(&[DigitalValue::zero(), DigitalValue::zero()][..])
+        );
+        assert_eq!(
+            table.row_outputs(1),
+            Some(&[DigitalValue::one(), DigitalValue::one()][..])
         );
 
         unregister_test_data_file(state_file);
