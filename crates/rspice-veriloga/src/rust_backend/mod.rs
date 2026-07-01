@@ -336,4 +336,144 @@ endmodule
         assert!(stamp.contains("eval_ddt("), "{stamp}");
         assert!(stamp.contains("stamp_potential_branch1_local"), "{stamp}");
     }
+
+    #[test]
+    fn scalar_backend_lowers_guarded_series_resistance_state() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module guarded_series_resistance(d, di, p, n);
+    inout d, di, p, n;
+    electrical d, di, p, n;
+    parameter integer rds_mod = 1 from [0:2];
+    parameter real drain_resistance = 2.0 from [0:inf);
+    real rd, rd0, rdwmin, t0, t1;
+    analog begin
+        if (rds_mod != 1) begin
+            rd0 = drain_resistance;
+            rdwmin = 0.0;
+        end else begin
+            t0 = V(p, n);
+            t1 = sqrt(t0 * t0 + 1.0e-4);
+            rd0 = t1 + 1.0;
+            rdwmin = rd0 * 0.5;
+        end
+
+        if (rds_mod == 1) begin
+            t0 = V(p, n) + 0.25;
+            t1 = sqrt(t0 * t0 + 1.0e-4);
+            rd = rdwmin + rd0 * t1 + drain_resistance;
+        end else begin
+            rd = drain_resistance;
+        end
+
+        if (rds_mod == 2)
+            rd = 0.0;
+
+        if (rds_mod != 2)
+            I(d, di) <+ V(d, di) / rd;
+        else
+            V(d, di) <+ 0.0;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("guarded series resistance state should lower to scalar OptIR");
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+    }
+
+    #[test]
+    fn scalar_backend_lowers_counter_dependent_accumulator_loop() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module counted_accumulator(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 4 from [0:inf);
+    integer i;
+    real acc, term;
+    analog begin
+        acc = 0.0;
+        for (i = 0; i < nf; i = i + 1) begin
+            term = 1.0 / (10.0 + V(p, n) + i);
+            acc = acc + term;
+        end
+        I(p, n) <+ acc;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("counter-dependent accumulator loop should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("while (counted_sum_"), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_lowers_guarded_counter_dependent_accumulator_loop() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module guarded_counted_accumulator(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 4 from [0:inf);
+    parameter integer enable = 1 from [0:1];
+    integer i;
+    real acc, out, term;
+    analog begin
+        if (enable != 0) begin
+            acc = 0.0;
+            for (i = 0; i < nf; i = i + 1) begin
+                term = 1.0 / (10.0 + V(p, n) + i);
+                acc = acc + term;
+            end
+            out = acc;
+        end else begin
+            out = 0.0;
+        end
+        I(p, n) <+ out;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("guarded counter-dependent accumulator loop should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("while (counted_sum_"), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
 }

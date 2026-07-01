@@ -105,6 +105,7 @@ struct ValueEmitContext<'a> {
     thermal_voltage_expr: String,
     ddt_slots: Option<&'a DdtSlots>,
     ddt_mode: DdtEmitMode,
+    loop_index_exprs: HashMap<u32, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -311,6 +312,7 @@ fn generate_stamp_file(
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
         ddt_slots: Some(ddt_slots),
         ddt_mode: DdtEmitMode::Transient,
+        loop_index_exprs: HashMap::new(),
     };
     emit_live_values(
         artifact,
@@ -367,6 +369,7 @@ fn generate_stamp_file(
             thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
             ddt_slots: Some(ddt_slots),
             ddt_mode: DdtEmitMode::ReactiveLinearized,
+            loop_index_exprs: HashMap::new(),
         };
         emit_live_values(
             artifact,
@@ -495,6 +498,7 @@ pub(super) fn scalar_state_extensions(
         thermal_voltage_expr: "thermal_voltage".to_string(),
         ddt_slots: None,
         ddt_mode: DdtEmitMode::Transient,
+        loop_index_exprs: HashMap::new(),
     };
     let temperature_context = ValueEmitContext {
         cached_values: &static_cache.set,
@@ -505,6 +509,7 @@ pub(super) fn scalar_state_extensions(
         thermal_voltage_expr: "thermal_voltage".to_string(),
         ddt_slots: None,
         ddt_mode: DdtEmitMode::Transient,
+        loop_index_exprs: HashMap::new(),
     };
     let mut methods = String::new();
 
@@ -788,6 +793,7 @@ pub(super) fn emit_static_current_values(
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
         ddt_slots: None,
         ddt_mode: DdtEmitMode::Transient,
+        loop_index_exprs: HashMap::new(),
     };
     emit_live_values(
         artifact,
@@ -2188,6 +2194,31 @@ fn emit_value_expr(
             let slot = branch_unknown_flow_slot(artifact, *branch_unknown)?;
             format!("ctx.branch_current(branches[{slot}])")
         }
+        OptValueKind::LoopIndex { loop_id } => context
+            .loop_index_exprs
+            .get(loop_id)
+            .cloned()
+            .ok_or_else(|| {
+                unsupported(
+                    artifact,
+                    format!("loop index {loop_id} outside counted sum"),
+                )
+            })?,
+        OptValueKind::CountedSum {
+            loop_id,
+            count,
+            initial,
+            term,
+        } => emit_counted_sum_expr(
+            artifact,
+            parameter_fields,
+            value.id,
+            *loop_id,
+            *count,
+            *initial,
+            *term,
+            context,
+        )?,
         OptValueKind::Unary { op, input } => emit_unary_expr(
             *op,
             value_ref(artifact, parameter_fields, *input, context)?,
@@ -2228,6 +2259,85 @@ fn emit_value_expr(
             ));
         }
     };
+    Ok(expr)
+}
+
+fn emit_counted_sum_expr(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    owner: ValueId,
+    loop_id: u32,
+    count: ValueId,
+    initial: ValueId,
+    term: ValueId,
+    context: &ValueEmitContext<'_>,
+) -> Result<String, RustBackendError> {
+    let count_expr = value_ref(artifact, parameter_fields, count, context)?;
+    let initial_expr = value_ref(artifact, parameter_fields, initial, context)?;
+    let accumulator_name = format!("counted_sum_{}_acc", owner.index());
+    let count_name = format!("counted_sum_{}_count", owner.index());
+    let counter_name = format!("counted_sum_{}_i", owner.index());
+    let index_name = format!("counted_sum_{}_index", owner.index());
+
+    let mut loop_context = ValueEmitContext {
+        cached_values: context.cached_values,
+        use_cached_fields: context.use_cached_fields,
+        inline_uncached_constants: context.inline_uncached_constants,
+        limexp_max_expr: context.limexp_max_expr.clone(),
+        temperature_expr: context.temperature_expr.clone(),
+        thermal_voltage_expr: context.thermal_voltage_expr.clone(),
+        ddt_slots: context.ddt_slots,
+        ddt_mode: context.ddt_mode,
+        loop_index_exprs: context.loop_index_exprs.clone(),
+    };
+    loop_context
+        .loop_index_exprs
+        .insert(loop_id, index_name.clone());
+
+    let mut loop_live = HashSet::new();
+    mark_counted_sum_term_live(artifact, term, context.cached_values, &mut loop_live)?;
+    let loop_values = ordered_counted_sum_values(artifact, &loop_live, context.cached_values)?;
+
+    let mut expr = String::new();
+    expr.push_str("{\n");
+    expr.push_str(&format!(
+        "            let mut {accumulator_name}: f64 = {initial_expr};\n"
+    ));
+    expr.push_str(&format!(
+        "            let {count_name}: f64 = {count_expr};\n"
+    ));
+    expr.push_str(&format!("            let mut {counter_name}: i64 = 0;\n"));
+    expr.push_str(&format!(
+        "            while ({counter_name} as f64) < {count_name} {{\n"
+    ));
+    expr.push_str(&format!(
+        "                let {index_name}: f64 = {counter_name} as f64;\n"
+    ));
+    for value_id in loop_values {
+        let value = artifact
+            .opt
+            .values
+            .get(usize::from(value_id))
+            .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
+        if matches!(value.kind, OptValueKind::LoopIndex { .. }) {
+            continue;
+        }
+        let value_expr = emit_value_expr(artifact, parameter_fields, value, &loop_context)?;
+        expr.push_str(&format!(
+            "                let {}: {} = {};\n",
+            value_name(value.id),
+            rust_type(value.value_type),
+            value_expr
+        ));
+    }
+    let term_expr = value_ref(artifact, parameter_fields, term, &loop_context)?;
+    expr.push_str(&format!(
+        "                {accumulator_name} += {term_expr};\n"
+    ));
+    expr.push_str(&format!("                {counter_name} += 1;\n"));
+    expr.push_str("            }\n");
+    expr.push_str(&format!("            {accumulator_name}\n"));
+    expr.push_str("        }");
     Ok(expr)
 }
 
@@ -2551,6 +2661,24 @@ fn value_ref(
     value: ValueId,
     context: &ValueEmitContext<'_>,
 ) -> Result<String, RustBackendError> {
+    if let Some(OptValueKind::LoopIndex { loop_id }) = artifact
+        .opt
+        .values
+        .get(usize::from(value))
+        .map(|value| &value.kind)
+    {
+        return context
+            .loop_index_exprs
+            .get(loop_id)
+            .cloned()
+            .ok_or_else(|| {
+                unsupported(
+                    artifact,
+                    format!("loop index {loop_id} outside counted sum"),
+                )
+            });
+    }
+
     if context.use_cached_fields && context.cached_values.contains(&value) {
         return Ok(format!("self.{}", cache_field_name(value)));
     }
@@ -2746,6 +2874,14 @@ fn value_graph_contains_ddt(
         } => Ok(value_graph_contains_ddt(artifact, condition, visited)?
             || value_graph_contains_ddt(artifact, then_value, visited)?
             || value_graph_contains_ddt(artifact, else_value, visited)?),
+        OptValueKind::CountedSum {
+            count,
+            initial,
+            term,
+            ..
+        } => Ok(value_graph_contains_ddt(artifact, count, visited)?
+            || value_graph_contains_ddt(artifact, initial, visited)?
+            || value_graph_contains_ddt(artifact, term, visited)?),
         OptValueKind::RealConstant(_)
         | OptValueKind::BooleanConstant(_)
         | OptValueKind::Parameter { .. }
@@ -2759,6 +2895,7 @@ fn value_graph_contains_ddt(
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
+        | OptValueKind::LoopIndex { .. }
         | OptValueKind::EquationValue { .. } => Ok(false),
     }
 }
@@ -3024,7 +3161,16 @@ fn mark_stamp_live_value(
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
+        | OptValueKind::LoopIndex { .. }
         | OptValueKind::EquationValue { .. } => {}
+        OptValueKind::CountedSum {
+            count,
+            initial,
+            ..
+        } => {
+            mark_stamp_live_value(artifact, count, static_cache, live)?;
+            mark_stamp_live_value(artifact, initial, static_cache, live)?;
+        }
         OptValueKind::Ddx {
             value: input,
             pos_node,
@@ -3060,6 +3206,81 @@ fn mark_stamp_live_value(
     Ok(())
 }
 
+fn mark_counted_sum_term_live(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+    cached_values: &HashSet<ValueId>,
+    live: &mut HashSet<ValueId>,
+) -> Result<(), RustBackendError> {
+    if cached_values.contains(&value) || !live.insert(value) {
+        return Ok(());
+    }
+
+    let value_slot = artifact
+        .opt
+        .values
+        .get(usize::from(value))
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
+    match value_slot.kind {
+        OptValueKind::RealConstant(_)
+        | OptValueKind::BooleanConstant(_)
+        | OptValueKind::Parameter { .. }
+        | OptValueKind::ParamGiven { .. }
+        | OptValueKind::Temperature
+        | OptValueKind::ThermalVoltage
+        | OptValueKind::Multiplicity
+        | OptValueKind::Time
+        | OptValueKind::Analysis { .. }
+        | OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. }
+        | OptValueKind::LoopIndex { .. }
+        | OptValueKind::EquationValue { .. } => {}
+        OptValueKind::Ddx {
+            value: input,
+            pos_node,
+            neg_node,
+        } => {
+            mark_counted_sum_term_live(artifact, input, cached_values, live)?;
+            for derivative in projected_ddx_derivative_values(artifact, input, pos_node, neg_node)?
+            {
+                mark_counted_sum_term_live(artifact, derivative, cached_values, live)?;
+            }
+        }
+        OptValueKind::Ddt { input, .. } => {
+            mark_counted_sum_term_live(artifact, input, cached_values, live)?;
+        }
+        OptValueKind::DdtScale => {}
+        OptValueKind::Unary { input, .. } => {
+            mark_counted_sum_term_live(artifact, input, cached_values, live)?;
+        }
+        OptValueKind::Binary { left, right, .. } => {
+            mark_counted_sum_term_live(artifact, left, cached_values, live)?;
+            mark_counted_sum_term_live(artifact, right, cached_values, live)?;
+        }
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => {
+            mark_counted_sum_term_live(artifact, condition, cached_values, live)?;
+            mark_counted_sum_term_live(artifact, then_value, cached_values, live)?;
+            mark_counted_sum_term_live(artifact, else_value, cached_values, live)?;
+        }
+        OptValueKind::CountedSum {
+            count,
+            initial,
+            term,
+            ..
+        } => {
+            mark_counted_sum_term_live(artifact, count, cached_values, live)?;
+            mark_counted_sum_term_live(artifact, initial, cached_values, live)?;
+            mark_counted_sum_term_live(artifact, term, cached_values, live)?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ValueVisitState {
     Unvisited,
@@ -3082,6 +3303,30 @@ fn ordered_live_values(
                 value.id,
                 live,
                 static_cache,
+                &mut state,
+                &mut ordered,
+            )?;
+        }
+    }
+
+    Ok(ordered)
+}
+
+fn ordered_counted_sum_values(
+    artifact: &CanonicalIrArtifact,
+    live: &HashSet<ValueId>,
+    cached_values: &HashSet<ValueId>,
+) -> Result<Vec<ValueId>, RustBackendError> {
+    let mut state = vec![ValueVisitState::Unvisited; artifact.opt.values.len()];
+    let mut ordered = Vec::with_capacity(live.len());
+
+    for value in &artifact.opt.values {
+        if live.contains(&value.id) && !cached_values.contains(&value.id) {
+            visit_counted_sum_value(
+                artifact,
+                value.id,
+                live,
+                cached_values,
                 &mut state,
                 &mut ordered,
             )?;
@@ -3138,7 +3383,16 @@ fn visit_live_value(
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
+        | OptValueKind::LoopIndex { .. }
         | OptValueKind::EquationValue { .. } => {}
+        OptValueKind::CountedSum {
+            count,
+            initial,
+            ..
+        } => {
+            visit_live_value(artifact, count, live, static_cache, state, ordered)?;
+            visit_live_value(artifact, initial, live, static_cache, state, ordered)?;
+        }
         OptValueKind::Ddx {
             value: input,
             pos_node,
@@ -3169,6 +3423,102 @@ fn visit_live_value(
             visit_live_value(artifact, condition, live, static_cache, state, ordered)?;
             visit_live_value(artifact, then_value, live, static_cache, state, ordered)?;
             visit_live_value(artifact, else_value, live, static_cache, state, ordered)?;
+        }
+    }
+    state[index] = ValueVisitState::Done;
+    ordered.push(value);
+    Ok(())
+}
+
+fn visit_counted_sum_value(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+    live: &HashSet<ValueId>,
+    cached_values: &HashSet<ValueId>,
+    state: &mut [ValueVisitState],
+    ordered: &mut Vec<ValueId>,
+) -> Result<(), RustBackendError> {
+    if cached_values.contains(&value) || !live.contains(&value) {
+        return Ok(());
+    }
+
+    let index = usize::from(value);
+    match state
+        .get(index)
+        .copied()
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?
+    {
+        ValueVisitState::Done => return Ok(()),
+        ValueVisitState::Visiting => {
+            return Err(unsupported(
+                artifact,
+                format!("cyclic counted-sum value dependency at {value}"),
+            ));
+        }
+        ValueVisitState::Unvisited => {}
+    }
+
+    state[index] = ValueVisitState::Visiting;
+    let value_slot = artifact
+        .opt
+        .values
+        .get(index)
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
+    match value_slot.kind {
+        OptValueKind::RealConstant(_)
+        | OptValueKind::BooleanConstant(_)
+        | OptValueKind::Parameter { .. }
+        | OptValueKind::ParamGiven { .. }
+        | OptValueKind::Temperature
+        | OptValueKind::ThermalVoltage
+        | OptValueKind::Multiplicity
+        | OptValueKind::Time
+        | OptValueKind::Analysis { .. }
+        | OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. }
+        | OptValueKind::LoopIndex { .. }
+        | OptValueKind::EquationValue { .. } => {}
+        OptValueKind::Ddx {
+            value: input,
+            pos_node,
+            neg_node,
+        } => {
+            visit_counted_sum_value(artifact, input, live, cached_values, state, ordered)?;
+            for derivative in projected_ddx_derivative_values(artifact, input, pos_node, neg_node)?
+            {
+                visit_counted_sum_value(artifact, derivative, live, cached_values, state, ordered)?;
+            }
+        }
+        OptValueKind::Ddt { input, .. } => {
+            visit_counted_sum_value(artifact, input, live, cached_values, state, ordered)?;
+        }
+        OptValueKind::DdtScale => {}
+        OptValueKind::Unary { input, .. } => {
+            visit_counted_sum_value(artifact, input, live, cached_values, state, ordered)?;
+        }
+        OptValueKind::Binary { left, right, .. } => {
+            visit_counted_sum_value(artifact, left, live, cached_values, state, ordered)?;
+            visit_counted_sum_value(artifact, right, live, cached_values, state, ordered)?;
+        }
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => {
+            visit_counted_sum_value(artifact, condition, live, cached_values, state, ordered)?;
+            visit_counted_sum_value(artifact, then_value, live, cached_values, state, ordered)?;
+            visit_counted_sum_value(artifact, else_value, live, cached_values, state, ordered)?;
+        }
+        OptValueKind::CountedSum {
+            count,
+            initial,
+            term,
+            ..
+        } => {
+            visit_counted_sum_value(artifact, count, live, cached_values, state, ordered)?;
+            visit_counted_sum_value(artifact, initial, live, cached_values, state, ordered)?;
+            visit_counted_sum_value(artifact, term, live, cached_values, state, ordered)?;
         }
     }
     state[index] = ValueVisitState::Done;

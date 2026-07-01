@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use thiserror::Error;
 
 use super::opt::{
@@ -152,6 +154,7 @@ struct OptEvaluator<'a> {
     inputs: &'a OptEvalInputs,
     values: Vec<Option<OptEvalValue>>,
     visiting: Vec<bool>,
+    loop_indices: HashMap<u32, f64>,
 }
 
 impl<'a> OptEvaluator<'a> {
@@ -161,6 +164,7 @@ impl<'a> OptEvaluator<'a> {
             inputs,
             values: vec![None; model.values.len()],
             visiting: vec![false; model.values.len()],
+            loop_indices: HashMap::new(),
         }
     }
 
@@ -231,6 +235,15 @@ impl<'a> OptEvaluator<'a> {
                 &self.inputs.branch_flows,
                 branch_unknown.index(),
             )?)),
+            OptValueKind::LoopIndex { loop_id } => Ok(OptEvalValue::Real(
+                self.loop_indices.get(loop_id).copied().unwrap_or(0.0),
+            )),
+            OptValueKind::CountedSum {
+                loop_id,
+                count,
+                initial,
+                term,
+            } => self.evaluate_counted_sum(*loop_id, *count, *initial, *term),
             OptValueKind::Unary { op, input } => self.evaluate_unary(value, *op, *input),
             OptValueKind::Binary { op, left, right } => {
                 self.evaluate_binary(value, *op, *left, *right)
@@ -253,6 +266,97 @@ impl<'a> OptEvaluator<'a> {
                 })
             }
         }
+    }
+
+    fn evaluate_counted_sum(
+        &mut self,
+        loop_id: u32,
+        count: ValueId,
+        initial: ValueId,
+        term: ValueId,
+    ) -> Result<OptEvalValue, OptEvalError> {
+        let count = self.real_value(count)?;
+        let mut accumulator = self.real_value(initial)?;
+        let previous = self.loop_indices.get(&loop_id).copied();
+        let mut index = 0_i64;
+        while (index as f64) < count {
+            self.loop_indices.insert(loop_id, index as f64);
+            self.clear_loop_dependent_values();
+            accumulator += self.real_value(term)?;
+            index += 1;
+        }
+        match previous {
+            Some(previous) => {
+                self.loop_indices.insert(loop_id, previous);
+            }
+            None => {
+                self.loop_indices.remove(&loop_id);
+            }
+        }
+        self.clear_loop_dependent_values();
+        Ok(OptEvalValue::Real(accumulator))
+    }
+
+    fn clear_loop_dependent_values(&mut self) {
+        let mut memo = vec![None; self.model.values.len()];
+        for value in &self.model.values {
+            if self.value_depends_on_loop_index(value.id, &mut memo) {
+                self.values[usize::from(value.id)] = None;
+            }
+        }
+    }
+
+    fn value_depends_on_loop_index(&self, value: ValueId, memo: &mut [Option<bool>]) -> bool {
+        let index = usize::from(value);
+        if let Some(depends) = memo[index] {
+            return depends;
+        }
+        let depends = match self.model.values[index].kind {
+            OptValueKind::LoopIndex { .. } => true,
+            OptValueKind::Unary { input, .. } => self.value_depends_on_loop_index(input, memo),
+            OptValueKind::Binary { left, right, .. } => {
+                self.value_depends_on_loop_index(left, memo)
+                    || self.value_depends_on_loop_index(right, memo)
+            }
+            OptValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => {
+                self.value_depends_on_loop_index(condition, memo)
+                    || self.value_depends_on_loop_index(then_value, memo)
+                    || self.value_depends_on_loop_index(else_value, memo)
+            }
+            OptValueKind::CountedSum {
+                count,
+                initial,
+                term,
+                ..
+            } => {
+                self.value_depends_on_loop_index(count, memo)
+                    || self.value_depends_on_loop_index(initial, memo)
+                    || self.value_depends_on_loop_index(term, memo)
+            }
+            OptValueKind::Ddx { value, .. } | OptValueKind::Ddt { input: value, .. } => {
+                self.value_depends_on_loop_index(value, memo)
+            }
+            OptValueKind::RealConstant(_)
+            | OptValueKind::BooleanConstant(_)
+            | OptValueKind::Parameter { .. }
+            | OptValueKind::ParamGiven { .. }
+            | OptValueKind::Temperature
+            | OptValueKind::ThermalVoltage
+            | OptValueKind::Multiplicity
+            | OptValueKind::Time
+            | OptValueKind::Analysis { .. }
+            | OptValueKind::DdtScale
+            | OptValueKind::NodePotential { .. }
+            | OptValueKind::BranchFlow { .. }
+            | OptValueKind::BranchUnknownFlow { .. }
+            | OptValueKind::EquationValue { .. } => false,
+        };
+        memo[index] = Some(depends);
+        depends
     }
 
     fn evaluate_unary(

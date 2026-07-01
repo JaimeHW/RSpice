@@ -137,6 +137,15 @@ pub enum OptValueKind {
     BranchUnknownFlow {
         branch_unknown: BranchUnknownId,
     },
+    LoopIndex {
+        loop_id: u32,
+    },
+    CountedSum {
+        loop_id: u32,
+        count: ValueId,
+        initial: ValueId,
+        term: ValueId,
+    },
     Unary {
         op: OptUnaryOp,
         input: ValueId,
@@ -313,6 +322,7 @@ struct ScalarGraphBuilder<'a> {
     variable_lowering_stack: HashSet<VariableId>,
     branch_current_values: HashMap<String, ValueId>,
     branch_flow_context: Option<BranchUnknownId>,
+    next_loop_id: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -339,6 +349,13 @@ enum OptValueKey {
     NodePotential(NodeId),
     BranchFlow(BranchId),
     BranchUnknownFlow(BranchUnknownId),
+    LoopIndex(u32),
+    CountedSum {
+        loop_id: u32,
+        count: ValueId,
+        initial: ValueId,
+        term: ValueId,
+    },
     Unary {
         op: OptUnaryOp,
         input: ValueId,
@@ -387,6 +404,18 @@ impl OptValueKey {
             OptValueKind::BranchUnknownFlow { branch_unknown } => {
                 Self::BranchUnknownFlow(*branch_unknown)
             }
+            OptValueKind::LoopIndex { loop_id } => Self::LoopIndex(*loop_id),
+            OptValueKind::CountedSum {
+                loop_id,
+                count,
+                initial,
+                term,
+            } => Self::CountedSum {
+                loop_id: *loop_id,
+                count: *count,
+                initial: *initial,
+                term: *term,
+            },
             OptValueKind::Unary { op, input } => Self::Unary {
                 op: *op,
                 input: *input,
@@ -423,6 +452,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             variable_lowering_stack: HashSet::new(),
             branch_current_values: HashMap::new(),
             branch_flow_context: None,
+            next_loop_id: 0,
         }
     }
 
@@ -513,7 +543,18 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::NodePotential { .. }
             | OptValueKind::BranchFlow { .. }
             | OptValueKind::BranchUnknownFlow { .. }
+            | OptValueKind::LoopIndex { .. }
             | OptValueKind::EquationValue { .. } => {}
+            OptValueKind::CountedSum {
+                count,
+                initial,
+                term,
+                ..
+            } => {
+                self.mark_live_value(count, live);
+                self.mark_live_value(initial, live);
+                self.mark_live_value(term, live);
+            }
             OptValueKind::Ddx {
                 value,
                 pos_node,
@@ -594,6 +635,17 @@ impl<'a> ScalarGraphBuilder<'a> {
             None
         };
         self.variable_values.insert(assignment.target, value);
+        if scalar_trace_var(&assignment.target_name) {
+            let expression_kind = self
+                .mir
+                .expressions
+                .get(usize::from(assignment.expr.id))
+                .map(|expression| &expression.kind);
+            eprintln!(
+                "scalar var trace: {} expr={:?} kind={:?} span={:?} value={:?}",
+                assignment.target_name, assignment.expr.id, expression_kind, assignment.span, value
+            );
+        }
         self.expression_values.clear();
     }
 
@@ -637,6 +689,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         let original_expression_values = self.expression_values.clone();
         let original_variable_values = self.variable_values.clone();
         let original_variable_assignment_exprs = self.variable_assignment_exprs.clone();
+        let original_next_loop_id = self.next_loop_id;
 
         let matched = self.try_lower_counted_accumulator_loop(loop_statement);
         if matched {
@@ -648,13 +701,15 @@ impl<'a> ScalarGraphBuilder<'a> {
             self.expression_values = original_expression_values;
             self.variable_values = original_variable_values;
             self.variable_assignment_exprs = original_variable_assignment_exprs;
+            self.next_loop_id = original_next_loop_id;
             false
         }
     }
 
     fn try_lower_counted_accumulator_loop(&mut self, loop_statement: &HirLoop) -> bool {
         self.expression_values.clear();
-        let Some((counter, bound)) = self.counted_loop_condition(loop_statement.condition.id)
+        let Some((counter, bound, _guarded_loop)) =
+            self.counted_loop_condition(loop_statement.condition.id)
         else {
             return false;
         };
@@ -671,8 +726,8 @@ impl<'a> ScalarGraphBuilder<'a> {
         let Some(assigned_variables) = self.loop_assignment_targets(&loop_statement.body) else {
             return false;
         };
+        let mut accumulator_targets = HashSet::new();
         let mut saw_counter_increment = false;
-        let mut saw_accumulator = false;
 
         for statement in &loop_statement.body {
             let HirStatement::Assignment(assignment) = statement else {
@@ -682,37 +737,116 @@ impl<'a> ScalarGraphBuilder<'a> {
                 saw_counter_increment = true;
                 continue;
             }
-
-            let Some(term_expr) =
-                self.accumulator_update_term(assignment, counter, &assigned_variables)
-            else {
-                return false;
-            };
-            if self.expr_references_any_variable(term_expr, &assigned_variables) {
+            let expr = self.counted_loop_assignment_expr(assignment);
+            if let Some(_term) = self.accumulator_update_term(assignment, counter, expr) {
+                accumulator_targets.insert(assignment.target);
+                continue;
+            }
+            if assignment.index.is_some() || !supported_assignment_value_type(assignment.expr_type)
+            {
                 return false;
             }
-            let Some(previous) = self.current_variable_value(assignment.target) else {
+            if assignment.target == counter {
                 return false;
-            };
-            self.expression_values.clear();
-            let Some(term) = self.lower_expression(term_expr) else {
-                return false;
-            };
-            let scaled_term = self.push_binary_value(OptBinaryOp::Mul, bound, term);
-            let next = self.push_binary_value(OptBinaryOp::Add, previous, scaled_term);
-            self.variable_values.insert(assignment.target, Some(next));
-            saw_accumulator = true;
+            }
         }
 
-        if !(saw_counter_increment && saw_accumulator) {
+        if !saw_counter_increment || accumulator_targets.is_empty() {
             return false;
         }
 
+        let original_variable_values = self.variable_values.clone();
+        let Some(loop_id) = self.allocate_loop_id() else {
+            return false;
+        };
+        let loop_index = self.push_value(OptValueType::Real, OptValueKind::LoopIndex { loop_id });
+        self.variable_values.insert(counter, Some(loop_index));
+        self.expression_values.clear();
+
+        let mut accumulator_sums = Vec::new();
+        for statement in &loop_statement.body {
+            let HirStatement::Assignment(assignment) = statement else {
+                return false;
+            };
+            if self.is_counter_increment_assignment(assignment, counter) {
+                continue;
+            }
+
+            let expr = self.counted_loop_assignment_expr(assignment);
+            if let Some(term_expr) = self.accumulator_update_term(assignment, counter, expr) {
+                if self.expr_references_any_variable(term_expr, &accumulator_targets) {
+                    return false;
+                }
+                let Some(previous) =
+                    self.variable_value_from_snapshot(assignment.target, &original_variable_values)
+                else {
+                    return false;
+                };
+                self.expression_values.clear();
+                let Some(term) = self.lower_expression(term_expr) else {
+                    return false;
+                };
+                accumulator_sums.push((assignment.target, previous, term));
+                continue;
+            }
+
+            if self.expr_references_any_variable(expr, &accumulator_targets) {
+                return false;
+            }
+            self.expression_values.clear();
+            let Some(value) = self.lower_expression(expr) else {
+                return false;
+            };
+            self.variable_values.insert(assignment.target, Some(value));
+        }
+
+        self.variable_values = original_variable_values;
+        for assigned in assigned_variables {
+            self.variable_assignment_exprs.remove(&assigned);
+            self.variable_values.insert(assigned, None);
+        }
+        for (target, initial, term) in accumulator_sums {
+            let sum = self.push_value(
+                OptValueType::Real,
+                OptValueKind::CountedSum {
+                    loop_id,
+                    count: bound,
+                    initial,
+                    term,
+                },
+            );
+            self.variable_values.insert(target, Some(sum));
+        }
         self.variable_values.insert(counter, Some(bound));
         true
     }
 
-    fn counted_loop_condition(&mut self, condition: ExprId) -> Option<(VariableId, ValueId)> {
+    fn counted_loop_condition(&mut self, condition: ExprId) -> Option<(VariableId, ValueId, bool)> {
+        if let Some(counted) = self.counted_loop_bound_condition(condition) {
+            let (counter, bound) = counted;
+            return Some((counter, bound, false));
+        }
+
+        let expression = self.mir.expressions.get(usize::from(condition))?;
+        let HirExprKind::Binary { op, left, right } = &expression.kind else {
+            return None;
+        };
+        if op.as_str() != "And" {
+            return None;
+        }
+
+        if let Some((counter, bound)) = self.counted_loop_bound_condition(*left) {
+            let count = self.guarded_loop_count(*right, bound)?;
+            return Some((counter, count, true));
+        }
+        if let Some((counter, bound)) = self.counted_loop_bound_condition(*right) {
+            let count = self.guarded_loop_count(*left, bound)?;
+            return Some((counter, count, true));
+        }
+        None
+    }
+
+    fn counted_loop_bound_condition(&mut self, condition: ExprId) -> Option<(VariableId, ValueId)> {
         let expression = self.mir.expressions.get(usize::from(condition))?;
         let HirExprKind::Binary { op, left, right } = &expression.kind else {
             return None;
@@ -720,32 +854,29 @@ impl<'a> ScalarGraphBuilder<'a> {
         if op.as_str() != "Lt" {
             return None;
         }
-
         let counter = self.variable_identifier(*left)?;
-        let bound = self.nonnegative_integer_loop_bound(*right)?;
+        let bound = self.counted_loop_bound(*right)?;
         Some((counter, bound))
     }
 
-    fn nonnegative_integer_loop_bound(&mut self, expr: ExprId) -> Option<ValueId> {
-        if let Some(parameter) = self.parameter_identifier(expr) {
-            let slot = self.mir.parameters.get(usize::from(parameter))?;
-            if slot.value_type == CanonicalValueType::Integer
-                && slot
-                    .range
-                    .as_ref()
-                    .and_then(|range| range.min)
-                    .is_some_and(|min| min >= 0.0)
-            {
-                return self.lower_expression(expr);
-            }
-            return None;
-        }
+    fn guarded_loop_count(&mut self, guard: ExprId, bound: ValueId) -> Option<ValueId> {
+        let guard = self.lower_expression(guard)?;
+        let zero = self.zero_real();
+        Some(self.push_value(
+            OptValueType::Real,
+            OptValueKind::Select {
+                condition: guard,
+                then_value: bound,
+                else_value: zero,
+            },
+        ))
+    }
 
-        let value = self.number_constant_expr(expr)?;
-        if value >= 0.0 && value.fract() == 0.0 {
-            return self.lower_expression(expr);
-        }
-        None
+    fn counted_loop_bound(&mut self, expr: ExprId) -> Option<ValueId> {
+        let bound = self.lower_expression(expr)?;
+        let mut memo = vec![None; self.values.len()];
+        (value_invalidation(&self.values, bound, &mut memo) == InvalidationClass::InstanceStatic)
+            .then_some(bound)
     }
 
     fn loop_assignment_targets(&self, statements: &[HirStatement]) -> Option<HashSet<VariableId>> {
@@ -770,7 +901,8 @@ impl<'a> ScalarGraphBuilder<'a> {
         if assignment.target != counter || assignment.index.is_some() {
             return false;
         }
-        let Some((left, right)) = self.add_operands(assignment.expr.id) else {
+        let expr = self.counted_loop_assignment_expr(assignment);
+        let Some((left, right)) = self.add_operands(expr) else {
             return false;
         };
         (self.variable_identifier(left) == Some(counter)
@@ -783,7 +915,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         &self,
         assignment: &HirAssignment,
         counter: VariableId,
-        assigned_variables: &HashSet<VariableId>,
+        expr: ExprId,
     ) -> Option<ExprId> {
         if assignment.target == counter
             || assignment.index.is_some()
@@ -791,10 +923,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         {
             return None;
         }
-        if !assigned_variables.contains(&assignment.target) {
-            return None;
-        }
-        let (left, right) = self.add_operands(assignment.expr.id)?;
+        let (left, right) = self.add_operands(expr)?;
         if self.variable_identifier(left) == Some(assignment.target) {
             return Some(right);
         }
@@ -802,6 +931,42 @@ impl<'a> ScalarGraphBuilder<'a> {
             return Some(left);
         }
         None
+    }
+
+    fn counted_loop_assignment_expr(&self, assignment: &HirAssignment) -> ExprId {
+        let Some(expression) = self.mir.expressions.get(usize::from(assignment.expr.id)) else {
+            return assignment.expr.id;
+        };
+        let HirExprKind::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } = &expression.kind
+        else {
+            return assignment.expr.id;
+        };
+        if self.variable_identifier(*else_expr) == Some(assignment.target) {
+            *then_expr
+        } else {
+            assignment.expr.id
+        }
+    }
+
+    fn variable_value_from_snapshot(
+        &mut self,
+        variable: VariableId,
+        snapshot: &HashMap<VariableId, Option<ValueId>>,
+    ) -> Option<ValueId> {
+        match snapshot.get(&variable).copied() {
+            Some(value) => value,
+            None => self.default_variable_value(self.variable_value_type(variable)?),
+        }
+    }
+
+    fn allocate_loop_id(&mut self) -> Option<u32> {
+        let loop_id = self.next_loop_id;
+        self.next_loop_id = self.next_loop_id.checked_add(1)?;
+        Some(loop_id)
     }
 
     fn add_operands(&self, expr: ExprId) -> Option<(ExprId, ExprId)> {
@@ -836,18 +1001,6 @@ impl<'a> ScalarGraphBuilder<'a> {
             .iter()
             .find(|variable| variable.name == *name)
             .map(|variable| variable.id)
-    }
-
-    fn parameter_identifier(&self, expr: ExprId) -> Option<ParamId> {
-        let expression = self.mir.expressions.get(usize::from(expr))?;
-        let HirExprKind::Identifier { name } = &expression.kind else {
-            return None;
-        };
-        self.mir
-            .parameters
-            .iter()
-            .find(|parameter| parameter.name == *name)
-            .map(|parameter| parameter.id)
     }
 
     fn number_constant_expr(&self, expr: ExprId) -> Option<f64> {
@@ -1281,6 +1434,11 @@ impl<'a> ScalarGraphBuilder<'a> {
                 left,
                 right,
             } if self.is_real_constant(*right, 1.0) => Some(*left),
+            OptValueKind::Select {
+                then_value,
+                else_value,
+                ..
+            } if then_value == else_value => Some(*then_value),
             _ => None,
         }
     }
@@ -1378,7 +1536,14 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::Analysis { .. }
             | OptValueKind::Ddx { .. }
             | OptValueKind::DdtScale
+            | OptValueKind::LoopIndex { .. }
             | OptValueKind::EquationValue { .. } => BTreeMap::new(),
+            OptValueKind::CountedSum {
+                loop_id,
+                count,
+                initial,
+                term,
+            } => self.lower_counted_sum_derivatives(loop_id, count, initial, term),
             OptValueKind::Ddt { input, .. } => self.lower_ddt_derivatives(input),
             OptValueKind::NodePotential { node } => {
                 let derivative =
@@ -1698,6 +1863,43 @@ impl<'a> ScalarGraphBuilder<'a> {
         derivatives
     }
 
+    fn lower_counted_sum_derivatives(
+        &mut self,
+        loop_id: u32,
+        count: ValueId,
+        initial: ValueId,
+        term: ValueId,
+    ) -> BTreeMap<DerivativeLane, ValueId> {
+        let initial_derivatives = self.derivative_map(initial);
+        let term_derivatives = self.derivative_map(term);
+        let mut lanes: BTreeSet<_> = initial_derivatives.keys().copied().collect();
+        lanes.extend(term_derivatives.keys().copied());
+
+        let mut derivatives = BTreeMap::new();
+        for lane in lanes {
+            let initial = initial_derivatives
+                .get(&lane)
+                .copied()
+                .unwrap_or_else(|| self.zero_real());
+            let Some(term) = term_derivatives.get(&lane).copied() else {
+                derivatives.insert(lane, initial);
+                continue;
+            };
+            let derivative = self.push_value(
+                OptValueType::Real,
+                OptValueKind::CountedSum {
+                    loop_id,
+                    count,
+                    initial,
+                    term,
+                },
+            );
+            derivatives.insert(lane, derivative);
+        }
+
+        derivatives
+    }
+
     fn lower_ddt_derivatives(&mut self, input: ValueId) -> BTreeMap<DerivativeLane, ValueId> {
         let input_derivatives = self.derivative_map(input);
         let scale = self.ddt_scale();
@@ -1873,14 +2075,23 @@ impl<'a> ScalarGraphBuilder<'a> {
             .iter()
             .find(|variable| variable.name == *name)?;
         if let Some(value) = self.variable_values.get(&variable.id).copied() {
+            if scalar_trace_var(name) {
+                eprintln!("scalar var read: {name} value={value:?}");
+            }
             if value.is_none()
                 && let Some(contextual) = self.lower_contextual_variable_identifier(variable.id)
             {
+                if scalar_trace_var(name) {
+                    eprintln!("scalar var contextual: {name} value={contextual:?}");
+                }
                 return Some(Some(contextual));
             }
             return Some(value);
         }
 
+        if scalar_trace_var(name) {
+            eprintln!("scalar var read: {name} value=<default>");
+        }
         Some(Some(self.default_variable_value(variable.value_type)?))
     }
 
@@ -2441,6 +2652,16 @@ fn normalize_analysis_query(name: &str) -> Option<&'static str> {
     }
 }
 
+fn scalar_trace_var(name: &str) -> bool {
+    let Ok(filter) = std::env::var("RSPICE_SCALAR_TRACE_VAR") else {
+        return false;
+    };
+    filter
+        .split(',')
+        .map(str::trim)
+        .any(|item| !item.is_empty() && item == name)
+}
+
 fn binary_op(op: &str) -> Option<OptBinaryOp> {
     match op {
         "Add" => Some(OptBinaryOp::Add),
@@ -2573,6 +2794,18 @@ fn remap_value_kind(kind: &OptValueKind, remap: &[Option<ValueId>]) -> OptValueK
         OptValueKind::BranchUnknownFlow { branch_unknown } => OptValueKind::BranchUnknownFlow {
             branch_unknown: *branch_unknown,
         },
+        OptValueKind::LoopIndex { loop_id } => OptValueKind::LoopIndex { loop_id: *loop_id },
+        OptValueKind::CountedSum {
+            loop_id,
+            count,
+            initial,
+            term,
+        } => OptValueKind::CountedSum {
+            loop_id: *loop_id,
+            count: remap_value_id(*count, remap),
+            initial: remap_value_id(*initial, remap),
+            term: remap_value_id(*term, remap),
+        },
         OptValueKind::Unary { op, input } => OptValueKind::Unary {
             op: *op,
             input: remap_value_id(*input, remap),
@@ -2622,7 +2855,8 @@ fn validate_value_kind(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel, valu
         | OptValueKind::ThermalVoltage
         | OptValueKind::Multiplicity
         | OptValueKind::Time
-        | OptValueKind::Analysis { .. } => {}
+        | OptValueKind::Analysis { .. }
+        | OptValueKind::LoopIndex { .. } => {}
         OptValueKind::Ddx {
             value: input,
             pos_node,
@@ -2734,6 +2968,34 @@ fn validate_value_kind(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel, valu
                 value.id,
                 *else_value,
                 "else operand",
+            );
+        }
+        OptValueKind::CountedSum {
+            count,
+            initial,
+            term,
+            ..
+        } => {
+            validate_value_operand(
+                diagnostics,
+                opt.values.len(),
+                value.id,
+                *count,
+                "count operand",
+            );
+            validate_value_operand(
+                diagnostics,
+                opt.values.len(),
+                value.id,
+                *initial,
+                "initial operand",
+            );
+            validate_value_operand(
+                diagnostics,
+                opt.values.len(),
+                value.id,
+                *term,
+                "term operand",
             );
         }
         OptValueKind::EquationValue { equation } => {
@@ -2877,10 +3139,16 @@ fn collect_static_ops(values: &[OptValue], target: InvalidationClass) -> Vec<Opt
     let mut invalidation_memo = vec![None; values.len()];
     let mut parameter_memo = vec![None; values.len()];
     let mut temperature_memo = vec![None; values.len()];
+    let mut loop_index_memo = vec![None; values.len()];
     values
         .iter()
         .filter(|value| {
             if value_invalidation(values, value.id, &mut invalidation_memo) != target {
+                return false;
+            }
+            if !matches!(value.kind, OptValueKind::CountedSum { .. })
+                && value_depends_on_loop_index(values, value.id, &mut loop_index_memo)
+            {
                 return false;
             }
             match target {
@@ -2914,7 +3182,8 @@ fn value_invalidation(
         OptValueKind::RealConstant(_)
         | OptValueKind::BooleanConstant(_)
         | OptValueKind::Parameter { .. }
-        | OptValueKind::ParamGiven { .. } => InvalidationClass::InstanceStatic,
+        | OptValueKind::ParamGiven { .. }
+        | OptValueKind::LoopIndex { .. } => InvalidationClass::InstanceStatic,
         OptValueKind::Temperature | OptValueKind::ThermalVoltage => {
             InvalidationClass::TemperatureStatic
         }
@@ -2942,6 +3211,18 @@ fn value_invalidation(
             max_invalidation(
                 value_invalidation(values, then_value, memo),
                 value_invalidation(values, else_value, memo),
+            ),
+        ),
+        OptValueKind::CountedSum {
+            count,
+            initial,
+            term,
+            ..
+        } => max_invalidation(
+            value_invalidation(values, count, memo),
+            max_invalidation(
+                value_invalidation(values, initial, memo),
+                value_invalidation(values, term, memo),
             ),
         ),
     };
@@ -2974,6 +3255,7 @@ fn value_depends_on_parameter(
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
+        | OptValueKind::LoopIndex { .. }
         | OptValueKind::EquationValue { .. } => false,
         OptValueKind::Unary { input, .. } => value_depends_on_parameter(values, input, memo),
         OptValueKind::Binary { left, right, .. } => {
@@ -2988,6 +3270,16 @@ fn value_depends_on_parameter(
             value_depends_on_parameter(values, condition, memo)
                 || value_depends_on_parameter(values, then_value, memo)
                 || value_depends_on_parameter(values, else_value, memo)
+        }
+        OptValueKind::CountedSum {
+            count,
+            initial,
+            term,
+            ..
+        } => {
+            value_depends_on_parameter(values, count, memo)
+                || value_depends_on_parameter(values, initial, memo)
+                || value_depends_on_parameter(values, term, memo)
         }
     };
     memo[index] = Some(depends);
@@ -3019,6 +3311,7 @@ fn value_depends_on_temperature(
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::BranchUnknownFlow { .. }
+        | OptValueKind::LoopIndex { .. }
         | OptValueKind::EquationValue { .. } => false,
         OptValueKind::Unary { input, .. } => value_depends_on_temperature(values, input, memo),
         OptValueKind::Binary { left, right, .. } => {
@@ -3033,6 +3326,73 @@ fn value_depends_on_temperature(
             value_depends_on_temperature(values, condition, memo)
                 || value_depends_on_temperature(values, then_value, memo)
                 || value_depends_on_temperature(values, else_value, memo)
+        }
+        OptValueKind::CountedSum {
+            count,
+            initial,
+            term,
+            ..
+        } => {
+            value_depends_on_temperature(values, count, memo)
+                || value_depends_on_temperature(values, initial, memo)
+                || value_depends_on_temperature(values, term, memo)
+        }
+    };
+    memo[index] = Some(depends);
+    depends
+}
+
+fn value_depends_on_loop_index(
+    values: &[OptValue],
+    value: ValueId,
+    memo: &mut [Option<bool>],
+) -> bool {
+    let index = usize::from(value);
+    if let Some(depends) = memo[index] {
+        return depends;
+    }
+
+    let depends = match values[index].kind {
+        OptValueKind::LoopIndex { .. } => true,
+        OptValueKind::RealConstant(_)
+        | OptValueKind::BooleanConstant(_)
+        | OptValueKind::Parameter { .. }
+        | OptValueKind::ParamGiven { .. }
+        | OptValueKind::Temperature
+        | OptValueKind::ThermalVoltage
+        | OptValueKind::Multiplicity
+        | OptValueKind::Time
+        | OptValueKind::Analysis { .. }
+        | OptValueKind::Ddx { .. }
+        | OptValueKind::Ddt { .. }
+        | OptValueKind::DdtScale
+        | OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. }
+        | OptValueKind::EquationValue { .. } => false,
+        OptValueKind::Unary { input, .. } => value_depends_on_loop_index(values, input, memo),
+        OptValueKind::Binary { left, right, .. } => {
+            value_depends_on_loop_index(values, left, memo)
+                || value_depends_on_loop_index(values, right, memo)
+        }
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => {
+            value_depends_on_loop_index(values, condition, memo)
+                || value_depends_on_loop_index(values, then_value, memo)
+                || value_depends_on_loop_index(values, else_value, memo)
+        }
+        OptValueKind::CountedSum {
+            count,
+            initial,
+            term,
+            ..
+        } => {
+            value_depends_on_loop_index(values, count, memo)
+                || value_depends_on_loop_index(values, initial, memo)
+                || value_depends_on_loop_index(values, term, memo)
         }
     };
     memo[index] = Some(depends);
