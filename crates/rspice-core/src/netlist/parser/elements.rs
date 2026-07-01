@@ -819,16 +819,21 @@ fn parse_pspice_u_dff(
         });
     }
 
-    let prebar = pspice_u_active_low_control_port(&pins[0]);
-    let clrbar = pspice_u_active_low_control_port(&pins[1]);
-    let clk = pspice_u_required_digital_port(&pins[2], "clock", fields, line_num)?;
+    let prebar = pspice_u_active_low_control_port(&pins[0], elements);
+    let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
+    let clk = pspice_u_required_digital_port(&pins[2], "clock", fields, line_num, elements)?;
     let d_offset = 3;
     let q_offset = d_offset + count;
     let qb_offset = q_offset + count;
 
     for index in 0..count {
-        let data =
-            pspice_u_required_digital_port(&pins[d_offset + index], "D input", fields, line_num)?;
+        let data = pspice_u_required_digital_port(
+            &pins[d_offset + index],
+            "D input",
+            fields,
+            line_num,
+            elements,
+        )?;
         let q = pspice_u_nullable_output_port(&pins[q_offset + index]);
         let qb = pspice_u_nullable_output_port(&pins[qb_offset + index]);
         let instance_name = pspice_u_lowered_instance_name(name, count, index);
@@ -868,19 +873,30 @@ fn parse_pspice_u_jkff(
         });
     }
 
-    let prebar = pspice_u_active_low_control_port(&pins[0]);
-    let clrbar = pspice_u_active_low_control_port(&pins[1]);
-    let clkbar = pspice_u_required_inverted_digital_port(&pins[2], "clock", fields, line_num)?;
+    let prebar = pspice_u_active_low_control_port(&pins[0], elements);
+    let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
+    let clkbar =
+        pspice_u_required_inverted_digital_port(&pins[2], "clock", fields, line_num, elements)?;
     let j_offset = 3;
     let k_offset = j_offset + count;
     let q_offset = k_offset + count;
     let qb_offset = q_offset + count;
 
     for index in 0..count {
-        let j =
-            pspice_u_required_digital_port(&pins[j_offset + index], "J input", fields, line_num)?;
-        let k =
-            pspice_u_required_digital_port(&pins[k_offset + index], "K input", fields, line_num)?;
+        let j = pspice_u_required_digital_port(
+            &pins[j_offset + index],
+            "J input",
+            fields,
+            line_num,
+            elements,
+        )?;
+        let k = pspice_u_required_digital_port(
+            &pins[k_offset + index],
+            "K input",
+            fields,
+            line_num,
+            elements,
+        )?;
         let q = pspice_u_nullable_output_port(&pins[q_offset + index]);
         let qb = pspice_u_nullable_output_port(&pins[qb_offset + index]);
         let instance_name = pspice_u_lowered_instance_name(name, count, index);
@@ -921,7 +937,8 @@ fn parse_pspice_u_tristate(
         });
     }
 
-    let enable = pspice_u_required_digital_port(&pins[count], "enable", fields, line_num)?;
+    let enable =
+        pspice_u_required_digital_port(&pins[count], "enable", fields, line_num, elements)?;
     let output_offset = count + 1;
 
     for index in 0..count {
@@ -931,15 +948,23 @@ fn parse_pspice_u_tristate(
                 "tri-state input",
                 fields,
                 line_num,
+                elements,
             )?
         } else {
-            pspice_u_required_digital_port(&pins[index], "tri-state input", fields, line_num)?
+            pspice_u_required_digital_port(
+                &pins[index],
+                "tri-state input",
+                fields,
+                line_num,
+                elements,
+            )?
         };
         let output = pspice_u_required_digital_port(
             &pins[output_offset + index],
             "tri-state output",
             fields,
             line_num,
+            elements,
         )?;
         let instance_name = pspice_u_lowered_instance_name(name, count, index);
         let ports = vec![input, enable.clone(), output];
@@ -986,6 +1011,7 @@ fn pspice_u_required_digital_port(
     role: &str,
     fields: &[String],
     line_num: usize,
+    elements: &mut Vec<Element>,
 ) -> Result<XspicePort, ParseError> {
     if pspice_u_is_no_connect(raw) {
         return Err(ParseError::Syntax {
@@ -997,6 +1023,7 @@ fn pspice_u_required_digital_port(
         });
     }
 
+    ensure_pspice_u_constant_driver(raw, elements);
     Ok(XspicePort::Digital(normalize_pspice_u_node(raw)))
 }
 
@@ -1005,6 +1032,7 @@ fn pspice_u_required_inverted_digital_port(
     role: &str,
     fields: &[String],
     line_num: usize,
+    elements: &mut Vec<Element>,
 ) -> Result<XspicePort, ParseError> {
     if pspice_u_is_no_connect(raw) {
         return Err(ParseError::Syntax {
@@ -1016,13 +1044,15 @@ fn pspice_u_required_inverted_digital_port(
         });
     }
 
+    ensure_pspice_u_constant_driver(raw, elements);
     Ok(XspicePort::DigitalInverted(normalize_pspice_u_node(raw)))
 }
 
-fn pspice_u_active_low_control_port(raw: &str) -> XspicePort {
+fn pspice_u_active_low_control_port(raw: &str, elements: &mut Vec<Element>) -> XspicePort {
     if pspice_u_is_inactive_control(raw) {
         XspicePort::Null
     } else {
+        ensure_pspice_u_constant_driver(raw, elements);
         XspicePort::DigitalInverted(normalize_pspice_u_node(raw))
     }
 }
@@ -1099,6 +1129,57 @@ fn pspice_u_is_no_connect(raw: &str) -> bool {
 fn pspice_u_is_inactive_control(raw: &str) -> bool {
     let normalized = raw.trim().to_ascii_uppercase();
     matches!(normalized.as_str(), "$D_HI" | "$D_NC" | "NULL")
+}
+
+fn ensure_pspice_u_constant_driver(raw: &str, elements: &mut Vec<Element>) {
+    let normalized = raw.trim().to_ascii_uppercase();
+    let Some((node, model, base_name)) = (match normalized.as_str() {
+        "$D_HI" => Some(("$D_HI", "d_pullup", "A__PSPICE_D_HI")),
+        "$D_LO" => Some(("$D_LO", "d_pulldown", "A__PSPICE_D_LO")),
+        _ => None,
+    }) else {
+        return;
+    };
+
+    if elements.iter().any(|element| {
+        matches!(
+            &element.kind,
+            ElementKind::Xspice { model: existing_model, ports, .. }
+                if existing_model.eq_ignore_ascii_case(model)
+                    && ports == &[XspicePort::Digital(node.to_string())]
+        )
+    }) {
+        return;
+    }
+
+    let name = unique_pspice_u_generated_name(elements, base_name);
+    push_pspice_u_xspice_element(
+        elements,
+        name,
+        model,
+        vec![XspicePort::Digital(node.to_string())],
+    );
+}
+
+fn unique_pspice_u_generated_name(elements: &[Element], base_name: &str) -> String {
+    if !elements
+        .iter()
+        .any(|element| element.name.eq_ignore_ascii_case(base_name))
+    {
+        return base_name.to_string();
+    }
+
+    let mut suffix = 1usize;
+    loop {
+        let candidate = format!("{base_name}_{suffix}");
+        if !elements
+            .iter()
+            .any(|element| element.name.eq_ignore_ascii_case(&candidate))
+        {
+            return candidate;
+        }
+        suffix += 1;
+    }
 }
 
 pub(super) fn parse_diode(

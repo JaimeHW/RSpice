@@ -4718,6 +4718,57 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_digital_constants_create_xspice_drivers() {
+        let netlist = Netlist::parse(
+            "pspice u digital constants\n\
+             U1 DFF(1) $G_DPWR $G_DGND $D_LO clear clk $D_HI q qb dly\n\
+             .end\n",
+        )
+        .expect("PSpice U-device digital constants should get XSPICE drivers");
+
+        assert!(netlist.elements.iter().any(|element| {
+            matches!(
+                &element.kind,
+                ElementKind::Xspice { model, ports, .. }
+                    if model == "d_pulldown"
+                        && ports == &[XspicePort::Digital("$D_LO".to_string())]
+            )
+        }));
+        assert!(netlist.elements.iter().any(|element| {
+            matches!(
+                &element.kind,
+                ElementKind::Xspice { model, ports, .. }
+                    if model == "d_pullup"
+                        && ports == &[XspicePort::Digital("$D_HI".to_string())]
+            )
+        }));
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U1")
+            .expect("U1 exists");
+
+        match &element.kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_dff");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("$D_HI".to_string()),
+                        XspicePort::Digital("CLK".to_string()),
+                        XspicePort::DigitalInverted("$D_LO".to_string()),
+                        XspicePort::DigitalInverted("CLEAR".to_string()),
+                        XspicePort::Digital("Q".to_string()),
+                        XspicePort::Digital("QB".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn pspice_u_dff_array_expands_to_scalar_xspice_instances() {
         let netlist = Netlist::parse(
             "pspice u dff array\n\
