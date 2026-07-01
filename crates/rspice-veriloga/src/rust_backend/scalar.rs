@@ -2,10 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::canonical_ir::opt::LIMEXP_MAX;
 use crate::canonical_ir::{
-    BranchId, CanonicalIrArtifact, CanonicalValueType, DerivativeLane, DerivativeLaneKind,
-    EquationId, ExprId, HirAnalogOperator, HirExprKind, HirStatement, InvalidationClass,
-    MirEquation, MirEquationKind, NodeId, OptBinaryOp, OptOp, OptUnaryOp, OptValue, OptValueKind,
-    OptValueType, ValueId,
+    BranchId, BranchUnknownId, CanonicalIrArtifact, CanonicalValueType, DerivativeLane,
+    DerivativeLaneKind, EquationId, ExprId, HirAnalogOperator, HirExprKind, HirStatement,
+    InvalidationClass, MirEquation, MirEquationKind, NodeId, OptBinaryOp, OptOp, OptUnaryOp,
+    OptValue, OptValueKind, OptValueType, ValueId,
 };
 
 use super::expr::{DdtSlots, LoweredVariable, analysis_predicate_expr, parameter_field_names};
@@ -221,7 +221,11 @@ fn generate_stamp_file(
             stamp_live.contains(&value.id) && matches!(value.kind, OptValueKind::ParamGiven { .. })
         });
     let stamp_needs_branches = artifact.opt.values.iter().any(|value| {
-        stamp_live.contains(&value.id) && matches!(value.kind, OptValueKind::BranchFlow { .. })
+        stamp_live.contains(&value.id)
+            && matches!(
+                value.kind,
+                OptValueKind::BranchFlow { .. } | OptValueKind::BranchUnknownFlow { .. }
+            )
     });
     let mut out = String::new();
     out.push_str("#![allow(dead_code, unused_imports, unused_parens, unused_variables)]\n\n");
@@ -2180,6 +2184,10 @@ fn emit_value_expr(
             let slot = branch_flow_slot(artifact, *branch)?;
             format!("ctx.branch_current(branches[{slot}])")
         }
+        OptValueKind::BranchUnknownFlow { branch_unknown } => {
+            let slot = branch_unknown_flow_slot(artifact, *branch_unknown)?;
+            format!("ctx.branch_current(branches[{slot}])")
+        }
         OptValueKind::Unary { op, input } => emit_unary_expr(
             *op,
             value_ref(artifact, parameter_fields, *input, context)?,
@@ -2750,6 +2758,7 @@ fn value_graph_contains_ddt(
         | OptValueKind::DdtScale
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::EquationValue { .. } => Ok(false),
     }
 }
@@ -2953,6 +2962,9 @@ fn validate_scalar_value_graph(
             OptValueKind::BranchFlow { branch } => {
                 branch_flow_slot(artifact, branch)?;
             }
+            OptValueKind::BranchUnknownFlow { branch_unknown } => {
+                branch_unknown_flow_slot(artifact, branch_unknown)?;
+            }
             OptValueKind::EquationValue { .. } => {
                 return Err(unsupported(
                     artifact,
@@ -3011,6 +3023,7 @@ fn mark_stamp_live_value(
         | OptValueKind::Analysis { .. }
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::EquationValue { .. } => {}
         OptValueKind::Ddx {
             value: input,
@@ -3124,6 +3137,7 @@ fn visit_live_value(
         | OptValueKind::Analysis { .. }
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::EquationValue { .. } => {}
         OptValueKind::Ddx {
             value: input,
@@ -3238,6 +3252,9 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
         match value.kind {
             OptValueKind::BranchFlow { branch } => {
                 branch_flow_slot(artifact, branch)?;
+            }
+            OptValueKind::BranchUnknownFlow { branch_unknown } => {
+                branch_unknown_flow_slot(artifact, branch_unknown)?;
             }
             OptValueKind::ParamGiven { .. }
             | OptValueKind::Temperature
@@ -3414,6 +3431,18 @@ fn branch_flow_slot(
         ));
     }
     Ok(usize::from(first.id))
+}
+
+fn branch_unknown_flow_slot(
+    artifact: &CanonicalIrArtifact,
+    branch_unknown: BranchUnknownId,
+) -> Result<usize, RustBackendError> {
+    artifact
+        .mir
+        .branch_unknowns
+        .get(usize::from(branch_unknown))
+        .map(|unknown| usize::from(unknown.id))
+        .ok_or_else(|| unsupported(artifact, format!("missing branch unknown {branch_unknown}")))
 }
 
 fn unsupported(artifact: &CanonicalIrArtifact, feature: impl Into<String>) -> RustBackendError {

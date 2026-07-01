@@ -134,6 +134,9 @@ pub enum OptValueKind {
     BranchFlow {
         branch: BranchId,
     },
+    BranchUnknownFlow {
+        branch_unknown: BranchUnknownId,
+    },
     Unary {
         op: OptUnaryOp,
         input: ValueId,
@@ -216,7 +219,7 @@ impl OptModel {
         }
         let mut equation_values = Vec::with_capacity(mir.equations.len());
         for equation in &mir.equations {
-            let value = builder.lower_equation_expression(equation.expression.id);
+            let value = builder.lower_equation_expression(equation);
             builder.cache_declared_branch_current(equation, value);
             equation_values.push(value);
         }
@@ -306,7 +309,10 @@ struct ScalarGraphBuilder<'a> {
     value_keys: HashMap<OptValueKey, ValueId>,
     expression_values: HashMap<ExprId, Option<ValueId>>,
     variable_values: HashMap<VariableId, Option<ValueId>>,
+    variable_assignment_exprs: HashMap<VariableId, ExprId>,
+    variable_lowering_stack: HashSet<VariableId>,
     branch_current_values: HashMap<String, ValueId>,
+    branch_flow_context: Option<BranchUnknownId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -332,6 +338,7 @@ enum OptValueKey {
     DdtScale,
     NodePotential(NodeId),
     BranchFlow(BranchId),
+    BranchUnknownFlow(BranchUnknownId),
     Unary {
         op: OptUnaryOp,
         input: ValueId,
@@ -377,6 +384,9 @@ impl OptValueKey {
             OptValueKind::DdtScale => Self::DdtScale,
             OptValueKind::NodePotential { node } => Self::NodePotential(*node),
             OptValueKind::BranchFlow { branch } => Self::BranchFlow(*branch),
+            OptValueKind::BranchUnknownFlow { branch_unknown } => {
+                Self::BranchUnknownFlow(*branch_unknown)
+            }
             OptValueKind::Unary { op, input } => Self::Unary {
                 op: *op,
                 input: *input,
@@ -409,7 +419,10 @@ impl<'a> ScalarGraphBuilder<'a> {
             value_keys: HashMap::new(),
             expression_values: HashMap::new(),
             variable_values: HashMap::new(),
+            variable_assignment_exprs: HashMap::new(),
+            variable_lowering_stack: HashSet::new(),
             branch_current_values: HashMap::new(),
+            branch_flow_context: None,
         }
     }
 
@@ -499,6 +512,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::Analysis { .. }
             | OptValueKind::NodePotential { .. }
             | OptValueKind::BranchFlow { .. }
+            | OptValueKind::BranchUnknownFlow { .. }
             | OptValueKind::EquationValue { .. } => {}
             OptValueKind::Ddx {
                 value,
@@ -566,6 +580,12 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_assignment_statement(&mut self, assignment: &HirAssignment) {
+        if assignment.index.is_none() && supported_assignment_value_type(assignment.expr_type) {
+            self.variable_assignment_exprs
+                .insert(assignment.target, assignment.expr.id);
+        } else {
+            self.variable_assignment_exprs.remove(&assignment.target);
+        }
         let value = if assignment.index.is_none()
             && supported_assignment_value_type(assignment.expr_type)
         {
@@ -616,6 +636,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         let original_value_keys = self.value_keys.clone();
         let original_expression_values = self.expression_values.clone();
         let original_variable_values = self.variable_values.clone();
+        let original_variable_assignment_exprs = self.variable_assignment_exprs.clone();
 
         let matched = self.try_lower_counted_accumulator_loop(loop_statement);
         if matched {
@@ -626,6 +647,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             self.value_keys = original_value_keys;
             self.expression_values = original_expression_values;
             self.variable_values = original_variable_values;
+            self.variable_assignment_exprs = original_variable_assignment_exprs;
             false
         }
     }
@@ -902,6 +924,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             match statement {
                 HirStatement::Assignment(assignment) => {
                     self.variable_values.insert(assignment.target, None);
+                    self.variable_assignment_exprs.remove(&assignment.target);
                 }
                 HirStatement::Loop(loop_statement) => {
                     self.mark_statement_assignments_unknown(&loop_statement.body);
@@ -953,7 +976,17 @@ impl<'a> ScalarGraphBuilder<'a> {
         lowered
     }
 
-    fn lower_equation_expression(&mut self, expr: ExprId) -> Option<ValueId> {
+    fn lower_equation_expression(&mut self, equation: &MirEquation) -> Option<ValueId> {
+        self.expression_values.clear();
+        let previous_context = self.branch_flow_context;
+        self.branch_flow_context = self.equation_branch_unknown(equation);
+        let lowered = self.lower_equation_expression_inner(equation.expression.id);
+        self.branch_flow_context = previous_context;
+        self.expression_values.clear();
+        lowered
+    }
+
+    fn lower_equation_expression_inner(&mut self, expr: ExprId) -> Option<ValueId> {
         let expression = self.mir.expressions.get(usize::from(expr))?;
         match &expression.kind {
             HirExprKind::AnalogOperator {
@@ -980,6 +1013,17 @@ impl<'a> ScalarGraphBuilder<'a> {
             }
             _ => self.lower_expression(expr),
         }
+    }
+
+    fn equation_branch_unknown(&self, equation: &MirEquation) -> Option<BranchUnknownId> {
+        if equation.kind != MirEquationKind::Potential {
+            return None;
+        }
+        self.mir
+            .branch_unknowns
+            .iter()
+            .find(|unknown| unknown.equation == equation.id)
+            .map(|unknown| unknown.id)
     }
 
     fn push_value(&mut self, value_type: OptValueType, kind: OptValueKind) -> ValueId {
@@ -1349,6 +1393,11 @@ impl<'a> ScalarGraphBuilder<'a> {
                 } else {
                     BTreeMap::new()
                 }
+            }
+            OptValueKind::BranchUnknownFlow { branch_unknown } => {
+                let derivative =
+                    self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
+                BTreeMap::from([(DerivativeLane::branch_unknown(branch_unknown), derivative)])
             }
             OptValueKind::Unary { op, input } => self.lower_unary_derivatives(value, op, input),
             OptValueKind::Binary { op, left, right } => {
@@ -1824,10 +1873,26 @@ impl<'a> ScalarGraphBuilder<'a> {
             .iter()
             .find(|variable| variable.name == *name)?;
         if let Some(value) = self.variable_values.get(&variable.id).copied() {
+            if value.is_none()
+                && let Some(contextual) = self.lower_contextual_variable_identifier(variable.id)
+            {
+                return Some(Some(contextual));
+            }
             return Some(value);
         }
 
         Some(Some(self.default_variable_value(variable.value_type)?))
+    }
+
+    fn lower_contextual_variable_identifier(&mut self, variable: VariableId) -> Option<ValueId> {
+        self.branch_flow_context?;
+        if !self.variable_lowering_stack.insert(variable) {
+            return None;
+        }
+        let expr = self.variable_assignment_exprs.get(&variable).copied();
+        let lowered = expr.and_then(|expr| self.lower_expression(expr));
+        self.variable_lowering_stack.remove(&variable);
+        lowered
     }
 
     fn default_variable_value(&mut self, value_type: CanonicalValueType) -> Option<ValueId> {
@@ -1851,7 +1916,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         neg: Option<&str>,
     ) -> Option<ValueId> {
         if is_flow_access_name(access.as_str()) {
-            return None;
+            return self.lower_direct_branch_flow(pos, neg);
         }
 
         let pos = self.resolve_endpoint(pos)?;
@@ -1861,6 +1926,48 @@ impl<'a> ScalarGraphBuilder<'a> {
         };
 
         Some(self.lower_voltage(pos, neg))
+    }
+
+    fn lower_direct_branch_flow(&mut self, pos: &SmolStr, neg: Option<&str>) -> Option<ValueId> {
+        let pos = self.resolve_endpoint(pos)?;
+        let neg = match neg {
+            Some(neg) => self.resolve_endpoint(neg)?,
+            None => None,
+        };
+        let (branch_unknown, reversed) = self
+            .context_branch_unknown_by_nodes(pos, neg)
+            .or_else(|| self.branch_unknown_by_nodes(pos, neg))?;
+        let flow = self.push_value(
+            OptValueType::Real,
+            OptValueKind::BranchUnknownFlow { branch_unknown },
+        );
+        if reversed {
+            Some(self.push_value(
+                OptValueType::Real,
+                OptValueKind::Unary {
+                    op: OptUnaryOp::Neg,
+                    input: flow,
+                },
+            ))
+        } else {
+            Some(flow)
+        }
+    }
+
+    fn context_branch_unknown_by_nodes(
+        &self,
+        pos_node: Option<NodeId>,
+        neg_node: Option<NodeId>,
+    ) -> Option<(BranchUnknownId, bool)> {
+        let branch_unknown = self.branch_flow_context?;
+        let unknown = self.mir.branch_unknowns.get(usize::from(branch_unknown))?;
+        if unknown.pos_node == pos_node && unknown.neg_node == neg_node {
+            return Some((unknown.id, false));
+        }
+        if unknown.pos_node == neg_node && unknown.neg_node == pos_node {
+            return Some((unknown.id, true));
+        }
+        None
     }
 
     fn lower_named_branch_access(&mut self, access: &SmolStr, name: &SmolStr) -> Option<ValueId> {
@@ -1974,6 +2081,34 @@ impl<'a> ScalarGraphBuilder<'a> {
             .iter()
             .find(|branch| branch.name.as_str() == name)
             .map(|branch| branch.id)
+    }
+
+    fn branch_unknown_by_nodes(
+        &self,
+        pos_node: Option<NodeId>,
+        neg_node: Option<NodeId>,
+    ) -> Option<(BranchUnknownId, bool)> {
+        let mut matches = self
+            .mir
+            .branch_unknowns
+            .iter()
+            .filter(|unknown| unknown.pos_node == pos_node && unknown.neg_node == neg_node);
+        if let Some(unknown) = matches.next()
+            && matches.next().is_none()
+        {
+            return Some((unknown.id, false));
+        }
+
+        let mut reversed_matches = self
+            .mir
+            .branch_unknowns
+            .iter()
+            .filter(|unknown| unknown.pos_node == neg_node && unknown.neg_node == pos_node);
+        let unknown = reversed_matches.next()?;
+        if reversed_matches.next().is_some() {
+            return None;
+        }
+        Some((unknown.id, true))
     }
 
     fn branch_unknown_for_branch(&self, branch_id: BranchId) -> Option<BranchUnknownId> {
@@ -2435,6 +2570,9 @@ fn remap_value_kind(kind: &OptValueKind, remap: &[Option<ValueId>]) -> OptValueK
         OptValueKind::DdtScale => OptValueKind::DdtScale,
         OptValueKind::NodePotential { node } => OptValueKind::NodePotential { node: *node },
         OptValueKind::BranchFlow { branch } => OptValueKind::BranchFlow { branch: *branch },
+        OptValueKind::BranchUnknownFlow { branch_unknown } => OptValueKind::BranchUnknownFlow {
+            branch_unknown: *branch_unknown,
+        },
         OptValueKind::Unary { op, input } => OptValueKind::Unary {
             op: *op,
             input: remap_value_id(*input, remap),
@@ -2537,6 +2675,17 @@ fn validate_value_kind(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel, valu
                     format!(
                         "OptIR value {} branch {} is out of range for {} branches",
                         value.id, branch, opt.branch_count
+                    ),
+                ));
+            }
+        }
+        OptValueKind::BranchUnknownFlow { branch_unknown } => {
+            if branch_unknown.index() >= opt.branch_unknown_count {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::OptValidation,
+                    format!(
+                        "OptIR value {} branch unknown {} is out of range for {} branch unknowns",
+                        value.id, branch_unknown, opt.branch_unknown_count
                     ),
                 ));
             }
@@ -2777,6 +2926,7 @@ fn value_invalidation(
         | OptValueKind::DdtScale => InvalidationClass::NewtonIteration,
         OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::EquationValue { .. } => InvalidationClass::NewtonIteration,
         OptValueKind::Unary { input, .. } => value_invalidation(values, input, memo),
         OptValueKind::Binary { left, right, .. } => max_invalidation(
@@ -2823,6 +2973,7 @@ fn value_depends_on_parameter(
         | OptValueKind::DdtScale
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::EquationValue { .. } => false,
         OptValueKind::Unary { input, .. } => value_depends_on_parameter(values, input, memo),
         OptValueKind::Binary { left, right, .. } => {
@@ -2867,6 +3018,7 @@ fn value_depends_on_temperature(
         | OptValueKind::DdtScale
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. }
         | OptValueKind::EquationValue { .. } => false,
         OptValueKind::Unary { input, .. } => value_depends_on_temperature(values, input, memo),
         OptValueKind::Binary { left, right, .. } => {

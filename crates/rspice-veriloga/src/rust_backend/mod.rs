@@ -297,4 +297,43 @@ endmodule
         assert!(stamp.contains("eval_ddt("), "{stamp}");
         assert!(stamp.contains("stamp_current_reactive"), "{stamp}");
     }
+
+    #[test]
+    fn scalar_backend_lowers_direct_branch_flow_ddt_potential() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module direct_flow_inductor(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real l = 1.0e-9 from (0:inf);
+    parameter real r = 1.0 from (0:inf);
+    real l_term;
+    analog begin
+        l_term = ddt(l * I(p, n));
+        V(p, n) <+ r * I(p, n);
+        V(p, n) <+ l_term;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("direct branch-flow ddt potential should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("eval_ddt("), "{stamp}");
+        assert!(stamp.contains("stamp_potential_branch1_local"), "{stamp}");
+    }
 }

@@ -226,6 +226,11 @@ impl<'a> OptEvaluator<'a> {
                 &self.inputs.branch_flows,
                 branch.index(),
             )?)),
+            OptValueKind::BranchUnknownFlow { branch_unknown } => Ok(OptEvalValue::Real(input_at(
+                "branch_flow",
+                &self.inputs.branch_flows,
+                branch_unknown.index(),
+            )?)),
             OptValueKind::Unary { op, input } => self.evaluate_unary(value, *op, *input),
             OptValueKind::Binary { op, left, right } => {
                 self.evaluate_binary(value, *op, *left, *right)
