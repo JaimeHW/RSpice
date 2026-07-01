@@ -378,7 +378,6 @@ impl<'a> Lexer<'a> {
     fn parse_number(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
         let mut end = 0;
         let mut _has_dot = false;
-        let mut has_exp = false;
         let chars: Vec<char> = input.chars().collect();
 
         // Optional leading sign
@@ -402,7 +401,6 @@ impl<'a> Lexer<'a> {
 
         // Exponent part (e or E)
         if end < chars.len() && (chars[end] == 'e' || chars[end] == 'E') {
-            has_exp = true;
             end += 1;
             // Optional exponent sign
             if end < chars.len() && (chars[end] == '-' || chars[end] == '+') {
@@ -433,8 +431,9 @@ impl<'a> Lexer<'a> {
                     .map_err(|_| LexError::InvalidNumber(num_str.to_string(), self.line))?
             };
 
-        // Check for SPICE suffix (only if no scientific notation was used)
-        let (multiplier, suffix_len) = if !has_exp && end < chars.len() {
+        // Check for SPICE suffix. Xyce/ngspice-style decks can append a scale
+        // suffix after a valid exponent (`1e3k`, `1e6um`).
+        let (multiplier, suffix_len) = if end < chars.len() {
             parse_spice_suffix(&chars[end..])
         } else {
             (1.0, 0)
@@ -605,6 +604,22 @@ fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
 
         // Voltage/current units with engineering prefix (e.g., mV, uA, kV).
         if c2 == 'V' || c2 == 'A' {
+            match c1 {
+                'T' => return (1e12, 2),
+                'G' => return (1e9, 2),
+                'K' => return (1e3, 2),
+                'M' => return (1e-3, 2),
+                'U' => return (1e-6, 2),
+                'N' => return (1e-9, 2),
+                'P' => return (1e-12, 2),
+                'F' => return (1e-15, 2),
+                _ => {}
+            }
+        }
+
+        // Length units (meters) with engineering prefix. Bare `m` remains the
+        // SPICE milli scale; only a second `m` unit designator is neutral.
+        if c2 == 'M' {
             match c1 {
                 'T' => return (1e12, 2),
                 'G' => return (1e9, 2),
@@ -882,6 +897,34 @@ mod tests {
         );
         assert_eq!(parse_spice_value(".1s").expect(".1s parses"), 0.1);
         assert_eq!(parse_spice_value("10s").expect("10s parses"), 10.0);
+    }
+
+    #[test]
+    fn prefixed_meter_suffixes_are_consumed_after_decimal_and_exponent_values() {
+        let tokens = tokenize("M1 d g s b nmos L=0.35um W=.6uM TOX=50.0nm\n").expect("tokenize");
+        let has_number = |lexeme: &str, expected: Value| {
+            tokens.iter().any(|token| match token.kind {
+                TokenKind::Number(value) if token.lexeme == lexeme => {
+                    (value - expected).abs() <= expected.abs().max(1.0) * 1.0e-15
+                }
+                _ => false,
+            })
+        };
+
+        assert!(has_number("0.35um", 0.35e-6));
+        assert!(has_number(".6uM", 0.6e-6));
+        assert!(has_number("50.0nm", 50.0e-9));
+        assert!(
+            !tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Ident("M".to_string())),
+            "prefixed meter unit must not leave a stray M token: {tokens:?}"
+        );
+        assert!((parse_spice_value("1.0e6um").expect("1e6um parses") - 1.0).abs() <= 1.0e-15);
+        assert!((parse_spice_value("1.0e3mm").expect("1e3mm parses") - 1.0).abs() <= 1.0e-15);
+        assert!((parse_spice_value("50nm").expect("50nm parses") - 50.0e-9).abs() <= 1.0e-21);
+        assert!((parse_spice_value("1.0e3m").expect("bare m is milli") - 1.0).abs() <= 1.0e-15);
+        assert!((parse_spice_value("1.0e3M").expect("bare M is milli") - 1.0).abs() <= 1.0e-15);
     }
 
     #[test]
