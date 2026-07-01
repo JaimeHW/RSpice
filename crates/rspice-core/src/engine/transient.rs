@@ -2706,7 +2706,8 @@ impl Engine {
                         max_step,
                         force_accept_device_truncation_limit,
                     );
-                    if t > 9.5e-8 && dt < 1.0e-15 {
+                    if std::env::var_os("RSPICE_GRID_DEBUG").is_some() && t > 9.5e-8 && dt < 1.0e-15
+                    {
                         log::warn!(
                             "LTE FORCE-ACCEPT at t={:.12e}s accepted_t={:.12e}s dt={:.3e} next_dt={:.3e} trunc_limit={:?} lte={:.3e} retry_count={}",
                             t,
