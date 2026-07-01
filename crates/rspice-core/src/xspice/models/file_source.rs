@@ -30,24 +30,37 @@ struct RawFileSourceField {
 #[derive(Debug, Clone)]
 struct FileSourceRow {
     time: Value,
-    values: Vec<Value>,
 }
 
 #[derive(Debug, Clone)]
 struct FileSourceRowsData {
     rows: Vec<FileSourceRow>,
+    values: Vec<Value>,
+    width: usize,
     strictly_increasing_time: bool,
 }
 
 impl FileSourceRowsData {
-    fn new(rows: Vec<FileSourceRow>) -> Self {
+    fn new(rows: Vec<FileSourceRow>, values: Vec<Value>, width: usize) -> Self {
         let strictly_increasing_time = rows
             .windows(2)
             .all(|window| window[0].time < window[1].time);
         Self {
             rows,
+            values,
+            width,
             strictly_increasing_time,
         }
+    }
+
+    fn row_values(&self, row: usize) -> &[Value] {
+        let Some(start) = row.checked_mul(self.width) else {
+            return &[];
+        };
+        let Some(end) = start.checked_add(self.width) else {
+            return &[];
+        };
+        self.values.get(start..end).unwrap_or(&[])
     }
 }
 
@@ -476,9 +489,10 @@ fn transform_rows(
     let amploffset = vector_transform_param(ctx, "amploffset")?;
 
     let expected_columns = width + 1;
-    let mut rows = Vec::with_capacity(raw_fields.len() / expected_columns);
+    let row_capacity = raw_fields.len() / expected_columns;
+    let mut rows = Vec::with_capacity(row_capacity);
+    let mut values = Vec::with_capacity(row_capacity.saturating_mul(width));
     let mut row_time = 0.0;
-    let mut row_values = Vec::with_capacity(width);
     let mut row_column = 0;
     let mut previous_time = timeoffset;
     for raw in raw_fields {
@@ -509,21 +523,16 @@ fn transform_rows(
 
         if row_column == 0 {
             row_time = value;
-            row_values.clear();
         } else {
-            row_values.push(value);
+            values.push(value);
         }
         row_column += 1;
         if row_column == expected_columns {
-            let values = std::mem::take(&mut row_values);
-            rows.push(FileSourceRow {
-                time: row_time,
-                values,
-            });
-            row_values.reserve(width);
+            rows.push(FileSourceRow { time: row_time });
             row_column = 0;
         }
     }
+    values.truncate(rows.len().saturating_mul(width));
 
     if rows.is_empty() {
         return Err(filesource_error(
@@ -532,7 +541,7 @@ fn transform_rows(
         ));
     }
 
-    Ok(FileSourceRowsData::new(rows))
+    Ok(FileSourceRowsData::new(rows, values, width))
 }
 
 fn schedule_next_breakpoint(ctx: &mut CmContext, data: &FileSourceRowsData) {
@@ -600,9 +609,10 @@ fn locate_filesource_interval(ctx: &mut CmContext, data: &FileSourceRowsData) ->
     lower
 }
 
-fn set_filesource_output_from_row(ctx: &mut CmContext, row: &FileSourceRow) {
-    ctx.set_output_vector_from_fn("out", row.values.len(), |index| {
-        row.values.get(index).copied().unwrap_or(0.0)
+fn set_filesource_output_from_row(ctx: &mut CmContext, data: &FileSourceRowsData, row: usize) {
+    let values = data.row_values(row);
+    ctx.set_output_vector_from_fn("out", values.len(), |index| {
+        values.get(index).copied().unwrap_or(0.0)
     });
 }
 
@@ -613,19 +623,20 @@ fn evaluate_rows_into_output(ctx: &mut CmContext, data: &FileSourceRowsData) {
     let first = &rows[0];
     if ctx.time < first.time {
         commit_filesource_cursor(ctx, 0);
-        set_filesource_output_from_row(ctx, rows.get(1).unwrap_or(first));
+        let row = if rows.len() > 1 { 1 } else { 0 };
+        set_filesource_output_from_row(ctx, data, row);
         return;
     }
     if ctx.time == first.time {
         commit_filesource_cursor(ctx, 0);
-        set_filesource_output_from_row(ctx, first);
+        set_filesource_output_from_row(ctx, data, 0);
         return;
     }
 
     let step_mode = bool_param(ctx, "amplstep");
     let lower = locate_filesource_interval(ctx, data);
     if lower + 1 >= rows.len() {
-        set_filesource_output_from_row(ctx, &rows[lower]);
+        set_filesource_output_from_row(ctx, data, lower);
         return;
     }
 
@@ -633,7 +644,7 @@ fn evaluate_rows_into_output(ctx: &mut CmContext, data: &FileSourceRowsData) {
     let upper_row = &rows[lower + 1];
 
     if step_mode {
-        set_filesource_output_from_row(ctx, lower_row);
+        set_filesource_output_from_row(ctx, data, lower);
         return;
     }
 
@@ -643,10 +654,12 @@ fn evaluate_rows_into_output(ctx: &mut CmContext, data: &FileSourceRowsData) {
     } else {
         1.0
     };
-    let width = lower_row.values.len().min(upper_row.values.len());
+    let lower_values = data.row_values(lower);
+    let upper_values = data.row_values(lower + 1);
+    let width = lower_values.len().min(upper_values.len());
     ctx.set_output_vector_from_fn("out", width, |index| {
-        let lower = lower_row.values.get(index).copied().unwrap_or(0.0);
-        let upper = upper_row.values.get(index).copied().unwrap_or(0.0);
+        let lower = lower_values.get(index).copied().unwrap_or(0.0);
+        let upper = upper_values.get(index).copied().unwrap_or(0.0);
         lower + alpha * (upper - lower)
     });
 }
@@ -728,7 +741,7 @@ impl CodeModel for FileSource {
         let rows = transformed_rows_for_context(ctx, &file, width)?;
         ctx.allocate_int_states(1);
         ctx.set_int_state(FILESOURCE_ROW_CURSOR_STATE, 0);
-        set_filesource_output_from_row(ctx, &rows[0]);
+        set_filesource_output_from_row(ctx, &rows, 0);
         Ok(())
     }
 
@@ -813,11 +826,14 @@ mod tests {
             .expect("data-file test guard")
     }
 
-    fn row(time: Value, value: Value) -> FileSourceRow {
-        FileSourceRow {
-            time,
-            values: vec![value],
-        }
+    fn single_value_rows(rows: &[(Value, Value)]) -> FileSourceRowsData {
+        FileSourceRowsData::new(
+            rows.iter()
+                .map(|(time, _)| FileSourceRow { time: *time })
+                .collect(),
+            rows.iter().map(|(_, value)| *value).collect(),
+            1,
+        )
     }
 
     fn poison_filesource_cache_lock() {
@@ -836,7 +852,7 @@ mod tests {
 
     #[test]
     fn filesource_interval_cursor_advances_and_rolls_back_like_ngspice_pointer() {
-        let rows = FileSourceRowsData::new(vec![row(0.0, 0.0), row(1.0e-9, 1.0), row(2.0e-9, 2.0)]);
+        let rows = single_value_rows(&[(0.0, 0.0), (1.0e-9, 1.0), (2.0e-9, 2.0)]);
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
         ctx.allocate_int_states(1);
@@ -854,7 +870,7 @@ mod tests {
 
     #[test]
     fn filesource_streams_output_and_preserves_previous_vector_value() {
-        let rows = FileSourceRowsData::new(vec![row(0.0, 0.0), row(1.0e-9, 2.0), row(2.0e-9, 4.0)]);
+        let rows = single_value_rows(&[(0.0, 0.0), (1.0e-9, 2.0), (2.0e-9, 4.0)]);
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
         ctx.set_port_width("out", 1);
@@ -874,7 +890,7 @@ mod tests {
 
     #[test]
     fn filesource_interval_cursor_does_not_commit_rollbackable_probe() {
-        let rows = FileSourceRowsData::new(vec![row(0.0, 0.0), row(1.0e-9, 1.0), row(2.0e-9, 2.0)]);
+        let rows = single_value_rows(&[(0.0, 0.0), (1.0e-9, 1.0), (2.0e-9, 2.0)]);
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
         ctx.allocate_int_states(1);
@@ -892,7 +908,7 @@ mod tests {
 
     #[test]
     fn filesource_breakpoint_lookup_uses_monotonic_row_index() {
-        let rows = FileSourceRowsData::new(vec![row(0.0, 0.0), row(1.0e-9, 1.0), row(2.0e-9, 2.0)]);
+        let rows = single_value_rows(&[(0.0, 0.0), (1.0e-9, 1.0), (2.0e-9, 2.0)]);
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
         ctx.time = 0.5e-9;
@@ -904,12 +920,7 @@ mod tests {
 
     #[test]
     fn filesource_breakpoint_lookup_preserves_nonmonotonic_min_future_time() {
-        let rows = FileSourceRowsData::new(vec![
-            row(0.0, 0.0),
-            row(2.0e-9, 2.0),
-            row(1.0e-9, 1.0),
-            row(3.0e-9, 3.0),
-        ]);
+        let rows = single_value_rows(&[(0.0, 0.0), (2.0e-9, 2.0), (1.0e-9, 1.0), (3.0e-9, 3.0)]);
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
         ctx.time = 0.5e-9;
@@ -921,7 +932,7 @@ mod tests {
 
     #[test]
     fn filesource_monotonic_interval_lookup_keeps_previous_row_at_exact_step_time() {
-        let rows = FileSourceRowsData::new(vec![row(0.0, 0.0), row(1.0e-9, 1.0), row(2.0e-9, 2.0)]);
+        let rows = single_value_rows(&[(0.0, 0.0), (1.0e-9, 1.0), (2.0e-9, 2.0)]);
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
         ctx.allocate_int_states(1);
@@ -956,7 +967,12 @@ mod tests {
         let rows = transform_rows(&ctx, &raw_fields, 2).expect("transform rows");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].time, 5.0);
-        assert_eq!(rows[0].values, vec![101.0, 7.0]);
+        assert_eq!(rows.row_values(0), &[101.0, 7.0]);
+        assert_eq!(
+            rows.values,
+            vec![101.0, 7.0],
+            "transformed filesource values should be stored contiguously"
+        );
     }
 
     #[test]
@@ -1023,7 +1039,7 @@ mod tests {
         ctx.set_real_vector_param("amplscale", vec![10.0]);
         let scaled = transformed_rows_for_context(&mut ctx, file, 1).expect("reload scaled rows");
         assert!(!Arc::ptr_eq(&shifted, &scaled));
-        assert_eq!(scaled[0].values, vec![10.0]);
+        assert_eq!(scaled.row_values(0), &[10.0]);
 
         let _ = data_file::unregister_data_file(file);
     }
@@ -1046,13 +1062,13 @@ mod tests {
         ctx.set_real_vector_param("amploffset", vec![0.0]);
         ctx.set_real_vector_param("amplscale", vec![1.0]);
         let first_rows = transform_rows(&ctx, &first, 1).expect("transform first rows");
-        assert_eq!(first_rows[1].values, vec![2.0]);
+        assert_eq!(first_rows.row_values(1), &[2.0]);
 
         data_file::register_data_file(file, "0 10\n1e-9 20\n")
             .expect("replace virtual filesource data");
         let (second, _) = load_filesource(file, 1).expect("load replaced virtual filesource data");
         let second_rows = transform_rows(&ctx, &second, 1).expect("transform replaced rows");
-        assert_eq!(second_rows[1].values, vec![20.0]);
+        assert_eq!(second_rows.row_values(1), &[20.0]);
 
         let cached_for_file = {
             let guard = lock_filesource_cache();
