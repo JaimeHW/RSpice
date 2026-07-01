@@ -2745,6 +2745,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_derivative(&mut self, expr_id: ExprId, wrt: CanonicalDerivativeAxis) -> JitResult<()> {
+        if self.expr_derivative_is_zero(expr_id, wrt)? {
+            return self.push(NativeOp::Const(0.0));
+        }
         let expression = self.expression(expr_id)?;
         match &expression.kind {
             HirExprKind::Number { .. }
@@ -2803,6 +2806,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
+        if self.expr_second_derivative_is_zero(expr_id, first, second)? {
+            return self.push(NativeOp::Const(0.0));
+        }
         let expression = self.expression(expr_id)?;
         match &expression.kind {
             HirExprKind::Number { .. }
@@ -2859,6 +2865,469 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 let gain = self.zi_kind_dc_gain(kind)?;
                 self.lower_scaled_second_derivative(*expr, first, second, gain)
             }
+        }
+    }
+
+    fn expr_derivative_is_zero(
+        &self,
+        expr_id: ExprId,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<bool> {
+        let expression = self.expression(expr_id)?;
+        match &expression.kind {
+            HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::ArrayLiteral { .. }
+            | HirExprKind::NoiseSource { .. } => Ok(true),
+            HirExprKind::Identifier { name } => Ok(self.identifier_derivative_is_zero(name, wrt)),
+            HirExprKind::BranchAccess { access, pos, neg } => self
+                .branch_access_derivative_is_zero(
+                    access.as_str(),
+                    pos.as_str(),
+                    neg.as_deref(),
+                    wrt,
+                ),
+            HirExprKind::NamedBranchAccess { access, name } => {
+                self.named_branch_access_derivative_is_zero(access.as_str(), name.as_str(), wrt)
+            }
+            HirExprKind::Unary { op, operand } => match op.as_str() {
+                "Pos" | "Neg" => self.expr_derivative_is_zero(*operand, wrt),
+                "Not" | "BitNot" => Ok(true),
+                _ => Ok(false),
+            },
+            HirExprKind::Binary { op, left, right } => match op.as_str() {
+                "Add" | "Sub" | "Mul" | "Div" => Ok(self.expr_derivative_is_zero(*left, wrt)?
+                    && self.expr_derivative_is_zero(*right, wrt)?),
+                "Pow" => {
+                    if self.constant_number(*right).is_some() {
+                        self.expr_derivative_is_zero(*left, wrt)
+                    } else {
+                        Ok(self.expr_derivative_is_zero(*left, wrt)?
+                            && self.expr_derivative_is_zero(*right, wrt)?)
+                    }
+                }
+                "Mod" | "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd"
+                | "BitOr" | "BitXor" | "Shl" | "Shr" => Ok(true),
+                _ => Ok(false),
+            },
+            HirExprKind::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => Ok(self.expr_derivative_is_zero(*then_expr, wrt)?
+                && self.expr_derivative_is_zero(*else_expr, wrt)?),
+            HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
+                self.call_derivative_is_zero(name.as_str(), args.as_slice(), wrt)
+            }
+            HirExprKind::ArrayAccess { array, .. } => {
+                Ok(self.array_derivative_is_zero(array.as_str(), wrt))
+            }
+            HirExprKind::AnalogOperator { op } => self.analog_operator_derivative_is_zero(op, wrt),
+            HirExprKind::Laplace { expr, .. } | HirExprKind::Zi { expr, .. } => {
+                self.expr_derivative_is_zero(*expr, wrt)
+            }
+        }
+    }
+
+    fn expr_second_derivative_is_zero(
+        &self,
+        expr_id: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<bool> {
+        let expression = self.expression(expr_id)?;
+        match &expression.kind {
+            HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::ArrayLiteral { .. }
+            | HirExprKind::NoiseSource { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => Ok(true),
+            HirExprKind::Identifier { name } => {
+                Ok(self.identifier_second_derivative_is_zero(name, first, second))
+            }
+            HirExprKind::Unary { op, operand } => match op.as_str() {
+                "Pos" | "Neg" => self.expr_second_derivative_is_zero(*operand, first, second),
+                "Not" | "BitNot" => Ok(true),
+                _ => Ok(false),
+            },
+            HirExprKind::Binary { op, left, right } => match op.as_str() {
+                "Add" | "Sub" => Ok(self.expr_second_derivative_is_zero(*left, first, second)?
+                    && self.expr_second_derivative_is_zero(*right, first, second)?),
+                "Mul" => Ok(self.expr_second_derivative_is_zero(*left, first, second)?
+                    && self.expr_second_derivative_is_zero(*right, first, second)?
+                    && (self.expr_derivative_is_zero(*left, first)?
+                        || self.expr_derivative_is_zero(*right, second)?)
+                    && (self.expr_derivative_is_zero(*left, second)?
+                        || self.expr_derivative_is_zero(*right, first)?)),
+                "Div" => Ok(self.expr_second_derivative_is_zero(*left, first, second)?
+                    && self.expr_second_derivative_is_zero(*right, first, second)?
+                    && self.expr_derivative_is_zero(*left, first)?
+                    && self.expr_derivative_is_zero(*left, second)?
+                    && self.expr_derivative_is_zero(*right, first)?
+                    && self.expr_derivative_is_zero(*right, second)?),
+                "Pow" => {
+                    if self.constant_number(*right).is_some() {
+                        Ok(self.expr_second_derivative_is_zero(*left, first, second)?
+                            && (self.expr_derivative_is_zero(*left, first)?
+                                || self.expr_derivative_is_zero(*left, second)?))
+                    } else {
+                        Ok(self.expr_second_derivative_is_zero(*left, first, second)?
+                            && self.expr_second_derivative_is_zero(*right, first, second)?
+                            && self.expr_derivative_is_zero(*left, first)?
+                            && self.expr_derivative_is_zero(*left, second)?
+                            && self.expr_derivative_is_zero(*right, first)?
+                            && self.expr_derivative_is_zero(*right, second)?)
+                    }
+                }
+                "Mod" | "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd"
+                | "BitOr" | "BitXor" | "Shl" | "Shr" => Ok(true),
+                _ => Ok(false),
+            },
+            HirExprKind::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => Ok(
+                self.expr_second_derivative_is_zero(*then_expr, first, second)?
+                    && self.expr_second_derivative_is_zero(*else_expr, first, second)?,
+            ),
+            HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
+                self.call_second_derivative_is_zero(name.as_str(), args.as_slice(), first, second)
+            }
+            HirExprKind::ArrayAccess { array, .. } => {
+                Ok(self.array_second_derivative_is_zero(array.as_str(), first, second))
+            }
+            HirExprKind::AnalogOperator { op } => {
+                self.analog_operator_second_derivative_is_zero(op, first, second)
+            }
+            HirExprKind::Laplace { expr, .. } | HirExprKind::Zi { expr, .. } => {
+                self.expr_second_derivative_is_zero(*expr, first, second)
+            }
+        }
+    }
+
+    fn identifier_derivative_is_zero(&self, name: &str, wrt: CanonicalDerivativeAxis) -> bool {
+        if self
+            .mir
+            .parameters
+            .iter()
+            .any(|parameter| parameter.name.as_str() == name)
+        {
+            return true;
+        }
+        if self
+            .limits
+            .variable_names
+            .iter()
+            .any(|variable| variable.as_str() == name)
+        {
+            let shadow_name = format!("{name}@{}", wrt.shadow_suffix());
+            return !self
+                .limits
+                .variable_names
+                .iter()
+                .any(|variable| variable.as_str() == shadow_name);
+        }
+        false
+    }
+
+    fn identifier_second_derivative_is_zero(
+        &self,
+        name: &str,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> bool {
+        if self
+            .mir
+            .parameters
+            .iter()
+            .any(|parameter| parameter.name.as_str() == name)
+        {
+            return true;
+        }
+        if self
+            .limits
+            .variable_names
+            .iter()
+            .any(|variable| variable.as_str() == name)
+        {
+            let first_shadow = format!("{name}@{}", first.shadow_suffix());
+            let second_shadow = format!("{first_shadow}@{}", second.shadow_suffix());
+            return !self
+                .limits
+                .variable_names
+                .iter()
+                .any(|variable| variable.as_str() == second_shadow);
+        }
+        false
+    }
+
+    fn array_derivative_is_zero(&self, array: &str, wrt: CanonicalDerivativeAxis) -> bool {
+        let suffix = format!("@{}", wrt.shadow_suffix());
+        !self.limits.variable_names.iter().any(|variable| {
+            variable
+                .strip_prefix(array)
+                .is_some_and(|tail| tail.contains(&suffix))
+        })
+    }
+
+    fn array_second_derivative_is_zero(
+        &self,
+        array: &str,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> bool {
+        let suffix = format!("@{}@{}", first.shadow_suffix(), second.shadow_suffix());
+        !self.limits.variable_names.iter().any(|variable| {
+            variable
+                .strip_prefix(array)
+                .is_some_and(|tail| tail.contains(&suffix))
+        })
+    }
+
+    fn branch_access_derivative_is_zero(
+        &self,
+        access: &str,
+        pos: &str,
+        neg: Option<&str>,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<bool> {
+        if is_flow_access(access) {
+            return match wrt {
+                CanonicalDerivativeAxis::Branch(runtime_branch) => {
+                    let nonzero = if let Some((branch_unknown, _)) =
+                        self.resolve_current_branch_unknown(pos, neg)?
+                    {
+                        self.map_canonical_branch_unknown(branch_unknown)?
+                            .runtime_index
+                            == runtime_branch
+                    } else {
+                        false
+                    };
+                    Ok(!nonzero)
+                }
+                CanonicalDerivativeAxis::Node(_) => Ok(true),
+            };
+        }
+        let pos = self.branch_endpoint(pos)?;
+        let neg = neg
+            .map(|node| self.branch_endpoint(node))
+            .transpose()?
+            .flatten();
+        Ok(match wrt {
+            CanonicalDerivativeAxis::Node(node) => {
+                branch_voltage_derivative(pos, neg, node).to_bits() == 0.0_f64.to_bits()
+            }
+            CanonicalDerivativeAxis::Branch(_) => true,
+        })
+    }
+
+    fn named_branch_access_derivative_is_zero(
+        &self,
+        access: &str,
+        name: &str,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<bool> {
+        if is_flow_access(access) {
+            return match wrt {
+                CanonicalDerivativeAxis::Branch(runtime_branch) => {
+                    let nonzero = if let Some(branch_unknown) = self.named_branch_unknown(name) {
+                        self.map_canonical_branch_unknown(usize::from(branch_unknown.id))?
+                            .runtime_index
+                            == runtime_branch
+                    } else {
+                        false
+                    };
+                    Ok(!nonzero)
+                }
+                CanonicalDerivativeAxis::Node(_) => Ok(true),
+            };
+        }
+        let branch = self
+            .mir
+            .branches
+            .iter()
+            .find(|branch| branch.name.as_str() == name);
+        Ok(match (branch, wrt) {
+            (Some(branch), CanonicalDerivativeAxis::Node(node)) => {
+                branch_voltage_derivative(branch.pos_node, branch.neg_node, node).to_bits()
+                    == 0.0_f64.to_bits()
+            }
+            (_, CanonicalDerivativeAxis::Branch(_)) => true,
+            (None, CanonicalDerivativeAxis::Node(_)) => false,
+        })
+    }
+
+    fn call_derivative_is_zero(
+        &self,
+        name: &str,
+        args: &[ExprId],
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<bool> {
+        let normalized = normalize_intrinsic_name(name);
+        match normalized.as_str() {
+            "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
+            | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
+            | "flicker_noise" | "noise_table" | "noise_table_log" => Ok(true),
+            "abs"
+            | "fabs"
+            | "sqrt"
+            | "exp"
+            | "ln"
+            | "log"
+            | "log10"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "sinh"
+            | "cosh"
+            | "tanh"
+            | "asinh"
+            | "acosh"
+            | "atanh"
+            | "asin"
+            | "acos"
+            | "atan"
+            | "limexp"
+            | "__rspice_limited_exp"
+            | "floor"
+            | "ceil"
+            | "limit"
+            | "ddt"
+            | "idt"
+            | "transition"
+            | "slew"
+            | "absdelay"
+                if !args.is_empty() =>
+            {
+                self.expr_derivative_is_zero(args[0], wrt)
+            }
+            "pow" if args.len() == 2 => {
+                if self.constant_number(args[1]).is_some() {
+                    self.expr_derivative_is_zero(args[0], wrt)
+                } else {
+                    Ok(self.expr_derivative_is_zero(args[0], wrt)?
+                        && self.expr_derivative_is_zero(args[1], wrt)?)
+                }
+            }
+            "min" | "max" | "atan2" | "hypot" if args.len() == 2 => Ok(self
+                .expr_derivative_is_zero(args[0], wrt)?
+                && self.expr_derivative_is_zero(args[1], wrt)?),
+            "ddx" | "table_model" | "idtmod" | "laplace_zp" | "laplace_zd" | "laplace_np"
+            | "laplace_nd" | "zi_zp" | "zi_zd" | "zi_np" | "zi_nd" => Ok(false),
+            _ => Ok(false),
+        }
+    }
+
+    fn call_second_derivative_is_zero(
+        &self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<bool> {
+        let normalized = normalize_intrinsic_name(name);
+        match normalized.as_str() {
+            "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
+            | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
+            | "flicker_noise" | "noise_table" | "noise_table_log" | "floor" | "ceil" | "abs"
+            | "fabs" => Ok(true),
+            "sqrt"
+            | "exp"
+            | "ln"
+            | "log"
+            | "log10"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "sinh"
+            | "cosh"
+            | "tanh"
+            | "asinh"
+            | "acosh"
+            | "atanh"
+            | "asin"
+            | "acos"
+            | "atan"
+            | "limexp"
+            | "__rspice_limited_exp"
+            | "limit"
+            | "ddt"
+            | "idt"
+            | "transition"
+            | "slew"
+            | "absdelay"
+                if !args.is_empty() =>
+            {
+                Ok(self.expr_second_derivative_is_zero(args[0], first, second)?
+                    && (self.expr_derivative_is_zero(args[0], first)?
+                        || self.expr_derivative_is_zero(args[0], second)?))
+            }
+            "pow" if args.len() == 2 => {
+                if self.constant_number(args[1]).is_some() {
+                    Ok(self.expr_second_derivative_is_zero(args[0], first, second)?
+                        && (self.expr_derivative_is_zero(args[0], first)?
+                            || self.expr_derivative_is_zero(args[0], second)?))
+                } else {
+                    Ok(self.expr_second_derivative_is_zero(args[0], first, second)?
+                        && self.expr_second_derivative_is_zero(args[1], first, second)?
+                        && self.expr_derivative_is_zero(args[0], first)?
+                        && self.expr_derivative_is_zero(args[0], second)?
+                        && self.expr_derivative_is_zero(args[1], first)?
+                        && self.expr_derivative_is_zero(args[1], second)?)
+                }
+            }
+            "min" | "max" | "atan2" | "hypot" if args.len() == 2 => Ok(self
+                .expr_second_derivative_is_zero(args[0], first, second)?
+                && self.expr_second_derivative_is_zero(args[1], first, second)?
+                && (self.expr_derivative_is_zero(args[0], first)?
+                    || self.expr_derivative_is_zero(args[1], second)?)
+                && (self.expr_derivative_is_zero(args[0], second)?
+                    || self.expr_derivative_is_zero(args[1], first)?)),
+            "ddx" | "table_model" | "idtmod" | "laplace_zp" | "laplace_zd" | "laplace_np"
+            | "laplace_nd" | "zi_zp" | "zi_zd" | "zi_np" | "zi_nd" => Ok(false),
+            _ => Ok(false),
+        }
+    }
+
+    fn analog_operator_derivative_is_zero(
+        &self,
+        op: &HirAnalogOperator,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<bool> {
+        match op {
+            HirAnalogOperator::Ddt { expr, .. }
+            | HirAnalogOperator::Idt { expr, .. }
+            | HirAnalogOperator::IdtMod { expr, .. }
+            | HirAnalogOperator::Limexp { expr }
+            | HirAnalogOperator::Absdelay { expr, .. }
+            | HirAnalogOperator::Transition { expr, .. }
+            | HirAnalogOperator::Slew { expr, .. } => self.expr_derivative_is_zero(*expr, wrt),
+            HirAnalogOperator::Ddx { .. } | HirAnalogOperator::LastCrossing { .. } => Ok(false),
+        }
+    }
+
+    fn analog_operator_second_derivative_is_zero(
+        &self,
+        op: &HirAnalogOperator,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<bool> {
+        match op {
+            HirAnalogOperator::Ddt { expr, .. }
+            | HirAnalogOperator::Idt { expr, .. }
+            | HirAnalogOperator::IdtMod { expr, .. }
+            | HirAnalogOperator::Absdelay { expr, .. }
+            | HirAnalogOperator::Transition { expr, .. }
+            | HirAnalogOperator::Slew { expr, .. } => {
+                self.expr_second_derivative_is_zero(*expr, first, second)
+            }
+            HirAnalogOperator::Limexp { expr } => Ok(self
+                .expr_second_derivative_is_zero(*expr, first, second)?
+                && (self.expr_derivative_is_zero(*expr, first)?
+                    || self.expr_derivative_is_zero(*expr, second)?)),
+            HirAnalogOperator::Ddx { .. } | HirAnalogOperator::LastCrossing { .. } => Ok(false),
         }
     }
 
@@ -3077,11 +3546,42 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<()> {
         match op {
             "Add" | "Sub" => {
+                let left_zero = self.expr_derivative_is_zero(left, wrt)?;
+                let right_zero = self.expr_derivative_is_zero(right, wrt)?;
+                if left_zero && right_zero {
+                    return self.push(NativeOp::Const(0.0));
+                }
+                if left_zero {
+                    self.lower_derivative(right, wrt)?;
+                    return if op == "Sub" {
+                        self.append_unary(NativeOp::Neg)
+                    } else {
+                        Ok(())
+                    };
+                }
+                if right_zero {
+                    return self.lower_derivative(left, wrt);
+                }
                 self.lower_derivative(left, wrt)?;
                 self.lower_derivative(right, wrt)?;
                 self.append_arithmetic(op)
             }
             "Mul" => {
+                let left_zero = self.expr_derivative_is_zero(left, wrt)?;
+                let right_zero = self.expr_derivative_is_zero(right, wrt)?;
+                if left_zero && right_zero {
+                    return self.push(NativeOp::Const(0.0));
+                }
+                if left_zero {
+                    self.lower_derivative(right, wrt)?;
+                    self.lower(left)?;
+                    return self.append_arithmetic("Mul");
+                }
+                if right_zero {
+                    self.lower_derivative(left, wrt)?;
+                    self.lower(right)?;
+                    return self.append_arithmetic("Mul");
+                }
                 self.lower_derivative(left, wrt)?;
                 self.lower(right)?;
                 self.append_arithmetic("Mul")?;
@@ -3091,6 +3591,24 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.append_arithmetic("Add")
             }
             "Div" => {
+                let left_zero = self.expr_derivative_is_zero(left, wrt)?;
+                let right_zero = self.expr_derivative_is_zero(right, wrt)?;
+                if left_zero && right_zero {
+                    return self.push(NativeOp::Const(0.0));
+                }
+                if right_zero {
+                    self.lower_derivative(left, wrt)?;
+                    self.lower(right)?;
+                    return self.append_arithmetic("Div");
+                }
+                if left_zero {
+                    self.lower_derivative(right, wrt)?;
+                    self.lower(left)?;
+                    self.append_arithmetic("Mul")?;
+                    self.append_unary(NativeOp::Neg)?;
+                    self.lower_arg_square(right)?;
+                    return self.append_arithmetic("Div");
+                }
                 self.lower_derivative(left, wrt)?;
                 self.lower(right)?;
                 self.append_arithmetic("Mul")?;
@@ -3120,29 +3638,73 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<()> {
         match op {
             "Add" | "Sub" => {
+                let left_zero = self.expr_second_derivative_is_zero(left, first, second)?;
+                let right_zero = self.expr_second_derivative_is_zero(right, first, second)?;
+                if left_zero && right_zero {
+                    return self.push(NativeOp::Const(0.0));
+                }
+                if left_zero {
+                    self.lower_second_derivative(right, first, second)?;
+                    return if op == "Sub" {
+                        self.append_unary(NativeOp::Neg)
+                    } else {
+                        Ok(())
+                    };
+                }
+                if right_zero {
+                    return self.lower_second_derivative(left, first, second);
+                }
                 self.lower_second_derivative(left, first, second)?;
                 self.lower_second_derivative(right, first, second)?;
                 self.append_arithmetic(op)
             }
             "Mul" => {
-                self.lower_second_derivative(left, first, second)?;
-                self.lower(right)?;
-                self.append_arithmetic("Mul")?;
+                let left_ab_zero = self.expr_second_derivative_is_zero(left, first, second)?;
+                let right_ab_zero = self.expr_second_derivative_is_zero(right, first, second)?;
+                let left_a_zero = self.expr_derivative_is_zero(left, first)?;
+                let left_b_zero = self.expr_derivative_is_zero(left, second)?;
+                let right_a_zero = self.expr_derivative_is_zero(right, first)?;
+                let right_b_zero = self.expr_derivative_is_zero(right, second)?;
 
-                self.lower_derivative(left, first)?;
-                self.lower_derivative(right, second)?;
-                self.append_arithmetic("Mul")?;
-                self.append_arithmetic("Add")?;
-
-                self.lower_derivative(left, second)?;
-                self.lower_derivative(right, first)?;
-                self.append_arithmetic("Mul")?;
-                self.append_arithmetic("Add")?;
-
-                self.lower(left)?;
-                self.lower_second_derivative(right, first, second)?;
-                self.append_arithmetic("Mul")?;
-                self.append_arithmetic("Add")
+                let mut emitted = false;
+                if !left_ab_zero {
+                    self.lower_second_derivative(left, first, second)?;
+                    self.lower(right)?;
+                    self.append_arithmetic("Mul")?;
+                    emitted = true;
+                }
+                if !(left_a_zero || right_b_zero) {
+                    self.lower_derivative(left, first)?;
+                    self.lower_derivative(right, second)?;
+                    self.append_arithmetic("Mul")?;
+                    if emitted {
+                        self.append_arithmetic("Add")?;
+                    }
+                    emitted = true;
+                }
+                if !(left_b_zero || right_a_zero) {
+                    self.lower_derivative(left, second)?;
+                    self.lower_derivative(right, first)?;
+                    self.append_arithmetic("Mul")?;
+                    if emitted {
+                        self.append_arithmetic("Add")?;
+                    }
+                    emitted = true;
+                }
+                if !right_ab_zero {
+                    self.lower_second_derivative(right, first, second)?;
+                    self.lower(left)?;
+                    self.append_arithmetic("Mul")?;
+                    if emitted {
+                        self.append_arithmetic("Add")?;
+                    }
+                    emitted = true;
+                }
+                if emitted {
+                    Ok(())
+                } else {
+                    self.push(NativeOp::Const(0.0))
+                }
             }
             "Div" => self.lower_div_second_derivative(left, right, first, second),
             "Pow" => self.lower_pow_second_derivative(left, right, first, second),
@@ -3159,41 +3721,80 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        self.lower_second_derivative(left, first, second)?;
-        self.lower(right)?;
-        self.append_arithmetic("Div")?;
+        let left_ab_zero = self.expr_second_derivative_is_zero(left, first, second)?;
+        let right_ab_zero = self.expr_second_derivative_is_zero(right, first, second)?;
+        let left_a_zero = self.expr_derivative_is_zero(left, first)?;
+        let left_b_zero = self.expr_derivative_is_zero(left, second)?;
+        let right_a_zero = self.expr_derivative_is_zero(right, first)?;
+        let right_b_zero = self.expr_derivative_is_zero(right, second)?;
 
-        self.lower_derivative(left, first)?;
-        self.lower_derivative(right, second)?;
-        self.append_arithmetic("Mul")?;
-        self.lower_arg_square(right)?;
-        self.append_arithmetic("Div")?;
-        self.append_arithmetic("Sub")?;
+        let mut emitted = false;
+        if !left_ab_zero {
+            self.lower_second_derivative(left, first, second)?;
+            self.lower(right)?;
+            self.append_arithmetic("Div")?;
+            emitted = true;
+        }
 
-        self.lower_derivative(left, second)?;
-        self.lower_derivative(right, first)?;
-        self.append_arithmetic("Mul")?;
-        self.lower_arg_square(right)?;
-        self.append_arithmetic("Div")?;
-        self.append_arithmetic("Sub")?;
+        let mut numerator_emitted = false;
+        if !(left_a_zero || right_b_zero) {
+            self.lower_derivative(left, first)?;
+            self.lower_derivative(right, second)?;
+            self.append_arithmetic("Mul")?;
+            numerator_emitted = true;
+        }
+        if !(left_b_zero || right_a_zero) {
+            self.lower_derivative(left, second)?;
+            self.lower_derivative(right, first)?;
+            self.append_arithmetic("Mul")?;
+            if numerator_emitted {
+                self.append_arithmetic("Add")?;
+            }
+            numerator_emitted = true;
+        }
+        if !right_ab_zero {
+            self.lower_second_derivative(right, first, second)?;
+            self.lower(left)?;
+            self.append_arithmetic("Mul")?;
+            if numerator_emitted {
+                self.append_arithmetic("Add")?;
+            }
+            numerator_emitted = true;
+        }
+        if numerator_emitted {
+            self.lower_arg_square(right)?;
+            self.append_arithmetic("Div")?;
+            if emitted {
+                self.append_arithmetic("Sub")?;
+            } else {
+                self.append_unary(NativeOp::Neg)?;
+                emitted = true;
+            }
+        }
 
-        self.lower(left)?;
-        self.lower_second_derivative(right, first, second)?;
-        self.append_arithmetic("Mul")?;
-        self.lower_arg_square(right)?;
-        self.append_arithmetic("Div")?;
-        self.append_arithmetic("Sub")?;
+        if !(right_a_zero || right_b_zero) {
+            self.lower_derivative(right, first)?;
+            self.lower_derivative(right, second)?;
+            self.append_arithmetic("Mul")?;
+            self.push(NativeOp::Const(2.0))?;
+            self.lower(left)?;
+            self.append_arithmetic("Mul")?;
+            self.append_arithmetic("Mul")?;
+            self.lower_arg_square(right)?;
+            self.lower(right)?;
+            self.append_arithmetic("Mul")?;
+            self.append_arithmetic("Div")?;
+            if emitted {
+                self.append_arithmetic("Add")?;
+            }
+            emitted = true;
+        }
 
-        self.push(NativeOp::Const(2.0))?;
-        self.lower(left)?;
-        self.append_arithmetic("Mul")?;
-        self.lower_derivative(right, first)?;
-        self.append_arithmetic("Mul")?;
-        self.lower_derivative(right, second)?;
-        self.append_arithmetic("Mul")?;
-        self.lower_arg_cube(right)?;
-        self.append_arithmetic("Div")?;
-        self.append_arithmetic("Add")
+        if emitted {
+            Ok(())
+        } else {
+            self.push(NativeOp::Const(0.0))
+        }
     }
 
     fn lower_pow_derivative(
@@ -3208,7 +3809,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.push(NativeOp::Const(exponent))?;
         self.lower(left)?;
         self.push(NativeOp::Const(exponent - 1.0))?;
-        self.append_binary_math_op(BinaryMathOp::Pow)?;
+        self.append_binary_math("Pow")?;
         self.append_arithmetic("Mul")?;
         self.lower_derivative(left, wrt)?;
         self.append_arithmetic("Mul")
@@ -3227,28 +3828,45 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         if exponent.to_bits() == 0.0_f64.to_bits() {
             return self.push(NativeOp::Const(0.0));
         }
-        if exponent.to_bits() == 1.0_f64.to_bits() {
-            return self.lower_second_derivative(left, first, second);
+
+        let left_a_zero = self.expr_derivative_is_zero(left, first)?;
+        let left_b_zero = self.expr_derivative_is_zero(left, second)?;
+        let left_ab_zero = self.expr_second_derivative_is_zero(left, first, second)?;
+        let mut emitted = false;
+
+        let first_coefficient = exponent * (exponent - 1.0);
+        if first_coefficient.to_bits() != 0.0_f64.to_bits() && !(left_a_zero || left_b_zero) {
+            self.lower_derivative(left, first)?;
+            self.lower_derivative(left, second)?;
+            self.append_arithmetic("Mul")?;
+            self.push(NativeOp::Const(first_coefficient))?;
+            self.lower(left)?;
+            self.push(NativeOp::Const(exponent - 2.0))?;
+            self.append_binary_math("Pow")?;
+            self.append_arithmetic("Mul")?;
+            self.append_arithmetic("Mul")?;
+            emitted = true;
         }
 
-        self.push(NativeOp::Const(exponent * (exponent - 1.0)))?;
-        self.lower(left)?;
-        self.push(NativeOp::Const(exponent - 2.0))?;
-        self.append_binary_math_op(BinaryMathOp::Pow)?;
-        self.append_arithmetic("Mul")?;
-        self.lower_derivative(left, first)?;
-        self.append_arithmetic("Mul")?;
-        self.lower_derivative(left, second)?;
-        self.append_arithmetic("Mul")?;
+        if !left_ab_zero {
+            self.lower_second_derivative(left, first, second)?;
+            self.push(NativeOp::Const(exponent))?;
+            self.lower(left)?;
+            self.push(NativeOp::Const(exponent - 1.0))?;
+            self.append_binary_math("Pow")?;
+            self.append_arithmetic("Mul")?;
+            self.append_arithmetic("Mul")?;
+            if emitted {
+                self.append_arithmetic("Add")?;
+            }
+            emitted = true;
+        }
 
-        self.push(NativeOp::Const(exponent))?;
-        self.lower(left)?;
-        self.push(NativeOp::Const(exponent - 1.0))?;
-        self.append_binary_math_op(BinaryMathOp::Pow)?;
-        self.append_arithmetic("Mul")?;
-        self.lower_second_derivative(left, first, second)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")
+        if emitted {
+            Ok(())
+        } else {
+            self.push(NativeOp::Const(0.0))
+        }
     }
 
     fn lower_call_derivative(
@@ -3474,7 +4092,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     lowerer.push(NativeOp::Const(-0.25))?;
                     lowerer.lower(arg)?;
                     lowerer.push(NativeOp::Const(-1.5))?;
-                    lowerer.append_binary_math_op(BinaryMathOp::Pow)?;
+                    lowerer.append_binary_math("Pow")?;
                     lowerer.append_arithmetic("Mul")
                 },
             ),
@@ -3612,9 +4230,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "floor" | "ceil" | "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime"
             | "mfactor" | "simparam" | "param_given" | "port_connected" | "analysis"
             | "white_noise" | "flicker_noise" | "noise_table" => self.push(NativeOp::Const(0.0)),
-            "atan2" | "hypot" => {
-                Err(self.unsupported(format!("second derivative of intrinsic function '{name}'")))
-            }
+            "atan2" => self.lower_atan2_second_derivative(name, args, first, second),
+            "hypot" => self.lower_hypot_second_derivative(name, args, first, second),
             _ => Err(self.unsupported(format!("second derivative of intrinsic function '{name}'"))),
         }
     }
@@ -3722,7 +4339,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 lowerer.append_unary(NativeOp::Neg)?;
                 lowerer.lower_arg_square_plus_const(arg, 1.0)?;
                 lowerer.push(NativeOp::Const(1.5))?;
-                lowerer.append_binary_math_op(BinaryMathOp::Pow)?;
+                lowerer.append_binary_math("Pow")?;
                 lowerer.append_arithmetic("Div")
             },
         )
@@ -3751,7 +4368,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 lowerer.append_unary(NativeOp::Neg)?;
                 lowerer.lower_arg_square_plus_const(arg, -1.0)?;
                 lowerer.push(NativeOp::Const(1.5))?;
-                lowerer.append_binary_math_op(BinaryMathOp::Pow)?;
+                lowerer.append_binary_math("Pow")?;
                 lowerer.append_arithmetic("Div")
             },
         )
@@ -3776,7 +4393,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 lowerer.append_arithmetic("Mul")?;
                 lowerer.lower_one_minus_arg_square(arg)?;
                 lowerer.push(NativeOp::Const(2.0))?;
-                lowerer.append_binary_math_op(BinaryMathOp::Pow)?;
+                lowerer.append_binary_math("Pow")?;
                 lowerer.append_arithmetic("Div")
             },
         )
@@ -3804,7 +4421,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 lowerer.lower(arg)?;
                 lowerer.lower_one_minus_arg_square(arg)?;
                 lowerer.push(NativeOp::Const(1.5))?;
-                lowerer.append_binary_math_op(BinaryMathOp::Pow)?;
+                lowerer.append_binary_math("Pow")?;
                 lowerer.append_arithmetic("Div")
             },
         )
@@ -3833,7 +4450,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 lowerer.append_unary(NativeOp::Neg)?;
                 lowerer.lower_one_minus_arg_square(arg)?;
                 lowerer.push(NativeOp::Const(1.5))?;
-                lowerer.append_binary_math_op(BinaryMathOp::Pow)?;
+                lowerer.append_binary_math("Pow")?;
                 lowerer.append_arithmetic("Div")
             },
         )
@@ -3862,7 +4479,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 lowerer.append_arithmetic("Mul")?;
                 lowerer.lower_arg_square_plus_const(arg, 1.0)?;
                 lowerer.push(NativeOp::Const(2.0))?;
-                lowerer.append_binary_math_op(BinaryMathOp::Pow)?;
+                lowerer.append_binary_math("Pow")?;
                 lowerer.append_arithmetic("Div")
             },
         )
@@ -4067,6 +4684,164 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.pop_binary("canonical hypot derivative")?;
         self.append_binary_math_op(BinaryMathOp::Hypot)?;
         self.append_arithmetic("Div")
+    }
+
+    fn lower_atan2_second_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 2)?;
+        let y = args[0];
+        let x = args[1];
+
+        self.lower_atan2_numerator_derivative(y, x, first, second)?;
+        self.lower_arg_square_sum(x, y)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_atan2_numerator(y, x, first)?;
+        self.lower_arg_square_sum_derivative(x, y, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")?;
+        self.lower_arg_square_sum(x, y)?;
+        self.lower_arg_square_sum(x, y)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_hypot_second_derivative(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.require_intrinsic_arity(name, args, 2)?;
+        let left = args[0];
+        let right = args[1];
+
+        self.lower_hypot_numerator_derivative(left, right, first, second)?;
+        self.lower_hypot_value(left, right)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_hypot_numerator(left, right, first)?;
+        self.lower_hypot_numerator(left, right, second)?;
+        self.lower_hypot_value(left, right)?;
+        self.append_arithmetic("Div")?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")?;
+        self.lower_arg_square_sum(left, right)?;
+        self.append_arithmetic("Div")
+    }
+
+    fn lower_arg_square_sum(&mut self, left: ExprId, right: ExprId) -> JitResult<()> {
+        self.lower_arg_square(left)?;
+        self.lower_arg_square(right)?;
+        self.append_arithmetic("Add")
+    }
+
+    fn lower_arg_square_sum_derivative(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.push(NativeOp::Const(2.0))?;
+        self.lower(left)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_derivative(left, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.push(NativeOp::Const(2.0))?;
+        self.lower(right)?;
+        self.append_arithmetic("Mul")?;
+        self.lower_derivative(right, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")
+    }
+
+    fn lower_atan2_numerator(
+        &mut self,
+        y: ExprId,
+        x: ExprId,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower(x)?;
+        self.lower_derivative(y, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.lower(y)?;
+        self.lower_derivative(x, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")
+    }
+
+    fn lower_atan2_numerator_derivative(
+        &mut self,
+        y: ExprId,
+        x: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_derivative(x, second)?;
+        self.lower_derivative(y, first)?;
+        self.append_arithmetic("Mul")?;
+        self.lower(x)?;
+        self.lower_second_derivative(y, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+        self.lower_derivative(y, second)?;
+        self.lower_derivative(x, first)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")?;
+        self.lower(y)?;
+        self.lower_second_derivative(x, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Sub")
+    }
+
+    fn lower_hypot_value(&mut self, left: ExprId, right: ExprId) -> JitResult<()> {
+        self.lower(left)?;
+        self.lower(right)?;
+        self.pop_binary("canonical hypot value")?;
+        self.append_binary_math_op(BinaryMathOp::Hypot)
+    }
+
+    fn lower_hypot_numerator(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower(left)?;
+        self.lower_derivative(left, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.lower(right)?;
+        self.lower_derivative(right, wrt)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")
+    }
+
+    fn lower_hypot_numerator_derivative(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_derivative(left, second)?;
+        self.lower_derivative(left, first)?;
+        self.append_arithmetic("Mul")?;
+        self.lower(left)?;
+        self.lower_second_derivative(left, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+        self.lower_derivative(right, second)?;
+        self.lower_derivative(right, first)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+        self.lower(right)?;
+        self.lower_second_derivative(right, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")
     }
 
     fn lower_arg_square(&mut self, arg: ExprId) -> JitResult<()> {
