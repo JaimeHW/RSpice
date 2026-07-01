@@ -380,6 +380,7 @@ impl CodeModel for TFlipFlop {
 mod tests {
     use super::*;
     use crate::xspice::context::PendingDigitalEvent;
+    use crate::xspice::{ParamType, PortDirection};
 
     fn has_event(events: &[PendingDigitalEvent], value: DigitalValue, delay: Value) -> bool {
         events.iter().any(|event| {
@@ -387,6 +388,192 @@ mod tests {
                 && event.values == vec![value]
                 && (event.delay - delay).abs() <= 1.0e-21
         })
+    }
+
+    fn param_summary(model: &dyn CodeModel) -> Vec<(&str, ParamType, Value)> {
+        model
+            .parameters()
+            .iter()
+            .map(|param| (param.name.as_str(), param.param_type, param.default))
+            .collect()
+    }
+
+    fn assert_scalar_digital_ports(
+        model: &dyn CodeModel,
+        names: &[&str],
+        directions: &[PortDirection],
+        nullable: &[bool],
+    ) {
+        let ports = model.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            names
+        );
+        for ((port, direction), null_allowed) in ports.iter().zip(directions).zip(nullable) {
+            assert_eq!(port.direction, *direction, "{} direction", port.name);
+            assert_eq!(
+                port.default_type,
+                PortType::Digital,
+                "{} default type",
+                port.name
+            );
+            assert_eq!(
+                port.allowed_types,
+                vec![PortType::Digital],
+                "{} allowed types",
+                port.name
+            );
+            assert!(
+                !port.is_vector,
+                "{} should be a scalar digital port",
+                port.name
+            );
+            assert_eq!(
+                port.null_allowed, *null_allowed,
+                "{} nullability",
+                port.name
+            );
+        }
+    }
+
+    fn assert_edge_model_metadata(model: &dyn CodeModel, names: &[&str], input_load: &str) {
+        let mut directions = vec![PortDirection::In; names.len()];
+        directions[names.len() - 2] = PortDirection::Out;
+        directions[names.len() - 1] = PortDirection::Out;
+        let mut nullable = vec![false; names.len()];
+        nullable[names.len() - 4] = true;
+        nullable[names.len() - 3] = true;
+        nullable[names.len() - 2] = true;
+        nullable[names.len() - 1] = true;
+        assert_scalar_digital_ports(model, names, &directions, &nullable);
+
+        assert_eq!(
+            param_summary(model),
+            vec![
+                ("clk_delay", ParamType::Real, 1.0e-9),
+                ("set_delay", ParamType::Real, 1.0e-9),
+                ("reset_delay", ParamType::Real, 1.0e-9),
+                ("ic", ParamType::Integer, 0.0),
+                ("rise_delay", ParamType::Real, 1.0e-9),
+                ("fall_delay", ParamType::Real, 1.0e-9),
+                (input_load, ParamType::Real, 1.0e-12),
+                ("clk_load", ParamType::Real, 1.0e-12),
+                ("set_load", ParamType::Real, 1.0e-12),
+                ("reset_load", ParamType::Real, 1.0e-12),
+            ]
+        );
+    }
+
+    #[test]
+    fn edge_triggered_metadata_matches_ngspice46_interfaces() {
+        assert_edge_model_metadata(
+            &DFlipFlop,
+            &["data", "clk", "set", "reset", "out", "Nout"],
+            "data_load",
+        );
+        assert_edge_model_metadata(
+            &TFlipFlop,
+            &["t", "clk", "set", "reset", "out", "Nout"],
+            "t_load",
+        );
+        assert_edge_model_metadata(
+            &JkFlipFlop,
+            &["j", "k", "clk", "set", "reset", "out", "Nout"],
+            "jk_load",
+        );
+        assert_edge_model_metadata(
+            &SrFlipFlop,
+            &["s", "r", "clk", "set", "reset", "out", "Nout"],
+            "sr_load",
+        );
+    }
+
+    #[test]
+    fn d_fdiv_metadata_matches_ngspice46_interface() {
+        assert_scalar_digital_ports(
+            &DigitalFrequencyDivider,
+            &["freq_in", "freq_out"],
+            &[PortDirection::In, PortDirection::Out],
+            &[false, false],
+        );
+        assert_eq!(
+            param_summary(&DigitalFrequencyDivider),
+            vec![
+                ("div_factor", ParamType::Integer, 2.0),
+                ("high_cycles", ParamType::Integer, 1.0),
+                ("i_count", ParamType::Integer, 0.0),
+                ("rise_delay", ParamType::Real, 1.0e-9),
+                ("fall_delay", ParamType::Real, 1.0e-9),
+                ("freq_in_load", ParamType::Real, 1.0e-12),
+            ]
+        );
+    }
+
+    #[test]
+    fn latch_metadata_matches_ngspice46_interfaces() {
+        assert_scalar_digital_ports(
+            &DLatch,
+            &["data", "enable", "set", "reset", "out", "Nout"],
+            &[
+                PortDirection::In,
+                PortDirection::In,
+                PortDirection::In,
+                PortDirection::In,
+                PortDirection::Out,
+                PortDirection::Out,
+            ],
+            &[false, false, true, true, true, true],
+        );
+        assert_eq!(
+            param_summary(&DLatch),
+            vec![
+                ("data_delay", ParamType::Real, 1.0e-9),
+                ("enable_delay", ParamType::Real, 1.0e-9),
+                ("set_delay", ParamType::Real, 1.0e-9),
+                ("reset_delay", ParamType::Real, 1.0e-9),
+                ("ic", ParamType::Integer, 0.0),
+                ("rise_delay", ParamType::Real, 1.0e-9),
+                ("fall_delay", ParamType::Real, 1.0e-9),
+                ("data_load", ParamType::Real, 1.0e-12),
+                ("enable_load", ParamType::Real, 1.0e-12),
+                ("set_load", ParamType::Real, 1.0e-12),
+                ("reset_load", ParamType::Real, 1.0e-12),
+            ]
+        );
+
+        assert_scalar_digital_ports(
+            &SrLatch,
+            &["s", "r", "enable", "set", "reset", "out", "Nout"],
+            &[
+                PortDirection::In,
+                PortDirection::In,
+                PortDirection::In,
+                PortDirection::In,
+                PortDirection::In,
+                PortDirection::Out,
+                PortDirection::Out,
+            ],
+            &[false, false, false, true, true, true, true],
+        );
+        assert_eq!(
+            param_summary(&SrLatch),
+            vec![
+                ("sr_delay", ParamType::Real, 1.0e-9),
+                ("enable_delay", ParamType::Real, 1.0e-9),
+                ("set_delay", ParamType::Real, 1.0e-9),
+                ("reset_delay", ParamType::Real, 1.0e-9),
+                ("ic", ParamType::Integer, 0.0),
+                ("rise_delay", ParamType::Real, 1.0e-9),
+                ("fall_delay", ParamType::Real, 1.0e-9),
+                ("sr_load", ParamType::Real, 1.0e-12),
+                ("enable_load", ParamType::Real, 1.0e-12),
+                ("set_load", ParamType::Real, 1.0e-12),
+                ("reset_load", ParamType::Real, 1.0e-12),
+            ]
+        );
     }
 
     #[test]
