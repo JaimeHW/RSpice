@@ -71,6 +71,7 @@ pub(crate) enum NativeOp {
     BinaryMath(BinaryMathOp),
     IntegerBinary(IntegerBinaryOp),
     IntegerShiftConst(IntegerBinaryOp, u8),
+    IntegerBinaryConst(IntegerBinaryOp, i64),
     TableLookup(usize),
     TableDerivative(usize),
     LimitState(usize),
@@ -1774,6 +1775,9 @@ impl NativeProgram {
                         continue;
                     }
                     if lower_constant_rhs_integer_shift(&mut ops, op) {
+                        continue;
+                    }
+                    if lower_constant_rhs_integer_bitwise(&mut ops, op) {
                         continue;
                     }
                     ops.push(NativeOp::IntegerBinary(op));
@@ -6784,6 +6788,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         };
         if lower_constant_integer_binary(&mut self.ops, op)
             || lower_constant_rhs_integer_shift(&mut self.ops, op)
+            || lower_constant_rhs_integer_bitwise(&mut self.ops, op)
         {
             return Ok(());
         }
@@ -7121,6 +7126,7 @@ fn is_parameter_default_op(op: &NativeOp) -> bool {
             | NativeOp::BinaryMath(_)
             | NativeOp::IntegerBinary(_)
             | NativeOp::IntegerShiftConst(_, _)
+            | NativeOp::IntegerBinaryConst(_, _)
     )
 }
 
@@ -7182,6 +7188,7 @@ fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::BinaryMath(_) => "BinaryMath",
         NativeOp::IntegerBinary(_) => "IntegerBinary",
         NativeOp::IntegerShiftConst(_, _) => "IntegerShiftConst",
+        NativeOp::IntegerBinaryConst(_, _) => "IntegerBinaryConst",
         NativeOp::TableLookup(_) => "TableLookup",
         NativeOp::TableDerivative(_) => "TableDerivative",
         NativeOp::LimitState(_) => "LimitState",
@@ -7458,6 +7465,22 @@ fn lower_constant_rhs_integer_shift(ops: &mut Vec<NativeOp>, op: IntegerBinaryOp
     };
     ops.pop();
     ops.push(NativeOp::IntegerShiftConst(op, count));
+    true
+}
+
+fn lower_constant_rhs_integer_bitwise(ops: &mut Vec<NativeOp>, op: IntegerBinaryOp) -> bool {
+    if !matches!(
+        op,
+        IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor
+    ) {
+        return false;
+    }
+    let Some(NativeOp::Const(value)) = ops.last().copied() else {
+        return false;
+    };
+
+    ops.pop();
+    ops.push(NativeOp::IntegerBinaryConst(op, value as i64));
     true
 }
 
@@ -8081,6 +8104,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::ExtremumConstLhs(_, _)
         | NativeOp::LogicalConst(_, _)
         | NativeOp::IntegerShiftConst(_, _)
+        | NativeOp::IntegerBinaryConst(_, _)
         | NativeOp::Neg
         | NativeOp::Abs
         | NativeOp::Square
@@ -12157,24 +12181,90 @@ endmodule
             let program = BytecodeProgram {
                 instructions: vec![
                     Instruction::PushTemperature,
-                    Instruction::PushConst(2.0),
+                    Instruction::PushParam(0),
                     instruction,
                 ],
             };
 
             let lowered =
-                NativeProgram::from_bytecode("bits", EntryKind::Assignment, &program, limits(0, 0))
+                NativeProgram::from_bytecode("bits", EntryKind::Assignment, &program, limits(1, 0))
                     .expect("integer binary ops have native x64 helper-call lowering");
 
             assert_eq!(
                 lowered.ops(),
                 &[
                     NativeOp::LoadTemperature,
-                    NativeOp::Const(2.0),
+                    NativeOp::LoadParam(0),
                     NativeOp::IntegerBinary(expected),
                 ]
             );
             assert_eq!(lowered.max_stack_depth(), 2);
+        }
+    }
+
+    #[test]
+    fn lowers_constant_rhs_bitwise_without_extra_stack_slot() {
+        let cases = [
+            (
+                "bitand",
+                Instruction::BitAnd,
+                IntegerBinaryOp::BitAnd,
+                6.25,
+                6,
+            ),
+            (
+                "bitor-negative",
+                Instruction::BitOr,
+                IntegerBinaryOp::BitOr,
+                -1.0,
+                -1,
+            ),
+            (
+                "bitxor-nan",
+                Instruction::BitXor,
+                IntegerBinaryOp::BitXor,
+                f64::NAN,
+                0,
+            ),
+            (
+                "bitand-saturating",
+                Instruction::BitAnd,
+                IntegerBinaryOp::BitAnd,
+                f64::INFINITY,
+                i64::MAX,
+            ),
+        ];
+
+        for (case, instruction, expected_op, literal, expected_rhs) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(literal),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "bits-const-rhs",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant RHS bitwise op should lower without an RHS stack slot");
+
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::IntegerBinaryConst(expected_op, expected_rhs),
+                ],
+                "{case}"
+            );
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{case} should not allocate an RHS XMM stack slot"
+            );
         }
     }
 

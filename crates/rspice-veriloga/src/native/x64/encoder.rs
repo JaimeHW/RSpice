@@ -215,6 +215,18 @@ impl X64Encoder {
         self.emit_r64_imm32(0b101, reg, value);
     }
 
+    pub(crate) fn and_r64_imm32(&mut self, reg: Gpr, value: i32) {
+        self.emit_r64_imm32(0b100, reg, value);
+    }
+
+    pub(crate) fn or_r64_imm32(&mut self, reg: Gpr, value: i32) {
+        self.emit_r64_imm32(0b001, reg, value);
+    }
+
+    pub(crate) fn xor_r64_imm32(&mut self, reg: Gpr, value: i32) {
+        self.emit_r64_imm32(0b110, reg, value);
+    }
+
     pub(crate) fn add_r64_r64(&mut self, dst: Gpr, src: Gpr) {
         self.emit_rex(true, src.code(), 0, dst.code());
         self.emit_u8(0x01);
@@ -805,13 +817,17 @@ mod tests {
         encoder.cmp_r64_imm32(Gpr::R10, 128);
         encoder.mov_r64_imm32(Gpr::Rdx, -2);
         encoder.mov_r64_imm32(Gpr::R13, -129);
+        encoder.and_r64_imm32(Gpr::R10, 7);
+        encoder.or_r64_imm32(Gpr::R11, -1);
+        encoder.xor_r64_imm32(Gpr::Rdx, 128);
 
         assert_eq!(
             encoder.into_bytes(),
             [
                 0x48, 0x83, 0xC2, 24, 0x49, 0x83, 0xC5, 0xF8, 0x49, 0x83, 0xEA, 1, 0x49, 0x83,
                 0xFB, 1, 0x48, 0x81, 0xC2, 128, 0, 0, 0, 0x49, 0x81, 0xFA, 128, 0, 0, 0, 0x48,
-                0xC7, 0xC2, 0xFE, 0xFF, 0xFF, 0xFF, 0x49, 0xC7, 0xC5, 0x7F, 0xFF, 0xFF, 0xFF,
+                0xC7, 0xC2, 0xFE, 0xFF, 0xFF, 0xFF, 0x49, 0xC7, 0xC5, 0x7F, 0xFF, 0xFF, 0xFF, 0x49,
+                0x83, 0xE2, 7, 0x49, 0x83, 0xCB, 0xFF, 0x48, 0x81, 0xF2, 128, 0, 0, 0,
             ]
         );
     }

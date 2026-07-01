@@ -406,6 +406,9 @@ impl FunctionCompiler {
                 NativeOp::IntegerShiftConst(op, count) => {
                     self.emit_integer_shift_const(op, count)?
                 }
+                NativeOp::IntegerBinaryConst(op, value) => {
+                    self.emit_integer_bitwise_const(op, value)?
+                }
                 NativeOp::TableLookup(table_id) => {
                     self.emit_table_helper_call(table_id, rspice_table_lookup_native)?
                 }
@@ -1483,6 +1486,40 @@ impl FunctionCompiler {
             }
         }
         self.encoder.cvtsi2sd_xmm_r64(left, Gpr::R10);
+        Ok(())
+    }
+
+    fn emit_integer_bitwise_const(&mut self, op: IntegerBinaryOp, value: i64) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "constant integer bitwise op requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.emit_rust_f64_to_i64(target, Gpr::R10)?;
+        if let Ok(value) = i32::try_from(value) {
+            match op {
+                IntegerBinaryOp::BitAnd => self.encoder.and_r64_imm32(Gpr::R10, value),
+                IntegerBinaryOp::BitOr => self.encoder.or_r64_imm32(Gpr::R10, value),
+                IntegerBinaryOp::BitXor => self.encoder.xor_r64_imm32(Gpr::R10, value),
+                IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
+                    unreachable!("constant bitwise lowering only accepts bitwise ops")
+                }
+            }
+        } else {
+            self.emit_i64_arg(Gpr::R11, value);
+            match op {
+                IntegerBinaryOp::BitAnd => self.encoder.and_r64_r64(Gpr::R10, Gpr::R11),
+                IntegerBinaryOp::BitOr => self.encoder.or_r64_r64(Gpr::R10, Gpr::R11),
+                IntegerBinaryOp::BitXor => self.encoder.xor_r64_r64(Gpr::R10, Gpr::R11),
+                IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
+                    unreachable!("constant bitwise lowering only accepts bitwise ops")
+                }
+            }
+        }
+        self.encoder.cvtsi2sd_xmm_r64(target, Gpr::R10);
         Ok(())
     }
 
@@ -3466,6 +3503,7 @@ fn native_op_reads_entry_args(op: NativeOp) -> bool {
             | NativeOp::BinaryMath(_)
             | NativeOp::IntegerBinary(_)
             | NativeOp::IntegerShiftConst(_, _)
+            | NativeOp::IntegerBinaryConst(_, _)
             | NativeOp::WhiteNoise
             | NativeOp::FlickerNoise
     )
@@ -3518,6 +3556,7 @@ fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
                 | NativeOp::UnaryMath(UnaryMathOp::Floor | UnaryMathOp::Ceil)
                 | NativeOp::IntegerBinary(_)
                 | NativeOp::IntegerShiftConst(_, _)
+                | NativeOp::IntegerBinaryConst(_, _)
                 | NativeOp::WhiteNoise
                 | NativeOp::FlickerNoise
         ),
@@ -8856,6 +8895,122 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_computes_constant_rhs_bitwise_without_rhs_conversion() {
+        let cases = [
+            (
+                "bitand-imm",
+                Instruction::BitAnd,
+                IntegerBinaryOp::BitAnd,
+                13.75,
+                6.25,
+                6,
+                runtime_bitand(13.75, 6.25),
+            ),
+            (
+                "bitor-negative-imm",
+                Instruction::BitOr,
+                IntegerBinaryOp::BitOr,
+                -16.0,
+                -1.0,
+                -1,
+                runtime_bitor(-16.0, -1.0),
+            ),
+            (
+                "bitxor-nan-imm",
+                Instruction::BitXor,
+                IntegerBinaryOp::BitXor,
+                f64::NAN,
+                f64::NAN,
+                0,
+                runtime_bitxor(f64::NAN, f64::NAN),
+            ),
+        ];
+
+        for (name, instruction, expected_op, left, right, rhs_i64, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushParam(0),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+                0,
+            );
+            assert_eq!(
+                program.ops(),
+                &[
+                    NativeOp::LoadParam(0),
+                    NativeOp::IntegerBinaryConst(expected_op, rhs_i64),
+                ],
+                "{name}: constant RHS should lower to an immediate bitwise op"
+            );
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{name}: constant RHS bitwise should not allocate an RHS stack slot"
+            );
+
+            let bytes = compile_value_function(&program).expect("compile constant bitwise leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "{name}: constant bitwise ops should not pay helper-call prologue"
+            );
+            assert!(
+                contains_bytes(
+                    &bytes,
+                    &bitwise_imm32_bytes(expected_op, Gpr::R10, rhs_i64 as i32)
+                ),
+                "{name}: generated code should apply the RHS as an imm32"
+            );
+            assert!(
+                !contains_bytes(&bytes, &xor_r64_bytes(Gpr::R11, Gpr::R11)),
+                "{name}: constant RHS bitwise should not convert the RHS through R11"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate constant bitwise leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let params = [left];
+            let ctx = eval_context(&params, &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
+        }
+
+        let wide_program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushParam(0),
+                Instruction::PushConst(f64::INFINITY),
+                Instruction::BitAnd,
+            ],
+            0,
+        );
+        let wide_bytes =
+            compile_value_function(&wide_program).expect("compile wide constant bitwise leaf");
+        assert!(
+            contains_bytes(&wide_bytes, &movabs_imm64_bytes(Gpr::R11, i64::MAX as u64)),
+            "wide constant RHS bitwise should materialize the full i64 value"
+        );
+
+        let memory = ExecutableMemory::allocate(&wide_bytes).expect("allocate wide bitwise leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [13.75];
+        let ctx = eval_context(&params, &[], &[], &[]);
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            runtime_bitand(13.75, f64::INFINITY).to_bits()
+        );
+    }
+
+    #[test]
     fn generated_value_leaf_folds_safe_constant_integer_binary_to_literals() {
         let cases = [
             ("shl", Instruction::Shl, 3.0, 2.0, runtime_shl(3.0, 2.0)),
@@ -11023,6 +11178,19 @@ mod tests {
             IntegerBinaryOp::Shr => encoder.sar_r64_imm8(register, count),
             IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
                 unreachable!("shift byte helper only accepts shl/shr")
+            }
+        }
+        encoder.into_bytes()
+    }
+
+    fn bitwise_imm32_bytes(op: IntegerBinaryOp, register: Gpr, value: i32) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        match op {
+            IntegerBinaryOp::BitAnd => encoder.and_r64_imm32(register, value),
+            IntegerBinaryOp::BitOr => encoder.or_r64_imm32(register, value),
+            IntegerBinaryOp::BitXor => encoder.xor_r64_imm32(register, value),
+            IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
+                unreachable!("bitwise byte helper only accepts bitwise ops")
             }
         }
         encoder.into_bytes()
