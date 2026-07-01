@@ -5545,6 +5545,144 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_and3_lowers_to_gate_feeding_tristate() {
+        let netlist = Netlist::parse(
+            "pspice u and3 tristate\n\
+             U16 AND3(3) $G_DPWR $G_DGND a b c enable y dly\n\
+             .model DLY UTGATE (TPLHTY=6n TPHLTY=4n)\n\
+             .end\n",
+        )
+        .expect("PSpice AND3 should lower through a zero-delay gate into d_tristate");
+
+        assert_eq!(netlist.elements.len(), 2);
+        assert_eq!(netlist.elements[0].name, "U16__GATE");
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                params,
+                pspice_u_timing,
+                ..
+            } => {
+                assert_eq!(model, "d_and");
+                assert!(pspice_u_timing.is_none());
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::DigitalVector(vec![
+                            "A".to_string(),
+                            "B".to_string(),
+                            "C".to_string()
+                        ]),
+                        XspicePort::Digital("__PSPICE_U16_TRI".to_string())
+                    ]
+                );
+                assert!(params.iter().any(|(name, value)| {
+                    name == "rise_delay" && (*value - 1.0e-12).abs() < f64::EPSILON
+                }));
+                assert!(params.iter().any(|(name, value)| {
+                    name == "fall_delay" && (*value - 1.0e-12).abs() < f64::EPSILON
+                }));
+                assert!(params.iter().any(|(name, value)| {
+                    name == "inertial_delay" && (*value - 1.0).abs() < f64::EPSILON
+                }));
+            }
+            other => panic!("expected primary XSPICE gate, got {other:?}"),
+        }
+
+        let alias_name = match &netlist.elements[1].kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                pspice_u_timing,
+                ..
+            } => {
+                assert!(pspice_u_timing.is_none());
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("__PSPICE_U16_TRI".to_string()),
+                        XspicePort::Digital("ENABLE".to_string()),
+                        XspicePort::Digital("Y".to_string())
+                    ]
+                );
+                model.as_str()
+            }
+            other => panic!("expected trailing XSPICE tristate, got {other:?}"),
+        };
+
+        let alias = netlist
+            .models
+            .iter()
+            .find(|alias| alias.name == alias_name)
+            .expect("generated UTGATE alias exists");
+        assert_eq!(alias.model_type, "d_tristate");
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "delay" && (*value - 6.0e-9).abs() < 1.0e-21 })
+        );
+    }
+
+    #[test]
+    fn pspice_u_nand3a_array_lowers_to_gate_tristate_pairs() {
+        let netlist = Netlist::parse(
+            "pspice u nand3a array\n\
+             U17 NAND3A(2,2) $G_DPWR $G_DGND a1 b1 a2 b2 enable y1 y2 dly\n\
+             .model DLY UTGATE (TPLHTY=3n TPHLTY=5n)\n\
+             .end\n",
+        )
+        .expect("PSpice NAND3A should lower to gate/tristate instance pairs");
+
+        assert_eq!(netlist.elements.len(), 4);
+        assert_eq!(netlist.elements[0].name, "U17_0__GATE");
+        assert_eq!(netlist.elements[1].name, "U17_0");
+        assert_eq!(netlist.elements[2].name, "U17_1__GATE");
+        assert_eq!(netlist.elements[3].name, "U17_1");
+
+        match &netlist.elements[2].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_nand");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::DigitalVector(vec!["A2".to_string(), "B2".to_string()]),
+                        XspicePort::Digital("__PSPICE_U17_1_TRI".to_string())
+                    ]
+                );
+            }
+            other => panic!("expected primary XSPICE gate, got {other:?}"),
+        }
+
+        match &netlist.elements[3].kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                pspice_u_timing,
+                ..
+            } => {
+                assert!(pspice_u_timing.is_none());
+                assert!(
+                    netlist
+                        .models
+                        .iter()
+                        .any(|alias| alias.name == *model && alias.model_type == "d_tristate")
+                );
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("__PSPICE_U17_1_TRI".to_string()),
+                        XspicePort::Digital("ENABLE".to_string()),
+                        XspicePort::Digital("Y2".to_string())
+                    ]
+                );
+            }
+            other => panic!("expected trailing XSPICE tristate, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn pspice_u_buf3a_array_lowers_to_tristate_instances() {
         let netlist = Netlist::parse(
             "pspice u buf3a array\n\

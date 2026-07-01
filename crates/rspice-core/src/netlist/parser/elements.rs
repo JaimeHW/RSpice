@@ -766,7 +766,39 @@ pub(super) fn parse_pspice_u_device(
             line_num,
             elements,
         ),
+        "AND3" => parse_pspice_u_tristate_vector_gate_array(
+            &name,
+            &fields,
+            count.map(|input_count| (input_count, 1)),
+            "d_and",
+            line_num,
+            elements,
+        ),
+        "AND3A" => parse_pspice_u_tristate_vector_gate_array(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            "d_and",
+            line_num,
+            elements,
+        ),
         "NANDA" => parse_pspice_u_vector_gate_array(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            "d_nand",
+            line_num,
+            elements,
+        ),
+        "NAND3" => parse_pspice_u_tristate_vector_gate_array(
+            &name,
+            &fields,
+            count.map(|input_count| (input_count, 1)),
+            "d_nand",
+            line_num,
+            elements,
+        ),
+        "NAND3A" => parse_pspice_u_tristate_vector_gate_array(
             &name,
             &fields,
             pspice_u_count_pair(&fields[1]),
@@ -782,6 +814,22 @@ pub(super) fn parse_pspice_u_device(
             line_num,
             elements,
         ),
+        "NOR3" => parse_pspice_u_tristate_vector_gate_array(
+            &name,
+            &fields,
+            count.map(|input_count| (input_count, 1)),
+            "d_nor",
+            line_num,
+            elements,
+        ),
+        "NOR3A" => parse_pspice_u_tristate_vector_gate_array(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            "d_nor",
+            line_num,
+            elements,
+        ),
         "NXORA" => parse_pspice_u_vector_gate_array(
             &name,
             &fields,
@@ -790,7 +838,39 @@ pub(super) fn parse_pspice_u_device(
             line_num,
             elements,
         ),
+        "NXOR3" => parse_pspice_u_tristate_vector_gate_array(
+            &name,
+            &fields,
+            Some((2, 1)),
+            "d_xnor",
+            line_num,
+            elements,
+        ),
+        "NXOR3A" => parse_pspice_u_tristate_vector_gate_array(
+            &name,
+            &fields,
+            count.map(|gate_count| (2, gate_count)),
+            "d_xnor",
+            line_num,
+            elements,
+        ),
         "ORA" => parse_pspice_u_vector_gate_array(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            "d_or",
+            line_num,
+            elements,
+        ),
+        "OR3" => parse_pspice_u_tristate_vector_gate_array(
+            &name,
+            &fields,
+            count.map(|input_count| (input_count, 1)),
+            "d_or",
+            line_num,
+            elements,
+        ),
+        "OR3A" => parse_pspice_u_tristate_vector_gate_array(
             &name,
             &fields,
             pspice_u_count_pair(&fields[1]),
@@ -823,10 +903,26 @@ pub(super) fn parse_pspice_u_device(
             line_num,
             elements,
         ),
+        "XOR3" => parse_pspice_u_tristate_vector_gate_array(
+            &name,
+            &fields,
+            Some((2, 1)),
+            "d_xor",
+            line_num,
+            elements,
+        ),
+        "XOR3A" => parse_pspice_u_tristate_vector_gate_array(
+            &name,
+            &fields,
+            count.map(|gate_count| (2, gate_count)),
+            "d_xor",
+            line_num,
+            elements,
+        ),
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3A, and INV3A",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, and NXOR3A",
                 fields[1]
             ),
         }),
@@ -1109,6 +1205,126 @@ fn parse_pspice_u_unary_gate_array(
     }
 
     Ok(())
+}
+
+fn parse_pspice_u_tristate_vector_gate_array(
+    name: &str,
+    fields: &[String],
+    shape: Option<(usize, usize)>,
+    primary_model: &str,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let Some((input_count, gate_count)) = shape else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice tri-state vector U-device '{}' requires valid type dimensions",
+                name
+            ),
+        });
+    };
+    if input_count < 2 || gate_count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice tri-state vector U-device '{}' requires at least two inputs and one gate",
+                name
+            ),
+        });
+    }
+
+    let input_total = input_count
+        .checked_mul(gate_count)
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!("PSpice tri-state vector U-device '{}' is too large", name),
+        })?;
+    let required = input_total
+        .checked_add(1)
+        .and_then(|count| count.checked_add(gate_count))
+        .and_then(|count| count.checked_add(1))
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!("PSpice tri-state vector U-device '{}' is too large", name),
+        })?;
+
+    let pins = &fields[4..];
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice tri-state vector U-device '{}' requires {} input pin(s), one enable pin, {} output pin(s), and a timing model",
+                name, input_total, gate_count
+            ),
+        });
+    }
+
+    let enable =
+        pspice_u_required_digital_port(&pins[input_total], "enable", fields, line_num, elements)?;
+    let output_offset = input_total + 1;
+    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
+        .map(|timing_model| PspiceUTiming { timing_model });
+
+    for gate_index in 0..gate_count {
+        let input_start = gate_index * input_count;
+        let inputs = pins[input_start..input_start + input_count]
+            .iter()
+            .map(|pin| {
+                pspice_u_required_digital_node(pin, "gate input", fields, line_num, elements)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let output = pspice_u_required_digital_port(
+            &pins[output_offset + gate_index],
+            "tri-state output",
+            fields,
+            line_num,
+            elements,
+        )?;
+        let instance_name = pspice_u_lowered_instance_name(name, gate_count, gate_index);
+        push_pspice_u_tristate_vector_gate(
+            elements,
+            &instance_name,
+            primary_model,
+            inputs,
+            enable.clone(),
+            output,
+            pspice_u_timing.clone(),
+        );
+    }
+
+    Ok(())
+}
+
+fn push_pspice_u_tristate_vector_gate(
+    elements: &mut Vec<Element>,
+    instance_name: &str,
+    primary_model: &str,
+    inputs: Vec<String>,
+    enable: XspicePort,
+    output: XspicePort,
+    pspice_u_timing: Option<PspiceUTiming>,
+) {
+    let connector = pspice_u_internal_connector_name(instance_name);
+    let primary_name = format!("{instance_name}__GATE");
+    push_pspice_u_xspice_element_with_params(
+        elements,
+        primary_name,
+        primary_model,
+        vec![
+            XspicePort::DigitalVector(inputs),
+            XspicePort::Digital(connector.clone()),
+        ],
+        pspice_u_zero_gate_delay_params(),
+        None,
+    );
+    push_pspice_u_xspice_element_with_timing(
+        elements,
+        instance_name.to_string(),
+        "d_tristate",
+        vec![XspicePort::Digital(connector), enable, output],
+        pspice_u_timing,
+    );
 }
 
 fn parse_pspice_u_pull(
@@ -1486,13 +1702,31 @@ fn push_pspice_u_xspice_element_with_timing(
     ports: Vec<XspicePort>,
     pspice_u_timing: Option<PspiceUTiming>,
 ) {
+    push_pspice_u_xspice_element_with_params(
+        elements,
+        name,
+        model,
+        ports,
+        Vec::new(),
+        pspice_u_timing,
+    );
+}
+
+fn push_pspice_u_xspice_element_with_params(
+    elements: &mut Vec<Element>,
+    name: String,
+    model: &str,
+    ports: Vec<XspicePort>,
+    params: Vec<(String, Value)>,
+    pspice_u_timing: Option<PspiceUTiming>,
+) {
     elements.push(Element {
         name,
         kind: ElementKind::Xspice {
             model: model.to_string(),
             pspice_u_timing,
             ports,
-            params: Vec::new(),
+            params,
             expr_params: Vec::new(),
             string_params: Vec::new(),
             string_expr_params: Vec::new(),
@@ -1503,6 +1737,27 @@ fn push_pspice_u_xspice_element_with_timing(
         },
         nodes: Vec::new(),
     });
+}
+
+fn pspice_u_zero_gate_delay_params() -> Vec<(String, Value)> {
+    vec![
+        ("inertial_delay".to_string(), 1.0),
+        ("rise_delay".to_string(), 1.0e-12),
+        ("fall_delay".to_string(), 1.0e-12),
+    ]
+}
+
+fn pspice_u_internal_connector_name(instance_name: &str) -> String {
+    let mut name = String::from("__PSPICE_");
+    for ch in instance_name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            name.push(ch.to_ascii_uppercase());
+        } else {
+            name.push('_');
+        }
+    }
+    name.push_str("_TRI");
+    name
 }
 
 fn pspice_u_lowered_instance_name(name: &str, count: usize, index: usize) -> String {
