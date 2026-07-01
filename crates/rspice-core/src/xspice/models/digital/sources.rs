@@ -23,7 +23,28 @@ const D_STATE_TABLE_RESOURCE: &str = "xspice.d_state.table";
 #[derive(Debug, Clone)]
 struct DSourceRow {
     time: Value,
+}
+
+#[derive(Debug, Clone)]
+struct DSourceRows {
+    width: usize,
+    rows: Vec<DSourceRow>,
     values: Vec<DigitalValue>,
+}
+
+impl DSourceRows {
+    fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn first(&self) -> Option<&DSourceRow> {
+        self.rows.first()
+    }
+
+    fn row_values(&self, index: usize) -> &[DigitalValue] {
+        let start = index * self.width;
+        &self.values[start..start + self.width]
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -41,13 +62,13 @@ struct DSourceRowsResource {
     input_file: String,
     width: usize,
     virtual_stamp: Option<data_file::DataFileStamp>,
-    rows: Option<Arc<Vec<DSourceRow>>>,
+    rows: Option<Arc<DSourceRows>>,
 }
 
 #[derive(Debug, Default)]
 struct DSourceCache {
     virtual_epoch: u64,
-    entries: HashMap<DSourceCacheKey, Arc<Vec<DSourceRow>>>,
+    entries: HashMap<DSourceCacheKey, Arc<DSourceRows>>,
 }
 
 impl DSourceCache {
@@ -150,8 +171,9 @@ fn parse_d_source_contents(
     input_file: &str,
     width: usize,
     contents: &str,
-) -> CmResult<Vec<DSourceRow>> {
+) -> CmResult<DSourceRows> {
     let mut rows = Vec::new();
+    let mut values = Vec::new();
     let mut previous_time = None;
 
     for (line_idx, line) in contents.lines().enumerate() {
@@ -194,21 +216,24 @@ fn parse_d_source_contents(
         }
         previous_time = Some(time);
 
-        let values = tokens[1..]
-            .iter()
-            .map(|token| parse_d_source_token(input_file, line_no, token))
-            .collect::<CmResult<Vec<_>>>()?;
-        rows.push(DSourceRow { time, values });
+        for token in &tokens[1..] {
+            values.push(parse_d_source_token(input_file, line_no, token)?);
+        }
+        rows.push(DSourceRow { time });
     }
 
     if rows.is_empty() {
         return Err(d_source_file_error(input_file, "contains no stimulus rows"));
     }
 
-    Ok(rows)
+    Ok(DSourceRows {
+        width,
+        rows,
+        values,
+    })
 }
 
-fn parse_d_source_file(input_file: &str, width: usize) -> CmResult<Vec<DSourceRow>> {
+fn parse_d_source_file(input_file: &str, width: usize) -> CmResult<DSourceRows> {
     let contents = data_file::read_to_string(input_file)
         .map_err(|err| d_source_file_error(input_file, err))?;
     parse_d_source_contents(input_file, width, &contents)
@@ -217,10 +242,7 @@ fn parse_d_source_file(input_file: &str, width: usize) -> CmResult<Vec<DSourceRo
 fn load_d_source_rows(
     input_file: &str,
     width: usize,
-) -> (
-    Option<data_file::DataFileStamp>,
-    CmResult<Arc<Vec<DSourceRow>>>,
-) {
+) -> (Option<data_file::DataFileStamp>, CmResult<Arc<DSourceRows>>) {
     let (contents, stamp) = match data_file::read_to_string_with_stamp(input_file) {
         Ok(file) => file,
         Err(err) => return (None, Err(d_source_file_error(input_file, err))),
@@ -250,7 +272,7 @@ fn load_d_source_rows_for_context(
     ctx: &mut CmContext,
     input_file: &str,
     width: usize,
-) -> CmResult<Arc<Vec<DSourceRow>>> {
+) -> CmResult<Arc<DSourceRows>> {
     if let Some(resource) = ctx.resource::<DSourceRowsResource>(D_SOURCE_ROWS_RESOURCE)
         && resource.input_file == input_file
         && resource.width == width
@@ -395,12 +417,12 @@ impl CodeModel for DigitalSource {
         }
         let emitted_row = ctx.int_state(D_SOURCE_EMITTED_ROW);
         let scheduled_row = ctx.int_state(D_SOURCE_SCHEDULED_ROW);
-        let (active_idx, next_idx) = d_source_row_indices(&rows, ctx.time, emitted_row);
+        let (active_idx, next_idx) = d_source_row_indices(&rows.rows, ctx.time, emitted_row);
 
         if let Some(idx) = active_idx {
             if emitted_row != idx as i64 {
-                let row = &rows[idx];
-                d_source_set_output(ctx, &row.values, row.time - ctx.time);
+                let row = &rows.rows[idx];
+                d_source_set_output(ctx, rows.row_values(idx), row.time - ctx.time);
                 d_source_set_row_state(ctx, D_SOURCE_EMITTED_ROW, idx as i64);
             }
         } else if emitted_row != D_SOURCE_BEFORE_FIRST_ROW {
@@ -410,8 +432,8 @@ impl CodeModel for DigitalSource {
 
         if let Some(idx) = next_idx {
             if scheduled_row != idx as i64 {
-                let row = &rows[idx];
-                d_source_set_output(ctx, &row.values, row.time - ctx.time);
+                let row = &rows.rows[idx];
+                d_source_set_output(ctx, rows.row_values(idx), row.time - ctx.time);
                 d_source_set_row_state(ctx, D_SOURCE_SCHEDULED_ROW, idx as i64);
             }
         } else if scheduled_row != D_SOURCE_NO_ROW {
@@ -1065,13 +1087,13 @@ mod tests {
         let mut ctx = CmContext::new();
         let first = load_d_source_rows_for_context(&mut ctx, input_file, 1)
             .expect("load first d_source rows");
-        assert_eq!(first[1].values, vec![DigitalValue::one()]);
+        assert_eq!(first.row_values(1), &[DigitalValue::one()][..]);
 
         data_file::register_data_file(input_file, "0 0s\n1n 0s\n")
             .expect("replace virtual d_source data");
         let second = load_d_source_rows_for_context(&mut ctx, input_file, 1)
             .expect("reload replaced d_source rows");
-        assert_eq!(second[1].values, vec![DigitalValue::zero()]);
+        assert_eq!(second.row_values(1), &[DigitalValue::zero()][..]);
 
         unregister_test_data_file(input_file);
     }
@@ -1114,13 +1136,13 @@ mod tests {
             .expect("register first virtual d_source data");
         let (_, first_source) = load_d_source_rows(input_file, 1);
         let first_source = first_source.expect("load first virtual d_source data");
-        assert_eq!(first_source[1].values, vec![DigitalValue::one()]);
+        assert_eq!(first_source.row_values(1), &[DigitalValue::one()][..]);
 
         data_file::register_data_file(input_file, "0 0s\n1n 0s\n")
             .expect("replace virtual d_source data");
         let (_, second_source) = load_d_source_rows(input_file, 1);
         let second_source = second_source.expect("load replaced virtual d_source data");
-        assert_eq!(second_source[1].values, vec![DigitalValue::zero()]);
+        assert_eq!(second_source.row_values(1), &[DigitalValue::zero()][..]);
 
         data_file::register_data_file(state_file, "0 0s 0 -> 0\n")
             .expect("register first virtual d_state data");
@@ -1259,24 +1281,33 @@ mod tests {
     }
 
     #[test]
+    fn d_source_parses_row_values_into_contiguous_storage() {
+        let rows =
+            parse_d_source_contents("virtual://d_source/flat-values", 2, "0 0s 1s\n1n Us 0r\n")
+                .expect("d_source table parses");
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.values.len(), 4);
+        assert_eq!(
+            rows.row_values(0),
+            &[DigitalValue::zero(), DigitalValue::one()][..]
+        );
+        assert_eq!(
+            rows.row_values(1),
+            &[
+                DigitalValue::unknown(),
+                DigitalValue::new(DigitalState::ZeroR, DigitalStrength::Resistive),
+            ][..]
+        );
+    }
+
+    #[test]
     fn d_source_row_lookup_uses_emitted_cursor_when_time_is_monotonic() {
         let rows = vec![
-            DSourceRow {
-                time: 0.0,
-                values: Vec::new(),
-            },
-            DSourceRow {
-                time: 1.0e-9,
-                values: Vec::new(),
-            },
-            DSourceRow {
-                time: 2.0e-9,
-                values: Vec::new(),
-            },
-            DSourceRow {
-                time: 3.0e-9,
-                values: Vec::new(),
-            },
+            DSourceRow { time: 0.0 },
+            DSourceRow { time: 1.0e-9 },
+            DSourceRow { time: 2.0e-9 },
+            DSourceRow { time: 3.0e-9 },
         ];
 
         assert_eq!(d_source_scan_start(&rows, 2.5e-9, 1), 2);
