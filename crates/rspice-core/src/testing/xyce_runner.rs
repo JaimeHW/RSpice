@@ -286,7 +286,8 @@ impl XyceLeadCurrentTerminal {
     fn op_parameter(self) -> Option<&'static str> {
         match self {
             Self::Drain => Some("id"),
-            Self::Gate | Self::Source | Self::Bulk => None,
+            Self::Source => Some("is"),
+            Self::Gate | Self::Bulk => None,
         }
     }
 
@@ -1939,7 +1940,7 @@ impl XyceTestRunner {
                     original
                 ));
             }
-            if lead_current.terminal.op_parameter().is_some() {
+            if Self::netlist_supports_lead_current_probe(netlist, &lead_current) {
                 return Ok(());
             }
             return Err(format!(
@@ -3054,6 +3055,98 @@ impl XyceTestRunner {
                     && Self::device_instance_names_match(&element.name, instance_name)
             })
         })
+    }
+
+    fn netlist_supports_lead_current_probe(
+        netlist: &Netlist,
+        probe: &XyceLeadCurrentProbe,
+    ) -> bool {
+        match probe.terminal {
+            XyceLeadCurrentTerminal::Drain => true,
+            XyceLeadCurrentTerminal::Source => {
+                Self::netlist_device_is_native_b3soi_mosfet(netlist, &probe.element_name)
+            }
+            XyceLeadCurrentTerminal::Gate | XyceLeadCurrentTerminal::Bulk => false,
+        }
+    }
+
+    fn netlist_device_is_native_b3soi_mosfet(netlist: &Netlist, instance_name: &str) -> bool {
+        if Self::elements_device_is_native_b3soi_mosfet(
+            &netlist.elements,
+            &netlist.models,
+            &[],
+            instance_name,
+        ) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            Self::elements_device_is_native_b3soi_mosfet(
+                &flattened.elements,
+                &netlist.models,
+                &flattened.scoped_models,
+                instance_name,
+            )
+        })
+    }
+
+    fn elements_device_is_native_b3soi_mosfet(
+        elements: &[crate::netlist::Element],
+        models: &[crate::netlist::ModelDef],
+        scoped_models: &[crate::netlist::ModelDef],
+        instance_name: &str,
+    ) -> bool {
+        elements.iter().any(|element| {
+            if !Self::device_instance_names_match(&element.name, instance_name) {
+                return false;
+            }
+            let ElementKind::Mosfet {
+                model,
+                instance_params,
+                ..
+            } = &element.kind
+            else {
+                return false;
+            };
+            Self::find_model(scoped_models, model)
+                .or_else(|| Self::find_model(models, model))
+                .is_some_and(|model| Self::model_is_native_b3soi_mosfet(model, instance_params))
+        })
+    }
+
+    fn model_is_native_b3soi_mosfet(
+        model: &crate::netlist::ModelDef,
+        instance_params: &[(String, Value)],
+    ) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) {
+            return false;
+        }
+        let Some(level) = Self::numeric_param_value(&model.params, "LEVEL") else {
+            return false;
+        };
+        if (level - 10.0).abs() <= 1.0e-9 {
+            return Self::numeric_param_value(instance_params, "SOIMOD")
+                .or_else(|| Self::numeric_param_value(&model.params, "SOIMOD"))
+                .is_none_or(|soi_mod| {
+                    soi_mod.is_finite()
+                        && (soi_mod - soi_mod.round()).abs() <= 1.0e-12
+                        && matches!(soi_mod.round() as i32, 0..=3)
+                });
+        }
+        [55.0, 56.0, 57.0]
+            .iter()
+            .any(|native_level| (level - native_level).abs() <= 1.0e-9)
+    }
+
+    fn numeric_param_value(params: &[(String, Value)], name: &str) -> Option<Value> {
+        params
+            .iter()
+            .rev()
+            .find(|(param_name, _)| param_name.eq_ignore_ascii_case(name))
+            .map(|(_, value)| *value)
     }
 
     fn netlist_element_exports_device_op(element: &crate::netlist::Element) -> bool {
@@ -4474,6 +4567,7 @@ End of Xyce(TM) Simulation
         );
         assert!(XyceTestRunner::parse_lead_current_probe("I(V1)").is_none());
         assert_eq!(XyceLeadCurrentTerminal::Drain.op_parameter(), Some("id"));
+        assert_eq!(XyceLeadCurrentTerminal::Source.op_parameter(), Some("is"));
         assert_eq!(XyceLeadCurrentTerminal::Gate.op_parameter(), None);
     }
 

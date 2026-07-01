@@ -116,6 +116,7 @@ impl CircuitData {
                 region: Some(region),
                 params: vec![
                     ("id", id),
+                    ("is", -id),
                     ("vgs", vgs),
                     ("vds", vds),
                     ("vbs", vbs),
@@ -136,6 +137,7 @@ impl CircuitData {
                 region: Some(region),
                 params: vec![
                     ("id", id),
+                    ("is", -id),
                     ("vgs", vgs),
                     ("vds", vds),
                     ("vbs", vbs),
@@ -156,6 +158,7 @@ impl CircuitData {
                 region: Some(region),
                 params: vec![
                     ("id", id),
+                    ("is", -id),
                     ("vgs", vgs),
                     ("vds", vds),
                     ("vbs", vbs),
