@@ -1528,6 +1528,7 @@ impl Engine {
                         &bounded_force_candidate,
                         expected_source_delta,
                         num_nodes,
+                        &force_accept_protected_nodes,
                     );
                     let use_static_source_recovery_guards =
                         !circuit.has_xspice_event_driven_devices();
@@ -2336,6 +2337,7 @@ impl Engine {
                         &bounded_force_candidate,
                         expected_source_delta,
                         num_nodes,
+                        &force_accept_protected_nodes,
                     );
                     let use_static_source_recovery_guards =
                         !circuit.has_xspice_event_driven_devices();

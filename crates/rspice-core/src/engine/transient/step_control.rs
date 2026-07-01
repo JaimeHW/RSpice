@@ -128,9 +128,16 @@ impl Engine {
         candidate_solution: &[Value],
         expected_source_delta: Value,
         num_nodes: usize,
+        protected_nodes: &[bool],
     ) -> bool {
-        let observed_delta =
-            Self::max_abs_delta_prefix(previous_solution, candidate_solution, num_nodes);
+        let observed_delta = previous_solution
+            .iter()
+            .zip(candidate_solution.iter())
+            .take(num_nodes)
+            .enumerate()
+            .filter(|(idx, _)| !protected_nodes.get(*idx).copied().unwrap_or(false))
+            .map(|(_, (x, y))| (x - y).abs())
+            .fold(0.0, Value::max);
         // Guard only truly explosive step jumps. We intentionally allow bounded
         // multi-volt recovery movement here because force-accept paths may need
         // larger-than-source-following corrections to escape stiff NR stalls.
