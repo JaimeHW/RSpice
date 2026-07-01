@@ -11,7 +11,16 @@ pub(super) enum InitialSolutionMode {
     LinearizedSeed,
 }
 
+const STARTUP_WARMUP_MIN_GMIN: Value = 1.0e-18;
+const STARTUP_WARMUP_MAX_GMIN: Value = 1.0e-15;
+
 impl Engine {
+    #[inline]
+    fn startup_warmup_conditioning_gmin(&self, circuit: &crate::circuit::Circuit) -> Value {
+        self.dc_nodal_gmin_floor(circuit)
+            .clamp(STARTUP_WARMUP_MIN_GMIN, STARTUP_WARMUP_MAX_GMIN)
+    }
+
     pub(super) fn nonlinear_startup_warmup_seed(
         &self,
         circuit: &mut crate::circuit::Circuit,
@@ -24,15 +33,17 @@ impl Engine {
         let size = circuit.matrix_size();
         let mut solution = seed.to_vec();
         let mut rhs = vec![0.0; size];
+        let gmin_floor = self.startup_warmup_conditioning_gmin(circuit);
 
         for _ in 0..WARMUP_ITERS {
             matrix.clear_values();
             rhs.fill(0.0);
 
             // Keep the warmup matrix well-conditioned for highly floating
-            // transistor stacks while still allowing nonlinear bias formation.
+            // transistor stacks without overwhelming very high-resistance
+            // native device topologies such as BSIM4 RGATEMOD=3.
             for i in 0..size {
-                matrix.add(i, i, 1e-6);
+                matrix.add(i, i, gmin_floor);
             }
             circuit.stamp_dc_direct(matrix, &mut rhs);
             circuit.stamp_generic_switches(matrix, &mut rhs, 0.0);
@@ -88,13 +99,14 @@ impl Engine {
         let size = circuit.matrix_size();
         let mut solution = seed.to_vec();
         let mut rhs = vec![0.0; size];
+        let gmin_floor = self.startup_warmup_conditioning_gmin(circuit);
 
         for _ in 0..WARMUP_ITERS {
             matrix.clear_values();
             rhs.fill(0.0);
 
             for i in 0..size {
-                matrix.add(i, i, 1e-6);
+                matrix.add(i, i, gmin_floor);
             }
             circuit.stamp_transient_operating_point_direct(matrix, &mut rhs);
             let num_nodes = circuit.num_nodes();
