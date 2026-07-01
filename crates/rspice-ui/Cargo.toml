@@ -75,7 +75,7 @@ usvg = { version = "0.44", default-features = false }
 svgtypes = "0.15"
 
 # Native file dialogs
-rfd = "0.15"
+rfd = "0.17"
 
 # Cross-platform config directories
 dirs = "5.0"
