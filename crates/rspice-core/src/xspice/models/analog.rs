@@ -453,7 +453,7 @@ impl CodeModel for Multiplier {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let (output, _partials) = mult_transfer_from_context(ctx)?;
+        let output = mult_output_from_context(ctx)?;
 
         ctx.set_output("out", output);
         Ok(())
@@ -468,18 +468,22 @@ impl CodeModel for Multiplier {
             return Vec::new();
         }
 
-        let Ok((_output, partials)) = mult_transfer_from_context(ctx) else {
+        let Ok(partials) = mult_partials_from_context(ctx) else {
             return Vec::new();
         };
         partials
-            .into_iter()
-            .enumerate()
-            .map(|(index, partial)| ("in".to_string(), index, partial))
-            .collect()
     }
 }
 
-fn mult_transfer_from_context(ctx: &CmContext) -> CmResult<(Value, Vec<Value>)> {
+#[derive(Debug, Clone, Copy)]
+struct MultTransfer {
+    input_width: usize,
+    accumulate_in: Value,
+    transfer_gain: Value,
+    out_offset: Value,
+}
+
+fn mult_transfer_from_context(ctx: &CmContext) -> CmResult<MultTransfer> {
     let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if inputs.len() < 2 {
         return Err(CmError::EvaluationError(format!(
@@ -495,35 +499,47 @@ fn mult_transfer_from_context(ctx: &CmContext) -> CmResult<(Value, Vec<Value>)> 
 
     let mut accumulate_gain = 1.0;
     let mut accumulate_in = 1.0;
-    let mut shifted_inputs = Vec::with_capacity(inputs.len());
     for (index, input) in inputs.iter().enumerate() {
         let gain = analog_vector_param_at(in_gain, index, 1.0);
         let offset = analog_vector_param_at(in_offset, index, 0.0);
         accumulate_gain *= gain;
-        let shifted = input.value + offset;
-        shifted_inputs.push(shifted);
-        accumulate_in *= shifted;
+        accumulate_in *= input.value + offset;
     }
 
     let transfer_gain = accumulate_gain * out_gain;
-    let output = accumulate_in * transfer_gain + out_offset;
-    let partials = if accumulate_in != 0.0 && accumulate_in.is_finite() && transfer_gain.is_finite()
-    {
-        shifted_inputs
-            .iter()
-            .map(|shifted| {
-                if *shifted == 0.0 {
-                    0.0
-                } else {
-                    accumulate_in / shifted * transfer_gain
-                }
-            })
-            .collect()
-    } else {
-        vec![0.0; inputs.len()]
-    };
+    Ok(MultTransfer {
+        input_width: inputs.len(),
+        accumulate_in,
+        transfer_gain,
+        out_offset,
+    })
+}
 
-    Ok((output, partials))
+fn mult_output_from_context(ctx: &CmContext) -> CmResult<Value> {
+    let transfer = mult_transfer_from_context(ctx)?;
+    Ok(transfer.accumulate_in * transfer.transfer_gain + transfer.out_offset)
+}
+
+fn mult_partials_from_context(ctx: &CmContext) -> CmResult<Vec<(String, usize, Value)>> {
+    let transfer = mult_transfer_from_context(ctx)?;
+    let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
+    let in_offset = analog_vector_param_values(ctx, "in_offset", transfer.input_width, "mult")?;
+
+    let mut partials = Vec::with_capacity(transfer.input_width);
+    for (index, input) in inputs.iter().enumerate() {
+        let shifted = input.value + analog_vector_param_at(in_offset, index, 0.0);
+        let partial = if transfer.accumulate_in != 0.0
+            && transfer.accumulate_in.is_finite()
+            && transfer.transfer_gain.is_finite()
+            && shifted != 0.0
+        {
+            transfer.accumulate_in / shifted * transfer.transfer_gain
+        } else {
+            0.0
+        };
+        partials.push(("in".to_string(), index, partial));
+    }
+    Ok(partials)
 }
 
 //=============================================================================
@@ -2217,6 +2233,7 @@ impl CodeModel for AnalogOneShot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xspice::AnalogValue;
 
     fn oneshot_point(control: Value, pulse_width: Value) -> OneShotPoint {
         OneShotPoint {
@@ -2425,6 +2442,31 @@ mod tests {
         assert!(
             (output - 25.0).abs() <= 1.0e-12,
             "wrapped delay history should interpolate between ring slots 2 and 3, got {output}"
+        );
+    }
+
+    #[test]
+    fn mult_output_and_partials_share_accumulator_math_without_extra_output_work() {
+        let mut ctx = CmContext::new();
+        ctx.set_input_analog_vector_from_fn("in", 3, |index| {
+            AnalogValue::new([1.0, 2.0, 3.0][index])
+        });
+        ctx.set_real_vector_param("in_gain", vec![2.0, 3.0, 4.0]);
+        ctx.set_real_vector_param("in_offset", vec![0.5, -1.0, 0.0]);
+        ctx.set_param("out_gain", 2.0);
+        ctx.set_param("out_offset", 1.0);
+
+        let output = mult_output_from_context(&ctx).expect("mult output evaluates");
+        assert_eq!(output, 217.0);
+
+        let partials = mult_partials_from_context(&ctx).expect("mult partials evaluate");
+        assert_eq!(
+            partials,
+            vec![
+                ("in".to_string(), 0, 144.0),
+                ("in".to_string(), 1, 216.0),
+                ("in".to_string(), 2, 72.0),
+            ]
         );
     }
 
