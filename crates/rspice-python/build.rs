@@ -55,8 +55,7 @@ fn ensure_windows_python_runtime_is_available() {
 #[cfg(windows)]
 fn discover_python_runtime_dir() -> Option<PathBuf> {
     let interpreter = pyo3_build_config::get()
-        .executable
-        .as_ref()
+        .executable()
         .map(OsString::from)
         .or_else(|| env::var_os("PYO3_PYTHON"))
         .unwrap_or_else(|| OsString::from("python"));

@@ -35,7 +35,7 @@ pub struct PyNetlist {
 }
 
 /// Non-fatal parser diagnostic attached to a parsed netlist.
-#[pyclass(name = "ParseDiagnostic")]
+#[pyclass(name = "ParseDiagnostic", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyParseDiagnostic {
     #[pyo3(get)]

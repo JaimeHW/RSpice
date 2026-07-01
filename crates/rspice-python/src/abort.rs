@@ -41,7 +41,7 @@ where
                 signal_error = Some(err);
                 abort_ref.set();
             }
-            py.allow_threads(|| std::thread::sleep(wait));
+            py.detach(|| std::thread::sleep(wait));
             wait = (wait * 2).min(MAX_POLL_INTERVAL);
         }
 

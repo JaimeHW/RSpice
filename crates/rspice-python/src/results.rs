@@ -1046,7 +1046,7 @@ impl PyDcSweepResult {
 /// Example:
 ///     >>> for contrib in result.contributions:
 ///     ...     print(f"{contrib.device_name}: {contrib.percentage:.1f}%")
-#[pyclass(name = "NoiseContribution")]
+#[pyclass(name = "NoiseContribution", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyNoiseContribution {
     /// Device name generating this noise
@@ -1081,7 +1081,7 @@ impl PyNoiseContribution {
 ///     >>> result = engine.run_noise(netlist, output_node="out", frequencies=[1e3, 10e3])
 ///     >>> for r in result:
 ///     ...     print(f"f={r.frequency:.0f}Hz: {r.output_noise_rms*1e9:.2f}nV/√Hz")
-#[pyclass(name = "NoiseResult")]
+#[pyclass(name = "NoiseResult", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyNoiseResult {
     /// Frequency in Hz
@@ -1182,7 +1182,7 @@ impl PyNoiseResult {
 ///     >>> stats = result.get_variable("V(out)")
 ///     >>> print(f"Mean: {stats.mean:.3f}, Std: {stats.std_dev:.3f}")
 ///     >>> print(f"3σ range: {stats.three_sigma_range}")
-#[pyclass(name = "VariableStatistics")]
+#[pyclass(name = "VariableStatistics", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyVariableStatistics {
     /// Variable name
@@ -1296,7 +1296,7 @@ impl PyVariableStatistics {
 ///     >>> result = engine.run_monte_carlo(netlist, num_runs=1000, seed=42)
 ///     >>> v_out = result.get_variable("V(OUT)")
 ///     >>> print(f"V(out): {v_out.mean:.3f} ± {v_out.std_dev:.3f}V")
-#[pyclass(name = "MonteCarloResult")]
+#[pyclass(name = "MonteCarloResult", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyMonteCarloResult {
     /// Number of runs completed
@@ -1398,7 +1398,7 @@ impl PyMonteCarloResult {
 ///     ...     print(complex(pole))
 ///     ...     if pole.is_real:
 ///     ...         print(f"  Time constant: {pole.time_constant:.3e}s")
-#[pyclass(name = "ComplexValue")]
+#[pyclass(name = "ComplexValue", from_py_object)]
 #[derive(Debug, Clone, Copy)]
 pub struct PyComplexValue {
     /// Real part
@@ -1494,7 +1494,7 @@ impl PyComplexValue {
 ///     >>> print(f"Stable: {result.is_stable}")
 ///     >>> for pole in result.poles:
 ///     ...     print(f"Pole: {pole}")
-#[pyclass(name = "PoleZeroResult")]
+#[pyclass(name = "PoleZeroResult", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyPoleZeroResult {
     /// System poles (natural frequencies)
@@ -1633,7 +1633,7 @@ impl PyPoleZeroResult {
 //=============================================================================
 
 /// A single harmonic component from Fourier analysis
-#[pyclass(name = "Harmonic")]
+#[pyclass(name = "Harmonic", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyHarmonic {
     /// Harmonic number (1 = fundamental)
@@ -1676,7 +1676,7 @@ impl PyHarmonic {
 ///     >>> print(f"THD = {four.thd_percent:.3f}%")
 ///     >>> for h in four.harmonics:
 ///     ...     print(h)
-#[pyclass(name = "FourierResult")]
+#[pyclass(name = "FourierResult", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyFourierResult {
     /// DC component of the waveform
@@ -1760,7 +1760,7 @@ impl PyFourierResult {
 /// Example:
 ///     >>> tf = engine.run_transfer_function(netlist, "out", "V1")
 ///     >>> print(f"gain={tf.gain:.3f}, Zin={tf.input_impedance:.1f}Ω")
-#[pyclass(name = "TransferFunctionResult")]
+#[pyclass(name = "TransferFunctionResult", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyTransferFunctionResult {
     /// Output specification
@@ -1821,7 +1821,7 @@ impl PyTransferFunctionResult {
 /// Example:
 ///     >>> m = report.measurement("trise")
 ///     >>> assert m.passed and m.value < 1e-6
-#[pyclass(name = "Measurement")]
+#[pyclass(name = "Measurement", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyMeasurement {
     /// Measurement name (from the .MEAS statement)
@@ -1930,7 +1930,7 @@ impl PyMeasurement {
 }
 
 /// Record of one analysis directive handled by `Engine.run`
-#[pyclass(name = "AnalysisRecord")]
+#[pyclass(name = "AnalysisRecord", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyAnalysisRecord {
     /// Analysis kind: "op", "dc", "ac", "tran", "noise", "tf", "four", ...

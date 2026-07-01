@@ -66,7 +66,7 @@ fn validate_timestep_window(min_timestep: f64, max_timestep: f64) -> PyResult<()
 /// - `VOLTAGE_LIMITING` - Junction voltage limiting (SPICE-style)
 /// - `BANK_ROSE` - Bank-Rose adaptive damping
 /// - `COMBINED` - Voltage limiting + line search (most robust)
-#[pyclass(name = "DampingStrategy", eq, eq_int)]
+#[pyclass(name = "DampingStrategy", eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PyDampingStrategy {
     #[pyo3(name = "NONE")]
@@ -125,7 +125,7 @@ impl PyDampingStrategy {
 /// - `GEAR2` - BDF2, good for stiff systems
 /// - `TRAP_GEAR` - Hybrid: trapezoidal that auto-switches to Gear2 at
 ///   discontinuities (default)
-#[pyclass(name = "IntegrationMethod", eq, eq_int)]
+#[pyclass(name = "IntegrationMethod", eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PyIntegrationMethod {
     #[pyo3(name = "BACKWARD_EULER")]
@@ -181,7 +181,7 @@ impl PyIntegrationMethod {
 ///     >>> bypass = BypassConfig(enabled=True, reltol=1e-3)
 ///     >>> bypass.enabled
 ///     True
-#[pyclass(name = "BypassConfig")]
+#[pyclass(name = "BypassConfig", from_py_object)]
 #[derive(Clone)]
 pub struct PyBypassConfig {
     pub(crate) inner: BypassConfig,
@@ -274,7 +274,7 @@ impl PyBypassConfig {
 ///
 /// Note: reading a nested config (e.g. `sim_config.convergence`) returns a
 /// copy; mutate it and assign it back, or construct with keywords.
-#[pyclass(name = "ConvergenceConfig")]
+#[pyclass(name = "ConvergenceConfig", from_py_object)]
 #[derive(Clone)]
 pub struct PyConvergenceConfig {
     pub(crate) inner: ConvergenceConfig,
@@ -549,7 +549,7 @@ impl PyConvergenceConfig {
 /// Note: property getters for `convergence` and `bypass` return copies.
 /// `config.convergence.verbose = True` mutates a temporary and is silently
 /// lost — assign a whole ConvergenceConfig instead.
-#[pyclass(name = "SimulationConfig")]
+#[pyclass(name = "SimulationConfig", from_py_object)]
 #[derive(Clone)]
 pub struct PySimulationConfig {
     pub(crate) inner: SimulationConfig,
