@@ -814,12 +814,13 @@ fn factor_linear_system(mut matrix: Vec<Vec<Value>>) -> Option<LinearFactorizati
         pivots.push(pivot_row);
 
         let pivot = matrix[pivot_col][pivot_col];
-        let pivot_values = matrix[pivot_col].clone();
-        for row_index in (pivot_col + 1)..n {
-            let factor = matrix[row_index][pivot_col] / pivot;
-            matrix[row_index][pivot_col] = factor;
-            for (col, pivot_value) in pivot_values.iter().enumerate().skip(pivot_col + 1) {
-                matrix[row_index][col] -= factor * pivot_value;
+        let (upper_rows, lower_rows) = matrix.split_at_mut(pivot_col + 1);
+        let pivot_tail = &upper_rows[pivot_col][pivot_col + 1..];
+        for row in lower_rows {
+            let factor = row[pivot_col] / pivot;
+            row[pivot_col] = factor;
+            for (entry, pivot_value) in row[pivot_col + 1..].iter_mut().zip(pivot_tail) {
+                *entry -= factor * pivot_value;
             }
         }
     }
@@ -1257,6 +1258,17 @@ mod tests {
         assert_eq!(solution, vec![2.0, 2.0]);
         assert_eq!(solution.as_ptr(), first_ptr);
         assert_eq!(solution.capacity(), first_capacity);
+    }
+
+    #[test]
+    fn s_xfer_factorized_solver_applies_pivoting() {
+        let factorization =
+            factor_linear_system(vec![vec![0.0, 2.0], vec![1.0, 3.0]]).expect("factorizes");
+
+        let solution = solve_factorized_system(&factorization, vec![4.0, 7.0]).expect("solves");
+
+        assert!((solution[0] - 1.0).abs() < 1.0e-12);
+        assert!((solution[1] - 2.0).abs() < 1.0e-12);
     }
 
     #[test]
