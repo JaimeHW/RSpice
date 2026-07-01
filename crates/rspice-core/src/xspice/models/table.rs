@@ -965,15 +965,13 @@ where
     let y_window = 2 * order - 2;
     let y_local_index = y_index - y_window_start;
 
-    values_along_y.clear();
-    dx_along_y.clear();
-    values_along_y.reserve(y_window);
-    dx_along_y.reserve(y_window);
-    for row_index in y_window_start..y_window_start + y_window {
+    values_along_y.resize(y_window, 0.0);
+    dx_along_y.resize(y_window, 0.0);
+    for (slot, row_index) in (y_window_start..y_window_start + y_window).enumerate() {
         let row = row_at(row_index);
         let eval = eno1d_eval_with_scratch(row, order, x_index, x_offset, x_scratch);
-        values_along_y.push(eval.value);
-        dx_along_y.push(eval.derivative);
+        values_along_y[slot] = eval.value;
+        dx_along_y[slot] = eval.derivative;
     }
 
     let y_eval = eno1d_eval_with_scratch(values_along_y, order, y_local_index, y_offset, y_scratch);
@@ -1042,12 +1040,11 @@ fn table3d_eno_derivatives_with_scratch(
     let y_local_index = y_axis.eno_index - y_window_start;
     let z_local_index = z_axis.eno_index - z_window_start;
 
-    scratch.values_over_zy.clear();
-    scratch.dx_over_zy.clear();
-    scratch.values_over_zy.reserve(yz_window * yz_window);
-    scratch.dx_over_zy.reserve(yz_window * yz_window);
-    for z in z_window_start..z_window_start + yz_window {
-        for y in y_window_start..y_window_start + yz_window {
+    let yz_len = yz_window * yz_window;
+    scratch.values_over_zy.resize(yz_len, 0.0);
+    scratch.dx_over_zy.resize(yz_len, 0.0);
+    for (z_slot, z) in (z_window_start..z_window_start + yz_window).enumerate() {
+        for (y_slot, y) in (y_window_start..y_window_start + yz_window).enumerate() {
             let eval = eno1d_eval_with_scratch(
                 table3d_x_row(table, y, z),
                 order,
@@ -1055,8 +1052,9 @@ fn table3d_eno_derivatives_with_scratch(
                 x_axis.eno_offset,
                 &mut scratch.x_scratch,
             );
-            scratch.values_over_zy.push(eval.value);
-            scratch.dx_over_zy.push(eval.derivative);
+            let slot = z_slot * yz_window + y_slot;
+            scratch.values_over_zy[slot] = eval.value;
+            scratch.dx_over_zy[slot] = eval.derivative;
         }
     }
 
@@ -1581,6 +1579,39 @@ mod tests {
     }
 
     #[test]
+    fn table2d_eval_overwrites_dirty_reused_scratch() {
+        let axis = vec![0.0, 1.0, 2.0, 3.0, 4.0];
+        let mut values = Vec::new();
+        for &y in &axis {
+            for &x in &axis {
+                values.push(x * x + y * y + x * y);
+            }
+        }
+        let table = Table2DData {
+            x: axis.clone(),
+            y: axis,
+            values,
+        };
+        let mut scratch = TableEvalScratch {
+            values_along_y: vec![Value::NAN; 32],
+            dx_along_y: vec![Value::NAN; 32],
+            x_scratch: vec![Value::NAN; 64],
+            y_scratch: vec![Value::NAN; 64],
+            ..TableEvalScratch::default()
+        };
+
+        let fast = evaluate_table2d_data_with_scratch(&table, 3, 1.4, 2.2, &mut scratch);
+        let expected = evaluate_table2d_data(&table, 3, 1.4, 2.2);
+
+        assert!(fast.value.is_finite());
+        assert!(fast.dx.is_finite());
+        assert!(fast.dy.is_finite());
+        assert_eq!(fast.value, expected.value);
+        assert_eq!(fast.dx, expected.dx);
+        assert_eq!(fast.dy, expected.dy);
+    }
+
+    #[test]
     fn table3d_eval_reused_scratch_matches_allocating_wrapper() {
         let axis = vec![0.0, 1.0, 2.0, 3.0, 4.0];
         let mut values = Vec::new();
@@ -1633,6 +1664,47 @@ mod tests {
         assert_eq!(again.dx, expected_again.dx);
         assert_eq!(again.dy, expected_again.dy);
         assert_eq!(again.dz, expected_again.dz);
+    }
+
+    #[test]
+    fn table3d_eval_overwrites_dirty_reused_scratch() {
+        let axis = vec![0.0, 1.0, 2.0, 3.0, 4.0];
+        let mut values = Vec::new();
+        for &z in &axis {
+            for &y in &axis {
+                for &x in &axis {
+                    values.push(x * x + y * y + z * z + x * y + y * z);
+                }
+            }
+        }
+        let table = Table3DData {
+            x: axis.clone(),
+            y: axis.clone(),
+            z: axis,
+            values,
+        };
+        let mut scratch = TableEvalScratch {
+            values_along_y: vec![Value::NAN; 32],
+            dx_along_y: vec![Value::NAN; 32],
+            x_scratch: vec![Value::NAN; 64],
+            y_scratch: vec![Value::NAN; 64],
+            values_over_zy: vec![Value::NAN; 64],
+            dx_over_zy: vec![Value::NAN; 64],
+            yz_x_scratch: vec![Value::NAN; 64],
+            yz_y_scratch: vec![Value::NAN; 64],
+        };
+
+        let fast = evaluate_table3d_data_with_scratch(&table, 3, 1.4, 2.2, 0.7, &mut scratch);
+        let expected = evaluate_table3d_data(&table, 3, 1.4, 2.2, 0.7);
+
+        assert!(fast.value.is_finite());
+        assert!(fast.dx.is_finite());
+        assert!(fast.dy.is_finite());
+        assert!(fast.dz.is_finite());
+        assert_eq!(fast.value, expected.value);
+        assert_eq!(fast.dx, expected.dx);
+        assert_eq!(fast.dy, expected.dy);
+        assert_eq!(fast.dz, expected.dz);
     }
 
     #[test]
