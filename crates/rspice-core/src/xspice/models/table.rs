@@ -42,6 +42,59 @@ impl TableKind {
 }
 
 #[derive(Debug, Clone)]
+struct TableAxis {
+    values: Vec<Value>,
+    local_diffs: Vec<Value>,
+    inverse_spans: Vec<Value>,
+    lower_ramp: Value,
+    upper_ramp: Value,
+}
+
+impl TableAxis {
+    fn new(values: Vec<Value>) -> Self {
+        debug_assert!(values.len() >= 2);
+
+        let inverse_spans = values
+            .windows(2)
+            .map(|window| 1.0 / (window[1] - window[0]))
+            .collect();
+
+        let last_index = values.len() - 1;
+        let local_diffs = (0..values.len())
+            .map(|index| {
+                if index == 0 {
+                    values[1] - values[0]
+                } else if index >= last_index {
+                    values[last_index] - values[last_index - 1]
+                } else {
+                    0.5 * (values[index + 1] - values[index - 1])
+                }
+            })
+            .collect();
+
+        let lower_ramp = BOUNDARY_DERIVATIVE_RAMP_FRACTION * (values[1] - values[0]);
+        let upper_ramp =
+            BOUNDARY_DERIVATIVE_RAMP_FRACTION * (values[last_index] - values[last_index - 1]);
+
+        Self {
+            values,
+            local_diffs,
+            inverse_spans,
+            lower_ramp,
+            upper_ramp,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    fn values(&self) -> &[Value] {
+        &self.values
+    }
+}
+
+#[derive(Debug, Clone)]
 struct TableLine {
     line: usize,
     header_ignored: bool,
@@ -153,16 +206,16 @@ impl TokenCursor {
 
 #[derive(Debug, Clone)]
 struct Table2DData {
-    x: Vec<Value>,
-    y: Vec<Value>,
+    x: TableAxis,
+    y: TableAxis,
     values: Vec<Value>,
 }
 
 #[derive(Debug, Clone)]
 struct Table3DData {
-    x: Vec<Value>,
-    y: Vec<Value>,
-    z: Vec<Value>,
+    x: TableAxis,
+    y: TableAxis,
+    z: TableAxis,
     values: Vec<Value>,
 }
 
@@ -357,7 +410,7 @@ fn parse_axis(
     model: &str,
     role: &str,
     len: usize,
-) -> CmResult<Vec<Value>> {
+) -> CmResult<TableAxis> {
     let row = cursor.next_line(file, model, role)?;
     if row.tokens.len() > len {
         return Err(table_line_error(
@@ -398,7 +451,7 @@ fn parse_axis(
         }
         axis.push(value);
     }
-    Ok(axis)
+    Ok(TableAxis::new(axis))
 }
 
 fn parse_table2d_values(
@@ -714,22 +767,21 @@ fn load_table3d_from_context(ctx: &CmContext, file: &str) -> CmResult<Arc<Table3
     table3d_resource(ctx, file).map_or_else(|| load_table3d(file).map(|(table, _)| table), Ok)
 }
 
-fn axis_eval(axis: &[Value], input: Value) -> AxisEval {
-    let last_index = axis.len() - 1;
-    let first = axis[0];
-    let last = axis[last_index];
+fn axis_eval(axis: &TableAxis, input: Value) -> AxisEval {
+    let values = axis.values();
+    let last_index = values.len() - 1;
+    let first = values[0];
+    let last = values[last_index];
 
     let derivative_scale = if input < first {
-        let ramp = BOUNDARY_DERIVATIVE_RAMP_FRACTION * (axis[1] - first);
-        if ramp > 0.0 && input >= first - ramp {
-            ((input - (first - ramp)) / ramp).clamp(0.0, 1.0)
+        if axis.lower_ramp > 0.0 && input >= first - axis.lower_ramp {
+            ((input - (first - axis.lower_ramp)) / axis.lower_ramp).clamp(0.0, 1.0)
         } else {
             0.0
         }
     } else if input > last {
-        let ramp = BOUNDARY_DERIVATIVE_RAMP_FRACTION * (last - axis[last_index - 1]);
-        if ramp > 0.0 && input <= last + ramp {
-            ((last + ramp - input) / ramp).clamp(0.0, 1.0)
+        if axis.upper_ramp > 0.0 && input <= last + axis.upper_ramp {
+            ((last + axis.upper_ramp - input) / axis.upper_ramp).clamp(0.0, 1.0)
         } else {
             0.0
         }
@@ -738,18 +790,12 @@ fn axis_eval(axis: &[Value], input: Value) -> AxisEval {
     };
 
     let clamped = input.clamp(first, last);
-    let eno_index = axis
+    let eno_index = values
         .partition_point(|value| *value <= clamped)
         .saturating_sub(1)
         .min(last_index);
-    let eno_offset = clamped - axis[eno_index];
-    let local_diff = if eno_index >= last_index {
-        axis[last_index] - axis[last_index - 1]
-    } else if eno_index == 0 {
-        axis[1] - axis[0]
-    } else {
-        0.5 * (axis[eno_index + 1] - axis[eno_index - 1])
-    };
+    let eno_offset = clamped - values[eno_index];
+    let local_diff = axis.local_diffs[eno_index];
 
     if clamped <= first {
         return AxisEval {
@@ -778,7 +824,7 @@ fn axis_eval(axis: &[Value], input: Value) -> AxisEval {
     AxisEval {
         lower,
         upper: lower + 1,
-        t: (clamped - axis[lower]) / (axis[lower + 1] - axis[lower]),
+        t: (clamped - values[lower]) * axis.inverse_spans[lower],
         derivative_scale,
         eno_index,
         eno_offset,
@@ -1535,6 +1581,27 @@ mod tests {
     }
 
     #[test]
+    fn table_axis_precomputes_evaluation_metadata() {
+        let axis = TableAxis::new(vec![0.0, 1.0, 3.0, 6.0]);
+
+        assert_eq!(axis.local_diffs, vec![1.0, 1.5, 2.5, 3.0]);
+        assert_eq!(axis.inverse_spans, vec![1.0, 0.5, 1.0 / 3.0]);
+
+        let middle = axis_eval(&axis, 2.0);
+        assert_eq!(middle.lower, 1);
+        assert_eq!(middle.upper, 2);
+        assert_eq!(middle.t, 0.5);
+        assert_eq!(middle.local_diff, 1.5);
+        assert_eq!(middle.derivative_scale, 1.0);
+
+        let near_upper = axis_eval(&axis, 6.25);
+        assert_eq!(near_upper.lower, 2);
+        assert_eq!(near_upper.upper, 3);
+        assert_eq!(near_upper.t, 1.0);
+        assert!((near_upper.derivative_scale - (1.0 / 3.0)).abs() < 1.0e-12);
+    }
+
+    #[test]
     fn table2d_eval_reused_scratch_matches_allocating_wrapper() {
         let axis = vec![0.0, 1.0, 2.0, 3.0, 4.0];
         let mut values = Vec::new();
@@ -1544,8 +1611,8 @@ mod tests {
             }
         }
         let table = Table2DData {
-            x: axis.clone(),
-            y: axis,
+            x: TableAxis::new(axis.clone()),
+            y: TableAxis::new(axis),
             values,
         };
         let mut scratch = TableEvalScratch::default();
@@ -1588,8 +1655,8 @@ mod tests {
             }
         }
         let table = Table2DData {
-            x: axis.clone(),
-            y: axis,
+            x: TableAxis::new(axis.clone()),
+            y: TableAxis::new(axis),
             values,
         };
         let mut scratch = TableEvalScratch {
@@ -1623,9 +1690,9 @@ mod tests {
             }
         }
         let table = Table3DData {
-            x: axis.clone(),
-            y: axis.clone(),
-            z: axis,
+            x: TableAxis::new(axis.clone()),
+            y: TableAxis::new(axis.clone()),
+            z: TableAxis::new(axis),
             values,
         };
         let mut scratch = TableEvalScratch::default();
@@ -1678,9 +1745,9 @@ mod tests {
             }
         }
         let table = Table3DData {
-            x: axis.clone(),
-            y: axis.clone(),
-            z: axis,
+            x: TableAxis::new(axis.clone()),
+            y: TableAxis::new(axis.clone()),
+            z: TableAxis::new(axis),
             values,
         };
         let mut scratch = TableEvalScratch {
