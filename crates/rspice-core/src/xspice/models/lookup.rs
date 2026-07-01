@@ -18,6 +18,12 @@ struct LookupPoint {
     y: Value,
 }
 
+#[derive(Debug, Clone)]
+struct LookupTable {
+    points: Vec<LookupPoint>,
+    upper_midpoints: Vec<Value>,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct LookupResult {
     value: Value,
@@ -33,7 +39,7 @@ struct LookupTableSignature {
 #[derive(Debug, Clone)]
 struct LookupTableResource {
     signature: LookupTableSignature,
-    points: CmResult<Arc<Vec<LookupPoint>>>,
+    table: CmResult<Arc<LookupTable>>,
 }
 
 fn lookup_params() -> &'static [ParamSpec] {
@@ -110,7 +116,7 @@ fn lookup_table_signature_matches(ctx: &CmContext, signature: &LookupTableSignat
         && ctx.real_vector_param("y_array").unwrap_or(&[]) == signature.y_values.as_slice()
 }
 
-fn lookup_table_uncached(ctx: &CmContext) -> CmResult<Vec<LookupPoint>> {
+fn lookup_table_uncached(ctx: &CmContext) -> CmResult<LookupTable> {
     let x_values = ctx
         .real_vector_param("x_array")
         .ok_or_else(|| missing_param("x_array"))?;
@@ -128,18 +134,18 @@ fn cache_lookup_table(ctx: &mut CmContext) {
     }
 
     let signature = lookup_table_signature(ctx);
-    let points = lookup_table_uncached(ctx).map(Arc::new);
+    let table = lookup_table_uncached(ctx).map(Arc::new);
     ctx.set_resource(
         LOOKUP_TABLE_RESOURCE,
-        Arc::new(LookupTableResource { signature, points }),
+        Arc::new(LookupTableResource { signature, table }),
     );
 }
 
-fn lookup_table(ctx: &CmContext) -> CmResult<Arc<Vec<LookupPoint>>> {
+fn lookup_table(ctx: &CmContext) -> CmResult<Arc<LookupTable>> {
     if let Some(resource) = ctx.resource::<LookupTableResource>(LOOKUP_TABLE_RESOURCE)
         && lookup_table_signature_matches(ctx, &resource.signature)
     {
-        return resource.points.clone();
+        return resource.table.clone();
     }
     lookup_table_uncached(ctx).map(Arc::new)
 }
@@ -155,7 +161,7 @@ fn invalid_param(name: &str, message: impl Into<String>) -> CmError {
     }
 }
 
-fn validate_lookup_table(x_values: &[Value], y_values: &[Value]) -> CmResult<Vec<LookupPoint>> {
+fn validate_lookup_table(x_values: &[Value], y_values: &[Value]) -> CmResult<LookupTable> {
     if x_values.len() != y_values.len() {
         return Err(invalid_param(
             "x_array/y_array",
@@ -201,7 +207,18 @@ fn validate_lookup_table(x_values: &[Value], y_values: &[Value]) -> CmResult<Vec
         points.push(LookupPoint { x, y });
     }
 
-    Ok(points)
+    Ok(lookup_table_from_points(points))
+}
+
+fn lookup_table_from_points(points: Vec<LookupPoint>) -> LookupTable {
+    let upper_midpoints = points
+        .windows(2)
+        .map(|window| lookup_midpoint(window[0], window[1]))
+        .collect();
+    LookupTable {
+        points,
+        upper_midpoints,
+    }
 }
 
 fn effective_input_domain(input_domain: Value) -> CmResult<Value> {
@@ -216,7 +233,7 @@ fn effective_input_domain(input_domain: Value) -> CmResult<Value> {
 }
 
 fn validate_smoothing_domain(
-    _points: &[LookupPoint],
+    _table: &LookupTable,
     input_domain: Value,
     _fraction: bool,
 ) -> CmResult<()> {
@@ -278,11 +295,8 @@ fn lookup_midpoint(left: LookupPoint, right: LookupPoint) -> Value {
     (left.x + right.x) / 2.0
 }
 
-fn lookup_breakpoint_times(
-    points: &[LookupPoint],
-    input_domain: Value,
-    fraction: bool,
-) -> Vec<Value> {
+fn lookup_breakpoint_times(table: &LookupTable, input_domain: Value, fraction: bool) -> Vec<Value> {
+    let points = table.points.as_slice();
     let expanded_len = points.len() + 2;
     let mut breakpoints = Vec::with_capacity(points.len() * 3);
     for index in 1..expanded_len - 1 {
@@ -342,12 +356,13 @@ fn smooth_corner(
 }
 
 fn evaluate_lookup(
-    points: &[LookupPoint],
+    table: &LookupTable,
     x: Value,
     input_domain: Value,
     fraction: bool,
     limit: bool,
 ) -> LookupResult {
+    let points = table.points.as_slice();
     let expanded_len = points.len() + 2;
     let first_bound = expanded_lookup_point(points, 0, limit);
     let first = expanded_lookup_point(points, 1, limit);
@@ -361,27 +376,26 @@ fn evaluate_lookup(
         return linear_value(last, segment_slope(last, last_bound), x);
     }
 
-    for index in 1..expanded_len - 1 {
-        let center = expanded_lookup_point(points, index, limit);
-        let upper = expanded_lookup_point(points, index + 1, limit);
-        if x < lookup_midpoint(center, upper) {
-            let lower = expanded_lookup_point(points, index - 1, limit);
-            let left_slope = segment_slope(lower, center);
-            let right_slope = segment_slope(center, upper);
-            let domain = breakpoint_domain(lower, center, upper, input_domain, fraction);
-            if domain > 0.0 && x >= center.x - domain && x < center.x + domain {
-                return smooth_corner(x, center.x, center.y, left_slope, right_slope, domain);
-            }
-            let slope = if x < center.x - domain {
-                left_slope
-            } else {
-                right_slope
-            };
-            return linear_value(center, slope, x);
-        }
+    let center_index = table
+        .upper_midpoints
+        .partition_point(|midpoint| x >= *midpoint);
+    let expanded_index = center_index + 1;
+    let lower = expanded_lookup_point(points, expanded_index - 1, limit);
+    let center = points[center_index];
+    let upper = expanded_lookup_point(points, expanded_index + 1, limit);
+    let left_slope = segment_slope(lower, center);
+    let right_slope = segment_slope(center, upper);
+    let domain = breakpoint_domain(lower, center, upper, input_domain, fraction);
+    if domain > 0.0 && x >= center.x - domain && x < center.x + domain {
+        return smooth_corner(x, center.x, center.y, left_slope, right_slope, domain);
     }
 
-    linear_value(last, segment_slope(last, last_bound), x)
+    let slope = if x < center.x - domain {
+        left_slope
+    } else {
+        right_slope
+    };
+    linear_value(center, slope, x)
 }
 
 fn evaluate_lookup_context(ctx: &CmContext, x: Value) -> CmResult<LookupResult> {
@@ -512,6 +526,50 @@ mod tests {
         );
     }
 
+    fn evaluate_lookup_legacy_scan(
+        table: &LookupTable,
+        x: Value,
+        input_domain: Value,
+        fraction: bool,
+        limit: bool,
+    ) -> LookupResult {
+        let points = table.points.as_slice();
+        let expanded_len = points.len() + 2;
+        let first_bound = expanded_lookup_point(points, 0, limit);
+        let first = expanded_lookup_point(points, 1, limit);
+        let last = expanded_lookup_point(points, expanded_len - 2, limit);
+        let last_bound = expanded_lookup_point(points, expanded_len - 1, limit);
+
+        if x <= lookup_midpoint(first_bound, first) {
+            return linear_value(first_bound, segment_slope(first_bound, first), x);
+        }
+        if x >= lookup_midpoint(last, last_bound) {
+            return linear_value(last, segment_slope(last, last_bound), x);
+        }
+
+        for index in 1..expanded_len - 1 {
+            let center = expanded_lookup_point(points, index, limit);
+            let upper = expanded_lookup_point(points, index + 1, limit);
+            if x < lookup_midpoint(center, upper) {
+                let lower = expanded_lookup_point(points, index - 1, limit);
+                let left_slope = segment_slope(lower, center);
+                let right_slope = segment_slope(center, upper);
+                let domain = breakpoint_domain(lower, center, upper, input_domain, fraction);
+                if domain > 0.0 && x >= center.x - domain && x < center.x + domain {
+                    return smooth_corner(x, center.x, center.y, left_slope, right_slope, domain);
+                }
+                let slope = if x < center.x - domain {
+                    left_slope
+                } else {
+                    right_slope
+                };
+                return linear_value(center, slope, x);
+            }
+        }
+
+        linear_value(last, segment_slope(last, last_bound), x)
+    }
+
     #[test]
     fn lookup_table_cache_reloads_when_params_change() {
         let mut ctx = CmContext::new();
@@ -531,11 +589,12 @@ mod tests {
 
     #[test]
     fn lookup_evaluation_preserves_first_overlapping_breakpoint() {
-        let points = validate_lookup_table(&[0.0, 0.5, 1.0, 1.5], &[0.0, 10.0, 30.0, 60.0])
+        let table = validate_lookup_table(&[0.0, 0.5, 1.0, 1.5], &[0.0, 10.0, 30.0, 60.0])
             .expect("strictly increasing lookup table");
+        let points = table.points.as_slice();
         let x = 0.7;
 
-        let result = evaluate_lookup(&points, x, 0.4, false, false);
+        let result = evaluate_lookup(&table, x, 0.4, false, false);
         let first_breakpoint_result = smooth_corner(
             x,
             points[1].x,
@@ -562,25 +621,47 @@ mod tests {
     }
 
     #[test]
+    fn lookup_binary_midpoint_selection_matches_legacy_scan() {
+        let table =
+            validate_lookup_table(&[0.0, 0.5, 1.0, 1.5, 3.0], &[0.0, 10.0, 30.0, 60.0, 120.0])
+                .expect("strictly increasing lookup table");
+        assert_eq!(table.upper_midpoints, vec![0.25, 0.75, 1.25, 2.25]);
+
+        for (input_domain, fraction) in [(0.2, false), (0.1, true)] {
+            for limit in [false, true] {
+                for x in [
+                    -0.6, -0.25, -0.005, 0.0, 0.24, 0.25, 0.7, 0.75, 1.26, 2.8, 3.4,
+                ] {
+                    let fast = evaluate_lookup(&table, x, input_domain, fraction, limit);
+                    let legacy =
+                        evaluate_lookup_legacy_scan(&table, x, input_domain, fraction, limit);
+                    assert_near(fast.value, legacy.value);
+                    assert_near(fast.slope, legacy.slope);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn lookup_limit_smooths_synthetic_edge_clamps() {
-        let points = validate_lookup_table(&[0.0, 1.0, 2.0], &[0.0, 10.0, 30.0])
+        let table = validate_lookup_table(&[0.0, 1.0, 2.0], &[0.0, 10.0, 30.0])
             .expect("strictly increasing lookup table");
 
-        let lower = evaluate_lookup(&points, -0.005, 0.01, false, true);
+        let lower = evaluate_lookup(&table, -0.005, 0.01, false, true);
         assert_near(lower.value, 0.00625);
         assert_near(lower.slope, 2.5);
 
-        let upper = evaluate_lookup(&points, 2.005, 0.01, false, true);
+        let upper = evaluate_lookup(&table, 2.005, 0.01, false, true);
         assert_near(upper.value, 29.9875);
         assert_near(upper.slope, 5.0);
     }
 
     #[test]
     fn pwlts_breakpoints_cover_smoothed_table_corners() {
-        let points = validate_lookup_table(&[0.0, 1.0e-9, 2.0e-9], &[0.0, 10.0, 30.0])
+        let table = validate_lookup_table(&[0.0, 1.0e-9, 2.0e-9], &[0.0, 10.0, 30.0])
             .expect("strictly increasing lookup table");
 
-        let breakpoints = lookup_breakpoint_times(&points, 0.01, true);
+        let breakpoints = lookup_breakpoint_times(&table, 0.01, true);
         let expected = [0.99e-9, 1.0e-9, 1.01e-9, 1.99e-9, 2.0e-9, 2.01e-9];
         assert_eq!(breakpoints.len(), expected.len());
         for (actual, expected) in breakpoints.into_iter().zip(expected) {
