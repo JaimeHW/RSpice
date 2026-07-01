@@ -1813,7 +1813,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         pos: &SmolStr,
         neg: Option<&str>,
     ) -> Option<ValueId> {
-        if access.as_str() != "V" {
+        if is_flow_access_name(access.as_str()) {
             return None;
         }
 
@@ -1827,25 +1827,21 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_named_branch_access(&mut self, access: &SmolStr, name: &SmolStr) -> Option<ValueId> {
-        match access.as_str() {
-            "I" => {
-                if let Some(current) = self.branch_current_values.get(name.as_str()).copied() {
-                    return Some(current);
-                }
-                let branch = self.branch_id_by_name(name)?;
-                self.branch_unknown_for_branch(branch)?;
-                Some(self.push_value(OptValueType::Real, OptValueKind::BranchFlow { branch }))
+        if is_flow_access_name(access.as_str()) {
+            if let Some(current) = self.branch_current_values.get(name.as_str()).copied() {
+                return Some(current);
             }
-            "V" => {
-                let (pos, neg) = self
-                    .mir
-                    .branches
-                    .iter()
-                    .find(|branch| branch.name.as_str() == name)
-                    .map(|branch| (branch.pos_node, branch.neg_node))?;
-                Some(self.lower_voltage(pos, neg))
-            }
-            _ => None,
+            let branch = self.branch_id_by_name(name)?;
+            self.branch_unknown_for_branch(branch)?;
+            Some(self.push_value(OptValueType::Real, OptValueKind::BranchFlow { branch }))
+        } else {
+            let (pos, neg) = self
+                .mir
+                .branches
+                .iter()
+                .find(|branch| branch.name.as_str() == name)
+                .map(|branch| (branch.pos_node, branch.neg_node))?;
+            Some(self.lower_voltage(pos, neg))
         }
     }
 
@@ -2110,7 +2106,9 @@ impl<'a> ScalarGraphBuilder<'a> {
     fn ddx_probe_nodes(&self, probe: ExprId) -> Option<(Option<NodeId>, Option<NodeId>)> {
         let expression = self.mir.expressions.get(usize::from(probe))?;
         match &expression.kind {
-            HirExprKind::BranchAccess { access, pos, neg } if access.as_str() != "I" => {
+            HirExprKind::BranchAccess { access, pos, neg }
+                if !is_flow_access_name(access.as_str()) =>
+            {
                 let pos = self.resolve_endpoint(pos)?;
                 let neg = match neg {
                     Some(neg) => self.resolve_endpoint(neg)?,
@@ -2118,12 +2116,15 @@ impl<'a> ScalarGraphBuilder<'a> {
                 };
                 Some((pos, neg))
             }
-            HirExprKind::NamedBranchAccess { access, name } if access.as_str() != "I" => self
-                .mir
-                .branches
-                .iter()
-                .find(|branch| branch.name.as_str() == name.as_str())
-                .map(|branch| (branch.pos_node, branch.neg_node)),
+            HirExprKind::NamedBranchAccess { access, name }
+                if !is_flow_access_name(access.as_str()) =>
+            {
+                self.mir
+                    .branches
+                    .iter()
+                    .find(|branch| branch.name.as_str() == name.as_str())
+                    .map(|branch| (branch.pos_node, branch.neg_node))
+            }
             _ => None,
         }
     }
@@ -2272,6 +2273,10 @@ fn unary_op(op: &str) -> Option<OptUnaryOp> {
         "Not" => Some(OptUnaryOp::Not),
         _ => None,
     }
+}
+
+fn is_flow_access_name(access: &str) -> bool {
+    matches!(access, "I" | "Pwr" | "F" | "Tau" | "Phi" | "Flow")
 }
 
 pub(crate) fn limexp_value(value: f64) -> f64 {

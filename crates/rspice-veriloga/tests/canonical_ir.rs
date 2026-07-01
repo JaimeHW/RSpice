@@ -385,6 +385,33 @@ endmodule
 "#
 }
 
+fn thermal_named_potential_source() -> &'static str {
+    r#"
+module thermal_named_potential(p, n, t);
+    inout p, n, t;
+    electrical p, n;
+    thermal t;
+    branch (t) th;
+    analog I(p, n) <+ Temp(th);
+endmodule
+"#
+}
+
+fn thermal_ddx_source() -> &'static str {
+    r#"
+module thermal_ddx(p, n, t);
+    inout p, n, t;
+    electrical p, n;
+    thermal t;
+    real dtemp;
+    analog begin
+        dtemp = ddx(Temp(t) * Temp(t), Temp(t));
+        I(p, n) <+ dtemp;
+    end
+endmodule
+"#
+}
+
 fn atan_current_source() -> &'static str {
     r#"
 module atan_i(p, n);
@@ -1048,6 +1075,60 @@ fn opt_lowering_scalarizes_ddx_projection_current() {
             .iter()
             .all(|value| !matches!(value.kind, OptValueKind::EquationValue { .. })),
         "ddx current should not fall back to legacy equation values: {:?}",
+        opt.values
+    );
+}
+
+#[test]
+fn opt_lowering_scalarizes_named_thermal_potential_access() {
+    let (_, _, _, opt) =
+        lower_fixture_parts(thermal_named_potential_source(), "thermal_named_potential");
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
+        panic!("thermal potential current should have a scalar root: {newton:?}");
+    };
+
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: Vec::new(),
+            node_potentials: vec![0.0, 0.0, 12.5],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate thermal potential scalar graph");
+
+    assert_eq!(snapshot.real(*root), Some(12.5));
+}
+
+#[test]
+fn opt_lowering_scalarizes_thermal_ddx_probe() {
+    let (_, _, _, opt) = lower_fixture_parts(thermal_ddx_source(), "thermal_ddx");
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
+        panic!("thermal ddx current should have a scalar root: {newton:?}");
+    };
+
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: Vec::new(),
+            node_potentials: vec![0.0, 0.0, 7.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate thermal ddx scalar graph");
+
+    assert_eq!(snapshot.real(*root), Some(14.0));
+    assert!(
+        opt.values
+            .iter()
+            .any(|value| matches!(value.kind, OptValueKind::Ddx { .. })),
+        "thermal ddx projection should stay in scalar OptIR: {:?}",
         opt.values
     );
 }
