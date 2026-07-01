@@ -338,7 +338,7 @@ impl CodeModel for DigitalLookupTable {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
         PORTS.get_or_init(|| {
             vec![
-                PortSpec::vector_input("in", PortType::Digital),
+                PortSpec::vector_input("in", PortType::Digital).with_vector_min_len(1),
                 PortSpec::output("out", PortType::Digital),
             ]
         })
@@ -513,6 +513,100 @@ mod tests {
     use super::*;
     use crate::xspice::EvaluationPhase;
     use crate::xspice::context::InputValue;
+    use crate::xspice::{ParamType, PortDirection};
+
+    fn param_summary(model: &dyn CodeModel) -> Vec<(&str, ParamType, Value, Option<&str>, bool)> {
+        model
+            .parameters()
+            .iter()
+            .map(|param| {
+                (
+                    param.name.as_str(),
+                    param.param_type,
+                    param.default,
+                    param.string_default.as_deref(),
+                    param.required,
+                )
+            })
+            .collect()
+    }
+
+    fn assert_digital_ports(
+        model: &dyn CodeModel,
+        expected: &[(&str, PortDirection, bool, Option<usize>, Option<usize>)],
+    ) {
+        let ports = model.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|(name, _, _, _, _)| *name)
+                .collect::<Vec<_>>()
+        );
+        for (port, (_, direction, is_vector, min_len, max_len)) in ports.iter().zip(expected) {
+            assert_eq!(port.direction, *direction, "{} direction", port.name);
+            assert_eq!(
+                port.default_type,
+                PortType::Digital,
+                "{} default type",
+                port.name
+            );
+            assert_eq!(
+                port.allowed_types,
+                vec![PortType::Digital],
+                "{} allowed types",
+                port.name
+            );
+            assert_eq!(port.is_vector, *is_vector, "{} vector flag", port.name);
+            assert!(!port.null_allowed, "{} nullability", port.name);
+            assert_eq!(port.vector_min_len, *min_len, "{} min length", port.name);
+            assert_eq!(port.vector_max_len, *max_len, "{} max length", port.name);
+        }
+    }
+
+    #[test]
+    fn d_lut_metadata_matches_ngspice46_interface() {
+        assert_digital_ports(
+            &DigitalLookupTable,
+            &[
+                ("in", PortDirection::In, true, Some(1), None),
+                ("out", PortDirection::Out, false, None, None),
+            ],
+        );
+        assert_eq!(
+            param_summary(&DigitalLookupTable),
+            vec![
+                ("rise_delay", ParamType::Real, 1.0e-9, None, false),
+                ("fall_delay", ParamType::Real, 1.0e-9, None, false),
+                ("input_load", ParamType::Real, 1.0e-12, None, false),
+                ("table_values", ParamType::String, 0.0, Some(""), true),
+            ]
+        );
+    }
+
+    #[test]
+    fn d_genlut_metadata_matches_ngspice46_interface() {
+        assert_digital_ports(
+            &DigitalGenericLookupTable,
+            &[
+                ("in", PortDirection::In, true, None, None),
+                ("out", PortDirection::Out, true, None, None),
+            ],
+        );
+        assert_eq!(
+            param_summary(&DigitalGenericLookupTable),
+            vec![
+                ("rise_delay", ParamType::RealVector, 0.0, None, false),
+                ("fall_delay", ParamType::RealVector, 0.0, None, false),
+                ("input_load", ParamType::RealVector, 0.0, None, false),
+                ("input_delay", ParamType::RealVector, 0.0, None, false),
+                ("table_values", ParamType::String, 0.0, Some(""), true),
+            ]
+        );
+    }
 
     #[test]
     fn d_lut_short_tables_default_missing_entries_to_unknown() {
