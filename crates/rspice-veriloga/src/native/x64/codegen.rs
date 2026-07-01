@@ -3090,6 +3090,11 @@ impl FunctionCompiler {
     }
 
     fn emit_literal_binary_op(&mut self, dst: Xmm, value: f64, op: BinaryOp) {
+        if matches!(op, BinaryOp::Mul) && value.to_bits() == 2.0_f64.to_bits() {
+            self.encoder.addsd_xmm_xmm(dst, dst);
+            return;
+        }
+
         let displacement_offset = match op {
             BinaryOp::Add => self.encoder.addsd_xmm_m64_rip_disp32(dst, 0),
             BinaryOp::Sub => self.encoder.subsd_xmm_m64_rip_disp32(dst, 0),
@@ -4933,6 +4938,61 @@ mod tests {
             ctx.temperature = 8.0;
 
             assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected.to_bits());
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_doubles_constant_rhs_mul_without_literal_load() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushParam(0),
+                Instruction::PushConst(2.0),
+                Instruction::Mul,
+            ],
+            0,
+        );
+        assert_eq!(
+            program.ops(),
+            &[NativeOp::LoadParam(0), NativeOp::MulConst(2.0)],
+            "x * 2.0 should stay a literal RHS multiply in native IR"
+        );
+        assert_eq!(
+            program.max_stack_depth(),
+            1,
+            "x * 2.0 should not allocate an RHS stack slot"
+        );
+
+        let bytes = compile_value_function(&program).expect("compile constant double leaf");
+        assert!(
+            contains_bytes(&bytes, &addsd_xmm_xmm_bytes(Xmm::Xmm0, Xmm::Xmm0)),
+            "x * 2.0 should emit an in-place addsd"
+        );
+        assert!(
+            !contains_bytes(&bytes, &mulsd_xmm_m64_rip_prefix_bytes(Xmm::Xmm0)),
+            "x * 2.0 should not emit a literal-pool mulsd"
+        );
+        assert!(
+            !contains_bytes(&bytes, &2.0_f64.to_le_bytes()),
+            "x * 2.0 should not append a 2.0 literal"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate constant double leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let cases = [
+            ("finite", 3.25_f64),
+            ("negative-zero", -0.0_f64),
+            ("positive-infinity", f64::INFINITY),
+            ("overflow", f64::MAX),
+            ("unordered", f64::from_bits(0x7ff0_0000_0000_1111)),
+        ];
+
+        for (name, input) in cases {
+            let params = [input];
+            let ctx = eval_context(&params, &[], &[], &[]);
+            assert_f64_matches(f(&ctx, std::ptr::null()), input * 2.0, name);
         }
     }
 
@@ -11441,6 +11501,20 @@ mod tests {
         let mut encoder = X64Encoder::new();
         encoder.add_rsp_imm32(value);
         encoder.into_bytes()
+    }
+
+    fn addsd_xmm_xmm_bytes(dst: Xmm, src: Xmm) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.addsd_xmm_xmm(dst, src);
+        encoder.into_bytes()
+    }
+
+    fn mulsd_xmm_m64_rip_prefix_bytes(dst: Xmm) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.mulsd_xmm_m64_rip_disp32(dst, 0);
+        let mut bytes = encoder.into_bytes();
+        bytes.truncate(bytes.len() - std::mem::size_of::<i32>());
+        bytes
     }
 
     fn stack_spill_store_bytes(register: Xmm) -> Vec<u8> {
