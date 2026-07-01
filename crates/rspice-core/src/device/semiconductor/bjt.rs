@@ -1620,6 +1620,14 @@ impl NonlinearDevice for Bjt {
 }
 
 impl Bjt {
+    /// Re-linearize promoted native VBIC devices directly at a static
+    /// residual/validation candidate.
+    pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {
+        if self.vbic_mna_promoted {
+            self.update_vbic_mna_static_probe(voltages);
+        }
+    }
+
     /// Diagnostic accessor for DC iteration tracing.
     pub(crate) fn legacy_junction_limited_for_trace(&self) -> bool {
         self.legacy_junction_limited

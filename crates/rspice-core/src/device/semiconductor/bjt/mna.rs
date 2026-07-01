@@ -302,11 +302,7 @@ impl Bjt {
         }
     }
 
-    /// Per-iteration update for the promoted device: read the internal node
-    /// voltages from the global solution, apply ngspice junction limiting
-    /// against the previous iterate (vbicload.c:656-670), and evaluate the
-    /// branch system once at the limited bias.
-    pub(super) fn update_vbic_mna(&mut self, voltages: &[Value]) {
+    fn update_vbic_mna_from_solution(&mut self, voltages: &[Value], apply_limiting: bool) {
         self.vbe_prev = self.vbe;
         self.vbc_prev = self.vbc;
         self.vcx_prev = self.vcx;
@@ -337,7 +333,11 @@ impl Bjt {
         let previous = [
             self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
         ];
-        let mut state = self.limit_vbic_internal_state_to_previous(raw, previous);
+        let mut state = if apply_limiting {
+            self.limit_vbic_internal_state_to_previous(raw, previous)
+        } else {
+            raw
+        };
         self.impose_vbic_collapse_manifold(&mut state, vc, vb, ve, vs);
 
         let eval = self.evaluate_state(
@@ -381,6 +381,23 @@ impl Bjt {
         self.refresh_vbic_mna_dynamic_state();
         self.reduced_linearization_cache_valid.set(false);
         self.charge_snapshot_cache_valid.set(false);
+    }
+
+    /// Per-iteration update for the promoted device: read the internal node
+    /// voltages from the global solution, apply ngspice junction limiting
+    /// against the previous iterate (vbicload.c:656-670), and evaluate the
+    /// branch system once at the limited bias.
+    pub(super) fn update_vbic_mna(&mut self, voltages: &[Value]) {
+        self.update_vbic_mna_from_solution(voltages, true);
+    }
+
+    /// Re-linearize directly at a static residual/validation candidate.
+    ///
+    /// Newton iterations must keep the ngspice limited companion, but residual
+    /// probes must evaluate the physical candidate voltage itself so stalled
+    /// limiter states are rejected and true operating-point roots are accepted.
+    pub(crate) fn update_vbic_mna_static_probe(&mut self, voltages: &[Value]) {
+        self.update_vbic_mna_from_solution(voltages, false);
     }
 
     /// Recompute the dynamic charge branches and excess-phase rows at the

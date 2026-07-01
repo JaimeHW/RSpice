@@ -43,7 +43,8 @@ impl Bjt {
     ) -> (Value, Value) {
         self.with_temperature_variant(previous_vrth, |model| {
             let vt = model.vt.max(1e-18);
-            let vcrit = Self::junction_critical_voltage(vt, model.is);
+            let nominal_is = (model.is_nominal * model.instance_scale()).max(1e-18);
+            let vcrit = Self::junction_critical_voltage(vt, nominal_is);
             (vt, vcrit)
         })
     }

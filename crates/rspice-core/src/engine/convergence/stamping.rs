@@ -130,6 +130,7 @@ impl Engine {
     ) -> Result<(), SimulationError> {
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
+        circuit.update_bjt_static_linearizations(solution);
         circuit.update_b3soi_static_linearizations(solution);
         circuit.update_jfet_static_linearizations(solution);
         circuit.stamp_generic_switches(matrix, rhs, 0.0);

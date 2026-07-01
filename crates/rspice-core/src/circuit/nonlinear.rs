@@ -423,6 +423,15 @@ impl CircuitData {
         }
     }
 
+    /// Re-linearize promoted native VBIC BJTs directly at a static probe
+    /// solution. Regular Newton updates keep VBIC's junction limiter; residual
+    /// validation probes need the true candidate equations.
+    pub(crate) fn update_bjt_static_linearizations(&mut self, voltages: &[Value]) {
+        for bjt in &mut self.bjts.devices {
+            bjt.update_static_linearization(voltages);
+        }
+    }
+
     /// Re-linearize BSIMSOI devices directly at a static probe solution.
     ///
     /// Normal nonlinear updates intentionally apply BSIMSOI branch/body

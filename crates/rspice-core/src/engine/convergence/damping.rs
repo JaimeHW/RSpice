@@ -189,7 +189,7 @@ impl Engine {
             .bjts
             .devices
             .iter()
-            .any(|bjt| bjt.uses_legacy_gummel_poon())
+            .any(|bjt| bjt.uses_legacy_gummel_poon() || bjt.uses_vbic_dynamic_charges())
             || circuit
                 .vdmoses
                 .devices
