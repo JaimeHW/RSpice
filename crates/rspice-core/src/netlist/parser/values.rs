@@ -1270,6 +1270,7 @@ pub(super) fn take_deferrable_value(
 pub(super) fn skip_optional_param_name(stream: &mut TokenStream, param_name: &str) {
     if let TokenKind::Ident(s) = &stream.peek().kind
         && s == param_name
+        && matches!(stream.peek_n(1).kind, TokenKind::Equals)
     {
         stream.advance();
         stream.consume(&TokenKind::Equals);

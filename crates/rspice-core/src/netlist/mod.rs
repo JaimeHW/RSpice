@@ -4066,6 +4066,59 @@ mod tests {
     }
 
     #[test]
+    fn resistor_value_followed_by_model_without_instance_params_parse() {
+        let netlist = Netlist::parse(
+            "modeled resistor without instance params\n\
+             R1 1 0 100 rmodel\n\
+             .model rmodel r tc1=1e-3\n\
+             .end\n",
+        )
+        .expect("resistor value followed by model should parse");
+
+        let (value, model) = netlist
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor { value, model, .. } => Some((*value, model.as_deref())),
+                _ => None,
+            })
+            .expect("resistor exists");
+
+        assert_eq!(value, 100.0);
+        assert!(model.is_some_and(|name| name.eq_ignore_ascii_case("rmodel")));
+    }
+
+    #[test]
+    fn subckt_resistor_bare_r_parameter_flattens_as_value() {
+        let netlist = Netlist::parse(
+            "subckt bare R parameter value\n\
+             X1 1 0 Rsub PARAMS: R=2k\n\
+             .subckt Rsub p n PARAMS: R=1k\n\
+             R1 p n R\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("bare R parameter in subcircuit resistor should parse");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("bare R parameter should flatten");
+        let resistance = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor { value, .. }
+                    if element.name.eq_ignore_ascii_case("X1.R1") =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .expect("flattened subcircuit resistor exists");
+
+        assert_eq!(resistance, 2_000.0);
+    }
+
+    #[test]
     fn subckt_body_param_shadows_top_level_param_when_flattened() {
         let netlist = Netlist::parse(
             "subckt body param scope\n\

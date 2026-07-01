@@ -156,13 +156,10 @@ pub(super) fn parse_resistor(
                             });
                         }
                     }
-                } else if model.is_none()
-                    && (value.is_none() && value_expr.is_none()
-                        || resistor_model_token_is_followed_by_params(stream))
-                {
-                    // Bare identifier after value-less prefix, or after an
-                    // explicit value when instance parameters follow: treat
-                    // as model name.
+                } else if model.is_none() {
+                    // Bare identifier after the optional value is the resistor
+                    // model name. This covers both model-only instances and
+                    // SPICE-compatible value-plus-model form.
                     model = Some(raw_name);
                 } else {
                     return Err(ParseError::Syntax {
@@ -234,16 +231,6 @@ pub(super) fn parse_resistor(
     });
 
     Ok(())
-}
-
-fn resistor_model_token_is_followed_by_params(stream: &TokenStream) -> bool {
-    let mut offset = 0usize;
-    while matches!(stream.peek_n(offset).kind, TokenKind::Comma) {
-        offset += 1;
-    }
-
-    matches!(stream.peek_n(offset).kind, TokenKind::Ident(_))
-        && matches!(stream.peek_n(offset + 1).kind, TokenKind::Equals)
 }
 
 const PASSIVE_RESISTOR_UNITS: &[&str] = &["OHM", "OHMS"];
