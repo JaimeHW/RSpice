@@ -252,6 +252,13 @@ impl X64Encoder {
         self.emit_u8(value);
     }
 
+    pub(crate) fn sar_r64_imm8(&mut self, reg: Gpr, value: u8) {
+        self.emit_rex(true, 0, 0, reg.code());
+        self.emit_all(&[0xC1]);
+        self.emit_modrm(0b11, 0b111, reg.code());
+        self.emit_u8(value);
+    }
+
     pub(crate) fn lea_r64_base_index_scale8_disp32(
         &mut self,
         dst: Gpr,

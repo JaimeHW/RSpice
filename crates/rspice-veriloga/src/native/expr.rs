@@ -67,6 +67,7 @@ pub(crate) enum NativeOp {
     UnaryMath(UnaryMathOp),
     BinaryMath(BinaryMathOp),
     IntegerBinary(IntegerBinaryOp),
+    IntegerShiftConst(IntegerBinaryOp, u8),
     TableLookup(usize),
     TableDerivative(usize),
     LimitState(usize),
@@ -1625,6 +1626,9 @@ impl NativeProgram {
                     depth -= 1;
                     let op = integer_binary_op(instruction);
                     if lower_constant_integer_binary(&mut ops, op) {
+                        continue;
+                    }
+                    if lower_constant_rhs_integer_shift(&mut ops, op) {
                         continue;
                     }
                     ops.push(NativeOp::IntegerBinary(op));
@@ -3921,7 +3925,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "BitXor" => IntegerBinaryOp::BitXor,
             _ => unreachable!("append_integer_binary only accepts integer operators"),
         };
-        if lower_constant_integer_binary(&mut self.ops, op) {
+        if lower_constant_integer_binary(&mut self.ops, op)
+            || lower_constant_rhs_integer_shift(&mut self.ops, op)
+        {
             return Ok(());
         }
         self.ops.push(NativeOp::IntegerBinary(op));
@@ -4256,6 +4262,7 @@ fn is_parameter_default_op(op: &NativeOp) -> bool {
             | NativeOp::UnaryMath(_)
             | NativeOp::BinaryMath(_)
             | NativeOp::IntegerBinary(_)
+            | NativeOp::IntegerShiftConst(_, _)
     )
 }
 
@@ -4315,6 +4322,7 @@ fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::UnaryMath(_) => "UnaryMath",
         NativeOp::BinaryMath(_) => "BinaryMath",
         NativeOp::IntegerBinary(_) => "IntegerBinary",
+        NativeOp::IntegerShiftConst(_, _) => "IntegerShiftConst",
         NativeOp::TableLookup(_) => "TableLookup",
         NativeOp::TableDerivative(_) => "TableDerivative",
         NativeOp::LimitState(_) => "LimitState",
@@ -4576,6 +4584,21 @@ fn lower_constant_integer_binary(ops: &mut Vec<NativeOp>, op: IntegerBinaryOp) -
     };
     ops.truncate(lhs_index);
     ops.push(NativeOp::Const(value));
+    true
+}
+
+fn lower_constant_rhs_integer_shift(ops: &mut Vec<NativeOp>, op: IntegerBinaryOp) -> bool {
+    if !matches!(op, IntegerBinaryOp::Shl | IntegerBinaryOp::Shr) {
+        return false;
+    }
+    let Some(NativeOp::Const(value)) = ops.last().copied() else {
+        return false;
+    };
+    let Some(count) = constant_shift_count(value) else {
+        return false;
+    };
+    ops.pop();
+    ops.push(NativeOp::IntegerShiftConst(op, count));
     true
 }
 
@@ -4948,6 +4971,11 @@ fn constant_integer_binary(op: IntegerBinaryOp, left: f64, right: f64) -> Option
     Some(value as f64)
 }
 
+fn constant_shift_count(value: f64) -> Option<u8> {
+    let count = value as i64;
+    (0..64).contains(&count).then_some(count as u8)
+}
+
 fn constant_unary_math(op: UnaryMathOp, value: f64) -> f64 {
     match op {
         UnaryMathOp::Exp => value.exp(),
@@ -5091,6 +5119,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::CompareConst(_, _)
         | NativeOp::ExtremumConst(_, _)
         | NativeOp::LogicalConst(_, _)
+        | NativeOp::IntegerShiftConst(_, _)
         | NativeOp::Neg
         | NativeOp::Abs
         | NativeOp::Square
@@ -5833,6 +5862,46 @@ endmodule
         .expect("lower canonical constant min to native program");
 
         assert_eq!(program.ops(), &[NativeOp::Const(-2.0)]);
+        assert_eq!(program.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_canonical_constant_rhs_shift_without_extra_stack_slot() {
+        let span = Span::dummy();
+        let mir = analyzed_two_terminal_mir(
+            "mir_shift_const_count",
+            Expression::Binary(BinaryExpr {
+                op: BinaryOp::Shl,
+                left: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
+                    access: "V".into(),
+                    pos: "p".into(),
+                    neg: Some("n".into()),
+                    span,
+                })),
+                right: Box::new(number(2.0, "2.0")),
+                span,
+            }),
+        );
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_shift_const_count",
+            EntryKind::StampValue,
+            &mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("canonical constant RHS shift lowers to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::IntegerShiftConst(IntegerBinaryOp::Shl, 2),
+            ]
+        );
         assert_eq!(program.max_stack_depth(), 1);
     }
 
@@ -8263,8 +8332,6 @@ endmodule
     #[test]
     fn lowers_integer_binary_functions_as_native_integer_ops() {
         let cases = [
-            (Instruction::Shl, IntegerBinaryOp::Shl),
-            (Instruction::Shr, IntegerBinaryOp::Shr),
             (Instruction::BitAnd, IntegerBinaryOp::BitAnd),
             (Instruction::BitOr, IntegerBinaryOp::BitOr),
             (Instruction::BitXor, IntegerBinaryOp::BitXor),
@@ -8292,6 +8359,56 @@ endmodule
                 ]
             );
             assert_eq!(lowered.max_stack_depth(), 2);
+        }
+    }
+
+    #[test]
+    fn lowers_valid_constant_rhs_shifts_without_extra_stack_slot() {
+        let cases = [
+            ("shl", Instruction::Shl, IntegerBinaryOp::Shl, 2.0, 2),
+            ("shr", Instruction::Shr, IntegerBinaryOp::Shr, 3.75, 3),
+            (
+                "negative-fraction-count",
+                Instruction::Shr,
+                IntegerBinaryOp::Shr,
+                -0.25,
+                0,
+            ),
+            (
+                "nan-count",
+                Instruction::Shl,
+                IntegerBinaryOp::Shl,
+                f64::NAN,
+                0,
+            ),
+        ];
+
+        for (case, instruction, expected_op, count_value, expected_count) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(count_value),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "bits-const-count",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("valid constant RHS shifts have immediate native lowering");
+
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::IntegerShiftConst(expected_op, expected_count),
+                ],
+                "{case}"
+            );
+            assert_eq!(lowered.max_stack_depth(), 1, "{case}");
         }
     }
 
