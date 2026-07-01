@@ -1291,6 +1291,10 @@ impl CodeModel for SXfer {
         }
     }
 
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
+    }
+
     fn output_input_ac_partials(
         &self,
         ctx: &CmContext,
