@@ -1533,11 +1533,10 @@ fn core_pwl_flux_density(
     core_linear_value(points[last_index], slope, h_input)
 }
 
-fn core_pwl_eval(ctx: &mut CmContext) -> CmResult<CoreEval> {
-    let table = cache_core_table(ctx)?;
+fn core_pwl_eval_from_table(ctx: &CmContext, table: &CoreTable) -> CmResult<CoreEval> {
     let input_domain = core_input_domain(ctx)?;
     let fraction = ctx.param_or("fraction", 1.0) > 0.5;
-    if !core_pwl_smoothing_allowed(&table, input_domain, fraction) {
+    if !core_pwl_smoothing_allowed(table, input_domain, fraction) {
         return Ok(CoreEval {
             current: 0.0,
             derivative: 0.0,
@@ -1548,12 +1547,29 @@ fn core_pwl_eval(ctx: &mut CmContext) -> CmResult<CoreEval> {
     let length = core_length(ctx)?;
     let h_input = ctx.input("mc") / length;
     let (flux_density, dflux_density_dh) =
-        core_pwl_flux_density(&table, h_input, input_domain, fraction);
+        core_pwl_flux_density(table, h_input, input_domain, fraction);
 
     Ok(CoreEval {
         current: flux_density * area,
         derivative: dflux_density_dh * area / length,
     })
+}
+
+fn core_pwl_eval(ctx: &mut CmContext) -> CmResult<CoreEval> {
+    let table = cache_core_table(ctx)?;
+    core_pwl_eval_from_table(ctx, &table)
+}
+
+fn core_pwl_eval_for_context(ctx: &CmContext) -> CmResult<CoreEval> {
+    if let Some(resource) = ctx.resource::<CoreTableResource>(CORE_TABLE_RESOURCE)
+        && core_table_signature_matches(ctx, &resource.signature)
+    {
+        let table = resource.data.clone()?;
+        return core_pwl_eval_from_table(ctx, &table);
+    }
+
+    let table = core_table_uncached(ctx)?;
+    core_pwl_eval_from_table(ctx, &table)
 }
 
 fn core_hysteresis_params(ctx: &CmContext) -> CmResult<CoreHysteresisParams> {
@@ -1582,7 +1598,7 @@ fn core_hysteresis_params(ctx: &CmContext) -> CmResult<CoreHysteresisParams> {
     })
 }
 
-fn core_hysteresis_eval(ctx: &mut CmContext) -> CmResult<CoreEval> {
+fn core_hysteresis_eval_for_context(ctx: &CmContext) -> CmResult<(CoreEval, i64)> {
     let params = core_hysteresis_params(ctx)?;
     let slope =
         (params.out_upper_limit - params.out_lower_limit) / (params.in_high - params.in_low);
@@ -1659,27 +1675,39 @@ fn core_hysteresis_eval(ctx: &mut CmContext) -> CmResult<CoreEval> {
         (params.out_lower_limit, 0.0)
     };
 
-    if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
-        ctx.set_int_state(
-            0,
-            if rising {
-                CORE_HYSTERESIS_RISING
-            } else {
-                CORE_HYSTERESIS_FALLING
-            },
-        );
-    }
+    let next_state = if rising {
+        CORE_HYSTERESIS_RISING
+    } else {
+        CORE_HYSTERESIS_FALLING
+    };
 
-    Ok(CoreEval {
-        current,
-        derivative,
-    })
+    Ok((
+        CoreEval {
+            current,
+            derivative,
+        },
+        next_state,
+    ))
+}
+
+fn core_hysteresis_eval(ctx: &mut CmContext) -> CmResult<CoreEval> {
+    let (eval, next_state) = core_hysteresis_eval_for_context(ctx)?;
+    xtradev_set_int_state(ctx, 0, next_state);
+    Ok(eval)
 }
 
 fn core_eval(ctx: &mut CmContext) -> CmResult<CoreEval> {
     match core_mode(ctx)? {
         CORE_MODE_PWL => core_pwl_eval(ctx),
         CORE_MODE_HYSTERESIS => core_hysteresis_eval(ctx),
+        _ => unreachable!("core_mode validates the mode range"),
+    }
+}
+
+fn core_eval_for_context(ctx: &CmContext) -> CmResult<CoreEval> {
+    match core_mode(ctx)? {
+        CORE_MODE_PWL => core_pwl_eval_for_context(ctx),
+        CORE_MODE_HYSTERESIS => core_hysteresis_eval_for_context(ctx).map(|(eval, _)| eval),
         _ => unreachable!("core_mode validates the mode range"),
     }
 }
@@ -2763,6 +2791,16 @@ impl CodeModel for Core {
 
         Ok(())
     }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if !output_port.eq_ignore_ascii_case("mc") {
+            return Vec::new();
+        }
+        let Ok(eval) = core_eval_for_context(ctx) else {
+            return Vec::new();
+        };
+        vec![("mc".to_string(), eval.derivative)]
+    }
 }
 
 impl CodeModel for CapacitanceMeter {
@@ -3643,6 +3681,28 @@ mod tests {
     }
 
     #[test]
+    fn core_pwl_partials_match_flux_derivative() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("h_array", vec![0.0, 1.0, 2.0]);
+        ctx.set_real_vector_param("b_array", vec![0.0, 2.0, 5.0]);
+        ctx.set_param("area", 2.0);
+        ctx.set_param("length", 4.0);
+        ctx.set_param("mode", CORE_MODE_PWL as Value);
+        ctx.set_param("input_domain", 0.1);
+        ctx.set_param("fraction", 0.0);
+        ctx.set_input_analog("mc", 6.4);
+
+        Core.init(&mut ctx).expect("core init");
+        let eval = core_eval_for_context(&ctx).expect("read-only core eval");
+        let partials = Core.output_input_partials(&ctx, "mc");
+
+        assert_eq!(partials.len(), 1);
+        assert_eq!(partials[0].0, "mc");
+        assert!((eval.derivative - 1.5).abs() < 1.0e-15);
+        assert!((partials[0].1 - eval.derivative).abs() < 1.0e-15);
+    }
+
+    #[test]
     fn core_hysteresis_does_not_commit_rollbackable_probe_branch_state() {
         let mut ctx = CmContext::new();
         ctx.analysis = crate::xspice::AnalysisType::Transient;
@@ -3680,5 +3740,41 @@ mod tests {
         Core.evaluate(&mut ctx)
             .expect("commits accepted falling branch");
         assert_eq!(ctx.int_state(0), CORE_HYSTERESIS_FALLING);
+    }
+
+    #[test]
+    fn core_hysteresis_partials_do_not_commit_branch_state() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.set_real_vector_param("h_array", vec![0.0, 1.0]);
+        ctx.set_real_vector_param("b_array", vec![0.0, 1.0]);
+        ctx.set_param("area", 1.0);
+        ctx.set_param("length", 1.0);
+        ctx.set_param("mode", CORE_MODE_HYSTERESIS as Value);
+        ctx.set_param("in_low", 0.0);
+        ctx.set_param("in_high", 1.0);
+        ctx.set_param("hyst", 0.2);
+        ctx.set_param("out_lower_limit", 0.0);
+        ctx.set_param("out_upper_limit", 1.0);
+        ctx.set_param("input_domain", 0.0);
+        ctx.set_param("fraction", 0.0);
+
+        Core.init(&mut ctx).expect("core init");
+
+        ctx.set_input_analog("mc", 0.0);
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        Core.evaluate(&mut ctx)
+            .expect("records initial rising branch");
+        assert_eq!(ctx.int_state(0), CORE_HYSTERESIS_RISING);
+
+        ctx.set_input_analog("mc", 1.3);
+        let partials = Core.output_input_partials(&ctx, "mc");
+
+        assert_eq!(partials.len(), 1);
+        assert_eq!(
+            ctx.int_state(0),
+            CORE_HYSTERESIS_RISING,
+            "querying core partials must not advance remembered hysteresis branch"
+        );
     }
 }
