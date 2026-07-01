@@ -361,7 +361,7 @@ fn fourier_invalid_numeric_node_is_a_simulation_error() {
 fn parse_error_exits_sixty_five() {
     let dir = test_dir("parse");
     let deck = dir.join("broken.sp");
-    std::fs::write(&deck, "* broken\nR1 in out\n.tran 1u 1m\n.end\n").expect("write deck");
+    std::fs::write(&deck, "* broken\nV1 in 0 1\n.tran nope 1m\n.end\n").expect("write deck");
 
     let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(65));
