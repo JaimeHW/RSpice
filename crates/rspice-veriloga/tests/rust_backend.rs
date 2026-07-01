@@ -1417,6 +1417,40 @@ fn rust_backend_auto_uses_local_storage_for_hybrid_straight_line_assignments() {
 }
 
 #[test]
+fn rust_backend_auto_uses_local_storage_for_legacy_straight_line_assignments() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(legacy_straight_line_local_storage_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile straight-line legacy fallback assignments through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("let mut var_drive: f64 = 0.0;"), "{stamp}");
+    assert!(stamp.contains("var_drive_dn0"), "{stamp}");
+    assert!(
+        !stamp.contains("self.scalar_v"),
+        "fixture should exercise the legacy fallback path, not the pure scalar backend:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("let s = match &mut self.scratch")
+            && !stamp.contains("scratch.values")
+            && !stamp.contains("scratch.node_derivatives"),
+        "bounded straight-line legacy fallback should use native local storage instead of scratch:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_uses_local_storage_for_hybrid_integer_flags() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(hybrid_integer_flag_local_storage_source())
@@ -1539,7 +1573,7 @@ fn rust_backend_auto_uses_local_storage_for_reactive_assignments() {
 }
 
 #[test]
-fn rust_backend_auto_keeps_hybrid_local_storage_when_residual_needs_scratch() {
+fn rust_backend_auto_materializes_local_derivatives_for_compact_ad_residuals() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(hybrid_local_storage_with_scratch_residual_source())
         .expect("canonical IR");
@@ -1562,20 +1596,25 @@ fn rust_backend_auto_keeps_hybrid_local_storage_when_residual_needs_scratch() {
         "DDT current should still use the scalar hybrid stamp path:\n{stamp}"
     );
     assert!(
-        stamp.contains("let s = match &mut self.scratch"),
-        "the floor-gated nonlinear residual should still allocate scratch AD:\n{stamp}"
-    );
-    assert!(
         stamp.matches("stamper.stamp_current_node2_local(").count() >= 2,
-        "scratch-required residual equations must not force scratch-free residual equations out of local scalar stamps:\n{stamp}"
+        "compact AD residuals must not force scratch-free residual equations out of local scalar stamps:\n{stamp}"
     );
     assert!(
-        !stamp.contains("let mut var_legacy"),
-        "variables used only by scratch-required residual equations should stay scratch-backed until that residual is scalarized:\n{stamp}"
+        stamp.contains("let mut var_legacy: f64 = 0.0;")
+            && stamp.contains("var_legacy_dn0")
+            && stamp.contains("var_legacy_dn1"),
+        "compact AD operands should keep native local derivative lanes:\n{stamp}"
     );
     assert!(
-        stamp.contains("s.store_") || stamp.contains("s.ad_value("),
-        "regression fixture should exercise residual scratch AD lowering:\n{stamp}"
+        stamp.contains("A::from_derivatives(var_legacy, [var_legacy_dn0, var_legacy_dn1], [])"),
+        "compact AD should materialize native local derivatives directly instead of reading a scratch slot:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("let s = match &mut self.scratch")
+            && !stamp.contains("scratch.values")
+            && !stamp.contains("scratch.node_derivatives")
+            && !stamp.contains("s.ad_value("),
+        "local-derivative compact AD residual should avoid legacy scratch storage:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -8807,7 +8846,7 @@ fn rust_backend_keeps_reactive_shadow_code_out_of_transient_stamp() {
 }
 
 #[test]
-fn rust_backend_splits_transient_and_reactive_scratch_storage() {
+fn rust_backend_runtime_support_splits_transient_and_reactive_scratch_storage() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(mixed_dynamic_static_source())
         .expect("canonical IR");
@@ -8841,19 +8880,28 @@ fn rust_backend_splits_transient_and_reactive_scratch_storage() {
     assert!(!transient_scratch.contains("pub(crate) rdn:"), "{stamp}");
     assert!(reactive_scratch.contains("pub(crate) rv:"), "{stamp}");
     assert!(
-        stamp.contains("let s = match &mut self.scratch {"),
+        !stamp.contains("let s = match &mut self.scratch {"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("let s = match &mut self.reactive_scratch {"),
+        !stamp.contains("let s = match &mut self.reactive_scratch {"),
         "{stamp}"
     );
     assert!(!stamp.contains("Scratch::new();"), "{stamp}");
     assert!(!stamp.contains("ReactiveScratch::new();"), "{stamp}");
-    assert!(stamp.contains("type Scratch = GenericScratch"), "{stamp}");
     assert!(
-        stamp.contains("type ReactiveScratch = GenericReactiveScratch"),
-        "{stamp}"
+        !stamp.contains("type Scratch = GenericScratch")
+            && !stamp.contains("type ReactiveScratch = GenericReactiveScratch"),
+        "native-local fixture should not import generated scratch aliases:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("var_cap_charge_dn0") && stamp.contains("stamp_current_node2_local"),
+        "mixed dynamic/static fixture should exercise native local derivative storage:\n{stamp}"
+    );
+    assert!(stamp.contains("stamp_current_reactive_node2"), "{stamp}");
+    assert!(
+        support.contains("fn from_derivatives("),
+        "runtime support should expose a native-local AD constructor:\n{support}"
     );
 }
 
@@ -18562,6 +18610,23 @@ module hybrid_idt_straight_line_assignments(p, n);
         I(p, n) <+ ddt(c * V(p, n));
         V(p, n) <+ idt(drive, 0.0);
         I(p, n) <+ floor(drive);
+    end
+endmodule
+"#
+}
+
+fn legacy_straight_line_local_storage_source() -> &'static str {
+    r#"
+module legacy_straight_line_local_storage(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real drive;
+    real shaped;
+    analog begin
+        drive = gain * V(p, n);
+        shaped = drive + V(p, n) * V(p, n);
+        I(p, n) <+ floor(shaped);
     end
 endmodule
 "#

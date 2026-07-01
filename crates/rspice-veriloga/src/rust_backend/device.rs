@@ -488,6 +488,7 @@ fn compact_stamp_files(mut files: StampFiles) -> StampFiles {
         helper.contents = reuse_duplicate_derivative_locals_in_helper_methods(std::mem::take(
             &mut helper.contents,
         ));
+        helper.contents = reconcile_helper_super_imports(std::mem::take(&mut helper.contents));
     }
     files.stamp = prune_unused_root_stamp_support_aliases(files.stamp, &files.helpers);
     files
@@ -572,6 +573,74 @@ fn super_import_line_imports_alias(line: &str, alias: &str) -> bool {
         return false;
     };
     imports.split(',').any(|import| import.trim() == alias)
+}
+
+fn reconcile_helper_super_imports(source: String) -> String {
+    let body_without_super_import = source
+        .lines()
+        .filter(|line| !line.starts_with("use super::{"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let uses_ad_value = helper_module_uses_ad_value_alias(&body_without_super_import);
+    let uses_scratch = helper_module_uses_scratch_alias(&body_without_super_import, "Scratch");
+    let uses_reactive_scratch =
+        helper_module_uses_scratch_alias(&body_without_super_import, "ReactiveScratch");
+
+    let mut rewritten = String::with_capacity(source.len());
+    for line in source.lines() {
+        let Some(imports) = line
+            .strip_prefix("use super::{")
+            .and_then(|line| line.split_once("};").map(|(imports, _)| imports))
+        else {
+            push_pruned_root_stamp_line(&mut rewritten, line);
+            continue;
+        };
+
+        let mut imports = imports
+            .split(',')
+            .map(|import| import.trim().to_string())
+            .filter(|import| import != "A" && import != "Scratch" && import != "ReactiveScratch")
+            .collect::<Vec<_>>();
+        if uses_reactive_scratch {
+            insert_helper_super_import_before(&mut imports, "ReactiveScratch", "LIMEXP_MAX");
+        }
+        if uses_scratch {
+            insert_helper_super_import_before(&mut imports, "Scratch", "LIMEXP_MAX");
+        }
+        if uses_ad_value {
+            imports.insert(0, "A".to_string());
+        }
+
+        rewritten.push_str("use super::{");
+        rewritten.push_str(&imports.join(", "));
+        rewritten.push_str("};\n");
+    }
+    rewritten
+}
+
+fn helper_module_uses_ad_value_alias(contents: &str) -> bool {
+    contents.contains("A::")
+        || block_uses_associated_path_alias(contents, "A")
+        || contents.contains(": A")
+        || contents.contains("-> A")
+        || contents.contains("[A;")
+}
+
+fn helper_module_uses_scratch_alias(contents: &str, alias: &str) -> bool {
+    contents.contains(&format!("&mut {alias}"))
+        || contents.contains(&format!(": {alias}"))
+        || block_uses_associated_path_alias(contents, alias)
+}
+
+fn insert_helper_super_import_before(imports: &mut Vec<String>, import: &str, before: &str) {
+    if imports.iter().any(|item| item == import) {
+        return;
+    }
+    if let Some(index) = imports.iter().position(|item| item == before) {
+        imports.insert(index, import.to_string());
+    } else {
+        imports.push(import.to_string());
+    }
 }
 
 fn is_root_stamp_support_import_or_alias(line: &str) -> bool {
@@ -22829,6 +22898,8 @@ fn generate_square_product_and_product3_scratch_helpers() -> String {
 fn index_or_mixed_helper_name(base: &str, mask: &str) -> String {
     if mask.bytes().all(|byte| byte == b'i') {
         format!("{base}_indices")
+    } else if mask.bytes().all(|byte| byte == b'a') {
+        base.to_string()
     } else {
         format!("{base}_mixed_{mask}")
     }
@@ -23042,6 +23113,11 @@ fn generate_ad_value_struct() -> String {
         "    #[inline]",
         "    fn constant(value: f64) -> Self {",
         "        Self { value, node_derivatives: [0.0; Instance::NODE_COUNT], branch_derivatives: [0.0; Instance::BRANCH_COUNT] }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn from_derivatives(value: f64, node_derivatives: [f64; Instance::NODE_COUNT], branch_derivatives: [f64; Instance::BRANCH_COUNT]) -> Self {",
+        "        Self { value, node_derivatives, branch_derivatives }",
         "    }",
         "    #[inline]",
         "    fn voltage(ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>) -> Self {",
@@ -24537,6 +24613,7 @@ fn compact_equation_uses_scratch_with_local_variables(
         variables,
         ddt_slots,
         branch_current_unknowns: potential_branch_slots.current_slots(),
+        ad_branch_axis_count: potential_branch_slots.len(),
         emitted: HashMap::new(),
         repeated_ad_counts: HashMap::new(),
         repeated_ad_locals: HashMap::new(),
@@ -24698,7 +24775,7 @@ fn emit_stamp_body(
     } else {
         HashSet::new()
     };
-    let branch_axis_count = branch_derivative_axis_count(potential_branch_slots.current_slots());
+    let branch_axis_count = potential_branch_slots.len();
     let equation_inline = equation_inline_plan(artifact)?;
     let local_storage_supported = has_live_variables
         && local_variable_storage_is_supported(
@@ -24707,7 +24784,6 @@ fn emit_stamp_body(
             transient_liveness,
             reactive_liveness,
             &candidate_local_derivative_variables,
-            scalar_hybrid_plan.is_some(),
         );
     let local_storage_candidate = local_storage_supported
         && local_variable_storage_is_bounded_for_pass(
@@ -24766,7 +24842,6 @@ fn emit_stamp_body(
                     &residual_usage.scratch_free_equations,
                     transient_liveness,
                     branch_axis_count,
-                    scalar_hybrid_plan.is_some(),
                 )? {
                     local_reactive_liveness = selection.liveness;
                     selected = selection.variables;
@@ -24781,7 +24856,6 @@ fn emit_stamp_body(
                 transient_liveness,
                 reactive_liveness,
                 branch_axis_count,
-                scalar_hybrid_plan.is_some(),
             )? {
                 local_transient_liveness = selection.liveness;
                 local_derivative_variables = selection.derivative_variables;
@@ -26218,6 +26292,7 @@ fn emit_compact_equation_stamp(
         variables,
         ddt_slots,
         branch_current_unknowns: potential_branch_slots.current_slots(),
+        ad_branch_axis_count: potential_branch_slots.len(),
         emitted: HashMap::new(),
         repeated_ad_counts: HashMap::new(),
         repeated_ad_locals: HashMap::new(),
@@ -26711,7 +26786,7 @@ fn seed_scalar_hybrid_branch_current_cache(
     potential_branch_slots: &PotentialBranchSlots,
     branch_currents: &mut HashMap<String, LoweredVariable>,
 ) -> Result<(), RustBackendError> {
-    let branch_axis_count = branch_derivative_axis_count(potential_branch_slots.current_slots());
+    let branch_axis_count = potential_branch_slots.len();
     for equation in &artifact.mir.equations {
         if equation.kind != MirEquationKind::Current {
             continue;
@@ -26759,7 +26834,7 @@ fn seed_scalar_hybrid_reactive_branch_current_cache(
     potential_branch_slots: &PotentialBranchSlots,
     branch_currents: &mut HashMap<String, LoweredVariable>,
 ) -> Result<(), RustBackendError> {
-    let branch_axis_count = branch_derivative_axis_count(potential_branch_slots.current_slots());
+    let branch_axis_count = potential_branch_slots.len();
     for equation in &artifact.mir.equations {
         if equation.kind != MirEquationKind::Current {
             continue;
@@ -26951,7 +27026,6 @@ fn can_use_local_variable_storage(
     reactive_liveness: &ReactiveLiveness,
     derivative_variables: &HashSet<String>,
     branch_axis_count: usize,
-    aggressive_straight_line_locals: bool,
 ) -> bool {
     local_variable_storage_is_supported(
         artifact,
@@ -26959,7 +27033,6 @@ fn can_use_local_variable_storage(
         transient_liveness,
         reactive_liveness,
         derivative_variables,
-        aggressive_straight_line_locals,
     ) && local_variable_storage_is_bounded_for_pass(
         artifact,
         reactive,
@@ -26976,11 +27049,9 @@ fn local_variable_storage_is_supported(
     transient_liveness: &TransientLiveness,
     reactive_liveness: &ReactiveLiveness,
     derivative_variables: &HashSet<String>,
-    aggressive_straight_line_locals: bool,
 ) -> bool {
     let local_storage_shape = statements_contain_loop(&artifact.hir.statements)
-        || (aggressive_straight_line_locals
-            && statements_are_straight_line_assignments(&artifact.hir.statements))
+        || statements_are_straight_line_assignments(&artifact.hir.statements)
         || (!reactive
             && derivative_variables.is_empty()
             && straight_line_assignments_are_parameter_static(artifact, transient_liveness));
@@ -27035,7 +27106,6 @@ fn select_bounded_transient_local_variable_subset(
     full_transient_liveness: &TransientLiveness,
     reactive_liveness: &ReactiveLiveness,
     branch_axis_count: usize,
-    aggressive_straight_line_locals: bool,
 ) -> Result<Option<SelectedTransientLocalVariables>, RustBackendError> {
     if let Some(selection) = transient_local_variable_selection_for_equations(
         artifact,
@@ -27043,7 +27113,6 @@ fn select_bounded_transient_local_variable_subset(
         full_transient_liveness,
         reactive_liveness,
         branch_axis_count,
-        aggressive_straight_line_locals,
     )? {
         return Ok(Some(selection));
     }
@@ -27061,7 +27130,6 @@ fn select_bounded_transient_local_variable_subset(
             full_transient_liveness,
             reactive_liveness,
             branch_axis_count,
-            aggressive_straight_line_locals,
         )? {
             selected = Some(selection);
         } else {
@@ -27077,7 +27145,6 @@ fn transient_local_variable_selection_for_equations(
     full_transient_liveness: &TransientLiveness,
     reactive_liveness: &ReactiveLiveness,
     branch_axis_count: usize,
-    aggressive_straight_line_locals: bool,
 ) -> Result<Option<SelectedTransientLocalVariables>, RustBackendError> {
     if equations.is_empty() {
         return Ok(None);
@@ -27117,7 +27184,6 @@ fn transient_local_variable_selection_for_equations(
             reactive_liveness,
             &derivative_variables,
             branch_axis_count,
-            aggressive_straight_line_locals,
         )
     {
         return Ok(None);
@@ -27134,14 +27200,12 @@ fn select_bounded_reactive_local_variable_subset(
     candidate_equations: &HashSet<EquationId>,
     transient_liveness: &TransientLiveness,
     branch_axis_count: usize,
-    aggressive_straight_line_locals: bool,
 ) -> Result<Option<SelectedReactiveLocalVariables>, RustBackendError> {
     if let Some(selection) = reactive_local_variable_selection_for_equations(
         artifact,
         candidate_equations,
         transient_liveness,
         branch_axis_count,
-        aggressive_straight_line_locals,
     )? {
         return Ok(Some(selection));
     }
@@ -27158,7 +27222,6 @@ fn select_bounded_reactive_local_variable_subset(
             &selected_equations,
             transient_liveness,
             branch_axis_count,
-            aggressive_straight_line_locals,
         )? {
             selected = Some(selection);
         } else {
@@ -27173,7 +27236,6 @@ fn reactive_local_variable_selection_for_equations(
     equations: &HashSet<EquationId>,
     transient_liveness: &TransientLiveness,
     branch_axis_count: usize,
-    aggressive_straight_line_locals: bool,
 ) -> Result<Option<SelectedReactiveLocalVariables>, RustBackendError> {
     if equations.is_empty() {
         return Ok(None);
@@ -27194,7 +27256,6 @@ fn reactive_local_variable_selection_for_equations(
             &liveness,
             &HashSet::new(),
             branch_axis_count,
-            aggressive_straight_line_locals,
         )
     {
         return Ok(None);
@@ -29416,24 +29477,28 @@ fn assign_local_derivative_lanes(
     out: &mut String,
     indent: &str,
 ) -> Result<(), RustBackendError> {
-    if targets.len() != values.len() {
-        return Err(RustBackendError::internal(
+    assign_local_derivative_lane_lines(targets, values, out, indent).map_err(|message| {
+        RustBackendError::internal(
             artifact.metadata.source_package.as_str(),
             artifact.mir.module_name.as_str(),
-            format!(
-                "local derivative lane count mismatch: {} targets for {} values",
-                targets.len(),
-                values.len()
-            ),
-        ));
-    }
-    for (target, value) in targets.iter().zip(values.iter()) {
+            message,
+        )
+    })
+}
+
+fn assign_local_derivative_lane_lines(
+    targets: &[String],
+    values: &[String],
+    out: &mut String,
+    indent: &str,
+) -> Result<(), String> {
+    for lane in 0..targets.len().max(values.len()) {
+        let target = targets.get(lane).map(String::as_str).unwrap_or("0.0");
+        let value = values.get(lane).map(String::as_str).unwrap_or("0.0");
         if target == "0.0" {
             if !is_zero_derivative(value) {
-                return Err(RustBackendError::internal(
-                    artifact.metadata.source_package.as_str(),
-                    artifact.mir.module_name.as_str(),
-                    format!("nonzero derivative {value} assigned to non-live local lane"),
+                return Err(format!(
+                    "nonzero derivative {value} assigned to non-live local lane {lane}",
                 ));
             }
             continue;
@@ -29478,6 +29543,7 @@ fn emit_compact_assignment_statement(
         variables,
         ddt_slots,
         branch_current_unknowns,
+        ad_branch_axis_count: branch_axis_count,
         emitted: HashMap::new(),
         repeated_ad_counts: HashMap::new(),
         repeated_ad_locals: HashMap::new(),
@@ -29602,6 +29668,7 @@ fn assignment_rhs_has_boolean_condition(
         variables,
         ddt_slots,
         branch_current_unknowns,
+        ad_branch_axis_count: branch_derivative_axis_count(branch_current_unknowns),
         emitted: HashMap::new(),
         repeated_ad_counts: HashMap::new(),
         repeated_ad_locals: HashMap::new(),
@@ -41035,6 +41102,7 @@ struct CompactAdEmitter<'a> {
     variables: &'a HashMap<String, LoweredVariable>,
     ddt_slots: &'a DdtSlots,
     branch_current_unknowns: &'a HashMap<String, BranchCurrentSlot>,
+    ad_branch_axis_count: usize,
     emitted: HashMap<ExprId, String>,
     repeated_ad_counts: HashMap<String, usize>,
     repeated_ad_locals: HashMap<String, String>,
@@ -41716,6 +41784,7 @@ impl CompactAdEmitter<'_> {
             variables: self.variables,
             ddt_slots: self.ddt_slots,
             branch_current_unknowns: self.branch_current_unknowns,
+            ad_branch_axis_count: self.ad_branch_axis_count,
             emitted: self.emitted.clone(),
             repeated_ad_counts: HashMap::new(),
             repeated_ad_locals: self.repeated_ad_locals.clone(),
@@ -41802,7 +41871,7 @@ impl CompactAdEmitter<'_> {
         let Some(variable) = self.variables.get(name.as_str()) else {
             return Ok(None);
         };
-        if lowered_variable_has_zero_derivatives(variable) {
+        if lowered_variable_has_zero_derivatives(variable) || is_local_variable_storage(variable) {
             return Ok(None);
         }
         self.variable_index(name.as_str())
@@ -41825,6 +41894,15 @@ impl CompactAdEmitter<'_> {
         } else if let Some(variable) = self.variables.get(name) {
             if lowered_variable_has_zero_derivatives(variable) {
                 return Ok(format!("AdValue::constant({})", variable.value));
+            }
+            if is_local_variable_storage(variable) {
+                return local_variable_ad_value_expr(
+                    variable,
+                    self.artifact.mir.nodes.len(),
+                    self.ad_branch_axis_count
+                        .max(variable.branch_derivatives.len()),
+                )
+                .map_err(|message| self.internal(message));
             }
             let index = self
                 .artifact
@@ -44013,6 +44091,36 @@ fn lowered_variable_has_zero_derivatives(variable: &LoweredVariable) -> bool {
                     .all(|value| is_zero_derivative(value))))
 }
 
+fn local_variable_ad_value_expr(
+    variable: &LoweredVariable,
+    node_count: usize,
+    branch_count: usize,
+) -> Result<String, String> {
+    let node_derivatives = padded_derivative_array_expr("node", &variable.derivatives, node_count)?;
+    let branch_derivatives =
+        padded_derivative_array_expr("branch", &variable.branch_derivatives, branch_count)?;
+    Ok(format!(
+        "AdValue::from_derivatives({}, [{}], [{}])",
+        variable.value, node_derivatives, branch_derivatives
+    ))
+}
+
+fn padded_derivative_array_expr(
+    axis_name: &str,
+    derivatives: &[String],
+    axis_count: usize,
+) -> Result<String, String> {
+    if derivatives.len() > axis_count {
+        return Err(format!(
+            "local {axis_name} derivative lane count {} exceeds model {axis_name} count {axis_count}",
+            derivatives.len()
+        ));
+    }
+    let mut padded = derivatives.to_vec();
+    padded.extend(std::iter::repeat("0.0".to_string()).take(axis_count - derivatives.len()));
+    Ok(padded.join(", "))
+}
+
 fn is_inline_derivative_expr(derivative: &str) -> bool {
     let derivative = derivative.trim();
     is_zero_derivative(derivative)
@@ -44203,12 +44311,118 @@ fn branch_derivative_axis_count(
 #[cfg(test)]
 mod dense_derivative_ref_tests {
     use super::{
-        ScratchDerivativeKind, ScratchDerivativeRow, direct_scratch_derivative_row,
-        emit_dense_derivative_refs, is_inline_derivative_expr,
+        ScratchDerivativeKind, ScratchDerivativeRow, assign_local_derivative_lane_lines,
+        direct_scratch_derivative_row, emit_dense_derivative_refs,
+        helper_module_uses_ad_value_alias, index_or_mixed_helper_name, is_inline_derivative_expr,
+        local_variable_ad_value_expr, reconcile_helper_super_imports,
     };
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn helper_modules_import_ad_value_only_when_used() {
+        assert!(!helper_module_uses_ad_value_alias(
+            "let value: f64 = var_drive;\nlet next = value + 1.0;\n"
+        ));
+        assert!(helper_module_uses_ad_value_alias(
+            "let next = A::mul(left, right);\n"
+        ));
+        assert!(helper_module_uses_ad_value_alias(
+            "fn helper(input: A) {}\n"
+        ));
+    }
+
+    #[test]
+    fn all_ad_compact_helpers_use_base_name() {
+        assert_eq!(
+            index_or_mixed_helper_name("store_mul_div_scaled_inputs", "aaa"),
+            "store_mul_div_scaled_inputs"
+        );
+        assert_eq!(
+            index_or_mixed_helper_name("store_mul_div_scaled_inputs", "iii"),
+            "store_mul_div_scaled_inputs_indices"
+        );
+        assert_eq!(
+            index_or_mixed_helper_name("store_mul_div_scaled_inputs", "iai"),
+            "store_mul_div_scaled_inputs_mixed_iai"
+        );
+    }
+
+    #[test]
+    fn reconciles_helper_imports_after_compaction_introduces_ad_aliases() {
+        let source = r#"#![allow(dead_code)]
+
+use super::{A, ddt_jacobian, GeneratedEvalContext, Scratch, LIMEXP_MAX};
+use super::super::state::{Instance, Parameters};
+
+impl Instance {
+    fn helper(ctx: &GeneratedEvalContext<'_>, s: &mut Scratch) {
+        s.store_add_ad(0, A::voltage(ctx, &[], None, None));
+    }
+}
+"#;
+
+        let reconciled = reconcile_helper_super_imports(source.to_string());
+
+        assert!(reconciled.contains("use super::{A, ddt_jacobian"));
+        assert!(reconciled.contains("Scratch, LIMEXP_MAX"));
+    }
+
+    #[test]
+    fn reconciles_helper_imports_prunes_unused_ad_aliases() {
+        let source = r#"#![allow(dead_code)]
+
+use super::{A, ddt_jacobian, GeneratedEvalContext, Scratch, LIMEXP_MAX};
+use super::super::state::{Instance, Parameters};
+
+impl Instance {
+    fn helper(_ctx: &GeneratedEvalContext<'_>, s: &mut Scratch) {
+        s.store_voltage(0, _ctx, &[], None, None);
+    }
+}
+"#;
+
+        let reconciled = reconcile_helper_super_imports(source.to_string());
+
+        assert!(!reconciled.contains("use super::{A,"));
+        assert!(reconciled.contains("use super::{ddt_jacobian"));
+        assert!(reconciled.contains("Scratch, LIMEXP_MAX"));
+    }
+
+    #[test]
+    fn local_ad_values_materialize_native_derivative_lanes() {
+        let variable = super::LoweredVariable {
+            value: "var_drive".to_string(),
+            condition: None,
+            derivatives: strings(&["var_drive_dn0", "0.0"]),
+            branch_derivatives: strings(&["var_drive_db0"]),
+            has_reactive: false,
+            reactive_value: "0.0".to_string(),
+            reactive_derivatives: strings(&["0.0", "0.0"]),
+            reactive_branch_derivatives: strings(&["0.0"]),
+        };
+
+        assert_eq!(
+            local_variable_ad_value_expr(&variable, 2, 3).expect("local AD value expr"),
+            "AdValue::from_derivatives(var_drive, [var_drive_dn0, 0.0], [var_drive_db0, 0.0, 0.0])"
+        );
+    }
+
+    #[test]
+    fn local_derivative_assignment_clears_extra_live_lanes() {
+        let targets = strings(&["var_drive_db0", "var_drive_db1", "var_drive_db2"]);
+        let values = strings(&["rhs_db0"]);
+        let mut out = String::new();
+
+        assign_local_derivative_lane_lines(&targets, &values, &mut out, "        ")
+            .expect("assign compact local derivatives");
+
+        assert_eq!(
+            out,
+            "        var_drive_db0 = rhs_db0;\n        var_drive_db1 = 0.0;\n        var_drive_db2 = 0.0;\n"
+        );
     }
 
     #[test]
