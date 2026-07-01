@@ -406,8 +406,6 @@ fn d_ram_evaluate_with_state(
 
     let select_changed = select != d_ram_state(ctx, scratch_state.as_deref(), D_RAM_PREV_SELECT);
     let write_changed = write_en != d_ram_state(ctx, scratch_state.as_deref(), D_RAM_PREV_WRITE_EN);
-    let address_changed = d_ram_previous_address_changed(ctx, scratch_state.as_deref(), shape);
-    let data_changed = d_ram_previous_data_changed(ctx, scratch_state.as_deref(), shape);
 
     if select_changed {
         if select == 1 {
@@ -433,7 +431,10 @@ fn d_ram_evaluate_with_state(
         } else if write_en == 0 {
             d_ram_set_uniform_outputs(ctx, shape, 2, DigitalStrength::HighZ, read_delay);
         }
-    } else if write_changed || address_changed || data_changed {
+    } else if write_changed
+        || d_ram_previous_address_changed(ctx, scratch_state.as_deref(), shape)
+        || d_ram_previous_data_changed(ctx, scratch_state.as_deref(), shape)
+    {
         if write_en == 1 {
             if select == 1 {
                 d_ram_write_word(ctx, &mut scratch_state, shape, address_index);
