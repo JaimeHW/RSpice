@@ -38,6 +38,7 @@ struct FileSourceRowsData {
     values: Vec<Value>,
     width: usize,
     strictly_increasing_time: bool,
+    nonmonotonic_breakpoints: Option<Vec<Value>>,
 }
 
 impl FileSourceRowsData {
@@ -45,11 +46,22 @@ impl FileSourceRowsData {
         let strictly_increasing_time = rows
             .windows(2)
             .all(|window| window[0].time < window[1].time);
+        let nonmonotonic_breakpoints = if strictly_increasing_time {
+            None
+        } else {
+            let mut times: Vec<Value> = rows.iter().map(|row| row.time).collect();
+            times.sort_by(|left, right| {
+                left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            times.dedup_by(|left, right| *left == *right);
+            Some(times)
+        };
         Self {
             rows,
             values,
             width,
             strictly_increasing_time,
+            nonmonotonic_breakpoints,
         }
     }
 
@@ -61,6 +73,12 @@ impl FileSourceRowsData {
             return &[];
         };
         self.values.get(start..end).unwrap_or(&[])
+    }
+
+    fn next_nonmonotonic_breakpoint(&self, time: Value) -> Option<Value> {
+        let breakpoints = self.nonmonotonic_breakpoints.as_deref()?;
+        let index = breakpoints.partition_point(|breakpoint| *breakpoint <= time);
+        breakpoints.get(index).copied()
     }
 }
 
@@ -555,15 +573,9 @@ fn schedule_next_breakpoint(ctx: &mut CmContext, data: &FileSourceRowsData) {
         return;
     }
 
-    if let Some(time) = next_nonmonotonic_breakpoint(data.rows.as_slice(), ctx.time) {
+    if let Some(time) = data.next_nonmonotonic_breakpoint(ctx.time) {
         ctx.request_breakpoint(time);
     }
-}
-
-fn next_nonmonotonic_breakpoint(rows: &[FileSourceRow], time: Value) -> Option<Value> {
-    rows.iter()
-        .filter_map(|row| (row.time > time).then_some(row.time))
-        .min_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal))
 }
 
 fn filesource_cursor(ctx: &CmContext, rows: &[FileSourceRow]) -> usize {
@@ -935,14 +947,29 @@ mod tests {
 
     #[test]
     fn filesource_breakpoint_lookup_preserves_nonmonotonic_min_future_time() {
-        let rows = single_value_rows(&[(0.0, 0.0), (2.0e-9, 2.0), (1.0e-9, 1.0), (3.0e-9, 3.0)]);
+        let rows = single_value_rows(&[
+            (0.0, 0.0),
+            (2.0e-9, 2.0),
+            (1.0e-9, 1.0),
+            (2.0e-9, 20.0),
+            (3.0e-9, 3.0),
+        ]);
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
         ctx.time = 0.5e-9;
 
         assert!(!rows.strictly_increasing_time);
+        assert_eq!(
+            rows.nonmonotonic_breakpoints.as_deref(),
+            Some(&[0.0, 1.0e-9, 2.0e-9, 3.0e-9][..]),
+            "nonmonotonic filesource data should precompute sorted unique breakpoint times"
+        );
         schedule_next_breakpoint(&mut ctx, &rows);
         assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
+
+        ctx.time = 1.0e-9;
+        schedule_next_breakpoint(&mut ctx, &rows);
+        assert_eq!(ctx.take_requested_breakpoints(), vec![2.0e-9]);
     }
 
     #[test]
