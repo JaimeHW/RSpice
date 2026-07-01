@@ -444,6 +444,10 @@ pub struct CmContext {
     string_vector_params: HashMap<String, Vec<String>>,
     /// Real-vector parameters by name
     real_vector_params: HashMap<String, Vec<Value>>,
+    /// Monotonic revisions for real-vector parameters by canonical name.
+    real_vector_param_revisions: HashMap<String, u64>,
+    /// Next revision assigned by `set_real_vector_param`.
+    next_real_vector_param_revision: u64,
     /// Integer-vector parameters by name
     integer_vector_params: HashMap<String, Vec<i64>>,
     /// Parameters explicitly supplied by the instance or model card.
@@ -534,6 +538,8 @@ impl CmContext {
             next_string_param_revision: 1,
             string_vector_params: HashMap::new(),
             real_vector_params: HashMap::new(),
+            real_vector_param_revisions: HashMap::new(),
+            next_real_vector_param_revision: 1,
             integer_vector_params: HashMap::new(),
             provided_params: HashSet::new(),
             state: Vec::new(),
@@ -1611,6 +1617,12 @@ impl CmContext {
             .map(|values| values.as_slice())
     }
 
+    /// Get the revision assigned when a real-vector parameter was last set.
+    pub(crate) fn real_vector_param_revision(&self, name: &str) -> Option<u64> {
+        let key = Self::canonical_param_lookup_key(name);
+        self.real_vector_param_revisions.get(key.as_ref()).copied()
+    }
+
     /// Get integer-vector parameter
     pub fn integer_vector_param(&self, name: &str) -> Option<&[i64]> {
         let key = Self::canonical_param_lookup_key(name);
@@ -1655,8 +1667,14 @@ impl CmContext {
 
     /// Set real-vector parameter
     pub fn set_real_vector_param(&mut self, name: &str, value: Vec<Value>) {
-        self.real_vector_params
-            .insert(Self::canonical_param_key(name), value);
+        let key = Self::canonical_param_key(name);
+        let revision = self.next_real_vector_param_revision;
+        self.next_real_vector_param_revision = self.next_real_vector_param_revision.wrapping_add(1);
+        if self.next_real_vector_param_revision == 0 {
+            self.next_real_vector_param_revision = 1;
+        }
+        self.real_vector_params.insert(key.clone(), value);
+        self.real_vector_param_revisions.insert(key, revision);
     }
 
     /// Set integer-vector parameter
@@ -2339,6 +2357,15 @@ mod tests {
             Some(["a".to_string(), "b".to_string()].as_slice())
         );
         assert_eq!(ctx.real_vector_param("points"), Some([1.0, 2.0].as_slice()));
+        let points_revision = ctx
+            .real_vector_param_revision("POINTS")
+            .expect("real-vector parameter revision is tracked");
+        ctx.set_real_vector_param("points", vec![3.0, 4.0]);
+        assert_eq!(ctx.real_vector_param("POINTS"), Some([3.0, 4.0].as_slice()));
+        assert!(
+            ctx.real_vector_param_revision("points").unwrap() > points_revision,
+            "real-vector parameter revisions advance when a parameter is replaced"
+        );
         assert_eq!(ctx.integer_vector_param("BITS"), Some([1, 0].as_slice()));
         assert!(ctx.param_was_provided("gain"));
         assert!(ctx.param_was_provided("GAIN"));

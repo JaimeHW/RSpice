@@ -42,10 +42,10 @@ struct FrequencyTableData {
     strictly_increasing_control: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FrequencyTableSignature {
-    controls: Vec<Value>,
-    frequencies: Vec<Value>,
+    controls_revision: Option<u64>,
+    frequencies_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -164,14 +164,13 @@ fn controlled_frequency_table(ctx: &CmContext) -> CmResult<FrequencyTableData> {
 
 fn frequency_table_signature(ctx: &CmContext) -> FrequencyTableSignature {
     FrequencyTableSignature {
-        controls: ctx.real_vector_param("cntl_array").unwrap_or(&[]).to_vec(),
-        frequencies: ctx.real_vector_param("freq_array").unwrap_or(&[]).to_vec(),
+        controls_revision: ctx.real_vector_param_revision("cntl_array"),
+        frequencies_revision: ctx.real_vector_param_revision("freq_array"),
     }
 }
 
 fn frequency_table_signature_matches(ctx: &CmContext, signature: &FrequencyTableSignature) -> bool {
-    ctx.real_vector_param("cntl_array").unwrap_or(&[]) == signature.controls.as_slice()
-        && ctx.real_vector_param("freq_array").unwrap_or(&[]) == signature.frequencies.as_slice()
+    frequency_table_signature(ctx) == *signature
 }
 
 fn controlled_frequency_table_optional_uncached(
@@ -810,6 +809,15 @@ mod tests {
             "unchanged waveform frequency parameters should reuse the parsed table"
         );
         assert_eq!(interpolate_frequency(&first, 0.0), 1.0e9);
+
+        ctx.set_real_vector_param("unrelated", vec![9.0, 10.0]);
+        let reused_after_unrelated_vector_change = controlled_frequency_table_optional(&mut ctx)
+            .expect("unrelated vector params do not invalidate waveform frequency table")
+            .expect("frequency table is present");
+        assert!(
+            Arc::ptr_eq(&first, &reused_after_unrelated_vector_change),
+            "only cntl_array/freq_array revisions should invalidate the parsed table"
+        );
 
         ctx.set_real_vector_param("freq_array", vec![2.0e9, 2.0e9]);
         let updated = controlled_frequency_table_optional(&mut ctx)
