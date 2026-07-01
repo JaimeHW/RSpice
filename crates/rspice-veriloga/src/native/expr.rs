@@ -2089,6 +2089,9 @@ impl NativeProgram {
                     if lower_constant_binary_logical(&mut ops, op) {
                         continue;
                     }
+                    if lower_dominating_constant_lhs_logical(&mut ops, op) {
+                        continue;
+                    }
                     if lower_constant_rhs_logical(&mut ops, op) {
                         continue;
                     }
@@ -6667,6 +6670,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             _ => unreachable!("append_logical only accepts logical operators"),
         };
         if lower_constant_binary_logical(&mut self.ops, op)
+            || lower_dominating_constant_lhs_logical(&mut self.ops, op)
             || lower_constant_rhs_logical(&mut self.ops, op)
             || lower_constant_lhs_logical(&mut self.ops, op)
         {
@@ -7694,6 +7698,31 @@ fn lower_constant_lhs_logical(ops: &mut Vec<NativeOp>, op: LogicalOp) -> bool {
     true
 }
 
+fn lower_dominating_constant_lhs_logical(ops: &mut Vec<NativeOp>, op: LogicalOp) -> bool {
+    if ops.len() < 2 {
+        return false;
+    }
+    let rhs_index = ops.len() - 1;
+    if !is_nonfaulting_context_value_push(&ops[rhs_index]) {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let NativeOp::Const(value) = ops[lhs_index] else {
+        return false;
+    };
+    let lhs_truthy = constant_truthy(value);
+    let result = match (op, lhs_truthy) {
+        (LogicalOp::And, false) => false,
+        (LogicalOp::Or, true) => true,
+        _ => return false,
+    };
+
+    ops.truncate(lhs_index);
+    ops.push(NativeOp::Const(if result { 1.0 } else { 0.0 }));
+    true
+}
+
 fn lower_constant_logical_not(ops: &mut Vec<NativeOp>) -> bool {
     let Some(NativeOp::Const(value)) = ops.last_mut() else {
         return false;
@@ -7864,6 +7893,17 @@ fn rounded_i64_without_saturation(value: f64) -> Option<i64> {
 
 fn is_independent_value_push(op: &NativeOp) -> bool {
     !matches!(op, NativeOp::Const(_)) && native_op_stack_effect(op) == (0, 1)
+}
+
+fn is_nonfaulting_context_value_push(op: &NativeOp) -> bool {
+    matches!(
+        op,
+        NativeOp::LoadTemperature
+            | NativeOp::LoadThermalVoltage
+            | NativeOp::LoadTime
+            | NativeOp::Analysis(_)
+            | NativeOp::LoadMfactor
+    )
 }
 
 fn compute_native_max_stack_depth(
@@ -10541,9 +10581,6 @@ endmodule
     fn lowers_constant_lhs_logical_ops_without_extra_stack_slot() {
         let cases = [
             (Instruction::And, 2.0e-15, LogicalOp::And, true),
-            (Instruction::And, 1.0e-15, LogicalOp::And, false),
-            (Instruction::And, f64::NAN, LogicalOp::And, false),
-            (Instruction::Or, -2.0e-15, LogicalOp::Or, true),
             (Instruction::Or, 0.5e-15, LogicalOp::Or, false),
             (Instruction::Or, f64::NAN, LogicalOp::Or, false),
         ];
@@ -10585,6 +10622,129 @@ endmodule
                 ]
             );
         }
+    }
+
+    #[test]
+    fn folds_dominating_constant_lhs_logical_context_reads_to_literals() {
+        let cases = [
+            (
+                "and-false-temperature",
+                Instruction::And,
+                1.0e-15,
+                vec![Instruction::PushTemperature],
+                0.0,
+            ),
+            (
+                "and-nan-time",
+                Instruction::And,
+                f64::NAN,
+                vec![Instruction::PushTime],
+                0.0,
+            ),
+            (
+                "or-true-analysis",
+                Instruction::Or,
+                -2.0e-15,
+                vec![Instruction::Analysis(5)],
+                1.0,
+            ),
+            (
+                "or-true-mfactor",
+                Instruction::Or,
+                2.0e-15,
+                vec![Instruction::PushMfactor],
+                1.0,
+            ),
+            (
+                "or-true-vt",
+                Instruction::Or,
+                2.0e-15,
+                vec![Instruction::PushVt],
+                1.0,
+            ),
+        ];
+
+        for (case, instruction, lhs, rhs, expected) in cases {
+            let mut instructions = vec![Instruction::PushConst(lhs)];
+            instructions.extend(rhs);
+            instructions.push(instruction);
+
+            let lowered = NativeProgram::from_bytecode(
+                "dominating-logic",
+                EntryKind::Assignment,
+                &BytecodeProgram { instructions },
+                limits(0, 0),
+            )
+            .expect("dominating constant logical op folds over nonfaulting context read");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{case} should fold to a single literal"
+            );
+            assert_eq!(
+                lowered.ops(),
+                &[NativeOp::Const(expected)],
+                "{case} should not emit a dead context read"
+            );
+        }
+    }
+
+    #[test]
+    fn folds_canonical_dominating_constant_lhs_logical_context_read_to_literal() {
+        let source = r#"
+`include "disciplines.vams"
+module mir_dominating_logic(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ 0.0 && analysis("dc");
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_dominating_logic",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower canonical dominating logical expression");
+
+        assert_eq!(program.ops(), &[NativeOp::Const(0.0)]);
+        assert_eq!(program.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn keeps_dominating_constant_lhs_logical_storage_reads_for_hard_fail_contract() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushConst(1.0e-15),
+                Instruction::PushParam(0),
+                Instruction::And,
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "dominating-logic-storage",
+            EntryKind::Assignment,
+            &program,
+            limits(0, 0),
+        )
+        .expect("dominating constant logical op keeps storage-backed RHS load");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadParam(0),
+                NativeOp::LogicalConst(LogicalOp::And, false)
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 1);
     }
 
     #[test]
