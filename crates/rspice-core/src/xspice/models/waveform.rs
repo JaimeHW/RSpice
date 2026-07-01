@@ -8,10 +8,15 @@ use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortDirection, PortSpec,
     PortType,
 };
-use std::sync::{Arc, OnceLock};
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicUsize, Ordering},
+};
 
 const MIN_FREQUENCY: Value = 1.0e-16;
 const FREQUENCY_TABLE_RESOURCE: &str = "xspice.waveform.frequency_table";
+const FREQUENCY_TABLE_UNSET_UPPER_INDEX: usize = usize::MAX;
+const FREQUENCY_TABLE_CURSOR_LINEAR_STEPS: usize = 8;
 const PHASE_STATE: usize = 0;
 const SQUARE_TIME1_STATE: usize = 1;
 const SQUARE_TIME2_STATE: usize = 2;
@@ -36,10 +41,11 @@ struct ControlPoint {
     frequency: Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct FrequencyTableData {
     points: Vec<ControlPoint>,
     strictly_increasing_control: bool,
+    last_upper_index: AtomicUsize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -227,6 +233,7 @@ fn frequency_table_data(points: Vec<ControlPoint>) -> FrequencyTableData {
     FrequencyTableData {
         points,
         strictly_increasing_control,
+        last_upper_index: AtomicUsize::new(FREQUENCY_TABLE_UNSET_UPPER_INDEX),
     }
 }
 
@@ -276,6 +283,64 @@ fn interpolate_frequency_linear_scan(table: &[ControlPoint], control: Value) -> 
     }
 }
 
+fn frequency_interval_contains(
+    points: &[ControlPoint],
+    upper_index: usize,
+    control: Value,
+) -> bool {
+    debug_assert!(upper_index > 0);
+    debug_assert!(upper_index < points.len());
+    points[upper_index - 1].control <= control && control <= points[upper_index].control
+}
+
+fn frequency_upper_index_binary(points: &[ControlPoint], control: Value) -> usize {
+    points.partition_point(|point| point.control <= control)
+}
+
+fn frequency_upper_index_with_cursor(table: &FrequencyTableData, control: Value) -> usize {
+    let points = table.points.as_slice();
+    let point_count = points.len();
+    let mut upper_index = table.last_upper_index.load(Ordering::Relaxed);
+
+    if upper_index == FREQUENCY_TABLE_UNSET_UPPER_INDEX
+        || upper_index == 0
+        || upper_index >= point_count
+    {
+        upper_index = frequency_upper_index_binary(points, control);
+        table.last_upper_index.store(upper_index, Ordering::Relaxed);
+        return upper_index;
+    }
+
+    if frequency_interval_contains(points, upper_index, control) {
+        return upper_index;
+    }
+
+    let mut steps = 0;
+    if control > points[upper_index].control {
+        while upper_index + 1 < point_count
+            && control > points[upper_index].control
+            && steps < FREQUENCY_TABLE_CURSOR_LINEAR_STEPS
+        {
+            upper_index += 1;
+            steps += 1;
+        }
+    } else {
+        while upper_index > 1
+            && control < points[upper_index - 1].control
+            && steps < FREQUENCY_TABLE_CURSOR_LINEAR_STEPS
+        {
+            upper_index -= 1;
+            steps += 1;
+        }
+    }
+
+    if !frequency_interval_contains(points, upper_index, control) {
+        upper_index = frequency_upper_index_binary(points, control);
+    }
+    table.last_upper_index.store(upper_index, Ordering::Relaxed);
+    upper_index
+}
+
 fn interpolate_frequency(table: &FrequencyTableData, control: Value) -> Value {
     let points = table.points.as_slice();
     if !table.strictly_increasing_control {
@@ -292,7 +357,7 @@ fn interpolate_frequency(table: &FrequencyTableData, control: Value) -> Value {
         return linear_interpolate(points[points.len() - 2], last, control);
     }
 
-    let upper_index = points.partition_point(|point| point.control <= control);
+    let upper_index = frequency_upper_index_with_cursor(table, control);
     linear_interpolate(points[upper_index - 1], points[upper_index], control)
 }
 
@@ -947,14 +1012,45 @@ mod tests {
         ]);
 
         assert!(table.strictly_increasing_control);
+        assert_eq!(
+            table.last_upper_index.load(Ordering::Relaxed),
+            FREQUENCY_TABLE_UNSET_UPPER_INDEX
+        );
         assert!(
             (interpolate_frequency(&table, 2.0) - 400.0).abs() < 1.0e-12,
             "strictly increasing controls should interpolate from the binary-search bracket"
         );
+        assert_eq!(table.last_upper_index.load(Ordering::Relaxed), 2);
         assert_eq!(
             interpolate_frequency(&table, 1.0),
             200.0,
             "exact interior controls should return the matching row"
+        );
+        assert_eq!(
+            table.last_upper_index.load(Ordering::Relaxed),
+            2,
+            "exact controls may reuse the current bracket when the value is unchanged"
+        );
+    }
+
+    #[test]
+    fn interpolate_frequency_cursor_falls_back_for_large_control_jumps() {
+        let table = frequency_table_data(
+            (1..=24)
+                .map(|control| ControlPoint {
+                    control: control as Value,
+                    frequency: control as Value,
+                })
+                .collect(),
+        );
+
+        assert_eq!(interpolate_frequency(&table, 2.5), 2.5);
+        assert_eq!(table.last_upper_index.load(Ordering::Relaxed), 2);
+        assert_eq!(interpolate_frequency(&table, 22.5), 22.5);
+        assert_eq!(
+            table.last_upper_index.load(Ordering::Relaxed),
+            22,
+            "large non-local control jumps should land on the binary-search bracket"
         );
     }
 
