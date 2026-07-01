@@ -32,15 +32,13 @@ struct ControlTablePoint {
     value: Value,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ControlTableSignature {
     model: &'static str,
     control_name: &'static str,
     value_name: &'static str,
-    controls_present: bool,
-    values_present: bool,
-    controls: Vec<Value>,
-    values: Vec<Value>,
+    controls_revision: Option<u64>,
+    values_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -166,16 +164,12 @@ fn control_table_signature(
     control_name: &'static str,
     value_name: &'static str,
 ) -> ControlTableSignature {
-    let controls = ctx.real_vector_param(control_name);
-    let values = ctx.real_vector_param(value_name);
     ControlTableSignature {
         model,
         control_name,
         value_name,
-        controls_present: controls.is_some(),
-        values_present: values.is_some(),
-        controls: controls.unwrap_or(&[]).to_vec(),
-        values: values.unwrap_or(&[]).to_vec(),
+        controls_revision: ctx.real_vector_param_revision(control_name),
+        values_revision: ctx.real_vector_param_revision(value_name),
     }
 }
 
@@ -193,12 +187,7 @@ fn control_table_signature_matches(
         return false;
     }
 
-    let controls = ctx.real_vector_param(control_name);
-    let values = ctx.real_vector_param(value_name);
-    signature.controls_present == controls.is_some()
-        && signature.values_present == values.is_some()
-        && controls.unwrap_or(&[]) == signature.controls.as_slice()
-        && values.unwrap_or(&[]) == signature.values.as_slice()
+    control_table_signature(ctx, model, control_name, value_name) == *signature
 }
 
 #[cfg(test)]
@@ -821,6 +810,20 @@ mod tests {
             "unchanged digital oscillator table parameters should reuse the parsed table"
         );
         assert_eq!(first[1].value, 2.0e6);
+
+        ctx.set_real_vector_param("unrelated", vec![1.0, 2.0]);
+        let after_unrelated = validate_table(
+            &mut ctx,
+            "d_osc",
+            "cntl_array",
+            "freq_array",
+            sanitize_d_osc_frequency,
+        )
+        .expect("unrelated vector preserves control table");
+        assert!(
+            Arc::ptr_eq(&first, &after_unrelated),
+            "unrelated vector parameters should not refresh the parsed control table"
+        );
 
         ctx.set_real_vector_param("freq_array", vec![1.0e6, 3.0e6]);
         let updated = validate_table(
