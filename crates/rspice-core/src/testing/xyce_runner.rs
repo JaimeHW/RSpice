@@ -14,7 +14,7 @@ use crate::engine::{
 };
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, Netlist, NetlistParseOptions,
-    StatisticalParamMode, StepCommand, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    StatisticalParamMode, StepCommand, StepTarget, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -157,6 +157,7 @@ struct XyceExecutionPlan {
     print: XycePrintRequest,
     dc: XyceDcSweep,
     step: Option<StepCommand>,
+    contract: XyceStaticDcContract,
 }
 
 #[derive(Debug, Clone)]
@@ -174,6 +175,27 @@ struct XyceSubcktFamilyContract {
     baseline_path: PathBuf,
     member_paths: Vec<PathBuf>,
     target_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceStaticDcContract {
+    PlainStaticPrn,
+    WrapperDefaultPrn,
+}
+
+impl XyceStaticDcContract {
+    fn result_contract(self, stepped: bool) -> &'static str {
+        match (self, stepped) {
+            (Self::PlainStaticPrn, false) => "static_prn_dc",
+            (Self::PlainStaticPrn, true) => "static_prn_step_dc",
+            (Self::WrapperDefaultPrn, false) => "wrapper_static_prn_dc",
+            (Self::WrapperDefaultPrn, true) => "wrapper_static_prn_step_dc",
+        }
+    }
+
+    fn requires_step_res_reference(self) -> bool {
+        matches!(self, Self::WrapperDefaultPrn)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -595,11 +617,11 @@ impl XyceTestRunner {
     }
 
     fn execution_plan(&self, deck: &XyceDeck) -> Result<XyceExecutionPlan, String> {
-        if self.requires_upstream_wrapper(&deck.relative_path) {
-            return Err(
-                "upstream wrapper semantics are required; RSPICE-HARNESS-MANIFEST.tsv records the removed .cir.sh sidecar contract"
-                    .to_string(),
-            );
+        let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
+        if requires_wrapper
+            && !Self::is_native_default_prn_wrapper_candidate_path(&deck.relative_path)
+        {
+            return Err(Self::upstream_wrapper_required_reason().to_string());
         }
 
         let reference_path = self
@@ -612,7 +634,19 @@ impl XyceTestRunner {
             ));
         }
 
+        if requires_wrapper {
+            let source = fs::read_to_string(&deck.path)
+                .map_err(|err| format!("failed to read deck: {err}"))?;
+            Self::validate_default_prn_wrapper_source(&source)?;
+        }
+
         let static_plan = self.static_dc_plan_for_path(&deck.path)?;
+        let contract = if requires_wrapper {
+            self.validate_native_wrapper_default_prn_contract(&static_plan, &reference_path)?;
+            XyceStaticDcContract::WrapperDefaultPrn
+        } else {
+            XyceStaticDcContract::PlainStaticPrn
+        };
 
         Ok(XyceExecutionPlan {
             deck_path: deck.path.clone(),
@@ -621,6 +655,7 @@ impl XyceTestRunner {
             print: static_plan.print,
             dc: static_plan.dc,
             step: static_plan.step,
+            contract,
         })
     }
 
@@ -651,19 +686,160 @@ impl XyceTestRunner {
         })
     }
 
+    fn validate_native_wrapper_default_prn_contract(
+        &self,
+        plan: &XyceStaticDcPlan,
+        reference_path: &Path,
+    ) -> Result<(), String> {
+        if plan.step.is_some() {
+            let res_reference_path = reference_path.with_extension("res");
+            if !res_reference_path.is_file() {
+                return Err(format!(
+                    "wrapper-origin stepped .PRINT DC deck has no checked-in Xyce .res oracle at {}",
+                    self.display_path(&res_reference_path)
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn is_native_default_prn_wrapper_candidate_path(relative_path: &str) -> bool {
+        Self::normalize_manifest_key(relative_path).starts_with("netlists/output/dc/")
+    }
+
+    fn upstream_wrapper_required_reason() -> &'static str {
+        "upstream wrapper semantics are required; RSPICE-HARNESS-MANIFEST.tsv records the removed .cir.sh sidecar contract"
+    }
+
+    fn validate_default_prn_wrapper_source(source: &str) -> Result<(), String> {
+        let mut print_count = 0usize;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let tokens = trimmed.split_whitespace().collect::<Vec<_>>();
+            let Some(command) = tokens.first().copied() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".print") {
+                print_count += 1;
+                Self::validate_default_prn_print_tokens(&tokens)?;
+                continue;
+            }
+            if Self::is_extra_wrapper_output_analysis_command(command) {
+                return Err(format!(
+                    "wrapper-origin default .prn contract does not cover {command} directives"
+                ));
+            }
+        }
+
+        match print_count {
+            1 => Ok(()),
+            0 => Err(
+                "wrapper-origin default .prn contract requires one .PRINT statement".to_string(),
+            ),
+            _ => Err(format!(
+                "wrapper-origin default .prn contract requires one .PRINT statement, found {print_count}"
+            )),
+        }
+    }
+
+    fn validate_default_prn_print_tokens(tokens: &[&str]) -> Result<(), String> {
+        let Some(analysis) = tokens.get(1) else {
+            return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
+        };
+        if !analysis.eq_ignore_ascii_case("DC") {
+            return Err(format!(
+                "wrapper-origin default .prn contract only covers .PRINT DC, got .PRINT {analysis}"
+            ));
+        }
+
+        let mut index = 2usize;
+        while index < tokens.len() {
+            if let Some((raw_key, raw_value, consumed)) =
+                Self::print_option_assignment(tokens, index)
+            {
+                let key = raw_key.trim().to_ascii_lowercase();
+                let value = raw_value.trim().trim_matches(['"', '\'']);
+                match key.as_str() {
+                    "file" => {
+                        return Err(
+                            "wrapper-origin default .prn contract does not cover FILE= output"
+                                .to_string(),
+                        );
+                    }
+                    "format" if value.eq_ignore_ascii_case("std") => {}
+                    "format" => {
+                        return Err(format!(
+                            "wrapper-origin default .prn contract does not cover FORMAT={value}"
+                        ));
+                    }
+                    _ => {}
+                }
+                index += consumed;
+                continue;
+            }
+            index += 1;
+        }
+
+        Ok(())
+    }
+
+    fn print_option_assignment<'a>(
+        tokens: &'a [&'a str],
+        index: usize,
+    ) -> Option<(&'a str, &'a str, usize)> {
+        let token = tokens.get(index).copied()?;
+        if let Some((key, value)) = token.split_once('=') {
+            return Some((key, value, 1));
+        }
+        if token.ends_with('=') {
+            return Some((
+                token.trim_end_matches('='),
+                tokens.get(index + 1).copied()?,
+                2,
+            ));
+        }
+        if tokens.get(index + 1).copied() == Some("=") {
+            return Some((token, tokens.get(index + 2).copied()?, 3));
+        }
+        None
+    }
+
+    fn is_extra_wrapper_output_analysis_command(command: &str) -> bool {
+        matches!(
+            command.to_ascii_lowercase().as_str(),
+            ".ac"
+                | ".four"
+                | ".fft"
+                | ".hb"
+                | ".measure"
+                | ".meas"
+                | ".noise"
+                | ".op"
+                | ".probe"
+                | ".save"
+                | ".sens"
+                | ".tran"
+        )
+    }
+
     fn run_static_prn_dc_plan(
         &self,
         deck: &XyceDeck,
         plan: XyceExecutionPlan,
         start: Instant,
     ) -> XyceTestResult {
+        let contract = plan.contract.result_contract(false);
         let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
             Ok(netlist) => netlist,
             Err(err) => {
                 return self.failure_result(
                     deck,
                     start,
-                    "static_prn_dc",
+                    contract,
                     format!("parse failed after contract validation: {err}"),
                     Vec::new(),
                 );
@@ -686,7 +862,7 @@ impl XyceTestRunner {
                 return self.failure_result(
                     deck,
                     start,
-                    "static_prn_dc",
+                    contract,
                     format!("failed to parse Xyce .prn oracle: {err}"),
                     Vec::new(),
                 );
@@ -711,7 +887,7 @@ impl XyceTestRunner {
                 return self.failure_result(
                     deck,
                     start,
-                    "static_prn_dc",
+                    contract,
                     format!(
                         "simulation exceeded timeout ({}ms)",
                         self.config.max_time_per_test_ms
@@ -731,7 +907,7 @@ impl XyceTestRunner {
                 return self.failure_result(
                     deck,
                     start,
-                    "static_prn_dc",
+                    contract,
                     format!("simulation error: {err}"),
                     Vec::new(),
                 );
@@ -751,7 +927,7 @@ impl XyceTestRunner {
                 return self.failure_result(
                     deck,
                     start,
-                    "static_prn_dc",
+                    contract,
                     format!("reference comparison error: {err}"),
                     Vec::new(),
                 );
@@ -759,12 +935,12 @@ impl XyceTestRunner {
         };
 
         if mismatches.is_empty() {
-            self.passed_result(deck, start, "static_prn_dc")
+            self.passed_result(deck, start, contract)
         } else {
             self.failure_result(
                 deck,
                 start,
-                "static_prn_dc",
+                contract,
                 format!("{} Xyce reference mismatch(es)", mismatches.len()),
                 mismatches,
             )
@@ -779,12 +955,27 @@ impl XyceTestRunner {
         reference: XycePrnTable,
         start: Instant,
     ) -> XyceTestResult {
+        let contract = plan.contract.result_contract(true);
         let engine = self.create_dc_engine();
         let step = plan
             .step
             .as_ref()
             .expect("step plan checked before stepped execution");
         let step_values = step.sweep.values();
+        if plan.contract.requires_step_res_reference() {
+            let res_reference_path = plan.reference_path.with_extension("res");
+            if let Err(err) =
+                self.compare_step_res_reference(&res_reference_path, step, &step_values)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("Xyce .STEP result summary comparison error: {err}"),
+                    Vec::new(),
+                );
+            }
+        }
         let stepped_netlists = match engine.step_netlists_for_command(&netlist, step, &step_values)
         {
             Ok(stepped) => stepped,
@@ -800,7 +991,7 @@ impl XyceTestRunner {
                 return self.failure_result(
                     deck,
                     start,
-                    "static_prn_step_dc",
+                    contract,
                     format!(".STEP expansion error: {err}"),
                     Vec::new(),
                 );
@@ -822,7 +1013,7 @@ impl XyceTestRunner {
                     return self.failure_result(
                         deck,
                         start,
-                        "static_prn_step_dc",
+                        contract,
                         format!(
                             "simulation exceeded timeout ({}ms)",
                             self.config.max_time_per_test_ms
@@ -842,7 +1033,7 @@ impl XyceTestRunner {
                     return self.failure_result(
                         deck,
                         start,
-                        "static_prn_step_dc",
+                        contract,
                         format!("simulation error: {err}"),
                         Vec::new(),
                     );
@@ -866,7 +1057,7 @@ impl XyceTestRunner {
                 return self.failure_result(
                     deck,
                     start,
-                    "static_prn_step_dc",
+                    contract,
                     format!("reference comparison error: {err}"),
                     Vec::new(),
                 );
@@ -874,12 +1065,12 @@ impl XyceTestRunner {
         };
 
         if mismatches.is_empty() {
-            self.passed_result(deck, start, "static_prn_step_dc")
+            self.passed_result(deck, start, contract)
         } else {
             self.failure_result(
                 deck,
                 start,
-                "static_prn_step_dc",
+                contract,
                 format!("{} Xyce reference mismatch(es)", mismatches.len()),
                 mismatches,
             )
@@ -1328,6 +1519,136 @@ impl XyceTestRunner {
         }
 
         Ok(mismatches)
+    }
+
+    fn compare_step_res_reference(
+        &self,
+        path: &Path,
+        step: &StepCommand,
+        expected_values: &[Value],
+    ) -> Result<(), String> {
+        let content = fs::read_to_string(path)
+            .map_err(|err| format!("{}: {err}", self.display_path(path)))?;
+        let mut nonempty_lines = content
+            .lines()
+            .enumerate()
+            .map(|(index, line)| (index + 1, line.trim()))
+            .filter(|(_, line)| !line.is_empty());
+
+        let Some((header_line, header)) = nonempty_lines.next() else {
+            return Err(format!("{} is empty", self.display_path(path)));
+        };
+        let header_fields = header.split_whitespace().collect::<Vec<_>>();
+        if !header_fields
+            .first()
+            .is_some_and(|field| field.eq_ignore_ascii_case("STEP"))
+        {
+            return Err(format!(
+                "{} line {header_line} must start with STEP",
+                self.display_path(path)
+            ));
+        }
+        let expected_name = Self::step_res_variable_name(step);
+        let actual_name = header_fields.get(1).ok_or_else(|| {
+            format!(
+                "{} line {header_line} is missing the .STEP variable column",
+                self.display_path(path)
+            )
+        })?;
+        if !actual_name.eq_ignore_ascii_case(&expected_name) {
+            return Err(format!(
+                "{} line {header_line} names .STEP variable '{}', expected '{}'",
+                self.display_path(path),
+                actual_name,
+                expected_name
+            ));
+        }
+        if header_fields.len() != 2 {
+            return Err(format!(
+                "{} line {header_line} has {} columns; native wrapper .res comparison currently supports one .STEP variable",
+                self.display_path(path),
+                header_fields.len()
+            ));
+        }
+
+        let mut rows = Vec::new();
+        for (line_number, line) in nonempty_lines {
+            if line.to_ascii_lowercase().starts_with("end of xyce") {
+                break;
+            }
+            rows.push((line_number, line));
+        }
+
+        if rows.len() != expected_values.len() {
+            return Err(format!(
+                "{} has {} step row(s), expected {}",
+                self.display_path(path),
+                rows.len(),
+                expected_values.len()
+            ));
+        }
+
+        for (row_index, (line_number, line)) in rows.iter().copied().enumerate() {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            if fields.len() != 2 {
+                return Err(format!(
+                    "{} line {line_number} has {} columns, expected STEP index and value",
+                    self.display_path(path),
+                    fields.len()
+                ));
+            }
+            let actual_index = fields[0].parse::<usize>().map_err(|err| {
+                format!(
+                    "{} line {line_number} has invalid STEP index '{}': {err}",
+                    self.display_path(path),
+                    fields[0]
+                )
+            })?;
+            if actual_index != row_index {
+                return Err(format!(
+                    "{} line {line_number} has STEP index {actual_index}, expected {row_index}",
+                    self.display_path(path)
+                ));
+            }
+            let actual = Self::parse_xyce_numeric_token(fields[1]).map_err(|err| {
+                format!(
+                    "{} line {line_number} has invalid STEP value '{}': {err}",
+                    self.display_path(path),
+                    fields[1]
+                )
+            })?;
+            let expected = expected_values[row_index];
+            let tolerance = XyceComparisonTolerance::from_config(&self.config);
+            if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+                return Err(format!(
+                    "{} line {line_number} STEP {} expected {:.8e}, actual {:.8e}, rel {:.3e}",
+                    self.display_path(path),
+                    expected_name,
+                    expected,
+                    actual,
+                    relative_error
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn step_res_variable_name(step: &StepCommand) -> String {
+        match step.target {
+            StepTarget::Temp => "TEMP".to_string(),
+            StepTarget::Param => step.name.clone(),
+            StepTarget::Device | StepTarget::Model => match &step.param_name {
+                Some(param_name) => format!("{}:{param_name}", step.name),
+                None => step.name.clone(),
+            },
+        }
+    }
+
+    fn parse_xyce_numeric_token(token: &str) -> Result<f64, std::num::ParseFloatError> {
+        token
+            .parse::<f64>()
+            .or_else(|_| token.replace(['D', 'd'], "e").parse::<f64>())
     }
 
     fn reference_data_columns(

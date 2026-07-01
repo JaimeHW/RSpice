@@ -748,6 +748,51 @@ fn test_xyce_subckt_wrapper_family_members_run_natively() {
 }
 
 #[test]
+fn test_xyce_output_dc_default_prn_wrapper_cases_run_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        ("Netlists/Output/DC/dc-prn.cir", "wrapper_static_prn_dc"),
+        (
+            "Netlists/Output/DC/dc-step-prn.cir",
+            "wrapper_static_prn_step_dc",
+        ),
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed upstream wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native wrapper-origin default .prn comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, expected_contract,
+            "{relative} should report the native wrapper-origin .prn contract"
+        );
+    }
+
+    for relative in [
+        "Netlists/Output/DC/dc-gnuplot.cir",
+        "Netlists/Output/DC/dc-raw-override.cir",
+        "Netlists/Output/DC/op-prn.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && result.expected_unsupported,
+            "{relative} should stay named unsupported until its removed wrapper's full output contract is implemented, got {result:?}"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_bsim_gm_device_operating_point_probes_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
