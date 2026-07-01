@@ -1023,7 +1023,7 @@ impl XyceTestRunner {
     }
 
     fn validate_default_prn_wrapper_source(source: &str) -> Result<(), String> {
-        let mut print_count = 0usize;
+        let mut primary_print_count = 0usize;
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
             if trimmed.is_empty() {
@@ -1034,8 +1034,9 @@ impl XyceTestRunner {
                 continue;
             };
             if command.eq_ignore_ascii_case(".print") {
-                print_count += 1;
-                Self::validate_default_prn_print_tokens(&tokens)?;
+                if !Self::validate_default_prn_print_tokens(&tokens)? {
+                    primary_print_count += 1;
+                }
                 continue;
             }
             if Self::is_extra_wrapper_output_analysis_command(command) {
@@ -1045,18 +1046,19 @@ impl XyceTestRunner {
             }
         }
 
-        match print_count {
+        match primary_print_count {
             1 => Ok(()),
             0 => Err(
-                "wrapper-origin default .prn contract requires one .PRINT statement".to_string(),
+                "wrapper-origin default .prn contract requires one primary .PRINT statement"
+                    .to_string(),
             ),
             _ => Err(format!(
-                "wrapper-origin default .prn contract requires one .PRINT statement, found {print_count}"
+                "wrapper-origin default .prn contract requires one primary .PRINT statement, found {primary_print_count}"
             )),
         }
     }
 
-    fn validate_default_prn_print_tokens(tokens: &[&str]) -> Result<(), String> {
+    fn validate_default_prn_print_tokens(tokens: &[&str]) -> Result<bool, String> {
         let Some(analysis) = tokens.get(1) else {
             return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
         };
@@ -1067,6 +1069,7 @@ impl XyceTestRunner {
         }
 
         let mut index = 2usize;
+        let mut has_file_output = false;
         while index < tokens.len() {
             if let Some((raw_key, raw_value, consumed)) =
                 Self::print_option_assignment(tokens, index)
@@ -1075,12 +1078,9 @@ impl XyceTestRunner {
                 let value = raw_value.trim().trim_matches(['"', '\'']);
                 match key.as_str() {
                     "file" => {
-                        return Err(
-                            "wrapper-origin default .prn contract does not cover FILE= output"
-                                .to_string(),
-                        );
+                        has_file_output = true;
                     }
-                    "format" if value.eq_ignore_ascii_case("std") => {}
+                    "format" if Self::dc_print_format_is_prn_compatible(value) => {}
                     "format" => {
                         return Err(format!(
                             "wrapper-origin default .prn contract does not cover FORMAT={value}"
@@ -1094,7 +1094,14 @@ impl XyceTestRunner {
             index += 1;
         }
 
-        Ok(())
+        Ok(has_file_output)
+    }
+
+    fn dc_print_format_is_prn_compatible(format: &str) -> bool {
+        matches!(
+            format.to_ascii_lowercase().as_str(),
+            "std" | "touchstone" | "touchstone2"
+        )
     }
 
     fn print_option_assignment<'a>(
@@ -1294,6 +1301,38 @@ impl XyceTestRunner {
         }
 
         if mismatches.is_empty() {
+            let batches = [XyceDcResultBatch {
+                netlist: netlist.clone(),
+                results: results.clone(),
+            }];
+            let side_mismatches =
+                match self.compare_prn_compatible_side_output_batches(&plan, &batches) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("PRN-compatible side-output comparison error: {err}"),
+                            Vec::new(),
+                        );
+                    }
+                };
+            if !side_mismatches.is_empty() {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "{} Xyce PRN-compatible side-output mismatch(es)",
+                        side_mismatches.len()
+                    ),
+                    side_mismatches,
+                );
+            }
+        }
+
+        if mismatches.is_empty() {
             self.passed_result(deck, start, contract)
         } else {
             self.failure_result(
@@ -1328,6 +1367,82 @@ impl XyceTestRunner {
             &plan.dc,
             results,
         )
+    }
+
+    fn compare_prn_compatible_side_output_batches(
+        &self,
+        plan: &XyceExecutionPlan,
+        batches: &[XyceDcResultBatch],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let side_outputs = Self::prn_compatible_side_output_requests(&plan.source)?;
+        let mut all_mismatches = Vec::new();
+        for request in side_outputs {
+            let file = request
+                .file
+                .as_deref()
+                .expect("side output request has FILE= set");
+            let reference_path = Self::side_output_reference_path(&plan.reference_path, file)?;
+            let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
+                format!(
+                    "failed to parse side-output oracle {}: {err}",
+                    self.display_path(&reference_path)
+                )
+            })?;
+            let print = XycePrintRequest {
+                probes: request.probes,
+            };
+            let mut mismatches = self.compare_dc_prn_reference_batches(
+                &reference,
+                &print,
+                &plan.source,
+                &plan.dc,
+                batches,
+            )?;
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("{file}:{}", mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        Ok(all_mismatches)
+    }
+
+    fn prn_compatible_side_output_requests(
+        source: &str,
+    ) -> Result<Vec<XycePrintOutputRequest>, String> {
+        Ok(Self::dc_print_output_requests(source)?
+            .into_iter()
+            .filter(|request| {
+                request.file.is_some()
+                    && Self::dc_print_format_is_prn_compatible(
+                        request.format.as_deref().unwrap_or("STD"),
+                    )
+            })
+            .collect())
+    }
+
+    fn side_output_reference_path(reference_path: &Path, file: &str) -> Result<PathBuf, String> {
+        let side_path = Path::new(file);
+        if side_path.is_absolute() {
+            return Err(format!(
+                "absolute FILE= side-output path '{}' cannot be mapped into the vendored OutputData tree",
+                file
+            ));
+        }
+        let parent = reference_path
+            .parent()
+            .ok_or_else(|| "primary reference path has no parent directory".to_string())?;
+        let candidate = parent.join(side_path);
+        if !candidate.is_file() {
+            return Err(format!(
+                "missing checked-in side-output oracle {}",
+                candidate.display()
+            ));
+        }
+        Ok(candidate)
     }
 
     fn run_static_prn_step_dc_plan(
@@ -1454,6 +1569,31 @@ impl XyceTestRunner {
         };
 
         if mismatches.is_empty() {
+            let side_mismatches =
+                match self.compare_prn_compatible_side_output_batches(&plan, &batches) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("PRN-compatible side-output comparison error: {err}"),
+                            Vec::new(),
+                        );
+                    }
+                };
+            if !side_mismatches.is_empty() {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "{} Xyce PRN-compatible side-output mismatch(es)",
+                        side_mismatches.len()
+                    ),
+                    side_mismatches,
+                );
+            }
             self.passed_result(deck, start, contract)
         } else {
             self.failure_result(
