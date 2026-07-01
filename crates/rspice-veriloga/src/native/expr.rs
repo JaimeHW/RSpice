@@ -4633,11 +4633,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
         self.lower_derivative(args[0], wrt)?;
-        self.lower(args[0])?;
-        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cos))?;
-        self.lower(args[0])?;
-        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cos))?;
-        self.append_arithmetic("Mul")?;
+        self.lower_arg_cos_square(args[0])?;
         self.append_arithmetic("Div")
     }
 
@@ -4648,13 +4644,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
-        self.push(NativeOp::Const(1.0))?;
-        self.lower(args[0])?;
-        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Tanh))?;
-        self.lower(args[0])?;
-        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Tanh))?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Sub")?;
+        self.lower_one_minus_tanh_square(args[0])?;
         self.lower_derivative(args[0], wrt)?;
         self.append_arithmetic("Mul")
     }
@@ -4991,18 +4981,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     fn lower_arg_cos_square(&mut self, arg: ExprId) -> JitResult<()> {
         self.lower(arg)?;
         self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cos))?;
-        self.lower(arg)?;
-        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Cos))?;
-        self.append_arithmetic("Mul")
+        self.append_unary(NativeOp::Square)
     }
 
     fn lower_one_minus_tanh_square(&mut self, arg: ExprId) -> JitResult<()> {
         self.push(NativeOp::Const(1.0))?;
         self.lower(arg)?;
         self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Tanh))?;
-        self.lower(arg)?;
-        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Tanh))?;
-        self.append_arithmetic("Mul")?;
+        self.append_unary(NativeOp::Square)?;
         self.append_arithmetic("Sub")
     }
 
@@ -8421,8 +8407,8 @@ fn integer_binary_op(instruction: &Instruction) -> IntegerBinaryOp {
 mod tests {
     use super::*;
     use crate::ast::{
-        AnalogOperator, BinaryExpr, BinaryOp, BranchAccess, Expression, NoiseSource, NumberLit,
-        PortDirection,
+        AnalogOperator, BinaryExpr, BinaryOp, BranchAccess, CallExpr, Expression, NoiseSource,
+        NumberLit, PortDirection,
     };
     use crate::canonical_ir::{CanonicalMetadata, HirExprKind, HirModel, MirModel};
     use crate::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
@@ -8594,6 +8580,22 @@ mod tests {
             neg: Some("n".into()),
             span: Span::dummy(),
         })
+    }
+
+    fn intrinsic_call(name: &str, args: Vec<Expression>) -> Expression {
+        Expression::Call(CallExpr {
+            name: name.into(),
+            args,
+            span: Span::dummy(),
+        })
+    }
+
+    fn unary_math_count(program: &NativeProgram, expected: UnaryMathOp) -> usize {
+        program
+            .ops()
+            .iter()
+            .filter(|op| matches!(op, NativeOp::UnaryMath(op) if *op == expected))
+            .count()
     }
 
     fn explicit_analog_limexp_mir() -> MirModel {
@@ -8926,6 +8928,88 @@ endmodule
                 NativeOp::IdtModState(0),
             ]
         );
+    }
+
+    #[test]
+    fn lowers_canonical_tan_tanh_derivatives_without_duplicate_helper_calls() {
+        let cases = [
+            ("tan", UnaryMathOp::Cos, 1usize),
+            ("tanh", UnaryMathOp::Tanh, 1usize),
+        ];
+
+        for (name, helper, helper_count) in cases {
+            let model_name = format!("mir_{name}_derivative");
+            let mir =
+                analyzed_two_terminal_mir(&model_name, intrinsic_call(name, vec![voltage_expr()]));
+            let root = mir.equations[0].expression.id;
+
+            let program = NativeProgram::from_mir_expression_derivative(
+                model_name,
+                EntryKind::Jacobian,
+                &mir,
+                crate::canonical_ir::EquationId::new(0),
+                root,
+                CanonicalDerivativeAxis::Node(NodeId::from(0)),
+                NativeLoweringLimits::new(2, 0, 0, 0, 0),
+            )
+            .expect("lower canonical unary derivative");
+
+            assert_eq!(unary_math_count(&program, helper), helper_count, "{name}");
+            assert!(
+                program
+                    .ops()
+                    .iter()
+                    .any(|op| matches!(op, NativeOp::Square)),
+                "{name} derivative should square the single helper result"
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_canonical_tan_tanh_second_derivatives_without_duplicate_helper_calls() {
+        let cases = [
+            ("tan", UnaryMathOp::Cos, 2usize, UnaryMathOp::Tan, 1usize),
+            ("tanh", UnaryMathOp::Tanh, 3usize, UnaryMathOp::Tanh, 3usize),
+        ];
+
+        for (name, primary_helper, primary_count, secondary_helper, secondary_count) in cases {
+            let model_name = format!("mir_{name}_second_derivative");
+            let mir =
+                analyzed_two_terminal_mir(&model_name, intrinsic_call(name, vec![voltage_expr()]));
+            let root = mir.equations[0].expression.id;
+
+            let program = NativeProgram::from_mir_expression_second_derivative(
+                model_name,
+                EntryKind::Jacobian,
+                &mir,
+                crate::canonical_ir::EquationId::new(0),
+                root,
+                CanonicalDerivativeAxis::Node(NodeId::from(0)),
+                CanonicalDerivativeAxis::Node(NodeId::from(0)),
+                NativeLoweringLimits::new(2, 0, 0, 0, 0),
+            )
+            .expect("lower canonical unary second derivative");
+
+            assert_eq!(
+                unary_math_count(&program, primary_helper),
+                primary_count,
+                "{name} primary helper count"
+            );
+            assert_eq!(
+                unary_math_count(&program, secondary_helper),
+                secondary_count,
+                "{name} secondary helper count"
+            );
+            assert_eq!(
+                program
+                    .ops()
+                    .iter()
+                    .filter(|op| matches!(op, NativeOp::Square))
+                    .count(),
+                2,
+                "{name} second derivative should square each reused helper result"
+            );
+        }
     }
 
     #[test]
