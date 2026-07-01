@@ -167,6 +167,7 @@ pub(crate) fn expand_step_sweep_values(
             }
             Ok(values.clone())
         }
+        StepSweep::Data { .. } => Ok(Vec::new()),
     }
 }
 

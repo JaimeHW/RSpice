@@ -1,9 +1,13 @@
 use super::types::{CornerMetricLabel, CornerPoint, SweepPointResult};
 use rspice_core::Value;
-use rspice_core::netlist::{StepCommand, StepTarget};
+use rspice_core::netlist::{StepCommand, StepSweep, StepTarget};
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
 
 pub(super) fn describe_step_target(step_cmd: &StepCommand) -> String {
+    if let StepSweep::Data { table_name } = &step_cmd.sweep {
+        return format!("DATA {table_name}");
+    }
+
     match step_cmd.target {
         StepTarget::Param => format!("PARAM {}", step_cmd.name),
         StepTarget::Device => match step_cmd.param_name.as_deref() {

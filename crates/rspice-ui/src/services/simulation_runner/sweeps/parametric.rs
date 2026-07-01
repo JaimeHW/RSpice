@@ -3,7 +3,7 @@ use super::mapping::{describe_step_target, map_dc_sweep_results, map_temperature
 use super::sweep_points::expand_step_sweep_values;
 use super::types::{CornerBaseMode, ParametricData, TempRunConfig};
 use rspice_core::engine::Engine;
-use rspice_core::netlist::{AnalysisCommand, StepTarget};
+use rspice_core::netlist::{AnalysisCommand, StepSweep, StepTarget};
 use std::path::Path;
 
 /// Run parametric analysis by executing the first `.STEP` command in the netlist.
@@ -28,8 +28,13 @@ pub fn run_parametric_analysis_with_source_path(
         })
         .ok_or_else(|| "Parametric analysis requires a .STEP command in the netlist".to_string())?;
 
-    let values = expand_step_sweep_values(&step_cmd.sweep).map_err(|err| err.to_string())?;
-    if values.is_empty() {
+    let is_data_sweep = matches!(step_cmd.sweep, StepSweep::Data { .. });
+    let values = if is_data_sweep {
+        Vec::new()
+    } else {
+        expand_step_sweep_values(&step_cmd.sweep).map_err(|err| err.to_string())?
+    };
+    if values.is_empty() && !is_data_sweep {
         return Err("Parametric analysis has no sweep points to execute".to_string());
     }
 
@@ -50,7 +55,11 @@ pub fn run_parametric_analysis_with_source_path(
         return Err("Parametric analysis produced no converged sweep points".to_string());
     }
 
-    let num_failures = values.len().saturating_sub(results.len());
+    let num_failures = if is_data_sweep {
+        0
+    } else {
+        values.len().saturating_sub(results.len())
+    };
     let (sweep_values, voltages) = map_dc_sweep_results(&results);
 
     Ok(ParametricData {
@@ -60,6 +69,43 @@ pub fn run_parametric_analysis_with_source_path(
         voltages,
         num_failures,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parametric_analysis_runs_step_data_table_rows() {
+        let data = run_parametric_analysis(
+            "data step\n\
+             .param rload=1k\n\
+             V1 in 0 1\n\
+             R1 in out {rload}\n\
+             R2 out 0 1k\n\
+             .data sweep\n\
+             + rload\n\
+             + 1k\n\
+             + 2k\n\
+             .enddata\n\
+             .step data=sweep\n\
+             .end\n",
+        )
+        .expect(".STEP DATA should execute through the parametric runner");
+
+        assert_eq!(data.target, "DATA SWEEP");
+        assert_eq!(data.sweep_values, vec![0.0, 1.0]);
+        assert_eq!(data.num_points, 2);
+        assert_eq!(data.num_failures, 0);
+
+        let (_, out_values) = data
+            .voltages
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+            .expect("V(out) trace");
+        assert!((out_values[0] - 0.5).abs() < 1e-12);
+        assert!((out_values[1] - (1.0 / 3.0)).abs() < 1e-12);
+    }
 }
 
 /// Run temperature sweep analysis with explicit base-mode configuration.
