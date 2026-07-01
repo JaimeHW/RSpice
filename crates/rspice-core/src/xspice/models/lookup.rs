@@ -11,6 +11,7 @@ use std::sync::{Arc, OnceLock};
 const INPUT_DOMAIN_MIN: Value = 1.0e-12;
 const INPUT_DOMAIN_MAX: Value = 0.5;
 const LOOKUP_TABLE_RESOURCE: &str = "xspice.lookup.table";
+const LOOKUP_EVAL_RESOURCE: &str = "xspice.lookup.eval";
 
 #[derive(Debug, Clone, Copy)]
 struct LookupPoint {
@@ -24,7 +25,7 @@ struct LookupTable {
     upper_midpoints: Vec<Value>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct LookupResult {
     value: Value,
     slope: Value,
@@ -40,6 +41,21 @@ struct LookupTableSignature {
 struct LookupTableResource {
     signature: LookupTableSignature,
     table: CmResult<Arc<LookupTable>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LookupEvalSignature {
+    table: LookupTableSignature,
+    x: Value,
+    input_domain: Value,
+    fraction: bool,
+    limit: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LookupEvalResource {
+    signature: LookupEvalSignature,
+    result: LookupResult,
 }
 
 fn lookup_params() -> &'static [ParamSpec] {
@@ -113,6 +129,16 @@ fn lookup_table_signature(ctx: &CmContext) -> LookupTableSignature {
 
 fn lookup_table_signature_matches(ctx: &CmContext, signature: &LookupTableSignature) -> bool {
     lookup_table_signature(ctx) == *signature
+}
+
+fn lookup_eval_signature(ctx: &CmContext, x: Value) -> CmResult<LookupEvalSignature> {
+    Ok(LookupEvalSignature {
+        table: lookup_table_signature(ctx),
+        x,
+        input_domain: effective_input_domain(ctx.param("input_domain"))?,
+        fraction: ctx.param("fraction") > 0.5,
+        limit: ctx.param("limit") > 0.5,
+    })
 }
 
 fn lookup_table_uncached(ctx: &CmContext) -> CmResult<LookupTable> {
@@ -398,13 +424,49 @@ fn evaluate_lookup(
 }
 
 fn evaluate_lookup_context(ctx: &CmContext, x: Value) -> CmResult<LookupResult> {
-    let points = lookup_table(ctx)?;
-    let input_domain = effective_input_domain(ctx.param("input_domain"))?;
-    let fraction = ctx.param("fraction") > 0.5;
-    let limit = ctx.param("limit") > 0.5;
+    let signature = lookup_eval_signature(ctx, x)?;
+    if let Some(resource) = ctx.resource::<LookupEvalResource>(LOOKUP_EVAL_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.result);
+    }
 
-    validate_smoothing_domain(&points, input_domain, fraction)?;
-    Ok(evaluate_lookup(&points, x, input_domain, fraction, limit))
+    let points = lookup_table(ctx)?;
+
+    validate_smoothing_domain(&points, signature.input_domain, signature.fraction)?;
+    Ok(evaluate_lookup(
+        &points,
+        signature.x,
+        signature.input_domain,
+        signature.fraction,
+        signature.limit,
+    ))
+}
+
+fn cache_lookup_eval(ctx: &mut CmContext, x: Value) -> CmResult<LookupResult> {
+    let signature = lookup_eval_signature(ctx, x)?;
+    if let Some(resource) = ctx.resource::<LookupEvalResource>(LOOKUP_EVAL_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.result);
+    }
+
+    cache_lookup_table(ctx);
+    let points = lookup_table(ctx)?;
+
+    validate_smoothing_domain(&points, signature.input_domain, signature.fraction)?;
+    let result = evaluate_lookup(
+        &points,
+        signature.x,
+        signature.input_domain,
+        signature.fraction,
+        signature.limit,
+    );
+    ctx.set_resource(
+        LOOKUP_EVAL_RESOURCE,
+        Arc::new(LookupEvalResource { signature, result }),
+    );
+    Ok(result)
 }
 
 /// Piecewise-linear controlled source.
@@ -440,7 +502,8 @@ impl CodeModel for PiecewiseLinear {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let result = evaluate_lookup_context(ctx, ctx.input("in"))?;
+        let input = ctx.input("in");
+        let result = cache_lookup_eval(ctx, input)?;
         ctx.set_output_with_partial("out", result.value, result.slope);
         Ok(())
     }
@@ -496,7 +559,8 @@ impl CodeModel for PiecewiseLinearTimeSeries {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let result = evaluate_lookup_context(ctx, ctx.time)?;
+        let time = ctx.time;
+        let result = cache_lookup_eval(ctx, time)?;
         ctx.set_output("out", result.value);
         Ok(())
     }
@@ -600,6 +664,72 @@ mod tests {
         let after = evaluate_lookup_context(&ctx, 0.5).expect("updated table");
         assert_near(after.value, 10.0);
         assert_near(after.slope, 20.0);
+    }
+
+    #[test]
+    fn lookup_eval_cache_reuses_current_result_until_input_changes() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("x_array", vec![0.0, 1.0]);
+        ctx.set_real_vector_param("y_array", vec![0.0, 10.0]);
+        ctx.set_param("input_domain", 0.01);
+        ctx.set_param("fraction", 0.0);
+        ctx.set_param("limit", 0.0);
+        ctx.set_input_analog("in", 0.5);
+
+        let input = ctx.input("in");
+        let initial = cache_lookup_eval(&mut ctx, input).expect("lookup eval caches");
+        assert_near(initial.value, 5.0);
+        assert_near(initial.slope, 10.0);
+
+        let sentinel = LookupResult {
+            value: 123.0,
+            slope: 456.0,
+        };
+        let signature =
+            lookup_eval_signature(&ctx, ctx.input("in")).expect("current lookup signature");
+        ctx.set_resource(
+            LOOKUP_EVAL_RESOURCE,
+            Arc::new(LookupEvalResource {
+                signature,
+                result: sentinel,
+            }),
+        );
+
+        assert_eq!(
+            evaluate_lookup_context(&ctx, ctx.input("in")).expect("cached lookup result"),
+            sentinel,
+            "matching lookup signatures should reuse the cached evaluation"
+        );
+
+        ctx.set_input_analog("in", 0.75);
+        let changed =
+            evaluate_lookup_context(&ctx, ctx.input("in")).expect("changed input recomputes");
+        assert_ne!(changed, sentinel);
+        assert_near(changed.value, 7.5);
+        assert_near(changed.slope, 10.0);
+    }
+
+    #[test]
+    fn lookup_eval_cache_invalidates_when_smoothing_parameters_change() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("x_array", vec![0.0, 1.0, 2.0]);
+        ctx.set_real_vector_param("y_array", vec![0.0, 10.0, 30.0]);
+        ctx.set_param("input_domain", 0.01);
+        ctx.set_param("fraction", 0.0);
+        ctx.set_param("limit", 0.0);
+        ctx.set_input_analog("in", -0.25);
+
+        let input = ctx.input("in");
+        let initial = cache_lookup_eval(&mut ctx, input).expect("lookup eval caches");
+        assert_near(initial.value, -2.5);
+        assert_near(initial.slope, 10.0);
+
+        ctx.set_param("limit", 1.0);
+        let limited =
+            evaluate_lookup_context(&ctx, ctx.input("in")).expect("limit change recomputes");
+        assert_ne!(limited, initial);
+        assert_near(limited.value, 0.0);
+        assert_near(limited.slope, 0.0);
     }
 
     #[test]
