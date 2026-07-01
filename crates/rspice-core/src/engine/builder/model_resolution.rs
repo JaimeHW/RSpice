@@ -59,6 +59,15 @@ fn set_temperature_scalars(ctx: &mut crate::netlist::ParamContext, temp_c: f64, 
     );
 }
 
+pub(super) fn base_eval_context(netlist: &Netlist) -> crate::netlist::ParamContext {
+    let mut ctx = netlist.params.clone();
+    ctx.set(
+        "GMIN",
+        netlist.options.gmin.unwrap_or(crate::constants::GMIN),
+    );
+    ctx
+}
+
 /// Build the expression-evaluation context for a passive instance (R/C/L),
 /// honoring instance `TEMP`/`DTEMP` overrides and the model card's `TNOM`.
 ///
@@ -78,7 +87,7 @@ fn resolve_passive_eval_context(
 
     let base_tnom_c = netlist.options.tnom.unwrap_or(27.0);
     let Some(model_def) = model_def else {
-        let mut ctx = netlist.params.clone();
+        let mut ctx = base_eval_context(netlist);
         set_temperature_scalars(&mut ctx, current_temp_c, base_tnom_c);
         return Ok((ctx, current_temp_c, base_tnom_c));
     };
@@ -103,7 +112,7 @@ fn build_model_eval_context(
     current_temp_c: f64,
     tnom_c: f64,
 ) -> crate::netlist::ParamContext {
-    let mut ctx = netlist.params.clone();
+    let mut ctx = base_eval_context(netlist);
     set_temperature_scalars(&mut ctx, current_temp_c, tnom_c);
 
     for (name, value) in &model_def.params {

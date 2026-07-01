@@ -2448,9 +2448,9 @@ pub(super) fn parse_subckt_def(
         idx += 1;
     }
 
-    // Parse default parameters: NAME=VALUE pairs
-    let mut params = Vec::new();
-    let mut string_params = Vec::new();
+    // Parse default parameters: NAME=VALUE pairs. Defaults may reference
+    // earlier defaults in the same .SUBCKT declaration.
+    let mut assignments = Vec::new();
     while idx < fields.len() {
         let field = &fields[idx];
         if field.eq_ignore_ascii_case("PARAMS") || field.eq_ignore_ascii_case("PARAMS:") {
@@ -2483,15 +2483,12 @@ pub(super) fn parse_subckt_def(
                     message: "Expected parameter name before '=' in .SUBCKT".to_string(),
                 });
             }
-            if let Some(value) = parse_string_field_value(&raw_value, params_ctx) {
-                string_params.push((param_name, value));
-            } else {
-                let value = parse_numeric_field_value(&raw_value, params_ctx, line_num)?;
-                params.push((param_name, value));
-            }
+            assignments.push((param_name, raw_value));
             continue;
         }
     }
+
+    let (params, string_params) = resolve_subckt_default_params(assignments, params_ctx, line_num)?;
 
     Ok(SubcircuitDef {
         name,
@@ -2508,8 +2505,56 @@ pub(super) fn parse_subckt_def(
     })
 }
 
+fn resolve_subckt_default_params(
+    assignments: Vec<(String, String)>,
+    params_ctx: &ParamContext,
+    line_num: usize,
+) -> Result<(Vec<(String, Value)>, Vec<(String, String)>), ParseError> {
+    let mut eval_ctx = params_ctx.clone();
+    let mut params = Vec::new();
+    let mut string_params = Vec::new();
+    let mut pending = assignments;
+
+    while !pending.is_empty() {
+        let mut progress = false;
+        let mut unresolved = Vec::new();
+        let mut first_error = None;
+
+        for (param_name, raw_value) in pending {
+            if let Some(value) = parse_string_field_value(&raw_value, &eval_ctx) {
+                eval_ctx.set_string(&param_name, value.clone());
+                string_params.push((param_name, value));
+                progress = true;
+                continue;
+            }
+
+            match parse_numeric_field_value(&raw_value, &eval_ctx, line_num) {
+                Ok(value) => {
+                    eval_ctx.set(&param_name, value);
+                    params.push((param_name, value));
+                    progress = true;
+                }
+                Err(err) => {
+                    first_error.get_or_insert(err);
+                    unresolved.push((param_name, raw_value));
+                }
+            }
+        }
+
+        if !progress {
+            return Err(first_error.unwrap_or_else(|| ParseError::Syntax {
+                line: line_num,
+                message: "subcircuit default parameters could not be resolved".to_string(),
+            }));
+        }
+        pending = unresolved;
+    }
+
+    Ok((params, string_params))
+}
+
 fn parse_string_field_value(raw_value: &str, params_ctx: &ParamContext) -> Option<String> {
-    if let Some(value) = strip_wrapping_string_literal(raw_value) {
+    if let Some(value) = strip_wrapping_double_quoted_string_literal(raw_value) {
         return Some(value.to_string());
     }
     let expr = strip_wrapping_expression_delimiters(raw_value);

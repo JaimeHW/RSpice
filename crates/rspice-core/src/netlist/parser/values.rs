@@ -81,7 +81,7 @@ pub(super) fn parse_parametric_field_value(
     raw_value: &str,
     params: &ParamContext,
 ) -> ParametricValue {
-    if let Some(value) = strip_wrapping_string_literal(raw_value) {
+    if let Some(value) = strip_wrapping_double_quoted_string_literal(raw_value) {
         return ParametricValue::String(value.to_string());
     }
     let expr = strip_wrapping_expression_delimiters(raw_value);
@@ -100,6 +100,18 @@ pub(super) fn parse_parametric_field_value(
         return ParametricValue::Resolved(value);
     }
     ParametricValue::Expression(expr.to_string())
+}
+
+pub(super) fn strip_wrapping_double_quoted_string_literal(raw: &str) -> Option<&str> {
+    let trimmed = raw.trim();
+    if trimmed.len() >= 2
+        && trimmed.as_bytes()[0] as char == '"'
+        && trimmed.as_bytes()[trimmed.len() - 1] as char == '"'
+    {
+        Some(&trimmed[1..trimmed.len() - 1])
+    } else {
+        None
+    }
 }
 
 pub(super) fn looks_like_expression(expr: &str) -> bool {

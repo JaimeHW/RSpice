@@ -4077,6 +4077,112 @@ mod tests {
     }
 
     #[test]
+    fn subckt_instance_params_resolve_same_line_expressions_after_overrides() {
+        let netlist = Netlist::parse(
+            "subckt instance parameter precedence\n\
+             .subckt simple in out PARAMS: par1=2.0 par2=2.0 par3='par1*par2*2.0'\n\
+             .param par3=100.0\n\
+             Rinside in out 'par3'\n\
+             .ends\n\
+             V1 1 0 1.0\n\
+             R1 1 2 1.0\n\
+             Xtest 2 0 simple par1=2.0 par2=3.0 par3='par1+par2'\n\
+             .end\n",
+        )
+        .expect("subcircuit instance parameter deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("subcircuit instance parameters flatten");
+        let resistance = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor { value, .. }
+                    if element.name.eq_ignore_ascii_case("Xtest.Rinside") =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .expect("flattened subcircuit resistor exists");
+
+        assert_eq!(resistance, 5.0);
+    }
+
+    #[test]
+    fn nested_subckt_instance_param_passes_caller_override() {
+        let netlist = Netlist::parse(
+            "nested subckt instance parameter precedence\n\
+             .subckt simple in out PARAMS: par1=2.0 par2=2.0 par3='par1*par2*2.0'\n\
+             .param par3=3000.0\n\
+             Xtest2 in out simple2 par3='par3'\n\
+             .ends\n\
+             .subckt simple2 in out PARAMS: par1=2.0 par2=80.0 par3='par1*par2/4.0'\n\
+             .param par3=500.0\n\
+             Rinside in out 'par3'\n\
+             .ends\n\
+             V1 1 0 1.0\n\
+             R1 1 2 1.0\n\
+             Xtest 2 0 simple par1=2.0 par2=3.0 par3='par1+par2'\n\
+             .end\n",
+        )
+        .expect("nested subcircuit instance parameter deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("nested subcircuit parameters flatten");
+        let resistance = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor { value, .. }
+                    if element.name.eq_ignore_ascii_case("Xtest.Xtest2.Rinside") =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .expect("flattened nested subcircuit resistor exists");
+
+        assert_eq!(resistance, 5.0);
+    }
+
+    #[test]
+    fn subckt_behavioral_resistor_value_expr_remaps_voltage_probe() {
+        let netlist = Netlist::parse(
+            "subckt solution dependent resistor\n\
+             .param scalar=2.0\n\
+             X1 2 0 soldepres\n\
+             .subckt soldepres 1 2\n\
+             Vcontrol cntl 2 2.0\n\
+             Rcontrol cntl 2 1.0\n\
+             R2 1 2 R={1.0+scalar*V(cntl)}\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("solution-dependent resistor subcircuit parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("solution-dependent resistor flattens");
+        let expression = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor { value_expr, .. }
+                    if element.name.eq_ignore_ascii_case("X1.R2") =>
+                {
+                    value_expr.as_deref()
+                }
+                _ => None,
+            })
+            .expect("flattened solution-dependent resistor expression exists");
+
+        assert!(
+            expression.to_ascii_lowercase().contains("v(x1.cntl)"),
+            "flattened expression should remap local probe, got {expression}"
+        );
+    }
+
+    #[test]
     fn subckt_body_function_shadows_top_level_function_when_flattened() {
         let netlist = Netlist::parse(
             "subckt body function scope\n\

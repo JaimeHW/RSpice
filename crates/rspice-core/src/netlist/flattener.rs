@@ -487,6 +487,21 @@ impl<'a> Flattener<'a> {
 
         // Remap the element kind, handling CCCS/CCVS control element names
         let new_kind = match &element.kind {
+            ElementKind::Resistor {
+                value,
+                value_expr,
+                model,
+                instance_params,
+                deferred_params,
+            } => ElementKind::Resistor {
+                value: *value,
+                value_expr: value_expr
+                    .as_ref()
+                    .map(|expr| self.remap_behavioral_expression(expr, prefix, node_map)),
+                model: model.clone(),
+                instance_params: instance_params.clone(),
+                deferred_params: deferred_params.clone(),
+            },
             ElementKind::BehavioralVoltage {
                 expression,
                 tc1,
@@ -774,22 +789,26 @@ impl<'a> Flattener<'a> {
                 model,
                 instance_params,
                 deferred_params,
-            } => ElementKind::Resistor {
-                value: self.resolve_optional_value_expr(*value, value_expr, scope)?,
-                value_expr: None,
-                model: self.resolve_optional_scoped_model(
-                    model,
-                    scope,
-                    element_path,
-                    model_scope_path,
-                )?,
-                instance_params: self.merge_deferred_params(
-                    instance_params,
-                    deferred_params,
-                    scope,
-                )?,
-                deferred_params: Vec::new(),
-            },
+            } => {
+                let (value, value_expr) =
+                    self.resolve_passive_value_expr(*value, value_expr, scope, element_path)?;
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model: self.resolve_optional_scoped_model(
+                        model,
+                        scope,
+                        element_path,
+                        model_scope_path,
+                    )?,
+                    instance_params: self.merge_deferred_params(
+                        instance_params,
+                        deferred_params,
+                        scope,
+                    )?,
+                    deferred_params: Vec::new(),
+                }
+            }
             ElementKind::Capacitor {
                 value,
                 value_expr,
@@ -1181,6 +1200,26 @@ impl<'a> Flattener<'a> {
         }
     }
 
+    fn resolve_passive_value_expr(
+        &self,
+        value: Value,
+        value_expr: &Option<String>,
+        scope: &ParamContext,
+        element_path: &str,
+    ) -> Result<(Value, Option<String>), ParseError> {
+        match value_expr {
+            Some(expr) if expression_references_circuit_state(expr) => Ok((
+                Value::NAN,
+                Some(self.prepare_scoped_behavioral_expression(expr, scope, element_path)?),
+            )),
+            Some(_) => Ok((
+                self.resolve_optional_value_expr(value, value_expr, scope)?,
+                None,
+            )),
+            None => Ok((value, None)),
+        }
+    }
+
     /// Merge deferred (expression-valued) instance parameters over the
     /// parse-time-resolved set, evaluating each against this instance's
     /// parameter scope. A deferred entry overrides a same-named resolved one.
@@ -1498,6 +1537,11 @@ fn parametric_value_is_string(value: &ParametricValue) -> bool {
     )
 }
 
+fn expression_references_circuit_state(expression: &str) -> bool {
+    let upper = expression.to_ascii_uppercase();
+    upper.contains("V(") || upper.contains("I(")
+}
+
 fn resolve_parametric_value(
     value: &ParametricValue,
     scope: &ParamContext,
@@ -1552,6 +1596,9 @@ fn build_subcircuit_param_scope(
     instance_params: &[(String, ParametricValue)],
     random: &RandomState,
 ) -> Result<ParamContext, ParseError> {
+    let (instance_numeric, instance_strings) =
+        resolve_subcircuit_instance_params(subckt, caller_scope, instance_params, random)?;
+
     let mut scope = caller_scope.clone();
     scope.adopt_random(random);
 
@@ -1571,22 +1618,106 @@ fn build_subcircuit_param_scope(
         scope.import_function(function.clone());
     }
 
-    for (name, value) in instance_params {
-        if subckt
-            .string_params
-            .iter()
-            .any(|(formal, _)| formal.eq_ignore_ascii_case(name))
-            || parametric_value_is_string(value)
-        {
-            let resolved = resolve_string_parametric_value(value, caller_scope)?;
-            scope.set_string(name, resolved);
-        } else {
-            let resolved = resolve_parametric_value(value, caller_scope, random)?;
-            scope.set(name, resolved);
-        }
+    for (name, value) in instance_strings {
+        scope.set_string(&name, value);
+    }
+    for (name, value) in instance_numeric {
+        scope.set(&name, value);
     }
 
     Ok(scope)
+}
+
+fn resolve_subcircuit_instance_params(
+    subckt: &SubcircuitDef,
+    caller_scope: &ParamContext,
+    instance_params: &[(String, ParametricValue)],
+    random: &RandomState,
+) -> Result<(Vec<(String, Value)>, Vec<(String, String)>), ParseError> {
+    let mut instance_scope = caller_scope.clone();
+    instance_scope.adopt_random(random);
+    let mut pending = instance_params.to_vec();
+    let mut numeric = Vec::<(String, Value)>::new();
+    let mut strings = Vec::<(String, String)>::new();
+
+    while !pending.is_empty() {
+        let mut progress = false;
+        let mut unresolved = Vec::new();
+        let mut first_error = None;
+
+        for (name, value) in pending {
+            if subcircuit_instance_param_is_string(subckt, &name, &value) {
+                match resolve_string_parametric_value(&value, &instance_scope) {
+                    Ok(resolved) => {
+                        instance_scope.set_string(&name, resolved.clone());
+                        upsert_string_param_value(&mut strings, name, resolved);
+                        progress = true;
+                    }
+                    Err(err) => {
+                        first_error.get_or_insert(err);
+                        unresolved.push((name, value));
+                    }
+                }
+            } else {
+                match resolve_parametric_value(&value, &instance_scope, random) {
+                    Ok(resolved) => {
+                        instance_scope.set(&name, resolved);
+                        upsert_numeric_param_value(&mut numeric, name, resolved);
+                        progress = true;
+                    }
+                    Err(err) => {
+                        first_error.get_or_insert(err);
+                        unresolved.push((name, value));
+                    }
+                }
+            }
+        }
+
+        if !progress {
+            return Err(first_error.unwrap_or_else(|| {
+                ParseError::InvalidValue(
+                    "subcircuit instance parameters could not be resolved".to_string(),
+                )
+            }));
+        }
+        pending = unresolved;
+    }
+
+    Ok((numeric, strings))
+}
+
+fn subcircuit_instance_param_is_string(
+    subckt: &SubcircuitDef,
+    name: &str,
+    value: &ParametricValue,
+) -> bool {
+    subckt
+        .string_params
+        .iter()
+        .any(|(formal, _)| formal.eq_ignore_ascii_case(name))
+        || parametric_value_is_string(value)
+}
+
+fn upsert_numeric_param_value(items: &mut Vec<(String, Value)>, name: String, value: Value) {
+    if let Some((_, existing_value)) = items
+        .iter_mut()
+        .find(|(existing, _)| existing.eq_ignore_ascii_case(&name))
+    {
+        *existing_value = value;
+    } else {
+        items.push((name, value));
+    }
+}
+
+fn upsert_string_param_value(items: &mut Vec<(String, String)>, name: String, value: String) {
+    if let Some((_, existing_value)) = items
+        .iter_mut()
+        .find(|(existing, _)| existing.eq_ignore_ascii_case(&name))
+    {
+        *existing_value = value;
+    } else {
+        items.push((name, value));
+    }
 }
 
 fn replace_model_param(model: &mut ModelDef, name: &str) {

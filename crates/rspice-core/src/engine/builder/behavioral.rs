@@ -103,7 +103,8 @@ pub(in crate::engine::builder) fn add_behavioral_resistor(
         )));
     }
 
-    let prepared = prepare_behavioral_expression(expression, &netlist.params).map_err(|e| {
+    let params = base_eval_context(netlist);
+    let prepared = prepare_behavioral_expression(expression, &params).map_err(|e| {
         SimulationError::Circuit(format!(
             "Resistor '{}' behavioral value expression could not be prepared: {}",
             element.name, e

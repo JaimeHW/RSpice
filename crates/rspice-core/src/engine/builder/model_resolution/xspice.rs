@@ -186,7 +186,7 @@ fn build_instance_eval_context(
     let mut ctx = match model_def {
         Some(model_def) => build_model_eval_context(netlist, model_def, current_temp_c, tnom_c),
         None => {
-            let mut ctx = netlist.params.clone();
+            let mut ctx = base_eval_context(netlist);
             ctx.set("TEMP", current_temp_c);
             ctx.set("TEMPER", current_temp_c);
             ctx.set("TNOM", tnom_c);

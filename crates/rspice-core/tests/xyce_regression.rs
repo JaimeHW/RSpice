@@ -410,6 +410,30 @@ fn test_xyce_step_static_dc_cases_run() {
 }
 
 #[test]
+fn test_xyce_solution_dependent_resistor_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/SOLN_DEP_RES/solDepRes.cir",
+        "Netlists/SOLN_DEP_RES/solDepRes2.cir",
+        "Netlists/SOLN_DEP_RES/solDepRes3.cir",
+        "Netlists/SOLN_DEP_RES/multSolDepRes.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce solution-dependent resistor comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_deep_function_parameter_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

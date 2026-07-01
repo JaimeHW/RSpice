@@ -1751,12 +1751,8 @@ impl XyceTestRunner {
                     return Ok(());
                 }
                 "r" => {
-                    if let Some(resistance) =
-                        Self::resistor_parameter_r_value(netlist, &element_name)
-                    {
-                        if resistance.is_finite() {
-                            return Ok(());
-                        }
+                    if Self::find_resistor_element(netlist, &element_name).is_some() {
+                        return Ok(());
                     }
                 }
                 "temp" if Self::resistor_temperature_value(netlist, &element_name).is_some() => {
@@ -1844,12 +1840,10 @@ impl XyceTestRunner {
         op_report: &crate::circuit::DeviceOpReport,
     ) -> Result<f64, String> {
         if let Some((node_pos, node_neg)) = Self::parse_voltage_probe(normalized) {
-            let pos = result
-                .try_voltage_named(&node_pos)
+            let pos = Self::result_voltage_named(result, &node_pos)
                 .ok_or_else(|| format!("node '{}' not found in DC result", node_pos))?;
             let neg = match node_neg {
-                Some(node) => result
-                    .try_voltage_named(&node)
+                Some(node) => Self::result_voltage_named(result, &node)
                     .ok_or_else(|| format!("node '{}' not found in DC result", node))?,
                 None => 0.0,
             };
@@ -1871,6 +1865,8 @@ impl XyceTestRunner {
                 netlist,
                 dc,
                 sweep_point,
+                result,
+                op_report,
                 &element_name,
                 &parameter,
             );
@@ -1898,13 +1894,13 @@ impl XyceTestRunner {
     }
 
     fn validate_dc_probe_expression(expression: &str, netlist: &Netlist) -> Result<(), String> {
-        let (rewritten, context) =
-            Self::rewrite_print_expression_calls(expression, netlist.params.clone(), |call| {
-                let normalized = Self::normalize_probe(call);
-                Self::validate_atomic_dc_probe(&normalized, call, netlist)?;
-                Ok(1.0)
-            })?;
-        crate::netlist::expr::eval_expression(&rewritten, &context)
+        let mut call_value = |call: &str| {
+            let normalized = Self::normalize_probe(call);
+            Self::validate_atomic_dc_probe(&normalized, call, netlist)?;
+            Ok(1.0)
+        };
+        let context = Self::print_eval_context(netlist, None, None);
+        Self::evaluate_print_expression_with_probe_calls(expression, context, &mut call_value)
             .map_err(|err| format!("unsupported .PRINT DC expression '{{{expression}}}': {err}"))?;
         Ok(())
     }
@@ -1917,28 +1913,269 @@ impl XyceTestRunner {
         result: &crate::SimulationResult,
         op_report: &crate::circuit::DeviceOpReport,
     ) -> Result<f64, String> {
+        let context = Self::print_eval_context(netlist, Some(dc), Some(sweep_point));
+        let mut call_value = |call: &str| {
+            let normalized = Self::normalize_probe(call);
+            Self::evaluate_atomic_dc_probe(&normalized, netlist, dc, sweep_point, result, op_report)
+        };
+        Self::evaluate_print_expression_with_probe_calls(expression, context, &mut call_value)
+            .map_err(|err| {
+                format!("failed to evaluate .PRINT DC expression '{{{expression}}}': {err}")
+            })
+    }
+
+    fn evaluate_print_expression_with_probe_calls<F>(
+        expression: &str,
+        context: crate::netlist::ParamContext,
+        call_value: &mut F,
+    ) -> Result<Value, String>
+    where
+        F: FnMut(&str) -> Result<Value, String>,
+    {
+        Self::evaluate_print_expression_internal(expression, context, call_value, None)
+    }
+
+    fn evaluate_print_expression_internal<F>(
+        expression: &str,
+        context: crate::netlist::ParamContext,
+        call_value: &mut F,
+        override_probe: Option<(&str, Value)>,
+    ) -> Result<Value, String>
+    where
+        F: FnMut(&str) -> Result<Value, String>,
+    {
         let (rewritten, context) =
-            Self::rewrite_print_expression_calls(expression, netlist.params.clone(), |call| {
-                let normalized = Self::normalize_probe(call);
-                Self::evaluate_atomic_dc_probe(
-                    &normalized,
-                    netlist,
-                    dc,
-                    sweep_point,
-                    result,
-                    op_report,
-                )
+            Self::rewrite_print_ddx_calls(expression, context, call_value, override_probe)?;
+        let (rewritten, context, _) =
+            Self::rewrite_print_expression_calls_maybe(&rewritten, context, |call| {
+                Self::print_probe_value(call, call_value, override_probe)
             })?;
-        crate::netlist::expr::eval_expression(&rewritten, &context).map_err(|err| {
-            format!("failed to evaluate .PRINT DC expression '{{{expression}}}': {err}")
+        crate::netlist::expr::eval_expression(&rewritten, &context).map_err(|err| err.to_string())
+    }
+
+    fn print_probe_value<F>(
+        call: &str,
+        call_value: &mut F,
+        override_probe: Option<(&str, Value)>,
+    ) -> Result<Value, String>
+    where
+        F: FnMut(&str) -> Result<Value, String>,
+    {
+        if let Some((override_name, override_value)) = override_probe {
+            if Self::normalize_probe(call) == override_name {
+                return Ok(override_value);
+            }
+        }
+        call_value(call)
+    }
+
+    fn rewrite_print_ddx_calls<F>(
+        expression: &str,
+        mut context: crate::netlist::ParamContext,
+        call_value: &mut F,
+        override_probe: Option<(&str, Value)>,
+    ) -> Result<(String, crate::netlist::ParamContext), String>
+    where
+        F: FnMut(&str) -> Result<Value, String>,
+    {
+        let mut rewritten = String::with_capacity(expression.len());
+        let mut index = 0usize;
+        let mut placeholder_index = 0usize;
+
+        while index < expression.len() {
+            if let Some(open_index) = Self::print_ddx_call_open_index(expression, index) {
+                let close_index = Self::matching_parenthesis_index(expression, open_index)?;
+                let call = &expression[index..=close_index];
+                let placeholder = format!("__rspice_ddx_{placeholder_index}");
+                let value =
+                    Self::evaluate_print_ddx_call(call, &context, call_value, override_probe)?;
+                context.set(&placeholder, value);
+                rewritten.push_str(&placeholder);
+                placeholder_index += 1;
+                index = close_index + 1;
+                continue;
+            }
+
+            let ch = expression[index..]
+                .chars()
+                .next()
+                .expect("valid char boundary");
+            match ch {
+                '{' => rewritten.push('('),
+                '}' => rewritten.push(')'),
+                _ => rewritten.push(ch),
+            }
+            index += ch.len_utf8();
+        }
+
+        Ok((rewritten, context))
+    }
+
+    fn evaluate_print_ddx_call<F>(
+        call: &str,
+        context: &crate::netlist::ParamContext,
+        call_value: &mut F,
+        override_probe: Option<(&str, Value)>,
+    ) -> Result<Value, String>
+    where
+        F: FnMut(&str) -> Result<Value, String>,
+    {
+        let open_index = call
+            .find('(')
+            .ok_or_else(|| format!("malformed DDX call '{call}'"))?;
+        let inner = call[open_index + 1..]
+            .strip_suffix(')')
+            .ok_or_else(|| format!("malformed DDX call '{call}'"))?;
+        let args = Self::split_top_level_args(inner)?;
+        if args.len() != 2 {
+            return Err(format!(
+                "DDX expects exactly two arguments, got {} in '{call}'",
+                args.len()
+            ));
+        }
+
+        let expression = args[0].trim();
+        let variable = args[1].trim();
+        if Self::parse_voltage_probe(variable).is_none()
+            && Self::parse_current_probe(variable).is_none()
+            && Self::parse_device_operating_point_probe(variable).is_none()
+            && Self::parse_device_parameter_probe(variable).is_none()
+        {
+            return Err(format!(
+                "DDX derivative variable '{variable}' is not a supported print probe"
+            ));
+        }
+
+        let normalized_variable = Self::normalize_probe(variable);
+        let center = Self::print_probe_value(variable, call_value, override_probe)?;
+        if !center.is_finite() {
+            return Err(format!(
+                "DDX derivative variable '{variable}' evaluated to non-finite value {center}"
+            ));
+        }
+
+        Self::central_difference_derivative(center, |point| {
+            Self::evaluate_print_expression_internal(
+                expression,
+                context.clone(),
+                call_value,
+                Some((&normalized_variable, point)),
+            )
         })
+    }
+
+    fn central_difference_derivative<F>(center: Value, mut eval_at: F) -> Result<Value, String>
+    where
+        F: FnMut(Value) -> Result<Value, String>,
+    {
+        let scale = center.abs().max(1.0);
+        let mut last_finite = None;
+        for relative_step in [1.0e-4, 3.0e-5, 1.0e-5, 3.0e-6, 1.0e-6] {
+            let step = scale * relative_step;
+            let hi = eval_at(center + step)?;
+            let lo = eval_at(center - step)?;
+            let derivative = (hi - lo) / (2.0 * step);
+            if derivative.is_finite() {
+                last_finite = Some(derivative);
+            }
+        }
+        last_finite.ok_or_else(|| "DDX derivative evaluated to a non-finite value".to_string())
+    }
+
+    fn split_top_level_args(input: &str) -> Result<Vec<String>, String> {
+        let mut args = Vec::new();
+        let mut start = 0usize;
+        let mut paren_depth = 0usize;
+        let mut brace_depth = 0usize;
+
+        for (index, ch) in input.char_indices() {
+            match ch {
+                '(' => paren_depth += 1,
+                ')' => {
+                    paren_depth = paren_depth.checked_sub(1).ok_or_else(|| {
+                        format!("unbalanced ')' while parsing function arguments '{input}'")
+                    })?;
+                }
+                '{' => brace_depth += 1,
+                '}' => {
+                    brace_depth = brace_depth.checked_sub(1).ok_or_else(|| {
+                        format!("unbalanced '}}' while parsing function arguments '{input}'")
+                    })?;
+                }
+                ',' if paren_depth == 0 && brace_depth == 0 => {
+                    args.push(input[start..index].trim().to_string());
+                    start = index + ch.len_utf8();
+                }
+                _ => {}
+            }
+        }
+
+        if paren_depth != 0 || brace_depth != 0 {
+            return Err(format!(
+                "unbalanced delimiters while parsing function arguments '{input}'"
+            ));
+        }
+        args.push(input[start..].trim().to_string());
+        if args.iter().any(|arg| arg.is_empty()) {
+            return Err(format!("empty function argument in '{input}'"));
+        }
+        Ok(args)
+    }
+
+    fn print_ddx_call_open_index(expression: &str, index: usize) -> Option<usize> {
+        if index >= expression.len() || !expression.is_char_boundary(index) {
+            return None;
+        }
+        let tail = &expression[index..];
+        if !tail
+            .get(..3)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("ddx"))
+        {
+            return None;
+        }
+        let previous = expression[..index].chars().next_back();
+        if previous.is_some_and(Self::print_identifier_char) {
+            return None;
+        }
+
+        let mut next_index = index + 3;
+        while next_index < expression.len() {
+            let ch = expression[next_index..].chars().next()?;
+            if !ch.is_whitespace() {
+                break;
+            }
+            next_index += ch.len_utf8();
+        }
+        expression[next_index..]
+            .starts_with('(')
+            .then_some(next_index)
     }
 
     fn rewrite_print_expression_calls<F>(
         expression: &str,
+        context: crate::netlist::ParamContext,
+        call_value: F,
+    ) -> Result<(String, crate::netlist::ParamContext), String>
+    where
+        F: FnMut(&str) -> Result<Value, String>,
+    {
+        let (rewritten, context, placeholder_index) =
+            Self::rewrite_print_expression_calls_maybe(expression, context, call_value)?;
+
+        if placeholder_index == 0 {
+            return Err(format!(
+                ".PRINT DC expression '{{{expression}}}' does not contain a supported V(), I(), or N() probe"
+            ));
+        }
+
+        Ok((rewritten, context))
+    }
+
+    fn rewrite_print_expression_calls_maybe<F>(
+        expression: &str,
         mut context: crate::netlist::ParamContext,
         mut call_value: F,
-    ) -> Result<(String, crate::netlist::ParamContext), String>
+    ) -> Result<(String, crate::netlist::ParamContext, usize), String>
     where
         F: FnMut(&str) -> Result<Value, String>,
     {
@@ -1972,13 +2209,7 @@ impl XyceTestRunner {
             index += ch.len_utf8();
         }
 
-        if placeholder_index == 0 {
-            return Err(format!(
-                ".PRINT DC expression '{{{expression}}}' does not contain a supported V(), I(), or N() probe"
-            ));
-        }
-
-        Ok((rewritten, context))
+        Ok((rewritten, context, placeholder_index))
     }
 
     fn print_expression_inner(probe: &str) -> Option<&str> {
@@ -2074,6 +2305,8 @@ impl XyceTestRunner {
         netlist: &Netlist,
         dc: &XyceDcSweep,
         sweep_point: XyceDcSweepPoint,
+        result: &crate::SimulationResult,
+        op_report: &crate::circuit::DeviceOpReport,
         element_name: &str,
         parameter: &str,
     ) -> Result<f64, String> {
@@ -2099,12 +2332,14 @@ impl XyceTestRunner {
                     )
                 })
             }
-            "r" => Self::resistor_parameter_r_value(netlist, element_name).ok_or_else(|| {
-                format!(
-                    "resistor parameter probe '{}:R' targets an unknown resistor",
-                    element_name
-                )
-            }),
+            "r" => Self::evaluate_resistor_parameter_r_value(
+                netlist,
+                dc,
+                sweep_point,
+                result,
+                op_report,
+                element_name,
+            ),
             "temp" => Self::resistor_temperature_value(netlist, element_name).ok_or_else(|| {
                 format!(
                     "resistor parameter probe '{}:TEMP' targets an unknown resistor",
@@ -2291,6 +2526,10 @@ impl XyceTestRunner {
         context.set("TEMPER", temp_c);
         context.set("TNOM", netlist.options.tnom.unwrap_or(27.0));
         context.set("VT", Self::thermal_voltage_celsius(temp_c));
+        context.set(
+            "GMIN",
+            netlist.options.gmin.unwrap_or(crate::constants::GMIN),
+        );
         Self::add_resistor_parameter_bindings(netlist, &mut context);
         context
     }
@@ -2386,13 +2625,18 @@ impl XyceTestRunner {
             .nodes
             .get(1)
             .ok_or_else(|| format!("resistor '{}' has no negative node", resistor_name))?;
-        let v_pos = result
-            .try_voltage_named(node_pos)
+        let v_pos = Self::result_voltage_named(result, node_pos)
             .ok_or_else(|| format!("node '{}' not found in DC result", node_pos))?;
-        let v_neg = result
-            .try_voltage_named(node_neg)
+        let v_neg = Self::result_voltage_named(result, node_neg)
             .ok_or_else(|| format!("node '{}' not found in DC result", node_neg))?;
         Ok((v_pos - v_neg) / resistance)
+    }
+
+    fn result_voltage_named(result: &crate::SimulationResult, node_name: &str) -> Option<Value> {
+        result.try_voltage_named(node_name).or_else(|| {
+            let normalized = Self::normalize_device_instance_name(node_name);
+            (normalized != node_name).then(|| result.try_voltage_named(&normalized))?
+        })
     }
 
     fn source_is_voltage_source(netlist: &Netlist, source: &str) -> bool {
@@ -2467,6 +2711,69 @@ impl XyceTestRunner {
         )
     }
 
+    fn evaluate_resistor_parameter_r_value(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        result: &crate::SimulationResult,
+        op_report: &crate::circuit::DeviceOpReport,
+        name: &str,
+    ) -> Result<Value, String> {
+        let element = Self::find_resistor_element(netlist, name).ok_or_else(|| {
+            format!("resistor parameter probe '{name}:R' targets an unknown resistor")
+        })?;
+        let ElementKind::Resistor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            return Err(format!(
+                "resistor parameter probe '{name}:R' targets a non-resistor element"
+            ));
+        };
+
+        if let Some(resistance) = Self::instance_param(instance_params, &["R", "VALUE"]) {
+            return Ok(resistance);
+        }
+        if value.is_finite() {
+            return Ok(*value);
+        }
+        if let Some(expression) = value_expr.as_deref() {
+            let context = Self::print_eval_context(netlist, Some(dc), Some(sweep_point));
+            let mut call_value = |call: &str| {
+                let normalized = Self::normalize_probe(call);
+                Self::evaluate_atomic_dc_probe(
+                    &normalized,
+                    netlist,
+                    dc,
+                    sweep_point,
+                    result,
+                    op_report,
+                )
+            };
+            return Self::evaluate_print_expression_with_probe_calls(
+                expression,
+                context,
+                &mut call_value,
+            )
+            .map_err(|err| {
+                format!("failed to evaluate resistor parameter probe '{name}:R': {err}")
+            });
+        }
+        if model.is_some()
+            && let Some(resistance) = Self::resistor_parameter_r_value(netlist, name)
+        {
+            return Ok(resistance);
+        }
+
+        Err(format!(
+            "resistor parameter probe '{name}:R' could not resolve a resistance value"
+        ))
+    }
+
     fn resistor_parameter_r_value_from_parts(
         value: Value,
         value_expr: Option<&str>,
@@ -2509,7 +2816,7 @@ impl XyceTestRunner {
 
     fn find_resistor_element(netlist: &Netlist, name: &str) -> Option<crate::netlist::Element> {
         if let Some(element) = netlist.elements.iter().find(|element| {
-            element.name.eq_ignore_ascii_case(name)
+            Self::device_instance_names_match(&element.name, name)
                 && matches!(&element.kind, ElementKind::Resistor { .. })
         }) {
             return Some(element.clone());
@@ -2520,7 +2827,7 @@ impl XyceTestRunner {
             .elements
             .into_iter()
             .find(|element| {
-                element.name.eq_ignore_ascii_case(name)
+                Self::device_instance_names_match(&element.name, name)
                     && matches!(&element.kind, ElementKind::Resistor { .. })
             })
     }
@@ -3153,7 +3460,7 @@ impl XyceTestRunner {
             .strip_prefix('{')
             .and_then(|value| value.strip_suffix('}'))
             .unwrap_or(&normalized);
-        let (element, parameter) = unwrapped.split_once(':')?;
+        let (element, parameter) = unwrapped.rsplit_once(':')?;
         if element.is_empty() || parameter.is_empty() {
             return None;
         }
@@ -3353,6 +3660,34 @@ End of Xyce(TM) Simulation
                 .is_some(),
             "current differences keep the stricter ITOL-scale default"
         );
+    }
+
+    #[test]
+    fn device_parameter_probe_splits_on_rightmost_colon() {
+        assert_eq!(
+            XyceTestRunner::parse_device_parameter_probe("{Xtest:Xtest2:Rinside:R}"),
+            Some(("xtest:xtest2:rinside".to_string(), "r".to_string()))
+        );
+    }
+
+    #[test]
+    fn print_ddx_evaluates_probe_derivative_at_operating_point() {
+        let mut context = crate::netlist::ParamContext::new();
+        context.set("SCALAR", 2.0);
+        let mut call_value = |call: &str| match XyceTestRunner::normalize_probe(call).as_str() {
+            "v(cntl)" => Ok(2.0),
+            "v(2)" => Ok(5.0 / 3.0),
+            other => Err(format!("unexpected probe {other}")),
+        };
+
+        let derivative = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+            "ddx(V(2)/(1.0+scalar*V(cntl)),v(cntl))",
+            context,
+            &mut call_value,
+        )
+        .expect("DDX print expression evaluates");
+
+        assert!((derivative + 2.0 / 15.0).abs() < 1.0e-9);
     }
 
     #[test]
