@@ -232,7 +232,7 @@ impl VerilogADevice {
         context.lookup_tables = model.lookup_tables.clone();
         context.laplace_filters = model.laplace_filters.clone();
         context.zi_filters = model.zi_filters.clone();
-        Self::preallocate_vm_runtime_state(&mut context, &model);
+        Self::preallocate_vm_runtime_state(&mut context, &model)?;
 
         // Attempt native compilation (if feature enabled)
         #[cfg(feature = "native")]
@@ -268,10 +268,22 @@ impl VerilogADevice {
     ///
     /// This avoids repeated dynamic growth during simulation hot paths and ensures
     /// stateful operators have stable dedicated slots.
-    fn preallocate_vm_runtime_state(context: &mut VmContext, model: &CompiledModel) {
+    fn preallocate_vm_runtime_state(
+        context: &mut VmContext,
+        model: &CompiledModel,
+    ) -> Result<(), VmError> {
         #[inline]
         fn update_max(max_slot: &mut Option<usize>, idx: usize) {
             *max_slot = Some(max_slot.map_or(idx, |prev| prev.max(idx)));
+        }
+
+        #[inline]
+        fn required_slot_count(label: &str, max_idx: usize) -> Result<usize, VmError> {
+            max_idx.checked_add(1).ok_or_else(|| {
+                VmError::NativeJit(format!(
+                    "native JIT {label} runtime state slot index {max_idx} cannot be represented; no interpreter fallback"
+                ))
+            })
         }
 
         let mut max_state = None;
@@ -348,20 +360,22 @@ impl VerilogADevice {
         }
 
         if let Some(max_idx) = max_state {
-            context.allocate_states(max_idx + 1);
+            context.allocate_states(required_slot_count("state-value", max_idx)?);
         }
         if let Some(max_idx) = max_delay_buffer {
-            context.allocate_delay_buffers(max_idx + 1);
+            context.allocate_delay_buffers(required_slot_count("delay-buffer", max_idx)?);
         }
         if let Some(max_idx) = max_transition_filter {
-            context.allocate_transition_filters(max_idx + 1);
+            context.allocate_transition_filters(required_slot_count("transition-filter", max_idx)?);
         }
         if let Some(max_idx) = max_slew_filter {
-            context.allocate_slew_filters(max_idx + 1);
+            context.allocate_slew_filters(required_slot_count("slew-filter", max_idx)?);
         }
         if let Some(max_idx) = max_cross_detector {
-            context.allocate_cross_detectors(max_idx + 1);
+            context.allocate_cross_detectors(required_slot_count("cross-detector", max_idx)?);
         }
+
+        Ok(())
     }
 
     /// Attempt to compile the model to native code.
@@ -912,6 +926,13 @@ impl VerilogADevice {
     fn missing_native_voltage_storage(required: usize, available: usize) -> VmError {
         VmError::NativeJit(format!(
             "native JIT voltage storage has {available} terminal slot(s), but compiled image requires {required}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn mismatched_native_terminal_context(required: usize, available: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT terminal context has {available} terminal slot(s), but compiled image requires exactly {required}; no interpreter fallback"
         ))
     }
 
@@ -1519,7 +1540,11 @@ impl VerilogADevice {
     ) -> Result<f64, VmError> {
         Self::validate_native_storage(vm.context, native)?;
         let dependencies = Self::native_entry_dependencies(native, entry)?;
-        Self::validate_native_current_pairs(vm.context, dependencies.current_pairs)?;
+        Self::validate_native_current_pairs(
+            vm.context,
+            native.num_terminals,
+            dependencies.current_pairs,
+        )?;
         Self::validate_native_prior_currents(vm.context, dependencies.prior_currents)?;
         Self::validate_native_branch_unknowns(vm.context, dependencies.branch_unknowns)?;
 
@@ -1558,6 +1583,7 @@ impl VerilogADevice {
     #[cfg(feature = "native")]
     fn validate_native_current_pairs(
         context: &VmContext,
+        compiled_terminal_count: usize,
         current_pairs: &[usize],
     ) -> Result<(), VmError> {
         if current_pairs.is_empty() {
@@ -1565,11 +1591,18 @@ impl VerilogADevice {
         }
 
         let terminal_count = context.terminal_count();
-        if terminal_count == 0 {
+        if terminal_count != compiled_terminal_count {
+            return Err(Self::mismatched_native_terminal_context(
+                compiled_terminal_count,
+                terminal_count,
+            ));
+        }
+        if compiled_terminal_count == 0 {
             return Err(Self::missing_native_terminal_pair_current_slot(0));
         }
         for pair_index in current_pairs {
-            let Some((pos, neg)) = terminal_pair_current_endpoints(*pair_index, terminal_count)
+            let Some((pos, neg)) =
+                terminal_pair_current_endpoints(*pair_index, compiled_terminal_count)
             else {
                 return Err(Self::missing_native_terminal_pair_current_slot(*pair_index));
             };
@@ -1601,6 +1634,12 @@ impl VerilogADevice {
     ) -> Result<(), VmError> {
         if context.voltages.len() < required_terminals {
             return Err(Self::missing_native_voltage_storage(
+                required_terminals,
+                context.voltages.len(),
+            ));
+        }
+        if context.voltages.len() != required_terminals {
+            return Err(Self::mismatched_native_terminal_context(
                 required_terminals,
                 context.voltages.len(),
             ));
@@ -1783,7 +1822,11 @@ impl VerilogADevice {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
         Self::validate_native_storage(vm.context, native)?;
-        Self::validate_native_current_pairs(vm.context, native.assignment_current_pairs())?;
+        Self::validate_native_current_pairs(
+            vm.context,
+            native.num_terminals,
+            native.assignment_current_pairs(),
+        )?;
         Self::validate_native_prior_currents(vm.context, native.assignment_prior_currents())?;
         Self::validate_native_branch_unknowns(vm.context, native.assignment_branch_unknowns())?;
         let ctx = Self::eval_context_from(vm.context);
@@ -2679,7 +2722,8 @@ mod tests {
         context.lookup_tables = model.lookup_tables.clone();
         context.laplace_filters = model.laplace_filters.clone();
         context.zi_filters = model.zi_filters.clone();
-        VerilogADevice::preallocate_vm_runtime_state(&mut context, &model);
+        VerilogADevice::preallocate_vm_runtime_state(&mut context, &model)
+            .expect("native test model runtime state preallocates");
 
         let mut device = VerilogADevice {
             name: SmolStr::new("NTEST"),
@@ -2692,7 +2736,9 @@ mod tests {
             program_active: vec![true; num_stamp_programs],
             branch_active: vec![true; num_branch_unknowns],
             matrix_indices: MatrixIndices::default(),
-            native_model: Arc::new(NativeModel::new_for_test(
+            native_model: Arc::new(NativeModel::new_for_test_with_shape(
+                num_terminals,
+                num_internal_nodes,
                 0,
                 num_stamp_programs,
                 jacobian_entry_points,
@@ -2827,7 +2873,8 @@ endmodule
         });
 
         let mut context = VmContext::with_internal_nodes(model.num_terminals, model.internal_nodes);
-        VerilogADevice::preallocate_vm_runtime_state(&mut context, &model);
+        VerilogADevice::preallocate_vm_runtime_state(&mut context, &model)
+            .expect("stateful test model runtime state preallocates");
 
         assert_eq!(context.state_values.len(), 9);
         assert_eq!(context.state_values_prev.len(), 9);
@@ -2836,6 +2883,30 @@ endmodule
         assert_eq!(context.transition_filters.len(), 2);
         assert_eq!(context.slew_filters.len(), 5);
         assert_eq!(context.cross_detectors.len(), 6);
+    }
+
+    #[test]
+    fn native_runtime_preallocation_rejects_state_slot_count_overflow() {
+        let mut model = compile(
+            r#"
+`include "disciplines.vams"
+module native_state_slot_overflow(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n);
+endmodule
+"#,
+        );
+        model.stamp_programs[0]
+            .value_program
+            .instructions
+            .push(Instruction::TransitionState(usize::MAX));
+
+        let mut context = VmContext::with_internal_nodes(model.num_terminals, model.internal_nodes);
+        let err = VerilogADevice::preallocate_vm_runtime_state(&mut context, &model)
+            .expect_err("overflowing runtime state slot must hard-fail");
+
+        assert_native_hard_fail(err, "transition-filter runtime state slot");
     }
 
     #[test]
@@ -2935,10 +3006,28 @@ endmodule
     #[test]
     fn native_current_pair_preflight_errors_use_hard_fail_contract() {
         let context = VmContext::with_internal_nodes(0, 0);
-        let err = VerilogADevice::validate_native_current_pairs(&context, &[0])
+        let err = VerilogADevice::validate_native_current_pairs(&context, 0, &[0])
             .expect_err("missing terminal-pair storage must hard-fail in native mode");
 
         assert_native_hard_fail(err, "terminal-pair current slot 0");
+    }
+
+    #[test]
+    fn native_current_pair_preflight_rejects_terminal_count_mismatch() {
+        let context = VmContext::with_internal_nodes(2, 0);
+        let err = VerilogADevice::validate_native_current_pairs(&context, 1, &[0])
+            .expect_err("terminal-pair preflight must use the compiled terminal shape");
+
+        assert_native_hard_fail(err, "terminal context");
+    }
+
+    #[test]
+    fn native_voltage_storage_rejects_terminal_count_mismatch() {
+        let context = VmContext::with_internal_nodes(2, 0);
+        let err = VerilogADevice::validate_native_voltage_storage(&context, 1, 0)
+            .expect_err("native dispatch must reject stale terminal context shapes");
+
+        assert_native_hard_fail(err, "terminal context");
     }
 
     #[test]

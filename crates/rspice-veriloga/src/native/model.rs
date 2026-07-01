@@ -111,6 +111,11 @@ impl NativeRequiredStorage {
             *max_slot = Some(max_slot.map_or(index, |prev| prev.max(index)));
         }
 
+        #[inline]
+        fn required_count(max_slot: Option<usize>) -> usize {
+            max_slot.map_or(0, |index| index.saturating_add(1))
+        }
+
         let mut max_state = None;
         let mut max_limit_state = None;
         let mut max_transition_filter = None;
@@ -166,18 +171,18 @@ impl NativeRequiredStorage {
             }
         }
 
-        let state_values = max_state.map_or(0, |index| index + 1);
+        let state_values = required_count(max_state);
         Self {
             state_values,
             state_values_prev: state_values,
-            state_initialized: max_limit_state.map_or(0, |index| index + 1),
+            state_initialized: required_count(max_limit_state),
             lookup_tables: model.lookup_tables.len(),
             laplace_filters: model.laplace_filters.len(),
             zi_filters: model.zi_filters.len(),
-            transition_filters: max_transition_filter.map_or(0, |index| index + 1),
-            slew_filters: max_slew_filter.map_or(0, |index| index + 1),
-            delay_buffers: max_delay_buffer.map_or(0, |index| index + 1),
-            cross_detectors: max_cross_detector.map_or(0, |index| index + 1),
+            transition_filters: required_count(max_transition_filter),
+            slew_filters: required_count(max_slew_filter),
+            delay_buffers: required_count(max_delay_buffer),
+            cross_detectors: required_count(max_cross_detector),
         }
     }
 }
@@ -325,6 +330,25 @@ impl NativeModel {
         jacobian_entry_points: Vec<usize>,
         reactive_jacobian_entry_points: Vec<usize>,
     ) -> Self {
+        Self::new_for_test_with_shape(
+            0,
+            0,
+            num_variables,
+            stamp_value_entry_points,
+            jacobian_entry_points,
+            reactive_jacobian_entry_points,
+        )
+    }
+
+    #[cfg(all(test, target_arch = "x86_64"))]
+    pub(crate) fn new_for_test_with_shape(
+        num_terminals: usize,
+        num_internal_nodes: usize,
+        num_variables: usize,
+        stamp_value_entry_points: usize,
+        jacobian_entry_points: Vec<usize>,
+        reactive_jacobian_entry_points: Vec<usize>,
+    ) -> Self {
         let mut bytes = vec![0xC3]; // assignment: ret
         let stamp_entry = append_test_value_stub(&mut bytes, 1);
         let jacobian_entry = append_test_value_stub(&mut bytes, 2);
@@ -357,8 +381,21 @@ impl NativeModel {
             noise_exponents: vec![],
         };
 
-        Self::from_executable_image(num_variables, 0, image, entries)
-            .expect("publish native test model")
+        let entry_starts = NativeEntryStarts::from_entries(&entries);
+        let current_dependencies = Self::empty_current_dependencies(&entries);
+        Self::from_executable_image_with_dependencies(
+            num_terminals,
+            num_internal_nodes,
+            num_variables,
+            0,
+            0,
+            image,
+            entries,
+            entry_starts,
+            current_dependencies,
+            NativeRequiredStorage::default(),
+        )
+        .expect("publish native test model")
     }
 
     #[allow(dead_code)]
