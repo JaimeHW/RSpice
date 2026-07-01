@@ -1966,7 +1966,20 @@ impl CodeModel for AnalogStateReturn {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
         PORTS.get_or_init(|| {
             vec![
-                broad_scalar_analog_input_port("in", "Analog input"),
+                scalar_analog_port(
+                    "in",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::VoltageName,
+                        PortType::Current,
+                        PortType::DifferentialCurrent,
+                    ],
+                    false,
+                    "Analog input",
+                ),
                 scalar_analog_output_port("out", "Selected previous analog input state"),
             ]
         })
@@ -2100,8 +2113,20 @@ fn oneshot_ports() -> &'static [PortSpec] {
     PORTS.get_or_init(|| {
         vec![
             analog_signal_port("clk", PortDirection::In, false).with_description("Clock input"),
-            analog_signal_port("cntl_in", PortDirection::In, true)
-                .with_description("Pulse-width control input"),
+            scalar_analog_port(
+                "cntl_in",
+                PortDirection::In,
+                PortType::Voltage,
+                vec![
+                    PortType::Voltage,
+                    PortType::VoltageName,
+                    PortType::DifferentialVoltage,
+                    PortType::Current,
+                    PortType::DifferentialCurrent,
+                ],
+                true,
+                "Pulse-width control input",
+            ),
             analog_signal_port("clear", PortDirection::In, true).with_description("Clear input"),
             analog_signal_port("out", PortDirection::Out, false).with_description("Pulse output"),
         ]
@@ -2589,6 +2614,87 @@ mod tests {
             .collect()
     }
 
+    fn port_summary(
+        model: &dyn CodeModel,
+    ) -> Vec<(
+        &str,
+        PortDirection,
+        PortType,
+        Vec<PortType>,
+        bool,
+        bool,
+        Option<usize>,
+        Option<usize>,
+    )> {
+        model
+            .ports()
+            .iter()
+            .map(|port| {
+                (
+                    port.name.as_str(),
+                    port.direction,
+                    port.default_type,
+                    port.allowed_types.clone(),
+                    port.is_vector,
+                    port.null_allowed,
+                    port.vector_min_len,
+                    port.vector_max_len,
+                )
+            })
+            .collect()
+    }
+
+    fn v_vd_i_id_vnam_types() -> Vec<PortType> {
+        vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::Current,
+            PortType::DifferentialCurrent,
+            PortType::VoltageName,
+        ]
+    }
+
+    fn v_vd_vnam_i_id_types() -> Vec<PortType> {
+        vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::VoltageName,
+            PortType::Current,
+            PortType::DifferentialCurrent,
+        ]
+    }
+
+    fn v_vnam_vd_i_id_types() -> Vec<PortType> {
+        vec![
+            PortType::Voltage,
+            PortType::VoltageName,
+            PortType::DifferentialVoltage,
+            PortType::Current,
+            PortType::DifferentialCurrent,
+        ]
+    }
+
+    fn v_vd_i_id_types() -> Vec<PortType> {
+        vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::Current,
+            PortType::DifferentialCurrent,
+        ]
+    }
+
+    fn v_vd_vnam_types() -> Vec<PortType> {
+        vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::VoltageName,
+        ]
+    }
+
+    fn v_vd_types() -> Vec<PortType> {
+        vec![PortType::Voltage, PortType::DifferentialVoltage]
+    }
+
     fn assert_analog_ports(
         model: &dyn CodeModel,
         expected: &[(&str, PortDirection, bool, Option<usize>)],
@@ -2755,6 +2861,311 @@ mod tests {
                 ("lower_delta", ParamType::Real, 0.0, false),
                 ("limit_range", ParamType::Real, 1.0e-6, false),
                 ("fraction", ParamType::Boolean, 0.0, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn analog_dynamic_metadata_matches_ngspice46_interfaces() {
+        assert_eq!(
+            port_summary(&HysteresisBlock),
+            vec![
+                (
+                    "in",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    v_vd_i_id_vnam_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+                (
+                    "out",
+                    PortDirection::Out,
+                    PortType::Voltage,
+                    v_vd_i_id_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+            ]
+        );
+        assert_eq!(
+            param_summary(&HysteresisBlock),
+            vec![
+                ("in_low", ParamType::Real, 0.0, false),
+                ("in_high", ParamType::Real, 1.0, false),
+                ("hyst", ParamType::Real, 0.1, false),
+                ("out_lower_limit", ParamType::Real, 0.0, false),
+                ("out_upper_limit", ParamType::Real, 1.0, false),
+                ("input_domain", ParamType::Real, 0.01, false),
+                ("fraction", ParamType::Boolean, 1.0, false),
+            ]
+        );
+
+        assert_eq!(
+            port_summary(&SlewRateFollower),
+            vec![
+                (
+                    "in",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    v_vd_i_id_vnam_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+                (
+                    "out",
+                    PortDirection::Out,
+                    PortType::Voltage,
+                    v_vd_i_id_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+            ]
+        );
+        assert_eq!(
+            param_summary(&SlewRateFollower),
+            vec![
+                ("rise_slope", ParamType::Real, 1.0e-9, false),
+                ("fall_slope", ParamType::Real, 1.0e-9, false),
+            ]
+        );
+
+        assert_eq!(
+            port_summary(&AnalogDelayLine),
+            vec![
+                (
+                    "in",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    v_vd_vnam_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+                (
+                    "out",
+                    PortDirection::Out,
+                    PortType::Voltage,
+                    v_vd_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+                (
+                    "cntrl",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    v_vd_i_id_types(),
+                    false,
+                    true,
+                    None,
+                    None,
+                ),
+            ]
+        );
+        assert_eq!(
+            param_summary(&AnalogDelayLine),
+            vec![
+                ("delay", ParamType::Real, 0.0, false),
+                ("buffer_size", ParamType::Integer, 1024.0, false),
+                ("has_delay_cnt", ParamType::Boolean, 0.0, false),
+                ("delmin", ParamType::Real, 0.0, false),
+                ("delmax", ParamType::Real, 0.0, false),
+            ]
+        );
+
+        assert_eq!(
+            port_summary(&AnalogStateReturn),
+            vec![
+                (
+                    "in",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    v_vd_vnam_i_id_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+                (
+                    "out",
+                    PortDirection::Out,
+                    PortType::Voltage,
+                    v_vd_i_id_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+            ]
+        );
+        assert_eq!(
+            param_summary(&AnalogStateReturn),
+            vec![("astate_no", ParamType::Integer, 1.0, false)]
+        );
+    }
+
+    #[test]
+    fn oneshot_metadata_matches_ngspice46_interface() {
+        assert_eq!(
+            port_summary(&AnalogOneShot),
+            vec![
+                (
+                    "clk",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    v_vd_vnam_i_id_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+                (
+                    "cntl_in",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    v_vnam_vd_i_id_types(),
+                    false,
+                    true,
+                    None,
+                    None,
+                ),
+                (
+                    "clear",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    v_vd_vnam_i_id_types(),
+                    false,
+                    true,
+                    None,
+                    None,
+                ),
+                (
+                    "out",
+                    PortDirection::Out,
+                    PortType::Voltage,
+                    v_vd_i_id_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+            ]
+        );
+
+        let params = AnalogOneShot.parameters();
+        assert_eq!(
+            param_summary(&AnalogOneShot),
+            vec![
+                ("cntl_array", ParamType::RealVector, 0.0, false),
+                ("pw_array", ParamType::RealVector, 0.0, false),
+                ("clk_trig", ParamType::Real, 0.5, false),
+                ("pos_edge_trig", ParamType::Boolean, 1.0, false),
+                ("out_low", ParamType::Real, 0.0, false),
+                ("out_high", ParamType::Real, 1.0, false),
+                ("rise_time", ParamType::Real, 1.0e-9, false),
+                ("rise_delay", ParamType::Real, 1.0e-9, false),
+                ("fall_delay", ParamType::Real, 1.0e-9, false),
+                ("fall_time", ParamType::Real, 1.0e-9, false),
+                ("retrig", ParamType::Boolean, 0.0, false),
+            ]
+        );
+        assert_eq!(
+            params[0].real_vector_default.as_deref(),
+            Some(&[0.0, 1.0][..])
+        );
+        assert_eq!(params[0].vector_min_len, Some(2));
+        assert_eq!(
+            params[1].real_vector_default.as_deref(),
+            Some(&[1.0e-6, 0.999_999_9][..])
+        );
+        assert_eq!(params[1].vector_min_len, Some(2));
+    }
+
+    #[test]
+    fn analog_integrator_metadata_matches_ngspice46_interfaces() {
+        assert_eq!(IntegratorAlias.name(), "int");
+        assert_eq!(
+            port_summary(&IntegratorAlias),
+            vec![
+                (
+                    "in",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    v_vd_i_id_vnam_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+                (
+                    "out",
+                    PortDirection::Out,
+                    PortType::Voltage,
+                    v_vd_i_id_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+            ]
+        );
+        assert_eq!(
+            param_summary(&IntegratorAlias),
+            vec![
+                ("in_offset", ParamType::Real, 0.0, false),
+                ("gain", ParamType::Real, 1.0, false),
+                ("out_lower_limit", ParamType::Real, -1.0e12, true),
+                ("out_upper_limit", ParamType::Real, 1.0e12, true),
+                ("limit_range", ParamType::Real, 1.0e-6, false),
+                ("out_ic", ParamType::Real, 0.0, false),
+            ]
+        );
+
+        assert_eq!(DifferentiatorAlias.name(), "d_dt");
+        assert_eq!(
+            port_summary(&DifferentiatorAlias),
+            vec![
+                (
+                    "in",
+                    PortDirection::In,
+                    PortType::Voltage,
+                    v_vd_i_id_vnam_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+                (
+                    "out",
+                    PortDirection::Out,
+                    PortType::Voltage,
+                    v_vd_i_id_types(),
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+            ]
+        );
+        assert_eq!(
+            param_summary(&DifferentiatorAlias),
+            vec![
+                ("out_offset", ParamType::Real, 0.0, false),
+                ("gain", ParamType::Real, 1.0, false),
+                ("out_lower_limit", ParamType::Real, -1.0e12, true),
+                ("out_upper_limit", ParamType::Real, 1.0e12, true),
+                ("limit_range", ParamType::Real, 1.0e-6, false),
             ]
         );
     }
@@ -3815,10 +4226,10 @@ pub(super) fn smooth_discontinuity(
 /// # Parameters
 /// - `in_offset` - Input offset (default: 0.0)
 /// - `gain` - Integration gain (default: 1.0)
-/// - `out_ic` - Initial condition (default: 0.0)
 /// - `out_lower_limit` - Lower saturation (default: -1e12)
 /// - `out_upper_limit` - Upper saturation (default: 1e12)
 /// - `limit_range` - Smoothing range near saturation limits (default: 1e-6)
+/// - `out_ic` - Initial condition (default: 0.0)
 ///
 /// # Ports
 /// - `in` - Input to integrate
@@ -3884,7 +4295,6 @@ impl CodeModel for Integrator {
             vec![
                 ParamSpec::real("in_offset", 0.0).with_description("Input offset"),
                 ParamSpec::real("gain", 1.0).with_description("Integration gain (1/time_constant)"),
-                ParamSpec::real("out_ic", 0.0).with_description("Initial output value"),
                 ParamSpec::real("out_lower_limit", -1e12)
                     .required()
                     .with_description("Lower output saturation limit"),
@@ -3893,6 +4303,7 @@ impl CodeModel for Integrator {
                     .with_description("Upper output saturation limit"),
                 ParamSpec::real("limit_range", 1.0e-6)
                     .with_description("Smoothing range near output limits"),
+                ParamSpec::real("out_ic", 0.0).with_description("Initial output value"),
             ]
         })
     }
@@ -4001,8 +4412,8 @@ impl CodeModel for Integrator {
 /// Continuous-time differentiator: out = gain * d(in)/dt
 ///
 /// # Parameters
-/// - `gain` - Differentiation gain (default: 1.0)
 /// - `out_offset` - Output offset (default: 0.0)
+/// - `gain` - Differentiation gain (default: 1.0)
 /// - `out_lower_limit` - Lower saturation (default: -1e12)
 /// - `out_upper_limit` - Upper saturation (default: 1e12)
 /// - `limit_range` - Smoothing range near saturation limits (default: 1e-6)
@@ -4069,8 +4480,8 @@ impl CodeModel for Differentiator {
         static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
         PARAMS.get_or_init(|| {
             vec![
-                ParamSpec::real("gain", 1.0).with_description("Differentiation gain"),
                 ParamSpec::real("out_offset", 0.0).with_description("Output offset voltage"),
+                ParamSpec::real("gain", 1.0).with_description("Differentiation gain"),
                 ParamSpec::real("out_lower_limit", -1e12)
                     .required()
                     .with_description("Lower output saturation limit"),
