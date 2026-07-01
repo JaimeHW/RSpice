@@ -14,7 +14,7 @@ use crate::engine::{
 };
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, Netlist, NetlistParseOptions,
-    StatisticalParamMode, StepCommand, StepTarget, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -736,11 +736,13 @@ impl XyceTestRunner {
         reference_path: &Path,
     ) -> Result<(), String> {
         if contract.requires_step_res_reference() && plan.step.is_some() {
-            let res_reference_path = reference_path.with_extension("res");
-            if !res_reference_path.is_file() {
+            if Self::step_res_reference_path(&plan.deck_path, reference_path).is_none() {
+                let output_res_path = reference_path.with_extension("res");
+                let deck_res_path = Self::deck_sidecar_path(&plan.deck_path, "res");
                 return Err(format!(
-                    "wrapper-origin stepped .PRINT DC deck has no checked-in Xyce .res oracle at {}",
-                    self.display_path(&res_reference_path)
+                    "wrapper-origin stepped .PRINT DC deck has no checked-in Xyce .res oracle at {} or {}",
+                    self.display_path(&output_res_path),
+                    self.display_path(&deck_res_path)
                 ));
             }
         }
@@ -794,6 +796,11 @@ impl XyceTestRunner {
             return Ok(XyceStaticDcContract::WrapperResistorDefaultPrn);
         }
 
+        if Self::is_native_step_data_wrapper_candidate(source) {
+            Self::validate_default_prn_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperDefaultPrn);
+        }
+
         Err(Self::upstream_wrapper_required_reason().to_string())
     }
 
@@ -815,6 +822,23 @@ impl XyceTestRunner {
         relative_path.starts_with("netlists/resistor/")
             && normalized_source.contains("default to 1000")
             && normalized_source.contains("warning")
+    }
+
+    fn is_native_step_data_wrapper_candidate(source: &str) -> bool {
+        let mut has_data_table = false;
+        let mut has_step_data = false;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line)
+                .trim()
+                .to_ascii_lowercase();
+            if trimmed.starts_with(".data ") {
+                has_data_table = true;
+            }
+            if trimmed.starts_with(".step ") && trimmed.contains("data") && trimmed.contains('=') {
+                has_step_data = true;
+            }
+        }
+        has_data_table && has_step_data
     }
 
     fn upstream_wrapper_required_reason() -> &'static str {
@@ -1092,9 +1116,20 @@ impl XyceTestRunner {
             .expect("step plan checked before stepped execution");
         let step_values = step.sweep.values();
         if plan.contract.requires_step_res_reference() {
-            let res_reference_path = plan.reference_path.with_extension("res");
+            let Some(res_reference_path) =
+                Self::step_res_reference_path(&plan.deck_path, &plan.reference_path)
+            else {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    "missing checked-in Xyce .STEP .res oracle after contract validation"
+                        .to_string(),
+                    Vec::new(),
+                );
+            };
             if let Err(err) =
-                self.compare_step_res_reference(&res_reference_path, step, &step_values)
+                self.compare_step_res_reference(&res_reference_path, &netlist, step, &step_values)
             {
                 return self.failure_result(
                     deck,
@@ -1653,6 +1688,7 @@ impl XyceTestRunner {
     fn compare_step_res_reference(
         &self,
         path: &Path,
+        netlist: &Netlist,
         step: &StepCommand,
         expected_values: &[Value],
     ) -> Result<(), String> {
@@ -1677,27 +1713,26 @@ impl XyceTestRunner {
                 self.display_path(path)
             ));
         }
-        let expected_name = Self::step_res_variable_name(step);
-        let actual_name = header_fields.get(1).ok_or_else(|| {
-            format!(
-                "{} line {header_line} is missing the .STEP variable column",
-                self.display_path(path)
-            )
-        })?;
-        if !actual_name.eq_ignore_ascii_case(&expected_name) {
+        let expected_columns = Self::step_res_expected_columns(netlist, step, expected_values)?;
+        if header_fields.len() != expected_columns.len() + 1 {
             return Err(format!(
-                "{} line {header_line} names .STEP variable '{}', expected '{}'",
+                "{} line {header_line} has {} columns; expected STEP plus {} .STEP variable column(s)",
                 self.display_path(path),
-                actual_name,
-                expected_name
+                header_fields.len(),
+                expected_columns.len()
             ));
         }
-        if header_fields.len() != 2 {
-            return Err(format!(
-                "{} line {header_line} has {} columns; native wrapper .res comparison currently supports one .STEP variable",
-                self.display_path(path),
-                header_fields.len()
-            ));
+        for (column_index, (expected_name, _)) in expected_columns.iter().enumerate() {
+            let actual_name = header_fields[column_index + 1];
+            if !actual_name.eq_ignore_ascii_case(expected_name) {
+                return Err(format!(
+                    "{} line {header_line} .STEP column {} is '{}', expected '{}'",
+                    self.display_path(path),
+                    column_index + 1,
+                    actual_name,
+                    expected_name
+                ));
+            }
         }
 
         let mut rows = Vec::new();
@@ -1708,22 +1743,27 @@ impl XyceTestRunner {
             rows.push((line_number, line));
         }
 
-        if rows.len() != expected_values.len() {
+        let expected_row_count = expected_columns
+            .first()
+            .map(|(_, values)| values.len())
+            .unwrap_or(0);
+        if rows.len() != expected_row_count {
             return Err(format!(
                 "{} has {} step row(s), expected {}",
                 self.display_path(path),
                 rows.len(),
-                expected_values.len()
+                expected_row_count
             ));
         }
 
         for (row_index, (line_number, line)) in rows.iter().copied().enumerate() {
             let fields = line.split_whitespace().collect::<Vec<_>>();
-            if fields.len() != 2 {
+            if fields.len() != expected_columns.len() + 1 {
                 return Err(format!(
-                    "{} line {line_number} has {} columns, expected STEP index and value",
+                    "{} line {line_number} has {} columns, expected STEP index plus {} value column(s)",
                     self.display_path(path),
-                    fields.len()
+                    fields.len(),
+                    expected_columns.len()
                 ));
             }
             let actual_index = fields[0].parse::<usize>().map_err(|err| {
@@ -1739,28 +1779,97 @@ impl XyceTestRunner {
                     self.display_path(path)
                 ));
             }
-            let actual = Self::parse_xyce_numeric_token(fields[1]).map_err(|err| {
-                format!(
-                    "{} line {line_number} has invalid STEP value '{}': {err}",
-                    self.display_path(path),
-                    fields[1]
-                )
-            })?;
-            let expected = expected_values[row_index];
-            let tolerance = XyceComparisonTolerance::from_config(&self.config);
-            if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
-                return Err(format!(
-                    "{} line {line_number} STEP {} expected {:.8e}, actual {:.8e}, rel {:.3e}",
-                    self.display_path(path),
-                    expected_name,
-                    expected,
-                    actual,
-                    relative_error
-                ));
+            for (column_index, (expected_name, expected_values)) in
+                expected_columns.iter().enumerate()
+            {
+                let actual =
+                    Self::parse_xyce_numeric_token(fields[column_index + 1]).map_err(|err| {
+                        format!(
+                            "{} line {line_number} has invalid STEP value '{}': {err}",
+                            self.display_path(path),
+                            fields[column_index + 1]
+                        )
+                    })?;
+                let expected = expected_values[row_index];
+                let tolerance = XyceComparisonTolerance::from_config(&self.config);
+                if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+                    return Err(format!(
+                        "{} line {line_number} STEP {} expected {:.8e}, actual {:.8e}, rel {:.3e}",
+                        self.display_path(path),
+                        expected_name,
+                        expected,
+                        actual,
+                        relative_error
+                    ));
+                }
             }
         }
 
         Ok(())
+    }
+
+    fn step_res_reference_path(deck_path: &Path, reference_path: &Path) -> Option<PathBuf> {
+        let output_res_path = reference_path.with_extension("res");
+        if output_res_path.is_file() {
+            return Some(output_res_path);
+        }
+        let deck_res_path = Self::deck_sidecar_path(deck_path, "res");
+        if deck_res_path.is_file() {
+            return Some(deck_res_path);
+        }
+        None
+    }
+
+    fn deck_sidecar_path(deck_path: &Path, extension: &str) -> PathBuf {
+        let mut sidecar = deck_path.as_os_str().to_os_string();
+        sidecar.push(".");
+        sidecar.push(extension);
+        PathBuf::from(sidecar)
+    }
+
+    fn step_res_expected_columns(
+        netlist: &Netlist,
+        step: &StepCommand,
+        expected_values: &[Value],
+    ) -> Result<Vec<(String, Vec<Value>)>, String> {
+        if let StepSweep::Data { table_name } = &step.sweep {
+            let table = netlist
+                .data_tables
+                .iter()
+                .find(|table| table.name.eq_ignore_ascii_case(table_name))
+                .ok_or_else(|| format!(".STEP DATA table '{table_name}' not found"))?;
+            if table.params.is_empty() {
+                return Err(format!(".STEP DATA table '{}' has no columns", table.name));
+            }
+            if table.rows.is_empty() {
+                return Err(format!(".STEP DATA table '{}' has no rows", table.name));
+            }
+            let mut columns = table
+                .params
+                .iter()
+                .map(|param| (param.clone(), Vec::with_capacity(table.rows.len())))
+                .collect::<Vec<_>>();
+            for (row_index, row) in table.rows.iter().enumerate() {
+                if row.len() != columns.len() {
+                    return Err(format!(
+                        ".STEP DATA table '{}' row {} has {} value(s), expected {}",
+                        table.name,
+                        row_index,
+                        row.len(),
+                        columns.len()
+                    ));
+                }
+                for (column_index, value) in row.iter().copied().enumerate() {
+                    columns[column_index].1.push(value);
+                }
+            }
+            return Ok(columns);
+        }
+
+        Ok(vec![(
+            Self::step_res_variable_name(step),
+            expected_values.to_vec(),
+        )])
     }
 
     fn step_res_variable_name(step: &StepCommand) -> String {
@@ -4222,8 +4331,35 @@ impl XyceTestRunner {
             );
         }
 
-        if step.sweep.values().is_empty() {
-            return Err("deck has invalid .STEP sweep bounds".to_string());
+        match &step.sweep {
+            StepSweep::Data { table_name } => {
+                let table = netlist
+                    .data_tables
+                    .iter()
+                    .find(|table| table.name.eq_ignore_ascii_case(table_name))
+                    .ok_or_else(|| format!(".STEP DATA table '{table_name}' not found"))?;
+                if table.params.is_empty() {
+                    return Err(format!(".STEP DATA table '{}' has no columns", table.name));
+                }
+                if table.rows.is_empty() {
+                    return Err(format!(".STEP DATA table '{}' has no rows", table.name));
+                }
+                for (row_index, row) in table.rows.iter().enumerate() {
+                    if row.len() != table.params.len() {
+                        return Err(format!(
+                            ".STEP DATA table '{}' row {} has {} value(s), expected {}",
+                            table.name,
+                            row_index,
+                            row.len(),
+                            table.params.len()
+                        ));
+                    }
+                }
+            }
+            _ if step.sweep.values().is_empty() => {
+                return Err("deck has invalid .STEP sweep bounds".to_string());
+            }
+            _ => {}
         }
 
         Ok(Some(step.clone()))

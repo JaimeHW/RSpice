@@ -1,4 +1,5 @@
 use super::*;
+use crate::netlist::StepSweep;
 
 impl Engine {
     /// Run .STEP parametric sweep
@@ -44,6 +45,18 @@ impl Engine {
         step_cmd: &StepCommand,
         values: &[Value],
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+        if matches!(step_cmd.sweep, StepSweep::Data { .. }) {
+            let stepped_netlists = self.step_netlists_for_command(netlist, step_cmd, values)?;
+            let mut results = Vec::with_capacity(stepped_netlists.len());
+            for (index, stepped_netlist) in stepped_netlists {
+                match self.run_dc_op(&stepped_netlist) {
+                    Ok(result) => results.push((index, result)),
+                    Err(e) => return Err(step_point_error("DATA", &step_cmd.name, index, e)),
+                }
+            }
+            return Ok(results);
+        }
+
         match step_cmd.target {
             StepTarget::Param => self.run_step(netlist, &step_cmd.name, values),
             StepTarget::Device => self.run_step_device(
@@ -68,6 +81,10 @@ impl Engine {
         step_cmd: &StepCommand,
         values: &[Value],
     ) -> Result<Vec<(Value, Netlist)>, SimulationError> {
+        if let StepSweep::Data { table_name } = &step_cmd.sweep {
+            return Self::data_step_netlists_for_table(netlist, table_name);
+        }
+
         validate_step_values(values)?;
 
         let mut stepped = Vec::with_capacity(values.len());
@@ -84,6 +101,61 @@ impl Engine {
                 "Parameter '{}' is not bound to any netlist expression",
                 step_cmd.name
             )));
+        }
+
+        Ok(stepped)
+    }
+
+    fn data_step_netlists_for_table(
+        netlist: &Netlist,
+        table_name: &str,
+    ) -> Result<Vec<(Value, Netlist)>, SimulationError> {
+        let table = netlist
+            .data_tables
+            .iter()
+            .find(|table| table.name.eq_ignore_ascii_case(table_name))
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(".STEP DATA table '{table_name}' not found"))
+            })?;
+        if table.params.is_empty() {
+            return Err(SimulationError::Circuit(format!(
+                ".STEP DATA table '{}' has no parameter columns",
+                table.name
+            )));
+        }
+        if table.rows.is_empty() {
+            return Err(SimulationError::Circuit(format!(
+                ".STEP DATA table '{}' has no rows",
+                table.name
+            )));
+        }
+
+        let mut stepped = Vec::with_capacity(table.rows.len());
+        for (row_index, row) in table.rows.iter().enumerate() {
+            if row.len() != table.params.len() {
+                return Err(SimulationError::Circuit(format!(
+                    ".STEP DATA table '{}' row {} has {} value(s), expected {}",
+                    table.name,
+                    row_index,
+                    row.len(),
+                    table.params.len()
+                )));
+            }
+            if let Some(value) = row.iter().find(|value| !value.is_finite()) {
+                return Err(SimulationError::Circuit(format!(
+                    ".STEP DATA table '{}' row {} contains non-finite value {}",
+                    table.name, row_index, value
+                )));
+            }
+
+            let overrides = table
+                .params
+                .iter()
+                .cloned()
+                .zip(row.iter().copied())
+                .collect::<Vec<_>>();
+            let (netlist, _) = Self::create_perturbed_netlist_multi(netlist, &overrides)?;
+            stepped.push((row_index as Value, netlist));
         }
 
         Ok(stepped)

@@ -316,6 +316,8 @@ impl Engine {
         Self::logical_lines_after_title(source).iter().any(|line| {
             let upper = line.to_ascii_uppercase();
             if Self::is_parameter_assignment_command(upper.trim_start())
+                || upper.starts_with(".DATA")
+                || upper.starts_with(".ENDDATA")
                 || upper.starts_with(".IC")
                 || upper.starts_with(".NODESET")
             {
@@ -357,7 +359,7 @@ impl Engine {
             let _ = writeln!(out, ".PARAM {}={:.17e}", name, value);
         }
 
-        for line in Self::logical_lines_after_title(source) {
+        for line in Self::logical_lines_after_title_preserving_data_blocks(source) {
             let mut override_suffix = String::new();
             for (name, value) in overrides {
                 if Self::param_assignment_present(&line, name) {
@@ -373,6 +375,59 @@ impl Engine {
         }
 
         out
+    }
+
+    fn logical_lines_after_title_preserving_data_blocks(source: &str) -> Vec<String> {
+        let mut lines = Vec::new();
+        let mut continuation = String::new();
+        let mut in_data_block = false;
+
+        for raw in source.lines().skip(1) {
+            let line = raw.split(';').next().unwrap_or("").trim();
+            if line.is_empty() || line.starts_with('*') || line.starts_with('$') {
+                continue;
+            }
+
+            let head = line.split_whitespace().next().unwrap_or("");
+            if in_data_block {
+                if !continuation.is_empty() {
+                    lines.push(std::mem::take(&mut continuation));
+                }
+                lines.push(line.to_string());
+                if head.eq_ignore_ascii_case(".enddata") {
+                    in_data_block = false;
+                }
+                continue;
+            }
+
+            if head.eq_ignore_ascii_case(".data") {
+                if !continuation.is_empty() {
+                    lines.push(std::mem::take(&mut continuation));
+                }
+                lines.push(line.to_string());
+                in_data_block = true;
+                continue;
+            }
+
+            if line.starts_with('+') {
+                if !continuation.is_empty() {
+                    continuation.push(' ');
+                    continuation.push_str(line.trim_start_matches('+').trim());
+                }
+                continue;
+            }
+
+            if !continuation.is_empty() {
+                lines.push(std::mem::take(&mut continuation));
+            }
+            continuation.push_str(line);
+        }
+
+        if !continuation.is_empty() {
+            lines.push(continuation);
+        }
+
+        lines
     }
 
     fn sensitivity_step(

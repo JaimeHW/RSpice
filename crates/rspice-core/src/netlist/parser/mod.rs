@@ -10,9 +10,9 @@ use super::expr::{eval_expression, eval_expression_complex};
 use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
 use super::xspice_parser;
 use super::{
-    AnalysisCommand, BjtType, Element, ElementKind, FreqVariation, InitialCondition, JfetType,
-    MesfetType, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist, NodeSet,
-    ParamContext, ParametricValue, ParseDiagnostic, ParseError, PoleZeroAnalysisType,
+    AnalysisCommand, BjtType, DataTable, Element, ElementKind, FreqVariation, InitialCondition,
+    JfetType, MesfetType, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist,
+    NodeSet, ParamContext, ParametricValue, ParseDiagnostic, ParseError, PoleZeroAnalysisType,
     PoleZeroTransferType, SaveSet, SaveSignal, SensitivityAcSweep, SimulationOptions, SourceSpec,
     StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
     VerilogAInclude,
@@ -67,6 +67,136 @@ impl Default for NetlistParseOptions {
     }
 }
 
+#[derive(Debug)]
+struct DataTableBuilder {
+    opened_at_line: usize,
+    name: String,
+    params: Vec<String>,
+    flat_values: Vec<Value>,
+}
+
+impl DataTableBuilder {
+    fn new(opened_at_line: usize, line: &str) -> Result<Self, ParseError> {
+        let mut fields = line.split_whitespace();
+        let _data = fields.next();
+        let Some(name) = fields.next() else {
+            return Err(ParseError::Syntax {
+                line: opened_at_line,
+                message: ".DATA requires a table name".to_string(),
+            });
+        };
+        let params = fields.map(|field| field.to_string()).collect::<Vec<_>>();
+        validate_data_table_params(opened_at_line, name, &params)?;
+        Ok(Self {
+            opened_at_line,
+            name: name.to_string(),
+            params,
+            flat_values: Vec::new(),
+        })
+    }
+
+    fn push_line(
+        &mut self,
+        line_num: usize,
+        line: &str,
+        params: &ParamContext,
+    ) -> Result<(), ParseError> {
+        let body = line.strip_prefix('+').unwrap_or(line).trim();
+        if body.is_empty() {
+            return Ok(());
+        }
+        let fields = body.split_whitespace().collect::<Vec<_>>();
+        if fields.is_empty() {
+            return Ok(());
+        }
+
+        if self.params.is_empty() {
+            self.params = fields.iter().map(|field| (*field).to_string()).collect();
+            validate_data_table_params(line_num, &self.name, &self.params)?;
+            return Ok(());
+        }
+
+        for field in fields {
+            self.flat_values
+                .push(parse_data_table_value(line_num, &self.name, field, params)?);
+        }
+        Ok(())
+    }
+
+    fn finish(self, line_num: usize) -> Result<DataTable, ParseError> {
+        if self.params.is_empty() {
+            return Err(ParseError::Syntax {
+                line: self.opened_at_line,
+                message: format!(".DATA {} has no parameter columns", self.name),
+            });
+        }
+        let columns = self.params.len();
+        if !self.flat_values.len().is_multiple_of(columns) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    ".DATA {} has {} value(s), which does not fill {} column(s)",
+                    self.name,
+                    self.flat_values.len(),
+                    columns
+                ),
+            });
+        }
+        let rows = self
+            .flat_values
+            .chunks_exact(columns)
+            .map(|chunk| chunk.to_vec())
+            .collect::<Vec<_>>();
+        Ok(DataTable {
+            name: self.name,
+            params: self.params,
+            rows,
+        })
+    }
+}
+
+fn validate_data_table_params(
+    line_num: usize,
+    table_name: &str,
+    params: &[String],
+) -> Result<(), ParseError> {
+    for param in params {
+        let mut chars = param.chars();
+        let valid = chars
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_' || ch == '$')
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' || ch == '.');
+        if !valid {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    ".DATA {table_name} parameter column '{param}' is not a valid parameter name"
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn parse_data_table_value(
+    line_num: usize,
+    table_name: &str,
+    token: &str,
+    params: &ParamContext,
+) -> Result<Value, ParseError> {
+    if let Ok(value) = parse_spice_value(token) {
+        return Ok(value);
+    }
+    let expr = token
+        .strip_prefix('{')
+        .and_then(|rest| rest.strip_suffix('}'))
+        .unwrap_or(token);
+    eval_expression(expr, params).map_err(|err| ParseError::Syntax {
+        line: line_num,
+        message: format!(".DATA {table_name} value '{token}' is not numeric: {err}"),
+    })
+}
+
 /// Parse a complete netlist from string
 pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     parse_netlist_with_options(input, NetlistParseOptions::default())
@@ -99,8 +229,7 @@ pub fn parse_netlist_with_options(
 
     let mut line_num = 1;
     let mut continuation = String::new();
-    let mut skipping_data_block = false;
-    let mut data_block_line = None;
+    let mut data_table: Option<DataTableBuilder> = None;
 
     for line in lines.iter().skip(1) {
         line_num += 1;
@@ -114,13 +243,21 @@ pub fn parse_netlist_with_options(
             continue;
         }
 
-        // `.DATA` rows belong to multi-run expansion (`netlist::multi_run`),
-        // not the circuit; skip the block through `.ENDDATA`.
         let head = trimmed.split_whitespace().next().unwrap_or("");
-        if skipping_data_block {
+        if let Some(table) = data_table.as_mut() {
             if head.eq_ignore_ascii_case(".enddata") {
-                skipping_data_block = false;
-                data_block_line = None;
+                let table = data_table
+                    .take()
+                    .expect(".DATA builder exists while inside data block")
+                    .finish(line_num)?;
+                state.data_tables.push(table);
+            } else if head.eq_ignore_ascii_case(".data") {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: ".DATA cannot be nested inside another .DATA block".to_string(),
+                });
+            } else {
+                table.push_line(line_num, trimmed, &state.params)?;
             }
             continue;
         }
@@ -153,8 +290,7 @@ pub fn parse_netlist_with_options(
             break;
         }
         if head.eq_ignore_ascii_case(".data") {
-            skipping_data_block = true;
-            data_block_line = Some(line_num);
+            data_table = Some(DataTableBuilder::new(line_num, trimmed)?);
             continue;
         }
         if head.eq_ignore_ascii_case(".enddata") {
@@ -175,9 +311,9 @@ pub fn parse_netlist_with_options(
         continuation = trimmed.to_string();
     }
 
-    if let Some(opened_at_line) = data_block_line {
+    if let Some(table) = data_table {
         return Err(ParseError::Syntax {
-            line: opened_at_line,
+            line: table.opened_at_line,
             message: ".DATA without a matching .ENDDATA".to_string(),
         });
     }

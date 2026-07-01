@@ -15,6 +15,7 @@ pub(super) struct SubcktFrame {
 pub(super) struct ParseState {
     pub(super) elements: Vec<Element>,
     pub(super) analyses: Vec<AnalysisCommand>,
+    pub(super) data_tables: Vec<DataTable>,
     pub(super) models: Vec<ModelDef>,
     pub(super) subcircuits: Vec<SubcircuitDef>,
     pub(super) params: ParamContext,
@@ -40,6 +41,7 @@ impl ParseState {
         Self {
             elements: Vec::new(),
             analyses: Vec::new(),
+            data_tables: Vec::new(),
             models: Vec::new(),
             subcircuits: Vec::new(),
             params: ParamContext::new(),
@@ -79,6 +81,7 @@ impl ParseState {
             title,
             elements: self.elements,
             analyses: self.analyses,
+            data_tables: self.data_tables,
             models: self.models,
             subcircuits: self.subcircuits,
             params: self.params,

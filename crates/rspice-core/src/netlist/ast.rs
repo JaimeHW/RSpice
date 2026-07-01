@@ -1469,6 +1469,17 @@ pub struct StepCommand {
     pub sweep: StepSweep,
 }
 
+/// Named table captured from a `.DATA ... .ENDDATA` block.
+#[derive(Debug, Clone)]
+pub struct DataTable {
+    /// Table name referenced by `DATA=<name>`.
+    pub name: String,
+    /// Parameter columns updated simultaneously for each table row.
+    pub params: Vec<String>,
+    /// Row-major numeric values. Each row length must match `params.len()`.
+    pub rows: Vec<Vec<Value>>,
+}
+
 /// What is being swept in a .STEP command
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepTarget {
@@ -1505,6 +1516,8 @@ pub enum StepSweep {
     },
     /// List of specific values: LIST v1 v2 v3...
     List(Vec<Value>),
+    /// Row-wise parameter table reference: DATA=<table-name>
+    Data { table_name: String },
 }
 
 impl StepSweep {
@@ -1530,6 +1543,7 @@ impl StepSweep {
                     Vec::new()
                 }
             }
+            StepSweep::Data { .. } => Vec::new(),
         }
     }
 }

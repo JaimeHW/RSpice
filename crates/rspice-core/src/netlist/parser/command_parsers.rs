@@ -10,6 +10,21 @@ pub(super) fn parse_step_command(
     // Check for sweep type prefix
     let first = expect_ident(stream, line_num)?;
     let first_upper = first.to_uppercase();
+    if first_upper == "DATA" {
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: ".STEP DATA requires DATA=<table-name>".to_string(),
+            });
+        }
+        let table_name = expect_ident(stream, line_num)?;
+        return Ok(StepCommand {
+            target: StepTarget::Param,
+            name: table_name.clone(),
+            param_name: None,
+            sweep: StepSweep::Data { table_name },
+        });
+    }
 
     let (sweep_prefix, target_str, name) = match first_upper.as_str() {
         "DEC" | "OCT" | "LIN" => {

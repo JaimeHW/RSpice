@@ -85,6 +85,9 @@ pub struct Netlist {
     pub elements: Vec<Element>,
     /// Analysis commands
     pub analyses: Vec<AnalysisCommand>,
+    /// Named `.DATA` tables retained for table-driven analyses such as
+    /// `.STEP DATA=<name>`.
+    pub data_tables: Vec<DataTable>,
     /// Model definitions
     pub models: Vec<ModelDef>,
     /// Subcircuit definitions
@@ -579,6 +582,7 @@ impl Default for Netlist {
             title: String::new(),
             elements: Vec::new(),
             analyses: Vec::new(),
+            data_tables: Vec::new(),
             models: Vec::new(),
             subcircuits: Vec::new(),
             params: ParamContext::new(),
@@ -3487,6 +3491,48 @@ mod tests {
             message.contains(".DATA") && message.contains(".ENDDATA"),
             "unexpected error: {message}"
         );
+    }
+
+    #[test]
+    fn step_data_table_is_retained_and_referenced() {
+        let netlist = Netlist::parse(
+            "step data table\n\
+             .param base=2 rval=1k\n\
+             R1 1 0 {rval}\n\
+             V1 1 0 1\n\
+             .dc V1 1 1 1\n\
+             .data sweep\n\
+             + rval scale\n\
+             + 1k {base*3}\n\
+             + 2k 8\n\
+             .enddata\n\
+             .step data=sweep\n\
+             .end\n",
+        )
+        .expect(".DATA table and .STEP DATA should parse");
+
+        let table = netlist
+            .data_tables
+            .iter()
+            .find(|table| table.name.eq_ignore_ascii_case("sweep"))
+            .expect(".DATA table retained");
+        assert_eq!(table.params, vec!["rval", "scale"]);
+        assert_eq!(table.rows, vec![vec![1000.0, 6.0], vec![2000.0, 8.0]]);
+
+        let step = netlist
+            .analyses
+            .iter()
+            .find_map(|analysis| match analysis {
+                AnalysisCommand::Step(step) => Some(step),
+                _ => None,
+            })
+            .expect(".STEP retained");
+        match &step.sweep {
+            StepSweep::Data { table_name } => {
+                assert!(table_name.eq_ignore_ascii_case("sweep"))
+            }
+            other => panic!("expected .STEP DATA sweep, got {other:?}"),
+        }
     }
 
     #[test]
