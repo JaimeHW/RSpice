@@ -1,15 +1,24 @@
 use super::*;
 use crate::Value;
 use crate::xspice::{CmError, EvaluationPhase};
+use std::sync::Arc;
 
 const D_LUT_INITIAL_STATE: i64 = i64::MIN;
 const D_LOOKUP_DELAY_MIN: Value = 1.0e-12;
+const D_LUT_TABLE_RESOURCE: &str = "xspice.d_lut.table_values";
+const D_GENLUT_TABLE_RESOURCE: &str = "xspice.d_genlut.table_values";
 
 #[derive(Debug, Default)]
 pub struct DigitalLookupTable;
 
 #[derive(Debug, Default)]
 pub struct DigitalGenericLookupTable;
+
+#[derive(Debug, Clone)]
+struct DLookupTableBytes {
+    table_values: String,
+    bytes: Arc<[u8]>,
+}
 
 fn d_lut_error(message: impl Into<String>) -> CmError {
     CmError::EvaluationError(format!("d_lut: {}", message.into()))
@@ -35,8 +44,30 @@ fn d_lut_state_from_code(code: i64) -> DigitalState {
     }
 }
 
-fn d_lut_table_state(table: &str, index: usize) -> DigitalState {
-    match table.as_bytes().get(index).copied() {
+fn d_lookup_table_bytes(ctx: &mut CmContext, resource_key: &str) -> CmResult<Arc<[u8]>> {
+    let table = ctx
+        .string_param("table_values")
+        .ok_or_else(|| CmError::MissingParameter("table_values".to_string()))?;
+    if let Some(resource) = ctx.resource::<DLookupTableBytes>(resource_key)
+        && resource.table_values == table
+    {
+        return Ok(Arc::clone(&resource.bytes));
+    }
+
+    let table_values = table.to_string();
+    let bytes: Arc<[u8]> = Arc::from(table.as_bytes());
+    ctx.set_resource(
+        resource_key,
+        Arc::new(DLookupTableBytes {
+            table_values,
+            bytes: Arc::clone(&bytes),
+        }),
+    );
+    Ok(bytes)
+}
+
+fn d_lut_table_state(table: &[u8], index: usize) -> DigitalState {
+    match table.get(index).copied() {
         Some(b'0') => DigitalState::Zero,
         Some(b'1') => DigitalState::One,
         _ => DigitalState::Unknown,
@@ -63,8 +94,8 @@ fn d_genlut_strength_from_code(code: i64) -> DigitalStrength {
     }
 }
 
-fn d_genlut_lookup_value(table: &str, index: usize) -> DigitalValue {
-    match table.as_bytes().get(index).copied() {
+fn d_genlut_lookup_value(table: &[u8], index: usize) -> DigitalValue {
+    match table.get(index).copied() {
         Some(b'0') => DigitalValue::new(DigitalState::Zero, DigitalStrength::Strong),
         Some(b'1') => DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
         Some(b'z') => DigitalValue::new(DigitalState::Unknown, DigitalStrength::HighZ),
@@ -197,6 +228,77 @@ fn d_genlut_total_state_count(input_width: usize, output_width: usize) -> usize 
     input_width + 2 * output_width
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DGenlutInputScan {
+    index: Option<usize>,
+    max_delay: Value,
+    one_bits: usize,
+    unknown_bits: usize,
+}
+
+fn d_genlut_scan_inputs(
+    ctx: &CmContext,
+    inputs: &[DigitalValue],
+    input_width: usize,
+    input_start: usize,
+) -> DGenlutInputScan {
+    let mut max_delay = 0.0;
+    let mut index = Some(0usize);
+    let mut one_bits = 0usize;
+    let mut unknown_bits = 0usize;
+
+    for bit in 0..input_width {
+        let input = inputs.get(bit).copied().unwrap_or_default();
+        let input_code = d_lut_state_code(input.state);
+        if input_code != ctx.int_state(input_start + bit) {
+            max_delay = f64::max(
+                max_delay,
+                d_genlut_param_value(ctx, "input_delay", bit, 0.0),
+            );
+        }
+        let bit_mask = 1usize << bit;
+        match input.state.logic_level() {
+            Some(true) => {
+                if let Some(value) = index {
+                    index = Some(value | bit_mask);
+                }
+                one_bits |= bit_mask;
+            }
+            Some(false) => {}
+            None => {
+                index = None;
+                unknown_bits |= bit_mask;
+            }
+        }
+    }
+
+    DGenlutInputScan {
+        index,
+        max_delay,
+        one_bits,
+        unknown_bits,
+    }
+}
+
+fn d_genlut_commit_input_scan(
+    ctx: &mut CmContext,
+    input_width: usize,
+    input_start: usize,
+    scan: DGenlutInputScan,
+) {
+    for bit in 0..input_width {
+        let bit_mask = 1usize << bit;
+        let code = if scan.unknown_bits & bit_mask != 0 {
+            -1
+        } else if scan.one_bits & bit_mask != 0 {
+            1
+        } else {
+            0
+        };
+        d_lookup_set_int_state(ctx, input_start + bit, code);
+    }
+}
+
 fn d_lut_delay(
     ctx: &CmContext,
     new_code: i64,
@@ -264,13 +366,11 @@ impl CodeModel for DigitalLookupTable {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let table = ctx
-            .string_param("table_values")
-            .ok_or_else(|| CmError::MissingParameter("table_values".to_string()))?;
+        let table = d_lookup_table_bytes(ctx, D_LUT_TABLE_RESOURCE)?;
         let input_width = ctx.port_width("in");
         let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
         let output_state = match d_lut_index_for_width(inputs, input_width)? {
-            Some(index) => d_lut_table_state(table, index),
+            Some(index) => d_lut_table_state(table.as_ref(), index),
             None => DigitalState::Unknown,
         };
         let output_code = d_lut_state_code(output_state);
@@ -355,47 +455,24 @@ impl CodeModel for DigitalGenericLookupTable {
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let (input_width, output_width) = d_genlut_shape(ctx)?;
-        if ctx.string_param("table_values").is_none() {
-            return Err(CmError::MissingParameter("table_values".to_string()));
-        }
+        let table = d_lookup_table_bytes(ctx, D_GENLUT_TABLE_RESOURCE)?;
         let input_start = d_genlut_previous_input_start(input_width, output_width);
         let state_start = d_genlut_previous_state_start(input_width, output_width);
         let strength_start = d_genlut_previous_strength_start(input_width, output_width);
 
-        let mut max_input_delay = 0.0;
-        let mut input_index = Some(0usize);
-        for bit in 0..input_width {
-            let input = {
-                let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
-                inputs.get(bit).copied().unwrap_or_default()
-            };
-            let input_code = d_lut_state_code(input.state);
-            if input_code != ctx.int_state(input_start + bit) {
-                max_input_delay = f64::max(
-                    max_input_delay,
-                    d_genlut_param_value(ctx, "input_delay", bit, 0.0),
-                );
-            }
-            match (input_index, input.state.logic_level()) {
-                (Some(index), Some(true)) => {
-                    input_index = Some(index | (1usize << bit));
-                }
-                (Some(index), Some(false)) => {
-                    input_index = Some(index);
-                }
-                _ => input_index = None,
-            }
-            d_lookup_set_int_state(ctx, input_start + bit, input_code);
-        }
+        let scan = {
+            let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
+            d_genlut_scan_inputs(ctx, inputs, input_width, input_start)
+        };
+        d_genlut_commit_input_scan(ctx, input_width, input_start, scan);
 
         let entry_len = 1usize << input_width;
         for output_index in 0..output_width {
-            let value = {
-                let table = ctx.string_param("table_values").unwrap_or("");
-                match input_index {
-                    Some(index) => d_genlut_lookup_value(table, index + output_index * entry_len),
-                    None => d_genlut_unknown_value(),
+            let value = match scan.index {
+                Some(index) => {
+                    d_genlut_lookup_value(table.as_ref(), index + output_index * entry_len)
                 }
+                None => d_genlut_unknown_value(),
             };
             let (state_code, strength_code) = d_genlut_value_code(value);
             let previous_state = ctx.int_state(state_start + output_index);
@@ -411,7 +488,7 @@ impl CodeModel for DigitalGenericLookupTable {
                         output_index,
                         state_code,
                         previous_state,
-                        max_input_delay,
+                        scan.max_delay,
                     ),
                 );
             } else if strength_code != previous_strength {
@@ -439,14 +516,14 @@ mod tests {
 
     #[test]
     fn d_lut_short_tables_default_missing_entries_to_unknown() {
-        assert_eq!(d_lut_table_state("01", 0), DigitalState::Zero);
-        assert_eq!(d_lut_table_state("01", 1), DigitalState::One);
-        assert_eq!(d_lut_table_state("01", 2), DigitalState::Unknown);
+        assert_eq!(d_lut_table_state(b"01", 0), DigitalState::Zero);
+        assert_eq!(d_lut_table_state(b"01", 1), DigitalState::One);
+        assert_eq!(d_lut_table_state(b"01", 2), DigitalState::Unknown);
     }
 
     #[test]
     fn d_lut_non_binary_table_characters_are_unknown() {
-        assert_eq!(d_lut_table_state("0x1", 1), DigitalState::Unknown);
+        assert_eq!(d_lut_table_state(b"0x1", 1), DigitalState::Unknown);
     }
 
     #[test]
@@ -531,9 +608,28 @@ mod tests {
     #[test]
     fn d_genlut_z_table_entries_are_high_impedance_unknowns() {
         assert_eq!(
-            d_genlut_lookup_value("z", 0),
+            d_genlut_lookup_value(b"z", 0),
             DigitalValue::new(DigitalState::Unknown, DigitalStrength::HighZ)
         );
+    }
+
+    #[test]
+    fn d_lookup_table_byte_cache_reloads_when_table_param_changes() {
+        let mut ctx = CmContext::new();
+        ctx.set_string_param("table_values", "01");
+
+        let first =
+            d_lookup_table_bytes(&mut ctx, D_LUT_TABLE_RESOURCE).expect("table bytes cache");
+        let reused =
+            d_lookup_table_bytes(&mut ctx, D_LUT_TABLE_RESOURCE).expect("table bytes reuse");
+        assert!(Arc::ptr_eq(&first, &reused));
+        assert_eq!(first.as_ref(), b"01");
+
+        ctx.set_string_param("table_values", "10");
+        let updated =
+            d_lookup_table_bytes(&mut ctx, D_LUT_TABLE_RESOURCE).expect("table bytes reload");
+        assert!(!Arc::ptr_eq(&first, &updated));
+        assert_eq!(updated.as_ref(), b"10");
     }
 
     #[test]
@@ -544,6 +640,35 @@ mod tests {
         assert_eq!(d_genlut_param_value(&ctx, "rise_delay", 0, 9.0), 1.0e-9);
         assert_eq!(d_genlut_param_value(&ctx, "rise_delay", 1, 9.0), 2.0e-9);
         assert_eq!(d_genlut_param_value(&ctx, "rise_delay", 2, 9.0), 2.0e-9);
+    }
+
+    #[test]
+    fn d_genlut_input_scan_packs_known_bits_unknowns_and_changed_delay() {
+        let mut ctx = CmContext::new();
+        ctx.allocate_int_states(4);
+        ctx.set_int_state(0, 0);
+        ctx.set_int_state(1, 0);
+        ctx.set_int_state(2, 0);
+        ctx.set_int_state(3, 1);
+        ctx.set_real_vector_param("input_delay", vec![1.0e-9, 2.0e-9, 3.0e-9, 4.0e-9]);
+
+        let inputs = [
+            DigitalValue::one(),
+            DigitalValue::unknown(),
+            DigitalValue::zero(),
+        ];
+        let scan = d_genlut_scan_inputs(&ctx, &inputs, 4, 0);
+
+        assert_eq!(scan.index, None);
+        assert_eq!(scan.one_bits, 0b0001);
+        assert_eq!(scan.unknown_bits, 0b0010);
+        assert_eq!(scan.max_delay, 4.0e-9);
+
+        d_genlut_commit_input_scan(&mut ctx, 4, 0, scan);
+        assert_eq!(ctx.int_state(0), 1);
+        assert_eq!(ctx.int_state(1), -1);
+        assert_eq!(ctx.int_state(2), 0);
+        assert_eq!(ctx.int_state(3), 0);
     }
 
     #[test]
