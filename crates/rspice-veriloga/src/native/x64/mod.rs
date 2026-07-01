@@ -17,8 +17,11 @@ use super::model::{
 };
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
-use crate::canonical_ir::{CanonicalIrArtifact, EquationId, MirEquationKind, MirModel, NodeId};
-use crate::codegen::{AssignmentStep, CompiledModel, StampIndex, StampProgram};
+use crate::canonical_ir::{
+    CanonicalIrArtifact, EquationId, ExprId, HirExprKind, HirExpression, MirEquationKind, MirModel,
+    NodeId, SourceSpanRef,
+};
+use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, StampIndex, StampProgram};
 use crate::native::x64::codegen::NativeAssignment;
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 
@@ -103,9 +106,10 @@ fn compile_model_inner(
 
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
         let static_condition = if let Some(condition) = &stamp.static_condition {
-            let program = NativeProgram::from_bytecode(
-                model.name.clone(),
-                EntryKind::StaticCondition,
+            let program = lower_static_condition_program(
+                model,
+                canonical_mir,
+                stamp_index,
                 condition,
                 base_limits,
             )?;
@@ -328,6 +332,135 @@ fn compile_model_inner(
         current_dependencies,
         NativeRequiredStorage::for_model(model),
     )
+}
+
+fn lower_static_condition_program(
+    model: &CompiledModel,
+    canonical_mir: Option<&MirModel>,
+    stamp_index: usize,
+    bytecode_program: &BytecodeProgram,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<NativeProgram> {
+    if let Some(mir) = canonical_mir {
+        let (mir, expr) = canonical_static_condition_expr(model, mir, stamp_index)?;
+        return NativeProgram::from_mir_expression(
+            model.name.clone(),
+            EntryKind::StaticCondition,
+            &mir,
+            expr,
+            limits,
+        );
+    }
+
+    NativeProgram::from_bytecode(
+        model.name.clone(),
+        EntryKind::StaticCondition,
+        bytecode_program,
+        limits,
+    )
+}
+
+fn canonical_static_condition_expr(
+    model: &CompiledModel,
+    canonical_mir: &MirModel,
+    stamp_index: usize,
+) -> JitResult<(MirModel, ExprId)> {
+    let equation =
+        canonical_mir
+            .equations
+            .get(stamp_index)
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!("canonical equation {stamp_index} is outside equation table")
+                    .into(),
+            })?;
+    let mut synthetic = canonical_mir.clone();
+    let expr = extract_leading_static_condition(
+        model,
+        &mut synthetic,
+        stamp_index,
+        equation.expression.id,
+    )?;
+    Ok((synthetic, expr))
+}
+
+fn extract_leading_static_condition(
+    model: &CompiledModel,
+    mir: &mut MirModel,
+    stamp_index: usize,
+    root: ExprId,
+) -> JitResult<ExprId> {
+    let mut condition = None;
+    let mut current = root;
+
+    loop {
+        let expression = canonical_expression(model, mir, current)?.clone();
+        match expression.kind {
+            HirExprKind::Conditional {
+                condition: guard,
+                then_expr,
+                else_expr,
+            } if is_canonical_zero(model, mir, else_expr)? => {
+                condition = Some(match condition {
+                    Some(previous) => {
+                        append_canonical_binary(mir, "And", previous, guard, expression.span)
+                    }
+                    None => guard,
+                });
+                current = then_expr;
+            }
+            _ => {
+                return condition.ok_or_else(|| JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: format!(
+                        "canonical equation {stamp_index} is missing leading static-condition guard"
+                    )
+                    .into(),
+                });
+            }
+        }
+    }
+}
+
+fn is_canonical_zero(model: &CompiledModel, mir: &MirModel, expr_id: ExprId) -> JitResult<bool> {
+    match &canonical_expression(model, mir, expr_id)?.kind {
+        HirExprKind::Number { value, .. } => Ok(value.to_bits() == 0.0_f64.to_bits()),
+        _ => Ok(false),
+    }
+}
+
+fn canonical_expression<'a>(
+    model: &CompiledModel,
+    mir: &'a MirModel,
+    expr_id: ExprId,
+) -> JitResult<&'a HirExpression> {
+    mir.expressions
+        .get(usize::from(expr_id))
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!("canonical expression {expr_id} is outside MIR expression arena")
+                .into(),
+        })
+}
+
+fn append_canonical_binary(
+    mir: &mut MirModel,
+    op: &'static str,
+    left: ExprId,
+    right: ExprId,
+    span: SourceSpanRef,
+) -> ExprId {
+    let id = ExprId::from(mir.expressions.len());
+    mir.expressions.push(HirExpression {
+        id,
+        kind: HirExprKind::Binary {
+            op: op.into(),
+            left,
+            right,
+        },
+        span,
+    });
+    id
 }
 
 fn validate_compiled_entry_shape(
@@ -1396,7 +1529,7 @@ fn format_current_endpoint(endpoint: usize) -> String {
 mod tests {
     use super::{
         NativeModel, compile_model_with_canonical_ir, lower_assignment_step,
-        validate_compiled_entry_shape,
+        lower_static_condition_program, validate_compiled_entry_shape,
     };
     use crate::canonical_ir::{
         BranchUnknownId, CanonicalIrArtifact, HirContributionKind, HirExprKind, MirBranchUnknown,
@@ -1850,6 +1983,116 @@ endmodule
         assert!(
             message.contains("no interpreter fallback"),
             "dependency validation must keep the hard-JIT failure contract: {message}"
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_static_condition_from_mir() {
+        let source = r#"
+`include "disciplines.vams"
+module native_canonical_static_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real enabled = 1.0;
+  analog begin
+    if (enabled > 0.5) begin
+      I(p, n) <+ V(p, n);
+    end
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let stamp_index = model
+            .stamp_programs
+            .iter()
+            .position(|stamp| stamp.static_condition.is_some())
+            .expect("fixture must include a static condition");
+        model.stamp_programs[stamp_index].static_condition = Some(BytecodeProgram {
+            instructions: vec![Instruction::PushConst(0.0)],
+        });
+
+        let program = lower_static_condition_program(
+            &model,
+            Some(&artifact.mir),
+            stamp_index,
+            model.stamp_programs[stamp_index]
+                .static_condition
+                .as_ref()
+                .expect("poisoned static condition bytecode exists"),
+            NativeLoweringLimits::for_model(&model),
+        )
+        .expect("canonical static condition lowers to native ops");
+        assert_ne!(
+            program.ops(),
+            &[NativeOp::Const(0.0)],
+            "canonical static guard must not use poisoned bytecode"
+        );
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical static condition compiles to native x64");
+        let params: Vec<f64> = model.parameters.iter().map(|param| param.default).collect();
+        let ctx = eval_context(&params, &[2.0, 0.0]);
+        let mut vars = vec![0.0_f64; native.num_variables.max(1)];
+        native.run_assignments(&ctx, vars.as_mut_ptr());
+        let active = native
+            .run_static_condition(stamp_index, &ctx, vars.as_ptr())
+            .expect("static condition has native entry");
+
+        assert_eq!(active.to_bits(), 1.0_f64.to_bits());
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_rejects_missing_static_condition_guard() {
+        let source = r#"
+`include "disciplines.vams"
+module native_canonical_static_guard_shape(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real enabled = 1.0;
+  analog begin
+    if (enabled > 0.5) begin
+      I(p, n) <+ V(p, n);
+    end
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let mut artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(
+            model
+                .stamp_programs
+                .iter()
+                .any(|stamp| stamp.static_condition.is_some()),
+            "fixture must include a compiled static condition"
+        );
+        let root = usize::from(artifact.mir.equations[0].expression.id);
+        let replacement = HirExprKind::Number {
+            value: 1.0,
+            raw: "1.0".into(),
+        };
+        artifact.hir.expressions[root].kind = replacement.clone();
+        artifact.mir.expressions[root].kind = replacement;
+        artifact.hir.contributions[0].expression.kind = "number".into();
+        artifact.mir.equations[0].expression.kind = "number".into();
+        artifact = rebuild_canonical_artifact(artifact);
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("missing canonical static guard must fail native compile");
+        let message = error.to_string();
+        assert!(
+            message.contains("missing leading static-condition guard"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical static guard mismatch must keep hard-JIT contract: {message}"
         );
     }
 

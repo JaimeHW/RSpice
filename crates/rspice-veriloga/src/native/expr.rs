@@ -2267,6 +2267,50 @@ impl NativeProgram {
         })
     }
 
+    pub(crate) fn from_mir_expression(
+        model: impl Into<SmolStr>,
+        entry_kind: EntryKind,
+        mir: &MirModel,
+        expr_id: ExprId,
+        limits: NativeLoweringLimits<'_>,
+    ) -> JitResult<Self> {
+        let model = model.into();
+        mir.validate()
+            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
+                model: model.clone(),
+                detail: diagnostics
+                    .first()
+                    .map(|diagnostic| diagnostic.message.clone())
+                    .unwrap_or_else(|| "MIR validation failed".into())
+                    .into(),
+            })?;
+
+        let mut lowerer =
+            MirEquationLowerer::new(model.clone(), entry_kind, mir, EquationId::new(0), limits);
+        lowerer.lower(expr_id)?;
+
+        if lowerer.depth != 1 {
+            return Err(stack_error(
+                model.clone(),
+                entry_kind,
+                format!("final stack depth {}, expected 1", lowerer.depth),
+            ));
+        }
+        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
+        let optimized_max_stack_depth =
+            compute_native_max_stack_depth(model, entry_kind, &lowerer.ops)?;
+        debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
+
+        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
+        Ok(Self {
+            ops: lowerer.ops,
+            max_stack_depth: optimized_max_stack_depth,
+            current_pair_dependencies: lowerer.current_pair_dependencies,
+            prior_current_dependencies: lowerer.prior_current_dependencies,
+            branch_unknown_dependencies,
+        })
+    }
+
     pub(crate) fn ops(&self) -> &[NativeOp] {
         &self.ops
     }
