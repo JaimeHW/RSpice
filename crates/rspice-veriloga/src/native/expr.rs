@@ -1716,6 +1716,9 @@ impl NativeProgram {
                     if lower_constant_lhs_noncommutative_arithmetic(&mut ops, instruction) {
                         continue;
                     }
+                    if lower_duplicate_nonfaulting_context_square(&mut ops, instruction) {
+                        continue;
+                    }
                     ops.push(arithmetic_op(instruction));
                 }
                 Instruction::Pow | Instruction::FnPow => {
@@ -6688,6 +6691,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             || lower_constant_lhs_identity_arithmetic(&mut self.ops, &instruction)
             || lower_constant_lhs_commutative_arithmetic(&mut self.ops, &instruction)
             || lower_constant_lhs_noncommutative_arithmetic(&mut self.ops, &instruction)
+            || lower_duplicate_nonfaulting_context_square(&mut self.ops, &instruction)
         {
             return Ok(());
         }
@@ -7649,6 +7653,27 @@ fn lower_constant_lhs_identity_arithmetic(
         return false;
     }
     ops.remove(lhs_index);
+    true
+}
+
+fn lower_duplicate_nonfaulting_context_square(
+    ops: &mut Vec<NativeOp>,
+    instruction: &Instruction,
+) -> bool {
+    if !matches!(instruction, Instruction::Mul) || ops.len() < 2 {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let rhs_index = ops.len() - 1;
+    let lhs = ops[lhs_index];
+    let rhs = ops[rhs_index];
+    if lhs != rhs || !is_nonfaulting_context_value_push(&lhs) {
+        return false;
+    }
+
+    ops.truncate(rhs_index);
+    ops.push(NativeOp::Square);
     true
 }
 
@@ -9917,6 +9942,41 @@ endmodule
     }
 
     #[test]
+    fn lowers_canonical_duplicate_context_mul_as_square() {
+        let source = r#"
+module mir_context_square(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ $temperature * $temperature;
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_context_square",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower duplicate canonical context multiply to native square");
+
+        assert_eq!(
+            program.ops(),
+            &[NativeOp::LoadTemperature, NativeOp::Square]
+        );
+        assert_eq!(
+            program.max_stack_depth(),
+            1,
+            "duplicate context multiply should not allocate a second XMM stack slot"
+        );
+    }
+
+    #[test]
     fn lowers_canonical_identity_power_to_native_base_expression() {
         let source = r#"
 module mir_identity_pow(p, n);
@@ -10119,6 +10179,69 @@ endmodule
             );
             assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, expected]);
         }
+    }
+
+    #[test]
+    fn lowers_duplicate_nonfaulting_context_mul_as_square() {
+        let cases = [
+            (
+                "temperature",
+                Instruction::PushTemperature,
+                NativeOp::LoadTemperature,
+            ),
+            ("time", Instruction::PushTime, NativeOp::LoadTime),
+            ("mfactor", Instruction::PushMfactor, NativeOp::LoadMfactor),
+        ];
+
+        for (name, instruction, expected_load) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![instruction.clone(), instruction, Instruction::Mul],
+            };
+
+            let lowered =
+                NativeProgram::from_bytecode(name, EntryKind::Assignment, &program, limits(0, 0))
+                    .expect("duplicate nonfaulting context multiply should become a square");
+
+            assert_eq!(lowered.ops(), &[expected_load, NativeOp::Square], "{name}");
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{name} should not allocate a second XMM stack slot for duplicate context loads"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_duplicate_storage_backed_mul_explicit() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushParam(0),
+                Instruction::PushParam(0),
+                Instruction::Mul,
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "duplicate-param-mul",
+            EntryKind::Assignment,
+            &program,
+            limits(1, 0),
+        )
+        .expect("storage-backed duplicate multiply should remain explicit");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadParam(0),
+                NativeOp::LoadParam(0),
+                NativeOp::Mul
+            ]
+        );
+        assert_eq!(
+            lowered.max_stack_depth(),
+            2,
+            "storage-backed loads keep the existing hard-fail check shape"
+        );
     }
 
     #[test]
