@@ -424,7 +424,75 @@ impl CodeModel for DigitalCosim {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xspice::ParamType;
     use crate::xspice::context::InputValue;
+
+    #[test]
+    fn d_cosim_metadata_matches_ngspice46_interface() {
+        let ports = DigitalCosim.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["d_in", "d_out", "d_inout"]
+        );
+        assert_eq!(ports[0].direction, PortDirection::In);
+        assert_eq!(ports[1].direction, PortDirection::Out);
+        assert_eq!(ports[2].direction, PortDirection::InOut);
+        for port in ports {
+            assert_eq!(port.default_type, PortType::Digital);
+            assert_eq!(port.allowed_types, vec![PortType::Digital]);
+            assert!(port.is_vector);
+            assert!(port.null_allowed);
+            assert_eq!(port.vector_min_len, Some(0));
+            assert_eq!(port.vector_max_len, None);
+        }
+
+        let params = DigitalCosim.parameters();
+        assert_eq!(
+            params
+                .iter()
+                .map(|param| (param.name.as_str(), &param.param_type))
+                .collect::<Vec<_>>(),
+            vec![
+                ("delay", &ParamType::Real),
+                ("simulation", &ParamType::String),
+                ("lib_args", &ParamType::StringVector),
+                ("sim_args", &ParamType::StringVector),
+                ("queue_size", &ParamType::Integer),
+                ("irreversible", &ParamType::Integer),
+            ]
+        );
+        assert_eq!(params[0].default, 1.0e-9);
+        assert!(params[1].required);
+        assert_eq!(params[4].default, 128.0);
+        assert_eq!(params[5].default, 1.0);
+    }
+
+    #[test]
+    fn d_cosim_limit_helpers_follow_ngspice46_lower_bounds() {
+        let mut ctx = CmContext::new();
+
+        assert_eq!(official_cosim_delay(&ctx), 1.0e-9);
+        assert_eq!(official_cosim_queue_size(&ctx), 128);
+
+        ctx.set_param("delay", 0.0);
+        ctx.set_param("queue_size", 0.0);
+        assert_eq!(official_cosim_delay(&ctx), COSIM_DELAY_MIN);
+        assert_eq!(
+            official_cosim_queue_size(&ctx),
+            COSIM_QUEUE_SIZE_MIN as usize
+        );
+
+        ctx.set_param("delay", Value::NAN);
+        ctx.set_param("queue_size", Value::NAN);
+        assert_eq!(official_cosim_delay(&ctx), COSIM_DELAY_MIN);
+        assert_eq!(
+            official_cosim_queue_size(&ctx),
+            COSIM_QUEUE_SIZE_MIN as usize
+        );
+    }
 
     #[test]
     fn d_cosim_sized_input_fill_reuses_existing_buffer() {

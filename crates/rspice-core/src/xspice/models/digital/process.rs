@@ -315,6 +315,59 @@ mod tests {
     use super::*;
     use crate::xspice::AnalysisType;
     use crate::xspice::context::InputValue;
+    use crate::xspice::{ParamType, PortDirection};
+
+    #[test]
+    fn d_process_metadata_matches_ngspice46_interface() {
+        let ports = DigitalProcess.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["in", "clk", "reset", "out"]
+        );
+        assert_eq!(ports[0].direction, PortDirection::In);
+        assert_eq!(ports[0].default_type, PortType::Digital);
+        assert!(ports[0].is_vector);
+        assert!(ports[0].null_allowed);
+        assert_eq!(ports[0].vector_min_len, None);
+        assert_eq!(ports[1].direction, PortDirection::In);
+        assert!(!ports[1].is_vector);
+        assert!(!ports[1].null_allowed);
+        assert_eq!(ports[2].direction, PortDirection::In);
+        assert!(!ports[2].is_vector);
+        assert!(ports[2].null_allowed);
+        assert_eq!(ports[3].direction, PortDirection::Out);
+        assert!(ports[3].is_vector);
+        assert!(!ports[3].null_allowed);
+        assert_eq!(ports[3].vector_min_len, Some(1));
+
+        let params = DigitalProcess.parameters();
+        assert_eq!(
+            params
+                .iter()
+                .map(|param| (param.name.as_str(), &param.param_type))
+                .collect::<Vec<_>>(),
+            vec![
+                ("clk_delay", &ParamType::Real),
+                ("reset_delay", &ParamType::Real),
+                ("process_file", &ParamType::String),
+                ("process_params", &ParamType::StringVector),
+                ("reset_state", &ParamType::Integer),
+                ("input_load", &ParamType::Real),
+                ("clk_load", &ParamType::Real),
+                ("reset_load", &ParamType::Real),
+            ]
+        );
+        assert_eq!(params[0].default, 1.0e-9);
+        assert_eq!(params[1].default, 1.0e-9);
+        assert!(params[2].required);
+        assert_eq!(params[4].default, 0.0);
+        assert_eq!(params[5].default, 1.0e-12);
+        assert_eq!(params[6].default, 1.0e-12);
+        assert_eq!(params[7].default, 1.0e-12);
+    }
 
     #[test]
     fn d_process_pack_input_bits_reuses_buffer_and_commits_rng_once() {
