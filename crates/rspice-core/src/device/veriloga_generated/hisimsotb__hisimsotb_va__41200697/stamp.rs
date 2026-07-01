@@ -6817,34 +6817,14 @@ impl Instance {
         let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let v2: f64 = 0.0;
         let v5: f64 = 1.0;
-        let v182: f64 = nv5;
         let v183: f64 = nv12;
         let v186: f64 = nv11;
-        let v187: f64 = (v186 - v183);
-        let v188: f64 = (self.scalar_v181 * v187);
-        let v190: f64 = nv2;
-        let v193: f64 = nv0;
-        let v213: bool = (v188 >= v2);
-        let v214: f64 = (if v213 { v5 } else { v2 });
-        let v219: bool = (!v213);
-        let v220: f64 = -1.0;
-        let v221: f64 = (if v219 { v220 } else { v214 });
-        let v483: f64 = -0.0;
-        let v514: bool = (v5 == v221);
-        let v588: bool = (!v514);
-        let v590: f64 = (v183 - v190);
-        let v592: f64 = (v193 - v186);
-        let v607: f64 = (if v588 { v483 } else { v2 });
-        let v620: f64 = (self.scalar_v181 * v607);
-        let v621: f64 = (v590 / v2);
-        let v622: f64 = (if (self.scalar_v589 != 0.0) { v621 } else { v2 });
-        let v623: f64 = (v592 / v2);
-        let v624: f64 = (if (self.scalar_v591 != 0.0) { v623 } else { v2 });
+        let v213: bool = ((self.scalar_v181 * (v186 - v183)) >= v2);
+        let v620: f64 = (self.scalar_v181 * (if (!(v5 == (if (!v213) { -1.0 } else { (if v213 { v5 } else { v2 }) }))) { -0.0 } else { v2 }));
+        let v622: f64 = (if (self.scalar_v589 != 0.0) { ((v183 - nv2) / v2) } else { v2 });
+        let v624: f64 = (if (self.scalar_v591 != 0.0) { ((nv0 - v186) / v2) } else { v2 });
         let v628: f64 = nv7;
-        let v629: f64 = nv1;
-        let v630: f64 = (v629 - v182);
-        let v631: f64 = (self.scalar_v180 * v630);
-        let v632: f64 = (if (self.scalar_v155 != 0.0) { v631 } else { v2 });
+        let v632: f64 = (if (self.scalar_v155 != 0.0) { (self.scalar_v180 * (nv1 - nv5)) } else { v2 });
 
         stamper.stamp_current_const_local(
             Some(11),
