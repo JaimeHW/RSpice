@@ -584,6 +584,13 @@ fn mult_transfer_for_context(ctx: &CmContext) -> CmResult<MultTransfer> {
 }
 
 fn cache_mult_transfer(ctx: &mut CmContext) -> CmResult<MultTransfer> {
+    let signature = mult_transfer_signature(ctx);
+    if let Some(resource) = ctx.resource::<MultTransferResource>(MULT_TRANSFER_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.transfer.clone());
+    }
+
     let (signature, transfer) = mult_transfer_from_context_with_signature(ctx)?;
     ctx.set_resource(
         MULT_TRANSFER_RESOURCE,
@@ -848,6 +855,12 @@ fn divide_transfer_for_context(ctx: &CmContext) -> DivideTransfer {
 
 fn cache_divide_transfer(ctx: &mut CmContext) -> DivideTransfer {
     let signature = divide_transfer_signature(ctx);
+    if let Some(resource) = ctx.resource::<DivideTransferResource>(DIVIDE_TRANSFER_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.transfer;
+    }
+
     let transfer = divide_transfer_from_signature(signature);
     ctx.set_resource(
         DIVIDE_TRANSFER_RESOURCE,
@@ -1076,6 +1089,12 @@ fn limit_transfer_for_context(ctx: &CmContext) -> LimitTransfer {
 
 fn cache_limit_transfer(ctx: &mut CmContext) -> LimitTransfer {
     let signature = limit_transfer_signature(ctx);
+    if let Some(resource) = ctx.resource::<LimitTransferResource>(LIMIT_TRANSFER_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.transfer;
+    }
+
     let transfer = limit_transfer_from_signature(signature);
     ctx.set_resource(
         LIMIT_TRANSFER_RESOURCE,
@@ -2740,11 +2759,16 @@ mod tests {
             sentinel,
             "matching signatures should reuse the cached mult transfer"
         );
+        assert_eq!(
+            cache_mult_transfer(&mut ctx).expect("matching signature reuses mutable mult cache"),
+            sentinel,
+            "matching signatures should reuse the cached mult transfer in the mutable path"
+        );
 
         ctx.set_input_analog_vector_from_fn("in", 3, |index| {
             AnalogValue::new([1.0, 4.0, 3.0][index])
         });
-        let updated = mult_transfer_for_context(&ctx).expect("changed input recomputes transfer");
+        let updated = cache_mult_transfer(&mut ctx).expect("changed input recomputes transfer");
         assert_ne!(
             updated, sentinel,
             "changed mult inputs must invalidate the cached transfer"
@@ -2811,9 +2835,14 @@ mod tests {
             sentinel,
             "matching signatures should reuse the cached limit transfer"
         );
+        assert_eq!(
+            cache_limit_transfer(&mut ctx),
+            sentinel,
+            "matching signatures should reuse the cached limit transfer in the mutable path"
+        );
 
         ctx.set_input_analog("in", 0.75);
-        let updated = limit_transfer_for_context(&ctx);
+        let updated = cache_limit_transfer(&mut ctx);
         assert_ne!(
             updated, sentinel,
             "changed limit inputs must invalidate the cached transfer"
@@ -2867,9 +2896,14 @@ mod tests {
             sentinel,
             "matching signatures should reuse the cached divide transfer"
         );
+        assert_eq!(
+            cache_divide_transfer(&mut ctx),
+            sentinel,
+            "matching signatures should reuse the cached divide transfer in the mutable path"
+        );
 
         ctx.set_input_analog("den", 2.0);
-        let updated = divide_transfer_for_context(&ctx);
+        let updated = cache_divide_transfer(&mut ctx);
         assert_ne!(
             updated, sentinel,
             "changed divide inputs must invalidate the cached transfer"
@@ -2922,9 +2956,14 @@ mod tests {
             sentinel,
             "matching signatures should reuse the cached climit transfer"
         );
+        assert_eq!(
+            cache_climit_transfer(&mut ctx),
+            sentinel,
+            "matching signatures should reuse the cached climit transfer in the mutable path"
+        );
 
         ctx.set_input_analog("cntl_upper", 3.0);
-        let updated = climit_transfer_for_context(&ctx);
+        let updated = cache_climit_transfer(&mut ctx);
         assert_ne!(
             updated, sentinel,
             "changed climit controls must invalidate the cached transfer"
@@ -3296,6 +3335,12 @@ fn climit_transfer_for_context(ctx: &CmContext) -> ClimitTransfer {
 
 fn cache_climit_transfer(ctx: &mut CmContext) -> ClimitTransfer {
     let signature = climit_transfer_signature(ctx);
+    if let Some(resource) = ctx.resource::<ClimitTransferResource>(CLIMIT_TRANSFER_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource.transfer;
+    }
+
     let transfer = climit_transfer_from_signature(signature);
     ctx.set_resource(
         CLIMIT_TRANSFER_RESOURCE,
