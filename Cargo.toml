@@ -15,6 +15,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["RSpice Contributors"]
 license-file = "LICENSE"
+publish = false
 repository = "https://github.com/JaimeHW/RSpice"
 rust-version = "1.94"
 
