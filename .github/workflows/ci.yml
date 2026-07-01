@@ -9,6 +9,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -17,6 +20,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   RUST_BACKTRACE: "1"
+  RUST_TOOLCHAIN: "1.94.0"
 
 jobs:
   test-linux:
@@ -28,11 +32,10 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.94.0
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Format
         run: cargo fmt --all -- --check
       - name: CI configuration tests
@@ -48,9 +51,9 @@ jobs:
       - name: Check (warnings denied)
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --workspace --exclude rspice-python --exclude rspice-wasm
+        run: cargo check --locked --workspace --exclude rspice-python --exclude rspice-wasm
       - name: Clippy (warnings denied)
-        run: cargo clippy --workspace --exclude rspice-python --exclude rspice-wasm --all-targets --message-format short -- -D warnings
+        run: cargo clippy --locked --workspace --exclude rspice-python --exclude rspice-wasm --all-targets --message-format short -- -D warnings
       - name: Clear check artifacts before tests
         run: cargo clean
       - name: Test core integration tests (fast tier)
@@ -59,100 +62,145 @@ jobs:
         # used to swallow seven oracle-pinned tests in unrelated files whose
         # names merely mention ngspice.
         run: >-
-          cargo test -p rspice-core --tests
+          cargo test --locked -p rspice-core --tests
           -- --skip test_ngspice_ --skip test_full_ngspice
       - name: Core library unit tests
-        run: cargo test -p rspice-core --lib
+        run: cargo test --locked -p rspice-core --lib
       - name: Clear core test artifacts
         run: cargo clean
       - name: Test non-UI crates (fast tier)
-        run: cargo test -p rspice-cli -p rspice-veriloga -p rspice-bench
+        run: cargo test --locked -p rspice-cli -p rspice-veriloga -p rspice-bench
       - name: Test Verilog-A native JIT units (Linux x64)
-        run: cargo test -p rspice-veriloga --features native native:: -- --test-threads=1
+        run: >-
+          cargo test --locked -p rspice-veriloga --features native native::
+          -- --test-threads=1
       - name: Test Verilog-A native core builder route (Linux x64)
-        run: cargo test -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_uses_canonical_ir_without_bytecode_fallback -- --test-threads=1
+        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_uses_canonical_ir_without_bytecode_fallback -- --test-threads=1
       - name: Test Verilog-A native JIT contracts (Linux x64)
-        run: cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
+        run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
       - name: Test Verilog-A native multiplicity contracts (Linux x64)
-        run: cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1
+        run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1
       - name: Test Verilog-A native contract (Linux x64 release)
-        run: cargo test -p rspice-veriloga --release --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
+        run: cargo test --locked -p rspice-veriloga --release --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
       - name: Smoke Verilog-A native JIT benchmark gate (Linux x64)
-        run: cargo run -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 1.10
+        run: cargo run --locked -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 1.10
       - name: Clear non-UI test artifacts
         run: cargo clean
       - name: Test UI library (Linux)
-        run: cargo test -p rspice-ui --lib
+        run: cargo test --locked -p rspice-ui --lib
 
   test-windows:
     name: Build & unit test (Windows)
     runs-on: windows-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.94.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Check
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --workspace --exclude rspice-python --exclude rspice-wasm
+        run: cargo check --locked --workspace --exclude rspice-python --exclude rspice-wasm
       - name: Unit tests
-        run: cargo test -p rspice-core --lib
+        run: cargo test --locked -p rspice-core --lib
+      - name: CLI integration tests
+        run: cargo test --locked -p rspice-cli --tests
+      - name: UI library tests
+        run: cargo test --locked -p rspice-ui --lib
       - name: Verilog-A native JIT unit tests
-        run: cargo test -p rspice-veriloga --features native native:: -- --test-threads=1
+        run: >-
+          cargo test --locked -p rspice-veriloga --features native native::
+          -- --test-threads=1
       - name: Verilog-A native JIT contract tests
-        run: cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
+        run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
       - name: Verilog-A native multiplicity tests
-        run: cargo test -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1
+        run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1
       - name: Smoke Verilog-A native JIT benchmark gate
-        run: cargo run -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 1.10
+        run: cargo run --locked -p rspice-bench --release -- native-jit --iterations 1000 --samples 2 --min-speedup 1.10
 
   check-macos-desktop:
-    name: Check desktop UI/CLI (macOS)
+    name: Check & test desktop UI/CLI (macOS)
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.94.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Check desktop crates
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check -p rspice-cli -p rspice-ui
+        run: cargo check --locked -p rspice-cli -p rspice-ui
+      - name: CLI integration tests
+        run: cargo test --locked -p rspice-cli --tests
+      - name: UI library tests
+        run: cargo test --locked -p rspice-ui --lib
 
   wasm:
     name: Check (wasm32)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.94.0
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Check rspice-wasm
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check -p rspice-wasm --target wasm32-unknown-unknown
+        run: cargo check --locked -p rspice-wasm --target wasm32-unknown-unknown
       - name: Build rspice-wasm release library
         env:
           RUSTFLAGS: -D warnings
-        run: cargo build -p rspice-wasm --lib --target wasm32-unknown-unknown --release
+        run: cargo build --locked -p rspice-wasm --lib --target wasm32-unknown-unknown --release
       - name: Check rspice-ui
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check -p rspice-ui --target wasm32-unknown-unknown
+        run: cargo check --locked -p rspice-ui --target wasm32-unknown-unknown
+
+  site-smoke:
+    name: Browser site smoke (wasm)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - name: Install wasm-bindgen-cli (pinned to Cargo.lock)
+        run: |
+          VERSION=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | head -1 | cut -d'"' -f2)
+          echo "Cargo.lock pins wasm-bindgen $VERSION"
+          DIST="wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl"
+          if curl -sSfL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${VERSION}/${DIST}.tar.gz" | tar -xz; then
+            mv "${DIST}/wasm-bindgen" "$HOME/.cargo/bin/"
+          else
+            echo "prebuilt download failed; building from source"
+            cargo install wasm-bindgen-cli --version "$VERSION" --locked
+          fi
+          wasm-bindgen --version
+      - name: Build and verify site bundle
+        run: python3 tools/deploy/build_site.py --out _site-ci
+      - name: Upload verified site bundle
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: site-smoke-bundle
+          path: _site-ci
+          if-no-files-found: error
 
   python:
     name: Check (Python bindings)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.12"
-      - uses: dtolnay/rust-toolchain@1.94.0
-      - uses: Swatinem/rust-cache@v2
+          python-version: "3.14"
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Check rspice-python
-        run: cargo check -p rspice-python
+        run: cargo check --locked -p rspice-python
