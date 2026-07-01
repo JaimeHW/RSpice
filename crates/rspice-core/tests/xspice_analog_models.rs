@@ -4223,6 +4223,32 @@ azhigh out_high 0 zhigh
 }
 
 #[test]
+fn memristor_dc_and_ac_use_initial_resistance() {
+    let deck = "\
+* XSPICE memristor initial conductance
+vin in 0 dc 10 ac 1
+rser in out 1000
+amem out 0 mem
+.model mem memristor (rinit=1000 rmin=10 rmax=10000 alpha=0 beta=1 vt=0)
+.op
+.ac lin 1 1k 1k
+.end
+";
+
+    let out = op_voltage(deck, "out");
+    assert!(
+        (out - 5.0).abs() < 1.0e-9,
+        "memristor DC should use rinit as its operating-point resistance, got {out}"
+    );
+
+    let ac_out = ac_voltage(deck, "out");
+    assert!(
+        (ac_out.re - 0.5).abs() < 1.0e-9 && ac_out.im.abs() < 1.0e-12,
+        "memristor AC should stamp the rinit small-signal conductance, got {ac_out}"
+    );
+}
+
+#[test]
 fn ilimit_linear_region_drives_output_through_source_resistance() {
     let deck = "\
 * XSPICE ilimit linear current source

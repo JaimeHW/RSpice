@@ -1246,7 +1246,25 @@ fn memristor_window(voltage: Value, params: MemristorParams) -> Value {
             * ((voltage + params.vt).abs() - (voltage - params.vt).abs())
 }
 
-fn memristor_eval(ctx: &mut CmContext) -> CmResult<MemristorEval> {
+fn memristor_abs_derivative(value: Value) -> Value {
+    if value > 0.0 {
+        1.0
+    } else if value < 0.0 {
+        -1.0
+    } else {
+        0.0
+    }
+}
+
+fn memristor_window_derivative(voltage: Value, params: MemristorParams) -> Value {
+    params.beta
+        + 0.5
+            * (params.alpha - params.beta)
+            * (memristor_abs_derivative(voltage + params.vt)
+                - memristor_abs_derivative(voltage - params.vt))
+}
+
+fn memristor_eval_for_context(ctx: &CmContext) -> CmResult<(MemristorEval, Value)> {
     let params = memristor_params(ctx)?;
     let voltage = ctx.input("memris");
     let accepted_resistance = {
@@ -1258,14 +1276,16 @@ fn memristor_eval(ctx: &mut CmContext) -> CmResult<MemristorEval> {
         }
     };
 
-    let (resistance, resistance_partial) = if ctx.is_transient() {
+    let (resistance, resistance_derivative) = if ctx.is_transient() {
         let rate = memristor_window(voltage, params);
         let active = (rate > 0.0 && accepted_resistance < params.rmax)
             || (rate < 0.0 && accepted_resistance > params.rmin);
         if active {
-            let resistance_partial = transient_integrator_partial(ctx);
-            let resistance = accepted_resistance + resistance_partial * rate;
-            (resistance, resistance_partial)
+            let integration_partial = transient_integrator_partial(ctx);
+            let resistance = accepted_resistance + integration_partial * rate;
+            let resistance_derivative =
+                integration_partial * memristor_window_derivative(voltage, params);
+            (resistance, resistance_derivative)
         } else {
             (accepted_resistance, 0.0)
         }
@@ -1273,18 +1293,22 @@ fn memristor_eval(ctx: &mut CmContext) -> CmResult<MemristorEval> {
         (accepted_resistance, 0.0)
     };
 
-    xtradev_set_state(ctx, 0, resistance);
     let conductance = 1.0 / resistance;
     let current = voltage * conductance;
-    let derivative = if ctx.is_transient() {
-        resistance_partial
-    } else {
-        conductance
-    };
-    Ok(MemristorEval {
-        current,
-        derivative,
-    })
+    let derivative = conductance - voltage * resistance_derivative * conductance * conductance;
+    Ok((
+        MemristorEval {
+            current,
+            derivative,
+        },
+        resistance,
+    ))
+}
+
+fn memristor_eval(ctx: &mut CmContext) -> CmResult<MemristorEval> {
+    let (eval, resistance) = memristor_eval_for_context(ctx)?;
+    xtradev_set_state(ctx, 0, resistance);
+    Ok(eval)
 }
 
 const CORE_MODE_PWL: i64 = 1;
@@ -2687,6 +2711,16 @@ impl CodeModel for Memristor {
 
         Ok(())
     }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if !output_port.eq_ignore_ascii_case("memris") {
+            return Vec::new();
+        }
+        let Ok((eval, _)) = memristor_eval_for_context(ctx) else {
+            return Vec::new();
+        };
+        vec![("memris".to_string(), eval.derivative)]
+    }
 }
 
 impl CodeModel for Core {
@@ -3293,6 +3327,43 @@ mod tests {
         assert!(
             ctx.state(0) > 100.0,
             "accepted memristor evaluation should commit resistance state"
+        );
+    }
+
+    #[test]
+    fn memristor_transient_partial_linearizes_current() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.set_param("rmin", 10.0);
+        ctx.set_param("rmax", 1000.0);
+        ctx.set_param("rinit", 100.0);
+        ctx.set_param("alpha", 0.0);
+        ctx.set_param("beta", 2.0);
+        ctx.set_param("vt", 0.0);
+        ctx.set_input_analog("memris", 4.0);
+        ctx.time = 0.5;
+        ctx.timestep = 0.5;
+
+        Memristor.init(&mut ctx).expect("memristor init");
+        let (eval, resistance) =
+            memristor_eval_for_context(&ctx).expect("memristor transient eval");
+        let expected_resistance = 104.0;
+        let expected_current = 4.0 / expected_resistance;
+        let expected_derivative =
+            1.0 / expected_resistance - 4.0 / (expected_resistance * expected_resistance);
+
+        assert!((resistance - expected_resistance).abs() < 1.0e-12);
+        assert!((eval.current - expected_current).abs() < 1.0e-15);
+        assert!((eval.derivative - expected_derivative).abs() < 1.0e-15);
+
+        let partials = Memristor.output_input_partials(&ctx, "memris");
+        assert_eq!(partials.len(), 1);
+        assert_eq!(partials[0].0, "memris");
+        assert!((partials[0].1 - expected_derivative).abs() < 1.0e-15);
+        assert_eq!(
+            ctx.state(0),
+            100.0,
+            "querying memristor partials must not commit resistance state"
         );
     }
 
