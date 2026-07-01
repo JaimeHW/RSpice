@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1485,7 +1485,6 @@ impl Instance {
         var_dmobs_rdb2 = 0.0;
         var_dmobs_rdb3 = 0.0;
         var_dmobs_rdb4 = 0.0;
-
 
         *var_dmobs_slot = var_dmobs;
         *var_dmobs_db0_slot = var_dmobs_db0;
@@ -3170,7 +3169,6 @@ impl Instance {
         var_t0_rdb2 = 0.0;
         var_t0_rdb3 = 0.0;
         var_t0_rdb4 = 0.0;
-
 
         *var_dmobs_slot = var_dmobs;
         *var_dmobs_db0_slot = var_dmobs_db0;
@@ -4943,7 +4941,6 @@ impl Instance {
         var_ta_rdb3 = 0.0;
         var_ta_rdb4 = 0.0;
 
-
         *var_esat_slot = var_esat;
         *var_esat_db0_slot = var_esat_db0;
         *var_esat_db1_slot = var_esat_db1;
@@ -6634,7 +6631,6 @@ impl Instance {
         var_phissat_rdb3 = 0.0;
         var_phissat_rdb4 = 0.0;
 
-
         *var_guard90_slot = var_guard90;
         *var_guard90_db0_slot = var_guard90_db0;
         *var_guard90_db1_slot = var_guard90_db1;
@@ -8314,7 +8310,6 @@ impl Instance {
         var_guard91_rdb3 = 0.0;
         var_guard91_rdb4 = 0.0;
 
-
         *var_guard91_slot = var_guard91;
         *var_guard91_db0_slot = var_guard91_db0;
         *var_guard91_db1_slot = var_guard91_db1;
@@ -9806,7 +9801,6 @@ impl Instance {
         var_qsqrt_rdb2 = 0.0;
         var_qsqrt_rdb3 = 0.0;
         var_qsqrt_rdb4 = 0.0;
-
 
         *var_q1_slot = var_q1;
         *var_q1_db0_slot = var_q1_db0;
@@ -11359,7 +11353,6 @@ impl Instance {
         var_g_rdb3 = 0.0;
         var_g_rdb4 = 0.0;
 
-
         *var_delta_slot = var_delta;
         *var_delta_db0_slot = var_delta_db0;
         *var_delta_db1_slot = var_delta_db1;
@@ -12777,7 +12770,6 @@ impl Instance {
         var_t1_rdb2 = 0.0;
         var_t1_rdb3 = 0.0;
         var_t1_rdb4 = 0.0;
-
 
         *var_delta_slot = var_delta;
         *var_delta_db0_slot = var_delta_db0;
@@ -14263,7 +14255,6 @@ impl Instance {
         var_q_rdb3 = 0.0;
         var_q_rdb4 = 0.0;
 
-
         *var_aaux_slot = var_aaux;
         *var_aaux_db0_slot = var_aaux_db0;
         *var_aaux_db1_slot = var_aaux_db1;
@@ -15585,7 +15576,6 @@ impl Instance {
         var_t2_rdb2 = 0.0;
         var_t2_rdb3 = 0.0;
         var_t2_rdb4 = 0.0;
-
 
         *var_coth1_slot = var_coth1;
         *var_coth1_db0_slot = var_coth1_db0;
@@ -17306,7 +17296,6 @@ impl Instance {
         var_qsqrt_rdb3 = 0.0;
         var_qsqrt_rdb4 = 0.0;
 
-
         *var_aaux_slot = var_aaux;
         *var_aaux_db0_slot = var_aaux_db0;
         *var_aaux_db1_slot = var_aaux_db1;
@@ -18639,7 +18628,6 @@ impl Instance {
         var_t0_rdb2 = 0.0;
         var_t0_rdb3 = 0.0;
         var_t0_rdb4 = 0.0;
-
 
         *var_coth1_slot = var_coth1;
         *var_coth1_db0_slot = var_coth1_db0;
@@ -20352,7 +20340,6 @@ impl Instance {
         var_q1_rdb3 = 0.0;
         var_q1_rdb4 = 0.0;
 
-
         *var_delta_slot = var_delta;
         *var_delta_db0_slot = var_delta_db0;
         *var_delta_db1_slot = var_delta_db1;
@@ -21929,7 +21916,6 @@ impl Instance {
         var_t1_rdb2 = 0.0;
         var_t1_rdb3 = 0.0;
         var_t1_rdb4 = 0.0;
-
 
         *var_aaux_slot = var_aaux;
         *var_aaux_db0_slot = var_aaux_db0;
@@ -23733,7 +23719,6 @@ impl Instance {
         var_delta_rdb3 = 0.0;
         var_delta_rdb4 = 0.0;
 
-
         *var_coth1_slot = var_coth1;
         *var_coth1_db0_slot = var_coth1_db0;
         *var_coth1_db1_slot = var_coth1_db1;
@@ -25414,7 +25399,6 @@ impl Instance {
         var_q_rdb2 = 0.0;
         var_q_rdb3 = 0.0;
         var_q_rdb4 = 0.0;
-
 
         *var_aaux_slot = var_aaux;
         *var_aaux_db0_slot = var_aaux_db0;

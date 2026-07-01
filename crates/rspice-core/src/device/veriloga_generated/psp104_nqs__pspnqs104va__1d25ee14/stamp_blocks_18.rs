@@ -1288,7 +1288,6 @@ impl Instance {
         var_itat__blk1656_db23 = assign61440_e79385_d_b23;
         var_itat__blk1656_db24 = assign61440_e79385_d_b24;
 
-
         *var_asrh__blk1655_slot = var_asrh__blk1655;
         *var_asrh__blk1655_db0_slot = var_asrh__blk1655_db0;
         *var_asrh__blk1655_db1_slot = var_asrh__blk1655_db1;
@@ -2854,7 +2853,6 @@ impl Instance {
         var_wgamma__blk1663_db22 = assign61530_e79540_d_b22;
         var_wgamma__blk1663_db23 = assign61530_e79540_d_b23;
         var_wgamma__blk1663_db24 = assign61530_e79540_d_b24;
-
 
         *var_btat__blk1657_slot = var_btat__blk1657;
         *var_btat__blk1657_db0_slot = var_btat__blk1657_db0;
@@ -4662,7 +4660,6 @@ impl Instance {
         let assign61630_e79708: f64 = if assign61630_e79705 > assign61630_e79707 { 1.0 } else { 0.0 };
         var_guard1808 = assign61630_e79708;
 
-
         *var_guard1807_slot = var_guard1807;
         *var_guard1808_slot = var_guard1808;
         *var_ktat__blk1665_slot = var_ktat__blk1665;
@@ -6076,7 +6073,6 @@ impl Instance {
         var_gammamax__blk1670_db23 = assign61730_e79934_d_b23;
         var_gammamax__blk1670_db24 = assign61730_e79934_d_b24;
 
-
         *var_erfcpos__blk1631_slot = var_erfcpos__blk1631;
         *var_erfcpos__blk1631_db0_slot = var_erfcpos__blk1631_db0;
         *var_erfcpos__blk1631_db1_slot = var_erfcpos__blk1631_db1;
@@ -7411,7 +7407,6 @@ impl Instance {
         var_tmp__blk1647_db22 = assign61850_e80168_d_b22;
         var_tmp__blk1647_db23 = assign61850_e80168_d_b23;
         var_tmp__blk1647_db24 = assign61850_e80168_d_b24;
-
 
         *var_fmaxr__blk1672_slot = var_fmaxr__blk1672;
         *var_fmaxr__blk1672_db0_slot = var_fmaxr__blk1672_db0;
@@ -8851,7 +8846,6 @@ impl Instance {
         let assign61960_e80333: f64 = if var_swgat2nd_d == 1.0 { 1.0 } else { 0.0 };
         var_guard1818 = assign61960_e80333;
 
-
         *var_fbreakdown__blk1673_slot = var_fbreakdown__blk1673;
         *var_fbreakdown__blk1673_db0_slot = var_fbreakdown__blk1673_db0;
         *var_fbreakdown__blk1673_db1_slot = var_fbreakdown__blk1673_db1;
@@ -10232,7 +10226,6 @@ impl Instance {
         var_tmp__blk1647_db22 = assign62060_e80526_d_b22;
         var_tmp__blk1647_db23 = assign62060_e80526_d_b23;
         var_tmp__blk1647_db24 = assign62060_e80526_d_b24;
-
 
         *var_guard1819_slot = var_guard1819;
         *var_h1__blk1632_slot = var_h1__blk1632;
@@ -11876,7 +11869,6 @@ impl Instance {
         let assign62170_e80701: f64 = if var_one_minus_pgat2nd_d == 0.5 { 1.0 } else { 0.0 };
         var_guard1820 = assign62170_e80701;
 
-
         *var_guard1820_slot = var_guard1820;
         *var_h1__blk1632_slot = var_h1__blk1632;
         *var_h2__blk1633_slot = var_h2__blk1633;
@@ -13498,7 +13490,6 @@ impl Instance {
         s.b[2811] = (s.v[1] != 0.0);
         s.store_scalar(2811, if s.b[2811] { 1.0 } else { 0.0 });
 
-
         *var_guard1821_slot = var_guard1821;
         *var_ijun_d_slot = var_ijun_d;
         *var_ijun_d_db0_slot = var_ijun_d_db0;
@@ -14986,7 +14977,6 @@ impl Instance {
         if (((s.b[2921] && (!s.b[2935])) && (!s.b[2936])) && s.b[2937]) {
             s.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_self_offset_rhs(2027, 1e-100, (-230.25850929940458), A::neg(s.ad_value(2016)), 0.3333333333333333, 1.0, 0.5, 1.0, 1.0);
         }
-
 
         *var_guard1925_slot = var_guard1925;
         *var_guard1926_slot = var_guard1926;

@@ -10,9 +10,109 @@ impl Instance {
         s: &mut Scratch,
         p: &Parameters,
         nodes: &[usize; Instance::NODE_COUNT],
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
         var_tnom: f64,
     ) {
         if (s.b[478] && s.b[479]) {
+            s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(129)), (s.v[81] / p.p9));
+            s.store_div_add_scaled_inputs_rhs_mixed_ai(95, 97, A::add_scaled_product(A::scale_offset(s.ad_value(136), p.p14, 1.0), 1.0, s.ad_value(136), s.ad_value(136), p.p15), 1.0, 90, p.p16);
+            s.store_scaled_mul(96, 95, 259, (p.p4 * (p.p5 * 1.0 / (p.p174))));
+            s.store_mul_offset_ad_rhs(98, 96, A::sub_scaled_inputs(s.ad_value(268), p.p21, s.ad_value(86), p.p21), 1.0);
+            s.store_sqrt_offset_ad(92, A::mul_scaled_lhs(s.ad_value(263), (p.p25 * p.p25), s.ad_value(263)), 1.0);
+            s.store_div(93, 98, 92);
+            s.store_mul(269, 93, 135);
+            s.store_sub(90, 261, 260);
+            s.store_add_scaled_inputs3_indices(91, 258, 1.0, 83, 1.0, 262, -1.0);
+            s.store_mul_add_scaled_inputs3_offset_rhs(137, 259, s.ad_value(258), ((p.p4 * p.p5) * p.p174), s.ad_value(262), (((-1.0)) * (((p.p4 * p.p5) * p.p174))), A::div_scaled_product(s.ad_value(90), s.ad_value(90), 0.5, s.ad_value(91), 6.0), ((p.p4 * p.p5) * p.p174), 0.0);
+            s.store_scale(188, 137, (1.0 / (p.p239) * 1e26));
+            s.store_offset_powf_ad(189, s.ad_value(188), p.p238, 1.0);
+            s.store_div_from_scalar(190, p.p237, 189);
+            s.store_div_from_scalar_offset_input(191, p.p9, 190, p.p173);
+            s.store_mul_add_scaled_inputs3_offset_rhs(264, 191, s.ad_value(258), ((p.p4 * p.p5) * p.p174), s.ad_value(262), (((-1.0)) * (((p.p4 * p.p5) * p.p174))), A::div_scaled_product(s.ad_value(90), s.ad_value(90), 0.5, s.ad_value(91), 6.0), ((p.p4 * p.p5) * p.p174), 0.0);
+            s.store_add_scaled_inputs3_indices(136, 258, 1.0, 83, 1.0, 262, -1.0);
+            s.store_add_scaled_inputs(90, 260, 0.3333333333333333, 261, (2.0 * 0.3333333333333333));
+            s.store_div_scaled_inputs_mixed_ai(91, A::square(s.ad_value(263)), (1.0 / 12.0), 136, 1.0);
+            s.store_div_scaled_product_mixed_aia(137, A::square(s.ad_value(263)), 263, (1.0 / 120.0), A::square(s.ad_value(136)), 1.0);
             s.store_mul_add_scaled_inputs4_indices_rhs(265, 191, 258, (-(((p.p4 * p.p174) * p.p5) * 0.5)), 90, (((-1.0)) * ((-(((p.p4 * p.p174) * p.p5) * 0.5)))), 91, (-(((p.p4 * p.p174) * p.p5) * 0.5)), 137, (-(((p.p4 * p.p174) * p.p5) * 0.5)));
         }
 
@@ -45,8 +145,8 @@ impl Instance {
         if ((!s.b[478]) && s.b[487]) {
             s.copy_ad(266, 62);
             s.store_scalar(146, (1.0 + p.p178));
-            s.store_scaled_mul(83, 82, 146, 8.617087e-5);
-            s.store_offset_scaled(88, 82, ((1.0 / (var_tnom)) * (p.p175)), (((((-1.0)) * (p.p175))) + (p.p172)));
+            s.store_mul_scale_ad_lhs(83, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 8.617087e-5, 146);
+            s.store_offset_scaled_ad(88, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p175)), (((((-1.0)) * (p.p175))) + (p.p172)));
             s.store_scalar(259, (p.p9 / p.p173));
             s.store_div_from_scalar_scaled_mul(136, p.p174, 83, 83, (((2.0 * p.p4) * 1.602176634e-19) * 3.24e17));
             s.store_add_scaled_product_right_ad(159, 88, 1.0, 83, A::ln_scaled_input(s.ad_value(136), p.p171), 1.0);
@@ -218,8 +318,8 @@ impl Instance {
 
         if ((!s.b[478]) && s.b[487]) {
             s.store_scalar(267, 0.0);
-            s.store_scaled_powf_ad(97, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p20, p.p176);
-            s.store_scaled_powf_ad(89, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p19, p.p177);
+            s.store_scaled_powf_ad(97, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p20, p.p176);
+            s.store_scaled_powf_ad(89, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p19, p.p177);
             s.store_mul_scaled_abs_ad_rhs(136, 259, 1.0 / (p.p9), A::sub(s.ad_value(258), s.ad_value(260)));
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(260)), (s.v[81] / p.p9));
             s.store_div_ad_rhs(95, 97, A::add_scaled_inputs3_offset(s.ad_value(136), p.p14, A::square(s.ad_value(136)), p.p15, s.ad_value(90), p.p16, 1.0));
@@ -251,6 +351,99 @@ impl Instance {
 
         if (((!s.b[478]) && s.b[487]) && s.b[491]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_17(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
+        var_tnom: f64,
+    ) {
+        if (((!s.b[478]) && s.b[487]) && s.b[491]) {
             s.store_limited_exp_scaled_input(91, 136, ((-3.0) * 1.0 / (4.0)));
             s.store_div_scaled_product3_mixed_iiaa(156, 83, 99, A::add_scaled_inputs(s.ad_value(136), (3.0 * 0.25), A::ln(A::add(s.ad_value(90), s.ad_value(91))), 1.0), 2.0, A::add_scaled_product(A::div_from_scalar(1.0, s.ad_value(152)), 1.0, s.ad_value(99), A::limited_exp_div_scaled_inputs(s.ad_value(130), (-1.0), s.ad_value(83), 2.0), 1.0 / (3.24e17)), 1.0);
         }
@@ -278,15 +471,6 @@ impl Instance {
             s.store_sub_div_same_denominator(105, 100, 103, 83);
         }
 
-    }
-
-    pub(super) fn stamp_transient_block_17(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        var_tnom: f64,
-    ) {
         if (((!s.b[478]) && s.b[487]) && s.b[492]) {
             s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), {
                 if ((!(s.v[104] >= 37.0)) && (!(s.v[104] <= (-37.0)))) {
@@ -467,8 +651,8 @@ impl Instance {
         if (s.b[493] && s.b[494]) {
             s.store_offset_sqrt_ad(280, A::offset(A::square(s.ad_value(279)), 0.01), (-0.1));
             s.store_offset_scaled(146, 280, p.p192, (1.0 + p.p191));
-            s.store_scaled_mul(83, 82, 146, 8.617087e-5);
-            s.store_sub_ad(88, A::sub_from_scalar(p.p185, A::scale_offset(s.ad_value(82), ((1.0 / (var_tnom)) * (p.p188)), (((-1.0)) * (p.p188)))), A::div_scaled_inputs(s.ad_value(280), (p.p194 * p.p193), A::sqrt_square_offset(s.ad_value(280), (p.p194 * p.p194)), 1.0));
+            s.store_mul_scale_ad_lhs(83, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 8.617087e-5, 146);
+            s.store_sub_ad(88, A::sub_from_scalar(p.p185, A::scale_offset(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p188)), (((-1.0)) * (p.p188)))), A::div_scaled_inputs(s.ad_value(280), (p.p194 * p.p193), A::sqrt_square_offset(s.ad_value(280), (p.p194 * p.p194)), 1.0));
             s.store_scalar(271, (p.p9 / p.p186));
             s.store_div_from_scalar_scaled_mul(136, p.p187, 83, 83, (((2.0 * p.p4) * 1.602176634e-19) * 3.24e17));
             s.store_add_scaled_product_right_ad(159, 88, 1.0, 83, A::ln_scaled_input(s.ad_value(136), p.p184), 1.0);
@@ -524,6 +708,94 @@ impl Instance {
             s.store_sub_div_same_denominator(105, 100, 103, 83);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_18(
+        s: &mut Scratch,
+        p: &Parameters,
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
+        var_tnom: f64,
+    ) {
         if ((s.b[493] && s.b[494]) && s.b[498]) {
             s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), {
                 if ((!(s.v[104] >= 37.0)) && (!(s.v[104] <= (-37.0)))) {
@@ -574,16 +846,6 @@ impl Instance {
             s.store_add_scaled_inputs3_mixed_iaa(113, 99, (-1.0), A::div(s.ad_value(109), s.ad_value(110)), (-1.0), A::div(s.ad_value(111), s.ad_value(112)), -1.0);
             s.store_sub_div_rhs_indices(114, 100, 106, 113);
             s.store_sub(115, 270, 114);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_18(
-        s: &mut Scratch,
-        p: &Parameters,
-        var_tnom: f64,
-    ) {
-        if ((s.b[493] && s.b[494]) && s.b[498]) {
             s.store_scaled_add_sqrt_square_offset_rhs(115, 115, 115, ((4.0 * 1e-9) * 1e-9), 0.5);
             s.store_powf(137, 115, (-0.3333333333333333));
             s.store_mul_scaled_powf_rhs(116, 136, p.p195, 115, 0.6666666666666666);
@@ -649,8 +911,8 @@ impl Instance {
         }
 
         if (s.b[493] && s.b[494]) {
-            s.store_scaled_powf_ad(97, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p20, p.p189);
-            s.store_scaled_powf_ad(89, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p19, p.p190);
+            s.store_scaled_powf_ad(97, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p20, p.p189);
+            s.store_scaled_powf_ad(89, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p19, p.p190);
             s.store_mul_scaled_abs_ad_rhs(136, 271, 1.0 / (p.p9), A::sub(s.ad_value(270), s.ad_value(272)));
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(272)), (s.v[81] / p.p9));
             s.store_div_ad_rhs(95, 97, A::add_scaled_inputs3_offset(s.ad_value(136), p.p14, A::square(s.ad_value(136)), p.p15, s.ad_value(90), p.p16, 1.0));
@@ -827,6 +1089,99 @@ impl Instance {
             s.store_sub(275, 273, 272);
             s.store_mul_add_scaled_inputs3_offset_rhs(135, 275, s.ad_value(270), 1.0, s.ad_value(274), (-1.0), s.ad_value(83), 1.0, 0.0);
             s.store_mul_scaled_abs_ad_rhs(136, 271, 1.0 / (p.p9), A::sub(s.ad_value(270), s.ad_value(274)));
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_19(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
+        var_tnom: f64,
+    ) {
+        if (s.b[493] && s.b[494]) {
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(129)), (s.v[81] / p.p9));
             s.store_div_add_scaled_inputs_rhs_mixed_ai(95, 97, A::add_scaled_product(A::scale_offset(s.ad_value(136), p.p14, 1.0), 1.0, s.ad_value(136), s.ad_value(136), p.p15), 1.0, 90, p.p16);
             s.store_scaled_mul(96, 95, 271, (p.p4 * (p.p5 * 1.0 / (p.p187))));
@@ -846,18 +1201,6 @@ impl Instance {
             s.store_add_scaled_inputs(90, 272, 0.3333333333333333, 273, (2.0 * 0.3333333333333333));
             s.store_div_scaled_inputs_mixed_ai(91, A::square(s.ad_value(275)), (1.0 / 12.0), 136, 1.0);
             s.store_div_scaled_product_mixed_aia(137, A::square(s.ad_value(275)), 275, (1.0 / 120.0), A::square(s.ad_value(136)), 1.0);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_19(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        var_tnom: f64,
-    ) {
-        if (s.b[493] && s.b[494]) {
             s.store_mul_add_scaled_inputs4_indices_rhs(277, 191, 270, (-(((p.p4 * p.p187) * p.p5) * 0.5)), 90, (((-1.0)) * ((-(((p.p4 * p.p187) * p.p5) * 0.5)))), 91, (-(((p.p4 * p.p187) * p.p5) * 0.5)), 137, (-(((p.p4 * p.p187) * p.p5) * 0.5)));
         }
 
@@ -890,8 +1233,8 @@ impl Instance {
         if ((!s.b[493]) && s.b[502]) {
             s.copy_ad(278, 66);
             s.store_scalar(146, (1.0 + p.p191));
-            s.store_scaled_mul(83, 82, 146, 8.617087e-5);
-            s.store_sub_from_scalar_ad(88, p.p185, A::scale_offset(s.ad_value(82), ((1.0 / (var_tnom)) * (p.p188)), (((-1.0)) * (p.p188))));
+            s.store_mul_scale_ad_lhs(83, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 8.617087e-5, 146);
+            s.store_sub_from_scalar_ad(88, p.p185, A::scale_offset(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p188)), (((-1.0)) * (p.p188))));
             s.store_scalar(271, (p.p9 / p.p186));
             s.store_div_from_scalar_scaled_mul(136, p.p187, 83, 83, (((2.0 * p.p4) * 1.602176634e-19) * 3.24e17));
             s.store_add_scaled_product_right_ad(159, 88, 1.0, 83, A::ln_scaled_input(s.ad_value(136), p.p184), 1.0);
@@ -1063,8 +1406,8 @@ impl Instance {
 
         if ((!s.b[493]) && s.b[502]) {
             s.store_scalar(279, 0.0);
-            s.store_scaled_powf_ad(97, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p20, p.p189);
-            s.store_scaled_powf_ad(89, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p19, p.p190);
+            s.store_scaled_powf_ad(97, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p20, p.p189);
+            s.store_scaled_powf_ad(89, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p19, p.p190);
             s.store_mul_scaled_abs_ad_rhs(136, 271, 1.0 / (p.p9), A::sub(s.ad_value(270), s.ad_value(272)));
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(272)), (s.v[81] / p.p9));
             s.store_div_ad_rhs(95, 97, A::add_scaled_inputs3_offset(s.ad_value(136), p.p14, A::square(s.ad_value(136)), p.p15, s.ad_value(90), p.p16, 1.0));
@@ -1096,6 +1439,99 @@ impl Instance {
 
         if (((!s.b[493]) && s.b[502]) && s.b[506]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_20(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
+        var_tnom: f64,
+    ) {
+        if (((!s.b[493]) && s.b[502]) && s.b[506]) {
             s.store_limited_exp_scaled_input(91, 136, ((-3.0) * 1.0 / (4.0)));
             s.store_div_scaled_product3_mixed_iiaa(156, 83, 99, A::add_scaled_inputs(s.ad_value(136), (3.0 * 0.25), A::ln(A::add(s.ad_value(90), s.ad_value(91))), 1.0), 2.0, A::add_scaled_product(A::div_from_scalar(1.0, s.ad_value(152)), 1.0, s.ad_value(99), A::limited_exp_div_scaled_inputs(s.ad_value(130), (-1.0), s.ad_value(83), 2.0), 1.0 / (3.24e17)), 1.0);
         }
@@ -1123,15 +1559,6 @@ impl Instance {
             s.store_sub_div_same_denominator(105, 100, 103, 83);
         }
 
-    }
-
-    pub(super) fn stamp_transient_block_20(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        var_tnom: f64,
-    ) {
         if (((!s.b[493]) && s.b[502]) && s.b[507]) {
             s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), {
                 if ((!(s.v[104] >= 37.0)) && (!(s.v[104] <= (-37.0)))) {
@@ -1312,8 +1739,8 @@ impl Instance {
         if (s.b[508] && s.b[509]) {
             s.store_offset_sqrt_ad(292, A::offset(A::square(s.ad_value(291)), 0.01), (-0.1));
             s.store_offset_scaled(146, 292, p.p192, (1.0 + p.p191));
-            s.store_scaled_mul(83, 82, 146, 8.617087e-5);
-            s.store_sub_ad(88, A::scale_offset(s.ad_value(82), ((1.0 / (var_tnom)) * (p.p188)), (((((-1.0)) * (p.p188))) + (p.p185))), A::div_scaled_inputs(s.ad_value(292), (p.p194 * p.p193), A::sqrt_square_offset(s.ad_value(292), (p.p194 * p.p194)), 1.0));
+            s.store_mul_scale_ad_lhs(83, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 8.617087e-5, 146);
+            s.store_sub_ad(88, A::scale_offset(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p188)), (((((-1.0)) * (p.p188))) + (p.p185))), A::div_scaled_inputs(s.ad_value(292), (p.p194 * p.p193), A::sqrt_square_offset(s.ad_value(292), (p.p194 * p.p194)), 1.0));
             s.store_scalar(283, (p.p9 / p.p186));
             s.store_div_from_scalar_scaled_mul(136, p.p187, 83, 83, (((2.0 * p.p4) * 1.602176634e-19) * 3.24e17));
             s.store_add_scaled_product_right_ad(159, 88, 1.0, 83, A::ln_scaled_input(s.ad_value(136), p.p184), 1.0);
@@ -1369,6 +1796,94 @@ impl Instance {
             s.store_sub_div_same_denominator(105, 100, 103, 83);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_21(
+        s: &mut Scratch,
+        p: &Parameters,
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
+        var_tnom: f64,
+    ) {
         if ((s.b[508] && s.b[509]) && s.b[513]) {
             s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), {
                 if ((!(s.v[104] >= 37.0)) && (!(s.v[104] <= (-37.0)))) {
@@ -1419,16 +1934,6 @@ impl Instance {
             s.store_add_scaled_inputs3_mixed_iaa(113, 99, (-1.0), A::div(s.ad_value(109), s.ad_value(110)), (-1.0), A::div(s.ad_value(111), s.ad_value(112)), -1.0);
             s.store_sub_div_rhs_indices(114, 100, 106, 113);
             s.store_sub(115, 282, 114);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_21(
-        s: &mut Scratch,
-        p: &Parameters,
-        var_tnom: f64,
-    ) {
-        if ((s.b[508] && s.b[509]) && s.b[513]) {
             s.store_scaled_add_sqrt_square_offset_rhs(115, 115, 115, ((4.0 * 1e-9) * 1e-9), 0.5);
             s.store_powf(137, 115, (-0.3333333333333333));
             s.store_mul_scaled_powf_rhs(116, 136, p.p195, 115, 0.6666666666666666);
@@ -1494,8 +1999,8 @@ impl Instance {
         }
 
         if (s.b[508] && s.b[509]) {
-            s.store_scaled_powf_ad(97, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p20, p.p189);
-            s.store_scaled_powf_ad(89, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p19, p.p190);
+            s.store_scaled_powf_ad(97, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p20, p.p189);
+            s.store_scaled_powf_ad(89, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p19, p.p190);
             s.store_mul_scaled_abs_ad_rhs(136, 283, 1.0 / (p.p9), A::sub(s.ad_value(282), s.ad_value(284)));
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(284)), (s.v[81] / p.p9));
             s.store_div_ad_rhs(95, 97, A::add_scaled_inputs3_offset(s.ad_value(136), p.p14, A::square(s.ad_value(136)), p.p15, s.ad_value(90), p.p16, 1.0));
@@ -1672,6 +2177,99 @@ impl Instance {
             s.store_sub(287, 285, 284);
             s.store_mul_add_scaled_inputs3_offset_rhs(135, 287, s.ad_value(282), 1.0, s.ad_value(286), (-1.0), s.ad_value(83), 1.0, 0.0);
             s.store_mul_scaled_abs_ad_rhs(136, 283, 1.0 / (p.p9), A::sub(s.ad_value(282), s.ad_value(286)));
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_22(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
+        var_tnom: f64,
+    ) {
+        if (s.b[508] && s.b[509]) {
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(129)), (s.v[81] / p.p9));
             s.store_div_add_scaled_inputs_rhs_mixed_ai(95, 97, A::add_scaled_product(A::scale_offset(s.ad_value(136), p.p14, 1.0), 1.0, s.ad_value(136), s.ad_value(136), p.p15), 1.0, 90, p.p16);
             s.store_scaled_mul(96, 95, 283, (p.p4 * (p.p5 * 1.0 / (p.p187))));
@@ -1691,18 +2289,6 @@ impl Instance {
             s.store_add_scaled_inputs(90, 284, 0.3333333333333333, 285, (2.0 * 0.3333333333333333));
             s.store_div_scaled_inputs_mixed_ai(91, A::square(s.ad_value(287)), (1.0 / 12.0), 136, 1.0);
             s.store_div_scaled_product_mixed_aia(137, A::square(s.ad_value(287)), 287, (1.0 / 120.0), A::square(s.ad_value(136)), 1.0);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_22(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        var_tnom: f64,
-    ) {
-        if (s.b[508] && s.b[509]) {
             s.store_mul_add_scaled_inputs4_indices_rhs(289, 191, 282, (-(((p.p4 * p.p187) * p.p5) * 0.5)), 90, (((-1.0)) * ((-(((p.p4 * p.p187) * p.p5) * 0.5)))), 91, (-(((p.p4 * p.p187) * p.p5) * 0.5)), 137, (-(((p.p4 * p.p187) * p.p5) * 0.5)));
         }
 
@@ -1735,8 +2321,8 @@ impl Instance {
         if ((!s.b[508]) && s.b[517]) {
             s.copy_ad(290, 70);
             s.store_scalar(146, (1.0 + p.p191));
-            s.store_scaled_mul(83, 82, 146, 8.617087e-5);
-            s.store_offset_scaled(88, 82, ((1.0 / (var_tnom)) * (p.p188)), (((((-1.0)) * (p.p188))) + (p.p185)));
+            s.store_mul_scale_ad_lhs(83, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 8.617087e-5, 146);
+            s.store_offset_scaled_ad(88, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p188)), (((((-1.0)) * (p.p188))) + (p.p185)));
             s.store_scalar(283, (p.p9 / p.p186));
             s.store_div_from_scalar_scaled_mul(136, p.p187, 83, 83, (((2.0 * p.p4) * 1.602176634e-19) * 3.24e17));
             s.store_add_scaled_product_right_ad(159, 88, 1.0, 83, A::ln_scaled_input(s.ad_value(136), p.p184), 1.0);
@@ -1908,8 +2494,8 @@ impl Instance {
 
         if ((!s.b[508]) && s.b[517]) {
             s.store_scalar(291, 0.0);
-            s.store_scaled_powf_ad(97, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p20, p.p189);
-            s.store_scaled_powf_ad(89, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p19, p.p190);
+            s.store_scaled_powf_ad(97, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p20, p.p189);
+            s.store_scaled_powf_ad(89, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p19, p.p190);
             s.store_mul_scaled_abs_ad_rhs(136, 283, 1.0 / (p.p9), A::sub(s.ad_value(282), s.ad_value(284)));
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(284)), (s.v[81] / p.p9));
             s.store_div_ad_rhs(95, 97, A::add_scaled_inputs3_offset(s.ad_value(136), p.p14, A::square(s.ad_value(136)), p.p15, s.ad_value(90), p.p16, 1.0));
@@ -1941,6 +2527,99 @@ impl Instance {
 
         if (((!s.b[508]) && s.b[517]) && s.b[521]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_23(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
+        var_tnom: f64,
+    ) {
+        if (((!s.b[508]) && s.b[517]) && s.b[521]) {
             s.store_limited_exp_scaled_input(91, 136, ((-3.0) * 1.0 / (4.0)));
             s.store_div_scaled_product3_mixed_iiaa(156, 83, 99, A::add_scaled_inputs(s.ad_value(136), (3.0 * 0.25), A::ln(A::add(s.ad_value(90), s.ad_value(91))), 1.0), 2.0, A::add_scaled_product(A::div_from_scalar(1.0, s.ad_value(152)), 1.0, s.ad_value(99), A::limited_exp_div_scaled_inputs(s.ad_value(130), (-1.0), s.ad_value(83), 2.0), 1.0 / (3.24e17)), 1.0);
         }
@@ -1968,15 +2647,6 @@ impl Instance {
             s.store_sub_div_same_denominator(105, 100, 103, 83);
         }
 
-    }
-
-    pub(super) fn stamp_transient_block_23(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        var_tnom: f64,
-    ) {
         if (((!s.b[508]) && s.b[517]) && s.b[522]) {
             s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), {
                 if ((!(s.v[104] >= 37.0)) && (!(s.v[104] <= (-37.0)))) {
@@ -2157,8 +2827,8 @@ impl Instance {
         if (s.b[523] && s.b[524]) {
             s.store_offset_sqrt_ad(304, A::offset(A::square(s.ad_value(303)), 0.01), (-0.1));
             s.store_offset_scaled(146, 304, p.p205, (1.0 + p.p204));
-            s.store_scaled_mul(83, 82, 146, 8.617087e-5);
-            s.store_sub_ad(88, A::sub_from_scalar(p.p198, A::scale_offset(s.ad_value(82), ((1.0 / (var_tnom)) * (p.p201)), (((-1.0)) * (p.p201)))), A::div_scaled_inputs(s.ad_value(304), (p.p207 * p.p206), A::sqrt_square_offset(s.ad_value(304), (p.p207 * p.p207)), 1.0));
+            s.store_mul_scale_ad_lhs(83, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 8.617087e-5, 146);
+            s.store_sub_ad(88, A::sub_from_scalar(p.p198, A::scale_offset(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p201)), (((-1.0)) * (p.p201)))), A::div_scaled_inputs(s.ad_value(304), (p.p207 * p.p206), A::sqrt_square_offset(s.ad_value(304), (p.p207 * p.p207)), 1.0));
             s.store_scalar(295, (p.p9 / p.p199));
             s.store_div_from_scalar_scaled_mul(136, p.p200, 83, 83, (((2.0 * p.p4) * 1.602176634e-19) * 3.24e17));
             s.store_add_scaled_product_right_ad(159, 88, 1.0, 83, A::ln_scaled_input(s.ad_value(136), p.p197), 1.0);
@@ -2214,6 +2884,94 @@ impl Instance {
             s.store_sub_div_same_denominator(105, 100, 103, 83);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_24(
+        s: &mut Scratch,
+        p: &Parameters,
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
+        var_tnom: f64,
+    ) {
         if ((s.b[523] && s.b[524]) && s.b[528]) {
             s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), {
                 if ((!(s.v[104] >= 37.0)) && (!(s.v[104] <= (-37.0)))) {
@@ -2264,16 +3022,6 @@ impl Instance {
             s.store_add_scaled_inputs3_mixed_iaa(113, 99, (-1.0), A::div(s.ad_value(109), s.ad_value(110)), (-1.0), A::div(s.ad_value(111), s.ad_value(112)), -1.0);
             s.store_sub_div_rhs_indices(114, 100, 106, 113);
             s.store_sub(115, 294, 114);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_24(
-        s: &mut Scratch,
-        p: &Parameters,
-        var_tnom: f64,
-    ) {
-        if ((s.b[523] && s.b[524]) && s.b[528]) {
             s.store_scaled_add_sqrt_square_offset_rhs(115, 115, 115, ((4.0 * 1e-9) * 1e-9), 0.5);
             s.store_powf(137, 115, (-0.3333333333333333));
             s.store_mul_scaled_powf_rhs(116, 136, p.p208, 115, 0.6666666666666666);
@@ -2339,8 +3087,8 @@ impl Instance {
         }
 
         if (s.b[523] && s.b[524]) {
-            s.store_scaled_powf_ad(97, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p20, p.p202);
-            s.store_scaled_powf_ad(89, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p19, p.p203);
+            s.store_scaled_powf_ad(97, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p20, p.p202);
+            s.store_scaled_powf_ad(89, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p19, p.p203);
             s.store_mul_scaled_abs_ad_rhs(136, 295, 1.0 / (p.p9), A::sub(s.ad_value(294), s.ad_value(296)));
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(296)), (s.v[81] / p.p9));
             s.store_div_ad_rhs(95, 97, A::add_scaled_inputs3_offset(s.ad_value(136), p.p14, A::square(s.ad_value(136)), p.p15, s.ad_value(90), p.p16, 1.0));
@@ -2517,6 +3265,99 @@ impl Instance {
             s.store_sub(299, 297, 296);
             s.store_mul_add_scaled_inputs3_offset_rhs(135, 299, s.ad_value(294), 1.0, s.ad_value(298), (-1.0), s.ad_value(83), 1.0, 0.0);
             s.store_mul_scaled_abs_ad_rhs(136, 295, 1.0 / (p.p9), A::sub(s.ad_value(294), s.ad_value(298)));
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_25(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
+        var_tnom: f64,
+    ) {
+        if (s.b[523] && s.b[524]) {
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(129)), (s.v[81] / p.p9));
             s.store_div_add_scaled_inputs_rhs_mixed_ai(95, 97, A::add_scaled_product(A::scale_offset(s.ad_value(136), p.p14, 1.0), 1.0, s.ad_value(136), s.ad_value(136), p.p15), 1.0, 90, p.p16);
             s.store_scaled_mul(96, 95, 295, (p.p4 * (p.p5 * 1.0 / (p.p200))));
@@ -2536,18 +3377,6 @@ impl Instance {
             s.store_add_scaled_inputs(90, 296, 0.3333333333333333, 297, (2.0 * 0.3333333333333333));
             s.store_div_scaled_inputs_mixed_ai(91, A::square(s.ad_value(299)), (1.0 / 12.0), 136, 1.0);
             s.store_div_scaled_product_mixed_aia(137, A::square(s.ad_value(299)), 299, (1.0 / 120.0), A::square(s.ad_value(136)), 1.0);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_25(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        var_tnom: f64,
-    ) {
-        if (s.b[523] && s.b[524]) {
             s.store_mul_add_scaled_inputs4_indices_rhs(301, 191, 294, (-(((p.p4 * p.p200) * p.p5) * 0.5)), 90, (((-1.0)) * ((-(((p.p4 * p.p200) * p.p5) * 0.5)))), 91, (-(((p.p4 * p.p200) * p.p5) * 0.5)), 137, (-(((p.p4 * p.p200) * p.p5) * 0.5)));
         }
 
@@ -2580,8 +3409,8 @@ impl Instance {
         if ((!s.b[523]) && s.b[532]) {
             s.copy_ad(302, 74);
             s.store_scalar(146, (1.0 + p.p204));
-            s.store_scaled_mul(83, 82, 146, 8.617087e-5);
-            s.store_sub_from_scalar_ad(88, p.p198, A::scale_offset(s.ad_value(82), ((1.0 / (var_tnom)) * (p.p201)), (((-1.0)) * (p.p201))));
+            s.store_mul_scale_ad_lhs(83, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 8.617087e-5, 146);
+            s.store_sub_from_scalar_ad(88, p.p198, A::scale_offset(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p201)), (((-1.0)) * (p.p201))));
             s.store_scalar(295, (p.p9 / p.p199));
             s.store_div_from_scalar_scaled_mul(136, p.p200, 83, 83, (((2.0 * p.p4) * 1.602176634e-19) * 3.24e17));
             s.store_add_scaled_product_right_ad(159, 88, 1.0, 83, A::ln_scaled_input(s.ad_value(136), p.p197), 1.0);
@@ -2753,8 +3582,8 @@ impl Instance {
 
         if ((!s.b[523]) && s.b[532]) {
             s.store_scalar(303, 0.0);
-            s.store_scaled_powf_ad(97, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p20, p.p202);
-            s.store_scaled_powf_ad(89, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p19, p.p203);
+            s.store_scaled_powf_ad(97, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p20, p.p202);
+            s.store_scaled_powf_ad(89, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p19, p.p203);
             s.store_mul_scaled_abs_ad_rhs(136, 295, 1.0 / (p.p9), A::sub(s.ad_value(294), s.ad_value(296)));
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(296)), (s.v[81] / p.p9));
             s.store_div_ad_rhs(95, 97, A::add_scaled_inputs3_offset(s.ad_value(136), p.p14, A::square(s.ad_value(136)), p.p15, s.ad_value(90), p.p16, 1.0));
@@ -2786,6 +3615,99 @@ impl Instance {
 
         if (((!s.b[523]) && s.b[532]) && s.b[536]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_26(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
+        var_tnom: f64,
+    ) {
+        if (((!s.b[523]) && s.b[532]) && s.b[536]) {
             s.store_limited_exp_scaled_input(91, 136, ((-3.0) * 1.0 / (4.0)));
             s.store_div_scaled_product3_mixed_iiaa(156, 83, 99, A::add_scaled_inputs(s.ad_value(136), (3.0 * 0.25), A::ln(A::add(s.ad_value(90), s.ad_value(91))), 1.0), 2.0, A::add_scaled_product(A::div_from_scalar(1.0, s.ad_value(152)), 1.0, s.ad_value(99), A::limited_exp_div_scaled_inputs(s.ad_value(130), (-1.0), s.ad_value(83), 2.0), 1.0 / (3.24e17)), 1.0);
         }
@@ -2813,15 +3735,6 @@ impl Instance {
             s.store_sub_div_same_denominator(105, 100, 103, 83);
         }
 
-    }
-
-    pub(super) fn stamp_transient_block_26(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        var_tnom: f64,
-    ) {
         if (((!s.b[523]) && s.b[532]) && s.b[537]) {
             s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), {
                 if ((!(s.v[104] >= 37.0)) && (!(s.v[104] <= (-37.0)))) {
@@ -3002,8 +3915,8 @@ impl Instance {
         if (s.b[538] && s.b[539]) {
             s.store_offset_sqrt_ad(316, A::offset(A::square(s.ad_value(315)), 0.01), (-0.1));
             s.store_offset_scaled(146, 316, p.p205, (1.0 + p.p204));
-            s.store_scaled_mul(83, 82, 146, 8.617087e-5);
-            s.store_sub_ad(88, A::scale_offset(s.ad_value(82), ((1.0 / (var_tnom)) * (p.p201)), (((((-1.0)) * (p.p201))) + (p.p198))), A::div_scaled_inputs(s.ad_value(316), (p.p207 * p.p206), A::sqrt_square_offset(s.ad_value(316), (p.p207 * p.p207)), 1.0));
+            s.store_mul_scale_ad_lhs(83, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 8.617087e-5, 146);
+            s.store_sub_ad(88, A::scale_offset(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p201)), (((((-1.0)) * (p.p201))) + (p.p198))), A::div_scaled_inputs(s.ad_value(316), (p.p207 * p.p206), A::sqrt_square_offset(s.ad_value(316), (p.p207 * p.p207)), 1.0));
             s.store_scalar(307, (p.p9 / p.p199));
             s.store_div_from_scalar_scaled_mul(136, p.p200, 83, 83, (((2.0 * p.p4) * 1.602176634e-19) * 3.24e17));
             s.store_add_scaled_product_right_ad(159, 88, 1.0, 83, A::ln_scaled_input(s.ad_value(136), p.p197), 1.0);
@@ -3059,6 +3972,94 @@ impl Instance {
             s.store_sub_div_same_denominator(105, 100, 103, 83);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_27(
+        s: &mut Scratch,
+        p: &Parameters,
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
+        var_tnom: f64,
+    ) {
         if ((s.b[538] && s.b[539]) && s.b[543]) {
             s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), {
                 if ((!(s.v[104] >= 37.0)) && (!(s.v[104] <= (-37.0)))) {
@@ -3109,16 +4110,6 @@ impl Instance {
             s.store_add_scaled_inputs3_mixed_iaa(113, 99, (-1.0), A::div(s.ad_value(109), s.ad_value(110)), (-1.0), A::div(s.ad_value(111), s.ad_value(112)), -1.0);
             s.store_sub_div_rhs_indices(114, 100, 106, 113);
             s.store_sub(115, 306, 114);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_27(
-        s: &mut Scratch,
-        p: &Parameters,
-        var_tnom: f64,
-    ) {
-        if ((s.b[538] && s.b[539]) && s.b[543]) {
             s.store_scaled_add_sqrt_square_offset_rhs(115, 115, 115, ((4.0 * 1e-9) * 1e-9), 0.5);
             s.store_powf(137, 115, (-0.3333333333333333));
             s.store_mul_scaled_powf_rhs(116, 136, p.p208, 115, 0.6666666666666666);
@@ -3184,8 +4175,8 @@ impl Instance {
         }
 
         if (s.b[538] && s.b[539]) {
-            s.store_scaled_powf_ad(97, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p20, p.p202);
-            s.store_scaled_powf_ad(89, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p19, p.p203);
+            s.store_scaled_powf_ad(97, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p20, p.p202);
+            s.store_scaled_powf_ad(89, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p19, p.p203);
             s.store_mul_scaled_abs_ad_rhs(136, 307, 1.0 / (p.p9), A::sub(s.ad_value(306), s.ad_value(308)));
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(308)), (s.v[81] / p.p9));
             s.store_div_ad_rhs(95, 97, A::add_scaled_inputs3_offset(s.ad_value(136), p.p14, A::square(s.ad_value(136)), p.p15, s.ad_value(90), p.p16, 1.0));
@@ -3362,6 +4353,99 @@ impl Instance {
             s.store_sub(311, 309, 308);
             s.store_mul_add_scaled_inputs3_offset_rhs(135, 311, s.ad_value(306), 1.0, s.ad_value(310), (-1.0), s.ad_value(83), 1.0, 0.0);
             s.store_mul_scaled_abs_ad_rhs(136, 307, 1.0 / (p.p9), A::sub(s.ad_value(306), s.ad_value(310)));
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_28(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
+        var_tnom: f64,
+    ) {
+        if (s.b[538] && s.b[539]) {
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(129)), (s.v[81] / p.p9));
             s.store_div_add_scaled_inputs_rhs_mixed_ai(95, 97, A::add_scaled_product(A::scale_offset(s.ad_value(136), p.p14, 1.0), 1.0, s.ad_value(136), s.ad_value(136), p.p15), 1.0, 90, p.p16);
             s.store_scaled_mul(96, 95, 307, (p.p4 * (p.p5 * 1.0 / (p.p200))));
@@ -3381,18 +4465,6 @@ impl Instance {
             s.store_add_scaled_inputs(90, 308, 0.3333333333333333, 309, (2.0 * 0.3333333333333333));
             s.store_div_scaled_inputs_mixed_ai(91, A::square(s.ad_value(311)), (1.0 / 12.0), 136, 1.0);
             s.store_div_scaled_product_mixed_aia(137, A::square(s.ad_value(311)), 311, (1.0 / 120.0), A::square(s.ad_value(136)), 1.0);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_28(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        var_tnom: f64,
-    ) {
-        if (s.b[538] && s.b[539]) {
             s.store_mul_add_scaled_inputs4_indices_rhs(313, 191, 306, (-(((p.p4 * p.p200) * p.p5) * 0.5)), 90, (((-1.0)) * ((-(((p.p4 * p.p200) * p.p5) * 0.5)))), 91, (-(((p.p4 * p.p200) * p.p5) * 0.5)), 137, (-(((p.p4 * p.p200) * p.p5) * 0.5)));
         }
 
@@ -3425,8 +4497,8 @@ impl Instance {
         if ((!s.b[538]) && s.b[547]) {
             s.copy_ad(314, 78);
             s.store_scalar(146, (1.0 + p.p204));
-            s.store_scaled_mul(83, 82, 146, 8.617087e-5);
-            s.store_offset_scaled(88, 82, ((1.0 / (var_tnom)) * (p.p201)), (((((-1.0)) * (p.p201))) + (p.p198)));
+            s.store_mul_scale_ad_lhs(83, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 8.617087e-5, 146);
+            s.store_offset_scaled_ad(88, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p201)), (((((-1.0)) * (p.p201))) + (p.p198)));
             s.store_scalar(307, (p.p9 / p.p199));
             s.store_div_from_scalar_scaled_mul(136, p.p200, 83, 83, (((2.0 * p.p4) * 1.602176634e-19) * 3.24e17));
             s.store_add_scaled_product_right_ad(159, 88, 1.0, 83, A::ln_scaled_input(s.ad_value(136), p.p197), 1.0);
@@ -3598,8 +4670,8 @@ impl Instance {
 
         if ((!s.b[538]) && s.b[547]) {
             s.store_scalar(315, 0.0);
-            s.store_scaled_powf_ad(97, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p20, p.p202);
-            s.store_scaled_powf_ad(89, A::scale(s.ad_value(82), 1.0 / (var_tnom)), p.p19, p.p203);
+            s.store_scaled_powf_ad(97, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p20, p.p202);
+            s.store_scaled_powf_ad(89, A::scale(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom)), p.p19, p.p203);
             s.store_mul_scaled_abs_ad_rhs(136, 307, 1.0 / (p.p9), A::sub(s.ad_value(306), s.ad_value(308)));
             s.store_scaled_abs_ad(90, A::sub(s.ad_value(45), s.ad_value(308)), (s.v[81] / p.p9));
             s.store_div_ad_rhs(95, 97, A::add_scaled_inputs3_offset(s.ad_value(136), p.p14, A::square(s.ad_value(136)), p.p15, s.ad_value(90), p.p16, 1.0));
@@ -3631,31 +4703,6 @@ impl Instance {
 
         if (((!s.b[538]) && s.b[547]) && s.b[551]) {
             s.store_limited_exp_scaled_input(90, 136, 1.0 / (4.0));
-            s.store_limited_exp_scaled_input(91, 136, ((-3.0) * 1.0 / (4.0)));
-            s.store_div_scaled_product3_mixed_iiaa(156, 83, 99, A::add_scaled_inputs(s.ad_value(136), (3.0 * 0.25), A::ln(A::add(s.ad_value(90), s.ad_value(91))), 1.0), 2.0, A::add_scaled_product(A::div_from_scalar(1.0, s.ad_value(152)), 1.0, s.ad_value(99), A::limited_exp_div_scaled_inputs(s.ad_value(130), (-1.0), s.ad_value(83), 2.0), 1.0 / (3.24e17)), 1.0);
-        }
-
-        if (((!s.b[538]) && s.b[547]) && (!s.b[551])) {
-            s.store_div_scaled_product3_mixed_iiia(156, 83, 99, 136, (2.0 * 1.0 / (1.0)), A::add_scaled_product(A::div_from_scalar(1.0, s.ad_value(152)), 1.0, s.ad_value(99), A::limited_exp_div_scaled_inputs(s.ad_value(130), (-1.0), s.ad_value(83), 2.0), 1.0 / (3.24e17)), 1.0);
-        }
-
-        if ((!s.b[538]) && s.b[547]) {
-            s.store_sub_div_rhs_indices(100, 130, 156, 99);
-        }
-
-        s.b[552] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
-        s.store_scalar(552, if s.b[552] { 1.0 } else { 0.0 });
-
-        if (((!s.b[538]) && s.b[547]) && s.b[552]) {
-            s.store_sub(101, 130, 100);
-            s.store_scaled_add_sqrt_square_offset_rhs(101, 101, 101, ((4.0 * 1e-9) * 1e-9), 0.5);
-            s.store_powf(136, 99, 0.6666666666666666);
-            s.store_powf(90, 101, 0.6666666666666666);
-            s.store_powf(91, 101, (-0.3333333333333333));
-            s.store_scaled_mul(102, 136, 90, p.p208);
-            s.store_scaled_mul(103, 136, 90, p.p209);
-            s.store_sub_div_same_denominator(104, 100, 102, 83);
-            s.store_sub_div_same_denominator(105, 100, 103, 83);
         }
 
     }
@@ -3719,6 +4766,8 @@ impl Instance {
         var_qsov_db52_slot: &mut f64,
         var_qsov_db53_slot: &mut f64,
         var_qsov_db54_slot: &mut f64,
+        var_qsov_db55_slot: &mut f64,
+        var_qsov_db56_slot: &mut f64,
         var_qsov_db6_slot: &mut f64,
         var_qsov_db7_slot: &mut f64,
         var_qsov_db8_slot: &mut f64,
@@ -3798,6 +4847,8 @@ impl Instance {
         var_vdseffcv_db52_slot: &mut f64,
         var_vdseffcv_db53_slot: &mut f64,
         var_vdseffcv_db54_slot: &mut f64,
+        var_vdseffcv_db55_slot: &mut f64,
+        var_vdseffcv_db56_slot: &mut f64,
         var_vdseffcv_db6_slot: &mut f64,
         var_vdseffcv_db7_slot: &mut f64,
         var_vdseffcv_db8_slot: &mut f64,
@@ -3883,6 +4934,8 @@ impl Instance {
         let mut var_qsov_db52: f64 = *var_qsov_db52_slot;
         let mut var_qsov_db53: f64 = *var_qsov_db53_slot;
         let mut var_qsov_db54: f64 = *var_qsov_db54_slot;
+        let mut var_qsov_db55: f64 = *var_qsov_db55_slot;
+        let mut var_qsov_db56: f64 = *var_qsov_db56_slot;
         let mut var_qsov_db6: f64 = *var_qsov_db6_slot;
         let mut var_qsov_db7: f64 = *var_qsov_db7_slot;
         let mut var_qsov_db8: f64 = *var_qsov_db8_slot;
@@ -3962,6 +5015,8 @@ impl Instance {
         let mut var_vdseffcv_db52: f64 = *var_vdseffcv_db52_slot;
         let mut var_vdseffcv_db53: f64 = *var_vdseffcv_db53_slot;
         let mut var_vdseffcv_db54: f64 = *var_vdseffcv_db54_slot;
+        let mut var_vdseffcv_db55: f64 = *var_vdseffcv_db55_slot;
+        let mut var_vdseffcv_db56: f64 = *var_vdseffcv_db56_slot;
         let mut var_vdseffcv_db6: f64 = *var_vdseffcv_db6_slot;
         let mut var_vdseffcv_db7: f64 = *var_vdseffcv_db7_slot;
         let mut var_vdseffcv_db8: f64 = *var_vdseffcv_db8_slot;
@@ -3989,6 +5044,34 @@ impl Instance {
         let mut var_vdseffcv_dn7: f64 = *var_vdseffcv_dn7_slot;
         let mut var_vdseffcv_dn8: f64 = *var_vdseffcv_dn8_slot;
         let mut var_vdseffcv_dn9: f64 = *var_vdseffcv_dn9_slot;
+
+        if (((!s.b[538]) && s.b[547]) && s.b[551]) {
+            s.store_limited_exp_scaled_input(91, 136, ((-3.0) * 1.0 / (4.0)));
+            s.store_div_scaled_product3_mixed_iiaa(156, 83, 99, A::add_scaled_inputs(s.ad_value(136), (3.0 * 0.25), A::ln(A::add(s.ad_value(90), s.ad_value(91))), 1.0), 2.0, A::add_scaled_product(A::div_from_scalar(1.0, s.ad_value(152)), 1.0, s.ad_value(99), A::limited_exp_div_scaled_inputs(s.ad_value(130), (-1.0), s.ad_value(83), 2.0), 1.0 / (3.24e17)), 1.0);
+        }
+
+        if (((!s.b[538]) && s.b[547]) && (!s.b[551])) {
+            s.store_div_scaled_product3_mixed_iiia(156, 83, 99, 136, (2.0 * 1.0 / (1.0)), A::add_scaled_product(A::div_from_scalar(1.0, s.ad_value(152)), 1.0, s.ad_value(99), A::limited_exp_div_scaled_inputs(s.ad_value(130), (-1.0), s.ad_value(83), 2.0), 1.0 / (3.24e17)), 1.0);
+        }
+
+        if ((!s.b[538]) && s.b[547]) {
+            s.store_sub_div_rhs_indices(100, 130, 156, 99);
+        }
+
+        s.b[552] = ((((s.v[100] - s.v[130])) as f64).abs() > 1e-19);
+        s.store_scalar(552, if s.b[552] { 1.0 } else { 0.0 });
+
+        if (((!s.b[538]) && s.b[547]) && s.b[552]) {
+            s.store_sub(101, 130, 100);
+            s.store_scaled_add_sqrt_square_offset_rhs(101, 101, 101, ((4.0 * 1e-9) * 1e-9), 0.5);
+            s.store_powf(136, 99, 0.6666666666666666);
+            s.store_powf(90, 101, 0.6666666666666666);
+            s.store_powf(91, 101, (-0.3333333333333333));
+            s.store_scaled_mul(102, 136, 90, p.p208);
+            s.store_scaled_mul(103, 136, 90, p.p209);
+            s.store_sub_div_same_denominator(104, 100, 102, 83);
+            s.store_sub_div_same_denominator(105, 100, 103, 83);
+        }
 
         if (((!s.b[538]) && s.b[547]) && s.b[552]) {
             s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), {
@@ -4218,6 +5301,8 @@ impl Instance {
         var_qsov_db52 = assign31000_e48893_d_b52;
         var_qsov_db53 = assign31000_e48893_d_b53;
         var_qsov_db54 = assign31000_e48893_d_b54;
+        var_qsov_db55 = 0.0;
+        var_qsov_db56 = 0.0;
 
         let (assign31010_e48908, assign31010_e48908_d_n0, assign31010_e48908_d_n1, assign31010_e48908_d_n2, assign31010_e48908_d_n3, assign31010_e48908_d_n4, assign31010_e48908_d_n5, assign31010_e48908_d_n6, assign31010_e48908_d_n7, assign31010_e48908_d_n8, assign31010_e48908_d_n9, assign31010_e48908_d_n10, assign31010_e48908_d_n11, assign31010_e48908_d_n12, assign31010_e48908_d_n13, assign31010_e48908_d_n14, assign31010_e48908_d_n15, assign31010_e48908_d_n16, assign31010_e48908_d_n17, assign31010_e48908_d_n18, assign31010_e48908_d_n19, assign31010_e48908_d_n20, assign31010_e48908_d_n21, assign31010_e48908_d_n22, assign31010_e48908_d_b0, assign31010_e48908_d_b1, assign31010_e48908_d_b2, assign31010_e48908_d_b3, assign31010_e48908_d_b4, assign31010_e48908_d_b5, assign31010_e48908_d_b6, assign31010_e48908_d_b7, assign31010_e48908_d_b8, assign31010_e48908_d_b9, assign31010_e48908_d_b10, assign31010_e48908_d_b11, assign31010_e48908_d_b12, assign31010_e48908_d_b13, assign31010_e48908_d_b14, assign31010_e48908_d_b15, assign31010_e48908_d_b16, assign31010_e48908_d_b17, assign31010_e48908_d_b18, assign31010_e48908_d_b19, assign31010_e48908_d_b20, assign31010_e48908_d_b21, assign31010_e48908_d_b22, assign31010_e48908_d_b23, assign31010_e48908_d_b24, assign31010_e48908_d_b25, assign31010_e48908_d_b26, assign31010_e48908_d_b27, assign31010_e48908_d_b28, assign31010_e48908_d_b29, assign31010_e48908_d_b30, assign31010_e48908_d_b31, assign31010_e48908_d_b32, assign31010_e48908_d_b33, assign31010_e48908_d_b34, assign31010_e48908_d_b35, assign31010_e48908_d_b36, assign31010_e48908_d_b37, assign31010_e48908_d_b38, assign31010_e48908_d_b39, assign31010_e48908_d_b40, assign31010_e48908_d_b41, assign31010_e48908_d_b42, assign31010_e48908_d_b43, assign31010_e48908_d_b44, assign31010_e48908_d_b45, assign31010_e48908_d_b46, assign31010_e48908_d_b47, assign31010_e48908_d_b48, assign31010_e48908_d_b49, assign31010_e48908_d_b50, assign31010_e48908_d_b51, assign31010_e48908_d_b52, assign31010_e48908_d_b53, assign31010_e48908_d_b54,) = {
     if (var_guard524 != 0.0) {
@@ -4311,6 +5396,8 @@ impl Instance {
         var_vdseffcv_db52 = assign31010_e48908_d_b52;
         var_vdseffcv_db53 = assign31010_e48908_d_b53;
         var_vdseffcv_db54 = assign31010_e48908_d_b54;
+        var_vdseffcv_db55 = 0.0;
+        var_vdseffcv_db56 = 0.0;
 
         let (assign31020_e48918,) = {
     if (var_guard524 != 0.0) {
@@ -4323,7 +5410,6 @@ impl Instance {
     }
 };
         var_cgdl_l = assign31020_e48918;
-
 
         *var_cgdl_l_slot = var_cgdl_l;
         *var_guard524_slot = var_guard524;
@@ -4379,6 +5465,8 @@ impl Instance {
         *var_qsov_db52_slot = var_qsov_db52;
         *var_qsov_db53_slot = var_qsov_db53;
         *var_qsov_db54_slot = var_qsov_db54;
+        *var_qsov_db55_slot = var_qsov_db55;
+        *var_qsov_db56_slot = var_qsov_db56;
         *var_qsov_db6_slot = var_qsov_db6;
         *var_qsov_db7_slot = var_qsov_db7;
         *var_qsov_db8_slot = var_qsov_db8;
@@ -4458,6 +5546,8 @@ impl Instance {
         *var_vdseffcv_db52_slot = var_vdseffcv_db52;
         *var_vdseffcv_db53_slot = var_vdseffcv_db53;
         *var_vdseffcv_db54_slot = var_vdseffcv_db54;
+        *var_vdseffcv_db55_slot = var_vdseffcv_db55;
+        *var_vdseffcv_db56_slot = var_vdseffcv_db56;
         *var_vdseffcv_db6_slot = var_vdseffcv_db6;
         *var_vdseffcv_db7_slot = var_vdseffcv_db7;
         *var_vdseffcv_db8_slot = var_vdseffcv_db8;
@@ -4545,6 +5635,8 @@ impl Instance {
         var_cgdvar_db52_slot: &mut f64,
         var_cgdvar_db53_slot: &mut f64,
         var_cgdvar_db54_slot: &mut f64,
+        var_cgdvar_db55_slot: &mut f64,
+        var_cgdvar_db56_slot: &mut f64,
         var_cgdvar_db6_slot: &mut f64,
         var_cgdvar_db7_slot: &mut f64,
         var_cgdvar_db8_slot: &mut f64,
@@ -4624,6 +5716,8 @@ impl Instance {
         var_qdov_db52_slot: &mut f64,
         var_qdov_db53_slot: &mut f64,
         var_qdov_db54_slot: &mut f64,
+        var_qdov_db55_slot: &mut f64,
+        var_qdov_db56_slot: &mut f64,
         var_qdov_db6_slot: &mut f64,
         var_qdov_db7_slot: &mut f64,
         var_qdov_db8_slot: &mut f64,
@@ -4703,6 +5797,8 @@ impl Instance {
         var_qsov_db52_slot: &mut f64,
         var_qsov_db53_slot: &mut f64,
         var_qsov_db54_slot: &mut f64,
+        var_qsov_db55_slot: &mut f64,
+        var_qsov_db56_slot: &mut f64,
         var_qsov_db6_slot: &mut f64,
         var_qsov_db7_slot: &mut f64,
         var_qsov_db8_slot: &mut f64,
@@ -4782,6 +5878,8 @@ impl Instance {
         var_vdseffcv_db52_slot: &mut f64,
         var_vdseffcv_db53_slot: &mut f64,
         var_vdseffcv_db54_slot: &mut f64,
+        var_vdseffcv_db55_slot: &mut f64,
+        var_vdseffcv_db56_slot: &mut f64,
         var_vdseffcv_db6_slot: &mut f64,
         var_vdseffcv_db7_slot: &mut f64,
         var_vdseffcv_db8_slot: &mut f64,
@@ -4867,6 +5965,8 @@ impl Instance {
         let mut var_cgdvar_db52: f64 = *var_cgdvar_db52_slot;
         let mut var_cgdvar_db53: f64 = *var_cgdvar_db53_slot;
         let mut var_cgdvar_db54: f64 = *var_cgdvar_db54_slot;
+        let mut var_cgdvar_db55: f64 = *var_cgdvar_db55_slot;
+        let mut var_cgdvar_db56: f64 = *var_cgdvar_db56_slot;
         let mut var_cgdvar_db6: f64 = *var_cgdvar_db6_slot;
         let mut var_cgdvar_db7: f64 = *var_cgdvar_db7_slot;
         let mut var_cgdvar_db8: f64 = *var_cgdvar_db8_slot;
@@ -4946,6 +6046,8 @@ impl Instance {
         let mut var_qdov_db52: f64 = *var_qdov_db52_slot;
         let mut var_qdov_db53: f64 = *var_qdov_db53_slot;
         let mut var_qdov_db54: f64 = *var_qdov_db54_slot;
+        let mut var_qdov_db55: f64 = *var_qdov_db55_slot;
+        let mut var_qdov_db56: f64 = *var_qdov_db56_slot;
         let mut var_qdov_db6: f64 = *var_qdov_db6_slot;
         let mut var_qdov_db7: f64 = *var_qdov_db7_slot;
         let mut var_qdov_db8: f64 = *var_qdov_db8_slot;
@@ -5025,6 +6127,8 @@ impl Instance {
         let mut var_qsov_db52: f64 = *var_qsov_db52_slot;
         let mut var_qsov_db53: f64 = *var_qsov_db53_slot;
         let mut var_qsov_db54: f64 = *var_qsov_db54_slot;
+        let mut var_qsov_db55: f64 = *var_qsov_db55_slot;
+        let mut var_qsov_db56: f64 = *var_qsov_db56_slot;
         let mut var_qsov_db6: f64 = *var_qsov_db6_slot;
         let mut var_qsov_db7: f64 = *var_qsov_db7_slot;
         let mut var_qsov_db8: f64 = *var_qsov_db8_slot;
@@ -5104,6 +6208,8 @@ impl Instance {
         let mut var_vdseffcv_db52: f64 = *var_vdseffcv_db52_slot;
         let mut var_vdseffcv_db53: f64 = *var_vdseffcv_db53_slot;
         let mut var_vdseffcv_db54: f64 = *var_vdseffcv_db54_slot;
+        let mut var_vdseffcv_db55: f64 = *var_vdseffcv_db55_slot;
+        let mut var_vdseffcv_db56: f64 = *var_vdseffcv_db56_slot;
         let mut var_vdseffcv_db6: f64 = *var_vdseffcv_db6_slot;
         let mut var_vdseffcv_db7: f64 = *var_vdseffcv_db7_slot;
         let mut var_vdseffcv_db8: f64 = *var_vdseffcv_db8_slot;
@@ -5224,6 +6330,8 @@ impl Instance {
         var_cgdvar_db52 = assign31030_e48934_d_b52;
         var_cgdvar_db53 = assign31030_e48934_d_b53;
         var_cgdvar_db54 = assign31030_e48934_d_b54;
+        var_cgdvar_db55 = 0.0;
+        var_cgdvar_db56 = 0.0;
 
         let (assign31040_e48942, assign31040_e48942_d_n0, assign31040_e48942_d_n1, assign31040_e48942_d_n2, assign31040_e48942_d_n3, assign31040_e48942_d_n4, assign31040_e48942_d_n5, assign31040_e48942_d_n6, assign31040_e48942_d_n7, assign31040_e48942_d_n8, assign31040_e48942_d_n9, assign31040_e48942_d_n10, assign31040_e48942_d_n11, assign31040_e48942_d_n12, assign31040_e48942_d_n13, assign31040_e48942_d_n14, assign31040_e48942_d_n15, assign31040_e48942_d_n16, assign31040_e48942_d_n17, assign31040_e48942_d_n18, assign31040_e48942_d_n19, assign31040_e48942_d_n20, assign31040_e48942_d_n21, assign31040_e48942_d_n22, assign31040_e48942_d_b0, assign31040_e48942_d_b1, assign31040_e48942_d_b2, assign31040_e48942_d_b3, assign31040_e48942_d_b4, assign31040_e48942_d_b5, assign31040_e48942_d_b6, assign31040_e48942_d_b7, assign31040_e48942_d_b8, assign31040_e48942_d_b9, assign31040_e48942_d_b10, assign31040_e48942_d_b11, assign31040_e48942_d_b12, assign31040_e48942_d_b13, assign31040_e48942_d_b14, assign31040_e48942_d_b15, assign31040_e48942_d_b16, assign31040_e48942_d_b17, assign31040_e48942_d_b18, assign31040_e48942_d_b19, assign31040_e48942_d_b20, assign31040_e48942_d_b21, assign31040_e48942_d_b22, assign31040_e48942_d_b23, assign31040_e48942_d_b24, assign31040_e48942_d_b25, assign31040_e48942_d_b26, assign31040_e48942_d_b27, assign31040_e48942_d_b28, assign31040_e48942_d_b29, assign31040_e48942_d_b30, assign31040_e48942_d_b31, assign31040_e48942_d_b32, assign31040_e48942_d_b33, assign31040_e48942_d_b34, assign31040_e48942_d_b35, assign31040_e48942_d_b36, assign31040_e48942_d_b37, assign31040_e48942_d_b38, assign31040_e48942_d_b39, assign31040_e48942_d_b40, assign31040_e48942_d_b41, assign31040_e48942_d_b42, assign31040_e48942_d_b43, assign31040_e48942_d_b44, assign31040_e48942_d_b45, assign31040_e48942_d_b46, assign31040_e48942_d_b47, assign31040_e48942_d_b48, assign31040_e48942_d_b49, assign31040_e48942_d_b50, assign31040_e48942_d_b51, assign31040_e48942_d_b52, assign31040_e48942_d_b53, assign31040_e48942_d_b54,) = {
     if (var_guard524 != 0.0) {
@@ -5313,6 +6421,8 @@ impl Instance {
         var_qdov_db52 = assign31040_e48942_d_b52;
         var_qdov_db53 = assign31040_e48942_d_b53;
         var_qdov_db54 = assign31040_e48942_d_b54;
+        var_qdov_db55 = 0.0;
+        var_qdov_db56 = 0.0;
 
         let (assign31050_e48953, assign31050_e48953_d_n0, assign31050_e48953_d_n1, assign31050_e48953_d_n2, assign31050_e48953_d_n3, assign31050_e48953_d_n4, assign31050_e48953_d_n5, assign31050_e48953_d_n6, assign31050_e48953_d_n7, assign31050_e48953_d_n8, assign31050_e48953_d_n9, assign31050_e48953_d_n10, assign31050_e48953_d_n11, assign31050_e48953_d_n12, assign31050_e48953_d_n13, assign31050_e48953_d_n14, assign31050_e48953_d_n15, assign31050_e48953_d_n16, assign31050_e48953_d_n17, assign31050_e48953_d_n18, assign31050_e48953_d_n19, assign31050_e48953_d_n20, assign31050_e48953_d_n21, assign31050_e48953_d_n22, assign31050_e48953_d_b0, assign31050_e48953_d_b1, assign31050_e48953_d_b2, assign31050_e48953_d_b3, assign31050_e48953_d_b4, assign31050_e48953_d_b5, assign31050_e48953_d_b6, assign31050_e48953_d_b7, assign31050_e48953_d_b8, assign31050_e48953_d_b9, assign31050_e48953_d_b10, assign31050_e48953_d_b11, assign31050_e48953_d_b12, assign31050_e48953_d_b13, assign31050_e48953_d_b14, assign31050_e48953_d_b15, assign31050_e48953_d_b16, assign31050_e48953_d_b17, assign31050_e48953_d_b18, assign31050_e48953_d_b19, assign31050_e48953_d_b20, assign31050_e48953_d_b21, assign31050_e48953_d_b22, assign31050_e48953_d_b23, assign31050_e48953_d_b24, assign31050_e48953_d_b25, assign31050_e48953_d_b26, assign31050_e48953_d_b27, assign31050_e48953_d_b28, assign31050_e48953_d_b29, assign31050_e48953_d_b30, assign31050_e48953_d_b31, assign31050_e48953_d_b32, assign31050_e48953_d_b33, assign31050_e48953_d_b34, assign31050_e48953_d_b35, assign31050_e48953_d_b36, assign31050_e48953_d_b37, assign31050_e48953_d_b38, assign31050_e48953_d_b39, assign31050_e48953_d_b40, assign31050_e48953_d_b41, assign31050_e48953_d_b42, assign31050_e48953_d_b43, assign31050_e48953_d_b44, assign31050_e48953_d_b45, assign31050_e48953_d_b46, assign31050_e48953_d_b47, assign31050_e48953_d_b48, assign31050_e48953_d_b49, assign31050_e48953_d_b50, assign31050_e48953_d_b51, assign31050_e48953_d_b52, assign31050_e48953_d_b53, assign31050_e48953_d_b54,) = {
     if (var_guard524 == 0.0) {
@@ -5403,6 +6513,8 @@ impl Instance {
         var_qsov_db52 = assign31050_e48953_d_b52;
         var_qsov_db53 = assign31050_e48953_d_b53;
         var_qsov_db54 = assign31050_e48953_d_b54;
+        var_qsov_db55 = 0.0;
+        var_qsov_db56 = 0.0;
 
         let (assign31060_e48969, assign31060_e48969_d_n0, assign31060_e48969_d_n1, assign31060_e48969_d_n2, assign31060_e48969_d_n3, assign31060_e48969_d_n4, assign31060_e48969_d_n5, assign31060_e48969_d_n6, assign31060_e48969_d_n7, assign31060_e48969_d_n8, assign31060_e48969_d_n9, assign31060_e48969_d_n10, assign31060_e48969_d_n11, assign31060_e48969_d_n12, assign31060_e48969_d_n13, assign31060_e48969_d_n14, assign31060_e48969_d_n15, assign31060_e48969_d_n16, assign31060_e48969_d_n17, assign31060_e48969_d_n18, assign31060_e48969_d_n19, assign31060_e48969_d_n20, assign31060_e48969_d_n21, assign31060_e48969_d_n22, assign31060_e48969_d_b0, assign31060_e48969_d_b1, assign31060_e48969_d_b2, assign31060_e48969_d_b3, assign31060_e48969_d_b4, assign31060_e48969_d_b5, assign31060_e48969_d_b6, assign31060_e48969_d_b7, assign31060_e48969_d_b8, assign31060_e48969_d_b9, assign31060_e48969_d_b10, assign31060_e48969_d_b11, assign31060_e48969_d_b12, assign31060_e48969_d_b13, assign31060_e48969_d_b14, assign31060_e48969_d_b15, assign31060_e48969_d_b16, assign31060_e48969_d_b17, assign31060_e48969_d_b18, assign31060_e48969_d_b19, assign31060_e48969_d_b20, assign31060_e48969_d_b21, assign31060_e48969_d_b22, assign31060_e48969_d_b23, assign31060_e48969_d_b24, assign31060_e48969_d_b25, assign31060_e48969_d_b26, assign31060_e48969_d_b27, assign31060_e48969_d_b28, assign31060_e48969_d_b29, assign31060_e48969_d_b30, assign31060_e48969_d_b31, assign31060_e48969_d_b32, assign31060_e48969_d_b33, assign31060_e48969_d_b34, assign31060_e48969_d_b35, assign31060_e48969_d_b36, assign31060_e48969_d_b37, assign31060_e48969_d_b38, assign31060_e48969_d_b39, assign31060_e48969_d_b40, assign31060_e48969_d_b41, assign31060_e48969_d_b42, assign31060_e48969_d_b43, assign31060_e48969_d_b44, assign31060_e48969_d_b45, assign31060_e48969_d_b46, assign31060_e48969_d_b47, assign31060_e48969_d_b48, assign31060_e48969_d_b49, assign31060_e48969_d_b50, assign31060_e48969_d_b51, assign31060_e48969_d_b52, assign31060_e48969_d_b53, assign31060_e48969_d_b54,) = {
     if (var_guard524 == 0.0) {
@@ -5496,6 +6608,8 @@ impl Instance {
         var_vdseffcv_db52 = assign31060_e48969_d_b52;
         var_vdseffcv_db53 = assign31060_e48969_d_b53;
         var_vdseffcv_db54 = assign31060_e48969_d_b54;
+        var_vdseffcv_db55 = 0.0;
+        var_vdseffcv_db56 = 0.0;
 
         let (assign31070_e48980,) = {
     if (var_guard524 == 0.0) {
@@ -5601,7 +6715,8 @@ impl Instance {
         var_cgdvar_db52 = assign31080_e48997_d_b52;
         var_cgdvar_db53 = assign31080_e48997_d_b53;
         var_cgdvar_db54 = assign31080_e48997_d_b54;
-
+        var_cgdvar_db55 = 0.0;
+        var_cgdvar_db56 = 0.0;
 
         *var_cgdl_l_slot = var_cgdl_l;
         *var_cgdvar_slot = var_cgdvar;
@@ -5656,6 +6771,8 @@ impl Instance {
         *var_cgdvar_db52_slot = var_cgdvar_db52;
         *var_cgdvar_db53_slot = var_cgdvar_db53;
         *var_cgdvar_db54_slot = var_cgdvar_db54;
+        *var_cgdvar_db55_slot = var_cgdvar_db55;
+        *var_cgdvar_db56_slot = var_cgdvar_db56;
         *var_cgdvar_db6_slot = var_cgdvar_db6;
         *var_cgdvar_db7_slot = var_cgdvar_db7;
         *var_cgdvar_db8_slot = var_cgdvar_db8;
@@ -5735,6 +6852,8 @@ impl Instance {
         *var_qdov_db52_slot = var_qdov_db52;
         *var_qdov_db53_slot = var_qdov_db53;
         *var_qdov_db54_slot = var_qdov_db54;
+        *var_qdov_db55_slot = var_qdov_db55;
+        *var_qdov_db56_slot = var_qdov_db56;
         *var_qdov_db6_slot = var_qdov_db6;
         *var_qdov_db7_slot = var_qdov_db7;
         *var_qdov_db8_slot = var_qdov_db8;
@@ -5814,6 +6933,8 @@ impl Instance {
         *var_qsov_db52_slot = var_qsov_db52;
         *var_qsov_db53_slot = var_qsov_db53;
         *var_qsov_db54_slot = var_qsov_db54;
+        *var_qsov_db55_slot = var_qsov_db55;
+        *var_qsov_db56_slot = var_qsov_db56;
         *var_qsov_db6_slot = var_qsov_db6;
         *var_qsov_db7_slot = var_qsov_db7;
         *var_qsov_db8_slot = var_qsov_db8;
@@ -5893,6 +7014,8 @@ impl Instance {
         *var_vdseffcv_db52_slot = var_vdseffcv_db52;
         *var_vdseffcv_db53_slot = var_vdseffcv_db53;
         *var_vdseffcv_db54_slot = var_vdseffcv_db54;
+        *var_vdseffcv_db55_slot = var_vdseffcv_db55;
+        *var_vdseffcv_db56_slot = var_vdseffcv_db56;
         *var_vdseffcv_db6_slot = var_vdseffcv_db6;
         *var_vdseffcv_db7_slot = var_vdseffcv_db7;
         *var_vdseffcv_db8_slot = var_vdseffcv_db8;
@@ -6007,6 +7130,87 @@ impl Instance {
         var_cgdvar_dn8: f64,
         var_cgdvar_dn9: f64,
         var_guard524: f64,
+        var_tdev: f64,
+        var_tdev_db0: f64,
+        var_tdev_db1: f64,
+        var_tdev_db10: f64,
+        var_tdev_db11: f64,
+        var_tdev_db12: f64,
+        var_tdev_db13: f64,
+        var_tdev_db14: f64,
+        var_tdev_db15: f64,
+        var_tdev_db16: f64,
+        var_tdev_db17: f64,
+        var_tdev_db18: f64,
+        var_tdev_db19: f64,
+        var_tdev_db2: f64,
+        var_tdev_db20: f64,
+        var_tdev_db21: f64,
+        var_tdev_db22: f64,
+        var_tdev_db23: f64,
+        var_tdev_db24: f64,
+        var_tdev_db25: f64,
+        var_tdev_db26: f64,
+        var_tdev_db27: f64,
+        var_tdev_db28: f64,
+        var_tdev_db29: f64,
+        var_tdev_db3: f64,
+        var_tdev_db30: f64,
+        var_tdev_db31: f64,
+        var_tdev_db32: f64,
+        var_tdev_db33: f64,
+        var_tdev_db34: f64,
+        var_tdev_db35: f64,
+        var_tdev_db36: f64,
+        var_tdev_db37: f64,
+        var_tdev_db38: f64,
+        var_tdev_db39: f64,
+        var_tdev_db4: f64,
+        var_tdev_db40: f64,
+        var_tdev_db41: f64,
+        var_tdev_db42: f64,
+        var_tdev_db43: f64,
+        var_tdev_db44: f64,
+        var_tdev_db45: f64,
+        var_tdev_db46: f64,
+        var_tdev_db47: f64,
+        var_tdev_db48: f64,
+        var_tdev_db49: f64,
+        var_tdev_db5: f64,
+        var_tdev_db50: f64,
+        var_tdev_db51: f64,
+        var_tdev_db52: f64,
+        var_tdev_db53: f64,
+        var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
+        var_tdev_db6: f64,
+        var_tdev_db7: f64,
+        var_tdev_db8: f64,
+        var_tdev_db9: f64,
+        var_tdev_dn0: f64,
+        var_tdev_dn1: f64,
+        var_tdev_dn10: f64,
+        var_tdev_dn11: f64,
+        var_tdev_dn12: f64,
+        var_tdev_dn13: f64,
+        var_tdev_dn14: f64,
+        var_tdev_dn15: f64,
+        var_tdev_dn16: f64,
+        var_tdev_dn17: f64,
+        var_tdev_dn18: f64,
+        var_tdev_dn19: f64,
+        var_tdev_dn2: f64,
+        var_tdev_dn20: f64,
+        var_tdev_dn21: f64,
+        var_tdev_dn22: f64,
+        var_tdev_dn3: f64,
+        var_tdev_dn4: f64,
+        var_tdev_dn5: f64,
+        var_tdev_dn6: f64,
+        var_tdev_dn7: f64,
+        var_tdev_dn8: f64,
+        var_tdev_dn9: f64,
         var_tnom: f64,
         var_qbdov_slot: &mut f64,
         var_qbdov_db0_slot: &mut f64,
@@ -6060,6 +7264,8 @@ impl Instance {
         var_qbdov_db52_slot: &mut f64,
         var_qbdov_db53_slot: &mut f64,
         var_qbdov_db54_slot: &mut f64,
+        var_qbdov_db55_slot: &mut f64,
+        var_qbdov_db56_slot: &mut f64,
         var_qbdov_db6_slot: &mut f64,
         var_qbdov_db7_slot: &mut f64,
         var_qbdov_db8_slot: &mut f64,
@@ -6139,6 +7345,8 @@ impl Instance {
         var_qbgov_db52_slot: &mut f64,
         var_qbgov_db53_slot: &mut f64,
         var_qbgov_db54_slot: &mut f64,
+        var_qbgov_db55_slot: &mut f64,
+        var_qbgov_db56_slot: &mut f64,
         var_qbgov_db6_slot: &mut f64,
         var_qbgov_db7_slot: &mut f64,
         var_qbgov_db8_slot: &mut f64,
@@ -6218,6 +7426,8 @@ impl Instance {
         var_qbsov_db52_slot: &mut f64,
         var_qbsov_db53_slot: &mut f64,
         var_qbsov_db54_slot: &mut f64,
+        var_qbsov_db55_slot: &mut f64,
+        var_qbsov_db56_slot: &mut f64,
         var_qbsov_db6_slot: &mut f64,
         var_qbsov_db7_slot: &mut f64,
         var_qbsov_db8_slot: &mut f64,
@@ -6297,6 +7507,8 @@ impl Instance {
         var_qdov_db52_slot: &mut f64,
         var_qdov_db53_slot: &mut f64,
         var_qdov_db54_slot: &mut f64,
+        var_qdov_db55_slot: &mut f64,
+        var_qdov_db56_slot: &mut f64,
         var_qdov_db6_slot: &mut f64,
         var_qdov_db7_slot: &mut f64,
         var_qdov_db8_slot: &mut f64,
@@ -6376,6 +7588,8 @@ impl Instance {
         var_qdsov_db52_slot: &mut f64,
         var_qdsov_db53_slot: &mut f64,
         var_qdsov_db54_slot: &mut f64,
+        var_qdsov_db55_slot: &mut f64,
+        var_qdsov_db56_slot: &mut f64,
         var_qdsov_db6_slot: &mut f64,
         var_qdsov_db7_slot: &mut f64,
         var_qdsov_db8_slot: &mut f64,
@@ -6460,6 +7674,8 @@ impl Instance {
         let mut var_qbdov_db52: f64 = *var_qbdov_db52_slot;
         let mut var_qbdov_db53: f64 = *var_qbdov_db53_slot;
         let mut var_qbdov_db54: f64 = *var_qbdov_db54_slot;
+        let mut var_qbdov_db55: f64 = *var_qbdov_db55_slot;
+        let mut var_qbdov_db56: f64 = *var_qbdov_db56_slot;
         let mut var_qbdov_db6: f64 = *var_qbdov_db6_slot;
         let mut var_qbdov_db7: f64 = *var_qbdov_db7_slot;
         let mut var_qbdov_db8: f64 = *var_qbdov_db8_slot;
@@ -6539,6 +7755,8 @@ impl Instance {
         let mut var_qbgov_db52: f64 = *var_qbgov_db52_slot;
         let mut var_qbgov_db53: f64 = *var_qbgov_db53_slot;
         let mut var_qbgov_db54: f64 = *var_qbgov_db54_slot;
+        let mut var_qbgov_db55: f64 = *var_qbgov_db55_slot;
+        let mut var_qbgov_db56: f64 = *var_qbgov_db56_slot;
         let mut var_qbgov_db6: f64 = *var_qbgov_db6_slot;
         let mut var_qbgov_db7: f64 = *var_qbgov_db7_slot;
         let mut var_qbgov_db8: f64 = *var_qbgov_db8_slot;
@@ -6618,6 +7836,8 @@ impl Instance {
         let mut var_qbsov_db52: f64 = *var_qbsov_db52_slot;
         let mut var_qbsov_db53: f64 = *var_qbsov_db53_slot;
         let mut var_qbsov_db54: f64 = *var_qbsov_db54_slot;
+        let mut var_qbsov_db55: f64 = *var_qbsov_db55_slot;
+        let mut var_qbsov_db56: f64 = *var_qbsov_db56_slot;
         let mut var_qbsov_db6: f64 = *var_qbsov_db6_slot;
         let mut var_qbsov_db7: f64 = *var_qbsov_db7_slot;
         let mut var_qbsov_db8: f64 = *var_qbsov_db8_slot;
@@ -6697,6 +7917,8 @@ impl Instance {
         let mut var_qdov_db52: f64 = *var_qdov_db52_slot;
         let mut var_qdov_db53: f64 = *var_qdov_db53_slot;
         let mut var_qdov_db54: f64 = *var_qdov_db54_slot;
+        let mut var_qdov_db55: f64 = *var_qdov_db55_slot;
+        let mut var_qdov_db56: f64 = *var_qdov_db56_slot;
         let mut var_qdov_db6: f64 = *var_qdov_db6_slot;
         let mut var_qdov_db7: f64 = *var_qdov_db7_slot;
         let mut var_qdov_db8: f64 = *var_qdov_db8_slot;
@@ -6776,6 +7998,8 @@ impl Instance {
         let mut var_qdsov_db52: f64 = *var_qdsov_db52_slot;
         let mut var_qdsov_db53: f64 = *var_qdsov_db53_slot;
         let mut var_qdsov_db54: f64 = *var_qdsov_db54_slot;
+        let mut var_qdsov_db55: f64 = *var_qdsov_db55_slot;
+        let mut var_qdsov_db56: f64 = *var_qdsov_db56_slot;
         let mut var_qdsov_db6: f64 = *var_qdsov_db6_slot;
         let mut var_qdsov_db7: f64 = *var_qdsov_db7_slot;
         let mut var_qdsov_db8: f64 = *var_qdsov_db8_slot;
@@ -6892,6 +8116,8 @@ impl Instance {
         var_qdov_db52 = assign31090_e49006_d_b52;
         var_qdov_db53 = assign31090_e49006_d_b53;
         var_qdov_db54 = assign31090_e49006_d_b54;
+        var_qdov_db55 = 0.0;
+        var_qdov_db56 = 0.0;
 
         let assign31100_e49009: f64 = (p.p4 * p.p5);
         let assign31100_e49011: f64 = (assign31100_e49009 * p.p212);
@@ -6975,6 +8201,8 @@ impl Instance {
         var_qdsov_db52 = 0.0;
         var_qdsov_db53 = 0.0;
         var_qdsov_db54 = 0.0;
+        var_qdsov_db55 = 0.0;
+        var_qdsov_db56 = 0.0;
 
         let assign31150_e49030: f64 = (p.p4 * p.p5);
         let assign31150_e49032: f64 = (assign31150_e49030 * p.p215);
@@ -7058,6 +8286,8 @@ impl Instance {
         var_qbdov_db52 = 0.0;
         var_qbdov_db53 = 0.0;
         var_qbdov_db54 = 0.0;
+        var_qbdov_db55 = 0.0;
+        var_qbdov_db56 = 0.0;
 
         let assign31160_e49037: f64 = (p.p4 * p.p5);
         let assign31160_e49039: f64 = (assign31160_e49037 * p.p216);
@@ -7141,6 +8371,8 @@ impl Instance {
         var_qbsov_db52 = 0.0;
         var_qbsov_db53 = 0.0;
         var_qbsov_db54 = 0.0;
+        var_qbsov_db55 = 0.0;
+        var_qbsov_db56 = 0.0;
 
         let assign31170_e49044: f64 = (p.p4 * p.p5);
         let assign31170_e49046: f64 = (assign31170_e49044 * p.p217);
@@ -7224,18 +8456,20 @@ impl Instance {
         var_qbgov_db52 = 0.0;
         var_qbgov_db53 = 0.0;
         var_qbgov_db54 = 0.0;
+        var_qbgov_db55 = 0.0;
+        var_qbgov_db56 = 0.0;
 
-        s.store_offset_scaled(375, 82, ((1.0 / (var_tnom)) * (p.p285)), (((((-1.0)) * (p.p285))) + (p.p279)));
+        s.store_offset_scaled_ad(375, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p285)), (((((-1.0)) * (p.p285))) + (p.p279)));
 
-        s.store_offset_scaled(373, 82, ((1.0 / (var_tnom)) * (p.p283)), (((((-1.0)) * (p.p283))) + (p.p275)));
+        s.store_offset_scaled_ad(373, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p283)), (((((-1.0)) * (p.p283))) + (p.p275)));
 
-        s.store_scale_ad(377, A::exp_scaled_input(A::scale_offset(s.ad_value(82), 1.0 / (var_tnom), (-1.0)), p.p281), p.p277);
+        s.store_scale_ad(377, A::exp_scaled_input(A::scale_offset(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom), (-1.0)), p.p281), p.p277);
 
-        s.store_offset_scaled(376, 82, ((1.0 / (var_tnom)) * (p.p286)), (((((-1.0)) * (p.p286))) + (p.p280)));
+        s.store_offset_scaled_ad(376, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p286)), (((((-1.0)) * (p.p286))) + (p.p280)));
 
-        s.store_offset_scaled(374, 82, ((1.0 / (var_tnom)) * (p.p284)), (((((-1.0)) * (p.p284))) + (p.p276)));
+        s.store_offset_scaled_ad(374, A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p284)), (((((-1.0)) * (p.p284))) + (p.p276)));
 
-        s.store_scale_ad(378, A::exp_scaled_input(A::scale_offset(s.ad_value(82), 1.0 / (var_tnom), (-1.0)), p.p282), p.p278);
+        s.store_scale_ad(378, A::exp_scaled_input(A::scale_offset(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), 1.0 / (var_tnom), (-1.0)), p.p282), p.p278);
 
         s.store_scale(137, 378, (p.p4 * p.p5));
 
@@ -7293,17 +8527,6 @@ impl Instance {
             s.store_scalar(369, 0.0);
         }
 
-        s.store_max_with_scalar_ad(372, A::sub(A::voltage(ctx, nodes, Some(2), Some(3)), s.ad_value(375)), 0.0);
-
-        s.store_scale(137, 377, (p.p4 * p.p5));
-
-        s.b[563] = (s.v[137] > 0.0);
-        s.store_scalar(563, if s.b[563] { 1.0 } else { 0.0 });
-
-        s.b[564] = (s.v[372] > 0.0);
-        s.store_scalar(564, if s.b[564] { 1.0 } else { 0.0 });
-
-
         *var_qbdov_slot = var_qbdov;
         *var_qbdov_db0_slot = var_qbdov_db0;
         *var_qbdov_db1_slot = var_qbdov_db1;
@@ -7356,6 +8579,8 @@ impl Instance {
         *var_qbdov_db52_slot = var_qbdov_db52;
         *var_qbdov_db53_slot = var_qbdov_db53;
         *var_qbdov_db54_slot = var_qbdov_db54;
+        *var_qbdov_db55_slot = var_qbdov_db55;
+        *var_qbdov_db56_slot = var_qbdov_db56;
         *var_qbdov_db6_slot = var_qbdov_db6;
         *var_qbdov_db7_slot = var_qbdov_db7;
         *var_qbdov_db8_slot = var_qbdov_db8;
@@ -7435,6 +8660,8 @@ impl Instance {
         *var_qbgov_db52_slot = var_qbgov_db52;
         *var_qbgov_db53_slot = var_qbgov_db53;
         *var_qbgov_db54_slot = var_qbgov_db54;
+        *var_qbgov_db55_slot = var_qbgov_db55;
+        *var_qbgov_db56_slot = var_qbgov_db56;
         *var_qbgov_db6_slot = var_qbgov_db6;
         *var_qbgov_db7_slot = var_qbgov_db7;
         *var_qbgov_db8_slot = var_qbgov_db8;
@@ -7514,6 +8741,8 @@ impl Instance {
         *var_qbsov_db52_slot = var_qbsov_db52;
         *var_qbsov_db53_slot = var_qbsov_db53;
         *var_qbsov_db54_slot = var_qbsov_db54;
+        *var_qbsov_db55_slot = var_qbsov_db55;
+        *var_qbsov_db56_slot = var_qbsov_db56;
         *var_qbsov_db6_slot = var_qbsov_db6;
         *var_qbsov_db7_slot = var_qbsov_db7;
         *var_qbsov_db8_slot = var_qbsov_db8;
@@ -7593,6 +8822,8 @@ impl Instance {
         *var_qdov_db52_slot = var_qdov_db52;
         *var_qdov_db53_slot = var_qdov_db53;
         *var_qdov_db54_slot = var_qdov_db54;
+        *var_qdov_db55_slot = var_qdov_db55;
+        *var_qdov_db56_slot = var_qdov_db56;
         *var_qdov_db6_slot = var_qdov_db6;
         *var_qdov_db7_slot = var_qdov_db7;
         *var_qdov_db8_slot = var_qdov_db8;
@@ -7672,6 +8903,8 @@ impl Instance {
         *var_qdsov_db52_slot = var_qdsov_db52;
         *var_qdsov_db53_slot = var_qdsov_db53;
         *var_qdsov_db54_slot = var_qdsov_db54;
+        *var_qdsov_db55_slot = var_qdsov_db55;
+        *var_qdsov_db56_slot = var_qdsov_db56;
         *var_qdsov_db6_slot = var_qdsov_db6;
         *var_qdsov_db7_slot = var_qdsov_db7;
         *var_qdsov_db8_slot = var_qdsov_db8;

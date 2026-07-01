@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, Scratch, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, Scratch, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1077,7 +1077,6 @@ impl Instance {
         var_b4soithetavth_db6 = assign10960_e8066_d_b6;
         var_b4soithetavth_db7 = assign10960_e8066_d_b7;
         var_b4soithetavth_db8 = assign10960_e8066_d_b8;
-
 
         *var_b4soithetavth_slot = var_b4soithetavth;
         *var_b4soithetavth_db0_slot = var_b4soithetavth_db0;
@@ -2517,7 +2516,6 @@ impl Instance {
         var_sqrtphisext_db6 = assign11140_e8227_d_b6;
         var_sqrtphisext_db7 = assign11140_e8227_d_b7;
         var_sqrtphisext_db8 = assign11140_e8227_d_b8;
-
 
         *var_delt_vth_slot = var_delt_vth;
         *var_delt_vth_db0_slot = var_delt_vth_db0;
@@ -4137,7 +4135,6 @@ impl Instance {
         var_vgsteff_db7 = assign11300_e8443_d_b7;
         var_vgsteff_db8 = assign11300_e8443_d_b8;
 
-
         *var_exparg_slot = var_exparg;
         *var_exparg_db0_slot = var_exparg_db0;
         *var_exparg_db1_slot = var_exparg_db1;
@@ -5658,7 +5655,6 @@ impl Instance {
         let assign11440_e8592: f64 = if var_t0 > assign11440_e8591 { 1.0 } else { 0.0 };
         var_guard951 = assign11440_e8592;
 
-
         *var_b4soitoxp_slot = var_b4soitoxp;
         *var_b4soitoxp_db0_slot = var_b4soitoxp_db0;
         *var_b4soitoxp_db1_slot = var_b4soitoxp_db1;
@@ -7147,7 +7143,6 @@ impl Instance {
         var_tmp3_db7 = (((((var_b4soitype * var_pparam_b4soivth0_db7) - var_t2_db7) - var_t3_db7) + ((var_pparam_b4soik3_db7 * var_t4) + (var_pparam_b4soik3 * var_t4_db7))) + var_t5_db7);
         var_tmp3_db8 = (((((var_b4soitype * var_pparam_b4soivth0_db8) - var_t2_db8) - var_t3_db8) + ((var_pparam_b4soik3_db8 * var_t4) + (var_pparam_b4soik3 * var_t4_db8))) + var_t5_db8);
 
-
         *var_guard952_slot = var_guard952;
         *var_t0_slot = var_t0;
         *var_t0_db0_slot = var_t0_db0;
@@ -8608,7 +8603,6 @@ impl Instance {
         var_t2_db7 = assign11900_e8904_d_b7;
         var_t2_db8 = assign11900_e8904_d_b8;
 
-
         *var_b4soigrgeltd_slot = var_b4soigrgeltd;
         *var_b4soigrgeltd_db0_slot = var_b4soigrgeltd_db0;
         *var_b4soigrgeltd_db1_slot = var_b4soigrgeltd_db1;
@@ -10005,7 +9999,6 @@ impl Instance {
         let assign12080_e9048: f64 = if var_t2 > 100.0 { 1.0 } else { 0.0 };
         var_guard962 = assign12080_e9048;
 
-
         *var_guard960_slot = var_guard960;
         *var_guard961_slot = var_guard961;
         *var_guard962_slot = var_guard962;
@@ -11304,7 +11297,6 @@ impl Instance {
         var_devtemp_db6 = (var_deltemp_db6 + var_devtemp_db6);
         var_devtemp_db7 = (var_deltemp_db7 + var_devtemp_db7);
         var_devtemp_db8 = (var_deltemp_db8 + var_devtemp_db8);
-
 
         *var_b4soivgsteffvth_slot = var_b4soivgsteffvth;
         *var_b4soivgsteffvth_db0_slot = var_b4soivgsteffvth_db0;
@@ -13089,7 +13081,6 @@ impl Instance {
         var_vtm_db7 = assign14340_e9886_d_b7;
         var_vtm_db8 = assign14340_e9886_d_b8;
 
-
         *var_coxeff2_slot = var_coxeff2;
         *var_coxeff2_db0_slot = var_coxeff2_db0;
         *var_coxeff2_db1_slot = var_coxeff2_db1;
@@ -14582,7 +14573,6 @@ impl Instance {
         var_eg__blk1212_db7 = assign14520_e10065_d_b7;
         var_eg__blk1212_db8 = assign14520_e10065_d_b8;
 
-
         *var_eg0__blk1401_slot = var_eg0__blk1401;
         *var_eg__blk1212_slot = var_eg__blk1212;
         *var_eg__blk1212_db0_slot = var_eg__blk1212_db0;
@@ -15892,7 +15882,6 @@ impl Instance {
         var_sqrtphi_db6 = assign14660_e10257_d_b6;
         var_sqrtphi_db7 = assign14660_e10257_d_b7;
         var_sqrtphi_db8 = assign14660_e10257_d_b8;
-
 
         *var_guard1460_slot = var_guard1460;
         *var_ni__blk1211_slot = var_ni__blk1211;
@@ -17381,7 +17370,6 @@ impl Instance {
         var_t0__blk1144_db7 = assign14820_e10406_d_b7;
         var_t0__blk1144_db8 = assign14820_e10406_d_b8;
 
-
         *var_b4soivtm_slot = var_b4soivtm;
         *var_b4soivtm_db0_slot = var_b4soivtm_db0;
         *var_b4soivtm_db1_slot = var_b4soivtm_db1;
@@ -18782,7 +18770,6 @@ impl Instance {
         let assign15030_e10565: f64 = if var_t7__blk1151 > 100.0 { 1.0 } else { 0.0 };
         var_guard1468 = assign15030_e10565;
 
-
         *var_ahlis_slot = var_ahlis;
         *var_ahlis_db0_slot = var_ahlis_db0;
         *var_ahlis_db1_slot = var_ahlis_db1;
@@ -19895,7 +19882,6 @@ impl Instance {
         var_t2__blk1146_db6 = assign15250_e10745_d_b6;
         var_t2__blk1146_db7 = assign15250_e10745_d_b7;
         var_t2__blk1146_db8 = assign15250_e10745_d_b8;
-
 
         *var_guard1469_slot = var_guard1469;
         *var_guard1470_slot = var_guard1470;
@@ -21274,7 +21260,6 @@ impl Instance {
         var_t7__blk1151_db6 = assign15440_e10890_d_b6;
         var_t7__blk1151_db7 = assign15440_e10890_d_b7;
         var_t7__blk1151_db8 = assign15440_e10890_d_b8;
-
 
         *var_ahlid_slot = var_ahlid;
         *var_ahlid_db0_slot = var_ahlid_db0;
@@ -22674,7 +22659,6 @@ impl Instance {
         var_rs0_db6 = assign15600_e10995_d_b6;
         var_rs0_db7 = assign15600_e10995_d_b7;
         var_rs0_db8 = assign15600_e10995_d_b8;
-
 
         *var_guard1480_slot = var_guard1480;
         *var_rd0_slot = var_rd0;

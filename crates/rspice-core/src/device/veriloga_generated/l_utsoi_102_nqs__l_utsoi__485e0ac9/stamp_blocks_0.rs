@@ -214,7 +214,6 @@ impl Instance {
             s.store_scalar(211, p.p135);
         }
 
-
         *var_guard83_slot = var_guard83;
     }
 
@@ -474,7 +473,6 @@ impl Instance {
             s.store_div_ad_lhs(584, A::sqrt(A::mul3_scaled_output(s.ad_value(229), s.ad_value(14), A::offset(s.ad_value(533), 4e-10), 1.0 / (3.45313e-11))), 575);
             s.store_scaled_mul_scale_offset_rhs_ad(544, A::powf(s.ad_value(584), p.p229), 580, p.p230, 1.0, (p.p228 * 2.0));
         }
-
 
         *var_kfracinv_i_slot = var_kfracinv_i;
     }
@@ -1291,7 +1289,6 @@ impl Instance {
             s.store_div_scaled_inputs_indices(0, 534, p.p238, 533, 1.0);
             s.store_mul(188, 187, 0);
         }
-
 
         *var_kfracinv_i_slot = var_kfracinv_i;
     }

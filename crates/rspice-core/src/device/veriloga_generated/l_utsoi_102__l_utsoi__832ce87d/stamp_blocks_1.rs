@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -710,7 +710,6 @@ impl Instance {
         var_temp2_db1 = assign6090_e5981_d_b1;
         var_temp2_db2 = assign6090_e5981_d_b2;
         var_temp2_db3 = assign6090_e5981_d_b3;
-
 
         *var_guard135_slot = var_guard135;
         *var_guard136_slot = var_guard136;
@@ -1925,7 +1924,6 @@ impl Instance {
         var_vfbac1_t_db1 = assign6300_e6285_d_b1;
         var_vfbac1_t_db2 = assign6300_e6285_d_b2;
         var_vfbac1_t_db3 = assign6300_e6285_d_b3;
-
 
         *var_betn1_t_slot = var_betn1_t;
         *var_betn1_t_db0_slot = var_betn1_t_db0;
@@ -3400,7 +3398,6 @@ impl Instance {
         var_dvfbch_db1 = (-(0.5 * var_deg_db1));
         var_dvfbch_db2 = (-(0.5 * var_deg_db2));
         var_dvfbch_db3 = (-(0.5 * var_deg_db3));
-
 
         *var_agidld_i_slot = var_agidld_i;
         *var_agidld_i_db0_slot = var_agidld_i_db0;
@@ -4947,7 +4944,6 @@ impl Instance {
         var_xd0_db2 = (var_cfd_i * var_inv_phit_db2);
         var_xd0_db3 = (var_cfd_i * var_inv_phit_db3);
 
-
         *var_a0_csisq_slot = var_a0_csisq;
         *var_a0_csisq_db0_slot = var_a0_csisq_db0;
         *var_a0_csisq_db1_slot = var_a0_csisq_db1;
@@ -6454,7 +6450,6 @@ impl Instance {
         var_vfb2_i_db1 = ((p.p14 * ((var_vfb2_t_db1 + var_dvfbch_db1) + var_dvfb2nch_db1)) + var_temp_db1);
         var_vfb2_i_db2 = ((p.p14 * ((var_vfb2_t_db2 + var_dvfbch_db2) + var_dvfb2nch_db2)) + var_temp_db2);
         var_vfb2_i_db3 = ((p.p14 * ((var_vfb2_t_db3 + var_dvfbch_db3) + var_dvfb2nch_db3)) + var_temp_db3);
-
 
         *var_dvfbpdep_slot = var_dvfbpdep;
         *var_dvfbpdep_db0_slot = var_dvfbpdep_db0;
@@ -8187,7 +8182,6 @@ impl Instance {
         var_thesatac_i_db2 = ((((var_thesatac_t_db2 * var_tf_thesat) + (var_thesatac_t * var_tf_thesat_db2)) * var_tf_bet) + (assign7590_e7091 * var_tf_bet_db2));
         var_thesatac_i_db3 = ((((var_thesatac_t_db3 * var_tf_thesat) + (var_thesatac_t * var_tf_thesat_db3)) * var_tf_bet) + (assign7590_e7091 * var_tf_bet_db3));
 
-
         *var_betn1_i_slot = var_betn1_i;
         *var_betn1_i_db0_slot = var_betn1_i_db0;
         *var_betn1_i_db1_slot = var_betn1_i_db1;
@@ -9849,7 +9843,6 @@ impl Instance {
         var_bgidl_i_db1 = (((var_bgidl_t * var_tempm_db1) * var_temp) + (assign7930_e7253 * var_temp_db1));
         var_bgidl_i_db2 = (((var_bgidl_t * var_tempm_db2) * var_temp) + (assign7930_e7253 * var_temp_db2));
         var_bgidl_i_db3 = (((var_bgidl_t * var_tempm_db3) * var_temp) + (assign7930_e7253 * var_temp_db3));
-
 
         *var_agidl_i_slot = var_agidl_i;
         *var_agidl_i_db0_slot = var_agidl_i_db0;
@@ -11549,7 +11542,6 @@ impl Instance {
         var_rtn_db2 = assign8340_e7497_d_b2;
         var_rtn_db3 = assign8340_e7497_d_b3;
 
-
         *var_a0_csisq_edge_slot = var_a0_csisq_edge;
         *var_a0_csisq_edge_db0_slot = var_a0_csisq_edge_db0;
         *var_a0_csisq_edge_db1_slot = var_a0_csisq_edge_db1;
@@ -13005,7 +12997,6 @@ impl Instance {
         var_xsddep_db1 = assign8540_e7699_d_b1;
         var_xsddep_db2 = assign8540_e7699_d_b2;
         var_xsddep_db3 = assign8540_e7699_d_b3;
-
 
         *var_a0_csisq_slot = var_a0_csisq;
         *var_a0_csisq_db0_slot = var_a0_csisq_db0;
@@ -14605,7 +14596,6 @@ impl Instance {
         var_tf_bet_db2 = assign8770_e7915_d_b2;
         var_tf_bet_db3 = assign8770_e7915_d_b3;
 
-
         *var_cf1_i_slot = var_cf1_i;
         *var_cf1_i_db0_slot = var_cf1_i_db0;
         *var_cf1_i_db1_slot = var_cf1_i_db1;
@@ -16049,7 +16039,6 @@ impl Instance {
         var_sat_phit_db1 = assign8970_e8048_d_b1;
         var_sat_phit_db2 = assign8970_e8048_d_b2;
         var_sat_phit_db3 = assign8970_e8048_d_b3;
-
 
         *var_betn1_i_slot = var_betn1_i;
         *var_betn1_i_db0_slot = var_betn1_i_db0;
@@ -17539,7 +17528,6 @@ impl Instance {
         var_bgidl_i_db2 = assign9160_e8199_d_b2;
         var_bgidl_i_db3 = assign9160_e8199_d_b3;
 
-
         *var_alp1_phit_slot = var_alp1_phit;
         *var_alp1_phit_db0_slot = var_alp1_phit_db0;
         *var_alp1_phit_db1_slot = var_alp1_phit_db1;
@@ -18905,7 +18893,6 @@ impl Instance {
         var_vds_db1 = assign9400_e8362_d_b1;
         var_vds_db2 = assign9400_e8362_d_b2;
         var_vds_db3 = assign9400_e8362_d_b3;
-
 
         *var_a2_i_slot = var_a2_i;
         *var_a2_i_db0_slot = var_a2_i_db0;
@@ -20476,7 +20463,6 @@ impl Instance {
         var_a0_db2 = assign9700_e8502_d_b2;
         var_a0_db3 = assign9700_e8502_d_b3;
 
-
         *var_a0_slot = var_a0;
         *var_a0_db0_slot = var_a0_db0;
         *var_a0_db1_slot = var_a0_db1;
@@ -21850,7 +21836,6 @@ impl Instance {
         var_temp2_db2 = assign9910_e8700_d_b2;
         var_temp2_db3 = assign9910_e8700_d_b3;
 
-
         *var_dx_wi_slot = var_dx_wi;
         *var_dx_wi_db0_slot = var_dx_wi_db0;
         *var_dx_wi_db1_slot = var_dx_wi_db1;
@@ -23163,7 +23148,6 @@ impl Instance {
         var_spsub_delta0_db1 = assign10130_e9021_d_b1;
         var_spsub_delta0_db2 = assign10130_e9021_d_b2;
         var_spsub_delta0_db3 = assign10130_e9021_d_b3;
-
 
         *var_guard535_slot = var_guard535;
         *var_guard536_slot = var_guard536;

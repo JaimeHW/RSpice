@@ -1116,7 +1116,6 @@ impl Instance {
         let assign61240_e79449: f64 = if var_mtat__blk1563 > assign61240_e79448 { 1.0 } else { 0.0 };
         var_guard1706 = assign61240_e79449;
 
-
         *var_erfcpos__blk1527_slot = var_erfcpos__blk1527;
         *var_erfcpos__blk1527_db0_slot = var_erfcpos__blk1527_db0;
         *var_erfcpos__blk1527_db1_slot = var_erfcpos__blk1527_db1;
@@ -2336,7 +2335,6 @@ impl Instance {
 
         let assign61450_e79832: f64 = if var_pbrgatd_i == 4.0 { 1.0 } else { 0.0 };
         var_guard1713 = assign61450_e79832;
-
 
         *var_erfctimesexpmtat__blk1565_slot = var_erfctimesexpmtat__blk1565;
         *var_erfctimesexpmtat__blk1565_db0_slot = var_erfctimesexpmtat__blk1565_db0;
@@ -3599,7 +3597,6 @@ impl Instance {
         var_qjungat_d_db4 = assign61630_e80190_d_b4;
         var_qjungat_d_db5 = assign61630_e80190_d_b5;
         var_qjungat_d_db6 = assign61630_e80190_d_b6;
-
 
         *var_fbreakdown__blk1569_slot = var_fbreakdown__blk1569;
         *var_fbreakdown__blk1569_db0_slot = var_fbreakdown__blk1569_db0;
@@ -4970,7 +4967,6 @@ impl Instance {
         var_qs_db4 = (-((var_qg_db4 + var_qb_db4) + var_qd_db4));
         var_qs_db5 = (-((var_qg_db5 + var_qb_db5) + var_qd_db5));
         var_qs_db6 = (-((var_qg_db6 + var_qb_db6) + var_qd_db6));
-
 
         *var_guard1716_slot = var_guard1716;
         *var_guard1717_slot = var_guard1717;
@@ -6831,7 +6827,6 @@ impl Instance {
         var_r_db5 = assign62320_e80752_d_b5;
         var_r_db6 = assign62320_e80752_d_b6;
 
-
         *var_c_igid_slot = var_c_igid;
         *var_c_igid_db0_slot = var_c_igid_db0;
         *var_c_igid_db1_slot = var_c_igid_db1;
@@ -8394,7 +8389,6 @@ impl Instance {
         var_mig_db5 = assign62500_e80998_d_b5;
         var_mig_db6 = assign62500_e80998_d_b6;
 
-
         *var_g_ideal_slot = var_g_ideal;
         *var_g_ideal_db0_slot = var_g_ideal_db0;
         *var_g_ideal_db1_slot = var_g_ideal_db1;
@@ -9683,7 +9677,6 @@ impl Instance {
         var_temp1_db4 = assign62960_e81445_d_b4;
         var_temp1_db5 = assign62960_e81445_d_b5;
         var_temp1_db6 = assign62960_e81445_d_b6;
-
 
         *var_c_igid_slot = var_c_igid;
         *var_c_igid_db0_slot = var_c_igid_db0;

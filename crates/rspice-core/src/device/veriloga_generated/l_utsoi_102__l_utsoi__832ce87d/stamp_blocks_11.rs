@@ -1505,7 +1505,6 @@ impl Instance {
         var_k2q2d_ac_db2 = assign42010_e47584_d_b2;
         var_k2q2d_ac_db3 = assign42010_e47584_d_b3;
 
-
         *var_a0_ac_slot = var_a0_ac;
         *var_a0_ac_db0_slot = var_a0_ac_db0;
         *var_a0_ac_db1_slot = var_a0_ac_db1;
@@ -3211,7 +3210,6 @@ impl Instance {
         var_k1q1deff_db2 = ((((0.5 * var_k1q1eff_db2) * var_ratio_pd_ac) + (assign42240_e47723 * var_ratio_pd_ac_db2)) + var_temp2_db2);
         var_k1q1deff_db3 = ((((0.5 * var_k1q1eff_db3) * var_ratio_pd_ac) + (assign42240_e47723 * var_ratio_pd_ac_db3)) + var_temp2_db3);
 
-
         *var_delta_k1q1_ac_slot = var_delta_k1q1_ac;
         *var_delta_k1q1_ac_db0_slot = var_delta_k1q1_ac_db0;
         *var_delta_k1q1_ac_db1_slot = var_delta_k1q1_ac_db1;
@@ -4814,7 +4812,6 @@ impl Instance {
         var_xedgefs_db2 = assign42470_e47917_d_b2;
         var_xedgefs_db3 = assign42470_e47917_d_b3;
 
-
         *var_guard1235_slot = var_guard1235;
         *var_k1q1eff_slot = var_k1q1eff;
         *var_k1q1eff_db0_slot = var_k1q1eff_db0;
@@ -6118,7 +6115,6 @@ impl Instance {
         var_qbsif_db1 = assign42650_e48159_d_b1;
         var_qbsif_db2 = assign42650_e48159_d_b2;
         var_qbsif_db3 = assign42650_e48159_d_b3;
-
 
         *var_qbdif_slot = var_qbdif;
         *var_qbdif_db0_slot = var_qbdif_db0;
@@ -7899,7 +7895,6 @@ impl Instance {
         var_qgdif_db2 = (assign42960_e48345 * var_qgdif_db2);
         var_qgdif_db3 = (assign42960_e48345 * var_qgdif_db3);
 
-
         *var_guard1236_slot = var_guard1236;
         *var_guard1239_slot = var_guard1239;
         *var_idse_slot = var_idse;
@@ -9448,7 +9443,6 @@ impl Instance {
         var_temp_db1 = (((var_qim_dc_db1 * var_qimstar) - (var_qim_dc * var_qimstar_db1)) / (var_qimstar * var_qimstar));
         var_temp_db2 = (((var_qim_dc_db2 * var_qimstar) - (var_qim_dc * var_qimstar_db2)) / (var_qimstar * var_qimstar));
         var_temp_db3 = (((var_qim_dc_db3 * var_qimstar) - (var_qim_dc * var_qimstar_db3)) / (var_qimstar * var_qimstar));
-
 
         *var_dm_slot = var_dm;
         *var_dm_db0_slot = var_dm_db0;
@@ -11081,7 +11075,6 @@ impl Instance {
         var_nmstar_db2 = ((var_nunit_db2 * assign43580_e48790) + (var_nunit * var_qim_dc_db2));
         var_nmstar_db3 = ((var_nunit_db3 * assign43580_e48790) + (var_nunit * var_qim_dc_db3));
 
-
         *var_cdgeff_slot = var_cdgeff;
         *var_cdgeff_db0_slot = var_cdgeff_db0;
         *var_cdgeff_db1_slot = var_cdgeff_db1;
@@ -12690,7 +12683,6 @@ impl Instance {
         let assign43910_e49063: f64 = 1.0;
         let assign43910_e49064: f64 = if p.p14 == assign43910_e49063 { 1.0 } else { 0.0 };
         var_guard1352 = assign43910_e49064;
-
 
         *var_a0_csisq_op_slot = var_a0_csisq_op;
         *var_a0_csisq_op_db0_slot = var_a0_csisq_op_db0;
@@ -14395,7 +14387,6 @@ impl Instance {
         var_temp1_db2 = assign44170_e49318_d_b2;
         var_temp1_db3 = assign44170_e49318_d_b3;
 
-
         *var_dxdsx_op_slot = var_dxdsx_op;
         *var_dxdsx_op_db0_slot = var_dxdsx_op_db0;
         *var_dxdsx_op_db1_slot = var_dxdsx_op_db1;
@@ -15607,7 +15598,6 @@ impl Instance {
         var_temp_db1 = assign44420_e49537_d_b1;
         var_temp_db2 = assign44420_e49537_d_b2;
         var_temp_db3 = assign44420_e49537_d_b3;
-
 
         *var_dx_wi_1d_op_slot = var_dx_wi_1d_op;
         *var_dx_wi_1d_op_db0_slot = var_dx_wi_1d_op_db0;
@@ -17128,7 +17118,6 @@ impl Instance {
         var_vfb2_op_db2 = assign44890_e50017_d_b2;
         var_vfb2_op_db3 = assign44890_e50017_d_b3;
 
-
         *var_dleff_op_slot = var_dleff_op;
         *var_dleff_op_db0_slot = var_dleff_op_db0;
         *var_dleff_op_db1_slot = var_dleff_op_db1;
@@ -18346,7 +18335,6 @@ impl Instance {
         var_k2_1d_qm_op_db2 = assign45120_e50279_d_b2;
         var_k2_1d_qm_op_db3 = assign45120_e50279_d_b3;
 
-
         *var_e1_op_slot = var_e1_op;
         *var_e1_op_db0_slot = var_e1_op_db0;
         *var_e1_op_db1_slot = var_e1_op_db1;
@@ -19205,7 +19193,6 @@ impl Instance {
         var_temp_db1 = assign45300_e50499_d_b1;
         var_temp_db2 = assign45300_e50499_d_b2;
         var_temp_db3 = assign45300_e50499_d_b3;
-
 
         *var_dleff_op_slot = var_dleff_op;
         *var_dleff_op_db0_slot = var_dleff_op_db0;

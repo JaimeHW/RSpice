@@ -62,6 +62,8 @@ impl Instance {
         var_tdev_db52: f64,
         var_tdev_db53: f64,
         var_tdev_db54: f64,
+        var_tdev_db55: f64,
+        var_tdev_db56: f64,
         var_tdev_db6: f64,
         var_tdev_db7: f64,
         var_tdev_db8: f64,
@@ -145,6 +147,8 @@ impl Instance {
         var_qfr3_db52_slot: &mut f64,
         var_qfr3_db53_slot: &mut f64,
         var_qfr3_db54_slot: &mut f64,
+        var_qfr3_db55_slot: &mut f64,
+        var_qfr3_db56_slot: &mut f64,
         var_qfr3_db6_slot: &mut f64,
         var_qfr3_db7_slot: &mut f64,
         var_qfr3_db8_slot: &mut f64,
@@ -223,6 +227,8 @@ impl Instance {
         var_qfr_db52_slot: &mut f64,
         var_qfr_db53_slot: &mut f64,
         var_qfr_db54_slot: &mut f64,
+        var_qfr_db55_slot: &mut f64,
+        var_qfr_db56_slot: &mut f64,
         var_qfr_db6_slot: &mut f64,
         var_qfr_db7_slot: &mut f64,
         var_qfr_db8_slot: &mut f64,
@@ -308,6 +314,8 @@ impl Instance {
         let mut var_qfr3_db52: f64 = *var_qfr3_db52_slot;
         let mut var_qfr3_db53: f64 = *var_qfr3_db53_slot;
         let mut var_qfr3_db54: f64 = *var_qfr3_db54_slot;
+        let mut var_qfr3_db55: f64 = *var_qfr3_db55_slot;
+        let mut var_qfr3_db56: f64 = *var_qfr3_db56_slot;
         let mut var_qfr3_db6: f64 = *var_qfr3_db6_slot;
         let mut var_qfr3_db7: f64 = *var_qfr3_db7_slot;
         let mut var_qfr3_db8: f64 = *var_qfr3_db8_slot;
@@ -386,6 +394,8 @@ impl Instance {
         let mut var_qfr_db52: f64 = *var_qfr_db52_slot;
         let mut var_qfr_db53: f64 = *var_qfr_db53_slot;
         let mut var_qfr_db54: f64 = *var_qfr_db54_slot;
+        let mut var_qfr_db55: f64 = *var_qfr_db55_slot;
+        let mut var_qfr_db56: f64 = *var_qfr_db56_slot;
         let mut var_qfr_db6: f64 = *var_qfr_db6_slot;
         let mut var_qfr_db7: f64 = *var_qfr_db7_slot;
         let mut var_qfr_db8: f64 = *var_qfr_db8_slot;
@@ -413,6 +423,16 @@ impl Instance {
         let mut var_qfr_dn7: f64 = *var_qfr_dn7_slot;
         let mut var_qfr_dn8: f64 = *var_qfr_dn8_slot;
         let mut var_qfr_dn9: f64 = *var_qfr_dn9_slot;
+
+        s.store_max_with_scalar_ad(372, A::sub(A::voltage(ctx, nodes, Some(2), Some(3)), s.ad_value(375)), 0.0);
+
+        s.store_scale(137, 377, (p.p4 * p.p5));
+
+        s.b[563] = (s.v[137] > 0.0);
+        s.store_scalar(563, if s.b[563] { 1.0 } else { 0.0 });
+
+        s.b[564] = (s.v[372] > 0.0);
+        s.store_scalar(564, if s.b[564] { 1.0 } else { 0.0 });
 
         if (s.b[563] && s.b[564]) {
             s.store_div_ad_rhs(354, 372, A::mul(s.ad_value(373), s.ad_value(36)));
@@ -668,6 +688,8 @@ impl Instance {
         var_qfr_db52 = (-(((var_tdev_db52 / var_tnom) * p.p227) * (nv0 - nv2)));
         var_qfr_db53 = (-(((var_tdev_db53 / var_tnom) * p.p227) * (nv0 - nv2)));
         var_qfr_db54 = (-(((var_tdev_db54 / var_tnom) * p.p227) * (nv0 - nv2)));
+        var_qfr_db55 = 0.0;
+        var_qfr_db56 = 0.0;
 
         let assign32140_e49681: f64 = (p.p4 * p.p5);
         let assign32140_e49684: f64 = (1e-25 + var_qfr);
@@ -760,8 +782,11 @@ impl Instance {
         var_qfr_db52 = (assign32140_e49681 * (var_qfr_db52 - (0.5 * (var_qfr_db52 - (((var_qfr_db52 * assign32140_e49694) + (assign32140_e49691 * var_qfr_db52)) / (2.0 * assign32140_e49698))))));
         var_qfr_db53 = (assign32140_e49681 * (var_qfr_db53 - (0.5 * (var_qfr_db53 - (((var_qfr_db53 * assign32140_e49694) + (assign32140_e49691 * var_qfr_db53)) / (2.0 * assign32140_e49698))))));
         var_qfr_db54 = (assign32140_e49681 * (var_qfr_db54 - (0.5 * (var_qfr_db54 - (((var_qfr_db54 * assign32140_e49694) + (assign32140_e49691 * var_qfr_db54)) / (2.0 * assign32140_e49698))))));
+        var_qfr_db55 = 0.0;
+        var_qfr_db56 = 0.0;
 
-        s.store_scaled_add_offset_sqrt_square_offset_ad(136, A::sub_from_scalar(p.p218, A::scale_offset(s.ad_value(82), ((1.0 / (var_tnom)) * (p.p226)), (((-1.0)) * (p.p226)))), 1e-18, (-1e-18), ((0.25 * 1e-19) * 1e-19), 0.5);
+        let assign32150_ad_e49745: A = A::add(A::offset(A::sub_from_scalar(p.p218, A::scale_offset(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p226)), (((-1.0)) * (p.p226)))), 1e-18), A::sqrt_square_offset(A::offset(A::sub_from_scalar(p.p218, A::scale_offset(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p226)), (((-1.0)) * (p.p226)))), (-1e-18)), ((0.25 * 1e-19) * 1e-19)));
+        s.store_scale_ad(136, assign32150_ad_e49745, 0.5);
 
         s.store_mul_scaled_voltage(196, 136, (p.p4 * p.p5), ctx, nodes, Some(9), Some(2));
 
@@ -847,8 +872,10 @@ impl Instance {
         var_qfr3_db52 = 0.0;
         var_qfr3_db53 = 0.0;
         var_qfr3_db54 = 0.0;
+        var_qfr3_db55 = 0.0;
+        var_qfr3_db56 = 0.0;
 
-        s.store_offset_scaled_ad(136, A::scale_offset(s.ad_value(82), ((1.0 / (var_tnom)) * (p.p225)), (((-1.0)) * (p.p225))), (-(1.0 - { let limited_exp_arg = ((-((p.p229) as f64).ln()) / p.p228); if limited_exp_arg > 80.0 { LIMEXP_MAX * (1.0 + limited_exp_arg - 80.0) } else if limited_exp_arg < -80.0 { 1.804851387e-35 } else { limited_exp_arg.exp() } })), ((p.p224) * ((1.0 - { let limited_exp_arg = ((-((p.p229) as f64).ln()) / p.p228); if limited_exp_arg > 80.0 { LIMEXP_MAX * (1.0 + limited_exp_arg - 80.0) } else if limited_exp_arg < -80.0 { 1.804851387e-35 } else { limited_exp_arg.exp() } }))));
+        s.store_offset_scaled_ad(136, A::scale_offset(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p225)), (((-1.0)) * (p.p225))), (-(1.0 - { let limited_exp_arg = ((-((p.p229) as f64).ln()) / p.p228); if limited_exp_arg > 80.0 { LIMEXP_MAX * (1.0 + limited_exp_arg - 80.0) } else if limited_exp_arg < -80.0 { 1.804851387e-35 } else { limited_exp_arg.exp() } })), ((p.p224) * ((1.0 - { let limited_exp_arg = ((-((p.p229) as f64).ln()) / p.p228); if limited_exp_arg > 80.0 { LIMEXP_MAX * (1.0 + limited_exp_arg - 80.0) } else if limited_exp_arg < -80.0 { 1.804851387e-35 } else { limited_exp_arg.exp() } }))));
 
         s.store_div_scaled_inputs2_mixed_iai(90, 136, 1.0, A::voltage(ctx, nodes, Some(2), Some(0)), (-1.0), 36, 1.0);
 
@@ -860,13 +887,12 @@ impl Instance {
 
         s.store_ln_ad(192, A::sub_from_scalar(1.0, A::scale(s.ad_value(106), 1.0 / (p.p224))));
 
-        s.store_mul_sub_from_scalar_lhs_scaled_ad(193, p.p224, A::scale_offset(s.ad_value(82), ((1.0 / (var_tnom)) * (p.p225)), (((-1.0)) * (p.p225))), A::sub_from_scalar(1.0, A::limited_exp_scaled_input(s.ad_value(192), (1.0 - p.p228))), (p.p223 * 1.0 / ((1.0 - p.p228))));
+        s.store_mul_sub_from_scalar_lhs_scaled_ad(193, p.p224, A::scale_offset(A::from_derivatives(var_tdev, [var_tdev_dn0, var_tdev_dn1, var_tdev_dn2, var_tdev_dn3, var_tdev_dn4, var_tdev_dn5, var_tdev_dn6, var_tdev_dn7, var_tdev_dn8, var_tdev_dn9, var_tdev_dn10, var_tdev_dn11, var_tdev_dn12, var_tdev_dn13, var_tdev_dn14, var_tdev_dn15, var_tdev_dn16, var_tdev_dn17, var_tdev_dn18, var_tdev_dn19, var_tdev_dn20, var_tdev_dn21, var_tdev_dn22], [var_tdev_db0, var_tdev_db1, var_tdev_db2, var_tdev_db3, var_tdev_db4, var_tdev_db5, var_tdev_db6, var_tdev_db7, var_tdev_db8, var_tdev_db9, var_tdev_db10, var_tdev_db11, var_tdev_db12, var_tdev_db13, var_tdev_db14, var_tdev_db15, var_tdev_db16, var_tdev_db17, var_tdev_db18, var_tdev_db19, var_tdev_db20, var_tdev_db21, var_tdev_db22, var_tdev_db23, var_tdev_db24, var_tdev_db25, var_tdev_db26, var_tdev_db27, var_tdev_db28, var_tdev_db29, var_tdev_db30, var_tdev_db31, var_tdev_db32, var_tdev_db33, var_tdev_db34, var_tdev_db35, var_tdev_db36, var_tdev_db37, var_tdev_db38, var_tdev_db39, var_tdev_db40, var_tdev_db41, var_tdev_db42, var_tdev_db43, var_tdev_db44, var_tdev_db45, var_tdev_db46, var_tdev_db47, var_tdev_db48, var_tdev_db49, var_tdev_db50, var_tdev_db51, var_tdev_db52, var_tdev_db53, var_tdev_db54, var_tdev_db55, var_tdev_db56]), ((1.0 / (var_tnom)) * (p.p225)), (((-1.0)) * (p.p225))), A::sub_from_scalar(1.0, A::limited_exp_scaled_input(s.ad_value(192), (1.0 - p.p228))), (p.p223 * 1.0 / ((1.0 - p.p228))));
 
         s.store_add_scaled_inputs3_mixed_iai(194, 193, (p.p4 * p.p5), A::voltage(ctx, nodes, Some(2), Some(0)), ((p.p229 * p.p223) * (p.p4 * p.p5)), 106, ((-(p.p229 * p.p223)) * (p.p4 * p.p5)));
 
         let assign32260_e49851: f64 = if ((p.p31 == 1.0) && (p.p32 > 0.0)) { 1.0 } else { 0.0 };
         var_guard576 = assign32260_e49851;
-
 
         *var_guard535_slot = var_guard535;
         *var_guard576_slot = var_guard576;
@@ -923,6 +949,8 @@ impl Instance {
         *var_qfr3_db52_slot = var_qfr3_db52;
         *var_qfr3_db53_slot = var_qfr3_db53;
         *var_qfr3_db54_slot = var_qfr3_db54;
+        *var_qfr3_db55_slot = var_qfr3_db55;
+        *var_qfr3_db56_slot = var_qfr3_db56;
         *var_qfr3_db6_slot = var_qfr3_db6;
         *var_qfr3_db7_slot = var_qfr3_db7;
         *var_qfr3_db8_slot = var_qfr3_db8;
@@ -1001,6 +1029,8 @@ impl Instance {
         *var_qfr_db52_slot = var_qfr_db52;
         *var_qfr_db53_slot = var_qfr_db53;
         *var_qfr_db54_slot = var_qfr_db54;
+        *var_qfr_db55_slot = var_qfr_db55;
+        *var_qfr_db56_slot = var_qfr_db56;
         *var_qfr_db6_slot = var_qfr_db6;
         *var_qfr_db7_slot = var_qfr_db7;
         *var_qfr_db8_slot = var_qfr_db8;

@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1137,7 +1137,6 @@ impl Instance {
         var_qlo_rdn11 = 0.0;
         var_qlo_rdn12 = 0.0;
         var_qlo_rdn13 = 0.0;
-
 
         *var_dv_slot = var_dv;
         *var_dv_dn0_slot = var_dv_dn0;
@@ -2569,7 +2568,6 @@ impl Instance {
         var_qhi__blk58_rdn11 = 0.0;
         var_qhi__blk58_rdn12 = 0.0;
         var_qhi__blk58_rdn13 = 0.0;
-
 
         *var_dv0__blk54_slot = var_dv0__blk54;
         *var_dv0__blk54_dn0_slot = var_dv0__blk54_dn0;
@@ -4050,7 +4048,6 @@ impl Instance {
         var_sel_rdn11 = 0.0;
         var_sel_rdn12 = 0.0;
         var_sel_rdn13 = 0.0;
-
 
         *var_guard78_slot = var_guard78;
         *var_guard78_dn0_slot = var_guard78_dn0;
@@ -5691,7 +5688,6 @@ impl Instance {
         var_qlo__blk57_rdn12 = 0.0;
         var_qlo__blk57_rdn13 = 0.0;
 
-
         *var_cl_slot = var_cl;
         *var_cl_dn0_slot = var_cl_dn0;
         *var_cl_dn1_slot = var_cl_dn1;
@@ -7324,7 +7320,6 @@ impl Instance {
         var_q1_rdn12 = 0.0;
         var_q1_rdn13 = 0.0;
 
-
         *var_afac_slot = var_afac;
         *var_afac_dn0_slot = var_afac_dn0;
         *var_afac_dn1_slot = var_afac_dn1;
@@ -8715,7 +8710,6 @@ impl Instance {
         var_guard85_rdn12 = 0.0;
         var_guard85_rdn13 = 0.0;
 
-
         *var_afac_slot = var_afac;
         *var_afac_dn0_slot = var_afac_dn0;
         *var_afac_dn1_slot = var_afac_dn1;
@@ -10088,7 +10082,6 @@ impl Instance {
         var_guard89_rdn12 = 0.0;
         var_guard89_rdn13 = 0.0;
 
-
         *var_arg_slot = var_arg;
         *var_arg_dn0_slot = var_arg_dn0;
         *var_arg_dn1_slot = var_arg_dn1;
@@ -11401,7 +11394,6 @@ impl Instance {
         var_afac_rdn11 = 0.0;
         var_afac_rdn12 = 0.0;
         var_afac_rdn13 = 0.0;
-
 
         *var_afac_slot = var_afac;
         *var_afac_dn0_slot = var_afac_dn0;
@@ -12732,7 +12724,6 @@ impl Instance {
         var_expi_rdn12 = 0.0;
         var_expi_rdn13 = 0.0;
 
-
         *var_afac_slot = var_afac;
         *var_afac_dn0_slot = var_afac_dn0;
         *var_afac_dn1_slot = var_afac_dn1;
@@ -14014,7 +14005,6 @@ impl Instance {
         var_afac_rdn11 = 0.0;
         var_afac_rdn12 = 0.0;
         var_afac_rdn13 = 0.0;
-
 
         *var_afac_slot = var_afac;
         *var_afac_dn0_slot = var_afac_dn0;
@@ -15300,7 +15290,6 @@ impl Instance {
         var_afac_rdn11 = 0.0;
         var_afac_rdn12 = 0.0;
         var_afac_rdn13 = 0.0;
-
 
         *var_afac_slot = var_afac;
         *var_afac_dn0_slot = var_afac_dn0;
@@ -16613,7 +16602,6 @@ impl Instance {
         var_kbci_rdn11 = 0.0;
         var_kbci_rdn12 = 0.0;
         var_kbci_rdn13 = 0.0;
-
 
         *var_afac_slot = var_afac;
         *var_afac_dn0_slot = var_afac_dn0;
@@ -18089,7 +18077,6 @@ impl Instance {
         var_pwq__blk138_rdn12 = 0.0;
         var_pwq__blk138_rdn13 = 0.0;
 
-
         *var_afac_slot = var_afac;
         *var_afac_dn0_slot = var_afac_dn0;
         *var_afac_dn1_slot = var_afac_dn1;
@@ -19556,7 +19543,6 @@ impl Instance {
         var_qlo__blk139_rdn12 = 0.0;
         var_qlo__blk139_rdn13 = 0.0;
 
-
         *var_dv__blk144_slot = var_dv__blk144;
         *var_dv__blk144_dn0_slot = var_dv__blk144_dn0;
         *var_dv__blk144_dn1_slot = var_dv__blk144_dn1;
@@ -20977,7 +20963,6 @@ impl Instance {
         var_qdbex_rdn11 = 0.0;
         var_qdbex_rdn12 = 0.0;
         var_qdbex_rdn13 = 0.0;
-
 
         *var_dv0__blk149_slot = var_dv0__blk149;
         *var_dv0__blk149_dn0_slot = var_dv0__blk149_dn0;
@@ -22540,7 +22525,6 @@ impl Instance {
         var_guard184_rdn11 = 0.0;
         var_guard184_rdn12 = 0.0;
         var_guard184_rdn13 = 0.0;
-
 
         *var_dv0__blk162_slot = var_dv0__blk162;
         *var_dv0__blk162_dn0_slot = var_dv0__blk162_dn0;

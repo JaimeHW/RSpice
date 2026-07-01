@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1029,7 +1029,6 @@ impl Instance {
         var_sp_ov_nu_db1 = assign24910_e25489_d_b1;
         var_sp_ov_nu_db2 = assign24910_e25489_d_b2;
         var_sp_ov_nu_db3 = assign24910_e25489_d_b3;
-
 
         *var_guard712_slot = var_guard712;
         *var_guard713_slot = var_guard713;
@@ -2273,7 +2272,6 @@ impl Instance {
         var_sp_ov_temp_db1 = assign25120_e25860_d_b1;
         var_sp_ov_temp_db2 = assign25120_e25860_d_b2;
         var_sp_ov_temp_db3 = assign25120_e25860_d_b3;
-
 
         *var_guard715_slot = var_guard715;
         *var_guard716_slot = var_guard716;
@@ -3570,7 +3568,6 @@ impl Instance {
         var_igdov_db1 = 0.0;
         var_igdov_db2 = 0.0;
         var_igdov_db3 = 0.0;
-
 
         *var_guard719_slot = var_guard719;
         *var_guard720_slot = var_guard720;
@@ -4896,7 +4893,6 @@ impl Instance {
         let assign25570_e26441: f64 = if var_gc3oveff < 0.0 { 1.0 } else { 0.0 };
         var_guard725 = assign25570_e26441;
 
-
         *var_arg2mina_slot = var_arg2mina;
         *var_arg2mina_db0_slot = var_arg2mina_db0;
         *var_arg2mina_db1_slot = var_arg2mina_db1;
@@ -5988,7 +5984,6 @@ impl Instance {
         var_tp2_db1 = assign25800_e26800_d_b1;
         var_tp2_db2 = assign25800_e26800_d_b2;
         var_tp2_db3 = assign25800_e26800_d_b3;
-
 
         *var_arg1_slot = var_arg1;
         *var_arg1_db0_slot = var_arg1_db0;
@@ -7083,7 +7078,6 @@ impl Instance {
         let assign26040_e27156: f64 = (-80.0);
         let assign26040_e27157: f64 = if assign26040_e27154 < assign26040_e27156 { 1.0 } else { 0.0 };
         var_guard741 = assign26040_e27157;
-
 
         *var_arg2mina_slot = var_arg2mina;
         *var_arg2mina_db0_slot = var_arg2mina_db0;
@@ -8253,7 +8247,6 @@ impl Instance {
         let assign26260_e27484: f64 = if var_arg1 < assign26260_e27483 { 1.0 } else { 0.0 };
         var_guard746 = assign26260_e27484;
 
-
         *var_arg1_slot = var_arg1;
         *var_arg1_db0_slot = var_arg1_db0;
         *var_arg1_db1_slot = var_arg1_db1;
@@ -9300,7 +9293,6 @@ impl Instance {
         let assign26500_e27859: f64 = (var_temp3).abs();
         let assign26500_e27861: f64 = if assign26500_e27859 < 80.0 { 1.0 } else { 0.0 };
         var_guard754 = assign26500_e27861;
-
 
         *var_dgate_slot = var_dgate;
         *var_dgate_db0_slot = var_dgate_db0;
@@ -10493,7 +10485,6 @@ impl Instance {
         var_xg1xshift_db2 = assign26710_e28219_d_b2;
         var_xg1xshift_db3 = assign26710_e28219_d_b3;
 
-
         *var_arg2mina_slot = var_arg2mina;
         *var_arg2mina_db0_slot = var_arg2mina_db0;
         *var_arg2mina_db1_slot = var_arg2mina_db1;
@@ -11569,7 +11560,6 @@ impl Instance {
 
         let assign26950_e28604: f64 = if ((var_xg1xshift <= 0.0) || ((var_gc2ch_i == 0.0) && (var_gc3ch_i == 0.0))) { 1.0 } else { 0.0 };
         var_guard767 = assign26950_e28604;
-
 
         *var_arg1_slot = var_arg1;
         *var_arg1_db0_slot = var_arg1_db0;
@@ -12671,7 +12661,6 @@ impl Instance {
         var_temp2_db1 = assign27160_e28943_d_b1;
         var_temp2_db2 = assign27160_e28943_d_b2;
         var_temp2_db3 = assign27160_e28943_d_b3;
-
 
         *var_ag_slot = var_ag;
         *var_ag_db0_slot = var_ag_db0;
@@ -13954,7 +13943,6 @@ impl Instance {
         var_temp4_db2 = assign27400_e29230_d_b2;
         var_temp4_db3 = assign27400_e29230_d_b3;
 
-
         *var_guard771_slot = var_guard771;
         *var_guard772_slot = var_guard772;
         *var_guard773_slot = var_guard773;
@@ -15169,7 +15157,6 @@ impl Instance {
         var_dxdsx_edge_db1 = assign27630_e29535_d_b1;
         var_dxdsx_edge_db2 = assign27630_e29535_d_b2;
         var_dxdsx_edge_db3 = assign27630_e29535_d_b3;
-
 
         *var_dxdsx_edge_slot = var_dxdsx_edge;
         *var_dxdsx_edge_db0_slot = var_dxdsx_edge_db0;
@@ -16658,7 +16645,6 @@ impl Instance {
         var_dx_wi_edge_db2 = assign27820_e29753_d_b2;
         var_dx_wi_edge_db3 = assign27820_e29753_d_b3;
 
-
         *var_a0_edge_slot = var_a0_edge;
         *var_a0_edge_db0_slot = var_a0_edge_db0;
         *var_a0_edge_db1_slot = var_a0_edge_db1;
@@ -17774,7 +17760,6 @@ impl Instance {
         let assign28060_e30043: f64 = if assign28060_e30040 > assign28060_e30042 { 1.0 } else { 0.0 };
         var_guard789 = assign28060_e30043;
 
-
         *var_guard783_slot = var_guard783;
         *var_guard784_slot = var_guard784;
         *var_guard785_slot = var_guard785;
@@ -18868,7 +18853,6 @@ impl Instance {
 
         let assign28290_e30324: f64 = if var_swshe_i > 0.0 { 1.0 } else { 0.0 };
         var_guard794 = assign28290_e30324;
-
 
         *var_delvsat_slot = var_delvsat;
         *var_delvsat_db0_slot = var_delvsat_db0;

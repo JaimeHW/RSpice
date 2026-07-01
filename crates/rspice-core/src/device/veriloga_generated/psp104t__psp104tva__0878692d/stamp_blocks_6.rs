@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -805,7 +805,6 @@ impl Instance {
 
         let assign31040_e39315: f64 = if var_lgdrain_i == 0.0 { 1.0 } else { 0.0 };
         var_guard626 = assign31040_e39315;
-
 
         *var_fbreakdown_slot = var_fbreakdown;
         *var_fbreakdown_db0_slot = var_fbreakdown_db0;
@@ -1974,7 +1973,6 @@ impl Instance {
         var_umaxpoweronepointfive_db4 = assign31280_e39645_d_b4;
         var_umaxpoweronepointfive_db5 = assign31280_e39645_d_b5;
         var_umaxpoweronepointfive_db6 = assign31280_e39645_d_b6;
-
 
         *var_asrh_slot = var_asrh;
         *var_asrh_db0_slot = var_asrh_db0;
@@ -3323,7 +3321,6 @@ impl Instance {
         let assign31470_e39974: f64 = if var_mtat > assign31470_e39973 { 1.0 } else { 0.0 };
         var_guard635 = assign31470_e39974;
 
-
         *var_erfcpos_slot = var_erfcpos;
         *var_erfcpos_db0_slot = var_erfcpos_db0;
         *var_erfcpos_db1_slot = var_erfcpos_db1;
@@ -4531,7 +4528,6 @@ impl Instance {
         let assign31680_e40343: f64 = if var_pbrgatd_i == 4.0 { 1.0 } else { 0.0 };
         var_guard642 = assign31680_e40343;
 
-
         *var_erfctimesexpmtat_slot = var_erfctimesexpmtat;
         *var_erfctimesexpmtat_db0_slot = var_erfctimesexpmtat_db0;
         *var_erfctimesexpmtat_db1_slot = var_erfctimesexpmtat_db1;
@@ -5543,7 +5539,6 @@ impl Instance {
 
         let assign32040_e40959: f64 = if var_abdrain_i == 0.0 { 1.0 } else { 0.0 };
         var_guard648 = assign32040_e40959;
-
 
         *var_fbreakdown_slot = var_fbreakdown;
         *var_fbreakdown_db0_slot = var_fbreakdown_db0;
@@ -6698,7 +6693,6 @@ impl Instance {
         var_umaxpoweronepointfive_db4 = assign32280_e41289_d_b4;
         var_umaxpoweronepointfive_db5 = assign32280_e41289_d_b5;
         var_umaxpoweronepointfive_db6 = assign32280_e41289_d_b6;
-
 
         *var_asrh_slot = var_asrh;
         *var_asrh_db0_slot = var_asrh_db0;
@@ -8047,7 +8041,6 @@ impl Instance {
         let assign32470_e41618: f64 = if var_mtat > assign32470_e41617 { 1.0 } else { 0.0 };
         var_guard657 = assign32470_e41618;
 
-
         *var_erfcpos_slot = var_erfcpos;
         *var_erfcpos_db0_slot = var_erfcpos_db0;
         *var_erfcpos_db1_slot = var_erfcpos_db1;
@@ -9235,7 +9228,6 @@ impl Instance {
         let assign32680_e41987: f64 = if var_pbrbotd_i == 4.0 { 1.0 } else { 0.0 };
         var_guard664 = assign32680_e41987;
 
-
         *var_erfctimesexpmtat_slot = var_erfctimesexpmtat;
         *var_erfctimesexpmtat_db0_slot = var_erfctimesexpmtat_db0;
         *var_erfctimesexpmtat_db1_slot = var_erfctimesexpmtat_db1;
@@ -10291,7 +10283,6 @@ impl Instance {
         var_itat_db4 = assign32920_e42336_d_b4;
         var_itat_db5 = assign32920_e42336_d_b5;
         var_itat_db6 = assign32920_e42336_d_b6;
-
 
         *var_asrh_slot = var_asrh;
         *var_asrh_db0_slot = var_asrh_db0;
@@ -11588,7 +11579,6 @@ impl Instance {
         var_terfc_db5 = assign33090_e42615_d_b5;
         var_terfc_db6 = assign33090_e42615_d_b6;
 
-
         *var_btat_slot = var_btat;
         *var_btat_db0_slot = var_btat_db0;
         *var_btat_db1_slot = var_btat_db1;
@@ -12882,7 +12872,6 @@ impl Instance {
         let assign33290_e42963: f64 = if assign33290_e42961 < 230.25850929940458 { 1.0 } else { 0.0 };
         var_guard677 = assign33290_e42963;
 
-
         *var_erfcpos_slot = var_erfcpos;
         *var_erfcpos_db0_slot = var_erfcpos_db0;
         *var_erfcpos_db1_slot = var_erfcpos_db1;
@@ -13917,7 +13906,6 @@ impl Instance {
 
         let assign33550_e43381: f64 = if var_pgatd_i == 0.5 { 1.0 } else { 0.0 };
         var_guard685 = assign33550_e43381;
-
 
         *var_dwsrh_slot = var_dwsrh;
         *var_fbreakdown_slot = var_fbreakdown;
@@ -15182,7 +15170,6 @@ impl Instance {
         var_ktat_db4 = assign33730_e43661_d_b4;
         var_ktat_db5 = assign33730_e43661_d_b5;
         var_ktat_db6 = assign33730_e43661_d_b6;
-
 
         *var_asrh_slot = var_asrh;
         *var_asrh_db0_slot = var_asrh_db0;
@@ -16499,7 +16486,6 @@ impl Instance {
         var_gammamax_db5 = assign33910_e44004_d_b5;
         var_gammamax_db6 = assign33910_e44004_d_b6;
 
-
         *var_erfcpos_slot = var_erfcpos;
         *var_erfcpos_db0_slot = var_erfcpos_db0;
         *var_erfcpos_db1_slot = var_erfcpos_db1;
@@ -17573,7 +17559,6 @@ impl Instance {
         var_fbreakdown_db5 = assign34120_e44366_d_b5;
         var_fbreakdown_db6 = assign34120_e44366_d_b6;
 
-
         *var_fbreakdown_slot = var_fbreakdown;
         *var_fbreakdown_db0_slot = var_fbreakdown_db0;
         *var_fbreakdown_db1_slot = var_fbreakdown_db1;
@@ -18498,7 +18483,6 @@ impl Instance {
 
         let assign34550_e45025: f64 = if var_pbotd_i == 0.5 { 1.0 } else { 0.0 };
         var_guard707 = assign34550_e45025;
-
 
         *var_dwsrh_slot = var_dwsrh;
         *var_guard699_slot = var_guard699;

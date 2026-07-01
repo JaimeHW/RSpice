@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1005,7 +1005,6 @@ impl Instance {
     }
 };
         var_latmin = assign660_e886;
-
 
         *var_avs_slot = var_avs;
         *var_c_1_slot = var_c_1;
@@ -2220,7 +2219,6 @@ impl Instance {
         var_vgb_t_db3 = (var_k1_db3 + var_k2_db3);
         var_vgb_t_db4 = (var_k1_db4 + var_k2_db4);
         var_vgb_t_db5 = (var_k1_db5 + var_k2_db5);
-
 
         *var_dtdev_slot = var_dtdev;
         *var_dtdev_db0_slot = var_dtdev_db0;
@@ -3565,7 +3563,6 @@ impl Instance {
 };
         var_vdj_t0 = assign1190_e1271;
 
-
         *var_ajei_t_slot = var_ajei_t;
         *var_ajei_t_db0_slot = var_ajei_t_db0;
         *var_ajei_t_db1_slot = var_ajei_t_db1;
@@ -4832,7 +4829,6 @@ impl Instance {
         var_hjei0_t_db3 = assign1370_e1453_d_b3;
         var_hjei0_t_db4 = assign1370_e1453_d_b4;
         var_hjei0_t_db5 = assign1370_e1453_d_b5;
-
 
         *var_ahjei_t_slot = var_ahjei_t;
         *var_ahjei_t_db0_slot = var_ahjei_t_db0;
@@ -6202,7 +6198,6 @@ impl Instance {
         var_ibcts_t_db3 = assign1580_e1601_d_b3;
         var_ibcts_t_db4 = assign1580_e1601_d_b4;
         var_ibcts_t_db5 = assign1580_e1601_d_b5;
-
 
         *var_favl_t_slot = var_favl_t;
         *var_favl_t_db0_slot = var_favl_t_db0;
@@ -7620,7 +7615,6 @@ impl Instance {
         var_cjep0_t_db4 = assign1770_e1779_d_b4;
         var_cjep0_t_db5 = assign1770_e1779_d_b5;
 
-
         *var_abct_t_slot = var_abct_t;
         *var_abct_t_db0_slot = var_abct_t_db0;
         *var_abct_t_db1_slot = var_abct_t_db1;
@@ -8922,7 +8916,6 @@ impl Instance {
         var_abet_t_db3 = assign1950_e1965_d_b3;
         var_abet_t_db4 = assign1950_e1965_d_b4;
         var_abet_t_db5 = assign1950_e1965_d_b5;
-
 
         *var_abet_t_slot = var_abet_t;
         *var_abet_t_db0_slot = var_abet_t_db0;
@@ -10243,7 +10236,6 @@ impl Instance {
         let assign2160_e2129: f64 = if p.p57 > 0.0 { 1.0 } else { 0.0 };
         var_guard35 = assign2160_e2129;
 
-
         *var_abet_t_slot = var_abet_t;
         *var_abet_t_db0_slot = var_abet_t_db0;
         *var_abet_t_db1_slot = var_abet_t_db1;
@@ -11264,7 +11256,6 @@ impl Instance {
         var_ajs_t_db3 = assign2350_e2382_d_b3;
         var_ajs_t_db4 = assign2350_e2382_d_b4;
         var_ajs_t_db5 = assign2350_e2382_d_b5;
-
 
         *var_a_jsp_slot = var_a_jsp;
         *var_ajs_t_slot = var_ajs_t;
@@ -12418,7 +12409,6 @@ impl Instance {
         var_ajsp_t_db3 = assign2540_e2585_d_b3;
         var_ajsp_t_db4 = assign2540_e2585_d_b4;
         var_ajsp_t_db5 = assign2540_e2585_d_b5;
-
 
         *var_a_jsp_slot = var_a_jsp;
         *var_ajs_t_slot = var_ajs_t;
@@ -13770,7 +13760,6 @@ impl Instance {
         var_ln_qtt0_db3 = assign2730_e2715_d_b3;
         var_ln_qtt0_db4 = assign2730_e2715_d_b4;
         var_ln_qtt0_db5 = assign2730_e2715_d_b5;
-
 
         *var_ajsp_t_slot = var_ajsp_t;
         *var_ajsp_t_db0_slot = var_ajsp_t_db0;
@@ -15181,7 +15170,6 @@ impl Instance {
         var_vdei_t_db4 = assign2900_e2893_d_b4;
         var_vdei_t_db5 = assign2900_e2893_d_b5;
 
-
         *var_ajei_t_slot = var_ajei_t;
         *var_ajei_t_db0_slot = var_ajei_t_db0;
         *var_ajei_t_db1_slot = var_ajei_t_db1;
@@ -16482,7 +16470,6 @@ impl Instance {
         var_qp0_t_db4 = assign3080_e3108_d_b4;
         var_qp0_t_db5 = assign3080_e3108_d_b5;
 
-
         *var_ajci_t_slot = var_ajci_t;
         *var_ajci_t_db0_slot = var_ajci_t_db0;
         *var_ajci_t_db1_slot = var_ajci_t_db1;
@@ -17753,7 +17740,6 @@ impl Instance {
         var_vdck_t_db4 = assign3240_e3291_d_b4;
         var_vdck_t_db5 = assign3240_e3291_d_b5;
 
-
         *var_ahjei_t_slot = var_ahjei_t;
         *var_ahjei_t_db0_slot = var_ahjei_t_db0;
         *var_ahjei_t_db1_slot = var_ahjei_t_db1;
@@ -19015,7 +19001,6 @@ impl Instance {
         var_abct_t_db3 = assign3430_e3460_d_b3;
         var_abct_t_db4 = assign3430_e3460_d_b4;
         var_abct_t_db5 = assign3430_e3460_d_b5;
-
 
         *var_abct_t_slot = var_abct_t;
         *var_abct_t_db0_slot = var_abct_t_db0;
@@ -20314,7 +20299,6 @@ impl Instance {
 
         let assign3620_e3679: f64 = if (((p.p29 == 1.0) && (p.p43 > 0.0)) && (p.p44 > 0.0)) { 1.0 } else { 0.0 };
         var_guard58 = assign3620_e3679;
-
 
         *var_ajep_t_slot = var_ajep_t;
         *var_ajep_t_db0_slot = var_ajep_t_db0;

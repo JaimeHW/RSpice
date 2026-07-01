@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -822,7 +822,6 @@ impl Instance {
         let assign680_e952: f64 = (var_vgzcbok - assign680_e951);
         let assign680_e954: f64 = if assign680_e952 < 0.05 { 1.0 } else { 0.0 };
         var_guard7 = assign680_e954;
-
 
         *var_an_slot = var_an;
         *var_bn_slot = var_bn;
@@ -1676,7 +1675,6 @@ impl Instance {
     }
 };
         var_vknbr_t = assign1000_e1290;
-
 
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
@@ -2739,7 +2737,6 @@ impl Instance {
 
         let assign1380_e1535: f64 = if var_nfr_t_tmp < 1.0 { 1.0 } else { 0.0 };
         var_guard20 = assign1380_e1535;
-
 
         *var_cjc_scale_slot = var_cjc_scale;
         *var_cjc_scale_db0_slot = var_cjc_scale_db0;
@@ -3972,7 +3969,6 @@ impl Instance {
         var_vb2c1_dn11 = 0.0;
         var_vb2c1_db0 = 0.0;
         var_vb2c1_db1 = 0.0;
-
 
         *var_bavl_t_slot = var_bavl_t;
         *var_bavl_t_db0_slot = var_bavl_t_db0;
@@ -5288,7 +5284,6 @@ impl Instance {
         let assign2390_e2331: f64 = if assign2390_e2329 < p.p147 { 1.0 } else { 0.0 };
         var_guard34 = assign2390_e2331;
 
-
         *var_evb1c4_slot = var_evb1c4;
         *var_evb1c4_db0_slot = var_evb1c4_db0;
         *var_evb1c4_db1_slot = var_evb1c4_db1;
@@ -6459,7 +6454,6 @@ impl Instance {
 
         let assign2740_e2620: f64 = if var_pw < p.p149 { 1.0 } else { 0.0 };
         var_guard42 = assign2740_e2620;
-
 
         *var_evb1c4vdc_slot = var_evb1c4vdc;
         *var_evb1c4vdc_db0_slot = var_evb1c4vdc_db0;
@@ -7688,7 +7682,6 @@ impl Instance {
         var_yi_dn11 = assign2970_e2855_d_n11;
         var_yi_db0 = assign2970_e2855_d_b0;
         var_yi_db1 = assign2970_e2855_d_b1;
-
 
         *var_alpha_slot = var_alpha;
         *var_alpha1_slot = var_alpha1;
@@ -9002,7 +8995,6 @@ impl Instance {
         let assign3200_e3072: f64 = (assign3200_e3068 * assign3200_e3071);
         let assign3200_e3074: f64 = if ((assign3200_e3059 < assign3200_e3062) || (assign3200_e3065 < assign3200_e3072)) { 1.0 } else { 0.0 };
         var_guard50 = assign3200_e3074;
-
 
         *var_b1_slot = var_b1;
         *var_b1_db0_slot = var_b1_db0;
@@ -10388,7 +10380,6 @@ impl Instance {
         var_vjc_dn11 = assign3450_e3271_d_n11;
         var_vjc_db0 = assign3450_e3271_d_b0;
         var_vjc_db1 = assign3450_e3271_d_b1;
-
 
         *var_a_vde_slot = var_a_vde;
         *var_a_vde_db0_slot = var_a_vde_db0;
@@ -12025,7 +12016,6 @@ impl Instance {
         let assign3710_e3476: f64 = if var_vb2e1 < 0.0 { 1.0 } else { 0.0 };
         var_guard57 = assign3710_e3476;
 
-
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
         *var_dxa_db1_slot = var_dxa_db1;
@@ -12996,7 +12986,6 @@ impl Instance {
     }
 };
         var_expl = assign4250_e4014;
-
 
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
@@ -14010,7 +13999,6 @@ impl Instance {
         var_ximsub_dn11 = assign4870_e4824_d_n11;
         var_ximsub_db0 = assign4870_e4824_d_b0;
         var_ximsub_db1 = assign4870_e4824_d_b1;
-
 
         *var_de0cb_slot = var_de0cb;
         *var_de0eb_slot = var_de0eb;
@@ -15163,7 +15151,6 @@ impl Instance {
         var_qbq_dn11 = ((var_q1q_dn11 * assign5290_e5198) + (var_q1q * (0.5 * (var_n0_dn11 + var_nb_dn11))));
         var_qbq_db0 = ((var_q1q_db0 * assign5290_e5198) + (var_q1q * (0.5 * (var_n0_db0 + var_nb_db0))));
         var_qbq_db1 = ((var_q1q_db1 * assign5290_e5198) + (var_q1q * (0.5 * (var_n0_db1 + var_nb_db1))));
-
 
         *var_eps2_slot = var_eps2;
         *var_eps2_db0_slot = var_eps2_db0;
@@ -16337,7 +16324,6 @@ impl Instance {
 
         let assign5600_e5533: f64 = if p.p7 == 0.0 { 1.0 } else { 0.0 };
         var_guard98 = assign5600_e5533;
-
 
         *var_dedx0_slot = var_dedx0;
         *var_e0_slot = var_e0;
@@ -17609,7 +17595,6 @@ impl Instance {
     }
 };
         var_expl = assign5850_e5985;
-
 
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
@@ -19069,7 +19054,6 @@ impl Instance {
         var_vtexv_dn11 = ((((var_vdc_ctc_t_dn11 / assign6170_e6315) * assign6170_e6327) + (assign6170_e6316 * (-if 0.0 == 0.0 && ((assign6170_e6325) as f64).is_finite() && ((assign6170_e6325) as f64).fract() == 0.0 { if assign6170_e6325 == 0.0 { 0.0 } else { (assign6170_e6325 * ((assign6170_e6322).powf(assign6170_e6325 - 1.0) * (-(((var_vjcex_dn11 * var_vdc_ctc_t) - (var_vjcex * var_vdc_ctc_t_dn11)) / (var_vdc_ctc_t * var_vdc_ctc_t))))) } } else { (assign6170_e6326 * (assign6170_e6325 * ((-(((var_vjcex_dn11 * var_vdc_ctc_t) - (var_vjcex * var_vdc_ctc_t_dn11)) / (var_vdc_ctc_t * var_vdc_ctc_t))) / assign6170_e6322))) }))) + ((var_bjc_dn11 * assign6170_e6332) + (var_bjc * (var_vb1c4_dn11 - var_vjcex_dn11))));
         var_vtexv_db0 = ((((var_vdc_ctc_t_db0 / assign6170_e6315) * assign6170_e6327) + (assign6170_e6316 * (-if 0.0 == 0.0 && ((assign6170_e6325) as f64).is_finite() && ((assign6170_e6325) as f64).fract() == 0.0 { if assign6170_e6325 == 0.0 { 0.0 } else { (assign6170_e6325 * ((assign6170_e6322).powf(assign6170_e6325 - 1.0) * (-(((var_vjcex_db0 * var_vdc_ctc_t) - (var_vjcex * var_vdc_ctc_t_db0)) / (var_vdc_ctc_t * var_vdc_ctc_t))))) } } else { (assign6170_e6326 * (assign6170_e6325 * ((-(((var_vjcex_db0 * var_vdc_ctc_t) - (var_vjcex * var_vdc_ctc_t_db0)) / (var_vdc_ctc_t * var_vdc_ctc_t))) / assign6170_e6322))) }))) + ((var_bjc_db0 * assign6170_e6332) + (var_bjc * (var_vb1c4_db0 - var_vjcex_db0))));
         var_vtexv_db1 = ((((var_vdc_ctc_t_db1 / assign6170_e6315) * assign6170_e6327) + (assign6170_e6316 * (-if 0.0 == 0.0 && ((assign6170_e6325) as f64).is_finite() && ((assign6170_e6325) as f64).fract() == 0.0 { if assign6170_e6325 == 0.0 { 0.0 } else { (assign6170_e6325 * ((assign6170_e6322).powf(assign6170_e6325 - 1.0) * (-(((var_vjcex_db1 * var_vdc_ctc_t) - (var_vjcex * var_vdc_ctc_t_db1)) / (var_vdc_ctc_t * var_vdc_ctc_t))))) } } else { (assign6170_e6326 * (assign6170_e6325 * ((-(((var_vjcex_db1 * var_vdc_ctc_t) - (var_vjcex * var_vdc_ctc_t_db1)) / (var_vdc_ctc_t * var_vdc_ctc_t))) / assign6170_e6322))) }))) + ((var_bjc_db1 * assign6170_e6332) + (var_bjc * (var_vb1c4_db1 - var_vjcex_db1))));
-
 
         *var_a_vdcctc_slot = var_a_vdcctc;
         *var_a_vdcctc_db0_slot = var_a_vdcctc_db0;

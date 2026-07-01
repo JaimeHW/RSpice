@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1455,7 +1455,6 @@ impl Instance {
         var_qi_qs_db5 = 0.0;
         var_qi_qs_db6 = 0.0;
         var_qi_qs_db7 = 0.0;
-
 
         *var_flg_brk10_slot = var_flg_brk10;
         *var_flg_dppg_slot = var_flg_dppg;
@@ -3368,7 +3367,6 @@ impl Instance {
         var_alpha_db5 = 0.0;
         var_alpha_db6 = 0.0;
         var_alpha_db7 = 0.0;
-
 
         *var_alpha_slot = var_alpha;
         *var_alpha_db0_slot = var_alpha_db0;
@@ -5318,7 +5316,6 @@ impl Instance {
         var_sqrtkusail_db6 = 0.0;
         var_sqrtkusail_db7 = 0.0;
 
-
         *var_betawl_slot = var_betawl;
         *var_betawl_db0_slot = var_betawl_db0;
         *var_betawl_db1_slot = var_betawl_db1;
@@ -6991,7 +6988,6 @@ impl Instance {
         var_xmp_db6 = assign1210_e780_d_b6;
         var_xmp_db7 = assign1210_e780_d_b7;
 
-
         *var_arg_slot = var_arg;
         *var_arg_db0_slot = var_arg_db0;
         *var_arg_db1_slot = var_arg_db1;
@@ -8281,7 +8277,6 @@ impl Instance {
         var_mks_nsubp_db5 = 0.0;
         var_mks_nsubp_db6 = 0.0;
         var_mks_nsubp_db7 = 0.0;
-
 
         *var_arg_slot = var_arg;
         *var_arg_db0_slot = var_arg_db0;
@@ -9593,7 +9588,6 @@ impl Instance {
         var_rth_db6 = (-((var_mks_rth0 * (var_mfactor * var_weff_nf_db6)) / (assign1880_e1139 * assign1880_e1139)));
         var_rth_db7 = (-((var_mks_rth0 * (var_mfactor * var_weff_nf_db7)) / (assign1880_e1139 * assign1880_e1139)));
 
-
         *var_dvthsm_slot = var_dvthsm;
         *var_dw_slot = var_dw;
         *var_dwcv_slot = var_dwcv;
@@ -10770,7 +10764,6 @@ impl Instance {
         var_tmf1_db6 = var_t1_db6;
         var_tmf1_db7 = var_t1_db7;
 
-
         *var_cth_slot = var_cth;
         *var_cth_db0_slot = var_cth_db0;
         *var_cth_db1_slot = var_cth_db1;
@@ -11732,7 +11725,6 @@ impl Instance {
     }
 };
         var_i = assign2280_e1498;
-
 
         *var_guard15_slot = var_guard15;
         *var_i_slot = var_i;
@@ -12745,7 +12737,6 @@ impl Instance {
         var_tmf1_db5 = (var_t3_db5 - var_t2_db5);
         var_tmf1_db6 = (var_t3_db6 - var_t2_db6);
         var_tmf1_db7 = (var_t3_db7 - var_t2_db7);
-
 
         *var_guard16_slot = var_guard16;
         *var_i_slot = var_i;
@@ -14064,7 +14055,6 @@ impl Instance {
         var_t1_db5 = 0.0;
         var_t1_db6 = 0.0;
         var_t1_db7 = 0.0;
-
 
         *var_cnstpgd_slot = var_cnstpgd;
         *var_gdl0_slot = var_gdl0;
@@ -15504,7 +15494,6 @@ impl Instance {
         var_qi_nqs_db6 = assign2980_e2011_d_b6;
         var_qi_nqs_db7 = assign2980_e2011_d_b7;
 
-
         *var_clmmod_slot = var_clmmod;
         *var_cqyb0_slot = var_cqyb0;
         *var_cqyb0_db0_slot = var_cqyb0_db0;
@@ -16810,7 +16799,6 @@ impl Instance {
         var_ttemp_db5 = assign3220_e2122_d_b5;
         var_ttemp_db6 = assign3220_e2122_d_b6;
         var_ttemp_db7 = assign3220_e2122_d_b7;
-
 
         *var_guard22_slot = var_guard22;
         *var_mode_slot = var_mode;
@@ -18156,7 +18144,6 @@ impl Instance {
         var_t1__blk27_db5 = if var_mtmp_db5 == 0.0 && ((var_mtmp) as f64).is_finite() && ((var_mtmp) as f64).fract() == 0.0 { if var_mtmp == 0.0 { 0.0 } else { (var_mtmp * ((assign3420_e2313).powf(var_mtmp - 1.0) * (var_ttemp_db5 / var_uc_tnom))) } } else { (assign3420_e2315 * ((var_mtmp_db5 * (assign3420_e2313).ln()) + (var_mtmp * ((var_ttemp_db5 / var_uc_tnom) / assign3420_e2313)))) };
         var_t1__blk27_db6 = if var_mtmp_db6 == 0.0 && ((var_mtmp) as f64).is_finite() && ((var_mtmp) as f64).fract() == 0.0 { if var_mtmp == 0.0 { 0.0 } else { (var_mtmp * ((assign3420_e2313).powf(var_mtmp - 1.0) * (var_ttemp_db6 / var_uc_tnom))) } } else { (assign3420_e2315 * ((var_mtmp_db6 * (assign3420_e2313).ln()) + (var_mtmp * ((var_ttemp_db6 / var_uc_tnom) / assign3420_e2313)))) };
         var_t1__blk27_db7 = if var_mtmp_db7 == 0.0 && ((var_mtmp) as f64).is_finite() && ((var_mtmp) as f64).fract() == 0.0 { if var_mtmp == 0.0 { 0.0 } else { (var_mtmp * ((assign3420_e2313).powf(var_mtmp - 1.0) * (var_ttemp_db7 / var_uc_tnom))) } } else { (assign3420_e2315 * ((var_mtmp_db7 * (assign3420_e2313).ln()) + (var_mtmp * ((var_ttemp_db7 / var_uc_tnom) / assign3420_e2313)))) };
-
 
         *var_beta_slot = var_beta;
         *var_beta2_slot = var_beta2;
@@ -19778,7 +19765,6 @@ impl Instance {
         var_costi0_db6 = ((var_costi00_db6 * assign3610_e2475) + (var_costi00 * (var_beta_inv_db6 / (2.0 * assign3610_e2475))));
         var_costi0_db7 = ((var_costi00_db7 * assign3610_e2475) + (var_costi00 * (var_beta_inv_db7 / (2.0 * assign3610_e2475))));
 
-
         *var_cgs_mphbn0_slot = var_cgs_mphbn0;
         *var_cgs_mphbn0_db0_slot = var_cgs_mphbn0_db0;
         *var_cgs_mphbn0_db1_slot = var_cgs_mphbn0_db1;
@@ -20978,7 +20964,6 @@ impl Instance {
         var_t2_db6 = assign3780_e2620_d_b6;
         var_t2_db7 = assign3780_e2620_d_b7;
 
-
         *var_costi0_p2_slot = var_costi0_p2;
         *var_costi0_p2_db0_slot = var_costi0_p2_db0;
         *var_costi0_p2_db1_slot = var_costi0_p2_db1;
@@ -22126,7 +22111,6 @@ impl Instance {
         var_ldby_db5 = ((((-((1.034943e-10 * var_q_nsub_db5) / (var_q_nsub * var_q_nsub))) * var_beta_inv) + (assign3970_e2738 * var_beta_inv_db5)) / (2.0 * assign3970_e2741));
         var_ldby_db6 = ((((-((1.034943e-10 * var_q_nsub_db6) / (var_q_nsub * var_q_nsub))) * var_beta_inv) + (assign3970_e2738 * var_beta_inv_db6)) / (2.0 * assign3970_e2741));
         var_ldby_db7 = ((((-((1.034943e-10 * var_q_nsub_db7) / (var_q_nsub * var_q_nsub))) * var_beta_inv) + (assign3970_e2738 * var_beta_inv_db7)) / (2.0 * assign3970_e2741));
-
 
         *var_ldby_slot = var_ldby;
         *var_ldby_db0_slot = var_ldby_db0;

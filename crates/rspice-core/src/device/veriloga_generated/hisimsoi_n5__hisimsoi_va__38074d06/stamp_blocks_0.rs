@@ -495,7 +495,6 @@ impl Instance {
 };
         var_dwbt = assign2080_e1376;
 
-
         *var_dw_slot = var_dw;
         *var_dwbt_slot = var_dwbt;
         *var_lgate_slot = var_lgate;
@@ -982,7 +981,6 @@ impl Instance {
 
         s.b[655] = (!s.b[529]);
         s.store_scalar(655, if s.b[655] { 1.0 } else { 0.0 });
-
 
         *var_cth_slot = var_cth;
         *var_dwcv_slot = var_dwcv;

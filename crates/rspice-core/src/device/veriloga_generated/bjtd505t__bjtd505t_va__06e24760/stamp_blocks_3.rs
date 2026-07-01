@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1079,7 +1079,6 @@ impl Instance {
         var_guard60_rdn11 = 0.0;
         var_guard60_rdb0 = 0.0;
         var_guard60_rdb1 = 0.0;
-
 
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
@@ -2338,7 +2337,6 @@ impl Instance {
         var_expl_rdb0 = 0.0;
         var_expl_rdb1 = 0.0;
 
-
         *var_expl_slot = var_expl;
         *var_expl_db0_slot = var_expl_db0;
         *var_expl_db1_slot = var_expl_db1;
@@ -3386,7 +3384,6 @@ impl Instance {
         var_expl_rdn11 = 0.0;
         var_expl_rdb0 = 0.0;
         var_expl_rdb1 = 0.0;
-
 
         *var_expl_slot = var_expl;
         *var_expl_db0_slot = var_expl_db0;
@@ -4861,7 +4858,6 @@ impl Instance {
         var_guard74_rdn11 = 0.0;
         var_guard74_rdb0 = 0.0;
         var_guard74_rdb1 = 0.0;
-
 
         *var_de0eb_slot = var_de0eb;
         *var_de0eb_db0_slot = var_de0eb_db0;
@@ -6540,7 +6536,6 @@ impl Instance {
         var_ximex_rdb0 = 0.0;
         var_ximex_rdb1 = 0.0;
 
-
         *var_de0cb_slot = var_de0cb;
         *var_de0cb_db0_slot = var_de0cb_db0;
         *var_de0cb_db1_slot = var_de0cb_db1;
@@ -8072,7 +8067,6 @@ impl Instance {
         var_vdif_rdn11 = 0.0;
         var_vdif_rdb0 = 0.0;
         var_vdif_rdb1 = 0.0;
-
 
         *var_eps2_slot = var_eps2;
         *var_eps2_db0_slot = var_eps2_db0;
@@ -9688,7 +9682,6 @@ impl Instance {
         var_rbvtemp_rdn11 = 0.0;
         var_rbvtemp_rdb0 = 0.0;
         var_rbvtemp_rdb1 = 0.0;
-
 
         *var_eps2_slot = var_eps2;
         *var_eps2_db0_slot = var_eps2_db0;
@@ -11316,7 +11309,6 @@ impl Instance {
         var_expl_rdn11 = 0.0;
         var_expl_rdb0 = 0.0;
         var_expl_rdb1 = 0.0;
-
 
         *var_expin_slot = var_expin;
         *var_expin_db0_slot = var_expin_db0;
@@ -13018,7 +13010,6 @@ impl Instance {
         var_eav_rdb0 = 0.0;
         var_eav_rdb1 = 0.0;
 
-
         *var_dedx0_slot = var_dedx0;
         *var_dedx0_db0_slot = var_dedx0_db0;
         *var_dedx0_db1_slot = var_dedx0_db1;
@@ -14694,7 +14685,6 @@ impl Instance {
         var_gem_rdb0 = 0.0;
         var_gem_rdb1 = 0.0;
 
-
         *var_e0_slot = var_e0;
         *var_e0_db0_slot = var_e0_db0;
         *var_e0_db1_slot = var_e0_db1;
@@ -16281,7 +16271,6 @@ impl Instance {
         var_guard99_rdn11 = 0.0;
         var_guard99_rdb0 = 0.0;
         var_guard99_rdb1 = 0.0;
-
 
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
@@ -17920,7 +17909,6 @@ impl Instance {
         var_qte_rdn11 = 0.0;
         var_qte_rdb0 = 0.0;
         var_qte_rdb1 = 0.0;
-
 
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
@@ -19596,7 +19584,6 @@ impl Instance {
         var_vjcex_rdn11 = 0.0;
         var_vjcex_rdb0 = 0.0;
         var_vjcex_rdb1 = 0.0;
-
 
         *var_a_vdcctc_slot = var_a_vdcctc;
         *var_a_vdcctc_db0_slot = var_a_vdcctc_db0;
@@ -21358,7 +21345,6 @@ impl Instance {
         var_expl_rdn11 = 0.0;
         var_expl_rdb0 = 0.0;
         var_expl_rdb1 = 0.0;
-
 
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
@@ -23126,7 +23112,6 @@ impl Instance {
         var_qex_rdb0 = 0.0;
         var_qex_rdb1 = 0.0;
 
-
         *var_evb1c4vdcex_slot = var_evb1c4vdcex;
         *var_evb1c4vdcex_db0_slot = var_evb1c4vdcex_db0;
         *var_evb1c4vdcex_db1_slot = var_evb1c4vdcex_db1;
@@ -24727,7 +24712,6 @@ impl Instance {
         var_xqex_rdn11 = 0.0;
         var_xqex_rdb0 = 0.0;
         var_xqex_rdb1 = 0.0;
-
 
         *var_evbc3vdcex_slot = var_evbc3vdcex;
         *var_evbc3vdcex_db0_slot = var_evbc3vdcex_db0;

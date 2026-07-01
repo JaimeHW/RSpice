@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1479,7 +1479,6 @@ impl Instance {
         var_itat__blk1552_db4 = 0.0;
         var_itat__blk1552_db5 = 0.0;
         var_itat__blk1552_db6 = 0.0;
-
 
         *var_asrh__blk1551_slot = var_asrh__blk1551;
         *var_asrh__blk1551_db0_slot = var_asrh__blk1551_db0;
@@ -3432,7 +3431,6 @@ impl Instance {
         var_ijun_d_db5 = 0.0;
         var_ijun_d_db6 = 0.0;
 
-
         *var_btat__blk1553_slot = var_btat__blk1553;
         *var_btat__blk1553_db0_slot = var_btat__blk1553_db0;
         *var_btat__blk1553_db1_slot = var_btat__blk1553_db1;
@@ -5162,7 +5160,6 @@ impl Instance {
         let assign55350_e69840: f64 = if var_m0flag_s > 0.0 { 1.0 } else { 0.0 };
         var_guard1574 = assign55350_e69840;
 
-
         *var_guard1572_slot = var_guard1572;
         *var_guard1573_slot = var_guard1573;
         *var_guard1574_slot = var_guard1574;
@@ -6471,7 +6468,6 @@ impl Instance {
         var_tm0_db5 = assign55500_e70065_d_b5;
         var_tm0_db6 = assign55500_e70065_d_b6;
 
-
         *var_guard1575_slot = var_guard1575;
         *var_ijun_s_slot = var_ijun_s;
         *var_ijun_s_db0_slot = var_ijun_s_db0;
@@ -7672,7 +7668,6 @@ impl Instance {
         var_tmpv_db5 = assign55710_e70298_d_b5;
         var_tmpv_db6 = assign55710_e70298_d_b6;
 
-
         *var_guard1578_slot = var_guard1578;
         *var_guard1579_slot = var_guard1579;
         *var_guard1580_slot = var_guard1580;
@@ -8819,7 +8814,6 @@ impl Instance {
         var_tmpv_db4 = assign55940_e70530_d_b4;
         var_tmpv_db5 = assign55940_e70530_d_b5;
         var_tmpv_db6 = assign55940_e70530_d_b6;
-
 
         *var_guard1582_slot = var_guard1582;
         *var_guard1583_slot = var_guard1583;
@@ -10055,7 +10049,6 @@ impl Instance {
 };
         var_h2__blk1529 = assign56150_e70821;
 
-
         *var_dfbbtgat_slot = var_dfbbtgat;
         *var_dfbbtgat_db0_slot = var_dfbbtgat_db0;
         *var_dfbbtgat_db1_slot = var_dfbbtgat_db1;
@@ -11123,7 +11116,6 @@ impl Instance {
 
         let assign56330_e71123: f64 = if var_vjun_s > 0.0 { 1.0 } else { 0.0 };
         var_guard1596 = assign56330_e71123;
-
 
         *var_guard1593_slot = var_guard1593;
         *var_guard1594_slot = var_guard1594;
@@ -12414,7 +12406,6 @@ impl Instance {
 
         let assign56520_e71436: f64 = if p.p824 == 0.5 { 1.0 } else { 0.0 };
         var_guard1600 = assign56520_e71436;
-
 
         *var_dwsrh__blk1548_slot = var_dwsrh__blk1548;
         *var_dwsrh__blk1548_db0_slot = var_dwsrh__blk1548_db0;
@@ -13816,7 +13807,6 @@ impl Instance {
         var_ktat__blk1561_db5 = assign56700_e71732_d_b5;
         var_ktat__blk1561_db6 = assign56700_e71732_d_b6;
 
-
         *var_asrh__blk1551_slot = var_asrh__blk1551;
         *var_asrh__blk1551_db0_slot = var_asrh__blk1551_db0;
         *var_asrh__blk1551_db1_slot = var_asrh__blk1551_db1;
@@ -15192,7 +15182,6 @@ impl Instance {
         var_itat__blk1552_db5 = assign56890_e72108_d_b5;
         var_itat__blk1552_db6 = assign56890_e72108_d_b6;
 
-
         *var_erfcpos__blk1527_slot = var_erfcpos__blk1527;
         *var_erfcpos__blk1527_db0_slot = var_erfcpos__blk1527_db0;
         *var_erfcpos__blk1527_db1_slot = var_erfcpos__blk1527_db1;
@@ -16248,7 +16237,6 @@ impl Instance {
 
         let assign57110_e72488: f64 = if var_one_minus_pbot == 0.5 { 1.0 } else { 0.0 };
         var_guard1614 = assign57110_e72488;
-
 
         *var_fbreakdown__blk1569_slot = var_fbreakdown__blk1569;
         *var_fbreakdown__blk1569_db0_slot = var_fbreakdown__blk1569_db0;
@@ -17481,7 +17469,6 @@ impl Instance {
         var_asrh__blk1551_db4 = assign57310_e72774_d_b4;
         var_asrh__blk1551_db5 = assign57310_e72774_d_b5;
         var_asrh__blk1551_db6 = assign57310_e72774_d_b6;
-
 
         *var_asrh__blk1551_slot = var_asrh__blk1551;
         *var_asrh__blk1551_db0_slot = var_asrh__blk1551_db0;
@@ -18929,7 +18916,6 @@ impl Instance {
         let assign57500_e73079: f64 = if var_xerfc__blk1564 > 0.0 { 1.0 } else { 0.0 };
         var_guard1621 = assign57500_e73079;
 
-
         *var_btat__blk1553_slot = var_btat__blk1553;
         *var_btat__blk1553_db0_slot = var_btat__blk1553_db0;
         *var_btat__blk1553_db1_slot = var_btat__blk1553_db1;
@@ -20232,7 +20218,6 @@ impl Instance {
         var_fmaxr__blk1568_db5 = assign57700_e73455_d_b5;
         var_fmaxr__blk1568_db6 = assign57700_e73455_d_b6;
 
-
         *var_erfcpos__blk1527_slot = var_erfcpos__blk1527;
         *var_erfcpos__blk1527_db0_slot = var_erfcpos__blk1527_db0;
         *var_erfcpos__blk1527_db1_slot = var_erfcpos__blk1527_db1;
@@ -21308,7 +21293,6 @@ impl Instance {
         var_ijungat_s_db4 = assign57910_e73824_d_b4;
         var_ijungat_s_db5 = assign57910_e73824_d_b5;
         var_ijungat_s_db6 = assign57910_e73824_d_b6;
-
 
         *var_fbreakdown__blk1569_slot = var_fbreakdown__blk1569;
         *var_fbreakdown__blk1569_db0_slot = var_fbreakdown__blk1569_db0;

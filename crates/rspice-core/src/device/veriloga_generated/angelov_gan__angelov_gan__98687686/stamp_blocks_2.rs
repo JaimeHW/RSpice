@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1557,7 +1557,6 @@ impl Instance {
         var_ids0_rdb16 = 0.0;
         var_ids0_rdb17 = 0.0;
         var_ids0_rdb18 = 0.0;
-
 
         *var_ids0_slot = var_ids0;
         *var_ids0_db0_slot = var_ids0_db0;
@@ -3465,7 +3464,6 @@ impl Instance {
         var_ids0_rdb17 = 0.0;
         var_ids0_rdb18 = 0.0;
 
-
         *var_alpha1_slot = var_alpha1;
         *var_alpha1_db0_slot = var_alpha1_db0;
         *var_alpha1_db1_slot = var_alpha1_db1;
@@ -5036,7 +5034,6 @@ impl Instance {
         var_rc1_rdb16 = 0.0;
         var_rc1_rdb17 = 0.0;
         var_rc1_rdb18 = 0.0;
-
 
         *var_guard11_slot = var_guard11;
         *var_guard11_db0_slot = var_guard11_db0;
@@ -6636,7 +6633,6 @@ impl Instance {
         var_guard12_rdb16 = 0.0;
         var_guard12_rdb17 = 0.0;
         var_guard12_rdb18 = 0.0;
-
 
         *var_guard12_slot = var_guard12;
         *var_guard12_db0_slot = var_guard12_db0;
@@ -8414,7 +8410,6 @@ impl Instance {
         var_tanh_gdbd_rdb17 = 0.0;
         var_tanh_gdbd_rdb18 = 0.0;
 
-
         *var_t0_slot = var_t0;
         *var_t0_db0_slot = var_t0_db0;
         *var_t0_db1_slot = var_t0_db1;
@@ -10144,7 +10139,6 @@ impl Instance {
         var_tanh_gs_rdb17 = 0.0;
         var_tanh_gs_rdb18 = 0.0;
 
-
         *var_guard13_slot = var_guard13;
         *var_guard13_db0_slot = var_guard13_db0;
         *var_guard13_db1_slot = var_guard13_db1;
@@ -11721,7 +11715,6 @@ impl Instance {
         var_tanh_gdbd_rdb16 = 0.0;
         var_tanh_gdbd_rdb17 = 0.0;
         var_tanh_gdbd_rdb18 = 0.0;
-
 
         *var_tanh_gd_slot = var_tanh_gd;
         *var_tanh_gd_db0_slot = var_tanh_gd_db0;
@@ -13906,7 +13899,6 @@ impl Instance {
         var_tanh1_rdb17 = 0.0;
         var_tanh1_rdb18 = 0.0;
 
-
         *var_igd_slot = var_igd;
         *var_igd1_slot = var_igd1;
         *var_igd1_db0_slot = var_igd1_db0;
@@ -15923,7 +15915,6 @@ impl Instance {
         var_tanh4_rdb17 = 0.0;
         var_tanh4_rdb18 = 0.0;
 
-
         *var_psi_2_slot = var_psi_2;
         *var_psi_2_db0_slot = var_psi_2_db0;
         *var_psi_2_db1_slot = var_psi_2_db1;
@@ -17820,7 +17811,6 @@ impl Instance {
         var_cgs_rdb17 = 0.0;
         var_cgs_rdb18 = 0.0;
 
-
         *var_cgs_slot = var_cgs;
         *var_cgs_db0_slot = var_cgs_db0;
         *var_cgs_db1_slot = var_cgs_db1;
@@ -19636,7 +19626,6 @@ impl Instance {
         var_cosh0_rdb16 = 0.0;
         var_cosh0_rdb17 = 0.0;
         var_cosh0_rdb18 = 0.0;
-
 
         *var_cgd_slot = var_cgd;
         *var_cgd_db0_slot = var_cgd_db0;
@@ -21458,7 +21447,6 @@ impl Instance {
         var_qgs_rdb17 = 0.0;
         var_qgs_rdb18 = 0.0;
 
-
         *var_cosh1_slot = var_cosh1;
         *var_cosh1_db0_slot = var_cosh1_db0;
         *var_cosh1_db1_slot = var_cosh1_db1;
@@ -23193,7 +23181,6 @@ impl Instance {
         var_qgd0_rdb16 = 0.0;
         var_qgd0_rdb17 = 0.0;
         var_qgd0_rdb18 = 0.0;
-
 
         *var_cosh0_slot = var_cosh0;
         *var_cosh0_db0_slot = var_cosh0_db0;
@@ -25092,7 +25079,6 @@ impl Instance {
         var_mjc_rdb16 = 0.0;
         var_mjc_rdb17 = 0.0;
         var_mjc_rdb18 = 0.0;
-
 
         *var_cgd_slot = var_cgd;
         *var_cgd_db0_slot = var_cgd_db0;
@@ -27009,7 +26995,6 @@ impl Instance {
         var_tanh4_rdb16 = 0.0;
         var_tanh4_rdb17 = 0.0;
         var_tanh4_rdb18 = 0.0;
-
 
         *var_cgsdepl_slot = var_cgsdepl;
         *var_cgsdepl_db0_slot = var_cgsdepl_db0;
@@ -29026,7 +29011,6 @@ impl Instance {
         var_cosh1_rdb16 = 0.0;
         var_cosh1_rdb17 = 0.0;
         var_cosh1_rdb18 = 0.0;
-
 
         *var_cgd_slot = var_cgd;
         *var_cgd_db0_slot = var_cgd_db0;

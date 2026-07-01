@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1295,7 +1295,6 @@ impl Instance {
         var_delta_t_rdb16 = 0.0;
         var_delta_t_rdb17 = 0.0;
         var_delta_t_rdb18 = 0.0;
-
 
         *var_delta_t_slot = var_delta_t;
         *var_delta_t_db0_slot = var_delta_t_db0;
@@ -2951,7 +2950,6 @@ impl Instance {
         var_cgd0_t_rdb16 = 0.0;
         var_cgd0_t_rdb17 = 0.0;
         var_cgd0_t_rdb18 = 0.0;
-
 
         *var_cgd0_t_slot = var_cgd0_t;
         *var_cgd0_t_db0_slot = var_cgd0_t_db0;
@@ -4613,7 +4611,6 @@ impl Instance {
         var_vjg_t_rdb17 = 0.0;
         var_vjg_t_rdb18 = 0.0;
 
-
         *var_p10_t_slot = var_p10_t;
         *var_p10_t_db0_slot = var_p10_t_db0;
         *var_p10_t_db1_slot = var_p10_t_db1;
@@ -6107,7 +6104,6 @@ impl Instance {
         var_ipk0_t_rdb16 = 0.0;
         var_ipk0_t_rdb17 = 0.0;
         var_ipk0_t_rdb18 = 0.0;
-
 
         *var_cdel_t_slot = var_cdel_t;
         *var_cdel_t_db0_slot = var_cdel_t_db0;
@@ -7637,7 +7633,6 @@ impl Instance {
         var_cdel_t_rdb16 = 0.0;
         var_cdel_t_rdb17 = 0.0;
         var_cdel_t_rdb18 = 0.0;
-
 
         *var_cdel_t_slot = var_cdel_t;
         *var_cdel_t_db0_slot = var_cdel_t_db0;
@@ -9482,7 +9477,6 @@ impl Instance {
         var_guard5_rdb16 = 0.0;
         var_guard5_rdb17 = 0.0;
         var_guard5_rdb18 = 0.0;
-
 
         *var_guard5_slot = var_guard5;
         *var_guard5_db0_slot = var_guard5_db0;
@@ -11396,7 +11390,6 @@ impl Instance {
         var_p1_t_rdb16 = 0.0;
         var_p1_t_rdb17 = 0.0;
         var_p1_t_rdb18 = 0.0;
-
 
         *var_p1_t_slot = var_p1_t;
         *var_p1_t_db0_slot = var_p1_t_db0;
@@ -13543,7 +13536,6 @@ impl Instance {
         var_psi_rdb17 = 0.0;
         var_psi_rdb18 = 0.0;
 
-
         *var_p3_t_slot = var_p3_t;
         *var_p3_t_db0_slot = var_p3_t_db0;
         *var_p3_t_db1_slot = var_p3_t_db1;
@@ -15520,7 +15512,6 @@ impl Instance {
         var_guard7_rdb16 = 0.0;
         var_guard7_rdb17 = 0.0;
         var_guard7_rdb18 = 0.0;
-
 
         *var_alpha_slot = var_alpha;
         *var_alpha_db0_slot = var_alpha_db0;
@@ -17794,7 +17785,6 @@ impl Instance {
         var_t1_rdb17 = 0.0;
         var_t1_rdb18 = 0.0;
 
-
         *var_guard10_slot = var_guard10;
         *var_guard10_db0_slot = var_guard10_db0;
         *var_guard10_db1_slot = var_guard10_db1;
@@ -19687,7 +19677,6 @@ impl Instance {
         var_lambda_p_rdb16 = 0.0;
         var_lambda_p_rdb17 = 0.0;
         var_lambda_p_rdb18 = 0.0;
-
 
         *var_alpha_n_slot = var_alpha_n;
         *var_alpha_n_db0_slot = var_alpha_n_db0;
@@ -21671,7 +21660,6 @@ impl Instance {
         var_ids0_rdb17 = 0.0;
         var_ids0_rdb18 = 0.0;
 
-
         *var_ids0_slot = var_ids0;
         *var_ids0_db0_slot = var_ids0_db0;
         *var_ids0_db1_slot = var_ids0_db1;
@@ -23453,7 +23441,6 @@ impl Instance {
         var_alpha1_rdb16 = 0.0;
         var_alpha1_rdb17 = 0.0;
         var_alpha1_rdb18 = 0.0;
-
 
         *var_alpha1_slot = var_alpha1;
         *var_alpha1_db0_slot = var_alpha1_db0;
@@ -25432,7 +25419,6 @@ impl Instance {
         var_t1_rdb17 = 0.0;
         var_t1_rdb18 = 0.0;
 
-
         *var_ids0_slot = var_ids0;
         *var_ids0_db0_slot = var_ids0_db0;
         *var_ids0_db1_slot = var_ids0_db1;
@@ -27298,7 +27284,6 @@ impl Instance {
         var_tanh_psi1_rdb17 = 0.0;
         var_tanh_psi1_rdb18 = 0.0;
 
-
         *var_psi_slot = var_psi;
         *var_psi_db0_slot = var_psi_db0;
         *var_psi_db1_slot = var_psi_db1;
@@ -29040,7 +29025,6 @@ impl Instance {
         var_tanh_alpha1_n_vds_rdb16 = 0.0;
         var_tanh_alpha1_n_vds_rdb17 = 0.0;
         var_tanh_alpha1_n_vds_rdb18 = 0.0;
-
 
         *var_alpha1_slot = var_alpha1;
         *var_alpha1_db0_slot = var_alpha1_db0;

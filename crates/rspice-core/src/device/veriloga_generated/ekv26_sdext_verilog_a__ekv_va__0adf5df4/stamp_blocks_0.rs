@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -801,7 +801,6 @@ impl Instance {
         var_phi_vd_dn1 = (var_phi_t_dn1 + var_vd_dn1);
         var_phi_vd_dn2 = (var_phi_t_dn2 + var_vd_dn2);
         var_phi_vd_dn3 = (var_phi_t_dn3 + var_vd_dn3);
-
 
         *var_awl_slot = var_awl;
         *var_deltat_slot = var_deltat;
@@ -1798,7 +1797,6 @@ impl Instance {
         var_zk_dn1 = assign1250_e998_d_n1;
         var_zk_dn2 = assign1250_e998_d_n2;
         var_zk_dn3 = assign1250_e998_d_n3;
-
 
         *var_big_sqrt_vp_slot = var_big_sqrt_vp;
         *var_big_sqrt_vp0_slot = var_big_sqrt_vp0;
@@ -2807,7 +2805,6 @@ impl Instance {
         var_t0_gamma_1_dn1 = assign1720_e1379_d_n1;
         var_t0_gamma_1_dn2 = assign1720_e1379_d_n2;
         var_t0_gamma_1_dn3 = assign1720_e1379_d_n3;
-
 
         *var_beta_slot = var_beta;
         *var_beta_dn0_slot = var_beta_dn0;
@@ -4040,7 +4037,6 @@ impl Instance {
         var_tmp1_dn2 = assign2440_e1902_d_n2;
         var_tmp1_dn3 = assign2440_e1902_d_n3;
 
-
         *var_beta_slot = var_beta;
         *var_beta_dn0_slot = var_beta_dn0;
         *var_beta_dn1_slot = var_beta_dn1;
@@ -5184,7 +5180,6 @@ impl Instance {
         var_csswg_d_dn2 = assign3480_e2791_d_n2;
         var_csswg_d_dn3 = assign3480_e2791_d_n3;
 
-
         *var_ad_i_slot = var_ad_i;
         *var_as_i_slot = var_as_i;
         *var_cj_t_slot = var_cj_t;
@@ -5630,7 +5625,6 @@ impl Instance {
         var_qjs_dn1 = ((((var_csb_s_dn1 + var_cssw_s_dn1) + var_csswg_s_dn1) * var_v_si_b) + (assign3600_e2947 * var_v_si_b_dn1));
         var_qjs_dn2 = ((((var_csb_s_dn2 + var_cssw_s_dn2) + var_csswg_s_dn2) * var_v_si_b) + (assign3600_e2947 * var_v_si_b_dn2));
         var_qjs_dn3 = ((((var_csb_s_dn3 + var_cssw_s_dn3) + var_csswg_s_dn3) * var_v_si_b) + (assign3600_e2947 * var_v_si_b_dn3));
-
 
         *var_csb_d_slot = var_csb_d;
         *var_csb_d_dn0_slot = var_csb_d_dn0;
@@ -6867,7 +6861,6 @@ impl Instance {
         var_phi_t_rdn1 = 0.0;
         var_phi_t_rdn2 = 0.0;
         var_phi_t_rdn3 = 0.0;
-
 
         *var_deltat_slot = var_deltat;
         *var_deltat_dn0_slot = var_deltat_dn0;
@@ -8293,7 +8286,6 @@ impl Instance {
         var_phi_vs_rdn2 = 0.0;
         var_phi_vs_rdn3 = 0.0;
 
-
         *var_awl_slot = var_awl;
         *var_awl_dn0_slot = var_awl_dn0;
         *var_awl_dn1_slot = var_awl_dn1;
@@ -9682,7 +9674,6 @@ impl Instance {
         var_vdss_sqrt_rdn2 = 0.0;
         var_vdss_sqrt_rdn3 = 0.0;
 
-
         *var_big_sqrt_vp_slot = var_big_sqrt_vp;
         *var_big_sqrt_vp0_slot = var_big_sqrt_vp0;
         *var_big_sqrt_vp0_dn0_slot = var_big_sqrt_vp0_dn0;
@@ -11063,7 +11054,6 @@ impl Instance {
         var_guard13_rdn2 = 0.0;
         var_guard13_rdn3 = 0.0;
 
-
         *var_deltal_slot = var_deltal;
         *var_deltal_dn0_slot = var_deltal_dn0;
         *var_deltal_dn1_slot = var_deltal_dn1;
@@ -12394,7 +12384,6 @@ impl Instance {
         var_e0_q_1_rdn1 = 0.0;
         var_e0_q_1_rdn2 = 0.0;
         var_e0_q_1_rdn3 = 0.0;
-
 
         *var_beta_slot = var_beta;
         *var_beta_dn0_slot = var_beta_dn0;
@@ -13861,7 +13850,6 @@ impl Instance {
         var_dirprime_dvd_rdn2 = 0.0;
         var_dirprime_dvd_rdn3 = 0.0;
 
-
         *var_beta_slot = var_beta;
         *var_beta_dn0_slot = var_beta_dn0;
         *var_beta_dn1_slot = var_beta_dn1;
@@ -15231,7 +15219,6 @@ impl Instance {
         var_dn_dvs_rdn1 = 0.0;
         var_dn_dvs_rdn2 = 0.0;
         var_dn_dvs_rdn3 = 0.0;
-
 
         *var_dbeta_dvd_slot = var_dbeta_dvd;
         *var_dbeta_dvd_dn0_slot = var_dbeta_dvd_dn0;
@@ -16617,7 +16604,6 @@ impl Instance {
         var_pb_t_rdn2 = 0.0;
         var_pb_t_rdn3 = 0.0;
 
-
         *var_ad_i_slot = var_ad_i;
         *var_ad_i_dn0_slot = var_ad_i_dn0;
         *var_ad_i_dn1_slot = var_ad_i_dn1;
@@ -17711,7 +17697,6 @@ impl Instance {
         var_qjs_rdn1 = 0.0;
         var_qjs_rdn2 = 0.0;
         var_qjs_rdn3 = 0.0;
-
 
         *var_cj_t_slot = var_cj_t;
         *var_cj_t_dn0_slot = var_cj_t_dn0;

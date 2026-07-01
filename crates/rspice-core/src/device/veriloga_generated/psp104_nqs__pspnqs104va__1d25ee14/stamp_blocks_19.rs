@@ -3756,7 +3756,6 @@ impl Instance {
             s.store_mul(2028, 1864, 1877);
         }
 
-
         *var_qfgd_slot = var_qfgd;
         *var_qfgd_db0_slot = var_qfgd_db0;
         *var_qfgd_db1_slot = var_qfgd_db1;

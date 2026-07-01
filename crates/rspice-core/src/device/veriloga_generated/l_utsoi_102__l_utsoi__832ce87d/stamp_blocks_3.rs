@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -891,7 +891,6 @@ impl Instance {
         var_q_ln_term_db1 = assign13900_e13312_d_b1;
         var_q_ln_term_db2 = assign13900_e13312_d_b2;
         var_q_ln_term_db3 = assign13900_e13312_d_b3;
-
 
         *var_guard575_slot = var_guard575;
         *var_guard576_slot = var_guard576;
@@ -2132,7 +2131,6 @@ impl Instance {
         var_q_d1_q2_db1 = ((2.0 * var_q_d1_lnexpnum_db1) - var_q_d1_ln_db1);
         var_q_d1_q2_db2 = ((2.0 * var_q_d1_lnexpnum_db2) - var_q_d1_ln_db2);
         var_q_d1_q2_db3 = ((2.0 * var_q_d1_lnexpnum_db3) - var_q_d1_ln_db3);
-
 
         *var_guard577_slot = var_guard577;
         *var_guard578_slot = var_guard578;
@@ -3581,7 +3579,6 @@ impl Instance {
         var_q_d1_qcoth_db2 = assign14370_e13760_d_b2;
         var_q_d1_qcoth_db3 = assign14370_e13760_d_b3;
 
-
         *var_guard579_slot = var_guard579;
         *var_guard580_slot = var_guard580;
         *var_guard581_slot = var_guard581;
@@ -4723,7 +4720,6 @@ impl Instance {
         var_q_temp2_db2 = assign14560_e14110_d_b2;
         var_q_temp2_db3 = assign14560_e14110_d_b3;
 
-
         *var_guard583_slot = var_guard583;
         *var_q_d1_ln_slot = var_q_d1_ln;
         *var_q_d1_ln_db0_slot = var_q_d1_ln_db0;
@@ -5835,7 +5831,6 @@ impl Instance {
         var_q_d1_expnum_db1 = assign14770_e14404_d_b1;
         var_q_d1_expnum_db2 = assign14770_e14404_d_b2;
         var_q_d1_expnum_db3 = assign14770_e14404_d_b3;
-
 
         *var_guard584_slot = var_guard584;
         *var_guard585_slot = var_guard585;
@@ -7186,7 +7181,6 @@ impl Instance {
         var_q_temp_db2 = assign14970_e14652_d_b2;
         var_q_temp_db3 = assign14970_e14652_d_b3;
 
-
         *var_guard587_slot = var_guard587;
         *var_q_d1_lnexpnum_slot = var_q_d1_lnexpnum;
         *var_q_d1_lnexpnum_db0_slot = var_q_d1_lnexpnum_db0;
@@ -8398,7 +8392,6 @@ impl Instance {
         var_k2q2s_db2 = assign15220_e14910_d_b2;
         var_k2q2s_db3 = assign15220_e14910_d_b3;
 
-
         *var_aexp1s_slot = var_aexp1s;
         *var_aexp1s_db0_slot = var_aexp1s_db0;
         *var_aexp1s_db1_slot = var_aexp1s_db1;
@@ -9440,7 +9433,6 @@ impl Instance {
         var_k2q2s_db1 = assign15440_e15286_d_b1;
         var_k2q2s_db2 = assign15440_e15286_d_b2;
         var_k2q2s_db3 = assign15440_e15286_d_b3;
-
 
         *var_guard594_slot = var_guard594;
         *var_guard595_slot = var_guard595;
@@ -10587,7 +10579,6 @@ impl Instance {
         let assign15690_e15514: f64 = (var_k1q1s / 2.0);
         let assign15690_e15516: f64 = if assign15690_e15514 < 80.0 { 1.0 } else { 0.0 };
         var_guard602 = assign15690_e15516;
-
 
         *var_a1s_slot = var_a1s;
         *var_a1s_db0_slot = var_a1s_db0;
@@ -11917,7 +11908,6 @@ impl Instance {
         var_temp3_db1 = assign15950_e15728_d_b1;
         var_temp3_db2 = assign15950_e15728_d_b2;
         var_temp3_db3 = assign15950_e15728_d_b3;
-
 
         *var_c1s_slot = var_c1s;
         *var_c1s_db0_slot = var_c1s_db0;
@@ -13425,7 +13415,6 @@ impl Instance {
         var_temp_db1 = assign16160_e15992_d_b1;
         var_temp_db2 = assign16160_e15992_d_b2;
         var_temp_db3 = assign16160_e15992_d_b3;
-
 
         *var_deltaxinf_slot = var_deltaxinf;
         *var_deltaxinf_db0_slot = var_deltaxinf_db0;
@@ -14944,7 +14933,6 @@ impl Instance {
         var_deltaxi_db2 = assign16380_e16234_d_b2;
         var_deltaxi_db3 = assign16380_e16234_d_b3;
 
-
         *var_deltaxi_slot = var_deltaxi;
         *var_deltaxi_db0_slot = var_deltaxi_db0;
         *var_deltaxi_db1_slot = var_deltaxi_db1;
@@ -16300,7 +16288,6 @@ impl Instance {
         var_qidsats_db2 = assign16570_e16463_d_b2;
         var_qidsats_db3 = assign16570_e16463_d_b3;
 
-
         *var_deltaxi_slot = var_deltaxi;
         *var_deltaxi_db0_slot = var_deltaxi_db0;
         *var_deltaxi_db1_slot = var_deltaxi_db1;
@@ -17517,7 +17504,6 @@ impl Instance {
         var_q_temp1_db1 = (-(var_k1_db1 / (assign16820_e16639 * assign16820_e16639)));
         var_q_temp1_db2 = (-(var_k1_db2 / (assign16820_e16639 * assign16820_e16639)));
         var_q_temp1_db3 = (-(var_k1_db3 / (assign16820_e16639 * assign16820_e16639)));
-
 
         *var_deltaxsat_slot = var_deltaxsat;
         *var_deltaxsat_db0_slot = var_deltaxsat_db0;
@@ -18751,7 +18737,6 @@ impl Instance {
         let assign17090_e16837: f64 = if assign17090_e16835 < 80.0 { 1.0 } else { 0.0 };
         var_guard619 = assign17090_e16837;
 
-
         *var_guard615_slot = var_guard615;
         *var_guard616_slot = var_guard616;
         *var_guard617_slot = var_guard617;
@@ -19929,7 +19914,6 @@ impl Instance {
         var_q_d1_qcoth_db1 = assign17300_e17060_d_b1;
         var_q_d1_qcoth_db2 = assign17300_e17060_d_b2;
         var_q_d1_qcoth_db3 = assign17300_e17060_d_b3;
-
 
         *var_guard620_slot = var_guard620;
         *var_guard621_slot = var_guard621;

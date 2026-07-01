@@ -1287,7 +1287,6 @@ impl Instance {
         let assign37750_e51775: f64 = if ((p.p37 != 0.0) || ((p.p25 == 1.0) && (p.p26 == 2.0))) { 1.0 } else { 0.0 };
         var_guard1228 = assign37750_e51775;
 
-
         *var_cthe_slot = var_cthe;
         *var_gth_slot = var_gth;
         *var_guard1216_slot = var_guard1216;

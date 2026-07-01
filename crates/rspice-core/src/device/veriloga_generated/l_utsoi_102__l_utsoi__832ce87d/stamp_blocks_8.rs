@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -913,7 +913,6 @@ impl Instance {
         var_q_d2_ln__blk836_db1 = assign31900_e35014_d_b1;
         var_q_d2_ln__blk836_db2 = assign31900_e35014_d_b2;
         var_q_d2_ln__blk836_db3 = assign31900_e35014_d_b3;
-
 
         *var_guard1116_slot = var_guard1116;
         *var_guard1117_slot = var_guard1117;
@@ -2061,7 +2060,6 @@ impl Instance {
         var_q_d1_expnum__blk838_db1 = assign32110_e35328_d_b1;
         var_q_d1_expnum__blk838_db2 = assign32110_e35328_d_b2;
         var_q_d1_expnum__blk838_db3 = assign32110_e35328_d_b3;
-
 
         *var_guard1118_slot = var_guard1118;
         *var_guard1119_slot = var_guard1119;
@@ -3427,7 +3425,6 @@ impl Instance {
         var_q_d2_qi__blk848_db2 = assign32320_e35542_d_b2;
         var_q_d2_qi__blk848_db3 = assign32320_e35542_d_b3;
 
-
         *var_guard1121_slot = var_guard1121;
         *var_q_d1_expnum__blk838_slot = var_q_d1_expnum__blk838;
         *var_q_d1_expnum__blk838_db0_slot = var_q_d1_expnum__blk838_db0;
@@ -4775,7 +4772,6 @@ impl Instance {
         var_q_d2_qcoth__blk832_db2 = assign32520_e35781_d_b2;
         var_q_d2_qcoth__blk832_db3 = assign32520_e35781_d_b3;
 
-
         *var_guard1122_slot = var_guard1122;
         *var_guard1123_slot = var_guard1123;
         *var_q1s__blk937_slot = var_q1s__blk937;
@@ -5864,7 +5860,6 @@ impl Instance {
         var_q_d2_qcoth__blk832_db1 = assign32710_e36091_d_b1;
         var_q_d2_qcoth__blk832_db2 = assign32710_e36091_d_b2;
         var_q_d2_qcoth__blk832_db3 = assign32710_e36091_d_b3;
-
 
         *var_guard1124_slot = var_guard1124;
         *var_q_d1_ln__blk835_slot = var_q_d1_ln__blk835;
@@ -6957,7 +6952,6 @@ impl Instance {
 
         let assign32930_e36361: f64 = if var_q_expnum__blk837 > 0.0 { 1.0 } else { 0.0 };
         var_guard1128 = assign32930_e36361;
-
 
         *var_guard1125_slot = var_guard1125;
         *var_guard1126_slot = var_guard1126;
@@ -8239,7 +8233,6 @@ impl Instance {
         var_q_eps2__blk852_db2 = assign33120_e36556_d_b2;
         var_q_eps2__blk852_db3 = assign33120_e36556_d_b3;
 
-
         *var_q_d1_lnexpnum__blk841_slot = var_q_d1_lnexpnum__blk841;
         *var_q_d1_lnexpnum__blk841_db0_slot = var_q_d1_lnexpnum__blk841_db0;
         *var_q_d1_lnexpnum__blk841_db1_slot = var_q_d1_lnexpnum__blk841_db1;
@@ -9489,7 +9482,6 @@ impl Instance {
         var_q_invexpq__blk831_db2 = assign33350_e36868_d_b2;
         var_q_invexpq__blk831_db3 = assign33350_e36868_d_b3;
 
-
         *var_guard1129_slot = var_guard1129;
         *var_guard1130_slot = var_guard1130;
         *var_guard1131_slot = var_guard1131;
@@ -10615,7 +10607,6 @@ impl Instance {
         let assign33550_e37276: f64 = (-0.005);
         let assign33550_e37277: f64 = if var_q_qsq__blk825 < assign33550_e37276 { 1.0 } else { 0.0 };
         var_guard1135 = assign33550_e37277;
-
 
         *var_guard1134_slot = var_guard1134;
         *var_guard1135_slot = var_guard1135;
@@ -11770,7 +11761,6 @@ impl Instance {
         var_q_temp1__blk814_db1 = assign33760_e37590_d_b1;
         var_q_temp1__blk814_db2 = assign33760_e37590_d_b2;
         var_q_temp1__blk814_db3 = assign33760_e37590_d_b3;
-
 
         *var_guard1136_slot = var_guard1136;
         *var_guard1137_slot = var_guard1137;
@@ -13213,7 +13203,6 @@ impl Instance {
         let assign33970_e37872: f64 = if var_aexp1s__blk943 <= 0.0 { 1.0 } else { 0.0 };
         var_guard1139 = assign33970_e37872;
 
-
         *var_aexp1s__blk943_slot = var_aexp1s__blk943;
         *var_aexp1s__blk943_db0_slot = var_aexp1s__blk943_db0;
         *var_aexp1s__blk943_db1_slot = var_aexp1s__blk943_db1;
@@ -14376,7 +14365,6 @@ impl Instance {
         var_q2s__blk941_db2 = assign34210_e38208_d_b2;
         var_q2s__blk941_db3 = assign34210_e38208_d_b3;
 
-
         *var_guard1140_slot = var_guard1140;
         *var_guard1141_slot = var_guard1141;
         *var_guard1142_slot = var_guard1142;
@@ -15507,7 +15495,6 @@ impl Instance {
         var_b1s__blk945_db2 = assign34430_e38559_d_b2;
         var_b1s__blk945_db3 = assign34430_e38559_d_b3;
 
-
         *var_a1s__blk947_slot = var_a1s__blk947;
         *var_a1s__blk947_db0_slot = var_a1s__blk947_db0;
         *var_a1s__blk947_db1_slot = var_a1s__blk947_db1;
@@ -16634,7 +16621,6 @@ impl Instance {
         var_temp2_db1 = assign34660_e38803_d_b1;
         var_temp2_db2 = assign34660_e38803_d_b2;
         var_temp2_db3 = assign34660_e38803_d_b3;
-
 
         *var_a1s__blk947_slot = var_a1s__blk947;
         *var_a1s__blk947_db0_slot = var_a1s__blk947_db0;
@@ -17899,7 +17885,6 @@ impl Instance {
         var_temp3_db1 = assign34860_e39024_d_b1;
         var_temp3_db2 = assign34860_e39024_d_b2;
         var_temp3_db3 = assign34860_e39024_d_b3;
-
 
         *var_c1s__blk960_slot = var_c1s__blk960;
         *var_c1s__blk960_db0_slot = var_c1s__blk960_db0;
@@ -19387,7 +19372,6 @@ impl Instance {
         var_dinf__blk974_db1 = assign35060_e39320_d_b1;
         var_dinf__blk974_db2 = assign35060_e39320_d_b2;
         var_dinf__blk974_db3 = assign35060_e39320_d_b3;
-
 
         *var_deltaxinf__blk971_slot = var_deltaxinf__blk971;
         *var_deltaxinf__blk971_db0_slot = var_deltaxinf__blk971_db0;

@@ -419,6 +419,73 @@ impl Instance {
         ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         var_guard12: f64,
         var_guard13: f64,
+        var_phit: f64,
+        var_phit_db0: f64,
+        var_phit_db1: f64,
+        var_phit_db10: f64,
+        var_phit_db11: f64,
+        var_phit_db12: f64,
+        var_phit_db13: f64,
+        var_phit_db14: f64,
+        var_phit_db15: f64,
+        var_phit_db16: f64,
+        var_phit_db17: f64,
+        var_phit_db18: f64,
+        var_phit_db19: f64,
+        var_phit_db2: f64,
+        var_phit_db20: f64,
+        var_phit_db21: f64,
+        var_phit_db22: f64,
+        var_phit_db23: f64,
+        var_phit_db24: f64,
+        var_phit_db25: f64,
+        var_phit_db26: f64,
+        var_phit_db27: f64,
+        var_phit_db28: f64,
+        var_phit_db29: f64,
+        var_phit_db3: f64,
+        var_phit_db30: f64,
+        var_phit_db31: f64,
+        var_phit_db32: f64,
+        var_phit_db33: f64,
+        var_phit_db34: f64,
+        var_phit_db35: f64,
+        var_phit_db4: f64,
+        var_phit_db5: f64,
+        var_phit_db6: f64,
+        var_phit_db7: f64,
+        var_phit_db8: f64,
+        var_phit_db9: f64,
+        var_phit_dn0: f64,
+        var_phit_dn1: f64,
+        var_phit_dn10: f64,
+        var_phit_dn11: f64,
+        var_phit_dn12: f64,
+        var_phit_dn13: f64,
+        var_phit_dn14: f64,
+        var_phit_dn15: f64,
+        var_phit_dn16: f64,
+        var_phit_dn17: f64,
+        var_phit_dn18: f64,
+        var_phit_dn19: f64,
+        var_phit_dn2: f64,
+        var_phit_dn20: f64,
+        var_phit_dn21: f64,
+        var_phit_dn22: f64,
+        var_phit_dn23: f64,
+        var_phit_dn24: f64,
+        var_phit_dn25: f64,
+        var_phit_dn26: f64,
+        var_phit_dn27: f64,
+        var_phit_dn28: f64,
+        var_phit_dn29: f64,
+        var_phit_dn3: f64,
+        var_phit_dn4: f64,
+        var_phit_dn5: f64,
+        var_phit_dn6: f64,
+        var_phit_dn7: f64,
+        var_phit_dn8: f64,
+        var_phit_dn9: f64,
         var_tdut: f64,
         var_tdut_db0: f64,
         var_tdut_db1: f64,
@@ -595,11 +662,11 @@ impl Instance {
             20,
             multiplicity * (eq9_e428_d_n20),
         );
-        let eq14_ad: A = {
+        let eq14_ad_e518: A = {
     if ((s.v[308] == 0.0) && (s.v[309] != 0.0)) {
-        A::scaled_offset({
+        let eq14_ad_e513: A = {
             if ((!(((nv24 - nv23) / s.v[113]) > 50.0)) && (!(((nv24 - nv23) / s.v[113]) < (-50.0)))) {
-                A::exp(A::div(A::voltage(ctx, nodes, Some(24), Some(23)), s.ad_value(113)))
+                A::exp(A::div(A::voltage(ctx, nodes, Some(24), Some(23)), A::from_derivatives(var_phit, [var_phit_dn0, var_phit_dn1, var_phit_dn2, var_phit_dn3, var_phit_dn4, var_phit_dn5, var_phit_dn6, var_phit_dn7, var_phit_dn8, var_phit_dn9, var_phit_dn10, var_phit_dn11, var_phit_dn12, var_phit_dn13, var_phit_dn14, var_phit_dn15, var_phit_dn16, var_phit_dn17, var_phit_dn18, var_phit_dn19, var_phit_dn20, var_phit_dn21, var_phit_dn22, var_phit_dn23, var_phit_dn24, var_phit_dn25, var_phit_dn26, var_phit_dn27, var_phit_dn28, var_phit_dn29], [var_phit_db0, var_phit_db1, var_phit_db2, var_phit_db3, var_phit_db4, var_phit_db5, var_phit_db6, var_phit_db7, var_phit_db8, var_phit_db9, var_phit_db10, var_phit_db11, var_phit_db12, var_phit_db13, var_phit_db14, var_phit_db15, var_phit_db16, var_phit_db17, var_phit_db18, var_phit_db19, var_phit_db20, var_phit_db21, var_phit_db22, var_phit_db23, var_phit_db24, var_phit_db25, var_phit_db26, var_phit_db27, var_phit_db28, var_phit_db29, var_phit_db30, var_phit_db31, var_phit_db32, var_phit_db33, var_phit_db34, var_phit_db35])))
             } else {
                 {
                     if ((!(((nv24 - nv23) / s.v[113]) > 50.0)) && (((nv24 - nv23) / s.v[113]) < (-50.0))) {
@@ -607,7 +674,7 @@ impl Instance {
                     } else {
                         {
                             if (((nv24 - nv23) / s.v[113]) > 50.0) {
-                                A::scaled_offset(A::div(A::voltage(ctx, nodes, Some(24), Some(23)), s.ad_value(113)), (((-50.0)) + (1.0)), ((50.0) as f64).exp())
+                                A::scaled_offset(A::div(A::voltage(ctx, nodes, Some(24), Some(23)), A::from_derivatives(var_phit, [var_phit_dn0, var_phit_dn1, var_phit_dn2, var_phit_dn3, var_phit_dn4, var_phit_dn5, var_phit_dn6, var_phit_dn7, var_phit_dn8, var_phit_dn9, var_phit_dn10, var_phit_dn11, var_phit_dn12, var_phit_dn13, var_phit_dn14, var_phit_dn15, var_phit_dn16, var_phit_dn17, var_phit_dn18, var_phit_dn19, var_phit_dn20, var_phit_dn21, var_phit_dn22, var_phit_dn23, var_phit_dn24, var_phit_dn25, var_phit_dn26, var_phit_dn27, var_phit_dn28, var_phit_dn29], [var_phit_db0, var_phit_db1, var_phit_db2, var_phit_db3, var_phit_db4, var_phit_db5, var_phit_db6, var_phit_db7, var_phit_db8, var_phit_db9, var_phit_db10, var_phit_db11, var_phit_db12, var_phit_db13, var_phit_db14, var_phit_db15, var_phit_db16, var_phit_db17, var_phit_db18, var_phit_db19, var_phit_db20, var_phit_db21, var_phit_db22, var_phit_db23, var_phit_db24, var_phit_db25, var_phit_db26, var_phit_db27, var_phit_db28, var_phit_db29, var_phit_db30, var_phit_db31, var_phit_db32, var_phit_db33, var_phit_db34, var_phit_db35])), (((-50.0)) + (1.0)), ((50.0) as f64).exp())
                             } else {
                                 A::constant(0.0)
                             }
@@ -615,11 +682,13 @@ impl Instance {
                     }
                 }
             }
-        }, (-1.0), p.p346)
+        };
+        A::scaled_offset(eq14_ad_e513, (-1.0), p.p346)
     } else {
         A::constant(0.0)
     }
 };
+        let eq14_ad: A = eq14_ad_e518;
         stamper.stamp_current_dense_local(
             Some(24),
             Some(23),
@@ -1145,6 +1214,73 @@ impl Instance {
         var_idsfp4_dn7: f64,
         var_idsfp4_dn8: f64,
         var_idsfp4_dn9: f64,
+        var_phit: f64,
+        var_phit_db0: f64,
+        var_phit_db1: f64,
+        var_phit_db10: f64,
+        var_phit_db11: f64,
+        var_phit_db12: f64,
+        var_phit_db13: f64,
+        var_phit_db14: f64,
+        var_phit_db15: f64,
+        var_phit_db16: f64,
+        var_phit_db17: f64,
+        var_phit_db18: f64,
+        var_phit_db19: f64,
+        var_phit_db2: f64,
+        var_phit_db20: f64,
+        var_phit_db21: f64,
+        var_phit_db22: f64,
+        var_phit_db23: f64,
+        var_phit_db24: f64,
+        var_phit_db25: f64,
+        var_phit_db26: f64,
+        var_phit_db27: f64,
+        var_phit_db28: f64,
+        var_phit_db29: f64,
+        var_phit_db3: f64,
+        var_phit_db30: f64,
+        var_phit_db31: f64,
+        var_phit_db32: f64,
+        var_phit_db33: f64,
+        var_phit_db34: f64,
+        var_phit_db35: f64,
+        var_phit_db4: f64,
+        var_phit_db5: f64,
+        var_phit_db6: f64,
+        var_phit_db7: f64,
+        var_phit_db8: f64,
+        var_phit_db9: f64,
+        var_phit_dn0: f64,
+        var_phit_dn1: f64,
+        var_phit_dn10: f64,
+        var_phit_dn11: f64,
+        var_phit_dn12: f64,
+        var_phit_dn13: f64,
+        var_phit_dn14: f64,
+        var_phit_dn15: f64,
+        var_phit_dn16: f64,
+        var_phit_dn17: f64,
+        var_phit_dn18: f64,
+        var_phit_dn19: f64,
+        var_phit_dn2: f64,
+        var_phit_dn20: f64,
+        var_phit_dn21: f64,
+        var_phit_dn22: f64,
+        var_phit_dn23: f64,
+        var_phit_dn24: f64,
+        var_phit_dn25: f64,
+        var_phit_dn26: f64,
+        var_phit_dn27: f64,
+        var_phit_dn28: f64,
+        var_phit_dn29: f64,
+        var_phit_dn3: f64,
+        var_phit_dn4: f64,
+        var_phit_dn5: f64,
+        var_phit_dn6: f64,
+        var_phit_dn7: f64,
+        var_phit_dn8: f64,
+        var_phit_dn9: f64,
         var_qgsfp4: f64,
         var_qgsfp4_db0: f64,
         var_qgsfp4_db1: f64,
@@ -1353,11 +1489,11 @@ impl Instance {
         let nv17 = ctx.node_voltage(nodes[17]);
         let nv26 = ctx.node_voltage(nodes[26]);
         let nv27 = ctx.node_voltage(nodes[27]);
-        let eq19_ad: A = {
+        let eq19_ad_e636: A = {
     if ((s.v[308] == 0.0) && (s.v[309] != 0.0)) {
-        A::scaled_offset({
+        let eq19_ad_e631: A = {
             if ((!(((nv26 - nv27) / s.v[113]) > 50.0)) && (!(((nv26 - nv27) / s.v[113]) < (-50.0)))) {
-                A::exp(A::div(A::voltage(ctx, nodes, Some(26), Some(27)), s.ad_value(113)))
+                A::exp(A::div(A::voltage(ctx, nodes, Some(26), Some(27)), A::from_derivatives(var_phit, [var_phit_dn0, var_phit_dn1, var_phit_dn2, var_phit_dn3, var_phit_dn4, var_phit_dn5, var_phit_dn6, var_phit_dn7, var_phit_dn8, var_phit_dn9, var_phit_dn10, var_phit_dn11, var_phit_dn12, var_phit_dn13, var_phit_dn14, var_phit_dn15, var_phit_dn16, var_phit_dn17, var_phit_dn18, var_phit_dn19, var_phit_dn20, var_phit_dn21, var_phit_dn22, var_phit_dn23, var_phit_dn24, var_phit_dn25, var_phit_dn26, var_phit_dn27, var_phit_dn28, var_phit_dn29], [var_phit_db0, var_phit_db1, var_phit_db2, var_phit_db3, var_phit_db4, var_phit_db5, var_phit_db6, var_phit_db7, var_phit_db8, var_phit_db9, var_phit_db10, var_phit_db11, var_phit_db12, var_phit_db13, var_phit_db14, var_phit_db15, var_phit_db16, var_phit_db17, var_phit_db18, var_phit_db19, var_phit_db20, var_phit_db21, var_phit_db22, var_phit_db23, var_phit_db24, var_phit_db25, var_phit_db26, var_phit_db27, var_phit_db28, var_phit_db29, var_phit_db30, var_phit_db31, var_phit_db32, var_phit_db33, var_phit_db34, var_phit_db35])))
             } else {
                 {
                     if ((!(((nv26 - nv27) / s.v[113]) > 50.0)) && (((nv26 - nv27) / s.v[113]) < (-50.0))) {
@@ -1365,7 +1501,7 @@ impl Instance {
                     } else {
                         {
                             if (((nv26 - nv27) / s.v[113]) > 50.0) {
-                                A::scaled_offset(A::div(A::voltage(ctx, nodes, Some(26), Some(27)), s.ad_value(113)), (((-50.0)) + (1.0)), ((50.0) as f64).exp())
+                                A::scaled_offset(A::div(A::voltage(ctx, nodes, Some(26), Some(27)), A::from_derivatives(var_phit, [var_phit_dn0, var_phit_dn1, var_phit_dn2, var_phit_dn3, var_phit_dn4, var_phit_dn5, var_phit_dn6, var_phit_dn7, var_phit_dn8, var_phit_dn9, var_phit_dn10, var_phit_dn11, var_phit_dn12, var_phit_dn13, var_phit_dn14, var_phit_dn15, var_phit_dn16, var_phit_dn17, var_phit_dn18, var_phit_dn19, var_phit_dn20, var_phit_dn21, var_phit_dn22, var_phit_dn23, var_phit_dn24, var_phit_dn25, var_phit_dn26, var_phit_dn27, var_phit_dn28, var_phit_dn29], [var_phit_db0, var_phit_db1, var_phit_db2, var_phit_db3, var_phit_db4, var_phit_db5, var_phit_db6, var_phit_db7, var_phit_db8, var_phit_db9, var_phit_db10, var_phit_db11, var_phit_db12, var_phit_db13, var_phit_db14, var_phit_db15, var_phit_db16, var_phit_db17, var_phit_db18, var_phit_db19, var_phit_db20, var_phit_db21, var_phit_db22, var_phit_db23, var_phit_db24, var_phit_db25, var_phit_db26, var_phit_db27, var_phit_db28, var_phit_db29, var_phit_db30, var_phit_db31, var_phit_db32, var_phit_db33, var_phit_db34, var_phit_db35])), (((-50.0)) + (1.0)), ((50.0) as f64).exp())
                             } else {
                                 A::constant(0.0)
                             }
@@ -1373,11 +1509,13 @@ impl Instance {
                     }
                 }
             }
-        }, (-1.0), p.p346)
+        };
+        A::scaled_offset(eq19_ad_e631, (-1.0), p.p346)
     } else {
         A::constant(0.0)
     }
 };
+        let eq19_ad: A = eq19_ad_e636;
         stamper.stamp_current_dense_local(
             Some(26),
             Some(27),

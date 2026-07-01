@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1140,7 +1140,6 @@ impl Instance {
         var_phissat_rdb2 = 0.0;
         var_phissat_rdb3 = 0.0;
         var_phissat_rdb4 = 0.0;
-
 
         *var_phissat_slot = var_phissat;
         *var_phissat_db0_slot = var_phissat_db0;
@@ -2674,7 +2673,6 @@ impl Instance {
         var_dg1_rdb3 = 0.0;
         var_dg1_rdb4 = 0.0;
 
-
         *var_delta_slot = var_delta;
         *var_delta_db0_slot = var_delta_db0;
         *var_delta_db1_slot = var_delta_db1;
@@ -4093,7 +4091,6 @@ impl Instance {
         var_delta_rdb2 = 0.0;
         var_delta_rdb3 = 0.0;
         var_delta_rdb4 = 0.0;
-
 
         *var_delta_slot = var_delta;
         *var_delta_db0_slot = var_delta_db0;
@@ -5582,7 +5579,6 @@ impl Instance {
         var_csc1_rdb3 = 0.0;
         var_csc1_rdb4 = 0.0;
 
-
         *var_aaux_slot = var_aaux;
         *var_aaux_db0_slot = var_aaux_db0;
         *var_aaux_db1_slot = var_aaux_db1;
@@ -6985,7 +6981,6 @@ impl Instance {
         var_t3_rdb2 = 0.0;
         var_t3_rdb3 = 0.0;
         var_t3_rdb4 = 0.0;
-
 
         *var_coth1_slot = var_coth1;
         *var_coth1_db0_slot = var_coth1_db0;
@@ -8751,7 +8746,6 @@ impl Instance {
         var_guard78_rdb3 = 0.0;
         var_guard78_rdb4 = 0.0;
 
-
         *var_aaux_slot = var_aaux;
         *var_aaux_db0_slot = var_aaux_db0;
         *var_aaux_db1_slot = var_aaux_db1;
@@ -10034,7 +10028,6 @@ impl Instance {
         var_dqcothqdqsqrt_rdb2 = 0.0;
         var_dqcothqdqsqrt_rdb3 = 0.0;
         var_dqcothqdqsqrt_rdb4 = 0.0;
-
 
         *var_coth1_slot = var_coth1;
         *var_coth1_db0_slot = var_coth1_db0;
@@ -11707,7 +11700,6 @@ impl Instance {
         var_auxb1_rdb3 = 0.0;
         var_auxb1_rdb4 = 0.0;
 
-
         *var_auxb1_slot = var_auxb1;
         *var_auxb1_db0_slot = var_auxb1_db0;
         *var_auxb1_db1_slot = var_auxb1_db1;
@@ -13217,7 +13209,6 @@ impl Instance {
         var_coth1_rdb2 = 0.0;
         var_coth1_rdb3 = 0.0;
         var_coth1_rdb4 = 0.0;
-
 
         *var_aaux_slot = var_aaux;
         *var_aaux_db0_slot = var_aaux_db0;
@@ -14998,7 +14989,6 @@ impl Instance {
         var_phi1_rdb3 = 0.0;
         var_phi1_rdb4 = 0.0;
 
-
         *var_delta_slot = var_delta;
         *var_delta_db0_slot = var_delta_db0;
         *var_delta_db1_slot = var_delta_db1;
@@ -16628,7 +16618,6 @@ impl Instance {
         var_csc1_rdb2 = 0.0;
         var_csc1_rdb3 = 0.0;
         var_csc1_rdb4 = 0.0;
-
 
         *var_aaux_slot = var_aaux;
         *var_aaux_db0_slot = var_aaux_db0;
@@ -18468,7 +18457,6 @@ impl Instance {
         var_df_rdb3 = 0.0;
         var_df_rdb4 = 0.0;
 
-
         *var_coth1_slot = var_coth1;
         *var_coth1_db0_slot = var_coth1_db0;
         *var_coth1_db1_slot = var_coth1_db1;
@@ -20257,7 +20245,6 @@ impl Instance {
         var_q_rdb2 = 0.0;
         var_q_rdb3 = 0.0;
         var_q_rdb4 = 0.0;
-
 
         *var_aaux_slot = var_aaux;
         *var_aaux_db0_slot = var_aaux_db0;
@@ -22141,7 +22128,6 @@ impl Instance {
         var_dq2_rdb3 = 0.0;
         var_dq2_rdb4 = 0.0;
 
-
         *var_coth1_slot = var_coth1;
         *var_coth1_db0_slot = var_coth1_db0;
         *var_coth1_db1_slot = var_coth1_db1;
@@ -23926,7 +23912,6 @@ impl Instance {
         var_q_rdb2 = 0.0;
         var_q_rdb3 = 0.0;
         var_q_rdb4 = 0.0;
-
 
         *var_delta_slot = var_delta;
         *var_delta_db0_slot = var_delta_db0;
@@ -25765,7 +25750,6 @@ impl Instance {
         var_t3_rdb2 = 0.0;
         var_t3_rdb3 = 0.0;
         var_t3_rdb4 = 0.0;
-
 
         *var_phi2_slot = var_phi2;
         *var_phi2_db0_slot = var_phi2_db0;

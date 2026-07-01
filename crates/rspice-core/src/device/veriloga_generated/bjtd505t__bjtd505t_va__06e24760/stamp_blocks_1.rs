@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1212,7 +1212,6 @@ impl Instance {
         var_vbex_dn11 = assign4640_e4488_d_n11;
         var_vbex_db0 = assign4640_e4488_d_b0;
         var_vbex_db1 = assign4640_e4488_d_b1;
-
 
         *var_dzcb_slot = var_dzcb;
         *var_dzcb_db0_slot = var_dzcb_db0;
@@ -2429,7 +2428,6 @@ impl Instance {
         var_xiex_dn11 = ((var_xiex_dn11 * var_fbrcb) + (var_xiex * var_fbrcb_dn11));
         var_xiex_db0 = ((var_xiex_db0 * var_fbrcb) + (var_xiex * var_fbrcb_db0));
         var_xiex_db1 = ((var_xiex_db1 * var_fbrcb) + (var_xiex * var_fbrcb_db1));
-
 
         *var_dfbrcb_slot = var_dfbrcb;
         *var_eps2_slot = var_eps2;
@@ -3847,7 +3845,6 @@ impl Instance {
         var_weff_db0 = assign5210_e4992_d_b0;
         var_weff_db1 = assign5210_e4992_d_b1;
 
-
         *var_dedx0_slot = var_dedx0;
         *var_eps2_slot = var_eps2;
         *var_eps2_db0_slot = var_eps2_db0;
@@ -5172,7 +5169,6 @@ impl Instance {
         var_in_shift_ihcavl_db0 = assign5440_e5394_d_b0;
         var_in_shift_ihcavl_db1 = assign5440_e5394_d_b1;
 
-
         *var_e0_slot = var_e0;
         *var_e0_db0_slot = var_e0_db0;
         *var_e0_db1_slot = var_e0_db1;
@@ -6420,7 +6416,6 @@ impl Instance {
         var_vztcb_dn11 = assign5710_e5750_d_n11;
         var_vztcb_db0 = assign5710_e5750_d_b0;
         var_vztcb_db1 = assign5710_e5750_d_b1;
-
 
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
@@ -8306,7 +8301,6 @@ impl Instance {
         var_xvtexv_db0 = ((((var_vdc_ctc_t_db0 / assign5940_e6048) * assign5940_e6060) + (assign5940_e6049 * (-if 0.0 == 0.0 && ((assign5940_e6058) as f64).is_finite() && ((assign5940_e6058) as f64).fract() == 0.0 { if assign5940_e6058 == 0.0 { 0.0 } else { (assign5940_e6058 * ((assign5940_e6055).powf(assign5940_e6058 - 1.0) * (-(((var_xvjcex_db0 * var_vdc_ctc_t) - (var_xvjcex * var_vdc_ctc_t_db0)) / (var_vdc_ctc_t * var_vdc_ctc_t))))) } } else { (assign5940_e6059 * (assign5940_e6058 * ((-(((var_xvjcex_db0 * var_vdc_ctc_t) - (var_xvjcex * var_vdc_ctc_t_db0)) / (var_vdc_ctc_t * var_vdc_ctc_t))) / assign5940_e6055))) }))) + ((var_bjc_db0 * assign5940_e6065) + (var_bjc * (var_vbc3_db0 - var_xvjcex_db0))));
         var_xvtexv_db1 = ((((var_vdc_ctc_t_db1 / assign5940_e6048) * assign5940_e6060) + (assign5940_e6049 * (-if 0.0 == 0.0 && ((assign5940_e6058) as f64).is_finite() && ((assign5940_e6058) as f64).fract() == 0.0 { if assign5940_e6058 == 0.0 { 0.0 } else { (assign5940_e6058 * ((assign5940_e6055).powf(assign5940_e6058 - 1.0) * (-(((var_xvjcex_db1 * var_vdc_ctc_t) - (var_xvjcex * var_vdc_ctc_t_db1)) / (var_vdc_ctc_t * var_vdc_ctc_t))))) } } else { (assign5940_e6059 * (assign5940_e6058 * ((-(((var_xvjcex_db1 * var_vdc_ctc_t) - (var_xvjcex * var_vdc_ctc_t_db1)) / (var_vdc_ctc_t * var_vdc_ctc_t))) / assign5940_e6055))) }))) + ((var_bjc_db1 * assign5940_e6065) + (var_bjc * (var_vbc3_db1 - var_xvjcex_db1))));
 
-
         *var_a_vdcctc_slot = var_a_vdcctc;
         *var_a_vdcctc_db0_slot = var_a_vdcctc_db0;
         *var_a_vdcctc_db1_slot = var_a_vdcctc_db1;
@@ -9908,7 +9902,6 @@ impl Instance {
 };
         var_expl = assign6210_e6364;
 
-
         *var_evb1c4vdcex_slot = var_evb1c4vdcex;
         *var_evb1c4vdcex_db0_slot = var_evb1c4vdcex_db0;
         *var_evb1c4vdcex_db1_slot = var_evb1c4vdcex_db1;
@@ -11483,7 +11476,6 @@ impl Instance {
         var_qbc_db0 = assign6420_e6574_d_b0;
         var_qbc_db1 = assign6420_e6574_d_b1;
 
-
         *var_dn0vb2e1_slot = var_dn0vb2e1;
         *var_dn0vb2e1_db0_slot = var_dn0vb2e1_db0;
         *var_dn0vb2e1_db1_slot = var_dn0vb2e1_db1;
@@ -12489,7 +12481,6 @@ impl Instance {
         var_taun_dn11 = assign6760_e6785_d_n11;
         var_taun_db0 = assign6760_e6785_d_b0;
         var_taun_db1 = assign6760_e6785_d_b1;
-
 
         *var_gem_n_slot = var_gem_n;
         *var_gem_n_db0_slot = var_gem_n_db0;
@@ -13757,7 +13748,6 @@ impl Instance {
         var_eps_bavl_t_rdn11 = 0.0;
         var_eps_bavl_t_rdb0 = 0.0;
         var_eps_bavl_t_rdb1 = 0.0;
-
 
         *var_an_slot = var_an;
         *var_an_db0_slot = var_an_db0;
@@ -15245,7 +15235,6 @@ impl Instance {
         var_vgzcbok_rdn11 = 0.0;
         var_vgzcbok_rdb0 = 0.0;
         var_vgzcbok_rdb1 = 0.0;
-
 
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
@@ -16819,7 +16808,6 @@ impl Instance {
         var_vdt_rdn11 = 0.0;
         var_vdt_rdb0 = 0.0;
         var_vdt_rdb1 = 0.0;
-
 
         *var_fex_slot = var_fex;
         *var_fex_db0_slot = var_fex_db0;
@@ -18475,7 +18463,6 @@ impl Instance {
         var_dxa_rdb0 = 0.0;
         var_dxa_rdb1 = 0.0;
 
-
         *var_dt_slot = var_dt;
         *var_dt_db0_slot = var_dt_db0;
         *var_dt_db1_slot = var_dt_db1;
@@ -19968,7 +19955,6 @@ impl Instance {
         var_vdc_t_rdb0 = 0.0;
         var_vdc_t_rdb1 = 0.0;
 
-
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
         *var_dxa_db1_slot = var_dxa_db1;
@@ -21330,7 +21316,6 @@ impl Instance {
         var_guard13_rdn11 = 0.0;
         var_guard13_rdb0 = 0.0;
         var_guard13_rdb1 = 0.0;
-
 
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
@@ -22956,7 +22941,6 @@ impl Instance {
         var_cjc_scale_inv_rdn11 = 0.0;
         var_cjc_scale_inv_rdb0 = 0.0;
         var_cjc_scale_inv_rdb1 = 0.0;
-
 
         *var_cjc_scale_slot = var_cjc_scale;
         *var_cjc_scale_db0_slot = var_cjc_scale_db0;

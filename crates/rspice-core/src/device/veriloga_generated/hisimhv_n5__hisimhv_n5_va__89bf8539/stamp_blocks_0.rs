@@ -591,7 +591,6 @@ impl Instance {
         var_qgso_db11 = 0.0;
         var_qgso_db12 = 0.0;
 
-
         *var_c_eox_slot = var_c_eox;
         *var_cgdo_given_slot = var_cgdo_given;
         *var_cgdoe_slot = var_cgdoe;
@@ -1496,7 +1495,6 @@ impl Instance {
 
         s.store_scalar(959, p.p437);
 
-
         *var_cfd_slot = var_cfd;
         *var_cfs_slot = var_cfs;
         *var_dwcv_slot = var_dwcv;
@@ -2198,7 +2196,6 @@ impl Instance {
 
         s.store_scalar(564, (p.p275 / 100.0));
 
-
         *var_guard170_slot = var_guard170;
         *var_guard171_slot = var_guard171;
         *var_mfactor_slot = var_mfactor;
@@ -2679,7 +2676,6 @@ impl Instance {
         if ((!s.b[1245]) && (!s.b[1246])) {
             s.store_scalar(335, (((p.p130 * p.p2) * p.p7) + (((s.v[530] + s.v[538]) * (((p.p67 * s.v[536]) * 1000000.0) + s.v[534])) * (((p.p68 * p.p100) * 1000000.0) + p.p101))));
         }
-
 
         *var_lbin_slot = var_lbin;
         *var_lg_slot = var_lg;
@@ -3177,7 +3173,6 @@ impl Instance {
             s.store_scalar(645, 0.0);
         }
 
-
         *var_cecox_slot = var_cecox;
         *var_dwcv_slot = var_dwcv;
         *var_uc_nover_slot = var_uc_nover;
@@ -3463,7 +3458,6 @@ impl Instance {
 
         s.b[1294] = (p.p39 != 2.0);
         s.store_scalar(1294, if s.b[1294] { 1.0 } else { 0.0 });
-
 
         *var_cfrng_slot = var_cfrng;
     }
@@ -4509,8 +4503,8 @@ impl Instance {
             s.copy_ad(790, 729);
             s.copy_ad(791, 731);
             s.copy_ad(792, 728);
-            s.copy_ad(793, 733);
-            s.copy_ad(796, 734);
+            s.store_ad_value(793, A::from_derivatives(var_vdsei, [var_vdsei_dn0, var_vdsei_dn1, var_vdsei_dn2, var_vdsei_dn3, var_vdsei_dn4, var_vdsei_dn5, var_vdsei_dn6, var_vdsei_dn7, var_vdsei_dn8, var_vdsei_dn9, var_vdsei_dn10, var_vdsei_dn11, var_vdsei_dn12, var_vdsei_dn13, var_vdsei_dn14, var_vdsei_dn15, var_vdsei_dn16, var_vdsei_dn17, var_vdsei_dn18], [var_vdsei_db0, var_vdsei_db1, var_vdsei_db2, var_vdsei_db3, var_vdsei_db4, var_vdsei_db5, var_vdsei_db6, var_vdsei_db7, var_vdsei_db8, var_vdsei_db9, var_vdsei_db10, var_vdsei_db11, var_vdsei_db12]));
+            s.store_ad_value(796, A::from_derivatives(var_vgsei, [var_vgsei_dn0, var_vgsei_dn1, var_vgsei_dn2, var_vgsei_dn3, var_vgsei_dn4, var_vgsei_dn5, var_vgsei_dn6, var_vgsei_dn7, var_vgsei_dn8, var_vgsei_dn9, var_vgsei_dn10, var_vgsei_dn11, var_vgsei_dn12, var_vgsei_dn13, var_vgsei_dn14, var_vgsei_dn15, var_vgsei_dn16, var_vgsei_dn17, var_vgsei_dn18], [var_vgsei_db0, var_vgsei_db1, var_vgsei_db2, var_vgsei_db3, var_vgsei_db4, var_vgsei_db5, var_vgsei_db6, var_vgsei_db7, var_vgsei_db8, var_vgsei_db9, var_vgsei_db10, var_vgsei_db11, var_vgsei_db12]));
             s.copy_ad(797, 735);
         }
 
@@ -4519,9 +4513,9 @@ impl Instance {
             s.store_neg(790, 729);
             s.copy_ad(791, 730);
             s.copy_ad(792, 727);
-            s.store_neg(793, 733);
-            s.store_sub(796, 734, 733);
-            s.store_sub(797, 735, 733);
+            s.store_neg_ad(793, A::from_derivatives(var_vdsei, [var_vdsei_dn0, var_vdsei_dn1, var_vdsei_dn2, var_vdsei_dn3, var_vdsei_dn4, var_vdsei_dn5, var_vdsei_dn6, var_vdsei_dn7, var_vdsei_dn8, var_vdsei_dn9, var_vdsei_dn10, var_vdsei_dn11, var_vdsei_dn12, var_vdsei_dn13, var_vdsei_dn14, var_vdsei_dn15, var_vdsei_dn16, var_vdsei_dn17, var_vdsei_dn18], [var_vdsei_db0, var_vdsei_db1, var_vdsei_db2, var_vdsei_db3, var_vdsei_db4, var_vdsei_db5, var_vdsei_db6, var_vdsei_db7, var_vdsei_db8, var_vdsei_db9, var_vdsei_db10, var_vdsei_db11, var_vdsei_db12]));
+            s.store_sub_ad(796, A::from_derivatives(var_vgsei, [var_vgsei_dn0, var_vgsei_dn1, var_vgsei_dn2, var_vgsei_dn3, var_vgsei_dn4, var_vgsei_dn5, var_vgsei_dn6, var_vgsei_dn7, var_vgsei_dn8, var_vgsei_dn9, var_vgsei_dn10, var_vgsei_dn11, var_vgsei_dn12, var_vgsei_dn13, var_vgsei_dn14, var_vgsei_dn15, var_vgsei_dn16, var_vgsei_dn17, var_vgsei_dn18], [var_vgsei_db0, var_vgsei_db1, var_vgsei_db2, var_vgsei_db3, var_vgsei_db4, var_vgsei_db5, var_vgsei_db6, var_vgsei_db7, var_vgsei_db8, var_vgsei_db9, var_vgsei_db10, var_vgsei_db11, var_vgsei_db12]), A::from_derivatives(var_vdsei, [var_vdsei_dn0, var_vdsei_dn1, var_vdsei_dn2, var_vdsei_dn3, var_vdsei_dn4, var_vdsei_dn5, var_vdsei_dn6, var_vdsei_dn7, var_vdsei_dn8, var_vdsei_dn9, var_vdsei_dn10, var_vdsei_dn11, var_vdsei_dn12, var_vdsei_dn13, var_vdsei_dn14, var_vdsei_dn15, var_vdsei_dn16, var_vdsei_dn17, var_vdsei_dn18], [var_vdsei_db0, var_vdsei_db1, var_vdsei_db2, var_vdsei_db3, var_vdsei_db4, var_vdsei_db5, var_vdsei_db6, var_vdsei_db7, var_vdsei_db8, var_vdsei_db9, var_vdsei_db10, var_vdsei_db11, var_vdsei_db12]));
+            s.store_sub_ad_rhs(797, 735, A::from_derivatives(var_vdsei, [var_vdsei_dn0, var_vdsei_dn1, var_vdsei_dn2, var_vdsei_dn3, var_vdsei_dn4, var_vdsei_dn5, var_vdsei_dn6, var_vdsei_dn7, var_vdsei_dn8, var_vdsei_dn9, var_vdsei_dn10, var_vdsei_dn11, var_vdsei_dn12, var_vdsei_dn13, var_vdsei_dn14, var_vdsei_dn15, var_vdsei_dn16, var_vdsei_dn17, var_vdsei_dn18], [var_vdsei_db0, var_vdsei_db1, var_vdsei_db2, var_vdsei_db3, var_vdsei_db4, var_vdsei_db5, var_vdsei_db6, var_vdsei_db7, var_vdsei_db8, var_vdsei_db9, var_vdsei_db10, var_vdsei_db11, var_vdsei_db12]));
         }
 
         s.b[1350] = ((p.p53 > 0.0) && (s.v[541] != 0.0));
@@ -4567,7 +4561,6 @@ impl Instance {
             s.store_div_from_scalar(335, 1.0, 387);
             s.store_scalar(336, (1.0 / s.v[764]));
         }
-
 
         *var_vdsei_slot = var_vdsei;
         *var_vdsei_db0_slot = var_vdsei_db0;
@@ -5279,7 +5272,6 @@ impl Instance {
             s.store_offset(69, 961, (-p.p262));
         }
 
-
         *var_c_eox_slot = var_c_eox;
         *var_cox0_slot = var_cox0;
         *var_coxb0_slot = var_coxb0;
@@ -5291,6 +5283,72 @@ impl Instance {
         p: &Parameters,
         param_given: &[bool; Instance::PARAMETER_COUNT],
         var_uc_nover: f64,
+        var_vdsei: f64,
+        var_vdsei_db0: f64,
+        var_vdsei_db1: f64,
+        var_vdsei_db10: f64,
+        var_vdsei_db11: f64,
+        var_vdsei_db12: f64,
+        var_vdsei_db2: f64,
+        var_vdsei_db3: f64,
+        var_vdsei_db4: f64,
+        var_vdsei_db5: f64,
+        var_vdsei_db6: f64,
+        var_vdsei_db7: f64,
+        var_vdsei_db8: f64,
+        var_vdsei_db9: f64,
+        var_vdsei_dn0: f64,
+        var_vdsei_dn1: f64,
+        var_vdsei_dn10: f64,
+        var_vdsei_dn11: f64,
+        var_vdsei_dn12: f64,
+        var_vdsei_dn13: f64,
+        var_vdsei_dn14: f64,
+        var_vdsei_dn15: f64,
+        var_vdsei_dn16: f64,
+        var_vdsei_dn17: f64,
+        var_vdsei_dn18: f64,
+        var_vdsei_dn2: f64,
+        var_vdsei_dn3: f64,
+        var_vdsei_dn4: f64,
+        var_vdsei_dn5: f64,
+        var_vdsei_dn6: f64,
+        var_vdsei_dn7: f64,
+        var_vdsei_dn8: f64,
+        var_vdsei_dn9: f64,
+        var_vgsei: f64,
+        var_vgsei_db0: f64,
+        var_vgsei_db1: f64,
+        var_vgsei_db10: f64,
+        var_vgsei_db11: f64,
+        var_vgsei_db12: f64,
+        var_vgsei_db2: f64,
+        var_vgsei_db3: f64,
+        var_vgsei_db4: f64,
+        var_vgsei_db5: f64,
+        var_vgsei_db6: f64,
+        var_vgsei_db7: f64,
+        var_vgsei_db8: f64,
+        var_vgsei_db9: f64,
+        var_vgsei_dn0: f64,
+        var_vgsei_dn1: f64,
+        var_vgsei_dn10: f64,
+        var_vgsei_dn11: f64,
+        var_vgsei_dn12: f64,
+        var_vgsei_dn13: f64,
+        var_vgsei_dn14: f64,
+        var_vgsei_dn15: f64,
+        var_vgsei_dn16: f64,
+        var_vgsei_dn17: f64,
+        var_vgsei_dn18: f64,
+        var_vgsei_dn2: f64,
+        var_vgsei_dn3: f64,
+        var_vgsei_dn4: f64,
+        var_vgsei_dn5: f64,
+        var_vgsei_dn6: f64,
+        var_vgsei_dn7: f64,
+        var_vgsei_dn8: f64,
+        var_vgsei_dn9: f64,
     ) {
         s.b[1393] = ((s.v[960] - p.p262) < s.v[69]);
         s.store_scalar(1393, if s.b[1393] { 1.0 } else { 0.0 });
@@ -5387,7 +5445,7 @@ impl Instance {
         s.store_scalar(1403, if s.b[1403] { 1.0 } else { 0.0 });
 
         if s.b[1403] {
-            s.copy_ad(373, 733);
+            s.store_ad_value(373, A::from_derivatives(var_vdsei, [var_vdsei_dn0, var_vdsei_dn1, var_vdsei_dn2, var_vdsei_dn3, var_vdsei_dn4, var_vdsei_dn5, var_vdsei_dn6, var_vdsei_dn7, var_vdsei_dn8, var_vdsei_dn9, var_vdsei_dn10, var_vdsei_dn11, var_vdsei_dn12, var_vdsei_dn13, var_vdsei_dn14, var_vdsei_dn15, var_vdsei_dn16, var_vdsei_dn17, var_vdsei_dn18], [var_vdsei_db0, var_vdsei_db1, var_vdsei_db2, var_vdsei_db3, var_vdsei_db4, var_vdsei_db5, var_vdsei_db6, var_vdsei_db7, var_vdsei_db8, var_vdsei_db9, var_vdsei_db10, var_vdsei_db11, var_vdsei_db12]));
         }
 
         s.b[1404] = (s.v[373] >= 0.0);
@@ -5464,8 +5522,8 @@ impl Instance {
         s.store_scalar(1407, if s.b[1407] { 1.0 } else { 0.0 });
 
         if s.b[1407] {
-            s.copy_ad(373, 733);
-            s.copy_ad(374, 734);
+            s.store_ad_value(373, A::from_derivatives(var_vdsei, [var_vdsei_dn0, var_vdsei_dn1, var_vdsei_dn2, var_vdsei_dn3, var_vdsei_dn4, var_vdsei_dn5, var_vdsei_dn6, var_vdsei_dn7, var_vdsei_dn8, var_vdsei_dn9, var_vdsei_dn10, var_vdsei_dn11, var_vdsei_dn12, var_vdsei_dn13, var_vdsei_dn14, var_vdsei_dn15, var_vdsei_dn16, var_vdsei_dn17, var_vdsei_dn18], [var_vdsei_db0, var_vdsei_db1, var_vdsei_db2, var_vdsei_db3, var_vdsei_db4, var_vdsei_db5, var_vdsei_db6, var_vdsei_db7, var_vdsei_db8, var_vdsei_db9, var_vdsei_db10, var_vdsei_db11, var_vdsei_db12]));
+            s.store_ad_value(374, A::from_derivatives(var_vgsei, [var_vgsei_dn0, var_vgsei_dn1, var_vgsei_dn2, var_vgsei_dn3, var_vgsei_dn4, var_vgsei_dn5, var_vgsei_dn6, var_vgsei_dn7, var_vgsei_dn8, var_vgsei_dn9, var_vgsei_dn10, var_vgsei_dn11, var_vgsei_dn12, var_vgsei_dn13, var_vgsei_dn14, var_vgsei_dn15, var_vgsei_dn16, var_vgsei_dn17, var_vgsei_dn18], [var_vgsei_db0, var_vgsei_db1, var_vgsei_db2, var_vgsei_db3, var_vgsei_db4, var_vgsei_db5, var_vgsei_db6, var_vgsei_db7, var_vgsei_db8, var_vgsei_db9, var_vgsei_db10, var_vgsei_db11, var_vgsei_db12]));
             s.copy_ad(372, 735);
         }
 

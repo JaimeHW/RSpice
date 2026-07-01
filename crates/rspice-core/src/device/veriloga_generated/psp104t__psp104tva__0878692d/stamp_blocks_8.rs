@@ -954,7 +954,6 @@ impl Instance {
         let assign38180_e50990: f64 = if var_pbrstid_i == 4.0 { 1.0 } else { 0.0 };
         var_guard793 = assign38180_e50990;
 
-
         *var_erfctimesexpmtat_slot = var_erfctimesexpmtat;
         *var_erfctimesexpmtat_db0_slot = var_erfctimesexpmtat_db0;
         *var_erfctimesexpmtat_db1_slot = var_erfctimesexpmtat_db1;
@@ -2010,7 +2009,6 @@ impl Instance {
         var_itat_db4 = assign38420_e51339_d_b4;
         var_itat_db5 = assign38420_e51339_d_b5;
         var_itat_db6 = assign38420_e51339_d_b6;
-
 
         *var_asrh_slot = var_asrh;
         *var_asrh_db0_slot = var_asrh_db0;
@@ -3307,7 +3305,6 @@ impl Instance {
         var_terfc_db5 = assign38590_e51618_d_b5;
         var_terfc_db6 = assign38590_e51618_d_b6;
 
-
         *var_btat_slot = var_btat;
         *var_btat_db0_slot = var_btat_db0;
         *var_btat_db1_slot = var_btat_db1;
@@ -4601,7 +4598,6 @@ impl Instance {
         let assign38790_e51966: f64 = if assign38790_e51964 < 230.25850929940458 { 1.0 } else { 0.0 };
         var_guard806 = assign38790_e51966;
 
-
         *var_erfcpos_slot = var_erfcpos;
         *var_erfcpos_db0_slot = var_erfcpos_db0;
         *var_erfcpos_db1_slot = var_erfcpos_db1;
@@ -5802,7 +5798,6 @@ impl Instance {
         let assign39000_e52338: f64 = (var_i5_cor / var_i5);
         let assign39000_e52353: f64 = if (((((assign39000_e52333 > 0.001) || (assign39000_e52338 > 0.001)) && (var_i4_cor > 0.0)) && (var_i5_cor > 0.0)) && (var_i5_cor > var_i4_cor)) { 1.0 } else { 0.0 };
         var_guard813 = assign39000_e52353;
-
 
         *var_fbreakdown_slot = var_fbreakdown;
         *var_fbreakdown_db0_slot = var_fbreakdown_db0;
@@ -7089,7 +7084,6 @@ impl Instance {
         var_isatrev_d_db4 = assign39190_e52723_d_b4;
         var_isatrev_d_db5 = assign39190_e52723_d_b5;
         var_isatrev_d_db6 = assign39190_e52723_d_b6;
-
 
         *var_alphaje_slot = var_alphaje;
         *var_alphaje_db0_slot = var_alphaje_db0;
@@ -8479,7 +8473,6 @@ impl Instance {
         var_rtn_db5 = (-((var_tkr * var_tkd_db5) / (var_tkd * var_tkd)));
         var_rtn_db6 = (-((var_tkr * var_tkd_db6) / (var_tkd * var_tkd)));
 
-
         *var_delt_slot = var_delt;
         *var_delt_db0_slot = var_delt_db0;
         *var_delt_db1_slot = var_delt_db1;
@@ -9460,7 +9453,7 @@ impl Instance {
         var_phibfac_db5 = assign39520_e53006_d_b5;
         var_phibfac_db6 = assign39520_e53006_d_b6;
 
-        s.store_scale(1919, 357, (4.0 * 1.3806505e-23));
+        s.store_scale_ad(1919, A::from_derivatives(var_tkd, [var_tkd_dn0, var_tkd_dn1, var_tkd_dn2, var_tkd_dn3, var_tkd_dn4, var_tkd_dn5, var_tkd_dn6, var_tkd_dn7, var_tkd_dn8, var_tkd_dn9, var_tkd_dn10, var_tkd_dn11, var_tkd_dn12], [var_tkd_db0, var_tkd_db1, var_tkd_db2, var_tkd_db3, var_tkd_db4, var_tkd_db5, var_tkd_db6]), (4.0 * 1.3806505e-23));
 
         let assign39540_e53014: f64 = (var_eg + var_dphib_i);
         let assign39540_e53017: f64 = (2.0 * var_phit);
@@ -9654,7 +9647,7 @@ impl Instance {
         var_kp_db5 = assign39630_e53091_d_b5;
         var_kp_db6 = assign39630_e53091_d_b6;
 
-        s.store_scaled_mul(722, 1916, 1916, 100.0);
+        s.store_scaled_mul_ad(722, A::from_derivatives(var_phit, [var_phit_dn0, var_phit_dn1, var_phit_dn2, var_phit_dn3, var_phit_dn4, var_phit_dn5, var_phit_dn6, var_phit_dn7, var_phit_dn8, var_phit_dn9, var_phit_dn10, var_phit_dn11, var_phit_dn12], [var_phit_db0, var_phit_db1, var_phit_db2, var_phit_db3, var_phit_db4, var_phit_db5, var_phit_db6]), A::from_derivatives(var_phit, [var_phit_dn0, var_phit_dn1, var_phit_dn2, var_phit_dn3, var_phit_dn4, var_phit_dn5, var_phit_dn6, var_phit_dn7, var_phit_dn8, var_phit_dn9, var_phit_dn10, var_phit_dn11, var_phit_dn12], [var_phit_db0, var_phit_db1, var_phit_db2, var_phit_db3, var_phit_db4, var_phit_db5, var_phit_db6]), 100.0);
 
         let assign39650_e53099: f64 = if p.p51 > 0.0 { 1.0 } else { 0.0 };
         var_guard1025 = assign39650_e53099;
@@ -9810,7 +9803,6 @@ impl Instance {
         var_sqrt_phib_dc_db4 = (var_phib_dc_db4 / (2.0 * assign39700_e53142));
         var_sqrt_phib_dc_db5 = (var_phib_dc_db5 / (2.0 * assign39700_e53142));
         var_sqrt_phib_dc_db6 = (var_phib_dc_db6 / (2.0 * assign39700_e53142));
-
 
         *var_arg2max_slot = var_arg2max;
         *var_dphibq_slot = var_dphibq;
@@ -11310,7 +11302,6 @@ impl Instance {
         var_bphi_ac_db4 = var_aphi_ac_db4;
         var_bphi_ac_db5 = var_aphi_ac_db5;
         var_bphi_ac_db6 = var_aphi_ac_db6;
-
 
         *var_alpha_b_slot = var_alpha_b;
         *var_alpha_b_db0_slot = var_alpha_b_db0;
@@ -13177,7 +13168,6 @@ impl Instance {
         var_tf_thesat_db5 = (assign40100_e53398 * (var_stthesat_i * var_ln_rtn_db5));
         var_tf_thesat_db6 = (assign40100_e53398 * (var_stthesat_i * var_ln_rtn_db6));
 
-
         *var_bet_i_slot = var_bet_i;
         *var_bet_i_db0_slot = var_bet_i_db0;
         *var_bet_i_db1_slot = var_bet_i_db1;
@@ -13806,6 +13796,27 @@ impl Instance {
         var_tf_thesat_dn9: f64,
         var_thesat_i: f64,
         var_thesatac_i: f64,
+        var_tkd: f64,
+        var_tkd_db0: f64,
+        var_tkd_db1: f64,
+        var_tkd_db2: f64,
+        var_tkd_db3: f64,
+        var_tkd_db4: f64,
+        var_tkd_db5: f64,
+        var_tkd_db6: f64,
+        var_tkd_dn0: f64,
+        var_tkd_dn1: f64,
+        var_tkd_dn10: f64,
+        var_tkd_dn11: f64,
+        var_tkd_dn12: f64,
+        var_tkd_dn2: f64,
+        var_tkd_dn3: f64,
+        var_tkd_dn4: f64,
+        var_tkd_dn5: f64,
+        var_tkd_dn6: f64,
+        var_tkd_dn7: f64,
+        var_tkd_dn8: f64,
+        var_tkd_dn9: f64,
         var_vfbedge_i: f64,
         var_a2_t_slot: &mut f64,
         var_a2_t_db0_slot: &mut f64,
@@ -14513,7 +14524,7 @@ impl Instance {
         var_a2_t_db5 = (var_a2_i * (assign40130_e53410 * (assign40130_e53407 * var_ln_rtn_db5)));
         var_a2_t_db6 = (var_a2_i * (assign40130_e53410 * (assign40130_e53407 * var_ln_rtn_db6)));
 
-        s.store_scaled_mul(1920, 274, 357, (4.0 * 1.3806505e-23));
+        s.store_mul_scaled_ad_rhs(1920, 274, (4.0 * 1.3806505e-23), A::from_derivatives(var_tkd, [var_tkd_dn0, var_tkd_dn1, var_tkd_dn2, var_tkd_dn3, var_tkd_dn4, var_tkd_dn5, var_tkd_dn6, var_tkd_dn7, var_tkd_dn8, var_tkd_dn9, var_tkd_dn10, var_tkd_dn11, var_tkd_dn12], [var_tkd_db0, var_tkd_db1, var_tkd_db2, var_tkd_db3, var_tkd_db4, var_tkd_db5, var_tkd_db6]));
 
         let assign40160_e53432: f64 = if ((p.p46 != 0.0) && (var_betnedge_i > 0.0)) { 1.0 } else { 0.0 };
         var_guard1027 = assign40160_e53432;
@@ -14932,7 +14943,6 @@ impl Instance {
         var_bphiedge_db4 = assign40290_e53546_d_b4;
         var_bphiedge_db5 = assign40290_e53546_d_b5;
         var_bphiedge_db6 = assign40290_e53546_d_b6;
-
 
         *var_a2_t_slot = var_a2_t;
         *var_a2_t_db0_slot = var_a2_t_db0;
@@ -16424,7 +16434,6 @@ impl Instance {
         var_v_gs_db5 = assign40510_e53686_d_b5;
         var_v_gs_db6 = assign40510_e53686_d_b6;
 
-
         *var_aphiedge_slot = var_aphiedge;
         *var_aphiedge_db0_slot = var_aphiedge_db0;
         *var_aphiedge_db1_slot = var_aphiedge_db1;
@@ -17823,7 +17832,6 @@ impl Instance {
         var_v_gs_db4 = assign40720_e53772_d_b4;
         var_v_gs_db5 = assign40720_e53772_d_b5;
         var_v_gs_db6 = assign40720_e53772_d_b6;
-
 
         *var_guard1029_slot = var_guard1029;
         *var_sigvds_slot = var_sigvds;
@@ -19402,7 +19410,6 @@ impl Instance {
         var_phib_db4 = var_phib_dc_db4;
         var_phib_db5 = var_phib_dc_db5;
         var_phib_db6 = var_phib_dc_db6;
-
 
         *var_dvbstar_dc_slot = var_dvbstar_dc;
         *var_dvbstar_dc_db0_slot = var_dvbstar_dc_db0;
@@ -21185,7 +21192,6 @@ impl Instance {
         var_xmict_db5 = assign41100_e54048_d_b5;
         var_xmict_db6 = assign41100_e54048_d_b6;
 
-
         *var_aphi_slot = var_aphi;
         *var_aphi_db0_slot = var_aphi_db0;
         *var_aphi_db1_slot = var_aphi_db1;
@@ -22903,7 +22909,6 @@ impl Instance {
         var_ux_db4 = ((var_vsbstar_db4 * var_inv_phit1) + (var_vsbstar * var_inv_phit1_db4));
         var_ux_db5 = ((var_vsbstar_db5 * var_inv_phit1) + (var_vsbstar * var_inv_phit1_db5));
         var_ux_db6 = ((var_vsbstar_db6 * var_inv_phit1) + (var_vsbstar * var_inv_phit1_db6));
-
 
         *var_ct_fact_slot = var_ct_fact;
         *var_ct_fact_db0_slot = var_ct_fact_db0;

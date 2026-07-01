@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -759,7 +759,6 @@ impl Instance {
         var_pnn0_rdb1 = 0.0;
         var_pnn0_rdb2 = 0.0;
         var_pnn0_rdb3 = 0.0;
-
 
         *var_nj0_slot = var_nj0;
         *var_nj0_db0_slot = var_nj0_db0;
@@ -1777,7 +1776,6 @@ impl Instance {
         var_tmf1_rdb1 = 0.0;
         var_tmf1_rdb2 = 0.0;
         var_tmf1_rdb3 = 0.0;
-
 
         *var_guard489_slot = var_guard489;
         *var_guard489_db0_slot = var_guard489_db0;
@@ -2870,7 +2868,6 @@ impl Instance {
         var_nja10_rdb2 = 0.0;
         var_nja10_rdb3 = 0.0;
 
-
         *var_guard492_slot = var_guard492;
         *var_guard492_db0_slot = var_guard492_db0;
         *var_guard492_db1_slot = var_guard492_db1;
@@ -3895,7 +3892,6 @@ impl Instance {
         var_tmf2_rdb1 = 0.0;
         var_tmf2_rdb2 = 0.0;
         var_tmf2_rdb3 = 0.0;
-
 
         *var_dfn_sl_slot = var_dfn_sl;
         *var_dfn_sl_db0_slot = var_dfn_sl_db0;
@@ -4974,7 +4970,6 @@ impl Instance {
         var_guard494_rdb1 = 0.0;
         var_guard494_rdb2 = 0.0;
         var_guard494_rdb3 = 0.0;
-
 
         *var_dnj1_dv_slot = var_dnj1_dv;
         *var_dnj1_dv_db0_slot = var_dnj1_dv_db0;
@@ -6181,7 +6176,6 @@ impl Instance {
         var_tmf2_rdb2 = 0.0;
         var_tmf2_rdb3 = 0.0;
 
-
         *var_dvmax_over_phitd_dv_slot = var_dvmax_over_phitd_dv;
         *var_dvmax_over_phitd_dv_db0_slot = var_dvmax_over_phitd_dv_db0;
         *var_dvmax_over_phitd_dv_db1_slot = var_dvmax_over_phitd_dv_db1;
@@ -7229,7 +7223,6 @@ impl Instance {
         var_tmf2_rdb1 = 0.0;
         var_tmf2_rdb2 = 0.0;
         var_tmf2_rdb3 = 0.0;
-
 
         *var_dfn_sl_slot = var_dfn_sl;
         *var_dfn_sl_db0_slot = var_dfn_sl_db0;
@@ -8407,7 +8400,6 @@ impl Instance {
         var_tmf2_rdb2 = 0.0;
         var_tmf2_rdb3 = 0.0;
 
-
         *var_dnj1_dv_slot = var_dnj1_dv;
         *var_dnj1_dv_db0_slot = var_dnj1_dv_db0;
         *var_dnj1_dv_db1_slot = var_dnj1_dv_db1;
@@ -9462,7 +9454,6 @@ impl Instance {
         var_nj0_rdb1 = 0.0;
         var_nj0_rdb2 = 0.0;
         var_nj0_rdb3 = 0.0;
-
 
         *var_dfn_sl_slot = var_dfn_sl;
         *var_dfn_sl_db0_slot = var_dfn_sl_db0;
@@ -10670,7 +10661,6 @@ impl Instance {
         var_nj0_rdb2 = 0.0;
         var_nj0_rdb3 = 0.0;
 
-
         *var_dnj1_dv_slot = var_dnj1_dv;
         *var_dnj1_dv_db0_slot = var_dnj1_dv_db0;
         *var_dnj1_dv_db1_slot = var_dnj1_dv_db1;
@@ -11644,7 +11634,6 @@ impl Instance {
         var_nj0_rdb1 = 0.0;
         var_nj0_rdb2 = 0.0;
         var_nj0_rdb3 = 0.0;
-
 
         *var_nj0_slot = var_nj0;
         *var_nj0_db0_slot = var_nj0_db0;
@@ -12694,7 +12683,6 @@ impl Instance {
         var_exp_k_rdb1 = 0.0;
         var_exp_k_rdb2 = 0.0;
         var_exp_k_rdb3 = 0.0;
-
 
         *var_exp_a_slot = var_exp_a;
         *var_exp_a_db0_slot = var_exp_a_db0;
@@ -14026,7 +14014,6 @@ impl Instance {
         var_exp_k2_rdb1 = 0.0;
         var_exp_k2_rdb2 = 0.0;
         var_exp_k2_rdb3 = 0.0;
-
 
         *var_exp_a2_slot = var_exp_a2;
         *var_exp_a2_db0_slot = var_exp_a2_db0;
@@ -15453,7 +15440,6 @@ impl Instance {
         var_tmf1_rdb2 = 0.0;
         var_tmf1_rdb3 = 0.0;
 
-
         *var_exp_k2_slot = var_exp_k2;
         *var_exp_k2_db0_slot = var_exp_k2_db0;
         *var_exp_k2_db1_slot = var_exp_k2_db1;
@@ -16434,7 +16420,6 @@ impl Instance {
         var_guard572_rdb1 = 0.0;
         var_guard572_rdb2 = 0.0;
         var_guard572_rdb3 = 0.0;
-
 
         *var_guard568_slot = var_guard568;
         *var_guard568_db0_slot = var_guard568_db0;

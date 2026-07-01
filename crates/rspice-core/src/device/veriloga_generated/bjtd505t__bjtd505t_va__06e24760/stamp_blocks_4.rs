@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1389,7 +1389,6 @@ impl Instance {
         var_qb1b2_rdn11 = 0.0;
         var_qb1b2_rdb0 = 0.0;
         var_qb1b2_rdb1 = 0.0;
-
 
         *var_dn0vb2e1_slot = var_dn0vb2e1;
         *var_dn0vb2e1_db0_slot = var_dn0vb2e1_db0;
@@ -2877,7 +2876,6 @@ impl Instance {
         var_guard125_rdb0 = 0.0;
         var_guard125_rdb1 = 0.0;
 
-
         *var_guard124_slot = var_guard124;
         *var_guard124_db0_slot = var_guard124_db0;
         *var_guard124_db1_slot = var_guard124_db1;
@@ -3437,7 +3435,6 @@ impl Instance {
         var_taun_rdn11 = 0.0;
         var_taun_rdb0 = 0.0;
         var_taun_rdb1 = 0.0;
-
 
         *var_guard126_slot = var_guard126;
         *var_guard126_db0_slot = var_guard126_db0;

@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1306,7 +1306,6 @@ impl Instance {
         var_dxa_rdn11 = 0.0;
         var_dxa_rdb0 = 0.0;
         var_dxa_rdb1 = 0.0;
-
 
         *var_cjc_t_slot = var_cjc_t;
         *var_cjc_t_db0_slot = var_cjc_t_db0;
@@ -2691,7 +2690,6 @@ impl Instance {
         var_nfr_t_rdn11 = 0.0;
         var_nfr_t_rdb0 = 0.0;
         var_nfr_t_rdb1 = 0.0;
-
 
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;
@@ -4254,7 +4252,6 @@ impl Instance {
         var_y_rdn11 = 0.0;
         var_y_rdb0 = 0.0;
         var_y_rdb1 = 0.0;
-
 
         *var_bavl_t_slot = var_bavl_t;
         *var_bavl_t_db0_slot = var_bavl_t_db0;
@@ -6144,7 +6141,6 @@ impl Instance {
         var_tk300_rdb0 = 0.0;
         var_tk300_rdb1 = 0.0;
 
-
         *var_inv_vdc_zener_t_slot = var_inv_vdc_zener_t;
         *var_inv_vdc_zener_t_db0_slot = var_inv_vdc_zener_t_db0;
         *var_inv_vdc_zener_t_db1_slot = var_inv_vdc_zener_t_db1;
@@ -7970,7 +7966,6 @@ impl Instance {
         var_vc3c4_rdb0 = 0.0;
         var_vc3c4_rdb1 = 0.0;
 
-
         *var_bnt_slot = var_bnt;
         *var_bnt_db0_slot = var_bnt_db0;
         *var_bnt_db1_slot = var_bnt_db1;
@@ -9632,7 +9627,6 @@ impl Instance {
         var_evb1c4_rdb0 = 0.0;
         var_evb1c4_rdb1 = 0.0;
 
-
         *var_evb1c4_slot = var_evb1c4;
         *var_evb1c4_db0_slot = var_evb1c4_db0;
         *var_evb1c4_db1_slot = var_evb1c4_db1;
@@ -10979,7 +10973,6 @@ impl Instance {
         var_guard36_rdb0 = 0.0;
         var_guard36_rdb1 = 0.0;
 
-
         *var_evb1c4_slot = var_evb1c4;
         *var_evb1c4_db0_slot = var_evb1c4_db0;
         *var_evb1c4_db1_slot = var_evb1c4_db1;
@@ -12286,7 +12279,6 @@ impl Instance {
         var_kw_rdn11 = 0.0;
         var_kw_rdb0 = 0.0;
         var_kw_rdb1 = 0.0;
-
 
         *var_evb1c4vdc_slot = var_evb1c4vdc;
         *var_evb1c4vdc_db0_slot = var_evb1c4vdc_db0;
@@ -13812,7 +13804,6 @@ impl Instance {
         var_x2_rdb0 = 0.0;
         var_x2_rdb1 = 0.0;
 
-
         *var_ec_slot = var_ec;
         *var_ec_db0_slot = var_ec_db0;
         *var_ec_db1_slot = var_ec_db1;
@@ -15320,7 +15311,6 @@ impl Instance {
         var_yi_rdb0 = 0.0;
         var_yi_rdb1 = 0.0;
 
-
         *var_alpha_slot = var_alpha;
         *var_alpha1_slot = var_alpha1;
         *var_alpha1_db0_slot = var_alpha1_db0;
@@ -16793,7 +16783,6 @@ impl Instance {
         var_b1_rdn11 = 0.0;
         var_b1_rdb0 = 0.0;
         var_b1_rdb1 = 0.0;
-
 
         *var_b1_slot = var_b1;
         *var_b1_db0_slot = var_b1_db0;
@@ -18358,7 +18347,6 @@ impl Instance {
         var_pav_rdn11 = 0.0;
         var_pav_rdb0 = 0.0;
         var_pav_rdb1 = 0.0;
-
 
         *var_b2_slot = var_b2;
         *var_b2_db0_slot = var_b2_db0;
@@ -19999,7 +19987,6 @@ impl Instance {
         var_e0eb_rdb0 = 0.0;
         var_e0eb_rdb1 = 0.0;
 
-
         *var_a_vde_slot = var_a_vde;
         *var_a_vde_db0_slot = var_a_vde_db0;
         *var_a_vde_db1_slot = var_a_vde_db1;
@@ -21571,7 +21558,6 @@ impl Instance {
         var_fi_rdn11 = 0.0;
         var_fi_rdb0 = 0.0;
         var_fi_rdb1 = 0.0;
-
 
         *var_bjc_slot = var_bjc;
         *var_bjc_db0_slot = var_bjc_db0;
@@ -23336,7 +23322,6 @@ impl Instance {
         var_q0i_rdb0 = 0.0;
         var_q0i_rdb1 = 0.0;
 
-
         *var_evb2c2star_nfr_slot = var_evb2c2star_nfr;
         *var_evb2c2star_nfr_db0_slot = var_evb2c2star_nfr_db0;
         *var_evb2c2star_nfr_db1_slot = var_evb2c2star_nfr_db1;
@@ -25025,7 +25010,6 @@ impl Instance {
         var_tmpexp1_rdn11 = 0.0;
         var_tmpexp1_rdb0 = 0.0;
         var_tmpexp1_rdb1 = 0.0;
-
 
         *var_dxa_slot = var_dxa;
         *var_dxa_db0_slot = var_dxa_db0;

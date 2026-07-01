@@ -1247,7 +1247,6 @@ impl Instance {
         var_dv_p_db4 = assign9420_e11337_d_b4;
         var_dv_p_db5 = assign9420_e11337_d_b5;
 
-
         *var_dfb_slot = var_dfb;
         *var_dfb_db0_slot = var_dfb_db0;
         *var_dfb_db1_slot = var_dfb_db1;
@@ -2640,7 +2639,6 @@ impl Instance {
         var_de_2_db3 = assign9590_e11522_d_b3;
         var_de_2_db4 = assign9590_e11522_d_b4;
         var_de_2_db5 = assign9590_e11522_d_b5;
-
 
         *var_da_slot = var_da;
         *var_da_db0_slot = var_da_db0;
@@ -4185,7 +4183,6 @@ impl Instance {
         var_dfx_db3 = assign9780_e11734_d_b3;
         var_dfx_db4 = assign9780_e11734_d_b4;
         var_dfx_db5 = assign9780_e11734_d_b5;
-
 
         *var_dc_j1_slot = var_dc_j1;
         *var_dc_j1_db0_slot = var_dc_j1_db0;
@@ -5814,7 +5811,6 @@ impl Instance {
         let assign9990_e11957: f64 = if var_dv_e < 80.0 { 1.0 } else { 0.0 };
         var_guard211 = assign9990_e11957;
 
-
         *var_dc_c_slot = var_dc_c;
         *var_dc_c_db0_slot = var_dc_c_db0;
         *var_dc_c_db1_slot = var_dc_c_db1;
@@ -7199,7 +7195,6 @@ impl Instance {
     }
 };
         var_dzr1 = assign10170_e12179;
-
 
         *var_da_slot = var_da;
         *var_da_db0_slot = var_da_db0;
@@ -8846,7 +8841,6 @@ impl Instance {
         var_dfb_db4 = assign10350_e12425_d_b4;
         var_dfb_db5 = assign10350_e12425_d_b5;
 
-
         *var_dc_j1_slot = var_dc_j1;
         *var_dc_j1_db0_slot = var_dc_j1_db0;
         *var_dc_j1_db1_slot = var_dc_j1_db1;
@@ -10367,7 +10361,6 @@ impl Instance {
         var_dio_le_db3 = assign10570_e12613_d_b3;
         var_dio_le_db4 = assign10570_e12613_d_b4;
         var_dio_le_db5 = assign10570_e12613_d_b5;
-
 
         *var_dfc_j1_slot = var_dfc_j1;
         *var_dfc_j1_db0_slot = var_dfc_j1_db0;
@@ -11915,7 +11908,6 @@ impl Instance {
         var_vxf2_db4 = assign10800_e12825_d_b4;
         var_vxf2_db5 = assign10800_e12825_d_b5;
 
-
         *var_dio_le_slot = var_dio_le;
         *var_dio_le_db0_slot = var_dio_le_db0;
         *var_dio_le_db1_slot = var_dio_le_db1;
@@ -13227,7 +13219,6 @@ impl Instance {
         let assign11300_e13128: f64 = if var_sqrt_n2 > 0.0 { 1.0 } else { 0.0 };
         var_guard265 = assign11300_e13128;
 
-
         *var_betadc_1_slot = var_betadc_1;
         *var_betadc_1_db0_slot = var_betadc_1_db0;
         *var_betadc_1_db1_slot = var_betadc_1_db1;
@@ -13620,7 +13611,6 @@ impl Instance {
         var_n_2_db3 = assign11320_e13144_d_b3;
         var_n_2_db4 = assign11320_e13144_d_b4;
         var_n_2_db5 = assign11320_e13144_d_b5;
-
 
         *var_n_2_slot = var_n_2;
         *var_n_2_db0_slot = var_n_2_db0;

@@ -3,12 +3,6 @@
 use super::state::Instance;
 use crate::device::veriloga_generated::{GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
 
-use crate::device::veriloga_generated::support::{AdValue as GenericAdValue, ReactiveScratch as GenericReactiveScratch, Scratch as GenericScratch};
-
-type A = GenericAdValue<{ Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;
-type Scratch = GenericScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;
-type ReactiveScratch = GenericReactiveScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;
-
 const LIMEXP_MAX: f64 = 5.54062238439351e34;
 #[path = "stamp_blocks_0.rs"]
 mod stamp_blocks_0;
@@ -116,29 +110,146 @@ impl Instance {
         let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
         let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
         let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
-        let s = match &mut self.scratch {
-            Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(Scratch::new_box()).as_mut(),
-        };
+        let mut var_v: f64 = 0.0;
+        let mut var_v_dn0: f64 = 0.0;
+        let mut var_v_dn1: f64 = 0.0;
+        let mut var_v_dn2: f64 = 0.0;
+        let mut var_i: f64 = 0.0;
+        let mut var_i_dn0: f64 = 0.0;
+        let mut var_i_dn1: f64 = 0.0;
+        let mut var_i_dn2: f64 = 0.0;
+        let mut var_leff_um: f64 = 0.0;
+        let mut var_weff_um: f64 = 0.0;
+        let mut var_r0: f64 = 0.0;
+        let mut var_r_dc: f64 = 0.0;
+        let mut var_r_dc_dn0: f64 = 0.0;
+        let mut var_r_dc_dn1: f64 = 0.0;
+        let mut var_r_dc_dn2: f64 = 0.0;
+        let mut var_cth: f64 = 0.0;
+        let mut var_tinik: f64 = 0.0;
+        let mut var_tdevk: f64 = 0.0;
+        let mut var_tdevk_dn0: f64 = 0.0;
+        let mut var_tdevk_dn1: f64 = 0.0;
+        let mut var_tdevk_dn2: f64 = 0.0;
+        let mut var_scalefac: f64 = 0.0;
+        let mut var_shrinkl: f64 = 0.0;
+        let mut var_delt: f64 = 0.0;
+        let mut var_delt_dn0: f64 = 0.0;
+        let mut var_delt_dn1: f64 = 0.0;
+        let mut var_delt_dn2: f64 = 0.0;
+        let mut var_tcr: f64 = 0.0;
+        let mut var_tcr_dn0: f64 = 0.0;
+        let mut var_tcr_dn1: f64 = 0.0;
+        let mut var_tcr_dn2: f64 = 0.0;
+        let mut var_xleff: f64 = 0.0;
+        let mut var_lfactor: f64 = 0.0;
+        let mut var_l_um: f64 = 0.0;
+        let mut var_w_um: f64 = 0.0;
+        let mut var_l_umfore: f64 = 0.0;
+        let mut var_g0: f64 = 0.0;
+        let mut var_r0_t: f64 = 0.0;
+        let mut var_r0_t_dn0: f64 = 0.0;
+        let mut var_r0_t_dn1: f64 = 0.0;
+        let mut var_r0_t_dn2: f64 = 0.0;
+        let mut var_sqrf: f64 = 0.0;
+        let mut var_sqrf_dn0: f64 = 0.0;
+        let mut var_sqrf_dn1: f64 = 0.0;
+        let mut var_sqrf_dn2: f64 = 0.0;
+        let mut var_cbrf: f64 = 0.0;
+        let mut var_cbrf_dn0: f64 = 0.0;
+        let mut var_cbrf_dn1: f64 = 0.0;
+        let mut var_cbrf_dn2: f64 = 0.0;
+        let mut var_tdevc: f64 = 0.0;
+        let mut var_tdevc_dn0: f64 = 0.0;
+        let mut var_tdevc_dn1: f64 = 0.0;
+        let mut var_tdevc_dn2: f64 = 0.0;
+        let mut var_rfactor: f64 = 0.0;
+        let mut var_rfactor_dn0: f64 = 0.0;
+        let mut var_rfactor_dn1: f64 = 0.0;
+        let mut var_rfactor_dn2: f64 = 0.0;
+        let mut var_vin: f64 = 0.0;
+        let mut var_vin_dn0: f64 = 0.0;
+        let mut var_vin_dn1: f64 = 0.0;
+        let mut var_vin_dn2: f64 = 0.0;
+        let mut var_e: f64 = 0.0;
+        let mut var_e_dn0: f64 = 0.0;
+        let mut var_e_dn1: f64 = 0.0;
+        let mut var_e_dn2: f64 = 0.0;
+        let mut var_q2e: f64 = 0.0;
+        let mut var_q2e_dn0: f64 = 0.0;
+        let mut var_q2e_dn1: f64 = 0.0;
+        let mut var_q2e_dn2: f64 = 0.0;
+        let mut var_q3e: f64 = 0.0;
+        let mut var_q3e_dn0: f64 = 0.0;
+        let mut var_q3e_dn1: f64 = 0.0;
+        let mut var_q3e_dn2: f64 = 0.0;
+        let mut var_tc1e: f64 = 0.0;
+        let mut var_tc2e: f64 = 0.0;
+        let mut var_gth: f64 = 0.0;
+        let mut var_vrth: f64 = 0.0;
+        let mut var_vrth_dn0: f64 = 0.0;
+        let mut var_vrth_dn1: f64 = 0.0;
+        let mut var_vrth_dn2: f64 = 0.0;
+        let mut var_ith: f64 = 0.0;
+        let mut var_ith_dn0: f64 = 0.0;
+        let mut var_ith_dn1: f64 = 0.0;
+        let mut var_ith_dn2: f64 = 0.0;
+        let mut var_irth: f64 = 0.0;
+        let mut var_irth_dn0: f64 = 0.0;
+        let mut var_irth_dn1: f64 = 0.0;
+        let mut var_irth_dn2: f64 = 0.0;
+        let mut var_qcth: f64 = 0.0;
+        let mut var_qcth_dn0: f64 = 0.0;
+        let mut var_qcth_dn1: f64 = 0.0;
+        let mut var_qcth_dn2: f64 = 0.0;
+        let mut var_p_um: f64 = 0.0;
+        let mut var_a_um2: f64 = 0.0;
+        let mut var_guard41: f64 = 0.0;
+        let mut var_guard42: f64 = 0.0;
+        let mut var_guard46: f64 = 0.0;
+        let mut var_guard47: f64 = 0.0;
+        let mut var_guard48: f64 = 0.0;
+        let mut var_guard49: f64 = 0.0;
+        let mut var_guard51: f64 = 0.0;
+        let mut var_guard53: f64 = 0.0;
+        let mut var_guard54: f64 = 0.0;
+        let mut var_guard55: f64 = 0.0;
+        let mut var_guard57: f64 = 0.0;
+        let mut var_guard59: f64 = 0.0;
+        let mut var_guard60: f64 = 0.0;
+        let mut var_guard62: f64 = 0.0;
+        let mut var_guard64: f64 = 0.0;
+        let mut var_guard70: f64 = 0.0;
+        let mut var_guard71: f64 = 0.0;
+        let mut var_guard72: f64 = 0.0;
+        let mut var_guard73: f64 = 0.0;
+        let mut var_guard75: f64 = 0.0;
+        let mut var_guard76: f64 = 0.0;
+        let mut var_guard78: f64 = 0.0;
+        let mut var_guard79: f64 = 0.0;
+        let mut var_guard80: f64 = 0.0;
+        let mut var_guard82: f64 = 0.0;
+        let mut var_guard89: f64 = 0.0;
 
-        Self::stamp_transient_block_0(ctx, s, p, nodes, param_given);
-        Self::stamp_transient_block_1(s, p);
+        Self::stamp_transient_block_0(ctx, p, param_given, &mut var_g0, &mut var_guard41, &mut var_guard42, &mut var_guard46, &mut var_guard47, &mut var_guard48, &mut var_guard49, &mut var_guard51, &mut var_guard53, &mut var_guard54, &mut var_guard55, &mut var_guard57, &mut var_guard59, &mut var_l_um, &mut var_leff_um, &mut var_lfactor, &mut var_r0, &mut var_scalefac, &mut var_shrinkl, &mut var_tdevc, &mut var_tdevc_dn0, &mut var_tdevc_dn1, &mut var_tdevc_dn2, &mut var_tinik, &mut var_w_um, &mut var_weff_um, &mut var_xleff);
+        Self::stamp_transient_block_1(ctx, p, nodes, var_guard48, var_guard53, var_guard59, var_lfactor, var_tinik, var_xleff, &mut var_a_um2, &mut var_cth, &mut var_delt, &mut var_delt_dn0, &mut var_delt_dn1, &mut var_delt_dn2, &mut var_e, &mut var_e_dn0, &mut var_e_dn1, &mut var_e_dn2, &mut var_g0, &mut var_gth, &mut var_guard60, &mut var_guard62, &mut var_guard64, &mut var_guard70, &mut var_guard71, &mut var_guard72, &mut var_guard73, &mut var_guard75, &mut var_guard76, &mut var_guard78, &mut var_guard79, &mut var_guard80, &mut var_guard82, &mut var_l_um, &mut var_l_umfore, &mut var_leff_um, &mut var_p_um, &mut var_r0, &mut var_r0_t, &mut var_r0_t_dn0, &mut var_r0_t_dn1, &mut var_r0_t_dn2, &mut var_tc1e, &mut var_tc2e, &mut var_tcr, &mut var_tcr_dn0, &mut var_tcr_dn1, &mut var_tcr_dn2, &mut var_tdevc, &mut var_tdevc_dn0, &mut var_tdevc_dn1, &mut var_tdevc_dn2, &mut var_tdevk, &mut var_tdevk_dn0, &mut var_tdevk_dn1, &mut var_tdevk_dn2, &mut var_vin, &mut var_vin_dn0, &mut var_vin_dn1, &mut var_vin_dn2, &mut var_vrth, &mut var_vrth_dn0, &mut var_vrth_dn1, &mut var_vrth_dn2, &mut var_w_um, &mut var_weff_um);
+        Self::stamp_transient_block_2(p, var_cth, var_e, var_e_dn0, var_e_dn1, var_e_dn2, var_g0, var_gth, var_guard82, var_r0, var_r0_t, var_r0_t_dn0, var_r0_t_dn1, var_r0_t_dn2, var_vin, var_vin_dn0, var_vin_dn1, var_vin_dn2, var_vrth, var_vrth_dn0, var_vrth_dn1, var_vrth_dn2, &mut var_cbrf, &mut var_cbrf_dn0, &mut var_cbrf_dn1, &mut var_cbrf_dn2, &mut var_guard89, &mut var_i, &mut var_i_dn0, &mut var_i_dn1, &mut var_i_dn2, &mut var_irth, &mut var_irth_dn0, &mut var_irth_dn1, &mut var_irth_dn2, &mut var_ith, &mut var_ith_dn0, &mut var_ith_dn1, &mut var_ith_dn2, &mut var_q2e, &mut var_q2e_dn0, &mut var_q2e_dn1, &mut var_q2e_dn2, &mut var_q3e, &mut var_q3e_dn0, &mut var_q3e_dn1, &mut var_q3e_dn2, &mut var_qcth, &mut var_qcth_dn0, &mut var_qcth_dn1, &mut var_qcth_dn2, &mut var_r_dc, &mut var_r_dc_dn0, &mut var_r_dc_dn1, &mut var_r_dc_dn2, &mut var_rfactor, &mut var_rfactor_dn0, &mut var_rfactor_dn1, &mut var_rfactor_dn2, &mut var_sqrf, &mut var_sqrf_dn0, &mut var_sqrf_dn1, &mut var_sqrf_dn2, &mut var_v, &mut var_v_dn0, &mut var_v_dn1, &mut var_v_dn2);
 
-        let eq0_value: f64 = s.v[1];
+        let eq0_value: f64 = var_i;
         stamper.stamp_current_node3_local(
             Some(0),
             Some(1),
             multiplicity * (eq0_value),
             0,
-            multiplicity * (s.dn[1][0]),
+            multiplicity * (var_i_dn0),
             1,
-            multiplicity * (s.dn[1][1]),
+            multiplicity * (var_i_dn1),
             2,
-            multiplicity * (s.dn[1][2]),
+            multiplicity * (var_i_dn2),
         );
         let (eq1_e56, eq1_e56_d_n0, eq1_e56_d_n1, eq1_e56_d_n2,) = {
     if (p.p7 != 0.0) {
-        (s.v[44], s.dn[44][0], s.dn[44][1], s.dn[44][2],)
+        (var_irth, var_irth_dn0, var_irth_dn1, var_irth_dn2,)
     } else {
         (0.0, 0.0, 0.0, 0.0,)
     }
@@ -157,7 +268,7 @@ impl Instance {
         );
         let (eq2_e60, eq2_e60_d_n0, eq2_e60_d_n1, eq2_e60_d_n2,) = {
     if (p.p7 != 0.0) {
-        (s.v[43], s.dn[43][0], s.dn[43][1], s.dn[43][2],)
+        (var_ith, var_ith_dn0, var_ith_dn1, var_ith_dn2,)
     } else {
         (0.0, 0.0, 0.0, 0.0,)
     }
@@ -176,8 +287,11 @@ impl Instance {
         );
         let (eq3_e67, eq3_e67_d_n0, eq3_e67_d_n1, eq3_e67_d_n2,) = {
     if (p.p7 == 0.0) {
-        let eq3_e65: f64 = (1000000.0 * s.v[42]);
-        (eq3_e65, (1000000.0 * s.dn[42][0]), (1000000.0 * s.dn[42][1]), (1000000.0 * s.dn[42][2]),)
+        let eq3_e65: f64 = (1000000.0 * var_vrth);
+        let eq3_e65_d_n0: f64 = (1000000.0 * var_vrth_dn0);
+        let eq3_e65_d_n1: f64 = (1000000.0 * var_vrth_dn1);
+        let eq3_e65_d_n2: f64 = (1000000.0 * var_vrth_dn2);
+        (eq3_e65, eq3_e65_d_n0, eq3_e65_d_n1, eq3_e65_d_n2,)
     } else {
         (0.0, 0.0, 0.0, 0.0,)
     }
@@ -196,8 +310,8 @@ impl Instance {
         );
         let (eq4_e72, eq4_e72_d_n0, eq4_e72_d_n1, eq4_e72_d_n2,) = {
     if (p.p7 != 0.0) {
-        let eq4_e70: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, s.v[45]);
-        (eq4_e70, (s.dn[45][0] * ddt_scale), (s.dn[45][1] * ddt_scale), (s.dn[45][2] * ddt_scale),)
+        let eq4_e70: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, var_qcth);
+        (eq4_e70, (var_qcth_dn0 * ddt_scale), (var_qcth_dn1 * ddt_scale), (var_qcth_dn2 * ddt_scale),)
     } else {
         (0.0, 0.0, 0.0, 0.0,)
     }
@@ -222,182 +336,238 @@ impl Instance {
         let branches = &(*self).branches;
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
-        let s = match &mut self.reactive_scratch {
-            Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(ReactiveScratch::new_box()).as_mut(),
-        };
+        let mut var_leff_um: f64 = 0.0;
+        let mut var_leff_um_rv: f64 = 0.0;
+        let mut var_leff_um_dn0: f64 = 0.0;
+        let mut var_leff_um_rdn0: f64 = 0.0;
+        let mut var_leff_um_dn1: f64 = 0.0;
+        let mut var_leff_um_rdn1: f64 = 0.0;
+        let mut var_leff_um_dn2: f64 = 0.0;
+        let mut var_leff_um_rdn2: f64 = 0.0;
+        let mut var_weff_um: f64 = 0.0;
+        let mut var_weff_um_rv: f64 = 0.0;
+        let mut var_weff_um_dn0: f64 = 0.0;
+        let mut var_weff_um_rdn0: f64 = 0.0;
+        let mut var_weff_um_dn1: f64 = 0.0;
+        let mut var_weff_um_rdn1: f64 = 0.0;
+        let mut var_weff_um_dn2: f64 = 0.0;
+        let mut var_weff_um_rdn2: f64 = 0.0;
+        let mut var_cth: f64 = 0.0;
+        let mut var_cth_rv: f64 = 0.0;
+        let mut var_cth_dn0: f64 = 0.0;
+        let mut var_cth_rdn0: f64 = 0.0;
+        let mut var_cth_dn1: f64 = 0.0;
+        let mut var_cth_rdn1: f64 = 0.0;
+        let mut var_cth_dn2: f64 = 0.0;
+        let mut var_cth_rdn2: f64 = 0.0;
+        let mut var_scalefac: f64 = 0.0;
+        let mut var_scalefac_rv: f64 = 0.0;
+        let mut var_scalefac_dn0: f64 = 0.0;
+        let mut var_scalefac_rdn0: f64 = 0.0;
+        let mut var_scalefac_dn1: f64 = 0.0;
+        let mut var_scalefac_rdn1: f64 = 0.0;
+        let mut var_scalefac_dn2: f64 = 0.0;
+        let mut var_scalefac_rdn2: f64 = 0.0;
+        let mut var_shrinkl: f64 = 0.0;
+        let mut var_shrinkl_rv: f64 = 0.0;
+        let mut var_shrinkl_dn0: f64 = 0.0;
+        let mut var_shrinkl_rdn0: f64 = 0.0;
+        let mut var_shrinkl_dn1: f64 = 0.0;
+        let mut var_shrinkl_rdn1: f64 = 0.0;
+        let mut var_shrinkl_dn2: f64 = 0.0;
+        let mut var_shrinkl_rdn2: f64 = 0.0;
+        let mut var_xleff: f64 = 0.0;
+        let mut var_xleff_rv: f64 = 0.0;
+        let mut var_xleff_dn0: f64 = 0.0;
+        let mut var_xleff_rdn0: f64 = 0.0;
+        let mut var_xleff_dn1: f64 = 0.0;
+        let mut var_xleff_rdn1: f64 = 0.0;
+        let mut var_xleff_dn2: f64 = 0.0;
+        let mut var_xleff_rdn2: f64 = 0.0;
+        let mut var_lfactor: f64 = 0.0;
+        let mut var_lfactor_rv: f64 = 0.0;
+        let mut var_lfactor_dn0: f64 = 0.0;
+        let mut var_lfactor_rdn0: f64 = 0.0;
+        let mut var_lfactor_dn1: f64 = 0.0;
+        let mut var_lfactor_rdn1: f64 = 0.0;
+        let mut var_lfactor_dn2: f64 = 0.0;
+        let mut var_lfactor_rdn2: f64 = 0.0;
+        let mut var_l_um: f64 = 0.0;
+        let mut var_l_um_rv: f64 = 0.0;
+        let mut var_l_um_dn0: f64 = 0.0;
+        let mut var_l_um_rdn0: f64 = 0.0;
+        let mut var_l_um_dn1: f64 = 0.0;
+        let mut var_l_um_rdn1: f64 = 0.0;
+        let mut var_l_um_dn2: f64 = 0.0;
+        let mut var_l_um_rdn2: f64 = 0.0;
+        let mut var_w_um: f64 = 0.0;
+        let mut var_w_um_rv: f64 = 0.0;
+        let mut var_w_um_dn0: f64 = 0.0;
+        let mut var_w_um_rdn0: f64 = 0.0;
+        let mut var_w_um_dn1: f64 = 0.0;
+        let mut var_w_um_rdn1: f64 = 0.0;
+        let mut var_w_um_dn2: f64 = 0.0;
+        let mut var_w_um_rdn2: f64 = 0.0;
+        let mut var_vrth: f64 = 0.0;
+        let mut var_vrth_rv: f64 = 0.0;
+        let mut var_vrth_dn0: f64 = 0.0;
+        let mut var_vrth_rdn0: f64 = 0.0;
+        let mut var_vrth_dn1: f64 = 0.0;
+        let mut var_vrth_rdn1: f64 = 0.0;
+        let mut var_vrth_dn2: f64 = 0.0;
+        let mut var_vrth_rdn2: f64 = 0.0;
+        let mut var_qcth: f64 = 0.0;
+        let mut var_qcth_rv: f64 = 0.0;
+        let mut var_qcth_dn0: f64 = 0.0;
+        let mut var_qcth_rdn0: f64 = 0.0;
+        let mut var_qcth_dn1: f64 = 0.0;
+        let mut var_qcth_rdn1: f64 = 0.0;
+        let mut var_qcth_dn2: f64 = 0.0;
+        let mut var_qcth_rdn2: f64 = 0.0;
+        let mut var_p_um: f64 = 0.0;
+        let mut var_p_um_rv: f64 = 0.0;
+        let mut var_p_um_dn0: f64 = 0.0;
+        let mut var_p_um_rdn0: f64 = 0.0;
+        let mut var_p_um_dn1: f64 = 0.0;
+        let mut var_p_um_rdn1: f64 = 0.0;
+        let mut var_p_um_dn2: f64 = 0.0;
+        let mut var_p_um_rdn2: f64 = 0.0;
+        let mut var_a_um2: f64 = 0.0;
+        let mut var_a_um2_rv: f64 = 0.0;
+        let mut var_a_um2_dn0: f64 = 0.0;
+        let mut var_a_um2_rdn0: f64 = 0.0;
+        let mut var_a_um2_dn1: f64 = 0.0;
+        let mut var_a_um2_rdn1: f64 = 0.0;
+        let mut var_a_um2_dn2: f64 = 0.0;
+        let mut var_a_um2_rdn2: f64 = 0.0;
+        let mut var_guard41: f64 = 0.0;
+        let mut var_guard41_rv: f64 = 0.0;
+        let mut var_guard41_dn0: f64 = 0.0;
+        let mut var_guard41_rdn0: f64 = 0.0;
+        let mut var_guard41_dn1: f64 = 0.0;
+        let mut var_guard41_rdn1: f64 = 0.0;
+        let mut var_guard41_dn2: f64 = 0.0;
+        let mut var_guard41_rdn2: f64 = 0.0;
+        let mut var_guard42: f64 = 0.0;
+        let mut var_guard42_rv: f64 = 0.0;
+        let mut var_guard42_dn0: f64 = 0.0;
+        let mut var_guard42_rdn0: f64 = 0.0;
+        let mut var_guard42_dn1: f64 = 0.0;
+        let mut var_guard42_rdn1: f64 = 0.0;
+        let mut var_guard42_dn2: f64 = 0.0;
+        let mut var_guard42_rdn2: f64 = 0.0;
+        let mut var_guard46: f64 = 0.0;
+        let mut var_guard46_rv: f64 = 0.0;
+        let mut var_guard46_dn0: f64 = 0.0;
+        let mut var_guard46_rdn0: f64 = 0.0;
+        let mut var_guard46_dn1: f64 = 0.0;
+        let mut var_guard46_rdn1: f64 = 0.0;
+        let mut var_guard46_dn2: f64 = 0.0;
+        let mut var_guard46_rdn2: f64 = 0.0;
+        let mut var_guard47: f64 = 0.0;
+        let mut var_guard47_rv: f64 = 0.0;
+        let mut var_guard47_dn0: f64 = 0.0;
+        let mut var_guard47_rdn0: f64 = 0.0;
+        let mut var_guard47_dn1: f64 = 0.0;
+        let mut var_guard47_rdn1: f64 = 0.0;
+        let mut var_guard47_dn2: f64 = 0.0;
+        let mut var_guard47_rdn2: f64 = 0.0;
+        let mut var_guard48: f64 = 0.0;
+        let mut var_guard48_rv: f64 = 0.0;
+        let mut var_guard48_dn0: f64 = 0.0;
+        let mut var_guard48_rdn0: f64 = 0.0;
+        let mut var_guard48_dn1: f64 = 0.0;
+        let mut var_guard48_rdn1: f64 = 0.0;
+        let mut var_guard48_dn2: f64 = 0.0;
+        let mut var_guard48_rdn2: f64 = 0.0;
+        let mut var_guard49: f64 = 0.0;
+        let mut var_guard49_rv: f64 = 0.0;
+        let mut var_guard49_dn0: f64 = 0.0;
+        let mut var_guard49_rdn0: f64 = 0.0;
+        let mut var_guard49_dn1: f64 = 0.0;
+        let mut var_guard49_rdn1: f64 = 0.0;
+        let mut var_guard49_dn2: f64 = 0.0;
+        let mut var_guard49_rdn2: f64 = 0.0;
+        let mut var_guard51: f64 = 0.0;
+        let mut var_guard51_rv: f64 = 0.0;
+        let mut var_guard51_dn0: f64 = 0.0;
+        let mut var_guard51_rdn0: f64 = 0.0;
+        let mut var_guard51_dn1: f64 = 0.0;
+        let mut var_guard51_rdn1: f64 = 0.0;
+        let mut var_guard51_dn2: f64 = 0.0;
+        let mut var_guard51_rdn2: f64 = 0.0;
+        let mut var_guard53: f64 = 0.0;
+        let mut var_guard53_rv: f64 = 0.0;
+        let mut var_guard53_dn0: f64 = 0.0;
+        let mut var_guard53_rdn0: f64 = 0.0;
+        let mut var_guard53_dn1: f64 = 0.0;
+        let mut var_guard53_rdn1: f64 = 0.0;
+        let mut var_guard53_dn2: f64 = 0.0;
+        let mut var_guard53_rdn2: f64 = 0.0;
+        let mut var_guard54: f64 = 0.0;
+        let mut var_guard54_rv: f64 = 0.0;
+        let mut var_guard54_dn0: f64 = 0.0;
+        let mut var_guard54_rdn0: f64 = 0.0;
+        let mut var_guard54_dn1: f64 = 0.0;
+        let mut var_guard54_rdn1: f64 = 0.0;
+        let mut var_guard54_dn2: f64 = 0.0;
+        let mut var_guard54_rdn2: f64 = 0.0;
+        let mut var_guard55: f64 = 0.0;
+        let mut var_guard55_rv: f64 = 0.0;
+        let mut var_guard55_dn0: f64 = 0.0;
+        let mut var_guard55_rdn0: f64 = 0.0;
+        let mut var_guard55_dn1: f64 = 0.0;
+        let mut var_guard55_rdn1: f64 = 0.0;
+        let mut var_guard55_dn2: f64 = 0.0;
+        let mut var_guard55_rdn2: f64 = 0.0;
+        let mut var_guard57: f64 = 0.0;
+        let mut var_guard57_rv: f64 = 0.0;
+        let mut var_guard57_dn0: f64 = 0.0;
+        let mut var_guard57_rdn0: f64 = 0.0;
+        let mut var_guard57_dn1: f64 = 0.0;
+        let mut var_guard57_rdn1: f64 = 0.0;
+        let mut var_guard57_dn2: f64 = 0.0;
+        let mut var_guard57_rdn2: f64 = 0.0;
+        let mut var_guard59: f64 = 0.0;
+        let mut var_guard59_rv: f64 = 0.0;
+        let mut var_guard59_dn0: f64 = 0.0;
+        let mut var_guard59_rdn0: f64 = 0.0;
+        let mut var_guard59_dn1: f64 = 0.0;
+        let mut var_guard59_rdn1: f64 = 0.0;
+        let mut var_guard59_dn2: f64 = 0.0;
+        let mut var_guard59_rdn2: f64 = 0.0;
+        let mut var_guard60: f64 = 0.0;
+        let mut var_guard60_rv: f64 = 0.0;
+        let mut var_guard60_dn0: f64 = 0.0;
+        let mut var_guard60_rdn0: f64 = 0.0;
+        let mut var_guard60_dn1: f64 = 0.0;
+        let mut var_guard60_rdn1: f64 = 0.0;
+        let mut var_guard60_dn2: f64 = 0.0;
+        let mut var_guard60_rdn2: f64 = 0.0;
+        let mut var_guard75: f64 = 0.0;
+        let mut var_guard75_rv: f64 = 0.0;
+        let mut var_guard75_dn0: f64 = 0.0;
+        let mut var_guard75_rdn0: f64 = 0.0;
+        let mut var_guard75_dn1: f64 = 0.0;
+        let mut var_guard75_rdn1: f64 = 0.0;
+        let mut var_guard75_dn2: f64 = 0.0;
+        let mut var_guard75_rdn2: f64 = 0.0;
+        let mut var_guard76: f64 = 0.0;
+        let mut var_guard76_rv: f64 = 0.0;
+        let mut var_guard76_dn0: f64 = 0.0;
+        let mut var_guard76_rdn0: f64 = 0.0;
+        let mut var_guard76_dn1: f64 = 0.0;
+        let mut var_guard76_rdn1: f64 = 0.0;
+        let mut var_guard76_dn2: f64 = 0.0;
+        let mut var_guard76_rdn2: f64 = 0.0;
 
-        s.b[51] = param_given[10];
-        s.store_scalar(51, if s.b[51] { 1.0 } else { 0.0 });
-
-        if s.b[51] {
-            s.store_scalar(13, p.p10);
-        }
-
-        if (!s.b[51]) {
-            s.store_scalar(13, 1.0);
-        }
-
-        s.b[52] = param_given[11];
-        s.store_scalar(52, if s.b[52] { 1.0 } else { 0.0 });
-
-        if s.b[52] {
-            s.store_scalar(14, (1.0 - (0.01 * p.p11)));
-        }
-
-        if (!s.b[52]) {
-            s.store_scalar(14, 1.0);
-        }
-
-        s.store_scaled_mul(18, 14, 13, 1000000.0);
-
-        s.b[56] = ((p.p3 != 0.0) && (p.p4 != 0.0));
-        s.store_scalar(56, if s.b[56] { 1.0 } else { 0.0 });
-
-        if s.b[56] {
-            s.store_scalar(17, p.p23);
-        }
-
-        s.b[57] = ((p.p3 != 0.0) || (p.p4 != 0.0));
-        s.store_scalar(57, if s.b[57] { 1.0 } else { 0.0 });
-
-        if ((!s.b[56]) && s.b[57]) {
-            s.store_scalar(17, (p.p23 * 0.5));
-        }
-
-        if ((!s.b[56]) && (!s.b[57])) {
-            s.store_scalar(17, 0.0);
-        }
-
-        s.b[58] = ((param_given[1] && param_given[2]) && (!param_given[0]));
-        s.store_scalar(58, if s.b[58] { 1.0 } else { 0.0 });
-
-        s.b[59] = ((p.p2 == 0.0) || (p.p1 == 0.0));
-        s.store_scalar(59, if s.b[59] { 1.0 } else { 0.0 });
-
-        if (s.b[58] && s.b[59]) {
-            s.store_scalar(19, 0.0);
-            s.store_scalar(3, 0.0);
-            s.store_scale(20, 18, p.p0);
-            s.store_offset(4, 20, p.p22);
-        }
-
-        if (s.b[58] && (!s.b[59])) {
-            s.store_scale(19, 18, p.p1);
-            s.store_add(3, 19, 17);
-        }
-
-        s.b[61] = (s.v[3] > 0.0);
-        s.store_scalar(61, if s.b[61] { 1.0 } else { 0.0 });
-
-        if ((s.b[58] && (!s.b[59])) && s.b[61]) {
-            s.store_scale(4, 3, (p.p17 / p.p2));
-            s.store_offset(20, 4, (-p.p22));
-        }
-
-        if ((s.b[58] && (!s.b[59])) && (!s.b[61])) {
-            s.store_scale(20, 18, p.p0);
-            s.store_offset(4, 20, p.p22);
-        }
-
-        s.b[63] = (param_given[2] && (!param_given[1]));
-        s.store_scalar(63, if s.b[63] { 1.0 } else { 0.0 });
-
-        s.b[64] = (p.p2 == 0.0);
-        s.store_scalar(64, if s.b[64] { 1.0 } else { 0.0 });
-
-        if (((!s.b[58]) && s.b[63]) && s.b[64]) {
-            s.store_scalar(19, 0.0);
-            s.store_scalar(3, 0.0);
-            s.store_scale(20, 18, p.p0);
-            s.store_offset(4, 20, p.p22);
-        }
-
-        s.b[65] = (p.p0 == 0.0);
-        s.store_scalar(65, if s.b[65] { 1.0 } else { 0.0 });
-
-        if ((((!s.b[58]) && s.b[63]) && (!s.b[64])) && s.b[65]) {
-            s.store_scalar(20, 0.0);
-            s.store_scalar(4, 0.0);
-            s.store_scale(19, 18, p.p1);
-            s.store_add(3, 19, 17);
-        }
-
-        if ((((!s.b[58]) && s.b[63]) && (!s.b[64])) && (!s.b[65])) {
-            s.store_scale(20, 18, p.p0);
-            s.store_offset(4, 20, p.p22);
-        }
-
-        s.b[67] = (s.v[4] > 0.0);
-        s.store_scalar(67, if s.b[67] { 1.0 } else { 0.0 });
-
-        if (((((!s.b[58]) && s.b[63]) && (!s.b[64])) && (!s.b[65])) && s.b[67]) {
-            s.store_scale(3, 4, (p.p2 / p.p17));
-            s.store_sub(19, 3, 17);
-        }
-
-        if (((((!s.b[58]) && s.b[63]) && (!s.b[64])) && (!s.b[65])) && (!s.b[67])) {
-            s.store_scale(19, 18, p.p1);
-            s.store_add(3, 19, 17);
-        }
-
-        s.b[69] = (p.p0 == 0.0);
-        s.store_scalar(69, if s.b[69] { 1.0 } else { 0.0 });
-
-        if (((!s.b[58]) && (!s.b[63])) && s.b[69]) {
-            s.store_scalar(20, 0.0);
-            s.store_scalar(4, 0.0);
-            s.store_scale(19, 18, p.p1);
-            s.store_add(3, 19, 17);
-        }
-
-        s.b[70] = (p.p1 == 0.0);
-        s.store_scalar(70, if s.b[70] { 1.0 } else { 0.0 });
-
-        if ((((!s.b[58]) && (!s.b[63])) && (!s.b[69])) && s.b[70]) {
-            s.store_scalar(19, 0.0);
-            s.store_scalar(3, 0.0);
-            s.store_scale(20, 18, p.p0);
-            s.store_offset(4, 20, p.p22);
-        }
-
-        if ((((!s.b[58]) && (!s.b[63])) && (!s.b[69])) && (!s.b[70])) {
-            s.store_scale(20, 18, p.p0);
-            s.store_offset(4, 20, p.p22);
-            s.store_scale(19, 18, p.p1);
-            s.store_add(3, 19, 17);
-        }
-
-        s.b[85] = ((p.p3 != 0.0) && (p.p4 != 0.0));
-        s.store_scalar(85, if s.b[85] { 1.0 } else { 0.0 });
-
-        if s.b[85] {
-            s.store_scaled_add(46, 19, 20, 2.0);
-        }
-
-        s.b[86] = ((p.p3 != 0.0) || (p.p4 != 0.0));
-        s.store_scalar(86, if s.b[86] { 1.0 } else { 0.0 });
-
-        if ((!s.b[85]) && s.b[86]) {
-            s.store_add_scaled_inputs(46, 19, 2.0, 20, 1.0);
-        }
-
-        if ((!s.b[85]) && (!s.b[86])) {
-            s.store_scale(46, 19, 2.0);
-        }
-
-        s.store_mul(47, 19, 20);
-
-        s.store_add_scaled_ad_lhs(9, A::scale_offset(s.ad_value(46), p.p48, p.p47), 47, p.p49);
-
-        s.store_voltage(42, ctx, nodes, Some(2), None);
-
-        s.store_mul(45, 42, 9);
+        Self::stamp_reactive_block_0(p, param_given, &mut var_guard41, &mut var_guard41_dn0, &mut var_guard41_dn1, &mut var_guard41_dn2, &mut var_guard41_rdn0, &mut var_guard41_rdn1, &mut var_guard41_rdn2, &mut var_guard41_rv, &mut var_guard42, &mut var_guard42_dn0, &mut var_guard42_dn1, &mut var_guard42_dn2, &mut var_guard42_rdn0, &mut var_guard42_rdn1, &mut var_guard42_rdn2, &mut var_guard42_rv, &mut var_guard46, &mut var_guard46_dn0, &mut var_guard46_dn1, &mut var_guard46_dn2, &mut var_guard46_rdn0, &mut var_guard46_rdn1, &mut var_guard46_rdn2, &mut var_guard46_rv, &mut var_guard47, &mut var_guard47_dn0, &mut var_guard47_dn1, &mut var_guard47_dn2, &mut var_guard47_rdn0, &mut var_guard47_rdn1, &mut var_guard47_rdn2, &mut var_guard47_rv, &mut var_guard48, &mut var_guard48_dn0, &mut var_guard48_dn1, &mut var_guard48_dn2, &mut var_guard48_rdn0, &mut var_guard48_rdn1, &mut var_guard48_rdn2, &mut var_guard48_rv, &mut var_guard49, &mut var_guard49_dn0, &mut var_guard49_dn1, &mut var_guard49_dn2, &mut var_guard49_rdn0, &mut var_guard49_rdn1, &mut var_guard49_rdn2, &mut var_guard49_rv, &mut var_guard51, &mut var_guard51_dn0, &mut var_guard51_dn1, &mut var_guard51_dn2, &mut var_guard51_rdn0, &mut var_guard51_rdn1, &mut var_guard51_rdn2, &mut var_guard51_rv, &mut var_guard53, &mut var_guard53_dn0, &mut var_guard53_dn1, &mut var_guard53_dn2, &mut var_guard53_rdn0, &mut var_guard53_rdn1, &mut var_guard53_rdn2, &mut var_guard53_rv, &mut var_guard54, &mut var_guard54_dn0, &mut var_guard54_dn1, &mut var_guard54_dn2, &mut var_guard54_rdn0, &mut var_guard54_rdn1, &mut var_guard54_rdn2, &mut var_guard54_rv, &mut var_guard55, &mut var_guard55_dn0, &mut var_guard55_dn1, &mut var_guard55_dn2, &mut var_guard55_rdn0, &mut var_guard55_rdn1, &mut var_guard55_rdn2, &mut var_guard55_rv, &mut var_l_um, &mut var_l_um_dn0, &mut var_l_um_dn1, &mut var_l_um_dn2, &mut var_l_um_rdn0, &mut var_l_um_rdn1, &mut var_l_um_rdn2, &mut var_l_um_rv, &mut var_leff_um, &mut var_leff_um_dn0, &mut var_leff_um_dn1, &mut var_leff_um_dn2, &mut var_leff_um_rdn0, &mut var_leff_um_rdn1, &mut var_leff_um_rdn2, &mut var_leff_um_rv, &mut var_lfactor, &mut var_lfactor_dn0, &mut var_lfactor_dn1, &mut var_lfactor_dn2, &mut var_lfactor_rdn0, &mut var_lfactor_rdn1, &mut var_lfactor_rdn2, &mut var_lfactor_rv, &mut var_scalefac, &mut var_scalefac_dn0, &mut var_scalefac_dn1, &mut var_scalefac_dn2, &mut var_scalefac_rdn0, &mut var_scalefac_rdn1, &mut var_scalefac_rdn2, &mut var_scalefac_rv, &mut var_shrinkl, &mut var_shrinkl_dn0, &mut var_shrinkl_dn1, &mut var_shrinkl_dn2, &mut var_shrinkl_rdn0, &mut var_shrinkl_rdn1, &mut var_shrinkl_rdn2, &mut var_shrinkl_rv, &mut var_w_um, &mut var_w_um_dn0, &mut var_w_um_dn1, &mut var_w_um_dn2, &mut var_w_um_rdn0, &mut var_w_um_rdn1, &mut var_w_um_rdn2, &mut var_w_um_rv, &mut var_weff_um, &mut var_weff_um_dn0, &mut var_weff_um_dn1, &mut var_weff_um_dn2, &mut var_weff_um_rdn0, &mut var_weff_um_rdn1, &mut var_weff_um_rdn2, &mut var_weff_um_rv, &mut var_xleff, &mut var_xleff_dn0, &mut var_xleff_dn1, &mut var_xleff_dn2, &mut var_xleff_rdn0, &mut var_xleff_rdn1, &mut var_xleff_rdn2, &mut var_xleff_rv);
+        Self::stamp_reactive_block_1(ctx, p, nodes, var_guard48, var_guard53, var_guard54, var_guard55, var_lfactor, var_lfactor_dn0, var_lfactor_dn1, var_lfactor_dn2, var_xleff, var_xleff_dn0, var_xleff_dn1, var_xleff_dn2, &mut var_a_um2, &mut var_a_um2_dn0, &mut var_a_um2_dn1, &mut var_a_um2_dn2, &mut var_a_um2_rdn0, &mut var_a_um2_rdn1, &mut var_a_um2_rdn2, &mut var_a_um2_rv, &mut var_cth, &mut var_cth_dn0, &mut var_cth_dn1, &mut var_cth_dn2, &mut var_cth_rdn0, &mut var_cth_rdn1, &mut var_cth_rdn2, &mut var_cth_rv, &mut var_guard57, &mut var_guard57_dn0, &mut var_guard57_dn1, &mut var_guard57_dn2, &mut var_guard57_rdn0, &mut var_guard57_rdn1, &mut var_guard57_rdn2, &mut var_guard57_rv, &mut var_guard59, &mut var_guard59_dn0, &mut var_guard59_dn1, &mut var_guard59_dn2, &mut var_guard59_rdn0, &mut var_guard59_rdn1, &mut var_guard59_rdn2, &mut var_guard59_rv, &mut var_guard60, &mut var_guard60_dn0, &mut var_guard60_dn1, &mut var_guard60_dn2, &mut var_guard60_rdn0, &mut var_guard60_rdn1, &mut var_guard60_rdn2, &mut var_guard60_rv, &mut var_guard75, &mut var_guard75_dn0, &mut var_guard75_dn1, &mut var_guard75_dn2, &mut var_guard75_rdn0, &mut var_guard75_rdn1, &mut var_guard75_rdn2, &mut var_guard75_rv, &mut var_guard76, &mut var_guard76_dn0, &mut var_guard76_dn1, &mut var_guard76_dn2, &mut var_guard76_rdn0, &mut var_guard76_rdn1, &mut var_guard76_rdn2, &mut var_guard76_rv, &mut var_l_um, &mut var_l_um_dn0, &mut var_l_um_dn1, &mut var_l_um_dn2, &mut var_l_um_rdn0, &mut var_l_um_rdn1, &mut var_l_um_rdn2, &mut var_l_um_rv, &mut var_leff_um, &mut var_leff_um_dn0, &mut var_leff_um_dn1, &mut var_leff_um_dn2, &mut var_leff_um_rdn0, &mut var_leff_um_rdn1, &mut var_leff_um_rdn2, &mut var_leff_um_rv, &mut var_p_um, &mut var_p_um_dn0, &mut var_p_um_dn1, &mut var_p_um_dn2, &mut var_p_um_rdn0, &mut var_p_um_rdn1, &mut var_p_um_rdn2, &mut var_p_um_rv, &mut var_qcth, &mut var_qcth_dn0, &mut var_qcth_dn1, &mut var_qcth_dn2, &mut var_qcth_rdn0, &mut var_qcth_rdn1, &mut var_qcth_rdn2, &mut var_qcth_rv, &mut var_vrth, &mut var_vrth_dn0, &mut var_vrth_dn1, &mut var_vrth_dn2, &mut var_vrth_rdn0, &mut var_vrth_rdn1, &mut var_vrth_rdn2, &mut var_vrth_rv, &mut var_w_um, &mut var_w_um_dn0, &mut var_w_um_dn1, &mut var_w_um_dn2, &mut var_w_um_rdn0, &mut var_w_um_rdn1, &mut var_w_um_rdn2, &mut var_w_um_rv, &mut var_weff_um, &mut var_weff_um_dn0, &mut var_weff_um_dn1, &mut var_weff_um_dn2, &mut var_weff_um_rdn0, &mut var_weff_um_rdn1, &mut var_weff_um_rdn2, &mut var_weff_um_rv);
 
         let (eq4_e72, eq4_e72_d_n0, eq4_e72_d_n1, eq4_e72_d_n2, eq4_e72_q,) = {
     if (p.p7 != 0.0) {
-        let eq4_e70_q: f64 = s.v[45];
-        (s.v[45], s.dn[45][0], s.dn[45][1], s.dn[45][2], eq4_e70_q,)
+        let eq4_e70_q: f64 = var_qcth;
+        (var_qcth, var_qcth_dn0, var_qcth_dn1, var_qcth_dn2, eq4_e70_q,)
     } else {
         (0.0, 0.0, 0.0, 0.0, 0.0,)
     }

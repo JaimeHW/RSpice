@@ -3,10 +3,6 @@
 use super::state::Instance;
 use crate::device::veriloga_generated::{GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
 
-use crate::device::veriloga_generated::support::{AdValue as GenericAdValue};
-
-type A = GenericAdValue<{ Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;
-
 const LIMEXP_MAX: f64 = 5.54062238439351e34;
 #[path = "stamp_blocks_0.rs"]
 mod stamp_blocks_0;

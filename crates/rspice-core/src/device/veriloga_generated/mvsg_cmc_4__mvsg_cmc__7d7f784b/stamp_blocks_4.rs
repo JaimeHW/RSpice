@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1391,7 +1391,6 @@ impl Instance {
         var_fn61_calc_iq__qinvv_db33 = assign5960_e7068_d_b33;
         var_fn61_calc_iq__qinvv_db34 = assign5960_e7068_d_b34;
         var_fn61_calc_iq__qinvv_db35 = assign5960_e7068_d_b35;
-
 
         *var_fn61_calc_iq__eta_slot = var_fn61_calc_iq__eta;
         *var_fn61_calc_iq__eta_db0_slot = var_fn61_calc_iq__eta_db0;
@@ -3442,7 +3441,6 @@ impl Instance {
         var_fn61_calc_iq__vdsats1_db34 = assign6020_e7173_d_b34;
         var_fn61_calc_iq__vdsats1_db35 = assign6020_e7173_d_b35;
 
-
         *var_fn61_calc_iq__muf_slot = var_fn61_calc_iq__muf;
         *var_fn61_calc_iq__muf_db0_slot = var_fn61_calc_iq__muf_db0;
         *var_fn61_calc_iq__muf_db1_slot = var_fn61_calc_iq__muf_db1;
@@ -5331,7 +5329,6 @@ impl Instance {
         var_fn61_calc_iq__fds_db33 = assign6070_e7347_d_b33;
         var_fn61_calc_iq__fds_db34 = assign6070_e7347_d_b34;
         var_fn61_calc_iq__fds_db35 = assign6070_e7347_d_b35;
-
 
         *var_fn61_calc_iq__fds_slot = var_fn61_calc_iq__fds;
         *var_fn61_calc_iq__fds_db0_slot = var_fn61_calc_iq__fds_db0;
@@ -7227,7 +7224,6 @@ impl Instance {
         let assign6160_e7420: f64 = if var_fn61_calc_iq__etas > 50.0 { 1.0 } else { 0.0 };
         var_guard69 = assign6160_e7420;
 
-
         *var_fn61_calc_iq__etas_slot = var_fn61_calc_iq__etas;
         *var_fn61_calc_iq__etas_db0_slot = var_fn61_calc_iq__etas_db0;
         *var_fn61_calc_iq__etas_db1_slot = var_fn61_calc_iq__etas_db1;
@@ -8718,7 +8714,6 @@ impl Instance {
         var_fn61_calc_iq__ffd_db33 = assign6250_e7490_d_b33;
         var_fn61_calc_iq__ffd_db34 = assign6250_e7490_d_b34;
         var_fn61_calc_iq__ffd_db35 = assign6250_e7490_d_b35;
-
 
         *var_fn61_calc_iq__exparg_slot = var_fn61_calc_iq__exparg;
         *var_fn61_calc_iq__exparg_db0_slot = var_fn61_calc_iq__exparg_db0;
@@ -10551,7 +10546,6 @@ impl Instance {
         var_fn61_calc_iq__vdsc_db33 = assign6330_e7574_d_b33;
         var_fn61_calc_iq__vdsc_db34 = assign6330_e7574_d_b34;
         var_fn61_calc_iq__vdsc_db35 = assign6330_e7574_d_b35;
-
 
         *var_fn61_calc_iq__etad_slot = var_fn61_calc_iq__etad;
         *var_fn61_calc_iq__etad_db0_slot = var_fn61_calc_iq__etad_db0;
@@ -12531,7 +12525,6 @@ impl Instance {
         var_fn61_calc_iq__two_n_phit0_db34 = assign6390_e7657_d_b34;
         var_fn61_calc_iq__two_n_phit0_db35 = assign6390_e7657_d_b35;
 
-
         *var_fn61_calc_iq__fsat_slot = var_fn61_calc_iq__fsat;
         *var_fn61_calc_iq__fsat_db0_slot = var_fn61_calc_iq__fsat_db0;
         *var_fn61_calc_iq__fsat_db1_slot = var_fn61_calc_iq__fsat_db1;
@@ -14379,7 +14372,6 @@ impl Instance {
         var_fn61_calc_iq__ff0_db33 = assign6470_e7761_d_b33;
         var_fn61_calc_iq__ff0_db34 = assign6470_e7761_d_b34;
         var_fn61_calc_iq__ff0_db35 = assign6470_e7761_d_b35;
-
 
         *var_fn61_calc_iq__exparg0_slot = var_fn61_calc_iq__exparg0;
         *var_fn61_calc_iq__exparg0_db0_slot = var_fn61_calc_iq__exparg0_db0;
@@ -16313,7 +16305,6 @@ impl Instance {
         var_fn61_calc_iq__vx0_db34 = assign6550_e7885_d_b34;
         var_fn61_calc_iq__vx0_db35 = assign6550_e7885_d_b35;
 
-
         *var_fn61_calc_iq__eta0_slot = var_fn61_calc_iq__eta0;
         *var_fn61_calc_iq__eta0_db0_slot = var_fn61_calc_iq__eta0_db0;
         *var_fn61_calc_iq__eta0_db1_slot = var_fn61_calc_iq__eta0_db1;
@@ -18163,7 +18154,6 @@ impl Instance {
         var_fn61_calc_iq__vdx0_db34 = assign6600_e7997_d_b34;
         var_fn61_calc_iq__vdx0_db35 = assign6600_e7997_d_b35;
 
-
         *var_fn61_calc_iq__fsd0_slot = var_fn61_calc_iq__fsd0;
         *var_fn61_calc_iq__fsd0_db0_slot = var_fn61_calc_iq__fsd0_db0;
         *var_fn61_calc_iq__fsd0_db1_slot = var_fn61_calc_iq__fsd0_db1;
@@ -19893,7 +19883,6 @@ impl Instance {
         var_fn61_calc_iq__ffs0_db33 = assign6680_e8124_d_b33;
         var_fn61_calc_iq__ffs0_db34 = assign6680_e8124_d_b34;
         var_fn61_calc_iq__ffs0_db35 = assign6680_e8124_d_b35;
-
 
         *var_fn61_calc_iq__exparg0_slot = var_fn61_calc_iq__exparg0;
         *var_fn61_calc_iq__exparg0_db0_slot = var_fn61_calc_iq__exparg0_db0;
@@ -21732,7 +21721,6 @@ impl Instance {
         let assign6780_e8206: f64 = if var_fn61_calc_iq__exparg0 < assign6780_e8205 { 1.0 } else { 0.0 };
         var_guard84 = assign6780_e8206;
 
-
         *var_fn61_calc_iq__etas0_slot = var_fn61_calc_iq__etas0;
         *var_fn61_calc_iq__etas0_db0_slot = var_fn61_calc_iq__etas0_db0;
         *var_fn61_calc_iq__etas0_db1_slot = var_fn61_calc_iq__etas0_db1;
@@ -23363,7 +23351,6 @@ impl Instance {
         var_fn61_calc_iq__qinvd0_db34 = assign6860_e8291_d_b34;
         var_fn61_calc_iq__qinvd0_db35 = assign6860_e8291_d_b35;
 
-
         *var_fn61_calc_iq__etad0_slot = var_fn61_calc_iq__etad0;
         *var_fn61_calc_iq__etad0_db0_slot = var_fn61_calc_iq__etad0_db0;
         *var_fn61_calc_iq__etad0_db1_slot = var_fn61_calc_iq__etad0_db1;
@@ -24977,7 +24964,6 @@ impl Instance {
         var_fn61_calc_iq__qinvdd_db33 = assign6920_e8349_d_b33;
         var_fn61_calc_iq__qinvdd_db34 = assign6920_e8349_d_b34;
         var_fn61_calc_iq__qinvdd_db35 = assign6920_e8349_d_b35;
-
 
         *var_fn61_calc_iq__qd2_slot = var_fn61_calc_iq__qd2;
         *var_fn61_calc_iq__qd2_db0_slot = var_fn61_calc_iq__qd2_db0;
@@ -27493,7 +27479,6 @@ impl Instance {
         let assign7000_e8443: f64 = if var_fn61_calc_iq__etac > 50.0 { 1.0 } else { 0.0 };
         var_guard88 = assign7000_e8443;
 
-
         *var_fn61_calc_iq__etac_slot = var_fn61_calc_iq__etac;
         *var_fn61_calc_iq__etac_db0_slot = var_fn61_calc_iq__etac_db0;
         *var_fn61_calc_iq__etac_db1_slot = var_fn61_calc_iq__etac_db1;
@@ -29196,7 +29181,6 @@ impl Instance {
         let assign7090_e8531: f64 = (-50.0);
         let assign7090_e8532: f64 = if var_fn61_calc_iq__etab < assign7090_e8531 { 1.0 } else { 0.0 };
         var_guard91 = assign7090_e8532;
-
 
         *var_fn61_calc_iq__etab_slot = var_fn61_calc_iq__etab;
         *var_fn61_calc_iq__etab_db0_slot = var_fn61_calc_iq__etab_db0;

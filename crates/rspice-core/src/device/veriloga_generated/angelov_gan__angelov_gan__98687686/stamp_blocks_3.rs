@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1437,7 +1437,6 @@ impl Instance {
         var_qgs0_rdb16 = 0.0;
         var_qgs0_rdb17 = 0.0;
         var_qgs0_rdb18 = 0.0;
-
 
         *var_lc1_slot = var_lc1;
         *var_lc1_db0_slot = var_lc1_db0;
@@ -3500,7 +3499,6 @@ impl Instance {
         var_lc4_rdb17 = 0.0;
         var_lc4_rdb18 = 0.0;
 
-
         *var_cosh0_slot = var_cosh0;
         *var_cosh0_db0_slot = var_cosh0_db0;
         *var_cosh0_db1_slot = var_cosh0_db1;
@@ -5437,7 +5435,6 @@ impl Instance {
         var_guard19_rdb17 = 0.0;
         var_guard19_rdb18 = 0.0;
 
-
         *var_cgd_slot = var_cgd;
         *var_cgd_db0_slot = var_cgd_db0;
         *var_cgd_db1_slot = var_cgd_db1;
@@ -7254,7 +7251,6 @@ impl Instance {
         var_gm_rdb16 = 0.0;
         var_gm_rdb17 = 0.0;
         var_gm_rdb18 = 0.0;
-
 
         *var_gm_slot = var_gm;
         *var_gm_db0_slot = var_gm_db0;
@@ -9131,7 +9127,6 @@ impl Instance {
         var_td_prime_rdb17 = 0.0;
         var_td_prime_rdb18 = 0.0;
 
-
         *var_gm_slot = var_gm;
         *var_gm_db0_slot = var_gm_db0;
         *var_gm_db1_slot = var_gm_db1;
@@ -10794,7 +10789,6 @@ impl Instance {
         var_noisepwrg_rdb17 = 0.0;
         var_noisepwrg_rdb18 = 0.0;
 
-
         *var_guard36_slot = var_guard36;
         *var_guard36_db0_slot = var_guard36_db0;
         *var_guard36_db1_slot = var_guard36_db1;
@@ -12442,7 +12436,6 @@ impl Instance {
         var_guard44_rdb16 = 0.0;
         var_guard44_rdb17 = 0.0;
         var_guard44_rdb18 = 0.0;
-
 
         *var_ci_slot = var_ci;
         *var_ci_db0_slot = var_ci_db0;

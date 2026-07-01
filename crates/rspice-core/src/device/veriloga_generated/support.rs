@@ -34544,7 +34544,7 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_mul_div_scaled_inputs_mixed_aaa(
+    pub(crate) fn store_mul_div_scaled_inputs(
         &mut self,
         index: usize,
         factor: AdValue<NODE_COUNT, BRANCH_COUNT>,
@@ -34792,7 +34792,7 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_mul_div_scaled_product_mixed_aaaa(
+    pub(crate) fn store_mul_div_scaled_product(
         &mut self,
         index: usize,
         factor: AdValue<NODE_COUNT, BRANCH_COUNT>,
@@ -73320,7 +73320,7 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_mul_div_scaled_inputs_mixed_aaa(
+    pub(crate) fn store_mul_div_scaled_inputs(
         &mut self,
         index: usize,
         factor: AdValue<NODE_COUNT, BRANCH_COUNT>,
@@ -73568,7 +73568,7 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_mul_div_scaled_product_mixed_aaaa(
+    pub(crate) fn store_mul_div_scaled_product(
         &mut self,
         index: usize,
         factor: AdValue<NODE_COUNT, BRANCH_COUNT>,
@@ -77565,6 +77565,15 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
             dn: [0.0; NODE_COUNT],
             db: [0.0; BRANCH_COUNT],
         }
+    }
+
+    #[inline]
+    pub(crate) fn from_derivatives(
+        value: f64,
+        dn: [f64; NODE_COUNT],
+        db: [f64; BRANCH_COUNT],
+    ) -> Self {
+        Self { value, dn, db }
     }
     #[inline]
     pub(crate) fn voltage(

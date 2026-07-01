@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -685,7 +685,6 @@ impl Instance {
         var_dnj1_dv_db1 = assign30980_e46409_d_b1;
         var_dnj1_dv_db2 = assign30980_e46409_d_b2;
         var_dnj1_dv_db3 = assign30980_e46409_d_b3;
-
 
         *var_dfn_sl_slot = var_dfn_sl;
         *var_dfn_sl_db0_slot = var_dfn_sl_db0;
@@ -1510,7 +1509,6 @@ impl Instance {
         var_tmf2_db1 = assign31280_e47043_d_b1;
         var_tmf2_db2 = assign31280_e47043_d_b2;
         var_tmf2_db3 = assign31280_e47043_d_b3;
-
 
         *var_dfn_sl_slot = var_dfn_sl;
         *var_dfn_sl_db0_slot = var_dfn_sl_db0;
@@ -2382,7 +2380,6 @@ impl Instance {
         var_tmf2_db2 = assign34270_e51565_d_b2;
         var_tmf2_db3 = assign34270_e51565_d_b3;
 
-
         *var_dnj1_dv_slot = var_dnj1_dv;
         *var_dnj1_dv_db0_slot = var_dnj1_dv_db0;
         *var_dnj1_dv_db1_slot = var_dnj1_dv_db1;
@@ -3135,7 +3132,6 @@ impl Instance {
         var_exp_k_db1 = assign34480_e51908_d_b1;
         var_exp_k_db2 = assign34480_e51908_d_b2;
         var_exp_k_db3 = assign34480_e51908_d_b3;
-
 
         *var_exp_a_slot = var_exp_a;
         *var_exp_a_db0_slot = var_exp_a_db0;
@@ -4059,7 +4055,6 @@ impl Instance {
         var_q_qs_k_db2 = assign34750_e52250_d_b2;
         var_q_qs_k_db3 = assign34750_e52250_d_b3;
 
-
         *var_exp_a2_slot = var_exp_a2;
         *var_exp_a2_db0_slot = var_exp_a2_db0;
         *var_exp_a2_db1_slot = var_exp_a2_db1;
@@ -4718,7 +4713,6 @@ impl Instance {
 
         let assign35090_e52542: f64 = if ((p.p84 > 0.0) && (p.p95 > 0.0)) { 1.0 } else { 0.0 };
         var_guard572 = assign35090_e52542;
-
 
         *var_guard567_slot = var_guard567;
         *var_guard568_slot = var_guard568;
@@ -6066,7 +6060,6 @@ impl Instance {
         var_swjunexp_i_rdb1 = 0.0;
         var_swjunexp_i_rdb2 = 0.0;
         var_swjunexp_i_rdb3 = 0.0;
-
 
         *var_epssi_slot = var_epssi;
         *var_epssi_db0_slot = var_epssi_db0;
@@ -7839,7 +7832,6 @@ impl Instance {
         var_phigdgat_rdb1 = 0.0;
         var_phigdgat_rdb2 = 0.0;
         var_phigdgat_rdb3 = 0.0;
-
 
         *var_auxt_slot = var_auxt;
         *var_auxt_db0_slot = var_auxt_db0;
@@ -9842,7 +9834,6 @@ impl Instance {
         var_dn_rdb2 = 0.0;
         var_dn_rdb3 = 0.0;
 
-
         *var_dn_slot = var_dn;
         *var_dn_db0_slot = var_dn_db0;
         *var_dn_db1_slot = var_dn_db1;
@@ -11679,7 +11670,6 @@ impl Instance {
         var_guard8_rdb2 = 0.0;
         var_guard8_rdb3 = 0.0;
 
-
         *var_ab_i_slot = var_ab_i;
         *var_ab_i_db0_slot = var_ab_i_db0;
         *var_ab_i_db1_slot = var_ab_i_db1;
@@ -13302,7 +13292,6 @@ impl Instance {
         var_guard27_rdb1 = 0.0;
         var_guard27_rdb2 = 0.0;
         var_guard27_rdb3 = 0.0;
-
 
         *var_guard26_slot = var_guard26;
         *var_guard26_db0_slot = var_guard26_db0;
@@ -14950,7 +14939,6 @@ impl Instance {
         var_nja10_rdb2 = 0.0;
         var_nja10_rdb3 = 0.0;
 
-
         *var_fraci_slot = var_fraci;
         *var_fraci_db0_slot = var_fraci_db0;
         *var_fraci_db1_slot = var_fraci_db1;
@@ -16091,7 +16079,6 @@ impl Instance {
         var_tmf2_rdb2 = 0.0;
         var_tmf2_rdb3 = 0.0;
 
-
         *var_nj0_slot = var_nj0;
         *var_nj0_db0_slot = var_nj0_db0;
         *var_nj0_db1_slot = var_nj0_db1;
@@ -17053,7 +17040,6 @@ impl Instance {
         var_idmultbot_rdb1 = 0.0;
         var_idmultbot_rdb2 = 0.0;
         var_idmultbot_rdb3 = 0.0;
-
 
         *var_guard81_slot = var_guard81;
         *var_guard81_db0_slot = var_guard81_db0;
@@ -18160,7 +18146,6 @@ impl Instance {
         var_nj1_rdb2 = 0.0;
         var_nj1_rdb3 = 0.0;
 
-
         *var_guard83_slot = var_guard83;
         *var_guard83_db0_slot = var_guard83_db0;
         *var_guard83_db1_slot = var_guard83_db1;
@@ -19217,7 +19202,6 @@ impl Instance {
         var_guard86_rdb1 = 0.0;
         var_guard86_rdb2 = 0.0;
         var_guard86_rdb3 = 0.0;
-
 
         *var_guard86_slot = var_guard86;
         *var_guard86_db0_slot = var_guard86_db0;

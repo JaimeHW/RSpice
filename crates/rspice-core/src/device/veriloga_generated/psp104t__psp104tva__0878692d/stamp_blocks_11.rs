@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1426,7 +1426,6 @@ impl Instance {
         var_vdspedge_db4 = assign47580_e61028_d_b4;
         var_vdspedge_db5 = assign47580_e61028_d_b5;
         var_vdspedge_db6 = assign47580_e61028_d_b6;
-
 
         *var_alphabmedge_slot = var_alphabmedge;
         *var_alphabmedge_db0_slot = var_alphabmedge_db0;
@@ -3059,7 +3058,6 @@ impl Instance {
         let assign47750_e61180: f64 = if assign47750_e61178 < 230.25850929940458 { 1.0 } else { 0.0 };
         var_guard1268 = assign47750_e61180;
 
-
         *var_delvgedge_slot = var_delvgedge;
         *var_delvgedge_db0_slot = var_delvgedge_db0;
         *var_delvgedge_db1_slot = var_delvgedge_db1;
@@ -4523,7 +4521,6 @@ impl Instance {
         var_qdeffedge_db5 = assign47920_e61449_d_b5;
         var_qdeffedge_db6 = assign47920_e61449_d_b6;
 
-
         *var_guard1269_slot = var_guard1269;
         *var_guard1270_slot = var_guard1270;
         *var_guard1271_slot = var_guard1271;
@@ -5976,7 +5973,6 @@ impl Instance {
         var_q_edge_sqerr_db4 = assign48090_e61682_d_b4;
         var_q_edge_sqerr_db5 = assign48090_e61682_d_b5;
         var_q_edge_sqerr_db6 = assign48090_e61682_d_b6;
-
 
         *var_guard1272_slot = var_guard1272;
         *var_guard1273_slot = var_guard1273;
@@ -7700,7 +7696,6 @@ impl Instance {
         let assign48280_e61910: f64 = if assign48280_e61908 < 0.0 { 1.0 } else { 0.0 };
         var_guard1278 = assign48280_e61910;
 
-
         *var_alphabmedge_slot = var_alphabmedge;
         *var_alphabmedge_db0_slot = var_alphabmedge_db0;
         *var_alphabmedge_db1_slot = var_alphabmedge_db1;
@@ -9164,7 +9159,6 @@ impl Instance {
         var_vsbstar__blk1318_db4 = assign48470_e62163_d_b4;
         var_vsbstar__blk1318_db5 = assign48470_e62163_d_b5;
         var_vsbstar__blk1318_db6 = assign48470_e62163_d_b6;
-
 
         *var_aphi__blk1315_slot = var_aphi__blk1315;
         *var_aphi__blk1315_db0_slot = var_aphi__blk1315_db0;
@@ -10695,7 +10689,6 @@ impl Instance {
         var_xmict__blk1332_db4 = assign48640_e62357_d_b4;
         var_xmict__blk1332_db5 = assign48640_e62357_d_b5;
         var_xmict__blk1332_db6 = assign48640_e62357_d_b6;
-
 
         *var_aphi__blk1315_slot = var_aphi__blk1315;
         *var_aphi__blk1315_db0_slot = var_aphi__blk1315_db0;
@@ -12272,7 +12265,6 @@ impl Instance {
         var_gf2__blk1325_db5 = assign48800_e62604_d_b5;
         var_gf2__blk1325_db6 = assign48800_e62604_d_b6;
 
-
         *var_ct_fact__blk1336_slot = var_ct_fact__blk1336;
         *var_ct_fact__blk1336_db0_slot = var_ct_fact__blk1336_db0;
         *var_ct_fact__blk1336_db1_slot = var_ct_fact__blk1336_db1;
@@ -13842,7 +13834,6 @@ impl Instance {
         var_temp__blk949_db5 = assign48980_e62825_d_b5;
         var_temp__blk949_db6 = assign48980_e62825_d_b6;
 
-
         *var_delphib__blk1345_slot = var_delphib__blk1345;
         *var_delphib__blk1345_db0_slot = var_delphib__blk1345_db0;
         *var_delphib__blk1345_db1_slot = var_delphib__blk1345_db1;
@@ -15232,7 +15223,6 @@ impl Instance {
         let assign49160_e63075: f64 = if var_dscr0__blk1356 > 1e-6 { 1.0 } else { 0.0 };
         var_guard1483 = assign49160_e63075;
 
-
         *var_dscr0__blk1356_slot = var_dscr0__blk1356;
         *var_dscr0__blk1356_db0_slot = var_dscr0__blk1356_db0;
         *var_dscr0__blk1356_db1_slot = var_dscr0__blk1356_db1;
@@ -16602,7 +16592,6 @@ impl Instance {
         let assign49340_e63322: f64 = (-var_margin__blk1361);
         let assign49340_e63323: f64 = if var_xg__blk1343 < assign49340_e63322 { 1.0 } else { 0.0 };
         var_guard1486 = assign49340_e63323;
-
 
         *var_delta_ns__blk1364_slot = var_delta_ns__blk1364;
         *var_delta_ns__blk1364_db0_slot = var_delta_ns__blk1364_db0;
@@ -17977,7 +17966,6 @@ impl Instance {
         var_sp_s_xi0__blk1460_db4 = assign49500_e63611_d_b4;
         var_sp_s_xi0__blk1460_db5 = assign49500_e63611_d_b5;
         var_sp_s_xi0__blk1460_db6 = assign49500_e63611_d_b6;
-
 
         *var_guard1487_slot = var_guard1487;
         *var_mutau_slot = var_mutau;
@@ -19399,7 +19387,6 @@ impl Instance {
         var_sp_s_temp__blk1448_db5 = assign49650_e63916_d_b5;
         var_sp_s_temp__blk1448_db6 = assign49650_e63916_d_b6;
 
-
         *var_guard1488_slot = var_guard1488;
         *var_sp_s_a_fac__blk1466_slot = var_sp_s_a_fac__blk1466;
         *var_sp_s_a_fac__blk1466_db0_slot = var_sp_s_a_fac__blk1466_db0;
@@ -20800,7 +20787,6 @@ impl Instance {
         var_sp_s_tau__blk1456_db5 = assign49790_e64231_d_b5;
         var_sp_s_tau__blk1456_db6 = assign49790_e64231_d_b6;
 
-
         *var_sp_s_a__blk1454_slot = var_sp_s_a__blk1454;
         *var_sp_s_a__blk1454_db0_slot = var_sp_s_a__blk1454_db0;
         *var_sp_s_a__blk1454_db1_slot = var_sp_s_a__blk1454_db1;
@@ -22162,7 +22148,6 @@ impl Instance {
         var_sp_s_temp__blk1448_db4 = assign49960_e64579_d_b4;
         var_sp_s_temp__blk1448_db5 = assign49960_e64579_d_b5;
         var_sp_s_temp__blk1448_db6 = assign49960_e64579_d_b6;
-
 
         *var_guard1489_slot = var_guard1489;
         *var_guard1490_slot = var_guard1490;
@@ -23679,7 +23664,6 @@ impl Instance {
         var_qis__blk1376_db4 = assign50120_e64770_d_b4;
         var_qis__blk1376_db5 = assign50120_e64770_d_b5;
         var_qis__blk1376_db6 = assign50120_e64770_d_b6;
-
 
         *var_alphas__blk1373_slot = var_alphas__blk1373;
         *var_alphas__blk1373_db0_slot = var_alphas__blk1373_db0;

@@ -1044,7 +1044,6 @@ impl Instance {
         var_erfctimesexpmtat_db23 = assign39780_e52605_d_b23;
         var_erfctimesexpmtat_db24 = assign39780_e52605_d_b24;
 
-
         *var_erfcpos_slot = var_erfcpos;
         *var_erfcpos_db0_slot = var_erfcpos_db0;
         *var_erfcpos_db1_slot = var_erfcpos_db1;
@@ -2464,7 +2463,6 @@ impl Instance {
         var_tmp_db23 = assign39900_e52802_d_b23;
         var_tmp_db24 = assign39900_e52802_d_b24;
 
-
         *var_fmaxr_slot = var_fmaxr;
         *var_fmaxr_db0_slot = var_fmaxr_db0;
         *var_fmaxr_db1_slot = var_fmaxr_db1;
@@ -3880,7 +3878,6 @@ impl Instance {
         var_ijungat_db22 = assign40010_e53006_d_b22;
         var_ijungat_db23 = assign40010_e53006_d_b23;
         var_ijungat_db24 = assign40010_e53006_d_b24;
-
 
         *var_fbreakdown_slot = var_fbreakdown;
         *var_fbreakdown_db0_slot = var_fbreakdown_db0;
@@ -5441,7 +5438,6 @@ impl Instance {
         var_i1_cor_db22 = assign40120_e53198_d_b22;
         var_i1_cor_db23 = assign40120_e53198_d_b23;
         var_i1_cor_db24 = assign40120_e53198_d_b24;
-
 
         *var_alphaje_slot = var_alphaje;
         *var_alphaje_db0_slot = var_alphaje_db0;
@@ -7149,7 +7145,6 @@ impl Instance {
         var_mcor_rev_db23 = assign40230_e53424_d_b23;
         var_mcor_rev_db24 = assign40230_e53424_d_b24;
 
-
         *var_alphaje_slot = var_alphaje;
         *var_alphaje_db0_slot = var_alphaje_db0;
         *var_alphaje_db1_slot = var_alphaje_db1;
@@ -8561,7 +8556,6 @@ impl Instance {
     }
 };
         var_expxhf1_d = assign40430_e53678;
-
 
         *var_expxhf1_d_slot = var_expxhf1_d;
         *var_guard823_slot = var_guard823;
@@ -9991,7 +9985,6 @@ impl Instance {
         var_vjun_s_db22 = assign40570_e53734_d_b22;
         var_vjun_s_db23 = assign40570_e53734_d_b23;
         var_vjun_s_db24 = assign40570_e53734_d_b24;
-
 
         *var_expxhf2_d_slot = var_expxhf2_d;
         *var_expxhf2_d_db0_slot = var_expxhf2_d_db0;
@@ -11472,7 +11465,7 @@ impl Instance {
         var_vjun_d_db23 = assign40630_e53767_d_b23;
         var_vjun_d_db24 = assign40630_e53767_d_b24;
 
-        s.store_add(829, 825, 827);
+        s.store_add_ad(829, A::from_derivatives(var_v_gs, [var_v_gs_dn0, var_v_gs_dn1, var_v_gs_dn2, var_v_gs_dn3, var_v_gs_dn4, var_v_gs_dn5, var_v_gs_dn6, var_v_gs_dn7, var_v_gs_dn8, var_v_gs_dn9, var_v_gs_dn10, var_v_gs_dn11, var_v_gs_dn12, var_v_gs_dn13, var_v_gs_dn14, var_v_gs_dn15, var_v_gs_dn16, var_v_gs_dn17, var_v_gs_dn18, var_v_gs_dn19, var_v_gs_dn20], [var_v_gs_db0, var_v_gs_db1, var_v_gs_db2, var_v_gs_db3, var_v_gs_db4, var_v_gs_db5, var_v_gs_db6, var_v_gs_db7, var_v_gs_db8, var_v_gs_db9, var_v_gs_db10, var_v_gs_db11, var_v_gs_db12, var_v_gs_db13, var_v_gs_db14, var_v_gs_db15, var_v_gs_db16, var_v_gs_db17, var_v_gs_db18, var_v_gs_db19, var_v_gs_db20, var_v_gs_db21, var_v_gs_db22, var_v_gs_db23, var_v_gs_db24]), A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]));
 
         var_vgsprime = var_v_gs;
         var_vgsprime_dn0 = var_v_gs_dn0;
@@ -11522,9 +11515,9 @@ impl Instance {
         var_vgsprime_db23 = var_v_gs_db23;
         var_vgsprime_db24 = var_v_gs_db24;
 
-        s.copy_ad(835, 827);
+        s.store_ad_value(835, A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]));
 
-        s.store_add(836, 826, 827);
+        s.store_add_ad(836, A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]));
 
         let assign40680_e53778: f64 = (var_v_gs - var_v_ds);
         var_vgdprime = assign40680_e53778;
@@ -11624,7 +11617,6 @@ impl Instance {
         var_xgs_ov_db22 = ((-var_vgsprime_db22) * var_inv_phita);
         var_xgs_ov_db23 = ((-var_vgsprime_db23) * var_inv_phita);
         var_xgs_ov_db24 = ((-var_vgsprime_db24) * var_inv_phita);
-
 
         *var_v_ds_slot = var_v_ds;
         *var_v_ds_db0_slot = var_v_ds_db0;
@@ -12664,15 +12656,15 @@ impl Instance {
         var_v_ds_db23 = assign40770_e53818_d_b23;
         var_v_ds_db24 = assign40770_e53818_d_b24;
 
-        s.store_add(828, 826, 827);
+        s.store_add_ad(828, A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]));
 
-        s.store_div_scaled_product_offset_denominator(830, s.ad_value(826), s.ad_value(826), 1.0, A::sqrt_square_offset(s.ad_value(826), 0.01), 0.1, 1.0);
+        s.store_div_scaled_product_offset_denominator(830, A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), 1.0, A::sqrt_square_offset(A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), 0.01), 0.1, 1.0);
 
-        s.store_add_scaled_inputs4_mixed_iiai(2107, 828, 0.5, 827, 0.5, A::sqrt(A::add(A::square(A::sub(s.ad_value(828), s.ad_value(827))), s.ad_value(739))), (-0.5), 737, 1.0);
+        s.store_add_scaled_inputs4_mixed_iaai(2107, 828, 0.5, A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]), 0.5, A::sqrt(A::add(A::square(A::sub(s.ad_value(828), A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]))), s.ad_value(739))), (-0.5), 737, 1.0);
 
         s.copy_ad(1820, 2107);
 
-        s.store_add_scaled_inputs4_mixed_iiai(2030, 827, 1.0, 2107, (-0.5), A::sqrt(A::add(A::square(s.ad_value(2107)), s.ad_value(738))), (-(-0.5)), 741, 1.0);
+        s.store_add_scaled_inputs4_mixed_aiai(2030, A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]), 1.0, 2107, (-0.5), A::sqrt(A::add(A::square(s.ad_value(2107)), s.ad_value(738))), (-(-0.5)), 741, 1.0);
 
         s.copy_ad(1821, 2030);
 
@@ -12682,12 +12674,12 @@ impl Instance {
         s.store_scalar(2263, if s.b[2263] { 1.0 } else { 0.0 });
 
         if s.b[2263] {
-            s.store_add_scaled_inputs3_indices(2032, 2030, 1.0, 826, 0.5, 830, (-0.5));
+            s.store_add_scaled_inputs3_mixed_iai(2032, 2030, 1.0, A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), 0.5, 830, (-0.5));
             s.store_sub_ad_lhs(2033, A::sqrt(A::add(s.ad_value(2032), s.ad_value(728))), 736);
             s.store_offset_div_scaled_inputs2_indices(2027, 2033, 2.0, 743, (-2.0), 744, 1.0, (-1.0));
             s.store_add_scaled_product_mixed_iaa(2034, 2033, 1.0, A::mul_sub_from_scalar_lhs_scaled_output(1.0, s.ad_value(184), s.ad_value(744), 0.25), A::add(s.ad_value(2027), A::sqrt_square_offset(s.ad_value(2027), 0.4804530139182)), (-1.0));
             s.store_add_scaled_square_product_indices(2035, 2034, 1.0, 736, 2034, 2.0);
-            s.store_add_scaled_inputs3_indices(2030, 2035, 1.0, 826, (-0.5), 830, (-(-0.5)));
+            s.store_add_scaled_inputs3_mixed_iai(2030, 2035, 1.0, A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), (-0.5), 830, (-(-0.5)));
             s.store_sub(2031, 1821, 2030);
         }
 
@@ -12707,7 +12699,7 @@ impl Instance {
 
         s.store_add_scaled_inputs3_indices(2111, 829, 1.0, 2112, (-1.0), 700, -1.0);
 
-        s.store_add_scaled_inputs3_indices(2113, 2108, 1.0, 826, 0.5, 830, (-0.5));
+        s.store_add_scaled_inputs3_mixed_iai(2113, 2108, 1.0, A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), 0.5, 830, (-0.5));
 
         s.store_scalar(2125, 1.0);
 
@@ -12863,9 +12855,7 @@ impl Instance {
         if s.b[2269] {
             s.store_add_scaled_inputs3_offset_mixed_iia(2027, 2133, 0.5, 2147, ((-1.0) * 0.5), A::sqrt_square_offset(A::offset(A::sub(s.ad_value(2133), s.ad_value(2147)), (-2.0)), 1.0), 0.5, (2.0 * 0.5));
             s.store_mul_scaled_offset_ad_rhs(2148, 2115, 0.5, A::sqrt_product_offset(A::div_from_scalar(4.0, s.ad_value(2115)), s.ad_value(2027), 1.0), (-1.0));
-            s.store_div_add_scaled_inputs_rhs_indices(2149, 2148, 2148, 1.0, 2147, 1.0);
         }
-
 
         *var_guard1114_slot = var_guard1114;
         *var_v_ds_slot = var_v_ds;
@@ -13062,6 +13052,7 @@ impl Instance {
         s: &mut Scratch,
     ) {
         if s.b[2269] {
+            s.store_div_add_scaled_inputs_rhs_indices(2149, 2148, 2148, 1.0, 2147, 1.0);
             s.store_add_scaled_product_indices(2139, 2138, 1.0, 2149, 2137, (-1.0));
         }
 
@@ -13357,15 +13348,62 @@ impl Instance {
             s.store_div_from_scalar_sub_from_scalar_ad(2174, 1.0, 1.0, A::mul(s.ad_value(221), s.ad_value(2113)));
         }
 
-        if ((s.b[2279] && s.b[2283]) && (!s.b[2286])) {
-            s.store_offset_mul(2174, 221, 2113, 1.0);
-        }
-
     }
 
     pub(super) fn stamp_transient_block_218(
         s: &mut Scratch,
+        var_v_ds: f64,
+        var_v_ds_db0: f64,
+        var_v_ds_db1: f64,
+        var_v_ds_db10: f64,
+        var_v_ds_db11: f64,
+        var_v_ds_db12: f64,
+        var_v_ds_db13: f64,
+        var_v_ds_db14: f64,
+        var_v_ds_db15: f64,
+        var_v_ds_db16: f64,
+        var_v_ds_db17: f64,
+        var_v_ds_db18: f64,
+        var_v_ds_db19: f64,
+        var_v_ds_db2: f64,
+        var_v_ds_db20: f64,
+        var_v_ds_db21: f64,
+        var_v_ds_db22: f64,
+        var_v_ds_db23: f64,
+        var_v_ds_db24: f64,
+        var_v_ds_db3: f64,
+        var_v_ds_db4: f64,
+        var_v_ds_db5: f64,
+        var_v_ds_db6: f64,
+        var_v_ds_db7: f64,
+        var_v_ds_db8: f64,
+        var_v_ds_db9: f64,
+        var_v_ds_dn0: f64,
+        var_v_ds_dn1: f64,
+        var_v_ds_dn10: f64,
+        var_v_ds_dn11: f64,
+        var_v_ds_dn12: f64,
+        var_v_ds_dn13: f64,
+        var_v_ds_dn14: f64,
+        var_v_ds_dn15: f64,
+        var_v_ds_dn16: f64,
+        var_v_ds_dn17: f64,
+        var_v_ds_dn18: f64,
+        var_v_ds_dn19: f64,
+        var_v_ds_dn2: f64,
+        var_v_ds_dn20: f64,
+        var_v_ds_dn3: f64,
+        var_v_ds_dn4: f64,
+        var_v_ds_dn5: f64,
+        var_v_ds_dn6: f64,
+        var_v_ds_dn7: f64,
+        var_v_ds_dn8: f64,
+        var_v_ds_dn9: f64,
     ) {
+        if ((s.b[2279] && s.b[2283]) && (!s.b[2286])) {
+            s.store_offset_mul(2174, 221, 2113, 1.0);
+        }
+
         if (s.b[2279] && s.b[2283]) {
             s.store_mul(2029, 2166, 2174);
             s.store_div_add_scaled_inputs_rhs_indices(2175, 2029, 223, 1.0, 2029, 1.0);
@@ -13454,9 +13492,9 @@ impl Instance {
 
         s.copy_ad(2194, 2177);
 
-        s.copy_ad(2195, 826);
+        s.store_ad_value(2195, A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]));
 
-        s.store_mul(2196, 826, 2130);
+        s.store_mul_ad_lhs(2196, A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), 2130);
 
         s.copy_ad(2200, 2153);
 
@@ -13617,7 +13655,7 @@ impl Instance {
 
         if s.b[2288] {
             s.store_offset(2027, 2110, 1.0);
-            s.store_div_scaled_product_left_ad(2028, A::sqrt(s.ad_value(2027)), 826, 1.0, 2194, 1.0);
+            s.store_div_scaled_product_mixed_aai(2028, A::sqrt(s.ad_value(2027)), A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), 1.0, 2194, 1.0);
             s.store_add_ad_lhs(2029, A::square(s.ad_value(2028)), 2027);
             s.store_scale(2027, 2028, 2.0);
             s.store_div_scaled_product_add_scaled_denominator(2195, 2194, 2027, 1.0, A::sqrt(A::sub(s.ad_value(2029), s.ad_value(2027))), 1.0, A::sqrt(A::add(s.ad_value(2029), s.ad_value(2027))), 1.0, 1.0);
@@ -13711,14 +13749,57 @@ impl Instance {
             s.store_add_scaled_inputs_ad_rhs(2200, 2262, 1.0, A::div(s.ad_value(2254), A::add(s.ad_value(2253), A::sqrt(s.ad_value(2238)))), 2.0);
         }
 
-        if s.b[2288] {
-            s.store_sub(2201, 2200, 2153);
-        }
-
     }
 
     pub(super) fn stamp_transient_block_219(
         s: &mut Scratch,
+        var_v_ds: f64,
+        var_v_ds_db0: f64,
+        var_v_ds_db1: f64,
+        var_v_ds_db10: f64,
+        var_v_ds_db11: f64,
+        var_v_ds_db12: f64,
+        var_v_ds_db13: f64,
+        var_v_ds_db14: f64,
+        var_v_ds_db15: f64,
+        var_v_ds_db16: f64,
+        var_v_ds_db17: f64,
+        var_v_ds_db18: f64,
+        var_v_ds_db19: f64,
+        var_v_ds_db2: f64,
+        var_v_ds_db20: f64,
+        var_v_ds_db21: f64,
+        var_v_ds_db22: f64,
+        var_v_ds_db23: f64,
+        var_v_ds_db24: f64,
+        var_v_ds_db3: f64,
+        var_v_ds_db4: f64,
+        var_v_ds_db5: f64,
+        var_v_ds_db6: f64,
+        var_v_ds_db7: f64,
+        var_v_ds_db8: f64,
+        var_v_ds_db9: f64,
+        var_v_ds_dn0: f64,
+        var_v_ds_dn1: f64,
+        var_v_ds_dn10: f64,
+        var_v_ds_dn11: f64,
+        var_v_ds_dn12: f64,
+        var_v_ds_dn13: f64,
+        var_v_ds_dn14: f64,
+        var_v_ds_dn15: f64,
+        var_v_ds_dn16: f64,
+        var_v_ds_dn17: f64,
+        var_v_ds_dn18: f64,
+        var_v_ds_dn19: f64,
+        var_v_ds_dn2: f64,
+        var_v_ds_dn20: f64,
+        var_v_ds_dn3: f64,
+        var_v_ds_dn4: f64,
+        var_v_ds_dn5: f64,
+        var_v_ds_dn6: f64,
+        var_v_ds_dn7: f64,
+        var_v_ds_dn8: f64,
+        var_v_ds_dn9: f64,
         var_xs_ov_slot: &mut f64,
         var_xs_ov_db0_slot: &mut f64,
         var_xs_ov_db1_slot: &mut f64,
@@ -13814,6 +13895,10 @@ impl Instance {
         let mut var_xs_ov_dn7: f64 = *var_xs_ov_dn7_slot;
         let mut var_xs_ov_dn8: f64 = *var_xs_ov_dn8_slot;
         let mut var_xs_ov_dn9: f64 = *var_xs_ov_dn9_slot;
+
+        if s.b[2288] {
+            s.store_sub(2201, 2200, 2153);
+        }
 
         s.b[2299] = (s.v[2201] < 1e-10);
         s.store_scalar(2299, if s.b[2299] { 1.0 } else { 0.0 });
@@ -13973,7 +14058,7 @@ impl Instance {
             s.store_ln_ad(2028, A::div_scaled_value_offset_denominator(s.ad_value(2215), 1.0, A::add(s.ad_value(2215), s.ad_value(2214)), 1e-14, 1.0));
             s.store_add_scaled_product_mixed_aia(2172, A::pow(A::mul(s.ad_value(2233), s.ad_value(704)), s.ad_value(705)), 1.0, 706, A::exp(A::mul_scaled_lhs(s.ad_value(707), 0.5, s.ad_value(2028))), 1.0);
             s.store_mul_add_ad_lhs(2234, A::offset(s.ad_value(2172), 1.0), s.ad_value(2170), 2164);
-            s.store_ln_ad(2235, A::div_scaled_offset_numerator(A::mul(A::sub(s.ad_value(826), s.ad_value(2204)), s.ad_value(779)), 1.0, 1.0, A::offset(A::mul(A::sub(s.ad_value(2195), s.ad_value(2204)), s.ad_value(779)), 1.0), 1.0));
+            s.store_ln_ad(2235, A::div_scaled_offset_numerator(A::mul(A::sub(A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), s.ad_value(2204)), s.ad_value(779)), 1.0, 1.0, A::offset(A::mul(A::sub(s.ad_value(2195), s.ad_value(2204)), s.ad_value(779)), 1.0), 1.0));
             s.store_mul(2029, 2228, 2174);
             s.store_div_add_scaled_inputs_rhs_indices(2175, 2029, 223, 1.0, 2029, 1.0);
         }
@@ -14116,7 +14201,6 @@ impl Instance {
         var_xs_ov_db22 = 0.0;
         var_xs_ov_db23 = 0.0;
         var_xs_ov_db24 = 0.0;
-
 
         *var_xs_ov_slot = var_xs_ov;
         *var_xs_ov_db0_slot = var_xs_ov_db0;
@@ -15209,7 +15293,6 @@ impl Instance {
         var_vovs_db23 = assign46160_e59240_d_b23;
         var_vovs_db24 = assign46160_e59240_d_b24;
 
-
         *var_guard1322_slot = var_guard1322;
         *var_sp_ov_xg_slot = var_sp_ov_xg;
         *var_sp_ov_xg_db0_slot = var_sp_ov_xg_db0;
@@ -15455,6 +15538,241 @@ impl Instance {
         var_igov_i: f64,
         var_igovd_i: f64,
         var_phita: f64,
+        var_v_ds: f64,
+        var_v_ds_db0: f64,
+        var_v_ds_db1: f64,
+        var_v_ds_db10: f64,
+        var_v_ds_db11: f64,
+        var_v_ds_db12: f64,
+        var_v_ds_db13: f64,
+        var_v_ds_db14: f64,
+        var_v_ds_db15: f64,
+        var_v_ds_db16: f64,
+        var_v_ds_db17: f64,
+        var_v_ds_db18: f64,
+        var_v_ds_db19: f64,
+        var_v_ds_db2: f64,
+        var_v_ds_db20: f64,
+        var_v_ds_db21: f64,
+        var_v_ds_db22: f64,
+        var_v_ds_db23: f64,
+        var_v_ds_db24: f64,
+        var_v_ds_db3: f64,
+        var_v_ds_db4: f64,
+        var_v_ds_db5: f64,
+        var_v_ds_db6: f64,
+        var_v_ds_db7: f64,
+        var_v_ds_db8: f64,
+        var_v_ds_db9: f64,
+        var_v_ds_dn0: f64,
+        var_v_ds_dn1: f64,
+        var_v_ds_dn10: f64,
+        var_v_ds_dn11: f64,
+        var_v_ds_dn12: f64,
+        var_v_ds_dn13: f64,
+        var_v_ds_dn14: f64,
+        var_v_ds_dn15: f64,
+        var_v_ds_dn16: f64,
+        var_v_ds_dn17: f64,
+        var_v_ds_dn18: f64,
+        var_v_ds_dn19: f64,
+        var_v_ds_dn2: f64,
+        var_v_ds_dn20: f64,
+        var_v_ds_dn3: f64,
+        var_v_ds_dn4: f64,
+        var_v_ds_dn5: f64,
+        var_v_ds_dn6: f64,
+        var_v_ds_dn7: f64,
+        var_v_ds_dn8: f64,
+        var_v_ds_dn9: f64,
+        var_v_gs: f64,
+        var_v_gs_db0: f64,
+        var_v_gs_db1: f64,
+        var_v_gs_db10: f64,
+        var_v_gs_db11: f64,
+        var_v_gs_db12: f64,
+        var_v_gs_db13: f64,
+        var_v_gs_db14: f64,
+        var_v_gs_db15: f64,
+        var_v_gs_db16: f64,
+        var_v_gs_db17: f64,
+        var_v_gs_db18: f64,
+        var_v_gs_db19: f64,
+        var_v_gs_db2: f64,
+        var_v_gs_db20: f64,
+        var_v_gs_db21: f64,
+        var_v_gs_db22: f64,
+        var_v_gs_db23: f64,
+        var_v_gs_db24: f64,
+        var_v_gs_db3: f64,
+        var_v_gs_db4: f64,
+        var_v_gs_db5: f64,
+        var_v_gs_db6: f64,
+        var_v_gs_db7: f64,
+        var_v_gs_db8: f64,
+        var_v_gs_db9: f64,
+        var_v_gs_dn0: f64,
+        var_v_gs_dn1: f64,
+        var_v_gs_dn10: f64,
+        var_v_gs_dn11: f64,
+        var_v_gs_dn12: f64,
+        var_v_gs_dn13: f64,
+        var_v_gs_dn14: f64,
+        var_v_gs_dn15: f64,
+        var_v_gs_dn16: f64,
+        var_v_gs_dn17: f64,
+        var_v_gs_dn18: f64,
+        var_v_gs_dn19: f64,
+        var_v_gs_dn2: f64,
+        var_v_gs_dn20: f64,
+        var_v_gs_dn3: f64,
+        var_v_gs_dn4: f64,
+        var_v_gs_dn5: f64,
+        var_v_gs_dn6: f64,
+        var_v_gs_dn7: f64,
+        var_v_gs_dn8: f64,
+        var_v_gs_dn9: f64,
+        var_vgdprime: f64,
+        var_vgdprime_db0: f64,
+        var_vgdprime_db1: f64,
+        var_vgdprime_db10: f64,
+        var_vgdprime_db11: f64,
+        var_vgdprime_db12: f64,
+        var_vgdprime_db13: f64,
+        var_vgdprime_db14: f64,
+        var_vgdprime_db15: f64,
+        var_vgdprime_db16: f64,
+        var_vgdprime_db17: f64,
+        var_vgdprime_db18: f64,
+        var_vgdprime_db19: f64,
+        var_vgdprime_db2: f64,
+        var_vgdprime_db20: f64,
+        var_vgdprime_db21: f64,
+        var_vgdprime_db22: f64,
+        var_vgdprime_db23: f64,
+        var_vgdprime_db24: f64,
+        var_vgdprime_db3: f64,
+        var_vgdprime_db4: f64,
+        var_vgdprime_db5: f64,
+        var_vgdprime_db6: f64,
+        var_vgdprime_db7: f64,
+        var_vgdprime_db8: f64,
+        var_vgdprime_db9: f64,
+        var_vgdprime_dn0: f64,
+        var_vgdprime_dn1: f64,
+        var_vgdprime_dn10: f64,
+        var_vgdprime_dn11: f64,
+        var_vgdprime_dn12: f64,
+        var_vgdprime_dn13: f64,
+        var_vgdprime_dn14: f64,
+        var_vgdprime_dn15: f64,
+        var_vgdprime_dn16: f64,
+        var_vgdprime_dn17: f64,
+        var_vgdprime_dn18: f64,
+        var_vgdprime_dn19: f64,
+        var_vgdprime_dn2: f64,
+        var_vgdprime_dn20: f64,
+        var_vgdprime_dn3: f64,
+        var_vgdprime_dn4: f64,
+        var_vgdprime_dn5: f64,
+        var_vgdprime_dn6: f64,
+        var_vgdprime_dn7: f64,
+        var_vgdprime_dn8: f64,
+        var_vgdprime_dn9: f64,
+        var_vgsprime: f64,
+        var_vgsprime_db0: f64,
+        var_vgsprime_db1: f64,
+        var_vgsprime_db10: f64,
+        var_vgsprime_db11: f64,
+        var_vgsprime_db12: f64,
+        var_vgsprime_db13: f64,
+        var_vgsprime_db14: f64,
+        var_vgsprime_db15: f64,
+        var_vgsprime_db16: f64,
+        var_vgsprime_db17: f64,
+        var_vgsprime_db18: f64,
+        var_vgsprime_db19: f64,
+        var_vgsprime_db2: f64,
+        var_vgsprime_db20: f64,
+        var_vgsprime_db21: f64,
+        var_vgsprime_db22: f64,
+        var_vgsprime_db23: f64,
+        var_vgsprime_db24: f64,
+        var_vgsprime_db3: f64,
+        var_vgsprime_db4: f64,
+        var_vgsprime_db5: f64,
+        var_vgsprime_db6: f64,
+        var_vgsprime_db7: f64,
+        var_vgsprime_db8: f64,
+        var_vgsprime_db9: f64,
+        var_vgsprime_dn0: f64,
+        var_vgsprime_dn1: f64,
+        var_vgsprime_dn10: f64,
+        var_vgsprime_dn11: f64,
+        var_vgsprime_dn12: f64,
+        var_vgsprime_dn13: f64,
+        var_vgsprime_dn14: f64,
+        var_vgsprime_dn15: f64,
+        var_vgsprime_dn16: f64,
+        var_vgsprime_dn17: f64,
+        var_vgsprime_dn18: f64,
+        var_vgsprime_dn19: f64,
+        var_vgsprime_dn2: f64,
+        var_vgsprime_dn20: f64,
+        var_vgsprime_dn3: f64,
+        var_vgsprime_dn4: f64,
+        var_vgsprime_dn5: f64,
+        var_vgsprime_dn6: f64,
+        var_vgsprime_dn7: f64,
+        var_vgsprime_dn8: f64,
+        var_vgsprime_dn9: f64,
+        var_vovs: f64,
+        var_vovs_db0: f64,
+        var_vovs_db1: f64,
+        var_vovs_db10: f64,
+        var_vovs_db11: f64,
+        var_vovs_db12: f64,
+        var_vovs_db13: f64,
+        var_vovs_db14: f64,
+        var_vovs_db15: f64,
+        var_vovs_db16: f64,
+        var_vovs_db17: f64,
+        var_vovs_db18: f64,
+        var_vovs_db19: f64,
+        var_vovs_db2: f64,
+        var_vovs_db20: f64,
+        var_vovs_db21: f64,
+        var_vovs_db22: f64,
+        var_vovs_db23: f64,
+        var_vovs_db24: f64,
+        var_vovs_db3: f64,
+        var_vovs_db4: f64,
+        var_vovs_db5: f64,
+        var_vovs_db6: f64,
+        var_vovs_db7: f64,
+        var_vovs_db8: f64,
+        var_vovs_db9: f64,
+        var_vovs_dn0: f64,
+        var_vovs_dn1: f64,
+        var_vovs_dn10: f64,
+        var_vovs_dn11: f64,
+        var_vovs_dn12: f64,
+        var_vovs_dn13: f64,
+        var_vovs_dn14: f64,
+        var_vovs_dn15: f64,
+        var_vovs_dn16: f64,
+        var_vovs_dn17: f64,
+        var_vovs_dn18: f64,
+        var_vovs_dn19: f64,
+        var_vovs_dn2: f64,
+        var_vovs_dn20: f64,
+        var_vovs_dn3: f64,
+        var_vovs_dn4: f64,
+        var_vovs_dn5: f64,
+        var_vovs_dn6: f64,
+        var_vovs_dn7: f64,
+        var_vovs_dn8: f64,
+        var_vovs_dn9: f64,
         var_xd_ov: f64,
         var_xd_ov_db0: f64,
         var_xd_ov_db1: f64,
@@ -15549,6 +15867,53 @@ impl Instance {
         var_xgd_ov_dn7: f64,
         var_xgd_ov_dn8: f64,
         var_xgd_ov_dn9: f64,
+        var_xs_ov: f64,
+        var_xs_ov_db0: f64,
+        var_xs_ov_db1: f64,
+        var_xs_ov_db10: f64,
+        var_xs_ov_db11: f64,
+        var_xs_ov_db12: f64,
+        var_xs_ov_db13: f64,
+        var_xs_ov_db14: f64,
+        var_xs_ov_db15: f64,
+        var_xs_ov_db16: f64,
+        var_xs_ov_db17: f64,
+        var_xs_ov_db18: f64,
+        var_xs_ov_db19: f64,
+        var_xs_ov_db2: f64,
+        var_xs_ov_db20: f64,
+        var_xs_ov_db21: f64,
+        var_xs_ov_db22: f64,
+        var_xs_ov_db23: f64,
+        var_xs_ov_db24: f64,
+        var_xs_ov_db3: f64,
+        var_xs_ov_db4: f64,
+        var_xs_ov_db5: f64,
+        var_xs_ov_db6: f64,
+        var_xs_ov_db7: f64,
+        var_xs_ov_db8: f64,
+        var_xs_ov_db9: f64,
+        var_xs_ov_dn0: f64,
+        var_xs_ov_dn1: f64,
+        var_xs_ov_dn10: f64,
+        var_xs_ov_dn11: f64,
+        var_xs_ov_dn12: f64,
+        var_xs_ov_dn13: f64,
+        var_xs_ov_dn14: f64,
+        var_xs_ov_dn15: f64,
+        var_xs_ov_dn16: f64,
+        var_xs_ov_dn17: f64,
+        var_xs_ov_dn18: f64,
+        var_xs_ov_dn19: f64,
+        var_xs_ov_dn2: f64,
+        var_xs_ov_dn20: f64,
+        var_xs_ov_dn3: f64,
+        var_xs_ov_dn4: f64,
+        var_xs_ov_dn5: f64,
+        var_xs_ov_dn6: f64,
+        var_xs_ov_dn7: f64,
+        var_xs_ov_dn8: f64,
+        var_xs_ov_dn9: f64,
         var_vovd_slot: &mut f64,
         var_vovd_db0_slot: &mut f64,
         var_vovd_db1_slot: &mut f64,
@@ -15722,7 +16087,7 @@ impl Instance {
         s.store_scalar(2313, if s.b[2313] { 1.0 } else { 0.0 });
 
         if (s.b[2312] && s.b[2313]) {
-            s.store_mul_sqrt_ad_lhs(2044, A::offset(A::square(s.ad_value(1878)), 1e-6), 795);
+            s.store_mul_sqrt_ad_lhs(2044, A::offset(A::square(A::from_derivatives(var_vovs, [var_vovs_dn0, var_vovs_dn1, var_vovs_dn2, var_vovs_dn3, var_vovs_dn4, var_vovs_dn5, var_vovs_dn6, var_vovs_dn7, var_vovs_dn8, var_vovs_dn9, var_vovs_dn10, var_vovs_dn11, var_vovs_dn12, var_vovs_dn13, var_vovs_dn14, var_vovs_dn15, var_vovs_dn16, var_vovs_dn17, var_vovs_dn18, var_vovs_dn19, var_vovs_dn20], [var_vovs_db0, var_vovs_db1, var_vovs_db2, var_vovs_db3, var_vovs_db4, var_vovs_db5, var_vovs_db6, var_vovs_db7, var_vovs_db8, var_vovs_db9, var_vovs_db10, var_vovs_db11, var_vovs_db12, var_vovs_db13, var_vovs_db14, var_vovs_db15, var_vovs_db16, var_vovs_db17, var_vovs_db18, var_vovs_db19, var_vovs_db20, var_vovs_db21, var_vovs_db22, var_vovs_db23, var_vovs_db24])), 1e-6), 795);
         }
 
         s.b[2314] = (s.v[243] < 0.0);
@@ -15755,9 +16120,9 @@ impl Instance {
         }
 
         if (s.b[2312] && s.b[2313]) {
-            s.store_offset(2046, 2042, 3.0);
+            s.store_offset_ad(2046, A::from_derivatives(var_xs_ov, [var_xs_ov_dn0, var_xs_ov_dn1, var_xs_ov_dn2, var_xs_ov_dn3, var_xs_ov_dn4, var_xs_ov_dn5, var_xs_ov_dn6, var_xs_ov_dn7, var_xs_ov_dn8, var_xs_ov_dn9, var_xs_ov_dn10, var_xs_ov_dn11, var_xs_ov_dn12, var_xs_ov_dn13, var_xs_ov_dn14, var_xs_ov_dn15, var_xs_ov_dn16, var_xs_ov_dn17, var_xs_ov_dn18, var_xs_ov_dn19, var_xs_ov_dn20], [var_xs_ov_db0, var_xs_ov_db1, var_xs_ov_db2, var_xs_ov_db3, var_xs_ov_db4, var_xs_ov_db5, var_xs_ov_db6, var_xs_ov_db7, var_xs_ov_db8, var_xs_ov_db9, var_xs_ov_db10, var_xs_ov_db11, var_xs_ov_db12, var_xs_ov_db13, var_xs_ov_db14, var_xs_ov_db15, var_xs_ov_db16, var_xs_ov_db17, var_xs_ov_db18, var_xs_ov_db19, var_xs_ov_db20, var_xs_ov_db21, var_xs_ov_db22, var_xs_ov_db23, var_xs_ov_db24]), 3.0);
             s.store_sub_from_scalar(2047, (-3.0), 235);
-            s.store_scale(2048, 834, 30.0);
+            s.store_scale_ad(2048, A::from_derivatives(var_vgsprime, [var_vgsprime_dn0, var_vgsprime_dn1, var_vgsprime_dn2, var_vgsprime_dn3, var_vgsprime_dn4, var_vgsprime_dn5, var_vgsprime_dn6, var_vgsprime_dn7, var_vgsprime_dn8, var_vgsprime_dn9, var_vgsprime_dn10, var_vgsprime_dn11, var_vgsprime_dn12, var_vgsprime_dn13, var_vgsprime_dn14, var_vgsprime_dn15, var_vgsprime_dn16, var_vgsprime_dn17, var_vgsprime_dn18, var_vgsprime_dn19, var_vgsprime_dn20], [var_vgsprime_db0, var_vgsprime_db1, var_vgsprime_db2, var_vgsprime_db3, var_vgsprime_db4, var_vgsprime_db5, var_vgsprime_db6, var_vgsprime_db7, var_vgsprime_db8, var_vgsprime_db9, var_vgsprime_db10, var_vgsprime_db11, var_vgsprime_db12, var_vgsprime_db13, var_vgsprime_db14, var_vgsprime_db15, var_vgsprime_db16, var_vgsprime_db17, var_vgsprime_db18, var_vgsprime_db19, var_vgsprime_db20, var_vgsprime_db21, var_vgsprime_db22, var_vgsprime_db23, var_vgsprime_db24]), 30.0);
             s.store_scalar(818, (4.0 - 0.9));
             s.store_add(819, 2046, 2048);
             s.store_mul_div_from_scalar_lhs_ad_mixed_ia(2027, 2.0, 818, A::sub(s.ad_value(819), A::sqrt(A::sub(A::square(s.ad_value(819)), A::mul3(s.ad_value(818), s.ad_value(2046), s.ad_value(2048))))));
@@ -15771,7 +16136,7 @@ impl Instance {
         s.store_scalar(2317, if s.b[2317] { 1.0 } else { 0.0 });
 
         if (s.b[2312] && s.b[2317]) {
-            s.store_mul_sqrt_ad_lhs(2044, A::offset(A::square(s.ad_value(1879)), 1e-6), 795);
+            s.store_mul_sqrt_ad_lhs(2044, A::offset(A::square(A::from_derivatives(var_vovd, [var_vovd_dn0, var_vovd_dn1, var_vovd_dn2, var_vovd_dn3, var_vovd_dn4, var_vovd_dn5, var_vovd_dn6, var_vovd_dn7, var_vovd_dn8, var_vovd_dn9, var_vovd_dn10, var_vovd_dn11, var_vovd_dn12, var_vovd_dn13, var_vovd_dn14, var_vovd_dn15, var_vovd_dn16, var_vovd_dn17, var_vovd_dn18, var_vovd_dn19, var_vovd_dn20], [var_vovd_db0, var_vovd_db1, var_vovd_db2, var_vovd_db3, var_vovd_db4, var_vovd_db5, var_vovd_db6, var_vovd_db7, var_vovd_db8, var_vovd_db9, var_vovd_db10, var_vovd_db11, var_vovd_db12, var_vovd_db13, var_vovd_db14, var_vovd_db15, var_vovd_db16, var_vovd_db17, var_vovd_db18, var_vovd_db19, var_vovd_db20, var_vovd_db21, var_vovd_db22, var_vovd_db23, var_vovd_db24])), 1e-6), 795);
         }
 
         s.b[2318] = (s.v[245] < 0.0);
@@ -15804,9 +16169,9 @@ impl Instance {
         }
 
         if (s.b[2312] && s.b[2317]) {
-            s.store_offset(2046, 2043, 3.0);
+            s.store_offset_ad(2046, A::from_derivatives(var_xd_ov, [var_xd_ov_dn0, var_xd_ov_dn1, var_xd_ov_dn2, var_xd_ov_dn3, var_xd_ov_dn4, var_xd_ov_dn5, var_xd_ov_dn6, var_xd_ov_dn7, var_xd_ov_dn8, var_xd_ov_dn9, var_xd_ov_dn10, var_xd_ov_dn11, var_xd_ov_dn12, var_xd_ov_dn13, var_xd_ov_dn14, var_xd_ov_dn15, var_xd_ov_dn16, var_xd_ov_dn17, var_xd_ov_dn18, var_xd_ov_dn19, var_xd_ov_dn20], [var_xd_ov_db0, var_xd_ov_db1, var_xd_ov_db2, var_xd_ov_db3, var_xd_ov_db4, var_xd_ov_db5, var_xd_ov_db6, var_xd_ov_db7, var_xd_ov_db8, var_xd_ov_db9, var_xd_ov_db10, var_xd_ov_db11, var_xd_ov_db12, var_xd_ov_db13, var_xd_ov_db14, var_xd_ov_db15, var_xd_ov_db16, var_xd_ov_db17, var_xd_ov_db18, var_xd_ov_db19, var_xd_ov_db20, var_xd_ov_db21, var_xd_ov_db22, var_xd_ov_db23, var_xd_ov_db24]), 3.0);
             s.store_sub_from_scalar(2047, (-3.0), 235);
-            s.store_scale(2048, 837, 30.0);
+            s.store_scale_ad(2048, A::from_derivatives(var_vgdprime, [var_vgdprime_dn0, var_vgdprime_dn1, var_vgdprime_dn2, var_vgdprime_dn3, var_vgdprime_dn4, var_vgdprime_dn5, var_vgdprime_dn6, var_vgdprime_dn7, var_vgdprime_dn8, var_vgdprime_dn9, var_vgdprime_dn10, var_vgdprime_dn11, var_vgdprime_dn12, var_vgdprime_dn13, var_vgdprime_dn14, var_vgdprime_dn15, var_vgdprime_dn16, var_vgdprime_dn17, var_vgdprime_dn18, var_vgdprime_dn19, var_vgdprime_dn20], [var_vgdprime_db0, var_vgdprime_db1, var_vgdprime_db2, var_vgdprime_db3, var_vgdprime_db4, var_vgdprime_db5, var_vgdprime_db6, var_vgdprime_db7, var_vgdprime_db8, var_vgdprime_db9, var_vgdprime_db10, var_vgdprime_db11, var_vgdprime_db12, var_vgdprime_db13, var_vgdprime_db14, var_vgdprime_db15, var_vgdprime_db16, var_vgdprime_db17, var_vgdprime_db18, var_vgdprime_db19, var_vgdprime_db20, var_vgdprime_db21, var_vgdprime_db22, var_vgdprime_db23, var_vgdprime_db24]), 30.0);
             s.store_scalar(818, (4.0 - 0.9));
             s.store_add(819, 2046, 2048);
             s.store_mul_div_from_scalar_lhs_ad_mixed_ia(2027, 2.0, 818, A::sub(s.ad_value(819), A::sqrt(A::sub(A::square(s.ad_value(819)), A::mul3(s.ad_value(818), s.ad_value(2046), s.ad_value(2048))))));
@@ -15824,7 +16189,7 @@ impl Instance {
 
         if ((s.b[2312] && s.b[2321]) && s.b[2322]) {
             s.store_offset(2027, 777, 1.0);
-            s.store_div_scaled_product_left_ad(2028, A::sqrt(s.ad_value(2027)), 826, 1.0, 1855, 1.0);
+            s.store_div_scaled_product_mixed_aai(2028, A::sqrt(s.ad_value(2027)), A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), 1.0, 1855, 1.0);
             s.store_add_ad_lhs(2029, A::square(s.ad_value(2028)), 2027);
             s.store_scale(2027, 2028, 2.0);
             s.store_div_scaled_product3_mixed_iiia(1858, 1855, 1825, 2027, 1.0, A::add(A::sqrt(A::sub(s.ad_value(2029), s.ad_value(2027))), A::sqrt(A::add(s.ad_value(2029), s.ad_value(2027)))), 1.0);
@@ -15879,7 +16244,7 @@ impl Instance {
         }
 
         if (s.b[2312] && s.b[2321]) {
-            s.store_mul_neg_ad_lhs(2054, A::add_scaled_inputs3(s.ad_value(825), 1.0, s.ad_value(2030), 1.0, s.ad_value(2050), -1.0), 1825);
+            s.store_mul_neg_ad_lhs(2054, A::add_scaled_inputs3(A::from_derivatives(var_v_gs, [var_v_gs_dn0, var_v_gs_dn1, var_v_gs_dn2, var_v_gs_dn3, var_v_gs_dn4, var_v_gs_dn5, var_v_gs_dn6, var_v_gs_dn7, var_v_gs_dn8, var_v_gs_dn9, var_v_gs_dn10, var_v_gs_dn11, var_v_gs_dn12, var_v_gs_dn13, var_v_gs_dn14, var_v_gs_dn15, var_v_gs_dn16, var_v_gs_dn17, var_v_gs_dn18, var_v_gs_dn19, var_v_gs_dn20], [var_v_gs_db0, var_v_gs_db1, var_v_gs_db2, var_v_gs_db3, var_v_gs_db4, var_v_gs_db5, var_v_gs_db6, var_v_gs_db7, var_v_gs_db8, var_v_gs_db9, var_v_gs_db10, var_v_gs_db11, var_v_gs_db12, var_v_gs_db13, var_v_gs_db14, var_v_gs_db15, var_v_gs_db16, var_v_gs_db17, var_v_gs_db18, var_v_gs_db19, var_v_gs_db20, var_v_gs_db21, var_v_gs_db22, var_v_gs_db23, var_v_gs_db24]), 1.0, s.ad_value(2030), 1.0, s.ad_value(2050), -1.0), 1825);
         }
 
         s.b[2327] = (((s.v[2054]) as f64).abs() < 230.25850929940458);
@@ -16002,7 +16367,7 @@ impl Instance {
         s.store_scalar(2336, if s.b[2336] { 1.0 } else { 0.0 });
 
         if (s.b[2335] && s.b[2336]) {
-            s.store_sqrt_offset_ad(2071, A::add_scaled_square_product(s.ad_value(1879), 1.0, A::square(s.ad_value(254)), A::square(s.ad_value(836)), 1.0), 1e-6);
+            s.store_sqrt_offset_ad(2071, A::add_scaled_square_product(A::from_derivatives(var_vovd, [var_vovd_dn0, var_vovd_dn1, var_vovd_dn2, var_vovd_dn3, var_vovd_dn4, var_vovd_dn5, var_vovd_dn6, var_vovd_dn7, var_vovd_dn8, var_vovd_dn9, var_vovd_dn10, var_vovd_dn11, var_vovd_dn12, var_vovd_dn13, var_vovd_dn14, var_vovd_dn15, var_vovd_dn16, var_vovd_dn17, var_vovd_dn18, var_vovd_dn19, var_vovd_dn20], [var_vovd_db0, var_vovd_db1, var_vovd_db2, var_vovd_db3, var_vovd_db4, var_vovd_db5, var_vovd_db6, var_vovd_db7, var_vovd_db8, var_vovd_db9, var_vovd_db10, var_vovd_db11, var_vovd_db12, var_vovd_db13, var_vovd_db14, var_vovd_db15, var_vovd_db16, var_vovd_db17, var_vovd_db18, var_vovd_db19, var_vovd_db20, var_vovd_db21, var_vovd_db22, var_vovd_db23, var_vovd_db24]), 1.0, A::square(s.ad_value(254)), A::square(s.ad_value(836)), 1.0), 1e-6);
             s.store_div_scaled_inputs_indices(2027, 807, -1.0, 2071, 1.0);
         }
 
@@ -16018,12 +16383,11 @@ impl Instance {
         }
 
         if (s.b[2335] && s.b[2336]) {
-            s.store_mul_scaled_ad_lhs(845, A::mul3(s.ad_value(836), s.ad_value(1879), s.ad_value(2071)), 2029, (-s.v[805]));
+            s.store_mul_scaled_ad_lhs(845, A::mul3(s.ad_value(836), A::from_derivatives(var_vovd, [var_vovd_dn0, var_vovd_dn1, var_vovd_dn2, var_vovd_dn3, var_vovd_dn4, var_vovd_dn5, var_vovd_dn6, var_vovd_dn7, var_vovd_dn8, var_vovd_dn9, var_vovd_dn10, var_vovd_dn11, var_vovd_dn12, var_vovd_dn13, var_vovd_dn14, var_vovd_dn15, var_vovd_dn16, var_vovd_dn17, var_vovd_dn18, var_vovd_dn19, var_vovd_dn20], [var_vovd_db0, var_vovd_db1, var_vovd_db2, var_vovd_db3, var_vovd_db4, var_vovd_db5, var_vovd_db6, var_vovd_db7, var_vovd_db8, var_vovd_db9, var_vovd_db10, var_vovd_db11, var_vovd_db12, var_vovd_db13, var_vovd_db14, var_vovd_db15, var_vovd_db16, var_vovd_db17, var_vovd_db18, var_vovd_db19, var_vovd_db20, var_vovd_db21, var_vovd_db22, var_vovd_db23, var_vovd_db24]), s.ad_value(2071)), 2029, (-s.v[805]));
         }
 
         s.b[2338] = ((s.v[247] > 0.0) && (s.v[1878] < 0.0));
         s.store_scalar(2338, if s.b[2338] { 1.0 } else { 0.0 });
-
 
         *var_vovd_slot = var_vovd;
         *var_vovd_db0_slot = var_vovd_db0;
@@ -16077,9 +16441,150 @@ impl Instance {
     pub(super) fn stamp_transient_block_222(
         s: &mut Scratch,
         p: &Parameters,
+        var_v_ds: f64,
+        var_v_ds_db0: f64,
+        var_v_ds_db1: f64,
+        var_v_ds_db10: f64,
+        var_v_ds_db11: f64,
+        var_v_ds_db12: f64,
+        var_v_ds_db13: f64,
+        var_v_ds_db14: f64,
+        var_v_ds_db15: f64,
+        var_v_ds_db16: f64,
+        var_v_ds_db17: f64,
+        var_v_ds_db18: f64,
+        var_v_ds_db19: f64,
+        var_v_ds_db2: f64,
+        var_v_ds_db20: f64,
+        var_v_ds_db21: f64,
+        var_v_ds_db22: f64,
+        var_v_ds_db23: f64,
+        var_v_ds_db24: f64,
+        var_v_ds_db3: f64,
+        var_v_ds_db4: f64,
+        var_v_ds_db5: f64,
+        var_v_ds_db6: f64,
+        var_v_ds_db7: f64,
+        var_v_ds_db8: f64,
+        var_v_ds_db9: f64,
+        var_v_ds_dn0: f64,
+        var_v_ds_dn1: f64,
+        var_v_ds_dn10: f64,
+        var_v_ds_dn11: f64,
+        var_v_ds_dn12: f64,
+        var_v_ds_dn13: f64,
+        var_v_ds_dn14: f64,
+        var_v_ds_dn15: f64,
+        var_v_ds_dn16: f64,
+        var_v_ds_dn17: f64,
+        var_v_ds_dn18: f64,
+        var_v_ds_dn19: f64,
+        var_v_ds_dn2: f64,
+        var_v_ds_dn20: f64,
+        var_v_ds_dn3: f64,
+        var_v_ds_dn4: f64,
+        var_v_ds_dn5: f64,
+        var_v_ds_dn6: f64,
+        var_v_ds_dn7: f64,
+        var_v_ds_dn8: f64,
+        var_v_ds_dn9: f64,
+        var_v_sb: f64,
+        var_v_sb_db0: f64,
+        var_v_sb_db1: f64,
+        var_v_sb_db10: f64,
+        var_v_sb_db11: f64,
+        var_v_sb_db12: f64,
+        var_v_sb_db13: f64,
+        var_v_sb_db14: f64,
+        var_v_sb_db15: f64,
+        var_v_sb_db16: f64,
+        var_v_sb_db17: f64,
+        var_v_sb_db18: f64,
+        var_v_sb_db19: f64,
+        var_v_sb_db2: f64,
+        var_v_sb_db20: f64,
+        var_v_sb_db21: f64,
+        var_v_sb_db22: f64,
+        var_v_sb_db23: f64,
+        var_v_sb_db24: f64,
+        var_v_sb_db3: f64,
+        var_v_sb_db4: f64,
+        var_v_sb_db5: f64,
+        var_v_sb_db6: f64,
+        var_v_sb_db7: f64,
+        var_v_sb_db8: f64,
+        var_v_sb_db9: f64,
+        var_v_sb_dn0: f64,
+        var_v_sb_dn1: f64,
+        var_v_sb_dn10: f64,
+        var_v_sb_dn11: f64,
+        var_v_sb_dn12: f64,
+        var_v_sb_dn13: f64,
+        var_v_sb_dn14: f64,
+        var_v_sb_dn15: f64,
+        var_v_sb_dn16: f64,
+        var_v_sb_dn17: f64,
+        var_v_sb_dn18: f64,
+        var_v_sb_dn19: f64,
+        var_v_sb_dn2: f64,
+        var_v_sb_dn20: f64,
+        var_v_sb_dn3: f64,
+        var_v_sb_dn4: f64,
+        var_v_sb_dn5: f64,
+        var_v_sb_dn6: f64,
+        var_v_sb_dn7: f64,
+        var_v_sb_dn8: f64,
+        var_v_sb_dn9: f64,
+        var_vovs: f64,
+        var_vovs_db0: f64,
+        var_vovs_db1: f64,
+        var_vovs_db10: f64,
+        var_vovs_db11: f64,
+        var_vovs_db12: f64,
+        var_vovs_db13: f64,
+        var_vovs_db14: f64,
+        var_vovs_db15: f64,
+        var_vovs_db16: f64,
+        var_vovs_db17: f64,
+        var_vovs_db18: f64,
+        var_vovs_db19: f64,
+        var_vovs_db2: f64,
+        var_vovs_db20: f64,
+        var_vovs_db21: f64,
+        var_vovs_db22: f64,
+        var_vovs_db23: f64,
+        var_vovs_db24: f64,
+        var_vovs_db3: f64,
+        var_vovs_db4: f64,
+        var_vovs_db5: f64,
+        var_vovs_db6: f64,
+        var_vovs_db7: f64,
+        var_vovs_db8: f64,
+        var_vovs_db9: f64,
+        var_vovs_dn0: f64,
+        var_vovs_dn1: f64,
+        var_vovs_dn10: f64,
+        var_vovs_dn11: f64,
+        var_vovs_dn12: f64,
+        var_vovs_dn13: f64,
+        var_vovs_dn14: f64,
+        var_vovs_dn15: f64,
+        var_vovs_dn16: f64,
+        var_vovs_dn17: f64,
+        var_vovs_dn18: f64,
+        var_vovs_dn19: f64,
+        var_vovs_dn2: f64,
+        var_vovs_dn20: f64,
+        var_vovs_dn3: f64,
+        var_vovs_dn4: f64,
+        var_vovs_dn5: f64,
+        var_vovs_dn6: f64,
+        var_vovs_dn7: f64,
+        var_vovs_dn8: f64,
+        var_vovs_dn9: f64,
     ) {
         if (s.b[2335] && s.b[2338]) {
-            s.store_sqrt_offset_ad(2072, A::add_scaled_square_product(s.ad_value(1878), 1.0, A::square(s.ad_value(253)), A::square(s.ad_value(835)), 1.0), 1e-6);
+            s.store_sqrt_offset_ad(2072, A::add_scaled_square_product(A::from_derivatives(var_vovs, [var_vovs_dn0, var_vovs_dn1, var_vovs_dn2, var_vovs_dn3, var_vovs_dn4, var_vovs_dn5, var_vovs_dn6, var_vovs_dn7, var_vovs_dn8, var_vovs_dn9, var_vovs_dn10, var_vovs_dn11, var_vovs_dn12, var_vovs_dn13, var_vovs_dn14, var_vovs_dn15, var_vovs_dn16, var_vovs_dn17, var_vovs_dn18, var_vovs_dn19, var_vovs_dn20], [var_vovs_db0, var_vovs_db1, var_vovs_db2, var_vovs_db3, var_vovs_db4, var_vovs_db5, var_vovs_db6, var_vovs_db7, var_vovs_db8, var_vovs_db9, var_vovs_db10, var_vovs_db11, var_vovs_db12, var_vovs_db13, var_vovs_db14, var_vovs_db15, var_vovs_db16, var_vovs_db17, var_vovs_db18, var_vovs_db19, var_vovs_db20, var_vovs_db21, var_vovs_db22, var_vovs_db23, var_vovs_db24]), 1.0, A::square(s.ad_value(253)), A::square(s.ad_value(835)), 1.0), 1e-6);
             s.store_div_scaled_inputs_indices(2027, 806, -1.0, 2072, 1.0);
         }
 
@@ -16095,7 +16600,7 @@ impl Instance {
         }
 
         if (s.b[2335] && s.b[2338]) {
-            s.store_mul_scaled_ad_lhs(844, A::mul3(s.ad_value(835), s.ad_value(1878), s.ad_value(2072)), 2029, (-s.v[804]));
+            s.store_mul_scaled_ad_lhs(844, A::mul3(s.ad_value(835), A::from_derivatives(var_vovs, [var_vovs_dn0, var_vovs_dn1, var_vovs_dn2, var_vovs_dn3, var_vovs_dn4, var_vovs_dn5, var_vovs_dn6, var_vovs_dn7, var_vovs_dn8, var_vovs_dn9, var_vovs_dn10, var_vovs_dn11, var_vovs_dn12, var_vovs_dn13, var_vovs_dn14, var_vovs_dn15, var_vovs_dn16, var_vovs_dn17, var_vovs_dn18, var_vovs_dn19, var_vovs_dn20], [var_vovs_db0, var_vovs_db1, var_vovs_db2, var_vovs_db3, var_vovs_db4, var_vovs_db5, var_vovs_db6, var_vovs_db7, var_vovs_db8, var_vovs_db9, var_vovs_db10, var_vovs_db11, var_vovs_db12, var_vovs_db13, var_vovs_db14, var_vovs_db15, var_vovs_db16, var_vovs_db17, var_vovs_db18, var_vovs_db19, var_vovs_db20, var_vovs_db21, var_vovs_db22, var_vovs_db23, var_vovs_db24]), s.ad_value(2072)), 2029, (-s.v[804]));
         }
 
         s.store_scalar(2076, s.v[715]);
@@ -16116,9 +16621,9 @@ impl Instance {
         s.store_scalar(2340, if s.b[2340] { 1.0 } else { 0.0 });
 
         if s.b[2340] {
-            s.store_add_scaled_inputs4_mixed_iiai(2027, 828, 0.5, 827, 0.5, A::sqrt(A::add(A::square(A::sub(s.ad_value(828), s.ad_value(827))), s.ad_value(764))), (-0.5), 762, 1.0);
-            s.store_add_scaled_inputs4_mixed_iiai(2073, 827, 1.0, 2027, (-0.5), A::sqrt(A::add(A::square(s.ad_value(2027)), s.ad_value(763))), (-(-0.5)), 766, 1.0);
-            s.store_add_scaled_inputs3_indices(2074, 2073, 1.0, 826, 0.5, 830, (-0.5));
+            s.store_add_scaled_inputs4_mixed_iaai(2027, 828, 0.5, A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]), 0.5, A::sqrt(A::add(A::square(A::sub(s.ad_value(828), A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]))), s.ad_value(764))), (-0.5), 762, 1.0);
+            s.store_add_scaled_inputs4_mixed_aiai(2073, A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]), 1.0, 2027, (-0.5), A::sqrt(A::add(A::square(s.ad_value(2027)), s.ad_value(763))), (-(-0.5)), 766, 1.0);
+            s.store_add_scaled_inputs3_mixed_iai(2074, 2073, 1.0, A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), 0.5, 830, (-0.5));
             s.store_mul_ad_product_rhs(2075, 289, A::offset(A::mul(s.ad_value(291), s.ad_value(830)), 1.0), A::offset(A::mul(s.ad_value(290), s.ad_value(2074)), 1.0));
             s.store_mul_offset_rhs(2076, 723, 2075, 1.0);
             s.store_div_from_scalar(2077, 1.0, 2076);
@@ -16277,7 +16782,7 @@ impl Instance {
         s.store_scalar(2349, if s.b[2349] { 1.0 } else { 0.0 });
 
         if s.b[2349] {
-            s.store_add_scaled_product_indices(2086, 826, 1.0, 232, 1860, (-1.0));
+            s.store_add_scaled_product_value_ad(2086, A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), 1.0, 232, 1860, (-1.0));
         }
 
         s.b[2350] = (s.v[2086] > 0.0);
@@ -16337,8 +16842,8 @@ impl Instance {
         s.store_scalar(2549, if s.b[2549] { 1.0 } else { 0.0 });
 
         if ((s.b[2547] && s.b[2548]) && s.b[2549]) {
-            s.store_add_scaled_inputs4_mixed_iiai(2391, 828, 0.5, 827, 0.5, A::sqrt(A::add(A::square(A::sub(s.ad_value(828), s.ad_value(827))), s.ad_value(749))), (-0.5), 747, 1.0);
-            s.store_add_scaled_inputs4_mixed_iiai(1886, 827, 1.0, 2391, (-0.5), A::sqrt(A::add(A::square(s.ad_value(2391)), s.ad_value(748))), (-(-0.5)), 750, 1.0);
+            s.store_add_scaled_inputs4_mixed_iaai(2391, 828, 0.5, A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]), 0.5, A::sqrt(A::add(A::square(A::sub(s.ad_value(828), A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]))), s.ad_value(749))), (-0.5), 747, 1.0);
+            s.store_add_scaled_inputs4_mixed_aiai(1886, A::from_derivatives(var_v_sb, [var_v_sb_dn0, var_v_sb_dn1, var_v_sb_dn2, var_v_sb_dn3, var_v_sb_dn4, var_v_sb_dn5, var_v_sb_dn6, var_v_sb_dn7, var_v_sb_dn8, var_v_sb_dn9, var_v_sb_dn10, var_v_sb_dn11, var_v_sb_dn12, var_v_sb_dn13, var_v_sb_dn14, var_v_sb_dn15, var_v_sb_dn16, var_v_sb_dn17, var_v_sb_dn18, var_v_sb_dn19, var_v_sb_dn20], [var_v_sb_db0, var_v_sb_db1, var_v_sb_db2, var_v_sb_db3, var_v_sb_db4, var_v_sb_db5, var_v_sb_db6, var_v_sb_db7, var_v_sb_db8, var_v_sb_db9, var_v_sb_db10, var_v_sb_db11, var_v_sb_db12, var_v_sb_db13, var_v_sb_db14, var_v_sb_db15, var_v_sb_db16, var_v_sb_db17, var_v_sb_db18, var_v_sb_db19, var_v_sb_db20, var_v_sb_db21, var_v_sb_db22, var_v_sb_db23, var_v_sb_db24]), 1.0, 2391, (-0.5), A::sqrt(A::add(A::square(s.ad_value(2391)), s.ad_value(748))), (-(-0.5)), 750, 1.0);
             s.copy_ad(2392, 1886);
             s.copy_ad(2388, 745);
             s.copy_ad(2389, 748);
@@ -16347,7 +16852,7 @@ impl Instance {
 
         if (s.b[2547] && s.b[2548]) {
             s.store_add_scaled_inputs3_indices(2395, 829, 1.0, 2396, (-1.0), 700, -1.0);
-            s.store_add_scaled_inputs3_indices(2397, 2392, 1.0, 826, 0.5, 830, (-0.5));
+            s.store_add_scaled_inputs3_mixed_iai(2397, 2392, 1.0, A::from_derivatives(var_v_ds, [var_v_ds_dn0, var_v_ds_dn1, var_v_ds_dn2, var_v_ds_dn3, var_v_ds_dn4, var_v_ds_dn5, var_v_ds_dn6, var_v_ds_dn7, var_v_ds_dn8, var_v_ds_dn9, var_v_ds_dn10, var_v_ds_dn11, var_v_ds_dn12, var_v_ds_dn13, var_v_ds_dn14, var_v_ds_dn15, var_v_ds_dn16, var_v_ds_dn17, var_v_ds_dn18, var_v_ds_dn19, var_v_ds_dn20], [var_v_ds_db0, var_v_ds_db1, var_v_ds_db2, var_v_ds_db3, var_v_ds_db4, var_v_ds_db5, var_v_ds_db6, var_v_ds_db7, var_v_ds_db8, var_v_ds_db9, var_v_ds_db10, var_v_ds_db11, var_v_ds_db12, var_v_ds_db13, var_v_ds_db14, var_v_ds_db15, var_v_ds_db16, var_v_ds_db17, var_v_ds_db18, var_v_ds_db19, var_v_ds_db20, var_v_ds_db21, var_v_ds_db22, var_v_ds_db23, var_v_ds_db24]), 0.5, 830, (-0.5));
             s.store_scalar(2409, 1.0);
         }
 

@@ -3636,34 +3636,6 @@ impl Instance {
         let nv6 = ctx.node_voltage(nodes[6]);
         let nv12 = ctx.node_voltage(nodes[12]);
         let nv14 = ctx.node_voltage(nodes[14]);
-        let (eq8_e345, eq8_e345_d_n5, eq8_e345_d_n6,) = {
-    if ((var_guard354 != 0.0) && (var_guard353 == 0.0)) {
-        let __rspice_inv_cse_0: f64 = 1.0 / 10.0;
-        let eq8_e339: f64 = ((nv6 - nv5) * __rspice_inv_cse_0);
-        let eq8_e339_d_n5: f64 = ((-1.0) * __rspice_inv_cse_0);
-        let eq8_e339_d_n6: f64 = (1.0 * __rspice_inv_cse_0);
-        let eq8_e340: f64 = { let limited_exp_arg = eq8_e339; if limited_exp_arg > 80.0 { LIMEXP_MAX * (1.0 + limited_exp_arg - 80.0) } else if limited_exp_arg < -80.0 { 1.804851387e-35 } else { limited_exp_arg.exp() } };
-        let eq8_e340_d_n5: f64 = ({ let limited_exp_arg = eq8_e339; if limited_exp_arg > 80.0 { LIMEXP_MAX } else if limited_exp_arg < -80.0 { 0.0 } else { limited_exp_arg.exp() } } * eq8_e339_d_n5);
-        let eq8_e340_d_n6: f64 = ({ let limited_exp_arg = eq8_e339; if limited_exp_arg > 80.0 { LIMEXP_MAX } else if limited_exp_arg < -80.0 { 0.0 } else { limited_exp_arg.exp() } } * eq8_e339_d_n6);
-        let eq8_e342: f64 = (eq8_e340 - 1.0);
-        let eq8_e343: f64 = (p.p99 * eq8_e342);
-        let eq8_e343_d_n5: f64 = (p.p99 * eq8_e340_d_n5);
-        let eq8_e343_d_n6: f64 = (p.p99 * eq8_e340_d_n6);
-        (eq8_e343, eq8_e343_d_n5, eq8_e343_d_n6,)
-    } else {
-        (0.0, 0.0, 0.0,)
-    }
-};
-        let eq8_value: f64 = eq8_e345;
-        stamper.stamp_current_node2_local(
-            Some(6),
-            Some(5),
-            multiplicity * (eq8_value),
-            5,
-            multiplicity * (eq8_e345_d_n5),
-            6,
-            multiplicity * (eq8_e345_d_n6),
-        );
         let (eq9_e355, eq9_e355_d_n5,) = {
     if ((var_guard354 != 0.0) && (var_guard353 == 0.0)) {
         let eq9_e352: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, (nv5 - 0.0));

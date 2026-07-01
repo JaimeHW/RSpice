@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, Scratch, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, Scratch, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1398,7 +1398,6 @@ impl Instance {
         var_ptwgr_t_db11 = 0.0;
         var_ptwgr_t_db12 = 0.0;
         var_ptwgr_t_db13 = 0.0;
-
 
         *var_c0si_i_slot = var_c0si_i;
         *var_c0sisat1_i_slot = var_c0sisat1_i;
@@ -3347,7 +3346,6 @@ impl Instance {
         var_local_scc_db12 = 0.0;
         var_local_scc_db13 = 0.0;
 
-
         *var_c0_i_slot = var_c0_i;
         *var_c0si1_i_slot = var_c0si1_i;
         *var_c0sisat_t_slot = var_c0sisat_t;
@@ -5280,7 +5278,6 @@ impl Instance {
 
         s.store_scalar(373, 0.0);
 
-
         *var_abulkcv_slot = var_abulkcv;
         *var_abulkcv_db0_slot = var_abulkcv_db0;
         *var_abulkcv_db1_slot = var_abulkcv_db1;
@@ -6915,7 +6912,6 @@ impl Instance {
 };
         var_l_lln1 = assign1470_e2346;
 
-
         *var_alpha0r_i_slot = var_alpha0r_i;
         *var_alpha0r_i_db0_slot = var_alpha0r_i_db0;
         *var_alpha0r_i_db1_slot = var_alpha0r_i_db1;
@@ -8233,7 +8229,6 @@ impl Instance {
         var_k2_i_db11 = 0.0;
         var_k2_i_db12 = 0.0;
         var_k2_i_db13 = 0.0;
-
 
         *var_bin_l_slot = var_bin_l;
         *var_bin_w_slot = var_bin_w;
@@ -9672,7 +9667,6 @@ impl Instance {
         let assign2130_e3060: f64 = (assign2130_e3056 + assign2130_e3059);
         var_pscbe2_i = assign2130_e3060;
 
-
         *var_delta_i_slot = var_delta_i;
         *var_delta_i_db0_slot = var_delta_i_db0;
         *var_delta_i_db1_slot = var_delta_i_db1;
@@ -10868,7 +10862,6 @@ impl Instance {
         let assign2610_e3684: f64 = (assign2610_e3680 + assign2610_e3683);
         var_bigc_i = assign2610_e3684;
 
-
         *var_agidl_i_slot = var_agidl_i;
         *var_agisl_i_slot = var_agisl_i;
         *var_aigbacc_i_slot = var_aigbacc_i;
@@ -11843,7 +11836,6 @@ impl Instance {
         var_cdscdr_i_db11 = assign3130_e4353_d_b11;
         var_cdscdr_i_db12 = assign3130_e4353_d_b12;
         var_cdscdr_i_db13 = assign3130_e4353_d_b13;
-
 
         *var_a11_i_slot = var_a11_i;
         *var_a1_i_slot = var_a1_i;
@@ -13057,7 +13049,6 @@ impl Instance {
 };
         var_beta0r_i = assign3260_e4561;
 
-
         *var_alpha0r_i_slot = var_alpha0r_i;
         *var_alpha0r_i_db0_slot = var_alpha0r_i_db0;
         *var_alpha0r_i_db1_slot = var_alpha0r_i_db1;
@@ -14238,7 +14229,6 @@ impl Instance {
     }
 };
         var_u0r_i = assign3490_e4817;
-
 
         *var_cdscb_i_slot = var_cdscb_i;
         *var_cdscd_i_slot = var_cdscd_i;
@@ -15480,7 +15470,6 @@ impl Instance {
 
         let assign3650_e4963: f64 = if p.p44 != 0.0 { 1.0 } else { 0.0 };
         var_guard30 = assign3650_e4963;
-
 
         *var_eu_i_slot = var_eu_i;
         *var_eu_i_db0_slot = var_eu_i_db0;
@@ -16778,7 +16767,6 @@ impl Instance {
 
         let assign3820_e5085: f64 = if p.p44 != 0.0 { 1.0 } else { 0.0 };
         var_guard33 = assign3820_e5085;
-
 
         *var_delta_i_slot = var_delta_i;
         *var_delta_i_db0_slot = var_delta_i_db0;
@@ -18082,7 +18070,6 @@ impl Instance {
         let assign4000_e5242: f64 = if p.p44 != 0.0 { 1.0 } else { 0.0 };
         var_guard37 = assign4000_e5242;
 
-
         *var_alpha0_i_slot = var_alpha0_i;
         *var_alpha0_i_db0_slot = var_alpha0_i_db0;
         *var_alpha0_i_db1_slot = var_alpha0_i_db1;
@@ -19308,7 +19295,6 @@ impl Instance {
         var_ndepcv_i_db12 = ((var_ndepcv_i_db12 * assign4180_e5412) + (var_ndepcv_i * (var_t0_db12 + var_t1_db12)));
         var_ndepcv_i_db13 = ((var_ndepcv_i_db13 * assign4180_e5412) + (var_ndepcv_i * (var_t0_db13 + var_t1_db13)));
 
-
         *var_agidl_i_slot = var_agidl_i;
         *var_agisl_i_slot = var_agisl_i;
         *var_aigc_i_slot = var_aigc_i;
@@ -20447,7 +20433,6 @@ impl Instance {
         var_t0_db11 = 0.0;
         var_t0_db12 = 0.0;
         var_t0_db13 = 0.0;
-
 
         *var_k1_i_slot = var_k1_i;
         *var_k1_i_db0_slot = var_k1_i_db0;
@@ -21638,7 +21623,6 @@ impl Instance {
     }
 };
         var_lh1 = assign4980_e5911;
-
 
         *var_at_i_slot = var_at_i;
         *var_beta1_i_slot = var_beta1_i;

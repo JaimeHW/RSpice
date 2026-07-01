@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, Scratch, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, Scratch, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1453,7 +1453,6 @@ impl Instance {
         var_jtsswgs_t_db15 = 0.0;
         var_jtsswgs_t_db16 = 0.0;
         var_jtsswgs_t_db17 = 0.0;
-
 
         *var_dr_slot = var_dr;
         *var_dr_db0_slot = var_dr_db0;
@@ -3344,7 +3343,6 @@ impl Instance {
         var_ucr_t_db15 = 0.0;
         var_ucr_t_db16 = 0.0;
         var_ucr_t_db17 = 0.0;
-
 
         *var_jtsswgd_t_slot = var_jtsswgd_t;
         *var_jtsswgd_t_db0_slot = var_jtsswgd_t_db0;
@@ -5267,7 +5265,6 @@ impl Instance {
 
         var_bgidlb_i = 0.0;
 
-
         *var_agidlb_i_slot = var_agidlb_i;
         *var_bgidlb_i_slot = var_bgidlb_i;
         *var_igcd_v_slot = var_igcd_v;
@@ -7124,7 +7121,6 @@ impl Instance {
 
         s.store_scalar(552, 0.0);
 
-
         *var_agislb_i_slot = var_agislb_i;
         *var_bgidlb_t_slot = var_bgidlb_t;
         *var_bgidlb_t_db0_slot = var_bgidlb_t_db0;
@@ -8977,7 +8973,6 @@ impl Instance {
 
         var_atr_i = 0.0;
 
-
         *var_atr_i_slot = var_atr_i;
         *var_cdscdr_i_slot = var_cdscdr_i;
         *var_citr_i_slot = var_citr_i;
@@ -10758,7 +10753,6 @@ impl Instance {
         var_qnds2_db15 = 0.0;
         var_qnds2_db16 = 0.0;
         var_qnds2_db17 = 0.0;
-
 
         *var_ach_slot = var_ach;
         *var_ach2_slot = var_ach2;
@@ -12589,7 +12583,6 @@ impl Instance {
         var_vtmeff_db15 = 0.0;
         var_vtmeff_db16 = 0.0;
         var_vtmeff_db17 = 0.0;
-
 
         *var_d1_slot = var_d1;
         *var_d2_slot = var_d2;
@@ -14454,7 +14447,6 @@ impl Instance {
 
         var_gfactor = 2.0;
 
-
         *var_deltaprsd_v_slot = var_deltaprsd_v;
         *var_devsign_slot = var_devsign;
         *var_epsratio_slot = var_epsratio;
@@ -15879,7 +15871,6 @@ impl Instance {
 };
         var_xw_i = assign3030_e3461;
 
-
         *var_deltal_slot = var_deltal;
         *var_deltal1_slot = var_deltal1;
         *var_deltal_db0_slot = var_deltal_db0;
@@ -16678,7 +16669,6 @@ impl Instance {
 };
         var_ach = assign3600_e4065;
 
-
         *var_ach_slot = var_ach;
         *var_cins_slot = var_cins;
         *var_dwbin_i_slot = var_dwbin_i;
@@ -17452,7 +17442,6 @@ impl Instance {
         let assign4130_e4819: f64 = (var_inv_wl * p.p211);
         let assign4130_e4820: f64 = (assign4130_e4816 + assign4130_e4819);
         var_cdscd_i = assign4130_e4820;
-
 
         *var_ach_slot = var_ach;
         *var_ach1_slot = var_ach1;
@@ -18489,7 +18478,6 @@ impl Instance {
         let assign4410_e5407: f64 = (var_inv_wl * p.p517);
         let assign4410_e5408: f64 = (assign4410_e5404 + assign4410_e5407);
         var_asat_i = assign4410_e5408;
-
 
         *var_asat_i_slot = var_asat_i;
         *var_dsub_i_slot = var_dsub_i;
@@ -19797,7 +19785,6 @@ impl Instance {
         let assign4590_e5786: f64 = (assign4590_e5782 + assign4590_e5785);
         var_udd1_i = assign4590_e5786;
 
-
         *var_deltavsat_i_slot = var_deltavsat_i;
         *var_deltavsatcv_i_slot = var_deltavsatcv_i;
         *var_etamob_i_slot = var_etamob_i;
@@ -20961,7 +20948,6 @@ impl Instance {
         let assign4900_e6437: f64 = (assign4900_e6433 + assign4900_e6436);
         var_bigc_i = assign4900_e6437;
 
-
         *var_a11_i_slot = var_a11_i;
         *var_a1_i_slot = var_a1_i;
         *var_a21_i_slot = var_a21_i;
@@ -21731,7 +21717,6 @@ impl Instance {
         let assign5320_e7318: f64 = (var_inv_wl * p.p1515);
         let assign5320_e7319: f64 = (assign5320_e7315 + assign5320_e7318);
         var_sii1_i = assign5320_e7319;
-
 
         *var_agidl_i_slot = var_agidl_i;
         *var_agisl_i_slot = var_agisl_i;
@@ -22506,7 +22491,6 @@ impl Instance {
         let assign5770_e8263: f64 = (var_inv_wl * p.p1700);
         let assign5770_e8264: f64 = (assign5770_e8260 + assign5770_e8263);
         var_mpower_i = assign5770_e8264;
-
 
         *var_aigen_i_slot = var_aigen_i;
         *var_at_i_slot = var_at_i;

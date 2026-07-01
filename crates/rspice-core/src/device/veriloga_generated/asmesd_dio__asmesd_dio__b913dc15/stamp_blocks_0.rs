@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1244,7 +1244,6 @@ impl Instance {
         var_vbbi_db4 = 0.0;
         var_vbbi_db5 = 0.0;
         var_vbbi_db6 = 0.0;
-
 
         *var_arg0_slot = var_arg0;
         *var_arg0_db0_slot = var_arg0_db0;
@@ -2516,7 +2515,6 @@ impl Instance {
         var_itrev_db5 = assign520_e729_d_b5;
         var_itrev_db6 = assign520_e729_d_b6;
 
-
         *var_arg_slot = var_arg;
         *var_arg_db0_slot = var_arg_db0;
         *var_arg_db1_slot = var_arg_db1;
@@ -3774,7 +3772,6 @@ impl Instance {
         let assign790_e940: f64 = if ((p.p30 == 1.0) && (p.p33 > 0.0)) { 1.0 } else { 0.0 };
         var_guard10 = assign790_e940;
 
-
         *var_dv0_slot = var_dv0;
         *var_dv0_db0_slot = var_dv0_db0;
         *var_dv0_db1_slot = var_dv0_db1;
@@ -4061,7 +4058,6 @@ impl Instance {
 
         let assign870_e1003: f64 = if ((var_re_nom > 0.0) && (var_re_nom >= p.p46)) { 1.0 } else { 0.0 };
         var_guard14 = assign870_e1003;
-
 
         *var_guard11_slot = var_guard11;
         *var_guard12_slot = var_guard12;
@@ -5413,7 +5409,6 @@ impl Instance {
         var_theexp_t_rdb4 = 0.0;
         var_theexp_t_rdb5 = 0.0;
         var_theexp_t_rdb6 = 0.0;
-
 
         *var_argt_slot = var_argt;
         *var_argt_db0_slot = var_argt_db0;
@@ -7300,7 +7295,6 @@ impl Instance {
         var_guard3_rdb5 = 0.0;
         var_guard3_rdb6 = 0.0;
 
-
         *var_arg0_slot = var_arg0;
         *var_arg0_db0_slot = var_arg0_db0;
         *var_arg0_db1_slot = var_arg0_db1;
@@ -8757,7 +8751,6 @@ impl Instance {
         var_ifwd_rdb5 = 0.0;
         var_ifwd_rdb6 = 0.0;
 
-
         *var_arg_slot = var_arg;
         *var_arg_db0_slot = var_arg_db0;
         *var_arg_db1_slot = var_arg_db1;
@@ -10186,7 +10179,6 @@ impl Instance {
         var_guard8_rdb5 = 0.0;
         var_guard8_rdb6 = 0.0;
 
-
         *var_arg_slot = var_arg;
         *var_arg_db0_slot = var_arg_db0;
         *var_arg_db1_slot = var_arg_db1;
@@ -11522,7 +11514,6 @@ impl Instance {
         var_guard11_rdb4 = 0.0;
         var_guard11_rdb5 = 0.0;
         var_guard11_rdb6 = 0.0;
-
 
         *var_dv0_slot = var_dv0;
         *var_dv0_db0_slot = var_dv0_db0;

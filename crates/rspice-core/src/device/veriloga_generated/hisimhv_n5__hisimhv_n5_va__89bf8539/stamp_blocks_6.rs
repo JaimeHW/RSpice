@@ -1115,7 +1115,6 @@ impl Instance {
         let assign95350_e148003: f64 = if var_flg_coovlps == 0.0 { 1.0 } else { 0.0 };
         var_guard2221 = assign95350_e148003;
 
-
         *var_cgsoe_slot = var_cgsoe;
         *var_flg_coovlp_slot = var_flg_coovlp;
         *var_flg_coovlps_slot = var_flg_coovlps;
@@ -1904,7 +1903,6 @@ impl Instance {
             s.store_scale(873, 828, p.p13);
             s.store_scale(874, 830, p.p13);
         }
-
 
         *var_cfd_slot = var_cfd;
         *var_cfs_slot = var_cfs;
@@ -4172,7 +4170,6 @@ impl Instance {
             s.store_scalar(387, (ctx_temp + p.p11));
         }
 
-
         *var_guard2333_slot = var_guard2333;
         *var_qdp_slot = var_qdp;
         *var_qdp_db0_slot = var_qdp_db0;
@@ -5416,6 +5413,39 @@ impl Instance {
         var_qsp_dn7: f64,
         var_qsp_dn8: f64,
         var_qsp_dn9: f64,
+        var_vdsei: f64,
+        var_vdsei_db0: f64,
+        var_vdsei_db1: f64,
+        var_vdsei_db10: f64,
+        var_vdsei_db11: f64,
+        var_vdsei_db12: f64,
+        var_vdsei_db2: f64,
+        var_vdsei_db3: f64,
+        var_vdsei_db4: f64,
+        var_vdsei_db5: f64,
+        var_vdsei_db6: f64,
+        var_vdsei_db7: f64,
+        var_vdsei_db8: f64,
+        var_vdsei_db9: f64,
+        var_vdsei_dn0: f64,
+        var_vdsei_dn1: f64,
+        var_vdsei_dn10: f64,
+        var_vdsei_dn11: f64,
+        var_vdsei_dn12: f64,
+        var_vdsei_dn13: f64,
+        var_vdsei_dn14: f64,
+        var_vdsei_dn15: f64,
+        var_vdsei_dn16: f64,
+        var_vdsei_dn17: f64,
+        var_vdsei_dn18: f64,
+        var_vdsei_dn2: f64,
+        var_vdsei_dn3: f64,
+        var_vdsei_dn4: f64,
+        var_vdsei_dn5: f64,
+        var_vdsei_dn6: f64,
+        var_vdsei_dn7: f64,
+        var_vdsei_dn8: f64,
+        var_vdsei_dn9: f64,
         var_cqb_slot: &mut f64,
         var_cqi_slot: &mut f64,
         var_qfd_slot: &mut f64,
@@ -5693,11 +5723,11 @@ impl Instance {
         s.store_scalar(3401, if s.b[3401] { 1.0 } else { 0.0 });
 
         if ((s.b[3398] && s.b[3400]) && s.b[3401]) {
-            s.copy_ad(745, 733);
+            s.store_ad_value(745, A::from_derivatives(var_vdsei, [var_vdsei_dn0, var_vdsei_dn1, var_vdsei_dn2, var_vdsei_dn3, var_vdsei_dn4, var_vdsei_dn5, var_vdsei_dn6, var_vdsei_dn7, var_vdsei_dn8, var_vdsei_dn9, var_vdsei_dn10, var_vdsei_dn11, var_vdsei_dn12, var_vdsei_dn13, var_vdsei_dn14, var_vdsei_dn15, var_vdsei_dn16, var_vdsei_dn17, var_vdsei_dn18], [var_vdsei_db0, var_vdsei_db1, var_vdsei_db2, var_vdsei_db3, var_vdsei_db4, var_vdsei_db5, var_vdsei_db6, var_vdsei_db7, var_vdsei_db8, var_vdsei_db9, var_vdsei_db10, var_vdsei_db11, var_vdsei_db12]));
         }
 
         if ((s.b[3398] && s.b[3400]) && (!s.b[3401])) {
-            s.store_add_scaled_product_right_sub(745, 729, 1.0, 683, 733, 729, 1.0);
+            s.store_add_scaled_product_right_ad(745, 729, 1.0, 683, A::sub(A::from_derivatives(var_vdsei, [var_vdsei_dn0, var_vdsei_dn1, var_vdsei_dn2, var_vdsei_dn3, var_vdsei_dn4, var_vdsei_dn5, var_vdsei_dn6, var_vdsei_dn7, var_vdsei_dn8, var_vdsei_dn9, var_vdsei_dn10, var_vdsei_dn11, var_vdsei_dn12, var_vdsei_dn13, var_vdsei_dn14, var_vdsei_dn15, var_vdsei_dn16, var_vdsei_dn17, var_vdsei_dn18], [var_vdsei_db0, var_vdsei_db1, var_vdsei_db2, var_vdsei_db3, var_vdsei_db4, var_vdsei_db5, var_vdsei_db6, var_vdsei_db7, var_vdsei_db8, var_vdsei_db9, var_vdsei_db10, var_vdsei_db11, var_vdsei_db12]), s.ad_value(729)), 1.0);
         }
 
         if (s.b[3398] && (!s.b[3400])) {
@@ -5817,7 +5847,6 @@ impl Instance {
     }
 };
         var_cqb = assign107770_e159142;
-
 
         *var_cqb_slot = var_cqb;
         *var_cqi_slot = var_cqi;

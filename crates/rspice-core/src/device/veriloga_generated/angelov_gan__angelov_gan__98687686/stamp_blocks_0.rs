@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1447,7 +1447,6 @@ impl Instance {
         var_t_db16 = assign160_e593_d_b16;
         var_t_db17 = assign160_e593_d_b17;
         var_t_db18 = assign160_e593_d_b18;
-
 
         *var_cgd_slot = var_cgd;
         *var_cgd_db0_slot = var_cgd_db0;
@@ -3147,7 +3146,6 @@ impl Instance {
         var_p40_t_db17 = assign340_e740_d_b17;
         var_p40_t_db18 = assign340_e740_d_b18;
 
-
         *var_cgd0_t_slot = var_cgd0_t;
         *var_cgd0_t_db0_slot = var_cgd0_t_db0;
         *var_cgd0_t_db1_slot = var_cgd0_t_db1;
@@ -4658,7 +4656,6 @@ impl Instance {
         var_p10_t_db16 = assign510_e873_d_b16;
         var_p10_t_db17 = assign510_e873_d_b17;
         var_p10_t_db18 = assign510_e873_d_b18;
-
 
         *var_cdel_t_slot = var_cdel_t;
         *var_cdel_t_db0_slot = var_cdel_t_db0;
@@ -6504,7 +6501,6 @@ impl Instance {
         var_vpkm_db17 = (((var_vpks_t_db17 + (p.p10 * ((p.p15 * var_vds_db17) / ((assign630_e948).cosh() * (assign630_e948).cosh())))) - var_vbg_db17) - (((p.p22 * (var_vdg_db17 - var_vtr_t_db17)) * assign630_e961) + (assign630_e958 * (var_vdg_db17 - var_vtr_t_db17))));
         var_vpkm_db18 = (((var_vpks_t_db18 + (p.p10 * ((p.p15 * var_vds_db18) / ((assign630_e948).cosh() * (assign630_e948).cosh())))) - var_vbg_db18) - (((p.p22 * (var_vdg_db18 - var_vtr_t_db18)) * assign630_e961) + (assign630_e958 * (var_vdg_db18 - var_vtr_t_db18))));
 
-
         *var_guard5_slot = var_guard5;
         *var_p1_t_slot = var_p1_t;
         *var_p1_t_db0_slot = var_p1_t_db0;
@@ -8155,7 +8151,6 @@ impl Instance {
         var_t0_db17 = assign900_e1216_d_b17;
         var_t0_db18 = assign900_e1216_d_b18;
 
-
         *var_guard6_slot = var_guard6;
         *var_guard7_slot = var_guard7;
         *var_guard8_slot = var_guard8;
@@ -9771,7 +9766,6 @@ impl Instance {
         var_rd1_db16 = assign1220_e1766_d_b16;
         var_rd1_db17 = assign1220_e1766_d_b17;
         var_rd1_db18 = assign1220_e1766_d_b18;
-
 
         *var_guard11_slot = var_guard11;
         *var_psi_slot = var_psi;
@@ -11507,7 +11501,6 @@ impl Instance {
         var_tanh1_db17 = (var_psi_1_db17 / ((var_psi_1).cosh() * (var_psi_1).cosh()));
         var_tanh1_db18 = (var_psi_1_db18 / ((var_psi_1).cosh() * (var_psi_1).cosh()));
 
-
         *var_guard12_slot = var_guard12;
         *var_psi_1_slot = var_psi_1;
         *var_psi_1_db0_slot = var_psi_1_db0;
@@ -13160,7 +13153,6 @@ impl Instance {
         var_cgd_db16 = assign1660_e2096_d_b16;
         var_cgd_db17 = assign1660_e2096_d_b17;
         var_cgd_db18 = assign1660_e2096_d_b18;
-
 
         *var_cgd_slot = var_cgd;
         *var_cgd_db0_slot = var_cgd_db0;
@@ -14879,7 +14871,6 @@ impl Instance {
         var_cosh1_db16 = assign1760_e2229_d_b16;
         var_cosh1_db17 = assign1760_e2229_d_b17;
         var_cosh1_db18 = assign1760_e2229_d_b18;
-
 
         *var_cosh0_slot = var_cosh0;
         *var_cosh0_db0_slot = var_cosh0_db0;
@@ -16768,7 +16759,6 @@ impl Instance {
         var_tanh2_db16 = assign1860_e2403_d_b16;
         var_tanh2_db17 = assign1860_e2403_d_b17;
         var_tanh2_db18 = assign1860_e2403_d_b18;
-
 
         *var_cgd_slot = var_cgd;
         *var_cgd_db0_slot = var_cgd_db0;
@@ -18751,7 +18741,6 @@ impl Instance {
     }
 };
         var_qgsdepl0 = assign1970_e2615;
-
 
         *var_cgd_slot = var_cgd;
         *var_cgd_db0_slot = var_cgd_db0;
@@ -20956,7 +20945,6 @@ impl Instance {
         var_cgd_db17 = assign2070_e2823_d_b17;
         var_cgd_db18 = assign2070_e2823_d_b18;
 
-
         *var_cgd_slot = var_cgd;
         *var_cgd_db0_slot = var_cgd_db0;
         *var_cgd_db1_slot = var_cgd_db1;
@@ -21867,7 +21855,6 @@ impl Instance {
 
         let assign2380_e3083: f64 = if p.p1 == 1.0 { 1.0 } else { 0.0 };
         var_guard44 = assign2380_e3083;
-
 
         *var_ci_slot = var_ci;
         *var_ci_db0_slot = var_ci_db0;
@@ -23417,7 +23404,6 @@ impl Instance {
         var_vgdc_rdb16 = 0.0;
         var_vgdc_rdb17 = 0.0;
         var_vgdc_rdb18 = 0.0;
-
 
         *var_vdg_slot = var_vdg;
         *var_vdg_db0_slot = var_vdg_db0;
@@ -25307,7 +25293,6 @@ impl Instance {
         var_cgd_rdb17 = 0.0;
         var_cgd_rdb18 = 0.0;
 
-
         *var_cgd_slot = var_cgd;
         *var_cgd_db0_slot = var_cgd_db0;
         *var_cgd_db1_slot = var_cgd_db1;
@@ -27056,7 +27041,6 @@ impl Instance {
         var_t_rdb16 = 0.0;
         var_t_rdb17 = 0.0;
         var_t_rdb18 = 0.0;
-
 
         *var_cgs_slot = var_cgs;
         *var_cgs_db0_slot = var_cgs_db0;

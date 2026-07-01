@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1114,7 +1114,6 @@ impl Instance {
         let assign8650_e8935: f64 = if 0.0 == 0.0 { 1.0 } else { 0.0 };
         var_guard112 = assign8650_e8935;
 
-
         *var_guard109_slot = var_guard109;
         *var_guard110_slot = var_guard110;
         *var_guard111_slot = var_guard111;
@@ -1628,7 +1627,6 @@ impl Instance {
     }
 };
         var_lp_s0 = assign8720_e9000;
-
 
         *var_guard113_slot = var_guard113;
         *var_lp_s0_slot = var_lp_s0;
@@ -2787,7 +2785,6 @@ impl Instance {
 
         let assign8740_e9278: f64 = if 1.0 == 0.0 { 1.0 } else { 0.0 };
         var_guard117 = assign8740_e9278;
-
 
         *var_guard114_slot = var_guard114;
         *var_guard115_slot = var_guard115;
@@ -4050,7 +4047,6 @@ impl Instance {
 
         let assign9000_e9497: f64 = if 1.0 == 8.0 { 1.0 } else { 0.0 };
         var_guard123 = assign9000_e9497;
-
 
         *var_arg_slot = var_arg;
         *var_arg_db0_slot = var_arg_db0;
@@ -5425,7 +5421,6 @@ impl Instance {
         var_costi1_db5 = assign9190_e9703_d_b5;
         var_costi1_db6 = assign9190_e9703_d_b6;
         var_costi1_db7 = assign9190_e9703_d_b7;
-
 
         *var_costi0_slot = var_costi0;
         *var_costi0_db0_slot = var_costi0_db0;
@@ -6826,7 +6821,6 @@ impl Instance {
         var_qn0sti_db5 = assign9350_e9874_d_b5;
         var_qn0sti_db6 = assign9350_e9874_d_b6;
         var_qn0sti_db7 = assign9350_e9874_d_b7;
-
 
         *var_asti_slot = var_asti;
         *var_asti_db0_slot = var_asti_db0;
@@ -8380,7 +8374,6 @@ impl Instance {
         var_t6_db6 = assign9520_e10028_d_b6;
         var_t6_db7 = assign9520_e10028_d_b7;
 
-
         *var_costi7_slot = var_costi7;
         *var_costi7_db0_slot = var_costi7_db0;
         *var_costi7_db1_slot = var_costi7_db1;
@@ -9122,7 +9115,6 @@ impl Instance {
     }
 };
         var_i = assign9670_e10173;
-
 
         *var_cgs_leff_slot = var_cgs_leff;
         *var_cgs_tfox0_slot = var_cgs_tfox0;
@@ -10312,7 +10304,6 @@ impl Instance {
         var_t5_db6 = assign9740_e10579_d_b6;
         var_t5_db7 = assign9740_e10579_d_b7;
 
-
         *var_d0_slot = var_d0;
         *var_d0_db0_slot = var_d0_db0;
         *var_d0_db1_slot = var_d0_db1;
@@ -11393,7 +11384,6 @@ impl Instance {
         var_psisubsat_db5 = assign9910_e10803_d_b5;
         var_psisubsat_db6 = assign9910_e10803_d_b6;
         var_psisubsat_db7 = assign9910_e10803_d_b7;
-
 
         *var_guard155_slot = var_guard155;
         *var_guard156_slot = var_guard156;
@@ -12775,7 +12765,6 @@ impl Instance {
         var_qhs_db5 = assign10080_e11046_d_b5;
         var_qhs_db6 = assign10080_e11046_d_b6;
         var_qhs_db7 = assign10080_e11046_d_b7;
-
 
         *var_guard157_slot = var_guard157;
         *var_isub_slot = var_isub;
@@ -14289,7 +14278,6 @@ impl Instance {
         var_t2_gamma_db6 = assign10300_e11151_d_b6;
         var_t2_gamma_db7 = assign10300_e11151_d_b7;
 
-
         *var_flg_conv_slot = var_flg_conv;
         *var_guard158_slot = var_guard158;
         *var_iqh_nqs_slot = var_iqh_nqs;
@@ -15129,7 +15117,6 @@ impl Instance {
         var_phi_s0_bulk_db7 = var_phi_s0_bulk_ini_db7;
 
         var_lp_s0 = 1.0;
-
 
         *var_lp_s0_slot = var_lp_s0;
         *var_phi_b0_soi_slot = var_phi_b0_soi;
@@ -22253,7 +22240,6 @@ impl Instance {
             var_lp_s0 = assign10390_body169_e12824;
         }
 
-
         *var_dpbsp_slot = var_dpbsp;
         *var_dpbsp_db0_slot = var_dpbsp_db0;
         *var_dpbsp_db1_slot = var_dpbsp_db1;
@@ -24888,7 +24874,6 @@ impl Instance {
         let assign10650_e12928: f64 = if var_t9 < 0.0 { 1.0 } else { 0.0 };
         var_guard184 = assign10650_e12928;
 
-
         *var_flg_brk10_slot = var_flg_brk10;
         *var_flg_noqi_slot = var_flg_noqi;
         *var_guard179_slot = var_guard179;
@@ -26334,7 +26319,6 @@ impl Instance {
         var_psl_db5 = assign10850_e13019_d_b5;
         var_psl_db6 = assign10850_e13019_d_b6;
         var_psl_db7 = assign10850_e13019_d_b7;
-
 
         *var_guard185_slot = var_guard185;
         *var_guard186_slot = var_guard186;

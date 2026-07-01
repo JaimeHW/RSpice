@@ -1068,7 +1068,6 @@ impl Instance {
         let assign170_e2285: f64 = if ((var_rcs_w >= p.p353) && (var_rcs_w > 0.0)) { 1.0 } else { 0.0 };
         var_guard5 = assign170_e2285;
 
-
         *var_gmin_slot = var_gmin;
         *var_guard2_slot = var_guard2;
         *var_guard3_slot = var_guard3;
@@ -2178,7 +2177,6 @@ impl Instance {
         var_rdi_db34 = assign260_e2372_d_b34;
         var_rdi_db35 = assign260_e2372_d_b35;
 
-
         *var_guard6_slot = var_guard6;
         *var_guard7_slot = var_guard7;
         *var_guard8_slot = var_guard8;
@@ -3265,7 +3263,7 @@ impl Instance {
         var_phit_db34 = ((1.38062e-23 * var_tdut_db34) / 1.60219e-19);
         var_phit_db35 = ((1.38062e-23 * var_tdut_db35) / 1.60219e-19);
 
-        s.store_offset_scaled(223, 111, p.p336, (((((-var_tnomk)) * (p.p336))) + (1.0)));
+        s.store_offset_scaled_ad(223, A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p336, (((((-var_tnomk)) * (p.p336))) + (1.0)));
 
         s.b[305] = (s.v[223] < 0.1);
         s.store_scalar(305, if s.b[305] { 1.0 } else { 0.0 });
@@ -3274,7 +3272,7 @@ impl Instance {
             s.store_scalar(223, 0.1);
         }
 
-        s.store_powi_scaled_input(112, 111, 1.0 / (var_tnomk), 3);
+        s.store_powi_ad(112, A::scale(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), 1.0 / (var_tnomk)), 3);
 
         let assign340_e2428: f64 = (var_tdut - var_tnomk);
         let assign340_e2429: f64 = (p.p21 * assign340_e2428);
@@ -3685,7 +3683,6 @@ impl Instance {
         var_cofdsubmt_db33 = (p.p12 * assign380_e2521_d_b33);
         var_cofdsubmt_db34 = (p.p12 * assign380_e2521_d_b34);
         var_cofdsubmt_db35 = (p.p12 * assign380_e2521_d_b35);
-
 
         *var_cofdmt_slot = var_cofdmt;
         *var_cofdmt_db0_slot = var_cofdmt_db0;
@@ -5459,7 +5456,6 @@ impl Instance {
         var_cofdsubmt0_db34 = (p.p18 * assign440_e2641_d_b34);
         var_cofdsubmt0_db35 = (p.p18 * assign440_e2641_d_b35);
 
-
         *var_cofdmt0_slot = var_cofdmt0;
         *var_cofdmt0_db0_slot = var_cofdmt0_db0;
         *var_cofdmt0_db1_slot = var_cofdmt0_db1;
@@ -6559,7 +6555,7 @@ impl Instance {
             if ((1.0 + (p.p8 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p8, (((((-var_tnomk)) * (p.p8))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p8, (((((-var_tnomk)) * (p.p8))) + (1.0)))
             }
         }, p.p7);
 
@@ -6567,7 +6563,7 @@ impl Instance {
             if ((1.0 + (p.p82 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p82, (((((-var_tnomk)) * (p.p82))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p82, (((((-var_tnomk)) * (p.p82))) + (1.0)))
             }
         }, p.p81);
 
@@ -6575,7 +6571,7 @@ impl Instance {
             if ((1.0 + (p.p104 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p104, (((((-var_tnomk)) * (p.p104))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p104, (((((-var_tnomk)) * (p.p104))) + (1.0)))
             }
         }, p.p103);
 
@@ -6583,7 +6579,7 @@ impl Instance {
             if ((1.0 + (p.p126 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p126, (((((-var_tnomk)) * (p.p126))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p126, (((((-var_tnomk)) * (p.p126))) + (1.0)))
             }
         }, p.p125);
 
@@ -6591,7 +6587,7 @@ impl Instance {
             if ((1.0 + (p.p148 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p148, (((((-var_tnomk)) * (p.p148))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p148, (((((-var_tnomk)) * (p.p148))) + (1.0)))
             }
         }, p.p147);
 
@@ -6599,7 +6595,7 @@ impl Instance {
             if ((1.0 + (p.p87 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p87, (((((-var_tnomk)) * (p.p87))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p87, (((((-var_tnomk)) * (p.p87))) + (1.0)))
             }
         }, p.p86);
 
@@ -6607,7 +6603,7 @@ impl Instance {
             if ((1.0 + (p.p109 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p109, (((((-var_tnomk)) * (p.p109))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p109, (((((-var_tnomk)) * (p.p109))) + (1.0)))
             }
         }, p.p108);
 
@@ -6615,7 +6611,7 @@ impl Instance {
             if ((1.0 + (p.p131 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p131, (((((-var_tnomk)) * (p.p131))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p131, (((((-var_tnomk)) * (p.p131))) + (1.0)))
             }
         }, p.p130);
 
@@ -6623,7 +6619,7 @@ impl Instance {
             if ((1.0 + (p.p153 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p153, (((((-var_tnomk)) * (p.p153))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p153, (((((-var_tnomk)) * (p.p153))) + (1.0)))
             }
         }, p.p152);
 
@@ -6631,7 +6627,7 @@ impl Instance {
             if ((1.0 + (p.p89 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p89, (((((-var_tnomk)) * (p.p89))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p89, (((((-var_tnomk)) * (p.p89))) + (1.0)))
             }
         }, p.p88);
 
@@ -6639,7 +6635,7 @@ impl Instance {
             if ((1.0 + (p.p111 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p111, (((((-var_tnomk)) * (p.p111))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p111, (((((-var_tnomk)) * (p.p111))) + (1.0)))
             }
         }, p.p110);
 
@@ -6647,7 +6643,7 @@ impl Instance {
             if ((1.0 + (p.p133 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p133, (((((-var_tnomk)) * (p.p133))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p133, (((((-var_tnomk)) * (p.p133))) + (1.0)))
             }
         }, p.p132);
 
@@ -6655,7 +6651,7 @@ impl Instance {
             if ((1.0 + (p.p155 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p155, (((((-var_tnomk)) * (p.p155))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p155, (((((-var_tnomk)) * (p.p155))) + (1.0)))
             }
         }, p.p154);
 
@@ -6663,7 +6659,7 @@ impl Instance {
             if ((1.0 + (p.p170 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p170, (((((-var_tnomk)) * (p.p170))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p170, (((((-var_tnomk)) * (p.p170))) + (1.0)))
             }
         }, p.p169);
 
@@ -6671,7 +6667,7 @@ impl Instance {
             if ((1.0 + (p.p192 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p192, (((((-var_tnomk)) * (p.p192))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p192, (((((-var_tnomk)) * (p.p192))) + (1.0)))
             }
         }, p.p191);
 
@@ -6843,7 +6839,7 @@ impl Instance {
             if ((1.0 + (p.p175 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p175, (((((-var_tnomk)) * (p.p175))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p175, (((((-var_tnomk)) * (p.p175))) + (1.0)))
             }
         }, p.p174);
 
@@ -6851,7 +6847,7 @@ impl Instance {
             if ((1.0 + (p.p197 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p197, (((((-var_tnomk)) * (p.p197))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p197, (((((-var_tnomk)) * (p.p197))) + (1.0)))
             }
         }, p.p196);
 
@@ -6936,7 +6932,6 @@ impl Instance {
         var_ccfp3t_db33 = (p.p218 * assign650_e3061_d_b33);
         var_ccfp3t_db34 = (p.p218 * assign650_e3061_d_b34);
         var_ccfp3t_db35 = (p.p218 * assign650_e3061_d_b35);
-
 
         *var_ccfp3t_slot = var_ccfp3t;
         *var_ccfp3t_db0_slot = var_ccfp3t_db0;
@@ -8046,7 +8041,7 @@ impl Instance {
             if ((1.0 + (p.p177 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p177, (((((-var_tnomk)) * (p.p177))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p177, (((((-var_tnomk)) * (p.p177))) + (1.0)))
             }
         }, p.p176);
 
@@ -8054,7 +8049,7 @@ impl Instance {
             if ((1.0 + (p.p199 * (s.v[111] - s.v[109]))) < 0.01) {
                 A::constant(0.01)
             } else {
-                A::scale_offset(s.ad_value(111), p.p199, (((((-var_tnomk)) * (p.p199))) + (1.0)))
+                A::scale_offset(A::from_derivatives(var_tdut, [var_tdut_dn0, var_tdut_dn1, var_tdut_dn2, var_tdut_dn3, var_tdut_dn4, var_tdut_dn5, var_tdut_dn6, var_tdut_dn7, var_tdut_dn8, var_tdut_dn9, var_tdut_dn10, var_tdut_dn11, var_tdut_dn12, var_tdut_dn13, var_tdut_dn14, var_tdut_dn15, var_tdut_dn16, var_tdut_dn17, var_tdut_dn18, var_tdut_dn19, var_tdut_dn20, var_tdut_dn21, var_tdut_dn22, var_tdut_dn23, var_tdut_dn24, var_tdut_dn25, var_tdut_dn26, var_tdut_dn27, var_tdut_dn28, var_tdut_dn29], [var_tdut_db0, var_tdut_db1, var_tdut_db2, var_tdut_db3, var_tdut_db4, var_tdut_db5, var_tdut_db6, var_tdut_db7, var_tdut_db8, var_tdut_db9, var_tdut_db10, var_tdut_db11, var_tdut_db12, var_tdut_db13, var_tdut_db14, var_tdut_db15, var_tdut_db16, var_tdut_db17, var_tdut_db18, var_tdut_db19, var_tdut_db20, var_tdut_db21, var_tdut_db22, var_tdut_db23, var_tdut_db24, var_tdut_db25, var_tdut_db26, var_tdut_db27, var_tdut_db28, var_tdut_db29, var_tdut_db30, var_tdut_db31, var_tdut_db32, var_tdut_db33, var_tdut_db34, var_tdut_db35]), p.p199, (((((-var_tnomk)) * (p.p199))) + (1.0)))
             }
         }, p.p198);
 
@@ -8422,7 +8417,6 @@ impl Instance {
         if ((s.v[308] == 0.0) && (s.v[309] != 0.0)) {
             s.store_voltage(224, ctx, nodes, Some(22), None);
         }
-
 
         *var_cbfp3t_slot = var_cbfp3t;
         *var_cbfp3t_db0_slot = var_cbfp3t_db0;
@@ -9393,7 +9387,7 @@ impl Instance {
         var_vdloutput_db35 = assign970_e3427_d_b35;
 
         if ((s.v[308] == 0.0) && (s.v[309] != 0.0)) {
-            s.store_scaled_abs_ad(228, A::sub(s.ad_value(225), s.ad_value(224)), 1.0 / (p.p338));
+            s.store_scaled_abs_ad(228, A::sub(A::from_derivatives(var_vdloutput, [var_vdloutput_dn0, var_vdloutput_dn1, var_vdloutput_dn2, var_vdloutput_dn3, var_vdloutput_dn4, var_vdloutput_dn5, var_vdloutput_dn6, var_vdloutput_dn7, var_vdloutput_dn8, var_vdloutput_dn9, var_vdloutput_dn10, var_vdloutput_dn11, var_vdloutput_dn12, var_vdloutput_dn13, var_vdloutput_dn14, var_vdloutput_dn15, var_vdloutput_dn16, var_vdloutput_dn17, var_vdloutput_dn18, var_vdloutput_dn19, var_vdloutput_dn20, var_vdloutput_dn21, var_vdloutput_dn22, var_vdloutput_dn23, var_vdloutput_dn24, var_vdloutput_dn25, var_vdloutput_dn26, var_vdloutput_dn27, var_vdloutput_dn28, var_vdloutput_dn29], [var_vdloutput_db0, var_vdloutput_db1, var_vdloutput_db2, var_vdloutput_db3, var_vdloutput_db4, var_vdloutput_db5, var_vdloutput_db6, var_vdloutput_db7, var_vdloutput_db8, var_vdloutput_db9, var_vdloutput_db10, var_vdloutput_db11, var_vdloutput_db12, var_vdloutput_db13, var_vdloutput_db14, var_vdloutput_db15, var_vdloutput_db16, var_vdloutput_db17, var_vdloutput_db18, var_vdloutput_db19, var_vdloutput_db20, var_vdloutput_db21, var_vdloutput_db22, var_vdloutput_db23, var_vdloutput_db24, var_vdloutput_db25, var_vdloutput_db26, var_vdloutput_db27, var_vdloutput_db28, var_vdloutput_db29, var_vdloutput_db30, var_vdloutput_db31, var_vdloutput_db32, var_vdloutput_db33, var_vdloutput_db34, var_vdloutput_db35]), s.ad_value(224)), 1.0 / (p.p338));
             s.store_voltage(226, ctx, nodes, Some(25), None);
         }
 
@@ -9473,7 +9467,7 @@ impl Instance {
         var_vgloutput_db35 = assign1000_e3453_d_b35;
 
         if ((s.v[308] == 0.0) && (s.v[309] != 0.0)) {
-            s.store_scaled_abs_ad(229, A::sub(s.ad_value(227), s.ad_value(226)), 1.0 / (p.p337));
+            s.store_scaled_abs_ad(229, A::sub(A::from_derivatives(var_vgloutput, [var_vgloutput_dn0, var_vgloutput_dn1, var_vgloutput_dn2, var_vgloutput_dn3, var_vgloutput_dn4, var_vgloutput_dn5, var_vgloutput_dn6, var_vgloutput_dn7, var_vgloutput_dn8, var_vgloutput_dn9, var_vgloutput_dn10, var_vgloutput_dn11, var_vgloutput_dn12, var_vgloutput_dn13, var_vgloutput_dn14, var_vgloutput_dn15, var_vgloutput_dn16, var_vgloutput_dn17, var_vgloutput_dn18, var_vgloutput_dn19, var_vgloutput_dn20, var_vgloutput_dn21, var_vgloutput_dn22, var_vgloutput_dn23, var_vgloutput_dn24, var_vgloutput_dn25, var_vgloutput_dn26, var_vgloutput_dn27, var_vgloutput_dn28, var_vgloutput_dn29], [var_vgloutput_db0, var_vgloutput_db1, var_vgloutput_db2, var_vgloutput_db3, var_vgloutput_db4, var_vgloutput_db5, var_vgloutput_db6, var_vgloutput_db7, var_vgloutput_db8, var_vgloutput_db9, var_vgloutput_db10, var_vgloutput_db11, var_vgloutput_db12, var_vgloutput_db13, var_vgloutput_db14, var_vgloutput_db15, var_vgloutput_db16, var_vgloutput_db17, var_vgloutput_db18, var_vgloutput_db19, var_vgloutput_db20, var_vgloutput_db21, var_vgloutput_db22, var_vgloutput_db23, var_vgloutput_db24, var_vgloutput_db25, var_vgloutput_db26, var_vgloutput_db27, var_vgloutput_db28, var_vgloutput_db29, var_vgloutput_db30, var_vgloutput_db31, var_vgloutput_db32, var_vgloutput_db33, var_vgloutput_db34, var_vgloutput_db35]), s.ad_value(226)), 1.0 / (p.p337));
             s.store_div_from_scalar_add_ad(230, 1.0, A::offset(s.ad_value(228), 1.0), s.ad_value(229));
         }
 
@@ -9765,7 +9759,6 @@ impl Instance {
         var_vcfp3_db33 = assign1550_e3819_d_b33;
         var_vcfp3_db34 = assign1550_e3819_d_b34;
         var_vcfp3_db35 = assign1550_e3819_d_b35;
-
 
         *var_guard22_slot = var_guard22;
         *var_vcfp3_slot = var_vcfp3;
@@ -11300,7 +11293,6 @@ impl Instance {
         var_vcfp4_db33 = assign1620_e3854_d_b33;
         var_vcfp4_db34 = assign1620_e3854_d_b34;
         var_vcfp4_db35 = assign1620_e3854_d_b35;
-
 
         *var_guard23_slot = var_guard23;
         *var_vbfp3_slot = var_vbfp3;
@@ -13150,7 +13142,6 @@ impl Instance {
         var_qgdfp4_db33 = 0.0;
         var_qgdfp4_db34 = 0.0;
         var_qgdfp4_db35 = 0.0;
-
 
         *var_idsfp4_slot = var_idsfp4;
         *var_idsfp4_db0_slot = var_idsfp4_db0;
@@ -15074,7 +15065,6 @@ impl Instance {
         var_fn25_calc_iq__qgdout_db34 = assign1790_e3901_d_b34;
         var_fn25_calc_iq__qgdout_db35 = assign1790_e3901_d_b35;
 
-
         *var_fn25_calc_iq__idsout_slot = var_fn25_calc_iq__idsout;
         *var_fn25_calc_iq__idsout_db0_slot = var_fn25_calc_iq__idsout_db0;
         *var_fn25_calc_iq__idsout_db1_slot = var_fn25_calc_iq__idsout_db1;
@@ -16871,7 +16861,6 @@ impl Instance {
         var_fn25_calc_iq__vgsin_db33 = assign1850_e3925_d_b33;
         var_fn25_calc_iq__vgsin_db34 = assign1850_e3925_d_b34;
         var_fn25_calc_iq__vgsin_db35 = assign1850_e3925_d_b35;
-
 
         *var_fn25_calc_iq__qbout_slot = var_fn25_calc_iq__qbout;
         *var_fn25_calc_iq__qbout_db0_slot = var_fn25_calc_iq__qbout_db0;
@@ -19005,7 +18994,6 @@ impl Instance {
 };
         var_fn25_calc_iq__cs = assign1970_e3973;
 
-
         *var_fn25_calc_iq__cgin_slot = var_fn25_calc_iq__cgin;
         *var_fn25_calc_iq__cgin_db0_slot = var_fn25_calc_iq__cgin_db0;
         *var_fn25_calc_iq__cgin_db1_slot = var_fn25_calc_iq__cgin_db1;
@@ -20600,7 +20588,6 @@ impl Instance {
         var_fn25_calc_iq__delta_db34 = assign2200_e4065_d_b34;
         var_fn25_calc_iq__delta_db35 = assign2200_e4065_d_b35;
 
-
         *var_fn25_calc_iq__alpha_slot = var_fn25_calc_iq__alpha;
         *var_fn25_calc_iq__alpha_phit_slot = var_fn25_calc_iq__alpha_phit;
         *var_fn25_calc_iq__alpha_phit_db0_slot = var_fn25_calc_iq__alpha_phit_db0;
@@ -22147,7 +22134,6 @@ impl Instance {
         var_fn25_calc_iq__qref_db33 = assign2260_e4089_d_b33;
         var_fn25_calc_iq__qref_db34 = assign2260_e4089_d_b34;
         var_fn25_calc_iq__qref_db35 = assign2260_e4089_d_b35;
-
 
         *var_fn25_calc_iq__ffs_slot = var_fn25_calc_iq__ffs;
         *var_fn25_calc_iq__ffs_db0_slot = var_fn25_calc_iq__ffs_db0;
@@ -23811,7 +23797,6 @@ impl Instance {
         var_fn25_calc_iq__n0_db34 = assign2320_e4113_d_b34;
         var_fn25_calc_iq__n0_db35 = assign2320_e4113_d_b35;
 
-
         *var_fn25_calc_iq__etas_slot = var_fn25_calc_iq__etas;
         *var_fn25_calc_iq__etas_db0_slot = var_fn25_calc_iq__etas_db0;
         *var_fn25_calc_iq__etas_db1_slot = var_fn25_calc_iq__etas_db1;
@@ -25473,7 +25458,6 @@ impl Instance {
         var_fn25_calc_iq__muf0_db33 = assign2380_e4137_d_b33;
         var_fn25_calc_iq__muf0_db34 = assign2380_e4137_d_b34;
         var_fn25_calc_iq__muf0_db35 = assign2380_e4137_d_b35;
-
 
         *var_fn25_calc_iq__etas0_slot = var_fn25_calc_iq__etas0;
         *var_fn25_calc_iq__etas0_db0_slot = var_fn25_calc_iq__etas0_db0;

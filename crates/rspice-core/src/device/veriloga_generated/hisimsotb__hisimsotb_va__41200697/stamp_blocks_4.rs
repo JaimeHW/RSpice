@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1158,7 +1158,6 @@ impl Instance {
         var_pds_ini_db5 = assign11020_e13189_d_b5;
         var_pds_ini_db6 = assign11020_e13189_d_b6;
         var_pds_ini_db7 = assign11020_e13189_d_b7;
-
 
         *var_flg_conv_slot = var_flg_conv;
         *var_guard187_slot = var_guard187;
@@ -2407,7 +2406,6 @@ impl Instance {
         var_psb_inia_db6 = assign11200_e13394_d_b6;
         var_psb_inia_db7 = assign11200_e13394_d_b7;
 
-
         *var_guard188_slot = var_guard188;
         *var_guard189_slot = var_guard189;
         *var_guard190_slot = var_guard190;
@@ -3556,7 +3554,6 @@ impl Instance {
         var_phi_sl_bulk_db6 = assign11360_e13676_d_b6;
         var_phi_sl_bulk_db7 = assign11360_e13676_d_b7;
 
-
         *var_guard192_slot = var_guard192;
         *var_guard193_slot = var_guard193;
         *var_phi_sl_bulk_slot = var_phi_sl_bulk;
@@ -4160,7 +4157,6 @@ impl Instance {
     }
 };
         var_lp_sl = assign11440_e13806;
-
 
         *var_guard194_slot = var_guard194;
         *var_lp_sl_slot = var_lp_sl;
@@ -5925,7 +5921,6 @@ impl Instance {
             var_lp_sl = assign11450_body31_e14304;
         }
 
-
         *var_guard195_slot = var_guard195;
         *var_guard196_slot = var_guard196;
         *var_guard197_slot = var_guard197;
@@ -6453,7 +6448,6 @@ impl Instance {
     }
 };
         var_lp_sl = assign11480_e14341;
-
 
         *var_lp_sl_slot = var_lp_sl;
         *var_phi_bl_soi_slot = var_phi_bl_soi;
@@ -8275,7 +8269,6 @@ impl Instance {
             var_lp_sl = assign11490_body32_e14892;
         }
 
-
         *var_guard199_slot = var_guard199;
         *var_guard200_slot = var_guard200;
         *var_guard201_slot = var_guard201;
@@ -9558,7 +9551,6 @@ impl Instance {
         var_phi_bl_soip_db7 = var_phi_bl_soip_ini_db7;
 
         var_lp_sl = 1.0;
-
 
         *var_flg_conv_slot = var_flg_conv;
         *var_guard203_slot = var_guard203;
@@ -16730,7 +16722,6 @@ impl Instance {
             var_lp_sl = assign11690_body168_e16612;
         }
 
-
         *var_dpbsp_slot = var_dpbsp;
         *var_dpbsp_db0_slot = var_dpbsp_db0;
         *var_dpbsp_db1_slot = var_dpbsp_db1;
@@ -19385,7 +19376,6 @@ impl Instance {
         var_idd2_db6 = assign11950_e16724_d_b6;
         var_idd2_db7 = assign11950_e16724_d_b7;
 
-
         *var_flg_brk10_slot = var_flg_brk10;
         *var_flg_noqi_slot = var_flg_noqi;
         *var_guard224_slot = var_guard224;
@@ -21137,7 +21127,6 @@ impl Instance {
         let assign12180_e16890: f64 = if var_psdl > assign12180_e16889 { 1.0 } else { 0.0 };
         var_guard235 = assign12180_e16890;
 
-
         *var_alpha_slot = var_alpha;
         *var_alpha_db0_slot = var_alpha_db0;
         *var_alpha_db1_slot = var_alpha_db1;
@@ -22568,7 +22557,6 @@ impl Instance {
         var_t9_db5 = assign12340_e17076_d_b5;
         var_t9_db6 = assign12340_e17076_d_b6;
         var_t9_db7 = assign12340_e17076_d_b7;
-
 
         *var_guard236_slot = var_guard236;
         *var_psdl_slot = var_psdl;
@@ -24145,7 +24133,6 @@ impl Instance {
         var_cgs_q_nl_db6 = (var_q_nl_db6 / 10000.0);
         var_cgs_q_nl_db7 = (var_q_nl_db7 / 10000.0);
 
-
         *var_cgs_esi_slot = var_cgs_esi;
         *var_cgs_q_nl_slot = var_cgs_q_nl;
         *var_cgs_q_nl_db0_slot = var_cgs_q_nl_db0;
@@ -25712,7 +25699,6 @@ impl Instance {
         var_eeff_db6 = (((var_t5_db6 * var_t4) - (var_t5 * var_t4_db6)) / (var_t4 * var_t4));
         var_eeff_db7 = (((var_t5_db7 * var_t4) - (var_t5 * var_t4_db7)) / (var_t4 * var_t4));
 
-
         *var_cgs_q_b0_dep_slot = var_cgs_q_b0_dep;
         *var_cgs_q_b0_dep_db0_slot = var_cgs_q_b0_dep_db0;
         *var_cgs_q_b0_dep_db1_slot = var_cgs_q_b0_dep_db1;
@@ -27123,7 +27109,6 @@ impl Instance {
         var_muun_db6 = (-(var_t1_db6 / (var_t1 * var_t1)));
         var_muun_db7 = (-(var_t1_db7 / (var_t1 * var_t1)));
 
-
         *var_eeff_slot = var_eeff;
         *var_eeff_db0_slot = var_eeff_db0;
         *var_eeff_db1_slot = var_eeff_db1;
@@ -28443,7 +28428,6 @@ impl Instance {
         var_tmf2_db5 = (((var_eeffb_db5 * var_eeffb) + (var_eeffb * var_eeffb_db5)) / (2.0 * assign13130_e17651));
         var_tmf2_db6 = (((var_eeffb_db6 * var_eeffb) + (var_eeffb * var_eeffb_db6)) / (2.0 * assign13130_e17651));
         var_tmf2_db7 = (((var_eeffb_db7 * var_eeffb) + (var_eeffb * var_eeffb_db7)) / (2.0 * assign13130_e17651));
-
 
         *var_cgs_qbdepu_slot = var_cgs_qbdepu;
         *var_cgs_qbdepu_db0_slot = var_cgs_qbdepu_db0;

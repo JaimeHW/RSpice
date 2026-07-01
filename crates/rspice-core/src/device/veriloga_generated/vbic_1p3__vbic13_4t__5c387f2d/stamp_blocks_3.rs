@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1020,7 +1020,6 @@ impl Instance {
         var_vnl0__blk168_rdn11 = 0.0;
         var_vnl0__blk168_rdn12 = 0.0;
         var_vnl0__blk168_rdn13 = 0.0;
-
 
         *var_guard185_slot = var_guard185;
         *var_guard185_dn0_slot = var_guard185_dn0;
@@ -2472,7 +2471,6 @@ impl Instance {
         var_ql__blk178_rdn11 = 0.0;
         var_ql__blk178_rdn12 = 0.0;
         var_ql__blk178_rdn13 = 0.0;
-
 
         *var_cl__blk177_slot = var_cl__blk177;
         *var_cl__blk177_dn0_slot = var_cl__blk177_dn0;
@@ -4065,7 +4063,6 @@ impl Instance {
         var_mif_rdn11 = 0.0;
         var_mif_rdn12 = 0.0;
         var_mif_rdn13 = 0.0;
-
 
         *var_dv__blk181_slot = var_dv__blk181;
         *var_dv__blk181_dn0_slot = var_dv__blk181_dn0;
@@ -5929,7 +5926,6 @@ impl Instance {
         var_qbex_rdn12 = 0.0;
         var_qbex_rdn13 = 0.0;
 
-
         *var_arg_slot = var_arg;
         *var_arg_dn0_slot = var_arg_dn0;
         *var_arg_dn1_slot = var_arg_dn1;
@@ -6743,7 +6739,6 @@ impl Instance {
         var_qcth_rdn11 = 0.0;
         var_qcth_rdn12 = 0.0;
         var_qcth_rdn13 = 0.0;
-
 
         *var_qbc_slot = var_qbc;
         *var_qbc_dn0_slot = var_qbc_dn0;

@@ -373,7 +373,6 @@ impl Instance {
         let assign11100_e14273: f64 = if p.p1090 > 0.0 { 1.0 } else { 0.0 };
         var_guard214 = assign11100_e14273;
 
-
         *var_guard213_slot = var_guard213;
         *var_guard214_slot = var_guard214;
         *var_hrsd_slot = var_hrsd;
@@ -650,7 +649,7 @@ impl Instance {
         var_t1_db17 = assign11120_e14324_d_b17;
 
         if ((s.v[1267] != 0.0) && (s.v[1268] != 0.0)) {
-            s.store_scaled_add(1034, 168, 169, (p.p43 + ((p.p4 - p.p43) * p.p1084)));
+            s.store_scaled_add_ad(1034, A::from_derivatives(var_t0, [var_t0_dn0, var_t0_dn1, var_t0_dn2, var_t0_dn3, var_t0_dn4, var_t0_dn5, var_t0_dn6, var_t0_dn7, var_t0_dn8, var_t0_dn9, var_t0_dn10, var_t0_dn11, var_t0_dn12, var_t0_dn13, var_t0_dn14, var_t0_dn15, var_t0_dn16], [var_t0_db0, var_t0_db1, var_t0_db2, var_t0_db3, var_t0_db4, var_t0_db5, var_t0_db6, var_t0_db7, var_t0_db8, var_t0_db9, var_t0_db10, var_t0_db11, var_t0_db12, var_t0_db13, var_t0_db14, var_t0_db15, var_t0_db16, var_t0_db17]), A::from_derivatives(var_t1, [var_t1_dn0, var_t1_dn1, var_t1_dn2, var_t1_dn3, var_t1_dn4, var_t1_dn5, var_t1_dn6, var_t1_dn7, var_t1_dn8, var_t1_dn9, var_t1_dn10, var_t1_dn11, var_t1_dn12, var_t1_dn13, var_t1_dn14, var_t1_dn15, var_t1_dn16], [var_t1_db0, var_t1_db1, var_t1_db2, var_t1_db3, var_t1_db4, var_t1_db5, var_t1_db6, var_t1_db7, var_t1_db8, var_t1_db9, var_t1_db10, var_t1_db11, var_t1_db12, var_t1_db13, var_t1_db14, var_t1_db15, var_t1_db16, var_t1_db17]), (p.p43 + ((p.p4 - p.p43) * p.p1084)));
         }
 
         if ((s.v[1267] != 0.0) && (s.v[1268] == 0.0)) {
@@ -902,7 +901,6 @@ impl Instance {
 
         s.b[1272] = (s.v[933] > 80.0);
         s.store_scalar(1272, if s.b[1272] { 1.0 } else { 0.0 });
-
 
         *var_t0_slot = var_t0;
         *var_t0_db0_slot = var_t0_db0;
@@ -1804,9 +1802,9 @@ impl Instance {
         var_t0_db16 = 0.0;
         var_t0_db17 = 0.0;
 
-        s.store_offset_scaled(515, 168, (0.0_f64).max((p.p9 - (p.p4 * var_nfintotal))), (s.v[165] * p.p7));
+        s.store_offset_scaled_ad(515, A::from_derivatives(var_t0, [var_t0_dn0, var_t0_dn1, var_t0_dn2, var_t0_dn3, var_t0_dn4, var_t0_dn5, var_t0_dn6, var_t0_dn7, var_t0_dn8, var_t0_dn9, var_t0_dn10, var_t0_dn11, var_t0_dn12, var_t0_dn13, var_t0_dn14, var_t0_dn15, var_t0_dn16], [var_t0_db0, var_t0_db1, var_t0_db2, var_t0_db3, var_t0_db4, var_t0_db5, var_t0_db6, var_t0_db7, var_t0_db8, var_t0_db9, var_t0_db10, var_t0_db11, var_t0_db12, var_t0_db13, var_t0_db14, var_t0_db15, var_t0_db16, var_t0_db17]), (0.0_f64).max((p.p9 - (p.p4 * var_nfintotal))), (s.v[165] * p.p7));
 
-        s.store_offset_scaled(516, 168, (0.0_f64).max((p.p10 - (p.p4 * var_nfintotal))), (s.v[165] * p.p8));
+        s.store_offset_scaled_ad(516, A::from_derivatives(var_t0, [var_t0_dn0, var_t0_dn1, var_t0_dn2, var_t0_dn3, var_t0_dn4, var_t0_dn5, var_t0_dn6, var_t0_dn7, var_t0_dn8, var_t0_dn9, var_t0_dn10, var_t0_dn11, var_t0_dn12, var_t0_dn13, var_t0_dn14, var_t0_dn15, var_t0_dn16], [var_t0_db0, var_t0_db1, var_t0_db2, var_t0_db3, var_t0_db4, var_t0_db5, var_t0_db6, var_t0_db7, var_t0_db8, var_t0_db9, var_t0_db10, var_t0_db11, var_t0_db12, var_t0_db13, var_t0_db14, var_t0_db15, var_t0_db16, var_t0_db17]), (0.0_f64).max((p.p10 - (p.p4 * var_nfintotal))), (s.v[165] * p.p8));
 
         s.b[1278] = (p.p62 != 5.0);
         s.store_scalar(1278, if s.b[1278] { 1.0 } else { 0.0 });
@@ -2039,7 +2037,6 @@ impl Instance {
 
         let assign13200_e17556: f64 = if (!param_given[174]) { 1.0 } else { 0.0 };
         var_guard227 = assign13200_e17556;
-
 
         *var_eefffactor_slot = var_eefffactor;
         *var_guard225_slot = var_guard225;
@@ -3082,7 +3079,6 @@ impl Instance {
         var_theta_dits_db15 = assign13350_e17668_d_b15;
         var_theta_dits_db16 = assign13350_e17668_d_b16;
         var_theta_dits_db17 = assign13350_e17668_d_b17;
-
 
         *var_guard228_slot = var_guard228;
         *var_guard229_slot = var_guard229;
@@ -4350,7 +4346,6 @@ impl Instance {
 };
         var_p2 = assign13570_e17962;
 
-
         *var_aechvb_slot = var_aechvb;
         *var_bechvb_slot = var_bechvb;
         *var_d1_slot = var_d1;
@@ -5157,7 +5152,6 @@ impl Instance {
 };
         var_qndnf2 = assign13680_e18789;
 
-
         *var_p3_slot = var_p3;
         *var_qndnf1_slot = var_qndnf1;
         *var_qndnf2_slot = var_qndnf2;
@@ -5761,7 +5755,6 @@ impl Instance {
     }
 };
         var_nc1l0 = assign13800_e19435;
-
 
         *var_nc1l0_slot = var_nc1l0;
         *var_nc3d_slot = var_nc3d;
@@ -6543,7 +6536,6 @@ impl Instance {
     }
 };
         var_nc2 = assign13950_e20099;
-
 
         *var_nc1_slot = var_nc1;
         *var_nc1l_slot = var_nc1l;
@@ -7379,7 +7371,6 @@ impl Instance {
         var_ua_i_db15 = assign14060_e20735_d_b15;
         var_ua_i_db16 = assign14060_e20735_d_b16;
         var_ua_i_db17 = assign14060_e20735_d_b17;
-
 
         *var_etamob_i_slot = var_etamob_i;
         *var_guard235_slot = var_guard235;
@@ -8505,7 +8496,6 @@ impl Instance {
         var_tratio_m1_db15 = var_tratio_db15;
         var_tratio_m1_db16 = var_tratio_db16;
         var_tratio_m1_db17 = var_tratio_db17;
-
 
         *var_devtemp_slot = var_devtemp;
         *var_devtemp_db0_slot = var_devtemp_db0;
@@ -9881,7 +9871,6 @@ impl Instance {
 };
         var_tlow = assign14350_e21204;
 
-
         *var_deltemp_slot = var_deltemp;
         *var_deltemp_db0_slot = var_deltemp_db0;
         *var_deltemp_db1_slot = var_deltemp_db1;
@@ -11213,7 +11202,6 @@ impl Instance {
         var_t3_db15 = assign14460_e21444_d_b15;
         var_t3_db16 = assign14460_e21444_d_b16;
         var_t3_db17 = assign14460_e21444_d_b17;
-
 
         *var_devtempeff_slot = var_devtempeff;
         *var_devtempeff_db0_slot = var_devtempeff_db0;
@@ -12910,7 +12898,6 @@ impl Instance {
         let assign14580_e21632: f64 = if p.p80 == 0.0 { 1.0 } else { 0.0 };
         var_guard243 = assign14580_e21632;
 
-
         *var_deltemp1_slot = var_deltemp1;
         *var_deltemp1_db0_slot = var_deltemp1_db0;
         *var_deltemp1_db1_slot = var_deltemp1_db1;
@@ -14594,7 +14581,6 @@ impl Instance {
         var_e1prime_db15 = (4.0 * var_e0prime_db15);
         var_e1prime_db16 = (4.0 * var_e0prime_db16);
         var_e1prime_db17 = (4.0 * var_e0prime_db17);
-
 
         *var_e0_1_slot = var_e0_1;
         *var_e0_1_db0_slot = var_e0_1_db0;
@@ -16302,7 +16288,6 @@ impl Instance {
         var_t1_db15 = assign14790_e21994_d_b15;
         var_t1_db16 = assign14790_e21994_d_b16;
         var_t1_db17 = assign14790_e21994_d_b17;
-
 
         *var_dvch_qm_slot = var_dvch_qm;
         *var_dvch_qm_db0_slot = var_dvch_qm_db0;

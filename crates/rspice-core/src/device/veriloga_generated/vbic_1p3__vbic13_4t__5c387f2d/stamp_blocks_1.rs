@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -1023,7 +1023,6 @@ impl Instance {
         var_expi_dn11 = assign4380_e4783_d_n11;
         var_expi_dn12 = assign4380_e4783_d_n12;
         var_expi_dn13 = assign4380_e4783_d_n13;
-
 
         *var_afac_slot = var_afac;
         *var_afac_dn0_slot = var_afac_dn0;
@@ -2651,7 +2650,6 @@ impl Instance {
         var_ircx_dn12 = var_ircx_dn12;
         var_ircx_dn13 = var_ircx_dn13;
 
-
         *var_afac_slot = var_afac;
         *var_afac_dn0_slot = var_afac_dn0;
         *var_afac_dn1_slot = var_afac_dn1;
@@ -3997,7 +3995,6 @@ impl Instance {
         var_dv__blk144_dn11 = assign4890_e5201_d_n11;
         var_dv__blk144_dn12 = assign4890_e5201_d_n12;
         var_dv__blk144_dn13 = assign4890_e5201_d_n13;
-
 
         *var_dv0__blk136_slot = var_dv0__blk136;
         *var_dv0__blk136_dn0_slot = var_dv0__blk136_dn0;
@@ -5381,7 +5378,6 @@ impl Instance {
         var_vl__blk159_dn12 = assign5100_e5476_d_n12;
         var_vl__blk159_dn13 = assign5100_e5476_d_n13;
 
-
         *var_dv0__blk149_slot = var_dv0__blk149;
         *var_dv0__blk149_dn0_slot = var_dv0__blk149_dn0;
         *var_dv0__blk149_dn1_slot = var_dv0__blk149_dn1;
@@ -6630,7 +6626,6 @@ impl Instance {
         var_vnl__blk172_dn11 = assign5310_e5846_d_n11;
         var_vnl__blk172_dn12 = assign5310_e5846_d_n12;
         var_vnl__blk172_dn13 = assign5310_e5846_d_n13;
-
 
         *var_dv0__blk162_slot = var_dv0__blk162;
         *var_dv0__blk162_dn0_slot = var_dv0__blk162_dn0;
@@ -7939,7 +7934,6 @@ impl Instance {
         let assign5520_e6128: f64 = if var_arg < var_vmaxexp { 1.0 } else { 0.0 };
         var_guard187 = assign5520_e6128;
 
-
         *var_arg_slot = var_arg;
         *var_arg_dn0_slot = var_arg_dn0;
         *var_arg_dn1_slot = var_arg_dn1;
@@ -9097,7 +9091,6 @@ impl Instance {
         var_qcth_dn11 = var_qcth_dn11;
         var_qcth_dn12 = var_qcth_dn12;
         var_qcth_dn13 = var_qcth_dn13;
-
 
         *var_expi_slot = var_expi;
         *var_expi_dn0_slot = var_expi_dn0;
@@ -10258,7 +10251,6 @@ impl Instance {
         var_iikr_rdn11 = 0.0;
         var_iikr_rdn12 = 0.0;
         var_iikr_rdn13 = 0.0;
-
 
         *var_guard1_slot = var_guard1;
         *var_guard1_dn0_slot = var_guard1_dn0;
@@ -11647,7 +11639,6 @@ impl Instance {
         var_vtv_rdn11 = 0.0;
         var_vtv_rdn12 = 0.0;
         var_vtv_rdn13 = 0.0;
-
 
         *var_guard11_slot = var_guard11;
         *var_guard11_dn0_slot = var_guard11_dn0;
@@ -13105,7 +13096,6 @@ impl Instance {
         var_guard17_rdn12 = 0.0;
         var_guard17_rdn13 = 0.0;
 
-
         *var_guard13_slot = var_guard13;
         *var_guard13_dn0_slot = var_guard13_dn0;
         *var_guard13_dn1_slot = var_guard13_dn1;
@@ -14463,7 +14453,6 @@ impl Instance {
         var_maxvibei_rdn11 = 0.0;
         var_maxvibei_rdn12 = 0.0;
         var_maxvibei_rdn13 = 0.0;
-
 
         *var_guard18_slot = var_guard18;
         *var_guard18_dn0_slot = var_guard18_dn0;
@@ -15856,7 +15845,6 @@ impl Instance {
         var_maxvibcip_rdn11 = 0.0;
         var_maxvibcip_rdn12 = 0.0;
         var_maxvibcip_rdn13 = 0.0;
-
 
         *var_guard22_slot = var_guard22;
         *var_guard22_dn0_slot = var_guard22_dn0;
@@ -17340,7 +17328,6 @@ impl Instance {
         var_isrr_t_rdn11 = 0.0;
         var_isrr_t_rdn12 = 0.0;
         var_isrr_t_rdn13 = 0.0;
-
 
         *var_dt_slot = var_dt;
         *var_dt_dn0_slot = var_dt_dn0;
@@ -18912,7 +18899,6 @@ impl Instance {
         var_pe_t_rdn11 = 0.0;
         var_pe_t_rdn12 = 0.0;
         var_pe_t_rdn13 = 0.0;
-
 
         *var_ibci_t_slot = var_ibci_t;
         *var_ibci_t_dn0_slot = var_ibci_t_dn0;
@@ -20616,7 +20602,6 @@ impl Instance {
         var_ver_t_rdn11 = 0.0;
         var_ver_t_rdn12 = 0.0;
         var_ver_t_rdn13 = 0.0;
-
 
         *var_cjc_t_slot = var_cjc_t;
         *var_cjc_t_dn0_slot = var_cjc_t_dn0;
@@ -22423,7 +22408,6 @@ impl Instance {
         var_pwq_rdn11 = 0.0;
         var_pwq_rdn12 = 0.0;
         var_pwq_rdn13 = 0.0;
-
 
         *var_dv0_slot = var_dv0;
         *var_dv0_dn0_slot = var_dv0_dn0;

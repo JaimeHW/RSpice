@@ -811,7 +811,6 @@ impl Instance {
 };
         var_cjorbotd_i = assign710_e1975;
 
-
         *var_alphaav_slot = var_alphaav;
         *var_berfc_slot = var_berfc;
         *var_cerfc_slot = var_cerfc;
@@ -1575,7 +1574,6 @@ impl Instance {
 };
         var_vbirbotd_i = assign1270_e2203;
 
-
         *var_adbbtgatd_i_slot = var_adbbtgatd_i;
         *var_advbrgatd_i_slot = var_advbrgatd_i;
         *var_anugatd_i_slot = var_anugatd_i;
@@ -2294,7 +2292,6 @@ impl Instance {
         let assign1970_e2526: f64 = (1.0 - assign1970_e2525);
         let assign1970_e2527: f64 = (1.0 / assign1970_e2526);
         var_fstopgat_d = assign1970_e2527;
-
 
         *var_adbbtgatd_i_slot = var_adbbtgatd_i;
         *var_advbrgatd_i_slot = var_advbrgatd_i;
@@ -3218,7 +3215,6 @@ impl Instance {
         let assign2740_e3058: f64 = (3.0 * 1.05457168e-34);
         let assign2740_e3059: f64 = (assign2740_e3055 / assign2740_e3058);
         var_btatpartsti = assign2740_e3059;
-
 
         *var_atatbot_slot = var_atatbot;
         *var_atatgat_slot = var_atatgat;
@@ -4220,7 +4216,6 @@ impl Instance {
         var_fbbtgat_d_db23 = 0.0;
         var_fbbtgat_d_db24 = 0.0;
 
-
         *var_atatbot_d_slot = var_atatbot_d;
         *var_atatgat_d_slot = var_atatgat_d;
         *var_atatsti_d_slot = var_atatsti_d;
@@ -5093,7 +5088,6 @@ impl Instance {
 
         s.store_scalar(78, p.p91);
 
-
         *var_abdrain_i_slot = var_abdrain_i;
         *var_absource_i_slot = var_absource_i;
         *var_ad_i_slot = var_ad_i;
@@ -5624,7 +5618,6 @@ impl Instance {
             s.store_scalar(341, ((var_ile) as f64).powf(p.p314));
         }
 
-
         *var_agidl_p_slot = var_agidl_p;
         *var_agidld_p_slot = var_agidld_p;
         *var_cfr_p_slot = var_cfr_p;
@@ -6036,7 +6029,6 @@ impl Instance {
     }
 };
         var_rsh_i = assign7220_e5705;
-
 
         *var_agidl_p_slot = var_agidl_p;
         *var_agidld_p_slot = var_agidld_p;
@@ -6621,7 +6613,6 @@ impl Instance {
 };
         var_agidld_p = assign8280_e7567;
 
-
         *var_agidl_p_slot = var_agidl_p;
         *var_agidld_p_slot = var_agidld_p;
         *var_guard100_slot = var_guard100;
@@ -7114,7 +7105,6 @@ impl Instance {
         if (((s.v[1030] != 0.0) && s.b[1140]) && s.b[1141]) {
             s.store_scalar(1012, (s.v[12] + var_w_i));
         }
-
 
         *var_cfr_p_slot = var_cfr_p;
         *var_cfrd_p_slot = var_cfrd_p;
@@ -7644,7 +7634,6 @@ impl Instance {
         s.copy_ad(271, 138);
 
         s.copy_ad(272, 139);
-
 
         *var_agidl_i_slot = var_agidl_i;
         *var_agidld_i_slot = var_agidld_i;
@@ -8246,7 +8235,6 @@ impl Instance {
 
         s.store_scalar(731, 0.0);
 
-
         *var_agidld_i_slot = var_agidld_i;
         *var_cfr_i_slot = var_cfr_i;
         *var_cfrd_i_slot = var_cfrd_i;
@@ -8744,7 +8732,6 @@ impl Instance {
     }
 };
         var_gwell = assign13230_e11694;
-
 
         *var_gbulk_slot = var_gbulk;
         *var_gdrain_slot = var_gdrain;
@@ -9726,7 +9713,6 @@ impl Instance {
         var_mfor2_d_db22 = 0.0;
         var_mfor2_d_db23 = 0.0;
         var_mfor2_d_db24 = 0.0;
-
 
         *var_abd_i_slot = var_abd_i;
         *var_abdrain_i_slot = var_abdrain_i;
@@ -11399,7 +11385,6 @@ impl Instance {
         var_xhighr_d_db22 = 0.0;
         var_xhighr_d_db23 = 0.0;
         var_xhighr_d_db24 = 0.0;
-
 
         *var_expxhf1_d_slot = var_expxhf1_d;
         *var_expxhf1_s_slot = var_expxhf1_s;
@@ -13329,7 +13314,6 @@ impl Instance {
         var_tt1_db22 = 0.0;
         var_tt1_db23 = 0.0;
         var_tt1_db24 = 0.0;
-
 
         *var_expxhr_d_slot = var_expxhr_d;
         *var_expxhr_d_db0_slot = var_expxhr_d_db0;
