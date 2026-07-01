@@ -474,7 +474,7 @@ struct DStateTableResource {
 #[derive(Debug, Clone)]
 struct DStateTransition {
     state: i64,
-    inputs: Vec<Option<bool>>,
+    wide_inputs: Option<Vec<Option<bool>>>,
     input_mask: u64,
     input_bits: u64,
     next_state: i64,
@@ -483,6 +483,7 @@ struct DStateTransition {
 #[derive(Debug, Clone)]
 struct DStateTable {
     transitions: Vec<DStateTransition>,
+    input_width: usize,
     output_width: usize,
     output_values: Vec<DigitalValue>,
     state_ranges: HashMap<i64, DStateRange>,
@@ -738,9 +739,10 @@ fn parse_d_state_contents(
         }
         let next_state = parse_d_state_i64(state_file, line_no, tokens[next_idx])?;
         let (input_mask, input_bits) = d_state_input_pattern_masks(&inputs);
+        let wide_inputs = (input_width > 64).then_some(inputs);
         transitions.push(DStateTransition {
             state,
-            inputs,
+            wide_inputs,
             input_mask,
             input_bits,
             next_state,
@@ -753,6 +755,7 @@ fn parse_d_state_contents(
 
     Ok(DStateTable {
         state_ranges: d_state_range_index(&transitions),
+        input_width,
         output_width,
         output_values,
         transitions,
@@ -895,22 +898,22 @@ fn d_state_input_value_masks(inputs: &[DigitalValue]) -> Option<(u64, u64)> {
 
 fn d_state_transition_matches(
     row: &DStateTransition,
+    input_width: usize,
     inputs: &[DigitalValue],
     input_masks: Option<(u64, u64)>,
 ) -> bool {
-    if inputs.len() >= row.inputs.len()
+    if inputs.len() >= input_width
         && let Some((known_mask, input_bits)) = input_masks
     {
         return (known_mask & row.input_mask) == row.input_mask
             && (input_bits & row.input_mask) == row.input_bits;
     }
 
-    row.inputs
-        .iter()
-        .zip(inputs.iter())
-        .all(|(pattern, value)| {
+    row.wide_inputs.as_ref().is_some_and(|patterns| {
+        patterns.iter().zip(inputs.iter()).all(|(pattern, value)| {
             pattern.is_none_or(|expected| d_state_logic(*value) == Some(expected))
         })
+    })
 }
 
 fn d_state_next(table: &DStateTable, state: i64, inputs: &[DigitalValue]) -> Option<i64> {
@@ -920,7 +923,7 @@ fn d_state_next(table: &DStateTable, state: i64, inputs: &[DigitalValue]) -> Opt
         .transitions
         .get(start..=end)?
         .iter()
-        .find(|row| d_state_transition_matches(row, inputs, input_masks))
+        .find(|row| d_state_transition_matches(row, table.input_width, inputs, input_masks))
         .map(|row| row.next_state)
 }
 
@@ -1546,6 +1549,13 @@ mod tests {
         assert_eq!(table.transitions[1].input_bits, 0b11);
         assert_eq!(table.transitions[2].input_mask, 0);
         assert_eq!(table.transitions[2].input_bits, 0);
+        assert!(
+            table
+                .transitions
+                .iter()
+                .all(|row| row.wide_inputs.is_none()),
+            "normal-width d_state tables should use packed masks without retaining parser vectors"
+        );
 
         assert_eq!(
             d_state_next(&table, 0, &[DigitalValue::one(), DigitalValue::unknown()]),
@@ -1564,11 +1574,38 @@ mod tests {
         );
         assert_eq!(
             d_state_next(&table, 0, &[DigitalValue::one()]),
-            Some(1),
-            "short direct-call inputs keep the legacy zip-based fallback semantics"
+            None,
+            "short direct-call inputs must not satisfy a full-width packed transition"
         );
 
         unregister_test_data_file(state_file);
+    }
+
+    #[test]
+    fn d_state_wide_input_patterns_keep_vector_fallback() {
+        let mut contents = String::from("0 0s ");
+        for input in 0..65 {
+            contents.push_str(if input == 64 { "1 " } else { "x " });
+        }
+        contents.push_str("-> 7\n");
+
+        let table = parse_d_state_contents("inline-wide-d-state", 65, 1, &contents)
+            .expect("wide d_state table parses");
+
+        assert_eq!(table.input_width, 65);
+        assert_eq!(table.transitions[0].input_mask, 0);
+        assert_eq!(table.transitions[0].input_bits, 0);
+        assert!(
+            table.transitions[0].wide_inputs.is_some(),
+            "d_state rows wider than u64 masks must retain a fallback pattern"
+        );
+
+        let mut inputs = vec![DigitalValue::unknown(); 65];
+        inputs[64] = DigitalValue::one();
+        assert_eq!(d_state_next(&table, 0, &inputs), Some(7));
+
+        inputs[64] = DigitalValue::zero();
+        assert_eq!(d_state_next(&table, 0, &inputs), None);
     }
 
     #[test]
