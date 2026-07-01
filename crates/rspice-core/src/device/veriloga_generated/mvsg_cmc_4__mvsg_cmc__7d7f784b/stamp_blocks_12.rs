@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -28,7 +28,6 @@ impl Instance {
         var_guard24: f64,
         var_guard59: f64,
         var_guard60: f64,
-        var_guard95: f64,
         var_idsfp3: f64,
         var_idsfp3_dn15: f64,
         var_idsfp3_dn16: f64,
@@ -52,13 +51,6 @@ impl Instance {
         var_qbfp4_dn3: f64,
         var_qbfp4_dn4: f64,
         var_qbfp4_dn7: f64,
-        var_qcfp3: f64,
-        var_qcfp3_dn15: f64,
-        var_qcfp3_dn16: f64,
-        var_qcfp3_dn2: f64,
-        var_qcfp3_dn3: f64,
-        var_qcfp3_dn4: f64,
-        var_qcfp3_dn7: f64,
         var_qcfp4: f64,
         var_qcfp4_dn16: f64,
         var_qcfp4_dn17: f64,
@@ -66,37 +58,18 @@ impl Instance {
         var_qcfp4_dn3: f64,
         var_qcfp4_dn4: f64,
         var_qcfp4_dn7: f64,
-        var_qgdfp3: f64,
-        var_qgdfp3_dn15: f64,
-        var_qgdfp3_dn16: f64,
-        var_qgdfp3_dn2: f64,
-        var_qgdfp3_dn4: f64,
-        var_qgdfp3_dn7: f64,
         var_qgdfp4: f64,
         var_qgdfp4_dn16: f64,
         var_qgdfp4_dn17: f64,
         var_qgdfp4_dn2: f64,
         var_qgdfp4_dn4: f64,
         var_qgdfp4_dn7: f64,
-        var_qgsfp3: f64,
-        var_qgsfp3_dn15: f64,
-        var_qgsfp3_dn16: f64,
-        var_qgsfp3_dn2: f64,
-        var_qgsfp3_dn4: f64,
-        var_qgsfp3_dn7: f64,
         var_qgsfp4: f64,
         var_qgsfp4_dn16: f64,
         var_qgsfp4_dn17: f64,
         var_qgsfp4_dn2: f64,
         var_qgsfp4_dn4: f64,
         var_qgsfp4_dn7: f64,
-        var_qsfp3: f64,
-        var_qsfp3_dn15: f64,
-        var_qsfp3_dn16: f64,
-        var_qsfp3_dn2: f64,
-        var_qsfp3_dn3: f64,
-        var_qsfp3_dn4: f64,
-        var_qsfp3_dn7: f64,
         var_qsfp4: f64,
         var_qsfp4_dn16: f64,
         var_qsfp4_dn17: f64,
@@ -161,39 +134,100 @@ impl Instance {
             20,
             multiplicity * (eq9_e428_d_n20),
         );
-        let eq14_ad_e518: A = {
+        let (eq14_e518, eq14_e518_d_n4, eq14_e518_d_n23, eq14_e518_d_n24,) = {
     if ((var_guard12 == 0.0) && (var_guard13 != 0.0)) {
-        A::scaled_offset({
-            if ((!(((nv24 - nv23) / var_phit) > 50.0)) && (!(((nv24 - nv23) / var_phit) < (-50.0)))) {
-                A::exp(A::div(A::voltage(ctx, nodes, Some(24), Some(23)), A::from_derivatives(var_phit, [0.0, 0.0, 0.0, 0.0, var_phit_dn4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])))
+        let eq14_e463: f64 = ((nv24 - nv23) / var_phit);
+        let eq14_e463_d_n4: f64 = (-(((nv24 - nv23) * var_phit_dn4) / (var_phit * var_phit)));
+        let __rspice_inv_cse_0: f64 = 1.0 / var_phit;
+        let eq14_e463_d_n23: f64 = ((-1.0) * __rspice_inv_cse_0);
+        let eq14_e463_d_n24: f64 = (1.0 * __rspice_inv_cse_0);
+        let eq14_e469: f64 = ((nv24 - nv23) * __rspice_inv_cse_0);
+        let eq14_e469_d_n4: f64 = (-(((nv24 - nv23) * var_phit_dn4) / (var_phit * var_phit)));
+        let __rspice_inv_cse_1: f64 = 1.0 / var_phit;
+        let eq14_e469_d_n23: f64 = ((-1.0) * __rspice_inv_cse_1);
+        let eq14_e469_d_n24: f64 = (1.0 * __rspice_inv_cse_1);
+        let eq14_e471: f64 = (-50.0);
+        let (eq14_e513, eq14_e513_d_n4, eq14_e513_d_n23, eq14_e513_d_n24,) = {
+            if ((!(eq14_e463 > 50.0)) && (!(eq14_e469 < eq14_e471))) {
+                let eq14_e477: f64 = ((nv24 - nv23) / var_phit);
+                let eq14_e477_d_n4: f64 = (-(((nv24 - nv23) * var_phit_dn4) / (var_phit * var_phit)));
+                let __rspice_inv_cse_2: f64 = 1.0 / var_phit;
+                let eq14_e477_d_n23: f64 = ((-1.0) * __rspice_inv_cse_2);
+                let eq14_e477_d_n24: f64 = (1.0 * __rspice_inv_cse_2);
+                let eq14_e478: f64 = (eq14_e477).exp();
+                let eq14_e478_d_n4: f64 = (eq14_e478 * eq14_e477_d_n4);
+                let eq14_e478_d_n23: f64 = (eq14_e478 * eq14_e477_d_n23);
+                let eq14_e478_d_n24: f64 = (eq14_e478 * eq14_e477_d_n24);
+                (eq14_e478, eq14_e478_d_n4, eq14_e478_d_n23, eq14_e478_d_n24,)
             } else {
-                {
-                    if ((!(((nv24 - nv23) / var_phit) > 50.0)) && (((nv24 - nv23) / var_phit) < (-50.0))) {
-                        A::exp_scaled_input(A::constant(50.0), -1.0)
+                let eq14_e481: f64 = ((nv24 - nv23) / var_phit);
+                let eq14_e481_d_n4: f64 = (-(((nv24 - nv23) * var_phit_dn4) / (var_phit * var_phit)));
+                let __rspice_inv_cse_3: f64 = 1.0 / var_phit;
+                let eq14_e481_d_n23: f64 = ((-1.0) * __rspice_inv_cse_3);
+                let eq14_e481_d_n24: f64 = (1.0 * __rspice_inv_cse_3);
+                let eq14_e487: f64 = ((nv24 - nv23) * __rspice_inv_cse_3);
+                let eq14_e487_d_n4: f64 = (-(((nv24 - nv23) * var_phit_dn4) / (var_phit * var_phit)));
+                let __rspice_inv_cse_4: f64 = 1.0 / var_phit;
+                let eq14_e487_d_n23: f64 = ((-1.0) * __rspice_inv_cse_4);
+                let eq14_e487_d_n24: f64 = (1.0 * __rspice_inv_cse_4);
+                let eq14_e489: f64 = (-50.0);
+                let (eq14_e512, eq14_e512_d_n4, eq14_e512_d_n23, eq14_e512_d_n24,) = {
+                    if ((!(eq14_e481 > 50.0)) && (eq14_e487 < eq14_e489)) {
+                        let eq14_e493: f64 = (-50.0);
+                        let eq14_e494: f64 = (eq14_e493).exp();
+                        (eq14_e494, 0.0, 0.0, 0.0,)
                     } else {
-                        {
-                            if (((nv24 - nv23) / var_phit) > 50.0) {
-                                A::scaled_offset(A::div(A::voltage(ctx, nodes, Some(24), Some(23)), A::from_derivatives(var_phit, [0.0, 0.0, 0.0, 0.0, var_phit_dn4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])), (((-50.0)) + (1.0)), ((50.0) as f64).exp())
+                        let eq14_e497: f64 = ((nv24 - nv23) / var_phit);
+                        let eq14_e497_d_n4: f64 = (-(((nv24 - nv23) * var_phit_dn4) / (var_phit * var_phit)));
+                        let __rspice_inv_cse_5: f64 = 1.0 / var_phit;
+                        let eq14_e497_d_n23: f64 = ((-1.0) * __rspice_inv_cse_5);
+                        let eq14_e497_d_n24: f64 = (1.0 * __rspice_inv_cse_5);
+                        let (eq14_e511, eq14_e511_d_n4, eq14_e511_d_n23, eq14_e511_d_n24,) = {
+                            if (eq14_e497 > 50.0) {
+                                let eq14_e501: f64 = (50.0_f64).exp();
+                                let eq14_e505: f64 = ((nv24 - nv23) / var_phit);
+                                let eq14_e505_d_n4: f64 = (-(((nv24 - nv23) * var_phit_dn4) / (var_phit * var_phit)));
+                                let __rspice_inv_cse_6: f64 = 1.0 / var_phit;
+                                let eq14_e505_d_n23: f64 = ((-1.0) * __rspice_inv_cse_6);
+                                let eq14_e505_d_n24: f64 = (1.0 * __rspice_inv_cse_6);
+                                let eq14_e507: f64 = (eq14_e505 - 50.0);
+                                let eq14_e508: f64 = (1.0 + eq14_e507);
+                                let eq14_e509: f64 = (eq14_e501 * eq14_e508);
+                                let eq14_e509_d_n4: f64 = (eq14_e501 * eq14_e505_d_n4);
+                                let eq14_e509_d_n23: f64 = (eq14_e501 * eq14_e505_d_n23);
+                                let eq14_e509_d_n24: f64 = (eq14_e501 * eq14_e505_d_n24);
+                                (eq14_e509, eq14_e509_d_n4, eq14_e509_d_n23, eq14_e509_d_n24,)
                             } else {
-                                A::constant(0.0)
+                                (0.0, 0.0, 0.0, 0.0,)
                             }
-                        }
+                        };
+                        (eq14_e511, eq14_e511_d_n4, eq14_e511_d_n23, eq14_e511_d_n24,)
                     }
-                }
+                };
+                (eq14_e512, eq14_e512_d_n4, eq14_e512_d_n23, eq14_e512_d_n24,)
             }
-        }, (-1.0), p.p346)
+        };
+        let eq14_e515: f64 = (eq14_e513 - 1.0);
+        let eq14_e516: f64 = (p.p346 * eq14_e515);
+        let eq14_e516_d_n4: f64 = (p.p346 * eq14_e513_d_n4);
+        let eq14_e516_d_n23: f64 = (p.p346 * eq14_e513_d_n23);
+        let eq14_e516_d_n24: f64 = (p.p346 * eq14_e513_d_n24);
+        (eq14_e516, eq14_e516_d_n4, eq14_e516_d_n23, eq14_e516_d_n24,)
     } else {
-        A::constant(0.0)
+        (0.0, 0.0, 0.0, 0.0,)
     }
 };
-        let eq14_ad: A = eq14_ad_e518;
-        stamper.stamp_current_dense_local(
+        let eq14_value: f64 = eq14_e518;
+        stamper.stamp_current_node3_local(
             Some(24),
             Some(23),
-            multiplicity * eq14_ad.value,
-            &eq14_ad.dn,
-            &eq14_ad.db,
-            multiplicity,
+            multiplicity * (eq14_value),
+            4,
+            multiplicity * (eq14_e518_d_n4),
+            23,
+            multiplicity * (eq14_e518_d_n23),
+            24,
+            multiplicity * (eq14_e518_d_n24),
         );
         let (eq17_e564, eq17_e564_d_n4, eq17_e564_d_n23,) = {
     if ((var_guard12 == 0.0) && (var_guard13 != 0.0)) {
@@ -230,39 +264,100 @@ impl Instance {
             23,
             multiplicity * (eq17_e564_d_n23),
         );
-        let eq19_ad_e636: A = {
+        let (eq19_e636, eq19_e636_d_n4, eq19_e636_d_n26, eq19_e636_d_n27,) = {
     if ((var_guard12 == 0.0) && (var_guard13 != 0.0)) {
-        A::scaled_offset({
-            if ((!(((nv26 - nv27) / var_phit) > 50.0)) && (!(((nv26 - nv27) / var_phit) < (-50.0)))) {
-                A::exp(A::div(A::voltage(ctx, nodes, Some(26), Some(27)), A::from_derivatives(var_phit, [0.0, 0.0, 0.0, 0.0, var_phit_dn4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])))
+        let eq19_e581: f64 = ((nv26 - nv27) / var_phit);
+        let eq19_e581_d_n4: f64 = (-(((nv26 - nv27) * var_phit_dn4) / (var_phit * var_phit)));
+        let __rspice_inv_cse_7: f64 = 1.0 / var_phit;
+        let eq19_e581_d_n26: f64 = (1.0 * __rspice_inv_cse_7);
+        let eq19_e581_d_n27: f64 = ((-1.0) * __rspice_inv_cse_7);
+        let eq19_e587: f64 = ((nv26 - nv27) * __rspice_inv_cse_7);
+        let eq19_e587_d_n4: f64 = (-(((nv26 - nv27) * var_phit_dn4) / (var_phit * var_phit)));
+        let __rspice_inv_cse_8: f64 = 1.0 / var_phit;
+        let eq19_e587_d_n26: f64 = (1.0 * __rspice_inv_cse_8);
+        let eq19_e587_d_n27: f64 = ((-1.0) * __rspice_inv_cse_8);
+        let eq19_e589: f64 = (-50.0);
+        let (eq19_e631, eq19_e631_d_n4, eq19_e631_d_n26, eq19_e631_d_n27,) = {
+            if ((!(eq19_e581 > 50.0)) && (!(eq19_e587 < eq19_e589))) {
+                let eq19_e595: f64 = ((nv26 - nv27) / var_phit);
+                let eq19_e595_d_n4: f64 = (-(((nv26 - nv27) * var_phit_dn4) / (var_phit * var_phit)));
+                let __rspice_inv_cse_9: f64 = 1.0 / var_phit;
+                let eq19_e595_d_n26: f64 = (1.0 * __rspice_inv_cse_9);
+                let eq19_e595_d_n27: f64 = ((-1.0) * __rspice_inv_cse_9);
+                let eq19_e596: f64 = (eq19_e595).exp();
+                let eq19_e596_d_n4: f64 = (eq19_e596 * eq19_e595_d_n4);
+                let eq19_e596_d_n26: f64 = (eq19_e596 * eq19_e595_d_n26);
+                let eq19_e596_d_n27: f64 = (eq19_e596 * eq19_e595_d_n27);
+                (eq19_e596, eq19_e596_d_n4, eq19_e596_d_n26, eq19_e596_d_n27,)
             } else {
-                {
-                    if ((!(((nv26 - nv27) / var_phit) > 50.0)) && (((nv26 - nv27) / var_phit) < (-50.0))) {
-                        A::exp_scaled_input(A::constant(50.0), -1.0)
+                let eq19_e599: f64 = ((nv26 - nv27) / var_phit);
+                let eq19_e599_d_n4: f64 = (-(((nv26 - nv27) * var_phit_dn4) / (var_phit * var_phit)));
+                let __rspice_inv_cse_10: f64 = 1.0 / var_phit;
+                let eq19_e599_d_n26: f64 = (1.0 * __rspice_inv_cse_10);
+                let eq19_e599_d_n27: f64 = ((-1.0) * __rspice_inv_cse_10);
+                let eq19_e605: f64 = ((nv26 - nv27) * __rspice_inv_cse_10);
+                let eq19_e605_d_n4: f64 = (-(((nv26 - nv27) * var_phit_dn4) / (var_phit * var_phit)));
+                let __rspice_inv_cse_11: f64 = 1.0 / var_phit;
+                let eq19_e605_d_n26: f64 = (1.0 * __rspice_inv_cse_11);
+                let eq19_e605_d_n27: f64 = ((-1.0) * __rspice_inv_cse_11);
+                let eq19_e607: f64 = (-50.0);
+                let (eq19_e630, eq19_e630_d_n4, eq19_e630_d_n26, eq19_e630_d_n27,) = {
+                    if ((!(eq19_e599 > 50.0)) && (eq19_e605 < eq19_e607)) {
+                        let eq19_e611: f64 = (-50.0);
+                        let eq19_e612: f64 = (eq19_e611).exp();
+                        (eq19_e612, 0.0, 0.0, 0.0,)
                     } else {
-                        {
-                            if (((nv26 - nv27) / var_phit) > 50.0) {
-                                A::scaled_offset(A::div(A::voltage(ctx, nodes, Some(26), Some(27)), A::from_derivatives(var_phit, [0.0, 0.0, 0.0, 0.0, var_phit_dn4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])), (((-50.0)) + (1.0)), ((50.0) as f64).exp())
+                        let eq19_e615: f64 = ((nv26 - nv27) / var_phit);
+                        let eq19_e615_d_n4: f64 = (-(((nv26 - nv27) * var_phit_dn4) / (var_phit * var_phit)));
+                        let __rspice_inv_cse_12: f64 = 1.0 / var_phit;
+                        let eq19_e615_d_n26: f64 = (1.0 * __rspice_inv_cse_12);
+                        let eq19_e615_d_n27: f64 = ((-1.0) * __rspice_inv_cse_12);
+                        let (eq19_e629, eq19_e629_d_n4, eq19_e629_d_n26, eq19_e629_d_n27,) = {
+                            if (eq19_e615 > 50.0) {
+                                let eq19_e619: f64 = (50.0_f64).exp();
+                                let eq19_e623: f64 = ((nv26 - nv27) / var_phit);
+                                let eq19_e623_d_n4: f64 = (-(((nv26 - nv27) * var_phit_dn4) / (var_phit * var_phit)));
+                                let __rspice_inv_cse_13: f64 = 1.0 / var_phit;
+                                let eq19_e623_d_n26: f64 = (1.0 * __rspice_inv_cse_13);
+                                let eq19_e623_d_n27: f64 = ((-1.0) * __rspice_inv_cse_13);
+                                let eq19_e625: f64 = (eq19_e623 - 50.0);
+                                let eq19_e626: f64 = (1.0 + eq19_e625);
+                                let eq19_e627: f64 = (eq19_e619 * eq19_e626);
+                                let eq19_e627_d_n4: f64 = (eq19_e619 * eq19_e623_d_n4);
+                                let eq19_e627_d_n26: f64 = (eq19_e619 * eq19_e623_d_n26);
+                                let eq19_e627_d_n27: f64 = (eq19_e619 * eq19_e623_d_n27);
+                                (eq19_e627, eq19_e627_d_n4, eq19_e627_d_n26, eq19_e627_d_n27,)
                             } else {
-                                A::constant(0.0)
+                                (0.0, 0.0, 0.0, 0.0,)
                             }
-                        }
+                        };
+                        (eq19_e629, eq19_e629_d_n4, eq19_e629_d_n26, eq19_e629_d_n27,)
                     }
-                }
+                };
+                (eq19_e630, eq19_e630_d_n4, eq19_e630_d_n26, eq19_e630_d_n27,)
             }
-        }, (-1.0), p.p346)
+        };
+        let eq19_e633: f64 = (eq19_e631 - 1.0);
+        let eq19_e634: f64 = (p.p346 * eq19_e633);
+        let eq19_e634_d_n4: f64 = (p.p346 * eq19_e631_d_n4);
+        let eq19_e634_d_n26: f64 = (p.p346 * eq19_e631_d_n26);
+        let eq19_e634_d_n27: f64 = (p.p346 * eq19_e631_d_n27);
+        (eq19_e634, eq19_e634_d_n4, eq19_e634_d_n26, eq19_e634_d_n27,)
     } else {
-        A::constant(0.0)
+        (0.0, 0.0, 0.0, 0.0,)
     }
 };
-        let eq19_ad: A = eq19_ad_e636;
-        stamper.stamp_current_dense_local(
+        let eq19_value: f64 = eq19_e636;
+        stamper.stamp_current_node3_local(
             Some(26),
             Some(27),
-            multiplicity * eq19_ad.value,
-            &eq19_ad.dn,
-            &eq19_ad.db,
-            multiplicity,
+            multiplicity * (eq19_value),
+            4,
+            multiplicity * (eq19_e636_d_n4),
+            26,
+            multiplicity * (eq19_e636_d_n26),
+            27,
+            multiplicity * (eq19_e636_d_n27),
         );
         let (eq22_e682, eq22_e682_d_n4, eq22_e682_d_n26,) = {
     if ((var_guard12 == 0.0) && (var_guard13 != 0.0)) {
@@ -527,6 +622,146 @@ impl Instance {
             [],
             1.0,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_1(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_previous_value_scale: f64,
+        ddt_older_value_scale: f64,
+        ddt_previous_derivative_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        var_gmin: f64,
+        var_guard131: f64,
+        var_guard132: f64,
+        var_guard167: f64,
+        var_guard95: f64,
+        var_guard96: f64,
+        var_idsfp1: f64,
+        var_idsfp1_dn14: f64,
+        var_idsfp1_dn2: f64,
+        var_idsfp1_dn3: f64,
+        var_idsfp1_dn4: f64,
+        var_idsfp1_dn5: f64,
+        var_idsfp1_dn7: f64,
+        var_idsfp2: f64,
+        var_idsfp2_dn14: f64,
+        var_idsfp2_dn15: f64,
+        var_idsfp2_dn2: f64,
+        var_idsfp2_dn3: f64,
+        var_idsfp2_dn4: f64,
+        var_idsfp2_dn7: f64,
+        var_qbfp2: f64,
+        var_qbfp2_dn14: f64,
+        var_qbfp2_dn15: f64,
+        var_qbfp2_dn2: f64,
+        var_qbfp2_dn3: f64,
+        var_qbfp2_dn4: f64,
+        var_qbfp2_dn7: f64,
+        var_qbfp3: f64,
+        var_qbfp3_dn15: f64,
+        var_qbfp3_dn16: f64,
+        var_qbfp3_dn2: f64,
+        var_qbfp3_dn3: f64,
+        var_qbfp3_dn4: f64,
+        var_qbfp3_dn7: f64,
+        var_qcfp1: f64,
+        var_qcfp1_dn14: f64,
+        var_qcfp1_dn2: f64,
+        var_qcfp1_dn3: f64,
+        var_qcfp1_dn4: f64,
+        var_qcfp1_dn5: f64,
+        var_qcfp1_dn7: f64,
+        var_qcfp2: f64,
+        var_qcfp2_dn14: f64,
+        var_qcfp2_dn15: f64,
+        var_qcfp2_dn2: f64,
+        var_qcfp2_dn3: f64,
+        var_qcfp2_dn4: f64,
+        var_qcfp2_dn7: f64,
+        var_qcfp3: f64,
+        var_qcfp3_dn15: f64,
+        var_qcfp3_dn16: f64,
+        var_qcfp3_dn2: f64,
+        var_qcfp3_dn3: f64,
+        var_qcfp3_dn4: f64,
+        var_qcfp3_dn7: f64,
+        var_qgdfp1: f64,
+        var_qgdfp1_dn14: f64,
+        var_qgdfp1_dn2: f64,
+        var_qgdfp1_dn4: f64,
+        var_qgdfp1_dn5: f64,
+        var_qgdfp1_dn7: f64,
+        var_qgdfp2: f64,
+        var_qgdfp2_dn14: f64,
+        var_qgdfp2_dn15: f64,
+        var_qgdfp2_dn2: f64,
+        var_qgdfp2_dn4: f64,
+        var_qgdfp2_dn7: f64,
+        var_qgdfp3: f64,
+        var_qgdfp3_dn15: f64,
+        var_qgdfp3_dn16: f64,
+        var_qgdfp3_dn2: f64,
+        var_qgdfp3_dn4: f64,
+        var_qgdfp3_dn7: f64,
+        var_qgsfp1: f64,
+        var_qgsfp1_dn14: f64,
+        var_qgsfp1_dn2: f64,
+        var_qgsfp1_dn4: f64,
+        var_qgsfp1_dn5: f64,
+        var_qgsfp1_dn7: f64,
+        var_qgsfp2: f64,
+        var_qgsfp2_dn14: f64,
+        var_qgsfp2_dn15: f64,
+        var_qgsfp2_dn2: f64,
+        var_qgsfp2_dn4: f64,
+        var_qgsfp2_dn7: f64,
+        var_qgsfp3: f64,
+        var_qgsfp3_dn15: f64,
+        var_qgsfp3_dn16: f64,
+        var_qgsfp3_dn2: f64,
+        var_qgsfp3_dn4: f64,
+        var_qgsfp3_dn7: f64,
+        var_qsfp1: f64,
+        var_qsfp1_dn14: f64,
+        var_qsfp1_dn2: f64,
+        var_qsfp1_dn3: f64,
+        var_qsfp1_dn4: f64,
+        var_qsfp1_dn5: f64,
+        var_qsfp1_dn7: f64,
+        var_qsfp2: f64,
+        var_qsfp2_dn14: f64,
+        var_qsfp2_dn15: f64,
+        var_qsfp2_dn2: f64,
+        var_qsfp2_dn3: f64,
+        var_qsfp2_dn4: f64,
+        var_qsfp2_dn7: f64,
+        var_qsfp3: f64,
+        var_qsfp3_dn15: f64,
+        var_qsfp3_dn16: f64,
+        var_qsfp3_dn2: f64,
+        var_qsfp3_dn3: f64,
+        var_qsfp3_dn4: f64,
+        var_qsfp3_dn7: f64,
+    ) {
+        let nv2 = ctx.node_voltage(nodes[2]);
+        let nv3 = ctx.node_voltage(nodes[3]);
+        let nv5 = ctx.node_voltage(nodes[5]);
+        let nv7 = ctx.node_voltage(nodes[7]);
+        let nv9 = ctx.node_voltage(nodes[9]);
+        let nv14 = ctx.node_voltage(nodes[14]);
+        let nv15 = ctx.node_voltage(nodes[15]);
+        let nv16 = ctx.node_voltage(nodes[16]);
         let (eq46_e876, eq46_e876_d_n2, eq46_e876_d_n4, eq46_e876_d_n7, eq46_e876_d_n15, eq46_e876_d_n16,) = {
     if (var_guard95 != 0.0) {
         let eq46_e869: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 20, var_qgsfp3);
@@ -622,146 +857,6 @@ impl Instance {
             [],
             1.0,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_1(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_previous_value_scale: f64,
-        ddt_older_value_scale: f64,
-        ddt_previous_derivative_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        var_gmin: f64,
-        var_guard131: f64,
-        var_guard132: f64,
-        var_guard167: f64,
-        var_guard95: f64,
-        var_guard96: f64,
-        var_idsfp1: f64,
-        var_idsfp1_dn14: f64,
-        var_idsfp1_dn2: f64,
-        var_idsfp1_dn3: f64,
-        var_idsfp1_dn4: f64,
-        var_idsfp1_dn5: f64,
-        var_idsfp1_dn7: f64,
-        var_idsfp2: f64,
-        var_idsfp2_dn14: f64,
-        var_idsfp2_dn15: f64,
-        var_idsfp2_dn2: f64,
-        var_idsfp2_dn3: f64,
-        var_idsfp2_dn4: f64,
-        var_idsfp2_dn7: f64,
-        var_qbfp1: f64,
-        var_qbfp1_dn14: f64,
-        var_qbfp1_dn2: f64,
-        var_qbfp1_dn3: f64,
-        var_qbfp1_dn4: f64,
-        var_qbfp1_dn5: f64,
-        var_qbfp1_dn7: f64,
-        var_qbfp2: f64,
-        var_qbfp2_dn14: f64,
-        var_qbfp2_dn15: f64,
-        var_qbfp2_dn2: f64,
-        var_qbfp2_dn3: f64,
-        var_qbfp2_dn4: f64,
-        var_qbfp2_dn7: f64,
-        var_qbfp3: f64,
-        var_qbfp3_dn15: f64,
-        var_qbfp3_dn16: f64,
-        var_qbfp3_dn2: f64,
-        var_qbfp3_dn3: f64,
-        var_qbfp3_dn4: f64,
-        var_qbfp3_dn7: f64,
-        var_qcfp1: f64,
-        var_qcfp1_dn14: f64,
-        var_qcfp1_dn2: f64,
-        var_qcfp1_dn3: f64,
-        var_qcfp1_dn4: f64,
-        var_qcfp1_dn5: f64,
-        var_qcfp1_dn7: f64,
-        var_qcfp2: f64,
-        var_qcfp2_dn14: f64,
-        var_qcfp2_dn15: f64,
-        var_qcfp2_dn2: f64,
-        var_qcfp2_dn3: f64,
-        var_qcfp2_dn4: f64,
-        var_qcfp2_dn7: f64,
-        var_qcfp3: f64,
-        var_qcfp3_dn15: f64,
-        var_qcfp3_dn16: f64,
-        var_qcfp3_dn2: f64,
-        var_qcfp3_dn3: f64,
-        var_qcfp3_dn4: f64,
-        var_qcfp3_dn7: f64,
-        var_qgdfp1: f64,
-        var_qgdfp1_dn14: f64,
-        var_qgdfp1_dn2: f64,
-        var_qgdfp1_dn4: f64,
-        var_qgdfp1_dn5: f64,
-        var_qgdfp1_dn7: f64,
-        var_qgdfp2: f64,
-        var_qgdfp2_dn14: f64,
-        var_qgdfp2_dn15: f64,
-        var_qgdfp2_dn2: f64,
-        var_qgdfp2_dn4: f64,
-        var_qgdfp2_dn7: f64,
-        var_qgdfp3: f64,
-        var_qgdfp3_dn15: f64,
-        var_qgdfp3_dn16: f64,
-        var_qgdfp3_dn2: f64,
-        var_qgdfp3_dn4: f64,
-        var_qgdfp3_dn7: f64,
-        var_qgsfp1: f64,
-        var_qgsfp1_dn14: f64,
-        var_qgsfp1_dn2: f64,
-        var_qgsfp1_dn4: f64,
-        var_qgsfp1_dn5: f64,
-        var_qgsfp1_dn7: f64,
-        var_qgsfp2: f64,
-        var_qgsfp2_dn14: f64,
-        var_qgsfp2_dn15: f64,
-        var_qgsfp2_dn2: f64,
-        var_qgsfp2_dn4: f64,
-        var_qgsfp2_dn7: f64,
-        var_qgsfp3: f64,
-        var_qgsfp3_dn15: f64,
-        var_qgsfp3_dn16: f64,
-        var_qgsfp3_dn2: f64,
-        var_qgsfp3_dn4: f64,
-        var_qgsfp3_dn7: f64,
-        var_qsfp1: f64,
-        var_qsfp1_dn14: f64,
-        var_qsfp1_dn2: f64,
-        var_qsfp1_dn3: f64,
-        var_qsfp1_dn4: f64,
-        var_qsfp1_dn5: f64,
-        var_qsfp1_dn7: f64,
-        var_qsfp2: f64,
-        var_qsfp2_dn14: f64,
-        var_qsfp2_dn15: f64,
-        var_qsfp2_dn2: f64,
-        var_qsfp2_dn3: f64,
-        var_qsfp2_dn4: f64,
-        var_qsfp2_dn7: f64,
-    ) {
-        let nv2 = ctx.node_voltage(nodes[2]);
-        let nv3 = ctx.node_voltage(nodes[3]);
-        let nv5 = ctx.node_voltage(nodes[5]);
-        let nv7 = ctx.node_voltage(nodes[7]);
-        let nv9 = ctx.node_voltage(nodes[9]);
-        let nv14 = ctx.node_voltage(nodes[14]);
-        let nv15 = ctx.node_voltage(nodes[15]);
-        let nv16 = ctx.node_voltage(nodes[16]);
         let (eq51_e921, eq51_e921_d_n2, eq51_e921_d_n4, eq51_e921_d_n7, eq51_e921_d_n15, eq51_e921_d_n16,) = {
     if (var_guard95 == 0.0) {
         let eq51_e914: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 28, var_qgsfp3);
@@ -1174,6 +1269,146 @@ impl Instance {
             [],
             1.0,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_2(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_previous_value_scale: f64,
+        ddt_older_value_scale: f64,
+        ddt_previous_derivative_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        var_gmin: f64,
+        var_guard167: f64,
+        var_guard168: f64,
+        var_guard203: f64,
+        var_guard204: f64,
+        var_guard239: f64,
+        var_idsfps1: f64,
+        var_idsfps1_dn10: f64,
+        var_idsfps1_dn2: f64,
+        var_idsfps1_dn3: f64,
+        var_idsfps1_dn4: f64,
+        var_idsfps1_dn7: f64,
+        var_idsfps1_dn9: f64,
+        var_idsfps2: f64,
+        var_idsfps2_dn10: f64,
+        var_idsfps2_dn11: f64,
+        var_idsfps2_dn2: f64,
+        var_idsfps2_dn3: f64,
+        var_idsfps2_dn4: f64,
+        var_idsfps2_dn7: f64,
+        var_qbfp1: f64,
+        var_qbfp1_dn14: f64,
+        var_qbfp1_dn2: f64,
+        var_qbfp1_dn3: f64,
+        var_qbfp1_dn4: f64,
+        var_qbfp1_dn5: f64,
+        var_qbfp1_dn7: f64,
+        var_qbfps1: f64,
+        var_qbfps1_dn10: f64,
+        var_qbfps1_dn2: f64,
+        var_qbfps1_dn3: f64,
+        var_qbfps1_dn4: f64,
+        var_qbfps1_dn7: f64,
+        var_qbfps1_dn9: f64,
+        var_qbfps2: f64,
+        var_qbfps2_dn10: f64,
+        var_qbfps2_dn11: f64,
+        var_qbfps2_dn2: f64,
+        var_qbfps2_dn3: f64,
+        var_qbfps2_dn4: f64,
+        var_qbfps2_dn7: f64,
+        var_qcfp1: f64,
+        var_qcfp1_dn14: f64,
+        var_qcfp1_dn2: f64,
+        var_qcfp1_dn3: f64,
+        var_qcfp1_dn4: f64,
+        var_qcfp1_dn5: f64,
+        var_qcfp1_dn7: f64,
+        var_qcfps1: f64,
+        var_qcfps1_dn10: f64,
+        var_qcfps1_dn2: f64,
+        var_qcfps1_dn3: f64,
+        var_qcfps1_dn4: f64,
+        var_qcfps1_dn7: f64,
+        var_qcfps1_dn9: f64,
+        var_qcfps2: f64,
+        var_qcfps2_dn10: f64,
+        var_qcfps2_dn11: f64,
+        var_qcfps2_dn2: f64,
+        var_qcfps2_dn3: f64,
+        var_qcfps2_dn4: f64,
+        var_qcfps2_dn7: f64,
+        var_qgdfp1: f64,
+        var_qgdfp1_dn14: f64,
+        var_qgdfp1_dn2: f64,
+        var_qgdfp1_dn4: f64,
+        var_qgdfp1_dn5: f64,
+        var_qgdfp1_dn7: f64,
+        var_qgdfps1: f64,
+        var_qgdfps1_dn10: f64,
+        var_qgdfps1_dn2: f64,
+        var_qgdfps1_dn4: f64,
+        var_qgdfps1_dn7: f64,
+        var_qgdfps1_dn9: f64,
+        var_qgdfps2: f64,
+        var_qgdfps2_dn10: f64,
+        var_qgdfps2_dn11: f64,
+        var_qgdfps2_dn2: f64,
+        var_qgdfps2_dn4: f64,
+        var_qgdfps2_dn7: f64,
+        var_qgsfp1: f64,
+        var_qgsfp1_dn14: f64,
+        var_qgsfp1_dn2: f64,
+        var_qgsfp1_dn4: f64,
+        var_qgsfp1_dn5: f64,
+        var_qgsfp1_dn7: f64,
+        var_qgsfps1: f64,
+        var_qgsfps1_dn10: f64,
+        var_qgsfps1_dn2: f64,
+        var_qgsfps1_dn4: f64,
+        var_qgsfps1_dn7: f64,
+        var_qgsfps1_dn9: f64,
+        var_qgsfps2: f64,
+        var_qgsfps2_dn10: f64,
+        var_qgsfps2_dn11: f64,
+        var_qgsfps2_dn2: f64,
+        var_qgsfps2_dn4: f64,
+        var_qgsfps2_dn7: f64,
+        var_qsfps1: f64,
+        var_qsfps1_dn10: f64,
+        var_qsfps1_dn2: f64,
+        var_qsfps1_dn3: f64,
+        var_qsfps1_dn4: f64,
+        var_qsfps1_dn7: f64,
+        var_qsfps1_dn9: f64,
+        var_qsfps2: f64,
+        var_qsfps2_dn10: f64,
+        var_qsfps2_dn11: f64,
+        var_qsfps2_dn2: f64,
+        var_qsfps2_dn3: f64,
+        var_qsfps2_dn4: f64,
+        var_qsfps2_dn7: f64,
+    ) {
+        let nv2 = ctx.node_voltage(nodes[2]);
+        let nv3 = ctx.node_voltage(nodes[3]);
+        let nv5 = ctx.node_voltage(nodes[5]);
+        let nv7 = ctx.node_voltage(nodes[7]);
+        let nv9 = ctx.node_voltage(nodes[9]);
+        let nv10 = ctx.node_voltage(nodes[10]);
+        let nv11 = ctx.node_voltage(nodes[11]);
+        let nv14 = ctx.node_voltage(nodes[14]);
         let (eq77_e1135, eq77_e1135_d_n2, eq77_e1135_d_n4, eq77_e1135_d_n5, eq77_e1135_d_n7, eq77_e1135_d_n14,) = {
     if (var_guard167 == 0.0) {
         let eq77_e1128: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 60, var_qgsfp1);
@@ -1263,146 +1498,6 @@ impl Instance {
             [],
             1.0,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_2(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_previous_value_scale: f64,
-        ddt_older_value_scale: f64,
-        ddt_previous_derivative_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        var_gmin: f64,
-        var_guard168: f64,
-        var_guard203: f64,
-        var_guard204: f64,
-        var_guard239: f64,
-        var_guard240: f64,
-        var_guard275: f64,
-        var_idsfps1: f64,
-        var_idsfps1_dn10: f64,
-        var_idsfps1_dn2: f64,
-        var_idsfps1_dn3: f64,
-        var_idsfps1_dn4: f64,
-        var_idsfps1_dn7: f64,
-        var_idsfps1_dn9: f64,
-        var_idsfps2: f64,
-        var_idsfps2_dn10: f64,
-        var_idsfps2_dn11: f64,
-        var_idsfps2_dn2: f64,
-        var_idsfps2_dn3: f64,
-        var_idsfps2_dn4: f64,
-        var_idsfps2_dn7: f64,
-        var_idsfps3: f64,
-        var_idsfps3_dn11: f64,
-        var_idsfps3_dn12: f64,
-        var_idsfps3_dn2: f64,
-        var_idsfps3_dn3: f64,
-        var_idsfps3_dn4: f64,
-        var_idsfps3_dn7: f64,
-        var_qbfps1: f64,
-        var_qbfps1_dn10: f64,
-        var_qbfps1_dn2: f64,
-        var_qbfps1_dn3: f64,
-        var_qbfps1_dn4: f64,
-        var_qbfps1_dn7: f64,
-        var_qbfps1_dn9: f64,
-        var_qbfps2: f64,
-        var_qbfps2_dn10: f64,
-        var_qbfps2_dn11: f64,
-        var_qbfps2_dn2: f64,
-        var_qbfps2_dn3: f64,
-        var_qbfps2_dn4: f64,
-        var_qbfps2_dn7: f64,
-        var_qcfps1: f64,
-        var_qcfps1_dn10: f64,
-        var_qcfps1_dn2: f64,
-        var_qcfps1_dn3: f64,
-        var_qcfps1_dn4: f64,
-        var_qcfps1_dn7: f64,
-        var_qcfps1_dn9: f64,
-        var_qcfps2: f64,
-        var_qcfps2_dn10: f64,
-        var_qcfps2_dn11: f64,
-        var_qcfps2_dn2: f64,
-        var_qcfps2_dn3: f64,
-        var_qcfps2_dn4: f64,
-        var_qcfps2_dn7: f64,
-        var_qcfps3: f64,
-        var_qcfps3_dn11: f64,
-        var_qcfps3_dn12: f64,
-        var_qcfps3_dn2: f64,
-        var_qcfps3_dn3: f64,
-        var_qcfps3_dn4: f64,
-        var_qcfps3_dn7: f64,
-        var_qgdfps1: f64,
-        var_qgdfps1_dn10: f64,
-        var_qgdfps1_dn2: f64,
-        var_qgdfps1_dn4: f64,
-        var_qgdfps1_dn7: f64,
-        var_qgdfps1_dn9: f64,
-        var_qgdfps2: f64,
-        var_qgdfps2_dn10: f64,
-        var_qgdfps2_dn11: f64,
-        var_qgdfps2_dn2: f64,
-        var_qgdfps2_dn4: f64,
-        var_qgdfps2_dn7: f64,
-        var_qgdfps3: f64,
-        var_qgdfps3_dn11: f64,
-        var_qgdfps3_dn12: f64,
-        var_qgdfps3_dn2: f64,
-        var_qgdfps3_dn4: f64,
-        var_qgdfps3_dn7: f64,
-        var_qgsfps1: f64,
-        var_qgsfps1_dn10: f64,
-        var_qgsfps1_dn2: f64,
-        var_qgsfps1_dn4: f64,
-        var_qgsfps1_dn7: f64,
-        var_qgsfps1_dn9: f64,
-        var_qgsfps2: f64,
-        var_qgsfps2_dn10: f64,
-        var_qgsfps2_dn11: f64,
-        var_qgsfps2_dn2: f64,
-        var_qgsfps2_dn4: f64,
-        var_qgsfps2_dn7: f64,
-        var_qgsfps3: f64,
-        var_qgsfps3_dn11: f64,
-        var_qgsfps3_dn12: f64,
-        var_qgsfps3_dn2: f64,
-        var_qgsfps3_dn4: f64,
-        var_qgsfps3_dn7: f64,
-        var_qsfps1: f64,
-        var_qsfps1_dn10: f64,
-        var_qsfps1_dn2: f64,
-        var_qsfps1_dn3: f64,
-        var_qsfps1_dn4: f64,
-        var_qsfps1_dn7: f64,
-        var_qsfps1_dn9: f64,
-        var_qsfps2: f64,
-        var_qsfps2_dn10: f64,
-        var_qsfps2_dn11: f64,
-        var_qsfps2_dn2: f64,
-        var_qsfps2_dn3: f64,
-        var_qsfps2_dn4: f64,
-        var_qsfps2_dn7: f64,
-    ) {
-        let nv2 = ctx.node_voltage(nodes[2]);
-        let nv3 = ctx.node_voltage(nodes[3]);
-        let nv7 = ctx.node_voltage(nodes[7]);
-        let nv9 = ctx.node_voltage(nodes[9]);
-        let nv10 = ctx.node_voltage(nodes[10]);
-        let nv11 = ctx.node_voltage(nodes[11]);
-        let nv12 = ctx.node_voltage(nodes[12]);
         let (eq83_e1182, eq83_e1182_d_n2, eq83_e1182_d_n3, eq83_e1182_d_n4, eq83_e1182_d_n7, eq83_e1182_d_n9, eq83_e1182_d_n10,) = {
     if (var_guard168 != 0.0) {
         let eq83_e1179: f64 = (var_gmin * (nv9 - nv10));
@@ -1816,6 +1911,149 @@ impl Instance {
             [],
             1.0,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_3(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_previous_value_scale: f64,
+        ddt_older_value_scale: f64,
+        ddt_previous_derivative_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        var_gmin: f64,
+        var_guard240: f64,
+        var_guard275: f64,
+        var_guard276: f64,
+        var_guard311: f64,
+        var_guard312: f64,
+        var_guard347: f64,
+        var_guard416: f64,
+        var_ids: f64,
+        var_ids_dn22: f64,
+        var_ids_dn23: f64,
+        var_ids_dn25: f64,
+        var_ids_dn26: f64,
+        var_ids_dn4: f64,
+        var_ids_dn5: f64,
+        var_ids_dn8: f64,
+        var_ids_dn9: f64,
+        var_idsfps3: f64,
+        var_idsfps3_dn11: f64,
+        var_idsfps3_dn12: f64,
+        var_idsfps3_dn2: f64,
+        var_idsfps3_dn3: f64,
+        var_idsfps3_dn4: f64,
+        var_idsfps3_dn7: f64,
+        var_idsfps4: f64,
+        var_idsfps4_dn12: f64,
+        var_idsfps4_dn13: f64,
+        var_idsfps4_dn2: f64,
+        var_idsfps4_dn3: f64,
+        var_idsfps4_dn4: f64,
+        var_idsfps4_dn7: f64,
+        var_idsrd: f64,
+        var_idsrd_dn0: f64,
+        var_idsrd_dn17: f64,
+        var_idsrd_dn18: f64,
+        var_idsrd_dn2: f64,
+        var_idsrd_dn20: f64,
+        var_idsrd_dn4: f64,
+        var_idsrs: f64,
+        var_idsrs_dn0: f64,
+        var_idsrs_dn13: f64,
+        var_idsrs_dn19: f64,
+        var_idsrs_dn2: f64,
+        var_idsrs_dn4: f64,
+        var_qbfps3: f64,
+        var_qbfps3_dn11: f64,
+        var_qbfps3_dn12: f64,
+        var_qbfps3_dn2: f64,
+        var_qbfps3_dn3: f64,
+        var_qbfps3_dn4: f64,
+        var_qbfps3_dn7: f64,
+        var_qbfps4: f64,
+        var_qbfps4_dn12: f64,
+        var_qbfps4_dn13: f64,
+        var_qbfps4_dn2: f64,
+        var_qbfps4_dn3: f64,
+        var_qbfps4_dn4: f64,
+        var_qbfps4_dn7: f64,
+        var_qcfps3: f64,
+        var_qcfps3_dn11: f64,
+        var_qcfps3_dn12: f64,
+        var_qcfps3_dn2: f64,
+        var_qcfps3_dn3: f64,
+        var_qcfps3_dn4: f64,
+        var_qcfps3_dn7: f64,
+        var_qcfps4: f64,
+        var_qcfps4_dn12: f64,
+        var_qcfps4_dn13: f64,
+        var_qcfps4_dn2: f64,
+        var_qcfps4_dn3: f64,
+        var_qcfps4_dn4: f64,
+        var_qcfps4_dn7: f64,
+        var_qgdfps3: f64,
+        var_qgdfps3_dn11: f64,
+        var_qgdfps3_dn12: f64,
+        var_qgdfps3_dn2: f64,
+        var_qgdfps3_dn4: f64,
+        var_qgdfps3_dn7: f64,
+        var_qgdfps4: f64,
+        var_qgdfps4_dn12: f64,
+        var_qgdfps4_dn13: f64,
+        var_qgdfps4_dn2: f64,
+        var_qgdfps4_dn4: f64,
+        var_qgdfps4_dn7: f64,
+        var_qgsfps3: f64,
+        var_qgsfps3_dn11: f64,
+        var_qgsfps3_dn12: f64,
+        var_qgsfps3_dn2: f64,
+        var_qgsfps3_dn4: f64,
+        var_qgsfps3_dn7: f64,
+        var_qgsfps4: f64,
+        var_qgsfps4_dn12: f64,
+        var_qgsfps4_dn13: f64,
+        var_qgsfps4_dn2: f64,
+        var_qgsfps4_dn4: f64,
+        var_qgsfps4_dn7: f64,
+        var_qsfps3: f64,
+        var_qsfps3_dn11: f64,
+        var_qsfps3_dn12: f64,
+        var_qsfps3_dn2: f64,
+        var_qsfps3_dn3: f64,
+        var_qsfps3_dn4: f64,
+        var_qsfps3_dn7: f64,
+        var_qsfps4: f64,
+        var_qsfps4_dn12: f64,
+        var_qsfps4_dn13: f64,
+        var_qsfps4_dn2: f64,
+        var_qsfps4_dn3: f64,
+        var_qsfps4_dn4: f64,
+        var_qsfps4_dn7: f64,
+    ) {
+        let nv2 = ctx.node_voltage(nodes[2]);
+        let nv3 = ctx.node_voltage(nodes[3]);
+        let nv5 = ctx.node_voltage(nodes[5]);
+        let nv7 = ctx.node_voltage(nodes[7]);
+        let nv9 = ctx.node_voltage(nodes[9]);
+        let nv11 = ctx.node_voltage(nodes[11]);
+        let nv12 = ctx.node_voltage(nodes[12]);
+        let nv13 = ctx.node_voltage(nodes[13]);
+        let nv17 = ctx.node_voltage(nodes[17]);
+        let nv18 = ctx.node_voltage(nodes[18]);
+        let nv19 = ctx.node_voltage(nodes[19]);
+        let nv28 = ctx.node_voltage(nodes[28]);
+        let nv29 = ctx.node_voltage(nodes[29]);
         let (eq109_e1396, eq109_e1396_d_n2, eq109_e1396_d_n3, eq109_e1396_d_n4, eq109_e1396_d_n7, eq109_e1396_d_n11, eq109_e1396_d_n12,) = {
     if (var_guard240 != 0.0) {
         let eq109_e1393: f64 = (var_gmin * (nv11 - nv12));
@@ -1910,169 +2148,6 @@ impl Instance {
             [],
             1.0,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_3(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_previous_value_scale: f64,
-        ddt_older_value_scale: f64,
-        ddt_previous_derivative_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        var_gmin: f64,
-        var_guard275: f64,
-        var_guard276: f64,
-        var_guard311: f64,
-        var_guard312: f64,
-        var_guard347: f64,
-        var_guard416: f64,
-        var_guard417: f64,
-        var_ids: f64,
-        var_ids_dn22: f64,
-        var_ids_dn23: f64,
-        var_ids_dn25: f64,
-        var_ids_dn26: f64,
-        var_ids_dn4: f64,
-        var_ids_dn5: f64,
-        var_ids_dn8: f64,
-        var_ids_dn9: f64,
-        var_idsfps4: f64,
-        var_idsfps4_dn12: f64,
-        var_idsfps4_dn13: f64,
-        var_idsfps4_dn2: f64,
-        var_idsfps4_dn3: f64,
-        var_idsfps4_dn4: f64,
-        var_idsfps4_dn7: f64,
-        var_idsrd: f64,
-        var_idsrd_dn0: f64,
-        var_idsrd_dn17: f64,
-        var_idsrd_dn18: f64,
-        var_idsrd_dn2: f64,
-        var_idsrd_dn20: f64,
-        var_idsrd_dn4: f64,
-        var_idsrs: f64,
-        var_idsrs_dn0: f64,
-        var_idsrs_dn13: f64,
-        var_idsrs_dn19: f64,
-        var_idsrs_dn2: f64,
-        var_idsrs_dn4: f64,
-        var_igdi: f64,
-        var_igdi_dn17: f64,
-        var_igdi_dn4: f64,
-        var_igdi_dn8: f64,
-        var_igsi: f64,
-        var_igsi_dn13: f64,
-        var_igsi_dn4: f64,
-        var_igsi_dn8: f64,
-        var_qbfps3: f64,
-        var_qbfps3_dn11: f64,
-        var_qbfps3_dn12: f64,
-        var_qbfps3_dn2: f64,
-        var_qbfps3_dn3: f64,
-        var_qbfps3_dn4: f64,
-        var_qbfps3_dn7: f64,
-        var_qbfps4: f64,
-        var_qbfps4_dn12: f64,
-        var_qbfps4_dn13: f64,
-        var_qbfps4_dn2: f64,
-        var_qbfps4_dn3: f64,
-        var_qbfps4_dn4: f64,
-        var_qbfps4_dn7: f64,
-        var_qcfps3: f64,
-        var_qcfps3_dn11: f64,
-        var_qcfps3_dn12: f64,
-        var_qcfps3_dn2: f64,
-        var_qcfps3_dn3: f64,
-        var_qcfps3_dn4: f64,
-        var_qcfps3_dn7: f64,
-        var_qcfps4: f64,
-        var_qcfps4_dn12: f64,
-        var_qcfps4_dn13: f64,
-        var_qcfps4_dn2: f64,
-        var_qcfps4_dn3: f64,
-        var_qcfps4_dn4: f64,
-        var_qcfps4_dn7: f64,
-        var_qgd: f64,
-        var_qgd_dn22: f64,
-        var_qgd_dn23: f64,
-        var_qgd_dn25: f64,
-        var_qgd_dn26: f64,
-        var_qgd_dn4: f64,
-        var_qgd_dn5: f64,
-        var_qgd_dn8: f64,
-        var_qgd_dn9: f64,
-        var_qgdfps3: f64,
-        var_qgdfps3_dn11: f64,
-        var_qgdfps3_dn12: f64,
-        var_qgdfps3_dn2: f64,
-        var_qgdfps3_dn4: f64,
-        var_qgdfps3_dn7: f64,
-        var_qgdfps4: f64,
-        var_qgdfps4_dn12: f64,
-        var_qgdfps4_dn13: f64,
-        var_qgdfps4_dn2: f64,
-        var_qgdfps4_dn4: f64,
-        var_qgdfps4_dn7: f64,
-        var_qgs: f64,
-        var_qgs_dn22: f64,
-        var_qgs_dn23: f64,
-        var_qgs_dn25: f64,
-        var_qgs_dn26: f64,
-        var_qgs_dn4: f64,
-        var_qgs_dn5: f64,
-        var_qgs_dn8: f64,
-        var_qgs_dn9: f64,
-        var_qgsfps3: f64,
-        var_qgsfps3_dn11: f64,
-        var_qgsfps3_dn12: f64,
-        var_qgsfps3_dn2: f64,
-        var_qgsfps3_dn4: f64,
-        var_qgsfps3_dn7: f64,
-        var_qgsfps4: f64,
-        var_qgsfps4_dn12: f64,
-        var_qgsfps4_dn13: f64,
-        var_qgsfps4_dn2: f64,
-        var_qgsfps4_dn4: f64,
-        var_qgsfps4_dn7: f64,
-        var_qsfps3: f64,
-        var_qsfps3_dn11: f64,
-        var_qsfps3_dn12: f64,
-        var_qsfps3_dn2: f64,
-        var_qsfps3_dn3: f64,
-        var_qsfps3_dn4: f64,
-        var_qsfps3_dn7: f64,
-        var_qsfps4: f64,
-        var_qsfps4_dn12: f64,
-        var_qsfps4_dn13: f64,
-        var_qsfps4_dn2: f64,
-        var_qsfps4_dn3: f64,
-        var_qsfps4_dn4: f64,
-        var_qsfps4_dn7: f64,
-    ) {
-        let nv2 = ctx.node_voltage(nodes[2]);
-        let nv3 = ctx.node_voltage(nodes[3]);
-        let nv5 = ctx.node_voltage(nodes[5]);
-        let nv7 = ctx.node_voltage(nodes[7]);
-        let nv8 = ctx.node_voltage(nodes[8]);
-        let nv9 = ctx.node_voltage(nodes[9]);
-        let nv11 = ctx.node_voltage(nodes[11]);
-        let nv12 = ctx.node_voltage(nodes[12]);
-        let nv13 = ctx.node_voltage(nodes[13]);
-        let nv17 = ctx.node_voltage(nodes[17]);
-        let nv18 = ctx.node_voltage(nodes[18]);
-        let nv19 = ctx.node_voltage(nodes[19]);
-        let nv28 = ctx.node_voltage(nodes[28]);
-        let nv29 = ctx.node_voltage(nodes[29]);
         let (eq115_e1445, eq115_e1445_d_n2, eq115_e1445_d_n3, eq115_e1445_d_n4, eq115_e1445_d_n7, eq115_e1445_d_n9, eq115_e1445_d_n11, eq115_e1445_d_n12,) = {
     if (var_guard275 != 0.0) {
         let eq115_e1438: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 106, var_qsfps3);
@@ -2480,6 +2555,153 @@ impl Instance {
             [],
             1.0,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_4(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_previous_value_scale: f64,
+        ddt_older_value_scale: f64,
+        ddt_previous_derivative_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        var_gmin: f64,
+        var_guard416: f64,
+        var_guard417: f64,
+        var_guard428: f64,
+        var_guard439: f64,
+        var_guard450: f64,
+        var_guard461: f64,
+        var_guard467: f64,
+        var_guard480: f64,
+        var_guard492: f64,
+        var_guard493: f64,
+        var_guard494: f64,
+        var_idsch: f64,
+        var_idsch2: f64,
+        var_idsch2_dn4: f64,
+        var_idsch2_dn7: f64,
+        var_idsch2_dn8: f64,
+        var_idsch_dn4: f64,
+        var_idsch_dn7: f64,
+        var_idsch_dn8: f64,
+        var_igdcbd: f64,
+        var_igdcbd_dn0: f64,
+        var_igdcbd_dn18: f64,
+        var_igdcbd_dn19: f64,
+        var_igdcbd_dn2: f64,
+        var_igdcbd_dn4: f64,
+        var_igdcbd_dn8: f64,
+        var_igdi: f64,
+        var_igdi2: f64,
+        var_igdi2_dn17: f64,
+        var_igdi2_dn4: f64,
+        var_igdi2_dn8: f64,
+        var_igdi2db: f64,
+        var_igdi2db_dn4: f64,
+        var_igdi2db_dn5: f64,
+        var_igdi2db_dn8: f64,
+        var_igdi_dn17: f64,
+        var_igdi_dn4: f64,
+        var_igdi_dn8: f64,
+        var_igdidb: f64,
+        var_igdidb_dn4: f64,
+        var_igdidb_dn5: f64,
+        var_igdidb_dn8: f64,
+        var_igscbd: f64,
+        var_igscbd_dn0: f64,
+        var_igscbd_dn18: f64,
+        var_igscbd_dn19: f64,
+        var_igscbd_dn2: f64,
+        var_igscbd_dn4: f64,
+        var_igscbd_dn8: f64,
+        var_igsi: f64,
+        var_igsi2: f64,
+        var_igsi2_dn13: f64,
+        var_igsi2_dn4: f64,
+        var_igsi2_dn8: f64,
+        var_igsi2db: f64,
+        var_igsi2db_dn4: f64,
+        var_igsi2db_dn8: f64,
+        var_igsi2db_dn9: f64,
+        var_igsi_dn13: f64,
+        var_igsi_dn4: f64,
+        var_igsi_dn8: f64,
+        var_igsidb: f64,
+        var_igsidb_dn4: f64,
+        var_igsidb_dn8: f64,
+        var_igsidb_dn9: f64,
+        var_qgd: f64,
+        var_qgd_dn22: f64,
+        var_qgd_dn23: f64,
+        var_qgd_dn25: f64,
+        var_qgd_dn26: f64,
+        var_qgd_dn4: f64,
+        var_qgd_dn5: f64,
+        var_qgd_dn8: f64,
+        var_qgd_dn9: f64,
+        var_qgs: f64,
+        var_qgs_dn22: f64,
+        var_qgs_dn23: f64,
+        var_qgs_dn25: f64,
+        var_qgs_dn26: f64,
+        var_qgs_dn4: f64,
+        var_qgs_dn5: f64,
+        var_qgs_dn8: f64,
+        var_qgs_dn9: f64,
+        var_qofd: f64,
+        var_qofd_dn0: f64,
+        var_qofd_dn4: f64,
+        var_qofd_dn6: f64,
+        var_qofds: f64,
+        var_qofds_dn0: f64,
+        var_qofds_dn2: f64,
+        var_qofds_dn4: f64,
+        var_qofdsub: f64,
+        var_qofdsub_dn0: f64,
+        var_qofdsub_dn3: f64,
+        var_qofdsub_dn4: f64,
+        var_qofgsub: f64,
+        var_qofgsub_dn3: f64,
+        var_qofgsub_dn4: f64,
+        var_qofgsub_dn6: f64,
+        var_qofs: f64,
+        var_qofs_dn2: f64,
+        var_qofs_dn4: f64,
+        var_qofs_dn6: f64,
+        var_qofssub: f64,
+        var_qofssub_dn2: f64,
+        var_qofssub_dn3: f64,
+        var_qofssub_dn4: f64,
+        var_qsch: f64,
+        var_qsch_dn7: f64,
+        var_qsch_dn8: f64,
+        var_rdi: f64,
+        var_rdi_dn4: f64,
+        var_rsi: f64,
+        var_rsi_dn4: f64,
+    ) {
+        let nv0 = ctx.node_voltage(nodes[0]);
+        let nv2 = ctx.node_voltage(nodes[2]);
+        let nv5 = ctx.node_voltage(nodes[5]);
+        let nv7 = ctx.node_voltage(nodes[7]);
+        let nv8 = ctx.node_voltage(nodes[8]);
+        let nv9 = ctx.node_voltage(nodes[9]);
+        let nv13 = ctx.node_voltage(nodes[13]);
+        let nv17 = ctx.node_voltage(nodes[17]);
+        let nv18 = ctx.node_voltage(nodes[18]);
+        let nv19 = ctx.node_voltage(nodes[19]);
+        let nv28 = ctx.node_voltage(nodes[28]);
+        let nv29 = ctx.node_voltage(nodes[29]);
         let (eq143_e1670, eq143_e1670_d_n28, eq143_e1670_d_n29,) = {
     if (var_guard416 == 0.0) {
         let eq143_e1661: f64 = ((nv28 - 0.0) - (nv29 - 0.0));
@@ -2583,150 +2805,6 @@ impl Instance {
             17,
             multiplicity * (eq148_e1709_d_n17),
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_4(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_previous_value_scale: f64,
-        ddt_older_value_scale: f64,
-        ddt_previous_derivative_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        var_gmin: f64,
-        var_guard417: f64,
-        var_guard428: f64,
-        var_guard439: f64,
-        var_guard450: f64,
-        var_guard461: f64,
-        var_guard467: f64,
-        var_guard480: f64,
-        var_guard492: f64,
-        var_guard493: f64,
-        var_guard494: f64,
-        var_guard523: f64,
-        var_idsch: f64,
-        var_idsch2: f64,
-        var_idsch2_dn4: f64,
-        var_idsch2_dn7: f64,
-        var_idsch2_dn8: f64,
-        var_idsch_dn4: f64,
-        var_idsch_dn7: f64,
-        var_idsch_dn8: f64,
-        var_igdcbd: f64,
-        var_igdcbd_dn0: f64,
-        var_igdcbd_dn18: f64,
-        var_igdcbd_dn19: f64,
-        var_igdcbd_dn2: f64,
-        var_igdcbd_dn4: f64,
-        var_igdcbd_dn8: f64,
-        var_igdi2: f64,
-        var_igdi2_dn17: f64,
-        var_igdi2_dn4: f64,
-        var_igdi2_dn8: f64,
-        var_igdi2db: f64,
-        var_igdi2db_dn4: f64,
-        var_igdi2db_dn5: f64,
-        var_igdi2db_dn8: f64,
-        var_igdidb: f64,
-        var_igdidb_dn4: f64,
-        var_igdidb_dn5: f64,
-        var_igdidb_dn8: f64,
-        var_igscbd: f64,
-        var_igscbd_dn0: f64,
-        var_igscbd_dn18: f64,
-        var_igscbd_dn19: f64,
-        var_igscbd_dn2: f64,
-        var_igscbd_dn4: f64,
-        var_igscbd_dn8: f64,
-        var_igsi2: f64,
-        var_igsi2_dn13: f64,
-        var_igsi2_dn4: f64,
-        var_igsi2_dn8: f64,
-        var_igsi2db: f64,
-        var_igsi2db_dn4: f64,
-        var_igsi2db_dn8: f64,
-        var_igsi2db_dn9: f64,
-        var_igsidb: f64,
-        var_igsidb_dn4: f64,
-        var_igsidb_dn8: f64,
-        var_igsidb_dn9: f64,
-        var_pdiss: f64,
-        var_pdiss_dn0: f64,
-        var_pdiss_dn10: f64,
-        var_pdiss_dn11: f64,
-        var_pdiss_dn12: f64,
-        var_pdiss_dn13: f64,
-        var_pdiss_dn14: f64,
-        var_pdiss_dn15: f64,
-        var_pdiss_dn16: f64,
-        var_pdiss_dn17: f64,
-        var_pdiss_dn18: f64,
-        var_pdiss_dn19: f64,
-        var_pdiss_dn2: f64,
-        var_pdiss_dn20: f64,
-        var_pdiss_dn22: f64,
-        var_pdiss_dn23: f64,
-        var_pdiss_dn25: f64,
-        var_pdiss_dn26: f64,
-        var_pdiss_dn3: f64,
-        var_pdiss_dn4: f64,
-        var_pdiss_dn5: f64,
-        var_pdiss_dn7: f64,
-        var_pdiss_dn8: f64,
-        var_pdiss_dn9: f64,
-        var_qofd: f64,
-        var_qofd_dn0: f64,
-        var_qofd_dn4: f64,
-        var_qofd_dn6: f64,
-        var_qofds: f64,
-        var_qofds_dn0: f64,
-        var_qofds_dn2: f64,
-        var_qofds_dn4: f64,
-        var_qofdsub: f64,
-        var_qofdsub_dn0: f64,
-        var_qofdsub_dn3: f64,
-        var_qofdsub_dn4: f64,
-        var_qofgsub: f64,
-        var_qofgsub_dn3: f64,
-        var_qofgsub_dn4: f64,
-        var_qofgsub_dn6: f64,
-        var_qofs: f64,
-        var_qofs_dn2: f64,
-        var_qofs_dn4: f64,
-        var_qofs_dn6: f64,
-        var_qofssub: f64,
-        var_qofssub_dn2: f64,
-        var_qofssub_dn3: f64,
-        var_qofssub_dn4: f64,
-        var_qsch: f64,
-        var_qsch_dn7: f64,
-        var_qsch_dn8: f64,
-        var_rdi: f64,
-        var_rdi_dn4: f64,
-        var_rsi: f64,
-        var_rsi_dn4: f64,
-    ) {
-        let nv0 = ctx.node_voltage(nodes[0]);
-        let nv2 = ctx.node_voltage(nodes[2]);
-        let nv4 = ctx.node_voltage(nodes[4]);
-        let nv5 = ctx.node_voltage(nodes[5]);
-        let nv7 = ctx.node_voltage(nodes[7]);
-        let nv8 = ctx.node_voltage(nodes[8]);
-        let nv9 = ctx.node_voltage(nodes[9]);
-        let nv13 = ctx.node_voltage(nodes[13]);
-        let nv17 = ctx.node_voltage(nodes[17]);
-        let nv18 = ctx.node_voltage(nodes[18]);
-        let nv19 = ctx.node_voltage(nodes[19]);
         let (eq149_e1719, eq149_e1719_d_n4, eq149_e1719_d_n8, eq149_e1719_d_n13,) = {
     if ((var_guard417 != 0.0) && (var_guard428 != 0.0)) {
         let eq149_e1716: f64 = (var_gmin * (nv8 - nv13));
@@ -3127,6 +3205,52 @@ impl Instance {
             6,
             multiplicity * ((var_qofgsub_dn6 * ddt_scale)),
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_5(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_previous_value_scale: f64,
+        ddt_older_value_scale: f64,
+        ddt_previous_derivative_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_older: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+        ddt_derivative_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        var_guard523: f64,
+        var_pdiss: f64,
+        var_pdiss_dn0: f64,
+        var_pdiss_dn10: f64,
+        var_pdiss_dn11: f64,
+        var_pdiss_dn12: f64,
+        var_pdiss_dn13: f64,
+        var_pdiss_dn14: f64,
+        var_pdiss_dn15: f64,
+        var_pdiss_dn16: f64,
+        var_pdiss_dn17: f64,
+        var_pdiss_dn18: f64,
+        var_pdiss_dn19: f64,
+        var_pdiss_dn2: f64,
+        var_pdiss_dn20: f64,
+        var_pdiss_dn22: f64,
+        var_pdiss_dn23: f64,
+        var_pdiss_dn25: f64,
+        var_pdiss_dn26: f64,
+        var_pdiss_dn3: f64,
+        var_pdiss_dn4: f64,
+        var_pdiss_dn5: f64,
+        var_pdiss_dn7: f64,
+        var_pdiss_dn8: f64,
+        var_pdiss_dn9: f64,
+    ) {
+        let nv4 = ctx.node_voltage(nodes[4]);
         let (eq194_e2167, eq194_e2167_d_n4,) = {
     if (var_guard523 != 0.0) {
         let eq194_e2164: f64 = (p.p321 * (nv4 - 0.0));
@@ -3169,9 +3293,9 @@ impl Instance {
         );
         let (eq196_e2178, eq196_e2178_d_n4,) = {
     if (var_guard523 != 0.0) {
-        let __rspice_inv_cse_2: f64 = 1.0 / p.p320;
-        let eq196_e2176: f64 = ((nv4 - 0.0) * __rspice_inv_cse_2);
-        let eq196_e2176_d_n4: f64 = (1.0 * __rspice_inv_cse_2);
+        let __rspice_inv_cse_0: f64 = 1.0 / p.p320;
+        let eq196_e2176: f64 = ((nv4 - 0.0) * __rspice_inv_cse_0);
+        let eq196_e2176_d_n4: f64 = (1.0 * __rspice_inv_cse_0);
         (eq196_e2176, eq196_e2176_d_n4,)
     } else {
         (0.0, 0.0,)
