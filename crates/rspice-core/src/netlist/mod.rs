@@ -3494,6 +3494,23 @@ mod tests {
     }
 
     #[test]
+    fn data_rows_accept_leading_decimal_values() {
+        let netlist = Netlist::parse(
+            "leading decimal data\n\
+             .data sweep vin\n\
+             .5\n\
+             .enddata\n\
+             .step data=sweep\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("leading-decimal .DATA value should parse");
+
+        assert_eq!(netlist.data_tables.len(), 1);
+        assert_eq!(netlist.data_tables[0].rows, vec![vec![0.5]]);
+    }
+
+    #[test]
     fn step_data_table_is_retained_and_referenced() {
         let netlist = Netlist::parse(
             "step data table\n\
@@ -5007,7 +5024,7 @@ mod tests {
     #[test]
     fn passive_tails_reject_unconsumed_trailing_tokens() {
         for line in [
-            "R1 out 0 1k garbage",
+            "R1 out 0 1k garbage extra",
             "C1 out 0 1p garbage",
             "L1 out 0 1n garbage",
         ] {
@@ -5021,7 +5038,10 @@ mod tests {
 
             let message = err.to_string();
             assert!(
-                message.contains("garbage") || message.contains("GARBAGE"),
+                message.contains("garbage")
+                    || message.contains("GARBAGE")
+                    || message.contains("extra")
+                    || message.contains("EXTRA"),
                 "unexpected error for {line}: {message}"
             );
         }

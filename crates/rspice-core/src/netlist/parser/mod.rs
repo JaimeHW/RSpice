@@ -256,13 +256,10 @@ pub fn parse_netlist_with_options(
                     line: line_num,
                     message: ".DATA cannot be nested inside another .DATA block".to_string(),
                 });
-            } else if head.starts_with('.') {
+            } else if is_dot_command_head(head) {
                 return Err(ParseError::Syntax {
                     line: table.opened_at_line,
-                    message: format!(
-                        ".DATA {} reached {head} before a matching .ENDDATA",
-                        table.name
-                    ),
+                    message: ".DATA without a matching .ENDDATA".to_string(),
                 });
             } else {
                 table.push_line(line_num, trimmed, &state.params)?;
@@ -397,6 +394,12 @@ fn validate_resistor_model_references_in_elements(
         }
     }
     Ok(())
+}
+
+fn is_dot_command_head(head: &str) -> bool {
+    head.strip_prefix('.')
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(|ch| ch.is_ascii_alphabetic())
 }
 
 fn prescan_temperature_options(lines: &[&str], state: &mut ParseState) -> Result<(), ParseError> {
