@@ -1371,6 +1371,11 @@ pub(super) fn parse_param_statement(
 
         let name = expect_ident(stream, line_num)?;
 
+        if matches!(stream.peek().kind, TokenKind::LParen) {
+            parse_param_function_definition(stream, line_num, params, name)?;
+            continue;
+        }
+
         // Expect = sign
         if !stream.consume(&TokenKind::Equals) {
             return Err(ParseError::Syntax {
@@ -1420,6 +1425,88 @@ pub(super) fn parse_param_statement(
     Ok(())
 }
 
+fn parse_param_function_definition(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &mut ParamContext,
+    func_name: String,
+) -> Result<(), ParseError> {
+    let args = parse_function_argument_list(stream, line_num, &func_name)?;
+
+    if !stream.consume(&TokenKind::Equals) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected '=' after .PARAM function signature '{}(...)'",
+                func_name
+            ),
+        });
+    }
+
+    let body = match &stream.peek().kind {
+        TokenKind::Expression(expr) => {
+            let body = expr.clone();
+            stream.advance();
+            body
+        }
+        _ => collect_param_rhs_expression(stream, line_num, &func_name)?,
+    };
+
+    if body.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                ".PARAM function '{}' requires an expression body",
+                func_name
+            ),
+        });
+    }
+
+    params.define_function(&func_name, args, &body);
+    log::debug!("Defined .PARAM function: {}(...) = {}", func_name, body);
+
+    Ok(())
+}
+
+fn parse_function_argument_list(
+    stream: &mut TokenStream,
+    line_num: usize,
+    func_name: &str,
+) -> Result<Vec<String>, ParseError> {
+    if !stream.consume(&TokenKind::LParen) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Function '{}' requires argument list in parentheses",
+                func_name
+            ),
+        });
+    }
+
+    let mut args = Vec::new();
+    if stream.consume(&TokenKind::RParen) {
+        return Ok(args);
+    }
+
+    loop {
+        args.push(expect_ident(stream, line_num)?);
+
+        if stream.consume(&TokenKind::Comma) {
+            continue;
+        }
+        break;
+    }
+
+    if !stream.consume(&TokenKind::RParen) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Expected ')' after function arguments".to_string(),
+        });
+    }
+
+    Ok(args)
+}
+
 fn param_rhs_continues(stream: &TokenStream) -> bool {
     let mut depth = 0usize;
     let mut offset = 0usize;
@@ -1430,10 +1517,13 @@ fn param_rhs_continues(stream: &TokenStream) -> bool {
             TokenKind::Newline | TokenKind::Eof => return false,
             TokenKind::Comma if depth == 0 => return false,
             TokenKind::Ident(_) if saw_token && depth == 0 => {
-                return !matches!(stream.peek_n(offset + 1).kind, TokenKind::Equals);
+                return !looks_like_param_entry_at(stream, offset);
             }
             TokenKind::LParen | TokenKind::LBracket => {
                 if !saw_token {
+                    return true;
+                }
+                if depth == 0 {
                     return true;
                 }
                 depth += 1;
@@ -1468,7 +1558,7 @@ fn collect_param_rhs_expression(
             TokenKind::Newline | TokenKind::Eof => break,
             TokenKind::Comma if depth == 0 => break,
             TokenKind::Ident(_) if !fragments.is_empty() && depth == 0 => {
-                if matches!(stream.peek_n(1).kind, TokenKind::Equals) {
+                if looks_like_param_entry_at(stream, 0) {
                     break;
                 }
             }
@@ -1496,6 +1586,37 @@ fn collect_param_rhs_expression(
     Ok(fragments.join(" "))
 }
 
+fn looks_like_param_entry_at(stream: &TokenStream, offset: usize) -> bool {
+    matches!(stream.peek_n(offset).kind, TokenKind::Ident(_))
+        && (matches!(stream.peek_n(offset + 1).kind, TokenKind::Equals)
+            || looks_like_param_function_entry_at(stream, offset))
+}
+
+fn looks_like_param_function_entry_at(stream: &TokenStream, offset: usize) -> bool {
+    if !matches!(stream.peek_n(offset).kind, TokenKind::Ident(_))
+        || !matches!(stream.peek_n(offset + 1).kind, TokenKind::LParen)
+    {
+        return false;
+    }
+
+    let mut depth = 0usize;
+    let mut cursor = offset + 1;
+    loop {
+        match &stream.peek_n(cursor).kind {
+            TokenKind::LParen => depth += 1,
+            TokenKind::RParen => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return matches!(stream.peek_n(cursor + 1).kind, TokenKind::Equals);
+                }
+            }
+            TokenKind::Newline | TokenKind::Eof => return false,
+            _ => {}
+        }
+        cursor += 1;
+    }
+}
+
 fn param_rhs_token_fragment(kind: &TokenKind, lexeme: &str) -> String {
     match kind {
         TokenKind::Expression(expr) => format!("({expr})"),
@@ -1513,34 +1634,7 @@ pub(super) fn parse_func_statement(
     // Get function name
     let func_name = expect_ident(stream, line_num)?;
 
-    // Expect opening paren for arguments
-    if !stream.consume(&TokenKind::LParen) {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: format!(".FUNC {} requires argument list in parentheses", func_name),
-        });
-    }
-
-    // Parse argument names
-    let mut args = Vec::new();
-    if !stream.consume(&TokenKind::RParen) {
-        loop {
-            let arg_name = expect_ident(stream, line_num)?;
-            args.push(arg_name);
-
-            // Skip comma
-            if !stream.consume(&TokenKind::Comma) {
-                break;
-            }
-        }
-
-        if !stream.consume(&TokenKind::RParen) {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: "Expected ')' after function arguments".to_string(),
-            });
-        }
-    }
+    let args = parse_function_argument_list(stream, line_num, &func_name)?;
 
     // Check for = sign or Expression (which is {expression})
     let body: String;

@@ -475,6 +475,54 @@ fn test_xyce_deep_function_parameter_case_runs() {
 }
 
 #[test]
+fn test_xyce_param_function_syntax_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/PARSER/paramFunc1.cir",
+        "Netlists/PARSER/paramFunc2.cir",
+        "Netlists/PARSER/paramFunc3.cir",
+        "Netlists/PARSER/paramFunc4.cir",
+        "Netlists/PARSER/paramFunc5.cir",
+        "Netlists/PARSER/paramFunc6.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce .PARAM function-syntax comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_naked_random_parameter_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/PARSER/nakedRandom.cir",
+        "Netlists/PARSER/nakedRandomGlobal.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce nominal random-parameter comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_subckt_wrapper_family_members_run_natively() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

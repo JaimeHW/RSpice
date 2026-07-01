@@ -315,6 +315,9 @@ fn eval_function(name: &str, args: &[Expr], ctx: &ParamContext) -> Result<Value,
             2 => {
                 let nom = get_arg(0)?;
                 let avar = get_arg(1)?;
+                if ctx.statistical_mode() == StatisticalParamMode::Nominal {
+                    return Ok(nom);
+                }
                 let sign = if ctx.random().next_symmetric() >= 0.0 {
                     1.0
                 } else {
@@ -348,6 +351,9 @@ fn eval_function(name: &str, args: &[Expr], ctx: &ParamContext) -> Result<Value,
             }
             // gauss: variation is relative to nom; agauss: absolute.
             let deviation = if name == "GAUSS" { nom * var } else { var };
+            if ctx.statistical_mode() == StatisticalParamMode::Nominal {
+                return Ok(nom);
+            }
             Ok(nom + deviation / sigma * ctx.random().next_standard_normal())
         }
         "UNIF" | "AUNIF" => {
@@ -358,6 +364,9 @@ fn eval_function(name: &str, args: &[Expr], ctx: &ParamContext) -> Result<Value,
             let var = get_arg(1)?;
             // unif: variation is relative to nom; aunif: absolute.
             let deviation = if name == "UNIF" { nom * var } else { var };
+            if ctx.statistical_mode() == StatisticalParamMode::Nominal {
+                return Ok(nom);
+            }
             Ok(nom + deviation * ctx.random().next_symmetric())
         }
         "IF" => {

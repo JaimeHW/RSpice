@@ -27,7 +27,7 @@ mod topology;
 mod xspice_parser;
 
 pub use ast::*;
-pub use expr::{ParamContext, RandomState};
+pub use expr::{ParamContext, RandomState, StatisticalParamMode};
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, flatten_netlist,
     flatten_netlist_with_models,
@@ -168,8 +168,16 @@ pub struct VerilogAInclude {
 impl Netlist {
     /// Parse a netlist from a string
     pub fn parse(input: &str) -> Result<Self, ParseError> {
+        Self::parse_with_options(input, NetlistParseOptions::default())
+    }
+
+    /// Parse a netlist from a string with explicit parser options.
+    pub fn parse_with_options(
+        input: &str,
+        options: NetlistParseOptions,
+    ) -> Result<Self, ParseError> {
         let (sanitized, mut diagnostics) = Self::strip_control_blocks_with_diagnostics(input)?;
-        let mut netlist = parser::parse_netlist(&sanitized)?;
+        let mut netlist = parser::parse_netlist_with_options(&sanitized, options)?;
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
         netlist.source_text = Some(input.to_string());
@@ -182,8 +190,17 @@ impl Netlist {
     /// This method preprocesses .include and .lib directives using the specified
     /// file path to resolve relative paths.
     pub fn parse_with_path(input: &str, file_path: &std::path::Path) -> Result<Self, ParseError> {
+        Self::parse_with_path_and_options(input, file_path, NetlistParseOptions::default())
+    }
+
+    /// Parse a netlist from a string with include resolution and parser options.
+    pub fn parse_with_path_and_options(
+        input: &str,
+        file_path: &std::path::Path,
+        options: NetlistParseOptions,
+    ) -> Result<Self, ParseError> {
         let processed = Self::preprocess_includes(input, file_path)?;
-        let mut netlist = Self::parse(&processed)?;
+        let mut netlist = Self::parse_with_options(&processed, options)?;
         Self::normalize_model_string_paths(&mut netlist, file_path);
         Self::apply_spef_includes(&mut netlist, file_path)?;
         netlist.source_text = Some(input.to_string());

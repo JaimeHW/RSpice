@@ -99,6 +99,22 @@ impl Default for RandomState {
     }
 }
 
+/// Evaluation policy for statistical parameter functions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatisticalParamMode {
+    /// Evaluate `gauss`/`agauss`/`unif`/`aunif`/2-arg `limit` as seeded draws.
+    Sample,
+    /// Evaluate statistical operators at their nominal value, matching Xyce's
+    /// non-UQ expression semantics before a sampling engine injects values.
+    Nominal,
+}
+
+impl Default for StatisticalParamMode {
+    fn default() -> Self {
+        Self::Sample
+    }
+}
+
 /// User-defined function definition
 #[derive(Debug, Clone)]
 pub struct FunctionDef {
@@ -130,6 +146,8 @@ pub struct ParamContext {
     functions: HashMap<String, FunctionDef>,
     /// Stream for the statistical functions; deterministic by default.
     random: RandomState,
+    /// Statistical-function evaluation policy for this parse/evaluation scope.
+    statistical_mode: StatisticalParamMode,
 }
 
 impl ParamContext {
@@ -204,6 +222,16 @@ impl ParamContext {
     /// The stream used by `gauss`/`agauss`/`unif`/`aunif`/2-arg `limit`.
     pub fn random(&self) -> &RandomState {
         &self.random
+    }
+
+    /// Set the statistical-function evaluation policy.
+    pub fn set_statistical_mode(&mut self, mode: StatisticalParamMode) {
+        self.statistical_mode = mode;
+    }
+
+    /// Current statistical-function evaluation policy.
+    pub fn statistical_mode(&self) -> StatisticalParamMode {
+        self.statistical_mode
     }
 
     /// Get all parameters as a vector of (name, value) tuples

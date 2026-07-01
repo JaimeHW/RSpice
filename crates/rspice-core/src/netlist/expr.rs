@@ -24,7 +24,9 @@ use parser::ExprParser;
 
 pub use api::{eval_expression, eval_simple, parse_expression};
 pub use behavioral::prepare_behavioral_expression;
-pub use context::{DEFAULT_RANDOM_SEED, FunctionDef, ParamContext, RandomState};
+pub use context::{
+    DEFAULT_RANDOM_SEED, FunctionDef, ParamContext, RandomState, StatisticalParamMode,
+};
 pub use error::ExprError;
 pub use eval::evaluate;
 pub use types::{BinOpKind, Expr, UnaryOpKind};

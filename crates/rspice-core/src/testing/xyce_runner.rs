@@ -13,8 +13,8 @@ use crate::engine::{
     extract_dc_value,
 };
 use crate::netlist::{
-    AnalysisCommand, DcSecondSweep, ElementKind, Netlist, StepCommand,
-    XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    AnalysisCommand, DcSecondSweep, ElementKind, Netlist, NetlistParseOptions,
+    StatisticalParamMode, StepCommand, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -356,6 +356,19 @@ impl XyceTestRunner {
         &self.config
     }
 
+    fn parse_xyce_netlist(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<Netlist, crate::netlist::ParseError> {
+        Netlist::parse_with_path_and_options(
+            source,
+            deck_path,
+            NetlistParseOptions {
+                statistical_mode: StatisticalParamMode::Nominal,
+            },
+        )
+    }
+
     /// RSpice never executes upstream `.sh`/`.pl` harness files in this runner.
     pub fn executes_upstream_scripts(&self) -> bool {
         false
@@ -622,7 +635,7 @@ impl XyceTestRunner {
         Self::reject_unsupported_source_directives(&source)?;
 
         let print = Self::single_dc_print_request(&source)?;
-        let netlist = Netlist::parse_with_path(&source, deck_path)
+        let netlist = Self::parse_xyce_netlist(&source, deck_path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let dc = Self::single_dc_sweep(&netlist)?;
         let step = Self::single_step_command(&netlist)?;
@@ -643,7 +656,7 @@ impl XyceTestRunner {
         plan: XyceExecutionPlan,
         start: Instant,
     ) -> XyceTestResult {
-        let netlist = match Netlist::parse_with_path(&plan.source, &plan.deck_path) {
+        let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
             Ok(netlist) => netlist,
             Err(err) => {
                 return self.failure_result(
@@ -1083,7 +1096,7 @@ impl XyceTestRunner {
                 ".STEP static DC execution requires the stepped .prn contract".to_string(),
             ));
         }
-        let netlist = Netlist::parse_with_path(&plan.source, &plan.deck_path)
+        let netlist = Self::parse_xyce_netlist(&plan.source, &plan.deck_path)
             .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
         let engine = self.create_dc_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));

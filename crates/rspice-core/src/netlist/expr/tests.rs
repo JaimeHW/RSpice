@@ -441,6 +441,26 @@ fn unif_covers_both_sides_of_nominal() {
 }
 
 #[test]
+fn nominal_statistical_mode_matches_xyce_non_sampling_semantics() {
+    let mut ctx = ParamContext::new();
+    ctx.set_statistical_mode(StatisticalParamMode::Nominal);
+
+    assert_eq!(eval_with(&ctx, "agauss(1, 1, 1)"), 1.0);
+    assert_eq!(eval_with(&ctx, "gauss(1, 1, 1)"), 1.0);
+    assert_eq!(eval_with(&ctx, "2 * rand()"), 1.0);
+    assert_eq!(eval_with(&ctx, "unif(1, 1)"), 1.0);
+    assert_eq!(eval_with(&ctx, "aunif(1, 1)"), 1.0);
+    assert_eq!(eval_with(&ctx, "limit(5, 0.5)"), 5.0);
+
+    let replay = ParamContext::new();
+    assert_eq!(
+        ctx.random().next_uniform(),
+        replay.random().next_uniform(),
+        "nominal evaluation must not consume the statistical draw stream"
+    );
+}
+
+#[test]
 fn limit_two_arg_is_worst_case_two_point() {
     let ctx = ParamContext::new();
     let mut hi = 0usize;

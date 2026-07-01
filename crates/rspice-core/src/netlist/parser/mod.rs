@@ -14,7 +14,8 @@ use super::{
     MesfetType, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist, NodeSet,
     ParamContext, ParametricValue, ParseDiagnostic, ParseError, PoleZeroAnalysisType,
     PoleZeroTransferType, SaveSet, SaveSignal, SensitivityAcSweep, SimulationOptions, SourceSpec,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
+    VerilogAInclude,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
@@ -52,8 +53,30 @@ type MeasureStatement = crate::analysis::MeasureStatement;
 // Main Parser
 //=============================================================================
 
+/// Options that affect netlist parsing and immediate parameter evaluation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NetlistParseOptions {
+    pub statistical_mode: StatisticalParamMode,
+}
+
+impl Default for NetlistParseOptions {
+    fn default() -> Self {
+        Self {
+            statistical_mode: StatisticalParamMode::Sample,
+        }
+    }
+}
+
 /// Parse a complete netlist from string
 pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
+    parse_netlist_with_options(input, NetlistParseOptions::default())
+}
+
+/// Parse a complete netlist from string with explicit parse options.
+pub fn parse_netlist_with_options(
+    input: &str,
+    options: NetlistParseOptions,
+) -> Result<Netlist, ParseError> {
     let lines: Vec<&str> = input.lines().collect();
 
     if lines.is_empty() {
@@ -63,6 +86,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     // First line is the title
     let title = lines[0].to_string();
     let mut state = ParseState::new();
+    state.params.set_statistical_mode(options.statistical_mode);
 
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
