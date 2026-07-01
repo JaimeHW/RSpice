@@ -892,6 +892,25 @@ fn test_xyce_rf_port_static_dc_case_runs() {
 }
 
 #[test]
+fn test_xyce_ekv3_nmos150_static_terminal_currents_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_1353/150nm_nmos.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a numeric Xyce EKV3 NMOS150 terminal-current comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+}
+
+#[test]
 fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
@@ -911,23 +930,19 @@ fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
         "unsupported reason should name the parser capability boundary, got {result:?}"
     );
 
-    for relative in [
-        "Netlists/Certification_Tests/BUG_1353/150nm_nmos.cir",
-        "Netlists/Certification_Tests/BUG_1353/150nm_pmos.cir",
-    ] {
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && result.expected_unsupported,
-            "{relative} should stay named unsupported until EKV3 LEVEL=301 static branch-current observables are fully implemented, got {result:?}"
-        );
-        assert!(
-            result
-                .error
-                .as_deref()
-                .is_some_and(|error| error.contains("EKV3 LEVEL=301")),
-            "unsupported reason should name the EKV3 capability boundary, got {result:?}"
-        );
-    }
+    let relative = "Netlists/Certification_Tests/BUG_1353/150nm_pmos.cir";
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && result.expected_unsupported,
+        "{relative} should stay named unsupported until EKV3 LEVEL=301 PMOS terminal currents are implemented, got {result:?}"
+    );
+    assert!(
+        result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("EKV3 LEVEL=301")),
+        "unsupported reason should name the EKV3 capability boundary, got {result:?}"
+    );
 
     for relative in [
         "Netlists/Certification_Tests/BUG_1775/HBT_IV.cir",

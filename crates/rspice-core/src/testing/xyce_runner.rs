@@ -1668,13 +1668,22 @@ impl XyceTestRunner {
             return Ok(());
         }
 
+        let mut has_voltage_source_current_probe = false;
         for probe in &print.probes {
             if Self::dc_probe_references_voltage_source_current(probe, netlist)? {
-                return Err(
-                    "EKV3 LEVEL=301 static .PRINT DC voltage-source branch-current probes require full external terminal-current stamping; the current native EKV3 slice is limited to validated NMOS150 channel-current DC rows and VANOISE"
-                        .to_string(),
-                );
+                has_voltage_source_current_probe = true;
+                break;
             }
+        }
+        if !has_voltage_source_current_probe {
+            return Ok(());
+        }
+
+        if Self::netlist_uses_unsupported_ekv3_level301_branch_current_model(netlist) {
+            return Err(
+                "EKV3 LEVEL=301 static .PRINT DC voltage-source branch-current probes are supported for native NMOS150-compatible NMOS models only; non-NMOS EKV3 LEVEL=301 cards remain fail-closed"
+                    .to_string(),
+            );
         }
 
         Ok(())
@@ -1687,6 +1696,24 @@ impl XyceTestRunner {
 
         crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
             Self::elements_use_ekv3_level301_mosfet(
+                &flattened.elements,
+                &netlist.models,
+                &flattened.scoped_models,
+            )
+        })
+    }
+
+    fn netlist_uses_unsupported_ekv3_level301_branch_current_model(netlist: &Netlist) -> bool {
+        if Self::elements_use_unsupported_ekv3_level301_branch_current_model(
+            &netlist.elements,
+            &netlist.models,
+            &[],
+        ) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            Self::elements_use_unsupported_ekv3_level301_branch_current_model(
                 &flattened.elements,
                 &netlist.models,
                 &flattened.scoped_models,
@@ -1720,6 +1747,24 @@ impl XyceTestRunner {
             Self::find_model(scoped_models, model)
                 .or_else(|| Self::find_model(models, model))
                 .is_some_and(Self::model_is_ekv3_level301)
+        })
+    }
+
+    fn elements_use_unsupported_ekv3_level301_branch_current_model(
+        elements: &[crate::netlist::Element],
+        models: &[crate::netlist::ModelDef],
+        scoped_models: &[crate::netlist::ModelDef],
+    ) -> bool {
+        elements.iter().any(|element| {
+            let ElementKind::Mosfet { model, .. } = &element.kind else {
+                return false;
+            };
+            Self::find_model(scoped_models, model)
+                .or_else(|| Self::find_model(models, model))
+                .is_some_and(|model| {
+                    Self::model_is_ekv3_level301(model)
+                        && !Self::model_is_ekv3_level301_native_nmos_branch_current(model)
+                })
         })
     }
 
@@ -1757,6 +1802,10 @@ impl XyceTestRunner {
             .rev()
             .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
             .is_some_and(|(_, value)| (*value - 301.0).abs() <= 1.0e-9)
+    }
+
+    fn model_is_ekv3_level301_native_nmos_branch_current(model: &crate::netlist::ModelDef) -> bool {
+        model.model_type.eq_ignore_ascii_case("NMOS") && Self::model_is_ekv3_level301(model)
     }
 
     fn model_is_native_vbic_bjt(model: &crate::netlist::ModelDef) -> bool {

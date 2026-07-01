@@ -16,6 +16,7 @@ const NODE_COUNT: usize = 4;
 const DRAIN_IDX: usize = 0;
 const GATE_IDX: usize = 1;
 const SOURCE_IDX: usize = 2;
+const BULK_IDX: usize = 3;
 
 const VALIDATED_W: Value = 150.0e-9;
 const VALIDATED_L: Value = 150.0e-9;
@@ -155,8 +156,26 @@ pub struct Ekv3Op {
 
 #[derive(Debug, Clone, Copy)]
 struct Ekv3Eval {
-    id: Value,
-    derivatives: [Value; NODE_COUNT],
+    channel_id: Value,
+    terminal_currents: [Value; NODE_COUNT],
+    terminal_derivatives: [[Value; NODE_COUNT]; NODE_COUNT],
+    channel_derivatives: [Value; NODE_COUNT],
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Ekv3RfCurrents {
+    channel_id: Value,
+    terminal_currents: [Value; NODE_COUNT],
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Ekv3IntrinsicCurrents {
+    channel_id: Value,
+    igd: Value,
+    igs: Value,
+    igb: Value,
+    igd_ov: Value,
+    igs_ov: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -221,23 +240,17 @@ impl Ekv3Device {
     fn stamp_linearized_at(&self, values: [Value; NODE_COUNT], matrix: &mut impl MatrixStamper) {
         let op = ekv3_nmos150_rf_eval(values, self.temperature_kelvin);
         let nodes = self.nodes();
-        let row_currents = [op.id, -op.id];
-        let row_signs = [1.0, -1.0];
-        for (row, (&current, &sign)) in [DRAIN_IDX, SOURCE_IDX]
-            .iter()
-            .zip(row_currents.iter().zip(row_signs.iter()))
-        {
-            if nodes[*row] == 0 {
+        for row in 0..NODE_COUNT {
+            if nodes[row] == 0 {
                 continue;
             }
-            let mut rhs = -current;
-            for (col, derivative) in op.derivatives.iter().enumerate() {
-                let value = sign * derivative;
-                stamp(matrix, nodes[*row], nodes[col], value);
+            let mut rhs = -op.terminal_currents[row];
+            for (col, value) in op.terminal_derivatives[row].iter().enumerate() {
+                stamp(matrix, nodes[row], nodes[col], *value);
                 rhs += value * values[col];
             }
             if rhs != 0.0 {
-                matrix.stamp_rhs(nodes[*row], rhs);
+                matrix.stamp_rhs(nodes[row], rhs);
             }
         }
     }
@@ -252,7 +265,7 @@ impl Ekv3Device {
         let wanted = [0.0, target, -target, 0.0];
         let nodes = self.nodes();
         for (col, wanted) in wanted.iter().enumerate() {
-            let drain_delta = wanted - op.derivatives[col];
+            let drain_delta = wanted - op.channel_derivatives[col];
             let source_delta = -drain_delta;
             add_if_nonzero(&mut add_real, nodes[DRAIN_IDX], nodes[col], drain_delta);
             add_if_nonzero(&mut add_real, nodes[SOURCE_IDX], nodes[col], source_delta);
@@ -276,11 +289,11 @@ impl Ekv3Device {
         let [vd, vg, vs, vb] = self.last_values;
         let op = ekv3_nmos150_rf_eval(self.last_values, self.temperature_kelvin);
         Ekv3Op {
-            id: op.id,
+            id: op.channel_id,
             vgs: vg - vs,
             vds: vd - vs,
             vbs: vb - vs,
-            gm: op.derivatives[GATE_IDX],
+            gm: op.channel_derivatives[GATE_IDX],
         }
     }
 }
@@ -314,19 +327,78 @@ impl NonlinearDevice for Ekv3Device {
 }
 
 fn ekv3_nmos150_rf_eval(values: [Value; NODE_COUNT], temperature_kelvin: Value) -> Ekv3Eval {
-    let id = ekv3_nmos150_rf_current(values, temperature_kelvin);
-    let mut derivatives = [0.0; NODE_COUNT];
+    let currents = ekv3_nmos150_rf_terminal_currents(values, temperature_kelvin);
+    let mut terminal_derivatives = [[0.0; NODE_COUNT]; NODE_COUNT];
+    let mut channel_derivatives = [0.0; NODE_COUNT];
     for col in 0..NODE_COUNT {
         let step = 1.0e-5 * values[col].abs().max(1.0);
         let mut plus = values;
         let mut minus = values;
         plus[col] += step;
         minus[col] -= step;
-        let hi = ekv3_nmos150_rf_current(plus, temperature_kelvin);
-        let lo = ekv3_nmos150_rf_current(minus, temperature_kelvin);
-        derivatives[col] = (hi - lo) / (2.0 * step);
+        let hi = ekv3_nmos150_rf_terminal_currents(plus, temperature_kelvin);
+        let lo = ekv3_nmos150_rf_terminal_currents(minus, temperature_kelvin);
+        channel_derivatives[col] = (hi.channel_id - lo.channel_id) / (2.0 * step);
+        for row in 0..NODE_COUNT {
+            terminal_derivatives[row][col] =
+                (hi.terminal_currents[row] - lo.terminal_currents[row]) / (2.0 * step);
+        }
     }
-    Ekv3Eval { id, derivatives }
+    Ekv3Eval {
+        channel_id: currents.channel_id,
+        terminal_currents: currents.terminal_currents,
+        terminal_derivatives,
+        channel_derivatives,
+    }
+}
+
+fn ekv3_nmos150_rf_terminal_currents(
+    values: [Value; NODE_COUNT],
+    temperature_kelvin: Value,
+) -> Ekv3RfCurrents {
+    let channel_id = ekv3_nmos150_rf_current(values, temperature_kelvin);
+    let rd = ekv3_nmos150_rf_series_resistance();
+    let rs = rd;
+    let mut internal = values;
+    internal[DRAIN_IDX] -= channel_id * rd;
+    internal[SOURCE_IDX] += channel_id * rs;
+
+    let intrinsic = ekv3_nmos150_intrinsic_currents(internal, temperature_kelvin);
+    let (d_gt_s, s_gt_d) = {
+        let vd_ext = internal[DRAIN_IDX] - internal[BULK_IDX];
+        let vs_ext = internal[SOURCE_IDX] - internal[BULK_IDX];
+        if vd_ext >= vs_ext {
+            (1.0, 0.0)
+        } else {
+            (0.0, 1.0)
+        }
+    };
+
+    let mut terminal_currents = [0.0; NODE_COUNT];
+    terminal_currents[DRAIN_IDX] += channel_id;
+    terminal_currents[SOURCE_IDX] -= channel_id;
+
+    let drain_gate_current = -(d_gt_s * intrinsic.igd
+        + s_gt_d * intrinsic.igs
+        + d_gt_s * intrinsic.igd_ov
+        + s_gt_d * intrinsic.igs_ov);
+    let source_gate_current = -(d_gt_s * intrinsic.igs
+        + s_gt_d * intrinsic.igd
+        + d_gt_s * intrinsic.igs_ov
+        + s_gt_d * intrinsic.igd_ov);
+    let bulk_gate_current = -intrinsic.igb;
+
+    terminal_currents[DRAIN_IDX] += drain_gate_current;
+    terminal_currents[GATE_IDX] -= drain_gate_current;
+    terminal_currents[SOURCE_IDX] += source_gate_current;
+    terminal_currents[GATE_IDX] -= source_gate_current;
+    terminal_currents[BULK_IDX] += bulk_gate_current;
+    terminal_currents[GATE_IDX] -= bulk_gate_current;
+
+    Ekv3RfCurrents {
+        channel_id,
+        terminal_currents,
+    }
 }
 
 fn ekv3_nmos150_rf_current(values: [Value; NODE_COUNT], temperature_kelvin: Value) -> Value {
@@ -336,7 +408,7 @@ fn ekv3_nmos150_rf_current(values: [Value; NODE_COUNT], temperature_kelvin: Valu
         let mut internal = values;
         internal[DRAIN_IDX] -= current * rd;
         internal[SOURCE_IDX] += current * rs;
-        ekv3_nmos150_intrinsic_current(internal, temperature_kelvin) - current
+        ekv3_nmos150_intrinsic_currents(internal, temperature_kelvin).channel_id - current
     };
 
     let f0 = f_at(0.0);
@@ -415,7 +487,10 @@ fn ekv3_nmos150_rf_series_resistance() -> Value {
     (EKV3_NMOS150_RLX / weff_nf).max(EKV3_MINIMUM_RESISTANCE)
 }
 
-fn ekv3_nmos150_intrinsic_current(values: [Value; NODE_COUNT], temperature_kelvin: Value) -> Value {
+fn ekv3_nmos150_intrinsic_currents(
+    values: [Value; NODE_COUNT],
+    temperature_kelvin: Value,
+) -> Ekv3IntrinsicCurrents {
     const SIGN: Value = 1.0;
     const SCALE: Value = 1.0;
     const COX: Value = 8.58e-3;
@@ -458,6 +533,12 @@ fn ekv3_nmos150_intrinsic_current(values: [Value; NODE_COUNT], temperature_kelvi
     const WR: Value = 80.0e-9;
     const QWR: Value = 500.0e-6;
     const NWR: Value = 12.0e-3;
+    const GAMMAOV: Value = 5.0;
+    const VFBOV: Value = 0.0;
+    const KG: Value = 50.0e-6;
+    const XB: Value = 5.5;
+    const EB: Value = 21.0e9;
+    const LOVIG: Value = 40.0e-12;
     const TNOM: Value = 30.0;
     const TCV: Value = 600.0e-6;
     const BEX: Value = -1.6;
@@ -483,6 +564,7 @@ fn ekv3_nmos150_intrinsic_current(values: [Value; NODE_COUNT], temperature_kelvi
     let t = temperature_kelvin;
     let tsi = C_EPSSIL / COX;
     let tox = C_EPSOX / COX;
+    let tox2 = tox * tox;
     let lc = (tsi * XJ).sqrt();
     let tnomk = TNOM + 273.15;
     let utnom = C_K * tnomk / C_QE;
@@ -558,6 +640,7 @@ fn ekv3_nmos150_intrinsic_current(values: [Value; NODE_COUNT], temperature_kelvi
     let vto = SIGN * vto_dev_t / ut;
     let gamma_b_dev = gamma_dev / sqrt_ut;
     let gamma_g = GAMMAG / sqrt_ut;
+    let gamma_ov = GAMMAOV / sqrt_ut;
     let ucrit = ucrit_dev_t / (ut / leff);
     let ev = ut / (e0_wt * tsi);
     let tmp = e1_wt * tsi;
@@ -565,6 +648,10 @@ fn ekv3_nmos150_intrinsic_current(values: [Value; NODE_COUNT], temperature_kelvi
     let sqrtphif = phif.sqrt();
     let gamma_b_dev2 = gamma_b_dev * gamma_b_dev;
     let gamma_g2 = gamma_g * gamma_g;
+    let gamma_ov2 = gamma_ov * gamma_ov;
+    let vfb_ov = VFBOV / ut;
+    let xb = XB / ut;
+    let ub = EB * tox / XB;
     let dpd = gamma_b_dev2 / gamma_g2;
 
     let nq0 = 1.0 / (1.0 + (dpd * 2.0 * SQRT2 * sqrtphif / gamma_b_dev))
@@ -777,8 +864,152 @@ fn ekv3_nmos150_intrinsic_current(values: [Value; NODE_COUNT], temperature_kelvi
     };
     let ispec_dits = ispec * dits_factor;
     let ids = i * ispec_dits;
+    let channel_id = SIGN * d_gt_s_flag * ids;
+    let (igd, igs, igb, igd_ov, igs_ov) = ekv3_nmos150_gate_currents(
+        psi_p, v_o_qme, qs, if_, irp, nq, vg, vfb, vd, vs, gamma_g, gamma_g2, gamma_ov, gamma_ov2,
+        vfb_ov, xb, ub, leff, weff_nf, ut2, tox2, KG, LOVIG,
+    );
 
-    SIGN * d_gt_s_flag * ids
+    Ekv3IntrinsicCurrents {
+        channel_id,
+        igd,
+        igs,
+        igb,
+        igd_ov,
+        igs_ov,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ekv3_nmos150_gate_currents(
+    psi_p: Value,
+    v_o_qme: Value,
+    qs: Value,
+    if_: Value,
+    irp: Value,
+    nq: Value,
+    vg: Value,
+    vfb: Value,
+    vd: Value,
+    vs: Value,
+    gamma_g: Value,
+    gamma_g2: Value,
+    gamma_ov: Value,
+    gamma_ov2: Value,
+    vfb_ov: Value,
+    xb: Value,
+    ub: Value,
+    leff: Value,
+    weff_nf: Value,
+    ut2: Value,
+    tox2: Value,
+    kg: Value,
+    lovig: Value,
+) -> (Value, Value, Value, Value, Value) {
+    let (psi_ox, dpsi_dq) = if psi_p > 0.0 {
+        let v1_gc = (0.25 + (v_o_qme + 2.0 * qs) / gamma_g2).sqrt();
+        let v2_gc = 0.5 + v1_gc;
+        let psi_ox = (v_o_qme + 2.0 * qs) / v2_gc;
+        let dpsi_dq =
+            (2.0 / v2_gc) * (1.0 - (v_o_qme + 2.0 * qs) / (2.0 * v1_gc * v2_gc * gamma_g2));
+        (psi_ox, dpsi_dq)
+    } else {
+        (v_o_qme + 2.0 * qs, 2.0)
+    };
+
+    let psi_x = psi_ox.abs() / xb;
+    let p_tun = ekv3_tunneling_probability(psi_x, ub);
+    let igo = qs * psi_ox * p_tun;
+    let (nigc, nigd) = if vs == vd || psi_ox == 0.0 {
+        let nigc = igo * nq;
+        (nigc, nigc * 0.5)
+    } else {
+        let dq_dksi = (irp - if_) / (2.0 * qs + 1.0);
+        let a_gc = dq_dksi * (1.0 / qs + dpsi_dq / psi_ox);
+        let b_gc = if psi_x < 1.0 {
+            let numerator = dq_dksi * dpsi_dq * (ub / xb) * (3.0 + psi_x);
+            let denominator = 4.0 + 2.0 * (1.0 - psi_x).sqrt() * (2.0 + psi_x);
+            if psi_ox > 0.0 {
+                numerator / denominator
+            } else {
+                -numerator / denominator
+            }
+        } else {
+            dpsi_dq * dq_dksi * ub / (psi_x * psi_ox)
+        };
+        let nigc = nq * igo * (2.0 + a_gc) / (2.0 - b_gc);
+        let nigs = 0.5 * nq * igo * (3.0 + a_gc) / (3.0 - b_gc);
+        (nigc, nigc - nigs)
+    };
+
+    let (igd, igs, igb) = if vg > vfb {
+        let scale = 2.0 * kg * weff_nf * leff * ut2 / tox2;
+        let ig = scale * nigc;
+        let igd = scale * nigd;
+        (igd, ig - igd, 0.0)
+    } else {
+        (
+            0.0,
+            0.0,
+            kg * weff_nf * leff * psi_ox * psi_ox.abs() * ut2 * p_tun / tox2,
+        )
+    };
+
+    let (igs_ov, igd_ov) = if lovig != 0.0 {
+        let psi_ox_sovgc = ekv3_overlap_gate_oxide_potential(
+            vg - vs,
+            vfb_ov,
+            gamma_g,
+            gamma_g2,
+            gamma_ov,
+            gamma_ov2,
+        );
+        let psi_ox_dovgc = ekv3_overlap_gate_oxide_potential(
+            vg - vd,
+            vfb_ov,
+            gamma_g,
+            gamma_g2,
+            gamma_ov,
+            gamma_ov2,
+        );
+        let p_tun_sovgc = ekv3_tunneling_probability(psi_ox_sovgc.abs() / xb, ub);
+        let p_tun_dovgc = ekv3_tunneling_probability(psi_ox_dovgc.abs() / xb, ub);
+        let scale = kg * weff_nf * lovig * ut2 / tox2;
+        (
+            scale * psi_ox_sovgc * psi_ox_sovgc.abs() * p_tun_sovgc,
+            scale * psi_ox_dovgc * psi_ox_dovgc.abs() * p_tun_dovgc,
+        )
+    } else {
+        (0.0, 0.0)
+    };
+
+    (igd, igs, igb, igd_ov, igs_ov)
+}
+
+fn ekv3_overlap_gate_oxide_potential(
+    vgo: Value,
+    vfb_ov: Value,
+    gamma_g: Value,
+    gamma_g2: Value,
+    gamma_ov: Value,
+    gamma_ov2: Value,
+) -> Value {
+    if vgo > vfb_ov {
+        let tmp = (vgo - vfb_ov + gamma_g2 * 0.25).sqrt() - gamma_g * 0.5;
+        vgo - tmp * tmp
+    } else {
+        let tmp = (-vgo + vfb_ov + gamma_ov2 * 0.25).sqrt() - gamma_ov * 0.5;
+        vgo + tmp * tmp
+    }
+}
+
+fn ekv3_tunneling_probability(psi_x: Value, ub: Value) -> Value {
+    if psi_x < 1.0 {
+        let tmp = (1.0 - psi_x).sqrt();
+        (-ub * (1.0 / (1.0 + tmp) + tmp)).exp()
+    } else {
+        (-ub / psi_x).exp()
+    }
 }
 
 fn qv(v: Value, nuv: Value) -> Value {
