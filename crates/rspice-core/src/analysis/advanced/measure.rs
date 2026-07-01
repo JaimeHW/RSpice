@@ -820,14 +820,28 @@ impl MeasureEngine {
             }
         }
         match crate::netlist::expr::eval_expression_complex(expression, &ctx) {
-            Ok(value) if value.im == 0.0 => MeasureResult::success(name, value.re),
-            Ok(value) => MeasureResult::failed(
-                name,
-                &format!(
-                    "PARAM expression produced non-finite/non-real value {} + {}j",
-                    value.re, value.im
-                ),
-            ),
+            Ok(value) => {
+                if !value.re.is_finite() || !value.im.is_finite() {
+                    return MeasureResult::failed(
+                        name,
+                        &format!(
+                            "PARAM expression produced non-finite value ({} {:+}j)",
+                            value.re, value.im
+                        ),
+                    );
+                }
+                let imag_tolerance = 1.0e-15 * value.re.abs().max(1.0);
+                if value.im.abs() > imag_tolerance {
+                    return MeasureResult::failed(
+                        name,
+                        &format!(
+                            "PARAM expression produced complex value ({} {:+}j); scalar measurement results must be real",
+                            value.re, value.im
+                        ),
+                    );
+                }
+                MeasureResult::success(name, value.re)
+            }
             Err(err) => MeasureResult::failed(name, &format!("PARAM expression failed: {err}")),
         }
     }
@@ -1071,7 +1085,7 @@ mod tests {
     }
 
     #[test]
-    fn param_measure_rejects_non_finite_value() {
+    fn param_measure_rejects_complex_value() {
         let statement = MeasureStatement {
             goal: None,
             tolerance: None,
@@ -1094,7 +1108,7 @@ mod tests {
                 .error
                 .as_deref()
                 .unwrap_or("")
-                .contains("non-finite")
+                .contains("complex value")
         );
     }
 
