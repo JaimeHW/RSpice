@@ -1640,18 +1640,21 @@ fn rust_backend_auto_uses_bounded_local_storage_subset_for_wide_mixed_residuals(
         .as_str();
 
     assert!(
-        stamp.contains("let s = match &mut self.scratch"),
-        "unsupported wide residual should keep scratch AD available:\n{stamp}"
+        !stamp.contains("let s = match &mut self.scratch")
+            && !stamp.contains("scratch.values")
+            && !stamp.contains("scratch.node_derivatives")
+            && !stamp.contains("s.ad_value("),
+        "wide mixed residual should stay on native scalar locals"
     );
     assert!(stamp.contains("let mut var_drive: f64 = 0.0;"), "{stamp}");
     assert!(stamp.contains("let mut var_shaped: f64 = 0.0;"), "{stamp}");
     assert!(
-        !stamp.contains("let mut var_x0") && !stamp.contains("let mut var_x469"),
-        "scratch-only wide variables must not expand into scalar local derivative storage:\n{stamp}"
+        stamp.contains("let mut var_x0") && stamp.contains("let mut var_x469"),
+        "wide residual variables should use sparse scalar local derivative storage"
     );
     assert!(
         stamp.contains("stamper.stamp_current_const_local("),
-        "scratch-free residual equations should stay on scalar local stamps:\n{stamp}"
+        "scratch-free residual equations should stay on scalar local stamps"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -1693,8 +1696,11 @@ fn rust_backend_auto_transpiles_shipped_asmhemt_with_mixed_local_storage() {
         .as_str();
 
     assert!(
-        stamp.contains("let s = match &mut self.scratch"),
-        "ASM-HEMT should still keep scratch AD for unsupported regions:\n{stamp}"
+        !stamp.contains("let s = match &mut self.scratch")
+            && !stamp.contains("scratch.values")
+            && !stamp.contains("scratch.node_derivatives")
+            && !stamp.contains("s.ad_value("),
+        "ASM-HEMT should avoid legacy scratch AD in transient stamp"
     );
     assert!(
         stamp.contains("let mut var_"),
@@ -1727,12 +1733,15 @@ fn rust_backend_auto_bounds_hybrid_local_storage_width() {
         "fixture should remain on the scalar-hybrid path for the DDT contribution:\n{stamp}"
     );
     assert!(
-        stamp.contains("let s = match &mut self.scratch"),
-        "wide residual assignment chains should remain scratch-backed until sparse scalar locals are available:\n{stamp}"
+        !stamp.contains("let s = match &mut self.scratch")
+            && !stamp.contains("scratch.values")
+            && !stamp.contains("scratch.node_derivatives")
+            && !stamp.contains("s.ad_value("),
+        "wide residual assignment chains should stay on sparse scalar local derivative storage"
     );
     assert!(
-        !stamp.contains("let mut var_x0") && !stamp.contains("let mut var_x469"),
-        "wide residual assignment chains must not expand into unbounded scalar local derivative storage:\n{stamp}"
+        stamp.contains("let mut var_x0") && stamp.contains("let mut var_x469"),
+        "wide residual assignment chains should emit bounded sparse scalar local derivative storage"
     );
 }
 
@@ -8764,9 +8773,11 @@ fn rust_backend_omits_reactive_work_for_models_without_ddt() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(assignment_fed_resistor_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
-        .transpile(&artifact)
-        .expect("transpile assignment-fed resistor");
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile assignment-fed resistor through auto backend");
     let stamp = generated
         .files
         .iter()
@@ -8822,14 +8833,23 @@ endmodule
         .compile_canonical_ir(src)
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
-        .transpile(&artifact)
-        .expect("transpile assignment-fed resistor");
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile assignment-fed resistor through auto backend");
     let stamp = generated
         .files
         .iter()
         .find(|file| file.relative_path == "stamp.rs")
         .expect("stamp file")
+        .contents
+        .as_str();
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
         .contents
         .as_str();
 
@@ -8839,11 +8859,16 @@ endmodule
     );
     assert!(!stamp.contains("Scratch::new_box"), "{stamp}");
     assert!(!stamp.contains("Scratch::new();"), "{stamp}");
-    assert!(stamp.contains("let mut var_g: f64 = 0.0;"), "{stamp}");
-    assert!(stamp.contains("var_g = "), "{stamp}");
-    assert!(stamp.contains("(1.0 / p.p0)"), "{stamp}");
+    assert!(
+        !stamp.contains("var_g"),
+        "assignment-fed conductance should be scalarized out of the stamp:\n{stamp}"
+    );
+    assert!(state.contains("(1.0 / p.p0)"), "{state}");
+    assert!(
+        stamp.contains("self.scalar_v") && stamp.contains("stamp_current_node2_local"),
+        "{stamp}"
+    );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
-    assert!(stamp.contains("eq0_value"), "{stamp}");
     assert!(!stamp.contains("s.dn[0]"), "{stamp}");
     assert!(!stamp.contains("g_d_n0 ="), "{stamp}");
     assert!(!stamp.contains("g_d_n1 ="), "{stamp}");
@@ -8853,6 +8878,7 @@ endmodule
     assert!(!stamp.contains("HashMap"), "{stamp}");
     assert!(!stamp.contains("Bytecode"), "{stamp}");
     assert!(!stamp.contains("g_q"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
 }
 
 #[test]
@@ -8884,9 +8910,11 @@ fn rust_backend_runtime_support_splits_transient_and_reactive_scratch_storage() 
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(mixed_dynamic_static_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
-        .transpile(&artifact)
-        .expect("transpile mixed dynamic/static device");
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile mixed dynamic/static device through auto backend");
     let stamp = generated
         .files
         .iter()
@@ -8929,8 +8957,8 @@ fn rust_backend_runtime_support_splits_transient_and_reactive_scratch_storage() 
         "native-local fixture should not import generated scratch aliases:\n{stamp}"
     );
     assert!(
-        stamp.contains("var_cap_charge_dn0") && stamp.contains("stamp_current_node2_local"),
-        "mixed dynamic/static fixture should exercise native local derivative storage:\n{stamp}"
+        stamp.contains("eval_ddt(") && stamp.contains("stamp_current_node2_local"),
+        "mixed dynamic/static fixture should exercise native scalar DDT stamping:\n{stamp}"
     );
     assert!(stamp.contains("stamp_current_reactive_node2"), "{stamp}");
     assert!(
@@ -9057,8 +9085,12 @@ fn rust_backend_splits_large_stamp_bodies_into_helper_blocks() {
         "algebraic generated stamps should not borrow integration state arrays:\n{stamp}"
     );
     assert!(
-        helper.contains("use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative"),
+        helper.contains("use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative"),
         "{helper}"
+    );
+    assert!(
+        !helper.contains("use super::{A,"),
+        "helper import list should not carry unused AdValue alias:\n{helper}"
     );
     assert!(
         helper.contains("use super::super::state::{Instance, Parameters};"),
@@ -9712,12 +9744,14 @@ fn rust_backend_borrowed_helper_arrays_compile_with_dense_stamps() {
 #[test]
 fn rust_backend_lowers_runtime_loops_with_derivative_shadows() {
     let artifact = VerilogACompiler::default()
-        .compile_canonical_ir(loop_accumulator_source())
+        .compile_canonical_ir(runtime_bounded_loop_accumulator_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
-        .transpile(&artifact)
-        .expect("transpile loop accumulator");
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile loop accumulator through auto backend");
     let state = generated
         .files
         .iter()
@@ -9751,11 +9785,11 @@ fn rust_backend_splits_large_local_variable_blocks_without_scratch() {
         .compile_canonical_ir(&large_loop_accumulator_source(280))
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
-    .expect("transpile large loop accumulator");
+    .expect("transpile large loop accumulator through auto backend");
     let stamp = generated
         .files
         .iter()

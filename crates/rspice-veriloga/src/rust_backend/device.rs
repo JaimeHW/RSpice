@@ -341,7 +341,14 @@ pub fn generate_device(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
 ) -> Result<GeneratedRustDevice, RustBackendError> {
-    generate_device_with_scalar_hybrid_plan(artifact, options, None)
+    generate_device_with_scalar_hybrid_plan(artifact, options, None, false)
+}
+
+pub(super) fn generate_auto_device(
+    artifact: &CanonicalIrArtifact,
+    options: &RustTranspileOptions,
+) -> Result<GeneratedRustDevice, RustBackendError> {
+    generate_device_with_scalar_hybrid_plan(artifact, options, None, true)
 }
 
 pub(super) fn generate_hybrid_device(
@@ -381,13 +388,14 @@ pub(super) fn generate_hybrid_device(
         idt_roots,
         static_cache,
     };
-    generate_device_with_scalar_hybrid_plan(artifact, options, Some(&scalar_hybrid_plan))
+    generate_device_with_scalar_hybrid_plan(artifact, options, Some(&scalar_hybrid_plan), true)
 }
 
 fn generate_device_with_scalar_hybrid_plan(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
     scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
+    native_local_storage: bool,
 ) -> Result<GeneratedRustDevice, RustBackendError> {
     reject_unsupported_model_shape(artifact)?;
 
@@ -427,6 +435,7 @@ fn generate_device_with_scalar_hybrid_plan(
         &reactive_liveness,
         &potential_branch_slots,
         scalar_hybrid_plan,
+        native_local_storage,
     )?);
     let state = if let Some(plan) = scalar_hybrid_plan.filter(|plan| !plan.static_cache.is_empty())
     {
@@ -490,8 +499,115 @@ fn compact_stamp_files(mut files: StampFiles) -> StampFiles {
         ));
         helper.contents = reconcile_helper_super_imports(std::mem::take(&mut helper.contents));
     }
+    files.stamp = prune_unused_root_scratch_allocations(files.stamp);
     files.stamp = prune_unused_root_stamp_support_aliases(files.stamp, &files.helpers);
     files
+}
+
+fn prune_unused_root_scratch_allocations(source: String) -> String {
+    let lines = source.lines().collect::<Vec<_>>();
+    let allocation_ranges = root_scratch_allocation_ranges(&lines);
+    if allocation_ranges.is_empty() {
+        return source;
+    }
+
+    let mut remove_ranges = Vec::new();
+    for (function_start, function_end) in root_stamp_function_ranges(&lines) {
+        let function_allocations = allocation_ranges
+            .iter()
+            .copied()
+            .filter(|(start, _)| *start >= function_start && *start < function_end)
+            .collect::<Vec<_>>();
+        if function_allocations.is_empty() {
+            continue;
+        }
+
+        let mut body_without_allocations = String::new();
+        for (index, line) in lines
+            .iter()
+            .enumerate()
+            .take(function_end)
+            .skip(function_start)
+        {
+            if function_allocations
+                .iter()
+                .any(|(start, end)| index >= *start && index < *end)
+            {
+                continue;
+            }
+            body_without_allocations.push_str(line);
+            body_without_allocations.push('\n');
+        }
+
+        if !generated_identifier_tokens(&body_without_allocations).contains("s") {
+            remove_ranges.extend(function_allocations);
+        }
+    }
+
+    if remove_ranges.is_empty() {
+        return source;
+    }
+
+    let mut rewritten = String::with_capacity(source.len());
+    for (index, line) in lines.iter().enumerate() {
+        if remove_ranges
+            .iter()
+            .any(|(start, end)| index >= *start && index < *end)
+        {
+            continue;
+        }
+        push_pruned_root_stamp_line(&mut rewritten, line);
+    }
+    rewritten
+}
+
+fn root_stamp_function_ranges(lines: &[&str]) -> Vec<(usize, usize)> {
+    let mut starts = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            (line.starts_with("    pub fn stamp(")
+                || line.starts_with("    pub fn stamp_reactive("))
+            .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    if starts.is_empty() {
+        return Vec::new();
+    }
+    starts.push(lines.len());
+    starts
+        .windows(2)
+        .map(|range| (range[0], range[1]))
+        .collect()
+}
+
+fn root_scratch_allocation_ranges(lines: &[&str]) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut index = 0usize;
+    while index + 3 < lines.len() {
+        if is_root_scratch_allocation_start(lines[index])
+            && lines[index + 1].trim() == "Some(buf) => buf.as_mut(),"
+            && lines[index + 2]
+                .trim_start()
+                .starts_with("slot @ None => slot.insert(")
+            && lines[index + 2]
+                .trim_end()
+                .ends_with("::new_box()).as_mut(),")
+            && lines[index + 3].trim() == "};"
+        {
+            ranges.push((index, index + 4));
+            index += 4;
+        } else {
+            index += 1;
+        }
+    }
+    ranges
+}
+
+fn is_root_scratch_allocation_start(line: &str) -> bool {
+    let line = line.trim();
+    line == "let s = match &mut self.scratch {"
+        || line == "let s = match &mut self.reactive_scratch {"
 }
 
 fn prune_unused_root_stamp_support_aliases(
@@ -13651,6 +13767,7 @@ fn generate_stamp_file(
     reactive_liveness: &ReactiveLiveness,
     potential_branch_slots: &PotentialBranchSlots,
     scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
+    native_local_storage: bool,
 ) -> Result<StampFiles, RustBackendError> {
     let mut out = String::new();
     out.push_str("#![allow(dead_code, unused_assignments, unused_parens, unused_variables)]\n\n");
@@ -13779,6 +13896,7 @@ fn generate_stamp_file(
         "stamp_transient",
         common_usage,
         scalar_hybrid_plan,
+        native_local_storage,
         &mut helper_modules,
         &mut out,
     )?;
@@ -13801,6 +13919,7 @@ fn generate_stamp_file(
             "stamp_reactive",
             common_usage,
             scalar_hybrid_plan,
+            native_local_storage,
             &mut helper_modules,
             &mut out,
         )?;
@@ -24662,6 +24781,7 @@ fn emit_stamp_body(
     helper_prefix: &str,
     common_usage: StampCommonUsage,
     scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
+    native_local_storage: bool,
     helper_modules: &mut StampHelperModules,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
@@ -24770,20 +24890,26 @@ fn emit_stamp_body(
                 || transient_liveness.is_derivative_live(variable.name.as_str())
         }
     });
-    let candidate_local_derivative_variables = if has_live_variables && !reactive {
-        collect_local_derivative_variables(artifact, transient_liveness)?
-    } else {
-        HashSet::new()
-    };
     let branch_axis_count = potential_branch_slots.len();
+    let candidate_local_derivative_layout =
+        if native_local_storage && has_live_variables && !reactive {
+            collect_local_derivative_layout(
+                artifact,
+                transient_liveness,
+                potential_branch_slots.current_slots(),
+            )?
+        } else {
+            LocalDerivativeLayout::new()
+        };
     let equation_inline = equation_inline_plan(artifact)?;
-    let local_storage_supported = has_live_variables
+    let local_storage_supported = native_local_storage
+        && has_live_variables
         && local_variable_storage_is_supported(
             artifact,
             reactive,
             transient_liveness,
             reactive_liveness,
-            &candidate_local_derivative_variables,
+            &candidate_local_derivative_layout,
         );
     let local_storage_candidate = local_storage_supported
         && local_variable_storage_is_bounded_for_pass(
@@ -24791,14 +24917,14 @@ fn emit_stamp_body(
             reactive,
             transient_liveness,
             reactive_liveness,
-            &candidate_local_derivative_variables,
+            &candidate_local_derivative_layout,
             branch_axis_count,
         );
     let mut use_local_variables = local_storage_candidate;
     let mut residual_uses_scratch_with_local_variables = false;
     let mut local_transient_liveness = transient_liveness.clone();
     let mut local_reactive_liveness = reactive_liveness.clone();
-    let mut local_derivative_variables = candidate_local_derivative_variables.clone();
+    let mut local_derivative_layout = candidate_local_derivative_layout.clone();
     let mut selected_local_variables = None;
     if local_storage_supported {
         let local_variables = if reactive {
@@ -24816,7 +24942,7 @@ fn emit_stamp_body(
                 variable_fields,
                 branch_axis_count,
                 transient_liveness,
-                &candidate_local_derivative_variables,
+                &candidate_local_derivative_layout,
                 None,
             )
             .into_iter()
@@ -24855,10 +24981,11 @@ fn emit_stamp_body(
                 &residual_usage.scratch_free_equations,
                 transient_liveness,
                 reactive_liveness,
+                potential_branch_slots.current_slots(),
                 branch_axis_count,
             )? {
                 local_transient_liveness = selection.liveness;
-                local_derivative_variables = selection.derivative_variables;
+                local_derivative_layout = selection.derivative_layout;
                 selected = selection.variables;
                 use_local_variables = true;
             } else {
@@ -24914,7 +25041,7 @@ fn emit_stamp_body(
                 variable_fields,
                 branch_axis_count,
                 &local_transient_liveness,
-                &local_derivative_variables,
+                &local_derivative_layout,
                 selected_local_variables.as_ref(),
                 &mut variables,
                 out,
@@ -24936,7 +25063,7 @@ fn emit_stamp_body(
                 variable_fields,
                 branch_axis_count,
                 &local_transient_liveness,
-                &local_derivative_variables,
+                &local_derivative_layout,
                 out,
             )
         }
@@ -27024,7 +27151,7 @@ fn can_use_local_variable_storage(
     reactive: bool,
     transient_liveness: &TransientLiveness,
     reactive_liveness: &ReactiveLiveness,
-    derivative_variables: &HashSet<String>,
+    derivative_layout: &LocalDerivativeLayout,
     branch_axis_count: usize,
 ) -> bool {
     local_variable_storage_is_supported(
@@ -27032,13 +27159,13 @@ fn can_use_local_variable_storage(
         reactive,
         transient_liveness,
         reactive_liveness,
-        derivative_variables,
+        derivative_layout,
     ) && local_variable_storage_is_bounded_for_pass(
         artifact,
         reactive,
         transient_liveness,
         reactive_liveness,
-        derivative_variables,
+        derivative_layout,
         branch_axis_count,
     )
 }
@@ -27048,12 +27175,12 @@ fn local_variable_storage_is_supported(
     reactive: bool,
     transient_liveness: &TransientLiveness,
     reactive_liveness: &ReactiveLiveness,
-    derivative_variables: &HashSet<String>,
+    derivative_layout: &LocalDerivativeLayout,
 ) -> bool {
     let local_storage_shape = statements_contain_loop(&artifact.hir.statements)
         || statements_are_straight_line_assignments(&artifact.hir.statements)
         || (!reactive
-            && derivative_variables.is_empty()
+            && derivative_layout.is_empty()
             && straight_line_assignments_are_parameter_static(artifact, transient_liveness));
     if !local_storage_shape {
         return false;
@@ -27074,7 +27201,7 @@ fn local_variable_storage_is_bounded_for_pass(
     reactive: bool,
     transient_liveness: &TransientLiveness,
     reactive_liveness: &ReactiveLiveness,
-    derivative_variables: &HashSet<String>,
+    derivative_layout: &LocalDerivativeLayout,
     branch_axis_count: usize,
 ) -> bool {
     if reactive {
@@ -27083,7 +27210,7 @@ fn local_variable_storage_is_bounded_for_pass(
         local_variable_storage_is_bounded(
             artifact,
             transient_liveness,
-            derivative_variables,
+            derivative_layout,
             branch_axis_count,
         )
     }
@@ -27091,7 +27218,7 @@ fn local_variable_storage_is_bounded_for_pass(
 
 struct SelectedTransientLocalVariables {
     liveness: TransientLiveness,
-    derivative_variables: HashSet<String>,
+    derivative_layout: LocalDerivativeLayout,
     variables: HashSet<String>,
 }
 
@@ -27100,11 +27227,35 @@ struct SelectedReactiveLocalVariables {
     variables: HashSet<String>,
 }
 
+#[derive(Clone, Debug, Default)]
+struct LocalDerivativeAxes {
+    nodes: HashSet<usize>,
+    branches: HashSet<usize>,
+}
+
+impl LocalDerivativeAxes {
+    fn is_empty(&self) -> bool {
+        self.nodes.is_empty() && self.branches.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.nodes.len() + self.branches.len()
+    }
+
+    fn union_with(&mut self, other: LocalDerivativeAxes) {
+        self.nodes.extend(other.nodes);
+        self.branches.extend(other.branches);
+    }
+}
+
+type LocalDerivativeLayout = HashMap<String, LocalDerivativeAxes>;
+
 fn select_bounded_transient_local_variable_subset(
     artifact: &CanonicalIrArtifact,
     candidate_equations: &HashSet<EquationId>,
     full_transient_liveness: &TransientLiveness,
     reactive_liveness: &ReactiveLiveness,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
     branch_axis_count: usize,
 ) -> Result<Option<SelectedTransientLocalVariables>, RustBackendError> {
     if let Some(selection) = transient_local_variable_selection_for_equations(
@@ -27112,6 +27263,7 @@ fn select_bounded_transient_local_variable_subset(
         candidate_equations,
         full_transient_liveness,
         reactive_liveness,
+        branch_current_unknowns,
         branch_axis_count,
     )? {
         return Ok(Some(selection));
@@ -27129,6 +27281,7 @@ fn select_bounded_transient_local_variable_subset(
             &selected_equations,
             full_transient_liveness,
             reactive_liveness,
+            branch_current_unknowns,
             branch_axis_count,
         )? {
             selected = Some(selection);
@@ -27144,6 +27297,7 @@ fn transient_local_variable_selection_for_equations(
     equations: &HashSet<EquationId>,
     full_transient_liveness: &TransientLiveness,
     reactive_liveness: &ReactiveLiveness,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
     branch_axis_count: usize,
 ) -> Result<Option<SelectedTransientLocalVariables>, RustBackendError> {
     if equations.is_empty() {
@@ -27165,7 +27319,8 @@ fn transient_local_variable_selection_for_equations(
             liveness.derivatives.insert(name.clone());
         }
     }
-    let derivative_variables = collect_local_derivative_variables(artifact, &liveness)?;
+    let derivative_layout =
+        collect_local_derivative_layout(artifact, &liveness, branch_current_unknowns)?;
     let variables = artifact
         .hir
         .variables
@@ -27182,7 +27337,7 @@ fn transient_local_variable_selection_for_equations(
             false,
             &liveness,
             reactive_liveness,
-            &derivative_variables,
+            &derivative_layout,
             branch_axis_count,
         )
     {
@@ -27190,7 +27345,7 @@ fn transient_local_variable_selection_for_equations(
     }
     Ok(Some(SelectedTransientLocalVariables {
         liveness,
-        derivative_variables,
+        derivative_layout,
         variables,
     }))
 }
@@ -27254,7 +27409,7 @@ fn reactive_local_variable_selection_for_equations(
             true,
             transient_liveness,
             &liveness,
-            &HashSet::new(),
+            &LocalDerivativeLayout::new(),
             branch_axis_count,
         )
     {
@@ -27279,21 +27434,25 @@ fn local_storage_supports_value_type(value_type: CanonicalValueType) -> bool {
 fn local_variable_storage_is_bounded(
     artifact: &CanonicalIrArtifact,
     transient_liveness: &TransientLiveness,
-    derivative_variables: &HashSet<String>,
-    branch_axis_count: usize,
+    derivative_layout: &LocalDerivativeLayout,
+    _branch_axis_count: usize,
 ) -> bool {
-    let derivative_axis_count = artifact.mir.nodes.len() + branch_axis_count;
     let mut slots = 0usize;
     for variable in &artifact.hir.variables {
         let value_live = transient_liveness.is_value_live(variable.name.as_str());
         let derivatives_live = variable.value_type == CanonicalValueType::Real
             && transient_liveness.is_derivative_live(variable.name.as_str())
-            && derivative_variables.contains(variable.name.as_str());
+            && derivative_layout.contains_key(variable.name.as_str());
         if value_live || derivatives_live {
             slots = slots.saturating_add(1);
         }
         if derivatives_live {
-            slots = slots.saturating_add(derivative_axis_count);
+            slots = slots.saturating_add(
+                derivative_layout
+                    .get(variable.name.as_str())
+                    .map(LocalDerivativeAxes::len)
+                    .unwrap_or(0),
+            );
         }
         if slots > MAX_LOCAL_VARIABLE_STORAGE_SLOTS {
             return false;
@@ -27419,7 +27578,7 @@ fn emit_local_variable_initializers(
     variable_fields: &HashMap<String, String>,
     branch_axis_count: usize,
     transient_liveness: &TransientLiveness,
-    derivative_variables: &HashSet<String>,
+    derivative_layout: &LocalDerivativeLayout,
     out: &mut String,
 ) -> HashMap<String, LoweredVariable> {
     let mut variables = HashMap::new();
@@ -27428,7 +27587,7 @@ fn emit_local_variable_initializers(
         variable_fields,
         branch_axis_count,
         transient_liveness,
-        derivative_variables,
+        derivative_layout,
         None,
         &mut variables,
         out,
@@ -27441,7 +27600,7 @@ fn local_variable_lowerings(
     variable_fields: &HashMap<String, String>,
     branch_axis_count: usize,
     transient_liveness: &TransientLiveness,
-    derivative_variables: &HashSet<String>,
+    derivative_layout: &LocalDerivativeLayout,
     selected_variables: Option<&HashSet<String>>,
 ) -> Vec<(String, LoweredVariable)> {
     let mut lowerings = Vec::new();
@@ -27452,7 +27611,7 @@ fn local_variable_lowerings(
         let value_live = transient_liveness.is_value_live(variable.name.as_str());
         let derivatives_live = variable.value_type == CanonicalValueType::Real
             && transient_liveness.is_derivative_live(variable.name.as_str())
-            && derivative_variables.contains(variable.name.as_str());
+            && derivative_layout.contains_key(variable.name.as_str());
         if !value_live && !derivatives_live {
             continue;
         }
@@ -27463,21 +27622,28 @@ fn local_variable_lowerings(
         let value = local_variable_value_name(field);
 
         let mut derivatives = Vec::with_capacity(artifact.mir.nodes.len());
+        let axes = derivative_layout.get(variable.name.as_str());
         for node_index in 0..artifact.mir.nodes.len() {
-            derivatives.push(if derivatives_live {
-                local_variable_node_derivative_name(field, node_index)
-            } else {
-                "0.0".to_string()
-            });
+            derivatives.push(
+                if derivatives_live && axes.is_some_and(|axes| axes.nodes.contains(&node_index)) {
+                    local_variable_node_derivative_name(field, node_index)
+                } else {
+                    "0.0".to_string()
+                },
+            );
         }
 
         let mut branch_derivatives = Vec::with_capacity(branch_axis_count);
         for branch_index in 0..branch_axis_count {
-            branch_derivatives.push(if derivatives_live {
-                local_variable_branch_derivative_name(field, branch_index)
-            } else {
-                "0.0".to_string()
-            });
+            branch_derivatives.push(
+                if derivatives_live
+                    && axes.is_some_and(|axes| axes.branches.contains(&branch_index))
+                {
+                    local_variable_branch_derivative_name(field, branch_index)
+                } else {
+                    "0.0".to_string()
+                },
+            );
         }
 
         let condition = (variable.value_type == CanonicalValueType::Boolean)
@@ -27617,7 +27783,7 @@ fn emit_selected_local_variable_initializers(
     variable_fields: &HashMap<String, String>,
     branch_axis_count: usize,
     transient_liveness: &TransientLiveness,
-    derivative_variables: &HashSet<String>,
+    derivative_layout: &LocalDerivativeLayout,
     selected_variables: Option<&HashSet<String>>,
     variables: &mut HashMap<String, LoweredVariable>,
     out: &mut String,
@@ -27627,7 +27793,7 @@ fn emit_selected_local_variable_initializers(
         variable_fields,
         branch_axis_count,
         transient_liveness,
-        derivative_variables,
+        derivative_layout,
         selected_variables,
     );
     emit_lowered_local_variable_declarations(lowerings.iter().map(|(_, variable)| variable), out);
@@ -27857,31 +28023,38 @@ fn local_helper_block_body(block: &str, local_usage: &LocalHelperUsage) -> Strin
     body
 }
 
-fn collect_local_derivative_variables(
+fn collect_local_derivative_layout(
     artifact: &CanonicalIrArtifact,
     transient_liveness: &TransientLiveness,
-) -> Result<HashSet<String>, RustBackendError> {
-    let mut active = HashSet::new();
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
+) -> Result<LocalDerivativeLayout, RustBackendError> {
+    let mut active = LocalDerivativeLayout::new();
     loop {
-        let before = active.len();
-        collect_local_derivative_statement_targets(
+        let before = local_derivative_layout_slot_count(&active);
+        collect_local_derivative_statement_target_axes(
             artifact,
             &artifact.hir.statements,
             transient_liveness,
+            branch_current_unknowns,
             &mut active,
         )?;
-        if active.len() == before {
+        if local_derivative_layout_slot_count(&active) == before {
             break;
         }
     }
     Ok(active)
 }
 
-fn collect_local_derivative_statement_targets(
+fn local_derivative_layout_slot_count(layout: &LocalDerivativeLayout) -> usize {
+    layout.values().map(LocalDerivativeAxes::len).sum()
+}
+
+fn collect_local_derivative_statement_target_axes(
     artifact: &CanonicalIrArtifact,
     statements: &[HirStatement],
     transient_liveness: &TransientLiveness,
-    active: &mut HashSet<String>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
+    active: &mut LocalDerivativeLayout,
 ) -> Result<(), RustBackendError> {
     for statement in statements {
         match statement {
@@ -27889,20 +28062,26 @@ fn collect_local_derivative_statement_targets(
                 if !transient_liveness.is_derivative_live(assignment.target_name.as_str()) {
                     continue;
                 }
-                if expr_local_derivative_may_be_nonzero(
+                let axes = expr_local_derivative_axes(
                     artifact,
                     assignment.expr.id,
                     active,
+                    branch_current_unknowns,
                     &mut HashSet::new(),
-                )? {
-                    active.insert(assignment.target_name.to_string());
+                )?;
+                if !axes.is_empty() {
+                    active
+                        .entry(assignment.target_name.to_string())
+                        .or_default()
+                        .union_with(axes);
                 }
             }
             HirStatement::Loop(loop_statement) => {
-                collect_local_derivative_statement_targets(
+                collect_local_derivative_statement_target_axes(
                     artifact,
                     &loop_statement.body,
                     transient_liveness,
+                    branch_current_unknowns,
                     active,
                 )?;
             }
@@ -27911,14 +28090,15 @@ fn collect_local_derivative_statement_targets(
     Ok(())
 }
 
-fn expr_local_derivative_may_be_nonzero(
+fn expr_local_derivative_axes(
     artifact: &CanonicalIrArtifact,
     id: ExprId,
-    active_variables: &HashSet<String>,
+    active_variables: &LocalDerivativeLayout,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
     visited: &mut HashSet<ExprId>,
-) -> Result<bool, RustBackendError> {
+) -> Result<LocalDerivativeAxes, RustBackendError> {
     if !visited.insert(id) {
-        return Ok(false);
+        return Ok(LocalDerivativeAxes::default());
     }
     let expression = artifact
         .mir
@@ -27933,55 +28113,129 @@ fn expr_local_derivative_may_be_nonzero(
         })?;
 
     match &expression.kind {
-        HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => Ok(false),
-        HirExprKind::Identifier { name } => Ok(active_variables.contains(name.as_str())),
-        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => Ok(true),
-        HirExprKind::NoiseSource { .. } => Ok(false),
+        HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => {
+            Ok(LocalDerivativeAxes::default())
+        }
+        HirExprKind::Identifier { name } => Ok(active_variables
+            .get(name.as_str())
+            .cloned()
+            .unwrap_or_default()),
+        HirExprKind::BranchAccess { access, pos, neg } => {
+            let mut axes = LocalDerivativeAxes::default();
+            if access.as_str() == "I" {
+                let pos_index = node_index_by_name(artifact, pos.as_str());
+                let neg_index = neg
+                    .as_deref()
+                    .and_then(|node| node_index_by_name(artifact, node));
+                if let Some(slot) =
+                    branch_current_unknowns.get(&branch_pair_key(pos_index, neg_index))
+                {
+                    axes.branches.insert(slot.slot);
+                }
+            } else {
+                if let Some(node) = node_index_by_name(artifact, pos.as_str()) {
+                    axes.nodes.insert(node);
+                }
+                if let Some(neg) = neg
+                    && let Some(node) = node_index_by_name(artifact, neg.as_str())
+                {
+                    axes.nodes.insert(node);
+                }
+            }
+            Ok(axes)
+        }
+        HirExprKind::NamedBranchAccess { access, name } => {
+            let mut axes = LocalDerivativeAxes::default();
+            if access.as_str() == "I" {
+                if let Some(slot) = branch_current_unknowns.get(name.as_str()) {
+                    axes.branches.insert(slot.slot);
+                }
+            } else if let Some(branch) = artifact
+                .mir
+                .branches
+                .iter()
+                .find(|branch| branch.name.as_str() == name.as_str())
+            {
+                if let Some(node) = branch.pos_node {
+                    axes.nodes.insert(node.index() as usize);
+                }
+                if let Some(node) = branch.neg_node {
+                    axes.nodes.insert(node.index() as usize);
+                }
+            }
+            Ok(axes)
+        }
+        HirExprKind::NoiseSource { .. } => Ok(LocalDerivativeAxes::default()),
         HirExprKind::Call { name, .. } | HirExprKind::SystemFunction { name, .. }
             if is_noise_name(name.as_str())
                 || is_analysis_name(name.as_str())
                 || is_value_only_system_function_name(name.as_str()) =>
         {
-            Ok(false)
+            Ok(LocalDerivativeAxes::default())
         }
         HirExprKind::AnalogOperator {
             op: HirAnalogOperator::Ddx { .. },
-        } => Ok(true),
+        } => {
+            let mut axes = LocalDerivativeAxes::default();
+            axes.nodes.extend(0..artifact.mir.nodes.len());
+            axes.branches
+                .extend(0..branch_derivative_axis_count(branch_current_unknowns));
+            Ok(axes)
+        }
         HirExprKind::Unary { op, operand } if matches!(op.as_str(), "Not" | "BitNot") => {
             let _ = operand;
-            Ok(false)
+            Ok(LocalDerivativeAxes::default())
         }
         HirExprKind::Binary { op, .. }
             if comparison_operator(op.as_str()).is_some()
                 || matches!(op.as_str(), "And" | "Or" | "BitAnd" | "BitOr") =>
         {
-            Ok(false)
+            Ok(LocalDerivativeAxes::default())
         }
         HirExprKind::Conditional {
             then_expr,
             else_expr,
             ..
-        } => Ok(expr_local_derivative_may_be_nonzero(
-            artifact,
-            *then_expr,
-            active_variables,
-            &mut HashSet::new(),
-        )? || expr_local_derivative_may_be_nonzero(
-            artifact,
-            *else_expr,
-            active_variables,
-            &mut HashSet::new(),
-        )?),
+        } => {
+            let mut axes = expr_local_derivative_axes(
+                artifact,
+                *then_expr,
+                active_variables,
+                branch_current_unknowns,
+                &mut HashSet::new(),
+            )?;
+            axes.union_with(expr_local_derivative_axes(
+                artifact,
+                *else_expr,
+                active_variables,
+                branch_current_unknowns,
+                &mut HashSet::new(),
+            )?);
+            Ok(axes)
+        }
         other => {
+            let mut axes = LocalDerivativeAxes::default();
             for child in expression_children(other) {
-                if expr_local_derivative_may_be_nonzero(artifact, child, active_variables, visited)?
-                {
-                    return Ok(true);
-                }
+                axes.union_with(expr_local_derivative_axes(
+                    artifact,
+                    child,
+                    active_variables,
+                    branch_current_unknowns,
+                    visited,
+                )?);
             }
-            Ok(false)
+            Ok(axes)
         }
     }
+}
+
+fn node_index_by_name(artifact: &CanonicalIrArtifact, name: &str) -> Option<usize> {
+    artifact
+        .mir
+        .nodes
+        .iter()
+        .find(|node| node.name.as_str() == name)
+        .map(|node| node.id.index() as usize)
 }
 
 fn emit_variable_initializers(
@@ -43125,6 +43379,8 @@ impl CompactAdEmitter<'_> {
             HirExprKind::Identifier { name } => {
                 if let Some(field) = self.parameter_fields.get(name.as_str()) {
                     Ok(Some(format!("params.{field}")))
+                } else if let Some(variable) = self.variables.get(name.as_str()) {
+                    Ok(Some(variable.value.clone()))
                 } else if let Some(index) = self.variable_index(name.as_str())? {
                     Ok(Some(format!("scratch.values[{index}]")))
                 } else {
