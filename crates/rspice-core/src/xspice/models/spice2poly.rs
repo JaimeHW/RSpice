@@ -235,9 +235,12 @@ fn build_poly_plan(input_count: usize, coef: &[Value]) -> CmResult<Arc<PolyPlan>
     validate_coef(coef)?;
 
     let mut exponents = vec![0usize; input_count];
-    let mut terms = Vec::with_capacity(coef.len() - 1);
+    let mut terms = Vec::with_capacity(coef.iter().skip(1).filter(|&&c| c != 0.0).count());
     for coefficient in coef.iter().skip(1).copied() {
         nxtpwr(&mut exponents);
+        if coefficient == 0.0 {
+            continue;
+        }
         terms.push(PolyTerm {
             coefficient,
             exponents: exponents.clone(),
@@ -495,6 +498,34 @@ mod tests {
         assert!((result.value - 228.0).abs() < 1.0e-12);
         assert!((result.partials[0] - 66.0).abs() < 1.0e-12);
         assert!((result.partials[1] - 98.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn polynomial_plan_skips_zero_terms_without_changing_exponent_order() {
+        let inputs = vec![AnalogValue::new(2.0), AnalogValue::new(3.0)];
+        let plan = build_poly_plan(
+            inputs.len(),
+            &[1.0, 0.0, 3.0, 0.0, 5.0, 0.0, 7.0, 0.0, 0.0, 10.0],
+        )
+        .expect("valid sparse polynomial plan");
+
+        assert_eq!(
+            plan.terms
+                .iter()
+                .map(|term| (term.coefficient, term.exponents.as_slice()))
+                .collect::<Vec<_>>(),
+            vec![
+                (3.0, &[0, 1][..]),
+                (5.0, &[1, 1][..]),
+                (7.0, &[3, 0][..]),
+                (10.0, &[0, 3][..]),
+            ]
+        );
+
+        let result = evaluate_poly(&inputs, &plan, 1.0);
+        assert!((result.value - 366.0).abs() < 1.0e-12);
+        assert!((result.partials[0] - 99.0).abs() < 1.0e-12);
+        assert!((result.partials[1] - 283.0).abs() < 1.0e-12);
     }
 
     #[test]
