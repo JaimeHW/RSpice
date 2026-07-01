@@ -1284,6 +1284,8 @@ impl XyceTestRunner {
                         None
                     },
                 };
+                let point_netlist = Self::dc_sweep_point_netlist(&batch.netlist, dc, sweep_point)?;
+                let probe_netlist = point_netlist.as_ref().unwrap_or(&batch.netlist);
                 for (column_index, column) in data_columns.iter().enumerate() {
                     let expected = row[column_index + value_offset];
                     let (probe, actual) = match column {
@@ -1294,7 +1296,7 @@ impl XyceTestRunner {
                             name.as_str(),
                             Self::evaluate_dc_probe(
                                 name,
-                                &batch.netlist,
+                                probe_netlist,
                                 dc,
                                 sweep_point,
                                 &point.result,
@@ -1832,13 +1834,43 @@ impl XyceTestRunner {
         if Self::source_is_independent_source(netlist, source)
             || source.eq_ignore_ascii_case("TEMP")
             || source.eq_ignore_ascii_case("TEMPER")
+            || Self::scalar_parameter_sweep_source_is_supported(netlist, source)
         {
             return Ok(());
         }
         Err(format!(
-            "DC sweep source '{}' is not a supported top-level independent source or TEMP sweep",
+            "DC sweep source '{}' is not a supported top-level independent source, scalar parameter, or TEMP sweep",
             source
         ))
+    }
+
+    fn dc_sweep_point_netlist(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+    ) -> Result<Option<Netlist>, String> {
+        let mut overrides = Vec::new();
+        if Self::scalar_parameter_sweep_source_is_supported(netlist, &dc.source) {
+            overrides.push((dc.source.clone(), sweep_point.primary));
+        }
+        if let Some(sweep2) = &dc.sweep2
+            && Self::scalar_parameter_sweep_source_is_supported(netlist, &sweep2.source)
+            && let Some(secondary) = sweep_point.secondary
+        {
+            overrides.push((sweep2.source.clone(), secondary));
+        }
+        if overrides.is_empty() {
+            return Ok(None);
+        }
+
+        Engine::create_perturbed_netlist_multi(netlist, &overrides)
+            .map(|(netlist, _)| Some(netlist))
+            .map_err(|err| {
+                format!(
+                    "failed to build Xyce DC parameter-sweep netlist for {:?}: {}",
+                    overrides, err
+                )
+            })
     }
 
     fn reject_unsupported_source_directives(source: &str) -> Result<(), String> {
@@ -3309,6 +3341,14 @@ impl XyceTestRunner {
             || parameter_name.eq_ignore_ascii_case("TEMPER")
             || parameter_name.eq_ignore_ascii_case("VT")
             || netlist.params.get(parameter_name).is_some()
+    }
+
+    fn scalar_parameter_sweep_source_is_supported(netlist: &Netlist, parameter_name: &str) -> bool {
+        netlist
+            .params
+            .all_params()
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(parameter_name))
     }
 
     fn effective_resistor_value(netlist: &Netlist, name: &str) -> Option<Value> {

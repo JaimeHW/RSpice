@@ -302,14 +302,16 @@ impl Engine {
 
         let outer_is_temp = sweep2.source.eq_ignore_ascii_case("TEMP")
             || sweep2.source.eq_ignore_ascii_case("TEMPER");
+        let outer_is_parameter = Self::netlist_has_numeric_parameter(netlist, &sweep2.source);
 
         let mut results = Vec::new();
+        let mut any_outer_parameter_binding = false;
         for &outer_value in &outer_points {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let mut swept = netlist.clone();
-            if outer_is_temp {
+            let swept = if outer_is_temp {
+                let mut swept = netlist.clone();
                 swept.options.temp = Some(outer_value);
                 swept.params.set("TEMP", outer_value);
                 swept.params.set("TEMPER", outer_value);
@@ -319,12 +321,26 @@ impl Engine {
                         crate::analysis::temperature::celsius_to_kelvin(outer_value),
                     ),
                 );
+                swept
+            } else if outer_is_parameter {
+                let (swept, bindings) =
+                    Self::create_perturbed_netlist(netlist, &sweep2.source, outer_value)?;
+                any_outer_parameter_binding |= bindings > 0;
+                swept
             } else {
+                let mut swept = netlist.clone();
                 Self::override_independent_source_dc(&mut swept, &sweep2.source, outer_value)?;
-            }
+                swept
+            };
             let inner =
                 self.run_dc_sweep_spec_with_report_and_abort(&swept, source_name, primary, abort)?;
             results.extend(inner);
+        }
+        if outer_is_parameter && netlist.source_text.is_some() && !any_outer_parameter_binding {
+            return Err(SimulationError::Circuit(format!(
+                "Second DC sweep parameter '{}' is not bound to any netlist expression",
+                sweep2.source
+            )));
         }
         Ok(results)
     }
@@ -430,6 +446,15 @@ impl Engine {
                 });
             }
             return Ok(results);
+        }
+
+        if Self::netlist_has_numeric_parameter(netlist, source_name) {
+            return self.run_dc_parameter_sweep_spec_with_report_and_abort(
+                netlist,
+                source_name,
+                &sweep_points,
+                abort,
+            );
         }
 
         // Build circuit once
@@ -627,6 +652,54 @@ impl Engine {
 
         sweep_result
     }
+
+    fn run_dc_parameter_sweep_spec_with_report_and_abort(
+        &self,
+        netlist: &Netlist,
+        param_name: &str,
+        sweep_points: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
+        let mut results = Vec::with_capacity(sweep_points.len());
+        let mut any_binding = false;
+
+        for &sweep_value in sweep_points {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let (swept, bindings) =
+                Self::create_perturbed_netlist(netlist, param_name, sweep_value)?;
+            any_binding |= bindings > 0;
+            let (result, device_op_report) = self.run_dc_op_with_report(&swept).map_err(|err| {
+                SimulationError::Circuit(format!(
+                    "DC parameter sweep {} = {} failed: {}",
+                    param_name, sweep_value, err
+                ))
+            })?;
+            results.push(DcSweepPointResult {
+                sweep_value,
+                result,
+                device_op_report,
+            });
+        }
+
+        if netlist.source_text.is_some() && !any_binding {
+            return Err(SimulationError::Circuit(format!(
+                "DC sweep parameter '{}' is not bound to any netlist expression",
+                param_name
+            )));
+        }
+
+        Ok(results)
+    }
+
+    fn netlist_has_numeric_parameter(netlist: &Netlist, param_name: &str) -> bool {
+        netlist
+            .params
+            .all_params()
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(param_name))
+    }
 }
 
 #[cfg(test)]
@@ -757,5 +830,43 @@ D1 0 in DMOD
             voltages.windows(2).all(|pair| pair[0] > pair[1]),
             "diode voltage should become more negative as source current increases: {voltages:?}"
         );
+    }
+
+    #[test]
+    fn dc_sweep_supports_dependent_parameter_sources() {
+        let deck = "\
+parameter dc sweep
+.param testnorm={0.5K}
+.param r1value={testnorm*2.0}
+R2 1 0 7k
+R1 1 2 {r1value}
+V1 2 0 1000
+.dc testnorm 0.5k 0.7k 0.1k
+.print dc testnorm V(1)
+.end
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let results = Engine::default()
+            .run_dc_sweep(&netlist, "testnorm", 0.5e3, 0.7e3, 0.1e3)
+            .expect("parameter DC sweep solves");
+
+        assert_eq!(results.len(), 3);
+        for ((actual_sweep, result), (expected_sweep, expected_voltage)) in results.iter().zip([
+            (500.0, 875.0),
+            (600.0, 853.6585365853658),
+            (700.0, 833.3333333333334),
+        ]) {
+            assert!(
+                (actual_sweep - expected_sweep).abs() < 1.0e-12,
+                "unexpected sweep point {actual_sweep}, expected {expected_sweep}"
+            );
+            let actual_voltage = result
+                .try_voltage_named("1")
+                .expect("swept node voltage is present");
+            assert!(
+                (actual_voltage - expected_voltage).abs() < 1.0e-9,
+                "unexpected V(1) at testnorm={actual_sweep}: {actual_voltage}, expected {expected_voltage}"
+            );
+        }
     }
 }
