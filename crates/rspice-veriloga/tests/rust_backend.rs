@@ -1383,7 +1383,7 @@ fn rust_backend_auto_scalarizes_hybrid_ddt_current_equations() {
 }
 
 #[test]
-fn rust_backend_auto_uses_local_storage_for_hybrid_straight_line_assignments() {
+fn rust_backend_auto_scalarizes_hybrid_straight_line_assignments() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(hybrid_idt_straight_line_assignment_source())
         .expect("canonical IR");
@@ -1403,30 +1403,35 @@ fn rust_backend_auto_uses_local_storage_for_hybrid_straight_line_assignments() {
 
     assert!(
         stamp.contains("eval_idt") && stamp.contains("eval_ddt"),
-        "unsupported scalar intrinsic should force hybrid while DDT/IDT provide scalarized roots:\n{stamp}"
+        "DDT/IDT roots should stay on scalar transient lowering:\n{stamp}"
     );
-    assert!(stamp.contains("let mut var_drive: f64 = 0.0;"), "{stamp}");
-    assert!(stamp.contains("var_drive_dn0"), "{stamp}");
+    assert!(stamp.contains(".floor()"), "{stamp}");
     assert!(
-        !stamp.contains("let s = match &mut self.scratch")
-            && !stamp.contains("scratch.values")
-            && !stamp.contains("scratch.node_derivatives"),
-        "hybrid straight-line real assignments should use local scalar storage instead of scratch:\n{stamp}"
+        stamp.contains("stamper.stamp_current_const_local("),
+        "floor residual should lower as zero-derivative scalar output:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("let mut var_drive")
+            && !stamp.contains("GenericAdValue")
+            && !stamp.contains("AdValue")
+            && !stamp.contains("Scratch")
+            && !stamp.contains("scratch."),
+        "hybrid straight-line assignments should stay on scalar output instead of legacy AD scratch:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
 
 #[test]
-fn rust_backend_auto_uses_local_storage_for_legacy_straight_line_assignments() {
+fn rust_backend_auto_scalarizes_floor_and_ceil_assignment_chains() {
     let artifact = VerilogACompiler::default()
-        .compile_canonical_ir(legacy_straight_line_local_storage_source())
+        .compile_canonical_ir(floor_ceil_straight_line_assignment_source())
         .expect("canonical IR");
 
     let generated = RustTranspiler::new_auto(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
-    .expect("transpile straight-line legacy fallback assignments through auto backend");
+    .expect("transpile straight-line floor/ceil assignments through auto backend");
     let stamp = generated
         .files
         .iter()
@@ -1435,23 +1440,25 @@ fn rust_backend_auto_uses_local_storage_for_legacy_straight_line_assignments() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("let mut var_drive: f64 = 0.0;"), "{stamp}");
-    assert!(stamp.contains("var_drive_dn0"), "{stamp}");
+    assert!(stamp.contains(".floor()"), "{stamp}");
+    assert!(stamp.contains(".ceil()"), "{stamp}");
     assert!(
-        !stamp.contains("self.scalar_v"),
-        "fixture should exercise the legacy fallback path, not the pure scalar backend:\n{stamp}"
+        stamp.contains("stamper.stamp_current_const_local("),
+        "floor/ceil have zero large-signal derivatives and should use a const current stamp:\n{stamp}"
     );
     assert!(
-        !stamp.contains("let s = match &mut self.scratch")
-            && !stamp.contains("scratch.values")
-            && !stamp.contains("scratch.node_derivatives"),
-        "bounded straight-line legacy fallback should use native local storage instead of scratch:\n{stamp}"
+        !stamp.contains("let eq0_")
+            && !stamp.contains("GenericAdValue")
+            && !stamp.contains("AdValue")
+            && !stamp.contains("Scratch")
+            && !stamp.contains("scratch."),
+        "floor/ceil assignment chains should stay on scalar output instead of legacy AD scratch:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
 
 #[test]
-fn rust_backend_auto_uses_local_storage_for_hybrid_integer_flags() {
+fn rust_backend_auto_scalarizes_hybrid_integer_flags() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(hybrid_integer_flag_local_storage_source())
         .expect("canonical IR");
@@ -1470,21 +1477,19 @@ fn rust_backend_auto_uses_local_storage_for_hybrid_integer_flags() {
         .as_str();
 
     assert!(stamp.contains("eval_ddt"), "{stamp}");
+    assert!(stamp.contains("let v4: bool ="), "{stamp}");
+    assert!(stamp.contains(".floor()"), "{stamp}");
     assert!(
-        stamp.contains("let mut var_use_left: f64 = 0.0;"),
-        "{stamp}"
-    );
-    assert!(stamp.contains("let mut var_drive: f64 = 0.0;"), "{stamp}");
-    assert!(
-        stamp.contains("if (var_use_left != 0.0)") || stamp.contains("if var_use_left"),
+        stamp.contains("if v4"),
         "integer flag should be reused as a local condition:\n{stamp}"
     );
     assert!(
-        !stamp.contains("let s = match &mut self.scratch")
-            && !stamp.contains("scratch.values")
-            && !stamp.contains("scratch.bool_values")
-            && !stamp.contains("scratch.node_derivatives"),
-        "hybrid integer/boolean flags should not force residual locals into scratch:\n{stamp}"
+        stamp.contains("stamper.stamp_current_const_local(")
+            && !stamp.contains("GenericAdValue")
+            && !stamp.contains("AdValue")
+            && !stamp.contains("Scratch")
+            && !stamp.contains("scratch."),
+        "hybrid integer/boolean flags should stay on scalar output instead of legacy AD scratch:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -1508,10 +1513,14 @@ fn rust_backend_auto_treats_scaled_zero_derivatives_as_dead_local_lanes() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("THERMAL_VOLTAGE_PER_K"), "{stamp}");
+    assert!(stamp.contains("0.025864925786328753"), "{stamp}");
     assert!(
         !stamp.contains("0.0 * THERMAL_VOLTAGE_PER_K"),
         "scaled zero derivatives should fold away before local lane assignment:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("AdValue") && !stamp.contains("Scratch"),
+        "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -1535,8 +1544,12 @@ fn rust_backend_auto_types_pow_derivative_literal_receivers() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("(2.0_f64).ln()"), "{stamp}");
+    assert!(stamp.contains("0.6931471805599453"), "{stamp}");
     assert!(!stamp.contains("(2.0).ln()"), "{stamp}");
+    assert!(
+        !stamp.contains("AdValue") && !stamp.contains("Scratch"),
+        "{stamp}"
+    );
     assert_generated_rust_compiles(&generated);
 }
 
@@ -1561,7 +1574,9 @@ fn rust_backend_auto_uses_local_storage_for_reactive_assignments() {
 
     assert!(stamp.contains("pub fn stamp_reactive"), "{stamp}");
     assert!(
-        stamp.contains("let mut var_charge_rv: f64 = 0.0;"),
+        stamp.contains("pub(crate) struct StampLocals")
+            && stamp.contains("pub(crate) var_charge_rv: f64")
+            && stamp.contains("locals.var_charge_rv = 0.0;"),
         "{stamp}"
     );
     assert!(!stamp.contains("ReactiveScratch"), "{stamp}");
@@ -1573,7 +1588,7 @@ fn rust_backend_auto_uses_local_storage_for_reactive_assignments() {
 }
 
 #[test]
-fn rust_backend_auto_materializes_local_derivatives_for_compact_ad_residuals() {
+fn rust_backend_auto_scalarizes_compact_ad_residuals() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(hybrid_local_storage_with_scratch_residual_source())
         .expect("canonical IR");
@@ -1600,30 +1615,28 @@ fn rust_backend_auto_materializes_local_derivatives_for_compact_ad_residuals() {
         "compact AD residuals must not force scratch-free residual equations out of local scalar stamps:\n{stamp}"
     );
     assert!(
-        stamp.contains("let mut var_legacy: f64 = 0.0;")
-            && stamp.contains("var_legacy_dn0")
-            && stamp.contains("var_legacy_dn1"),
-        "compact AD operands should keep native local derivative lanes:\n{stamp}"
+        stamp.contains("stamper.stamp_current_const_local("),
+        "floor residuals should lower as zero-derivative scalar output:\n{stamp}"
     );
     assert!(
         !stamp.contains("GenericAdValue")
             && !stamp.contains("type A =")
             && !stamp.contains("A::from_derivatives(var_legacy")
             && !stamp.contains("AdValue::from_derivatives(var_legacy"),
-        "local-derivative residuals should stay on scalar lowering instead of rebuilding AdValue operands:\n{stamp}"
+        "compact residuals should stay on scalar lowering instead of rebuilding AdValue operands:\n{stamp}"
     );
     assert!(
         !stamp.contains("let s = match &mut self.scratch")
             && !stamp.contains("scratch.values")
             && !stamp.contains("scratch.node_derivatives")
             && !stamp.contains("s.ad_value("),
-        "local-derivative compact AD residual should avoid legacy scratch storage:\n{stamp}"
+        "scalar compact residual should avoid legacy scratch storage:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
 
 #[test]
-fn rust_backend_auto_uses_bounded_local_storage_subset_for_wide_mixed_residuals() {
+fn rust_backend_auto_scalarizes_wide_mixed_residuals() {
     let source = wide_mixed_hybrid_local_storage_source(35, 470);
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&source)
@@ -1663,11 +1676,9 @@ fn rust_backend_auto_uses_bounded_local_storage_subset_for_wide_mixed_residuals(
             && !state.contains("reactive_scratch:"),
         "wide mixed residual should not reserve legacy scratch storage in generated state"
     );
-    assert!(stamp.contains("let mut var_drive: f64 = 0.0;"), "{stamp}");
-    assert!(stamp.contains("let mut var_shaped: f64 = 0.0;"), "{stamp}");
     assert!(
-        stamp.contains("let mut var_x0") && stamp.contains("let mut var_x469"),
-        "wide residual variables should use sparse scalar local derivative storage"
+        !stamp.contains("let mut var_"),
+        "wide residual variables should lower through OptIR scalar values"
     );
     assert!(
         stamp.contains("stamper.stamp_current_const_local("),
@@ -1739,8 +1750,13 @@ fn rust_backend_auto_transpiles_shipped_asmhemt_with_mixed_local_storage() {
         "ASM-HEMT should not reserve legacy scratch storage in generated state"
     );
     assert!(
-        stamp.contains("let mut var_"),
-        "ASM-HEMT should retain native local variables for selected scalar regions:\n{stamp}"
+        stamp.contains("pub(crate) struct StampLocals")
+            && generated
+                .files
+                .iter()
+                .any(|file| file.relative_path.starts_with("stamp_blocks_")
+                    && file.contents.contains("locals.var_")),
+        "ASM-HEMT should retain native scalar local storage for selected scalar regions:\n{stamp}"
     );
     assert!(
         !stamp.contains("GenericAdValue")
@@ -1782,8 +1798,8 @@ fn rust_backend_auto_bounds_hybrid_local_storage_width() {
         "wide residual assignment chains should stay on sparse scalar local derivative storage"
     );
     assert!(
-        stamp.contains("let mut var_x0") && stamp.contains("let mut var_x469"),
-        "wide residual assignment chains should emit bounded sparse scalar local derivative storage"
+        !stamp.contains("let mut var_") && stamp.contains("stamper.stamp_current_const_local("),
+        "wide residual assignment chains should lower through scalar values without legacy local storage"
     );
 }
 
@@ -9890,17 +9906,21 @@ fn rust_backend_splits_large_local_variable_blocks_without_scratch() {
         .as_str();
 
     assert!(!stamp.contains("Scratch::new_box"), "{stamp}");
-    assert!(stamp.contains("let mut var_acc: f64 = 0.0;"), "{stamp}");
     assert!(
-        stamp.contains("Self::stamp_transient_block_0(") && stamp.contains("&mut var_acc"),
+        stamp.contains("pub(crate) struct StampLocals")
+            && stamp.contains("pub(crate) var_acc: f64"),
         "{stamp}"
     );
-    assert!(helper.contains("var_acc_slot: &mut f64"), "{helper}");
     assert!(
-        helper.contains("let mut var_acc: f64 = *var_acc_slot;"),
+        stamp.contains("Self::stamp_transient_block_0(&mut locals);"),
+        "{stamp}"
+    );
+    assert!(helper.contains("locals: &mut StampLocals"), "{helper}");
+    assert!(
+        helper.contains("locals.var_acc =") || helper.contains("locals.var_acc +"),
         "{helper}"
     );
-    assert!(helper.contains("*var_acc_slot = var_acc;"), "{helper}");
+    assert!(!helper.contains("var_acc_slot"), "{helper}");
     assert!(!helper.contains("Scratch"), "{helper}");
     assert_generated_rust_compiles(&generated);
 }
@@ -18767,9 +18787,9 @@ endmodule
 "#
 }
 
-fn legacy_straight_line_local_storage_source() -> &'static str {
+fn floor_ceil_straight_line_assignment_source() -> &'static str {
     r#"
-module legacy_straight_line_local_storage(p, n);
+module floor_ceil_straight_line_assignments(p, n);
     inout p, n;
     electrical p, n;
     parameter real gain = 2.0;
@@ -18778,7 +18798,7 @@ module legacy_straight_line_local_storage(p, n);
     analog begin
         drive = gain * V(p, n);
         shaped = drive + V(p, n) * V(p, n);
-        I(p, n) <+ floor(shaped);
+        I(p, n) <+ floor(shaped) + ceil(0.5 * shaped);
     end
 endmodule
 "#

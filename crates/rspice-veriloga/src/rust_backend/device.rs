@@ -277,37 +277,29 @@ fn stamp_helper_params_with_locals(
 
 #[derive(Debug, Clone, Default)]
 struct LocalHelperUsage {
-    read_only: Vec<String>,
-    mutable: Vec<String>,
+    uses_frame: bool,
 }
 
 impl LocalHelperUsage {
     fn is_empty(&self) -> bool {
-        self.read_only.is_empty() && self.mutable.is_empty()
+        !self.uses_frame
     }
 }
 
 fn stamp_helper_local_call_args(local_usage: &LocalHelperUsage) -> Vec<String> {
-    let mut args = Vec::new();
-    args.extend(local_usage.read_only.iter().cloned());
-    args.extend(
-        local_usage
-            .mutable
-            .iter()
-            .map(|name| format!("&mut {name}")),
-    );
-    args
+    if local_usage.uses_frame {
+        vec!["&mut locals".to_string()]
+    } else {
+        Vec::new()
+    }
 }
 
 fn stamp_helper_local_params(local_usage: &LocalHelperUsage) -> String {
-    let mut params = String::new();
-    for name in &local_usage.read_only {
-        params.push_str(&format!("        {name}: f64,\n"));
+    if local_usage.uses_frame {
+        "        locals: &mut StampLocals,\n".to_string()
+    } else {
+        String::new()
     }
-    for name in &local_usage.mutable {
-        params.push_str(&format!("        {name}_slot: &mut f64,\n"));
-    }
-    params
 }
 
 fn stamp_helper_operator_params(operator_usage: StampOperatorUsage) -> String {
@@ -14004,6 +13996,7 @@ fn generate_stamp_file(
         common_usage,
         transient_operator_usage,
     );
+    materialize_local_variable_frame(&mut out);
     let helpers = helper_modules.finish();
     if !helpers.is_empty() {
         let declarations = helpers
@@ -28162,18 +28155,11 @@ fn local_helper_usage(block: &str, local_names: &[String]) -> LocalHelperUsage {
         return LocalHelperUsage::default();
     }
     let tokens = generated_identifier_tokens(block);
-    let mut usage = LocalHelperUsage::default();
-    for name in local_names {
-        if !tokens.contains(name.as_str()) {
-            continue;
-        }
-        if block_assigns_local_variable(block, name) {
-            usage.mutable.push(name.clone());
-        } else {
-            usage.read_only.push(name.clone());
-        }
+    LocalHelperUsage {
+        uses_frame: local_names
+            .iter()
+            .any(|name| tokens.contains(name.as_str())),
     }
-    usage
 }
 
 fn generated_identifier_tokens(block: &str) -> HashSet<String> {
@@ -28196,42 +28182,119 @@ fn generated_identifier_tokens(block: &str) -> HashSet<String> {
     tokens
 }
 
-fn block_assigns_local_variable(block: &str, local_name: &str) -> bool {
-    block
-        .lines()
-        .any(|line| line_assigns_local_variable(line, local_name))
+fn local_helper_block_body(
+    block: &str,
+    local_usage: &LocalHelperUsage,
+    local_names: &[String],
+) -> String {
+    if local_usage.uses_frame {
+        rewrite_generated_local_names(block, local_names)
+    } else {
+        block.to_string()
+    }
 }
 
-fn line_assigns_local_variable(line: &str, local_name: &str) -> bool {
-    let line = line.trim_start();
-    let Some(rest) = line.strip_prefix(local_name) else {
-        return false;
-    };
-    if rest.chars().next().is_some_and(is_rust_identifier_char) {
-        return false;
+fn materialize_local_variable_frame(source: &mut String) {
+    let local_names = declared_local_variable_storage_names(source);
+    if local_names.is_empty() {
+        return;
     }
-    rest.trim_start().starts_with('=')
+
+    let mut rewritten = String::with_capacity(source.len());
+    let mut locals_declared = false;
+    for line in source.lines() {
+        if line.starts_with("    pub fn ") {
+            locals_declared = false;
+        }
+        if let Some((local, rhs)) = parse_generated_mut_f64_local_initializer(line) {
+            if !locals_declared {
+                rewritten.push_str("        let mut locals = StampLocals::default();\n");
+                locals_declared = true;
+            }
+            if rhs != "0.0" {
+                let rhs = rewrite_generated_local_names(rhs, &local_names);
+                rewritten.push_str(&format!("        locals.{local} = {rhs};\n"));
+            }
+        } else {
+            rewritten.push_str(&rewrite_generated_local_names(line, &local_names));
+            rewritten.push('\n');
+        }
+    }
+
+    let local_frame = emit_stamp_local_frame(&local_names);
+    if let Some(index) = rewritten.find("impl Instance {\n") {
+        rewritten.insert_str(index, &local_frame);
+    }
+    *source = rewritten;
 }
 
-fn local_helper_block_body(block: &str, local_usage: &LocalHelperUsage) -> String {
-    let mut body = String::with_capacity(block.len() + local_usage.mutable.len() * 96);
-    for name in &local_usage.mutable {
-        body.push_str(&format!("        let mut {name}: f64 = *{name}_slot;\n"));
+fn emit_stamp_local_frame(local_names: &[String]) -> String {
+    let mut out = String::from("#[derive(Default)]\npub(crate) struct StampLocals {\n");
+    for name in local_names {
+        out.push_str(&format!("    pub(crate) {name}: f64,\n"));
     }
-    if !local_usage.mutable.is_empty() {
-        body.push('\n');
+    out.push_str("}\n\n");
+    out
+}
+
+fn rewrite_generated_local_names(source: &str, local_names: &[String]) -> String {
+    if local_names.is_empty() {
+        return source.to_string();
     }
-    body.push_str(block);
-    if !block.ends_with('\n') {
-        body.push('\n');
+    let local_names = local_names
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let mut rewritten = String::with_capacity(source.len());
+    let mut token_start = None;
+    let mut cursor = 0usize;
+    for (index, ch) in source.char_indices() {
+        if is_rust_identifier_char(ch) {
+            if token_start.is_none() {
+                token_start = Some(index);
+            }
+            continue;
+        }
+        if let Some(start) = token_start.take() {
+            push_generated_local_name_rewrite(
+                source,
+                &local_names,
+                &mut rewritten,
+                &mut cursor,
+                start,
+                index,
+            );
+        }
     }
-    if !local_usage.mutable.is_empty() {
-        body.push('\n');
+    if let Some(start) = token_start {
+        push_generated_local_name_rewrite(
+            source,
+            &local_names,
+            &mut rewritten,
+            &mut cursor,
+            start,
+            source.len(),
+        );
     }
-    for name in &local_usage.mutable {
-        body.push_str(&format!("        *{name}_slot = {name};\n"));
+    rewritten.push_str(&source[cursor..]);
+    rewritten
+}
+
+fn push_generated_local_name_rewrite(
+    source: &str,
+    local_names: &HashSet<&str>,
+    rewritten: &mut String,
+    cursor: &mut usize,
+    start: usize,
+    end: usize,
+) {
+    rewritten.push_str(&source[*cursor..start]);
+    let token = &source[start..end];
+    if local_names.contains(token) && !source[..start].ends_with('.') {
+        rewritten.push_str("locals.");
     }
-    body
+    rewritten.push_str(token);
+    *cursor = end;
 }
 
 fn collect_local_derivative_layout(
@@ -28919,6 +28982,7 @@ fn emit_local_variable_stamp_helper_call(
         helper_common_usage,
         helper_operator_usage,
         &local_usage,
+        local_names,
         helper_modules,
     );
     let helper_args = stamp_helper_call_args_with_locals(
@@ -28976,6 +29040,7 @@ fn split_marked_equation_chunks(
             helper_common_usage,
             helper_operator_usage,
             &local_usage,
+            local_names,
             helper_modules,
         );
         let helper_args = stamp_helper_call_args_with_locals(
@@ -29636,6 +29701,7 @@ fn emit_stamp_helper_method(
         common_usage,
         operator_usage,
         &LocalHelperUsage::default(),
+        &[],
         helper_modules,
     );
 }
@@ -29649,6 +29715,7 @@ fn emit_stamp_helper_method_with_locals(
     common_usage: StampHelperCommonUsage,
     operator_usage: StampOperatorUsage,
     local_usage: &LocalHelperUsage,
+    local_names: &[String],
     helper_modules: &mut StampHelperModules,
 ) {
     let stamper_type = if reactive {
@@ -29673,7 +29740,7 @@ fn emit_stamp_helper_method_with_locals(
     if local_usage.is_empty() {
         method.push_str(block);
     } else {
-        method.push_str(&local_helper_block_body(block, local_usage));
+        method.push_str(&local_helper_block_body(block, local_usage, local_names));
     }
     method.push_str("    }\n");
     helper_modules.push_method(method, reactive);
@@ -29699,6 +29766,7 @@ impl StampHelperModules {
                 method_count: 0,
                 uses_reactive_scratch: false,
                 uses_transient_scratch: false,
+                uses_local_frame: false,
             });
         }
 
@@ -29711,6 +29779,7 @@ impl StampHelperModules {
             module.uses_reactive_scratch |=
                 reactive && method_part.contains("&mut ReactiveScratch");
             module.uses_transient_scratch |= !reactive && method_part.contains("&mut Scratch");
+            module.uses_local_frame |= method_part.contains("&mut StampLocals");
         }
         module.contents.push_str(&method_part);
     }
@@ -29733,6 +29802,7 @@ struct StampHelperModule {
     method_count: usize,
     uses_reactive_scratch: bool,
     uses_transient_scratch: bool,
+    uses_local_frame: bool,
 }
 
 impl StampHelperModule {
@@ -29753,6 +29823,9 @@ impl StampHelperModule {
         }
         if self.uses_transient_scratch {
             imports.push("Scratch");
+        }
+        if self.uses_local_frame {
+            imports.push("StampLocals");
         }
         imports.push("LIMEXP_MAX");
         imports.push("THERMAL_VOLTAGE_PER_K");
