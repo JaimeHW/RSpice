@@ -38,10 +38,10 @@ struct PolyPlan {
     terms: Vec<PolyTerm>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PolyPlanSignature {
     input_count: usize,
-    coef: Vec<Value>,
+    coef_revision: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -212,12 +212,12 @@ fn nxtpwr(pwrseq: &mut [usize]) {
 }
 
 fn poly_plan_signature(ctx: &CmContext, input_count: usize) -> CmResult<PolyPlanSignature> {
-    let coef = ctx
-        .real_vector_param("coef")
+    let coef_revision = ctx
+        .real_vector_param_revision("coef")
         .ok_or_else(|| CmError::MissingParameter("coef".to_string()))?;
     Ok(PolyPlanSignature {
         input_count,
-        coef: coef.to_vec(),
+        coef_revision,
     })
 }
 
@@ -228,8 +228,8 @@ fn poly_plan_signature_matches(
 ) -> bool {
     signature.input_count == input_count
         && ctx
-            .real_vector_param("coef")
-            .is_some_and(|coef| coef == signature.coef.as_slice())
+            .real_vector_param_revision("coef")
+            .is_some_and(|revision| revision == signature.coef_revision)
 }
 
 fn build_poly_plan(input_count: usize, coef: &[Value]) -> CmResult<Arc<PolyPlan>> {
@@ -269,7 +269,7 @@ fn cache_poly_plan(ctx: &mut CmContext, input_count: usize) -> CmResult<Arc<Poly
     }
 
     let signature = poly_plan_signature(ctx, input_count)?;
-    let plan = build_poly_plan(input_count, &signature.coef);
+    let plan = build_poly_plan(input_count, checked_coef(ctx)?);
     ctx.set_resource(
         POLY_PLAN_RESOURCE,
         Arc::new(PolyPlanResource {
@@ -287,8 +287,8 @@ fn poly_plan(ctx: &CmContext, input_count: usize) -> CmResult<Arc<PolyPlan>> {
         return resource.plan.clone();
     }
 
-    let signature = poly_plan_signature(ctx, input_count)?;
-    build_poly_plan(input_count, &signature.coef)
+    poly_plan_signature(ctx, input_count)?;
+    build_poly_plan(input_count, checked_coef(ctx)?)
 }
 
 fn evaluate_poly(inputs: &[AnalogValue], plan: &PolyPlan, multiplier: Value) -> PolyEval {
@@ -563,6 +563,11 @@ mod tests {
         let first = cache_poly_plan(&mut ctx, 2).expect("valid polynomial plan");
         let second = cache_poly_plan(&mut ctx, 2).expect("cached polynomial plan");
         assert!(Arc::ptr_eq(&first, &second));
+
+        ctx.set_real_vector_param("unrelated", vec![1.0, 2.0]);
+        let after_unrelated =
+            cache_poly_plan(&mut ctx, 2).expect("unrelated vector preserves polynomial plan");
+        assert!(Arc::ptr_eq(&first, &after_unrelated));
 
         let wider = cache_poly_plan(&mut ctx, 3).expect("reloaded polynomial plan");
         assert!(!Arc::ptr_eq(&first, &wider));
