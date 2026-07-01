@@ -416,7 +416,7 @@ impl CodeModel for DigitalLookupTable {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
         PORTS.get_or_init(|| {
             vec![
-                PortSpec::vector_input("in", PortType::Digital),
+                PortSpec::vector_input("in", PortType::Digital).with_vector_min_len(1),
                 PortSpec::output("out", PortType::Digital),
             ]
         })
@@ -672,7 +672,7 @@ mod tests {
         assert_digital_ports(
             &DigitalLookupTable,
             &[
-                ("in", PortDirection::In, true, None, None),
+                ("in", PortDirection::In, true, Some(1), None),
                 ("out", PortDirection::Out, false, None, None),
             ],
         );
@@ -748,22 +748,6 @@ mod tests {
         let inputs = [DigitalValue::one()];
 
         assert_eq!(d_lut_index_for_width(&inputs, 3).unwrap(), Some(1));
-    }
-
-    #[test]
-    fn d_lut_zero_input_width_is_constant_table_like_ngspice() {
-        let mut ctx = CmContext::new();
-        ctx.set_port_width("in", 0);
-        ctx.set_string_param("table_values", "1");
-
-        DigitalLookupTable
-            .init(&mut ctx)
-            .expect("d_lut zero-input init");
-        DigitalLookupTable
-            .evaluate(&mut ctx)
-            .expect("d_lut zero-input evaluate");
-
-        assert_eq!(ctx.output_digital_vector("out"), vec![DigitalValue::one()]);
     }
 
     #[test]
