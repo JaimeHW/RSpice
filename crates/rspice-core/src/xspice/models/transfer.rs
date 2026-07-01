@@ -497,20 +497,22 @@ fn xfer_table_signature_matches(ctx: &CmContext, signature: &XferTableSignature)
         && signature.offset == ctx.param("offset")
 }
 
-fn cache_xfer_table(ctx: &mut CmContext) {
+fn cache_xfer_table(ctx: &mut CmContext) -> CmResult<Arc<XferTableData>> {
     if let Some(resource) = ctx.resource::<XferTableResource>(XFER_TABLE_RESOURCE)
         && xfer_table_signature_matches(ctx, &resource.signature)
     {
-        return;
+        return resource.result.clone();
     }
 
     let (file_virtual_stamp, result) = xfer_table_uncached(ctx);
     let signature = xfer_table_signature_with_virtual_stamp(ctx, file_virtual_stamp);
     let result = result.map(xfer_table_data).map(Arc::new);
+    let cached = result.clone();
     ctx.set_resource(
         XFER_TABLE_RESOURCE,
         Arc::new(XferTableResource { signature, result }),
     );
+    cached
 }
 
 fn xfer_table(ctx: &CmContext) -> CmResult<Arc<XferTableData>> {
@@ -588,6 +590,13 @@ fn xfer_gain_at(table: &XferTableData, frequency: Value) -> Complex64 {
 
 fn xfer_first_real_gain(ctx: &CmContext) -> Value {
     xfer_table(ctx)
+        .ok()
+        .and_then(|table| table.points.first().map(|point| point.gain.re))
+        .unwrap_or(0.0)
+}
+
+fn xfer_first_real_gain_cached(ctx: &mut CmContext) -> Value {
+    cache_xfer_table(ctx)
         .ok()
         .and_then(|table| table.points.first().map(|point| point.gain.re))
         .unwrap_or(0.0)
@@ -1110,7 +1119,7 @@ impl CodeModel for Xfer {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        cache_xfer_table(ctx);
+        let _ = cache_xfer_table(ctx);
         Ok(())
     }
 
@@ -1119,7 +1128,7 @@ impl CodeModel for Xfer {
             return Ok(());
         }
 
-        let gain = xfer_first_real_gain(ctx);
+        let gain = xfer_first_real_gain_cached(ctx);
         ctx.set_output_with_partial("out", gain * ctx.input("in"), gain);
         Ok(())
     }
@@ -1462,16 +1471,16 @@ mod tests {
         let first_table = xfer_table(&ctx).expect("cached xfer table");
         assert_eq!(xfer_first_real_gain(&ctx), 10.0);
 
-        cache_xfer_table(&mut ctx);
-        let after_mutable_cache = xfer_table(&ctx).expect("xfer table after mutable cache refresh");
+        let after_mutable_cache =
+            cache_xfer_table(&mut ctx).expect("xfer table after mutable cache refresh");
         assert!(
             Arc::ptr_eq(&first_table, &after_mutable_cache),
             "unchanged xfer parameters should reuse the context table resource"
         );
 
         ctx.set_real_vector_param("unrelated", vec![1.0, 2.0]);
-        cache_xfer_table(&mut ctx);
-        let after_unrelated = xfer_table(&ctx).expect("xfer table after unrelated vector");
+        let after_unrelated =
+            cache_xfer_table(&mut ctx).expect("xfer table after unrelated vector");
         assert!(Arc::ptr_eq(&first_table, &after_unrelated));
 
         ctx.set_param("db", 0.0);
