@@ -38,7 +38,7 @@ struct SXferCoefficients {
 struct XferTableSignature {
     file: String,
     file_virtual_stamp: Option<data_file::DataFileStamp>,
-    table: Vec<Value>,
+    table_revision: Option<u64>,
     table_provided: bool,
     r_i: Value,
     r_i_provided: bool,
@@ -60,8 +60,8 @@ struct XferTableResource {
 struct SXferCoefficientSignature {
     gain: Value,
     denormalized_freq: Value,
-    num_coeff: Vec<Value>,
-    den_coeff: Vec<Value>,
+    num_coeff_revision: Option<u64>,
+    den_coeff_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -474,7 +474,7 @@ fn xfer_table_signature_with_virtual_stamp(
     XferTableSignature {
         file_virtual_stamp,
         file,
-        table: ctx.real_vector_param("table").unwrap_or(&[]).to_vec(),
+        table_revision: ctx.real_vector_param_revision("table"),
         table_provided: ctx.param_was_provided("table"),
         r_i: ctx.param("r_i"),
         r_i_provided: ctx.param_was_provided("r_i"),
@@ -491,7 +491,7 @@ fn xfer_table_signature_matches(ctx: &CmContext, signature: &XferTableSignature)
     let file = ctx.string_param("file").unwrap_or("").trim();
     signature.file == file
         && signature.file_virtual_stamp == data_file::virtual_data_file_stamp(file)
-        && ctx.real_vector_param("table").unwrap_or(&[]) == signature.table.as_slice()
+        && ctx.real_vector_param_revision("table") == signature.table_revision
         && signature.table_provided == ctx.param_was_provided("table")
         && signature.r_i == ctx.param("r_i")
         && signature.r_i_provided == ctx.param_was_provided("r_i")
@@ -691,8 +691,8 @@ fn s_xfer_coefficient_signature(ctx: &CmContext) -> SXferCoefficientSignature {
     SXferCoefficientSignature {
         gain: ctx.param("gain"),
         denormalized_freq: ctx.param_or("denormalized_freq", 1.0),
-        num_coeff: ctx.real_vector_param("num_coeff").unwrap_or(&[]).to_vec(),
-        den_coeff: ctx.real_vector_param("den_coeff").unwrap_or(&[]).to_vec(),
+        num_coeff_revision: ctx.real_vector_param_revision("num_coeff"),
+        den_coeff_revision: ctx.real_vector_param_revision("den_coeff"),
     }
 }
 
@@ -702,8 +702,8 @@ fn s_xfer_coefficient_signature_matches(
 ) -> bool {
     signature.gain == ctx.param("gain")
         && signature.denormalized_freq == ctx.param_or("denormalized_freq", 1.0)
-        && ctx.real_vector_param("num_coeff").unwrap_or(&[]) == signature.num_coeff.as_slice()
-        && ctx.real_vector_param("den_coeff").unwrap_or(&[]) == signature.den_coeff.as_slice()
+        && ctx.real_vector_param_revision("num_coeff") == signature.num_coeff_revision
+        && ctx.real_vector_param_revision("den_coeff") == signature.den_coeff_revision
 }
 
 fn cache_s_xfer_coefficients(ctx: &mut CmContext) -> CmResult<Option<Arc<SXferCoefficients>>> {
@@ -1383,7 +1383,12 @@ mod tests {
         ctx.set_param("offset", 1.0);
 
         Xfer.init(&mut ctx).expect("xfer initializes");
+        let first_table = xfer_table(&ctx).expect("cached xfer table");
         assert_eq!(xfer_first_real_gain(&ctx), 10.0);
+
+        ctx.set_real_vector_param("unrelated", vec![1.0, 2.0]);
+        let after_unrelated = xfer_table(&ctx).expect("xfer table after unrelated vector");
+        assert!(Arc::ptr_eq(&first_table, &after_unrelated));
 
         ctx.set_param("db", 0.0);
         assert_eq!(xfer_first_real_gain(&ctx), 20.0);
@@ -1466,9 +1471,22 @@ mod tests {
         ctx.set_real_vector_param("den_coeff", vec![1.0]);
 
         SXfer.init(&mut ctx).expect("s_xfer initializes");
+        let first = s_xfer_coefficients_for_context(&ctx)
+            .expect("cached coefficients")
+            .expect("proper s_xfer order");
         assert_eq!(s_xfer_dc_gain(&ctx), 2.0);
 
+        ctx.set_real_vector_param("unrelated", vec![1.0, 2.0]);
+        let after_unrelated = s_xfer_coefficients_for_context(&ctx)
+            .expect("coefficients after unrelated vector")
+            .expect("proper s_xfer order");
+        assert!(Arc::ptr_eq(&first, &after_unrelated));
+
         ctx.set_param("gain", 4.0);
+        let updated = s_xfer_coefficients_for_context(&ctx)
+            .expect("updated coefficients")
+            .expect("proper s_xfer order");
+        assert!(!Arc::ptr_eq(&first, &updated));
         assert_eq!(s_xfer_dc_gain(&ctx), 4.0);
     }
 }
