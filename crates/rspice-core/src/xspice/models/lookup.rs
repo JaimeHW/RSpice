@@ -631,6 +631,10 @@ impl CodeModel for PiecewiseLinearTimeSeries {
         vec![0.0]
     }
 
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
+    }
+
     fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
         let points = lookup_table(ctx)?;
         let input_domain = effective_input_domain(ctx.param("input_domain"))?;

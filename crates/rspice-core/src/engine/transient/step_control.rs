@@ -84,11 +84,12 @@ impl Engine {
             return false;
         }
 
-        // Only dynamic branch-current unknowns represent physical state progression
-        // when node voltages remain fixed. Algebraic source currents can change
-        // without moving the circuit state, so ignore them here.
+        // Inductor branch-current unknowns can show physical state progression
+        // when node voltages remain fixed. Capacitor-only decks carry their
+        // dynamic state in node voltages, so a tiny node delta there is not
+        // enough evidence to reject an otherwise bounded recovery step.
         if circuit.inductors.branch_indices.is_empty() {
-            return true;
+            return circuit.capacitors.is_empty();
         }
 
         let current_threshold = current_tolerance.max(1e-18);
