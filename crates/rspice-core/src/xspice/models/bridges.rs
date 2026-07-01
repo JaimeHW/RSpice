@@ -520,6 +520,10 @@ fn bidi_target_svoc(drive: DigitalValue, params: BidiParams) -> Value {
 }
 
 fn bidi_advance_svoc(prev: Value, drive: DigitalValue, dt: Value, params: BidiParams) -> Value {
+    if drive.strength == DigitalStrength::HighZ {
+        return 0.5;
+    }
+
     let target = bidi_target_svoc(drive, params);
     if !(dt.is_finite() && dt > 0.0) {
         return prev;
@@ -1614,6 +1618,35 @@ mod tests {
         assert_eq!(
             ctx.state(drive_strength_base),
             digital_strength_code(DigitalStrength::Strong) as Value
+        );
+    }
+
+    #[test]
+    fn bidi_bridge_high_z_drive_resets_svoc_like_ngspice() {
+        let mut ctx = CmContext::new();
+        set_bidi_default_params(&mut ctx, 0.0);
+        ctx.set_param("direction", 0.0);
+        ctx.set_port_width("a", 1);
+        ctx.set_port_width("d", 1);
+        ctx.set_input("a", InputValue::AnalogVector(vec![AnalogValue::new(0.0)]));
+        ctx.set_input("d", InputValue::DigitalVector(vec![DigitalValue::high_z()]));
+        BidiBridge.init(&mut ctx).expect("bidi_bridge initializes");
+
+        ctx.set_initial_state(BIDI_STATE_SVOC_BASE, 1.0);
+        ctx.analysis = AnalysisType::Transient;
+        ctx.call_type = CallType::TransientAnalysis;
+        ctx.time_prev = 0.0;
+        ctx.time = 0.1e-9;
+        ctx.timestep = 0.1e-9;
+
+        BidiBridge
+            .evaluate(&mut ctx)
+            .expect("bidi_bridge evaluates high-Z drive");
+
+        assert_eq!(
+            ctx.state(BIDI_STATE_SVOC_BASE),
+            0.5,
+            "ngspice resets bidi_bridge open-circuit voltage immediately for high-Z drive"
         );
     }
 
