@@ -726,12 +726,23 @@ pub(super) fn parse_pspice_u_device(
 
     let (kind, count) = parse_pspice_u_kind_and_count(&fields[1]);
     match kind.as_str() {
+        "BUF3" | "BUF3A" => parse_pspice_u_tristate(
+            &name,
+            &fields,
+            count.unwrap_or(1),
+            false,
+            line_num,
+            elements,
+        ),
         "DFF" => parse_pspice_u_dff(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "INV3" | "INV3A" => {
+            parse_pspice_u_tristate(&name, &fields, count.unwrap_or(1), true, line_num, elements)
+        }
         "JKFF" => parse_pspice_u_jkff(&name, &fields, count.unwrap_or(1), line_num, elements),
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, and JKFF",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, JKFF, BUF3A, and INV3A",
                 fields[1]
             ),
         }),
@@ -875,6 +886,64 @@ fn parse_pspice_u_jkff(
         let instance_name = pspice_u_lowered_instance_name(name, count, index);
         let ports = vec![j, k, clkbar.clone(), prebar.clone(), clrbar.clone(), q, qb];
         push_pspice_u_xspice_element(elements, instance_name, "d_jkff", ports);
+    }
+
+    Ok(())
+}
+
+fn parse_pspice_u_tristate(
+    name: &str,
+    fields: &[String],
+    count: usize,
+    invert_input: bool,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    if count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice U-device '{}' type '{}' requires at least one tri-state buffer",
+                name, fields[1]
+            ),
+        });
+    }
+
+    let pins = &fields[4..];
+    let required = count + 1 + count + 1;
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice tri-state U-device '{}' requires {} input pin(s), one enable pin, {} output pin(s), and a timing model",
+                name, count, count
+            ),
+        });
+    }
+
+    let enable = pspice_u_required_digital_port(&pins[count], "enable", fields, line_num)?;
+    let output_offset = count + 1;
+
+    for index in 0..count {
+        let input = if invert_input {
+            pspice_u_required_inverted_digital_port(
+                &pins[index],
+                "tri-state input",
+                fields,
+                line_num,
+            )?
+        } else {
+            pspice_u_required_digital_port(&pins[index], "tri-state input", fields, line_num)?
+        };
+        let output = pspice_u_required_digital_port(
+            &pins[output_offset + index],
+            "tri-state output",
+            fields,
+            line_num,
+        )?;
+        let instance_name = pspice_u_lowered_instance_name(name, count, index);
+        let ports = vec![input, enable.clone(), output];
+        push_pspice_u_xspice_element(elements, instance_name, "d_tristate", ports);
     }
 
     Ok(())

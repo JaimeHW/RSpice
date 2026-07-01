@@ -4800,6 +4800,81 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_buf3a_array_lowers_to_tristate_instances() {
+        let netlist = Netlist::parse(
+            "pspice u buf3a array\n\
+             U5 BUF3A(2) $G_DPWR $G_DGND in1 in2 enable out1 out2 dly\n\
+             .end\n",
+        )
+        .expect("PSpice BUF3A array should lower to d_tristate instances");
+
+        assert_eq!(netlist.elements.len(), 2);
+        assert_eq!(netlist.elements[0].name, "U5_0");
+        assert_eq!(netlist.elements[1].name, "U5_1");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_tristate");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("IN1".to_string()),
+                        XspicePort::Digital("ENABLE".to_string()),
+                        XspicePort::Digital("OUT1".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+
+        match &netlist.elements[1].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_tristate");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("IN2".to_string()),
+                        XspicePort::Digital("ENABLE".to_string()),
+                        XspicePort::Digital("OUT2".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_inv3a_lowers_to_tristate_with_inverted_input() {
+        let netlist = Netlist::parse(
+            "pspice u inv3a\n\
+             U6 INV3A(1) $G_DPWR $G_DGND in enable out dly\n\
+             .end\n",
+        )
+        .expect("PSpice INV3A should lower to d_tristate with inverted input");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U6")
+            .expect("U6 exists");
+
+        match &element.kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_tristate");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::DigitalInverted("IN".to_string()),
+                        XspicePort::Digital("ENABLE".to_string()),
+                        XspicePort::Digital("OUT".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn pspice_u_unsupported_frontend_families_fail_closed() {
         let err = Netlist::parse(
             "pspice u logicexp unsupported slice\n\
