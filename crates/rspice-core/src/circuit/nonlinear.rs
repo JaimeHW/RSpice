@@ -204,12 +204,8 @@ impl CircuitData {
             return true;
         }
 
-        #[cfg(feature = "veriloga")]
-        {
-            if self.has_veriloga_devices() {
-                return true;
-            }
-        }
+        // External Verilog-A can model ideal branch constraints whose exact
+        // Newton step must not be rejected by global line-search damping.
         #[cfg(feature = "veriloga-builtins")]
         {
             if self.has_generated_veriloga_devices() {
