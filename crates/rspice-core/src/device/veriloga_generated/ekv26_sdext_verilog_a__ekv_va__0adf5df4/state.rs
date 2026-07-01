@@ -1,7 +1,6 @@
 #![allow(dead_code, unused_parens, unused_variables)]
 
 use crate::device::veriloga_generated::GeneratedDdtCoefficients;
-use crate::device::veriloga_generated::support::{ReactiveScratch as GenericReactiveScratch, Scratch as GenericScratch};
 
 pub struct Parameters {
     pub p0: f64,
@@ -557,8 +556,6 @@ pub struct Instance {
     pub(crate) scalar_temperature_static_valid: bool,
     pub(crate) scalar_temperature_static_temperature: f64,
     pub(crate) scalar_temperature_static_thermal_voltage: f64,
-    pub(crate) scratch: Option<Box<GenericScratch<271, 4, 0>>>,
-    pub(crate) reactive_scratch: Option<Box<GenericReactiveScratch<271, 4, 0>>>,
 }
 
 impl Clone for Instance {
@@ -881,8 +878,6 @@ impl Clone for Instance {
             scalar_temperature_static_valid: self.scalar_temperature_static_valid,
             scalar_temperature_static_temperature: self.scalar_temperature_static_temperature,
             scalar_temperature_static_thermal_voltage: self.scalar_temperature_static_thermal_voltage,
-            scratch: None,
-            reactive_scratch: None,
         }
     }
 }
@@ -1222,8 +1217,6 @@ impl Instance {
             scalar_temperature_static_valid: false,
             scalar_temperature_static_temperature: 0.0,
             scalar_temperature_static_thermal_voltage: 0.0,
-            scratch: Some(GenericScratch::new_box()),
-            reactive_scratch: None,
         };
         instance.recompute_instance_static();
         instance
@@ -1231,8 +1224,6 @@ impl Instance {
 
     #[inline]
     pub fn restore_from_snapshot(&mut self, snapshot: Self) {
-        let scratch = self.scratch.take();
-        let reactive_scratch = self.reactive_scratch.take();
         let Self {
             nodes,
             branches,
@@ -1550,8 +1541,6 @@ impl Instance {
             scalar_temperature_static_valid,
             scalar_temperature_static_temperature,
             scalar_temperature_static_thermal_voltage,
-            scratch: _,
-            reactive_scratch: _,
         } = snapshot;
         *self = Self {
             nodes,
@@ -1870,8 +1859,6 @@ impl Instance {
             scalar_temperature_static_valid,
             scalar_temperature_static_temperature,
             scalar_temperature_static_thermal_voltage,
-            scratch,
-            reactive_scratch,
         };
     }
 

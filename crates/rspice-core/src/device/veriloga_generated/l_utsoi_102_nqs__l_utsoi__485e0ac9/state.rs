@@ -1,7 +1,6 @@
 #![allow(dead_code, unused_parens, unused_variables)]
 
 use crate::device::veriloga_generated::GeneratedDdtCoefficients;
-use crate::device::veriloga_generated::support::{ReactiveScratch as GenericReactiveScratch, Scratch as GenericScratch};
 
 pub struct Parameters {
     pub p0: f64,
@@ -1271,8 +1270,6 @@ pub struct Instance {
     pub(crate) scalar_v188: f64,
     pub(crate) scalar_v189: f64,
     pub(crate) scalar_v190: f64,
-    pub(crate) scratch: Option<Box<GenericScratch<1911, 14, 4>>>,
-    pub(crate) reactive_scratch: Option<Box<GenericReactiveScratch<1911, 14, 4>>>,
 }
 
 impl Clone for Instance {
@@ -1452,8 +1449,6 @@ impl Clone for Instance {
             scalar_v188: self.scalar_v188,
             scalar_v189: self.scalar_v189,
             scalar_v190: self.scalar_v190,
-            scratch: None,
-            reactive_scratch: None,
         }
     }
 }
@@ -1650,8 +1645,6 @@ impl Instance {
             scalar_v188: 0.0,
             scalar_v189: 0.0,
             scalar_v190: 0.0,
-            scratch: Some(GenericScratch::new_box()),
-            reactive_scratch: None,
         };
         instance.recompute_instance_static();
         instance
@@ -1659,8 +1652,6 @@ impl Instance {
 
     #[inline]
     pub fn restore_from_snapshot(&mut self, snapshot: Self) {
-        let scratch = self.scratch.take();
-        let reactive_scratch = self.reactive_scratch.take();
         let Self {
             nodes,
             branches,
@@ -1835,8 +1826,6 @@ impl Instance {
             scalar_v188,
             scalar_v189,
             scalar_v190,
-            scratch: _,
-            reactive_scratch: _,
         } = snapshot;
         *self = Self {
             nodes,
@@ -2012,8 +2001,6 @@ impl Instance {
             scalar_v188,
             scalar_v189,
             scalar_v190,
-            scratch,
-            reactive_scratch,
         };
     }
 

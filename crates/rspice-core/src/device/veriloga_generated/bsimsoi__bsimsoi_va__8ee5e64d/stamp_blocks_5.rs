@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]
 
-use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, ReactiveScratch, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
+use super::{ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, idt_jacobian, LIMEXP_MAX, THERMAL_VOLTAGE_PER_K};
 use super::super::state::{Instance, Parameters};
 
 impl Instance {
@@ -14776,919 +14776,3086 @@ impl Instance {
 
     pub(super) fn stamp_reactive_block_0(
         ctx: &GeneratedEvalContext<'_>,
-        s: &mut ReactiveScratch,
         p: &Parameters,
+        var_b4soia0_slot: &mut f64,
+        var_b4soia0_rv_slot: &mut f64,
+        var_b4soia1_slot: &mut f64,
+        var_b4soia1_rv_slot: &mut f64,
+        var_b4soia2_slot: &mut f64,
+        var_b4soia2_rv_slot: &mut f64,
+        var_b4soiados_slot: &mut f64,
+        var_b4soiados_rv_slot: &mut f64,
+        var_b4soiaebcp_slot: &mut f64,
+        var_b4soiaebcp_rv_slot: &mut f64,
+        var_b4soiagbcp_slot: &mut f64,
+        var_b4soiagbcp2_slot: &mut f64,
+        var_b4soiagbcp2_rv_slot: &mut f64,
+        var_b4soiagbcp_rv_slot: &mut f64,
+        var_b4soiagbcpd_slot: &mut f64,
+        var_b4soiagbcpd_rv_slot: &mut f64,
+        var_b4soiagidl_slot: &mut f64,
+        var_b4soiagidl_rv_slot: &mut f64,
+        var_b4soiagisl_slot: &mut f64,
+        var_b4soiagisl_rv_slot: &mut f64,
+        var_b4soiags_slot: &mut f64,
+        var_b4soiags_rv_slot: &mut f64,
+        var_b4soiat_slot: &mut f64,
+        var_b4soiat_rv_slot: &mut f64,
+        var_b4soibdos_slot: &mut f64,
+        var_b4soibdos_rv_slot: &mut f64,
+        var_b4soibg0sub_slot: &mut f64,
+        var_b4soibg0sub_rv_slot: &mut f64,
+        var_b4soibgidl_slot: &mut f64,
+        var_b4soibgidl_rv_slot: &mut f64,
+        var_b4soibgisl_slot: &mut f64,
+        var_b4soibgisl_rv_slot: &mut f64,
+        var_b4soibinunit_slot: &mut f64,
+        var_b4soibinunit_rv_slot: &mut f64,
+        var_b4soibjtoff_slot: &mut f64,
+        var_b4soibjtoff_rv_slot: &mut f64,
+        var_b4soibodyjctgatesidedgradingcoeff_slot: &mut f64,
+        var_b4soibodyjctgatesidedgradingcoeff_rv_slot: &mut f64,
+        var_b4soibodyjctgatesidesgradingcoeff_slot: &mut f64,
+        var_b4soibodyjctgatesidesgradingcoeff_rv_slot: &mut f64,
+        var_b4soibodysquares_slot: &mut f64,
+        var_b4soibodysquares_rv_slot: &mut f64,
+        var_b4soicapmod_slot: &mut f64,
+        var_b4soicapmod_rv_slot: &mut f64,
+        var_b4soicdsc_slot: &mut f64,
+        var_b4soicdsc_rv_slot: &mut f64,
+        var_b4soicdscb_slot: &mut f64,
+        var_b4soicdscb_rv_slot: &mut f64,
+        var_b4soicdscd_slot: &mut f64,
+        var_b4soicdscd_rv_slot: &mut f64,
+        var_b4soicgidl_slot: &mut f64,
+        var_b4soicgidl_rv_slot: &mut f64,
+        var_b4soicgisl_slot: &mut f64,
+        var_b4soicgisl_rv_slot: &mut f64,
+        var_b4soicit_slot: &mut f64,
+        var_b4soicit_rv_slot: &mut f64,
+        var_b4soicth0_slot: &mut f64,
+        var_b4soicth0_rv_slot: &mut f64,
+        var_b4soidelta_slot: &mut f64,
+        var_b4soidelta_rv_slot: &mut f64,
+        var_b4soidelvto_slot: &mut f64,
+        var_b4soidelvto_rv_slot: &mut f64,
+        var_b4soidrainarea_slot: &mut f64,
+        var_b4soidrainarea_rv_slot: &mut f64,
+        var_b4soidrainperimeter_slot: &mut f64,
+        var_b4soidrainperimeter_rv_slot: &mut f64,
+        var_b4soidrainsquares_slot: &mut f64,
+        var_b4soidrainsquares_rv_slot: &mut f64,
+        var_b4soidrout_slot: &mut f64,
+        var_b4soidrout_rv_slot: &mut f64,
+        var_b4soidsub_slot: &mut f64,
+        var_b4soidsub_rv_slot: &mut f64,
+        var_b4soidtoxcv_slot: &mut f64,
+        var_b4soidtoxcv_rv_slot: &mut f64,
+        var_b4soidvt0_slot: &mut f64,
+        var_b4soidvt0_rv_slot: &mut f64,
+        var_b4soidvt0w_slot: &mut f64,
+        var_b4soidvt0w_rv_slot: &mut f64,
+        var_b4soidvt1_slot: &mut f64,
+        var_b4soidvt1_rv_slot: &mut f64,
+        var_b4soidvt1w_slot: &mut f64,
+        var_b4soidvt1w_rv_slot: &mut f64,
+        var_b4soidvt2_slot: &mut f64,
+        var_b4soidvt2_rv_slot: &mut f64,
+        var_b4soidvt2w_slot: &mut f64,
+        var_b4soidvt2w_rv_slot: &mut f64,
+        var_b4soieasub_slot: &mut f64,
+        var_b4soieasub_rv_slot: &mut f64,
+        var_b4soiegidl_slot: &mut f64,
+        var_b4soiegidl_rv_slot: &mut f64,
+        var_b4soiegisl_slot: &mut f64,
+        var_b4soiegisl_rv_slot: &mut f64,
+        var_b4soieot_slot: &mut f64,
+        var_b4soieot_rv_slot: &mut f64,
+        var_b4soiepsrgate_slot: &mut f64,
+        var_b4soiepsrgate_rv_slot: &mut f64,
+        var_b4soiepsrox_slot: &mut f64,
+        var_b4soiepsrox_rv_slot: &mut f64,
+        var_b4soiepsrsub_slot: &mut f64,
+        var_b4soiepsrsub_rv_slot: &mut f64,
+        var_b4soieta0_slot: &mut f64,
+        var_b4soieta0_rv_slot: &mut f64,
+        var_b4soieta0cv_slot: &mut f64,
+        var_b4soieta0cv_rv_slot: &mut f64,
+        var_b4soietab_slot: &mut f64,
+        var_b4soietab_rv_slot: &mut f64,
+        var_b4soietabcv_slot: &mut f64,
+        var_b4soietabcv_rv_slot: &mut f64,
+        var_b4soietsi_slot: &mut f64,
+        var_b4soietsi_rv_slot: &mut f64,
+        var_b4soieu_slot: &mut f64,
+        var_b4soieu_rv_slot: &mut f64,
+        var_b4soifgidl_slot: &mut f64,
+        var_b4soifgidl_rv_slot: &mut f64,
+        var_b4soifgisl_slot: &mut f64,
+        var_b4soifgisl_rv_slot: &mut f64,
+        var_b4soifrbody_slot: &mut f64,
+        var_b4soifrbody_rv_slot: &mut f64,
+        var_b4soigamma1_slot: &mut f64,
+        var_b4soigamma1_rv_slot: &mut f64,
+        var_b4soigamma2_slot: &mut f64,
+        var_b4soigamma2_rv_slot: &mut f64,
+        var_b4soigatesidewalljctdpotential_slot: &mut f64,
+        var_b4soigatesidewalljctdpotential_rv_slot: &mut f64,
+        var_b4soigatesidewalljctspotential_slot: &mut f64,
+        var_b4soigatesidewalljctspotential_rv_slot: &mut f64,
+        var_b4soigidlmod_slot: &mut f64,
+        var_b4soigidlmod_rv_slot: &mut f64,
+        var_b4soiiiimod_slot: &mut f64,
+        var_b4soiiiimod_rv_slot: &mut f64,
+        var_b4soik1_slot: &mut f64,
+        var_b4soik1_rv_slot: &mut f64,
+        var_b4soik2_slot: &mut f64,
+        var_b4soik2_rv_slot: &mut f64,
+        var_b4soik3_slot: &mut f64,
+        var_b4soik3_rv_slot: &mut f64,
+        var_b4soik3b_slot: &mut f64,
+        var_b4soik3b_rv_slot: &mut f64,
+        var_b4soiketa_slot: &mut f64,
+        var_b4soiketa_rv_slot: &mut f64,
+        var_b4soikgidl_slot: &mut f64,
+        var_b4soikgidl_rv_slot: &mut f64,
+        var_b4soikgisl_slot: &mut f64,
+        var_b4soikgisl_rv_slot: &mut f64,
+        var_b4soikt1_slot: &mut f64,
+        var_b4soikt1_rv_slot: &mut f64,
+        var_b4soikt1l_slot: &mut f64,
+        var_b4soikt1l_rv_slot: &mut f64,
+        var_b4soikt2_slot: &mut f64,
+        var_b4soikt2_rv_slot: &mut f64,
+        var_b4soil_slot: &mut f64,
+        var_b4soil_rv_slot: &mut f64,
+        var_b4soileffeot_slot: &mut f64,
+        var_b4soileffeot_rv_slot: &mut f64,
+        var_b4soilint_slot: &mut f64,
+        var_b4soilint_rv_slot: &mut f64,
+        var_b4soill_slot: &mut f64,
+        var_b4soill_rv_slot: &mut f64,
+        var_b4soillc_slot: &mut f64,
+        var_b4soillc_rv_slot: &mut f64,
+        var_b4soilln_slot: &mut f64,
+        var_b4soilln_rv_slot: &mut f64,
+        var_b4soilpe0_slot: &mut f64,
+        var_b4soilpe0_rv_slot: &mut f64,
+        var_b4soilpeb_slot: &mut f64,
+        var_b4soilpeb_rv_slot: &mut f64,
+        var_b4soilw_slot: &mut f64,
+        var_b4soilw_rv_slot: &mut f64,
+        var_b4soimobmod_slot: &mut f64,
+        var_b4soimobmod_rv_slot: &mut f64,
+        var_b4soimtrlmod_slot: &mut f64,
+        var_b4soimtrlmod_rv_slot: &mut f64,
+        var_b4soinbc_slot: &mut f64,
+        var_b4soinbc_rv_slot: &mut f64,
+        var_b4soindiode_slot: &mut f64,
+        var_b4soindiode_rv_slot: &mut f64,
+        var_b4soindioded_slot: &mut f64,
+        var_b4soindioded_rv_slot: &mut f64,
+        var_b4soinf_slot: &mut f64,
+        var_b4soinf_rv_slot: &mut f64,
+        var_b4soinfactor_slot: &mut f64,
+        var_b4soinfactor_rv_slot: &mut f64,
+        var_b4soingate_slot: &mut f64,
+        var_b4soingate_rv_slot: &mut f64,
+        var_b4soini0sub_slot: &mut f64,
+        var_b4soini0sub_rv_slot: &mut f64,
+        var_b4soinpeak_slot: &mut f64,
+        var_b4soinpeak_rv_slot: &mut f64,
+        var_b4soinsd_slot: &mut f64,
+        var_b4soinsd_rv_slot: &mut f64,
+        var_b4soinseg_slot: &mut f64,
+        var_b4soinseg_rv_slot: &mut f64,
+        var_b4soinsub_slot: &mut f64,
+        var_b4soinsub_rv_slot: &mut f64,
+        var_b4soipclm_slot: &mut f64,
+        var_b4soipclm_rv_slot: &mut f64,
+        var_b4soipdbcp_slot: &mut f64,
+        var_b4soipdbcp_rv_slot: &mut f64,
+        var_b4soipdibl1_slot: &mut f64,
+        var_b4soipdibl1_rv_slot: &mut f64,
+        var_b4soipdibl2_slot: &mut f64,
+        var_b4soipdibl2_rv_slot: &mut f64,
+        var_b4soipdiblb_slot: &mut f64,
+        var_b4soipdiblb_rv_slot: &mut f64,
+        var_b4soiphig_slot: &mut f64,
+        var_b4soiphig_rv_slot: &mut f64,
+        var_b4soiprt_slot: &mut f64,
+        var_b4soiprt_rv_slot: &mut f64,
+        var_b4soiprwb_slot: &mut f64,
+        var_b4soiprwb_rv_slot: &mut f64,
+        var_b4soiprwg_slot: &mut f64,
+        var_b4soiprwg_rv_slot: &mut f64,
+        var_b4soipsbcp_slot: &mut f64,
+        var_b4soipsbcp_rv_slot: &mut f64,
+        var_b4soipvag_slot: &mut f64,
+        var_b4soipvag_rv_slot: &mut f64,
+        var_b4soirdsw_slot: &mut f64,
+        var_b4soirdsw_rv_slot: &mut f64,
+        var_b4soirdw_slot: &mut f64,
+        var_b4soirdw_rv_slot: &mut f64,
+        var_b4soirdwmin_slot: &mut f64,
+        var_b4soirdwmin_rv_slot: &mut f64,
+        var_b4soirgatemod_slot: &mut f64,
+        var_b4soirgatemod_rv_slot: &mut f64,
+        var_b4soirgidl_slot: &mut f64,
+        var_b4soirgidl_rv_slot: &mut f64,
+        var_b4soirgisl_slot: &mut f64,
+        var_b4soirgisl_rv_slot: &mut f64,
+        var_b4soirsw_slot: &mut f64,
+        var_b4soirsw_rv_slot: &mut f64,
+        var_b4soirswmin_slot: &mut f64,
+        var_b4soirswmin_rv_slot: &mut f64,
+        var_b4soisa_slot: &mut f64,
+        var_b4soisa_rv_slot: &mut f64,
+        var_b4soisb_slot: &mut f64,
+        var_b4soisb_rv_slot: &mut f64,
+        var_b4soisd_slot: &mut f64,
+        var_b4soisd_rv_slot: &mut f64,
+        var_b4soisheetresistance_slot: &mut f64,
+        var_b4soisheetresistance_rv_slot: &mut f64,
+        var_b4soisoimod_slot: &mut f64,
+        var_b4soisoimod_rv_slot: &mut f64,
+        var_b4soisourcearea_slot: &mut f64,
+        var_b4soisourcearea_rv_slot: &mut f64,
+        var_b4soisourceperimeter_slot: &mut f64,
+        var_b4soisourceperimeter_rv_slot: &mut f64,
+        var_b4soisourcesquares_slot: &mut f64,
+        var_b4soisourcesquares_rv_slot: &mut f64,
+        var_b4soitbgasub_slot: &mut f64,
+        var_b4soitbgasub_rv_slot: &mut f64,
+        var_b4soitbgbsub_slot: &mut f64,
+        var_b4soitbgbsub_rv_slot: &mut f64,
+        var_b4soitbox_slot: &mut f64,
+        var_b4soitbox_rv_slot: &mut f64,
+        var_b4soitempeot_slot: &mut f64,
+        var_b4soitempeot_rv_slot: &mut f64,
+        var_b4soitnom_slot: &mut f64,
+        var_b4soitnom_rv_slot: &mut f64,
+        var_b4soitox_slot: &mut f64,
+        var_b4soitox_rv_slot: &mut f64,
+        var_b4soitoxm_slot: &mut f64,
+        var_b4soitoxm_rv_slot: &mut f64,
+        var_b4soitsi_slot: &mut f64,
+        var_b4soitsi_rv_slot: &mut f64,
+        var_b4soitype_slot: &mut f64,
+        var_b4soitype_rv_slot: &mut f64,
+        var_b4soiu0_slot: &mut f64,
+        var_b4soiu0_rv_slot: &mut f64,
+        var_b4soiua_slot: &mut f64,
+        var_b4soiua1_slot: &mut f64,
+        var_b4soiua1_rv_slot: &mut f64,
+        var_b4soiua_rv_slot: &mut f64,
+        var_b4soiub_slot: &mut f64,
+        var_b4soiub1_slot: &mut f64,
+        var_b4soiub1_rv_slot: &mut f64,
+        var_b4soiub_rv_slot: &mut f64,
+        var_b4soiuc_slot: &mut f64,
+        var_b4soiuc1_slot: &mut f64,
+        var_b4soiuc1_rv_slot: &mut f64,
+        var_b4soiuc_rv_slot: &mut f64,
+        var_b4soiucs_slot: &mut f64,
+        var_b4soiucs_rv_slot: &mut f64,
+        var_b4soiucste_slot: &mut f64,
+        var_b4soiucste_rv_slot: &mut f64,
+        var_b4soiud_slot: &mut f64,
+        var_b4soiud1_slot: &mut f64,
+        var_b4soiud1_rv_slot: &mut f64,
+        var_b4soiud_rv_slot: &mut f64,
+        var_b4soiunitlengthgatesidewalljctcapd_slot: &mut f64,
+        var_b4soiunitlengthgatesidewalljctcapd_rv_slot: &mut f64,
+        var_b4soiunitlengthgatesidewalljctcaps_slot: &mut f64,
+        var_b4soiunitlengthgatesidewalljctcaps_rv_slot: &mut f64,
+        var_b4soiute_slot: &mut f64,
+        var_b4soiute_rv_slot: &mut f64,
+        var_b4soivbm_slot: &mut f64,
+        var_b4soivbm_rv_slot: &mut f64,
+        var_b4soivbx_slot: &mut f64,
+        var_b4soivbx_rv_slot: &mut f64,
+        var_b4soivddeot_slot: &mut f64,
+        var_b4soivddeot_rv_slot: &mut f64,
+        var_b4soivfb_slot: &mut f64,
+        var_b4soivfb_rv_slot: &mut f64,
+        var_b4soivgstcvmod_slot: &mut f64,
+        var_b4soivgstcvmod_rv_slot: &mut f64,
+        var_b4soivoff_slot: &mut f64,
+        var_b4soivoff_rv_slot: &mut f64,
+        var_b4soivsat_slot: &mut f64,
+        var_b4soivsat_rv_slot: &mut f64,
+        var_b4soivth0_slot: &mut f64,
+        var_b4soivth0_rv_slot: &mut f64,
+        var_b4soiw_slot: &mut f64,
+        var_b4soiw0_slot: &mut f64,
+        var_b4soiw0_rv_slot: &mut f64,
+        var_b4soiw_rv_slot: &mut f64,
+        var_b4soiweffeot_slot: &mut f64,
+        var_b4soiweffeot_rv_slot: &mut f64,
+        var_b4soixbjt_slot: &mut f64,
+        var_b4soixbjt_rv_slot: &mut f64,
+        var_b4soixdif_slot: &mut f64,
+        var_b4soixdif_rv_slot: &mut f64,
+        var_b4soixdifd_slot: &mut f64,
+        var_b4soixdifd_rv_slot: &mut f64,
+        var_b4soixj_slot: &mut f64,
+        var_b4soixj_rv_slot: &mut f64,
+        var_b4soixpart_slot: &mut f64,
+        var_b4soixpart_rv_slot: &mut f64,
+        var_b4soixrec_slot: &mut f64,
+        var_b4soixrec_rv_slot: &mut f64,
+        var_b4soixrecd_slot: &mut f64,
+        var_b4soixrecd_rv_slot: &mut f64,
+        var_b4soixt_slot: &mut f64,
+        var_b4soixt_rv_slot: &mut f64,
+        var_b4soixtun_slot: &mut f64,
+        var_b4soixtun_rv_slot: &mut f64,
+        var_b4soixtund_slot: &mut f64,
+        var_b4soixtund_rv_slot: &mut f64,
+        var_devtemp_slot: &mut f64,
+        var_devtemp_dn6_slot: &mut f64,
+        var_devtemp_rv_slot: &mut f64,
     ) {
         let ctx_temp = ctx.temperature();
-        s.store_scalar(769, (ctx_temp + p.p0));
-
-        s.store_scalar(36, p.p34);
-
-        s.store_scalar(37, p.p1);
-
-        s.store_scalar(38, p.p2);
-
-        s.store_scalar(39, p.p3);
-
-        s.store_scalar(40, p.p4);
-
-        s.store_scalar(41, p.p5);
-
-        s.store_scalar(42, p.p6);
-
-        s.store_scalar(43, p.p7);
-
-        s.store_scalar(44, p.p8);
-
-        s.store_scalar(45, p.p9);
-
-        s.store_scalar(46, p.p10);
-
-        s.store_scalar(47, p.p11);
-
-        s.store_scalar(48, p.p12);
-
-        s.store_scalar(49, p.p14);
-
-        s.store_scalar(51, p.p17);
-
-        s.store_scalar(52, p.p18);
-
-        s.store_scalar(53, p.p19);
-
-        s.store_scalar(56, p.p22);
-
-        s.store_scalar(57, p.p23);
-
-        s.store_scalar(58, p.p24);
-
-        s.store_scalar(59, p.p25);
-
-        s.store_scalar(60, p.p26);
-
-        s.store_scalar(61, p.p27);
-
-        s.store_scalar(62, p.p28);
-
-        s.store_scalar(63, p.p29);
-
-        s.store_scalar(64, p.p30);
-
-        s.store_scalar(65, p.p31);
-
-        s.store_scalar(66, p.p37);
-
-        s.store_scalar(68, p.p39);
-
-        s.store_scalar(69, p.p40);
-
-        s.store_scalar(70, p.p41);
-
-        s.store_scalar(71, p.p42);
-
-        s.store_scalar(72, p.p43);
-
-        s.store_scalar(73, p.p44);
-
-        s.store_scalar(74, p.p45);
-
-        s.store_scalar(75, p.p46);
-
-        s.store_scalar(76, p.p47);
-
-        s.store_scalar(77, p.p48);
-
-        s.store_scalar(78, p.p49);
-
-        s.store_scalar(79, p.p50);
-
-        s.store_scalar(80, p.p51);
-
-        s.store_scalar(81, p.p52);
-
-        s.store_scalar(82, p.p53);
-
-        s.store_scalar(83, p.p54);
-
-        s.store_scalar(84, p.p55);
-
-        s.store_scalar(85, p.p56);
-
-        s.store_scalar(86, p.p57);
-
-        s.store_scalar(87, p.p58);
-
-        s.store_scalar(88, p.p59);
-
-        s.store_scalar(89, p.p60);
-
-        s.store_scalar(90, p.p63);
-
-        s.store_scalar(91, p.p64);
-
-        s.store_scalar(93, p.p66);
-
-        s.store_scalar(94, p.p67);
-
-        s.store_scalar(95, p.p68);
-
-        s.store_scalar(96, p.p69);
-
-        s.store_scalar(97, p.p70);
-
-        s.store_scalar(98, p.p71);
-
-        s.store_scalar(99, p.p72);
-
-        s.store_scalar(100, p.p73);
-
-        s.store_scalar(101, p.p74);
-
-        s.store_scalar(102, p.p75);
-
-        s.store_scalar(103, p.p76);
-
-        s.store_scalar(104, p.p77);
-
-        s.store_scalar(105, p.p78);
-
-        s.store_scalar(106, p.p79);
-
-        s.store_scalar(107, p.p80);
-
-        s.store_scalar(108, p.p81);
-
-        s.store_scalar(109, p.p82);
-
-        s.store_scalar(110, p.p83);
-
-        s.store_scalar(111, p.p84);
-
-        s.store_scalar(112, p.p85);
-
-        s.store_scalar(113, p.p86);
-
-        s.store_scalar(114, p.p87);
-
-        s.store_scalar(115, p.p88);
-
-        s.store_scalar(116, p.p89);
-
-        s.store_scalar(117, p.p90);
-
-        s.store_scalar(118, p.p91);
-
-        s.store_scalar(119, p.p92);
-
-        s.store_scalar(120, p.p93);
-
-        s.store_scalar(121, p.p94);
-
-        s.store_scalar(122, p.p95);
-
-        s.store_scalar(123, p.p96);
-
-        s.store_scalar(124, p.p973);
-
-        s.store_scalar(125, p.p97);
-
-        s.store_scalar(126, p.p98);
-
-        s.store_scalar(127, p.p99);
-
-        s.store_scalar(128, p.p100);
-
-        s.store_scalar(129, p.p101);
-
-        s.store_scalar(130, p.p102);
-
-        s.store_scalar(131, p.p103);
-
-        s.store_scalar(132, p.p104);
-
-        s.store_scalar(133, p.p105);
-
-        s.store_scalar(134, p.p107);
-
-        s.store_scalar(135, p.p108);
-
-        s.store_scalar(136, p.p109);
-
-        s.store_scalar(137, p.p110);
-
-        s.store_scalar(138, p.p111);
-
-        s.store_scalar(139, p.p112);
-
-        s.store_scalar(140, p.p113);
-
-        s.store_scalar(141, p.p114);
-
-        s.store_scalar(142, p.p115);
-
-        s.store_scalar(143, p.p116);
-
-        s.store_scalar(144, p.p117);
-
-        s.store_scalar(145, p.p118);
-
-        s.store_scalar(146, p.p119);
-
-        s.store_scalar(147, p.p120);
-
-        s.store_scalar(148, p.p121);
-
-        s.store_scalar(149, p.p122);
-
-        s.store_scalar(150, (p.p123 + 273.15));
-
-        s.store_scalar(153, p.p126);
-
-        s.store_scalar(154, p.p127);
-
-        s.store_scalar(155, p.p128);
-
-        s.store_scalar(156, p.p129);
-
-        s.store_scalar(157, p.p130);
-
-        s.store_scalar(158, p.p131);
-
-        s.store_scalar(159, p.p132);
-
-        s.store_scalar(160, p.p133);
-
-        s.store_scalar(161, p.p134);
-
-        s.store_scalar(162, p.p135);
-
-        s.store_scalar(163, p.p136);
-
-        s.store_scalar(164, p.p137);
-
-        s.store_scalar(165, p.p138);
-
-        s.store_scalar(166, p.p139);
-
-        s.store_scalar(167, p.p140);
-
-        s.store_scalar(168, p.p141);
-
-        s.store_scalar(169, p.p142);
-
-        s.store_scalar(170, p.p143);
-
-        s.store_scalar(171, p.p144);
-
-        s.store_scalar(172, p.p145);
-
-        s.store_scalar(173, p.p146);
-
-        s.store_scalar(174, p.p147);
-
-        s.store_scalar(175, p.p148);
-
-        s.store_scalar(176, p.p149);
-
-        s.store_scalar(177, p.p974);
-
-        s.store_scalar(178, p.p150);
-
-        s.store_scalar(179, p.p151);
-
-        s.store_scalar(180, p.p152);
-
-        s.store_scalar(181, p.p153);
-
-        s.store_scalar(182, p.p154);
-
-        s.store_scalar(183, p.p155);
-
-        s.store_scalar(184, p.p975);
-
-        s.store_scalar(185, p.p156);
-
-        s.store_scalar(186, p.p157);
-
-        s.store_scalar(187, p.p158);
-
-        s.store_scalar(188, p.p159);
-
-        s.store_scalar(189, p.p160);
-
-        s.store_scalar(190, p.p161);
-
-        s.store_scalar(191, p.p162);
-
-        s.store_scalar(192, p.p163);
-
-        s.store_scalar(193, p.p164);
-
-        s.store_scalar(194, p.p165);
-
-        s.store_scalar(195, p.p166);
-
-        s.store_scalar(196, p.p167);
-
-        s.store_scalar(197, p.p168);
-
-        s.store_scalar(198, p.p169);
-
-        s.store_scalar(199, p.p170);
-
-        s.store_scalar(200, p.p171);
-
-        s.store_scalar(201, p.p172);
-
-        s.copy_ad(202, 1152);
-
-        s.store_scalar(203, p.p174);
-
-        s.store_scalar(204, p.p175);
-
-        s.store_scalar(205, p.p176);
-
-        s.store_scalar(206, p.p177);
-
-        s.store_scalar(207, p.p178);
-
-        s.store_scalar(208, p.p179);
-
-        s.store_scalar(209, p.p180);
-
-        s.store_scalar(210, p.p181);
-
-        s.store_scalar(211, p.p182);
-
-        s.store_scalar(212, p.p183);
-
-        s.store_scalar(213, p.p184);
-
-        s.store_scalar(214, p.p185);
-
-        s.store_scalar(215, p.p186);
-
-        s.store_scalar(216, p.p187);
-
-        s.store_scalar(217, p.p188);
-
-        s.store_scalar(218, p.p189);
-
-        s.store_scalar(219, p.p190);
-
-        s.store_scalar(220, p.p191);
-
-        s.store_scalar(221, p.p192);
-
-        s.store_scalar(222, p.p193);
-
-        s.store_scalar(223, p.p194);
-
-        s.store_scalar(224, p.p195);
-
-        s.store_scalar(225, p.p196);
-
-        s.store_scalar(226, p.p197);
-
-        s.store_scalar(227, p.p198);
-
-        s.store_scalar(228, p.p199);
-
-        s.store_scalar(229, p.p200);
-
-        s.store_scalar(230, p.p201);
-
-        s.store_scalar(231, p.p202);
-
-        s.store_scalar(233, p.p204);
-
-        s.store_scalar(234, p.p205);
-
-        s.store_scalar(235, p.p206);
-
-        s.store_scalar(236, p.p207);
-
-        s.store_scalar(237, p.p208);
-
-        s.store_scalar(241, p.p214);
-
-        s.store_scalar(243, p.p216);
-
-        s.store_scalar(246, p.p219);
-
-        s.store_scalar(247, p.p220);
-
-        s.store_scalar(248, p.p221);
-
-        s.store_scalar(249, p.p222);
-
-        s.store_scalar(250, p.p223);
-
-        s.store_scalar(251, p.p224);
-
-        s.store_scalar(252, p.p225);
-
-        s.store_scalar(253, p.p226);
-
-        s.store_scalar(254, p.p227);
-
-        s.store_scalar(255, p.p228);
-
-        s.store_scalar(256, p.p229);
-
-        s.store_scalar(257, p.p236);
-
-        s.store_scalar(258, p.p237);
-
-        s.store_scalar(259, p.p238);
-
-        s.store_scalar(260, p.p239);
-
-        s.store_scalar(261, p.p240);
-
-        s.store_scalar(262, p.p241);
-
-        s.store_scalar(266, p.p245);
-
-        s.store_scalar(267, p.p249);
-
-        s.store_scalar(268, p.p253);
-
-        s.store_scalar(269, p.p257);
-
-        s.store_scalar(270, p.p261);
-
-        s.store_scalar(271, p.p265);
-
-        s.store_scalar(272, p.p269);
-
-        s.store_scalar(273, p.p270);
-
-        s.store_scalar(274, p.p271);
-
-        s.store_scalar(275, p.p272);
-
-        s.store_scalar(281, p.p287);
-
-        s.store_scalar(282, p.p288);
-
-        s.store_scalar(283, p.p289);
-
-        s.store_scalar(284, p.p290);
-
-        s.store_scalar(285, p.p291);
-
-        s.store_scalar(286, p.p292);
-
-        s.store_scalar(287, p.p293);
-
-        s.store_scalar(288, p.p294);
-
-        s.store_scalar(289, p.p295);
-
-        s.store_scalar(290, p.p296);
-
-        s.store_scalar(291, p.p297);
-
-        s.store_scalar(292, p.p298);
-
-        s.store_scalar(293, p.p299);
-
-        s.store_scalar(294, p.p300);
-
-        s.store_scalar(295, p.p301);
-
-        s.store_scalar(296, p.p302);
-
-        s.store_scalar(297, p.p303);
-
-        s.store_scalar(298, p.p304);
-
-        s.store_scalar(299, p.p305);
-
-        s.store_scalar(300, p.p306);
-
-        s.store_scalar(301, p.p307);
-
-        s.store_scalar(302, p.p308);
-
-        s.store_scalar(303, p.p309);
-
-        s.store_scalar(304, p.p310);
-
-        s.store_scalar(305, p.p311);
-
-        s.store_scalar(306, p.p312);
-
-        s.store_scalar(307, p.p313);
-
-        s.store_scalar(308, p.p314);
-
-        s.store_scalar(309, p.p315);
-
-        s.store_scalar(310, p.p316);
-
-        s.store_scalar(311, p.p317);
-
-        s.store_scalar(312, p.p318);
-
+        let mut var_b4soia0: f64 = *var_b4soia0_slot;
+        let mut var_b4soia0_rv: f64 = *var_b4soia0_rv_slot;
+        let mut var_b4soia1: f64 = *var_b4soia1_slot;
+        let mut var_b4soia1_rv: f64 = *var_b4soia1_rv_slot;
+        let mut var_b4soia2: f64 = *var_b4soia2_slot;
+        let mut var_b4soia2_rv: f64 = *var_b4soia2_rv_slot;
+        let mut var_b4soiados: f64 = *var_b4soiados_slot;
+        let mut var_b4soiados_rv: f64 = *var_b4soiados_rv_slot;
+        let mut var_b4soiaebcp: f64 = *var_b4soiaebcp_slot;
+        let mut var_b4soiaebcp_rv: f64 = *var_b4soiaebcp_rv_slot;
+        let mut var_b4soiagbcp: f64 = *var_b4soiagbcp_slot;
+        let mut var_b4soiagbcp2: f64 = *var_b4soiagbcp2_slot;
+        let mut var_b4soiagbcp2_rv: f64 = *var_b4soiagbcp2_rv_slot;
+        let mut var_b4soiagbcp_rv: f64 = *var_b4soiagbcp_rv_slot;
+        let mut var_b4soiagbcpd: f64 = *var_b4soiagbcpd_slot;
+        let mut var_b4soiagbcpd_rv: f64 = *var_b4soiagbcpd_rv_slot;
+        let mut var_b4soiagidl: f64 = *var_b4soiagidl_slot;
+        let mut var_b4soiagidl_rv: f64 = *var_b4soiagidl_rv_slot;
+        let mut var_b4soiagisl: f64 = *var_b4soiagisl_slot;
+        let mut var_b4soiagisl_rv: f64 = *var_b4soiagisl_rv_slot;
+        let mut var_b4soiags: f64 = *var_b4soiags_slot;
+        let mut var_b4soiags_rv: f64 = *var_b4soiags_rv_slot;
+        let mut var_b4soiat: f64 = *var_b4soiat_slot;
+        let mut var_b4soiat_rv: f64 = *var_b4soiat_rv_slot;
+        let mut var_b4soibdos: f64 = *var_b4soibdos_slot;
+        let mut var_b4soibdos_rv: f64 = *var_b4soibdos_rv_slot;
+        let mut var_b4soibg0sub: f64 = *var_b4soibg0sub_slot;
+        let mut var_b4soibg0sub_rv: f64 = *var_b4soibg0sub_rv_slot;
+        let mut var_b4soibgidl: f64 = *var_b4soibgidl_slot;
+        let mut var_b4soibgidl_rv: f64 = *var_b4soibgidl_rv_slot;
+        let mut var_b4soibgisl: f64 = *var_b4soibgisl_slot;
+        let mut var_b4soibgisl_rv: f64 = *var_b4soibgisl_rv_slot;
+        let mut var_b4soibinunit: f64 = *var_b4soibinunit_slot;
+        let mut var_b4soibinunit_rv: f64 = *var_b4soibinunit_rv_slot;
+        let mut var_b4soibjtoff: f64 = *var_b4soibjtoff_slot;
+        let mut var_b4soibjtoff_rv: f64 = *var_b4soibjtoff_rv_slot;
+        let mut var_b4soibodyjctgatesidedgradingcoeff: f64 = *var_b4soibodyjctgatesidedgradingcoeff_slot;
+        let mut var_b4soibodyjctgatesidedgradingcoeff_rv: f64 = *var_b4soibodyjctgatesidedgradingcoeff_rv_slot;
+        let mut var_b4soibodyjctgatesidesgradingcoeff: f64 = *var_b4soibodyjctgatesidesgradingcoeff_slot;
+        let mut var_b4soibodyjctgatesidesgradingcoeff_rv: f64 = *var_b4soibodyjctgatesidesgradingcoeff_rv_slot;
+        let mut var_b4soibodysquares: f64 = *var_b4soibodysquares_slot;
+        let mut var_b4soibodysquares_rv: f64 = *var_b4soibodysquares_rv_slot;
+        let mut var_b4soicapmod: f64 = *var_b4soicapmod_slot;
+        let mut var_b4soicapmod_rv: f64 = *var_b4soicapmod_rv_slot;
+        let mut var_b4soicdsc: f64 = *var_b4soicdsc_slot;
+        let mut var_b4soicdsc_rv: f64 = *var_b4soicdsc_rv_slot;
+        let mut var_b4soicdscb: f64 = *var_b4soicdscb_slot;
+        let mut var_b4soicdscb_rv: f64 = *var_b4soicdscb_rv_slot;
+        let mut var_b4soicdscd: f64 = *var_b4soicdscd_slot;
+        let mut var_b4soicdscd_rv: f64 = *var_b4soicdscd_rv_slot;
+        let mut var_b4soicgidl: f64 = *var_b4soicgidl_slot;
+        let mut var_b4soicgidl_rv: f64 = *var_b4soicgidl_rv_slot;
+        let mut var_b4soicgisl: f64 = *var_b4soicgisl_slot;
+        let mut var_b4soicgisl_rv: f64 = *var_b4soicgisl_rv_slot;
+        let mut var_b4soicit: f64 = *var_b4soicit_slot;
+        let mut var_b4soicit_rv: f64 = *var_b4soicit_rv_slot;
+        let mut var_b4soicth0: f64 = *var_b4soicth0_slot;
+        let mut var_b4soicth0_rv: f64 = *var_b4soicth0_rv_slot;
+        let mut var_b4soidelta: f64 = *var_b4soidelta_slot;
+        let mut var_b4soidelta_rv: f64 = *var_b4soidelta_rv_slot;
+        let mut var_b4soidelvto: f64 = *var_b4soidelvto_slot;
+        let mut var_b4soidelvto_rv: f64 = *var_b4soidelvto_rv_slot;
+        let mut var_b4soidrainarea: f64 = *var_b4soidrainarea_slot;
+        let mut var_b4soidrainarea_rv: f64 = *var_b4soidrainarea_rv_slot;
+        let mut var_b4soidrainperimeter: f64 = *var_b4soidrainperimeter_slot;
+        let mut var_b4soidrainperimeter_rv: f64 = *var_b4soidrainperimeter_rv_slot;
+        let mut var_b4soidrainsquares: f64 = *var_b4soidrainsquares_slot;
+        let mut var_b4soidrainsquares_rv: f64 = *var_b4soidrainsquares_rv_slot;
+        let mut var_b4soidrout: f64 = *var_b4soidrout_slot;
+        let mut var_b4soidrout_rv: f64 = *var_b4soidrout_rv_slot;
+        let mut var_b4soidsub: f64 = *var_b4soidsub_slot;
+        let mut var_b4soidsub_rv: f64 = *var_b4soidsub_rv_slot;
+        let mut var_b4soidtoxcv: f64 = *var_b4soidtoxcv_slot;
+        let mut var_b4soidtoxcv_rv: f64 = *var_b4soidtoxcv_rv_slot;
+        let mut var_b4soidvt0: f64 = *var_b4soidvt0_slot;
+        let mut var_b4soidvt0_rv: f64 = *var_b4soidvt0_rv_slot;
+        let mut var_b4soidvt0w: f64 = *var_b4soidvt0w_slot;
+        let mut var_b4soidvt0w_rv: f64 = *var_b4soidvt0w_rv_slot;
+        let mut var_b4soidvt1: f64 = *var_b4soidvt1_slot;
+        let mut var_b4soidvt1_rv: f64 = *var_b4soidvt1_rv_slot;
+        let mut var_b4soidvt1w: f64 = *var_b4soidvt1w_slot;
+        let mut var_b4soidvt1w_rv: f64 = *var_b4soidvt1w_rv_slot;
+        let mut var_b4soidvt2: f64 = *var_b4soidvt2_slot;
+        let mut var_b4soidvt2_rv: f64 = *var_b4soidvt2_rv_slot;
+        let mut var_b4soidvt2w: f64 = *var_b4soidvt2w_slot;
+        let mut var_b4soidvt2w_rv: f64 = *var_b4soidvt2w_rv_slot;
+        let mut var_b4soieasub: f64 = *var_b4soieasub_slot;
+        let mut var_b4soieasub_rv: f64 = *var_b4soieasub_rv_slot;
+        let mut var_b4soiegidl: f64 = *var_b4soiegidl_slot;
+        let mut var_b4soiegidl_rv: f64 = *var_b4soiegidl_rv_slot;
+        let mut var_b4soiegisl: f64 = *var_b4soiegisl_slot;
+        let mut var_b4soiegisl_rv: f64 = *var_b4soiegisl_rv_slot;
+        let mut var_b4soieot: f64 = *var_b4soieot_slot;
+        let mut var_b4soieot_rv: f64 = *var_b4soieot_rv_slot;
+        let mut var_b4soiepsrgate: f64 = *var_b4soiepsrgate_slot;
+        let mut var_b4soiepsrgate_rv: f64 = *var_b4soiepsrgate_rv_slot;
+        let mut var_b4soiepsrox: f64 = *var_b4soiepsrox_slot;
+        let mut var_b4soiepsrox_rv: f64 = *var_b4soiepsrox_rv_slot;
+        let mut var_b4soiepsrsub: f64 = *var_b4soiepsrsub_slot;
+        let mut var_b4soiepsrsub_rv: f64 = *var_b4soiepsrsub_rv_slot;
+        let mut var_b4soieta0: f64 = *var_b4soieta0_slot;
+        let mut var_b4soieta0_rv: f64 = *var_b4soieta0_rv_slot;
+        let mut var_b4soieta0cv: f64 = *var_b4soieta0cv_slot;
+        let mut var_b4soieta0cv_rv: f64 = *var_b4soieta0cv_rv_slot;
+        let mut var_b4soietab: f64 = *var_b4soietab_slot;
+        let mut var_b4soietab_rv: f64 = *var_b4soietab_rv_slot;
+        let mut var_b4soietabcv: f64 = *var_b4soietabcv_slot;
+        let mut var_b4soietabcv_rv: f64 = *var_b4soietabcv_rv_slot;
+        let mut var_b4soietsi: f64 = *var_b4soietsi_slot;
+        let mut var_b4soietsi_rv: f64 = *var_b4soietsi_rv_slot;
+        let mut var_b4soieu: f64 = *var_b4soieu_slot;
+        let mut var_b4soieu_rv: f64 = *var_b4soieu_rv_slot;
+        let mut var_b4soifgidl: f64 = *var_b4soifgidl_slot;
+        let mut var_b4soifgidl_rv: f64 = *var_b4soifgidl_rv_slot;
+        let mut var_b4soifgisl: f64 = *var_b4soifgisl_slot;
+        let mut var_b4soifgisl_rv: f64 = *var_b4soifgisl_rv_slot;
+        let mut var_b4soifrbody: f64 = *var_b4soifrbody_slot;
+        let mut var_b4soifrbody_rv: f64 = *var_b4soifrbody_rv_slot;
+        let mut var_b4soigamma1: f64 = *var_b4soigamma1_slot;
+        let mut var_b4soigamma1_rv: f64 = *var_b4soigamma1_rv_slot;
+        let mut var_b4soigamma2: f64 = *var_b4soigamma2_slot;
+        let mut var_b4soigamma2_rv: f64 = *var_b4soigamma2_rv_slot;
+        let mut var_b4soigatesidewalljctdpotential: f64 = *var_b4soigatesidewalljctdpotential_slot;
+        let mut var_b4soigatesidewalljctdpotential_rv: f64 = *var_b4soigatesidewalljctdpotential_rv_slot;
+        let mut var_b4soigatesidewalljctspotential: f64 = *var_b4soigatesidewalljctspotential_slot;
+        let mut var_b4soigatesidewalljctspotential_rv: f64 = *var_b4soigatesidewalljctspotential_rv_slot;
+        let mut var_b4soigidlmod: f64 = *var_b4soigidlmod_slot;
+        let mut var_b4soigidlmod_rv: f64 = *var_b4soigidlmod_rv_slot;
+        let mut var_b4soiiiimod: f64 = *var_b4soiiiimod_slot;
+        let mut var_b4soiiiimod_rv: f64 = *var_b4soiiiimod_rv_slot;
+        let mut var_b4soik1: f64 = *var_b4soik1_slot;
+        let mut var_b4soik1_rv: f64 = *var_b4soik1_rv_slot;
+        let mut var_b4soik2: f64 = *var_b4soik2_slot;
+        let mut var_b4soik2_rv: f64 = *var_b4soik2_rv_slot;
+        let mut var_b4soik3: f64 = *var_b4soik3_slot;
+        let mut var_b4soik3_rv: f64 = *var_b4soik3_rv_slot;
+        let mut var_b4soik3b: f64 = *var_b4soik3b_slot;
+        let mut var_b4soik3b_rv: f64 = *var_b4soik3b_rv_slot;
+        let mut var_b4soiketa: f64 = *var_b4soiketa_slot;
+        let mut var_b4soiketa_rv: f64 = *var_b4soiketa_rv_slot;
+        let mut var_b4soikgidl: f64 = *var_b4soikgidl_slot;
+        let mut var_b4soikgidl_rv: f64 = *var_b4soikgidl_rv_slot;
+        let mut var_b4soikgisl: f64 = *var_b4soikgisl_slot;
+        let mut var_b4soikgisl_rv: f64 = *var_b4soikgisl_rv_slot;
+        let mut var_b4soikt1: f64 = *var_b4soikt1_slot;
+        let mut var_b4soikt1_rv: f64 = *var_b4soikt1_rv_slot;
+        let mut var_b4soikt1l: f64 = *var_b4soikt1l_slot;
+        let mut var_b4soikt1l_rv: f64 = *var_b4soikt1l_rv_slot;
+        let mut var_b4soikt2: f64 = *var_b4soikt2_slot;
+        let mut var_b4soikt2_rv: f64 = *var_b4soikt2_rv_slot;
+        let mut var_b4soil: f64 = *var_b4soil_slot;
+        let mut var_b4soil_rv: f64 = *var_b4soil_rv_slot;
+        let mut var_b4soileffeot: f64 = *var_b4soileffeot_slot;
+        let mut var_b4soileffeot_rv: f64 = *var_b4soileffeot_rv_slot;
+        let mut var_b4soilint: f64 = *var_b4soilint_slot;
+        let mut var_b4soilint_rv: f64 = *var_b4soilint_rv_slot;
+        let mut var_b4soill: f64 = *var_b4soill_slot;
+        let mut var_b4soill_rv: f64 = *var_b4soill_rv_slot;
+        let mut var_b4soillc: f64 = *var_b4soillc_slot;
+        let mut var_b4soillc_rv: f64 = *var_b4soillc_rv_slot;
+        let mut var_b4soilln: f64 = *var_b4soilln_slot;
+        let mut var_b4soilln_rv: f64 = *var_b4soilln_rv_slot;
+        let mut var_b4soilpe0: f64 = *var_b4soilpe0_slot;
+        let mut var_b4soilpe0_rv: f64 = *var_b4soilpe0_rv_slot;
+        let mut var_b4soilpeb: f64 = *var_b4soilpeb_slot;
+        let mut var_b4soilpeb_rv: f64 = *var_b4soilpeb_rv_slot;
+        let mut var_b4soilw: f64 = *var_b4soilw_slot;
+        let mut var_b4soilw_rv: f64 = *var_b4soilw_rv_slot;
+        let mut var_b4soimobmod: f64 = *var_b4soimobmod_slot;
+        let mut var_b4soimobmod_rv: f64 = *var_b4soimobmod_rv_slot;
+        let mut var_b4soimtrlmod: f64 = *var_b4soimtrlmod_slot;
+        let mut var_b4soimtrlmod_rv: f64 = *var_b4soimtrlmod_rv_slot;
+        let mut var_b4soinbc: f64 = *var_b4soinbc_slot;
+        let mut var_b4soinbc_rv: f64 = *var_b4soinbc_rv_slot;
+        let mut var_b4soindiode: f64 = *var_b4soindiode_slot;
+        let mut var_b4soindiode_rv: f64 = *var_b4soindiode_rv_slot;
+        let mut var_b4soindioded: f64 = *var_b4soindioded_slot;
+        let mut var_b4soindioded_rv: f64 = *var_b4soindioded_rv_slot;
+        let mut var_b4soinf: f64 = *var_b4soinf_slot;
+        let mut var_b4soinf_rv: f64 = *var_b4soinf_rv_slot;
+        let mut var_b4soinfactor: f64 = *var_b4soinfactor_slot;
+        let mut var_b4soinfactor_rv: f64 = *var_b4soinfactor_rv_slot;
+        let mut var_b4soingate: f64 = *var_b4soingate_slot;
+        let mut var_b4soingate_rv: f64 = *var_b4soingate_rv_slot;
+        let mut var_b4soini0sub: f64 = *var_b4soini0sub_slot;
+        let mut var_b4soini0sub_rv: f64 = *var_b4soini0sub_rv_slot;
+        let mut var_b4soinpeak: f64 = *var_b4soinpeak_slot;
+        let mut var_b4soinpeak_rv: f64 = *var_b4soinpeak_rv_slot;
+        let mut var_b4soinsd: f64 = *var_b4soinsd_slot;
+        let mut var_b4soinsd_rv: f64 = *var_b4soinsd_rv_slot;
+        let mut var_b4soinseg: f64 = *var_b4soinseg_slot;
+        let mut var_b4soinseg_rv: f64 = *var_b4soinseg_rv_slot;
+        let mut var_b4soinsub: f64 = *var_b4soinsub_slot;
+        let mut var_b4soinsub_rv: f64 = *var_b4soinsub_rv_slot;
+        let mut var_b4soipclm: f64 = *var_b4soipclm_slot;
+        let mut var_b4soipclm_rv: f64 = *var_b4soipclm_rv_slot;
+        let mut var_b4soipdbcp: f64 = *var_b4soipdbcp_slot;
+        let mut var_b4soipdbcp_rv: f64 = *var_b4soipdbcp_rv_slot;
+        let mut var_b4soipdibl1: f64 = *var_b4soipdibl1_slot;
+        let mut var_b4soipdibl1_rv: f64 = *var_b4soipdibl1_rv_slot;
+        let mut var_b4soipdibl2: f64 = *var_b4soipdibl2_slot;
+        let mut var_b4soipdibl2_rv: f64 = *var_b4soipdibl2_rv_slot;
+        let mut var_b4soipdiblb: f64 = *var_b4soipdiblb_slot;
+        let mut var_b4soipdiblb_rv: f64 = *var_b4soipdiblb_rv_slot;
+        let mut var_b4soiphig: f64 = *var_b4soiphig_slot;
+        let mut var_b4soiphig_rv: f64 = *var_b4soiphig_rv_slot;
+        let mut var_b4soiprt: f64 = *var_b4soiprt_slot;
+        let mut var_b4soiprt_rv: f64 = *var_b4soiprt_rv_slot;
+        let mut var_b4soiprwb: f64 = *var_b4soiprwb_slot;
+        let mut var_b4soiprwb_rv: f64 = *var_b4soiprwb_rv_slot;
+        let mut var_b4soiprwg: f64 = *var_b4soiprwg_slot;
+        let mut var_b4soiprwg_rv: f64 = *var_b4soiprwg_rv_slot;
+        let mut var_b4soipsbcp: f64 = *var_b4soipsbcp_slot;
+        let mut var_b4soipsbcp_rv: f64 = *var_b4soipsbcp_rv_slot;
+        let mut var_b4soipvag: f64 = *var_b4soipvag_slot;
+        let mut var_b4soipvag_rv: f64 = *var_b4soipvag_rv_slot;
+        let mut var_b4soirdsw: f64 = *var_b4soirdsw_slot;
+        let mut var_b4soirdsw_rv: f64 = *var_b4soirdsw_rv_slot;
+        let mut var_b4soirdw: f64 = *var_b4soirdw_slot;
+        let mut var_b4soirdw_rv: f64 = *var_b4soirdw_rv_slot;
+        let mut var_b4soirdwmin: f64 = *var_b4soirdwmin_slot;
+        let mut var_b4soirdwmin_rv: f64 = *var_b4soirdwmin_rv_slot;
+        let mut var_b4soirgatemod: f64 = *var_b4soirgatemod_slot;
+        let mut var_b4soirgatemod_rv: f64 = *var_b4soirgatemod_rv_slot;
+        let mut var_b4soirgidl: f64 = *var_b4soirgidl_slot;
+        let mut var_b4soirgidl_rv: f64 = *var_b4soirgidl_rv_slot;
+        let mut var_b4soirgisl: f64 = *var_b4soirgisl_slot;
+        let mut var_b4soirgisl_rv: f64 = *var_b4soirgisl_rv_slot;
+        let mut var_b4soirsw: f64 = *var_b4soirsw_slot;
+        let mut var_b4soirsw_rv: f64 = *var_b4soirsw_rv_slot;
+        let mut var_b4soirswmin: f64 = *var_b4soirswmin_slot;
+        let mut var_b4soirswmin_rv: f64 = *var_b4soirswmin_rv_slot;
+        let mut var_b4soisa: f64 = *var_b4soisa_slot;
+        let mut var_b4soisa_rv: f64 = *var_b4soisa_rv_slot;
+        let mut var_b4soisb: f64 = *var_b4soisb_slot;
+        let mut var_b4soisb_rv: f64 = *var_b4soisb_rv_slot;
+        let mut var_b4soisd: f64 = *var_b4soisd_slot;
+        let mut var_b4soisd_rv: f64 = *var_b4soisd_rv_slot;
+        let mut var_b4soisheetresistance: f64 = *var_b4soisheetresistance_slot;
+        let mut var_b4soisheetresistance_rv: f64 = *var_b4soisheetresistance_rv_slot;
+        let mut var_b4soisoimod: f64 = *var_b4soisoimod_slot;
+        let mut var_b4soisoimod_rv: f64 = *var_b4soisoimod_rv_slot;
+        let mut var_b4soisourcearea: f64 = *var_b4soisourcearea_slot;
+        let mut var_b4soisourcearea_rv: f64 = *var_b4soisourcearea_rv_slot;
+        let mut var_b4soisourceperimeter: f64 = *var_b4soisourceperimeter_slot;
+        let mut var_b4soisourceperimeter_rv: f64 = *var_b4soisourceperimeter_rv_slot;
+        let mut var_b4soisourcesquares: f64 = *var_b4soisourcesquares_slot;
+        let mut var_b4soisourcesquares_rv: f64 = *var_b4soisourcesquares_rv_slot;
+        let mut var_b4soitbgasub: f64 = *var_b4soitbgasub_slot;
+        let mut var_b4soitbgasub_rv: f64 = *var_b4soitbgasub_rv_slot;
+        let mut var_b4soitbgbsub: f64 = *var_b4soitbgbsub_slot;
+        let mut var_b4soitbgbsub_rv: f64 = *var_b4soitbgbsub_rv_slot;
+        let mut var_b4soitbox: f64 = *var_b4soitbox_slot;
+        let mut var_b4soitbox_rv: f64 = *var_b4soitbox_rv_slot;
+        let mut var_b4soitempeot: f64 = *var_b4soitempeot_slot;
+        let mut var_b4soitempeot_rv: f64 = *var_b4soitempeot_rv_slot;
+        let mut var_b4soitnom: f64 = *var_b4soitnom_slot;
+        let mut var_b4soitnom_rv: f64 = *var_b4soitnom_rv_slot;
+        let mut var_b4soitox: f64 = *var_b4soitox_slot;
+        let mut var_b4soitox_rv: f64 = *var_b4soitox_rv_slot;
+        let mut var_b4soitoxm: f64 = *var_b4soitoxm_slot;
+        let mut var_b4soitoxm_rv: f64 = *var_b4soitoxm_rv_slot;
+        let mut var_b4soitsi: f64 = *var_b4soitsi_slot;
+        let mut var_b4soitsi_rv: f64 = *var_b4soitsi_rv_slot;
+        let mut var_b4soitype: f64 = *var_b4soitype_slot;
+        let mut var_b4soitype_rv: f64 = *var_b4soitype_rv_slot;
+        let mut var_b4soiu0: f64 = *var_b4soiu0_slot;
+        let mut var_b4soiu0_rv: f64 = *var_b4soiu0_rv_slot;
+        let mut var_b4soiua: f64 = *var_b4soiua_slot;
+        let mut var_b4soiua1: f64 = *var_b4soiua1_slot;
+        let mut var_b4soiua1_rv: f64 = *var_b4soiua1_rv_slot;
+        let mut var_b4soiua_rv: f64 = *var_b4soiua_rv_slot;
+        let mut var_b4soiub: f64 = *var_b4soiub_slot;
+        let mut var_b4soiub1: f64 = *var_b4soiub1_slot;
+        let mut var_b4soiub1_rv: f64 = *var_b4soiub1_rv_slot;
+        let mut var_b4soiub_rv: f64 = *var_b4soiub_rv_slot;
+        let mut var_b4soiuc: f64 = *var_b4soiuc_slot;
+        let mut var_b4soiuc1: f64 = *var_b4soiuc1_slot;
+        let mut var_b4soiuc1_rv: f64 = *var_b4soiuc1_rv_slot;
+        let mut var_b4soiuc_rv: f64 = *var_b4soiuc_rv_slot;
+        let mut var_b4soiucs: f64 = *var_b4soiucs_slot;
+        let mut var_b4soiucs_rv: f64 = *var_b4soiucs_rv_slot;
+        let mut var_b4soiucste: f64 = *var_b4soiucste_slot;
+        let mut var_b4soiucste_rv: f64 = *var_b4soiucste_rv_slot;
+        let mut var_b4soiud: f64 = *var_b4soiud_slot;
+        let mut var_b4soiud1: f64 = *var_b4soiud1_slot;
+        let mut var_b4soiud1_rv: f64 = *var_b4soiud1_rv_slot;
+        let mut var_b4soiud_rv: f64 = *var_b4soiud_rv_slot;
+        let mut var_b4soiunitlengthgatesidewalljctcapd: f64 = *var_b4soiunitlengthgatesidewalljctcapd_slot;
+        let mut var_b4soiunitlengthgatesidewalljctcapd_rv: f64 = *var_b4soiunitlengthgatesidewalljctcapd_rv_slot;
+        let mut var_b4soiunitlengthgatesidewalljctcaps: f64 = *var_b4soiunitlengthgatesidewalljctcaps_slot;
+        let mut var_b4soiunitlengthgatesidewalljctcaps_rv: f64 = *var_b4soiunitlengthgatesidewalljctcaps_rv_slot;
+        let mut var_b4soiute: f64 = *var_b4soiute_slot;
+        let mut var_b4soiute_rv: f64 = *var_b4soiute_rv_slot;
+        let mut var_b4soivbm: f64 = *var_b4soivbm_slot;
+        let mut var_b4soivbm_rv: f64 = *var_b4soivbm_rv_slot;
+        let mut var_b4soivbx: f64 = *var_b4soivbx_slot;
+        let mut var_b4soivbx_rv: f64 = *var_b4soivbx_rv_slot;
+        let mut var_b4soivddeot: f64 = *var_b4soivddeot_slot;
+        let mut var_b4soivddeot_rv: f64 = *var_b4soivddeot_rv_slot;
+        let mut var_b4soivfb: f64 = *var_b4soivfb_slot;
+        let mut var_b4soivfb_rv: f64 = *var_b4soivfb_rv_slot;
+        let mut var_b4soivgstcvmod: f64 = *var_b4soivgstcvmod_slot;
+        let mut var_b4soivgstcvmod_rv: f64 = *var_b4soivgstcvmod_rv_slot;
+        let mut var_b4soivoff: f64 = *var_b4soivoff_slot;
+        let mut var_b4soivoff_rv: f64 = *var_b4soivoff_rv_slot;
+        let mut var_b4soivsat: f64 = *var_b4soivsat_slot;
+        let mut var_b4soivsat_rv: f64 = *var_b4soivsat_rv_slot;
+        let mut var_b4soivth0: f64 = *var_b4soivth0_slot;
+        let mut var_b4soivth0_rv: f64 = *var_b4soivth0_rv_slot;
+        let mut var_b4soiw: f64 = *var_b4soiw_slot;
+        let mut var_b4soiw0: f64 = *var_b4soiw0_slot;
+        let mut var_b4soiw0_rv: f64 = *var_b4soiw0_rv_slot;
+        let mut var_b4soiw_rv: f64 = *var_b4soiw_rv_slot;
+        let mut var_b4soiweffeot: f64 = *var_b4soiweffeot_slot;
+        let mut var_b4soiweffeot_rv: f64 = *var_b4soiweffeot_rv_slot;
+        let mut var_b4soixbjt: f64 = *var_b4soixbjt_slot;
+        let mut var_b4soixbjt_rv: f64 = *var_b4soixbjt_rv_slot;
+        let mut var_b4soixdif: f64 = *var_b4soixdif_slot;
+        let mut var_b4soixdif_rv: f64 = *var_b4soixdif_rv_slot;
+        let mut var_b4soixdifd: f64 = *var_b4soixdifd_slot;
+        let mut var_b4soixdifd_rv: f64 = *var_b4soixdifd_rv_slot;
+        let mut var_b4soixj: f64 = *var_b4soixj_slot;
+        let mut var_b4soixj_rv: f64 = *var_b4soixj_rv_slot;
+        let mut var_b4soixpart: f64 = *var_b4soixpart_slot;
+        let mut var_b4soixpart_rv: f64 = *var_b4soixpart_rv_slot;
+        let mut var_b4soixrec: f64 = *var_b4soixrec_slot;
+        let mut var_b4soixrec_rv: f64 = *var_b4soixrec_rv_slot;
+        let mut var_b4soixrecd: f64 = *var_b4soixrecd_slot;
+        let mut var_b4soixrecd_rv: f64 = *var_b4soixrecd_rv_slot;
+        let mut var_b4soixt: f64 = *var_b4soixt_slot;
+        let mut var_b4soixt_rv: f64 = *var_b4soixt_rv_slot;
+        let mut var_b4soixtun: f64 = *var_b4soixtun_slot;
+        let mut var_b4soixtun_rv: f64 = *var_b4soixtun_rv_slot;
+        let mut var_b4soixtund: f64 = *var_b4soixtund_slot;
+        let mut var_b4soixtund_rv: f64 = *var_b4soixtund_rv_slot;
+        let mut var_devtemp: f64 = *var_devtemp_slot;
+        let mut var_devtemp_dn6: f64 = *var_devtemp_dn6_slot;
+        let mut var_devtemp_rv: f64 = *var_devtemp_rv_slot;
+
+        let assign00_e1482: f64 = ctx_temp;
+        let assign00_e1484: f64 = (assign00_e1482 + p.p0);
+        var_devtemp = assign00_e1484;
+        var_devtemp_dn6 = 0.0;
+        var_devtemp_rv = 0.0;
+
+        var_b4soitype = p.p34;
+        var_b4soitype_rv = 0.0;
+
+        var_b4soil = p.p1;
+        var_b4soil_rv = 0.0;
+
+        var_b4soiw = p.p2;
+        var_b4soiw_rv = 0.0;
+
+        var_b4soinf = p.p3;
+        var_b4soinf_rv = 0.0;
+
+        var_b4soisa = p.p4;
+        var_b4soisa_rv = 0.0;
+
+        var_b4soisb = p.p5;
+        var_b4soisb_rv = 0.0;
+
+        var_b4soisd = p.p6;
+        var_b4soisd_rv = 0.0;
+
+        var_b4soidrainarea = p.p7;
+        var_b4soidrainarea_rv = 0.0;
+
+        var_b4soisourcearea = p.p8;
+        var_b4soisourcearea_rv = 0.0;
+
+        var_b4soidrainperimeter = p.p9;
+        var_b4soidrainperimeter_rv = 0.0;
+
+        var_b4soisourceperimeter = p.p10;
+        var_b4soisourceperimeter_rv = 0.0;
+
+        var_b4soidrainsquares = p.p11;
+        var_b4soidrainsquares_rv = 0.0;
+
+        var_b4soisourcesquares = p.p12;
+        var_b4soisourcesquares_rv = 0.0;
+
+        var_b4soibjtoff = p.p14;
+        var_b4soibjtoff_rv = 0.0;
+
+        var_b4soicth0 = p.p17;
+        var_b4soicth0_rv = 0.0;
+
+        var_b4soibodysquares = p.p18;
+        var_b4soibodysquares_rv = 0.0;
+
+        var_b4soifrbody = p.p19;
+        var_b4soifrbody_rv = 0.0;
+
+        var_b4soidelvto = p.p22;
+        var_b4soidelvto_rv = 0.0;
+
+        var_b4soisoimod = p.p23;
+        var_b4soisoimod_rv = 0.0;
+
+        var_b4soinbc = p.p24;
+        var_b4soinbc_rv = 0.0;
+
+        var_b4soinseg = p.p25;
+        var_b4soinseg_rv = 0.0;
+
+        var_b4soipdbcp = p.p26;
+        var_b4soipdbcp_rv = 0.0;
+
+        var_b4soipsbcp = p.p27;
+        var_b4soipsbcp_rv = 0.0;
+
+        var_b4soiagbcp = p.p28;
+        var_b4soiagbcp_rv = 0.0;
+
+        var_b4soiagbcp2 = p.p29;
+        var_b4soiagbcp2_rv = 0.0;
+
+        var_b4soiagbcpd = p.p30;
+        var_b4soiagbcpd_rv = 0.0;
+
+        var_b4soiaebcp = p.p31;
+        var_b4soiaebcp_rv = 0.0;
+
+        var_b4soirgatemod = p.p37;
+        var_b4soirgatemod_rv = 0.0;
+
+        var_b4soimtrlmod = p.p39;
+        var_b4soimtrlmod_rv = 0.0;
+
+        var_b4soivgstcvmod = p.p40;
+        var_b4soivgstcvmod_rv = 0.0;
+
+        var_b4soigidlmod = p.p41;
+        var_b4soigidlmod_rv = 0.0;
+
+        var_b4soiiiimod = p.p42;
+        var_b4soiiiimod_rv = 0.0;
+
+        var_b4soieot = p.p43;
+        var_b4soieot_rv = 0.0;
+
+        var_b4soiepsrox = p.p44;
+        var_b4soiepsrox_rv = 0.0;
+
+        var_b4soiepsrsub = p.p45;
+        var_b4soiepsrsub_rv = 0.0;
+
+        var_b4soini0sub = p.p46;
+        var_b4soini0sub_rv = 0.0;
+
+        var_b4soibg0sub = p.p47;
+        var_b4soibg0sub_rv = 0.0;
+
+        var_b4soitbgasub = p.p48;
+        var_b4soitbgasub_rv = 0.0;
+
+        var_b4soitbgbsub = p.p49;
+        var_b4soitbgbsub_rv = 0.0;
+
+        var_b4soiphig = p.p50;
+        var_b4soiphig_rv = 0.0;
+
+        var_b4soieasub = p.p51;
+        var_b4soieasub_rv = 0.0;
+
+        var_b4soileffeot = p.p52;
+        var_b4soileffeot_rv = 0.0;
+
+        var_b4soiweffeot = p.p53;
+        var_b4soiweffeot_rv = 0.0;
+
+        var_b4soivddeot = p.p54;
+        var_b4soivddeot_rv = 0.0;
+
+        var_b4soitempeot = p.p55;
+        var_b4soitempeot_rv = 0.0;
+
+        var_b4soiados = p.p56;
+        var_b4soiados_rv = 0.0;
+
+        var_b4soibdos = p.p57;
+        var_b4soibdos_rv = 0.0;
+
+        var_b4soiepsrgate = p.p58;
+        var_b4soiepsrgate_rv = 0.0;
+
+        var_b4soicapmod = p.p59;
+        var_b4soicapmod_rv = 0.0;
+
+        var_b4soimobmod = p.p60;
+        var_b4soimobmod_rv = 0.0;
+
+        var_b4soibinunit = p.p63;
+        var_b4soibinunit_rv = 0.0;
+
+        var_b4soitox = p.p64;
+        var_b4soitox_rv = 0.0;
+
+        var_b4soitoxm = p.p66;
+        var_b4soitoxm_rv = 0.0;
+
+        var_b4soidtoxcv = p.p67;
+        var_b4soidtoxcv_rv = 0.0;
+
+        var_b4soicdsc = p.p68;
+        var_b4soicdsc_rv = 0.0;
+
+        var_b4soicdscb = p.p69;
+        var_b4soicdscb_rv = 0.0;
+
+        var_b4soicdscd = p.p70;
+        var_b4soicdscd_rv = 0.0;
+
+        var_b4soicit = p.p71;
+        var_b4soicit_rv = 0.0;
+
+        var_b4soinfactor = p.p72;
+        var_b4soinfactor_rv = 0.0;
+
+        var_b4soivsat = p.p73;
+        var_b4soivsat_rv = 0.0;
+
+        var_b4soiat = p.p74;
+        var_b4soiat_rv = 0.0;
+
+        var_b4soia0 = p.p75;
+        var_b4soia0_rv = 0.0;
+
+        var_b4soiags = p.p76;
+        var_b4soiags_rv = 0.0;
+
+        var_b4soia1 = p.p77;
+        var_b4soia1_rv = 0.0;
+
+        var_b4soia2 = p.p78;
+        var_b4soia2_rv = 0.0;
+
+        var_b4soiketa = p.p79;
+        var_b4soiketa_rv = 0.0;
+
+        var_b4soinsub = p.p80;
+        var_b4soinsub_rv = 0.0;
+
+        var_b4soinpeak = p.p81;
+        var_b4soinpeak_rv = 0.0;
+
+        var_b4soingate = p.p82;
+        var_b4soingate_rv = 0.0;
+
+        var_b4soinsd = p.p83;
+        var_b4soinsd_rv = 0.0;
+
+        var_b4soigamma1 = p.p84;
+        var_b4soigamma1_rv = 0.0;
+
+        var_b4soigamma2 = p.p85;
+        var_b4soigamma2_rv = 0.0;
+
+        var_b4soivbx = p.p86;
+        var_b4soivbx_rv = 0.0;
+
+        var_b4soivbm = p.p87;
+        var_b4soivbm_rv = 0.0;
+
+        var_b4soixt = p.p88;
+        var_b4soixt_rv = 0.0;
+
+        var_b4soik1 = p.p89;
+        var_b4soik1_rv = 0.0;
+
+        var_b4soikt1 = p.p90;
+        var_b4soikt1_rv = 0.0;
+
+        var_b4soikt1l = p.p91;
+        var_b4soikt1l_rv = 0.0;
+
+        var_b4soikt2 = p.p92;
+        var_b4soikt2_rv = 0.0;
+
+        var_b4soik2 = p.p93;
+        var_b4soik2_rv = 0.0;
+
+        var_b4soik3 = p.p94;
+        var_b4soik3_rv = 0.0;
+
+        var_b4soik3b = p.p95;
+        var_b4soik3b_rv = 0.0;
+
+        var_b4soiw0 = p.p96;
+        var_b4soiw0_rv = 0.0;
+
+        var_b4soilpe0 = p.p973;
+        var_b4soilpe0_rv = 0.0;
+
+        var_b4soilpeb = p.p97;
+        var_b4soilpeb_rv = 0.0;
+
+        var_b4soidvt0 = p.p98;
+        var_b4soidvt0_rv = 0.0;
+
+        var_b4soidvt1 = p.p99;
+        var_b4soidvt1_rv = 0.0;
+
+        var_b4soidvt2 = p.p100;
+        var_b4soidvt2_rv = 0.0;
+
+        var_b4soidvt0w = p.p101;
+        var_b4soidvt0w_rv = 0.0;
+
+        var_b4soidvt1w = p.p102;
+        var_b4soidvt1w_rv = 0.0;
+
+        var_b4soidvt2w = p.p103;
+        var_b4soidvt2w_rv = 0.0;
+
+        var_b4soidrout = p.p104;
+        var_b4soidrout_rv = 0.0;
+
+        var_b4soidsub = p.p105;
+        var_b4soidsub_rv = 0.0;
+
+        var_b4soivth0 = p.p107;
+        var_b4soivth0_rv = 0.0;
+
+        var_b4soivfb = p.p108;
+        var_b4soivfb_rv = 0.0;
+
+        var_b4soiua = p.p109;
+        var_b4soiua_rv = 0.0;
+
+        var_b4soiua1 = p.p110;
+        var_b4soiua1_rv = 0.0;
+
+        var_b4soiub = p.p111;
+        var_b4soiub_rv = 0.0;
+
+        var_b4soiub1 = p.p112;
+        var_b4soiub1_rv = 0.0;
+
+        var_b4soiuc = p.p113;
+        var_b4soiuc_rv = 0.0;
+
+        var_b4soiuc1 = p.p114;
+        var_b4soiuc1_rv = 0.0;
+
+        var_b4soiu0 = p.p115;
+        var_b4soiu0_rv = 0.0;
+
+        var_b4soieu = p.p116;
+        var_b4soieu_rv = 0.0;
+
+        var_b4soiute = p.p117;
+        var_b4soiute_rv = 0.0;
+
+        var_b4soiucs = p.p118;
+        var_b4soiucs_rv = 0.0;
+
+        var_b4soiucste = p.p119;
+        var_b4soiucste_rv = 0.0;
+
+        var_b4soiud = p.p120;
+        var_b4soiud_rv = 0.0;
+
+        var_b4soiud1 = p.p121;
+        var_b4soiud1_rv = 0.0;
+
+        var_b4soivoff = p.p122;
+        var_b4soivoff_rv = 0.0;
+
+        let assign1140_e1600: f64 = (p.p123 + 273.15);
+        var_b4soitnom = assign1140_e1600;
+        var_b4soitnom_rv = 0.0;
+
+        var_b4soixpart = p.p126;
+        var_b4soixpart_rv = 0.0;
+
+        var_b4soidelta = p.p127;
+        var_b4soidelta_rv = 0.0;
+
+        var_b4soisheetresistance = p.p128;
+        var_b4soisheetresistance_rv = 0.0;
+
+        var_b4soirdsw = p.p129;
+        var_b4soirdsw_rv = 0.0;
+
+        var_b4soirsw = p.p130;
+        var_b4soirsw_rv = 0.0;
+
+        var_b4soirdw = p.p131;
+        var_b4soirdw_rv = 0.0;
+
+        var_b4soirswmin = p.p132;
+        var_b4soirswmin_rv = 0.0;
+
+        var_b4soirdwmin = p.p133;
+        var_b4soirdwmin_rv = 0.0;
+
+        var_b4soiprwg = p.p134;
+        var_b4soiprwg_rv = 0.0;
+
+        var_b4soiprwb = p.p135;
+        var_b4soiprwb_rv = 0.0;
+
+        var_b4soiprt = p.p136;
+        var_b4soiprt_rv = 0.0;
+
+        var_b4soieta0 = p.p137;
+        var_b4soieta0_rv = 0.0;
+
+        var_b4soietab = p.p138;
+        var_b4soietab_rv = 0.0;
+
+        var_b4soieta0cv = p.p139;
+        var_b4soieta0cv_rv = 0.0;
+
+        var_b4soietabcv = p.p140;
+        var_b4soietabcv_rv = 0.0;
+
+        var_b4soipclm = p.p141;
+        var_b4soipclm_rv = 0.0;
+
+        var_b4soipdibl1 = p.p142;
+        var_b4soipdibl1_rv = 0.0;
+
+        var_b4soipdibl2 = p.p143;
+        var_b4soipdibl2_rv = 0.0;
+
+        var_b4soipdiblb = p.p144;
+        var_b4soipdiblb_rv = 0.0;
+
+        var_b4soipvag = p.p145;
+        var_b4soipvag_rv = 0.0;
+
+        var_b4soitbox = p.p146;
+        var_b4soitbox_rv = 0.0;
+
+        var_b4soitsi = p.p147;
+        var_b4soitsi_rv = 0.0;
+
+        var_b4soietsi = p.p148;
+        var_b4soietsi_rv = 0.0;
+
+        var_b4soixj = p.p149;
+        var_b4soixj_rv = 0.0;
+
+        var_b4soiegidl = p.p974;
+        var_b4soiegidl_rv = 0.0;
+
+        var_b4soiagidl = p.p150;
+        var_b4soiagidl_rv = 0.0;
+
+        var_b4soibgidl = p.p151;
+        var_b4soibgidl_rv = 0.0;
+
+        var_b4soicgidl = p.p152;
+        var_b4soicgidl_rv = 0.0;
+
+        var_b4soirgidl = p.p153;
+        var_b4soirgidl_rv = 0.0;
+
+        var_b4soikgidl = p.p154;
+        var_b4soikgidl_rv = 0.0;
+
+        var_b4soifgidl = p.p155;
+        var_b4soifgidl_rv = 0.0;
+
+        var_b4soiegisl = p.p975;
+        var_b4soiegisl_rv = 0.0;
+
+        var_b4soiagisl = p.p156;
+        var_b4soiagisl_rv = 0.0;
+
+        var_b4soibgisl = p.p157;
+        var_b4soibgisl_rv = 0.0;
+
+        var_b4soicgisl = p.p158;
+        var_b4soicgisl_rv = 0.0;
+
+        var_b4soirgisl = p.p159;
+        var_b4soirgisl_rv = 0.0;
+
+        var_b4soikgisl = p.p160;
+        var_b4soikgisl_rv = 0.0;
+
+        var_b4soifgisl = p.p161;
+        var_b4soifgisl_rv = 0.0;
+
+        var_b4soindiode = p.p162;
+        var_b4soindiode_rv = 0.0;
+
+        var_b4soindioded = p.p163;
+        var_b4soindioded_rv = 0.0;
+
+        var_b4soixbjt = p.p164;
+        var_b4soixbjt_rv = 0.0;
+
+        var_b4soixdif = p.p165;
+        var_b4soixdif_rv = 0.0;
+
+        var_b4soixrec = p.p166;
+        var_b4soixrec_rv = 0.0;
+
+        var_b4soixtun = p.p167;
+        var_b4soixtun_rv = 0.0;
+
+        var_b4soixdifd = p.p168;
+        var_b4soixdifd_rv = 0.0;
+
+        var_b4soixrecd = p.p169;
+        var_b4soixrecd_rv = 0.0;
+
+        var_b4soixtund = p.p170;
+        var_b4soixtund_rv = 0.0;
+
+        var_b4soigatesidewalljctspotential = p.p171;
+        var_b4soigatesidewalljctspotential_rv = 0.0;
+
+        var_b4soigatesidewalljctdpotential = p.p172;
+        var_b4soigatesidewalljctdpotential_rv = 0.0;
+
+        var_b4soibodyjctgatesidesgradingcoeff = p.p173;
+        var_b4soibodyjctgatesidesgradingcoeff_rv = 0.0;
+
+        var_b4soibodyjctgatesidedgradingcoeff = p.p174;
+        var_b4soibodyjctgatesidedgradingcoeff_rv = 0.0;
+
+        var_b4soiunitlengthgatesidewalljctcaps = p.p175;
+        var_b4soiunitlengthgatesidewalljctcaps_rv = 0.0;
+
+        var_b4soiunitlengthgatesidewalljctcapd = p.p176;
+        var_b4soiunitlengthgatesidewalljctcapd_rv = 0.0;
+
+        var_b4soilint = p.p177;
+        var_b4soilint_rv = 0.0;
+
+        var_b4soill = p.p178;
+        var_b4soill_rv = 0.0;
+
+        var_b4soillc = p.p179;
+        var_b4soillc_rv = 0.0;
+
+        var_b4soilln = p.p180;
+        var_b4soilln_rv = 0.0;
+
+        var_b4soilw = p.p181;
+        var_b4soilw_rv = 0.0;
+
+        *var_b4soia0_slot = var_b4soia0;
+        *var_b4soia0_rv_slot = var_b4soia0_rv;
+        *var_b4soia1_slot = var_b4soia1;
+        *var_b4soia1_rv_slot = var_b4soia1_rv;
+        *var_b4soia2_slot = var_b4soia2;
+        *var_b4soia2_rv_slot = var_b4soia2_rv;
+        *var_b4soiados_slot = var_b4soiados;
+        *var_b4soiados_rv_slot = var_b4soiados_rv;
+        *var_b4soiaebcp_slot = var_b4soiaebcp;
+        *var_b4soiaebcp_rv_slot = var_b4soiaebcp_rv;
+        *var_b4soiagbcp_slot = var_b4soiagbcp;
+        *var_b4soiagbcp2_slot = var_b4soiagbcp2;
+        *var_b4soiagbcp2_rv_slot = var_b4soiagbcp2_rv;
+        *var_b4soiagbcp_rv_slot = var_b4soiagbcp_rv;
+        *var_b4soiagbcpd_slot = var_b4soiagbcpd;
+        *var_b4soiagbcpd_rv_slot = var_b4soiagbcpd_rv;
+        *var_b4soiagidl_slot = var_b4soiagidl;
+        *var_b4soiagidl_rv_slot = var_b4soiagidl_rv;
+        *var_b4soiagisl_slot = var_b4soiagisl;
+        *var_b4soiagisl_rv_slot = var_b4soiagisl_rv;
+        *var_b4soiags_slot = var_b4soiags;
+        *var_b4soiags_rv_slot = var_b4soiags_rv;
+        *var_b4soiat_slot = var_b4soiat;
+        *var_b4soiat_rv_slot = var_b4soiat_rv;
+        *var_b4soibdos_slot = var_b4soibdos;
+        *var_b4soibdos_rv_slot = var_b4soibdos_rv;
+        *var_b4soibg0sub_slot = var_b4soibg0sub;
+        *var_b4soibg0sub_rv_slot = var_b4soibg0sub_rv;
+        *var_b4soibgidl_slot = var_b4soibgidl;
+        *var_b4soibgidl_rv_slot = var_b4soibgidl_rv;
+        *var_b4soibgisl_slot = var_b4soibgisl;
+        *var_b4soibgisl_rv_slot = var_b4soibgisl_rv;
+        *var_b4soibinunit_slot = var_b4soibinunit;
+        *var_b4soibinunit_rv_slot = var_b4soibinunit_rv;
+        *var_b4soibjtoff_slot = var_b4soibjtoff;
+        *var_b4soibjtoff_rv_slot = var_b4soibjtoff_rv;
+        *var_b4soibodyjctgatesidedgradingcoeff_slot = var_b4soibodyjctgatesidedgradingcoeff;
+        *var_b4soibodyjctgatesidedgradingcoeff_rv_slot = var_b4soibodyjctgatesidedgradingcoeff_rv;
+        *var_b4soibodyjctgatesidesgradingcoeff_slot = var_b4soibodyjctgatesidesgradingcoeff;
+        *var_b4soibodyjctgatesidesgradingcoeff_rv_slot = var_b4soibodyjctgatesidesgradingcoeff_rv;
+        *var_b4soibodysquares_slot = var_b4soibodysquares;
+        *var_b4soibodysquares_rv_slot = var_b4soibodysquares_rv;
+        *var_b4soicapmod_slot = var_b4soicapmod;
+        *var_b4soicapmod_rv_slot = var_b4soicapmod_rv;
+        *var_b4soicdsc_slot = var_b4soicdsc;
+        *var_b4soicdsc_rv_slot = var_b4soicdsc_rv;
+        *var_b4soicdscb_slot = var_b4soicdscb;
+        *var_b4soicdscb_rv_slot = var_b4soicdscb_rv;
+        *var_b4soicdscd_slot = var_b4soicdscd;
+        *var_b4soicdscd_rv_slot = var_b4soicdscd_rv;
+        *var_b4soicgidl_slot = var_b4soicgidl;
+        *var_b4soicgidl_rv_slot = var_b4soicgidl_rv;
+        *var_b4soicgisl_slot = var_b4soicgisl;
+        *var_b4soicgisl_rv_slot = var_b4soicgisl_rv;
+        *var_b4soicit_slot = var_b4soicit;
+        *var_b4soicit_rv_slot = var_b4soicit_rv;
+        *var_b4soicth0_slot = var_b4soicth0;
+        *var_b4soicth0_rv_slot = var_b4soicth0_rv;
+        *var_b4soidelta_slot = var_b4soidelta;
+        *var_b4soidelta_rv_slot = var_b4soidelta_rv;
+        *var_b4soidelvto_slot = var_b4soidelvto;
+        *var_b4soidelvto_rv_slot = var_b4soidelvto_rv;
+        *var_b4soidrainarea_slot = var_b4soidrainarea;
+        *var_b4soidrainarea_rv_slot = var_b4soidrainarea_rv;
+        *var_b4soidrainperimeter_slot = var_b4soidrainperimeter;
+        *var_b4soidrainperimeter_rv_slot = var_b4soidrainperimeter_rv;
+        *var_b4soidrainsquares_slot = var_b4soidrainsquares;
+        *var_b4soidrainsquares_rv_slot = var_b4soidrainsquares_rv;
+        *var_b4soidrout_slot = var_b4soidrout;
+        *var_b4soidrout_rv_slot = var_b4soidrout_rv;
+        *var_b4soidsub_slot = var_b4soidsub;
+        *var_b4soidsub_rv_slot = var_b4soidsub_rv;
+        *var_b4soidtoxcv_slot = var_b4soidtoxcv;
+        *var_b4soidtoxcv_rv_slot = var_b4soidtoxcv_rv;
+        *var_b4soidvt0_slot = var_b4soidvt0;
+        *var_b4soidvt0_rv_slot = var_b4soidvt0_rv;
+        *var_b4soidvt0w_slot = var_b4soidvt0w;
+        *var_b4soidvt0w_rv_slot = var_b4soidvt0w_rv;
+        *var_b4soidvt1_slot = var_b4soidvt1;
+        *var_b4soidvt1_rv_slot = var_b4soidvt1_rv;
+        *var_b4soidvt1w_slot = var_b4soidvt1w;
+        *var_b4soidvt1w_rv_slot = var_b4soidvt1w_rv;
+        *var_b4soidvt2_slot = var_b4soidvt2;
+        *var_b4soidvt2_rv_slot = var_b4soidvt2_rv;
+        *var_b4soidvt2w_slot = var_b4soidvt2w;
+        *var_b4soidvt2w_rv_slot = var_b4soidvt2w_rv;
+        *var_b4soieasub_slot = var_b4soieasub;
+        *var_b4soieasub_rv_slot = var_b4soieasub_rv;
+        *var_b4soiegidl_slot = var_b4soiegidl;
+        *var_b4soiegidl_rv_slot = var_b4soiegidl_rv;
+        *var_b4soiegisl_slot = var_b4soiegisl;
+        *var_b4soiegisl_rv_slot = var_b4soiegisl_rv;
+        *var_b4soieot_slot = var_b4soieot;
+        *var_b4soieot_rv_slot = var_b4soieot_rv;
+        *var_b4soiepsrgate_slot = var_b4soiepsrgate;
+        *var_b4soiepsrgate_rv_slot = var_b4soiepsrgate_rv;
+        *var_b4soiepsrox_slot = var_b4soiepsrox;
+        *var_b4soiepsrox_rv_slot = var_b4soiepsrox_rv;
+        *var_b4soiepsrsub_slot = var_b4soiepsrsub;
+        *var_b4soiepsrsub_rv_slot = var_b4soiepsrsub_rv;
+        *var_b4soieta0_slot = var_b4soieta0;
+        *var_b4soieta0_rv_slot = var_b4soieta0_rv;
+        *var_b4soieta0cv_slot = var_b4soieta0cv;
+        *var_b4soieta0cv_rv_slot = var_b4soieta0cv_rv;
+        *var_b4soietab_slot = var_b4soietab;
+        *var_b4soietab_rv_slot = var_b4soietab_rv;
+        *var_b4soietabcv_slot = var_b4soietabcv;
+        *var_b4soietabcv_rv_slot = var_b4soietabcv_rv;
+        *var_b4soietsi_slot = var_b4soietsi;
+        *var_b4soietsi_rv_slot = var_b4soietsi_rv;
+        *var_b4soieu_slot = var_b4soieu;
+        *var_b4soieu_rv_slot = var_b4soieu_rv;
+        *var_b4soifgidl_slot = var_b4soifgidl;
+        *var_b4soifgidl_rv_slot = var_b4soifgidl_rv;
+        *var_b4soifgisl_slot = var_b4soifgisl;
+        *var_b4soifgisl_rv_slot = var_b4soifgisl_rv;
+        *var_b4soifrbody_slot = var_b4soifrbody;
+        *var_b4soifrbody_rv_slot = var_b4soifrbody_rv;
+        *var_b4soigamma1_slot = var_b4soigamma1;
+        *var_b4soigamma1_rv_slot = var_b4soigamma1_rv;
+        *var_b4soigamma2_slot = var_b4soigamma2;
+        *var_b4soigamma2_rv_slot = var_b4soigamma2_rv;
+        *var_b4soigatesidewalljctdpotential_slot = var_b4soigatesidewalljctdpotential;
+        *var_b4soigatesidewalljctdpotential_rv_slot = var_b4soigatesidewalljctdpotential_rv;
+        *var_b4soigatesidewalljctspotential_slot = var_b4soigatesidewalljctspotential;
+        *var_b4soigatesidewalljctspotential_rv_slot = var_b4soigatesidewalljctspotential_rv;
+        *var_b4soigidlmod_slot = var_b4soigidlmod;
+        *var_b4soigidlmod_rv_slot = var_b4soigidlmod_rv;
+        *var_b4soiiiimod_slot = var_b4soiiiimod;
+        *var_b4soiiiimod_rv_slot = var_b4soiiiimod_rv;
+        *var_b4soik1_slot = var_b4soik1;
+        *var_b4soik1_rv_slot = var_b4soik1_rv;
+        *var_b4soik2_slot = var_b4soik2;
+        *var_b4soik2_rv_slot = var_b4soik2_rv;
+        *var_b4soik3_slot = var_b4soik3;
+        *var_b4soik3_rv_slot = var_b4soik3_rv;
+        *var_b4soik3b_slot = var_b4soik3b;
+        *var_b4soik3b_rv_slot = var_b4soik3b_rv;
+        *var_b4soiketa_slot = var_b4soiketa;
+        *var_b4soiketa_rv_slot = var_b4soiketa_rv;
+        *var_b4soikgidl_slot = var_b4soikgidl;
+        *var_b4soikgidl_rv_slot = var_b4soikgidl_rv;
+        *var_b4soikgisl_slot = var_b4soikgisl;
+        *var_b4soikgisl_rv_slot = var_b4soikgisl_rv;
+        *var_b4soikt1_slot = var_b4soikt1;
+        *var_b4soikt1_rv_slot = var_b4soikt1_rv;
+        *var_b4soikt1l_slot = var_b4soikt1l;
+        *var_b4soikt1l_rv_slot = var_b4soikt1l_rv;
+        *var_b4soikt2_slot = var_b4soikt2;
+        *var_b4soikt2_rv_slot = var_b4soikt2_rv;
+        *var_b4soil_slot = var_b4soil;
+        *var_b4soil_rv_slot = var_b4soil_rv;
+        *var_b4soileffeot_slot = var_b4soileffeot;
+        *var_b4soileffeot_rv_slot = var_b4soileffeot_rv;
+        *var_b4soilint_slot = var_b4soilint;
+        *var_b4soilint_rv_slot = var_b4soilint_rv;
+        *var_b4soill_slot = var_b4soill;
+        *var_b4soill_rv_slot = var_b4soill_rv;
+        *var_b4soillc_slot = var_b4soillc;
+        *var_b4soillc_rv_slot = var_b4soillc_rv;
+        *var_b4soilln_slot = var_b4soilln;
+        *var_b4soilln_rv_slot = var_b4soilln_rv;
+        *var_b4soilpe0_slot = var_b4soilpe0;
+        *var_b4soilpe0_rv_slot = var_b4soilpe0_rv;
+        *var_b4soilpeb_slot = var_b4soilpeb;
+        *var_b4soilpeb_rv_slot = var_b4soilpeb_rv;
+        *var_b4soilw_slot = var_b4soilw;
+        *var_b4soilw_rv_slot = var_b4soilw_rv;
+        *var_b4soimobmod_slot = var_b4soimobmod;
+        *var_b4soimobmod_rv_slot = var_b4soimobmod_rv;
+        *var_b4soimtrlmod_slot = var_b4soimtrlmod;
+        *var_b4soimtrlmod_rv_slot = var_b4soimtrlmod_rv;
+        *var_b4soinbc_slot = var_b4soinbc;
+        *var_b4soinbc_rv_slot = var_b4soinbc_rv;
+        *var_b4soindiode_slot = var_b4soindiode;
+        *var_b4soindiode_rv_slot = var_b4soindiode_rv;
+        *var_b4soindioded_slot = var_b4soindioded;
+        *var_b4soindioded_rv_slot = var_b4soindioded_rv;
+        *var_b4soinf_slot = var_b4soinf;
+        *var_b4soinf_rv_slot = var_b4soinf_rv;
+        *var_b4soinfactor_slot = var_b4soinfactor;
+        *var_b4soinfactor_rv_slot = var_b4soinfactor_rv;
+        *var_b4soingate_slot = var_b4soingate;
+        *var_b4soingate_rv_slot = var_b4soingate_rv;
+        *var_b4soini0sub_slot = var_b4soini0sub;
+        *var_b4soini0sub_rv_slot = var_b4soini0sub_rv;
+        *var_b4soinpeak_slot = var_b4soinpeak;
+        *var_b4soinpeak_rv_slot = var_b4soinpeak_rv;
+        *var_b4soinsd_slot = var_b4soinsd;
+        *var_b4soinsd_rv_slot = var_b4soinsd_rv;
+        *var_b4soinseg_slot = var_b4soinseg;
+        *var_b4soinseg_rv_slot = var_b4soinseg_rv;
+        *var_b4soinsub_slot = var_b4soinsub;
+        *var_b4soinsub_rv_slot = var_b4soinsub_rv;
+        *var_b4soipclm_slot = var_b4soipclm;
+        *var_b4soipclm_rv_slot = var_b4soipclm_rv;
+        *var_b4soipdbcp_slot = var_b4soipdbcp;
+        *var_b4soipdbcp_rv_slot = var_b4soipdbcp_rv;
+        *var_b4soipdibl1_slot = var_b4soipdibl1;
+        *var_b4soipdibl1_rv_slot = var_b4soipdibl1_rv;
+        *var_b4soipdibl2_slot = var_b4soipdibl2;
+        *var_b4soipdibl2_rv_slot = var_b4soipdibl2_rv;
+        *var_b4soipdiblb_slot = var_b4soipdiblb;
+        *var_b4soipdiblb_rv_slot = var_b4soipdiblb_rv;
+        *var_b4soiphig_slot = var_b4soiphig;
+        *var_b4soiphig_rv_slot = var_b4soiphig_rv;
+        *var_b4soiprt_slot = var_b4soiprt;
+        *var_b4soiprt_rv_slot = var_b4soiprt_rv;
+        *var_b4soiprwb_slot = var_b4soiprwb;
+        *var_b4soiprwb_rv_slot = var_b4soiprwb_rv;
+        *var_b4soiprwg_slot = var_b4soiprwg;
+        *var_b4soiprwg_rv_slot = var_b4soiprwg_rv;
+        *var_b4soipsbcp_slot = var_b4soipsbcp;
+        *var_b4soipsbcp_rv_slot = var_b4soipsbcp_rv;
+        *var_b4soipvag_slot = var_b4soipvag;
+        *var_b4soipvag_rv_slot = var_b4soipvag_rv;
+        *var_b4soirdsw_slot = var_b4soirdsw;
+        *var_b4soirdsw_rv_slot = var_b4soirdsw_rv;
+        *var_b4soirdw_slot = var_b4soirdw;
+        *var_b4soirdw_rv_slot = var_b4soirdw_rv;
+        *var_b4soirdwmin_slot = var_b4soirdwmin;
+        *var_b4soirdwmin_rv_slot = var_b4soirdwmin_rv;
+        *var_b4soirgatemod_slot = var_b4soirgatemod;
+        *var_b4soirgatemod_rv_slot = var_b4soirgatemod_rv;
+        *var_b4soirgidl_slot = var_b4soirgidl;
+        *var_b4soirgidl_rv_slot = var_b4soirgidl_rv;
+        *var_b4soirgisl_slot = var_b4soirgisl;
+        *var_b4soirgisl_rv_slot = var_b4soirgisl_rv;
+        *var_b4soirsw_slot = var_b4soirsw;
+        *var_b4soirsw_rv_slot = var_b4soirsw_rv;
+        *var_b4soirswmin_slot = var_b4soirswmin;
+        *var_b4soirswmin_rv_slot = var_b4soirswmin_rv;
+        *var_b4soisa_slot = var_b4soisa;
+        *var_b4soisa_rv_slot = var_b4soisa_rv;
+        *var_b4soisb_slot = var_b4soisb;
+        *var_b4soisb_rv_slot = var_b4soisb_rv;
+        *var_b4soisd_slot = var_b4soisd;
+        *var_b4soisd_rv_slot = var_b4soisd_rv;
+        *var_b4soisheetresistance_slot = var_b4soisheetresistance;
+        *var_b4soisheetresistance_rv_slot = var_b4soisheetresistance_rv;
+        *var_b4soisoimod_slot = var_b4soisoimod;
+        *var_b4soisoimod_rv_slot = var_b4soisoimod_rv;
+        *var_b4soisourcearea_slot = var_b4soisourcearea;
+        *var_b4soisourcearea_rv_slot = var_b4soisourcearea_rv;
+        *var_b4soisourceperimeter_slot = var_b4soisourceperimeter;
+        *var_b4soisourceperimeter_rv_slot = var_b4soisourceperimeter_rv;
+        *var_b4soisourcesquares_slot = var_b4soisourcesquares;
+        *var_b4soisourcesquares_rv_slot = var_b4soisourcesquares_rv;
+        *var_b4soitbgasub_slot = var_b4soitbgasub;
+        *var_b4soitbgasub_rv_slot = var_b4soitbgasub_rv;
+        *var_b4soitbgbsub_slot = var_b4soitbgbsub;
+        *var_b4soitbgbsub_rv_slot = var_b4soitbgbsub_rv;
+        *var_b4soitbox_slot = var_b4soitbox;
+        *var_b4soitbox_rv_slot = var_b4soitbox_rv;
+        *var_b4soitempeot_slot = var_b4soitempeot;
+        *var_b4soitempeot_rv_slot = var_b4soitempeot_rv;
+        *var_b4soitnom_slot = var_b4soitnom;
+        *var_b4soitnom_rv_slot = var_b4soitnom_rv;
+        *var_b4soitox_slot = var_b4soitox;
+        *var_b4soitox_rv_slot = var_b4soitox_rv;
+        *var_b4soitoxm_slot = var_b4soitoxm;
+        *var_b4soitoxm_rv_slot = var_b4soitoxm_rv;
+        *var_b4soitsi_slot = var_b4soitsi;
+        *var_b4soitsi_rv_slot = var_b4soitsi_rv;
+        *var_b4soitype_slot = var_b4soitype;
+        *var_b4soitype_rv_slot = var_b4soitype_rv;
+        *var_b4soiu0_slot = var_b4soiu0;
+        *var_b4soiu0_rv_slot = var_b4soiu0_rv;
+        *var_b4soiua_slot = var_b4soiua;
+        *var_b4soiua1_slot = var_b4soiua1;
+        *var_b4soiua1_rv_slot = var_b4soiua1_rv;
+        *var_b4soiua_rv_slot = var_b4soiua_rv;
+        *var_b4soiub_slot = var_b4soiub;
+        *var_b4soiub1_slot = var_b4soiub1;
+        *var_b4soiub1_rv_slot = var_b4soiub1_rv;
+        *var_b4soiub_rv_slot = var_b4soiub_rv;
+        *var_b4soiuc_slot = var_b4soiuc;
+        *var_b4soiuc1_slot = var_b4soiuc1;
+        *var_b4soiuc1_rv_slot = var_b4soiuc1_rv;
+        *var_b4soiuc_rv_slot = var_b4soiuc_rv;
+        *var_b4soiucs_slot = var_b4soiucs;
+        *var_b4soiucs_rv_slot = var_b4soiucs_rv;
+        *var_b4soiucste_slot = var_b4soiucste;
+        *var_b4soiucste_rv_slot = var_b4soiucste_rv;
+        *var_b4soiud_slot = var_b4soiud;
+        *var_b4soiud1_slot = var_b4soiud1;
+        *var_b4soiud1_rv_slot = var_b4soiud1_rv;
+        *var_b4soiud_rv_slot = var_b4soiud_rv;
+        *var_b4soiunitlengthgatesidewalljctcapd_slot = var_b4soiunitlengthgatesidewalljctcapd;
+        *var_b4soiunitlengthgatesidewalljctcapd_rv_slot = var_b4soiunitlengthgatesidewalljctcapd_rv;
+        *var_b4soiunitlengthgatesidewalljctcaps_slot = var_b4soiunitlengthgatesidewalljctcaps;
+        *var_b4soiunitlengthgatesidewalljctcaps_rv_slot = var_b4soiunitlengthgatesidewalljctcaps_rv;
+        *var_b4soiute_slot = var_b4soiute;
+        *var_b4soiute_rv_slot = var_b4soiute_rv;
+        *var_b4soivbm_slot = var_b4soivbm;
+        *var_b4soivbm_rv_slot = var_b4soivbm_rv;
+        *var_b4soivbx_slot = var_b4soivbx;
+        *var_b4soivbx_rv_slot = var_b4soivbx_rv;
+        *var_b4soivddeot_slot = var_b4soivddeot;
+        *var_b4soivddeot_rv_slot = var_b4soivddeot_rv;
+        *var_b4soivfb_slot = var_b4soivfb;
+        *var_b4soivfb_rv_slot = var_b4soivfb_rv;
+        *var_b4soivgstcvmod_slot = var_b4soivgstcvmod;
+        *var_b4soivgstcvmod_rv_slot = var_b4soivgstcvmod_rv;
+        *var_b4soivoff_slot = var_b4soivoff;
+        *var_b4soivoff_rv_slot = var_b4soivoff_rv;
+        *var_b4soivsat_slot = var_b4soivsat;
+        *var_b4soivsat_rv_slot = var_b4soivsat_rv;
+        *var_b4soivth0_slot = var_b4soivth0;
+        *var_b4soivth0_rv_slot = var_b4soivth0_rv;
+        *var_b4soiw_slot = var_b4soiw;
+        *var_b4soiw0_slot = var_b4soiw0;
+        *var_b4soiw0_rv_slot = var_b4soiw0_rv;
+        *var_b4soiw_rv_slot = var_b4soiw_rv;
+        *var_b4soiweffeot_slot = var_b4soiweffeot;
+        *var_b4soiweffeot_rv_slot = var_b4soiweffeot_rv;
+        *var_b4soixbjt_slot = var_b4soixbjt;
+        *var_b4soixbjt_rv_slot = var_b4soixbjt_rv;
+        *var_b4soixdif_slot = var_b4soixdif;
+        *var_b4soixdif_rv_slot = var_b4soixdif_rv;
+        *var_b4soixdifd_slot = var_b4soixdifd;
+        *var_b4soixdifd_rv_slot = var_b4soixdifd_rv;
+        *var_b4soixj_slot = var_b4soixj;
+        *var_b4soixj_rv_slot = var_b4soixj_rv;
+        *var_b4soixpart_slot = var_b4soixpart;
+        *var_b4soixpart_rv_slot = var_b4soixpart_rv;
+        *var_b4soixrec_slot = var_b4soixrec;
+        *var_b4soixrec_rv_slot = var_b4soixrec_rv;
+        *var_b4soixrecd_slot = var_b4soixrecd;
+        *var_b4soixrecd_rv_slot = var_b4soixrecd_rv;
+        *var_b4soixt_slot = var_b4soixt;
+        *var_b4soixt_rv_slot = var_b4soixt_rv;
+        *var_b4soixtun_slot = var_b4soixtun;
+        *var_b4soixtun_rv_slot = var_b4soixtun_rv;
+        *var_b4soixtund_slot = var_b4soixtund;
+        *var_b4soixtund_rv_slot = var_b4soixtund_rv;
+        *var_devtemp_slot = var_devtemp;
+        *var_devtemp_dn6_slot = var_devtemp_dn6;
+        *var_devtemp_rv_slot = var_devtemp_rv;
     }
 
     pub(super) fn stamp_reactive_block_1(
-        s: &mut ReactiveScratch,
         p: &Parameters,
-        param_given: &[bool; Instance::PARAMETER_COUNT],
+        var_b4soiabjtii_slot: &mut f64,
+        var_b4soiabjtii_rv_slot: &mut f64,
+        var_b4soiacde_slot: &mut f64,
+        var_b4soiacde_rv_slot: &mut f64,
+        var_b4soiaely_slot: &mut f64,
+        var_b4soiaely_rv_slot: &mut f64,
+        var_b4soiahli_slot: &mut f64,
+        var_b4soiahli_rv_slot: &mut f64,
+        var_b4soiahlid_slot: &mut f64,
+        var_b4soiahlid_rv_slot: &mut f64,
+        var_b4soiaigbcp2_slot: &mut f64,
+        var_b4soiaigbcp2_rv_slot: &mut f64,
+        var_b4soiaigc_slot: &mut f64,
+        var_b4soiaigc_rv_slot: &mut f64,
+        var_b4soiaigsd_slot: &mut f64,
+        var_b4soiaigsd_rv_slot: &mut f64,
+        var_b4soialpha0_slot: &mut f64,
+        var_b4soialpha0_rv_slot: &mut f64,
+        var_b4soialphagb1_slot: &mut f64,
+        var_b4soialphagb1_rv_slot: &mut f64,
+        var_b4soialphagb2_slot: &mut f64,
+        var_b4soialphagb2_rv_slot: &mut f64,
+        var_b4soiasd_slot: &mut f64,
+        var_b4soiasd_rv_slot: &mut f64,
+        var_b4soib0_slot: &mut f64,
+        var_b4soib0_rv_slot: &mut f64,
+        var_b4soib1_slot: &mut f64,
+        var_b4soib1_rv_slot: &mut f64,
+        var_b4soibeta0_slot: &mut f64,
+        var_b4soibeta0_rv_slot: &mut f64,
+        var_b4soibeta1_slot: &mut f64,
+        var_b4soibeta1_rv_slot: &mut f64,
+        var_b4soibeta2_slot: &mut f64,
+        var_b4soibeta2_rv_slot: &mut f64,
+        var_b4soibetagb1_slot: &mut f64,
+        var_b4soibetagb1_rv_slot: &mut f64,
+        var_b4soibetagb2_slot: &mut f64,
+        var_b4soibetagb2_rv_slot: &mut f64,
+        var_b4soibigbcp2_slot: &mut f64,
+        var_b4soibigbcp2_rv_slot: &mut f64,
+        var_b4soibigc_slot: &mut f64,
+        var_b4soibigc_rv_slot: &mut f64,
+        var_b4soibigsd_slot: &mut f64,
+        var_b4soibigsd_rv_slot: &mut f64,
+        var_b4soicbjtii_slot: &mut f64,
+        var_b4soicbjtii_rv_slot: &mut f64,
+        var_b4soicfrcoeff_slot: &mut f64,
+        var_b4soicfrcoeff_rv_slot: &mut f64,
+        var_b4soicgdl_slot: &mut f64,
+        var_b4soicgdl_rv_slot: &mut f64,
+        var_b4soicgeo_slot: &mut f64,
+        var_b4soicgeo_rv_slot: &mut f64,
+        var_b4soicgsl_slot: &mut f64,
+        var_b4soicgsl_rv_slot: &mut f64,
+        var_b4soicigbcp2_slot: &mut f64,
+        var_b4soicigbcp2_rv_slot: &mut f64,
+        var_b4soicigc_slot: &mut f64,
+        var_b4soicigc_rv_slot: &mut f64,
+        var_b4soicigsd_slot: &mut f64,
+        var_b4soicigsd_rv_slot: &mut f64,
+        var_b4soickappa_slot: &mut f64,
+        var_b4soickappa_rv_slot: &mut f64,
+        var_b4soiclc_slot: &mut f64,
+        var_b4soiclc_rv_slot: &mut f64,
+        var_b4soicle_slot: &mut f64,
+        var_b4soicle_rv_slot: &mut f64,
+        var_b4soicsdesw_slot: &mut f64,
+        var_b4soicsdesw_rv_slot: &mut f64,
+        var_b4soicsdmin_slot: &mut f64,
+        var_b4soicsdmin_dn10_slot: &mut f64,
+        var_b4soicsdmin_dn11_slot: &mut f64,
+        var_b4soicsdmin_dn12_slot: &mut f64,
+        var_b4soicsdmin_dn3_slot: &mut f64,
+        var_b4soicsdmin_dn4_slot: &mut f64,
+        var_b4soicsdmin_dn5_slot: &mut f64,
+        var_b4soicsdmin_dn6_slot: &mut f64,
+        var_b4soicsdmin_dn7_slot: &mut f64,
+        var_b4soicsdmin_dn8_slot: &mut f64,
+        var_b4soicsdmin_dn9_slot: &mut f64,
+        var_b4soicsdmin_rv_slot: &mut f64,
+        var_b4soideltavox_slot: &mut f64,
+        var_b4soideltavox_rv_slot: &mut f64,
+        var_b4soidelvt_slot: &mut f64,
+        var_b4soidelvt_rv_slot: &mut f64,
+        var_b4soidk2b_slot: &mut f64,
+        var_b4soidk2b_rv_slot: &mut f64,
+        var_b4soidlbg_slot: &mut f64,
+        var_b4soidlbg_rv_slot: &mut f64,
+        var_b4soidlc_slot: &mut f64,
+        var_b4soidlc_rv_slot: &mut f64,
+        var_b4soidlcb_slot: &mut f64,
+        var_b4soidlcb_rv_slot: &mut f64,
+        var_b4soidlcig_slot: &mut f64,
+        var_b4soidlcig_rv_slot: &mut f64,
+        var_b4soidvbd0_slot: &mut f64,
+        var_b4soidvbd0_rv_slot: &mut f64,
+        var_b4soidvtp0_slot: &mut f64,
+        var_b4soidvtp0_rv_slot: &mut f64,
+        var_b4soidvtp1_slot: &mut f64,
+        var_b4soidvtp1_rv_slot: &mut f64,
+        var_b4soidvtp2_slot: &mut f64,
+        var_b4soidvtp2_rv_slot: &mut f64,
+        var_b4soidvtp3_slot: &mut f64,
+        var_b4soidvtp3_rv_slot: &mut f64,
+        var_b4soidvtp4_slot: &mut f64,
+        var_b4soidvtp4_rv_slot: &mut f64,
+        var_b4soidwb_slot: &mut f64,
+        var_b4soidwb_rv_slot: &mut f64,
+        var_b4soidwbc_slot: &mut f64,
+        var_b4soidwbc_rv_slot: &mut f64,
+        var_b4soidwc_slot: &mut f64,
+        var_b4soidwc_rv_slot: &mut f64,
+        var_b4soidwg_slot: &mut f64,
+        var_b4soidwg_rv_slot: &mut f64,
+        var_b4soiebg_slot: &mut f64,
+        var_b4soiebg_rv_slot: &mut f64,
+        var_b4soiebjtii_slot: &mut f64,
+        var_b4soiebjtii_rv_slot: &mut f64,
+        var_b4soiesatii_slot: &mut f64,
+        var_b4soiesatii_rv_slot: &mut f64,
+        var_b4soifbjtii_slot: &mut f64,
+        var_b4soifbjtii_rv_slot: &mut f64,
+        var_b4soifbody_slot: &mut f64,
+        var_b4soifbody_rv_slot: &mut f64,
+        var_b4soifprout_slot: &mut f64,
+        var_b4soifprout_rv_slot: &mut f64,
+        var_b4soiidbjt_slot: &mut f64,
+        var_b4soiidbjt_rv_slot: &mut f64,
+        var_b4soiiddif_slot: &mut f64,
+        var_b4soiiddif_rv_slot: &mut f64,
+        var_b4soiidrec_slot: &mut f64,
+        var_b4soiidrec_rv_slot: &mut f64,
+        var_b4soiidtun_slot: &mut f64,
+        var_b4soiidtun_rv_slot: &mut f64,
+        var_b4soiigbmod_slot: &mut f64,
+        var_b4soiigbmod_rv_slot: &mut f64,
+        var_b4soiigcmod_slot: &mut f64,
+        var_b4soiigcmod_rv_slot: &mut f64,
+        var_b4soiisbjt_slot: &mut f64,
+        var_b4soiisbjt_rv_slot: &mut f64,
+        var_b4soiisdif_slot: &mut f64,
+        var_b4soiisdif_rv_slot: &mut f64,
+        var_b4soiisrec_slot: &mut f64,
+        var_b4soiisrec_rv_slot: &mut f64,
+        var_b4soiistun_slot: &mut f64,
+        var_b4soiistun_rv_slot: &mut f64,
+        var_b4soik1b_slot: &mut f64,
+        var_b4soik1b_rv_slot: &mut f64,
+        var_b4soik1w1_slot: &mut f64,
+        var_b4soik1w1_rv_slot: &mut f64,
+        var_b4soik1w2_slot: &mut f64,
+        var_b4soik1w2_rv_slot: &mut f64,
+        var_b4soik2b_slot: &mut f64,
+        var_b4soik2b_rv_slot: &mut f64,
+        var_b4soikb1_slot: &mut f64,
+        var_b4soikb1_rv_slot: &mut f64,
+        var_b4soiketas_slot: &mut f64,
+        var_b4soiketas_rv_slot: &mut f64,
+        var_b4soiku0_slot: &mut f64,
+        var_b4soiku0_rv_slot: &mut f64,
+        var_b4soikvsat_slot: &mut f64,
+        var_b4soikvsat_rv_slot: &mut f64,
+        var_b4soikvth0_slot: &mut f64,
+        var_b4soikvth0_rv_slot: &mut f64,
+        var_b4soilbjt0_slot: &mut f64,
+        var_b4soilbjt0_rv_slot: &mut f64,
+        var_b4soildif0_slot: &mut f64,
+        var_b4soildif0_rv_slot: &mut f64,
+        var_b4soilii_slot: &mut f64,
+        var_b4soilii_rv_slot: &mut f64,
+        var_b4soillodku0_slot: &mut f64,
+        var_b4soillodku0_rv_slot: &mut f64,
+        var_b4soillodvth_slot: &mut f64,
+        var_b4soillodvth_rv_slot: &mut f64,
+        var_b4soiln_slot: &mut f64,
+        var_b4soiln_rv_slot: &mut f64,
+        var_b4soilodeta0_slot: &mut f64,
+        var_b4soilodeta0_rv_slot: &mut f64,
+        var_b4soilodeta0cv_slot: &mut f64,
+        var_b4soilodeta0cv_rv_slot: &mut f64,
+        var_b4soilodk2_slot: &mut f64,
+        var_b4soilodk2_rv_slot: &mut f64,
+        var_b4soilwc_slot: &mut f64,
+        var_b4soilwc_rv_slot: &mut f64,
+        var_b4soilwl_slot: &mut f64,
+        var_b4soilwl_rv_slot: &mut f64,
+        var_b4soilwlc_slot: &mut f64,
+        var_b4soilwlc_rv_slot: &mut f64,
+        var_b4soilwn_slot: &mut f64,
+        var_b4soilwn_rv_slot: &mut f64,
+        var_b4soimbjtii_slot: &mut f64,
+        var_b4soimbjtii_rv_slot: &mut f64,
+        var_b4soiminv_slot: &mut f64,
+        var_b4soiminv_rv_slot: &mut f64,
+        var_b4soimoin_slot: &mut f64,
+        var_b4soimoin_rv_slot: &mut f64,
+        var_b4soinbjt_slot: &mut f64,
+        var_b4soinbjt_rv_slot: &mut f64,
+        var_b4soindif_slot: &mut f64,
+        var_b4soindif_rv_slot: &mut f64,
+        var_b4soinigc_slot: &mut f64,
+        var_b4soinigc_rv_slot: &mut f64,
+        var_b4soinoff_slot: &mut f64,
+        var_b4soinoff2_slot: &mut f64,
+        var_b4soinoff2_rv_slot: &mut f64,
+        var_b4soinoff_rv_slot: &mut f64,
+        var_b4soinofffd_slot: &mut f64,
+        var_b4soinofffd_rv_slot: &mut f64,
+        var_b4soinrecf0_slot: &mut f64,
+        var_b4soinrecf0_rv_slot: &mut f64,
+        var_b4soinrecf0d_slot: &mut f64,
+        var_b4soinrecf0d_rv_slot: &mut f64,
+        var_b4soinrecr0_slot: &mut f64,
+        var_b4soinrecr0_rv_slot: &mut f64,
+        var_b4soinrecr0d_slot: &mut f64,
+        var_b4soinrecr0d_rv_slot: &mut f64,
+        var_b4sointox_slot: &mut f64,
+        var_b4sointox_rv_slot: &mut f64,
+        var_b4sointrecf_slot: &mut f64,
+        var_b4sointrecf_rv_slot: &mut f64,
+        var_b4sointrecr_slot: &mut f64,
+        var_b4sointrecr_rv_slot: &mut f64,
+        var_b4sointun_slot: &mut f64,
+        var_b4sointun_rv_slot: &mut f64,
+        var_b4sointund_slot: &mut f64,
+        var_b4sointund_rv_slot: &mut f64,
+        var_b4soipdits_slot: &mut f64,
+        var_b4soipdits_rv_slot: &mut f64,
+        var_b4soipditsd_slot: &mut f64,
+        var_b4soipditsd_rv_slot: &mut f64,
+        var_b4soipditsl_slot: &mut f64,
+        var_b4soipditsl_rv_slot: &mut f64,
+        var_b4soipigcd_slot: &mut f64,
+        var_b4soipigcd_rv_slot: &mut f64,
+        var_b4soipoxedge_slot: &mut f64,
+        var_b4soipoxedge_rv_slot: &mut f64,
+        var_b4soirbody_slot: &mut f64,
+        var_b4soirbody_rv_slot: &mut f64,
+        var_b4soirbsh_slot: &mut f64,
+        var_b4soirbsh_rv_slot: &mut f64,
+        var_b4soirhalo_slot: &mut f64,
+        var_b4soirhalo_rv_slot: &mut f64,
+        var_b4soirnoia_slot: &mut f64,
+        var_b4soirnoia_rv_slot: &mut f64,
+        var_b4soisaref_slot: &mut f64,
+        var_b4soisaref_rv_slot: &mut f64,
+        var_b4soisbref_slot: &mut f64,
+        var_b4soisbref_rv_slot: &mut f64,
+        var_b4soisii0_slot: &mut f64,
+        var_b4soisii0_rv_slot: &mut f64,
+        var_b4soisii1_slot: &mut f64,
+        var_b4soisii1_rv_slot: &mut f64,
+        var_b4soisii2_slot: &mut f64,
+        var_b4soisii2_rv_slot: &mut f64,
+        var_b4soisiid_slot: &mut f64,
+        var_b4soisiid_rv_slot: &mut f64,
+        var_b4soisteta0_slot: &mut f64,
+        var_b4soisteta0_rv_slot: &mut f64,
+        var_b4soisteta0cv_slot: &mut f64,
+        var_b4soisteta0cv_rv_slot: &mut f64,
+        var_b4soistk2_slot: &mut f64,
+        var_b4soistk2_rv_slot: &mut f64,
+        var_b4soitcjswg_slot: &mut f64,
+        var_b4soitcjswg_rv_slot: &mut f64,
+        var_b4soitcjswgd_slot: &mut f64,
+        var_b4soitcjswgd_rv_slot: &mut f64,
+        var_b4soitii_slot: &mut f64,
+        var_b4soitii_rv_slot: &mut f64,
+        var_b4soitku0_slot: &mut f64,
+        var_b4soitku0_rv_slot: &mut f64,
+        var_b4soitnoia_slot: &mut f64,
+        var_b4soitnoia_rv_slot: &mut f64,
+        var_b4soitoxqm_slot: &mut f64,
+        var_b4soitoxqm_rv_slot: &mut f64,
+        var_b4soitoxref_slot: &mut f64,
+        var_b4soitoxref_rv_slot: &mut f64,
+        var_b4soitpbswg_slot: &mut f64,
+        var_b4soitpbswg_rv_slot: &mut f64,
+        var_b4soitpbswgd_slot: &mut f64,
+        var_b4soitpbswgd_rv_slot: &mut f64,
+        var_b4soitt_slot: &mut f64,
+        var_b4soitt_rv_slot: &mut f64,
+        var_b4soitvbci_slot: &mut f64,
+        var_b4soitvbci_rv_slot: &mut f64,
+        var_b4soivabjt_slot: &mut f64,
+        var_b4soivabjt_rv_slot: &mut f64,
+        var_b4soivbci_slot: &mut f64,
+        var_b4soivbci_rv_slot: &mut f64,
+        var_b4soivbsa_slot: &mut f64,
+        var_b4soivbsa_rv_slot: &mut f64,
+        var_b4soivdsatii0_slot: &mut f64,
+        var_b4soivdsatii0_rv_slot: &mut f64,
+        var_b4soivecb_slot: &mut f64,
+        var_b4soivecb_rv_slot: &mut f64,
+        var_b4soivevb_slot: &mut f64,
+        var_b4soivevb_rv_slot: &mut f64,
+        var_b4soivgb1_slot: &mut f64,
+        var_b4soivgb1_rv_slot: &mut f64,
+        var_b4soivgb2_slot: &mut f64,
+        var_b4soivgb2_rv_slot: &mut f64,
+        var_b4soivofffd_slot: &mut f64,
+        var_b4soivofffd_rv_slot: &mut f64,
+        var_b4soivoxh_slot: &mut f64,
+        var_b4soivoxh_rv_slot: &mut f64,
+        var_b4soivrec0_slot: &mut f64,
+        var_b4soivrec0_rv_slot: &mut f64,
+        var_b4soivrec0d_slot: &mut f64,
+        var_b4soivrec0d_rv_slot: &mut f64,
+        var_b4soivsdfb_slot: &mut f64,
+        var_b4soivsdfb_rv_slot: &mut f64,
+        var_b4soivsdth_slot: &mut f64,
+        var_b4soivsdth_rv_slot: &mut f64,
+        var_b4soivtun0_slot: &mut f64,
+        var_b4soivtun0_rv_slot: &mut f64,
+        var_b4soivtun0d_slot: &mut f64,
+        var_b4soivtun0d_rv_slot: &mut f64,
+        var_b4soiwint_slot: &mut f64,
+        var_b4soiwint_rv_slot: &mut f64,
+        var_b4soiwl_slot: &mut f64,
+        var_b4soiwl_rv_slot: &mut f64,
+        var_b4soiwlc_slot: &mut f64,
+        var_b4soiwlc_rv_slot: &mut f64,
+        var_b4soiwln_slot: &mut f64,
+        var_b4soiwln_rv_slot: &mut f64,
+        var_b4soiwlod_slot: &mut f64,
+        var_b4soiwlod_rv_slot: &mut f64,
+        var_b4soiwlodku0_slot: &mut f64,
+        var_b4soiwlodku0_rv_slot: &mut f64,
+        var_b4soiwlodvth_slot: &mut f64,
+        var_b4soiwlodvth_rv_slot: &mut f64,
+        var_b4soiwr_slot: &mut f64,
+        var_b4soiwr_rv_slot: &mut f64,
+        var_b4soiwth0_slot: &mut f64,
+        var_b4soiwth0_rv_slot: &mut f64,
+        var_b4soiww_slot: &mut f64,
+        var_b4soiww_rv_slot: &mut f64,
+        var_b4soiwwc_slot: &mut f64,
+        var_b4soiwwc_rv_slot: &mut f64,
+        var_b4soiwwl_slot: &mut f64,
+        var_b4soiwwl_rv_slot: &mut f64,
+        var_b4soiwwlc_slot: &mut f64,
+        var_b4soiwwlc_rv_slot: &mut f64,
+        var_b4soiwwn_slot: &mut f64,
+        var_b4soiwwn_rv_slot: &mut f64,
     ) {
-        s.store_scalar(313, p.p319);
-
-        s.store_scalar(314, p.p320);
-
-        s.store_scalar(315, p.p321);
-
-        s.store_scalar(316, p.p322);
-
-        s.store_scalar(317, p.p323);
-
-        s.store_scalar(318, p.p324);
-
-        s.store_scalar(319, p.p325);
-
-        s.store_scalar(320, p.p326);
-
-        s.store_scalar(321, p.p327);
-
-        s.store_scalar(322, p.p328);
-
-        s.store_scalar(323, p.p329);
-
-        s.store_scalar(324, p.p330);
-
-        s.store_scalar(325, p.p331);
-
-        s.store_scalar(326, p.p332);
-
-        s.store_scalar(327, p.p333);
-
-        s.store_scalar(328, p.p334);
-
-        s.store_scalar(329, p.p335);
-
-        s.store_scalar(330, p.p336);
-
-        s.store_scalar(331, p.p337);
-
-        s.store_scalar(332, p.p338);
-
-        s.store_scalar(333, p.p339);
-
-        s.store_scalar(334, p.p340);
-
-        s.store_scalar(335, p.p341);
-
-        s.store_scalar(336, p.p342);
-
-        s.store_scalar(337, p.p343);
-
-        s.store_scalar(338, p.p344);
-
-        s.store_scalar(339, p.p345);
-
-        s.store_scalar(340, p.p346);
-
-        s.store_scalar(341, p.p347);
-
-        s.store_scalar(342, p.p348);
-
-        s.store_scalar(343, p.p349);
-
-        s.store_scalar(344, p.p350);
-
-        s.store_scalar(345, p.p351);
-
-        s.store_scalar(346, p.p352);
-
-        s.store_scalar(347, p.p353);
-
-        s.store_scalar(348, p.p354);
-
-        s.store_scalar(349, p.p355);
-
-        s.store_scalar(350, p.p356);
-
-        s.store_scalar(351, p.p357);
-
-        s.store_scalar(352, p.p358);
-
-        s.store_scalar(353, p.p359);
-
-        s.store_scalar(354, p.p360);
-
-        s.store_scalar(355, p.p362);
-
-        s.store_scalar(356, p.p363);
-
-        s.store_scalar(357, p.p364);
-
-        s.store_scalar(358, p.p365);
-
-        s.store_scalar(359, p.p366);
-
-        s.store_scalar(360, p.p367);
-
-        s.store_scalar(361, p.p368);
-
-        s.store_scalar(362, p.p369);
-
-        s.store_scalar(363, p.p370);
-
-        s.store_scalar(364, p.p371);
-
-        s.store_scalar(365, p.p372);
-
-        s.store_scalar(366, p.p373);
-
-        s.store_scalar(367, p.p374);
-
-        s.store_scalar(368, p.p375);
-
-        s.store_scalar(369, p.p376);
-
-        s.store_scalar(370, p.p377);
-
-        s.store_scalar(371, p.p378);
-
-        s.store_scalar(372, p.p379);
-
-        s.store_scalar(373, p.p380);
-
-        s.store_scalar(374, p.p381);
-
-        s.store_scalar(375, p.p382);
-
-        s.store_scalar(376, p.p383);
-
-        s.store_scalar(377, p.p384);
-
-        s.store_scalar(378, p.p385);
-
-        s.store_scalar(379, p.p386);
-
-        s.store_scalar(380, p.p387);
-
-        s.store_scalar(381, p.p388);
-
-        s.store_scalar(382, p.p389);
-
-        s.store_scalar(383, p.p390);
-
-        s.store_scalar(384, p.p391);
-
-        s.store_scalar(385, p.p392);
-
-        s.store_scalar(388, p.p395);
-
-        s.store_scalar(389, p.p396);
-
-        s.store_scalar(390, p.p397);
-
-        s.store_scalar(391, p.p398);
-
-        s.store_scalar(392, p.p399);
-
-        s.store_scalar(393, p.p400);
-
-        s.store_scalar(394, p.p401);
-
-        s.store_scalar(395, p.p402);
-
-        s.store_scalar(396, p.p403);
-
-        s.store_scalar(386, p.p393);
-
-        s.store_scalar(387, p.p394);
-
-        s.store_scalar(397, p.p404);
-
-        s.store_scalar(398, p.p405);
-
-        s.store_scalar(399, p.p406);
-
-        s.store_scalar(400, p.p407);
-
-        s.store_scalar(401, p.p408);
-
-        s.store_scalar(402, p.p409);
-
-        s.store_scalar(403, p.p410);
-
-        s.store_scalar(404, p.p411);
-
-        s.store_scalar(405, p.p412);
-
-        s.store_scalar(406, p.p413);
-
-        s.store_scalar(407, p.p414);
-
-        s.store_scalar(408, p.p418);
-
-        s.store_scalar(455, p.p985);
-
-        s.store_scalar(456, p.p986);
-
-        s.store_scalar(457, p.p987);
-
-        s.store_scalar(458, p.p988);
-
-        s.store_scalar(459, p.p989);
-
-        s.store_scalar(460, p.p990);
-
-        s.store_scalar(461, p.p991);
-
-        s.store_scalar(462, p.p992);
-
-        s.store_scalar(463, p.p993);
-
-        s.store_scalar(464, p.p994);
-
-        s.store_scalar(465, p.p995);
-
-        if (s.v[68] != 0.0) {
-            s.store_scalar(777, 3.9);
-            s.store_scalar(776, s.v[72]);
-            s.store_scalar(778, (8.85418e-12 * s.v[74]));
-            s.store_sqrt_scaled_input(780, 778, (2000000.0 * 1.60219e-19));
-            s.store_div_scaled_inputs_indices(757, 777, 8.85418e-12, 776, 1.0);
-            s.store_scalar(781, s.v[455]);
-            s.store_scalar(782, s.v[456]);
-            s.store_scalar(784, s.v[457]);
-            s.store_scalar(785, s.v[458]);
-            s.store_scalar(786, s.v[459]);
-            s.store_scalar(787, s.v[460]);
-            s.store_scalar(788, s.v[461]);
-            s.store_scalar(789, s.v[462]);
-            s.store_scalar(790, s.v[463]);
-            s.store_scalar(791, s.v[464]);
-        }
-
-        if (s.v[68] == 0.0) {
-            s.store_scalar(777, s.v[73]);
-            s.store_scalar(776, s.v[91]);
-            s.store_scalar(778, 1.03594e-10);
-            s.store_scalar(780, 5.753e-12);
-            s.store_scalar(757, (3.453133e-11 / s.v[91]));
-            s.store_scalar(781, s.v[455]);
-            s.store_scalar(782, s.v[456]);
-            s.store_scalar(784, s.v[457]);
-            s.store_scalar(785, s.v[458]);
-            s.store_scalar(786, s.v[459]);
-            s.store_scalar(787, s.v[460]);
-            s.store_scalar(788, s.v[461]);
-            s.store_scalar(789, s.v[462]);
-            s.store_scalar(790, s.v[463]);
-            s.store_scalar(791, s.v[464]);
-        }
-
-        s.store_scalar(760, 0.0);
-
-        s.b[807] = param_given[203];
-        s.store_scalar(807, if s.b[807] { 1.0 } else { 0.0 });
-
-        if s.b[807] {
-            s.store_scalar(232, p.p203);
-        }
-
-        if (!s.b[807]) {
-            s.store_scalar(232, (((2.0 * 3.453133e-11) / 3.141592653589793) * (((1.0 + (4e-7 / s.v[91]))) as f64).ln()));
-        }
-
-        s.b[808] = param_given[125];
-        s.store_scalar(808, if s.b[808] { 1.0 } else { 0.0 });
-
-        if s.b[808] {
-            s.store_scalar(152, p.p125);
-        }
-
-        s.b[809] = (param_given[207] && (s.v[236] > 0.0));
-        s.store_scalar(809, if s.b[809] { 1.0 } else { 0.0 });
-
-        if ((!s.b[808]) && s.b[809]) {
-            s.store_offset_scaled(152, 757, s.v[236], (-s.v[230]));
-        }
-
-        if ((!s.b[808]) && (!s.b[809])) {
-            s.store_scale(152, 757, (0.6 * s.v[176]));
-        }
-
-        s.b[810] = param_given[124];
-        s.store_scalar(810, if s.b[810] { 1.0 } else { 0.0 });
-
-        if s.b[810] {
-            s.store_scalar(151, p.p124);
-        }
-
-        s.b[811] = (param_given[207] && (s.v[236] > 0.0));
-        s.store_scalar(811, if s.b[811] { 1.0 } else { 0.0 });
-
-        if ((!s.b[810]) && s.b[811]) {
-            s.store_offset_scaled(151, 757, s.v[236], (-s.v[229]));
-        }
-
-        if ((!s.b[810]) && (!s.b[811])) {
-            s.store_scale(151, 757, (0.6 * s.v[176]));
-        }
-
-        s.b[885] = (s.v[200] < 0.1);
-        s.store_scalar(885, if s.b[885] { 1.0 } else { 0.0 });
-
-        if s.b[885] {
-            s.store_scalar(200, 0.1);
-        }
-
-        s.b[886] = (s.v[201] < 0.1);
-        s.store_scalar(886, if s.b[886] { 1.0 } else { 0.0 });
-
-        if s.b[886] {
-            s.store_scalar(201, 0.1);
-        }
-
-        s.store_scalar(832, s.v[150]);
-
-        s.store_scalar(827, (s.v[769] / s.v[832]));
-
-        if (s.v[68] != 0.0) {
-            s.store_sqrt_mul_ad(758, A::div_scaled_inputs(s.ad_value(778), 1.0, s.ad_value(777), 8.85418e-12), s.ad_value(776));
-        }
-
-        if (s.v[68] == 0.0) {
-            s.store_scalar(758, ((((1.03594e-10 / 3.453133e-11) * s.v[91])) as f64).sqrt());
-        }
-
-        s.store_scalar(783, s.v[465]);
-
-        s.b[887] = (s.v[68] == 0.0);
-        s.store_scalar(887, if s.b[887] { 1.0 } else { 0.0 });
-
-        if s.b[887] {
-            s.store_scalar(831, (8.617087e-5 * s.v[832]));
-            s.store_scalar(816, (1.16 - (((0.000702 * s.v[832]) * s.v[832]) / (s.v[832] + 1108.0))));
-            s.copy_ad(755, 816);
-            s.store_scalar(409, (8.617087e-5 * s.v[769]));
-            s.store_scalar(815, (1.16 - (((0.000702 * s.v[769]) * s.v[769]) / (s.v[769] + 1108.0))));
-            s.copy_ad(756, 815);
-            s.store_scaled_exp_ad(817, A::sub_from_scalar(21.5565981, A::div_scaled_inputs(s.ad_value(815), 1.0, s.ad_value(409), 2.0)), ((14500000000.0 * (s.v[769] / 300.15)) * (((s.v[769] / 300.15)) as f64).sqrt()));
-        }
-
-        if (!s.b[887]) {
-            s.store_scalar(831, (8.617087e-5 * s.v[832]));
-            s.store_scalar(816, (s.v[76] - (((s.v[77] * s.v[832]) * s.v[832]) / (s.v[832] + s.v[78]))));
-            s.copy_ad(755, 816);
-            s.store_scalar(409, (8.617087e-5 * s.v[769]));
-            s.store_scalar(815, (s.v[76] - (((s.v[77] * s.v[769]) * s.v[769]) / (s.v[769] + s.v[78]))));
-            s.copy_ad(756, 815);
-            s.store_scaled_exp_ad(817, A::sub(A::div_scaled_inputs(s.ad_value(816), 1.0, s.ad_value(831), 2.0), A::div_scaled_inputs(s.ad_value(815), 1.0, s.ad_value(409), 2.0)), ((s.v[75] * (s.v[769] / s.v[832])) * (((s.v[769] / s.v[832])) as f64).sqrt()));
-        }
-
-        s.store_scalar(427, (s.v[52] * s.v[330]));
-
-        s.store_scalar(825, s.v[37]);
-
-        s.store_scalar(826, (s.v[38] / s.v[39]));
-
-        s.store_scalar(818, ((s.v[825]) as f64).powf(s.v[209]));
-
-        s.store_scalar(819, ((s.v[826]) as f64).powf(s.v[212]));
-
-        s.store_scalar(813, (((s.v[207] / s.v[818]) + (s.v[210] / s.v[819])) + (s.v[213] / (s.v[818] * s.v[819]))));
-
-        s.store_scalar(687, (s.v[206] + s.v[813]));
-
-        s.store_scalar(813, (((s.v[208] / s.v[818]) + (s.v[211] / s.v[819])) + (s.v[214] / (s.v[818] * s.v[819]))));
-
-        s.store_scalar(691, (s.v[236] + s.v[813]));
-
-        s.store_scalar(581, (s.v[385] + s.v[813]));
-
-        s.b[888] = (s.v[581] < 0.0);
-        s.store_scalar(888, if s.b[888] { 1.0 } else { 0.0 });
-
-        if s.b[888] {
-            s.store_scalar(581, 0.0);
-        }
-
-        s.store_scalar(820, ((s.v[825]) as f64).powf(s.v[221]));
-
-        s.store_scalar(821, ((s.v[826]) as f64).powf(s.v[224]));
-
-        s.store_scalar(814, (((s.v[219] / s.v[820]) + (s.v[222] / s.v[821])) + (s.v[225] / (s.v[820] * s.v[821]))));
-
-        s.store_scalar(686, (s.v[216] + s.v[814]));
-
-        s.store_scalar(814, (((s.v[220] / s.v[820]) + (s.v[223] / s.v[821])) + (s.v[226] / (s.v[820] * s.v[821]))));
-
-        s.store_scalar(690, (s.v[235] + s.v[814]));
-
-        s.store_scalar(688, (s.v[37] - (2.0 * s.v[687])));
-
+        let mut var_b4soiabjtii: f64 = *var_b4soiabjtii_slot;
+        let mut var_b4soiabjtii_rv: f64 = *var_b4soiabjtii_rv_slot;
+        let mut var_b4soiacde: f64 = *var_b4soiacde_slot;
+        let mut var_b4soiacde_rv: f64 = *var_b4soiacde_rv_slot;
+        let mut var_b4soiaely: f64 = *var_b4soiaely_slot;
+        let mut var_b4soiaely_rv: f64 = *var_b4soiaely_rv_slot;
+        let mut var_b4soiahli: f64 = *var_b4soiahli_slot;
+        let mut var_b4soiahli_rv: f64 = *var_b4soiahli_rv_slot;
+        let mut var_b4soiahlid: f64 = *var_b4soiahlid_slot;
+        let mut var_b4soiahlid_rv: f64 = *var_b4soiahlid_rv_slot;
+        let mut var_b4soiaigbcp2: f64 = *var_b4soiaigbcp2_slot;
+        let mut var_b4soiaigbcp2_rv: f64 = *var_b4soiaigbcp2_rv_slot;
+        let mut var_b4soiaigc: f64 = *var_b4soiaigc_slot;
+        let mut var_b4soiaigc_rv: f64 = *var_b4soiaigc_rv_slot;
+        let mut var_b4soiaigsd: f64 = *var_b4soiaigsd_slot;
+        let mut var_b4soiaigsd_rv: f64 = *var_b4soiaigsd_rv_slot;
+        let mut var_b4soialpha0: f64 = *var_b4soialpha0_slot;
+        let mut var_b4soialpha0_rv: f64 = *var_b4soialpha0_rv_slot;
+        let mut var_b4soialphagb1: f64 = *var_b4soialphagb1_slot;
+        let mut var_b4soialphagb1_rv: f64 = *var_b4soialphagb1_rv_slot;
+        let mut var_b4soialphagb2: f64 = *var_b4soialphagb2_slot;
+        let mut var_b4soialphagb2_rv: f64 = *var_b4soialphagb2_rv_slot;
+        let mut var_b4soiasd: f64 = *var_b4soiasd_slot;
+        let mut var_b4soiasd_rv: f64 = *var_b4soiasd_rv_slot;
+        let mut var_b4soib0: f64 = *var_b4soib0_slot;
+        let mut var_b4soib0_rv: f64 = *var_b4soib0_rv_slot;
+        let mut var_b4soib1: f64 = *var_b4soib1_slot;
+        let mut var_b4soib1_rv: f64 = *var_b4soib1_rv_slot;
+        let mut var_b4soibeta0: f64 = *var_b4soibeta0_slot;
+        let mut var_b4soibeta0_rv: f64 = *var_b4soibeta0_rv_slot;
+        let mut var_b4soibeta1: f64 = *var_b4soibeta1_slot;
+        let mut var_b4soibeta1_rv: f64 = *var_b4soibeta1_rv_slot;
+        let mut var_b4soibeta2: f64 = *var_b4soibeta2_slot;
+        let mut var_b4soibeta2_rv: f64 = *var_b4soibeta2_rv_slot;
+        let mut var_b4soibetagb1: f64 = *var_b4soibetagb1_slot;
+        let mut var_b4soibetagb1_rv: f64 = *var_b4soibetagb1_rv_slot;
+        let mut var_b4soibetagb2: f64 = *var_b4soibetagb2_slot;
+        let mut var_b4soibetagb2_rv: f64 = *var_b4soibetagb2_rv_slot;
+        let mut var_b4soibigbcp2: f64 = *var_b4soibigbcp2_slot;
+        let mut var_b4soibigbcp2_rv: f64 = *var_b4soibigbcp2_rv_slot;
+        let mut var_b4soibigc: f64 = *var_b4soibigc_slot;
+        let mut var_b4soibigc_rv: f64 = *var_b4soibigc_rv_slot;
+        let mut var_b4soibigsd: f64 = *var_b4soibigsd_slot;
+        let mut var_b4soibigsd_rv: f64 = *var_b4soibigsd_rv_slot;
+        let mut var_b4soicbjtii: f64 = *var_b4soicbjtii_slot;
+        let mut var_b4soicbjtii_rv: f64 = *var_b4soicbjtii_rv_slot;
+        let mut var_b4soicfrcoeff: f64 = *var_b4soicfrcoeff_slot;
+        let mut var_b4soicfrcoeff_rv: f64 = *var_b4soicfrcoeff_rv_slot;
+        let mut var_b4soicgdl: f64 = *var_b4soicgdl_slot;
+        let mut var_b4soicgdl_rv: f64 = *var_b4soicgdl_rv_slot;
+        let mut var_b4soicgeo: f64 = *var_b4soicgeo_slot;
+        let mut var_b4soicgeo_rv: f64 = *var_b4soicgeo_rv_slot;
+        let mut var_b4soicgsl: f64 = *var_b4soicgsl_slot;
+        let mut var_b4soicgsl_rv: f64 = *var_b4soicgsl_rv_slot;
+        let mut var_b4soicigbcp2: f64 = *var_b4soicigbcp2_slot;
+        let mut var_b4soicigbcp2_rv: f64 = *var_b4soicigbcp2_rv_slot;
+        let mut var_b4soicigc: f64 = *var_b4soicigc_slot;
+        let mut var_b4soicigc_rv: f64 = *var_b4soicigc_rv_slot;
+        let mut var_b4soicigsd: f64 = *var_b4soicigsd_slot;
+        let mut var_b4soicigsd_rv: f64 = *var_b4soicigsd_rv_slot;
+        let mut var_b4soickappa: f64 = *var_b4soickappa_slot;
+        let mut var_b4soickappa_rv: f64 = *var_b4soickappa_rv_slot;
+        let mut var_b4soiclc: f64 = *var_b4soiclc_slot;
+        let mut var_b4soiclc_rv: f64 = *var_b4soiclc_rv_slot;
+        let mut var_b4soicle: f64 = *var_b4soicle_slot;
+        let mut var_b4soicle_rv: f64 = *var_b4soicle_rv_slot;
+        let mut var_b4soicsdesw: f64 = *var_b4soicsdesw_slot;
+        let mut var_b4soicsdesw_rv: f64 = *var_b4soicsdesw_rv_slot;
+        let mut var_b4soicsdmin: f64 = *var_b4soicsdmin_slot;
+        let mut var_b4soicsdmin_dn10: f64 = *var_b4soicsdmin_dn10_slot;
+        let mut var_b4soicsdmin_dn11: f64 = *var_b4soicsdmin_dn11_slot;
+        let mut var_b4soicsdmin_dn12: f64 = *var_b4soicsdmin_dn12_slot;
+        let mut var_b4soicsdmin_dn3: f64 = *var_b4soicsdmin_dn3_slot;
+        let mut var_b4soicsdmin_dn4: f64 = *var_b4soicsdmin_dn4_slot;
+        let mut var_b4soicsdmin_dn5: f64 = *var_b4soicsdmin_dn5_slot;
+        let mut var_b4soicsdmin_dn6: f64 = *var_b4soicsdmin_dn6_slot;
+        let mut var_b4soicsdmin_dn7: f64 = *var_b4soicsdmin_dn7_slot;
+        let mut var_b4soicsdmin_dn8: f64 = *var_b4soicsdmin_dn8_slot;
+        let mut var_b4soicsdmin_dn9: f64 = *var_b4soicsdmin_dn9_slot;
+        let mut var_b4soicsdmin_rv: f64 = *var_b4soicsdmin_rv_slot;
+        let mut var_b4soideltavox: f64 = *var_b4soideltavox_slot;
+        let mut var_b4soideltavox_rv: f64 = *var_b4soideltavox_rv_slot;
+        let mut var_b4soidelvt: f64 = *var_b4soidelvt_slot;
+        let mut var_b4soidelvt_rv: f64 = *var_b4soidelvt_rv_slot;
+        let mut var_b4soidk2b: f64 = *var_b4soidk2b_slot;
+        let mut var_b4soidk2b_rv: f64 = *var_b4soidk2b_rv_slot;
+        let mut var_b4soidlbg: f64 = *var_b4soidlbg_slot;
+        let mut var_b4soidlbg_rv: f64 = *var_b4soidlbg_rv_slot;
+        let mut var_b4soidlc: f64 = *var_b4soidlc_slot;
+        let mut var_b4soidlc_rv: f64 = *var_b4soidlc_rv_slot;
+        let mut var_b4soidlcb: f64 = *var_b4soidlcb_slot;
+        let mut var_b4soidlcb_rv: f64 = *var_b4soidlcb_rv_slot;
+        let mut var_b4soidlcig: f64 = *var_b4soidlcig_slot;
+        let mut var_b4soidlcig_rv: f64 = *var_b4soidlcig_rv_slot;
+        let mut var_b4soidvbd0: f64 = *var_b4soidvbd0_slot;
+        let mut var_b4soidvbd0_rv: f64 = *var_b4soidvbd0_rv_slot;
+        let mut var_b4soidvtp0: f64 = *var_b4soidvtp0_slot;
+        let mut var_b4soidvtp0_rv: f64 = *var_b4soidvtp0_rv_slot;
+        let mut var_b4soidvtp1: f64 = *var_b4soidvtp1_slot;
+        let mut var_b4soidvtp1_rv: f64 = *var_b4soidvtp1_rv_slot;
+        let mut var_b4soidvtp2: f64 = *var_b4soidvtp2_slot;
+        let mut var_b4soidvtp2_rv: f64 = *var_b4soidvtp2_rv_slot;
+        let mut var_b4soidvtp3: f64 = *var_b4soidvtp3_slot;
+        let mut var_b4soidvtp3_rv: f64 = *var_b4soidvtp3_rv_slot;
+        let mut var_b4soidvtp4: f64 = *var_b4soidvtp4_slot;
+        let mut var_b4soidvtp4_rv: f64 = *var_b4soidvtp4_rv_slot;
+        let mut var_b4soidwb: f64 = *var_b4soidwb_slot;
+        let mut var_b4soidwb_rv: f64 = *var_b4soidwb_rv_slot;
+        let mut var_b4soidwbc: f64 = *var_b4soidwbc_slot;
+        let mut var_b4soidwbc_rv: f64 = *var_b4soidwbc_rv_slot;
+        let mut var_b4soidwc: f64 = *var_b4soidwc_slot;
+        let mut var_b4soidwc_rv: f64 = *var_b4soidwc_rv_slot;
+        let mut var_b4soidwg: f64 = *var_b4soidwg_slot;
+        let mut var_b4soidwg_rv: f64 = *var_b4soidwg_rv_slot;
+        let mut var_b4soiebg: f64 = *var_b4soiebg_slot;
+        let mut var_b4soiebg_rv: f64 = *var_b4soiebg_rv_slot;
+        let mut var_b4soiebjtii: f64 = *var_b4soiebjtii_slot;
+        let mut var_b4soiebjtii_rv: f64 = *var_b4soiebjtii_rv_slot;
+        let mut var_b4soiesatii: f64 = *var_b4soiesatii_slot;
+        let mut var_b4soiesatii_rv: f64 = *var_b4soiesatii_rv_slot;
+        let mut var_b4soifbjtii: f64 = *var_b4soifbjtii_slot;
+        let mut var_b4soifbjtii_rv: f64 = *var_b4soifbjtii_rv_slot;
+        let mut var_b4soifbody: f64 = *var_b4soifbody_slot;
+        let mut var_b4soifbody_rv: f64 = *var_b4soifbody_rv_slot;
+        let mut var_b4soifprout: f64 = *var_b4soifprout_slot;
+        let mut var_b4soifprout_rv: f64 = *var_b4soifprout_rv_slot;
+        let mut var_b4soiidbjt: f64 = *var_b4soiidbjt_slot;
+        let mut var_b4soiidbjt_rv: f64 = *var_b4soiidbjt_rv_slot;
+        let mut var_b4soiiddif: f64 = *var_b4soiiddif_slot;
+        let mut var_b4soiiddif_rv: f64 = *var_b4soiiddif_rv_slot;
+        let mut var_b4soiidrec: f64 = *var_b4soiidrec_slot;
+        let mut var_b4soiidrec_rv: f64 = *var_b4soiidrec_rv_slot;
+        let mut var_b4soiidtun: f64 = *var_b4soiidtun_slot;
+        let mut var_b4soiidtun_rv: f64 = *var_b4soiidtun_rv_slot;
+        let mut var_b4soiigbmod: f64 = *var_b4soiigbmod_slot;
+        let mut var_b4soiigbmod_rv: f64 = *var_b4soiigbmod_rv_slot;
+        let mut var_b4soiigcmod: f64 = *var_b4soiigcmod_slot;
+        let mut var_b4soiigcmod_rv: f64 = *var_b4soiigcmod_rv_slot;
+        let mut var_b4soiisbjt: f64 = *var_b4soiisbjt_slot;
+        let mut var_b4soiisbjt_rv: f64 = *var_b4soiisbjt_rv_slot;
+        let mut var_b4soiisdif: f64 = *var_b4soiisdif_slot;
+        let mut var_b4soiisdif_rv: f64 = *var_b4soiisdif_rv_slot;
+        let mut var_b4soiisrec: f64 = *var_b4soiisrec_slot;
+        let mut var_b4soiisrec_rv: f64 = *var_b4soiisrec_rv_slot;
+        let mut var_b4soiistun: f64 = *var_b4soiistun_slot;
+        let mut var_b4soiistun_rv: f64 = *var_b4soiistun_rv_slot;
+        let mut var_b4soik1b: f64 = *var_b4soik1b_slot;
+        let mut var_b4soik1b_rv: f64 = *var_b4soik1b_rv_slot;
+        let mut var_b4soik1w1: f64 = *var_b4soik1w1_slot;
+        let mut var_b4soik1w1_rv: f64 = *var_b4soik1w1_rv_slot;
+        let mut var_b4soik1w2: f64 = *var_b4soik1w2_slot;
+        let mut var_b4soik1w2_rv: f64 = *var_b4soik1w2_rv_slot;
+        let mut var_b4soik2b: f64 = *var_b4soik2b_slot;
+        let mut var_b4soik2b_rv: f64 = *var_b4soik2b_rv_slot;
+        let mut var_b4soikb1: f64 = *var_b4soikb1_slot;
+        let mut var_b4soikb1_rv: f64 = *var_b4soikb1_rv_slot;
+        let mut var_b4soiketas: f64 = *var_b4soiketas_slot;
+        let mut var_b4soiketas_rv: f64 = *var_b4soiketas_rv_slot;
+        let mut var_b4soiku0: f64 = *var_b4soiku0_slot;
+        let mut var_b4soiku0_rv: f64 = *var_b4soiku0_rv_slot;
+        let mut var_b4soikvsat: f64 = *var_b4soikvsat_slot;
+        let mut var_b4soikvsat_rv: f64 = *var_b4soikvsat_rv_slot;
+        let mut var_b4soikvth0: f64 = *var_b4soikvth0_slot;
+        let mut var_b4soikvth0_rv: f64 = *var_b4soikvth0_rv_slot;
+        let mut var_b4soilbjt0: f64 = *var_b4soilbjt0_slot;
+        let mut var_b4soilbjt0_rv: f64 = *var_b4soilbjt0_rv_slot;
+        let mut var_b4soildif0: f64 = *var_b4soildif0_slot;
+        let mut var_b4soildif0_rv: f64 = *var_b4soildif0_rv_slot;
+        let mut var_b4soilii: f64 = *var_b4soilii_slot;
+        let mut var_b4soilii_rv: f64 = *var_b4soilii_rv_slot;
+        let mut var_b4soillodku0: f64 = *var_b4soillodku0_slot;
+        let mut var_b4soillodku0_rv: f64 = *var_b4soillodku0_rv_slot;
+        let mut var_b4soillodvth: f64 = *var_b4soillodvth_slot;
+        let mut var_b4soillodvth_rv: f64 = *var_b4soillodvth_rv_slot;
+        let mut var_b4soiln: f64 = *var_b4soiln_slot;
+        let mut var_b4soiln_rv: f64 = *var_b4soiln_rv_slot;
+        let mut var_b4soilodeta0: f64 = *var_b4soilodeta0_slot;
+        let mut var_b4soilodeta0_rv: f64 = *var_b4soilodeta0_rv_slot;
+        let mut var_b4soilodeta0cv: f64 = *var_b4soilodeta0cv_slot;
+        let mut var_b4soilodeta0cv_rv: f64 = *var_b4soilodeta0cv_rv_slot;
+        let mut var_b4soilodk2: f64 = *var_b4soilodk2_slot;
+        let mut var_b4soilodk2_rv: f64 = *var_b4soilodk2_rv_slot;
+        let mut var_b4soilwc: f64 = *var_b4soilwc_slot;
+        let mut var_b4soilwc_rv: f64 = *var_b4soilwc_rv_slot;
+        let mut var_b4soilwl: f64 = *var_b4soilwl_slot;
+        let mut var_b4soilwl_rv: f64 = *var_b4soilwl_rv_slot;
+        let mut var_b4soilwlc: f64 = *var_b4soilwlc_slot;
+        let mut var_b4soilwlc_rv: f64 = *var_b4soilwlc_rv_slot;
+        let mut var_b4soilwn: f64 = *var_b4soilwn_slot;
+        let mut var_b4soilwn_rv: f64 = *var_b4soilwn_rv_slot;
+        let mut var_b4soimbjtii: f64 = *var_b4soimbjtii_slot;
+        let mut var_b4soimbjtii_rv: f64 = *var_b4soimbjtii_rv_slot;
+        let mut var_b4soiminv: f64 = *var_b4soiminv_slot;
+        let mut var_b4soiminv_rv: f64 = *var_b4soiminv_rv_slot;
+        let mut var_b4soimoin: f64 = *var_b4soimoin_slot;
+        let mut var_b4soimoin_rv: f64 = *var_b4soimoin_rv_slot;
+        let mut var_b4soinbjt: f64 = *var_b4soinbjt_slot;
+        let mut var_b4soinbjt_rv: f64 = *var_b4soinbjt_rv_slot;
+        let mut var_b4soindif: f64 = *var_b4soindif_slot;
+        let mut var_b4soindif_rv: f64 = *var_b4soindif_rv_slot;
+        let mut var_b4soinigc: f64 = *var_b4soinigc_slot;
+        let mut var_b4soinigc_rv: f64 = *var_b4soinigc_rv_slot;
+        let mut var_b4soinoff: f64 = *var_b4soinoff_slot;
+        let mut var_b4soinoff2: f64 = *var_b4soinoff2_slot;
+        let mut var_b4soinoff2_rv: f64 = *var_b4soinoff2_rv_slot;
+        let mut var_b4soinoff_rv: f64 = *var_b4soinoff_rv_slot;
+        let mut var_b4soinofffd: f64 = *var_b4soinofffd_slot;
+        let mut var_b4soinofffd_rv: f64 = *var_b4soinofffd_rv_slot;
+        let mut var_b4soinrecf0: f64 = *var_b4soinrecf0_slot;
+        let mut var_b4soinrecf0_rv: f64 = *var_b4soinrecf0_rv_slot;
+        let mut var_b4soinrecf0d: f64 = *var_b4soinrecf0d_slot;
+        let mut var_b4soinrecf0d_rv: f64 = *var_b4soinrecf0d_rv_slot;
+        let mut var_b4soinrecr0: f64 = *var_b4soinrecr0_slot;
+        let mut var_b4soinrecr0_rv: f64 = *var_b4soinrecr0_rv_slot;
+        let mut var_b4soinrecr0d: f64 = *var_b4soinrecr0d_slot;
+        let mut var_b4soinrecr0d_rv: f64 = *var_b4soinrecr0d_rv_slot;
+        let mut var_b4sointox: f64 = *var_b4sointox_slot;
+        let mut var_b4sointox_rv: f64 = *var_b4sointox_rv_slot;
+        let mut var_b4sointrecf: f64 = *var_b4sointrecf_slot;
+        let mut var_b4sointrecf_rv: f64 = *var_b4sointrecf_rv_slot;
+        let mut var_b4sointrecr: f64 = *var_b4sointrecr_slot;
+        let mut var_b4sointrecr_rv: f64 = *var_b4sointrecr_rv_slot;
+        let mut var_b4sointun: f64 = *var_b4sointun_slot;
+        let mut var_b4sointun_rv: f64 = *var_b4sointun_rv_slot;
+        let mut var_b4sointund: f64 = *var_b4sointund_slot;
+        let mut var_b4sointund_rv: f64 = *var_b4sointund_rv_slot;
+        let mut var_b4soipdits: f64 = *var_b4soipdits_slot;
+        let mut var_b4soipdits_rv: f64 = *var_b4soipdits_rv_slot;
+        let mut var_b4soipditsd: f64 = *var_b4soipditsd_slot;
+        let mut var_b4soipditsd_rv: f64 = *var_b4soipditsd_rv_slot;
+        let mut var_b4soipditsl: f64 = *var_b4soipditsl_slot;
+        let mut var_b4soipditsl_rv: f64 = *var_b4soipditsl_rv_slot;
+        let mut var_b4soipigcd: f64 = *var_b4soipigcd_slot;
+        let mut var_b4soipigcd_rv: f64 = *var_b4soipigcd_rv_slot;
+        let mut var_b4soipoxedge: f64 = *var_b4soipoxedge_slot;
+        let mut var_b4soipoxedge_rv: f64 = *var_b4soipoxedge_rv_slot;
+        let mut var_b4soirbody: f64 = *var_b4soirbody_slot;
+        let mut var_b4soirbody_rv: f64 = *var_b4soirbody_rv_slot;
+        let mut var_b4soirbsh: f64 = *var_b4soirbsh_slot;
+        let mut var_b4soirbsh_rv: f64 = *var_b4soirbsh_rv_slot;
+        let mut var_b4soirhalo: f64 = *var_b4soirhalo_slot;
+        let mut var_b4soirhalo_rv: f64 = *var_b4soirhalo_rv_slot;
+        let mut var_b4soirnoia: f64 = *var_b4soirnoia_slot;
+        let mut var_b4soirnoia_rv: f64 = *var_b4soirnoia_rv_slot;
+        let mut var_b4soisaref: f64 = *var_b4soisaref_slot;
+        let mut var_b4soisaref_rv: f64 = *var_b4soisaref_rv_slot;
+        let mut var_b4soisbref: f64 = *var_b4soisbref_slot;
+        let mut var_b4soisbref_rv: f64 = *var_b4soisbref_rv_slot;
+        let mut var_b4soisii0: f64 = *var_b4soisii0_slot;
+        let mut var_b4soisii0_rv: f64 = *var_b4soisii0_rv_slot;
+        let mut var_b4soisii1: f64 = *var_b4soisii1_slot;
+        let mut var_b4soisii1_rv: f64 = *var_b4soisii1_rv_slot;
+        let mut var_b4soisii2: f64 = *var_b4soisii2_slot;
+        let mut var_b4soisii2_rv: f64 = *var_b4soisii2_rv_slot;
+        let mut var_b4soisiid: f64 = *var_b4soisiid_slot;
+        let mut var_b4soisiid_rv: f64 = *var_b4soisiid_rv_slot;
+        let mut var_b4soisteta0: f64 = *var_b4soisteta0_slot;
+        let mut var_b4soisteta0_rv: f64 = *var_b4soisteta0_rv_slot;
+        let mut var_b4soisteta0cv: f64 = *var_b4soisteta0cv_slot;
+        let mut var_b4soisteta0cv_rv: f64 = *var_b4soisteta0cv_rv_slot;
+        let mut var_b4soistk2: f64 = *var_b4soistk2_slot;
+        let mut var_b4soistk2_rv: f64 = *var_b4soistk2_rv_slot;
+        let mut var_b4soitcjswg: f64 = *var_b4soitcjswg_slot;
+        let mut var_b4soitcjswg_rv: f64 = *var_b4soitcjswg_rv_slot;
+        let mut var_b4soitcjswgd: f64 = *var_b4soitcjswgd_slot;
+        let mut var_b4soitcjswgd_rv: f64 = *var_b4soitcjswgd_rv_slot;
+        let mut var_b4soitii: f64 = *var_b4soitii_slot;
+        let mut var_b4soitii_rv: f64 = *var_b4soitii_rv_slot;
+        let mut var_b4soitku0: f64 = *var_b4soitku0_slot;
+        let mut var_b4soitku0_rv: f64 = *var_b4soitku0_rv_slot;
+        let mut var_b4soitnoia: f64 = *var_b4soitnoia_slot;
+        let mut var_b4soitnoia_rv: f64 = *var_b4soitnoia_rv_slot;
+        let mut var_b4soitoxqm: f64 = *var_b4soitoxqm_slot;
+        let mut var_b4soitoxqm_rv: f64 = *var_b4soitoxqm_rv_slot;
+        let mut var_b4soitoxref: f64 = *var_b4soitoxref_slot;
+        let mut var_b4soitoxref_rv: f64 = *var_b4soitoxref_rv_slot;
+        let mut var_b4soitpbswg: f64 = *var_b4soitpbswg_slot;
+        let mut var_b4soitpbswg_rv: f64 = *var_b4soitpbswg_rv_slot;
+        let mut var_b4soitpbswgd: f64 = *var_b4soitpbswgd_slot;
+        let mut var_b4soitpbswgd_rv: f64 = *var_b4soitpbswgd_rv_slot;
+        let mut var_b4soitt: f64 = *var_b4soitt_slot;
+        let mut var_b4soitt_rv: f64 = *var_b4soitt_rv_slot;
+        let mut var_b4soitvbci: f64 = *var_b4soitvbci_slot;
+        let mut var_b4soitvbci_rv: f64 = *var_b4soitvbci_rv_slot;
+        let mut var_b4soivabjt: f64 = *var_b4soivabjt_slot;
+        let mut var_b4soivabjt_rv: f64 = *var_b4soivabjt_rv_slot;
+        let mut var_b4soivbci: f64 = *var_b4soivbci_slot;
+        let mut var_b4soivbci_rv: f64 = *var_b4soivbci_rv_slot;
+        let mut var_b4soivbsa: f64 = *var_b4soivbsa_slot;
+        let mut var_b4soivbsa_rv: f64 = *var_b4soivbsa_rv_slot;
+        let mut var_b4soivdsatii0: f64 = *var_b4soivdsatii0_slot;
+        let mut var_b4soivdsatii0_rv: f64 = *var_b4soivdsatii0_rv_slot;
+        let mut var_b4soivecb: f64 = *var_b4soivecb_slot;
+        let mut var_b4soivecb_rv: f64 = *var_b4soivecb_rv_slot;
+        let mut var_b4soivevb: f64 = *var_b4soivevb_slot;
+        let mut var_b4soivevb_rv: f64 = *var_b4soivevb_rv_slot;
+        let mut var_b4soivgb1: f64 = *var_b4soivgb1_slot;
+        let mut var_b4soivgb1_rv: f64 = *var_b4soivgb1_rv_slot;
+        let mut var_b4soivgb2: f64 = *var_b4soivgb2_slot;
+        let mut var_b4soivgb2_rv: f64 = *var_b4soivgb2_rv_slot;
+        let mut var_b4soivofffd: f64 = *var_b4soivofffd_slot;
+        let mut var_b4soivofffd_rv: f64 = *var_b4soivofffd_rv_slot;
+        let mut var_b4soivoxh: f64 = *var_b4soivoxh_slot;
+        let mut var_b4soivoxh_rv: f64 = *var_b4soivoxh_rv_slot;
+        let mut var_b4soivrec0: f64 = *var_b4soivrec0_slot;
+        let mut var_b4soivrec0_rv: f64 = *var_b4soivrec0_rv_slot;
+        let mut var_b4soivrec0d: f64 = *var_b4soivrec0d_slot;
+        let mut var_b4soivrec0d_rv: f64 = *var_b4soivrec0d_rv_slot;
+        let mut var_b4soivsdfb: f64 = *var_b4soivsdfb_slot;
+        let mut var_b4soivsdfb_rv: f64 = *var_b4soivsdfb_rv_slot;
+        let mut var_b4soivsdth: f64 = *var_b4soivsdth_slot;
+        let mut var_b4soivsdth_rv: f64 = *var_b4soivsdth_rv_slot;
+        let mut var_b4soivtun0: f64 = *var_b4soivtun0_slot;
+        let mut var_b4soivtun0_rv: f64 = *var_b4soivtun0_rv_slot;
+        let mut var_b4soivtun0d: f64 = *var_b4soivtun0d_slot;
+        let mut var_b4soivtun0d_rv: f64 = *var_b4soivtun0d_rv_slot;
+        let mut var_b4soiwint: f64 = *var_b4soiwint_slot;
+        let mut var_b4soiwint_rv: f64 = *var_b4soiwint_rv_slot;
+        let mut var_b4soiwl: f64 = *var_b4soiwl_slot;
+        let mut var_b4soiwl_rv: f64 = *var_b4soiwl_rv_slot;
+        let mut var_b4soiwlc: f64 = *var_b4soiwlc_slot;
+        let mut var_b4soiwlc_rv: f64 = *var_b4soiwlc_rv_slot;
+        let mut var_b4soiwln: f64 = *var_b4soiwln_slot;
+        let mut var_b4soiwln_rv: f64 = *var_b4soiwln_rv_slot;
+        let mut var_b4soiwlod: f64 = *var_b4soiwlod_slot;
+        let mut var_b4soiwlod_rv: f64 = *var_b4soiwlod_rv_slot;
+        let mut var_b4soiwlodku0: f64 = *var_b4soiwlodku0_slot;
+        let mut var_b4soiwlodku0_rv: f64 = *var_b4soiwlodku0_rv_slot;
+        let mut var_b4soiwlodvth: f64 = *var_b4soiwlodvth_slot;
+        let mut var_b4soiwlodvth_rv: f64 = *var_b4soiwlodvth_rv_slot;
+        let mut var_b4soiwr: f64 = *var_b4soiwr_slot;
+        let mut var_b4soiwr_rv: f64 = *var_b4soiwr_rv_slot;
+        let mut var_b4soiwth0: f64 = *var_b4soiwth0_slot;
+        let mut var_b4soiwth0_rv: f64 = *var_b4soiwth0_rv_slot;
+        let mut var_b4soiww: f64 = *var_b4soiww_slot;
+        let mut var_b4soiww_rv: f64 = *var_b4soiww_rv_slot;
+        let mut var_b4soiwwc: f64 = *var_b4soiwwc_slot;
+        let mut var_b4soiwwc_rv: f64 = *var_b4soiwwc_rv_slot;
+        let mut var_b4soiwwl: f64 = *var_b4soiwwl_slot;
+        let mut var_b4soiwwl_rv: f64 = *var_b4soiwwl_rv_slot;
+        let mut var_b4soiwwlc: f64 = *var_b4soiwwlc_slot;
+        let mut var_b4soiwwlc_rv: f64 = *var_b4soiwwlc_rv_slot;
+        let mut var_b4soiwwn: f64 = *var_b4soiwwn_slot;
+        let mut var_b4soiwwn_rv: f64 = *var_b4soiwwn_rv_slot;
+
+        var_b4soilwc = p.p182;
+        var_b4soilwc_rv = 0.0;
+
+        var_b4soilwn = p.p183;
+        var_b4soilwn_rv = 0.0;
+
+        var_b4soilwl = p.p184;
+        var_b4soilwl_rv = 0.0;
+
+        var_b4soilwlc = p.p185;
+        var_b4soilwlc_rv = 0.0;
+
+        var_b4soiwr = p.p186;
+        var_b4soiwr_rv = 0.0;
+
+        var_b4soiwint = p.p187;
+        var_b4soiwint_rv = 0.0;
+
+        var_b4soidwg = p.p188;
+        var_b4soidwg_rv = 0.0;
+
+        var_b4soidwb = p.p189;
+        var_b4soidwb_rv = 0.0;
+
+        var_b4soiwl = p.p190;
+        var_b4soiwl_rv = 0.0;
+
+        var_b4soiwlc = p.p191;
+        var_b4soiwlc_rv = 0.0;
+
+        var_b4soiwln = p.p192;
+        var_b4soiwln_rv = 0.0;
+
+        var_b4soiww = p.p193;
+        var_b4soiww_rv = 0.0;
+
+        var_b4soiwwc = p.p194;
+        var_b4soiwwc_rv = 0.0;
+
+        var_b4soiwwn = p.p195;
+        var_b4soiwwn_rv = 0.0;
+
+        var_b4soiwwl = p.p196;
+        var_b4soiwwl_rv = 0.0;
+
+        var_b4soiwwlc = p.p197;
+        var_b4soiwwlc_rv = 0.0;
+
+        var_b4soib0 = p.p198;
+        var_b4soib0_rv = 0.0;
+
+        var_b4soib1 = p.p199;
+        var_b4soib1_rv = 0.0;
+
+        var_b4soicgsl = p.p200;
+        var_b4soicgsl_rv = 0.0;
+
+        var_b4soicgdl = p.p201;
+        var_b4soicgdl_rv = 0.0;
+
+        var_b4soickappa = p.p202;
+        var_b4soickappa_rv = 0.0;
+
+        var_b4soiclc = p.p204;
+        var_b4soiclc_rv = 0.0;
+
+        var_b4soicle = p.p205;
+        var_b4soicle_rv = 0.0;
+
+        var_b4soidwc = p.p206;
+        var_b4soidwc_rv = 0.0;
+
+        var_b4soidlc = p.p207;
+        var_b4soidlc_rv = 0.0;
+
+        var_b4soialpha0 = p.p208;
+        var_b4soialpha0_rv = 0.0;
+
+        var_b4soitnoia = p.p214;
+        var_b4soitnoia_rv = 0.0;
+
+        var_b4soirnoia = p.p216;
+        var_b4soirnoia_rv = 0.0;
+
+        var_b4soisaref = p.p219;
+        var_b4soisaref_rv = 0.0;
+
+        var_b4soisbref = p.p220;
+        var_b4soisbref_rv = 0.0;
+
+        var_b4soiwlod = p.p221;
+        var_b4soiwlod_rv = 0.0;
+
+        var_b4soiku0 = p.p222;
+        var_b4soiku0_rv = 0.0;
+
+        var_b4soikvsat = p.p223;
+        var_b4soikvsat_rv = 0.0;
+
+        var_b4soikvth0 = p.p224;
+        var_b4soikvth0_rv = 0.0;
+
+        var_b4soitku0 = p.p225;
+        var_b4soitku0_rv = 0.0;
+
+        var_b4soillodku0 = p.p226;
+        var_b4soillodku0_rv = 0.0;
+
+        var_b4soiwlodku0 = p.p227;
+        var_b4soiwlodku0_rv = 0.0;
+
+        var_b4soillodvth = p.p228;
+        var_b4soillodvth_rv = 0.0;
+
+        var_b4soiwlodvth = p.p229;
+        var_b4soiwlodvth_rv = 0.0;
+
+        var_b4soistk2 = p.p236;
+        var_b4soistk2_rv = 0.0;
+
+        var_b4soilodk2 = p.p237;
+        var_b4soilodk2_rv = 0.0;
+
+        var_b4soisteta0 = p.p238;
+        var_b4soisteta0_rv = 0.0;
+
+        var_b4soilodeta0 = p.p239;
+        var_b4soilodeta0_rv = 0.0;
+
+        var_b4soisteta0cv = p.p240;
+        var_b4soisteta0cv_rv = 0.0;
+
+        var_b4soilodeta0cv = p.p241;
+        var_b4soilodeta0cv_rv = 0.0;
+
+        var_b4soidvtp0 = p.p245;
+        var_b4soidvtp0_rv = 0.0;
+
+        var_b4soidvtp1 = p.p249;
+        var_b4soidvtp1_rv = 0.0;
+
+        var_b4soidvtp2 = p.p253;
+        var_b4soidvtp2_rv = 0.0;
+
+        var_b4soidvtp3 = p.p257;
+        var_b4soidvtp3_rv = 0.0;
+
+        var_b4soidvtp4 = p.p261;
+        var_b4soidvtp4_rv = 0.0;
+
+        var_b4soiminv = p.p265;
+        var_b4soiminv_rv = 0.0;
+
+        var_b4soipdits = p.p269;
+        var_b4soipdits_rv = 0.0;
+
+        var_b4soipditsl = p.p270;
+        var_b4soipditsl_rv = 0.0;
+
+        var_b4soipditsd = p.p271;
+        var_b4soipditsd_rv = 0.0;
+
+        var_b4soifprout = p.p272;
+        var_b4soifprout_rv = 0.0;
+
+        var_b4soik1w1 = p.p287;
+        var_b4soik1w1_rv = 0.0;
+
+        var_b4soik1w2 = p.p288;
+        var_b4soik1w2_rv = 0.0;
+
+        var_b4soiketas = p.p289;
+        var_b4soiketas_rv = 0.0;
+
+        var_b4soidwbc = p.p290;
+        var_b4soidwbc_rv = 0.0;
+
+        var_b4soibeta0 = p.p291;
+        var_b4soibeta0_rv = 0.0;
+
+        var_b4soibeta1 = p.p292;
+        var_b4soibeta1_rv = 0.0;
+
+        var_b4soibeta2 = p.p293;
+        var_b4soibeta2_rv = 0.0;
+
+        var_b4soivdsatii0 = p.p294;
+        var_b4soivdsatii0_rv = 0.0;
+
+        var_b4soitii = p.p295;
+        var_b4soitii_rv = 0.0;
+
+        var_b4soilii = p.p296;
+        var_b4soilii_rv = 0.0;
+
+        var_b4soisii0 = p.p297;
+        var_b4soisii0_rv = 0.0;
+
+        var_b4soisii1 = p.p298;
+        var_b4soisii1_rv = 0.0;
+
+        var_b4soisii2 = p.p299;
+        var_b4soisii2_rv = 0.0;
+
+        var_b4soisiid = p.p300;
+        var_b4soisiid_rv = 0.0;
+
+        var_b4soifbjtii = p.p301;
+        var_b4soifbjtii_rv = 0.0;
+
+        var_b4soiebjtii = p.p302;
+        var_b4soiebjtii_rv = 0.0;
+
+        var_b4soicbjtii = p.p303;
+        var_b4soicbjtii_rv = 0.0;
+
+        var_b4soivbci = p.p304;
+        var_b4soivbci_rv = 0.0;
+
+        var_b4soiabjtii = p.p305;
+        var_b4soiabjtii_rv = 0.0;
+
+        var_b4soimbjtii = p.p306;
+        var_b4soimbjtii_rv = 0.0;
+
+        var_b4soitvbci = p.p307;
+        var_b4soitvbci_rv = 0.0;
+
+        var_b4soiesatii = p.p308;
+        var_b4soiesatii_rv = 0.0;
+
+        var_b4sointun = p.p309;
+        var_b4sointun_rv = 0.0;
+
+        var_b4sointund = p.p310;
+        var_b4sointund_rv = 0.0;
+
+        var_b4soinrecf0 = p.p311;
+        var_b4soinrecf0_rv = 0.0;
+
+        var_b4soinrecf0d = p.p312;
+        var_b4soinrecf0d_rv = 0.0;
+
+        var_b4soinrecr0 = p.p313;
+        var_b4soinrecr0_rv = 0.0;
+
+        var_b4soinrecr0d = p.p314;
+        var_b4soinrecr0d_rv = 0.0;
+
+        var_b4soiisbjt = p.p315;
+        var_b4soiisbjt_rv = 0.0;
+
+        var_b4soiidbjt = p.p316;
+        var_b4soiidbjt_rv = 0.0;
+
+        var_b4soiisdif = p.p317;
+        var_b4soiisdif_rv = 0.0;
+
+        var_b4soiiddif = p.p318;
+        var_b4soiiddif_rv = 0.0;
+
+        var_b4soiisrec = p.p319;
+        var_b4soiisrec_rv = 0.0;
+
+        var_b4soiidrec = p.p320;
+        var_b4soiidrec_rv = 0.0;
+
+        var_b4soiistun = p.p321;
+        var_b4soiistun_rv = 0.0;
+
+        var_b4soiidtun = p.p322;
+        var_b4soiidtun_rv = 0.0;
+
+        var_b4soiln = p.p323;
+        var_b4soiln_rv = 0.0;
+
+        var_b4soivrec0 = p.p324;
+        var_b4soivrec0_rv = 0.0;
+
+        var_b4soivrec0d = p.p325;
+        var_b4soivrec0d_rv = 0.0;
+
+        var_b4soivtun0 = p.p326;
+        var_b4soivtun0_rv = 0.0;
+
+        var_b4soivtun0d = p.p327;
+        var_b4soivtun0d_rv = 0.0;
+
+        var_b4soinbjt = p.p328;
+        var_b4soinbjt_rv = 0.0;
+
+        var_b4soilbjt0 = p.p329;
+        var_b4soilbjt0_rv = 0.0;
+
+        var_b4soildif0 = p.p330;
+        var_b4soildif0_rv = 0.0;
+
+        var_b4soivabjt = p.p331;
+        var_b4soivabjt_rv = 0.0;
+
+        var_b4soiaely = p.p332;
+        var_b4soiaely_rv = 0.0;
+
+        var_b4soiahli = p.p333;
+        var_b4soiahli_rv = 0.0;
+
+        var_b4soiahlid = p.p334;
+        var_b4soiahlid_rv = 0.0;
+
+        var_b4soirbody = p.p335;
+        var_b4soirbody_rv = 0.0;
+
+        var_b4soirbsh = p.p336;
+        var_b4soirbsh_rv = 0.0;
+
+        var_b4soicgeo = p.p337;
+        var_b4soicgeo_rv = 0.0;
+
+        var_b4soitt = p.p338;
+        var_b4soitt_rv = 0.0;
+
+        var_b4soindif = p.p339;
+        var_b4soindif_rv = 0.0;
+
+        var_b4soivsdfb = p.p340;
+        var_b4soivsdfb_rv = 0.0;
+
+        var_b4soivsdth = p.p341;
+        var_b4soivsdth_rv = 0.0;
+
+        var_b4soicsdmin = p.p342;
+        var_b4soicsdmin_dn3 = 0.0;
+        var_b4soicsdmin_dn4 = 0.0;
+        var_b4soicsdmin_dn5 = 0.0;
+        var_b4soicsdmin_dn6 = 0.0;
+        var_b4soicsdmin_dn7 = 0.0;
+        var_b4soicsdmin_dn8 = 0.0;
+        var_b4soicsdmin_dn9 = 0.0;
+        var_b4soicsdmin_dn10 = 0.0;
+        var_b4soicsdmin_dn11 = 0.0;
+        var_b4soicsdmin_dn12 = 0.0;
+        var_b4soicsdmin_rv = 0.0;
+
+        var_b4soiasd = p.p343;
+        var_b4soiasd_rv = 0.0;
+
+        var_b4soicsdesw = p.p344;
+        var_b4soicsdesw_rv = 0.0;
+
+        var_b4sointrecf = p.p345;
+        var_b4sointrecf_rv = 0.0;
+
+        var_b4sointrecr = p.p346;
+        var_b4sointrecr_rv = 0.0;
+
+        var_b4soidlcb = p.p347;
+        var_b4soidlcb_rv = 0.0;
+
+        var_b4soifbody = p.p348;
+        var_b4soifbody_rv = 0.0;
+
+        var_b4soitcjswg = p.p349;
+        var_b4soitcjswg_rv = 0.0;
+
+        var_b4soitpbswg = p.p350;
+        var_b4soitpbswg_rv = 0.0;
+
+        var_b4soitcjswgd = p.p351;
+        var_b4soitcjswgd_rv = 0.0;
+
+        var_b4soitpbswgd = p.p352;
+        var_b4soitpbswgd_rv = 0.0;
+
+        var_b4soiacde = p.p353;
+        var_b4soiacde_rv = 0.0;
+
+        var_b4soimoin = p.p354;
+        var_b4soimoin_rv = 0.0;
+
+        var_b4soinoff = p.p355;
+        var_b4soinoff_rv = 0.0;
+
+        var_b4soinoff2 = p.p356;
+        var_b4soinoff2_rv = 0.0;
+
+        var_b4soidelvt = p.p357;
+        var_b4soidelvt_rv = 0.0;
+
+        var_b4soikb1 = p.p358;
+        var_b4soikb1_rv = 0.0;
+
+        var_b4soidlbg = p.p359;
+        var_b4soidlbg_rv = 0.0;
+
+        var_b4soicfrcoeff = p.p360;
+        var_b4soicfrcoeff_rv = 0.0;
+
+        var_b4soiigbmod = p.p362;
+        var_b4soiigbmod_rv = 0.0;
+
+        var_b4soiigcmod = p.p363;
+        var_b4soiigcmod_rv = 0.0;
+
+        var_b4soitoxqm = p.p364;
+        var_b4soitoxqm_rv = 0.0;
+
+        var_b4soiwth0 = p.p365;
+        var_b4soiwth0_rv = 0.0;
+
+        var_b4soirhalo = p.p366;
+        var_b4soirhalo_rv = 0.0;
+
+        var_b4sointox = p.p367;
+        var_b4sointox_rv = 0.0;
+
+        var_b4soitoxref = p.p368;
+        var_b4soitoxref_rv = 0.0;
+
+        var_b4soiebg = p.p369;
+        var_b4soiebg_rv = 0.0;
+
+        var_b4soivevb = p.p370;
+        var_b4soivevb_rv = 0.0;
+
+        var_b4soialphagb1 = p.p371;
+        var_b4soialphagb1_rv = 0.0;
+
+        var_b4soibetagb1 = p.p372;
+        var_b4soibetagb1_rv = 0.0;
+
+        var_b4soivgb1 = p.p373;
+        var_b4soivgb1_rv = 0.0;
+
+        var_b4soivecb = p.p374;
+        var_b4soivecb_rv = 0.0;
+
+        var_b4soialphagb2 = p.p375;
+        var_b4soialphagb2_rv = 0.0;
+
+        var_b4soibetagb2 = p.p376;
+        var_b4soibetagb2_rv = 0.0;
+
+        var_b4soivgb2 = p.p377;
+        var_b4soivgb2_rv = 0.0;
+
+        var_b4soiaigbcp2 = p.p378;
+        var_b4soiaigbcp2_rv = 0.0;
+
+        var_b4soibigbcp2 = p.p379;
+        var_b4soibigbcp2_rv = 0.0;
+
+        var_b4soicigbcp2 = p.p380;
+        var_b4soicigbcp2_rv = 0.0;
+
+        var_b4soivoxh = p.p381;
+        var_b4soivoxh_rv = 0.0;
+
+        var_b4soideltavox = p.p382;
+        var_b4soideltavox_rv = 0.0;
+
+        var_b4soiaigc = p.p383;
+        var_b4soiaigc_rv = 0.0;
+
+        var_b4soibigc = p.p384;
+        var_b4soibigc_rv = 0.0;
+
+        var_b4soicigc = p.p385;
+        var_b4soicigc_rv = 0.0;
+
+        var_b4soiaigsd = p.p386;
+        var_b4soiaigsd_rv = 0.0;
+
+        var_b4soibigsd = p.p387;
+        var_b4soibigsd_rv = 0.0;
+
+        var_b4soicigsd = p.p388;
+        var_b4soicigsd_rv = 0.0;
+
+        var_b4soinigc = p.p389;
+        var_b4soinigc_rv = 0.0;
+
+        var_b4soipigcd = p.p390;
+        var_b4soipigcd_rv = 0.0;
+
+        var_b4soipoxedge = p.p391;
+        var_b4soipoxedge_rv = 0.0;
+
+        var_b4soidlcig = p.p392;
+        var_b4soidlcig_rv = 0.0;
+
+        var_b4soivbsa = p.p395;
+        var_b4soivbsa_rv = 0.0;
+
+        var_b4soinofffd = p.p396;
+        var_b4soinofffd_rv = 0.0;
+
+        var_b4soivofffd = p.p397;
+        var_b4soivofffd_rv = 0.0;
+
+        var_b4soik1b = p.p398;
+        var_b4soik1b_rv = 0.0;
+
+        var_b4soik2b = p.p399;
+        var_b4soik2b_rv = 0.0;
+
+        var_b4soidk2b = p.p400;
+        var_b4soidk2b_rv = 0.0;
+
+        var_b4soidvbd0 = p.p401;
+        var_b4soidvbd0_rv = 0.0;
+
+        *var_b4soiabjtii_slot = var_b4soiabjtii;
+        *var_b4soiabjtii_rv_slot = var_b4soiabjtii_rv;
+        *var_b4soiacde_slot = var_b4soiacde;
+        *var_b4soiacde_rv_slot = var_b4soiacde_rv;
+        *var_b4soiaely_slot = var_b4soiaely;
+        *var_b4soiaely_rv_slot = var_b4soiaely_rv;
+        *var_b4soiahli_slot = var_b4soiahli;
+        *var_b4soiahli_rv_slot = var_b4soiahli_rv;
+        *var_b4soiahlid_slot = var_b4soiahlid;
+        *var_b4soiahlid_rv_slot = var_b4soiahlid_rv;
+        *var_b4soiaigbcp2_slot = var_b4soiaigbcp2;
+        *var_b4soiaigbcp2_rv_slot = var_b4soiaigbcp2_rv;
+        *var_b4soiaigc_slot = var_b4soiaigc;
+        *var_b4soiaigc_rv_slot = var_b4soiaigc_rv;
+        *var_b4soiaigsd_slot = var_b4soiaigsd;
+        *var_b4soiaigsd_rv_slot = var_b4soiaigsd_rv;
+        *var_b4soialpha0_slot = var_b4soialpha0;
+        *var_b4soialpha0_rv_slot = var_b4soialpha0_rv;
+        *var_b4soialphagb1_slot = var_b4soialphagb1;
+        *var_b4soialphagb1_rv_slot = var_b4soialphagb1_rv;
+        *var_b4soialphagb2_slot = var_b4soialphagb2;
+        *var_b4soialphagb2_rv_slot = var_b4soialphagb2_rv;
+        *var_b4soiasd_slot = var_b4soiasd;
+        *var_b4soiasd_rv_slot = var_b4soiasd_rv;
+        *var_b4soib0_slot = var_b4soib0;
+        *var_b4soib0_rv_slot = var_b4soib0_rv;
+        *var_b4soib1_slot = var_b4soib1;
+        *var_b4soib1_rv_slot = var_b4soib1_rv;
+        *var_b4soibeta0_slot = var_b4soibeta0;
+        *var_b4soibeta0_rv_slot = var_b4soibeta0_rv;
+        *var_b4soibeta1_slot = var_b4soibeta1;
+        *var_b4soibeta1_rv_slot = var_b4soibeta1_rv;
+        *var_b4soibeta2_slot = var_b4soibeta2;
+        *var_b4soibeta2_rv_slot = var_b4soibeta2_rv;
+        *var_b4soibetagb1_slot = var_b4soibetagb1;
+        *var_b4soibetagb1_rv_slot = var_b4soibetagb1_rv;
+        *var_b4soibetagb2_slot = var_b4soibetagb2;
+        *var_b4soibetagb2_rv_slot = var_b4soibetagb2_rv;
+        *var_b4soibigbcp2_slot = var_b4soibigbcp2;
+        *var_b4soibigbcp2_rv_slot = var_b4soibigbcp2_rv;
+        *var_b4soibigc_slot = var_b4soibigc;
+        *var_b4soibigc_rv_slot = var_b4soibigc_rv;
+        *var_b4soibigsd_slot = var_b4soibigsd;
+        *var_b4soibigsd_rv_slot = var_b4soibigsd_rv;
+        *var_b4soicbjtii_slot = var_b4soicbjtii;
+        *var_b4soicbjtii_rv_slot = var_b4soicbjtii_rv;
+        *var_b4soicfrcoeff_slot = var_b4soicfrcoeff;
+        *var_b4soicfrcoeff_rv_slot = var_b4soicfrcoeff_rv;
+        *var_b4soicgdl_slot = var_b4soicgdl;
+        *var_b4soicgdl_rv_slot = var_b4soicgdl_rv;
+        *var_b4soicgeo_slot = var_b4soicgeo;
+        *var_b4soicgeo_rv_slot = var_b4soicgeo_rv;
+        *var_b4soicgsl_slot = var_b4soicgsl;
+        *var_b4soicgsl_rv_slot = var_b4soicgsl_rv;
+        *var_b4soicigbcp2_slot = var_b4soicigbcp2;
+        *var_b4soicigbcp2_rv_slot = var_b4soicigbcp2_rv;
+        *var_b4soicigc_slot = var_b4soicigc;
+        *var_b4soicigc_rv_slot = var_b4soicigc_rv;
+        *var_b4soicigsd_slot = var_b4soicigsd;
+        *var_b4soicigsd_rv_slot = var_b4soicigsd_rv;
+        *var_b4soickappa_slot = var_b4soickappa;
+        *var_b4soickappa_rv_slot = var_b4soickappa_rv;
+        *var_b4soiclc_slot = var_b4soiclc;
+        *var_b4soiclc_rv_slot = var_b4soiclc_rv;
+        *var_b4soicle_slot = var_b4soicle;
+        *var_b4soicle_rv_slot = var_b4soicle_rv;
+        *var_b4soicsdesw_slot = var_b4soicsdesw;
+        *var_b4soicsdesw_rv_slot = var_b4soicsdesw_rv;
+        *var_b4soicsdmin_slot = var_b4soicsdmin;
+        *var_b4soicsdmin_dn10_slot = var_b4soicsdmin_dn10;
+        *var_b4soicsdmin_dn11_slot = var_b4soicsdmin_dn11;
+        *var_b4soicsdmin_dn12_slot = var_b4soicsdmin_dn12;
+        *var_b4soicsdmin_dn3_slot = var_b4soicsdmin_dn3;
+        *var_b4soicsdmin_dn4_slot = var_b4soicsdmin_dn4;
+        *var_b4soicsdmin_dn5_slot = var_b4soicsdmin_dn5;
+        *var_b4soicsdmin_dn6_slot = var_b4soicsdmin_dn6;
+        *var_b4soicsdmin_dn7_slot = var_b4soicsdmin_dn7;
+        *var_b4soicsdmin_dn8_slot = var_b4soicsdmin_dn8;
+        *var_b4soicsdmin_dn9_slot = var_b4soicsdmin_dn9;
+        *var_b4soicsdmin_rv_slot = var_b4soicsdmin_rv;
+        *var_b4soideltavox_slot = var_b4soideltavox;
+        *var_b4soideltavox_rv_slot = var_b4soideltavox_rv;
+        *var_b4soidelvt_slot = var_b4soidelvt;
+        *var_b4soidelvt_rv_slot = var_b4soidelvt_rv;
+        *var_b4soidk2b_slot = var_b4soidk2b;
+        *var_b4soidk2b_rv_slot = var_b4soidk2b_rv;
+        *var_b4soidlbg_slot = var_b4soidlbg;
+        *var_b4soidlbg_rv_slot = var_b4soidlbg_rv;
+        *var_b4soidlc_slot = var_b4soidlc;
+        *var_b4soidlc_rv_slot = var_b4soidlc_rv;
+        *var_b4soidlcb_slot = var_b4soidlcb;
+        *var_b4soidlcb_rv_slot = var_b4soidlcb_rv;
+        *var_b4soidlcig_slot = var_b4soidlcig;
+        *var_b4soidlcig_rv_slot = var_b4soidlcig_rv;
+        *var_b4soidvbd0_slot = var_b4soidvbd0;
+        *var_b4soidvbd0_rv_slot = var_b4soidvbd0_rv;
+        *var_b4soidvtp0_slot = var_b4soidvtp0;
+        *var_b4soidvtp0_rv_slot = var_b4soidvtp0_rv;
+        *var_b4soidvtp1_slot = var_b4soidvtp1;
+        *var_b4soidvtp1_rv_slot = var_b4soidvtp1_rv;
+        *var_b4soidvtp2_slot = var_b4soidvtp2;
+        *var_b4soidvtp2_rv_slot = var_b4soidvtp2_rv;
+        *var_b4soidvtp3_slot = var_b4soidvtp3;
+        *var_b4soidvtp3_rv_slot = var_b4soidvtp3_rv;
+        *var_b4soidvtp4_slot = var_b4soidvtp4;
+        *var_b4soidvtp4_rv_slot = var_b4soidvtp4_rv;
+        *var_b4soidwb_slot = var_b4soidwb;
+        *var_b4soidwb_rv_slot = var_b4soidwb_rv;
+        *var_b4soidwbc_slot = var_b4soidwbc;
+        *var_b4soidwbc_rv_slot = var_b4soidwbc_rv;
+        *var_b4soidwc_slot = var_b4soidwc;
+        *var_b4soidwc_rv_slot = var_b4soidwc_rv;
+        *var_b4soidwg_slot = var_b4soidwg;
+        *var_b4soidwg_rv_slot = var_b4soidwg_rv;
+        *var_b4soiebg_slot = var_b4soiebg;
+        *var_b4soiebg_rv_slot = var_b4soiebg_rv;
+        *var_b4soiebjtii_slot = var_b4soiebjtii;
+        *var_b4soiebjtii_rv_slot = var_b4soiebjtii_rv;
+        *var_b4soiesatii_slot = var_b4soiesatii;
+        *var_b4soiesatii_rv_slot = var_b4soiesatii_rv;
+        *var_b4soifbjtii_slot = var_b4soifbjtii;
+        *var_b4soifbjtii_rv_slot = var_b4soifbjtii_rv;
+        *var_b4soifbody_slot = var_b4soifbody;
+        *var_b4soifbody_rv_slot = var_b4soifbody_rv;
+        *var_b4soifprout_slot = var_b4soifprout;
+        *var_b4soifprout_rv_slot = var_b4soifprout_rv;
+        *var_b4soiidbjt_slot = var_b4soiidbjt;
+        *var_b4soiidbjt_rv_slot = var_b4soiidbjt_rv;
+        *var_b4soiiddif_slot = var_b4soiiddif;
+        *var_b4soiiddif_rv_slot = var_b4soiiddif_rv;
+        *var_b4soiidrec_slot = var_b4soiidrec;
+        *var_b4soiidrec_rv_slot = var_b4soiidrec_rv;
+        *var_b4soiidtun_slot = var_b4soiidtun;
+        *var_b4soiidtun_rv_slot = var_b4soiidtun_rv;
+        *var_b4soiigbmod_slot = var_b4soiigbmod;
+        *var_b4soiigbmod_rv_slot = var_b4soiigbmod_rv;
+        *var_b4soiigcmod_slot = var_b4soiigcmod;
+        *var_b4soiigcmod_rv_slot = var_b4soiigcmod_rv;
+        *var_b4soiisbjt_slot = var_b4soiisbjt;
+        *var_b4soiisbjt_rv_slot = var_b4soiisbjt_rv;
+        *var_b4soiisdif_slot = var_b4soiisdif;
+        *var_b4soiisdif_rv_slot = var_b4soiisdif_rv;
+        *var_b4soiisrec_slot = var_b4soiisrec;
+        *var_b4soiisrec_rv_slot = var_b4soiisrec_rv;
+        *var_b4soiistun_slot = var_b4soiistun;
+        *var_b4soiistun_rv_slot = var_b4soiistun_rv;
+        *var_b4soik1b_slot = var_b4soik1b;
+        *var_b4soik1b_rv_slot = var_b4soik1b_rv;
+        *var_b4soik1w1_slot = var_b4soik1w1;
+        *var_b4soik1w1_rv_slot = var_b4soik1w1_rv;
+        *var_b4soik1w2_slot = var_b4soik1w2;
+        *var_b4soik1w2_rv_slot = var_b4soik1w2_rv;
+        *var_b4soik2b_slot = var_b4soik2b;
+        *var_b4soik2b_rv_slot = var_b4soik2b_rv;
+        *var_b4soikb1_slot = var_b4soikb1;
+        *var_b4soikb1_rv_slot = var_b4soikb1_rv;
+        *var_b4soiketas_slot = var_b4soiketas;
+        *var_b4soiketas_rv_slot = var_b4soiketas_rv;
+        *var_b4soiku0_slot = var_b4soiku0;
+        *var_b4soiku0_rv_slot = var_b4soiku0_rv;
+        *var_b4soikvsat_slot = var_b4soikvsat;
+        *var_b4soikvsat_rv_slot = var_b4soikvsat_rv;
+        *var_b4soikvth0_slot = var_b4soikvth0;
+        *var_b4soikvth0_rv_slot = var_b4soikvth0_rv;
+        *var_b4soilbjt0_slot = var_b4soilbjt0;
+        *var_b4soilbjt0_rv_slot = var_b4soilbjt0_rv;
+        *var_b4soildif0_slot = var_b4soildif0;
+        *var_b4soildif0_rv_slot = var_b4soildif0_rv;
+        *var_b4soilii_slot = var_b4soilii;
+        *var_b4soilii_rv_slot = var_b4soilii_rv;
+        *var_b4soillodku0_slot = var_b4soillodku0;
+        *var_b4soillodku0_rv_slot = var_b4soillodku0_rv;
+        *var_b4soillodvth_slot = var_b4soillodvth;
+        *var_b4soillodvth_rv_slot = var_b4soillodvth_rv;
+        *var_b4soiln_slot = var_b4soiln;
+        *var_b4soiln_rv_slot = var_b4soiln_rv;
+        *var_b4soilodeta0_slot = var_b4soilodeta0;
+        *var_b4soilodeta0_rv_slot = var_b4soilodeta0_rv;
+        *var_b4soilodeta0cv_slot = var_b4soilodeta0cv;
+        *var_b4soilodeta0cv_rv_slot = var_b4soilodeta0cv_rv;
+        *var_b4soilodk2_slot = var_b4soilodk2;
+        *var_b4soilodk2_rv_slot = var_b4soilodk2_rv;
+        *var_b4soilwc_slot = var_b4soilwc;
+        *var_b4soilwc_rv_slot = var_b4soilwc_rv;
+        *var_b4soilwl_slot = var_b4soilwl;
+        *var_b4soilwl_rv_slot = var_b4soilwl_rv;
+        *var_b4soilwlc_slot = var_b4soilwlc;
+        *var_b4soilwlc_rv_slot = var_b4soilwlc_rv;
+        *var_b4soilwn_slot = var_b4soilwn;
+        *var_b4soilwn_rv_slot = var_b4soilwn_rv;
+        *var_b4soimbjtii_slot = var_b4soimbjtii;
+        *var_b4soimbjtii_rv_slot = var_b4soimbjtii_rv;
+        *var_b4soiminv_slot = var_b4soiminv;
+        *var_b4soiminv_rv_slot = var_b4soiminv_rv;
+        *var_b4soimoin_slot = var_b4soimoin;
+        *var_b4soimoin_rv_slot = var_b4soimoin_rv;
+        *var_b4soinbjt_slot = var_b4soinbjt;
+        *var_b4soinbjt_rv_slot = var_b4soinbjt_rv;
+        *var_b4soindif_slot = var_b4soindif;
+        *var_b4soindif_rv_slot = var_b4soindif_rv;
+        *var_b4soinigc_slot = var_b4soinigc;
+        *var_b4soinigc_rv_slot = var_b4soinigc_rv;
+        *var_b4soinoff_slot = var_b4soinoff;
+        *var_b4soinoff2_slot = var_b4soinoff2;
+        *var_b4soinoff2_rv_slot = var_b4soinoff2_rv;
+        *var_b4soinoff_rv_slot = var_b4soinoff_rv;
+        *var_b4soinofffd_slot = var_b4soinofffd;
+        *var_b4soinofffd_rv_slot = var_b4soinofffd_rv;
+        *var_b4soinrecf0_slot = var_b4soinrecf0;
+        *var_b4soinrecf0_rv_slot = var_b4soinrecf0_rv;
+        *var_b4soinrecf0d_slot = var_b4soinrecf0d;
+        *var_b4soinrecf0d_rv_slot = var_b4soinrecf0d_rv;
+        *var_b4soinrecr0_slot = var_b4soinrecr0;
+        *var_b4soinrecr0_rv_slot = var_b4soinrecr0_rv;
+        *var_b4soinrecr0d_slot = var_b4soinrecr0d;
+        *var_b4soinrecr0d_rv_slot = var_b4soinrecr0d_rv;
+        *var_b4sointox_slot = var_b4sointox;
+        *var_b4sointox_rv_slot = var_b4sointox_rv;
+        *var_b4sointrecf_slot = var_b4sointrecf;
+        *var_b4sointrecf_rv_slot = var_b4sointrecf_rv;
+        *var_b4sointrecr_slot = var_b4sointrecr;
+        *var_b4sointrecr_rv_slot = var_b4sointrecr_rv;
+        *var_b4sointun_slot = var_b4sointun;
+        *var_b4sointun_rv_slot = var_b4sointun_rv;
+        *var_b4sointund_slot = var_b4sointund;
+        *var_b4sointund_rv_slot = var_b4sointund_rv;
+        *var_b4soipdits_slot = var_b4soipdits;
+        *var_b4soipdits_rv_slot = var_b4soipdits_rv;
+        *var_b4soipditsd_slot = var_b4soipditsd;
+        *var_b4soipditsd_rv_slot = var_b4soipditsd_rv;
+        *var_b4soipditsl_slot = var_b4soipditsl;
+        *var_b4soipditsl_rv_slot = var_b4soipditsl_rv;
+        *var_b4soipigcd_slot = var_b4soipigcd;
+        *var_b4soipigcd_rv_slot = var_b4soipigcd_rv;
+        *var_b4soipoxedge_slot = var_b4soipoxedge;
+        *var_b4soipoxedge_rv_slot = var_b4soipoxedge_rv;
+        *var_b4soirbody_slot = var_b4soirbody;
+        *var_b4soirbody_rv_slot = var_b4soirbody_rv;
+        *var_b4soirbsh_slot = var_b4soirbsh;
+        *var_b4soirbsh_rv_slot = var_b4soirbsh_rv;
+        *var_b4soirhalo_slot = var_b4soirhalo;
+        *var_b4soirhalo_rv_slot = var_b4soirhalo_rv;
+        *var_b4soirnoia_slot = var_b4soirnoia;
+        *var_b4soirnoia_rv_slot = var_b4soirnoia_rv;
+        *var_b4soisaref_slot = var_b4soisaref;
+        *var_b4soisaref_rv_slot = var_b4soisaref_rv;
+        *var_b4soisbref_slot = var_b4soisbref;
+        *var_b4soisbref_rv_slot = var_b4soisbref_rv;
+        *var_b4soisii0_slot = var_b4soisii0;
+        *var_b4soisii0_rv_slot = var_b4soisii0_rv;
+        *var_b4soisii1_slot = var_b4soisii1;
+        *var_b4soisii1_rv_slot = var_b4soisii1_rv;
+        *var_b4soisii2_slot = var_b4soisii2;
+        *var_b4soisii2_rv_slot = var_b4soisii2_rv;
+        *var_b4soisiid_slot = var_b4soisiid;
+        *var_b4soisiid_rv_slot = var_b4soisiid_rv;
+        *var_b4soisteta0_slot = var_b4soisteta0;
+        *var_b4soisteta0_rv_slot = var_b4soisteta0_rv;
+        *var_b4soisteta0cv_slot = var_b4soisteta0cv;
+        *var_b4soisteta0cv_rv_slot = var_b4soisteta0cv_rv;
+        *var_b4soistk2_slot = var_b4soistk2;
+        *var_b4soistk2_rv_slot = var_b4soistk2_rv;
+        *var_b4soitcjswg_slot = var_b4soitcjswg;
+        *var_b4soitcjswg_rv_slot = var_b4soitcjswg_rv;
+        *var_b4soitcjswgd_slot = var_b4soitcjswgd;
+        *var_b4soitcjswgd_rv_slot = var_b4soitcjswgd_rv;
+        *var_b4soitii_slot = var_b4soitii;
+        *var_b4soitii_rv_slot = var_b4soitii_rv;
+        *var_b4soitku0_slot = var_b4soitku0;
+        *var_b4soitku0_rv_slot = var_b4soitku0_rv;
+        *var_b4soitnoia_slot = var_b4soitnoia;
+        *var_b4soitnoia_rv_slot = var_b4soitnoia_rv;
+        *var_b4soitoxqm_slot = var_b4soitoxqm;
+        *var_b4soitoxqm_rv_slot = var_b4soitoxqm_rv;
+        *var_b4soitoxref_slot = var_b4soitoxref;
+        *var_b4soitoxref_rv_slot = var_b4soitoxref_rv;
+        *var_b4soitpbswg_slot = var_b4soitpbswg;
+        *var_b4soitpbswg_rv_slot = var_b4soitpbswg_rv;
+        *var_b4soitpbswgd_slot = var_b4soitpbswgd;
+        *var_b4soitpbswgd_rv_slot = var_b4soitpbswgd_rv;
+        *var_b4soitt_slot = var_b4soitt;
+        *var_b4soitt_rv_slot = var_b4soitt_rv;
+        *var_b4soitvbci_slot = var_b4soitvbci;
+        *var_b4soitvbci_rv_slot = var_b4soitvbci_rv;
+        *var_b4soivabjt_slot = var_b4soivabjt;
+        *var_b4soivabjt_rv_slot = var_b4soivabjt_rv;
+        *var_b4soivbci_slot = var_b4soivbci;
+        *var_b4soivbci_rv_slot = var_b4soivbci_rv;
+        *var_b4soivbsa_slot = var_b4soivbsa;
+        *var_b4soivbsa_rv_slot = var_b4soivbsa_rv;
+        *var_b4soivdsatii0_slot = var_b4soivdsatii0;
+        *var_b4soivdsatii0_rv_slot = var_b4soivdsatii0_rv;
+        *var_b4soivecb_slot = var_b4soivecb;
+        *var_b4soivecb_rv_slot = var_b4soivecb_rv;
+        *var_b4soivevb_slot = var_b4soivevb;
+        *var_b4soivevb_rv_slot = var_b4soivevb_rv;
+        *var_b4soivgb1_slot = var_b4soivgb1;
+        *var_b4soivgb1_rv_slot = var_b4soivgb1_rv;
+        *var_b4soivgb2_slot = var_b4soivgb2;
+        *var_b4soivgb2_rv_slot = var_b4soivgb2_rv;
+        *var_b4soivofffd_slot = var_b4soivofffd;
+        *var_b4soivofffd_rv_slot = var_b4soivofffd_rv;
+        *var_b4soivoxh_slot = var_b4soivoxh;
+        *var_b4soivoxh_rv_slot = var_b4soivoxh_rv;
+        *var_b4soivrec0_slot = var_b4soivrec0;
+        *var_b4soivrec0_rv_slot = var_b4soivrec0_rv;
+        *var_b4soivrec0d_slot = var_b4soivrec0d;
+        *var_b4soivrec0d_rv_slot = var_b4soivrec0d_rv;
+        *var_b4soivsdfb_slot = var_b4soivsdfb;
+        *var_b4soivsdfb_rv_slot = var_b4soivsdfb_rv;
+        *var_b4soivsdth_slot = var_b4soivsdth;
+        *var_b4soivsdth_rv_slot = var_b4soivsdth_rv;
+        *var_b4soivtun0_slot = var_b4soivtun0;
+        *var_b4soivtun0_rv_slot = var_b4soivtun0_rv;
+        *var_b4soivtun0d_slot = var_b4soivtun0d;
+        *var_b4soivtun0d_rv_slot = var_b4soivtun0d_rv;
+        *var_b4soiwint_slot = var_b4soiwint;
+        *var_b4soiwint_rv_slot = var_b4soiwint_rv;
+        *var_b4soiwl_slot = var_b4soiwl;
+        *var_b4soiwl_rv_slot = var_b4soiwl_rv;
+        *var_b4soiwlc_slot = var_b4soiwlc;
+        *var_b4soiwlc_rv_slot = var_b4soiwlc_rv;
+        *var_b4soiwln_slot = var_b4soiwln;
+        *var_b4soiwln_rv_slot = var_b4soiwln_rv;
+        *var_b4soiwlod_slot = var_b4soiwlod;
+        *var_b4soiwlod_rv_slot = var_b4soiwlod_rv;
+        *var_b4soiwlodku0_slot = var_b4soiwlodku0;
+        *var_b4soiwlodku0_rv_slot = var_b4soiwlodku0_rv;
+        *var_b4soiwlodvth_slot = var_b4soiwlodvth;
+        *var_b4soiwlodvth_rv_slot = var_b4soiwlodvth_rv;
+        *var_b4soiwr_slot = var_b4soiwr;
+        *var_b4soiwr_rv_slot = var_b4soiwr_rv;
+        *var_b4soiwth0_slot = var_b4soiwth0;
+        *var_b4soiwth0_rv_slot = var_b4soiwth0_rv;
+        *var_b4soiww_slot = var_b4soiww;
+        *var_b4soiww_rv_slot = var_b4soiww_rv;
+        *var_b4soiwwc_slot = var_b4soiwwc;
+        *var_b4soiwwc_rv_slot = var_b4soiwwc_rv;
+        *var_b4soiwwl_slot = var_b4soiwwl;
+        *var_b4soiwwl_rv_slot = var_b4soiwwl_rv;
+        *var_b4soiwwlc_slot = var_b4soiwwlc;
+        *var_b4soiwwlc_rv_slot = var_b4soiwwlc_rv;
+        *var_b4soiwwn_slot = var_b4soiwwn;
+        *var_b4soiwwn_rv_slot = var_b4soiwwn_rv;
     }
 }
