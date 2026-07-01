@@ -4931,6 +4931,59 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_pullup_lowers_to_xspice_pullup() {
+        let netlist = Netlist::parse(
+            "pspice u pullup\n\
+             U10 PULLUP $G_DPWR $G_DGND node\n\
+             .end\n",
+        )
+        .expect("PSpice PULLUP should lower to d_pullup");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U10")
+            .expect("U10 exists");
+
+        match &element.kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_pullup");
+                assert_eq!(ports, &[XspicePort::Digital("NODE".to_string())]);
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_pulldn_array_lowers_to_xspice_pulldowns() {
+        let netlist = Netlist::parse(
+            "pspice u pulldn array\n\
+             U11 PULLDN(2) $G_DPWR $G_DGND n1 n2\n\
+             .end\n",
+        )
+        .expect("PSpice PULLDN array should lower to d_pulldown");
+
+        assert_eq!(netlist.elements.len(), 2);
+        assert_eq!(netlist.elements[0].name, "U11_0");
+        assert_eq!(netlist.elements[1].name, "U11_1");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_pulldown");
+                assert_eq!(ports, &[XspicePort::Digital("N1".to_string())]);
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+        match &netlist.elements[1].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_pulldown");
+                assert_eq!(ports, &[XspicePort::Digital("N2".to_string())]);
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn pspice_u_inverter_lowers_to_scalar_xspice_ports() {
         let netlist = Netlist::parse(
             "pspice u inverter\n\

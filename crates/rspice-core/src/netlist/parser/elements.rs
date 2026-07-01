@@ -741,11 +741,27 @@ pub(super) fn parse_pspice_u_device(
             parse_pspice_u_tristate(&name, &fields, count.unwrap_or(1), true, line_num, elements)
         }
         "JKFF" => parse_pspice_u_jkff(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "PULLDN" | "PULLDOWN" => parse_pspice_u_pull(
+            &name,
+            &fields,
+            count.unwrap_or(1),
+            "d_pulldown",
+            line_num,
+            elements,
+        ),
+        "PULLUP" => parse_pspice_u_pull(
+            &name,
+            &fields,
+            count.unwrap_or(1),
+            "d_pullup",
+            line_num,
+            elements,
+        ),
         "SRFF" => parse_pspice_u_srlatch(&name, &fields, count.unwrap_or(1), line_num, elements),
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, SRFF, BUF3A, and INV3A",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, PULLUP, PULLDN, SRFF, BUF3A, and INV3A",
                 fields[1]
             ),
         }),
@@ -860,6 +876,45 @@ fn parse_pspice_u_dff(
             ports,
             pspice_u_timing.clone(),
         );
+    }
+
+    Ok(())
+}
+
+fn parse_pspice_u_pull(
+    name: &str,
+    fields: &[String],
+    count: usize,
+    model: &str,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    if count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice U-device '{}' type '{}' requires at least one pull device",
+                name, fields[1]
+            ),
+        });
+    }
+
+    let pins = &fields[4..];
+    if pins.len() < count {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice pull U-device '{}' requires {} output pin(s)",
+                name, count
+            ),
+        });
+    }
+
+    for (index, pin) in pins.iter().take(count).enumerate() {
+        let output =
+            pspice_u_required_digital_port(pin, "pull output", fields, line_num, elements)?;
+        let instance_name = pspice_u_lowered_instance_name(name, count, index);
+        push_pspice_u_xspice_element(elements, instance_name, model, vec![output]);
     }
 
     Ok(())
