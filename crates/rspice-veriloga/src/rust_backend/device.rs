@@ -24735,6 +24735,7 @@ fn residual_equation_local_variable_usage(
         if should_emit_compact_equation_stamp(
             artifact,
             equation,
+            variables,
             potential_branch_slots.current_slots(),
             equation_inline[index],
         )? {
@@ -25287,6 +25288,7 @@ fn emit_stamp_body(
             && should_emit_compact_equation_stamp(
                 artifact,
                 equation,
+                &variables,
                 potential_branch_slots.current_slots(),
                 equation_inline[index],
             )?
@@ -26282,6 +26284,7 @@ fn emit_fixed_sparse_reactive_potential_stamp(
 fn should_emit_compact_equation_stamp(
     artifact: &CanonicalIrArtifact,
     equation: &MirEquation,
+    variables: &HashMap<String, LoweredVariable>,
     branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
     force_inline: bool,
 ) -> Result<bool, RustBackendError> {
@@ -26293,8 +26296,53 @@ fn should_emit_compact_equation_stamp(
     if derivative_axis_count == 0 {
         return Ok(false);
     }
+    if expression_references_native_local_derivatives(
+        artifact,
+        equation.expression.id,
+        variables,
+        &mut HashSet::new(),
+    )? {
+        return Ok(false);
+    }
     Ok(expression_node_count(artifact, equation.expression.id)?
         >= COMPACT_EQUATION_EXPR_NODE_THRESHOLD)
+}
+
+fn expression_references_native_local_derivatives(
+    artifact: &CanonicalIrArtifact,
+    expr: ExprId,
+    variables: &HashMap<String, LoweredVariable>,
+    visited: &mut HashSet<ExprId>,
+) -> Result<bool, RustBackendError> {
+    if !visited.insert(expr) {
+        return Ok(false);
+    }
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(expr))
+        .ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("expression {expr} is outside MIR arena"),
+            )
+        })?;
+
+    if let HirExprKind::Identifier { name } = &expression.kind
+        && variables.get(name.as_str()).is_some_and(|variable| {
+            is_local_variable_storage(variable) && !lowered_variable_has_zero_derivatives(variable)
+        })
+    {
+        return Ok(true);
+    }
+
+    for child in expression_children(&expression.kind) {
+        if expression_references_native_local_derivatives(artifact, child, variables, visited)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn compact_ad_active_axes(

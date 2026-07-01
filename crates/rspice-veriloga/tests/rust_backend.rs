@@ -1606,8 +1606,11 @@ fn rust_backend_auto_materializes_local_derivatives_for_compact_ad_residuals() {
         "compact AD operands should keep native local derivative lanes:\n{stamp}"
     );
     assert!(
-        stamp.contains("A::from_derivatives(var_legacy, [var_legacy_dn0, var_legacy_dn1], [])"),
-        "compact AD should materialize native local derivatives directly instead of reading a scratch slot:\n{stamp}"
+        !stamp.contains("GenericAdValue")
+            && !stamp.contains("type A =")
+            && !stamp.contains("A::from_derivatives(var_legacy")
+            && !stamp.contains("AdValue::from_derivatives(var_legacy"),
+        "local-derivative residuals should stay on scalar lowering instead of rebuilding AdValue operands:\n{stamp}"
     );
     assert!(
         !stamp.contains("let s = match &mut self.scratch")
@@ -1738,6 +1741,12 @@ fn rust_backend_auto_transpiles_shipped_asmhemt_with_mixed_local_storage() {
     assert!(
         stamp.contains("let mut var_"),
         "ASM-HEMT should retain native local variables for selected scalar regions:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("GenericAdValue")
+            && !stamp.contains("type A =")
+            && !stamp.contains("from_derivatives("),
+        "ASM-HEMT should not rebuild native locals as compact AdValue operands:\n{stamp}"
     );
 }
 
