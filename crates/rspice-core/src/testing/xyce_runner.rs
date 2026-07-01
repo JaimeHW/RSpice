@@ -1100,7 +1100,7 @@ impl XyceTestRunner {
     fn dc_print_format_is_prn_compatible(format: &str) -> bool {
         matches!(
             format.to_ascii_lowercase().as_str(),
-            "std" | "touchstone" | "touchstone2"
+            "std" | "tecplot" | "touchstone" | "touchstone2"
         )
     }
 
@@ -1272,20 +1272,23 @@ impl XyceTestRunner {
         if mismatches.is_empty()
             && matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplotPrn)
         {
-            let side_mismatches = match self
-                .compare_gnuplot_splot_side_output(&plan, &netlist, &reference, &results)
-            {
-                Ok(mismatches) => mismatches,
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!("GNUPLOT/SPLOT side-output comparison error: {err}"),
-                        Vec::new(),
-                    );
-                }
-            };
+            let batches = [XyceDcResultBatch {
+                netlist: netlist.clone(),
+                results: results.clone(),
+            }];
+            let side_mismatches =
+                match self.compare_gnuplot_splot_side_output_batches(&plan, &batches) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("GNUPLOT/SPLOT side-output comparison error: {err}"),
+                            Vec::new(),
+                        );
+                    }
+                };
             if !side_mismatches.is_empty() {
                 return self.failure_result(
                     deck,
@@ -1345,28 +1348,46 @@ impl XyceTestRunner {
         }
     }
 
-    fn compare_gnuplot_splot_side_output(
+    fn compare_gnuplot_splot_side_output_batches(
         &self,
         plan: &XyceExecutionPlan,
-        netlist: &Netlist,
-        reference: &XycePrnTable,
-        results: &[DcSweepPointResult],
+        batches: &[XyceDcResultBatch],
     ) -> Result<Vec<XyceValueMismatch>, String> {
         let (_, side) = Self::gnuplot_splot_print_pair(&plan.source)?;
         if side.probes != plan.print.probes {
             return Err("SPLOT side-output probes differ from primary GNUPLOT probes".to_string());
         }
+        let file = side
+            .file
+            .as_deref()
+            .ok_or_else(|| "SPLOT side-output request has no FILE= target".to_string())?;
+        let side_reference_path =
+            Self::side_output_reference_candidate(&plan.reference_path, file)?;
+        let reference_path = if side_reference_path.is_file() {
+            side_reference_path
+        } else {
+            plan.reference_path.clone()
+        };
+        let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
+            format!(
+                "failed to parse SPLOT side-output oracle {}: {err}",
+                self.display_path(&reference_path)
+            )
+        })?;
         let side_print = XycePrintRequest {
             probes: side.probes,
         };
-        self.compare_dc_prn_reference(
-            reference,
+        let mut mismatches = self.compare_dc_prn_reference_batches(
+            &reference,
             &side_print,
-            netlist,
             &plan.source,
             &plan.dc,
-            results,
-        )
+            batches,
+        )?;
+        for mismatch in &mut mismatches {
+            mismatch.probe = format!("{file}:{}", mismatch.probe);
+        }
+        Ok(mismatches)
     }
 
     fn compare_prn_compatible_side_output_batches(
@@ -1425,6 +1446,20 @@ impl XyceTestRunner {
     }
 
     fn side_output_reference_path(reference_path: &Path, file: &str) -> Result<PathBuf, String> {
+        let candidate = Self::side_output_reference_candidate(reference_path, file)?;
+        if !candidate.is_file() {
+            return Err(format!(
+                "missing checked-in side-output oracle {}",
+                candidate.display()
+            ));
+        }
+        Ok(candidate)
+    }
+
+    fn side_output_reference_candidate(
+        reference_path: &Path,
+        file: &str,
+    ) -> Result<PathBuf, String> {
         let side_path = Path::new(file);
         if side_path.is_absolute() {
             return Err(format!(
@@ -1435,14 +1470,7 @@ impl XyceTestRunner {
         let parent = reference_path
             .parent()
             .ok_or_else(|| "primary reference path has no parent directory".to_string())?;
-        let candidate = parent.join(side_path);
-        if !candidate.is_file() {
-            return Err(format!(
-                "missing checked-in side-output oracle {}",
-                candidate.display()
-            ));
-        }
-        Ok(candidate)
+        Ok(parent.join(side_path))
     }
 
     fn run_static_prn_step_dc_plan(
