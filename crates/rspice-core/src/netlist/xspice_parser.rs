@@ -72,6 +72,14 @@ pub fn parse_xspice(
     loop {
         skip_xspice_mif_token_separators(stream);
 
+        if ports
+            .iter()
+            .any(|port| matches!(port, XspicePort::Analog(_)))
+            && consume_xspice_params_marker(stream)
+        {
+            continue;
+        }
+
         if is_xspice_null_token(stream.peek()) {
             stream.advance();
             ports.push(XspicePort::Null);
@@ -783,6 +791,33 @@ fn skip_xspice_mif_token_separators(stream: &mut TokenStream) {
         TokenKind::Comma | TokenKind::Equals | TokenKind::LParen | TokenKind::RParen
     ) {
         stream.advance();
+    }
+}
+
+fn consume_xspice_params_marker(stream: &mut TokenStream) -> bool {
+    let mut probe = stream.clone();
+
+    let TokenKind::Ident(marker) = &probe.peek().kind else {
+        return false;
+    };
+    let marker_without_colon = marker.strip_suffix(':').unwrap_or(marker);
+    if !marker_without_colon.eq_ignore_ascii_case("params") {
+        return false;
+    }
+
+    let marker_had_colon = marker.ends_with(':');
+    probe.advance();
+    if !marker_had_colon && matches!(probe.peek().kind, TokenKind::Other(':')) {
+        probe.advance();
+    }
+
+    if matches!(probe.peek().kind, TokenKind::Ident(_))
+        && matches!(probe.peek_n(1).kind, TokenKind::Equals)
+    {
+        *stream = probe;
+        true
+    } else {
+        false
     }
 }
 

@@ -2281,6 +2281,50 @@ mod tests {
     }
 
     #[test]
+    fn xspice_instance_params_accept_legacy_mif_params_marker() {
+        let netlist = Netlist::parse(
+            "xspice instance legacy MIF params marker\n\
+             A1 [a b] y d_and PARAMS: rise_delay=10n fall_delay=20n family=ttl\n\
+             .end\n",
+        )
+        .expect("XSPICE instance params accept legacy PARAMS marker");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                params,
+                string_params,
+                ..
+            } => {
+                assert_eq!(model, "D_AND");
+                assert_eq!(
+                    ports,
+                    &vec![
+                        XspicePort::DigitalVector(vec!["A".to_string(), "B".to_string()]),
+                        XspicePort::Analog("Y".to_string()),
+                    ]
+                );
+                assert_eq!(params.len(), 2);
+                assert!(params.iter().any(|(name, value)| {
+                    name.eq_ignore_ascii_case("rise_delay") && (*value - 10.0e-9).abs() < 1.0e-21
+                }));
+                assert!(params.iter().any(|(name, value)| {
+                    name.eq_ignore_ascii_case("fall_delay") && (*value - 20.0e-9).abs() < 1.0e-21
+                }));
+                assert_eq!(
+                    string_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("family"))
+                        .map(|(_, value)| value.as_str()),
+                    Some("ttl")
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn xspice_instance_contextual_model_param_keeps_numeric_selectors_numeric() {
         let netlist = Netlist::parse(
             "xspice instance contextual model param\n\
