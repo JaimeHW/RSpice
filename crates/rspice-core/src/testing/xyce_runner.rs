@@ -1955,7 +1955,7 @@ impl XyceTestRunner {
             return Ok(());
         }
         if let Some(element_name) = Self::parse_current_probe(normalized) {
-            if Self::source_is_voltage_source(netlist, &element_name) {
+            if Self::netlist_has_recorded_branch_current(netlist, &element_name) {
                 return Ok(());
             }
             if Self::source_is_current_source(netlist, &element_name) {
@@ -2098,7 +2098,7 @@ impl XyceTestRunner {
         }
 
         if let Some(element_name) = Self::parse_current_probe(normalized) {
-            if let Some(current) = result.branch_current_named(&element_name) {
+            if let Some(current) = Self::result_branch_current_named(result, &element_name) {
                 return Ok(current);
             }
             if let Some(current) =
@@ -3095,6 +3095,48 @@ impl XyceTestRunner {
             let normalized = Self::normalize_device_instance_name(node_name);
             (normalized != node_name).then(|| result.try_voltage_named(&normalized))?
         })
+    }
+
+    fn result_branch_current_named(
+        result: &crate::SimulationResult,
+        branch_name: &str,
+    ) -> Option<Value> {
+        result.branch_current_named(branch_name).or_else(|| {
+            let normalized = Self::normalize_device_instance_name(branch_name);
+            (normalized != branch_name).then(|| result.branch_current_named(&normalized))?
+        })
+    }
+
+    fn netlist_has_recorded_branch_current(netlist: &Netlist, source: &str) -> bool {
+        if Self::elements_have_recorded_branch_current(&netlist.elements, source) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            Self::elements_have_recorded_branch_current(&flattened.elements, source)
+        })
+    }
+
+    fn elements_have_recorded_branch_current(
+        elements: &[crate::netlist::Element],
+        source: &str,
+    ) -> bool {
+        elements.iter().any(|element| {
+            Self::device_instance_names_match(&element.name, source)
+                && Self::element_has_recorded_branch_current(&element.kind)
+        })
+    }
+
+    fn element_has_recorded_branch_current(kind: &ElementKind) -> bool {
+        matches!(
+            kind,
+            ElementKind::VoltageSource(_)
+                | ElementKind::Inductor { .. }
+                | ElementKind::JilesAthertonInductor { .. }
+                | ElementKind::Vcvs { .. }
+                | ElementKind::Ccvs { .. }
+                | ElementKind::BehavioralVoltage { .. }
+        )
     }
 
     fn source_is_voltage_source(netlist: &Netlist, source: &str) -> bool {
