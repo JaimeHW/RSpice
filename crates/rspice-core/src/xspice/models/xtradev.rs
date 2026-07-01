@@ -118,10 +118,10 @@ struct CoreTable {
     strictly_increasing_h: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CoreTableSignature {
-    h_values: Vec<Value>,
-    b_values: Vec<Value>,
+    h_revision: Option<u64>,
+    b_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -1348,14 +1348,13 @@ fn core_length(ctx: &CmContext) -> CmResult<Value> {
 
 fn core_table_signature(ctx: &CmContext) -> CoreTableSignature {
     CoreTableSignature {
-        h_values: ctx.real_vector_param("h_array").unwrap_or(&[]).to_vec(),
-        b_values: ctx.real_vector_param("b_array").unwrap_or(&[]).to_vec(),
+        h_revision: ctx.real_vector_param_revision("h_array"),
+        b_revision: ctx.real_vector_param_revision("b_array"),
     }
 }
 
 fn core_table_signature_matches(ctx: &CmContext, signature: &CoreTableSignature) -> bool {
-    ctx.real_vector_param("h_array").unwrap_or(&[]) == signature.h_values.as_slice()
-        && ctx.real_vector_param("b_array").unwrap_or(&[]) == signature.b_values.as_slice()
+    core_table_signature(ctx) == *signature
 }
 
 fn core_table_from_points(points: Vec<CorePoint>) -> CoreTable {
@@ -3652,6 +3651,11 @@ mod tests {
         assert!(Arc::ptr_eq(&first, &second));
         assert!(first.strictly_increasing_h);
         assert_eq!(first.midpoints, vec![0.5, 1.5]);
+
+        ctx.set_real_vector_param("unrelated", vec![9.0, 10.0]);
+        let after_unrelated =
+            cache_core_table(&mut ctx).expect("unrelated vector preserves core table");
+        assert!(Arc::ptr_eq(&first, &after_unrelated));
 
         ctx.set_real_vector_param("b_array", vec![0.0, 2.0, 8.0]);
         let updated = cache_core_table(&mut ctx).expect("updated core table caches");
