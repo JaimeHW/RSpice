@@ -519,7 +519,83 @@ impl Engine {
         circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
         result.record_digital_snapshot(resume_time, &digital_snapshot, &mut digital_trace_indices);
         let mut t = resume_time;
-        let voltage_lte_excluded_nodes = circuit.xspice_transient_voltage_lte_excluded_nodes();
+        let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
+        let mut voltage_lte_excluded_nodes = circuit.xspice_transient_voltage_lte_excluded_nodes();
+        let mut solution_lte_excluded = vec![false; size];
+        fn mark_voltage_lte_excluded(mask: &mut [bool], node: usize) {
+            if node == 0 {
+                return;
+            }
+            if let Some(slot) = mask.get_mut(node - 1) {
+                *slot = true;
+            }
+        }
+        for &idx in &voltage_lte_excluded_nodes {
+            if let Some(slot) = solution_lte_excluded.get_mut(idx) {
+                *slot = true;
+            }
+        }
+        for idx in 0..circuit.voltage_sources.len() {
+            mark_voltage_lte_excluded(
+                &mut solution_lte_excluded,
+                circuit.voltage_sources.node_pos[idx],
+            );
+            mark_voltage_lte_excluded(
+                &mut solution_lte_excluded,
+                circuit.voltage_sources.node_neg[idx],
+            );
+        }
+        for idx in 0..circuit.vcvs.len() {
+            mark_voltage_lte_excluded(&mut solution_lte_excluded, circuit.vcvs.node_pos[idx]);
+            mark_voltage_lte_excluded(&mut solution_lte_excluded, circuit.vcvs.node_neg[idx]);
+        }
+        for idx in 0..circuit.ccvs.len() {
+            mark_voltage_lte_excluded(&mut solution_lte_excluded, circuit.ccvs.node_pos[idx]);
+            mark_voltage_lte_excluded(&mut solution_lte_excluded, circuit.ccvs.node_neg[idx]);
+        }
+        for source in &circuit.behavioral_sources.voltage_sources {
+            if !source.excludes_output_from_transient_voltage_lte() {
+                continue;
+            }
+            for node in [source.node_pos, source.node_neg] {
+                mark_voltage_lte_excluded(&mut solution_lte_excluded, node);
+            }
+        }
+        let mut propagated_behavioral_exclusion = true;
+        while propagated_behavioral_exclusion {
+            propagated_behavioral_exclusion = false;
+            for source in &circuit.behavioral_sources.voltage_sources {
+                let bound_indices: Vec<usize> = source.bound_solution_indices().collect();
+                if bound_indices.is_empty()
+                    || !bound_indices
+                        .iter()
+                        .all(|idx| solution_lte_excluded.get(*idx).copied().unwrap_or(false))
+                {
+                    continue;
+                }
+
+                for node in [source.node_pos, source.node_neg] {
+                    let Some(idx) = node.checked_sub(1) else {
+                        continue;
+                    };
+                    if let Some(slot) = solution_lte_excluded.get_mut(idx)
+                        && !*slot
+                    {
+                        *slot = true;
+                        propagated_behavioral_exclusion = true;
+                    }
+                }
+            }
+        }
+        voltage_lte_excluded_nodes.extend(
+            solution_lte_excluded
+                .iter()
+                .take(num_nodes)
+                .enumerate()
+                .filter_map(|(idx, excluded)| (*excluded).then_some(idx)),
+        );
+        voltage_lte_excluded_nodes.sort_unstable();
+        voltage_lte_excluded_nodes.dedup();
 
         // Grid-locked stepping: the accepted times are exactly the
         // configured grid (filtered to points after the start), the dt
@@ -643,7 +719,6 @@ impl Engine {
         let mut ekv26_history = Self::initialize_ekv26_history(&circuit, &solution);
         ekv26_history.accepted_dt_prev = hinted_max_step;
         ekv26_history.accepted_dt_prev_prev = hinted_max_step;
-        let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let ideal_output_pairs = circuit.ideal_voltage_output_pairs();
 
         // ngspice keeps `CKTgmin` live in every analysis mode: the compact

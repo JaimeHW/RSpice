@@ -181,6 +181,10 @@ impl CodeModel for Gain {
             Vec::new()
         }
     }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
+    }
 }
 
 //=============================================================================
@@ -316,6 +320,10 @@ impl CodeModel for Summer {
                 )
             })
             .collect()
+    }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
     }
 }
 
@@ -481,6 +489,10 @@ impl CodeModel for Multiplier {
             return Vec::new();
         };
         mult_partials_from_transfer(transfer.as_ref())
+    }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
     }
 }
 
@@ -819,6 +831,10 @@ impl CodeModel for Divider {
             ("den".to_string(), transfer.den_partial),
         ]
     }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1068,6 +1084,10 @@ impl CodeModel for Limiter {
             Vec::new()
         }
     }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1265,6 +1285,10 @@ impl CodeModel for ControlledLimiter {
         } else {
             Vec::new()
         }
+    }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
     }
 }
 

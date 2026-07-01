@@ -1037,6 +1037,10 @@ impl CodeModel for DacBridge {
 
         Ok(())
     }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
+    }
 }
 
 impl CodeModel for BidiBridge {

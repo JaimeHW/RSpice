@@ -5,7 +5,9 @@
 //! evaluation in the Newton-Raphson loop.
 
 use crate::Value;
-use crate::expr::{CompiledExpr, Context, Vm, compile, parse_expression_strict};
+use crate::expr::{
+    BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile, parse_expression_strict,
+};
 use crate::solver::StaticMatrix;
 
 const DERIVATIVE_REL_STEP: Value = 1e-6;
@@ -40,6 +42,8 @@ pub struct BehavioralVoltageSource {
     branch_partials: Vec<Value>,
     /// Circuit temperature in degrees Celsius, surfaced as `temper`.
     temperature: Value,
+    /// True when the expression can jump discontinuously as its inputs cross a predicate.
+    transient_voltage_lte_excluded: bool,
 }
 
 impl BehavioralVoltageSource {
@@ -53,6 +57,8 @@ impl BehavioralVoltageSource {
     ) -> Result<Self, String> {
         let ast = parse_expression_strict(expression)
             .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
+        let transient_voltage_lte_excluded =
+            expression_has_discontinuous_output_for_voltage_lte(&ast);
         let program = compile(&ast);
 
         Ok(Self {
@@ -71,6 +77,7 @@ impl BehavioralVoltageSource {
             temperature: crate::analysis::temperature::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
+            transient_voltage_lte_excluded,
         })
     }
 
@@ -144,6 +151,11 @@ impl BehavioralVoltageSource {
             .iter()
             .chain(self.branch_bindings.iter())
             .filter_map(|binding| *binding)
+    }
+
+    #[inline]
+    pub(crate) fn excludes_output_from_transient_voltage_lte(&self) -> bool {
+        self.transient_voltage_lte_excluded
     }
 
     #[inline]
@@ -315,6 +327,54 @@ impl BehavioralVoltageSource {
 
         // RHS: branch equation
         rhs[br - 1] = v_affine;
+    }
+}
+
+fn expression_has_discontinuous_output_for_voltage_lte(expr: &Expr) -> bool {
+    match expr {
+        Expr::Const(_)
+        | Expr::NodeVoltage(_)
+        | Expr::BranchCurrent(_)
+        | Expr::Time
+        | Expr::Frequency
+        | Expr::Temperature => false,
+        Expr::Unary { op, operand } => {
+            matches!(op, UnaryOp::Not)
+                || expression_has_discontinuous_output_for_voltage_lte(operand)
+        }
+        Expr::Binary { op, left, right } => {
+            matches!(
+                op,
+                BinaryOp::Lt
+                    | BinaryOp::Le
+                    | BinaryOp::Gt
+                    | BinaryOp::Ge
+                    | BinaryOp::Eq
+                    | BinaryOp::Ne
+                    | BinaryOp::And
+                    | BinaryOp::Or
+            ) || expression_has_discontinuous_output_for_voltage_lte(left)
+                || expression_has_discontinuous_output_for_voltage_lte(right)
+        }
+        Expr::Function { func, args } => {
+            matches!(
+                func,
+                Function::Floor
+                    | Function::Ceil
+                    | Function::Round
+                    | Function::Sign
+                    | Function::Stp
+                    | Function::Eq0
+                    | Function::Ne0
+                    | Function::Gt0
+                    | Function::Lt0
+                    | Function::Ge0
+                    | Function::Le0
+                    | Function::If
+            ) || args
+                .iter()
+                .any(expression_has_discontinuous_output_for_voltage_lte)
+        }
     }
 }
 
