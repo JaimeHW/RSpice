@@ -1944,6 +1944,9 @@ impl XyceTestRunner {
                 }
                 _ => {}
             }
+            if Self::model_parameter_probe_is_supported(netlist, &element_name, &parameter) {
+                return Ok(());
+            }
             return Err(format!(
                 "device parameter probe '{}' targets an unsupported parameter",
                 original
@@ -2584,11 +2587,110 @@ impl XyceTestRunner {
                     element_name
                 )
             }),
-            _ => Err(format!(
-                "device parameter probe '{}:{}' is not supported",
-                element_name, parameter
-            )),
+            _ => Self::evaluate_model_parameter_probe(
+                netlist,
+                dc,
+                sweep_point,
+                element_name,
+                parameter,
+            )
+            .unwrap_or_else(|| {
+                Err(format!(
+                    "device parameter probe '{}:{}' is not supported",
+                    element_name, parameter
+                ))
+            }),
         }
+    }
+
+    fn model_parameter_probe_is_supported(
+        netlist: &Netlist,
+        model_name: &str,
+        parameter: &str,
+    ) -> bool {
+        Self::models_have_parameter_probe(&netlist.models, model_name, parameter)
+            || crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+                Self::models_have_parameter_probe(&flattened.scoped_models, model_name, parameter)
+            })
+    }
+
+    fn models_have_parameter_probe(
+        models: &[crate::netlist::ModelDef],
+        model_name: &str,
+        parameter: &str,
+    ) -> bool {
+        Self::find_model(models, model_name).is_some_and(|model| {
+            model
+                .params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case(parameter))
+                || model
+                    .expr_params
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(parameter))
+        })
+    }
+
+    fn evaluate_model_parameter_probe(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        model_name: &str,
+        parameter: &str,
+    ) -> Option<Result<Value, String>> {
+        Self::model_parameter_probe_value(
+            &netlist.models,
+            netlist,
+            dc,
+            sweep_point,
+            model_name,
+            parameter,
+        )
+        .or_else(|| {
+            let flattened = crate::netlist::flatten_netlist_with_models(netlist).ok()?;
+            Self::model_parameter_probe_value(
+                &flattened.scoped_models,
+                netlist,
+                dc,
+                sweep_point,
+                model_name,
+                parameter,
+            )
+        })
+    }
+
+    fn model_parameter_probe_value(
+        models: &[crate::netlist::ModelDef],
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        model_name: &str,
+        parameter: &str,
+    ) -> Option<Result<Value, String>> {
+        let model = Self::find_model(models, model_name)?;
+        if let Some((_, value)) = model
+            .params
+            .iter()
+            .rev()
+            .find(|(name, _)| name.eq_ignore_ascii_case(parameter))
+        {
+            return Some(Ok(*value));
+        }
+
+        model
+            .expr_params
+            .iter()
+            .rev()
+            .find(|(name, _)| name.eq_ignore_ascii_case(parameter))
+            .map(|(_, expression)| {
+                let context = Self::print_eval_context(netlist, Some(dc), Some(sweep_point));
+                crate::netlist::expr::eval_expression(expression, &context).map_err(|err| {
+                    format!(
+                        "failed to evaluate model parameter probe '{}:{}': {err}",
+                        model_name, parameter
+                    )
+                })
+            })
     }
 
     fn bare_device_parameter_probe_is_supported(netlist: &Netlist, probe: &str) -> bool {
