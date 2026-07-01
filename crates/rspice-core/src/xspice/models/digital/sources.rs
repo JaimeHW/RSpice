@@ -451,6 +451,8 @@ struct DStateTransition {
     state: i64,
     outputs: Vec<DigitalValue>,
     inputs: Vec<Option<bool>>,
+    input_mask: u64,
+    input_bits: u64,
     next_state: i64,
 }
 
@@ -550,6 +552,25 @@ fn parse_d_state_input_code(state_file: &str, line: usize, token: &str) -> CmRes
             format!("invalid input token '{token}'"),
         )),
     }
+}
+
+fn d_state_input_pattern_masks(inputs: &[Option<bool>]) -> (u64, u64) {
+    if inputs.len() > 64 {
+        return (0, 0);
+    }
+
+    let mut mask = 0;
+    let mut bits = 0;
+    for (index, input) in inputs.iter().enumerate() {
+        if let Some(value) = input {
+            let bit = 1_u64 << index;
+            mask |= bit;
+            if *value {
+                bits |= bit;
+            }
+        }
+    }
+    (mask, bits)
 }
 
 fn parse_d_state_i64(state_file: &str, line: usize, token: &str) -> CmResult<i64> {
@@ -678,10 +699,13 @@ fn parse_d_state_contents(
             });
         }
         let next_state = parse_d_state_i64(state_file, line_no, tokens[next_idx])?;
+        let (input_mask, input_bits) = d_state_input_pattern_masks(&inputs);
         transitions.push(DStateTransition {
             state,
             outputs,
             inputs,
+            input_mask,
+            input_bits,
             next_state,
         });
     }
@@ -814,20 +838,53 @@ fn d_state_outputs(table: &DStateTable, state: i64) -> Option<&[DigitalValue]> {
         .map(|row| row.outputs.as_slice())
 }
 
+fn d_state_input_value_masks(inputs: &[DigitalValue]) -> Option<(u64, u64)> {
+    if inputs.len() > 64 {
+        return None;
+    }
+
+    let mut known_mask = 0;
+    let mut bits = 0;
+    for (index, input) in inputs.iter().enumerate() {
+        if let Some(value) = d_state_logic(*input) {
+            let bit = 1_u64 << index;
+            known_mask |= bit;
+            if value {
+                bits |= bit;
+            }
+        }
+    }
+    Some((known_mask, bits))
+}
+
+fn d_state_transition_matches(
+    row: &DStateTransition,
+    inputs: &[DigitalValue],
+    input_masks: Option<(u64, u64)>,
+) -> bool {
+    if inputs.len() >= row.inputs.len()
+        && let Some((known_mask, input_bits)) = input_masks
+    {
+        return (known_mask & row.input_mask) == row.input_mask
+            && (input_bits & row.input_mask) == row.input_bits;
+    }
+
+    row.inputs
+        .iter()
+        .zip(inputs.iter())
+        .all(|(pattern, value)| {
+            pattern.is_none_or(|expected| d_state_logic(*value) == Some(expected))
+        })
+}
+
 fn d_state_next(table: &DStateTable, state: i64, inputs: &[DigitalValue]) -> Option<i64> {
     let (start, end) = d_state_contiguous_range(table, state)?;
+    let input_masks = d_state_input_value_masks(inputs);
     table
         .transitions
         .get(start..=end)?
         .iter()
-        .find(|row| {
-            row.inputs
-                .iter()
-                .zip(inputs.iter())
-                .all(|(pattern, value)| {
-                    pattern.is_none_or(|expected| d_state_logic(*value) == Some(expected))
-                })
-        })
+        .find(|row| d_state_transition_matches(row, inputs, input_masks))
         .map(|row| row.next_state)
 }
 
@@ -1398,6 +1455,47 @@ mod tests {
             d_state_outputs(&table, 2),
             Some(&[DigitalValue::one()][..]),
             "missing states keep ngspice's first-row fallback"
+        );
+
+        unregister_test_data_file(state_file);
+    }
+
+    #[test]
+    fn d_state_cached_input_masks_match_wildcards_and_unknowns() {
+        let _guard = data_file_test_guard();
+        let state_file = "virtual://d_state/masked-inputs";
+        unregister_test_data_file(state_file);
+        data_file::register_data_file(state_file, "0 0s 1 x -> 1\n1 1 -> 2\nx x -> 3\n")
+            .expect("register virtual d_state table");
+
+        let table = parse_d_state_file(state_file, 2, 1).expect("state table parses");
+
+        assert_eq!(table.transitions[0].input_mask, 0b01);
+        assert_eq!(table.transitions[0].input_bits, 0b01);
+        assert_eq!(table.transitions[1].input_mask, 0b11);
+        assert_eq!(table.transitions[1].input_bits, 0b11);
+        assert_eq!(table.transitions[2].input_mask, 0);
+        assert_eq!(table.transitions[2].input_bits, 0);
+
+        assert_eq!(
+            d_state_next(&table, 0, &[DigitalValue::one(), DigitalValue::unknown()]),
+            Some(1),
+            "wildcard columns must ignore unknown input values"
+        );
+        assert_eq!(
+            d_state_next(&table, 0, &[DigitalValue::unknown(), DigitalValue::one()]),
+            Some(3),
+            "unknown required inputs must not satisfy a concrete pattern"
+        );
+        assert_eq!(
+            d_state_next(&table, 0, &[DigitalValue::one(), DigitalValue::one()]),
+            Some(1),
+            "mask matching must preserve first-row transition priority"
+        );
+        assert_eq!(
+            d_state_next(&table, 0, &[DigitalValue::one()]),
+            Some(1),
+            "short direct-call inputs keep the legacy zip-based fallback semantics"
         );
 
         unregister_test_data_file(state_file);
