@@ -7,6 +7,7 @@ const D_LUT_INITIAL_STATE: i64 = i64::MIN;
 const D_LOOKUP_DELAY_MIN: Value = 1.0e-12;
 const D_LUT_TABLE_RESOURCE: &str = "xspice.d_lut.table_values";
 const D_GENLUT_TABLE_RESOURCE: &str = "xspice.d_genlut.table_values";
+const D_GENLUT_DELAY_PLAN_RESOURCE: &str = "xspice.d_genlut.delay_plan";
 
 #[derive(Debug, Default)]
 pub struct DigitalLookupTable;
@@ -18,6 +19,23 @@ pub struct DigitalGenericLookupTable;
 struct DLookupTableBytes {
     table_revision: u64,
     bytes: Arc<[u8]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DGenlutDelaySignature {
+    input_width: usize,
+    output_width: usize,
+    rise_revision: u64,
+    fall_revision: u64,
+    input_revision: u64,
+}
+
+#[derive(Debug, Clone)]
+struct DGenlutDelayPlan {
+    signature: DGenlutDelaySignature,
+    rise_delays: Arc<[Value]>,
+    fall_delays: Arc<[Value]>,
+    input_delays: Arc<[Value]>,
 }
 
 fn d_lut_error(message: impl Into<String>) -> CmError {
@@ -64,6 +82,64 @@ fn d_lookup_table_bytes(ctx: &mut CmContext, resource_key: &str) -> CmResult<Arc
         }),
     );
     Ok(bytes)
+}
+
+fn d_genlut_delay_signature(
+    ctx: &CmContext,
+    input_width: usize,
+    output_width: usize,
+) -> DGenlutDelaySignature {
+    DGenlutDelaySignature {
+        input_width,
+        output_width,
+        rise_revision: ctx.real_vector_param_revision("rise_delay").unwrap_or(0),
+        fall_revision: ctx.real_vector_param_revision("fall_delay").unwrap_or(0),
+        input_revision: ctx.real_vector_param_revision("input_delay").unwrap_or(0),
+    }
+}
+
+fn d_genlut_expand_param_values(
+    ctx: &CmContext,
+    name: &str,
+    width: usize,
+    default: Value,
+    clamp_delay: bool,
+) -> Arc<[Value]> {
+    let values = ctx.real_vector_param(name).unwrap_or(&[]);
+    let fallback = values.last().copied().unwrap_or(default);
+    (0..width)
+        .map(|index| {
+            let value = values.get(index).copied().unwrap_or(fallback);
+            if clamp_delay {
+                d_lookup_delay(value)
+            } else {
+                value
+            }
+        })
+        .collect::<Vec<_>>()
+        .into()
+}
+
+fn d_genlut_delay_plan(
+    ctx: &mut CmContext,
+    input_width: usize,
+    output_width: usize,
+) -> Arc<DGenlutDelayPlan> {
+    let signature = d_genlut_delay_signature(ctx, input_width, output_width);
+    if let Some(resource) = ctx.resource::<DGenlutDelayPlan>(D_GENLUT_DELAY_PLAN_RESOURCE)
+        && resource.signature == signature
+    {
+        return resource;
+    }
+
+    let plan = Arc::new(DGenlutDelayPlan {
+        signature,
+        rise_delays: d_genlut_expand_param_values(ctx, "rise_delay", output_width, 1.0e-9, true),
+        fall_delays: d_genlut_expand_param_values(ctx, "fall_delay", output_width, 1.0e-9, true),
+        input_delays: d_genlut_expand_param_values(ctx, "input_delay", input_width, 0.0, false),
+    });
+    ctx.set_resource(D_GENLUT_DELAY_PLAN_RESOURCE, Arc::clone(&plan));
+    plan
 }
 
 fn d_lut_table_state(table: &[u8], index: usize) -> DigitalState {
@@ -160,25 +236,19 @@ fn d_lookup_delay(value: Value) -> Value {
     value.max(D_LOOKUP_DELAY_MIN)
 }
 
-fn d_genlut_delay_param_value(ctx: &CmContext, name: &str, index: usize, default: Value) -> Value {
-    d_lookup_delay(d_genlut_param_value(ctx, name, index, default))
-}
-
 fn d_genlut_output_delay(
     ctx: &CmContext,
+    delay_plan: &DGenlutDelayPlan,
     output_index: usize,
     new_state: i64,
     previous_state: i64,
     input_delay: Value,
 ) -> Value {
-    let default = 1.0e-9;
     let edge_delay = match new_state {
-        0 => d_genlut_delay_param_value(ctx, "fall_delay", output_index, default),
-        1 => d_genlut_delay_param_value(ctx, "rise_delay", output_index, default),
-        _ if previous_state == 0 => {
-            d_genlut_delay_param_value(ctx, "rise_delay", output_index, default)
-        }
-        _ => d_genlut_delay_param_value(ctx, "fall_delay", output_index, default),
+        0 => delay_plan.fall_delays[output_index],
+        1 => delay_plan.rise_delays[output_index],
+        _ if previous_state == 0 => delay_plan.rise_delays[output_index],
+        _ => delay_plan.fall_delays[output_index],
     };
 
     if ctx.time == 0.0 || previous_state == D_LUT_INITIAL_STATE {
@@ -190,25 +260,25 @@ fn d_genlut_output_delay(
 
 fn d_genlut_strength_delay(
     ctx: &CmContext,
+    delay_plan: &DGenlutDelayPlan,
     output_index: usize,
     new_strength: i64,
     previous_state: i64,
 ) -> Value {
-    let default = 1.0e-9;
     if ctx.time == 0.0 || previous_state == D_LUT_INITIAL_STATE {
         return 0.0;
     }
 
     if new_strength == 3 {
         if previous_state == 0 {
-            d_genlut_delay_param_value(ctx, "fall_delay", output_index, default)
+            delay_plan.fall_delays[output_index]
         } else {
-            d_genlut_delay_param_value(ctx, "rise_delay", output_index, default)
+            delay_plan.rise_delays[output_index]
         }
     } else if previous_state == 0 {
-        d_genlut_delay_param_value(ctx, "rise_delay", output_index, default)
+        delay_plan.rise_delays[output_index]
     } else {
-        d_genlut_delay_param_value(ctx, "fall_delay", output_index, default)
+        delay_plan.fall_delays[output_index]
     }
 }
 
@@ -242,6 +312,17 @@ fn d_genlut_scan_inputs(
     input_width: usize,
     input_start: usize,
 ) -> DGenlutInputScan {
+    let input_delays = d_genlut_expand_param_values(ctx, "input_delay", input_width, 0.0, false);
+    d_genlut_scan_inputs_with_delays(ctx, inputs, input_width, input_start, &input_delays)
+}
+
+fn d_genlut_scan_inputs_with_delays(
+    ctx: &CmContext,
+    inputs: &[DigitalValue],
+    input_width: usize,
+    input_start: usize,
+    input_delays: &[Value],
+) -> DGenlutInputScan {
     let mut max_delay = 0.0;
     let mut index = Some(0usize);
     let mut one_bits = 0usize;
@@ -251,10 +332,7 @@ fn d_genlut_scan_inputs(
         let input = inputs.get(bit).copied().unwrap_or_default();
         let input_code = d_lut_state_code(input.state);
         if input_code != ctx.int_state(input_start + bit) {
-            max_delay = f64::max(
-                max_delay,
-                d_genlut_param_value(ctx, "input_delay", bit, 0.0),
-            );
+            max_delay = f64::max(max_delay, input_delays.get(bit).copied().unwrap_or(0.0));
         }
         let bit_mask = 1usize << bit;
         match input.state.logic_level() {
@@ -456,13 +534,20 @@ impl CodeModel for DigitalGenericLookupTable {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let (input_width, output_width) = d_genlut_shape(ctx)?;
         let table = d_lookup_table_bytes(ctx, D_GENLUT_TABLE_RESOURCE)?;
+        let delay_plan = d_genlut_delay_plan(ctx, input_width, output_width);
         let input_start = d_genlut_previous_input_start(input_width, output_width);
         let state_start = d_genlut_previous_state_start(input_width, output_width);
         let strength_start = d_genlut_previous_strength_start(input_width, output_width);
 
         let scan = {
             let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
-            d_genlut_scan_inputs(ctx, inputs, input_width, input_start)
+            d_genlut_scan_inputs_with_delays(
+                ctx,
+                inputs,
+                input_width,
+                input_start,
+                &delay_plan.input_delays,
+            )
         };
         d_genlut_commit_input_scan(ctx, input_width, input_start, scan);
 
@@ -485,6 +570,7 @@ impl CodeModel for DigitalGenericLookupTable {
                     value,
                     d_genlut_output_delay(
                         ctx,
+                        &delay_plan,
                         output_index,
                         state_code,
                         previous_state,
@@ -496,7 +582,13 @@ impl CodeModel for DigitalGenericLookupTable {
                     "out",
                     output_index,
                     value,
-                    d_genlut_strength_delay(ctx, output_index, strength_code, previous_state),
+                    d_genlut_strength_delay(
+                        ctx,
+                        &delay_plan,
+                        output_index,
+                        strength_code,
+                        previous_state,
+                    ),
                 );
             }
 
