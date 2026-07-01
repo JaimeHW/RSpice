@@ -216,6 +216,7 @@ impl XyceBaselineFamilyKind {
 enum XyceStaticDcContract {
     PlainStaticPrn,
     WrapperDefaultPrn,
+    WrapperGnuplotSplotPrn,
     WrapperHspiceMathPrn,
     WrapperResistorDefaultPrn,
     WrapperVoltageAccessorPrn,
@@ -228,6 +229,8 @@ impl XyceStaticDcContract {
             (Self::PlainStaticPrn, true) => "static_prn_step_dc",
             (Self::WrapperDefaultPrn, false) => "wrapper_static_prn_dc",
             (Self::WrapperDefaultPrn, true) => "wrapper_static_prn_step_dc",
+            (Self::WrapperGnuplotSplotPrn, false) => "wrapper_gnuplot_splot_prn_dc",
+            (Self::WrapperGnuplotSplotPrn, true) => "wrapper_gnuplot_splot_prn_step_dc",
             (Self::WrapperHspiceMathPrn, false) => "wrapper_hspice_math_prn_dc",
             (Self::WrapperHspiceMathPrn, true) => "wrapper_hspice_math_prn_step_dc",
             (Self::WrapperResistorDefaultPrn, false) => "wrapper_resistor_default_prn_dc",
@@ -244,6 +247,13 @@ impl XyceStaticDcContract {
 
 #[derive(Debug, Clone)]
 struct XycePrintRequest {
+    probes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XycePrintOutputRequest {
+    format: Option<String>,
+    file: Option<String>,
     probes: Vec<String>,
 }
 
@@ -857,6 +867,10 @@ impl XyceTestRunner {
         deck_path: &Path,
         source: &str,
     ) -> Result<XyceStaticDcContract, String> {
+        if Self::is_native_gnuplot_splot_wrapper_candidate(source) {
+            return Ok(XyceStaticDcContract::WrapperGnuplotSplotPrn);
+        }
+
         if Self::is_native_default_prn_wrapper_candidate_path(relative_path) {
             Self::validate_default_prn_wrapper_source(source)?;
             return Ok(XyceStaticDcContract::WrapperDefaultPrn);
@@ -925,6 +939,18 @@ impl XyceTestRunner {
             }
         }
         has_data_table && has_step_data
+    }
+
+    fn is_native_gnuplot_splot_wrapper_candidate(source: &str) -> bool {
+        if Self::wrapper_source_has_extra_output_analysis(source)
+            || Self::source_has_step_command(source)
+        {
+            return false;
+        }
+        let Ok((primary, side)) = Self::gnuplot_splot_print_pair(source) else {
+            return false;
+        };
+        primary.probes == side.probes
     }
 
     fn is_native_empty_wildcard_lead_current_wrapper_candidate(
@@ -1109,6 +1135,25 @@ impl XyceTestRunner {
         )
     }
 
+    fn wrapper_source_has_extra_output_analysis(source: &str) -> bool {
+        Self::logical_netlist_lines(source).into_iter().any(|line| {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            let Some(command) = trimmed.split_whitespace().next() else {
+                return false;
+            };
+            Self::is_extra_wrapper_output_analysis_command(command)
+        })
+    }
+
+    fn source_has_step_command(source: &str) -> bool {
+        Self::logical_netlist_lines(source).into_iter().any(|line| {
+            Self::strip_netlist_comment(&line)
+                .split_whitespace()
+                .next()
+                .is_some_and(|command| command.eq_ignore_ascii_case(".step"))
+        })
+    }
+
     fn run_static_prn_dc_plan(
         &self,
         deck: &XyceDeck,
@@ -1217,6 +1262,37 @@ impl XyceTestRunner {
             }
         };
 
+        if mismatches.is_empty()
+            && matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplotPrn)
+        {
+            let side_mismatches = match self
+                .compare_gnuplot_splot_side_output(&plan, &netlist, &reference, &results)
+            {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("GNUPLOT/SPLOT side-output comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            if !side_mismatches.is_empty() {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "{} Xyce GNUPLOT/SPLOT side-output mismatch(es)",
+                        side_mismatches.len()
+                    ),
+                    side_mismatches,
+                );
+            }
+        }
+
         if mismatches.is_empty() {
             self.passed_result(deck, start, contract)
         } else {
@@ -1228,6 +1304,30 @@ impl XyceTestRunner {
                 mismatches,
             )
         }
+    }
+
+    fn compare_gnuplot_splot_side_output(
+        &self,
+        plan: &XyceExecutionPlan,
+        netlist: &Netlist,
+        reference: &XycePrnTable,
+        results: &[DcSweepPointResult],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let (_, side) = Self::gnuplot_splot_print_pair(&plan.source)?;
+        if side.probes != plan.print.probes {
+            return Err("SPLOT side-output probes differ from primary GNUPLOT probes".to_string());
+        }
+        let side_print = XycePrintRequest {
+            probes: side.probes,
+        };
+        self.compare_dc_prn_reference(
+            reference,
+            &side_print,
+            netlist,
+            &plan.source,
+            &plan.dc,
+            results,
+        )
     }
 
     fn run_static_prn_step_dc_plan(
@@ -4793,50 +4893,121 @@ impl XyceTestRunner {
     }
 
     fn single_dc_print_request(source: &str) -> Result<XycePrintRequest, String> {
+        let requests = Self::dc_print_output_requests(source)?
+            .into_iter()
+            .filter(|request| request.file.is_none())
+            .map(|request| XycePrintRequest {
+                probes: request.probes,
+            })
+            .collect::<Vec<_>>();
+
+        match requests.len() {
+            0 => Err("deck has no .PRINT DC statement with static columns".to_string()),
+            1 => Ok(requests.into_iter().next().expect("one request")),
+            _ => Err("deck has multiple .PRINT DC statements; multi-table comparison is not implemented yet".to_string()),
+        }
+    }
+
+    fn dc_print_output_requests(source: &str) -> Result<Vec<XycePrintOutputRequest>, String> {
         let mut requests = Vec::new();
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
             if trimmed.is_empty() {
                 continue;
             }
-            let mut parts = trimmed.split_whitespace();
-            let Some(command) = parts.next() else {
+            let tokens = trimmed.split_whitespace().collect::<Vec<_>>();
+            let Some(command) = tokens.first().copied() else {
                 continue;
             };
             if !command.eq_ignore_ascii_case(".print") {
                 continue;
             }
-            let Some(analysis) = parts.next() else {
+            let Some(analysis) = tokens.get(1).copied() else {
                 return Err(".PRINT statement has no analysis type".to_string());
             };
-            if analysis.eq_ignore_ascii_case("DC") {
-                let mut writes_named_file = false;
-                let mut probes = Vec::new();
-                for part in parts {
-                    let normalized = part.to_ascii_lowercase();
-                    if normalized.starts_with("file=") {
-                        writes_named_file = true;
-                        continue;
+            if !analysis.eq_ignore_ascii_case("DC") {
+                continue;
+            }
+
+            let mut format = None;
+            let mut file = None;
+            let mut probes = Vec::new();
+            let mut index = 2usize;
+            while index < tokens.len() {
+                if let Some((raw_key, raw_value, consumed)) =
+                    Self::print_option_assignment(&tokens, index)
+                {
+                    let key = raw_key.trim().to_ascii_lowercase();
+                    let value = raw_value.trim().trim_matches(['"', '\'']).to_string();
+                    match key.as_str() {
+                        "format" => format = Some(value),
+                        "file" => file = Some(value),
+                        _ => {}
                     }
-                    if Self::is_print_option_token(&normalized) {
-                        continue;
-                    }
-                    probes.push(part.to_string());
-                }
-                if writes_named_file {
+                    index += consumed;
                     continue;
                 }
-                if probes.is_empty() {
-                    return Err(".PRINT DC statement has no probes".to_string());
+
+                let normalized = tokens[index].to_ascii_lowercase();
+                if Self::is_print_option_token(&normalized) {
+                    index += 1;
+                    continue;
                 }
-                requests.push(XycePrintRequest { probes });
+                probes.push(tokens[index].to_string());
+                index += 1;
             }
+
+            if probes.is_empty() {
+                return Err(".PRINT DC statement has no probes".to_string());
+            }
+            requests.push(XycePrintOutputRequest {
+                format,
+                file,
+                probes,
+            });
         }
 
-        match requests.len() {
-            0 => Err("deck has no .PRINT DC statement with static columns".to_string()),
-            1 => Ok(requests.remove(0)),
-            _ => Err("deck has multiple .PRINT DC statements; multi-table comparison is not implemented yet".to_string()),
+        Ok(requests)
+    }
+
+    fn gnuplot_splot_print_pair(
+        source: &str,
+    ) -> Result<(XycePrintOutputRequest, XycePrintOutputRequest), String> {
+        let requests = Self::dc_print_output_requests(source)?;
+        let mut primary = None;
+        let mut side = None;
+        for request in requests {
+            let format = request.format.as_deref().unwrap_or("STD");
+            if request.file.is_none() && format.eq_ignore_ascii_case("GNUPLOT") {
+                if primary.replace(request).is_some() {
+                    return Err(
+                        "GNUPLOT/SPLOT contract requires exactly one primary GNUPLOT .PRINT DC"
+                            .to_string(),
+                    );
+                }
+                continue;
+            }
+            if request.file.is_some() && format.eq_ignore_ascii_case("SPLOT") {
+                if side.replace(request).is_some() {
+                    return Err(
+                        "GNUPLOT/SPLOT contract requires exactly one named SPLOT .PRINT DC"
+                            .to_string(),
+                    );
+                }
+                continue;
+            }
+            return Err(format!(
+                "GNUPLOT/SPLOT contract does not cover .PRINT DC FORMAT={format} FILE={}",
+                request.file.as_deref().unwrap_or("<default>")
+            ));
+        }
+
+        match (primary, side) {
+            (Some(primary), Some(side)) => Ok((primary, side)),
+            _ => Err(
+                "GNUPLOT/SPLOT contract requires one primary GNUPLOT and one named SPLOT .PRINT DC"
+                    .to_string(),
+            ),
         }
     }
 
