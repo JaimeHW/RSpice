@@ -1797,7 +1797,7 @@ fn ilimit_eval_for_context(ctx: &CmContext) -> CmResult<IlimitEval> {
         return Ok(resource.eval);
     }
 
-    ilimit_eval(ctx)
+    Ok(ilimit_eval_from_signature(&signature))
 }
 
 fn cache_ilimit_eval(ctx: &mut CmContext) -> CmResult<IlimitEval> {
@@ -1808,7 +1808,7 @@ fn cache_ilimit_eval(ctx: &mut CmContext) -> CmResult<IlimitEval> {
         return Ok(resource.eval);
     }
 
-    let eval = ilimit_eval(ctx)?;
+    let eval = ilimit_eval_from_signature(&signature);
     ctx.set_resource(
         ILIMIT_EVAL_RESOURCE,
         Arc::new(IlimitEvalResource { signature, eval }),
@@ -1817,38 +1817,32 @@ fn cache_ilimit_eval(ctx: &mut CmContext) -> CmResult<IlimitEval> {
 }
 
 fn ilimit_eval(ctx: &CmContext) -> CmResult<IlimitEval> {
-    ilimit_params(ctx)?;
+    let signature = ilimit_eval_signature(ctx)?;
+    Ok(ilimit_eval_from_signature(&signature))
+}
 
-    let in_offset = finite_param(ctx, "in_offset", 0.0)?;
-    let gain = finite_param(ctx, "gain", 1.0)?;
-    let r_out_source = finite_param(ctx, "r_out_source", 1.0)?.clamp(1.0e-9, 1.0e9);
-    let r_out_sink = finite_param(ctx, "r_out_sink", 1.0)?.clamp(1.0e-9, 1.0e9);
-    let i_limit_source = finite_param(ctx, "i_limit_source", 10.0e-3)?.max(1.0e-12);
-    let i_limit_sink = finite_param(ctx, "i_limit_sink", 10.0e-3)?.max(1.0e-12);
-    let v_pwr_range = finite_param(ctx, "v_pwr_range", 1.0e-6)?.max(1.0e-15);
-    let i_source_range = finite_param(ctx, "i_source_range", 1.0e-9)?.max(1.0e-15);
-    let i_sink_range = finite_param(ctx, "i_sink_range", 1.0e-9)?.max(1.0e-15);
-    let r_out_domain = finite_param(ctx, "r_out_domain", 1.0e-9)?.max(1.0e-15);
+fn ilimit_eval_from_signature(signature: &IlimitEvalSignature) -> IlimitEval {
+    let in_offset = signature.in_offset;
+    let gain = signature.gain;
+    let r_out_source = signature.r_out_source.clamp(1.0e-9, 1.0e9);
+    let r_out_sink = signature.r_out_sink.clamp(1.0e-9, 1.0e9);
+    let i_limit_source = signature.i_limit_source.max(1.0e-12);
+    let i_limit_sink = signature.i_limit_sink.max(1.0e-12);
+    let v_pwr_range = signature.v_pwr_range.max(1.0e-15);
+    let i_source_range = signature.i_source_range.max(1.0e-15);
+    let i_sink_range = signature.i_sink_range.max(1.0e-15);
+    let r_out_domain = signature.r_out_domain.max(1.0e-15);
+    let vout = signature.output;
+    let pos_pwr_in = signature.pos_pwr;
+    let neg_pwr_in = signature.neg_pwr;
+    let pos_pwr_connected = signature.pos_pwr_connected;
+    let neg_pwr_connected = signature.neg_pwr_connected;
 
-    let vout = ctx.input("out");
-    let pos_pwr_connected = ilimit_port_connected(ctx, "pos_pwr");
-    let neg_pwr_connected = ilimit_port_connected(ctx, "neg_pwr");
-    let pos_pwr_in = if pos_pwr_connected {
-        ctx.input("pos_pwr")
-    } else {
-        1.0e6
-    };
-    let neg_pwr_in = if neg_pwr_connected {
-        ctx.input("neg_pwr")
-    } else {
-        -1.0e6
-    };
-
-    let (veq, pveq_pvin, pveq_pvneg, pveq_pvpos) = if ctx.is_init() {
+    let (veq, pveq_pvin, pveq_pvneg, pveq_pvpos) = if signature.init {
         ((pos_pwr_in - neg_pwr_in) * 0.5, 0.0, 0.0, 0.0)
     } else {
         climit_transfer(
-            ctx.input("in"),
+            signature.input,
             in_offset,
             pos_pwr_in,
             neg_pwr_in,
@@ -1979,7 +1973,7 @@ fn ilimit_eval(ctx: &CmContext) -> CmResult<IlimitEval> {
         pi_pos_pvout = -pi_out_pvout;
     }
 
-    Ok(IlimitEval {
+    IlimitEval {
         out_current: -i_out,
         out_in_partial: -pi_out_pvin,
         out_out_partial: -pi_out_pvout,
@@ -2011,7 +2005,7 @@ fn ilimit_eval(ctx: &CmContext) -> CmResult<IlimitEval> {
             0.0
         },
         neg_neg_partial: -pi_neg_pvneg,
-    })
+    }
 }
 
 fn seegen_params(ctx: &CmContext) -> CmResult<SeeGeneratorParams> {
