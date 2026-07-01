@@ -986,16 +986,21 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "absdelay" => {
-                validate_arg_range(&call.name, call.args.len(), 2, Some(2))?;
+                validate_arg_range(&call.name, call.args.len(), 1, Some(3))?;
                 let expr = self.convert(require_arg(0)?)?;
-                let delay = self.convert(require_arg(1)?)?;
+                let delay = call
+                    .args
+                    .get(1)
+                    .map(|arg| self.convert(arg))
+                    .transpose()?
+                    .unwrap_or(IrExpr::Const(0.0));
                 Ok(IrExpr::AbsDelay {
                     expr: Box::new(expr),
                     delay_time: Box::new(delay),
                 })
             }
             "transition" => {
-                validate_arg_range(&call.name, call.args.len(), 1, Some(4))?;
+                validate_arg_range(&call.name, call.args.len(), 1, Some(5))?;
                 let expr = self.convert(require_arg(0)?)?;
                 let opt = |n: usize| -> CompileResult<Option<Box<IrExpr>>> {
                     Ok(call
