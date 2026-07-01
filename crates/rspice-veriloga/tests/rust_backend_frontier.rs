@@ -5,6 +5,9 @@
 //!
 //! To focus on one package, file, or module:
 //! `RSPICE_RUST_BACKEND_FRONTIER_FILTER=asmhemt cargo test -p rspice-veriloga --test rust_backend_frontier shipped_rust_backend_frontier -- --ignored --nocapture`
+//!
+//! To print the scalar error for every non-scalar selection:
+//! `RSPICE_RUST_BACKEND_FRONTIER_TRACE_NON_SCALAR=1 ...`
 
 use rspice_veriloga::canonical_ir::{CanonicalIrArtifact, InvalidationClass, OptOp};
 use rspice_veriloga::rust_backend::{
@@ -16,7 +19,7 @@ use std::path::Path;
 
 const FILTER_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_FILTER";
 const REQUIRE_NO_LEGACY_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_REQUIRE_NO_LEGACY";
-const TRACE_SCALAR_ERRORS_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_TRACE_SCALAR_ERRORS";
+const TRACE_NON_SCALAR_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_TRACE_NON_SCALAR";
 
 #[test]
 #[ignore = "full shipped Rust-backend frontier audit; run explicitly while scalar coverage is still moving"]
@@ -82,31 +85,17 @@ fn run_shipped_rust_backend_frontier() {
             match transpiler.transpile_with_report(&compiled.artifact) {
                 Ok(report) => {
                     counts.record(report.backend);
-                    if report.backend == RustBackendSelection::LegacyNativeLocalFallback
-                        && env::var_os(TRACE_SCALAR_ERRORS_ENV).is_some()
-                    {
-                        match RustTranspiler::new_scalar(RustTranspileOptions::default())
-                            .transpile(&compiled.artifact)
-                        {
-                            Ok(_) => eprintln!(
-                                "scalar diagnostic unexpectedly succeeded for {} :: {}",
-                                source
-                                    .path
-                                    .strip_prefix(&root)
-                                    .unwrap_or(&source.path)
-                                    .display(),
-                                module
-                            ),
-                            Err(error) => eprintln!(
-                                "scalar diagnostic for {} :: {}: {error}",
-                                source
-                                    .path
-                                    .strip_prefix(&root)
-                                    .unwrap_or(&source.path)
-                                    .display(),
-                                module
-                            ),
-                        }
+                    if should_trace_scalar_gap(report.backend) {
+                        let relative_path = source
+                            .path
+                            .strip_prefix(&root)
+                            .unwrap_or(&source.path)
+                            .display();
+                        eprintln!(
+                            "scalar diagnostic for {:?} :: {} :: {}",
+                            report.backend, relative_path, module
+                        );
+                        trace_scalar_transpile_error(&compiled.artifact, &relative_path, module);
                         trace_scalar_gap(&compiled.artifact);
                     }
                     eprintln!(
@@ -139,16 +128,33 @@ fn run_shipped_rust_backend_frontier() {
         failures.join("\n")
     );
     eprintln!(
-        "backend frontier: scalar={}, scalar-hybrid={}, legacy-native-local-fallback={}, legacy-device={}",
-        counts.scalar, counts.hybrid, counts.legacy_native_local_fallback, counts.legacy_device
+        "backend frontier: scalar={}, scalar-hybrid={}, legacy-device={}",
+        counts.scalar, counts.hybrid, counts.legacy_device
     );
 
     if env::var_os(REQUIRE_NO_LEGACY_ENV).is_some() {
         assert_eq!(
-            counts.legacy_native_local_fallback + counts.legacy_device,
-            0,
+            counts.legacy_device, 0,
             "legacy backend selections remain in the shipped frontier"
         );
+    }
+}
+
+fn should_trace_scalar_gap(backend: RustBackendSelection) -> bool {
+    env::var_os(TRACE_NON_SCALAR_ENV).is_some() && backend != RustBackendSelection::ScalarOptIr
+}
+
+fn trace_scalar_transpile_error(
+    artifact: &CanonicalIrArtifact,
+    relative_path: &dyn std::fmt::Display,
+    module: &str,
+) {
+    match RustTranspiler::new_scalar(RustTranspileOptions::default()).transpile(artifact) {
+        Ok(_) => eprintln!(
+            "  scalar diagnostic unexpectedly succeeded for {} :: {}",
+            relative_path, module
+        ),
+        Err(error) => eprintln!("  scalar diagnostic error: {error}"),
     }
 }
 
@@ -204,7 +210,6 @@ fn source_matches_filter(
 struct BackendSelectionCounts {
     scalar: usize,
     hybrid: usize,
-    legacy_native_local_fallback: usize,
     legacy_device: usize,
 }
 
@@ -213,9 +218,6 @@ impl BackendSelectionCounts {
         match selection {
             RustBackendSelection::ScalarOptIr => self.scalar += 1,
             RustBackendSelection::ScalarHybrid => self.hybrid += 1,
-            RustBackendSelection::LegacyNativeLocalFallback => {
-                self.legacy_native_local_fallback += 1
-            }
             RustBackendSelection::LegacyDevice => self.legacy_device += 1,
         }
     }

@@ -1,3 +1,4 @@
+mod builtins;
 mod compact;
 mod device;
 mod discover;
@@ -9,6 +10,11 @@ mod names;
 mod registry;
 mod scalar;
 
+pub use builtins::{
+    BuiltinBackendSelectionCounts, BuiltinGenerationReport, GENERATED_BUILTIN_MANIFEST_FILE_NAME,
+    REGENERATE_BUILTINS_COMMAND, regenerate_generated_builtins,
+    regenerate_generated_builtins_with_progress, validate_generated_builtins,
+};
 pub use device::render_runtime_support_module;
 pub use discover::{
     VERILOGA_DISCOVERY_SKIP_MARKER, VerilogASourceCandidate, discover_veriloga_sources,
@@ -44,7 +50,6 @@ pub struct GeneratedRustDevice {
 pub enum RustBackendSelection {
     ScalarOptIr,
     ScalarHybrid,
-    LegacyNativeLocalFallback,
     LegacyDevice,
 }
 
@@ -135,25 +140,9 @@ impl RustTranspiler {
                             device,
                             backend: RustBackendSelection::ScalarHybrid,
                         }),
-                        Err(hybrid_error) if hybrid_error.is_unsupported() => {
-                            match device::generate_auto_device(artifact, &self.options) {
-                                Ok(device) => {
-                                    let device = reject_legacy_ad_device(artifact, device)?;
-                                    Ok(GeneratedRustDeviceReport {
-                                        device,
-                                        backend: RustBackendSelection::LegacyNativeLocalFallback,
-                                    })
-                                }
-                                Err(legacy_error) if legacy_error.is_unsupported() => {
-                                    Err(auto_backend_unsupported(
-                                        artifact,
-                                        &scalar_error,
-                                        &hybrid_error,
-                                    ))
-                                }
-                                Err(error) => Err(error),
-                            }
-                        }
+                        Err(hybrid_error) if hybrid_error.is_unsupported() => Err(
+                            auto_backend_unsupported(artifact, &scalar_error, &hybrid_error),
+                        ),
                         Err(error) => Err(error),
                     }
                 }
@@ -171,44 +160,6 @@ impl RustTranspiler {
     }
 }
 
-fn reject_legacy_ad_device(
-    artifact: &CanonicalIrArtifact,
-    device: GeneratedRustDevice,
-) -> Result<GeneratedRustDevice, RustBackendError> {
-    if let Some((relative_path, marker)) = generated_legacy_ad_marker(&device) {
-        return Err(RustBackendError::unsupported(
-            artifact.metadata.source_package.as_str(),
-            artifact.mir.module_name.as_str(),
-            format!(
-                "model requires legacy AD backend; generated {relative_path} contains {marker}"
-            ),
-        ));
-    }
-    Ok(device)
-}
-
-fn generated_legacy_ad_marker(device: &GeneratedRustDevice) -> Option<(&str, &'static str)> {
-    const MARKERS: &[&str] = &[
-        "GenericAdValue",
-        "AdValue",
-        "GenericScratch",
-        "GenericReactiveScratch",
-        "scratch:",
-        "reactive_scratch:",
-        "scratch.",
-        "reactive_scratch.",
-        "::support::",
-    ];
-
-    device.files.iter().find_map(|file| {
-        MARKERS
-            .iter()
-            .copied()
-            .find(|marker| file.contents.contains(marker))
-            .map(|marker| (file.relative_path.as_str(), marker))
-    })
-}
-
 fn auto_backend_unsupported(
     artifact: &CanonicalIrArtifact,
     scalar_error: &RustBackendError,
@@ -218,7 +169,7 @@ fn auto_backend_unsupported(
         artifact.metadata.source_package.as_str(),
         artifact.mir.module_name.as_str(),
         format!(
-            "model cannot be lowered without the legacy AD backend; scalar path: {}; hybrid scalar path: {}",
+            "model cannot be lowered by scalar Rust backends; scalar path: {}; hybrid scalar path: {}",
             unsupported_detail(scalar_error),
             unsupported_detail(hybrid_error)
         ),
@@ -235,25 +186,6 @@ fn unsupported_detail(error: &RustBackendError) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn generated_legacy_ad_marker_detects_ad_runtime_usage() {
-        let device = generated_device("let eq0 = AdValue::log10(input);");
-
-        assert_eq!(
-            generated_legacy_ad_marker(&device),
-            Some(("stamp.rs", "AdValue"))
-        );
-    }
-
-    #[test]
-    fn generated_legacy_ad_marker_allows_native_local_output() {
-        let device = generated_device(
-            "let v0: f64 = ctx.node_voltage(nodes[0]);\nstamper.stamp_current_node2_local();",
-        );
-
-        assert_eq!(generated_legacy_ad_marker(&device), None);
-    }
 
     #[test]
     fn transpile_with_report_records_selected_backend() {
@@ -278,16 +210,29 @@ endmodule
         assert_eq!(report.device.public_model_name, "tiny_res");
     }
 
-    fn generated_device(stamp: &str) -> GeneratedRustDevice {
-        GeneratedRustDevice {
-            module_name: "fixture".to_string(),
-            public_model_name: "fixture".to_string(),
-            folder_name: "fixture__fixture__00000000".to_string(),
-            source_digest: "0000000000000000".to_string(),
-            files: vec![GeneratedRustFile {
-                relative_path: "stamp.rs".to_string(),
-                contents: stamp.to_string(),
-            }],
-        }
+    #[test]
+    fn auto_backend_does_not_select_explicit_legacy_generator() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module ideal_opamp(out, inp, inn);
+    inout out, inp, inn;
+    electrical out, inp, inn;
+    analog V(out): V(inp, inn) == 0.0;
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let error = RustTranspiler::new_auto(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect_err("auto backend must not select the explicit legacy generator");
+
+        assert!(
+            error
+                .message
+                .contains("model cannot be lowered by scalar Rust backends"),
+            "{error}"
+        );
     }
 }

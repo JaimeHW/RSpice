@@ -63,6 +63,12 @@ lto = "fat"
 codegen-units = 1
 opt-level = 3
 
+[profile.generator]
+inherits = "release"
+incremental = true
+lto = false
+codegen-units = 16
+
 # Faster test compilation
 [profile.test]
 incremental = true
