@@ -4836,6 +4836,73 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_dltch_array_lowers_to_dlatch_instances() {
+        let netlist = Netlist::parse(
+            "pspice u dltch array\n\
+             U7 DLTCH(2) $G_DPWR $G_DGND preset clear enable d1 d2 q1 q2 qb1 qb2 dly\n\
+             .end\n",
+        )
+        .expect("PSpice DLTCH array should lower to scalar d_dlatch instances");
+
+        assert_eq!(netlist.elements.len(), 2);
+        assert_eq!(netlist.elements[0].name, "U7_0");
+        assert_eq!(netlist.elements[1].name, "U7_1");
+
+        match &netlist.elements[1].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_dlatch");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("D2".to_string()),
+                        XspicePort::Digital("ENABLE".to_string()),
+                        XspicePort::DigitalInverted("PRESET".to_string()),
+                        XspicePort::DigitalInverted("CLEAR".to_string()),
+                        XspicePort::Digital("Q2".to_string()),
+                        XspicePort::Digital("QB2".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_srff_lowers_to_srlatch_ports() {
+        let netlist = Netlist::parse(
+            "pspice u srff\n\
+             U8 SRFF(1) $G_DPWR $G_DGND preset clear enable s r q $D_NC dly\n\
+             .end\n",
+        )
+        .expect("PSpice SRFF U-device should lower to d_srlatch");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U8")
+            .expect("U8 exists");
+
+        match &element.kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_srlatch");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("S".to_string()),
+                        XspicePort::Digital("R".to_string()),
+                        XspicePort::Digital("ENABLE".to_string()),
+                        XspicePort::DigitalInverted("PRESET".to_string()),
+                        XspicePort::DigitalInverted("CLEAR".to_string()),
+                        XspicePort::Digital("Q".to_string()),
+                        XspicePort::Null,
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn pspice_u_sequential_devices_reject_required_no_connects() {
         let err = Netlist::parse(
             "pspice u jkff invalid nc\n\

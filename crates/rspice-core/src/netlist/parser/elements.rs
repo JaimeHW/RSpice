@@ -735,14 +735,16 @@ pub(super) fn parse_pspice_u_device(
             elements,
         ),
         "DFF" => parse_pspice_u_dff(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "DLTCH" => parse_pspice_u_dlatch(&name, &fields, count.unwrap_or(1), line_num, elements),
         "INV3" | "INV3A" => {
             parse_pspice_u_tristate(&name, &fields, count.unwrap_or(1), true, line_num, elements)
         }
         "JKFF" => parse_pspice_u_jkff(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "SRFF" => parse_pspice_u_srlatch(&name, &fields, count.unwrap_or(1), line_num, elements),
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, JKFF, BUF3A, and INV3A",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, JKFF, SRFF, BUF3A, and INV3A",
                 fields[1]
             ),
         }),
@@ -902,6 +904,130 @@ fn parse_pspice_u_jkff(
         let instance_name = pspice_u_lowered_instance_name(name, count, index);
         let ports = vec![j, k, clkbar.clone(), prebar.clone(), clrbar.clone(), q, qb];
         push_pspice_u_xspice_element(elements, instance_name, "d_jkff", ports);
+    }
+
+    Ok(())
+}
+
+fn parse_pspice_u_dlatch(
+    name: &str,
+    fields: &[String],
+    count: usize,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    if count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice U-device '{}' type '{}' requires at least one D latch",
+                name, fields[1]
+            ),
+        });
+    }
+
+    let pins = &fields[4..];
+    let required = 3 + count * 3 + 1;
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice DLTCH U-device '{}' requires PREBAR, CLRBAR, GATE, {} D input(s), {} Q output(s), {} QBAR output(s), and a timing model",
+                name, count, count, count
+            ),
+        });
+    }
+
+    let prebar = pspice_u_active_low_control_port(&pins[0], elements);
+    let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
+    let enable = pspice_u_required_digital_port(&pins[2], "enable", fields, line_num, elements)?;
+    let d_offset = 3;
+    let q_offset = d_offset + count;
+    let qb_offset = q_offset + count;
+
+    for index in 0..count {
+        let data = pspice_u_required_digital_port(
+            &pins[d_offset + index],
+            "D input",
+            fields,
+            line_num,
+            elements,
+        )?;
+        let q = pspice_u_nullable_output_port(&pins[q_offset + index]);
+        let qb = pspice_u_nullable_output_port(&pins[qb_offset + index]);
+        let instance_name = pspice_u_lowered_instance_name(name, count, index);
+        let ports = vec![data, enable.clone(), prebar.clone(), clrbar.clone(), q, qb];
+        push_pspice_u_xspice_element(elements, instance_name, "d_dlatch", ports);
+    }
+
+    Ok(())
+}
+
+fn parse_pspice_u_srlatch(
+    name: &str,
+    fields: &[String],
+    count: usize,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    if count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice U-device '{}' type '{}' requires at least one SR latch",
+                name, fields[1]
+            ),
+        });
+    }
+
+    let pins = &fields[4..];
+    let required = 3 + count * 4 + 1;
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice SRFF U-device '{}' requires PREBAR, CLRBAR, GATE, {} S input(s), {} R input(s), {} Q output(s), {} QBAR output(s), and a timing model",
+                name, count, count, count, count
+            ),
+        });
+    }
+
+    let prebar = pspice_u_active_low_control_port(&pins[0], elements);
+    let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
+    let enable = pspice_u_required_digital_port(&pins[2], "enable", fields, line_num, elements)?;
+    let s_offset = 3;
+    let r_offset = s_offset + count;
+    let q_offset = r_offset + count;
+    let qb_offset = q_offset + count;
+
+    for index in 0..count {
+        let set = pspice_u_required_digital_port(
+            &pins[s_offset + index],
+            "S input",
+            fields,
+            line_num,
+            elements,
+        )?;
+        let reset = pspice_u_required_digital_port(
+            &pins[r_offset + index],
+            "R input",
+            fields,
+            line_num,
+            elements,
+        )?;
+        let q = pspice_u_nullable_output_port(&pins[q_offset + index]);
+        let qb = pspice_u_nullable_output_port(&pins[qb_offset + index]);
+        let instance_name = pspice_u_lowered_instance_name(name, count, index);
+        let ports = vec![
+            set,
+            reset,
+            enable.clone(),
+            prebar.clone(),
+            clrbar.clone(),
+            q,
+            qb,
+        ];
+        push_pspice_u_xspice_element(elements, instance_name, "d_srlatch", ports);
     }
 
     Ok(())
