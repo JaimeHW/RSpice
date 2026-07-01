@@ -12,6 +12,7 @@ use crate::xspice::{
 use std::sync::{Arc, OnceLock};
 
 const POLY_PLAN_RESOURCE: &str = "xspice.spice2poly.plan";
+const POLY_EVAL_RESOURCE: &str = "xspice.spice2poly.eval";
 
 #[derive(Debug, Default)]
 pub struct Spice2Poly;
@@ -19,7 +20,7 @@ pub struct Spice2Poly;
 #[derive(Debug, Default)]
 pub struct IcmSpice2Poly;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct PolyEval {
     value: Value,
     partials: Vec<Value>,
@@ -48,6 +49,19 @@ struct PolyPlanSignature {
 struct PolyPlanResource {
     signature: PolyPlanSignature,
     plan: CmResult<Arc<PolyPlan>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct PolyEvalSignature {
+    plan: PolyPlanSignature,
+    multiplier: Value,
+    inputs: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct PolyEvalResource {
+    signature: PolyEvalSignature,
+    result: PolyEval,
 }
 
 fn ports() -> &'static [PortSpec] {
@@ -291,14 +305,29 @@ fn poly_plan(ctx: &CmContext, input_count: usize) -> CmResult<Arc<PolyPlan>> {
     build_poly_plan(input_count, checked_coef(ctx)?)
 }
 
-fn evaluate_poly(inputs: &[AnalogValue], plan: &PolyPlan, multiplier: Value) -> PolyEval {
+fn input_values(inputs: &[AnalogValue]) -> Vec<Value> {
+    inputs.iter().map(|input| input.value).collect()
+}
+
+fn poly_eval_signature(ctx: &CmContext) -> CmResult<PolyEvalSignature> {
+    let inputs = checked_inputs(ctx)?;
+    let plan = poly_plan_signature(ctx, inputs.len())?;
+    let multiplier = checked_multiplier(ctx)?;
+    Ok(PolyEvalSignature {
+        plan,
+        multiplier,
+        inputs: input_values(inputs),
+    })
+}
+
+fn evaluate_poly(inputs: &[Value], plan: &PolyPlan, multiplier: Value) -> PolyEval {
     let mut value = plan.constant;
     let mut partials = vec![0.0; inputs.len()];
 
     for term in &plan.terms {
         let mut product = 1.0;
         for &(input_index, exponent) in &term.active_exponents {
-            product *= evterm(inputs[input_index].value, exponent);
+            product *= evterm(inputs[input_index], exponent);
         }
         value += term.coefficient * product;
 
@@ -306,9 +335,9 @@ fn evaluate_poly(inputs: &[AnalogValue], plan: &PolyPlan, multiplier: Value) -> 
             let mut partial_product = exponent as Value;
             for &(term_index, term_exponent) in &term.active_exponents {
                 partial_product *= if term_index == input_index {
-                    evterm(inputs[term_index].value, term_exponent - 1)
+                    evterm(inputs[term_index], term_exponent - 1)
                 } else {
-                    evterm(inputs[term_index].value, term_exponent)
+                    evterm(inputs[term_index], term_exponent)
                 };
             }
             partials[input_index] += term.coefficient * partial_product;
@@ -324,18 +353,39 @@ fn evaluate_poly(inputs: &[AnalogValue], plan: &PolyPlan, multiplier: Value) -> 
 }
 
 fn evaluate_context(ctx: &CmContext) -> CmResult<PolyEval> {
-    let inputs = checked_inputs(ctx)?;
-    let plan = poly_plan(ctx, inputs.len())?;
-    let multiplier = checked_multiplier(ctx)?;
-    Ok(evaluate_poly(inputs, &plan, multiplier))
+    let signature = poly_eval_signature(ctx)?;
+    if let Some(resource) = ctx.resource::<PolyEvalResource>(POLY_EVAL_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.result.clone());
+    }
+
+    let plan = poly_plan(ctx, signature.inputs.len())?;
+    Ok(evaluate_poly(
+        &signature.inputs,
+        &plan,
+        signature.multiplier,
+    ))
 }
 
 fn evaluate_context_cached(ctx: &mut CmContext) -> CmResult<PolyEval> {
-    let input_count = checked_inputs(ctx)?.len();
-    let plan = cache_poly_plan(ctx, input_count)?;
-    let inputs = checked_inputs(ctx)?;
-    let multiplier = checked_multiplier(ctx)?;
-    Ok(evaluate_poly(inputs, &plan, multiplier))
+    let signature = poly_eval_signature(ctx)?;
+    if let Some(resource) = ctx.resource::<PolyEvalResource>(POLY_EVAL_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.result.clone());
+    }
+
+    let plan = cache_poly_plan(ctx, signature.inputs.len())?;
+    let result = evaluate_poly(&signature.inputs, &plan, signature.multiplier);
+    ctx.set_resource(
+        POLY_EVAL_RESOURCE,
+        Arc::new(PolyEvalResource {
+            signature,
+            result: result.clone(),
+        }),
+    );
+    Ok(result)
 }
 
 impl CodeModel for Spice2Poly {
@@ -439,6 +489,12 @@ impl CodeModel for IcmSpice2Poly {
 mod tests {
     use super::*;
 
+    fn set_inputs(ctx: &mut CmContext, values: &[Value]) {
+        ctx.set_input_analog_vector_from_fn("in", values.len(), |index| {
+            AnalogValue::new(values[index])
+        });
+    }
+
     #[test]
     fn nxtpwr_matches_spice2_order_for_two_inputs() {
         let mut exponents = vec![0usize; 2];
@@ -492,7 +548,7 @@ mod tests {
 
     #[test]
     fn polynomial_value_and_partials_use_multiplier() {
-        let inputs = vec![AnalogValue::new(2.0), AnalogValue::new(3.0)];
+        let inputs = vec![2.0, 3.0];
         let plan = build_poly_plan(inputs.len(), &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
             .expect("valid polynomial plan");
         let result = evaluate_poly(&inputs, &plan, 2.0);
@@ -504,7 +560,7 @@ mod tests {
 
     #[test]
     fn polynomial_plan_skips_zero_terms_without_changing_exponent_order() {
-        let inputs = vec![AnalogValue::new(2.0), AnalogValue::new(3.0)];
+        let inputs = vec![2.0, 3.0];
         let plan = build_poly_plan(
             inputs.len(),
             &[1.0, 0.0, 3.0, 0.0, 5.0, 0.0, 7.0, 0.0, 0.0, 10.0],
@@ -544,7 +600,7 @@ mod tests {
 
     #[test]
     fn polynomial_partials_handle_zero_sparse_inputs() {
-        let inputs = vec![AnalogValue::new(0.0), AnalogValue::new(3.0)];
+        let inputs = vec![0.0, 3.0];
         let plan = build_poly_plan(inputs.len(), &[0.0, 0.0, 0.0, 0.0, 1.0])
             .expect("valid sparse polynomial plan");
         let result = evaluate_poly(&inputs, &plan, 1.0);
@@ -575,5 +631,95 @@ mod tests {
         ctx.set_real_vector_param("coef", vec![1.0, 2.0, 4.0]);
         let updated = cache_poly_plan(&mut ctx, 3).expect("updated polynomial plan");
         assert!(!Arc::ptr_eq(&wider, &updated));
+    }
+
+    #[test]
+    fn poly_eval_cache_reuses_current_result_until_inputs_change() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("coef", vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        ctx.set_param("m", 2.0);
+        set_inputs(&mut ctx, &[2.0, 3.0]);
+
+        let initial = evaluate_context_cached(&mut ctx).expect("evaluation caches");
+        assert_eq!(
+            initial,
+            PolyEval {
+                value: 228.0,
+                partials: vec![66.0, 98.0],
+            }
+        );
+
+        let signature = poly_eval_signature(&ctx).expect("current eval signature");
+        let sentinel = PolyEval {
+            value: 123.0,
+            partials: vec![7.0, 11.0],
+        };
+        ctx.set_resource(
+            POLY_EVAL_RESOURCE,
+            Arc::new(PolyEvalResource {
+                signature,
+                result: sentinel.clone(),
+            }),
+        );
+
+        assert_eq!(
+            evaluate_context(&ctx).expect("read-only path reuses cache"),
+            sentinel
+        );
+        assert_eq!(
+            Spice2Poly.output_input_vector_partials(&ctx, "out"),
+            vec![("in".to_string(), 0, 7.0), ("in".to_string(), 1, 11.0)]
+        );
+
+        set_inputs(&mut ctx, &[2.0, 4.0]);
+        let updated = evaluate_context(&ctx).expect("changed inputs invalidate cache");
+        assert_ne!(updated, sentinel);
+        assert_eq!(
+            updated,
+            evaluate_context_cached(&mut ctx).expect("direct updated eval")
+        );
+    }
+
+    #[test]
+    fn poly_eval_cache_invalidates_when_multiplier_or_coefficients_change() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("coef", vec![1.0, 2.0, 3.0]);
+        ctx.set_param("m", 1.0);
+        set_inputs(&mut ctx, &[2.0, 3.0]);
+
+        let signature = poly_eval_signature(&ctx).expect("current eval signature");
+        let sentinel = PolyEval {
+            value: 99.0,
+            partials: vec![5.0, 6.0],
+        };
+        ctx.set_resource(
+            POLY_EVAL_RESOURCE,
+            Arc::new(PolyEvalResource {
+                signature,
+                result: sentinel.clone(),
+            }),
+        );
+
+        assert_eq!(
+            evaluate_context(&ctx).expect("matching eval reuses cache"),
+            sentinel
+        );
+
+        ctx.set_param("m", 3.0);
+        let changed_multiplier =
+            evaluate_context(&ctx).expect("changed multiplier invalidates cache");
+        assert_ne!(changed_multiplier, sentinel);
+
+        let signature = poly_eval_signature(&ctx).expect("multiplier signature");
+        ctx.set_resource(
+            POLY_EVAL_RESOURCE,
+            Arc::new(PolyEvalResource {
+                signature,
+                result: sentinel.clone(),
+            }),
+        );
+        ctx.set_real_vector_param("coef", vec![1.0, 2.0, 4.0]);
+        let changed_coef = evaluate_context(&ctx).expect("changed coefficients invalidate cache");
+        assert_ne!(changed_coef, sentinel);
     }
 }
